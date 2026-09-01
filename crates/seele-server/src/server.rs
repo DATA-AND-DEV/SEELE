@@ -156,6 +156,22 @@ pub enum Event {
     /// Difundida a todos, como a do servidor — mas com o dono junto, porque a
     /// figura é de uma pessoa e não do lugar. Quem recebe troca a imagem
     /// daquela linha do roster e de mais nenhuma.
+    /// Alguém trocou de apelido.
+    ///
+    /// Difundido a todos. O histórico não é tocado: cada mensagem guarda o
+    /// apelido de quando foi escrita, e é decisão de produto que continue
+    /// mostrando aquele.
+    PersonRenamed {
+        /// Quem.
+        person: PersonId,
+        /// O nome novo.
+        nickname: String,
+    },
+    /// A imagem de alguém mudou.
+    ///
+    /// Difundida a todos, como a do servidor — mas com o dono junto, porque a
+    /// figura é de uma pessoa e não do lugar. Quem recebe troca a imagem
+    /// daquela linha do roster e de mais nenhuma.
     PersonIconChanged {
         /// De quem.
         person: PersonId,

@@ -225,6 +225,11 @@ enum Comando {
         nome: String,
     },
     /// A imagem de perfil de quem está usando este cliente.
+    /// O apelido de quem está usando este cliente.
+    MeuApelido {
+        /// O nome novo.
+        nome: String,
+    },
     MinhaImagem {
         /// A figura, ou `None` para não ter.
         icone: Option<Vec<u8>>,
@@ -1375,6 +1380,20 @@ impl Enlace {
         self.mandar(Comando::MinhaImagem { icone }).await
     }
 
+    /// Troca **o seu** apelido.
+    ///
+    /// **Não** é refeito ao reconectar: o nome fica gravado no servidor, e a
+    /// reconexão volta a apresentar quem já se é. Reenviá-lo seria escrever de
+    /// novo o que já está lá — e, num servidor onde outra pessoa tenha tomado
+    /// o nome nesse meio-tempo, seria uma recusa a cada volta.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn definir_meu_apelido(&self, nome: String) -> Result<(), Fechado> {
+        self.mandar(Comando::MeuApelido { nome }).await
+    }
+
     /// Pede ao servidor que acabe com a sessão de alguém.
     ///
     /// Pede, e só — como os verbos de sala, e pela mesma razão: a
@@ -2020,6 +2039,7 @@ impl Motor {
             Comando::RenomearServer { nome } => cliente.rename_server(&nome).await,
             Comando::IconeDoServer { icone } => cliente.set_server_icon(icone).await,
             Comando::MinhaImagem { icone } => cliente.set_person_icon(icone).await,
+            Comando::MeuApelido { nome } => cliente.set_nickname(nome).await,
             Comando::Expulsar { pessoa } => cliente.kick_person(pessoa).await,
             Comando::Banir {
                 pessoa,

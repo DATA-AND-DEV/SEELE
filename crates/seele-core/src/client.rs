@@ -929,6 +929,15 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::SetPersonIcon { icon }).await
     }
 
+    /// Troca o apelido de quem está usando este cliente.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn set_nickname(&mut self, name: String) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::SetNickname { name }).await
+    }
+
     /// Asks the server to end a person's session.
     ///
     /// Asks, like the four above, and for the same reason: nothing here checks

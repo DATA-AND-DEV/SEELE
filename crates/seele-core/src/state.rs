@@ -815,14 +815,24 @@ impl Room {
                     id: *id,
                     channel: *channel,
                     author: *author,
-                    // The server's name for them wins over ours only when we
-                    // have none: somebody we watched arrive is somebody whose
-                    // name we already learned, and history for a stranger is
-                    // the case this field exists for.
-                    author_nickname: self
-                        .people
-                        .get(author)
-                        .map_or_else(|| author_nickname.clone(), |person| person.nickname.clone()),
+                    // **O nome que veio com a mensagem, sempre.**
+                    //
+                    // Aqui o roster vencia: «somebody we watched arrive is
+                    // somebody whose name we already learned». Aquilo era
+                    // verdade enquanto o apelido de uma conta não mudava — e
+                    // desde o `SetNickname` da 0.9.0 ele muda.
+                    //
+                    // Com o roster vencendo, trocar de nome reescreveria o
+                    // passado: toda mensagem antiga passaria a mostrar o nome
+                    // de hoje, e uma conversa em que alguém foi chamado pelo
+                    // nome antigo ficaria citando alguém que não aparece nela.
+                    // Quem desenha decidiu o contrário, e é o que preserva o
+                    // registro.
+                    //
+                    // O servidor grava o apelido no instante em que a mensagem
+                    // é publicada — `apelido_de_agora`, em `session.rs` —, então
+                    // este campo é o nome de então, e é o que se mostra.
+                    author_nickname: author_nickname.clone(),
                     at_seconds: *at_seconds,
                     body: body.clone(),
                     replies_to: *replies_to,
@@ -988,6 +998,22 @@ impl Room {
             // `None` **apaga a entrada** em vez de guardar um `None`: quem
             // tirou a imagem não tem imagem, e um mapa que cresce com ausências
             // é um mapa que só cresce.
+            // Alguém trocou de nome.
+            //
+            // **Só o roster muda.** O histórico guarda o apelido de quando cada
+            // mensagem foi escrita, e é decisão de produto que continue
+            // mostrando aquele: um histórico reescrito é um em que uma conversa
+            // passa a citar um nome que ninguém usava quando ela aconteceu.
+            ServerMessage::PersonRenamed { person, nickname } => {
+                // Os assentos guardam identificadores; quem guarda o nome é o
+                // mapa de pessoas. Um lugar só para trocar, que é o que impede
+                // um roster com dois nomes para a mesma conta.
+                if let Some(pessoa) = self.people.get_mut(person) {
+                    pessoa.nickname.clone_from(nickname);
+                }
+                changed.roster = true;
+            }
+
             ServerMessage::PersonIconChanged { person, icon } => {
                 match icon {
                     Some(bytes) => {
@@ -1239,12 +1265,19 @@ mod tests {
         }
     }
 
-    fn said(id: u64, author: u64, body: &str) -> ServerMessage {
+    /// Uma mensagem, com o apelido de quem a escreveu **no instante em que a
+    /// escreveu** — que é o que o servidor grava e manda.
+    ///
+    /// O nome vinha como `pessoa {author}` e o `Room` o trocava pelo do roster.
+    /// Aquilo escondia o que este campo é: desde o `SetNickname` da 0.9.0 o
+    /// apelido de uma conta muda, e a mensagem guarda o de então. Uma fixture
+    /// que manda um nome que ninguém usa testa o caminho errado.
+    fn dito_por(id: u64, author: u64, apelido: &str, body: &str) -> ServerMessage {
         ServerMessage::MessageReceived {
             channel: CHANNEL,
             id: MessageId(id),
             author: PersonId(author),
-            author_nickname: format!("pessoa {author}"),
+            author_nickname: apelido.into(),
             // Deliberately unrelated to the id: the server's clock can tie or
             // go backwards across a restart, and ordering must not depend on it.
             at_seconds: 1_700_000_000 - i64::try_from(id).expect("at"),
@@ -1253,6 +1286,11 @@ mod tests {
             client_message_id: None,
             attachment: None,
         }
+    }
+
+    /// O mesmo, quando o nome de quem falou não é o assunto do teste.
+    fn said(id: u64, author: u64, body: &str) -> ServerMessage {
+        dito_por(id, author, &format!("pessoa {author}"), body)
     }
 
     fn room() -> Room {
@@ -1315,7 +1353,9 @@ mod tests {
         // into "pessoa 3" the moment they close their client.
         let mut room = room();
         room.apply(&joined(3, "marcela"));
-        room.apply(&said(1, 3, "verificando harmônicos"));
+        // Com o apelido de verdade, que é o que o servidor grava e manda. O
+        // `said` genérico só serve onde o nome de quem falou não é o assunto.
+        room.apply(&dito_por(1, 3, "marcela", "verificando harmônicos"));
         room.apply(&ServerMessage::PersonLeft {
             voice_room: VOICE_ROOM,
             person: PersonId(3),
@@ -1324,6 +1364,41 @@ mod tests {
         assert_eq!(room.current_roster().count(), 1, "only us should be left");
         assert_eq!(room.name_of(PersonId(3)), "marcela");
         assert_eq!(room.messages[0].author_nickname, "marcela");
+    }
+
+    #[test]
+    fn trocar_de_nome_nao_reescreve_o_que_ja_foi_dito() {
+        // **A decisão de quem desenha o produto, em 2026-09-01:** o histórico
+        // mantém o nome antigo.
+        //
+        // O contrário — o roster vencendo — reescreveria o passado: toda
+        // mensagem antiga passaria a mostrar o nome de hoje, e uma conversa em
+        // que alguém foi chamado pelo nome antigo ficaria citando alguém que
+        // não aparece nela.
+        let mut room = room();
+        room.apply(&joined(3, "marcela"));
+        room.apply(&dito_por(1, 3, "marcela", "olá"));
+
+        let mudou = room.apply(&ServerMessage::PersonRenamed {
+            person: PersonId(3),
+            nickname: "marcela lima".into(),
+        });
+
+        assert!(mudou.roster, "o roster mudou e ninguém foi avisado");
+        assert_eq!(
+            room.name_of(PersonId(3)),
+            "marcela lima",
+            "o roster tem o nome novo"
+        );
+        assert_eq!(
+            room.messages[0].author_nickname, "marcela",
+            "o que já foi dito passou a citar um nome que não existia quando foi dito"
+        );
+
+        // E o que ela disser **depois** sai com o nome novo, porque é o
+        // servidor que carimba cada mensagem ao publicá-la.
+        room.apply(&dito_por(2, 3, "marcela lima", "de novo"));
+        assert_eq!(room.messages[1].author_nickname, "marcela lima");
     }
 
     #[test]

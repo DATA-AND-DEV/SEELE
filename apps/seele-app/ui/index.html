@@ -2788,24 +2788,23 @@
         </div>
       </div>
       <!--
-        **O apelido é leitura, e não campo — por ora.**
+        O apelido, editável desde que o `SetNickname` foi construído.
 
-        A comp o desenha editável, e mudá-lo exige um verbo de protocolo que
-        **não existe**: o apelido chega no aperto de mão e é gravado ali. Não é
-        o mesmo trabalho que a imagem — a coluna é `UNIQUE`, e trocar de nome no
-        meio de uma sessão mexe no roster e na autoria de tudo que já foi dito.
-        É funcionalidade própria, e está perguntada.
+        **Sair do campo manda**, como o nome do servidor na configuração: é o
+        gesto que diz «o valor mudou **e** a edição acabou» de uma vez, e é o
+        que faz o Enter e o clique fora valerem a mesma coisa sem um botão no
+        meio — que esta janela não tem, por regra.
 
-        Um campo desabilitado promete um ajuste que não existe — a regra que a
-        seção APARÊNCIA acabou de seguir. Então aqui é texto, com o lugar onde
-        se troca escrito ao lado.
+        A nota diz o que **não** muda, e ela importa: quem troca de nome pode
+        esperar que o passado o acompanhe, e ele não acompanha.
       -->
-      <div class="nomear-campo">
+      <label class="nomear-campo">
         <span class="rotulo">APELIDO</span>
-        <p id="perfil-apelido" class="perfil-apelido">—</p>
-        <p class="nota">Escolhido ao entrar no servidor. Para trocar, saia e
-          entre de novo com outro.</p>
-      </div>
+        <input id="perfil-apelido" name="apelido" maxlength="32"
+               spellcheck="false" autocomplete="off"
+               placeholder="como as pessoas te veem">
+        <span class="nota">O que você já disse continua com o nome de então.</span>
+      </label>
       <!--
         **Sem `SALVAR` e sem `CANCELAR`**, e a comp os desenha.
 

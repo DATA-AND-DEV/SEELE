@@ -171,8 +171,8 @@ async function abrirPerfil() {
   } catch (falha) {
     console.warn("snapshot:", falha);
   }
-  const apelido = snapshot?.nickname ?? "—";
-  $("perfil-apelido").textContent = apelido;
+  const apelido = snapshot?.nickname ?? "";
+  $("perfil-apelido").value = apelido;
   await desenharPrevia(snapshot?.me ?? 0, apelido);
   $("perfil").hidden = false;
   $("perfil-escolher").focus();
@@ -228,6 +228,31 @@ $("perfil-forma").addEventListener("submit", (evento) => {
   evento.preventDefault();
   fecharPerfil();
 });
+// Sair do campo manda, como o nome do servidor na configuração: `change` diz
+// «o valor mudou **e** a edição acabou» de uma vez, e é ele que faz o Enter e o
+// clique fora valerem a mesma coisa sem um botão no meio.
+//
+// Um valor escrito pelo script não dispara `change`, então reabrir o perfil não
+// se manda de volta para o servidor.
+$("perfil-apelido").addEventListener("change", async () => {
+  const escolhido = $("perfil-apelido").value.trim();
+  if (escolhido === "") {
+    // Vazio é desistir da edição, e não pedir um apelido sem nome. Devolve o
+    // que está valendo, para o campo não ficar mentindo.
+    await abrirPerfil();
+    return;
+  }
+  $("perfil-erro").hidden = true;
+  try {
+    await invoke("escolher_apelido", { apelido: escolhido });
+    anunciar(`Agora você é ${escolhido}.`);
+  } catch (falha) {
+    console.warn("escolher_apelido:", falha);
+    recusarPerfil(fraseDeErro(falha));
+    await abrirPerfil();
+  }
+});
+
 $("perfil-fechar").addEventListener("click", fecharPerfil);
 $("operador-quem").addEventListener("click", () => {
   abrirPerfil().catch((falha) => console.warn("abrir o perfil:", falha));

@@ -267,7 +267,19 @@ impl<'a> Permissions<'a> {
     /// ADR 0017 makes the name property of the key that claimed it, and that is
     /// the whole protection: without this check, renaming would be the way to
     /// take somebody else's name and inherit how they are addressed.
-    fn rename(&self, person: PersonId, nickname: &str) -> Result<()> {
+    /// Troca o apelido de uma conta.
+    ///
+    /// Público desde o `SetNickname` da 0.9.0. Já era o caminho que a entrada
+    /// usava quando alguém voltava com outro nome; agora é também o de quem
+    /// troca no meio da sessão, e as duas rotas escrevem a mesma linha pela
+    /// mesma função — que é o que impede uma delas de esquecer a conferência
+    /// de unicidade.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::NicknameTaken`] quando o nome é de outra conta, e o que o
+    /// banco devolver.
+    pub fn rename(&self, person: PersonId, nickname: &str) -> Result<()> {
         let atual: String = self.connection.query_row(
             "SELECT nickname FROM people WHERE id = ?1",
             [person.get() as i64],

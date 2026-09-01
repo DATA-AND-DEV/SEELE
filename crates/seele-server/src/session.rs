@@ -962,6 +962,16 @@ async fn run_session(
     // deixaria um cliente que fala mais rápido do que a sessão processa crescer
     // sem teto na memória do servidor. Cheio, a tarefa leitora para de ler, e a
     // contrapressão volta pelo QUIC — que é onde ela deve aparecer.
+    // O apelido que vale **agora**, e não o do aperto de mão.
+    //
+    // `session` é imutável aqui, e desde o `SetNickname` da 0.9.0 o nome pode
+    // mudar no meio da sessão. Toda mensagem publicada guarda o apelido de quem
+    // a escreveu no instante em que foi escrita — é isso que faz o histórico
+    // continuar dizendo o nome antigo, que é o que quem desenha decidiu —, e
+    // ler `session.nickname` aqui faria tudo que viesse depois da troca sair
+    // com o nome de antes dela.
+    let mut apelido_de_agora = session.nickname.clone();
+
     let (para_dentro, mut entrada) = mpsc::channel::<ClientMessage>(ENTRADA_DEPTH);
     let leitora = tokio::spawn(async move {
         let mut recv = recv;
@@ -1491,7 +1501,7 @@ async fn run_session(
                         server.post(PendingMessage {
                             channel,
                             author: session.person,
-                            author_nickname: session.nickname.clone(),
+                            author_nickname: apelido_de_agora.clone(),
                             body,
                             replies_to,
                             client_message_id: Some(client_message_id),
@@ -1676,6 +1686,40 @@ async fn run_session(
                             Ok(name) => {
                                 tracing::info!(by = %session.person, %name, "the server was renamed");
                                 let _ = server.events.send(Event::ServerRenamed { name });
+                            }
+                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                        }
+                    }
+                    ClientMessage::SetNickname { name } => {
+                        // Sem permissão, e sem conferir formato: `frame::read`
+                        // já recusou o quadro se o nome estivesse vazio ou
+                        // passasse de `MAX_NICKNAME_LEN`.
+                        //
+                        // A unicidade é do banco, e quem a confere é o
+                        // `rename` — o mesmo que a entrada usa quando alguém
+                        // volta com outro nome. Duas rotas, uma função: é o
+                        // que impede uma delas de esquecer a conferência.
+                        let feito = {
+                            let guard = server.persistence.lock().await;
+                            crate::permissions::Permissions::new(&guard)
+                                .rename(session.person, &name)
+                        };
+                        match feito {
+                            Ok(()) => {
+                                // O nome desta sessão anda junto: ele é o que
+                                // vai no `author_nickname` de tudo que ela
+                                // publicar daqui em diante, e deixá-lo para
+                                // trás faria as mensagens seguintes saírem com
+                                // o nome antigo.
+                                apelido_de_agora.clone_from(&name);
+                                tracing::info!(
+                                    person = %session.person,
+                                    "somebody changed their name"
+                                );
+                                let _ = server.events.send(Event::PersonRenamed {
+                                    person: session.person,
+                                    nickname: name,
+                                });
                             }
                             Err(erro) => nao_deu(&mut send, &erro).await?,
                         }
@@ -2892,6 +2936,12 @@ fn translate(
         // A imagem de alguém, para todo mundo. Sem filtro de canal nem de
         // sala: o roster é do servidor inteiro, e uma pessoa aparece em
         // qualquer lista onde tenha estado — a imagem tem de chegar junto.
+        // O nome novo, para todo mundo. Sem filtro: uma pessoa aparece em
+        // qualquer lista onde tenha estado, e o nome tem de chegar a todas.
+        Event::PersonRenamed { person, nickname } => Some(ServerMessage::PersonRenamed {
+            person: *person,
+            nickname: nickname.clone(),
+        }),
         Event::PersonIconChanged { person, icon } => Some(ServerMessage::PersonIconChanged {
             person: *person,
             icon: icon.clone(),

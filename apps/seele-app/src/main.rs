@@ -1217,6 +1217,22 @@ async fn escolher_minha_imagem(
     Ok(true)
 }
 
+/// Troca o seu apelido.
+///
+/// O histórico não muda: cada mensagem guarda o nome de quem a escreveu no
+/// instante em que foi escrita. É a decisão de quem desenha o produto, e é a
+/// que preserva o registro — um histórico reescrito é um em que uma conversa
+/// passa a citar um nome que ninguém usava quando ela aconteceu.
+///
+/// # Errors
+///
+/// O que a sessão devolver. Um nome já tomado volta como alerta do servidor, e
+/// não daqui: quem sabe quais nomes existem naquele servidor é ele.
+#[tauri::command]
+fn escolher_apelido(session: State<'_, Session>, apelido: String) -> Result<(), ConnectionError> {
+    session.connection()?.set_nickname(apelido)
+}
+
 /// Tira a sua imagem.
 ///
 /// # Errors
@@ -2687,6 +2703,7 @@ fn main() {
             baixar_modulo_de_video,
             escolher_icone_do_server,
             escolher_minha_imagem,
+            escolher_apelido,
             tirar_minha_imagem,
             imagem_da_pessoa,
             tirar_icone_do_server,

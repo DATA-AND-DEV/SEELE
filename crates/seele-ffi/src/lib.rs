@@ -533,6 +533,11 @@ enum Command {
         /// A figura, ou `None` para não ter.
         icon: Option<Vec<u8>>,
     },
+    /// Troca o apelido de quem está usando este cliente.
+    SetNickname {
+        /// O nome novo.
+        name: String,
+    },
     SetServerIcon {
         icon: Option<Vec<u8>>,
     },
@@ -1404,6 +1409,28 @@ impl Connection {
             }
         })?;
         self.command(Command::SetPersonIcon { icon })
+    }
+
+    /// Troca **o seu** apelido.
+    ///
+    /// O histórico não muda: cada mensagem guarda o apelido de quem a escreveu
+    /// no instante em que foi escrita, e é decisão de produto que continue
+    /// mostrando aquele. Ver `ClientMessage::SetNickname`.
+    ///
+    /// Um nome em branco é desistir da edição, e não um pedido: devolve `Ok`
+    /// sem mandar nada, como `set_person_icon` faz com o seletor fechado.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] quando não há sessão. Um nome já
+    /// tomado por outra conta volta como alerta do servidor, e não daqui: quem
+    /// sabe quais nomes existem é ele.
+    pub fn set_nickname(&self, name: String) -> Result<(), ConnectionError> {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Ok(());
+        }
+        self.command(Command::SetNickname { name })
     }
 
     /// A imagem de perfil de alguém, ou `None` quando não tem.
@@ -3487,6 +3514,11 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         }
         Command::SetPersonIcon { icon } => {
             if client.definir_minha_imagem(icon).await.is_err() {
+                return false;
+            }
+        }
+        Command::SetNickname { name } => {
+            if client.definir_meu_apelido(name).await.is_err() {
                 return false;
             }
         }

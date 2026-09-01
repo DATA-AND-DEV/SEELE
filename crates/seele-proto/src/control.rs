@@ -1149,6 +1149,30 @@ pub enum ClientMessage {
         /// A figura, ou `None` para não ter.
         icon: Option<Vec<u8>>,
     },
+    /// Troca **o seu** apelido.
+    ///
+    /// # O que muda, e o que deliberadamente não muda
+    ///
+    /// Muda como a pessoa aparece no roster, de agora em diante. **Não muda o
+    /// que já foi dito:** cada mensagem guarda o apelido de quem a escreveu no
+    /// instante em que foi escrita, e é esse que continua sendo mostrado.
+    ///
+    /// A decisão é de quem desenha o produto, e é a que preserva o registro: um
+    /// histórico reescrito é um histórico em que uma conversa passa a citar um
+    /// nome que ninguém usava quando ela aconteceu. Quem leu «rafa disse» há um
+    /// mês continua lendo isso.
+    ///
+    /// Sem permissão, pela razão que [`Self::SetPersonIcon`] escreve: a linha
+    /// escrita é a de quem pediu.
+    ///
+    /// O apelido é **único** no servidor — a coluna é `UNIQUE` desde a migração
+    /// 1 —, então um nome já tomado é recusado com
+    /// [`AlertReason::NicknameTaken`], que é o mesmo motivo que a entrada já
+    /// usa. Um verbo novo não inventa uma recusa nova para a mesma coisa.
+    SetNickname {
+        /// O nome novo.
+        name: String,
+    },
 }
 
 /// Server to client.
@@ -1705,6 +1729,17 @@ pub enum ServerMessage {
         /// A figura, ou `None` quando não há.
         icon: Option<Vec<u8>>,
     },
+    /// Alguém trocou de apelido.
+    ///
+    /// Difundido a todos. Quem recebe troca o nome **no roster** e em mais lugar
+    /// nenhum: o histórico guarda o apelido de quando cada mensagem foi escrita,
+    /// e é esse que continua valendo. Ver [`ClientMessage::SetNickname`].
+    PersonRenamed {
+        /// Quem.
+        person: PersonId,
+        /// O nome novo.
+        nickname: String,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -1975,6 +2010,14 @@ impl Validate for ClientMessage {
             Self::RenameServer { name } => check_server_name(name),
             Self::SetServerIcon { icon } => check_icon(icon.as_ref()),
             Self::SetPersonIcon { icon } => check_icon(icon.as_ref()),
+            Self::SetNickname { name } => {
+                // Em branco recusado pela mesma razão que um nome de sala: um
+                // apelido vazio é alguém que ninguém consegue mencionar.
+                if name.trim().is_empty() {
+                    return Err(ControlError::FieldOutOfRange { field: "nickname" });
+                }
+                check("nickname", name.len(), MAX_NICKNAME_LEN)
+            }
             Self::LeaveVoiceRoom
             | Self::JoinChannel { .. }
             | Self::FetchHistory { .. }
@@ -2070,6 +2113,9 @@ impl Validate for ServerMessage {
             // acima — o limite vale na árvore que sai, não só no verbo que
             // entra.
             Self::PersonIconChanged { icon, .. } => check_icon(icon.as_ref()),
+            Self::PersonRenamed { nickname, .. } => {
+                check("nickname", nickname.len(), MAX_NICKNAME_LEN)
+            }
             Self::PersonLeft { .. }
             | Self::PersonGone { .. }
             | Self::MessageRemoved { .. }
