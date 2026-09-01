@@ -1482,6 +1482,23 @@ Então a escolha que este registro deixava em aberto está decidida pelos
 números: **serializar**, e não alargar prazo. Três segundos a mais por rodada
 compram uma suíte que volta a ser evidência.
 
+### Piorou em 2026-08-31, e agora atrapalha o trabalho
+
+Com dois testes novos no `acceptance_m5`, a mesma rodada de `--workspace`
+passou a reprovar **três** de uma vez — e o arquivo continua passando 15 de 15
+quando roda sozinho, em 20,03 s.
+
+O efeito prático mudou de natureza: deixou de ser ruído e virou **atrito por
+passo**. Numa sequência de commits, cada verificação exige rodar duas vezes
+para saber se a falha é do que se acabou de escrever. Isso é exatamente o que o
+registro acima previa — «uma suíte que reprova aleatoriamente deixa de ser
+evidência» —, agora com número.
+
+**O protocolo enquanto ela não é consertada**, e ele está aqui para não ser
+reinventado a cada vez: verificar com `cargo test --workspace` **e**, quando o
+`seele-conformance` reprovar, repetir só ele. Passando sozinho, a falha é
+carga; reprovando sozinho, é regressão. Duas rodadas, e a segunda é barata.
+
 **O que falta é só o como.** Não há chave de `test-threads` no `Cargo.toml` de
 um crate — o caminho é um semáforo no `start()` da conformidade, limitando
 quantos servidores existem ao mesmo tempo dentro do binário de teste. Contido,
