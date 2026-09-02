@@ -226,6 +226,38 @@ fn base64_decodificar(entrada: &str) -> Result<Vec<u8>, String> {
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// O interpretador que roda o `publicar.sh`, achado e não suposto.
+///
+/// **O Windows não traz um `sh` no PATH, e os testes daqui morriam nele** —
+/// «program not found», dez de uma vez, na primeira vez que a bateria daquela
+/// máquina chegou a rodar. A saída fácil seria desligá-los ali; seria a errada.
+/// É no Windows que os defeitos de fim de linha aparecem, e foi lá que dois
+/// guardas deste arquivo já reprovaram por comparar texto com `\n` num
+/// repositório que faz checkout com CRLF. Um teste desligado justamente onde ele
+/// pega coisa não é um teste.
+///
+/// O `sh.exe` do Git para Windows roda o script inteiro — medido naquela máquina,
+/// com `--decidir`, antes de este caminho existir. Ele só não está no PATH.
+fn interpretador() -> PathBuf {
+    if !cfg!(windows) {
+        return PathBuf::from("sh");
+    }
+    for caminho in [
+        r"C:\Program Files\Git\bin\sh.exe",
+        r"C:\Program Files\Git\usr\bin\sh.exe",
+        r"C:\Program Files (x86)\Git\bin\sh.exe",
+    ] {
+        let caminho = PathBuf::from(caminho);
+        if caminho.is_file() {
+            return caminho;
+        }
+    }
+    // Sem interpretador o teste não roda, e não rodar tem de doer: devolver
+    // «sh» aqui deixa o erro ser o mesmo «program not found» de antes, agora com
+    // esta função no caminho para quem for procurar o porquê.
+    PathBuf::from("sh")
+}
+
 fn publicar() -> PathBuf {
     raiz().join("empacotar/publicar.sh")
 }
@@ -234,7 +266,7 @@ fn publicar() -> PathBuf {
 fn o_orquestrador_e_shell_posix_valido() {
     // `sh -n` analisa e não executa. É o mesmo portão dos irmãos, e o único que
     // pega um `fi` faltando antes de a pessoa descobrir com o Docker no ar.
-    let saida = Command::new("sh")
+    let saida = Command::new(interpretador())
         .arg("-n")
         .arg(publicar())
         .output()
@@ -296,7 +328,7 @@ fn nenhum_segredo_atravessa_por_argumento() {
 
 /// A regra de publicação, sozinha: sem repositório, sem rede e sem compilar.
 fn decidir(pedidos: &str, falhas: &str, parcial: bool) -> (i32, String) {
-    let mut comando = Command::new("sh");
+    let mut comando = Command::new(interpretador());
     comando
         .arg(publicar())
         .arg("--decidir")
@@ -708,7 +740,7 @@ esac
 
     fn rodar(&self, argumentos: &[&str], ambiente: &[(&str, &str)]) -> Saida {
         let caminho_antigo = std::env::var("PATH").unwrap_or_default();
-        let mut comando = Command::new("sh");
+        let mut comando = Command::new(interpretador());
         comando
             .arg(self.repo.join("empacotar/publicar.sh"))
             .args(argumentos)
@@ -1459,7 +1491,7 @@ fn notas(assuntos: &str) -> String {
     use std::io::Write;
     use std::process::Stdio;
 
-    let mut filho = Command::new("sh")
+    let mut filho = Command::new(interpretador())
         .arg(publicar())
         .arg("--notas")
         .stdin(Stdio::piped())
@@ -1532,7 +1564,7 @@ fn um_escopo_desconhecido_pede_para_ser_classificado() {
     // E o padrão avisa em vez de decidir calado: quem publica vê o nome do
     // escopo novo e classifica. Sem isto, a tabela envelhece sem ninguém
     // perceber, que é como uma decisão de curadoria vira acidente.
-    let mut filho = Command::new("sh")
+    let mut filho = Command::new(interpretador())
         .arg(publicar())
         .arg("--notas")
         .stdin(std::process::Stdio::piped())
@@ -1664,7 +1696,7 @@ fn anterior(tags: &str, versao: &str) -> String {
     use std::io::Write;
     use std::process::Stdio;
 
-    let mut filho = Command::new("sh")
+    let mut filho = Command::new(interpretador())
         .arg(publicar())
         .arg("--tag-anterior")
         .arg(versao)
