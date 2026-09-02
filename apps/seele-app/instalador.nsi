@@ -210,6 +210,23 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 
+; A segunda passagem do `instalador.nsh`: as páginas.
+;
+; **Por que duas.** O bundler inclui os ganchos lá em cima, antes dos `!define`
+; do modelo. Macro não se importa — ela é expandida onde é inserida, lá adiante,
+; com tudo já definido. **Função se importa:** ela é compilada onde está escrita,
+; e uma função escrita antes do `!define SIDEBARIMAGE` enxerga a chave literal,
+; não o valor. Foi o que derrubou a primeira compilação das páginas: um `File`
+; procurando um arquivo chamado, ao pé da letra, `${SIDEBARIMAGE}`.
+;
+; Então o mesmo arquivo entra outra vez, aqui, onde os defines já existem — e ele
+; se divide pelo `SEELE_SEGUNDA_PASSAGEM`: ganchos na primeira, páginas na
+; segunda. O caminho vem do próprio bundler, que é quem sabe onde o arquivo está.
+{{#if installer_hooks}}
+!define SEELE_SEGUNDA_PASSAGEM
+!include "{{installer_hooks}}"
+{{/if}}
+
 ; Installer pages, must be ordered as they appear
 ;
 ; **A boas-vindas e a licença saíram.** O desenho começa no destino: uma página

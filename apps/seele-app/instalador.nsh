@@ -17,6 +17,12 @@
 ; instalador, que atualiza a cópia do `Program Files`, e o atalho continua
 ; abrindo a do `AppData` — parada na versão em que foi deixada.
 
+; Duas passagens: ver o `instalador.nsi`, onde a segunda é pedida.
+; Aqui em cima ficam os ganchos, que são macros e podem nascer antes dos
+; `!define` do modelo. As páginas, que são funções, não podem — e por isso
+; moram na segunda metade deste arquivo.
+!ifndef SEELE_SEGUNDA_PASSAGEM
+
 !macro NSIS_HOOK_PREINSTALL
   ; A instalação por usuário, se houver. `HKCU` explícito e não `SHCTX`: neste
   ; instalador o contexto é o da máquina, que é justamente onde ela não está.
@@ -134,6 +140,10 @@
   nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="SEELE" dir=in'
   Pop $0
 !macroend
+
+!endif
+
+!ifdef SEELE_SEGUNDA_PASSAGEM
 
 ; ============================================================================
 ; A cara do instalador.
@@ -434,3 +444,5 @@ Function SeeleLeAsEscolhas
     ClearErrors
   ${EndIf}
 FunctionEnd
+
+!endif
