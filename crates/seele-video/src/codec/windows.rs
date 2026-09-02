@@ -871,9 +871,21 @@ mod medida_de_memoria {
             marcos.push(memoria_mb());
         }
 
+        // **E depois de largar.** É a outra metade da pergunta, e a que o
+        // relato de campo faz: «depois que paro de transmitir ele fica em 70~80
+        // MB, sendo que antes ficava em 7~15. Não deveria voltar ao normal?».
+        //
+        // Largar o codificador tem de devolver a sessão do MFT. Se o número não
+        // cair aqui, ou o `Drop` não está encerrando o que devia, ou o Windows
+        // segura as páginas no conjunto de trabalho até haver pressão — e as
+        // duas pedem trabalhos diferentes.
+        drop(codificador);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let depois_de_largar = memoria_mb();
+
         eprintln!(
             "MEMÓRIA 1080p60: antes {antes:.1} MB | armado {armado:.1} MB (+{:.1}) | \
-             depois de 60, 120, 180, 240, 300 quadros: {}",
+             depois de 60, 120, 180, 240, 300 quadros: {} | largado {depois_de_largar:.1} MB",
             armado - antes,
             marcos
                 .iter()
