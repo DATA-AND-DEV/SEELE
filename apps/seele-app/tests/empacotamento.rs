@@ -510,3 +510,116 @@ fn todo_crate_do_produto_pode_falar_no_log() {
          vai procurar uma linha que nunca vai chegar."
     );
 }
+
+/// A versão do `tauri-bundler` de onde `instalador.nsi` foi bifurcado.
+///
+/// Escrita no cabeçalho daquele arquivo **e** aqui, de propósito: são as duas
+/// pontas da mesma dívida, e um número que só existe num comentário é um número
+/// que ninguém confere.
+fn origem_do_modelo() -> String {
+    let modelo = ler("instalador.nsi");
+    modelo
+        .lines()
+        .find_map(|linha| linha.trim_start_matches("; ").strip_prefix("ORIGEM: tauri-bundler "))
+        .and_then(|resto| resto.split(',').next())
+        .map(str::trim)
+        .map(str::to_owned)
+        .expect(
+            "o `instalador.nsi` perdeu a linha `ORIGEM:` do cabeçalho — sem ela \
+             ninguém sabe de que modelo ele saiu, nem quando rebifurcar",
+        )
+}
+
+#[test]
+fn o_modelo_bifurcado_guarda_o_que_faz_a_atualizacao_funcionar() {
+    // **Este `.exe` tem dois usos, e o segundo não tem ninguém olhando.**
+    //
+    // Uma pessoa clica no instalador e vê as páginas. O atualizador do Tauri
+    // baixa o mesmo arquivo e o roda com `/S`, sem tela nenhuma — e é assim que
+    // toda atualização do SEELE é aplicada.
+    //
+    // `SkipIfPassive` é o que faz cada página sumir nesse modo. Uma página nova
+    // que esqueça de passar por ele para a atualização de todo mundo, e o
+    // sintoma chega como «o app não atualiza mais», sem nada na tela para
+    // explicar — porque tela é justamente o que não há.
+    let modelo = ler("instalador.nsi");
+
+    assert!(
+        modelo.contains("SkipIfPassive"),
+        "o modelo bifurcado perdeu o `SkipIfPassive`.\n\
+         Sem ele as páginas aparecem no modo silencioso, e o atualizador fica \
+         parado esperando alguém apertar um botão numa janela que ninguém vê."
+    );
+    assert!(
+        modelo.contains("{{#if installer_hooks}}") && modelo.contains("{{installer_hooks}}"),
+        "o modelo bifurcado deixou de incluir os ganchos.\n\
+         São eles que criam a regra de firewall da 8383 e removem a instalação \
+         por usuário — ver `instalador.nsh`."
+    );
+    assert!(
+        modelo.contains("{{product_name}}") && modelo.contains("{{version}}"),
+        "o modelo bifurcado perdeu as chaves do Handlebars.\n\
+         Elas não são do NSIS: apagar uma não dá erro de compilação nenhum, sai \
+         um instalador com o campo vazio."
+    );
+}
+
+#[test]
+fn a_bifurcacao_do_modelo_ainda_corresponde_ao_tauri_instalado() {
+    // A dívida que a bifurcação criou, com alguém conferindo.
+    //
+    // Um modelo bifurcado não recebe as correções de quem o escreveu, e uma
+    // delas pode ser justamente a que conserta a instalação num Windows que
+    // ninguém aqui tem. Quando o `tauri-bundler` subir de versão, isto reprova e
+    // pede para comparar o modelo novo com o nosso.
+    //
+    // **Não reprova quando não há o que comparar.** O registro do cargo pode não
+    // ter o `tauri-bundler` — é ferramenta de quem empacota, não dependência do
+    // app. Aí a resposta honesta é dizer que não conferiu, e não inventar um
+    // veredito.
+    let origem = origem_do_modelo();
+
+    let Some(registro) = std::env::var_os("CARGO_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|casa| std::path::PathBuf::from(casa).join(".cargo")))
+        .map(|casa| casa.join("registry/src"))
+        .filter(|caminho| caminho.is_dir())
+    else {
+        println!("PARCIAL: não achei o registro do cargo; não confiro a bifurcação daqui.");
+        return;
+    };
+
+    let mut instaladas: Vec<String> = Vec::new();
+    let Ok(indices) = std::fs::read_dir(&registro) else {
+        println!("PARCIAL: não li {}; não confiro a bifurcação daqui.", registro.display());
+        return;
+    };
+    for indice in indices.flatten() {
+        let Ok(pacotes) = std::fs::read_dir(indice.path()) else {
+            continue;
+        };
+        for pacote in pacotes.flatten() {
+            let nome = pacote.file_name().to_string_lossy().into_owned();
+            if let Some(versao) = nome.strip_prefix("tauri-bundler-") {
+                instaladas.push(versao.to_owned());
+            }
+        }
+    }
+
+    if instaladas.is_empty() {
+        println!(
+            "PARCIAL: o `tauri-bundler` não está no registro desta máquina; \
+             a bifurcação diz vir da {origem} e ninguém a contradiz aqui."
+        );
+        return;
+    }
+
+    assert!(
+        instaladas.iter().any(|versao| versao == &origem),
+        "o `instalador.nsi` foi bifurcado do tauri-bundler {origem}, e esta \
+         máquina tem {instaladas:?}.\n\
+         O modelo novo pode trazer correções que o nosso não tem. Rebifurque: \
+         compare o `installer.nsi` da versão nova com o nosso, traga o que mudou \
+         e atualize a linha `ORIGEM:` do cabeçalho."
+    );
+}

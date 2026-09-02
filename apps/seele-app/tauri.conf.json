@@ -47,7 +47,8 @@
     "windows": {
       "nsis": {
         "installMode": "perMachine",
-        "installerHooks": "instalador.nsh"
+        "installerHooks": "instalador.nsh",
+        "template": "instalador.nsi"
       }
     }
   },
