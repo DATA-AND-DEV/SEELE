@@ -729,13 +729,46 @@ function fecharPorta() {
  */
 async function copiarLink(campo, botao) {
   campo.select();
-  try {
-    await navigator.clipboard.writeText(campo.value);
-    botao.textContent = "copiado";
-  } catch (falha) {
-    console.warn("copiar o link:", falha);
-    botao.textContent = "copie com Ctrl+C";
+
+  // **Três caminhos, e o segundo existe porque o primeiro não vale em toda
+  // janela.**
+  //
+  // `navigator.clipboard` exige contexto seguro e, no WKWebView que o Tauri usa
+  // no macOS, ela é negada — ou nem existe. O botão então caía direto na frase
+  // de desistência, que é como ele «parou de funcionar»: relato de campo, «o
+  // botão de copiar a url não funciona mais no Mac».
+  //
+  // `document.execCommand("copy")` é obsoleta e é justamente por isso que
+  // funciona aqui: ela não pede permissão nenhuma, copia o que está
+  // selecionado, e o `select()` acima já deixou o link selecionado. Um recurso
+  // obsoleto que funciona vale mais que um moderno que é recusado.
+  if (navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(campo.value);
+      botao.textContent = "copiado";
+      return;
+    } catch (falha) {
+      console.warn("copiar o link pela área de transferência:", falha);
+    }
   }
+
+  try {
+    if (document.execCommand("copy")) {
+      botao.textContent = "copiado";
+      return;
+    }
+  } catch (falha) {
+    console.warn("copiar o link pelo comando antigo:", falha);
+  }
+
+  // E a tecla é a do sistema em que a pessoa está. Dizer «Ctrl+C» a quem usa
+  // Mac é mandá-la apertar uma tecla que não copia nada.
+  //
+  // Escrito «Cmd» e não com o símbolo da tecla: a face de dados desta casca não
+  // tem glifo para U+2318, e um guarda de `frontend.rs` reprova por isso — o
+  // caractere cairia na monoespaçada do sistema no meio da frase.
+  const mac = navigator.platform.toUpperCase().includes("MAC");
+  botao.textContent = mac ? "copie com Cmd+C" : "copie com Ctrl+C";
 }
 
 $("porta-fechar").addEventListener("click", fecharPorta);
