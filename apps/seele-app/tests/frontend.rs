@@ -9595,3 +9595,34 @@ fn o_glifo_de_um_botao_nao_e_alvo_de_clique() {
          responder, e só a borda funcionar."
     );
 }
+
+#[test]
+fn o_isolamento_total_diz_que_cala_a_tela_tambem() {
+    // O isolamento silencia todas as fontes de uma vez — é o `set_master` do
+    // misturador, e `voice.rs` escreve que quem se isola «não ouve nem a voz nem
+    // a tela». A decisão é boa. O que faltava era a interface contá-la: o botão
+    // dizia «não ouvir ninguém», que fala de gente.
+    //
+    // O custo de não contar foi medido: «sem áudio na transmissão» levou a
+    // cruzar dois logs, acrescentar telemetria dos dois lados e provar cadeia
+    // por cadeia que o som saía do Mac, chegava ao Windows e era misturado — para
+    // a resposta ser «tava com o áudio mutado, não sabia que mutava a live
+    // também».
+    //
+    // Uma frase que some numa revisão de texto e leva o defeito de volta, sem
+    // nada quebrar. Daí o guarda.
+    let sessao = read("ui/tela-sessao.js");
+    let corpo = without_comments(&sessao);
+    assert!(
+        corpo.contains("nem o som de uma tela compartilhada"),
+        "o botão de isolamento voltou a dizer só que cala pessoas.\n\
+         Ele cala a tela compartilhada junto, e quem não souber vai procurar \
+         defeito no compartilhamento."
+    );
+    assert!(
+        corpo.contains("não está ouvindo nada, nem a tela"),
+        "a linha de estado voltou a dizer só «não está ouvindo».\n\
+         Quem lê isso entende «ninguém está falando comigo», e não «o som da \
+         tela também está calado»."
+    );
+}

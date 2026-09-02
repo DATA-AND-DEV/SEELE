@@ -810,14 +810,28 @@ function desenharOperador(snapshot) {
   const surdoRotulo = snapshot.total_isolation ? "ISOLAMENTO TOTAL" : "OUVINDO";
   surdo.replaceChildren(glifoComEstado("fone", snapshot.total_isolation, surdoRotulo));
   surdo.setAttribute("aria-label", surdoRotulo);
-  surdo.title = snapshot.total_isolation ? "voltar a ouvir" : "não ouvir ninguém";
+  // **«ninguém» dizia gente, e ele cala a tela também.**
+  //
+  // O isolamento total silencia todas as fontes de uma vez — é o `set_master` do
+  // misturador, e está escrito em `voice.rs` que quem se isola «não ouve nem a
+  // voz nem a tela». A decisão é boa; o que faltava era a interface contá-la.
+  //
+  // Custou uma investigação inteira: «sem áudio na transmissão» levou a cruzar
+  // dois logs, medir cadeia por cadeia e provar que o som saía, chegava e era
+  // misturado — para no fim ser «tava com o áudio mutado, não sabia que mutava a
+  // live também».
+  surdo.title = snapshot.total_isolation
+    ? "voltar a ouvir"
+    : "não ouvir ninguém, nem o som de uma tela compartilhada";
   surdo.dataset.ativo = snapshot.total_isolation ? "sim" : "nao";
 
   // A linha que substituiu o botão de falar: o que o microfone e o som estão
   // fazendo, nas palavras da comp — «microfone aberto · ouvindo».
   $("voz-estado").textContent = [
     snapshot.muted ? "microfone mudo" : "microfone aberto",
-    snapshot.total_isolation ? "não está ouvindo" : "ouvindo",
+    // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
+    // «ninguém está falando comigo», e não «o som da tela também está calado».
+    snapshot.total_isolation ? "não está ouvindo nada, nem a tela" : "ouvindo",
     snapshot.speaking ? "no ar" : null,
     // O modo entra na frase porque ele saiu da tela como botão: a comp escreve
     // exatamente isto em `vozEstado`, e é assim que o operador continua dizendo
