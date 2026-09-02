@@ -66,6 +66,18 @@ private = { ignore = true }
 # MIT-0 is MIT with the attribution clause removed — strictly more permissive
 # than MIT, which is already allowed. It arrived with `dcv-color-primitives`,
 # the BGRA-to-I420 converter on the Windows capture path.
+#
+# bzip2-1.0.6 is the original bzip2 licence: BSD-style, four clauses, no
+# advertising clause and no propagation term. It permits binary redistribution
+# with the notice preserved, which is what a single statically linked binary
+# (ADR 0008) needs. It arrived with `libbz2-rs-sys`, under `bzip2`, which
+# `seele-video` uses to expand the OpenH264 module that the product downloads
+# rather than ships — the same licence constraint that keeps the codec out of
+# the installer is what puts a decompressor in the tree.
+#
+# It was rejected by omission and the supply-chain job had been red on it since
+# it entered. Adding a licence to this list is a decision, not paperwork, so the
+# reasoning above is the decision: permissive, no linking terms, notice-only.
 allow = [
     "MPL-2.0",
     "MIT",
@@ -74,6 +86,7 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "bzip2-1.0.6",
     "ISC",
     "Unicode-3.0",
     "Unicode-DFS-2016",
