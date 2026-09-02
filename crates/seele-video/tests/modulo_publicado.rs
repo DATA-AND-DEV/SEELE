@@ -48,8 +48,12 @@ fn quem_publica_roda_a_bateria_nos_dois_sistemas() {
     // carregava. Rodar só na máquina de quem publica troca cobertura por
     // conveniência de quem aperta o botão.
     let script = publicar();
+    // No começo da linha, porque `etapa_da_bateria() {` também termina em
+    // «bateria() {» — e uma âncora que casa com a função auxiliar apontaria para
+    // o corpo errado, onde nada do que este teste procura mora. Foi o que
+    // aconteceu quando ela nasceu.
     let bateria = script
-        .split("bateria() {")
+        .split("\nbateria() {")
         .nth(1)
         .expect("a função da bateria sumiu do publicar.sh");
     assert!(
