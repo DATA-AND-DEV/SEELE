@@ -44,6 +44,14 @@ use windows::Win32::Media::MediaFoundation::{
 use super::{Cadencia, Resolucao};
 use crate::ErroDeVideo;
 
+fn recusa(operacao: &'static str, detalhe: impl std::fmt::Display) -> ErroDeVideo {
+    ErroDeVideo::CodecRecusou {
+        operacao,
+        detalhe: detalhe.to_string(),
+    }
+}
+
+/// Liga o Media Foundation, uma vez.
 /// Liga o Media Foundation, uma vez por codificador, e desliga com ele.
 ///
 /// **Era uma vez por processo e nunca desligava**, com a justificativa de que
@@ -53,18 +61,15 @@ use crate::ErroDeVideo;
 /// documentação pede exatamente um `MFShutdown` para cada `MFStartup`. Aninhar é
 /// o uso previsto, não um risco.
 ///
-/// O custo de não desligar apareceu em campo: «depois que paro de transmitir ele
-/// fica em 70~80 MB, sendo que antes ficava em 7~15». Um par por codificador é o
-/// que faz o subsistema sair quando o último deles sai.
-
-fn recusa(operacao: &'static str, detalhe: impl std::fmt::Display) -> ErroDeVideo {
-    ErroDeVideo::CodecRecusou {
-        operacao,
-        detalhe: detalhe.to_string(),
-    }
-}
-
-/// Liga o Media Foundation, uma vez.
+/// **E não foi isto que devolveu a memória.** Medido nos dois estados, na mesma
+/// máquina: largar o codificador devolve até 219,1 MB sem o par, e 219,3 com
+/// ele. Diferença nenhuma. Quem devolveu os 25 MB foi o `ShutdownObject` do
+/// ativador, no `Drop`; o subsistema não estava segurando nada.
+///
+/// Fica assim mesmo assim, porque parear é o contrato: um `MFStartup` sem o
+/// `MFShutdown` correspondente é uma dívida que não aparece hoje e que muda de
+/// preço quando a Microsoft quiser. Mas fica **registrado que não é otimização**,
+/// para ninguém tirar conclusão errada de um número que não mudou.
 fn comecar() -> Result<(), ErroDeVideo> {
     // SAFETY: chamada de inicialização do subsistema, sem ponteiros nossos.
     // `MFSTARTUP_NOSOCKET` não serve: o encoder é do subsistema completo.
