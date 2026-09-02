@@ -174,6 +174,34 @@ pub const OCUPACAO_MINIMA: u32 = 85;
 /// grande demais para a janela seguinte descrever.
 pub const SUBIDA: u32 = 125;
 
+/// De quanto ela sobe quando o caminho é **curto**, em por cento.
+///
+/// **O passo passa a depender de um número medido, e não de uma suposição.**
+///
+/// O que torna um passo grande arriscado é o tempo até saber que ele errou:
+/// numa janela de um segundo sobre um caminho de cem milissegundos, a dor chega
+/// tarde e já contaminou muito. Sobre um caminho de dois milissegundos, o
+/// retorno é quase imediato — errar para cima custa uma janela e volta.
+///
+/// E o freio de evidência continua: a subida nunca passa do que a janela de fato
+/// carregou, escalado. Um passo maior encurta o caminho até a medida, não
+/// substitui a medida.
+///
+/// Medido em campo, numa LAN: da suposição de 2 Mbps até 6 Mbps de teto foram
+/// **dezessete segundos** — e são justamente os primeiros segundos que alguém
+/// olha. O relato foi «momentos de muito movimento pixeliza demais», e a imagem
+/// feia era a sonda ainda engatinhando. Dobrando, os mesmos 6 Mbps chegam em
+/// torno de quatro segundos.
+pub const SUBIDA_DE_CAMINHO_CURTO: u32 = 200;
+
+/// Até que ida e volta um caminho conta como curto.
+///
+/// **Cinco milissegundos**, e a escolha é conservadora de propósito: uma LAN fica
+/// abaixo de dois, e mesmo um servidor na mesma cidade por fibra costuma passar
+/// de cinco. Quem estiver na faixa duvidosa continua com o passo antigo, que é o
+/// que já funcionava.
+pub const IDA_E_VOLTA_CURTA: Duration = Duration::from_millis(5);
+
 /// De quanto a estimativa desce quando doeu e a janela não sabe dizer o tamanho
 /// do cano, em por cento.
 ///
@@ -420,6 +448,20 @@ impl Sonda {
         self.janela = None;
     }
 
+    /// De quanto a estimativa sobe nesta janela, conforme o comprimento do
+    /// caminho.
+    ///
+    /// Ver [`SUBIDA_DE_CAMINHO_CURTO`]. Sem uma medida de ida e volta ainda, o
+    /// passo é o de sempre: supor caminho curto sem evidência seria a suposição
+    /// que este módulo inteiro existe para não fazer.
+    #[must_use]
+    fn passo_de_subida(&self) -> u32 {
+        match self.menor_ida_e_volta {
+            Some(volta) if volta <= IDA_E_VOLTA_CURTA => SUBIDA_DE_CAMINHO_CURTO,
+            _ => SUBIDA,
+        }
+    }
+
     /// Uma leitura. Devolve a estimativa nova quando ela andou, e `None` quando
     /// não.
     ///
@@ -636,10 +678,14 @@ impl Sonda {
         // provou, em cima da voz. [`caminho_que_sustenta`] é o maior caminho de
         // que a janela é evidência: aquele em que [`FRACAO_DO_CAMINHO`] dele
         // ainda cabe no que de fato saiu pelo soquete.
-        let alvo = escalar(self.estimativa_bps, SUBIDA)
+        // O passo, escolhido pelo comprimento do caminho. Ver
+        // [`SUBIDA_DE_CAMINHO_CURTO`]: o que muda não é a confiança na medida,
+        // é a pressa em chegar até ela.
+        let passo = self.passo_de_subida();
+        let alvo = escalar(self.estimativa_bps, passo)
             .min(escalar(
                 caminho_que_sustenta(entregue_bps, janela.faixa),
-                SUBIDA,
+                passo,
             ))
             .min(self.limite_bps.unwrap_or(TETO_DA_ESTIMATIVA_BPS))
             .min(TETO_DA_ESTIMATIVA_BPS);

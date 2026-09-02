@@ -277,6 +277,28 @@ pub const PERDA_QUE_ACALMA: u32 = 2;
 /// Quanto a estimativa sobe por janela cheia e sem dor, em por cento.
 pub const SUBIDA: u32 = 125;
 
+/// De quanto ela sobe quando o caminho é **curto**, em por cento.
+///
+/// O irmão de `seele_core::caminho::SUBIDA_DE_CAMINHO_CURTO`, e pelo mesmo
+/// motivo: o teto da tela é o **menor** entre esta perna e a de quem
+/// compartilha, então acelerar só um lado não acelera nada.
+///
+/// O que torna um passo grande arriscado é o tempo até saber que ele errou.
+/// Sobre um caminho de dois milissegundos o retorno é quase imediato — errar
+/// para cima custa uma janela e volta —, e o freio continua sendo o mesmo: só
+/// sobe com a janela cheia e a perda calma.
+///
+/// Medido em campo, numa LAN: da suposição de 2 Mbps até 6 Mbps de teto foram
+/// dezessete segundos, e são os primeiros segundos que alguém olha.
+pub const SUBIDA_DE_CAMINHO_CURTO: u32 = 200;
+
+/// Até que ida e volta um caminho conta como curto.
+///
+/// Cinco milissegundos, conservador de propósito: uma LAN fica abaixo de dois, e
+/// um servidor na mesma cidade por fibra costuma passar de cinco. Quem estiver na
+/// faixa duvidosa continua com o passo antigo.
+pub const IDA_E_VOLTA_CURTA: Duration = Duration::from_millis(5);
+
 /// Quanto a estimativa recua quando doeu e não dá para dizer o tamanho.
 pub const QUEDA: u32 = 80;
 
@@ -330,6 +352,12 @@ pub struct LeituraDaSubida {
     /// [`teto_do_hospedeiro`] vezes o número de espectadores — o teto é **por
     /// cópia**, e o que sai do cano são todas elas.
     pub permitido_bps: u32,
+    /// O menor ida e volta entre as conexões desta janela.
+    ///
+    /// Menor e não médio: o que se quer saber é se **existe** um caminho curto,
+    /// porque é ele que devolve a resposta depressa. Ver
+    /// [`SUBIDA_DE_CAMINHO_CURTO`]. `None` quando não há conexão nenhuma.
+    pub menor_ida_e_volta: Option<Duration>,
 }
 
 /// Onde uma janela começou.
@@ -445,7 +473,15 @@ impl SondaDaSubida {
             // sem fingir saber o tamanho.
             self.estimativa_bps = (u64::from(antes) * u64::from(QUEDA) / 100) as u32;
         } else if cheia && calma {
-            let passo = (u64::from(antes) * u64::from(SUBIDA) / 100) as u32;
+            // O passo depende do comprimento do caminho: ver
+            // [`SUBIDA_DE_CAMINHO_CURTO`]. Sem medida de ida e volta ainda, o
+            // passo é o de sempre — supor caminho curto sem evidência seria a
+            // suposição que esta sonda existe para não fazer.
+            let quanto = match janela.leitura.menor_ida_e_volta {
+                Some(volta) if volta <= IDA_E_VOLTA_CURTA => SUBIDA_DE_CAMINHO_CURTO,
+                _ => SUBIDA,
+            };
+            let passo = (u64::from(antes) * u64::from(quanto) / 100) as u32;
             let teto = self.limite_bps.unwrap_or(TETO_DA_SUBIDA_BPS);
             self.estimativa_bps = passo.min(teto).min(TETO_DA_SUBIDA_BPS);
         }
@@ -473,6 +509,11 @@ pub struct LeituraDaConexao {
     pub pacotes_enviados: u64,
     /// `path.congestion_events`.
     pub eventos_de_congestionamento: u64,
+    /// O ida e volta que esta conexão está medindo.
+    ///
+    /// Não entra na conta de banda: entra na **pressa** dela. Ver
+    /// [`SUBIDA_DE_CAMINHO_CURTO`].
+    pub ida_e_volta: Duration,
 }
 
 impl From<&quinn::ConnectionStats> for LeituraDaConexao {
@@ -482,6 +523,7 @@ impl From<&quinn::ConnectionStats> for LeituraDaConexao {
             pacotes_perdidos: stats.path.lost_packets,
             pacotes_enviados: stats.udp_tx.datagrams,
             eventos_de_congestionamento: stats.path.congestion_events,
+            ida_e_volta: stats.path.rtt,
         }
     }
 }
@@ -585,6 +627,10 @@ impl Subida {
             soma.pacotes_perdidos = soma
                 .pacotes_perdidos
                 .saturating_add(leitura.pacotes_perdidos);
+            soma.menor_ida_e_volta = Some(match soma.menor_ida_e_volta {
+                Some(menor) if menor <= leitura.ida_e_volta => menor,
+                _ => leitura.ida_e_volta,
+            });
             soma.eventos_de_congestionamento = soma
                 .eventos_de_congestionamento
                 .saturating_add(leitura.eventos_de_congestionamento);
@@ -820,6 +866,60 @@ mod tests {
     /// **fração**, e uma leitura de teste que não dissesse quantos pacotes
     /// saíram faria toda perda parecer 100%. Mil e duzentos bytes por
     /// datagrama, que é o que cabe num caminho comum sem fragmentar.
+    /// A mesma leitura, dizendo que o caminho é curto.
+    fn leitura_de_perto(bytes: u64, permitido_bps: u32) -> LeituraDaSubida {
+        LeituraDaSubida {
+            menor_ida_e_volta: Some(Duration::from_millis(1)),
+            ..leitura(bytes, 0, permitido_bps)
+        }
+    }
+
+    /// Numa LAN a estimativa sobe o dobro por janela.
+    ///
+    /// O relato que trouxe isto: «momentos de muito movimento pixeliza demais».
+    /// A imagem feia era a sonda engatinhando — dezessete segundos, medidos em
+    /// campo, da suposição de 2 Mbps até 6 Mbps de teto — e são os primeiros
+    /// segundos que alguém olha.
+    ///
+    /// O que muda é a pressa e não a confiança: o freio continua sendo a janela
+    /// cheia e a perda calma, e o passo maior só vale onde o retorno chega em
+    /// milissegundos.
+    #[test]
+    fn um_caminho_curto_sobe_mais_depressa_que_um_longo() {
+        let permitido = 1_000_000;
+        let cheio = bytes_em_um_segundo(permitido);
+
+        let subir = |de_perto: bool| {
+            let mut sonda = SondaDaSubida::nova();
+            let inicio = Instant::now();
+            let mut bytes = 0;
+            for segundo in 1..=3 {
+                bytes += cheio;
+                let leitura = if de_perto {
+                    leitura_de_perto(bytes, permitido)
+                } else {
+                    leitura(bytes, 0, permitido)
+                };
+                sonda.observar(inicio + Duration::from_secs(segundo), &leitura);
+            }
+            sonda.estimativa()
+        };
+
+        let perto = subir(true);
+        let longe = subir(false);
+        assert!(
+            perto > longe,
+            "o caminho curto não subiu mais que o longo: {perto} contra {longe}"
+        );
+        // O dobro por janela contra 25%: em três janelas a diferença é grande o
+        // bastante para não ser ruído de arredondamento.
+        assert!(
+            perto >= longe * 3 / 2,
+            "o caminho curto subiu, mas devagar demais para valer a mudança: \
+             {perto} contra {longe}"
+        );
+    }
+
     fn leitura(bytes: u64, perdidos: u64, permitido_bps: u32) -> LeituraDaSubida {
         LeituraDaSubida {
             bytes_enviados: bytes,
@@ -827,6 +927,10 @@ mod tests {
             pacotes_enviados: bytes / 1200,
             eventos_de_congestionamento: 0,
             permitido_bps,
+            // Sem ida e volta: estes testes fixam o passo no de sempre, e é o
+            // que se quer — quem afirma sobre o passo curto é o teste próprio
+            // dele, e os outros não devem mudar de resultado por causa disso.
+            menor_ida_e_volta: None,
         }
     }
 
@@ -1214,6 +1318,7 @@ mod a_sonda_em_lan {
                     pacotes_perdidos: 0,
                     pacotes_enviados: bytes / 1200,
                     eventos_de_congestionamento: 0,
+                    ida_e_volta: std::time::Duration::from_millis(40),
                 },
             );
         }
