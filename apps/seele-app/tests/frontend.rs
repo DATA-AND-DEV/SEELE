@@ -410,42 +410,32 @@ fn every_command_the_frontend_calls_is_registered() {
 /// below make sure it is: the moment the page calls one of these, this test
 /// fails and says to take it off the list. Nothing rots quietly.
 ///
-/// `renomear_voice_room` / `renomear_linha` are the other half of managing rooms.
-/// Creating them is drawn — the session screen offers both forms to whoever
-/// `Snapshot::may_manage_voice_rooms` says may create — and renaming is not: it was
-/// not asked for, and a rename control is a different shape from a create one
-/// (it belongs on the room, not under the list).
-///
-/// They stay here rather than being deleted, because deleting them would take
-/// the verbs down with the only thing that remembers they exist.
-///
-/// The day the four moderation verbs were wired, these two were looked at again
-/// and left. The reason is specific rather than a shrug, and it is about the
-/// shape the control has to have: a rename belongs *on the room*, which means an
-/// editable name in the row — and every row of `#lista-voice_rooms` and `#lista-linhas`
-/// is thrown away and rebuilt by `desenharCanais` on every snapshot, twice a
-/// second. A field there cannot hold a cursor for two frames, let alone a
-/// selection. Making it possible means the channel column adopting the call
-/// screen's repaint-don't-rebuild discipline, which changes the one list every
-/// other screen reads.
-///
-/// The other shape — a rename dialog, like the moderation layer — does work
-/// today, and was rejected on purpose: moderation needs a dialog because it
-/// needs a surface wide enough to spell out a consequence before an irreversible
-/// act. Renaming is reversible and trivial, so the dialog would be pure distance
-/// between the person and the room they are renaming. Doing it badly now would
-/// cost more than the wait.
-///
 /// The seven of ADR 0030 were here for exactly one commit, and this is the note
 /// they left: `camada-portaria.js` draws all of them, so the check below said so
 /// by name and they came out. That is the list working the way it is meant to.
-// `renomear_voice_room` saiu daqui na 0.9.0: a comp faz do **nome da sala** o
-// botão que renomeia, e o diálogo de nomear existe desde `bbe45b3`. A pilha
-// inteira já estava construída — protocolo, servidor, núcleo, FFI e comando do
-// app —, e o que faltava era exatamente o que esta lista existe para lembrar.
+// **A lista está vazia, que é o estado de repouso dela.**
 //
-// `renomear_linha` fica: o canal ainda não tem por onde ser renomeado.
-const AGUARDANDO_TELA: &[&str] = &["renomear_linha"];
+// `renomear_voice_room` saiu na 0.9.0: a comp faz do **nome da sala** o botão que
+// renomeia, e o diálogo de nomear existe desde `bbe45b3`. A pilha inteira já
+// estava construída — protocolo, servidor, núcleo, FFI e comando do app —, e o
+// que faltava era exatamente o que esta lista existe para lembrar.
+//
+// `renomear_linha` saiu na 0.10.1, e vale registrar por que a espera acabou, já
+// que as duas objeções escritas aqui eram específicas:
+//
+// A primeira dizia que renomear pertence **à fileira**, e que toda fileira de
+// `#lista-linhas` é jogada fora e reconstruída duas vezes por segundo — um campo
+// ali não segura cursor. Continua verdade, e por isso o controle não foi para a
+// fileira: foi para a **barra do canal aberto**, onde o nome é título e não
+// navegação. Na lista o nome já é o botão que abre o canal; na barra o alvo está
+// livre. O preço é renomear só o canal em que se está.
+//
+// A segunda rejeitava o diálogo, por ser «pura distância entre a pessoa e a sala
+// que ela renomeia». Essa objeção já tinha sido vencida pelos fatos: a 0.9.0
+// renomeia sala de voz por esse mesmo diálogo, e ninguém reclamou da distância.
+// O que a nota rejeitava era o diálogo **da moderação**, largo o bastante para
+// soletrar uma consequência — e `abrirNomear` não é ele.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -9649,5 +9639,54 @@ fn o_recurso_do_apelido_sai_da_impressao_desta_maquina() {
         "o `connect` deixou de tratar o apelido vazio.\n\
          A casca manda vazio de propósito quando ninguém se nomeou: é aqui que \
          isso vira um nome."
+    );
+}
+
+#[test]
+fn o_nome_do_canal_so_vira_botao_para_quem_administra() {
+    // A mesma regra do nome da sala de voz, e pela mesma razão: um botão que
+    // recusa é pior que a ausência dele, porque promete um caminho e o fecha
+    // depois do clique. Quem não administra lê o nome como texto.
+    let tela = read("ui/tela-sessao.js");
+    let barra = tela
+        .split("function desenharLinha(")
+        .nth(1)
+        .and_then(|resto| resto.split("\nfunction trocarONomeDaLinha(").next())
+        .expect("a barra do canal aberto sumiu de tela-sessao.js");
+
+    assert!(
+        barra.contains("may_manage_voice_rooms"),
+        "a barra do canal aberto deixou de conferir a permissão antes de \
+         oferecer o renomear.\n\
+         Sem isso o nome vira botão para todo mundo, e quem não administra \
+         descobre que não pode depois de clicar e ler uma recusa."
+    );
+}
+
+#[test]
+fn o_renomear_do_canal_le_qual_canal_esta_aberto_na_hora_do_clique() {
+    // O botão nasce uma vez — só quando a permissão muda — e vive enquanto a
+    // tela viver. Entre o nascimento dele e o clique, quem usa pode ter aberto
+    // outro canal.
+    //
+    // Se o canal fosse capturado na criação, o clique renomearia um canal que
+    // ninguém está vendo, com o nome que está na tela pertencendo a outro. O
+    // servidor aceitaria: é um pedido perfeitamente válido para o canal errado.
+    let tela = read("ui/tela-sessao.js");
+    let troca = tela
+        .split("function trocarONomeDaLinha(")
+        .nth(1)
+        .expect("`trocarONomeDaLinha` sumiu de tela-sessao.js");
+    let clique = troca
+        .split("renomear_linha")
+        .next()
+        .expect("o renomear do canal sumiu da barra");
+
+    assert!(
+        clique.contains("channels") && clique.contains("open"),
+        "o botão de renomear o canal deixou de descobrir qual canal está aberto \
+         na hora do clique.\n\
+         Capturar o canal quando o botão nasce renomeia o canal de antes — e o \
+         servidor aceita, porque o pedido é válido para o canal errado."
     );
 }

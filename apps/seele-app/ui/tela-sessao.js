@@ -857,9 +857,72 @@ function desenharOperador(snapshot) {
  */
 function desenharLinha(snapshot) {
   const aberta = snapshot.channels.find((linha) => linha.open);
-  const nome = $("linha-nome");
+
+  // **O nome é o botão de renomear**, a mesma regra das salas de voz: o alvo do
+  // gesto é a coisa que se quer mudar, e não um lápis ao lado dela.
+  //
+  // Aqui, e não na lista da esquerda, porque lá o nome já é o botão que **abre**
+  // o canal — dois verbos no mesmo alvo. Nesta barra ele é título e não
+  // navegação, então o alvo está livre. O preço é que se renomeia o canal em que
+  // se está, e não qualquer um da lista; o ganho é uma fileira que não cresce um
+  // ícone por ação.
+  //
+  // Só para quem administra. Para os outros continua sendo texto — um botão que
+  // recusa é pior que a ausência dele, porque promete um caminho e o fecha
+  // depois do clique.
+  const pode = aberta !== undefined && snapshot.may_manage_voice_rooms === true;
+  const nome = trocarONomeDaLinha(pode);
+
   nome.textContent = aberta ? aberta.name : "nenhum canal aberto";
   nome.classList.toggle("linha-nome-vazio", !aberta);
+  if (pode) {
+    nome.title = `renomear #${aberta.name}`;
+    nome.setAttribute("aria-label", `Renomear o canal ${aberta.name}`);
+  }
+}
+
+/**
+ * Devolve o `#linha-nome` do tipo certo, trocando o elemento só quando precisa.
+ *
+ * `<button>` para quem renomeia, `<span>` para quem lê. A troca acontece uma vez
+ * por mudança de permissão, e não a cada desenho: este módulo redesenha duas
+ * vezes por segundo, e recriar o nó toda vez tiraria o foco do teclado de quem
+ * estivesse justamente ali.
+ */
+function trocarONomeDaLinha(pode) {
+  const atual = $("linha-nome");
+  const querido = pode ? "BUTTON" : "SPAN";
+  if (atual.tagName === querido) {
+    if (!pode) {
+      atual.removeAttribute("title");
+      atual.removeAttribute("aria-label");
+    }
+    return atual;
+  }
+
+  const novo = elemento(pode ? "button" : "span", "linha-nome");
+  novo.id = "linha-nome";
+  if (pode) {
+    novo.type = "button";
+    // O canal vem do último snapshot desenhado, e não de uma captura de quando
+    // este botão nasceu: entre a criação e o clique alguém pode ter aberto outro
+    // canal, e renomear o de antes seria renomear o que ninguém está vendo.
+    novo.addEventListener("click", () => {
+      const alvo = desenhado?.channels?.find((linha) => linha.open);
+      if (!alvo) return;
+      abrirNomear({
+        titulo: "RENOMEAR O CANAL",
+        rotulo: "NOME DO CANAL",
+        exemplo: alvo.name,
+        valor: alvo.name,
+        acao: "RENOMEAR",
+        aoConfirmar: (escolhido) =>
+          invoke("renomear_linha", { channel: alvo.id, name: escolhido }),
+      });
+    });
+  }
+  atual.replaceWith(novo);
+  return novo;
 }
 
 /**

@@ -903,6 +903,22 @@ button.voice_room-nome:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
+/* O nome como botão de renomear, para quem administra — o mesmo desenho que
+   `button.voice_room-nome`, e pela mesma razão: ele **é** o nome, e desenhá-lo
+   como botão faria a barra parecer uma barra de ferramentas. O que diz que ele
+   responde é o cursor e o sublinhado ao passar, mais o `title` e o `aria-label`,
+   que dizem o verbo por extenso para quem não tem mouse nem enxerga. */
+button.linha-nome {
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+button.linha-nome:hover { text-decoration: underline; }
+
 /* Sem canal aberto a frase é uma frase — em minúscula, na tipografia de dado,
    para não parecer o nome de um canal chamado "nenhum canal aberto". */
 .linha-nome-vazio {
