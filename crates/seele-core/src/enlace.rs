@@ -1876,7 +1876,21 @@ impl Motor {
                     // O fluxo caiu. Não é o fim da sessão: é o começo da
                     // bateria.
                     Err(erro) => {
-                        tracing::debug!(%erro, "o enlace caiu");
+                        // **`warn` e não `debug`.** Esta linha é a única que diz
+                        // por que uma sessão acabou do lado de quem estava
+                        // dentro, e ela estava abaixo do filtro: o log do
+                        // cliente ficava **mudo** enquanto a conexão caía.
+                        //
+                        // Custou um diagnóstico inteiro. Um relato de campo —
+                        // «minha sessão some para o host e o compartilhamento
+                        // para sozinho, mas no Mac eu ainda estou na call» —
+                        // teve de ser cruzado com o log do servidor para se
+                        // saber sequer que a conexão havia caído, e o motivo
+                        // continuou sem aparecer em lugar nenhum.
+                        //
+                        // Não é ruidosa: acontece uma vez, e o que vem depois é
+                        // a bateria de reconexão.
+                        tracing::warn!(%erro, "o enlace caiu");
                         self.cair();
                     }
                 }
@@ -2451,9 +2465,14 @@ impl Motor {
                     .escoar_espelhado(tela, origem, &mut eventos, espelho)
                     .await;
                 let _ = avisos.send(Aviso::TelaFechou { tela });
+                // Pelo mesmo motivo da de cima: são as duas linhas que contam o
+                // fim de uma transmissão, uma vez cada, e as duas estavam
+                // apagadas. A contagem do caminho bom diz quantos quadros
+                // saíram e quantos o teto descartou — é o que separa «parou» de
+                // «nunca andou».
                 match fim {
-                    Ok(contagem) => tracing::debug!(?contagem, "a transmissão de tela acabou"),
-                    Err(erro) => tracing::debug!(%erro, "a transmissão de tela caiu"),
+                    Ok(contagem) => tracing::info!(?contagem, "a transmissão de tela acabou"),
+                    Err(erro) => tracing::warn!(%erro, "a transmissão de tela caiu"),
                 }
             });
         });
