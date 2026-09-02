@@ -1357,7 +1357,7 @@ fn um_sistema_que_falha_nao_leva_os_outros_junto() {
         saida.texto
     );
     assert!(
-        !saida.diario.contains("SEELE/releases\n"),
+        !saida.diario.contains("SEELE-RELEASES/releases\n"),
         "criou o release mesmo faltando sistema:\n{}",
         saida.diario
     );
@@ -1377,7 +1377,7 @@ fn com_parcial_o_release_sai_dizendo_quem_faltou() {
         saida.texto
     );
     assert!(
-        saida.diario.contains("SEELE/releases\n"),
+        saida.diario.contains("SEELE-RELEASES/releases\n"),
         "com --parcial o rascunho tem que sair:\n{}",
         saida.diario
     );
@@ -1844,5 +1844,35 @@ fn o_trabalho_solto_no_windows_e_guardado_e_nao_apagado() {
         !codigo.contains("reset --hard"),
         "apareceu um `reset --hard` no caminho do Windows: isso apaga trabalho \
          de quem estiver naquela máquina, e o stash existe para não apagar"
+    );
+}
+
+#[test]
+fn quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio() {
+    // Eles se separaram do repositório do código quando ele foi fechado: em
+    // repositório privado os anexos de release deixam de ser públicos, e o
+    // atualizador faz um GET simples, sem credencial — ele pararia de funcionar
+    // em silêncio para todo mundo.
+    //
+    // Separar é seguro: o pacote é assinado com minisign e a chave pública mora
+    // dentro do app, então quem hospeda não precisa ser confiável. O que **não**
+    // é seguro é os dois discordarem — o script publicando num lugar e o app
+    // procurando noutro. Ninguém percebe até uma versão sair e ninguém receber.
+    let script = std::fs::read_to_string(raiz().join("empacotar/publicar.sh"))
+        .expect("empacotar/publicar.sh é legível");
+    let config = std::fs::read_to_string(raiz().join("apps/seele-app/tauri.conf.json"))
+        .expect("tauri.conf.json é legível");
+
+    let destino = script
+        .split("REPO=\"${SEELE_REPO:-")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("o publicar.sh deixou de declarar o repositório das versões");
+
+    assert!(
+        config.contains(&format!("github.com/{destino}/releases/")),
+        "o atualizador procura noutro repositório do que o script publica.\n\
+         O script publica em «{destino}», e o `endpoints` do tauri.conf.json não \
+         aponta para lá — uma versão sairia e ninguém a receberia."
     );
 }

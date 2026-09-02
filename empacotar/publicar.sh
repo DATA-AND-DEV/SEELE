@@ -123,7 +123,29 @@ ENVIO="https://uploads.github.com"
 # --------------------------------------------------------------- as opções
 
 VERSAO=""
-REPO="${SEELE_REPO:-DATA-AND-DEV/SEELE}"
+# **O repositório das versões, e não o do código.**
+#
+# Eles se separaram quando o código foi fechado: em repositório privado os
+# anexos de release deixam de ser públicos, e o atualizador faz um GET simples,
+# sem credencial — ele pararia de funcionar em silêncio para todo mundo.
+#
+# Separar é seguro porque o pacote é assinado com minisign e a chave pública mora
+# dentro do app: quem hospeda **não precisa ser confiável**. Trocar de casa não
+# enfraquece nada; esquecer de trocar o `endpoints` do `tauri.conf.json` junto,
+# sim — e é o que `crates/seele-video/tests/modulo_publicado.rs` prende.
+REPO="${SEELE_REPO:-DATA-AND-DEV/SEELE-RELEASES}"
+# E o do código, que é outro desde que ele foi fechado.
+#
+# **São dois papéis e não um.** O commit é a procedência — é dele que este
+# release sai —, e ele mora no repositório do código; o release é distribuição, e
+# mora no público, porque anexo de repositório privado não é público e o
+# atualizador faz um GET sem credencial.
+#
+# Antes eram o mesmo nome numa variável só, e o script conferia o commit onde
+# publicava. Com a separação essa conferência procuraria o commit do código num
+# repositório onde ele nunca esteve, e reprovaria todo release — foi o que o
+# `xtask` pegou no primeiro teste depois da troca.
+REPO_CODIGO="${SEELE_REPO_CODIGO:-DATA-AND-DEV/SEELE}"
 WINDOWS="${SEELE_WINDOWS_SSH:-}"
 REPO_WINDOWS="${SEELE_WINDOWS_REPO:-C:\\SEELE}"
 TOKEN="${SEELE_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
@@ -1193,13 +1215,16 @@ sys.exit(0 if dados.get("permissions", {}).get("push") else 1)' "$CORPO_API" 2>/
     # O rascunho nasce apontando para ele, e é ele que vira a tag na hora de
     # publicar. Um rascunho apontando para um commit que o GitHub não conhece é
     # um release que ninguém consegue rastrear.
-    chamar_api GET "$API/repos/$REPO/commits/$COMMIT"
+    # No repositório do **código**, que é onde o commit vive. O release sai no
+    # das versões, e a tag dele lá não tem como apontar para um commit que
+    # aquele repositório nunca viu.
+    chamar_api GET "$API/repos/$REPO_CODIGO/commits/$COMMIT"
     if [ "$CODIGO_HTTP" != "200" ]; then
-        morrer "o commit $COMMIT não está no GitHub (HTTP $CODIGO_HTTP)." \
-            "É dele que este release sairia, e é ele que vira a tag ao publicar." \
+        morrer "o commit $COMMIT não está em $REPO_CODIGO (HTTP $CODIGO_HTTP)." \
+            "É dele que este release sai, e é a procedência do que vai no pacote." \
             "Empurre-o antes:  git push"
     fi
-    passo "o commit está no GitHub"
+    passo "o commit está no repositório do código"
 
     # Rascunho **não** cria tag, então `releases/tags/<tag>` não o encontra: é
     # preciso listar. É a única coisa que este script faz diferente do
