@@ -42,7 +42,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_CHILD, WS_EX_APPWINDOW, WS_POPUP, WS_VISIBLE,
 };
 
-use crate::{carga, pele, registro};
+use crate::{carga, pele, registro, sistema};
 
 /// O aviso que a linha da instalação manda à janela a cada arquivo.
 ///
@@ -1563,7 +1563,22 @@ fn comecar_a_instalar(janela: HWND, estado: &mut Estado) {
     estado.log.clear();
     estado.erro = None;
 
+    // **Antes de escrever qualquer arquivo.** O Windows não deixa sobrescrever
+    // um executável em uso; descobrir isso no meio deixaria parte dos arquivos
+    // novos e parte velhos — o estado mais difícil de explicar e o mais fácil de
+    // evitar.
+    if sistema::produto_aberto() {
+        estado.erro = Some(
+            "o SEELE está aberto nesta máquina. Feche-o e aperte INSTALAR de \
+             novo — enquanto ele estiver rodando, o Windows não deixa trocar os \
+             arquivos dele."
+                .to_owned(),
+        );
+        return;
+    }
+
     let destino = std::path::PathBuf::from(pasta_escolhida(estado));
+    let opcoes = estado.opcoes;
     let (manda, recebe) = std::sync::mpsc::channel();
     estado.recado = Some(recebe);
 
@@ -1590,7 +1605,13 @@ fn comecar_a_instalar(janela: HWND, estado: &mut Estado) {
             let _ = manda.send(Ok(arquivo.to_owned()));
             acordar();
         })
-        .and_then(|quantos| anunciar_ao_windows(&destino).map(|()| quantos));
+        .and_then(|quantos| {
+            anunciar_ao_windows(&destino, opcoes, &|passo| {
+                let _ = manda.send(Ok(passo.to_owned()));
+                acordar();
+            })
+            .map(|()| quantos)
+        });
 
         if let Err(motivo) = resultado {
             let _ = manda.send(Err(motivo));
@@ -1624,7 +1645,11 @@ fn pasta_escolhida(estado: &Estado) -> String {
 /// entrada do painel apontar para ele: uma entrada que aponta para um arquivo
 /// que ainda não existe é uma entrada que não desinstala — e ninguém descobre
 /// isso na instalação, só meses depois, quando alguém tenta remover.
-fn anunciar_ao_windows(destino: &std::path::Path) -> Result<(), String> {
+fn anunciar_ao_windows(
+    destino: &std::path::Path,
+    opcoes: [bool; 2],
+    contar: &dyn Fn(&str),
+) -> Result<(), String> {
     // O desinstalador **é este mesmo programa**, copiado para dentro da pasta.
     // Um binário, dois modos: instalar é o que ele faz quando roda de fora, e
     // remover é o que ele faz quando roda de dentro, com `--desinstalar`. Assim
@@ -1639,12 +1664,61 @@ fn anunciar_ao_windows(destino: &std::path::Path) -> Result<(), String> {
         )
     })?;
 
+    contar("desinstalador escrito");
+
     registro::anunciar(
         &destino.display().to_string(),
         env!("CARGO_PKG_VERSION"),
         &desinstalador.display().to_string(),
         tamanho_no_disco(destino),
-    )
+    )?;
+    contar("registrado em «Aplicativos instalados»");
+
+    let produto = destino.join("SEELE.exe");
+    let [quer_atalho, quer_porta] = opcoes;
+
+    // **Os atalhos primeiro, porque é por eles que alguém acha o produto.**
+    if quer_atalho {
+        if let Some(menu) = sistema::menu_iniciar() {
+            sistema::atalho(
+                &menu.join("SEELE.lnk"),
+                &produto,
+                "Voz, vídeo e texto auto-hospedados",
+            )?;
+            contar("atalho no menu Iniciar");
+        }
+        if let Some(mesa) = sistema::area_de_trabalho() {
+            sistema::atalho(
+                &mesa.join("SEELE.lnk"),
+                &produto,
+                "Voz, vídeo e texto auto-hospedados",
+            )?;
+            contar("atalho na área de trabalho");
+        }
+    }
+
+    // A regra sai sempre, marcada ou não — ver `sistema::regra_de_firewall`.
+    sistema::regra_de_firewall(&produto, quer_porta)?;
+    contar(if quer_porta {
+        "porta 8383 UDP aberta no firewall"
+    } else {
+        "firewall: regra não pedida"
+    });
+
+    // **A instalação da 0.7.1 sai por último**, e só depois de a nova estar de
+    // pé: apagá-la antes deixaria a máquina sem SEELE nenhum caso o que vem
+    // depois falhasse.
+    if let Some(antiga) = sistema::instalacao_por_usuario() {
+        // A falha aqui não derruba a instalação: o produto novo já está
+        // inteiro, e o que sobra é uma pasta órfã que ninguém mais abre.
+        if std::fs::remove_dir_all(&antiga).is_ok() {
+            contar("instalação antiga por usuário removida");
+        } else {
+            contar("instalação antiga por usuário: não consegui apagar");
+        }
+    }
+
+    Ok(())
 }
 
 /// Quanto a pasta ocupa, em KiB — que é a unidade do `EstimatedSize`.

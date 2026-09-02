@@ -43,6 +43,8 @@ mod janela;
 mod pele;
 #[cfg(windows)]
 mod registro;
+#[cfg(windows)]
+mod sistema;
 
 /// Cada coisa que o instalador do NSIS fazia, e o que quebra sem ela.
 ///

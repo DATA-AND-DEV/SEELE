@@ -9,3 +9,9 @@
 // marca, e duas cópias do mesmo `.ico` divergem na primeira vez que alguém
 // redesenhar uma delas.
 1 ICON "../seele-app/icons/icon.ico"
+
+// O manifesto: elevação, ciência de dpi e a lista de versões do Windows.
+//
+// `1 24` é `RT_MANIFEST` com o id que o carregador procura num executável — os
+// dois números não têm nome no `.rc`, e é assim mesmo que se escreve.
+1 24 "seele.manifest"

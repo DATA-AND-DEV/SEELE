@@ -21,6 +21,7 @@ fn main() {
     // crate continua compilando no Mac — que é onde a bateria roda primeiro.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=icone.rc");
+        println!("cargo:rerun-if-changed=seele.manifest");
         println!("cargo:rerun-if-changed=../seele-app/icons/icon.ico");
         // O `expect` é negado pela folha de lints, e aqui a alternativa é
         // melhor mesmo: um `panic!` de `build.rs` sai como rastro de pânico do
