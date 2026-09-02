@@ -42,7 +42,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_CHILD, WS_EX_APPWINDOW, WS_POPUP, WS_VISIBLE,
 };
 
-use crate::pele;
+use crate::{carga, pele};
+
+/// O aviso que a linha da instalação manda à janela a cada arquivo.
+///
+/// `WM_APP` é a primeira mensagem que o Windows reserva para o programa: nada do
+/// sistema a usa, e é assim que uma linha de trabalho acorda a linha da janela
+/// sem tocar no estado dela por fora.
+const WM_ANDOU: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 
 /// Em que passo do assistente a janela está.
 ///
@@ -139,6 +146,19 @@ struct Estado {
     /// do retorno: o Windows o usa para pintar. Um pincel criado e destruído
     /// dentro do tratador é um pincel que o sistema usa depois de morto.
     fundo_do_campo: HBRUSH,
+    /// O que a instalação já disse, uma linha por arquivo.
+    ///
+    /// Cresce até o fim e só as últimas aparecem: o log existe para uma
+    /// instalação que demora **parecer** uma instalação que anda, e o que
+    /// importa nele é a última linha.
+    log: Vec<String>,
+    /// O que a linha da instalação manda de volta, e de onde a janela lê.
+    ///
+    /// `Option` porque ele só existe depois de alguém apertar INSTALAR: um canal
+    /// aberto desde o começo seria um canal que ninguém escreve.
+    recado: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    /// O que impediu a instalação, quando impediu.
+    erro: Option<String>,
     /// Onde o teclado está. `None` até alguém apertar Tab pela primeira vez.
     ///
     /// **Por ação e não por índice.** A lista de alvos é refeita a cada
@@ -534,13 +554,140 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
                 left: corpo_x,
                 top: topo + px(160),
                 right: corpo_direita,
-                bottom: topo + px(200),
+                bottom: topo + px(176),
+            },
+            &if carga::existe() {
+                // O número honesto é o comprimido — o instalado só se saberia
+                // descompactando, e descompactar duas vezes para escrever uma
+                // linha é pagar a instalação inteira por um rótulo.
+                format!(
+                    "ESTE INSTALADOR CARREGA {} MiB COMPRIMIDOS",
+                    carga::comprimida() / (1024 * 1024)
+                )
+            } else {
+                "SEM CARGA: ESTE BUILD DESENHA A JANELA E NÃO INSTALA".to_owned()
+            },
+            estado.rotulo,
+            if carga::existe() {
+                pele::ROTULO
+            } else {
+                pele::LARANJA
+            },
+            DT_SINGLELINE.0 | DT_NOPREFIX.0,
+        );
+        escrever(
+            hdc,
+            RECT {
+                left: corpo_x,
+                top: topo + px(180),
+                right: corpo_direita,
+                bottom: topo + px(210),
             },
             "Ao continuar você aceita a licença do projeto, que acompanha o executável.",
             estado.corpo,
             pele::ROTULO,
             DT_WORDBREAK.0 | DT_NOPREFIX.0,
         );
+    }
+
+    if estado.passo == Passo::Instalando {
+        let (frase, cor_da_frase) = estado.erro.as_ref().map_or_else(
+            || {
+                (
+                    "Escrevendo os arquivos. Nada é baixado: tudo já está neste instalador."
+                        .to_owned(),
+                    pele::ROTULO,
+                )
+            },
+            |motivo| (motivo.clone(), pele::LARANJA),
+        );
+        escrever(
+            hdc,
+            RECT {
+                left: corpo_x,
+                top: topo + px(64),
+                right: corpo_direita,
+                bottom: topo + px(112),
+            },
+            &frase,
+            estado.corpo,
+            cor_da_frase,
+            DT_WORDBREAK.0 | DT_NOPREFIX.0,
+        );
+
+        // O log, e só o fim dele: quem olha uma instalação quer saber onde ela
+        // está, não o que já passou.
+        let cabem = 6_usize;
+        let comeco = estado.log.len().saturating_sub(cabem);
+        let mut y = topo + px(124);
+        for linha in estado.log.iter().skip(comeco) {
+            escrever(
+                hdc,
+                RECT {
+                    left: corpo_x,
+                    top: y,
+                    right: corpo_direita,
+                    bottom: y + px(16),
+                },
+                &format!("· {linha}"),
+                estado.corpo,
+                pele::ROTULO,
+                DT_SINGLELINE.0 | DT_NOPREFIX.0 | windows::Win32::Graphics::Gdi::DT_END_ELLIPSIS.0,
+            );
+            y += px(16);
+        }
+    }
+
+    if estado.passo == Passo::Pronto {
+        escrever(
+            hdc,
+            RECT {
+                left: corpo_x,
+                top: topo + px(64),
+                right: corpo_direita,
+                bottom: topo + px(104),
+            },
+            "Na primeira abertura o app gera sua chave e pede um apelido. Depois disso você escolhe entre entrar num servidor ou hospedar um aqui.",
+            estado.corpo,
+            pele::ROTULO,
+            DT_WORDBREAK.0 | DT_NOPREFIX.0,
+        );
+        for (i, (rotulo, valor)) in [
+            ("VERSÃO", env!("CARGO_PKG_VERSION").to_owned()),
+            ("PASTA", pasta_escolhida(estado)),
+            ("ARQUIVOS", format!("{} escritos", estado.log.len())),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let y = topo + px(116) + px(20) * i32::try_from(i).unwrap_or(0);
+            escrever(
+                hdc,
+                RECT {
+                    left: corpo_x,
+                    top: y,
+                    right: corpo_x + px(80),
+                    bottom: y + px(16),
+                },
+                rotulo,
+                estado.rotulo,
+                pele::ROTULO,
+                DT_SINGLELINE.0 | DT_NOPREFIX.0,
+            );
+            escrever(
+                hdc,
+                RECT {
+                    left: corpo_x + px(88),
+                    top: y,
+                    right: corpo_direita,
+                    bottom: y + px(16),
+                },
+                valor,
+                estado.corpo,
+                pele::OSSO,
+                DT_SINGLELINE.0 | DT_NOPREFIX.0 | windows::Win32::Graphics::Gdi::DT_END_ELLIPSIS.0,
+            );
+        }
     }
 
     if estado.passo == Passo::Opcoes {
@@ -925,6 +1072,41 @@ extern "system" fn procedimento(janela: HWND, mensagem: u32, w: WPARAM, l: LPARA
             }
             padrao
         }
+        WM_ANDOU => {
+            // Esvazia o canal de uma vez, e não uma linha por acordada: a linha
+            // da instalação manda mais depressa do que a janela repinta, e ler
+            // uma por vez faria o log ficar para trás do que já foi escrito em
+            // disco — um progresso que mente para menos.
+            if let Some(estado) = estado_de(janela) {
+                let mut acabou = false;
+                if let Some(canal) = estado.recado.as_ref() {
+                    while let Ok(recado) = canal.try_recv() {
+                        match recado {
+                            Ok(arquivo) => estado.log.push(arquivo),
+                            Err(motivo) => {
+                                estado.erro = Some(motivo);
+                                acabou = true;
+                            }
+                        }
+                    }
+                }
+                // Sem erro e sem canal vivo, acabou bem. O `Sender` morre com a
+                // linha de trabalho, e é isso que o `try_recv` desconectado diz.
+                if !acabou
+                    && estado.recado.as_ref().is_some_and(|canal| {
+                        matches!(
+                            canal.try_recv(),
+                            Err(std::sync::mpsc::TryRecvError::Disconnected)
+                        )
+                    })
+                {
+                    estado.recado = None;
+                    estado.passo = Passo::Pronto;
+                }
+                repintar(janela);
+            }
+            LRESULT(0)
+        }
         WM_CTLCOLOREDIT => {
             // O `EDIT` é o único controle do Windows nesta janela, e o único que
             // aceita cor. O pincel devolvido tem de continuar válido **depois**
@@ -1014,19 +1196,30 @@ fn agir(janela: HWND, estado: &mut Estado, acao: Option<Acao>) {
             }
         }
         Some(Acao::Voltar) => {
-            estado.passo = match estado.passo {
-                Passo::Destino | Passo::Opcoes => Passo::Destino,
-                Passo::Instalando => Passo::Opcoes,
-                Passo::Pronto => Passo::Instalando,
-            };
+            // Do 03 e do 04 não se volta: o 03 está escrevendo em disco, e o 04
+            // é depois de ter escrito. Um VOLTAR que reabre as opções depois de
+            // a instalação ter acontecido é um botão que promete desfazer o que
+            // não desfaz.
+            if matches!(estado.passo, Passo::Opcoes) {
+                estado.passo = Passo::Destino;
+            }
         }
-        Some(Acao::Avancar) => {
-            estado.passo = match estado.passo {
-                Passo::Destino => Passo::Opcoes,
-                Passo::Opcoes => Passo::Instalando,
-                Passo::Instalando | Passo::Pronto => Passo::Pronto,
-            };
-        }
+        Some(Acao::Avancar) => match estado.passo {
+            Passo::Destino => estado.passo = Passo::Opcoes,
+            Passo::Opcoes => {
+                estado.passo = Passo::Instalando;
+                comecar_a_instalar(janela, estado);
+            }
+            // Enquanto instala, avançar não faz nada: o passo 04 chega quando a
+            // linha da instalação disser que acabou, e não quando alguém apertar.
+            Passo::Instalando => {}
+            Passo::Pronto => {
+                // SAFETY: fecha a janela; o produto abre no lugar dela.
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(janela);
+                }
+            }
+        },
         Some(Acao::Escolher) => {
             if let Some(escolhida) = perguntar_a_pasta(janela, estado) {
                 let texto = larga(&escolhida);
@@ -1212,6 +1405,9 @@ pub(crate) fn abrir() -> Result<(), String> {
             alvos: Vec::new(),
             sob_o_mouse: None,
             apertando: None,
+            log: Vec::new(),
+            recado: None,
+            erro: None,
             foco: None,
             dpi,
             cartela: fonte("Saira Condensed", 22 * dpi / 96, true),
@@ -1351,4 +1547,71 @@ fn perguntar_a_pasta(janela: HWND, estado: &Estado) -> Option<String> {
 fn pasta_proposta() -> String {
     let base = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_owned());
     format!(r"{base}\SEELE")
+}
+
+/// Põe a instalação numa linha própria e volta na hora.
+///
+/// **Numa linha própria porque a janela precisa continuar respondendo.** Abrir a
+/// carga é escrever dezenas de arquivos em disco; feito aqui dentro, a janela
+/// para de repintar, o Windows a marca como travada e escurece a tela dela — no
+/// exato momento em que ela deveria estar mostrando que anda.
+///
+/// A linha de trabalho não toca no estado: ela manda cada arquivo por um canal e
+/// acorda a janela com `WM_ANDOU`. Quem escreve no estado continua sendo só o
+/// procedimento da janela, numa linha só, que é o que dispensa tranca.
+fn comecar_a_instalar(janela: HWND, estado: &mut Estado) {
+    estado.log.clear();
+    estado.erro = None;
+
+    let destino = std::path::PathBuf::from(pasta_escolhida(estado));
+    let (manda, recebe) = std::sync::mpsc::channel();
+    estado.recado = Some(recebe);
+
+    // O `isize` atravessa a fronteira da linha porque `HWND` não é `Send` — e
+    // não é `Send` por uma razão que não vale aqui: o que não se pode fazer de
+    // outra linha é **mexer** na janela, e isto só a acorda. `PostMessageW` é
+    // feito exatamente para isso.
+    let aviso = janela.0 as isize;
+    std::thread::spawn(move || {
+        let acordar = || {
+            // SAFETY: `PostMessageW` é a chamada que o Win32 documenta como
+            // segura de outra linha; ela enfileira e volta na hora.
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    Some(HWND(aviso as *mut core::ffi::c_void)),
+                    WM_ANDOU,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        };
+
+        let resultado = carga::abrir_em(&destino, |arquivo| {
+            let _ = manda.send(Ok(arquivo.to_owned()));
+            acordar();
+        });
+        if let Err(motivo) = resultado {
+            let _ = manda.send(Err(motivo));
+        }
+        acordar();
+    });
+}
+
+/// O que está escrito no campo da pasta, ou a proposta se ele estiver vazio.
+fn pasta_escolhida(estado: &Estado) -> String {
+    let mut texto = [0_u16; 512];
+    // SAFETY: `campo` é o `EDIT` desta janela e `texto` tem o tamanho que a
+    // chamada recebe.
+    let quantos = unsafe {
+        windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(estado.campo, &mut texto)
+    };
+    let lido = texto
+        .get(..usize::try_from(quantos).unwrap_or(0))
+        .map(String::from_utf16_lossy)
+        .unwrap_or_default();
+    if lido.trim().is_empty() {
+        pasta_proposta()
+    } else {
+        lido
+    }
 }

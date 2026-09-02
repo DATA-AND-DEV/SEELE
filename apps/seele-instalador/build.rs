@@ -15,6 +15,8 @@
 //! 0019 para o que entra.
 
 fn main() {
+    carga();
+
     // O recurso só existe no Windows. Fora dele o `build.rs` não faz nada, e a
     // crate continua compilando no Mac — que é onde a bateria roda primeiro.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
@@ -33,6 +35,45 @@ fn main() {
                  aplicativo — na tela em que alguém decide se confia no arquivo \
                  que acabou de baixar."
             );
+        }
+    }
+}
+
+/// Põe a carga — os arquivos do produto — onde o `include_bytes!` a encontra.
+///
+/// # Por que por variável de ambiente
+///
+/// A carga é o resultado de compilar o SEELE inteiro, e o instalador é compilado
+/// depois dele. Um caminho fixo no código obrigaria a árvore a ter sempre um
+/// `.tar.gz` de release por perto — inclusive para quem só quer mexer na janela.
+///
+/// Sem `SEELE_CARGA`, entra uma carga **vazia** e o instalador se recusa a
+/// instalar, dizendo isso. É o estado em que a janela é desenvolvida, e é
+/// melhor que um instalador que compila igual nos dois casos e só descobre o
+/// vazio na máquina de quem baixou.
+fn carga() {
+    println!("cargo:rerun-if-env-changed=SEELE_CARGA");
+    let destino =
+        std::path::Path::new(&std::env::var("OUT_DIR").unwrap_or_default()).join("carga.tar.gz");
+
+    match std::env::var("SEELE_CARGA") {
+        Ok(origem) if !origem.is_empty() => {
+            println!("cargo:rerun-if-changed={origem}");
+            if let Err(erro) = std::fs::copy(&origem, &destino) {
+                panic!(
+                    "não copiei a carga de «{origem}»: {erro}\n\
+                     `SEELE_CARGA` aponta para o `.tar.gz` com os arquivos do \
+                     produto. Se ele não existe, o instalador sairia vazio."
+                );
+            }
+        }
+        _ => {
+            // Vazia, e não ausente: o `include_bytes!` precisa de um arquivo, e
+            // um arquivo de zero byte é o que faz o instalador saber que não tem
+            // o que instalar.
+            if let Err(erro) = std::fs::write(&destino, []) {
+                panic!("não criei a carga vazia: {erro}");
+            }
         }
     }
 }

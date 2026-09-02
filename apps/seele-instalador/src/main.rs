@@ -35,6 +35,7 @@
 //! ADR pede, e a que evita descobrir a obrigação esquecida depois de o
 //! instalador estar pronto.
 
+mod carga;
 #[cfg(windows)]
 mod janela;
 mod pele;

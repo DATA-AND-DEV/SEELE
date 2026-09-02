@@ -26,6 +26,14 @@ description = "O instalador do SEELE para Windows. Ver ADR 0043."
 embed-resource = "3"
 
 [target.'cfg(windows)'.dependencies]
+# A carga é um `.tar.gz`, e os dois já estão na árvore — o `tar` e o `flate2`
+# vêm pelo atualizador do Tauri. Sólido e não por arquivo: o produto são dezenas
+# de arquivos parecidos, e gzip sobre tar comprime o conjunto, enquanto um `.zip`
+# comprimiria cada um sozinho. É também o formato que o próprio SEELE já usa para
+# a atualização do macOS, então não há um formato novo na casa.
+flate2 = "1"
+tar = "0.4"
+
 # A mesma versão que o `seele-video` já traz, para o `Cargo.lock` não carregar
 # duas cópias do mundo do Windows.
 windows = { version = "0.62", features = [
