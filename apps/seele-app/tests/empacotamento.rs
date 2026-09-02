@@ -520,7 +520,11 @@ fn origem_do_modelo() -> String {
     let modelo = ler("instalador.nsi");
     modelo
         .lines()
-        .find_map(|linha| linha.trim_start_matches("; ").strip_prefix("ORIGEM: tauri-bundler "))
+        .find_map(|linha| {
+            linha
+                .trim_start_matches("; ")
+                .strip_prefix("ORIGEM: tauri-bundler ")
+        })
         .and_then(|resto| resto.split(',').next())
         .map(str::trim)
         .map(str::to_owned)
@@ -581,7 +585,9 @@ fn a_bifurcacao_do_modelo_ainda_corresponde_ao_tauri_instalado() {
 
     let Some(registro) = std::env::var_os("CARGO_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|casa| std::path::PathBuf::from(casa).join(".cargo")))
+        .or_else(|| {
+            std::env::var_os("HOME").map(|casa| std::path::PathBuf::from(casa).join(".cargo"))
+        })
         .map(|casa| casa.join("registry/src"))
         .filter(|caminho| caminho.is_dir())
     else {
@@ -591,7 +597,10 @@ fn a_bifurcacao_do_modelo_ainda_corresponde_ao_tauri_instalado() {
 
     let mut instaladas: Vec<String> = Vec::new();
     let Ok(indices) = std::fs::read_dir(&registro) else {
-        println!("PARCIAL: não li {}; não confiro a bifurcação daqui.", registro.display());
+        println!(
+            "PARCIAL: não li {}; não confiro a bifurcação daqui.",
+            registro.display()
+        );
         return;
     };
     for indice in indices.flatten() {
@@ -621,5 +630,52 @@ fn a_bifurcacao_do_modelo_ainda_corresponde_ao_tauri_instalado() {
          O modelo novo pode trazer correções que o nosso não tem. Rebifurque: \
          compare o `installer.nsi` da versão nova com o nosso, traga o que mudou \
          e atualize a linha `ORIGEM:` do cabeçalho."
+    );
+}
+
+#[test]
+fn nenhum_comentario_do_modelo_parece_handlebars() {
+    // **O Handlebars lê o arquivo inteiro, comentário incluído.**
+    //
+    // O primeiro build desta bifurcação morreu num par de chaves duplas escrito
+    // dentro de um comentário — justamente o comentário que explicava o que as
+    // chaves duplas são. O erro que voltou foi de sintaxe de template apontando
+    // para uma linha de prosa, que é o tipo de mensagem em que ninguém acredita
+    // na primeira leitura.
+    //
+    // O guarda é grosseiro de propósito: toda chave dupla do arquivo tem de
+    // parecer uma expressão de verdade. Prosa entre chaves não parece, e é essa
+    // a única coisa que ele precisa pegar.
+    let modelo = ler("instalador.nsi");
+
+    let mut suspeitas = Vec::new();
+    let mut resto = modelo.as_str();
+    while let Some(inicio) = resto.find("{{") {
+        let apos = &resto[inicio + 2..];
+        let Some(fim) = apos.find("}}") else {
+            break;
+        };
+        let dentro = apos[..fim].trim();
+        // O que o modelo de verdade usa: `nome`, `#bloco`, `/bloco`, e as formas
+        // de `#each … as |x| ~`. Nenhuma delas tem espaço solto no começo nem
+        // fica vazia, que é como a prosa entra.
+        let plausivel = !dentro.is_empty()
+            && dentro
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '#' || c == '/' || c == '_');
+        if !plausivel {
+            suspeitas.push(format!("{{{{{dentro}}}}}"));
+        }
+        resto = &apos[fim + 2..];
+    }
+
+    assert!(
+        suspeitas.is_empty(),
+        "há chaves duplas no `instalador.nsi` que não parecem expressão: \
+         {suspeitas:?}\n\
+         O Handlebars do bundler lê o arquivo inteiro, comentário incluído — um \
+         par de chaves na prosa derruba o empacotamento com um erro de sintaxe \
+         apontando para uma frase."
     );
 }

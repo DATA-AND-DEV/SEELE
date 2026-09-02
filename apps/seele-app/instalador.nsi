@@ -22,8 +22,14 @@
 ; `NSIS_HOOK_PREUNINSTALL` vivem em `instalador.nsh` e são a regra de firewall e
 ; a remoção da instalação por usuário. Ver o cabeçalho daquele arquivo.
 ;
-; **As chaves `{{ }}`.** São do Handlebars do bundler, não do NSIS. Apagar uma
-; delas não dá erro de compilação: sai um instalador com o campo vazio.
+; **As chaves duplas.** São do Handlebars do bundler, não do NSIS, e o bundler
+; as troca por valores antes de o NSIS ver o arquivo. Apagar uma não dá erro de
+; compilação: sai um instalador com o campo vazio.
+;
+; E o Handlebars lê o arquivo **inteiro**, comentário incluído. Escrever um par
+; de chaves duplas aqui em cima, para explicar o que elas são, foi o que
+; derrubou o primeiro build desta bifurcação — com um erro de sintaxe apontando
+; para uma linha de prosa.
 ;
 ; ---- a dívida que esta bifurcação cria ----
 ;
