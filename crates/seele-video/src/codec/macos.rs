@@ -42,9 +42,10 @@ use objc2_core_media::{
 use objc2_core_video::{CVImageBuffer, CVPixelBuffer, CVPixelBufferLockFlags};
 use objc2_video_toolbox::{
     kVTCompressionPropertyKey_AllowFrameReordering, kVTCompressionPropertyKey_AverageBitRate,
-    kVTCompressionPropertyKey_DataRateLimits, kVTCompressionPropertyKey_ExpectedFrameRate,
-    kVTCompressionPropertyKey_MaxKeyFrameInterval, kVTCompressionPropertyKey_RealTime,
-    kVTEncodeFrameOptionKey_ForceKeyFrame, VTCompressionSession, VTEncodeInfoFlags,
+    kVTCompressionPropertyKey_ConstantBitRate, kVTCompressionPropertyKey_DataRateLimits,
+    kVTCompressionPropertyKey_ExpectedFrameRate, kVTCompressionPropertyKey_MaxKeyFrameInterval,
+    kVTCompressionPropertyKey_RealTime, kVTEncodeFrameOptionKey_ForceKeyFrame,
+    VTCompressionSession, VTEncodeInfoFlags,
 };
 
 use super::{Cadencia, QuadroCodificado, QuadroI420, Resolucao};
@@ -238,6 +239,73 @@ fn conjunto_de_parametros(formato: &CMVideoFormatDescription, indice: usize) -> 
     Some(unsafe { std::slice::from_raw_parts(ponteiro, tamanho) }.to_vec())
 }
 
+/// Manda o codificador **gastar** o teto, e não só não ultrapassá-lo.
+///
+/// # Por que existe
+///
+/// Porque declarar a média não faz ninguém usá-la. Medido em campo, a 1080p com
+/// teto de 1,87 Mbps: o VideoToolbox entregou **568 kbps**, 30% do orçamento, e
+/// a imagem de um vídeo em movimento ficou péssima. Ele mira qualidade e
+/// economiza — o que é bom comportamento para gravar um arquivo e ruim para uma
+/// transmissão, onde a banda não gasta hoje não sobra para amanhã.
+///
+/// O irmão do Windows não tem esse problema porque ali a taxa constante é dita
+/// por extenso, com `AVEncCommonRateControlMode`. Esta função é a mesma frase
+/// para o macOS. A assimetria produziu a pergunta de campo: «por que no Windows
+/// para o Mac ficou tão limpa a imagem e o contrário está péssimo, sendo que
+/// estamos em LAN?».
+///
+/// # Dois caminhos, e o segundo é o de antes
+///
+/// `ConstantBitRate` é o pedido direto, e a própria biblioteca avisa duas
+/// coisas: ele é **incompatível** com `DataRateLimits`, e nem todo codificador o
+/// aceita — devolve `kVTPropertyNotSupportedErr` quando não. Então ele vai
+/// primeiro e sozinho; se for recusado, cai para o par de antes, que ao menos
+/// impede o estouro.
+///
+/// # O que a taxa constante custa
+///
+/// Ela **enche o cano mesmo com a tela parada**: é o que «constante» quer dizer,
+/// e um quadro que não mudou passa a custar bits que antes não custava. Aceito,
+/// e por dois motivos. O teto já é uma fração medida do que a máquina consegue
+/// subir, então encher é usar o que é nosso e não invadir o que é de outro; e o
+/// balde do transporte continua sendo o último a decidir, então o desperdício
+/// tem limite e não vira congestionamento.
+///
+/// Se um dia isso incomodar — alguém num plano medido, por exemplo —, a saída
+/// não é voltar à média: é o teto perguntar quanto de fato há para subir, que é
+/// o trabalho da sonda e não do codificador.
+///
+/// # Errors
+///
+/// [`ErroDeVideo::CodecRecusou`] quando nem o caminho de reserva é aceito.
+fn mirar_a_banda(sessao: &VTCompressionSession, teto_bps: u32) -> Result<(), ErroDeVideo> {
+    let bps = i32::try_from(teto_bps).unwrap_or(i32::MAX);
+    // SAFETY: a chave é estática da biblioteca.
+    let constante = unsafe {
+        ajustar(
+            sessao,
+            kVTCompressionPropertyKey_ConstantBitRate,
+            CFNumber::new_i32(bps).as_ref(),
+            "pedir taxa constante",
+        )
+    };
+    if constante.is_ok() {
+        return Ok(());
+    }
+
+    // SAFETY: idem.
+    unsafe {
+        ajustar(
+            sessao,
+            kVTCompressionPropertyKey_AverageBitRate,
+            CFNumber::new_i32(bps).as_ref(),
+            "declarar o teto de banda",
+        )?;
+    }
+    limitar(sessao, teto_bps)
+}
+
 /// O **limite duro** de banda, que é diferente do alvo médio.
 ///
 /// `AverageBitRate` é uma média que o VideoToolbox persegue ao longo do tempo, e
@@ -379,32 +447,25 @@ impl Codificador {
                 CFNumber::new_i32(i32::try_from(quadros.saturating_mul(2)).unwrap_or(60)).as_ref(),
                 "declarar o intervalo máximo entre quadros-chave",
             )?;
-            ajustar(
-                &sessao.0,
-                kVTCompressionPropertyKey_AverageBitRate,
-                CFNumber::new_i32(i32::try_from(teto_bps).unwrap_or(i32::MAX)).as_ref(),
-                "declarar o teto de banda",
-            )?;
-            limitar(&sessao.0, teto_bps)?;
-            // **O piso de qualidade foi tentado aqui, e medido, e não serve.**
-            //
-            // Sob teto apertado os dois codificadores obedecem de formas
-            // opostas: o OpenH264 joga quadro fora e gasta os bits nos que
-            // sobram; o do sistema entrega todos e borra cada um. Medido a 720p
-            // com 2 Mbps: 26,8 dB em 13 quadros de 120 contra 16,2 dB em 120 de
-            // 120. «Mais pixelado» é a cara exata da segunda troca, e foi o
-            // relato de campo — daí a tentação de pôr um teto de quantização
-            // com `kVTCompressionPropertyKey_MaxAllowedFrameQP`.
-            //
-            // Com QP máximo 35 o mesmo teste deu **29,23 dB e 30,19 Mbps**:
-            // 1510% do teto. O VideoToolbox honra o piso de qualidade e
-            // **abandona** o `DataRateLimits` — troca o defeito que a linha
-            // acima acabou de consertar por um três vezes maior. Quem passaria a
-            // jogar quadro fora seria o balde do transporte, depois de a CPU já
-            // ter pago para codificá-los.
-            //
-            // Fica escrito para ninguém tentar de novo achando que é de graça.
         }
+        // **A banda: mirar e limitar.** Ver `mirar_a_banda` — declarar a média
+        // não faz o codificador usá-la, e medi-lo entregando 30% do orçamento é
+        // o que trouxe aquela função ao mundo.
+        //
+        // **O piso de qualidade foi tentado aqui, e medido, e não serve.** Sob
+        // teto apertado os dois codificadores obedecem de formas opostas: o
+        // OpenH264 joga quadro fora e gasta os bits nos que sobram; o do sistema
+        // entrega todos e borra cada um. Medido a 720p com 2 Mbps: 26,8 dB em 13
+        // quadros de 120 contra 16,2 dB em 120 de 120. Daí a tentação de pôr um
+        // teto de quantização com `kVTCompressionPropertyKey_MaxAllowedFrameQP`.
+        //
+        // Com QP máximo 35 o mesmo teste deu **29,23 dB e 30,19 Mbps**: 1510% do
+        // teto. O VideoToolbox honra o piso de qualidade e **abandona** o limite
+        // de banda — troca um defeito por outro três vezes maior, e quem passaria
+        // a jogar quadro fora seria o balde do transporte, depois de a CPU já ter
+        // pago para codificar. Fica escrito para ninguém tentar de novo achando
+        // que é de graça.
+        mirar_a_banda(&sessao.0, teto_bps)?;
 
         Ok(Self {
             sessao,
@@ -535,18 +596,11 @@ impl super::CodificaVideo for Codificador {
     }
 
     fn ajustar_teto(&mut self, teto_bps: u32) -> Result<(), ErroDeVideo> {
-        // SAFETY: a chave é estática da biblioteca; a sessão é nossa.
-        unsafe {
-            ajustar(
-                &self.sessao.0,
-                kVTCompressionPropertyKey_AverageBitRate,
-                CFNumber::new_i32(i32::try_from(teto_bps).unwrap_or(i32::MAX)).as_ref(),
-                "mudar o teto de banda",
-            )?;
-        }
-        // O limite duro anda junto: mudar só a média deixaria o teto novo valendo
-        // para a perseguição e o antigo valendo para o estouro.
-        limitar(&self.sessao.0, teto_bps)?;
+        // Pelo mesmo caminho da abertura, e não só a média: mudar a média
+        // deixaria o teto novo valendo para a perseguição e o antigo para o
+        // estouro — e, pior, deixaria a taxa constante presa no número velho, que
+        // é justamente o que faz o codificador gastar o orçamento.
+        mirar_a_banda(&self.sessao.0, teto_bps)?;
         self.teto_bps = teto_bps;
         Ok(())
     }
