@@ -35,11 +35,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GetSystemMetrics,
-    GetWindowLongPtrW, LoadCursorW, LoadIconW, PostQuitMessage, RegisterClassW, SetWindowLongPtrW,
-    ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCAPTION,
-    HTCLIENT, IDC_ARROW, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_SHOW, WM_DESTROY, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_EX_APPWINDOW,
-    WS_POPUP,
+    GetWindowLongPtrW, LoadCursorW, LoadIconW, PostQuitMessage, RegisterClassW, SendMessageW,
+    SetWindowLongPtrW, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
+    GWLP_USERDATA, HTCAPTION, HTCLIENT, IDC_ARROW, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_SHOW,
+    WM_CTLCOLOREDIT, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_CHILD, WS_EX_APPWINDOW, WS_POPUP, WS_VISIBLE,
 };
 
 use crate::pele;
@@ -114,6 +114,7 @@ enum Acao {
     Voltar,
     Avancar,
     Alternar(usize),
+    Escolher,
 }
 
 /// O que a janela sabe de si.
@@ -124,6 +125,20 @@ struct Estado {
     alvos: Vec<Alvo>,
     sob_o_mouse: Option<Acao>,
     apertando: Option<Acao>,
+    /// O campo da pasta: o único controle do Windows nesta janela.
+    ///
+    /// **Nativo de propósito.** Um `EDIT` traz cursor, seleção, teclado, IME e
+    /// as teclas de edição que ninguém lembra de implementar — e, ao contrário
+    /// do botão, ele **aceita cor** por `WM_CTLCOLOREDIT`. Desenhar um campo de
+    /// texto à mão para receber um caminho de pasta seria trocar o certo pelo
+    /// pior.
+    campo: HWND,
+    /// O pincel do fundo do campo, vivo enquanto a janela viver.
+    ///
+    /// `WM_CTLCOLOREDIT` exige devolver um `HBRUSH` que continue válido depois
+    /// do retorno: o Windows o usa para pintar. Um pincel criado e destruído
+    /// dentro do tratador é um pincel que o sistema usa depois de morto.
+    fundo_do_campo: HBRUSH,
     /// Onde o teclado está. `None` até alguém apertar Tab pela primeira vez.
     ///
     /// **Por ação e não por índice.** A lista de alvos é refeita a cada
@@ -244,6 +259,25 @@ fn fonte(familia: &str, altura: i32, negrito: bool) -> HFONT {
             u32::from(FF_DONTCARE.0),
             PCWSTR(nome.as_ptr()),
         )
+    }
+}
+
+/// Onde o campo da pasta mora, em pixels da janela.
+///
+/// **Uma função, dois consumidores.** Quem desenha a moldura em volta e quem
+/// posiciona o controle nativo leem daqui. Duas contas separadas divergem no
+/// primeiro ajuste, e o sintoma é uma moldura ao lado do campo em vez de em
+/// volta dele.
+fn caixa_do_campo(estado: &Estado, largura: i32, altura: i32) -> RECT {
+    let px = |v: i32| estado.px(v);
+    let topo = px(pele::BARRA) + 1 + px(30) + 1;
+    let corpo_x = px(pele::LOMBADA) + px(28);
+    let _ = altura;
+    RECT {
+        left: corpo_x,
+        top: topo + px(124),
+        right: largura - px(28) - px(96),
+        bottom: topo + px(148),
     }
 }
 
@@ -436,6 +470,78 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
         pele::OSSO,
         DT_SINGLELINE.0 | DT_NOPREFIX.0,
     );
+
+    if estado.passo == Passo::Destino {
+        escrever(
+            hdc,
+            RECT {
+                left: corpo_x,
+                top: topo + px(64),
+                right: corpo_direita,
+                bottom: topo + px(96),
+            },
+            "Nada é enviado para fora durante a instalação. O SEELE não cria conta: sua identidade é uma chave gerada aqui, no primeiro uso.",
+            estado.corpo,
+            pele::ROTULO,
+            DT_WORDBREAK.0 | DT_NOPREFIX.0,
+        );
+        escrever(
+            hdc,
+            RECT {
+                left: corpo_x,
+                top: topo + px(108),
+                right: corpo_direita,
+                bottom: topo + px(120),
+            },
+            "PASTA DE DESTINO",
+            estado.rotulo,
+            pele::ROTULO,
+            DT_SINGLELINE.0 | DT_NOPREFIX.0,
+        );
+
+        // O campo é um filho de verdade, então quem o move é o Windows e não o
+        // desenho. Aqui só se diz onde ele deve estar; a moldura é nossa, porque
+        // um `EDIT` com borda do sistema traz o cinza do tema junto.
+        let campo = caixa_do_campo(estado, largura, altura);
+        contorno(hdc, campo, pele::LINHA_FORTE);
+
+        let escolher = RECT {
+            left: campo.right + px(8),
+            top: campo.top,
+            right: corpo_direita,
+            bottom: campo.bottom,
+        };
+        contorno(hdc, escolher, pele::LINHA_FORTE);
+        escrever(
+            hdc,
+            escolher,
+            "ESCOLHER…",
+            estado.rotulo,
+            pele::OSSO,
+            DT_SINGLELINE.0
+                | DT_VCENTER.0
+                | DT_NOPREFIX.0
+                | windows::Win32::Graphics::Gdi::DT_CENTER.0,
+        );
+        alvos.push(Alvo {
+            caixa: escolher,
+            qual: Acao::Escolher,
+        });
+
+        escrever(
+            hdc,
+            RECT {
+                left: corpo_x,
+                top: topo + px(160),
+                right: corpo_direita,
+                bottom: topo + px(200),
+            },
+            "Ao continuar você aceita a licença do projeto, que acompanha o executável.",
+            estado.corpo,
+            pele::ROTULO,
+            DT_WORDBREAK.0 | DT_NOPREFIX.0,
+        );
+    }
 
     if estado.passo == Passo::Opcoes {
         let mut y = topo + px(72);
@@ -646,6 +752,35 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
     alvos
 }
 
+/// Põe o campo da pasta no lugar, e o esconde fora do passo 01.
+///
+/// Chamado a cada repintura, e não só na troca de passo: é uma chamada barata e
+/// é o que mantém o campo colado à moldura quando a janela muda de monitor —
+/// dpi novo, medidas novas, e o campo teria ficado onde estava.
+fn arrumar_campo(estado: &Estado, largura: i32, altura: i32) {
+    let caixa = caixa_do_campo(estado, largura, altura);
+    let no_passo = estado.passo == Passo::Destino;
+    // SAFETY: `campo` é o `EDIT` criado em `abrir`, filho desta janela.
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::MoveWindow(
+            estado.campo,
+            caixa.left + 1,
+            caixa.top + 1,
+            caixa.right - caixa.left - 2,
+            caixa.bottom - caixa.top - 2,
+            true,
+        );
+        let _ = ShowWindow(
+            estado.campo,
+            if no_passo {
+                SW_SHOW
+            } else {
+                windows::Win32::UI::WindowsAndMessaging::SW_HIDE
+            },
+        );
+    }
+}
+
 /// Qual alvo está sob um ponto, se algum.
 fn alvo_em(alvos: &[Alvo], x: i32, y: i32) -> Option<Acao> {
     alvos
@@ -708,6 +843,7 @@ extern "system" fn procedimento(janela: HWND, mensagem: u32, w: WPARAM, l: LPARA
 
                 if let Some(estado) = estado_de(janela) {
                     estado.alvos = desenhar(estado, memoria, largura, altura);
+                    arrumar_campo(estado, largura, altura);
                 }
 
                 let _ = BitBlt(hdc, 0, 0, largura, altura, Some(memoria), 0, 0, SRCCOPY);
@@ -788,6 +924,24 @@ extern "system" fn procedimento(janela: HWND, mensagem: u32, w: WPARAM, l: LPARA
                 }
             }
             padrao
+        }
+        WM_CTLCOLOREDIT => {
+            // O `EDIT` é o único controle do Windows nesta janela, e o único que
+            // aceita cor. O pincel devolvido tem de continuar válido **depois**
+            // do retorno — o sistema o usa para pintar —, por isso ele vive no
+            // estado e não é criado aqui.
+            if let Some(estado) = estado_de(janela) {
+                // SAFETY: `w` é o HDC que o sistema mandou, válido nesta chamada.
+                unsafe {
+                    SetTextColor(HDC(w.0 as *mut core::ffi::c_void), COLORREF(pele::OSSO));
+                    windows::Win32::Graphics::Gdi::SetBkColor(
+                        HDC(w.0 as *mut core::ffi::c_void),
+                        COLORREF(pele::NEGRO),
+                    );
+                }
+                return LRESULT(estado.fundo_do_campo.0 as isize);
+            }
+            LRESULT(0)
         }
         WM_KEYDOWN => {
             let tecla = u16::try_from(w.0).unwrap_or(0);
@@ -872,6 +1026,19 @@ fn agir(janela: HWND, estado: &mut Estado, acao: Option<Acao>) {
                 Passo::Opcoes => Passo::Instalando,
                 Passo::Instalando | Passo::Pronto => Passo::Pronto,
             };
+        }
+        Some(Acao::Escolher) => {
+            if let Some(escolhida) = perguntar_a_pasta(janela, estado) {
+                let texto = larga(&escolhida);
+                // SAFETY: `texto` é uma string terminada em zero viva até o fim
+                // da chamada, e `campo` é o `EDIT` criado em `abrir`.
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowTextW(
+                        estado.campo,
+                        PCWSTR(texto.as_ptr()),
+                    );
+                }
+            }
         }
         Some(Acao::Alternar(qual)) => {
             if let Some(marca) = estado.opcoes.get_mut(qual) {
@@ -1008,8 +1175,37 @@ pub(crate) fn abrir() -> Result<(), String> {
             janela, x, y, largura, altura, true,
         );
 
+        // O campo da pasta: filho da janela, criado uma vez e mostrado só no
+        // passo 01. `ES_AUTOHSCROLL` porque um caminho longo tem de rolar dentro
+        // dele em vez de sumir.
+        let classe_do_campo = larga("EDIT");
+        let proposta = larga(&pasta_proposta());
+        let campo = CreateWindowExW(
+            Default::default(),
+            PCWSTR(classe_do_campo.as_ptr()),
+            PCWSTR(proposta.as_ptr()),
+            WS_CHILD
+                | WS_VISIBLE
+                | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(
+                    (windows::Win32::UI::WindowsAndMessaging::ES_AUTOHSCROLL
+                        | windows::Win32::UI::WindowsAndMessaging::ES_LEFT)
+                        as u32,
+                ),
+            0,
+            0,
+            10,
+            10,
+            Some(janela),
+            None,
+            Some(instancia),
+            None,
+        )
+        .map_err(|erro| format!("não criei o campo da pasta: {erro}"))?;
+
         let estado = Box::new(Estado {
             passo: Passo::Destino,
+            campo,
+            fundo_do_campo: CreateSolidBrush(COLORREF(pele::NEGRO)),
             // O atalho nasce marcado e a porta nasce desmarcada, como o desenho
             // os mostra: um atalho é conveniência e uma porta aberta é decisão.
             opcoes: [true, false],
@@ -1022,6 +1218,15 @@ pub(crate) fn abrir() -> Result<(), String> {
             rotulo: fonte("Saira Condensed", 11 * dpi / 96, false),
             corpo: fonte("IBM Plex Mono", 12 * dpi / 96, false),
         });
+        // A fonte do campo é a mesma do corpo. Sem isto ele nasce na fonte de
+        // sistema, e o único texto que quem instala pode editar seria o único
+        // que não é do produto.
+        SendMessageW(
+            campo,
+            windows::Win32::UI::WindowsAndMessaging::WM_SETFONT,
+            Some(WPARAM(estado.corpo.0 as usize)),
+            Some(LPARAM(1)),
+        );
         SetWindowLongPtrW(janela, GWLP_USERDATA, Box::into_raw(estado) as isize);
 
         let _ = ShowWindow(janela, SW_SHOW);
@@ -1093,4 +1298,57 @@ fn marca(hdc: HDC, x: i32, y: i32, estado: &Estado) {
             SRCCOPY,
         );
     }
+}
+
+/// Abre a caixa do Windows para escolher a pasta.
+///
+/// `SHBrowseForFolderW`, e não o `IFileDialog` moderno: o diálogo moderno é COM
+/// com quatro interfaces e um `CoInitialize` que precisa combinar com o resto do
+/// processo, e o que se pede aqui é uma pasta. O antigo faz exatamente isso,
+/// existe desde sempre e não tem o que dar errado.
+fn perguntar_a_pasta(janela: HWND, estado: &Estado) -> Option<String> {
+    use windows::Win32::UI::Shell::{
+        SHBrowseForFolderW, SHGetPathFromIDListW, BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS,
+        BROWSEINFOW,
+    };
+
+    let titulo = larga("Onde instalar o SEELE");
+    let informacao = BROWSEINFOW {
+        hwndOwner: janela,
+        lpszTitle: PCWSTR(titulo.as_ptr()),
+        ulFlags: BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE,
+        ..Default::default()
+    };
+
+    // SAFETY: `titulo` vive até o fim da função, e `caminho` tem o tamanho que a
+    // API exige — `MAX_PATH` unidades.
+    unsafe {
+        let lista = SHBrowseForFolderW(&informacao);
+        if lista.is_null() {
+            // Cancelou, que não é erro nenhum: é a resposta «deixa como está».
+            return None;
+        }
+        let mut caminho = [0_u16; 260];
+        let deu = SHGetPathFromIDListW(lista, &mut caminho);
+        windows::Win32::System::Com::CoTaskMemFree(Some(lista.cast()));
+        if !deu.as_bool() {
+            return None;
+        }
+        let fim = caminho
+            .iter()
+            .position(|u| *u == 0)
+            .unwrap_or(caminho.len());
+        let _ = estado;
+        caminho.get(..fim).map(String::from_utf16_lossy)
+    }
+}
+
+/// A pasta que o instalador propõe.
+///
+/// `%ProgramFiles%`, lido do ambiente e não escrito à mão: em Windows de outros
+/// idiomas a pasta tem outro nome, e num Windows de 32 bits ela mora noutro
+/// lugar. Um caminho fixo instala certo aqui e erra na máquina de outra pessoa.
+fn pasta_proposta() -> String {
+    let base = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_owned());
+    format!(r"{base}\SEELE")
 }
