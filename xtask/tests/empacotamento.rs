@@ -1876,3 +1876,32 @@ fn quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio() {
          aponta para lá — uma versão sairia e ninguém a receberia."
     );
 }
+
+#[test]
+fn o_endereco_antigo_continua_na_lista_enquanto_a_migracao_dura() {
+    // **Um guarda com prazo, e ele diz isso de si mesmo.**
+    //
+    // O endereço de atualização é gravado dentro do app instalado. Quem tem o
+    // SEELE hoje só conhece `DATA-AND-DEV/SEELE`, e a única forma de mudar esse
+    // endereço é uma atualização — que vem por ele. Se aquele repositório
+    // deixar de responder antes de todo mundo ter atualizado, quem ficou para
+    // trás fica preso para sempre: sem caminho de volta que não seja baixar e
+    // instalar à mão.
+    //
+    // Daí a lista com dois, e nesta ordem: o novo primeiro, porque é para lá
+    // que as versões vão; o antigo depois, porque o atualizador tenta em ordem
+    // até um responder, e é ele que carrega quem ainda não migrou.
+    //
+    // **Este teste deve ser apagado**, e por decisão e não por esquecimento:
+    // quando o `DATA-AND-DEV/SEELE` parar de receber versões e for razoável
+    // considerar que quem ia atualizar já atualizou. Enquanto ele existir,
+    // remover o endereço antigo é abandonar gente.
+    let config = std::fs::read_to_string(raiz().join("apps/seele-app/tauri.conf.json"))
+        .expect("tauri.conf.json é legível");
+    assert!(
+        config.contains("github.com/DATA-AND-DEV/SEELE/releases/"),
+        "o endereço antigo saiu da lista do atualizador antes da migração acabar.\n\
+         Quem instalou o SEELE antes da mudança só conhece esse endereço, e a \
+         atualização que mudaria o endereço dele vem por ele."
+    );
+}

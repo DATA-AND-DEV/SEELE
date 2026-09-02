@@ -54,7 +54,8 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/DATA-AND-DEV/SEELE-RELEASES/releases/latest/download/latest.json"
+        "https://github.com/DATA-AND-DEV/SEELE-RELEASES/releases/latest/download/latest.json",
+        "https://github.com/DATA-AND-DEV/SEELE/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZDOTdGMTgyRjBCMTY3OTcKUldTWFo3SHdndkdYL0tSdHhYelQwK2srWVVSc2xoZVRKb2F3b3R2Y0tWWFdIelE3L3hkZDBSbHMK",
       "windows": {
