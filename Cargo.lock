@@ -5036,6 +5036,7 @@ dependencies = [
 name = "seele-instalador"
 version = "0.0.0"
 dependencies = [
+ "embed-resource",
  "windows 0.62.2",
 ]
 

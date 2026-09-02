@@ -30,13 +30,16 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
     GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetKeyState, ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN, VK_SHIFT, VK_SPACE, VK_TAB,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GetSystemMetrics,
-    GetWindowLongPtrW, LoadCursorW, PostQuitMessage, RegisterClassW, SetWindowLongPtrW, ShowWindow,
-    TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCAPTION, HTCLIENT,
-    IDC_ARROW, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_SHOW, WM_DESTROY, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_EX_APPWINDOW, WS_POPUP,
+    GetWindowLongPtrW, LoadCursorW, LoadIconW, PostQuitMessage, RegisterClassW, SetWindowLongPtrW,
+    ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCAPTION,
+    HTCLIENT, IDC_ARROW, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_SHOW, WM_DESTROY, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_EX_APPWINDOW,
+    WS_POPUP,
 };
 
 use crate::pele;
@@ -121,6 +124,12 @@ struct Estado {
     alvos: Vec<Alvo>,
     sob_o_mouse: Option<Acao>,
     apertando: Option<Acao>,
+    /// Onde o teclado está. `None` até alguém apertar Tab pela primeira vez.
+    ///
+    /// **Por ação e não por índice.** A lista de alvos é refeita a cada
+    /// repintura e muda de tamanho com o passo; um índice guardado apontaria
+    /// para outro botão depois de avançar, e o foco pularia sozinho.
+    foco: Option<Acao>,
     dpi: i32,
     cartela: HFONT,
     rotulo: HFONT,
@@ -165,6 +174,16 @@ fn bloco(hdc: HDC, caixa: RECT, cor: u32) {
         FillRect(hdc, &caixa, pincel);
         let _ = DeleteObject(pincel.into());
     }
+}
+
+/// O contorno de uma caixa: quatro riscos de 1px, sem preencher.
+fn contorno(hdc: HDC, caixa: RECT, cor: u32) {
+    let largura = caixa.right - caixa.left;
+    let altura = caixa.bottom - caixa.top;
+    risco(hdc, caixa.left, caixa.top, largura, 1, cor);
+    risco(hdc, caixa.left, caixa.bottom - 1, largura, 1, cor);
+    risco(hdc, caixa.left, caixa.top, 1, altura, cor);
+    risco(hdc, caixa.right - 1, caixa.top, 1, altura, cor);
 }
 
 /// Uma linha de 1px — a única borda que este desenho conhece.
@@ -440,24 +459,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
                 if marcada { pele::LARANJA } else { pele::NEGRO },
             );
             if !marcada {
-                risco(hdc, quadro.left, quadro.top, px(16), 1, pele::LINHA_FORTE);
-                risco(
-                    hdc,
-                    quadro.left,
-                    quadro.bottom - 1,
-                    px(16),
-                    1,
-                    pele::LINHA_FORTE,
-                );
-                risco(hdc, quadro.left, quadro.top, 1, px(16), pele::LINHA_FORTE);
-                risco(
-                    hdc,
-                    quadro.right - 1,
-                    quadro.top,
-                    1,
-                    px(16),
-                    pele::LINHA_FORTE,
-                );
+                contorno(hdc, quadro, pele::LINHA_FORTE);
             } else {
                 escrever(
                     hdc,
@@ -619,6 +621,28 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
         });
     }
 
+    // **O anel de foco sai do mesmo retângulo que recebe o clique.**
+    //
+    // Desenhado por último, sobre tudo, e a partir da lista de alvos — não de
+    // uma cópia das coordenadas. É o que garante que o anel não possa aparecer
+    // num lugar e o clique responder noutro; e um Tab que move um foco invisível
+    // é pior que não ter Tab, porque promete navegação e esconde onde se está.
+    if let Some(onde) = estado.foco {
+        if let Some(alvo) = alvos.iter().find(|alvo| alvo.qual == onde) {
+            let folga = px(2);
+            contorno(
+                hdc,
+                RECT {
+                    left: alvo.caixa.left - folga,
+                    top: alvo.caixa.top - folga,
+                    right: alvo.caixa.right + folga,
+                    bottom: alvo.caixa.bottom + folga,
+                },
+                pele::OSSO,
+            );
+        }
+    }
+
     alvos
 }
 
@@ -765,6 +789,31 @@ extern "system" fn procedimento(janela: HWND, mensagem: u32, w: WPARAM, l: LPARA
             }
             padrao
         }
+        WM_KEYDOWN => {
+            let tecla = u16::try_from(w.0).unwrap_or(0);
+            if tecla == VK_ESCAPE.0 {
+                // SAFETY: fecha a janela; o `WM_DESTROY` encerra o laço.
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(janela);
+                }
+                return LRESULT(0);
+            }
+            if let Some(estado) = estado_de(janela) {
+                if tecla == VK_TAB.0 {
+                    // SAFETY: leitura do estado de uma tecla, sem ponteiro.
+                    let com_shift = unsafe { GetKeyState(i32::from(VK_SHIFT.0)) } < 0;
+                    estado.foco = vizinho(&estado.alvos, estado.foco, com_shift);
+                    repintar(janela);
+                } else if tecla == VK_RETURN.0 || tecla == VK_SPACE.0 {
+                    let alvo = estado.foco;
+                    if alvo.is_some() {
+                        agir(janela, estado, alvo);
+                        repintar(janela);
+                    }
+                }
+            }
+            LRESULT(0)
+        }
         WM_DESTROY => {
             // SAFETY: encerra o laço de mensagens.
             unsafe {
@@ -775,6 +824,30 @@ extern "system" fn procedimento(janela: HWND, mensagem: u32, w: WPARAM, l: LPARA
         // SAFETY: o resto é do sistema.
         _ => unsafe { DefWindowProcW(janela, mensagem, w, l) },
     }
+}
+
+/// O alvo seguinte (ou anterior) na ordem em que a tela é lida.
+///
+/// **Ordenado por posição, e não pela ordem em que foi desenhado.** As duas
+/// coincidem hoje por acaso; no dia em que alguém mover um botão no desenho sem
+/// mover a linha que o pinta, o Tab passaria a pular na ordem do código — que
+/// ninguém vê — em vez da ordem da tela, que é a única que quem usa conhece.
+fn vizinho(alvos: &[Alvo], atual: Option<Acao>, para_tras: bool) -> Option<Acao> {
+    let mut ordenados: Vec<&Alvo> = alvos.iter().collect();
+    ordenados.sort_by_key(|alvo| (alvo.caixa.top, alvo.caixa.left));
+    if ordenados.is_empty() {
+        return None;
+    }
+
+    let posicao = atual.and_then(|acao| ordenados.iter().position(|alvo| alvo.qual == acao));
+    let quantos = ordenados.len();
+    let proxima = match (posicao, para_tras) {
+        (None, false) => 0,
+        (None, true) => quantos - 1,
+        (Some(i), false) => (i + 1) % quantos,
+        (Some(i), true) => (i + quantos - 1) % quantos,
+    };
+    ordenados.get(proxima).map(|alvo| alvo.qual)
 }
 
 /// O que um clique consumado faz.
@@ -878,12 +951,30 @@ pub(crate) fn abrir() -> Result<(), String> {
         let cursor = LoadCursorW(None, IDC_ARROW)
             .map_err(|erro| format!("não carreguei o cursor: {erro}"))?;
 
+        // O mesmo ícone que o Explorer mostra, agora na barra de tarefas e no
+        // Alt-Tab. São dois caminhos diferentes para a mesma imagem: o do
+        // Explorer é o recurso embutido pelo `build.rs`; este é o `HICON` que a
+        // classe da janela carrega, e sem ele a janela aparece com o ícone
+        // genérico mesmo com o `.exe` já ilustrado.
+        //
+        // `PCWSTR(1 as *const u16)` é o `MAKEINTRESOURCE(1)` do C: o `1` do
+        // `icone.rc`, passado como número e não como nome.
+        // `without_provenance(1)` é o `MAKEINTRESOURCE(1)` do C dito em Rust: um
+        // ponteiro cujo **endereço** é o número do recurso, e que ninguém
+        // desreferencia — o Windows testa se o valor cabe em 16 bits e o trata
+        // como id. O clippy o via como ponteiro pendurado, e a sugestão dele
+        // (`ptr::dangling`) daria um endereço qualquer, que é o único jeito de
+        // isto ficar errado de verdade.
+        let numero_do_icone: *const u16 = std::ptr::without_provenance(1);
+        let icone = LoadIconW(Some(instancia), PCWSTR(numero_do_icone)).unwrap_or_default();
+
         let registro = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(procedimento),
             hInstance: instancia,
             lpszClassName: PCWSTR(classe.as_ptr()),
             hCursor: cursor,
+            hIcon: icone,
             ..Default::default()
         };
         if RegisterClassW(&registro) == 0 {
@@ -925,6 +1016,7 @@ pub(crate) fn abrir() -> Result<(), String> {
             alvos: Vec::new(),
             sob_o_mouse: None,
             apertando: None,
+            foco: None,
             dpi,
             cartela: fonte("Saira Condensed", 22 * dpi / 96, true),
             rotulo: fonte("Saira Condensed", 11 * dpi / 96, false),

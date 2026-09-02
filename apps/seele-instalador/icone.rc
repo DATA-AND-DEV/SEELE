@@ -1,0 +1,11 @@
+// O ícone do executável do instalador.
+//
+// `1` é o identificador numérico, e não um nome: o Windows mostra no Explorer o
+// ícone de **menor id** do executável, e um id numérico baixo é a forma de
+// garantir que seja este. É o mesmo id que `janela.rs` pede ao `LoadIconW` para
+// pôr na barra de tarefas e no Alt-Tab.
+//
+// O arquivo é o do produto, e não uma cópia: o instalador e o app são a mesma
+// marca, e duas cópias do mesmo `.ico` divergem na primeira vez que alguém
+// redesenhar uma delas.
+1 ICON "../seele-app/icons/icon.ico"

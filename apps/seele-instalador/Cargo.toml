@@ -14,6 +14,17 @@ description = "O instalador do SEELE para Windows. Ver ADR 0043."
 # todo mundo por um caminho que ninguém liga aos dois.
 [dependencies]
 
+# O ícone do `.exe` — ver `build.rs`. Já está na árvore pelo `tauri-build`, então
+# não acrescenta nada ao grafo.
+#
+# **Sem `cfg(windows)`**, e isso não é descuido: um `build.rs` é compilado para a
+# máquina que compila, não para o alvo. `[target.'cfg(windows)'.build-dependencies]`
+# significa «quando quem compila é Windows» — e quem compila o instalador do
+# Windows, aqui, é um Mac. Quem decide se o recurso entra é o próprio `build.rs`,
+# olhando `CARGO_CFG_TARGET_OS`.
+[build-dependencies]
+embed-resource = "3"
+
 [target.'cfg(windows)'.dependencies]
 # A mesma versão que o `seele-video` já traz, para o `Cargo.lock` não carregar
 # duas cópias do mundo do Windows.
