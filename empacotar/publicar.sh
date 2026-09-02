@@ -715,6 +715,24 @@ conferir_ferramentas() {
             morrer "este script precisa do «${ferramenta}» e ele não está no PATH."
         fi
     done
+
+    # **Estar no PATH não é funcionar, e o Windows tem um caso célebre disso.**
+    #
+    # O `python3` que aparece no PATH de um Windows sem Python é o atalho da
+    # Microsoft Store: um executável que existe, responde ao `command -v`, e ao
+    # ser chamado imprime uma propaganda da loja e sai. O `command -v` acima
+    # aprova, e a primeira coisa que este script pede ao Python falha dez linhas
+    # depois, com uma mensagem sobre a loja no meio de uma publicação.
+    #
+    # Executar custa milissegundos e responde a pergunta certa.
+    if ! python3 -c 'print(1)' >/dev/null 2>&1; then
+        morrer "o «python3» do PATH não é um Python que roda." \
+            "Num Windows sem Python, o que está no PATH é o atalho da Microsoft" \
+            "Store: ele existe, mas só sabe abrir a loja." \
+            "" \
+            "O que ele respondeu:" \
+            "$(python3 -c 'print(1)' 2>&1 | head -c 300)"
+    fi
     if [ -z "$(somador)" ]; then
         morrer "este script precisa somar os arquivos e não achou com que." \
             "Serve «shasum» (macOS) ou «sha256sum» (coreutils); nenhum dos dois" \

@@ -496,8 +496,68 @@ fn marcar_executavel(caminho: &PathBuf, executavel: bool) {
 #[cfg(not(unix))]
 fn marcar_executavel(_caminho: &PathBuf, _executavel: bool) {}
 
+/// O que falta a esta máquina para rodar o `publicar.sh`, se faltar algo.
+///
+/// # Por que isto existe
+///
+/// O script é a ferramenta de quem publica, e quem publica é um Mac. Estes
+/// testes o executam de verdade, e para isso precisam do que ele precisa. Na
+/// máquina Windows onde a bateria também roda não há Python: o `python3` que
+/// aparece no PATH é o **atalho da Microsoft Store** — um executável que existe,
+/// responde ao `command -v`, e ao ser chamado imprime uma propaganda da loja e
+/// sai. Dez testes reprovavam por isso, cada um dizendo que a conferência que
+/// eles guardam tinha falhado.
+///
+/// **Existir e funcionar não são a mesma coisa**, e é a terceira vez nesta
+/// sessão que a diferença custa uma corrida inteira. Por isso a verificação é
+/// executar, e não procurar.
+///
+/// O que se perde ao pular aqui é a execução do script naquela máquina; o que
+/// **não** se perde são os guardas de texto deste arquivo, que leem o script
+/// como texto e continuam rodando lá — e são eles que pegam fim de linha, que é
+/// o defeito que só o Windows mostra.
+fn falta_ao_banco() -> Option<String> {
+    let interpretador = interpretador();
+    if Command::new(&interpretador)
+        .arg("-c")
+        .arg(":")
+        .output()
+        .is_err()
+    {
+        return Some(format!(
+            "não há um «sh» executável aqui ({}), e estes testes rodam o publicar.sh",
+            interpretador.display()
+        ));
+    }
+    match Command::new("python3").arg("-c").arg("print(1)").output() {
+        Err(erro) => Some(format!("o python3 não executa aqui: {erro}")),
+        Ok(saida) if !saida.status.success() => Some(format!(
+            "o python3 do PATH não é um Python: saiu {} dizendo «{}»",
+            saida.status,
+            String::from_utf8_lossy(&saida.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&saida.stderr).lines())
+                .find(|linha| !linha.trim().is_empty())
+                .unwrap_or("nada")
+                .trim()
+        )),
+        Ok(_) => None,
+    }
+}
+
 impl Bancada {
-    fn nova() -> Bancada {
+    /// `None` quando esta máquina não tem com que rodar o script — ver
+    /// [`falta_ao_banco`]. Quem chama volta calado do teste **depois** de a
+    /// razão ter sido dita na saída de erro.
+    fn nova() -> Option<Bancada> {
+        if let Some(falta) = falta_ao_banco() {
+            eprintln!("PARCIAL: {falta}");
+            return None;
+        }
+        Some(Self::montar())
+    }
+
+    fn montar() -> Bancada {
         let base = std::env::temp_dir().join(format!(
             "seele-publicar-{}-{}",
             std::process::id(),
@@ -791,7 +851,9 @@ impl Drop for Bancada {
 
 #[test]
 fn com_tudo_no_lugar_as_conferencias_passam_sem_compilar_nada() {
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--conferir"], &[]);
 
     assert_eq!(
@@ -821,7 +883,9 @@ fn a_versao_invalida_morre_antes_de_qualquer_pergunta_cara() {
     // A conferência mais barata é a primeira. `0.1.2-rc1` compila duas horas e
     // é recusado pelo empacotador no último passo — este script o recusa no
     // primeiro.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["0.1.2-rc1"], &[]);
 
     assert_eq!(
@@ -853,7 +917,9 @@ fn a_arvore_suja_impede_o_empacotamento() {
     // dono na primeira execução por causa de um documento que vive editado — com
     // o script sugerindo `git stash` num arquivo dele. O escopo certo é o que a
     // própria mensagem sempre disse: o que estes scripts reescrevem.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     escrever(
         &bancada.repo.join("um-rascunho.txt"),
         "meu trabalho\n",
@@ -897,7 +963,9 @@ fn a_arvore_suja_impede_o_empacotamento() {
 
 #[test]
 fn o_docker_fora_do_ar_reprova_antes_da_primeira_compilacao() {
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_DOCKER", "caido")]);
 
     assert_eq!(
@@ -917,7 +985,9 @@ fn o_docker_fora_do_ar_reprova_antes_da_primeira_compilacao() {
 fn o_windows_inalcancavel_reprova_antes_do_linux_emulado() {
     // O teste que dá razão a este script existir. Sem ele, a descoberta de que
     // o Windows não atende chega depois de noventa minutos de Linux emulado.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_SSH", "recusa")]);
 
     assert_eq!(
@@ -948,7 +1018,9 @@ fn o_windows_noutro_commit_e_levado_ao_commit_certo() {
     // outra máquina. Era o passo manual mais caro dos quatro, porque acontecia
     // depois de o SSH já estar de pé — quem publicava descobria que precisava
     // ir até lá tendo tudo pronto para não ir.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(
         &["1.2.3", "--sem-bateria"],
         &[
@@ -975,7 +1047,9 @@ fn o_windows_que_nao_chega_ao_commit_nao_compila_nada() {
     // `checkout` recusado, disco cheio —, o script tem de parar. Três pacotes de
     // códigos diferentes são três releases com o mesmo número, e isso não
     // deixou de valer só porque agora a reconciliação é automática.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(
         &["1.2.3", "--sem-bateria"],
         &[("FALSO_SSH_HEAD", "0000000000000000000000000000000000000000")],
@@ -997,7 +1071,9 @@ fn a_chave_pela_metade_reprova_e_sem_assinatura_libera() {
     // Sem a chave não há `latest.json`, e um release sem manifesto deixa todo
     // mundo sem atualização até o seguinte — sem que quem o montou saiba. Ou se
     // tem a chave, ou se diz por escrito que não se quer o botão de atualizar.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
 
     let saida = bancada.rodar(
         &["1.2.3", "--sem-bateria"],
@@ -1035,7 +1111,9 @@ fn a_chave_pela_metade_reprova_e_sem_assinatura_libera() {
 
 #[test]
 fn o_token_recusado_reprova_antes_de_compilar() {
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_TOKEN", "vencido")]);
 
     assert_eq!(
@@ -1058,7 +1136,9 @@ fn o_token_recusado_reprova_antes_de_compilar() {
 fn um_token_sem_escrita_reprova() {
     // Ler o repositório e criar release são permissões diferentes, e a segunda é
     // a que só se descobre na hora de publicar.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_PUSH", "false")]);
 
     assert_eq!(
@@ -1077,7 +1157,9 @@ fn um_token_sem_escrita_reprova() {
 fn um_release_ja_publicado_nao_e_substituido() {
     // A mesma regra do release.yml: rascunho se substitui sem cerimônia,
     // publicado é decisão que uma pessoa tomou.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(
         &["1.2.3", "--sem-bateria"],
         &[(
@@ -1117,7 +1199,9 @@ fn restos_de_outra_versao_sao_apagados_e_nomeados() {
     //
     // O que **não** foi aceito é apagar calado. Cada arquivo removido é
     // nomeado na saída, para quem estiver olhando ver o que sumiu.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     escrever(
         &bancada.repo.join("entrega/SEELE_0.9.9_aarch64.dmg"),
         "de outra vez\n",
@@ -1146,7 +1230,9 @@ fn a_entrega_da_versao_corrente_sobrevive_a_limpeza() {
     // pacotes dos que deram certo têm de continuar ali — uma limpeza que os
     // levasse junto faria toda retomada recompilar as duas horas que já tinham
     // dado certo.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     escrever(
         &bancada.repo.join("entrega/SEELE_1.2.3_aarch64.dmg"),
         "desta vez\n",
@@ -1182,7 +1268,9 @@ fn o_arquivo_que_o_finder_escreve_nao_e_entrega_de_ninguem() {
     // O `.DS_Store` volta sozinho toda vez que alguém abre a pasta. Nomeá-lo
     // como «apagado» a cada publicação treinaria quem lê a ignorar a lista, que
     // é o que faz a lista deixar de servir para o dia em que ela importar.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     escrever(&bancada.repo.join("entrega/.DS_Store"), "finder\n", false);
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
@@ -1295,7 +1383,9 @@ fn o_commit_vai_para_o_remoto_antes_de_o_windows_buscar() {
 fn pular_um_sistema_dispensa_a_ferramenta_dele() {
     // Retomar sem o Docker no ar é o caso de quem já tem o `.deb` da rodada
     // anterior e só precisa refazer o Mac.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(
         &["1.2.3", "--conferir", "--pular", "linux,windows"],
         &[("FALSO_DOCKER", "caido"), ("FALSO_SSH", "recusa")],
@@ -1324,7 +1414,9 @@ fn os_tres_correm_do_mais_barato_para_o_mais_caro() {
     // grandeza a mais que os outros dois, e o que mais quebra é o código, que
     // quebra igual nos três. O build nativo do Mac primeiro é o que transforma
     // noventa minutos perdidos em cinco.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert_eq!(
@@ -1357,7 +1449,9 @@ fn o_release_sai_rascunho_e_confessa_a_falta_de_procedencia() {
     // com `gh attestation verify` — que aqui **não acha atestado**, porque não
     // houve workflow. Sem esta confissão no corpo, o comando falha e quem o rodou
     // conclui adulteração onde só houve ausência de CI.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert_eq!(
@@ -1386,7 +1480,9 @@ fn o_release_sai_rascunho_e_confessa_a_falta_de_procedencia() {
 fn um_sistema_que_falha_nao_leva_os_outros_junto() {
     // Duas horas de compilação não podem ser jogadas fora porque a primeira
     // delas falhou. O que falha vira uma linha no fim; o que dá certo continua.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_MACOS", "1")]);
 
     assert_eq!(
@@ -1413,7 +1509,9 @@ fn um_sistema_que_falha_nao_leva_os_outros_junto() {
 
 #[test]
 fn com_parcial_o_release_sai_dizendo_quem_faltou() {
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(
         &["1.2.3", "--parcial", "--sem-bateria"],
         &[("FALSO_MACOS", "1")],
@@ -1443,7 +1541,9 @@ fn a_versao_gravada_nao_fica_no_repositorio() {
     // ou o número de um release fica gravado no repositório e entra no próximo
     // commit distraído. Já aconteceu: é a razão de existir o teste
     // `o_titulo_da_janela_atravessou_inteiro`.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let antes = std::fs::read_to_string(bancada.repo.join("apps/seele-app/tauri.conf.json"))
         .expect("legível");
 
@@ -1468,7 +1568,9 @@ fn a_versao_gravada_nao_fica_no_repositorio() {
 
 #[test]
 fn um_sistema_que_nao_existe_e_recusado() {
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--conferir", "--pular", "bsd"], &[]);
 
     assert_eq!(saida.estado, 1, "«bsd» não é um dos três:\n{}", saida.texto);
@@ -1831,7 +1933,9 @@ fn o_trabalho_solto_no_windows_e_guardado_e_nao_apagado() {
     //
     // Guardado, e nunca descartado: um `reset --hard` resolveria o mesmo e
     // apagaria trabalho de quem estivesse mexendo naquela máquina.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(
         &["1.2.3", "--sem-bateria"],
         &[
@@ -1940,7 +2044,9 @@ fn a_versao_sai_nas_duas_casas_numa_execucao_so() {
     // resultado e custaria outra hora e meia de Linux — e, pior, os pacotes da
     // segunda volta seriam outros arquivos, com outras somas, para o mesmo
     // número de versão.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert_eq!(
@@ -1964,7 +2070,9 @@ fn cada_casa_recebe_o_manifesto_que_aponta_para_ela_mesma() {
     // antiga um manifesto que aponta para a nova manda o app buscar o pacote num
     // lugar onde ele ainda não pode chegar — e o app não diz o que houve: um
     // download que falha e uma versão que não existe são a mesma tela.
-    let bancada = Bancada::nova();
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
     let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     for casa in ["DATA-AND-DEV/SEELE-RELEASES", "DATA-AND-DEV/SEELE"] {
