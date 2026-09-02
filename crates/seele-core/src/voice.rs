@@ -1013,6 +1013,7 @@ async fn pipeline(
     // estado entre quadros — é isso que faz a subida ser lenta o bastante para
     // ninguém ouvir.
     let mut ganho = seele_audio::ganho::Ganho::novo();
+    let (mut ganho_avisado, mut quadros_com_ganho) = (false, 0_u32);
     let mut datagram = vec![0_u8; seele_proto::MAX_DATAGRAM_LEN];
     let mut mixed = vec![0.0_f32; FRAME_SAMPLES];
     let mut for_device = Vec::new();
@@ -1114,6 +1115,22 @@ async fn pipeline(
             // ventilador. Ver `seele_audio::ganho`.
             let mut frame = frame;
             ganho.aplicar(&mut frame);
+            // **Uma linha, quando o ganho assenta**, e ela existe porque a
+            // primeira resposta de campo a este recurso foi «não notei muita
+            // diferença» — que pode significar «o microfone já estava bom» ou
+            // «não funcionou», e as duas pedem trabalhos opostos.
+            //
+            // Meio segundo de fala é o bastante para a subida sair do zero, e
+            // uma vez por sessão porque a condição, quando é verdade, é verdade
+            // cinquenta vezes por segundo.
+            quadros_com_ganho += 1;
+            if !ganho_avisado && quadros_com_ganho >= 25 {
+                ganho_avisado = true;
+                tracing::info!(
+                    vezes = ganho.atual(),
+                    "o ganho automático do microfone assentou"
+                );
+            }
 
             // Encoded from `f32` directly: the pipeline is `f32` end to end,
             // and the conversion to `i16` that used to be here was a rounding
