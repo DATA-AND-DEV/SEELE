@@ -1007,6 +1007,7 @@ async fn pipeline(
     // buraco a ocultar nem ordem a corrigir, e dar-lhe uma fila de compasso
     // seria acrescentar atraso para resolver um problema que ele não tem.
     let mut som_da_tela = VoiceDecoder::new().ok();
+    let mut som_da_tela_avisado = false;
 
     let (mut captured, mut at_48k, mut pending) = (Vec::new(), Vec::new(), Vec::<f32>::new());
     // O ganho automático do microfone. Um por caminho de voz, e ele guarda
@@ -1253,6 +1254,24 @@ async fn pipeline(
                         .pop_front();
                     if let Some(pacote) = pacote {
                         if let Ok(amostras) = decodificador.decode(&pacote) {
+                            // **A linha espelho da do outro lado.**
+                            //
+                            // Quem transmite já diz «o som da tela começou a
+                            // sair para o fio», e essa linha provou que o envio
+                            // funciona. Quem recebe não dizia nada, e sem ela
+                            // «não sai som» é indistinguível entre três coisas:
+                            // não saiu, não chegou, ou chegou e não tocou.
+                            //
+                            // Uma vez por sessão, como as irmãs: a condição,
+                            // quando é verdade, é verdade cinquenta vezes por
+                            // segundo.
+                            if !som_da_tela_avisado {
+                                som_da_tela_avisado = true;
+                                tracing::info!(
+                                    amostras = amostras.len(),
+                                    "o som da tela alheia começou a ser tocado aqui"
+                                );
+                            }
                             decoded.push((SSRC_DA_TELA, amostras));
                         }
                     }
