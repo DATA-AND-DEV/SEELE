@@ -1670,19 +1670,6 @@ fi
 } > "$NOTAS"
 
 PEDIDO="$TEMPORARIO/pedido.json"
-if ! python3 -c 'import json, sys
-tag, commit, notas, destino = sys.argv[1:5]
-with open(destino, "w", encoding="utf-8") as saida:
-    json.dump({
-        "tag_name": tag,
-        "name": "SEELE " + tag,
-        "target_commitish": commit,
-        "draft": True,
-        "prerelease": False,
-        "body": open(notas, encoding="utf-8").read(),
-    }, saida)' "v$VERSAO" "$COMMIT" "$NOTAS" "$PEDIDO"; then
-    morrer "não consegui montar o pedido de criação do release."
-fi
 
 # Uma volta por casa, e os mesmos pacotes em todas.
 #
@@ -1721,6 +1708,37 @@ for pub_repo in $REPOS; do
         if [ "$CODIGO_HTTP" != "204" ]; then
             aviso "não consegui apagar o rascunho anterior (HTTP $CODIGO_HTTP); sigo."
         fi
+    fi
+
+    # **O `target_commitish` só vai para a casa que conhece o commit.**
+    #
+    # Ele é onde a tag vai nascer quando alguém publicar o rascunho. O commit
+    # deste release mora no repositório do **código**; o das versões nunca o viu,
+    # e o GitHub recusa o release inteiro com um 422 em cima desse campo — foi o
+    # que aconteceu na primeira publicação depois da separação das casas.
+    #
+    # Sem o campo, a tag nasce no ramo padrão daquele repositório. Não se perde
+    # procedência com isso: o commit está escrito por extenso no corpo do
+    # release, que é onde uma pessoa o procura, e é o mesmo texto nas duas casas.
+    if [ "$pub_repo" = "$REPO_CODIGO" ]; then
+        pub_alvo="$COMMIT"
+    else
+        pub_alvo=""
+    fi
+    if ! python3 -c 'import json, sys
+tag, commit, notas, destino = sys.argv[1:5]
+corpo = {
+    "tag_name": tag,
+    "name": "SEELE " + tag,
+    "draft": True,
+    "prerelease": False,
+    "body": open(notas, encoding="utf-8").read(),
+}
+if commit:
+    corpo["target_commitish"] = commit
+with open(destino, "w", encoding="utf-8") as saida:
+    json.dump(corpo, saida)' "v$VERSAO" "$pub_alvo" "$NOTAS" "$PEDIDO"; then
+        morrer "não consegui montar o pedido de criação do release."
     fi
 
     passo "criando o rascunho de v$VERSAO"
