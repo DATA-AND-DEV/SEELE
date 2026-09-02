@@ -774,9 +774,12 @@ mod tests {
         // that was unplugged — all three arrive here as a string that has to
         // come back as a variant somebody can write a sentence for, rather than
         // as a client that will not start.
-        let refused = open_capture("isto nao e um dispositivo");
+        // `.err()` because the success side is a live `AudioIo`, which has no
+        // `Debug` and nothing worth printing: `None` here already says the only
+        // thing that matters about it — it opened, when it had to refuse.
+        let refused = open_capture("isto nao e um dispositivo").err();
         assert!(
-            matches!(refused, Err(DeviceError::CaptureDeviceGone { .. })),
+            matches!(refused, Some(DeviceError::CaptureDeviceGone { .. })),
             "an unparseable id came back as something other than a missing device: \
              {refused:?}"
         );
@@ -788,9 +791,9 @@ mod tests {
         // matters more on this side: the fallback that follows a refusal is
         // silent by construction — nobody hears the speakers they did not pick
         // — so the refusal itself is the only thing there is to act on.
-        let refused = open_playback("isto tambem nao e um dispositivo");
+        let refused = open_playback("isto tambem nao e um dispositivo").err();
         assert!(
-            matches!(refused, Err(DeviceError::PlaybackDeviceGone { .. })),
+            matches!(refused, Some(DeviceError::PlaybackDeviceGone { .. })),
             "an unparseable playback id came back as something other than a missing \
              device: {refused:?}"
         );
