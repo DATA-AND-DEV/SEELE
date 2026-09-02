@@ -346,6 +346,61 @@ mod testes {
         bilhete(&onde.to_string())
     }
 
+    /// Um destino que **esta** máquina recusa, descoberto e não suposto.
+    ///
+    /// # Por que descoberto
+    ///
+    /// Porque três hipóteses sobre «o que todo sistema recusa» já foram escritas
+    /// aqui, e as três estavam erradas. Sem broadcast o envio devolveria permissão
+    /// negada em todo sistema — no Windows passa. A porta zero seria recusada em
+    /// todo sistema — no Windows passa. Um socket desligado recusaria em todo
+    /// sistema — no macOS passa. Todas afirmavam «todo sistema» tendo consultado
+    /// um só.
+    ///
+    /// Medido, com o socket de pilha dupla que o produto abre e o mapeamento que
+    /// ele aplica:
+    ///
+    /// | destino              | macOS  | Windows |
+    /// |----------------------|--------|---------|
+    /// | `255.255.255.255:0`  | recusa | passa   |
+    /// | `127.0.0.1:0`        | recusa | passa   |
+    /// | `[::1]:0`            | recusa | passa   |
+    /// | socket desligado     | passa  | recusa  |
+    /// | `0.0.0.0:0`          | recusa | recusa  |
+    /// | `[::]:0`             | recusa | recusa  |
+    ///
+    /// O Linux não foi medido — o Docker desta máquina estava parado — e é
+    /// exatamente esse buraco que as três hipóteses anteriores preencheram com
+    /// palpite. Então em vez de escolher, o teste **experimenta**: manda um
+    /// datagrama de sonda para cada candidato num socket igual ao do produto, e
+    /// devolve o primeiro que a máquina recusar de fato. Onde nenhum for
+    /// recusado, quem falha é o teste, dizendo isso — e não `avisar`, acusado de
+    /// engolir um erro que nunca houve.
+    ///
+    /// Os dois candidatos são endereços **não especificados**: nenhum pacote sai
+    /// para a rede se a máquina os aceitar, ao contrário do broadcast.
+    ///
+    /// Devolve o endereço **cru**: quem mapeia é `avisar`.
+    fn destino_recusado() -> Option<SocketAddr> {
+        let socket = abrir_socket_local()?;
+        let local_e_seis = socket.local_addr().ok()?.is_ipv6();
+        for cru in ["0.0.0.0:0", "[::]:0"] {
+            let Ok(destino) = cru.parse::<SocketAddr>() else {
+                continue;
+            };
+            let alvo = match (local_e_seis, destino.ip()) {
+                (true, IpAddr::V4(quatro)) => {
+                    SocketAddr::new(quatro.to_ipv6_mapped().into(), destino.port())
+                }
+                _ => destino,
+            };
+            if socket.send_to(&[0_u8; 96], alvo).is_err() {
+                return Some(destino);
+            }
+        }
+        None
+    }
+
     /// Uma impressão digital de teste, com pelo menos 16 caracteres — é dela
     /// que `preparar` tira a marca do aviso.
     const IMPRESSAO_DE_TESTE: &str =
@@ -557,39 +612,41 @@ mod testes {
         // `tracing::debug!`, não só o `WouldBlock` que a rodada 1 tinha em
         // mira — e quem chama nunca saberia que o aviso não saiu.
         //
-        // **A porta zero é recusada pelo kernel, na hora, em todo sistema.**
-        // Não há porta 0 para onde mandar: ela é o «escolha uma» de quem
-        // liga um socket, e como destino não existe. O erro sai antes de
-        // qualquer pacote, sem depender de rede de verdade estar presente —
-        // que é o que faz este teste rodar em máquina desconectada.
+        // # Duas tentativas de provocar a recusa por endereço, e as duas erradas
         //
-        // **Era um endereço de broadcast, e o Windows reprovava.** O raciocínio
-        // antigo era que mandar para `255.255.255.255` sem `SO_BROADCAST`
-        // devolve permissão negada, e o comentário afirmava que o WinSock fazia
-        // o equivalente. Não faz: medido na máquina, o envio passa e o teste
-        // reprovava por causa do sistema, não do código. O que ele existe para
-        // provar — que `avisar` **devolve** o erro em vez de engoli-lo — não
-        // tem nada a ver com broadcast; broadcast era só um jeito conveniente
-        // de conseguir uma recusa, e era um jeito que só funcionava em dois dos
-        // três sistemas.
+        // Primeiro foi `255.255.255.255:9`, com o raciocínio de que sem
+        // `SO_BROADCAST` o envio volta com permissão negada em todo sistema.
+        // Depois foi `255.255.255.255:0`, com o raciocínio de que a porta zero é
+        // recusada em todo sistema. Ambos afirmavam «em todo sistema» sem que
+        // nenhum sistema além deste tivesse sido consultado, e o Windows
+        // desmentiu os dois: lá, no socket de pilha dupla que o produto abre, o
+        // envio **passa**.
         //
-        // A asserção de baixo é `is_err` e não um erro específico, de propósito:
-        // o que se afirma é que o erro chega a quem chama, não qual erro é.
-        let bilhete = bilhete("255.255.255.255:0");
+        // O que o teste quer não tem nada a ver com endereço: ele quer um envio
+        // que falhe, para ver se o erro chega a quem chama. Então o destino é
+        // **descoberto** — ver `destino_recusado`, que também guarda o que já foi
+        // medido e o que ainda não foi.
+        let Some(ponto) = destino_recusado() else {
+            panic!(
+                "nenhum destino candidato é recusado nesta máquina, e sem uma \
+                 recusa este teste não tem um envio falho para observar. Não é \
+                 `avisar` que está errado: é o mecanismo daqui que não vale neste \
+                 sistema — acrescente um candidato em `destino_recusado`"
+            );
+        };
+        let bilhete = bilhete(&ponto.to_string());
         let batida = Batida::preparar(&bilhete, Some(IMPRESSAO_DE_TESTE)).await;
         let Some(batida) = batida else {
             panic!(
-                "preparar tem de dar certo mesmo quando o ponto de encontro é \
-                 um endereço de broadcast — é `avisar`, mandando para lá, que \
-                 não vai conseguir; `aviso` (para onde o anfitrião deve furar) \
-                 é um endereço comum, e não tem nada a ver com isto"
+                "preparar tem de dar certo mesmo com um ponto de encontro que só \
+                 recusa no envio — é `avisar` que não vai conseguir"
             );
         };
 
         let erro = batida.avisar().await;
         assert!(
             erro.is_err(),
-            "avisar engoliu o erro de um envio que o kernel recusou"
+            "avisar engoliu o erro de um envio que o socket recusou: {erro:?}"
         );
     }
 
@@ -604,12 +661,15 @@ mod testes {
         // ele faz com ele — registrar e ir ao candidato seguinte, sem derrubar
         // a conexão — está em `um_aviso_recusado_pelo_kernel_nao_derruba_o_laco`,
         // em `crates/seele-conformance/tests/furo.rs`.
+        let Some(ponto) = destino_recusado() else {
+            panic!("nenhum destino candidato é recusado nesta máquina");
+        };
         assert!(
-            Batida::preparar(&bilhete("255.255.255.255:9"), Some(FP))
+            Batida::preparar(&bilhete(&ponto.to_string()), Some(FP))
                 .await
                 .is_some(),
-            "preparar tem de dar certo para este bilhete — é `avisar`, mandando \
-             para o broadcast, que não pode dar"
+            "preparar tem de dar certo para este bilhete — quem falha lá em cima \
+             é o envio"
         );
     }
 }
