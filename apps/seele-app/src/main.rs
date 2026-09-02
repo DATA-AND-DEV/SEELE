@@ -3051,10 +3051,51 @@ fn main() {
             decidir_pedido,
             revogar_admissao,
         ])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
 
-    if let Err(error) = started {
-        tracing::error!(%error, "the desktop shell could not start");
-        std::process::exit(1);
+    match started {
+        Ok(app) => app.run(|handle, evento| {
+            // **Despedir-se antes de morrer.**
+            //
+            // Fechar a janela matava o processo em silêncio. Um socket UDP que
+            // some não avisa ninguém — QUIC precisa de um `CONNECTION_CLOSE`
+            // dito por extenso —, então quem hospedava só descobria a ausência
+            // no tempo limite de ociosidade, e até lá a pessoa continuava
+            // sentada na sala para todo mundo. Relato de campo: «se eu fecho o
+            // app no Mac, o usuário não sai da sala para o Windows».
+            //
+            // `ExitRequested` e não `Exit`: o primeiro chega quando a última
+            // janela fecha e ainda há tempo de o quadro sair pelo fio; o segundo
+            // chega com o processo já indo embora.
+            if matches!(evento, tauri::RunEvent::ExitRequested { .. }) {
+                despedir_se(handle);
+            }
+        }),
+        Err(error) => {
+            tracing::error!(%error, "the desktop shell could not start");
+            std::process::exit(1);
+        }
     }
+}
+
+/// Avisa o servidor de que esta máquina está saindo, antes de o processo morrer.
+///
+/// O `disconnect` encerra o laço do enlace, e é o fim dele que faz o QUIC mandar
+/// o `CONNECTION_CLOSE`. A espera curta depois existe porque isso é um datagrama:
+/// sem ela o processo pode sair antes de o quadro chegar ao cartão de rede, e o
+/// aviso que este código existe para dar não sai.
+///
+/// Cento e cinquenta milissegundos é muito para uma LAN e pouco para alguém
+/// notar ao fechar uma janela. Se não der tempo — a máquina desligando, a rede
+/// já morta —, o servidor cai no tempo limite de ociosidade como caía antes, que
+/// é o comportamento que este caminho melhora e não substitui.
+fn despedir_se(handle: &tauri::AppHandle) {
+    use tauri::Manager as _;
+
+    let sessao = handle.state::<Session>();
+    let Ok(connection) = sessao.connection() else {
+        return;
+    };
+    connection.disconnect();
+    std::thread::sleep(std::time::Duration::from_millis(150));
 }

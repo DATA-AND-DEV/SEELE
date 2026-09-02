@@ -389,13 +389,31 @@ function limitesEscolhidos() {
     // O que ela não sabe fazer é subir acima do que se pediu.
     altura_maxima: 1080,
     quadros_maximos: 60,
+    // **Nitidez, e a escolha do contrário custou a qualidade da imagem.**
+    //
+    // Quando o controle de nitidez-ou-movimento saiu da caixa, a constante que
+    // ficou no lugar dele foi `movimento` — e ninguém decidiu isso, foi o valor
+    // que estava selecionado. O efeito é grande e não é óbvio: os limiares de
+    // `movimento` são o **dobro** dos de nitidez, porque a mesma resolução em
+    // movimento custa cerca do dobro por quadro.
+    //
+    // Medido em campo, com o log do teto: uma casa entregando 1,58 Mbps dá
+    // **1080p** por nitidez e **540p** por movimento. A escada subiu certinho —
+    // 1,20 → 1,34 → 1,43 → 1,58 Mbps em 25 segundos — e a resolução não saiu de
+    // 540p porque faltavam 220 kbps para o limiar dobrado de 720p. O relato foi
+    // «muito pixelada», e era esta linha.
+    //
+    // Nitidez é o padrão certo para uma tela: quem compartilha mostra texto,
+    // código, navegador — e texto a 540p não se lê. Quem transmite jogo perde
+    // fluidez, e é a troca menos ruim: uma imagem legível a menos quadros ainda
+    // serve, uma imagem ilegível não serve para nada.
+    //
     // **Minúsculo**, que é como o `Prioridade` do Rust atravessa: ele carrega
-    // `#[serde(rename_all = "lowercase")]`, e o `<select>` que existia aqui
-    // mandava `value="movimento"`. Ao trocar o controle por uma constante eu
-    // escrevi o nome da variante em vez do nome do fio, e a ponte recusou com
-    // «unknown variant `Movimento`, expected `nitidez` or `movimento`» —
-    // compartilhar a tela parou de funcionar de uma vez.
-    prioridade: "movimento",
+    // `#[serde(rename_all = "lowercase")]`. Ao trocar o controle por uma
+    // constante eu escrevi o nome da variante — `Movimento` — em vez do nome do
+    // fio, e a ponte recusou com «unknown variant», parando o compartilhamento
+    // de uma vez. `frontend.rs` prende isso lendo o enum do Rust.
+    prioridade: "nitidez",
   };
 }
 
