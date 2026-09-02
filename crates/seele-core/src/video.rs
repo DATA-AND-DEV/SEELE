@@ -947,6 +947,23 @@ impl Compartilhamento {
 
         let mudou_a_banda = bps != self.codificador.teto_bps();
         if mudou_a_banda {
+            // **O teto passa a aparecer no log**, e é a quarta vez nesta casa que
+            // um mecanismo decide e não conta.
+            //
+            // Ele é quem escolhe entre 540p e 1080p, e nada dele chegava ao
+            // arquivo: um relato de «muito pixelada» só podia ser respondido com
+            // a resolução armada, que diz o **efeito** e não a causa. Com o
+            // número aqui, «ficou em 540p» deixa de ser mistério e vira «a banda
+            // medida era esta».
+            //
+            // Só na mudança, e não a cada tique: a sonda mexe no número o tempo
+            // todo, e uma linha por medição afogaria o arquivo. Uma mudança de
+            // teto é decisão, não medição.
+            tracing::info!(
+                de = self.codificador.teto_bps(),
+                para = bps,
+                "o teto de banda da tela mudou"
+            );
             self.codificador.ajustar_teto(bps)?;
         }
 
