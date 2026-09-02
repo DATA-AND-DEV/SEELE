@@ -510,9 +510,25 @@ echo deb > "$raiz/entrega/seele_$1_amd64.deb"
 "#,
             true,
         );
+        // O dublê do manifesto **escreve** um latest.json com a casa que lhe
+        // pediram. O de verdade põe ali as URLs de download, e é isso que muda de
+        // uma casa para a outra; um dublê que só imprimisse deixaria essa troca
+        // sem ninguém olhando — e ela é a única coisa que distingue as duas
+        // publicações de uma execução.
         escrever(
             &repo.join("empacotar/manifesto.py"),
-            "#!/usr/bin/env python3\nprint('manifesto de mentira')\n",
+            r#"#!/usr/bin/env python3
+import os, pathlib, sys
+
+entrega, tag = sys.argv[1], sys.argv[2]
+repo = sys.argv[sys.argv.index("--repo") + 1]
+with open(os.environ["SEELE_TESTE_DIARIO"], "a", encoding="utf-8") as diario:
+    diario.write("manifesto " + repo + "\n")
+pathlib.Path(entrega, "latest.json").write_text(
+    '{"url": "https://github.com/' + repo + '/releases/download/' + tag + '/SEELE.dmg"}',
+    encoding="utf-8",
+)
+"#,
             true,
         );
 
@@ -1863,18 +1879,72 @@ fn quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio() {
     let config = std::fs::read_to_string(raiz().join("apps/seele-app/tauri.conf.json"))
         .expect("tauri.conf.json é legível");
 
-    let destino = script
-        .split("REPO=\"${SEELE_REPO:-")
+    let destinos = script
+        .split("REPOS=\"${SEELE_REPO:-")
         .nth(1)
         .and_then(|resto| resto.split('}').next())
-        .expect("o publicar.sh deixou de declarar o repositório das versões");
+        .expect("o publicar.sh deixou de declarar os repositórios das versões");
 
-    assert!(
-        config.contains(&format!("github.com/{destino}/releases/")),
-        "o atualizador procura noutro repositório do que o script publica.\n\
-         O script publica em «{destino}», e o `endpoints` do tauri.conf.json não \
-         aponta para lá — uma versão sairia e ninguém a receberia."
+    // **Todos, e não só o primeiro.** Enquanto a migração durar são dois, e uma
+    // casa que recebe a versão sem constar do `endpoints` é trabalho que ninguém
+    // recebe: o release fica lá, completo e assinado, e nenhum app olha para ele.
+    for destino in destinos.split_whitespace() {
+        assert!(
+            config.contains(&format!("github.com/{destino}/releases/")),
+            "o script publica em «{destino}» e o `endpoints` do tauri.conf.json \
+             não aponta para lá.\n\
+             A versão sairia inteira nesse repositório e nenhum app a receberia."
+        );
+    }
+}
+
+#[test]
+fn a_versao_sai_nas_duas_casas_numa_execucao_so() {
+    // **Compilar uma vez, publicar duas.**
+    //
+    // Durante a migração cada versão tem de estar nas duas casas: quem instalou
+    // o SEELE antes da mudança só conhece a antiga, e a atualização que muda o
+    // endereço dele chega por ela. Rodar o script duas vezes daria o mesmo
+    // resultado e custaria outra hora e meia de Linux — e, pior, os pacotes da
+    // segunda volta seriam outros arquivos, com outras somas, para o mesmo
+    // número de versão.
+    let bancada = Bancada::nova();
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "a publicação tinha que ir até o fim:\n{}",
+        saida.texto
     );
+    for casa in ["DATA-AND-DEV/SEELE-RELEASES", "DATA-AND-DEV/SEELE"] {
+        assert!(
+            saida.diario.contains(&format!("repos/{casa}/releases\n")),
+            "não criou o release em {casa}; durante a migração as duas casas \
+             precisam da mesma versão:\n{}",
+            saida.diario
+        );
+    }
+}
+
+#[test]
+fn cada_casa_recebe_o_manifesto_que_aponta_para_ela_mesma() {
+    // O `latest.json` carrega as URLs de download dentro dele. Servir da casa
+    // antiga um manifesto que aponta para a nova manda o app buscar o pacote num
+    // lugar onde ele ainda não pode chegar — e o app não diz o que houve: um
+    // download que falha e uma versão que não existe são a mesma tela.
+    let bancada = Bancada::nova();
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+
+    for casa in ["DATA-AND-DEV/SEELE-RELEASES", "DATA-AND-DEV/SEELE"] {
+        assert!(
+            saida.corpos.contains(&format!(
+                "https://github.com/{casa}/releases/download/v1.2.3/"
+            )),
+            "nenhum manifesto subiu apontando para {casa}: alguma casa recebeu o \
+             latest.json da outra, e quem atualizar por ela baixa de um lugar \
+             onde o arquivo não está."
+        );
+    }
 }
 
 #[test]

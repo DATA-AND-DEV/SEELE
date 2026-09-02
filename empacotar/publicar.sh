@@ -133,7 +133,22 @@ VERSAO=""
 # dentro do app: quem hospeda **não precisa ser confiável**. Trocar de casa não
 # enfraquece nada; esquecer de trocar o `endpoints` do `tauri.conf.json` junto,
 # sim — e é o que `crates/seele-video/tests/modulo_publicado.rs` prende.
-REPO="${SEELE_REPO:-DATA-AND-DEV/SEELE-RELEASES}"
+#
+# **São duas, e é a migração que pede.** O endereço de atualização é gravado
+# dentro do app instalado: quem tem o SEELE de antes só conhece o repositório
+# antigo, e a atualização que muda esse endereço tem de chegar por ele. Publicar
+# só na casa nova deixaria essa gente parada numa versão que ninguém mais toca —
+# sem saber por quê, porque um atualizador que não acha nada não distingue «não
+# há versão nova» de «olhei no lugar errado».
+#
+# Publicar nas duas **na mesma execução** é o que evita compilar tudo de novo
+# para a segunda: os pacotes são os mesmos, só o `latest.json` muda, porque as
+# URLs dentro dele apontam para a casa que os hospeda.
+#
+# Quando a migração acabar, isto volta a ser um nome só — e o guarda do `xtask`
+# que segura o endereço antigo no `tauri.conf.json` sai junto, pela mesma razão
+# e no mesmo dia.
+REPOS="${SEELE_REPO:-DATA-AND-DEV/SEELE-RELEASES DATA-AND-DEV/SEELE}"
 # E o do código, que é outro desde que ele foi fechado.
 #
 # **São dois papéis e não um.** O commit é a procedência — é dele que este
@@ -195,7 +210,7 @@ uso() {
 "" \
 "  --windows <usuário@máquina>  onde o Windows atende SSH (ou \$SEELE_WINDOWS_SSH)" \
 "  --repo-windows <caminho>     o repositório lá (ou \$SEELE_WINDOWS_REPO)" \
-"  --repo <dono/repositório>    onde publicar" \
+"  --repo <dono/repositório>    onde publicar; repita separando por espaço" \
 "  --pular <lista>              macos,windows,linux — separados por vírgula" \
 "  --sem-bateria                publica sem rodar os testes; para a emergência" \
 "  --parcial                    sobe o rascunho mesmo faltando sistema" \
@@ -205,7 +220,9 @@ uso() {
 "  --decidir <pedidos> <falhas> a regra de publicação, sozinha, sem compilar" \
 "" \
 "ambiente:" \
-"  SEELE_GITHUB_TOKEN                    token com escrita no repositório" \
+"  SEELE_GITHUB_TOKEN                    token com escrita nos repositórios" \
+"  SEELE_REPO                            onde publicar (hoje são dois, e a" \
+"                                        migração é a razão)" \
 "  TAURI_SIGNING_PRIVATE_KEY             a chave do projeto (fica só aqui)" \
 "  TAURI_SIGNING_PRIVATE_KEY_PASSWORD    a senha dela" \
 "  SEELE_WINDOWS_SSH                     usuário@máquina do Windows" \
@@ -586,7 +603,7 @@ while [ "$#" -gt 0 ]; do
             if [ "$#" -lt 2 ]; then
                 morrer "--repo quer dono/repositório"
             fi
-            REPO="$2"
+            REPOS="$2"
             shift 2
             ;;
         --pular)
@@ -1176,6 +1193,57 @@ chamar_api() {
     printf '%s\n' "$ca_bruto" | sed '$d' > "$CORPO_API"
 }
 
+# Lista os rascunhos que já subiram inteiros, para uma mensagem de falha.
+#
+# Quando a segunda casa falha, a primeira ficou de pé — e um rascunho não avisa
+# ninguém de que existe. Dizer onde ele está é a diferença entre limpá-lo e
+# descobri-lo meses depois, ao lado de um release publicado com o mesmo número.
+rascunhos_ate_agora() {
+    if [ -z "$1" ]; then
+        printf '%s' ""
+        return
+    fi
+    printf '\n%s\n' "Estes rascunhos ficaram inteiros e ninguém os apagou:"
+    printf '%s' "$1" | while IFS='	' read -r ra_repo ra_url; do
+        [ -n "$ra_repo" ] || continue
+        printf '  %s: %s\n' "$ra_repo" "$ra_url"
+    done
+}
+
+# Acha o release desta tag num repositório, e diz em que estado ele está.
+#
+# Rascunho **não** cria tag, então `releases/tags/<tag>` não o encontra: é
+# preciso listar. É a única coisa que este script faz diferente do `release.yml`,
+# onde o `gh release view` esconde essa distinção.
+#
+# Responde em três variáveis porque `sh` não devolve mais que um número, e
+# porque quem chama precisa dos três: o id para apagar, o estado para decidir, a
+# URL para dizer onde está o que impede.
+procurar_release() {
+    pr_repo="$1"
+    RELEASE_ID=""
+    RELEASE_ESTADO=""
+    RELEASE_URL=""
+
+    chamar_api GET "$API/repos/$pr_repo/releases?per_page=100"
+    if [ "$CODIGO_HTTP" != "200" ]; then
+        morrer "não consegui listar os releases de $pr_repo (HTTP $CODIGO_HTTP)." \
+            "$(head -c 500 "$CORPO_API")"
+    fi
+    pr_achado=$(python3 -c 'import json, sys
+alvo = sys.argv[2]
+for release in json.load(open(sys.argv[1], encoding="utf-8")):
+    if release.get("tag_name") == alvo:
+        print(release["id"])
+        print("rascunho" if release.get("draft") else "publicado")
+        print(release.get("html_url", ""))
+        break' "$CORPO_API" "v$VERSAO" 2>/dev/null)
+
+    RELEASE_ID=$(printf '%s\n' "$pr_achado" | sed -n 1p)
+    RELEASE_ESTADO=$(printf '%s\n' "$pr_achado" | sed -n 2p)
+    RELEASE_URL=$(printf '%s\n' "$pr_achado" | sed -n 3p)
+}
+
 conferir_github() {
     if [ -z "$TOKEN" ]; then
         morrer "não há token para falar com o GitHub." \
@@ -1197,18 +1265,28 @@ conferir_github() {
     cg_quem=$(python3 -c 'import json, sys
 print(json.load(open(sys.argv[1], encoding="utf-8")).get("login", "?"))' "$CORPO_API" 2>/dev/null)
 
-    chamar_api GET "$API/repos/$REPO"
-    if [ "$CODIGO_HTTP" != "200" ]; then
-        morrer "não consegui ler $REPO (HTTP $CODIGO_HTTP)." \
-            "$(head -c 500 "$CORPO_API")"
-    fi
-    if ! python3 -c 'import json, sys
+    # Cada casa, e todas antes de compilar.
+    #
+    # A conferência inteira existe para custar segundos: descobrir na hora de
+    # subir que o token não escreve na segunda casa custaria o build inteiro, e
+    # deixaria o release **meio publicado** — uma casa com a versão nova, a outra
+    # sem. Enquanto a migração durar, meio publicado é pior que não publicado:
+    # parte de quem usa recebe a atualização e parte não, e ninguém dos dois
+    # lados sabe em qual metade está.
+    for cg_repo in $REPOS; do
+        chamar_api GET "$API/repos/$cg_repo"
+        if [ "$CODIGO_HTTP" != "200" ]; then
+            morrer "não consegui ler $cg_repo (HTTP $CODIGO_HTTP)." \
+                "$(head -c 500 "$CORPO_API")"
+        fi
+        if ! python3 -c 'import json, sys
 dados = json.load(open(sys.argv[1], encoding="utf-8"))
 sys.exit(0 if dados.get("permissions", {}).get("push") else 1)' "$CORPO_API" 2>/dev/null; then
-        morrer "o token de «${cg_quem}» enxerga $REPO mas não pode escrever nele." \
-            "Criar release é escrita. Dê-lhe **Contents: Read and write**."
-    fi
-    passo "token de $cg_quem, com escrita em $REPO"
+            morrer "o token de «${cg_quem}» enxerga $cg_repo mas não pode escrever nele." \
+                "Criar release é escrita. Dê-lhe **Contents: Read and write**."
+        fi
+        passo "token de $cg_quem, com escrita em $cg_repo"
+    done
 
     # O commit tem de existir lá.
     #
@@ -1226,39 +1304,21 @@ sys.exit(0 if dados.get("permissions", {}).get("push") else 1)' "$CORPO_API" 2>/
     fi
     passo "o commit está no repositório do código"
 
-    # Rascunho **não** cria tag, então `releases/tags/<tag>` não o encontra: é
-    # preciso listar. É a única coisa que este script faz diferente do
-    # `release.yml`, onde o `gh release view` esconde essa distinção.
-    chamar_api GET "$API/repos/$REPO/releases?per_page=100"
-    if [ "$CODIGO_HTTP" != "200" ]; then
-        morrer "não consegui listar os releases de $REPO (HTTP $CODIGO_HTTP)." \
-            "$(head -c 500 "$CORPO_API")"
-    fi
-    cg_achado=$(python3 -c 'import json, sys
-alvo = sys.argv[2]
-for release in json.load(open(sys.argv[1], encoding="utf-8")):
-    if release.get("tag_name") == alvo:
-        print(release["id"])
-        print("rascunho" if release.get("draft") else "publicado")
-        print(release.get("html_url", ""))
-        break' "$CORPO_API" "v$VERSAO" 2>/dev/null)
-
-    RELEASE_ID=$(printf '%s\n' "$cg_achado" | sed -n 1p)
-    RELEASE_ESTADO=$(printf '%s\n' "$cg_achado" | sed -n 2p)
-    RELEASE_URL=$(printf '%s\n' "$cg_achado" | sed -n 3p)
-
-    if [ "$RELEASE_ESTADO" = publicado ]; then
-        # A mesma regra do release.yml, e a mesma razão: rascunho se substitui
-        # sem cerimônia, publicado é decisão que uma pessoa tomou.
-        morrer "já existe um release **publicado** em v$VERSAO, e eu não o apago." \
-            "  $RELEASE_URL" \
-            "" \
-            "Publique noutra versão, ou remova-o à mão se a intenção é mesmo substituí-lo."
-    fi
-    if [ "$RELEASE_ESTADO" = rascunho ]; then
-        aviso "já há um rascunho em v$VERSAO; ele será substituído no fim."
-    fi
-    passo "v$VERSAO livre no Releases"
+    for cg_repo in $REPOS; do
+        procurar_release "$cg_repo"
+        if [ "$RELEASE_ESTADO" = publicado ]; then
+            # A mesma regra do release.yml, e a mesma razão: rascunho se
+            # substitui sem cerimônia, publicado é decisão que uma pessoa tomou.
+            morrer "já existe um release **publicado** em v$VERSAO, e eu não o apago." \
+                "  $RELEASE_URL" \
+                "" \
+                "Publique noutra versão, ou remova-o à mão se a intenção é mesmo substituí-lo."
+        fi
+        if [ "$RELEASE_ESTADO" = rascunho ]; then
+            aviso "já há um rascunho em v$VERSAO em $cg_repo; será substituído no fim."
+        fi
+        passo "v$VERSAO livre no Releases de $cg_repo"
+    done
 }
 
 # =========================================================================
@@ -1437,18 +1497,6 @@ fi
 
 printf '\n--- publicando ---\n'
 
-passo "montando o latest.json"
-if ! python3 "$RAIZ/empacotar/manifesto.py" "$RAIZ/entrega" "v$VERSAO" --repo "$REPO"; then
-    morrer "o manifesto não saiu." \
-        "Sem ele o botão de atualizar do app não acha este release."
-fi
-
-passo "somando os arquivos"
-rm -f "$RAIZ/entrega/SHA256SUMS"
-if ! (cd "$RAIZ/entrega" && shasum -a 256 * > SHA256SUMS); then
-    morrer "não consegui somar os arquivos de entrega/."
-fi
-
 # O corpo do release: as notas de sempre, mais a verdade sobre estes pacotes.
 #
 # No corpo, e não só na tela deste script, porque quem baixa não vê esta tela.
@@ -1513,7 +1561,6 @@ fi
 "Versões saídas do workflow respondem, e a seção acima explica como."
 } > "$NOTAS"
 
-passo "criando o rascunho de v$VERSAO"
 PEDIDO="$TEMPORARIO/pedido.json"
 if ! python3 -c 'import json, sys
 tag, commit, notas, destino = sys.argv[1:5]
@@ -1529,58 +1576,96 @@ with open(destino, "w", encoding="utf-8") as saida:
     morrer "não consegui montar o pedido de criação do release."
 fi
 
-# O rascunho anterior desta tag sai antes, para não acumular duplicata. Só o
-# rascunho: o publicado já foi barrado lá atrás, nas conferências.
-if [ "$RELEASE_ESTADO" = rascunho ] && [ -n "$RELEASE_ID" ]; then
-    passo "apagando o rascunho anterior de v$VERSAO"
-    chamar_api DELETE "$API/repos/$REPO/releases/$RELEASE_ID"
-    if [ "$CODIGO_HTTP" != "204" ]; then
-        aviso "não consegui apagar o rascunho anterior (HTTP $CODIGO_HTTP); sigo."
-    fi
-fi
+# Uma volta por casa, e os mesmos pacotes em todas.
+#
+# O que muda de uma para outra é só o `latest.json`: as URLs de download dentro
+# dele apontam para quem hospeda os anexos, e um manifesto da casa nova servido
+# pela casa antiga mandaria o app buscar arquivos onde ele ainda não pode chegar.
+# Por isso ele é refeito aqui dentro, e o `SHA256SUMS` junto — ele soma o
+# `latest.json` também, e uma soma que não confere é a acusação mais barata de
+# adulteração que existe.
+#
+# Os pacotes, esses, são bit a bit os mesmos: compilados uma vez, assinados uma
+# vez, subidos duas. É essa a diferença entre esta volta e rodar o script duas
+# vezes — a segunda casa custa o upload, e não mais uma hora e meia de Linux.
+RASCUNHOS=""
+for pub_repo in $REPOS; do
+    printf '\n'
+    passo "publicando em $pub_repo"
 
-chamar_api POST "$API/repos/$REPO/releases" "$PEDIDO"
-if [ "$CODIGO_HTTP" != "201" ]; then
-    morrer "o GitHub recusou criar o release (HTTP $CODIGO_HTTP)." \
-        "$(head -c 500 "$CORPO_API")" \
-        "" \
-        "Os arquivos continuam em entrega/. Para tentar só a publicação de novo:" \
-        "  $0 $VERSAO --pular $(printf '%s' "$SISTEMAS" | LC_ALL=C tr ' ' ',')"
-fi
-NOVO_ID=$(python3 -c 'import json, sys
+    if ! python3 "$RAIZ/empacotar/manifesto.py" "$RAIZ/entrega" "v$VERSAO" --repo "$pub_repo"; then
+        morrer "o manifesto de $pub_repo não saiu." \
+            "Sem ele o botão de atualizar do app não acha este release."
+    fi
+
+    passo "somando os arquivos"
+    rm -f "$RAIZ/entrega/SHA256SUMS"
+    if ! (cd "$RAIZ/entrega" && shasum -a 256 * > SHA256SUMS); then
+        morrer "não consegui somar os arquivos de entrega/."
+    fi
+
+    # O rascunho anterior desta tag sai antes, para não acumular duplicata. Só o
+    # rascunho: o publicado já foi barrado lá atrás, nas conferências.
+    procurar_release "$pub_repo"
+    if [ "$RELEASE_ESTADO" = rascunho ] && [ -n "$RELEASE_ID" ]; then
+        passo "apagando o rascunho anterior de v$VERSAO"
+        chamar_api DELETE "$API/repos/$pub_repo/releases/$RELEASE_ID"
+        if [ "$CODIGO_HTTP" != "204" ]; then
+            aviso "não consegui apagar o rascunho anterior (HTTP $CODIGO_HTTP); sigo."
+        fi
+    fi
+
+    passo "criando o rascunho de v$VERSAO"
+    chamar_api POST "$API/repos/$pub_repo/releases" "$PEDIDO"
+    if [ "$CODIGO_HTTP" != "201" ]; then
+        morrer "o GitHub recusou criar o release em $pub_repo (HTTP $CODIGO_HTTP)." \
+            "$(head -c 500 "$CORPO_API")" \
+            "$(rascunhos_ate_agora "$RASCUNHOS")" \
+            "" \
+            "Os arquivos continuam em entrega/. Para tentar só a publicação de novo:" \
+            "  $0 $VERSAO --pular $(printf '%s' "$SISTEMAS" | LC_ALL=C tr ' ' ',')"
+    fi
+    NOVO_ID=$(python3 -c 'import json, sys
 print(json.load(open(sys.argv[1], encoding="utf-8"))["id"])' "$CORPO_API")
-NOVA_URL=$(python3 -c 'import json, sys
+    NOVA_URL=$(python3 -c 'import json, sys
 print(json.load(open(sys.argv[1], encoding="utf-8")).get("html_url", ""))' "$CORPO_API")
 
-for arquivo in "$RAIZ"/entrega/*; do
-    [ -f "$arquivo" ] || continue
-    nome=$(basename "$arquivo")
-    # Nome que precise de escape na URL é nome que eu não sei subir sem
-    # corrompê-lo, e os empacotadores nunca produziram um.
-    case "$nome" in
-        *[!A-Za-z0-9._-]*)
-            morrer "o arquivo «${nome}» tem caractere que eu não sei pôr numa URL." \
-                "Renomeie-o antes de publicar."
-            ;;
-    esac
+    for arquivo in "$RAIZ"/entrega/*; do
+        [ -f "$arquivo" ] || continue
+        nome=$(basename "$arquivo")
+        # Nome que precise de escape na URL é nome que eu não sei subir sem
+        # corrompê-lo, e os empacotadores nunca produziram um.
+        case "$nome" in
+            *[!A-Za-z0-9._-]*)
+                morrer "o arquivo «${nome}» tem caractere que eu não sei pôr numa URL." \
+                    "Renomeie-o antes de publicar."
+                ;;
+        esac
 
-    passo "subindo $nome"
-    envio_bruto=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl --config - \
-        -sS -X POST \
-        -H 'Accept: application/vnd.github+json' \
-        -H 'Content-Type: application/octet-stream' \
-        --data-binary "@$arquivo" \
-        -w '\n%{http_code}' \
-        "$ENVIO/repos/$REPO/releases/$NOVO_ID/assets?name=$nome" 2>&1)
-    envio_codigo=$(printf '%s\n' "$envio_bruto" | tail -n 1)
-    if [ "$envio_codigo" != "201" ]; then
-        morrer "o envio de «${nome}» falhou (HTTP $envio_codigo)." \
-            "$(printf '%s\n' "$envio_bruto" | sed '$d' | head -c 500)" \
-            "" \
-            "O rascunho ficou pela metade em:" \
-            "  $NOVA_URL" \
-            "Apague-o lá e rode de novo — os arquivos continuam em entrega/."
-    fi
+        passo "subindo $nome"
+        envio_bruto=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl --config - \
+            -sS -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'Content-Type: application/octet-stream' \
+            --data-binary "@$arquivo" \
+            -w '\n%{http_code}' \
+            "$ENVIO/repos/$pub_repo/releases/$NOVO_ID/assets?name=$nome" 2>&1)
+        envio_codigo=$(printf '%s\n' "$envio_bruto" | tail -n 1)
+        if [ "$envio_codigo" != "201" ]; then
+            morrer "o envio de «${nome}» para $pub_repo falhou (HTTP $envio_codigo)." \
+                "$(printf '%s\n' "$envio_bruto" | sed '$d' | head -c 500)" \
+                "" \
+                "O rascunho ficou pela metade em:" \
+                "  $NOVA_URL" \
+                "$(rascunhos_ate_agora "$RASCUNHOS")" \
+                "" \
+                "Apague o que ficou pela metade e rode de novo — os arquivos" \
+                "continuam em entrega/."
+        fi
+    done
+
+    RASCUNHOS="$RASCUNHOS$pub_repo	$NOVA_URL
+"
 done
 
 # =========================================================================
@@ -1588,7 +1673,21 @@ done
 # =========================================================================
 
 printf '\n--- pronto, e ainda não está publicado ---\n\n'
-printf '%s\n' "O rascunho está em:" "  $NOVA_URL" ""
+printf '%s\n' "O rascunho está em:"
+printf '%s' "$RASCUNHOS" | while IFS='	' read -r fim_repo fim_url; do
+    [ -n "$fim_repo" ] || continue
+    printf '  %s\n    %s\n' "$fim_repo" "$fim_url"
+done
+printf '\n'
+if [ "$(printf '%s' "$RASCUNHOS" | grep -c .)" -gt 1 ]; then
+    printf '%s\n' \
+"**São dois, e os dois têm de ser publicados.** Enquanto a migração durar, quem" \
+"tem o SEELE de antes só olha para o repositório antigo, e quem instalou depois" \
+"olha primeiro para o novo. Publicar só um deixa metade das pessoas numa versão" \
+"que ninguém mais toca — e um atualizador que não acha nada não sabe dizer se" \
+"não há versão nova ou se ele olhou no lugar errado." \
+""
+fi
 printf '%s\n' \
 "**Ele é rascunho, e rascunho ninguém enxerga.** O endereço gravado dentro de" \
 "cada SEELE instalado é releases/latest/download/latest.json, e «latest» é o" \
