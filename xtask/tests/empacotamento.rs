@@ -1975,3 +1975,66 @@ fn o_endereco_antigo_continua_na_lista_enquanto_a_migracao_dura() {
          atualização que mudaria o endereço dele vem por ele."
     );
 }
+
+#[test]
+fn o_que_vem_do_windows_e_lido_byte_a_byte() {
+    // O PowerShell manda bytes que não formam texto válido na locale desta
+    // máquina, e o `sed` do BSD **aborta** ao topar com um deles: escreve «RE
+    // error: illegal byte sequence» na saída de erro e não imprime mais nada,
+    // enquanto o script segue como se tivesse lido.
+    //
+    // Onde isso alimenta uma decisão, o estrago é silencioso: o `head=` diz se o
+    // Windows está no commit deste release, e um valor vazio por sed abortado é
+    // indistinguível de um Windows no commit errado. Sob `LC_ALL=C` não existe
+    // sequência ilegal — byte é byte, e é tudo o que se precisa para achar um
+    // prefixo ASCII.
+    //
+    // Este guarda é de texto, e por isso limitado: ele prende o `LC_ALL=C` no
+    // lugar, não prova que a leitura funciona. Provar pediria uma máquina Windows
+    // de verdade mandando bytes de verdade, e ela não cabe num teste.
+    let script = std::fs::read_to_string(raiz().join("empacotar/publicar.sh"))
+        .expect("empacotar/publicar.sh é legível");
+
+    for linha in script.lines() {
+        if !linha.contains("$cw_") {
+            continue;
+        }
+        for ferramenta in ["| sed", "| tr"] {
+            if linha.contains(ferramenta)
+                && !linha.contains(&format!("| LC_ALL=C {}", &ferramenta[2..]))
+            {
+                panic!(
+                    "esta linha lê a saída do Windows sem LC_ALL=C:\n  {}\n\
+                     Um byte que não é UTF-8 aborta a leitura sem que o script \
+                     perceba, e o que ele decide depois vem de um valor vazio.",
+                    linha.trim()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_bateria_formata_o_workspace_inteiro_e_nao_a_raiz_vazia() {
+    // A raiz é um workspace virtual: não tem alvo nenhum para formatar. Sem
+    // `--all`, `cargo fmt --manifest-path <raiz>` responde «Failed to find
+    // targets» e **sai com erro** — que o script lia como «o código não está
+    // formatado», mandando quem publica rodar um `cargo fmt` que não tinha nada
+    // para fazer.
+    //
+    // Custou uma execução inteira, com o Windows já levado ao commit, para
+    // descobrir que a queixa não tinha relação com o motivo.
+    let script = std::fs::read_to_string(raiz().join("empacotar/publicar.sh"))
+        .expect("empacotar/publicar.sh é legível");
+    let linha = script
+        .lines()
+        .find(|linha| linha.contains("cargo fmt") && linha.contains("--check"))
+        .expect("a bateria deixou de conferir a formatação");
+    assert!(
+        linha.contains("--all"),
+        "o `cargo fmt` da bateria perdeu o `--all`.\n  {}\n\
+         Na raiz de um workspace virtual ele não acha alvo nenhum, sai com erro, \
+         e o script culpa a formatação por algo que nunca foi conferido.",
+        linha.trim()
+    );
+}

@@ -737,6 +737,30 @@ conferir_ferramentas() {
 #
 # `--sem-bateria` existe para a emergência de madrugada, e ele **grita**: um
 # atalho silencioso vira o caminho normal em duas semanas.
+# Roda uma etapa da bateria e, se ela reprovar, **mostra o que ela disse**.
+#
+# Antes cada etapa mandava a saída para /dev/null e a substituía por um palpite
+# sobre o motivo. Enquanto o palpite acerta ninguém nota; quando erra, quem
+# publica lê uma queixa que não tem relação com o que houve e vai consertar o
+# lugar errado. Foi o que aconteceu com o `fmt`, e o diagnóstico existia — o
+# script o jogou fora antes de alguém poder lê-lo.
+#
+# O palpite continua, porque ele é útil: na maioria das vezes acerta e diz o
+# conserto numa linha. O que muda é que ele deixou de ser a **única** coisa dita.
+etapa_da_bateria() {
+    eb_queixa="$1"
+    eb_conserto="$2"
+    shift 2
+    if ! (cd "$RAIZ" && "$@") > "$TEMPORARIO/bateria.log" 2>&1; then
+        morrer "$eb_queixa" \
+            "$eb_conserto" \
+            "" \
+            "As últimas linhas do que ela disse — leia-as antes de acreditar na" \
+            "queixa acima, que é um palpite:" \
+            "$(tail -n 20 "$TEMPORARIO/bateria.log")"
+    fi
+}
+
 bateria() {
     if [ "${SEM_BATERIA:-nao}" = "sim" ]; then
         aviso "bateria pulada por --sem-bateria: este pacote não foi testado."
@@ -772,25 +796,31 @@ bateria() {
     export SEELE_OPENH264
     export SEELE_EXIGE_CODEC=1
 
-    if ! cargo fmt --manifest-path "$RAIZ/Cargo.toml" --check >/dev/null 2>&1; then
-        morrer "o código não está formatado." "Rode «cargo fmt»."
-    fi
-    if ! (cd "$RAIZ" && RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets >/dev/null 2>&1); then
-        morrer "o clippy reprovou." "Rode «cargo clippy --workspace --all-targets»."
-    fi
+    # `--all` porque a raiz é um workspace virtual, e um workspace virtual não
+    # tem alvo nenhum para formatar.
+    #
+    # Sem ele o `cargo fmt` responde «Failed to find targets» e **sai com erro** —
+    # e como a saída ia para /dev/null, o script traduzia isso para «o código não
+    # está formatado» e mandava rodar um `cargo fmt` que não tinha nada para
+    # fazer. Custou uma execução inteira, com o Windows já levado ao commit, para
+    # descobrir que a queixa não tinha relação com o motivo.
+    etapa_da_bateria "o código não está formatado." "Rode «cargo fmt»." \
+        cargo fmt --manifest-path "$RAIZ/Cargo.toml" --all --check
+    etapa_da_bateria "o clippy reprovou." \
+        "Rode «cargo clippy --workspace --all-targets»." \
+        env RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets
     # Em série: a bateria de conformidade sobe servidores de verdade e disputa
     # portas consigo mesma em paralelo. Ela passa em série, e um release não é
     # lugar de conviver com instabilidade conhecida.
-    if ! (cd "$RAIZ" && cargo test --workspace -- --test-threads=1 >/dev/null 2>&1); then
-        morrer "a bateria reprovou nesta máquina." \
-            "Rode «cargo test --workspace -- --test-threads=1» e leia."
-    fi
-    if ! (cd "$RAIZ" && cargo xtask check-deps >/dev/null 2>&1); then
-        morrer "a regra de dependência do specs/01 foi quebrada."
-    fi
-    if ! (cd "$RAIZ" && cargo deny check licenses >/dev/null 2>&1); then
-        morrer "uma licença nova entrou na árvore sem passar pelo deny.toml."
-    fi
+    etapa_da_bateria "a bateria reprovou nesta máquina." \
+        "Rode «cargo test --workspace -- --test-threads=1» e leia." \
+        cargo test --workspace -- --test-threads=1
+    etapa_da_bateria "a regra de dependência do specs/01 foi quebrada." \
+        "Rode «cargo xtask check-deps»." \
+        cargo xtask check-deps
+    etapa_da_bateria "uma licença nova entrou na árvore sem passar pelo deny.toml." \
+        "Rode «cargo deny check licenses»." \
+        cargo deny check licenses
     passo "bateria aqui: ok"
 
     if pedido windows; then
@@ -1101,11 +1131,23 @@ Write-Output ('pilha=' + (git stash list | Measure-Object).Count)")
                         "$cw_guarda"
                     ;;
             esac
-            printf '%s\n' "$cw_guarda" | sed -n 's/^pilha=/     stashes em '"$WINDOWS"' agora: /p' | tr -d '\r'
+            # `LC_ALL=C` porque o que vem do Windows não é UTF-8.
+            #
+            # O PowerShell manda bytes que não formam texto válido nesta locale, e
+            # o `sed` do BSD **aborta a linha inteira** ao topar com um deles —
+            # «RE error: illegal byte sequence», na saída de erro, enquanto o
+            # script segue como se nada fosse. Nos dois primeiros é ruído; no
+            # `head=` é a decisão de saber se o Windows está no commit deste
+            # release, e um `cw_head` vazio por sed abortado é indistinguível de
+            # um Windows no commit errado.
+            #
+            # Sob C não há sequência ilegal: byte é byte, e é tudo o que se
+            # precisa para achar um prefixo ASCII.
+            printf '%s\n' "$cw_guarda" | LC_ALL=C sed -n 's/^pilha=/     stashes em '"$WINDOWS"' agora: /p' | LC_ALL=C tr -d '\r'
             printf '     recupere lá com:  git stash list  e  git stash pop\n'
             ;;
     esac
-    printf '%s\n' "$cw_resposta" | sed -n 's/^apaguei=/     apagado em '"$WINDOWS"': /p' | tr -d '\r'
+    printf '%s\n' "$cw_resposta" | LC_ALL=C sed -n 's/^apaguei=/     apagado em '"$WINDOWS"': /p' | LC_ALL=C tr -d '\r'
     case "$cw_resposta" in
         *restos=0*) ;;
         *restos=*)
@@ -1113,7 +1155,7 @@ Write-Output ('pilha=' + (git stash list | Measure-Object).Count)")
             ;;
     esac
 
-    cw_head=$(printf '%s\n' "$cw_resposta" | sed -n 's/^head=//p' | tr -d '\r')
+    cw_head=$(printf '%s\n' "$cw_resposta" | LC_ALL=C sed -n 's/^head=//p' | LC_ALL=C tr -d '\r')
     if [ "$cw_head" != "$COMMIT" ]; then
         # O Windows tem de estar no **mesmo commit**, e não na ponta do ramo: um
         # release cujos três pacotes vêm de códigos diferentes é três releases
@@ -1142,7 +1184,7 @@ Set-Location '$REPO_WINDOWS'
 git fetch --all --quiet
 git checkout --quiet $COMMIT
 Write-Output ('head=' + (git rev-parse HEAD))")
-        cw_head=$(printf '%s\n' "$cw_troca" | sed -n 's/^head=//p' | tr -d '\r')
+        cw_head=$(printf '%s\n' "$cw_troca" | LC_ALL=C sed -n 's/^head=//p' | LC_ALL=C tr -d '\r')
         if [ "$cw_head" != "$COMMIT" ]; then
             morrer "não consegui levar $WINDOWS ao commit deste release." \
                 "  aqui: $COMMIT" \
