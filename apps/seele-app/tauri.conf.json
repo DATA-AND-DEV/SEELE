@@ -48,7 +48,8 @@
       "nsis": {
         "installMode": "perMachine",
         "installerHooks": "instalador.nsh",
-        "template": "instalador.nsi"
+        "template": "instalador.nsi",
+        "sidebarImage": "marca-instalador.bmp"
       }
     }
   },

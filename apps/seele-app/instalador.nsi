@@ -211,15 +211,11 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 
 ; Installer pages, must be ordered as they appear
-; 1. Welcome Page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!insertmacro MUI_PAGE_WELCOME
-
-; 2. License Page (if defined)
-!if "${LICENSE}" != ""
-  !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-  !insertmacro MUI_PAGE_LICENSE "${LICENSE}"
-!endif
+;
+; **A boas-vindas e a licença saíram.** O desenho começa no destino: uma página
+; que só diz «bem-vindo ao assistente» é um clique cobrado de todo mundo para não
+; dizer nada, e a licença virou uma linha dentro do primeiro passo, que é onde
+; ela é lida por quem lê.
 
 ; 3. Install mode (if it is set to `both`)
 !if "${INSTALLMODE}" == "both"
@@ -430,9 +426,33 @@ Function PageLeaveReinstall
   reinst_done:
 FunctionEnd
 
-; 5. Choose install directory page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!insertmacro MUI_PAGE_DIRECTORY
+; 5. Os passos 01 e 02, desenhados por `instalador.nsh`.
+;
+; O `PassiveMode` é conferido aqui, e não lá, porque `Var PassiveMode` é
+; declarado neste arquivo — e porque um `Abort` tem de acontecer no corpo da
+; própria função da página para pular a página, e não dentro de outra que ela
+; chame.
+Function SeeleDestinoPre
+  ${If} $PassiveMode == 1
+    Abort
+  ${EndIf}
+  Call SeelePaginaDestino
+FunctionEnd
+Function SeeleOpcoesPre
+  ${If} $PassiveMode == 1
+    Abort
+  ${EndIf}
+  Call SeelePaginaOpcoes
+FunctionEnd
+Function SeeleProntoPre
+  ${If} $PassiveMode == 1
+    Abort
+  ${EndIf}
+  Call SeelePaginaPronto
+FunctionEnd
+
+Page custom SeeleDestinoPre SeeleSaiDestino
+Page custom SeeleOpcoesPre SeeleSaiOpcoes
 
 ; 6. Start menu shortcut page
 Var AppStartMenuFolder
@@ -447,20 +467,13 @@ Var AppStartMenuFolder
 ; 7. Installation page
 !insertmacro MUI_PAGE_INSTFILES
 
-; 8. Finish page
+; 8. O passo 04, desenhado por `instalador.nsh`.
 ;
-; Don't auto jump to finish page after installation page,
-; because the installation page has useful info that can be used debug any issues with the installer.
-!define MUI_FINISHPAGE_NOAUTOCLOSE
-; Use show readme button in the finish page as a button create a desktop shortcut
-!define MUI_FINISHPAGE_SHOWREADME
-!define MUI_FINISHPAGE_SHOWREADME_TEXT "$(createDesktop)"
-!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateOrUpdateDesktopShortcut
-; Show run app after installation.
-!define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!insertmacro MUI_PAGE_FINISH
+; A página do MUI oferecia o atalho da área de trabalho aqui, num «mostrar
+; leia-me» reaproveitado. O atalho passou para o passo 02, junto das outras
+; escolhas, que é onde alguém procura uma escolha — e não depois de a instalação
+; já ter acontecido.
+Page custom SeeleProntoPre SeeleSaiPronto
 
 Function RunMainBinary
   nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
