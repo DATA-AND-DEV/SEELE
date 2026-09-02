@@ -557,28 +557,25 @@ mod testes {
         // `tracing::debug!`, não só o `WouldBlock` que a rodada 1 tinha em
         // mira — e quem chama nunca saberia que o aviso não saiu.
         //
-        // Um destino de broadcast é rejeitado pelo próprio kernel, na hora,
-        // sem round-trip de rede nenhum: este socket nunca liga
-        // `SO_BROADCAST`, e mandar para `255.255.255.255` sem essa opção
-        // devolve permissão negada — comportamento de BSD sockets (macOS,
-        // Linux) e do WinSock equivalente no Windows, não algo que dependa de
-        // rede de verdade estar presente.
+        // **A porta zero é recusada pelo kernel, na hora, em todo sistema.**
+        // Não há porta 0 para onde mandar: ela é o «escolha uma» de quem
+        // liga um socket, e como destino não existe. O erro sai antes de
+        // qualquer pacote, sem depender de rede de verdade estar presente —
+        // que é o que faz este teste rodar em máquina desconectada.
         //
-        // O caminho que dispara o erro passa por `mapear`: num socket de
-        // pilha dupla (o caso comum de `abrir_socket_local`), `avisar` manda
-        // para `[::ffff:255.255.255.255]:9`, não para o v4 puro — é essa
-        // forma mapeada que o kernel avalia contra `SO_BROADCAST` e recusa.
-        // Os **dois** ramos de `abrir_socket_local` dão `PermissionDenied`:
-        // o de pilha dupla mandando para `[::ffff:255.255.255.255]:9` e o v4
-        // puro (a máquina sem IPv6) mandando para `255.255.255.255:9` — os
-        // dois medidos nesta plataforma (macOS), os dois `EACCES`. O
-        // `InvalidInput` que este comentário já afirmou não sai de ramo
-        // nenhum daqui: ele só apareceria numa terceira configuração, que é o
-        // socket de pilha dupla com o destino v4 **não** mapeado — isto é, o
-        // que aconteceria se `mapear` saísse de `avisar`. A asserção de baixo
-        // (`is_err`) vale para os três, e é de propósito: o que se afirma é
-        // que o erro chega a quem chama, não qual erro é.
-        let bilhete = bilhete("255.255.255.255:9");
+        // **Era um endereço de broadcast, e o Windows reprovava.** O raciocínio
+        // antigo era que mandar para `255.255.255.255` sem `SO_BROADCAST`
+        // devolve permissão negada, e o comentário afirmava que o WinSock fazia
+        // o equivalente. Não faz: medido na máquina, o envio passa e o teste
+        // reprovava por causa do sistema, não do código. O que ele existe para
+        // provar — que `avisar` **devolve** o erro em vez de engoli-lo — não
+        // tem nada a ver com broadcast; broadcast era só um jeito conveniente
+        // de conseguir uma recusa, e era um jeito que só funcionava em dois dos
+        // três sistemas.
+        //
+        // A asserção de baixo é `is_err` e não um erro específico, de propósito:
+        // o que se afirma é que o erro chega a quem chama, não qual erro é.
+        let bilhete = bilhete("255.255.255.255:0");
         let batida = Batida::preparar(&bilhete, Some(IMPRESSAO_DE_TESTE)).await;
         let Some(batida) = batida else {
             panic!(
