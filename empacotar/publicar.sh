@@ -689,15 +689,37 @@ conferir_versao() {
     passo "versão $VERSAO: ok"
 }
 
+# Quem soma os arquivos nesta máquina: `shasum` ou `sha256sum`.
+#
+# **São dois nomes para a mesma resposta, e nenhuma máquina tem os dois por
+# obrigação.** O macOS traz o `shasum`, que é perl; o Git para Windows e a maior
+# parte dos Linux trazem o `sha256sum`, do coreutils, e não trazem o outro.
+# Exigir um nome só é exigir um sistema só — e foi o que barrou a bateria do
+# Windows, onde os testes deste script rodam.
+#
+# A saída dos dois é a mesma linha, «soma  arquivo», que é o que o SHA256SUMS é.
+somador() {
+    if command -v shasum >/dev/null 2>&1; then
+        printf 'shasum -a 256'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        printf 'sha256sum'
+    fi
+}
+
 conferir_ferramentas() {
-    # O `shasum` entra nesta lista por um motivo de tempo, e não de higiene: ele
-    # só é usado no fim, depois de todos os builds. Descobrir a falta dele lá é
-    # descobri-la duas horas tarde demais.
-    for ferramenta in python3 curl git shasum; do
+    # O somador entra nesta conferência por um motivo de tempo, e não de higiene:
+    # ele só é usado no fim, depois de todos os builds. Descobrir a falta dele lá
+    # é descobri-la duas horas tarde demais.
+    for ferramenta in python3 curl git; do
         if ! command -v "$ferramenta" >/dev/null 2>&1; then
             morrer "este script precisa do «${ferramenta}» e ele não está no PATH."
         fi
     done
+    if [ -z "$(somador)" ]; then
+        morrer "este script precisa somar os arquivos e não achou com que." \
+            "Serve «shasum» (macOS) ou «sha256sum» (coreutils); nenhum dos dois" \
+            "está no PATH."
+    fi
 
     if [ ! -f "$RAIZ/empacotar/manifesto.py" ]; then
         morrer "não achei empacotar/manifesto.py." \
@@ -1668,7 +1690,7 @@ for pub_repo in $REPOS; do
 
     passo "somando os arquivos"
     rm -f "$RAIZ/entrega/SHA256SUMS"
-    if ! (cd "$RAIZ/entrega" && shasum -a 256 * > SHA256SUMS); then
+    if ! (cd "$RAIZ/entrega" && $(somador) * > SHA256SUMS); then
         morrer "não consegui somar os arquivos de entrega/."
     fi
 
