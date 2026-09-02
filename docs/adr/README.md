@@ -47,6 +47,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0039](0039-o-produto-passa-a-ter-uma-casca-so.md) | O produto passa a ter uma casca só | aceito | `05` e `06` — as cascas |
 | [0040](0040-sessenta-quadros-entram-por-medida.md) | Sessenta quadros entram, por medida | aceito | design da tela, §6 item 10 |
 | [0041](0041-o-codec-por-hardware-e-a-excecao-ao-unsafe.md) | O codec por hardware, e a exceção nomeada ao `unsafe` | **aceito** | — (reverte a recusa registrada no `Cargo.toml` do `seele-video`) |
+| [0042](0042-nomes-repetidos-e-a-chave-que-distingue.md) | Nomes repetidos, e a chave que distingue | **proposto** | — (pedido do dono; revisa o `0017`) |
 
 ## O que ainda não tem ADR
 
