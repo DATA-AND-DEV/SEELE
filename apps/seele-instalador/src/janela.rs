@@ -1,0 +1,1004 @@
+//! A janela, desenhada por nós.
+//!
+//! **Sem moldura do sistema.** `WS_POPUP` e nada mais: a barra de título é
+//! pintada aqui, com a marca e a versão, que é o que o desenho pede e o que o
+//! NSIS não sabia fazer. O preço é assumir o que a moldura dava de graça —
+//! arrastar a janela, fechar, e o foco do teclado.
+//!
+//! **Tudo é desenhado, menos o campo de texto.** Um `EDIT` do Windows aceita
+//! cor por `WM_CTLCOLOREDIT` — ao contrário do botão, que o tema do sistema
+//! desenha e ignora quem manda — e traz cursor, seleção, teclado e IME prontos.
+//! Reescrever isso à mão para uma caixa que recebe um caminho de pasta seria
+//! trocar o certo pelo pior.
+//!
+//! **Desenho em buffer, e não direto na tela.** Cada `WM_PAINT` pinta num
+//! bitmap de memória e copia uma vez. Sem isso a janela pisca a cada movimento
+//! do mouse, porque cada retângulo aparece separado — e o desenho é quase todo
+//! retângulo.
+#![allow(unsafe_code)]
+
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreateSolidBrush,
+    DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, InvalidateRect, SelectObject, SetBkMode,
+    SetTextColor, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_NOPREFIX,
+    DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, FF_DONTCARE, FW_BOLD, FW_NORMAL, HBRUSH, HDC, HFONT,
+    OUT_TT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
+};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::HiDpi::{
+    GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GetSystemMetrics,
+    GetWindowLongPtrW, LoadCursorW, PostQuitMessage, RegisterClassW, SetWindowLongPtrW, ShowWindow,
+    TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCAPTION, HTCLIENT,
+    IDC_ARROW, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_SHOW, WM_DESTROY, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_EX_APPWINDOW, WS_POPUP,
+};
+
+use crate::pele;
+
+/// Em que passo do assistente a janela está.
+///
+/// Quatro, como o desenho: destino, opções, instalando, pronto.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Passo {
+    Destino,
+    Opcoes,
+    Instalando,
+    Pronto,
+}
+
+impl Passo {
+    const TODOS: [Self; 4] = [Self::Destino, Self::Opcoes, Self::Instalando, Self::Pronto];
+
+    const fn numero(self) -> &'static str {
+        match self {
+            Self::Destino => "01",
+            Self::Opcoes => "02",
+            Self::Instalando => "03",
+            Self::Pronto => "04",
+        }
+    }
+
+    const fn nome(self) -> &'static str {
+        match self {
+            Self::Destino => "DESTINO",
+            Self::Opcoes => "OPÇÕES",
+            Self::Instalando => "INSTALANDO",
+            Self::Pronto => "PRONTO",
+        }
+    }
+
+    const fn titulo(self) -> &'static str {
+        match self {
+            Self::Destino => "Instalar o SEELE nesta máquina",
+            Self::Opcoes => "O que o instalador vai mexer",
+            Self::Instalando => "Instalando",
+            Self::Pronto => "O SEELE está pronto",
+        }
+    }
+
+    /// O rótulo do botão que avança, que muda com o passo.
+    const fn verbo(self) -> &'static str {
+        match self {
+            Self::Destino => "CONTINUAR",
+            Self::Opcoes => "INSTALAR",
+            Self::Instalando => "AGUARDE…",
+            Self::Pronto => "ABRIR O SEELE",
+        }
+    }
+}
+
+/// Uma região que responde ao mouse.
+///
+/// Guardada como retângulo em pixels da janela, recalculada a cada desenho: a
+/// janela não muda de tamanho, mas o dpi da tela em que ela está pode mudar
+/// quando alguém a arrasta para outro monitor.
+#[derive(Clone, Copy)]
+struct Alvo {
+    caixa: RECT,
+    qual: Acao,
+}
+
+/// O que um clique faz.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Acao {
+    Fechar,
+    Voltar,
+    Avancar,
+    Alternar(usize),
+}
+
+/// O que a janela sabe de si.
+struct Estado {
+    passo: Passo,
+    /// As duas escolhas do passo 02, na ordem em que são desenhadas.
+    opcoes: [bool; 2],
+    alvos: Vec<Alvo>,
+    sob_o_mouse: Option<Acao>,
+    apertando: Option<Acao>,
+    dpi: i32,
+    cartela: HFONT,
+    rotulo: HFONT,
+    corpo: HFONT,
+}
+
+impl Estado {
+    /// Converte um valor do desenho (96 dpi) para o pixel desta tela.
+    const fn px(&self, valor: i32) -> i32 {
+        valor * self.dpi / 96
+    }
+}
+
+/// As duas opções do passo 02 — as que o produto sabe cumprir.
+///
+/// O desenho traz quatro. As outras duas — tratar `seele://` e abrir junto com o
+/// Windows — descrevem coisas que o app não faz: `seele://` só existe como nome
+/// de canal interno de evento, e não há partida minimizada. Um interruptor que
+/// não cumpre é pior que um interruptor ausente, então elas ficam de fora até
+/// existirem.
+const OPCOES: [(&str, &str); 2] = [
+    (
+        "Atalho na área de trabalho",
+        "e uma entrada no menu Iniciar",
+    ),
+    (
+        "Abrir a porta 8383 UDP no firewall do Windows",
+        "só é necessário se você for hospedar um servidor",
+    ),
+];
+
+/// Texto para o Win32: UTF-16 terminado em zero.
+fn larga(texto: &str) -> Vec<u16> {
+    texto.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Pinta um retângulo cheio.
+fn bloco(hdc: HDC, caixa: RECT, cor: u32) {
+    // SAFETY: `caixa` é um retângulo válido e o pincel é criado e destruído aqui.
+    unsafe {
+        let pincel: HBRUSH = CreateSolidBrush(COLORREF(cor));
+        FillRect(hdc, &caixa, pincel);
+        let _ = DeleteObject(pincel.into());
+    }
+}
+
+/// Uma linha de 1px — a única borda que este desenho conhece.
+fn risco(hdc: HDC, x: i32, y: i32, largura: i32, altura: i32, cor: u32) {
+    bloco(
+        hdc,
+        RECT {
+            left: x,
+            top: y,
+            right: x + largura,
+            bottom: y + altura,
+        },
+        cor,
+    );
+}
+
+/// Escreve texto numa caixa.
+fn escrever(hdc: HDC, caixa: RECT, texto: &str, fonte: HFONT, cor: u32, formato: u32) {
+    let mut unidades = larga(texto);
+    let mut alvo = caixa;
+    // SAFETY: `unidades` vive até o fim da chamada e `alvo` é um retângulo válido.
+    unsafe {
+        let anterior = SelectObject(hdc, fonte.into());
+        SetTextColor(hdc, COLORREF(cor));
+        SetBkMode(hdc, TRANSPARENT);
+        DrawTextW(
+            hdc,
+            &mut unidades,
+            &mut alvo,
+            windows::Win32::Graphics::Gdi::DRAW_TEXT_FORMAT(formato),
+        );
+        SelectObject(hdc, anterior);
+    }
+}
+
+/// Cria uma face a partir do nome que a família registrou.
+fn fonte(familia: &str, altura: i32, negrito: bool) -> HFONT {
+    let nome = larga(familia);
+    // SAFETY: `nome` é uma string terminada em zero e vive até o fim da chamada.
+    unsafe {
+        CreateFontW(
+            -altura,
+            0,
+            0,
+            0,
+            if negrito {
+                FW_BOLD.0 as i32
+            } else {
+                FW_NORMAL.0 as i32
+            },
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_TT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            DEFAULT_QUALITY,
+            u32::from(FF_DONTCARE.0),
+            PCWSTR(nome.as_ptr()),
+        )
+    }
+}
+
+/// Desenha a janela inteira e devolve os alvos de clique que ela criou.
+///
+/// Os alvos saem daqui, e não de uma tabela à parte, porque quem sabe onde um
+/// botão ficou é quem o desenhou. Duas listas — uma para pintar, outra para
+/// clicar — divergem no primeiro ajuste de layout, e o sintoma é um botão que
+/// responde ao lado de onde aparece.
+fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
+    let mut alvos = Vec::new();
+    let px = |v: i32| estado.px(v);
+
+    // O fundo, e a moldura de 1px que substitui a do sistema.
+    bloco(
+        hdc,
+        RECT {
+            left: 0,
+            top: 0,
+            right: largura,
+            bottom: altura,
+        },
+        pele::NEGRO,
+    );
+    risco(hdc, 0, 0, largura, 1, pele::LINHA_FORTE);
+    risco(hdc, 0, altura - 1, largura, 1, pele::LINHA_FORTE);
+    risco(hdc, 0, 0, 1, altura, pele::LINHA_FORTE);
+    risco(hdc, largura - 1, 0, 1, altura, pele::LINHA_FORTE);
+
+    // ---- a barra de título, que é nossa ----
+    let barra = px(pele::BARRA);
+    bloco(
+        hdc,
+        RECT {
+            left: 1,
+            top: 1,
+            right: largura - 1,
+            bottom: barra,
+        },
+        pele::PAINEL,
+    );
+    risco(hdc, 0, barra, largura, 1, pele::LINHA);
+    escrever(
+        hdc,
+        RECT {
+            left: px(14),
+            top: 1,
+            right: largura - px(90),
+            bottom: barra,
+        },
+        "INSTALAR O SEELE",
+        estado.cartela,
+        pele::OSSO,
+        DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0,
+    );
+    escrever(
+        hdc,
+        RECT {
+            left: px(160),
+            top: 1,
+            right: largura - px(50),
+            bottom: barra,
+        },
+        concat!(env!("CARGO_PKG_VERSION"), " · WINDOWS 64 BITS"),
+        estado.rotulo,
+        pele::ROTULO,
+        DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0,
+    );
+
+    let fechar = RECT {
+        left: largura - px(40),
+        top: 1,
+        right: largura - 1,
+        bottom: barra,
+    };
+    if estado.sob_o_mouse == Some(Acao::Fechar) {
+        bloco(hdc, fechar, pele::LINHA);
+    }
+    escrever(
+        hdc,
+        fechar,
+        "×",
+        estado.corpo,
+        pele::OSSO,
+        DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0 | windows::Win32::Graphics::Gdi::DT_CENTER.0,
+    );
+    alvos.push(Alvo {
+        caixa: fechar,
+        qual: Acao::Fechar,
+    });
+
+    // ---- os quatro passos ----
+    let fita = barra + 1;
+    let altura_da_fita = px(30);
+    let largura_do_passo = (largura - 2) / 4;
+    for (i, passo) in Passo::TODOS.iter().enumerate() {
+        let x = 1 + largura_do_passo * i32::try_from(i).unwrap_or(0);
+        let caixa = RECT {
+            left: x,
+            top: fita,
+            right: x + largura_do_passo,
+            bottom: fita + altura_da_fita,
+        };
+        let atual = *passo == estado.passo;
+        bloco(hdc, caixa, if atual { pele::LARANJA } else { pele::PAINEL });
+        escrever(
+            hdc,
+            RECT {
+                left: caixa.left + px(12),
+                ..caixa
+            },
+            &format!("{}  {}", passo.numero(), passo.nome()),
+            estado.rotulo,
+            if atual { pele::NEGRO } else { pele::ROTULO },
+            DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0,
+        );
+        risco(hdc, caixa.right - 1, fita, 1, altura_da_fita, pele::LINHA);
+    }
+    risco(hdc, 0, fita + altura_da_fita, largura, 1, pele::LINHA);
+
+    // ---- a lombada ----
+    let topo = fita + altura_da_fita + 1;
+    let base = altura - px(pele::RODAPE);
+    let lombada = px(pele::LOMBADA);
+    bloco(
+        hdc,
+        RECT {
+            left: 1,
+            top: topo,
+            right: lombada,
+            bottom: base,
+        },
+        pele::PAINEL,
+    );
+    risco(hdc, lombada, topo, 1, base - topo, pele::LINHA);
+    marca(hdc, px(20), topo + px(20), estado);
+    escrever(
+        hdc,
+        RECT {
+            left: px(20),
+            top: topo + px(76),
+            right: lombada,
+            bottom: topo + px(110),
+        },
+        "SEELE",
+        estado.cartela,
+        pele::LARANJA,
+        DT_SINGLELINE.0 | DT_NOPREFIX.0,
+    );
+    escrever(
+        hdc,
+        RECT {
+            left: px(20),
+            top: topo + px(112),
+            right: lombada - px(16),
+            bottom: base - px(60),
+        },
+        "VOZ, VÍDEO E TEXTO AUTO-HOSPEDADOS",
+        estado.rotulo,
+        pele::ROTULO,
+        DT_WORDBREAK.0 | DT_NOPREFIX.0,
+    );
+    escrever(
+        hdc,
+        RECT {
+            left: px(20),
+            top: base - px(56),
+            right: lombada - px(16),
+            bottom: base - px(8),
+        },
+        "O mesmo executável é o aplicativo e o servidor.",
+        estado.corpo,
+        pele::ROTULO,
+        DT_WORDBREAK.0 | DT_NOPREFIX.0,
+    );
+
+    // ---- o corpo ----
+    let corpo_x = lombada + px(28);
+    let corpo_direita = largura - px(28);
+    escrever(
+        hdc,
+        RECT {
+            left: corpo_x,
+            top: topo + px(24),
+            right: corpo_direita,
+            bottom: topo + px(58),
+        },
+        estado.passo.titulo(),
+        estado.cartela,
+        pele::OSSO,
+        DT_SINGLELINE.0 | DT_NOPREFIX.0,
+    );
+
+    if estado.passo == Passo::Opcoes {
+        let mut y = topo + px(72);
+        for (i, (nome, nota)) in OPCOES.iter().enumerate() {
+            let caixa = RECT {
+                left: corpo_x,
+                top: y,
+                right: corpo_direita,
+                bottom: y + px(44),
+            };
+            let marcada = estado.opcoes.get(i).copied().unwrap_or(false);
+            let quadro = RECT {
+                left: corpo_x,
+                top: y + px(2),
+                right: corpo_x + px(16),
+                bottom: y + px(18),
+            };
+            bloco(
+                hdc,
+                quadro,
+                if marcada { pele::LARANJA } else { pele::NEGRO },
+            );
+            if !marcada {
+                risco(hdc, quadro.left, quadro.top, px(16), 1, pele::LINHA_FORTE);
+                risco(
+                    hdc,
+                    quadro.left,
+                    quadro.bottom - 1,
+                    px(16),
+                    1,
+                    pele::LINHA_FORTE,
+                );
+                risco(hdc, quadro.left, quadro.top, 1, px(16), pele::LINHA_FORTE);
+                risco(
+                    hdc,
+                    quadro.right - 1,
+                    quadro.top,
+                    1,
+                    px(16),
+                    pele::LINHA_FORTE,
+                );
+            } else {
+                escrever(
+                    hdc,
+                    quadro,
+                    "×",
+                    estado.corpo,
+                    pele::NEGRO,
+                    DT_SINGLELINE.0
+                        | DT_VCENTER.0
+                        | DT_NOPREFIX.0
+                        | windows::Win32::Graphics::Gdi::DT_CENTER.0,
+                );
+            }
+            escrever(
+                hdc,
+                RECT {
+                    left: corpo_x + px(28),
+                    top: y,
+                    right: corpo_direita,
+                    bottom: y + px(18),
+                },
+                nome,
+                estado.corpo,
+                pele::OSSO,
+                DT_SINGLELINE.0 | DT_NOPREFIX.0,
+            );
+            escrever(
+                hdc,
+                RECT {
+                    left: corpo_x + px(28),
+                    top: y + px(18),
+                    right: corpo_direita,
+                    bottom: y + px(40),
+                },
+                nota,
+                estado.corpo,
+                pele::ROTULO,
+                DT_WORDBREAK.0 | DT_NOPREFIX.0,
+            );
+            alvos.push(Alvo {
+                caixa,
+                qual: Acao::Alternar(i),
+            });
+            y += px(52);
+        }
+    }
+
+    // ---- o rodapé ----
+    bloco(
+        hdc,
+        RECT {
+            left: 1,
+            top: base,
+            right: largura - 1,
+            bottom: altura - 1,
+        },
+        pele::PAINEL,
+    );
+    risco(hdc, 0, base, largura, 1, pele::LINHA);
+    escrever(
+        hdc,
+        RECT {
+            left: px(28),
+            top: base,
+            right: largura - px(240),
+            bottom: altura,
+        },
+        &format!(
+            "PASSO {} DE 04 · {}",
+            estado.passo.numero(),
+            estado.passo.nome()
+        ),
+        estado.rotulo,
+        pele::ROTULO,
+        DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0,
+    );
+
+    let avancar = RECT {
+        left: largura - px(150),
+        top: base + px(14),
+        right: largura - px(28),
+        bottom: altura - px(14),
+    };
+    let aceso = estado.apertando == Some(Acao::Avancar);
+    bloco(hdc, avancar, if aceso { pele::OSSO } else { pele::LARANJA });
+    escrever(
+        hdc,
+        avancar,
+        estado.passo.verbo(),
+        estado.rotulo,
+        pele::NEGRO,
+        DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0 | windows::Win32::Graphics::Gdi::DT_CENTER.0,
+    );
+    alvos.push(Alvo {
+        caixa: avancar,
+        qual: Acao::Avancar,
+    });
+
+    let voltar = RECT {
+        left: avancar.left - px(104),
+        top: avancar.top,
+        right: avancar.left - px(10),
+        bottom: avancar.bottom,
+    };
+    let primeiro = estado.passo == Passo::Destino;
+    let cor_da_borda = if primeiro {
+        pele::LINHA
+    } else {
+        pele::LINHA_FORTE
+    };
+    risco(
+        hdc,
+        voltar.left,
+        voltar.top,
+        voltar.right - voltar.left,
+        1,
+        cor_da_borda,
+    );
+    risco(
+        hdc,
+        voltar.left,
+        voltar.bottom - 1,
+        voltar.right - voltar.left,
+        1,
+        cor_da_borda,
+    );
+    risco(
+        hdc,
+        voltar.left,
+        voltar.top,
+        1,
+        voltar.bottom - voltar.top,
+        cor_da_borda,
+    );
+    risco(
+        hdc,
+        voltar.right - 1,
+        voltar.top,
+        1,
+        voltar.bottom - voltar.top,
+        cor_da_borda,
+    );
+    escrever(
+        hdc,
+        voltar,
+        "VOLTAR",
+        estado.rotulo,
+        if primeiro {
+            pele::LINHA_FORTE
+        } else {
+            pele::ROTULO
+        },
+        DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0 | windows::Win32::Graphics::Gdi::DT_CENTER.0,
+    );
+    if !primeiro {
+        alvos.push(Alvo {
+            caixa: voltar,
+            qual: Acao::Voltar,
+        });
+    }
+
+    alvos
+}
+
+/// Qual alvo está sob um ponto, se algum.
+fn alvo_em(alvos: &[Alvo], x: i32, y: i32) -> Option<Acao> {
+    alvos
+        .iter()
+        .find(|alvo| {
+            x >= alvo.caixa.left
+                && x < alvo.caixa.right
+                && y >= alvo.caixa.top
+                && y < alvo.caixa.bottom
+        })
+        .map(|alvo| alvo.qual)
+}
+
+/// O estado da janela, pendurado nela.
+///
+/// `GWLP_USERDATA` é onde o Win32 deixa um ponteiro por janela. O estado é
+/// criado antes da janela e vazado de propósito no fim do programa: um
+/// instalador que fecha é um processo que termina, e devolver a memória ao
+/// sistema um instante antes de o sistema tomá-la de volta não paga o risco de
+/// uma mensagem tardia encontrar o ponteiro já solto.
+fn estado_de(janela: HWND) -> Option<&'static mut Estado> {
+    // SAFETY: o ponteiro guardado é sempre o do `Box` criado em `abrir`, e ele
+    // vive enquanto o processo viver.
+    unsafe {
+        let bruto = GetWindowLongPtrW(janela, GWLP_USERDATA) as *mut Estado;
+        if bruto.is_null() {
+            None
+        } else {
+            Some(&mut *bruto)
+        }
+    }
+}
+
+/// Manda redesenhar a janela inteira.
+fn repintar(janela: HWND) {
+    // SAFETY: `janela` é válida enquanto esta função é chamada de dentro do
+    // procedimento dela.
+    unsafe {
+        let _ = InvalidateRect(Some(janela), None, false);
+    }
+}
+
+extern "system" fn procedimento(janela: HWND, mensagem: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+    match mensagem {
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            // SAFETY: par `BeginPaint`/`EndPaint` completo, e todo objeto de GDI
+            // criado aqui é destruído antes do retorno.
+            unsafe {
+                let hdc = BeginPaint(janela, &mut ps);
+                let mut caixa = RECT::default();
+                let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(janela, &mut caixa);
+                let (largura, altura) = (caixa.right, caixa.bottom);
+
+                // O buffer: pintar direto na tela faz a janela piscar a cada
+                // movimento do mouse, porque cada retângulo aparece sozinho.
+                let memoria = CreateCompatibleDC(Some(hdc));
+                let bitmap = CreateCompatibleBitmap(hdc, largura, altura);
+                let anterior = SelectObject(memoria, bitmap.into());
+
+                if let Some(estado) = estado_de(janela) {
+                    estado.alvos = desenhar(estado, memoria, largura, altura);
+                }
+
+                let _ = BitBlt(hdc, 0, 0, largura, altura, Some(memoria), 0, 0, SRCCOPY);
+                SelectObject(memoria, anterior);
+                let _ = DeleteObject(bitmap.into());
+                let _ = DeleteDC(memoria);
+                let _ = EndPaint(janela, &ps);
+            }
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            let (x, y) = (posicao_x(l), posicao_y(l));
+            if let Some(estado) = estado_de(janela) {
+                let agora = alvo_em(&estado.alvos, x, y);
+                if agora != estado.sob_o_mouse {
+                    estado.sob_o_mouse = agora;
+                    repintar(janela);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            let (x, y) = (posicao_x(l), posicao_y(l));
+            if let Some(estado) = estado_de(janela) {
+                estado.apertando = alvo_em(&estado.alvos, x, y);
+                if estado.apertando.is_some() {
+                    // SAFETY: a captura é solta no `WM_LBUTTONUP` logo abaixo.
+                    unsafe {
+                        SetCapture(janela);
+                    }
+                    repintar(janela);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            let (x, y) = (posicao_x(l), posicao_y(l));
+            // SAFETY: solta a captura tomada no botão apertado.
+            unsafe {
+                let _ = ReleaseCapture();
+            }
+            if let Some(estado) = estado_de(janela) {
+                let sobre = alvo_em(&estado.alvos, x, y);
+                let apertado = estado.apertando.take();
+                // Só age quando soltou **em cima do mesmo alvo** em que apertou:
+                // apertar e arrastar para fora é como se desiste de um clique, e
+                // um instalador que instala no arrependimento é um instalador
+                // que ninguém confia.
+                if sobre.is_some() && sobre == apertado {
+                    agir(janela, estado, sobre);
+                }
+                repintar(janela);
+            }
+            LRESULT(0)
+        }
+        WM_NCHITTEST => {
+            // A barra de título é nossa, então arrastar a janela também é.
+            // `HTCAPTION` faz o próprio Windows mover a janela — reimplementar o
+            // arrasto à mão perderia o encaixe nas bordas e o atalho de teclado.
+            // SAFETY: chamada padrão, sem ponteiro nenhum.
+            let padrao = unsafe { DefWindowProcW(janela, mensagem, w, l) };
+            if padrao.0 != HTCLIENT as isize {
+                return padrao;
+            }
+            let mut ponto = POINT {
+                x: posicao_x(l),
+                y: posicao_y(l),
+            };
+            // SAFETY: `ponto` é válido e a janela existe.
+            unsafe {
+                let _ = windows::Win32::Graphics::Gdi::ScreenToClient(janela, &mut ponto);
+            }
+            if let Some(estado) = estado_de(janela) {
+                if alvo_em(&estado.alvos, ponto.x, ponto.y).is_none()
+                    && ponto.y < estado.px(pele::BARRA)
+                {
+                    return LRESULT(HTCAPTION as isize);
+                }
+            }
+            padrao
+        }
+        WM_DESTROY => {
+            // SAFETY: encerra o laço de mensagens.
+            unsafe {
+                PostQuitMessage(0);
+            }
+            LRESULT(0)
+        }
+        // SAFETY: o resto é do sistema.
+        _ => unsafe { DefWindowProcW(janela, mensagem, w, l) },
+    }
+}
+
+/// O que um clique consumado faz.
+fn agir(janela: HWND, estado: &mut Estado, acao: Option<Acao>) {
+    match acao {
+        Some(Acao::Fechar) => {
+            // SAFETY: fecha a janela, o que leva ao `WM_DESTROY`.
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(janela);
+            }
+        }
+        Some(Acao::Voltar) => {
+            estado.passo = match estado.passo {
+                Passo::Destino | Passo::Opcoes => Passo::Destino,
+                Passo::Instalando => Passo::Opcoes,
+                Passo::Pronto => Passo::Instalando,
+            };
+        }
+        Some(Acao::Avancar) => {
+            estado.passo = match estado.passo {
+                Passo::Destino => Passo::Opcoes,
+                Passo::Opcoes => Passo::Instalando,
+                Passo::Instalando | Passo::Pronto => Passo::Pronto,
+            };
+        }
+        Some(Acao::Alternar(qual)) => {
+            if let Some(marca) = estado.opcoes.get_mut(qual) {
+                *marca = !*marca;
+            }
+        }
+        None => {}
+    }
+}
+
+/// O x de um `LPARAM` de mouse. O Win32 empacota os dois numa palavra dupla.
+const fn posicao_x(l: LPARAM) -> i32 {
+    (l.0 & 0xFFFF) as i16 as i32
+}
+
+/// O y do mesmo `LPARAM`.
+const fn posicao_y(l: LPARAM) -> i32 {
+    ((l.0 >> 16) & 0xFFFF) as i16 as i32
+}
+
+/// Registra uma face embarcada e devolve `false` se o Windows a recusar.
+///
+/// **Da memória, nunca instalada.** `AddFontMemResourceEx` deixa a face
+/// disponível só para este processo e some quando ele termina: quem roda o
+/// instalador não fica com fonte nova no sistema, e quem desiste no primeiro
+/// passo não deixa rastro.
+fn registrar_face(bytes: &'static [u8]) -> bool {
+    let mut quantas: u32 = 0;
+    // SAFETY: `bytes` é `'static` — vem de `include_bytes!` — e continua válido
+    // enquanto o processo viver, que é o que esta função exige.
+    let alça = unsafe {
+        windows::Win32::Graphics::Gdi::AddFontMemResourceEx(
+            bytes.as_ptr().cast(),
+            u32::try_from(bytes.len()).unwrap_or(0),
+            None,
+            &raw mut quantas,
+        )
+    };
+    !alça.is_invalid() && quantas > 0
+}
+
+/// Abre a janela e roda até alguém fechá-la.
+pub(crate) fn abrir() -> Result<(), String> {
+    // SAFETY: chamadas de inicialização do processo, antes de qualquer janela.
+    unsafe {
+        // Por monitor, e na segunda versão: sem isto o Windows estica a janela
+        // numa tela de 150% e o desenho sai borrado — que é justamente o que
+        // este instalador existe para não ser.
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+
+    // As faces antes da janela: uma face que não registrou faz o `CreateFontW`
+    // cair na substituta do sistema **em silêncio**, e o instalador aparece com
+    // a tipografia errada sem nada dizer.
+    let faces = [
+        ("Saira Condensed 700", pele::SAIRA_700),
+        ("Saira Condensed 500", pele::SAIRA_500),
+        ("IBM Plex Mono 400", pele::PLEX_400),
+    ];
+    for (nome, bytes) in faces {
+        if !registrar_face(bytes) {
+            return Err(format!(
+                "o Windows recusou a face embarcada «{nome}». Sem ela o \
+                 instalador apareceria na tipografia do sistema, que não é a do \
+                 produto."
+            ));
+        }
+    }
+
+    // SAFETY: registro de classe e criação de janela, com todos os ponteiros
+    // vivos até depois do uso.
+    let janela = unsafe {
+        let instancia: HINSTANCE = GetModuleHandleW(None)
+            .map_err(|erro| format!("não achei o módulo deste processo: {erro}"))?
+            .into();
+        let classe = larga("SeeleInstalador");
+        let cursor = LoadCursorW(None, IDC_ARROW)
+            .map_err(|erro| format!("não carreguei o cursor: {erro}"))?;
+
+        let registro = WNDCLASSW {
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(procedimento),
+            hInstance: instancia,
+            lpszClassName: PCWSTR(classe.as_ptr()),
+            hCursor: cursor,
+            ..Default::default()
+        };
+        if RegisterClassW(&registro) == 0 {
+            return Err("não registrei a classe da janela".to_owned());
+        }
+
+        // O dpi só se sabe depois de a janela existir, e o tamanho depende dele.
+        // Então ela nasce no tamanho de 96 dpi e é ajustada logo abaixo.
+        let janela = CreateWindowExW(
+            WS_EX_APPWINDOW,
+            PCWSTR(classe.as_ptr()),
+            PCWSTR(larga("Instalar o SEELE").as_ptr()),
+            WS_POPUP,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            pele::LARGURA,
+            pele::ALTURA,
+            None,
+            None,
+            Some(instancia),
+            None,
+        )
+        .map_err(|erro| format!("não criei a janela: {erro}"))?;
+
+        let dpi = i32::try_from(GetDpiForWindow(janela)).unwrap_or(96);
+        let largura = pele::LARGURA * dpi / 96;
+        let altura = pele::ALTURA * dpi / 96;
+        let x = (GetSystemMetrics(SM_CXSCREEN) - largura) / 2;
+        let y = (GetSystemMetrics(SM_CYSCREEN) - altura) / 2;
+        let _ = windows::Win32::UI::WindowsAndMessaging::MoveWindow(
+            janela, x, y, largura, altura, true,
+        );
+
+        let estado = Box::new(Estado {
+            passo: Passo::Destino,
+            // O atalho nasce marcado e a porta nasce desmarcada, como o desenho
+            // os mostra: um atalho é conveniência e uma porta aberta é decisão.
+            opcoes: [true, false],
+            alvos: Vec::new(),
+            sob_o_mouse: None,
+            apertando: None,
+            dpi,
+            cartela: fonte("Saira Condensed", 22 * dpi / 96, true),
+            rotulo: fonte("Saira Condensed", 11 * dpi / 96, false),
+            corpo: fonte("IBM Plex Mono", 12 * dpi / 96, false),
+        });
+        SetWindowLongPtrW(janela, GWLP_USERDATA, Box::into_raw(estado) as isize);
+
+        let _ = ShowWindow(janela, SW_SHOW);
+        janela
+    };
+
+    // O laço. `GetMessageW` devolve 0 no `WM_QUIT`, que é o que `PostQuitMessage`
+    // enfileira quando a janela morre.
+    let mut mensagem = MSG::default();
+    // SAFETY: laço de mensagens padrão, com `mensagem` viva em todas as chamadas.
+    unsafe {
+        while GetMessageW(&mut mensagem, None, 0, 0).as_bool() {
+            let _ = TranslateMessage(&mensagem);
+            DispatchMessageW(&mensagem);
+        }
+    }
+    let _ = janela;
+    Ok(())
+}
+
+/// Desenha a marca embarcada, direto do `.bmp`, sem criar objeto de GDI.
+///
+/// `SetDIBitsToDevice` pinta os bytes como estão — o cabeçalho do arquivo já diz
+/// tamanho, profundidade e ordem das linhas. Criar um `HBITMAP` para depois
+/// destruí-lo seria dois objetos a mais para vazar num caminho que roda a cada
+/// repintura.
+///
+/// O fundo do arquivo já é `--seele-negro-painel`, que é a cor da lombada: por
+/// isso ele encaixa sem transparência nenhuma. Ver
+/// `empacotar/marca-do-instalador.py`.
+fn marca(hdc: HDC, x: i32, y: i32, estado: &Estado) {
+    // 14 bytes de cabeçalho de arquivo, e o `BITMAPINFOHEADER` logo depois. O
+    // deslocamento dos pixels vem do próprio cabeçalho, e não de uma conta:
+    // um `.bmp` com paleta põe os pixels mais adiante.
+    let Some(cabecalho) = pele::MARCA.get(14..) else {
+        return;
+    };
+    let Some(inicio) = pele::MARCA.get(10..14) else {
+        return;
+    };
+    let deslocamento = u32::from_le_bytes([
+        *inicio.first().unwrap_or(&0),
+        *inicio.get(1).unwrap_or(&0),
+        *inicio.get(2).unwrap_or(&0),
+        *inicio.get(3).unwrap_or(&0),
+    ]) as usize;
+    let Some(pixels) = pele::MARCA.get(deslocamento..) else {
+        return;
+    };
+
+    let lado = estado.px(52);
+    // SAFETY: `cabecalho` aponta para o `BITMAPINFOHEADER` de um `.bmp` que este
+    // binário embarca, e `pixels` para os dados que ele descreve. Os dois vivem
+    // enquanto o processo viver — vêm de `include_bytes!`.
+    unsafe {
+        windows::Win32::Graphics::Gdi::StretchDIBits(
+            hdc,
+            x,
+            y,
+            lado,
+            lado,
+            0,
+            0,
+            52,
+            52,
+            Some(pixels.as_ptr().cast()),
+            cabecalho.as_ptr().cast(),
+            windows::Win32::Graphics::Gdi::DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+    }
+}

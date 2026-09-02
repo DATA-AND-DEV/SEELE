@@ -23,8 +23,28 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Controls",
     "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_LibraryLoader",
 ] }
 
-[lints]
-workspace = true
+# **Folha própria, e a razão é uma linha só.**
+#
+# `unsafe_code` precisa ser `deny` em vez de `forbid` — a janela é Win32, e todo
+# Win32 é `unsafe`. `forbid` não se afrouxa nem com `allow` dentro de um módulo,
+# que é o mecanismo com que o `seele-video` isola a mesma necessidade (ADR 0041).
+#
+# Todo o resto é **cópia** do `[workspace.lints]`, e cópia apodrece: uma regra
+# acrescentada ao workspace amanhã não chega aqui sozinha. Quem prende isso é
+# `xtask/tests/folha_de_lints.rs`, que lê os dois arquivos e reprova qualquer
+# divergência que não seja esta.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+indexing_slicing = "warn"

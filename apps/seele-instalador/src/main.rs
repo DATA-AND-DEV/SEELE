@@ -35,6 +35,10 @@
 //! ADR pede, e a que evita descobrir a obrigação esquecida depois de o
 //! instalador estar pronto.
 
+#[cfg(windows)]
+mod janela;
+mod pele;
+
 /// Cada coisa que o instalador do NSIS fazia, e o que quebra sem ela.
 ///
 /// **Escrita como dado, e não como prosa, porque um teste a lê.** Uma lista em
@@ -82,10 +86,17 @@ pub const OBRIGACOES: &[(&str, &str)] = &[
 
 #[cfg(windows)]
 fn main() -> std::process::ExitCode {
-    // A janela entra aqui, na etapa seguinte. Enquanto ela não existe, o
-    // instalador diz o que é em vez de fingir que instalou alguma coisa.
-    eprintln!("seele-instalador: ainda sem janela; ver ADR 0043.");
-    std::process::ExitCode::FAILURE
+    // **A janela abre e ainda não instala nada.** É a etapa 1 do ADR 0043: ver o
+    // desenho de pé antes de escrever o motor. Um instalador que desenha certo e
+    // instala errado é pior que um que não abre, então o motor vem depois, com
+    // as obrigações desta lista uma a uma.
+    match janela::abrir() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(motivo) => {
+            eprintln!("seele-instalador: {motivo}");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }
 
 /// Fora do Windows ele compila e recusa.
