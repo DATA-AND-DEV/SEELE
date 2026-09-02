@@ -22,7 +22,8 @@
 //!
 //! A conclusão vale escrita: este guarda encurta a distância até o erro, e não
 //! substitui compilar nos três sistemas. O job `windows-2022` de
-//! `.github/workflows/ci.yml` é quem faz isso, e o `seele-audio` quebrado
+//! `empacotar/publicar.sh` é quem faz isso — rodando a bateria aqui e no
+//! Windows antes de empacotar —, e o `seele-audio` quebrado
 //! atravessou um release inteiro — o que quer dizer que ele não estava sendo
 //! olhado. Ver a pendência 7.
 

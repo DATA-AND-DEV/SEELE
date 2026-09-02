@@ -705,6 +705,34 @@ bateria() {
     fi
 
     passo "bateria, aqui"
+
+    # **O codec, exigido e não suposto.**
+    #
+    # Metade dos testes de tela pula quando o módulo do Cisco não está por
+    # perto, e pular tem a mesma cor de passar num relatório verde — foi assim
+    # que o `ida_e_volta` ficou anos verde enquanto falhava, e assim que o som
+    # da tela do Windows atravessou seis versões quebrado. `SEELE_EXIGE_CODEC`
+    # transforma a ausência em erro, e aqui ela é obrigatória: um release não é
+    # lugar de descobrir depois.
+    #
+    # O módulo é o que o próprio app baixa. Se não estiver aqui, abra o SEELE
+    # uma vez — ele o busca sozinho — ou aponte `SEELE_OPENH264`.
+    if [ -z "${SEELE_OPENH264:-}" ]; then
+        for b_tentativa in "$HOME/.config/seele/libopenh264.dylib" \
+            "$HOME/.config/seele/libopenh264.so"; do
+            if [ -f "$b_tentativa" ]; then
+                SEELE_OPENH264="$b_tentativa"
+                break
+            fi
+        done
+    fi
+    if [ -z "${SEELE_OPENH264:-}" ] || [ ! -f "$SEELE_OPENH264" ]; then
+        morrer "não achei o módulo de vídeo do Cisco." \
+            "Abra o SEELE uma vez para ele baixá-lo, ou aponte SEELE_OPENH264."
+    fi
+    export SEELE_OPENH264
+    export SEELE_EXIGE_CODEC=1
+
     if ! cargo fmt --manifest-path "$RAIZ/Cargo.toml" --check >/dev/null 2>&1; then
         morrer "o código não está formatado." "Rode «cargo fmt»."
     fi
@@ -730,6 +758,8 @@ bateria() {
         passo "bateria, no Windows"
         bw_saida=$(no_windows "\$ErrorActionPreference = 'Stop'
 Set-Location '${REPO_WINDOWS}'
+\$env:SEELE_OPENH264 = \"\$env:APPDATA\tech.datadev.seele\openh264.dll\"
+\$env:SEELE_EXIGE_CODEC = '1'
 cargo test --workspace 2>&1 | Select-String -Pattern 'test result: FAILED|^error' | Select-Object -First 5")
         if [ -n "$bw_saida" ]; then
             morrer "a bateria reprovou no Windows:" "$bw_saida"
@@ -1220,16 +1250,23 @@ conferir_windows
 conferir_github
 # Depois das conferências e **antes** de empacotar: descobrir que a bateria
 # reprovou vale minutos aqui e uma hora e meia depois do Linux.
-bateria
 printf -- '--- tudo conferido ---\n'
 
 if [ "$SO_CONFERIR" = sim ]; then
     printf '\n'
     printf '%s\n' "Nada foi compilado — era --conferir." \
+        "A bateria também não rodou: ela compila o mundo, e --conferir existe" \
+        "para responder em segundos se vale a pena começar." \
         "Para valer, e reservando o resto da tarde:" \
         "  $0 $VERSAO"
     exit 0
 fi
+
+# **Depois do `--conferir` e antes de empacotar.** Depois porque a bateria
+# compila o workspace inteiro e o `--conferir` existe para responder em segundos;
+# antes porque descobrir que ela reprovou custa minutos aqui e uma hora e meia
+# depois do Linux.
+bateria
 
 # =========================================================================
 # Os builds.

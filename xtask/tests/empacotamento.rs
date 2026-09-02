@@ -826,7 +826,7 @@ fn a_arvore_suja_impede_o_empacotamento() {
         "# meio de um conserto\n",
         false,
     );
-    let saida = bancada.rodar(&["1.2.3"], &[]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert_eq!(
         saida.estado, 1,
@@ -850,7 +850,7 @@ fn a_arvore_suja_impede_o_empacotamento() {
 #[test]
 fn o_docker_fora_do_ar_reprova_antes_da_primeira_compilacao() {
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["1.2.3"], &[("FALSO_DOCKER", "caido")]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_DOCKER", "caido")]);
 
     assert_eq!(
         saida.estado, 1,
@@ -870,7 +870,7 @@ fn o_windows_inalcancavel_reprova_antes_do_linux_emulado() {
     // O teste que dá razão a este script existir. Sem ele, a descoberta de que
     // o Windows não atende chega depois de noventa minutos de Linux emulado.
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["1.2.3"], &[("FALSO_SSH", "recusa")]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_SSH", "recusa")]);
 
     assert_eq!(
         saida.estado, 1,
@@ -902,7 +902,7 @@ fn o_windows_noutro_commit_e_levado_ao_commit_certo() {
     // ir até lá tendo tudo pronto para não ir.
     let bancada = Bancada::nova();
     let saida = bancada.rodar(
-        &["1.2.3"],
+        &["1.2.3", "--sem-bateria"],
         &[
             ("FALSO_SSH_HEAD", "0000000000000000000000000000000000000000"),
             ("FALSO_SSH_HEAD_DEPOIS", &bancada.commit.clone()),
@@ -929,7 +929,7 @@ fn o_windows_que_nao_chega_ao_commit_nao_compila_nada() {
     // deixou de valer só porque agora a reconciliação é automática.
     let bancada = Bancada::nova();
     let saida = bancada.rodar(
-        &["1.2.3"],
+        &["1.2.3", "--sem-bateria"],
         &[("FALSO_SSH_HEAD", "0000000000000000000000000000000000000000")],
     );
 
@@ -951,7 +951,10 @@ fn a_chave_pela_metade_reprova_e_sem_assinatura_libera() {
     // tem a chave, ou se diz por escrito que não se quer o botão de atualizar.
     let bancada = Bancada::nova();
 
-    let saida = bancada.rodar(&["1.2.3"], &[("TAURI_SIGNING_PRIVATE_KEY", "")]);
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("TAURI_SIGNING_PRIVATE_KEY", "")],
+    );
     assert_eq!(
         saida.estado, 1,
         "meia chave tem que reprovar:\n{}",
@@ -985,7 +988,7 @@ fn a_chave_pela_metade_reprova_e_sem_assinatura_libera() {
 #[test]
 fn o_token_recusado_reprova_antes_de_compilar() {
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["1.2.3"], &[("FALSO_TOKEN", "vencido")]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_TOKEN", "vencido")]);
 
     assert_eq!(
         saida.estado, 1,
@@ -1008,7 +1011,7 @@ fn um_token_sem_escrita_reprova() {
     // Ler o repositório e criar release são permissões diferentes, e a segunda é
     // a que só se descobre na hora de publicar.
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["1.2.3"], &[("FALSO_PUSH", "false")]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_PUSH", "false")]);
 
     assert_eq!(
         saida.estado, 1,
@@ -1028,7 +1031,7 @@ fn um_release_ja_publicado_nao_e_substituido() {
     // publicado é decisão que uma pessoa tomou.
     let bancada = Bancada::nova();
     let saida = bancada.rodar(
-        &["1.2.3"],
+        &["1.2.3", "--sem-bateria"],
         &[(
             "FALSO_RELEASES",
             "[{\"id\":7,\"tag_name\":\"v1.2.3\",\"draft\":false,\"html_url\":\"https://exemplo\"}]",
@@ -1072,7 +1075,7 @@ fn restos_de_outra_versao_sao_apagados_e_nomeados() {
         "de outra vez\n",
         false,
     );
-    let saida = bancada.rodar(&["1.2.3"], &[]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert!(
         !bancada
@@ -1106,7 +1109,7 @@ fn a_entrega_da_versao_corrente_sobrevive_a_limpeza() {
         "de outra vez\n",
         false,
     );
-    let saida = bancada.rodar(&["1.2.3"], &[]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert!(
         bancada
@@ -1133,7 +1136,7 @@ fn o_arquivo_que_o_finder_escreve_nao_e_entrega_de_ninguem() {
     // é o que faz a lista deixar de servir para o dia em que ela importar.
     let bancada = Bancada::nova();
     escrever(&bancada.repo.join("entrega/.DS_Store"), "finder\n", false);
-    let saida = bancada.rodar(&["1.2.3"], &[]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert!(
         !saida.texto.contains(".DS_Store"),
@@ -1274,7 +1277,7 @@ fn os_tres_correm_do_mais_barato_para_o_mais_caro() {
     // quebra igual nos três. O build nativo do Mac primeiro é o que transforma
     // noventa minutos perdidos em cinco.
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["1.2.3"], &[]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert_eq!(
         saida.estado, 0,
@@ -1307,7 +1310,7 @@ fn o_release_sai_rascunho_e_confessa_a_falta_de_procedencia() {
     // houve workflow. Sem esta confissão no corpo, o comando falha e quem o rodou
     // conclui adulteração onde só houve ausência de CI.
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["1.2.3"], &[]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
 
     assert_eq!(
         saida.estado, 0,
@@ -1336,7 +1339,7 @@ fn um_sistema_que_falha_nao_leva_os_outros_junto() {
     // Duas horas de compilação não podem ser jogadas fora porque a primeira
     // delas falhou. O que falha vira uma linha no fim; o que dá certo continua.
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["1.2.3"], &[("FALSO_MACOS", "1")]);
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_MACOS", "1")]);
 
     assert_eq!(
         saida.estado, 1,
@@ -1363,7 +1366,10 @@ fn um_sistema_que_falha_nao_leva_os_outros_junto() {
 #[test]
 fn com_parcial_o_release_sai_dizendo_quem_faltou() {
     let bancada = Bancada::nova();
-    let saida = bancada.rodar(&["1.2.3", "--parcial"], &[("FALSO_MACOS", "1")]);
+    let saida = bancada.rodar(
+        &["1.2.3", "--parcial", "--sem-bateria"],
+        &[("FALSO_MACOS", "1")],
+    );
 
     assert_eq!(
         saida.estado, 0,
@@ -1394,7 +1400,7 @@ fn a_versao_gravada_nao_fica_no_repositorio() {
         .expect("legível");
 
     let saida = bancada.rodar(
-        &["1.2.3"],
+        &["1.2.3", "--sem-bateria"],
         &[("FALSO_MACOS", "1"), ("FALSO_MACOS_SUJA", "1")],
     );
 
@@ -1779,7 +1785,7 @@ fn o_trabalho_solto_no_windows_e_guardado_e_nao_apagado() {
     // apagaria trabalho de quem estivesse mexendo naquela máquina.
     let bancada = Bancada::nova();
     let saida = bancada.rodar(
-        &["1.2.3"],
+        &["1.2.3", "--sem-bateria"],
         &[
             ("FALSO_SSH_HEAD", &bancada.commit.clone()),
             ("FALSO_SSH_SUJO", "sim"),
