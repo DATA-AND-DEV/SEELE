@@ -23,8 +23,6 @@
 //! continua saindo pelo OpenH264 em vez de não sair.
 #![allow(unsafe_code)]
 
-use std::sync::Once;
-
 use windows::core::{Interface as _, GUID};
 use windows::Win32::Media::MediaFoundation::{
     eAVEncCommonRateControlMode_CBR, CODECAPI_AVEncCommonMeanBitRate,
@@ -32,7 +30,7 @@ use windows::Win32::Media::MediaFoundation::{
     CODECAPI_AVEncMPVGOPSize, CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVLowLatencyMode,
     ICodecAPI, IMFActivate, IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform,
     METransformHaveOutput, METransformNeedInput, MFCreateMediaType, MFCreateMemoryBuffer,
-    MFCreateSample, MFMediaType_Video, MFStartup, MFTEnumEx, MFVideoFormat_H264,
+    MFCreateSample, MFMediaType_Video, MFShutdown, MFStartup, MFTEnumEx, MFVideoFormat_H264,
     MFVideoFormat_NV12, MFVideoInterlace_Progressive, MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
     MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_ASYNCMFT, MFT_ENUM_FLAG_HARDWARE,
     MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
@@ -46,13 +44,18 @@ use windows::Win32::Media::MediaFoundation::{
 use super::{Cadencia, Resolucao};
 use crate::ErroDeVideo;
 
-/// O Media Foundation é iniciado uma vez por processo.
+/// Liga o Media Foundation, uma vez por codificador, e desliga com ele.
 ///
-/// `MFStartup` conta referências e casa com `MFShutdown`, mas nada aqui desliga:
-/// o custo de manter o subsistema vivo é o de um processo que já usa vídeo, e
-/// desligá-lo no `Drop` do último codificador arriscaria derrubá-lo debaixo de
-/// outro que estivesse nascendo na mesma hora.
-static COMECOU: Once = Once::new();
+/// **Era uma vez por processo e nunca desligava**, com a justificativa de que
+/// desligar arriscaria derrubar o subsistema debaixo de um codificador nascendo
+/// ao mesmo tempo. A justificativa estava errada por desconhecimento meu:
+/// `MFStartup` e `MFShutdown` são contados pelo próprio Media Foundation, e a
+/// documentação pede exatamente um `MFShutdown` para cada `MFStartup`. Aninhar é
+/// o uso previsto, não um risco.
+///
+/// O custo de não desligar apareceu em campo: «depois que paro de transmitir ele
+/// fica em 70~80 MB, sendo que antes ficava em 7~15». Um par por codificador é o
+/// que faz o subsistema sair quando o último deles sai.
 
 fn recusa(operacao: &'static str, detalhe: impl std::fmt::Display) -> ErroDeVideo {
     ErroDeVideo::CodecRecusou {
@@ -63,18 +66,9 @@ fn recusa(operacao: &'static str, detalhe: impl std::fmt::Display) -> ErroDeVide
 
 /// Liga o Media Foundation, uma vez.
 fn comecar() -> Result<(), ErroDeVideo> {
-    let mut falha = None;
-    COMECOU.call_once(|| {
-        // SAFETY: chamada de inicialização do subsistema, sem ponteiros nossos.
-        // `MFSTARTUP_NOSOCKET` não serve: o encoder é do subsistema completo.
-        if let Err(erro) = unsafe { MFStartup(MF_VERSION, 0) } {
-            falha = Some(erro);
-        }
-    });
-    match falha {
-        None => Ok(()),
-        Some(erro) => Err(recusa("iniciar o Media Foundation", erro)),
-    }
+    // SAFETY: chamada de inicialização do subsistema, sem ponteiros nossos.
+    // `MFSTARTUP_NOSOCKET` não serve: o encoder é do subsistema completo.
+    unsafe { MFStartup(MF_VERSION, 0) }.map_err(|erro| recusa("iniciar o Media Foundation", erro))
 }
 
 /// Procura um codificador de H.264 que aceite NV12, preferindo o de hardware.
@@ -621,6 +615,10 @@ impl Drop for Codificador {
             // `ShutdownObject` — soltar a interface do transformador libera a
             // interface, não a sessão que o driver abriu por baixo.
             let _ = self.ativador.ShutdownObject();
+            // E o subsistema, uma vez para cada `MFStartup`. Ele é contado pelo
+            // próprio Media Foundation: este par fecha o que este codificador
+            // abriu, e não o de mais ninguém.
+            let _ = MFShutdown();
         }
     }
 }
