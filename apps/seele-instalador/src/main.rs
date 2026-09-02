@@ -37,8 +37,12 @@
 
 mod carga;
 #[cfg(windows)]
+mod desinstalar;
+#[cfg(windows)]
 mod janela;
 mod pele;
+#[cfg(windows)]
+mod registro;
 
 /// Cada coisa que o instalador do NSIS fazia, e o que quebra sem ela.
 ///
@@ -91,7 +95,17 @@ fn main() -> std::process::ExitCode {
     // desenho de pé antes de escrever o motor. Um instalador que desenha certo e
     // instala errado é pior que um que não abre, então o motor vem depois, com
     // as obrigações desta lista uma a uma.
-    match janela::abrir() {
+    // Os dois modos de remoção não abrem janela nenhuma: o painel do Windows
+    // chama o `UninstallString` e espera um programa que faça e saia. Uma janela
+    // aqui seria uma segunda tela pedindo a mesma confirmação que o painel já
+    // pediu.
+    let resultado = match desinstalar::ler_pedido() {
+        desinstalar::Pedido::Instalar => janela::abrir(),
+        desinstalar::Pedido::RemoverDeDentro => desinstalar::sair_de_dentro(),
+        desinstalar::Pedido::RemoverA(pasta) => desinstalar::remover(&pasta),
+    };
+
+    match resultado {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(motivo) => {
             eprintln!("seele-instalador: {motivo}");

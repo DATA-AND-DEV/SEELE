@@ -42,7 +42,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_CHILD, WS_EX_APPWINDOW, WS_POPUP, WS_VISIBLE,
 };
 
-use crate::{carga, pele};
+use crate::{carga, pele, registro};
 
 /// O aviso que a linha da instalação manda à janela a cada arquivo.
 ///
@@ -1589,7 +1589,9 @@ fn comecar_a_instalar(janela: HWND, estado: &mut Estado) {
         let resultado = carga::abrir_em(&destino, |arquivo| {
             let _ = manda.send(Ok(arquivo.to_owned()));
             acordar();
-        });
+        })
+        .and_then(|quantos| anunciar_ao_windows(&destino).map(|()| quantos));
+
         if let Err(motivo) = resultado {
             let _ = manda.send(Err(motivo));
         }
@@ -1614,4 +1616,57 @@ fn pasta_escolhida(estado: &Estado) -> String {
     } else {
         lido
     }
+}
+
+/// O que vem depois de os arquivos estarem no disco.
+///
+/// **Nesta ordem, e a ordem importa.** O desinstalador é copiado antes de a
+/// entrada do painel apontar para ele: uma entrada que aponta para um arquivo
+/// que ainda não existe é uma entrada que não desinstala — e ninguém descobre
+/// isso na instalação, só meses depois, quando alguém tenta remover.
+fn anunciar_ao_windows(destino: &std::path::Path) -> Result<(), String> {
+    // O desinstalador **é este mesmo programa**, copiado para dentro da pasta.
+    // Um binário, dois modos: instalar é o que ele faz quando roda de fora, e
+    // remover é o que ele faz quando roda de dentro, com `--desinstalar`. Assim
+    // não há um segundo executável para manter, assinar e manter em dia.
+    let eu = std::env::current_exe()
+        .map_err(|erro| format!("não sei onde este programa está: {erro}"))?;
+    let desinstalador = destino.join("desinstalar.exe");
+    std::fs::copy(&eu, &desinstalador).map_err(|erro| {
+        format!(
+            "não copiei o desinstalador para {}: {erro}",
+            desinstalador.display()
+        )
+    })?;
+
+    registro::anunciar(
+        &destino.display().to_string(),
+        env!("CARGO_PKG_VERSION"),
+        &desinstalador.display().to_string(),
+        tamanho_no_disco(destino),
+    )
+}
+
+/// Quanto a pasta ocupa, em KiB — que é a unidade do `EstimatedSize`.
+///
+/// Medido depois de escrever, e não estimado da carga comprimida: o painel do
+/// Windows mostra este número, e um número inventado ali é uma informação errada
+/// numa tela do sistema.
+fn tamanho_no_disco(pasta: &std::path::Path) -> u32 {
+    fn somar(pasta: &std::path::Path, total: &mut u64) {
+        let Ok(itens) = std::fs::read_dir(pasta) else {
+            return;
+        };
+        for item in itens.flatten() {
+            let Ok(tipo) = item.file_type() else { continue };
+            if tipo.is_dir() {
+                somar(&item.path(), total);
+            } else if let Ok(dados) = item.metadata() {
+                *total += dados.len();
+            }
+        }
+    }
+    let mut total = 0_u64;
+    somar(pasta, &mut total);
+    u32::try_from(total / 1024).unwrap_or(u32::MAX)
 }
