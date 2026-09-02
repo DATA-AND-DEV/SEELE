@@ -128,6 +128,7 @@ WINDOWS="${SEELE_WINDOWS_SSH:-}"
 REPO_WINDOWS="${SEELE_WINDOWS_REPO:-C:\\SEELE}"
 TOKEN="${SEELE_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
 PULAR=""
+SEM_BATERIA=nao
 PARCIAL=nao
 SEM_ASSINATURA=nao
 SO_CONFERIR=nao
@@ -174,6 +175,7 @@ uso() {
 "  --repo-windows <caminho>     o repositório lá (ou \$SEELE_WINDOWS_REPO)" \
 "  --repo <dono/repositório>    onde publicar" \
 "  --pular <lista>              macos,windows,linux — separados por vírgula" \
+"  --sem-bateria                publica sem rodar os testes; para a emergência" \
 "  --parcial                    sobe o rascunho mesmo faltando sistema" \
 "  --sem-assinatura             segue sem a chave do projeto (release que não" \
 "                               atualiza ninguém)" \
@@ -573,6 +575,7 @@ while [ "$#" -gt 0 ]; do
             shift 2
             ;;
         --parcial) PARCIAL=sim; shift ;;
+        --sem-bateria) SEM_BATERIA=sim; shift ;;
         --sem-assinatura) SEM_ASSINATURA=sim; shift ;;
         --conferir) SO_CONFERIR=sim; shift ;;
         -h|--help|--ajuda) uso; exit 0 ;;
@@ -673,6 +676,66 @@ conferir_ferramentas() {
             "Ou instale-o, ou rode com --pular windows."
     fi
     passo "ferramentas e empacotadores irmãos: ok"
+}
+
+# A bateria, antes de empacotar qualquer coisa.
+#
+# **Existe porque quem a rodava era o GitHub Actions, e ele vai sair.** Este
+# script sempre soube empacotar e publicar; nunca soube testar. Enquanto o CI
+# existia isso não custava nada — a bateria já tinha rodado no push. Sem ele,
+# um release sairia sem nada ter sido executado, e o defeito estrearia na
+# máquina de quem instalou.
+#
+# **Nos dois sistemas, e não só neste.** Numa única sessão o Windows encontrou
+# três defeitos que o macOS não mostra: dois de fim de linha, em guardas que
+# comparavam texto com `\n` num repositório que faz checkout com CRLF, e um
+# binário de teste que nem carregava. Rodar só aqui seria trocar a cobertura
+# pela conveniência de quem publica.
+#
+# O Linux fica de fora de propósito: ele roda emulado em Docker e a bateria
+# dobraria uma etapa que já custa hora e meia. O que ele tem de próprio é o
+# empacotamento, e é isso que `linux.sh` continua provando.
+#
+# `--sem-bateria` existe para a emergência de madrugada, e ele **grita**: um
+# atalho silencioso vira o caminho normal em duas semanas.
+bateria() {
+    if [ "${SEM_BATERIA:-nao}" = "sim" ]; then
+        aviso "bateria pulada por --sem-bateria: este pacote não foi testado."
+        return 0
+    fi
+
+    passo "bateria, aqui"
+    if ! cargo fmt --manifest-path "$RAIZ/Cargo.toml" --check >/dev/null 2>&1; then
+        morrer "o código não está formatado." "Rode «cargo fmt»."
+    fi
+    if ! (cd "$RAIZ" && RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets >/dev/null 2>&1); then
+        morrer "o clippy reprovou." "Rode «cargo clippy --workspace --all-targets»."
+    fi
+    # Em série: a bateria de conformidade sobe servidores de verdade e disputa
+    # portas consigo mesma em paralelo. Ela passa em série, e um release não é
+    # lugar de conviver com instabilidade conhecida.
+    if ! (cd "$RAIZ" && cargo test --workspace -- --test-threads=1 >/dev/null 2>&1); then
+        morrer "a bateria reprovou nesta máquina." \
+            "Rode «cargo test --workspace -- --test-threads=1» e leia."
+    fi
+    if ! (cd "$RAIZ" && cargo xtask check-deps >/dev/null 2>&1); then
+        morrer "a regra de dependência do specs/01 foi quebrada."
+    fi
+    if ! (cd "$RAIZ" && cargo deny check licenses >/dev/null 2>&1); then
+        morrer "uma licença nova entrou na árvore sem passar pelo deny.toml."
+    fi
+    passo "bateria aqui: ok"
+
+    if pedido windows; then
+        passo "bateria, no Windows"
+        bw_saida=$(no_windows "\$ErrorActionPreference = 'Stop'
+Set-Location '${REPO_WINDOWS}'
+cargo test --workspace 2>&1 | Select-String -Pattern 'test result: FAILED|^error' | Select-Object -First 5")
+        if [ -n "$bw_saida" ]; then
+            morrer "a bateria reprovou no Windows:" "$bw_saida"
+        fi
+        passo "bateria no Windows: ok"
+    fi
 }
 
 conferir_arvore() {
@@ -1155,6 +1218,9 @@ conferir_chave
 conferir_docker
 conferir_windows
 conferir_github
+# Depois das conferências e **antes** de empacotar: descobrir que a bateria
+# reprovou vale minutos aqui e uma hora e meia depois do Linux.
+bateria
 printf -- '--- tudo conferido ---\n'
 
 if [ "$SO_CONFERIR" = sim ]; then
