@@ -9,6 +9,7 @@ members = [
     "crates/seele-server",
     "crates/seele-ffi",
     "apps/seele-app",
+    "apps/seele-instalador",
     "crates/seele-conformance",
     "xtask",
 ]

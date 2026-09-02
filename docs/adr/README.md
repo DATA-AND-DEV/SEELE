@@ -48,6 +48,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0040](0040-sessenta-quadros-entram-por-medida.md) | Sessenta quadros entram, por medida | aceito | design da tela, §6 item 10 |
 | [0041](0041-o-codec-por-hardware-e-a-excecao-ao-unsafe.md) | O codec por hardware, e a exceção nomeada ao `unsafe` | **aceito** | — (reverte a recusa registrada no `Cargo.toml` do `seele-video`) |
 | [0042](0042-nomes-repetidos-e-a-chave-que-distingue.md) | Nomes repetidos, e a chave que distingue | **proposto** | — (pedido do dono; revisa o `0017`) |
+| [0043](0043-o-instalador-do-windows-e-nosso.md) | O instalador do Windows é nosso | **aceito** | — (o NSIS não desenha a moldura, os botões nem a fonte) |
 
 ## O que ainda não tem ADR
 

@@ -1,0 +1,30 @@
+[package]
+name = "seele-instalador"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "O instalador do SEELE para Windows. Ver ADR 0043."
+
+# **Nenhuma dependência do produto, e isto é regra e não economia.**
+#
+# Está no `xtask/src/check_deps.rs` junto do `xtask`, pela mesma razão: se o
+# instalador dependesse do `seele-core`, construir o instalador exigiria
+# construir o produto — e uma mudança no produto poderia quebrar a instalação de
+# todo mundo por um caminho que ninguém liga aos dois.
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+# A mesma versão que o `seele-video` já traz, para o `Cargo.lock` não carregar
+# duas cópias do mundo do Windows.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_System_LibraryLoader",
+] }
+
+[lints]
+workspace = true

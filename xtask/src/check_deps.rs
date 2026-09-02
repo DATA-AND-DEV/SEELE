@@ -117,6 +117,11 @@ const RULES: &[(&str, &[&str])] = &[
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
     // product to compile before it could check the product.
     ("xtask", &[]),
+    // O instalador, pela mesma razão e com a mesma força — ADR 0043. Se ele
+    // dependesse do `seele-core`, construir o instalador exigiria construir o
+    // produto, e uma mudança no produto poderia quebrar a instalação de todo
+    // mundo por um caminho que ninguém liga aos dois.
+    ("seele-instalador", &[]),
 ];
 
 /// One offending edge in the workspace graph.
