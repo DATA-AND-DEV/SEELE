@@ -261,6 +261,33 @@ async fn connect(
     };
 
     let home = config_dir(&app);
+    // **Sem nome escolhido, um nome desta máquina** — e não uma constante que
+    // todo mundo compartilha.
+    //
+    // A casca manda vazio quando ninguém se nomeou. O recurso antigo era a
+    // palavra `pessoa`, igual para todos, e por ADR 0017 o apelido pertence a
+    // uma chave: a **segunda** pessoa sem nome de qualquer servidor colidia por
+    // construção e era recusada na porta. Aconteceu em campo, e a frase que ela
+    // lia mandava escolher outro apelido — um apelido que ela nunca tinha
+    // escolhido.
+    //
+    // Quatro caracteres da impressão da chave desta máquina resolvem as duas
+    // metades: não colidem, porque a impressão é da chave; e são **estáveis**,
+    // então quem volta amanhã volta na mesma conta, com o mesmo histórico, em
+    // vez de criar uma conta nova a cada abertura — que é o que um sufixo
+    // aleatório faria.
+    //
+    // Continua sendo recurso e não escolha: quem se nomeia no perfil manda, e
+    // o rodapé da entrada segue mostrando o travessão até alguém se nomear de
+    // verdade.
+    let nickname = if nickname.trim().is_empty() {
+        seele_ffi::impressao_desta_maquina(&home).map_or_else(
+            |_| "pessoa".to_owned(),
+            |impressao| format!("pessoa-{}", &impressao[..4.min(impressao.len())]),
+        )
+    } else {
+        nickname
+    };
     // Guardados antes de a configuração levar os originais para a outra thread:
     // a lista de visitados só é escrita lá embaixo, depois de a conexão existir.
     let alvo = server.clone();

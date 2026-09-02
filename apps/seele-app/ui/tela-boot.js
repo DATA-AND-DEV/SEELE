@@ -132,9 +132,12 @@ async function conectar(alvo, apelido, token) {
   // continua guardando o que **veio** de escolha: o apelido daquela visita que
   // o diálogo de conhecidos passa, e o da sessão que a troca de servidor passa.
   if (apelido !== "") ultimoApelido = apelido;
-  // E um nome, sempre: entrar sem nome nenhum é aparecer no roster como uma
-  // linha vazia, que não é um estado que alguém escolheu.
-  if (apelido === "") apelido = "pessoa";
+  // **O vazio segue para o Rust, que é quem sabe derivar um nome desta
+  // máquina.** Ver `connect` no `main.rs`: o recurso deixou de ser a palavra
+  // `pessoa`, igual para todo mundo e por isso garantida de colidir com a
+  // segunda pessoa sem nome, e passou a ser `pessoa-` mais quatro caracteres da
+  // impressão da chave daqui. A casca não tem essa impressão, e pedi-la por IPC
+  // só para montar uma palavra seria uma volta a mais para chegar no mesmo.
   // **A bandeira é lida e apagada aqui, e não depois do `connect`.**
   //
   // Apagá-la só no caminho feliz a deixaria ligada quando o `connect` falha —
@@ -209,7 +212,9 @@ async function conectar(alvo, apelido, token) {
     // tratou a falha, e só o que sobra vira a linha vermelha daqui.
     if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
       erro.hidden = false;
-      erro.textContent = fraseDeErro(motivo);
+      // O apelido que esta tentativa mandou, para a recusa por nome tomado
+      // poder dizer **qual** nome foi recusado. Ver `fraseDeErro`.
+      erro.textContent = fraseDeErro(motivo, apelido);
     }
   } finally {
     botao.disabled = false;

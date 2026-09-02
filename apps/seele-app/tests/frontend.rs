@@ -3690,10 +3690,20 @@ fn voltar_a_um_servidor_leva_o_apelido_daquela_vez() {
         "sem apelido gravado para aquele servidor, nada busca o desta \
          máquina:\n{conectar}"
     );
+    // **E o recurso não mora mais aqui.** Ele era a palavra `pessoa`, igual
+    // para todo mundo — e por ADR 0017 o apelido pertence a uma chave, então a
+    // segunda pessoa sem nome de qualquer servidor colidia por construção e era
+    // recusada na porta. Passou para o `main.rs`, que tem a impressão desta
+    // máquina e monta um nome que não colide e é estável entre aberturas.
+    //
+    // Quem garante que o vazio não chega ao roster é o guarda do outro lado,
+    // `o_recurso_do_apelido_sai_da_impressao_desta_maquina`, e não este.
     assert!(
-        conectar.contains("\"pessoa\""),
-        "e sem nome nenhum a conexão sai com o apelido vazio, que é uma linha \
-         em branco no roster de todo mundo:\n{conectar}"
+        !conectar.contains("\"pessoa\""),
+        "a casca voltou a inventar um recurso de apelido.\n\
+         Uma constante compartilhada colide por construção com a segunda pessoa \
+         que não se nomear; quem sabe montar um nome que não colide é o Rust, \
+         porque só ele tem a impressão da chave desta máquina:\n{conectar}"
     );
 }
 
@@ -9521,48 +9531,32 @@ fn every_surface_that_draws_a_person_dresses_their_portrait() {
 }
 
 #[test]
-fn the_fallback_nickname_is_never_the_one_the_shell_remembers() {
-    // The field report: «pessoa não autorizada entra no link, eu autorizo,
-    // pessoa não consegue entrar porque nome já existe» — and then, decisively,
-    // «mesmo trocando o nick várias vezes, continua dando o erro de apelido, o
-    // que não faz sentido porque tem 5 nomes no servidor».
+fn the_shell_never_remembers_a_nickname_nobody_chose() {
+    // O relato: «pessoa não autorizada entra no link, eu autorizo, e ela não
+    // consegue entrar porque o nome já existe» — e, decisivo, «mesmo trocando o
+    // nick várias vezes continua dando o erro, num servidor com cinco nomes».
     //
-    // Nothing was wrong with the names she typed. `conectar` reads the
-    // remembered nickname first and only asks the profile when there is none;
-    // the last line of that block used to hand the remembered slot whatever the
-    // block had produced — including `pessoa`, the fallback for somebody who
-    // never named themselves. From the first refusal on, the slot was full, the
-    // profile was never read again, and every name she saved stayed on disk.
-    // The shell kept sending `pessoa` until the app was closed, because that
-    // `let` lives as long as the window does.
+    // Nada estava errado com os nomes digitados. `conectar` lê o apelido
+    // lembrado desta execução primeiro e só pergunta ao perfil quando não há
+    // nenhum; a última linha daquele bloco entregava ao lembrado o que o bloco
+    // tivesse produzido, inclusive o recurso de quem nunca se nomeou. Da
+    // primeira recusa em diante o cache estava cheio, o perfil nunca mais era
+    // lido, e cada nome salvo ficava no disco sem sair da máquina.
     //
-    // The order is the whole fix, so the order is what this guards: remember
-    // first, fall back second. Comments are stripped so that the prose above
-    // the code — which names both — cannot satisfy the assertion.
+    // O recurso mudou de lado desde então — hoje quem o monta é o `main.rs`,
+    // com a impressão da chave — e por isso este guarda deixou de olhar a ordem
+    // entre duas linhas e passa a olhar a regra que sobrou, que é a que
+    // importava: **só se lembra o que veio de escolha**.
     let corpo = without_comments(&js_function(
         &read("ui/tela-boot.js"),
         "async function conectar(",
     ));
-    // The semicolon matters: the first line of `conectar` is
-    // `ultimoApelido = apelido ?? ultimoApelido;`, which contains the bare
-    // assignment as a prefix and sits before everything here. Anchoring on the
-    // prefix made this guard pass against the very ordering it exists to
-    // reject — it was written that way first, and the check that it fails on
-    // the old code is what caught it.
-    let lembra = corpo
-        .find("ultimoApelido = apelido;")
-        .expect("`conectar` stopped remembering the nickname at all");
-    let recurso = corpo
-        .find(r#"apelido = "pessoa""#)
-        .expect("`conectar` stopped having a fallback nickname");
     assert!(
-        lembra < recurso,
-        "the fallback nickname is assigned before the shell remembers the \
-         nickname, so the fallback is what gets remembered.\n\
-         Somebody who arrives without a name is then refused for a nickname \
-         they never chose, and no name they save afterwards is ever read \
-         again — the profile is only consulted while the remembered slot is \
-         empty.\n{corpo}"
+        corpo.contains("if (apelido !== \"\") ultimoApelido = apelido;"),
+        "a casca voltou a lembrar um apelido sem conferir se alguém o escolheu.\n\
+         Lembrar o vazio, ou um recurso, faz o perfil parar de ser consultado \
+         nas tentativas seguintes — e quem corrigir o nome no perfil vai vê-lo \
+         gravado no disco sem nunca sair da máquina.\n{corpo}"
     );
 }
 
@@ -9624,5 +9618,36 @@ fn o_isolamento_total_diz_que_cala_a_tela_tambem() {
         "a linha de estado voltou a dizer só «não está ouvindo».\n\
          Quem lê isso entende «ninguém está falando comigo», e não «o som da \
          tela também está calado»."
+    );
+}
+
+#[test]
+fn o_recurso_do_apelido_sai_da_impressao_desta_maquina() {
+    // A outra metade do guarda da casca: ela manda vazio quando ninguém se
+    // nomeou, e quem monta o nome é o `connect`.
+    //
+    // O recurso era a palavra `pessoa`, igual para todo mundo. Por ADR 0017 o
+    // apelido pertence a uma chave, então a **segunda** pessoa sem nome de
+    // qualquer servidor colidia por construção e era recusada na porta — com uma
+    // frase mandando escolher outro apelido, um apelido que ela nunca escolheu.
+    //
+    // A impressão da chave resolve as duas metades de uma vez: não colide,
+    // porque é da chave; e é **estável**, então quem volta amanhã volta na mesma
+    // conta com o mesmo histórico, em vez de criar uma conta nova a cada
+    // abertura — que é o que um sufixo aleatório faria.
+    let fonte = read("src/main.rs");
+    assert!(
+        fonte.contains("impressao_desta_maquina"),
+        "o `connect` deixou de derivar o apelido de recurso da impressão desta \
+         máquina.\n\
+         Sem isso, ou a conexão sai com o nome vazio — uma linha em branco no \
+         roster de todo mundo — ou volta a uma constante que colide com a \
+         segunda pessoa que não se nomear."
+    );
+    assert!(
+        fonte.contains("nickname.trim().is_empty()"),
+        "o `connect` deixou de tratar o apelido vazio.\n\
+         A casca manda vazio de propósito quando ninguém se nomeou: é aqui que \
+         isso vira um nome."
     );
 }

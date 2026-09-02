@@ -300,7 +300,7 @@ function fraseDeCaminho(caminho) {
  * Um `PinChanged` carrega as duas impressões digitais porque a coisa toda é um
  * humano compará-las (ADR 0003).
  */
-function fraseDeErro(erro) {
+function fraseDeErro(erro, apelido) {
   if (typeof erro === "string") return FRASES[erro] ?? erro;
   if (erro && typeof erro === "object") {
     if (erro.PinChanged) {
@@ -325,6 +325,24 @@ function fraseDeErro(erro) {
       );
     }
     if (erro.Refused) {
+      // **O apelido recusado entra na frase**, e é conserto de uma coisa cruel.
+      //
+      // A recusa por nome tomado é a única desta lista que a pessoa conserta
+      // sozinha, e a frase mandava «escolha outro apelido» sem dizer qual foi
+      // recusado. Quando o nome é o recurso automático — que ninguém digitou —,
+      // ela lia uma ordem sobre um nome que nunca escolheu, e não tinha como
+      // saber disso. Foi assim que um relato de campo virou meia hora de
+      // «troquei o nick várias vezes e continua dando o mesmo erro».
+      //
+      // O servidor já manda o nome no detalhe da recusa, e ele não atravessa a
+      // ponte. A casca, essa, sabe exatamente o que mandou — dizer daqui custa
+      // um argumento e não um campo novo no fio.
+      if (erro.Refused.reason === "NicknameTaken" && apelido) {
+        return (
+          `O APELIDO «${apelido}» JÁ É DE OUTRA PESSOA NESTE SERVIDOR.\n` +
+          "Não é o convite nem a senha: escolha outro apelido e entre de novo."
+        );
+      }
       return MOTIVOS[erro.Refused.reason] ?? "SESSÃO RECUSADA";
     }
   }
