@@ -310,8 +310,54 @@ mod testes {
     /// e um teste que exigisse barulho seria um teste que falha por ninguém
     /// estar tocando música. O que ele afirma é que o fluxo abre, anda, e não
     /// perde amostras — as três coisas que decidem se este caminho existe.
+    /// Um fluxo de saída tocando silêncio, para que haja o que capturar.
+    ///
+    /// **O loopback não inventa amostras.** Ele entrega o que a placa está
+    /// tocando, e com a máquina parada não há sessão de renderização ativa: o
+    /// cliente não recebe pacote nenhum — nem de silêncio, porque não há de onde
+    /// tirá-lo. O teste afirmava o contrário («o silêncio também produz
+    /// amostras») e por isso reprovava numa máquina calada, que é o estado normal
+    /// de uma máquina de compilação.
+    ///
+    /// Manter uma saída tocando zeros cria a condição em vez de supô-la, e não faz
+    /// barulho nenhum: são zeros. O que o teste passa a provar é o que o produto
+    /// precisa — que o som que a máquina toca chega à captura.
+    fn manter_a_saida_tocando() -> Option<cpal::Stream> {
+        fn zeros<T: cpal::SizedSample>(
+            saida: &cpal::Device,
+            config: cpal::StreamConfig,
+        ) -> Option<cpal::Stream> {
+            saida
+                .build_output_stream(
+                    config,
+                    move |dados: &mut [T], _: &cpal::OutputCallbackInfo| {
+                        dados.fill(T::EQUILIBRIUM);
+                    },
+                    |_erro| {},
+                    None,
+                )
+                .ok()
+        }
+
+        let saida = cpal::default_host().default_output_device()?;
+        let config = saida.default_output_config().ok()?;
+        let fluxo = match config.sample_format() {
+            cpal::SampleFormat::F32 => zeros::<f32>(&saida, config.config()),
+            cpal::SampleFormat::I16 => zeros::<i16>(&saida, config.config()),
+            cpal::SampleFormat::U16 => zeros::<u16>(&saida, config.config()),
+            _ => None,
+        }?;
+        fluxo.play().ok()?;
+        Some(fluxo)
+    }
+
     #[test]
     fn a_saida_desta_maquina_abre_como_entrada() {
+        // Antes da captura: o loopback entrega o que está tocando **enquanto**
+        // está tocando, e uma saída que começasse depois deixaria os primeiros
+        // instantes vazios sem que isso dissesse nada sobre o caminho.
+        let manutencao = manter_a_saida_tocando();
+
         let captura = match CapturaDaSaida::abrir(None) {
             Ok(captura) => captura,
             Err(erro) => {
@@ -361,10 +407,17 @@ mod testes {
             return;
         }
         assert!(
+            manutencao.is_some(),
+            "não consegui pôr esta máquina para tocar, e sem isso o loopback não \
+             tem o que entregar. Num Windows sem saída utilizável o caminho do som \
+             da tela não existe — e é ele que este teste mede."
+        );
+        assert!(
             lidas > 0,
-            "o fluxo abriu e não andou: nenhuma amostra em dois segundos. \
-             Num sistema com loopback isto é o fluxo aberto sobre o dispositivo \
-             errado, e não silêncio — o silêncio também produz amostras."
+            "o fluxo abriu e não andou: nenhuma amostra em dois segundos, com uma \
+             saída tocando o tempo todo. Aqui isso é o fluxo aberto sobre o \
+             dispositivo errado — não é a máquina estar calada, porque este teste \
+             tirou essa possibilidade do caminho."
         );
         // E as amostras saem na taxa da casa, convertidas quando preciso.
         //

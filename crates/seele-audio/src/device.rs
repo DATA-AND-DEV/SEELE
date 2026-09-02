@@ -741,17 +741,6 @@ mod tests {
         Some(found)
     }
 
-    /// Asks for a capture device by id, with the machine's own speakers.
-    fn open_capture(id: &str) -> Result<AudioIo, DeviceError> {
-        open(
-            Wanted {
-                capture: Some(id),
-                playback: None,
-            },
-            100,
-        )
-    }
-
     /// Asks for a playback device by id, with the machine's own microphone.
     fn open_playback(id: &str) -> Result<AudioIo, DeviceError> {
         open(
@@ -763,11 +752,25 @@ mod tests {
         )
     }
 
+    /// Asks `resolve` for one side, which is where an id becomes a variant.
+    ///
+    /// **Through `resolve` and not through `open`, and that is the whole point.**
+    /// `open` resolves the input side first, always — so a test that asked for a
+    /// bad *playback* id while leaving capture as `None` was really asking for
+    /// this machine's microphone, and came back `NoInputDevice` on a machine
+    /// without one. It did that on the Windows box, and the claim written above
+    /// these tests — «needs no sound card» — was false the whole time.
+    ///
+    /// An unparseable id never reaches the host: it dies in `parse`, which is why
+    /// this needs no device at all, now truthfully.
+    fn refuse(id: &str, side: Side) -> Option<DeviceError> {
+        resolve(&cpal::default_host(), Some(id), side).err()
+    }
+
     #[test]
     fn an_id_that_names_no_device_is_an_enum_and_not_a_panic() {
-        // Needs no sound card: nothing that is not `host:device` can name a
-        // device on any host, so this is refused before the audio subsystem is
-        // asked anything at all.
+        // Nothing that is not `host:device` can name a device on any host, so
+        // this is refused before the audio subsystem is asked anything at all.
         //
         // The case is not hypothetical. A preference written down by an older
         // build, a settings file copied between two machines, or an interface
@@ -777,7 +780,7 @@ mod tests {
         // `.err()` because the success side is a live `AudioIo`, which has no
         // `Debug` and nothing worth printing: `None` here already says the only
         // thing that matters about it — it opened, when it had to refuse.
-        let refused = open_capture("isto nao e um dispositivo").err();
+        let refused = refuse("isto nao e um dispositivo", Side::Input);
         assert!(
             matches!(refused, Some(DeviceError::CaptureDeviceGone { .. })),
             "an unparseable id came back as something other than a missing device: \
@@ -787,11 +790,10 @@ mod tests {
 
     #[test]
     fn a_playback_id_that_names_no_device_is_an_enum_and_not_a_panic() {
-        // Needs no sound card, for the same reason its twin does not. And it
-        // matters more on this side: the fallback that follows a refusal is
-        // silent by construction — nobody hears the speakers they did not pick
-        // — so the refusal itself is the only thing there is to act on.
-        let refused = open_playback("isto tambem nao e um dispositivo").err();
+        // It matters more on this side: the fallback that follows a refusal is
+        // silent by construction — nobody hears the speakers they did not pick —
+        // so the refusal itself is the only thing there is to act on.
+        let refused = refuse("isto tambem nao e um dispositivo", Side::Output);
         assert!(
             matches!(refused, Some(DeviceError::PlaybackDeviceGone { .. })),
             "an unparseable playback id came back as something other than a missing \
@@ -803,20 +805,23 @@ mod tests {
     fn a_refusal_carries_the_id_that_was_asked_for() {
         // Without it the log channel says a device is gone and never says which,
         // which is exactly the report nobody can act on.
-        let Err(DeviceError::CaptureDeviceGone { id }) = open_capture("alsa:hw:99,99") else {
-            // A machine that really does have `hw:99,99` would land here. It
-            // does not exist, but saying so beats an `unwrap`.
-            eprintln!("skipped: this machine claims to have alsa:hw:99,99");
-            return;
+        let Some(DeviceError::CaptureDeviceGone { id }) = refuse("alsa:hw:99,99", Side::Input)
+        else {
+            panic!("this machine claims to have alsa:hw:99,99");
         };
         assert_eq!(id, "alsa:hw:99,99");
     }
 
     #[test]
     fn a_playback_refusal_carries_the_id_that_was_asked_for() {
-        let Err(DeviceError::PlaybackDeviceGone { id }) = open_playback("alsa:hw:98,98") else {
-            eprintln!("skipped: this machine claims to have alsa:hw:98,98");
-            return;
+        // **O pulo daqui era mentira, e mentira que escondia isto.** Ele dizia
+        // «esta máquina alega ter alsa:hw:98,98» e voltava verde; a verdade é que
+        // ele passava por `open`, que pede o microfone padrão antes de olhar para
+        // a saída, e no Windows sem microfone a recusa que chegava era outra. Um
+        // pulo com o motivo errado é pior que vermelho: ele fecha o assunto.
+        let Some(DeviceError::PlaybackDeviceGone { id }) = refuse("alsa:hw:98,98", Side::Output)
+        else {
+            panic!("this machine claims to have alsa:hw:98,98");
         };
         assert_eq!(id, "alsa:hw:98,98");
     }
