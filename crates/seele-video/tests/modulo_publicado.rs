@@ -67,3 +67,56 @@ fn quem_publica_roda_a_bateria_nos_dois_sistemas() {
          deles se vê daqui."
     );
 }
+
+#[test]
+fn a_bateria_do_windows_julga_pelo_codigo_de_saida() {
+    // O cargo escreve o progresso («Compiling seele-proto») na saída de **erro**,
+    // e o PowerShell transforma cada uma dessas linhas num registro de erro.
+    //
+    // Isso arma duas armadilhas opostas. Com `$ErrorActionPreference = 'Stop'`, a
+    // primeira linha de compilação encerra o script: os testes nunca rodam, e o
+    // que sobra para explicar a reprovação é uma linha de compilação. Sem `Stop`,
+    // mas julgando por «veio texto na saída», o mesmo ruído reprova todo release
+    // — porque `no_windows` junta a saída de erro à normal.
+    //
+    // A saída dos dois é a mesma: perguntar ao cargo como ele terminou, e fazer o
+    // Windows dizer isso numa linha que este lado procura.
+    let script = publicar();
+    let bateria = script
+        .split("\nbateria() {")
+        .nth(1)
+        .expect("a função da bateria sumiu do publicar.sh");
+    // Sem os comentários: o que está aqui explica **por que** o
+    // `ErrorActionPreference` saiu, e um guarda que procurasse a palavra no texto
+    // inteiro acusaria a própria explicação de ser a regressão que ela descreve.
+    // Foi o que aconteceu quando ele nasceu.
+    let janela: String = bateria
+        .split("bateria, no Windows")
+        .nth(1)
+        .expect("a bateria deixou de rodar no Windows")
+        // **Fechada nas duas pontas.** Aberta só na primeira, ela ia até o fim do
+        // arquivo e alcançava as outras conversas com o Windows — que usam o
+        // `ErrorActionPreference` com razão, porque não têm um cargo dentro. Um
+        // guarda de janela aberta acusa o vizinho.
+        .split("bateria no Windows: ok")
+        .next()
+        .expect("o fim da bateria do Windows sumiu")
+        .lines()
+        .filter(|linha| !linha.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        janela.contains("LASTEXITCODE"),
+        "a bateria do Windows voltou a julgar pelo que apareceu na tela.\n\
+         O progresso do cargo chega aqui como saída de erro: julgar por «veio \
+         texto» reprova todo release, e um release não sai de «provavelmente»."
+    );
+    assert!(
+        !janela.contains("ErrorActionPreference"),
+        "voltou o `ErrorActionPreference` em volta do cargo no Windows.\n\
+         Com ele, a primeira linha de compilação encerra o script antes de \
+         qualquer teste rodar — e a queixa que sobra nomeia a compilação como \
+         motivo da reprovação."
+    );
+}

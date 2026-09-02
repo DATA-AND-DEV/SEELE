@@ -777,7 +777,8 @@ mod tests {
         let refused = open_capture("isto nao e um dispositivo");
         assert!(
             matches!(refused, Err(DeviceError::CaptureDeviceGone { .. })),
-            "an unparseable id came back as something other than a missing device"
+            "an unparseable id came back as something other than a missing device: \
+             {refused:?}"
         );
     }
 
@@ -790,7 +791,8 @@ mod tests {
         let refused = open_playback("isto tambem nao e um dispositivo");
         assert!(
             matches!(refused, Err(DeviceError::PlaybackDeviceGone { .. })),
-            "an unparseable playback id came back as something other than a missing device"
+            "an unparseable playback id came back as something other than a missing \
+             device: {refused:?}"
         );
     }
 

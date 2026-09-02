@@ -825,13 +825,39 @@ bateria() {
 
     if pedido windows; then
         passo "bateria, no Windows"
-        bw_saida=$(no_windows "\$ErrorActionPreference = 'Stop'
-Set-Location '${REPO_WINDOWS}'
+        # **Quem decide é o código de saída do cargo, e não o que apareceu na tela.**
+        #
+        # Duas armadilhas moram aqui, e as duas fazem uma bateria verde parecer
+        # vermelha ou o contrário:
+        #
+        # A primeira: o cargo escreve o progresso («Compiling seele-proto») na
+        # saída de **erro**, e o PowerShell transforma cada uma dessas linhas num
+        # registro de erro. Com `$ErrorActionPreference = 'Stop'`, a primeira
+        # delas encerra o script inteiro — os testes nunca chegavam a rodar, e a
+        # queixa que sobrava era uma linha de compilação apresentada como motivo
+        # da reprovação. Por isso o `Stop` saiu daqui.
+        #
+        # A segunda: `no_windows` junta a saída de erro à normal, então esse
+        # mesmo ruído chega até aqui. Julgar por «veio texto» reprovaria todo
+        # release. Por isso o Windows agora **diz o veredito**, numa linha que
+        # este lado procura; sem ela, não houve resposta, e isso também é falha.
+        bw_saida=$(no_windows "Set-Location '${REPO_WINDOWS}'
 \$env:SEELE_OPENH264 = \"\$env:APPDATA\tech.datadev.seele\openh264.dll\"
 \$env:SEELE_EXIGE_CODEC = '1'
-cargo test --workspace 2>&1 | Select-String -Pattern 'test result: FAILED|^error' | Select-Object -First 5")
-        if [ -n "$bw_saida" ]; then
-            morrer "a bateria reprovou no Windows:" "$bw_saida"
+cargo test --workspace 2>&1 | Select-String -Pattern 'test result: FAILED|^error' | Select-Object -First 5
+Write-Output ('estado=' + \$LASTEXITCODE)")
+        bw_estado=$(printf '%s\n' "$bw_saida" | LC_ALL=C sed -n 's/^estado=//p' | LC_ALL=C tr -d '\r')
+        if [ -z "$bw_estado" ]; then
+            morrer "a bateria no Windows não respondeu com um veredito." \
+                "Sem ele não dá para dizer se ela passou; e um release não sai" \
+                "de «provavelmente»." \
+                "" \
+                "O que veio de lá:" \
+                "$bw_saida"
+        fi
+        if [ "$bw_estado" != "0" ]; then
+            morrer "a bateria reprovou no Windows (cargo saiu $bw_estado):" \
+                "$(printf '%s\n' "$bw_saida" | LC_ALL=C sed '/^estado=/d')"
         fi
         passo "bateria no Windows: ok"
     fi
