@@ -87,7 +87,7 @@ fn comecar() -> Result<(), ErroDeVideo> {
 /// Assíncronos entram na busca porque **quase todo encoder de hardware é
 /// assíncrono**: excluí-los seria pedir hardware e aceitar só software. O preço
 /// é o laço de eventos em [`Codificador::codificar`].
-fn procurar() -> Result<IMFTransform, ErroDeVideo> {
+fn procurar() -> Result<(IMFActivate, IMFTransform), ErroDeVideo> {
     let entrada = MFT_REGISTER_TYPE_INFO {
         guidMajorType: MFMediaType_Video,
         guidSubtype: MFVideoFormat_NV12,
@@ -137,8 +137,12 @@ fn procurar() -> Result<IMFTransform, ErroDeVideo> {
     let ativador =
         primeiro.ok_or_else(|| recusa("procurar um codificador de H.264", "a lista veio vazia"))?;
     // SAFETY: o ativador é o que o sistema acabou de entregar.
-    unsafe { ativador.ActivateObject::<IMFTransform>() }
-        .map_err(|erro| recusa("ativar o codificador de H.264", erro))
+    let transformador = unsafe { ativador.ActivateObject::<IMFTransform>() }
+        .map_err(|erro| recusa("ativar o codificador de H.264", erro))?;
+    // **O ativador vai junto, e não é zelo.** Ver o `Drop`: quem desmonta o que
+    // `ActivateObject` montou é `ShutdownObject`, e para chamá-lo é preciso
+    // ainda ter o ativador na mão.
+    Ok((ativador, transformador))
 }
 
 /// Um tipo de mídia com major, subtipo e as medidas que os dois lados pedem.
@@ -180,6 +184,11 @@ fn tipo(
 /// O codificador por hardware do Windows.
 #[derive(Debug)]
 pub struct Codificador {
+    /// Quem montou o transformador, guardado para poder desmontá-lo.
+    ///
+    /// Ver [`Drop`]: soltar a interface do transformador **não** libera o que o
+    /// `ActivateObject` alocou, e sem esta referência não há como pedir.
+    ativador: IMFActivate,
     transformador: IMFTransform,
     /// Presente quando o transformador é assíncrono, que é o caso da maioria
     /// dos de hardware. É por ele que o laço sabe quando entregar e quando
@@ -228,7 +237,7 @@ impl Codificador {
     /// software**: ver [`super::armar`].
     pub fn novo(config: &super::ConfigDoCodificador) -> Result<Self, ErroDeVideo> {
         comecar()?;
-        let transformador = procurar()?;
+        let (ativador, transformador) = procurar()?;
         let quadros = config.cadencia.hz();
 
         // **Assíncrono precisa ser destrancado antes de qualquer outra coisa.**
@@ -328,6 +337,7 @@ impl Codificador {
 
         let (largura, altura) = (config.resolucao.largura(), config.resolucao.altura());
         Ok(Self {
+            ativador,
             transformador,
             eventos,
             resolucao: config.resolucao,
@@ -600,6 +610,17 @@ impl Drop for Codificador {
             let _ = self
                 .transformador
                 .ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+            // **E desmontar o que foi montado.** Medido: sem esta linha, largar
+            // o codificador devolvia 12 MB dos 70 que ele custa — o resto ficava
+            // no processo até ele morrer. É o relato de campo: «depois que paro
+            // de transmitir ele fica em 70~80 MB, sendo que antes ficava em
+            // 7~15».
+            //
+            // A contagem de referências do COM não alcança isto. O objeto nasceu
+            // de `IMFActivate::ActivateObject`, e quem desfaz esse par é
+            // `ShutdownObject` — soltar a interface do transformador libera a
+            // interface, não a sessão que o driver abriu por baixo.
+            let _ = self.ativador.ShutdownObject();
         }
     }
 }
