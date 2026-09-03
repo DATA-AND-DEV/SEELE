@@ -140,6 +140,7 @@ pub struct CapturaComSom {
 /// enviar somente o áudio da janela selecionada, não de todo o PC».
 /// Compartilhando um monitor, o som é o da máquina, que é o que compartilhar um
 /// monitor quer dizer.
+#[cfg(target_os = "windows")]
 enum SomDaTela {
     /// A árvore de processos de uma janela.
     ///
@@ -675,22 +676,25 @@ impl Captura for CapturaDoSistema {
             // máquina é a queda: mandar o som do computador inteiro é pior que
             // mandar só o da janela, e melhor que mandar silêncio.
             let som = match self.alvo.processo() {
-                Some(processo) => match seele_audio::laco_por_processo::SomDoPrograma::abrir(
-                    processo,
-                ) {
-                    Ok(captura) => {
-                        tracing::info!(processo, "o som deste programa abriu para a transmissão");
-                        Some(SomDaTela::DoPrograma(captura))
+                Some(processo) => {
+                    match seele_audio::laco_por_processo::SomDoPrograma::abrir(processo) {
+                        Ok(captura) => {
+                            tracing::info!(
+                                processo,
+                                "o som deste programa abriu para a transmissão"
+                            );
+                            Some(SomDaTela::DoPrograma(captura))
+                        }
+                        Err(erro) => {
+                            tracing::warn!(
+                                %erro,
+                                processo,
+                                "não abri o som só deste programa; caio para o som da máquina"
+                            );
+                            som_da_maquina()
+                        }
                     }
-                    Err(erro) => {
-                        tracing::warn!(
-                            %erro,
-                            processo,
-                            "não abri o som só deste programa; caio para o som da máquina"
-                        );
-                        som_da_maquina()
-                    }
-                },
+                }
                 None => som_da_maquina(),
             };
             Ok(CapturaComSom { imagem, som })
