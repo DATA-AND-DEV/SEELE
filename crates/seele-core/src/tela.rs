@@ -57,7 +57,7 @@ use std::time::{Duration, Instant};
 
 use seele_proto::screen::{ScreenError, ScreenHeader, SCREEN_HEADER_LEN};
 use seele_proto::signal::SignalBand;
-use seele_video::codec::Resolucao;
+use seele_video::codec::{Cadencia, Resolucao};
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
@@ -576,6 +576,90 @@ pub const fn resolucao_para(teto_bps: u32, prioridade: Prioridade) -> Resolucao 
         // 540p, exatamente como antes; a 8 Mbps ele passa a dar 1080p, que
         // antes era impossível.
         Prioridade::Movimento => resolucao_para_movimento(teto_bps),
+    }
+}
+
+/// Quantos bits um quadro desta resolução precisa para não sair borrado.
+///
+/// # De onde estes números vêm
+///
+/// Da **mesma tabela** que deu os limiares de [`resolucao_para`], lida pela
+/// outra coluna. Ela mediu o OpenH264 num teto de 1200 kbps:
+///
+/// | resolução | kbps entregues | quadros perdidos | bits por quadro entregue |
+/// |---|---|---|---|
+/// | 1080p | 1146 | 16,2% | 45,6 k |
+/// | 720p  |  872 | 11,1% | 32,7 k |
+/// | 540p  |  796 | 12,4% | 30,3 k |
+///
+/// A coluna da direita é a que ninguém tinha usado, e ela é a mais importante
+/// das três: é **quanto o codificador de referência gastou em cada quadro que
+/// ele decidiu entregar**. Ele chegou àquela qualidade jogando um sexto dos
+/// quadros fora — está escrito na tabela — e gastando os bits que sobraram nos
+/// que ficaram.
+///
+/// # Por que isto faltava, e o que ele conserta
+///
+/// O §2 fixou a regra: *«a resolução segura, o quadro cede — texto continua
+/// legível a 8 quadros e vira borrão no instante em que se reduz a
+/// resolução»*. A metade da resolução foi implementada em [`resolucao_para`];
+/// **a metade do quadro nunca foi**. A cadência era a escolha de quem
+/// compartilha, 30 por padrão, e nada a reduzia quando o orçamento apertava.
+///
+/// Isso funcionava por acidente enquanto o codificador era o do Cisco, que
+/// jogava quadro fora sozinho. Com o codec do sistema deixou de funcionar, e de
+/// formas opostas nos dois: o comentário de `codec/macos.rs` mediu 26,8 dB em 13
+/// quadros de 120 contra **16,2 dB em 120 de 120** — o VideoToolbox entrega
+/// todos os quadros e borra cada um, que é literalmente o «vira borrão» que a
+/// regra do §2 existe para evitar.
+///
+/// Relatado assim: «assistindo a transmissão do mac, a imagem fica borrada e
+/// blocada».
+#[must_use]
+pub const fn bits_por_quadro(resolucao: Resolucao) -> u32 {
+    match resolucao {
+        Resolucao::P1080 => 45_000,
+        Resolucao::P720 => 33_000,
+        Resolucao::P540 => 30_000,
+    }
+}
+
+/// A cadência que este teto compra nesta resolução — a metade que faltava do §2.
+///
+/// `escolha` é teto, como tudo no §5: o que sai é o menor entre o que a pessoa
+/// pediu e o que o orçamento carrega. Quem escolheu 8 quadros continua em 8 numa
+/// fibra.
+///
+/// # Movimento não cede quadro, e é o eixo inteiro
+///
+/// Para [`Prioridade::Movimento`] a escolha sai intacta. Não é exceção: é a
+/// definição daquele eixo — «o quadro segura, a resolução cede» —, e a
+/// resolução já cedeu em [`resolucao_para_movimento`], que cobra o dobro por
+/// degrau. Cortar quadro aqui cobraria duas vezes pela mesma falta de banda, e
+/// a 8 quadros um jogo não é pior: é inutilizável.
+#[must_use]
+pub fn cadencia_para(
+    teto_bps: u32,
+    resolucao: Resolucao,
+    prioridade: Prioridade,
+    escolha: Cadencia,
+) -> Cadencia {
+    if matches!(prioridade, Prioridade::Movimento) {
+        return escolha;
+    }
+    let cabe = teto_bps / bits_por_quadro(resolucao);
+    let maior = Cadencia::TODAS
+        .into_iter()
+        .rev()
+        .find(|degrau| degrau.hz() <= cabe)
+        // Abaixo do menor degrau não há cadência a escolher. Quem manda parar é
+        // o piso de banda do §2, em `TetoDeVideo`, e não esta função: aqui o
+        // menor degrau é o menor degrau.
+        .unwrap_or(Cadencia::Q8);
+    if maior.hz() <= escolha.hz() {
+        maior
+    } else {
+        escolha
     }
 }
 
@@ -2418,8 +2502,91 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod o_eixo_da_degradacao {
-    use super::{resolucao_para, Prioridade};
-    use seele_video::codec::Resolucao;
+    use super::{cadencia_para, resolucao_para, Prioridade};
+    use seele_video::codec::{Cadencia, Resolucao};
+
+    /// **A metade do §2 que não existia.**
+    ///
+    /// A regra é «a resolução segura, o quadro cede», e só a primeira metade
+    /// estava implementada: a cadência era a escolha de quem compartilha, 30 por
+    /// padrão, e nada a reduzia quando o orçamento apertava.
+    ///
+    /// Isso funcionava por acidente enquanto o codificador era o do Cisco, que
+    /// joga quadro fora sozinho — a tabela de onde saíram os limiares mostra
+    /// 11% a 16% de quadros perdidos. O codec do sistema não joga nenhum e borra
+    /// todos, e foi assim que chegou: «assistindo a transmissão do mac, a imagem
+    /// fica borrada e blocada».
+    #[test]
+    fn o_quadro_cede_quando_a_resolucao_nao_tem_bits() {
+        // Nos limiares, a cadência cheia cabe — é de lá que os números vêm.
+        assert_eq!(
+            cadencia_para(
+                1_500_000,
+                Resolucao::P1080,
+                Prioridade::Nitidez,
+                Cadencia::Q30
+            ),
+            Cadencia::Q30,
+            "no limiar de 1080p os 30 quadros são exatamente o que a medida comprou"
+        );
+
+        // E abaixo dele o quadro cede em vez de a imagem borrar. 900 kbps
+        // compram 720p pela tabela — a 15 quadros, não a 30.
+        assert_eq!(
+            cadencia_para(900_000, Resolucao::P720, Prioridade::Nitidez, Cadencia::Q30),
+            Cadencia::Q15,
+            "720p a 900 kbps são 30 kbit por quadro em 30 quadros: o codificador \
+             do sistema entrega os 30 e borra cada um"
+        );
+        assert_eq!(
+            cadencia_para(300_000, Resolucao::P540, Prioridade::Nitidez, Cadencia::Q30),
+            Cadencia::Q8,
+            "o §2 nomeia 8 quadros como o ponto em que texto ainda se lê"
+        );
+    }
+
+    #[test]
+    fn a_escolha_continua_sendo_teto_e_nunca_piso() {
+        // Como a resolução: o que sai é o menor entre o pedido e o que cabe.
+        // Quem escolheu 8 quadros continua em 8 numa fibra — a função não
+        // promove ninguém.
+        assert_eq!(
+            cadencia_para(
+                50_000_000,
+                Resolucao::P1080,
+                Prioridade::Nitidez,
+                Cadencia::Q8
+            ),
+            Cadencia::Q8,
+            "uma fibra promoveu quem tinha escolhido 8 quadros"
+        );
+        assert_eq!(
+            cadencia_para(
+                50_000_000,
+                Resolucao::P1080,
+                Prioridade::Nitidez,
+                Cadencia::Q60
+            ),
+            Cadencia::Q60,
+            "e quem escolheu 60 e tem banda continua em 60"
+        );
+    }
+
+    #[test]
+    fn movimento_nao_paga_duas_vezes_pela_mesma_falta_de_banda() {
+        // **Não é exceção, é a definição do eixo.** «O quadro segura, a
+        // resolução cede» — e a resolução já cedeu em `resolucao_para_movimento`,
+        // que cobra o dobro por degrau. Cortar quadro aqui cobraria duas vezes,
+        // e a 8 quadros um jogo não é pior: é inutilizável.
+        for teto in [300_000_u32, 900_000, 1_500_000] {
+            let resolucao = resolucao_para(teto, Prioridade::Movimento);
+            assert_eq!(
+                cadencia_para(teto, resolucao, Prioridade::Movimento, Cadencia::Q30),
+                Cadencia::Q30,
+                "a {teto} bps, movimento perdeu quadro além da resolução que já cedeu"
+            );
+        }
+    }
 
     /// O mesmo teto compra resoluções diferentes conforme o que se protege.
     ///

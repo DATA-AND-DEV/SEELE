@@ -828,4 +828,75 @@ mod testes {
             .expect_err("um quadro de 540p num codificador de 720p tem de ser recusado");
         assert!(matches!(erro, ErroDeVideo::QuadroDeTamanhoErrado { .. }));
     }
+    /// **Quanto o codificador de verdade gasta do teto que recebeu.**
+    ///
+    /// Relato de campo: «assistindo a transmissão do mac, a imagem fica borrada
+    /// e blocada» — e borrada *e* blocada é falta de bits, não de resolução.
+    ///
+    /// Não afirma nada: imprime. É uma medida, e o número que ela produz é o que
+    /// separa «o teto chega errado» de «o teto chega certo e o codificador não o
+    /// gasta».
+    ///
+    /// # O que ela deu, em 03/09/2026, num MacBook
+    ///
+    /// **75% do teto, exatamente, em todas as taxas e todas as resoluções.**
+    ///
+    /// ```text
+    /// teto  500000 bps ·  540p → gastou  375340 bps (75%)
+    /// teto 1200000 bps ·  720p → gastou  900336 bps (75%)
+    /// teto 2000000 bps · 1080p → gastou 1500348 bps (75%)
+    /// teto 4000000 bps · 1080p → gastou 3000348 bps (75%)
+    /// ```
+    ///
+    /// Duas coisas saem daqui, e as duas importam.
+    ///
+    /// **A primeira:** os bytes são os mesmos em 540p e em 1080p. É CBR de
+    /// verdade — o que muda com a resolução não é quanto se gasta, é o que se
+    /// compra com o mesmo gasto. Um teto apertado em 1080p compra borrão.
+    ///
+    /// **A segunda:** um quarto do orçamento não é usado. Medido também o
+    /// caminho alternativo, forçando a queda para `AverageBitRate` mais
+    /// `DataRateLimits`: 4% a 26% do teto, muito pior. Então o `ConstantBitRate`
+    /// continua sendo a escolha certa, e os 75% são o que este sistema entrega —
+    /// não um defeito desta casa a consertar, mas um número a saber.
+    ///
+    /// Os carimbos de tempo são sintéticos, `contador/quadros_por_segundo`, então
+    /// sessenta quadros são dois segundos de fluxo e a conta não depende de quão
+    /// rápido a máquina codifica.
+    #[test]
+    #[ignore = "medida, não asserção: rode com --ignored --nocapture"]
+    fn quanto_o_videotoolbox_gasta_do_teto() {
+        for teto in [500_000_u32, 1_200_000, 2_000_000, 4_000_000] {
+            for resolucao in [Resolucao::P540, Resolucao::P720, Resolucao::P1080] {
+                let Ok(mut codec) = Codificador::novo(&ConfigDoCodificador {
+                    resolucao,
+                    cadencia: Cadencia::Q30,
+                    teto_bps: teto,
+                }) else {
+                    eprintln!("PULADO: este Mac não deu uma sessão do VideoToolbox.");
+                    return;
+                };
+
+                // Dois segundos a 30 quadros, com o conteúdo andando: um padrão
+                // parado comprime a nada e mediria o codificador dormindo.
+                let mut bytes = 0_usize;
+                for passo in 0..60_usize {
+                    if let Some(saida) = codec
+                        .codificar(&quadro(resolucao, passo * 3), passo == 0)
+                        .expect("codificar")
+                    {
+                        bytes += saida.bytes.len();
+                    }
+                }
+                let medido = (bytes * 8) / 2;
+                println!(
+                    "teto {:>7} bps · {:>5} → gastou {:>7} bps ({:>3}% do teto)",
+                    teto,
+                    format!("{}p", resolucao.altura()),
+                    medido,
+                    (medido * 100) / teto as usize
+                );
+            }
+        }
+    }
 }

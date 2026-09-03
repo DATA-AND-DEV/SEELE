@@ -850,9 +850,21 @@ pub fn config_para(
 ) -> Option<ConfigDoCodificador> {
     let Teto::Bps(bps) = teto else { return None };
     let degrau = crate::tela::resolucao_para(bps, prioridade);
+    let resolucao = menor_resolucao(degrau, escolha);
     Some(ConfigDoCodificador {
-        resolucao: menor_resolucao(degrau, escolha),
-        cadencia,
+        resolucao,
+        // **E a cadência cede, que é a outra metade do §2.**
+        //
+        // A regra é «a resolução segura, o quadro cede», e só a primeira metade
+        // estava aqui: a cadência atravessava esta função intacta, fosse qual
+        // fosse o orçamento. Funcionava por acidente enquanto o codificador era
+        // o do Cisco, que jogava quadro fora sozinho; o codec do sistema não
+        // joga, e borra os 30 que recebeu. Ver `tela::cadencia_para`.
+        //
+        // Depois da resolução e não antes: quantos bits um quadro precisa
+        // depende de quantos pixels ele tem, e a resolução que vale é a que
+        // acabou de sair do `menor_resolucao`.
+        cadencia: crate::tela::cadencia_para(bps, resolucao, prioridade, cadencia),
         teto_bps: teto.bps(),
     })
 }
