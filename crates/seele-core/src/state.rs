@@ -263,15 +263,17 @@ pub struct Room {
     /// be in the air at once, and the second one failing must not erase the
     /// reason the first one did. A shell drains it.
     pub transfers: Vec<TransferNotice>,
-    /// Quem está compartilhando tela em cada sala de voz.
+    /// As transmissões em curso, pela [`ScreenId`] de cada uma.
     ///
-    /// Uma transmissão por sala de voz, que é o §6 item 3 da spec de compartilhamento
-    /// de tela: *«duas dobram a subida de quem recebe e triplicam a
-    /// interface»*. Um mapa e não um campo em [`VoiceRoomInfo`] porque o servidor
-    /// **não** pôs a transmissão lá — ele reenvia `ScreenShareStarted` a quem
-    /// entra numa sala que já tem uma —, e um campo que só o reenvio preenche
-    /// seria um campo mentindo no aperto de mão.
-    pub telas: HashMap<VoiceRoomId, Tela>,
+    /// **Pela tela e não pela sala**, desde que uma sala passou a caber mais de
+    /// uma: a chave que todo evento carrega é a da transmissão, e indexar pela
+    /// sala obrigaria a procurar qual das dela é a do evento.
+    ///
+    /// Um mapa e não um campo em [`VoiceRoomInfo`] porque o servidor **não** pôs
+    /// a transmissão lá — ele reenvia `ScreenShareStarted` a quem entra numa
+    /// sala que já tem uma —, e um campo que só o reenvio preenche seria um
+    /// campo mentindo no aperto de mão.
+    pub telas: HashMap<ScreenId, Tela>,
     /// A subida que o servidor mediu da própria máquina, em bits por segundo.
     ///
     /// A primeira linha do teto do §5.1 — `caminho de quem HOSPEDA × 60% ÷ N` —
@@ -314,6 +316,12 @@ pub struct Tela {
     /// que a entrada da primeira pessoa não dê um salto no teto. Repeti-lo aqui
     /// faria a interface escrever «1 pessoa assistindo» antes de haver uma.
     pub espectadores: u32,
+    /// Em que sala ela está acontecendo.
+    ///
+    /// Guardada dentro e não como chave do mapa: a interface pergunta «o que
+    /// está sendo transmitido na minha sala», e a resposta é um filtro sobre
+    /// este campo.
+    pub voice_room: VoiceRoomId,
     /// Quem está compartilhando.
     pub person: PersonId,
     /// Como a transmissão se chama.
@@ -1116,15 +1124,12 @@ impl Room {
                 // subir por um instante — justamente no instante em que a sala
                 // acabou de crescer. O `ScreenViewers` que vem atrás corrige o
                 // número; o que ele não corrige é o teto que já saiu.
-                let espectadores = self
-                    .telas
-                    .get(voice_room)
-                    .filter(|tela| tela.screen == *screen)
-                    .map_or(0, |tela| tela.espectadores);
+                let espectadores = self.telas.get(screen).map_or(0, |tela| tela.espectadores);
                 self.telas.insert(
-                    *voice_room,
+                    *screen,
                     Tela {
                         espectadores,
+                        voice_room: *voice_room,
                         person: *person,
                         screen: *screen,
                     },
@@ -1133,17 +1138,11 @@ impl Room {
             }
             // Quantas pessoas estão recebendo, que é o N do §5.1.
             //
-            // Procurado pelo `ScreenId` e não pelo sala de voz porque é assim que a
-            // mensagem se endereça, e porque um `ScreenViewers` atrasado de uma
-            // transmissão anterior não pode reescrever a contagem da que
-            // começou depois — é o mesmo cuidado do `ScreenShareStopped` logo
-            // acima, pelo mesmo motivo.
+            // Endereçado pela `ScreenId`, que agora é também a chave do mapa: um
+            // `ScreenViewers` atrasado de uma transmissão que já acabou não acha
+            // ninguém e não reescreve nada.
             ServerMessage::ScreenViewers { tela, quantos } => {
-                if let Some(viva) = self
-                    .telas
-                    .values_mut()
-                    .find(|conhecida| conhecida.screen == *tela)
-                {
+                if let Some(viva) = self.telas.get_mut(tela) {
                     if viva.espectadores != *quantos {
                         viva.espectadores = *quantos;
                         changed.telas = true;
@@ -1178,10 +1177,10 @@ impl Room {
                 // vez de assumida.
                 if self
                     .telas
-                    .get(voice_room)
-                    .is_some_and(|tela| tela.screen == *screen)
+                    .get(screen)
+                    .is_some_and(|tela| tela.voice_room == *voice_room)
                 {
-                    self.telas.remove(voice_room);
+                    self.telas.remove(screen);
                     changed.telas = true;
                 }
             }
@@ -2152,11 +2151,12 @@ mod tests {
         // uma tela estaria redesenhando justamente o que não mudou.
         assert!(!changed.roster);
         assert_eq!(
-            room.telas.get(&VOICE_ROOM),
+            room.telas.get(&ScreenId(1)),
             Some(&Tela {
                 // Zero até o `ScreenViewers` chegar: quem começou a
                 // compartilhar ainda não sabe se alguém está olhando.
                 espectadores: 0,
+                voice_room: VOICE_ROOM,
                 person: PersonId(9),
                 screen: ScreenId(1)
             })
@@ -2318,7 +2318,7 @@ mod tests {
         });
         assert!(!changed.telas, "um fim de outra transmissão mexeu na sala");
         assert_eq!(
-            room.telas.get(&VOICE_ROOM).map(|tela| tela.screen),
+            room.telas.get(&ScreenId(2)).map(|tela| tela.screen),
             Some(ScreenId(2))
         );
     }

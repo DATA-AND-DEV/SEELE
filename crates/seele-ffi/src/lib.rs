@@ -2770,7 +2770,14 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
 /// desta pessoa — ver [`TelaEmCurso::pedido`].
 fn tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
     let voice_room = room.current_voice_room?;
-    let tela = room.telas.get(&voice_room)?;
+    // **A da minha sala**, e não «a da sala» — o mapa passou a ser por
+    // transmissão, e uma sala pode ter mais de uma. Enquanto a casca desenha um
+    // palco só, a escolhida é a primeira; quando ela souber escolher, é ela que
+    // diz qual.
+    let tela = room
+        .telas
+        .values()
+        .find(|tela| tela.voice_room == voice_room)?;
     // Quem compartilha não assiste a si mesmo. É o mesmo N do §5.1, contado do
     // lado de cá — ver o doc de `TelaEmCurso::espectadores` para o que ele não é.
     let espectadores = room
