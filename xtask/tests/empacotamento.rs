@@ -1627,12 +1627,12 @@ fn as_mudancas_separam_o_que_a_pessoa_sente_do_que_e_ferramenta() {
         .unwrap_or_else(|| panic!("as duas seções têm que existir:\n{texto}"));
 
     assert!(
-        em_cima.contains("a tela para de falar com quem construiu")
-            && em_cima.contains("as recusas dizem o que houve"),
+        em_cima.contains("A tela para de falar com quem construiu.")
+            && em_cima.contains("As recusas dizem o que houve, e param."),
         "o que a pessoa sente lidera:\n{texto}"
     );
     assert!(
-        embaixo.contains("o rascunho do hdiutil não é pacote"),
+        embaixo.contains("O rascunho do hdiutil não é pacote."),
         "o conserto da ferramenta continua na página, embaixo:\n{texto}"
     );
     assert!(
@@ -1743,7 +1743,7 @@ fn o_assunto_atravessa_byte_a_byte() {
     let texto = notas(&format!("{torto}\n"));
 
     assert!(
-        texto.contains("o `»` não entra no $NOME, e a \\ fica"),
+        texto.contains("O `»` não entra no $NOME, e a \\ fica."),
         "o assunto tem que atravessar sem ser mastigado:\n{texto}"
     );
 }
@@ -1758,26 +1758,12 @@ fn a_ordem_dentro_de_uma_secao_e_a_que_entrou() {
          feat(core): primeiro\n",
     );
 
-    let terceiro = texto.find("terceiro");
-    let segundo = texto.find("segundo");
-    let primeiro = texto.find("primeiro");
+    let terceiro = texto.find("Terceiro.");
+    let segundo = texto.find("Segundo.");
+    let primeiro = texto.find("Primeiro.");
     assert!(
         terceiro < segundo && segundo < primeiro,
         "a ordem do histórico tem que sobreviver:\n{texto}"
-    );
-}
-
-#[test]
-fn o_escopo_aparece_ao_lado_do_assunto() {
-    // «as recusas dizem o que houve» sozinho fica solto. Com o escopo na frente
-    // a frase ganha endereço, e os escopos deste projeto são vocabulário do
-    // produto — «alcance», «portaria», «encontro» são as palavras da
-    // documentação, não jargão de quem compila.
-    let texto = notas("fix(alcance): as recusas dizem o que houve\n");
-
-    assert!(
-        texto.contains("**alcance**"),
-        "o escopo tem que aparecer, e em negrito:\n{texto}"
     );
 }
 
@@ -2035,30 +2021,35 @@ fn quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio() {
 }
 
 #[test]
-fn a_versao_sai_nas_duas_casas_numa_execucao_so() {
-    // **Compilar uma vez, publicar duas.**
+fn a_versao_sai_em_todas_as_casas_listadas_numa_execucao_so() {
+    // **Compilar uma vez, publicar quantas casas houver.**
     //
-    // Durante a migração cada versão tem de estar nas duas casas: quem instalou
-    // o SEELE antes da mudança só conhece a antiga, e a atualização que muda o
-    // endereço dele chega por ela. Rodar o script duas vezes daria o mesmo
-    // resultado e custaria outra hora e meia de Linux — e, pior, os pacotes da
-    // segunda volta seriam outros arquivos, com outras somas, para o mesmo
-    // número de versão.
+    // Rodar o script uma vez por casa daria o mesmo resultado e custaria outra
+    // hora e meia de Linux — e, pior, os pacotes da segunda volta seriam outros
+    // arquivos, com outras somas, para o mesmo número de versão.
+    //
+    // As casas são de mentira de propósito. Este teste prova o **mecanismo**, e
+    // o mecanismo tem que sobreviver à decisão de quantas casas existem hoje;
+    // qual é a lista padrão é assunto de `a_casa_padrao_e_so_a_das_versoes`, e
+    // essa lista já mudou uma vez.
     let Some(bancada) = Bancada::nova() else {
         return;
     };
-    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("SEELE_REPO", "casa/nova casa/velha")],
+    );
 
     assert_eq!(
         saida.estado, 0,
         "a publicação tinha que ir até o fim:\n{}",
         saida.texto
     );
-    for casa in ["DATA-AND-DEV/SEELE-RELEASES", "DATA-AND-DEV/SEELE"] {
+    for casa in ["casa/nova", "casa/velha"] {
         assert!(
             saida.diario.contains(&format!("repos/{casa}/releases\n")),
-            "não criou o release em {casa}; durante a migração as duas casas \
-             precisam da mesma versão:\n{}",
+            "não criou o release em {casa}; uma casa listada e não servida é \
+             pior que casa nenhuma — o app procura lá:\n{}",
             saida.diario
         );
     }
@@ -2073,9 +2064,12 @@ fn cada_casa_recebe_o_manifesto_que_aponta_para_ela_mesma() {
     let Some(bancada) = Bancada::nova() else {
         return;
     };
-    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("SEELE_REPO", "casa/nova casa/velha")],
+    );
 
-    for casa in ["DATA-AND-DEV/SEELE-RELEASES", "DATA-AND-DEV/SEELE"] {
+    for casa in ["casa/nova", "casa/velha"] {
         assert!(
             saida.corpos.contains(&format!(
                 "https://github.com/{casa}/releases/download/v1.2.3/"
@@ -2176,5 +2170,114 @@ fn a_bateria_formata_o_workspace_inteiro_e_nao_a_raiz_vazia() {
          Na raiz de um workspace virtual ele não acha alvo nenhum, sai com erro, \
          e o script culpa a formatação por algo que nunca foi conferido.",
         linha.trim()
+    );
+}
+
+#[test]
+fn a_linha_da_mudanca_e_uma_frase_e_nao_uma_tabela() {
+    // Antes, cada linha saía como `- **sessao** — o canal ganha por onde ser
+    // renomeado`, e um guarda chamado `o_escopo_aparece_ao_lado_do_assunto`
+    // exigia esse negrito — este teste é a revogação dele, não um descuido.
+    //
+    // `sessao` é jargão desta casa: quem baixa o SEELE não sabe o
+    // que é, e uma coluna de rótulos antes de cada frase atrapalha justamente
+    // quem a página existe para atender. O escopo continua decidindo a seção,
+    // que é para o que ele serve.
+    let texto = notas("feat(sessao): o canal ganha por onde ser renomeado\n");
+
+    assert!(
+        texto.contains("- O canal ganha por onde ser renomeado."),
+        "a linha tem que ler como frase: maiúscula no começo, ponto no fim:\n{texto}"
+    );
+    assert!(
+        !texto.contains("**sessao**") && !texto.contains("sessao"),
+        "o nome do escopo é jargão de quem escreve, não de quem lê:\n{texto}"
+    );
+}
+
+#[test]
+fn quem_ja_terminava_em_pontuacao_nao_ganha_outro_ponto() {
+    // Um assunto que já é frase inteira não vira `frase?.`, que é o tipo de
+    // detalhe que denuncia que a página foi montada por um script descuidado.
+    let texto = notas("fix(app): e agora, quem paga a conta?\n");
+
+    assert!(
+        texto.contains("E agora, quem paga a conta?\n"),
+        "não se empilha ponto em cima de pontuação:\n{texto}"
+    );
+    assert!(
+        !texto.contains("?."),
+        "e muito menos os dois juntos:\n{texto}"
+    );
+}
+
+#[test]
+fn um_escopo_de_varias_palavras_acha_o_que_conhece_dentro() {
+    // `fix(som da tela)` e `fix(supply-chain, testes)` são commits reais deste
+    // repositório. A tabela não vai listar frases — seriam infinitas —, e antes
+    // disto essas linhas produziam um aviso por palavra: `som`, `da`, `tela`.
+    // Dois desses nomes estão na tabela desde sempre, e o aviso os acusava de
+    // não estarem.
+    let mut filho = Command::new(interpretador())
+        .arg(publicar())
+        .arg("--notas")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("o orquestrador tem que executar");
+    if let Some(entrada) = filho.stdin.as_mut() {
+        use std::io::Write;
+        let _ = entrada.write_all(
+            b"fix(som da tela): o loopback pergunta o formato ao lado certo\n\
+              fix(supply-chain, testes): o cargo deny volta ao verde\n",
+        );
+    }
+    let saida = filho.wait_with_output().expect("o filho termina");
+    let texto = String::from_utf8_lossy(&saida.stdout);
+    let erro = String::from_utf8_lossy(&saida.stderr);
+
+    for palavra in ["«som»", "«da»", "«tela»", "«testes»"] {
+        assert!(
+            !erro.contains(palavra),
+            "{palavra} saiu da quebra de um escopo de várias palavras, e a \
+             tabela conhece o que importa dentro dele:\n{erro}"
+        );
+    }
+
+    let (em_cima, embaixo) = texto
+        .split_once("## Por baixo")
+        .unwrap_or_else(|| panic!("as duas seções têm que existir:\n{texto}"));
+    assert!(
+        em_cima.contains("pergunta o formato ao lado certo"),
+        "«som da tela» é `tela`, e `tela` é produto:\n{texto}"
+    );
+    assert!(
+        embaixo.contains("cargo deny volta ao verde"),
+        "«supply-chain, testes» é `testes`, e `testes` é ferramenta:\n{texto}"
+    );
+}
+
+#[test]
+fn o_corpo_do_release_lista_os_commits_da_mesma_faixa_que_resume() {
+    // O resumo curado escolhe: só `feat` e `fix`, agrupados. É o que quase todo
+    // mundo quer ler, e é exatamente o que não serve para quem foi mandado
+    // investigar alguma coisa — essa pessoa precisa da lista inteira.
+    //
+    // As duas têm que sair da **mesma** faixa. Se uma resume `$FAIXA` e a outra
+    // lista outra coisa, a página fica dizendo duas verdades diferentes sobre a
+    // mesma versão, e ninguém percebe até já estar publicada.
+    let texto = std::fs::read_to_string(publicar()).expect("o orquestrador tem que ser legível");
+
+    assert!(
+        texto.contains("changelog_dos_commits \"$FAIXA\""),
+        "o corpo do release tem que listar os commits da faixa que ele resume"
+    );
+    assert!(
+        texto.contains(
+            "git -C \"$RAIZ\" log --no-merges --format='%s' \"$FAIXA\" \
+                        | notas_das_mudancas"
+        ),
+        "e o resumo tem que sair da mesma faixa"
     );
 }

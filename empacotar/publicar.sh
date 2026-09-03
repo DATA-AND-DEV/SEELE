@@ -403,18 +403,20 @@ if (git status --porcelain -- '$CONFIG_TAURI') {
 # produto" — que é falsa: `ffi` é ponte e `xtask` é ferramenta, e os dois moram
 # lá. Uma lista curta que alguém revisa quando um escopo novo aparece é mais
 # honesta que uma heurística que erra em silêncio.
-ESCOPOS_DE_PRODUTO="alcance admissao anexos app atualizador audio media
-voice_rooms cascas chamada chegada cliente conformance convite core encontro
+ESCOPOS_DE_PRODUTO="alcance admissao anexos apelido app atualizador audio media
+voice_rooms banda botoes botões captura cascas chamada chegada cliente codec
+conformance convite core dispositivos encontro instalador log nucleo subida
 enlace entrada escada fontes frases furo hospedagem interface marca medida
-permissions mensagens moderar mods plug porta portaria proto rede seguranca server
+permissions mensagens moderar mods plug porta portaria proto rede seguranca
+server windows
 sessao spike sync taxa tela telemetria tofu tui ui uri varredura voz"
 
 # Os escopos que existem para **montar** o SEELE, e não para usá-lo.
 #
 # Continuam na página: quem publica, quem empacota noutra máquina e quem
 # desconfia de um pacote têm o que fazer com eles. Só não lideram.
-ESCOPOS_DE_FERRAMENTA="build ci deps empacotar ffi publicar release test
-testes xtask"
+ESCOPOS_DE_FERRAMENTA="adr build ci deps empacotar ffi lints publicar release
+test teste testes xtask"
 
 # Em que seção um escopo entra.
 #
@@ -432,6 +434,22 @@ secao_do_escopo() {
     for se_um in $ESCOPOS_DE_PRODUTO; do
         [ "$1" = "$se_um" ] && { printf 'produto'; return 0; }
     done
+    # Escopo de mais de uma palavra: `fix(som da tela)`, `fix(supply-chain,
+    # testes)`. A tabela não vai listar frases — seriam infinitas —, mas jogar
+    # essas linhas em «desconhecido» é pior que errar: elas **têm** um escopo
+    # conhecido dentro, e o aviso passou três versões acusando `tela` e `testes`
+    # de não existirem na tabela onde eles estão desde sempre.
+    case "$1" in
+        *\ *)
+            for se_um in $1; do
+                if se_achou=$(secao_do_escopo "$se_um"); then
+                    printf '%s' "$se_achou"
+                    return 0
+                fi
+            done
+            ;;
+    esac
+
     printf 'produto'
     return 1
 }
@@ -448,6 +466,47 @@ secao_do_escopo() {
 # Só `feat` e `fix` entram. `docs`, `test`, `chore` e `refactor` são verdade
 # sobre o commit e não são mudança do produto; quem quiser a verdade completa
 # tem o histórico, que continua sendo ela.
+# A primeira letra em maiúscula, e um ponto no fim.
+#
+# Os assuntos deste repositório já são frases inteiras em português — «o canal
+# ganha por onde ser renomeado» —, e o que falta para elas lerem como frase é
+# exatamente isto. Sem acento na primeira letra o `tr` não faz nada, e a linha
+# sai como estava, que é melhor que sair errada.
+em_maiuscula() {
+    em_primeira=$(printf '%s' "$1" | cut -c1 | tr '[:lower:]' '[:upper:]')
+    em_resto=$(printf '%s' "$1" | cut -c2-)
+    case "$1" in
+        *.|*!|*\?) printf '%s%s' "$em_primeira" "$em_resto" ;;
+        *) printf '%s%s.' "$em_primeira" "$em_resto" ;;
+    esac
+}
+
+# Todos os commits da faixa, um por linha, com o resumo curto.
+#
+# **Por que ele existe ao lado do resumo curado.** As seções de cima escolhem: só
+# `feat` e `fix`, agrupados. Isso é o que quase todo mundo quer ler — e é
+# exatamente o que não serve para quem foi mandado investigar alguma coisa. Essa
+# pessoa precisa da lista inteira, com o resumo de cada commit, para achar o que
+# mexeu no que ela está olhando.
+#
+# O resumo e não o hash sozinho: um hash é um endereço, e uma lista de endereços
+# não se lê. Os dois juntos dão a frase e o caminho para o resto dela.
+changelog_dos_commits() {
+    cdc_faixa="$1"
+    cdc_quantos=$(git -C "$RAIZ" log --no-merges --oneline "$cdc_faixa" | grep -c "" || true)
+    if [ "${cdc_quantos:-0}" -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n\n' "## Todos os commits desta versão"
+    printf '%s\n\n' \
+"São ${cdc_quantos}, do mais recente ao mais antigo. O resumo curado está acima; \
+esta lista é para quem precisa achar o commit que mexeu numa coisa específica."
+    printf '<details>\n<summary>Abrir a lista</summary>\n\n'
+    git -C "$RAIZ" log --no-merges --format='- `%h` %s' "$cdc_faixa"
+    printf '\n</details>\n\n'
+}
+
 notas_das_mudancas() {
     ndm_produto=""
     ndm_ferramenta=""
@@ -470,21 +529,36 @@ notas_das_mudancas() {
         esac
 
         if [ -n "$ndm_escopo" ]; then
-            ndm_item="- **$ndm_escopo** — $ndm_assunto"
+            # **Sem o rótulo do escopo na frente.**
+            #
+            # Ele saía como `- **sessao** — o canal ganha por onde ser
+            # renomeado`, e o `sessao` é jargão desta casa: quem baixa não sabe
+            # o que é, e ler uma coluna de rótulos antes de cada frase atrapalha
+            # justamente quem a página existe para atender. O escopo continua
+            # decidindo **em que seção** a linha cai, que é para o que ele serve.
+            ndm_item="- $(em_maiuscula "$ndm_assunto")"
             if ndm_secao=$(secao_do_escopo "$ndm_escopo"); then
                 :
             else
                 # Desconhecido: entra em produto e é nomeado para quem publica
                 # classificar. Uma vez por escopo, não uma vez por commit.
-                case " $ndm_novos " in
-                    *" $ndm_escopo "*) : ;;
-                    *) ndm_novos="$ndm_novos $ndm_escopo" ;;
+                # Separado por linha, e não por espaço: um escopo pode ter
+                # espaço dentro, e a lista separada por espaço se partia nas
+                # palavras dele — foi assim que `som da tela` virou três avisos,
+                # dois deles sobre escopos que a tabela conhece.
+                case "
+$ndm_novos" in
+                    *"
+$ndm_escopo
+"*) : ;;
+                    *) ndm_novos="$ndm_novos$ndm_escopo
+" ;;
                 esac
             fi
         else
             # Sem escopo é forma legítima de conventional commit, e descartá-la
             # perderia mudança sem dizer nada.
-            ndm_item="- $ndm_assunto"
+            ndm_item="- $(em_maiuscula "$ndm_assunto")"
             ndm_secao="produto"
         fi
 
@@ -497,7 +571,8 @@ notas_das_mudancas() {
         fi
     done
 
-    for ndm_um in $ndm_novos; do
+    printf '%s' "$ndm_novos" | while IFS= read -r ndm_um; do
+        [ -n "$ndm_um" ] || continue
         # As chaves não são estilo: sem elas o `»` (0xC2 0xBB) entra no nome da
         # variável em alguns shells, e o script morre com «unbound variable»
         # apontando para um nome que ninguém escreveu. É o mesmo defeito que o
@@ -1633,7 +1708,13 @@ fi
 
 {
     if [ -n "$FAIXA" ]; then
+        # Qual faixa é esta. Sem a linha, «o que mudou» não diz **desde quando**,
+        # e quem pulou uma versão fica sem saber se o que está lendo cobre a
+        # distância que ele andou.
+        printf '%s\n\n' "_As mudanças de \`$ANTERIOR\` até \`v$VERSAO\`._"
         git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA" | notas_das_mudancas
+        printf '\n'
+        changelog_dos_commits "$FAIXA"
     else
         printf '%s\n' \
 "_Primeira versão publicada: não há uma anterior contra a qual comparar. O" \
