@@ -343,18 +343,35 @@ pub struct Telas {
 
 /// Quantas transmissões cabem numa sala ao mesmo tempo.
 ///
-/// **Duas, e o número sai do teto de banda e não do gosto.** O teto de uma
-/// transmissão é `min(subida do host × 60% ÷ espectadores, subida de quem
-/// transmite × 60%)` — `crates/seele-server/src/tela.rs`. Com duas transmissões
-/// o mesmo cano se divide entre elas, e o que cabia em 1080p passa a caber em
-/// 720p para cada uma: uma troca que quem assiste entende, porque ganhou a
-/// segunda imagem.
+/// **Uma, hoje, e o número é do encaminhador e não desta regra.**
 ///
-/// A terceira não. Ela levaria as três para perto do piso em que o
-/// compartilhamento **para** por falta de banda, e o sintoma seria todo mundo
-/// vendo tudo pixelado sem ninguém ter feito nada de errado. Recusar a terceira
-/// com uma frase é melhor que aceitá-la e piorar as outras duas em silêncio.
-pub const TRANSMISSOES_POR_SALA: usize = 2;
+/// O `voice_room` guarda `tela: Option<EmCurso>` — uma transmissão por sala no
+/// caminho dos bytes. Enquanto for assim, aceitar duas aqui seria anunciar uma
+/// transmissão que nunca pinta: o controle diz que começou, o encaminhador a
+/// recusa, e quem assiste fica esperando uma imagem que não vem.
+///
+/// # Por que este número vai sumir, e não crescer
+///
+/// A primeira versão disto era `2`, com o argumento de que o teto se divide
+/// entre as transmissões. **Metade errada**, e a correção veio de quem usa: a
+/// conta do §5.1 é
+///
+/// ```text
+/// min(caminho de quem HOSPEDA × 60% ÷ cópias, caminho de quem COMPARTILHA × 60%, escolha)
+/// ```
+///
+/// A perna de quem compartilha **não** se divide — cada pessoa sobe o próprio
+/// fluxo. O que se divide é a perna do host, e só porque é ele que reencaminha
+/// uma cópia por espectador: com duas transmissões ele manda o dobro de cópias.
+///
+/// E daí sai o limite certo, que não é um número escolhido: quando o teto por
+/// cópia cai abaixo de `PISO_DE_BANDA_BPS`, o `teto_do_hospedeiro` já responde
+/// `None`, e o encaminhador já encerra com `AlemDoQueOHospedeiroCarrega`. Numa
+/// casa com subida boa e três pessoas, três transmissões cabem; numa apertada, a
+/// segunda é recusada — **pela medida da máquina, não por uma constante.**
+///
+/// Este número existe só até o encaminhador saber guardar várias.
+pub const TRANSMISSOES_POR_SALA: usize = 1;
 
 impl Telas {
     /// Registra uma transmissão, ou diz quem já está ocupando as vagas.
@@ -1042,17 +1059,10 @@ mod tests {
     // ---- compartilhamento de tela ----
 
     #[test]
-    fn duas_transmissoes_cabem_na_mesma_sala_e_a_terceira_nao() {
-        // A regra era uma por sala — «duas dobram a subida de quem recebe e
-        // triplicam a interface», dizia a spec da v1. A subida continua sendo o
-        // argumento, e é ela que dá o número: o teto se divide entre as
-        // transmissões, e o que cabia em 1080p passa a caber em 720p para cada
-        // uma. É uma troca que quem assiste entende, porque ganhou a segunda
-        // imagem.
-        //
-        // A terceira levaria as três para perto do piso em que o
-        // compartilhamento **para**, e o sintoma seria todo mundo vendo tudo
-        // pixelado sem ninguém ter feito nada.
+    fn o_registro_para_no_limite_que_o_encaminhador_aguenta() {
+        // O registro já sabe guardar várias — a estrutura é uma lista por sala.
+        // Quem ainda não sabe é o encaminhador, e é por isso que o limite é 1:
+        // aceitar duas aqui anunciaria uma transmissão que nunca pinta.
         //
         // O que este teste prende junto com o número é **quem** o `Err` carrega:
         // é com esses nomes que a interface escreve a recusa, e um `bool`
@@ -1064,18 +1074,13 @@ mod tests {
         );
         assert_eq!(
             telas.comecar(VoiceRoomId(1), PersonId(20), ScreenId(2)),
-            Ok(())
-        );
-
-        assert_eq!(
-            telas.comecar(VoiceRoomId(1), PersonId(30), ScreenId(3)),
-            Err(vec![PersonId(10), PersonId(20)]),
-            "a terceira tem de ser recusada, nomeando quem está nas vagas"
+            Err(vec![PersonId(10)]),
+            "a segunda tem de ser recusada, nomeando quem está na vaga"
         );
 
         // Outra sala é outra conta.
         assert_eq!(
-            telas.comecar(VoiceRoomId(2), PersonId(30), ScreenId(3)),
+            telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(2)),
             Ok(())
         );
     }
@@ -1095,11 +1100,10 @@ mod tests {
             Ok(())
         );
 
-        assert_eq!(telas.em(VoiceRoomId(1)), vec![(PersonId(10), ScreenId(2))]);
         assert_eq!(
-            telas.comecar(VoiceRoomId(1), PersonId(20), ScreenId(3)),
-            Ok(()),
-            "a segunda vaga continuava livre"
+            telas.em(VoiceRoomId(1)),
+            vec![(PersonId(10), ScreenId(2))],
+            "trocou a tela e continua ocupando uma vaga só"
         );
     }
 
@@ -1114,17 +1118,18 @@ mod tests {
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
         telas
-            .comecar(VoiceRoomId(1), PersonId(20), ScreenId(2))
+            .comecar(VoiceRoomId(2), PersonId(20), ScreenId(2))
             .expect("começa");
 
         assert_eq!(telas.parar(VoiceRoomId(1), PersonId(30)), None);
-        assert_eq!(telas.em(VoiceRoomId(1)).len(), 2, "ninguém saiu");
+        assert_eq!(telas.em(VoiceRoomId(1)).len(), 1, "ninguém saiu");
 
         assert_eq!(telas.parar(VoiceRoomId(1), PersonId(10)), Some(ScreenId(1)));
+        assert!(telas.em(VoiceRoomId(1)).is_empty());
         assert_eq!(
-            telas.em(VoiceRoomId(1)),
+            telas.em(VoiceRoomId(2)),
             vec![(PersonId(20), ScreenId(2))],
-            "parar uma não pode derrubar a outra"
+            "parar uma não pode derrubar a de outra sala"
         );
     }
 
@@ -1139,10 +1144,10 @@ mod tests {
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
         telas
-            .comecar(VoiceRoomId(1), PersonId(20), ScreenId(2))
+            .comecar(VoiceRoomId(2), PersonId(10), ScreenId(3))
             .expect("começa");
         telas
-            .comecar(VoiceRoomId(2), PersonId(10), ScreenId(3))
+            .comecar(VoiceRoomId(3), PersonId(20), ScreenId(2))
             .expect("começa");
 
         let encerradas = telas.encerrar_de(PersonId(10));
@@ -1150,32 +1155,28 @@ mod tests {
         assert!(encerradas.contains(&(VoiceRoomId(1), ScreenId(1))));
         assert!(encerradas.contains(&(VoiceRoomId(2), ScreenId(3))));
 
+        assert!(telas.em(VoiceRoomId(1)).is_empty());
+        assert!(telas.em(VoiceRoomId(2)).is_empty());
         assert_eq!(
-            telas.em(VoiceRoomId(1)),
+            telas.em(VoiceRoomId(3)),
             vec![(PersonId(20), ScreenId(2))],
             "a de quem ficou não pode cair junto"
         );
-        assert!(telas.em(VoiceRoomId(2)).is_empty());
         assert!(telas.encerrar_de(PersonId(10)).is_empty());
     }
 
     #[test]
     fn uma_sala_destruida_leva_todas_as_transmissoes_dela() {
-        // Todas, e não a primeira: um aviso só deixaria as outras desenhadas
-        // para sempre na tela de quem assiste.
+        // **Todas**, e o plural é o ponto: a sessão anuncia o fim de cada uma, e
+        // avisar só a primeira deixaria as outras desenhadas para sempre na tela
+        // de quem assiste. Hoje a sala guarda uma; a forma devolve lista para
+        // que o dia em que guardar duas não passe por aqui sem ninguém notar.
         let mut telas = Telas::default();
         telas
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
-        telas
-            .comecar(VoiceRoomId(1), PersonId(20), ScreenId(2))
-            .expect("começa");
 
-        let encerradas = telas.encerrar_voice_room(VoiceRoomId(1));
-        assert_eq!(encerradas.len(), 2);
-        assert!(encerradas.contains(&ScreenId(1)));
-        assert!(encerradas.contains(&ScreenId(2)));
-
+        assert_eq!(telas.encerrar_voice_room(VoiceRoomId(1)), vec![ScreenId(1)]);
         assert!(telas.encerrar_voice_room(VoiceRoomId(1)).is_empty());
         assert!(telas.todas().is_empty());
     }
@@ -1190,11 +1191,11 @@ mod tests {
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
         telas
-            .comecar(VoiceRoomId(1), PersonId(20), ScreenId(2))
+            .comecar(VoiceRoomId(2), PersonId(20), ScreenId(2))
             .expect("começa");
 
         assert_eq!(telas.de(PersonId(10)), Some((VoiceRoomId(1), ScreenId(1))));
-        assert_eq!(telas.de(PersonId(20)), Some((VoiceRoomId(1), ScreenId(2))));
+        assert_eq!(telas.de(PersonId(20)), Some((VoiceRoomId(2), ScreenId(2))));
         assert_eq!(telas.de(PersonId(30)), None);
         assert_eq!(telas.todas().len(), 2);
     }
