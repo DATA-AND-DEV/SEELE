@@ -1214,7 +1214,21 @@ fn agir(janela: HWND, estado: &mut Estado, acao: Option<Acao>) {
             // linha da instalação disser que acabou, e não quando alguém apertar.
             Passo::Instalando => {}
             Passo::Pronto => {
-                // SAFETY: fecha a janela; o produto abre no lugar dela.
+                // **Abrir antes de fechar, e nesta ordem.**
+                //
+                // O botão diz ABRIR O SEELE. A primeira versão disto só fechava
+                // a janela, com um comentário afirmando que o produto abria no
+                // lugar dela — a intenção escrita e não implementada. Quem
+                // apertava via o instalador sumir e mais nada.
+                //
+                // Fechar primeiro também não serviria: o `DestroyWindow` leva ao
+                // fim do laço de mensagens e à saída do processo, e o que vier
+                // depois pode não chegar a rodar.
+                instalacao::abrir_o_produto(
+                    &std::path::PathBuf::from(pasta_escolhida(estado)),
+                    &[],
+                );
+                // SAFETY: fecha a janela, agora com o produto já lançado.
                 unsafe {
                     let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(janela);
                 }

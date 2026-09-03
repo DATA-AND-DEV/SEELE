@@ -212,6 +212,37 @@ mod testes {
     }
 
     #[test]
+    fn o_botao_que_diz_abrir_o_seele_abre_o_seele() {
+        // **O defeito que este guarda existe para pegar já aconteceu.**
+        //
+        // O botão do passo 04 diz ABRIR O SEELE, e a primeira versão dele só
+        // fechava a janela — com um comentário ao lado afirmando que o produto
+        // abria no lugar dela. A intenção estava escrita e não implementada, e
+        // relendo o código ela parecia certa: o comentário dizia o que deveria
+        // acontecer.
+        //
+        // Quem apertava via o instalador sumir e mais nada. Não há erro, não há
+        // log, não há tela — é um botão que promete e cala.
+        let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/janela.rs");
+        let Ok(janela) = std::fs::read_to_string(&caminho) else {
+            panic!("não li {}", caminho.display());
+        };
+
+        let ramo = janela
+            .split("Passo::Pronto => {")
+            .nth(1)
+            .and_then(|resto| resto.split("\n            }").next())
+            .expect("o passo 04 perdeu o ramo do botão que avança");
+
+        assert!(
+            ramo.contains("abrir_o_produto"),
+            "o botão do passo 04 fecha a janela e não abre o produto.\n\
+             Ele diz ABRIR O SEELE: quem aperta vê o instalador sumir e mais \
+             nada — sem erro, sem log, sem tela."
+        );
+    }
+
+    #[test]
     fn nenhuma_obrigacao_esta_sem_consequencia() {
         // Uma obrigação sem o que quebra ao lado é uma linha que ninguém sabe
         // priorizar — e a primeira a ser cortada quando o prazo aperta.
