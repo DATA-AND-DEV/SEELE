@@ -9958,3 +9958,82 @@ fn a_recusa_da_transmissao_nao_atravessa_a_saida_da_sala() {
         "sair da sala deixou de esquecer a recusa:\n{desenho}"
     );
 }
+
+#[test]
+fn uma_atualizacao_que_nao_pegou_e_dita_e_nao_descoberta() {
+    // **O atualizador do Tauri não sabe se o instalador abriu.** No Windows ele
+    // entrega o arquivo ao shell e sai:
+    //
+    // ```rust
+    // unsafe { ShellExecuteW(null, w!("open"), file, parameters, null, SW_SHOW) };
+    // std::process::exit(0);
+    // ```
+    //
+    // O retorno é descartado. UAC negado, elevação que falha, instalador que
+    // aborta: o app fecha do mesmo jeito, e quem reabre está na versão de antes.
+    // Foi relatado como pergunta — «por que não está persistindo?» —, e a
+    // pergunta é a prova de que faltava a frase: a pessoa descobriu comparando
+    // números de versão.
+    let servidor = without_comments(&read("ui/tela-server.js"));
+    assert!(
+        servidor.contains("atualizacao_que_nao_pegou"),
+        "ninguém pergunta se a atualização anterior pegou"
+    );
+    assert!(
+        servidor.contains("contarAAtualizacaoQueNaoPegou()"),
+        "a pergunta existe e ninguém a faz ao subir, então a frase espera a \
+         pessoa abrir a configuração — depois de ela já ter descoberto sozinha"
+    );
+
+    // Na entrada, que é a tela da abertura. Escondida atrás da engrenagem ela
+    // chegaria depois da pergunta.
+    let conta = servidor
+        .split("async function contarAAtualizacaoQueNaoPegou")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        conta.contains("boot-erro"),
+        "a frase não aparece na entrada:\n{conta}"
+    );
+}
+
+#[test]
+fn o_bilhete_da_atualizacao_e_escrito_antes_de_o_processo_poder_morrer() {
+    // No Windows o `install` não volta. Um bilhete escrito depois dele nunca
+    // seria escrito, e a próxima abertura não teria o que comparar.
+    let rust = without_comments(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
+        )
+        .expect("o main tem que ser legível"),
+    );
+
+    let instalar = rust
+        .split("async fn instalar_atualizacao")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+
+    let anota = instalar.find("anotar_a_tentativa").unwrap_or(usize::MAX);
+    let instala = instalar.find("nova.install(").unwrap_or(usize::MAX);
+    assert!(
+        anota < instala,
+        "o bilhete é escrito depois do `install`, que no Windows não volta:\n{instalar}"
+    );
+
+    // E lido uma vez: o Rust o apaga na leitura. Uma queixa que se repete a cada
+    // abertura é uma queixa que se aprende a ignorar.
+    let le = rust
+        .split("fn atualizacao_que_nao_pegou")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        le.contains("remove_file"),
+        "o bilhete sobrevive à leitura, e a frase passa a aparecer para sempre:\n{le}"
+    );
+}

@@ -817,6 +817,66 @@ function desenharAchado(nova) {
   achado.hidden = false;
 }
 
+/**
+ * A atualização anterior que não pegou, dita uma vez.
+ *
+ * # Por que o app precisa dizer isto
+ *
+ * No Windows o atualizador do Tauri entrega o instalador ao shell e sai com
+ * `exit(0)` **sem olhar** se o shell conseguiu abri-lo — o retorno do
+ * `ShellExecuteW` é descartado no código dele. UAC negado, elevação que falha,
+ * instalador que aborta: o app fecha do mesmo jeito, e quem reabre está na
+ * versão de antes sem uma palavra sobre por quê.
+ *
+ * Foi relatado exatamente assim: «depois da versão 10.1-1 toda vez que atualizo
+ * e fecho o app, ao abrir de novo volta pra essa versão. Por que não está
+ * persistindo?». A pergunta é a prova de que faltava a frase — a pessoa teve de
+ * descobrir sozinha, comparando números.
+ *
+ * Uma vez e não a cada abertura: o Rust apaga o bilhete ao lê-lo. Uma queixa que
+ * se repete é uma queixa que se aprende a ignorar, e a próxima tentativa escreve
+ * o bilhete de novo se falhar de novo.
+ */
+async function contarAAtualizacaoQueNaoPegou() {
+  let alvo = null;
+  try {
+    alvo = await invoke("atualizacao_que_nao_pegou");
+  } catch (falha) {
+    console.warn("atualizacao_que_nao_pegou:", falha);
+    return;
+  }
+  if (!alvo) return;
+
+  const frase =
+    `A atualização para a ${alvo} não foi aplicada: o instalador foi aberto e ` +
+    "não terminou. No Windows isso quase sempre é o aviso de permissão do " +
+    "sistema recusado ou fechado. Abra a configuração e tente de novo, " +
+    "respondendo Sim quando o Windows perguntar.";
+
+  // **Na entrada, e não escondida na configuração.**
+  //
+  // A abertura é o momento em que a pessoa descobre o problema — foi
+  // comparando o número da versão que ela o descobriu da primeira vez. Uma
+  // frase guardada atrás de uma engrenagem chegaria depois da pergunta.
+  const naEntrada = $("boot-erro");
+  if (naEntrada) {
+    naEntrada.hidden = false;
+    naEntrada.textContent = frase;
+  }
+
+  // E também ao lado do botão que tenta de novo, que é onde ela vira ação.
+  const erro = $("atualizacao-erro");
+  if (erro) {
+    erro.hidden = false;
+    erro.textContent = frase;
+  }
+}
+
+// Uma vez, ao subir. O bilhete é apagado na leitura, do lado do Rust.
+contarAAtualizacaoQueNaoPegou().catch((falha) =>
+  console.warn("a atualização anterior:", falha),
+);
+
 /** Pergunta se há versão nova. Não baixa nada. */
 async function procurarAtualizacao() {
   const botao = $("atualizacao-procurar");

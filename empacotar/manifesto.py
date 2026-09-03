@@ -66,7 +66,29 @@ def montar(entrega: pathlib.Path, tag: str, repo: str) -> dict | None:
     versao = tag[1:] if tag.startswith("v") else tag
     plataformas: dict[str, dict[str, str]] = {}
 
-    for assinatura in sorted(entrega.glob("*.sig")):
+    # **A ordem é a escolha, e no Windows ela decide qual instalador atualiza.**
+    #
+    # Dois `.exe` casam `windows-x86_64`: o `-setup.exe` do NSIS e o
+    # `-instalador.exe`, que é nosso. Quem entrar por último no dicionário vence,
+    # e antes disto a ordem era alfabética — `instalador` antes de `setup` —,
+    # então o NSIS ganhava por acidente de nome.
+    #
+    # Ganhar por acidente de nome custou caro. Quem instala pelo nosso e atualiza
+    # pelo NSIS tem dois programas diferentes decidindo onde o SEELE mora e que
+    # chave de registro o descreve. Relatado assim: «depois da versão 10.1-1 toda
+    # vez que atualizo e fecho o app, ao abrir de novo volta pra essa versão» —
+    # com a pasta intacta e **uma só** entrada em Programas e Recursos, que é a
+    # nossa. O NSIS nunca completou, e o app nunca soube: o atualizador do Tauri
+    # descarta o retorno do `ShellExecuteW` e sai com código zero de qualquer
+    # jeito.
+    #
+    # O nosso vem por último de propósito: a atualização passa pelo mesmo
+    # instalador que instalou, que sabe onde o app está pelo registro e respeita
+    # a pasta que a pessoa escolheu.
+    def preferencia(caminho: pathlib.Path) -> tuple[int, str]:
+        return (1 if "-instalador.exe" in caminho.name else 0, caminho.name)
+
+    for assinatura in sorted(entrega.glob("*.sig"), key=preferencia):
         pacote = assinatura.with_suffix("")
         if not pacote.exists():
             print(f"aviso: {assinatura.name} assina um arquivo que não está aqui; ignorado.")

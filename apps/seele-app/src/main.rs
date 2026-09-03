@@ -2852,6 +2852,31 @@ async fn instalar_atualizacao(
         .await
         .map_err(|erro| classificar_atualizacao(&erro))?;
 
+    // **O bilhete que sobrevive a este processo.**
+    //
+    // No Windows o `install` abaixo não volta: o atualizador do Tauri entrega o
+    // instalador ao shell e sai com `exit(0)` — e sai **sem olhar** se o shell
+    // conseguiu abri-lo. Está no código dele:
+    //
+    // ```rust
+    // unsafe { ShellExecuteW(null, w!("open"), file, parameters, null, SW_SHOW) };
+    // std::process::exit(0);
+    // ```
+    //
+    // O retorno é descartado. UAC negado, arquivo que não abre, elevação que
+    // falha — o app fecha igual, e quem reabre está na versão de antes sem uma
+    // palavra sobre por quê. Relatado assim: «depois da versão 10.1-1 toda vez
+    // que atualizo e fecho o app, ao abrir de novo volta pra essa versão».
+    //
+    // Este arquivo é o que permite dizer a frase. Ele é escrito **antes** de o
+    // processo poder morrer, guarda para que versão se estava indo, e é lido na
+    // próxima abertura: se a versão de agora não é aquela, a atualização não
+    // aconteceu, e a tela passa a saber disso.
+    //
+    // Escrever falhando não impede de instalar. O que se perde é a frase da
+    // próxima vez, e trocar uma atualização por uma frase seria a troca errada.
+    anotar_a_tentativa(&app, nova.version.clone());
+
     // Daqui para baixo é a parte que mexe em disco.
     nova.install(pacote)
         .map_err(|erro| classificar_atualizacao(&erro))?;
@@ -2859,6 +2884,60 @@ async fn instalar_atualizacao(
     // Só se chega aqui fora do Windows: lá o `install` acima já encerrou este
     // processo. `restart` não volta, e é por isso que não há `Ok(())` depois.
     app.restart()
+}
+
+/// Onde fica o bilhete da atualização em curso.
+///
+/// Ao lado das preferências, e não em `Program Files`: quem escreve é o app
+/// rodando como a pessoa, e quem lê é a abertura seguinte da mesma pessoa.
+fn bilhete_da_atualizacao(app: &AppHandle) -> std::path::PathBuf {
+    std::path::PathBuf::from(config_dir(app)).join("atualizacao-em-curso")
+}
+
+/// Guarda para que versão esta atualização estava indo.
+///
+/// Ver o comentário em `instalar_atualizacao`: no Windows o processo pode morrer
+/// na linha seguinte, e morre sem saber se o instalador chegou a abrir.
+fn anotar_a_tentativa(app: &AppHandle, versao: String) {
+    let caminho = bilhete_da_atualizacao(app);
+    if let Some(pasta) = caminho.parent() {
+        let _ = std::fs::create_dir_all(pasta);
+    }
+    if let Err(erro) = std::fs::write(&caminho, &versao) {
+        tracing::warn!(%erro, %versao, "não consegui anotar a atualização em curso");
+    }
+}
+
+/// O que a atualização anterior prometeu e não cumpriu, se houve uma.
+///
+/// `Some(versão)` quando a última tentativa mirava uma versão que **não** é a que
+/// está rodando agora. Nos dois outros casos o bilhete é apagado e a resposta é
+/// `None`: ou a atualização deu certo, ou não houve nenhuma.
+///
+/// Apagado ao ser lido, e é o que faz a frase aparecer **uma vez**. Uma queixa
+/// que se repete a cada abertura vira ruído que se aprende a ignorar, e a
+/// próxima tentativa escreve o bilhete de novo se falhar de novo.
+///
+/// # Errors
+///
+/// Nenhum. Um bilhete que não abre é indistinguível de bilhete nenhum, e nos
+/// dois casos não há o que contar.
+#[tauri::command]
+fn atualizacao_que_nao_pegou(app: AppHandle) -> Option<String> {
+    let caminho = bilhete_da_atualizacao(&app);
+    let anotada = std::fs::read_to_string(&caminho).ok()?;
+    let _ = std::fs::remove_file(&caminho);
+
+    let anotada = anotada.trim().to_owned();
+    if anotada.is_empty() || anotada == app.package_info().version.to_string() {
+        return None;
+    }
+    tracing::warn!(
+        alvo = %anotada,
+        rodando = %app.package_info().version,
+        "a atualização anterior não foi aplicada"
+    );
+    Some(anotada)
 }
 
 /// Abre o arquivo de log desta máquina, em modo de acréscimo.
@@ -3130,6 +3209,7 @@ fn main() {
             busca_limpar,
             procurar_atualizacao,
             instalar_atualizacao,
+            atualizacao_que_nao_pegou,
             descrever_arquivo,
             guardar_colado,
             escolher_arquivo,

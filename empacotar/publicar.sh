@@ -1798,6 +1798,50 @@ PEDIDO="$TEMPORARIO/pedido.json"
 # Os pacotes, esses, são bit a bit os mesmos: compilados uma vez, assinados uma
 # vez, subidos duas. É essa a diferença entre esta volta e rodar o script duas
 # vezes — a segunda casa custa o upload, e não mais uma hora e meia de Linux.
+# **A assinatura do nosso instalador, sem a qual ele não atualiza ninguém.**
+#
+# O `manifesto.py` só monta entrada para arquivo que tenha um `.sig` ao lado, e
+# o empacotador do Tauri assina só o que ele mesmo produz. O nosso instalador
+# saía sem assinatura, o manifesto caía no `-setup.exe` do NSIS, e quem instalou
+# pelo nosso passava a atualizar por outro programa — com outra ideia de onde o
+# SEELE mora e outra chave de registro para descrevê-lo.
+#
+# O sintoma, relatado: «depois da versão 10.1-1 toda vez que atualizo e fecho o
+# app, ao abrir de novo volta pra essa versão». A pasta intacta e **uma só**
+# entrada em Programas e Recursos — a nossa — dizem que o NSIS nunca completou.
+# E o app não tinha como saber: o atualizador do Tauri descarta o retorno do
+# `ShellExecuteW` e sai com código zero de qualquer jeito.
+#
+# Aqui e não no `windows.ps1` porque a chave do projeto mora **nesta** máquina,
+# e mandá-la para a máquina do Windows por SSH seria pôr a chave onde ela não
+# precisa estar.
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+    for ai_um in "$RAIZ"/entrega/*-instalador.exe; do
+        [ -f "$ai_um" ] || continue
+        if [ -f "$ai_um.sig" ]; then
+            continue
+        fi
+        passo "assinando $(basename "$ai_um")"
+        if cargo tauri signer sign "$ai_um" > "$TEMPORARIO/assinatura" 2>&1; then
+            # A CLI escreve a assinatura na saída, entre linhas de prosa. O
+            # arquivo `.sig` ao lado é o que o `manifesto.py` lê, e é ele que
+            # tem de existir — a CLI já o escreve, e esta conferência é para o
+            # dia em que ela parar de escrever.
+            if [ ! -f "$ai_um.sig" ]; then
+                morrer "«cargo tauri signer sign» não deixou o .sig ao lado de" \
+                    "$(basename "$ai_um")." \
+                    "$(head -c 400 "$TEMPORARIO/assinatura")"
+            fi
+        else
+            morrer "não consegui assinar $(basename "$ai_um")." \
+                "$(head -c 400 "$TEMPORARIO/assinatura")" \
+                "" \
+                "Sem esta assinatura o manifesto cai no instalador do NSIS, e" \
+                "quem instalou pelo nosso atualiza por outro programa."
+        fi
+    done
+fi
+
 RASCUNHOS=""
 for pub_repo in $REPOS; do
     printf '\n'
