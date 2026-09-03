@@ -352,9 +352,17 @@ impl VoiceRoom {
                 // quadro-chave, ele acerta o passo e ainda consegue
                 // decodificar. Quem entra pede um quadro-chave, e a onda 1 já
                 // atende esse pedido.
-                for curso in self.telas.values_mut() {
-                    if curso.dono != person {
-                        curso.esperando.push(person);
+                // **Só entra sozinho na única.** Com uma transmissão na sala,
+                // quem chega vê o que está acontecendo sem clicar — é o que o
+                // produto sempre fez, e ninguém quer clicar para ver a única
+                // coisa que há. Com duas, entrar nas duas custaria duas cópias e
+                // dois decodificadores a quem acabou de chegar, sem ter pedido
+                // nenhum dos dois; a escolha passa a ser dela, por `WatchScreen`.
+                if self.telas.len() == 1 {
+                    for curso in self.telas.values_mut() {
+                        if curso.dono != person {
+                            curso.esperando.push(person);
+                        }
                     }
                 }
                 self.reconferir_o_teto();
@@ -539,15 +547,26 @@ impl VoiceRoom {
                 fim,
             },
         );
+        // **A primeira abre para a sala; da segunda em diante, quem quiser pede.**
+        //
+        // Com uma transmissão só, empurrá-la para todo mundo é o certo: ninguém
+        // quer clicar para ver a única coisa que está acontecendo, e é o que o
+        // produto fez desde sempre. A partir da segunda, empurrar cobraria de
+        // cada pessoa uma cópia na descida e um decodificador na CPU por
+        // transmissão — e nenhuma das duas aparece na conta do teto, que só mede
+        // a subida de quem hospeda.
+        //
         // Quem já está na sala entra do primeiro byte: o fluxo ainda não tem
         // byte nenhum, então não há passo a acertar.
-        let ja_estao: Vec<PersonId> = self
-            .members
-            .keys()
-            .copied()
-            .filter(|quem| *quem != from)
-            .collect();
-        self.ligar(from, &ja_estao);
+        if self.telas.len() == 1 {
+            let ja_estao: Vec<PersonId> = self
+                .members
+                .keys()
+                .copied()
+                .filter(|quem| *quem != from)
+                .collect();
+            self.ligar(from, &ja_estao);
+        }
         // A primeira contagem, e ela tem de sair mesmo quando a sala está
         // vazia: quem compartilha para uma sala de uma pessoa precisa saber
         // que N é zero tanto quanto precisa saber que virou seis.
@@ -1415,10 +1434,56 @@ mod tests {
 
         assert_eq!(voice_room.drops().tela_ja_tomada, 0, "nenhuma foi recusada");
 
-        // Carol recebe convite das duas, e a ordem é a de abertura.
+        // **A primeira chega sozinha; a segunda, só se ela pedir.**
+        //
+        // Com uma transmissão na sala, empurrá-la é o certo — ninguém quer
+        // clicar para ver a única coisa que há. Da segunda em diante, empurrar
+        // cobraria de Carol uma cópia na descida e um decodificador na CPU sem
+        // que ela tivesse pedido nenhum dos dois.
         assert_eq!(carol.try_recv().map(|c| c.screen), Ok(ScreenId(7)));
+        assert!(
+            carol.try_recv().is_err(),
+            "a segunda chegou sem ela pedir: é a cópia que ninguém autorizou"
+        );
+
+        // Pedindo, ela entra — no próximo quadro-chave, como quem chega no meio.
+        voice_room.handle(VoiceRoomCommand::TelaAssistir {
+            person: PersonId(3),
+            screen: ScreenId(8),
+        });
+        assert!(
+            carol.try_recv().is_err(),
+            "o pedido não liga no meio do fluxo, e sim no quadro-chave"
+        );
+        voice_room.handle(VoiceRoomCommand::TelaBytes {
+            from: PersonId(2),
+            bytes: quadro(true, 30),
+        });
         assert_eq!(carol.try_recv().map(|c| c.screen), Ok(ScreenId(8)));
-        assert!(carol.try_recv().is_err(), "e nada além das duas");
+    }
+
+    #[test]
+    fn quem_fecha_a_janela_devolve_a_copia() {
+        // `UnwatchScreen` existe pela razão que `StopScreenShare` já tinha: um
+        // verbo que só existe como ausência não distingue «fechei a janela» de
+        // «minha conexão caiu». O servidor precisa da diferença para devolver o
+        // teto a quem ficou — e é a contagem de cópias que o teto divide.
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _alice = espectador(&mut voice_room, 1);
+        let _bob = espectador(&mut voice_room, 2);
+        let _fim = compartilhar(&mut voice_room, 1, 7);
+
+        assert_eq!(voice_room.copias(), 1, "bob assiste sozinho");
+
+        voice_room.handle(VoiceRoomCommand::TelaParouDeAssistir {
+            person: PersonId(2),
+            screen: ScreenId(7),
+        });
+        assert_eq!(
+            voice_room.copias(),
+            0,
+            "a cópia dele tinha de sair da conta na hora"
+        );
     }
 
     #[test]
