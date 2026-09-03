@@ -7,6 +7,10 @@ ensinou", no fim, e "O que a primeira máquina de outra pessoa ensinou", logo
 depois: três decisões deste ADR foram corrigidas por um relato de campo, e a
 maior delas é que o convite não pode carregar um endereço só.
 
+**Emendado em 2026-09-03:** a condição de o ponto de encontro ser **sem estado**
+foi revista. Ver «O quarto, e por que a recusa foi revista», no fim. O resto do
+ADR continua valendo.
+
 **Degrau 4 implementado:** 2026-08-17, depois da conversa sobre metadado que
 esta página pedia — a decisão foi **construir, com um ponto de encontro nosso por
 padrão, e trocável**. Ver "O que o degrau 4 ensinou", no fim. O degrau 5 continua
@@ -298,7 +302,7 @@ Este ADR listou quatro mitigações como parte da decisão. Onde cada uma é cob
 |---|---|
 | **opcional** | `SEELE_ENCONTRO=nao` desliga o degrau, e nenhum pacote sai — `alcance::encontro`; e `hospedagem` prova que com o ponto fora do ar o Dogma sobe igual, com os mesmos endereços no link |
 | **trocável** | o endereço viaja no `enc=` do convite, e o teste do `uri` cobra as duas metades; o ambiente troca o ponto sem versão nova de nada |
-| **sem estado** | `responder` é função livre: um `LEVE` funciona sem nenhum `ONDE` antes, e dois processos diferentes respondem byte a byte igual |
+| **sem estado** | ~~`responder` é função livre~~ — **emendado em 03/09/2026**, ver «O quarto». `responder` continua sendo função livre e os três verbos antigos continuam sem estado; o que passou a existir é um mapa de `marca → endereço` em memória, com prazo |
 | **não lê nem se passa por ninguém** | a resposta é montada campo a campo e nunca copiada do pedido; e quem entra não lê resposta nenhuma do ponto de encontro |
 
 ## O que a implementação ensinou
@@ -457,3 +461,96 @@ global de verdade e não há como distingui-lo pela faixa; quem sabe é a interf
 Sem essa distinção a escada escrevia "alcança de qualquer lugar" embaixo de um
 link que não aceita entrada nenhuma — a forma mais convincente do silêncio que
 este ADR existe para não produzir, porque vem com uma frase confiante em cima.
+
+## O quarto, e por que a recusa foi revista
+
+**2026-09-03.** Este ADR recusou o quarto com um argumento que continua correto:
+
+> A primeira forma óbvia do bilhete — um identificador opaco, um número de
+> "quarto" — **contradiz isso**: alguém teria de traduzir aquele número para o
+> endereço do anfitrião, e essa tradução é uma tabela. Um serviço com tabela tem
+> o que perder num reinício, o que vazar num descuido e o que entregar sob
+> intimação.
+
+O que mudou não foi esse lado da conta. Foi o outro.
+
+### O que a ausência do quarto custava
+
+Um relato de campo, na palavra de quem o deu:
+
+> *«O ip que fica salvo na lista de servidores ainda dá problema de reconexão,
+> possivelmente por que a porta muda quando abre e fecha o server. Precisamos
+> achar um jeito de resolver isso, por que se não, a lista de servidores fica
+> inútil.»*
+
+O diagnóstico está certo, e é mais amplo do que porta. Medindo os três caminhos
+que este ADR construiu:
+
+| caminho | a porta | sobrevive a fechar e abrir? |
+|---|---|---|
+| rede local, `192.168.x.x:8383` | fixa | **sim** |
+| UPnP/PCP, degrau 3 | pede 8383 externa e **recusa** outra | **sim** |
+| furo de NAT, degrau 4 | a que o roteador deu ao datagrama | **não** |
+
+E **tudo** o que a lista de servidores conhecidos guarda é endereço: o do link,
+os alternativos, e o `aviso` de dentro do bilhete. Os três nascem do mesmo
+mapeamento e morrem juntos quando o servidor fecha. O anfitrião reavive o
+mapeamento a cada quinze segundos enquanto está no ar — por isso a coisa funciona
+durante uma sessão inteira — e na abertura seguinte o roteador dá outro.
+
+Ou seja: a lista servia a quem está na mesma casa e a quem tem degrau 3, e era
+inútil exatamente para quem este degrau existe para atender.
+
+### O que passou a existir
+
+Um mapa de `marca → endereço`, **em memória**, com prazo de 60 segundos e teto de
+4096 marcas. Dois verbos novos no protocolo: `MORO`, que o anfitrião manda no
+pacote de reavivamento que ele já mandava, e `QUEM`, com que se pergunta.
+
+A marca sai da impressão digital, que é a única coisa da lista que não envelhece
+— ela é a chave do servidor, e já viaja no `seele://`.
+
+### O custo, nomeado
+
+**O ponto de encontro passa a saber que uma marca está no ar, e em que
+endereço.** É metadado vivo, e é exatamente o que este ADR não queria que
+existisse. Vale escrever o que ele **continua** não sabendo, porque a diferença é
+o que torna o preço aceitável:
+
+- quem falou com quem não passa por ali — a conversa nunca passou;
+- a marca é meia impressão digital: um número, não um nome, não um apelido e não
+  um endereço de e-mail;
+- nada vai a disco, e o `--barulhento` — que existe para investigar — não imprime
+  o quarto.
+
+O que se perdeu de concreto: um ponto de encontro reiniciado deixa de responder
+igual, porque o quarto esvazia. Os anfitriões voltam a aparecer em até quinze
+segundos, e os três verbos antigos continuam respondendo byte a byte igual — o
+`um_ponto_de_encontro_reiniciado_responde_igual` continua verde e continua
+valendo para eles.
+
+### Por que ninguém toma o lugar de ninguém
+
+Qualquer um manda `MORO` com a marca de outro. Duas coisas contêm isso, e
+**nenhuma delas é autenticação** — este serviço não tem chave nenhuma para
+conferir, e dar-lhe uma seria dar-lhe muito mais estado do que este ADR aceita:
+
+1. **Quem chega confere a impressão digital de qualquer jeito** (ADR 0003). Um
+   endereço errado falha no aperto de mão; não vira conexão com o impostor. O
+   prejuízo é não entrar, e não entrar no lugar errado.
+2. **Quem escreveu primeiro fica**, enquanto o prazo não vencer. O anfitrião
+   reavive o dele a cada quinze segundos, então o lugar só está livre quando ele
+   está fora do ar — e aí o que se toma é o lugar de quem não está lá.
+
+O dono **pode** se mudar, e é o caso que o mecanismo inteiro existe para cobrir:
+a comparação é por IP e não pelo socket, porque a porta é justamente o que muda.
+
+### Onde isto é cobrado
+
+| Propriedade | Onde |
+|---|---|
+| o endereço de hoje chega a quem só tem a impressão | `crates/seele-conformance/tests/quarto.rs`, com um ponto de encontro de verdade no meio |
+| um ponto antigo, que não conhece `QUEM`, cala e não trava ninguém | o mesmo arquivo |
+| o quarto tem teto, e encher não expulsa quem está dentro | `seele-encontro`, `o_quarto_tem_teto_porque_escrever_nele_e_de_graca` |
+| a impressão sobrevive a uma visita que não a traz | `seele-core`, `a_impressao_sobrevive_a_uma_visita_que_nao_a_traz` |
+| uma lista escrita antes desta coluna continua sendo lida | `uma_linha_de_sete_campos_continua_sendo_lida` |
