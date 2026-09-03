@@ -19,6 +19,18 @@ let decodificador = null;
 let telaEmCurso = null;
 
 /**
+ * Se esta pessoa disse que não quer ver transmissão nenhuma.
+ *
+ * **Uma escolha, e não a ausência de uma.** Sem esta bandeira, `NÃO VER` duraria
+ * até o servidor ligar a pessoa de novo — o que ele faz sozinho sempre que uma
+ * transmissão começa e é a única da sala, porque é o certo para quem não disse
+ * nada. Quem disse, disse; e é `abrirImagemDaTela` que respeita.
+ *
+ * Zerada ao sair da sala: a escolha é sobre o que está acontecendo ali.
+ */
+let naoQueroVer = false;
+
+/**
  * Se já chegou um quadro-chave desta transmissão.
  *
  * Um `VideoDecoder` alimentado com um quadro delta antes do primeiro chave
@@ -140,6 +152,19 @@ function pintar(quadro) {
  * Mac não decodifica isto» de uma tela preta sem explicação.
  */
 async function abrirImagemDaTela(tela, largura, altura) {
+  // **A recusa vale mesmo quando o servidor liga por conta própria.**
+  //
+  // Ele liga todo mundo na primeira transmissão de uma sala, sem pedido, e isso
+  // é o certo para quem não disse nada — ninguém quer clicar para ver a única
+  // coisa que está acontecendo. Para quem disse, é o contrário: a cópia chega
+  // por um caminho que a pessoa já recusou, e devolvê-la é a única forma de o
+  // botão significar o que diz.
+  if (naoQueroVer) {
+    invoke("assistir", { tela, quero: false }).catch((falha) => {
+      if (falha !== "NotConnected") console.warn("recusar a transmissão:", falha);
+    });
+    return;
+  }
   fecharImagemDaTela();
   telaEmCurso = tela;
   esperandoChave = true;
@@ -478,10 +503,18 @@ listen("seele://event", (evento) => {
  * de uma sala passou a esperar um pedido — o anúncio chega para todo mundo, a
  * imagem só para quem pediu.
  *
- * # Escondida quando há uma só
+ * # Aparece com uma, e não só com duas
  *
- * Escolher entre uma coisa não é escolher. Com uma transmissão a sala se
- * comporta como sempre se comportou: ela aparece sozinha, e não há lista.
+ * Ela ficava escondida com uma transmissão só, com o argumento de que escolher
+ * entre uma coisa não é escolher. O argumento estava incompleto: com uma
+ * transmissão há **duas** escolhas — ver, e não ver —, e a segunda não tinha por
+ * onde ser feita. Pedido assim: «precisamos da opção do usuário estar na call e
+ * não querer ver a live.»
+ *
+ * Quem não quer ver tem razões que este produto não precisa conhecer: a máquina
+ * dele decodifica 1080p com o ventilador no teto, a banda dele é dividida com
+ * mais gente, ou ele só quer ouvir. O que custava a ele era uma cópia na
+ * descida e um decodificador na CPU que ninguém tinha pedido.
  *
  * @param {object} snapshot o retrato que a sessão acabou de ler
  */
@@ -489,11 +522,21 @@ function desenharTransmissoes(snapshot) {
   const onde = $("palco-escolha");
   if (!onde) return;
 
+  // **Sair da sala esquece a recusa.** Ela é uma escolha sobre o que está
+  // acontecendo naquela sala; carregá-la para a próxima faria a pessoa chegar
+  // numa call nova já recusando o que ainda não viu, sem lembrar de ter dito.
+  //
+  // Aqui e não num gancho de saída porque este desenho roda a cada retrato e
+  // enxerga as duas transições — sair pela porta, ser expulso, o servidor cair.
+  // Um gancho por caminho seria um gancho a esquecer.
+  const naSala = (snapshot?.voice_rooms ?? []).some((sala) => sala.occupied_by_us);
+  if (!naSala) naoQueroVer = false;
+
   const lista = Array.isArray(snapshot?.transmissoes) ? snapshot.transmissoes : [];
   // Quem transmite não assiste a si mesmo pelo servidor — o espelho dele é
   // local —, então a própria transmissão não entra na escolha.
   const alheias = lista.filter((transmissao) => !transmissao.e_minha);
-  onde.hidden = alheias.length < 2;
+  onde.hidden = alheias.length === 0;
   if (onde.hidden) {
     onde.replaceChildren();
     return;
@@ -513,7 +556,49 @@ function desenharTransmissoes(snapshot) {
     });
     return botao;
   });
+
+  // **E a saída, no fim da fileira.**
+  //
+  // No fim e não no começo: a fileira é lida da esquerda, e o que se procura
+  // primeiro é a tela de alguém. Um `NÃO VER` na frente poria a recusa antes da
+  // oferta.
+  //
+  // Marcado como qualquer um dos outros — `aria-pressed` — porque ele é uma
+  // opção da mesma escolha, e não uma ação à parte: estar sem ver nenhuma é um
+  // dos estados possíveis, e quem chega tem de conseguir dizer em qual está.
+  const nenhuma = elemento("button", null, "NÃO VER");
+  nenhuma.type = "button";
+  nenhuma.setAttribute("aria-pressed", telaEmCurso === null ? "true" : "false");
+  nenhuma.title =
+    telaEmCurso === null
+      ? "você não está recebendo transmissão nenhuma"
+      : "parar de receber a transmissão e ficar só no áudio";
+  nenhuma.addEventListener("click", () => {
+    pararDeVer().catch((falha) => console.warn("parar de ver:", falha));
+  });
+  botoes.push(nenhuma);
+
   repovoar(onde, botoes);
+}
+
+/**
+ * Larga a transmissão que está no palco, e não pega outra.
+ *
+ * A escolha fica **guardada nesta janela**, e é o que faz o botão significar o
+ * que ele diz. Sem isso, a próxima transmissão a começar sozinha na sala seria
+ * empurrada de volta pelo servidor — que liga todo mundo na primeira, e é o
+ * comportamento certo para quem não disse nada. Quem disse, disse.
+ *
+ * Guardada e não gravada em disco: é uma escolha sobre esta sala e este
+ * momento, e reabrir o aplicativo é começar de novo.
+ */
+async function pararDeVer() {
+  naoQueroVer = true;
+  const antiga = telaEmCurso;
+  fecharImagemDaTela();
+  if (antiga !== null) {
+    await invoke("assistir", { tela: antiga, quero: false });
+  }
 }
 
 /**
@@ -536,6 +621,9 @@ function nomeDeQuem(snapshot, id) {
  * derrubar as duas.
  */
 async function trocarDeTransmissao(tela) {
+  // Escolher uma tela é desdizer o `NÃO VER`. A bandeira sai aqui e não no
+  // clique do botão porque este é o único caminho por onde se volta a ver.
+  naoQueroVer = false;
   if (tela === telaEmCurso) return;
   const antiga = telaEmCurso;
   // A imagem some agora, e não quando a nova chegar: deixar a antiga desenhada

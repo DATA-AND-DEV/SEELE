@@ -9890,3 +9890,71 @@ fn a_tela_de_espera_nao_afirma_permissao_pendente_para_toda_falha() {
          de um rótulo que não minta sobre qual das duas ela é"
     );
 }
+
+#[test]
+fn quem_esta_na_call_pode_escolher_nao_ver_a_transmissao() {
+    // Pedido assim: «também precisamos da opção do usuário estar na call e não
+    // querer ver a live».
+    //
+    // A fileira de escolha existia e ficava escondida com uma transmissão só,
+    // com o argumento de que escolher entre uma coisa não é escolher. O
+    // argumento estava incompleto: com uma transmissão há **duas** escolhas —
+    // ver e não ver —, e a segunda não tinha por onde ser feita.
+    let palco = without_comments(&read("ui/palco-imagem.js"));
+
+    assert!(
+        palco.contains("alheias.length === 0"),
+        "a fileira voltou a se esconder com uma transmissão só, e com ela some \
+         o único jeito de dizer que não se quer ver"
+    );
+    assert!(
+        palco.contains("NÃO VER"),
+        "a opção de não ver sumiu da fileira"
+    );
+    assert!(
+        palco.contains("function pararDeVer"),
+        "nada larga a transmissão sem pegar outra"
+    );
+
+    // E a recusa vale contra o servidor, que liga todo mundo por conta própria
+    // na primeira transmissão de uma sala. Sem isto o botão duraria até o
+    // próximo `ScreenOpened`, que é o oposto de uma escolha.
+    let abrir = palco
+        .split("async function abrirImagemDaTela")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        abrir.contains("naoQueroVer"),
+        "abrir a imagem não olha a recusa, então o servidor religa quem disse \
+         que não queria:\n{abrir}"
+    );
+    let recusa = abrir.find("naoQueroVer").unwrap_or(usize::MAX);
+    let fecha = abrir.find("fecharImagemDaTela()").unwrap_or(usize::MAX);
+    assert!(
+        recusa < fecha,
+        "a recusa é conferida depois de a imagem já ter sido montada:\n{abrir}"
+    );
+}
+
+#[test]
+fn a_recusa_da_transmissao_nao_atravessa_a_saida_da_sala() {
+    // Ela é uma escolha sobre o que está acontecendo naquela sala. Carregá-la
+    // para a próxima faria a pessoa chegar numa call nova já recusando o que
+    // ainda não viu, sem lembrar de ter dito — e o botão que a desfaz só
+    // aparece quando há transmissão, então ela descobriria o estado pelo
+    // sintoma.
+    let palco = without_comments(&read("ui/palco-imagem.js"));
+    let desenho = palco
+        .split("function desenharTransmissoes")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+
+    assert!(
+        desenho.contains("occupied_by_us") && desenho.contains("naoQueroVer = false"),
+        "sair da sala deixou de esquecer a recusa:\n{desenho}"
+    );
+}
