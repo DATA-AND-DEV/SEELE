@@ -42,14 +42,46 @@ async fn start() -> Result<(SocketAddr, Arc<Daemon>)> {
     Ok((address, server))
 }
 
-/// A scratch directory, so each test is a different person.
+/// A scratch directory, so each connection is a different person.
 ///
 /// ADR 0017 binds a nickname to the identity that claimed it, which is exactly
 /// what makes two tests sharing a home directory fight over a name.
+///
+/// # Uma pasta nova por chamada, e não a mesma apagada
+///
+/// Ela apagava: `remove_dir_all` no mesmo caminho, a cada chamada. Três apelidos
+/// deste arquivo — `rafael`, `carla` e `rei` — são usados por **testes
+/// diferentes**, então o segundo teste apagava a pasta do primeiro.
+///
+/// No Unix isso passa: apagar um arquivo aberto é legal, e o descritor de quem
+/// ainda o tem continua valendo. **No Windows não.** Um diretório com arquivo
+/// aberto não é removido; ele fica *pendente de remoção*, e o `create_dir_all`
+/// que vem logo em seguida bate em `ERROR_ACCESS_DENIED`. O que chega em cima é
+/// `IdentityUnavailable`, que não fala de pasta nenhuma:
+///
+/// ```text
+/// Error: IdentityUnavailable
+/// Error: IdentityUnavailable
+/// test result: FAILED. 13 passed; 2 failed
+/// ```
+///
+/// A conexão anterior ainda estava sendo recolhida — `Connection` fecha o
+/// endpoint QUIC numa tarefa de fundo —, e é por isso que falhavam **duas** e
+/// não todas: só as que perderam a corrida.
+///
+/// Um contador em vez do apagar resolve os dois lados de uma vez. Nada é
+/// removido, então não há corrida; e cada conexão nasce numa pasta que ninguém
+/// tocou, que é o que faz o `Trust::FirstContact` logo abaixo ser uma afirmação
+/// e não uma esperança.
+///
+/// Nenhum teste deste arquivo reconecta com o mesmo apelido no mesmo servidor,
+/// que é o único caso em que uma identidade nova mudaria a resposta.
 fn home(name: &str) -> String {
+    static QUANTAS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = QUANTAS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
     let mut path = std::env::temp_dir();
-    path.push(format!("seele-ffi-test-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
+    path.push(format!("seele-ffi-test-{name}-{}-{n}", std::process::id()));
     path.to_string_lossy().into_owned()
 }
 
@@ -62,9 +94,9 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Connection>, Conne
     // and nothing on a disagreeing link, pinning every key in silence, which is
     // the defect this branch exists to remove.
     //
-    // `home()` is wiped per nickname, so every connection here is a genuine
-    // first contact with a server that was just born. Saying so out loud is what
-    // makes the constant impossible.
+    // `home()` hands back a directory nobody has touched, so every connection
+    // here is a genuine first contact with a server that was just born. Saying
+    // so out loud is what makes the constant impossible.
     Connection::connect(ConnectConfig {
         server: address.to_string(),
         alternate_servers: Vec::new(),
