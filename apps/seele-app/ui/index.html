@@ -1096,6 +1096,23 @@
             <canvas id="palco-imagem" class="chamada-palco-imagem" hidden></canvas>
             <p id="palco-quem" class="chamada-palco-quem">NINGUÉM ESTÁ COMPARTILHANDO A TELA</p>
             <!--
+              As transmissões da sala, quando há mais de uma.
+
+              **Escondida quando há uma só**, e isso não é economia de pixel:
+              escolher entre uma coisa não é escolher, e uma lista de um item
+              ensina a olhar para um lugar onde nunca há decisão a tomar.
+
+              Cada linha é um botão porque o gesto é trocar o que está no palco —
+              e trocar custa: sai um pedido para parar de receber uma e outro
+              para começar a receber a outra. Uma pessoa assiste a **uma por
+              vez**, que é o que faz uma transmissão custar uma cópia na descida
+              desta máquina e um decodificador na CPU dela.
+
+              Escrita por `palco-imagem.js`, que é quem sabe qual está sendo
+              recebida de fato.
+            -->
+            <div id="palco-escolha" class="chamada-palco-escolha" role="group" aria-label="Transmissões desta sala" hidden></div>
+            <!--
               Por que a tela alheia não apareceu, **onde dá para ver**.
 
               Todo desfecho ruim do lado de quem recebe era um `console.warn` e

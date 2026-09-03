@@ -228,6 +228,43 @@
   color: var(--seele-osso);
 }
 
+/* A escolha entre transmissões, quando há mais de uma.
+
+   Uma fileira de botões e não uma lista vertical: são poucos, e uma coluna
+   empurraria a imagem para baixo justamente quando há mais imagem para caber. */
+.chamada-palco-escolha {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--seele-linha);
+  border: 1px solid var(--seele-linha-forte);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.chamada-palco-escolha button {
+  font: inherit;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-osso-apagado);
+  background: var(--seele-negro-painel);
+  border: 0;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.chamada-palco-escolha button:hover {
+  color: var(--seele-osso);
+}
+
+/* A que está no palco. Laranja e não só mais clara: é o único jeito de dizer
+   «esta é a que você está recebendo» sem uma palavra a mais na fileira. */
+.chamada-palco-escolha button[aria-pressed="true"] {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
 /* Sem ninguém transmitindo a frase é estado, e não manchete: ela desce ao corpo
    do texto para não gritar um nada. */
 .chamada-palco[data-transmitindo="nao"] .chamada-palco-quem {

@@ -1013,8 +1013,35 @@ pub struct Snapshot {
     /// anuncia a quem está lá dentro, e desenhá-la fora seria a casca contando
     /// algo que a sessão não viu.
     pub tela: Option<TelaEmCurso>,
+    /// Tudo o que está sendo transmitido na sala em que esta pessoa está.
+    ///
+    /// **A lista existe porque a sala passou a caber mais de uma.** Com uma só,
+    /// [`Self::tela`] respondia tudo: quem transmite, quanto sai, se parou. Com
+    /// duas, alguém precisa escolher qual assistir — e para escolher é preciso
+    /// saber o que há.
+    ///
+    /// Vazia quando ninguém transmite, e com **um** elemento no caso comum, que
+    /// é quando a casca não desenha lista nenhuma: escolher entre uma coisa não
+    /// é escolher.
+    pub transmissoes: Vec<TransmissaoNaSala>,
     /// Set once the session is over.
     pub ended: Option<EndReason>,
+}
+
+/// Uma transmissão em curso, do ponto de vista de quem pode assisti-la.
+///
+/// O mínimo para desenhar uma linha de lista e para pedir a imagem: o nome da
+/// transmissão e de quem ela é. O que ela está entregando — resolução, quadros,
+/// kbps — está em [`TelaEmCurso`], e só para a que está no palco: medir as
+/// outras seria medir o que ninguém está recebendo.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TransmissaoNaSala {
+    /// Como o servidor batizou a transmissão. É o que se passa a `assistir`.
+    pub tela: u32,
+    /// Quem está mandando.
+    pub de: u64,
+    /// Se é esta pessoa — quem transmite não assiste a si mesmo pelo servidor.
+    pub e_minha: bool,
 }
 
 /// What the shell subscribes to.

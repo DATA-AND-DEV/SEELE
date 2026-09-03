@@ -435,11 +435,10 @@ fn every_command_the_frontend_calls_is_registered() {
 // renomeia sala de voz por esse mesmo diálogo, e ninguém reclamou da distância.
 // O que a nota rejeitava era o diálogo **da moderação**, largo o bastante para
 // soletrar uma consequência — e `abrirNomear` não é ele.
-// `assistir` entrou com o servidor e o núcleo prontos e a tela ainda não. Ele
-// sai desta lista no commit que desenha a lista de transmissões e o segundo
-// palco — que é o que dá sentido a escolher o que assistir: com uma transmissão
-// por sala não há escolha nenhuma a fazer.
-const AGUARDANDO_TELA: &[&str] = &["assistir"];
+// `assistir` esteve aqui por dois commits — o servidor e o núcleo prontos, a
+// tela não — e saiu quando `palco-imagem.js` passou a desenhar a escolha entre
+// transmissões. A lista voltou ao estado de repouso, que é vazia.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

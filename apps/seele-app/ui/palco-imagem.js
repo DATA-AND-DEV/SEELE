@@ -464,3 +464,87 @@ listen("seele://event", (evento) => {
     if (carga.ScreenClosed.screen === telaEmCurso) fecharImagemDaTela();
   }
 });
+
+// ---------------------------------------------------------------- a escolha
+
+/**
+ * Desenha a lista de transmissões da sala e marca a que está no palco.
+ *
+ * # Por que ela mora aqui
+ *
+ * Porque quem sabe **qual está sendo recebida** é este arquivo: `telaEmCurso` é
+ * escrito quando um fluxo abre de verdade, e não quando o servidor anuncia que
+ * alguém começou. As duas coisas são diferentes desde que a segunda transmissão
+ * de uma sala passou a esperar um pedido — o anúncio chega para todo mundo, a
+ * imagem só para quem pediu.
+ *
+ * # Escondida quando há uma só
+ *
+ * Escolher entre uma coisa não é escolher. Com uma transmissão a sala se
+ * comporta como sempre se comportou: ela aparece sozinha, e não há lista.
+ *
+ * @param {object} snapshot o retrato que a sessão acabou de ler
+ */
+function desenharTransmissoes(snapshot) {
+  const onde = $("palco-escolha");
+  if (!onde) return;
+
+  const lista = Array.isArray(snapshot?.transmissoes) ? snapshot.transmissoes : [];
+  // Quem transmite não assiste a si mesmo pelo servidor — o espelho dele é
+  // local —, então a própria transmissão não entra na escolha.
+  const alheias = lista.filter((transmissao) => !transmissao.e_minha);
+  onde.hidden = alheias.length < 2;
+  if (onde.hidden) {
+    onde.replaceChildren();
+    return;
+  }
+
+  const botoes = alheias.map((transmissao) => {
+    const quem = nomeDeQuem(snapshot, transmissao.de);
+    const botao = elemento("button", null, quem);
+    botao.type = "button";
+    const noPalco = transmissao.tela === telaEmCurso;
+    botao.setAttribute("aria-pressed", noPalco ? "true" : "false");
+    botao.title = noPalco ? `${quem} está no palco` : `ver a tela de ${quem}`;
+    botao.addEventListener("click", () => {
+      trocarDeTransmissao(transmissao.tela).catch((falha) =>
+        console.warn("trocar de transmissão:", falha),
+      );
+    });
+    return botao;
+  });
+  repovoar(onde, botoes);
+}
+
+/**
+ * O nome de quem transmite, ou um travessão se o roster ainda não o tem.
+ *
+ * O roster é a única fonte de nome desta casca. Um id cru na tela seria pior que
+ * o travessão: parece um dado e não é nome de ninguém.
+ */
+function nomeDeQuem(snapshot, id) {
+  const pessoa = (snapshot?.roster ?? []).find((quem) => quem.id === id);
+  return pessoa?.nickname ?? "—";
+}
+
+/**
+ * Troca o que está no palco.
+ *
+ * **Larga a antiga antes de pedir a nova**, e a ordem é a conta: as duas ao
+ * mesmo tempo seriam duas cópias saindo da subida de quem hospeda por um
+ * instante — e é justamente o instante em que o teto seria recalculado, podendo
+ * derrubar as duas.
+ */
+async function trocarDeTransmissao(tela) {
+  if (tela === telaEmCurso) return;
+  const antiga = telaEmCurso;
+  // A imagem some agora, e não quando a nova chegar: deixar a antiga desenhada
+  // enquanto a nova não vem faria a troca parecer que não aconteceu.
+  fecharImagemDaTela();
+  if (antiga !== null) {
+    await invoke("assistir", { tela: antiga, quero: false }).catch((falha) =>
+      console.warn("parar de assistir:", falha),
+    );
+  }
+  await invoke("assistir", { tela, quero: true });
+}

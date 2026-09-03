@@ -282,6 +282,10 @@ function desenhar(snapshot) {
   desenharCanais(snapshot);
   desenharOperador(snapshot);
   desenharLinha(snapshot);
+  // A escolha entre transmissões mora em `palco-imagem.js`, que é quem sabe
+  // qual está sendo recebida de fato — o anúncio de que alguém começou chega a
+  // todo mundo, a imagem só a quem pediu.
+  desenharTransmissoes(snapshot);
   abrirLinhaSozinho(snapshot);
   sincronizarMensagens(snapshot.messages_revision);
   // E o desenho que a tela escondida engoliu, agora que ela pode ter altura.

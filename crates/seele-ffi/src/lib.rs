@@ -52,7 +52,7 @@ pub use types::{
     EndReason, Event, FonteDeTela, LimitesDeTela, LinkState, LinkTrust, Message, Notice,
     NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
     PreviewRefusal, PreviewRules, Severity, SignalBand as Band, Snapshot, TelaEmCurso, Telemetry,
-    Transfer, Trust, VoiceMode, VoiceRoom, VoiceRoomSync,
+    Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -2270,6 +2270,7 @@ impl Connection {
                 .permissions
                 .contains(&seele_core::Permission::AdministerServer),
             tela: tela_de(&room, self.shared.pedido_da_tela()),
+            transmissoes: transmissoes_de(&room),
             ended: room.ended.map(|end| end.reason.into()),
         }
     }
@@ -2768,6 +2769,32 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
 /// sair do `Room`: o `Room` é o que o servidor contou, e o que esta pessoa
 /// escolheu nunca passou por ele. Ele só sai daqui quando a transmissão é
 /// desta pessoa — ver [`TelaEmCurso::pedido`].
+/// Tudo o que está sendo transmitido na sala em que esta pessoa está.
+///
+/// **Só a sala dela.** O servidor só anuncia uma transmissão a quem está lá
+/// dentro, e listar outra aqui seria a casca contando algo que a sessão não viu.
+///
+/// Ordenada pelo nome da transmissão, que é crescente: sem ordem, um mapa
+/// devolveria as linhas em ordem diferente a cada desenho, e a lista piscaria
+/// de lugar duas vezes por segundo.
+fn transmissoes_de(room: &Room) -> Vec<TransmissaoNaSala> {
+    let Some(voice_room) = room.current_voice_room else {
+        return Vec::new();
+    };
+    let mut lista: Vec<TransmissaoNaSala> = room
+        .telas
+        .values()
+        .filter(|tela| tela.voice_room == voice_room)
+        .map(|tela| TransmissaoNaSala {
+            tela: tela.screen.0,
+            de: tela.person.0,
+            e_minha: room.me == Some(tela.person),
+        })
+        .collect();
+    lista.sort_by_key(|transmissao| transmissao.tela);
+    lista
+}
+
 fn tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
     let voice_room = room.current_voice_room?;
     // **A da minha sala**, e não «a da sala» — o mapa passou a ser por
