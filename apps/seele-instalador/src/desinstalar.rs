@@ -26,10 +26,29 @@
 
 use crate::registro;
 
+/// Quanta tela a instalação mostra.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tela {
+    /// A janela inteira, com as quatro páginas. É o que uma pessoa vê.
+    Cheia,
+    /// Só o andamento, sem perguntar nada. `/P` — é o que o atualizador do
+    /// SEELE usa, e está em `tauri.conf.json` como `installMode: "passive"`.
+    Passiva,
+    /// Nenhuma. `/S`.
+    Nenhuma,
+}
+
 /// O que a linha de comando pediu.
 pub(crate) enum Pedido {
-    /// Instalar, que é o que acontece sem argumento nenhum.
-    Instalar,
+    /// Instalar.
+    Instalar {
+        /// Quanta tela mostrar.
+        tela: Tela,
+        /// Abrir o produto no fim. `/R`.
+        reiniciar: bool,
+        /// O que o app estava rodando com, para devolver a ele ao reabrir.
+        argumentos_do_app: Vec<String>,
+    },
     /// Remover, rodando de dentro da pasta instalada.
     RemoverDeDentro,
     /// Remover a pasta nomeada, rodando de fora dela.
@@ -37,14 +56,53 @@ pub(crate) enum Pedido {
 }
 
 /// Lê a linha de comando.
+///
+/// # O contrato que não é nosso
+///
+/// `/P`, `/S` e `/R` são os argumentos que o **atualizador do Tauri** passa a um
+/// instalador NSIS — `["/P", "/R"]` no modo passivo, que é o configurado em
+/// `tauri.conf.json`. Este instalador substitui o NSIS e por isso herda a
+/// linha de comando dele: quem chama é o SEELE já instalado, e ele não vai mudar
+/// de opinião porque trocamos de instalador.
+///
+/// Os argumentos que sobram são os do próprio app, que o atualizador repassa
+/// para devolvê-los na hora de reabrir. Eles não são para nós, e ignorá-los
+/// silenciosamente seria perder o que a pessoa estava fazendo.
 pub(crate) fn ler_pedido() -> Pedido {
-    let mut argumentos = std::env::args().skip(1);
-    match argumentos.next().as_deref() {
-        Some("--desinstalar") => Pedido::RemoverDeDentro,
-        Some("--desinstalar-de") => argumentos
-            .next()
-            .map_or(Pedido::Instalar, |pasta| Pedido::RemoverA(pasta.into())),
-        _ => Pedido::Instalar,
+    let argumentos: Vec<String> = std::env::args().skip(1).collect();
+
+    if argumentos.first().is_some_and(|a| a == "--desinstalar") {
+        return Pedido::RemoverDeDentro;
+    }
+    if argumentos.first().is_some_and(|a| a == "--desinstalar-de") {
+        return argumentos.get(1).map_or(
+            Pedido::Instalar {
+                tela: Tela::Cheia,
+                reiniciar: false,
+                argumentos_do_app: Vec::new(),
+            },
+            |pasta| Pedido::RemoverA(pasta.into()),
+        );
+    }
+
+    let mut tela = Tela::Cheia;
+    let mut reiniciar = false;
+    let mut do_app = Vec::new();
+    for argumento in argumentos {
+        // Sem diferenciar maiúscula: quem escreve `/s` à mão espera o mesmo que
+        // `/S`, e o NSIS aceitava os dois.
+        match argumento.to_ascii_uppercase().as_str() {
+            "/S" => tela = Tela::Nenhuma,
+            "/P" => tela = Tela::Passiva,
+            "/R" => reiniciar = true,
+            _ => do_app.push(argumento),
+        }
+    }
+
+    Pedido::Instalar {
+        tela,
+        reiniciar,
+        argumentos_do_app: do_app,
     }
 }
 

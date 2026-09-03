@@ -42,7 +42,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_NCHITTEST, WM_PAINT, WNDCLASSW, WS_CHILD, WS_EX_APPWINDOW, WS_POPUP, WS_VISIBLE,
 };
 
-use crate::{carga, pele, registro, sistema};
+use crate::{carga, instalacao, pele, sistema};
 
 /// O aviso que a linha da instalação manda à janela a cada arquivo.
 ///
@@ -1372,7 +1372,7 @@ pub(crate) fn abrir() -> Result<(), String> {
         // passo 01. `ES_AUTOHSCROLL` porque um caminho longo tem de rolar dentro
         // dele em vez de sumir.
         let classe_do_campo = larga("EDIT");
-        let proposta = larga(&pasta_proposta());
+        let proposta = larga(&instalacao::pasta_padrao());
         let campo = CreateWindowExW(
             Default::default(),
             PCWSTR(classe_do_campo.as_ptr()),
@@ -1539,16 +1539,6 @@ fn perguntar_a_pasta(janela: HWND, estado: &Estado) -> Option<String> {
     }
 }
 
-/// A pasta que o instalador propõe.
-///
-/// `%ProgramFiles%`, lido do ambiente e não escrito à mão: em Windows de outros
-/// idiomas a pasta tem outro nome, e num Windows de 32 bits ela mora noutro
-/// lugar. Um caminho fixo instala certo aqui e erra na máquina de outra pessoa.
-fn pasta_proposta() -> String {
-    let base = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_owned());
-    format!(r"{base}\SEELE")
-}
-
 /// Põe a instalação numa linha própria e volta na hora.
 ///
 /// **Numa linha própria porque a janela precisa continuar respondendo.** Abrir a
@@ -1601,17 +1591,12 @@ fn comecar_a_instalar(janela: HWND, estado: &mut Estado) {
             }
         };
 
-        let resultado = carga::abrir_em(&destino, |arquivo| {
-            let _ = manda.send(Ok(arquivo.to_owned()));
-            acordar();
-        })
-        .and_then(|quantos| {
-            anunciar_ao_windows(&destino, opcoes, &|passo| {
+        let [atalho, porta] = opcoes;
+        let resultado =
+            instalacao::executar(&destino, instalacao::Escolhas { atalho, porta }, &|passo| {
                 let _ = manda.send(Ok(passo.to_owned()));
                 acordar();
-            })
-            .map(|()| quantos)
-        });
+            });
 
         if let Err(motivo) = resultado {
             let _ = manda.send(Err(motivo));
@@ -1633,114 +1618,8 @@ fn pasta_escolhida(estado: &Estado) -> String {
         .map(String::from_utf16_lossy)
         .unwrap_or_default();
     if lido.trim().is_empty() {
-        pasta_proposta()
+        instalacao::pasta_padrao()
     } else {
         lido
     }
-}
-
-/// O que vem depois de os arquivos estarem no disco.
-///
-/// **Nesta ordem, e a ordem importa.** O desinstalador é copiado antes de a
-/// entrada do painel apontar para ele: uma entrada que aponta para um arquivo
-/// que ainda não existe é uma entrada que não desinstala — e ninguém descobre
-/// isso na instalação, só meses depois, quando alguém tenta remover.
-fn anunciar_ao_windows(
-    destino: &std::path::Path,
-    opcoes: [bool; 2],
-    contar: &dyn Fn(&str),
-) -> Result<(), String> {
-    // O desinstalador **é este mesmo programa**, copiado para dentro da pasta.
-    // Um binário, dois modos: instalar é o que ele faz quando roda de fora, e
-    // remover é o que ele faz quando roda de dentro, com `--desinstalar`. Assim
-    // não há um segundo executável para manter, assinar e manter em dia.
-    let eu = std::env::current_exe()
-        .map_err(|erro| format!("não sei onde este programa está: {erro}"))?;
-    let desinstalador = destino.join("desinstalar.exe");
-    std::fs::copy(&eu, &desinstalador).map_err(|erro| {
-        format!(
-            "não copiei o desinstalador para {}: {erro}",
-            desinstalador.display()
-        )
-    })?;
-
-    contar("desinstalador escrito");
-
-    registro::anunciar(
-        &destino.display().to_string(),
-        env!("CARGO_PKG_VERSION"),
-        &desinstalador.display().to_string(),
-        tamanho_no_disco(destino),
-    )?;
-    contar("registrado em «Aplicativos instalados»");
-
-    let produto = destino.join("SEELE.exe");
-    let [quer_atalho, quer_porta] = opcoes;
-
-    // **Os atalhos primeiro, porque é por eles que alguém acha o produto.**
-    if quer_atalho {
-        if let Some(menu) = sistema::menu_iniciar() {
-            sistema::atalho(
-                &menu.join("SEELE.lnk"),
-                &produto,
-                "Voz, vídeo e texto auto-hospedados",
-            )?;
-            contar("atalho no menu Iniciar");
-        }
-        if let Some(mesa) = sistema::area_de_trabalho() {
-            sistema::atalho(
-                &mesa.join("SEELE.lnk"),
-                &produto,
-                "Voz, vídeo e texto auto-hospedados",
-            )?;
-            contar("atalho na área de trabalho");
-        }
-    }
-
-    // A regra sai sempre, marcada ou não — ver `sistema::regra_de_firewall`.
-    sistema::regra_de_firewall(&produto, quer_porta)?;
-    contar(if quer_porta {
-        "porta 8383 UDP aberta no firewall"
-    } else {
-        "firewall: regra não pedida"
-    });
-
-    // **A instalação da 0.7.1 sai por último**, e só depois de a nova estar de
-    // pé: apagá-la antes deixaria a máquina sem SEELE nenhum caso o que vem
-    // depois falhasse.
-    if let Some(antiga) = sistema::instalacao_por_usuario() {
-        // A falha aqui não derruba a instalação: o produto novo já está
-        // inteiro, e o que sobra é uma pasta órfã que ninguém mais abre.
-        if std::fs::remove_dir_all(&antiga).is_ok() {
-            contar("instalação antiga por usuário removida");
-        } else {
-            contar("instalação antiga por usuário: não consegui apagar");
-        }
-    }
-
-    Ok(())
-}
-
-/// Quanto a pasta ocupa, em KiB — que é a unidade do `EstimatedSize`.
-///
-/// Medido depois de escrever, e não estimado da carga comprimida: o painel do
-/// Windows mostra este número, e um número inventado ali é uma informação errada
-/// numa tela do sistema.
-fn tamanho_no_disco(pasta: &std::path::Path) -> u32 {
-    fn somar(pasta: &std::path::Path, total: &mut u64) {
-        let Ok(itens) = std::fs::read_dir(pasta) else {
-            return;
-        };
-        for item in itens.flatten() {
-            let Ok(tipo) = item.file_type() else { continue };
-            if tipo.is_dir() {
-                somar(&item.path(), total);
-            } else if let Ok(dados) = item.metadata() {
-                *total += dados.len();
-            }
-        }
-    }
-    let mut total = 0_u64;
-    somar(pasta, &mut total);
-    u32::try_from(total / 1024).unwrap_or(u32::MAX)
 }

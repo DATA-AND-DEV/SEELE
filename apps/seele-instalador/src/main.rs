@@ -39,6 +39,8 @@ mod carga;
 #[cfg(windows)]
 mod desinstalar;
 #[cfg(windows)]
+mod instalacao;
+#[cfg(windows)]
 mod janela;
 mod pele;
 #[cfg(windows)]
@@ -102,7 +104,20 @@ fn main() -> std::process::ExitCode {
     // aqui seria uma segunda tela pedindo a mesma confirmação que o painel já
     // pediu.
     let resultado = match desinstalar::ler_pedido() {
-        desinstalar::Pedido::Instalar => janela::abrir(),
+        desinstalar::Pedido::Instalar {
+            tela: desinstalar::Tela::Cheia,
+            ..
+        } => janela::abrir(),
+        // **Sem tela, e este é o caminho que ninguém olha.** É por ele que
+        // passa toda atualização do SEELE: o app baixa este `.exe` e o roda com
+        // `/P /R`. As escolhas vêm do registro — quem tinha a porta aberta a
+        // mantém —, e a pasta é a de antes, senão a atualização instalaria noutro
+        // lugar e deixaria duas cópias.
+        desinstalar::Pedido::Instalar {
+            tela,
+            reiniciar,
+            argumentos_do_app,
+        } => sem_perguntar(tela, reiniciar, &argumentos_do_app),
         desinstalar::Pedido::RemoverDeDentro => desinstalar::sair_de_dentro(),
         desinstalar::Pedido::RemoverA(pasta) => desinstalar::remover(&pasta),
     };
@@ -126,6 +141,44 @@ fn main() -> std::process::ExitCode {
 fn main() -> std::process::ExitCode {
     eprintln!("seele-instalador: este programa é do Windows.");
     std::process::ExitCode::FAILURE
+}
+
+/// Instalar sem perguntar nada — o caminho da atualização automática.
+///
+/// # Por que ele não abre janela nem no modo passivo
+///
+/// O `/P` do NSIS mostrava a página de andamento. Aqui ele não mostra, e a
+/// diferença é deliberada: uma janela que aparece sozinha por cima do que a
+/// pessoa está fazendo, durante uma atualização que ela não pediu, é uma
+/// interrupção — e a atualização do SEELE acontece quando o app decide, não
+/// quando alguém clica.
+///
+/// O que o `/P` continua significando aqui é «não pergunte nada», que é o que ele
+/// sempre significou de fato.
+///
+/// # Errors
+///
+/// Devolve o que impediu. Ninguém está olhando, então a mensagem vai para a
+/// saída de erro — e o código de saída é o que o atualizador lê.
+#[cfg(windows)]
+fn sem_perguntar(
+    _tela: desinstalar::Tela,
+    reiniciar: bool,
+    argumentos_do_app: &[String],
+) -> Result<(), String> {
+    let destino = instalacao::como_caminho(&instalacao::pasta_padrao());
+    let escolhas = instalacao::Escolhas::de_antes();
+
+    instalacao::executar(&destino, escolhas, &|passo| {
+        // A saída padrão, e não silêncio: quem roda isto à mão quer ver, e quem
+        // roda por atualização não lê nada de qualquer jeito.
+        println!("{passo}");
+    })?;
+
+    if reiniciar {
+        instalacao::abrir_o_produto(&destino, argumentos_do_app);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

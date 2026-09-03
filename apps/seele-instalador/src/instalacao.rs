@@ -1,0 +1,195 @@
+//! O motor: o que acontece, na ordem em que acontece.
+//!
+//! **Fora da janela de propósito.** Há três caminhos até aqui — a janela, o modo
+//! passivo e o silencioso —, e os três têm de fazer exatamente a mesma coisa. Um
+//! motor dentro da janela seria um motor que só o primeiro caminho exercita, e
+//! os outros dois são justamente os que ninguém olha.
+#![cfg(windows)]
+
+use std::path::{Path, PathBuf};
+
+use crate::{carga, registro, sistema};
+
+/// O que quem instala escolheu.
+///
+/// Duas, as que o produto sabe cumprir. Ver o comentário de `OPCOES` em
+/// `janela.rs` sobre as outras duas do desenho.
+#[derive(Clone, Copy)]
+pub(crate) struct Escolhas {
+    /// Atalho na área de trabalho e no menu Iniciar.
+    pub(crate) atalho: bool,
+    /// Regra de entrada da 8383 no firewall.
+    pub(crate) porta: bool,
+}
+
+impl Escolhas {
+    /// O que vale quando ninguém respondeu — numa atualização silenciosa.
+    ///
+    /// **Lidas do registro, e não presumidas.** A atualização roda sem tela: se
+    /// ela usasse um padrão fixo, quem tinha a porta aberta a perderia numa
+    /// atualização que não pediu, e o servidor pararia de aceitar conexão sem
+    /// nada explicar.
+    ///
+    /// Sem valor gravado — quem instalou antes desta versão — o padrão é o
+    /// comportamento antigo do instalador NSIS: atalho sim, porta sim. Mudar o
+    /// padrão por baixo de quem já hospeda seria a mesma quebra por outro
+    /// caminho.
+    pub(crate) fn de_antes() -> Self {
+        let (atalho, porta) = registro::escolhas_guardadas();
+        Self {
+            atalho: atalho.unwrap_or(true),
+            porta: porta.unwrap_or(true),
+        }
+    }
+}
+
+/// A pasta que o instalador propõe, ou aquela onde o SEELE já está.
+///
+/// **A de antes ganha.** Numa atualização, instalar noutro lugar deixaria duas
+/// cópias e um atalho apontando para a velha — que é exatamente o defeito que a
+/// 0.7.2 levou meses para descobrir.
+pub(crate) fn pasta_padrao() -> String {
+    if let Some(ja_instalado) = registro::onde_esta_instalado() {
+        return ja_instalado;
+    }
+    let base = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_owned());
+    format!(r"{base}\SEELE")
+}
+
+/// Instala, do começo ao fim.
+///
+/// `contar` recebe cada passo em português, para o log do passo 03 e para a
+/// saída do modo silencioso. Ele é chamado **depois** de cada coisa dar certo,
+/// nunca antes: um log que anuncia o que vai tentar mente quando a tentativa
+/// falha.
+///
+/// # Errors
+///
+/// Devolve o primeiro passo que não deu certo, com o que o Windows respondeu.
+pub(crate) fn executar(
+    destino: &Path,
+    escolhas: Escolhas,
+    contar: &dyn Fn(&str),
+) -> Result<(), String> {
+    // **Antes de escrever o primeiro arquivo.** O Windows não deixa sobrescrever
+    // um executável em uso, e descobrir isso no meio deixaria parte dos arquivos
+    // novos e parte velhos — o estado mais difícil de explicar.
+    if sistema::produto_aberto() {
+        return Err("o SEELE está aberto nesta máquina. Feche-o e instale de novo.".to_owned());
+    }
+
+    let quantos = carga::abrir_em(destino, |arquivo| contar(arquivo))?;
+    contar(&format!("{quantos} arquivos escritos"));
+
+    // O desinstalador **antes** da entrada que aponta para ele: uma entrada que
+    // aponta para um arquivo inexistente não desinstala, e ninguém descobre isso
+    // na instalação — só meses depois, quando alguém tenta remover.
+    let eu = std::env::current_exe()
+        .map_err(|erro| format!("não sei onde este programa está: {erro}"))?;
+    let desinstalador = destino.join("desinstalar.exe");
+    std::fs::copy(&eu, &desinstalador).map_err(|erro| {
+        format!(
+            "não copiei o desinstalador para {}: {erro}",
+            desinstalador.display()
+        )
+    })?;
+    contar("desinstalador escrito");
+
+    registro::anunciar(
+        &destino.display().to_string(),
+        env!("CARGO_PKG_VERSION"),
+        &desinstalador.display().to_string(),
+        tamanho_no_disco(destino),
+    )?;
+    registro::guardar_escolhas(escolhas.atalho, escolhas.porta)?;
+    contar("registrado em «Aplicativos instalados»");
+
+    let produto = destino.join("SEELE.exe");
+    if escolhas.atalho {
+        if let Some(menu) = sistema::menu_iniciar() {
+            sistema::atalho(
+                &menu.join("SEELE.lnk"),
+                &produto,
+                "Voz, vídeo e texto auto-hospedados",
+            )?;
+            contar("atalho no menu Iniciar");
+        }
+        if let Some(mesa) = sistema::area_de_trabalho() {
+            sistema::atalho(
+                &mesa.join("SEELE.lnk"),
+                &produto,
+                "Voz, vídeo e texto auto-hospedados",
+            )?;
+            contar("atalho na área de trabalho");
+        }
+    }
+
+    sistema::regra_de_firewall(&produto, escolhas.porta)?;
+    contar(if escolhas.porta {
+        "porta 8383 UDP aberta no firewall"
+    } else {
+        "firewall: regra não pedida"
+    });
+
+    // **Por último**, e só depois de a nova estar de pé: apagar a antiga antes
+    // deixaria a máquina sem SEELE nenhum se o que vem depois falhasse.
+    if let Some(antiga) = sistema::instalacao_por_usuario() {
+        if std::fs::remove_dir_all(&antiga).is_ok() {
+            contar("instalação antiga por usuário removida");
+        } else {
+            contar("instalação antiga por usuário: não consegui apagar");
+        }
+    }
+
+    Ok(())
+}
+
+/// Abre o produto recém-instalado, como o usuário e não como administrador.
+///
+/// **Como o usuário, e isto não é detalhe.** O instalador roda elevado; um filho
+/// dele nasceria elevado também, e o SEELE passaria a gravar identidade, pinos e
+/// preferências na pasta do administrador — onde a próxima abertura normal não
+/// os acha. A pessoa perderia a chave dela numa atualização.
+pub(crate) fn abrir_o_produto(destino: &Path, argumentos: &[String]) {
+    let produto = destino.join("SEELE.exe");
+    if !produto.is_file() {
+        return;
+    }
+    // `explorer.exe <programa>` é o jeito documentado de baixar o privilégio: o
+    // Explorer roda como o usuário, e o que ele lança herda o token dele.
+    let mut comando = std::process::Command::new("explorer.exe");
+    comando.arg(&produto);
+    for argumento in argumentos {
+        comando.arg(argumento);
+    }
+    let _ = comando.spawn();
+}
+
+/// Quanto a pasta ocupa, em KiB — que é a unidade do `EstimatedSize`.
+///
+/// Medido depois de escrever, e não estimado da carga comprimida: o painel do
+/// Windows mostra este número, e um número inventado ali é informação errada
+/// numa tela do sistema.
+fn tamanho_no_disco(pasta: &Path) -> u32 {
+    fn somar(pasta: &Path, total: &mut u64) {
+        let Ok(itens) = std::fs::read_dir(pasta) else {
+            return;
+        };
+        for item in itens.flatten() {
+            let Ok(tipo) = item.file_type() else { continue };
+            if tipo.is_dir() {
+                somar(&item.path(), total);
+            } else if let Ok(dados) = item.metadata() {
+                *total += dados.len();
+            }
+        }
+    }
+    let mut total = 0_u64;
+    somar(pasta, &mut total);
+    u32::try_from(total / 1024).unwrap_or(u32::MAX)
+}
+
+/// O caminho da instalação como `PathBuf`, para quem tem só o texto.
+pub(crate) fn como_caminho(texto: &str) -> PathBuf {
+    PathBuf::from(texto)
+}

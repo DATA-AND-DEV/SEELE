@@ -199,3 +199,82 @@ pub(crate) fn esquecer() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// As escolhas guardadas, quando há.
+///
+/// `None` para quem instalou antes desta versão — e é o chamador que decide o
+/// que fazer com a ausência. Ver [`crate::instalacao::Escolhas::de_antes`].
+pub(crate) fn escolhas_guardadas() -> (Option<bool>, Option<bool>) {
+    (
+        ler_numero("AtalhoNaAreaDeTrabalho"),
+        ler_numero("FirewallUDP"),
+    )
+}
+
+/// Guarda o que se escolheu, para a atualização silenciosa reencontrar.
+///
+/// # Errors
+///
+/// Devolve o que impediu. Falhar aqui não desfaz a instalação, mas custa a
+/// próxima atualização: sem esses valores ela cai no padrão, que pode não ser o
+/// que esta pessoa escolheu.
+pub(crate) fn guardar_escolhas(atalho: bool, porta: bool) -> Result<(), String> {
+    let chave = abrir(CASA)?;
+    let resultado = escrever_numero(chave, "AtalhoNaAreaDeTrabalho", u32::from(atalho))
+        .and_then(|()| escrever_numero(chave, "FirewallUDP", u32::from(porta)));
+    fechar(chave);
+    resultado
+}
+
+/// Onde o SEELE já está instalado, se estiver.
+pub(crate) fn onde_esta_instalado() -> Option<String> {
+    ler_texto("InstallDir")
+}
+
+/// Lê um valor de texto de [`CASA`].
+fn ler_texto(nome: &str) -> Option<String> {
+    let caminho = larga(CASA);
+    let nome_largo = larga(nome);
+    let mut dados = [0_u16; 512];
+    let mut bytes = u32::try_from(std::mem::size_of_val(&dados)).unwrap_or(0);
+    // SAFETY: os dois nomes vivem até o fim da chamada, e `bytes` é o tamanho
+    // real de `dados`.
+    let estado = unsafe {
+        windows::Win32::System::Registry::RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(caminho.as_ptr()),
+            PCWSTR(nome_largo.as_ptr()),
+            windows::Win32::System::Registry::RRF_RT_REG_SZ,
+            None,
+            Some(dados.as_mut_ptr().cast()),
+            Some(&raw mut bytes),
+        )
+    };
+    if estado != ERROR_SUCCESS {
+        return None;
+    }
+    let unidades = (bytes as usize / 2).saturating_sub(1);
+    dados.get(..unidades).map(String::from_utf16_lossy)
+}
+
+/// Lê um valor numérico de [`CASA`], como sim ou não.
+fn ler_numero(nome: &str) -> Option<bool> {
+    let caminho = larga(CASA);
+    let nome_largo = larga(nome);
+    let mut valor = 0_u32;
+    let mut bytes = u32::try_from(std::mem::size_of::<u32>()).unwrap_or(4);
+    // SAFETY: os dois nomes vivem até o fim da chamada, e `bytes` é o tamanho de
+    // `valor`.
+    let estado = unsafe {
+        windows::Win32::System::Registry::RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(caminho.as_ptr()),
+            PCWSTR(nome_largo.as_ptr()),
+            windows::Win32::System::Registry::RRF_RT_REG_DWORD,
+            None,
+            Some((&raw mut valor).cast()),
+            Some(&raw mut bytes),
+        )
+    };
+    (estado == ERROR_SUCCESS).then_some(valor != 0)
+}
