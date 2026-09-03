@@ -131,6 +131,22 @@ pub(crate) fn executar(
         "firewall: regra não pedida"
     });
 
+    // **O WebView2 depois de o produto estar inteiro, e sem poder de veto.**
+    //
+    // Ele precisa de rede e pode demorar; falhar aqui não desfaz nada — o SEELE
+    // fica instalado e abre uma janela em branco até o runtime existir. Por isso
+    // o erro é **contado e seguido**, não devolvido: derrubar a instalação
+    // inteira porque a rede caiu no último passo desfaria o que já deu certo.
+    if sistema::webview2_instalado() {
+        contar("WebView2: já estava aqui");
+    } else {
+        contar("WebView2 ausente; baixando da Microsoft");
+        match sistema::instalar_webview2() {
+            Ok(()) => contar("WebView2 instalado"),
+            Err(motivo) => contar(&format!("WebView2: {motivo}")),
+        }
+    }
+
     // **Por último**, e só depois de a nova estar de pé: apagar a antiga antes
     // deixaria a máquina sem SEELE nenhum se o que vem depois falhasse.
     if let Some(antiga) = sistema::instalacao_por_usuario() {

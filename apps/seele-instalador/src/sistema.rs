@@ -244,3 +244,115 @@ pub(crate) fn instalacao_por_usuario() -> Option<std::path::PathBuf> {
     let pasta = Path::new(&base).join("SEELE");
     pasta.join("SEELE.exe").is_file().then_some(pasta)
 }
+
+/// O runtime do WebView2 está nesta máquina?
+///
+/// **Sem ele o SEELE não abre.** O app é uma casca do Tauri sobre o WebView2;
+/// numa máquina limpa — Windows 10 sem atualizações recentes — ele não vem, e o
+/// produto instalado abre uma janela em branco que não explica nada. É por isso
+/// que o instalador do NSIS tinha uma seção inteira para ele, e por isso este
+/// aqui não pode ser uma janela WebView2.
+///
+/// A chave é a do Edge Update, e o valor é a versão. `WOW6432Node` porque a
+/// entrada é gravada pelo instalador de 32 bits do runtime mesmo num Windows de
+/// 64 — procurar só fora dela responde «não tem» numa máquina que tem.
+pub(crate) fn webview2_instalado() -> bool {
+    const CLIENTE: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    let lugares = [
+        (
+            windows::Win32::System::Registry::HKEY_LOCAL_MACHINE,
+            format!(r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{CLIENTE}"),
+        ),
+        (
+            windows::Win32::System::Registry::HKEY_LOCAL_MACHINE,
+            format!(r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{CLIENTE}"),
+        ),
+        (
+            windows::Win32::System::Registry::HKEY_CURRENT_USER,
+            format!(r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{CLIENTE}"),
+        ),
+    ];
+
+    lugares.iter().any(|(raiz, caminho)| {
+        let caminho_largo = larga(caminho);
+        let nome = larga("pv");
+        let mut dados = [0_u16; 64];
+        let mut bytes = u32::try_from(std::mem::size_of_val(&dados)).unwrap_or(0);
+        // SAFETY: os dois nomes vivem até o fim da iteração, e `bytes` é o
+        // tamanho real de `dados`.
+        let estado = unsafe {
+            windows::Win32::System::Registry::RegGetValueW(
+                *raiz,
+                PCWSTR(caminho_largo.as_ptr()),
+                PCWSTR(nome.as_ptr()),
+                windows::Win32::System::Registry::RRF_RT_REG_SZ,
+                None,
+                Some(dados.as_mut_ptr().cast()),
+                Some(&raw mut bytes),
+            )
+        };
+        // Uma versão vazia conta como ausente: a chave sobrevive a uma remoção
+        // do runtime, e o que ela guarda nesse caso é uma cadeia de zero
+        // caractere.
+        estado == windows::Win32::Foundation::ERROR_SUCCESS && bytes > 2
+    })
+}
+
+/// Baixa e roda o instalador do WebView2 da Microsoft.
+///
+/// **O endereço é o oficial e permanente** — `go.microsoft.com/fwlink/p/?LinkId=2124703`
+/// é o mesmo que o modelo do NSIS do Tauri usa. Ele baixa o *bootstrapper*, de
+/// 1,7 MB, que por sua vez busca o runtime; é por isso que este passo precisa de
+/// rede, e é por isso que a falha aqui diz isso por extenso.
+///
+/// `URLDownloadToFileW` do `urlmon`, e não um cliente HTTP: uma dependência a
+/// mais neste binário é uma dependência a auditar para instalar um programa que
+/// se vende por não depender de ninguém.
+///
+/// # Errors
+///
+/// Devolve o que impediu. Falhar aqui **não** derruba a instalação: o SEELE fica
+/// instalado, e quem abrir vê uma janela em branco até o runtime existir. Por
+/// isso a mensagem tem de ser guardada e mostrada, e não engolida.
+pub(crate) fn instalar_webview2() -> Result<(), String> {
+    use windows::Win32::System::Com::Urlmon::URLDownloadToFileW;
+
+    let destino = std::env::temp_dir().join("MicrosoftEdgeWebview2Setup.exe");
+    let endereco = larga("https://go.microsoft.com/fwlink/p/?LinkId=2124703");
+    let arquivo = larga(&destino.display().to_string());
+
+    // SAFETY: as duas cadeias vivem até o fim da chamada; os dois ponteiros de
+    // COM que a API aceita são nulos, que é o uso documentado sem callback.
+    unsafe {
+        URLDownloadToFileW(
+            None,
+            PCWSTR(endereco.as_ptr()),
+            PCWSTR(arquivo.as_ptr()),
+            0,
+            None,
+        )
+    }
+    .map_err(|erro| {
+        format!(
+            "não baixei o runtime do WebView2: {erro}\n\
+             Este passo precisa de rede. Sem o runtime o SEELE instala e abre \
+             uma janela em branco — instale-o depois pelo site da Microsoft."
+        )
+    })?;
+
+    let saida = std::process::Command::new(&destino)
+        .args(["/silent", "/install"])
+        .creation_flags(SEM_CONSOLE)
+        .status()
+        .map_err(|erro| format!("não rodei o instalador do WebView2: {erro}"))?;
+
+    if saida.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "o instalador do WebView2 saiu com {}. O SEELE está instalado, mas \
+             pode abrir uma janela em branco até o runtime existir.",
+            saida.code().unwrap_or(-1)
+        ))
+    }
+}
