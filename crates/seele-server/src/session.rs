@@ -2110,25 +2110,22 @@ async fn run_session(
                             continue;
                         }
                         let screen = registry.issue_screen();
-                        match server.telas.lock().await.comecar(voice_room, session.person, screen) {
-                            Ok(()) => {
-                                let _ = server.events.send(Event::ScreenShareStarted {
-                                    voice_room,
-                                    person: session.person,
-                                    screen,
-                                });
-                            }
-                            // Uma transmissão por sala (§6 item 3). Quem perdeu
-                            // a corrida ouve uma frase verdadeira: a vaga está
-                            // tomada, e não «você não pode».
-                            Err(_dono) => {
-                                frame::write(&mut send, &ServerMessage::Alert {
-                                    severity: AlertSeverity::Info,
-                                    reason: AlertReason::ScreenShareTaken,
-                                    operator_text: None,
-                                }).await?;
-                            }
-                        }
+                        // **O registro não recusa mais.** A vaga deixou de ser
+                        // uma por sala: quem diz que uma transmissão a mais não
+                        // cabe é o encaminhador, que mede a subida de quem
+                        // hospeda e conta as cópias — e diz isso com
+                        // `AlemDoQueOHospedeiroCarrega`, que é uma frase, e não
+                        // com `ScreenShareTaken`, que era «alguém chegou antes».
+                        server
+                            .telas
+                            .lock()
+                            .await
+                            .comecar(voice_room, session.person, screen);
+                        let _ = server.events.send(Event::ScreenShareStarted {
+                            voice_room,
+                            person: session.person,
+                            screen,
+                        });
                     }
                     ClientMessage::WatchScreen { screen }
                     | ClientMessage::UnwatchScreen { screen } => {

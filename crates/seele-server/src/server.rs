@@ -341,65 +341,38 @@ pub struct Telas {
     por_voice_room: HashMap<VoiceRoomId, Vec<(PersonId, ScreenId)>>,
 }
 
-/// Quantas transmissões cabem numa sala ao mesmo tempo.
-///
-/// **Uma, hoje, e o número é do encaminhador e não desta regra.**
-///
-/// O `voice_room` guarda `tela: Option<EmCurso>` — uma transmissão por sala no
-/// caminho dos bytes. Enquanto for assim, aceitar duas aqui seria anunciar uma
-/// transmissão que nunca pinta: o controle diz que começou, o encaminhador a
-/// recusa, e quem assiste fica esperando uma imagem que não vem.
-///
-/// # Por que este número vai sumir, e não crescer
-///
-/// A primeira versão disto era `2`, com o argumento de que o teto se divide
-/// entre as transmissões. **Metade errada**, e a correção veio de quem usa: a
-/// conta do §5.1 é
-///
-/// ```text
-/// min(caminho de quem HOSPEDA × 60% ÷ cópias, caminho de quem COMPARTILHA × 60%, escolha)
-/// ```
-///
-/// A perna de quem compartilha **não** se divide — cada pessoa sobe o próprio
-/// fluxo. O que se divide é a perna do host, e só porque é ele que reencaminha
-/// uma cópia por espectador: com duas transmissões ele manda o dobro de cópias.
-///
-/// E daí sai o limite certo, que não é um número escolhido: quando o teto por
-/// cópia cai abaixo de `PISO_DE_BANDA_BPS`, o `teto_do_hospedeiro` já responde
-/// `None`, e o encaminhador já encerra com `AlemDoQueOHospedeiroCarrega`. Numa
-/// casa com subida boa e três pessoas, três transmissões cabem; numa apertada, a
-/// segunda é recusada — **pela medida da máquina, não por uma constante.**
-///
-/// Este número existe só até o encaminhador saber guardar várias.
-pub const TRANSMISSOES_POR_SALA: usize = 1;
+// **Não há constante de quantas transmissões cabem numa sala, e isso é a
+// decisão.**
+//
+// Ela já foi `1` e já foi `2`. Os dois números estavam errados pela mesma razão:
+// o que uma transmissão a mais consome depende da subida da casa de quem hospeda
+// e de quantas pessoas estão assistindo, e nenhuma constante sabe disso.
+//
+// Quem recusa é `VoiceRoom::tela_abriu`, quando o teto por cópia não cabe mais
+// acima de `crate::tela::PISO_DE_BANDA_BPS` — e recusa com
+// `AlemDoQueOHospedeiroCarrega`, que é uma frase que explica em vez de um número
+// que ninguém entende. Numa casa com subida boa cabem várias; numa apertada, a
+// segunda não cabe.
 
 impl Telas {
-    /// Registra uma transmissão, ou diz quem já está ocupando as vagas.
+    /// Registra uma transmissão.
     ///
-    /// `Err` traz quem está transmitindo agora — a frase que a interface escreve
-    /// nomeia gente, e um booleano obrigaria quem chama a procurar a resposta de
-    /// novo noutro lugar.
+    /// **Não recusa nada**, e é aí que a decisão mora: quem sabe se uma
+    /// transmissão a mais cabe é o encaminhador, que mede a subida e conta as
+    /// cópias — ver a nota acima e `VoiceRoom::tela_abriu`.
     ///
     /// Quem já transmite pedindo de novo **troca a própria tela** e não ocupa
     /// vaga nova: é um cliente que reabriu o botão, ou um `StartScreenShare`
-    /// depois de reconectar.
-    pub fn comecar(
-        &mut self,
-        voice_room: VoiceRoomId,
-        person: PersonId,
-        screen: ScreenId,
-    ) -> Result<(), Vec<PersonId>> {
+    /// depois de reconectar. Mandar duas telas dobraria a subida de quem manda
+    /// sem que ninguém tivesse pedido a segunda.
+    pub fn comecar(&mut self, voice_room: VoiceRoomId, person: PersonId, screen: ScreenId) {
         let vagas = self.por_voice_room.entry(voice_room).or_default();
 
         if let Some(minha) = vagas.iter_mut().find(|(dono, _)| *dono == person) {
             minha.1 = screen;
-            return Ok(());
-        }
-        if vagas.len() >= TRANSMISSOES_POR_SALA {
-            return Err(vagas.iter().map(|(dono, _)| *dono).collect());
+            return;
         }
         vagas.push((person, screen));
-        Ok(())
     }
 
     /// Encerra a transmissão desta pessoa nesta sala, se houver.
@@ -1059,29 +1032,39 @@ mod tests {
     // ---- compartilhamento de tela ----
 
     #[test]
-    fn o_registro_para_no_limite_que_o_encaminhador_aguenta() {
-        // O registro já sabe guardar várias — a estrutura é uma lista por sala.
-        // Quem ainda não sabe é o encaminhador, e é por isso que o limite é 1:
-        // aceitar duas aqui anunciaria uma transmissão que nunca pinta.
+    fn o_registro_nao_limita_o_numero_de_transmissoes() {
+        // **Quem limita é a medida, não este registro.**
         //
-        // O que este teste prende junto com o número é **quem** o `Err` carrega:
-        // é com esses nomes que a interface escreve a recusa, e um `bool`
-        // obrigaria quem chama a procurar a resposta de novo noutro lugar.
+        // O número já foi 1 e já foi 2. Os dois estavam errados pela mesma razão:
+        // a subida que uma transmissão a mais consome depende da casa de quem
+        // hospeda e de quantas pessoas estão assistindo, e nenhuma constante
+        // sabe disso.
+        //
+        // Quem recusa é `VoiceRoom::tela_abriu`, quando o teto por cópia não cabe
+        // mais acima do piso — e ele recusa com `AlemDoQueOHospedeiroCarrega`,
+        // que é uma frase que explica. Aqui só se guarda quem está transmitindo.
         let mut telas = Telas::default();
+        for pessoa in 10_u32..20 {
+            telas.comecar(
+                VoiceRoomId(1),
+                PersonId(u64::from(pessoa)),
+                ScreenId(pessoa),
+            );
+        }
         assert_eq!(
-            telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1)),
-            Ok(())
-        );
-        assert_eq!(
-            telas.comecar(VoiceRoomId(1), PersonId(20), ScreenId(2)),
-            Err(vec![PersonId(10)]),
-            "a segunda tem de ser recusada, nomeando quem está na vaga"
+            telas.em(VoiceRoomId(1)).len(),
+            10,
+            "o registro não é o lugar de dizer não"
         );
 
-        // Outra sala é outra conta.
+        // O que ele ainda recusa é a mesma pessoa ocupando duas vagas: uma
+        // pessoa manda **uma** tela, e mandar duas dobraria a subida dela sem
+        // que ninguém tivesse pedido a segunda.
+        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(99));
         assert_eq!(
-            telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(2)),
-            Ok(())
+            telas.em(VoiceRoomId(1)).len(),
+            10,
+            "trocar a própria não abre vaga nova"
         );
     }
 
@@ -1092,13 +1075,8 @@ mod tests {
         // perdeu uma vaga para si mesma — e ocupar uma vaga nova gastaria a
         // segunda com a mesma pessoa, tirando-a de quem ainda não transmitiu.
         let mut telas = Telas::default();
-        telas
-            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
-            .expect("primeira");
-        assert_eq!(
-            telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(2)),
-            Ok(())
-        );
+        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
+        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(2));
 
         assert_eq!(
             telas.em(VoiceRoomId(1)),
@@ -1114,12 +1092,8 @@ mod tests {
         // nem `ScreenId` de propósito, então não há nada além do registro para
         // separar as duas.
         let mut telas = Telas::default();
-        telas
-            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
-            .expect("começa");
-        telas
-            .comecar(VoiceRoomId(2), PersonId(20), ScreenId(2))
-            .expect("começa");
+        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
+        telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(2));
 
         assert_eq!(telas.parar(VoiceRoomId(1), PersonId(30)), None);
         assert_eq!(telas.em(VoiceRoomId(1)).len(), 1, "ninguém saiu");
@@ -1140,15 +1114,9 @@ mod tests {
         // imagem em movimento que não tem mais de onde vir: o fluxo morreu com a
         // conexão.
         let mut telas = Telas::default();
-        telas
-            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
-            .expect("começa");
-        telas
-            .comecar(VoiceRoomId(2), PersonId(10), ScreenId(3))
-            .expect("começa");
-        telas
-            .comecar(VoiceRoomId(3), PersonId(20), ScreenId(2))
-            .expect("começa");
+        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
+        telas.comecar(VoiceRoomId(2), PersonId(10), ScreenId(3));
+        telas.comecar(VoiceRoomId(3), PersonId(20), ScreenId(2));
 
         let encerradas = telas.encerrar_de(PersonId(10));
         assert_eq!(encerradas.len(), 2, "as duas salas em que ela transmitia");
@@ -1172,9 +1140,7 @@ mod tests {
         // de quem assiste. Hoje a sala guarda uma; a forma devolve lista para
         // que o dia em que guardar duas não passe por aqui sem ninguém notar.
         let mut telas = Telas::default();
-        telas
-            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
-            .expect("começa");
+        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
 
         assert_eq!(telas.encerrar_voice_room(VoiceRoomId(1)), vec![ScreenId(1)]);
         assert!(telas.encerrar_voice_room(VoiceRoomId(1)).is_empty());
@@ -1187,12 +1153,8 @@ mod tests {
         // da sessão: é a única fonte que sabe sala e tela ao mesmo tempo. Com
         // duas transmissões na sala, achar «a da sala» deixou de bastar.
         let mut telas = Telas::default();
-        telas
-            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
-            .expect("começa");
-        telas
-            .comecar(VoiceRoomId(2), PersonId(20), ScreenId(2))
-            .expect("começa");
+        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
+        telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(2));
 
         assert_eq!(telas.de(PersonId(10)), Some((VoiceRoomId(1), ScreenId(1))));
         assert_eq!(telas.de(PersonId(20)), Some((VoiceRoomId(2), ScreenId(2))));
