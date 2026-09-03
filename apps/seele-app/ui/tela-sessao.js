@@ -665,26 +665,29 @@ function desenharCanais(snapshot) {
     const apagar = botaoDeApagarVoiceRoom(voice_room, snapshot, snapshot.voice_rooms.length === 1);
     if (apagar) cabeca.append(apagar);
 
-    if (voice_room.occupied_by_us) {
-      const sair = elemento("button", "voice_room-sair");
-      sair.type = "button";
-      sair.dataset.voice_room = String(voice_room.id);
-      sair.dataset.dentro = "sim";
-      sair.title = "sair: você para de ouvir e de falar nesta sala";
-      // `aria-label` porque o botão é um desenho: um caminho SVG não é nome, e
-      // sem ele um leitor de tela anuncia «botão» e nada mais.
-      sair.setAttribute("aria-label", `Sair de ${voice_room.name}`);
-      sair.append(glifo("sair", "Sair da sala"));
-      cabeca.append(sair);
-      item.append(cabeca, dentro);
-    } else {
-      const entrar = elemento("button", "voice_room-entrar", "ENTRAR NA SALA");
-      entrar.type = "button";
-      entrar.dataset.voice_room = String(voice_room.id);
-      entrar.dataset.dentro = "nao";
-      entrar.title = `entrar e falar com quem está em ${voice_room.name}`;
-      item.append(cabeca, dentro, entrar);
-    }
+    // **A fileira da sala nunca sai da sala.** Ela tinha um botão de desligar —
+    // o círculo com a haste em cima, o mesmo símbolo de um aparelho que se apaga
+    // — e ele chamava `eject_plug`. Saiu a pedido de quem usa: quem sai da sala
+    // sai pelo `SAIR DA SALA` escrito no operador, que é o único lugar onde essa
+    // saída mora agora, e diz em palavras o que faz.
+    //
+    // O que sobrou na fileira é **navegação, e só**: entrar na sala, ou — se já
+    // se está nela — voltar para a grade depois de ter ido ler um canal. Os dois
+    // sentidos do antigo alternador `CONVERSA`/`CHAMADA` viraram isto: clica-se
+    // na sala para ver a chamada, e no canal para ver a conversa.
+    const dentro_da_sala = voice_room.occupied_by_us;
+    const ir = elemento(
+      "button",
+      dentro_da_sala ? "voice_room-entrar aqui" : "voice_room-entrar",
+      dentro_da_sala ? "VER A CHAMADA" : "ENTRAR NA SALA",
+    );
+    ir.type = "button";
+    ir.dataset.voice_room = String(voice_room.id);
+    ir.dataset.dentro = dentro_da_sala ? "sim" : "nao";
+    ir.title = dentro_da_sala
+      ? `voltar para a grade de ${voice_room.name}; você já está dentro`
+      : `entrar e falar com quem está em ${voice_room.name}`;
+    item.append(cabeca, dentro, ir);
     return item;
   });
   repovoar($("lista-voice_rooms"), voice_rooms);
@@ -713,12 +716,21 @@ function desenharCanais(snapshot) {
     // simples. Ver o cabeçalho de `tela-sessao.css`.
 
     item.append(botao);
-    // Irmão do botão, e não filho: um `<button>` dentro de outro não é
+    // Irmãos do botão, e não filhos: um `<button>` dentro de outro não é
     // marcação válida, e o alvo do clique de abrir a Linha é a fileira inteira.
+    //
+    // **Empilhados e grudados**, o `×` em cima e o lápis embaixo, numa coluna de
+    // 22px à direita do nome. Lado a lado eles roubariam 44px de uma coluna de
+    // 268px, que é onde o nome do canal mora; a fileira tem 40px de altura e
+    // duas caixas de 20 cabem nela sem que nada cresça.
     const apagar = botaoDeApagarLinha(linha, snapshot);
-    if (apagar) {
+    const renomear = botaoDeRenomearLinha(linha, snapshot);
+    if (apagar || renomear) {
       item.className = "linha-fileira";
-      item.append(apagar);
+      const controles = elemento("div", "linha-controles");
+      if (apagar) controles.append(apagar);
+      if (renomear) controles.append(renomear);
+      item.append(controles);
     }
     if (linha.open) linhaAberta = linha.id;
     return item;
@@ -2317,7 +2329,10 @@ async function alternarCanal(evento) {
     if (item.dataset.voice_room) {
       const voice_room = Number(item.dataset.voice_room);
       if (item.dataset.dentro === "sim") {
-        await invoke("eject_plug");
+        // Já se está dentro: isto é navegação, e não saída. O `eject_plug` que
+        // morava aqui foi para o `SAIR DA SALA` do operador — ver o comentário
+        // na fileira, em `desenharVoiceRooms`.
+        entrou = true;
       } else {
         // `voiceRoom` e não `voice_room`: o Tauri converte o nome do
         // argumento para camelCase antes de procurá-lo no que o JS mandou
@@ -2330,6 +2345,12 @@ async function alternarCanal(evento) {
     } else if (item.dataset.linha) {
       linhaAberta = Number(item.dataset.linha);
       await invoke("open_channel", { channel: linhaAberta });
+      // **Escolher um canal é pedir para lê-lo.** Com o alternador
+      // `CONVERSA`/`CHAMADA` fora do rodapé, este é o caminho de volta da grade
+      // para a conversa — e era o que faltava: abrir um canal estando na grade
+      // trocava o canal por baixo e deixava na tela a grade de sempre, então o
+      // clique não fazia nada visível.
+      fecharChamada();
     }
     // Escolhido o destino, a gaveta fecha: ela é navegação, e a conversa que
     // se acabou de abrir está atrás dela. Em janela larga não há gaveta e isto

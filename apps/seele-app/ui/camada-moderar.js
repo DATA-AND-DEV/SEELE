@@ -183,6 +183,34 @@ function botaoDeApagarLinha(linha, snapshot) {
 }
 
 /**
+ * O botão que renomeia uma Linha, ou `null` quando não há o que oferecer.
+ *
+ * **Ele nasceu de um relato, e o relato foi uma pergunta:** «onde eu renomeio a
+ * sala? não devia ter um botão de um lápis embaixo do x?». Renomear um canal
+ * existia desde a 0.10.1 e ficava no **título da barra de cima** — clicar no
+ * nome do canal aberto —, que é longe do `×` e não se parece com nada. Quem é
+ * dono do produto foi procurar e não achou.
+ *
+ * `may_manage_voice_rooms` e não `may_delete_rooms`, que é o par do `×` ao lado:
+ * trocar o nome de um canal é um erro que se desfaz digitando de novo, destruí-lo
+ * acaba com o que outra pessoa escreveu. A `specs/04-servidor-seele.md` separa
+ * as duas permissões justamente para que exista quem arrume sem poder derrubar —
+ * e por isso os dois botões aparecem e somem **independentes**.
+ */
+function botaoDeRenomearLinha(linha, snapshot) {
+  if (snapshot.may_manage_voice_rooms !== true) return null;
+  const botao = elemento("button", "linha-renomear");
+  botao.type = "button";
+  botao.dataset.renomearLinha = String(linha.id);
+  // O botão é um desenho: um caminho SVG não é nome, e sem isto um leitor de
+  // tela anuncia «botão» e nada mais.
+  botao.setAttribute("aria-label", `renomear o canal ${linha.name}`);
+  botao.title = `trocar o nome de #${linha.name}`;
+  botao.append(glifo("lapis", "Renomear"));
+  return botao;
+}
+
+/**
  * O segundo botão da caixa de alerta, que o comp desenha e o v2 deixou morto.
  *
  * A ambiguidade do rótulo do comp (Q6 do inventário — «ejetar o connection **do**
@@ -667,6 +695,31 @@ $("lista-voice_rooms").addEventListener("click", async (evento) => {
     // camelCase: ver a nota em `tela-sessao.js`, no `insert_plug`.
     () => invoke("apagar_voice_room", { voiceRoom: id }),
   );
+});
+
+// Renomear, na mesma delegação e antes de apagar.
+//
+// **Sem caixa de confirmação**, ao contrário do `×` logo acima: a confirmação
+// existe para dizer a consequência de um ato que não se desfaz, e trocar o nome
+// de um canal se desfaz digitando o antigo de volta. O diálogo que abre já é a
+// escolha do nome, e cancelar nele não muda nada.
+$("lista-linhas").addEventListener("click", (evento) => {
+  const alvo = evento.target.closest("button[data-renomear-linha]");
+  if (!alvo) return;
+  const id = Number(alvo.dataset.renomearLinha);
+  // O nome de agora vem do último snapshot desenhado, e não de uma captura de
+  // quando este botão nasceu: as listas são refeitas duas vezes por segundo, e
+  // entre o desenho e o clique outra pessoa pode ter renomeado o mesmo canal.
+  const linha = desenhado?.channels?.find((l) => l.id === id);
+  if (!linha) return;
+  abrirNomear({
+    titulo: "RENOMEAR O CANAL",
+    rotulo: "NOME DO CANAL",
+    exemplo: linha.name,
+    valor: linha.name,
+    acao: "RENOMEAR",
+    aoConfirmar: (escolhido) => invoke("renomear_linha", { channel: id, name: escolhido }),
+  });
 });
 
 $("lista-linhas").addEventListener("click", async (evento) => {

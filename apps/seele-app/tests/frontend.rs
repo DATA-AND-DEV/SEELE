@@ -2507,33 +2507,34 @@ fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the
         "the channel handler is back to catching the row, which is the shape \
          that has no keyboard and no accessible name"
     );
-    // **`SAIR DA SALA` deixou de ser um rótulo na 0.9.0**, e a exigência mudou
-    // de forma junto com a comp — não de conteúdo.
+    // **A saída saiu desta lista, e a exigência mudou de lugar com ela.**
     //
-    // O par que o v3 separou continua sendo o assunto: entrar e sair precisam
-    // ser dois controles, nomeados, e não um clique na fileira. O que a comp
-    // muda é o **peso**: entrar é a barra de largura cheia com o rótulo por
-    // extenso, e sair virou um quadrado de 22px na linha do nome, ao lado do
-    // apagar — porque as duas nunca aparecem juntas, e dar-lhes o mesmo
-    // tamanho fazia a lista parecer que oferecia as duas o tempo todo.
+    // A fileira da sala teve um botão de desligar — o círculo com a haste, o
+    // símbolo de um aparelho que se apaga — que chamava `eject_plug`. Ele saiu a
+    // pedido de quem usa. O que sobrou na fileira é navegação, e só: entrar na
+    // sala, ou voltar para a grade quando já se está nela.
     //
-    // Um botão que é um desenho não tem rótulo para procurar. O que se cobra
-    // dele é o `aria-label`, que é o que um leitor de tela anuncia — e é
-    // exatamente a metade que se perderia por descuido, porque ela não aparece
-    // na tela de ninguém que enxerga.
+    // O que este guarda protege continua sendo o mesmo: os dois atos têm de ser
+    // controles nomeados, e não um clique numa fileira que teclado nenhum
+    // alcança. Mudou onde cada um mora.
     assert!(
-        lista.contains("ENTRAR NA SALA"),
-        "a sala deixou de oferecer `ENTRAR NA SALA` por extenso"
+        lista.contains("ENTRAR NA SALA") && lista.contains("VER A CHAMADA"),
+        "a fileira da sala tem que oferecer os dois sentidos da navegação por \
+         extenso: entrar, e voltar para a grade de onde já se está"
     );
     assert!(
-        lista.contains("voice_room-sair") && lista.contains("aria-label"),
-        "o botão de sair da sala sumiu, ou ficou sem nome acessível — e sem nome \
-         ele anuncia como «botão» e mais nada"
+        !lista.contains("eject_plug"),
+        "a lista de salas voltou a largar a sala. Ela é navegação; quem sai é o \
+         `SAIR DA SALA` do rodapé, que diz em palavras o que faz"
     );
+
+    // E a saída existe, escrita, no rodapé do operador — que está na tela
+    // enquanto se está numa sala, que é a condição em que ela faz sentido.
+    let rodape = without_comments(&read("ui/tela-chamada.js"));
     assert!(
-        lista.contains("eject_plug") || handler.contains("eject_plug"),
-        "nothing on this screen takes the connection out, and the only other way out \
-         lives on a screen reached from here"
+        rodape.contains("SAIR DA SALA") && rodape.contains("eject_plug"),
+        "nada nesta janela larga a sala: o botão do rodapé perdeu o rótulo ou o \
+         comando, e a fileira da sala não os tem mais"
     );
 }
 
@@ -5069,6 +5070,25 @@ fn the_host_is_told_how_far_the_link_they_are_about_to_send_reaches() {
 // Destroying a room — the confirmation that says the size of the damage.
 // ---------------------------------------------------------------------------
 
+/// O ouvinte que **apaga** um canal, achado pelo que ele mira e não pela ordem.
+///
+/// A lista de canais tem mais de um ouvinte, e este guarda pegava o primeiro:
+/// `.split(...).nth(1)`. Isso valeu enquanto só houve um. Quando o lápis de
+/// renomear entrou no arquivo — acima do apagar, que é onde ele fica na fileira
+/// —, os dois guardas passaram a examinar o ouvinte errado e a acusar o de
+/// apagar de não pesar o canal, apontando para um código que nunca pesou nada
+/// porque não é ele que destrói.
+///
+/// Posição não é identidade. O que identifica este ouvinte é o atributo que ele
+/// procura.
+fn porta_de_apagar_o_canal(layer: &str) -> Option<String> {
+    layer
+        .split("$(\"lista-linhas\").addEventListener")
+        .skip(1)
+        .map(|resto| resto.split("\n});").next().unwrap_or_default().to_owned())
+        .find(|corpo| corpo.contains("data-apagar-linha"))
+}
+
 #[test]
 fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
     // The requirement this whole path exists to satisfy, and the one a screen
@@ -5109,11 +5129,7 @@ fn the_line_confirmation_counts_what_it_is_about_to_destroy() {
     // file explains the rule in prose as well and an unscoped search would be
     // satisfied by the paragraph.
     let layer = without_comments(&read("ui/camada-moderar.js"));
-    let Some(porta) = layer
-        .split("$(\"lista-linhas\").addEventListener")
-        .nth(1)
-        .and_then(|resto| resto.split("\n});").next())
-    else {
+    let Some(porta) = porta_de_apagar_o_canal(&layer) else {
         panic!("nothing listens for a press on the Channel list in the moderation layer");
     };
     assert!(
@@ -5147,11 +5163,7 @@ fn a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it() {
     // invent a zero either — «isto destrói 0 mensagens» about o canal full of
     // them is the worst sentence this screen could produce.
     let layer = without_comments(&read("ui/camada-moderar.js"));
-    let Some(porta) = layer
-        .split("$(\"lista-linhas\").addEventListener")
-        .nth(1)
-        .and_then(|resto| resto.split("\n});").next())
-    else {
+    let Some(porta) = porta_de_apagar_o_canal(&layer) else {
         panic!("nothing listens for a press on the Channel list in the moderation layer");
     };
 
@@ -9691,5 +9703,168 @@ fn o_renomear_do_canal_le_qual_canal_esta_aberto_na_hora_do_clique() {
          na hora do clique.\n\
          Capturar o canal quando o botão nasce renomeia o canal de antes — e o \
          servidor aceita, porque o pedido é válido para o canal errado."
+    );
+}
+
+#[test]
+fn o_canal_tem_um_lapis_grudado_no_x_e_nao_so_o_nome_da_barra_de_cima() {
+    // **O relato foi uma pergunta:** «onde eu renomeio a sala? não devia ter um
+    // botão de um lápis embaixo do x?».
+    //
+    // Renomear um canal existia e ficava no **título da barra de cima** — clicar
+    // no nome do canal aberto, sem moldura, sem fundo, só cursor e sublinhado ao
+    // passar. Um comentário deste repositório argumentava que «o alvo do gesto é
+    // a coisa que se quer mudar, e não um lápis ao lado dela». O argumento é bom
+    // e perdeu para o campo: quem é dono do produto foi procurar e não achou.
+    //
+    // O que este guarda prende não é o desenho, é a **descoberta**: o controle
+    // fica na mesma fileira do canal, ao lado do que já se sabe apertar.
+    let camada = without_comments(&read("ui/camada-moderar.js"));
+    assert!(
+        camada.contains("function botaoDeRenomearLinha"),
+        "o canal perdeu o botão de renomear da fileira, e voltou a esconder o \
+         verbo no título da barra de cima"
+    );
+    assert!(
+        camada.contains("glifo(\"lapis\""),
+        "o botão de renomear deixou de ser o lápis, que é o desenho que quem \
+         procurou o verbo foi procurar"
+    );
+    assert!(
+        camada.contains("data-renomear-linha") || camada.contains("renomearLinha"),
+        "nada escuta o lápis, então ele é um botão que não faz nada"
+    );
+
+    // A permissão é a de administrar, e não a de destruir. Quem arruma nomes sem
+    // poder derrubar canais existe na spec, e os dois botões aparecem e somem
+    // independentes por causa disso.
+    let renomear = camada
+        .split("function botaoDeRenomearLinha")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        renomear.contains("may_manage_voice_rooms"),
+        "o lápis está preso à permissão errada: trocar um nome se desfaz \
+         digitando de novo, e destruir um canal não:\n{renomear}"
+    );
+
+    // E a fileira empilha os dois, em vez de pô-los lado a lado: a coluna tem
+    // 268px e o que se lê nela é o nome do canal.
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    assert!(
+        sessao.contains("linha-controles"),
+        "o `×` e o lápis deixaram de dividir uma coluna própria, e agora \
+         disputam a largura com o nome do canal"
+    );
+    let css = read("ui/tela-sessao.css");
+    assert!(
+        css.contains("flex-direction: column"),
+        "a coluna dos controles do canal não empilha, então o lápis não está \
+         embaixo do `×` — que é onde ele foi procurado"
+    );
+}
+
+#[test]
+fn escolher_um_canal_leva_para_a_conversa_dele() {
+    // Sem isto o clique não faz nada visível estando na grade: o canal troca por
+    // baixo e a tela continua mostrando a chamada. É metade da navegação nova —
+    // a outra é clicar numa sala para ver a grade —, e as duas juntas são o que
+    // substituiu o alternador `CONVERSA`/`CHAMADA`.
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let trecho = sessao
+        .split("async function alternarCanal")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+
+    let abre = trecho.find("open_channel");
+    let fecha = trecho.find("fecharChamada()");
+    assert!(
+        abre.is_some() && fecha.is_some(),
+        "abrir um canal deixou de trocar a vista para a conversa dele:\n{trecho}"
+    );
+    assert!(
+        abre < fecha,
+        "a vista troca antes de o canal abrir, e o que aparece é a conversa \
+         de antes:\n{trecho}"
+    );
+}
+
+#[test]
+fn o_rodape_do_operador_muda_de_oficio_com_a_sala() {
+    // Quatro regras, e todas dizem a mesma coisa: um controle que nomeia um
+    // lugar onde não se está é um controle que promete não fazer nada.
+    //
+    //   fora de sala   `SAIR DO SERVIDOR`, e o segundo botão escondido
+    //   dentro        `SAIR DA SALA` e `COMPARTILHAR`
+    let chamada = without_comments(&read("ui/tela-chamada.js"));
+    let desenho = chamada
+        .split("function desenharORodapeDoOperador")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        !desenho.is_empty(),
+        "ninguém desenha o rodapé do operador, então os dois botões dizem para \
+         sempre o que o HTML escreveu"
+    );
+
+    for frase in ["SAIR DA SALA", "SAIR DO SERVIDOR", "COMPARTILHAR"] {
+        assert!(
+            desenho.contains(frase),
+            "«{frase}» sumiu do rodapé, e um dos dois estados ficou sem rótulo:\n{desenho}"
+        );
+    }
+    assert!(
+        desenho.contains("hidden"),
+        "o botão de compartilhar deixou de sumir fora de sala, e compartilhar \
+         fora de sala é uma promessa que o produto não cumpre:\n{desenho}"
+    );
+
+    // O alternador não voltou. Ele era um terceiro caminho para o que dois
+    // cliques nas listas já fazem, e o pior dos três: não dizia de qual sala nem
+    // de qual canal falava.
+    assert!(
+        !chamada.contains("naGrade ? \"CONVERSA\""),
+        "o alternador `CONVERSA`/`CHAMADA` voltou ao rodapé"
+    );
+}
+
+#[test]
+fn sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo() {
+    // A regra está escrita em `pedirTrocaDeServidor`, e este guarda a estende
+    // para o rodapé: uma caixa que repete o rótulo do botão é a caixa que treina
+    // a apertar duas vezes sem ler. `SAIR DO SERVIDOR` diz o que faz.
+    //
+    // O que ele **não** diz é que um servidor hospedado neste computador cai
+    // junto, e todo mundo que estiver dentro sai. Essa é a parte que a caixa
+    // existe para escrever — e é a única que a justifica aqui.
+    let chamada = without_comments(&read("ui/tela-chamada.js"));
+    let saida = chamada
+        .split("$(\"operador-sair\").addEventListener")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+        .unwrap_or_default()
+        .to_owned();
+
+    assert!(
+        saida.contains("hospedandoAqui"),
+        "a saída do servidor não pergunta se este computador hospeda, então ela \
+         derruba o servidor de todo mundo sem avisar:\n{saida}"
+    );
+    let pergunta = saida.find("hospedandoAqui").unwrap_or(usize::MAX);
+    let caixa = saida.find("abrirConfirmacao").unwrap_or(usize::MAX);
+    assert!(
+        pergunta < caixa,
+        "a caixa abre antes de saber se há o que avisar:\n{saida}"
+    );
+    assert!(
+        saida.contains("eject_plug"),
+        "o mesmo botão dentro de uma sala tem que largar a sala, e não o \
+         servidor:\n{saida}"
     );
 }

@@ -1,4 +1,8 @@
-// SEELE — os seis glifos que a face de dados não tem.
+// SEELE — os glifos que a face de dados não tem.
+//
+// Eram seis quando este arquivo nasceu, e o cabeçalho dizia o número. São 24, e
+// o número saiu daqui: uma contagem escrita à mão numa lista que cresce é uma
+// frase que envelhece calada, e ela já estava errada por dezoito.
 //
 // A IBM Plex Mono embarcada (`fontes/ibm-plex-mono-400.woff2`) traz 1049
 // entradas de cmap e **um** glifo em toda a faixa U+25A0–U+25CF. Ou seja: ▸ ◂
@@ -172,6 +176,35 @@ const GLIFOS = {
     [
       "path",
       { d: "M8 2.2v5.4", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
+    ],
+  ],
+
+  // O lápis: o corpo em diagonal, a ponta embaixo à esquerda e a virola em cima.
+  //
+  // **Ele existe porque o nome clicável não bastou.** Renomear um canal era
+  // clicar no título da barra de cima — sem moldura, sem fundo, só cursor e
+  // sublinhado ao passar. Quem é dono deste produto foi procurar como renomear,
+  // procurou um lápis embaixo do `×`, e não achou. Um comentário deste
+  // repositório argumentava que «o alvo do gesto é a coisa que se quer mudar, e
+  // não um lápis ao lado dela»; o argumento é bom e perdeu para o campo, porque
+  // um alvo que ninguém enxerga não é alvo.
+  //
+  // Traço 1,3 como os outros contornados, e a diagonal a 45° para o corpo cair
+  // na grade em vez de brigar com ela.
+  lapis: [
+    [
+      "path",
+      {
+        d: "M3 13l1.1-3.2 6.4-6.4 2.1 2.1-6.4 6.4z",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "1.3",
+        "stroke-linejoin": "round",
+      },
+    ],
+    [
+      "path",
+      { d: "M9.4 4.7l2.1 2.1", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
     ],
   ],
 

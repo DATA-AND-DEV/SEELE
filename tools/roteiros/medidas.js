@@ -11,8 +11,9 @@ await espera(900);
 const porta = document.getElementById("porta");
 if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
 relatar("cabecalho: " + ["nova-voice_room", "ajuda-abrir"].map(cx).join(" "));
-relatar("alternador: " + document.getElementById("operador-vista").textContent);
-document.getElementById("operador-vista").click();
-await espera(300);
-relatar("depois do clique: " + document.getElementById("operador-vista").textContent
-  + " (vista-chamada " + visivel("vista-chamada") + ")");
+// O alternador `CONVERSA`/`CHAMADA` saiu do rodapé; a navegação é clicar numa
+// sala ou num canal. Ver `rodape-do-operador.js`, que mede o rodapé novo.
+const naSala = document.querySelector("#lista-voice_rooms button[data-dentro='nao']");
+if (naSala) naSala.click();
+await espera(600);
+relatar("depois de entrar na sala: vista-chamada " + visivel("vista-chamada"));

@@ -442,23 +442,9 @@
  * daquela fileira que age sobre a **sua** presença — os outros agem sobre a
  * sala. Ao passar o mouse ele inverte, que é o que a comp faz com todo botão
  * de contorno laranja. */
-.voice_room-sair {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--seele-laranja-nerv);
-  background: none;
-  border: 1px solid var(--seele-laranja-nerv);
-  cursor: pointer;
-}
-
-.voice_room-sair:hover {
-  color: var(--seele-negro-absoluto);
-  background: var(--seele-laranja-nerv);
-}
+/* `.voice_room-sair` saiu com o botão de desligar que ela pintava. Quem sai da
+   sala agora é o `SAIR DA SALA` do rodapé do operador, escrito em palavras —
+   ver `desenharORodapeDoOperador`, em `tela-chamada.js`. */
 
 .painel-acao {
   width: 22px;
@@ -664,11 +650,23 @@ button.voice_room-nome:hover { text-decoration: underline; }
   background: var(--seele-laranja-nerv);
 }
 
-/* O `[data-dentro="sim"]` saiu com a comp da 0.9.0: este botão só existe
-   quando se está **fora** da sala. Dentro, quem oferece a saída é o
-   `.voice_room-sair`, do tamanho do apagar ao lado dele. O atributo continua
-   sendo escrito porque é por ele que o manipulador de clique decide o que
-   mandar — ele só não pinta mais nada. */
+/* **Dentro da sala o botão continua, e muda de ofício: `VER A CHAMADA`.**
+
+   Ele já foi `ENTRAR NA SALA` só do lado de fora, com um botão de desligar no
+   lugar dele do lado de dentro. O desligar saiu — sair da sala é o `SAIR DA
+   SALA` do rodapé, escrito —, e o que sobrou aqui é navegação: voltar para a
+   grade depois de ter ido ler um canal.
+
+   Preenchido em vez de vazado, e é a única diferença de desenho: o vazado
+   convida a entrar, e num lugar onde já se está o convite seria uma promessa
+   falsa. Preenchido ele lê como «é aqui», que é o que a borda laranja do
+   `<li>` já diz uma linha acima. */
+.voice_room-entrar.aqui {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+.voice_room-entrar.aqui:hover { opacity: 0.85; }
 
 /* ---- destruir uma sala ----
 
@@ -691,7 +689,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
  * de 268px em que o verbo mais raro era o elemento mais pesado. O nome do que
  * ele apaga continua dito por extenso, no `aria-label` e no `title`, que é onde
  * ele é lido por quem procura o verbo em vez de esbarrar nele. */
-.voice_room-apagar, .linha-apagar {
+.voice_room-apagar, .linha-apagar, .linha-renomear {
   width: 22px;
   height: 22px;
   flex: 0 0 auto;
@@ -708,7 +706,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
   cursor: pointer;
 }
 
-.voice_room-apagar:hover, .linha-apagar:hover {
+.voice_room-apagar:hover, .linha-apagar:hover, .linha-renomear:hover {
   color: var(--seele-negro-absoluto);
   background: var(--seele-osso-apagado);
   border-color: var(--seele-osso-apagado);
@@ -724,10 +722,34 @@ button.voice_room-nome:hover { text-decoration: underline; }
 
 .voice_room-apagar:disabled:hover { color: var(--seele-linha-forte); background: none; }
 
-/* A fileira da Linha, quando ela tem um botão de apagar ao lado. Sem ele o
-   `<li>` continua sendo o que era: um único botão de largura cheia. */
+/* A fileira da Linha, quando ela tem controles ao lado. Sem eles o `<li>`
+   continua sendo o que era: um único botão de largura cheia. */
 .linha-fileira { display: flex; align-items: stretch; }
 .linha-fileira .linha { min-width: 0; flex: 1; }
+
+/* Os dois controles do canal, **empilhados e grudados**: o `×` em cima e o
+   lápis embaixo, numa coluna de 22px.
+
+   Lado a lado eles custariam 44px da coluna de 268px onde o nome do canal mora,
+   e o nome é o que se lê. A fileira tem 40px de altura, então duas caixas de 20
+   cabem sem que nada cresça — a de 22px vira 20 aqui dentro, e o `-1px` de
+   margem funde as duas bordas numa linha só, que é o que «grudado» quer dizer.
+
+   Quem tem só uma das duas permissões vê um botão de 20px numa fileira de 40, e
+   isso está certo: o vazio ao lado é a permissão que essa pessoa não tem. */
+.linha-controles {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.linha-controles > button { height: 20px; }
+.linha-controles > button + button { margin-top: -1px; }
+
+/* O lápis é desenho e não caractere, então a caixa do glifo manda — sem o
+   `font-size` de 13px que o `×` precisa por ser texto. */
+.linha-renomear { font-size: inherit; }
 
 .barra {
   display: block;

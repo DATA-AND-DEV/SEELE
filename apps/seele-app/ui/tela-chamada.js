@@ -101,7 +101,7 @@ const EVENTOS_LEMBRADOS = 40;
 function desenharChamada(snapshot) {
   const voice_room = snapshot ? snapshot.voice_rooms.find((c) => c.occupied_by_us) : null;
 
-  rotularOAlternador();
+  desenharORodapeDoOperador(voice_room);
   desenharBarraDaChamada(snapshot, voice_room);
   desenharPalco(snapshot, voice_room);
   desenharCartoes(snapshot, voice_room);
@@ -587,11 +587,11 @@ function fraseDoEstado(pessoa) {
  * `chamada-ejetar` — microfone, isolamento, compartilhar e sair do servidor —
  * numa fileira própria da tela de chamada. A comp dissolve aquela tela e põe
  * microfone e isolamento no **operador**, que já os tinha; sair do servidor já
- * era o `+` da trilha, que confirma antes; e o compartilhar foi para o
- * cabeçalho do palco, ao
- * lado de `TELA CHEIA` — a comp não o desenha em lugar nenhum, e a fileira do
- * operador, onde ele parou primeiro, o deixava na tela o tempo todo, inclusive
- * fora da chamada, onde não há palco que receba o que ele produz.
+ * era o `+` da trilha, que confirma antes; e o compartilhar deu duas voltas —
+ * a comp não o desenha em lugar nenhum. Parou primeiro na fileira do operador,
+ * onde ficava na tela o tempo todo, inclusive fora de sala; foi para o cabeçalho
+ * do palco, onde só existia com a grade aberta; e voltou ao operador
+ * **condicionado à sala**, que é a forma que faltava — ver `desenharORodapeDoOperador`.
  *
  * Quatro botões que existiam em dois lugares viraram quatro em um. */
 
@@ -674,67 +674,101 @@ async function atualizarChamada() {
 
 
 /**
- * O alternador da comp: a grade da sala **no lugar da conversa**, e de volta.
+ * Os dois botões do rodapé do operador, e os dois mudam de ofício com a sala.
  *
- * Um botão só para os dois sentidos, e o rótulo diz para onde ele leva — não
- * onde se está. `CHAMADA` quando se está na conversa, `CONVERSA` quando se
- * está na grade. Dois botões seriam um deles sempre inútil.
+ * ---- o que eram ----
+ *
+ * `SAIR DA SALA` e um alternador `CONVERSA`/`CHAMADA`, sempre os dois, sempre
+ * iguais. O alternador existia porque a coluna do meio mostra uma coisa de cada
+ * vez, e não havia outro jeito de escolher qual.
+ *
+ * ---- por que mudaram ----
+ *
+ * Agora há: a navegação passou para as listas da esquerda — clicar numa sala
+ * mostra a grade dela, clicar num canal mostra a conversa. Com isso o alternador
+ * virou um terceiro caminho para o que dois cliques já faziam, e o pior dos
+ * três, porque não diz **de qual** sala nem **de qual** canal está falando.
+ *
+ * No lugar dele, dentro de uma sala, vai `COMPARTILHAR`. Ele existia só no
+ * cabeçalho da grade, que é visível apenas quando já se está olhando a grade —
+ * então quem estivesse lendo um canal, dentro de uma sala, não tinha por onde
+ * começar a compartilhar sem antes trocar de vista.
+ *
+ * E fora de sala nenhuma os dois somem ou trocam: não há sala de onde sair, e a
+ * saída que existe ali é do servidor. Um botão que nomeia um lugar onde não se
+ * está é um botão que promete não fazer nada — foi o argumento que tirou
+ * `CHAMADA` de cima da chamada, e ele vale igual aqui.
+ *
+ * ---- o estado mora no botão ----
+ *
+ * Os ouvintes são registrados uma vez, no carregamento, e o que decide o que
+ * eles fazem é o `dataset` que este desenho escreve. É o mesmo idioma do rótulo
+ * lido da tela que o alternador já usava: um estado guardado em variável de
+ * módulo fica velho sempre que alguma outra coisa muda a sala, e há caminhos que
+ * mudam — entrar por um clique na lista, ser expulso, o servidor cair.
  */
-$("operador-vista").addEventListener("click", () => {
-  const naGrade = !$("vista-chamada").hidden;
-  // O rótulo é relido **depois** da troca, e não antes: `abrirChamada` é
-  // assíncrona, e relê-lo no mesmo tique leria o estado que acabou de sair.
-  // `desenharChamada` corrigiria no quadro seguinte de qualquer forma; isto é
-  // para o botão não piscar a palavra errada no meio do caminho.
-  if (naGrade) {
-    fecharChamada();
-    rotularOAlternador();
-  } else {
-    abrirChamada()
-      .then(rotularOAlternador)
-      .catch((falha) => console.warn("abrir a grade:", falha));
-  }
-});
+function desenharORodapeDoOperador(voice_room) {
+  const dentro = voice_room != null;
 
-/**
- * O rótulo do alternador, **lido da tela e não escrito no clique**.
- *
- * Ele era escrito uma vez, dentro do ouvinte do botão. Qualquer outro caminho
- * que trocasse a vista deixava a palavra velha — e há pelo menos um que a troca
- * sozinho: começar a compartilhar a tela chama `abrirChamada`, porque quem
- * acabou de escolher um monitor quer ver o que está saindo. Depois disso o botão
- * dizia `CHAMADA` estando já na chamada, oferecendo o lugar onde a pessoa
- * estava. Foi relatado assim: «às vezes já está na visualização de chamada e
- * ainda aparece como chamada em vez de conversa».
- *
- * O rótulo diz **para onde o botão leva**, e não onde se está: `CHAMADA` na
- * conversa, `CONVERSA` na grade. Um botão que nomeia o lugar em que já se está é
- * um botão que promete não fazer nada.
- */
-function rotularOAlternador() {
-  const naGrade = !$("vista-chamada").hidden;
-  $("operador-vista").textContent = naGrade ? "CONVERSA" : "CHAMADA";
+  const sair = $("operador-sair");
+  sair.dataset.alvo = dentro ? "sala" : "servidor";
+  sair.textContent = dentro ? "SAIR DA SALA" : "SAIR DO SERVIDOR";
+  sair.title = dentro
+    ? `sair de ${voice_room.name}: você para de ouvir e de falar nesta sala`
+    : "sair deste servidor e voltar à tela de entrada";
+
+  const outro = $("operador-vista");
+  // `hidden`, e não um estilo: fora de sala este botão não tem ofício nenhum, e
+  // um botão desabilitado prometeria que existe um jeito de habilitá-lo aqui.
+  outro.hidden = !dentro;
+  if (dentro) {
+    outro.textContent = "COMPARTILHAR";
+    outro.title = `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`;
+  }
 }
 
-/**
- * Sair da sala de voz — e **só** dela.
- *
- * O par do alternador acima, e a distinção entre os dois é o que o
- * `as_duas_saidas_continuam_dizendo_qual_delas_larga_a_sala` prende: um troca
- * o que se vê, o outro para de ouvir e de falar. A conexão com o servidor não
- * é tocada por nenhum dos dois; quem sai do servidor é o `+` da trilha.
- */
-$("operador-sair").addEventListener("click", async () => {
-  try {
-    await invoke("eject_plug");
-  } catch (falha) {
-    console.warn("eject_plug:", falha);
-  }
-  await atualizar();
-});
-$("chamada-compartilhar").addEventListener("click", () => {
+$("operador-vista").addEventListener("click", () => {
   abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
 });
+
+/**
+ * Sair — da sala, ou do servidor, conforme onde se está.
+ *
+ * **Sem caixa de confirmação para o caso comum, e com ela para um só.** A regra
+ * está escrita em `pedirTrocaDeServidor`: uma caixa que repete o rótulo do botão
+ * é a caixa que treina a apertar duas vezes sem ler. `SAIR DA SALA` e
+ * `SAIR DO SERVIDOR` dizem o que fazem, e o que se perde nos dois se recupera
+ * entrando de novo.
+ *
+ * O caso que não se recupera é hospedar: o servidor que este computador põe no
+ * ar cai junto com quem o hospeda, e todo mundo que estiver dentro sai. Isso o
+ * rótulo não diz, e é exatamente a parte que a caixa existe para escrever.
+ */
+$("operador-sair").addEventListener("click", async () => {
+  if ($("operador-sair").dataset.alvo === "sala") {
+    try {
+      await invoke("eject_plug");
+    } catch (falha) {
+      console.warn("eject_plug:", falha);
+    }
+    await atualizar();
+    return;
+  }
+
+  const daqui = nomeDesteServidor();
+  if (await hospedandoAqui()) {
+    abrirConfirmacao(
+      "SAIR DO SERVIDOR",
+      consequenciaDeIrParaAEntrada(daqui, true),
+      `SAIR DE ${daqui}`,
+      sairDoServidorParaAEntrada,
+    );
+    return;
+  }
+  await sairDoServidorParaAEntrada();
+});
+
+
 
 
 

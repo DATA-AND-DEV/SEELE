@@ -980,10 +980,25 @@
           ele produz aparece.
         -->
         <div class="operador-fileira">
+          <!--
+            **Os dois trocam de ofício com a sala, e o desenho é quem escreve.**
+
+            Fora de sala: `SAIR DO SERVIDOR` sozinho, e o segundo escondido. Numa
+            sala: `SAIR DA SALA` e `COMPARTILHAR`. O rótulo e o `title` daqui são
+            só o que a janela mostra antes do primeiro snapshot; quem manda é
+            `desenharOperador`, em `tela-chamada.js`, e é lá que a razão está
+            escrita.
+
+            **O alternador `CONVERSA`/`CHAMADA` foi embora.** A navegação passou
+            para as listas da esquerda — clicar numa sala mostra a grade dela,
+            clicar num canal mostra a conversa —, e com isso ele virou um
+            terceiro caminho para o que dois cliques já faziam, e o pior dos
+            três, porque não dizia de qual sala nem de qual canal falava.
+          -->
           <button id="operador-sair" class="botao-fantasma" type="button"
-                  title="sair: você para de ouvir e de falar nesta sala">SAIR DA SALA</button>
-          <button id="operador-vista" class="botao-fantasma" type="button"
-                  title="a grade da sala de voz no lugar da conversa">CHAMADA</button>
+                  title="sair deste servidor e voltar à tela de entrada">SAIR DO SERVIDOR</button>
+          <button id="operador-vista" class="botao-fantasma" type="button" hidden
+                  title="mostrar um monitor ou uma janela sua para quem está na sala">COMPARTILHAR</button>
           <!--
             **`DESCONECTAR` saiu, e a saída não sumiu com ele.**
 
@@ -1068,15 +1083,19 @@
               sala onde ninguém compartilha promete uma coisa que não existe.
             -->
             <!--
-              Começar a compartilhar mora no cabeçalho do palco: o palco é o
-              destino do que ele produz, e o botão à esquerda de `TELA CHEIA`
-              põe «mostrar a minha» e «ampliar a alheia» na mesma barra, que é
-              onde quem procura uma vai procurar a outra.
+              **`COMPARTILHAR` saiu daqui, e foi para o rodapé do operador.**
+
+              Ele morou nesta barra pela razão certa — o palco é o destino do que
+              ele produz — e o preço só apareceu quando a navegação mudou: este
+              cabeçalho existe **dentro** da grade, então quem estivesse numa
+              sala lendo um canal não tinha por onde começar a compartilhar sem
+              antes trocar de vista. No rodapé do operador ele está em pé nas
+              duas vistas, e o rodapé está sempre na tela enquanto se está numa
+              sala — que é exatamente a condição em que compartilhar existe.
+
+              O que fica aqui é `TELA CHEIA`, que é sobre a imagem deste palco e
+              não teria sentido fora dele.
             -->
-            <button id="chamada-compartilhar" class="chamada-palco-cheia" type="button"
-                    title="mostrar um monitor ou uma janela sua para quem está na sala">
-              COMPARTILHAR
-            </button>
             <button id="palco-cheia" class="chamada-palco-cheia" type="button" hidden>
               TELA CHEIA
             </button>
