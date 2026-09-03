@@ -44,9 +44,42 @@ thiserror = "2.0.19"
 # Leitura e nada mais: este crate não escreve no registro, e não tem por que.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+# A captura por processo: WASAPI cru, que o `cpal` não alcança. A mesma versão
+# que `seele-video` já traz, para o `Cargo.lock` não carregar duas cópias do
+# mundo do Windows.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+] }
+windows-core = "0.62"
 
-[lints]
-workspace = true
+# **Folha própria, e a razão é uma linha só.**
+#
+# `unsafe_code` precisa ser `deny` em vez de `forbid`: a captura de áudio por
+# processo do Windows é WASAPI cru — `ActivateAudioInterfaceAsync` e um objeto
+# COM implementado à mão —, e o `cpal` não a alcança. `forbid` não se afrouxa nem
+# com `allow` dentro de um módulo, que é o mecanismo com que `seele-video` (ADR
+# 0041) e `seele-instalador` (ADR 0043) isolam a mesma necessidade.
+#
+# Todo o resto é **cópia** do `[workspace.lints]`, e cópia apodrece. Quem prende
+# isso é `xtask/tests/folha_de_lints.rs`, que lê os dois arquivos e reprova
+# qualquer divergência que não seja esta.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+indexing_slicing = "warn"
 
 [dev-dependencies]
 assert_no_alloc = "1.1.2"

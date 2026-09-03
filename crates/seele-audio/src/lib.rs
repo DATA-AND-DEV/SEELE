@@ -30,6 +30,9 @@ pub mod ganho;
 pub mod gate;
 pub mod jitter;
 pub mod laco;
+/// O som de um programa só, no Windows. Ver o cabeçalho do módulo.
+#[cfg(windows)]
+pub mod laco_por_processo;
 pub mod latency;
 pub mod mixer;
 pub mod netsim;
