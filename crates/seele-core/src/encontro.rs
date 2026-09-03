@@ -29,7 +29,11 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use seele_proto::encontro::{self, Marca};
+// `Marca` reexportada: quem chama `onde_mora` de fora precisa montar uma, e
+// fazê-la vir daqui poupa a camada de cima de nomear `seele-proto` — que o ADR
+// 0002 não deixa a casca alcançar de qualquer jeito.
+pub use seele_proto::encontro::Marca;
+use seele_proto::encontro::{self};
 use seele_proto::uri::Bilhete;
 
 /// Quanto tempo se gasta batendo antes de desistir e conectar assim mesmo.
@@ -296,6 +300,73 @@ fn mapear(destino: SocketAddr, socket: &tokio::net::UdpSocket) -> SocketAddr {
             SocketAddr::new(quatro.to_ipv6_mapped().into(), destino.port())
         }
         _ => destino,
+    }
+}
+
+/// Onde um servidor mora **agora**, perguntando ao ponto de encontro.
+///
+/// # Por que ela existe
+///
+/// Todo endereço de um anfitrião atrás de NAT é perecível: o mapeamento nasce
+/// quando um pacote sai, e o roteador dá outro na abertura seguinte. A lista de
+/// servidores conhecidos guarda endereço — o do link, os alternativos, o do
+/// bilhete —, e no fechar todos os três morrem juntos. Foi relatado assim: «o ip
+/// que fica salvo na lista de servidores ainda dá problema de reconexão,
+/// possivelmente porque a porta muda quando abre e fecha o server. Se não, a
+/// lista de servidores fica inútil.»
+///
+/// O que não envelhece é a impressão digital, e é dela que sai a marca. O
+/// anfitrião registra o endereço de hoje sob essa marca a cada quinze segundos,
+/// no pacote que ele já mandava; esta função pergunta.
+///
+/// # O que se faz com a resposta, e o que não se faz
+///
+/// Ela entra na **lista de candidatos**, na frente dos guardados. Não substitui
+/// a conferência de nada: o aperto de mão confere a impressão digital como
+/// sempre (ADR 0003), então um ponto de encontro hostil que responda um endereço
+/// escolhido por ele consegue fazer a conexão falhar, e nada além disso.
+///
+/// `None` quando o ponto não responde no prazo — o que inclui um ponto de
+/// encontro antigo, que não conhece o verbo `QUEM` e cala. Calar é o
+/// comportamento certo dele, e aqui é indistinguível de «esse servidor não está
+/// no ar»: nos dois casos o que sobra são os endereços guardados.
+pub async fn onde_mora(
+    ponto: &str,
+    marca: &seele_proto::encontro::Marca,
+    prazo: std::time::Duration,
+) -> Option<SocketAddr> {
+    let destino: SocketAddr = tokio::net::lookup_host(ponto).await.ok()?.next()?;
+    let socket = tokio::net::UdpSocket::bind(match destino {
+        SocketAddr::V4(_) => "0.0.0.0:0",
+        SocketAddr::V6(_) => "[::]:0",
+    })
+    .await
+    .ok()?;
+    socket
+        .send_to(&seele_proto::encontro::quem(marca), destino)
+        .await
+        .ok()?;
+
+    let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
+    loop {
+        let (lidos, origem) = tokio::time::timeout(prazo, socket.recv_from(&mut balde))
+            .await
+            .ok()?
+            .ok()?;
+        // Só do ponto a que se perguntou. Um `AQUI` que chega de outro lugar é
+        // ruído da internet ou alguém tentando escolher para onde esta máquina
+        // vai conectar — e o segundo é a razão de esta linha existir.
+        if origem.ip() != destino.ip() {
+            continue;
+        }
+        let Some((respondida, endereco)) =
+            balde.get(..lidos).and_then(seele_proto::encontro::ler_aqui)
+        else {
+            continue;
+        };
+        if &respondida == marca {
+            return Some(endereco);
+        }
     }
 }
 

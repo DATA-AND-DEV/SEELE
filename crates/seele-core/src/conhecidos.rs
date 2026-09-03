@@ -79,6 +79,19 @@ pub struct Conhecido {
     /// Pelo mesmo motivo dos caminhos: sem ele, voltar a um servidor atrás de
     /// NAT perde o degrau que o fez funcionar da primeira vez.
     pub bilhete: Option<String>,
+    /// A impressão digital do servidor, como o `seele://` a trouxe.
+    ///
+    /// **É a única coisa desta linha que não envelhece.** Endereço, caminhos e
+    /// bilhete são todos endereço, e endereço atrás de NAT morre quando o
+    /// servidor fecha: o roteador dá outro mapeamento na abertura seguinte. A
+    /// impressão digital é a mesma para sempre — é a chave do servidor —, e é
+    /// dela que sai a marca com que se pergunta ao ponto de encontro «onde esse
+    /// servidor está hoje».
+    ///
+    /// `None` numa entrada escrita antes desta coluna existir, ou numa visita
+    /// que veio por endereço digitado e não por link. Aí não há a quem
+    /// perguntar, e a lista volta a valer o que valia.
+    pub impressao: Option<String>,
 }
 
 /// A lista, em disco.
@@ -163,16 +176,17 @@ impl Conhecidos {
         // Os caminhos e o bilhete sobrevivem pela mesma razão que o nome e a
         // imagem: uma visita que não os traz — o terminal, um endereço digitado
         // — não pode apagar o que o convite ensinou.
-        let (nome, icone, caminhos, bilhete) = self
+        let (nome, icone, caminhos, bilhete, impressao) = self
             .entradas
             .iter()
             .find(|e| e.alvo == alvo)
-            .map_or((None, None, Vec::new(), None), |e| {
+            .map_or((None, None, Vec::new(), None, None), |e| {
                 (
                     e.nome.clone(),
                     e.icone.clone(),
                     e.caminhos.clone(),
                     e.bilhete.clone(),
+                    e.impressao.clone(),
                 )
             });
 
@@ -186,6 +200,7 @@ impl Conhecidos {
             icone,
             caminhos,
             bilhete,
+            impressao,
         });
         self.gravar()
     }
@@ -203,6 +218,7 @@ impl Conhecidos {
         alvo: &str,
         caminhos: &[String],
         bilhete: Option<&str>,
+        impressao: Option<&str>,
     ) -> Result<()> {
         let alvo = higienizar(alvo);
         let Some(entrada) = self.entradas.iter_mut().find(|e| e.alvo == alvo) else {
@@ -211,11 +227,19 @@ impl Conhecidos {
         // Só quando há o que guardar: uma reconexão pelo endereço salvo não
         // traz convite, e passar vazio aqui apagaria a escada que o link
         // ensinou — o oposto do que esta função existe para fazer.
-        if caminhos.is_empty() && bilhete.is_none() {
+        if caminhos.is_empty() && bilhete.is_none() && impressao.is_none() {
             return Ok(());
         }
-        entrada.caminhos = caminhos.iter().map(|c| higienizar(c)).collect();
-        entrada.bilhete = bilhete.map(higienizar);
+        if !caminhos.is_empty() || bilhete.is_some() {
+            entrada.caminhos = caminhos.iter().map(|c| higienizar(c)).collect();
+            entrada.bilhete = bilhete.map(higienizar);
+        }
+        // **A impressão sobrevive sozinha, e por cima.** Ela não envelhece — é a
+        // chave do servidor — e uma visita que não a traz não pode apagá-la, do
+        // mesmo jeito que não apaga o nome nem a imagem.
+        if let Some(impressao) = impressao {
+            entrada.impressao = Some(higienizar(impressao));
+        }
         self.gravar()
     }
 
@@ -279,7 +303,7 @@ impl Conhecidos {
             .iter()
             .map(|e| {
                 format!(
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                     e.alvo,
                     e.apelido,
                     e.voice_room
@@ -290,7 +314,8 @@ impl Conhecidos {
                     // continua sendo lida, e cada campo que falta vira ausência.
                     e.nome.as_deref().unwrap_or(""),
                     e.caminhos.join(","),
-                    e.bilhete.as_deref().unwrap_or("")
+                    e.bilhete.as_deref().unwrap_or(""),
+                    e.impressao.as_deref().unwrap_or("")
                 )
             })
             .collect();
@@ -355,6 +380,11 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         .map(str::trim)
         .filter(|b| !b.is_empty())
         .map(str::to_owned);
+    let impressao = campos
+        .next()
+        .map(str::trim)
+        .filter(|i| !i.is_empty())
+        .map(str::to_owned);
 
     Some(Conhecido {
         alvo: alvo.to_owned(),
@@ -364,6 +394,7 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         nome,
         caminhos,
         bilhete,
+        impressao,
         // Carregada em `abrir`, que é quem conhece o caminho.
         icone: None,
     })
@@ -643,6 +674,7 @@ mod a_escada_do_convite {
                 "192.168.0.7:8383",
                 &["187.255.97.152:9455".to_owned()],
                 Some("encontro.seele.app.br/187.255.97.152:9454"),
+                Some("abcdef0123456789cafe"),
             )
             .expect("anotar");
 
@@ -651,7 +683,7 @@ mod a_escada_do_convite {
             .registrar("192.168.0.7:8383", "aleta", None)
             .expect("registrar");
         lista
-            .anotar_caminhos("192.168.0.7:8383", &[], None)
+            .anotar_caminhos("192.168.0.7:8383", &[], None, None)
             .expect("anotar sem nada");
 
         let guardado = lista.buscar("192.168.0.7:8383").expect("está na lista");
@@ -677,7 +709,12 @@ mod a_escada_do_convite {
                 .registrar("casa:8383", "aleta", None)
                 .expect("registrar");
             lista
-                .anotar_caminhos("casa:8383", &["fora:9455".to_owned()], Some("ponto/aviso"))
+                .anotar_caminhos(
+                    "casa:8383",
+                    &["fora:9455".to_owned()],
+                    Some("ponto/aviso"),
+                    None,
+                )
                 .expect("anotar");
         }
         let relido = lista(&pasta);
@@ -699,5 +736,60 @@ mod a_escada_do_convite {
         assert_eq!(guardado.nome.as_deref(), Some("Casa"));
         assert!(guardado.caminhos.is_empty());
         assert_eq!(guardado.bilhete, None);
+    }
+    #[test]
+    fn a_impressao_sobrevive_a_uma_visita_que_nao_a_traz() {
+        // **É a única coluna desta linha que não envelhece.** Endereço, caminhos
+        // e bilhete são todos endereço, e endereço atrás de NAT morre quando o
+        // servidor fecha. A impressão digital é a chave do servidor, e é dela
+        // que sai a marca com que se pergunta ao ponto de encontro onde ele
+        // está hoje — sem ela, a lista volta a valer o que valia.
+        let pasta = pasta_de("impressao");
+        let mut lista = lista(&pasta);
+
+        lista
+            .registrar("casa:8383", "aleta", None)
+            .expect("registrar");
+        lista
+            .anotar_caminhos("casa:8383", &[], None, Some("abcdef0123456789cafe"))
+            .expect("anotar a impressão");
+
+        // Uma volta pelo endereço salvo: sem link, sem convite, sem nada.
+        lista
+            .registrar("casa:8383", "aleta", None)
+            .expect("de novo");
+        lista
+            .anotar_caminhos("casa:8383", &[], None, None)
+            .expect("anotar nada");
+
+        assert_eq!(
+            lista.buscar("casa:8383").and_then(|c| c.impressao.clone()),
+            Some("abcdef0123456789cafe".to_owned()),
+            "a segunda visita apagou a impressão digital, e com ela o único jeito \
+             de achar este servidor depois que a porta dele mudar"
+        );
+    }
+
+    #[test]
+    fn uma_linha_de_sete_campos_continua_sendo_lida() {
+        // Escrita antes de a coluna da impressão existir. Colunas a mais vão
+        // sempre no fim e nunca no meio, e cada campo que falta vira ausência —
+        // é a mesma regra que deixou a coluna do bilhete entrar.
+        let pasta = pasta_de("sete-campos");
+        let caminho = pasta.join("conhecidos");
+        std::fs::write(
+            &caminho,
+            "casa:8383\taleta\t1\t1738000000\tCasa\tfora:9455\tponto/aviso\n",
+        )
+        .expect("escrever");
+
+        let lista = Conhecidos::abrir(caminho).expect("abrir");
+        let guardado = lista.buscar("casa:8383").expect("está na lista");
+        assert_eq!(guardado.nome.as_deref(), Some("Casa"));
+        assert_eq!(guardado.bilhete.as_deref(), Some("ponto/aviso"));
+        assert_eq!(
+            guardado.impressao, None,
+            "campo que não existe na linha é ausência, e não texto vazio"
+        );
     }
 }

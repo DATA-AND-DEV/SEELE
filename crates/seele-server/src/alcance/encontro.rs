@@ -360,6 +360,21 @@ fn marca_do_convite(impressao_digital: &str) -> Option<Marca> {
     Marca::nova(impressao_digital.get(..16)?)
 }
 
+/// A marca sob a qual o **socket do servidor** se registra no quarto.
+///
+/// É [`marca_do_convite`] com um `s` no fim, e as duas existem porque o quarto
+/// guarda **um endereço por marca** e quem chega precisa de dois: o do servidor,
+/// para conectar, e o da escuta de avisos, para pedir o furo. Um endereço só não
+/// serve — os dois sockets moram atrás do mesmo IP público e em portas
+/// diferentes, e não há como derivar uma da outra.
+///
+/// O sufixo e não uma marca solta porque quem procura tem só a impressão digital
+/// na mão, e ela é o que o `seele://` carrega. Derivar as duas do mesmo lugar é o
+/// que faz a lista de servidores conhecidos precisar guardar uma coisa só.
+fn marca_do_server(impressao_digital: &str) -> Option<Marca> {
+    Marca::nova(&format!("{}s", impressao_digital.get(..16)?))
+}
+
 /// Um encontro aberto: o que o convite precisa dizer, e a tarefa que o mantém.
 pub struct Encontro {
     ponto: String,
@@ -507,6 +522,7 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
         aviso,
         minha_marca,
         marca_de_quem_chega,
+        marca_do_server(&convocacao.impressao_digital),
     ));
 
     Ok(Encontro {
@@ -769,6 +785,7 @@ async fn atender(
     aviso: SocketAddr,
     minha_marca: Marca,
     de_quem_chega: Marca,
+    marca_do_server: Option<Marca>,
 ) {
     let mut relogio = tokio::time::interval(REAVIVAR);
     relogio.tick().await;
@@ -780,8 +797,27 @@ async fn atender(
             _ = relogio.tick() => {
                 // Os dois caminhos, porque são dois mapeamentos: o da escuta de
                 // avisos e o do socket do servidor.
-                let _ = avisos.send_to(&encontro::onde(&minha_marca), ponto).await;
+                // **`MORO` e não `ONDE`, e é o quarto.**
+                //
+                // Os dois pacotes já saíam a cada quinze segundos para manter os
+                // dois mapeamentos de NAT vivos — o da escuta de avisos e o do
+                // socket do servidor. Trocar o verbo do primeiro registra o
+                // endereço no quarto **de graça**, no pacote que já ia sair, e é
+                // isso que faz a lista de servidores conhecidos voltar a servir
+                // a quem está atrás de NAT: o endereço morria no fechar, e agora
+                // quem tem a impressão digital pergunta onde ele está hoje.
+                //
+                // O terceiro pacote é o que faltava: o socket do **servidor**
+                // também precisa se registrar, porque é para ele que quem chega
+                // conecta. A resposta dele volta para o próprio socket do
+                // servidor, onde quem lê é o QUIC — que a descarta, como já
+                // descarta todo `FURO` que chega ali. Ver o cabeçalho de
+                // `encontro::furo`.
+                let _ = avisos.send_to(&encontro::moro(&minha_marca), ponto).await;
                 mandar_pelo_server(&server, &encontro::leve(aviso, &minha_marca), ponto);
+                if let Some(marca) = &marca_do_server {
+                    mandar_pelo_server(&server, &encontro::moro(marca), ponto);
+                }
             }
             recebido = avisos.recv_from(&mut balde) => {
                 let Ok((lidos, origem)) = recebido else { continue };
@@ -1450,6 +1486,9 @@ mod testes {
             avisos_endereco,
             minha_marca,
             de_quem_chega.clone(),
+            // Sem quarto neste teste: ele mede o furo, e o registro do quarto é
+            // um pacote a mais que não muda o que ele afirma.
+            None,
         ));
 
         (tarefa, avisos_endereco, alvo, alvo_endereco, de_quem_chega)

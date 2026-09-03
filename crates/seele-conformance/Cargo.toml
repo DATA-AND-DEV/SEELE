@@ -22,6 +22,10 @@ seele-audio = { path = "../seele-audio" }
 seele-core = { path = "../seele-core" }
 seele-server = { path = "../seele-server" }
 seele-ffi = { path = "../seele-ffi" }
+# O ponto de encontro, para o teste do quarto: ele precisa das duas pontas — um
+# anfitrião registrando e um cliente perguntando — com o serviço de verdade no
+# meio, e este crate é o único lugar onde as duas cabem juntas.
+seele-encontro = { path = "../seele-encontro" }
 # The acceptance tests draw the real interface into an off-screen buffer.
 ratatui = "0.30.2"
 tokio = { version = "1", features = ["full"] }

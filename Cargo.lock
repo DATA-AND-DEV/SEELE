@@ -4987,6 +4987,7 @@ dependencies = [
  "ratatui",
  "seele-audio",
  "seele-core",
+ "seele-encontro",
  "seele-ffi",
  "seele-proto",
  "seele-server",

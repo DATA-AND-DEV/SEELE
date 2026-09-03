@@ -6422,3 +6422,48 @@ mod conferir_a_troca {
         );
     }
 }
+
+/// Quanto se espera o ponto de encontro dizer onde um servidor mora.
+///
+/// Curto: isto acontece **antes** de qualquer tentativa de conexão, e o que se
+/// paga aqui atrasa até quem está na mesma casa e nunca precisou de ponto de
+/// encontro nenhum. Um ponto que não respondeu em meio segundo ou está fora do
+/// ar ou não conhece o verbo `QUEM`, e nos dois casos os endereços guardados
+/// continuam valendo.
+const PRAZO_DO_QUARTO: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Onde este servidor mora hoje: o socket dele, e a escuta de avisos dele.
+///
+/// # Por que a casca chama isto e não monta as marcas
+///
+/// A marca é vocabulário de fio (ADR 0002): dezesseis dígitos da impressão
+/// digital para o socket de avisos, e os mesmos com um `s` no fim para o socket
+/// do servidor. A casca não tem o que fazer com essa regra — ela tem uma
+/// impressão digital e um ponto de encontro, e o que ela quer são dois
+/// endereços.
+///
+/// As duas perguntas em paralelo, porque são dois datagramas independentes para
+/// o mesmo lugar e fazê-las em série dobraria o prazo que todo mundo paga.
+///
+/// Devolve `(o do servidor, o da escuta de avisos)`, e cada um é `None` quando o
+/// ponto não respondeu por aquela marca.
+pub async fn onde_mora_hoje(
+    ponto: &str,
+    impressao: &str,
+) -> (Option<std::net::SocketAddr>, Option<std::net::SocketAddr>) {
+    use seele_core::encontro::{onde_mora, Marca};
+
+    let Some(prefixo) = impressao.get(..16) else {
+        return (None, None);
+    };
+    let (Some(do_aviso), Some(do_server)) =
+        (Marca::nova(prefixo), Marca::nova(&format!("{prefixo}s")))
+    else {
+        return (None, None);
+    };
+
+    tokio::join!(
+        onde_mora(ponto, &do_server, PRAZO_DO_QUARTO),
+        onde_mora(ponto, &do_aviso, PRAZO_DO_QUARTO),
+    )
+}

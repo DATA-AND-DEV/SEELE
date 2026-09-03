@@ -59,11 +59,18 @@ fn main() -> ExitCode {
     // `IPV6_V6ONLY` muda de sistema para sistema, e o degrau 2 deste mesmo ADR
     // apanhou disso. Duas linhas de execução, nenhuma dependência.
     let mut linhas = Vec::new();
+    // **Um quarto para as duas.** Um anfitrião registra por uma família e quem
+    // procura pode perguntar pela outra; dois quartos fariam esse par nunca se
+    // encontrar, e a resposta seria o silêncio — indistinguível de «esse
+    // servidor não existe».
+    let quarto = std::sync::Arc::new(seele_encontro::Quarto::novo());
     for escuta in [
         SocketAddr::from((Ipv4Addr::UNSPECIFIED, porta)),
         SocketAddr::from((Ipv6Addr::UNSPECIFIED, porta)),
     ] {
-        match Ponto::abrir(escuta, vizinhanca).map(|ponto| ponto.barulhento(barulhento)) {
+        match Ponto::abrir_com_quarto(escuta, vizinhanca, std::sync::Arc::clone(&quarto))
+            .map(|ponto| ponto.barulhento(barulhento))
+        {
             Ok(ponto) => {
                 eprintln!("ponto de encontro atendendo em {escuta}");
                 linhas.push(std::thread::spawn(move || {

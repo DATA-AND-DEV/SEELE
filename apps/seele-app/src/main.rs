@@ -239,7 +239,10 @@ async fn connect(
     // lista de para-onde-voltar tinha guardado, dos três endereços, o único que
     // não serve a ela. «Ele salva apenas o endereço LAN, o que não faz sentido
     // algum para pessoas que se conversam pela internet.»
-    let (alternativos, bilhete) = if alternativos.is_empty() && bilhete.is_none() {
+    let veio_de_link = !alternativos.is_empty() || bilhete.is_some();
+    let (mut alternativos, bilhete, impressao_guardada) = if veio_de_link {
+        (alternativos, bilhete, None)
+    } else {
         seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(config_dir(&app)).join("conhecidos"),
         )
@@ -252,12 +255,55 @@ async fn connect(
                         .bilhete
                         .as_deref()
                         .and_then(|texto| seele_ffi::uri::Bilhete::ler(texto).ok()),
+                    conhecido.impressao.clone(),
                 )
             })
         })
         .unwrap_or_default()
-    } else {
-        (alternativos, bilhete)
+    };
+
+    // **O quarto: onde este servidor mora hoje.**
+    //
+    // Tudo o que a lista guarda é endereço, e endereço atrás de NAT é perecível
+    // — o mapeamento nasce quando um pacote sai, e o roteador dá outro na
+    // abertura seguinte. Foi relatado assim: «o ip que fica salvo na lista de
+    // servidores ainda dá problema de reconexão, possivelmente porque a porta
+    // muda quando abre e fecha o server. Se não, a lista de servidores fica
+    // inútil.»
+    //
+    // A impressão digital não envelhece, e é dela que sai a marca. Duas
+    // perguntas porque são dois sockets atrás do mesmo IP público: o do
+    // servidor, para onde se conecta, e o da escuta de avisos, para onde vai o
+    // pedido de furo. Nenhuma das duas se deriva da outra.
+    //
+    // As respostas entram **na frente** dos endereços guardados, e não no lugar
+    // deles: um ponto de encontro que não responda — inclusive um antigo, que
+    // não conhece o verbo — deixa tudo como estava, e o guardado ainda serve a
+    // quem está na mesma casa.
+    let bilhete = match (
+        impressao_guardada.as_deref().or(esperada.as_deref()),
+        &bilhete,
+    ) {
+        (Some(impressao), Some(bilhete_guardado)) => {
+            let (fresco_do_server, fresco_do_aviso) =
+                seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
+            if let Some(endereco) = fresco_do_server {
+                let texto = endereco.to_string();
+                if !alternativos.contains(&texto) {
+                    alternativos.insert(0, texto);
+                }
+            }
+            match fresco_do_aviso {
+                Some(endereco) => seele_ffi::uri::Bilhete::novo(
+                    bilhete_guardado.ponto.clone(),
+                    endereco.to_string(),
+                )
+                .ok()
+                .or_else(|| Some(bilhete_guardado.clone())),
+                None => Some(bilhete_guardado.clone()),
+            }
+        }
+        _ => bilhete,
     };
 
     let home = config_dir(&app);
@@ -304,7 +350,10 @@ async fn connect(
         home,
         audio,
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
-        expected_fingerprint: esperada,
+        // Clonada: a lista de conhecidos a guarda depois de a conexão dar
+        // certo, e é ela que faz a marca do quarto na visita seguinte. Uma
+        // impressão digital tem 64 bytes.
+        expected_fingerprint: esperada.clone(),
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
@@ -411,7 +460,12 @@ async fn connect(
             // nada a anotar: uma volta pelo endereço salvo não traz convite, e
             // passar vazio aqui desfaria, na segunda visita, o que o link
             // ensinou na primeira.
-            if let Err(erro) = lista.anotar_caminhos(&alvo, &caminhos, bilhete_texto.as_deref()) {
+            if let Err(erro) = lista.anotar_caminhos(
+                &alvo,
+                &caminhos,
+                bilhete_texto.as_deref(),
+                esperada.as_deref(),
+            ) {
                 tracing::debug!(%erro, "não guardei os outros caminhos deste servidor");
             }
         }

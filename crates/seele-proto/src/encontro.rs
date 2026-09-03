@@ -3,12 +3,16 @@
 //! ```text
 //! SEELE-ENC/1 ONDE <marca>
 //! SEELE-ENC/1 LEVE <destino> <marca>
-//! SEELE-ENC/1 AQUI <marca> <origem>
+//! SEELE-ENC/1 MORO <marca>
+//! SEELE-ENC/1 QUEM <marca>
+//! SEELE-ENC/1 AQUI <marca> <endereço>
 //! ```
 //!
-//! Três linhas, e é o protocolo inteiro. Duas entram no ponto de encontro e uma
-//! sai dele, e a única coisa que ele sabe fazer é **dizer de onde um pacote
-//! veio** — para quem o mandou (`ONDE`) ou para um terceiro endereço (`LEVE`).
+//! Cinco linhas, e é o protocolo inteiro. Quatro entram no ponto de encontro e
+//! uma sai dele. Três delas só sabem **dizer de onde um pacote veio** — para
+//! quem o mandou (`ONDE`, `MORO`) ou para um terceiro endereço (`LEVE`). A
+//! quarta, `QUEM`, é a única que precisa de memória, e a seção sobre o quarto
+//! diz o que ela custa.
 //!
 //! # Por que isto basta para furar um NAT
 //!
@@ -24,12 +28,55 @@
 //! e o anfitrião manda alguns pacotes para lá. Os dois roteadores passam a ter
 //! uma saída registrada para o outro lado, e daí em diante o tráfego é direto.
 //!
+//! # O quarto, e o que ele custa
+//!
+//! **O ADR 0022 recusou isto, e a recusa foi revista em 03/09/2026.** O texto
+//! dele diz: *«a alternativa óbvia era um número opaco que o ponto de encontro
+//! traduzisse para o endereço do anfitrião. Isso obrigaria o ponto de encontro a
+//! guardar essa tradução.»* O argumento continua correto; o que mudou foi o
+//! preço do outro lado.
+//!
+//! Sem memória, o endereço de um anfitrião atrás de NAT vive só enquanto o
+//! servidor está no ar: o mapeamento nasce quando um pacote sai, e o roteador dá
+//! outro na abertura seguinte. O `seele://` e a lista de servidores conhecidos
+//! guardam aquele endereço, e ele morre no fechar. Foi relatado assim: *«o ip
+//! que fica salvo na lista de servidores ainda dá problema de reconexão,
+//! possivelmente porque a porta muda quando abre e fecha o server. Se não, a
+//! lista de servidores fica inútil.»*
+//!
+//! Então o ponto de encontro passa a guardar **uma** coisa: `marca → endereço`,
+//! em memória, com prazo. Nunca em disco, nunca em log. O anfitrião escreve com
+//! `MORO` no mesmo pacote de quinze segundos que já mandava; quem tem o link
+//! pergunta com `QUEM`.
+//!
+//! ## O que isso entrega a quem opera o ponto de encontro
+//!
+//! **Que uma marca está no ar, e em que endereço.** É metadado vivo, e é
+//! exatamente o que o ADR não queria que existisse. O que ele **não** entrega
+//! continua não entregando: quem falou com quem não passa por aqui, e a marca é
+//! meia impressão digital — um número, não um nome.
+//!
+//! ## Por que ninguém rouba o lugar de ninguém
+//!
+//! Qualquer um pode mandar `MORO` com a marca de outro, e mandar quem pergunta
+//! para o endereço errado. Duas coisas contêm isso, e nenhuma delas é
+//! autenticação — este serviço não tem chave nenhuma para conferir:
+//!
+//! 1. **Quem chega confere a impressão digital de qualquer jeito** (ADR 0003).
+//!    Um endereço errado falha no aperto de mão; não vira conexão com o
+//!    impostor. O prejuízo é não entrar, e não entrar no lugar errado.
+//! 2. **Quem escreveu primeiro fica**, enquanto o prazo não vencer. O anfitrião
+//!    reavive o dele a cada quinze segundos, então o lugar só está livre quando
+//!    ele está fora do ar — e aí o que se toma é o lugar de quem não está lá.
+//!
 //! # O que ele não faz, e por construção
 //!
-//! **Não guarda nada.** [`responder`] é uma função livre: não tem `self`, não
-//! tem tabela, não recebe estado e não devolve estado. Um `LEVE` funciona sem
-//! nenhum `ONDE` antes dele, e reiniciar o processo não muda resposta nenhuma —
-//! não porque alguém teve o cuidado de limpar, mas porque não há onde guardar.
+//! **Não guarda nada além do quarto.** [`responder`] continua sendo uma função
+//! livre: não tem `self`, não tem tabela, não recebe estado. Um `LEVE` funciona
+//! sem nenhum `ONDE` antes dele, e reiniciar o processo não muda resposta
+//! nenhuma dela. O quarto mora fora daqui, em `seele_encontro::Quarto`, e um
+//! ponto de encontro que não o queira continua chamando esta função e continua
+//! correto.
 //!
 //! **Não repassa conteúdo.** A resposta é **montada** aqui, campo a campo, e
 //! nunca copiada do pedido: o que sai é o verbo, a marca (alfanumérica, curta) e
@@ -153,6 +200,29 @@ pub enum Pedido {
         /// A etiqueta que vai nele.
         marca: Marca,
     },
+    /// "Guarde que quem manda isto é esta marca, e me diga onde eu estou."
+    ///
+    /// O **quarto**: o único pedido deste protocolo que pede memória. Ver o
+    /// cabeçalho do módulo, seção «O quarto, e o que ele custa».
+    ///
+    /// É um [`Self::Onde`] que também registra, e não um verbo à parte, porque
+    /// o anfitrião já manda um `ONDE` a cada quinze segundos para manter o
+    /// mapeamento de NAT vivo. Registrar de graça naquele pacote é o que faz
+    /// isto não custar tráfego nenhum a mais.
+    Moro {
+        /// Sob que nome guardar. São os primeiros dígitos da impressão digital
+        /// do servidor, que é o que o `seele://` carrega.
+        marca: Marca,
+    },
+    /// "Onde está a marca X agora?"
+    ///
+    /// A resposta volta **para quem perguntou**, e nunca para um terceiro: isto
+    /// não é um refletor como o [`Self::Leve`], e por isso não precisa das
+    /// defesas de destino que aquele precisa.
+    Quem {
+        /// De quem se quer o endereço.
+        marca: Marca,
+    },
 }
 
 /// O que um ponto de encontro tem a dizer, e para quem.
@@ -180,6 +250,18 @@ pub fn leve(destino: SocketAddr, marca: &Marca) -> Vec<u8> {
 #[must_use]
 pub fn aqui(marca: &Marca, origem: SocketAddr) -> Vec<u8> {
     encher(format!("{MAGIA} AQUI {marca} {origem}"))
+}
+
+/// Monta um `MORO`.
+#[must_use]
+pub fn moro(marca: &Marca) -> Vec<u8> {
+    encher(format!("{MAGIA} MORO {marca}"))
+}
+
+/// Monta um `QUEM`.
+#[must_use]
+pub fn quem(marca: &Marca) -> Vec<u8> {
+    encher(format!("{MAGIA} QUEM {marca}"))
 }
 
 /// Monta um `FURO`: o pacote que abre o caminho, mandado de uma ponta à outra.
@@ -261,10 +343,21 @@ pub fn responder_em(
     vizinhanca: Vizinhanca,
 ) -> Option<Resposta> {
     match analisar(datagrama)? {
-        Pedido::Onde { marca } => Some(Resposta {
+        // `MORO` responde como `ONDE` **e nada mais aqui dentro**: esta função
+        // não tem onde guardar, e é o que a assinatura dela promete. Quem guarda
+        // é `seele_encontro::Quarto`, do lado de fora, e é lá que o custo do
+        // quarto está escrito. Um ponto de encontro que não queira o quarto
+        // continua chamando esta função e continua correto — ele só passa a
+        // responder `MORO` como se fosse `ONDE`, que é a resposta honesta de
+        // quem não guardou.
+        Pedido::Onde { marca } | Pedido::Moro { marca } => Some(Resposta {
             destino: origem,
             datagrama: aqui(&marca, origem),
         }),
+        // E `QUEM` cala, aqui. Sem quarto não há endereço guardado, e inventar
+        // um seria mandar quem perguntou para o lugar errado. Calar é a resposta
+        // que este módulo dá para tudo o que ele não sabe.
+        Pedido::Quem { .. } => None,
         Pedido::Leve { destino, marca } => {
             let permitido = match vizinhanca {
                 Vizinhanca::Internet => alcancavel(destino),
@@ -291,6 +384,12 @@ pub fn analisar(datagrama: &[u8]) -> Option<Pedido> {
     let (verbo, resto) = resto.split_once(' ')?;
     match verbo {
         "ONDE" => Some(Pedido::Onde {
+            marca: Marca::nova(resto)?,
+        }),
+        "MORO" => Some(Pedido::Moro {
+            marca: Marca::nova(resto)?,
+        }),
+        "QUEM" => Some(Pedido::Quem {
             marca: Marca::nova(resto)?,
         }),
         "LEVE" => {
