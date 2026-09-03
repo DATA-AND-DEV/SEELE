@@ -2281,3 +2281,42 @@ fn o_corpo_do_release_lista_os_commits_da_mesma_faixa_que_resume() {
         "e o resumo tem que sair da mesma faixa"
     );
 }
+
+#[test]
+fn a_casa_padrao_e_so_a_das_versoes_e_a_ponte_fica_registrada() {
+    // **A migração terminou do lado de quem publica.**
+    //
+    // Até a 0.10.0 este script subia cada versão nas duas casas, porque o
+    // endereço de atualização é gravado dentro do app instalado e quem tinha o
+    // SEELE de antes só conhecia a antiga. A 0.10.0 é a versão que carrega a
+    // lista com os dois endereços, e ela saiu nas duas: quem está em 0.9.x acha
+    // a 0.10.0 na casa antiga, instala, e a partir dali procura na casa nova.
+    //
+    // Isso deixa uma condição pendurada num release, que é o pior lugar para
+    // guardar uma condição — ninguém a lê antes de arrumar a casa. Ela fica
+    // escrita aqui: **apagar a 0.10.0 de `DATA-AND-DEV/SEELE` corta a ponte**, e
+    // quem estiver em 0.9.x para de receber atualização sem nunca saber, porque
+    // um atualizador que não acha nada não distingue «não há versão nova» de
+    // «olhei no lugar errado».
+    let texto = std::fs::read_to_string(publicar()).expect("o orquestrador tem que ser legível");
+
+    let linha = texto
+        .lines()
+        .find(|l| l.starts_with("REPOS="))
+        .unwrap_or_else(|| panic!("o orquestrador tem que dizer onde publica"));
+    assert!(
+        linha.contains("DATA-AND-DEV/SEELE-RELEASES"),
+        "a casa das versões é para onde o app aponta desde a 0.10.0: {linha}"
+    );
+    assert!(
+        !linha.contains("DATA-AND-DEV/SEELE "),
+        "publicar de novo na casa do código republicaria a versão num lugar que \
+         só existe para a ponte da 0.10.0: {linha}"
+    );
+
+    assert!(
+        texto.contains("0.10.0 tem que continuar publicada em `DATA-AND-DEV/SEELE`"),
+        "a condição que segura a ponte tem que estar escrita ao lado da decisão \
+         que depende dela, e não só no release que ela protege"
+    );
+}

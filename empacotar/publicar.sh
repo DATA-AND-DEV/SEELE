@@ -134,21 +134,24 @@ VERSAO=""
 # enfraquece nada; esquecer de trocar o `endpoints` do `tauri.conf.json` junto,
 # sim — e é o que `crates/seele-video/tests/modulo_publicado.rs` prende.
 #
-# **São duas, e é a migração que pede.** O endereço de atualização é gravado
-# dentro do app instalado: quem tem o SEELE de antes só conhece o repositório
-# antigo, e a atualização que muda esse endereço tem de chegar por ele. Publicar
-# só na casa nova deixaria essa gente parada numa versão que ninguém mais toca —
-# sem saber por quê, porque um atualizador que não acha nada não distingue «não
-# há versão nova» de «olhei no lugar errado».
+# **É uma só a partir da 0.10.1, e a ponte já está do outro lado.** O endereço
+# de atualização é gravado dentro do app instalado: quem tem o SEELE de antes só
+# conhece o repositório antigo. A 0.10.0 é a versão que carrega a lista com os
+# dois endereços, e ela foi publicada **nas duas casas** — quem está em 0.9.x
+# acha a 0.10.0 na casa antiga, instala, e a partir dali procura na casa nova.
 #
-# Publicar nas duas **na mesma execução** é o que evita compilar tudo de novo
-# para a segunda: os pacotes são os mesmos, só o `latest.json` muda, porque as
-# URLs dentro dele apontam para a casa que os hospeda.
+# Isto tem uma condição, e ela é a única coisa que segura o esquema de pé: a
+# **0.10.0 tem que continuar publicada em `DATA-AND-DEV/SEELE`**. Apagar aquele
+# release corta a ponte, e quem estiver em 0.9.x fica parado numa versão que
+# ninguém mais toca — sem saber por quê, porque um atualizador que não acha nada
+# não distingue «não há versão nova» de «olhei no lugar errado». Enquanto ela
+# estiver lá, publicar só na casa nova não deixa ninguém para trás.
 #
-# Quando a migração acabar, isto volta a ser um nome só — e o guarda do `xtask`
-# que segura o endereço antigo no `tauri.conf.json` sai junto, pela mesma razão
-# e no mesmo dia.
-REPOS="${SEELE_REPO:-DATA-AND-DEV/SEELE-RELEASES DATA-AND-DEV/SEELE}"
+# O guarda do `xtask` que segura o endereço antigo na lista do `tauri.conf.json`
+# **fica**: ele fala do que o app procura, não de onde este script publica, e o
+# app tem que continuar procurando nos dois enquanto houver gente chegando pela
+# ponte.
+REPOS="${SEELE_REPO:-DATA-AND-DEV/SEELE-RELEASES}"
 # E o do código, que é outro desde que ele foi fechado.
 #
 # **São dois papéis e não um.** O commit é a procedência — é dele que este
