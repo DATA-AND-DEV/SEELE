@@ -191,10 +191,10 @@ impl FonteDeQuadros for CapturaComSom {
             // formato em vez de aceitar o do dispositivo, porque nesta ativação
             // não há dispositivo a quem perguntar. Não há taxa a converter.
             //
-            // O prazo é curto de propósito: esta chamada corre no laço do
-            // codificador, e esperar por som que não vem seguraria o quadro
-            // seguinte. Um programa em silêncio devolve vazio na hora.
-            SomDaTela::DoPrograma(captura) => captura.tomar(5),
+            // E ela não bloqueia: quem espera o evento do WASAPI é a linha dela,
+            // e aqui só se tira do anel. Esperar neste ponto seguraria o quadro
+            // seguinte do codificador.
+            SomDaTela::DoPrograma(captura) => captura.tomar(TETO),
         }
     }
 }

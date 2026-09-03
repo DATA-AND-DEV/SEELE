@@ -299,32 +299,103 @@ fn houve_som(evento: HANDLE, prazo_ms: u32) -> bool {
 }
 
 /// A captura do som de um programa, aberta e correndo.
+///
+/// # Por que uma linha própria
+///
+/// **Os objetos do COM não atravessam linhas, e esta captura precisa
+/// atravessar.** Ela nasce na linha que abre a transmissão e é lida na do
+/// codificador — `seele_core::video` exige `Send` disto, e exige por medida: o
+/// par existe justamente porque a captura de imagem e a de som vivem em linhas
+/// diferentes.
+///
+/// Então o `IAudioClient` fica onde nasceu, numa linha só dele, e o que
+/// atravessa é um anel de amostras. É a mesma forma que o resto do áudio desta
+/// casa já usa — a `FilaDeSom` do macOS e o `capture_path` do `cpal` — e ela
+/// resolve de brinde o outro problema: a leitura do WASAPI **bloqueia** esperando
+/// o evento, e bloquear no laço do codificador seguraria o quadro seguinte.
 pub struct SomDoPrograma {
-    cliente: IAudioClient,
-    captura: IAudioCaptureClient,
-    evento: HANDLE,
+    anel: Arc<Mutex<std::collections::VecDeque<f32>>>,
+    parar: Arc<std::sync::atomic::AtomicBool>,
 }
+
+/// Quantas amostras o anel guarda antes de descartar as mais velhas.
+///
+/// Meio segundo. Mais que isso é som que já não serve — quem assiste prefere o
+/// silêncio de agora ao que aconteceu há um segundo, e insistir nele afasta o
+/// som da imagem cada vez mais. É a mesma razão que a fila do macOS escreve.
+const FOLGA_DO_ANEL: usize = TAXA as usize / 2;
 
 impl SomDoPrograma {
     /// Abre a captura da árvore deste processo.
     ///
     /// # Errors
     ///
-    /// [`String`] com o que o Windows respondeu. Quem chama trata a falha
-    /// mandando a tela sem som, que é metade do que se queria — e melhor que
-    /// nada, que é o que dá não mostrar.
+    /// [`String`] com o que o Windows respondeu. Quem chama trata a falha caindo
+    /// para o som da máquina — pior que o som só da janela, e melhor que o
+    /// silêncio.
     pub fn abrir(processo: u32) -> Result<Self, String> {
-        let (cliente, captura, evento) = abrir_cliente(processo).map_err(|erro| {
-            format!(
-                "não abri o som do processo {processo}: {erro}. \
-                 Esta captura existe a partir do Windows 10 build 20348."
-            )
-        })?;
-        Ok(Self {
-            cliente,
-            captura,
-            evento,
-        })
+        let anel = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        let parar = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (conta, ouve) = std::sync::mpsc::channel();
+
+        let anel_da_linha = Arc::clone(&anel);
+        let parar_na_linha = Arc::clone(&parar);
+        std::thread::Builder::new()
+            .name("som-do-programa".to_owned())
+            .spawn(move || {
+                // A abertura acontece **aqui**, e é por isso que o resultado dela
+                // volta por um canal: os objetos criados nesta linha não podem
+                // sair dela.
+                let aberto = abrir_cliente(processo).map_err(|erro| {
+                    format!(
+                        "não abri o som do processo {processo}: {erro}. \
+                         Esta captura existe a partir do Windows 10 build 20348."
+                    )
+                });
+                let (cliente, captura, evento) = match aberto {
+                    Ok(partes) => {
+                        let _ = conta.send(Ok(()));
+                        partes
+                    }
+                    Err(motivo) => {
+                        let _ = conta.send(Err(motivo));
+                        return;
+                    }
+                };
+
+                while !parar_na_linha.load(std::sync::atomic::Ordering::Relaxed) {
+                    // O prazo existe para a parada ser notada: sem ele, uma
+                    // captura de um programa mudo ficaria presa no `Wait` para
+                    // sempre, e a linha não morreria nunca.
+                    if !houve_som(evento, 100) {
+                        continue;
+                    }
+                    let Ok(amostras) = tomar(&captura) else {
+                        continue;
+                    };
+                    let Ok(mut anel) = anel_da_linha.lock() else {
+                        break;
+                    };
+                    anel.extend(amostras);
+                    while anel.len() > FOLGA_DO_ANEL {
+                        anel.pop_front();
+                    }
+                }
+
+                // SAFETY: os dois vieram desta linha e ainda não foram
+                // encerrados.
+                unsafe {
+                    let _ = cliente.Stop();
+                    let _ = windows::Win32::Foundation::CloseHandle(evento);
+                }
+            })
+            .map_err(|erro| format!("não criei a linha do som do programa: {erro}"))?;
+
+        match ouve.recv() {
+            Ok(Ok(())) => Ok(Self { anel, parar }),
+            Ok(Err(motivo)) => Err(motivo),
+            Err(_) => Err("a linha do som do programa morreu antes de responder".to_owned()),
+        }
     }
 
     /// A taxa em que as amostras saem.
@@ -333,26 +404,24 @@ impl SomDoPrograma {
         TAXA
     }
 
-    /// Lê o que o programa tocou desde a última chamada.
+    /// Tira do anel o que o programa tocou, até `teto` amostras.
     ///
-    /// Espera até `prazo_ms` por som novo. Uma lista vazia é o silêncio de um
-    /// programa que não está tocando nada — e não uma falha.
+    /// Uma lista vazia é o silêncio de um programa que não está tocando nada — e
+    /// não uma falha.
     #[must_use]
-    pub fn tomar(&self, prazo_ms: u32) -> Vec<f32> {
-        if !houve_som(self.evento, prazo_ms) {
+    pub fn tomar(&self, teto: usize) -> Vec<f32> {
+        let Ok(mut anel) = self.anel.lock() else {
             return Vec::new();
-        }
-        tomar(&self.captura).unwrap_or_default()
+        };
+        let quantas = anel.len().min(teto);
+        anel.drain(..quantas).collect()
     }
 }
 
 impl Drop for SomDoPrograma {
     fn drop(&mut self) {
-        // SAFETY: os dois vieram da abertura desta captura e ainda não foram
-        // encerrados.
-        unsafe {
-            let _ = self.cliente.Stop();
-            let _ = windows::Win32::Foundation::CloseHandle(self.evento);
-        }
+        // A linha vê a bandeira no próximo prazo do `Wait` — cem milissegundos —
+        // e encerra o cliente lá, que é onde ele foi criado.
+        self.parar.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
