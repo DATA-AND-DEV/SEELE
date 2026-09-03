@@ -98,6 +98,22 @@ pub(crate) fn executar(
     let quantos = carga::abrir_em(destino, |arquivo| contar(arquivo))?;
     contar(&format!("{quantos} arquivos escritos"));
 
+    // **O produto tem de estar lá.**
+    //
+    // Uma carga que extrai sem erro e não traz o executável deixa a pasta cheia
+    // de arquivos, o atalho apontando para o vazio e a entrada no painel
+    // anunciando um programa que não existe — tudo isso *com sucesso*. É o pior
+    // resultado possível, e custa uma linha impedir.
+    let produto = destino.join("SEELE.exe");
+    if !produto.is_file() {
+        return Err(format!(
+            "a carga foi extraída e o `SEELE.exe` não está em {}.\n\
+             O instalador não vai criar atalho nem registrar nada apontando para \
+             um programa que não existe.",
+            destino.display()
+        ));
+    }
+
     // O desinstalador **antes** da entrada que aponta para ele: uma entrada que
     // aponta para um arquivo inexistente não desinstala, e ninguém descobre isso
     // na instalação — só meses depois, quando alguém tenta remover.
@@ -121,7 +137,6 @@ pub(crate) fn executar(
     registro::guardar_escolhas(escolhas.atalho, escolhas.porta)?;
     contar("registrado em «Aplicativos instalados»");
 
-    let produto = destino.join("SEELE.exe");
     if escolhas.atalho {
         if let Some(menu) = sistema::menu_iniciar() {
             sistema::atalho(

@@ -296,12 +296,37 @@ try {
     Remove-Item -Recurse -Force $Carga -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $Carga | Out-Null
 
-    # O que o produto instalado precisa ter ao lado. É a mesma lista que o
-    # bundle do Tauri leva: o app e o `seeled`, que é o sidecar. O sidecar perde
-    # o sufixo do alvo — dentro da pasta instalada ele se chama `seeled.exe`,
-    # que é como o README manda chamá-lo no PATH.
-    Copy-Item "target\release\SEELE.exe" (Join-Path $Carga "SEELE.exe") -Force
-    Copy-Item "target\release\seeled.exe" (Join-Path $Carga "seeled.exe") -Force
+    # **O binário do cargo, renomeado — e não um `SEELE.exe` procurado no disco.**
+    #
+    # O `[[bin]]` do app se chama `seele-app`, e é `seele-app.exe` que o cargo
+    # acabou de escrever. Quem renomeia para o nome de produto é o empacotador
+    # do Tauri, na hora de montar o bundle.
+    #
+    # A primeira versão disto copiava `target\release\SEELE.exe`, e funcionou no
+    # sentido de não dar erro: o Windows não diferencia maiúscula de minúscula, e
+    # havia um `seele.exe` de duas semanas atrás parado na mesma pasta. O
+    # instalador saiu com esse binário velho — que não abre, e cujo atalho fica
+    # sem ícone. Nenhum passo reclamou de nada.
+    #
+    # Daí a conferência abaixo: o arquivo tem de existir com o nome que o cargo
+    # dá, e tem de ser desta compilação. Um `Copy-Item` de um caminho que casa por
+    # acaso é a forma mais silenciosa de embarcar a coisa errada.
+    $AppCompilado = "target\release\seele-app.exe"
+    if (-not (Test-Path $AppCompilado)) {
+        throw "não achei $AppCompilado — o app não foi compilado nesta execução"
+    }
+    $Idade = (Get-Date) - (Get-Item $AppCompilado).LastWriteTime
+    if ($Idade.TotalHours -gt 2) {
+        throw ("o $AppCompilado tem {0:N1} horas e esta execução acabou de compilar. " -f $Idade.TotalHours) +
+              "Isto é um resto de outra compilação, e embarcá-lo poria uma versão velha dentro do instalador."
+    }
+    Copy-Item $AppCompilado (Join-Path $Carga "SEELE.exe") -Force
+
+    $ServidorCompilado = "target\release\seeled.exe"
+    if (-not (Test-Path $ServidorCompilado)) {
+        throw "não achei $ServidorCompilado — o servidor não foi compilado nesta execução"
+    }
+    Copy-Item $ServidorCompilado (Join-Path $Carga "seeled.exe") -Force
 
     $CargaTar = Join-Path $env:TEMP "seele-carga-$Versao.tar.gz"
     Remove-Item -Force $CargaTar -ErrorAction SilentlyContinue
