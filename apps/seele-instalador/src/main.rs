@@ -228,11 +228,13 @@ mod testes {
             panic!("não li {}", caminho.display());
         };
 
-        let ramo = janela
+        let Some(ramo) = janela
             .split("Passo::Pronto => {")
             .nth(1)
             .and_then(|resto| resto.split("\n            }").next())
-            .expect("o passo 04 perdeu o ramo do botão que avança");
+        else {
+            panic!("o passo 04 perdeu o ramo do botão que avança");
+        };
 
         assert!(
             ramo.contains("abrir_o_produto"),
