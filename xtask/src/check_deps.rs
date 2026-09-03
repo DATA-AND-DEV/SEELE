@@ -108,6 +108,18 @@ const RULES: &[(&str, &[&str])] = &[
             "seele-server",
             "seele-tui",
             "seele-ffi",
+            // **O ponto de encontro, e é o mesmo argumento das duas cascas.**
+            //
+            // O quarto do ADR 0022 (emenda de 03/09/2026) só se prova com as
+            // três peças ao mesmo tempo: um anfitrião registrando, um cliente
+            // perguntando, e o serviço de verdade no meio. Sem esta linha o
+            // teste teria de encenar o serviço — e um teste que encena a peça
+            // que está sendo medida não mede nada.
+            //
+            // Não inverte a regra: `seele-encontro` é folha, vê `seele-proto` e
+            // mais nada, e ninguém depende dele. É a mesma aresta lateral no
+            // topo do grafo que `seele-server` já é aqui dentro.
+            "seele-encontro",
         ],
     ),
     // The desktop shell. Sees `seele-ffi`, which sees `seele-core`. Reaching past
@@ -273,7 +285,10 @@ mod tests {
             &[
                 edge("seele-server"),
                 edge("seele-core"),
-                edge("seele-proto")
+                edge("seele-proto"),
+                // E o ponto de encontro: o quarto do ADR 0022 só se prova com o
+                // serviço de verdade no meio das duas pontas.
+                edge("seele-encontro"),
             ]
         )
         .is_empty());
