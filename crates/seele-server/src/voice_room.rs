@@ -162,6 +162,17 @@ pub struct DropCounts {
     pub espectador_cortado: u64,
     /// Um fluxo de tela chegou de quem não estava registrado transmitindo.
     pub tela_sem_dono: u64,
+    /// Alguém quis assistir e a subida de quem hospeda não carregava a cópia.
+    ///
+    /// **É a recusa que substituiu um encerramento.** Antes, o espectador que
+    /// não coubesse entrava na conta assim mesmo, e o reconferir do teto
+    /// encerrava a transmissão mais nova — que numa sala com uma é a única. A
+    /// sétima pessoa a entrar apagava a tela de todo mundo.
+    ///
+    /// Contado e não silencioso porque é a diferença entre «ninguém está
+    /// transmitindo» e «não coube a sua cópia», e as duas dão a mesma tela vazia
+    /// para quem chegou.
+    pub espectador_nao_coube: u64,
 }
 
 /// One member of a voice room.
@@ -358,12 +369,27 @@ impl VoiceRoom {
                 // coisa que há. Com duas, entrar nas duas custaria duas cópias e
                 // dois decodificadores a quem acabou de chegar, sem ter pedido
                 // nenhum dos dois; a escolha passa a ser dela, por `WatchScreen`.
-                if self.telas.len() == 1 {
+                //
+                // **E só se a cópia dele couber.** Cada pessoa que entra é uma
+                // cópia a mais na subida de quem hospeda. Sem esta pergunta, o
+                // `reconferir_o_teto` logo abaixo via as cópias não caberem e
+                // **encerrava a transmissão** — numa sala com uma só, a mais
+                // nova é a única, então a sétima pessoa a entrar apagava a tela
+                // de todo mundo. Quem chegou por último derrubava o que estava
+                // no ar, e ninguém tinha como saber por quê.
+                //
+                // Quando não cabe, quem fica de fora é **quem chegou**, e não a
+                // transmissão. É a mesma direção da regra que já existia para as
+                // transmissões — a última a entrar é a primeira a sair —,
+                // aplicada a espectador em vez de a tela.
+                if self.telas.len() == 1 && self.cabe_mais_uma_copia() {
                     for curso in self.telas.values_mut() {
                         if curso.dono != person {
                             curso.esperando.push(person);
                         }
                     }
+                } else if self.telas.len() == 1 {
+                    self.drops.espectador_nao_coube += 1;
                 }
                 self.reconferir_o_teto();
             }
@@ -596,8 +622,30 @@ impl VoiceRoom {
         {
             return;
         }
+        // **Antes de entrar, e não depois.** Isto conferia o teto **depois** de
+        // pôr a pessoa na fila, e o `reconferir_o_teto` encerrava a transmissão
+        // mais nova quando ela não coubesse — ou seja, pedir para assistir podia
+        // derrubar o que se queria assistir. Quem não cabe fica de fora; a
+        // transmissão fica.
+        if !self.cabe_mais_uma_copia() {
+            self.drops.espectador_nao_coube += 1;
+            return;
+        }
+        let Some(curso) = self.telas.values_mut().find(|curso| curso.screen == screen) else {
+            return;
+        };
         curso.esperando.push(person);
-        self.reconferir_o_teto();
+    }
+
+    /// Se a subida de quem hospeda carrega **mais uma** cópia além das de agora.
+    ///
+    /// A pergunta que faltava nos dois caminhos por onde um espectador entra.
+    /// Ela é feita **antes** de a pessoa entrar na conta, porque a alternativa —
+    /// entrar e reconferir — tem uma sanção que não é dela: `reconferir_o_teto`
+    /// encerra transmissão, e um espectador a mais não pode ser motivo para
+    /// apagar a tela de quem já estava vendo.
+    fn cabe_mais_uma_copia(&self) -> bool {
+        crate::tela::teto_do_hospedeiro(self.caminho_bps, self.copias() + 1).is_some()
     }
 
     /// Tira alguém de uma transmissão, sem tocar nas outras.
@@ -1534,6 +1582,39 @@ mod tests {
     }
 
     #[test]
+    fn a_sala_que_cresce_nao_derruba_a_transmissao_de_quem_ja_estava() {
+        // **Quem chega depois tem de ver o que está no ar.** É requisito, na
+        // palavra de quem o pediu: «um usuário DEVE ser capaz de ver a live,
+        // mesmo entrando depois de ela iniciar.»
+        //
+        // O caminho por onde isso se perde não é o de ligar quem chega — esse
+        // funciona, e o teste ao lado o prende. É o `reconferir_o_teto` que roda
+        // logo depois: cada pessoa que entra é uma cópia a mais na subida de
+        // quem hospeda, e quando as cópias não cabem ele **encerra** a
+        // transmissão mais nova. Numa sala com uma transmissão só, a mais nova é
+        // a única — então a sétima pessoa a entrar apagaria a tela de todo
+        // mundo, e quem chegou por último veria a culpa cair sobre si.
+        //
+        // Com a subida suposta de 2 Mbit/s e o piso de 200 kbit/s, cabem seis
+        // cópias. Este teste enche a sala até lá e mais uma.
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _dono = espectador(&mut voice_room, 1);
+        let mut fim = compartilhar(&mut voice_room, 1, 7);
+
+        let mut chegando = Vec::new();
+        for quem in 2..=8 {
+            chegando.push(espectador(&mut voice_room, quem));
+        }
+
+        assert!(
+            fim.try_recv().is_err(),
+            "a transmissão foi encerrada porque a sala cresceu. Quem entra tem \
+             de ver o que está no ar — e se a subida não carrega, quem sobra de \
+             fora é quem chegou, não a transmissão inteira"
+        );
+    }
+
+    #[test]
     fn quem_entra_no_meio_so_e_ligado_num_quadro_chave() {
         // N muda no meio da transmissão, e é o §5.1 em movimento. Ligar alguém
         // num byte qualquer deslocaria o enquadramento dele para sempre: o
@@ -1611,10 +1692,13 @@ mod tests {
     }
 
     #[test]
-    fn a_transmissao_que_para_pelo_teto_nao_anuncia_uma_ultima_contagem() {
-        // A ordem importa: anunciar antes de reconferir poria no fio o N de uma
-        // transmissão que morre no mesmo instante, e quem recebesse desenharia
-        // «3 pessoas assistindo» ao lado de uma tela que acabou de parar.
+    fn quem_nao_cabe_fica_de_fora_e_a_contagem_nao_muda() {
+        // **Este teste foi virado ao contrário em 03/09/2026**, e o que ele
+        // afirmava está logo abaixo, em `a_sala_que_cresce...`. O que se
+        // preservou daqui é a ordem: uma contagem só sai quando há o que contar.
+        //
+        // Chegar sem caber não é evento nenhum para quem já assiste: o N deles
+        // não mudou, porque a cópia da pessoa nova não foi aberta.
         let (mut voice_room, mut ouvinte) = sala_com_barramento(600_000);
         let _alice = espectador(&mut voice_room, 1);
         let _bob = espectador(&mut voice_room, 2);
@@ -1622,20 +1706,44 @@ mod tests {
         assert_eq!(contagens(&mut ouvinte), vec![1]);
 
         let _carol = espectador(&mut voice_room, 3);
-        assert_eq!(
-            fim.try_recv(),
-            Ok(crate::tela::FimDaTela::AlemDoQueOHospedeiroCarrega)
+        assert!(
+            fim.try_recv().is_err(),
+            "a chegada de alguém encerrou a transmissão de quem já estava"
         );
-        assert_eq!(contagens(&mut ouvinte), Vec::<u32>::new());
+        // O número **não muda**, que é o que importa: a cópia de carol não foi
+        // aberta, então quem assiste continua sendo um. Que ele seja reanunciado
+        // é ruído do reconferir e não mentira — e uma contagem repetida é muito
+        // melhor que a que este teste afirmava antes, que era nenhuma, porque a
+        // transmissão tinha acabado de morrer.
+        assert_eq!(
+            contagens(&mut ouvinte),
+            vec![1],
+            "a chegada de quem não coube mudou a contagem de quem já assistia"
+        );
+        assert_eq!(voice_room.drops.espectador_nao_coube, 1);
     }
 
     #[test]
-    fn a_sala_que_cresce_alem_da_subida_do_server_para_a_transmissao() {
-        // A primeira linha do `min` do §5.1, que é a que faltava: a subida de
-        // quem hospeda é `N × teto`, então cada pessoa que entra encolhe o teto
-        // de todo mundo. Quando ele passa por baixo do piso do §2, o que para é
-        // o vídeo — com motivo — porque a alternativa é a sala inteira
-        // picotando por causa da tela.
+    fn a_sala_que_cresce_alem_da_subida_deixa_de_fora_quem_chegou() {
+        // **A decisão que este teste afirmava foi revista em 03/09/2026**, e
+        // vale escrever o argumento antigo inteiro porque ele não era tolo:
+        //
+        // > A subida de quem hospeda é `N × teto`, então cada pessoa que entra
+        // > encolhe o teto de todo mundo. Quando ele passa por baixo do piso do
+        // > §2, o que para é o vídeo — com motivo — porque a alternativa é a
+        // > sala inteira picotando por causa da tela.
+        //
+        // A conclusão não segue da premissa. Ela supõe **duas** saídas — manter
+        // todas as cópias, ou parar o vídeo — e há uma terceira: não abrir a
+        // cópia que não cabe. A voz fica protegida exatamente igual, porque o
+        // número de cópias no fio é o mesmo dos dois jeitos; o que muda é quem
+        // paga. Antes pagavam todos; agora paga quem chegou por último.
+        //
+        // O relato que forçou a revisão: «não dá pra ver a live se ela tiver
+        // iniciada antes do usuário entrar. Um usuário DEVE ser capaz de ver a
+        // live, mesmo entrando depois de ela iniciar.» O sintoma era pior que o
+        // relatado — a chegada não deixava a pessoa de fora, apagava a tela de
+        // todo mundo — e a culpa caía sobre quem tinha acabado de entrar.
         let mut voice_room = VoiceRoom::com_caminho(VoiceRoomId(1), 600_000, None);
         let _alice = espectador(&mut voice_room, 1);
         let mut bob = espectador(&mut voice_room, 2);
@@ -1643,14 +1751,18 @@ mod tests {
         let mut de_bob = bob.try_recv().unwrap();
         assert!(fim.try_recv().is_err(), "um espectador já não cabia");
 
-        // 360 kbps de teto para dois espectadores são 180, abaixo dos 200 do
-        // piso.
+        // 360 kbps de teto para dois espectadores seriam 180, abaixo dos 200 do
+        // piso. Então carol não entra — e bob continua vendo.
         let _carol = espectador(&mut voice_room, 3);
-        assert_eq!(
-            fim.try_recv(),
-            Ok(crate::tela::FimDaTela::AlemDoQueOHospedeiroCarrega)
+        assert!(
+            fim.try_recv().is_err(),
+            "a transmissão foi encerrada porque a sala cresceu"
         );
-        assert!(matches!(de_bob.pedacos.try_recv(), Ok(Pedaco::Fim)));
+        assert!(
+            de_bob.pedacos.try_recv().is_err(),
+            "quem já assistia foi cortado por causa de quem chegou"
+        );
+        assert_eq!(voice_room.drops.espectador_nao_coube, 1);
     }
 
     #[test]
