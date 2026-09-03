@@ -192,6 +192,19 @@ struct EmCurso {
     fim: mpsc::Sender<FimDaTela>,
 }
 
+impl EmCurso {
+    /// Quantas cópias esta transmissão custa ao cano de quem hospeda.
+    ///
+    /// **Os ligados mais os que esperam.** Quem entrou no meio ainda não tem
+    /// cano — ele é ligado no próximo quadro-chave —, mas vai ter, e em
+    /// milissegundos. Contar só os ligados deixaria o teto otimista exatamente
+    /// no instante em que alguém chega, que é quando ele mais precisa estar
+    /// certo: a conta serve para decidir se a sala nova ainda cabe.
+    fn recebem(&self) -> usize {
+        self.canos.len() + self.esperando.len()
+    }
+}
+
 /// The state of one voice channel.
 pub struct VoiceRoom {
     id: VoiceRoomId,
@@ -206,7 +219,16 @@ pub struct VoiceRoom {
     /// depender do número que ninguém mediu — ver
     /// [`crate::tela::CAMINHO_DO_SERVER_BPS`].
     caminho_bps: u32,
-    tela: Option<EmCurso>,
+    /// As transmissões em curso, pela pessoa que as manda.
+    ///
+    /// **Pela pessoa e não pela `ScreenId`** porque toda pergunta que este
+    /// arquivo faz é «o que fulano está mandando» — os bytes chegam com o
+    /// remetente, a saída da sala é de uma pessoa, e o fim também. Indexar pela
+    /// tela obrigaria a procurar o dono em toda uma delas.
+    ///
+    /// Uma pessoa manda uma tela por vez: mandar duas seria dobrar a subida dela
+    /// sem que ninguém tivesse pedido a segunda.
+    telas: HashMap<PersonId, EmCurso>,
     /// Por onde o **N** desta sala chega ao plano de controle.
     ///
     /// A sala de voz é o único lugar do servidor que sabe quem está na sala sem
@@ -241,7 +263,7 @@ impl VoiceRoom {
             drops: DropCounts::default(),
             forwarded: 0,
             caminho_bps,
-            tela: None,
+            telas: HashMap::new(),
             eventos,
         }
     }
@@ -312,7 +334,7 @@ impl VoiceRoom {
                 // quadro-chave, ele acerta o passo e ainda consegue
                 // decodificar. Quem entra pede um quadro-chave, e a onda 1 já
                 // atende esse pedido.
-                if let Some(curso) = self.tela.as_mut() {
+                for curso in self.telas.values_mut() {
                     if curso.dono != person {
                         curso.esperando.push(person);
                     }
@@ -329,10 +351,12 @@ impl VoiceRoom {
                 // destruída e em qualquer `?` do meio da sessão. Um
                 // encaminhamento que sobrevivesse a isso seria um fluxo
                 // bombeando para uma sala que já não tem de onde receber.
-                let do_dono = self.tela.as_ref().is_some_and(|curso| curso.dono == person);
-                if do_dono {
-                    self.encerrar_tela(None);
-                } else if let Some(curso) = self.tela.as_mut() {
+                if self.telas.contains_key(&person) {
+                    self.encerrar_tela(person, None);
+                }
+                // E sai de espectadora das outras, que continuam de pé: a saída
+                // de quem assiste não derruba transmissão nenhuma.
+                for curso in self.telas.values_mut() {
                     curso.canos.remove(&person);
                     curso.esperando.retain(|quem| *quem != person);
                 }
@@ -349,8 +373,8 @@ impl VoiceRoom {
             } => self.tela_abriu(from, screen, abertura, fim),
             VoiceRoomCommand::TelaBytes { from, bytes } => self.tela_bytes(from, &bytes),
             VoiceRoomCommand::TelaFechou { from } => {
-                if self.tela.as_ref().is_some_and(|curso| curso.dono == from) {
-                    self.encerrar_tela(None);
+                if self.telas.contains_key(&from) {
+                    self.encerrar_tela(from, None);
                 }
             }
         }
@@ -366,7 +390,22 @@ impl VoiceRoom {
         self.members.len().saturating_sub(1)
     }
 
-    /// Refaz a conta do §5.1 depois de N mudar, e para se ela não fecha.
+    /// Quantas cópias este servidor está subindo agora, somadas.
+    ///
+    /// **A conta que o §5.1 divide, e ela é de cópias e não de espectadores.**
+    /// Com uma transmissão as duas coincidem; com duas, não: quem hospeda manda
+    /// uma cópia por espectador **de cada** transmissão, e é a soma que sai pelo
+    /// cano dele.
+    ///
+    /// Contadas dos canos ligados, e não de `transmissões × membros`: quem não
+    /// está assistindo não tem cano, e uma cópia que ninguém recebe não ocupa
+    /// subida nenhuma.
+    #[must_use]
+    fn copias(&self) -> usize {
+        self.telas.values().map(EmCurso::recebem).sum()
+    }
+
+    /// Refaz a conta do §5.1 depois de N mudar, e para as que não cabem.
     ///
     /// **Onde o número que só o encaminhador sabe é aplicado.** A subida deste
     /// servidor é `N × teto`, então cada pessoa que entra na sala encolhe o teto
@@ -376,11 +415,26 @@ impl VoiceRoom {
     /// por causa da tela, e essa é a única coisa que a spec chama de produto
     /// quebrado.
     fn reconferir_o_teto(&mut self) {
-        if self.tela.is_none() {
+        if self.telas.is_empty() {
             return;
         }
-        if crate::tela::teto_do_hospedeiro(self.caminho_bps, self.espectadores()).is_none() {
-            self.encerrar_tela(Some(FimDaTela::AlemDoQueOHospedeiroCarrega));
+        if crate::tela::teto_do_hospedeiro(self.caminho_bps, self.copias()).is_none() {
+            // **A última a entrar é a primeira a sair.**
+            //
+            // Quando o cano não carrega mais todas, alguma tem de parar, e
+            // derrubar a mais antiga puniria quem estava lá primeiro por alguém
+            // ter chegado depois. Encerrar só uma, e reconferir: pode ser que
+            // com uma a menos as outras caibam, e derrubar todas de uma vez
+            // seria apagar a sala inteira por causa de uma pessoa.
+            let ultima = self
+                .telas
+                .values()
+                .max_by_key(|curso| curso.screen.0)
+                .map(|curso| curso.dono);
+            if let Some(dono) = ultima {
+                self.encerrar_tela(dono, Some(FimDaTela::AlemDoQueOHospedeiroCarrega));
+            }
+            self.reconferir_o_teto();
             return;
         }
         // O mesmo instante, e por isso está aqui e não ao lado de
@@ -395,18 +449,22 @@ impl VoiceRoom {
 
     /// Põe o N desta sala no barramento, se há transmissão e há quem ouça.
     fn anunciar_espectadores(&self) {
-        let (Some(curso), Some(eventos)) = (self.tela.as_ref(), self.eventos.as_ref()) else {
+        let Some(eventos) = self.eventos.as_ref() else {
             return;
         };
-        let _ = eventos.send(Event::ScreenViewers {
-            voice_room: self.id,
-            screen: curso.screen,
-            // Um servidor é dimensionado em cinquenta pessoas
-            // (`specs/04-servidor-seele.md`), então isto nunca satura; saturar
-            // ainda assim é melhor que dar a volta, porque um N pequeno demais
-            // devolveria um teto grande demais.
-            quantos: u32::try_from(self.espectadores()).unwrap_or(u32::MAX),
-        });
+        // Um aviso por transmissão: o N de cada uma é o mesmo hoje, e será
+        // diferente no dia em que cada pessoa escolher o que assiste.
+        for curso in self.telas.values() {
+            let _ = eventos.send(Event::ScreenViewers {
+                voice_room: self.id,
+                screen: curso.screen,
+                // Um servidor é dimensionado em cinquenta pessoas
+                // (`specs/04-servidor-seele.md`), então isto nunca satura; saturar
+                // ainda assim é melhor que dar a volta, porque um N pequeno demais
+                // devolveria um teto grande demais.
+                quantos: u32::try_from(curso.recebem()).unwrap_or(u32::MAX),
+            });
+        }
     }
 
     /// Abre a transmissão e liga nela todo mundo que já está na sala.
@@ -431,25 +489,34 @@ impl VoiceRoom {
         }
         // Uma por sala (§6 item 3). A corrida já foi decidida no controle; isto
         // é a parede que não depende de o cliente ter respeitado a resposta.
-        if self.tela.is_some() {
+        if self.telas.contains_key(&from) {
+            // A mesma pessoa abrindo de novo. A corrida já foi decidida no
+            // controle; isto é a parede que não depende de o cliente ter
+            // respeitado a resposta.
             self.drops.tela_ja_tomada += 1;
             return;
         }
-        if crate::tela::teto_do_hospedeiro(self.caminho_bps, self.members.len().saturating_sub(1))
-            .is_none()
-        {
+        // **O teto é conferido com as cópias que esta transmissão vai somar**, e
+        // não com as que já existem: aceitar primeiro e descobrir depois deixaria
+        // a sala com uma transmissão a mais por um instante — e o instante é o
+        // suficiente para todas picotarem.
+        let depois = self.copias() + self.members.len().saturating_sub(1);
+        if crate::tela::teto_do_hospedeiro(self.caminho_bps, depois).is_none() {
             let _ = fim.try_send(FimDaTela::AlemDoQueOHospedeiroCarrega);
             return;
         }
-        self.tela = Some(EmCurso {
-            dono: from,
-            screen,
-            abertura,
-            enquadramento: Enquadramento::novo(),
-            canos: HashMap::new(),
-            esperando: Vec::new(),
-            fim,
-        });
+        self.telas.insert(
+            from,
+            EmCurso {
+                dono: from,
+                screen,
+                abertura,
+                enquadramento: Enquadramento::novo(),
+                canos: HashMap::new(),
+                esperando: Vec::new(),
+                fim,
+            },
+        );
         // Quem já está na sala entra do primeiro byte: o fluxo ainda não tem
         // byte nenhum, então não há passo a acertar.
         let ja_estao: Vec<PersonId> = self
@@ -458,7 +525,7 @@ impl VoiceRoom {
             .copied()
             .filter(|quem| *quem != from)
             .collect();
-        self.ligar(&ja_estao);
+        self.ligar(from, &ja_estao);
         // A primeira contagem, e ela tem de sair mesmo quando a sala está
         // vazia: quem compartilha para uma sala de uma pessoa precisa saber
         // que N é zero tanto quanto precisa saber que virou seis.
@@ -470,9 +537,9 @@ impl VoiceRoom {
     /// Um cano por pessoa e por transmissão. É o fechamento dele que diz a
     /// `crate::tela::bombear` se o fluxo terminou ou foi cortado, sem uma
     /// segunda bandeira que pudesse discordar do canal.
-    fn ligar(&mut self, quem: &[PersonId]) {
+    fn ligar(&mut self, dono: PersonId, quem: &[PersonId]) {
         let mut cortados = 0_u64;
-        let Some(curso) = self.tela.as_mut() else {
+        let Some(curso) = self.telas.get_mut(&dono) else {
             return;
         };
         for person in quem {
@@ -505,18 +572,14 @@ impl VoiceRoom {
     /// mídia ser um acréscimo. Os cinco bytes que o [`Enquadramento`] lê dizem
     /// onde um quadro acaba, e nada sobre o que há dentro dele.
     fn tela_bytes(&mut self, from: PersonId, bytes: &[u8]) {
-        let Some(curso) = self.tela.as_mut() else {
+        let Some(curso) = self.telas.get_mut(&from) else {
             self.drops.tela_sem_dono += 1;
             return;
         };
-        if curso.dono != from {
-            self.drops.tela_sem_dono += 1;
-            return;
-        }
         let porta = match curso.enquadramento.entrada(bytes) {
             Ok(porta) => porta.filter(|_| !curso.esperando.is_empty()),
             Err(motivo) => {
-                self.encerrar_tela(Some(motivo));
+                self.encerrar_tela(from, Some(motivo));
                 return;
             }
         };
@@ -524,22 +587,22 @@ impl VoiceRoom {
         // que veio antes vai só para quem já assistia, e do quadro-chave em
         // diante todo mundo recebe o mesmo.
         let Some(corte) = porta else {
-            self.escrever(bytes);
+            self.escrever(from, bytes);
             return;
         };
         let entrando = std::mem::take(&mut curso.esperando);
         let (antes, depois) = bytes.split_at(corte.min(bytes.len()));
-        self.escrever(antes);
-        self.ligar(&entrando);
-        self.escrever(depois);
+        self.escrever(from, antes);
+        self.ligar(from, &entrando);
+        self.escrever(from, depois);
     }
 
     /// Escreve o mesmo pedaço em cada cano ligado.
-    fn escrever(&mut self, bytes: &[u8]) {
+    fn escrever(&mut self, dono: PersonId, bytes: &[u8]) {
         if bytes.is_empty() {
             return;
         }
-        let Some(curso) = self.tela.as_mut() else {
+        let Some(curso) = self.telas.get_mut(&dono) else {
             return;
         };
         let mut cortados = Vec::new();
@@ -563,8 +626,8 @@ impl VoiceRoom {
     /// recebe [`Pedaco::Fim`] para que o fluxo dele **termine** em vez de ser
     /// cortado. `Some` é o servidor encerrando por conta própria, e o motivo sobe
     /// para a sessão de quem compartilha, que é quem tem como anunciá-lo.
-    fn encerrar_tela(&mut self, motivo: Option<FimDaTela>) {
-        let Some(curso) = self.tela.take() else {
+    fn encerrar_tela(&mut self, dono: PersonId, motivo: Option<FimDaTela>) {
+        let Some(curso) = self.telas.remove(&dono) else {
             return;
         };
         for cano in curso.canos.values() {
@@ -1273,10 +1336,14 @@ mod tests {
     }
 
     #[test]
-    fn uma_transmissao_por_sala() {
-        // §6 item 3. A corrida é decidida no controle, que responde
-        // `ScreenShareTaken`; isto é a parede que não depende de o cliente ter
-        // respeitado a resposta.
+    fn duas_pessoas_transmitem_e_cada_espectador_recebe_as_duas() {
+        // A regra era uma por sala. Ela caiu porque o argumento que a sustentava
+        // — «duas dobram a subida» — só vale para a perna de quem **hospeda**: a
+        // de quem compartilha não se divide, cada pessoa sobe o próprio fluxo
+        // pelo próprio cano.
+        //
+        // O que limita passou a ser a medida: o teto por cópia tem de continuar
+        // acima do piso, e é `reconferir_o_teto` quem cobra isso.
         let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
         let _alice = espectador(&mut voice_room, 1);
         let _bob = espectador(&mut voice_room, 2);
@@ -1285,10 +1352,29 @@ mod tests {
         let _fim = compartilhar(&mut voice_room, 1, 7);
         let _tambem = compartilhar(&mut voice_room, 2, 8);
 
-        assert_eq!(voice_room.drops().tela_ja_tomada, 1);
-        // E carol continua vendo a primeira, não duas.
+        assert_eq!(voice_room.drops().tela_ja_tomada, 0, "nenhuma foi recusada");
+
+        // Carol recebe convite das duas, e a ordem é a de abertura.
         assert_eq!(carol.try_recv().map(|c| c.screen), Ok(ScreenId(7)));
-        assert!(carol.try_recv().is_err());
+        assert_eq!(carol.try_recv().map(|c| c.screen), Ok(ScreenId(8)));
+        assert!(carol.try_recv().is_err(), "e nada além das duas");
+    }
+
+    #[test]
+    fn a_mesma_pessoa_abrindo_duas_vezes_continua_sendo_uma_transmissao() {
+        // A parede que sobrou, e ela não depende de o cliente ter respeitado a
+        // resposta do controle: uma pessoa manda **uma** tela: mandar duas
+        // dobraria a subida dela sem que ninguém tivesse pedido a segunda.
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _alice = espectador(&mut voice_room, 1);
+        let mut bob = espectador(&mut voice_room, 2);
+
+        let _fim = compartilhar(&mut voice_room, 1, 7);
+        let _de_novo = compartilhar(&mut voice_room, 1, 8);
+
+        assert_eq!(voice_room.drops().tela_ja_tomada, 1);
+        assert_eq!(bob.try_recv().map(|c| c.screen), Ok(ScreenId(7)));
+        assert!(bob.try_recv().is_err(), "a segunda não chegou a existir");
     }
 
     #[test]
