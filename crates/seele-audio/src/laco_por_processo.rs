@@ -174,10 +174,14 @@ fn abrir_cliente(processo: u32) -> ResultadoCom<(IAudioClient, IAudioCaptureClie
 
     // SAFETY: `parametros` e `propriedades` vivem até o fim desta função, e a
     // espera abaixo garante que o COM terminou de lê-los antes disso.
+    // O `IID` numa variável, e não `&raw const IAudioClient::IID`: aquilo é uma
+    // constante associada, e tomar o endereço dela é tomar o de um temporário
+    // que morre na mesma expressão.
+    let identidade: GUID = IAudioClient::IID;
     let operacao = unsafe {
         ActivateAudioInterfaceAsync(
             VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
-            &raw const IAudioClient::IID as *const GUID,
+            &raw const identidade,
             Some(&*propriedades),
             &aviso,
         )
