@@ -388,7 +388,20 @@ $(if ($instaladores.Count -eq 0) { 'Nenhum: o empacotamento disse que deu certo 
     $Proprio = "target\release\seele-instalador.exe"
     if (Test-Path $Proprio) {
         $NomeProprio = "SEELE_${Versao}_x64-instalador.exe"
-        Copy-Item $Proprio (Join-Path $Destino $NomeProprio) -Force
+        $AlvoProprio = Join-Path $Destino $NomeProprio
+        try {
+            Copy-Item $Proprio $AlvoProprio -Force -ErrorAction Stop
+        }
+        catch [System.IO.IOException] {
+            # **O arquivo em uso é o caso comum aqui, e o despejo de exceção não
+            # o diz.** Quem empacota acabou de testar o instalador da execução
+            # anterior; enquanto ele estiver aberto, o Windows não deixa
+            # sobrescrevê-lo — e o que aparecia era um `IOException` com um til
+            # apontando para a linha do `Copy-Item`.
+            throw "não substituí $AlvoProprio porque ele está em uso. " +
+                  "Feche o instalador que está aberto (ele é o arquivo de uma " +
+                  "execução anterior) e rode de novo — tudo o mais já está pronto."
+        }
         Write-Host "→ instalador próprio: $NomeProprio" -ForegroundColor Cyan
     }
 
