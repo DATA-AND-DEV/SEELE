@@ -142,9 +142,17 @@ pub struct CapturaComSom {
 /// monitor quer dizer.
 enum SomDaTela {
     /// A árvore de processos de uma janela.
+    ///
+    /// Pequena: o que ela guarda é um anel e uma bandeira — o WASAPI mora na
+    /// linha dela.
     DoPrograma(seele_audio::laco_por_processo::SomDoPrograma),
     /// Tudo o que a máquina toca.
-    DaMaquina(seele_audio::laco::CapturaDaSaida),
+    ///
+    /// **No `Box` por causa do tamanho, e não por gosto.** Ela carrega o fluxo
+    /// do `cpal` inteiro; ao lado da outra, a diferença fazia toda `SomDaTela`
+    /// ocupar o tamanho da maior — inclusive nos casos em que a menor está
+    /// dentro.
+    DaMaquina(Box<seele_audio::laco::CapturaDaSaida>),
 }
 
 /// `Fonte` tem de ser `Send`: ela nasce na thread que abre a captura e vive na
@@ -1072,6 +1080,29 @@ impl Compartilhamento {
     }
 }
 
+/// O som da máquina inteira, que é o que um monitor compartilhado leva.
+///
+/// **`info!` e não `debug!` no caminho bom.** A pergunta que este log responde é
+/// «a transmissão saiu muda por quê», e ela é feita depois do fato, por alguém
+/// lendo o arquivo: um caminho bom silencioso não distingue «abriu e não veio
+/// som» de «nem abriu».
+#[cfg(target_os = "windows")]
+fn som_da_maquina() -> Option<SomDaTela> {
+    match seele_audio::laco::CapturaDaSaida::abrir(None) {
+        Ok(captura) => {
+            tracing::info!(
+                taxa = captura.taxa(),
+                "o som desta máquina abriu para a transmissão"
+            );
+            Some(SomDaTela::DaMaquina(Box::new(captura)))
+        }
+        Err(erro) => {
+            tracing::warn!(%erro, "não abri o som desta máquina; a transmissão sai muda");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1376,28 +1407,5 @@ mod tests {
             erro,
             ErroDeCompartilhamento::Parado(MotivoDeParada::AbaixoDoPiso)
         ));
-    }
-}
-
-/// O som da máquina inteira, que é o que um monitor compartilhado leva.
-///
-/// **`info!` e não `debug!` no caminho bom.** A pergunta que este log responde é
-/// «a transmissão saiu muda por quê», e ela é feita depois do fato, por alguém
-/// lendo o arquivo: um caminho bom silencioso não distingue «abriu e não veio
-/// som» de «nem abriu».
-#[cfg(target_os = "windows")]
-fn som_da_maquina() -> Option<SomDaTela> {
-    match seele_audio::laco::CapturaDaSaida::abrir(None) {
-        Ok(captura) => {
-            tracing::info!(
-                taxa = captura.taxa(),
-                "o som desta máquina abriu para a transmissão"
-            );
-            Some(SomDaTela::DaMaquina(captura))
-        }
-        Err(erro) => {
-            tracing::warn!(%erro, "não abri o som desta máquina; a transmissão sai muda");
-            None
-        }
     }
 }
