@@ -1757,6 +1757,19 @@ fn pedir_quadro_chave(session: State<'_, Session>, tela: u32) -> Result<(), Conn
     session.connection()?.pedir_quadro_chave(tela)
 }
 
+/// Passa a receber a imagem de uma transmissão, ou para de receber.
+///
+/// **Assistir é um pedido**, e é a tela quem decide o que está aberto. Enquanto
+/// havia uma transmissão por sala, ela chegava sozinha — o certo, porque ninguém
+/// quer clicar para ver a única coisa que está acontecendo. Com várias, cada
+/// imagem aberta custa uma cópia na descida desta máquina e um decodificador na
+/// CPU dela, e nenhuma das duas entra na conta do teto, que só mede a subida de
+/// quem hospeda.
+#[tauri::command]
+fn assistir(session: State<'_, Session>, tela: u32, quero: bool) -> Result<(), ConnectionError> {
+    session.connection()?.assistir(tela, quero)
+}
+
 // `ajustar_limites_da_tela` saiu daqui.
 //
 // Ela mudava os tetos no meio da transmissão sem cortá-la — comando próprio e
@@ -3039,6 +3052,7 @@ fn main() {
             compartilhar_tela,
             parar_de_compartilhar,
             pedir_quadro_chave,
+            assistir,
             dispensar_aviso,
             permissao_de_microfone,
             abrir_ajustes_do_microfone,

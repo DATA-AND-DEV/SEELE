@@ -623,6 +623,11 @@ enum Command {
     RequestKeyFrame {
         tela: seele_core::ScreenId,
     },
+    /// Passar a receber a imagem de uma transmissão, ou parar.
+    Assistir {
+        tela: seele_core::ScreenId,
+        quero: bool,
+    },
     Shutdown,
 }
 
@@ -1748,6 +1753,23 @@ impl Connection {
     pub fn pedir_quadro_chave(&self, tela: u32) -> Result<(), ConnectionError> {
         self.command(Command::RequestKeyFrame {
             tela: seele_core::ScreenId(tela),
+        })
+    }
+
+    /// Passa a receber a imagem de uma transmissão, ou para de receber.
+    ///
+    /// **Assistir é um pedido.** Enquanto havia uma transmissão por sala, ela era
+    /// empurrada para todo mundo; com várias, empurrar todas para todos faria cada
+    /// máquina baixar uma cópia de cada e abrir um decodificador para cada — e nem
+    /// a descida nem a CPU de quem assiste entram na conta do teto.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] sem sessão.
+    pub fn assistir(&self, tela: u32, quero: bool) -> Result<(), ConnectionError> {
+        self.command(Command::Assistir {
+            tela: seele_core::ScreenId(tela),
+            quero,
         })
     }
 
@@ -3779,6 +3801,14 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         Command::AdjustScreenLimits { limites } => {
             if client.ajustar_limites_da_tela(limites).await.is_err() {
                 return false;
+            }
+        }
+        Command::Assistir { tela, quero } => {
+            // Falhar aqui não derruba a sessão, pela mesma razão do
+            // quadro-chave: sem o pedido a imagem não aparece, e com a sessão
+            // fechada não aparece nunca mais.
+            if let Err(erro) = client.assistir(tela, quero).await {
+                tracing::debug!(%erro, quero, "não consegui mudar o que assisto");
             }
         }
         Command::RequestKeyFrame { tela } => {

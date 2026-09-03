@@ -1244,6 +1244,41 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::RequestKeyFrame { screen }).await
     }
 
+    /// Pede para receber a imagem de uma transmissão.
+    ///
+    /// **Assistir é um pedido, e não o que acontece sozinho.** Enquanto havia uma
+    /// transmissão por sala, o servidor a empurrava para todo mundo — o certo,
+    /// porque ninguém quer clicar para ver a única coisa que está acontecendo.
+    /// Com várias, empurrar todas para todos cobra o que ninguém pediu: cada
+    /// máquina baixa uma cópia de cada e abre um decodificador para cada, e nem a
+    /// descida nem a CPU de quem assiste entram na conta do teto, que só mede a
+    /// subida de quem hospeda.
+    ///
+    /// O servidor recusa em silêncio uma tela que não seja da sala em que esta
+    /// conexão está — é a mesma conferência do quadro-chave, e a razão dela é
+    /// impedir que alguém assine a transmissão de outra sala.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn watch_screen(&mut self, screen: ScreenId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::WatchScreen { screen }).await
+    }
+
+    /// Para de receber a imagem de uma transmissão.
+    ///
+    /// Fechar o fluxo diria quase o mesmo, e não serve pela razão que
+    /// [`Self::stop_screen_share`] já dá: um verbo que só existe como ausência
+    /// não distingue «fechei a janela» de «minha conexão caiu», e o servidor
+    /// precisa da diferença para devolver o teto a quem ficou.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn unwatch_screen(&mut self, screen: ScreenId) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::UnwatchScreen { screen }).await
+    }
+
     /// Abre o fluxo de vídeo desta transmissão.
     ///
     /// Na conexão que já existe, e num fluxo unidirecional — as duas metades do

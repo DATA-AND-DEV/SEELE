@@ -325,6 +325,17 @@ enum Comando {
     /// De quem **recebe**, e é o que faz alguém que entra no meio de uma
     /// transmissão ver alguma coisa: sem ele chegam só diferenças de um quadro
     /// que nunca se viu, e o decodificador as descarta.
+    /// Pede para receber, ou parar de receber, a imagem de uma transmissão.
+    ///
+    /// **Um comando com uma bandeira, e não dois comandos.** Os dois lados
+    /// carregam a mesma coisa — qual tela — e diferem numa palavra; separá-los
+    /// duplicaria o caminho inteiro até o `Client` para trocar um verbo no fim.
+    Assistir {
+        /// Qual transmissão.
+        tela: ScreenId,
+        /// `true` para receber, `false` para parar.
+        quero: bool,
+    },
     PedirQuadroChave {
         /// Qual transmissão. O servidor confere se ela é mesmo a da sala.
         tela: ScreenId,
@@ -1652,6 +1663,15 @@ impl Enlace {
         self.mandar(Comando::PedirQuadroChave { tela }).await
     }
 
+    /// Passa a receber a imagem desta transmissão, ou para de receber.
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a conexão já foi embora.
+    pub async fn assistir(&self, tela: ScreenId, quero: bool) -> Result<(), Fechado> {
+        self.mandar(Comando::Assistir { tela, quero }).await
+    }
+
     /// Encerra por vontade própria.
     pub async fn sair(&self) {
         let _ = self.mandar(Comando::Sair).await;
@@ -2248,6 +2268,13 @@ impl Motor {
                 cliente.stop_screen_share().await
             }
 
+            Comando::Assistir { tela, quero } => {
+                if quero {
+                    cliente.watch_screen(tela).await
+                } else {
+                    cliente.unwatch_screen(tela).await
+                }
+            }
             Comando::PedirQuadroChave { tela } => cliente.request_key_frame(tela).await,
 
             Comando::Sair => return,
