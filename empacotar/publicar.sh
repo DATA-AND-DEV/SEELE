@@ -1673,8 +1673,39 @@ if [ "$ESTADO" -ne 0 ]; then
     exit 1
 fi
 
-if [ -z "$(find "$RAIZ/entrega" -type f 2>/dev/null)" ]; then
-    morrer "entrega/ está vazia; não há o que publicar."
+# **O guarda tem que contar o que a etapa seguinte vai subir, e nada mais.**
+#
+# Ele contava arquivos com `find -type f`, e um `.DS_Store` é um arquivo. Uma
+# `entrega/` com nada dentro além do lixo que o Finder deixa passava por aqui
+# inteira, e a publicação morria três passos adiante em
+# «`shasum: *: No such file or directory`» — que é o `*` que não casou com nada,
+# porque glob de shell não pega ponto-arquivo. Duas contagens diferentes da mesma
+# pasta, e quem lê o erro fica sabendo do glob antes de saber da pasta vazia.
+#
+# Agora conta-se com o **mesmo glob** que o laço de envio usa. Se ele não casar
+# aqui, não casaria lá.
+PACOTES=0
+for adm_um in "$RAIZ"/entrega/*; do
+    [ -f "$adm_um" ] || continue
+    case "$(basename "$adm_um")" in
+        # Estes dois nascem aqui dentro, depois deste ponto. Contá-los seria
+        # deixar uma sobra de execução anterior fingir que há pacote.
+        SHA256SUMS | latest.json) continue ;;
+    esac
+    PACOTES=$((PACOTES + 1))
+done
+
+if [ "$PACOTES" -eq 0 ]; then
+    morrer "não há nenhum pacote em entrega/, e um release sem pacote não" \
+        "atualiza ninguém." \
+        "" \
+        "Nenhum sistema foi pedido nesta execução — «--pular» levou os três —," \
+        "então o script contava com pacotes que já estivessem lá. Um" \
+        "«--conferir» anterior limpa entrega/ dos restos de outra versão, e é" \
+        "o caminho mais curto para chegar aqui com a pasta vazia." \
+        "" \
+        "Peça pelo menos um sistema:" \
+        "  $0 $VERSAO --pular linux"
 fi
 
 # =========================================================================

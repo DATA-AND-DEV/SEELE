@@ -2335,3 +2335,47 @@ fn um_ganho_de_desempenho_e_mudanca_que_a_pessoa_sente() {
         "um `perf` de produto lidera, como um `feat`:\n{texto}"
     );
 }
+
+#[test]
+fn uma_entrega_com_so_o_lixo_do_finder_para_antes_de_publicar() {
+    // **Isto aconteceu, e o guarda que devia pegá-lo estava lá.**
+    //
+    // Ele contava arquivos com `find -type f`, e um `.DS_Store` é um arquivo.
+    // Uma `entrega/` sem nenhum pacote passava inteira por ele, e a publicação
+    // morria três passos adiante em «`shasum: *: No such file or directory`» —
+    // o `*` que não casou com nada, porque glob de shell não pega ponto-arquivo.
+    // Duas contagens diferentes da mesma pasta: quem lia o erro ficava sabendo
+    // do glob antes de saber da pasta vazia.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    std::fs::create_dir_all(bancada.repo.join("entrega")).expect("entrega/ tem que existir");
+    escrever(&bancada.repo.join("entrega/.DS_Store"), "lixo\n", false);
+
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria", "--pular", "macos,windows,linux"],
+        &[],
+    );
+
+    assert_ne!(
+        saida.estado, 0,
+        "um release sem pacote nenhum não pode ser criado:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("não há nenhum pacote em entrega/"),
+        "a recusa tem que falar da pasta, que é o problema:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("shasum"),
+        "o nome da ferramenta que tropeçou não é o assunto, e falar dele primeiro \
+         manda quem lê investigar a ferramenta errada:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.diario.is_empty() || !saida.diario.contains("/releases\n"),
+        "e nada pode ter ido ao GitHub antes da recusa:\n{}",
+        saida.diario
+    );
+}
