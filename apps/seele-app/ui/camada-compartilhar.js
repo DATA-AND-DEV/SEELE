@@ -58,6 +58,25 @@ let focoAntesDeCompartilhar = null;
 let fonteArmada = null;
 
 /**
+ * Qual fonte está no ar agora, quando a transmissão é desta pessoa.
+ *
+ * **O retrato não sabe.** `TelaEmCurso` diz de quem é, que altura e que taxa
+ * estão saindo, e não diz **o quê** está sendo mostrado — o servidor encaminha
+ * bytes e nunca soube que monitor eles são. Quem sabe é esta casca, porque foi
+ * ela que escolheu.
+ *
+ * Serve para uma coisa só: não deixar `TROCAR` recomeçar a transmissão para a
+ * mesma fonte. Recomeçar corta a imagem de quem assiste por um instante, e
+ * fazer isso para chegar onde já se estava é o botão trabalhando contra quem o
+ * apertou.
+ *
+ * Não sobrevive a uma queda, e não precisa: uma transmissão não volta sozinha
+ * depois de uma reconexão — é decisão do `Motor::lembrar`, e pôr a tela de
+ * alguém no ar sem que ninguém tenha apertado nada seria pior.
+ */
+let fonteEmCurso = null;
+
+/**
  * A última resposta do sistema sobre gravar a tela, ou `null` antes da primeira.
  *
  * Guardada aqui e lida pela chamada porque é ela que decide se o botão
@@ -316,26 +335,50 @@ function desenharBotoesDeTela(snapshot) {
   const minha = Boolean(tela && tela.e_minha);
   const deOutro = Boolean(tela) && !minha;
 
-  // **`COMPARTILHAR` some enquanto a transmissão é sua.**
+  // **O mesmo botão, e ele vira `TROCAR` enquanto a transmissão é sua.**
   //
-  // Ele dizia `APLICAR OS LIMITES` nesse caso, porque havia limites a aplicar
-  // sem recomeçar a transmissão. Os controles saíram, e um botão que aplica
-  // quatro valores fixos aos mesmos quatro valores fixos é um botão que não faz
-  // nada. O que resta a fazer numa transmissão própria é pará-la, e `PARAR`
-  // está logo ao lado.
+  // Ele sumia. O comentário que estava aqui dizia que «trocar de monitor no
+  // meio continua sendo parar e começar de novo, que é o que sempre foi» — e
+  // era, mas isso descrevia o que a pessoa tinha de fazer, não o que a caixa
+  // oferecia: com o botão escondido, o único caminho era `PARAR`, fechar,
+  // reabrir e escolher de novo. Pedido assim: «quando estiver compartilhando o
+  // modal de compartilhamento deve permitir a troca de janela. Hoje só permite
+  // parar a transmissão.»
   //
-  // Trocar de monitor no meio continua sendo parar e começar de novo, que é o
-  // que sempre foi: `compartilhar_tela` recomeça o fluxo, e a caixa fecha
-  // quando ele começa.
+  // Continua sendo parar e começar por baixo, porque o servidor recusa uma
+  // segunda abertura da mesma pessoa — `tela_abriu` tem essa parede, e ela é o
+  // que impede uma pessoa de ocupar duas vagas. O que muda é que os dois passos
+  // são um gesto.
+  //
+  // O mesmo botão e não um terceiro: a fileira tem dois lugares e o que se faz
+  // com uma fonte escolhida é sempre o mesmo — mandá-la. Que isso comece ou
+  // troque é estado, e o rótulo diz qual.
+  // A transmissão acabou por fora — o servidor a encerrou, a sala estourou o
+  // teto, a conexão caiu. A fonte de agora deixa de existir junto, ou `TROCAR`
+  // continuaria recusando a única que a pessoa quer mandar.
+  if (!minha) {
+    fonteEmCurso = null;
+  }
+
   const comecar = $("compartilhar-comecar");
-  comecar.hidden = minha;
-  comecar.textContent = "COMPARTILHAR";
-  comecar.disabled = !snapshot || deOutro || fonteArmada === null;
+  const mesmaFonte = minha && fonteArmada !== null && fonteArmada === fonteEmCurso;
+  // **O estado mora no botão**, e é o mesmo idioma do rodapé do operador: o
+  // ouvinte é registrado uma vez, no carregamento, e o que decide o que ele faz
+  // é o que este desenho escreveu. Uma variável de módulo ficaria velha sempre
+  // que outra coisa mudasse a transmissão, e há caminhos que mudam.
+  comecar.dataset.modo = minha ? "trocar" : "comecar";
+  comecar.hidden = false;
+  comecar.textContent = minha ? "TROCAR" : "COMPARTILHAR";
+  comecar.disabled = !snapshot || deOutro || fonteArmada === null || mesmaFonte;
   comecar.title = deOutro
     ? FRASES.ScreenShareTaken
-    : !minha && fonteArmada === null
-      ? "escolha um monitor ou uma janela na lista acima"
-      : "";
+    : mesmaFonte
+      ? "é esta que já está no ar; escolha outra para trocar"
+      : fonteArmada === null
+        ? "escolha um monitor ou uma janela na lista acima"
+        : minha
+          ? "a transmissão de agora para, e a nova começa no lugar dela"
+          : "";
 
   $("compartilhar-parar").hidden = !minha;
 
@@ -520,10 +563,22 @@ $("compartilhar-baixar").addEventListener("click", async () => {
 $("compartilhar-comecar").addEventListener("click", async () => {
   const limites = limitesEscolhidos();
   erroDeTela = null;
+  const trocando = $("compartilhar-comecar").dataset.modo === "trocar";
   try {
-    // O botão só existe quando não há transmissão própria — ver
-    // `desenharBotoesDeTela` —, então este caminho é sempre o de começar.
+    // **A antiga para antes de a nova começar, e a ordem é obrigatória.**
+    //
+    // O servidor recusa uma segunda abertura da mesma pessoa: `tela_abriu` tem
+    // essa parede, e é ela que impede alguém de ocupar duas vagas da sala. Sem
+    // parar antes, `TROCAR` receberia a recusa e a caixa mostraria «já há uma
+    // transmissão sua» — que é verdade e não é o que a pessoa pediu.
+    //
+    // Aguardado, e não disparado: começar antes de a parada chegar ao servidor
+    // é a mesma corrida por outro caminho.
+    if (trocando) {
+      await invoke("parar_de_compartilhar");
+    }
     await invoke("compartilhar_tela", { fonte: fonteArmada, limites });
+    fonteEmCurso = fonteArmada;
     {
       // **Aqui havia um `registrarEventoDaChamada`, e ele não existe mais.**
       //
@@ -562,6 +617,7 @@ $("compartilhar-parar").addEventListener("click", async () => {
   erroDeTela = null;
   try {
     await invoke("parar_de_compartilhar");
+    fonteEmCurso = null;
     // Sem registro de eventos aqui também — ver a nota em `compartilhar-comecar`.
   } catch (falha) {
     mostrarErroDeTela(falha);

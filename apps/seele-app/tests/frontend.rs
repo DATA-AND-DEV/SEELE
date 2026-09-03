@@ -10037,3 +10037,83 @@ fn o_bilhete_da_atualizacao_e_escrito_antes_de_o_processo_poder_morrer() {
         "o bilhete sobrevive à leitura, e a frase passa a aparecer para sempre:\n{le}"
     );
 }
+
+#[test]
+fn a_caixa_de_compartilhar_troca_de_janela_sem_parar_antes() {
+    // Pedido: «quando estiver compartilhando o modal de compartilhamento deve
+    // permitir a troca de janela. Hoje só permite parar a transmissão.»
+    //
+    // O botão sumia enquanto a transmissão era da própria pessoa. O comentário
+    // que justificava isso dizia que «trocar de monitor no meio continua sendo
+    // parar e começar de novo, que é o que sempre foi» — e era, mas isso
+    // descrevia o que a pessoa tinha de fazer, não o que a caixa oferecia: o
+    // único caminho era PARAR, fechar, reabrir e escolher de novo.
+    let caixa = without_comments(&read("ui/camada-compartilhar.js"));
+
+    assert!(
+        !caixa.contains("comecar.hidden = minha"),
+        "o botão voltou a sumir enquanto a transmissão é sua, e com ele o único \
+         jeito de trocar de janela"
+    );
+    assert!(
+        caixa.contains("\"TROCAR\""),
+        "o botão não diz o que faz quando já há transmissão sua"
+    );
+
+    // **Para antes de começar, e aguardado.** O servidor recusa uma segunda
+    // abertura da mesma pessoa — `tela_abriu` tem essa parede, e é ela que
+    // impede alguém de ocupar duas vagas da sala. Começar antes de a parada
+    // chegar lá é a mesma corrida por outro caminho.
+    let aperto = caixa
+        .split("$(\"compartilhar-comecar\").addEventListener")
+        .nth(1)
+        .and_then(|resto| resto.split("\n});").next())
+        .unwrap_or_default()
+        .to_owned();
+
+    let para = aperto.find("await invoke(\"parar_de_compartilhar\")");
+    let comeca = aperto.find("await invoke(\"compartilhar_tela\"");
+    assert!(
+        para.is_some() && comeca.is_some(),
+        "trocar deixou de parar a transmissão de agora:\n{aperto}"
+    );
+    assert!(
+        para < comeca,
+        "a nova começa antes de a antiga parar, e o servidor recusa a segunda \
+         abertura da mesma pessoa:\n{aperto}"
+    );
+}
+
+#[test]
+fn trocar_para_a_mesma_fonte_nao_corta_a_imagem_de_quem_assiste() {
+    // Recomeçar corta a imagem de quem está vendo por um instante. Fazer isso
+    // para chegar onde já se estava é o botão trabalhando contra quem o
+    // apertou — e o retrato não ajuda: `TelaEmCurso` não diz **o quê** está
+    // sendo mostrado, porque o servidor encaminha bytes e nunca soube que
+    // monitor eles são. Quem sabe é a casca, que escolheu.
+    let caixa = without_comments(&read("ui/camada-compartilhar.js"));
+
+    assert!(
+        caixa.contains("let fonteEmCurso"),
+        "a casca deixou de lembrar qual fonte está no ar, e `TROCAR` passa a \
+         recomeçar a transmissão para ela mesma"
+    );
+    assert!(
+        caixa.contains("fonteArmada === fonteEmCurso"),
+        "nada compara a fonte escolhida com a que já está saindo"
+    );
+
+    // E ela é esquecida quando a transmissão acaba por fora — o servidor a
+    // encerrou, o teto estourou, a conexão caiu. Sem isso `TROCAR` continuaria
+    // recusando a única fonte que a pessoa quer mandar.
+    let desenho = caixa
+        .split("function desenharBotoesDeTela")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        desenho.contains("fonteEmCurso = null"),
+        "a fonte de agora sobrevive ao fim da transmissão:\n{desenho}"
+    );
+}

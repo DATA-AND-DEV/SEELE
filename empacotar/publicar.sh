@@ -1741,6 +1741,24 @@ else
 fi
 
 {
+    # **O aviso desta versão, e só dela.**
+    #
+    # `NOTAS-DE-RELEASE.md` é o texto que sai em toda página — onde baixar, como
+    # conferir. O que faltava era o oposto: uma frase que vale para **uma**
+    # versão e some na seguinte.
+    #
+    # Sem isso, a única forma de avisar era editar o arquivo permanente e lembrar
+    # de desfazer depois — e um aviso que sobrevive à versão que ele descreve é
+    # pior que nenhum: ele manda fazer algo que já não é preciso.
+    #
+    # Vem **antes** de tudo, inclusive de «o que mudou». Um aviso é instrução,
+    # e instrução que aparece depois da lista de novidades chega depois de a
+    # pessoa já ter clicado em baixar.
+    if [ -f "$RAIZ/empacotar/notas/$VERSAO.md" ]; then
+        cat "$RAIZ/empacotar/notas/$VERSAO.md"
+        printf '\n---\n\n'
+    fi
+
     if [ -n "$FAIXA" ]; then
         # Qual faixa é esta. Sem a linha, «o que mudou» não diz **desde quando**,
         # e quem pulou uma versão fica sem saber se o que está lendo cobre a
