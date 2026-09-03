@@ -1910,6 +1910,60 @@ print(json.load(open(sys.argv[1], encoding="utf-8")).get("html_url", ""))' "$COR
 done
 
 # =========================================================================
+# A tag, no repositório do **código**.
+# =========================================================================
+#
+# **Ela é a memória de qual commit virou qual versão, e não havia nenhuma.**
+#
+# O release nascia rascunho em `DATA-AND-DEV/SEELE-RELEASES`, e um rascunho do
+# GitHub não cria tag. Publicá-lo criava a tag **lá**, apontando para o `main`
+# daquele repositório — que não é este histórico e não serve como ponta de faixa.
+#
+# O preço apareceu no changelog. `tag_anterior` lê `git tag --list` daqui, então
+# depois da 0.10.0 ele respondia sempre `v0.10.0`: a página da 0.10.3 sairia com
+# 55 commits, repetindo tudo que a 0.10.1 e a 0.10.2 já tinham contado. Relatado
+# assim: «você tem errado muito as versões, toma cuidado em escrever changelog
+# errado». Não era descuido de quem escreve — saía sozinho.
+#
+# Aqui e não antes do release: uma tag empurrada antes de a página existir
+# afirmaria uma versão que talvez não suba. Depois, ela descreve o que aconteceu.
+#
+# Anotada e não leve, porque ela carrega o motivo e a data; e no `$COMMIT`, que é
+# o mesmo que o corpo do release nomeia como procedência.
+passo "marcando v$VERSAO no repositório do código"
+TAG_ATUAL=$(git -C "$RAIZ" rev-list -n 1 "v$VERSAO" 2>/dev/null || true)
+if [ -n "$TAG_ATUAL" ] && [ "$TAG_ATUAL" != "$COMMIT" ]; then
+    # Repetir a publicação é normal; repeti-la de outro commit não é. Uma tag que
+    # muda de commit apaga a resposta a «de onde saiu aquela versão», que é a
+    # única coisa que ela existe para responder.
+    morrer "v$VERSAO já está marcada aqui, em $TAG_ATUAL, e este release saiu de" \
+        "$COMMIT." \
+        "" \
+        "Uma versão sai de um commit só. Se a marca é que está errada:" \
+        "  git tag -d v$VERSAO && git push origin :refs/tags/v$VERSAO"
+fi
+if [ -z "$TAG_ATUAL" ]; then
+    if git -C "$RAIZ" tag -a "v$VERSAO" "$COMMIT" -m "SEELE $VERSAO"; then
+        if git -C "$RAIZ" push -q origin "v$VERSAO"; then
+            echo "     v$VERSAO → $COMMIT, aqui e no origin"
+        else
+            # Não é fatal: a página está de pé e os pacotes subiram. É alto
+            # porque a próxima publicação lê esta lista para saber onde a faixa
+            # do changelog começa, e sem a marca ela recomeça na versão errada.
+            aviso "a tag v$VERSAO ficou só nesta máquina." \
+                "Empurre-a, ou o changelog da próxima versão vai repetir esta:" \
+                "  git push origin v$VERSAO"
+        fi
+    else
+        aviso "não consegui marcar v$VERSAO em $COMMIT." \
+            "Faça à mão, ou o changelog da próxima versão vai repetir esta:" \
+            "  git tag -a v$VERSAO $COMMIT -m \"SEELE $VERSAO\" && git push origin v$VERSAO"
+    fi
+else
+    echo "     v$VERSAO já estava marcada em $COMMIT"
+fi
+
+# =========================================================================
 # O que ficou faltando, dito por extenso.
 # =========================================================================
 

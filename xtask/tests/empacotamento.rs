@@ -2379,3 +2379,53 @@ fn uma_entrega_com_so_o_lixo_do_finder_para_antes_de_publicar() {
         saida.diario
     );
 }
+
+#[test]
+fn a_versao_publicada_deixa_marca_no_repositorio_do_codigo() {
+    // **Sem a tag, o changelog da versão seguinte repete esta.**
+    //
+    // O release nasce rascunho em `DATA-AND-DEV/SEELE-RELEASES`, e um rascunho
+    // do GitHub não cria tag. Publicá-lo cria a tag **lá**, apontando para o
+    // `main` daquele repositório — que não é o histórico do código e não serve
+    // como ponta de faixa.
+    //
+    // O efeito medido em 03/09/2026: a única tag `v0.10*` que existia era a
+    // `v0.10.0`, e `tag_anterior` para uma 0.10.3 respondia `v0.10.0`. A página
+    // sairia com 55 commits, repetindo tudo que a 0.10.1 e a 0.10.2 já tinham
+    // contado. Relatado assim: «você tem errado muito as versões, toma cuidado
+    // em escrever changelog errado» — e não era descuido de quem escreve: saía
+    // sozinho.
+    let texto = std::fs::read_to_string(publicar()).expect("o orquestrador tem que ser legível");
+
+    assert!(
+        texto.contains("git -C \"$RAIZ\" tag -a \"v$VERSAO\" \"$COMMIT\""),
+        "a publicação deixou de marcar o commit que virou esta versão, e a \
+         faixa do changelog seguinte volta a começar na versão errada"
+    );
+    assert!(
+        texto.contains("push -q origin \"v$VERSAO\""),
+        "a marca fica só na máquina de quem publicou, e a próxima publicação de \
+         outra máquina não a encontra"
+    );
+
+    // E ela é criada **depois** do release. Uma tag empurrada antes afirmaria
+    // uma versão que talvez não suba.
+    let cria_release = texto
+        .find("criando o rascunho de v$VERSAO")
+        .unwrap_or(usize::MAX);
+    let marca = texto
+        .find("marcando v$VERSAO no repositório do código")
+        .unwrap_or(usize::MAX);
+    assert!(
+        cria_release < marca,
+        "a tag é criada antes de a página existir, e passa a afirmar uma versão \
+         que talvez não suba"
+    );
+
+    // Repetir a publicação é normal; repeti-la de outro commit não é. Uma tag
+    // que muda de commit apaga a resposta a «de onde saiu aquela versão».
+    assert!(
+        texto.contains("já está marcada aqui, em $TAG_ATUAL"),
+        "publicar a mesma versão de outro commit deixou de ser recusado"
+    );
+}
