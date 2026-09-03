@@ -607,6 +607,38 @@ async fn handshake(
         // abriria a porta de todo servidor que não usa portaria.
         if let Some(recusa) = recusa_adiada {
             let conhecida = crate::portaria::ja_admitido(&guard, &impressao).unwrap_or(false);
+            // **E quem ainda está na fila continua na fila, com o nome certo.**
+            //
+            // A tela de espera do cliente bate de novo a cada quinze segundos, e
+            // essa batida vai **sem segredo**: o convite é de uso único e
+            // `conectar` não o lembra, porque reenviá-lo seria gastar de novo o
+            // que já foi gasto. Sem esta linha ela parava aqui, e quem estava
+            // esperando permissão recebia «credencial recusada» — resposta sobre
+            // um problema que a pessoa não tem, no meio de uma espera que estava
+            // correndo normalmente.
+            //
+            // Relatado assim: «o portão barra e pede liberação, o host libera, e
+            // no recall ele não reconhece e fica no loop. O usuário precisa sair
+            // da sala de permissão e tentar conectar novamente.» Sair e voltar
+            // funcionava porque a entrada manda o convite de novo, e a batida da
+            // espera não.
+            //
+            // O perdão é estreito: `pedido_pendente` só responde `true` para uma
+            // chave **provada** que já passou pela camada do segredo uma vez —
+            // é o que criou a linha na fila —, e o que ela ganha é continuar
+            // esperando, não entrar. Ver o cabeçalho daquela função.
+            let na_fila =
+                !conhecida && crate::portaria::pedido_pendente(&guard, &impressao).unwrap_or(false);
+            if na_fila {
+                tracing::info!(
+                    %impressao,
+                    "segredo ausente numa batida de quem já espera decisão; segue esperando"
+                );
+                return Err(Refusal {
+                    reason: DisconnectReason::AdmissionPending,
+                    detail: format!("portaria: {impressao} aguarda decisão"),
+                });
+            }
             if !conhecida {
                 return Err(Refusal {
                     reason: DisconnectReason::CredentialRejected,

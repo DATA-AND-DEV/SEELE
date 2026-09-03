@@ -604,3 +604,96 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
     servidor.shutdown();
     Ok(())
 }
+
+/// A sequência exata que o app faz, e não a que é cômoda de escrever num teste.
+///
+/// O relato: «um usuário entra no servidor pela primeira vez, o portão barra e
+/// pede liberação, o host libera, e no recall ele não reconhece e fica no loop.
+/// O usuário precisa sair da sala de permissão e tentar conectar novamente para
+/// conseguir entrar.»
+///
+/// O que o teste vizinho já cobria era aprovar e **reconectar com a senha**. O
+/// app não faz isso: `baterDeNovo` chama `conectar()` sem argumento nenhum, e
+/// `conectar` não lembra o convite de propósito — «um convite de uso único vale
+/// uma vez, e reenviá-lo numa reconexão seria gastar de novo o que já foi
+/// gasto». Então a batida que a tela de espera repete a cada quinze segundos vai
+/// **sem segredo**, e é essa que tem de entrar depois da aprovação.
+#[tokio::test]
+async fn quem_foi_aprovado_entra_na_batida_seguinte_que_vai_sem_segredo() -> Result<()> {
+    use seele_proto::control::DisconnectReason;
+    use seele_server::portaria;
+
+    let pasta = tempfile::tempdir()?;
+    let banco = pasta.path().join("seele.db");
+
+    let token = {
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        portaria::ligar(&mut persistence, true)?;
+        admissao::criar_convite(&mut persistence, "para quem chega pela primeira vez")?
+    };
+
+    let (endereco, _servidor) = subir(&banco).await?;
+
+    // 1. A primeira batida, com o convite no link. É como se chega.
+    let primeira = conectar(
+        endereco,
+        "quem chega",
+        7,
+        Arc::new(MemoryPinStore::new()),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(
+        razao(primeira.err()),
+        DisconnectReason::AdmissionPending,
+        "o portão tem que barrar quem nunca veio, mesmo com convite válido"
+    );
+
+    // 1b. E a batida que a tela repete a cada quinze segundos, **antes** de
+    //     alguém ter liberado. Ela vai sem o convite, porque `conectar` não o
+    //     lembra. O que a pessoa vê nesta hora é o que a tela de espera escreve.
+    let enquanto_espera = conectar(
+        endereco,
+        "quem chega",
+        7,
+        Arc::new(MemoryPinStore::new()),
+        None,
+    )
+    .await;
+    assert_eq!(
+        razao(enquanto_espera.err()),
+        DisconnectReason::AdmissionPending,
+        "quem já tem pedido pendente e bate de novo tem que ouvir «ainda \
+         aguardando», e não «credencial recusada». A tela de espera repete esta \
+         batida sozinha, e uma recusa de credencial no meio de uma espera é a \
+         tela dizendo que o problema é outro — e mandando resolver o que não \
+         está quebrado"
+    );
+
+    // 2. Quem hospeda libera, pela tela.
+    {
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        portaria::decidir(&mut persistence, &impressao_de(7), true)?;
+    }
+
+    // 3. E a batida seguinte vai **sem segredo**, que é o que a tela de espera
+    //    manda. Aqui é onde o laço se fecha ou se abre.
+    let depois = conectar(
+        endereco,
+        "quem chega",
+        7,
+        Arc::new(MemoryPinStore::new()),
+        None,
+    )
+    .await;
+    assert!(
+        depois.is_ok(),
+        "aprovado e ainda barrado: a batida que a tela de espera repete vai sem \
+         segredo, e é essa que precisa entrar. Sem isto a pessoa fica no laço \
+         até desistir e reconectar pela entrada — que foi exatamente o relato. \
+         Recusa: {:?}",
+        depois.err()
+    );
+
+    Ok(())
+}

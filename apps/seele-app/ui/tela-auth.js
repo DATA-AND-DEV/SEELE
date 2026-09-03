@@ -564,8 +564,21 @@ function levarParaAEspera(falha, endereco) {
   // o que apertar porque a resposta já saiu. Nos dois casos o único caminho vivo
   // é a saída, e é para lá que o foco vai.
   const recusado = razao === "AdmissionDenied";
+  // **Três estados, e não dois.** O rótulo dizia `AGUARDANDO PERMISSÃO` para
+  // tudo o que não fosse uma recusa decidida — inclusive para um servidor fora
+  // do ar e para uma credencial recusada de verdade. Quem lia via uma espera
+  // correndo normalmente, e o que estava acontecendo era outra coisa; o texto
+  // logo abaixo dizia a verdade, e o rótulo grande a contradizia.
+  //
+  // Continuar batendo está certo nos três casos — um servidor que caiu volta —,
+  // e o que muda aqui é só parar de afirmar o que não se sabe.
+  const esperandoMesmo = razao === "AdmissionPending";
   const botao = $("auth-botao");
-  botao.textContent = recusado ? "ENTRADA NEGADA" : "AGUARDANDO PERMISSÃO";
+  botao.textContent = recusado
+    ? "ENTRADA NEGADA"
+    : esperandoMesmo
+      ? "AGUARDANDO PERMISSÃO"
+      : "TENTANDO DE NOVO";
   // O botão veste o estado da conexão, e aqui não há sessão nenhuma. Sem isto
   // ele guardaria o azul da última que houve — um `CONEXÃO SEGURA` pintado num
   // botão que existe porque a entrada não aconteceu.

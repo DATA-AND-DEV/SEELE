@@ -9868,3 +9868,25 @@ fn sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo() {
          servidor:\n{saida}"
     );
 }
+
+#[test]
+fn a_tela_de_espera_nao_afirma_permissao_pendente_para_toda_falha() {
+    // Ela tinha dois estados — `ENTRADA NEGADA` e `AGUARDANDO PERMISSÃO` — e o
+    // segundo cobria tudo o mais: um servidor fora do ar, uma credencial
+    // recusada de verdade, um erro que ninguém previu. Quem lia via uma espera
+    // correndo normalmente, e o texto logo abaixo dizia outra coisa.
+    //
+    // Continuar batendo está certo nos três casos: um servidor que caiu volta. O
+    // que não pode é afirmar qual dos três é.
+    let auth = without_comments(&read("ui/tela-auth.js"));
+    assert!(
+        auth.contains("AdmissionPending\""),
+        "o rótulo da espera não distingue mais a espera de verdade das outras \
+         falhas, e volta a prometer permissão pendente para qualquer uma"
+    );
+    assert!(
+        auth.contains("TENTANDO DE NOVO"),
+        "falta o terceiro estado: uma falha que não é recusa nem espera precisa \
+         de um rótulo que não minta sobre qual das duas ela é"
+    );
+}

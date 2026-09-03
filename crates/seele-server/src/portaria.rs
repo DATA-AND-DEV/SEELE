@@ -391,6 +391,54 @@ pub fn ja_admitido(persistence: &Persistence, impressao: &str) -> Result<bool> {
     Ok(decidido.as_deref() == Some("admitido"))
 }
 
+/// Se esta impressão digital **tem um pedido esperando decisão**.
+///
+/// # Por que ela existe, e é a irmã de [`ja_admitido`]
+///
+/// Aquela perdoa um segredo errado para quem já foi admitido. Esta perdoa o
+/// mesmo para quem **ainda está na fila** — e a razão é que a tela de espera do
+/// cliente bate de novo a cada quinze segundos **sem segredo nenhum**: o convite
+/// é de uso único e `conectar` não o lembra de propósito, porque reenviá-lo
+/// numa reconexão seria gastar de novo o que já foi gasto.
+///
+/// Sem isto, a batida que a própria tela repete para na camada do segredo, e a
+/// pessoa que está esperando permissão recebe **«credencial recusada»** — uma
+/// resposta sobre um problema que ela não tem, no meio de uma espera que está
+/// correndo normalmente. Foi relatado assim: «o portão barra e pede liberação, o
+/// host libera, e no recall ele não reconhece e fica no loop».
+///
+/// # Por que não abre buraco nenhum
+///
+/// Três coisas, e as três precisam ser verdade ao mesmo tempo:
+///
+///   1. a impressão chega aqui **provada** — a assinatura sobre o nonce já foi
+///      conferida, como em [`ja_admitido`];
+///   2. só existe linha na `portaria` para quem **já passou pela camada do
+///      segredo uma vez**, porque [`bater`] só roda depois dela;
+///   3. e o que se ganha é continuar esperando, não entrar.
+///
+/// Ou seja: quem recebe este perdão é exatamente quem já provou o segredo e a
+/// chave, e o que ele recebe de volta é a mesma porta fechada com o nome certo.
+///
+/// # Errors
+///
+/// Falha se o banco não responder.
+pub fn pedido_pendente(persistence: &Persistence, impressao: &str) -> Result<bool> {
+    if !ligada(persistence)? {
+        return Ok(false);
+    }
+    let pendente: Option<i64> = persistence
+        .connection()
+        .query_row(
+            "SELECT 1 FROM portaria
+              WHERE impressao = ?1 AND decidido_em IS NULL",
+            params![impressao],
+            |linha| linha.get(0),
+        )
+        .optional()?;
+    Ok(pendente.is_some())
+}
+
 /// A fila e o histórico, pendentes primeiro e mais antigo antes.
 ///
 /// Pendentes primeiro porque é o que pede ação; mais antigo antes porque quem
