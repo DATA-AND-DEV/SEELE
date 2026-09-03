@@ -356,3 +356,38 @@ pub(crate) fn instalar_webview2() -> Result<(), String> {
         ))
     }
 }
+
+/// Este Windows é novo o bastante para o SEELE?
+///
+/// **Windows 10 é o piso, e quem o define não somos nós:** é o WebView2, que o
+/// produto precisa para abrir. Instalar num Windows 8 escreveria os arquivos e
+/// deixaria alguém com um programa que nunca abre.
+///
+/// A pergunta é feita ao registro, e não a `GetVersionEx`, que mente: sem
+/// manifesto ele responde «Windows 8» para sempre, e com manifesto responde a
+/// verdade — mas depender do manifesto para uma resposta correta é depender de um
+/// arquivo que alguém pode editar sem entender o que quebra.
+///
+/// `CurrentMajorVersionNumber` **só existe a partir do Windows 10**. A ausência
+/// dele é a resposta, e é uma resposta que não depende de interpretar número
+/// nenhum.
+pub(crate) fn windows_novo_o_bastante() -> bool {
+    let caminho = larga(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+    let nome = larga("CurrentMajorVersionNumber");
+    let mut maior = 0_u32;
+    let mut bytes = u32::try_from(std::mem::size_of::<u32>()).unwrap_or(4);
+    // SAFETY: as duas cadeias vivem até o fim da chamada, e `bytes` é o tamanho
+    // de `maior`.
+    let estado = unsafe {
+        windows::Win32::System::Registry::RegGetValueW(
+            windows::Win32::System::Registry::HKEY_LOCAL_MACHINE,
+            PCWSTR(caminho.as_ptr()),
+            PCWSTR(nome.as_ptr()),
+            windows::Win32::System::Registry::RRF_RT_REG_DWORD,
+            None,
+            Some((&raw mut maior).cast()),
+            Some(&raw mut bytes),
+        )
+    };
+    estado == windows::Win32::Foundation::ERROR_SUCCESS && maior >= 10
+}

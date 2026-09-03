@@ -74,6 +74,23 @@ pub(crate) fn executar(
     // **Antes de escrever o primeiro arquivo.** O Windows não deixa sobrescrever
     // um executável em uso, e descobrir isso no meio deixaria parte dos arquivos
     // novos e parte velhos — o estado mais difícil de explicar.
+    if !sistema::windows_novo_o_bastante() {
+        return Err(
+            "este Windows é anterior ao 10, e o SEELE não abre nele: o runtime \
+             do WebView2, que o app usa para desenhar, não existe para versões \
+             mais antigas.\n\
+             Nada foi escrito nesta máquina."
+                .to_owned(),
+        );
+    }
+
+    // **A arquitetura não é conferida, e isso é uma decisão e não um esquecimento.**
+    //
+    // Este instalador é um executável de 64 bits: num Windows de 32 bits ele não
+    // chega a rodar — o próprio sistema o recusa antes, com a mensagem dele. Um
+    // teste aqui seria código que nunca pode reprovar, e código que nunca reprova
+    // é código que ninguém sabe se funciona.
+
     if sistema::produto_aberto() {
         return Err("o SEELE está aberto nesta máquina. Feche-o e instale de novo.".to_owned());
     }

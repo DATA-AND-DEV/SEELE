@@ -42,6 +42,7 @@ mod desinstalar;
 mod instalacao;
 #[cfg(windows)]
 mod janela;
+mod linha;
 mod pele;
 #[cfg(windows)]
 mod registro;
@@ -103,9 +104,9 @@ fn main() -> std::process::ExitCode {
     // chama o `UninstallString` e espera um programa que faça e saia. Uma janela
     // aqui seria uma segunda tela pedindo a mesma confirmação que o painel já
     // pediu.
-    let resultado = match desinstalar::ler_pedido() {
-        desinstalar::Pedido::Instalar {
-            tela: desinstalar::Tela::Cheia,
+    let resultado = match linha::ler_pedido() {
+        linha::Pedido::Instalar {
+            tela: linha::Tela::Cheia,
             ..
         } => janela::abrir(),
         // **Sem tela, e este é o caminho que ninguém olha.** É por ele que
@@ -113,13 +114,13 @@ fn main() -> std::process::ExitCode {
         // `/P /R`. As escolhas vêm do registro — quem tinha a porta aberta a
         // mantém —, e a pasta é a de antes, senão a atualização instalaria noutro
         // lugar e deixaria duas cópias.
-        desinstalar::Pedido::Instalar {
+        linha::Pedido::Instalar {
             tela,
             reiniciar,
             argumentos_do_app,
         } => sem_perguntar(tela, reiniciar, &argumentos_do_app),
-        desinstalar::Pedido::RemoverDeDentro => desinstalar::sair_de_dentro(),
-        desinstalar::Pedido::RemoverA(pasta) => desinstalar::remover(&pasta),
+        linha::Pedido::RemoverDeDentro => desinstalar::sair_de_dentro(),
+        linha::Pedido::RemoverA(pasta) => desinstalar::remover(&pasta),
     };
 
     match resultado {
@@ -162,7 +163,7 @@ fn main() -> std::process::ExitCode {
 /// saída de erro — e o código de saída é o que o atualizador lê.
 #[cfg(windows)]
 fn sem_perguntar(
-    _tela: desinstalar::Tela,
+    _tela: linha::Tela,
     reiniciar: bool,
     argumentos_do_app: &[String],
 ) -> Result<(), String> {
