@@ -224,8 +224,8 @@ uso() {
 "" \
 "ambiente:" \
 "  SEELE_GITHUB_TOKEN                    token com escrita nos repositórios" \
-"  SEELE_REPO                            onde publicar (hoje são dois, e a" \
-"                                        migração é a razão)" \
+"  SEELE_REPO                            onde publicar; espaço separa, e o" \
+"                                        padrão é só a casa das versões" \
 "  TAURI_SIGNING_PRIVATE_KEY             a chave do projeto (fica só aqui)" \
 "  TAURI_SIGNING_PRIVATE_KEY_PASSWORD    a senha dela" \
 "  SEELE_WINDOWS_SSH                     usuário@máquina do Windows" \
