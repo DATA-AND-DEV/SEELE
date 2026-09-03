@@ -517,12 +517,12 @@ notas_das_mudancas() {
 
     while IFS= read -r ndm_linha; do
         case "$ndm_linha" in
-            feat\(*\):\ *|fix\(*\):\ *)
+            feat\(*\):\ *|fix\(*\):\ *|perf\(*\):\ *)
                 ndm_resto="${ndm_linha#*\(}"
                 ndm_escopo="${ndm_resto%%\)*}"
                 ndm_assunto="${ndm_linha#*\): }"
                 ;;
-            feat:\ *|fix:\ *)
+            feat:\ *|fix:\ *|perf:\ *)
                 ndm_escopo=""
                 ndm_assunto="${ndm_linha#*: }"
                 ;;

@@ -2320,3 +2320,18 @@ fn a_casa_padrao_e_so_a_das_versoes_e_a_ponte_fica_registrada() {
          que depende dela, e não só no release que ela protege"
     );
 }
+
+#[test]
+fn um_ganho_de_desempenho_e_mudanca_que_a_pessoa_sente() {
+    // `perf` ficava de fora, e a 0.10.1 mostrou o custo: «a carga passa a ser
+    // comprimida com brotli» é um instalador 4,3 MB menor, baixado de novo a
+    // cada atualização por todo mundo. Isso é exatamente o que a página existe
+    // para contar — não é arrumação interna, é o plano de dados de quem instala.
+    let texto = notas("perf(instalador): a carga passa a ser comprimida com brotli\n");
+
+    let em_cima = texto.split("## Por baixo").next().unwrap_or_default();
+    assert!(
+        em_cima.contains("A carga passa a ser comprimida com brotli."),
+        "um `perf` de produto lidera, como um `feat`:\n{texto}"
+    );
+}
