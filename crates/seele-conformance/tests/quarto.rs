@@ -143,3 +143,83 @@ async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele()
          (o de {do_dono})"
     );
 }
+
+#[tokio::test]
+async fn um_nome_que_nao_resolve_nao_atrasa_quem_esta_na_lan() {
+    // **É o pedaço que caía em cima de quem menos precisa dele.**
+    //
+    // O prazo cobria só a leitura do socket; resolver o nome do ponto de
+    // encontro ficava de fora. Numa rede sem internet — duas máquinas na mesma
+    // casa — `lookup_host` não falha rápido: ele espera o servidor de DNS que
+    // não vai responder. E isto roda **antes** de qualquer tentativa de conexão,
+    // então o atraso é pago por uma conexão de rede local que nunca precisaria
+    // de ponto de encontro nenhum.
+    //
+    // **O que este teste prova, e o que ele não prova.**
+    //
+    // `.invalid` é reservado pela RFC 2606 e nenhum resolvedor tem resposta para
+    // ele — mas a resposta «não existe» chega **rápido**, então este caso passava
+    // mesmo com o defeito. O perigo de verdade é o resolvedor que não responde
+    // nada, e simular isso pediria um servidor de DNS de mentira e uma rota para
+    // ele; não é o que este arquivo faz.
+    //
+    // Então este teste prende a forma — o prazo existe e é obedecido no caminho
+    // que dá para exercitar — e a asserção de estrutura logo abaixo prende o
+    // resto: que resolver o nome esteja **dentro** dele.
+    let marca = Marca::nova("abcdef0123456789").expect("é uma marca");
+
+    let comecou = std::time::Instant::now();
+    let achado = onde_mora(
+        "nao-existe-em-lugar-nenhum.invalid:8384",
+        &marca,
+        std::time::Duration::from_millis(300),
+    )
+    .await;
+
+    assert_eq!(achado, None, "não havia resposta a inventar");
+    assert!(
+        comecou.elapsed() < std::time::Duration::from_secs(2),
+        "a pergunta passou do prazo: quem paga é a conexão que vem depois dela, \
+         e numa LAN ela é a única que importa. Levou {:?}",
+        comecou.elapsed()
+    );
+}
+
+#[test]
+fn resolver_o_nome_acontece_dentro_do_prazo_e_nao_antes_dele() {
+    // O par do teste acima, e ele existe porque aquele não alcança o caso que
+    // importa: um resolvedor que não responde. O que se pode afirmar sem um
+    // servidor de DNS de mentira é a **forma** da função — se `lookup_host` está
+    // dentro do que o `timeout` embrulha, nenhum resolvedor do mundo consegue
+    // atrasar uma conexão de rede local além do prazo.
+    let fonte = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../seele-core/src/encontro.rs"),
+    )
+    .expect("o módulo do encontro tem que ser legível");
+
+    // **Sem os comentários.** O corpo desta função explica, em prosa, que
+    // `lookup_host` ficava de fora do prazo — e a primeira versão deste guarda
+    // casou com essa frase e acusou o código de ter o defeito que o comentário
+    // descreve. É a segunda vez que uma âncora deste repositório encontra o
+    // próprio comentário; da primeira foi a da bateria, no `publicar.sh`.
+    let corpo: String = fonte
+        .split("pub async fn onde_mora(")
+        .nth(1)
+        .and_then(|resto| resto.split("\nasync fn ").next())
+        .unwrap_or_default()
+        .lines()
+        .filter(|linha| !linha.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        corpo.contains("timeout(prazo"),
+        "`onde_mora` deixou de embrulhar a pergunta num prazo:\n{corpo}"
+    );
+    assert!(
+        !corpo.contains("lookup_host"),
+        "resolver o nome voltou para fora do prazo. Numa rede sem internet isso \
+         são segundos de espera cobrados de uma conexão de LAN que nunca \
+         precisaria de ponto de encontro nenhum:\n{corpo}"
+    );
+}

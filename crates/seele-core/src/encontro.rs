@@ -335,6 +335,23 @@ pub async fn onde_mora(
     marca: &seele_proto::encontro::Marca,
     prazo: std::time::Duration,
 ) -> Option<SocketAddr> {
+    // **O prazo cobre a pergunta inteira, e resolver o nome é parte dela.**
+    //
+    // Ele cobria só o `recv_from`, e o `lookup_host` ficava de fora. Numa rede
+    // sem internet — duas máquinas na mesma casa, que é o caso que menos precisa
+    // de ponto de encontro — resolver `encontro.seele.app.br` não falha rápido:
+    // ele espera o servidor de DNS que não vai responder, e isso são segundos.
+    //
+    // O preço caía inteiro em cima de quem estava na LAN, porque isto roda
+    // **antes** de qualquer tentativa de conexão. Uma pergunta acessória que
+    // atrasa a resposta principal é pior que não fazer a pergunta.
+    tokio::time::timeout(prazo, perguntar(ponto, marca))
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn perguntar(ponto: &str, marca: &seele_proto::encontro::Marca) -> Option<SocketAddr> {
     let destino: SocketAddr = tokio::net::lookup_host(ponto).await.ok()?.next()?;
     let socket = tokio::net::UdpSocket::bind(match destino {
         SocketAddr::V4(_) => "0.0.0.0:0",
@@ -349,10 +366,10 @@ pub async fn onde_mora(
 
     let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
     loop {
-        let (lidos, origem) = tokio::time::timeout(prazo, socket.recv_from(&mut balde))
-            .await
-            .ok()?
-            .ok()?;
+        // Sem prazo aqui: quem o carrega é `onde_mora`, e um prazo por leitura
+        // dentro de um laço não é prazo nenhum — cada datagrama de ruído
+        // renovaria a espera inteira.
+        let (lidos, origem) = socket.recv_from(&mut balde).await.ok()?;
         // Só do ponto a que se perguntou. Um `AQUI` que chega de outro lugar é
         // ruído da internet ou alguém tentando escolher para onde esta máquina
         // vai conectar — e o segundo é a razão de esta linha existir.
