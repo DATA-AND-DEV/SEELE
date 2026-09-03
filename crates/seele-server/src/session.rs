@@ -2130,6 +2130,44 @@ async fn run_session(
                             }
                         }
                     }
+                    ClientMessage::WatchScreen { screen }
+                    | ClientMessage::UnwatchScreen { screen } => {
+                        // **A tela pedida tem de ser uma das desta sala**, e a
+                        // conferência é a mesma do quadro-chave: sem ela, um id
+                        // inventado seria um jeito de assinar a transmissão de
+                        // outra sala — e a cópia sairia da subida de quem
+                        // hospeda sem ninguém daquela sala ter pedido.
+                        let daqui = match current_voice_room {
+                            Some(voice_room) => server
+                                .telas
+                                .lock()
+                                .await
+                                .em(voice_room)
+                                .iter()
+                                .any(|(_, corrente)| *corrente == screen),
+                            None => false,
+                        };
+                        if let (true, Some(voice_room)) = (daqui, current_voice_room) {
+                            let assistir =
+                                matches!(message, ClientMessage::WatchScreen { .. });
+                            let comando = if assistir {
+                                VoiceRoomCommand::TelaAssistir {
+                                    person: session.person,
+                                    screen,
+                                }
+                            } else {
+                                VoiceRoomCommand::TelaParouDeAssistir {
+                                    person: session.person,
+                                    screen,
+                                }
+                            };
+                            // O resultado é descartado como nos outros
+                            // comandos de sala: a sala que sumiu entre a
+                            // conferência e o envio já não tem transmissão para
+                            // assistir, e não há o que dizer a quem pediu.
+                            let _ = voice_rooms.of(voice_room).await.send(comando).await;
+                        }
+                    }
                     ClientMessage::StopScreenShare => {
                         let parada = match current_voice_room {
                             Some(voice_room) => server.telas.lock().await.parar(voice_room, session.person),

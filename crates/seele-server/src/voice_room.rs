@@ -113,6 +113,24 @@ pub enum VoiceRoomCommand {
         /// Quem.
         from: PersonId,
     },
+    /// Alguém pediu para assistir a uma transmissão desta sala.
+    ///
+    /// **É o pedido que cria a cópia.** Sem ele o servidor não abre cano, e uma
+    /// transmissão que ninguém abriu não ocupa subida nenhuma — é o que faz
+    /// «todos podem transmitir» caber na conta.
+    TelaAssistir {
+        /// Quem quer ver.
+        person: PersonId,
+        /// O quê.
+        screen: ScreenId,
+    },
+    /// Alguém fechou a janela de uma transmissão.
+    TelaParouDeAssistir {
+        /// Quem.
+        person: PersonId,
+        /// O quê.
+        screen: ScreenId,
+    },
 }
 
 /// Why a datagram was not forwarded.
@@ -372,6 +390,10 @@ impl VoiceRoom {
                 fim,
             } => self.tela_abriu(from, screen, abertura, fim),
             VoiceRoomCommand::TelaBytes { from, bytes } => self.tela_bytes(from, &bytes),
+            VoiceRoomCommand::TelaAssistir { person, screen } => self.assistir(person, screen),
+            VoiceRoomCommand::TelaParouDeAssistir { person, screen } => {
+                self.parar_de_assistir(person, screen);
+            }
             VoiceRoomCommand::TelaFechou { from } => {
                 if self.telas.contains_key(&from) {
                     self.encerrar_tela(from, None);
@@ -530,6 +552,45 @@ impl VoiceRoom {
         // vazia: quem compartilha para uma sala de uma pessoa precisa saber
         // que N é zero tanto quanto precisa saber que virou seis.
         self.anunciar_espectadores();
+    }
+
+    /// Põe alguém para assistir a uma transmissão desta sala.
+    ///
+    /// **Na fila do próximo quadro-chave, e não no fluxo.** Ligado num byte
+    /// qualquer, o enquadramento de quem chega fica deslocado para sempre;
+    /// ligado no começo do próximo quadro-chave, ele acerta o passo e decodifica.
+    /// É a mesma regra de quem entra na sala no meio de uma transmissão.
+    ///
+    /// O teto é reconferido **depois**, porque a cópia nova entra na conta: uma
+    /// pessoa a mais assistindo pode ser a que não cabe.
+    fn assistir(&mut self, person: PersonId, screen: ScreenId) {
+        let Some(curso) = self.telas.values_mut().find(|curso| curso.screen == screen) else {
+            self.drops.tela_sem_dono += 1;
+            return;
+        };
+        // Quem manda não se assiste, e quem já assiste não entra duas vezes: a
+        // segunda entrada abriria um cano a mais para a mesma pessoa, e a conta
+        // de cópias passaria a mentir para mais.
+        if curso.dono == person
+            || curso.canos.contains_key(&person)
+            || curso.esperando.contains(&person)
+        {
+            return;
+        }
+        curso.esperando.push(person);
+        self.reconferir_o_teto();
+    }
+
+    /// Tira alguém de uma transmissão, sem tocar nas outras.
+    fn parar_de_assistir(&mut self, person: PersonId, screen: ScreenId) {
+        let Some(curso) = self.telas.values_mut().find(|curso| curso.screen == screen) else {
+            return;
+        };
+        curso.canos.remove(&person);
+        curso.esperando.retain(|quem| *quem != person);
+        // Devolve teto a quem ficou, que é a metade boa de alguém fechar a
+        // janela — a mesma razão que a saída da sala tem.
+        self.reconferir_o_teto();
     }
 
     /// Liga estes espectadores na transmissão em curso.
