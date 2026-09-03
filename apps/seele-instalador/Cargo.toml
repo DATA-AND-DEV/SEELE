@@ -24,14 +24,21 @@ description = "O instalador do SEELE para Windows. Ver ADR 0043."
 # olhando `CARGO_CFG_TARGET_OS`.
 [build-dependencies]
 embed-resource = "3"
+# O `build.rs` comprime a carga: ver `carga()` lá.
+brotli = "8"
 
 [target.'cfg(windows)'.dependencies]
-# A carga é um `.tar.gz`, e os dois já estão na árvore — o `tar` e o `flate2`
-# vêm pelo atualizador do Tauri. Sólido e não por arquivo: o produto são dezenas
-# de arquivos parecidos, e gzip sobre tar comprime o conjunto, enquanto um `.zip`
-# comprimiria cada um sozinho. É também o formato que o próprio SEELE já usa para
-# a atualização do macOS, então não há um formato novo na casa.
-flate2 = "1"
+# A carga é um `.tar` comprimido com brotli, e os dois já estão na árvore.
+#
+# **Brotli e não gzip, e a diferença é medida em megabytes.** Com gzip o
+# instalador saiu 4,3 MB maior que o do NSIS, que usa LZMA — e este `.exe` é
+# baixado de novo a cada atualização, por todo mundo. O brotli comprime na faixa
+# do LZMA e já vem pelo Tauri; trocar custa uma linha de cada lado.
+#
+# Sólido e não por arquivo: o produto são dezenas de arquivos parecidos, e
+# comprimir o `.tar` inteiro aproveita a semelhança entre eles, enquanto um
+# `.zip` comprimiria cada um sozinho.
+brotli = "8"
 tar = "0.4"
 
 # A mesma versão que o `seele-video` já traz, para o `Cargo.lock` não carregar

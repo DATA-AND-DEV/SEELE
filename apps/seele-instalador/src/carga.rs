@@ -2,7 +2,8 @@
 //!
 //! # O que é
 //!
-//! Um `.tar.gz` embutido pelo `build.rs`, com o que o NSIS empacotava — o
+//! Um `.tar` comprimido com brotli, embutido pelo `build.rs`, com o que o NSIS
+//! empacotava — o
 //! `SEELE.exe`, o `seeled.exe` e o que mais o app precisa ao lado. Ela entra por
 //! `SEELE_CARGA` no momento de compilar o instalador, que é depois de compilar o
 //! produto.
@@ -23,8 +24,8 @@
 //! onde a bateria roda primeiro, que é o Mac.
 #![cfg_attr(not(windows), allow(dead_code))]
 
-/// O `.tar.gz` com os arquivos do produto, ou vazio.
-const CARGA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/carga.tar.gz"));
+/// O `.tar` comprimido com brotli, com os arquivos do produto, ou vazio.
+const CARGA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/carga.tar.br"));
 
 /// Se este executável tem o que instalar.
 pub(crate) fn existe() -> bool {
@@ -68,7 +69,7 @@ pub(crate) fn abrir_em(
     std::fs::create_dir_all(destino)
         .map_err(|erro| format!("não criei {}: {erro}", destino.display()))?;
 
-    let descompactador = flate2::read::GzDecoder::new(CARGA);
+    let descompactador = brotli::Decompressor::new(CARGA, 4096);
     let mut arquivo = tar::Archive::new(descompactador);
     let entradas = arquivo
         .entries()

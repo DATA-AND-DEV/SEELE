@@ -40,7 +40,7 @@ fn main() {
     }
 }
 
-/// Põe a carga — os arquivos do produto — onde o `include_bytes!` a encontra.
+/// Comprime a carga — os arquivos do produto — onde o `include_bytes!` a encontra.
 ///
 /// # Por que por variável de ambiente
 ///
@@ -55,18 +55,12 @@ fn main() {
 fn carga() {
     println!("cargo:rerun-if-env-changed=SEELE_CARGA");
     let destino =
-        std::path::Path::new(&std::env::var("OUT_DIR").unwrap_or_default()).join("carga.tar.gz");
+        std::path::Path::new(&std::env::var("OUT_DIR").unwrap_or_default()).join("carga.tar.br");
 
     match std::env::var("SEELE_CARGA") {
         Ok(origem) if !origem.is_empty() => {
             println!("cargo:rerun-if-changed={origem}");
-            if let Err(erro) = std::fs::copy(&origem, &destino) {
-                panic!(
-                    "não copiei a carga de «{origem}»: {erro}\n\
-                     `SEELE_CARGA` aponta para o `.tar.gz` com os arquivos do \
-                     produto. Se ele não existe, o instalador sairia vazio."
-                );
-            }
+            comprimir(&origem, &destino);
         }
         _ => {
             // Vazia, e não ausente: o `include_bytes!` precisa de um arquivo, e
@@ -76,5 +70,40 @@ fn carga() {
                 panic!("não criei a carga vazia: {erro}");
             }
         }
+    }
+}
+
+/// Comprime o `.tar` com brotli, na qualidade máxima.
+///
+/// # Por que aqui e não no empacotamento
+///
+/// Porque o compressor já está no `Cargo.lock` e não existe como programa na
+/// máquina que empacota: o `tar` do Windows faz `.tar` e `.tar.gz`, e não
+/// brotli. Pedir um binário a mais só para comprimir seria uma dependência
+/// externa para uma coisa que a árvore já sabe fazer.
+///
+/// Qualidade 11 e janela de 24 bits, que é o máximo. Isto roda uma vez por
+/// pacote, e o que se ganha é baixado por todo mundo em toda atualização —
+/// trocar minutos de quem empacota por megabytes de quem instala é fácil.
+fn comprimir(origem: &str, destino: &std::path::Path) {
+    let cru = match std::fs::read(origem) {
+        Ok(bytes) => bytes,
+        Err(erro) => panic!(
+            "não li a carga de «{origem}»: {erro}\n\
+             `SEELE_CARGA` aponta para o `.tar` com os arquivos do produto. Se \
+             ele não existe, o instalador sairia vazio."
+        ),
+    };
+
+    let saida = match std::fs::File::create(destino) {
+        Ok(arquivo) => arquivo,
+        Err(erro) => panic!("não criei {}: {erro}", destino.display()),
+    };
+    let mut comprimindo = brotli::CompressorWriter::new(saida, 4096, 11, 24);
+    if let Err(erro) = std::io::Write::write_all(&mut comprimindo, &cru) {
+        panic!("não comprimi a carga: {erro}");
+    }
+    if let Err(erro) = std::io::Write::flush(&mut comprimindo) {
+        panic!("não fechei a carga comprimida: {erro}");
     }
 }

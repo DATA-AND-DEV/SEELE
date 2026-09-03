@@ -328,10 +328,12 @@ try {
     }
     Copy-Item $ServidorCompilado (Join-Path $Carga "seeled.exe") -Force
 
-    $CargaTar = Join-Path $env:TEMP "seele-carga-$Versao.tar.gz"
+    $CargaTar = Join-Path $env:TEMP "seele-carga-$Versao.tar"
     Remove-Item -Force $CargaTar -ErrorAction SilentlyContinue
-    # O `tar` do Windows 10 em diante é o do libarchive e faz `.tar.gz` sozinho.
-    tar -czf $CargaTar -C $Carga .
+    # **Sem comprimir aqui.** Quem comprime é o `build.rs` do instalador, com
+    # brotli — o `tar` do Windows faz gzip e não brotli, e gzip custava 4,3 MB a
+    # mais em cada `.exe` baixado. Ver `comprimir` lá.
+    tar -cf $CargaTar -C $Carga .
     if ($LASTEXITCODE -ne 0) { throw "não montei a carga do instalador" }
 
     Write-Host "→ compilando o instalador próprio" -ForegroundColor Cyan

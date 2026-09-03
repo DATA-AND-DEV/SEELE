@@ -5038,8 +5038,8 @@ dependencies = [
 name = "seele-instalador"
 version = "0.0.0"
 dependencies = [
+ "brotli",
  "embed-resource",
- "flate2",
  "tar",
  "windows 0.62.2",
 ]
