@@ -285,6 +285,38 @@ try {
     }
     finally { Pop-Location }
 
+    # ------------------------------------------------- o instalador que é nosso
+    #
+    # Ver ADR 0043. Ele convive com o do NSIS enquanto não estiver completo: o
+    # NSIS continua sendo o que a versão publica, e este sai ao lado para ser
+    # olhado. O dia em que trocarem de lugar está no ADR, e é depois de o modo
+    # silencioso ter teste próprio.
+    Write-Host "→ montando a carga do instalador próprio" -ForegroundColor Cyan
+    $Carga = Join-Path $env:TEMP "seele-carga-$Versao"
+    Remove-Item -Recurse -Force $Carga -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $Carga | Out-Null
+
+    # O que o produto instalado precisa ter ao lado. É a mesma lista que o
+    # bundle do Tauri leva: o app e o `seeled`, que é o sidecar. O sidecar perde
+    # o sufixo do alvo — dentro da pasta instalada ele se chama `seeled.exe`,
+    # que é como o README manda chamá-lo no PATH.
+    Copy-Item "target\release\SEELE.exe" (Join-Path $Carga "SEELE.exe") -Force
+    Copy-Item "target\release\seeled.exe" (Join-Path $Carga "seeled.exe") -Force
+
+    $CargaTar = Join-Path $env:TEMP "seele-carga-$Versao.tar.gz"
+    Remove-Item -Force $CargaTar -ErrorAction SilentlyContinue
+    # O `tar` do Windows 10 em diante é o do libarchive e faz `.tar.gz` sozinho.
+    tar -czf $CargaTar -C $Carga .
+    if ($LASTEXITCODE -ne 0) { throw "não montei a carga do instalador" }
+
+    Write-Host "→ compilando o instalador próprio" -ForegroundColor Cyan
+    $env:SEELE_CARGA = $CargaTar
+    try {
+        cargo build --release -p seele-instalador
+        if ($LASTEXITCODE -ne 0) { throw "o instalador próprio não compilou" }
+    }
+    finally { Remove-Item Env:SEELE_CARGA -ErrorAction SilentlyContinue }
+
     # -------------------------------------------------------------- reunir
     $Destino = "entrega"
     New-Item -ItemType Directory -Force -Path $Destino | Out-Null
@@ -325,6 +357,16 @@ $(if ($instaladores.Count -eq 0) { 'Nenhum: o empacotamento disse que deu certo 
         -DestinationPath "$Destino\seele-cli-$Versao-windows-x86_64.zip" -Force
 
     # -------------------------------------------------------------- conferir
+    # O nosso, com nome que não colide com o do NSIS: os dois convivem em
+    # `entrega\` enquanto a troca não acontece, e um nome igual faria o segundo
+    # sobrescrever o primeiro sem ninguém notar.
+    $Proprio = "target\release\seele-instalador.exe"
+    if (Test-Path $Proprio) {
+        $NomeProprio = "SEELE_${Versao}_x64-instalador.exe"
+        Copy-Item $Proprio (Join-Path $Destino $NomeProprio) -Force
+        Write-Host "→ instalador próprio: $NomeProprio" -ForegroundColor Cyan
+    }
+
     Write-Host "`n--- entrega ---" -ForegroundColor Green
     Get-ChildItem $Destino | ForEach-Object {
         $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
