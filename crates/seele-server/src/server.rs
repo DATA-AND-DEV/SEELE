@@ -338,96 +338,124 @@ pub enum Event {
 /// que é o que [`Telas::encerrar_de`] existe para fazer numa chamada só.
 #[derive(Debug, Default)]
 pub struct Telas {
-    por_voice_room: HashMap<VoiceRoomId, (PersonId, ScreenId)>,
+    por_voice_room: HashMap<VoiceRoomId, Vec<(PersonId, ScreenId)>>,
 }
 
+/// Quantas transmissões cabem numa sala ao mesmo tempo.
+///
+/// **Duas, e o número sai do teto de banda e não do gosto.** O teto de uma
+/// transmissão é `min(subida do host × 60% ÷ espectadores, subida de quem
+/// transmite × 60%)` — `crates/seele-server/src/tela.rs`. Com duas transmissões
+/// o mesmo cano se divide entre elas, e o que cabia em 1080p passa a caber em
+/// 720p para cada uma: uma troca que quem assiste entende, porque ganhou a
+/// segunda imagem.
+///
+/// A terceira não. Ela levaria as três para perto do piso em que o
+/// compartilhamento **para** por falta de banda, e o sintoma seria todo mundo
+/// vendo tudo pixelado sem ninguém ter feito nada de errado. Recusar a terceira
+/// com uma frase é melhor que aceitá-la e piorar as outras duas em silêncio.
+pub const TRANSMISSOES_POR_SALA: usize = 2;
+
 impl Telas {
-    /// Registra uma transmissão, ou diz quem já está com a vaga.
+    /// Registra uma transmissão, ou diz quem já está ocupando as vagas.
     ///
-    /// `Err(person)` é quem chegou primeiro. Devolver o nome e não um `bool`
-    /// porque a frase que a interface tem de escrever é «fulano já está
-    /// compartilhando», e um booleano obrigaria quem chama a procurar a resposta
-    /// de novo em outro lugar.
+    /// `Err` traz quem está transmitindo agora — a frase que a interface escreve
+    /// nomeia gente, e um booleano obrigaria quem chama a procurar a resposta de
+    /// novo noutro lugar.
+    ///
+    /// Quem já transmite pedindo de novo **troca a própria tela** e não ocupa
+    /// vaga nova: é um cliente que reabriu o botão, ou um `StartScreenShare`
+    /// depois de reconectar.
     pub fn comecar(
         &mut self,
         voice_room: VoiceRoomId,
         person: PersonId,
         screen: ScreenId,
-    ) -> Result<(), PersonId> {
-        match self.por_voice_room.get(&voice_room) {
-            // Quem já está transmitindo pedindo de novo não é uma corrida
-            // perdida: é um cliente que reabriu o botão, e devolver
-            // `ScreenShareTaken` para a própria pessoa seria dizer que ela
-            // perdeu para si mesma.
-            Some((dono, _)) if *dono != person => Err(*dono),
-            _ => {
-                self.por_voice_room.insert(voice_room, (person, screen));
-                Ok(())
-            }
+    ) -> Result<(), Vec<PersonId>> {
+        let vagas = self.por_voice_room.entry(voice_room).or_default();
+
+        if let Some(minha) = vagas.iter_mut().find(|(dono, _)| *dono == person) {
+            minha.1 = screen;
+            return Ok(());
         }
+        if vagas.len() >= TRANSMISSOES_POR_SALA {
+            return Err(vagas.iter().map(|(dono, _)| *dono).collect());
+        }
+        vagas.push((person, screen));
+        Ok(())
     }
 
-    /// Encerra a transmissão de uma sala de voz, se for deste pessoa.
+    /// Encerra a transmissão desta pessoa nesta sala, se houver.
     ///
     /// Conferido, e não apagado às cegas: um `StopScreenShare` de quem não está
     /// transmitindo derrubaria a tela de quem está.
     pub fn parar(&mut self, voice_room: VoiceRoomId, person: PersonId) -> Option<ScreenId> {
-        let (dono, screen) = *self.por_voice_room.get(&voice_room)?;
-        if dono != person {
-            return None;
+        let vagas = self.por_voice_room.get_mut(&voice_room)?;
+        let onde = vagas.iter().position(|(dono, _)| *dono == person)?;
+        let (_, screen) = vagas.remove(onde);
+        if vagas.is_empty() {
+            self.por_voice_room.remove(&voice_room);
         }
-        self.por_voice_room.remove(&voice_room);
         Some(screen)
     }
 
-    /// Encerra o que este pessoa estivesse transmitindo, onde quer que fosse.
+    /// Encerra o que esta pessoa estivesse transmitindo, onde quer que fosse.
     ///
-    /// Devolve as salas de voz e as transmissões, porque alguém tem de anunciar o fim
-    /// e quem chama nem sempre sabe a sala — uma sessão acaba em qualquer `?` do
-    /// meio do laço dela. É o mesmo raciocínio de
-    /// [`Occupancy::vacate_everywhere`].
+    /// Devolve as salas e as transmissões, porque alguém tem de anunciar o fim e
+    /// quem chama nem sempre sabe a sala — uma sessão acaba em qualquer `?` do
+    /// meio do laço dela. É o mesmo raciocínio de [`Occupancy::vacate_everywhere`].
     pub fn encerrar_de(&mut self, person: PersonId) -> Vec<(VoiceRoomId, ScreenId)> {
-        let encerradas: Vec<_> = self
-            .por_voice_room
-            .iter()
-            .filter(|(_, (dono, _))| *dono == person)
-            .map(|(voice_room, (_, screen))| (*voice_room, *screen))
-            .collect();
-        for (voice_room, _) in &encerradas {
-            self.por_voice_room.remove(voice_room);
+        let mut encerradas = Vec::new();
+        for (voice_room, vagas) in &mut self.por_voice_room {
+            if let Some(onde) = vagas.iter().position(|(dono, _)| *dono == person) {
+                let (_, screen) = vagas.remove(onde);
+                encerradas.push((*voice_room, screen));
+            }
         }
+        self.por_voice_room.retain(|_, vagas| !vagas.is_empty());
         encerradas
     }
 
-    /// Encerra tudo o que estivesse acontecendo num sala de voz que deixou de existir.
-    pub fn encerrar_voice_room(&mut self, voice_room: VoiceRoomId) -> Option<ScreenId> {
+    /// Encerra tudo o que estivesse acontecendo numa sala que deixou de existir.
+    pub fn encerrar_voice_room(&mut self, voice_room: VoiceRoomId) -> Vec<ScreenId> {
         self.por_voice_room
             .remove(&voice_room)
+            .unwrap_or_default()
+            .into_iter()
             .map(|(_, screen)| screen)
+            .collect()
     }
 
-    /// Quem está transmitindo neste sala de voz, se alguém está.
+    /// Quem está transmitindo nesta sala.
     #[must_use]
-    pub fn em(&self, voice_room: VoiceRoomId) -> Option<(PersonId, ScreenId)> {
-        self.por_voice_room.get(&voice_room).copied()
+    pub fn em(&self, voice_room: VoiceRoomId) -> Vec<(PersonId, ScreenId)> {
+        self.por_voice_room
+            .get(&voice_room)
+            .cloned()
+            .unwrap_or_default()
     }
 
-    /// Onde este pessoa está transmitindo, se está.
+    /// Onde esta pessoa está transmitindo, se está.
     ///
     /// A pergunta que o **encaminhamento** faz, e ela vem ao contrário de
     /// [`Self::em`] por um motivo concreto: a tarefa que aceita os fluxos
     /// unidirecionais de uma conexão vive fora do laço da sessão — é o que a
-    /// impede de bloquear o controle — e por isso não enxerga em que sala de voz o
+    /// impede de bloquear o controle — e por isso não enxerga em que sala o
     /// connection está. Este registro é a única fonte que sabe as duas coisas ao
-    /// mesmo tempo, e é a mesma que decidiu a corrida do §6 item 3. Perguntar a
-    /// ela é o que garante que um fluxo de tela só é aceito de quem o controle
-    /// já autorizou.
+    /// mesmo tempo, e é a mesma que decidiu a vaga. Perguntar a ela é o que
+    /// garante que um fluxo de tela só é aceito de quem o controle já autorizou.
+    ///
+    /// Uma pessoa transmite **uma** tela por vez, mesmo com mais de uma vaga na
+    /// sala: o que a segunda vaga permite é outra pessoa, não outra janela da
+    /// mesma.
     #[must_use]
     pub fn de(&self, person: PersonId) -> Option<(VoiceRoomId, ScreenId)> {
-        self.por_voice_room
-            .iter()
-            .find(|(_, (dono, _))| *dono == person)
-            .map(|(voice_room, (_, screen))| (*voice_room, *screen))
+        self.por_voice_room.iter().find_map(|(voice_room, vagas)| {
+            vagas
+                .iter()
+                .find(|(dono, _)| *dono == person)
+                .map(|(_, screen)| (*voice_room, *screen))
+        })
     }
 
     /// Tudo o que está acontecendo agora, achatado.
@@ -439,7 +467,11 @@ impl Telas {
     pub fn todas(&self) -> Vec<(VoiceRoomId, PersonId, ScreenId)> {
         self.por_voice_room
             .iter()
-            .map(|(voice_room, (person, screen))| (*voice_room, *person, *screen))
+            .flat_map(|(voice_room, vagas)| {
+                vagas
+                    .iter()
+                    .map(move |(person, screen)| (*voice_room, *person, *screen))
+            })
             .collect()
     }
 }
@@ -1010,15 +1042,21 @@ mod tests {
     // ---- compartilhamento de tela ----
 
     #[test]
-    fn uma_transmissao_por_voice_room_e_quem_perde_a_corrida_tem_nome() {
-        // §6 item 3 da spec de compartilhamento de tela: uma transmissão por
-        // sala de voz na v1, porque «duas dobram a subida de quem recebe e
-        // triplicam a interface».
+    fn duas_transmissoes_cabem_na_mesma_sala_e_a_terceira_nao() {
+        // A regra era uma por sala — «duas dobram a subida de quem recebe e
+        // triplicam a interface», dizia a spec da v1. A subida continua sendo o
+        // argumento, e é ela que dá o número: o teto se divide entre as
+        // transmissões, e o que cabia em 1080p passa a caber em 720p para cada
+        // uma. É uma troca que quem assiste entende, porque ganhou a segunda
+        // imagem.
         //
-        // O que este teste prende junto com a regra é **quem** o `Err` carrega:
-        // é com esse nome que a sessão escreve `AlertReason::ScreenShareTaken`,
-        // e trocá-lo por um `bool` obrigaria quem chama a procurar a resposta
-        // de novo em outro lugar — onde ela já pode ter mudado.
+        // A terceira levaria as três para perto do piso em que o
+        // compartilhamento **para**, e o sintoma seria todo mundo vendo tudo
+        // pixelado sem ninguém ter feito nada.
+        //
+        // O que este teste prende junto com o número é **quem** o `Err` carrega:
+        // é com esses nomes que a interface escreve a recusa, e um `bool`
+        // obrigaria quem chama a procurar a resposta de novo noutro lugar.
         let mut telas = Telas::default();
         assert_eq!(
             telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1)),
@@ -1026,26 +1064,28 @@ mod tests {
         );
         assert_eq!(
             telas.comecar(VoiceRoomId(1), PersonId(20), ScreenId(2)),
-            Err(PersonId(10)),
-            "duas telas na mesma sala"
+            Ok(())
         );
-        // E a corrida perdida não derruba quem ganhou.
-        assert_eq!(telas.em(VoiceRoomId(1)), Some((PersonId(10), ScreenId(1))));
 
-        // Outra sala é outra corrida.
         assert_eq!(
-            telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(3)),
+            telas.comecar(VoiceRoomId(1), PersonId(30), ScreenId(3)),
+            Err(vec![PersonId(10), PersonId(20)]),
+            "a terceira tem de ser recusada, nomeando quem está nas vagas"
+        );
+
+        // Outra sala é outra conta.
+        assert_eq!(
+            telas.comecar(VoiceRoomId(2), PersonId(30), ScreenId(3)),
             Ok(())
         );
     }
 
     #[test]
-    fn quem_ja_transmite_pedindo_de_novo_nao_perde_para_si_mesmo() {
-        // Um cliente que reabriu o botão, ou um `StartScreenShare` repetido
-        // depois de uma reconexão. Devolver `ScreenShareTaken` para a própria
-        // pessoa seria dizer que ela perdeu uma corrida contra ela mesma, e a
-        // interface escreveria uma frase que não faz sentido nenhum na tela de
-        // quem está compartilhando naquele instante.
+    fn quem_ja_transmite_pedindo_de_novo_troca_a_propria_tela() {
+        // Um cliente que reabriu o botão, ou um `StartScreenShare` depois de
+        // reconectar. Devolver recusa para a própria pessoa seria dizer que ela
+        // perdeu uma vaga para si mesma — e ocupar uma vaga nova gastaria a
+        // segunda com a mesma pessoa, tirando-a de quem ainda não transmitiu.
         let mut telas = Telas::default();
         telas
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
@@ -1054,59 +1094,108 @@ mod tests {
             telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(2)),
             Ok(())
         );
-        assert_eq!(telas.em(VoiceRoomId(1)), Some((PersonId(10), ScreenId(2))));
+
+        assert_eq!(telas.em(VoiceRoomId(1)), vec![(PersonId(10), ScreenId(2))]);
+        assert_eq!(
+            telas.comecar(VoiceRoomId(1), PersonId(20), ScreenId(3)),
+            Ok(()),
+            "a segunda vaga continuava livre"
+        );
     }
 
     #[test]
     fn parar_a_tela_de_outra_pessoa_nao_para_nada() {
         // Sem esta conferência, um `StopScreenShare` de qualquer pessoa da sala
-        // derruba a tela de quem está compartilhando — e o verbo não carrega
-        // sala de voz nem `ScreenId` de propósito, então não há nada além do registro
-        // para separar as duas.
+        // derruba a tela de quem está transmitindo — e o verbo não carrega sala
+        // nem `ScreenId` de propósito, então não há nada além do registro para
+        // separar as duas.
         let mut telas = Telas::default();
         telas
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
+        telas
+            .comecar(VoiceRoomId(1), PersonId(20), ScreenId(2))
+            .expect("começa");
 
-        assert_eq!(telas.parar(VoiceRoomId(1), PersonId(20)), None);
-        assert_eq!(telas.em(VoiceRoomId(1)), Some((PersonId(10), ScreenId(1))));
+        assert_eq!(telas.parar(VoiceRoomId(1), PersonId(30)), None);
+        assert_eq!(telas.em(VoiceRoomId(1)).len(), 2, "ninguém saiu");
 
         assert_eq!(telas.parar(VoiceRoomId(1), PersonId(10)), Some(ScreenId(1)));
-        assert_eq!(telas.em(VoiceRoomId(1)), None);
+        assert_eq!(
+            telas.em(VoiceRoomId(1)),
+            vec![(PersonId(20), ScreenId(2))],
+            "parar uma não pode derrubar a outra"
+        );
     }
 
     #[test]
-    fn a_tela_de_quem_sai_para_junto_com_ele() {
-        // O mesmo defeito que `Occupancy::vacate_everywhere` conserta para o
+    fn a_tela_de_quem_sai_para_junto_com_ele_e_so_a_dele() {
+        // O mesmo defeito que `Occupancy::vacate_everywhere` conserta para a
         // pessoa fantasma, com a diferença de que aqui a sala fica prometendo
-        // imagem em movimento que não tem mais de onde vir: o fluxo morreu com
-        // a conexão.
+        // imagem em movimento que não tem mais de onde vir: o fluxo morreu com a
+        // conexão.
         let mut telas = Telas::default();
         telas
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
         telas
-            .comecar(VoiceRoomId(2), PersonId(20), ScreenId(2))
+            .comecar(VoiceRoomId(1), PersonId(20), ScreenId(2))
+            .expect("começa");
+        telas
+            .comecar(VoiceRoomId(2), PersonId(10), ScreenId(3))
             .expect("começa");
 
+        let encerradas = telas.encerrar_de(PersonId(10));
+        assert_eq!(encerradas.len(), 2, "as duas salas em que ela transmitia");
+        assert!(encerradas.contains(&(VoiceRoomId(1), ScreenId(1))));
+        assert!(encerradas.contains(&(VoiceRoomId(2), ScreenId(3))));
+
         assert_eq!(
-            telas.encerrar_de(PersonId(10)),
-            vec![(VoiceRoomId(1), ScreenId(1))]
+            telas.em(VoiceRoomId(1)),
+            vec![(PersonId(20), ScreenId(2))],
+            "a de quem ficou não pode cair junto"
         );
-        assert_eq!(telas.em(VoiceRoomId(1)), None);
-        // E não encosta na de mais ninguém.
-        assert_eq!(telas.em(VoiceRoomId(2)), Some((PersonId(20), ScreenId(2))));
+        assert!(telas.em(VoiceRoomId(2)).is_empty());
         assert!(telas.encerrar_de(PersonId(10)).is_empty());
     }
 
     #[test]
-    fn uma_sala_destruida_leva_a_transmissao_dela() {
+    fn uma_sala_destruida_leva_todas_as_transmissoes_dela() {
+        // Todas, e não a primeira: um aviso só deixaria as outras desenhadas
+        // para sempre na tela de quem assiste.
         let mut telas = Telas::default();
         telas
             .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
             .expect("começa");
-        assert_eq!(telas.encerrar_voice_room(VoiceRoomId(1)), Some(ScreenId(1)));
-        assert_eq!(telas.encerrar_voice_room(VoiceRoomId(1)), None);
+        telas
+            .comecar(VoiceRoomId(1), PersonId(20), ScreenId(2))
+            .expect("começa");
+
+        let encerradas = telas.encerrar_voice_room(VoiceRoomId(1));
+        assert_eq!(encerradas.len(), 2);
+        assert!(encerradas.contains(&ScreenId(1)));
+        assert!(encerradas.contains(&ScreenId(2)));
+
+        assert!(telas.encerrar_voice_room(VoiceRoomId(1)).is_empty());
         assert!(telas.todas().is_empty());
+    }
+
+    #[test]
+    fn o_encaminhamento_acha_a_tela_de_cada_pessoa() {
+        // `de` é a pergunta que a tarefa dos fluxos faz, e ela vive fora do laço
+        // da sessão: é a única fonte que sabe sala e tela ao mesmo tempo. Com
+        // duas transmissões na sala, achar «a da sala» deixou de bastar.
+        let mut telas = Telas::default();
+        telas
+            .comecar(VoiceRoomId(1), PersonId(10), ScreenId(1))
+            .expect("começa");
+        telas
+            .comecar(VoiceRoomId(1), PersonId(20), ScreenId(2))
+            .expect("começa");
+
+        assert_eq!(telas.de(PersonId(10)), Some((VoiceRoomId(1), ScreenId(1))));
+        assert_eq!(telas.de(PersonId(20)), Some((VoiceRoomId(1), ScreenId(2))));
+        assert_eq!(telas.de(PersonId(30)), None);
+        assert_eq!(telas.todas().len(), 2);
     }
 }

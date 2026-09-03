@@ -1949,7 +1949,10 @@ async fn run_session(
                                 // desenhando a tela para de desenhá-la porque
                                 // ela acabou, e não porque o cômodo sumiu de
                                 // baixo dela.
-                                if let Some(screen) = server.telas.lock().await.encerrar_voice_room(id) {
+                                // Uma por transmissão: a sala pode ter mais de
+                                // uma em curso, e um aviso só deixaria as outras
+                                // desenhadas para sempre na tela de quem assiste.
+                                for screen in server.telas.lock().await.encerrar_voice_room(id) {
                                     let _ = server.events.send(Event::ScreenShareStopped {
                                         voice_room: id,
                                         screen,
@@ -2143,18 +2146,24 @@ async fn run_session(
                         // §3.3 conta o que um quadro-chave custa — 65 KiB em
                         // 1080p, 446 ms do orçamento inteiro. Um pedido que
                         // atravessasse salas seria amplificação de graça.
-                        let dono = match current_voice_room {
+                        let em_curso = match current_voice_room {
                             Some(voice_room) => server.telas.lock().await.em(voice_room),
-                            None => None,
+                            None => Vec::new(),
                         };
-                        if let Some((sharer, corrente)) = dono {
-                            if corrente == screen {
-                                let _ = server.events.send(Event::KeyFrameRequested {
-                                    screen,
-                                    person: session.person,
-                                    sharer,
-                                });
-                            }
+                        // A tela pedida tem de ser **uma das** desta sala. Com
+                        // mais de uma transmissão a conferência deixou de ser
+                        // «é a da sala» e passou a ser «está entre as da sala» —
+                        // e afrouxá-la para «existe em algum lugar» reabriria o
+                        // pedido que atravessa salas, que é a amplificação que
+                        // este trecho existe para impedir.
+                        if let Some((sharer, _)) =
+                            em_curso.into_iter().find(|(_, corrente)| *corrente == screen)
+                        {
+                            let _ = server.events.send(Event::KeyFrameRequested {
+                                screen,
+                                person: session.person,
+                                sharer,
+                            });
                         }
                     }
 
