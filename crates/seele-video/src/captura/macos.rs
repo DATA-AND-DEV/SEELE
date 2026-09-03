@@ -1196,3 +1196,100 @@ mod testes {
         );
     }
 }
+
+#[cfg(test)]
+mod medicao_do_som_por_janela {
+    use super::{fontes, Cadencia, CapturaDaTela, Fonte, Resolucao};
+    use std::time::Instant;
+
+    /// Ouve por até cinco segundos e devolve o pico.
+    fn pico_de(captura: &CapturaDaTela) -> f32 {
+        let som = captura.som();
+        let _ = som.tomar(96_000);
+        let mut tocando = match std::process::Command::new("afplay")
+            .arg("/System/Library/Sounds/Submarine.aiff")
+            .spawn()
+        {
+            Ok(filho) => filho,
+            Err(_) => return -1.0,
+        };
+        let comeco = Instant::now();
+        let mut pico = 0.0_f32;
+        while comeco.elapsed().as_secs_f64() < 4.0 && pico == 0.0 {
+            for amostra in som.tomar(96_000) {
+                pico = pico.max(amostra.abs());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _ = tocando.kill();
+        let _ = tocando.wait();
+        pico
+    }
+
+    #[test]
+    #[ignore = "medição: precisa de caixa de som e de uma janela na tela"]
+    fn o_filtro_por_janela_isola_o_som_do_aplicativo() {
+        // **O que este teste descobriu, e que ninguém sabia:** no macOS,
+        // compartilhar uma janela já manda só o som do aplicativo dela. A
+        // metade macOS de «mandar só o áudio da janela» estava pronta desde que
+        // o `with_captures_audio` foi ligado, e o pedido de campo — «deve enviar
+        // somente o áudio da janela selecionada, não de todo o PC» — é, aqui, um
+        // pedido já atendido.
+        //
+        // Medido em 03/09/2026, macOS 26.6.2: monitor 0,047324, janela 0,000000.
+        //
+        // **Um experimento com controle, e não uma suposição.**
+        //
+        // A pergunta é se `SCContentFilter::with_window` já entrega só o som do
+        // aplicativo daquela janela. O monitor é o controle: se ele ouvir o
+        // `afplay` e a janela não, o filtro isola. Se **nenhum dos dois** ouvir,
+        // a medição é nula — o som deste processo não chegou ao SCK, e já
+        // aconteceu nesta casa de eu concluir defeito a partir disso.
+        let Ok(lista) = fontes() else {
+            eprintln!("PULADO: não consegui listar as fontes.");
+            return;
+        };
+        let Some(monitor) = lista.iter().find(|f| matches!(f, Fonte::Monitor { .. })) else {
+            eprintln!("PULADO: nenhum monitor na lista.");
+            return;
+        };
+        let Some(janela) = lista.iter().find(|f| matches!(f, Fonte::Janela { .. })) else {
+            eprintln!("PULADO: nenhuma janela na lista.");
+            return;
+        };
+
+        let do_monitor = CapturaDaTela::iniciar(monitor, Resolucao::P720, Cadencia::Q30)
+            .expect("a captura do monitor começa");
+        let pico_do_monitor = pico_de(&do_monitor);
+        do_monitor.parar().expect("para");
+
+        let da_janela = CapturaDaTela::iniciar(janela, Resolucao::P720, Cadencia::Q30)
+            .expect("a captura da janela começa");
+        let pico_da_janela = pico_de(&da_janela);
+        da_janela.parar().expect("para");
+
+        println!("  monitor: pico {pico_do_monitor:.6}");
+        println!("  janela : pico {pico_da_janela:.6}");
+
+        if pico_do_monitor <= 0.0 {
+            // **A medição nula é dita, e não confundida com um resultado.**
+            // Já aconteceu nesta casa de eu concluir «a captura está quebrada» a
+            // partir de um `afplay` que nunca chegou ao SCK.
+            eprintln!(
+                "PULADO: nem o monitor ouviu o `afplay` — o som deste processo \
+                 não chegou ao SCK, e nada se conclui da janela."
+            );
+            return;
+        }
+
+        assert_eq!(
+            pico_da_janela, 0.0,
+            "o som de outro aplicativo entrou numa captura de janela.\n\
+             Medido em 03/09/2026, macOS 26.6.2: monitor 0,047324 e janela \
+             0,000000 — o `SCContentFilter::with_window` isolava o som do \
+             aplicativo da janela. Se isto reprova, aquele comportamento mudou, \
+             e compartilhar uma janela no macOS voltou a mandar o som do \
+             computador inteiro."
+        );
+    }
+}
