@@ -198,19 +198,35 @@ pub(crate) fn executar(
 /// dele nasceria elevado também, e o SEELE passaria a gravar identidade, pinos e
 /// preferências na pasta do administrador — onde a próxima abertura normal não
 /// os acha. A pessoa perderia a chave dela numa atualização.
-pub(crate) fn abrir_o_produto(destino: &Path, argumentos: &[String]) {
+///
+/// # Sem argumentos, e é o `explorer.exe` que manda
+///
+/// Ela recebia uma lista de argumentos e os punha na linha do Explorer. **O
+/// Explorer não encaminha argumento nenhum**: ele recebe um item para abrir, e o
+/// resto ele tenta abrir também. Com `/UPDATE /ARGS` na linha — que é o que o
+/// atualizador do Tauri sempre manda — o produto não abria.
+///
+/// Relatado assim: «ele não reabre o app após atualizar». O botão ABRIR O SEELE
+/// da janela sempre funcionou, e a diferença entre os dois caminhos era esta
+/// lista: vazia num, com dois argumentos no outro. A mesma função, dois
+/// resultados.
+///
+/// **E não há o que perder.** O `seele-app` não lê `argv` em lugar nenhum — os
+/// argumentos que o atualizador reenvia são os que o app tinha, e ele não os
+/// consulta. No dia em que passar a consultar, baixar o privilégio deixa de
+/// poder ser o Explorer: será preciso o token da shell —
+/// `GetShellWindow`/`OpenProcessToken`/`CreateProcessWithTokenW` — que
+/// encaminha linha de comando e é bem mais código.
+pub(crate) fn abrir_o_produto(destino: &Path) {
     let produto = destino.join("SEELE.exe");
     if !produto.is_file() {
         return;
     }
     // `explorer.exe <programa>` é o jeito documentado de baixar o privilégio: o
     // Explorer roda como o usuário, e o que ele lança herda o token dele.
-    let mut comando = std::process::Command::new("explorer.exe");
-    comando.arg(&produto);
-    for argumento in argumentos {
-        comando.arg(argumento);
-    }
-    let _ = comando.spawn();
+    let _ = std::process::Command::new("explorer.exe")
+        .arg(&produto)
+        .spawn();
 }
 
 /// Quanto a pasta ocupa, em KiB — que é a unidade do `EstimatedSize`.

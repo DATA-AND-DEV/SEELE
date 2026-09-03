@@ -177,7 +177,21 @@ fn sem_perguntar(
     })?;
 
     if reiniciar {
-        instalacao::abrir_o_produto(&destino, argumentos_do_app);
+        // **Os argumentos do app não vão junto, e isto diz quando havia algum.**
+        //
+        // Baixar o privilégio é `explorer.exe <programa>`, e o Explorer não
+        // encaminha argumento nenhum — ver `abrir_o_produto`. Na prática não há
+        // o que perder, porque o `seele-app` não lê `argv`; mas descartar em
+        // silêncio é como o defeito anterior nasceu, e uma linha na saída custa
+        // nada a quem não a lê.
+        if !argumentos_do_app.is_empty() {
+            println!(
+                "os argumentos do app não foram repassados, porque o Explorer \
+                 não os encaminha: {}",
+                argumentos_do_app.join(" ")
+            );
+        }
+        instalacao::abrir_o_produto(&destino);
     }
     Ok(())
 }

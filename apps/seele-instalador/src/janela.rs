@@ -1224,10 +1224,7 @@ fn agir(janela: HWND, estado: &mut Estado, acao: Option<Acao>) {
                 // Fechar primeiro também não serviria: o `DestroyWindow` leva ao
                 // fim do laço de mensagens e à saída do processo, e o que vier
                 // depois pode não chegar a rodar.
-                instalacao::abrir_o_produto(
-                    &std::path::PathBuf::from(pasta_escolhida(estado)),
-                    &[],
-                );
+                instalacao::abrir_o_produto(&std::path::PathBuf::from(pasta_escolhida(estado)));
                 // SAFETY: fecha a janela, agora com o produto já lançado.
                 unsafe {
                     let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(janela);

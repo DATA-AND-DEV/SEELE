@@ -90,6 +90,26 @@ pub(crate) fn ler(argumentos: impl Iterator<Item = String>) -> Pedido {
             "/S" => tela = Tela::Nenhuma,
             "/P" => tela = Tela::Passiva,
             "/R" => reiniciar = true,
+            // **`/UPDATE` e `/ARGS`, que o atualizador do Tauri sempre manda.**
+            //
+            // A linha inteira que ele monta é `/P /R /UPDATE /ARGS <args do
+            // app>` — está em `updater.rs` do plugin, no braço `Nsis`. Estes
+            // dois não estavam aqui, então caíam no `_` e viravam «argumentos do
+            // app»; e `abrir_o_produto` os entregava ao `explorer.exe`, que não
+            // encaminha argumento nenhum e não abria coisa nenhuma.
+            //
+            // Relatado assim: «ele não reabre o app após atualizar». O botão
+            // ABRIR O SEELE da janela sempre funcionou, e a diferença entre os
+            // dois caminhos era exatamente esta lista: vazia num, com `/UPDATE
+            // /ARGS` no outro.
+            //
+            // `/UPDATE` é marca e não pedido: ele diz «isto é uma atualização»,
+            // que aqui já se sabe por não haver tela. Reconhecido para não virar
+            // lixo, e ignorado por não ter o que fazer.
+            "/UPDATE" => {}
+            // `/ARGS` é separador: o que vem **depois** dele é do app, e o que
+            // vem antes é do instalador. Sem ele os dois se misturavam.
+            "/ARGS" => do_app.clear(),
             _ => do_app.push(argumento),
         }
     }
@@ -179,5 +199,38 @@ mod testes {
             Pedido::RemoverA(pasta) => assert_eq!(pasta.display().to_string(), r"C:\SEELE"),
             _ => panic!("esperava a remoção de uma pasta nomeada"),
         }
+    }
+    #[test]
+    fn a_linha_inteira_que_o_atualizador_manda() {
+        // **É esta, e não a que era cômoda de imaginar.** O plugin monta
+        // `/P /R /UPDATE /ARGS <args do app>` — está em `updater.rs`, no braço
+        // `Nsis`. Os testes vizinhos exercitavam `/P /R` e paravam ali, que é
+        // por onde o defeito passou: `/UPDATE` e `/ARGS` caíam no ramo de sobra,
+        // viravam «argumentos do app», e iam parar na linha do `explorer.exe`,
+        // que não encaminha argumento nenhum e não abria o produto.
+        //
+        // Relatado assim: «ele não reabre o app após atualizar».
+        let (tela, reiniciar, sobras) = instalar(&["/P", "/R", "/UPDATE", "/ARGS"]);
+        assert!(
+            tela == Tela::Passiva,
+            "o /P continua pedindo a tela passiva"
+        );
+        assert!(reiniciar, "o /R continua sendo o pedido de reabrir");
+        assert!(
+            sobras.is_empty(),
+            "as marcas do atualizador viraram argumentos do app: {sobras:?}"
+        );
+    }
+
+    #[test]
+    fn o_que_vem_depois_de_args_e_do_app_e_o_que_vem_antes_nao() {
+        // `/ARGS` é separador. Sem ele, o que o instalador não reconhecesse se
+        // misturava com o que é do app, e os dois iam para o mesmo lugar.
+        let (_, _, sobras) = instalar(&["/P", "/R", "/UPDATE", "/ARGS", "--sala", "7"]);
+        assert_eq!(
+            sobras,
+            vec!["--sala".to_owned(), "7".to_owned()],
+            "o que vem depois de /ARGS é do app, e nada além disso"
+        );
     }
 }
