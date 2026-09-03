@@ -127,6 +127,27 @@ fn todo_import_de_plataforma_esta_dentro_de_um_cfg() {
         };
         let linhas: Vec<&str> = corpo.lines().collect();
 
+        // **Um `#![cfg(...)]` no topo cobre o arquivo inteiro.**
+        //
+        // O guarda procurava só a forma externa, `#[cfg(...)]`, que é a que
+        // acompanha um item. A forma interna vale para tudo o que vem depois
+        // dela no arquivo — e um arquivo que começa com `#![cfg(windows)]` não
+        // existe fora do Windows, então nenhum import dentro dele pode derrubar
+        // a compilação de outro sistema.
+        //
+        // Sem isto o guarda reprovava um arquivo que estava certo, e a saída
+        // fácil seria repetir o `#[cfg]` em cada `use` — ruído que ensina a
+        // ignorar o guarda.
+        let arquivo_inteiro_e_de_uma_plataforma: Vec<&str> = linhas
+            .iter()
+            .take_while(|linha| {
+                let cortada = linha.trim_start();
+                cortada.is_empty() || cortada.starts_with("//") || cortada.starts_with("#![")
+            })
+            .filter(|linha| linha.trim_start().starts_with("#![cfg("))
+            .copied()
+            .collect();
+
         for (numero, linha) in linhas.iter().enumerate() {
             let cortada = linha.trim_start();
             if !cortada.starts_with("use ") {
@@ -144,7 +165,10 @@ fn todo_import_de_plataforma_esta_dentro_de_um_cfg() {
                 .get(inicio..numero)
                 .unwrap_or_default()
                 .iter()
-                .any(|acima| acima.contains("#[cfg(") && acima.contains(plataforma));
+                .any(|acima| acima.contains("#[cfg(") && acima.contains(plataforma))
+                || arquivo_inteiro_e_de_uma_plataforma
+                    .iter()
+                    .any(|topo| topo.contains(plataforma));
 
             if !coberto {
                 let relativo = arquivo.strip_prefix(&raiz).unwrap_or(arquivo);
