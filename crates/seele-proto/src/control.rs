@@ -1173,6 +1173,39 @@ pub enum ClientMessage {
         /// O nome novo.
         name: String,
     },
+    /// Pede para receber a imagem desta transmissão.
+    ///
+    /// # Por que assistir é um pedido, e não o que acontece sozinho
+    ///
+    /// Até aqui uma transmissão era empurrada para toda a sala: quem abria,
+    /// abria para todo mundo. Com uma transmissão por sala isso é o
+    /// comportamento certo — ninguém quer clicar para ver a única coisa que está
+    /// acontecendo.
+    ///
+    /// Com várias, empurrar todas para todos custa o que ninguém pediu: cada
+    /// pessoa **baixa** uma cópia de cada transmissão e **decodifica** uma por
+    /// uma. Numa sala de seis com todos transmitindo, cada máquina receberia
+    /// cinco fluxos e abriria cinco decodificadores — e nem a descida nem a CPU
+    /// de quem assiste aparecem na conta do §5.1, que só mede a subida de quem
+    /// hospeda.
+    ///
+    /// Sendo pedido, uma transmissão custa o que alguém está de fato olhando: o
+    /// servidor não abre cano para quem não pediu, e o teto divide pelas cópias
+    /// que existem.
+    WatchScreen {
+        /// Qual transmissão. Tem de ser uma das da sala em que esta conexão está.
+        screen: ScreenId,
+    },
+    /// Para de receber a imagem desta transmissão.
+    ///
+    /// Fechar o fluxo diria quase o mesmo, e não serve pelo mesmo motivo que
+    /// [`Self::StopScreenShare`] existe: um verbo que só existe como ausência
+    /// não distingue «fechei a janela» de «minha conexão caiu», e o servidor
+    /// precisa saber a diferença para devolver o teto a quem ficou.
+    UnwatchScreen {
+        /// Qual transmissão.
+        screen: ScreenId,
+    },
 }
 
 /// Server to client.
@@ -2034,7 +2067,13 @@ impl Validate for ClientMessage {
             | Self::FetchAttachment { .. }
             | Self::StartScreenShare
             | Self::StopScreenShare
-            | Self::RequestKeyFrame { .. } => Ok(()),
+            | Self::RequestKeyFrame { .. }
+            // A `ScreenId` não se valida aqui: um número qualquer é uma tela que
+            // não existe, e quem sabe disso é o servidor, que tem o registro. O
+            // que ele faz com um id inventado está em `session.rs`, junto da
+            // mesma conferência que o pedido de quadro-chave já faz.
+            | Self::WatchScreen { .. }
+            | Self::UnwatchScreen { .. } => Ok(()),
         }
     }
 }
@@ -3201,6 +3240,22 @@ mod screen_tests {
                     screen: ScreenId(0x00C0_FFEE),
                 },
                 27,
+            ),
+            // Os dois verbos de assistir, acrescentados no fim como os outros
+            // três. Eles não existiam quando uma transmissão era empurrada para
+            // a sala inteira; um par mais velho que os receba não os reconhece e
+            // recusa o quadro, que é o contrato.
+            (
+                ClientMessage::WatchScreen {
+                    screen: ScreenId(0x00C0_FFEE),
+                },
+                30,
+            ),
+            (
+                ClientMessage::UnwatchScreen {
+                    screen: ScreenId(0x00C0_FFEE),
+                },
+                31,
             ),
         ] {
             let frame = encode(&message).unwrap();
