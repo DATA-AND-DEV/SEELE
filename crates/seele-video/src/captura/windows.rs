@@ -160,6 +160,26 @@ enum Fonte {
     Janela(Window),
 }
 
+impl Alvo {
+    /// O processo dono desta janela, quando o alvo é uma janela.
+    ///
+    /// **`None` para um monitor, e a ausência é a resposta certa:** compartilhar
+    /// um monitor não tem um programa dono, e o som que acompanha é o da
+    /// máquina. É por este número que a captura de áudio por processo sabe de
+    /// quem capturar — ver `seele_audio::laco_por_processo`.
+    ///
+    /// `None` também quando o Windows não diz de quem é a janela. A janela pode
+    /// ter fechado entre a lista e o começo da transmissão, e nesse caso o som
+    /// da máquina é melhor que silêncio.
+    #[must_use]
+    pub fn processo(&self) -> Option<u32> {
+        match self.fonte {
+            Fonte::Monitor(_) => None,
+            Fonte::Janela(janela) => janela.process_id().ok(),
+        }
+    }
+}
+
 /// Uma coisa que se pode transmitir, com o rótulo que a interface mostra.
 #[derive(Debug, Clone)]
 pub struct Alvo {

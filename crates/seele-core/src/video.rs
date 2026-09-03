@@ -130,7 +130,21 @@ impl FonteDeQuadros for seele_video::captura::macos::CapturaDaTela {
 #[cfg(target_os = "windows")]
 pub struct CapturaComSom {
     imagem: seele_video::captura::windows::Captura,
-    som: Option<seele_audio::laco::CapturaDaSaida>,
+    som: Option<SomDaTela>,
+}
+
+/// De onde o som da transmissão vem, no Windows.
+///
+/// **Duas fontes, e a diferença é o que vai no fio.** Compartilhando uma janela,
+/// o som é o do programa dela e de mais nada — foi o pedido de campo: «deve
+/// enviar somente o áudio da janela selecionada, não de todo o PC».
+/// Compartilhando um monitor, o som é o da máquina, que é o que compartilhar um
+/// monitor quer dizer.
+enum SomDaTela {
+    /// A árvore de processos de uma janela.
+    DoPrograma(seele_audio::laco_por_processo::SomDoPrograma),
+    /// Tudo o que a máquina toca.
+    DaMaquina(seele_audio::laco::CapturaDaSaida),
 }
 
 /// `Fonte` tem de ser `Send`: ela nasce na thread que abre a captura e vive na
@@ -171,7 +185,17 @@ impl FonteDeQuadros for CapturaComSom {
         //
         // `CapturaDaSaida` converte, com o mesmo `RateConverter` que a voz usa
         // desde sempre. O que sai de `tomar` está na taxa da casa, sempre.
-        captura.tomar(TETO)
+        match captura {
+            SomDaTela::DaMaquina(captura) => captura.tomar(TETO),
+            // A captura por processo já nasce em 48 kHz — ela **declara** o
+            // formato em vez de aceitar o do dispositivo, porque nesta ativação
+            // não há dispositivo a quem perguntar. Não há taxa a converter.
+            //
+            // O prazo é curto de propósito: esta chamada corre no laço do
+            // codificador, e esperar por som que não vem seguraria o quadro
+            // seguinte. Um programa em silêncio devolve vazio na hora.
+            SomDaTela::DoPrograma(captura) => captura.tomar(5),
+        }
     }
 }
 
@@ -636,18 +660,30 @@ impl Captura for CapturaDoSistema {
             // responde é «a transmissão saiu muda por quê», e ela é feita depois
             // do fato, por alguém lendo o arquivo: um caminho bom silencioso não
             // distingue «abriu e não veio som» de «nem abriu».
-            let som = match seele_audio::laco::CapturaDaSaida::abrir(None) {
-                Ok(captura) => {
-                    tracing::info!(
-                        taxa = captura.taxa(),
-                        "o som desta máquina abriu para a transmissão"
-                    );
-                    Some(captura)
-                }
-                Err(erro) => {
-                    tracing::warn!(%erro, "não abri o som desta máquina; a transmissão sai muda");
-                    None
-                }
+            // **Uma janela leva o som dela; um monitor leva o da máquina.**
+            //
+            // E quando a captura por processo não abre — Windows anterior à
+            // build 20348, ou a janela fechou entre a lista e agora —, o som da
+            // máquina é a queda: mandar o som do computador inteiro é pior que
+            // mandar só o da janela, e melhor que mandar silêncio.
+            let som = match self.alvo.processo() {
+                Some(processo) => match seele_audio::laco_por_processo::SomDoPrograma::abrir(
+                    processo,
+                ) {
+                    Ok(captura) => {
+                        tracing::info!(processo, "o som deste programa abriu para a transmissão");
+                        Some(SomDaTela::DoPrograma(captura))
+                    }
+                    Err(erro) => {
+                        tracing::warn!(
+                            %erro,
+                            processo,
+                            "não abri o som só deste programa; caio para o som da máquina"
+                        );
+                        som_da_maquina()
+                    }
+                },
+                None => som_da_maquina(),
             };
             Ok(CapturaComSom { imagem, som })
         }
@@ -1340,5 +1376,28 @@ mod tests {
             erro,
             ErroDeCompartilhamento::Parado(MotivoDeParada::AbaixoDoPiso)
         ));
+    }
+}
+
+/// O som da máquina inteira, que é o que um monitor compartilhado leva.
+///
+/// **`info!` e não `debug!` no caminho bom.** A pergunta que este log responde é
+/// «a transmissão saiu muda por quê», e ela é feita depois do fato, por alguém
+/// lendo o arquivo: um caminho bom silencioso não distingue «abriu e não veio
+/// som» de «nem abriu».
+#[cfg(target_os = "windows")]
+fn som_da_maquina() -> Option<SomDaTela> {
+    match seele_audio::laco::CapturaDaSaida::abrir(None) {
+        Ok(captura) => {
+            tracing::info!(
+                taxa = captura.taxa(),
+                "o som desta máquina abriu para a transmissão"
+            );
+            Some(SomDaTela::DaMaquina(captura))
+        }
+        Err(erro) => {
+            tracing::warn!(%erro, "não abri o som desta máquina; a transmissão sai muda");
+            None
+        }
     }
 }
