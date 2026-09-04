@@ -1766,6 +1766,23 @@ button.linha-nome:hover { text-decoration: underline; }
   color: var(--seele-osso-apagado);
 }
 
+/* A parede: a regra de firewall desta máquina não cobre o programa que está
+   escutando, então **ninguém** entra — nem quem está na mesma rede.
+
+   Ela não é `-detalhe` apagado porque não explica um alcance menor: explica
+   alcance nenhum. Mais clara que os detalhes e com uma barra à esquerda, que é
+   como esta interface separa «isto é sobre o que você tentou» de «isto é sobre
+   o que está impedindo». Sem vermelho: `tokens.css` reserva essa cor para
+   alerta e queda, e uma porta fechada é nenhum dos dois. */
+.convite-alcance-parede {
+  display: block;
+  margin-top: 8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--seele-laranja-nerv);
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso);
+}
+
 /* ---- bateria interna ----
    `specs/07-estetica.md`: contagem em vermelho, interface esmaecida mas
    **ainda legível**. Esmaecer não é esconder: o histórico continua ali para

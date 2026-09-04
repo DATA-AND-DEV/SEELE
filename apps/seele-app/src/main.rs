@@ -543,6 +543,30 @@ struct Anfitriao {
     /// quando ninguém pediu ponto de encontro nenhum — desligá-lo é uma escolha,
     /// não uma falha a explicar.
     encontro_recusado: Option<String>,
+    /// A regra de firewall desta máquina não cobre **este** executável.
+    ///
+    /// # Como isto some sem ninguém notar
+    ///
+    /// A regra é presa ao programa e não à porta — de propósito, porque uma
+    /// regra por número abriria a 8383 para qualquer coisa que a escutasse
+    /// depois. O preço é que ela vale para **um caminho**, e um caminho pode
+    /// deixar de ser o certo sem que nada mude no Windows: quem roda uma cópia
+    /// compilada à mão, quem move a pasta, quem apaga a instalação sem passar
+    /// pelo desinstalador.
+    ///
+    /// Aí a regra continua lá, habilitada, verde no painel, **e não permite
+    /// nada** — porque o programa que ela nomeia não é o que está escutando.
+    ///
+    /// Medido numa máquina de verdade em 04/09/2026: o registro dizia
+    /// `C:\Program Files\SEELE`, a pasta não existia, e a regra apontava para o
+    /// `SEELE.exe` que estaria lá. O anfitrião subia, a escada anunciava furo de
+    /// NAT, e quem estava na mesma LAN batia três vezes sem entrar — o candidato
+    /// da rede local era barrado pelo firewall, e sobrava um furo de NAT entre
+    /// duas máquinas atrás do mesmo roteador, que depende de *hairpinning* e
+    /// quase nunca funciona.
+    ///
+    /// Nada nesta tela dizia isso. O relato foi «teste em LAN não funciona».
+    firewall_nao_cobre: Option<String>,
 }
 
 /// Por que não deu para hospedar.
@@ -642,6 +666,7 @@ async fn hospedar(
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
         encontro_recusado: alcance
             .and_then(|alcance| alcance.encontro_recusado().map(str::to_owned)),
+        firewall_nao_cobre: firewall_nao_cobre_este_executavel(),
     };
 
     session
@@ -652,6 +677,76 @@ async fn hospedar(
 
     Ok(anfitriao)
 }
+
+/// Se a regra de firewall desta máquina **não** cobre o executável que está
+/// rodando, e por quê.
+///
+/// # Por que comparar com o registro em vez de ler a regra
+///
+/// Ler a regra seria perguntar ao `netsh`, e a saída dele é traduzida: o campo é
+/// `Programa:` num Windows em português e `Program:` num em inglês. Um
+/// diagnóstico que depende do idioma do sistema é um diagnóstico que erra
+/// justamente na máquina de outra pessoa.
+///
+/// O registro responde a mesma pergunta sem ambiguidade. `InstallLocation` é
+/// escrito pelo nosso instalador, e é dele que sai o caminho que a regra nomeia.
+/// Se este executável não está lá dentro, a regra não é sobre ele.
+///
+/// Duas formas de estar errado, e as duas dão a mesma tela vazia do outro lado:
+///
+///   1. **A pasta não existe.** Alguém apagou a instalação sem passar pelo
+///      desinstalador; a regra continua apontando para o nada.
+///   2. **Este não é o executável instalado.** Uma cópia compilada à mão, um
+///      atalho para outra pasta. A regra cobre a instalada, não esta.
+///
+/// Medido numa máquina de verdade em 04/09/2026: o registro dizia uma pasta que
+/// não existia, a regra apontava para o executável que estaria lá, o anfitrião
+/// subia anunciando furo de NAT, e quem estava na mesma LAN batia três vezes sem
+/// entrar. Nada na tela dizia isso, e o relato foi «teste em LAN não funciona».
+///
+/// `None` fora do Windows e quando está tudo certo. Um `None` por não conseguir
+/// ler o registro também é `None`: não saber não é motivo para acusar.
+fn firewall_nao_cobre_este_executavel() -> Option<String> {
+    #[cfg(not(windows))]
+    {
+        None
+    }
+    #[cfg(windows)]
+    {
+        let eu = std::env::current_exe().ok()?;
+        let instalado = std::process::Command::new("reg")
+            .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
+            .output()
+            .ok()
+            .filter(|saida| saida.status.success())
+            .and_then(|saida| {
+                String::from_utf8_lossy(&saida.stdout)
+                    .lines()
+                    .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
+            })?;
+
+        let pasta = std::path::Path::new(&instalado);
+        if !pasta.is_dir() {
+            return Some(format!(
+                "a regra de firewall aponta para {instalado}, e essa pasta não existe \
+                 mais — então ela não deixa entrar nada. Reinstale o SEELE marcando a \
+                 caixa da porta."
+            ));
+        }
+        if !eu.starts_with(pasta) {
+            return Some(format!(
+                "este SEELE está rodando de {}, e a regra de firewall cobre o que está \
+                 instalado em {instalado}. Conexões de fora não chegam a esta cópia.",
+                eu.display()
+            ));
+        }
+        None
+    }
+}
+
+/// Onde o instalador grava o que se sabe sobre a instalação.
+#[cfg(windows)]
+const CHAVE_DA_INSTALACAO: &str = r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\SEELE";
 
 /// A porta em que um servidor escuta por padrão.
 const PORTA_PADRAO: u16 = 8383;

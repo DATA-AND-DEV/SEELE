@@ -273,7 +273,7 @@ listen("seele://event", (evento) => {
  * `RedeLocalOuVpn` conta como perto: quem hospeda com uma VPN de navegação
  * ligada tem um endereço que parece alcançar o mundo e não aceita ninguém.
  */
-function mostrarAlcance(alcance, portaRecusada, encontroRecusado) {
+function mostrarAlcance(alcance, portaRecusada, encontroRecusado, firewallNaoCobre) {
   const onde = $("convite-alcance");
   const frase = fraseDeErro(alcance);
   const soPerto = alcance === "SoRedeLocal" || alcance === "RedeLocalOuVpn";
@@ -294,6 +294,24 @@ function mostrarAlcance(alcance, portaRecusada, encontroRecusado) {
   // verdade, «o roteador respondeu: o roteador respondeu, e o endereço dele…».
   // O rótulo só parecia necessário porque quem o escreveu não estava lendo a
   // frase que ele ia prefixar.
+  // **A parede vem antes, e não é detalhe.**
+  //
+  // Os dois motivos abaixo explicam por que o link não chega tão longe quanto
+  // poderia. Este explica por que ele não chega a lugar nenhum: a regra de
+  // firewall desta máquina nomeia um programa que não é o que está escutando,
+  // então nem quem está na mesma rede entra.
+  //
+  // Medido numa máquina de verdade: o anfitrião subia anunciando furo de NAT, e
+  // quem estava na mesma LAN batia três vezes sem entrar. A escada dizia até
+  // onde o link ia; nada dizia que a porta estava fechada atrás dela. O relato
+  // foi «teste em LAN não funciona».
+  if (firewallNaoCobre) {
+    const parede = document.createElement("span");
+    parede.className = "convite-alcance-parede";
+    parede.textContent = firewallNaoCobre;
+    onde.append(parede);
+  }
+
   for (const motivo of [portaRecusada, encontroRecusado]) {
     if (!motivo) continue;
     const detalhe = document.createElement("span");
@@ -330,6 +348,7 @@ async function hospedar() {
       anfitriao.alcance,
       anfitriao.porta_recusada,
       anfitriao.encontro_recusado,
+      anfitriao.firewall_nao_cobre,
     );
 
     // **O link, guardado e mostrado.** A comp da 0.9.0 promove a um diálogo o
