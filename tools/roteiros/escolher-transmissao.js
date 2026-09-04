@@ -78,6 +78,59 @@ desenharTransmissoes({
 });
 relatar("quem o roster não tem: " + estado());
 
+// ---- os três estados da escolha ----
+//
+// Relatado assim: «o botão de ver e não ver a stream ta completamente cagado.
+// Tem hora que clico e ele não vai, as vezes cliquei pra não ver ele fecha e
+// depois abre novamente sozinho.»
+//
+// As duas metades saem do mesmo lugar: a fileira mostrava o **fluxo** e nunca o
+// **pedido**. Entre o clique e a imagem há o próximo quadro-chave de quem
+// transmite, e nesse intervalo nada mudava na tela.
+
+function estadoDetalhado() {
+  const onde = $("palco-escolha");
+  return [...onde.querySelectorAll("button")]
+    .map((b) => {
+      const marca = b.getAttribute("aria-pressed") === "true" ? "*" : "";
+      const esperando = b.dataset.esperando === "sim" ? "~" : "";
+      return b.textContent + marca + esperando;
+    })
+    .join(" ");
+}
+
+telaEmCurso = null;
+telaQuerida = undefined;
+salaDaEscolha = 1;
+desenharTransmissoes(duas);
+relatar("ninguém escolheu nada: " + estadoDetalhado());
+
+// Clicar pede, e o pedido aparece **antes** da imagem.
+await trocarDeTransmissao(8);
+desenharTransmissoes(duas);
+relatar("logo depois do clique: " + estadoDetalhado());
+
+// Clicar de novo na mesma não refaz o pedido — era isto que reiniciava a espera.
+const antes = telaQuerida;
+await trocarDeTransmissao(8);
+relatar("clicando de novo: telaQuerida mudou? " + (antes !== telaQuerida));
+
+// A imagem chega, e o «abrindo» some.
+telaEmCurso = 8;
+desenharTransmissoes(duas);
+relatar("quando a imagem chega: " + estadoDetalhado());
+
+// E um retrato transitório, sem a lista de salas, não pode apagar a escolha.
+await pararDeVer();
+desenharTransmissoes({ roster, transmissoes: duas.transmissoes });
+relatar("retrato sem lista de salas: telaQuerida=" + telaQuerida);
+desenharTransmissoes(duas);
+relatar("e a fileira segue: " + estadoDetalhado());
+
+// Sair da sala, esse sim, esquece.
+desenharTransmissoes({ roster, voice_rooms: [{ id: 1, occupied_by_us: false }], transmissoes: [] });
+relatar("fora da sala: telaQuerida=" + telaQuerida);
+
 // ---- não querer ver ----
 //
 // Com uma transmissão só a fileira agora aparece: escolher entre ver e não ver
@@ -103,8 +156,8 @@ relatar("o servidor tentou ligar: telaEmCurso=" + telaEmCurso);
 
 // Escolher uma tela desdiz a recusa.
 await trocarDeTransmissao(7);
-relatar("depois de escolher de novo: naoQueroVer=" + naoQueroVer);
+relatar("depois de escolher de novo: telaQuerida=" + telaQuerida);
 
 // E sair da sala esquece.
 desenharTransmissoes({ roster, voice_rooms: [{ id: 1, occupied_by_us: false }], transmissoes: [] });
-relatar("fora da sala: naoQueroVer=" + naoQueroVer + " · fileira " + estado());
+relatar("fora da sala: telaQuerida=" + telaQuerida + " · fileira " + estado());

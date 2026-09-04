@@ -137,7 +137,11 @@ impl Resolucao {
 /// por `cargo:rustc-link-arg`, o Cargo o ignora vindo de dependência, e o
 /// `.cargo/config.toml` que conserta isso não alcança doctests.
 #[must_use]
-pub fn medidas_para(degrau: Resolucao, fonte_largura: usize, fonte_altura: usize) -> (usize, usize) {
+pub fn medidas_para(
+    degrau: Resolucao,
+    fonte_largura: usize,
+    fonte_altura: usize,
+) -> (usize, usize) {
     // Uma fonte sem lado não tem proporção: fica o degrau, que é o que a lista
     // do §5 promete e o que todo teste deste crate espera.
     if fonte_largura == 0 || fonte_altura == 0 {

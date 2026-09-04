@@ -19,16 +19,45 @@ let decodificador = null;
 let telaEmCurso = null;
 
 /**
- * Se esta pessoa disse que não quer ver transmissão nenhuma.
+ * O que esta pessoa **pediu** para ver, que não é o mesmo que está vendo.
  *
- * **Uma escolha, e não a ausência de uma.** Sem esta bandeira, `NÃO VER` duraria
- * até o servidor ligar a pessoa de novo — o que ele faz sozinho sempre que uma
- * transmissão começa e é a única da sala, porque é o certo para quem não disse
- * nada. Quem disse, disse; e é `abrirImagemDaTela` que respeita.
+ * # Por que a intenção precisa de uma variável própria
  *
- * Zerada ao sair da sala: a escolha é sobre o que está acontecendo ali.
+ * `telaEmCurso` é escrito quando o fluxo **abre de verdade**, e abrir espera o
+ * próximo quadro-chave de quem transmite — segundos, não milissegundos. Enquanto
+ * a fileira era desenhada só a partir dele, o intervalo inteiro entre o clique e
+ * a imagem era indistinguível de nada ter acontecido: o botão continuava dizendo
+ * `VER`, sem marca, e clicar de novo **reiniciava a espera**.
+ *
+ * Foi relatado assim: «o botão de ver e não ver a stream ta completamente
+ * cagado. Tem hora que clico e ele não vai, as vezes cliquei pra não ver ele
+ * fecha e depois abre novamente sozinho.» As duas metades saem daqui.
+ *
+ * # Os três estados, e eles são três de propósito
+ *
+ * - `undefined` — **ninguém escolheu**. O servidor decide, e ele liga todo mundo
+ *   na primeira transmissão da sala. É o certo para quem não disse nada: ninguém
+ *   quer clicar para ver a única coisa que está acontecendo.
+ * - `null` — **escolheu não ver**. Vale contra o religar do servidor.
+ * - um número — **escolheu esta**, e a imagem pode ainda não ter chegado.
+ *
+ * A ausência de escolha e a escolha de não ver eram a mesma coisa antes, com uma
+ * bandeira à parte tentando distingui-las. Duas variáveis para um estado são
+ * duas variáveis que discordam.
  */
-let naoQueroVer = false;
+let telaQuerida;
+
+/**
+ * Em que sala a escolha acima vale.
+ *
+ * **Presa à sala, e não zerada por qualquer retrato.** A bandeira anterior era
+ * apagada sempre que um retrato não afirmasse que se está numa sala — e um
+ * retrato transitório, chegando entre dois estados, afirma isso sem querer. A
+ * escolha morria, o servidor religava, e a imagem voltava sozinha.
+ *
+ * Comparar a sala é o que distingue «saí» de «o retrato ainda não sabe».
+ */
+let salaDaEscolha = null;
 
 /**
  * Se já chegou um quadro-chave desta transmissão.
@@ -159,7 +188,11 @@ async function abrirImagemDaTela(tela, largura, altura) {
   // coisa que está acontecendo. Para quem disse, é o contrário: a cópia chega
   // por um caminho que a pessoa já recusou, e devolvê-la é a única forma de o
   // botão significar o que diz.
-  if (naoQueroVer) {
+  // Escolheu não ver, ou escolheu **outra**: nos dois casos o servidor está
+  // abrindo uma coisa que ninguém pediu, e devolvê-la é o que faz a escolha
+  // significar alguma coisa. `undefined` passa: aí ninguém escolheu, e o
+  // religar automático é o comportamento certo.
+  if (telaQuerida !== undefined && telaQuerida !== tela) {
     invoke("assistir", { tela, quero: false }).catch((falha) => {
       if (falha !== "NotConnected") console.warn("recusar a transmissão:", falha);
     });
@@ -538,15 +571,24 @@ function desenharTransmissoes(snapshot) {
   const onde = $("palco-escolha");
   if (!onde) return;
 
-  // **Sair da sala esquece a recusa.** Ela é uma escolha sobre o que está
-  // acontecendo naquela sala; carregá-la para a próxima faria a pessoa chegar
-  // numa call nova já recusando o que ainda não viu, sem lembrar de ter dito.
+  // **A escolha morre com a sala, e só com ela.**
   //
-  // Aqui e não num gancho de saída porque este desenho roda a cada retrato e
-  // enxerga as duas transições — sair pela porta, ser expulso, o servidor cair.
-  // Um gancho por caminho seria um gancho a esquecer.
-  const naSala = (snapshot?.voice_rooms ?? []).some((sala) => sala.occupied_by_us);
-  if (!naSala) naoQueroVer = false;
+  // Ela era apagada sempre que um retrato não afirmasse que se está numa sala —
+  // e um retrato transitório, chegando entre dois estados, afirma isso sem
+  // querer. A escolha morria, o servidor religava, e a imagem voltava sozinha:
+  // «cliquei pra não ver, ele fecha e depois abre novamente sozinho».
+  //
+  // Duas mudanças resolvem. A primeira: só um retrato que **traz a lista de
+  // salas** conta — sem ela não se sabe nada, e não saber não é motivo para
+  // esquecer. A segunda: compara-se a sala, e não a presença; entrar noutra sala
+  // é uma escolha nova, ficar na mesma não é.
+  if (Array.isArray(snapshot?.voice_rooms)) {
+    const sala = snapshot.voice_rooms.find((uma) => uma.occupied_by_us)?.id ?? null;
+    if (sala !== salaDaEscolha) {
+      salaDaEscolha = sala;
+      telaQuerida = undefined;
+    }
+  }
 
   const lista = Array.isArray(snapshot?.transmissoes) ? snapshot.transmissoes : [];
   // Quem transmite não assiste a si mesmo pelo servidor — o espelho dele é
@@ -558,9 +600,24 @@ function desenharTransmissoes(snapshot) {
     return;
   }
 
+  // **O que está marcado é o que foi pedido, e não o que já chegou.**
+  //
+  // Sem escolha nenhuma, o pedido é o que está no palco — é o servidor quem
+  // decide, e a fileira mostra o que ele decidiu.
+  const pedida = telaQuerida === undefined ? telaEmCurso : telaQuerida;
+
   const botoes = alheias.map((transmissao) => {
     const quem = nomeDeQuem(snapshot, transmissao.de);
+    const escolhida = transmissao.tela === pedida;
     const noPalco = transmissao.tela === telaEmCurso;
+    // **Esperando é um terceiro estado, e ele precisava aparecer.**
+    //
+    // Entre o clique e a imagem há o próximo quadro-chave de quem transmite —
+    // segundos. A fileira mostrava o fluxo, então o intervalo inteiro era
+    // indistinguível de nada ter acontecido: «tem hora que clico e ele não vai».
+    // Agora ela mostra o pedido, e diz que está esperando.
+    const esperando = escolhida && !noPalco;
+
     // **`VER` na frente quando não se está vendo nada.**
     //
     // O rótulo era só o nome. Entre duas transmissões isso basta — a escolha é
@@ -570,15 +627,20 @@ function desenharTransmissoes(snapshot) {
     //
     // Relatado assim: «tem botão pra parar de ver live, mas não tem botão pra
     // voltar a ver a live». O botão existia e não dizia que era um.
-    //
-    // Só quando ninguém está no palco: com uma transmissão sendo recebida, os
-    // outros nomes já são «troque para este», e um `VER` em cada um seria a
-    // palavra repetida numa fileira que já se entende.
-    const rotulo = telaEmCurso === null ? `VER ${quem}` : quem;
+    const rotulo = esperando
+      ? `${quem} · ABRINDO`
+      : pedida === null
+        ? `VER ${quem}`
+        : quem;
     const botao = elemento("button", null, rotulo);
     botao.type = "button";
-    botao.setAttribute("aria-pressed", noPalco ? "true" : "false");
-    botao.title = noPalco ? `${quem} está no palco` : `ver a tela de ${quem}`;
+    botao.setAttribute("aria-pressed", escolhida ? "true" : "false");
+    botao.dataset.esperando = esperando ? "sim" : "nao";
+    botao.title = esperando
+      ? `pedido; a imagem começa no próximo quadro-chave de ${quem}`
+      : noPalco
+        ? `${quem} está no palco`
+        : `ver a tela de ${quem}`;
     botao.addEventListener("click", () => {
       trocarDeTransmissao(transmissao.tela).catch((falha) =>
         console.warn("trocar de transmissão:", falha),
@@ -598,9 +660,9 @@ function desenharTransmissoes(snapshot) {
   // dos estados possíveis, e quem chega tem de conseguir dizer em qual está.
   const nenhuma = elemento("button", null, "NÃO VER");
   nenhuma.type = "button";
-  nenhuma.setAttribute("aria-pressed", telaEmCurso === null ? "true" : "false");
+  nenhuma.setAttribute("aria-pressed", pedida === null ? "true" : "false");
   nenhuma.title =
-    telaEmCurso === null
+    pedida === null
       ? "você não está recebendo transmissão nenhuma"
       : "parar de receber a transmissão e ficar só no áudio";
   nenhuma.addEventListener("click", () => {
@@ -623,7 +685,7 @@ function desenharTransmissoes(snapshot) {
  * momento, e reabrir o aplicativo é começar de novo.
  */
 async function pararDeVer() {
-  naoQueroVer = true;
+  telaQuerida = null;
   const antiga = telaEmCurso;
   fecharImagemDaTela();
   if (antiga !== null) {
@@ -651,10 +713,14 @@ function nomeDeQuem(snapshot, id) {
  * derrubar as duas.
  */
 async function trocarDeTransmissao(tela) {
-  // Escolher uma tela é desdizer o `NÃO VER`. A bandeira sai aqui e não no
-  // clique do botão porque este é o único caminho por onde se volta a ver.
-  naoQueroVer = false;
-  if (tela === telaEmCurso) return;
+  // **Comparado com o que foi pedido, e não com o que está na tela.**
+  //
+  // Era `tela === telaEmCurso`, e entre o clique e a imagem esse teste é falso —
+  // o fluxo ainda não abriu. Então um segundo clique refazia o pedido inteiro e
+  // **reiniciava a espera pelo quadro-chave**, que é o que fazia o botão parecer
+  // morto quanto mais se insistia nele.
+  if (tela === telaQuerida) return;
+  telaQuerida = tela;
   const antiga = telaEmCurso;
   // A imagem some agora, e não quando a nova chegar: deixar a antiga desenhada
   // enquanto a nova não vem faria a troca parecer que não aconteceu.

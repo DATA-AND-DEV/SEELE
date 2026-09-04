@@ -265,6 +265,20 @@
   background: var(--seele-laranja-nerv);
 }
 
+/* **Pedida e ainda não chegando.** Entre o clique e a imagem há o próximo
+   quadro-chave de quem transmite, e isso são segundos. Vazada em vez de cheia:
+   ela já é a escolhida — por isso a borda laranja — e ainda não é a que está no
+   palco, por isso o fundo não. É a mesma diferença que o `.aqui` da fileira das
+   salas usa, e pela mesma razão.
+
+   Sem animação: `specs/06-clientes-gui.md` chama animação decorativa que atrasa
+   quem usa de falha de desenho, e o rótulo já diz `· ABRINDO`. */
+.chamada-palco-escolha button[data-esperando="sim"] {
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-painel);
+  box-shadow: inset 0 0 0 1px var(--seele-laranja-nerv);
+}
+
 /* Sem ninguém transmitindo a frase é estado, e não manchete: ela desce ao corpo
    do texto para não gritar um nada. */
 .chamada-palco[data-transmitindo="nao"] .chamada-palco-quem {

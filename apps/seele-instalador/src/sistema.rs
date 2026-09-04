@@ -34,23 +34,29 @@ fn larga(texto: &str) -> Vec<u16> {
 /// reinstalação deixaria de pé a regra da instalação anterior — e a caixa teria
 /// mentido.
 ///
-/// # Rede conhecida e rede de casa, e **não** rede pública
+/// # `profile=any`, e ela já foi estreitada e voltou
 ///
-/// Era `profile=any`, que inclui o perfil público — o que o Windows chama de
-/// rede em que não se confia, e é o que ele escolhe para o Wi-Fi de uma
-/// cafeteria ou de um aeroporto. A regra valia lá também.
+/// **04/09/2026, ida.** Passou a ser `domain,private`, deixando de fora o perfil
+/// público — o que o Windows escolhe para uma rede em que não se confia, e o que
+/// ele dá ao Wi-Fi de uma cafeteria. O argumento era bom e continua sendo:
+/// hospedar de uma cafeteria é caso raro, carregar o notebook para uma é o caso
+/// comum, e as três paredes que respondem depois (o balde por endereço, o
+/// segredo, a portaria) são paredes e não a ausência de contato.
 ///
-/// A conta que mudou isso: hospedar de uma cafeteria é caso raro; **carregar o
-/// notebook para uma é o caso comum**. Com `any`, todo mundo naquela rede podia
-/// bater na porta do SEELE de quem só foi tomar café — e as três paredes que
-/// respondem depois (o balde por endereço, o segredo, a portaria) são paredes,
-/// não a ausência de contato.
+/// **04/09/2026, volta.** Quem hospeda pediu de volta, depois de o Windows
+/// continuar recusando conexão. Fica registrado que **a evidência aponta para
+/// outro lugar**: numa máquina examinada, a regra nomeava
+/// `C:\Program Files\SEELE\SEELE.exe` e essa pasta não existia — e uma regra
+/// presa a um programa ausente não permite nada, em perfil nenhum. O perfil não
+/// era a parede.
 ///
-/// O custo é real e vai para quem hospeda numa rede que o Windows marcou como
-/// pública: ninguém entra, e o Windows não diz por quê. Quem estiver nesse caso
-/// muda a rede para privada nas configurações do Windows — que é a coisa certa
-/// a fazer de qualquer jeito, porque «pública» significa «não deixe esta máquina
-/// ser vista aqui».
+/// A volta é decisão de quem opera, e o custo dela está escrito aqui para quando
+/// alguém reabrir esta função: com `any`, uma máquina que hospedou uma vez
+/// continua aceitando UDP não solicitado no Wi-Fi de qualquer lugar onde ela for
+/// aberta. Estreitar de novo é seguro **depois** de a causa de verdade estar
+/// resolvida — e o aviso que o app agora dá, quando a regra não cobre o
+/// executável que está rodando, é o que faltava para essa conversa acontecer
+/// com dado em vez de com tentativa.
 ///
 /// # Errors
 ///
@@ -91,9 +97,9 @@ pub(crate) fn regra_de_firewall(executavel: &Path, ligada: bool) -> Result<(), S
             "dir=in",
             "action=allow",
             "protocol=udp",
-            // Ver o cabeçalho: `any` incluía o perfil público, e a regra valia
-            // no Wi-Fi de uma cafeteria.
-            "profile=domain,private",
+            // Ver o cabeçalho: isto já foi `domain,private` e voltou, a pedido
+            // de quem hospeda.
+            "profile=any",
             "enable=yes",
             &format!("program={}", executavel.display()),
             "description=Deixa entrar conexão para o servidor SEELE hospedado nesta máquina.",

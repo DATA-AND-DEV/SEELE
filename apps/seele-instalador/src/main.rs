@@ -270,29 +270,30 @@ mod testes {
         }
     }
     #[test]
-    fn a_regra_de_firewall_nao_vale_em_rede_publica() {
-        // **Era `profile=any`, e isso incluía o público.**
+    fn a_regra_de_firewall_nomeia_o_perfil_que_ela_cobre() {
+        // **Esta decisão foi tomada, revogada e registrada no mesmo dia.**
         //
-        // «Público» é o que o Windows escolhe para uma rede em que não se
-        // confia — o Wi-Fi de uma cafeteria, de um aeroporto, de um hotel. Com
-        // `any`, a regra valia lá: todo mundo naquela rede podia bater na porta
-        // do SEELE de quem só foi tomar café.
+        // Ela nasceu `profile=any`. Em 04/09/2026 passou a `domain,private`,
+        // deixando de fora o perfil público — o que o Windows dá ao Wi-Fi de uma
+        // cafeteria —, com o argumento de que hospedar de uma é caso raro e
+        // carregar o notebook para uma é o caso comum.
         //
-        // A conta que mudou isso é simples: hospedar de uma cafeteria é caso
-        // raro, e **carregar o notebook para uma é o caso comum**. As três
-        // paredes que respondem depois — o balde por endereço, o segredo, a
-        // portaria — são paredes, e não a ausência de contato.
+        // Voltou a `any` no mesmo dia, a pedido de quem hospeda, depois de o
+        // Windows continuar recusando conexão. **A evidência aponta para outro
+        // lugar**: numa máquina examinada a regra nomeava
+        // `C:\Program Files\SEELE\SEELE.exe` e essa pasta não existia — e uma
+        // regra presa a um programa ausente não permite nada, em perfil nenhum.
         //
-        // Não dá para exercitar o `netsh` num teste; o que dá é prender a lista
-        // de argumentos, que é onde a decisão mora.
+        // O que este guarda protege agora não é qual perfil, e sim que **haja um
+        // escrito**. Uma regra sem `profile` herda o padrão do `netsh`, e o
+        // padrão é a coisa que ninguém decidiu.
         let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/sistema.rs");
         let Ok(fonte) = std::fs::read_to_string(&caminho) else {
             panic!("não li {}", caminho.display());
         };
-        // Sem os comentários: o cabeçalho da função explica que `any` era o que
-        // havia antes, e uma âncora que casa com a própria explicação acusa o
-        // código de ter o defeito que o comentário descreve. Já aconteceu duas
-        // vezes neste repositório.
+        // Sem os comentários: o cabeçalho da função conta as duas decisões, e
+        // uma âncora que casa com a explicação acusa o código do que o
+        // comentário descreve. Já aconteceu três vezes neste repositório.
         let codigo: String = fonte
             .lines()
             .filter(|linha| !linha.trim_start().starts_with("//"))
@@ -300,13 +301,19 @@ mod testes {
             .join("\n");
 
         assert!(
-            codigo.contains("\"profile=domain,private\""),
-            "a regra de firewall deixou de nomear os perfis confiáveis"
+            codigo.contains("\"profile="),
+            "a regra de firewall deixou de dizer que perfis ela cobre, e passa a \
+             herdar o padrão do netsh — que é a escolha que ninguém fez"
         );
+
+        // E a regra continua presa ao **programa**, que é a parte que nunca
+        // esteve em discussão: uma regra por número de porta abriria a 8383 para
+        // qualquer coisa que a escutasse depois, inclusive o que for instalado
+        // amanhã.
         assert!(
-            !codigo.contains("\"profile=any\""),
-            "a regra voltou a valer em rede pública, e passa a deixar entrar \
-             conexão no Wi-Fi de qualquer lugar onde a máquina for aberta"
+            codigo.contains("program="),
+            "a regra deixou de ser do programa, e passou a abrir a porta para \
+             qualquer coisa que a escute"
         );
     }
     // **Estes dois moram aqui e não em `registro.rs`.**

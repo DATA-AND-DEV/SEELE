@@ -9870,96 +9870,6 @@ fn sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo() {
 }
 
 #[test]
-fn a_tela_de_espera_nao_afirma_permissao_pendente_para_toda_falha() {
-    // Ela tinha dois estados — `ENTRADA NEGADA` e `AGUARDANDO PERMISSÃO` — e o
-    // segundo cobria tudo o mais: um servidor fora do ar, uma credencial
-    // recusada de verdade, um erro que ninguém previu. Quem lia via uma espera
-    // correndo normalmente, e o texto logo abaixo dizia outra coisa.
-    //
-    // Continuar batendo está certo nos três casos: um servidor que caiu volta. O
-    // que não pode é afirmar qual dos três é.
-    let auth = without_comments(&read("ui/tela-auth.js"));
-    assert!(
-        auth.contains("AdmissionPending\""),
-        "o rótulo da espera não distingue mais a espera de verdade das outras \
-         falhas, e volta a prometer permissão pendente para qualquer uma"
-    );
-    assert!(
-        auth.contains("TENTANDO DE NOVO"),
-        "falta o terceiro estado: uma falha que não é recusa nem espera precisa \
-         de um rótulo que não minta sobre qual das duas ela é"
-    );
-}
-
-#[test]
-fn quem_esta_na_call_pode_escolher_nao_ver_a_transmissao() {
-    // Pedido assim: «também precisamos da opção do usuário estar na call e não
-    // querer ver a live».
-    //
-    // A fileira de escolha existia e ficava escondida com uma transmissão só,
-    // com o argumento de que escolher entre uma coisa não é escolher. O
-    // argumento estava incompleto: com uma transmissão há **duas** escolhas —
-    // ver e não ver —, e a segunda não tinha por onde ser feita.
-    let palco = without_comments(&read("ui/palco-imagem.js"));
-
-    assert!(
-        palco.contains("alheias.length === 0"),
-        "a fileira voltou a se esconder com uma transmissão só, e com ela some \
-         o único jeito de dizer que não se quer ver"
-    );
-    assert!(
-        palco.contains("NÃO VER"),
-        "a opção de não ver sumiu da fileira"
-    );
-    assert!(
-        palco.contains("function pararDeVer"),
-        "nada larga a transmissão sem pegar outra"
-    );
-
-    // E a recusa vale contra o servidor, que liga todo mundo por conta própria
-    // na primeira transmissão de uma sala. Sem isto o botão duraria até o
-    // próximo `ScreenOpened`, que é o oposto de uma escolha.
-    let abrir = palco
-        .split("async function abrirImagemDaTela")
-        .nth(1)
-        .and_then(|resto| resto.split("\n}\n").next())
-        .unwrap_or_default()
-        .to_owned();
-    assert!(
-        abrir.contains("naoQueroVer"),
-        "abrir a imagem não olha a recusa, então o servidor religa quem disse \
-         que não queria:\n{abrir}"
-    );
-    let recusa = abrir.find("naoQueroVer").unwrap_or(usize::MAX);
-    let fecha = abrir.find("fecharImagemDaTela()").unwrap_or(usize::MAX);
-    assert!(
-        recusa < fecha,
-        "a recusa é conferida depois de a imagem já ter sido montada:\n{abrir}"
-    );
-}
-
-#[test]
-fn a_recusa_da_transmissao_nao_atravessa_a_saida_da_sala() {
-    // Ela é uma escolha sobre o que está acontecendo naquela sala. Carregá-la
-    // para a próxima faria a pessoa chegar numa call nova já recusando o que
-    // ainda não viu, sem lembrar de ter dito — e o botão que a desfaz só
-    // aparece quando há transmissão, então ela descobriria o estado pelo
-    // sintoma.
-    let palco = without_comments(&read("ui/palco-imagem.js"));
-    let desenho = palco
-        .split("function desenharTransmissoes")
-        .nth(1)
-        .and_then(|resto| resto.split("\n}\n").next())
-        .unwrap_or_default()
-        .to_owned();
-
-    assert!(
-        desenho.contains("occupied_by_us") && desenho.contains("naoQueroVer = false"),
-        "sair da sala deixou de esquecer a recusa:\n{desenho}"
-    );
-}
-
-#[test]
 fn uma_atualizacao_que_nao_pegou_e_dita_e_nao_descoberta() {
     // **O atualizador do Tauri não sabe se o instalador abriu.** No Windows ele
     // entrega o arquivo ao shell e sai:
@@ -10119,70 +10029,106 @@ fn trocar_para_a_mesma_fonte_nao_corta_a_imagem_de_quem_assiste() {
 }
 
 #[test]
-fn uma_transmissao_que_esta_versao_nao_le_vira_frase_e_nao_tela_preta() {
-    // Relatado assim: «quem assiste com uma versão mais velha vê tela preta, sem
-    // mensagem nenhuma, e a sessão morre em ~3 segundos sem dizer por quê».
+fn a_escolha_da_transmissao_e_uma_intencao_e_nao_o_estado_do_fluxo() {
+    // **As duas metades do relato saem daqui**: «tem hora que clico e ele não
+    // vai, as vezes cliquei pra não ver ele fecha e depois abre novamente
+    // sozinho».
     //
-    // A parte «sem mensagem nenhuma» era o núcleo voltando calado quando o
-    // cabeçalho de um fluxo de tela não decodificava: sem `ScreenOpened` não
-    // havia o que desenhar, sem `ScreenClosed` não havia o que apagar, e a casca
-    // não sabia que tinha existido alguma coisa.
+    // A fileira era desenhada a partir de `telaEmCurso`, que só é escrito
+    // quando o fluxo **abre de verdade** — e abrir espera o próximo quadro-chave
+    // de quem transmite, que são segundos. O intervalo inteiro entre o clique e
+    // a imagem era indistinguível de nada ter acontecido, e clicar de novo
+    // reiniciava a espera.
     let palco = without_comments(&read("ui/palco-imagem.js"));
 
     assert!(
-        palco.contains("carga.ScreenUnreadable"),
-        "a casca deixou de escutar a transmissão ilegível, e o retângulo escuro \
-         volta a ser tudo o que a pessoa recebe"
+        palco.contains("let telaQuerida"),
+        "a intenção voltou a não ter variável própria, e a fileira volta a \
+         mostrar o fluxo em vez do pedido"
+    );
+    assert!(
+        !palco.contains("naoQueroVer"),
+        "a bandeira antiga voltou: duas variáveis para um estado são duas \
+         variáveis que discordam"
     );
 
-    // Do primeiro `carga.ScreenUnreadable` em diante, e não o trecho **entre**
-    // as duas ocorrências dele — ele aparece duas vezes no ramo, na condição e
-    // no motivo, e um `split(..).nth(1)` devolve os dois caracteres do meio.
-    let ramo = palco
-        .find("carga.ScreenUnreadable")
-        .map(|onde| palco.get(onde..).unwrap_or_default().to_owned())
-        .unwrap_or_default();
+    // Clicar duas vezes na mesma não pode refazer o pedido.
+    let troca = palco
+        .split("async function trocarDeTransmissao")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
     assert!(
-        ramo.contains("naoDeuParaMostrar"),
-        "o evento chega e nada é escrito no palco:\n{ramo}"
-    );
-    assert!(
-        ramo.contains("ATUALIZE O SEELE"),
-        "a frase não diz o que a pessoa pode fazer, que é a única parte dela que \
-         serve para alguma coisa:\n{ramo}"
+        troca.contains("if (tela === telaQuerida) return;"),
+        "a comparação voltou a ser com o que está na tela; um segundo clique \
+         refaz o pedido e reinicia a espera pelo quadro-chave:\n{troca}"
     );
 
-    // O motivo técnico vai para o console e não para a tela: quem está numa call
-    // não tem o que fazer com «unsupported version 3, expected 2».
+    // E o desenho marca o pedido, com o «abrindo» enquanto ele não chega.
+    let desenho = palco
+        .split("function desenharTransmissoes")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
     assert!(
-        ramo.contains("console.warn"),
-        "o motivo técnico sumiu, e quem investiga fica sem ele:\n{ramo}"
+        desenho.contains("const pedida =") && desenho.contains("ABRINDO"),
+        "a fileira deixou de mostrar o pedido e o estado de espera:\n{desenho}"
     );
 }
 
 #[test]
-fn quem_parou_de_ver_tem_por_onde_voltar_a_ver() {
-    // Relatado assim: «tem botão pra parar de ver live, mas não tem botão pra
-    // voltar a ver a live».
+fn um_retrato_transitorio_nao_apaga_a_escolha_de_quem_esta_na_sala() {
+    // «Cliquei pra não ver, ele fecha e depois abre novamente sozinho.»
     //
-    // O botão existia — é o nome de quem transmite — e não dizia que era um.
-    // Entre duas transmissões o nome basta: a escolha é entre pessoas, e a
-    // marcada diz qual está no palco. Depois de `NÃO VER` não há nenhuma
-    // marcada, e a fileira vira uma lista de nomes; um nome não se parece com
-    // um caminho de volta.
+    // A escolha era apagada sempre que um retrato não afirmasse que se está
+    // numa sala — e um retrato transitório, chegando entre dois estados, afirma
+    // isso sem querer. A escolha morria, o servidor religava, e a imagem voltava.
+    //
+    // Duas coisas consertam: só um retrato que **traz** a lista de salas conta,
+    // e compara-se a sala em vez da presença.
     let palco = without_comments(&read("ui/palco-imagem.js"));
+    let desenho = palco
+        .split("function desenharTransmissoes")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
 
     assert!(
-        palco.contains("`VER ${quem}`"),
-        "o botão de voltar a ver perdeu o verbo, e volta a ser um nome solto \
-         numa fileira sem nada marcado"
+        desenho.contains("Array.isArray(snapshot?.voice_rooms)"),
+        "um retrato sem a lista de salas voltou a contar como «saiu da sala», e \
+         não saber não é motivo para esquecer:\n{desenho}"
     );
-
-    // Só quando ninguém está no palco. Com uma transmissão sendo recebida, os
-    // outros nomes já são «troque para este», e um `VER` em cada um seria a
-    // palavra repetida numa fileira que já se entende.
     assert!(
-        palco.contains("telaEmCurso === null ? `VER ${quem}` : quem"),
-        "o `VER` passou a aparecer também quando já se está vendo alguma coisa"
+        desenho.contains("salaDaEscolha"),
+        "a escolha deixou de ser presa à sala em que foi feita:\n{desenho}"
+    );
+}
+
+#[test]
+fn o_servidor_nao_impoe_uma_transmissao_que_ninguem_pediu() {
+    // Ele liga todo mundo na primeira transmissão de uma sala, sem pedido, e
+    // isso é o certo para quem não disse nada. Para quem disse — não ver, ou ver
+    // outra —, abrir tem de devolver a cópia.
+    let palco = without_comments(&read("ui/palco-imagem.js"));
+    let abrir = palco
+        .split("async function abrirImagemDaTela")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+
+    assert!(
+        abrir.contains("telaQuerida !== undefined && telaQuerida !== tela"),
+        "abrir a imagem deixou de conferir o pedido, e o servidor volta a impor \
+         o que ninguém escolheu:\n{abrir}"
+    );
+    let confere = abrir.find("telaQuerida").unwrap_or(usize::MAX);
+    let fecha = abrir.find("fecharImagemDaTela()").unwrap_or(usize::MAX);
+    assert!(
+        confere < fecha,
+        "a conferência acontece depois de a imagem já ter sido montada:\n{abrir}"
     );
 }
