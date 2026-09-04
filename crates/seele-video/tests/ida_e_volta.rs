@@ -28,6 +28,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 use seele_video::codec::{
     armar, Cadencia, Codificador, ConfigDoCodificador, Decodificador, QuadroI420, Resolucao,
@@ -460,5 +461,59 @@ fn o_codificador_armado_nao_sai_em_baseline() {
             .expect("decodificar o quadro-chave")
             .is_some(),
         "o quadro-chave saiu num perfil que este decodificador não abre"
+    );
+}
+
+/// Armar o codificador custa o mesmo na thread do teste e numa thread nova.
+///
+/// # Por que esta pergunta existe
+///
+/// O §2 manda o codificador morar numa **thread própria**, e `crate::bomba` a
+/// cria com `thread::spawn`. Os sete testes daquele módulo reprovam por tempo:
+/// a bomba se dá cinco segundos para emitir o primeiro evento e leva dezenove.
+/// Cronometrado, o gasto é de uma chamada só — `VTCompressionSessionCreate` —,
+/// e todo o resto do caminho é microssegundo.
+///
+/// Falta saber se os dezenove segundos são **da thread** ou **do ambiente de
+/// teste**, e a diferença decide se isto é um teste para consertar ou um defeito
+/// que alcança quem usa: se for da thread, começar a compartilhar no macOS e
+/// cada troca de degrau da escada custam dezenove segundos em produção.
+///
+/// **Aquece antes de medir.** A primeira sessão de um processo paga a subida do
+/// serviço de codificação do sistema, e cobrá-la da primeira medida faria a
+/// ordem das duas decidir o resultado.
+///
+/// Não reprova por tempo, pelo mesmo motivo que `qualidade-do-codec.rs` não
+/// reprova por PSNR: o número muda por máquina. Ele vai para a saída.
+#[test]
+fn armar_o_codificador_custa_o_mesmo_em_qualquer_thread() {
+    let Some(biblioteca) = biblioteca() else {
+        return;
+    };
+    let config = ConfigDoCodificador {
+        resolucao: Resolucao::P1080,
+        cadencia: Cadencia::Q30,
+        teto_bps: 12_000_000,
+    };
+
+    // O aquecimento, descartado.
+    drop(armar(&biblioteca, config).expect("armar para aquecer"));
+
+    let marca = Instant::now();
+    drop(armar(&biblioteca, config).expect("armar na thread do teste"));
+    let na_thread_do_teste = marca.elapsed();
+
+    let emprestada = biblioteca.clone();
+    let numa_thread_nova = std::thread::spawn(move || {
+        let marca = Instant::now();
+        drop(armar(&emprestada, config).expect("armar na thread nova"));
+        marca.elapsed()
+    })
+    .join()
+    .expect("a thread do codificador");
+
+    eprintln!(
+        "\n  MEDIDA armar 1080p:\n    thread do teste: {na_thread_do_teste:?}\n    \
+         thread nova:     {numa_thread_nova:?}\n"
     );
 }

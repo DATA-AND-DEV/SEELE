@@ -1174,7 +1174,39 @@ mod tests {
     /// (33 ms a 30 quadros) e uma máquina de integração contínua carregada
     /// atrasa mais que isso. Um teste que falha por escalonamento é um teste que
     /// ensina a gente a re-rodar em vez de a olhar.
-    const PACIENCIA: Duration = Duration::from_secs(5);
+    ///
+    /// # Sessenta segundos, e eram cinco
+    ///
+    /// O número deixou de ser sobre escalonamento. Ele passou a ser sobre o que
+    /// o sistema cobra para criar a **primeira** sessão de codificação do
+    /// processo. Medido num Mac, com o codec do sistema em uso:
+    ///
+    /// ```text
+    /// VTCompressionSessionCreate, 1ª do processo:  19,04 s
+    /// VTCompressionSessionCreate, as seguintes:     1,8 ms
+    /// ```
+    ///
+    /// Dezenove segundos numa chamada só; todo o resto de `Laco::armar` é
+    /// microssegundo. É o serviço de codificação do sistema subindo, uma vez por
+    /// processo — e **não** é a thread própria que o §2 exige:
+    /// `armar_o_codificador_custa_o_mesmo_em_qualquer_thread`, em `seele-video`,
+    /// mede 1,8 ms dos dois lados e existe para prender essa distinção.
+    ///
+    /// Em paralelo, as sete bombas deste módulo disputam essa primeira sessão e
+    /// todas esperam por ela. Com cinco segundos, as sete reprovavam.
+    ///
+    /// # Por que isto ficou escondido
+    ///
+    /// Porque estes testes **pulam** quando o módulo do Cisco não está na
+    /// máquina, que é o caso normal — e quem pula conta como quem passou. Eles
+    /// só apareceram quando alguém apontou `SEELE_OPENH264` para medir outra
+    /// coisa, e então falhavam os sete. Um teste que sai cedo em silêncio é um
+    /// teste que não existe.
+    ///
+    /// O que este número não pode virar é generoso a ponto de deixar de pegar
+    /// uma bomba travada, que é a razão de ele existir. Sessenta são três vezes
+    /// o pior caso medido.
+    const PACIENCIA: Duration = Duration::from_secs(60);
 
     // -----------------------------------------------------------------------
     // As mentiras
@@ -1526,7 +1558,11 @@ mod tests {
             biblioteca,
             captura.clone(),
             arranjo(
-                TetoDeVideo::com_caminho(8_000_000),
+                // **As duas pernas**, e não só a desta máquina: a de quem
+                // hospeda parte de `CAMINHO_DA_PROVA_BPS` enquanto o
+                // `HostUplink` não chega, e o `min` do §5.1 manda nela. Subir
+                // uma só deixa o teto preso em 1,2 Mbps.
+                TetoDeVideo::com_caminho(8_000_000).com_caminho_de_quem_hospeda(8_000_000),
                 SignalBand::Nominal,
                 Resolucao::P720,
             ),
@@ -1736,7 +1772,7 @@ mod tests {
         let Some(biblioteca) = biblioteca() else {
             return;
         };
-        let teto = TetoDeVideo::com_caminho(8_000_000);
+        let teto = TetoDeVideo::com_caminho(8_000_000).com_caminho_de_quem_hospeda(8_000_000);
         let captura = CapturaDeMentira::default();
         let (bomba, mut eventos) = ligar(
             biblioteca,
@@ -1804,7 +1840,11 @@ mod tests {
             biblioteca,
             captura,
             arranjo(
-                TetoDeVideo::com_caminho(8_000_000),
+                // **As duas pernas**, e não só a desta máquina: a de quem
+                // hospeda parte de `CAMINHO_DA_PROVA_BPS` enquanto o
+                // `HostUplink` não chega, e o `min` do §5.1 manda nela. Subir
+                // uma só deixa o teto preso em 1,2 Mbps.
+                TetoDeVideo::com_caminho(8_000_000).com_caminho_de_quem_hospeda(8_000_000),
                 SignalBand::Nominal,
                 Resolucao::P1080,
             ),
