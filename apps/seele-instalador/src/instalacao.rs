@@ -194,6 +194,55 @@ pub(crate) fn executar(
         }
     }
 
+    // **O entulho das instalações anteriores, na mesma pasta.**
+    //
+    // Relatado assim: «por que na pasta SEELE fica: seele-app, SEELE, seeled,
+    // plug, uninstall e desinstalar? Não tem coisas que estão se repetindo?».
+    // Tem, e são de três instaladores diferentes.
+    //
+    // A nossa carga escreve **dois** arquivos — `SEELE.exe` e `seeled.exe` — e
+    // este instalador acrescenta o `desinstalar.exe`, que é uma cópia dele
+    // mesmo. Os outros três não são nossos:
+    //
+    //   `seele-app.exe`  o binário que o instalador NSIS do Tauri escrevia. A
+    //                    nossa carga o renomeia para `SEELE.exe` ao empacotar,
+    //                    então os dois são o mesmo programa com dois nomes — e o
+    //                    atalho de cada instalador aponta para o seu.
+    //   `uninstall.exe`  o desinstalador do NSIS. Ele remove a entrada
+    //                    `tech.datadev.seele` do painel, que é a **dele**; a
+    //                    nossa é `SEELE`, e nenhum dos dois remove a do outro.
+    //   `plug.exe`       de antes de o vocabulário mudar, quando o produto ainda
+    //                    chamava as coisas assim. Nenhuma versão em uso o
+    //                    escreve.
+    //
+    // Removidos por lista nomeada, e não por «tudo o que não é nosso»: esta é
+    // uma pasta de `Program Files`, e apagar por regra o que não se reconhece é
+    // como um instalador leva junto o que outra pessoa pôs ali.
+    //
+    // Falhar não interrompe. Um arquivo que sobra é entulho; parar a instalação
+    // por causa dele seria trocar um incômodo por uma máquina sem SEELE.
+    for resto in ["seele-app.exe", "uninstall.exe", "plug.exe"] {
+        let caminho = destino.join(resto);
+        if !caminho.exists() {
+            continue;
+        }
+        if std::fs::remove_file(&caminho).is_ok() {
+            contar(&format!("{resto}: resto de instalação anterior, removido"));
+        } else {
+            contar(&format!(
+                "{resto}: resto de instalação anterior, não consegui apagar"
+            ));
+        }
+    }
+
+    // E a entrada que o NSIS deixava no painel, pela mesma razão: duas linhas
+    // «SEELE» em Programas e Recursos, cada uma removendo metade.
+    match registro::esquecer_a_do_nsis() {
+        Ok(true) => contar("entrada antiga do instalador do NSIS removida do painel"),
+        Ok(false) => {}
+        Err(erro) => contar(&format!("entrada antiga do NSIS: {erro}")),
+    }
+
     // **Por último**, e só depois de a nova estar de pé: apagar a antiga antes
     // deixaria a máquina sem SEELE nenhum se o que vem depois falhasse.
     if let Some(antiga) = sistema::instalacao_por_usuario() {

@@ -469,4 +469,50 @@ mod testes {
             "os dados passaram a ser apagados sem a escolha"
         );
     }
+    /// **A pasta fica com o que é desta instalação, e não com três.**
+    ///
+    /// Relatado assim: «por que na pasta SEELE fica: seele-app, SEELE, seeled,
+    /// plug, uninstall e desinstalar? Não tem coisas que estão se repetindo?».
+    /// Tem, e são de três instaladores diferentes: a nossa carga escreve dois
+    /// arquivos e o instalador acrescenta o desinstalador; `seele-app.exe` e
+    /// `uninstall.exe` são do NSIS do Tauri, e `plug.exe` é de antes de o
+    /// vocabulário mudar.
+    ///
+    /// `seele-app.exe` é o mesmo programa que o nosso `SEELE.exe` — a carga o
+    /// renomeia ao empacotar —, e cada instalador aponta o atalho dele para o
+    /// seu. Dois atalhos para dois nomes do mesmo binário é como uma máquina
+    /// «volta de versão» sem ninguém entender.
+    #[test]
+    fn a_instalacao_leva_junto_o_entulho_das_anteriores() {
+        let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/instalacao.rs");
+        let Ok(fonte) = std::fs::read_to_string(&caminho) else {
+            panic!("não li {}", caminho.display());
+        };
+        let codigo: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for resto in ["seele-app.exe", "uninstall.exe", "plug.exe"] {
+            assert!(
+                codigo.contains(resto),
+                "«{resto}» deixou de ser removido, e a pasta volta a acumular \
+                 arquivos de instaladores que já não existem"
+            );
+        }
+        assert!(
+            codigo.contains("esquecer_a_do_nsis"),
+            "a entrada do NSIS no painel deixou de sair, e «Programas e Recursos» \
+             volta a mostrar dois SEELE, cada um removendo metade"
+        );
+
+        // **Lista nomeada, e não «tudo o que não é nosso».** Esta é uma pasta de
+        // `Program Files`, e apagar por regra o que não se reconhece é como um
+        // instalador leva junto o que outra pessoa pôs ali.
+        assert!(
+            !codigo.contains("read_dir(destino)"),
+            "a limpeza passou a varrer a pasta em vez de nomear o que remove"
+        );
+    }
 }

@@ -215,6 +215,43 @@ pub(crate) fn esquecer() -> Result<(), String> {
     Ok(())
 }
 
+/// A entrada que o instalador do NSIS deixava no painel.
+///
+/// **Não é a nossa.** A nossa é `Uninstall\SEELE`; a dele é o identificador do
+/// pacote, `tech.datadev.seele`. Enquanto as duas existem, «Programas e
+/// Recursos» mostra dois SEELE e cada um remove metade — e quem clica no errado
+/// fica com a outra metade e nenhuma explicação.
+///
+/// Ela só existe em máquina que passou pelo instalador do Tauri, que era por
+/// onde as atualizações passavam antes de o manifesto apontar para o nosso.
+const LISTA_DO_NSIS: &str =
+    r"Software\Microsoft\Windows\CurrentVersion\Uninstall\tech.datadev.seele";
+
+/// Apaga a entrada do NSIS, se ela estiver lá.
+///
+/// Devolve `true` quando havia uma para apagar — é o que separa «removi» de
+/// «não havia nada», e os dois merecem linhas diferentes no relato da
+/// instalação.
+///
+/// # Errors
+///
+/// O que o Windows respondeu, quando a chave existe e não sai.
+pub(crate) fn esquecer_a_do_nsis() -> Result<bool, String> {
+    let largo = larga(LISTA_DO_NSIS);
+    // SAFETY: `largo` vive até o fim da chamada.
+    let estado = unsafe { RegDeleteTreeW(HKEY_LOCAL_MACHINE, PCWSTR(largo.as_ptr())) };
+    if estado == ERROR_SUCCESS {
+        return Ok(true);
+    }
+    if estado == windows::Win32::Foundation::ERROR_FILE_NOT_FOUND {
+        return Ok(false);
+    }
+    Err(format!(
+        "não apaguei `HKLM\\{LISTA_DO_NSIS}`: erro {}",
+        estado.0
+    ))
+}
+
 /// As escolhas guardadas, quando há.
 ///
 /// `None` para quem instalou antes desta versão — e é o chamador que decide o
