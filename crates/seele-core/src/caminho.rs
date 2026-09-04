@@ -441,6 +441,56 @@ impl Sonda {
         }
     }
 
+    /// Uma sonda que começa de uma medida, e não do palpite de
+    /// [`CAMINHO_DA_PROVA_BPS`].
+    ///
+    /// # O defeito que ela conserta
+    ///
+    /// A escada existe porque ninguém sabe o cano. Quem já mediu **sabe**, e
+    /// recomeçar do palpite universal é jogar a medida fora — toda transmissão
+    /// partia supondo uma subida doméstica de 2 Mbps, inclusive entre duas
+    /// máquinas no mesmo switch que mediram 12,48 Mbps entre si vinte minutos
+    /// antes. Medido em campo, LAN, duas máquinas:
+    ///
+    /// ```text
+    /// 2.400.000 →  4.524.054   → 720p
+    /// 4.524.054 →  9.048.108   → 1080p
+    /// 9.048.108 → 12.480.000   ← topo
+    /// ```
+    ///
+    /// Doze segundos de imagem ruim para reaprender um fato que era verdade
+    /// desde o primeiro milissegundo — e o código já suspeitava, porque
+    /// [`IDA_E_VOLTA_CURTA`] tinha reconhecido o cano curto e trocado o passo
+    /// para [`SUBIDA_DE_CAMINHO_CURTO`]. Ele sabia que era uma LAN e mesmo
+    /// assim começava do palpite.
+    ///
+    /// # O que ela não muda
+    ///
+    /// O valor é grampeado na faixa que a escada admite: memória não autoriza
+    /// começar fora dela. E a sonda continua sendo uma sonda — o §5 não é
+    /// tocado, porque a escolha da pessoa continua sendo **teto e nunca piso**,
+    /// e a primeira janela que doer corrige este número como corrigiria
+    /// qualquer outro.
+    ///
+    /// **Não põe [`Self::limite_bps`]**, e isso é decisão: uma medida lembrada é
+    /// de onde partir, não uma borda encontrada. A histerese existe para o que
+    /// doeu **nesta** sessão, e herdá-la de ontem impediria a sonda de descobrir
+    /// que o cano cresceu.
+    #[must_use]
+    pub const fn partindo_de(bps: u32) -> Self {
+        let lembrado = if bps < PISO_DA_ESTIMATIVA_BPS {
+            PISO_DA_ESTIMATIVA_BPS
+        } else if bps > TETO_DA_ESTIMATIVA_BPS {
+            TETO_DA_ESTIMATIVA_BPS
+        } else {
+            bps
+        };
+        Self {
+            estimativa_bps: lembrado,
+            ..Self::nova()
+        }
+    }
+
     /// O caminho de subida desta máquina, como a sonda o conhece agora.
     ///
     /// É o número que vai para `crate::tela::TetoDeVideo::com_caminho`.
@@ -1112,6 +1162,37 @@ mod tests {
     ///
     /// A prova: as mesmas janelas cheias, na faixa degradada, num cano largo.
     /// A estimativa tem de **subir do mesmo jeito**.
+    #[test]
+    fn a_sonda_que_lembra_nao_recomeca_do_palpite() {
+        let lembrada = Sonda::partindo_de(12_480_000);
+        assert_eq!(lembrada.estimativa(), 12_480_000);
+
+        // E ela continua sendo uma sonda: um cano que encolheu a corrige na
+        // primeira janela que doer, como corrigiria qualquer estimativa. Memória
+        // que não cede a uma medida não é memória, é teimosia.
+        let mut lembrada = lembrada;
+        let mut cano = Cano::de(3_000_000);
+        correr(
+            &mut lembrada,
+            &mut cano,
+            SignalBand::Nominal,
+            ticas(10),
+            |_, _| {},
+        );
+        assert!(
+            lembrada.estimativa() < 12_480_000,
+            "o cano encolheu e a estimativa lembrada não desceu"
+        );
+
+        // A faixa que a escada admite continua valendo dos dois lados: memória
+        // não é autorização para começar fora dela.
+        assert_eq!(
+            Sonda::partindo_de(u32::MAX).estimativa(),
+            TETO_DA_ESTIMATIVA_BPS
+        );
+        assert_eq!(Sonda::partindo_de(1).estimativa(), PISO_DA_ESTIMATIVA_BPS);
+    }
+
     #[test]
     fn a_faixa_da_voz_nao_corta_a_estimativa_uma_segunda_vez() {
         let mut nominal = Sonda::nova();

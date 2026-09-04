@@ -92,6 +92,20 @@ pub struct Conhecido {
     /// que veio por endereço digitado e não por link. Aí não há a quem
     /// perguntar, e a lista volta a valer o que valia.
     pub impressao: Option<String>,
+    /// O último caminho de subida medido para este servidor, em bits por
+    /// segundo.
+    ///
+    /// `None` numa linha escrita por uma versão anterior, e num servidor onde
+    /// ninguém compartilhou tela ainda. Quem o lê é
+    /// [`crate::caminho::Sonda::partindo_de`], e o que ele evita são os doze
+    /// segundos que a escada gasta para reaprender um cano que já mediu — o
+    /// pior momento que a tela tem, e o único que todo mundo vê.
+    ///
+    /// **Conveniência, e não verdade.** Um número velho não vincula nada: a
+    /// sonda continua medindo, e a primeira janela que doer o substitui. É essa
+    /// propriedade que deixa ele morar num arquivo que se apaga sem
+    /// consequência.
+    pub caminho_bps: Option<u32>,
 }
 
 /// A lista, em disco.
@@ -190,6 +204,16 @@ impl Conhecidos {
                 )
             });
 
+        // **A medida do caminho sobrevive ao reencontro.** Esta função apaga a
+        // entrada e põe outra no lugar, então um campo não repescado aqui é um
+        // campo zerado a cada conexão — e uma medida que se perde a cada
+        // conexão nunca chega a servir para nada, que é justamente o defeito
+        // que ela existe para corrigir.
+        let caminho_bps = self
+            .entradas
+            .iter()
+            .find(|e| e.alvo == alvo)
+            .and_then(|e| e.caminho_bps);
         self.entradas.retain(|e| e.alvo != alvo);
         self.entradas.push(Conhecido {
             alvo,
@@ -201,6 +225,7 @@ impl Conhecidos {
             caminhos,
             bilhete,
             impressao,
+            caminho_bps,
         });
         self.gravar()
     }
@@ -303,7 +328,7 @@ impl Conhecidos {
             .iter()
             .map(|e| {
                 format!(
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                     e.alvo,
                     e.apelido,
                     e.voice_room
@@ -315,7 +340,9 @@ impl Conhecidos {
                     e.nome.as_deref().unwrap_or(""),
                     e.caminhos.join(","),
                     e.bilhete.as_deref().unwrap_or(""),
-                    e.impressao.as_deref().unwrap_or("")
+                    e.impressao.as_deref().unwrap_or(""),
+                    e.caminho_bps
+                        .map_or_else(String::new, |bps| bps.to_string())
                 )
             })
             .collect();
@@ -385,6 +412,9 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         .map(str::trim)
         .filter(|i| !i.is_empty())
         .map(str::to_owned);
+    // Um número que não se lê vira ausência, e não zero: zero seria «este cano
+    // não carrega nada», que é o contrário de «ninguém mediu ainda».
+    let caminho_bps = campos.next().and_then(|c| c.trim().parse().ok());
 
     Some(Conhecido {
         alvo: alvo.to_owned(),
@@ -395,6 +425,7 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         caminhos,
         bilhete,
         impressao,
+        caminho_bps,
         // Carregada em `abrir`, que é quem conhece o caminho.
         icone: None,
     })
@@ -480,6 +511,24 @@ mod tests {
         assert_eq!(entrada.voice_room, Some(2), "a visita nova não valeu");
 
         let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    #[test]
+    fn a_linha_carrega_o_ultimo_caminho_medido() {
+        // **O nono campo, e ele é de conveniência como os outros.** Um arquivo
+        // apagado custa doze segundos de imagem ruim uma vez, e nada mais — é
+        // por isso que esta medida pode morar aqui, e não junto dos pins.
+        let com = analisar_linha(
+            "server.exemplo:8383\tmarcela\t1\t1738000000\t\t\t\t\t12480000",
+        )
+        .expect("uma linha de nove campos é válida");
+        assert_eq!(com.caminho_bps, Some(12_480_000));
+
+        // E oito campos — a linha que já está no disco de quem atualizar —
+        // continua valendo, com ausência no lugar do número.
+        let sem = analisar_linha("server.exemplo:8383\tmarcela\t1\t1738000000")
+            .expect("uma linha de quatro campos é válida");
+        assert_eq!(sem.caminho_bps, None);
     }
 
     #[test]
