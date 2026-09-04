@@ -2465,3 +2465,52 @@ fn a_bateria_confere_aviso_de_seguranca_e_nao_so_licenca() {
         "a ordem inverteu: o aviso de segurança deixou de ser a última coisa lida"
     );
 }
+
+#[test]
+fn a_bateria_tem_prazo_e_nao_espera_para_sempre() {
+    // **Uma bateria travada não termina nunca, e quem publica desiste.**
+    //
+    // Medido em 04/09/2026: `cargo test --workspace` travou duas vezes no
+    // `seele_video`, com onze minutos de CPU no mesmo binário e nenhum
+    // progresso. Os testes de captura chamam `start_capture` e `stop_capture` do
+    // ScreenCaptureKit — bloqueantes, por XPC com um serviço do sistema — e sob
+    // carga esse caminho estola. Não há como cancelá-lo de dentro do processo.
+    //
+    // O custo de não ter prazo não é técnico, é humano: foi assim que a 0.10.1-1
+    // e a 0.10.3 saíram com `--sem-bateria`, e cada uma voltou como relato de
+    // campo. «Gerei sem bateria por que demora muito.»
+    //
+    // O prazo não é para reprovar máquina lenta. Com tudo compilado a bateria
+    // leva 5min22s neste Mac — 284 segundos de teste em 66 alvos —, e o padrão
+    // é sete vezes isso.
+    let texto = std::fs::read_to_string(publicar()).expect("o orquestrador tem que ser legível");
+
+    assert!(
+        texto.contains("PRAZO_DA_ETAPA_S"),
+        "a bateria voltou a esperar para sempre, e uma que trava vira uma que \
+         se pula"
+    );
+    assert!(
+        texto.contains("SEELE_PRAZO_DA_ETAPA_S"),
+        "o prazo deixou de poder ser afrouxado pelo ambiente, e uma máquina \
+         lenta de verdade passa a ser reprovada sem ter como discordar"
+    );
+
+    // **Sem `timeout`.** O coreutils não está no macOS por padrão, e uma etapa
+    // que depende dele reprova a máquina de quem publica em vez do código.
+    let etapa = texto
+        .split("etapa_da_bateria() {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}\n").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        !etapa.contains("timeout "),
+        "a espera passou a depender do `timeout` do coreutils, que o macOS não \
+         tem:\n{etapa}"
+    );
+    assert!(
+        etapa.contains("kill -9"),
+        "o prazo vence e nada interrompe o que travou:\n{etapa}"
+    );
+}

@@ -865,11 +865,65 @@ conferir_ferramentas() {
 #
 # O palpite continua, porque ele é útil: na maioria das vezes acerta e diz o
 # conserto numa linha. O que muda é que ele deixou de ser a **única** coisa dita.
+# Quanto tempo uma etapa da bateria pode levar antes de ser considerada travada.
+#
+# **Medido, e não escolhido.** Com tudo compilado, `cargo test --workspace` leva
+# 5min22s neste Mac — 284 segundos de teste em 66 alvos, e o cargo roda os
+# binários praticamente em série. O resto de uma etapa é compilação, que numa
+# máquina fria é a maior parte.
+#
+# Quarenta minutos é sete vezes a rodada quente, com folga para uma compilação
+# do zero num Windows mais lento. Não é para reprovar uma máquina devagar; é
+# para reprovar uma que **parou**.
+#
+# # Por que isto existe
+#
+# `cargo test --workspace` travou duas vezes no `seele_video`, com onze minutos
+# de CPU no mesmo binário e nenhum progresso. Os testes de captura chamam
+# `start_capture` e `stop_capture` do ScreenCaptureKit, que são bloqueantes e
+# falam por XPC com um serviço do sistema — sob carga esse caminho estola, e não
+# há como cancelá-lo de dentro do processo.
+#
+# Sem prazo, uma bateria travada não termina nunca, e quem está publicando
+# desiste e usa `--sem-bateria`. Foi assim que a 0.10.1-1 e a 0.10.3 saíram sem
+# teste, e cada uma delas voltou como relato de campo. Um prazo transforma
+# «nunca acaba» em «reprovou, e disse que travou» — que é uma coisa com a qual
+# se pode fazer alguma coisa.
+PRAZO_DA_ETAPA_S="${SEELE_PRAZO_DA_ETAPA_S:-2400}"
+
 etapa_da_bateria() {
     eb_queixa="$1"
     eb_conserto="$2"
     shift 2
-    if ! (cd "$RAIZ" && "$@") > "$TEMPORARIO/bateria.log" 2>&1; then
+    # **O prazo é montado à mão, e não com `timeout`.** O coreutils não está no
+    # macOS por padrão, e uma etapa que depende dele reprovaria a máquina de quem
+    # publica em vez do código. O que existe em todo lugar é um `sh` que sabe
+    # esperar e um relógio que sabe contar.
+    (cd "$RAIZ" && "$@") > "$TEMPORARIO/bateria.log" 2>&1 &
+    eb_filho=$!
+    eb_gasto=0
+    while kill -0 "$eb_filho" 2>/dev/null; do
+        if [ "$eb_gasto" -ge "$PRAZO_DA_ETAPA_S" ]; then
+            kill -9 "$eb_filho" 2>/dev/null || true
+            wait "$eb_filho" 2>/dev/null || true
+            morrer "a bateria passou de $PRAZO_DA_ETAPA_S segundos e foi interrompida." \
+                "Isto não é lentidão: com tudo compilado ela leva uns cinco minutos." \
+                "" \
+                "O caso conhecido é o \`seele-video\` travando nos testes de captura" \
+                "de tela — o \`start_capture\`/\`stop_capture\` do ScreenCaptureKit é" \
+                "bloqueante e estola sob carga. Rode-o sozinho para confirmar:" \
+                "  cargo test -p seele-video --lib" \
+                "" \
+                "Para dar mais tempo a uma máquina lenta:" \
+                "  SEELE_PRAZO_DA_ETAPA_S=4800 $0 …" \
+                "" \
+                "As últimas linhas antes de ela parar:" \
+                "$(tail -n 20 "$TEMPORARIO/bateria.log")"
+        fi
+        sleep 5
+        eb_gasto=$((eb_gasto + 5))
+    done
+    if ! wait "$eb_filho"; then
         morrer "$eb_queixa" \
             "$eb_conserto" \
             "" \
