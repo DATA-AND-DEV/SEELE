@@ -108,7 +108,7 @@ fn main() -> std::process::ExitCode {
         linha::Pedido::Instalar {
             tela: linha::Tela::Cheia,
             ..
-        } => janela::abrir(),
+        } => janela::abrir(janela::Modo::Instalar, std::path::Path::new("")),
         // **Sem tela, e este é o caminho que ninguém olha.** É por ele que
         // passa toda atualização do SEELE: o app baixa este `.exe` e o roda com
         // `/P /R`. As escolhas vêm do registro — quem tinha a porta aberta a
@@ -120,7 +120,17 @@ fn main() -> std::process::ExitCode {
             argumentos_do_app,
         } => sem_perguntar(tela, reiniciar, &argumentos_do_app),
         linha::Pedido::RemoverDeDentro => desinstalar::sair_de_dentro(),
-        linha::Pedido::RemoverA(pasta) => desinstalar::remover(&pasta),
+        // **A janela da remoção roda no segundo tempo, e é o único lugar onde
+        // ela pode rodar.**
+        //
+        // O primeiro tempo é o executável de dentro de `Program Files`, e uma
+        // janela ali não poderia apagar a própria pasta — o Windows não deixa
+        // remover um diretório com um executável em uso dentro. O segundo tempo
+        // roda da cópia no temporário, e é dele que a pasta some.
+        //
+        // Para quem aperta «desinstalar» no painel a troca é invisível: o
+        // primeiro tempo copia, chama e sai na hora, e o que aparece é a janela.
+        linha::Pedido::RemoverA(pasta) => janela::abrir(janela::Modo::Remover, &pasta),
     };
 
     match resultado {
@@ -373,5 +383,90 @@ mod testes {
                  no workspace inteiro"
             );
         }
+    }
+    /// **A remoção tem passos próprios, e eles não são os da instalação.**
+    ///
+    /// Ela abria a janela de instalar, com o campo da pasta e as caixas do
+    /// atalho e do firewall. Relatado assim: «o desinstalador abre como
+    /// instalar, com todo o passo a passo para instalação. Por quê? Ele deveria
+    /// ter passos diferentes, como remoção dos dados locais opcional».
+    ///
+    /// As duas perguntas não se parecem: instalar pergunta **onde** e **o que
+    /// mexer**; remover pergunta **o que levar junto**. E a única escolha da
+    /// remoção é a que ninguém desfaz.
+    #[test]
+    fn a_janela_da_remocao_tem_os_passos_dela() {
+        let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/janela.rs");
+        let Ok(fonte) = std::fs::read_to_string(&caminho) else {
+            panic!("não li {}", caminho.display());
+        };
+        let codigo: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for peca in [
+            "enum Modo",
+            "Passo::Confirmar",
+            "Passo::Removendo",
+            "Passo::Removido",
+        ] {
+            assert!(
+                codigo.contains(peca),
+                "«{peca}» sumiu: a remoção voltou a usar a trilha da instalação"
+            );
+        }
+        assert!(
+            codigo.contains("OPCOES_DA_REMOCAO"),
+            "a remoção perdeu a escolha dela, e volta a mostrar as caixas do \
+             atalho e do firewall — que não têm o que fazer numa remoção"
+        );
+        // O botão do fim não oferece abrir o que acabou de sair da máquina.
+        assert!(
+            codigo.contains("Self::Removido => \"FECHAR\""),
+            "o passo final da remoção voltou a oferecer abrir o SEELE"
+        );
+    }
+
+    /// A caixa dos dados nasce desmarcada, e a nota dela diz o que se perde.
+    ///
+    /// A identidade é uma chave Ed25519 gerada uma vez (ADR 0004) e não há
+    /// recuperação de conta em spec nenhuma. Quem a apaga entra nos servidores
+    /// de novo como alguém que nunca esteve lá, e o apelido que era dela fica
+    /// preso à chave que morreu. Uma caixa marcada por padrão faria isso
+    /// acontecer com quem só quis desinstalar.
+    #[test]
+    fn apagar_os_dados_e_escolha_e_a_nota_diz_o_preco() {
+        let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/janela.rs");
+        let Ok(fonte) = std::fs::read_to_string(&caminho) else {
+            panic!("não li {}", caminho.display());
+        };
+        let tabela = fonte
+            .split("const OPCOES_DA_REMOCAO")
+            .nth(1)
+            .and_then(|resto| resto.split("];").next())
+            .unwrap_or_default()
+            .to_owned();
+
+        assert!(
+            tabela.contains("não há como desfazer"),
+            "a nota da caixa deixou de dizer que isto não se desfaz:\n{tabela}"
+        );
+        assert!(
+            tabela.contains("identidade"),
+            "a nota não nomeia o que se perde, e «dados» não diz a ninguém que a \
+             identidade vai junto:\n{tabela}"
+        );
+
+        // E a remoção dos dados é condicional no código que apaga.
+        let remocao = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/desinstalar.rs");
+        let Ok(fonte) = std::fs::read_to_string(&remocao) else {
+            panic!("não li {}", remocao.display());
+        };
+        assert!(
+            fonte.contains("if apagar_dados {"),
+            "os dados passaram a ser apagados sem a escolha"
+        );
     }
 }

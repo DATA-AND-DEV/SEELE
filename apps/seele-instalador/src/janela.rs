@@ -60,16 +60,58 @@ enum Passo {
     Opcoes,
     Instalando,
     Pronto,
+    Confirmar,
+    Removendo,
+    Removido,
+}
+
+/// Para que esta janela foi aberta.
+///
+/// # Por que a remoção tem passos próprios
+///
+/// Ela abria a janela de **instalar**, com o campo da pasta e a caixa do
+/// firewall, porque `linha::ler` sem argumento nenhum responde `Instalar` e o
+/// `UninstallString` chamava o arquivo cru. Relatado assim: «o desinstalador
+/// abre como instalar, com todo o passo a passo para instalação. Por quê? Ele
+/// deveria ter passos diferentes, como remoção dos dados locais opcional».
+///
+/// Está certo, e as duas perguntas não se parecem: instalar pergunta **onde** e
+/// **o que mexer**; remover pergunta **o que levar junto**. A única escolha da
+/// remoção é a que ninguém pode desfazer — os dados desta máquina —, e ela
+/// merece uma tela em que se leia o que se perde.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Modo {
+    Instalar,
+    Remover,
+}
+
+impl Modo {
+    fn passos(self) -> &'static [Passo] {
+        match self {
+            Self::Instalar => &[
+                Passo::Destino,
+                Passo::Opcoes,
+                Passo::Instalando,
+                Passo::Pronto,
+            ],
+            Self::Remover => &[Passo::Confirmar, Passo::Removendo, Passo::Removido],
+        }
+    }
+
+    const fn primeiro(self) -> Passo {
+        match self {
+            Self::Instalar => Passo::Destino,
+            Self::Remover => Passo::Confirmar,
+        }
+    }
 }
 
 impl Passo {
-    const TODOS: [Self; 4] = [Self::Destino, Self::Opcoes, Self::Instalando, Self::Pronto];
-
     const fn numero(self) -> &'static str {
         match self {
-            Self::Destino => "01",
-            Self::Opcoes => "02",
-            Self::Instalando => "03",
+            Self::Destino | Self::Confirmar => "01",
+            Self::Opcoes | Self::Removendo => "02",
+            Self::Instalando | Self::Removido => "03",
             Self::Pronto => "04",
         }
     }
@@ -80,6 +122,9 @@ impl Passo {
             Self::Opcoes => "OPÇÕES",
             Self::Instalando => "INSTALANDO",
             Self::Pronto => "PRONTO",
+            Self::Confirmar => "O QUE SAI",
+            Self::Removendo => "REMOVENDO",
+            Self::Removido => "REMOVIDO",
         }
     }
 
@@ -89,6 +134,9 @@ impl Passo {
             Self::Opcoes => "O que o instalador vai mexer",
             Self::Instalando => "Instalando",
             Self::Pronto => "O SEELE está pronto",
+            Self::Confirmar => "Remover o SEELE desta máquina",
+            Self::Removendo => "Removendo",
+            Self::Removido => "O SEELE foi removido",
         }
     }
 
@@ -97,9 +145,26 @@ impl Passo {
         match self {
             Self::Destino => "CONTINUAR",
             Self::Opcoes => "INSTALAR",
-            Self::Instalando => "AGUARDE…",
+            Self::Instalando | Self::Removendo => "AGUARDE…",
             Self::Pronto => "ABRIR O SEELE",
+            Self::Confirmar => "REMOVER",
+            Self::Removido => "FECHAR",
         }
+    }
+
+    /// Se este passo mostra caixas de escolha.
+    const fn tem_escolhas(self) -> bool {
+        matches!(self, Self::Opcoes | Self::Confirmar)
+    }
+
+    /// Se este passo mostra o log do que está acontecendo.
+    const fn tem_log(self) -> bool {
+        matches!(self, Self::Instalando | Self::Removendo)
+    }
+
+    /// Se este passo é o fim.
+    const fn e_o_fim(self) -> bool {
+        matches!(self, Self::Pronto | Self::Removido)
     }
 }
 
@@ -126,6 +191,17 @@ enum Acao {
 
 /// O que a janela sabe de si.
 struct Estado {
+    /// Para que esta janela foi aberta: instalar, ou remover.
+    ///
+    /// A trilha de passos, o primeiro passo e as caixas de escolha saem daqui.
+    /// Ela é escolhida uma vez, na abertura, e não muda: uma janela que
+    /// trocasse de ofício no meio seria uma janela em que ninguém confia.
+    modo: Modo,
+    /// Onde o SEELE está, quando o modo é remover.
+    ///
+    /// Vazio ao instalar, onde quem responde é o campo. Ao remover não há campo:
+    /// quem sabe é o primeiro tempo, que passou o caminho no `--desinstalar-de`.
+    pasta: std::path::PathBuf,
     passo: Passo,
     /// As duas escolhas do passo 02, na ordem em que são desenhadas.
     opcoes: [bool; 2],
@@ -195,6 +271,30 @@ const OPCOES: [(&str, &str); 2] = [
         "só é necessário se você for hospedar um servidor",
     ),
 ];
+
+/// A única escolha da remoção, e ela é a que não se desfaz.
+///
+/// **Uma só, e desmarcada.** Tudo o mais que a remoção faz é reversível
+/// reinstalando: a pasta volta, o atalho volta, a regra de firewall volta. Os
+/// dados desta máquina não voltam — a identidade é uma chave Ed25519 gerada uma
+/// vez (ADR 0004), e não há recuperação de conta em spec nenhuma. Quem a apagar
+/// entra nos servidores de novo como uma pessoa que nunca esteve lá, e o apelido
+/// que era dela fica preso à chave que morreu.
+///
+/// Por isso a nota diz o que se perde e não o que se ganha. Uma caixa que
+/// dissesse «limpar tudo» seria verdadeira e insuficiente.
+const OPCOES_DA_REMOCAO: [(&str, &str); 1] = [(
+    "Apagar também os meus dados nesta máquina",
+    "identidade, servidores conhecidos, conversas e anexos — não há como desfazer",
+)];
+
+/// As opções que este passo mostra.
+const fn opcoes_de(passo: Passo) -> &'static [(&'static str, &'static str)] {
+    match passo {
+        Passo::Confirmar => &OPCOES_DA_REMOCAO,
+        _ => &OPCOES,
+    }
+}
 
 /// Texto para o Win32: UTF-16 terminado em zero.
 fn larga(texto: &str) -> Vec<u16> {
@@ -393,7 +493,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
     let fita = barra + 1;
     let altura_da_fita = px(30);
     let largura_do_passo = (largura - 2) / 4;
-    for (i, passo) in Passo::TODOS.iter().enumerate() {
+    for (i, passo) in estado.modo.passos().iter().enumerate() {
         let x = 1 + largura_do_passo * i32::try_from(i).unwrap_or(0);
         let caixa = RECT {
             left: x,
@@ -590,7 +690,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
         );
     }
 
-    if estado.passo == Passo::Instalando {
+    if estado.passo.tem_log() {
         let (frase, cor_da_frase) = estado.erro.as_ref().map_or_else(
             || {
                 (
@@ -638,7 +738,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
         }
     }
 
-    if estado.passo == Passo::Pronto {
+    if estado.passo.e_o_fim() {
         escrever(
             hdc,
             RECT {
@@ -690,9 +790,32 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
         }
     }
 
-    if estado.passo == Passo::Opcoes {
+    // O parágrafo da confirmação, acima da única caixa.
+    //
+    // Ele diz **o que sai** — e o que sai é a metade que a pessoa consegue
+    // desfazer reinstalando. O que ela não desfaz está na caixa logo abaixo, com
+    // a nota dela, e é por isso que os dois textos não se repetem.
+    if estado.passo == Passo::Confirmar {
+        escrever(
+            hdc,
+            RECT {
+                left: corpo_x,
+                top: topo + px(24),
+                right: corpo_direita,
+                bottom: topo + px(64),
+            },
+            "Saem desta máquina: os arquivos do SEELE, os atalhos, a regra de \
+             firewall e a entrada no painel do Windows. Tudo isso volta se você \
+             instalar de novo.",
+            estado.corpo,
+            pele::ROTULO,
+            DT_WORDBREAK.0 | DT_NOPREFIX.0,
+        );
+    }
+
+    if estado.passo.tem_escolhas() {
         let mut y = topo + px(72);
-        for (i, (nome, nota)) in OPCOES.iter().enumerate() {
+        for (i, (nome, nota)) in opcoes_de(estado.passo).iter().enumerate() {
             let caixa = RECT {
                 left: corpo_x,
                 top: y,
@@ -817,7 +940,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
         right: avancar.left - px(10),
         bottom: avancar.bottom,
     };
-    let primeiro = estado.passo == Passo::Destino;
+    let primeiro = estado.passo == estado.modo.primeiro();
     let cor_da_borda = if primeiro {
         pele::LINHA
     } else {
@@ -1212,7 +1335,20 @@ fn agir(janela: HWND, estado: &mut Estado, acao: Option<Acao>) {
             }
             // Enquanto instala, avançar não faz nada: o passo 04 chega quando a
             // linha da instalação disser que acabou, e não quando alguém apertar.
-            Passo::Instalando => {}
+            Passo::Instalando | Passo::Removendo => {}
+            Passo::Confirmar => {
+                estado.passo = Passo::Removendo;
+                comecar_a_remover(janela, estado);
+            }
+            // Removido: só fechar. Não há o que abrir — o produto acabou de
+            // sair desta máquina, e um botão que oferecesse abri-lo seria a
+            // janela desmentindo o que ela própria fez.
+            Passo::Removido => {
+                // SAFETY: fecha a janela, que leva ao `WM_DESTROY`.
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(janela);
+                }
+            }
             Passo::Pronto => {
                 // **Abrir antes de fechar, e nesta ordem.**
                 //
@@ -1285,7 +1421,8 @@ fn registrar_face(bytes: &'static [u8]) -> bool {
 }
 
 /// Abre a janela e roda até alguém fechá-la.
-pub(crate) fn abrir() -> Result<(), String> {
+pub(crate) fn abrir(modo: Modo, pasta: &std::path::Path) -> Result<(), String> {
+    let pasta = pasta.to_path_buf();
     // SAFETY: chamadas de inicialização do processo, antes de qualquer janela.
     unsafe {
         // Por monitor, e na segunda versão: sem isto o Windows estica a janela
@@ -1407,7 +1544,9 @@ pub(crate) fn abrir() -> Result<(), String> {
         .map_err(|erro| format!("não criei o campo da pasta: {erro}"))?;
 
         let estado = Box::new(Estado {
-            passo: Passo::Destino,
+            modo,
+            pasta: pasta.clone(),
+            passo: modo.primeiro(),
             campo,
             fundo_do_campo: CreateSolidBrush(COLORREF(pele::NEGRO)),
             // O atalho nasce marcado e a porta nasce desmarcada, como o desenho
@@ -1608,6 +1747,47 @@ fn comecar_a_instalar(janela: HWND, estado: &mut Estado) {
                 let _ = manda.send(Ok(passo.to_owned()));
                 acordar();
             });
+
+        if let Err(motivo) = resultado {
+            let _ = manda.send(Err(motivo));
+        }
+        acordar();
+    });
+}
+
+/// Começa a remoção numa linha própria, como a instalação faz.
+///
+/// **A pasta vem do estado e não do campo.** Não há campo nesta tela: quem sabe
+/// onde o SEELE está é quem chamou a janela, e ele soube pelo `--desinstalar-de`
+/// que o primeiro tempo passou.
+fn comecar_a_remover(janela: HWND, estado: &mut Estado) {
+    estado.log.clear();
+    estado.erro = None;
+
+    let pasta = estado.pasta.clone();
+    let apagar_dados = estado.opcoes.first().copied().unwrap_or(false);
+    let (manda, recebe) = std::sync::mpsc::channel();
+    estado.recado = Some(recebe);
+
+    // O `isize` atravessa a fronteira pela mesma razão de `comecar_a_instalar`.
+    let aviso = janela.0 as isize;
+    std::thread::spawn(move || {
+        let acordar = || {
+            // SAFETY: ver `comecar_a_instalar`.
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    Some(HWND(aviso as *mut core::ffi::c_void)),
+                    WM_ANDOU,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        };
+
+        let resultado = crate::desinstalar::remover_contando(&pasta, apagar_dados, &|passo| {
+            let _ = manda.send(Ok(passo.to_owned()));
+            acordar();
+        });
 
         if let Err(motivo) = resultado {
             let _ = manda.send(Err(motivo));
