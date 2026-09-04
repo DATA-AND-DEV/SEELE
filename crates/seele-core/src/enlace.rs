@@ -3883,8 +3883,8 @@ mod tests {
         );
         assert_eq!(
             teto.resolucao_estimada(),
-            Some(seele_video::codec::Resolucao::P1080),
-            "o caminho medido comprava 1080p e a tela continuou menor"
+            Some(seele_video::codec::Resolucao::P720),
+            "o caminho medido comprava 720p e a tela continuou menor"
         );
     }
 

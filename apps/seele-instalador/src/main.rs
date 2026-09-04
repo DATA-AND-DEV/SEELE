@@ -77,7 +77,7 @@ pub const OBRIGACOES: &[(&str, &str)] = &[
         "o SEELE não abre numa máquina limpa",
     ),
     (
-        "a regra de firewall da 8383, do programa",
+        "a regra de firewall da 8383, do programa, em rede confiável",
         "quem hospeda fica invisível e não descobre por quê",
     ),
     (
@@ -268,5 +268,45 @@ mod testes {
                 "a obrigação «{obrigacao}» não diz o que quebra sem ela"
             );
         }
+    }
+    #[test]
+    fn a_regra_de_firewall_nao_vale_em_rede_publica() {
+        // **Era `profile=any`, e isso incluía o público.**
+        //
+        // «Público» é o que o Windows escolhe para uma rede em que não se
+        // confia — o Wi-Fi de uma cafeteria, de um aeroporto, de um hotel. Com
+        // `any`, a regra valia lá: todo mundo naquela rede podia bater na porta
+        // do SEELE de quem só foi tomar café.
+        //
+        // A conta que mudou isso é simples: hospedar de uma cafeteria é caso
+        // raro, e **carregar o notebook para uma é o caso comum**. As três
+        // paredes que respondem depois — o balde por endereço, o segredo, a
+        // portaria — são paredes, e não a ausência de contato.
+        //
+        // Não dá para exercitar o `netsh` num teste; o que dá é prender a lista
+        // de argumentos, que é onde a decisão mora.
+        let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/sistema.rs");
+        let Ok(fonte) = std::fs::read_to_string(&caminho) else {
+            panic!("não li {}", caminho.display());
+        };
+        // Sem os comentários: o cabeçalho da função explica que `any` era o que
+        // havia antes, e uma âncora que casa com a própria explicação acusa o
+        // código de ter o defeito que o comentário descreve. Já aconteceu duas
+        // vezes neste repositório.
+        let codigo: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            codigo.contains("\"profile=domain,private\""),
+            "a regra de firewall deixou de nomear os perfis confiáveis"
+        );
+        assert!(
+            !codigo.contains("\"profile=any\""),
+            "a regra voltou a valer em rede pública, e passa a deixar entrar \
+             conexão no Wi-Fi de qualquer lugar onde a máquina for aberta"
+        );
     }
 }

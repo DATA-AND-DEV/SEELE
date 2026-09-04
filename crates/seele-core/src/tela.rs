@@ -483,26 +483,67 @@ impl TetoDeVideo {
 /// que a captura entrega, e o que chega do outro lado é imagem grande e trêmula.
 /// Ela **não** diz onde 1080p passa a caber.
 ///
-/// 1500 kbps é o palpite com a única aritmética disponível atrás: os 1146 kbps
-/// entregues cobriram 83,8% dos quadros, e carregar os outros pediria uns
-/// 1368 kbps — 1500 é isso com a folga que um ponto medido merece. **O modelo é
-/// ingênuo pela mesma razão que o comentário de [`PISO_DE_BANDA_BPS`] já dá:**
-/// bits não escalam com quadros, o quadro-chave custa o mesmo e o conteúdo
-/// parado também. A prova de que é ingênuo está na própria tabela — 540p perde
-/// *mais* quadros que 720p gastando *menos* bits, o que nenhuma regra de três
-/// explica.
-pub const TETO_ESTIMADO_PARA_1080P_BPS: u32 = 1_500_000;
+/// **6,2 Mbps, e o número saiu da tabela para uma conta.** Este limiar valeu
+/// 1500 kbps, e aquele valor era o palpite de *onde o OpenH264 pararia de jogar
+/// quadro fora* — 1146 kbps entregues cobrindo 83,8% dos quadros, e uns
+/// 1368 kbps para carregar o resto. É o ponto em que o codificador para de
+/// passar fome, não o ponto em que a imagem fica boa, e os dois estão longe um
+/// do outro: 1080p a 1500 kbps e 30 quadros são **0,024 bits por pixel**.
+///
+/// Tela com texto pede cerca de **0,10 bits por pixel** — é aí que a borda de
+/// uma fonte para de virar bloco. 1080p tem 2 073 600 pixels, então a 30
+/// quadros a conta é `2 073 600 × 0,10 × 30 = 6,2 Mbps`, e é só isso que este
+/// número é.
+///
+/// **O que a mudança custa, e é visível:** quem via «1080p» nas conexões de
+/// 2 Mbps passa a ver «720p». Não é regressão — era um 1080p de 0,024 bpp, que
+/// é o relato «a imagem fica borrada e blocada». Mas o §5 manda mostrar o que
+/// está saindo, então a troca aparece na interface e a nota de versão precisa
+/// dizer por quê.
+///
+/// **O que ela não resolve:** 540p num monitor grande mostrando código continua
+/// ilegível por mais nítido que seja. Resolução também é legibilidade, e bits
+/// por pixel não captura isso — é a razão de este número ser calibrado por
+/// medida **e** por alguém olhando o texto, e não só por PSNR.
+///
+/// # Por que é derivado e não escrito
+///
+/// A invariante que este limiar tem de cumprir está escrita como teste desde
+/// antes desta calibração: *«nos limiares, a cadência cheia cabe»*. Ela só vale
+/// se o limiar for **exatamente** [`bits_por_quadro`] vezes
+/// [`CADENCIA_DE_REFERENCIA`] — e a primeira versão desta mudança escreveu
+/// 6 200 000 à mão, 10 000 abaixo do que a divisão de [`cadencia_para`] precisa,
+/// o que pôs 1080p a 15 quadros em cima do próprio limiar. Duas constantes
+/// arredondadas em separado divergem; uma derivada da outra não pode.
+pub const TETO_ESTIMADO_PARA_1080P_BPS: u32 =
+    bits_por_quadro(Resolucao::P1080) * CADENCIA_DE_REFERENCIA;
+
+/// A cadência contra a qual os limiares de resolução são medidos.
+///
+/// **30, e é o padrão do §5.** Um limiar de resolução é uma frase sobre bits por
+/// pixel, e bits por pixel só existem depois de alguém dizer a quantos quadros.
+/// Este é esse alguém: os limiares dizem «esta resolução cabe **a 30 quadros**»,
+/// e é [`cadencia_para`] quem trata dos outros degraus a partir do mesmo
+/// [`bits_por_quadro`].
+pub const CADENCIA_DE_REFERENCIA: u32 = 30;
 
 /// A partir de quanto o orçamento compra 720p, em bits por segundo.
 ///
 /// Mesma tabela, mesma ressalva de [`TETO_ESTIMADO_PARA_1080P_BPS`]: um teto
 /// medido, e o resto é estimativa.
 ///
-/// 900 kbps é o que 720p **de fato gastou** no teto de 1200 (872 kbps),
-/// arredondado para cima. Abaixo disso o orçamento deixa de cobrir o que essa
-/// resolução pede, e o degrau seguinte — 540p, o piso da lista do §5 — passa a
-/// ser a maior que ainda compra alguma coisa.
-pub const TETO_ESTIMADO_PARA_720P_BPS: u32 = 900_000;
+/// **2,8 Mbps, pela mesma conta de [`TETO_ESTIMADO_PARA_1080P_BPS`].** Este
+/// limiar valeu 900 kbps, que era o que 720p **de fato gastou** no teto de 1200
+/// — e gastar não é o mesmo que precisar: naquele ponto o codificador entregava
+/// 0,033 bits por pixel a 30 quadros, um terço do que texto pede.
+///
+/// 720p tem 921 600 pixels: `921 600 × 0,10 × 30 = 2,76 Mbps`.
+///
+/// **Derivado e não escrito**, pela mesma razão de
+/// [`TETO_ESTIMADO_PARA_1080P_BPS`]: dois arredondamentos independentes já
+/// tinham quebrado a invariante uma vez.
+pub const TETO_ESTIMADO_PARA_720P_BPS: u32 =
+    bits_por_quadro(Resolucao::P720) * CADENCIA_DE_REFERENCIA;
 
 /// A maior resolução que este teto ainda compra (§5.1).
 ///
@@ -617,10 +658,29 @@ pub const fn resolucao_para(teto_bps: u32, prioridade: Prioridade) -> Resolucao 
 /// blocada».
 #[must_use]
 pub const fn bits_por_quadro(resolucao: Resolucao) -> u32 {
+    // **0,10 bits por pixel, e não o que o OpenH264 gastou.**
+    //
+    // A tabela anterior — 45 k a 1080p, 33 k a 720p, 30 k a 540p — era a coluna
+    // da direita do quadro acima: o gasto por quadro **entregue** do
+    // codificador de referência num teto de 1200 kbps. Naquele ponto ele estava
+    // jogando 16,2% dos quadros fora. É o ponto de fome dele, não o ponto em
+    // que a imagem fica boa, e adotá-lo como alvo fez o produto escolher sempre
+    // mais quadros do que os bits pagavam — 45 k num quadro de 1080p são 0,022
+    // bits por pixel.
+    //
+    // 0,10 bpp é onde a borda de uma fonte para de virar bloco. Os três números
+    // abaixo são essa constante vezes os pixels de cada degrau, arredondados
+    // **para cima**, e nada mais. Para cima e não para o mais próximo: 207 000
+    // num quadro de 1080p são 0,0998 bpp, e um piso que o próprio piso não
+    // alcança é um piso que não guarda nada — foi o que
+    // `cada_limiar_compra_a_resolucao_que_promete` acusou.
     match resolucao {
-        Resolucao::P1080 => 45_000,
-        Resolucao::P720 => 33_000,
-        Resolucao::P540 => 30_000,
+        // 2 073 600 px × 0,10 = 207 360
+        Resolucao::P1080 => 208_000,
+        //   921 600 px × 0,10 = 92 160
+        Resolucao::P720 => 93_000,
+        //   518 400 px × 0,10
+        Resolucao::P540 => 52_000,
     }
 }
 
@@ -1758,9 +1818,13 @@ pub(crate) mod tests {
         // resolução não controla tráfego: dez pessoas numa fibra cabem em
         // 1080p, quatro numa subida ruim não cabem em 720p.
         //
-        // Dez pessoas numa fibra de 100 Mbps:
-        let fibra = TetoDeVideo::com_caminho(100_000_000)
-            .com_caminho_de_quem_hospeda(100_000_000)
+        // Dez pessoas numa fibra de 200 Mbps. **Eram 100**, e o número subiu
+        // com a régua e não com a intenção: 100 Mbps ÷ 10 davam 6 Mbps de teto,
+        // que compravam 1080p quando o limiar era 1,5 e não compram agora que
+        // ele é 6,24. O que o teste diz continua sendo o mesmo — o degrau segue
+        // o teto e não a contagem de gente.
+        let fibra = TetoDeVideo::com_caminho(200_000_000)
+            .com_caminho_de_quem_hospeda(200_000_000)
             .com_espectadores(10);
         assert_eq!(
             fibra.teto(SignalBand::Nominal).resolucao_estimada(),
@@ -1781,8 +1845,15 @@ pub(crate) mod tests {
         );
 
         // E o degrau anda com o teto, não com o número de pessoas: a mesma sala
-        // de quatro numa subida três vezes maior sobe de degrau sozinha.
-        let casa_boa = casa.com_caminho_de_quem_hospeda(6_000_000);
+        // de quatro numa subida dez vezes maior sobe de degrau sozinha.
+        //
+        // **As duas pernas juntas**, e não só a de quem hospeda: o `min` do
+        // §5.1 tem três braços, e subir um só deixa o teto preso no outro — foi
+        // o que aconteceu quando este teste subia apenas `com_caminho_de_quem_hospeda`
+        // e a perna desta máquina continuava nos 2 Mbps da prova.
+        let casa_boa = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
+            .com_espectadores(4);
         assert_eq!(
             casa_boa.teto(SignalBand::Nominal).resolucao_estimada(),
             Some(Resolucao::P720),
@@ -1796,9 +1867,13 @@ pub(crate) mod tests {
         // estimativa, e o nome das constantes diz isso; o que este teste prende
         // é o que a medida de fato sustenta.
 
-        // No teto que foi medido, 1080p joga fora 16,2% do que captura e 720p
-        // perde 11,1% e anda melhor. Então 1200 kbps **não** compra 1080p.
-        assert_eq!(resolucao_estimada_para(1_200_000), Resolucao::P720);
+        // No teto que foi medido, 1080p joga fora 16,2% do que captura. Então
+        // 1200 kbps **não** compra 1080p — e, desde que a régua passou a ser
+        // bits por pixel, não compra 720p também: 720p a 1200 kbps e 30 quadros
+        // são 0,043 bits por pixel, menos da metade do que texto pede. O degrau
+        // que 1200 kbps compra é 540p, e comprá-lo nítido é melhor que comprar
+        // 720p blocado.
+        assert_eq!(resolucao_estimada_para(1_200_000), Resolucao::P540);
 
         // Nos limiares, e um bit abaixo de cada um.
         assert_eq!(
@@ -2502,7 +2577,10 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod o_eixo_da_degradacao {
-    use super::{cadencia_para, resolucao_para, Prioridade};
+    use super::{
+        cadencia_para, resolucao_para, Prioridade, FRACAO_DO_CAMINHO, TETO_ESTIMADO_PARA_1080P_BPS,
+        TETO_ESTIMADO_PARA_720P_BPS,
+    };
     use seele_video::codec::{Cadencia, Resolucao};
 
     /// **A metade do §2 que não existia.**
@@ -2521,22 +2599,32 @@ mod o_eixo_da_degradacao {
         // Nos limiares, a cadência cheia cabe — é de lá que os números vêm.
         assert_eq!(
             cadencia_para(
-                1_500_000,
+                TETO_ESTIMADO_PARA_1080P_BPS,
                 Resolucao::P1080,
                 Prioridade::Nitidez,
                 Cadencia::Q30
             ),
             Cadencia::Q30,
-            "no limiar de 1080p os 30 quadros são exatamente o que a medida comprou"
+            "no limiar de 1080p os 30 quadros são exatamente o que a régua compra"
         );
 
-        // E abaixo dele o quadro cede em vez de a imagem borrar. 900 kbps
-        // compram 720p pela tabela — a 15 quadros, não a 30.
+        // E abaixo dele o quadro cede em vez de a imagem borrar. Metade do
+        // limiar de 720p compra 720p a 15 quadros, e não a 30.
+        //
+        // **O número era 900 kbps**, e mudou junto com a régua: aquele valor era
+        // o que 720p *gastou* no teto de 1200 kbps, num ponto em que o
+        // codificador entregava 0,033 bits por pixel. Metade do limiar é a mesma
+        // frase — «abaixo do limiar, o quadro cede» — dita contra a tabela que
+        // vale.
         assert_eq!(
-            cadencia_para(900_000, Resolucao::P720, Prioridade::Nitidez, Cadencia::Q30),
+            cadencia_para(
+                TETO_ESTIMADO_PARA_720P_BPS / 2,
+                Resolucao::P720,
+                Prioridade::Nitidez,
+                Cadencia::Q30
+            ),
             Cadencia::Q15,
-            "720p a 900 kbps são 30 kbit por quadro em 30 quadros: o codificador \
-             do sistema entrega os 30 e borra cada um"
+            "metade dos bits do limiar tem de comprar metade dos quadros"
         );
         assert_eq!(
             cadencia_para(300_000, Resolucao::P540, Prioridade::Nitidez, Cadencia::Q30),
@@ -2617,25 +2705,34 @@ mod o_eixo_da_degradacao {
         // resolução. O que a invariante do laço acima guarda continua valendo —
         // movimento nunca pede **mais** que nitidez —, e o que muda é que a 6
         // Mbps o dobro de 1,5 já cabe.
+        //
+        // **Os tetos deste teste andaram com a régua, e o que eles dizem não.**
+        // Movimento paga o dobro por degrau, então o teto que prova «movimento
+        // alcança 1080p» é, por construção, o dobro do limiar de 1080p — antes
+        // 3 Mbps, agora 12,42. Escrever 6 000 000 aqui de novo provaria o
+        // contrário do que a frase diz.
+        let dois_1080p = TETO_ESTIMADO_PARA_1080P_BPS * 2;
         assert_eq!(
-            resolucao_para(6_000_000, Prioridade::Nitidez),
+            resolucao_para(dois_1080p, Prioridade::Nitidez),
             Resolucao::P1080
         );
         assert_eq!(
-            resolucao_para(6_000_000, Prioridade::Movimento),
+            resolucao_para(dois_1080p, Prioridade::Movimento),
             Resolucao::P1080,
-            "a seis megabits, o dobro do limiar de 1080p cabe com folga"
+            "no dobro do limiar de 1080p, movimento alcança 1080p"
         );
 
-        // E o aperto continua apertando, que é a razão de o eixo existir.
+        // E o aperto continua apertando, que é a razão de o eixo existir: um
+        // teto que compra 720p para quem mostra texto compra 540p para quem
+        // joga, porque movimento cobra o dobro.
         assert_eq!(
-            resolucao_para(1_200_000, Prioridade::Nitidez),
+            resolucao_para(TETO_ESTIMADO_PARA_720P_BPS, Prioridade::Nitidez),
             Resolucao::P720
         );
         assert_eq!(
-            resolucao_para(1_200_000, Prioridade::Movimento),
+            resolucao_para(TETO_ESTIMADO_PARA_720P_BPS, Prioridade::Movimento),
             Resolucao::P540,
-            "a 1,2 Mbps movimento continua cedendo resolução para segurar o quadro"
+            "no limiar de 720p, movimento continua cedendo resolução para segurar o quadro"
         );
 
         // **E 1080p tem de ser alcançável.** Sem esta linha, a regra pode voltar
@@ -2673,6 +2770,64 @@ mod o_eixo_da_degradacao {
             resolucao_para(6_000_000, Prioridade::default()),
             resolucao_para(6_000_000, Prioridade::Nitidez)
         );
+    }
+
+    /// Quantos bits por pixel um degrau entrega no seu próprio limiar.
+    ///
+    /// É a conta que decide se sai bloco, e a única que atravessa resolução e
+    /// cadência ao mesmo tempo: um limiar só é honesto se, exatamente em cima
+    /// dele, a imagem que ele promete couber nos bits que ele tem.
+    fn bits_por_pixel(teto_bps: u32, resolucao: Resolucao, quadros: u32) -> f64 {
+        let pixels = (resolucao.largura() * resolucao.altura()) as f64;
+        f64::from(teto_bps) / f64::from(quadros) / pixels
+    }
+
+    /// 0,10 bits por pixel é onde a borda de uma fonte para de virar bloco.
+    const PISO_BPP: f64 = 0.10;
+
+    #[test]
+    fn cada_limiar_compra_a_resolucao_que_promete() {
+        // Em cima do limiar, e não acima: o limiar é o pior caso do degrau, e é
+        // ele que tem de fechar a conta. Se fechar só com folga, o degrau está
+        // prometendo o que não entrega na hora em que alguém de fato o alcança.
+        for (teto, resolucao) in [
+            (TETO_ESTIMADO_PARA_1080P_BPS, Resolucao::P1080),
+            (TETO_ESTIMADO_PARA_720P_BPS, Resolucao::P720),
+        ] {
+            let cadencia = cadencia_para(teto, resolucao, Prioridade::Nitidez, Cadencia::Q30);
+            let bpp = bits_por_pixel(teto, resolucao, cadencia.hz());
+            assert!(
+                bpp >= PISO_BPP,
+                "{resolucao:?} no limiar de {teto} bps a {} quadros dá {bpp:.3} bpp, \
+                 abaixo do piso de {PISO_BPP} — é o limiar prometendo o que não paga",
+                cadencia.hz(),
+            );
+        }
+    }
+
+    #[test]
+    fn o_teto_da_estimativa_alcanca_os_oito_megabits_que_o_produto_quer() {
+        // O vídeo leva FRACAO_DO_CAMINHO — 60% — do caminho, então o caminho
+        // tem de chegar a 13,3 Mbps para o vídeo chegar a 8. Sem esta folga,
+        // «quero 8 Mbps» é uma escolha que o `min()` das três pernas do §5.1
+        // derruba em silêncio.
+        let maior_video_bps =
+            u64::from(crate::caminho::TETO_DA_ESTIMATIVA_BPS) * u64::from(FRACAO_DO_CAMINHO) / 100;
+        assert!(
+            maior_video_bps >= 8_000_000,
+            "o teto da estimativa só chega a {maior_video_bps} bps de vídeo, e o produto quer 8 M"
+        );
+    }
+
+    #[test]
+    fn oito_megabits_compram_1080p_a_trinta_com_folga() {
+        // A ponta de cima da escada, escrita para não voltar a ser suposição: o
+        // que o pedido de 8 Mbps de fato entrega na tela.
+        let resolucao = resolucao_para(8_000_000, Prioridade::Nitidez);
+        assert_eq!(resolucao, Resolucao::P1080);
+        let cadencia = cadencia_para(8_000_000, resolucao, Prioridade::Nitidez, Cadencia::Q30);
+        assert_eq!(cadencia, Cadencia::Q30);
+        assert!(bits_por_pixel(8_000_000, resolucao, cadencia.hz()) >= 0.12);
     }
 }
 

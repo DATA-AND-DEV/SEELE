@@ -157,8 +157,11 @@ pub(crate) fn executar(
     }
 
     sistema::regra_de_firewall(&produto, escolhas.porta)?;
+    // Os perfis nomeados, e não só «aberta»: a regra **não** vale em rede
+    // pública, e quem hospeda de uma precisa saber disso por aqui em vez de
+    // descobrir por ninguém conseguir entrar. Ver `sistema::regra_de_firewall`.
     contar(if escolhas.porta {
-        "porta 8383 UDP aberta no firewall"
+        "porta 8383 UDP aberta no firewall, em rede de domínio e privada — não em rede pública"
     } else {
         "firewall: regra não pedida"
     });

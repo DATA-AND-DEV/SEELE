@@ -34,6 +34,24 @@ fn larga(texto: &str) -> Vec<u16> {
 /// reinstalação deixaria de pé a regra da instalação anterior — e a caixa teria
 /// mentido.
 ///
+/// # Rede conhecida e rede de casa, e **não** rede pública
+///
+/// Era `profile=any`, que inclui o perfil público — o que o Windows chama de
+/// rede em que não se confia, e é o que ele escolhe para o Wi-Fi de uma
+/// cafeteria ou de um aeroporto. A regra valia lá também.
+///
+/// A conta que mudou isso: hospedar de uma cafeteria é caso raro; **carregar o
+/// notebook para uma é o caso comum**. Com `any`, todo mundo naquela rede podia
+/// bater na porta do SEELE de quem só foi tomar café — e as três paredes que
+/// respondem depois (o balde por endereço, o segredo, a portaria) são paredes,
+/// não a ausência de contato.
+///
+/// O custo é real e vai para quem hospeda numa rede que o Windows marcou como
+/// pública: ninguém entra, e o Windows não diz por quê. Quem estiver nesse caso
+/// muda a rede para privada nas configurações do Windows — que é a coisa certa
+/// a fazer de qualquer jeito, porque «pública» significa «não deixe esta máquina
+/// ser vista aqui».
+///
 /// # Errors
 ///
 /// Devolve o que o `netsh` respondeu quando ele recusa. Falhar aqui não desfaz a
@@ -73,7 +91,9 @@ pub(crate) fn regra_de_firewall(executavel: &Path, ligada: bool) -> Result<(), S
             "dir=in",
             "action=allow",
             "protocol=udp",
-            "profile=any",
+            // Ver o cabeçalho: `any` incluía o perfil público, e a regra valia
+            // no Wi-Fi de uma cafeteria.
+            "profile=domain,private",
             "enable=yes",
             &format!("program={}", executavel.display()),
             "description=Deixa entrar conexão para o servidor SEELE hospedado nesta máquina.",

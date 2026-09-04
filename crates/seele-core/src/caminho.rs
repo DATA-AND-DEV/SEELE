@@ -255,13 +255,25 @@ pub const FILA_TOLERADA: Duration = Duration::from_millis(40);
 
 /// O maior caminho que a sonda chega a afirmar, em bits por segundo.
 ///
-/// **10 Mbps, e é escolha.** O maior degrau da lista fechada do §5 é 1080p, e
-/// [`crate::tela::TETO_ESTIMADO_PARA_1080P_BPS`] o compra a 1500 kbps de teto —
-/// que são 2,5 Mbps de caminho. Este teto é quatro vezes isso: espaço de sobra
-/// para o orçamento cobrir o que o encoder pede sem apertos, e um lugar onde a
-/// escada para de subir antes de virar um número que só serve para produzir
-/// saltos que nada compra.
-pub const TETO_DA_ESTIMATIVA_BPS: u32 = 10_000_000;
+/// **14 Mbps, e é a conta do produto e não uma folga.** O pedido é 8 Mbps de
+/// vídeo — o que compra 1080p a 30 quadros com 0,13 bits por pixel, ou 720p a
+/// 60 com 0,145. O vídeo leva [`crate::tela::FRACAO_DO_CAMINHO`], 60% do
+/// caminho, então 8 Mbps de vídeo pedem 13,3 Mbps de caminho, e 14 é esse
+/// número arredondado para cima.
+///
+/// **O que este teto era, e por que o argumento dele caiu.** Ele valia 10 Mbps,
+/// justificados como «quatro vezes os 2,5 Mbps de caminho que compram 1080p». O
+/// erro não estava aqui, estava no outro lado da conta: aqueles 2,5 Mbps vinham
+/// de [`crate::tela::TETO_ESTIMADO_PARA_1080P_BPS`] valer 1500 kbps, que é o
+/// ponto em que 1080p passa a ser **comprável** — 0,024 bits por pixel — e não
+/// o ponto em que ele fica bom. Com o limiar recalibrado para 6,2 Mbps, 10 Mbps
+/// de caminho dariam 6 Mbps de vídeo e não alcançariam o próprio degrau de
+/// cima.
+///
+/// Continua havendo um teto, e pela razão de sempre: acima de 1080p a 60
+/// quadros não há degrau que a lista fechada do §5 ofereça, então uma
+/// estimativa maior só produziria saltos que nada compra.
+pub const TETO_DA_ESTIMATIVA_BPS: u32 = 14_000_000;
 
 /// O menor caminho que a sonda chega a afirmar, em bits por segundo.
 ///
@@ -618,6 +630,33 @@ impl Sonda {
         }
 
         if !cheia {
+            return;
+        }
+
+        // **E a faixa não pode fazer uma janela parecer cheia.**
+        //
+        // `cheia` compara o que saiu com `janela.teto_bps`, e em
+        // [`SignalBand::Degraded`] esse teto **já vem cortado pela metade** —
+        // `TetoDeVideo::teto` o corta, e por uma razão que não tem nada a ver
+        // com capacidade. Uma janela assim enche o próprio teto usando 30% do
+        // cano e diz «coube», e a estimativa sobe um passo largo em cima de uma
+        // prova que não existe. Repetido a cada janela de uma faixa ruim, o
+        // número vai até [`TETO_DA_ESTIMATIVA_BPS`] sem nunca ter tocado a
+        // borda; quando a faixa volta a `Nominal`, o teto salta para 60% de um
+        // número inventado e come de uma vez a reserva da voz — que é
+        // exatamente a terceira armadilha do cabeçalho deste módulo, entrando
+        // pela porta que ela não vigiava.
+        //
+        // Descer continua permitido em qualquer faixa: `doeu` já retornou
+        // acima, e dor é notícia verdadeira venha de onde vier. O que uma faixa
+        // cortada não pode fazer é **dizer um tamanho**, que é a mesma frase da
+        // primeira armadilha.
+        //
+        // Isto ficou escondido enquanto o teto da estimativa era 10 Mbps: com
+        // ele, os dois lados de `a_faixa_da_voz_nao_corta_a_estimativa_uma_segunda_vez`
+        // paravam no mesmo teto e a igualdade passava por empate, não por
+        // acerto. Subir o teto para 14 Mbps separou os dois e mostrou o defeito.
+        if !matches!(janela.faixa, SignalBand::Nominal) {
             return;
         }
 
@@ -1084,12 +1123,48 @@ mod tests {
             |_, _| {},
         );
 
+        // **A faixa não pode DERRUBAR a estimativa** — é o que o cabeçalho
+        // deste módulo escreve, e é a coisa que importa: se a sonda também
+        // baixasse por causa da faixa, o vídeo levaria dois cortes pelo mesmo
+        // sintoma e voltaria devagar de um buraco que ele mesmo cavou.
+        assert!(
+            degradada.estimativa() >= CAMINHO_DA_PROVA_BPS,
+            "a faixa degradada derrubou a medida do caminho abaixo de onde ela começou"
+        );
+
+        // **E não pode LEVANTÁ-LA, que é o outro lado e é o que este teste
+        // pedia por engano.** Aqui estava escrito que as duas estimativas têm de
+        // ser iguais, e isso só é alcançável de um jeito: subindo em `Degraded`.
+        // Subir ali é subir sem prova — o teto já vem cortado pela metade, então
+        // a janela enche o próprio teto usando 30% do cano e diz «coube». Doze
+        // janelas assim levam a estimativa a `TETO_DA_ESTIMATIVA_BPS` sem nunca
+        // ter tocado a borda, e a volta para `Nominal` põe o teto em 60% de um
+        // número inventado — a reserva da voz evaporando pela porta que a
+        // terceira armadilha não vigiava.
+        //
+        // A igualdade passava por empate e não por acerto: com o teto da
+        // estimativa em 10 Mbps os dois lados batiam nele. Subi-lo para 14
+        // separou os dois e a igualdade caiu.
+        assert!(
+            degradada.estimativa() <= nominal.estimativa(),
+            "a faixa degradada afirmou um caminho maior que o que a faixa nominal mediu"
+        );
+
+        // O que a faixa degradada **não** custa é permanente: voltando a
+        // `Nominal`, a subida recomeça de onde parou e reencontra a borda. É
+        // isto que «dois sinais independentes» quer dizer na prática.
+        correr(
+            &mut degradada,
+            &mut cano_degradado,
+            SignalBand::Nominal,
+            ticas(15),
+            |_, _| {},
+        );
         assert_eq!(
             degradada.estimativa(),
             nominal.estimativa(),
-            "a faixa degradada mexeu na medida do caminho, e não só no teto"
+            "depois de a faixa voltar, a medida tinha de reencontrar a mesma borda"
         );
-        assert!(degradada.estimativa() > CAMINHO_DA_PROVA_BPS);
 
         // E o corte da faixa continua existindo, no lugar dele: metade do teto,
         // pelas mãos de quem sempre o fez.

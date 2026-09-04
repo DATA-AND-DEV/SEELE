@@ -71,7 +71,7 @@ aparece semanas depois, na máquina de outra pessoa.
 | `EstimatedSize`, `DisplayVersion`, `UninstallString` e os demais valores | a entrada aparece pela metade, sem tamanho nem versão |
 | atalhos do menu Iniciar e da área de trabalho | e **migrar** os antigos, que apontam para o nome velho do binário |
 | instalar o WebView2 se faltar | o SEELE não abre numa máquina limpa |
-| a regra de firewall da 8383, do programa | quem hospeda fica invisível |
+| a regra de firewall da 8383, do programa, em rede confiável | quem hospeda fica invisível |
 | apagar a instalação por usuário da 0.7.1 | o app «volta de versão» — o atalho velho abre a cópia velha |
 | **o modo silencioso** | **ninguém mais recebe atualização** |
 | recusar-se a rodar com o app aberto, em arquitetura errada ou Windows velho | arquivo em uso, e uma instalação pela metade |

@@ -1253,15 +1253,20 @@ mod tests {
     fn o_teto_decide_a_configuracao_do_codificador_sem_precisar_de_codificador() {
         // A decisão inteira é aritmética, e esta é ela: o degrau sai do teto
         // (§5.1) e a escolha da pessoa fica por cima como teto (§5).
-        let fibra = Teto::Bps(4_000_000);
+        // **Oito megabits, e eram quatro.** O número subiu com a régua e não
+        // com a intenção: 4 Mbps compravam 1080p quando o limiar era 1,5 Mbps,
+        // e não compram agora que ele é bits por pixel — 1080p a 4 Mbps e 30
+        // quadros são 0,064 bpp. Oito é o teto que o produto pede, e o que ele
+        // compra é o que este teste passa a prender.
+        let fibra = Teto::Bps(8_000_000);
         let config = config_para(fibra, Resolucao::P1080, Cadencia::Q30, Prioridade::Nitidez)
-            .expect("um teto de 4 Mbps compra alguma coisa");
+            .expect("um teto de 8 Mbps compra alguma coisa");
         assert_eq!(config.resolucao, Resolucao::P1080);
-        assert_eq!(config.teto_bps, 4_000_000);
+        assert_eq!(config.teto_bps, 8_000_000);
 
         // A mesma fibra, com quem escolheu 540p: continua 540p.
         let modesto = config_para(fibra, Resolucao::P540, Cadencia::Q8, Prioridade::Nitidez)
-            .expect("um teto de 4 Mbps compra alguma coisa");
+            .expect("um teto de 8 Mbps compra alguma coisa");
         assert_eq!(modesto.resolucao, Resolucao::P540);
         assert_eq!(modesto.cadencia, Cadencia::Q8);
 
