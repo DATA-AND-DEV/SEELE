@@ -12,7 +12,7 @@ publish.workspace = true
 audioadapter-buffers = "4"
 cpal = "0.18.1"
 seele-proto = { path = "../seele-proto" }
-rtrb = "0.3.4"
+rtrb = "0.3.5"
 rubato = "4.0.0"
 # `source-build` em toda plataforma: compila o libopus do código-fonte em vez
 # de baixar o pré-compilado do crate. Não é preferência, é que o pré-compilado

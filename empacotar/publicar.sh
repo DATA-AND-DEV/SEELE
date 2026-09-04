@@ -939,6 +939,25 @@ bateria() {
     etapa_da_bateria "uma licença nova entrou na árvore sem passar pelo deny.toml." \
         "Rode «cargo deny check licenses»." \
         cargo deny check licenses
+    # **E os avisos de segurança, que esta bateria não conferia.**
+    #
+    # O `deny.toml` tem a seção de advisories desde sempre, com a disciplina
+    # escrita nela — «no vulnerability is ignored», e a `specs/08-seguranca.md`
+    # citada no cabeçalho: *«cargo deny and cargo audit in CI, failing the build
+    # on a known vulnerability»*. O que faltava era alguém rodar.
+    #
+    # O custo dessa falta apareceu em 03/09/2026, quando alguém perguntou se o
+    # SEELE é seguro: `rtrb 0.3.4` estava na árvore com uma vulnerabilidade de
+    # dupla liberação (RUSTSEC-2026-0274), publicada e não notada. Não era
+    # alcançável aqui — o anel só carrega `f32`, e o `Drop` dele não existe —,
+    # mas ninguém sabia disso porque ninguém tinha olhado.
+    #
+    # Depois das licenças e não antes: uma licença nova é decisão de quem
+    # publica, um aviso de segurança é notícia do mundo, e a notícia é a que
+    # merece ser a última coisa que se lê.
+    etapa_da_bateria "há aviso de segurança numa dependência." \
+        "Rode «cargo deny check advisories» e leia." \
+        cargo deny check advisories
     passo "bateria aqui: ok"
 
     if pedido windows; then

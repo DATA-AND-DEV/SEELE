@@ -19,6 +19,14 @@ version = 2
 # Electron. ADR 0020 records the trade and what would make it stop being
 # acceptable.
 ignore = [
+    # `paste`, macro de concatenação de identificadores. Sem manutenção desde
+    # 2024, e **não é vulnerabilidade**: é uma macro que roda em tempo de
+    # compilação e não existe no binário. Chega por baixo do Tauri e do `cpal`,
+    # e nenhum crate desta casa a nomeia.
+    #
+    # Entra aqui pela mesma regra do resto desta lista: `unmaintained` é
+    # exceção com razão escrita; vulnerabilidade não entra nunca.
+    { id = "RUSTSEC-2024-0436", reason = "paste sem manutenção; macro de compilação, não vai ao binário" },
     # GTK3 bindings. Linux only, and reached only through webkit2gtk, which is
     # the system webview Tauri uses there. Upstream's migration to GTK4 is
     # tracked by Tauri, not by us; we do not call these crates directly.

@@ -2429,3 +2429,39 @@ fn a_versao_publicada_deixa_marca_no_repositorio_do_codigo() {
         "publicar a mesma versão de outro commit deixou de ser recusado"
     );
 }
+
+#[test]
+fn a_bateria_confere_aviso_de_seguranca_e_nao_so_licenca() {
+    // **A conferência existia e ninguém a rodava.**
+    //
+    // O `deny.toml` tem a seção de advisories desde sempre, com a disciplina
+    // escrita nela — «no vulnerability is ignored» — e a `specs/08-seguranca.md`
+    // citada no cabeçalho: «cargo deny and cargo audit in CI, failing the build
+    // on a known vulnerability». A bateria rodava só `check licenses`.
+    //
+    // O custo apareceu quando alguém perguntou se o SEELE é seguro: `rtrb 0.3.4`
+    // estava na árvore com uma dupla liberação publicada (RUSTSEC-2026-0274) e
+    // não notada. Não era alcançável — o anel só carrega `f32` —, mas ninguém
+    // sabia, porque ninguém tinha olhado.
+    let texto = std::fs::read_to_string(publicar()).expect("o orquestrador tem que ser legível");
+
+    assert!(
+        texto.contains("cargo deny check advisories"),
+        "a bateria voltou a conferir só licenças, e um aviso de segurança novo \
+         passa a chegar pela pergunta de alguém em vez de pela publicação"
+    );
+
+    // Depois das licenças: uma licença nova é decisão de quem publica, um aviso
+    // de segurança é notícia do mundo, e a notícia é a que merece ser lida por
+    // último.
+    let licencas = texto
+        .find("cargo deny check licenses")
+        .unwrap_or(usize::MAX);
+    let avisos = texto
+        .find("cargo deny check advisories")
+        .unwrap_or(usize::MAX);
+    assert!(
+        licencas < avisos,
+        "a ordem inverteu: o aviso de segurança deixou de ser a última coisa lida"
+    );
+}
