@@ -487,6 +487,22 @@ listen("seele://event", (evento) => {
     quadroDaTela(screen, key, data);
   } else if (carga.ScreenClosed) {
     if (carga.ScreenClosed.screen === telaEmCurso) fecharImagemDaTela();
+  } else if (carga.ScreenUnreadable) {
+    // **A frase que faltava.**
+    //
+    // Chegou uma transmissão e este build não soube ler o cabeçalho dela — quase
+    // sempre porque o outro lado está noutra versão. Antes disto o núcleo
+    // voltava calado: sem `ScreenOpened` não havia o que desenhar, sem
+    // `ScreenClosed` não havia o que apagar, e a pessoa ficava olhando um
+    // retângulo escuro. Relatado assim: «vê tela preta, sem mensagem nenhuma».
+    //
+    // O motivo técnico vai para o console, e não para a tela: quem está numa
+    // call não tem o que fazer com «unsupported version 3, expected 2». O que
+    // ela pode fazer está na frase.
+    console.warn("transmissão ilegível:", carga.ScreenUnreadable.reason);
+    naoDeuParaMostrar(
+      "ALGUÉM ESTÁ COMPARTILHANDO NUMA VERSÃO QUE ESTA NÃO LÊ · ATUALIZE O SEELE",
+    );
   }
 });
 

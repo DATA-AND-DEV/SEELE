@@ -3162,6 +3162,9 @@ async fn drive(
                             height: altura,
                         });
                     }
+                    seele_core::enlace::Aviso::TelaIlegivel { motivo } => {
+                        shared.notify(&Event::ScreenUnreadable { reason: motivo });
+                    }
                     seele_core::enlace::Aviso::TelaQuadro { tela, chave, bytes } => {
                         shared.notify(&Event::ScreenFrame {
                             screen: tela.0,

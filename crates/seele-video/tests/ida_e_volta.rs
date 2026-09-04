@@ -30,7 +30,7 @@
 use std::path::PathBuf;
 
 use seele_video::codec::{
-    Cadencia, Codificador, ConfigDoCodificador, Decodificador, QuadroI420, Resolucao,
+    armar, Cadencia, Codificador, ConfigDoCodificador, Decodificador, QuadroI420, Resolucao,
 };
 use seele_video::modulo::{self, BibliotecaDeVideo};
 
@@ -352,4 +352,113 @@ fn o_modulo_que_esta_nesta_maquina_bate_com_o_hash_fixado() {
     modulo
         .conferir_expandido(&bytes)
         .expect("o módulo em disco tem de ser o que este build fixou");
+}
+
+/// O `profile_idc` que o SPS declara, ou `None` se não houver SPS aqui.
+///
+/// É o fio e não a API de nenhum sistema: 66 é Baseline, 77 é Main, 100 é High.
+/// O byte seguinte ao cabeçalho de um NAL de tipo 7 é ele.
+fn profile_idc(annex_b: &[u8]) -> Option<u8> {
+    let mut i = 0;
+    while i + 5 < annex_b.len() {
+        let (salto, cabeca) = match annex_b.get(i..i + 4) {
+            Some([0, 0, 0, 1]) => (4, i + 4),
+            Some([0, 0, 1, _]) => (3, i + 3),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        if annex_b.get(cabeca).is_some_and(|b| b & 0x1F == 7) {
+            return annex_b.get(cabeca + 1).copied();
+        }
+        i += salto;
+    }
+    None
+}
+
+/// O codificador que o produto arma não pode sair em Baseline.
+///
+/// # Por que isto é teste, e por que o número está no fio
+///
+/// Baseline é CAVLC, e o caminho de **software** deste crate usa CABAC desde
+/// 2026-08-31 — `examples/entropia.rs` mediu 13,4% menos bytes a 540p e 15,7% a
+/// 720p. Um codificador do sistema em Baseline entrega **pior que o de
+/// software** pelo mesmo teto, que é o avesso da razão de ele existir.
+///
+/// No Windows era o caso: `fn tipo` montava o tipo de saída sem
+/// `MF_MT_MPEG2_PROFILE`, e o codificador H.264 da Microsoft sem perfil
+/// declarado entrega Baseline. Foi o relato «está mais pixelado que antes».
+///
+/// O teste lê o `profile_idc` do SPS em vez de perguntar à API porque é o fio
+/// que decide: o que o outro lado vê é isto, em qualquer sistema.
+#[test]
+fn o_codificador_armado_nao_sai_em_baseline() {
+    let Some(biblioteca) = biblioteca() else {
+        return;
+    };
+    let mut codificador = armar(
+        &biblioteca,
+        ConfigDoCodificador {
+            resolucao: Resolucao::P540,
+            cadencia: Cadencia::Q30,
+            teto_bps: 1_200_000,
+        },
+    )
+    .expect("armar o codificador");
+
+    let quadro = QuadroI420::preto(960, 540);
+    let mut chave = None;
+    // O controle de taxa pode pular quadro, e `Ok(None)` não é erro: insiste-se
+    // até sair um, que é o que `codec.rs` manda quem chama fazer.
+    for _ in 0..30 {
+        if let Some(saida) = codificador.codificar(&quadro, true).expect("codificar") {
+            chave = Some(saida);
+            break;
+        }
+    }
+    let chave = chave.expect("trinta tentativas e nenhum quadro saiu");
+    assert!(chave.chave, "o primeiro quadro pedido tem de ser chave");
+
+    let perfil = profile_idc(&chave.bytes).expect("um quadro-chave carrega SPS");
+    eprintln!(
+        "PERFIL NO FIO: profile_idc={perfil} ({}), quadro-chave de {} bytes",
+        match perfil {
+            66 => "Baseline",
+            77 => "Main",
+            100 => "High",
+            _ => "?",
+        },
+        chave.bytes.len(),
+    );
+    assert_ne!(
+        perfil, 66,
+        "o codificador armado saiu em Baseline/CAVLC, atrás do caminho de software"
+    );
+    assert!(
+        perfil == 77 || perfil == 100,
+        "perfil inesperado no fio: {perfil}"
+    );
+
+    // **E o outro lado abre.** Uma economia que só nós entendêssemos seria
+    // incompatibilidade e não economia — é a razão 4 do §2, e é ela que decide
+    // entre Main e High enquanto o `Decodificador` for o do OpenH264.
+    //
+    // **O mesmo quadro-chave duas vezes**, como `o_quadro_volta_do_outro_lado`
+    // já documenta neste arquivo: o OpenH264 devolve `None` na primeira chamada,
+    // que é ele armando-se com o SPS, e a imagem sai na segunda. Afirmar
+    // `is_some()` na primeira acusa incompatibilidade onde não há nenhuma — foi
+    // o que este teste fez na primeira versão, e o `profile_idc=77` do
+    // Media Foundation levou a culpa por um quadro que só faltava repetir.
+    let mut decodificador = Decodificador::novo(&biblioteca).expect("armar o decodificador");
+    let _ = decodificador
+        .decodificar(&chave.bytes)
+        .expect("armar o decodificador com o SPS");
+    assert!(
+        decodificador
+            .decodificar(&chave.bytes)
+            .expect("decodificar o quadro-chave")
+            .is_some(),
+        "o quadro-chave saiu num perfil que este decodificador não abre"
+    );
 }

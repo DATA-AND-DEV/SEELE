@@ -2820,6 +2820,40 @@ mod o_eixo_da_degradacao {
     }
 
     #[test]
+    fn o_degrau_de_cima_da_escada_e_alcancavel() {
+        // **1080p a 60 quadros tem de ser possível em alguma rede.** O §5 fecha
+        // a lista de degraus, e um degrau que nenhuma banda alcança não é um
+        // degrau: é uma opção que mente na interface.
+        //
+        // Isto reprovou duas vezes. Com o teto da estimativa em 10 Mbps e depois
+        // em 14, `cadencia_para` nunca chegava a Q60 em 1080p — 8,4 Mbps ÷ 208 k
+        // dão 40, que compra Q30 —, então o topo da lista era inalcançável por
+        // construção, inclusive numa LAN de 10 gigabits. É a mesma doença que
+        // `movimento_troca_um_degrau_de_resolucao_por_quadros` já tinha nomeado
+        // uma vez: «a regra virou um teto, e foi assim que 1080p ficou
+        // impossível no produto».
+        let teto_maximo = crate::caminho::TETO_DA_ESTIMATIVA_BPS / 100 * FRACAO_DO_CAMINHO;
+        assert_eq!(
+            resolucao_para(teto_maximo, Prioridade::Nitidez),
+            Resolucao::P1080
+        );
+        assert_eq!(
+            cadencia_para(
+                teto_maximo,
+                Resolucao::P1080,
+                Prioridade::Nitidez,
+                Cadencia::Q60
+            ),
+            Cadencia::Q60,
+            "no caminho mais largo que a sonda afirma, 1080p60 tem de caber"
+        );
+        assert!(
+            bits_por_pixel(teto_maximo, Resolucao::P1080, 60) >= PISO_BPP,
+            "1080p60 no teto máximo ainda sai abaixo do piso de bits por pixel"
+        );
+    }
+
+    #[test]
     fn oito_megabits_compram_1080p_a_trinta_com_folga() {
         // A ponta de cima da escada, escrita para não voltar a ser suposição: o
         // que o pedido de 8 Mbps de fato entrega na tela.

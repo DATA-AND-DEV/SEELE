@@ -663,6 +663,21 @@ impl super::CodificaVideo for Codificador {
         Ok(())
     }
 
+    fn ajustar_quadros(&mut self, quadros_por_segundo: u32) -> Result<u32, ErroDeVideo> {
+        let valendo = quadros_por_segundo.clamp(super::PISO_DE_QUADROS, self.cadencia.hz());
+        // **Só o número, e não o tipo de mídia.** Trocar `MF_MT_FRAME_RATE` com
+        // o fluxo aberto exige `MFT_MESSAGE_COMMAND_FLUSH` mais `SetOutputType`,
+        // e as duas juntas custam um IDR — que é exatamente o preço que esta
+        // porta existe para não pagar.
+        //
+        // O que faz o MFT gastar mais bits em cada quadro é receber menos
+        // quadros com a duração certa, e `self.quadros_por_segundo` já é quem
+        // calcula `SetSampleTime` e `SetSampleDuration` em `amostra`. O CBR
+        // persegue a média ao longo de um segundo qualquer que seja a contagem.
+        self.quadros_por_segundo = valendo;
+        Ok(valendo)
+    }
+
     fn codificar(
         &mut self,
         quadro: &super::QuadroI420,

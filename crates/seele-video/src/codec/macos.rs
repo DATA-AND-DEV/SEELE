@@ -605,6 +605,31 @@ impl super::CodificaVideo for Codificador {
         Ok(())
     }
 
+    fn ajustar_quadros(&mut self, quadros_por_segundo: u32) -> Result<u32, ErroDeVideo> {
+        let valendo = quadros_por_segundo.clamp(super::PISO_DE_QUADROS, self.cadencia.hz());
+        if valendo == self.quadros_por_segundo {
+            return Ok(valendo);
+        }
+        // `ExpectedFrameRate` é o que o controle de taxa usa para repartir o
+        // orçamento entre os quadros que espera receber. Sem esta linha o
+        // VideoToolbox continuaria orçando para 30 enquanto recebe 15, e
+        // gastaria metade do teto — o avesso do que esta porta existe para
+        // fazer. Os carimbos acompanham sozinhos: eles saem de
+        // `contador / quadros_por_segundo`.
+        //
+        // SAFETY: a chave é estática da própria biblioteca.
+        unsafe {
+            ajustar(
+                &self.sessao.0,
+                kVTCompressionPropertyKey_ExpectedFrameRate,
+                CFNumber::new_i32(i32::try_from(valendo).unwrap_or(30)).as_ref(),
+                "mudar a cadência esperada",
+            )?;
+        }
+        self.quadros_por_segundo = valendo;
+        Ok(valendo)
+    }
+
     fn codificar(
         &mut self,
         quadro: &QuadroI420,

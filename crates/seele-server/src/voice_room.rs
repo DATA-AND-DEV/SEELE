@@ -689,7 +689,19 @@ impl VoiceRoom {
                 cortados += 1;
             }
         }
-        self.drops.espectador_cortado += cortados;
+        if cortados > 0 {
+            // **Cortar é a sanção, e ela era muda.** Um espectador que não
+            // acompanha perde a cópia dele — e do lado dele isso é a imagem
+            // congelando sem explicação, que é metade do relato da tela preta.
+            self.drops.espectador_cortado += cortados;
+            tracing::warn!(
+                sala = %self.id.get(),
+                dono = %dono.get(),
+                cortados = %cortados,
+                total = %self.drops.espectador_cortado,
+                "espectador cortado por não acompanhar o fluxo da tela"
+            );
+        }
     }
 
     /// Encaminha um pedaço do fluxo de quem compartilha para cada espectador.
@@ -701,7 +713,20 @@ impl VoiceRoom {
     /// onde um quadro acaba, e nada sobre o que há dentro dele.
     fn tela_bytes(&mut self, from: PersonId, bytes: &[u8]) {
         let Some(curso) = self.telas.get_mut(&from) else {
+            // **Bytes de tela de quem não está transmitindo.**
+            //
+            // Não é ruído: para chegar aqui alguém abriu um fluxo QUIC de tela
+            // e escreveu nele. As duas causas são um cliente que não respeitou a
+            // recusa do plano de controle, e — a que morde em produção — dois
+            // lados que discordam sobre o que é uma transmissão aberta.
             self.drops.tela_sem_dono += 1;
+            tracing::warn!(
+                sala = %self.id.get(),
+                de = %from.get(),
+                bytes = %bytes.len(),
+                total = %self.drops.tela_sem_dono,
+                "chegaram bytes de tela de quem não está registrado transmitindo"
+            );
             return;
         };
         let porta = match curso.enquadramento.entrada(bytes) {
@@ -745,7 +770,20 @@ impl VoiceRoom {
             // entre «a transmissão acabou» e «a sua cópia se perdeu».
             curso.canos.remove(person);
         }
-        self.drops.espectador_cortado += cortados.len() as u64;
+        if !cortados.is_empty() {
+            // O outro ponto onde uma cópia é cortada — este é o do meio do
+            // fluxo, o de cima é o do quadro-chave. Os dois eram mudos, e a
+            // consequência é a mesma do lado de quem assiste: a imagem para e
+            // nada diz por quê.
+            self.drops.espectador_cortado += cortados.len() as u64;
+            tracing::warn!(
+                sala = %self.id.get(),
+                dono = %dono.get(),
+                cortados = %cortados.len(),
+                total = %self.drops.espectador_cortado,
+                "espectador cortado no meio do fluxo da tela"
+            );
+        }
     }
 
     /// Acaba com a transmissão desta sala, com ou sem motivo.
@@ -758,6 +796,25 @@ impl VoiceRoom {
         let Some(curso) = self.telas.remove(&dono) else {
             return;
         };
+        // **O fim de uma transmissão passa a deixar rastro.**
+        //
+        // Este módulo tinha **uma** linha de `tracing` para o encaminhamento
+        // inteiro, e os contadores de descarte eram incrementados e nunca lidos
+        // fora dos testes — o que é pior que não contar nada, porque dá a
+        // impressão de que alguém está olhando.
+        //
+        // Foi o que deixou este relato sem resposta: «quem assiste com uma
+        // versão mais velha vê tela preta, sem mensagem nenhuma, e a sessão
+        // morre em ~3 segundos sem dizer por quê». Do lado do servidor não havia
+        // uma linha para procurar.
+        tracing::info!(
+            sala = %self.id.get(),
+            dono = %dono.get(),
+            tela = %curso.screen.get(),
+            espectadores = %curso.canos.len(),
+            motivo = ?motivo,
+            "transmissão de tela encerrada"
+        );
         for cano in curso.canos.values() {
             let _ = cano.try_send(Pedaco::Fim);
         }

@@ -400,6 +400,32 @@ pub trait CodificaVideo: Send + std::fmt::Debug {
     /// [`ErroDeVideo::CodecRecusou`] quando o codificador não aceita o número.
     fn ajustar_teto(&mut self, teto_bps: u32) -> Result<(), ErroDeVideo>;
 
+    /// Muda quantos quadros por segundo ele mira, dentro da faixa automática.
+    ///
+    /// **Não custa quadro-chave e não reabre o fluxo**, e é essa a diferença
+    /// para a resolução: a resolução mora no cabeçalho de abertura do §3.6 e
+    /// trocá-la é recomeçar captura, codificador e fluxo; a cadência não viaja
+    /// no fio, então baixá-la é uma propriedade de sessão e nada mais.
+    ///
+    /// O pedido é **grampeado** entre [`PISO_DE_QUADROS`] e a cadência com que
+    /// este codificador foi armado — que é teto e nunca piso (§5) —, e o que
+    /// volta é o valor que passou a valer, não o que se pediu.
+    ///
+    /// # Por que isto entrou no contrato
+    ///
+    /// O doc deste trait dizia que `ajustar_quadros` ficava de fora *«porque
+    /// ninguém o chama — pôr no contrato uma coisa que ninguém pede é obrigar
+    /// toda implementação futura a inventar uma resposta para uma pergunta que
+    /// não é feita»*. A regra continua boa; o que mudou é que a pergunta passou
+    /// a ser feita. O §2 manda o quadro ceder quando o orçamento aperta, e sem
+    /// esta porta só o codificador de software sabia obedecer: os do sistema
+    /// entregam todos os quadros e borram cada um.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeVideo::CodecRecusou`] quando o codificador não aceita o número.
+    fn ajustar_quadros(&mut self, quadros_por_segundo: u32) -> Result<u32, ErroDeVideo>;
+
     /// Codifica um quadro. `Ok(None)` é o controle de taxa tendo pulado este
     /// quadro para não estourar o teto: **não é perda e não é erro**.
     ///
@@ -434,6 +460,10 @@ impl CodificaVideo for Codificador {
 
     fn ajustar_teto(&mut self, teto_bps: u32) -> Result<(), ErroDeVideo> {
         Self::ajustar_teto(self, teto_bps)
+    }
+
+    fn ajustar_quadros(&mut self, quadros_por_segundo: u32) -> Result<u32, ErroDeVideo> {
+        Self::ajustar_quadros(self, quadros_por_segundo)
     }
 
     fn codificar(

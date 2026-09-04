@@ -255,25 +255,36 @@ pub const FILA_TOLERADA: Duration = Duration::from_millis(40);
 
 /// O maior caminho que a sonda chega a afirmar, em bits por segundo.
 ///
-/// **14 Mbps, e é a conta do produto e não uma folga.** O pedido é 8 Mbps de
-/// vídeo — o que compra 1080p a 30 quadros com 0,13 bits por pixel, ou 720p a
-/// 60 com 0,145. O vídeo leva [`crate::tela::FRACAO_DO_CAMINHO`], 60% do
-/// caminho, então 8 Mbps de vídeo pedem 13,3 Mbps de caminho, e 14 é esse
-/// número arredondado para cima.
+/// **20,8 Mbps, e é o degrau mais alto da escada do §5 pagando o próprio
+/// preço.** Não é um número escolhido: é
+/// `bits_por_quadro(1080p) × 60 quadros ÷ FRACAO_DO_CAMINHO`, ou seja o que o
+/// caminho precisa carregar para que 1080p a 60 quadros receba os 0,10 bits por
+/// pixel que fazem a borda de uma fonte não virar bloco.
 ///
-/// **O que este teto era, e por que o argumento dele caiu.** Ele valia 10 Mbps,
-/// justificados como «quatro vezes os 2,5 Mbps de caminho que compram 1080p». O
-/// erro não estava aqui, estava no outro lado da conta: aqueles 2,5 Mbps vinham
-/// de [`crate::tela::TETO_ESTIMADO_PARA_1080P_BPS`] valer 1500 kbps, que é o
-/// ponto em que 1080p passa a ser **comprável** — 0,024 bits por pixel — e não
-/// o ponto em que ele fica bom. Com o limiar recalibrado para 6,2 Mbps, 10 Mbps
-/// de caminho dariam 6 Mbps de vídeo e não alcançariam o próprio degrau de
-/// cima.
+/// # Por que derivado, e o que os dois números anteriores erraram
+///
+/// Ele valeu **10 Mbps**, justificados como «quatro vezes os 2,5 Mbps de
+/// caminho que compram 1080p». O erro estava do outro lado da conta:
+/// `TETO_ESTIMADO_PARA_1080P_BPS` valia 1500 kbps, que é onde 1080p passa a ser
+/// **comprável** — 0,024 bits por pixel — e não onde ele fica bom.
+///
+/// Depois valeu **14 Mbps**, e esse errou de outro jeito: era o pedido de
+/// produto de 8 Mbps de vídeo dividido por 60%. Oito megabits compram 1080p a
+/// **30** quadros com folga, ou 720p a 60 — e não compram 1080p60, que a 8 Mbps
+/// recebe 133 kbit por quadro, 0,064 bpp. Pior: com aquele teto,
+/// `cadencia_para` nem oferecia 60 quadros em 1080p — `8_400_000 / 208_000 = 40`
+/// compra Q30 —, então **o degrau de cima da lista fechada do §5 era
+/// inalcançável por construção**, em qualquer rede, inclusive numa LAN.
+///
+/// Um teto escrito à mão erra sempre que a escada muda. Derivado dela, não pode:
+/// no dia em que a lista do §5 ganhar um degrau, este número acompanha.
 ///
 /// Continua havendo um teto, e pela razão de sempre: acima de 1080p a 60
 /// quadros não há degrau que a lista fechada do §5 ofereça, então uma
 /// estimativa maior só produziria saltos que nada compra.
-pub const TETO_DA_ESTIMATIVA_BPS: u32 = 14_000_000;
+pub const TETO_DA_ESTIMATIVA_BPS: u32 =
+    crate::tela::bits_por_quadro(seele_video::codec::Resolucao::P1080) * 60 * 100
+        / FRACAO_DO_CAMINHO;
 
 /// O menor caminho que a sonda chega a afirmar, em bits por segundo.
 ///

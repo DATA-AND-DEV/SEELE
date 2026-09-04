@@ -1117,6 +1117,24 @@ pub enum Event {
     /// `ScreenShareStarted` mostraria `720p · 4 pessoas assistindo` para uma
     /// sala de seis.
     ScreenChanged,
+    /// Chegou uma transmissão de tela e esta versão não sabe lê-la.
+    ///
+    /// **É o evento que apagava a tela preta.** Quando o cabeçalho de um fluxo
+    /// de tela não decodifica, este lado não sabe nem o número da transmissão —
+    /// então não há `ScreenClosed` a mandar, e não havia nada. A casca não ficava
+    /// sabendo que existiu alguma coisa: nenhum desenho, nenhuma frase, e a
+    /// pessoa olhando um retângulo escuro.
+    ///
+    /// Relatado assim: «quem assiste com uma versão mais velha vê tela preta,
+    /// sem mensagem nenhuma».
+    ///
+    /// O motivo vai como texto porque é para uma pessoa ler, e porque o que o
+    /// causou é um formato que este build não conhece — enumerá-lo exigiria
+    /// conhecer de antemão o que ainda não foi inventado.
+    ScreenUnreadable {
+        /// O que o decodificador do cabeçalho respondeu.
+        reason: String,
+    },
     /// Uma transmissão alheia começou a chegar, e este é o seu tamanho.
     ///
     /// Separado de [`Self::ScreenChanged`], que é grosso e manda reler o

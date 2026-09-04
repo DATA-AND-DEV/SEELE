@@ -3440,3 +3440,81 @@ mod screen_tests {
         assert_eq!(decode::<ServerMessage>(&frame).unwrap(), ninguem);
     }
 }
+
+#[cfg(test)]
+mod o_vocabulario_e_a_versao {
+    use super::*;
+
+    /// O ordinal que o postcard escreve para esta mensagem.
+    ///
+    /// Byte 0 é a versão do protocolo, byte 1 é a variante — a mesma leitura que
+    /// `the_screen_verbs_round_trip_and_sit_where_they_were_appended` usa.
+    fn ordinal<T: serde::Serialize + Validate>(mensagem: &T) -> u8 {
+        let bytes = encode(mensagem).expect("uma mensagem desta casa serializa");
+        *bytes.get(1).expect("todo quadro tem versão e variante")
+    }
+
+    /// **Acrescentar uma variante é decidir sobre a versão do protocolo.**
+    ///
+    /// # O que este guarda existe para impedir
+    ///
+    /// O postcard indexa variante por posição e não é autodescritivo. Um par que
+    /// não conhece a variante **não a ignora**: ele recusa o quadro, e o fluxo
+    /// de controle dele acaba ali. `version.rs` já escrevia isso, e o teste dos
+    /// verbos de tela também — «a build one protocol version older reads byte 25
+    /// as whatever *it* has at 25 — which is nothing, so it refuses the frame,
+    /// which is the contract».
+    ///
+    /// O que faltava era a outra metade: **a versão não subiu junto**.
+    /// `WatchScreen` e `UnwatchScreen` entraram e `PROTOCOL_VERSION` continuou 2.
+    /// Dois builds diferentes passaram a dizer «2» e a falar vocabulários
+    /// diferentes — e a negociação, que existe justamente para pegar isso, deixou
+    /// os dois entrarem.
+    ///
+    /// O relato: «se usuários de diferentes versões estão compartilhando a tela,
+    /// a stream cai». O caminho inteiro era cego, e a raiz era esta: o número que
+    /// deveria denunciar a diferença estava mentindo.
+    ///
+    /// # Por que ele prende o ordinal e não conta variantes
+    ///
+    /// Contar exigiria macro ou derivação. O ordinal do último de cada lista dá
+    /// a mesma resposta: ele só muda quando alguém acrescenta ou remove, que são
+    /// exatamente os dois atos que pedem a decisão.
+    ///
+    /// **Quando este teste reprovar**, a pergunta não é «como faço passar». É:
+    /// um par da versão anterior recebe esta variante nova? Se recebe, ou
+    /// `PROTOCOL_VERSION` sobe e a linha de baixo acompanha, ou quem manda passa
+    /// a perguntar a versão do par antes — como `session.rs` já faz para o
+    /// `UplinkLoss`.
+    #[test]
+    fn o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou() {
+        assert_eq!(
+            ordinal(&ClientMessage::UnwatchScreen {
+                screen: ScreenId(1)
+            }),
+            31,
+            "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
+             de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
+             sobre esta linha"
+        );
+        assert_eq!(
+            ordinal(&ServerMessage::PersonRenamed {
+                person: PersonId(1),
+                nickname: "x".into()
+            }),
+            33,
+            "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
+             de mexer no número"
+        );
+
+        // E o número da versão, preso ao lado deles. Ele é o que diz a um par se
+        // vale a pena tentar — e enquanto ele não subir, dois builds com listas
+        // diferentes vão continuar se cumprimentando como iguais.
+        assert_eq!(
+            crate::version::PROTOCOL_VERSION,
+            2,
+            "a versão do protocolo mudou; confira se os ordinais acima e a janela \
+             de compatibilidade continuam contando a mesma história"
+        );
+    }
+}

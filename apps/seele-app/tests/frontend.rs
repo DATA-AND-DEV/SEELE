@@ -10117,3 +10117,45 @@ fn trocar_para_a_mesma_fonte_nao_corta_a_imagem_de_quem_assiste() {
         "a fonte de agora sobrevive ao fim da transmissão:\n{desenho}"
     );
 }
+
+#[test]
+fn uma_transmissao_que_esta_versao_nao_le_vira_frase_e_nao_tela_preta() {
+    // Relatado assim: «quem assiste com uma versão mais velha vê tela preta, sem
+    // mensagem nenhuma, e a sessão morre em ~3 segundos sem dizer por quê».
+    //
+    // A parte «sem mensagem nenhuma» era o núcleo voltando calado quando o
+    // cabeçalho de um fluxo de tela não decodificava: sem `ScreenOpened` não
+    // havia o que desenhar, sem `ScreenClosed` não havia o que apagar, e a casca
+    // não sabia que tinha existido alguma coisa.
+    let palco = without_comments(&read("ui/palco-imagem.js"));
+
+    assert!(
+        palco.contains("carga.ScreenUnreadable"),
+        "a casca deixou de escutar a transmissão ilegível, e o retângulo escuro \
+         volta a ser tudo o que a pessoa recebe"
+    );
+
+    // Do primeiro `carga.ScreenUnreadable` em diante, e não o trecho **entre**
+    // as duas ocorrências dele — ele aparece duas vezes no ramo, na condição e
+    // no motivo, e um `split(..).nth(1)` devolve os dois caracteres do meio.
+    let ramo = palco
+        .find("carga.ScreenUnreadable")
+        .map(|onde| palco.get(onde..).unwrap_or_default().to_owned())
+        .unwrap_or_default();
+    assert!(
+        ramo.contains("naoDeuParaMostrar"),
+        "o evento chega e nada é escrito no palco:\n{ramo}"
+    );
+    assert!(
+        ramo.contains("ATUALIZE O SEELE"),
+        "a frase não diz o que a pessoa pode fazer, que é a única parte dela que \
+         serve para alguma coisa:\n{ramo}"
+    );
+
+    // O motivo técnico vai para o console e não para a tela: quem está numa call
+    // não tem o que fazer com «unsupported version 3, expected 2».
+    assert!(
+        ramo.contains("console.warn"),
+        "o motivo técnico sumiu, e quem investiga fica sem ele:\n{ramo}"
+    );
+}

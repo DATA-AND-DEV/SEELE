@@ -35,21 +35,66 @@ use seele_video::{modulo, BibliotecaDeVideo};
 /// Quantos quadros. O bastante para o quadro-chave diluir na média.
 const QUADROS: usize = 120;
 
+/// Ruído **de valor**: uma grade grossa sorteada e interpolada.
+///
+/// # Por que não é `rand()` por pixel, e por que isso importava
+///
+/// A primeira versão deste arquivo sorteava um byte por pixel. Isso não é «foto
+/// ou vídeo dentro da janela» — é **ruído branco**, que é incompressível por
+/// construção: não há correlação entre vizinhos, então nenhuma predição acerta
+/// e nenhuma transformada concentra energia. O codificador não tem o que fazer
+/// com ele em bitrate nenhum.
+///
+/// O efeito na medida era esconder tudo o que ela existia para mostrar: a
+/// tabela de cadências media 16 dB em 1080p a **3,0 bits por pixel**, um regime
+/// onde qualquer conteúdo de verdade estaria acima de 40. Comparações entre
+/// linhas continuavam válidas — o conteúdo era o mesmo dos dois lados —, mas o
+/// **nível** não dizia nada, e foi por pouco que ele não virou argumento para
+/// mexer nos limiares de `seele_core::tela`.
+///
+/// Foto tem estrutura: regiões suaves, bordas, e detalhe correlacionado na
+/// escala de alguns pixels. Ruído de valor é a maneira mais barata de ter isso
+/// — uma grade a cada [`CELULA`] pixels, interpolada — e não custa dependência
+/// nenhuma, que era a razão de o gerador congruencial estar aqui.
+fn ruido_de_valor(x: usize, y: usize, passo: usize) -> f64 {
+    /// De quantos em quantos pixels a grade é sorteada.
+    ///
+    /// Oito, que é o lado do bloco de transformada do H.264 em perfil High: é a
+    /// escala em que um codificador de verdade decide, então é a escala em que
+    /// o conteúdo tem de ter o que decidir.
+    const CELULA: usize = 8;
+
+    let sortear = |cx: usize, cy: usize| -> f64 {
+        let semente = 0x2545_F491_4F6C_DD1D_u64
+            ^ (cx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ (cy as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+            ^ (passo as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+        let semente = semente
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((semente >> 33) % 256) as f64
+    };
+
+    let (cx, cy) = (x / CELULA, y / CELULA);
+    let (fx, fy) = (
+        (x % CELULA) as f64 / CELULA as f64,
+        (y % CELULA) as f64 / CELULA as f64,
+    );
+    let cima = sortear(cx, cy) + (sortear(cx + 1, cy) - sortear(cx, cy)) * fx;
+    let baixo = sortear(cx, cy + 1) + (sortear(cx + 1, cy + 1) - sortear(cx, cy + 1)) * fx;
+    cima + (baixo - cima) * fy
+}
+
 /// Um quadro com as três coisas que uma tela de trabalho tem.
 ///
 /// Degradê — que é onde o banding aparece —, bordas duras — que é o texto — e
-/// um bloco de ruído determinístico, que é a foto ou o vídeo dentro da janela.
-/// O ruído sai de um gerador congruencial escrito aqui: uma dependência a mais
-/// para gerar número aleatório num teste é uma dependência a mais para sempre.
+/// um bloco de detalhe correlacionado, que é a foto ou o vídeo dentro da janela.
+/// Ver [`ruido_de_valor`] para por que o terceiro não é ruído branco.
 fn quadro_de_tela(resolucao: Resolucao, passo: usize) -> QuadroI420 {
     let (largura, altura) = (resolucao.largura(), resolucao.altura());
     let mut luma = Vec::with_capacity(largura * altura);
-    let mut semente = 0x2545_F491_4F6C_DD1D_u64 ^ (passo as u64);
     for linha in 0..altura {
         for coluna in 0..largura {
-            semente = semente
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1_442_695_040_888_963_407);
             let valor = if linha < altura / 3 {
                 // Degradê horizontal, com a fase andando a cada quadro.
                 u8::try_from(((coluna + passo * 4) * 255 / largura.max(1)) % 256).unwrap_or(0)
@@ -61,8 +106,10 @@ fn quadro_de_tela(resolucao: Resolucao, passo: usize) -> QuadroI420 {
                     16
                 }
             } else {
-                // Ruído, que é o que nenhum codificador comprime de graça.
-                u8::try_from((semente >> 33) % 256).unwrap_or(0)
+                // Detalhe correlacionado, andando com o quadro para dar trabalho
+                // à predição entre quadros — que é o que um vídeo tocando faz.
+                u8::try_from(ruido_de_valor(coluna + passo, linha, passo / 8) as u32 % 256)
+                    .unwrap_or(0)
             };
             luma.push(valor);
         }
@@ -141,7 +188,14 @@ fn medir(
         }
     }
 
-    let segundos = quadros.len() as f64 / 30.0;
+    // **A cadência do codificador, e não um 30 escrito à mão.**
+    //
+    // Enquanto toda medida rodava a 30 quadros isto estava certo. Deixou de
+    // estar quando `ajustar_quadros` passou a existir: medir 120 quadros a 8 por
+    // segundo e dividir por 30 diz que saíram quatro vezes mais bits do que
+    // saíram, e a tabela que compara cadências mentiria exatamente na coluna
+    // que ela existe para comparar.
+    let segundos = quadros.len() as f64 / f64::from(codificador.quadros_por_segundo().max(1));
     Medida {
         psnr: if medidos == 0 {
             0.0
@@ -210,4 +264,59 @@ fn o_codificador_do_sistema_ao_lado_do_de_software() {
         software.psnr > 0.0 && sistema.psnr > 0.0,
         "um dos dois produziu fluxo que o decodificador não abriu"
     );
+}
+
+/// Quanta qualidade cada cadência compra pelo mesmo teto.
+///
+/// # Por que esta tabela faltava
+///
+/// O §2 fixa a regra — «a resolução segura, o quadro cede» — e `cadencia_para`
+/// a implementa. Mas a régua que ela usa, [`seele_core::tela::bits_por_quadro`],
+/// é **0,10 bits por pixel**, e esse número foi escolhido por argumento e não
+/// por medida: é onde se diz que a borda de uma fonte para de virar bloco.
+///
+/// Esta tabela é o que permite conferir. Se 0,10 bpp for generoso, a coluna do
+/// PSNR mostra o ganho achatando antes dele; se for apertado, ela mostra o
+/// PSNR ainda subindo depois. Como o resto deste arquivo, **não reprova por
+/// qualidade** — imprime, e quem estiver perguntando lê.
+#[test]
+fn quanto_a_cadencia_compra_pelo_mesmo_teto() {
+    let Ok(biblioteca) = BibliotecaDeVideo::procurar_e_carregar(&pastas()) else {
+        eprintln!("PULADO: sem o módulo do Cisco não há com o que comparar.");
+        return;
+    };
+
+    eprintln!("\n  resolução | teto  | quadros |   PSNR   |  Mbps  | saíram | bits/pixel");
+    for resolucao in [Resolucao::P540, Resolucao::P720, Resolucao::P1080] {
+        let quadros: Vec<QuadroI420> = (0..QUADROS)
+            .map(|passo| quadro_de_tela(resolucao, passo))
+            .collect();
+        let pixels = (resolucao.largura() * resolucao.altura()) as f64;
+        for teto_bps in [1_200_000_u32, 6_000_000, 12_480_000] {
+            for pedido in [8_u32, 15, 30, 60] {
+                let mut codificador = armar(
+                    &biblioteca,
+                    ConfigDoCodificador {
+                        resolucao,
+                        cadencia: Cadencia::Q60,
+                        teto_bps,
+                    },
+                )
+                .expect("armar o codificador");
+                let valendo = codificador
+                    .ajustar_quadros(pedido)
+                    .expect("ajustar a cadência");
+                let medida = medir(codificador.as_mut(), &quadros, &biblioteca);
+                let bpp = f64::from(teto_bps) / f64::from(valendo) / pixels;
+                eprintln!(
+                    "  {:>9?} | {:>4} k | {valendo:>7} | {:>5.2} dB | {:>6.2} | {:>3}/{QUADROS} | {bpp:>10.3}",
+                    resolucao,
+                    teto_bps / 1000,
+                    medida.psnr,
+                    medida.mbps,
+                    medida.sairam,
+                );
+            }
+        }
+    }
 }

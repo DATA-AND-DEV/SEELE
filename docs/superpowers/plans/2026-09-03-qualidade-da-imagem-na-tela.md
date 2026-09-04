@@ -723,146 +723,25 @@ git commit -m "fix(tela): refazer o degrau deixa de comer a cadência que a pess
 
 ---
 
-### Task 4: o Media Foundation passa a declarar o perfil
+### Task 4: ~~o Media Foundation passa a declarar o perfil~~ — RETIRADA, a premissa era falsa
 
-`fn tipo()` monta o tipo de saída sem `MF_MT_MPEG2_PROFILE`, e o codificador H.264 da Microsoft sem perfil declarado entrega **Baseline**, ou seja CAVLC. O caminho de software deste mesmo crate já usa **CABAC** desde 2026-08-31, com 13,4% a 15,7% menos bytes medidos em `examples/entropia.rs` — o codificador do sistema no Windows está atrás do de software, e é a troca que produziu o relato «está mais pixelado que antes».
+**Medido em 2026-09-04, numa máquina Windows de verdade, e o resultado foi o contrário do previsto.**
 
-**Main e não High**, e a razão é o outro lado: `tests/ida_e_volta.rs` e `tests/qualidade-do-codec.rs` decodificam pelo `Decodificador` do OpenH264, e o binding diz por escrito que a transformada 8×8 exigida por High não está implementada. Main é CABAC sem 8×8 — exatamente o que o OpenH264 já emite e o próprio decodificador já lê. High fica para uma medição própria, com o arnês da Task 6.
+A tarefa dizia que `fn tipo` monta o tipo de saída sem `MF_MT_MPEG2_PROFILE` e que, sem perfil declarado, o codificador H.264 da Microsoft entrega **Baseline** — CAVLC, atrás do caminho de software deste mesmo crate, que usa CABAC desde 2026-08-31. Era o suspeito nomeado para o relato «está mais pixelado que antes, no Windows».
 
-**Arquivos:**
-- Modificar: `crates/seele-video/src/codec/windows.rs` — bloco `use` (linha ~27) e `fn tipo` (linha ~183)
-- Teste: `crates/seele-video/tests/ida_e_volta.rs`
+O teste que a tarefa mandava escrever foi escrito e rodado. Ele lê o `profile_idc` do SPS, que é o fio e não a API de nenhum sistema:
 
-**Interfaces:**
-- Consome: nada das tarefas anteriores. Pode ser executada em paralelo com as Tasks 1–3.
-
-- [ ] **Passo 1: escrever o teste que falha**
-
-Em `crates/seele-video/tests/ida_e_volta.rs`, um teste que lê o `profile_idc` do SPS que sai do codificador armado por `armar`:
-
-```rust
-/// O primeiro byte depois do cabeçalho NAL de um SPS é o `profile_idc`.
-///
-/// 66 é Baseline, 77 é Main, 100 é High. Vale para qualquer codificador: é o
-/// fio, não a API de nenhum sistema.
-fn profile_idc(annex_b: &[u8]) -> Option<u8> {
-    let mut i = 0;
-    while i + 5 < annex_b.len() {
-        let (salto, cabeca) = match annex_b.get(i..i + 4) {
-            Some([0, 0, 0, 1]) => (4, i + 4),
-            Some([0, 0, 1, _]) => (3, i + 3),
-            _ => {
-                i += 1;
-                continue;
-            }
-        };
-        // Tipo de NAL 7 é SPS.
-        if annex_b.get(cabeca).is_some_and(|b| b & 0x1F == 7) {
-            return annex_b.get(cabeca + 1).copied();
-        }
-        i += salto;
-    }
-    None
-}
-
-#[test]
-fn o_codificador_armado_nao_sai_em_baseline() {
-    // Baseline é CAVLC, e o caminho de software deste crate já usa CABAC desde
-    // 2026-08-31 — 13,4% a 15,7% menos bytes, medidos em `examples/entropia.rs`.
-    // Um codificador do sistema em Baseline entrega **pior** que o de software
-    // pelo mesmo teto, que é o avesso da razão de ele existir.
-    let Some(biblioteca) = biblioteca() else {
-        return;
-    };
-    let mut codificador = armar(
-        &biblioteca,
-        ConfigDoCodificador {
-            resolucao: Resolucao::P540,
-            cadencia: Cadencia::Q30,
-            teto_bps: 1_200_000,
-        },
-    )
-    .expect("armar o codificador");
-
-    let quadro = QuadroI420::preto(960, 540);
-    let chave = loop {
-        if let Some(saida) = codificador.codificar(&quadro, true).expect("codificar") {
-            break saida;
-        }
-    };
-    assert!(chave.chave, "o primeiro quadro pedido tem de ser chave");
-
-    let perfil = profile_idc(&chave.bytes).expect("o quadro-chave carrega SPS");
-    assert_ne!(perfil, 66, "saiu em Baseline/CAVLC");
-    assert!(
-        perfil == 77 || perfil == 100,
-        "perfil inesperado no fio: {perfil}"
-    );
-}
+```
+PERFIL NO FIO: profile_idc=77 (Main), quadro-chave de 173 bytes
 ```
 
-- [ ] **Passo 2: rodar o teste e ver falhar**
+**77 é Main.** O MFT já escolhe Main sem que ninguém peça, e o `Decodificador` do OpenH264 abre o fluxo. A ausência de `MF_MT_MPEG2_PROFILE` não estava custando nada nesta máquina.
 
-**Numa máquina Windows:** `cargo test -p seele-video o_codificador_armado_nao_sai_em_baseline -- --nocapture`
-Esperado: FALHA — `saiu em Baseline/CAVLC`, porque o MFT não recebeu perfil.
+O que **sobrou de valor**: o teste `o_codificador_armado_nao_sai_em_baseline` fica em `crates/seele-video/tests/ida_e_volta.rs`. Ele não conserta nada — prende. Um driver de outro fabricante, ou uma versão de Windows que escolha Baseline, passa a ser reprovado em vez de descoberto por relato de campo. É a única forma honesta de uma suposição virar garantia: escrevê-la como teste e deixá-la rodar em toda máquina.
 
-No macOS este teste já deve passar (o OpenH264 com CABAC declara 100, e o VideoToolbox declara o que o driver escolher — a Task 5 fixa isso). Se falhar no macOS, é a Task 5 que resolve; execute-a antes.
+**Um achado de lado, e não é cosmético:** `seele_proto::screen::ScreenCodec` só tem a variante `H264Baseline`, e é o byte 0 que viaja no cabeçalho de abertura do §3.6. O que sai do Windows é **Main**. O cabeçalho declara um perfil que o fluxo não tem. Hoje ninguém se machuca — quem assiste decodifica por WebCodecs, que lê o perfil do próprio SPS —, mas o doc daquele enum diz que ele existe para que *«o receptor recuse um codec que não sabe decodificar»*, e um campo que mente não serve para isso. Merece pendência própria.
 
-- [ ] **Passo 3: declarar o perfil no tipo de saída**
-
-Acrescentar ao bloco `use` de `crates/seele-video/src/codec/windows.rs`:
-
-```rust
-    eAVEncH264VProfile_Main, MF_MT_MPEG2_PROFILE,
-```
-
-(mantendo a ordem alfabética do bloco existente)
-
-E em `fn tipo`, dentro da cadeia `and_then`, logo depois de `MF_MT_INTERLACE_MODE` e antes do braço de `teto_bps`:
-
-```rust
-            .and_then(|()| match teto_bps {
-                // **Perfil só na saída.** O tipo de entrada é NV12 cru e não
-                // tem perfil nenhum; declarar um ali faz o `SetInputType`
-                // recusar tudo, que é o erro mais comum deste caminho.
-                //
-                // Main e não High: o outro lado dos testes deste crate
-                // decodifica pelo OpenH264, e o binding diz por escrito que a
-                // transformada 8×8 exigida por High não está implementada.
-                // Main é CABAC sem 8×8 — exatamente o que o caminho de software
-                // já emite e o decodificador já lê todo dia.
-                //
-                // Sem esta linha o MFT da Microsoft entrega **Baseline**, ou
-                // seja CAVLC, e fica atrás do codificador de software deste
-                // mesmo crate pelo mesmo teto. É o relato «está mais pixelado
-                // que antes», no Windows.
-                Some(_) => tipo.SetUINT32(
-                    &MF_MT_MPEG2_PROFILE,
-                    u32::try_from(eAVEncH264VProfile_Main.0).unwrap_or(77),
-                ),
-                None => Ok(()),
-            })
-            .and_then(|()| match teto_bps {
-                Some(bps) => tipo.SetUINT32(&MF_MT_AVG_BITRATE, bps),
-                None => Ok(()),
-            })
-```
-
-- [ ] **Passo 4: rodar o teste e ver passar**
-
-**Numa máquina Windows:** `cargo test -p seele-video -- --nocapture`
-Esperado: PASSA. `o_codificador_armado_nao_sai_em_baseline` lê 77, e `ida_e_volta` continua verde — que é a prova de que o `Decodificador` abre o fluxo novo.
-
-Se `ida_e_volta` ficar vermelho, o decodificador não aceitou Main: reverta para Baseline nesta tarefa e registre a medida, porque aí a economia não é economia, é incompatibilidade (§2, razão 4).
-
-- [ ] **Passo 5: commit**
-
-```bash
-git add crates/seele-video/src/codec/windows.rs crates/seele-video/tests/ida_e_volta.rs
-git commit -m "fix(codec): o Media Foundation deixa de sair em baseline, que era pior que o software"
-```
-
----
+**Lição para quem escrever a próxima tarefa deste plano:** «o padrão da API é X» é hipótese, não fato, e o custo de conferir era um teste de trinta linhas.
 
 ### Task 5: o VideoToolbox passa a declarar o perfil em vez de herdá-lo do driver
 
@@ -1038,3 +917,152 @@ git commit -m "test(codec): o arnês passa a medir o que a cadência compra pelo
 - **Não toca no lado de quem assiste.** Não há buffer de jitter para a tela, o carimbo de apresentação é o instante de chegada e cada quadro atravessa a ponte em base64. Isso é o outro pedido — «fluida do início ao fim» — e é um plano próprio, porque mexe em `seele-proto` (carimbo no cabeçalho de quadro), no `seele-ffi` e no JS, e não em codec nenhum.
 - **Não sobe para High profile.** Fica dependendo da medida da Task 6 e de uma decisão sobre o `Decodificador` do OpenH264 nos testes.
 - **Não sobe `MAX_QUADRO_LEN` nem `FATIAS_DO_QUADRO_CHAVE`.** A 8 Mbps o quadro-chave de 1080p30 fica em ~133 KB, bem dentro dos 512 KiB, e só a 8 quadros por segundo ele chega perto da borda (~500 KB). São constantes de **formato**, gêmeas em `seele-core` e `seele-server`, e mexer nelas é mudança de protocolo entre versões — merece tarefa própria, com as duas metades no mesmo commit.
+
+---
+
+### Task 7: a escada passa a lembrar onde parou
+
+**O primeiro segundo é o pior que este produto tem, e é o único que todo mundo vê.**
+
+`CAMINHO_DA_PROVA_BPS = 2_000_000`: toda transmissão parte supondo uma subida doméstica de 2 Mbps. Inclusive entre duas máquinas no mesmo switch que mediram 12,48 Mbps entre si vinte minutos antes. A medida morre quando a transmissão acaba, e a próxima redescobre do zero.
+
+Medido em campo nesta sessão, LAN, duas máquinas:
+
+```
+02:25:31   2.400.000 →  4.524.054   → P720
+02:25:40   4.524.054 →  9.048.108   → P1080
+02:25:43   9.048.108 → 12.480.000   ← topo
+```
+
+**Doze segundos de imagem ruim para reaprender um fato que era verdade desde o primeiro milissegundo.** E o código já sabia: `IDA_E_VOLTA_CURTA` de 5 ms identificou o cano curto e trocou o passo de 125% para 200% — ou seja, ele reconheceu a LAN e mesmo assim começou supondo 2 Mbps.
+
+O que **não** muda: a escolha da pessoa continua sendo teto e nunca piso (§5), e o teto continua cedendo quando o caminho aperta. Lembrar de onde começar não fere a regra do §3.2 — a primeira janela que doer corrige, pelo mecanismo que já existe.
+
+**Arquivos:**
+- Modificar: `crates/seele-core/src/conhecidos.rs` — `struct Conhecido`, e a leitura e escrita da linha
+- Modificar: `crates/seele-core/src/caminho.rs` — `Sonda::nova` ganha irmã que parte de uma medida
+- Teste: `crates/seele-core/src/conhecidos.rs` e `crates/seele-core/src/caminho.rs`, nos módulos de teste que já existem
+
+**Interfaces:**
+- Produz: `Conhecido::caminho_bps: Option<u32>` e `Sonda::partindo_de(bps: u32) -> Sonda`.
+
+- [ ] **Passo 1: escrever o teste que falha, no `conhecidos`**
+
+```rust
+#[test]
+fn a_linha_carrega_o_ultimo_caminho_medido() {
+    // O quinto campo, e ele é de conveniência como os outros três: um arquivo
+    // apagado custa doze segundos de imagem ruim uma vez, e nada mais. É por
+    // isso que ele mora aqui e não junto dos pins — ver o cabeçalho.
+    let escrito = "192.168.0.7:8383\tmarcela\t1\t1738000000\t12480000";
+    let lido = Conhecido::da_linha(escrito).expect("uma linha de cinco campos");
+    assert_eq!(lido.caminho_bps, Some(12_480_000));
+    assert_eq!(lido.para_linha(), escrito);
+
+    // **Quatro campos continua sendo uma linha válida**, e isto não é gentileza:
+    // é o arquivo que já está no disco de quem atualizar. Sem esta linha, a
+    // primeira execução da versão nova esquece todos os servidores conhecidos.
+    let velha = "192.168.0.7:8383\tmarcela\t1\t1738000000";
+    let lido = Conhecido::da_linha(velha).expect("uma linha de quatro campos");
+    assert_eq!(lido.caminho_bps, None);
+}
+```
+
+- [ ] **Passo 2: rodar e ver falhar**
+
+Rodar: `cargo test -p seele-core conhecidos::`
+Esperado: FALHA de compilação — `no field 'caminho_bps' on type 'Conhecido'`.
+
+- [ ] **Passo 3: acrescentar o campo**
+
+Em `struct Conhecido`:
+
+```rust
+    /// O último caminho medido para este servidor, em bits por segundo.
+    ///
+    /// `None` para uma linha escrita por uma versão anterior, e para um
+    /// servidor onde ninguém compartilhou tela ainda. Quem lê isto é
+    /// [`crate::caminho::Sonda::partindo_de`], e o que ele evita são os doze
+    /// segundos que a escada gasta para reaprender uma LAN.
+    ///
+    /// **Conveniência, e não verdade.** Um número velho não vincula nada: a
+    /// sonda continua medindo, e a primeira janela que doer o substitui. É por
+    /// isso que ele pode morar num arquivo que se apaga sem consequência.
+    pub caminho_bps: Option<u32>,
+```
+
+Na leitura da linha, o quinto campo é opcional: `campos.next().and_then(|c| c.parse().ok())`. Na escrita, um campo ausente não escreve tabulação sobrando — uma linha de quatro campos continua saindo de quatro.
+
+- [ ] **Passo 4: rodar e ver passar**
+
+Rodar: `cargo test -p seele-core conhecidos::`
+Esperado: PASSA, e os testes antigos do formato continuam verdes.
+
+- [ ] **Passo 5: escrever o teste da sonda que parte de uma medida**
+
+```rust
+#[test]
+fn a_sonda_que_lembra_nao_recomeca_do_palpite() {
+    // A escada existe porque ninguém sabe o cano. Quem já mediu **sabe**, e
+    // recomeçar do palpite universal é jogar a medida fora.
+    let lembrada = Sonda::partindo_de(12_480_000);
+    assert_eq!(lembrada.estimativa(), 12_480_000);
+
+    // E ela continua sendo uma sonda: um cano que encolheu a corrige na
+    // primeira janela que doer, como corrigiria qualquer estimativa.
+    let mut lembrada = lembrada;
+    let mut cano = Cano::de(3_000_000);
+    correr(&mut lembrada, &mut cano, SignalBand::Nominal, ticas(10), |_, _| {});
+    assert!(
+        lembrada.estimativa() < 12_480_000,
+        "a memória virou teimosia: o cano encolheu e a estimativa não desceu"
+    );
+
+    // O piso continua sendo o piso: memória não autoriza começar acima do teto.
+    assert_eq!(
+        Sonda::partindo_de(u32::MAX).estimativa(),
+        TETO_DA_ESTIMATIVA_BPS
+    );
+}
+```
+
+- [ ] **Passo 6: implementar**
+
+```rust
+    /// Uma sonda que começa de uma medida em vez do palpite de
+    /// [`CAMINHO_DA_PROVA_BPS`].
+    ///
+    /// O valor é grampeado entre [`PISO_DA_ESTIMATIVA_BPS`] e
+    /// [`TETO_DA_ESTIMATIVA_BPS`]: memória não é autorização para começar fora
+    /// da faixa que a escada admite.
+    ///
+    /// **Não põe `limite_bps`.** Uma medida lembrada é de onde partir, não uma
+    /// borda encontrada — a histerese é para o que doeu **nesta** sessão, e
+    /// herdá-la de ontem impediria a sonda de descobrir que o cano cresceu.
+    #[must_use]
+    pub fn partindo_de(bps: u32) -> Self {
+        Self {
+            estimativa_bps: bps.clamp(PISO_DA_ESTIMATIVA_BPS, TETO_DA_ESTIMATIVA_BPS),
+            ..Self::nova()
+        }
+    }
+```
+
+- [ ] **Passo 7: ligar as duas pontas**
+
+Quem constrói a `Sonda` passa a ler o `Conhecido` do servidor em que está, e quem encerra uma transmissão passa a gravar `estimativa()` de volta na linha. O lugar de gravar é onde `crate::enlace` já vê `a transmissão de tela acabou` — é o único ponto que sabe que houve medida e que ela terminou.
+
+Rodar: `cargo test -p seele-core`
+Esperado: tudo verde.
+
+- [ ] **Passo 8: conferir em campo, que é onde este defeito foi visto**
+
+Duas máquinas na mesma LAN, compartilhar com movimento, esperar a escada chegar a P1080, parar, e compartilhar de novo. **A segunda vez tem de começar em 1080p**, sem os doze segundos.
+
+- [ ] **Passo 9: commit**
+
+```bash
+git add crates/seele-core/src/conhecidos.rs crates/seele-core/src/caminho.rs
+git commit -m "feat(tela): a escada lembra o caminho medido e para de reaprender a LAN"
+```
+

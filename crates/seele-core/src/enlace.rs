@@ -146,6 +146,26 @@ pub enum Aviso {
         /// O quadro, em Annex-B.
         bytes: Vec<u8>,
     },
+    /// Chegou uma transmissão e esta versão não sabe lê-la.
+    ///
+    /// **É a resposta à tela preta.** Quando o cabeçalho de um fluxo de tela não
+    /// decodifica — versão do protocolo que este build não fala, campo que mudou
+    /// de forma —, este lado não sabe nem o número da transmissão, então não há
+    /// `TelaFechou` a mandar. Antes disto ele simplesmente voltava, e a casca
+    /// nunca ficava sabendo que houve alguma coisa: nenhum evento, nenhum
+    /// desenho, nenhuma frase.
+    ///
+    /// Foi relatado assim: «quem assiste com uma versão mais velha vê tela
+    /// preta, sem mensagem nenhuma, e a sessão morre em ~3 segundos sem dizer
+    /// por quê». A parte «sem mensagem nenhuma» é esta variante que não existia.
+    ///
+    /// O motivo viaja como texto porque é para uma pessoa ler, e porque o que o
+    /// causou é justamente um formato que este build não conhece — enumerá-lo
+    /// exigiria conhecer de antemão o que ainda não foi inventado.
+    TelaIlegivel {
+        /// O que o decodificador do cabeçalho respondeu.
+        motivo: String,
+    },
     /// A transmissão que estava chegando acabou.
     TelaFechou {
         /// Qual transmissão.
@@ -180,6 +200,10 @@ impl std::fmt::Debug for Aviso {
                 .field("tela", tela)
                 .field("largura", largura)
                 .field("altura", altura)
+                .finish(),
+            Self::TelaIlegivel { motivo } => f
+                .debug_struct("TelaIlegivel")
+                .field("motivo", motivo)
                 .finish(),
             // Pelo mesmo motivo do quadro: os bytes viram um número.
             Self::TelaSom { tela, bytes } => f
@@ -2375,7 +2399,23 @@ fn escoar_tela_alheia(avisos: mpsc::UnboundedSender<Aviso>, fluxo: quinn::RecvSt
             let mut recepcao = match crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await {
                 Ok(recepcao) => recepcao,
                 Err(erro) => {
-                    tracing::debug!(%erro, "um fluxo de tela abriu torto");
+                    // **`warn!` e não `debug!`, e a casca fica sabendo.**
+                    //
+                    // Alguém do outro lado abriu um fluxo de tela e este build
+                    // não conseguiu ler o cabeçalho dele. Não é ruído: é uma
+                    // transmissão que existe e que esta pessoa não vai ver, e a
+                    // causa quase sempre é versão diferente dos dois lados.
+                    //
+                    // Voltar calado era o que produzia a tela preta: sem
+                    // `TelaAbriu` não há o que desenhar, e sem `TelaFechou` não
+                    // há o que apagar — a casca não sabia que tinha havido nada.
+                    tracing::warn!(
+                        %erro,
+                        "chegou uma transmissão de tela que esta versão não sabe ler"
+                    );
+                    let _ = avisos.send(Aviso::TelaIlegivel {
+                        motivo: erro.to_string(),
+                    });
                     return;
                 }
             };
@@ -2423,7 +2463,11 @@ fn escoar_tela_alheia(avisos: mpsc::UnboundedSender<Aviso>, fluxo: quinn::RecvSt
                         // conexão: o fluxo já perdeu o sincronismo, e continuar
                         // lendo dele é ler lixo. Quem transmite recomeça com um
                         // fluxo novo se quiser.
-                        tracing::debug!(%erro, %tela, "a transmissão alheia terminou torta");
+                        // `warn!`: o fluxo perdeu o sincronismo no meio, e do
+                        // lado de quem assiste isso é a imagem congelando. O
+                        // `TelaFechou` logo abaixo ao menos apaga o palco, que é
+                        // mais do que o caso do cabeçalho tinha.
+                        tracing::warn!(%erro, %tela, "a transmissão alheia terminou torta");
                         break;
                     }
                 }

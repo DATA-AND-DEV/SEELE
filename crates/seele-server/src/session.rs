@@ -404,7 +404,18 @@ pub async fn serve(
     // «não entregou nada» — a sonda recuaria por causa de alguém desligando.
     server.subida.lock().await.esquecer(id_da_conexao);
 
-    tracing::info!(person = %session.person, "session ended");
+    // **O motivo, quando há um.** Esta linha dizia «session ended» e mais nada,
+    // e o `result` — que carrega o erro — ia embora sem ser lido. Quem
+    // investigava uma sessão que morreu sozinha achava a linha que confirma que
+    // ela morreu, e nenhuma que diga por quê.
+    match &result {
+        Ok(()) => tracing::info!(person = %session.person, "session ended"),
+        Err(erro) => tracing::warn!(
+            person = %session.person,
+            %erro,
+            "session ended com erro"
+        ),
+    }
     result
 }
 
@@ -1008,14 +1019,31 @@ async fn run_session(
     let leitora = tokio::spawn(async move {
         let mut recv = recv;
         loop {
-            match frame::read::<ClientMessage>(&mut recv).await {
+            match frame::ler::<ClientMessage>(&mut recv).await {
                 Ok(mensagem) => {
                     if para_dentro.send(mensagem).await.is_err() {
                         return;
                     }
                 }
-                Err(erro) => {
-                    tracing::debug!(%erro, "o fluxo de controle do cliente terminou");
+                // **Fechar é rotina; não entender é notícia.** Os dois vinham
+                // pelo mesmo caminho e saíam pela mesma linha de `debug!`, com
+                // a frase do primeiro — então uma incompatibilidade de
+                // protocolo era registrada como alguém desligando, num nível
+                // que ninguém lê.
+                //
+                // O relato que trouxe isto: «quem assiste com uma versão mais
+                // velha vê tela preta, sem mensagem nenhuma, e a sessão morre
+                // em ~3 segundos sem dizer por quê».
+                Err(fim) if fim.e_incompatibilidade() => {
+                    tracing::warn!(
+                        erro = %fim.erro(),
+                        "um par mandou um quadro de controle que este servidor não entende; \
+                         quase sempre é uma versão diferente dos dois lados"
+                    );
+                    return;
+                }
+                Err(fim) => {
+                    tracing::debug!(erro = %fim.erro(), "o fluxo de controle do cliente terminou");
                     return;
                 }
             }
