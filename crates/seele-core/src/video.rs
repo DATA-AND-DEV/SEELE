@@ -814,6 +814,19 @@ pub enum Ajuste {
         /// O teto que passou a valer.
         teto_bps: u32,
     },
+    /// A cadência mudou, e a resolução não.
+    ///
+    /// Variante própria e não um campo em [`Self::TetoNovo`] porque as duas
+    /// respondem perguntas diferentes na interface do §5 — «o que está saindo»
+    /// tem dois números, e o que muda é quase sempre um só.
+    ///
+    /// **Baixar a cadência não reabre o fluxo.** Ao contrário da resolução, ela
+    /// não vai no cabeçalho de abertura do §3.6, então quem recebe isto não tem
+    /// nada a refazer: já está valendo.
+    CadenciaNova {
+        /// Quantos quadros por segundo passaram a valer.
+        quadros_por_segundo: u32,
+    },
     /// O degrau de resolução mudou, e o codificador **continua no antigo**.
     ///
     /// A resolução vai no cabeçalho de abertura do fluxo (§3.6), então trocá-la
@@ -888,6 +901,13 @@ pub struct Compartilhamento {
     /// [`armar`], num lugar só.
     codificador: Box<dyn CodificaVideo>,
     escolha_de_resolucao: Resolucao,
+    /// A cadência que a pessoa escolheu, que é **teto e nunca piso** (§5).
+    ///
+    /// Guardada à parte do codificador de propósito: o codificador carrega a
+    /// que **está valendo**, já reduzida pelo orçamento, e ler a escolha dele
+    /// faria cada aperto virar o novo máximo — uma catraca que nunca devolve os
+    /// 30 quadros depois que a sala esvazia.
+    escolha_de_cadencia: Cadencia,
     prioridade: Prioridade,
     teto: Teto,
 }
@@ -929,6 +949,7 @@ impl Compartilhamento {
             biblioteca,
             codificador,
             escolha_de_resolucao,
+            escolha_de_cadencia: cadencia,
             prioridade,
             teto,
         })
@@ -1031,16 +1052,57 @@ impl Compartilhamento {
         // `resolucao_estimada_para` mais um degrau abaixo quando quem
         // compartilha escolheu movimento. A escolha explícita da pessoa continua
         // sendo teto por cima disso — os dois são teto, e manda o menor (§5).
-        let do_teto = match novo {
-            Teto::Bps(bps) => crate::tela::resolucao_para(bps, self.prioridade),
-            Teto::Parado(_) => self.escolha_de_resolucao,
-        };
-        let degrau = menor_resolucao(do_teto, self.escolha_de_resolucao);
-        if degrau != self.codificador.resolucao() {
+        // O eixo entra aqui, e num lugar só: `resolucao_para` é
+        // `resolucao_estimada_para` mais um limiar dobrado quando quem
+        // compartilha escolheu movimento. A escolha explícita da pessoa continua
+        // sendo teto por cima disso — os dois são teto, e manda o menor (§5).
+        let degrau_novo = menor_resolucao(
+            crate::tela::resolucao_para(bps, self.prioridade),
+            self.escolha_de_resolucao,
+        );
+
+        // **A outra metade do §2, no caminho onde o teto de fato anda.**
+        //
+        // `config_para` já resolve isto ao armar, e era só ali: a sala que
+        // cresce chega por aqui, não por lá. Sem estas linhas, seis
+        // espectadores numa casa de 6 Mbps derrubavam a resolução para 540p e
+        // deixavam a cadência em 30 — dez kbit por quadro, que é o bloco que o
+        // relato chama de «pixelado».
+        //
+        // Contra `degrau_novo` e não contra a resolução armada: os bits que um
+        // quadro precisa dependem de quantos pixels ele tem, e o degrau que vai
+        // valer é o que acabou de sair.
+        let cadencia_alvo = crate::tela::cadencia_para(
+            bps,
+            degrau_novo,
+            self.prioridade,
+            self.escolha_de_cadencia,
+        );
+        let antes = self.codificador.quadros_por_segundo();
+        let agora = self.codificador.ajustar_quadros(cadencia_alvo.hz())?;
+        let mudou_a_cadencia = agora != antes;
+        if mudou_a_cadencia {
+            tracing::info!(
+                de = antes,
+                para = agora,
+                teto_bps = bps,
+                "a cadência da tela cedeu ao orçamento"
+            );
+        }
+
+        // A ordem dos três é deliberada: a resolução ganha porque é a única que
+        // obriga a reabrir o fluxo, e quem recebe `ResolucaoPedida` vai reler a
+        // cadência ao refazer de qualquer forma.
+        if degrau_novo != self.codificador.resolucao() {
             return Ok(Ajuste::ResolucaoPedida {
                 de: self.codificador.resolucao(),
-                para: degrau,
+                para: degrau_novo,
                 teto_bps: bps,
+            });
+        }
+        if mudou_a_cadencia {
+            return Ok(Ajuste::CadenciaNova {
+                quadros_por_segundo: agora,
             });
         }
         if mudou_a_banda {
@@ -1062,10 +1124,27 @@ impl Compartilhamento {
     pub fn refazer_com(&mut self, resolucao: Resolucao) -> Result<(), ErroDeCompartilhamento> {
         let config = ConfigDoCodificador {
             resolucao,
-            cadencia: self.codificador.cadencia(),
+            // **A escolha da pessoa, e não a cadência que está valendo.**
+            //
+            // Este campo é o **máximo** (§5), e o codificador carrega o valor já
+            // reduzido pelo orçamento. Passar o reduzido faria cada reabertura
+            // de fluxo virar o teto novo — quem escolheu 60 e passou por um
+            // aperto nunca mais voltaria a 60, sem ninguém ter revogado a
+            // escolha. Uma catraca, e silenciosa.
+            cadencia: self.escolha_de_cadencia,
             teto_bps: self.teto.bps(),
         };
         self.codificador = armar(&self.biblioteca, config)?;
+        // E o orçamento decide de novo, agora contra o degrau novo: os bits que
+        // um quadro precisa dependem de quantos pixels ele tem — 208 k a 1080p
+        // contra 52 k a 540p —, então a cadência da resolução velha não serve.
+        let alvo = crate::tela::cadencia_para(
+            self.teto.bps(),
+            resolucao,
+            self.prioridade,
+            self.escolha_de_cadencia,
+        );
+        self.codificador.ajustar_quadros(alvo.hz())?;
         Ok(())
     }
 
@@ -1292,16 +1371,17 @@ mod tests {
     }
 
     #[test]
-    fn a_sala_que_cresce_aperta_o_codificador_e_nao_a_voz() {
-        // O caminho completo do §5.1, e é o que esta cola existe para fazer:
-        // alguém entra na sala → a perna de quem hospeda é dividida por mais um
-        // → o teto cai → o codificador obedece. Sem o codificador na mão o
-        // teste ainda prova a metade que decide.
+    fn a_sala_que_cresce_faz_o_quadro_ceder_e_nao_so_a_resolucao() {
+        // O §2: «a resolução segura, o quadro cede». `config_para` já cumpre isso
+        // ao armar; este teste é a mesma regra no caminho onde o teto de fato
+        // anda, que é alguém entrando na sala (§5.1) — e ali só a resolução
+        // cedia.
         let Some(biblioteca) = biblioteca() else {
             return;
         };
 
-        // Uma casa que hospeda com 6 Mbps de subida, sozinha na sala.
+        // Uma casa que hospeda com 6 Mbps de subida: 3,6 Mbps de teto sozinha,
+        // que a régua compra como 720p a 30 quadros.
         let sozinho = TetoDeVideo::com_caminho(6_000_000)
             .com_caminho_de_quem_hospeda(6_000_000)
             .com_espectadores(1);
@@ -1314,23 +1394,167 @@ mod tests {
             Prioridade::Nitidez,
         )
         .expect("armar o codificador com 3,6 Mbps de teto");
-        assert_eq!(compartilhamento.resolucao(), Resolucao::P1080);
-        assert_eq!(compartilhamento.teto(), Teto::Bps(3_600_000));
+        assert_eq!(compartilhamento.resolucao(), Resolucao::P720);
+        assert_eq!(compartilhamento.quadros_por_segundo(), 30);
 
-        // Entra a segunda pessoa: 3,6 Mbps ÷ 2 = 1,8, que ainda compra 1080p.
+        // Seis pessoas assistindo: 3,6 Mbps ÷ 6 = 600 kbps. Abaixo do limiar de
+        // 720p, então o degrau é 540p; e 600 000 ÷ 52 000 = 11, que compra 8
+        // quadros e não 30.
+        let a_seis = sozinho.com_espectadores(6);
+        assert_eq!(
+            compartilhamento
+                .ajustar(&a_seis, SignalBand::Nominal)
+                .expect("baixar a banda do codificador"),
+            Ajuste::ResolucaoPedida {
+                de: Resolucao::P720,
+                para: Resolucao::P540,
+                teto_bps: 600_000,
+            },
+            "a resolução continua sendo a notícia maior: é ela que reabre o fluxo"
+        );
+
+        // **E o quadro cedeu junto, sem esperar a reabertura.** Baixar a
+        // cadência não custa quadro-chave e não vai no cabeçalho do §3.6, então
+        // não há razão para ela esperar o degrau.
+        assert_eq!(
+            compartilhamento.quadros_por_segundo(),
+            8,
+            "a sala cresceu, a resolução cedeu e o quadro ficou em 30: são 10 kbit \
+             por quadro, que é o bloco que o relato chama de «pixelado»"
+        );
+    }
+
+    #[test]
+    fn a_cadencia_volta_quando_a_sala_esvazia() {
+        // O contrário do teste acima, e ele existe porque um ajuste que só desce
+        // é uma catraca: quem saísse da sala deixaria todo mundo a 8 quadros
+        // para sempre. A escolha da pessoa é teto (§5) e continua alcançável.
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let sozinho = TetoDeVideo::com_caminho(6_000_000)
+            .com_caminho_de_quem_hospeda(6_000_000)
+            .com_espectadores(1);
+        let mut compartilhamento = Compartilhamento::abrir(
+            biblioteca,
+            &sozinho,
+            SignalBand::Nominal,
+            Resolucao::P1080,
+            Cadencia::Q30,
+            Prioridade::Nitidez,
+        )
+        .expect("armar o codificador");
+
+        let _ = compartilhamento
+            .ajustar(&sozinho.com_espectadores(6), SignalBand::Nominal)
+            .expect("apertar");
+        assert_eq!(compartilhamento.quadros_por_segundo(), 8);
+
+        // A sala esvazia. O codificador continua armado em 720p — ninguém
+        // reabriu o fluxo —, então o degrau não muda e a notícia é a cadência.
+        assert_eq!(
+            compartilhamento
+                .ajustar(&sozinho, SignalBand::Nominal)
+                .expect("afrouxar"),
+            Ajuste::CadenciaNova {
+                quadros_por_segundo: 30
+            }
+        );
+        assert_eq!(compartilhamento.quadros_por_segundo(), 30);
+    }
+
+    #[test]
+    fn refazer_o_degrau_recalcula_a_cadencia_para_o_degrau_novo() {
+        // **`refazer_com` arma um codificador do zero**, e um codificador recém-
+        // armado mira `config.cadencia.hz()` — o máximo. Sem recalcular, toda
+        // troca de degrau devolvia a cadência ao topo, mesmo com o orçamento
+        // pagando um oitavo dela, e ela só voltava a ceder no `ajustar`
+        // seguinte. Entre um e outro, o codec do sistema entrega 30 quadros
+        // borrados de um orçamento que compra 8 nítidos.
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        let sozinho = TetoDeVideo::com_caminho(6_000_000)
+            .com_caminho_de_quem_hospeda(6_000_000)
+            .com_espectadores(1);
+        let mut compartilhamento = Compartilhamento::abrir(
+            biblioteca,
+            &sozinho,
+            SignalBand::Nominal,
+            Resolucao::P1080,
+            Cadencia::Q30,
+            Prioridade::Nitidez,
+        )
+        .expect("armar o codificador");
+
+        let _ = compartilhamento
+            .ajustar(&sozinho.com_espectadores(6), SignalBand::Nominal)
+            .expect("apertar");
+        compartilhamento
+            .refazer_com(Resolucao::P540)
+            .expect("refazer em 540p");
+
+        assert_eq!(compartilhamento.resolucao(), Resolucao::P540);
+        assert_eq!(
+            compartilhamento.quadros_por_segundo(),
+            8,
+            "refazer o degrau devolveu a cadência ao máximo que a pessoa escolheu, \
+             ignorando o orçamento que a pôs em 8"
+        );
+
+        // E a escolha continua sendo alcançável: 30 é teto, não foi revogado.
+        let _ = compartilhamento
+            .ajustar(&sozinho, SignalBand::Nominal)
+            .expect("afrouxar");
+        assert_eq!(compartilhamento.quadros_por_segundo(), 30);
+    }
+
+    #[test]
+    fn a_sala_que_cresce_aperta_o_codificador_e_nao_a_voz() {
+        // O caminho completo do §5.1, e é o que esta cola existe para fazer:
+        // alguém entra na sala → a perna de quem hospeda é dividida por mais um
+        // → o teto cai → o codificador obedece. Sem o codificador na mão o
+        // teste ainda prova a metade que decide.
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+
+        // Uma casa que hospeda com 30 Mbps de subida, sozinha na sala.
+        //
+        // **Eram 6 Mbps**, e o número subiu com a régua e não com a intenção: a
+        // forma que este teste prova é a escada de três degraus do §5.1 — o
+        // primeiro compra o topo, o segundo só baixa a banda, o terceiro derruba
+        // o degrau. Com os limiares em bits por pixel, 6 Mbps já entram abaixo
+        // de 1080p e a escada perderia os dois primeiros degraus.
+        let sozinho = TetoDeVideo::com_caminho(30_000_000)
+            .com_caminho_de_quem_hospeda(30_000_000)
+            .com_espectadores(1);
+        let mut compartilhamento = Compartilhamento::abrir(
+            biblioteca,
+            &sozinho,
+            SignalBand::Nominal,
+            Resolucao::P1080,
+            Cadencia::Q30,
+            Prioridade::Nitidez,
+        )
+        .expect("armar o codificador com 18 Mbps de teto");
+        assert_eq!(compartilhamento.resolucao(), Resolucao::P1080);
+        assert_eq!(compartilhamento.teto(), Teto::Bps(18_000_000));
+
+        // Entra a segunda pessoa: 18 Mbps ÷ 2 = 9, que ainda compra 1080p.
         let a_dois = sozinho.com_espectadores(2);
         assert_eq!(
             compartilhamento
                 .ajustar(&a_dois, SignalBand::Nominal)
                 .expect("baixar a banda do codificador"),
             Ajuste::TetoNovo {
-                teto_bps: 1_800_000
+                teto_bps: 9_000_000
             }
         );
         assert_eq!(compartilhamento.resolucao(), Resolucao::P1080);
 
-        // Entra a terceira: 1,2 Mbps, e aí o degrau cai — é a linha do §5.1,
-        // «a 1200 kbps o 1080p joga fora um sexto do que captura».
+        // Entra a terceira: 6 Mbps, um fio abaixo do limiar de 1080p, e aí o
+        // degrau cai.
         let a_tres = sozinho.com_espectadores(3);
         assert_eq!(
             compartilhamento
@@ -1339,7 +1563,7 @@ mod tests {
             Ajuste::ResolucaoPedida {
                 de: Resolucao::P1080,
                 para: Resolucao::P720,
-                teto_bps: 1_200_000,
+                teto_bps: 6_000_000,
             }
         );
         // E o codificador **continua** em 1080p até alguém reabrir o fluxo: a
@@ -1357,7 +1581,7 @@ mod tests {
         for espectadores in [1, 2, 3] {
             assert_eq!(
                 sozinho.com_espectadores(espectadores).reserva_da_voz(),
-                2_400_000
+                12_000_000
             );
         }
     }
@@ -1391,8 +1615,13 @@ mod tests {
 
         // E com quadro, sai H.264 de verdade: o primeiro é chave, com SPS e PPS
         // na frente, que é o que faz quem recebe conseguir abrir o fluxo.
-        let fonte =
-            FonteDeMentira::com(vec![quadro(Resolucao::P720, 8), quadro(Resolucao::P720, 0)]);
+        // **Da resolução que o codificador armou, e não de uma escrita à mão.**
+        // O degrau sai da régua de `crate::tela`, e prender 720p aqui faz este
+        // teste — que é sobre a cola ir da captura ao quadro codificado —
+        // reprovar toda vez que a régua muda, com um erro que fala de tamanho de
+        // quadro e não da coisa que ele prova.
+        let degrau = compartilhamento.resolucao();
+        let fonte = FonteDeMentira::com(vec![quadro(degrau, 8), quadro(degrau, 0)]);
         let Passo::Quadro(primeiro) = compartilhamento
             .passo(&fonte, true)
             .expect("codificar o primeiro quadro")

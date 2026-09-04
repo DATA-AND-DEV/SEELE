@@ -714,6 +714,19 @@ impl<C: Captura> Laco<C> {
         };
         match ajuste {
             Ok(Ajuste::Igual) => Ok(()),
+            // **Nada a fazer, e é o ponto.** A cadência não viaja no cabeçalho
+            // do §3.6, então baixá-la não abre fluxo; e o laço já lê
+            // `quadros_por_segundo()` a cada `dormir()`, então o intervalo entre
+            // tiques passou a ser o novo sozinho, antes desta linha existir.
+            //
+            // **Sem evento**, ao contrário do irmão de baixo, e isso é decisão:
+            // `EventoDaBomba::Teto` é consumido aqui dentro, para reajustar o
+            // balde do fluxo — a cadência não mexe em balde nenhum. O §5 pede
+            // que a interface mostre o que está saindo ao lado do que foi
+            // pedido, e ela hoje não mostra cadência nenhuma: inventar um evento
+            // agora seria código morto num caminho quente. Quando a interface
+            // ganhar esse número, é aqui que ele sai.
+            Ok(Ajuste::CadenciaNova { .. }) => Ok(()),
             Ok(Ajuste::TetoNovo { teto_bps }) => {
                 self.emitir(EventoDaBomba::Teto { teto_bps });
                 Ok(())
@@ -1152,7 +1165,7 @@ mod tests {
     use seele_video::modulo;
 
     use super::*;
-    use crate::tela::{Recepcao, CAMINHO_DA_PROVA_BPS};
+    use crate::tela::Recepcao;
     use crate::video::FonteDeQuadros;
 
     /// Quanto um teste espera por um evento antes de desistir.
@@ -1304,8 +1317,8 @@ mod tests {
         let Some(biblioteca) = biblioteca() else {
             return;
         };
-        let fibra = TetoDeVideo::com_caminho(6_000_000)
-            .com_caminho_de_quem_hospeda(6_000_000)
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
             .com_espectadores(1);
         let (bomba, mut eventos) = ligar(
             biblioteca,
@@ -1350,8 +1363,8 @@ mod tests {
         let Some(biblioteca) = biblioteca() else {
             return;
         };
-        let fibra = TetoDeVideo::com_caminho(6_000_000)
-            .com_caminho_de_quem_hospeda(6_000_000)
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
             .com_espectadores(1);
         let (bomba, mut eventos) = ligar(
             biblioteca,
@@ -1366,7 +1379,7 @@ mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 1,
                 resolucao: Resolucao::P1080,
-                teto_bps: 3_600_000,
+                teto_bps: 12_000_000,
             })
         );
         assert_eq!(
@@ -1475,6 +1488,13 @@ mod tests {
         }
     }
 
+    /// O arranjo que os testes deste módulo usam.
+    ///
+    /// **Os tetos daqui andaram com a régua de `crate::tela`, e o que eles
+    /// provam não.** Os limiares passaram a ser bits por pixel, então 6 Mbps de
+    /// subida deixaram de comprar 1080p e o cano da prova deixou de comprar
+    /// 720p. Cada teto escrito nos testes abaixo é o menor que ainda faz aquele
+    /// teste exercitar o degrau que ele nomeia.
     fn arranjo(teto: TetoDeVideo, faixa: SignalBand, escolha: Resolucao) -> Arranjo {
         Arranjo {
             prioridade: crate::tela::Prioridade::Nitidez,
@@ -1506,7 +1526,7 @@ mod tests {
             biblioteca,
             captura.clone(),
             arranjo(
-                TetoDeVideo::com_caminho(CAMINHO_DA_PROVA_BPS),
+                TetoDeVideo::com_caminho(8_000_000),
                 SignalBand::Nominal,
                 Resolucao::P720,
             ),
@@ -1521,7 +1541,7 @@ mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 1,
                 resolucao: Resolucao::P720,
-                teto_bps: 1_200_000,
+                teto_bps: 4_800_000,
             }),
             "a bomba entregou quadro antes de dizer em que fluxo ele vai"
         );
@@ -1578,8 +1598,8 @@ mod tests {
         let Some(biblioteca) = biblioteca() else {
             return;
         };
-        let fibra = TetoDeVideo::com_caminho(6_000_000)
-            .com_caminho_de_quem_hospeda(6_000_000)
+        let fibra = TetoDeVideo::com_caminho(20_000_000)
+            .com_caminho_de_quem_hospeda(20_000_000)
             .com_espectadores(1);
         let captura = CapturaDeMentira::default();
         let (bomba, mut eventos) = ligar(
@@ -1595,12 +1615,12 @@ mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 1,
                 resolucao: Resolucao::P1080,
-                teto_bps: 3_600_000,
+                teto_bps: 12_000_000,
             })
         );
 
-        // Entram mais duas pessoas: 3,6 Mbps ÷ 3 = 1,2, que é onde o 1080p
-        // passa a jogar fora um sexto do que captura.
+        // Entram mais duas pessoas: 12 Mbps ÷ 3 = 4, que é abaixo do limiar de
+        // 1080p e acima do de 720p.
         assert!(bomba.teto(fibra.com_espectadores(3), SignalBand::Nominal));
 
         assert_eq!(
@@ -1608,7 +1628,7 @@ mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 2,
                 resolucao: Resolucao::P720,
-                teto_bps: 1_200_000,
+                teto_bps: 4_000_000,
             }),
             "o degrau caiu e ninguém abriu fluxo novo: quem recebe leria 720p \
              sob um cabeçalho que anuncia 1080p"
@@ -1716,7 +1736,7 @@ mod tests {
         let Some(biblioteca) = biblioteca() else {
             return;
         };
-        let teto = TetoDeVideo::com_caminho(CAMINHO_DA_PROVA_BPS);
+        let teto = TetoDeVideo::com_caminho(8_000_000);
         let captura = CapturaDeMentira::default();
         let (bomba, mut eventos) = ligar(
             biblioteca,
@@ -1755,7 +1775,7 @@ mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 2,
                 resolucao: Resolucao::P720,
-                teto_bps: 1_200_000,
+                teto_bps: 4_800_000,
             }),
             "o sinal voltou e a tela não voltou com ele"
         );
@@ -1784,7 +1804,7 @@ mod tests {
             biblioteca,
             captura,
             arranjo(
-                TetoDeVideo::com_caminho(CAMINHO_DA_PROVA_BPS),
+                TetoDeVideo::com_caminho(8_000_000),
                 SignalBand::Nominal,
                 Resolucao::P1080,
             ),
