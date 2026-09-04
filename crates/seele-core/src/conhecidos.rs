@@ -268,6 +268,30 @@ impl Conhecidos {
         self.gravar()
     }
 
+    /// Anota o caminho de subida medido para este servidor.
+    ///
+    /// Zero **não apaga** o que já estava guardado, e é a mesma regra de
+    /// [`Self::anotar_caminhos`]: a sonda só mede enquanto a tela transmite, e
+    /// uma sessão em que ninguém compartilhou nada devolveria zero e desfaria,
+    /// na segunda visita, o que a primeira aprendeu.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser gravado.
+    pub fn anotar_caminho_medido(&mut self, alvo: &str, bps: u32) -> Result<()> {
+        if bps == 0 {
+            return Ok(());
+        }
+        let Some(entrada) = self.entradas.iter_mut().find(|e| e.alvo == alvo) else {
+            return Ok(());
+        };
+        if entrada.caminho_bps == Some(bps) {
+            return Ok(());
+        }
+        entrada.caminho_bps = Some(bps);
+        self.gravar()
+    }
+
     /// Anota como o servidor se chama e qual é a imagem dele.
     ///
     /// Separado de [`Self::registrar`] porque acontece noutro momento: o

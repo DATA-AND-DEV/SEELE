@@ -239,6 +239,16 @@ pub enum Motivo {
 /// O que a casca manda fazer.
 #[derive(Debug)]
 enum Comando {
+    /// Semeia a sonda com o caminho medido da última vez com este servidor.
+    ///
+    /// Comando e não parâmetro de `conectar`: os quatro `conectar*` públicos
+    /// passam por um funil privado, e acrescentar um argumento a todos eles
+    /// para um número opcional obrigaria cada chamador a dizer «não tenho» —
+    /// enquanto quem tem é um só, o app, que é quem abre a lista de conhecidos.
+    ///
+    /// Chegar depois da conexão não custa nada: a sonda só começa a medir
+    /// quando a tela transmite, e ninguém transmite antes de entrar.
+    LembrarCaminho(u32),
     InserirPlug(VoiceRoomId),
     EjetarPlug,
     AbrirLinha(ChannelId),
@@ -525,6 +535,13 @@ pub struct Enlace {
     /// segundo, e transformar cada medição num aviso encheria a fila de coisas
     /// que ninguém precisa ver acontecer — só ver o valor atual.
     rtt: Arc<std::sync::atomic::AtomicU64>,
+    /// O caminho de subida que a sonda mediu, em bits por segundo. Zero é
+    /// «ninguém mediu ainda».
+    ///
+    /// Um átomo pela mesma razão que o `rtt`: quem o lê é quem grava a lista de
+    /// conhecidos, e transformar cada janela de medição num aviso encheria a
+    /// fila de coisas que ninguém precisa ver acontecer.
+    caminho_medido: Arc<std::sync::atomic::AtomicU32>,
     tarefa: tokio::task::JoinHandle<()>,
 }
 
@@ -1148,6 +1165,7 @@ impl Enlace {
         let sessao = cliente.session().clone();
         let media = cliente.media();
         let rtt = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let caminho_medido = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
         let (comandos_tx, comandos_rx) = mpsc::channel(COMANDOS);
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
@@ -1171,6 +1189,7 @@ impl Enlace {
             isolamento: false,
             avisos: avisos_tx,
             rtt: Arc::clone(&rtt),
+            caminho_medido: Arc::clone(&caminho_medido),
             tela_pedida: None,
             tela_viva: None,
             faixa: FAIXA_INICIAL,
@@ -1190,6 +1209,7 @@ impl Enlace {
             pin,
             veredito,
             rtt,
+            caminho_medido,
             tarefa,
         })
     }
@@ -1244,6 +1264,37 @@ impl Enlace {
     #[must_use]
     pub fn veredito(&self) -> &Verdict {
         &self.veredito
+    }
+
+    /// Semeia a sonda com o caminho medido da última vez com este servidor.
+    ///
+    /// Sem isto, toda transmissão parte de
+    /// [`crate::tela::CAMINHO_DA_PROVA_BPS`] — 2 Mbps supostos — e gasta os
+    /// primeiros segundos reaprendendo um cano que já mediu. Medido em campo
+    /// numa LAN: doze segundos de 540p até a escada reencontrar 1080p.
+    ///
+    /// Zero é «não sei», e não faz nada: é o que a lista de conhecidos guarda
+    /// para um servidor onde ninguém compartilhou tela ainda.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn lembrar_o_caminho(&self, bps: u32) -> Result<(), Fechado> {
+        if bps == 0 {
+            return Ok(());
+        }
+        self.mandar(Comando::LembrarCaminho(bps)).await
+    }
+
+    /// O caminho de subida que a sonda mediu, em bits por segundo.
+    ///
+    /// Zero enquanto ninguém compartilhou tela: a sonda mede **enquanto a tela
+    /// transmite**, porque é a tela que enche o cano. Quem grava a lista de
+    /// conhecidos deve tratar zero como «não mediu» e deixar o valor antigo.
+    #[must_use]
+    pub fn caminho_medido(&self) -> u32 {
+        self.caminho_medido
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// O último tempo de ida e volta medido.
@@ -1745,6 +1796,7 @@ struct Motor {
     isolamento: bool,
     avisos: mpsc::UnboundedSender<Aviso>,
     rtt: Arc<std::sync::atomic::AtomicU64>,
+    caminho_medido: Arc<std::sync::atomic::AtomicU32>,
     /// A escolha da pessoa, esperando a transmissão ganhar nome.
     ///
     /// **A bomba não pode nascer no comando**, e é a forma da coisa e não uma
@@ -2117,6 +2169,8 @@ impl Motor {
             return;
         };
         let resultado = match comando {
+            // Nada a mandar ao servidor: é estado desta máquina.
+            Comando::LembrarCaminho(_) => Ok(()),
             Comando::InserirPlug(voice_room) => cliente.insert_plug(voice_room).await,
             Comando::EjetarPlug => cliente.eject_plug().await,
             Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
@@ -2641,6 +2695,14 @@ impl Motor {
         if self.caminho.observar(Instant::now(), &amostra).is_some() {
             self.reconferir_o_teto();
         }
+        // **Fora do `if`, e de propósito.** O `Some` acima diz que a estimativa
+        // *mudou*; o que quem grava a lista de conhecidos quer é o valor de
+        // agora, e uma sessão inteira sem mudança nenhuma continua tendo um
+        // número que vale a pena lembrar.
+        self.caminho_medido.store(
+            self.caminho.estimativa(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     /// Conta à bomba que o teto andou.
@@ -2671,6 +2733,10 @@ impl Motor {
     /// Guarda o que a reconexão vai ter que refazer.
     fn lembrar(&mut self, comando: &Comando) {
         match comando {
+            Comando::LembrarCaminho(bps) => {
+                tracing::info!(bps, "a sonda começa do caminho lembrado deste servidor");
+                self.caminho = crate::caminho::Sonda::partindo_de(*bps);
+            }
             Comando::InserirPlug(voice_room) => self.voice_room = Some(*voice_room),
             Comando::EjetarPlug => self.voice_room = None,
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
@@ -3975,6 +4041,7 @@ mod tests {
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
+            caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 }

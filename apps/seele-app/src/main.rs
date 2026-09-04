@@ -449,6 +449,21 @@ async fn connect(
             let voice_room = lista
                 .buscar(&alvo)
                 .and_then(|conhecido| conhecido.voice_room);
+            // **A escada começa de onde parou da última vez.**
+            //
+            // Sem isto a sonda parte de `CAMINHO_DA_PROVA_BPS` — 2 Mbps
+            // supostos — e gasta os primeiros segundos de toda transmissão
+            // reaprendendo um cano que já mediu. Medido em campo numa LAN: doze
+            // segundos de 540p até a escada reencontrar 1080p, entre duas
+            // máquinas que tinham medido 12,48 Mbps entre si minutos antes.
+            //
+            // **Antes de `registrar`**, que reescreve a entrada: lê-lo depois
+            // funcionaria, e depender da ordem de duas linhas para isso é a
+            // espécie de coisa que quebra quando alguém as troca de lugar.
+            let lembrado = lista
+                .buscar(&alvo)
+                .and_then(|conhecido| conhecido.caminho_bps)
+                .unwrap_or(0);
             // Falhar em gravar um atalho não pode derrubar uma conversa que já
             // está de pé.
             if let Err(erro) = lista.registrar(&alvo, &apelido, voice_room) {
@@ -460,6 +475,14 @@ async fn connect(
             // nada a anotar: uma volta pelo endereço salvo não traz convite, e
             // passar vazio aqui desfaria, na segunda visita, o que o link
             // ensinou na primeira.
+            // Semeada pelo slot: a `connection` já foi movida para a sessão
+            // algumas linhas acima, e mover a leitura da lista para antes dela
+            // só trocaria uma ordem frágil por outra.
+            if let Ok(slot) = session.connection.lock() {
+                if let Some(viva) = slot.as_ref() {
+                    viva.lembrar_o_caminho(lembrado);
+                }
+            }
             if let Err(erro) = lista.anotar_caminhos(
                 &alvo,
                 &caminhos,
@@ -650,12 +673,33 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
 }
 
 #[tauri::command]
-async fn disconnect(session: State<'_, Session>) -> Result<(), ()> {
+async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
     let connection = session
         .connection
         .lock()
         .ok()
         .and_then(|mut slot| slot.take());
+
+    // **A medida da escada sobrevive à sessão**, e este é o único ponto que tem
+    // as duas coisas na mão: a conexão que mediu e o endereço que a nomeia.
+    //
+    // Zero não apaga o que estava guardado — `anotar_caminho_medido` recusa —,
+    // porque a sonda só mede enquanto a tela transmite: uma sessão em que
+    // ninguém compartilhou nada devolve zero, e sobrescrever com ele desfaria
+    // justamente o que a memória serve para evitar.
+    if let Some(viva) = connection.as_ref() {
+        let medido = viva.caminho_medido();
+        let alvo = session.alvo.lock().ok().and_then(|a| a.clone());
+        if let (Some(alvo), true) = (alvo, medido != 0) {
+            if let Ok(mut lista) =
+                seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
+            {
+                if let Err(erro) = lista.anotar_caminho_medido(&alvo, medido) {
+                    tracing::debug!(%erro, "não guardei o caminho medido deste servidor");
+                }
+            }
+        }
+    }
     // Dropping the handle is what ends the session; taking it out of the slot
     // is what makes the next `connect` allowed.
     drop(connection);

@@ -500,6 +500,8 @@ pub trait EventListener: Send + Sync {
 
 /// A command on its way to the driver thread.
 enum Command {
+    /// Devolve à sonda o caminho medido da última visita a este servidor.
+    LembrarCaminho(u32),
     EnterVoiceRoom(VoiceRoomId),
     LeaveVoiceRoom,
     OpenChannel(ChannelId),
@@ -633,6 +635,17 @@ enum Command {
 
 /// State the driver thread writes and the shell reads.
 struct Shared {
+    /// O caminho de subida que a sonda mediu, em bits por segundo.
+    ///
+    /// Zero é «ninguém mediu ainda»: a sonda mede **enquanto a tela transmite**,
+    /// porque é a tela que enche o cano. Quem o lê é a casca, para guardá-lo na
+    /// lista de conhecidos e devolvê-lo à sonda na próxima visita a este mesmo
+    /// servidor — é o que evita os doze segundos de imagem ruim que a escada
+    /// gasta reaprendendo um cano que já mediu.
+    ///
+    /// Átomo e não `Event`, pela razão que o `rtt` já dá: é valor de agora, e
+    /// não coisa que alguém precise ver acontecer.
+    caminho_medido: std::sync::atomic::AtomicU32,
     room: Mutex<Room>,
     listeners: Mutex<Vec<Arc<dyn EventListener>>>,
     /// The voice path, which is also where the chosen devices are remembered.
@@ -1068,6 +1081,7 @@ impl Connection {
         })?);
 
         let shared = Arc::new(Shared {
+            caminho_medido: std::sync::atomic::AtomicU32::new(0),
             link_battery: AtomicBool::new(false),
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
@@ -2273,6 +2287,32 @@ impl Connection {
             transmissoes: transmissoes_de(&room),
             ended: room.ended.map(|end| end.reason.into()),
         }
+    }
+
+    /// Ends the session.
+    /// Devolve à sonda o caminho medido da última visita a este servidor.
+    ///
+    /// Zero não faz nada: é o que a lista de conhecidos guarda para um servidor
+    /// onde ninguém compartilhou tela ainda.
+    pub fn lembrar_o_caminho(&self, bps: u32) {
+        if bps != 0 {
+            // Perder isto não é perder nada: uma sessão que já caiu não tem
+            // sonda para semear, e a próxima vai ler o mesmo número do disco.
+            let _ = self.command(Command::LembrarCaminho(bps));
+        }
+    }
+
+    /// O caminho de subida que a sonda mediu nesta sessão, em bits por segundo.
+    ///
+    /// Zero enquanto ninguém compartilhou tela. Quem guarda isto deve tratar
+    /// zero como «não mediu» e **deixar o valor antigo** — sobrescrever uma
+    /// medida boa com um zero é jogar fora exatamente o que ela serve para
+    /// evitar.
+    #[must_use]
+    pub fn caminho_medido(&self) -> u32 {
+        self.shared
+            .caminho_medido
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Ends the session.
@@ -3528,6 +3568,12 @@ fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {
         .and_then(|voice| voice.as_ref().map(Voice::telemetry));
     let rtt = client.rtt().unwrap_or_default();
     let rtt_micros = u64::try_from(rtt.as_micros()).unwrap_or(u64::MAX);
+    // Na mesma volta que o resto da telemetria, e pelo mesmo motivo: quem lê
+    // isto lê quando quiser, e uma medição não precisa virar evento.
+    shared.caminho_medido.store(
+        client.caminho_medido(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     medir_a_volta(sync, shared, telemetria.as_ref(), rtt_micros)
 }
 
@@ -3620,6 +3666,9 @@ fn medir_a_volta(
 /// Runs one command. Returns false when the driver should stop.
 async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) -> bool {
     match command {
+        Command::LembrarCaminho(bps) => {
+            let _ = client.lembrar_o_caminho(bps).await;
+        }
         Command::EnterVoiceRoom(voice_room) => {
             if client.inserir_plug(voice_room).await.is_err() {
                 return false;
@@ -4284,6 +4333,7 @@ mod tests {
     /// A `Shared` with nothing in it, for the folds below.
     fn bare_shared() -> Arc<Shared> {
         Arc::new(Shared {
+            caminho_medido: std::sync::atomic::AtomicU32::new(0),
             link_battery: AtomicBool::new(false),
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
@@ -5356,6 +5406,7 @@ mod tests {
         }
 
         let shared = Arc::new(Shared {
+            caminho_medido: std::sync::atomic::AtomicU32::new(0),
             link_battery: AtomicBool::new(false),
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
@@ -5396,6 +5447,7 @@ mod tests {
     /// Um `Shared` vazio, para exercer o `fold` sem uma conexão.
     fn compartilhado_de_teste() -> Arc<Shared> {
         Arc::new(Shared {
+            caminho_medido: std::sync::atomic::AtomicU32::new(0),
             link_battery: AtomicBool::new(false),
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
