@@ -103,6 +103,58 @@ impl Resolucao {
     }
 }
 
+/// As medidas que um degrau ganha quando a tela não é 16:9.
+///
+/// # O defeito que isto existe para nomear
+///
+/// Os três degraus do §5 são todos 16:9. Uma tela de MacBook é **3024 × 1964**,
+/// ou seja 1,54:1, e a captura do macOS pede `preserves_aspect_ratio` com
+/// `scales_to_fit` — então o conteúdo entra deitado e o resto vira tarja:
+///
+/// | degrau pedido | o que a tela do Mac ocupa | tarja |
+/// |---|---|---|
+/// | 1280 × 720 | **1108** × 720 | 13,4% da largura |
+/// | 1920 × 1080 | **1663** × 1080 | 13,4% |
+///
+/// A tarja é preta e quase não custa bits — isso o código já sabia. O que ela
+/// custa e ninguém contava é **resolução**: o produto anuncia 720p e entrega
+/// 1108 pixels de largura de conteúdo, 13% menos detalhe horizontal que a mesma
+/// transmissão feita de um monitor 16:9. É por isso que uma live feita do Mac
+/// sai visivelmente mais mole que a mesma live feita do Windows.
+///
+/// # O que esta função devolve
+///
+/// As medidas que dão **o mesmo orçamento de pixels do degrau** na proporção da
+/// fonte — sem tarja, sem mentira no rótulo, e sem gastar mais bits: é a mesma
+/// área, distribuída como a tela é.
+///
+/// Ambas pares, que é o que o 4:2:0 exige: um plano de croma tem metade de cada
+/// lado, e lado ímpar não tem metade inteira.
+///
+/// Ver `as_medidas_seguem_a_proporcao_da_fonte` para o que ela devolve numa tela
+/// de MacBook. **Sem exemplo no doc**, e não por preguiça: um doctest deste
+/// crate não linka — o `build.rs` do `screencapturekit` publica o rpath do Swift
+/// por `cargo:rustc-link-arg`, o Cargo o ignora vindo de dependência, e o
+/// `.cargo/config.toml` que conserta isso não alcança doctests.
+#[must_use]
+pub fn medidas_para(degrau: Resolucao, fonte_largura: usize, fonte_altura: usize) -> (usize, usize) {
+    // Uma fonte sem lado não tem proporção: fica o degrau, que é o que a lista
+    // do §5 promete e o que todo teste deste crate espera.
+    if fonte_largura == 0 || fonte_altura == 0 {
+        return (degrau.largura(), degrau.altura());
+    }
+    let area = (degrau.largura() * degrau.altura()) as f64;
+    let proporcao = fonte_largura as f64 / fonte_altura as f64;
+    // `área = l × a` e `l = proporção × a`, então `a = raiz(área / proporção)`.
+    let altura = (area / proporcao).sqrt();
+    let largura = altura * proporcao;
+    // Para baixo e para par: arredondar para cima poria o quadro acima do
+    // orçamento de pixels que o degrau nomeia, e é esse orçamento que a régua
+    // de `seele_core::tela` usa para decidir a cadência.
+    let par = |v: f64| ((v as usize) / 2 * 2).max(2);
+    (par(largura), par(altura))
+}
+
 /// Os três tetos de quadros por segundo que o §5 fechou.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Cadencia {
@@ -931,6 +983,45 @@ fn compactar(plano: &[u8], passo: usize, largura: usize, altura: usize) -> Vec<u
 
 #[cfg(test)]
 mod testes {
+
+    #[test]
+    fn as_medidas_seguem_a_proporcao_da_fonte() {
+        // Uma tela de MacBook: 3024 × 1964, que é 1,54:1 e não 16:9.
+        let (largura, altura) = medidas_para(Resolucao::P720, 3024, 1964);
+        assert_eq!((largura, altura), (1190, 772));
+
+        // **A mesma área do degrau**, dentro de um por cento: o orçamento de
+        // pixels é o que a régua de `seele_core::tela` usa para decidir a
+        // cadência, então mudar a forma não pode mudar o preço.
+        let orcamento = Resolucao::P720.largura() * Resolucao::P720.altura();
+        assert!(
+            (largura * altura).abs_diff(orcamento) * 100 < orcamento,
+            "{largura}×{altura} saiu de {orcamento} pixels por mais de 1%"
+        );
+
+        // E é mais largura de conteúdo do que a tarja deixava: 1108 × 720 era o
+        // que cabia dentro de 1280 × 720 preservando a proporção.
+        assert!(largura > 1108, "não ganhou detalhe horizontal nenhum");
+
+        // Numa tela 16:9 o degrau sai intocado, que é o que a lista do §5
+        // promete e o que todo o resto deste crate espera.
+        assert_eq!(medidas_para(Resolucao::P720, 1920, 1080), (1280, 720));
+        assert_eq!(medidas_para(Resolucao::P1080, 3840, 2160), (1920, 1080));
+
+        // Lados pares, sempre: o croma do 4:2:0 tem metade de cada lado.
+        for (l, a) in [
+            medidas_para(Resolucao::P540, 3024, 1964),
+            medidas_para(Resolucao::P1080, 3024, 1964),
+            medidas_para(Resolucao::P720, 2560, 1080),
+        ] {
+            assert_eq!(l % 2, 0, "largura ímpar: {l}");
+            assert_eq!(a % 2, 0, "altura ímpar: {a}");
+        }
+
+        // Uma fonte sem lado não tem proporção, e aí fica o degrau.
+        assert_eq!(medidas_para(Resolucao::P720, 0, 0), (1280, 720));
+    }
+
     use super::*;
 
     /// Prova em tempo de compilação do que o §2 exige: o encoder mora numa

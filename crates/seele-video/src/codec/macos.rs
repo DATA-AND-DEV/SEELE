@@ -290,9 +290,23 @@ fn mirar_a_banda(sessao: &VTCompressionSession, teto_bps: u32) -> Result<(), Err
             "pedir taxa constante",
         )
     };
+    let constante_erro = match &constante {
+        Ok(()) => String::new(),
+        Err(erro) => erro.to_string(),
+    };
     if constante.is_ok() {
+        // **Qual dos dois caminhos valeu é a coisa mais importante deste
+        // arquivo**, e ela era decidida em silêncio. `ConstantBitRate` é teto;
+        // `AverageBitRate` é média, e média estoura. Quando alguém perguntar por
+        // que a imagem do Mac chegou pixelada, esta linha é a primeira a ler.
+        tracing::info!("o VideoToolbox aceitou a taxa constante: o teto é teto");
         return Ok(());
     }
+    tracing::warn!(
+        %constante_erro,
+        "o VideoToolbox recusou a taxa constante; a banda passa a ser uma média \
+         com limite duro, e média estoura"
+    );
 
     // SAFETY: idem.
     unsafe {

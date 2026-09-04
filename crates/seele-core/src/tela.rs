@@ -704,10 +704,39 @@ pub fn cadencia_para(
     prioridade: Prioridade,
     escolha: Cadencia,
 ) -> Cadencia {
-    if matches!(prioridade, Prioridade::Movimento) {
-        return escolha;
-    }
-    let cabe = teto_bps / bits_por_quadro(resolucao);
+    // **Movimento não cede quadro por qualidade, e cede por transporte.**
+    //
+    // A regra do eixo continua valendo — «o quadro segura, a resolução cede», e
+    // a resolução já cedeu em `resolucao_para_movimento`, que cobra o dobro por
+    // degrau. Cortar quadro aqui por gosto cobraria duas vezes pela mesma falta
+    // de banda, e é o que `movimento_nao_paga_duas_vezes_pela_mesma_falta_de_banda`
+    // proíbe.
+    //
+    // O que este piso guarda é outra coisa, e ela não é negociável: **abaixo de
+    // um certo orçamento por quadro o codificador do sistema para de respeitar
+    // o teto.** Medido no VideoToolbox, conteúdo realista, em
+    // `seele-video/tests/qualidade-do-codec.rs`:
+    //
+    // ```text
+    // 0,010 a 0,048 bits/pixel → entregou 118% a 157% do teto
+    // 0,077 bits/pixel e acima → entregou 91% a 92%
+    // ```
+    //
+    // Ele tem um piso de qualidade interno e, quando o orçamento exige ir abaixo
+    // dele, fura o teto em vez de obedecer. E um teto furado não é um defeito de
+    // imagem: é o §3.2 caindo — o fluxo congestiona, a fila do gargalo enche, e
+    // a voz vai de 23 para 225 ms. Ceder quadro aqui não é preferência, é a
+    // única maneira de manter a promessa.
+    //
+    // Três quartos do piso de nitidez, e o número é o ponto medido **limpo**:
+    // entre 0,048 e 0,077 ninguém mediu, e escolher a borda de baixo seria
+    // escolher o lado errado de uma faixa desconhecida.
+    let piso = if matches!(prioridade, Prioridade::Movimento) {
+        bits_por_quadro(resolucao) / 4 * 3
+    } else {
+        bits_por_quadro(resolucao)
+    };
+    let cabe = teto_bps / piso;
     let maior = Cadencia::TODAS
         .into_iter()
         .rev()
@@ -2661,12 +2690,59 @@ mod o_eixo_da_degradacao {
     }
 
     #[test]
+    fn movimento_cede_quadro_quando_o_teto_deixaria_de_ser_teto() {
+        // **Não é o eixo mudando de ideia.** Movimento continua não cedendo
+        // quadro por qualidade — o teste vizinho prova isso e continua verde.
+        // O que ele cede é o ponto em que o codificador do sistema para de
+        // respeitar o teto, medido entre 0,048 e 0,077 bits por pixel, e ali a
+        // conta deixa de ser sobre imagem e passa a ser sobre a voz (§3.2).
+        //
+        // A 1,2 Mbps, movimento pede 540p; a 60 quadros isso são 0,039 bpp, e
+        // foi a linha que entregou 135% do teto.
+        let apertado = 1_200_000;
+        assert_eq!(
+            resolucao_para(apertado, Prioridade::Movimento),
+            Resolucao::P540
+        );
+        let cedeu = cadencia_para(
+            apertado,
+            Resolucao::P540,
+            Prioridade::Movimento,
+            Cadencia::Q60,
+        );
+        assert!(
+            cedeu.hz() < 60,
+            "movimento ficou em {} quadros num orçamento onde o teto deixa de \
+             valer, e teto furado é a voz cedendo à tela",
+            cedeu.hz()
+        );
+
+        // E onde o teto se sustenta, movimento continua intocado: 60 quadros.
+        assert_eq!(
+            cadencia_para(
+                3_000_000,
+                Resolucao::P540,
+                Prioridade::Movimento,
+                Cadencia::Q60
+            ),
+            Cadencia::Q60,
+            "movimento perdeu quadro num orçamento que o codificador respeita"
+        );
+    }
+
+    #[test]
     fn movimento_nao_paga_duas_vezes_pela_mesma_falta_de_banda() {
         // **Não é exceção, é a definição do eixo.** «O quadro segura, a
         // resolução cede» — e a resolução já cedeu em `resolucao_para_movimento`,
         // que cobra o dobro por degrau. Cortar quadro aqui cobraria duas vezes,
         // e a 8 quadros um jogo não é pior: é inutilizável.
-        for teto in [300_000_u32, 900_000, 1_500_000] {
+        // **Os tetos subiram, e a frase não.** Eram 300 k, 900 k e 1,5 M.
+        // Abaixo de 1,2 Mbps a 540p o orçamento por quadro entra na faixa em que
+        // o codificador do sistema para de respeitar o teto, e ali quem corta é
+        // `movimento_cede_quadro_quando_o_teto_deixaria_de_ser_teto` — por
+        // transporte, não por qualidade. Este teste é sobre a outra coisa: onde
+        // o teto se sustenta, movimento não perde um quadro sequer.
+        for teto in [1_200_000_u32, 1_500_000, 3_000_000] {
             let resolucao = resolucao_para(teto, Prioridade::Movimento);
             assert_eq!(
                 cadencia_para(teto, resolucao, Prioridade::Movimento, Cadencia::Q30),
