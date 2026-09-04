@@ -361,7 +361,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
             right: largura - px(50),
             bottom: barra,
         },
-        concat!(env!("CARGO_PKG_VERSION"), " · WINDOWS 64 BITS"),
+        concat!(env!("SEELE_VERSAO"), " · WINDOWS 64 BITS"),
         estado.rotulo,
         pele::ROTULO,
         DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0,
@@ -653,7 +653,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
             DT_WORDBREAK.0 | DT_NOPREFIX.0,
         );
         for (i, (rotulo, valor)) in [
-            ("VERSÃO", env!("CARGO_PKG_VERSION").to_owned()),
+            ("VERSÃO", env!("SEELE_VERSAO").to_owned()),
             ("PASTA", pasta_escolhida(estado)),
             ("ARQUIVOS", format!("{} escritos", estado.log.len())),
         ]

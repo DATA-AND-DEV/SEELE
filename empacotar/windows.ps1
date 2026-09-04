@@ -338,11 +338,21 @@ try {
 
     Write-Host "→ compilando o instalador próprio" -ForegroundColor Cyan
     $env:SEELE_CARGA = $CargaTar
+    # **E a versão, que o instalador não tinha como saber.**
+    #
+    # O `Cargo.toml` do workspace é `0.0.0`: a versão de verdade é injetada no
+    # `tauri.conf.json` e nunca chegava ao instalador. A janela dele dizia
+    # «0.0.0 · WINDOWS 64 BITS» e a entrada no painel do Windows registrava
+    # `DisplayVersion 0.0.0`.
+    $env:SEELE_VERSAO = $Versao
     try {
         cargo build --release -p seele-instalador
         if ($LASTEXITCODE -ne 0) { throw "o instalador próprio não compilou" }
     }
-    finally { Remove-Item Env:SEELE_CARGA -ErrorAction SilentlyContinue }
+    finally {
+        Remove-Item Env:SEELE_CARGA -ErrorAction SilentlyContinue
+        Remove-Item Env:SEELE_VERSAO -ErrorAction SilentlyContinue
+    }
 
     # -------------------------------------------------------------- reunir
     $Destino = "entrega"

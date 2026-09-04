@@ -560,9 +560,23 @@ function desenharTransmissoes(snapshot) {
 
   const botoes = alheias.map((transmissao) => {
     const quem = nomeDeQuem(snapshot, transmissao.de);
-    const botao = elemento("button", null, quem);
-    botao.type = "button";
     const noPalco = transmissao.tela === telaEmCurso;
+    // **`VER` na frente quando não se está vendo nada.**
+    //
+    // O rótulo era só o nome. Entre duas transmissões isso basta — a escolha é
+    // entre pessoas, e a marcada diz qual está no palco. Mas depois de apertar
+    // `NÃO VER` não há nenhuma marcada, e a fileira vira uma lista de nomes: um
+    // nome não se parece com um caminho de volta.
+    //
+    // Relatado assim: «tem botão pra parar de ver live, mas não tem botão pra
+    // voltar a ver a live». O botão existia e não dizia que era um.
+    //
+    // Só quando ninguém está no palco: com uma transmissão sendo recebida, os
+    // outros nomes já são «troque para este», e um `VER` em cada um seria a
+    // palavra repetida numa fileira que já se entende.
+    const rotulo = telaEmCurso === null ? `VER ${quem}` : quem;
+    const botao = elemento("button", null, rotulo);
+    botao.type = "button";
     botao.setAttribute("aria-pressed", noPalco ? "true" : "false");
     botao.title = noPalco ? `${quem} está no palco` : `ver a tela de ${quem}`;
     botao.addEventListener("click", () => {

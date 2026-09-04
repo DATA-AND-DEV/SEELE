@@ -10159,3 +10159,30 @@ fn uma_transmissao_que_esta_versao_nao_le_vira_frase_e_nao_tela_preta() {
         "o motivo técnico sumiu, e quem investiga fica sem ele:\n{ramo}"
     );
 }
+
+#[test]
+fn quem_parou_de_ver_tem_por_onde_voltar_a_ver() {
+    // Relatado assim: «tem botão pra parar de ver live, mas não tem botão pra
+    // voltar a ver a live».
+    //
+    // O botão existia — é o nome de quem transmite — e não dizia que era um.
+    // Entre duas transmissões o nome basta: a escolha é entre pessoas, e a
+    // marcada diz qual está no palco. Depois de `NÃO VER` não há nenhuma
+    // marcada, e a fileira vira uma lista de nomes; um nome não se parece com
+    // um caminho de volta.
+    let palco = without_comments(&read("ui/palco-imagem.js"));
+
+    assert!(
+        palco.contains("`VER ${quem}`"),
+        "o botão de voltar a ver perdeu o verbo, e volta a ser um nome solto \
+         numa fileira sem nada marcado"
+    );
+
+    // Só quando ninguém está no palco. Com uma transmissão sendo recebida, os
+    // outros nomes já são «troque para este», e um `VER` em cada um seria a
+    // palavra repetida numa fileira que já se entende.
+    assert!(
+        palco.contains("telaEmCurso === null ? `VER ${quem}` : quem"),
+        "o `VER` passou a aparecer também quando já se está vendo alguma coisa"
+    );
+}

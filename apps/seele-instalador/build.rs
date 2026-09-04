@@ -54,6 +54,25 @@ fn main() {
 /// vazio na máquina de quem baixou.
 fn carga() {
     println!("cargo:rerun-if-env-changed=SEELE_CARGA");
+
+    // **A versão que está sendo instalada, e não a do `Cargo.toml`.**
+    //
+    // O workspace inteiro é `0.0.0` — a versão de verdade é injetada no
+    // `tauri.conf.json` na hora de empacotar, e nunca chegava aqui. O resultado
+    // aparecia em dois lugares: a janela do instalador dizia
+    // «0.0.0 · WINDOWS 64 BITS», e a entrada no painel do Windows registrava
+    // `DisplayVersion 0.0.0`. Relatado assim: «o instalador não mostra a versão
+    // que ta sendo instalada».
+    //
+    // Quem sabe é quem empacota, e ele já passa o caminho da carga pelo mesmo
+    // caminho. Sem a variável fica o que sempre ficou — um instalador compilado
+    // à mão não tem versão de release nenhuma para declarar, e mentir um número
+    // seria pior que mostrar o marcador.
+    println!("cargo:rerun-if-env-changed=SEELE_VERSAO");
+    let versao = std::env::var("SEELE_VERSAO").unwrap_or_else(|_| {
+        std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_owned())
+    });
+    println!("cargo:rustc-env=SEELE_VERSAO={versao}");
     let destino =
         std::path::Path::new(&std::env::var("OUT_DIR").unwrap_or_default()).join("carga.tar.br");
 

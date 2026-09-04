@@ -309,4 +309,62 @@ mod testes {
              conexão no Wi-Fi de qualquer lugar onde a máquina for aberta"
         );
     }
+    // **Estes dois moram aqui e não em `registro.rs`.**
+    //
+    // Aquele arquivo é `#![cfg(windows)]` inteiro, então um módulo de teste
+    // dentro dele não compila no Mac — e o Mac é onde a bateria roda a cada
+    // mudança. Eles leem fonte como texto e não tocam no registro de ninguém,
+    // então não têm por que ser presos ao sistema.
+
+    /// **O `UninstallString` tem de mandar desinstalar.**
+    ///
+    /// `desinstalar.exe` é uma cópia do instalador — um binário, dois modos,
+    /// decididos pela linha de comando. Sem argumento nenhum, `linha::ler`
+    /// responde `Instalar`, e o painel do Windows abria a janela de instalação
+    /// quando alguém pedia para remover. Relatado assim: «o desinstalador não
+    /// desinstala».
+    ///
+    /// Lido da fonte porque escrever no registro pede elevação e uma máquina
+    /// Windows. O que se prende é a decisão, que mora na linha.
+    #[test]
+    fn o_painel_do_windows_chama_o_desinstalador_no_modo_de_desinstalar() {
+        let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/registro.rs");
+        let Ok(fonte) = std::fs::read_to_string(&caminho) else {
+            panic!("não li {}", caminho.display());
+        };
+        // Sem os comentários: o de cima explica o defeito e cita a linha antiga.
+        let codigo: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            codigo.contains("--desinstalar"),
+            "o `UninstallString` voltou a chamar o arquivo cru, e remover pelo \
+             painel volta a abrir o instalador"
+        );
+    }
+
+    /// A versão anunciada é a que está sendo instalada.
+    ///
+    /// Era `CARGO_PKG_VERSION`, e o workspace inteiro é `0.0.0`: a versão de
+    /// verdade é injetada no `tauri.conf.json` na hora de empacotar e nunca
+    /// chegava aqui. O painel do Windows registrava `DisplayVersion 0.0.0`, e a
+    /// janela do instalador dizia «0.0.0 · WINDOWS 64 BITS». Relatado assim: «o
+    /// instalador não mostra a versão que ta sendo instalada».
+    #[test]
+    fn a_versao_anunciada_nao_e_a_do_cargo_toml() {
+        for arquivo in ["src/instalacao.rs", "src/janela.rs"] {
+            let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(arquivo);
+            let Ok(fonte) = std::fs::read_to_string(&caminho) else {
+                panic!("não li {}", caminho.display());
+            };
+            assert!(
+                !fonte.contains("env!(\"CARGO_PKG_VERSION\")"),
+                "{arquivo} voltou a anunciar a versão do Cargo.toml, que é 0.0.0 \
+                 no workspace inteiro"
+            );
+        }
+    }
 }

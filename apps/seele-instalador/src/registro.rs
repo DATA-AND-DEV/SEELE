@@ -160,7 +160,22 @@ pub(crate) fn anunciar(
         escrever_texto(chave, "DisplayVersion", versao)?;
         escrever_texto(chave, "Publisher", "DATA AND DEV")?;
         escrever_texto(chave, "InstallLocation", pasta)?;
-        escrever_texto(chave, "UninstallString", &format!("\"{desinstalador}\""))?;
+        // **Com o `--desinstalar`, e é ele que faz a diferença.**
+        //
+        // `desinstalar.exe` é uma cópia do instalador — um binário, dois modos,
+        // decididos pela linha de comando. Sem argumento nenhum, `linha::ler`
+        // responde `Instalar`: o painel do Windows chamava o arquivo cru, e
+        // «desinstalar» abria a janela de instalação. Relatado assim: «o
+        // desinstalador não desinstala».
+        //
+        // O nome do arquivo enganava quem lia esta linha. O que faz dele um
+        // desinstalador é o argumento, e está escrito no cabeçalho de
+        // `desinstalar.rs` desde que ele nasceu.
+        escrever_texto(
+            chave,
+            "UninstallString",
+            &format!("\"{desinstalador}\" --desinstalar"),
+        )?;
         escrever_texto(
             chave,
             "URLInfoAbout",

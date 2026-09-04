@@ -128,9 +128,21 @@ pub(crate) fn executar(
     })?;
     contar("desinstalador escrito");
 
+    // **Com o `--desinstalar`, sem o qual ele instala.**
+    //
+    // `linha::ler` decide o modo pela linha de comando, e sem argumento nenhum a
+    // resposta é `Instalar`. O `UninstallString` apontava para o
+    // `desinstalar.exe` **cru**, então clicar em «desinstalar» no painel do
+    // Windows abria a janela do instalador. Relatado assim: «o desinstalador não
+    // desinstala».
+    //
+    // O nome do arquivo enganava quem lia: `desinstalar.exe` é uma cópia do
+    // instalador, e é o argumento que faz dele um desinstalador — está escrito
+    // no cabeçalho de `desinstalar.rs`, e o `UninstallString` era o único lugar
+    // que não tinha lido.
     registro::anunciar(
         &destino.display().to_string(),
-        env!("CARGO_PKG_VERSION"),
+        env!("SEELE_VERSAO"),
         &desinstalador.display().to_string(),
         tamanho_no_disco(destino),
     )?;
