@@ -542,10 +542,8 @@ mod tests {
         // **O nono campo, e ele é de conveniência como os outros.** Um arquivo
         // apagado custa doze segundos de imagem ruim uma vez, e nada mais — é
         // por isso que esta medida pode morar aqui, e não junto dos pins.
-        let com = analisar_linha(
-            "server.exemplo:8383\tmarcela\t1\t1738000000\t\t\t\t\t12480000",
-        )
-        .expect("uma linha de nove campos é válida");
+        let com = analisar_linha("server.exemplo:8383\tmarcela\t1\t1738000000\t\t\t\t\t12480000")
+            .expect("uma linha de nove campos é válida");
         assert_eq!(com.caminho_bps, Some(12_480_000));
 
         // E oito campos — a linha que já está no disco de quem atualizar —

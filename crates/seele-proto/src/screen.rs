@@ -47,10 +47,48 @@
 use thiserror::Error;
 
 use crate::ids::ScreenId;
-use crate::version::{negotiate, PROTOCOL_VERSION};
+use crate::version::PROTOCOL_VERSION;
 
 /// Bytes of opening header before the first encoded picture.
 pub const SCREEN_HEADER_LEN: usize = 11;
+
+/// A versão **deste cabeçalho**, que não é a versão do protocolo.
+///
+/// # Por que ela existe, e o que ela conserta
+///
+/// O primeiro byte carregava [`PROTOCOL_VERSION`] e era conferido com a janela
+/// do protocolo. Mas estes onze bytes **nunca mudaram**: a ordem dos campos é a
+/// mesma desde que o compartilhamento de tela nasceu, e nenhuma subida de
+/// protocolo mexeu neles — a 2 acrescentou uma mensagem de controle, e nada
+/// aqui.
+///
+/// O efeito era o cabeçalho dizer «você precisa da versão N para ler estes onze
+/// bytes» quando a verdade é «qualquer build que tenha esta funcionalidade sabe
+/// lê-los». **Cada subida de protocolo levantava falsamente a barra do fluxo de
+/// tela**, e quem transmitia da versão nova ficava ilegível para quem assistia
+/// da anterior.
+///
+/// Relatado assim: «quem assiste com uma versão mais velha vê tela preta, sem
+/// mensagem nenhuma, e a sessão morre em ~3 segundos sem dizer por quê» — e:
+/// «se usuários de diferentes versões estão compartilhando a tela, a stream
+/// cai».
+///
+/// **1, e sobe quando estes onze bytes mudarem** — não quando o protocolo
+/// mudar. São duas perguntas diferentes e mereciam dois números.
+pub const SCREEN_HEADER_VERSION: u8 = 1;
+
+/// Todo número que um build já publicado escreveu neste primeiro byte.
+///
+/// Cada um deles escreveu o `PROTOCOL_VERSION` **dele**, porque era isso que
+/// este campo carregava. Como o layout é o mesmo em todos, todos são legíveis, e
+/// recusá-los seria recusar uma transmissão que se sabe ler.
+///
+/// O teto acompanha [`PROTOCOL_VERSION`] em vez de ser um número escrito: um
+/// build que suba o protocolo continua aceitando o que os anteriores escreveram,
+/// sem que ninguém precise lembrar de mexer aqui.
+const fn cabecalho_legivel(version: u8) -> bool {
+    version >= 1 && version <= PROTOCOL_VERSION
+}
 
 /// Longest side a transmission may declare, in pixels.
 ///
@@ -323,11 +361,19 @@ impl ScreenHeader {
 
         // The version before anything else, so a layout this build has never
         // seen is refused rather than read as one it has.
+        //
+        // **E não é mais `negotiate`.** Aquela é a janela do protocolo — N−1 —, e
+        // usá-la aqui fazia o fluxo de tela herdar um limite que não é dele: um
+        // build que subisse o protocolo passava a recusar o cabeçalho de quem
+        // estava uma versão atrás, apesar de os onze bytes serem idênticos. Ver
+        // [`SCREEN_HEADER_VERSION`].
         let version = header.first().copied().unwrap_or_default();
-        negotiate(version).map_err(|_| ScreenError::UnsupportedVersion {
-            found: version,
-            expected: PROTOCOL_VERSION,
-        })?;
+        if !cabecalho_legivel(version) {
+            return Err(ScreenError::UnsupportedVersion {
+                found: version,
+                expected: SCREEN_HEADER_VERSION,
+            });
+        }
 
         let screen = ScreenId(read_u32(header, 1));
         let source_code = header.get(5).copied().unwrap_or_default();
@@ -378,7 +424,7 @@ mod tests {
 
     fn header() -> ScreenHeader {
         ScreenHeader {
-            version: PROTOCOL_VERSION,
+            version: SCREEN_HEADER_VERSION,
             screen: ScreenId(0x00C0_FFEE),
             source: ScreenSource::Window,
             codec: ScreenCodec::H264Baseline,
@@ -422,7 +468,10 @@ mod tests {
         let mut buffer = [0_u8; SCREEN_HEADER_LEN];
         header().encode(&mut buffer).unwrap();
 
-        assert_eq!(buffer[0], PROTOCOL_VERSION, "version first");
+        assert_eq!(
+            buffer[0], SCREEN_HEADER_VERSION,
+            "version first — a **deste cabeçalho**, e não a do protocolo"
+        );
         assert_eq!(
             &buffer[1..5],
             &[0x00, 0xC0, 0xFF, 0xEE],
@@ -452,9 +501,15 @@ mod tests {
 
     #[test]
     fn a_foreign_version_is_refused_with_the_numbers() {
-        // Versioned by the first byte like every control frame, and through the
-        // same `negotiate`, so the compatibility window is decided in one place
-        // rather than twice with a difference nobody notices until a release.
+        // **Este teste dizia que a janela era a mesma do controle**, «decidida
+        // num lugar só em vez de duas com uma diferença que ninguém nota até um
+        // release». A intenção era boa e o efeito foi o oposto: o fluxo de tela
+        // herdou um limite que não é dele, e quem transmitia da versão nova
+        // ficava ilegível para quem assistia da anterior — apesar de os onze
+        // bytes serem idênticos nas duas. Ver `SCREEN_HEADER_VERSION`.
+        //
+        // O que se confere agora é o que este cabeçalho de fato sabe: um número
+        // que build nenhum escreveu.
         let mut buffer = [0_u8; SCREEN_HEADER_LEN];
         header().encode(&mut buffer).unwrap();
         buffer[0] = PROTOCOL_VERSION.wrapping_add(7);
@@ -463,9 +518,29 @@ mod tests {
             ScreenHeader::decode(&buffer),
             Err(ScreenError::UnsupportedVersion {
                 found: PROTOCOL_VERSION.wrapping_add(7),
-                expected: PROTOCOL_VERSION,
+                expected: SCREEN_HEADER_VERSION,
             })
         );
+
+        // E o oposto, que é a razão de tudo isto: o número que **cada** build já
+        // publicado escreveu aqui continua sendo lido. Recusá-los seria recusar
+        // uma transmissão que se sabe ler.
+        for escrito in 1..=PROTOCOL_VERSION {
+            let mut de_outra_versao = [0_u8; SCREEN_HEADER_LEN];
+            header().encode(&mut de_outra_versao).unwrap();
+            de_outra_versao[0] = escrito;
+            assert!(
+                ScreenHeader::decode(&de_outra_versao).is_ok(),
+                "o cabeçalho escrito por um build v{escrito} foi recusado, e os \
+                 onze bytes dele são os mesmos"
+            );
+        }
+
+        // Zero nunca foi escrito por ninguém, e é o que um buffer vazio dá.
+        let mut zerado = [0_u8; SCREEN_HEADER_LEN];
+        header().encode(&mut zerado).unwrap();
+        zerado[0] = 0;
+        assert!(ScreenHeader::decode(&zerado).is_err());
     }
 
     #[test]
@@ -589,5 +664,80 @@ mod tests {
             id.get()
         }
         assert_eq!(takes_screen(header().screen), 0x00C0_FFEE);
+    }
+}
+
+#[cfg(test)]
+mod entre_versoes {
+    use super::*;
+
+    /// **O cabeçalho de um build mais novo continua legível num mais velho.**
+    ///
+    /// É o caso do relato, encenado com os números em vez de com dois builds:
+    /// «se usuários de diferentes versões estão compartilhando a tela, a stream
+    /// cai», e «quem assiste com uma versão mais velha vê tela preta».
+    ///
+    /// A causa era o primeiro byte carregar o `PROTOCOL_VERSION` de quem
+    /// transmite e ser conferido com a janela do protocolo. Um transmissor v3
+    /// escrevia 3; um espectador v2 fazia `negotiate(3)`, via um número acima do
+    /// dele, e recusava — apesar de os onze bytes serem idênticos nas duas
+    /// versões, porque este layout nunca mudou.
+    ///
+    /// Agora quem transmite escreve [`SCREEN_HEADER_VERSION`], que é o número
+    /// **deste layout**, e ele é 1 desde que o compartilhamento de tela nasceu.
+    /// Todo build já publicado sabe ler 1.
+    #[test]
+    fn quem_transmite_escreve_a_versao_do_layout_e_nao_a_do_protocolo() {
+        let mut buffer = [0_u8; SCREEN_HEADER_LEN];
+        ScreenHeader {
+            version: SCREEN_HEADER_VERSION,
+            screen: crate::ids::ScreenId(7),
+            source: ScreenSource::Monitor,
+            codec: ScreenCodec::H264Baseline,
+            width: 1920,
+            height: 1080,
+        }
+        .encode(&mut buffer)
+        .expect("o cabeçalho cabe");
+
+        assert_eq!(
+            buffer[0], 1,
+            "o primeiro byte voltou a ser a versão do protocolo, e com ela volta \
+             a barra que este layout nunca precisou"
+        );
+
+        // **Quem já está no mundo consegue ler o 1, e a conta é a janela deles.**
+        //
+        // Todo build publicado confere este byte com `negotiate`, cuja janela é
+        // N−1: um build de protocolo `v` aceita `v-1..=v`. Então o 1 passa em
+        // todos com `v <= 2` — e os publicados são a v1 (até a 0.9.9) e a v2
+        // (da 0.10.0 em diante). É a conta inteira, e ela é aritmética e não
+        // suposição.
+        for publicado in 1_u8..=2 {
+            let mais_velho = publicado.saturating_sub(crate::version::COMPATIBILITY_WINDOW);
+            assert!(
+                (mais_velho..=publicado).contains(&SCREEN_HEADER_VERSION),
+                "um build de protocolo v{publicado} recusaria o cabeçalho que \
+                 esta versão escreve"
+            );
+        }
+
+        // **E o build de agora o lê pela conferência própria, não pela janela.**
+        //
+        // Esta é a parte que só vale porque as duas coisas saem juntas: um v3
+        // com a conferência antiga recusaria o 1, porque a janela dele começa em
+        // 2. Nenhum v3 assim chegou a existir — a subida do protocolo e esta
+        // troca são o mesmo commit, e é por isso que elas não podem se separar.
+        let mut de_volta = [0_u8; SCREEN_HEADER_LEN];
+        de_volta.copy_from_slice(&buffer);
+        assert!(
+            ScreenHeader::decode(&de_volta).is_ok(),
+            "este build não lê o cabeçalho que ele mesmo escreve"
+        );
+        assert!(
+            crate::version::negotiate(SCREEN_HEADER_VERSION).is_err(),
+            "a janela do protocolo passou a aceitar o 1 de novo; se isso for \
+             verdade, este teste perdeu o que ele estava guardando"
+        );
     }
 }

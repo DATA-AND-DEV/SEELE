@@ -1072,12 +1072,8 @@ impl Compartilhamento {
         // Contra `degrau_novo` e não contra a resolução armada: os bits que um
         // quadro precisa dependem de quantos pixels ele tem, e o degrau que vai
         // valer é o que acabou de sair.
-        let cadencia_alvo = crate::tela::cadencia_para(
-            bps,
-            degrau_novo,
-            self.prioridade,
-            self.escolha_de_cadencia,
-        );
+        let cadencia_alvo =
+            crate::tela::cadencia_para(bps, degrau_novo, self.prioridade, self.escolha_de_cadencia);
         let antes = self.codificador.quadros_por_segundo();
         let agora = self.codificador.ajustar_quadros(cadencia_alvo.hz())?;
         let mudou_a_cadencia = agora != antes;

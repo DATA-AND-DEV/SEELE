@@ -3510,9 +3510,14 @@ mod o_vocabulario_e_a_versao {
         // E o número da versão, preso ao lado deles. Ele é o que diz a um par se
         // vale a pena tentar — e enquanto ele não subir, dois builds com listas
         // diferentes vão continuar se cumprimentando como iguais.
+        // **Este número já cumpriu o trabalho dele uma vez.** Ele estava em 2
+        // quando `WatchScreen` e `UnwatchScreen` entraram na lista sem que
+        // ninguém decidisse sobre a versão; este teste reprovou na primeira vez
+        // que alguém mexeu na lista depois disso, e a decisão foi tomada — a
+        // versão subiu para 3 em 04/09/2026.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            2,
+            3,
             "a versão do protocolo mudou; confira se os ordinais acima e a janela \
              de compatibilidade continuam contando a mesma história"
         );

@@ -72,7 +72,6 @@ use std::time::{Duration, Instant};
 use seele_proto::ids::ScreenId;
 use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource};
 use seele_proto::signal::SignalBand;
-use seele_proto::version::PROTOCOL_VERSION;
 use seele_video::codec::{Cadencia, QuadroCodificado, Resolucao};
 use seele_video::BibliotecaDeVideo;
 use tokio::sync::mpsc as canal;
@@ -1060,7 +1059,7 @@ pub async fn escoar_com_espelho(
                     velha.encerrar();
                 }
                 let cabecalho = ScreenHeader {
-                    version: PROTOCOL_VERSION,
+                    version: seele_proto::screen::SCREEN_HEADER_VERSION,
                     screen: tela,
                     source: fonte,
                     codec: ScreenCodec::H264Baseline,

@@ -22,7 +22,34 @@ use thiserror::Error;
 /// não é ignorada, ela desloca a leitura do fluxo para sempre. A janela de
 /// compatibilidade abaixo é o que garante que ele continue conectando e
 /// simplesmente não a receba; quem decide não mandá-la é a sessão do servidor.
-pub const PROTOCOL_VERSION: u8 = 2;
+/// **3 desde 04/09/2026**, e a subida tem uma razão que não é uma variante nova.
+///
+/// `WatchScreen` e `UnwatchScreen` entraram na lista do cliente com este número
+/// parado em 2. O postcard indexa variante por posição, então dois builds
+/// diferentes passaram a dizer «2» e a falar vocabulários diferentes — e a
+/// negociação abaixo, que existe exatamente para pegar isso, deixou os dois
+/// entrarem e quebrarem depois.
+///
+/// O que a subida compra, medido no código e não suposto:
+///
+/// - **um cliente v3 não alcança mais um servidor v2**: o servidor faz
+///   `negotiate(3)`, vê 3 acima do que ele fala, e recusa com `Incompatible`.
+///   A pessoa lê «versão incompatível com este servidor» **antes** de entrar, em
+///   vez de descobrir pela sessão morrendo em três segundos. Isso torna
+///   desnecessário gatear os dois verbos no cliente: ele nunca fala com quem não
+///   os entende;
+/// - **um cliente v2 continua entrando num servidor v3**, porque 2 está na
+///   janela. Quem tem de se conter é o servidor, e é o que `session.rs` já faz
+///   com o `UplinkLoss`.
+///
+/// O que ela **custa**: a janela desliza e a v1 deixa de ser aceita. Combinado
+/// com quem hospeda: não há ninguém na 0.9.x, que é onde a v1 vivia.
+///
+/// O que ela **não** conserta é o compartilhamento de tela entre versões — esse
+/// era outro defeito, e está em [`crate::screen::SCREEN_HEADER_VERSION`]: o
+/// cabeçalho da tela carregava este número e herdava esta janela, apesar de os
+/// onze bytes dele nunca terem mudado.
+pub const PROTOCOL_VERSION: u8 = 3;
 
 /// How many past versions a peer accepts, beyond the current one.
 ///
@@ -122,11 +149,21 @@ mod tests {
     /// mesmo minuto».
     #[test]
     fn a_versao_anterior_continua_dentro_da_janela() {
-        assert_eq!(PROTOCOL_VERSION, 2);
-        assert_eq!(oldest_supported_version(), 1);
-        assert!(negotiate(1).is_ok(), "um cliente v1 foi recusado");
-        assert!(negotiate(2).is_ok());
-        assert!(negotiate(3).is_err(), "um cliente do futuro foi aceito");
+        // **Os números mudaram em 04/09/2026, e a janela deslizou junto.**
+        //
+        // A v1 saiu da janela, e a decisão foi de quem hospeda: «não tem ninguém
+        // na 0.9.x», que é onde a v1 vivia. O que fica preso aqui é a forma —
+        // aceita-se a de agora e a anterior, recusa-se a seguinte —, e ela vale
+        // para qualquer número.
+        assert_eq!(PROTOCOL_VERSION, 3);
+        assert_eq!(oldest_supported_version(), 2);
+        assert!(negotiate(2).is_ok(), "a versão anterior foi recusada");
+        assert!(negotiate(3).is_ok());
+        assert!(
+            negotiate(1).is_err(),
+            "a v1 continuou aceita depois de a janela deslizar"
+        );
+        assert!(negotiate(4).is_err(), "um cliente do futuro foi aceito");
     }
 
     #[test]
