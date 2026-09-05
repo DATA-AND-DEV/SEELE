@@ -1667,14 +1667,35 @@ document.documentElement.style.setProperty("--seele-laranja-nerv", "#00b7ff");
 console.log("MOD seele/primeiro: entrou");
 ```
 
-Abra o app, hospede, habilite o MOD, e confira as três coisas:
+**Lacuna descoberta na execução, e ela é do plano e não do código:** *não há
+tela para habilitar MOD nesta etapa.* `habilitar_mod` existe, é testado e está
+em `AGUARDANDO_TELA`; a tela que o chama é de um plano posterior. Então o passo
+«habilite o MOD» não é executável como estava escrito aqui.
 
-1. o MOD aparece na lista;
-2. depois de habilitar e reabrir, o laranja da interface está azul;
-3. o console diz «entrou».
+Enquanto a tela não existe, a prova manual é em duas partes:
 
-Se qualquer uma falhar, o plano não terminou — e o que falhou é informação, não
-motivo para contornar.
+**Parte automática, e ela está feita:** o caminho inteiro tem teste em cada
+nível — manifesto, hash, leitura de disco, tabela, `mod://` com os dois guardas
+provados por reversão.
+
+**Parte que precisa de mãos, e precisa da linha no banco:**
+
+1. abra o app uma vez, para a migração 11 rodar;
+2. hospede, para haver banco de servidor;
+3. escreva a linha à mão, porque a tela ainda não existe:
+
+```sh
+sqlite3 "${SEELE_HOME:-$HOME/.config/seele}/seele.db" \
+  "INSERT INTO mods (id, version, hash, enabled)
+   VALUES ('seele/primeiro', '1.0.0', '', 1);"
+```
+
+4. reabra o app e confira as duas coisas: **o laranja da interface está azul**, e
+   o console diz **«MOD seele/primeiro: entrou»**.
+
+O `hash` vazio acima é deliberado e é o que esta etapa permite: nada confere
+hash contra o que um servidor anunciou, porque nada atravessa o fio ainda. O
+plano que põe o anúncio no protocolo é o que fecha isso.
 
 ## O que este plano deliberadamente não faz
 
