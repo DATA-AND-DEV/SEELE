@@ -278,6 +278,31 @@ pub(crate) fn guardar_escolhas(atalho: bool, porta: bool) -> Result<(), String> 
     resultado
 }
 
+/// Guarda **uma** das duas, deixando a outra como está.
+///
+/// Existe para o `--abrir-a-porta`: quem aperta o botão de hospedar decidiu
+/// sobre a porta e não sobre o atalho, e escrever os dois faria a atualização
+/// silenciosa seguinte reinstalar um atalho que a pessoa talvez tenha tirado.
+///
+/// # Errors
+///
+/// O que impediu de escrever. Falhar aqui não desfaz a regra que acabou de ser
+/// criada: o custo é a próxima atualização não saber que ela existe.
+pub(crate) fn guardar_uma_escolha(atalho: Option<bool>, porta: Option<bool>) -> Result<(), String> {
+    let chave = abrir(CASA)?;
+    let mut resultado = Ok(());
+    if let Some(atalho) = atalho {
+        resultado = escrever_numero(chave, "AtalhoNaAreaDeTrabalho", u32::from(atalho));
+    }
+    if resultado.is_ok() {
+        if let Some(porta) = porta {
+            resultado = escrever_numero(chave, "FirewallUDP", u32::from(porta));
+        }
+    }
+    fechar(chave);
+    resultado
+}
+
 /// Onde o SEELE já está instalado, se estiver.
 pub(crate) fn onde_esta_instalado() -> Option<String> {
     ler_texto("InstallDir")

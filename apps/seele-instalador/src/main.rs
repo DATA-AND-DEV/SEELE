@@ -119,6 +119,38 @@ fn main() -> std::process::ExitCode {
             reiniciar,
             argumentos_do_app,
         } => sem_perguntar(tela, reiniciar, &argumentos_do_app),
+        // **A regra de firewall, sozinha, sem instalar nada.**
+        //
+        // O caminho vem do registro e não da linha de comando: este binário roda
+        // elevado, e receber de fora para que programa a regra vale seria deixar
+        // quem chama escolher isso.
+        linha::Pedido::AbrirAPorta => {
+            let destino = instalacao::como_caminho(&instalacao::pasta_padrao());
+            let produto = destino.join("SEELE.exe");
+            if !produto.is_file() {
+                Err(format!(
+                    "não achei o SEELE em {} — a regra seria sobre um programa \
+                     que não está lá.",
+                    produto.display()
+                ))
+            } else {
+                match sistema::regra_de_firewall(&produto, true) {
+                    Ok(()) => {
+                        // A escolha fica guardada para a atualização
+                        // silenciosa não desfazer o que acabou de ser decidido.
+                        // Só a porta: quem apertou hospedar não disse nada sobre
+                        // o atalho.
+                        let _ = registro::guardar_uma_escolha(None, Some(true));
+                        println!(
+                            "porta 8383 UDP aberta no firewall para {}",
+                            produto.display()
+                        );
+                        Ok(())
+                    }
+                    Err(erro) => Err(erro),
+                }
+            }
+        }
         linha::Pedido::RemoverDeDentro => desinstalar::sair_de_dentro(),
         // **A janela da remoção roda no segundo tempo, e é o único lugar onde
         // ela pode rodar.**

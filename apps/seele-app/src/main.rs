@@ -790,6 +790,114 @@ fn firewall_nao_cobre_este_executavel() -> Option<String> {
 #[cfg(windows)]
 const CHAVE_DA_INSTALACAO: &str = r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\SEELE";
 
+/// Cria a regra de firewall do SEELE, pedindo elevação ao Windows.
+///
+/// # Por que o app não faz isso sozinho
+///
+/// A regra exige administrador, e este processo roda como a pessoa — de
+/// propósito: um app elevado gravaria identidade, pinos e preferências na pasta
+/// do administrador, onde a abertura seguinte não os acha.
+///
+/// Quem exige administrador é o instalador, cujo manifesto pede elevação, e a
+/// cópia que a instalação deixa na pasta é ele mesmo. Então o app o chama, o
+/// Windows pergunta uma vez, e a regra nasce.
+///
+/// # Por que a pergunta mudou de lugar
+///
+/// Ela era uma caixa no passo 02 do instalador, desmarcada, perguntando «quer
+/// abrir a porta?» a quem ainda não sabia se ia hospedar. Perguntado assim:
+/// «mas uai, o instalador já não faz isso?». Faz quando pedem, e quem instala um
+/// app de conversa não está decidindo sobre firewall naquele instante.
+///
+/// Quem aperta HOSPEDAR AQUI **está**. É aqui que a pergunta cabe.
+///
+/// # Errors
+///
+/// Quando não há instalação registrada, quando o desinstalador não está lá, ou
+/// quando o Windows recusa lançar. Uma recusa no UAC não é erro: a pessoa disse
+/// não, e o app segue sem a regra — a tela continua avisando.
+#[tauri::command]
+fn abrir_a_porta_no_firewall() -> Result<(), String> {
+    #[cfg(not(windows))]
+    {
+        Err("a regra de firewall do Windows só existe no Windows.".to_owned())
+    }
+    #[cfg(windows)]
+    {
+        use windows::core::PCWSTR;
+
+        let instalado = std::process::Command::new("reg")
+            .args([
+                "query",
+                CHAVE_DA_INSTALACAO,
+                "/v",
+                "InstallLocation",
+            ])
+            .output()
+            .ok()
+            .filter(|saida| saida.status.success())
+            .and_then(|saida| {
+                String::from_utf8_lossy(&saida.stdout)
+                    .lines()
+                    .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
+            })
+            .ok_or_else(|| {
+                "não achei a instalação do SEELE no registro desta máquina.".to_owned()
+            })?;
+
+        let ferramenta = std::path::Path::new(&instalado).join("desinstalar.exe");
+        if !ferramenta.is_file() {
+            return Err(format!(
+                "não achei {} — reinstale o SEELE para recuperá-lo.",
+                ferramenta.display()
+            ));
+        }
+
+        // **`runas`, e não `open`.** O verbo é o que faz o Windows perguntar; sem
+        // ele, lançar um executável que exige administrador de um processo que
+        // não é falha com «elevação necessária» e nada acontece.
+        let arquivo: Vec<u16> = ferramenta
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let parametros: Vec<u16> = "--abrir-a-porta"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // SAFETY: os dois vetores vivem até o fim da chamada, e `ShellExecuteW`
+        // é a forma documentada de pedir elevação a partir de um processo comum.
+        let resposta = unsafe {
+            windows::Win32::UI::Shell::ShellExecuteW(
+                None,
+                PCWSTR(larga_runas().as_ptr()),
+                PCWSTR(arquivo.as_ptr()),
+                PCWSTR(parametros.as_ptr()),
+                PCWSTR::null(),
+                windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+            )
+        };
+        // O `ShellExecuteW` devolve um valor **menor ou igual a 32** quando
+        // falha, e este retorno era descartado pelo atualizador do Tauri — foi
+        // assim que uma atualização que não acontecia virou um app que fechava
+        // sozinho. Aqui ele é lido.
+        if resposta.0 as isize <= 32 {
+            return Err(
+                "o Windows não abriu o pedido de permissão. Se você recusou, \
+                 tente de novo e responda Sim."
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+}
+
+/// O verbo `runas`, em UTF-16 terminado em zero.
+#[cfg(windows)]
+fn larga_runas() -> Vec<u16> {
+    "runas".encode_utf16().chain(std::iter::once(0)).collect()
+}
+
 /// A porta em que um servidor escuta por padrão.
 const PORTA_PADRAO: u16 = 8383;
 
@@ -3391,6 +3499,7 @@ fn main() {
             procurar_atualizacao,
             instalar_atualizacao,
             atualizacao_que_nao_pegou,
+            abrir_a_porta_no_firewall,
             descrever_arquivo,
             guardar_colado,
             escolher_arquivo,

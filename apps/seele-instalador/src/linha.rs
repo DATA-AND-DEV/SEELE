@@ -37,6 +37,11 @@ pub(crate) enum Pedido {
     RemoverDeDentro,
     /// Remover a pasta nomeada, rodando de fora dela.
     RemoverA(std::path::PathBuf),
+    /// Criar a regra de firewall do produto instalado, e mais nada.
+    ///
+    /// Chamado pelo app quando alguém aperta HOSPEDAR AQUI e não há regra. Ver
+    /// a nota em [`ler_com_nome`].
+    AbrirAPorta,
 }
 
 /// Lê a linha de comando.
@@ -110,6 +115,25 @@ fn ler_com_nome(nome: Option<&str>, argumentos: impl Iterator<Item = String>) ->
         && nome == Some("desinstalar.exe")
     {
         return Pedido::RemoverDeDentro;
+    }
+
+    // **Abrir a porta, sozinho.** Terceiro modo do mesmo binário, e ele existe
+    // porque a pergunta estava no lugar errado: a caixa do passo 02 pergunta
+    // «quer abrir a porta?» a quem ainda não sabe se vai hospedar, e nasce
+    // desmarcada. Quem aperta HOSPEDAR AQUI já decidiu — e é lá que a pergunta
+    // deveria estar.
+    //
+    // O app não pode criar a regra: ela exige elevação, e ele roda como a
+    // pessoa. Este binário exige — o manifesto dele pede administrador —, e a
+    // cópia que a instalação deixa na pasta é ele mesmo. Então o app o chama, o
+    // Windows pergunta uma vez, e a regra nasce.
+    //
+    // Sem argumento nenhum: o caminho vem do registro, que é de onde ele veio
+    // quando a instalação a criou. Receber o caminho de fora seria deixar quem
+    // chama escolher para que programa a regra vale, e este binário roda
+    // elevado.
+    if argumentos.first().is_some_and(|a| a == "--abrir-a-porta") {
+        return Pedido::AbrirAPorta;
     }
 
     if argumentos.first().is_some_and(|a| a == "--desinstalar") {
