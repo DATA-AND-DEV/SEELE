@@ -98,6 +98,18 @@ impl Modo {
         }
     }
 
+    /// O que a barra de cima diz que esta janela é.
+    ///
+    /// Era a palavra `INSTALAR` fixa, e ela contradizia a janela inteira: o
+    /// mesmo executável remove, os passos são os da remoção, o botão diz
+    /// REMOVER, e o alto da tela continuava anunciando uma instalação.
+    const fn titulo_da_barra(self) -> &'static str {
+        match self {
+            Self::Instalar => "INSTALAR O SEELE",
+            Self::Remover => "REMOVER O SEELE",
+        }
+    }
+
     const fn primeiro(self) -> Passo {
         match self {
             Self::Instalar => Passo::Destino,
@@ -448,7 +460,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
             right: largura - px(90),
             bottom: barra,
         },
-        "INSTALAR O SEELE",
+        estado.modo.titulo_da_barra(),
         estado.cartela,
         pele::OSSO,
         DT_SINGLELINE.0 | DT_VCENTER.0 | DT_NOPREFIX.0,
@@ -489,10 +501,15 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
         qual: Acao::Fechar,
     });
 
-    // ---- os quatro passos ----
+    // ---- os passos deste modo ----
+    //
+    // A divisão é pelo número de passos **deste modo**, e não por quatro. A
+    // remoção tem três, e o quarto lugar sobrava vazio à direita — um degrau
+    // que a janela desenhava e nunca ia usar.
     let fita = barra + 1;
     let altura_da_fita = px(30);
-    let largura_do_passo = (largura - 2) / 4;
+    let quantos = i32::try_from(estado.modo.passos().len()).unwrap_or(1).max(1);
+    let largura_do_passo = (largura - 2) / quantos;
     for (i, passo) in estado.modo.passos().iter().enumerate() {
         let x = 1 + largura_do_passo * i32::try_from(i).unwrap_or(0);
         let caixa = RECT {
@@ -798,11 +815,15 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
     if estado.passo == Passo::Confirmar {
         escrever(
             hdc,
+            // `64` e não `24`: em `24` este parágrafo era escrito **por cima**
+            // do título do passo, que ocupa `24..58`. As duas frases saíam
+            // embaralhadas uma na outra, ilegíveis, e é assim que a janela
+            // apareceu na primeira captura que alguém fez dela rodando.
             RECT {
                 left: corpo_x,
-                top: topo + px(24),
+                top: topo + px(64),
                 right: corpo_direita,
-                bottom: topo + px(64),
+                bottom: topo + px(112),
             },
             "Saem desta máquina: os arquivos do SEELE, os atalhos, a regra de \
              firewall e a entrada no painel do Windows. Tudo isso volta se você \
@@ -814,13 +835,20 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
     }
 
     if estado.passo.tem_escolhas() {
-        let mut y = topo + px(72);
+        // O passo da remoção tem um parágrafo acima das caixas; o das opções
+        // não tem. Sem esta diferença as caixas subiam para debaixo do texto.
+        let mut y = topo
+            + if estado.passo == Passo::Confirmar {
+                px(124)
+            } else {
+                px(72)
+            };
         for (i, (nome, nota)) in opcoes_de(estado.passo).iter().enumerate() {
             let caixa = RECT {
                 left: corpo_x,
                 top: y,
                 right: corpo_direita,
-                bottom: y + px(44),
+                bottom: y + px(50),
             };
             let marcada = estado.opcoes.get(i).copied().unwrap_or(false);
             let quadro = RECT {
@@ -867,8 +895,12 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
                 RECT {
                     left: corpo_x + px(28),
                     top: y + px(18),
+                    // Duas linhas, e não uma e meia. A fonte do corpo tem 12px
+                    // de altura, então `18..40` cabia uma linha e cortava a
+                    // segunda no meio — foi assim que «não há como desfazer»,
+                    // que é a metade que importa desta nota, apareceu partido.
                     right: corpo_direita,
-                    bottom: y + px(40),
+                    bottom: y + px(50),
                 },
                 nota,
                 estado.corpo,
@@ -879,7 +911,7 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
                 caixa,
                 qual: Acao::Alternar(i),
             });
-            y += px(52);
+            y += px(58);
         }
     }
 
@@ -903,9 +935,12 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
             right: largura - px(240),
             bottom: altura,
         },
+        // `{:02}` e não `04` fixo: a remoção tem três passos, e o rodapé
+        // anunciava «PASSO 01 DE 04» numa fita com três.
         &format!(
-            "PASSO {} DE 04 · {}",
+            "PASSO {} DE {:02} · {}",
             estado.passo.numero(),
+            estado.modo.passos().len(),
             estado.passo.nome()
         ),
         estado.rotulo,
@@ -1549,9 +1584,20 @@ pub(crate) fn abrir(modo: Modo, pasta: &std::path::Path) -> Result<(), String> {
             passo: modo.primeiro(),
             campo,
             fundo_do_campo: CreateSolidBrush(COLORREF(pele::NEGRO)),
-            // O atalho nasce marcado e a porta nasce desmarcada, como o desenho
-            // os mostra: um atalho é conveniência e uma porta aberta é decisão.
-            opcoes: [true, false],
+            // **Por modo**, e não uma constante para os dois. Na instalação o
+            // atalho nasce marcado e a porta desmarcada: um atalho é
+            // conveniência e uma porta aberta é decisão.
+            //
+            // Na remoção a primeira caixa é outra coisa inteira — «apagar
+            // também os meus dados», a nota dela terminando em «não há como
+            // desfazer» — e ela herdava esse `true` por dividir o arranjo com a
+            // instalação. A escolha que não se desfaz nascia feita, na tela que
+            // existe para perguntar. Visto na captura: o quadro laranja marcado,
+            // antes de alguém tocar em nada.
+            opcoes: match modo {
+                Modo::Instalar => [true, false],
+                Modo::Remover => [false, false],
+            },
             alvos: Vec::new(),
             sob_o_mouse: None,
             apertando: None,

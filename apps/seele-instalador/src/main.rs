@@ -500,6 +500,116 @@ mod testes {
             fonte.contains("if apagar_dados {"),
             "os dados passaram a ser apagados sem a escolha"
         );
+
+        // **E a caixa nasce desmarcada — conferido, e não afirmado.**
+        //
+        // Isto faltava, e a falta tem a forma que o CLAUDE.md descreve: o
+        // comentário deste teste prometia «a caixa dos dados nasce desmarcada»
+        // desde que ele foi escrito, e nenhuma linha dele olhava para o estado
+        // inicial. O guarda casava com o próprio comentário.
+        //
+        // O que estava lá era `opcoes: [true, false]`, um arranjo só para os
+        // dois modos: na instalação o `true` é o atalho, e na remoção o mesmo
+        // `true` marcava «apagar também os meus dados». A escolha que não se
+        // desfaz nascia feita, na tela que existe para perguntar. Só apareceu
+        // quando alguém mandou uma captura da janela rodando.
+        let janela = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/janela.rs");
+        let Ok(fonte) = std::fs::read_to_string(&janela) else {
+            panic!("não li {}", janela.display());
+        };
+        let inicial = sem_comentarios(&fonte);
+        assert!(
+            inicial.contains("opcoes: match modo"),
+            "as caixas voltaram a nascer com um estado só para os dois modos, e \
+             o que é conveniência na instalação é destruição na remoção"
+        );
+        assert!(
+            inicial.contains("Modo::Remover => [false, false]"),
+            "a caixa de apagar os dados voltou a nascer marcada"
+        );
+    }
+
+    /// Lê o arquivo sem as linhas de comentário.
+    ///
+    /// Existe porque três guardas deste repositório já casaram com o próprio
+    /// comentário: o texto que eles procuravam estava na prosa que explica a
+    /// regra, e não no código que a cumpre.
+    fn sem_comentarios(fonte: &str) -> String {
+        fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// **A janela da remoção deixa de se desenhar como a da instalação.**
+    ///
+    /// Os quatro defeitos vieram na mesma captura, e são a mesma causa: o modo
+    /// de remoção herdava a geometria e as palavras do modo de instalar.
+    ///
+    /// - a barra de cima dizia INSTALAR O SEELE numa janela cujo botão diz
+    ///   REMOVER;
+    /// - a fita dividia a largura por quatro, e sobrava um degrau vazio à
+    ///   direita, porque a remoção tem três passos;
+    /// - o rodapé anunciava «PASSO 01 DE 04» na fita de três;
+    /// - e o parágrafo do que sai era escrito **por cima** do título do passo,
+    ///   deixando as duas frases embaralhadas e ilegíveis.
+    #[test]
+    fn a_remocao_nao_se_desenha_com_as_medidas_da_instalacao() {
+        let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/janela.rs");
+        let Ok(fonte) = std::fs::read_to_string(&caminho) else {
+            panic!("não li {}", caminho.display());
+        };
+        let codigo = sem_comentarios(&fonte);
+
+        assert!(
+            codigo.contains("Self::Remover => \"REMOVER O SEELE\""),
+            "a barra de cima voltou a anunciar uma instalação numa janela que \
+             remove"
+        );
+        assert!(
+            !codigo.contains("DE 04"),
+            "o rodapé voltou a contar quatro passos, e a remoção tem três"
+        );
+        assert!(
+            codigo.contains("estado.modo.passos().len()"),
+            "a fita ou o rodapé deixaram de contar os passos deste modo"
+        );
+        assert!(
+            !codigo.contains("(largura - 2) / 4"),
+            "a fita voltou a dividir a largura por quatro, e sobra um degrau \
+             vazio no modo que tem três"
+        );
+
+        // E o parágrafo da remoção não pode dividir o `top` com o título.
+        let titulo = codigo
+            .split("estado.passo.titulo()")
+            .next()
+            .and_then(|antes| antes.rsplit("RECT {").next())
+            .unwrap_or_default()
+            .to_owned();
+        let paragrafo = codigo
+            .split("Saem desta máquina")
+            .next()
+            .and_then(|antes| antes.rsplit("RECT {").next())
+            .unwrap_or_default()
+            .to_owned();
+        let altura_de = |trecho: &str| {
+            trecho
+                .split("top: topo + px(")
+                .nth(1)
+                .and_then(|resto| resto.split(')').next())
+                .and_then(|numero| numero.parse::<i32>().ok())
+        };
+        let (Some(do_titulo), Some(do_paragrafo)) = (altura_de(&titulo), altura_de(&paragrafo))
+        else {
+            panic!("não achei os dois `top` para comparar:\n{titulo}\n---\n{paragrafo}");
+        };
+        assert!(
+            do_paragrafo > do_titulo,
+            "o parágrafo do que sai voltou a ser escrito em cima do título do \
+             passo: título em {do_titulo}, parágrafo em {do_paragrafo}"
+        );
     }
     /// **A pasta fica com o que é desta instalação, e não com três.**
     ///
