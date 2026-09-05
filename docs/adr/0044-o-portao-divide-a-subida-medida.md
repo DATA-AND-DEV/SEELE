@@ -115,8 +115,14 @@ governa o próprio vídeo de quem o mediu; aqui governa o teto de **todo mundo**
 sala, e uma memória alta demais numa rede que encolheu custa a voz da sala por
 uma ou duas janelas, até o `doeu` derrubá-la.
 
-Fica registrado o que **não** foi tocado: `TETO_DA_SUBIDA_BPS` são 50 Mbps, e
-uma casa com mais subida que isso não é contada inteira.
+`TETO_DA_SUBIDA_BPS` sobe de 50 Mbps para 1 Gbps, e a razão é a parte 3. O doc
+antigo dizia que «o número importa menos do que parece», e era verdade enquanto
+subir custava 25% por janela cheia: o teto quase nunca era alcançado, então
+quase nunca cortava. Com o piso demonstrado ele corta na primeira janela — e
+cinquenta megabits não descrevem mais uma máquina, já que uma fibra de 500/250
+tem cinco vezes isso de subida. O que ele é não mudou: uma parede contra número
+absurdo, nunca uma política sobre o tamanho das casas. Nada nele promete um
+gigabit a ninguém; a estimativa só chega onde o cano comprovadamente levou.
 
 ## Custo de reverter
 

@@ -326,11 +326,24 @@ pub const QUEDA: u32 = 80;
 
 /// O maior valor que a estimativa pode alcançar, em bits por segundo.
 ///
-/// Cinquenta megabits, e o número importa menos do que parece: a subida é de
-/// 25% por janela **cheia**, e encher exige o vídeo de fato gastar o que recebeu.
-/// Sair de 2 Mbps e chegar aqui leva uns quinze segundos de tráfego real — se o
-/// cano não carrega, a estimativa para no caminho sozinha.
-pub const TETO_DA_SUBIDA_BPS: u32 = 50_000_000;
+/// **Um gigabit, e a razão de ele ter subido de cinquenta megabits está no
+/// braço do piso demonstrado.** O doc antigo dizia que «o número importa menos
+/// do que parece», e a razão era boa enquanto valeu: subir era 25% por janela
+/// **cheia**, encher exigia o vídeo de fato gastar o que recebeu, e sair de
+/// 2 Mbps e chegar aqui levava uns quinze segundos de tráfego real. O teto
+/// quase nunca era alcançado, então quase nunca cortava.
+///
+/// Desde que uma janela que entregou mais do que a estimativa passou a levá-la
+/// **direto** para o que passou, ele corta na primeira janela. E cinquenta
+/// megabits não descrevem mais uma máquina: uma fibra doméstica de 500/250 tem
+/// cinco vezes isso de subida, e um VPS de 1 Gbps, vinte.
+///
+/// O que ele é continua o mesmo, e é por isso que ele continua existindo: uma
+/// parede contra número absurdo — um contador que deu a volta, um banco
+/// adulterado —, e nunca uma política sobre o tamanho das casas. Nada aqui
+/// **promete** um gigabit a ninguém: a estimativa só chega onde o cano
+/// comprovadamente levou.
+pub const TETO_DA_SUBIDA_BPS: u32 = 1_000_000_000;
 
 /// O menor valor que a estimativa pode alcançar.
 ///
@@ -1078,6 +1091,34 @@ mod tests {
             eventos_de_congestionamento: eventos,
             ..leitura(bytes, 0, permitido_bps)
         }
+    }
+
+    #[test]
+    fn uma_casa_de_fibra_nao_e_cortada_pelo_teto_da_estimativa() {
+        // **O teto deixou de ser inalcançável no dia em que o piso demonstrado
+        // entrou.** O doc dele dizia que «o número importa menos do que
+        // parece», e a razão era boa: subir era 25% por janela cheia, e sair de
+        // 2 Mbps para lá levava uns quinze segundos de tráfego real que só o
+        // vídeo produzia. Agora uma janela que entregou 200 Mbps leva a
+        // estimativa a 200 Mbps de uma vez, e o teto passou a cortar.
+        //
+        // Cinquenta megabits não descrevem mais uma máquina: uma fibra
+        // doméstica de 500/250 tem cinco vezes isso de subida, e um VPS de
+        // 1 Gbps, vinte. O teto continua sendo o que sempre foi — uma parede
+        // contra número absurdo, e não uma política sobre o tamanho das casas.
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        let cano = 200_000_000;
+        let mut bytes = 0;
+        for segundo in 1..=3 {
+            bytes += bytes_em_um_segundo(cano);
+            sonda.observar(inicio + Duration::from_secs(segundo), &leitura(bytes, 0, 0));
+        }
+        assert_eq!(
+            sonda.estimativa(),
+            cano,
+            "uma casa de 200 Mbps foi contada como se tivesse {TETO_DA_SUBIDA_BPS}"
+        );
     }
 
     #[test]
