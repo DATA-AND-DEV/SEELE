@@ -713,6 +713,8 @@ fn firewall_nao_cobre_este_executavel() -> Option<String> {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
+
         let eu = std::env::current_exe().ok()?;
 
         // **Antes de comparar caminhos: existe regra?**
@@ -744,6 +746,7 @@ fn firewall_nao_cobre_este_executavel() -> Option<String> {
                 "name=SEELE",
                 "dir=in",
             ])
+            .creation_flags(SEM_CONSOLE)
             .output()
             .ok()
             .is_some_and(|saida| saida.status.success());
@@ -758,6 +761,7 @@ fn firewall_nao_cobre_este_executavel() -> Option<String> {
 
         let instalado = std::process::Command::new("reg")
             .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
+            .creation_flags(SEM_CONSOLE)
             .output()
             .ok()
             .filter(|saida| saida.status.success())
@@ -828,6 +832,7 @@ fn abrir_a_porta_no_firewall() -> Result<(), String> {
 
         let instalado = std::process::Command::new("reg")
             .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
+            .creation_flags(SEM_CONSOLE)
             .output()
             .ok()
             .filter(|saida| saida.status.success())
@@ -876,9 +881,7 @@ fn abrir_a_porta_no_firewall() -> Result<(), String> {
                     ferramenta.display()
                 ),
             ])
-            // Sem console piscando por cima da janela de quem só apertou um
-            // botão. É a mesma razão do `SEM_CONSOLE` do instalador.
-            .creation_flags(0x0800_0000)
+            .creation_flags(SEM_CONSOLE)
             .output()
             .map_err(|erro| format!("não consegui pedir a permissão ao Windows: {erro}"))?;
 
@@ -890,6 +893,21 @@ fn abrir_a_porta_no_firewall() -> Result<(), String> {
         Ok(())
     }
 }
+
+/// `CREATE_NO_WINDOW`: o processo filho não ganha console.
+///
+/// **Sem isto, uma janela preta pisca por cima do app.** Três chamadas ao
+/// sistema saem daqui — `netsh` uma vez e `reg` duas —, e elas rodam **toda vez
+/// que alguém aperta HOSPEDAR AQUI**, antes de qualquer decisão. Relatado
+/// assim: «agora toda vez que vai abrir o host aparece o terminal, isso passa
+/// insegurança pro usuário».
+///
+/// E passa mesmo: um terminal que aparece sozinho num programa de conversa é
+/// indistinguível de um programa fazendo o que não devia. O instalador já tinha
+/// esta constante pela mesma razão, e eu não a copiei ao trazer as chamadas para
+/// cá.
+#[cfg(windows)]
+const SEM_CONSOLE: u32 = 0x0800_0000;
 
 /// A porta em que um servidor escuta por padrão.
 const PORTA_PADRAO: u16 = 8383;
