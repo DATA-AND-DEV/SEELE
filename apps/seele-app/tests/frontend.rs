@@ -438,7 +438,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // `assistir` esteve aqui por dois commits — o servidor e o núcleo prontos, a
 // tela não — e saiu quando `palco-imagem.js` passou a desenhar a escolha entre
 // transmissões. A lista voltou ao estado de repouso, que é vazia.
-const AGUARDANDO_TELA: &[&str] = &[];
+// `habilitar_mod` e `desabilitar_mod` entraram com o ADR 0044: o núcleo, o
+// FFI e o banco estão prontos, e a tela que liga e desliga MOD é de um plano
+// posterior. `mods_instalados` **não** está aqui — o `base.js` já o chama para
+// carregar os MODs habilitados, que é a metade que existe hoje.
+const AGUARDANDO_TELA: &[&str] = &["habilitar_mod", "desabilitar_mod"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -516,6 +520,11 @@ fn every_element_the_script_reaches_for_exists_in_the_page() {
     );
 }
 
+/// **Escopo, desde o ADR 0044:** este guarda vale sobre `self` — os arquivos
+/// embutidos em `ui/`. Bytes servidos sob `mod://` não passam por aqui e têm o
+/// guarda deles em `apps/seele-app/src/mods.rs`: nada é servido que o manifesto
+/// do MOD não declare, e nada sobe de diretório. A emenda é de alcance e não de
+/// rigor — nenhum arquivo de MOD entra em `ui/`.
 #[test]
 fn the_page_loads_only_files_that_are_shipped() {
     // The CSP is `default-src 'self'`, so anything external is blocked at
@@ -10267,5 +10276,92 @@ fn a_parede_do_firewall_traz_o_conserto_junto() {
         ramo.contains("catch"),
         "o botão não trata a recusa, e recusar o UAC é o caminho mais comum \
          depois de apertar:\n{ramo}"
+    );
+}
+
+/// Os três comandos de MOD existem no Rust com o nome que a página invoca.
+///
+/// ADR 0019 escolheu frontend sem checagem de tipo, e este arquivo é a
+/// mitigação nomeada: um `invoke` com nome errado não aparece em build nenhum,
+/// só em execução, e só quando alguém clica.
+#[test]
+fn the_mod_commands_the_page_invokes_exist_in_rust() {
+    let rust = read("src/main.rs");
+    for command in ["mods_instalados", "habilitar_mod", "desabilitar_mod"] {
+        assert!(
+            rust.contains(&format!("fn {command}(")),
+            "a página invoca `{command}` e o Rust não o define"
+        );
+    }
+}
+
+/// A casca não nomeia o protocolo nem o núcleo para falar de MOD.
+///
+/// `xtask/src/check_deps.rs` já reprova a **aresta** de Cargo; este guarda cobra
+/// o outro lado da mesma regra, que é o que custou uma reescrita durante a
+/// execução do plano: os comandos passavam por `seele_core::mods` e a casca não
+/// alcança aquele crate. Quem sabe de MOD aqui é `seele_ffi::mods`, e a regra
+/// escreve o motivo — «reaching past it would put protocol knowledge in a Tauri
+/// command».
+#[test]
+fn the_shell_reaches_mods_through_the_ffi_and_not_past_it() {
+    let rust = read("src/main.rs");
+    assert!(
+        !rust.contains("seele_core::mods"),
+        "a casca alcançou `seele_core::mods` por cima do `seele-ffi`"
+    );
+    assert!(
+        !rust.contains("seele_proto::mods"),
+        "a casca alcançou `seele_proto::mods`, que é conhecimento de protocolo numa Tauri command"
+    );
+    assert!(
+        rust.contains("seele_ffi::mods"),
+        "a casca deixou de falar de MOD pelo `seele-ffi`"
+    );
+}
+
+/// A CSP admite `mod:` e nada mais que isso.
+///
+/// O ADR 0044 escreveu como critério e não como coincidência: se aplicar um
+/// MOD exigisse `unsafe-inline` ou `unsafe-eval`, o desenho estaria errado.
+#[test]
+fn the_csp_admits_mods_and_never_loosens_further() {
+    let conf = read("tauri.conf.json");
+    let csp = conf
+        .lines()
+        .find(|line| line.contains("\"csp\""))
+        .expect("a CSP sumiu do tauri.conf.json");
+
+    assert!(
+        csp.contains("script-src 'self' mod:"),
+        "`mod:` saiu do script-src"
+    );
+    assert!(!csp.contains("unsafe-inline"), "a CSP ganhou unsafe-inline");
+    assert!(!csp.contains("unsafe-eval"), "a CSP ganhou unsafe-eval");
+    assert!(
+        !csp.contains("style-src 'self' mod:"),
+        "folha de terceiro entrou pela CSP sem ADR que a autorize"
+    );
+}
+
+/// A página carrega MOD, e só depois de haver página.
+#[test]
+fn the_page_loads_mods_after_the_first_draw() {
+    let base = read("ui/base.js");
+    assert!(base.contains("mods_instalados"), "base.js não lista MODs");
+    assert!(
+        base.contains("mod://"),
+        "base.js não carrega nada sob mod://"
+    );
+
+    let primeiro_desenho = base.find("desenhar(await invoke(\"snapshot\"))");
+    let carga = base.find("carregarMods();");
+    let (Some(desenho), Some(carga)) = (primeiro_desenho, carga) else {
+        panic!("não achei o primeiro desenho ou a chamada de carregarMods");
+    };
+    assert!(
+        carga > desenho,
+        "os MODs carregam antes de a página existir, e um MOD que roda cedo \
+         falha de um jeito que parece defeito dele"
     );
 }

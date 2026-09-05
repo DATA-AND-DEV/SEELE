@@ -27,6 +27,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod icone;
+mod mods;
 
 use std::sync::{Arc, Mutex};
 
@@ -1598,6 +1599,139 @@ async fn escolher_icone_do_server(
 #[tauri::command]
 fn tirar_icone_do_server(session: State<'_, Session>) -> Result<(), ConnectionError> {
     session.connection()?.set_server_icon(None)
+}
+
+// ------------------------------------------------------------------------ MODs
+//
+// ADR 0044. Um MOD é código de terceiro, e as regras do produto base não o
+// alcançam — a defesa é o repositório público e a revisão de código de cada
+// versão, e ela não mora aqui.
+//
+// Nesta etapa habilitar é **local**: fala com o banco do servidor que esta
+// janela hospeda, pelo mesmo acessor da portaria (ADR 0030). Os verbos de
+// protocolo com `AdministerServer` são de um plano posterior, e é aí que um
+// servidor rodando por `seeled` numa VPS passa a ser administrável.
+
+/// Por que um comando de MOD não deu.
+///
+/// Enum e não frase, como as vizinhas: a fronteira erro→texto é do frontend.
+#[derive(Debug, serde::Serialize)]
+enum FalhaNoMod {
+    /// Esta janela não está hospedando, então não há servidor a que habilitar.
+    NaoEstaHospedando,
+    /// O banco do servidor não respondeu.
+    BancoNaoRespondeu,
+    /// O MOD existe e não passou na validação. O nome é da variante de
+    /// recusa que o `seele-ffi` devolve, e quem escreve a frase é o `frases.js`.
+    Recusado {
+        /// O nome da recusa, de uma lista fechada.
+        motivo: String,
+    },
+}
+
+/// Um MOD como a janela o desenha.
+///
+/// O `seele-ffi` entrega o que está em disco; o que esta camada acrescenta é a
+/// única coisa que ele não pode saber — se o servidor **desta janela** o exige
+/// agora. `flatten` para que a página leia um objeto só.
+#[derive(Debug, serde::Serialize)]
+struct ModNaTela {
+    /// O que o FFI leu do disco.
+    #[serde(flatten)]
+    instalado: seele_ffi::mods::ModInstalado,
+    /// Se o servidor desta janela o exige agora.
+    enabled: bool,
+}
+
+/// Todo MOD em `mods/`, com o que o servidor desta máquina tem ligado.
+#[tauri::command]
+async fn mods_instalados(
+    app: AppHandle,
+    session: State<'_, Session>,
+) -> Result<Vec<ModNaTela>, FalhaNoMod> {
+    let ligados = mods_ligados(&session).await?;
+    let pasta = config_dir(&app);
+
+    Ok(seele_ffi::mods::listar(&pasta)
+        .into_iter()
+        .map(|instalado| ModNaTela {
+            enabled: ligados.contains(&instalado.id),
+            instalado,
+        })
+        .collect())
+}
+
+/// Liga um MOD no servidor que este processo hospeda.
+#[tauri::command]
+async fn habilitar_mod(
+    app: AppHandle,
+    session: State<'_, Session>,
+    id: String,
+) -> Result<(), FalhaNoMod> {
+    let instalado = seele_ffi::mods::ler_um(&config_dir(&app), &id)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+
+    let persistence = persistence_do_mod(&session)?;
+    let persistence = persistence.lock().await;
+    seele_server::persistence::mods::enable(
+        &persistence,
+        &instalado.id,
+        &instalado.version,
+        &instalado.hash,
+    )
+    .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+}
+
+/// Desliga um MOD. Os dados dele ficam — ADR 0044.
+#[tauri::command]
+async fn desabilitar_mod(session: State<'_, Session>, id: String) -> Result<(), FalhaNoMod> {
+    let persistence = persistence_do_mod(&session)?;
+    let persistence = persistence.lock().await;
+    seele_server::persistence::mods::disable(&persistence, &id)
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+}
+
+/// Os identificadores ligados, ou vazio quando esta janela não hospeda.
+///
+/// Não hospedar não é falha aqui: a lista de MODs instalados é útil de qualquer
+/// jeito, e desenhar um erro para quem só abriu a tela seria pior que desenhar
+/// a lista com tudo desligado.
+async fn mods_ligados(session: &State<'_, Session>) -> Result<Vec<String>, FalhaNoMod> {
+    let Ok(persistence) = persistence_do_mod(session) else {
+        return Ok(Vec::new());
+    };
+    let persistence = persistence.lock().await;
+    seele_server::persistence::mods::enabled(&persistence)
+        .map(|ligados| ligados.into_iter().map(|ligado| ligado.id).collect())
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+}
+
+/// O `Arc` do PERSISTENCE hospedado, ou a recusa.
+///
+/// Clonado para fora do `Mutex` do app **antes** de qualquer `await`, pela
+/// mesma razão que `persistence_hospedada` escreve: segurar um
+/// `std::sync::MutexGuard` atravessando um ponto de espera trava os dois
+/// cadeados de uma vez e nem compila do lado do Tauri.
+/// A única resposta que `mod://` dá ao que não aprovou.
+///
+/// Sem corpo e sem motivo: um esquema que distingue «não existe» de «não
+/// declarado» é um esquema que responde perguntas sobre o disco de quem o roda.
+fn recusa_do_mod() -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(404)
+        .body(Vec::new())
+        .unwrap_or_default()
+}
+
+fn persistence_do_mod(
+    session: &State<'_, Session>,
+) -> Result<seele_server::hospedagem::PersistenceCompartilhada, FalhaNoMod> {
+    let aberto = session
+        .hospedagem
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    let server = aberto.as_ref().ok_or(FalhaNoMod::NaoEstaHospedando)?;
+    Ok(server.persistence())
 }
 
 /// Abre o seletor e põe a imagem escolhida como **a sua**.
@@ -3361,6 +3495,21 @@ fn main() {
         // quem abre um diálogo neste app é um comando desta casca, com o título
         // escrito aqui, e não uma linha de JavaScript.
         .plugin(tauri_plugin_dialog::init())
+        // ADR 0044. O único esquema além de `self` que a CSP admite, e ele só
+        // devolve o que `mods::serve` aprovou: um arquivo que o manifesto do
+        // MOD declarou, e nada que suba de diretório. A conferência é ali, e
+        // não aqui, para caber num teste sem subir uma janela.
+        .register_uri_scheme_protocol("mod", |ctx, request| {
+            let caminho = request.uri().path().to_owned();
+            let pasta = config_dir(ctx.app_handle());
+            match mods::serve(std::path::Path::new(&pasta), &caminho) {
+                Some(corpo) => tauri::http::Response::builder()
+                    .header("Content-Type", "text/javascript; charset=utf-8")
+                    .body(corpo)
+                    .unwrap_or_else(|_| recusa_do_mod()),
+                None => recusa_do_mod(),
+            }
+        })
         .manage(Session::default())
         .setup(move |app| {
             // **A decoração do Windows sai; a do macOS fica.**
@@ -3466,6 +3615,9 @@ fn main() {
             imagem_da_pessoa,
             meu_retrato,
             tirar_icone_do_server,
+            mods_instalados,
+            habilitar_mod,
+            desabilitar_mod,
             icone_do_server,
             expulsar_pessoa,
             banir_pessoa,

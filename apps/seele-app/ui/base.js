@@ -397,4 +397,47 @@ function ligarControlesDaJanela() {
   });
 }
 
+// ------------------------------------------------------------------------ MODs
+
+/**
+ * Carrega os MODs que o servidor desta janela exige.
+ *
+ * ADR 0044. Um MOD roda com acesso à janela inteira, por decisão: as regras do
+ * produto base — palheta congelada, movimento diagnóstico, os quatro guardas do
+ * vermelho — protegem o produto e **não** alcançam MOD. A defesa é o repositório
+ * público obrigatório e a revisão de código de cada versão publicada, e ela não
+ * mora aqui.
+ *
+ * Chamado no fim do arranque, depois de `ligarControlesDaJanela`, de propósito:
+ * um MOD que rodasse antes de a página existir não acharia o que veio mexer, e
+ * falharia de um jeito que parece defeito do MOD sem ser.
+ */
+async function carregarMods() {
+  let instalados;
+  try {
+    instalados = await invoke("mods_instalados");
+  } catch (erro) {
+    // Não hospedar não é falha, e o comando já devolve lista vazia nesse caso.
+    // O que chega aqui é banco que não respondeu, e isso se conta.
+    console.error("MODs: não deu para listar", erro);
+    return;
+  }
+
+  for (const mod of instalados) {
+    if (!mod.enabled || !mod.client) continue;
+
+    const script = document.createElement("script");
+    script.type = "module";
+    script.src = `mod://localhost/${mod.id}/${mod.client}`;
+    // Um MOD que quebra não leva a janela junto — ADR 0044, «falha isolada».
+    // Sem isto, um erro de sintaxe num MOD de terceiro é uma tela preta que
+    // ninguém sabe explicar.
+    script.addEventListener("error", () => {
+      console.error(`MOD ${mod.id}: não carregou`);
+    });
+    document.head.appendChild(script);
+  }
+}
+
 ligarControlesDaJanela();
+carregarMods();

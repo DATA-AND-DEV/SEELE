@@ -25,7 +25,14 @@
 
 use std::path::{Path, PathBuf};
 
-use seele_proto::mods::{content_hash, read_manifest, Manifest, Refused};
+use seele_proto::mods::{content_hash, read_manifest};
+
+// Republicados de propósito, e não por conveniência. `xtask/src/check_deps.rs`
+// impede `seele-ffi` — e portanto a casca — de nomear `seele-proto`: «reaching
+// past it would put protocol knowledge in a Tauri command». Quem consome MOD
+// precisa destes dois tipos, então esta camada, que é a fronteira, os
+// republica. É a mesma disciplina, não uma brecha nela.
+pub use seele_proto::mods::{Manifest, Refused};
 
 /// A MOD that read cleanly.
 #[derive(Debug, Clone)]
@@ -146,6 +153,36 @@ fn identifier_of(root: &Path, dir: &Path) -> Option<String> {
         return None;
     }
     Some(format!("{author}/{name}"))
+}
+
+/// The name of a refusal, from a closed list.
+///
+/// Exists here and not in the shell for the reason above: the shell cannot name
+/// `Refused`'s variants. ADR 0012 keeps the wording in the shell — this is an
+/// identifier, not a sentence, and `ui/frases.js` turns it into one.
+#[must_use]
+pub fn refusal_name(why: &Refused) -> &'static str {
+    match why {
+        Refused::Malformed { .. } => "malformed",
+        Refused::SchemaTooNew { .. } => "schema-too-new",
+        Refused::ApiTooNew { .. } => "api-too-new",
+        Refused::MalformedId => "malformed-id",
+        Refused::Empty => "empty",
+    }
+}
+
+/// Lowercase hex of a content hash.
+///
+/// Here rather than in the shell because it is what a person compares by eye
+/// against what the indexer publishes, and two spellings of the same hash would
+/// make that comparison fail for no reason.
+#[must_use]
+pub fn hex(hash: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    hash.iter().fold(String::new(), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    })
 }
 
 /// The identifier of an entry, however it turned out.
