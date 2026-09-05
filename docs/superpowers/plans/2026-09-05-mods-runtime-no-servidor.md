@@ -278,8 +278,12 @@ const TETO_DE_MEMORIA: usize = 8 * 1024 * 1024;
 /// Steps and not milliseconds because that is what the interpreter counts, and
 /// because a number of steps behaves the same on a fast machine and a slow one
 /// — a wall-clock ceiling would cut a slow host's MOD and spare a fast one's.
-/// The spike stopped a `while (true) {}` in 169 ms with 10 000.
-const TETO_DE_PASSOS: usize = 200_000;
+/// **Corrigido na execução, e o erro era de fator 5 000.** O contador não conta
+/// operações: conta quantas vezes o motor resolve perguntar «continua?».
+/// Medido: 1 consulta ≈ 5 000 operações ≈ 0,45 ms. O 200 000 que estava aqui
+/// valeria **noventa segundos** de um MOD segurando um SFU de 1 vCPU. Ver a doc
+/// do módulo para a tabela.
+const TETO_DE_CONSULTAS: usize = 500;
 
 /// Why a MOD did not run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -382,7 +386,7 @@ impl Anfitriao {
             f.call::<_, ()>((momento, carga)).map_err(|erro| {
                 if hospede.passos.load(Ordering::Relaxed) > TETO_DE_PASSOS {
                     Falha::PassouDoTempo
-                } else if matches!(erro, rquickjs::Error::OutOfMemory) {
+                } else if matches!(erro, rquickjs::Error::Allocation) {
                     Falha::EstourouMemoria
                 } else {
                     Falha::Lancou
@@ -405,7 +409,7 @@ pub mod mods;
 Run: `cargo test -p seele-server mods::tests`
 Expected: PASS, seis testes.
 
-**Se `rquickjs::Error::OutOfMemory` não existir com esse nome**, não invente:
+**A variante do estouro é `Allocation`** — conferida em `rquickjs-core-0.12.2/src/result.rs`, e não `OutOfMemory`, que foi o nome que eu supus ao escrever isto. Se ela mudar de nome numa versão futura, não invente:
 rode `cargo doc -p rquickjs --open` e leia as variantes de `Error` da versão que
 o `Cargo.lock` travou. O que não muda é o desenho — o estouro tem variante
 própria, e cair para `Lancou` seria perder a única informação que distingue um

@@ -39,6 +39,22 @@ igd-next = { version = "0.17.1", default-features = false, features = ["aio_toki
 # entram os `netlink-*` no lugar dos `objc2-*`, e no Windows nada além do
 # `windows-sys` que o quinn já traz. Ver `alcance::pcp::roteador_padrao`.
 netdev = { version = "0.46.1", default-features = false, features = ["gateway"] }
+# O interpretador dos MODs (ADR 0044). QuickJS pelo binding, e não Boa: o spike
+# `spikes/mod-em-js/` mediu 11× menos binário (+1 098 KiB contra +12 088), ~2×
+# menos custo por chamada (39 ns contra 73) e ~4× menos memória com 50 contextos
+# (5,9 MB contra 24,8). Contra o orçamento de 1 vCPU / 512 MB que o
+# `check_deps` protege, a diferença decide.
+#
+# MIT, então nenhuma exceção nova no `deny.toml`. Custo medido contra o
+# `Cargo.lock` deste workspace: **4 crates novas** — `rquickjs`,
+# `rquickjs-core`, `rquickjs-sys` e `relative-path`. É menos que o `netdev`
+# acima custou.
+#
+# **O custo que ele traz, e é novo neste projeto:** `rquickjs-sys` compila fonte
+# em C, então construir este crate passa a exigir um compilador de C. Existe nos
+# três alvos — Xcode CLT, MSVC nos runners de Windows, `cc` no Linux — e é a
+# primeira vez que o Rust sozinho não basta.
+rquickjs = "0.12.2"
 seele-proto = { path = "../seele-proto" }
 quinn = "0.11.11"
 rand = "0.10.2"
