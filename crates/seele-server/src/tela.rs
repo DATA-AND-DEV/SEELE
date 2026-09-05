@@ -456,6 +456,15 @@ impl SondaDaSubida {
             .and_then(|pct| u32::try_from(pct).ok())
             .unwrap_or(0);
         let doeu = perda_pct >= PERDA_QUE_DOI;
+        // **O campo que era somado e ninguém lia.** `eventos_de_congestionamento`
+        // entra em `LeituraDaSubida` desde que ela existe e não decidia nada.
+        // Passa a decidir aqui, que é a única janela desta sonda cuja evidência
+        // não é o vídeo enchendo a própria licença — ver o braço do piso
+        // demonstrado, abaixo.
+        let congestionou = leitura
+            .eventos_de_congestionamento
+            .saturating_sub(janela.leitura.eventos_de_congestionamento)
+            > 0;
         // A faixa do meio segura: nem sobe nem desce. É onde a perda existe e
         // não é o cano falando.
         let calma = perda_pct <= PERDA_QUE_ACALMA;
@@ -484,9 +493,33 @@ impl SondaDaSubida {
             let passo = (u64::from(antes) * u64::from(quanto) / 100) as u32;
             let teto = self.limite_bps.unwrap_or(TETO_DA_SUBIDA_BPS);
             self.estimativa_bps = passo.min(teto).min(TETO_DA_SUBIDA_BPS);
+        } else if entregue_bps > antes && calma && !congestionou {
+            // **O piso demonstrado**, e é a janela que esta sonda descartava.
+            //
+            // Sem transmissão, `permitido` é zero e `cheia` é falso — mas o cano
+            // não estava parado: dez pessoas conversando são 6,5 Mbps saindo
+            // daqui. Uma estimativa menor do que o que a máquina acabou de
+            // empurrar está errada, e a própria janela é a prova.
+            //
+            // **Vai para o que passou, e nunca um passo além.** O `SUBIDA` de
+            // 25% é sondagem, e sondar é pedir ao cano mais do que se sabe que
+            // ele dá — legítimo quando quem pede é o vídeo dentro da própria
+            // licença, e não quando o que encheu a janela foi a voz. Aqui só se
+            // afirma o que foi medido.
+            //
+            // **E a barra é mais alta que o `doeu` das outras janelas**, que é
+            // perda ≥ `PERDA_QUE_DOI` e nada mais. O teto do vídeo é
+            // `FRACAO_DO_CAMINHO` da estimativa **por cima** do que a voz já
+            // gasta; levantá-la a partir de um cano que já está reclamando daria
+            // ao vídeo licença sobre bits que a voz está usando, e a regra que
+            // não se negocia é que a voz nunca cede à tela (§3.2). Perda calma
+            // não basta: o cano não pode ter reclamado nenhuma vez.
+            let teto = self.limite_bps.unwrap_or(TETO_DA_SUBIDA_BPS);
+            self.estimativa_bps = entregue_bps.min(teto).min(TETO_DA_SUBIDA_BPS);
         }
-        // E o quarto caso — não doeu e não encheu — não move nada. É a tela
-        // parada, e ela não é notícia sobre o cano.
+        // E o quinto caso — não doeu, não encheu e não entregou mais do que se
+        // acreditava — não move nada. É a tela parada com a sala quieta, e ela
+        // não é notícia sobre o cano.
 
         self.estimativa_bps = self
             .estimativa_bps
@@ -961,6 +994,91 @@ mod tests {
             CAMINHO_DO_SERVER_BPS,
             "uma sala parada mexeu na estimativa da subida: o servidor passou a \
              confundir «ninguém mandou nada» com «o cano é estreito»"
+        );
+    }
+
+    /// A mesma leitura, com o congestionamento que o cano relatou.
+    fn leitura_com_congestionamento(
+        bytes: u64,
+        eventos: u64,
+        permitido_bps: u32,
+    ) -> LeituraDaSubida {
+        LeituraDaSubida {
+            eventos_de_congestionamento: eventos,
+            ..leitura(bytes, 0, permitido_bps)
+        }
+    }
+
+    #[test]
+    fn a_conversa_que_enche_o_cano_ensina_a_subida_antes_da_primeira_tela() {
+        // **O tateio de catorze segundos no começo de toda transmissão.**
+        //
+        // A sonda só aprendia por uma evidência: o vídeo ter gastado
+        // `OCUPACAO_MINIMA` do que o teto lhe permitia. Sem transmissão,
+        // `permitido_bps` é zero, toda janela é descartada, e a primeira tela
+        // de uma call abre na hipótese de 2 Mbps — subindo 25% por janela até
+        // alcançar o cano, com o portão recusando espectador durante a subida.
+        //
+        // Existe uma segunda evidência, e ela é mais forte que a primeira: **se
+        // o cano entregou mais bits do que a estimativa dizia caber, o cano é
+        // pelo menos esse tamanho.** Não é palpite nem passo cego — é o que a
+        // máquina comprovadamente empurrou. Dez pessoas conversando são 6,5
+        // Mbps saindo daqui, e uma estimativa de 2 Mbps que os vê passar está
+        // errada, com a própria janela como prova.
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        let voz_bps = 8_000_000;
+        let mut bytes = 0;
+        for segundo in 1..=3 {
+            bytes += bytes_em_um_segundo(voz_bps);
+            // `permitido` zero: ninguém está transmitindo tela nenhuma.
+            sonda.observar(inicio + Duration::from_secs(segundo), &leitura(bytes, 0, 0));
+        }
+        assert_eq!(
+            sonda.estimativa(),
+            voz_bps,
+            "o cano carregou 8 Mbps sem reclamar e a estimativa ficou na hipótese: \
+             a primeira tela desta call vai abrir tateando"
+        );
+    }
+
+    #[test]
+    fn o_cano_que_reclama_nao_levanta_a_subida_por_mais_que_entregue() {
+        // **A metade que protege a voz, e a razão de ela ser mais dura que o
+        // «doeu» das outras janelas.**
+        //
+        // O `doeu` desta sonda é perda ≥ `PERDA_QUE_DOI`, e só. Isso basta para
+        // uma janela em que o **vídeo** encheu a própria licença: ali a
+        // estimativa e o gasto são a mesma perna, e 60% dela continua sendo
+        // 60% dela.
+        //
+        // A janela que esta onda passou a aceitar é outra coisa: o que a encheu
+        // foi voz, e o teto do vídeo é 60% da estimativa **por cima** do que a
+        // voz já gasta. Levantá-la a partir de um cano que já está reclamando
+        // seria dar ao vídeo licença sobre bits que a voz está usando — e a
+        // regra que não se negocia é que a voz nunca cede à tela (§3.2).
+        //
+        // Então esta janela exige silêncio de verdade: perda calma **e** nenhum
+        // evento de congestionamento novo. `eventos_de_congestionamento` era
+        // somado em `LeituraDaSubida` e não era lido por ninguém; passa a ser
+        // lido aqui, que é onde ele decide algo.
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        let mut bytes = 0;
+        let mut eventos = 0;
+        for segundo in 1..=3 {
+            bytes += bytes_em_um_segundo(8_000_000);
+            eventos += 1;
+            sonda.observar(
+                inicio + Duration::from_secs(segundo),
+                &leitura_com_congestionamento(bytes, eventos, 0),
+            );
+        }
+        assert_eq!(
+            sonda.estimativa(),
+            CAMINHO_DO_SERVER_BPS,
+            "o cano reclamou e a estimativa subiu assim mesmo: o teto do vídeo \
+             passa a cobrir bits que a voz está usando"
         );
     }
 
