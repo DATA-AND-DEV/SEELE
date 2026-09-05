@@ -279,4 +279,82 @@ mod testes {
             "o que vem depois de /ARGS é do app, e nada além disso"
         );
     }
+    /// **Chamar-se `desinstalar.exe` já é o pedido.**
+    ///
+    /// O modo vinha só da linha de comando, e a linha de comando vem do
+    /// `UninstallString` — que foi **gravado no passado**. Uma máquina que
+    /// instalou com a versão que o escrevia sem argumento tem, no registro, uma
+    /// linha que manda rodar o arquivo cru; e rodá-lo cru abria a janela de
+    /// instalar.
+    ///
+    /// Consertar o que se grava conserta a próxima instalação e não a de quem já
+    /// instalou. O relato veio duas vezes, a segunda com «isso já está ficando
+    /// irritante» — e estava certo: um conserto que depende de um valor guardado
+    /// por uma versão anterior não é conserto, é pedido de reinstalação.
+    #[test]
+    fn o_arquivo_chamado_desinstalar_desinstala_mesmo_sem_argumento() {
+        let sem_nada: Vec<String> = Vec::new();
+        assert!(
+            matches!(
+                super::ler_com_nome(Some("desinstalar.exe"), sem_nada.into_iter()),
+                Pedido::RemoverDeDentro
+            ),
+            "o `desinstalar.exe` rodado sem argumento voltou a abrir o instalador"
+        );
+
+        // Maiúscula não muda nada: o Windows não distingue, e o `UninstallString`
+        // de outra versão pode ter escrito de outro jeito.
+        let sem_nada: Vec<String> = Vec::new();
+        assert!(matches!(
+            super::ler_com_nome(
+                Some("DESINSTALAR.EXE".to_lowercase().as_str()),
+                sem_nada.into_iter()
+            ),
+            Pedido::RemoverDeDentro
+        ));
+    }
+
+    /// O segundo tempo tem o mesmo nome, e o argumento é que os separa.
+    ///
+    /// Os dois arquivos se chamam `desinstalar.exe`: o de dentro da pasta e a
+    /// cópia no temporário. Sem esta distinção, a cópia se trataria como o
+    /// primeiro tempo e se copiaria de novo, para sempre.
+    #[test]
+    fn o_segundo_tempo_vence_o_nome() {
+        let pedido = super::ler_com_nome(
+            Some("desinstalar.exe"),
+            [
+                "--desinstalar-de".to_owned(),
+                r"C:\Program Files\SEELE".to_owned(),
+            ]
+            .into_iter(),
+        );
+        assert!(
+            matches!(pedido, Pedido::RemoverA(_)),
+            "a cópia no temporário voltou a se tratar como o primeiro tempo"
+        );
+    }
+
+    /// E o instalador baixado continua instalando.
+    ///
+    /// Ele se chama `SEELE_<versão>_x64-instalador.exe`, e é esse mesmo arquivo
+    /// que o atualizador roda. Nenhum dos dois se chama `desinstalar.exe`.
+    #[test]
+    fn o_instalador_baixado_nao_e_confundido_com_o_desinstalador() {
+        let sem_nada: Vec<String> = Vec::new();
+        assert!(matches!(
+            super::ler_com_nome(
+                Some("seele_0.10.4-3_x64-instalador.exe"),
+                sem_nada.into_iter()
+            ),
+            Pedido::Instalar { .. }
+        ));
+        assert!(matches!(
+            super::ler_com_nome(
+                Some("seele_0.10.4-3_x64-instalador.exe"),
+                ["/P".to_owned(), "/R".to_owned()].into_iter()
+            ),
+            Pedido::Instalar { .. }
+        ));
+    }
 }
