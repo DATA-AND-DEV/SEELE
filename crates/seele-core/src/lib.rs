@@ -34,6 +34,7 @@ pub mod encontro;
 pub mod enlace;
 pub mod frame;
 pub mod identity;
+pub mod mods;
 pub mod preferences;
 pub mod preview;
 pub mod search;
