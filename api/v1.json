@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "reads": {
+    "servidor.nome": "ServerConfig",
+    "servidor.pessoas": "PersonState",
+    "servidor.salas": "VoiceRoomId",
+    "servidor.canais": "ChannelId",
+    "servidor.papeis": "RoleId",
+    "pessoa.id": "PersonId",
+    "pessoa.apelido": "PersonProfile",
+    "pessoa.papel": "Role",
+    "pessoa.permissoes": "Permission",
+    "sala.id": "VoiceRoomId",
+    "sala.nome": "RenameVoiceRoom",
+    "sala.pessoas": "PersonPresent",
+    "canal.id": "ChannelId",
+    "canal.nome": "RenameChannel",
+    "canal.historico": "FetchHistory",
+    "mensagem.id": "MessageId",
+    "mensagem.autor": "MessageReceived",
+    "mensagem.texto": "SendMessage",
+    "mensagem.quando": "MessageEdited"
+  },
+  "moments": [
+    "PersonJoined", "PersonLeft", "PersonPresent", "PersonGone",
+    "PersonRenamed", "PersonIconChanged",
+    "MessageReceived", "MessageEdited", "MessageRemoved",
+    "VoiceRoomCreated", "VoiceRoomRenamed", "VoiceRoomDeleted",
+    "MovedToVoiceRoom",
+    "ChannelCreated", "ChannelRenamed", "ChannelDeleted", "ChannelWeighed",
+    "ScreenShareStarted", "ScreenShareStopped",
+    "ServerRenamed", "ServerIconChanged"
+  ],
+  "actions": {
+    "mandarMensagem": "SendMessage",
+    "removerMensagem": "RemoveMessage",
+    "criarSala": "CreateVoiceRoom",
+    "renomearSala": "RenameVoiceRoom",
+    "apagarSala": "DeleteVoiceRoom",
+    "criarCanal": "CreateChannel",
+    "renomearCanal": "RenameChannel",
+    "apagarCanal": "DeleteChannel",
+    "moverPessoa": "MovePerson",
+    "expulsarPessoa": "KickPerson",
+    "banirPessoa": "BanPerson",
+    "renomearServidor": "RenameServer",
+    "definirIconeDoServidor": "SetServerIcon"
+  },
+  "own": {
+    "guardar": "mod_data",
+    "ler": "mod_data",
+    "esquecer": "mod_data",
+    "listar": "mod_data"
+  },
+  "world": {
+    "buscar": "Anfitriao",
+    "agora": "now_seconds",
+    "registrar": "Anfitriao"
+  }
+}
