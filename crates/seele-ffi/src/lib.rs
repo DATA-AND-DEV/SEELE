@@ -154,7 +154,7 @@ pub fn impressao_desta_maquina(home: &str) -> Result<String, ConnectionError> {
 /// How often measurements are refreshed.
 const TICK: Duration = Duration::from_millis(250);
 
-/// How many messages of history to ask for when o canal opens.
+/// How many messages of history to ask for when a channel opens.
 const HISTORY_PAGE: u16 = 50;
 
 /// What a shell needs to connect.
@@ -1159,7 +1159,7 @@ impl Connection {
     /// # Errors
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
-    pub fn insert_plug(&self, voice_room: u32) -> Result<(), ConnectionError> {
+    pub fn enter_voice_room(&self, voice_room: u32) -> Result<(), ConnectionError> {
         self.command(Command::EnterVoiceRoom(VoiceRoomId(voice_room)))
     }
 
@@ -1168,11 +1168,11 @@ impl Connection {
     /// # Errors
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
-    pub fn eject_plug(&self) -> Result<(), ConnectionError> {
+    pub fn leave_voice_room(&self) -> Result<(), ConnectionError> {
         self.command(Command::LeaveVoiceRoom)
     }
 
-    /// Opens o canal and asks for the page of history behind it.
+    /// Opens a channel and asks for the page of history behind it.
     ///
     /// # Errors
     ///
@@ -1244,7 +1244,7 @@ impl Connection {
     ///
     /// **On a press, never on a scroll**, and that is a decision this call
     /// leaves no room to get wrong: it downloads. The file lives on the server,
-    /// so looking at it costs the host's uplink, and o canal that previewed
+    /// so looking at it costs the host's uplink, and a channel that previewed
     /// everything as it scrolled would turn a 1 GiB disk ceiling into a 1 GiB
     /// transfer every time somebody opened it.
     ///
@@ -1628,7 +1628,7 @@ impl Connection {
         })
     }
 
-    /// Asks the server to destroy o canal, and everything written in it —
+    /// Asks the server to destroy the channel, and everything written in it —
     /// `apagar_linha`.
     ///
     /// # Errors
@@ -1640,7 +1640,7 @@ impl Connection {
         })
     }
 
-    /// Asks what destroying o canal would cost, and waits for the answer.
+    /// Asks what destroying the channel would cost, and waits for the answer.
     ///
     /// The one call on this handle that waits, and the reason is the sentence it
     /// feeds: a confirmation promising to destroy 1.847 messages by 6 people
@@ -3670,7 +3670,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             let _ = client.lembrar_o_caminho(bps).await;
         }
         Command::EnterVoiceRoom(voice_room) => {
-            if client.inserir_plug(voice_room).await.is_err() {
+            if client.entrar_na_voice_room(voice_room).await.is_err() {
                 return false;
             }
             if let Ok(mut room) = shared.room.lock() {
@@ -3679,14 +3679,14 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             shared.notify(&Event::RosterChanged);
         }
         Command::LeaveVoiceRoom => {
-            if client.ejetar_plug().await.is_err() {
+            if client.sair_da_voice_room().await.is_err() {
                 return false;
             }
             // O espelho do `EnterVoiceRoom` acima, e ele faltava. O servidor não
             // devolve o `PersonLeft` a quem o causou — «essa pessoa já sabe» —,
             // então esta metade do roster é contabilidade desta casca. Sem ela
             // o assento se esvazia no servidor e em todos os outros clientes, e
-            // a única tela que continua desenhando o pessoa na jaula é a de
+            // a única tela que continua desenhando a pessoa na sala é a de
             // quem acabou de sair dela.
             if let Ok(mut room) = shared.room.lock() {
                 room.leave_voice_room();
@@ -3747,7 +3747,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             }
         }
         // Nothing is written into the local `Room` here, unlike entering a voice room
-        // or opening o canal. Those two are facts about this client, which the
+        // or opening a channel. Those two are facts about this client, which the
         // server confirms by silence; a room is a fact about the server, and the
         // only honest source for it is the server saying it exists. Writing it in
         // optimistically would draw a room for the person who asked even when
@@ -5590,7 +5590,7 @@ mod tests {
         assert_eq!(tela.de, 3);
         assert!(
             !tela.e_minha,
-            "quem compartilha é o pessoa 3, e nós somos o 7"
+            "quem compartilha é a pessoa 3, e nós somos a 7"
         );
         // Três na sala — nós, o 3 e o 4 —, e quem compartilha não assiste a si
         // mesmo. Quem assiste são dois, e é esse N que divide o teto (§5.1).

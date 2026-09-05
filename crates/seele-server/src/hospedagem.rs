@@ -31,7 +31,7 @@ use crate::{Daemon, ServerConfig};
 /// desktop e ela **não depende de `tokio`**. Sem este nome, expor o banco
 /// obrigaria o app a declarar a dependência só para escrever o tipo de uma
 /// variável — uma dependência inteira paga em nome de uma anotação.
-pub type CasperCompartilhado = Arc<tokio::sync::Mutex<crate::persistence::Persistence>>;
+pub type PersistenceCompartilhada = Arc<tokio::sync::Mutex<crate::persistence::Persistence>>;
 
 /// Um servidor rodando dentro deste processo.
 ///
@@ -229,7 +229,7 @@ impl Hospedagem {
     /// segurar os dois. Clonar é barato, e o `await` acontece depois de o outro
     /// já ter sido solto.
     #[must_use]
-    pub fn persistence(&self) -> CasperCompartilhado {
+    pub fn persistence(&self) -> PersistenceCompartilhada {
         Arc::clone(&self.server.server().persistence)
     }
 

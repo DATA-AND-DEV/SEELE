@@ -61,7 +61,7 @@ const OUTBOUND_DEPTH: usize = 256;
 
 /// Quantos quadros de controle esperam a sessão antes de a leitura parar.
 ///
-/// Limitado de propósito. Controle é raro — entrar num sala de voz, abrir uma Linha,
+/// Limitado de propósito. Controle é raro — entrar numa sala de voz, abrir uma Linha,
 /// dizer uma frase — então um cliente honesto nunca chega perto disto; e um
 /// desonesto encontra contrapressão em vez de memória do servidor para gastar.
 const ENTRADA_DEPTH: usize = 64;
@@ -426,7 +426,7 @@ pub async fn serve(
 /// `Connection` é recolhida, e o QUIC derruba tudo — inclusive o quadro que
 /// ainda não tinha saído. **O cliente lia erro de conexão e mostrava "não foi
 /// possível alcançar o servidor"**, mandando a pessoa procurar problema de rede
-/// enquanto a resposta era "esse apelido é de outro pessoa".
+/// enquanto a resposta era "esse apelido é de outra pessoa".
 ///
 /// `stopped()` volta quando o outro lado reconheceu o fim do fluxo, que é a
 /// prova de que ele leu. O prazo existe porque um cliente que sumiu no meio da
@@ -795,7 +795,7 @@ async fn handshake(
     // `persistence::aparencia`.
     //
     // Uma segunda tomada do mutex, e não um campo a mais na `Account`: são duas
-    // perguntas sobre coisas diferentes — o que este pessoa é, e o que este
+    // perguntas sobre coisas diferentes — o que esta pessoa é, e o que este
     // servidor é — e o aperto de mão já toma este mutex mais de uma vez.
     let (nome_do_server, icone_do_server, icones_das_pessoas) = {
         let guard = server.persistence.lock().await;
@@ -1411,11 +1411,11 @@ async fn run_session(
     // E quais salas de voz já estão transmitindo tela, pelo mesmo motivo e no mesmo
     // lugar.
     //
-    // §3.6 escreve esta regra como «reenviado a quem entra num sala de voz que já
+    // §3.6 escreve esta regra como «reenviado a quem entra numa sala de voz que já
     // está transmitindo», e ela é atendida aqui em vez de na entrada da sala de voz
     // porque `ScreenShareStarted` sai do barramento **sem filtro de sala** —
     // do jeito que `PersonJoined` passou a sair quando o cliente começou a
-    // desenhar todos as salas de voz. Com a difusão cobrindo tudo o que acontece a
+    // desenhar todas as salas de voz. Com a difusão cobrindo tudo o que acontece a
     // partir de agora, o que falta é exatamente o que já estava acontecendo
     // antes de esta conexão existir, e isso é uma varredura, uma vez.
     //
@@ -1957,8 +1957,8 @@ async fn run_session(
                             Ok(()) => {
                                 tracing::info!(by = %session.person, %id, own = seu, "message removed");
                                 // The Channel comes from the stored row, never
-                                // from the asker: o canal the client filled in
-                                // is o canal the client can fill in wrong, and
+                                // from the asker: the channel the client filled in
+                                // is the channel the client can fill in wrong, and
                                 // it would aim somebody else's announcement.
                                 let _ = server.events.send(Event::MessageRemoved {
                                     channel: alvo.channel,
@@ -2052,7 +2052,7 @@ async fn run_session(
                     }
                     // A read, answered straight down this connection rather
                     // than over the bus: it is nobody else's business how heavy
-                    // o canal looked to the person about to be asked whether
+                    // the channel looked to the person about to be asked whether
                     // they mean it.
                     //
                     // No permission. Answering tells a person how much is in a
@@ -2145,7 +2145,7 @@ async fn run_session(
                         // Sentado antes de transmitir. Uma sala de voz vindo de quem
                         // pergunta é uma sala de voz que quem pergunta aponta para
                         // outro lugar, então a mensagem não o carrega e a
-                        // resposta é a sala onde o connection está.
+                        // resposta é a sala onde a pessoa está.
                         //
                         // `PermissionDenied` é a recusa mais próxima que existe
                         // enumerada, e ela não diz a verdade inteira: a pessoa
@@ -2296,7 +2296,7 @@ async fn run_session(
                     //
                     // Aqui havia um `let Ok(event) = event else { continue }`, e
                     // era a pendência nº 1 inteira: a sessão seguia, calada, com
-                    // um buraco permanente no que aquele pessoa vê. Ninguém dos
+                    // um buraco permanente no que aquela pessoa vê. Ninguém dos
                     // dois lados ficava sabendo, e não havia número nenhum para
                     // olhar depois.
                     //
@@ -2458,10 +2458,10 @@ async fn run_session(
                         }).await?;
                         continue;
                     }
-                    // The same for o canal this connection had open. It is
+                    // The same for the channel this connection had open. It is
                     // dropped from `channels` here rather than left to rot: that
                     // list is what `translate` filters message traffic by, and
-                    // o canal that stayed in it would make this connection the
+                    // a channel that stayed in it would make this connection the
                     // one that still asks about a room that is gone.
                     Event::ChannelDeleted { channel: id } if channels.contains(id) => {
                         channels.retain(|aberta| aberta != id);
@@ -2733,10 +2733,10 @@ async fn assentar(
     });
 
     // **Nada de tela é reenviado aqui**, e o §3.6 pede que seja — «também
-    // enviado a um pessoa que entra num sala de voz onde já há transmissão». Ele é
+    // enviado a uma pessoa que entra numa sala de voz onde já há transmissão». Ele é
     // atendido em outro lugar e melhor: `ScreenShareStarted` sai pelo
     // barramento **sem filtro**, como `PersonJoined` já sai desde que o cliente
-    // passou a desenhar todos as salas de voz, e o que faltava — o que já estava
+    // passou a desenhar todas as salas de voz, e o que faltava — o que já estava
     // acontecendo antes de esta conexão existir — é mandado uma vez, no começo
     // da sessão, ao lado do retrato da ocupação. Reenviar aqui seria o mesmo
     // quadro duas vezes para quem já o tinha.
@@ -2819,7 +2819,7 @@ async fn moderavel(
 ///
 /// O fluxo não carrega identidade nenhuma, e não deve carregar: quem manda é a
 /// conexão, como o `ssrc` de `VoiceRoom::forward`. Então a primeira pergunta é ao
-/// registro que decidiu a corrida do §6 item 3 — este pessoa está transmitindo
+/// registro que decidiu a corrida do §6 item 3 — esta pessoa está transmitindo
 /// em alguma sala? —, e o `ScreenId` que o cabeçalho declara é conferido contra
 /// o que **este servidor** atribuiu. Sem essas duas linhas, abrir um fluxo seria
 /// uma maneira de compartilhar tela sem pedir, e de assinar a transmissão de
@@ -2927,13 +2927,13 @@ async fn receber_tela(
     Ok(())
 }
 
-/// Encerra e anuncia o que este pessoa estivesse transmitindo, onde estivesse.
+/// Encerra e anuncia o que esta pessoa estivesse transmitindo, onde estivesse.
 ///
-/// Chamado em todo lugar onde o connection sai de uma sala de voz — sair, ser movido, ser
+/// Chamado em todo lugar onde alguém sai de uma sala de voz — sair, ser movido, ser
 /// expulso, ou a conexão acabar em qualquer `?` do meio do laço. Uma
 /// transmissão que sobrevivesse à saída de quem a manda ficaria desenhada para
 /// sempre na sala, prometendo um fluxo que não tem mais de onde vir: é o mesmo
-/// defeito do pessoa fantasma que `serve` conserta logo acima, com a diferença
+/// defeito da pessoa fantasma que `serve` conserta logo acima, com a diferença
 /// de que aqui a promessa é de imagem em movimento.
 async fn encerrar_telas_de(server: &Server, person: PersonId) {
     for (voice_room, screen) in server.telas.lock().await.encerrar_de(person) {
@@ -3224,7 +3224,7 @@ fn translate(
         //
         // A todo mundo e não só à sala de voz: é a mesma escolha que `PersonJoined`
         // fez ao deixar de filtrar por sala, e pelo mesmo motivo — a v3 desenha
-        // todos as salas de voz, e uma sala que não diz que está transmitindo é uma
+        // todas as salas de voz, e uma sala que não diz que está transmitindo é uma
         // sala em que ninguém sabe que há o que assistir. Não revela nada que
         // entrar na sala já não revelasse.
         Event::ScreenShareStarted {

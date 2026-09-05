@@ -754,7 +754,7 @@ impl Store {
     /// Deduplication happens here, **after** the bytes arrived, and that is
     /// deliberate: answering "I already have that" before receiving would tell
     /// the sender, by timing alone, that somebody has already sent that exact
-    /// file — including into o canal they may not read. The disk is the resource
+    /// file — including into a channel they may not read. The disk is the resource
     /// under a hard ceiling, and the disk is still spared.
     ///
     /// # Errors

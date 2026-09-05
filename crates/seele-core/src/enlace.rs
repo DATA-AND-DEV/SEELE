@@ -249,8 +249,8 @@ enum Comando {
     /// Chegar depois da conexão não custa nada: a sonda só começa a medir
     /// quando a tela transmite, e ninguém transmite antes de entrar.
     LembrarCaminho(u32),
-    InserirPlug(VoiceRoomId),
-    EjetarPlug,
+    EntrarNaVoiceRoom(VoiceRoomId),
+    SairDaVoiceRoom,
     AbrirLinha(ChannelId),
     Dizer {
         linha: ChannelId,
@@ -1179,7 +1179,7 @@ impl Enlace {
                 //
                 // E fecha **dizendo o que foi**: o motivo viaja no
                 // `CONNECTION_CLOSE` e é o que fica no log do servidor. Fechar
-                // como `ejected` faria uma recusa de convite parecer um pessoa
+                // como `ejected` faria uma recusa de convite parecer uma pessoa
                 // saindo, que é o único jeito de esconder a recusa de quem tem
                 // o log na mão.
                 cliente.close(crate::client::INVITE_REFUSED);
@@ -1343,13 +1343,13 @@ impl Enlace {
         self.media.clone()
     }
 
-    /// Entra num sala de voz. Restaurado depois de uma reconexão.
+    /// Entra numa sala de voz. Restaurado depois de uma reconexão.
     ///
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn inserir_plug(&self, voice_room: VoiceRoomId) -> Result<(), Fechado> {
-        self.mandar(Comando::InserirPlug(voice_room)).await
+    pub async fn entrar_na_voice_room(&self, voice_room: VoiceRoomId) -> Result<(), Fechado> {
+        self.mandar(Comando::EntrarNaVoiceRoom(voice_room)).await
     }
 
     /// Sai da sala de voz.
@@ -1357,8 +1357,8 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn ejetar_plug(&self) -> Result<(), Fechado> {
-        self.mandar(Comando::EjetarPlug).await
+    pub async fn sair_da_voice_room(&self) -> Result<(), Fechado> {
+        self.mandar(Comando::SairDaVoiceRoom).await
     }
 
     /// Abre uma Linha. Restaurada depois de uma reconexão.
@@ -1413,7 +1413,7 @@ impl Enlace {
 
     /// Pede ao servidor que faça uma sala de voz.
     ///
-    /// Pede, e só. Nada aqui confere se este pessoa pode: a `specs/08-seguranca.md`
+    /// Pede, e só. Nada aqui confere se esta pessoa pode: a `specs/08-seguranca.md`
     /// põe a decisão no servidor, e um core que recusasse por conta própria
     /// seria uma segunda autoridade para manter de acordo com a primeira. A
     /// resposta chega como aviso — `VoiceRoomCreated` se aconteceu, `Alert` com
@@ -1959,7 +1959,7 @@ impl Motor {
                     comando = comandos.recv() => {
                         match comando {
                             Some(Comando::Sair) | None => return self.encerrar(Motivo::Pedido),
-                            // Guardado, não perdido: entrar num sala de voz durante a
+                            // Guardado, não perdido: entrar numa sala de voz durante a
                             // queda é uma intenção que vale quando voltar.
                             Some(comando) => { self.lembrar(&comando); None }
                         }
@@ -1973,8 +1973,8 @@ impl Motor {
                     Ok(mensagem) => {
                         // O que a reconexão vai refazer também muda quando
                         // **outra pessoa** decide. Sem isto, alguém movido por
-                        // um operador voltaria, depois de uma queda, para o
-                        // sala de voz de onde foi tirado: o motor refaz o último sala de voz
+                        // um operador voltaria, depois de uma queda, para a
+                        // sala de voz de onde foi tirado: o motor refaz a última sala de voz
                         // que este cliente pediu, e ele não pediu este.
                         if let ServerMessage::MovedToVoiceRoom { voice_room } = mensagem {
                             self.voice_room = Some(voice_room);
@@ -2153,7 +2153,7 @@ impl Motor {
                 // "reconectado" e perguntasse a sala de voz antes de ele existir veria
                 // uma sala vazia e acharia que perdeu gente.
                 if let Some(voice_room) = self.voice_room {
-                    let _ = cliente.insert_plug(voice_room).await;
+                    let _ = cliente.enter_voice_room(voice_room).await;
                 }
                 if let Some(linha) = self.linha {
                     let _ = cliente.join_channel(linha).await;
@@ -2196,8 +2196,8 @@ impl Motor {
         let resultado = match comando {
             // Nada a mandar ao servidor: é estado desta máquina.
             Comando::LembrarCaminho(_) => Ok(()),
-            Comando::InserirPlug(voice_room) => cliente.insert_plug(voice_room).await,
-            Comando::EjetarPlug => cliente.eject_plug().await,
+            Comando::EntrarNaVoiceRoom(voice_room) => cliente.enter_voice_room(voice_room).await,
+            Comando::SairDaVoiceRoom => cliente.leave_voice_room().await,
             Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
             Comando::Dizer { linha, corpo, id } => cliente.send_message(linha, &corpo, id).await,
             Comando::Historico { linha, limite } => {
@@ -2566,14 +2566,14 @@ impl Motor {
     /// O pedido guardado vira bomba, se este `ScreenShareStarted` for o dele.
     ///
     /// A guarda que mora aqui é uma só, e é a que precisa do [`Client`]: **é
-    /// desta pessoa?** O quadro sai do barramento do servidor para a sala de voz inteiro,
+    /// desta pessoa?** O quadro sai do barramento do servidor para a sala de voz inteira,
     /// e sem ela quem apenas assiste ligaria a captura da própria tela ao ver
     /// outro começar. As outras duas — já há uma viva, e o pedido existe — moram
     /// em [`Self::nascer_a_tela`], porque valem também para quem o chama de um
     /// teste.
     ///
     /// **A `Bomba` não vai para uma bomba a mais quando o servidor reenvia.** Ele
-    /// reenvia `ScreenShareStarted` a cada pessoa que entra num sala de voz onde já há
+    /// reenvia `ScreenShareStarted` a cada pessoa que entra numa sala de voz onde já há
     /// transmissão, e quem transmite recebe o reenvio junto; o pedido já foi
     /// consumido no primeiro, então o segundo não acha nada.
     fn talvez_ligar_a_bomba(&mut self, pessoa: PersonId, tela: ScreenId) {
@@ -2762,8 +2762,8 @@ impl Motor {
                 tracing::info!(bps, "a sonda começa do caminho lembrado deste servidor");
                 self.caminho = crate::caminho::Sonda::partindo_de(*bps);
             }
-            Comando::InserirPlug(voice_room) => self.voice_room = Some(*voice_room),
-            Comando::EjetarPlug => self.voice_room = None,
+            Comando::EntrarNaVoiceRoom(voice_room) => self.voice_room = Some(*voice_room),
+            Comando::SairDaVoiceRoom => self.voice_room = None,
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
             Comando::Muted(ligado) => self.muted = *ligado,
             Comando::Isolamento(ligado) => self.isolamento = *ligado,
@@ -3429,7 +3429,7 @@ mod tests {
     fn o_que_a_reconexao_restaura_e_o_que_a_pessoa_escolheu() {
         let mut motor = motor_de_teste();
 
-        motor.lembrar(&Comando::InserirPlug(VoiceRoomId(2)));
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2)));
         motor.lembrar(&Comando::AbrirLinha(ChannelId(7)));
         motor.lembrar(&Comando::Muted(true));
         motor.lembrar(&Comando::Isolamento(true));
@@ -3440,7 +3440,7 @@ mod tests {
         assert!(motor.isolamento);
 
         // Ejetar não é uma queda: quem saiu da sala de voz não volta para ele.
-        motor.lembrar(&Comando::EjetarPlug);
+        motor.lembrar(&Comando::SairDaVoiceRoom);
         assert_eq!(motor.voice_room, None);
     }
 
@@ -3615,7 +3615,7 @@ mod tests {
         // minutos depois, alguém que já tinha reconectado cairia de novo, sem
         // ninguém ter pedido nada. O mesmo para banir.
         let mut motor = motor_de_teste();
-        motor.lembrar(&Comando::InserirPlug(VoiceRoomId(2)));
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2)));
 
         motor.lembrar(&Comando::Expulsar {
             pessoa: PersonId(9),
@@ -3884,7 +3884,7 @@ mod tests {
 
     #[test]
     fn sem_pedido_guardado_um_nome_de_transmissao_nao_liga_nada() {
-        // O servidor reenvia `ScreenShareStarted` a cada pessoa que entra num sala de voz
+        // O servidor reenvia `ScreenShareStarted` a cada pessoa que entra numa sala de voz
         // onde já há transmissão — inclusive a quem está transmitindo. Sem esta
         // guarda, cada pessoa entrando na sala ligaria outra captura da mesma
         // tela.

@@ -2326,7 +2326,7 @@ fn as_duas_saidas_continuam_dizendo_qual_delas_larga_a_sala() {
     // Alternar a vista não pode puxar a conexão nem largar a sala.
     let trocar = body_of(&script, "function fecharChamada");
     assert!(
-        !trocar.contains("eject_plug") && !trocar.contains("leave_voice_room"),
+        !trocar.contains("leave_voice_room") && !trocar.contains("leave_voice_room"),
         "voltar para a conversa está largando a sala, então os dois botões fazem \
          a mesma coisa e as palavras da tela ficaram erradas:\n{trocar}"
     );
@@ -2510,7 +2510,7 @@ fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the
     // **A saída saiu desta lista, e a exigência mudou de lugar com ela.**
     //
     // A fileira da sala teve um botão de desligar — o círculo com a haste, o
-    // símbolo de um aparelho que se apaga — que chamava `eject_plug`. Ele saiu a
+    // símbolo de um aparelho que se apaga — que chamava `leave_voice_room`. Ele saiu a
     // pedido de quem usa. O que sobrou na fileira é navegação, e só: entrar na
     // sala, ou voltar para a grade quando já se está nela.
     //
@@ -2523,7 +2523,7 @@ fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the
          extenso: entrar, e voltar para a grade de onde já se está"
     );
     assert!(
-        !lista.contains("eject_plug"),
+        !lista.contains("leave_voice_room"),
         "a lista de salas voltou a largar a sala. Ela é navegação; quem sai é o \
          `SAIR DA SALA` do rodapé, que diz em palavras o que faz"
     );
@@ -2532,7 +2532,7 @@ fn entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the
     // enquanto se está numa sala, que é a condição em que ela faz sentido.
     let rodape = without_comments(&read("ui/tela-chamada.js"));
     assert!(
-        rodape.contains("SAIR DA SALA") && rodape.contains("eject_plug"),
+        rodape.contains("SAIR DA SALA") && rodape.contains("leave_voice_room"),
         "nada nesta janela larga a sala: o botão do rodapé perdeu o rótulo ou o \
          comando, e a fileira da sala não os tem mais"
     );
@@ -5240,7 +5240,7 @@ fn destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room() {
         );
     }
 
-    // For o canal: whoever is reading it loses it from the screen at that
+    // For the channel: whoever is reading it loses it from the screen at that
     // instant, and any voice room bound to it comes out with no canal — a change
     // nobody asked for, which is exactly the kind this product names.
     let linha = body_of(&scripts(), "function consequenciaDeApagarLinha");
@@ -6208,7 +6208,7 @@ fn arriving_at_a_server_opens_a_line_and_does_not_put_anybody_in_a_voice_room() 
          reason the automatic step existed is lost:\n{entrar}"
     );
     assert!(
-        !entrar.contains("insert_plug"),
+        !entrar.contains("enter_voice_room"),
         "arriving puts the person inside a sala de voz without them pressing anything — \
          a seat taken and a microphone offered to a conversation nobody \
          chose:\n{entrar}"
@@ -7750,7 +7750,7 @@ fn sentences_of(file: &str, dictionary: &str) -> Vec<(String, String)> {
             continue;
         }
         // ASCII only, so the byte index below lands on a character boundary and
-        // o canal opening with a word like `Não` is not read as a variant name.
+        // a channel opening with a word like `Não` is not read as a variant name.
         let name: String = trimmed
             .chars()
             .take_while(|letter| letter.is_ascii_alphanumeric() || *letter == '_')
@@ -8181,7 +8181,7 @@ fn texto_de_marcacao(pagina: &str) -> Vec<String> {
 /// Serve às duas posições deste frontend em que uma string com espaço dentro é
 /// identificador e não frase, e onde nenhuma regra de forma as separa:
 ///
-/// - `console.warn("eject_plug:", falha)` — nada que sai por aqui chega a uma
+/// - `console.warn("leave_voice_room:", falha)` — nada que sai por aqui chega a uma
 ///   tela, então a chamada inteira cai (`manter` 0);
 /// - `elemento(tag, classe, texto)` — a **lista de classes** é a única string de
 ///   identificador desta casa que traz espaço (`"voice_room aberto"`), e é o segundo
@@ -9886,7 +9886,7 @@ fn sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo() {
         "a caixa abre antes de saber se há o que avisar:\n{saida}"
     );
     assert!(
-        saida.contains("eject_plug"),
+        saida.contains("leave_voice_room"),
         "o mesmo botão dentro de uma sala tem que largar a sala, e não o \
          servidor:\n{saida}"
     );

@@ -299,7 +299,7 @@ pub struct Room {
     pub ended: Option<Ended>,
 }
 
-/// Uma transmissão de tela acontecendo num sala de voz.
+/// Uma transmissão de tela acontecendo numa sala de voz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tela {
     /// Quantas pessoas estão recebendo esta transmissão, quem compartilha
@@ -436,7 +436,7 @@ impl Room {
         // conexão nova não tem fluxo de tela nenhum — o `Client` que os
         // carregava morreu com ela —, então uma transmissão herdada seria a
         // interface prometendo uma tela que não tem por onde chegar. O servidor
-        // reenvia `ScreenShareStarted` a quem entra num sala de voz que está
+        // reenvia `ScreenShareStarted` a quem entra numa sala de voz que está
         // transmitindo, então o que é verdade volta sozinho.
         self.telas.clear();
         self.chave_pedida = None;
@@ -517,7 +517,7 @@ impl Room {
         self.notice.take().is_some()
     }
 
-    /// Records that the client is now reading o canal.
+    /// Records that the client is now reading the channel.
     ///
     /// Clears the messages, because a new Channel is a new conversation and keeping
     /// the old one under a new heading misattributes every channel of it.
@@ -1107,7 +1107,7 @@ impl Room {
             // poder abrir o fluxo, e todo o resto precisa saber que um fluxo
             // vem aí em vez de descobrir sendo entregue um.
             //
-            // E manda de novo a quem **entra** num sala de voz que já tem transmissão.
+            // E manda de novo a quem **entra** numa sala de voz que já tem transmissão.
             // É por isso que aqui não há caso especial nenhum: chegar depois e
             // estar lá desde o começo são a mesma mensagem, e um cliente que
             // tratasse os dois de maneiras diferentes teria duas maneiras de
@@ -1119,7 +1119,7 @@ impl Room {
             } => {
                 // A contagem sobrevive ao reenvio, e é por isso que ela é lida
                 // antes de inserir: o servidor manda `ScreenShareStarted` de novo
-                // a **cada** pessoa que entra num sala de voz que já transmite, e
+                // a **cada** pessoa que entra numa sala de voz que já transmite, e
                 // zerar ali faria a interface piscar «0 assistindo» e o teto
                 // subir por um instante — justamente no instante em que a sala
                 // acabou de crescer. O `ScreenViewers` que vem atrás corrige o
@@ -1982,7 +1982,7 @@ mod tests {
     }
 
     #[test]
-    fn the_plug_comes_out_of_a_voice_room_that_no_longer_exists() {
+    fn this_client_leaves_a_voice_room_that_no_longer_exists() {
         // And lands nowhere. Choosing another room for somebody would put them
         // in a conversation they never asked to be in — with a live microphone.
         let mut room = room();
@@ -1997,7 +1997,7 @@ mod tests {
     }
 
     #[test]
-    fn destroying_some_other_voice_room_leaves_this_plug_where_it_is() {
+    fn destroying_some_other_voice_room_leaves_this_client_where_it_is() {
         // The half that a `retain` over the wrong field would break silently:
         // most of these announcements are about a room this client is not in.
         let mut room = room();
@@ -2086,7 +2086,7 @@ mod tests {
     // ---- moved by somebody else's hand ----
 
     #[test]
-    fn being_moved_takes_the_plug_with_it() {
+    fn being_moved_takes_this_client_with_it() {
         // `enter_voice_room` is called on the way out, when this client asks. A move
         // is a voice room nobody here asked for, so without an arm of its own the
         // person stays drawn in the room they left — sending voice into it and

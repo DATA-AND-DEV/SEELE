@@ -220,7 +220,7 @@ impl From<seele_core::AlertReason> for NoticeReason {
     }
 }
 
-/// What o canal holds, as the confirmation in front of destroying it needs it.
+/// What the channel holds, as the confirmation in front of destroying it needs it.
 ///
 /// Counted in the server's database at the instant of asking, and carried across
 /// the bridge unrounded. A shell cannot work these out for itself: it holds one
@@ -890,7 +890,7 @@ pub struct Snapshot {
     ///
     /// **Não é a soma de [`VoiceRoom::people`]**, e essa diferença é a razão de o
     /// campo existir: quem entra no servidor e fica fora das salas não aparece
-    /// em nenhum sala de voz, e por muito tempo não aparecia em lugar nenhum — a
+    /// em nenhuma sala de voz, e por muito tempo não aparecia em lugar nenhum — a
     /// interface listava os sentados e chamava aquilo de «pessoas». A lista de
     /// quem está fora das salas é esta menos aquelas, e a subtração é uma linha
     /// de quem desenha.
@@ -1288,7 +1288,7 @@ pub enum AttachmentRefusal {
     RateLimited,
     /// This server is not storing attachments at all.
     Unavailable,
-    /// No such attachment, or it is in o canal this person may not read.
+    /// No such attachment, or it is in a channel this person may not read.
     NotFound,
     /// The bytes were evicted to keep the server under its ceiling.
     Expired,
@@ -1322,7 +1322,7 @@ pub struct Attachment {
 ///
 /// The answer to one press of one button, and never anything a screen gets by
 /// scrolling: the file lives on the server, so looking at it is downloading it,
-/// and o canal that fetched every picture as it scrolled past would turn the
+/// and a channel that fetched every picture as it scrolled past would turn the
 /// host's disk ceiling into everybody's uplink.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Preview {

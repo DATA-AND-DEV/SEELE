@@ -642,12 +642,12 @@ impl Client {
         &self.pin
     }
 
-    /// Enters a voice room. "Inserir connection".
+    /// Enters a voice room. `InserirPlug` in `specs/02-protocolo.md`.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn insert_plug(&mut self, voice_room: VoiceRoomId) -> Result<()> {
+    pub async fn enter_voice_room(&mut self, voice_room: VoiceRoomId) -> Result<()> {
         frame::write(
             &mut self.send,
             &ClientMessage::EnterVoiceRoom {
@@ -795,7 +795,7 @@ impl Client {
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn eject_plug(&mut self) -> Result<()> {
+    pub async fn leave_voice_room(&mut self) -> Result<()> {
         frame::write(&mut self.send, &ClientMessage::LeaveVoiceRoom).await
     }
 
@@ -1190,7 +1190,7 @@ impl Client {
         .await
     }
 
-    /// Asks the server to destroy o canal, and everything written in it.
+    /// Asks the server to destroy the channel, and everything written in it.
     ///
     /// # Errors
     ///

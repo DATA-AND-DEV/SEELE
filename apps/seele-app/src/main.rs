@@ -1000,13 +1000,13 @@ fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, Conn
 }
 
 #[tauri::command]
-fn insert_plug(session: State<'_, Session>, voice_room: u32) -> Result<(), ConnectionError> {
-    session.connection()?.insert_plug(voice_room)
+fn enter_voice_room(session: State<'_, Session>, voice_room: u32) -> Result<(), ConnectionError> {
+    session.connection()?.enter_voice_room(voice_room)
 }
 
 #[tauri::command]
-fn eject_plug(session: State<'_, Session>) -> Result<(), ConnectionError> {
-    session.connection()?.eject_plug()
+fn leave_voice_room(session: State<'_, Session>) -> Result<(), ConnectionError> {
+    session.connection()?.leave_voice_room()
 }
 
 #[tauri::command]
@@ -1359,7 +1359,7 @@ fn pasta_de_downloads(app: AppHandle) -> String {
 /// Quem responde isso é o servidor, e a resposta chega pela mesma porta que todo o
 /// resto: `ChannelsChanged` se ele fez, `NoticeRaised` com `PermissionDenied`
 /// se recusou. A tela redesenha a lista pelo evento, como já faz quando alguém
-/// entra num sala de voz — não há caminho novo a aprender.
+/// entra numa sala de voz — não há caminho novo a aprender.
 ///
 /// A tela pode consultar `Snapshot::may_manage_voice_rooms` para decidir se mostra o
 /// botão. Isso é conveniência: mandar o pedido sem ter a permissão não cria
@@ -1870,7 +1870,7 @@ fn mover_pessoa(
 /// Pede ao servidor que destrua uma sala de voz — `apagar_voice_room`.
 ///
 /// Quem estiver dentro é posto para fora e avisado; a Linha presa a ele, se
-/// houver, fica onde está. O servidor recusa o último sala de voz e diz isso com
+/// houver, fica onde está. O servidor recusa a última sala de voz e diz isso com
 /// `LastVoiceRoom`, que é frase diferente da de entrada recusada.
 ///
 /// A tela pode consultar `Snapshot::may_delete_rooms` para decidir se desenha o
@@ -2336,7 +2336,7 @@ fn microfone_escolhido(app: AppHandle) -> Option<String> {
 /// logo acima, e o que sumiu entre desenhá-la e clicar nela pode ser trocado por
 /// outro. Nenhuma delas é `ConnectionError::IdentityUnavailable`, que era o que este
 /// comando devolvia: a frase daquela fala de identidade em disco, e acusar a
-/// chave do pessoa por causa de um arquivo de ajustes manda quem lê procurar no
+/// chave da pessoa por causa de um arquivo de ajustes manda quem lê procurar no
 /// lugar errado.
 #[derive(Debug, serde::Serialize)]
 enum FalhaAoEscolher {
@@ -2439,7 +2439,7 @@ fn caminho_dos_conhecidos(app: &AppHandle) -> std::path::PathBuf {
     std::path::PathBuf::from(config_dir(app)).join("conhecidos")
 }
 
-/// Os servidores onde este pessoa já esteve.
+/// Os servidores onde esta pessoa já esteve.
 ///
 /// Uma lista de atalhos corrompida não pode fechar a porta: `specs/05` diz que
 /// este arquivo é conveniência e pode ser apagado sem consequência. Por isso
@@ -2625,9 +2625,9 @@ struct PedidoNaTela {
 /// Clonado para fora do `Mutex` do app **antes** de qualquer `await`: segurar um
 /// `std::sync::MutexGuard` atravessando um ponto de espera trava os dois
 /// cadeados de uma vez e nem compila do lado do Tauri.
-fn casper_hospedado(
+fn persistence_hospedada(
     session: &State<'_, Session>,
-) -> Result<seele_server::hospedagem::CasperCompartilhado, FalhaNaPortaria> {
+) -> Result<seele_server::hospedagem::PersistenceCompartilhada, FalhaNaPortaria> {
     let aberto = session
         .hospedagem
         .lock()
@@ -2688,7 +2688,7 @@ async fn definir_senha_do_server(
     session: State<'_, Session>,
     senha: Option<String>,
 ) -> Result<(), FalhaNaPortaria> {
-    let persistence = casper_hospedado(&session)?;
+    let persistence = persistence_hospedada(&session)?;
     let mut persistence = persistence.lock().await;
     seele_server::admissao::definir_senha(&mut persistence, senha.as_deref())
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
@@ -2729,7 +2729,7 @@ async fn criar_convite_do_server(
 /// Liga ou desliga a portaria. ADR 0030.
 #[tauri::command]
 async fn ligar_portaria(session: State<'_, Session>, ligada: bool) -> Result<(), FalhaNaPortaria> {
-    let persistence = casper_hospedado(&session)?;
+    let persistence = persistence_hospedada(&session)?;
     let mut persistence = persistence.lock().await;
     seele_server::portaria::ligar(&mut persistence, ligada)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
@@ -2740,7 +2740,7 @@ async fn ligar_portaria(session: State<'_, Session>, ligada: bool) -> Result<(),
 async fn pedidos_da_portaria(
     session: State<'_, Session>,
 ) -> Result<Vec<PedidoNaTela>, FalhaNaPortaria> {
-    let persistence = casper_hospedado(&session)?;
+    let persistence = persistence_hospedada(&session)?;
     let persistence = persistence.lock().await;
     let fila = seele_server::portaria::pedidos(&persistence)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
@@ -2767,7 +2767,7 @@ async fn decidir_pedido(
     impressao: String,
     admitir: bool,
 ) -> Result<(), FalhaNaPortaria> {
-    let persistence = casper_hospedado(&session)?;
+    let persistence = persistence_hospedada(&session)?;
     let mut persistence = persistence.lock().await;
     seele_server::portaria::decidir(&mut persistence, &impressao, admitir)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
@@ -2782,7 +2782,7 @@ async fn revogar_admissao(
     session: State<'_, Session>,
     impressao: String,
 ) -> Result<(), FalhaNaPortaria> {
-    let persistence = casper_hospedado(&session)?;
+    let persistence = persistence_hospedada(&session)?;
     let mut persistence = persistence.lock().await;
     seele_server::portaria::revogar(&mut persistence, &impressao)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
@@ -3445,8 +3445,8 @@ fn main() {
             disconnect,
             snapshot,
             messages,
-            insert_plug,
-            eject_plug,
+            enter_voice_room,
+            leave_voice_room,
             open_channel,
             send_message,
             criar_voice_room,

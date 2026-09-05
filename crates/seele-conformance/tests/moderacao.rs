@@ -7,7 +7,7 @@
 //! **A recusa é do servidor.** É a que passaria por engano mais fácil. Nem o
 //! `seele-core` nem o `seele-ffi` conferem permissão nenhuma — de propósito,
 //! porque a `specs/08-seguranca.md` põe a decisão no servidor —, então o pedido
-//! de um pessoa sem `Kick` **sai no fio**. Um teste que só olhasse o cliente não
+//! de uma pessoa sem `Kick` **sai no fio**. Um teste que só olhasse o cliente não
 //! distinguiria «a casca não mandou» de «o servidor recusou», e as duas dão
 //! exatamente a mesma tela. Aqui a diferença é medida por fora: a vítima
 //! continua conectada e sentada, o que só é observável de outra sessão.
@@ -204,9 +204,9 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
 
     // O anfitrião conecta primeiro e vira Comandante. Aqui ele é a vítima e a
     // testemunha ao mesmo tempo: se qualquer verbo tivesse passado, a sessão
-    // dele acabaria, ou o connection dele mudaria de sala.
+    // dele acabaria, ou ele mudaria de sala.
     let anfitriao = entrar(endereco, "anfitriao-recusa").await?;
-    anfitriao.insert_plug(VOICE_ROOM)?;
+    anfitriao.enter_voice_room(VOICE_ROOM)?;
     anfitriao.open_channel(LINE)?;
     anfitriao.send_message(LINE, "verificando harmônicos".into())?;
     assert!(
@@ -266,7 +266,7 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
             .voice_rooms
             .iter()
             .any(|voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us),
-        "o connection do Comandante saiu da sala de voz por conta de um pedido recusado"
+        "o Comandante saiu da sala de voz por conta de um pedido recusado"
     );
     assert_eq!(
         anfitriao.messages().len(),
@@ -296,7 +296,7 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
     );
 
     let visita = entrar(endereco, "visita-expulsar").await?;
-    visita.insert_plug(VOICE_ROOM)?;
+    visita.enter_voice_room(VOICE_ROOM)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
         ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM)
@@ -436,7 +436,7 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
+async fn mover_leva_a_pessoa_e_a_conta_na_sala_nova() -> Result<()> {
     let (endereco, servidor, _arquivo) = server("mover").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-mover").await?;
@@ -447,12 +447,12 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
             .voice_rooms
             .len()
             == 2),
-        "o segundo sala de voz não foi feito, e não há para onde mover ninguém"
+        "a segunda sala de voz não foi feita, e não há para onde mover ninguém"
     );
     let destino = anfitriao.snapshot().voice_rooms[1].id;
 
     let visita = entrar(endereco, "visita-mover").await?;
-    visita.insert_plug(VOICE_ROOM)?;
+    visita.enter_voice_room(VOICE_ROOM)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
         ate(&visita, |connection| connection
@@ -462,12 +462,12 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
             .any(
                 |voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us
             )),
-        "a visita não entrou no primeiro sala de voz"
+        "a visita não entrou na primeira sala de voz"
     );
 
     anfitriao.move_person(quem, destino)?;
 
-    // Um: o connection muda de sala do lado de quem foi movido. Sem isto a pessoa
+    // Um: quem foi movido muda de sala do próprio lado. Sem isto a pessoa
     // continuaria mandando voz para a sala que ela acha que ainda é a dela.
     assert!(
         ate(&visita, |connection| connection
@@ -477,7 +477,7 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
             .any(
                 |voice_room| voice_room.id == destino && voice_room.occupied_by_us
             )),
-        "quem foi movido continua desenhado na sala de voz antigo"
+        "quem foi movido continua desenhado na sala de voz antiga"
     );
     assert!(
         !visita
@@ -485,7 +485,7 @@ async fn mover_leva_o_plug_e_conta_a_pessoa() -> Result<()> {
             .voice_rooms
             .iter()
             .any(|voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us),
-        "o connection ficou nos dois voice_rooms ao mesmo tempo"
+        "a pessoa ficou nas duas salas de voz ao mesmo tempo"
     );
 
     // Dois: a pessoa é **contada**. Ser movido em silêncio é indistinguível de

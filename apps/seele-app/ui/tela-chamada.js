@@ -628,7 +628,7 @@ async function abrirChamada() {
  *
  * Metade da distinção que o v3 traz (inventário §7.1) e que a comp mantém:
  * trocar de vista não é sair da sala. Um alterna o que a coluna mostra, o
- * outro chama `eject_plug`, e a nota de cada um diz qual é qual.
+ * outro chama `leave_voice_room`, e a nota de cada um diz qual é qual.
  */
 function fecharChamada() {
   $("vista-chamada").hidden = true;
@@ -747,9 +747,9 @@ $("operador-vista").addEventListener("click", () => {
 $("operador-sair").addEventListener("click", async () => {
   if ($("operador-sair").dataset.alvo === "sala") {
     try {
-      await invoke("eject_plug");
+      await invoke("leave_voice_room");
     } catch (falha) {
-      console.warn("eject_plug:", falha);
+      console.warn("leave_voice_room:", falha);
     }
     await atualizar();
     return;
@@ -775,7 +775,7 @@ $("operador-sair").addEventListener("click", async () => {
 /**
  * `SAIR DA SALA` — a outra metade da distinção do §7.1.
  *
- * Este é o `eject_plug`, e é o único dos dois botões do rodapé que sai da sala
+ * Este é o `leave_voice_room`, e é o único dos dois botões do rodapé que sai da sala
  * de voz. Ele devolve para os canais depois, porque fora da sala esta tela não
  * tem grade nenhuma para desenhar e ficar nela mostraria o vazio de uma sala
  * que a pessoa acabou de deixar de propósito.

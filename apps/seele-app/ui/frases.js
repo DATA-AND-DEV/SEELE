@@ -109,7 +109,7 @@ const AVISOS = {
   // ---- uma sala deixou de existir ----
   //
   // Três frases e não uma, porque pedem coisas diferentes de quem lê. As duas
-  // primeiras chegam a quem estava dentro: o connection já saiu e a conversa já saiu
+  // primeiras chegam a quem estava dentro: quem estava lá já saiu e a conversa já saiu
   // da tela quando isto aparece, e sem a frase o que sobra é uma sala que sumiu
   // sozinha — indistinguível de uma janela que perdeu a conta de onde estava.
   //

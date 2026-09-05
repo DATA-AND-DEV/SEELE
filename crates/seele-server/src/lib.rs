@@ -234,7 +234,7 @@ pub fn diretorio_de_anexos(config: &ServerConfig) -> Option<std::path::PathBuf> 
 /// # Why a flag, and not only `INSERT OR IGNORE`
 ///
 /// Because the identifiers are written out by hand, `INSERT OR IGNORE` means
-/// "unless row 1 is taken" — and once o canal can be **destroyed**, row 1 stops
+/// "unless row 1 is taken" — and once a channel can be **destroyed**, row 1 stops
 /// being taken. A server whose operator destroyed `geral` on purpose, after a
 /// confirmation promising that nothing brings it back, would find it again at
 /// the next restart: same name, same identifier, empty. That is the product

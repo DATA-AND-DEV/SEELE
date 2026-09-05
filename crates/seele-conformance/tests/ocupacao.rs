@@ -6,7 +6,7 @@
 //! # Por que nenhum teste de unidade via isso
 //!
 //! Os dois lados estavam certos sozinhos. `seele_core::state::Room` sabe assentar
-//! um pessoa em qualquer voice room e sempre soube — os testes dele passam entregando
+//! uma pessoa em qualquer voice room e sempre soube — os testes dele passam entregando
 //! `PersonJoined` à mão, para a sala de voz que o teste quiser. O servidor sabe manter a
 //! ocupação e sempre soube. O que faltava era o **fio entre os dois**: o
 //! `translate` da sessão descartava todo `PersonJoined` que não fosse da sala de voz em
@@ -24,7 +24,7 @@
 //! 2. **Quem entra depois aparece para quem está noutro sala de voz.** É a metade que
 //!    fica viva; sem ela a tela está certa ao abrir e erra um minuto depois.
 //! 3. **Quem some é retirado.** A saída só era anunciada pelo ramo do
-//!    `EjetarPlug`; uma conexão que caía deixava o pessoa no roster de todo
+//!    `SairDaVoiceRoom`; uma conexão que caía deixava a pessoa no roster de todo
 //!    mundo. Invisível enquanto o cliente desenhava uma sala de voz só, e um fantasma na
 //!    tela agora que ele desenha todos.
 
@@ -45,7 +45,7 @@ use seele_proto::ids::{ChannelId, VoiceRoomId};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
-/// Sobe um servidor numa porta que o sistema escolhe, com dois salas de voz.
+/// Sobe um servidor numa porta que o sistema escolhe, com duas salas de voz.
 ///
 /// Dois, e esse é o ponto do arquivo inteiro: com um só, o filtro que este
 /// teste existe para pegar não filtra nada e tudo passa.
@@ -131,7 +131,7 @@ where
     pronto(room)
 }
 
-/// Os apelidos sentados num sala de voz, como a tela os desenharia.
+/// Os apelidos sentados numa sala de voz, como a tela os desenharia.
 fn sentados(room: &Room, voice_room: VoiceRoomId) -> Vec<String> {
     let mut nomes: Vec<String> = room
         .roster(voice_room)
@@ -141,7 +141,7 @@ fn sentados(room: &Room, voice_room: VoiceRoomId) -> Vec<String> {
     nomes
 }
 
-/// Abre um segundo sala de voz, que só quem hospeda pode fazer.
+/// Abre uma segunda sala de voz, que só quem hospeda pode fazer.
 async fn segundo_voice_room(
     anfitriao: &Enlace,
     enlace: &mut Enlace,
@@ -158,7 +158,7 @@ async fn segundo_voice_room(
     .await;
     assert!(
         chegou,
-        "o segundo sala de voz não chegou a quem estava conectado"
+        "a segunda sala de voz não chegou a quem estava conectado"
     );
     Ok(room.voice_rooms[1].id)
 }
@@ -176,11 +176,11 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
     // Duas pessoas sentam, uma em cada sala de voz, **antes** de a testemunha existir.
     let mut rafael = conectar(endereco, 47, "rafael").await?;
     rafael
-        .inserir_plug(voice_room_um)
+        .entrar_na_voice_room(voice_room_um)
         .await
         .expect("sessão acabou");
     carla
-        .inserir_plug(voice_room_dois)
+        .entrar_na_voice_room(voice_room_dois)
         .await
         .expect("sessão acabou");
     // Um instante para os dois assentos existirem no servidor antes do aperto de
@@ -226,7 +226,7 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
     let voice_room_dois = segundo_voice_room(&anfitriao, &mut rei, &mut sala_rei).await?;
 
     // A testemunha senta no primeiro voice room e fica lá o teste inteiro.
-    rei.inserir_plug(voice_room_um)
+    rei.entrar_na_voice_room(voice_room_um)
         .await
         .expect("sessão acabou");
     sala_rei.enter_voice_room(voice_room_um);
@@ -235,7 +235,7 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
     // aperto de mão estaria certo até aqui e erraria a partir daqui.
     let rafael = conectar(endereco, 47, "rafael").await?;
     rafael
-        .inserir_plug(voice_room_dois)
+        .entrar_na_voice_room(voice_room_dois)
         .await
         .expect("sessão acabou");
 
@@ -250,15 +250,15 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
     );
     assert_eq!(sentados(&sala_rei, voice_room_dois), ["rafael"]);
 
-    // E sair do outro sala de voz também chega. Sem isto a tela só cresce.
-    rafael.ejetar_plug().await.expect("sessão acabou");
+    // E sair da outra sala de voz também chega. Sem isto a tela só cresce.
+    rafael.sair_da_voice_room().await.expect("sessão acabou");
     let sumiu = absorver_ate(&mut rei, &mut sala_rei, Duration::from_secs(15), |room| {
         room.roster(voice_room_dois).count() == 0
     })
     .await;
     assert!(
         sumiu,
-        "quem ejetou o connection na sala de voz-02 continua desenhado lá: {:?}",
+        "quem saiu da sala de voz-02 continua desenhado lá: {:?}",
         sentados(&sala_rei, voice_room_dois)
     );
 
@@ -280,7 +280,7 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
 
     let rafael = conectar(endereco, 47, "rafael").await?;
     rafael
-        .inserir_plug(voice_room_um)
+        .entrar_na_voice_room(voice_room_um)
         .await
         .expect("sessão acabou");
     // Mais um comando atrás do primeiro, para que a entrada tenha sido
@@ -304,7 +304,7 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
     assert!(
         saiu,
         "quem fechou o cliente ficou sentado no SALA-01 para todo mundo: {:?}\n\
-         A saída só era anunciada pelo ramo do EjetarPlug, então toda queda \
+         A saída só era anunciada pelo ramo do SairDaVoiceRoom, então toda queda \
          deixava um fantasma na tela.",
         sentados(&sala_rei, voice_room_um)
     );
@@ -343,7 +343,7 @@ async fn quem_volta_para_o_assento_guardado_reaparece_para_quem_ficou() -> Resul
 
     let visitante = {
         let visitante = conectar(endereco, 62, "visitante").await?;
-        visitante.inserir_plug(VoiceRoomId(1)).await?;
+        visitante.entrar_na_voice_room(VoiceRoomId(1)).await?;
         // O anfitrião tem de **ver** a entrada normal antes, ou a asserção do fim
         // poderia passar por um `PersonJoined` que nunca foi embora.
         assert!(

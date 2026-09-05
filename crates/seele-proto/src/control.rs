@@ -207,7 +207,7 @@ pub enum AttachmentRefusal {
     RateLimited,
     /// This server is not storing attachments at all.
     Unavailable,
-    /// No such attachment, or it belongs to o canal this person may not read.
+    /// No such attachment, or it belongs to a channel this person may not read.
     NotFound,
     /// The bytes were evicted to keep the server under its ceiling.
     Expired,
@@ -762,7 +762,7 @@ pub enum ClientMessage {
         /// Proof of identity. ADR 0004 makes this an Ed25519 signature.
         proof: Vec<u8>,
     },
-    /// Enters a voice room. "Inserir connection" in `docs/glossario.md`.
+    /// Enters a voice room. `InserirPlug` in `specs/02-protocolo.md`.
     EnterVoiceRoom {
         /// Which voice room.
         voice_room: VoiceRoomId,
@@ -1030,7 +1030,7 @@ pub enum ClientMessage {
     // Both need [`Permission::AdministerServer`], and **not** the
     // [`Permission::ManageVoiceRooms`] the four room verbs use. The channel
     // `specs/04-servidor-seele.md` draws is between "criar e configurar voice_rooms"
-    // and "todo o resto sobre o servidor"; the name and the picture of the servidor
+    // and "todo o resto sobre o servidor"; the name and the picture of the server
     // itself are not a room, and whoever may build rooms is not thereby the
     // person whose server it is. Migration 1 seeds `AdministerServer` on the
     // Comandante alone, and `Permissions::seat_the_arrival` gives the Comandante to

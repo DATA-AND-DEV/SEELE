@@ -112,7 +112,7 @@ impl<'a> Channels<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`NoSuchChannel`] if `channel` names o canal that is not there, or a
+    /// Returns [`NoSuchChannel`] if `channel` names a channel that is not there, or a
     /// database error.
     pub fn create_voice_room(
         &self,
@@ -152,7 +152,7 @@ impl<'a> Channels<'a> {
         })
     }
 
-    /// Makes o canal, and returns it as the wire will carry it.
+    /// Makes the channel, and returns it as the wire will carry it.
     ///
     /// # Errors
     ///
@@ -228,7 +228,7 @@ impl<'a> Channels<'a> {
             return Err(NoSuchChannel.into());
         }
         // One statement for the three numbers, and not three. Two of them would
-        // be counted a moment apart otherwise, and o canal being written to
+        // be counted a moment apart otherwise, and a channel being written to
         // while somebody weighs it could answer "1.847 messages by 7 people"
         // with the seventh person's only message in neither count.
         let (messages, authors, oldest) = self.connection.query_row(
@@ -312,7 +312,7 @@ impl<'a> Channels<'a> {
     /// - a voice room bound to this Channel keeps existing and loses the binding.
     ///   `voice_rooms.channel_id` has no `ON DELETE` clause, so without this the delete
     ///   fails on the foreign key and reaches the shell as a database error —
-    ///   "could not destroy it", about o canal whose only sin is being useful to
+    ///   "could not destroy it", about a channel whose only sin is being useful to
     ///   a room.
     /// - a reply **from another Channel** pointing at a message in this one is
     ///   unhooked first. `messages.replies_to` references `messages(id)` with
@@ -381,7 +381,7 @@ pub struct NoSuchChannel;
 #[error("this is the only voice room in the server")]
 pub struct LastVoiceRoom;
 
-/// What o canal holds, as the confirmation in front of destroying it needs it.
+/// What the channel holds, as the confirmation in front of destroying it needs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelWeight {
     /// How many messages are in it that anybody can read.

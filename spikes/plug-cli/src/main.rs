@@ -146,7 +146,7 @@ async fn main() -> Result<()> {
         println!("  cage    {} · {}", cage.id, cage.name);
     }
 
-    client.insert_plug(args.cage).await?;
+    client.enter_voice_room(args.cage).await?;
     client.join_channel(ChannelId(1)).await?;
     client.fetch_history(ChannelId(1), None, 20).await?;
     println!("\nplug inserido no cage {} · linha 1\n", args.cage);

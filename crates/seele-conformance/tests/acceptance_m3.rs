@@ -339,7 +339,7 @@ async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
 
     let before = {
         let mut marcela = connect(address, "marcela", &key(1)).await?;
-        marcela.insert_plug(VOICE_ROOM).await?;
+        marcela.enter_voice_room(VOICE_ROOM).await?;
         tokio::time::sleep(Duration::from_millis(150)).await;
         let session = marcela.session().clone();
         // The train enters the tunnel.

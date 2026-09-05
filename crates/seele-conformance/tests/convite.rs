@@ -145,7 +145,7 @@ where
 /// seguiu" de "a conferência avisou e derrubou": um enlace derrubado devolve
 /// `Ok` do mesmo jeito, e só cala quando alguém fala com ele.
 async fn falar_e_ouvir(enlace: &mut Enlace, o_que: &str) -> Result<()> {
-    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
+    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace
         .dizer(ChannelId(LINE), o_que.to_owned(), ClientMessageId(1))

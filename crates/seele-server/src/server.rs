@@ -275,7 +275,7 @@ pub enum Event {
     },
     /// Alguém que assiste não tem de que predizer e pediu um quadro-chave.
     ///
-    /// Endereçado a um pessoa e entregue a todos, como o [`Self::SessionEnded`]
+    /// Endereçado a uma pessoa e entregue a todos, como o [`Self::SessionEnded`]
     /// — um servidor não tem outra maneira de uma sessão alcançar outra, e o
     /// barramento já é o que toda conexão drena.
     KeyFrameRequested {

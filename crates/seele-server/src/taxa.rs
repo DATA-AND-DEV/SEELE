@@ -72,7 +72,7 @@ pub const ENDERECOS_LEMBRADOS: usize = 4096;
 
 /// Quantos quadros de controle uma conexão pode mandar em rajada.
 ///
-/// Entrar num sala de voz, abrir as Linhas e pedir o histórico de cada uma é uma
+/// Entrar numa sala de voz, abrir as Linhas e pedir o histórico de cada uma é uma
 /// rajada real, e acontece toda vez que alguém conecta ou reconecta. Sessenta
 /// dá folga para um punhado de Linhas sem chegar perto do limite.
 pub const QUADROS_DE_RAJADA: u32 = 60;
@@ -95,7 +95,7 @@ pub const QUADROS_POR_SEGUNDO: f64 = 20.0;
 /// ninguém do outro lado leu o aviso.
 pub const PACIENCIA: u32 = 200;
 
-/// Quantos bytes de anexo um pessoa pode subir em rajada.
+/// Quantos bytes de anexo uma pessoa pode subir em rajada.
 ///
 /// O ADR 0027 é explícito sobre o que este balde **não** é: ele não é um
 /// limite, é um retardo. O limite é o teto, e é o único mecanismo aqui que
@@ -290,7 +290,7 @@ pub enum Veredito {
 
 /// O balde de depois de autenticar, um por conexão.
 ///
-/// Chave na conexão e não no pessoa de propósito: o mesmo pessoa em duas
+/// Chave na conexão e não na pessoa de propósito: a mesma pessoa em duas
 /// máquinas são duas conexões, e quem abre conexões em série para diluir o
 /// limite esbarra antes na [`Portaria`], que conta por endereço. Os dois baldes
 /// se compõem; nenhum dos dois sozinho fecha os dois caminhos.
@@ -349,7 +349,7 @@ impl Vigia {
 /// O balde de bytes, um por pessoa.
 ///
 /// O terceiro balde do ADR 0025, acrescentado pelo ADR 0027, no mesmo mecanismo
-/// e com o tempo entrando por parâmetro como os outros dois. Chave no pessoa e
+/// e com o tempo entrando por parâmetro como os outros dois. Chave na pessoa e
 /// não na conexão: uma pessoa abrindo cinco conexões para subir cinco arquivos
 /// ao mesmo tempo é exatamente o caso que um balde por conexão não pega, e a
 /// identidade aqui já está provada — isto acontece depois do desafio-resposta.
@@ -365,7 +365,7 @@ impl Vazao {
         Self::default()
     }
 
-    /// Se este pessoa pode gastar `bytes` agora.
+    /// Se esta pessoa pode gastar `bytes` agora.
     ///
     /// Consultado com o tamanho **declarado**, antes de o primeiro byte ser
     /// lido — pela mesma razão que o teto é: cobrar depois é cobrar por uma
@@ -597,7 +597,7 @@ mod testes {
 
     #[test]
     fn o_vigia_deixa_passar_a_rajada_de_entrada() {
-        // Entrar num sala de voz, abrir as Linhas e pedir o histórico de cada uma.
+        // Entrar numa sala de voz, abrir as Linhas e pedir o histórico de cada uma.
         let inicio = zero();
         let mut vigia = Vigia::novo(inicio);
         for numero in 0..QUADROS_DE_RAJADA {

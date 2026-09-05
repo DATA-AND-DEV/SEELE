@@ -374,7 +374,7 @@ impl<'a> Permissions<'a> {
             return Ok(());
         }
 
-        // Everybody after the first arrives as a pessoa. specs/04 makes that the
+        // Everybody after the first arrives as a Person. specs/04 makes that the
         // normal-use role; a Comandante promotes from there.
         self.connection.execute(
             "INSERT INTO person_roles (person_id, role_id) VALUES (?1, ?2)",

@@ -93,7 +93,7 @@ async fn entrar(address: SocketAddr, apelido: &str, semente: u8) -> Result<Clien
         None,
     )
     .await?;
-    cliente.insert_plug(VoiceRoomId(VOICE_ROOM)).await?;
+    cliente.enter_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
     cliente.join_channel(ChannelId(LINE)).await?;
     Ok(cliente)
 }

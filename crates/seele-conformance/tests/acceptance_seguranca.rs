@@ -88,7 +88,7 @@ async fn reiniciar_o_server_nao_troca_a_chave() -> Result<()> {
 
     let cliente = conectar(endereco, "marcela", 1, pins, None)
         .await
-        .map_err(|erro| anyhow::anyhow!("o pessoa foi recusado após um reinício: {erro:?}"))?;
+        .map_err(|erro| anyhow::anyhow!("a pessoa foi recusada após um reinício: {erro:?}"))?;
     assert!(matches!(
         cliente.pin_decision(),
         PinDecision::Matches { .. }
@@ -218,7 +218,7 @@ async fn a_senha_do_voice_room_e_conferida() -> Result<()> {
 
     // A entrada sem senha é recusada com um alerta, não com uma queda: a sala de voz
     // é um cômodo, e errar a senha dele não derruba a sessão.
-    cliente.insert_plug(VOICE_ROOM).await?;
+    cliente.enter_voice_room(VOICE_ROOM).await?;
     let alerta = tokio::time::timeout(
         std::time::Duration::from_secs(3),
         aguardar_recusa(&mut cliente),
@@ -226,7 +226,7 @@ async fn a_senha_do_voice_room_e_conferida() -> Result<()> {
     .await;
     assert!(
         alerta.is_ok(),
-        "entrar num sala de voz trancado sem senha não foi recusado"
+        "entrar numa sala de voz trancada sem senha não foi recusado"
     );
 
     servidor.shutdown();

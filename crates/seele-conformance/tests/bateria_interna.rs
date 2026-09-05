@@ -88,7 +88,7 @@ async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<(
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
+    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
     assert_eq!(enlace.estado(), Link::Online);
 
@@ -147,7 +147,7 @@ async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<(
 #[tokio::test(flavor = "multi_thread")]
 async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     // Reconectar no lugar errado é quase tão ruim quanto não reconectar: quem
-    // estava num sala de voz conversando volta calado noutro canto sem entender por
+    // estava numa sala de voz conversando volta calado noutro canto sem entender por
     // quê.
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
@@ -160,7 +160,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
+    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace.muted(true).await?;
 

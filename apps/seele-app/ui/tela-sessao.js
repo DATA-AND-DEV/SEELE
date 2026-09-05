@@ -641,7 +641,7 @@ function desenharCanais(snapshot) {
 
     const dentro = elemento("ul", "voice_room-dentro");
     if (voice_room.people.length === 0) {
-      // Palavra, e não travessão: uma sala de voz vazio é uma medida, e o produto a
+      // Palavra, e não travessão: uma sala de voz vazia é uma medida, e o produto a
       // tem. O travessão é para o que ninguém mediu.
       dentro.append(elemento("li", "voice_room-vazio", "ninguém aqui"));
     } else {
@@ -660,14 +660,14 @@ function desenharCanais(snapshot) {
     // duas o tempo todo.
     cabeca.append(elemento("span", "espaco"));
 
-    // O último sala de voz vem desabilitado e não escondido: a razão de ele
+    // A última sala de voz vem desabilitada e não escondida: a razão de ela
     // não poder ir embora é coisa que se lê, e uma ausência não se lê.
     const apagar = botaoDeApagarVoiceRoom(voice_room, snapshot, snapshot.voice_rooms.length === 1);
     if (apagar) cabeca.append(apagar);
 
     // **A fileira da sala nunca sai da sala.** Ela tinha um botão de desligar —
     // o círculo com a haste em cima, o mesmo símbolo de um aparelho que se apaga
-    // — e ele chamava `eject_plug`. Saiu a pedido de quem usa: quem sai da sala
+    // — e ele chamava `leave_voice_room`. Saiu a pedido de quem usa: quem sai da sala
     // sai pelo `SAIR DA SALA` escrito no operador, que é o único lugar onde essa
     // saída mora agora, e diz em palavras o que faz.
     //
@@ -1238,7 +1238,7 @@ function desenharMensagens() {
  * mantém o realce no lugar num corpo com emoji.
  *
  * `aceso` é qual destes intervalos é o do cursor, ou `null` se o cursor está
- * noutra mensagem. Sem ele todas as ocorrências saíam idênticas e o pessoa não
+ * noutra mensagem. Sem ele todas as ocorrências saíam idênticas e a pessoa não
  * enxergava onde estava dentro de uma mensagem que casa três vezes. A ordem
  * desta lista é a mesma em que o core contou, e é o que faz o índice bater.
  *
@@ -2329,7 +2329,7 @@ async function alternarCanal(evento) {
     if (item.dataset.voice_room) {
       const voice_room = Number(item.dataset.voice_room);
       if (item.dataset.dentro === "sim") {
-        // Já se está dentro: isto é navegação, e não saída. O `eject_plug` que
+        // Já se está dentro: isto é navegação, e não saída. O `leave_voice_room` que
         // morava aqui foi para o `SAIR DA SALA` do operador — ver o comentário
         // na fileira, em `desenharVoiceRooms`.
         entrou = true;
@@ -2339,7 +2339,7 @@ async function alternarCanal(evento) {
         // (`ArgumentCase::Camel` é o padrão do `#[tauri::command]`). Enquanto
         // o argumento se chamou `cage`, uma palavra só, as duas formas eram a
         // mesma string e isso não aparecia.
-        await invoke("insert_plug", { voiceRoom: voice_room });
+        await invoke("enter_voice_room", { voiceRoom: voice_room });
         entrou = true;
       }
     } else if (item.dataset.linha) {

@@ -110,7 +110,7 @@ async fn three_clients_in_one_voice_room_hear_each_other() -> Result<()> {
     );
 
     for client in [&mut marcela, &mut rafael, &mut carla] {
-        client.insert_plug(VoiceRoomId(1)).await?;
+        client.enter_voice_room(VoiceRoomId(1)).await?;
     }
     // The voice room task processes joins asynchronously; give it a moment before
     // anybody speaks, or the first datagram races the membership.
@@ -147,8 +147,8 @@ async fn a_client_without_permission_is_refused() -> Result<()> {
     let mut observer = connect(address, "observador").await?;
     let mut person = connect(address, "marcela").await?;
 
-    observer.insert_plug(VoiceRoomId(1)).await?;
-    person.insert_plug(VoiceRoomId(1)).await?;
+    observer.enter_voice_room(VoiceRoomId(1)).await?;
+    person.enter_voice_room(VoiceRoomId(1)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // The observer is in the voice room and may listen.
@@ -183,7 +183,7 @@ async fn a_forged_ssrc_is_refused() -> Result<()> {
     let mut carla = connect(address, "carla").await?;
 
     for client in [&mut marcela, &mut rafael, &mut carla] {
-        client.insert_plug(VoiceRoomId(1)).await?;
+        client.enter_voice_room(VoiceRoomId(1)).await?;
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -386,7 +386,7 @@ async fn media_before_entering_a_voice_room_goes_nowhere() -> Result<()> {
 
     let listener = connect(address, "marcela").await?;
     let mut inside = connect(address, "rafael").await?;
-    inside.insert_plug(VoiceRoomId(1)).await?;
+    inside.enter_voice_room(VoiceRoomId(1)).await?;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // `listener` never inserted its connection.

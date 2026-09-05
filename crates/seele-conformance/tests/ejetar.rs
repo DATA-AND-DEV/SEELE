@@ -143,7 +143,7 @@ async fn conectar_e_falar(
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
+    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace
         .dizer(ChannelId(LINE), o_que.to_owned(), proxima_chave())
@@ -209,11 +209,11 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
     drop(primeiro);
 
     // Semente diferente, e de propósito: aqui o que se mede é o **rastro** que a
-    // sessão ejetada deixa no servidor, e com o mesmo pessoa não haveria rastro
+    // sessão ejetada deixa no servidor, e com a mesma pessoa não haveria rastro
     // para medir. `Occupancy::seat` começa por `vacate_everywhere(person)`
-    // (`server.rs:171-174`), então o mesmo pessoa nunca aparece duas vezes na
+    // (`server.rs:171-174`), então a mesma pessoa nunca aparece duas vezes na
     // lista, por construção — a asserção lá embaixo passaria mesmo com a
-    // primeira sessão inteira pendurada. Com dois pessoas, uma sessão que não
+    // primeira sessão inteira pendurada. Com duas pessoas, uma sessão que não
     // se desfaz fica visível como uma cadeira ocupada a mais.
     //
     // A volta da *mesma* pessoa, que é o caso real do `:ejetar`, está no teste
@@ -269,7 +269,7 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
     assert_eq!(
         segundo.sessao().person,
         pessoa,
-        "a mesma identidade voltou como outro pessoa"
+        "a mesma identidade voltou como outra pessoa"
     );
     assert_ne!(
         segundo.sessao().id,
@@ -278,7 +278,7 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
     );
 
     // Este teste **não** olha a lotação da sala de voz, e a omissão é deliberada: com o
-    // mesmo pessoa nos dois lados, o `vacate` da sessão que morre e o `seat` da
+    // mesma pessoa nos dois lados, o `vacate` da sessão que morre e o `seat` da
     // que nasce disputam a mesma chave, e a lista pode acabar vazia. É a
     // pendência 11, encontrada lendo este teste — o defeito é do servidor, não
     // daqui, e afirmar lotação neste ponto seria trocar um teste que pega falha

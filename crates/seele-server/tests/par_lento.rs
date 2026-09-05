@@ -12,7 +12,7 @@
 //! `broadcast` de capacidade fixa: passado o tamanho do anel, ele descarta o
 //! mais antigo e devolve `Lagged` na próxima leitura. Um `let Ok(event) = event
 //! else { continue }` transformava isso em nada — a sessão seguia, calada, com
-//! um buraco permanente no que aquele pessoa vê.
+//! um buraco permanente no que aquela pessoa vê.
 //!
 //! É por isso que a pendência é a número 1: a mensagem foi gravada em PERSISTENCE,
 //! quem escreveu viu a sua aparecer, e o outro lado nunca soube que faltou.

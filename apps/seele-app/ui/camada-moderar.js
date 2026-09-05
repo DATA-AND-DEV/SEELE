@@ -46,7 +46,7 @@ let atoArmado = null;
  *
  * Guardado como elemento e não como `id`, pela mesma razão que `focoDeVolta` em
  * `base.js`: metade dos controles que abrem esta caixa é desenhada pelo
- * JavaScript e não tem `id` nenhum — o botão de moderar de um pessoa é
+ * JavaScript e não tem `id` nenhum — o botão de moderar de uma pessoa é
  * reconstruído a cada snapshot.
  */
 let focoAntesDeModerar = null;
@@ -213,7 +213,7 @@ function botaoDeRenomearLinha(linha, snapshot) {
 /**
  * O segundo botão da caixa de alerta, que o comp desenha e o v2 deixou morto.
  *
- * A ambiguidade do rótulo do comp (Q6 do inventário — «ejetar o connection **do**
+ * A ambiguidade do rótulo do comp (Q6 do inventário — «ejetar o plug **do**
  * operador» tanto pode ser o ato sobre outra pessoa quanto a saída ordenada por
  * quem está aqui) se resolveu para o primeiro lado: quem quer sair tem
  * DESCONECTAR no cabeçalho, escrito, e é o que faz o que diz.
@@ -692,7 +692,7 @@ $("lista-voice_rooms").addEventListener("click", async (evento) => {
     `APAGAR A SALA DE VOZ ${voice_room.name} ?`,
     consequenciaDeApagarVoiceRoom(voice_room, presa),
     `APAGAR ${voice_room.name}`,
-    // camelCase: ver a nota em `tela-sessao.js`, no `insert_plug`.
+    // camelCase: ver a nota em `tela-sessao.js`, no `enter_voice_room`.
     () => invoke("apagar_voice_room", { voiceRoom: id }),
   );
 });

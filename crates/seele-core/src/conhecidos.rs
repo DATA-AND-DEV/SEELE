@@ -11,7 +11,7 @@
 //! propósito, porque quem foi avisado de que a chave mudou precisa abrir e
 //! comparar.
 //!
-//! Acrescentar apelido e último sala de voz ali dentro tornaria esse arquivo maior,
+//! Acrescentar apelido e última sala de voz ali dentro tornaria esse arquivo maior,
 //! mais fácil de corromper, e menos óbvio de ler. Conveniência e segurança em
 //! arquivos separados: um pode ser apagado sem consequência, o outro não.
 //!
@@ -23,7 +23,7 @@
 //! 192.168.0.7:8383 <TAB> marcela <TAB> 1 <TAB> 1738000000
 //! ```
 //!
-//! endereço, apelido, último sala de voz, e quando foi a última visita. Texto porque
+//! endereço, apelido, última sala de voz, e quando foi a última visita. Texto porque
 //! alguém vai querer editar isso à mão, e binário transformaria uma limpeza de
 //! lista numa conversa de suporte.
 
@@ -43,7 +43,7 @@ pub struct Conhecido {
     pub alvo: String,
     /// Com que apelido se entrou da última vez.
     pub apelido: String,
-    /// Último sala de voz em que o connection foi inserido.
+    /// Última sala de voz em que se entrou.
     pub voice_room: Option<u32>,
     /// Quando foi a última visita, em segundos desde a época.
     pub visto_em: i64,

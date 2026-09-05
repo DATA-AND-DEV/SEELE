@@ -7,7 +7,7 @@
 //!
 //! Este é o que mais fácil passaria por engano. `seele-core` não confere
 //! permissão nenhuma — de propósito, porque a `specs/08-seguranca.md` põe a
-//! decisão no servidor —, então o pedido de um pessoa sem `ManageVoiceRooms`
+//! decisão no servidor —, então o pedido de uma pessoa sem `ManageVoiceRooms`
 //! **sai no fio**. Um teste que só olhasse o cliente não distinguiria «a casca
 //! não mandou» de «o servidor recusou», e as duas dão a mesma tela.
 //!
@@ -276,7 +276,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
         .await
         .expect("a sessão acabou antes de o pedido sair");
 
-    // Um: a recusa volta, enumerada. Sem ela o pessoa olharia para uma lista
+    // Um: a recusa volta, enumerada. Sem ela a pessoa olharia para uma lista
     // que não mudou sem saber por quê.
     let recusa = esperar(&mut sem_permissao, Duration::from_secs(15), e_recusa).await;
     assert!(

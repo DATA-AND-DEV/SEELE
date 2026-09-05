@@ -16,15 +16,15 @@
 //! Zero não é «não medido» aos olhos de quem lê: pelas três faixas do comp
 //! (`comp v2`) zero é **crítico**, vermelho, a cor de «vá
 //! olhar». Numa sessão local, com RTT, jitter e perda em zero, o servidor calcula
-//! cem — e o roster acusava o pessoa de estar em colapso.
+//! cem — e o roster acusava a pessoa de estar em colapso.
 //!
 //! E não para na linha: `Room::voice_room_sync` tira a média das cadeiras, então numa
-//! sessão de um pessoa só a MÉDIA Da sala de voz também era zero, e num sala de voz de cinco
+//! sessão de uma pessoa só a média da sala também era zero, e numa sala de voz de cinco
 //! cada pessoa via a média puxada para baixo pela própria linha.
 //!
 //! # O que este arquivo afirma, e o que não
 //!
-//! Afirma que a difusão **chega** ao pessoa que ela descreve e que o roster dele
+//! Afirma que a difusão **chega** à pessoa que ela descreve e que o roster dela
 //! sai do zero por medição, não por otimismo. Não afirma valor exato: a taxa é
 //! medida contra a pilha QUIC real, e cravar «cem» seria cravar o desempenho da
 //! máquina de integração contínua. O que dá para afirmar é a faixa — em
@@ -103,7 +103,7 @@ async fn sentar(endereco: SocketAddr, semente: u8, apelido: &str) -> Result<(Enl
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.inserir_plug(VoiceRoomId(VOICE_ROOM)).await?;
+    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
 
     let mut sala = Room::new();
     sala.adopt(enlace.sessao(), apelido);
@@ -162,8 +162,8 @@ async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
     let taxa = minha_taxa(&sala).expect("o próprio pessoa sumiu do roster");
     assert!(
         mediu,
-        "a barra de telemetria mede a sinal e o roster continua \
-         em {taxa}%: a difusão do `PersonState` nunca chegou ao pessoa que ela \
+        "a barra de telemetria mede o sinal e o roster continua \
+         em {taxa}%: a difusão do `PersonState` nunca chegou à pessoa que ela \
          descreve"
     );
 
@@ -182,8 +182,8 @@ async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_media_do_voice_room_conta_a_propria_linha() -> Result<()> {
     // A média sai de `Room::voice_room_sync`, que soma as cadeiras. Enquanto a linha
-    // de `me` ficava em zero, um pessoa sozinho via MÉDIA DO VOICE_ROOM: 0 — e num
-    // sala de voz cheio cada pessoa via a média puxada para baixo pela própria linha,
+    // de `me` ficava em zero, uma pessoa sozinha via média da sala: 0 — e numa
+    // sala de voz cheia cada pessoa via a média puxada para baixo pela própria linha,
     // cada uma por um valor diferente. Uma média que discorda entre as telas da
     // mesma sala não é média de nada.
     let (endereco, servidor) = server().await?;
@@ -198,10 +198,10 @@ async fn a_media_do_voice_room_conta_a_propria_linha() -> Result<()> {
     let media = sala
         .current_voice_room_sync()
         .expect("uma sala de voz com alguém dentro tem média");
-    assert_eq!(media.people, 1, "a sala de voz devia ter só este pessoa");
+    assert_eq!(media.people, 1, "a sala de voz devia ter só esta pessoa");
     assert!(
         mediu,
-        "a média da sala de voz de um pessoa medido ficou em {}%",
+        "a média da sala de voz de uma pessoa medida ficou em {}%",
         media.ratio
     );
 

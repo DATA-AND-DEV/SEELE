@@ -399,7 +399,7 @@ impl VoiceRoom {
                 }
                 // A saída de quem compartilha mata a transmissão, e é o caminho
                 // por onde **toda** saída passa: `salas de voz::leave_everywhere` é
-                // chamado ao ejetar o connection, ao ser movido, ao a sala ser
+                // chamado ao sair da sala, ao ser movido, ao a sala ser
                 // destruída e em qualquer `?` do meio da sessão. Um
                 // encaminhamento que sobrevivesse a isso seria um fluxo
                 // bombeando para uma sala que já não tem de onde receber.
@@ -1610,7 +1610,7 @@ mod tests {
 
     #[test]
     fn sair_da_sala_encerra_a_transmissao() {
-        // O caminho por onde **toda** saída passa — ejetar o connection, ser movido,
+        // O caminho por onde **toda** saída passa — sair da sala, ser movido,
         // a sala ser destruída, a conexão cair em qualquer `?`. Sem isto fica
         // um fluxo aberto na tela de quem assistia, prometendo imagem que já
         // não tem de onde vir.

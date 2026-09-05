@@ -1154,7 +1154,7 @@ VoiceRoom que se deixou é nomeado.
 **Três achados no código mudaram o desenho**, e valem mesmo sem o ADR:
 
 1. **O áudio abre na conexão, não na entrada na sala de voz**
-   (`crates/seele-ffi/src/lib.rs:1507-1531`; `insert_plug` não toca áudio,
+   (`crates/seele-ffi/src/lib.rs:1507-1531`; `enter_voice_room` não toca áudio,
    `lib.rs:565-567` e `1787-1795`). Três conexões abririam três `AudioIo` antes
    de alguém falar. O ADR move a abertura para a entrada no primeiro VoiceRoom, o que
    é melhoria de privacidade por si só.
