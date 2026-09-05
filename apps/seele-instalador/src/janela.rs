@@ -508,7 +508,9 @@ fn desenhar(estado: &Estado, hdc: HDC, largura: i32, altura: i32) -> Vec<Alvo> {
     // que a janela desenhava e nunca ia usar.
     let fita = barra + 1;
     let altura_da_fita = px(30);
-    let quantos = i32::try_from(estado.modo.passos().len()).unwrap_or(1).max(1);
+    let quantos = i32::try_from(estado.modo.passos().len())
+        .unwrap_or(1)
+        .max(1);
     let largura_do_passo = (largura - 2) / quantos;
     for (i, passo) in estado.modo.passos().iter().enumerate() {
         let x = 1 + largura_do_passo * i32::try_from(i).unwrap_or(0);
