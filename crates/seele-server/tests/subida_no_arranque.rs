@@ -108,10 +108,18 @@ impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
 
 /// Um servidor em memória, já atendendo.
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    servidor_com(Location::Memory).await
+}
+
+/// O mesmo servidor, sobre o banco que se pedir.
+///
+/// Um arquivo, e não memória, é o que permite o segundo arranque ler o que o
+/// primeiro escreveu — que é a afirmação inteira de `partindo_de`.
+async fn servidor_com(database: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-        database: Location::Memory,
+        database,
         ..ServerConfig::default()
     };
     let servidor = Arc::new(Daemon::bind(config).await?);
@@ -315,6 +323,86 @@ async fn a_conversa_ensina_o_cano_e_a_medida_chega_ao_portao_e_ao_disco() -> Res
 
     // Sem isto os pares caem antes do servidor e o desligamento vira corrida.
     drop(pares);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// O segundo arranque começa onde o primeiro parou.
+///
+/// # A afirmação que faltava
+///
+/// `persistence::subida` prova a ida e a volta num banco **em memória**, e o
+/// teste acima prova que a medida chega ao disco — dentro de um arranque só.
+/// Nenhum dos dois prova a frase que a onda vende: *«a medida sobrevive ao
+/// reinício»*. Entre eles cabia um Dogma que grava direito, fecha, sobe de novo
+/// e ignora o que gravou — e o sintoma seria o tateio de catorze segundos
+/// voltando em silêncio, na primeira tela de todo arranque, que é exatamente o
+/// defeito que ninguém relata porque parece normal.
+///
+/// Aqui o banco é um arquivo, o primeiro Dogma morre, e o segundo nasce sobre o
+/// mesmo arquivo.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_segundo_arranque_comeca_onde_o_primeiro_parou() -> Result<()> {
+    let diretorio = tempfile::tempdir()?;
+    let banco = diretorio.path().join("seele.db");
+
+    // Primeiro arranque: a conversa ensina o cano.
+    let medida = {
+        let (endereco, servidor) = servidor_com(Location::File(banco.clone())).await?;
+        let mut pares = Vec::new();
+        for semente in 1..=4_u8 {
+            let mut par = abrir(endereco, semente, 1024 * 1024).await?;
+            let sala = par.sala;
+            frame::write(
+                &mut par.envio,
+                &ClientMessage::EnterVoiceRoom {
+                    voice_room: sala,
+                    password: None,
+                },
+            )
+            .await?;
+            pares.push(par);
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let mut falando = Vec::new();
+        for par in pares {
+            falando.push(tokio::spawn(async move {
+                for seq in 0..150_u16 {
+                    let _ = par.conexao.send_datagram(quadro(par.ssrc, seq).into());
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                par
+            }));
+        }
+        let mut pares = Vec::new();
+        for quem in falando {
+            pares.push(quem.await?);
+        }
+
+        let medida = servidor
+            .server()
+            .subida
+            .lock()
+            .await
+            .medida()
+            .expect("o primeiro arranque não mediu nada");
+        drop(pares);
+        servidor.shutdown();
+        servidor.wait_idle().await;
+        medida
+    };
+    println!("o primeiro arranque mediu {medida} bps");
+
+    // Segundo arranque, sobre o mesmo arquivo, sem ninguém conversando.
+    let (_, servidor) = servidor_com(Location::File(banco)).await?;
+    let ao_nascer = servidor.server().subida.lock().await.medida();
+    assert_eq!(
+        ao_nascer,
+        Some(medida),
+        "o Dogma reabriu o mesmo banco e nasceu sem medida nenhuma: a primeira \
+         tela deste arranque vai tatear de novo o que ontem já se sabia"
+    );
     servidor.shutdown();
     Ok(())
 }
