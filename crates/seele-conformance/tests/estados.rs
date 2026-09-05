@@ -352,7 +352,12 @@ fn a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca() {
     assert!(
         matches!(
             falha.error,
-            seele_ffi::ConnectionError::Unreachable | seele_ffi::ConnectionError::HandshakeTimeout
+            // `SemResposta` desde 05/09/2026: os pacotes saem e nada volta, que
+            // é o que de fato acontece contra uma porta onde ninguém escuta.
+            // Ver `an_unreachable_server_is_an_enum_and_not_a_message`.
+            seele_ffi::ConnectionError::Unreachable
+                | seele_ffi::ConnectionError::SemResposta
+                | seele_ffi::ConnectionError::HandshakeTimeout
         ),
         "erro inesperado: {:?}",
         falha.error

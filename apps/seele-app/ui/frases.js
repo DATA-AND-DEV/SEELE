@@ -20,7 +20,11 @@
 const MOTIVOS = {
   Incompatible: "VERSÃO INCOMPATÍVEL COM ESTE SERVIDOR",
   CredentialRejected: "CREDENCIAL RECUSADA",
-  HandshakeTimeout: "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
+  // **Esta é o servidor dizendo que desistiu de esperar por nós.** Ela chega
+  // pelo fio, num `Disconnecting`, então o outro lado recebeu o que mandamos e
+  // decidiu parar — o oposto do `SemResposta` da tabela de baixo, onde nada
+  // chegou a lugar nenhum. As duas diziam a mesma frase, e ela descrevia só uma.
+  HandshakeTimeout: "O SERVIDOR DESISTIU DE ESPERAR O NOSSO APERTO DE MÃO",
   Kicked: "DESCONECTADO POR UM OPERADOR",
   Banned: "ACESSO BARRADO POR UM OPERADOR",
   ServerFull: "SERVIDOR LOTADO",
@@ -399,7 +403,24 @@ const FRASES = {
     AlreadyConnected: "JÁ HÁ UMA SESSÃO ABERTA",
     UnresolvableHost: "NÃO CONSEGUI RESOLVER ESSE ENDEREÇO",
     Unreachable: "NADA RESPONDEU NESSE ENDEREÇO",
-    HandshakeTimeout: "TEMPO ESGOTADO NA SINCRONIZAÇÃO INICIAL",
+    // **Duas frases onde havia uma.**
+    //
+    // As duas falhas usavam esta, e ela descreve bem só a primeira: um servidor
+    // que recebeu o pedido e demorou a responder. A segunda — os pacotes saírem
+    // e nada voltar — não é sincronização nenhuma, e chamá-la assim mandou quem
+    // leu conferir protocolo, versão e servidor. Perguntado assim: «o Mac só dá
+    // tempo esgotado na sincronização. Como isso, se os PCs estão na mesma LAN e
+    // na mesma versão?» — e as duas coisas estavam certas.
+    //
+    // A segunda linha diz onde olhar, porque a causa quase sempre é a mesma: no
+    // Windows, quem hospeda precisa da regra de firewall, e ela nasce
+    // desmarcada no instalador.
+    HandshakeTimeout:
+        "O SERVIDOR RECEBEU E NÃO RESPONDEU A TEMPO\n" +
+        "Ele está no ar e demorou. Tente de novo.",
+    SemResposta:
+        "OS PACOTES SAÍRAM E NADA VOLTOU\n" +
+        "Quem hospeda precisa abrir a porta 8383 UDP no firewall.",
     IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
     NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
     UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",

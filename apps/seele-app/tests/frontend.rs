@@ -10132,3 +10132,64 @@ fn o_servidor_nao_impoe_uma_transmissao_que_ninguem_pediu() {
         "a conferência acontece depois de a imagem já ter sido montada:\n{abrir}"
     );
 }
+
+#[test]
+fn os_pacotes_que_nao_voltam_nao_se_chamam_sincronizacao() {
+    // **Duas falhas vestiam a mesma frase, e ela descrevia só uma.**
+    //
+    // `quinn::ConnectionError::TimedOut` é a conexão inteira expirando, e chega
+    // **antes** de existir aperto de mão nenhum: os pacotes saíram e nada
+    // voltou. Traduzi-lo como «tempo esgotado na sincronização inicial» manda
+    // quem lê investigar protocolo, versão e servidor — três coisas do outro
+    // lado — quando o que aconteceu foi um datagrama que não chegou lá.
+    //
+    // Perguntado assim: «o Mac só dá tempo esgotado na sincronização. Como
+    // isso, se os PCs estão na mesma LAN e na mesma versão?». A pergunta é a
+    // prova: as duas coisas que a frase mandou conferir estavam certas.
+    let frases = without_comments(&read("ui/frases.js"));
+
+    assert!(
+        frases.contains("SemResposta:"),
+        "a falha de «nada voltou» perdeu a frase dela, e volta a se chamar \
+         sincronização"
+    );
+    assert!(
+        frases.contains("OS PACOTES SAÍRAM E NADA VOLTOU"),
+        "a frase deixou de dizer o que de fato aconteceu"
+    );
+    assert!(
+        frases.contains("8383 UDP no firewall"),
+        "a frase não diz o que fazer, e a causa mais comum desta falha é uma \
+         regra de firewall que nasce desmarcada"
+    );
+
+    // E a de sincronização passa a descrever só o que ela é: o servidor
+    // recebeu e demorou.
+    // **São duas tabelas, e a chave se repete nas duas.** `MOTIVOS` traduz o
+    // que o servidor manda pelo fio; `FRASES` traduz o que este lado conclui
+    // sozinho. As duas tinham a mesma frase para coisas opostas — uma é «ele
+    // recebeu e desistiu», a outra é «nada chegou lá».
+    let motivos = frases
+        .split("const MOTIVOS")
+        .nth(1)
+        .and_then(|resto| resto.split("};").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        motivos.contains("O SERVIDOR DESISTIU DE ESPERAR"),
+        "o motivo que vem pelo fio voltou a se chamar sincronização, e some a \
+         diferença entre «ele desistiu» e «nada chegou»:\n{motivos}"
+    );
+
+    let tabela = frases
+        .split("const FRASES")
+        .nth(1)
+        .and_then(|resto| resto.split("};").next())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        tabela.contains("RECEBEU E NÃO RESPONDEU"),
+        "a frase do aperto de mão não diz que o servidor recebeu, que é a \
+         única coisa que a separa da outra:\n{tabela}"
+    );
+}

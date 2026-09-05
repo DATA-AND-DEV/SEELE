@@ -511,10 +511,28 @@ async fn an_unreachable_server_is_an_enum_and_not_a_message() -> Result<()> {
         .await?
         .expect_err("connecting to nothing succeeded");
 
+    // **`SemResposta` entrou aqui em 05/09/2026, e este teste é a prova de que
+    // o nome antigo estava errado.**
+    //
+    // Nada escuta na porta 1. Os pacotes saem e nada volta — e é exatamente
+    // isso que acontece. O `quinn` devolve `ConnectionError::TimedOut`, que era
+    // traduzido como `HandshakeTimeout`, cuja frase é «tempo esgotado na
+    // sincronização inicial»: um aperto de mão que nunca começou, descrito como
+    // um que demorou.
+    //
+    // O custo apareceu em campo, como pergunta: «o Mac só dá tempo esgotado na
+    // sincronização. Como isso, se os PCs estão na mesma LAN e na mesma
+    // versão?». As duas coisas que a frase mandou conferir estavam certas, e a
+    // que importava — o caminho até a máquina — ela não mencionava.
+    //
+    // `HandshakeTimeout` continua na lista porque ele é a resposta certa do
+    // outro caso: o servidor recebeu e desistiu de esperar.
     assert!(
         matches!(
             failure,
-            ConnectionError::Unreachable | ConnectionError::HandshakeTimeout
+            ConnectionError::Unreachable
+                | ConnectionError::SemResposta
+                | ConnectionError::HandshakeTimeout
         ),
         "unexpected failure: {failure:?}"
     );

@@ -4026,6 +4026,7 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
             }
         }
         seele_core::ConnectError::HandshakeTimeout => ConnectionError::HandshakeTimeout,
+        seele_core::ConnectError::SemResposta => ConnectionError::SemResposta,
         seele_core::ConnectError::Refused { reason } => ConnectionError::Refused {
             reason: (*reason).into(),
         },

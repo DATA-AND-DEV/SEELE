@@ -1420,7 +1420,22 @@ pub enum ConnectionError {
     /// Nothing answered.
     Unreachable,
     /// The handshake did not finish in time.
+    ///
+    /// **O servidor recebeu e demorou**, que é diferente de nada ter voltado —
+    /// ver [`Self::SemResposta`].
     HandshakeTimeout,
+    /// Os pacotes saíram e nada voltou.
+    ///
+    /// A conexão inteira expirou, antes de existir aperto de mão nenhum. Era
+    /// [`Self::HandshakeTimeout`] até 05/09/2026, e a frase daquele — «tempo
+    /// esgotado na sincronização inicial» — mandava quem lia investigar
+    /// protocolo, versão e servidor, quando o que aconteceu foi um datagrama que
+    /// não chegou ao outro lado.
+    ///
+    /// Relatado assim: «o Mac só dá tempo esgotado na sincronização. Como isso,
+    /// se os PCs estão na mesma LAN e na mesma versão?». As duas coisas que a
+    /// frase mandou conferir estavam certas.
+    SemResposta,
     /// The server's key is not the one that was pinned.
     ///
     /// ADR 0003. The two fingerprints are carried because the whole point is

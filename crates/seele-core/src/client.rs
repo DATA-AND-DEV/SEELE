@@ -68,7 +68,32 @@ pub enum ConnectError {
         offered: String,
     },
     /// The handshake did not finish inside the budget in `specs/02-protocolo.md`.
+    ///
+    /// **Isto é o servidor demorando a responder, e não a rede sumindo.** O
+    /// segundo caso tem nome próprio desde 05/09/2026 — ver [`Self::SemResposta`]
+    /// —, porque os dois vestiam esta variante e mandavam quem lia procurar em
+    /// lugares opostos.
     HandshakeTimeout,
+    /// A conexão morreu antes de qualquer resposta chegar.
+    ///
+    /// # Por que ela não é [`Self::HandshakeTimeout`]
+    ///
+    /// Os dois eram a mesma variante, e a frase dela é «tempo esgotado na
+    /// sincronização inicial». Ela descreve bem um servidor que recebeu o
+    /// `Hello` e demorou a responder — Argon2 numa máquina carregada, um banco
+    /// lento —, e descreve **mal** o caso mais comum: os pacotes saíram e nada
+    /// voltou.
+    ///
+    /// O `quinn` distingue: `ConnectionError::TimedOut` é a conexão inteira
+    /// expirando, e chega antes de existir aperto de mão nenhum. Traduzi-lo como
+    /// «sincronização» manda quem lê investigar protocolo, versão e servidor —
+    /// quando o que aconteceu foi um datagrama que não chegou ao outro lado.
+    ///
+    /// Foi assim que apareceu: «o Mac só dá tempo esgotado na sincronização.
+    /// Como isso, se os PCs estão na mesma LAN e na mesma versão?». A pergunta é
+    /// a prova de que a frase apontou para o lugar errado — as duas coisas que
+    /// ela mandou conferir estavam certas.
+    SemResposta,
     /// The server ended the session during the handshake, and said why.
     Refused {
         /// The enumerated reason.
@@ -1405,7 +1430,11 @@ fn classify_connection_error(
         return ConnectError::PinChanged { pinned, offered };
     }
     match error {
-        quinn::ConnectionError::TimedOut => ConnectError::HandshakeTimeout,
+        // **A conexão expirou, e não o aperto de mão.** Ver `SemResposta`: este
+        // erro chega antes de haver aperto de mão nenhum, e chamá-lo de
+        // «sincronização» manda quem lê procurar no servidor um problema que
+        // está no caminho até ele.
+        quinn::ConnectionError::TimedOut => ConnectError::SemResposta,
         quinn::ConnectionError::TransportError(_) => {
             tracing::warn!(%error, "TLS refused the connection");
             ConnectError::TlsRefused
