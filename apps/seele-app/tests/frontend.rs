@@ -10180,10 +10180,29 @@ fn os_pacotes_que_nao_voltam_nao_se_chamam_sincronizacao() {
         frases.contains("OS PACOTES SAÍRAM E NADA VOLTOU"),
         "a frase deixou de dizer o que de fato aconteceu"
     );
+    // **Duas máquinas podem calar este caminho, e a frase precisa das duas.**
+    //
+    // Esta parte do guarda pedia só o firewall de quem hospeda, e mandava
+    // consertar a máquina certa metade das vezes. A outra metade apareceu no
+    // rastro de campo: o candidato `192.168.…` gastava os quatro segundos em
+    // silêncio enquanto o endereço público entrava no mesmo instante — o app
+    // alcançava a máquina dando a volta pelo mundo e não pelo cabo ao lado.
+    // Não era firewall nenhum: era o macOS negando, sem perguntar, o que sai
+    // deste app para a própria casa.
+    //
+    // Nomear os dois numa frase só é o que `camada-compartilhar.js` já faz com
+    // a recusa de gravar tela, e pela mesma razão: os sistemas negam coisas
+    // diferentes, e quem lê está num deles.
     assert!(
-        frases.contains("8383 UDP no firewall"),
-        "a frase não diz o que fazer, e a causa mais comum desta falha é uma \
-         regra de firewall que nasce desmarcada"
+        frases.contains("8383 UDP"),
+        "a frase não diz o que fazer no lado de quem hospeda, e a porta \
+         fechada continua sendo uma das duas causas"
+    );
+    assert!(
+        frases.contains("rede local"),
+        "a frase esqueceu a outra metade: no macOS o silêncio no caminho da LAN \
+         é desta máquina, que recusa calada o que sai daqui para a própria casa \
+         enquanto ninguém disser que sim nos Ajustes"
     );
 
     // E a de sincronização passa a descrever só o que ela é: o servidor

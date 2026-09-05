@@ -30,6 +30,34 @@
 	  tela. Quem for consertar «por simetria» com o microfone vai procurar e não
 	  achar — esta linha existe para poupar essa busca.
 	-->
+	<!--
+	  A terceira vez que este arquivo conserta a mesma coisa, agora com a rede
+	  local no lugar do microfone e da tela. Sem
+	  `NSLocalNetworkUsageDescription` o macOS **recusa os pacotes que saem
+	  daqui para endereços da própria casa**, sem alerta e sem entrada em
+	  Ajustes — e recusa só esses: o que vai para a internet passa, e o que
+	  chega de fora também.
+
+	  O sintoma é essa assimetria, e ela mente muito bem. Foi relatada assim:
+	  «o windows entra no mac, mas o mac não entra no windows, estando em LAN.
+	  Mas no 5g vai.» As três metades são a mesma recusa: quem entra vem de
+	  fora e passa; o 5G tira o outro da casa e passa; e só o caminho curto,
+	  de 192.168 para 192.168, morre calado. O rastro registrava quatro
+	  segundos de silêncio no candidato da LAN e a entrada pelo endereço
+	  público, com furo, no mesmo instante — o app alcançava a máquina dando a
+	  volta pelo mundo e não pelo cabo ao lado.
+
+	  E, de novo, o terminal não sofria: uma sonda rodada por `cargo` chegava
+	  ao mesmo endereço em 16 ms, porque a permissão pertence ao aplicativo que
+	  iniciou o processo e o terminal já tem a dele. Foi essa diferença que
+	  isolou o culpado, depois de o firewall do outro lado ter sido inocentado
+	  com a porta aberta para qualquer programa.
+
+	  A chave não concede nada: ela faz o sistema **perguntar**. Sem ela não há
+	  pergunta, e o padrão de quem não foi perguntado é «não».
+	-->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>O SEELE procura o servidor na sua própria rede quando ele está na mesma casa que você — é o caminho mais curto e o de melhor qualidade. Sem esta permissão a conversa ainda funciona, mas dá a volta pela internet.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>O SEELE mostra a sua tela para as outras pessoas da sala de voz, e só enquanto você estiver compartilhando. Nada é gravado.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -179,6 +179,31 @@ fn o_app_declara_para_que_quer_a_tela() {
 }
 
 #[test]
+fn o_app_declara_para_que_quer_a_rede_de_casa() {
+    // O mesmo defeito, a terceira vez, e a mais cara de achar: sem esta chave o
+    // macOS recusa **os pacotes que saem daqui para a própria casa**, calado. Só
+    // esses. O que vai para a internet passa, e o que chega de fora também.
+    //
+    // Por isso o sintoma mente: «o windows entra no mac, mas o mac não entra no
+    // windows, estando em LAN. Mas no 5g vai.» Quem entra vem de fora; o 5G tira
+    // o outro da casa; e só o caminho curto morre. O rastro do app mostrava os
+    // quatro segundos de silêncio no candidato `192.168.…` e a entrada pelo
+    // endereço público no mesmo instante — dando a volta pelo mundo em vez de
+    // usar o cabo ao lado.
+    //
+    // E a mesma pista das outras duas vezes: uma sonda rodada pelo terminal
+    // chegava ao mesmo endereço em 16 ms, porque a permissão pertence ao
+    // aplicativo que iniciou o processo.
+    let plist = ler("Info.plist");
+    assert!(
+        plist.contains("NSLocalNetworkUsageDescription"),
+        "o Info.plist não diz para que o app quer a rede de casa; o macOS nega \
+         calado, e só o caminho da LAN — pela internet continua funcionando, que \
+         é o que faz este defeito parecer qualquer outra coisa"
+    );
+}
+
+#[test]
 fn o_app_declara_para_que_quer_o_microfone() {
     // Sem esta chave o macOS nega o microfone **sem perguntar nada**: nenhum
     // alerta, nenhuma entrada em Ajustes, e o programa recebe uma falha de

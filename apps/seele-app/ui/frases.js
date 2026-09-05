@@ -418,9 +418,16 @@ const FRASES = {
     HandshakeTimeout:
         "O SERVIDOR RECEBEU E NÃO RESPONDEU A TEMPO\n" +
         "Ele está no ar e demorou. Tente de novo.",
+    // **Dois sistemas numa frase só**, pela mesma razão que a recusa de gravar
+    // tela nomeia os dois: eles negam coisas diferentes, e quem lê está num
+    // deles. Antes esta linha nomeava só o firewall de quem hospeda, e mandava
+    // consertar a máquina certa metade das vezes — no macOS o silêncio no
+    // caminho da LAN é desta máquina, que recusa calada o que sai daqui para a
+    // própria casa até alguém dizer que sim nos Ajustes.
     SemResposta:
         "OS PACOTES SAÍRAM E NADA VOLTOU\n" +
-        "Quem hospeda precisa abrir a porta 8383 UDP no firewall.",
+        "Quem hospeda precisa da porta 8383 UDP aberta. E o Mac de quem entra " +
+        "pede permissão de rede local, em Ajustes.",
     IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
     NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
     UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",

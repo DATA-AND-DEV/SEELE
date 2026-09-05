@@ -1012,7 +1012,19 @@ impl Enlace {
                 let tentativa = Self::conectar_por(&endpoint, bilhete, destino, chave, pins);
                 let resultado = match tokio::time::timeout(prazo, tentativa).await {
                     Ok(resultado) => resultado,
-                    Err(_) => Err(ConnectError::HandshakeTimeout),
+                    // `SemResposta` e não `HandshakeTimeout`: este prazo é o do
+                    // **candidato inteiro**, e queimá-lo é não ter recebido nada
+                    // de volta. O aperto de mão tem um prazo próprio, dentro de
+                    // `Client::connect`, e é ele quem sabe dizer «o servidor
+                    // recebeu e demorou» — porque só ele roda depois de haver
+                    // conexão.
+                    //
+                    // Enquanto os dois casos saíam por aqui, a separação escrita
+                    // em `ConnectError::SemResposta` não chegava à tela uma vez
+                    // sequer: quatro segundos de silêncio na LAN eram anunciados
+                    // como problema de sincronização, e a frase mandava conferir
+                    // versão e protocolo — as duas coisas que estavam certas.
+                    Err(_) => Err(ConnectError::SemResposta),
                 };
                 // A repetição para quando o candidato termina, dando certo ou
                 // não: avisar sobre um candidato que já falhou gastaria furo da
