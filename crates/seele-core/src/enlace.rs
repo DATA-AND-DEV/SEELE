@@ -1063,7 +1063,20 @@ impl Enlace {
             desfazer_pin_orfao(pins.as_ref(), chave_perdida, antes.as_deref());
         }
 
-        if let Some((_, enlace)) = corrida.vencedor {
+        // **Quem ganhou, dito por extenso.** O log tinha uma linha por candidato
+        // que falhou e nenhuma para o que deu certo, e a diferença custou uma
+        // noite: com quatro segundos de silêncio na LAN e uma entrada pelo
+        // endereço público no mesmo instante, não havia como saber, lendo o
+        // rastro, por qual dos dois a conversa tinha subido — só dava para
+        // inferir pelos milissegundos, e a inferência errou.
+        //
+        // A posição é lida daqui e não da trilha porque a trilha guarda a ordem
+        // em que as tentativas **começaram**, e elas correm em paralelo: a
+        // última a começar não é a que venceu. Aqui a corrida já terminou e
+        // sabe o nome de quem chegou.
+        if let Some((posicao, enlace)) = corrida.vencedor {
+            let onde = todos.get(posicao).map(|destino| destino.servidor);
+            tracing::info!(?onde, "este é o endereço que deu");
             return Ok(enlace);
         }
 
