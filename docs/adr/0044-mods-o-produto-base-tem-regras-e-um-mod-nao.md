@@ -215,11 +215,18 @@ como descoberta:
 > **Um servidor em rede local, sem internet, com um MOD habilitado, tranca todo
 > mundo do lado de fora — inclusive quem hospeda.**
 
-O cliente busca os bytes no indexador, por hash; um MOD só existe se estiver
-publicado. Isto contraria o ADR 0022, que chama o ponto de encontro de
-*«opcional, trocável e não obrigatório»*, e o 0029, que escrevia que *«nada em um
-MOD depende de ele ter vindo de lá»*. A tela de hospedar tem de dizer isso **no
-momento de habilitar o primeiro MOD**, não depois.
+O cliente bate em `mods.seele.app.br` e confere o hash; um MOD só existe se
+estiver publicado. **Não há cache no servidor, não há espelho e não há caminho
+lateral** — foi proposto servir os bytes pelo próprio servidor, com a assinatura
+garantindo a procedência do mesmo jeito, e foi recusado: quem entra tem de bater
+na origem.
+
+Isto contraria o ADR 0022, que chama o ponto de encontro de *«opcional, trocável
+e não obrigatório»*, e o 0029, que escrevia que *«nada em um MOD depende de ele
+ter vindo de lá»*. As duas frases deixam de valer para MODs.
+
+A tela de hospedar tem de dizer isso **no momento de habilitar o primeiro MOD**,
+não depois.
 
 ### Falha isolada
 
@@ -241,9 +248,14 @@ GitHub.
 - **Revisão de código de cada versão.** Não só da primeira: um MOD limpo
   aprovado cuja versão seguinte entra sozinha é uma revisão que não significa
   nada.
+- **Endereço fixo: `mods.seele.app.br`.** O cliente bate na origem, e não num
+  espelho. Isto **diverge do ADR 0029**, que previa endereço configurável e
+  espelhamento — *«quem não quiser que sejamos nós a servir os bytes serve os
+  mesmos bytes de outro lado»* —, e a divergência é decisão do dono. O custo
+  está em «O que fica sem saída».
 - **Catálogo assinado, busca no cliente.** Não é uma API. Com API, o indexador
   aprende cada termo digitado; com catálogo, aprende que alguém buscou o
-  catálogo. O arquivo é espelhável e a assinatura continua conferindo.
+  catálogo.
 - **Sem consulta automática ao abrir** — mesma regra do ADR 0026.
 - **MOD oficial é assinatura conferida offline**, com chave **separada** da do
   atualizador: uma chave que atesta duas coisas deixa as duas se passarem uma
@@ -334,9 +346,11 @@ qualquer, no vigésimo MOD da semana.
 que não é fácil é código limpo que faz uma coisa a mais, discreta, na décima
 função.
 
-**A rede local fica trancada quando há MOD**, e um produto cujo argumento é «o
-servidor é seu» passa a ter um caso em que entrar depende de um serviço nosso
-estar no ar.
+**A rede local sem internet não funciona quando há MOD.** Um produto cujo
+argumento é «o servidor é seu» passa a ter um caso em que entrar numa sala depende
+de `mods.seele.app.br` estar no ar. Foi apresentado duas vezes, com a alternativa
+de o servidor servir os bytes que já baixou, e reafirmado as duas: **quem entra
+bate na origem.** Se aquele domínio cair, ninguém entra em servidor com MOD.
 
 **Um MOD pode ser feio, lento e ruim, e passar em tudo.** O produto pode tornar a
 leitura possível e não pode torná-la provável. A resposta que resta é a mesma de

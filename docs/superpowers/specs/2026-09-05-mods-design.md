@@ -307,11 +307,15 @@ não como descoberta:
 > **Um servidor em rede local, sem internet, com um MOD habilitado, tranca todo
 > mundo do lado de fora — inclusive quem hospeda.**
 
-O cliente busca os bytes no indexador, por hash. Um MOD só existe se estiver
-publicado. Isto contraria o ADR 0022, que chama o ponto de encontro de
-*«opcional, trocável e não obrigatório»*, e o ADR 0029, que escreveu que *«nada
-em um MOD depende de ele ter vindo de lá»*. Habilitar um MOD passa a ser assumir
-que quem entra alcança o indexador.
+O cliente bate em `mods.seele.app.br` e confere o hash. Um MOD só existe se
+estiver publicado. **Não há cache no servidor, não há espelho e não há caminho
+lateral**: foi proposto servir os bytes pelo próprio servidor — a assinatura
+garantiria a procedência igual — e foi recusado. Quem entra bate na origem.
+
+Isto contraria o ADR 0022, que chama o ponto de encontro de *«opcional, trocável
+e não obrigatório»*, e o ADR 0029, que escreveu que *«nada em um MOD depende de
+ele ter vindo de lá»*. Habilitar um MOD passa a ser assumir que quem entra
+alcança o indexador.
 
 A tela de hospedar tem de dizer isso **no momento de habilitar o primeiro MOD**,
 não depois.
@@ -348,9 +352,11 @@ GitHub.
   publicação.
 - **Revisão de código de cada versão.** Não só da primeira. Um MOD limpo aprovado
   cuja versão seguinte entra sozinha é uma revisão que não significa nada.
+- **Endereço fixo: `mods.seele.app.br`.** A origem, não um espelho. Diverge do
+  ADR 0029, que previa endereço configurável e espelhamento, por decisão do dono.
 - **Catálogo assinado, busca no cliente.** Não é uma API. Com API, o indexador
   aprende cada termo digitado; com catálogo, aprende que alguém buscou o
-  catálogo. O arquivo é espelhável, e a assinatura continua conferindo.
+  catálogo.
 - **Sem consulta automática ao abrir.** Mesma regra do ADR 0026.
 - **MOD oficial é uma assinatura conferida offline**, com chave **separada** da do
   atualizador — uma chave que atesta duas coisas deixa as duas se passarem uma
@@ -435,9 +441,11 @@ a atenção de quem revisa, num dia qualquer, no vigésimo MOD da semana.
 esquema e falha em qualquer leitura — mas ofuscado é fácil de recusar. O que não
 é fácil é código limpo que faz uma coisa a mais, discreta, na décima função.
 
-**A LAN offline fica trancada**, e foi escolhido assim depois de o custo ser
-mostrado. Um produto cujo argumento é «o servidor é seu» passa a ter um caso em
-que entrar depende de um serviço nosso estar no ar.
+**A LAN sem internet não funciona quando há MOD**, e foi escolhido assim duas
+vezes, com a alternativa do cache no servidor na mesa nas duas. Um produto cujo
+argumento é «o servidor é seu» passa a ter um caso em que entrar numa sala depende
+de `mods.seele.app.br` estar no ar. Se aquele domínio cair, ninguém entra em
+servidor com MOD.
 
 **Guardar toda versão para sempre é um compromisso sem fim conhecido.** Disco
 nosso, disco de quem instala, e cada release virando artefato permanente. A lista
