@@ -1,6 +1,13 @@
 # 0004 — Autenticação por chave pública Ed25519
 
 Status: aceito por default
+
+> **Vocabulário.** Esta página é anterior ao [ADR
+> 0035](0035-o-codigo-deixa-de-falar-evangelion.md) e diz `Dogma` onde o
+> produto hoje diz **servidor** e `CASPER` onde diz **PERSISTENCE**. O texto
+> fica como foi escrito: o 0035 preserva de propósito o registro de ontem, e o
+> `docs/glossario.md` é a autoridade sobre a palavra de hoje.
+
 Contexto: `specs/09-roadmap.md` exige a decisão em M0; `specs/08-seguranca.md` diz "escolher em M2". Contradição de cronograma (C1 do plano). A *direção* precisa vencer agora porque determina se `seele-proto` carrega o formato desafio-resposta e se o schema de CASPER tem colunas de senha — decidir depois força bump de versão de protocolo.
 Decisão: chave pública Ed25519 como mecanismo primário, com convite por token de uso único para entrada em um Dogma. Senha (Argon2id) como fallback opcional habilitado pelo operador. **Implementação em M2/M3; só a direção vale agora.**
 Alternativas: senha como primário. Descartado porque traz hash para vazar, não prepara terreno para E2EE, e `08` já recomenda o contrário.

@@ -7,6 +7,12 @@ ensinou", no fim, e "O que a primeira máquina de outra pessoa ensinou", logo
 depois: três decisões deste ADR foram corrigidas por um relato de campo, e a
 maior delas é que o convite não pode carregar um endereço só.
 
+> **Vocabulário.** Esta página é anterior ao [ADR
+> 0035](0035-o-codigo-deixa-de-falar-evangelion.md) e diz `Dogma` onde o
+> produto hoje diz **servidor** — inclusive no título e no nome do arquivo. O
+> texto fica como foi escrito: o 0035 preserva de propósito o registro de
+> ontem, e o `docs/glossario.md` é a autoridade sobre a palavra de hoje.
+
 **Emendado em 2026-09-03:** a condição de o ponto de encontro ser **sem estado**
 foi revista. Ver «O quarto, e por que a recusa foi revista», no fim. O resto do
 ADR continua valendo.

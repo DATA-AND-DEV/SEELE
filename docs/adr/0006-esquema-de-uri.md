@@ -2,12 +2,19 @@
 
 Status: aceito (era `proposto` desde M2)
 
+> **Vocabulário.** Esta página é anterior ao [ADR
+> 0035](0035-o-codigo-deixa-de-falar-evangelion.md) e diz `Dogma` onde o
+> produto hoje diz **servidor** e `Cage` onde diz **sala de voz**. O texto fica
+> como foi escrito; **o esquema da URI, não** — ele é endereço, não registro, e
+> um parâmetro errado aqui vira um link que não faz o que promete. O `cage=` do
+> exemplo virou `room=`, com a consequência anotada na lista.
+
 Contexto: entrar num Dogma exigia passar endereço, porta e — depois do ADR 0021 — um segredo, cada um por um canal, e ainda pedir que a pessoa conferisse a impressão digital do certificado por fora. Ninguém confere. Um primeiro contato TOFU que na prática é cego não é confiança na primeira vez, é aceitar qualquer um.
 
 Decisão: um esquema de URI que carrega o que faz falta.
 
 ```
-seele://dogma.exemplo:8383/?alt=<outros>&fp=<impressão>&convite=<token>&cage=<n>
+seele://servidor.exemplo:8383/?alt=<outros>&fp=<impressão>&convite=<token>&room=<n>
 ```
 
 - **endereço** — obrigatório.
@@ -16,7 +23,11 @@ seele://dogma.exemplo:8383/?alt=<outros>&fp=<impressão>&convite=<token>&cage=<n
   podia ser um só", no fim.
 - **`fp`** — a impressão digital do certificado. É o principal motivo disto existir: o cliente compara antes de fixar, então o primeiro contato passa a ser verificado, e um servidor no meio do caminho não passa.
 - **`convite`** — token de uso único do ADR 0021.
-- **`cage`** — em qual Cage entrar ao conectar.
+- **`room`** — em qual sala de voz entrar ao conectar. **Chamava-se `cage=` até
+  2026-08-25**, e o [ADR 0035](0035-o-codigo-deixa-de-falar-evangelion.md)
+  registra o que a troca custou: pela regra logo abaixo, um link antigo com
+  `cage=` não é recusado — o parâmetro é ignorado, e a sala escolhida se perde
+  em silêncio.
 
 O `seeled convite` imprime a URI pronta, já com a impressão digital e o endereço de rede da máquina.
 

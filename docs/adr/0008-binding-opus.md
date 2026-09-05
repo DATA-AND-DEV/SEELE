@@ -1,6 +1,13 @@
 # 0008 — `shiguredo_opus` como binding do codec
 
 Status: aceito · substitui a primeira redação deste ADR
+
+> **Vocabulário.** Esta página é anterior ao [ADR
+> 0035](0035-o-codigo-deixa-de-falar-evangelion.md) e diz `Cage` onde o
+> produto hoje diz **sala de voz**. O texto fica como foi escrito: o 0035
+> preserva de propósito o registro de ontem, e o `docs/glossario.md` é a
+> autoridade sobre a palavra de hoje.
+
 Contexto: `specs/03-audio.md` cita "`audiopus` ou `opus`" sem escolher. A primeira redação deste ADR recomendou `audiopus` com libopus vendorizado. **Ao executar M0.4, essa recomendação se mostrou inviável** e foi o retorno mais claro da decisão de puxar a tarefa de M1 para M0.
 
 O que M0.4 encontrou, em ordem:

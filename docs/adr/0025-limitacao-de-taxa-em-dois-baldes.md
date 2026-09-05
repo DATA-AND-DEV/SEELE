@@ -2,6 +2,13 @@
 
 Status: aceito
 
+> **Vocabulário.** Esta página é anterior ao [ADR
+> 0035](0035-o-codigo-deixa-de-falar-evangelion.md) e diz `Dogma` onde o
+> produto hoje diz **servidor**, `Cage` onde diz **sala de voz**, `Linha` onde
+> diz **canal** e `piloto` onde diz **pessoa**. O texto fica como foi escrito:
+> o 0035 preserva de propósito o registro de ontem, e o `docs/glossario.md` é
+> a autoridade sobre a palavra de hoje.
+
 Contexto: o ADR 0021 pôs um porteiro no Dogma e escreveu, na própria lista de consequências, o que ele não resolvia: *"um convidado legítimo pode inundar de mensagens; não há limitação de taxa (dívida registrada, `DisconnectReason::RateLimited` existe e nunca é enviado)"*. Metade do formato, portanto, já estava decidida havia cinco milestones — o protocolo sabia dizer "você excedeu", e o servidor nunca dizia. `specs/08-seguranca.md` pede as duas coisas nominalmente: "limite de quadros por segundo por remetente" no modelo de ameaça, e "rate limiting de tentativas, com backoff por IP e por identidade" na seção de autenticação. Era a última trava aberta antes de um Dogma poder ficar exposto na internet.
 
 Decisão: **um balde de fichas**, em `crates/seele-server/src/taxa.rs`, consultado em três lugares — dois novos e um que já existia com mecanismo próprio.

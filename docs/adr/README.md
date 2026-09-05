@@ -4,6 +4,32 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 `[EM ABERTO]` nas specs vira um ADR quando resolvida. Template em
 `0000-template.md`.
 
+## Sobre o vocabulário destas páginas
+
+O [ADR 0035](0035-o-codigo-deixa-de-falar-evangelion.md) renomeou o código em
+2026-08-25 — `Dogma` virou **servidor**, `Cage` virou **sala de voz**, `Pilot`
+virou **pessoa**, `Line` virou **canal** — e decidiu, na mesma página, **não
+reescrever os ADRs anteriores**: *«reescreve o que descreve o sistema de hoje,
+preserva o que registra a decisão de ontem»*. Essa regra continua valendo, e é
+por isso que as páginas de antes daquela data ainda dizem `Dogma`. Cada uma
+delas abre com uma nota de vocabulário apontando para cá.
+
+Duas coisas **não** são registro e foram corrigidas onde estavam erradas:
+
+- **endereços** — caminho de arquivo, nome de função, parâmetro de URI. Um
+  endereço errado manda a próxima pessoa a uma pasta que não existe, então
+  `src/casper/` virou `src/persistence/` no 0027, e o `cage=` do `seele://`
+  virou `room=` no 0006, com a consequência anotada;
+- **as decisões ainda abertas** — 0029, 0030, 0031 e 0032 projetavam trabalho
+  que seria construído nos nomes que estivessem escritos ali. Foram trazidas
+  para a língua de hoje por inteiro, e cada uma diz no alto o que mudou.
+
+Os nomes de arquivo de 0021, 0022, 0031 e 0032 continuam com `dogma` dentro.
+Renomeá-los quebraria todo link que aponte para eles de fora do repositório, e
+o ganho é de estética.
+
+## O índice
+
 | # | Título | Status | Decisão em aberto que fecha |
 |---|---|---|---|
 | [0001](0001-serializacao-postcard.md) | Serialização com `postcard` | aceito por default | `02` — serialização |
@@ -11,7 +37,7 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0003](0003-certificados-tofu.md) | TOFU como padrão de certificado | aceito por default | `01`, `08` — certificados |
 | [0004](0004-autenticacao-chave-publica.md) | Autenticação por chave pública Ed25519 | aceito por default | `08` — autenticação |
 | [0005](0005-porta-padrao.md) | Porta padrão 8383/UDP | **proposto** | `01` — porta |
-| [0006](0006-esquema-de-uri.md) | Esquema de URI `seele://` | **proposto** | — (lacuna encontrada no design) |
+| [0006](0006-esquema-de-uri.md) | Esquema de URI `seele://` | aceito | — (lacuna encontrada no design) |
 | [0007](0007-sem-dsp-externo-em-v1.md) | Sem DSP externo em v1 | aceito por default | `03` — AEC, AGC, supressão |
 | [0008](0008-binding-opus.md) | `shiguredo_opus` como binding do codec | **aceito** | `03` — binding do codec |
 | [0009](0009-orcamento-de-latencia.md) | Orçamento de latência boca-a-ouvido | **aceito** | — (contradição `00` × `03`) |
@@ -26,18 +52,18 @@ Formato e regra de criação em `specs/10-convencoes.md`: toda decisão marcada
 | [0018](0018-seele-ffi-sem-uniffi-por-enquanto.md) | `seele-ffi` com a forma que o `uniffi` exige, sem a dependência | aceito | `01` — ponte para o app |
 | [0019](0019-frontend-sem-framework-e-sem-npm.md) | Frontend do desktop sem framework e sem npm | aceito | `05` — frontend desktop |
 | [0020](0020-o-que-o-tauri-traz-junto.md) | O que o Tauri traz junto, e por que aceitamos | aceito | `01` — dependências do app |
-| [0021](0021-admissao-em-um-dogma.md) | Quem entra num Dogma: convite de uso único, senha como alternativa | aceito | `08` — admissão |
-| [0022](0022-alcancar-um-dogma-pela-internet.md) | Alcançar um Dogma pela internet | **aceito** | `01` — alcance fora da rede local |
+| [0021](0021-admissao-em-um-dogma.md) | Quem entra num servidor: convite de uso único, senha como alternativa | aceito | `08` — admissão |
+| [0022](0022-alcancar-um-dogma-pela-internet.md) | Alcançar um servidor pela internet | **aceito** | `01` — alcance fora da rede local |
 | [0023](0023-idioma-dentro-do-seele-core.md) | Idioma dentro do `seele-core` | aceito | `10` — idioma |
-| [0024](0024-faixas-de-sincronia-em-tres-e-a-media-no-core.md) | Faixas de sincronia em três, e a média do Cage no core | aceito | `03` — sincronia |
+| [0024](0024-faixas-de-sincronia-em-tres-e-a-media-no-core.md) | Faixas do sinal em três, e a média da sala no core | aceito | `03` — sincronia |
 | [0025](0025-limitacao-de-taxa-em-dois-baldes.md) | Limitação de taxa: dois baldes, e um aviso antes da porta | aceito | `08` — limitação de taxa |
 | [0026](0026-duas-assinaturas-e-um-botao-de-atualizar.md) | Duas assinaturas, e um botão de atualizar | aceito | `01` — distribuição |
 | [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md) | Anexos com teto total, e o mais velho sai | aceito | `02` — política de anexos (D14) |
 | [0028](0028-a-reserva-do-anel-de-reproducao.md) | A reserva do anel de reprodução, e o que ela custa de latência | aceito | — (pendência 2, e revisão do `0009`) |
-| [0029](0029-mods-declaram-valores-e-o-produto-mede.md) | MODs: declaram valores, e o produto mede antes de aplicar | **proposto** | — (pedido do dono; desfaz metade do não-objetivo de `00`) |
-| [0030](0030-quem-bate-a-porta.md) | Quem bate à porta: TOFU aplicado a gente, e a portaria de quem hospeda | **proposto** | — (pedido do dono; estende o `0021`) |
-| [0031](0031-varios-dogmas-ao-mesmo-tempo.md) | Vários Dogmas ao mesmo tempo: a sessão é do Dogma, o microfone é da máquina | **proposto** | — (pedido do dono; o `+` da trilha) |
-| [0032](0032-personalizacao-de-um-dogma.md) | Personalização de um Dogma: nome, cor e ícone | **proposto** | — (pedido do dono; reusa a resolução do `0029`) |
+| [0029](0029-mods-declaram-valores-e-o-produto-mede.md) | MODs: declaram valores, e o produto mede antes de aplicar | **proposto** · nada construído | — (pedido do dono; desfaz metade do não-objetivo de `00`) |
+| [0030](0030-quem-bate-a-porta.md) | Quem bate à porta: TOFU aplicado a gente, e a portaria de quem hospeda | **aceito** · construído 18/08 | — (pedido do dono; estende o `0021`) |
+| [0031](0031-varios-dogmas-ao-mesmo-tempo.md) | Vários servidores ao mesmo tempo: a sessão é do servidor, o microfone é da máquina | **proposto** · nada construído | — (pedido do dono; o `+` da trilha) |
+| [0032](0032-personalizacao-de-um-dogma.md) | Personalização de um servidor: nome, cor e ícone | **aceito** · nome e ícone construídos, cor não | — (pedido do dono; reusa a resolução do `0029`) |
 | [0033](0033-o-vocabulario-sai-da-interface-a-estetica-fica.md) | O vocabulário de Evangelion sai da interface; a estética fica | aceito | `07` — o vocabulário na tela |
 | [0034](0034-a-marca-abandona-as-duas-citacoes-do-anime.md) | A marca abandona as duas citações do anime | aceito | `07` — a marca na imagem |
 | [0035](0035-o-codigo-deixa-de-falar-evangelion.md) | O código deixa de falar Evangelion | aceito | `07` — o vocabulário no código |
@@ -64,8 +90,9 @@ aceito e construído, e ele desfaz metade da D14 — o teto de corpo de 4 KiB
 continua, e o "sem anexos em v1" não. O que ele decide está de pé, com uma
 exceção que ele mesmo registra: «nenhuma dependência nova» caiu, e o seletor de
 arquivos nativo existe desde 2026-08-18 — o botão ARQUIVO não abria nada, e o
-primeiro dono a usar o app clicou nele. A prévia embutida de imagem continua não
-construída, anotada no alto dele. Ver pendência 18.
+primeiro dono a usar o app clicou nele. **A prévia embutida de imagem foi
+construída em 2026-08-18** — são quatro formatos, com o motivo de cada um
+escrito, e o próprio 0027 registra a data no alto dele.
 
 **IPv6/NAT traversal saiu desta lista**: virou o [0022](0022-alcancar-um-dogma-pela-internet.md),
 aceito, com os degraus 2 (IPv6) e 3 (UPnP) construídos. O degrau 4 — furo de NAT
@@ -77,15 +104,23 @@ que essa conversa aconteça antes do código.
 os punha como **não-objetivo** de v1 ("marketplace de plugins"), e a tela de
 configurações registrava que um segundo tema seria "decisão de ADR, não de tela".
 Viraram o [0029](0029-mods-declaram-valores-e-o-produto-mede.md), **proposto**,
-que desfaz metade daquele não-objetivo. Nada foi construído; ver pendência 21.
+que desfaz metade daquele não-objetivo. **Nada foi construído até hoje**; ver
+pendência 21.
 
-**Várias sessões e personalização de Dogma também nunca estiveram nesta lista**,
-e o motivo é que ninguém as tinha pedido: o `+` da trilha estava desabilitado com
-a limitação escrita no `title`, e o nome de um Dogma hospedado pelo app era o
-literal `"Casa"`. Viraram o [0031](0031-varios-dogmas-ao-mesmo-tempo.md) e o
-[0032](0032-personalizacao-de-um-dogma.md), os dois **propostos**, e o segundo
-cita o primeiro na parte que compartilham — o corte entre o que é do Dogma e o
-que é desta máquina. Nada foi construído; ver pendências 24 e 25.
+**Várias sessões e personalização de servidor também nunca estiveram nesta
+lista**, e o motivo é que ninguém as tinha pedido: o `+` da trilha estava
+desabilitado com a limitação escrita no `title`, e o nome de um servidor
+hospedado pelo app era o literal `"Casa"`. Viraram o
+[0031](0031-varios-dogmas-ao-mesmo-tempo.md) e o
+[0032](0032-personalizacao-de-um-dogma.md), e o segundo cita o primeiro na parte
+que compartilham — o corte entre o que é do servidor e o que é desta máquina.
+
+**Os dois seguiram caminhos diferentes desde então, e é o que a tabela acima
+registra.** O 0032 foi construído pela metade que não dependia do outro: o nome
+se escreve pela janela, o ícone existe contra a recusa da própria página — ver o
+adendo dela — e a cor continua sem existir, porque ela é a parte que depende do
+0031. O 0031 continua **proposto e não construído**: o `+` ganhou verbo em
+22/08, mas trocando de servidor, não somando sessões. Ver pendências 24 e 25.
 
 Postura de direitos sobre Evangelion (`07`) também não tem ADR: a recomendação é
 repositório privado até M4, o que tira a decisão do caminho crítico.

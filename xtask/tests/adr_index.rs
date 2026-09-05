@@ -103,6 +103,46 @@ fn the_index_links_no_adr_that_does_not_exist() {
     );
 }
 
+/// The status an ADR declares, as one word, or `None` if this is not that line.
+///
+/// Everything after the first word is prose about the status — «(era `proposto`
+/// desde M2)», «· substitui a primeira redação deste ADR», «, construído em
+/// parte» — and reading it is how this check used to answer the wrong question.
+fn status_value(line: &str) -> Option<String> {
+    let rest = line
+        .strip_prefix("Status:")
+        .or_else(|| line.strip_prefix("**Estado:**"))
+        .or_else(|| line.strip_prefix("Estado:"))?;
+    let word: String = rest
+        .trim()
+        .trim_start_matches('*')
+        .chars()
+        .take_while(|c| c.is_alphabetic())
+        .collect();
+    (!word.is_empty()).then_some(word.to_lowercase())
+}
+
+#[test]
+fn the_status_is_read_as_a_word_and_never_as_a_sentence_about_it() {
+    // Proof by the line that broke it. Both of these are accepted ADRs whose
+    // status line goes on to mention something else; a `contains` reading calls
+    // the first one proposed.
+    assert_eq!(
+        status_value("Status: aceito (era `proposto` desde M2)").as_deref(),
+        Some("aceito")
+    );
+    assert_eq!(
+        status_value("**Estado:** aceito, construído em parte").as_deref(),
+        Some("aceito")
+    );
+    assert_eq!(
+        status_value("**Estado:** proposto — **nada foi construído**").as_deref(),
+        Some("proposto")
+    );
+    assert_eq!(status_value("**Data:** 2026-08-18"), None);
+    assert_eq!(status_value("Contexto: o ADR 0021 pôs um porteiro"), None);
+}
+
 #[test]
 fn the_index_agrees_with_each_adr_about_whether_it_is_still_only_proposed() {
     // The half that rots without anybody touching the table. An ADR moves from
@@ -125,9 +165,21 @@ fn the_index_agrees_with_each_adr_about_whether_it_is_still_only_proposed() {
         // Two spellings live in this directory: `Status: aceito` in the older
         // ones and `**Estado:** aceito` in the newer. Reading only one of them is
         // how this check would pass by never looking.
-        let declares_proposed = body.lines().take(20).any(|line| {
-            line.contains("roposto") && (line.contains("tatus") || line.contains("stado"))
-        });
+        //
+        // **The word this reads is the first one, and that is the whole fix of
+        // 2026-09-05.** Until then it asked whether the status *line* contained
+        // `proposto` anywhere, and ADR 0006 says `Status: aceito (era
+        // `proposto` desde M2)` — a line that records what the status used to
+        // be. The guard read it as still proposed, the index row said
+        // `**proposto**`, the two agreed, and the test was green for months
+        // while the index misrepresented an accepted decision. A guard that
+        // compares two readings of the same sentence agrees with itself; this
+        // one has to read the status, which is one word.
+        let declares_proposed = body
+            .lines()
+            .take(20)
+            .find_map(status_value)
+            .is_some_and(|value| value == "proposto");
 
         let Some(row) = readme
             .lines()

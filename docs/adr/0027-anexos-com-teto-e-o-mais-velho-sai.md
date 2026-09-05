@@ -4,6 +4,14 @@
 **Data:** 2026-08-17
 **Construído:** 2026-08-17
 
+> **Vocabulário.** Esta página é anterior ao [ADR 0035](0035-o-codigo-deixa-de-falar-evangelion.md)
+> e diz `Dogma` onde o produto hoje diz **servidor**, `Cage` onde diz **sala de
+> voz** e `Linha` onde diz **canal**. O texto fica como foi escrito — o 0035
+> preserva o registro de ontem de propósito. Os dois caminhos de arquivo que
+> apontavam para `src/casper/` foram corrigidos para `src/persistence/`, porque
+> aqueles não são registro: são endereços, e um endereço errado manda a próxima
+> pessoa para uma pasta que não existe.
+
 Tudo o que este documento decide está de pé. Duas coisas que ele descreve não
 tinham sido construídas, e as duas foram construídas depois. Ficam aqui, com a
 data, em vez de sumirem do texto:
@@ -80,11 +88,11 @@ O que existe hoje, e que condiciona todo o desenho abaixo:
   para M3". A única configuração que sobrevive a reinício é a tabela
   `configuracao`, que a migração 2 criou para o ADR 0021.
 - **Uma poda de histórico que ninguém ligou.** `Messages::prune(retention_days)`
-  existe em `crates/seele-server/src/casper/messages.rs` e **só é chamada pelo
+  existe em `crates/seele-server/src/persistence/messages.rs` e **só é chamada pelo
   próprio teste**. `specs/04` prevê `retencao_dias = 0` — ilimitado — no arquivo
   que não existe. Guardar isto na cabeça importa para a alternativa 2.
 - **Doze permissões enumeradas**, sem sistema de expressão, com quatro papéis
-  semeados no esquema (`crates/seele-server/src/casper/schema.rs`).
+  semeados no esquema (`crates/seele-server/src/persistence/schema.rs`).
 
 ## Decisão
 

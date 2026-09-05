@@ -1,14 +1,33 @@
 # 0030 — Quem bate à porta: TOFU aplicado a gente, e a portaria de quem hospeda
 
-Status: proposto
+Status: aceito
 
-Contexto: o ADR 0021 deu ao Dogma dois porteiros — convite de uso único e senha —
+**Construído em 2026-08-18**, em `crates/seele-server/src/portaria.rs`, que abre
+citando este ADR. O estado ficou `proposto` por duas semanas depois de o código
+existir; a data acima é a do commit `0f68dc0`, não a de hoje.
+
+O que está de pé, conferido no código e não suposto: as três camadas conjuntivas,
+o pedido durável em SQLite (`portaria::bater`, `decidir`, `revogar`, `pedidos`),
+as duas razões `AdmissionPending` (índice 12) e `AdmissionDenied` (índice 13)
+apensadas ao fim de `DisconnectReason`, a portaria ligada por semente no botão
+HOSPEDAR AQUI (`portaria::semear_ligada`) e desligada por padrão no `seeled`, e a
+fila na janela em `apps/seele-app/ui/camada-portaria.js`.
+
+O que continua **não** construído, como o próprio ADR previu: a notificação do
+sistema quando a janela não está em foco, e a limpeza de pedidos antigos.
+
+**Vocabulário:** este texto foi escrito antes do ADR 0035 e falava `Dogma`,
+`piloto` e `CASPER`. Foi trazido para a língua de hoje — servidor, pessoa,
+PERSISTENCE — porque descreve o sistema que está no ar. O pedido do dono citado
+no contexto fica **verbatim**: é testemunho, não descrição.
+
+Contexto: o ADR 0021 deu ao servidor dois porteiros — convite de uso único e senha —
 e o servidor sabe operar os dois: `admissao::criar_convite` e
 `admissao::definir_senha`. **O app não expõe nenhum dos dois.** O único caminho
 até eles é `seeled convite` e `seeled senha`, no terminal.
 
 O público do botão HOSPEDAR AQUI é exatamente quem não abre terminal. Então, na
-prática, todo Dogma hospedado pelo app é um Dogma aberto, e **não há nada em
+prática, todo servidor hospedado pelo app é um servidor aberto, e **não há nada em
 lugar nenhum da janela que o feche** — nem para fechá-lo, nem para dizer que ele
 está aberto. O aviso que o `seeled` dá em voz alta ao subir sem porteiro
 (`admissao.rs:27`) vai para um log que ninguém que apertou aquele botão vai ler.
@@ -38,7 +57,7 @@ Elas são **conjuntivas**: passar por uma não dispensa as outras. Um segredo ab
 o portão da rua; a portaria decide se a porta da casa abre. Elas checam coisas
 diferentes, em momentos diferentes, e as duas ordens importam.
 
-| | o que checa | quando | o que a recusa custa ao Dogma |
+| | o que checa | quando | o que a recusa custa ao servidor |
 |---|---|---|---|
 | Senha / convite (0021) | um segredo | no `Hello`, **antes** da assinatura | nada — nem uma verificação de assinatura |
 | Portaria (este) | uma chave **provada** | depois do desafio-resposta | uma verificação de assinatura |
@@ -62,7 +81,7 @@ deixou aberto.
 **O convite passa a ser gasto por quem entra, não por quem bate.** Isto é uma
 correção dentro do 0021, encontrada ao construir isto e não antes: o convite era
 consumido na camada do segredo, então um handshake que morresse depois dela —
-assinatura ruim, piloto banido, a rede caindo entre dois quadros — queimava o
+assinatura ruim, pessoa banida, a rede caindo entre dois quadros — queimava o
 convite de alguém que nunca entrou. Era raro o bastante para nunca ter aparecido.
 Com portaria deixa de ser raro e passa a ser **o caso normal**: uma batida
 pendente é o caminho projetado, a pessoa é mandada tentar de novo, e o convite
@@ -74,7 +93,7 @@ com o mesmo convite no mesmo instante não estava na conferência e sim no
 conferem com sucesso, e só um vê linha alterada.
 
 **Um convite conferido não aprova ninguém.** Ele aparece no pedido, ao lado da
-observação que quem hospeda escreveu ao gerá-lo — `criar_convite(casper,
+observação que quem hospeda escreveu ao gerá-lo — `criar_convite(persistence,
 observacao)` já guarda esse campo e nada o lia. «Chegou com o convite *para o
 Rafael*» é a melhor prova que existe do outro lado, e ainda assim é prova, não
 decisão: um link se encaminha. Quem decide continua sendo quem hospeda.
@@ -91,7 +110,7 @@ de `DisconnectReason`:
 - **`AdmissionPending`** — o pedido chegou e ainda não foi decidido.
 - **`AdmissionDenied`** — quem hospeda decidiu que não.
 
-Que o Dogma tenha portaria não é segredo que valha guardar: quem bate precisa
+Que o servidor tenha portaria não é segredo que valha guardar: quem bate precisa
 saber que há alguém para decidir, ou vai embora achando que o endereço está
 errado.
 
@@ -104,7 +123,7 @@ para tentar de novo quando quiser.
 Isto dissolve a pior das três respostas em vez de tratá-la. «Ninguém atendeu» só
 existe como estado se alguma coisa estiver esperando; como nada espera, o que
 sobra é um pedido de pé, que quem hospeda concede quando olhar. A pessoa do outro
-lado nunca fica olhando para uma barra que não anda, e o Dogma nunca segura
+lado nunca fica olhando para uma barra que não anda, e o servidor nunca segura
 recurso por alguém que ainda não entrou — que é o mesmo motivo pelo qual o 0021
 não quis gastar assinatura com quem nem devia estar batendo.
 
@@ -115,7 +134,7 @@ minimizada, ao app fechado e à máquina reiniciada. Quem hospeda vê a fila qua
 abrir a portaria, com a hora de cada pedido; conceder três dias depois vale igual,
 e a pessoa entra na próxima vez que tentar.
 
-Um Dogma que só admite enquanto alguém olha a tela seria um Dogma que recusa por
+Um servidor que só admite enquanto alguém olha a tela seria um servidor que recusa por
 omissão. Este recusa nada por omissão: ele adia, e o adiamento é durável. O que
 falta é o toque no ombro — uma notificação do sistema quando a janela não está em
 foco. Fica de fora deste ADR e vai para as pendências: é melhoria de latência da
@@ -153,20 +172,20 @@ vale para a próxima batida. Derrubar já tem verbo, chama-se expulsar, e fazer 
 ato brando ter consequência violenta é como uma interface ensina a não apertar
 nada.
 
-Sobre o buraco já registrado — `banir_piloto` existe e `unban` não tem verbo de
+Sobre o buraco já registrado — `Permissions::ban` existe e `unban` não tem verbo de
 protocolo: **este desenho não o piora, e mostra a saída.** Ele não piora porque
 não acrescenta verbo nenhum de protocolo: a portaria inteira é estado local da
-máquina que hospeda, decidido por quem tem o arquivo do Dogma na mão — que é
+máquina que hospeda, decidido por quem tem o arquivo do servidor na mão — que é
 exatamente a autoridade que a frase de confirmação do banimento já nomeia como
 a única que o desfaz. E mostra a saída porque estabelece a forma: uma decisão
-que se desfaz é uma linha que se apaga, e `Melchior::unban` já é literalmente
+que se desfaz é uma linha que se apaga, e `Permissions::unban` já é literalmente
 `DELETE FROM bans`. Falta a ele só o caminho até a janela. Não é consertado aqui
 de passagem; fica anotado.
 
 ### Onde os comandos vivem: na casa, não no fio
 
 Toda moderação deste app hoje viaja pelo fio, como cliente, mesmo quando o
-próprio app hospeda. A portaria **não**: ela fala direto com o CASPER do servidor
+próprio app hospeda. A portaria **não**: ela fala direto com o PERSISTENCE do servidor
 embutido, por acessores novos em `Hospedagem`.
 
 Três motivos. **Fechar a porta não pode depender de estar dentro** — exigir uma
@@ -176,7 +195,7 @@ ela defende, e obriga quem hospeda a ter entrado enquanto ainda estava aberto.
 E **nenhum verbo novo de protocolo** significa nenhuma superfície nova exposta à
 internet para uma decisão que é, por definição, de quem está na máquina.
 
-O custo, que é real: isto não administra o Dogma de outra pessoa. Um Comandante
+O custo, que é real: isto não administra o servidor de outra pessoa. Um Comandante
 remoto continua sem fechar a porta da casa alheia — que é onde o 0021 já tinha
 deixado a administração de verdade (alternativa 3), e continua lá.
 
@@ -193,13 +212,13 @@ aberto era defensável — numa rede local entre duas máquinas, é um clique �
 a diferença entre aberto e fechado no dia em que a porta do roteador abre, que é
 o dia que o 0021 escreveu como o dia em que o padrão deixa de servir.
 
-Ligado só na primeira vez: é semente de Dogma novo, não imposição a cada subida.
+Ligado só na primeira vez: é semente de servidor novo, não imposição a cada subida.
 Quem desligar, fica desligado.
 
 **E, ligado ou desligado, o estado da porta é dito na janela.** É a metade que
 falta hoje e que nenhum padrão conserta: quem hospeda vê, no cartão de
 hospedagem, se a porta está aberta, com senha, com convites, com portaria — e um
-Dogma aberto que alcança além do loopback diz isso numa banda de alerta, porque
+servidor aberto que alcança além do loopback diz isso numa banda de alerta, porque
 é uma porta aberta para a internet e é disso que o vermelho é reservado.
 
 ## Alternativas
@@ -211,7 +230,7 @@ Dogma aberto que alcança além do loopback diz isso numa banda de alerta, porqu
 2. **Segurar a conexão enquanto quem hospeda decide.** Melhor de ler — a pessoa
    vê «aguardando» de verdade. Recusada por três motivos que se somam: obriga um
    prazo, e um prazo cria a resposta «ninguém atendeu» que não se sabe traduzir
-   em ação; segura recurso do Dogma por alguém que ainda não entrou; e não
+   em ação; segura recurso do servidor por alguém que ainda não entrou; e não
    melhora o caso que importa, o da janela minimizada, onde o prazo vence de
    qualquer jeito. Um pedido durável é uma promessa mais forte que uma barra
    girando.
@@ -231,7 +250,7 @@ Dogma aberto que alcança além do loopback diz isso numa banda de alerta, porqu
 
 - Quem hospeda pelo botão passa a ter, na janela, as três camadas: fechar com
   senha, gerar convite, e decidir quem entra. Era o buraco relatado.
-- **Um Dogma hospedado pelo app deixa de ser aberto por padrão** sem que o padrão
+- **Um servidor hospedado pelo app deixa de ser aberto por padrão** sem que o padrão
   do `seeled` mude.
 - **Quem não passa pela portaria não vira conta.** Ela roda antes de
   `register_or_find`, e essa ordem é o que impede uma batida recusada de reservar
@@ -244,7 +263,7 @@ Dogma aberto que alcança além do loopback diz isso numa banda de alerta, porqu
   tempo é recusada por `register_or_find`, e não pela portaria. É a regra do ADR
   0017 valendo como sempre valeu; a aprovação continua de pé para quando ela
   escolher outro nome.
-- A fila de pedidos é metadado que o Dogma passa a guardar: quem tentou entrar e
+- A fila de pedidos é metadado que o servidor passa a guardar: quem tentou entrar e
   quando, inclusive de quem nunca entrou. É informação que ele já teria no log;
   a diferença é que agora tem tabela e prazo de vida nenhum. Limpar pedidos
   antigos não está construído.
@@ -258,7 +277,7 @@ comportamento de hoje, e a tabela que sobra não é lida por ninguém.
 
 ## Adendo — a espera do cliente passa a insistir, enquanto alguém olha (22/08/2026)
 
-A alternativa 2 acima foi recusada, e continua recusada: **o Dogma não segura a
+A alternativa 2 acima foi recusada, e continua recusada: **o servidor não segura a
 conexão** enquanto quem hospeda decide. O que mudou é do outro lado do fio.
 
 O relato de campo foi «quando o usuário vai entrar num servidor, ele precisa
@@ -274,7 +293,7 @@ dele não sobreviveram ao exame:
 
 - **não é o que este ADR recusou.** O que se recusou foi segurar a conexão. Uma
   batida do cliente conecta, é recusada e desconecta: não segura recurso do
-  Dogma, não obriga prazo nenhum, e não fabrica a resposta «ninguém atendeu» —
+  servidor, não obriga prazo nenhum, e não fabrica a resposta «ninguém atendeu» —
   a resposta continua sendo a mesma recusa durável de sempre;
 - **não estoura o balde do ADR 0025.** Quinze segundos são quatro batidas por
   minuto, e o balde de antes de autenticar repõe trinta. A bateria de reconexão

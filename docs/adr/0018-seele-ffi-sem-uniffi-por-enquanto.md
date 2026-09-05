@@ -2,6 +2,12 @@
 
 Status: aceito
 
+> **Vocabulário.** Esta página é anterior ao [ADR
+> 0035](0035-o-codigo-deixa-de-falar-evangelion.md) e diz `PilotId` onde o
+> produto hoje diz **`PersonId`** e `Plug` onde diz **`Connection`**. O texto
+> fica como foi escrito: o 0035 preserva de propósito o registro de ontem, e o
+> `docs/glossario.md` é a autoridade sobre a palavra de hoje.
+
 Contexto: `specs/06-clientes-gui.md` descreve a superfície da `seele-ffi` e diz que ela deve ser "gerada com `uniffi` sempre que possível". Ao chegar em M5 a pergunta ficou concreta: o `uniffi` entra agora, com o desktop, ou em M6, com o mobile?
 
 O `uniffi` gera *bindings* — Kotlin, Swift, Python. O Tauri não usa nenhum deles: o lado Rust do Tauri chama Rust. Trazer o `uniffi` em M5 significa carregar um proc-macro e um passo de build por um milestone inteiro sem um único consumidor de binding.

@@ -2,6 +2,12 @@
 
 Status: aceito
 
+> **Vocabulário.** Esta página é anterior ao [ADR
+> 0035](0035-o-codigo-deixa-de-falar-evangelion.md) e diz `Dogma` onde o
+> produto hoje diz **servidor** — inclusive no título e no nome do arquivo. O
+> texto fica como foi escrito: o 0035 preserva de propósito o registro de
+> ontem, e o `docs/glossario.md` é a autoridade sobre a palavra de hoje.
+
 Contexto: `specs/08-seguranca.md` fechava a seção de autenticação com **[EM ABERTO — escolher em M2]** e uma recomendação: *"chave pública como mecanismo primário, com convite por token de uso único para entrada em um Dogma. Senha como fallback opcional configurável pelo operador."* A escolha nunca foi feita, e o efeito prático só ficou visível quando surgiu a pergunta de compartilhar acesso com um amigo: **não havia porteiro nenhum.** Quem alcançasse a porta UDP completava o handshake e ganhava uma conta.
 
 Para uma rede local entre duas máquinas isso é o comportamento certo, e é por isso que passou despercebido por cinco milestones. No dia em que alguém abre a porta no roteador, deixa de ser.

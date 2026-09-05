@@ -1,7 +1,17 @@
 # ADR 0029 — MODs: declaram valores, e o produto mede antes de aplicar
 
-**Estado:** proposto
+**Estado:** proposto — **nada foi construído**
 **Data:** 2026-08-17
+
+**O vocabulário desta página foi trazido para a língua do ADR 0035** (`Dogma`
+era `servidor`, `Cage` era sala de voz, `Terminal Dogma` era `TERMINAL SERVER`),
+porque ela projeta trabalho que ainda não existe e seria construído nos nomes
+que estivessem escritos aqui. As citações de `specs/00-visao-geral.md` e da tela
+ficam **verbatim**.
+
+Duas linhas do inventário envelheceram e estão marcadas no corpo: o quinto
+guarda do vermelho e a segunda tabela de frases viviam em `crates/seele-tui`,
+que saiu do repositório no ADR 0039.
 
 ## Contexto
 
@@ -18,7 +28,7 @@ lugares, e o segundo é mais específico que o primeiro:
 
 - `specs/00-visao-geral.md`, em "Não-objetivos — v1.0": *"Bots, webhooks,
   **marketplace de plugins**."*
-- `apps/seele-app/ui/index.html:1427`, no Terminal Dogma: *"**TEMA** — o ADR 0014
+- `apps/seele-app/ui/index.html`, no TERMINAL SERVER: *"**TEMA** — o ADR 0014
   congela a paleta. Um segundo tema é uma segunda paleta canônica, e essa é
   decisão de ADR, não de tela."* E isso é cobrado por teste:
   `the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead`
@@ -42,7 +52,8 @@ O que existe hoje, e que condiciona todo o desenho abaixo:
   superfície em `frontend.rs` — a caixa de alerta (1435), a moderação (3624), a
   faixa de veredito (845) e as regras de `.convite-alcance` (~3930) — mais
   `alert_and_accent_stay_distinct_in_sixteen_colours` em
-  `crates/seele-tui/src/theme.rs:362`. Todos os quatro primeiros fazem a mesma
+  `crates/seele-tui/src/theme.rs` — este quinto saiu com a TUI no ADR 0039, e
+  hoje são quatro. Todos os quatro fazem a mesma
   pergunta: **esta regra *nomeia* `vermelho`?** Nenhum deles pergunta que cor o
   token guarda. Guardar isto na cabeça é o que faz o resto deste ADR se decidir
   sozinho.
@@ -73,9 +84,11 @@ O que existe hoje, e que condiciona todo o desenho abaixo:
   de painel, coordenada e valor ausente. Ela vence por ordem de fonte, com a
   mesma especificidade, e há teste que reprova se qualquer folha que pinta for
   carregada depois dela.
-- **Frases são duas tabelas paralelas, e i18n não existe.** `ui/frases.js` e
-  `crates/seele-tui/src/text.rs` dizem as mesmas coisas em pt-BR, em duas cascas,
-  e o `text.rs` diz que o `match` chapado é de propósito. Não há
+- **Frases eram duas tabelas paralelas, e i18n não existe.** `ui/frases.js` e
+  `crates/seele-tui/src/text.rs` diziam as mesmas coisas em pt-BR, em duas
+  cascas, e o `text.rs` dizia que o `match` chapado era de propósito. **O ADR
+  0039 tirou a segunda casca**, e sobrou `ui/frases.js` sozinho — o que apaga
+  o custo de paridade que esta linha pesava, e não o de não haver catálogo. Não há
   `crates/seele-i18n`, não há `.ftl`. O ADR 0012 decidiu a **fronteira** e adiou
   o catálogo: *"A tabela de tradução nasce em M4. Até lá não há o que traduzir."*
 - **Sons não existem.** O `seele-audio` é captura, reprodução, codec e mixagem. O
@@ -160,9 +173,10 @@ entra.
 nome, e não reaponta nome. `vermelho-alerta` continua sendo a única cor com que
 qualquer superfície de alerta ou de queda se pinta, e continua sendo exclusiva
 disso, porque quem decide isso são os seletores e os seletores são nossos. As
-faixas de sincronia continuam apontando para onde apontam
-(`--seele-sync-critico: var(--seele-vermelho-alerta)`), e o glossário de
-`specs/07` continua intacto: `Cage` continua `Cage`.
+faixas do sinal continuam apontando para onde apontam
+(`--seele-sync-critico: var(--seele-vermelho-alerta)`), e um MOD não renomeia
+conceito nenhum — o que a sala de voz se chama é decisão do `docs/glossario.md`
+e do ADR 0035, não de um arquivo que alguém instalou.
 
 Então a resposta direta à pergunta: **o vermelho de alerta continua sendo dele.**
 O papel é intransferível; o tom é negociável. Um MOD para daltonismo que precise
@@ -381,7 +395,7 @@ em CIELAB restrito a 16–255 —, porque calcular uma vez ao instalar não é
 arredondar a cada desenho. O `ansi16` não tem como ser calculado, e é justamente
 o que `theme.rs` diz.
 
-### Um MOD não acompanha um Dogma
+### Um MOD não acompanha um servidor
 
 Alguém entra numa sala e o tema muda: **não.** É a pergunta mais atraente do
 pedido e a resposta é a mais restritiva deste ADR, então ela vem com os motivos
@@ -392,7 +406,7 @@ inteiros.
   remove a pessoa de todo esse desenho e deixa só a conferência de pé — e a
   conferência é a metade fraca, porque ela sabe medir contraste e não sabe medir
   intenção.
-- **Um Dogma não é necessariamente entre amigos.** O ADR 0021 deixa um Dogma sem
+- **Um servidor não é necessariamente entre amigos.** O ADR 0021 deixa um servidor sem
   convite e sem senha **aberto por padrão**, de propósito. Uma sala que empurra
   tema é uma sala que empurra tema onde a queda de enlace é discreta.
 - **E a tela mudaria enquanto a pessoa está nela.** `specs/07` diz que movimento
@@ -402,9 +416,9 @@ inteiros.
 
 **O que fica permitido é recomendar.** O ADR 0006 já estabelece que parâmetro
 desconhecido no `seele://` é **ignorado em vez de recusado** — foi essa regra que
-deixou o `alt=` ser compatível com clientes velhos —, então um Dogma pode
+deixou o `alt=` ser compatível com clientes velhos —, então um servidor pode
 carregar no link a identidade de um MOD: nome, autor, hash e onde achar. O
-cliente mostra "este Dogma sugere o MOD X" e **instalar continua sendo o mesmo
+cliente mostra "este servidor sugere o MOD X" e **instalar continua sendo o mesmo
 ato, na mesma tela, com as mesmas medidas na frente**. Recomendação é dado;
 aplicação é consentimento.
 

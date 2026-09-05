@@ -2,6 +2,15 @@
 
 Status: aceito
 
+> **Vocabulário.** Esta página é anterior ao [ADR
+> 0035](0035-o-codigo-deixa-de-falar-evangelion.md) e diz `Cage` onde o
+> produto hoje diz **sala de voz**, `Pilot` onde diz **`Person`**, `Dogma`
+> onde diz **servidor** e `SyncBand` onde diz **`SignalBand`**. A média que
+> ele decide pôr no core é hoje `Room::voice_room_sync(VoiceRoomId) ->
+> Option<VoiceRoomSync>`. O texto fica como foi escrito: o 0035 preserva de
+> propósito o registro de ontem, e o `docs/glossario.md` é a autoridade sobre
+> a palavra de hoje.
+
 ## Contexto
 
 `specs/07-estetica.md` bandava a Taxa de Sincronização em quatro: `≥ 90` nominal, `70–89` aceitável em osso, `40–69` degradado, `< 40` crítico. O código obedecia, em `seele_proto::sync_ratio::SyncBand`, e as duas cascas pintavam a partir daí.
