@@ -194,6 +194,13 @@ fn o_app_declara_para_que_quer_a_rede_de_casa() {
     // E a mesma pista das outras duas vezes: uma sonda rodada pelo terminal
     // chegava ao mesmo endereço em 16 ms, porque a permissão pertence ao
     // aplicativo que iniciou o processo.
+    //
+    // Ela **já funcionou**, e é isso que faz esta chave parecer desnecessária:
+    // o rastro tem a LAN entrando em 17 ms até uma build nova substituir a
+    // anterior. Assinado `adhoc` e sem `TeamIdentifier`, cada build é outro
+    // programa para o macOS, e o sim dado ao binário de ontem não atravessa a
+    // troca. Sem esta chave não há segunda pergunta — foi assim que o defeito
+    // atravessou uma dúzia de versões sem ninguém achar a causa.
     let plist = ler("Info.plist");
     assert!(
         plist.contains("NSLocalNetworkUsageDescription"),

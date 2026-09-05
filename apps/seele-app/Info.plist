@@ -55,6 +55,31 @@
 
 	  A chave não concede nada: ela faz o sistema **perguntar**. Sem ela não há
 	  pergunta, e o padrão de quem não foi perguntado é «não».
+
+	  # Por que funcionou antes, e por que parou
+
+	  Funcionou: o rastro tem `192.168.50.30:8383` entrando em 17 ms nos dias
+	  01 e 02/09. A permissão existia — alguém disse que sim uma vez, e o
+	  sistema guardou esse sim.
+
+	  Parou entre duas linhas do mesmo arquivo: a última entrada de 17 ms às
+	  00:32:52, e um `janela pronta` às 01:03:05 que é uma **build nova** no
+	  lugar da antiga. Daí em diante, nunca mais.
+
+	  O que morre numa build nova é a identidade. Este app é assinado `adhoc`,
+	  sem `TeamIdentifier`, e para o macOS isso não é uma versão nova do mesmo
+	  programa: é outro programa, com outro `cdhash`. O sim foi dado ao binário
+	  anterior e não atravessa a troca. Sem a chave desta seção não há segunda
+	  pergunta, então ele nunca voltou — atravessou uma dúzia de versões assim.
+
+	  E ficou escondido porque o quarto chegou quase junto: com um segundo
+	  candidato, o endereço público com furo, o app passou a **funcionar dando
+	  a volta pelo mundo**. O defeito deixou de ser «não conecta» e virou «às
+	  vezes demora, às vezes esgota», que é a forma que ninguém investiga.
+
+	  Enquanto a assinatura for `adhoc` a pergunta volta a cada atualização. Ela
+	  para de voltar no dia em que entrar um Developer ID — a mesma pendência
+	  que o `Entitlements.plist` já espera para o hardened runtime.
 	-->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>O SEELE procura o servidor na sua própria rede quando ele está na mesma casa que você — é o caminho mais curto e o de melhor qualidade. Sem esta permissão a conversa ainda funciona, mas dá a volta pela internet.</string>
