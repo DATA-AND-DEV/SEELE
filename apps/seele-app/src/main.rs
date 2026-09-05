@@ -714,6 +714,48 @@ fn firewall_nao_cobre_este_executavel() -> Option<String> {
     #[cfg(windows)]
     {
         let eu = std::env::current_exe().ok()?;
+
+        // **Antes de comparar caminhos: existe regra?**
+        //
+        // A primeira versão disto comparava o executável com o `InstallLocation`
+        // e nada mais — então ela pegava «a regra aponta para outro lugar» e
+        // deixava passar o caso mais comum de todos: **regra nenhuma**. A caixa
+        // que a cria nasce desmarcada no passo 02 do instalador, com o argumento
+        // de que uma porta aberta é decisão; quem não a marcou não tem regra, e
+        // nada nesta tela dizia isso.
+        //
+        // Foi assim que a pergunta chegou: «mas uai, o instalador já não faz
+        // isso? E eu nunca travei meu firewall, ele já era liberado». As duas
+        // metades são verdade e nenhuma delas produz uma regra: o instalador só
+        // faz quando pedem, e o que estava liberado era o `seele-app.exe` do
+        // instalador antigo — o aviso do Windows cria regra para **um arquivo**,
+        // e este programa passou a se chamar `SEELE.exe`.
+        //
+        // Só a existência é lida, e não os campos: a saída do `netsh` é
+        // traduzida — `Programa:` num Windows em português, `Program:` num em
+        // inglês — e um diagnóstico que depende do idioma erra na máquina de
+        // outra pessoa. Existir ou não existir, isso o código de saída responde.
+        let ha_regra = std::process::Command::new("netsh")
+            .args([
+                "advfirewall",
+                "firewall",
+                "show",
+                "rule",
+                "name=SEELE",
+                "dir=in",
+            ])
+            .output()
+            .ok()
+            .is_some_and(|saida| saida.status.success());
+        if !ha_regra {
+            return Some(
+                "não há regra de firewall para o SEELE nesta máquina, então \
+                 conexão de fora não chega — nem de quem está na mesma rede. \
+                 Reinstale marcando a caixa «abrir a porta 8383 UDP» no passo 02."
+                    .to_owned(),
+            );
+        }
+
         let instalado = std::process::Command::new("reg")
             .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
             .output()
