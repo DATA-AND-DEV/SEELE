@@ -53,7 +53,16 @@ pub(crate) enum Pedido {
 /// para devolvê-los na hora de reabrir. Eles não são para nós, e ignorá-los
 /// silenciosamente seria perder o que a pessoa estava fazendo.
 pub(crate) fn ler_pedido() -> Pedido {
-    ler(std::env::args().skip(1))
+    ler_com_nome(nome_do_executavel().as_deref(), std::env::args().skip(1))
+}
+
+/// Como este executável se chama, em minúsculas e sem o caminho.
+fn nome_do_executavel() -> Option<String> {
+    std::env::current_exe()
+        .ok()?
+        .file_name()?
+        .to_str()
+        .map(str::to_lowercase)
 }
 
 /// A leitura em si, separada do ambiente para poder ser exercitada.
@@ -63,8 +72,45 @@ pub(crate) fn ler_pedido() -> Pedido {
 /// tela, que ninguém exercita à mão. Presa a `std::env::args()`, ela só seria
 /// testável rodando o instalador de verdade, com elevação, numa máquina Windows.
 /// Separada, ela é uma função pura com um punhado de casos.
+#[cfg(test)]
 pub(crate) fn ler(argumentos: impl Iterator<Item = String>) -> Pedido {
+    ler_com_nome(None, argumentos)
+}
+
+/// O nome do arquivo entra na decisão, e não só a linha de comando.
+///
+/// # Por que o nome, se já há um argumento
+///
+/// Porque o argumento vem do `UninstallString`, e o `UninstallString` foi
+/// **gravado no passado**. Quem instalou com uma versão que o escrevia sem
+/// `--desinstalar` tem, no registro, uma linha que manda rodar o arquivo cru — e
+/// rodá-lo cru abria a janela de **instalar**.
+///
+/// Consertar o que se grava conserta a próxima instalação e não a de ninguém que
+/// já instalou; e o relato veio duas vezes, a segunda com «isso já está ficando
+/// irritante». Está certo: um conserto que depende de um valor guardado por uma
+/// versão anterior não é um conserto, é um pedido de reinstalação.
+///
+/// O nome do arquivo é a única coisa que este processo sabe sobre si mesmo sem
+/// perguntar a ninguém. A instalação copia o binário como `desinstalar.exe`, e a
+/// partir daí ele **é** o desinstalador — com argumento ou sem.
+///
+/// # O que isto não confunde
+///
+/// O instalador baixado chama-se `SEELE_<versão>_x64-instalador.exe`, e o que o
+/// atualizador roda é esse mesmo arquivo. Nenhum dos dois se chama
+/// `desinstalar.exe`; só a cópia que a instalação escreve dentro da pasta.
+fn ler_com_nome(nome: Option<&str>, argumentos: impl Iterator<Item = String>) -> Pedido {
     let argumentos: Vec<String> = argumentos.collect();
+
+    // O segundo tempo tem argumento e caminho, e ele vence o nome: os dois
+    // arquivos se chamam igual — o de dentro da pasta e a cópia no temporário —
+    // e é o argumento que diz qual deles está rodando.
+    if !argumentos.first().is_some_and(|a| a == "--desinstalar-de")
+        && nome == Some("desinstalar.exe")
+    {
+        return Pedido::RemoverDeDentro;
+    }
 
     if argumentos.first().is_some_and(|a| a == "--desinstalar") {
         return Pedido::RemoverDeDentro;
