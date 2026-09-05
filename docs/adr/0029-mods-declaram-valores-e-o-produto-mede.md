@@ -1,7 +1,16 @@
 # ADR 0029 — MODs: declaram valores, e o produto mede antes de aplicar
 
-**Estado:** proposto — **nada foi construído**
+**Estado:** **substituído pelo [ADR 0044](0044-mods-o-produto-base-tem-regras-e-um-mod-nao.md)** em 2026-09-05 — nada foi construído
 **Data:** 2026-08-17
+
+> **Esta página não vale mais, e é para ser lida como registro.** O 0044 decidiu
+> o contrário nos três eixos que sustentavam este desenho: um MOD **é** código,
+> ele **é** do servidor, e ele **tem** onde escrever. O argumento inteiro daqui
+> repousava numa frase — *«toda defesa daqui repousa numa pessoa decidindo»* — e
+> o dono decidiu que as regras do produto base não alcançam MODs.
+>
+> Duas coisas daqui sobrevivem no 0044 e valem a leitura: **instalação parcial
+> silenciosa é o modo de falha a evitar**, e **o esquema só cresce**.
 
 **O vocabulário desta página foi trazido para a língua do ADR 0035** (`Dogma`
 era `servidor`, `Cage` era sala de voz, `Terminal Dogma` era `TERMINAL SERVER`),

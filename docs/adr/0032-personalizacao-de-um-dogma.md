@@ -17,7 +17,7 @@ O que está de pé, conferido no código:
 | Nome, escrito pela janela | construído | `RenameServer` · `ServerRenamed` · `renomear_server` |
 | Nome anunciado com o servidor no ar | construído | `crates/seele-server/tests/personalizacao.rs` |
 | Ícone | **construído**, contra a recusa desta página | `SetServerIcon` · `ServerIconChanged` |
-| Cor da placa | **não construída** | — |
+| Cor da placa | **não será construída** — absorvida pelo [ADR 0044](0044-mods-o-produto-base-tem-regras-e-um-mod-nao.md) | — |
 | Sigla derivada do nome | construída | `siglaDoAlvo` · `tela-sessao.js` · `camada-servidores.js` |
 | Coluna de preferência local de cor | não construída | — |
 

@@ -1,6 +1,13 @@
 # 0026 — Duas assinaturas, e um botão de atualizar
 
-Status: aceito
+Status: aceito — **o botão foi substituído pelo [ADR 0045](0045-toda-versao-continua-de-pe.md)** em 2026-09-05
+
+> **As duas assinaturas continuam valendo inteiras** e viraram pré-requisito do
+> 0045. O que saiu foi «um app, uma versão instalada»: o botão de atualizar vira
+> um seletor de versão, porque um MOD é escrito contra uma versão específica e
+> toda versão publicada passa a continuar hospedável. O argumento desta página
+> contra atualização silenciosa sobrevive reforçado — um seletor é mais
+> explícito que um botão.
 
 ## Contexto
 
