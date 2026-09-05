@@ -95,3 +95,29 @@ que substituem funciona hoje.
 novo sai, uma pessoa instala à mão e fica tudo bem, e a atualização automática
 para em silêncio para quem já tinha o produto. É por isso que ele precisa de
 teste próprio antes de substituir o que existe, e não depois.
+
+## A troca aconteceu — 2026-09-05
+
+O NSIS sai da carga. `empacotar/windows.ps1` compila o app com `--no-bundle` e
+entrega só o `-instalador.exe`; o `-setup.exe` deixa de existir.
+
+A condição que este ADR pôs — o modo silencioso ter teste próprio antes de
+substituir o que existe — está cumprida em `linha.rs`, com
+`o_silencioso_do_nsis_tambem_vale` conferindo que `/S` continua sendo entendido.
+
+O que forçou a data não foi a condição, e sim o custo de manter os dois. O
+manifesto do atualizador já apontava para o nosso desde que `preferencia()`
+passou a ordenar assim, então o `-setup.exe` era publicado todo release e
+ninguém o baixava. E ele não era inerte: o NSIS instala noutro lugar e cria a
+**própria** entrada em Programas e Recursos, então uma máquina que passou pelos
+dois fica com duas instalações do mesmo produto disputando a mesma pasta.
+
+Foi assim que apareceu, primeiro como sintoma — «por que na pasta SEELE fica:
+seele-app, SEELE, seeled, plug, uninstall e desinstalar?» — e depois como a
+pergunta certa: «qual a diferença do setup e do instalador? por que pra mim
+parece ser a mesma coisa». Parecia porque era.
+
+`o_windows_recebe_um_instalador_so`, em `apps/seele-app/tests/empacotamento.rs`,
+guarda as duas metades: que o NSIS não volte, e que a falta do nosso não seja
+silenciosa — sem o do NSIS ao lado, um `if` que pula publicaria uma versão sem
+instalador de Windows nenhum.

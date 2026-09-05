@@ -179,6 +179,74 @@ fn o_app_declara_para_que_quer_a_tela() {
 }
 
 #[test]
+fn o_windows_recebe_um_instalador_so() {
+    // **Dois instaladores para o mesmo produto, e nenhum dos dois sabia disso.**
+    //
+    // O `-setup.exe` do NSIS e o `-instalador.exe` deste repositório saíam lado
+    // a lado em todo release. Ninguém usava o primeiro — o manifesto do
+    // atualizador prefere o nosso desde que `preferencia()` existe —, e ele não
+    // era inerte: o NSIS instala noutro lugar e cria a **própria** entrada em
+    // Programas e Recursos.
+    //
+    // Foi perguntado assim: «por que na pasta SEELE fica: seele-app, SEELE,
+    // seeled, plug, uninstall e desinstalar?». A resposta eram duas instalações
+    // do mesmo produto na mesma máquina, cada uma com o seu desinstalador. E
+    // depois: «qual a diferença do setup e do instalador? por que pra mim
+    // parece ser a mesma coisa». Parecia porque era.
+    let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("a raiz do repositório");
+    let carga = std::fs::read_to_string(raiz.join("empacotar/windows.ps1"))
+        .expect("não li empacotar/windows.ps1");
+    let codigo: String = carga
+        .lines()
+        .filter(|linha| !linha.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !codigo.contains("--bundles nsis"),
+        "a carga do Windows voltou a empacotar o NSIS, e o `-setup.exe` volta a \
+         disputar a máquina com o instalador que é nosso"
+    );
+    assert!(
+        !codigo.contains("-setup.exe"),
+        "a entrega do Windows voltou a colher o instalador do NSIS"
+    );
+    assert!(
+        codigo.contains("seele-instalador.exe"),
+        "a entrega do Windows perdeu o único instalador que ela ainda tem"
+    );
+
+    // E ele não pode mais faltar em silêncio: sem o do NSIS ao lado, um `if`
+    // que pula publicaria uma versão sem instalador de Windows nenhum.
+    //
+    // A **condição**, e não a frase. A primeira versão desta parte procurava o
+    // texto do `throw`, e ele continua no arquivo quando alguém troca o teste
+    // por `if ($false)` — provado assim, revertendo, e o guarda não viu. É o
+    // mesmo «existir não é funcionar» que o CLAUDE.md cobra.
+    let guarda = codigo
+        .split("$Proprio = ")
+        .nth(1)
+        .unwrap_or_default()
+        .lines()
+        // O primeiro pedaço é o resto da própria linha da atribuição — o
+        // caminho do arquivo —, e não a linha seguinte.
+        .skip(1)
+        .map(str::trim)
+        .filter(|linha| !linha.is_empty())
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        guarda.starts_with("if (-not (Test-Path $Proprio))") && guarda.contains("throw"),
+        "a falta do instalador do Windows voltou a ser silenciosa na entrega; o \
+         que veio logo depois de nomeá-lo foi:\n{guarda}"
+    );
+}
+
+#[test]
 fn o_app_declara_para_que_quer_a_rede_de_casa() {
     // O mesmo defeito, a terceira vez, e a mais cara de achar: sem esta chave o
     // macOS recusa **os pacotes que saem daqui para a própria casa**, calado. Só

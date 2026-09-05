@@ -203,8 +203,9 @@ try {
 
     # ------------------------------------------- o pacote de atualização
     #
-    # No Windows o `.exe` do NSIS **é** o pacote de atualização: o mesmo arquivo
-    # que uma pessoa baixaria à mão. O que falta é a assinatura ao lado dele, e
+    # No Windows o `.exe` do instalador **é** o pacote de atualização: o mesmo
+    # arquivo que uma pessoa baixaria à mão. O que falta é a assinatura ao lado
+    # dele, e
     # ela só sai com as duas metades da chave do projeto — a pública, que vive
     # no repositório em `plugins.updater.pubkey`, e a privada, que vem do
     # ambiente. Uma só das duas quebra o empacotamento no último passo.
@@ -275,22 +276,36 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "não instalei a CLI do Tauri" }
     }
 
-    # `.exe` do NSIS e não `.msi`: instala no perfil sem pedir administrador.
-    # O `--config` é o que põe os acompanhantes dentro do bundle.
-    Write-Host "→ empacotando o instalador" -ForegroundColor Cyan
+    # **`--no-bundle`: aqui só se compila o app.** Quem empacota é o instalador
+    # deste repositório, e a carga dele sai de `target\release` — não do bundle.
+    #
+    # Até aqui esta linha pedia `--bundles nsis`, e o `-setup.exe` que ela
+    # produzia era publicado ao lado do nosso. Ninguém o usava: o manifesto do
+    # atualizador aponta para o `-instalador.exe` desde que o `manifesto.py`
+    # passou a preferi-lo, e os downloads da 0.10.5 mediram a diferença.
+    #
+    # E ele não era inerte. O NSIS instala noutro lugar e cria a **própria**
+    # entrada em Programas e Recursos, então uma máquina que já tinha passado
+    # pelos dois ficava com duas instalações do mesmo produto disputando a mesma
+    # pasta. Foi perguntado assim: «por que na pasta SEELE fica: seele-app,
+    # SEELE, seeled, plug, uninstall e desinstalar?». Os restos eram estes, e
+    # havia regras de firewall apontando para um `AppData\Local\SEELE` que já
+    # não existia.
+    #
+    # O `--config` continua: é ele que dá a versão ao app compilado.
+    Write-Host "→ compilando o app" -ForegroundColor Cyan
     Push-Location "apps\seele-app"
     try {
-        cargo tauri build --config tauri.release.conf.json --bundles nsis
-        if ($LASTEXITCODE -ne 0) { throw "o empacotamento falhou" }
+        cargo tauri build --config tauri.release.conf.json --no-bundle
+        if ($LASTEXITCODE -ne 0) { throw "a compilação do app falhou" }
     }
     finally { Pop-Location }
 
     # ------------------------------------------------- o instalador que é nosso
     #
-    # Ver ADR 0043. Ele convive com o do NSIS enquanto não estiver completo: o
-    # NSIS continua sendo o que a versão publica, e este sai ao lado para ser
-    # olhado. O dia em que trocarem de lugar está no ADR, e é depois de o modo
-    # silencioso ter teste próprio.
+    # Ver ADR 0043. Ele deixou de conviver com o do NSIS: é o único que sai daqui.
+    # A condição que o ADR pôs para a troca era o modo silencioso ter teste
+    # próprio, e ele tem — `o_silencioso_do_nsis_tambem_vale`, em `linha.rs`.
     Write-Host "→ montando a carga do instalador próprio" -ForegroundColor Cyan
     $Carga = Join-Path $env:TEMP "seele-carga-$Versao"
     Remove-Item -Recurse -Force $Carga -ErrorAction SilentlyContinue
@@ -358,35 +373,6 @@ try {
     $Destino = "entrega"
     New-Item -ItemType Directory -Force -Path $Destino | Out-Null
 
-    # Filtrado pela versão desta execução, e não «qualquer coisa que termine em
-    # -setup.exe».
-    #
-    # O `target\bundle` acumula: empacotar 0.4.2 depois de 0.4.0 deixa os dois
-    # lado a lado, e a conferência de «exatamente um» reprovava com os dois
-    # presentes. Ela estava certa em recusar ambiguidade e errada em não saber
-    # desfazê-la — a versão está no nome do arquivo, e é a resposta.
-    #
-    # Apagar o diretório antes seria a outra saída, e é pior: o instalador
-    # anterior é de alguém, e um script de empacotamento que apaga entrega
-    # passada é um que apaga a entrega que você ainda não subiu.
-    $padrao = "*_${Versao}_*-setup.exe"
-    $instaladores = @(Get-ChildItem -Path "target\release\bundle" -Recurse -Filter $padrao)
-    if ($instaladores.Count -ne 1) {
-        throw @"
-esperava exatamente um instalador de $Versao e achei $($instaladores.Count).
-Procurei por «$padrao» em target\release\bundle.
-$(if ($instaladores.Count -eq 0) { 'Nenhum: o empacotamento disse que deu certo mas não deixou arquivo com esta versão.' } else { 'Mais de um: ' + ($instaladores.FullName -join ', ') })
-"@
-    }
-    Copy-Item $instaladores[0].FullName $Destino -Force
-
-    # A assinatura do atualizador fica ao lado do instalador, com o mesmo nome e
-    # `.sig` no fim. Só existe quando a chave do projeto estava no ambiente.
-    $assinatura = "$($instaladores[0].FullName).sig"
-    if (Test-Path $assinatura) {
-        Copy-Item $assinatura $Destino -Force
-    }
-
     # O zip da CLI **não** é um segundo instalador: é o que o `install.ps1`
     # baixa. Sem ele o instalador de uma linha para de funcionar.
     Compress-Archive `
@@ -394,28 +380,33 @@ $(if ($instaladores.Count -eq 0) { 'Nenhum: o empacotamento disse que deu certo 
         -DestinationPath "$Destino\seele-cli-$Versao-windows-x86_64.zip" -Force
 
     # -------------------------------------------------------------- conferir
-    # O nosso, com nome que não colide com o do NSIS: os dois convivem em
-    # `entrega\` enquanto a troca não acontece, e um nome igual faria o segundo
-    # sobrescrever o primeiro sem ninguém notar.
+    # **O instalador do Windows, e agora o único.**
+    #
+    # O `if (Test-Path)` que envolvia isto era de quando havia dois: se o nosso
+    # faltasse, o do NSIS ainda ia na entrega e ninguém percebia a falta. Sem o
+    # NSIS, um `if` que pula em silêncio publicaria uma versão **sem instalador
+    # de Windows nenhum** — e o `manifesto.py` só avisaria depois, dizendo que
+    # não sabe para que sistema serve nada.
     $Proprio = "target\release\seele-instalador.exe"
-    if (Test-Path $Proprio) {
-        $NomeProprio = "SEELE_${Versao}_x64-instalador.exe"
-        $AlvoProprio = Join-Path $Destino $NomeProprio
-        try {
-            Copy-Item $Proprio $AlvoProprio -Force -ErrorAction Stop
-        }
-        catch [System.IO.IOException] {
-            # **O arquivo em uso é o caso comum aqui, e o despejo de exceção não
-            # o diz.** Quem empacota acabou de testar o instalador da execução
-            # anterior; enquanto ele estiver aberto, o Windows não deixa
-            # sobrescrevê-lo — e o que aparecia era um `IOException` com um til
-            # apontando para a linha do `Copy-Item`.
-            throw "não substituí $AlvoProprio porque ele está em uso. " +
-                  "Feche o instalador que está aberto (ele é o arquivo de uma " +
-                  "execução anterior) e rode de novo — tudo o mais já está pronto."
-        }
-        Write-Host "→ instalador próprio: $NomeProprio" -ForegroundColor Cyan
+    if (-not (Test-Path $Proprio)) {
+        throw "não achei $Proprio — o instalador não foi compilado nesta execução, e ele é o único que o Windows recebe"
     }
+    $NomeProprio = "SEELE_${Versao}_x64-instalador.exe"
+    $AlvoProprio = Join-Path $Destino $NomeProprio
+    try {
+        Copy-Item $Proprio $AlvoProprio -Force -ErrorAction Stop
+    }
+    catch [System.IO.IOException] {
+        # **O arquivo em uso é o caso comum aqui, e o despejo de exceção não
+        # o diz.** Quem empacota acabou de testar o instalador da execução
+        # anterior; enquanto ele estiver aberto, o Windows não deixa
+        # sobrescrevê-lo — e o que aparecia era um `IOException` com um til
+        # apontando para a linha do `Copy-Item`.
+        throw "não substituí $AlvoProprio porque ele está em uso. " +
+              "Feche o instalador que está aberto (ele é o arquivo de uma " +
+              "execução anterior) e rode de novo — tudo o mais já está pronto."
+    }
+    Write-Host "→ instalador próprio: $NomeProprio" -ForegroundColor Cyan
 
     Write-Host "`n--- entrega ---" -ForegroundColor Green
     Get-ChildItem $Destino | ForEach-Object {
