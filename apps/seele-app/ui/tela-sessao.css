@@ -1774,6 +1774,36 @@ button.linha-nome:hover { text-decoration: underline; }
    como esta interface separa «isto é sobre o que você tentou» de «isto é sobre
    o que está impedindo». Sem vermelho: `tokens.css` reserva essa cor para
    alerta e queda, e uma porta fechada é nenhum dos dois. */
+/* O botão que resolve a parede, logo abaixo dela.
+
+   Vazado e não cheio: ele é o caminho e não o assunto — o assunto é a frase
+   acima. E laranja porque é a única coisa nesta tela que pede um gesto. */
+.convite-alcance-conserto {
+  display: block;
+  margin-top: 8px;
+  margin-left: 8px;
+  font: inherit;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-laranja-nerv);
+  background: none;
+  border: 1px solid var(--seele-laranja-nerv);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.convite-alcance-conserto:hover:not(:disabled) {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+.convite-alcance-conserto:disabled {
+  color: var(--seele-linha-forte);
+  border-color: var(--seele-linha);
+  cursor: progress;
+}
+
 .convite-alcance-parede {
   display: block;
   margin-top: 8px;

@@ -824,15 +824,10 @@ fn abrir_a_porta_no_firewall() -> Result<(), String> {
     }
     #[cfg(windows)]
     {
-        use windows::core::PCWSTR;
+        use std::os::windows::process::CommandExt;
 
         let instalado = std::process::Command::new("reg")
-            .args([
-                "query",
-                CHAVE_DA_INSTALACAO,
-                "/v",
-                "InstallLocation",
-            ])
+            .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
             .output()
             .ok()
             .filter(|saida| saida.status.success())
@@ -853,49 +848,47 @@ fn abrir_a_porta_no_firewall() -> Result<(), String> {
             ));
         }
 
-        // **`runas`, e não `open`.** O verbo é o que faz o Windows perguntar; sem
-        // ele, lançar um executável que exige administrador de um processo que
-        // não é falha com «elevação necessária» e nada acontece.
-        let arquivo: Vec<u16> = ferramenta
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let parametros: Vec<u16> = "--abrir-a-porta"
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        // SAFETY: os dois vetores vivem até o fim da chamada, e `ShellExecuteW`
-        // é a forma documentada de pedir elevação a partir de um processo comum.
-        let resposta = unsafe {
-            windows::Win32::UI::Shell::ShellExecuteW(
-                None,
-                PCWSTR(larga_runas().as_ptr()),
-                PCWSTR(arquivo.as_ptr()),
-                PCWSTR(parametros.as_ptr()),
-                PCWSTR::null(),
-                windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
-            )
-        };
-        // O `ShellExecuteW` devolve um valor **menor ou igual a 32** quando
-        // falha, e este retorno era descartado pelo atualizador do Tauri — foi
-        // assim que uma atualização que não acontecia virou um app que fechava
-        // sozinho. Aqui ele é lido.
-        if resposta.0 as isize <= 32 {
-            return Err(
-                "o Windows não abriu o pedido de permissão. Se você recusou, \
-                 tente de novo e responda Sim."
-                    .to_owned(),
-            );
+        // **`Start-Process -Verb RunAs`, e não `ShellExecuteW`.**
+        //
+        // O que faz o Windows perguntar é o verbo `runas`; sem ele, lançar um
+        // executável que exige administrador a partir de um processo que não é
+        // falha com «elevação necessária» e nada acontece.
+        //
+        // A forma direta seria o `ShellExecuteW`, e ela não cabe aqui: a folha de
+        // lints deste workspace proíbe `unsafe`, e `seele-app` não tem folha
+        // própria — abrir uma exceção para uma chamada seria pagar caro por
+        // conveniência. O PowerShell existe em todo Windows desde o 7 e faz a
+        // mesma coisa por um caminho que não precisa de exceção nenhuma.
+        //
+        // **E ele diz quando a pessoa recusa.** `Start-Process` lança um erro
+        // quando o UAC é negado, e o PowerShell sai com código diferente de zero
+        // — que é exatamente o retorno que o atualizador do Tauri descarta no
+        // `ShellExecuteW` dele, e foi assim que uma atualização que não
+        // acontecia virou um app que fechava sozinho. Aqui ele é lido.
+        let saida = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "Start-Process -FilePath '{}' -ArgumentList '--abrir-a-porta' \
+                     -Verb RunAs -Wait",
+                    ferramenta.display()
+                ),
+            ])
+            // Sem console piscando por cima da janela de quem só apertou um
+            // botão. É a mesma razão do `SEM_CONSOLE` do instalador.
+            .creation_flags(0x0800_0000)
+            .output()
+            .map_err(|erro| format!("não consegui pedir a permissão ao Windows: {erro}"))?;
+
+        if !saida.status.success() {
+            return Err("o Windows não criou a regra. Se você recusou a permissão, \
+                        tente de novo e responda Sim."
+                .to_owned());
         }
         Ok(())
     }
-}
-
-/// O verbo `runas`, em UTF-16 terminado em zero.
-#[cfg(windows)]
-fn larga_runas() -> Vec<u16> {
-    "runas".encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// A porta em que um servidor escuta por padrão.

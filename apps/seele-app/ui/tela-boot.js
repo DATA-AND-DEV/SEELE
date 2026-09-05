@@ -310,6 +310,40 @@ function mostrarAlcance(alcance, portaRecusada, encontroRecusado, firewallNaoCob
     parede.className = "convite-alcance-parede";
     parede.textContent = firewallNaoCobre;
     onde.append(parede);
+
+    // **E o botão que resolve, em vez da frase que manda reinstalar.**
+    //
+    // A pergunta estava no lugar errado: uma caixa no passo 02 do instalador,
+    // desmarcada, perguntando «quer abrir a porta?» a quem ainda não sabia se ia
+    // hospedar. Perguntado assim: «mas uai, o instalador já não faz isso?». Faz
+    // quando pedem — e quem instala um app de conversa não está decidindo sobre
+    // firewall naquele instante.
+    //
+    // Quem acabou de apertar HOSPEDAR AQUI **está**, e é aqui que a decisão
+    // cabe. O Windows pergunta uma vez, e a regra nasce.
+    const abrir = document.createElement("button");
+    abrir.type = "button";
+    abrir.className = "convite-alcance-conserto";
+    abrir.textContent = "ABRIR A PORTA AGORA";
+    abrir.title = "o Windows vai pedir permissão de administrador uma vez";
+    abrir.addEventListener("click", async () => {
+      abrir.disabled = true;
+      abrir.textContent = "PEDINDO AO WINDOWS…";
+      try {
+        await invoke("abrir_a_porta_no_firewall");
+        // Relido e não presumido: quem responde se a regra existe é o Windows,
+        // e o botão que se declara vitorioso é o mesmo defeito do atualizador
+        // que fechava o app sem saber se instalou.
+        parede.textContent =
+          "Regra criada. Mande o link de novo — agora as conexões chegam.";
+        abrir.remove();
+      } catch (falha) {
+        abrir.disabled = false;
+        abrir.textContent = "ABRIR A PORTA AGORA";
+        parede.textContent = fraseDeErro(falha);
+      }
+    });
+    onde.append(abrir);
   }
 
   for (const motivo of [portaRecusada, encontroRecusado]) {

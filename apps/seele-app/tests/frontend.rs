@@ -5814,13 +5814,36 @@ fn there_is_no_blocklist_of_extensions_anywhere_in_the_frontend() {
     }
     fonte.push_str(&without_comments(&read("src/main.rs")));
 
-    for suspeito in [".exe\"", ".bat\"", ".scr\"", ".cmd\"", ".ps1\""] {
-        assert!(
-            !fonte.contains(suspeito),
-            "something in the shell names `{suspeito}`, which is how a blocklist \
-             of extensions starts — and ADR 0027 explains why one is worse than \
-             none"
-        );
+    // **Uma lista, e não um nome.**
+    //
+    // Este guarda casava com qualquer ocorrência de `.exe"`, e em 05/09/2026 ele
+    // reprovou por `join("desinstalar.exe")` — um caminho para **um** programa
+    // desta casa, que não é uma lista de nada. Afrouxá-lo até «não cite `.exe`»
+    // seria proibir o código de nomear os próprios arquivos.
+    //
+    // O que denuncia uma lista de proibidos é a forma: ou duas extensões
+    // diferentes juntas, ou uma comparação de sufixo. Nomear um arquivo não é
+    // nenhuma das duas.
+    let suspeitos = [".exe\"", ".bat\"", ".scr\"", ".cmd\"", ".ps1\""];
+    let quantos = suspeitos.iter().filter(|s| fonte.contains(**s)).count();
+    assert!(
+        quantos < 2,
+        "a casca nomeia {quantos} extensões executáveis diferentes, que é como \
+         uma lista de proibidos começa — e ADR 0027 explica por que uma é pior \
+         que nenhuma"
+    );
+
+    for suspeito in [".exe", ".bat", ".scr", ".cmd", ".ps1"] {
+        for forma in [
+            format!("endsWith(\"{suspeito}\")"),
+            format!("ends_with(\"{suspeito}\")"),
+        ] {
+            assert!(
+                !fonte.contains(&forma),
+                "a casca compara sufixo com `{suspeito}`, que é uma lista de \
+                 proibidos com um item — e ADR 0027 recusa a forma, não o tamanho"
+            );
+        }
     }
 }
 
@@ -10191,5 +10214,39 @@ fn os_pacotes_que_nao_voltam_nao_se_chamam_sincronizacao() {
         tabela.contains("RECEBEU E NÃO RESPONDEU"),
         "a frase do aperto de mão não diz que o servidor recebeu, que é a \
          única coisa que a separa da outra:\n{tabela}"
+    );
+}
+
+#[test]
+fn a_parede_do_firewall_traz_o_conserto_junto() {
+    // «Mas uai, o instalador já não faz isso?» Faz quando pedem — a caixa nasce
+    // desmarcada no passo 02 —, e quem instala um app de conversa não está
+    // decidindo sobre firewall naquele instante. Quem aperta HOSPEDAR AQUI está.
+    //
+    // A frase sozinha mandava reinstalar, que é um preço alto por uma linha no
+    // firewall. O botão faz o Windows perguntar uma vez.
+    let boot = without_comments(&read("ui/tela-boot.js"));
+
+    assert!(
+        boot.contains("abrir_a_porta_no_firewall"),
+        "a parede do firewall voltou a ser só uma frase, e a frase manda \
+         reinstalar por causa de uma regra que um clique cria"
+    );
+    assert!(
+        boot.contains("ABRIR A PORTA AGORA"),
+        "o botão perdeu o rótulo que diz o que ele faz"
+    );
+
+    // **O sucesso é lido, e não presumido.** Um botão que se declara vitorioso
+    // sem confirmação é o mesmo defeito do atualizador do Tauri, que fechava o
+    // app sem saber se o instalador tinha aberto.
+    let ramo = boot
+        .find("abrir_a_porta_no_firewall")
+        .map(|onde| boot.get(onde..).unwrap_or_default().to_owned())
+        .unwrap_or_default();
+    assert!(
+        ramo.contains("catch"),
+        "o botão não trata a recusa, e recusar o UAC é o caminho mais comum \
+         depois de apertar:\n{ramo}"
     );
 }
