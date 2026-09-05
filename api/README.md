@@ -42,9 +42,24 @@ publicar em vez de antes de existir.
   `ClientMessage`, e passam pelas **mesmas permissões** que a janela atravessa:
   não há caminho paralelo, então não há semântica paralela para divergir.
 - **`own`** e **`world`** — o quintal de dados do MOD, e o que não está no
-  protocolo: rede, relógio e registro. É onde a «liberdade total» do ADR 0044
-  mora, e é a parte que a tela de aceite tem de dizer em voz alta — **rede de
-  saída na máquina de quem hospeda** não é detalhe de implementação.
+  protocolo: rede, relógio, registro e **disco**.
+
+`world` é onde a «liberdade total» do ADR 0044 mora, e é a parte que a tela de
+aceite tem de dizer em voz alta, em letra grande e sem eufemismo:
+
+> **Um MOD alcança a rede e o sistema de arquivos da máquina de quem hospeda.**
+
+Não há caixa de areia, por decisão do dono — *«o que construímos até agora tem
+regras, mas essas regras não se aplicam aos MODs, e essa é a graça»*. A defesa é
+o repositório público obrigatório e a revisão de código de cada versão
+publicada, e ela não é técnica: é humana, e é a única. Está escrita como tal em
+«O que fica sem saída» do ADR.
+
+O `lerArquivo` e o `escreverArquivo` chegaram depois dos outros três, e a razão
+está registrada: a primeira versão desta página tinha rede e não tinha disco, o
+que era menos do que «liberdade total» quer dizer. Um MOD que abre túnel já
+alcança tudo o que o disco alcançaria pela rede; a assimetria era acidente, não
+desenho.
 
 ## O lado direito não é um caminho de código
 

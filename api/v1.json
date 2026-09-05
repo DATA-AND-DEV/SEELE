@@ -22,14 +22,27 @@
     "mensagem.quando": "MessageEdited"
   },
   "moments": [
-    "PersonJoined", "PersonLeft", "PersonPresent", "PersonGone",
-    "PersonRenamed", "PersonIconChanged",
-    "MessageReceived", "MessageEdited", "MessageRemoved",
-    "VoiceRoomCreated", "VoiceRoomRenamed", "VoiceRoomDeleted",
+    "PersonJoined",
+    "PersonLeft",
+    "PersonPresent",
+    "PersonGone",
+    "PersonRenamed",
+    "PersonIconChanged",
+    "MessageReceived",
+    "MessageEdited",
+    "MessageRemoved",
+    "VoiceRoomCreated",
+    "VoiceRoomRenamed",
+    "VoiceRoomDeleted",
     "MovedToVoiceRoom",
-    "ChannelCreated", "ChannelRenamed", "ChannelDeleted", "ChannelWeighed",
-    "ScreenShareStarted", "ScreenShareStopped",
-    "ServerRenamed", "ServerIconChanged"
+    "ChannelCreated",
+    "ChannelRenamed",
+    "ChannelDeleted",
+    "ChannelWeighed",
+    "ScreenShareStarted",
+    "ScreenShareStopped",
+    "ServerRenamed",
+    "ServerIconChanged"
   ],
   "actions": {
     "mandarMensagem": "SendMessage",
@@ -55,6 +68,9 @@
   "world": {
     "buscar": "Anfitriao",
     "agora": "now_seconds",
-    "registrar": "Anfitriao"
+    "registrar": "Anfitriao",
+    "lerArquivo": "Anfitriao",
+    "escreverArquivo": "Anfitriao",
+    "listarPasta": "Anfitriao"
   }
 }
