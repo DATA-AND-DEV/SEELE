@@ -860,10 +860,13 @@ MODs disputariam o mesmo diretório sob mod://."
 
 **Interfaces:**
 - Consumes: nada das tarefas anteriores — a tabela guarda `id` e `hash` como texto.
-- Produces:
-  - `pub fn enable(conn: &Connection, id: &str, version: &str, hash: &str) -> rusqlite::Result<()>`
-  - `pub fn disable(conn: &Connection, id: &str) -> rusqlite::Result<()>`
-  - `pub fn enabled(conn: &Connection) -> rusqlite::Result<Vec<EnabledMod>>`
+- Produces — **`&Persistence` e não `&Connection`**, e a correção veio da execução:
+  `Persistence::connection` é `pub(crate)`, então uma assinatura sobre conexão
+  crua não é chamável da casca, que é justamente quem chama. É a forma que
+  `admissao::criar_convite` e `icone_da_pessoa` já usam.
+  - `pub fn enable(persistence: &Persistence, id: &str, version: &str, hash: &str) -> anyhow::Result<()>`
+  - `pub fn disable(persistence: &Persistence, id: &str) -> anyhow::Result<()>`
+  - `pub fn enabled(persistence: &Persistence) -> anyhow::Result<Vec<EnabledMod>>`
   - `pub struct EnabledMod { pub id: String, pub version: String, pub hash: String }`
 
 - [ ] **Step 1: Escrever a migração**
