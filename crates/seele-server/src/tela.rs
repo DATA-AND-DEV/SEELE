@@ -97,6 +97,28 @@ pub const PISO_DE_BANDA_BPS: u32 = 200_000;
 /// vinte linhas.
 pub const CAMINHO_DO_SERVER_BPS: u32 = 2_000_000;
 
+/// Com que subida o portão de admissão nasce.
+///
+/// A ordem é **medida lembrada, depois declarado, depois hipótese** — a mesma
+/// que [`caminho_no_fio`] usa, e pela razão que o doc dela dá: a medida vence o
+/// declarado porque uma foi conferida contra o cano e a outra foi digitada.
+///
+/// A única diferença é o fundo. No fio o fundo é zero, que pelo §5.1 quer dizer
+/// «não medi» e faz o termo sumir do `min` do outro lado. Aqui o fundo é
+/// [`CAMINHO_DO_SERVER_BPS`], porque o portão **tem** de decidir alguma coisa
+/// quando alguém aperta o botão, e a hipótese erra para o lado de encerrar
+/// cedo — que é o lado que o §3.2 manda errar.
+///
+/// Zero lembrado é tratado como nada lembrado, pela mesma regra que
+/// [`caminho_do_server`] já aplica ao declarado: não é uma medida, é a falta de
+/// uma.
+#[must_use]
+pub fn caminho_do_arranque(lembrada: Option<u32>, declarado: Option<u32>) -> u32 {
+    lembrada
+        .filter(|bps| *bps > 0)
+        .unwrap_or_else(|| caminho_do_server(declarado))
+}
+
 /// A subida por que este servidor divide N ao admitir uma transmissão.
 ///
 /// O que o operador declarou, ou a hipótese de [`CAMINHO_DO_SERVER_BPS`].
@@ -404,6 +426,35 @@ impl SondaDaSubida {
         }
     }
 
+    /// Uma sonda que parte de uma medida lembrada, e não da hipótese.
+    ///
+    /// Gêmea de `seele_core::caminho::Sonda::partindo_de`, e as duas ressalvas
+    /// dela valem aqui:
+    ///
+    /// **Grampeada na faixa que a escada admite.** Memória não autoriza começar
+    /// fora dela — um banco adulterado, ou uma constante que mudou entre
+    /// versões, não pode pôr a sonda num valor que ela própria nunca
+    /// alcançaria.
+    ///
+    /// **Não põe [`Self::limite_bps`]**, e isso é decisão: uma medida lembrada é
+    /// de onde partir, não uma borda encontrada. A histerese existe para o que
+    /// doeu **nesta** sessão, e herdá-la de ontem impediria a sonda de descobrir
+    /// que o cano cresceu.
+    #[must_use]
+    pub const fn partindo_de(bps: u32) -> Self {
+        Self {
+            estimativa_bps: if bps < PISO_DA_SUBIDA_BPS {
+                PISO_DA_SUBIDA_BPS
+            } else if bps > TETO_DA_SUBIDA_BPS {
+                TETO_DA_SUBIDA_BPS
+            } else {
+                bps
+            },
+            limite_bps: None,
+            janela: None,
+        }
+    }
+
     /// A subida que este servidor acredita ter agora.
     #[must_use]
     pub const fn estimativa(&self) -> u32 {
@@ -598,6 +649,26 @@ impl Subida {
             sonda: SondaDaSubida::nova(),
             por_conexao: std::collections::HashMap::new(),
             mediu: false,
+            espectadores: 0,
+        }
+    }
+
+    /// Uma subida que parte da medida que o arranque anterior deixou.
+    ///
+    /// Nasce com `mediu` verdadeiro, e isso é o ponto: uma medida lembrada **é**
+    /// uma medida, não a hipótese. Ela atravessa para o portão de admissão e
+    /// para o fio no primeiro segundo, sem esperar uma janela nova a confirmar
+    /// — guardar o número e depois não usá-lo seria o defeito que esta onda
+    /// inteira conserta.
+    ///
+    /// O que ela custa está escrito em `crate::persistence::subida`: a medida
+    /// pode ser de outra rede, e aqui ela governa o teto de todo mundo na sala.
+    #[must_use]
+    pub fn partindo_de(bps: u32) -> Self {
+        Self {
+            sonda: SondaDaSubida::partindo_de(bps),
+            por_conexao: std::collections::HashMap::new(),
+            mediu: true,
             espectadores: 0,
         }
     }
@@ -1007,6 +1078,68 @@ mod tests {
             eventos_de_congestionamento: eventos,
             ..leitura(bytes, 0, permitido_bps)
         }
+    }
+
+    #[test]
+    fn a_ordem_do_arranque_e_medida_declarado_hipotese() {
+        // A mesma ordem que `caminho_no_fio` já usa para o fio: *«a medida vence
+        // o declarado»*. Aqui ela decide com que número o portão de admissão
+        // nasce, e a única diferença é o fundo — no fio o fundo é zero, que
+        // quer dizer «não medi»; no arranque o fundo é a hipótese, porque o
+        // portão tem de decidir alguma coisa quando alguém aperta o botão.
+        assert_eq!(
+            caminho_do_arranque(Some(42_000_000), Some(9_000_000)),
+            42_000_000,
+            "o declarado venceu a medida"
+        );
+        assert_eq!(caminho_do_arranque(None, Some(9_000_000)), 9_000_000);
+        assert_eq!(caminho_do_arranque(None, None), CAMINHO_DO_SERVER_BPS);
+        // Zero declarado já era tratado como nada declarado; zero lembrado
+        // segue a mesma regra, pelo mesmo motivo — não é uma medida, é a falta
+        // de uma.
+        assert_eq!(caminho_do_arranque(Some(0), None), CAMINHO_DO_SERVER_BPS);
+    }
+
+    #[test]
+    fn a_sonda_que_lembra_a_medida_nao_recomeca_da_hipotese() {
+        // **O tateio acontecia em todo arranque.** A sonda começa na hipótese e
+        // sobe por evidência; sem memória, o Dogma reaprende de manhã o que
+        // mediu ontem à noite — e o portão de `d1c75bb`, que divide esse número
+        // por N, recomeça recusando a partir do sétimo espectador.
+        //
+        // Gêmeo de `seele_core::caminho::Sonda::partindo_de`, e com a mesma
+        // ressalva escrita lá: memória é de onde partir, não uma borda
+        // encontrada — `limite_bps` continua vazio, ou a histerese de ontem
+        // impediria a sonda de descobrir que o cano cresceu.
+        let sonda = SondaDaSubida::partindo_de(42_000_000);
+        assert_eq!(sonda.estimativa(), 42_000_000);
+
+        // **Grampeado na faixa que a escada admite**, nos dois sentidos:
+        // memória não autoriza começar fora dela. Um banco adulterado, ou uma
+        // constante que mudou entre versões, não pode pôr a sonda num valor que
+        // ela própria nunca alcançaria.
+        assert_eq!(
+            SondaDaSubida::partindo_de(u32::MAX).estimativa(),
+            TETO_DA_SUBIDA_BPS,
+            "uma memória absurda pôs a sonda acima do que a escada alcança"
+        );
+        assert_eq!(
+            SondaDaSubida::partindo_de(1).estimativa(),
+            PISO_DA_SUBIDA_BPS,
+            "uma memória minúscula pôs a sonda abaixo do piso que o vídeo exige"
+        );
+    }
+
+    #[test]
+    fn a_subida_que_lembra_ja_nasce_medida() {
+        // Uma medida lembrada **é** uma medida, e não a hipótese: ela tem de
+        // atravessar para o portão e para o fio no primeiro segundo, sem
+        // esperar uma janela nova a confirmar. O contrário — nascer com o número
+        // certo e mentir «não medi» até alguém encher o cano — seria guardar o
+        // número e não usá-lo, que é o defeito que esta onda inteira conserta.
+        let subida = Subida::partindo_de(42_000_000);
+        assert_eq!(subida.medida(), Some(42_000_000));
+        assert_eq!(Subida::nova().medida(), None, "a hipótese virou medida");
     }
 
     #[test]

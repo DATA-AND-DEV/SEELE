@@ -31,6 +31,7 @@ pub mod attachments;
 pub mod channels;
 pub mod messages;
 pub mod schema;
+pub mod subida;
 
 /// O banco de um cliente que hospeda, na pasta dele, com o nome de hoje.
 ///

@@ -2533,6 +2533,23 @@ async fn run_session(
                     // dele a caminho do fio. O produto media a perna certa e
                     // não a usava onde ela decide.
                     voice_rooms.subida_medida(bps).await;
+                    // **E o disco, para o arranque seguinte.**
+                    //
+                    // Sem isto a sonda reaprende de manhã o que mediu ontem, e
+                    // o portão recomeça recusando a partir do sétimo
+                    // espectador até a primeira janela ensinar de novo. Escrito
+                    // aqui e não num tique próprio porque só aqui há notícia:
+                    // `observar` devolve `Some` **quando a estimativa andou**,
+                    // que em regime é raro.
+                    //
+                    // Um erro de escrita avisa e não derruba nada: o Dogma
+                    // continua com o número na memória, e o que se perde é a
+                    // memória do próximo arranque.
+                    if let Err(erro) =
+                        crate::persistence::subida::lembrar(&*server.persistence.lock().await, bps)
+                    {
+                        tracing::warn!(%erro, bps, "não deu para guardar a subida medida");
+                    }
                 }
 
                 let rtt_ms = connection.rtt().as_secs_f32() * 1000.0;
