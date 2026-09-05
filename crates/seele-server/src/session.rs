@@ -2524,6 +2524,15 @@ async fn run_session(
                     // Mandar só para este par deixaria os outros com o número
                     // velho e a mesma sala com dois tetos diferentes.
                     let _ = server.events.send(Event::HostUplink { bps });
+                    // **E as salas, que decidem com este número.**
+                    //
+                    // O `HostUplink` acima atravessa o fio e serve a conta que
+                    // cada cliente faz. O portão que decide quem entra numa
+                    // transmissão é deste lado, e ele dividia a hipótese de
+                    // `caminho_do_server` enquanto a medida passava por cima
+                    // dele a caminho do fio. O produto media a perna certa e
+                    // não a usava onde ela decide.
+                    voice_rooms.subida_medida(bps).await;
                 }
 
                 let rtt_ms = connection.rtt().as_secs_f32() * 1000.0;

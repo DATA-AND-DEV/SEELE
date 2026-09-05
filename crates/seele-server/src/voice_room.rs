@@ -19,6 +19,8 @@
 //! routing trivially parallel." No `Mutex` appears in this module.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use seele_proto::ids::{PersonId, ScreenId, Ssrc, VoiceRoomId};
@@ -131,6 +133,15 @@ pub enum VoiceRoomCommand {
         /// O quê.
         screen: ScreenId,
     },
+    /// A subida desta máquina foi **medida**, e o número mudou.
+    ///
+    /// A sala nasce com [`crate::tela::caminho_do_server`] — o declarado, ou a
+    /// hipótese das provas — e é por esse número que ela divide N. Enquanto
+    /// isto não existia, era o **único** número que ela conhecia: a `Subida`
+    /// media o cano de verdade, mandava o resultado para cada cliente pelo
+    /// `HostUplink`, e o portão que decide quem entra continuava dividindo a
+    /// hipótese. O produto media a perna certa e não a usava onde ela decide.
+    Subida,
 }
 
 /// Why a datagram was not forwarded.
@@ -242,12 +253,21 @@ pub struct VoiceRoom {
     by_ssrc: HashMap<Ssrc, PersonId>,
     drops: DropCounts,
     forwarded: u64,
-    /// A subida que se assume deste servidor, em bits por segundo.
+    /// A subida deste servidor, **partilhada com quem a mede**.
     ///
     /// Parâmetro e não constante para que o teto do §5.1 seja testável sem
     /// depender do número que ninguém mediu — ver
     /// [`crate::tela::CAMINHO_DO_SERVER_BPS`].
-    caminho_bps: u32,
+    ///
+    /// `Arc<AtomicU32>` e não `u32` porque este número **anda**, e porque a sala
+    /// tem de ler o valor de agora em vez de receber cópias dele. Uma cópia
+    /// entregue por mensagem pode ser descartada — [`VoiceRooms::subida_medida`]
+    /// usa `try_send` para não segurar todas as salas atrás de uma atolada — e
+    /// a sala ficaria dividindo um número velho para sempre, sem ninguém saber.
+    /// É a falha que este repositório paga mais caro: o produto sabe e não
+    /// conta. [`VoiceRoomCommand::Subida`] continua existindo, para **disparar**
+    /// o reconferir; o número nunca viaja nele.
+    caminho_bps: Arc<AtomicU32>,
     /// As transmissões em curso, pela pessoa que as manda.
     ///
     /// **Pela pessoa e não pela `ScreenId`** porque toda pergunta que este
@@ -283,6 +303,16 @@ impl VoiceRoom {
     pub fn com_caminho(
         id: VoiceRoomId,
         caminho_bps: u32,
+        eventos: Option<broadcast::Sender<Event>>,
+    ) -> Self {
+        Self::com_caminho_partilhado(id, Arc::new(AtomicU32::new(caminho_bps)), eventos)
+    }
+
+    /// A mesma sala, sobre a subida que [`VoiceRooms`] mede e todas partilham.
+    #[must_use]
+    pub fn com_caminho_partilhado(
+        id: VoiceRoomId,
+        caminho_bps: Arc<AtomicU32>,
         eventos: Option<broadcast::Sender<Event>>,
     ) -> Self {
         Self {
@@ -433,6 +463,18 @@ impl VoiceRoom {
                     self.encerrar_tela(from, None);
                 }
             }
+            VoiceRoomCommand::Subida => {
+                // **O número já chegou**, pelo `Arc` que esta sala partilha com
+                // quem o mede. Este comando é só o empurrão para reconferir.
+                //
+                // **Nos dois sentidos, e o de apertar é o que não pode faltar.**
+                // A medida costuma ser maior que a hipótese, e aí isto não faz
+                // nada além de deixar o próximo espectador entrar. Quando ela é
+                // menor, é aqui que a proteção do §3.2 continua de pé: o que já
+                // está no ar deixou de caber, e o reconferir é quem sabe qual
+                // transmissão encerrar e com que motivo.
+                self.reconferir_o_teto();
+            }
         }
     }
 
@@ -474,7 +516,9 @@ impl VoiceRoom {
         if self.telas.is_empty() {
             return;
         }
-        if crate::tela::teto_do_hospedeiro(self.caminho_bps, self.copias()).is_none() {
+        if crate::tela::teto_do_hospedeiro(self.caminho_bps.load(Ordering::Relaxed), self.copias())
+            .is_none()
+        {
             // **A última a entrar é a primeira a sair.**
             //
             // Quando o cano não carrega mais todas, alguma tem de parar, e
@@ -557,7 +601,9 @@ impl VoiceRoom {
         // a sala com uma transmissão a mais por um instante — e o instante é o
         // suficiente para todas picotarem.
         let depois = self.copias() + self.members.len().saturating_sub(1);
-        if crate::tela::teto_do_hospedeiro(self.caminho_bps, depois).is_none() {
+        if crate::tela::teto_do_hospedeiro(self.caminho_bps.load(Ordering::Relaxed), depois)
+            .is_none()
+        {
             let _ = fim.try_send(FimDaTela::AlemDoQueOHospedeiroCarrega);
             return;
         }
@@ -645,7 +691,8 @@ impl VoiceRoom {
     /// encerra transmissão, e um espectador a mais não pode ser motivo para
     /// apagar a tela de quem já estava vendo.
     fn cabe_mais_uma_copia(&self) -> bool {
-        crate::tela::teto_do_hospedeiro(self.caminho_bps, self.copias() + 1).is_some()
+        crate::tela::teto_do_hospedeiro(self.caminho_bps.load(Ordering::Relaxed), self.copias() + 1)
+            .is_some()
     }
 
     /// Tira alguém de uma transmissão, sem tocar nas outras.
@@ -925,12 +972,12 @@ impl VoiceRoom {
 #[must_use]
 pub fn spawn(
     id: VoiceRoomId,
-    caminho_bps: u32,
+    caminho_bps: Arc<AtomicU32>,
     eventos: broadcast::Sender<Event>,
 ) -> mpsc::Sender<VoiceRoomCommand> {
     let (tx, mut rx) = mpsc::channel(CHANNEL_DEPTH);
     tokio::spawn(async move {
-        let mut voice_room = VoiceRoom::com_caminho(id, caminho_bps, Some(eventos));
+        let mut voice_room = VoiceRoom::com_caminho_partilhado(id, caminho_bps, Some(eventos));
         while let Some(command) = rx.recv().await {
             voice_room.handle(command);
         }
@@ -964,7 +1011,13 @@ pub struct VoiceRooms {
     /// Uma cópia só, e ela é a mesma que viaja no `HostUplink`: a sala divide
     /// este número por N e o cliente o divide de novo, e as duas contas têm de
     /// partir do mesmo lugar. Ver [`crate::tela::caminho_do_server`].
-    caminho_bps: u32,
+    ///
+    /// **Atômico porque ele anda.** Era o número do boot, entregue para sempre:
+    /// [`crate::tela::caminho_do_server`] sem `caminho_bps` declarado — e nada
+    /// neste repositório o declara — é a hipótese das provas. Uma sala nasce
+    /// quando a primeira pessoa entra nela, o que costuma ser **depois** de a
+    /// `Subida` já ter medido; sem isto, ela nasceria na hipótese de novo.
+    caminho_bps: Arc<AtomicU32>,
     eventos: broadcast::Sender<Event>,
 }
 
@@ -978,8 +1031,25 @@ impl VoiceRooms {
     pub fn new(caminho_bps: u32, eventos: broadcast::Sender<Event>) -> Self {
         Self {
             tasks: tokio::sync::Mutex::new(HashMap::new()),
-            caminho_bps,
+            caminho_bps: Arc::new(AtomicU32::new(caminho_bps)),
             eventos,
+        }
+    }
+
+    /// A subida desta máquina foi **medida**, e o número mudou.
+    ///
+    /// Duas coisas, e as duas são necessárias: guarda o número para as salas que
+    /// ainda vão nascer, e conta às que já estão vivas. Só a primeira deixaria
+    /// a conversa de agora dividindo a hipótese; só a segunda deixaria a próxima
+    /// sala nascer nela.
+    pub async fn subida_medida(&self, bps: u32) {
+        self.caminho_bps.store(bps, Ordering::Relaxed);
+        // Sem `await` dentro do laço com a trava na mão: `try_send` e não
+        // `send`. Uma sala com a fila cheia está atolada de comando, e a
+        // próxima medida vem daqui a um segundo — esperar por ela seguraria
+        // todas as outras salas atrás de uma.
+        for sala in self.tasks.lock().await.values() {
+            let _ = sala.try_send(VoiceRoomCommand::Subida);
         }
     }
 
@@ -989,7 +1059,7 @@ impl VoiceRooms {
             .lock()
             .await
             .entry(id)
-            .or_insert_with(|| spawn(id, self.caminho_bps, self.eventos.clone()))
+            .or_insert_with(|| spawn(id, Arc::clone(&self.caminho_bps), self.eventos.clone()))
             .clone()
     }
 
@@ -1025,6 +1095,12 @@ mod tests {
     fn salas() -> VoiceRooms {
         let (eventos, _) = broadcast::channel(64);
         VoiceRooms::new(crate::tela::CAMINHO_DO_SERVER_BPS, eventos)
+    }
+
+    /// Um conjunto de salas sobre um cano escolhido, e a ponta que o escuta.
+    fn salas_com(caminho_bps: u32) -> (VoiceRooms, broadcast::Receiver<Event>) {
+        let (eventos, ouvinte) = broadcast::channel(64);
+        (VoiceRooms::new(caminho_bps, eventos), ouvinte)
     }
 
     fn datagram(ssrc: u32, seq: u16) -> Vec<u8> {
@@ -1364,6 +1440,59 @@ mod tests {
             bytes: datagram(200, 1),
         });
         assert_eq!(voice_room.drops().not_a_member, 1);
+    }
+
+    #[tokio::test]
+    async fn a_sala_que_nasce_depois_da_medida_nasce_com_ela() {
+        // **`VoiceRooms` guardava o número do boot e o entregava para sempre.**
+        //
+        // Uma sala nasce quando a primeira pessoa entra nela, o que pode ser
+        // horas depois de o servidor subir. Avisar só as salas vivas deixaria a
+        // próxima nascer na hipótese de novo — e numa conversa a sala costuma
+        // nascer depois da medida, não antes.
+        let (salas, mut ouvinte) = salas_com(600_000);
+        salas.subida_medida(2_000_000).await;
+
+        let sala = salas.of(VoiceRoomId(1)).await;
+        // As pontas receptoras ficam vivas: quem não tem por onde ser convidado
+        // não entra na conta de cópias, e o teste mediria a própria negligência.
+        let mut pontas = Vec::new();
+        for pessoa in 1..=3_u64 {
+            let (outbound, ouve) = mpsc::channel(8);
+            let (tela, convites) = mpsc::channel(crate::tela::ABERTURAS_DEPTH);
+            pontas.push((ouve, convites));
+            sala.send(VoiceRoomCommand::Join {
+                person: PersonId(pessoa),
+                ssrc: Ssrc(pessoa as u32 * 10),
+                may_speak: true,
+                outbound,
+                tela,
+            })
+            .await
+            .unwrap();
+        }
+        let (fim, mut fim_rx) = mpsc::channel(1);
+        sala.send(VoiceRoomCommand::TelaAbriu {
+            from: PersonId(1),
+            screen: ScreenId(7),
+            abertura: abertura(7),
+            fim,
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Em 600 kbps, duas cópias dariam 180 kbps cada — abaixo do piso — e a
+        // transmissão nem começaria. Em 2 Mbps ela começa e anuncia as duas.
+        assert!(
+            fim_rx.try_recv().is_err(),
+            "a sala nasceu com a hipótese e recusou a transmissão"
+        );
+        assert_eq!(
+            contagens(&mut ouvinte),
+            vec![2],
+            "a sala nasceu com a hipótese em vez da medida"
+        );
     }
 
     #[tokio::test]
@@ -1820,6 +1949,89 @@ mod tests {
             "quem já assistia foi cortado por causa de quem chegou"
         );
         assert_eq!(voice_room.drops.espectador_nao_coube, 1);
+    }
+
+    #[test]
+    fn a_subida_medida_abre_a_porta_que_a_hipotese_tinha_fechado() {
+        // **O portão dividia um número que ninguém tinha medido.**
+        //
+        // A sala nasce com `caminho_do_server`, que sem `caminho_bps` declarado
+        // — e nada neste repositório o declara — é a hipótese de 2 Mbps das
+        // provas. A `Subida` mede o cano de verdade a cada segundo e manda o
+        // resultado para cada cliente pelo `HostUplink`; o portão que decide
+        // quem entra continuava dividindo a hipótese. O produto media a perna
+        // certa e não a usava onde ela decide.
+        //
+        // O gêmeo de cima prova a recusa. Este prova que ela **desfaz** quando
+        // a medida chega, que é a metade que faltava.
+        //
+        // **E sem comando nenhum.** A sala lê o número que `VoiceRooms` mede,
+        // e não uma cópia que alguém lhe entrega: uma cópia entregue por
+        // mensagem pode ser descartada — `try_send` numa fila cheia —, e a sala
+        // ficaria dividindo um número velho para sempre, sem ninguém saber. O
+        // comando existe para **disparar o reconferir**, nunca para carregar o
+        // número.
+        let cano = Arc::new(AtomicU32::new(600_000));
+        let mut voice_room =
+            VoiceRoom::com_caminho_partilhado(VoiceRoomId(1), Arc::clone(&cano), None);
+        let _alice = espectador(&mut voice_room, 1);
+        let _bob = espectador(&mut voice_room, 2);
+        let _fim = compartilhar(&mut voice_room, 1, 7);
+
+        // 360 kbps para dois espectadores seriam 180, abaixo do piso de 200.
+        let _carol = espectador(&mut voice_room, 3);
+        assert_eq!(
+            voice_room.drops.espectador_nao_coube, 1,
+            "carol deveria ter ficado de fora pela hipótese"
+        );
+
+        // A medida chega: o cano é maior do que o número com que a sala nasceu.
+        // 1,2 Mbps repartidos carregam seis cópias, e a segunda é uma delas.
+        cano.store(2_000_000, Ordering::Relaxed);
+
+        let _dave = espectador(&mut voice_room, 4);
+        assert_eq!(
+            voice_room.drops.espectador_nao_coube, 1,
+            "a medida chegou e o portão continuou dividindo a hipótese"
+        );
+        assert_eq!(
+            voice_room.copias(),
+            2,
+            "a cópia de dave não foi aberta depois da medida"
+        );
+    }
+
+    #[test]
+    fn a_subida_medida_que_encolhe_aperta_o_teto_e_nao_so_o_afrouxa() {
+        // **A metade que impede esta mudança de ser um afrouxamento.**
+        //
+        // Ler a medida em vez da hipótese é útil porque a hipótese quase sempre
+        // erra para baixo. Mas ela também erra para cima — numa casa com menos
+        // de 2 Mbps de subida —, e uma medida que só abre portas trocaria a
+        // proteção do §3.2 por um número maior. O portão tem de andar nos dois
+        // sentidos, ou não é portão.
+        let cano = Arc::new(AtomicU32::new(2_000_000));
+        let mut voice_room =
+            VoiceRoom::com_caminho_partilhado(VoiceRoomId(1), Arc::clone(&cano), None);
+        let _alice = espectador(&mut voice_room, 1);
+        let _bob = espectador(&mut voice_room, 2);
+        let _carol = espectador(&mut voice_room, 3);
+        let _dave = espectador(&mut voice_room, 4);
+        let mut fim = compartilhar(&mut voice_room, 1, 7);
+        assert_eq!(voice_room.copias(), 3, "as três cópias cabiam em 2 Mbps");
+        assert!(fim.try_recv().is_err());
+
+        // O cano medido é bem menor do que a hipótese: 360 kbps repartidos por
+        // três seriam 120, abaixo do piso de 200. O número chega pelo `Arc`; o
+        // comando é só o empurrão para reconferir o que já está no ar.
+        cano.store(600_000, Ordering::Relaxed);
+        voice_room.handle(VoiceRoomCommand::Subida);
+
+        assert_eq!(
+            fim.try_recv().ok(),
+            Some(crate::tela::FimDaTela::AlemDoQueOHospedeiroCarrega),
+            "a medida encolheu e a transmissão continuou subindo o que o cano não tem"
+        );
     }
 
     #[test]
