@@ -364,9 +364,13 @@ GitHub.
 - **Remoção existe**, e uma remoção precisa alcançar quem já baixou. É a mesma
   peça da lista de revogação de versões, e as duas devem ser a mesma coisa.
 
-**O que continua verdade depois de tudo isso: quem serve os bytes vê quem os
-pediu.** Minimizado, espelhável — e verdade. É o mesmo saldo do degrau 4 do ADR
-0022, e a mesma honestidade.
+**O que continua verdade depois de tudo isso, e ficou mais forte e não mais
+fraco: quem serve os bytes vê quem os pediu.** O ADR 0029 amortecia isso com
+duas palavras — espelhável e opcional — e as duas caíram. Endereço fixo e sem
+cache no servidor significa que **`mods.seele.app.br` aprende quem entra em qual
+servidor com MOD, e quando**. Não o conteúdo, não a conversa, não com quem a
+pessoa fala. Mas é o degrau 4 do ADR 0022 sem as duas reduções que aquela página
+comprou, e isso se diz em voz alta antes de construir, e não depois.
 
 **A revisão não escala, e isso é um fato e não um risco.** Cada versão de cada
 MOD passa por olho humano nosso. Um catálogo que cresce é um catálogo que

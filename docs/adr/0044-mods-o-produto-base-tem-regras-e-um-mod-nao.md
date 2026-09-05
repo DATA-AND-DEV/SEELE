@@ -346,6 +346,11 @@ qualquer, no vigésimo MOD da semana.
 que não é fácil é código limpo que faz uma coisa a mais, discreta, na décima
 função.
 
+**O indexador aprende quem entra em qual servidor com MOD, e quando.** O ADR
+0029 amortecia isto com duas palavras — espelhável e opcional — e as duas caíram
+com o endereço fixo. Não é conteúdo e não é conversa; é o degrau 4 do ADR 0022
+sem as reduções que aquela página tinha comprado.
+
 **A rede local sem internet não funciona quando há MOD.** Um produto cujo
 argumento é «o servidor é seu» passa a ter um caso em que entrar numa sala depende
 de `mods.seele.app.br` estar no ar. Foi apresentado duas vezes, com a alternativa
