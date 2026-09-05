@@ -118,12 +118,34 @@ existe. Existe uma defesa humana, e ela está na seção do indexador.
 erro de digitação chega em execução, na máquina de quem hospeda. A contrapartida
 obrigatória é a seção «Falha isolada».
 
-**Qual interpretador embutir é medida, não intuição.** É a única peça deste ADR
-que depende de um número que ninguém tem — tamanho de binário, memória por
-contexto, custo de chamada, contra 1 vCPU / 512 MB. Um spike mede antes de
-qualquer linha. A intuição corrente de que «WASM é mais leve que um interpretador
-JS» provavelmente é falsa aqui, e é exatamente o gênero de hipótese confiante que
-o `CLAUDE.md` deste repositório manda medir.
+**Qual interpretador embutir foi medido, e o número está em
+`spikes/mod-em-js/`.** Era a única peça deste ADR que dependia de um número que
+ninguém tinha — tamanho de binário, memória por contexto, custo de chamada,
+contra 1 vCPU / 512 MB. Duas candidatas, QuickJS pelo `rquickjs` e Boa em puro
+Rust:
+
+| | QuickJS | Boa |
+|---|---|---|
+| delta de binário | **1 098 KiB** | 12 088 KiB |
+| custo por chamada | **39 ns** | 73 ns |
+| RSS com 50 contextos | **5,9 MB** | 24,8 MB |
+| licença | MIT | Unlicense OR MIT |
+
+**QuickJS, e não por pouco:** 11× menor, ~2× mais rápido, ~4× menos memória. E a
+intuição que eu trouxe para esta página estava errada — supunha-se que um runtime
+WASM seria a opção leve e o interpretador JS o peso; é o contrário, e 1 MiB cabe
+folgado nos 512 MB. `CLAUDE.md`: *«Três vezes uma hipótese confiante custou mais
+que a medida teria custado.»*
+
+Os dois tetos que esta página promete **existem e foram conferidos**:
+`set_memory_limit` corta um MOD que aloca sem parar, `set_interrupt_handler`
+corta um `while (true) {}` — e, nos dois casos, **o contexto sobrevive**, que é a
+metade que a seção «Falha isolada» precisa.
+
+**O custo, dito:** `rquickjs-sys` compila fonte em C, então o build passa a
+exigir um compilador de C nos três alvos. Ele já existe nos três; a exigência é
+nova para um projeto que até aqui compilava só com o Rust, e 11 MiB a mais em
+cada instalador é caro demais para evitá-la.
 
 ### A API é uma fachada congelada, não uma projeção do protocolo
 

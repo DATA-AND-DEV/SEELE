@@ -1,0 +1,18 @@
+[package]
+name = "spike-mod-em-js"
+description = "Prova de desenho: que interpretador JS cabe num SFU de 1 vCPU / 512 MB? DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Fora do workspace de propósito, como os spikes anteriores. Existe para
+# responder **uma** pergunta — qual motor o ADR 0044 embute no servidor — e
+# morre com a resposta. Nada pode depender dele.
+[workspace]
+
+[dependencies]
+rquickjs = "0.12.2"
+boa_engine = "0.22.0"
+
+[profile.release]
+opt-level = 3
