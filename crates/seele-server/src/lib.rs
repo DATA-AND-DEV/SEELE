@@ -367,6 +367,26 @@ impl Daemon {
             }
         };
 
+        // **Antes do mutex**, pela mesma razão que os anexos acima: o banco
+        // ainda é nosso sozinho aqui, e o número tem de estar de pé antes da
+        // primeira conexão. Um erro de leitura não impede o Dogma de subir —
+        // sem memória ele cai na ordem de sempre, que é o comportamento de
+        // antes desta memória existir.
+        let subida_lembrada = crate::persistence::subida::lembrada(&persistence)
+            .inspect_err(|erro| {
+                tracing::warn!(%erro, "não deu para ler a subida medida do arranque anterior");
+            })
+            .ok()
+            .flatten();
+        let caminho_do_arranque = tela::caminho_do_arranque(subida_lembrada, config.caminho_bps);
+        match subida_lembrada {
+            Some(bps) => tracing::info!(bps, "a sonda começa da subida medida da última vez"),
+            None => tracing::info!(
+                bps = caminho_do_arranque,
+                "nenhuma subida medida guardada; o arranque usa o declarado ou a hipótese"
+            ),
+        }
+
         let persistence = Arc::new(tokio::sync::Mutex::new(persistence));
 
         let (events, _) = tokio::sync::broadcast::channel(1024);
@@ -378,7 +398,10 @@ impl Daemon {
             slots: Arc::new(tokio::sync::Mutex::new(server::Slots::default())),
             occupancy: Arc::new(tokio::sync::Mutex::new(server::Occupancy::default())),
             presentes: Arc::new(tokio::sync::Mutex::new(server::Presentes::default())),
-            subida: Arc::new(tokio::sync::Mutex::new(crate::tela::Subida::nova())),
+            subida: Arc::new(tokio::sync::Mutex::new(match subida_lembrada {
+                Some(bps) => crate::tela::Subida::partindo_de(bps),
+                None => crate::tela::Subida::nova(),
+            })),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
             atrasos: Arc::new(server::Atrasos::default()),
             telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),
@@ -405,7 +428,7 @@ impl Daemon {
         // esse único remetente: correto enquanto um servidor tinha uma sala,
         // silenciosamente errado no instante em que passou a poder ter duas.
         let voice_rooms = Arc::new(voice_room::VoiceRooms::new(
-            tela::caminho_do_server(server.caminho_bps),
+            caminho_do_arranque,
             server.events.clone(),
         ));
 
