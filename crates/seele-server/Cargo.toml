@@ -55,6 +55,22 @@ netdev = { version = "0.46.1", default-features = false, features = ["gateway"] 
 # três alvos — Xcode CLT, MSVC nos runners de Windows, `cc` no Linux — e é a
 # primeira vez que o Rust sozinho não basta.
 rquickjs = "0.12.2"
+# A rede que um MOD alcança (ADR 0044, bloco `world`). `blocking`, porque quem
+# chama é a thread dos MODs, que de propósito não é do Tokio.
+#
+# Custo medido contra o `Cargo.lock`: **0 crates novas** — o `seele-app` já
+# traz esta versão inteira pelo atualizador do ADR 0026, e `rustls` e `ring`
+# já estavam aqui pelo quinn. O que entra é uma aresta, não uma árvore.
+#
+# `default-features = false` mantém fora o `native-tls`: uma segunda pilha de
+# TLS num binário que já tem a do quinn seria duas de tudo.
+reqwest = { version = "0.13", default-features = false, features = [
+    "blocking",
+    # Mesma feature que o `seele-app` já usa, e pelo mesmo motivo: o provedor
+    # de criptografia é escolhido pelo processo, e duas escolhas no mesmo
+    # binário seriam duas pilhas de TLS.
+    "rustls-no-provider",
+] }
 seele-proto = { path = "../seele-proto" }
 quinn = "0.11.11"
 rand = "0.10.2"

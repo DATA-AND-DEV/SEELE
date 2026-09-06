@@ -29,6 +29,7 @@
 
 pub mod arquivos;
 pub mod despacho;
+pub mod mundo;
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -211,6 +212,25 @@ impl Anfitriao {
                 )?;
 
                 ctx.globals().set("arquivos", arquivos_js)?;
+
+                // O bloco `world` do `api/v1.json`: rede, relógio e registro.
+                // É onde a liberdade total do ADR 0044 mora, e é o que a tela
+                // de aceite tem de dizer em voz alta.
+                let mundo_js = rquickjs::Object::new(ctx.clone())?;
+                mundo_js.set(
+                    "buscar",
+                    Function::new(ctx.clone(), |url: String| mundo::buscar(&url))?,
+                )?;
+                mundo_js.set("agora", Function::new(ctx.clone(), mundo::agora)?)?;
+                let quem = id.to_owned();
+                mundo_js.set(
+                    "registrar",
+                    Function::new(ctx.clone(), move |linha: String| {
+                        mundo::registrar(&quem, &linha);
+                    })?,
+                )?;
+                ctx.globals().set("mundo", mundo_js)?;
+
                 ctx.eval::<(), _>(fonte)
             })
             .map_err(|_| Falha::NaoCarregou)?;
@@ -553,6 +573,59 @@ mod tests {
             std::fs::read_to_string(raiz.join("identity.key")).expect("ler"),
             "SEGREDO"
         );
+    }
+
+    /// O `mundo` chega ao MOD, e o relógio dele é o nosso.
+    #[test]
+    fn um_mod_le_o_relogio_e_escreve_no_log() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/relogio",
+                "globalThis.aoAcontecer = () => { \
+                   mundo.registrar('oi do MOD'); \
+                   dados.quando = String(mundo.agora()); \
+                 };",
+                &pasta_de_teste("mundo"),
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::new();
+        anfitriao
+            .chamar("seele/relogio", "PersonJoined", "{}", &mut quintal)
+            .expect("chamar");
+
+        let quando: i64 = quintal
+            .get("quando")
+            .and_then(|q| q.parse().ok())
+            .unwrap_or(0);
+        assert!(
+            quando > 1_700_000_000,
+            "o MOD leu um relógio de antes de 2023"
+        );
+    }
+
+    /// E um MOD **não** alcança `file://` pela rede, que seria fazer pelo
+    /// `mundo.buscar` exatamente o que a pasta do MOD impede no disco.
+    #[test]
+    fn um_mod_nao_le_arquivo_pela_rede() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/curioso",
+                "globalThis.aoAcontecer = () => { \
+                   dados.leu = mundo.buscar('file:///etc/passwd') ?? 'nada'; \
+                 };",
+                &pasta_de_teste("rede"),
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::new();
+        anfitriao
+            .chamar("seele/curioso", "PersonJoined", "{}", &mut quintal)
+            .expect("chamar");
+
+        assert_eq!(quintal.get("leu").map(String::as_str), Some("nada"));
     }
 
     /// O teto de memória é **aplicado**, e não só escrito.
