@@ -350,6 +350,50 @@ impl Anfitriao {
     }
 }
 
+/// Reads the server halves of the MODs this server has on.
+///
+/// Returns `(id, source, data folder)` per MOD, skipping the ones with no
+/// server half — a MOD that is only appearance has nothing to run here, and
+/// that is not a failure.
+///
+/// A MOD whose manifest is unreadable is skipped **and named** in the returned
+/// list of complaints. Skipping in silence is the failure this repository pays
+/// for most: whoever enabled it gets no answer.
+#[must_use]
+pub fn carregar_do_disco(
+    pasta_dos_mods: &std::path::Path,
+    ids: &[String],
+) -> (Vec<(String, String, std::path::PathBuf)>, Vec<String>) {
+    let mut prontos = Vec::new();
+    let mut queixas = Vec::new();
+
+    for id in ids {
+        let dir = pasta_dos_mods.join(id);
+        let Ok(texto) = std::fs::read_to_string(dir.join("mod.json")) else {
+            queixas.push(format!("{id}: sem mod.json em {}", dir.display()));
+            continue;
+        };
+        let manifesto = match seele_proto::mods::read_manifest(&texto) {
+            Ok(manifesto) => manifesto,
+            Err(recusa) => {
+                queixas.push(format!("{id}: {recusa}"));
+                continue;
+            }
+        };
+        let Some(metade) = manifesto.server else {
+            continue;
+        };
+        let Ok(fonte) = std::fs::read_to_string(dir.join(&metade)) else {
+            queixas.push(format!(
+                "{id}: o manifesto aponta para {metade}, que não abre"
+            ));
+            continue;
+        };
+        prontos.push((id.clone(), fonte, dir.join("dados")));
+    }
+    (prontos, queixas)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

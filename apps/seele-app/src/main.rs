@@ -617,6 +617,9 @@ async fn hospedar(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
         "Casa",
+        // ADR 0044: os MODs deste servidor moram ao lado do banco dele, na
+        // pasta do ADR 0017 que esta janela já conhece.
+        Some(std::path::Path::new(&config_dir(&app)).join("mods")),
     )
     .await
     .map_err(|erro| classificar(&erro))?;

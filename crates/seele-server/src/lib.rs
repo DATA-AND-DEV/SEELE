@@ -100,6 +100,12 @@ pub const PUBLIC_KEY_LEN: usize = seele_proto::control::PUBLIC_KEY_LEN;
 /// configuring.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
+    /// Onde os MODs deste servidor moram em disco, se houver.
+    ///
+    /// `None` desliga MODs inteiramente, e é o padrão: um servidor que nunca
+    /// ouviu falar de MOD não deve ganhar uma thread de interpretador por
+    /// existir. ADR 0044.
+    pub mods_dir: Option<std::path::PathBuf>,
     /// What this server is called.
     pub name: String,
     /// Where to listen. UDP; QUIC needs no second port.
@@ -172,6 +178,9 @@ impl Default for ServerConfig {
             voice_room_limit: 15,
             observers: Vec::new(),
             database: crate::persistence::Location::Memory,
+            // Sem MODs por padrão: uma thread de interpretador é caro demais
+            // para um servidor que nunca ouviu falar deles. ADR 0044.
+            mods_dir: None,
             anexos: None,
             caminho_bps: None,
         }
@@ -409,6 +418,39 @@ impl Daemon {
             anexos,
             caminho_bps: config.caminho_bps,
         });
+
+        // Os MODs deste servidor, se houver pasta. ADR 0044.
+        //
+        // Aqui e não no `Daemon`: é o servidor montado que tem banco e
+        // barramento, que são as duas coisas de que o despachante precisa. E
+        // fica **depois** do `Server` existir, porque um MOD que reagisse a um
+        // evento antes de haver sala reagiria a uma sala que não existe.
+        if let Some(pasta_dos_mods) = config.mods_dir.clone() {
+            let ligados = {
+                let banco = server.persistence.lock().await;
+                crate::persistence::mods::enabled(&banco).unwrap_or_default()
+            };
+            let ids: Vec<String> = ligados.into_iter().map(|ligado| ligado.id).collect();
+
+            if !ids.is_empty() {
+                let (fontes, queixas) = crate::mods::carregar_do_disco(&pasta_dos_mods, &ids);
+                for queixa in queixas {
+                    // Um MOD habilitado que não abre é dito em voz alta. O
+                    // silêncio aqui seria quem hospeda perguntando dias depois
+                    // por que a sala não faz o que ele ligou.
+                    tracing::error!("MOD habilitado e não carregado — {queixa}");
+                }
+                let (despachante, recusados) = crate::mods::despacho::Despachante::iniciar(fontes);
+                for (id, falha) in recusados {
+                    tracing::error!(mod_id = %id, %falha, "MOD recusado ao subir; a sala sobe sem ele");
+                }
+                tokio::spawn(crate::mods::despacho::acompanhar(
+                    server.events.subscribe(),
+                    Arc::clone(&server.persistence),
+                    despachante,
+                ));
+            }
+        }
 
         // Held seats have to be released even if nobody reconnects, or a server
         // slowly fills with places kept for people who left for good.

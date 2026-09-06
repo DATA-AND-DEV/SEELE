@@ -73,9 +73,17 @@ impl Hospedagem {
     /// # Errors
     ///
     /// Falha se a porta já estiver em uso ou se o banco não abrir.
-    pub async fn iniciar(porta: u16, banco: Location, nome: &str) -> Result<Self> {
+    pub async fn iniciar(
+        porta: u16,
+        banco: Location,
+        nome: &str,
+        pasta_dos_mods: Option<std::path::PathBuf>,
+    ) -> Result<Self> {
         let config = ServerConfig {
             name: nome.to_owned(),
+            // ADR 0044. `None` desliga MODs; quem hospeda pelo app passa a
+            // pasta que ele já conhece, e o `seeled` a computa por si.
+            mods_dir: pasta_dos_mods,
             listen: SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)),
             database: banco,
             ..ServerConfig::default()
@@ -305,7 +313,7 @@ mod tests {
 
     #[tokio::test]
     async fn um_server_hospedado_aceita_conexao() {
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
             .expect("subir");
 
@@ -321,7 +329,7 @@ mod tests {
     async fn escuta_em_todas_as_interfaces_e_nao_so_em_localhost() {
         // Um servidor hospedado que só aceitasse localhost serviria para falar
         // sozinho, que é o oposto do motivo de existir.
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
             .expect("subir");
         assert!(hospedagem.endereco().ip().is_unspecified());
@@ -330,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn o_endereco_para_os_amigos_nao_e_o_de_escuta() {
         // `0.0.0.0` é onde se escuta, não um lugar aonde alguém possa ir.
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
             .expect("subir");
 
@@ -347,7 +355,7 @@ mod tests {
     async fn o_convite_carrega_a_impressao_digital_desta_instancia() {
         // Sem ela o primeiro contato volta a ser cego, e o convite deixa de ser
         // a coisa que torna o TOFU verificável.
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
             .expect("subir");
 
@@ -369,7 +377,7 @@ mod tests {
         // levava só o endereço do degrau mais alto, e quem estava na mesma casa
         // deixou de conseguir entrar. Agora o endereço da rede local está
         // sempre lá — e é o primeiro, porque é o caso comum.
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
             .expect("subir");
         let convite = hospedagem.convite();
@@ -408,7 +416,7 @@ mod tests {
         // Sem degrau 4 nenhum: é o servidor de antes desta mudança, e é a régua.
         std::env::set_var(crate::alcance::encontro::VARIAVEL, "nao");
         let relogio = std::time::Instant::now();
-        let sem = Hospedagem::iniciar(0, Location::Memory, "Casa")
+        let sem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
             .expect("subir sem ponto de encontro");
         let sem_encontro = relogio.elapsed();
@@ -419,7 +427,7 @@ mod tests {
         // Com um ponto de encontro que não responde nunca.
         std::env::set_var(crate::alcance::encontro::VARIAVEL, BURACO_NEGRO);
         let relogio = std::time::Instant::now();
-        let com = Hospedagem::iniciar(0, Location::Memory, "Casa")
+        let com = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
             .expect("hospedar falhou porque o ponto de encontro está fora do ar");
         let com_encontro = relogio.elapsed();
@@ -468,13 +476,13 @@ mod tests {
     async fn encerrar_libera_a_porta_para_hospedar_de_novo() {
         // Fechar uma conversa e abrir outra é o caso normal, e sem esperar o
         // endpoint terminar isso falha com "endereço já em uso".
-        let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa")
+        let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
             .expect("subir");
         let porta = primeira.endereco().port();
         primeira.encerrar().await;
 
-        let segunda = Hospedagem::iniciar(porta, Location::Memory, "Casa").await;
+        let segunda = Hospedagem::iniciar(porta, Location::Memory, "Casa", None).await;
         assert!(
             segunda.is_ok(),
             "a porta continuou presa: {:?}",
