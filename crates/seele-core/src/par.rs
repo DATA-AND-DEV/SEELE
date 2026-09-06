@@ -104,35 +104,45 @@ pub fn passar_a_atender(ponta: &quinn::Endpoint, identidade: Identidade) -> Resu
     Ok(())
 }
 
+/// Onde o verificador deixa o [`ErroDePar`] que o `rustls` não sabe carregar.
+///
+/// **É o que salva a distinção entre «ninguém respondeu» e «alguém respondeu
+/// no lugar dele».** O `rustls` só aceita de volta um `rustls::Error`, e o
+/// nosso motivo tipado teria de virar `Error::General(String)` no caminho —
+/// depois disso, quem disca só teria texto de mensagem para comparar. Esta
+/// vaga é uma segunda saída para o erro de verdade: o verificador o deixa aqui
+/// antes de responder ao `rustls`, e [`ligar`] o recolhe quando a conexão
+/// falha. Uma vaga por tentativa, criada em [`config_de_cliente`], então não
+/// há duas discagens a disputá-la.
+pub(crate) type Relato = std::sync::Arc<std::sync::Mutex<Option<ErroDePar>>>;
+
 /// Aceita **um** certificado, o que o servidor apresentou, e nenhum outro.
 ///
 /// Espelho do `TofuVerifier` de `crate::tofu`, com a diferença que é o assunto
 /// todo: aquele **aprende** na primeira vez e guarda; este não aprende nada e
 /// não guarda nada. A impressão digital chega pelo servidor a cada
 /// apresentação, então não há primeira vez a confiar.
-///
-/// Fora de teste, ninguém ainda constrói um — quem disca é a Task 4 desta
-/// mesma leva, por [`config_de_cliente`], e ela ainda não existe nesta tarefa.
-/// A alternativa a este `allow` seria adiantar aquela tarefa aqui.
 #[derive(Debug)]
-#[allow(
-    dead_code,
-    reason = "chamado por config_de_cliente, que a Task 4 ainda vai discar"
-)]
 pub(crate) struct ConfereImpressao {
     esperada: String,
     provedor: std::sync::Arc<rustls::crypto::CryptoProvider>,
+    relato: Relato,
 }
 
-#[allow(
-    dead_code,
-    reason = "chamado por config_de_cliente, que a Task 4 ainda vai discar"
-)]
 impl ConfereImpressao {
+    /// Um verificador que só aceita esta impressão digital.
+    ///
+    /// A impressão é dada, e não lida do certificado nem do nome TLS, porque
+    /// quem a apresenta é o servidor: o par não tem como vouchear por si
+    /// mesmo. O nome TLS aqui é só um rótulo — este verificador nunca o
+    /// confere —, e é a mesma razão pela qual `TofuVerifier::new` recebe a
+    /// chave de pino em vez de a deduzir.
+    #[must_use]
     pub(crate) fn nova(esperada: String) -> Self {
         Self {
             esperada,
             provedor: std::sync::Arc::new(rustls::crypto::ring::default_provider()),
+            relato: Relato::default(),
         }
     }
 
@@ -162,7 +172,15 @@ impl ServerCertVerifier for ConfereImpressao {
     ) -> Result<ServerCertVerified, rustls::Error> {
         self.confere(end_entity)
             .map(|()| ServerCertVerified::assertion())
-            .map_err(|erro| rustls::Error::General(erro.to_string()))
+            .map_err(|erro| {
+                // O motivo tipado sai por aqui **antes** de ser achatado em
+                // texto; ver [`Relato`]. Se a vaga estiver envenenada, quem
+                // discou cai em `NaoAlcancou`, que é pior mas não é errado.
+                if let Ok(mut vaga) = self.relato.lock() {
+                    *vaga = Some(erro.clone());
+                }
+                rustls::Error::General(erro.to_string())
+            })
     }
 
     fn verify_tls12_signature(
@@ -200,27 +218,155 @@ impl ServerCertVerifier for ConfereImpressao {
     }
 }
 
-/// O `ClientConfig` com que se disca para um par.
+/// O `ClientConfig` com que se disca para um par, e a vaga do motivo.
+///
+/// Devolve as duas coisas porque a configuração sozinha não basta: quando o
+/// aperto de mão falha, o `quinn` só sabe dizer que falhou, e o motivo tipado
+/// está na [`Relato`] que o verificador desta configuração — e só ele — enche.
+/// Separá-las obrigaria [`ligar`] a adivinhar qual vaga é de qual discagem.
 ///
 /// # Errors
 ///
 /// Falha se o `rustls` recusar a configuração.
-///
-/// Ninguém chama isto ainda: quem disca para um par é a Task 4 desta mesma
-/// leva, e ela entra num commit posterior.
-#[allow(
-    dead_code,
-    reason = "a Task 4 desta mesma leva disca com isto; ainda não integrada"
-)]
-pub(crate) fn config_de_cliente(esperada: String) -> Result<quinn::ClientConfig, ErroDePar> {
+pub(crate) fn config_de_cliente(
+    esperada: String,
+) -> Result<(quinn::ClientConfig, Relato), ErroDePar> {
+    let confere = ConfereImpressao::nova(esperada);
+    let relato = std::sync::Arc::clone(&confere.relato);
     let mut tls = rustls::ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(std::sync::Arc::new(ConfereImpressao::nova(esperada)))
+        .with_custom_certificate_verifier(std::sync::Arc::new(confere))
         .with_no_client_auth();
     tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
     let quic = quinn::crypto::rustls::QuicClientConfig::try_from(tls)
         .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
-    Ok(quinn::ClientConfig::new(std::sync::Arc::new(quic)))
+    Ok((quinn::ClientConfig::new(std::sync::Arc::new(quic)), relato))
+}
+
+/// Como a ligação com um par foi conseguida.
+///
+/// **É metade da razão de o subprojeto A existir.** Toda a aritmética da malha
+/// supõe que dois clientes domésticos se alcançam, e ninguém mediu isso. Se o
+/// furo falhar em boa parte dos pares, a árvore do subprojeto B não pode supor
+/// que qualquer par se alcança — e vira «árvore entre quem se alcança, estrela
+/// para o resto», que é um desenho bem diferente.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComoChegou {
+    /// Mesma rede: nenhum furo foi necessário.
+    Local,
+    /// Endereço público: o furo deu certo.
+    Furo,
+}
+
+/// Um par ligado, e o que a ligação ensinou.
+#[derive(Debug)]
+pub struct ParLigado {
+    /// A conexão viva.
+    pub conexao: quinn::Connection,
+    /// Como ela foi conseguida.
+    pub como: ComoChegou,
+    /// O ida e volta que o `quinn` está medindo nela. É o custo de um salto.
+    pub ida_e_volta: std::time::Duration,
+}
+
+/// Disca para um par e devolve a primeira conexão que fechar.
+///
+/// Todos os endereços em paralelo, como o ADR 0037 faz para o servidor: uma
+/// lista tentada em série multiplica o pior caso pelo número de candidatos, e o
+/// pior caso é justamente o endereço que não responde.
+///
+/// **Só disca.** Quem atende do outro lado é o laço de [`quinn::Endpoint::accept`]
+/// de quem chamou [`passar_a_atender`] — o `quinn` enfileira a tentativa que
+/// chega e não responde nada até alguém a aceitar. As duas coisas juntas é que
+/// são o furo: a discagem abre o mapeamento de NAT desta ponta, e o atendimento
+/// deixa entrar a discagem que vem pelo mapeamento aberto do outro lado.
+///
+/// # Errors
+///
+/// [`ErroDePar::ImpressaoNaoBate`] quando alguém respondeu e não era quem o
+/// servidor apresentou; [`ErroDePar::NaoAlcancou`] quando ninguém respondeu no
+/// prazo.
+pub async fn ligar(
+    ponta: &quinn::Endpoint,
+    enderecos: &[std::net::SocketAddr],
+    impressao_esperada: String,
+    prazo: std::time::Duration,
+) -> Result<ParLigado, ErroDePar> {
+    let mut tentativas = tokio::task::JoinSet::new();
+    for endereco in enderecos {
+        let (config, relato) = config_de_cliente(impressao_esperada.clone())?;
+        let ponta = ponta.clone();
+        let endereco = *endereco;
+        tentativas.spawn(async move {
+            let ligando = ponta
+                .connect_with(config, endereco, "seele-par")
+                .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+            let conexao = ligando.await.map_err(|erro| classificar(&relato, &erro))?;
+            Ok::<_, ErroDePar>((conexao, como_chegou(endereco)))
+        });
+    }
+
+    let mut ultimo = ErroDePar::NaoAlcancou;
+    let ate = tokio::time::Instant::now() + prazo;
+    while let Ok(Some(acabou)) = tokio::time::timeout_at(ate, tentativas.join_next()).await {
+        match acabou {
+            Ok(Ok((conexao, como))) => {
+                let ida_e_volta = conexao.rtt();
+                // A primeira que fecha vence; as outras são abandonadas, e
+                // abandoná-las é o que fecha as conexões que sobraram.
+                tentativas.abort_all();
+                tracing::info!(?como, ?ida_e_volta, "um par ligou");
+                return Ok(ParLigado {
+                    conexao,
+                    como,
+                    ida_e_volta,
+                });
+            }
+            // **A impressão que não bate ganha do silêncio.** Se um endereço
+            // respondeu com o certificado errado e outro não respondeu, o que
+            // se quer contar é o primeiro: ele é evento de segurança, e o
+            // segundo é rotina.
+            Ok(Err(erro @ ErroDePar::ImpressaoNaoBate { .. })) => return Err(erro),
+            Ok(Err(erro)) => ultimo = erro,
+            Err(erro) => ultimo = ErroDePar::Escuta(erro.to_string()),
+        }
+    }
+    Err(ultimo)
+}
+
+/// Se este endereço é da mesma rede, e portanto não precisou de furo.
+fn como_chegou(endereco: std::net::SocketAddr) -> ComoChegou {
+    let local = match endereco.ip() {
+        std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback() || (v6.segments().first().is_some_and(|s| s & 0xfe00 == 0xfc00))
+        }
+    };
+    if local {
+        ComoChegou::Local
+    } else {
+        ComoChegou::Furo
+    }
+}
+
+/// Traduz uma falha de conexão para o motivo enumerado.
+///
+/// **Sem comparar texto de mensagem.** O motivo real é o que o verificador
+/// deixou na [`Relato`] desta discagem; o `quinn::ConnectionError` que chega
+/// aqui é a mesma falha vista de longe, já achatada, e serve só para o rastro.
+/// Vaga cheia é «alguém respondeu, e não era ele»; vaga vazia é silêncio —
+/// ninguém chegou a apresentar certificado nenhum.
+fn classificar(relato: &Relato, erro: &quinn::ConnectionError) -> ErroDePar {
+    relato
+        .lock()
+        .ok()
+        .and_then(|mut vaga| vaga.take())
+        .unwrap_or_else(|| {
+            // O produto sabe qual erro o `quinn` deu; `NaoAlcancou` não tem
+            // onde o guardar, e perdê-lo em silêncio é o defeito de sempre.
+            tracing::debug!(%erro, "um endereço deste par não fechou aperto de mão");
+            ErroDePar::NaoAlcancou
+        })
 }
 
 #[cfg(test)]
@@ -231,6 +377,29 @@ pub(crate) fn config_de_cliente(esperada: String) -> Result<quinn::ClientConfig,
 )]
 mod testes {
     use super::*;
+
+    /// Atende numa ponta e segura o que chegar, até ela fechar.
+    ///
+    /// **Não é enfeite de teste, é metade do furo.** O `quinn` 0.11 enfileira
+    /// a tentativa que chega e não responde *nada* até alguém a aceitar: uma
+    /// ponta que só chamou [`passar_a_atender`] fica muda, e a discagem do
+    /// outro lado morre de [`ErroDePar::NaoAlcancou`] no fim do prazo. Foi
+    /// exatamente o que estes dois testes fizeram antes deste laço existir —
+    /// medido, não suposto. No produto, quem roda este laço é quem recebeu
+    /// `SirvaTelaPara`; aqui é isto.
+    ///
+    /// Segura as conexões porque largar uma `quinn::Connection` a fecha, e um
+    /// dos testes pergunta a quem discou se ela continua viva.
+    fn atender_em_segundo_plano(ponta: quinn::Endpoint) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut vivas = Vec::new();
+            while let Some(chegando) = ponta.accept().await {
+                if let Ok(conexao) = chegando.await {
+                    vivas.push(conexao);
+                }
+            }
+        })
+    }
 
     #[test]
     fn cada_identidade_e_nova_e_a_impressao_a_distingue() {
@@ -313,5 +482,85 @@ mod testes {
         // **A prova de que atender funciona é da Task 4**, porque esta asserção
         // só confere que a porta não mudou. Se `set_server_config` foi de verdade
         // chamado com a configuração correta, é testado lá.
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dois_pares_se_ligam_e_o_teste_sabe_como() {
+        // **Os dois discam, e o furo sai de graça.** Como as duas pontas atendem,
+        // as próprias tentativas de conexão são os pacotes que abrem o NAT dos dois
+        // lados; a primeira que fecha o aperto de mão vence e a outra é descartada.
+        // Resolve o caso assimétrico sozinho — se só um lado consegue sair, é a
+        // conexão dele que vinga — e usa só a API pública do `quinn`.
+        //
+        // Em `127.0.0.1` não há NAT a furar, então o que este teste prende é o
+        // resto: que a ligação fecha, que a impressão digital é conferida no
+        // caminho, e que o resultado diz **como** chegou. A taxa de furo de verdade
+        // é o roteiro de duas máquinas que mede, e nenhum teste daqui pode medi-la.
+        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ia = identidade_efemera().unwrap();
+        let impressao_a = impressao(&ia);
+        passar_a_atender(&a, ia).unwrap();
+        let endereco_a = a.local_addr().unwrap();
+        let _atendendo_a = atender_em_segundo_plano(a);
+
+        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ib = identidade_efemera().unwrap();
+        passar_a_atender(&b, ib).unwrap();
+
+        let ligado = ligar(
+            &b,
+            &[endereco_a],
+            impressao_a,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect("os dois pares não se ligaram");
+
+        assert_eq!(
+            ligado.como,
+            ComoChegou::Local,
+            "127.0.0.1 não é rede local?"
+        );
+        assert!(
+            ligado.conexao.close_reason().is_none(),
+            "a conexão já morreu"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_par_com_a_impressao_errada_nao_liga() {
+        // O caso que separa «não consegui falar com ele» de «alguém respondeu no
+        // lugar dele». Sem esta parede, qualquer um que alcance a porta alimenta
+        // quadro de tela a quem estava esperando o par certo.
+        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        passar_a_atender(&a, identidade_efemera().unwrap()).unwrap();
+        let endereco_a = a.local_addr().unwrap();
+        let _atendendo_a = atender_em_segundo_plano(a);
+
+        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let erro = ligar(
+            &b,
+            &[endereco_a],
+            "f".repeat(64),
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(erro, ErroDePar::ImpressaoNaoBate { .. }),
+            "a recusa saiu com o motivo errado: {erro:?}"
+        );
+        // **E o motivo veio inteiro** — que é o que o caminho limpo comprou.
+        // `classificar` recolhe o `ErroDePar` que o verificador guardou na
+        // `Relato`, então os dois hashes chegam até aqui; uma `classificar`
+        // que olhasse o texto da mensagem do `quinn` só saberia dizer «não
+        // bateu», com os dois campos vazios. Esta asserção é também o que faz
+        // o guarda morder: uma `ligar` que ignorasse a impressão pedida e
+        // discasse com outra passaria pelo `matches!` acima sem tropeçar.
+        if let ErroDePar::ImpressaoNaoBate { esperada, veio } = &erro {
+            assert_eq!(esperada, &"f".repeat(64), "não foi a impressão pedida");
+            assert_eq!(veio.len(), 64, "o que veio não é SHA-256 em hex");
+            assert_ne!(veio, esperada, "os dois lados do erro são o mesmo hash");
+        }
     }
 }
