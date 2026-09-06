@@ -122,6 +122,30 @@ justifica não reusar o caminho do servidor: o do servidor é persistido porque 
 pino depende dele; este não é pinado por ninguém, porque a impressão digital
 chega pelo servidor a cada apresentação.
 
+### 3.2.1 · A conferência é dos dois lados — revisão de 06/09/2026
+
+**Escrito depois de a Task 4 do plano medir o que este documento supunha.** O
+§3.3 diz que os dois lados discam, e daí segue uma coisa que a primeira redação
+não seguiu até o fim: **qualquer um dos dois pode acabar sendo quem aceita.** E
+quem aceita não passa pelo verificador de cima — ele roda em quem disca.
+
+Com `with_no_client_auth()`, metade das ligações não teria conferência nenhuma, e
+quem empresta a subida serviria quadro a qualquer um que alcançasse a porta.
+Este documento promete o contrário desde a primeira versão.
+
+**O conserto usa um campo que já existia sem uso.** `SirvaTelaPara` leva a quem
+empresta a impressão digital de quem vai receber; era para isto, e o desenho não
+dizia o que fazer com ela. Quem atende instala um verificador de **certificado
+de cliente** contra essa impressão, e exige certificado — um par que não
+apresente nenhum é recusado, não aceito.
+
+Duas paredes espelhadas, e as duas necessárias porque as duas direções existem.
+
+**E alguém precisa atender.** Instalar o `ServerConfig` não faz o `quinn`
+responder: ele enfileira a chegada e não diz nada até alguém chamar
+`Endpoint::accept()`. Medido, não suposto — dois pares que só discassem nunca se
+ligariam.
+
 **Onde ele é gerado.** O `tls.rs` que gera certificado mora no `seele-server`, e
 o ADR 0002 proíbe o `seele-core` de depender do daemon. A decisão é **duplicar
 as poucas linhas de `rcgen` no core**, com o porquê escrito — o precedente que
