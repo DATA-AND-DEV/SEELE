@@ -14,7 +14,9 @@
 //! **formato da impressão digital**, e ele não diverge porque os dois lados
 //! chamam `seele_proto::transport::certificate_fingerprint`.
 
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use rustls::{DigitallySignedStruct, SignatureScheme};
 
 /// Um certificado e a chave que assina por ele.
 pub struct Identidade {
@@ -102,6 +104,125 @@ pub fn passar_a_atender(ponta: &quinn::Endpoint, identidade: Identidade) -> Resu
     Ok(())
 }
 
+/// Aceita **um** certificado, o que o servidor apresentou, e nenhum outro.
+///
+/// Espelho do `TofuVerifier` de `crate::tofu`, com a diferença que é o assunto
+/// todo: aquele **aprende** na primeira vez e guarda; este não aprende nada e
+/// não guarda nada. A impressão digital chega pelo servidor a cada
+/// apresentação, então não há primeira vez a confiar.
+///
+/// Fora de teste, ninguém ainda constrói um — quem disca é a Task 4 desta
+/// mesma leva, por [`config_de_cliente`], e ela ainda não existe nesta tarefa.
+/// A alternativa a este `allow` seria adiantar aquela tarefa aqui.
+#[derive(Debug)]
+#[allow(
+    dead_code,
+    reason = "chamado por config_de_cliente, que a Task 4 ainda vai discar"
+)]
+pub(crate) struct ConfereImpressao {
+    esperada: String,
+    provedor: std::sync::Arc<rustls::crypto::CryptoProvider>,
+}
+
+#[allow(
+    dead_code,
+    reason = "chamado por config_de_cliente, que a Task 4 ainda vai discar"
+)]
+impl ConfereImpressao {
+    pub(crate) fn nova(esperada: String) -> Self {
+        Self {
+            esperada,
+            provedor: std::sync::Arc::new(rustls::crypto::ring::default_provider()),
+        }
+    }
+
+    /// A conferência em si, fora do `trait`, para o teste poder afirmá-la sem
+    /// montar uma sessão TLS inteira.
+    pub(crate) fn confere(&self, certificado: &CertificateDer<'_>) -> Result<(), ErroDePar> {
+        let veio = seele_proto::transport::certificate_fingerprint(certificado.as_ref());
+        if veio == self.esperada {
+            Ok(())
+        } else {
+            Err(ErroDePar::ImpressaoNaoBate {
+                esperada: self.esperada.clone(),
+                veio,
+            })
+        }
+    }
+}
+
+impl ServerCertVerifier for ConfereImpressao {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        self.confere(end_entity)
+            .map(|()| ServerCertVerified::assertion())
+            .map_err(|erro| rustls::Error::General(erro.to_string()))
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provedor.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provedor.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.provedor
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+/// O `ClientConfig` com que se disca para um par.
+///
+/// # Errors
+///
+/// Falha se o `rustls` recusar a configuração.
+///
+/// Ninguém chama isto ainda: quem disca para um par é a Task 4 desta mesma
+/// leva, e ela entra num commit posterior.
+#[allow(
+    dead_code,
+    reason = "a Task 4 desta mesma leva disca com isto; ainda não integrada"
+)]
+pub(crate) fn config_de_cliente(esperada: String) -> Result<quinn::ClientConfig, ErroDePar> {
+    let mut tls = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(ConfereImpressao::nova(esperada)))
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+    let quic = quinn::crypto::rustls::QuicClientConfig::try_from(tls)
+        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+    Ok(quinn::ClientConfig::new(std::sync::Arc::new(quic)))
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -143,6 +264,33 @@ mod testes {
         assert!(impressao(&identidade)
             .chars()
             .all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn o_par_certo_passa_e_o_errado_e_recusado_com_o_motivo_certo() {
+        // **A identidade aqui não é TOFU — é apresentação.** O ADR 0003 vale para
+        // o `seele://`, onde não há intermediário e a primeira vez tem de ser
+        // confiada. Aqui há: os dois clientes já fixaram o mesmo servidor e já se
+        // autenticaram nele por chave pública (ADR 0004). O servidor ocupa o lugar
+        // que o link ocupa no `seele://`.
+        //
+        // Sem pino novo em disco, e sem par anônimo alimentando quadro.
+        let identidade = identidade_efemera().unwrap();
+        let der = identidade.cadeia.first().unwrap().clone();
+        let certa = impressao(&identidade);
+
+        assert!(ConfereImpressao::nova(certa.clone()).confere(&der).is_ok());
+
+        let erro = ConfereImpressao::nova("f".repeat(64))
+            .confere(&der)
+            .unwrap_err();
+        match erro {
+            ErroDePar::ImpressaoNaoBate { esperada, veio } => {
+                assert_eq!(esperada, "f".repeat(64));
+                assert_eq!(veio, certa);
+            }
+            outro => panic!("o motivo errado saiu de uma impressão que não bate: {outro:?}"),
+        }
     }
 
     #[tokio::test]
