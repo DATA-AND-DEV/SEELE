@@ -86,6 +86,14 @@ pub enum Falha {
     /// It went past the step ceiling.
     #[error("mod went past its step ceiling")]
     PassouDoTempo,
+    /// Its yard went past the size ceiling.
+    ///
+    /// Unlike the memory one, this refusal **is** distinguishable from a MOD
+    /// that threw: the ceiling is ours and we count it, so telling the host
+    /// which MOD filled its yard costs nothing and answers the question they
+    /// will actually ask.
+    #[error("mod yard went past its size ceiling")]
+    QuintalCheio,
 }
 
 /// One MOD's runtime, and the step counter its interrupt handler reads.
@@ -171,6 +179,15 @@ impl Anfitriao {
         Ok(())
     }
 
+    /// The most a MOD's key→value yard may hold, in bytes.
+    ///
+    /// Counted over keys and values together, and refused on write rather than
+    /// trimmed: a yard that silently drops the oldest entry is a yard whose MOD
+    /// cannot tell whether it saved anything. The ADR 0027 attachment ceiling
+    /// evicts because a file that arrives late is still a file; a counter that
+    /// silently stops counting is a defect.
+    pub const TETO_DO_QUINTAL: usize = 256 * 1024;
+
     /// Hands a MOD one moment.
     ///
     /// A MOD with no `aoAcontecer` is not a failure: it is a MOD whose server
@@ -182,13 +199,37 @@ impl Anfitriao {
     /// loaded is also `Lancou` — deliberately the same answer, because a caller
     /// that has to tell them apart is a caller inventing a recovery for a state
     /// it cannot fix.
-    pub fn chamar(&mut self, id: &str, momento: &str, carga: &str) -> Result<(), Falha> {
+    pub fn chamar(
+        &mut self,
+        id: &str,
+        momento: &str,
+        carga: &str,
+        quintal: &mut BTreeMap<String, String>,
+    ) -> Result<(), Falha> {
         let hospede = self.hospedes.get(id).ok_or(Falha::Lancou)?;
         // Each call gets the whole budget: a MOD that was slow once is not a
         // MOD that is broken forever.
         hospede.passos.store(0, Ordering::Relaxed);
 
-        hospede.contexto.with(|ctx| {
+        let resultado = hospede.contexto.with(|ctx| {
+            // The yard goes in as a plain object and comes back as one.
+            //
+            // Loading and storing around the call, rather than host functions
+            // that reach the database, is what keeps this module free of
+            // persistence — `check_deps` would allow the dependency, and the
+            // testability would not survive it. It also makes a call
+            // transactional by construction: a MOD that throws half-way leaves
+            // the yard as it was.
+            let dados = rquickjs::Object::new(ctx.clone()).map_err(|_| Falha::Lancou)?;
+            for (chave, valor) in quintal.iter() {
+                dados
+                    .set(chave.as_str(), valor.as_str())
+                    .map_err(|_| Falha::Lancou)?;
+            }
+            ctx.globals()
+                .set("dados", dados)
+                .map_err(|_| Falha::Lancou)?;
+
             let Ok(f) = ctx.globals().get::<_, Function<'_>>("aoAcontecer") else {
                 return Ok(());
             };
@@ -199,6 +240,45 @@ impl Anfitriao {
                     Falha::Lancou
                 }
             })
+        });
+
+        // Read the yard back **only if the call finished**. A MOD that threw or
+        // was cut leaves the yard exactly as it was: half a write is worse than
+        // none, and the MOD has no way to know which half landed.
+        if resultado.is_ok() {
+            self.recolher_quintal(id, quintal)?;
+        }
+        resultado
+    }
+
+    /// Copies the JS `dados` object back into the map, refusing an oversized
+    /// yard rather than trimming it.
+    fn recolher_quintal(
+        &self,
+        id: &str,
+        quintal: &mut BTreeMap<String, String>,
+    ) -> Result<(), Falha> {
+        let Some(hospede) = self.hospedes.get(id) else {
+            return Ok(());
+        };
+        hospede.contexto.with(|ctx| {
+            let Ok(dados) = ctx.globals().get::<_, rquickjs::Object<'_>>("dados") else {
+                return Ok(());
+            };
+            let mut novo = BTreeMap::new();
+            let mut bytes = 0_usize;
+            for par in dados.props::<String, String>() {
+                let (chave, valor) = par.map_err(|_| Falha::Lancou)?;
+                bytes = bytes
+                    .saturating_add(chave.len())
+                    .saturating_add(valor.len());
+                if bytes > Self::TETO_DO_QUINTAL {
+                    return Err(Falha::QuintalCheio);
+                }
+                novo.insert(chave, valor);
+            }
+            *quintal = novo;
+            Ok(())
         })
     }
 }
@@ -216,7 +296,7 @@ mod tests {
             )
             .expect("carregar");
         anfitriao
-            .chamar("seele/exemplo", "PersonJoined", "{}")
+            .chamar("seele/exemplo", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("chamar");
     }
 
@@ -233,7 +313,7 @@ mod tests {
             )
             .expect("carregar");
 
-        let falha = anfitriao.chamar("seele/glutao", "PersonJoined", "{}");
+        let falha = anfitriao.chamar("seele/glutao", "PersonJoined", "{}", &mut BTreeMap::new());
         // `Lancou` e não uma variante própria: QuickJS reporta o estouro
         // lançando dentro do script, e daqui de fora não há como distinguir.
         // Está escrito na doc de `Falha`, e o teto em si tem prova própria em
@@ -248,8 +328,92 @@ mod tests {
             .carregar("seele/glutao", "globalThis.aoAcontecer = () => {};")
             .expect("recarregar depois do estouro");
         anfitriao
-            .chamar("seele/glutao", "PersonJoined", "{}")
+            .chamar("seele/glutao", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("o contexto morreu junto com o estouro");
+    }
+
+    #[test]
+    fn o_que_um_mod_guarda_no_quintal_volta() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/placar",
+                "globalThis.aoAcontecer = () => { dados.pontos = '7'; };",
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::new();
+        anfitriao
+            .chamar("seele/placar", "PersonJoined", "{}", &mut quintal)
+            .expect("chamar");
+
+        assert_eq!(quintal.get("pontos").map(String::as_str), Some("7"));
+    }
+
+    #[test]
+    fn o_que_estava_no_quintal_chega_ao_mod() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/placar",
+                "globalThis.aoAcontecer = () => { dados.eco = dados.pontos; };",
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::from([("pontos".to_owned(), "7".to_owned())]);
+        anfitriao
+            .chamar("seele/placar", "PersonJoined", "{}", &mut quintal)
+            .expect("chamar");
+
+        assert_eq!(quintal.get("eco").map(String::as_str), Some("7"));
+    }
+
+    /// Uma chamada é transacional: meia escrita é pior que nenhuma, porque o
+    /// MOD não tem como saber qual metade entrou.
+    #[test]
+    fn um_mod_que_lanca_no_meio_nao_deixa_meia_escrita() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/meio",
+                "globalThis.aoAcontecer = () => { dados.a = '1'; throw new Error('no meio'); };",
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::from([("antes".to_owned(), "ok".to_owned())]);
+        assert_eq!(
+            anfitriao.chamar("seele/meio", "PersonJoined", "{}", &mut quintal),
+            Err(Falha::Lancou)
+        );
+
+        assert_eq!(quintal.len(), 1, "a escrita de um MOD que lançou entrou");
+        assert_eq!(quintal.get("antes").map(String::as_str), Some("ok"));
+    }
+
+    /// O teto do quintal recusa em vez de aparar. Um quintal que descarta a
+    /// entrada mais velha em silêncio é um quintal cujo MOD não sabe se gravou.
+    #[test]
+    fn um_quintal_grande_demais_e_recusado_e_nao_aparado() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/glutao",
+                "globalThis.aoAcontecer = () => { \
+                   for (let i = 0; i < 5000; i++) dados['c' + i] = 'x'.repeat(100); \
+                 };",
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::from([("antes".to_owned(), "ok".to_owned())]);
+        assert_eq!(
+            anfitriao.chamar("seele/glutao", "PersonJoined", "{}", &mut quintal),
+            Err(Falha::QuintalCheio)
+        );
+        assert_eq!(
+            quintal.get("antes").map(String::as_str),
+            Some("ok"),
+            "o quintal foi aparado em vez de a escrita ser recusada"
+        );
     }
 
     /// O teto de memória é **aplicado**, e não só escrito.
@@ -268,14 +432,16 @@ mod tests {
             .carregar("seele/x", ALOCA_UM_MIB)
             .expect("carregar");
         assert!(
-            apertado.chamar("seele/x", "PersonJoined", "{}").is_err(),
+            apertado
+                .chamar("seele/x", "PersonJoined", "{}", &mut BTreeMap::new())
+                .is_err(),
             "1 MiB coube num teto de 256 KiB"
         );
 
         let mut folgado = Anfitriao::com_tetos(8 * 1024 * 1024, 10_000_000).expect("folgado");
         folgado.carregar("seele/x", ALOCA_UM_MIB).expect("carregar");
         folgado
-            .chamar("seele/x", "PersonJoined", "{}")
+            .chamar("seele/x", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("1 MiB não coube num teto de 8 MiB");
     }
 
@@ -292,7 +458,7 @@ mod tests {
         let mut apertado = Anfitriao::com_tetos(64 * 1024 * 1024, 100).expect("apertado");
         apertado.carregar("seele/y", LACO_LONGO).expect("carregar");
         assert_eq!(
-            apertado.chamar("seele/y", "PersonJoined", "{}"),
+            apertado.chamar("seele/y", "PersonJoined", "{}", &mut BTreeMap::new()),
             Err(Falha::PassouDoTempo),
             "um laço de dez milhões de operações passou por um teto de 100 consultas"
         );
@@ -300,7 +466,7 @@ mod tests {
         let mut folgado = Anfitriao::com_tetos(64 * 1024 * 1024, 10_000).expect("folgado");
         folgado.carregar("seele/y", LACO_LONGO).expect("carregar");
         folgado
-            .chamar("seele/y", "PersonJoined", "{}")
+            .chamar("seele/y", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("o mesmo laço não coube em 10 000 consultas");
     }
 
@@ -317,7 +483,7 @@ mod tests {
             .expect("carregar");
 
         let inicio = std::time::Instant::now();
-        let falha = anfitriao.chamar("seele/eterno", "PersonJoined", "{}");
+        let falha = anfitriao.chamar("seele/eterno", "PersonJoined", "{}", &mut BTreeMap::new());
         assert!(matches!(
             falha,
             Err(Falha::PassouDoTempo) | Err(Falha::Lancou)
@@ -347,7 +513,7 @@ mod tests {
             )
             .expect("dois");
         anfitriao
-            .chamar("seele/dois", "PersonJoined", "{}")
+            .chamar("seele/dois", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("o global de um MOD vazou para o outro");
     }
 
@@ -371,7 +537,7 @@ mod tests {
             .carregar("seele/mudo", "globalThis.nada = 1;")
             .expect("carregar");
         anfitriao
-            .chamar("seele/mudo", "PersonJoined", "{}")
+            .chamar("seele/mudo", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("um MOD calado virou falha");
     }
 }
