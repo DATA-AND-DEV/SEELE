@@ -79,6 +79,29 @@ pub fn impressao(identidade: &Identidade) -> String {
     })
 }
 
+/// Diz a uma ponta que já existe que ela também atende.
+///
+/// **Só é chamada quando a pessoa optou por emprestar a subida.** Quem não
+/// optou nunca passa por aqui, e a ponta dela continua só discando, como antes
+/// desta onda existir.
+///
+/// # Errors
+///
+/// Falha se o `rustls` recusar o certificado ou a chave.
+pub fn passar_a_atender(ponta: &quinn::Endpoint, identidade: Identidade) -> Result<(), ErroDePar> {
+    let mut tls = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(identidade.cadeia, identidade.chave)
+        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+    let quic = quinn::crypto::rustls::QuicServerConfig::try_from(tls)
+        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+    ponta.set_server_config(Some(quinn::ServerConfig::with_crypto(std::sync::Arc::new(
+        quic,
+    ))));
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -120,5 +143,31 @@ mod testes {
         assert!(impressao(&identidade)
             .chars()
             .all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn uma_ponta_de_cliente_passa_a_atender_sem_socket_novo() {
+        // **Nem escuta nova, nem porta nova.** `set_server_config` recebe `&self`,
+        // então a ponta que o cliente já usa para falar com o servidor aprende a
+        // atender na mesma porta — e naquela porta o mapeamento de NAT já está
+        // vivo, mantido pelo keep-alive da conexão que já existe. Abrir uma porta
+        // à parte perderia essa propriedade, que é a melhor do desenho.
+        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let porta_antes = ponta.local_addr().unwrap();
+
+        passar_a_atender(&ponta, identidade_efemera().unwrap()).unwrap();
+
+        assert_eq!(
+            ponta.local_addr().unwrap(),
+            porta_antes,
+            "atender trocou a porta: o mapeamento de NAT que já estava vivo se perdeu"
+        );
+        // E ela de fato aceita: sem `set_server_config`, `accept()` devolve `None`
+        // na hora em que a ponta é fechada. **A prova de que atender funciona é
+        // da Task 4**, porque esta asserção não cobre se `set_server_config` foi
+        // de verdade chamado.
+        let aceitando = tokio::spawn(async move { ponta.accept().await.is_some() });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        aceitando.abort();
     }
 }
