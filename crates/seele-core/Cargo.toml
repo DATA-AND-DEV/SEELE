@@ -49,11 +49,12 @@ anyhow = "1.0.104"
 thiserror = "2.0.19"
 tracing = "0.1.44"
 serde = "1.0.229"
+# Só para o certificado efêmero de `crate::par` e para o par QUIC do teste de
+# dessincronização do `frame`. Já está na árvore do workspace via
+# `seele-server`, então não acrescenta superfície de auditoria.
+rcgen = "0.14.8"
 
 [dev-dependencies]
-# Só para o par QUIC do teste de dessincronização do `frame`. Já está na árvore
-# do workspace via `seele-server`, então não acrescenta superfície de auditoria.
-rcgen = "0.14.8"
 # O relógio virtual do tokio, e nada além dele.
 #
 # `features = ["full"]` **não** inclui `test-util`, que é o que dá
