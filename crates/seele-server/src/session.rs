@@ -2270,7 +2270,7 @@ async fn run_session(
                     // pode descobrir dias depois, sem dado nenhum, que o
                     // servidor nunca fez nada com o pedido dela.
                     ClientMessage::EmprestarSubida { .. } | ClientMessage::ParFalhou { .. } => {
-                        tracing::debug!(
+                        tracing::warn!(
                             person = %session.person,
                             "caminho entre pares recebido antes de o despacho existir"
                         );

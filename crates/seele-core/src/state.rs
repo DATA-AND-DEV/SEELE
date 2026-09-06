@@ -1205,12 +1205,12 @@ impl Room {
             ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
 
             // O protocolo já leva os dois verbos do caminho entre pares
-            // (`PROTOCOL_VERSION` 4), mas quem os liga ao `crate::caminho` é
-            // uma tarefa futura deste plano — que ainda não existe neste
-            // commit. Rastreado, e não calado: um quadro que este `Room` ainda
-            // não sabe usar não pode desaparecer sem deixar rastro.
+            // (`PROTOCOL_VERSION` 4). A integração com o despacho de pares é
+            // andaime para Task 8 («O cliente pede ao par, e cai para o servidor
+            // quando falha»). Rastreado, e não calado: uma mensagem que chega e é
+            // descartada sem resposta nenhuma não pode desaparecer sem deixar rastro.
             ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => {
-                tracing::debug!("caminho entre pares recebido antes de o cliente estar ligado");
+                tracing::warn!("caminho entre pares recebido antes de o cliente estar ligado");
             }
         }
 

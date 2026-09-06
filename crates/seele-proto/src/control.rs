@@ -227,7 +227,7 @@ pub const SIGNATURE_LEN: usize = 64;
 /// password fallback needs.
 pub const MAX_PROOF_LEN: usize = 256;
 
-/// Length of uma impressão digital em hex minúsculo.
+/// Tamanho de uma impressão digital em hex minúsculo.
 ///
 /// Um SHA-256 em hexadecimal são exatamente 64 caracteres — nem mais, nem
 /// menos, o mesmo tamanho que [`crate::uri`] já confere para o `fp=` do
