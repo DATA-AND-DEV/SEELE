@@ -297,39 +297,103 @@ pub async fn ligar(
         let (config, relato) = config_de_cliente(impressao_esperada.clone())?;
         let ponta = ponta.clone();
         let endereco = *endereco;
+        // Cada tentativa devolve **o próprio endereço** junto do resultado. Sem
+        // isso, o rastro diz que «um endereço» falhou sem dizer qual, e o que
+        // sobra no fim do prazo não tem nome nenhum.
         tentativas.spawn(async move {
-            let ligando = ponta
-                .connect_with(config, endereco, "seele-par")
-                .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
-            let conexao = ligando.await.map_err(|erro| classificar(&relato, &erro))?;
-            Ok::<_, ErroDePar>((conexao, como_chegou(endereco)))
+            let tentada = async {
+                let ligando = ponta
+                    .connect_with(config, endereco, "seele-par")
+                    .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+                let conexao = ligando
+                    .await
+                    .map_err(|erro| classificar(&relato, endereco, &erro))?;
+                Ok::<_, ErroDePar>((conexao, como_chegou(endereco)))
+            }
+            .await;
+            (endereco, tentada)
         });
     }
 
+    let mut no_ar = enderecos.to_vec();
     let mut ultimo = ErroDePar::NaoAlcancou;
     let ate = tokio::time::Instant::now() + prazo;
-    while let Ok(Some(acabou)) = tokio::time::timeout_at(ate, tentativas.join_next()).await {
-        match acabou {
-            Ok(Ok((conexao, como))) => {
+    // O laço é explícito para o fim saber **por que** acabou: um `while let`
+    // não distingue «venceu o prazo» de «todas as tentativas responderam», e a
+    // linha de rastro lá embaixo mente se confundir as duas.
+    let mut venceu_o_prazo = false;
+    loop {
+        let acabou = match tokio::time::timeout_at(ate, tentativas.join_next()).await {
+            Err(_) => {
+                venceu_o_prazo = true;
+                break;
+            }
+            Ok(None) => break,
+            Ok(Some(acabou)) => acabou,
+        };
+        let (endereco, tentada) = match acabou {
+            Ok(devolvido) => devolvido,
+            Err(erro) => {
+                // A tarefa nem chegou a devolver endereço; é o único caso em
+                // que o rastro não sabe de quem fala.
+                tracing::warn!(%erro, "uma tentativa de ligação morreu sem responder");
+                ultimo = ErroDePar::Escuta(erro.to_string());
+                continue;
+            }
+        };
+        if let Some(posicao) = no_ar.iter().position(|candidato| *candidato == endereco) {
+            no_ar.remove(posicao);
+        }
+        match tentada {
+            Ok((conexao, como)) => {
                 let ida_e_volta = conexao.rtt();
+                // **Por qual endereço a ligação entrou, dito por extenso** — a
+                // lição do `e56dbb2`, que consertou a mesma falta na corrida de
+                // candidatos do servidor. Sem esta linha só dava para inferir
+                // pelos milissegundos, e a inferência erra.
+                tracing::info!(
+                    par = %conexao.remote_address(),
+                    ?como,
+                    ?ida_e_volta,
+                    "um par ligou"
+                );
+                if !no_ar.is_empty() {
+                    tracing::debug!(?no_ar, "estas tentativas foram abandonadas: outra venceu");
+                }
                 // A primeira que fecha vence; as outras são abandonadas, e
                 // abandoná-las é o que fecha as conexões que sobraram.
                 tentativas.abort_all();
-                tracing::info!(?como, ?ida_e_volta, "um par ligou");
                 return Ok(ParLigado {
                     conexao,
                     como,
                     ida_e_volta,
                 });
             }
-            // **A impressão que não bate ganha do silêncio.** Se um endereço
-            // respondeu com o certificado errado e outro não respondeu, o que
-            // se quer contar é o primeiro: ele é evento de segurança, e o
-            // segundo é rotina.
-            Ok(Err(erro @ ErroDePar::ImpressaoNaoBate { .. })) => return Err(erro),
-            Ok(Err(erro)) => ultimo = erro,
-            Err(erro) => ultimo = ErroDePar::Escuta(erro.to_string()),
+            // **A impressão que não bate ganha do silêncio no fim — e só no
+            // fim.** Devolvê-la na hora seria preempção, não precedência: um
+            // único endereço obsoleto da lista, reciclado por outra máquina,
+            // mataria a discagem inteira antes de o endereço legítimo fechar o
+            // aperto de mão um instante depois. Quem consegue pôr um endereço
+            // na lista teria negação de serviço de graça. A impostura já saiu
+            // no `warn!` da `classificar`, que é onde ela é notícia; aqui ela
+            // só espera, e é o motivo devolvido se ninguém vencer.
+            Err(erro) => {
+                if !matches!(ultimo, ErroDePar::ImpressaoNaoBate { .. }) {
+                    ultimo = erro;
+                }
+            }
         }
+    }
+    if venceu_o_prazo && !no_ar.is_empty() {
+        // O prazo venceu com gente no ar. O que essas tentativas teriam a
+        // dizer morre no `abort`, então o rastro diz ao menos **quais** eram —
+        // a alternativa é uma falha que não deixa nome nenhum para trás.
+        tracing::info!(
+            ?prazo,
+            ?no_ar,
+            "o prazo venceu e estes endereços do par ainda não tinham respondido"
+        );
+        tentativas.abort_all();
     }
     Err(ultimo)
 }
@@ -339,7 +403,15 @@ fn como_chegou(endereco: std::net::SocketAddr) -> ComoChegou {
     let local = match endereco.ip() {
         std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
         std::net::IpAddr::V6(v6) => {
-            v6.is_loopback() || (v6.segments().first().is_some_and(|s| s & 0xfe00 == 0xfc00))
+            v6.is_loopback()
+                || v6.segments().first().is_some_and(|s| {
+                    // `fc00::/7`, o endereço único local, e `fe80::/10`, o
+                    // link-local — o par de `is_private()` e `is_link_local()`
+                    // do lado v4. Nenhum dos dois atravessa roteador, então
+                    // quem chega por eles está na mesma rede e não furou nada.
+                    // O `std` sabe dizer isto, mas só em API instável.
+                    s & 0xfe00 == 0xfc00 || s & 0xffc0 == 0xfe80
+                })
         }
     };
     if local {
@@ -349,24 +421,38 @@ fn como_chegou(endereco: std::net::SocketAddr) -> ComoChegou {
     }
 }
 
-/// Traduz uma falha de conexão para o motivo enumerado.
+/// Traduz uma falha de conexão para o motivo enumerado, e a registra.
 ///
 /// **Sem comparar texto de mensagem.** O motivo real é o que o verificador
 /// deixou na [`Relato`] desta discagem; o `quinn::ConnectionError` que chega
 /// aqui é a mesma falha vista de longe, já achatada, e serve só para o rastro.
 /// Vaga cheia é «alguém respondeu, e não era ele»; vaga vazia é silêncio —
 /// ninguém chegou a apresentar certificado nenhum.
-fn classificar(relato: &Relato, erro: &quinn::ConnectionError) -> ErroDePar {
-    relato
-        .lock()
-        .ok()
-        .and_then(|mut vaga| vaga.take())
-        .unwrap_or_else(|| {
+///
+/// Recebe o `endereco` porque é aqui que o rastro sabe de quem fala: uma linha
+/// que diz que «um endereço» falhou, numa lista de candidatos, não diz nada.
+fn classificar(
+    relato: &Relato,
+    endereco: std::net::SocketAddr,
+    erro: &quinn::ConnectionError,
+) -> ErroDePar {
+    match relato.lock().ok().and_then(|mut vaga| vaga.take()) {
+        Some(motivo @ ErroDePar::ImpressaoNaoBate { .. }) => {
+            // **Notícia, e não pode esperar o fim da discagem.** Quem discou
+            // pode até ligar por outro endereço e nunca devolver este erro —
+            // alguém ter respondido no lugar do par continua sendo o evento de
+            // segurança que o §4 da spec quer contado, e é contado aqui.
+            tracing::warn!(par = %endereco, %motivo, "alguém respondeu no lugar do par");
+            motivo
+        }
+        Some(outro) => outro,
+        None => {
             // O produto sabe qual erro o `quinn` deu; `NaoAlcancou` não tem
             // onde o guardar, e perdê-lo em silêncio é o defeito de sempre.
-            tracing::debug!(%erro, "um endereço deste par não fechou aperto de mão");
+            tracing::debug!(par = %endereco, %erro, "este endereço do par não fechou aperto de mão");
             ErroDePar::NaoAlcancou
-        })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -390,10 +476,18 @@ mod testes {
     ///
     /// Segura as conexões porque largar uma `quinn::Connection` a fecha, e um
     /// dos testes pergunta a quem discou se ela continua viva.
-    fn atender_em_segundo_plano(ponta: quinn::Endpoint) -> tokio::task::JoinHandle<()> {
+    ///
+    /// O `atraso` é esperado **depois** de a tentativa chegar e antes de ser
+    /// respondida, e serve a um teste só: o que precisa que o impostor falhe
+    /// antes de o par legítimo fechar. Nos outros é `ZERO`.
+    fn atender_em_segundo_plano(
+        ponta: quinn::Endpoint,
+        atraso: std::time::Duration,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut vivas = Vec::new();
             while let Some(chegando) = ponta.accept().await {
+                tokio::time::sleep(atraso).await;
                 if let Ok(conexao) = chegando.await {
                     vivas.push(conexao);
                 }
@@ -501,7 +595,7 @@ mod testes {
         let impressao_a = impressao(&ia);
         passar_a_atender(&a, ia).unwrap();
         let endereco_a = a.local_addr().unwrap();
-        let _atendendo_a = atender_em_segundo_plano(a);
+        let _atendendo_a = atender_em_segundo_plano(a, std::time::Duration::ZERO);
 
         let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         let ib = identidade_efemera().unwrap();
@@ -535,7 +629,7 @@ mod testes {
         let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         passar_a_atender(&a, identidade_efemera().unwrap()).unwrap();
         let endereco_a = a.local_addr().unwrap();
-        let _atendendo_a = atender_em_segundo_plano(a);
+        let _atendendo_a = atender_em_segundo_plano(a, std::time::Duration::ZERO);
 
         let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         let erro = ligar(
@@ -562,5 +656,118 @@ mod testes {
             assert_eq!(veio.len(), 64, "o que veio não é SHA-256 em hex");
             assert_ne!(veio, esperada, "os dois lados do erro são o mesmo hash");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_impostor_na_lista_nao_derruba_a_discagem_inteira() {
+        // **A impostura é notícia, não é motivo para desistir.** A lista de um
+        // par mistura endereço de LAN e endereço público, e um deles estar
+        // obsoleto — reciclado por outra máquina — é cenário de todo dia. Se
+        // bastasse um responder com o certificado errado para a discagem
+        // inteira morrer, quem conseguisse pôr um endereço na lista teria uma
+        // negação de serviço de graça contra o par legítimo. O evento de
+        // segurança sai no `warn!` da `classificar`, na hora; a discagem
+        // continua, e `ImpressaoNaoBate` só é devolvido se ninguém vencer.
+        //
+        // O legítimo atende com atraso **de propósito**: sem isso as duas
+        // tentativas correm juntas e o teste não prende nada — ele tem de ver
+        // o impostor falhar antes de o legítimo fechar o aperto de mão.
+        let impostor = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        passar_a_atender(&impostor, identidade_efemera().unwrap()).unwrap();
+        let endereco_impostor = impostor.local_addr().unwrap();
+        let _atendendo_impostor = atender_em_segundo_plano(impostor, std::time::Duration::ZERO);
+
+        let legitimo = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let identidade = identidade_efemera().unwrap();
+        let esperada = impressao(&identidade);
+        passar_a_atender(&legitimo, identidade).unwrap();
+        let endereco_legitimo = legitimo.local_addr().unwrap();
+        let _atendendo_legitimo =
+            atender_em_segundo_plano(legitimo, std::time::Duration::from_millis(150));
+
+        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ligado = ligar(
+            &b,
+            &[endereco_impostor, endereco_legitimo],
+            esperada,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect("o impostor derrubou a discagem inteira");
+
+        assert_eq!(
+            ligado.conexao.remote_address(),
+            endereco_legitimo,
+            "a ligação fechou com quem não era o par"
+        );
+    }
+
+    #[test]
+    fn o_que_e_da_mesma_rede_nunca_conta_como_furo() {
+        // **`ComoChegou` é o número que o subprojeto A existe para produzir.**
+        // Um endereço da própria rede contado como `Furo` infla a taxa que vai
+        // decidir se a árvore do subprojeto B pode supor que qualquer par se
+        // alcança. O `fe80::/10` faltava — o lado v4 conferia `is_link_local()`
+        // e o v6 não conferia nada equivalente.
+        for texto in [
+            "127.0.0.1:9",
+            "10.0.0.1:9",
+            "172.16.0.1:9",
+            "192.168.1.10:9",
+            "169.254.7.7:9",
+            "[::1]:9",
+            "[fd00::1]:9",
+            "[fe80::1]:9",
+            "[febf:ffff::1]:9",
+        ] {
+            assert_eq!(
+                como_chegou(texto.parse().unwrap()),
+                ComoChegou::Local,
+                "{texto} é da mesma rede e foi contado como furo"
+            );
+        }
+        for texto in ["203.0.113.5:9", "[2001:db8::1]:9"] {
+            assert_eq!(
+                como_chegou(texto.parse().unwrap()),
+                ComoChegou::Furo,
+                "{texto} não é da rede local"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_prazo_manda_quando_ninguem_responde() {
+        // Dois endereços que nunca respondem (`192.0.2.0/24` e
+        // `198.51.100.0/24` são as faixas de documentação, reservadas
+        // justamente para isto). O prazo tem de mandar, e o motivo tem de ser
+        // o de rotina — não o de segurança.
+        //
+        // **O que este teste não prova:** que a linha de rastro do prazo saiu.
+        // Ele não instala assinante de `tracing` e não lê log nenhum; o que
+        // prende é o prazo e o motivo. A linha em si é lida por olho humano,
+        // e é honesto dizer isso aqui em vez de fingir cobertura.
+        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let comecou = std::time::Instant::now();
+        let erro = ligar(
+            &b,
+            &[
+                "192.0.2.1:9".parse().unwrap(),
+                "198.51.100.1:9".parse().unwrap(),
+            ],
+            "f".repeat(64),
+            std::time::Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            matches!(erro, ErroDePar::NaoAlcancou),
+            "silêncio não é evento de segurança: {erro:?}"
+        );
+        assert!(
+            comecou.elapsed() < std::time::Duration::from_secs(3),
+            "o prazo não mandou: a discagem levou {:?}",
+            comecou.elapsed()
+        );
     }
 }
