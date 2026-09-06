@@ -118,7 +118,11 @@ mod tests {
     use super::*;
 
     fn pasta(nome: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("seele-quintal-{nome}-{}", std::process::id()));
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static QUAL: AtomicUsize = AtomicUsize::new(0);
+        let n = QUAL.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("seele-quintal-{nome}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temporário");
         dir

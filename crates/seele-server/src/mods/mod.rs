@@ -399,13 +399,28 @@ mod tests {
     use super::*;
 
     /// Uma pasta de dados de mentira, por teste.
+    /// Uma pasta de dados de mentira, **única por chamada**.
+    ///
+    /// O contador não é zelo. Sem ele, dois testes que passem o mesmo nome
+    /// dividem o diretório, e como `cargo test` roda em paralelo um apaga o do
+    /// outro no meio da corrida. Foi o que aconteceu: testes **diferentes**
+    /// falhando a cada execução, que é assinatura de colisão e não de lógica —
+    /// e nenhum deles falhava sozinho.
+    ///
+    /// Único por construção, e não por todo chamador lembrar de um nome
+    /// diferente: a versão que dependia disso é a que quebrou.
     fn pasta_de_teste(nome: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static QUAL: AtomicUsize = AtomicUsize::new(0);
+
+        let n = QUAL.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("seele-anfitriao-{nome}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("seele-anfitriao-{nome}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temporário");
         dir
     }
+
     #[test]
     fn um_mod_que_carrega_responde_a_um_momento() {
         let mut anfitriao = Anfitriao::novo().expect("anfitrião");
