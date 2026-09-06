@@ -27,6 +27,8 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod arquivos;
+
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -152,7 +154,12 @@ impl Anfitriao {
     /// # Errors
     ///
     /// [`Falha::NaoCarregou`] when the source does not compile.
-    pub fn carregar(&mut self, id: &str, fonte: &str) -> Result<(), Falha> {
+    pub fn carregar(
+        &mut self,
+        id: &str,
+        fonte: &str,
+        pasta_de_dados: &std::path::Path,
+    ) -> Result<(), Falha> {
         let runtime = Runtime::new().map_err(|_| Falha::NaoCarregou)?;
         runtime.set_memory_limit(self.teto_de_memoria);
 
@@ -164,8 +171,47 @@ impl Anfitriao {
         })));
 
         let contexto = Context::full(&runtime).map_err(|_| Falha::NaoCarregou)?;
+
+        // A pasta do MOD, e nada além dela. Ver `arquivos` para por que o disco
+        // é a única exceção à liberdade total do ADR 0044.
+        let pasta = pasta_de_dados.to_path_buf();
         contexto
-            .with(|ctx| ctx.eval::<(), _>(fonte))
+            .with(|ctx| {
+                let arquivos_js = rquickjs::Object::new(ctx.clone())?;
+
+                let p = pasta.clone();
+                arquivos_js.set(
+                    "ler",
+                    Function::new(ctx.clone(), move |caminho: String| {
+                        arquivos::ler(&p, &caminho)
+                    })?,
+                )?;
+
+                let p = pasta.clone();
+                arquivos_js.set(
+                    "escrever",
+                    Function::new(ctx.clone(), move |caminho: String, conteudo: String| {
+                        arquivos::escrever(&p, &caminho, &conteudo)
+                    })?,
+                )?;
+
+                let p = pasta.clone();
+                arquivos_js.set(
+                    "listar",
+                    Function::new(ctx.clone(), move || arquivos::listar(&p))?,
+                )?;
+
+                let p = pasta.clone();
+                arquivos_js.set(
+                    "apagar",
+                    Function::new(ctx.clone(), move |caminho: String| {
+                        arquivos::apagar(&p, &caminho)
+                    })?,
+                )?;
+
+                ctx.globals().set("arquivos", arquivos_js)?;
+                ctx.eval::<(), _>(fonte)
+            })
             .map_err(|_| Falha::NaoCarregou)?;
 
         self.hospedes.insert(
@@ -286,6 +332,15 @@ impl Anfitriao {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Uma pasta de dados de mentira, por teste.
+    fn pasta_de_teste(nome: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("seele-anfitriao-{nome}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temporário");
+        dir
+    }
     #[test]
     fn um_mod_que_carrega_responde_a_um_momento() {
         let mut anfitriao = Anfitriao::novo().expect("anfitrião");
@@ -293,6 +348,7 @@ mod tests {
             .carregar(
                 "seele/exemplo",
                 "globalThis.aoAcontecer = (momento) => { globalThis.ultimo = momento; };",
+                &pasta_de_teste("t"),
             )
             .expect("carregar");
         anfitriao
@@ -310,6 +366,7 @@ mod tests {
             .carregar(
                 "seele/glutao",
                 "globalThis.aoAcontecer = () => { const a = []; for (;;) a.push(new Array(1024)); };",
+                &pasta_de_teste("t"),
             )
             .expect("carregar");
 
@@ -325,7 +382,11 @@ mod tests {
 
         // E o contexto ainda responde.
         anfitriao
-            .carregar("seele/glutao", "globalThis.aoAcontecer = () => {};")
+            .carregar(
+                "seele/glutao",
+                "globalThis.aoAcontecer = () => {};",
+                &pasta_de_teste("t"),
+            )
             .expect("recarregar depois do estouro");
         anfitriao
             .chamar("seele/glutao", "PersonJoined", "{}", &mut BTreeMap::new())
@@ -339,6 +400,7 @@ mod tests {
             .carregar(
                 "seele/placar",
                 "globalThis.aoAcontecer = () => { dados.pontos = '7'; };",
+                &pasta_de_teste("t"),
             )
             .expect("carregar");
 
@@ -357,6 +419,7 @@ mod tests {
             .carregar(
                 "seele/placar",
                 "globalThis.aoAcontecer = () => { dados.eco = dados.pontos; };",
+                &pasta_de_teste("t"),
             )
             .expect("carregar");
 
@@ -377,6 +440,7 @@ mod tests {
             .carregar(
                 "seele/meio",
                 "globalThis.aoAcontecer = () => { dados.a = '1'; throw new Error('no meio'); };",
+                &pasta_de_teste("t"),
             )
             .expect("carregar");
 
@@ -401,6 +465,7 @@ mod tests {
                 "globalThis.aoAcontecer = () => { \
                    for (let i = 0; i < 5000; i++) dados['c' + i] = 'x'.repeat(100); \
                  };",
+                &pasta_de_teste("t"),
             )
             .expect("carregar");
 
@@ -413,6 +478,79 @@ mod tests {
             quintal.get("antes").map(String::as_str),
             Some("ok"),
             "o quintal foi aparado em vez de a escrita ser recusada"
+        );
+    }
+
+    /// De ponta a ponta: um MOD **em JavaScript** escreve na pasta dele.
+    ///
+    /// Os testes de `arquivos` provam a regra; este prova a **ligação**. Sem
+    /// ele, as quatro funções poderiam estar corretas e nunca registradas no
+    /// contexto, e nada reclamaria.
+    #[test]
+    fn um_mod_escreve_um_arquivo_de_dentro_do_javascript() {
+        let pasta = pasta_de_teste("js-escreve");
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/rpg",
+                "globalThis.aoAcontecer = () => { \
+                   dados.gravou = arquivos.escrever('fichas/coelho.json', '{\"forca\":18}') \
+                     ? 'sim' : 'nao'; \
+                   dados.leu = arquivos.ler('fichas/coelho.json') ?? 'nada'; \
+                 };",
+                &pasta,
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::new();
+        anfitriao
+            .chamar("seele/rpg", "PersonJoined", "{}", &mut quintal)
+            .expect("chamar");
+
+        assert_eq!(quintal.get("gravou").map(String::as_str), Some("sim"));
+        assert_eq!(
+            quintal.get("leu").map(String::as_str),
+            Some("{\"forca\":18}")
+        );
+        assert!(pasta.join("fichas/coelho.json").exists());
+    }
+
+    /// E o mesmo MOD, tentando sair, recebe `false` em vez da chave de
+    /// identidade de quem hospeda.
+    #[test]
+    fn um_mod_que_tenta_sair_da_pasta_pelo_javascript_recebe_recusa() {
+        let raiz = pasta_de_teste("js-fuga");
+        let minha = raiz.join("dados");
+        std::fs::create_dir_all(&minha).expect("pasta do mod");
+        std::fs::write(raiz.join("identity.key"), "SEGREDO").expect("chave de mentira");
+
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/curioso",
+                "globalThis.aoAcontecer = () => { \
+                   dados.leu = arquivos.ler('../identity.key') ?? 'nada'; \
+                   dados.escreveu = arquivos.escrever('../invadi.txt', 'oi') ? 'sim' : 'nao'; \
+                 };",
+                &minha,
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::new();
+        anfitriao
+            .chamar("seele/curioso", "PersonJoined", "{}", &mut quintal)
+            .expect("chamar");
+
+        assert_eq!(
+            quintal.get("leu").map(String::as_str),
+            Some("nada"),
+            "um MOD leu o identity.key de quem hospeda"
+        );
+        assert_eq!(quintal.get("escreveu").map(String::as_str), Some("nao"));
+        assert!(!raiz.join("invadi.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(raiz.join("identity.key")).expect("ler"),
+            "SEGREDO"
         );
     }
 
@@ -429,7 +567,7 @@ mod tests {
 
         let mut apertado = Anfitriao::com_tetos(256 * 1024, 10_000_000).expect("apertado");
         apertado
-            .carregar("seele/x", ALOCA_UM_MIB)
+            .carregar("seele/x", ALOCA_UM_MIB, &pasta_de_teste("t"))
             .expect("carregar");
         assert!(
             apertado
@@ -439,7 +577,9 @@ mod tests {
         );
 
         let mut folgado = Anfitriao::com_tetos(8 * 1024 * 1024, 10_000_000).expect("folgado");
-        folgado.carregar("seele/x", ALOCA_UM_MIB).expect("carregar");
+        folgado
+            .carregar("seele/x", ALOCA_UM_MIB, &pasta_de_teste("t"))
+            .expect("carregar");
         folgado
             .chamar("seele/x", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("1 MiB não coube num teto de 8 MiB");
@@ -456,7 +596,9 @@ mod tests {
             "globalThis.aoAcontecer = () => { let s = 0; for (let i = 0; i < 1e7; i++) s += i; };";
 
         let mut apertado = Anfitriao::com_tetos(64 * 1024 * 1024, 100).expect("apertado");
-        apertado.carregar("seele/y", LACO_LONGO).expect("carregar");
+        apertado
+            .carregar("seele/y", LACO_LONGO, &pasta_de_teste("t"))
+            .expect("carregar");
         assert_eq!(
             apertado.chamar("seele/y", "PersonJoined", "{}", &mut BTreeMap::new()),
             Err(Falha::PassouDoTempo),
@@ -464,7 +606,9 @@ mod tests {
         );
 
         let mut folgado = Anfitriao::com_tetos(64 * 1024 * 1024, 10_000).expect("folgado");
-        folgado.carregar("seele/y", LACO_LONGO).expect("carregar");
+        folgado
+            .carregar("seele/y", LACO_LONGO, &pasta_de_teste("t"))
+            .expect("carregar");
         folgado
             .chamar("seele/y", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("o mesmo laço não coube em 10 000 consultas");
@@ -479,6 +623,7 @@ mod tests {
             .carregar(
                 "seele/eterno",
                 "globalThis.aoAcontecer = () => { while (true) {} };",
+                &pasta_de_teste("t"),
             )
             .expect("carregar");
 
@@ -504,12 +649,14 @@ mod tests {
             .carregar(
                 "seele/um",
                 "globalThis.marca = 1; globalThis.aoAcontecer = () => {};",
+                &pasta_de_teste("t"),
             )
             .expect("um");
         anfitriao
             .carregar(
                 "seele/dois",
                 "globalThis.aoAcontecer = () => { if (globalThis.marca) throw new Error('vazou'); };",
+                &pasta_de_teste("t"),
             )
             .expect("dois");
         anfitriao
@@ -523,7 +670,11 @@ mod tests {
     fn um_mod_que_nao_compila_e_recusado_ao_carregar() {
         let mut anfitriao = Anfitriao::novo().expect("anfitrião");
         assert!(matches!(
-            anfitriao.carregar("seele/quebrado", "isto ( não é javascript"),
+            anfitriao.carregar(
+                "seele/quebrado",
+                "isto ( não é javascript",
+                &pasta_de_teste("t")
+            ),
             Err(Falha::NaoCarregou)
         ));
     }
@@ -534,7 +685,7 @@ mod tests {
     fn um_mod_sem_ao_acontecer_nao_e_falha() {
         let mut anfitriao = Anfitriao::novo().expect("anfitrião");
         anfitriao
-            .carregar("seele/mudo", "globalThis.nada = 1;")
+            .carregar("seele/mudo", "globalThis.nada = 1;", &pasta_de_teste("t"))
             .expect("carregar");
         anfitriao
             .chamar("seele/mudo", "PersonJoined", "{}", &mut BTreeMap::new())
