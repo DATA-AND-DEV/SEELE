@@ -176,10 +176,14 @@ por posição — acrescentar no fim é ilegível para quem não conhece a varia
 
 **cliente → servidor**
 
-A `impressao` das quatro mensagens é o **SHA-256 do certificado DER**, os mesmos
-32 bytes que `tls::Identity::fingerprint` já produz do lado do servidor e que o
-`fp=` do `seele://` carrega. Um formato só para a mesma coisa, em vez de um
-segundo jeito de dizer «este é o certificado».
+A `impressao` das quatro mensagens é uma `String`: o **SHA-256 do certificado
+DER em hexadecimal minúsculo**, exatamente o que
+`seele_proto::transport::certificate_fingerprint` devolve, que é o que
+`tls::Identity::fingerprint` usa e o que o `fp=` do `seele://` carrega. Um
+formato só para a mesma coisa, em vez de um segundo jeito de dizer «este é o
+certificado» — e `String` e não `[u8; 32]` porque é assim que o pino do ADR 0003
+já viaja e é guardado, e dois formatos para o mesmo hash é o começo de os dois
+discordarem.
 
 - `EmprestarSubida { emprestando: bool, impressao: [u8; 32], locais: Vec<SocketAddr> }`
   — «eu empresto, este é o meu certificado, e estes são os meus endereços de rede
