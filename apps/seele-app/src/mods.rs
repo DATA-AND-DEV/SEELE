@@ -17,7 +17,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 /// Serves one path under `mod://`, or nothing.
 ///
@@ -39,7 +39,7 @@ pub(crate) fn serve(config_dir: &Path, url_path: &str) -> Option<Vec<u8>> {
         return None;
     }
 
-    let relative = caminho_interno(&inside)?;
+    let relative = seele_ffi::mods::caminho_interno(&inside)?;
 
     let id = format!("{author}/{name}");
     let declared = seele_ffi::mods::ler_um(&config_dir.to_string_lossy(), &id)
@@ -62,32 +62,10 @@ pub(crate) fn serve(config_dir: &Path, url_path: &str) -> Option<Vec<u8>> {
     .ok()
 }
 
-/// The path inside a MOD, rebuilt from components, or nothing.
-///
-/// Its own function, and tested on its own, because of what proving it taught:
-/// while this lived inside [`serve`], the traversal test passed with the whole
-/// rebuilding deleted — the manifest check was catching those paths for another
-/// reason, and the guard agreed with its own comment without doing anything.
-/// `CLAUDE.md`: "existir não é funcionar".
-///
-/// A `..` anywhere is refused rather than resolved, and so is an absolute
-/// component, a root, or an empty piece. Refusing beats resolving because
-/// resolving is where a path that looks contained stops being contained.
-fn caminho_interno(inside: &[&str]) -> Option<PathBuf> {
-    let mut relative = PathBuf::new();
-    for part in inside {
-        let mut components = Path::new(part).components();
-        match (components.next(), components.next()) {
-            (Some(Component::Normal(piece)), None) => relative.push(piece),
-            _ => return None,
-        }
-    }
-    Some(relative)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn semear(raiz: &Path, id: &str) -> PathBuf {
         let dir = raiz.join("mods").join(id);
@@ -132,40 +110,14 @@ mod tests {
         assert_eq!(serve(&raiz, "/seele/exemplo/cliente/extra.js"), None);
     }
 
-    /// `..` não sobe, e isto é cobrado **na função que decide**.
+    /// Caminho inteiro por `serve`, e **este teste não é a prova da travessia**.
     ///
-    /// A primeira versão deste teste passava por `serve` e continuou verde com
-    /// a reconstrução por componentes inteiramente apagada: a conferência do
-    /// manifesto recusava aqueles caminhos por outro motivo, e o guarda da
-    /// travessia não guardava nada. Provado revertendo, achado assim, e movido
-    /// para cá — onde apagar a defesa reprova o teste.
-    #[test]
-    fn nenhum_caminho_com_dois_pontos_vira_caminho_interno() {
-        for parte in [
-            vec!["..", "etc", "passwd"],
-            vec!["cliente", "..", "..", "mod.json"],
-            vec!["cliente", "../main.js"],
-            vec!["/etc", "passwd"],
-            vec![""],
-            vec!["."],
-        ] {
-            assert_eq!(
-                caminho_interno(&parte),
-                None,
-                "`{parte:?}` virou caminho interno"
-            );
-        }
-    }
-
-    #[test]
-    fn um_caminho_comum_vira_caminho_interno() {
-        assert_eq!(
-            caminho_interno(&["cliente", "main.js"]),
-            Some(PathBuf::from("cliente").join("main.js"))
-        );
-    }
-
-    /// E o caminho inteiro, por `serve`, que é o que a janela realmente chama.
+    /// Vale dizer, porque a suposição contrária já custou uma vez: com a regra
+    /// de `seele_proto::mods::inner_path` inteiramente quebrada, este teste
+    /// continua verde — a conferência do manifesto recusa estes caminhos por
+    /// outro motivo. A prova de verdade é
+    /// `nenhum_caminho_com_dois_pontos_vira_caminho_interno`, lá, com os dois
+    /// lados. Aqui é integração: o `serve` recusa, seja qual for a razão.
     #[test]
     fn um_caminho_que_tenta_subir_nao_e_servido() {
         let raiz = temporario("subir");

@@ -186,6 +186,32 @@ silenciosa é o modo de falha a evitar.**
 Se «expulsar» passar a significar outra coisa, nenhuma fachada segura um MOD que
 dependia do significado antigo. É para esse dia que o **ADR 0045** existe.
 
+### O único freio da liberdade total, e ele é de uma linha
+
+Um MOD alcança tudo — inclusive rede de saída, que é o que o MOD de túnel do
+dono exige. **A exceção é o disco: um MOD lê e escreve na pasta dele**,
+`mods/<autor>/<nome>/dados/`, e não na máquina.
+
+O motivo não é uma regra de produto se aplicando a MOD. É o que fica ao lado
+daquela pasta, no diretório do ADR 0017: `identity.key`, `pins`, `conhecidos` e
+o banco com todas as conversas. Disco inteiro entregaria a **chave privada de
+identidade** de quem hospeda, e aí o que cai não é estética: é o ADR 0004 e o
+0017, que são o que garante que a pessoa é ela mesma.
+
+**Rede e disco não são o mesmo grau, e é isso que torna a linha desenhável:**
+rede deixa um MOD mandar para fora o que ele já enxerga; disco decide o que ele
+enxerga. Sozinha, a rede não alcança o `identity.key`.
+
+A pasta própria entrega os três usos que existem — volume de verdade, importar e
+exportar, e um lugar que quem hospeda abre para ver o que o MOD guardou. O
+quarto — **falar com outro programa da máquina** — é o único que pede o disco
+inteiro, e a saída está nomeada: capacidade declarada no manifesto e mostrada
+**em separado** na tela de aceite, pelo caminho que o `reach` já tem. Quem
+instala lê «este MOD lê o seu disco inteiro» como uma linha própria.
+
+O escopo é conferido por `seele_proto::mods::inner_path` — a mesma função que o `mod://` usa,
+e não uma segunda cópia dela.
+
 ### Como o código entra na janela
 
 `script-src 'self'` recusa qualquer `.js` que não esteja embutido, e afrouxar

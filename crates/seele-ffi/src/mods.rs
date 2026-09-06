@@ -84,3 +84,21 @@ fn achatar(found: Found) -> ModInstalado {
         },
     }
 }
+
+/// O caminho dentro de um MOD, reconstruído por componentes, ou nada.
+///
+/// Republicado e não reimplementado: a regra é a mesma que o servidor usa para
+/// limitar um MOD à pasta dele, e duas cópias seriam dois lugares para
+/// consertar e um para esquecer. Mora no `seele-proto` porque é o único crate
+/// que a casca **e** o servidor alcançam — cada um pelo caminho que
+/// `check_deps` permite.
+///
+/// # Errors
+///
+/// Devolve `None` para `..`, para componente absoluto, para raiz e para pedaço
+/// vazio. Recusar em vez de resolver, porque resolver é onde um caminho que
+/// parece contido deixa de estar.
+#[must_use]
+pub fn caminho_interno(partes: &[&str]) -> Option<std::path::PathBuf> {
+    seele_core::mods::inner_path(partes)
+}

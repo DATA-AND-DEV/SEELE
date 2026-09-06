@@ -63,14 +63,15 @@
     "guardar": "mod_data",
     "ler": "mod_data",
     "esquecer": "mod_data",
-    "listar": "mod_data"
+    "listar": "mod_data",
+    "lerArquivo": "inner_path",
+    "escreverArquivo": "inner_path",
+    "listarArquivos": "inner_path",
+    "apagarArquivo": "inner_path"
   },
   "world": {
     "buscar": "Anfitriao",
     "agora": "now_seconds",
-    "registrar": "Anfitriao",
-    "lerArquivo": "Anfitriao",
-    "escreverArquivo": "Anfitriao",
-    "listarPasta": "Anfitriao"
+    "registrar": "Anfitriao"
   }
 }

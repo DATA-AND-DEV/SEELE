@@ -205,9 +205,71 @@ pub fn content_hash(files: &mut [(String, Vec<u8>)]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+/// The path inside a MOD's own directory, rebuilt from components, or nothing.
+///
+/// Two callers need exactly this rule and it must not drift between them:
+///
+/// - the desktop shell, serving a MOD's files under `mod://`;
+/// - the server, scoping a MOD's own folder under `mods/<author>/<name>/dados/`.
+///
+/// A second copy would be two places to fix and one to forget, so it lives in
+/// the one crate both are allowed to reach.
+///
+/// # Why refusing beats resolving
+///
+/// A `..` anywhere is refused rather than resolved, and so is an absolute
+/// component, a root, or an empty piece. Resolving is where a path that looks
+/// contained stops being contained.
+///
+/// This has its own tests because of what proving it taught: while the rule
+/// lived inside the `mod://` handler, the traversal test passed with the whole
+/// rebuilding deleted — another check was catching those paths for another
+/// reason, and the guard agreed with its own comment without doing anything.
+/// `CLAUDE.md`: "existir não é funcionar".
+#[must_use]
+pub fn inner_path(parts: &[&str]) -> Option<std::path::PathBuf> {
+    use std::path::{Component, Path, PathBuf};
+
+    let mut relative = PathBuf::new();
+    for part in parts {
+        let mut components = Path::new(part).components();
+        match (components.next(), components.next()) {
+            (Some(Component::Normal(piece)), None) => relative.push(piece),
+            _ => return None,
+        }
+    }
+    Some(relative)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nenhum_caminho_com_dois_pontos_vira_caminho_interno() {
+        for parte in [
+            vec!["..", "etc", "passwd"],
+            vec!["cliente", "..", "..", "mod.json"],
+            vec!["cliente", "../main.js"],
+            vec!["/etc", "passwd"],
+            vec![""],
+            vec!["."],
+        ] {
+            assert_eq!(
+                inner_path(&parte),
+                None,
+                "`{parte:?}` virou caminho interno"
+            );
+        }
+    }
+
+    #[test]
+    fn um_caminho_comum_vira_caminho_interno() {
+        assert_eq!(
+            inner_path(&["cliente", "main.js"]),
+            Some(std::path::PathBuf::from("cliente").join("main.js"))
+        );
+    }
 
     fn manifesto_minimo() -> String {
         format!(
