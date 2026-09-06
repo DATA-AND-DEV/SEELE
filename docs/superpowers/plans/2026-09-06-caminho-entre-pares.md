@@ -1285,6 +1285,16 @@ git commit -m "feat(pares): o servidor guarda quem empresta e aponta quem serve 
 **Files:**
 - Modify: `crates/seele-core/src/enlace.rs` (braço novo perto de `:2441`, onde `HostUplink` já é tratado)
 - Modify: `crates/seele-core/src/par.rs`
+- Modify: `crates/seele-core/src/state.rs` (o braço provisório que a Task 6 deixou, perto de `:1213`)
+
+**O braço de `state.rs` é seu, e ele tem dono só desde 06/09.** A Task 6 precisou
+acrescentá-lo porque `Room::apply` faz `match` exaustivo sobre `ServerMessage` e
+parou de compilar com as variantes novas. Ele é andaime com `warn!`, e **não é
+ponto morto**: `crates/seele-ffi/src/lib.rs:3358` chama `room.apply(message)` para
+toda mensagem recebida em produção. Decida o que a `Room` faz com
+`AssistaTelaPor` e `SirvaTelaPara` — mesmo que a resposta seja «nada, porque quem
+age é o `enlace`», essa resposta tem de estar escrita ali em vez de um `warn!` de
+andaime.
 
 **Interfaces:**
 - Consumes: `ligar`, `ParLigado`, `ErroDePar` (Tasks 1–4); `ServerMessage::AssistaTelaPor` (Task 6)
