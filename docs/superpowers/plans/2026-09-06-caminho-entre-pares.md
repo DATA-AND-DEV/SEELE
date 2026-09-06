@@ -160,12 +160,15 @@ pub enum ErroDePar {
 ///
 /// Falha se o `rcgen` não gerar chave ou certificado.
 pub fn identidade_efemera() -> Result<Identidade, ErroDePar> {
+    // A forma exata que `tela.rs:2049` já usa neste crate, e por isso está
+    // provada contra esta versão do `rcgen`. Não invente outra.
     let gerado = rcgen::generate_simple_self_signed(vec!["seele-par".to_owned()])
         .map_err(|erro| ErroDePar::Certificado(erro.to_string()))?;
+    let cadeia = vec![CertificateDer::from(gerado.cert.der().to_vec())];
+    let chave = rustls::pki_types::PrivatePkcs8KeyDer::from(gerado.signing_key.serialize_der());
     Ok(Identidade {
-        cadeia: vec![CertificateDer::from(gerado.cert)],
-        chave: PrivateKeyDer::try_from(gerado.signing_key.serialize_der())
-            .map_err(|erro| ErroDePar::Certificado(erro.to_string()))?,
+        cadeia,
+        chave: chave.into(),
     })
 }
 
@@ -184,11 +187,10 @@ Em `crates/seele-core/src/lib.rs`, junto dos outros `pub mod`, em ordem alfabét
 pub mod par;
 ```
 
-Em `crates/seele-core/Cargo.toml`, na seção `[dependencies]`, com a versão que `seele-server` já usa (confira com `grep rcgen crates/seele-server/Cargo.toml` e copie exatamente):
-
-```toml
-rcgen = "<a mesma versão do seele-server>"
-```
+Em `crates/seele-core/Cargo.toml`: **`rcgen = "0.14.8"` já existe, em
+`[dev-dependencies]`** — `tela.rs:2049` e `frame.rs:79` o usam em teste. **Mova a
+linha** para `[dependencies]`, sem mudar a versão. Acrescentar uma segunda linha
+deixaria a mesma dependência declarada duas vezes com liberdade de divergirem.
 
 - [ ] **Step 4: Run test to verify it passes**
 
