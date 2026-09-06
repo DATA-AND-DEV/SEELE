@@ -49,7 +49,23 @@ use thiserror::Error;
 /// era outro defeito, e está em [`crate::screen::SCREEN_HEADER_VERSION`]: o
 /// cabeçalho da tela carregava este número e herdava esta janela, apesar de os
 /// onze bytes dele nunca terem mudado.
-pub const PROTOCOL_VERSION: u8 = 3;
+///
+/// **4 desde 06/09/2026**, com o caminho entre pares.
+///
+/// A v3 **já tinha saído** — release `v0.10.5-1`, commit `12a6401a6` — quando as
+/// quatro variantes abaixo entraram, então elas não puderam pegar carona numa
+/// versão ainda não publicada como as do ADR 0036 pegaram na v2. Foram
+/// acrescentadas [`crate::control::ClientMessage::EmprestarSubida`],
+/// [`crate::control::ClientMessage::ParFalhou`],
+/// [`crate::control::ServerMessage::SirvaTelaPara`] e
+/// [`crate::control::ServerMessage::AssistaTelaPor`] — o cliente que empresta a
+/// própria subida para outro par assistir, e o servidor que orquestra o
+/// encontro entre os dois.
+///
+/// Um cliente v3 continua entrando num servidor v4, porque 3 está na janela; só
+/// nunca recebe as variantes novas, e é servido pelo servidor como sempre foi
+/// — o mesmo comportamento que um cliente v2 já tinha diante da v3.
+pub const PROTOCOL_VERSION: u8 = 4;
 
 /// How many past versions a peer accepts, beyond the current one.
 ///
@@ -149,21 +165,34 @@ mod tests {
     /// mesmo minuto».
     #[test]
     fn a_versao_anterior_continua_dentro_da_janela() {
-        // **Os números mudaram em 04/09/2026, e a janela deslizou junto.**
+        // **Os números mudaram de novo em 06/09/2026, com o caminho entre
+        // pares, e a janela deslizou junto.**
         //
-        // A v1 saiu da janela, e a decisão foi de quem hospeda: «não tem ninguém
-        // na 0.9.x», que é onde a v1 vivia. O que fica preso aqui é a forma —
-        // aceita-se a de agora e a anterior, recusa-se a seguinte —, e ela vale
-        // para qualquer número.
-        assert_eq!(PROTOCOL_VERSION, 3);
-        assert_eq!(oldest_supported_version(), 2);
-        assert!(negotiate(2).is_ok(), "a versão anterior foi recusada");
-        assert!(negotiate(3).is_ok());
+        // Desta vez quem sai da janela é a v2, e a diferença para a subida
+        // anterior é esta: a v3 **já tinha saído** — release `v0.10.5-1`, commit
+        // `12a6401a6` — então existe gente rodando exatamente essa versão, e é
+        // ela que a janela precisa continuar cobrindo. O que fica preso aqui é a
+        // forma — aceita-se a de agora e a anterior, recusa-se a seguinte —, e
+        // ela vale para qualquer número.
+        assert_eq!(PROTOCOL_VERSION, 4);
+        assert_eq!(oldest_supported_version(), 3);
+        assert!(negotiate(3).is_ok(), "a versão anterior foi recusada");
+        assert!(negotiate(4).is_ok());
         assert!(
-            negotiate(1).is_err(),
-            "a v1 continuou aceita depois de a janela deslizar"
+            negotiate(2).is_err(),
+            "a v2 continuou aceita depois de a janela deslizar"
         );
-        assert!(negotiate(4).is_err(), "um cliente do futuro foi aceito");
+        assert!(negotiate(5).is_err(), "um cliente do futuro foi aceito");
+    }
+
+    #[test]
+    fn a_versao_subiu_para_a_do_caminho_entre_pares() {
+        // A v3 **já saiu** no release `v0.10.5-1` (commit `12a6401a6`), então as
+        // quatro mensagens novas não pegam carona como as do ADR 0036 pegaram na
+        // v2. Um cliente v3 conecta pela janela, nunca recebe as mensagens novas, e
+        // é servido pelo servidor — que é o comportamento de antes desta onda.
+        assert_eq!(PROTOCOL_VERSION, 4);
+        assert_eq!(oldest_supported_version(), 3);
     }
 
     #[test]

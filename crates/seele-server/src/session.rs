@@ -2262,6 +2262,20 @@ async fn run_session(
                         }
                     }
 
+                    // O protocolo já leva os dois verbos do caminho entre
+                    // pares (`PROTOCOL_VERSION` 4), mas quem os liga a
+                    // `pares.rs` é a próxima tarefa deste plano — que ainda não
+                    // existe neste commit. Rastreado, e não calado: uma pessoa
+                    // que emprestou a subida ou relatou um par que falhou não
+                    // pode descobrir dias depois, sem dado nenhum, que o
+                    // servidor nunca fez nada com o pedido dela.
+                    ClientMessage::EmprestarSubida { .. } | ClientMessage::ParFalhou { .. } => {
+                        tracing::debug!(
+                            person = %session.person,
+                            "caminho entre pares recebido antes de o despacho existir"
+                        );
+                    }
+
                     // The handshake is over. Repeating it is a protocol
                     // violation, not a re-authentication.
                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,

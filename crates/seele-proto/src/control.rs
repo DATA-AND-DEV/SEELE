@@ -227,6 +227,16 @@ pub const SIGNATURE_LEN: usize = 64;
 /// password fallback needs.
 pub const MAX_PROOF_LEN: usize = 256;
 
+/// Length of uma impressão digital em hex minúsculo.
+///
+/// Um SHA-256 em hexadecimal são exatamente 64 caracteres — nem mais, nem
+/// menos, o mesmo tamanho que [`crate::uri`] já confere para o `fp=` do
+/// `seele://`. Só o tamanho é conferido aqui: se os caracteres são hex e se a
+/// impressão bate com um certificado de verdade é o que o aperto de mão
+/// descobre, e é para isso que [`MotivoDeFalhaDePar::ImpressaoNaoBate`]
+/// existe.
+pub const MAX_IMPRESSAO_LEN: usize = 64;
+
 /// Why a control frame could not be handled.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ControlError {
@@ -727,6 +737,24 @@ pub enum AlertReason {
     },
 }
 
+/// Por que um par deixou de servir uma transmissão.
+///
+/// Cada variante distingue um conserto diferente, e é por isso que são quatro e
+/// não uma. `ImpressaoNaoBate` **não** é `NaoAlcancou`: a diferença entre «não
+/// consegui falar com ele» e «alguém respondeu no lugar dele» é a informação
+/// inteira, e é a mesma distinção que o ADR 0003 existe para nomear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MotivoDeFalhaDePar {
+    /// Nenhum dos endereços fechou aperto de mão.
+    NaoAlcancou,
+    /// Alguém respondeu, e não era quem o servidor apresentou.
+    ImpressaoNaoBate,
+    /// Estava servindo, e a conexão morreu.
+    CaiuNoMeio,
+    /// Conexão viva, e quadro nenhum dentro do prazo.
+    ParouDeMandar,
+}
+
 /// Client to server.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClientMessage {
@@ -1205,6 +1233,40 @@ pub enum ClientMessage {
     UnwatchScreen {
         /// Qual transmissão.
         screen: ScreenId,
+    },
+    /// «Eu empresto a minha subida», ou «deixei de emprestar».
+    ///
+    /// **Opt-in, e por duas razões independentes.** A primeira é privacidade:
+    /// numa malha, quem assiste passa a conhecer o endereço de quem lhe
+    /// repassa, e hoje ninguém conhece endereço de ninguém — um servidor não é
+    /// necessariamente entre amigos, e o ADR 0021 deixa a admissão poder ser
+    /// aberta. A segunda é custo: a máquina de quem empresta passa a subir
+    /// cópias para outras pessoas, e ninguém deve gastar a internet de alguém
+    /// sem perguntar.
+    EmprestarSubida {
+        /// Se empresta a partir de agora.
+        emprestando: bool,
+        /// SHA-256 do certificado desta sessão, em hex minúsculo. O mesmo
+        /// formato do `fp=` do `seele://` e do pino do ADR 0003 — um formato só
+        /// para a mesma coisa.
+        impressao: String,
+        /// Endereços de **rede local** por onde este par atende.
+        ///
+        /// O público não vem daqui: ele é a origem da conexão que já está
+        /// aberta, e o servidor o tem sem perguntar. Um endereço público que o
+        /// cliente afirma seria um endereço que ele pode mentir.
+        locais: Vec<std::net::SocketAddr>,
+    },
+    /// O par que estava servindo esta transmissão não serve mais.
+    ///
+    /// **Mandada por quem recebe, e nunca por quem empresta:** quem sabe que a
+    /// imagem parou é quem estava esperando por ela, e quem empresta pode ter
+    /// caído sem chegar a saber de nada.
+    ParFalhou {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// O que aconteceu.
+        motivo: MotivoDeFalhaDePar,
     },
 }
 
@@ -1773,6 +1835,32 @@ pub enum ServerMessage {
         /// O nome novo.
         nickname: String,
     },
+    /// Sirva esta transmissão a este par.
+    ///
+    /// Quem recebe isto disca para os endereços **e** passa a atender: as duas
+    /// tentativas simultâneas são o que abre o NAT dos dois lados, e a primeira
+    /// que fecha o aperto de mão vence.
+    SirvaTelaPara {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// Onde o outro par pode ser alcançado.
+        enderecos: Vec<std::net::SocketAddr>,
+        /// A impressão digital que o outro par vai apresentar.
+        impressao: String,
+    },
+    /// Assista a esta transmissão por este par, em vez de esperar por mim.
+    ///
+    /// Simétrica de [`Self::SirvaTelaPara`] de propósito: os dois lados fazem a
+    /// mesma coisa com ela — discar e conferir a impressão digital —, e a
+    /// assimetria fica só em quem já tem os bytes.
+    AssistaTelaPor {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// Onde o par pode ser alcançado.
+        enderecos: Vec<std::net::SocketAddr>,
+        /// A impressão digital que ele vai apresentar.
+        impressao: String,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2074,6 +2162,12 @@ impl Validate for ClientMessage {
             // mesma conferência que o pedido de quadro-chave já faz.
             | Self::WatchScreen { .. }
             | Self::UnwatchScreen { .. } => Ok(()),
+            Self::EmprestarSubida { impressao, .. } => {
+                check("impressao", impressao.len(), MAX_IMPRESSAO_LEN)
+            }
+            // O motivo é um enumerado de tamanho fixo, e a `ScreenId` segue a
+            // mesma regra do braço acima: quem sabe se ela existe é o servidor.
+            Self::ParFalhou { .. } => Ok(()),
         }
     }
 }
@@ -2171,6 +2265,9 @@ impl Validate for ServerMessage {
             | Self::KeyFrameRequested { .. }
             | Self::ScreenViewers { .. }
             | Self::HostUplink { .. } => Ok(()),
+            Self::SirvaTelaPara { impressao, .. } | Self::AssistaTelaPor { impressao, .. } => {
+                check("impressao", impressao.len(), MAX_IMPRESSAO_LEN)
+            }
         }
     }
 }
@@ -2226,6 +2323,55 @@ mod tests {
     fn a_server_message_round_trips() {
         let frame = encode(&session()).unwrap();
         assert_eq!(decode::<ServerMessage>(&frame).unwrap(), session());
+    }
+
+    #[test]
+    fn as_mensagens_do_caminho_entre_pares_atravessam_o_fio() {
+        // Ida e volta pelo `postcard`, como as outras. O que este teste prende de
+        // verdade é a **posição** das variantes: o `postcard` indexa variante por
+        // posição, então acrescentar no meio troca o significado de todas as
+        // seguintes para quem já está no ar.
+        let emprestar = ClientMessage::EmprestarSubida {
+            emprestando: true,
+            impressao: "a".repeat(64),
+            locais: vec!["192.168.1.7:41234".parse().unwrap()],
+        };
+        assert_eq!(
+            postcard::from_bytes::<ClientMessage>(&postcard::to_allocvec(&emprestar).unwrap())
+                .unwrap(),
+            emprestar
+        );
+
+        let falhou = ClientMessage::ParFalhou {
+            screen: ScreenId(7),
+            motivo: MotivoDeFalhaDePar::ImpressaoNaoBate,
+        };
+        assert_eq!(
+            postcard::from_bytes::<ClientMessage>(&postcard::to_allocvec(&falhou).unwrap())
+                .unwrap(),
+            falhou
+        );
+
+        let sirva = ServerMessage::SirvaTelaPara {
+            screen: ScreenId(7),
+            enderecos: vec!["203.0.113.9:8383".parse().unwrap()],
+            impressao: "b".repeat(64),
+        };
+        assert_eq!(
+            postcard::from_bytes::<ServerMessage>(&postcard::to_allocvec(&sirva).unwrap()).unwrap(),
+            sirva
+        );
+
+        let assista = ServerMessage::AssistaTelaPor {
+            screen: ScreenId(7),
+            enderecos: vec!["203.0.113.9:8383".parse().unwrap()],
+            impressao: "b".repeat(64),
+        };
+        assert_eq!(
+            postcard::from_bytes::<ServerMessage>(&postcard::to_allocvec(&assista).unwrap())
+                .unwrap(),
+            assista
+        );
     }
 
     #[test]
@@ -3489,20 +3635,22 @@ mod o_vocabulario_e_a_versao {
     #[test]
     fn o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou() {
         assert_eq!(
-            ordinal(&ClientMessage::UnwatchScreen {
-                screen: ScreenId(1)
+            ordinal(&ClientMessage::ParFalhou {
+                screen: ScreenId(1),
+                motivo: MotivoDeFalhaDePar::NaoAlcancou,
             }),
-            31,
+            33,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
         );
         assert_eq!(
-            ordinal(&ServerMessage::PersonRenamed {
-                person: PersonId(1),
-                nickname: "x".into()
+            ordinal(&ServerMessage::AssistaTelaPor {
+                screen: ScreenId(1),
+                enderecos: vec![],
+                impressao: String::new(),
             }),
-            33,
+            35,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -3510,14 +3658,17 @@ mod o_vocabulario_e_a_versao {
         // E o número da versão, preso ao lado deles. Ele é o que diz a um par se
         // vale a pena tentar — e enquanto ele não subir, dois builds com listas
         // diferentes vão continuar se cumprimentando como iguais.
-        // **Este número já cumpriu o trabalho dele uma vez.** Ele estava em 2
+        // **Este número já cumpriu o trabalho dele duas vezes.** Ele estava em 2
         // quando `WatchScreen` e `UnwatchScreen` entraram na lista sem que
         // ninguém decidisse sobre a versão; este teste reprovou na primeira vez
         // que alguém mexeu na lista depois disso, e a decisão foi tomada — a
-        // versão subiu para 3 em 04/09/2026.
+        // versão subiu para 3 em 04/09/2026. A segunda vez foi o caminho entre
+        // pares: `EmprestarSubida`, `ParFalhou`, `SirvaTelaPara` e
+        // `AssistaTelaPor` entraram, os dois braços acima passaram a apontar
+        // para o verbo novo de cada lista, e a versão subiu para 4.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            3,
+            4,
             "a versão do protocolo mudou; confira se os ordinais acima e a janela \
              de compatibilidade continuam contando a mesma história"
         );
