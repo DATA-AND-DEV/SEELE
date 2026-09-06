@@ -2542,7 +2542,7 @@ async fn run_session(
                     // `observar` devolve `Some` **quando a estimativa andou**,
                     // que em regime é raro.
                     //
-                    // Um erro de escrita avisa e não derruba nada: o Dogma
+                    // Um erro de escrita avisa e não derruba nada: o servidor
                     // continua com o número na memória, e o que se perde é a
                     // memória do próximo arranque.
                     if let Err(erro) =

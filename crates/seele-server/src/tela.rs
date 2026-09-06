@@ -1144,7 +1144,7 @@ mod tests {
     #[test]
     fn a_sonda_que_lembra_a_medida_nao_recomeca_da_hipotese() {
         // **O tateio acontecia em todo arranque.** A sonda começa na hipótese e
-        // sobe por evidência; sem memória, o Dogma reaprende de manhã o que
+        // sobe por evidência; sem memória, o servidor reaprende de manhã o que
         // mediu ontem à noite — e o portão de `d1c75bb`, que divide esse número
         // por N, recomeça recusando a partir do sétimo espectador.
         //

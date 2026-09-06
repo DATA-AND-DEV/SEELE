@@ -334,12 +334,12 @@ async fn a_conversa_ensina_o_cano_e_a_medida_chega_ao_portao_e_ao_disco() -> Res
 /// `persistence::subida` prova a ida e a volta num banco **em memória**, e o
 /// teste acima prova que a medida chega ao disco — dentro de um arranque só.
 /// Nenhum dos dois prova a frase que a onda vende: *«a medida sobrevive ao
-/// reinício»*. Entre eles cabia um Dogma que grava direito, fecha, sobe de novo
+/// reinício»*. Entre eles cabia um servidor que grava direito, fecha, sobe de novo
 /// e ignora o que gravou — e o sintoma seria o tateio de catorze segundos
 /// voltando em silêncio, na primeira tela de todo arranque, que é exatamente o
 /// defeito que ninguém relata porque parece normal.
 ///
-/// Aqui o banco é um arquivo, o primeiro Dogma morre, e o segundo nasce sobre o
+/// Aqui o banco é um arquivo, o primeiro servidor morre, e o segundo nasce sobre o
 /// mesmo arquivo.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_segundo_arranque_comeca_onde_o_primeiro_parou() -> Result<()> {
@@ -400,7 +400,7 @@ async fn o_segundo_arranque_comeca_onde_o_primeiro_parou() -> Result<()> {
     assert_eq!(
         ao_nascer,
         Some(medida),
-        "o Dogma reabriu o mesmo banco e nasceu sem medida nenhuma: a primeira \
+        "o servidor reabriu o mesmo banco e nasceu sem medida nenhuma: a primeira \
          tela deste arranque vai tatear de novo o que ontem já se sabia"
     );
     servidor.shutdown();

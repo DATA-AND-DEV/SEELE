@@ -1,15 +1,19 @@
 //! A subida medida desta máquina, guardada entre arranques.
 //!
 //! Uma linha na tabela `configuracao`, pelo mesmo critério que a migração 2
-//! escreveu para ela: *«configuração do Dogma que não cabe num arquivo, porque
-//! muda em tempo de execução e precisa sobreviver a reinício»*. É exatamente o
-//! que este número é.
+//! escreveu para ela: uma configuração *«que não cabe num arquivo, porque muda
+//! em tempo de execução e precisa sobreviver a reinício»*. É exatamente o que
+//! este número é.
+//!
+//! (O comentário citado ainda diz `Dogma` onde o produto hoje diz **servidor**;
+//! ele mora dentro do SQL de uma migração já aplicada, e o ADR 0035 preserva o
+//! que registra ontem. A frase acima é a de hoje.)
 //!
 //! # Por que guardar
 //!
 //! A [`crate::tela::SondaDaSubida`] começa na hipótese de
 //! [`crate::tela::CAMINHO_DO_SERVER_BPS`] e sobe por evidência. Sem memória,
-//! **toda** vez que o Dogma sobe ela recomeça dali — e o portão de admissão,
+//! **toda** vez que o servidor sobe ela recomeça dali — e o portão de admissão,
 //! que divide esse número por N, recomeça recusando a partir do sétimo
 //! espectador até a primeira janela ensinar de novo o que já se sabia ontem.
 //!
@@ -115,7 +119,7 @@ mod testes {
 
     #[test]
     fn o_que_foi_medido_volta_no_proximo_arranque() {
-        // A razão inteira deste módulo: sem isto, o Dogma recomeça na hipótese
+        // A razão inteira deste módulo: sem isto, o servidor recomeça na hipótese
         // de 2 Mbps toda vez que sobe, e o portão de admissão recomeça
         // recusando a partir do sétimo espectador.
         let persistence = memoria();

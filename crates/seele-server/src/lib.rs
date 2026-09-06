@@ -369,7 +369,7 @@ impl Daemon {
 
         // **Antes do mutex**, pela mesma razão que os anexos acima: o banco
         // ainda é nosso sozinho aqui, e o número tem de estar de pé antes da
-        // primeira conexão. Um erro de leitura não impede o Dogma de subir —
+        // primeira conexão. Um erro de leitura não impede o servidor de subir —
         // sem memória ele cai na ordem de sempre, que é o comportamento de
         // antes desta memória existir.
         let subida_lembrada = crate::persistence::subida::lembrada(&persistence)
