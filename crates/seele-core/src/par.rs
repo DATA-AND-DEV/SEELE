@@ -162,12 +162,8 @@ mod testes {
             porta_antes,
             "atender trocou a porta: o mapeamento de NAT que já estava vivo se perdeu"
         );
-        // E ela de fato aceita: sem `set_server_config`, `accept()` devolve `None`
-        // na hora em que a ponta é fechada. **A prova de que atender funciona é
-        // da Task 4**, porque esta asserção não cobre se `set_server_config` foi
-        // de verdade chamado.
-        let aceitando = tokio::spawn(async move { ponta.accept().await.is_some() });
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        aceitando.abort();
+        // **A prova de que atender funciona é da Task 4**, porque esta asserção
+        // só confere que a porta não mudou. Se `set_server_config` foi de verdade
+        // chamado com a configuração correta, é testado lá.
     }
 }
