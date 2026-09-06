@@ -77,6 +77,19 @@ pub enum ErroDePar {
     /// chega depois, como fechamento desta conexão.
     #[error("a ligação fechou logo depois de conectar: {0}")]
     RecusadoDepoisDeLigar(MotivoDaRecusa),
+    /// Alguém completou o aperto de mão, e o prazo venceu antes da
+    /// confirmação de aplicação.
+    ///
+    /// **Não é [`Self::NaoAlcancou`], pela mesma razão que
+    /// [`Self::ImpressaoNaoBate`] não é.** Aquele é silêncio total: nenhum
+    /// candidato respondeu. Aqui, pelo menos um respondeu e completou o
+    /// TLS — só não trocou o byte de confirmação a tempo, e dizer «nenhum
+    /// endereço deste par respondeu» seria falso. Também não
+    /// é [`Self::RecusadoDepoisDeLigar`]: aquele já tem um `CONNECTION_CLOSE`
+    /// de verdade para classificar; aqui não chegou fechamento nenhum, só o
+    /// prazo de `ligar` venceu primeiro.
+    #[error("um candidato completou o aperto de mão, e o prazo venceu antes da confirmação")]
+    ConfirmacaoNaoChegouATempo,
 }
 
 /// Por que a conexão fechou depois que quem disca já a considerava pronta.
@@ -468,6 +481,14 @@ pub async fn ligar(
     prazo: std::time::Duration,
 ) -> Result<ParLigado, ErroDePar> {
     let mut tentativas = tokio::task::JoinSet::new();
+    // **Marca se alguma tentativa chegou a completar o TLS.** Uma tentativa
+    // presa em `confirmar_com_quem_atende` quando o prazo vence é abortada
+    // sem nunca devolver nada — e sem esta marca, `ultimo` continuaria no
+    // `NaoAlcancou` inicial, que é falso: alguém respondeu, e completou o
+    // aperto de mão. É a mesma distinção que faz `ImpressaoNaoBate` não ser
+    // `NaoAlcancou`, só que para um candidato que trava depois de conectar
+    // em vez de mentir sobre quem é.
+    let apertou_a_mao = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     for endereco in enderecos {
         // `config_de_cliente` roda aqui, fora da tarefa, e devolve uma
         // configuração já dona dos próprios bytes — é o que deixa
@@ -476,6 +497,7 @@ pub async fn ligar(
         let (config, relato) = config_de_cliente(impressao_esperada.clone(), identidade_propria)?;
         let ponta = ponta.clone();
         let endereco = *endereco;
+        let apertou_a_mao = std::sync::Arc::clone(&apertou_a_mao);
         // Cada tentativa devolve **o próprio endereço** junto do resultado. Sem
         // isso, o rastro diz que «um endereço» falhou sem dizer qual, e o que
         // sobra no fim do prazo não tem nome nenhum.
@@ -487,6 +509,7 @@ pub async fn ligar(
                 let conexao = ligando
                     .await
                     .map_err(|erro| classificar(&relato, endereco, &erro))?;
+                apertou_a_mao.store(true, std::sync::atomic::Ordering::Relaxed);
                 // **O aperto de mão do lado de quem disca conclui antes de
                 // saber se o par vai aceitar a contrapartida.** O TLS 1.3
                 // considera a sessão pronta assim que processa o `Finished`
@@ -591,6 +614,15 @@ pub async fn ligar(
         );
         tentativas.abort_all();
     }
+    // **A tentativa abortada não teve como falar por si.** Se `ultimo` ainda
+    // é o `NaoAlcancou` de largada, e alguma tentativa chegou a completar o
+    // TLS, `NaoAlcancou` está mentindo — foi abortada depois de apertar a
+    // mão, não por silêncio nenhum.
+    if matches!(ultimo, ErroDePar::NaoAlcancou)
+        && apertou_a_mao.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        ultimo = ErroDePar::ConfirmacaoNaoChegouATempo;
+    }
     Err(ultimo)
 }
 
@@ -604,10 +636,25 @@ pub async fn ligar(
 /// responde nada até alguém chamar [`quinn::Endpoint::accept`]. Sem esta
 /// função, dois pares que só chamem [`ligar`] nunca se ligam.
 ///
-/// `None` quando a ponta fechou sem ninguém chegar, ou quando quem chegou não
+/// `prazo_de_confirmacao` limita só a espera **depois** do aperto de mão, pela
+/// troca de byte que substitui o relógio em [`ligar`] (ver
+/// `confirmar_com_quem_atende`). **É obrigatório, e não um enfeite:** sem
+/// prazo nenhum, `accept_bi` fica preso ao `max_idle_timeout` do `quinn`
+/// (30 s nos padrões 0.11.11 deste crate) se o par ficar calado —
+/// **indefinidamente** se ele mandar qualquer coisa para manter a conexão
+/// viva sem nunca abrir o fluxo. Como esta função serve **uma** vaga só, um
+/// par autenticado e parado nega a vaga inteira de quem empresta a subida
+/// até vencer esse relógio. Não limita a espera por alguém chegar — essa,
+/// por desenho, não tem prazo.
+///
+/// `None` quando a ponta fechou sem ninguém chegar, quando quem chegou não
 /// completou o aperto de mão — inclusive por `ConfereQuemChega` ter recusado
-/// o certificado apresentado.
-pub async fn atender(ponta: quinn::Endpoint) -> Option<ParLigado> {
+/// o certificado apresentado —, ou quando apertou a mão e não confirmou
+/// dentro do prazo.
+pub async fn atender(
+    ponta: quinn::Endpoint,
+    prazo_de_confirmacao: std::time::Duration,
+) -> Option<ParLigado> {
     let chegando = ponta.accept().await?;
     // Lido **antes** do `.await` que segue: `chegando` já sabe de onde a
     // tentativa veio, e uma recusa por aí não pode ficar sem nome — é a
@@ -622,10 +669,24 @@ pub async fn atender(ponta: quinn::Endpoint) -> Option<ParLigado> {
         }
     };
     // A metade de quem atende na troca que substitui o relógio em `ligar` —
-    // ver `confirmar_com_quem_atende`.
-    if let Err(erro) = confirmar_para_quem_ligou(&conexao).await {
-        tracing::warn!(par = %remoto, %erro, "a troca de confirmação com quem ligou falhou");
-        return None;
+    // ver `confirmar_com_quem_atende`. Com prazo próprio: sem ele, um par que
+    // aperta a mão e some prenderia esta vaga até o `max_idle_timeout` do
+    // `quinn` — ou para sempre, se mandar qualquer coisa para manter a
+    // conexão viva.
+    match tokio::time::timeout(prazo_de_confirmacao, confirmar_para_quem_ligou(&conexao)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(erro)) => {
+            tracing::warn!(par = %remoto, %erro, "a troca de confirmação com quem ligou falhou");
+            return None;
+        }
+        Err(_elapsed) => {
+            tracing::warn!(
+                par = %remoto,
+                ?prazo_de_confirmacao,
+                "quem ligou apertou a mão e não confirmou dentro do prazo"
+            );
+            return None;
+        }
     }
     let ida_e_volta = conexao.rtt();
     let como = como_chegou(conexao.remote_address());
@@ -793,6 +854,14 @@ fn classificar(
 mod testes {
     use super::*;
 
+    /// O prazo de confirmação que os testes deste módulo dão a `atender`.
+    ///
+    /// Generoso para `127.0.0.1` (onde um RTT real custa microssegundos) e
+    /// curto o bastante para um teste que trava por causa deste prazo faltar
+    /// não segurar a suíte pelos 30 s do `max_idle_timeout` do `quinn`, ou
+    /// pior, para sempre.
+    const PRAZO_DE_CONFIRMACAO_NO_TESTE: std::time::Duration = std::time::Duration::from_secs(2);
+
     #[test]
     fn cada_identidade_e_nova_e_a_impressao_a_distingue() {
         // **Efêmero é o ponto, e não um detalhe.** O certificado do servidor é
@@ -901,7 +970,7 @@ mod testes {
         let impressao_b = impressao(&ib);
         passar_a_atender(&a, ia, impressao_b).unwrap();
         let endereco_a = a.local_addr().unwrap();
-        let _atendendo_a = tokio::spawn(atender(a));
+        let _atendendo_a = tokio::spawn(atender(a, PRAZO_DE_CONFIRMACAO_NO_TESTE));
 
         let ib_para_discar = ib.clone();
         passar_a_atender(&b, ib, impressao_a.clone()).unwrap();
@@ -940,7 +1009,7 @@ mod testes {
         )
         .unwrap();
         let endereco_a = a.local_addr().unwrap();
-        let _atendendo_a = tokio::spawn(atender(a));
+        let _atendendo_a = tokio::spawn(atender(a, PRAZO_DE_CONFIRMACAO_NO_TESTE));
 
         let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         let erro = ligar(
@@ -996,7 +1065,7 @@ mod testes {
         )
         .unwrap();
         let endereco_impostor = impostor.local_addr().unwrap();
-        let _atendendo_impostor = tokio::spawn(atender(impostor));
+        let _atendendo_impostor = tokio::spawn(atender(impostor, PRAZO_DE_CONFIRMACAO_NO_TESTE));
 
         let legitimo = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         let identidade = identidade_efemera().unwrap();
@@ -1009,7 +1078,7 @@ mod testes {
             // ver o impostor falhar antes de o legítimo fechar o aperto de
             // mão.
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-            atender(legitimo).await
+            atender(legitimo, PRAZO_DE_CONFIRMACAO_NO_TESTE).await
         });
 
         let ib_para_discar = ib.clone();
@@ -1052,7 +1121,7 @@ mod testes {
         // apresenta a dele, que é outra.
         passar_a_atender(&anfitriao, ia, esperada_de_outro).unwrap();
         let onde = anfitriao.local_addr().unwrap();
-        let atendendo = tokio::spawn(atender(anfitriao.clone()));
+        let atendendo = tokio::spawn(atender(anfitriao.clone(), PRAZO_DE_CONFIRMACAO_NO_TESTE));
 
         let ponta_do_intruso = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         let intruso_para_discar = intruso.clone();
@@ -1066,9 +1135,19 @@ mod testes {
         )
         .await;
 
+        // **A variante exata, não só `is_err()`.** `RecusadoDepoisDeLigar` e
+        // `MotivoDaRecusa` existem para distinguir «apresentou o errado» de
+        // «não apresentou nenhum» — uma regressão que jogasse os dois em
+        // `MotivoDaRecusa::Outro(String)` deixaria só `is_err()` verde.
         assert!(
-            tentou.is_err(),
-            "o intruso apresentou um certificado que o anfitrião nunca esperou, e entrou"
+            matches!(
+                tentou,
+                Err(ErroDePar::RecusadoDepoisDeLigar(
+                    MotivoDaRecusa::CertificadoErrado
+                ))
+            ),
+            "o intruso apresentou um certificado que o anfitrião nunca esperou, e entrou \
+             (ou saiu com o motivo errado): {tentou:?}"
         );
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(200), atendendo)
@@ -1096,7 +1175,7 @@ mod testes {
         passar_a_atender(&a, ia, impressao_b.clone()).unwrap();
         passar_a_atender(&b, ib, impressao_a.clone()).unwrap();
         let onde_a = a.local_addr().unwrap();
-        let atendendo = tokio::spawn(atender(a.clone()));
+        let atendendo = tokio::spawn(atender(a.clone(), PRAZO_DE_CONFIRMACAO_NO_TESTE));
 
         let ligado = ligar(
             &b,
@@ -1139,7 +1218,7 @@ mod testes {
         let esperada_de_quem_liga = impressao(&identidade_efemera().unwrap());
         passar_a_atender(&anfitriao, ia, esperada_de_quem_liga).unwrap();
         let onde = anfitriao.local_addr().unwrap();
-        let atendendo = tokio::spawn(atender(anfitriao));
+        let atendendo = tokio::spawn(atender(anfitriao, PRAZO_DE_CONFIRMACAO_NO_TESTE));
 
         let sem_identidade = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         let tentou = ligar(
@@ -1151,9 +1230,17 @@ mod testes {
         )
         .await;
 
+        // A variante exata — ver o comentário equivalente em
+        // `quem_atende_recusa_quem_o_servidor_nao_apresentou`.
         assert!(
-            tentou.is_err(),
-            "quem nunca apresentou certificado nenhum entrou mesmo assim"
+            matches!(
+                tentou,
+                Err(ErroDePar::RecusadoDepoisDeLigar(
+                    MotivoDaRecusa::SemCertificado
+                ))
+            ),
+            "quem nunca apresentou certificado nenhum entrou mesmo assim \
+             (ou saiu com o motivo errado): {tentou:?}"
         );
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(200), atendendo)
@@ -1161,6 +1248,89 @@ mod testes {
                 .map(|ligado| ligado.ok().flatten().is_none())
                 .unwrap_or(true),
             "o anfitrião deu por boa uma ligação sem certificado de cliente nenhum"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn atender_nao_trava_para_sempre_com_um_par_que_aperta_a_mao_e_para() {
+        // **O achado do round 2 da revisão.** Antes da troca de byte, `atender`
+        // devolvia assim que o TLS fechava. Agora ela também espera o par abrir
+        // o fluxo de confirmação — e sem prazo próprio, um par que autentica e
+        // some prenderia a vaga inteira até o `max_idle_timeout` do `quinn`
+        // (30 s nos padrões), ou para sempre se mandar algo para manter a
+        // conexão viva. Este teste finge exatamente esse par: completa o TLS
+        // discando direto (sem passar por `ligar`, que sempre confirma) e
+        // nunca abre fluxo nenhum.
+        let anfitriao = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ia = identidade_efemera().unwrap();
+        let impressao_do_anfitriao = impressao(&ia);
+        let quieto = identidade_efemera().unwrap();
+        let impressao_do_quieto = impressao(&quieto);
+        passar_a_atender(&anfitriao, ia, impressao_do_quieto).unwrap();
+        let onde = anfitriao.local_addr().unwrap();
+        let prazo_de_confirmacao = std::time::Duration::from_millis(150);
+        let atendendo = tokio::spawn(atender(anfitriao, prazo_de_confirmacao));
+
+        let ponta_do_quieto = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let (config, _relato) = config_de_cliente(impressao_do_anfitriao, Some(&quieto)).unwrap();
+        let conexao_quieta = ponta_do_quieto
+            .connect_with(config, onde, "seele-par")
+            .unwrap()
+            .await
+            .unwrap();
+
+        // Um limite bem maior que `prazo_de_confirmacao`: o que se prova aqui
+        // é que `atender` volta **por causa do prazo dele**, não por acaso do
+        // agendador.
+        let resultado = tokio::time::timeout(std::time::Duration::from_secs(2), atendendo)
+            .await
+            .expect("atender devia ter voltado dentro do próprio prazo, e travou")
+            .expect("a tarefa de atender morreu");
+        assert!(
+            resultado.is_none(),
+            "atender deu por boa uma ligação que apertou a mão e nunca confirmou"
+        );
+        drop(conexao_quieta); // mantida viva de propósito até aqui
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ligar_nao_diz_naoalcancou_para_quem_apertou_a_mao_e_travou() {
+        // **O terceiro achado do round 2.** `NaoAlcancou` diz «nenhum endereço
+        // respondeu» — falso aqui: o anfitrião completa o TLS e só não abre o
+        // fluxo de confirmação (segura a conexão de propósito, sem nunca
+        // chamar `accept_bi`). `ligar` tem de saber a diferença, pela mesma
+        // razão que `ImpressaoNaoBate` não é `NaoAlcancou`.
+        let anfitriao = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ia = identidade_efemera().unwrap();
+        let impressao_do_anfitriao = impressao(&ia);
+        let quem_disca = identidade_efemera().unwrap();
+        let impressao_de_quem_disca = impressao(&quem_disca);
+        passar_a_atender(&anfitriao, ia, impressao_de_quem_disca).unwrap();
+        let onde = anfitriao.local_addr().unwrap();
+
+        let _segurando = tokio::spawn(async move {
+            if let Some(chegando) = anfitriao.accept().await {
+                if let Ok(_conexao_apertada) = chegando.await {
+                    // Aperta a mão, e para — de propósito, sem `accept_bi`.
+                    std::future::pending::<()>().await;
+                }
+            }
+        });
+
+        let ponta_de_quem_disca = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let erro = ligar(
+            &ponta_de_quem_disca,
+            &[onde],
+            impressao_do_anfitriao,
+            Some(&quem_disca),
+            std::time::Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            matches!(erro, ErroDePar::ConfirmacaoNaoChegouATempo),
+            "o par apertou a mão e travou, e o motivo devolvido foi outro: {erro:?}"
         );
     }
 
