@@ -2984,10 +2984,15 @@ async fn repassar_a_tela(repasse: &RepasseDeTela, ligado: &par::ParLigado, scree
     // agora, ou ela acabou entre o pedido do servidor e a ligação fechar. Um
     // par ligado num fluxo sem cabeçalho não decodifica nada, e mandar-lhe
     // pedaços soltos seria pior que não mandar nada.
-    let Some(abertura) = repasse.abertura() else {
+    // `abertura_de` e não `abertura`: com duas transmissões no ar, a que está
+    // sendo repassada pode não ser a que o servidor mandou servir. Repassar a
+    // outra seria entregar ao par uma tela com o nome de outra — ver o doc de
+    // `EstadoDoRepasse::qual`.
+    let Some(abertura) = repasse.abertura_de(screen) else {
         tracing::warn!(
             ?screen,
-            "o par ligou e não há transmissão nenhuma chegando do servidor para lhe repassar"
+            "o par ligou e esta máquina não está recebendo do servidor a transmissão que lhe \
+             mandaram repassar; quem assiste continua sendo servido pelo servidor"
         );
         return;
     };
@@ -3219,46 +3224,118 @@ const PEDACOS_A_ESPERA_DO_PAR: usize = 32;
 /// só acrescentaria pontos de suspensão a caminhos que não os têm.
 #[derive(Debug, Default)]
 struct RepasseDeTela {
+    /// Tudo sob um punho só. Ver o doc de [`EstadoDoRepasse`].
+    estado: std::sync::Mutex<EstadoDoRepasse>,
+}
+
+/// O que o repasse guarda, e por que num punho só.
+///
+/// **Porque as três coisas se decidem juntas.** «Estes bytes vão para o par?»
+/// é uma pergunta sobre a tela em curso *e* sobre haver destino; separada em
+/// dois punhos, ela é respondida em dois instantes, e entre os dois a
+/// transmissão pode ter trocado. Um quadro copiado para o fluxo de outra tela
+/// não dá erro em lugar nenhum — dá duas telas fundidas numa só na janela de
+/// quem assiste, que é o defeito que este guarda existe para impedir.
+#[derive(Debug, Default)]
+struct EstadoDoRepasse {
+    /// De qual transmissão é o repasse em curso.
+    ///
+    /// **É a identidade que faltava, e ela é uma só de propósito.** Havia um
+    /// [`RepasseDeTela`] por [`Motor`] e nenhuma marca de tela: com duas
+    /// transmissões no ar na mesma sala — o cenário do §0 do desenho —, a
+    /// segunda `abriu()` sobrescrevia a primeira, os quadros das duas entravam
+    /// intercalados no mesmo fluxo do par, e o primeiro `fechou()` matava o
+    /// repasse da outra. Quem recebia rotulava tudo com o `screen` do fluxo e
+    /// via as duas telas fundidas, sem um erro em lugar nenhum.
+    ///
+    /// **A versão que repassa as duas é do subprojeto B**, e não cabe aqui:
+    /// ela exige uma marca de tela no fio entre pares — mudança de protocolo,
+    /// que é a fundação daquele subprojeto. O que cabe hoje é a honestidade:
+    /// uma tela por vez, dito em voz alta, com quem assiste a outra
+    /// continuando a receber do servidor pelo caminho de sempre.
+    ///
+    /// A identidade é o [`ScreenId`] e **não** o dono da transmissão: este
+    /// lado não sabe de quem é uma tela alheia. `ScreenHeader` não carrega
+    /// pessoa e [`Aviso::TelaAbriu`] também não — e não precisa carregar: o
+    /// `ScreenId` é atribuído pelo servidor e é único por transmissão, que é
+    /// exatamente a pergunta que este campo responde.
+    qual: Option<ScreenId>,
     /// Os bytes crus do cabeçalho da transmissão que chega agora do servidor.
-    abertura: std::sync::Mutex<Option<Vec<u8>>>,
+    abertura: Option<Vec<u8>>,
     /// Para onde copiar cada quadro, enquanto há um par a servir.
-    destino: std::sync::Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    destino: Option<mpsc::Sender<Vec<u8>>>,
 }
 
 impl RepasseDeTela {
     /// Uma transmissão do servidor abriu com este cabeçalho.
-    fn abriu(&self, abertura: Vec<u8>) {
-        if let Ok(mut guarda) = self.abertura.lock() {
-            *guarda = Some(abertura);
+    ///
+    /// **A segunda tela não assume.** Se já há um repasse em curso de outra
+    /// transmissão, esta é recusada e o `warn!` diz por quê — ver o doc de
+    /// [`EstadoDoRepasse::qual`]. Quem assiste à tela recusada continua
+    /// recebendo do servidor, que é o caminho de sempre: nenhuma imagem se
+    /// perde, e nada se funde em silêncio.
+    fn abriu(&self, tela: ScreenId, abertura: Vec<u8>) {
+        let Ok(mut estado) = self.estado.lock() else {
+            return;
+        };
+        if let Some(em_curso) = estado.qual {
+            if em_curso != tela {
+                tracing::warn!(
+                    %em_curso,
+                    nova = %tela,
+                    "só uma tela por vez é repassada a um par nesta versão; esta segunda \
+                     transmissão continua vindo do servidor para quem a assiste"
+                );
+                return;
+            }
         }
+        estado.qual = Some(tela);
+        estado.abertura = Some(abertura);
     }
 
     /// A transmissão do servidor acabou: não há mais o que repassar, e o par
     /// que estava sendo servido vê o fluxo terminar direito.
-    fn fechou(&self) {
-        if let Ok(mut guarda) = self.abertura.lock() {
-            *guarda = None;
+    ///
+    /// **Só se for a que está sendo repassada.** Sem esta conferência, o fim
+    /// de uma segunda transmissão — que nunca chegou a ser repassada —
+    /// derrubaria o repasse da primeira.
+    fn fechou(&self, tela: ScreenId) {
+        let Ok(mut estado) = self.estado.lock() else {
+            return;
+        };
+        if estado.qual != Some(tela) {
+            return;
         }
-        self.desligar();
+        estado.qual = None;
+        estado.abertura = None;
+        estado.destino = None;
     }
 
-    /// O cabeçalho da transmissão que está chegando, se há uma.
-    fn abertura(&self) -> Option<Vec<u8>> {
-        self.abertura.lock().ok().and_then(|guarda| guarda.clone())
+    /// O cabeçalho da transmissão que está chegando, se a que chega é esta.
+    ///
+    /// `None` quando o repasse em curso é de outra tela: servir o pedido do
+    /// servidor com a abertura da tela errada seria entregar ao par uma
+    /// transmissão com o nome de outra.
+    fn abertura_de(&self, tela: ScreenId) -> Option<Vec<u8>> {
+        let estado = self.estado.lock().ok()?;
+        if estado.qual != Some(tela) {
+            return None;
+        }
+        estado.abertura.clone()
     }
 
     /// Passa a copiar os pedaços para aqui.
     fn ligar(&self, destino: mpsc::Sender<Vec<u8>>) {
-        if let Ok(mut guarda) = self.destino.lock() {
-            *guarda = Some(destino);
+        if let Ok(mut estado) = self.estado.lock() {
+            estado.destino = Some(destino);
         }
     }
 
     /// Para de copiar. O `Sender` largado fecha o canal, e
     /// [`crate::par::repassar`] termina o fluxo do par direito.
     fn desligar(&self) {
-        if let Ok(mut guarda) = self.destino.lock() {
-            *guarda = None;
+        if let Ok(mut estado) = self.estado.lock() {
+            estado.destino = None;
         }
     }
 
@@ -3266,11 +3343,17 @@ impl RepasseDeTela {
     ///
     /// **Nunca espera, e nunca descarta um pedaço só.** Ver o doc de
     /// [`PEDACOS_A_ESPERA_DO_PAR`].
-    fn pedaco(&self, bytes: Vec<u8>) {
-        let Ok(mut guarda) = self.destino.lock() else {
+    ///
+    /// **E só os da tela em curso.** Um quadro de outra transmissão entrando
+    /// neste fluxo é o que fundia duas telas numa só.
+    fn pedaco(&self, tela: ScreenId, bytes: Vec<u8>) {
+        let Ok(mut estado) = self.estado.lock() else {
             return;
         };
-        let Some(destino) = guarda.as_ref() else {
+        if estado.qual != Some(tela) {
+            return;
+        }
+        let Some(destino) = estado.destino.as_ref() else {
             return;
         };
         match destino.try_send(bytes) {
@@ -3280,9 +3363,9 @@ impl RepasseDeTela {
                     quantos = PEDACOS_A_ESPERA_DO_PAR,
                     "o par parou de aceitar bytes; o repasse para ele é desligado"
                 );
-                *guarda = None;
+                estado.destino = None;
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => *guarda = None,
+            Err(mpsc::error::TrySendError::Closed(_)) => estado.destino = None,
         }
     }
 }
@@ -3397,7 +3480,7 @@ fn escoar_tela_alheia(
             let cabecalho = *recepcao.cabecalho();
             let tela = cabecalho.screen;
             if let DeOndeVeioATela::Servidor(repasse) = &de_onde {
-                repasse.abriu(recepcao.abertura().to_vec());
+                repasse.abriu(tela, recepcao.abertura().to_vec());
             }
             if avisos
                 .send(Aviso::TelaAbriu {
@@ -3421,7 +3504,7 @@ fn escoar_tela_alheia(
                         // filtrar aqui produziria duas telas diferentes com o
                         // mesmo nome.
                         if let DeOndeVeioATela::Servidor(repasse) = &de_onde {
-                            repasse.pedaco(quadro.no_fio());
+                            repasse.pedaco(tela, quadro.no_fio());
                         }
                         // **O som não atravessa a ponte.** Ele vai para a
                         // mistura, aqui em Rust, e nunca para a casca: a janela
@@ -3502,7 +3585,7 @@ fn escoar_tela_alheia(
                 }
             }
             if let DeOndeVeioATela::Servidor(repasse) = &de_onde {
-                repasse.fechou();
+                repasse.fechou(tela);
             }
             let _ = avisos.send(Aviso::TelaFechou { tela });
         });
@@ -5169,5 +5252,61 @@ mod tests {
             "a ponta de quem empresta continuou atendendo depois de servir_um_par devolver: \
              {tentou:?}"
         );
+    }
+
+    /// **Duas telas na mesma sala: a segunda não é repassada, e a primeira
+    /// sobrevive ao fim dela.**
+    ///
+    /// O cenário é o do §0 do desenho — «numa call de 5 pessoas, 2 querem
+    /// transmitir a tela» —, e antes deste guarda ele produzia o pior defeito
+    /// que este repositório sabe nomear: a segunda `abriu()` sobrescrevia a
+    /// primeira, os quadros das duas entravam intercalados no mesmo fluxo do
+    /// par, quem recebia rotulava tudo com o `screen` do fluxo, e o primeiro
+    /// `fechou()` matava o repasse da outra. Duas telas fundidas numa só, sem
+    /// erro em lugar nenhum.
+    #[tokio::test]
+    async fn so_uma_tela_por_vez_e_repassada_e_o_fim_da_outra_nao_a_derruba() {
+        let repasse = RepasseDeTela::default();
+        let primeira = ScreenId(1);
+        let segunda = ScreenId(2);
+        let (para_o_par, mut do_par) = mpsc::channel(8);
+
+        repasse.abriu(primeira, b"abertura-da-primeira".to_vec());
+        repasse.ligar(para_o_par);
+
+        // A segunda transmissão chega e **não** assume.
+        repasse.abriu(segunda, b"abertura-da-segunda".to_vec());
+        assert_eq!(
+            repasse.abertura_de(primeira),
+            Some(b"abertura-da-primeira".to_vec()),
+            "a segunda tela assumiu o repasse da primeira"
+        );
+        assert_eq!(
+            repasse.abertura_de(segunda),
+            None,
+            "o repasse aceitou servir a segunda tela com a abertura de outra"
+        );
+
+        // E os quadros dela não entram no fluxo do par.
+        repasse.pedaco(segunda, b"quadro-da-segunda".to_vec());
+
+        // O fim da segunda não derruba o repasse da primeira.
+        repasse.fechou(segunda);
+        repasse.pedaco(primeira, b"quadro-da-primeira".to_vec());
+
+        assert_eq!(
+            do_par.try_recv().ok(),
+            Some(b"quadro-da-primeira".to_vec()),
+            "o fim da segunda tela derrubou o repasse da primeira"
+        );
+        assert!(
+            do_par.try_recv().is_err(),
+            "um quadro da segunda tela entrou no fluxo do par da primeira — as duas chegam \
+             fundidas a quem assiste"
+        );
+
+        // E o fim da primeira, esse sim, encerra o repasse.
+        repasse.fechou(primeira);
+        assert_eq!(repasse.abertura_de(primeira), None);
     }
 }
