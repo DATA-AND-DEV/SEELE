@@ -227,15 +227,15 @@ pub const SIGNATURE_LEN: usize = 64;
 /// password fallback needs.
 pub const MAX_PROOF_LEN: usize = 256;
 
-/// Tamanho de uma impressão digital em hex minúsculo.
+/// Tamanho de uma impressão digital em hex.
 ///
 /// Um SHA-256 em hexadecimal são exatamente 64 caracteres — nem mais, nem
 /// menos, o mesmo tamanho que [`crate::uri`] já confere para o `fp=` do
-/// `seele://`. Só o tamanho é conferido aqui: se os caracteres são hex e se a
-/// impressão bate com um certificado de verdade é o que o aperto de mão
-/// descobre, e é para isso que [`MotivoDeFalhaDePar::ImpressaoNaoBate`]
-/// existe.
-pub const MAX_IMPRESSAO_LEN: usize = 64;
+/// `seele://`. É um tamanho **exato**, e não um teto: ver
+/// [`check_impressao`]. Se a impressão bate com um certificado de verdade é o
+/// que o aperto de mão descobre, e é para isso que
+/// [`MotivoDeFalhaDePar::ImpressaoNaoBate`] existe.
+pub const IMPRESSAO_LEN: usize = 64;
 
 /// Why a control frame could not be handled.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -1953,6 +1953,29 @@ fn check(field: &'static str, len: usize, limit: usize) -> Result<(), ControlErr
     check_bounds(field, len, limit)
 }
 
+/// Recusa uma impressão digital que não é um SHA-256 em hexadecimal.
+///
+/// **Tamanho exato, e não teto.** Um `<= 64` aceita `""`, aceita um caractere,
+/// e aceita sessenta e quatro caracteres que não são hexadecimais — e um
+/// cliente que declare lixo é escolhido por `Pares::escolher`, ocupa vaga em
+/// `ja_servindo`, e custa segundos de tela parada a cada `WatchScreen`: a
+/// discagem contra uma impressão que nenhum certificado produz só falha quando
+/// o prazo vence. Falhar aqui custa um quadro de controle.
+///
+/// A mesma regra que [`crate::uri`] aplica ao `fp=` do `seele://` — um formato
+/// só para a mesma coisa —, maiúsculas incluídas.
+///
+/// # Errors
+///
+/// [`ControlError::FieldOutOfRange`] quando não são exatamente
+/// [`IMPRESSAO_LEN`] dígitos hexadecimais.
+fn check_impressao(impressao: &str) -> Result<(), ControlError> {
+    if impressao.len() == IMPRESSAO_LEN && impressao.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(());
+    }
+    Err(ControlError::FieldOutOfRange { field: "impressao" })
+}
+
 /// Refuses a field longer than its documented limit.
 ///
 /// Public because [`crate::attachment`] validates the header of a transfer with
@@ -2186,9 +2209,7 @@ impl Validate for ClientMessage {
             // mesma conferência que o pedido de quadro-chave já faz.
             | Self::WatchScreen { .. }
             | Self::UnwatchScreen { .. } => Ok(()),
-            Self::EmprestarSubida { impressao, .. } => {
-                check("impressao", impressao.len(), MAX_IMPRESSAO_LEN)
-            }
+            Self::EmprestarSubida { impressao, .. } => check_impressao(impressao),
             // O motivo é um enumerado de tamanho fixo, e a `ScreenId` segue a
             // mesma regra do braço acima: quem sabe se ela existe é o servidor.
             Self::ParFalhou { .. } => Ok(()),
@@ -2289,8 +2310,12 @@ impl Validate for ServerMessage {
             | Self::KeyFrameRequested { .. }
             | Self::ScreenViewers { .. }
             | Self::HostUplink { .. } => Ok(()),
+            // A mesma regra da entrada, e não uma mais frouxa: a impressão que
+            // sai daqui veio de uma declaração que já passou por
+            // `check_impressao`, e uma saída que aceitasse o que a entrada
+            // recusa seria uma segunda regra esperando para discordar.
             Self::SirvaTelaPara { impressao, .. } | Self::AssistaTelaPor { impressao, .. } => {
-                check("impressao", impressao.len(), MAX_IMPRESSAO_LEN)
+                check_impressao(impressao)
             }
         }
     }
@@ -3672,7 +3697,11 @@ mod o_vocabulario_e_a_versao {
             ordinal(&ServerMessage::AssistaTelaPor {
                 screen: ScreenId(1),
                 enderecos: vec![],
-                impressao: String::new(),
+                // Uma impressão de verdade, e não `String::new()`: `encode`
+                // valida antes de serializar, e `check_impressao` exige um
+                // SHA-256 em hex. A pergunta deste teste é sobre o ordinal, e
+                // um campo inválido a trocaria por outra.
+                impressao: "3c".repeat(32),
             }),
             35,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
@@ -3696,5 +3725,74 @@ mod o_vocabulario_e_a_versao {
             "a versão do protocolo mudou; confira se os ordinais acima e a janela \
              de compatibilidade continuam contando a mesma história"
         );
+    }
+
+    #[test]
+    fn uma_impressao_que_nao_e_um_sha256_em_hex_e_recusada_no_fio() {
+        // **O teto não bastava.** `check(.., MAX_IMPRESSAO_LEN)` aceitava
+        // `""`, aceitava um caractere, e aceitava sessenta e quatro caracteres
+        // que não são hexadecimais. O desenho diz «exatamente 64 caracteres», e
+        // a diferença não é cosmética: um cliente que declare lixo é escolhido
+        // por `Pares::escolher`, ocupa vaga em `ja_servindo`, e custa segundos
+        // de tela parada a cada `WatchScreen` — porque a discagem contra uma
+        // impressão que nenhum certificado produz só falha quando o prazo
+        // vence.
+        for ruim in [
+            String::new(),
+            "a".repeat(63),
+            "a".repeat(65),
+            "z".repeat(64),
+            format!("{}g", "a".repeat(63)),
+        ] {
+            let quantos = ruim.len();
+            let mensagem = ClientMessage::EmprestarSubida {
+                emprestando: true,
+                impressao: ruim,
+                locais: Vec::new(),
+            };
+            assert!(
+                mensagem.validate().is_err(),
+                "uma impressão de {quantos} caracteres que não é um SHA-256 em hex passou pela \
+                 validação"
+            );
+        }
+    }
+
+    #[test]
+    fn uma_impressao_de_verdade_continua_passando() {
+        // A outra metade: um guarda que recusasse tudo passaria no teste acima
+        // e desligaria a malha inteira. Maiúsculas incluídas, como
+        // `crate::uri` já aceita para o `fp=` do `seele://` — um formato só
+        // para a mesma coisa.
+        for boa in ["3c".repeat(32), "3C".repeat(32)] {
+            let mensagem = ClientMessage::EmprestarSubida {
+                emprestando: true,
+                impressao: boa.clone(),
+                locais: Vec::new(),
+            };
+            assert!(
+                mensagem.validate().is_ok(),
+                "uma impressão legítima ({boa}) foi recusada"
+            );
+        }
+    }
+
+    #[test]
+    fn as_duas_mensagens_do_servidor_conferem_a_impressao_com_a_mesma_regra() {
+        // A impressão que o servidor apresenta veio de uma declaração que já
+        // passou pela regra acima; conferi-la de novo com uma regra **mais
+        // frouxa** seria deixar a saída aceitar o que a entrada recusa.
+        let sirva = ServerMessage::SirvaTelaPara {
+            screen: ScreenId(7),
+            enderecos: Vec::new(),
+            impressao: String::new(),
+        };
+        assert!(sirva.validate().is_err());
+        let assista = ServerMessage::AssistaTelaPor {
+            screen: ScreenId(7),
+            enderecos: Vec::new(),
+            impressao: "z".repeat(64),
+        };
+        assert!(assista.validate().is_err());
     }
 }
