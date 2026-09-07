@@ -1084,6 +1084,75 @@ async fn o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor() -> Result<()>
     Ok(())
 }
 
+/// **Um repasse encerrado normalmente devolve o par à fila.**
+///
+/// A nomeação do servidor (`Pares::apontou`) só era desfeita por um
+/// `ParFalhou`. Quando o repasse terminava **bem** — quem assiste fecha a
+/// janela e manda `UnwatchScreen` —, ela ficava de pé, e `Pares::ja_servindo`
+/// contava aquele par como ocupado pelo resto da sessão do daemon. Do lado do
+/// cliente `atendendo_pares` já tinha sido devolvido: os dois lados
+/// discordavam em silêncio, e a malha degradava para a estrela — um par por
+/// transmissão encerrada — sem um único rastro dizendo por quê.
+///
+/// A afirmação é sobre o **estado do servidor**, e não sobre imagem: é lá que
+/// a vaga era queimada, e é lá que o teste tem de olhar.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_repasse_encerrado_normalmente_devolve_o_par_a_fila() -> Result<()> {
+    let Cenario {
+        servidor,
+        compartilha,
+        empresta,
+        assiste,
+        screen,
+        copias,
+    } = cenario().await?;
+
+    let empresta_quem = empresta.sessao().person;
+
+    assiste.assistir(screen, true).await?;
+    ate("o servidor parar de subir a cópia de quem assiste", || {
+        copias.agora() == 1
+    })
+    .await?;
+    {
+        let pares = servidor.server().pares.lock().await;
+        assert!(
+            pares.ja_servindo().contains(&empresta_quem),
+            "o servidor apontou um par e não o contou como ocupado"
+        );
+    }
+
+    // **Quem assiste sai da sala**, e é este o caminho que nenhuma mensagem do
+    // cliente cobre. Um `UnwatchScreen` também encerra o repasse, mas depois
+    // do conserto do fim limpo o `ParFalhou` que ele provoca já solta a
+    // nomeação pelo braço de sempre — reverter a linha do `UnwatchScreen` não
+    // faz teste nenhum falhar. A saída da sala não tem esse socorro: o
+    // cliente não relata nada, e se o servidor não soltar a nomeação sozinho
+    // ela fica de pé para sempre.
+    assiste.sair_da_voice_room().await?;
+
+    let fim = Instant::now() + PACIENCIA;
+    loop {
+        let ocupados = servidor.server().pares.lock().await.ja_servindo();
+        if ocupados.is_empty() {
+            break;
+        }
+        assert!(
+            Instant::now() < fim,
+            "o repasse terminou bem e o par continua contado como ocupado ({ocupados:?}) — \
+             o servidor nunca mais vai escolhê-lo, e o cliente dele já devolveu a vaga"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    println!("o par voltou à fila depois de o repasse ter sido encerrado normalmente");
+
+    drop(compartilha);
+    drop(empresta);
+    drop(assiste);
+    servidor.shutdown();
+    Ok(())
+}
+
 /// **O contador não pode calar quando o barramento atrasa.**
 ///
 /// `ContadorDeCopias` é a metade negativa de toda prova deste arquivo: um

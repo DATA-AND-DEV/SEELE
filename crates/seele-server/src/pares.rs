@@ -70,6 +70,20 @@ pub struct QuemDeclarou {
     pub emprestando: bool,
 }
 
+/// Uma nomeação do servidor: quem empresta, e para quem.
+///
+/// **Os dois lados, e não só quem empresta.** Guardar quem empresta basta para
+/// resolver um `ParFalhou`, mas não para desfazer a nomeação quando quem
+/// assiste vai embora — e uma nomeação que não é desfeita é um par que o
+/// servidor nunca mais escolhe. Ver [`Pares::desapontou`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Nomeacao {
+    /// Quem foi apontado para servir.
+    empresta: PersonId,
+    /// A quem ele foi mandado servir.
+    assiste: PersonId,
+}
+
 /// Quem declarou identidade para o caminho entre pares neste daemon, agora.
 ///
 /// **Global ao daemon, e não por sala de voz.** Uma pessoa declara identidade
@@ -80,14 +94,15 @@ pub struct QuemDeclarou {
 #[derive(Debug, Default)]
 pub struct Pares {
     quem: HashMap<PersonId, QuemDeclarou>,
-    /// Quem o servidor apontou por último para servir cada transmissão.
+    /// Quem o servidor apontou por último para servir cada transmissão, e a
+    /// quem.
     ///
     /// **A própria nomeação do servidor, guardada para poder ser desfeita.**
     /// Achado do fix round 2: sem isto, um `ParFalhou { screen }` não tem
     /// como saber de quem reclamar — ele só carrega a transmissão, e nunca
     /// deveria carregar a identidade de quem falhou, porque quem relata é a
     /// vítima, não quem investiga. Ver [`Self::apontou`].
-    nomeacoes: HashMap<ScreenId, PersonId>,
+    nomeacoes: HashMap<ScreenId, Nomeacao>,
 }
 
 impl Pares {
@@ -150,6 +165,12 @@ impl Pares {
         if e_esta_conexao {
             self.esquecer(pessoa);
         }
+        // **Fora do `if`, e de propósito.** A conferência por conexão existe
+        // para não apagar a *declaração* de uma conexão que venceu a corrida
+        // de candidatos. Uma nomeação feita para esta pessoa não é declaração
+        // de ninguém: quem assiste foi embora, o repasse acabou, e o par
+        // apontado tem de voltar à fila seja qual for a conexão que fechou.
+        self.quem_assiste_saiu(pessoa);
     }
 
     /// Desacredita a declaração desta pessoa, **seja qual for a conexão que a
@@ -170,7 +191,23 @@ impl Pares {
     /// declaração e qualquer nomeação que apontava para ela.
     fn esquecer(&mut self, pessoa: PersonId) {
         self.quem.remove(&pessoa);
-        self.nomeacoes.retain(|_, quem| *quem != pessoa);
+        self.nomeacoes
+            .retain(|_, nomeacao| nomeacao.empresta != pessoa);
+    }
+
+    /// Esta pessoa deixou de assistir a tudo — saiu da sala, ou a sessão dela
+    /// acabou.
+    ///
+    /// **É metade do conserto de «cada repasse queima um par para sempre».**
+    /// A nomeação existe enquanto alguém está sendo servido; quem assiste
+    /// indo embora encerra o repasse tanto quanto um `UnwatchScreen`, e sem
+    /// esta linha o par apontado ficaria contado em [`Self::ja_servindo`] pelo
+    /// resto da sessão do daemon, enquanto o cliente dele já devolveu a vaga.
+    /// Os dois lados discordariam em silêncio, e a malha degradaria para a
+    /// estrela sem um rastro.
+    pub fn quem_assiste_saiu(&mut self, pessoa: PersonId) {
+        self.nomeacoes
+            .retain(|_, nomeacao| nomeacao.assiste != pessoa);
     }
 
     /// A declaração desta pessoa, exista ela para emprestar ou só para ser
@@ -237,20 +274,33 @@ impl Pares {
     /// discordar desta no primeiro dia ruim.
     #[must_use]
     pub fn ja_servindo(&self) -> HashSet<PersonId> {
-        self.nomeacoes.values().copied().collect()
+        self.nomeacoes
+            .values()
+            .map(|nomeacao| nomeacao.empresta)
+            .collect()
     }
 
-    /// O servidor apontou `quem` para servir `screen`.
+    /// O servidor apontou `empresta` para servir `screen` a `assiste`.
     ///
     /// Chamado por quem despacha `SirvaTelaPara`/`AssistaTelaPor`, depois de
     /// [`Self::escolher`] decidir. Substitui a nomeação anterior desta
     /// transmissão, se havia uma: só a mais recente importa para resolver um
     /// `ParFalhou`.
-    pub fn apontou(&mut self, screen: ScreenId, quem: PersonId) {
-        self.nomeacoes.insert(screen, quem);
+    pub fn apontou(&mut self, screen: ScreenId, empresta: PersonId, assiste: PersonId) {
+        self.nomeacoes
+            .insert(screen, Nomeacao { empresta, assiste });
     }
 
     /// Esta transmissão deixou de ter par apontado.
+    ///
+    /// **Chamada em todo caminho que encerra o repasse**, e não só no
+    /// `ParFalhou`: quem assiste faz `UnwatchScreen`, quem compartilha para,
+    /// a sala é apagada. Enquanto só o relato de falha a chamava, um repasse
+    /// que terminasse **bem** deixava a nomeação de pé, e
+    /// [`Self::ja_servindo`] contava aquele par como ocupado pelo resto da
+    /// sessão do daemon — com o cliente dele já tendo devolvido a vaga. A
+    /// malha degradava para a estrela, um par por transmissão encerrada, sem
+    /// um único rastro dizendo por quê.
     ///
     /// **Diferente de [`Self::desacreditar`], e a diferença é quem paga.** Ali
     /// a declaração inteira de uma pessoa é apagada, porque ela foi provada
@@ -270,7 +320,9 @@ impl Pares {
     /// vítima, não quem investiga.
     #[must_use]
     pub fn quem_foi_apontado(&self, screen: ScreenId) -> Option<PersonId> {
-        self.nomeacoes.get(&screen).copied()
+        self.nomeacoes
+            .get(&screen)
+            .map(|nomeacao| nomeacao.empresta)
     }
 }
 
@@ -575,7 +627,7 @@ mod testes {
         // vítima, nunca o par apontado.
         let mut pares = Pares::nova();
         let tela = ScreenId(9);
-        pares.apontou(tela, PersonId(5));
+        pares.apontou(tela, PersonId(5), PersonId(2));
         assert_eq!(pares.quem_foi_apontado(tela), Some(PersonId(5)));
     }
 
@@ -591,12 +643,80 @@ mod testes {
             endereco(5),
         );
         let tela = ScreenId(9);
-        pares.apontou(tela, PersonId(5));
+        pares.apontou(tela, PersonId(5), PersonId(2));
         pares.saiu(PersonId(5), 1);
         assert_eq!(
             pares.quem_foi_apontado(tela),
             None,
             "quem já foi embora continuou sendo a resposta de uma nomeação"
+        );
+    }
+
+    #[test]
+    fn quem_assiste_indo_embora_devolve_o_par_a_quem_pode_escolher() {
+        // **Cada repasse encerrado queimava um par para sempre.** A nomeação
+        // só era apagada por `ParFalhou`; quem assiste saindo da sala — ou a
+        // sessão dela acabando — deixava a nomeação de pé, e `ja_servindo`
+        // contava aquele par como ocupado pelo resto da sessão do daemon,
+        // enquanto o cliente dele já tinha devolvido a vaga.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(4),
+            1,
+            true,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        pares.apontou(ScreenId(9), PersonId(4), PersonId(2));
+        assert!(
+            pares.ja_servindo().contains(&PersonId(4)),
+            "a nomeação não pôs o par em ja_servindo"
+        );
+
+        pares.quem_assiste_saiu(PersonId(2));
+        assert!(
+            pares.ja_servindo().is_empty(),
+            "quem assiste foi embora e o par apontado continuou contado como ocupado"
+        );
+        assert!(
+            pares
+                .escolher(
+                    PersonId(1),
+                    PersonId(3),
+                    &pares.ja_servindo(),
+                    &toda_a_sala()
+                )
+                .is_some(),
+            "o par não voltou a ser escolhível depois de o repasse acabar"
+        );
+    }
+
+    #[test]
+    fn a_saida_de_quem_assiste_nao_derruba_a_nomeacao_de_outra_pessoa() {
+        // A outra metade: um `retain` escrito ao contrário passaria no teste
+        // acima e desligaria toda nomeação viva a cada saída de sala.
+        let mut pares = Pares::nova();
+        pares.apontou(ScreenId(9), PersonId(4), PersonId(2));
+        pares.quem_assiste_saiu(PersonId(7));
+        assert_eq!(
+            pares.quem_foi_apontado(ScreenId(9)),
+            Some(PersonId(4)),
+            "a saída de quem não assistia esta tela derrubou a nomeação dela"
+        );
+    }
+
+    #[test]
+    fn a_sessao_que_acaba_devolve_o_par_que_servia_esta_pessoa() {
+        // `saiu` confere a conexão para não apagar a **declaração** de uma
+        // conexão que venceu a corrida de candidatos. A nomeação feita para
+        // esta pessoa não é declaração de ninguém: ela cai de qualquer jeito.
+        let mut pares = Pares::nova();
+        pares.apontou(ScreenId(9), PersonId(4), PersonId(2));
+        pares.saiu(PersonId(2), 77);
+        assert!(
+            pares.ja_servindo().is_empty(),
+            "a sessão de quem assiste acabou e o par apontado continuou ocupado"
         );
     }
 

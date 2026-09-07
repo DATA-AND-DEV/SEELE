@@ -363,7 +363,7 @@ pub async fn serve(
     // above can end at any `?`, and a path that returns early does not know
     // where the person was sitting.
     voice_rooms.leave_everywhere(session.person).await;
-    encerrar_telas_de(&server, session.person).await;
+    soltar_telas_e_pares_de(&server, session.person).await;
 
     // And **announced**, which it was not. `Event::PersonLeft` was sent only
     // from the `LeaveVoiceRoom` branch, so a person who closed their client, lost
@@ -1560,7 +1560,7 @@ async fn run_session(
                     }
                     ClientMessage::LeaveVoiceRoom => {
                         voice_rooms.leave_everywhere(session.person).await;
-                        encerrar_telas_de(server, session.person).await;
+                        soltar_telas_e_pares_de(server, session.person).await;
                         if let Some(id) = current_voice_room.take() {
                             midia.entrou(current_voice_room);
                             server.occupancy.lock().await.vacate(id, session.person);
@@ -2039,6 +2039,7 @@ async fn run_session(
                                 // uma em curso, e um aviso só deixaria as outras
                                 // desenhadas para sempre na tela de quem assiste.
                                 for screen in server.telas.lock().await.encerrar_voice_room(id) {
+                                    server.pares.lock().await.desapontou(screen);
                                     let _ = server.events.send(Event::ScreenShareStopped {
                                         voice_room: id,
                                         screen,
@@ -2284,6 +2285,16 @@ async fn run_session(
                             // conferência e o envio já não tem transmissão para
                             // assistir, e não há o que dizer a quem pediu.
                             let _ = voice_rooms.of(voice_room).await.send(comando).await;
+                            if !assistir {
+                                // **O fim bom do repasse, e ele também solta o
+                                // par.** Enquanto só `ParFalhou` chamava
+                                // `desapontou`, um repasse que terminasse bem
+                                // deixava a nomeação de pé e `ja_servindo`
+                                // contava aquele par como ocupado pelo resto
+                                // da sessão do daemon — com o cliente dele já
+                                // tendo devolvido a vaga.
+                                server.pares.lock().await.desapontou(screen);
+                            }
                         }
                     }
                     ClientMessage::StopScreenShare => {
@@ -2292,6 +2303,9 @@ async fn run_session(
                             None => None,
                         };
                         if let (Some(voice_room), Some(screen)) = (current_voice_room, parada) {
+                            // A transmissão acabou: não há repasse dela para
+                            // ninguém, e o par que a servia volta à fila.
+                            server.pares.lock().await.desapontou(screen);
                             let _ = server.events.send(Event::ScreenShareStopped { voice_room, screen });
                         }
                     }
@@ -2620,7 +2634,7 @@ async fn run_session(
                     // been told to forget.
                     Event::VoiceRoomDeleted { voice_room: id } if current_voice_room == Some(*id) => {
                         voice_rooms.leave_everywhere(session.person).await;
-                        encerrar_telas_de(server, session.person).await;
+                        soltar_telas_e_pares_de(server, session.person).await;
                         current_voice_room = None;
                         midia.entrou(current_voice_room);
                         server.occupancy.lock().await.vacate(*id, session.person);
@@ -2836,7 +2850,7 @@ async fn assentar(
     // agora aponta para outro lugar, e o §6 item 3 só permite uma por sala —
     // levar a transmissão pela mão faria a pessoa tomar a vaga da sala nova sem
     // ter pedido.
-    encerrar_telas_de(server, session.person).await;
+    soltar_telas_e_pares_de(server, session.person).await;
     voice_rooms
         .of(destino)
         .await
@@ -3119,7 +3133,7 @@ async fn apontar_um_par(
             );
             return false;
         };
-        pares.apontou(screen, empresta.pessoa);
+        pares.apontou(screen, empresta.pessoa, quem_quer);
         (empresta, quem)
     };
     tracing::info!(
@@ -3212,7 +3226,7 @@ async fn receber_tela(
             // Anunciado, porque o plano de controle é o único lugar de onde a
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
             // transmissão que já não tem quem a bombeie.
-            encerrar_telas_de(server, person).await;
+            soltar_telas_e_pares_de(server, person).await;
             // E com nome, para quem a mandava. `ScreenShareStopped` vai para a
             // sala inteira e não carrega razão de propósito — as duas maneiras
             // comuns de acabar já se distinguem sozinhas —, mas esta terceira
@@ -3263,7 +3277,8 @@ async fn receber_tela(
     Ok(())
 }
 
-/// Encerra e anuncia o que esta pessoa estivesse transmitindo, onde estivesse.
+/// Encerra e anuncia o que esta pessoa estivesse transmitindo, e solta os pares
+/// que ela sustentava.
 ///
 /// Chamado em todo lugar onde alguém sai de uma sala de voz — sair, ser movido, ser
 /// expulso, ou a conexão acabar em qualquer `?` do meio do laço. Uma
@@ -3271,8 +3286,26 @@ async fn receber_tela(
 /// sempre na sala, prometendo um fluxo que não tem mais de onde vir: é o mesmo
 /// defeito da pessoa fantasma que `serve` conserta logo acima, com a diferença
 /// de que aqui a promessa é de imagem em movimento.
-async fn encerrar_telas_de(server: &Server, person: PersonId) {
-    for (voice_room, screen) in server.telas.lock().await.encerrar_de(person) {
+///
+/// # E as nomeações de par, nas duas direções
+///
+/// Sair da sala encerra um repasse tanto quanto um `UnwatchScreen`, e por dois
+/// caminhos: as transmissões **desta** pessoa acabaram (então o par que as
+/// servia está livre), e o que **ela** assistia acabou para ela (então o par
+/// apontado para lhe servir está livre). Sem as duas linhas, cada saída
+/// deixaria uma nomeação de pé, `crate::pares::Pares::ja_servindo` contaria
+/// aquele par como ocupado pelo resto da sessão do daemon, e a malha
+/// degradaria para a estrela sem um rastro.
+async fn soltar_telas_e_pares_de(server: &Server, person: PersonId) {
+    let encerradas = server.telas.lock().await.encerrar_de(person);
+    {
+        let mut pares = server.pares.lock().await;
+        for (_, screen) in &encerradas {
+            pares.desapontou(*screen);
+        }
+        pares.quem_assiste_saiu(person);
+    }
+    for (voice_room, screen) in encerradas {
         let _ = server
             .events
             .send(Event::ScreenShareStopped { voice_room, screen });
