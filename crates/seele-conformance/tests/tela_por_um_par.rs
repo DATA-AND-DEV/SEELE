@@ -410,20 +410,42 @@ struct ContadorDeCopias {
 impl ContadorDeCopias {
     /// Passa a seguir o contador desta transmissão.
     fn de(servidor: &Daemon, screen: ScreenId) -> Self {
+        Self::seguindo(servidor.server().events.subscribe(), screen)
+    }
+
+    /// O mesmo, a partir de uma assinatura já feita do barramento.
+    ///
+    /// Existe separado de [`Self::de`] para que
+    /// [`o_contador_de_copias_sobrevive_a_um_atraso_do_barramento`] possa
+    /// entregar um recebedor **já atrasado** — coisa que um daemon de verdade
+    /// não sabe produzir sob encomenda.
+    fn seguindo(mut eventos: tokio::sync::broadcast::Receiver<Event>, screen: ScreenId) -> Self {
         let quantos = Arc::new(std::sync::atomic::AtomicU32::new(u32::MAX));
         let escrevendo = Arc::clone(&quantos);
-        let mut eventos = servidor.server().events.subscribe();
         tokio::spawn(async move {
-            while let Ok(evento) = eventos.recv().await {
-                if let Event::ScreenViewers {
-                    screen: qual,
-                    quantos,
-                    ..
-                } = evento
-                {
-                    if qual == screen {
-                        escrevendo.store(quantos, std::sync::atomic::Ordering::Relaxed);
+            loop {
+                // **`Lagged` não encerra a contagem.** O barramento do servidor
+                // larga eventos quando quem lê fica para trás, e um `while let
+                // Ok(..)` trataria essa perda como fim de barramento: o laço
+                // sairia e `agora()` congelaria no último número visto. Um
+                // contador congelado em `1` afirma para sempre a única coisa
+                // que estes testes existem para provar. Perder eventos custa
+                // precisão; parar de ler custa a prova.
+                match eventos.recv().await {
+                    Ok(evento) => {
+                        if let Event::ScreenViewers {
+                            screen: qual,
+                            quantos,
+                            ..
+                        } = evento
+                        {
+                            if qual == screen {
+                                escrevendo.store(quantos, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        }
                     }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
@@ -924,5 +946,54 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
     drop(empresta);
     drop(assiste);
     servidor.shutdown();
+    Ok(())
+}
+
+/// **O contador não pode calar quando o barramento atrasa.**
+///
+/// `ContadorDeCopias` é a metade negativa de toda prova deste arquivo: um
+/// `copias.agora() == 1` afirmado trinta vezes seguidas. Se o laço que o
+/// alimenta sair do ar num `Lagged` — e o barramento do servidor larga eventos
+/// por desenho quando alguém não os lê a tempo —, `agora()` congela no último
+/// número que viu. Congelado em `1`, ele afirma trinta vezes uma coisa que
+/// parou de conferir, e o servidor pode ter voltado a subir a cópia sem que
+/// asserção nenhuma acuse.
+///
+/// É o mesmo falso-verde que a Task 10 caçou por outra porta. Aqui ele é
+/// provado direto: um recebedor que **já perdeu** eventos, e um número que
+/// chega depois da perda.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_contador_de_copias_sobrevive_a_um_atraso_do_barramento() -> Result<()> {
+    let screen = ScreenId(7);
+    let voice_room = VoiceRoomId(1);
+
+    // Um barramento minúsculo, cheio **antes** de alguém ler: a primeira coisa
+    // que o laço do contador encontra é o `Lagged`.
+    let (fala, ouve) = tokio::sync::broadcast::channel::<Event>(2);
+    for quantos in 0..4 {
+        fala.send(Event::ScreenViewers {
+            voice_room,
+            screen,
+            quantos,
+        })
+        .expect("o recebedor está vivo");
+    }
+
+    let copias = ContadorDeCopias::seguindo(ouve, screen);
+
+    // O número que importa vem **depois** do atraso. Um contador que desistiu
+    // no `Lagged` nunca o vê.
+    fala.send(Event::ScreenViewers {
+        voice_room,
+        screen,
+        quantos: 1,
+    })
+    .expect("o recebedor está vivo");
+
+    ate(
+        "o contador enxergar o número que veio depois do atraso do barramento",
+        || copias.agora() == 1,
+    )
+    .await?;
     Ok(())
 }
