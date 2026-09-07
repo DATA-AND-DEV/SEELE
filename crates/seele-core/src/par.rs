@@ -562,9 +562,26 @@ pub struct ParLigado {
 ///
 /// # Errors
 ///
-/// [`ErroDePar::ImpressaoNaoBate`] quando alguém respondeu e não era quem o
-/// servidor apresentou; [`ErroDePar::NaoAlcancou`] quando ninguém respondeu no
-/// prazo.
+/// Cinco motivos, e a diferença entre eles é a diferença entre cinco consertos
+/// — numa casa em que o motivo enumerado é contrato de casca (ADR 0012), uma
+/// lista incompleta aqui é a casca escolhendo a frase errada:
+///
+/// - [`ErroDePar::NaoAlcancou`] — nenhum dos endereços respondeu dentro do
+///   prazo. É o silêncio: rede, NAT, endereço velho.
+/// - [`ErroDePar::ImpressaoNaoBate`] — alguém respondeu e não era quem o
+///   servidor apresentou. Único motivo que é evento de segurança, e o único
+///   que desacredita a declaração de quem foi apontado.
+/// - [`ErroDePar::RecusadoDepoisDeLigar`] — o aperto de mão fechou deste lado
+///   e quem atendeu recusou a contrapartida. Leva o [`MotivoDaRecusa`] dentro.
+/// - [`ErroDePar::ConfirmacaoNaoChegouATempo`] — alguém completou o TLS e o
+///   prazo venceu antes da troca do byte de confirmação. Não é
+///   `NaoAlcancou`: houve resposta.
+/// - [`ErroDePar::Escuta`] — a configuração de cliente desta discagem não
+///   pôde ser montada, `connect_with` recusou o endereço na hora, ou uma
+///   tentativa morreu sem responder por si.
+///
+/// [`ErroDePar::Certificado`] e [`ErroDePar::Repasse`] **não** saem daqui: o
+/// primeiro é de [`passar_a_atender`], o segundo de [`repassar`].
 pub async fn ligar(
     ponta: &quinn::Endpoint,
     enderecos: &[std::net::SocketAddr],
