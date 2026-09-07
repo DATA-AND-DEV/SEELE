@@ -35,8 +35,8 @@ use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
-    Permission, PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem,
-    SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
+    MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role, ServerMessage,
+    Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
 };
 use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use seele_proto::screen::SCREEN_HEADER_LEN;
@@ -395,6 +395,12 @@ pub async fn serve(
             person: session.person,
         });
     }
+
+    // E sai de quem empresta a subida, pelo mesmo motivo de todo o resto desta
+    // seção: sem isto a escolha (`Pares::escolher`) continuaria apontando para
+    // alguém que já foi embora, e quem_quer discaria para um endereço que não
+    // atende mais.
+    server.pares.lock().await.saiu(session.person);
 
     // E os contadores desta conexão saem da soma da subida.
     //
@@ -2262,18 +2268,65 @@ async fn run_session(
                         }
                     }
 
-                    // O protocolo já leva os dois verbos do caminho entre
-                    // pares (`PROTOCOL_VERSION` 4), mas quem os liga a
-                    // `pares.rs` é a próxima tarefa deste plano — que ainda não
-                    // existe neste commit. Rastreado, e não calado: uma pessoa
-                    // que emprestou a subida ou relatou um par que falhou não
-                    // pode descobrir dias depois, sem dado nenhum, que o
-                    // servidor nunca fez nada com o pedido dela.
-                    ClientMessage::EmprestarSubida { .. } | ClientMessage::ParFalhou { .. } => {
-                        tracing::warn!(
+                    ClientMessage::EmprestarSubida {
+                        emprestando,
+                        impressao,
+                        locais,
+                    } => {
+                        // O público **não** vem do cliente: `locais` é o que ele
+                        // afirma sobre a própria rede, mas o único endereço em
+                        // que este servidor pode confiar é o de onde a conexão
+                        // realmente veio. Um público que o cliente inventasse
+                        // seria um endereço para o qual outra pessoa discaria
+                        // sem saber que está confiando na palavra de um
+                        // estranho.
+                        let publico = connection.remote_address();
+                        // «Deixei de emprestar» chega como `emprestando: false`
+                        // por cima de uma `impressao` que o protocolo não força
+                        // a vir vazia — quem decide o que ela significa é este
+                        // despacho, e não o campo em si. `Pares::declarou` só
+                        // entende opt-out como impressão vazia (decisão de
+                        // 05/09), e é essa tradução que acontece aqui.
+                        let impressao = if emprestando { impressao } else { String::new() };
+                        tracing::info!(
                             person = %session.person,
-                            "caminho entre pares recebido antes de o despacho existir"
+                            %publico,
+                            emprestando,
+                            "declaração de empréstimo de subida no caminho entre pares"
                         );
+                        server
+                            .pares
+                            .lock()
+                            .await
+                            .declarou(session.person, impressao, locais, publico);
+                    }
+                    ClientMessage::ParFalhou { screen, motivo } => {
+                        // O rastro fica mesmo quando não há o que fazer: quem
+                        // investigar um par que nunca serve ninguém precisa
+                        // achar aqui todo relato que chegou, não só os que
+                        // mudaram algum estado.
+                        tracing::info!(
+                            person = %session.person,
+                            %screen,
+                            ?motivo,
+                            "par relatado como falho no caminho entre pares"
+                        );
+                        // Só `ImpressaoNaoBate` diz algo sobre a **declaração**:
+                        // as outras três razões são da rede — endereço que não
+                        // respondeu, conexão que caiu, quadro que parou de vir —
+                        // e nenhuma delas prova que o que está publicado em
+                        // `Pares` deixou de ser de quem o publicou. Quem caiu de
+                        // verdade já sai daqui pela saída de sessão, mais abaixo
+                        // neste arquivo — `Pares::saiu` é chamado lá para todo
+                        // encerramento, e não só para este relato. `ImpressaoNaoBate`
+                        // é diferente: prova que alguém respondeu no lugar de
+                        // quem o servidor apresentou, o que discredita a
+                        // declaração mesmo que quem a fez continue conectado a
+                        // este servidor — daí valer a pena remover a própria
+                        // declaração desta pessoa, e não esperar pela saída dela.
+                        if motivo == MotivoDeFalhaDePar::ImpressaoNaoBate {
+                            server.pares.lock().await.saiu(session.person);
+                        }
                     }
 
                     // The handshake is over. Repeating it is a protocol

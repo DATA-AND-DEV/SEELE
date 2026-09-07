@@ -764,6 +764,9 @@ pub struct Server {
     pub atrasos: Arc<Atrasos>,
     /// Quem está compartilhando tela em cada sala de voz. Ver [`Telas`].
     pub telas: Arc<Mutex<Telas>>,
+    /// Quem declarou que empresta a subida, e quem serve quem. Ver
+    /// [`crate::pares::Pares`].
+    pub pares: Arc<Mutex<crate::pares::Pares>>,
     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
     ///
     /// `None` when this server has nowhere to keep blobs, which is the in-memory

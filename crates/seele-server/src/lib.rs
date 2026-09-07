@@ -34,6 +34,7 @@ pub mod admissao;
 pub mod alcance;
 pub mod frame;
 pub mod hospedagem;
+pub mod pares;
 pub mod perda_de_subida;
 pub mod permissions;
 pub mod persistence;
@@ -405,6 +406,7 @@ impl Daemon {
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
             atrasos: Arc::new(server::Atrasos::default()),
             telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),
+            pares: Arc::new(tokio::sync::Mutex::new(pares::Pares::nova())),
             anexos,
             caminho_bps: config.caminho_bps,
         });
