@@ -2962,7 +2962,11 @@ fn locais_a_publicar<F: FnOnce() -> Vec<SocketAddr>>(
     emprestando: bool,
     todos: F,
 ) -> Vec<SocketAddr> {
-    if emprestando { todos() } else { Vec::new() }
+    if emprestando {
+        todos()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Se este endereço vale como "local" para o caminho entre pares.
