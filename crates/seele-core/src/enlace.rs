@@ -3148,6 +3148,16 @@ where
 /// público que o servidor já vê na conexão de controle continua sobrando
 /// como candidato, e a ausência de locais não impede o furo, só tira o atalho
 /// de LAN.
+///
+/// # Sem caminho de produção hoje
+///
+/// **Nada em `apps/` nem no `seele-ffi` liga o empréstimo**, e esta função só
+/// roda quando alguém o liga (ver [`locais_a_publicar`]). O único chamador do
+/// caminho inteiro no repositório é o teste de integração
+/// `seele-conformance/tests/tela_por_um_par.rs`, que fala com um servidor em
+/// memória — então **o atalho de LAN nunca foi exercitado contra uma rede de
+/// verdade**. `docs/teste-duas-maquinas.md` diz o mesmo, e este parágrafo
+/// existe para que a próxima pessoa não conclua o contrário lendo só o código.
 fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
     let Ok(local) = ponta.local_addr() else {
         return Vec::new();
@@ -3180,6 +3190,15 @@ fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
 /// máquina é trabalho que quem não empresta nem chega a fazer, e um argumento
 /// já avaliado esconderia dentro do chamador justamente a decisão que este
 /// guarda existe para prender.
+///
+/// # O ramo `true` não tem caminho de produção hoje
+///
+/// **Nada em `apps/` nem no `seele-ffi` chama `Enlace::emprestar_subida`**, e
+/// sem isso `emprestando` é sempre `false` em produção: o ramo que publica
+/// endereços só roda no teste de integração
+/// `seele-conformance/tests/tela_por_um_par.rs`. O guarda do opt-in está preso
+/// por teste; o que não foi exercitado é o **caminho de LAN** que ele
+/// destranca. Ver `docs/teste-duas-maquinas.md`, que registra o mesmo.
 fn locais_a_publicar<F: FnOnce() -> Vec<SocketAddr>>(
     emprestando: bool,
     todos: F,
