@@ -353,3 +353,92 @@ pode ser feita depois disto.
 
 Se algo falhar, o mais útil é: qual seção, o que a barra de telemetria mostrava,
 e o que o `seeled` imprimiu no terminal dele naquele momento.
+
+---
+
+## O caminho entre pares (subprojeto A da malha)
+
+**Isto é o que nenhum teste automático deste repositório consegue produzir.** Um
+furo de NAT entre dois roteadores domésticos não acontece em `127.0.0.1`, e os
+dois números abaixo são a razão de o subprojeto A existir antes do B (o
+desenho da árvore de retransmissão). Sem eles, a aritmética de quantas pessoas
+uma sala comporta é chute — ver a seção seguinte antes de convocar ninguém.
+
+### Confira isto antes de marcar horário com três pessoas
+
+**O empréstimo de subida não tem hoje nenhum lugar para clicar.** A chamada que
+liga isso (`Client::emprestar_subida`, em `crates/seele-core/src/client.rs`, que
+manda `ClientMessage::EmprestarSubida` — `crates/seele-proto/src/control.rs`)
+não é acionada por nenhum comando do app gráfico: nenhuma das funções
+`#[tauri::command]` de `apps/seele-app/src/main.rs` a chama, e nenhum arquivo em
+`apps/seele-app/ui/` menciona "emprestar" ou "subida". Hoje só quem a chama é o
+teste de integração `crates/seele-conformance/tests/tela_por_um_par.rs`, que
+roda em processo, sem rede de verdade — não é algo que se aperte um botão para
+fazer.
+
+Isto já estava anotado no diário desta malha (`progress.md`, Task 8): *"o
+caminho de LAN do §3.1 fica inerte até o opt-in existir na interface."* Antes
+de reunir três máquinas, confira se essa lacuna já foi fechada — procure por
+`emprestar` em `apps/seele-app/src/main.rs` e em `apps/seele-app/ui/`. Se
+continuar vazio, este roteiro não tem como ser executado por alguém sem abrir o
+código: falta uma forma de a pessoa dizer "eu empresto", nem que seja
+provisória. Registre esse achado antes de tentar rodar o resto desta seção — é
+mais útil do que uma tarde perdida procurando um botão que não existe.
+
+### A montagem, quando houver por onde ligar o empréstimo
+
+Precisa de **três** máquinas, ou de duas mais um celular em 4G — o essencial é
+que **quem empresta e quem assiste não estejam na mesma rede**. Uma máquina
+sozinha (o servidor e quem compartilha) pode estar em qualquer rede; as outras
+duas é que têm de ser redes diferentes entre si, ou o furo nunca é exercitado —
+mesmo aviso que a seção 7 já faz para o degrau 4.
+
+1. Numa máquina, suba o servidor (seção 1) e abra o app (seção 6). Entre na
+   sala de voz e compartilhe a tela: o botão **COMPARTILHAR** no rodapé,
+   escolha a janela ou o monitor.
+2. Numa segunda rede, entre com uma pessoa. Ligue o empréstimo de subida nela
+   (ver acima — hoje não tem onde).
+3. Numa terceira rede (ou no celular em 4G), entre com outra pessoa e clique
+   no nome de quem está compartilhando para assistir. Não escolha "pelo par"
+   ou "pelo servidor" — a escolha é automática e burra hoje (o servidor aponta
+   o primeiro que declarou emprestar), e é justamente ela que os dois números
+   abaixo medem.
+
+Anote, do `tracing` de quem assistiu (a terceira máquina):
+
+| o que | onde ler | campo | anote |
+|---|---|---|---|
+| como a ligação chegou | evento `um par ligou` | `como` | `Local` ou `Furo` |
+| ida e volta com o par | evento `um par ligou` | `ida_e_volta` | em ms |
+| quando não ligou, o motivo enumerado | evento `o par não veio; a tela vem do servidor` | `motivo` | o valor, por extenso |
+| quando não ligou, o detalhe | mesmo evento acima | `erro` | a frase inteira, útil para achar a causa |
+
+As duas linhas de `tracing` são emitidas por `crate::par` (`crates/seele-core/src/par.rs`)
+no processo de quem assistiu — é lá, e não no de quem empresta, que a discagem
+e a decisão acontecem.
+
+Repita **umas dez vezes**, em redes diferentes se der. O que se quer é a
+**fração** de `Furo` sobre tentativas, e ela é o número que decide o desenho da
+árvore: se o furo falhar em boa parte dos pares, o subprojeto B não pode supor
+que qualquer par se alcança, e vira «árvore entre quem se alcança, estrela para
+o resto».
+
+### Uma ressalva que a medida não pode esconder
+
+`ComoChegou` (`crates/seele-core/src/par.rs`) classifica por **faixa de
+endereço**, não por ter havido furo de verdade — é o que `como_chegou` faz:
+olha se o IP é privado, loopback, link-local ou ULA, e nada além disso. Duas
+máquinas da mesma casa que se alcancem pelo endereço público — hairpin de
+NAT — contam como `Furo` sem furo nenhum. Um endereço IPv6 global sem NAT,
+travado só por firewall, também conta como `Furo`. **Os dois inflam o
+numerador** da fração acima.
+
+Não dá para o número corrigir isso sozinho — anote a topologia ao lado dele:
+que rede era cada máquina, se havia CGNAT, se o roteador tinha UPnP ligado. Sem
+essa nota, a fração medida não quer dizer o que promete.
+
+Escreva os dois números — o custo de um salto (a mediana do `ida_e_volta`) e a
+fração de furo — em `docs/m1-medicoes.md`, ao lado dos outros. **Enquanto eles
+não existirem, a aritmética da malha na spec continua sendo estimativa**, e ela
+já está marcada como tal em `docs/superpowers/specs/2026-09-05-caminho-entre-pares-design.md`
+(§2: *"dois números que hoje são estimativa"*).
