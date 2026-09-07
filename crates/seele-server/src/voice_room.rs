@@ -71,6 +71,12 @@ pub enum VoiceRoomCommand {
     Leave {
         /// Who.
         person: PersonId,
+        /// De qual conexão. O cliente tenta vários caminhos ao mesmo tempo
+        /// (ADR 0037) e abandona os perdedores, que fecham logo depois — e
+        /// fechar roda a saída. Sem isto, a conexão abandonada tirava da sala
+        /// quem estava vivo, e a pessoa parava de ouvir e de ser ouvida
+        /// continuando a se ver dentro.
+        ssrc: Ssrc,
     },
     /// A datagram arrived from a connection.
     Datagram {
@@ -423,7 +429,15 @@ impl VoiceRoom {
                 }
                 self.reconferir_o_teto();
             }
-            VoiceRoomCommand::Leave { person } => {
+            VoiceRoomCommand::Leave { person, ssrc } => {
+                // Só sai quem é desta conexão. Ver o doc da variante.
+                if !self
+                    .members
+                    .get(&person)
+                    .is_some_and(|member| member.ssrc == ssrc)
+                {
+                    return;
+                }
                 if let Some(member) = self.members.remove(&person) {
                     self.by_ssrc.remove(&member.ssrc);
                 }
@@ -1072,11 +1086,11 @@ impl VoiceRooms {
     /// somebody's `ssrc` receiving audio in a room they left. `Leave` for a
     /// person who is not there is a no-op, and `specs/04-servidor-seele.md` sizes
     /// a server at five active voice_rooms, so the fan-out is five sends.
-    pub async fn leave_everywhere(&self, person: PersonId) {
+    pub async fn leave_everywhere(&self, person: PersonId, ssrc: Ssrc) {
         let tasks: Vec<mpsc::Sender<VoiceRoomCommand>> =
             self.tasks.lock().await.values().cloned().collect();
         for task in tasks {
-            let _ = task.send(VoiceRoomCommand::Leave { person }).await;
+            let _ = task.send(VoiceRoomCommand::Leave { person, ssrc }).await;
         }
     }
 
@@ -1425,6 +1439,7 @@ mod tests {
 
         voice_room.handle(VoiceRoomCommand::Leave {
             person: PersonId(2),
+            ssrc: Ssrc(200),
         });
         assert_eq!(voice_room.occupancy(), 1);
 
@@ -1588,7 +1603,7 @@ mod tests {
         .await
         .unwrap();
 
-        voice_rooms.leave_everywhere(PersonId(1)).await;
+        voice_rooms.leave_everywhere(PersonId(1), Ssrc(100)).await;
 
         sala.send(VoiceRoomCommand::Datagram {
             from: Ssrc(200),
@@ -1752,6 +1767,7 @@ mod tests {
 
         voice_room.handle(VoiceRoomCommand::Leave {
             person: PersonId(1),
+            ssrc: Ssrc(10),
         });
         assert!(
             matches!(convite.pedacos.try_recv(), Ok(Pedaco::Fim)),
@@ -1862,6 +1878,7 @@ mod tests {
         // E a saída é a metade boa de N mudar: ela devolve teto.
         voice_room.handle(VoiceRoomCommand::Leave {
             person: PersonId(2),
+            ssrc: Ssrc(20),
         });
         assert_eq!(contagens(&mut ouvinte), vec![1]);
     }
