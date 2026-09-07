@@ -239,7 +239,7 @@ certificado» — e `String` e não `[u8; 32]` porque é assim que o pino do ADR
 já viaja e é guardado, e dois formatos para o mesmo hash é o começo de os dois
 discordarem.
 
-- `EmprestarSubida { emprestando: bool, impressao: [u8; 32], locais: Vec<SocketAddr> }`
+- `EmprestarSubida { emprestando: bool, impressao: String, locais: Vec<SocketAddr> }`
   — «eu empresto, este é o meu certificado, e estes são os meus endereços de rede
   local». O endereço público **não** vai aqui: ele é a origem da conexão que já
   está aberta, e o servidor o tem sem perguntar. Um endereço público que o
@@ -265,14 +265,35 @@ discordarem.
 
 **servidor → cliente**
 
-- `SirvaTelaPara { screen: ScreenId, enderecos: Vec<SocketAddr>, impressao: [u8; 32] }`
+- `SirvaTelaPara { screen: ScreenId, enderecos: Vec<SocketAddr>, impressao: String }`
   — para quem empresta.
-- `AssistaTelaPor { screen: ScreenId, enderecos: Vec<SocketAddr>, impressao: [u8; 32] }`
+- `AssistaTelaPor { screen: ScreenId, enderecos: Vec<SocketAddr>, impressao: String }`
   — para quem recebe.
 
 As duas são simétricas de propósito: os dois lados fazem a mesma coisa com elas
 — discar para os endereços e conferir a impressão digital —, e a assimetria fica
 só em quem já tem os bytes.
+
+### 4.1 · A impressão é `String` nas assinaturas também — emenda de 07/09/2026
+
+**Escrito depois de a revisão final ler as três assinaturas acima.** Elas diziam
+`impressao: [u8; 32]` enquanto o parágrafo logo antes delas — e o código —
+diziam `String`. O parágrafo estava certo e as assinaturas estavam erradas; as
+três foram corrigidas.
+
+Não é cosmética: o texto que as assinaturas contradiziam é justamente o que
+explica **por que** `String` — «é assim que o pino do ADR 0003 já viaja e é
+guardado, e dois formatos para o mesmo hash é o começo de os dois discordarem».
+Uma spec que carregava os dois formatos já era a primeira das duas
+discordâncias.
+
+**E o tamanho é regra, não descrição.** «Exatamente 64 caracteres» virou
+validação de fio: `seele_proto::control::check_impressao` exige 64 dígitos
+hexadecimais, nem mais nem menos. O teto que havia antes (`<= 64`) aceitava
+`""` e aceitava lixo — e um cliente que declarasse lixo era escolhido por
+`Pares::escolher`, ocupava vaga em `ja_servindo` e custava segundos de tela
+parada a cada `WatchScreen`. Maiúsculas passam na entrada, como `crate::uri` já
+faz com o `fp=` do `seele://`; quem **produz** continua escrevendo minúsculo.
 
 ## 5 · O opt-in entra agora, e a razão é de custo
 
