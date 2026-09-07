@@ -41,7 +41,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
-use seele_proto::control::ServerMessage;
+use seele_proto::control::{MotivoDeFalhaDePar, ServerMessage};
 use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId,
 };
@@ -50,6 +50,7 @@ use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
 use crate::client::{Client, ConnectError, MediaChannel, SessionInfo};
+use crate::par;
 use crate::tofu::PinDecision;
 use crate::tofu::PinStore;
 use crate::tofu::{verdict, Verdict};
@@ -384,6 +385,37 @@ enum Comando {
 /// servidor doméstico leva para começar a mandar e pouco para deixar uma tela
 /// esperando por bytes que não vêm.
 const ESPERA_DE_ANEXO: Duration = Duration::from_secs(10);
+
+/// Quanto tempo se dá ao caminho entre pares antes de cair para o servidor.
+///
+/// Generoso o bastante para um furo de NAT em rede doméstica — o roteiro de
+/// duas máquinas de `docs/teste-duas-maquinas.md` é quem mede o real — e curto
+/// o bastante para quem está esperando a imagem não ficar olhando para uma
+/// tela parada além do razoável: passado ele, `crate::par::por_onde` cai para o
+/// servidor sem drama, e é exatamente esse o ponto da malha ser alívio e nunca
+/// dependência.
+const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
+
+/// O que uma tentativa do caminho entre pares, resolvida numa tarefa solta,
+/// devolve ao laço de [`Motor::rodar`] para ele agir.
+///
+/// Só existe porque a tentativa é assíncrona e pode levar até
+/// [`PRAZO_DO_PAR`]: bloquear o laço principal por isso pausaria a voz, o ping
+/// e o resto desta sessão até o par responder ou o prazo vencer. A tarefa roda
+/// solta (ver [`Motor::assistir_por_par`]) e devolve o que decidiu por aqui; só
+/// quem tem o `&mut Client` — o laço de `rodar` — pode falar com o servidor.
+#[derive(Debug)]
+enum ResultadoDoPar {
+    /// O par não veio, ou ligou e nunca abriu a transmissão: o servidor
+    /// precisa saber, para poder ele mesmo assumir. Ver
+    /// [`seele_proto::control::ClientMessage::ParFalhou`].
+    ParFalhou {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// O que aconteceu.
+        motivo: MotivoDeFalhaDePar,
+    },
+}
 
 /// Um arquivo para mandar, com a mensagem que vai junto.
 ///
@@ -1194,6 +1226,7 @@ impl Enlace {
 
         let (comandos_tx, comandos_rx) = mpsc::channel(COMANDOS);
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
+        let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
 
         let motor = Motor {
             destino,
@@ -1221,6 +1254,11 @@ impl Enlace {
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
+            ponta_de_pares: None,
+            identidade_de_par: None,
+            atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resultados_do_par,
+            resultados_do_par_tx,
         };
         let tarefa = tokio::spawn(motor.rodar(comandos_rx));
 
@@ -1865,6 +1903,39 @@ struct Motor {
     /// na tica que ele já tem — ver [`Motor::medir_o_caminho`]. Era a pergunta
     /// 2 do §8.
     caminho: crate::caminho::Sonda,
+    /// A ponta QUIC do caminho entre pares. Nem a mesma que fala com o
+    /// servidor, nem uma por tentativa: uma só, reaproveitada por toda a
+    /// sessão para dela discar e nela atender.
+    ///
+    /// `None` até a primeira `AssistaTelaPor` ou `SirvaTelaPara` chegar — a
+    /// maioria das sessões nunca troca uma dessas mensagens, e abrir um socket
+    /// UDP à toa seria custo sem uso.
+    ponta_de_pares: Option<quinn::Endpoint>,
+    /// A identidade efêmera desta sessão para o caminho entre pares.
+    ///
+    /// Gerada na primeira vez que é necessária e guardada depois: quem chama
+    /// `par::passar_a_atender` e depois `par::ligar` na mesma ponta precisa
+    /// das duas — é para essa cópia que `Identidade::clone` existe, e é por
+    /// isso que a identidade tem de sobreviver ao primeiro uso.
+    identidade_de_par: Option<par::Identidade>,
+    /// Se já há uma tentativa de servir um par em curso.
+    ///
+    /// No A1 quem empresta serve um par por vez (`crate::par::atender` só
+    /// aceita uma ligação). Um `SirvaTelaPara` que chegasse no meio de outro
+    /// não teria vaga — a escolha aqui é recusar em silêncio para o servidor
+    /// (que não espera resposta nenhuma desta mensagem) e deixar só o rastro.
+    ///
+    /// `Arc<AtomicBool>` e não `bool` simples: a tarefa solta que
+    /// [`Motor::servir_par`] cria precisa devolver a vaga quando termina, e
+    /// ela não tem `&mut Motor` — só a cópia deste punho.
+    atendendo_pares: Arc<std::sync::atomic::AtomicBool>,
+    /// Por onde as tarefas soltas do caminho entre pares devolvem o que
+    /// decidiram — ver [`ResultadoDoPar`].
+    resultados_do_par: mpsc::UnboundedReceiver<ResultadoDoPar>,
+    /// A metade de [`Self::resultados_do_par`] que as tarefas soltas recebem,
+    /// para mandar de volta. Clonada a cada tarefa nova: um `Sender` barato
+    /// de clonar, e cada tarefa é dona da própria cópia.
+    resultados_do_par_tx: mpsc::UnboundedSender<ResultadoDoPar>,
 }
 
 /// Uma transmissão desta pessoa que está no ar.
@@ -1936,6 +2007,11 @@ impl Motor {
                 .as_ref()
                 .map(crate::client::Client::fila_de_telas);
             let avisos_da_tela = self.avisos.clone();
+            // Tirado pela mesma razão dos dois de cima: `resultados_do_par` é
+            // um campo próprio, disjunto de `self.cliente`, e emprestá-lo aqui
+            // é o que deixa o braço novo do `select!` chamar `cliente.par_falhou`
+            // sem pedir `self` de novo.
+            let resultados_do_par = &mut self.resultados_do_par;
 
             // Só há o que ler quando há conexão. Sem ela, a espera é o relógio.
             let houve_evento = match self.cliente.as_mut() {
@@ -1945,6 +2021,24 @@ impl Motor {
                     // já separou este fluxo dos anexos; aqui ele vira quadros.
                     Some(fluxo) = espera_da_fila(&fila_de_telas) => {
                         escoar_tela_alheia(avisos_da_tela.clone(), fluxo);
+                        None
+                    }
+                    // O que uma tarefa solta do caminho entre pares (ver
+                    // `Motor::assistir_por_par`) decidiu. Só chega aqui um
+                    // `ParFalhou` — ver `ResultadoDoPar` — porque só o laço de
+                    // `rodar`, dono do `&mut Client`, pode falar com o servidor.
+                    Some(resultado) = resultados_do_par.recv() => {
+                        match resultado {
+                            ResultadoDoPar::ParFalhou { screen, motivo } => {
+                                if let Err(erro) = cliente.par_falhou(screen, motivo).await {
+                                    tracing::warn!(
+                                        %erro,
+                                        ?screen,
+                                        "não deu para avisar o servidor que o par falhou"
+                                    );
+                                }
+                            }
+                        }
                         None
                     }
                     comando = comandos.recv() => {
@@ -2442,8 +2536,230 @@ impl Motor {
                 self.caminho_de_quem_hospeda_bps = (bps > 0).then_some(bps);
                 self.reconferir_o_teto();
             }
+            // O caminho entre pares: vá buscar esta tela naquele par, e caia
+            // para o servidor sem drama se ele não vier. Ver
+            // `Motor::assistir_por_par`.
+            ServerMessage::AssistaTelaPor {
+                screen,
+                ref enderecos,
+                ref impressao,
+            } => {
+                self.assistir_por_par(screen, enderecos.clone(), impressao.clone());
+            }
+            // O caminho entre pares, do outro lado: passe a atender e disque
+            // para quem vai me buscar. Ver `Motor::servir_par`.
+            ServerMessage::SirvaTelaPara {
+                screen,
+                ref enderecos,
+                ref impressao,
+            } => {
+                self.servir_par(screen, enderecos.clone(), impressao.clone());
+            }
             _ => {}
         }
+    }
+
+    // -------------------------------------------------------- caminho entre pares
+
+    /// A ponta QUIC do caminho entre pares, criando-a na primeira vez.
+    ///
+    /// Depois da primeira vez é só uma clonagem barata: `quinn::Endpoint` é um
+    /// punho sobre um estado compartilhado, e cada tarefa solta do caminho
+    /// entre pares fica com a própria cópia.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError::LocalEndpoint`] se o socket UDP não abrir.
+    fn ponta_de_pares(&mut self) -> Result<quinn::Endpoint, ConnectError> {
+        if let Some(ponta) = &self.ponta_de_pares {
+            return Ok(ponta.clone());
+        }
+        let ponta = crate::client::local_endpoint(None)?;
+        self.ponta_de_pares = Some(ponta.clone());
+        Ok(ponta)
+    }
+
+    /// A identidade efêmera desta sessão para o caminho entre pares, gerada na
+    /// primeira vez que é necessária e reaproveitada depois.
+    ///
+    /// # Errors
+    ///
+    /// [`par::ErroDePar::Certificado`] se o `rcgen` não gerar o certificado.
+    fn identidade_de_par(&mut self) -> Result<par::Identidade, par::ErroDePar> {
+        if let Some(identidade) = &self.identidade_de_par {
+            return Ok(identidade.clone());
+        }
+        let identidade = par::identidade_efemera()?;
+        self.identidade_de_par = Some(identidade.clone());
+        Ok(identidade)
+    }
+
+    /// `ServerMessage::AssistaTelaPor`: vá buscar esta tela naquele par.
+    ///
+    /// Roda numa tarefa solta porque `par::por_onde` pode levar até
+    /// [`PRAZO_DO_PAR`] — bloquear o laço de [`Motor::rodar`] por isso
+    /// pausaria a voz, o ping e o resto desta sessão até o par responder ou o
+    /// prazo vencer.
+    ///
+    /// `por_onde` **nunca erra** — essa é a promessa dela, escrita no próprio
+    /// doc: quem chama não tem decisão a tomar sobre a falha do par. O que
+    /// este método faz com o `PorOndeAssistir::Servidor` que ela devolve é
+    /// mandar o aviso ao servidor pelo canal de [`ResultadoDoPar`]: só o laço
+    /// de `rodar`, dono do `&mut Client`, pode falar com ele.
+    fn assistir_por_par(
+        &mut self,
+        screen: ScreenId,
+        enderecos: Vec<SocketAddr>,
+        impressao: String,
+    ) {
+        let ponta = match self.ponta_de_pares() {
+            Ok(ponta) => ponta,
+            Err(erro) => {
+                tracing::warn!(%erro, ?screen, "não deu para abrir a ponta do caminho entre pares");
+                let _ = self.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
+                    screen,
+                    motivo: MotivoDeFalhaDePar::NaoAlcancou,
+                });
+                return;
+            }
+        };
+        let avisos = self.avisos.clone();
+        let resultados = self.resultados_do_par_tx.clone();
+        tokio::spawn(async move {
+            match par::por_onde(&ponta, &enderecos, impressao, PRAZO_DO_PAR).await {
+                par::PorOndeAssistir::Par(ligado) => {
+                    // A conta de bytes é de quem empresta — `crate::par::repassar`
+                    // escreve por pedaço do lado dele. Do lado de quem assiste
+                    // não muda nada: `escoar_tela_alheia` já não sabe, e não
+                    // precisa saber, se o fluxo veio do servidor ou de um par.
+                    match tokio::time::timeout(PRAZO_DO_PAR, ligado.conexao.accept_uni()).await {
+                        Ok(Ok(fluxo)) => escoar_tela_alheia(avisos, fluxo),
+                        Ok(Err(erro)) => {
+                            tracing::warn!(%erro, ?screen, "o par ligou e a transmissão não abriu");
+                            let _ = resultados.send(ResultadoDoPar::ParFalhou {
+                                screen,
+                                motivo: MotivoDeFalhaDePar::CaiuNoMeio,
+                            });
+                        }
+                        Err(_prazo) => {
+                            tracing::warn!(
+                                ?screen,
+                                "o par ligou e não abriu a transmissão a tempo"
+                            );
+                            let _ = resultados.send(ResultadoDoPar::ParFalhou {
+                                screen,
+                                motivo: MotivoDeFalhaDePar::ParouDeMandar,
+                            });
+                        }
+                    }
+                }
+                // `por_onde` já registrou o motivo detalhado no `tracing` dela.
+                // O que chega aqui é só "não deu", de propósito — é a mesma
+                // promessa que o doc dela faz. `NaoAlcancou` é a leitura mais
+                // honesta que dá para mandar ao servidor sem esse detalhe: o
+                // evento de segurança de uma impressão que não bate já foi
+                // denunciado localmente (`classificar`, em `par.rs`), e a
+                // escolha de hoje do servidor (`Pares::escolher`) é burra de
+                // propósito e não age diferente por causa do motivo.
+                par::PorOndeAssistir::Servidor => {
+                    let _ = resultados.send(ResultadoDoPar::ParFalhou {
+                        screen,
+                        motivo: MotivoDeFalhaDePar::NaoAlcancou,
+                    });
+                }
+            }
+        });
+    }
+
+    /// `ServerMessage::SirvaTelaPara`: passe a atender, e disque para o outro
+    /// lado — as duas tentativas simultâneas são o furo.
+    ///
+    /// Como [`Motor::assistir_por_par`], roda solta pela mesma razão de prazo.
+    /// Ao contrário dela, quem empresta **nunca** manda `ParFalhou`:
+    /// `seele_proto::control::ClientMessage::ParFalhou` é explícita que só
+    /// quem recebe manda essa mensagem, porque só quem recebe sabe que a
+    /// imagem parou — quem empresta pode ter caído sem chegar a saber de nada.
+    fn servir_par(&mut self, screen: ScreenId, enderecos: Vec<SocketAddr>, impressao: String) {
+        if self
+            .atendendo_pares
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            // No A1 quem empresta serve um par por vez (`par::atender` só
+            // aceita uma ligação). Sem vaga, e sem resposta esperada desta
+            // mensagem — só o rastro.
+            tracing::warn!(
+                ?screen,
+                "um pedido para servir chegou enquanto este par já servia outro"
+            );
+            return;
+        }
+        let ponta = match self.ponta_de_pares() {
+            Ok(ponta) => ponta,
+            Err(erro) => {
+                tracing::warn!(%erro, ?screen, "não deu para abrir a ponta do caminho entre pares");
+                return;
+            }
+        };
+        let identidade = match self.identidade_de_par() {
+            Ok(identidade) => identidade,
+            Err(erro) => {
+                tracing::warn!(%erro, ?screen, "não deu para gerar a identidade deste par");
+                return;
+            }
+        };
+        self.atendendo_pares
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let atendendo_pares = Arc::clone(&self.atendendo_pares);
+        tokio::spawn(async move {
+            let ligado = servir_um_par(ponta, identidade, enderecos, impressao).await;
+            atendendo_pares.store(false, std::sync::atomic::Ordering::Relaxed);
+            match ligado {
+                Some(ligado) => tracing::info!(
+                    par = %ligado.conexao.remote_address(),
+                    como = ?ligado.como,
+                    ?screen,
+                    "este par está sendo servido"
+                ),
+                // As duas tentativas — passar_a_atender+atender e ligar — não
+                // deram em nada. Sem `ParFalhou` daqui: é quem assiste que vai
+                // notar a falta de imagem e avisar o servidor.
+                None => tracing::info!(
+                    ?screen,
+                    "nenhuma das duas tentativas de servir este par deu certo"
+                ),
+            }
+        });
+    }
+}
+
+/// Passa a atender e disca para o outro lado, ao mesmo tempo — as duas
+/// tentativas simultâneas são o furo de NAT dos dois lados. A primeira que
+/// fechar o aperto de mão vence, como em `par::testes::dois_pares_apresentados_se_ligam_pelos_dois_lados`.
+///
+/// `None` se nenhuma das duas fechar a tempo. Livre e não método de `Motor`
+/// porque roda dentro do `tokio::spawn` de [`Motor::servir_par`], depois de o
+/// `&mut Motor` já ter sido solto.
+async fn servir_um_par(
+    ponta: quinn::Endpoint,
+    identidade: par::Identidade,
+    enderecos: Vec<SocketAddr>,
+    impressao: String,
+) -> Option<par::ParLigado> {
+    if let Err(erro) = par::passar_a_atender(&ponta, identidade.clone(), impressao.clone()) {
+        tracing::warn!(%erro, "não deu para pôr esta ponta a atender o par");
+        return None;
+    }
+    let atende = par::atender(ponta.clone(), PRAZO_DO_PAR);
+    let disca = par::ligar(
+        &ponta,
+        &enderecos,
+        impressao,
+        Some(&identidade),
+        PRAZO_DO_PAR,
+    );
+    tokio::select! {
+        atendido = atende => atendido,
+        discado = disca => discado.ok(),
     }
 }
 
@@ -4039,6 +4355,7 @@ mod tests {
 
     fn motor_de_teste() -> Motor {
         let (avisos, _) = mpsc::unbounded_channel();
+        let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
         Motor {
             bilhete: None,
             destino: Destino {
@@ -4067,6 +4384,11 @@ mod tests {
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            ponta_de_pares: None,
+            identidade_de_par: None,
+            atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resultados_do_par,
+            resultados_do_par_tx,
         }
     }
 }

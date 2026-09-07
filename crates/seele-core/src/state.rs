@@ -1204,14 +1204,28 @@ impl Room {
             // of which are over before any shell is watching.
             ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
 
-            // O protocolo já leva os dois verbos do caminho entre pares
-            // (`PROTOCOL_VERSION` 4). A integração com o despacho de pares é
-            // andaime para Task 8 («O cliente pede ao par, e cai para o servidor
-            // quando falha»). Rastreado, e não calado: uma mensagem que chega e é
-            // descartada sem resposta nenhuma não pode desaparecer sem deixar rastro.
-            ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => {
-                tracing::warn!("caminho entre pares recebido antes de o cliente estar ligado");
-            }
+            // Decisão da Task 8, e não mais andaime: nada, de propósito.
+            //
+            // Quem age nestas duas mensagens é o `enlace::Motor` —
+            // `Motor::assistir_por_par` disca para o par que `AssistaTelaPor`
+            // aponta (e cai para o servidor sem drama se ele não vier);
+            // `Motor::servir_par` passa a atender e disca de volta quando
+            // chega `SirvaTelaPara`. O `Motor` vê a mesma mensagem **antes**
+            // dela chegar aqui: `Motor::rodar` chama `a_tela_ouviu` e só depois
+            // manda o `Aviso::Mensagem` que a casca funde neste `Room` (ver
+            // `crates/seele-ffi/src/lib.rs::fold`).
+            //
+            // E o `Room` não tem o que fazer com elas mesmo tendo a vez: ele é
+            // o que se sabe do **servidor** para a interface desenhar — a
+            // sala, quem está nela, quem compartilha o quê —, e de qual par
+            // serve qual tela não há nada aí que a interface precise mostrar.
+            // A transmissão continua sendo a mesma `ScreenId` de antes; de
+            // onde os bytes vêm — servidor ou par — é detalhe de transporte
+            // que `ComoChegou` e `ParLigado` guardam do lado do `enlace`, e
+            // nunca precisou de campo no roster. Por isso nenhum braço muda
+            // `changed`: não é a mesma omissão do andaime — aquele calava uma
+            // mensagem que ninguém tratava; esta é dita e decidida.
+            ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => {}
         }
 
         changed

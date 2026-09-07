@@ -1304,6 +1304,24 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::UnwatchScreen { screen }).await
     }
 
+    /// Avisa o servidor que o par que devia servir esta transmissão não veio.
+    ///
+    /// **Mandada só por quem recebe, nunca por quem empresta** —
+    /// [`seele_proto::control::ClientMessage::ParFalhou`] documenta por quê:
+    /// quem sabe que a imagem parou é quem estava esperando por ela; quem
+    /// empresta pode ter caído sem chegar a saber de nada.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn par_falhou(
+        &mut self,
+        screen: ScreenId,
+        motivo: seele_proto::control::MotivoDeFalhaDePar,
+    ) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::ParFalhou { screen, motivo }).await
+    }
+
     /// Abre o fluxo de vídeo desta transmissão.
     ///
     /// Na conexão que já existe, e num fluxo unidirecional — as duas metades do

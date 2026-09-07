@@ -698,6 +698,47 @@ pub async fn atender(
     })
 }
 
+/// De onde a imagem desta transmissão vai vir.
+///
+/// `Box` em [`Self::Par`] porque [`ParLigado`] carrega uma [`quinn::Connection`]
+/// e [`Self::Servidor`] não carrega nada: sem a caixa o `enum` inteiro teria o
+/// tamanho da maior variante, e o `clippy::large_enum_variant` reclamaria com
+/// razão — a variante pequena pagaria pelo tamanho da grande a cada vez que
+/// aparecesse.
+#[derive(Debug)]
+pub enum PorOndeAssistir {
+    /// Por este par.
+    Par(Box<ParLigado>),
+    /// Pelo servidor, como sempre.
+    Servidor,
+}
+
+/// Tenta o par, e cai para o servidor sem drama quando ele não vem.
+///
+/// **Nunca devolve erro**, e é de propósito: quem chama não tem decisão a tomar
+/// sobre a falha. A malha é alívio; falhar nela é voltar ao caminho de antes
+/// dela existir, e isso não é um erro, é o normal — a mesma regra que a spec de
+/// 05/09 registra: ninguém perde imagem por causa da máquina de outra pessoa.
+///
+/// O motivo enumerado da falha **não some**: vai para o `tracing` aqui. Quem
+/// chama não recebe o [`ErroDePar`] de volta — essa é a metade da promessa
+/// acima, «quem chama não tem decisão a tomar» — mas o rastro fica escrito para
+/// quem for investigar depois.
+pub async fn por_onde(
+    ponta: &quinn::Endpoint,
+    enderecos: &[std::net::SocketAddr],
+    impressao: String,
+    prazo: std::time::Duration,
+) -> PorOndeAssistir {
+    match ligar(ponta, enderecos, impressao, None, prazo).await {
+        Ok(ligado) => PorOndeAssistir::Par(Box::new(ligado)),
+        Err(erro) => {
+            tracing::info!(%erro, "o par não veio; a tela vem do servidor");
+            PorOndeAssistir::Servidor
+        }
+    }
+}
+
 /// Se este endereço é da mesma rede, e portanto não precisou de furo.
 fn como_chegou(endereco: std::net::SocketAddr) -> ComoChegou {
     let local = match endereco.ip() {
@@ -1401,6 +1442,33 @@ mod testes {
             comecou.elapsed() < std::time::Duration::from_secs(3),
             "o prazo não mandou: a discagem levou {:?}",
             comecou.elapsed()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn quando_o_par_nao_liga_a_resposta_e_o_servidor() {
+        // **A malha é alívio, nunca dependência.** Decisão de quem desenha o
+        // produto, 05/09/2026: ninguém perde imagem por causa da máquina de outra
+        // pessoa. É a propriedade de segurança da malha inteira, e por isso ela é
+        // provada aqui e não adiada para o subprojeto B — uma propriedade de
+        // segurança provada depois é uma propriedade que passou um tempo sem
+        // existir.
+        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        // Uma porta em que ninguém atende: o endereço é válido e o aperto de mão
+        // nunca fecha.
+        let ninguem = std::net::SocketAddr::from(([127, 0, 0, 1], 1));
+
+        let onde = por_onde(
+            &ponta,
+            &[ninguem],
+            "a".repeat(64),
+            std::time::Duration::from_millis(300),
+        )
+        .await;
+
+        assert!(
+            matches!(onde, PorOndeAssistir::Servidor),
+            "o par não ligou e o cliente não caiu para o servidor: alguém ficou sem imagem"
         );
     }
 }
