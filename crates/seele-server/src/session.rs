@@ -2664,18 +2664,7 @@ async fn run_session(
                 }
 
                 if let Some(message) = translate(&event, &channels, session.person) {
-                    // Um cliente v1 não conhece as variantes que a v2
-                    // acrescentou, e o postcard não é autodescritivo: mandá-la
-                    // não seria ignorada do outro lado — deslocaria o fluxo de
-                    // controle dele para sempre, e a partir dali ele segue
-                    // conectado sem entender mais nenhum quadro. A janela de
-                    // compatibilidade do ADR 0036 promete que ele continua
-                    // funcionando, e esta é a linha que cumpre a promessa.
-                    let entende = match message {
-                        ServerMessage::UplinkLoss { .. } => session.protocol_version >= 2,
-                        _ => true,
-                    };
-                    if entende {
+                    if entende_a_mensagem(&message, session.protocol_version) {
                         frame::write(&mut send, &message).await?;
                     }
                 }
@@ -3017,6 +3006,47 @@ async fn moderavel(
         .may(quem, Permission::AdministerServer)
         .unwrap_or(false);
     !alvo_administra || quem_administra
+}
+
+/// Se um cliente nesta versão de protocolo entende esta mensagem.
+///
+/// **Uma mensagem que o outro lado não conhece não é ignorada por ele.** O
+/// postcard não é autodescritivo: um cliente v3 que receba uma variante da v4
+/// lê os bytes dela como se fossem de outra coisa, e o fluxo de controle dele
+/// fica deslocado **para sempre** — a partir dali ele segue conectado sem
+/// entender mais nenhum quadro. A janela de compatibilidade do ADR 0036
+/// promete que um cliente dentro dela continua funcionando, e é esta função
+/// que cumpre a promessa.
+///
+/// # Por que função pura, e não um `match` dentro do laço
+///
+/// Porque a promessa é sobre um cliente que este servidor não tem em teste
+/// nenhum. Dentro do laço, a única forma de exercitá-la seria montar uma
+/// sessão v3 inteira; extraída, a regra é afirmável mensagem a mensagem — que
+/// é a mesma razão de `crate::pares::quem_desacreditar` ter saído do braço de
+/// `ParFalhou`.
+///
+/// # A linha que faltava
+///
+/// `SirvaTelaPara` e `AssistaTelaPor` são da v4 e caíam no `_ => true`. Hoje
+/// um cliente v3 não as recebe — `Pares::escolher` exige `emprestando: true`,
+/// que só chega por `EmprestarSubida`, que é v4 —, mas isso é um invariante de
+/// outra tarefa, e não uma linha que afirme a promessa. Estas duas afirmam.
+#[must_use]
+fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
+    match message {
+        // A v2 acrescentou esta. O `>= 2` de antes já era vácuo — a janela de
+        // compatibilidade do ADR 0036 é de uma versão, e
+        // `oldest_supported_version()` já é 3, então nenhuma sessão viva chega
+        // aqui com menos que isso. Fica escrito com a versão em que a variante
+        // nasceu, e não apagado: no dia em que a janela alargar, é este número
+        // que volta a morder, e reconstruí-lo por arqueologia custaria mais do
+        // que a linha custa.
+        ServerMessage::UplinkLoss { .. } => versao >= 2,
+        // As duas da v4, o caminho entre pares.
+        ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => versao >= 4,
+        _ => true,
+    }
 }
 
 /// Tenta pôr um par a servir esta transmissão a quem acabou de pedir para vê-la.
@@ -3665,5 +3695,80 @@ mod plano_de_midia {
             atribuicoes >= 6,
             "só {atribuicoes} trocas de sala encontradas — o guarda perdeu o alvo"
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod versao_no_fio {
+    use super::*;
+
+    fn sirva() -> ServerMessage {
+        ServerMessage::SirvaTelaPara {
+            screen: ScreenId(7),
+            enderecos: vec![std::net::SocketAddr::from(([203, 0, 113, 9], 8383))],
+            impressao: "a".repeat(64),
+        }
+    }
+
+    fn assista() -> ServerMessage {
+        ServerMessage::AssistaTelaPor {
+            screen: ScreenId(7),
+            enderecos: vec![std::net::SocketAddr::from(([203, 0, 113, 9], 8383))],
+            impressao: "a".repeat(64),
+        }
+    }
+
+    #[test]
+    fn as_duas_mensagens_da_v4_nao_saem_para_um_cliente_v3() {
+        // **A promessa do ADR 0036, escrita numa linha em vez de suposta.** Um
+        // cliente v3 que recebesse uma destas leria os bytes dela como se
+        // fossem de outra coisa — o postcard não é autodescritivo — e o fluxo
+        // de controle dele ficaria deslocado para sempre.
+        //
+        // Que ele não as receba hoje é verdade **por acidente**: `escolher`
+        // exige `emprestando: true`, e isso só chega por `EmprestarSubida`,
+        // que é v4. Um invariante de outra tarefa não é a promessa; estas
+        // asserções são.
+        for versao in [seele_proto::version::oldest_supported_version(), 3] {
+            assert!(
+                !entende_a_mensagem(&sirva(), versao),
+                "SirvaTelaPara saiu para um cliente v{versao}"
+            );
+            assert!(
+                !entende_a_mensagem(&assista(), versao),
+                "AssistaTelaPor saiu para um cliente v{versao}"
+            );
+        }
+    }
+
+    #[test]
+    fn as_duas_mensagens_da_v4_saem_para_um_cliente_v4() {
+        // A outra metade: um guarda que barrasse todo mundo passaria no teste
+        // acima e desligaria a malha inteira sem um rastro.
+        assert!(entende_a_mensagem(
+            &sirva(),
+            seele_proto::version::PROTOCOL_VERSION
+        ));
+        assert!(entende_a_mensagem(
+            &assista(),
+            seele_proto::version::PROTOCOL_VERSION
+        ));
+    }
+
+    #[test]
+    fn a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v4() {
+        // O `>= 2` de `UplinkLoss` é vácuo desde que a janela do ADR 0036
+        // subiu o piso para 3 — este teste é o que o diz em voz alta, e é o
+        // que vai falhar no dia em que a janela alargar e ele deixar de ser.
+        assert_eq!(seele_proto::version::oldest_supported_version(), 3);
+        assert!(entende_a_mensagem(
+            &ServerMessage::UplinkLoss { fraction: 0.0 },
+            seele_proto::version::oldest_supported_version()
+        ));
     }
 }
