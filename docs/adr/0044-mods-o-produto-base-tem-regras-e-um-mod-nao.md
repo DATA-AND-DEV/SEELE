@@ -68,8 +68,13 @@ Conferido no código antes de qualquer linha desta página.
 
 **Um MOD é código de verdade, escrito por terceiros, rodando nos dois lados, com
 acesso real. Não há caixa de areia. A defesa é código aberto obrigatório mais
-revisão nossa de cada versão publicada — e isso fica escrito como o que é: a
-única defesa real.**
+avaliação de cada versão publicada — e isso fica escrito como o que é: a única
+defesa real.**
+
+*O «revisão nossa» com que esta frase foi escrita virou «avaliação automática,
+com humano no que ela não fecha limpo» no adendo de 06/09. O que a frase diz
+sobre ser a única defesa continua valendo, e é por isso que ela não foi
+reescrita: o que mudou foi quem revisa, não que a revisão seja tudo o que há.*
 
 ### «Sem caixa de areia» é a decisão inteira
 
@@ -385,7 +390,9 @@ GitHub.
 
 ## O que fica sem saída
 
-**A revisão de código é a única defesa, e ela é humana.** Um MOD malicioso que
+**A revisão de código é a única defesa.** *(Emendado pelo adendo de 06/09: ela
+passa a ser por máquina, com humano no que não fecha limpo. O que continua
+verdade é o resto deste parágrafo.)* Um MOD malicioso que
 passe pela leitura roda com acesso real na máquina de quem hospeda e na de todo
 mundo que entrou. A profundidade da defesa é a atenção de quem revisa, num dia
 qualquer, no vigésimo MOD da semana.
@@ -422,3 +429,92 @@ handler de protocolo, uma tela e um diretório. A CSP volta uma linha.
 construção. Ela é o produto, não uma implementação dele — quebrá-la é quebrar MOD
 de terceiro, que é a razão pela qual essa porta não fecha. É a mesma advertência
 que o ADR 0017 escreveu sobre o formato do `identity.key`.
+
+## Adendo — a avaliação passa a ser por máquina, e o veredito tem três alturas (2026-09-06)
+
+O corpo acima diz que a defesa é **«revisão nossa de cada versão publicada»** e a
+chama de *a única defesa real*. Isso muda aqui, e a frase muda junto — porque
+uma defesa descrita errado é pior que uma defesa fraca.
+
+Pedido do dono, nas palavras dele: o autor clona um repositório base, publica no
+**repositório dele**, e **pelo site** pede inclusão passando a URL. A avaliação
+clona e analisa **o repositório inteiro** — estrutura, e o código contra código
+malicioso, comunicação com software de terceiro e tentativa de invasão. Aprovado,
+recebe verificado. Não aprovado, depende do que ele faz.
+
+### O que a avaliação por máquina é, dito com precisão
+
+**Um filtro, e não uma prova.** Ela pega o óbvio — `eval` de string remota,
+exfiltração escancarada, ofuscação — e não pega o caminho sutil na décima função
+de um arquivo limpo. Não pega intenção, que é exatamente o que a alternativa 2
+deste ADR dizia sobre caixa de areia.
+
+Ela resolve um problema que estava escrito em «O que fica sem saída»: *«a revisão
+não escala, e isso é um fato e não um risco»*. Trocar humano por máquina troca um
+gargalo por um teto de qualidade, e é uma troca legítima — desde que o teto seja
+dito.
+
+**Então a frase do corpo passa a ser:** a defesa é **repositório público
+obrigatório mais avaliação automática de cada versão, com olho humano em tudo o
+que ela não fecha limpo.** O terceiro nível abaixo é precisamente um caso que
+exige o olho humano, então ele não é opcional no desenho.
+
+### Os três níveis
+
+| | o que é | como é provado |
+|---|---|---|
+| **oficial** | nosso, e nós respondemos por ele | assinatura com a chave de MOD |
+| **verificado** | passou na avaliação | **assinatura**, e não campo |
+| **publicado com notas** | não passou limpo, e o que faz é legítimo — integração com terceiro conhecido, por exemplo | assinatura **que cobre as notas** |
+| *negado* | lesa quem instala | não entra |
+
+**«Verificado» é assinatura e nunca campo**, pelo argumento que o ADR 0026 já
+escreveu na alternativa 5: um catálogo adulterado forja um campo e não forja uma
+assinatura. **E as notas de segurança do terceiro nível ficam dentro do que é
+assinado** — notas que alguém pode tirar são notas que não protegem ninguém.
+
+O terceiro nível é a parte nova mais valiosa deste adendo: sem ele, «não passou»
+só teria a forma de «negado», e todo MOD que conversa com qualquer coisa de fora
+seria recusado. Com ele, a pessoa que instala lê o que o MOD faz de incomum e
+decide — que é a frase que este ADR usa desde o começo, agora com um mecanismo
+atrás.
+
+### O commit é fixado, ou a avaliação não vale nada
+
+O catálogo carrega o **hash do commit avaliado**, e os bytes servidos saem dele.
+Sem isso o autor dá `push` depois da aprovação e passa a distribuir outra coisa
+sob o mesmo veredito — o mesmo teatro que este ADR já recusou para artefato
+compilado, voltando por outra porta.
+
+Um `push` depois da aprovação não muda o que ninguém baixa. Ele exige
+solicitação nova.
+
+### O que o site pode e não pode
+
+O formulário de solicitação é uma **escrita**, e o [indexador](../indexador-de-mods.md)
+é hospedagem estática de propósito. A separação que vale, e que precisa ficar
+escrita para ninguém a desfazer por conveniência:
+
+- **a submissão ganha caminho de escrita** — um formulário que abre uma issue, ou
+  uma função de borda que faz o mesmo;
+- **o catálogo continua parado.** Nenhuma rota de busca, nunca. É a propriedade
+  inteira: com API o indexador aprende cada termo digitado, e com arquivo ele
+  aprende que alguém buscou o arquivo.
+
+No dia em que existir um Worker para a submissão, alguém vai propor usá-lo para
+a busca. A resposta está aqui.
+
+### E a conferência de assinatura no navegador não é controle de segurança
+
+O site baixa o catálogo, a assinatura e a chave **da mesma origem**. Quem
+adultera o catálogo adultera o verificador junto, e a chave junto — não há
+âncora. A conferência do cliente vale porque a chave está **compilada no app**, e
+quem controla a CDN não a alcança; o site não tem equivalente.
+
+Ela fica, porque pega corrupção acidental e CDN mal configurada. O que não pode
+é a tela prometer o que ela não dá: a palavra é **íntegro**, e não **autêntico**,
+e a página diz uma vez que a conferência que decide acontece no app.
+
+Consequência prática: **assinar em modo legado para o navegador poder conferir
+não se justifica por isso.** Justifica-se por o catálogo ser pequeno — o
+pré-hash existe para arquivo grande —, e a razão certa é a que fica escrita.
