@@ -2,7 +2,7 @@
 
 > Para quem vai escrever um. A decisão de por que MODs existem e o que eles
 > alcançam está no [ADR 0044](adr/0044-mods-o-produto-base-tem-regras-e-um-mod-nao.md);
-> o indexador, em [indexador-de-mods.md](indexador-de-mods.md).
+> o indexador, em `indexador-de-mods.md`, no repositório `SEELE-MODS-INDEXER`.
 
 **Um MOD é JavaScript.** Não há SDK, não há build, não há passo de compilação.
 O que você escreve é o que roda, e é também o que passa pela avaliação — os três

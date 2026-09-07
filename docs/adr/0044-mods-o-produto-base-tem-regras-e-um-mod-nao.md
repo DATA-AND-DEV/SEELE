@@ -491,7 +491,7 @@ solicitação nova.
 
 ### O que o site pode e não pode
 
-O formulário de solicitação é uma **escrita**, e o [indexador](../indexador-de-mods.md)
+O formulário de solicitação é uma **escrita**, e o indexador (`indexador-de-mods.md`, no repositório `SEELE-MODS-INDEXER`)
 é hospedagem estática de propósito. A separação que vale, e que precisa ficar
 escrita para ninguém a desfazer por conveniência:
 
