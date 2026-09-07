@@ -511,6 +511,39 @@ async fn cenario() -> Result<Cenario> {
     })
 }
 
+/// O maior `seq` de tela já enfileirado nos avisos deste cliente, sem esperar
+/// nenhum quadro novo.
+///
+/// **Frisar em tentativas curtas, e não varrer uma vez só.** O canal de
+/// avisos é FIFO e o produtor (`compartilhar`) nunca para de mandar quadro
+/// novo — a cada [`INTERVALO`]. Parar de drenar por causa de uma tentativa
+/// que não achou nada dentro da janela é a única forma de saber que o canal
+/// está momentaneamente vazio; ele nunca fica vazio *para sempre* enquanto a
+/// transmissão durar.
+async fn maior_seq_ja_enfileirado(enlace: &mut Enlace, screen: ScreenId) -> Option<u32> {
+    let mut maior = None;
+    loop {
+        let Ok(aviso) = tokio::time::timeout(Duration::from_millis(20), enlace.proximo()).await
+        else {
+            return maior;
+        };
+        if let Aviso::TelaQuadro { tela, bytes, .. } = aviso {
+            if tela == screen {
+                if let Some(seq) = seq_de(&bytes) {
+                    maior = Some(maior.map_or(seq, |atual: u32| atual.max(seq)));
+                }
+            }
+        }
+    }
+}
+
+/// Quantos quadros seguidos, todos pelo par, provam recepção sustentada — e
+/// não um quadro isolado que ainda coubesse num punhado em voo.
+///
+/// A trinta quadros por segundo (`INTERVALO`), é um segundo de vídeo. Um cano
+/// que o servidor desligou não entrega um segundo de imagem por acidente.
+const QUADROS_PARA_PROVAR: u32 = 30;
+
 /// O quadro chega ao segundo cliente **pelo primeiro**, e o servidor não o subiu.
 ///
 /// # A prova que importa é a negativa
@@ -522,11 +555,26 @@ async fn cenario() -> Result<Cenario> {
 /// servidor diz que aquela cópia não saiu dele. É a mesma forma de prova que
 /// `subida_no_arranque.rs` usa.
 ///
-/// E é dupla no tempo também. O contador cair para uma cópia prova que o
-/// servidor deixou de subir para quem assiste; o quadro exigido depois disso é
-/// um quadro que **só existiu** com o cano do servidor já desligado, e que
-/// portanto não pode ter vindo dele. Um teste que só olhasse o último quadro
-/// recebido passaria com um que o servidor tivesse mandado um instante antes.
+/// # Por que a prova de tempo não é "o quadro que só existiu depois"
+///
+/// Uma versão anterior deste teste median o tempo entre `assistir()` e o
+/// quadro chegar, e chamava um quadro rápido demais de prova. Estava errada:
+/// `esperar` lê um canal FIFO, e o canal já tinha o quadro 0 na fila — o
+/// servidor o entregou muito antes de `assistir()` ser chamado, enquanto
+/// ainda servia as duas cópias. Um `Instant::now()` medido depois de
+/// `assistir()` limita **quanto se espera**, nunca **de onde o quadro veio**;
+/// um teste que só olhasse esse relógio passava em microssegundos com um
+/// `pop` de fila em memória, não com rede nenhuma atravessada.
+///
+/// A prova de verdade tem duas pernas. **Primeiro**, um piso: antes de pedir
+/// para assistir, [`maior_seq_ja_enfileirado`] drena o que já chegou e guarda
+/// o maior `seq` visto — só um `seq` estritamente maior que esse piso pode
+/// ter atravessado depois do corte. **Segundo**, sustentação: um `seq` isolado
+/// acima do piso ainda cabe num candidato a mais em voo (a discagem
+/// simultânea dos dois lados admite isso, de propósito). [`QUADROS_PARA_PROVAR`]
+/// quadros seguidos — um segundo inteiro —, cada um estritamente maior que o
+/// anterior e com o contador do servidor em uma cópia o tempo todo, não cabem
+/// em voo nenhum: só cabem vindo de um cano que o servidor não subiu.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
     let Cenario {
@@ -546,14 +594,21 @@ async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
     // exatamente um endereço — o público que o servidor **viu**, e que
     // `Pares::declarou` acrescenta sozinho. Um `locais_a_publicar` chamado com
     // `true` fixo publicaria a topologia interna de quem nunca optou por nada.
+    //
+    // Os `PersonId` vêm de `.sessao().person`, e não escritos à mão: os dois
+    // são clientes de verdade, e a ordem em que o servidor lhes atribuiu
+    // identidade não é contrato — escrevê-los à mão prenderia esta afirmação
+    // a essa ordem por acidente.
     {
+        let empresta_quem = empresta.sessao().person;
+        let assiste_quem = assiste.sessao().person;
         let pares = servidor.server().pares.lock().await;
         let quem_assiste = pares
-            .declaracao_de(PersonId(3))
+            .declaracao_de(assiste_quem)
             .expect("quem assiste conectou e não declarou identidade nenhuma")
             .clone();
         let quem_empresta = pares
-            .declaracao_de(PersonId(2))
+            .declaracao_de(empresta_quem)
             .expect("quem empresta optou por emprestar e não declarou identidade")
             .clone();
         assert!(
@@ -574,6 +629,10 @@ async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
         );
     }
 
+    // O piso: nenhum quadro daqui para trás prova nada sobre o par, porque
+    // todos ainda podem ter vindo do servidor.
+    let piso_inicial = maior_seq_ja_enfileirado(&mut assiste, screen).await;
+
     // Quem assiste pede para ver, e é aqui que o servidor escolhe o par.
     assiste.assistir(screen, true).await?;
 
@@ -582,35 +641,41 @@ async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
     })
     .await?;
 
-    // A partir de agora, todo quadro que chegar a quem assiste é um quadro que
-    // o servidor não subiu para ela.
-    let desde = Instant::now();
-    let (seq, bytes) = esperar(
-        &mut assiste,
-        "um quadro chegar pelo par depois de o servidor ter desligado o cano",
-        |aviso| match aviso {
-            Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => {
-                seq_de(bytes).map(|seq| (seq, bytes.clone()))
-            }
-            _ => None,
-        },
-    )
-    .await?;
+    // A prova de verdade: `QUADROS_PARA_PROVAR` seguidos, cada um acima do
+    // piso anterior (o próprio piso avança a cada quadro aceito, então dois
+    // quadros iguais ou fora de ordem não colam), e o servidor contando uma
+    // cópia só do primeiro ao último.
+    let mut piso = piso_inicial;
+    for indice in 0..QUADROS_PARA_PROVAR {
+        let (seq, bytes) = esperar(
+            &mut assiste,
+            "um quadro chegar pelo par, estritamente depois do piso, com o cano do servidor \
+             desligado",
+            |aviso| match aviso {
+                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
+                    .filter(|seq| piso.is_none_or(|p| *seq > p))
+                    .map(|seq| (seq, bytes.clone())),
+                _ => None,
+            },
+        )
+        .await?;
+        assert_eq!(
+            bytes,
+            corpo(seq),
+            "o quadro {seq} chegou e não é o que saiu: os bytes não batem"
+        );
+        assert_eq!(
+            copias.agora(),
+            1,
+            "o servidor voltou a subir a cópia de quem assiste no meio da recepção sustentada \
+             (quadro {indice} de {QUADROS_PARA_PROVAR}, seq {seq}): este quadro pode ter vindo \
+             dele, e a malha não provou nada"
+        );
+        piso = Some(seq);
+    }
     println!(
-        "o quadro {seq} chegou a quem assiste {:?} depois de o cano do servidor ser desligado",
-        desde.elapsed()
-    );
-
-    assert_eq!(
-        bytes,
-        corpo(seq),
-        "o quadro chegou e não é o que saiu: os bytes não batem"
-    );
-    assert_eq!(
-        copias.agora(),
-        1,
-        "o servidor voltou a subir a cópia de quem assiste: este quadro pode ter vindo dele, \
-         e a malha não provou nada"
+        "{QUADROS_PARA_PROVAR} quadros seguidos chegaram a quem assiste, todos com seq acima de \
+         {piso_inicial:?}, com o servidor subindo uma cópia só do primeiro ao último"
     );
 
     // Sem isto os clientes caem antes do servidor e o desligamento vira corrida.

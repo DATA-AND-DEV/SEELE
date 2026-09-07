@@ -430,16 +430,6 @@ const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
 /// ou na segunda, e um que não exista custa o mesmo prazo total de antes.
 const TENTATIVA_DE_PAR: Duration = Duration::from_millis(500);
 
-/// Por quanto tempo [`servir_um_par`] ainda recusa uma ligação que chegue
-/// depois de a corrida entre atender e discar já ter um vencedor.
-///
-/// **Curta de propósito.** Uma sobra de verdade — a segunda de duas
-/// tentativas simultâneas para a mesma pessoa — chega dentro de um RTT da
-/// vencedora, não de um prazo de discagem inteiro: as duas saem do mesmo
-/// [`par::ligar`], no mesmo instante. Ver [`recusar_sobras`] para o porquê de
-/// a janela existir.
-const JANELA_DE_SOBRAS: Duration = Duration::from_millis(150);
-
 /// O que uma tentativa do caminho entre pares, resolvida numa tarefa solta,
 /// devolve ao laço de [`Motor::rodar`] para ele agir.
 ///
@@ -3092,56 +3082,15 @@ async fn servir_um_par(
         atendido = atende => atendido,
         discado = disca => discado.ok(),
     };
-    // A sobra de uma corrida que a linha acima já decidiu, recusada antes de
-    // desarmar — ver o doc de `recusar_sobras` para o pânico que evita.
-    recusar_sobras(&ponta).await;
     // **Desarma sempre, sirva ou não sirva.** Achado do fix round 3: sem
     // isto a ponta continuava aceitando conexões pelo resto da sessão — ver
-    // o doc de `par::parar_de_atender`.
-    par::parar_de_atender(&ponta);
+    // o doc de [`par::parar_de_atender`]. A função já drena e recusa
+    // sozinha qualquer sobra da corrida acima antes de desarmar de verdade —
+    // ver o doc dela para o pânico que isso evita — porque o perigo mora no
+    // `set_server_config(None)` que ela faz, não neste ponto de chamada: um
+    // `servir_um_par` de amanhã sem essa linha não devia poder reabri-lo.
+    par::parar_de_atender(&ponta).await;
     resultado
-}
-
-/// Recusa qualquer tentativa de ligação que já tenha chegado a esta ponta e
-/// ainda não foi aceita, antes de [`par::parar_de_atender`] desarmá-la.
-///
-/// # O pânico que este dreno evita
-///
-/// `par::ligar` disca todos os endereços declarados em paralelo, e
-/// `enlace::locais_a_publicar` pode declarar mais de um endereço para a
-/// mesma pessoa — o local de rede e o público que o servidor viu. Quando os
-/// dois caem no mesmo soquete do outro lado — sempre em `localhost`, e em
-/// rede real atrás de um roteador com NAT *hairpin* —, o `quinn` enxerga duas
-/// tentativas de ligação separadas para a mesma pessoa, não uma só.
-/// [`par::atender`] aceita a primeira que chega; a segunda fica esquecida no
-/// `quinn`, sem ninguém para aceitá-la ou recusá-la, porque `atender` serve
-/// **uma** vaga só.
-///
-/// Se essa sobra continuar esquecida quando `parar_de_atender` zera o
-/// `ServerConfig` da ponta, uma retransmissão dela — o `quinn` reenvia o
-/// pacote inicial de toda tentativa sem resposta — encontra a rota ainda
-/// indexada e o servidor já desarmado, e o `quinn-proto` 0.11.16
-/// (`endpoint.rs:217`) entra em pânico num `.unwrap()` que supõe o contrário.
-/// O pânico é num `Drop`, então não é só a tentativa que morre: **o processo
-/// inteiro aborta**. `crates/seele-conformance/tests/tela_por_um_par.rs`
-/// reproduz isto toda vez que roda, porque o servidor de testes escuta em
-/// `127.0.0.1` e a máquina de CI sempre tem pelo menos uma interface de rede
-/// além do loopback.
-///
-/// Recusar — e não `accept` nem ignorar — é o que fecha a ligação de
-/// verdade: `Incoming::ignore` não manda pacote nenhum, e a sobra continuaria
-/// esperando uma resposta que nunca chegaria da mesma forma que crashava
-/// antes. `Incoming::refuse` manda o fechamento e tira a entrada do índice do
-/// `quinn` — depois disso, uma retransmissão não acha rota nenhuma, e não há
-/// `server_config` nenhum para desembrulhar.
-async fn recusar_sobras(ponta: &quinn::Endpoint) {
-    while let Ok(Some(sobrando)) = tokio::time::timeout(JANELA_DE_SOBRAS, ponta.accept()).await {
-        tracing::debug!(
-            par = %sobrando.remote_address(),
-            "uma segunda tentativa de ligação da mesma corrida foi recusada"
-        );
-        sobrando.refuse();
-    }
 }
 
 /// Os endereços de rede local desta máquina, na porta que `ponta` já usa.
@@ -5090,5 +5039,96 @@ mod tests {
             resultados_do_par,
             resultados_do_par_tx,
         }
+    }
+
+    /// O ponto de chamada de `par::parar_de_atender` dentro de
+    /// `servir_um_par` desarma a ponta de quem empresta depois de servir.
+    ///
+    /// # O achado do round 1 desta tarefa
+    ///
+    /// A tentativa anterior deste guarda media só do lado de quem **disca**
+    /// uma segunda vez contra a ponta já servida — e lá, armada e desarmada
+    /// são indistinguíveis: sem ninguém para chamar `ponta.accept()` de
+    /// novo, as duas produzem o mesmo silêncio até o próprio prazo de
+    /// discagem vencer. Medido e descartado — ver o relatório da Task 10.
+    ///
+    /// O sinal mora do lado de quem **atende**, como
+    /// `par::testes::parar_de_atender_desarma_o_que_passar_a_atender_armou`
+    /// já prova para a função isolada: pôr alguém pronto para aceitar
+    /// (`par::atender`) depois do desarme, e só então discar. Armada, o
+    /// aperto de mão completa; desarmada, `accept()` nunca rende nada e quem
+    /// disca esgota o próprio prazo. Este teste faz o mesmo, mas contra
+    /// `servir_um_par` — o ponto de chamada de produção, não a função pura.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn servir_um_par_desarma_a_ponta_de_quem_empresta_depois_de_servir() {
+        let ponta_empresta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let onde_empresta = ponta_empresta.local_addr().unwrap();
+        let identidade_empresta = par::identidade_efemera().unwrap();
+        let impressao_empresta = par::impressao(&identidade_empresta);
+
+        // Quem "assiste": só disca, nunca atende — o mesmo papel de
+        // `Motor::assistir_por_par`.
+        let identidade_assiste = par::identidade_efemera().unwrap();
+        let impressao_assiste = par::impressao(&identidade_assiste);
+
+        // Um buraco negro: uma ponta de verdade, bindada, mas sem
+        // `ServerConfig` nenhum. É o endereço que `servir_um_par` tenta
+        // discar do lado dele — precisa ser um alvo que nunca responde, para
+        // a corrida interna resolver pelo lado de `atender`, que é o que a
+        // discagem de verdade abaixo aciona. Um pacote UDP para uma porta
+        // fechada arriscaria um erro rápido demais (`ECONNREFUSED` do SO) e
+        // venceria a corrida errada; este alvo só ignora, do jeito que um par
+        // de verdade que não respondesse também ignoraria.
+        let buraco_negro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let onde_buraco_negro = buraco_negro.local_addr().unwrap();
+
+        let servindo = tokio::spawn(servir_um_par(
+            ponta_empresta.clone(),
+            identidade_empresta,
+            vec![onde_buraco_negro],
+            impressao_assiste.clone(),
+        ));
+
+        // A discagem de verdade, de fora da tarefa acima — o papel de
+        // `Motor::assistir_por_par` do lado de quem assiste.
+        let ponta_assiste = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ligado = par::ligar(
+            &ponta_assiste,
+            &[onde_empresta],
+            impressao_empresta.clone(),
+            Some(&identidade_assiste),
+            Duration::from_secs(3),
+        )
+        .await
+        .expect("a discagem de quem assiste tinha tudo para fechar e não fechou");
+        drop(ligado);
+
+        let resultado = servindo.await.expect("a tarefa de servir_um_par");
+        assert!(
+            resultado.is_some(),
+            "servir_um_par não serviu ninguém, e o resto deste teste não prova nada"
+        );
+
+        // **O discriminador.** Alguém pronto para aceitar, depois de
+        // `servir_um_par` já ter devolvido: se a ponta continuasse armada —
+        // por exemplo, com a chamada a `par::parar_de_atender` removida
+        // deste ponto de chamada —, é este `atender` quem completaria o
+        // aperto de mão, com a MESMA impressão que `passar_a_atender` já
+        // tinha fixado dentro de `servir_um_par`.
+        let _atendendo = tokio::spawn(par::atender(ponta_empresta, Duration::from_secs(2)));
+        let ponta_de_novo = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let tentou = par::ligar(
+            &ponta_de_novo,
+            &[onde_empresta],
+            impressao_empresta,
+            Some(&identidade_assiste),
+            Duration::from_millis(300),
+        )
+        .await;
+        assert!(
+            matches!(tentou, Err(par::ErroDePar::NaoAlcancou)),
+            "a ponta de quem empresta continuou atendendo depois de servir_um_par devolver: \
+             {tentou:?}"
+        );
     }
 }

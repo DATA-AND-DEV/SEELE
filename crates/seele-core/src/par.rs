@@ -197,6 +197,17 @@ pub fn passar_a_atender(
     Ok(())
 }
 
+/// Por quanto tempo [`parar_de_atender`] ainda recusa uma ligação que chegue
+/// depois de a corrida em [`atender`]/[`ligar`] já ter um vencedor, antes de
+/// desarmar de verdade.
+///
+/// **Curta de propósito.** Uma sobra de verdade — a segunda de duas
+/// tentativas simultâneas para a mesma pessoa — chega dentro de um RTT da
+/// vencedora, não de um prazo de discagem inteiro: as duas saem do mesmo
+/// [`ligar`], no mesmo instante. Ver o doc de [`parar_de_atender`] para o
+/// pânico que a janela evita.
+const JANELA_DE_SOBRAS: std::time::Duration = std::time::Duration::from_millis(150);
+
 /// Desarma o que [`passar_a_atender`] armou.
 ///
 /// **Não é limpeza opcional — achado do fix round 3.** Sem isto, a ponta
@@ -212,7 +223,55 @@ pub fn passar_a_atender(
 /// de controle desta mesma ponta não é afetada: `set_server_config` só rege
 /// o que a ponta faz com um `Initial` que chega, e uma conexão já
 /// estabelecida não passa por aí de novo.
-pub fn parar_de_atender(ponta: &quinn::Endpoint) {
+///
+/// # Por que esta função drena sobras antes de desarmar, e não quem a chama
+///
+/// **O perigo mora aqui, no `set_server_config(None)`, e não em nenhum
+/// ponto de chamada** — então é aqui que o guarda tem de estar, onde ninguém
+/// que vier a chamar `parar_de_atender` (o subprojeto B, um teste novo desta
+/// função) pode esquecê-lo.
+///
+/// [`ligar`] disca todos os endereços declarados em paralelo, e
+/// `enlace::locais_a_publicar` pode declarar mais de um endereço para a
+/// mesma pessoa — o local de rede e o público que o servidor viu. Quando os
+/// dois caem no mesmo soquete do outro lado — sempre em `localhost`, e em
+/// rede real atrás de um roteador com NAT *hairpin* —, o `quinn` enxerga isso
+/// como **duas** tentativas de ligação separadas para a mesma pessoa, não uma
+/// só. [`atender`] aceita a primeira que chega; a segunda fica esquecida no
+/// `quinn`, sem ninguém para aceitá-la ou recusá-la, porque `atender` serve
+/// **uma** vaga só.
+///
+/// Se essa sobra continuar esquecida quando esta função zera o
+/// `ServerConfig` da ponta, uma retransmissão dela — o `quinn` reenvia o
+/// pacote inicial de toda tentativa sem resposta — encontra a rota ainda
+/// indexada e o servidor já desarmado, e o `quinn-proto` 0.11.16
+/// (`endpoint.rs:217`) entra em pânico num `.unwrap()` que supõe o contrário.
+/// O pânico é num `Drop`, então não é só a tentativa que morre: **o processo
+/// inteiro aborta**. `crates/seele-conformance/tests/tela_por_um_par.rs`
+/// reproduz isto toda vez que roda, porque o servidor de testes escuta em
+/// `127.0.0.1` e a máquina de CI sempre tem pelo menos uma interface de rede
+/// além do loopback.
+///
+/// # `refuse`, e não `ignore` — mas não pela razão que uma versão anterior
+/// deste doc registrou
+///
+/// As duas limpam o mesmo estado: `Incoming::refuse` e `Incoming::ignore`
+/// chamam, os dois, `clean_up_incoming` por dentro do `quinn`
+/// (`endpoint.rs:715` e `785` do `quinn-proto` 0.11.16) — tirar a entrada do
+/// índice não é privilégio de um dos dois, e uma versão anterior deste doc
+/// dizia o contrário. A diferença real é o que sai no fio: `refuse` manda um
+/// `CONNECTION_REFUSED` na hora; `ignore` não manda nada. Escolho `refuse`
+/// porque avisa quem perdeu a corrida imediatamente, em vez de deixá-lo
+/// esperando o próprio prazo de discagem inteiro por um silêncio que já era
+/// definitivo — não porque `ignore` deixasse a sobra presa (não deixa).
+pub async fn parar_de_atender(ponta: &quinn::Endpoint) {
+    while let Ok(Some(sobrando)) = tokio::time::timeout(JANELA_DE_SOBRAS, ponta.accept()).await {
+        tracing::debug!(
+            par = %sobrando.remote_address(),
+            "uma segunda tentativa de ligação da mesma corrida foi recusada"
+        );
+        sobrando.refuse();
+    }
     ponta.set_server_config(None);
 }
 
@@ -1829,7 +1888,7 @@ mod testes {
         passar_a_atender(&ponta, identidade_da_ponta, impressao_de_quem_discaria).unwrap();
         let onde = ponta.local_addr().unwrap();
 
-        parar_de_atender(&ponta);
+        parar_de_atender(&ponta).await;
 
         // Alguém pronto para aceitar, mesmo assim: se a ponta continuasse
         // armada, é `atender` quem completaria o aperto de mão.
