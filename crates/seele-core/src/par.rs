@@ -765,23 +765,31 @@ pub async fn por_onde(
 /// Traduz o motivo detalhado de [`ligar`] para o motivo enumerado que o
 /// protocolo leva ao servidor.
 ///
-/// **Só [`ErroDePar::ImpressaoNaoBate`] é evento de segurança**, e é a única
-/// tradução exata que existe: alguém respondeu no lugar de quem o servidor
-/// apresentou. Tudo o mais — certificado que não gerou, ponta que não abriu,
-/// silêncio, recusa depois de ligar, confirmação que não chegou a tempo — é
-/// rotina de rede sem nada a provar sobre a declaração publicada, e cai em
+/// **Duas traduções exatas, e o resto é rotina.**
+/// [`ErroDePar::ImpressaoNaoBate`] é evento de segurança — alguém respondeu no
+/// lugar de quem o servidor apresentou — e vira
+/// [`MotivoDeFalhaDePar::ImpressaoNaoBate`].
+/// [`ErroDePar::RecusadoDepoisDeLigar`] é o inverso — quem respondeu **era**
+/// quem o servidor apresentou, e foi ele que recusou a identidade que eu
+/// ofereci — e vira [`MotivoDeFalhaDePar::NaoFuiAceito`] (fix round 2: os dois
+/// pedem consertos opostos do lado do servidor, e viajar como o mesmo motivo
+/// escondia essa diferença). Tudo o mais — certificado que não gerou, ponta
+/// que não abriu, silêncio, confirmação que não chegou a tempo — é rotina de
+/// rede sem nada a provar sobre nenhuma declaração, e cai em
 /// [`MotivoDeFalhaDePar::NaoAlcancou`]: a leitura mais honesta disponível sem
-/// inventar uma das outras três variantes, que descrevem falhas de **depois**
+/// inventar uma das outras duas variantes, que descrevem falhas de **depois**
 /// de já estar servindo (`CaiuNoMeio`, `ParouDeMandar`), não desta discagem.
 fn motivo_de_falha(erro: &ErroDePar) -> seele_proto::control::MotivoDeFalhaDePar {
     match erro {
         ErroDePar::ImpressaoNaoBate { .. } => {
             seele_proto::control::MotivoDeFalhaDePar::ImpressaoNaoBate
         }
+        ErroDePar::RecusadoDepoisDeLigar(_) => {
+            seele_proto::control::MotivoDeFalhaDePar::NaoFuiAceito
+        }
         ErroDePar::Certificado(_)
         | ErroDePar::Escuta(_)
         | ErroDePar::NaoAlcancou
-        | ErroDePar::RecusadoDepoisDeLigar(_)
         | ErroDePar::ConfirmacaoNaoChegouATempo => {
             seele_proto::control::MotivoDeFalhaDePar::NaoAlcancou
         }
@@ -1561,6 +1569,46 @@ mod testes {
                 )
             ),
             "alguém respondeu no lugar do par, e o motivo devolvido não foi o de segurança: {onde:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn quando_o_anfitriao_recusa_minha_identidade_o_motivo_e_naofuiaceito() {
+        // **Achado do fix round 2.** `RecusadoDepoisDeLigar` é o inverso de
+        // `ImpressaoNaoBate`: aqui quem respondeu **era** quem o servidor
+        // apresentou, e foi ele que recusou a identidade que eu ofereci — não
+        // impostura do par, e sim (o caso comum) a minha própria declaração
+        // desatualizada. Antes desta variante existir, os dois motivos
+        // viajavam como `NaoAlcancou`, que diz «ninguém respondeu» — falso
+        // quando o TLS fechou dos dois lados.
+        let anfitriao = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ia = identidade_efemera().unwrap();
+        let impressao_do_anfitriao = impressao(&ia);
+        let esperada_de_quem_liga = impressao(&identidade_efemera().unwrap());
+        passar_a_atender(&anfitriao, ia, esperada_de_quem_liga).unwrap();
+        let onde_atende = anfitriao.local_addr().unwrap();
+        let _atendendo = tokio::spawn(atender(anfitriao, PRAZO_DE_CONFIRMACAO_NO_TESTE));
+
+        // Quem disca não tem a identidade que o anfitrião espera — a mesma
+        // configuração de `quem_atende_recusa_quem_nao_apresentou_certificado_nenhum`,
+        // só que por `por_onde`.
+        let sem_a_identidade_certa =
+            quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let onde = por_onde(
+            &sem_a_identidade_certa,
+            &[onde_atende],
+            impressao_do_anfitriao,
+            None,
+            std::time::Duration::from_secs(3),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                onde,
+                PorOndeAssistir::Servidor(seele_proto::control::MotivoDeFalhaDePar::NaoFuiAceito)
+            ),
+            "o anfitrião recusou a identidade de quem discou, e o motivo não foi NaoFuiAceito: {onde:?}"
         );
     }
 }

@@ -2313,21 +2313,56 @@ async fn run_session(
                             ?motivo,
                             "par relatado como falho no caminho entre pares"
                         );
-                        // Só `ImpressaoNaoBate` diz algo sobre a **declaração**:
-                        // as outras três razões são da rede — endereço que não
-                        // respondeu, conexão que caiu, quadro que parou de vir —
-                        // e nenhuma delas prova que o que está publicado em
-                        // `Pares` deixou de ser de quem o publicou. Quem caiu de
-                        // verdade já sai daqui pela saída de sessão, mais abaixo
-                        // neste arquivo — `Pares::saiu` é chamado lá para todo
-                        // encerramento, e não só para este relato. `ImpressaoNaoBate`
-                        // é diferente: prova que alguém respondeu no lugar de
-                        // quem o servidor apresentou, o que discredita a
-                        // declaração mesmo que quem a fez continue conectado a
-                        // este servidor — daí valer a pena remover a própria
-                        // declaração desta pessoa, e não esperar pela saída dela.
-                        if motivo == MotivoDeFalhaDePar::ImpressaoNaoBate {
-                            server.pares.lock().await.saiu(session.person);
+                        // **`session.person` é quem relatou — a vítima, nunca
+                        // quem falhou.** Achado do fix round 2: a primeira
+                        // versão chamava `saiu(session.person)`, e uma
+                        // `ImpressaoNaoBate` — que só prova que ALGUÉM
+                        // enganou quem relata — apagava a identidade de quem
+                        // relata pela sessão inteira, porque nada a
+                        // redeclara. `ParFalhou` carrega só `screen` de
+                        // propósito: quem relata nunca soube a identidade de
+                        // quem o enganou, só que a imagem parou. Quem sabe
+                        // disso é o próprio servidor, que emitiu
+                        // `SirvaTelaPara`/`AssistaTelaPor` e guardou a própria
+                        // nomeação (`Pares::apontou`) — resolver `screen`
+                        // contra ela é a única forma de descobrir de quem
+                        // reclamar sem inventar protocolo novo.
+                        match motivo {
+                            // Evento de segurança: alguém respondeu no lugar
+                            // de quem o servidor apresentou. Desacredita o
+                            // par **apontado** — nunca `session.person`.
+                            MotivoDeFalhaDePar::ImpressaoNaoBate => {
+                                let mut pares = server.pares.lock().await;
+                                if let Some(apontado) = pares.quem_foi_apontado(screen) {
+                                    pares.saiu(apontado);
+                                } else {
+                                    // Sem nomeação guardada — hoje é sempre o
+                                    // caso, porque nenhum despacho chama
+                                    // `Pares::apontou` ainda (Task 10). Sem
+                                    // saber quem foi apontado, não há quem
+                                    // desacreditar; ficar quieto é mais seguro
+                                    // do que adivinhar.
+                                    tracing::debug!(
+                                        %screen,
+                                        "ImpressaoNaoBate relatado sem nomeação guardada para a transmissão"
+                                    );
+                                }
+                            }
+                            // «Não me aceitaram» — o inverso de `ImpressaoNaoBate`:
+                            // quase sempre a própria declaração de quem
+                            // relata está desatualizada, não impostura do par
+                            // apontado. O conserto certo (pedir a quem relata
+                            // que declare de novo) ainda não tem mensagem
+                            // própria no protocolo; por ora só o rastro acima
+                            // registra o caso, e desacreditar o par apontado
+                            // — o conserto de `ImpressaoNaoBate` — seria
+                            // castigar quem não errou nada.
+                            MotivoDeFalhaDePar::NaoFuiAceito => {}
+                            // Rotina de rede: nenhuma prova sobre nenhuma
+                            // declaração.
+                            MotivoDeFalhaDePar::NaoAlcancou
+                            | MotivoDeFalhaDePar::CaiuNoMeio
+                            | MotivoDeFalhaDePar::ParouDeMandar => {}
                         }
                     }
 

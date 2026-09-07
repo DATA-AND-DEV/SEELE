@@ -375,6 +375,16 @@ enum Comando {
         /// Qual transmissão. O servidor confere se ela é mesmo a da sala.
         tela: ScreenId,
     },
+    /// Declare ao servidor a identidade efêmera deste par.
+    ///
+    /// **Só existe para atravessar o canal de comandos.** Quem manda isto é
+    /// [`Enlace::declarar_identidade_de_par`], chamado uma vez, do lado de
+    /// fora, sobre o `Enlace` que já venceu a corrida de candidatos — nunca de
+    /// dentro de `Motor::rodar`/`executar` por conta própria. Ver o doc de
+    /// [`Motor::declarar_identidade_de_par`] para o porquê de precisar de
+    /// `&mut self` inteiro, e não só do `&mut Client` que
+    /// [`Motor::executar`] empresta para todo o resto deste `enum`.
+    DeclararIdentidadeDePar,
     Sair,
 }
 
@@ -966,6 +976,12 @@ impl Enlace {
             if let Some(repeticao) = repeticao {
                 repeticao.abort();
             }
+            // Candidato único: não há corrida, e ainda assim a declaração só
+            // sai depois de a conexão estar de pé. Ver o doc de
+            // `Enlace::declarar_identidade_de_par`.
+            if let Ok(enlace) = &resultado {
+                let _ = enlace.declarar_identidade_de_par().await;
+            }
             return resultado;
         }
 
@@ -1109,6 +1125,10 @@ impl Enlace {
         if let Some((posicao, enlace)) = corrida.vencedor {
             let onde = todos.get(posicao).map(|destino| destino.servidor);
             tracing::info!(?onde, "este é o endereço que deu");
+            // Só o vencedor declara, e só agora que se sabe quem venceu — ver
+            // o doc de `Enlace::declarar_identidade_de_par` para o porquê de
+            // não declarar dentro de `conectar_por`.
+            let _ = enlace.declarar_identidade_de_par().await;
             return Ok(enlace);
         }
 
@@ -1145,7 +1165,9 @@ impl Enlace {
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
         let endpoint = crate::client::local_endpoint(None)?;
-        Self::conectar_por(&endpoint, None, destino, chave, pins).await
+        let enlace = Self::conectar_por(&endpoint, None, destino, chave, pins).await?;
+        let _ = enlace.declarar_identidade_de_par().await;
+        Ok(enlace)
     }
 
     /// O mesmo, pelo socket que já furou o NAT. Degrau 4 do ADR 0022.
@@ -1228,7 +1250,7 @@ impl Enlace {
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
         let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
 
-        let mut motor = Motor {
+        let motor = Motor {
             destino,
             // Guardado para a reconexão, e não só para a primeira entrada: uma
             // reconexão sai de um socket novo, com uma porta nova, e o caminho
@@ -1254,15 +1276,21 @@ impl Enlace {
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
-            ponta_de_pares: None,
             identidade_de_par: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             resultados_do_par,
             resultados_do_par_tx,
         };
-        // Antes de o laço começar, e não sob demanda: ver o doc de
-        // `Motor::declarar_identidade_de_par` para o porquê.
-        motor.declarar_identidade_de_par().await;
+        // **Não declara identidade aqui.** Achado do fix round 2:
+        // `conectar_por` é o funil que **cada candidato** de uma conexão com
+        // múltiplos destinos atravessa (`tentar_entre`), não só o vencedor da
+        // corrida. Declarar deste lado faria todo candidato que conectasse
+        // mandar `EmprestarSubida`, e o candidato perdedor — cuja conexão é
+        // fechada logo depois — apagaria ao sair a declaração que o vencedor
+        // acabara de fazer: `Pares` é chaveado por pessoa, e os dois
+        // candidatos são a mesma pessoa. Só o vencedor declara, e só depois de
+        // decidido quem venceu — ver `Enlace::declarar_identidade_de_par` e
+        // onde ela é chamada em `conectar`/`tentar_entre`.
         let tarefa = tokio::spawn(motor.rodar(comandos_rx));
 
         Ok(Self {
@@ -1818,6 +1846,23 @@ impl Enlace {
         let _ = self.mandar(Comando::Sair).await;
     }
 
+    /// Declara ao servidor a identidade efêmera desta sessão para o caminho
+    /// entre pares.
+    ///
+    /// **Chamada uma vez, sobre quem já venceu** — nunca de dentro do funil
+    /// que conecta candidatos. Achado do fix round 2: `conectar_por` conecta
+    /// **cada** candidato de uma conexão com múltiplos destinos, não só o
+    /// vencedor da corrida (`Enlace::tentar_entre`), e declarar de lá dentro
+    /// fazia todo candidato mandar `EmprestarSubida` pela própria conexão —
+    /// o perdedor, cuja conexão fecha logo depois, apagava ao sair a
+    /// declaração que o vencedor tinha acabado de fazer (`Pares` é chaveado
+    /// por pessoa, e os dois candidatos são a mesma pessoa). Por isso esta
+    /// função só é chamada nos pontos de retorno de `conectar` e
+    /// `tentar_entre`, depois de já se saber quem ganhou.
+    async fn declarar_identidade_de_par(&self) -> Result<(), Fechado> {
+        self.mandar(Comando::DeclararIdentidadeDePar).await
+    }
+
     async fn mandar(&self, comando: Comando) -> Result<(), Fechado> {
         self.comandos.send(comando).await.map_err(|_| Fechado)
     }
@@ -1906,14 +1951,6 @@ struct Motor {
     /// na tica que ele já tem — ver [`Motor::medir_o_caminho`]. Era a pergunta
     /// 2 do §8.
     caminho: crate::caminho::Sonda,
-    /// A ponta QUIC do caminho entre pares. Nem a mesma que fala com o
-    /// servidor, nem uma por tentativa: uma só, reaproveitada por toda a
-    /// sessão para dela discar e nela atender.
-    ///
-    /// `None` até a primeira `AssistaTelaPor` ou `SirvaTelaPara` chegar — a
-    /// maioria das sessões nunca troca uma dessas mensagens, e abrir um socket
-    /// UDP à toa seria custo sem uso.
-    ponta_de_pares: Option<quinn::Endpoint>,
     /// A identidade efêmera desta sessão para o caminho entre pares.
     ///
     /// Gerada na primeira vez que é necessária e guardada depois: quem chama
@@ -2293,6 +2330,15 @@ impl Motor {
 
     async fn executar(&mut self, comando: Comando) {
         self.lembrar(&comando);
+        // Especial, e antes do empréstimo de `cliente` logo abaixo: declarar
+        // identidade precisa do `&mut self` inteiro (identidade **e**
+        // cliente — ver `Motor::declarar_identidade_de_par`), e o resto deste
+        // método já empresta só `self.cliente`. Os dois empréstimos não
+        // convivem no mesmo escopo.
+        if matches!(comando, Comando::DeclararIdentidadeDePar) {
+            self.declarar_identidade_de_par().await;
+            return;
+        }
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
@@ -2339,6 +2385,11 @@ impl Motor {
             Comando::ApagarVoiceRoom { voice_room } => cliente.delete_voice_room(voice_room).await,
             Comando::ApagarLinha { linha } => cliente.delete_channel(linha).await,
             Comando::PesarLinha { linha } => cliente.weigh_channel(linha).await,
+            // Tratado acima, antes deste empréstimo de `cliente` — nunca
+            // chega aqui de verdade. `match` continua exaustivo porque o
+            // `enum` inteiro é um só, e um braço a menos aqui quebraria a
+            // primeira vez que `Comando` ganhasse mais uma variante.
+            Comando::DeclararIdentidadeDePar => Ok(()),
 
             // Numa tarefa própria, e não aqui dentro. Executar vinte megabytes
             // no laço de comandos devolveria, dentro do cliente, exatamente o
@@ -2570,22 +2621,24 @@ impl Motor {
 
     // -------------------------------------------------------- caminho entre pares
 
-    /// A ponta QUIC do caminho entre pares, criando-a na primeira vez.
+    /// A ponta QUIC do caminho entre pares — a mesma que já fala com o
+    /// servidor, e não uma nova.
     ///
-    /// Depois da primeira vez é só uma clonagem barata: `quinn::Endpoint` é um
-    /// punho sobre um estado compartilhado, e cada tarefa solta do caminho
-    /// entre pares fica com a própria cópia.
+    /// **Achado do fix round 2.** A primeira versão desta função abria um
+    /// socket próprio (`crate::client::local_endpoint`), e o §3.1 da spec de
+    /// 05/09 proíbe isso com todas as letras: *"Não é escuta nova, socket
+    /// novo nem porta nova [...] aquela porta já tem mapeamento de NAT vivo,
+    /// mantido pelo `keep_alive_interval` da conexão com o servidor"*. Uma
+    /// porta nova tem endereço público **desconhecido do servidor** — ele só
+    /// vê a origem da conexão de controle, que é a que `Client::endpoint`
+    /// devolve — e o furo simultâneo mirava um endereço onde nada atendia.
     ///
-    /// # Errors
-    ///
-    /// [`ConnectError::LocalEndpoint`] se o socket UDP não abrir.
-    fn ponta_de_pares(&mut self) -> Result<quinn::Endpoint, ConnectError> {
-        if let Some(ponta) = &self.ponta_de_pares {
-            return Ok(ponta.clone());
-        }
-        let ponta = crate::client::local_endpoint(None)?;
-        self.ponta_de_pares = Some(ponta.clone());
-        Ok(ponta)
+    /// `None` só quando não há conexão viva agora. Não deveria acontecer
+    /// quando isto é chamado: só se chega aqui processando uma
+    /// `ServerMessage`, que só existe porque há conexão, ou declarando
+    /// identidade logo depois de conectar.
+    fn ponta_de_pares(&self) -> Option<quinn::Endpoint> {
+        self.cliente.as_ref().map(Client::endpoint)
     }
 
     /// A identidade efêmera desta sessão para o caminho entre pares, gerada na
@@ -2627,11 +2680,13 @@ impl Motor {
     /// (`Pares::saiu`, no servidor), e a identidade efêmera não sobrevive a
     /// ela sem ser dita de novo.
     ///
-    /// `locais` sai vazio: sem opt-in de emprestar não há por que publicar
-    /// endereços para alguém discar **para** esta ponta — ela só chama
-    /// `par::passar_a_atender` quando `SirvaTelaPara` de fato pede (ver
-    /// [`Motor::servir_par`]). O endereço que sobra para o servidor apontar é
-    /// o público, que ele já vê na própria conexão.
+    /// `locais` leva os endereços de rede local desta máquina, na porta que a
+    /// ponta de pares já usa (ver [`locais_de_pares`]) — mesmo sem opt-in de
+    /// emprestar. **Achado do fix round 2**: quem só assiste também pode ser
+    /// alcançado pela LAN, quando `SirvaTelaPara` aponta alguém para discar
+    /// para ela; sem `locais`, o único endereço que sobraria para o servidor
+    /// apontar seria o público da conexão de controle, e um par na mesma rede
+    /// pagaria o furo à toa quando a LAN bastava.
     async fn declarar_identidade_de_par(&mut self) {
         let identidade = match self.identidade_de_par() {
             Ok(identidade) => identidade,
@@ -2640,11 +2695,15 @@ impl Motor {
                 return;
             }
         };
+        let Some(ponta) = self.ponta_de_pares() else {
+            return;
+        };
+        let locais = locais_de_pares(&ponta);
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
         if let Err(erro) = cliente
-            .emprestar_subida(false, par::impressao(&identidade), Vec::new())
+            .emprestar_subida(false, par::impressao(&identidade), locais)
             .await
         {
             tracing::warn!(%erro, "não deu para declarar a identidade deste par ao servidor");
@@ -2676,16 +2735,16 @@ impl Motor {
         enderecos: Vec<SocketAddr>,
         impressao: String,
     ) {
-        let ponta = match self.ponta_de_pares() {
-            Ok(ponta) => ponta,
-            Err(erro) => {
-                tracing::warn!(%erro, ?screen, "não deu para abrir a ponta do caminho entre pares");
-                let _ = self.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
-                    screen,
-                    motivo: MotivoDeFalhaDePar::NaoAlcancou,
-                });
-                return;
-            }
+        let Some(ponta) = self.ponta_de_pares() else {
+            tracing::warn!(
+                ?screen,
+                "sem conexão com o servidor: não há ponta para o caminho entre pares"
+            );
+            let _ = self.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
+                screen,
+                motivo: MotivoDeFalhaDePar::NaoAlcancou,
+            });
+            return;
         };
         let identidade = match self.identidade_de_par() {
             Ok(identidade) => identidade,
@@ -2769,12 +2828,12 @@ impl Motor {
             );
             return;
         }
-        let ponta = match self.ponta_de_pares() {
-            Ok(ponta) => ponta,
-            Err(erro) => {
-                tracing::warn!(%erro, ?screen, "não deu para abrir a ponta do caminho entre pares");
-                return;
-            }
+        let Some(ponta) = self.ponta_de_pares() else {
+            tracing::warn!(
+                ?screen,
+                "sem conexão com o servidor: não há ponta para o caminho entre pares"
+            );
+            return;
         };
         let identidade = match self.identidade_de_par() {
             Ok(identidade) => identidade,
@@ -2836,6 +2895,56 @@ async fn servir_um_par(
     tokio::select! {
         atendido = atende => atendido,
         discado = disca => discado.ok(),
+    }
+}
+
+/// Os endereços de rede local desta máquina, na porta que `ponta` já usa.
+///
+/// **Achado do fix round 2.** Enumeração simples, sem a ordenação por
+/// heurística de VPN que `seele-server::alcance::interfaces::descobrir` faz
+/// para o convite: aqui não há convite nem degrau de furo a preparar, só uma
+/// lista de candidatos que `par::ligar` já tenta todos em paralelo. O ADR
+/// 0002 proíbe este crate de depender de `seele-server`, então a pergunta —
+/// "quais endereços desta máquina servem para alguém bater neles" — é
+/// refeita aqui, com o mesmo crate (`if_addrs`).
+///
+/// Vazio se a enumeração falhar ou não achar nenhum endereço utilizável: o
+/// público que o servidor já vê na conexão de controle continua sobrando
+/// como candidato, e a ausência de locais não impede o furo, só tira o atalho
+/// de LAN.
+fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
+    let Ok(local) = ponta.local_addr() else {
+        return Vec::new();
+    };
+    match if_addrs::get_if_addrs() {
+        Ok(interfaces) => interfaces
+            .into_iter()
+            .map(|interface| interface.addr.ip())
+            .filter(|ip| e_endereco_de_rede_local(*ip))
+            .map(|ip| SocketAddr::new(ip, local.port()))
+            .collect(),
+        Err(erro) => {
+            tracing::warn!(%erro, "não deu para enumerar os endereços locais desta máquina");
+            Vec::new()
+        }
+    }
+}
+
+/// Se este endereço vale como "local" para o caminho entre pares.
+///
+/// Loopback e não especificado não saem desta máquina; link-local
+/// (`169.254.0.0/16`, `fe80::/10`) não sai do cabo — o mesmo motivo que
+/// `seele-server::alcance::interfaces::descobrir` já documenta para o
+/// convite. Tudo o mais entra, inclusive um endereço público diretamente
+/// atribuído a uma interface: um duplicado do que o servidor já vê não faz
+/// mal, `Pares::declarou` já lida com isso.
+fn e_endereco_de_rede_local(ip: IpAddr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() {
+        return false;
+    }
+    match ip {
+        IpAddr::V4(v4) => !v4.is_link_local(),
+        IpAddr::V6(v6) => !v6.segments().first().is_some_and(|s| s & 0xffc0 == 0xfe80),
     }
 }
 
@@ -4460,7 +4569,6 @@ mod tests {
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            ponta_de_pares: None,
             identidade_de_par: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             resultados_do_par,

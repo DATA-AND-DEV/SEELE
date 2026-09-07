@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
-use seele_proto::ids::PersonId;
+use seele_proto::ids::{PersonId, ScreenId};
 
 /// Uma identidade e onde alcançá-la, que uma pessoa declarou para o caminho
 /// entre pares.
@@ -51,6 +51,14 @@ pub struct QuemDeclarou {
 #[derive(Debug, Default)]
 pub struct Pares {
     quem: HashMap<PersonId, QuemDeclarou>,
+    /// Quem o servidor apontou por último para servir cada transmissão.
+    ///
+    /// **A própria nomeação do servidor, guardada para poder ser desfeita.**
+    /// Achado do fix round 2: sem isto, um `ParFalhou { screen }` não tem
+    /// como saber de quem reclamar — ele só carrega a transmissão, e nunca
+    /// deveria carregar a identidade de quem falhou, porque quem relata é a
+    /// vítima, não quem investiga. Ver [`Self::apontou`].
+    nomeacoes: HashMap<ScreenId, PersonId>,
 }
 
 impl Pares {
@@ -94,8 +102,24 @@ impl Pares {
     /// Esta pessoa saiu. A identidade é efêmera e não sobrevive à sessão —
     /// sem isto, uma discagem futura apontaria para uma impressão de uma
     /// sessão que não existe mais, e não só a escolha de quem serve.
+    ///
+    /// Também esquece toda nomeação que apontava para ela: uma transmissão
+    /// que ainda "apontasse" para quem já foi embora resolveria um
+    /// `ParFalhou` contra ninguém.
     pub fn saiu(&mut self, pessoa: PersonId) {
         self.quem.remove(&pessoa);
+        self.nomeacoes.retain(|_, quem| *quem != pessoa);
+    }
+
+    /// A declaração desta pessoa, exista ela para emprestar ou só para ser
+    /// alcançada.
+    ///
+    /// `None` se ela nunca declarou, ou já saiu. Quem vai montar
+    /// `SirvaTelaPara`/`AssistaTelaPor` precisa disto para a identidade de
+    /// **quem pediu** — `escolher` só devolve a de quem empresta.
+    #[must_use]
+    pub fn declaracao_de(&self, pessoa: PersonId) -> Option<&QuemDeclarou> {
+        self.quem.get(&pessoa)
     }
 
     /// Quem pode servir esta transmissão a esta pessoa, se alguém.
@@ -119,6 +143,27 @@ impl Pares {
                     && !ja_servindo.contains(&candidato.pessoa)
             })
             .cloned()
+    }
+
+    /// O servidor apontou `quem` para servir `screen`.
+    ///
+    /// Chamado por quem despacha `SirvaTelaPara`/`AssistaTelaPor`, depois de
+    /// [`Self::escolher`] decidir — ainda sem chamador em produção; é o
+    /// despacho da Task 10. Substitui a nomeação anterior desta transmissão,
+    /// se havia uma: só a mais recente importa para resolver um `ParFalhou`.
+    pub fn apontou(&mut self, screen: ScreenId, quem: PersonId) {
+        self.nomeacoes.insert(screen, quem);
+    }
+
+    /// Quem foi apontado por último para servir esta transmissão, se alguém.
+    ///
+    /// É contra isto que um `ClientMessage::ParFalhou { screen }` se resolve:
+    /// a mensagem só carrega a transmissão, nunca a identidade de quem
+    /// falhou, porque quem relata é quem estava esperando a imagem — a
+    /// vítima, não quem investiga.
+    #[must_use]
+    pub fn quem_foi_apontado(&self, screen: ScreenId) -> Option<PersonId> {
+        self.nomeacoes.get(&screen).copied()
     }
 }
 
@@ -219,5 +264,75 @@ mod testes {
             .unwrap();
         assert!(escolhido.enderecos.contains(&publico));
         assert!(escolhido.enderecos.contains(&endereco(3)));
+    }
+
+    #[test]
+    fn a_impressao_sobrevive_a_emprestando_false() {
+        // **O guarda que faltava no round 1.** O teste anterior
+        // (`quem_nao_empresta_nunca_e_escolhido_mesmo_com_impressao_guardada`)
+        // só afirma a metade `escolher`; esta prova a outra metade — que
+        // `declarou` de fato **guarda** a declaração de quem só assiste, e
+        // não a apaga por `emprestando` ser falso. Sem este teste, um
+        // `declarou` revertido para o comportamento velho (apagar quando a
+        // pessoa "não empresta") passaria pela suíte inteira sem tropeçar:
+        // nenhum outro teste lê a declaração de volta.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(3),
+            false,
+            "c".repeat(64),
+            vec![endereco(3)],
+            endereco(3),
+        );
+        let declaracao = pares
+            .declaracao_de(PersonId(3))
+            .expect("a declaração de quem só assiste desapareceu");
+        assert_eq!(declaracao.impressao, "c".repeat(64));
+        assert!(declaracao.enderecos.contains(&endereco(3)));
+        assert!(!declaracao.emprestando);
+    }
+
+    #[test]
+    fn saiu_apaga_tambem_a_declaracao() {
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(3),
+            false,
+            "c".repeat(64),
+            vec![endereco(3)],
+            endereco(3),
+        );
+        pares.saiu(PersonId(3));
+        assert!(
+            pares.declaracao_de(PersonId(3)).is_none(),
+            "a identidade sobreviveu à saída da sessão"
+        );
+    }
+
+    #[test]
+    fn um_parfalhou_resolve_contra_a_propria_nomeacao_e_nao_contra_quem_relata() {
+        // **Achado do fix round 2.** `ParFalhou { screen }` não carrega quem
+        // falhou — só quem relata sabe que a imagem parou, e relatar não é o
+        // mesmo que saber a identidade do impostor. O servidor tem de
+        // resolver `screen` contra a própria nomeação (`apontou`), não contra
+        // `session.person` do despacho — esse é sempre quem relatou, a
+        // vítima, nunca o par apontado.
+        let mut pares = Pares::nova();
+        let tela = ScreenId(9);
+        pares.apontou(tela, PersonId(5));
+        assert_eq!(pares.quem_foi_apontado(tela), Some(PersonId(5)));
+    }
+
+    #[test]
+    fn quem_sai_deixa_de_ser_a_resposta_de_uma_nomeacao_velha() {
+        let mut pares = Pares::nova();
+        let tela = ScreenId(9);
+        pares.apontou(tela, PersonId(5));
+        pares.saiu(PersonId(5));
+        assert_eq!(
+            pares.quem_foi_apontado(tela),
+            None,
+            "quem já foi embora continuou sendo a resposta de uma nomeação"
+        );
     }
 }

@@ -53,6 +53,14 @@ serde = "1.0.229"
 # dessincronização do `frame`. Já está na árvore do workspace via
 # `seele-server`, então não acrescenta superfície de auditoria.
 rcgen = "0.14.8"
+# Para `enlace::Motor` saber os próprios endereços de rede local ao declarar
+# identidade no caminho entre pares (`EmprestarSubida.locais`) — a std não
+# enumera interfaces. Mesma versão que `seele-server::alcance::interfaces` já
+# usa para o mesmo tipo de pergunta, então já está na árvore do workspace e
+# não acrescenta superfície de auditoria. ADR 0002 proíbe este crate de
+# depender de `seele-server`, então a pergunta é refeita aqui, sem a
+# ordenação por heurística de VPN que só importa para o convite.
+if-addrs = "0.15"
 
 [dev-dependencies]
 # O relógio virtual do tokio, e nada além dele.

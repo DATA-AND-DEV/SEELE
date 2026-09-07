@@ -739,10 +739,17 @@ pub enum AlertReason {
 
 /// Por que um par deixou de servir uma transmissão.
 ///
-/// Cada variante distingue um conserto diferente, e é por isso que são quatro e
+/// Cada variante distingue um conserto diferente, e é por isso que são cinco e
 /// não uma. `ImpressaoNaoBate` **não** é `NaoAlcancou`: a diferença entre «não
 /// consegui falar com ele» e «alguém respondeu no lugar dele» é a informação
 /// inteira, e é a mesma distinção que o ADR 0003 existe para nomear.
+/// `NaoFuiAceito`, acrescentada no fix round 2 da Task 8, **não** é
+/// `ImpressaoNaoBate` pelo mesmo motivo, na outra direção — ver o doc dela.
+///
+/// **Sempre acrescente no fim.** O `postcard` indexa variante por posição; uma
+/// inserção no meio desloca todo ordinal depois dela, e ainda não há guarda
+/// automático para este `enum` como há para `ClientMessage`/`ServerMessage`
+/// em `o_vocabulario_e_a_versao`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MotivoDeFalhaDePar {
     /// Nenhum dos endereços fechou aperto de mão.
@@ -753,6 +760,23 @@ pub enum MotivoDeFalhaDePar {
     CaiuNoMeio,
     /// Conexão viva, e quadro nenhum dentro do prazo.
     ParouDeMandar,
+    /// Fechou a ligação porque quem atendia não aceitou **a minha**
+    /// identidade.
+    ///
+    /// **Não é [`Self::ImpressaoNaoBate`] — é o inverso.** Lá, quem respondeu
+    /// não era quem o servidor tinha apresentado: o par apontado é que está
+    /// sob suspeita. Aqui, quem respondeu **era** quem o servidor apresentou,
+    /// e foi ele que recusou a contrapartida que eu ofereci — a suspeita cai
+    /// sobre a **minha própria** declaração, não sobre a dele.
+    ///
+    /// Quase nunca é impostura: o caso comum é a declaração de quem relata
+    /// (`ClientMessage::EmprestarSubida`) estar desatualizada, e o conserto
+    /// certo é pedir a quem relata que declare de novo — nunca desacreditar o
+    /// par apontado, que é o que `ImpressaoNaoBate` faz. Antes desta
+    /// variante, os dois casos viajavam como `Self::NaoAlcancou`, que diz
+    /// «ninguém respondeu» — falso quando o TLS chegou a fechar dos dois
+    /// lados.
+    NaoFuiAceito,
 }
 
 /// Client to server.

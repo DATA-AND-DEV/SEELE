@@ -383,6 +383,16 @@ pub struct Client {
     /// Atrás de um `Mutex` e não do `&mut self` como as telas: quem recebe um
     /// anexo é uma tarefa solta, criada por comando, e ela não tem o `Client`.
     anexos: FilaDeAnexos,
+    /// A ponta QUIC que esta conexão usa para falar com o servidor.
+    ///
+    /// **Guardada para o caminho entre pares a reaproveitar** — `§3.1` da
+    /// spec de 05/09 é explícito: "Não é escuta nova, socket novo nem porta
+    /// nova [...] aquela porta já tem mapeamento de NAT vivo, mantido pelo
+    /// `keep_alive_interval` da conexão com o servidor". Uma ponta nova teria
+    /// endereço público desconhecido do servidor — ele só vê a origem desta
+    /// conexão de controle — e furar NAT numa porta que ele nunca apontou não
+    /// tem como funcionar. Ver [`Self::endpoint`].
+    endpoint: quinn::Endpoint,
 }
 
 /// A fila de onde sai a próxima transmissão de tela alheia.
@@ -610,7 +620,19 @@ impl Client {
             last_rtt: None,
             telas: std::sync::Arc::new(tokio::sync::Mutex::new(telas)),
             anexos: std::sync::Arc::new(tokio::sync::Mutex::new(anexos)),
+            endpoint: endpoint.clone(),
         })
+    }
+
+    /// A ponta QUIC que esta conexão usa para falar com o servidor.
+    ///
+    /// **É o que o caminho entre pares reaproveita**, e não uma ponta nova —
+    /// ver o doc do campo. Devolvida como punho: `quinn::Endpoint` é barato de
+    /// clonar (é um punho sobre um estado compartilhado), e `enlace::Motor`
+    /// guarda a própria cópia para discar e atender nela.
+    #[must_use]
+    pub fn endpoint(&self) -> quinn::Endpoint {
+        self.endpoint.clone()
     }
 
     /// A fila por onde chegam os fluxos de tela, sem o byte de tipo.
