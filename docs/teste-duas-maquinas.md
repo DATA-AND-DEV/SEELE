@@ -396,20 +396,20 @@ mesmo aviso que a seção 7 já faz para o degrau 4.
 1. Numa máquina, suba o servidor (seção 1) e abra o app (seção 6). Entre na
    sala de voz e compartilhe a tela: o botão **COMPARTILHAR** no rodapé,
    escolha a janela ou o monitor.
-2. Numa segunda rede, entre com uma pessoa. Ligue o empréstimo de subida nela
-   (ver acima — hoje não tem onde).
+2. **(bloqueado)** Numa segunda rede, entre com uma pessoa e ligue o
+   empréstimo de subida nela — ver acima: hoje não tem onde clicar.
 3. Numa terceira rede (ou no celular em 4G), entre com outra pessoa e clique
    no nome de quem está compartilhando para assistir. Não escolha "pelo par"
-   ou "pelo servidor" — a escolha é automática e burra hoje (o servidor aponta
-   o primeiro que declarou emprestar), e é justamente ela que os dois números
-   abaixo medem.
+   ou "pelo servidor" — a escolha de quem serve é automática e não segue
+   critério visível nenhum (nem latência, nem ordem de chegada), e é
+   justamente ela que os dois números abaixo medem.
 
 Anote, do `tracing` de quem assistiu (a terceira máquina):
 
 | o que | onde ler | campo | anote |
 |---|---|---|---|
 | como a ligação chegou | evento `um par ligou` | `como` | `Local` ou `Furo` |
-| ida e volta com o par | evento `um par ligou` | `ida_e_volta` | em ms |
+| ida e volta com o par | evento `um par ligou` | `ida_e_volta` | o valor já vem formatado com unidade (ex.: `12.345ms`) — não é número cru |
 | quando não ligou, o motivo enumerado | evento `o par não veio; a tela vem do servidor` | `motivo` | o valor, por extenso |
 | quando não ligou, o detalhe | mesmo evento acima | `erro` | a frase inteira, útil para achar a causa |
 
@@ -422,6 +422,13 @@ Repita **umas dez vezes**, em redes diferentes se der. O que se quer é a
 árvore: se o furo falhar em boa parte dos pares, o subprojeto B não pode supor
 que qualquer par se alcança, e vira «árvore entre quem se alcança, estrela para
 o resto».
+
+**Dez é o piso, não a meta.** É uma fração binária decidindo o desenho de uma
+árvore — dez tentativas dão um intervalo de confiança largo demais para
+sustentar sozinho essa decisão. Quanto mais tentativas, e quanto mais redes
+diferentes entre elas, melhor: quem for ler os dois números depois precisa
+saber quantas tentativas e quantas redes distintas os produziram, não só a
+fração final.
 
 ### Uma ressalva que a medida não pode esconder
 

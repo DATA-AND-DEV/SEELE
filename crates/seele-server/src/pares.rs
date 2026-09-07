@@ -3,8 +3,10 @@
 //!
 //! # A escolha aqui é deliberadamente burra
 //!
-//! Ela aponta o primeiro que declarou que empresta, não é quem compartilha, e
-//! ainda não serve ninguém. É um espaço reservado com a forma certa: o
+//! Ela não segue critério visível nenhum — nem latência, nem ordem de
+//! chegada: `self.quem` é um `HashMap`, e a ordem de iteração dele não é a de
+//! inserção. O que ela garante é só isto — não é quem compartilha, e ainda
+//! não serve ninguém. É um espaço reservado com a forma certa: o
 //! **subprojeto B** é quem olha subida medida e topologia para escolher bem.
 //! Chamar isto de «escolha automática» seria vender como pronto o que é um
 //! lugar guardado — e a spec de 05/09 diz isso com todas as letras.
