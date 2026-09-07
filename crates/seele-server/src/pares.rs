@@ -21,10 +21,22 @@
 //! «não empresto», ninguém que só assistisse teria certificado para
 //! apresentar, e a discagem dele seria sempre recusada como `SemCertificado`.
 //! Por isso `declarou` guarda sempre, e só `escolher` olha `emprestando`.
+//!
+//! # Por que a declaração carrega a conexão que a fez
+//!
+//! Achado do fix round 3. Uma corrida de candidatos (ADR 0037, do lado do
+//! cliente) pode deixar duas conexões vivas com o mesmo `PersonId` ao mesmo
+//! tempo: cada candidato completa o próprio aperto de mão contra este
+//! servidor antes de a corrida decidir quem venceu. Se `saiu` apagasse pela
+//! pessoa sozinha, o encerramento do candidato perdedor — que chega **depois**
+//! de o vencedor já ter declarado — apagaria a declaração viva. Por isso
+//! [`QuemDeclarou`] guarda a conexão que a fez, e [`Pares::saiu`] só apaga se
+//! ainda for a mesma.
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
+use seele_proto::control::MotivoDeFalhaDePar;
 use seele_proto::ids::{PersonId, ScreenId};
 
 /// Uma identidade e onde alcançá-la, que uma pessoa declarou para o caminho
@@ -33,6 +45,14 @@ use seele_proto::ids::{PersonId, ScreenId};
 pub struct QuemDeclarou {
     /// Quem.
     pub pessoa: PersonId,
+    /// Qual conexão fez esta declaração — `quinn::Connection::stable_id`,
+    /// como `session.rs` já usa para `Subida::esquecer`.
+    ///
+    /// **Não é decoração.** Uma corrida de candidatos pode ter duas conexões
+    /// vivas com o mesmo `PersonId`; sem isto, o encerramento de uma conexão
+    /// que perdeu a corrida apagaria a declaração de uma que ganhou. Ver o
+    /// doc do módulo.
+    pub id_da_conexao: u64,
     /// A impressão digital que apresenta.
     pub impressao: String,
     /// Onde alcançá-la: os locais que declarou, mais o público que o servidor
@@ -75,10 +95,13 @@ impl Pares {
     /// «esqueça que existo» — só [`Self::saiu`] apaga, porque só a saída da
     /// sessão torna a identidade obsoleta.
     ///
-    /// `publico` é a origem da conexão desta pessoa, vista pelo servidor.
+    /// `id_da_conexao` é de quem esta declaração pertence — ver o doc de
+    /// [`QuemDeclarou::id_da_conexao`]. `publico` é a origem da conexão desta
+    /// pessoa, vista pelo servidor.
     pub fn declarou(
         &mut self,
         pessoa: PersonId,
+        id_da_conexao: u64,
         emprestando: bool,
         impressao: String,
         locais: Vec<SocketAddr>,
@@ -92,6 +115,7 @@ impl Pares {
             pessoa,
             QuemDeclarou {
                 pessoa,
+                id_da_conexao,
                 impressao,
                 enderecos,
                 emprestando,
@@ -99,14 +123,43 @@ impl Pares {
         );
     }
 
-    /// Esta pessoa saiu. A identidade é efêmera e não sobrevive à sessão —
-    /// sem isto, uma discagem futura apontaria para uma impressão de uma
-    /// sessão que não existe mais, e não só a escolha de quem serve.
+    /// Esta conexão saiu. A identidade é efêmera e não sobrevive à sessão que
+    /// a declarou — mas só a ela.
     ///
-    /// Também esquece toda nomeação que apontava para ela: uma transmissão
-    /// que ainda "apontasse" para quem já foi embora resolveria um
-    /// `ParFalhou` contra ninguém.
-    pub fn saiu(&mut self, pessoa: PersonId) {
+    /// **Verificado por conexão, não só por pessoa** — achado do fix round 3.
+    /// Uma corrida de candidatos pode deixar duas conexões vivas com o mesmo
+    /// `PersonId`; se esta função apagasse por `pessoa` sozinha, o
+    /// encerramento de uma candidata que perdeu a corrida — chegando depois
+    /// de a vencedora já ter declarado — apagaria a declaração viva. Se
+    /// `id_da_conexao` não bater com o que está publicado, não há nada a
+    /// fazer: outra conexão já substituiu esta declaração.
+    pub fn saiu(&mut self, pessoa: PersonId, id_da_conexao: u64) {
+        let e_esta_conexao = self
+            .quem
+            .get(&pessoa)
+            .is_some_and(|declarado| declarado.id_da_conexao == id_da_conexao);
+        if e_esta_conexao {
+            self.esquecer(pessoa);
+        }
+    }
+
+    /// Desacredita a declaração desta pessoa, **seja qual for a conexão que a
+    /// fez**.
+    ///
+    /// Diferente de [`Self::saiu`]: ali o motivo é a conexão ter acabado, e a
+    /// checagem por `id_da_conexao` existe para não confundir sessões.
+    /// Aqui o motivo é a **declaração** ter sido provada falsa —
+    /// `ImpressaoNaoBate`, quando alguém respondeu no lugar de quem foi
+    /// apontado — e a conexão que a fez pode continuar perfeitamente viva; é
+    /// a identidade publicada que deixou de merecer confiança. Ver
+    /// [`quem_desacreditar`].
+    pub fn desacreditar(&mut self, pessoa: PersonId) {
+        self.esquecer(pessoa);
+    }
+
+    /// O que [`Self::saiu`] e [`Self::desacreditar`] têm em comum: apagar a
+    /// declaração e qualquer nomeação que apontava para ela.
+    fn esquecer(&mut self, pessoa: PersonId) {
         self.quem.remove(&pessoa);
         self.nomeacoes.retain(|_, quem| *quem != pessoa);
     }
@@ -167,6 +220,39 @@ impl Pares {
     }
 }
 
+/// Dado o motivo de um `ClientMessage::ParFalhou` e quem o servidor tinha
+/// apontado para a transmissão, quem (se alguém) desacreditar.
+///
+/// **Função pura, extraída no fix round 3.** É onde o defeito do round 2
+/// morava — `session.rs` chamava `saiu(session.person)`, que é sempre quem
+/// **relata**, nunca quem falhou — e o round 2 corrigiu isso em `session.rs`
+/// sem deixar um teste que exercitasse a decisão em si: o revisor reintroduziu
+/// o defeito e os 361 testes do `seele-server` passaram porque o único teste
+/// que citava o achado exercitava `apontou`/`quem_foi_apontado` isolados, não
+/// este raciocínio. Extraída para cá, a decisão é testável sem sessão, sem
+/// conexão e sem `Pares` nenhum.
+///
+/// Só [`MotivoDeFalhaDePar::ImpressaoNaoBate`] desacredita alguém — é o único
+/// motivo que prova algo sobre a **declaração** (alguém respondeu no lugar de
+/// quem foi apontado). `NaoFuiAceito` é o inverso — a suspeita cai sobre quem
+/// relata, não sobre o par apontado — e os outros dois são rotina de rede.
+/// `apontado` vem de [`Pares::quem_foi_apontado`]; `None` quando o servidor
+/// não tem nomeação guardada para a transmissão (hoje, sempre — ver o doc do
+/// módulo).
+#[must_use]
+pub fn quem_desacreditar(
+    motivo: MotivoDeFalhaDePar,
+    apontado: Option<PersonId>,
+) -> Option<PersonId> {
+    match motivo {
+        MotivoDeFalhaDePar::ImpressaoNaoBate => apontado,
+        MotivoDeFalhaDePar::NaoAlcancou
+        | MotivoDeFalhaDePar::CaiuNoMeio
+        | MotivoDeFalhaDePar::ParouDeMandar
+        | MotivoDeFalhaDePar::NaoFuiAceito => None,
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -188,6 +274,7 @@ mod testes {
         let mut pares = Pares::nova();
         pares.declarou(
             PersonId(1),
+            1,
             true,
             "a".repeat(64),
             vec![endereco(1)],
@@ -211,6 +298,7 @@ mod testes {
         let mut pares = Pares::nova();
         pares.declarou(
             PersonId(3),
+            1,
             true,
             "c".repeat(64),
             vec![endereco(3)],
@@ -218,6 +306,7 @@ mod testes {
         );
         pares.declarou(
             PersonId(3),
+            1,
             false,
             "c".repeat(64),
             vec![endereco(3)],
@@ -236,6 +325,7 @@ mod testes {
         let mut pares = Pares::nova();
         pares.declarou(
             PersonId(3),
+            1,
             true,
             "c".repeat(64),
             vec![endereco(3)],
@@ -254,6 +344,7 @@ mod testes {
         let publico = SocketAddr::from(([203, 0, 113, 9], 8383));
         pares.declarou(
             PersonId(3),
+            1,
             true,
             "c".repeat(64),
             vec![endereco(3)],
@@ -279,6 +370,7 @@ mod testes {
         let mut pares = Pares::nova();
         pares.declarou(
             PersonId(3),
+            1,
             false,
             "c".repeat(64),
             vec![endereco(3)],
@@ -297,15 +389,49 @@ mod testes {
         let mut pares = Pares::nova();
         pares.declarou(
             PersonId(3),
+            1,
             false,
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),
         );
-        pares.saiu(PersonId(3));
+        pares.saiu(PersonId(3), 1);
         assert!(
             pares.declaracao_de(PersonId(3)).is_none(),
             "a identidade sobreviveu à saída da sessão"
+        );
+    }
+
+    #[test]
+    fn a_saida_de_uma_conexao_velha_nao_apaga_a_declaracao_de_uma_nova() {
+        // **Achado do fix round 3.** Uma corrida de candidatos pode deixar
+        // duas conexões vivas com o mesmo `PersonId`. A candidata 1 declara,
+        // perde a corrida e sua conexão é fechada; a candidata 2 (a
+        // vencedora) já declarou de novo antes de o encerramento da 1
+        // terminar de rodar. `saiu` chamado com o `id_da_conexao` da
+        // candidata 1 não pode apagar a declaração que a 2 acabou de fazer.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(3),
+            1, // candidata 1, perdedora
+            true,
+            "c".repeat(64),
+            vec![endereco(3)],
+            endereco(3),
+        );
+        pares.declarou(
+            PersonId(3),
+            2, // candidata 2, vencedora — substitui a declaração acima
+            true,
+            "c".repeat(64),
+            vec![endereco(3)],
+            endereco(3),
+        );
+        pares.saiu(PersonId(3), 1); // o encerramento tardio da candidata 1
+        assert!(
+            pares.declaracao_de(PersonId(3)).is_some(),
+            "o encerramento de uma conexão que perdeu a corrida apagou a \
+             declaração da que venceu"
         );
     }
 
@@ -326,13 +452,74 @@ mod testes {
     #[test]
     fn quem_sai_deixa_de_ser_a_resposta_de_uma_nomeacao_velha() {
         let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(5),
+            1,
+            true,
+            "e".repeat(64),
+            vec![endereco(5)],
+            endereco(5),
+        );
         let tela = ScreenId(9);
         pares.apontou(tela, PersonId(5));
-        pares.saiu(PersonId(5));
+        pares.saiu(PersonId(5), 1);
         assert_eq!(
             pares.quem_foi_apontado(tela),
             None,
             "quem já foi embora continuou sendo a resposta de uma nomeação"
         );
+    }
+
+    #[test]
+    fn desacreditar_apaga_independente_da_conexao() {
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(3),
+            1,
+            true,
+            "c".repeat(64),
+            vec![endereco(3)],
+            endereco(3),
+        );
+        pares.desacreditar(PersonId(3));
+        assert!(
+            pares.declaracao_de(PersonId(3)).is_none(),
+            "desacreditar não apagou a declaração"
+        );
+    }
+
+    #[test]
+    fn impressaonaobate_desacredita_quem_foi_apontado_nunca_quem_relata() {
+        // **O guarda que faltava no round 2.** `quem_desacreditar` é a
+        // função pura onde o defeito do round 2 morava — o teste de lá só
+        // exercitava `apontou`/`quem_foi_apontado`, nunca esta decisão.
+        assert_eq!(
+            quem_desacreditar(MotivoDeFalhaDePar::ImpressaoNaoBate, Some(PersonId(9))),
+            Some(PersonId(9))
+        );
+    }
+
+    #[test]
+    fn sem_nomeacao_guardada_ninguem_e_desacreditado() {
+        assert_eq!(
+            quem_desacreditar(MotivoDeFalhaDePar::ImpressaoNaoBate, None),
+            None
+        );
+    }
+
+    #[test]
+    fn motivos_que_nao_sao_impressaonaobate_nunca_desacreditam_ninguem() {
+        for motivo in [
+            MotivoDeFalhaDePar::NaoAlcancou,
+            MotivoDeFalhaDePar::CaiuNoMeio,
+            MotivoDeFalhaDePar::ParouDeMandar,
+            MotivoDeFalhaDePar::NaoFuiAceito,
+        ] {
+            assert_eq!(
+                quem_desacreditar(motivo, Some(PersonId(9))),
+                None,
+                "{motivo:?} desacreditou alguém, e só ImpressaoNaoBate deveria"
+            );
+        }
     }
 }

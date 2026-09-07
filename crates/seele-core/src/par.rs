@@ -183,6 +183,25 @@ pub fn passar_a_atender(
     Ok(())
 }
 
+/// Desarma o que [`passar_a_atender`] armou.
+///
+/// **Não é limpeza opcional — achado do fix round 3.** Sem isto, a ponta
+/// continua aceitando conexões pelo resto da sessão, muito depois de a única
+/// vaga de [`atender`] já ter sido servida, com o verificador ainda fixado na
+/// impressão do **último** par apontado. E QUIC sem `use_retry` responde ao
+/// primeiro pacote de quem quer que bata, antes de qualquer autenticação:
+/// uma porta armada é um refletor de amplificação (até 3× o `Initial`
+/// recebido, contra qualquer endereço de origem que o pacote alegue) por todo
+/// esse tempo — não só enquanto está de fato servindo alguém.
+///
+/// Chame depois que [`atender`] devolver, sirva ele ou não sirva. A conexão
+/// de controle desta mesma ponta não é afetada: `set_server_config` só rege
+/// o que a ponta faz com um `Initial` que chega, e uma conexão já
+/// estabelecida não passa por aí de novo.
+pub fn parar_de_atender(ponta: &quinn::Endpoint) {
+    ponta.set_server_config(None);
+}
+
 /// Confere quem **chega**, contra a impressão que o servidor apresentou.
 ///
 /// Espelho de [`ConfereImpressao`] na outra direção. As duas existem porque os
@@ -1610,5 +1629,174 @@ mod testes {
             ),
             "o anfitrião recusou a identidade de quem discou, e o motivo não foi NaoFuiAceito: {onde:?}"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn parar_de_atender_desarma_o_que_passar_a_atender_armou() {
+        // **O achado do fix round 3.** Sem `parar_de_atender`, a ponta
+        // continua aceitando conexões pelo resto da sessão depois de servir a
+        // única vaga de `atender` — com o verificador fixado na impressão do
+        // último par, e funcionando como refletor de amplificação para quem
+        // quer que bata, sem `use_retry`.
+        // As duas identidades combinam de propósito: se `parar_de_atender`
+        // não desarmar nada, este par fecha o aperto de mão sem obstáculo
+        // nenhum, e o guarda tem algo de verdade para prender — um `ligar`
+        // que desse `NaoAlcancou` mesmo com a ponta armada (por exemplo, por
+        // impressões que nunca bateriam) não provaria nada sobre
+        // `parar_de_atender`.
+        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let identidade_da_ponta = identidade_efemera().unwrap();
+        let impressao_da_ponta = impressao(&identidade_da_ponta);
+        let identidade_de_quem_discaria = identidade_efemera().unwrap();
+        let impressao_de_quem_discaria = impressao(&identidade_de_quem_discaria);
+        passar_a_atender(&ponta, identidade_da_ponta, impressao_de_quem_discaria).unwrap();
+        let onde = ponta.local_addr().unwrap();
+
+        parar_de_atender(&ponta);
+
+        // Alguém pronto para aceitar, mesmo assim: se a ponta continuasse
+        // armada, é `atender` quem completaria o aperto de mão.
+        let _atendendo = tokio::spawn(atender(ponta, PRAZO_DE_CONFIRMACAO_NO_TESTE));
+
+        let discando = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let tentou = ligar(
+            &discando,
+            &[onde],
+            impressao_da_ponta,
+            Some(&identidade_de_quem_discaria),
+            std::time::Duration::from_millis(300),
+        )
+        .await;
+
+        assert!(
+            matches!(tentou, Err(ErroDePar::NaoAlcancou)),
+            "a ponta continuou atendendo depois de parar_de_atender: {tentou:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_ponta_atende_um_par_sem_derrubar_a_conexao_de_controle() {
+        // **A propriedade central do §3.1, provada em código.** O teste
+        // antigo (`uma_ponta_de_cliente_passa_a_atender_sem_socket_novo`) só
+        // confere que a porta local não muda — ele nunca tem conexão nenhuma
+        // no ar para derrubar, e o próprio comentário dele admite isso. Aqui
+        // há uma conexão de controle de verdade, contra um "servidor" QUIC de
+        // teste, **antes** de `passar_a_atender` entrar em cena na MESMA
+        // ponta; a prova que importa é que essa conexão continua trocando
+        // bytes depois.
+
+        // O "servidor" — um par comum atendendo, fazendo o papel do
+        // seele-server só para dar a `ponta` uma conexão de controle de
+        // verdade.
+        let servidor = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let identidade_do_servidor = identidade_efemera().unwrap();
+        let impressao_do_servidor = impressao(&identidade_do_servidor);
+        let identidade_da_ponta = identidade_efemera().unwrap();
+        let impressao_da_ponta = impressao(&identidade_da_ponta);
+        passar_a_atender(&servidor, identidade_do_servidor, impressao_da_ponta).unwrap();
+        let endereco_do_servidor = servidor.local_addr().unwrap();
+        let atendendo_o_controle = tokio::spawn(atender(servidor, PRAZO_DE_CONFIRMACAO_NO_TESTE));
+
+        // `ponta`: só disca, do jeito que uma conexão de controle sai — sem
+        // `passar_a_atender` nenhum ainda.
+        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let controle = ligar(
+            &ponta,
+            &[endereco_do_servidor],
+            impressao_do_servidor,
+            Some(&identidade_da_ponta),
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect("a conexão de controle não fechou");
+        let controle_do_lado_do_servidor = atendendo_o_controle
+            .await
+            .expect("a tarefa do servidor de teste morreu")
+            .expect("o servidor de teste não aceitou a conexão de controle");
+
+        // Um eco simples do lado do servidor: aceita um fluxo, devolve o que
+        // recebeu. Só o suficiente para provar, depois de tudo que acontece a
+        // seguir, que os bytes ainda atravessam nos dois sentidos.
+        //
+        // A tarefa recebe um **clone** da conexão, e não o `ParLigado`
+        // inteiro: soltar a última alça de uma `quinn::Connection` fecha a
+        // ligação, e a tarefa termina (e larga a dela) assim que ecoa —
+        // antes de o lado do cliente terminar de ler. `controle_do_lado_do_servidor`
+        // continua viva no escopo do teste até o fim, e é essa cópia que
+        // mantém a conexão de pé.
+        let conexao_para_o_eco = controle_do_lado_do_servidor.conexao.clone();
+        let eco = tokio::spawn(async move {
+            let (mut envio, mut recebe) = conexao_para_o_eco
+                .accept_bi()
+                .await
+                .expect("o servidor de teste não recebeu o fluxo de prova");
+            let mut buf = [0_u8; 10];
+            recebe
+                .read_exact(&mut buf)
+                .await
+                .expect("a leitura da prova falhou");
+            envio
+                .write_all(&buf)
+                .await
+                .expect("a escrita da prova falhou");
+            let _ = envio.finish();
+        });
+
+        // Agora, na MESMA `ponta` — nem escuta nova, nem porta nova —, ela
+        // também passa a atender um par, exatamente como `Motor::servir_par`
+        // faz.
+        let identidade_para_o_par = identidade_efemera().unwrap();
+        let impressao_de_quem_atende = impressao(&identidade_para_o_par);
+        let identidade_do_terceiro = identidade_efemera().unwrap();
+        let impressao_do_terceiro = impressao(&identidade_do_terceiro);
+        passar_a_atender(&ponta, identidade_para_o_par, impressao_do_terceiro).unwrap();
+        let onde_a_ponta_atende = ponta.local_addr().unwrap();
+        let atendendo_o_par = tokio::spawn(atender(ponta.clone(), PRAZO_DE_CONFIRMACAO_NO_TESTE));
+
+        // Um terceiro par — quem `SirvaTelaPara` mandaria discar para
+        // `ponta` — liga para ela.
+        let terceiro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ligado_pelo_terceiro = ligar(
+            &terceiro,
+            &[onde_a_ponta_atende],
+            impressao_de_quem_atende,
+            Some(&identidade_do_terceiro),
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect("o terceiro par não conseguiu ligar para a ponta que também atende");
+        // Guardado, e não descartado: soltar o `ParLigado` deste lado
+        // fecharia a conexão imediatamente, e a asserção abaixo veria uma
+        // ligação morta por causa do próprio teste, não por
+        // `passar_a_atender`.
+        let _atendido_do_lado_da_ponta = atendendo_o_par
+            .await
+            .expect("a tarefa que atende o par morreu")
+            .expect("a ponta não aceitou o par que discou para ela");
+        assert!(
+            ligado_pelo_terceiro.conexao.close_reason().is_none(),
+            "a ligação com o terceiro par já morreu"
+        );
+
+        // **A prova que importa:** a conexão de controle, aberta antes de
+        // tudo isso, continua viva e trocando bytes — não foi derrubada nem
+        // por `passar_a_atender` nem pelo aperto de mão do terceiro par.
+        let (mut envio, mut recebe) = controle
+            .conexao
+            .open_bi()
+            .await
+            .expect("a conexão de controle não abre mais fluxo nenhum");
+        envio
+            .write_all(b"ainda viva")
+            .await
+            .expect("a escrita na conexão de controle falhou");
+        let _ = envio.finish();
+        let mut resposta = [0_u8; 10];
+        recebe
+            .read_exact(&mut resposta)
+            .await
+            .expect("a leitura na conexão de controle falhou");
+        assert_eq!(&resposta, b"ainda viva");
+        eco.await.expect("a tarefa de eco do servidor morreu");
     }
 }

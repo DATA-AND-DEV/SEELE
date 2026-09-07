@@ -2308,7 +2308,7 @@ impl Motor {
                 // pessoa reconecta sem identidade nenhuma registrada até a
                 // próxima vez que este método for chamado por acaso. Ver o
                 // doc de `Motor::declarar_identidade_de_par`.
-                self.declarar_identidade_de_par().await;
+                self.declarar_identidade_de_par(false).await;
 
                 let _ = self.avisos.send(Aviso::Reconectado {
                     media: Box::new(media),
@@ -2336,7 +2336,7 @@ impl Motor {
         // método já empresta só `self.cliente`. Os dois empréstimos não
         // convivem no mesmo escopo.
         if matches!(comando, Comando::DeclararIdentidadeDePar) {
-            self.declarar_identidade_de_par().await;
+            self.declarar_identidade_de_par(false).await;
             return;
         }
         let Some(cliente) = self.cliente.as_mut() else {
@@ -2680,14 +2680,23 @@ impl Motor {
     /// (`Pares::saiu`, no servidor), e a identidade efêmera não sobrevive a
     /// ela sem ser dita de novo.
     ///
-    /// `locais` leva os endereços de rede local desta máquina, na porta que a
-    /// ponta de pares já usa (ver [`locais_de_pares`]) — mesmo sem opt-in de
-    /// emprestar. **Achado do fix round 2**: quem só assiste também pode ser
-    /// alcançado pela LAN, quando `SirvaTelaPara` aponta alguém para discar
-    /// para ela; sem `locais`, o único endereço que sobraria para o servidor
-    /// apontar seria o público da conexão de controle, e um par na mesma rede
-    /// pagaria o furo à toa quando a LAN bastava.
-    async fn declarar_identidade_de_par(&mut self) {
+    /// `locais` só leva os endereços de rede local desta máquina quando
+    /// `emprestando` for `true` — **achado do fix round 3, e correção de um
+    /// vazamento de privacidade que o round 2 introduziu.** O §5 da spec
+    /// nomeia privacidade como a primeira das duas razões independentes do
+    /// opt-in — um servidor não é necessariamente entre amigos (ADR 0021) —,
+    /// e o round 2 fez esta função publicar a topologia de rede interna de
+    /// **toda** máquina que apenas conecta, `emprestando: false` incluído.
+    /// Quem só assiste declara a impressão e nada mais: o público que o
+    /// servidor já vê na conexão de controle basta para quem empresta discar
+    /// de volta, e o furo simultâneo cobre o resto.
+    ///
+    /// Hoje os dois pontos que chamam este método (a conexão inicial e cada
+    /// reconexão) sempre passam `emprestando: false` — não há ainda um
+    /// comando de "emprestar a subida" neste `enlace`. `locais_de_pares` fica
+    /// pronta para quando ele existir e puder chamar
+    /// `declarar_identidade_de_par(true)`, sem rodar enquanto ele não existe.
+    async fn declarar_identidade_de_par(&mut self, emprestando: bool) {
         let identidade = match self.identidade_de_par() {
             Ok(identidade) => identidade,
             Err(erro) => {
@@ -2698,12 +2707,12 @@ impl Motor {
         let Some(ponta) = self.ponta_de_pares() else {
             return;
         };
-        let locais = locais_de_pares(&ponta);
+        let locais = locais_a_publicar(emprestando, || locais_de_pares(&ponta));
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
         if let Err(erro) = cliente
-            .emprestar_subida(false, par::impressao(&identidade), locais)
+            .emprestar_subida(emprestando, par::impressao(&identidade), locais)
             .await
         {
             tracing::warn!(%erro, "não deu para declarar a identidade deste par ao servidor");
@@ -2892,10 +2901,15 @@ async fn servir_um_par(
         Some(&identidade),
         PRAZO_DO_PAR,
     );
-    tokio::select! {
+    let resultado = tokio::select! {
         atendido = atende => atendido,
         discado = disca => discado.ok(),
-    }
+    };
+    // **Desarma sempre, sirva ou não sirva.** Achado do fix round 3: sem
+    // isto a ponta continuava aceitando conexões pelo resto da sessão — ver
+    // o doc de `par::parar_de_atender`.
+    par::parar_de_atender(&ponta);
+    resultado
 }
 
 /// Os endereços de rede local desta máquina, na porta que `ponta` já usa.
@@ -2928,6 +2942,27 @@ fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
             Vec::new()
         }
     }
+}
+
+/// Quais endereços de rede local uma declaração publica.
+///
+/// **A regra do opt-in, isolada para poder ser presa por teste — achado do
+/// fix round 3.** Só quem optou por emprestar publica os endereços da própria
+/// máquina: o §5 da spec nomeia privacidade como a primeira das duas razões
+/// independentes do opt-in, e lembra que um servidor não é necessariamente
+/// entre amigos (ADR 0021). Quem só assiste declara a impressão e nada mais —
+/// o público que o servidor já vê na conexão de controle basta para quem
+/// empresta discar de volta, e o furo simultâneo cobre o resto.
+///
+/// `todos` é adiado (`FnOnce`) de propósito: enumerar as interfaces desta
+/// máquina é trabalho que quem não empresta nem chega a fazer, e um argumento
+/// já avaliado esconderia dentro do chamador justamente a decisão que este
+/// guarda existe para prender.
+fn locais_a_publicar<F: FnOnce() -> Vec<SocketAddr>>(
+    emprestando: bool,
+    todos: F,
+) -> Vec<SocketAddr> {
+    if emprestando { todos() } else { Vec::new() }
 }
 
 /// Se este endereço vale como "local" para o caminho entre pares.
@@ -3717,6 +3752,56 @@ fn vale_insistir(erro: &ConnectError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn so_quem_empresta_publica_os_enderecos_da_propria_maquina() {
+        // **O guarda do achado de privacidade do fix round 3.** O round 2
+        // passou a publicar os endereços de interface de *todo* cliente,
+        // inclusive de quem manda `emprestando: false` — contra o §5 da spec,
+        // que nomeia privacidade como a primeira das duas razões do opt-in.
+        // Quem só assiste declara a impressão e nada mais.
+        //
+        // Os endereços são inventados de propósito: a decisão não pode
+        // depender de quais interfaces a máquina que roda o teste tem, senão
+        // o guarda passa a valer só onde há uma LAN.
+        let da_maquina = || vec![SocketAddr::from(([192, 168, 1, 10], 4444))];
+        assert!(
+            locais_a_publicar(false, da_maquina).is_empty(),
+            "quem só assiste publicou a topologia de rede interna da máquina"
+        );
+        assert_eq!(
+            locais_a_publicar(true, da_maquina),
+            da_maquina(),
+            "quem optou por emprestar deixou de publicar por onde ser alcançado"
+        );
+    }
+
+    #[test]
+    fn enderecos_locais_excluem_loopback_nao_especificado_e_link_local() {
+        // A parte que `locais_de_pares` não pode errar: publicar loopback ou
+        // um não-especificado não ajuda ninguém a discar, e link-local não
+        // sai do cabo — mesmo motivo que
+        // `seele-server::alcance::interfaces::descobrir` já documenta para o
+        // convite.
+        let locais = [IpAddr::from([192, 168, 1, 10]), IpAddr::from([10, 0, 0, 5])];
+        for ip in locais {
+            assert!(e_endereco_de_rede_local(ip), "{ip} devia contar como local");
+        }
+        let excluidos = [
+            IpAddr::from([127, 0, 0, 1]),
+            IpAddr::from([0, 0, 0, 0]),
+            IpAddr::from([169, 254, 1, 1]),
+            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+            IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            IpAddr::V6(std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+        ];
+        for ip in excluidos {
+            assert!(
+                !e_endereco_de_rede_local(ip),
+                "{ip} não devia contar como local"
+            );
+        }
+    }
 
     #[test]
     fn insistir_contra_recusa_nao_muda_a_resposta() {

@@ -400,7 +400,17 @@ pub async fn serve(
     // seção: sem isto a escolha (`Pares::escolher`) continuaria apontando para
     // alguém que já foi embora, e quem_quer discaria para um endereço que não
     // atende mais.
-    server.pares.lock().await.saiu(session.person);
+    //
+    // `id_da_conexao` vai junto — achado do fix round 3: uma corrida de
+    // candidatos pode deixar duas conexões vivas com o mesmo `session.person`,
+    // e `Pares::saiu` só apaga se a conexão que está saindo ainda for a que
+    // publicou a declaração. Sem isso, o encerramento de uma candidata que
+    // perdeu a corrida apagaria a declaração que a vencedora acabou de fazer.
+    server
+        .pares
+        .lock()
+        .await
+        .saiu(session.person, id_da_conexao);
 
     // E os contadores desta conexão saem da soma da subida.
     //
@@ -1020,6 +1030,16 @@ async fn run_session(
     // ler `session.nickname` aqui faria tudo que viesse depois da troca sair
     // com o nome de antes dela.
     let mut apelido_de_agora = session.nickname.clone();
+
+    // A mesma identidade que `handle_connection` já calcula antes de chamar
+    // esta função (`id_da_conexao`, ali). Recalculada aqui porque
+    // `EmprestarSubida`/`ParFalhou` são tratados dentro deste laço, e
+    // `stable_id` devolve o mesmo número para o mesmo `Connection` em
+    // qualquer ponto da vida dele — não é um novo identificador, é o mesmo
+    // lido de novo. `crate::pares::Pares::declarou`/`saiu` precisam dele para
+    // não confundir duas conexões da mesma pessoa numa corrida de candidatos
+    // (fix round 3 da Task 8).
+    let id_da_conexao = connection.stable_id() as u64;
 
     let (para_dentro, mut entrada) = mpsc::channel::<ClientMessage>(ENTRADA_DEPTH);
     let leitora = tokio::spawn(async move {
@@ -2296,6 +2316,7 @@ async fn run_session(
                         );
                         server.pares.lock().await.declarou(
                             session.person,
+                            id_da_conexao,
                             emprestando,
                             impressao,
                             locais,
@@ -2321,48 +2342,34 @@ async fn run_session(
                         // relata pela sessão inteira, porque nada a
                         // redeclara. `ParFalhou` carrega só `screen` de
                         // propósito: quem relata nunca soube a identidade de
-                        // quem o enganou, só que a imagem parou. Quem sabe
-                        // disso é o próprio servidor, que emitiu
-                        // `SirvaTelaPara`/`AssistaTelaPor` e guardou a própria
-                        // nomeação (`Pares::apontou`) — resolver `screen`
-                        // contra ela é a única forma de descobrir de quem
-                        // reclamar sem inventar protocolo novo.
-                        match motivo {
-                            // Evento de segurança: alguém respondeu no lugar
-                            // de quem o servidor apresentou. Desacredita o
-                            // par **apontado** — nunca `session.person`.
-                            MotivoDeFalhaDePar::ImpressaoNaoBate => {
-                                let mut pares = server.pares.lock().await;
-                                if let Some(apontado) = pares.quem_foi_apontado(screen) {
-                                    pares.saiu(apontado);
-                                } else {
-                                    // Sem nomeação guardada — hoje é sempre o
-                                    // caso, porque nenhum despacho chama
-                                    // `Pares::apontou` ainda (Task 10). Sem
-                                    // saber quem foi apontado, não há quem
-                                    // desacreditar; ficar quieto é mais seguro
-                                    // do que adivinhar.
-                                    tracing::debug!(
-                                        %screen,
-                                        "ImpressaoNaoBate relatado sem nomeação guardada para a transmissão"
-                                    );
-                                }
+                        // quem o enganou, só que a imagem parou.
+                        //
+                        // **A decisão em si é função pura** —
+                        // `crate::pares::quem_desacreditar` — achado do fix
+                        // round 3: o teste que o round 2 escreveu exercitava
+                        // `apontou`/`quem_foi_apontado` isolados, nunca este
+                        // braço, e o revisor reintroduziu
+                        // `saiu(session.person)` aqui sem que os 361 testes
+                        // do `seele-server` tropeçassem. Extraída, a decisão
+                        // é testável sem sessão nenhuma, e este braço só
+                        // executa o que ela decidiu.
+                        let mut pares = server.pares.lock().await;
+                        let apontado = pares.quem_foi_apontado(screen);
+                        match crate::pares::quem_desacreditar(motivo, apontado) {
+                            Some(quem) => pares.desacreditar(quem),
+                            // Sem nomeação guardada — hoje é sempre o caso
+                            // para `ImpressaoNaoBate`, porque nenhum despacho
+                            // chama `Pares::apontou` ainda (Task 10). Sem
+                            // saber quem foi apontado, não há quem
+                            // desacreditar; ficar quieto é mais seguro do que
+                            // adivinhar.
+                            None if motivo == MotivoDeFalhaDePar::ImpressaoNaoBate => {
+                                tracing::debug!(
+                                    %screen,
+                                    "ImpressaoNaoBate relatado sem nomeação guardada para a transmissão"
+                                );
                             }
-                            // «Não me aceitaram» — o inverso de `ImpressaoNaoBate`:
-                            // quase sempre a própria declaração de quem
-                            // relata está desatualizada, não impostura do par
-                            // apontado. O conserto certo (pedir a quem relata
-                            // que declare de novo) ainda não tem mensagem
-                            // própria no protocolo; por ora só o rastro acima
-                            // registra o caso, e desacreditar o par apontado
-                            // — o conserto de `ImpressaoNaoBate` — seria
-                            // castigar quem não errou nada.
-                            MotivoDeFalhaDePar::NaoFuiAceito => {}
-                            // Rotina de rede: nenhuma prova sobre nenhuma
-                            // declaração.
-                            MotivoDeFalhaDePar::NaoAlcancou
-                            | MotivoDeFalhaDePar::CaiuNoMeio
-                            | MotivoDeFalhaDePar::ParouDeMandar => {}
+                            None => {}
                         }
                     }
 
