@@ -90,6 +90,20 @@ pub enum ErroDePar {
     /// prazo de `ligar` venceu primeiro.
     #[error("um candidato completou o aperto de mão, e o prazo venceu antes da confirmação")]
     ConfirmacaoNaoChegouATempo,
+    /// O repasse de tela para um par parou no meio.
+    ///
+    /// **Não é [`Self::Escuta`], e a diferença importa para quem lê o log.**
+    /// `Escuta` documenta «não deu para pôr esta ponta a atender» — a frase
+    /// certa para um `set_server_config` que falhou, e enganosa para um par
+    /// que caiu no meio de uma transmissão de tela já em andamento. Cobre três
+    /// causas: o fluxo QUIC não abriu ou parou de aceitar bytes (o par caiu,
+    /// ou mandou `STOP_SENDING`), ou os bytes que chegaram de quem está do
+    /// outro lado de [`crate::par::repassar`] já não formam um enquadramento
+    /// válido (ver [`crate::tela::Enquadramento::entrada`]) — o que quer dizer
+    /// que o repasse já não sabe mais onde um quadro-chave começaria, e
+    /// continuar seria repassar lixo.
+    #[error("o repasse de tela para o par parou: {0}")]
+    Repasse(String),
 }
 
 /// Por que a conexão fechou depois que quem disca já a considerava pronta.
@@ -747,25 +761,43 @@ pub async fn atender(
 /// Ligar no meio de um quadro é ligar em lixo. O servidor já sabe disto:
 /// `EmCurso::esperando`, em `crates/seele-server/src/voice_room.rs`, segura
 /// quem chega numa lista de espera até o próximo quadro-chave. `repassar` faz
-/// o mesmo: descarta todo pedaço até o primeiro cujo primeiro byte seja
-/// [`crate::tela::TipoDeQuadro::Chave`], e a partir dele repassa tudo, sem
-/// descartar mais nada. Sem esta regra, quem entra por um par veria blocos
-/// coloridos até o quadro-chave seguinte, sem como saber por quê.
+/// o mesmo, com o mesmo instrumento que o servidor usa para achar a
+/// fronteira: um [`crate::tela::Enquadramento`] que **conta bytes** através
+/// dos pedaços, em vez de supor que o primeiro byte de cada pedaço é sempre
+/// um byte de tipo — suposição que um pedaço `[quadro comum][quadro-chave]`
+/// (dois quadros, um pedaço só) ou um quadro comum partido ao meio entre dois
+/// pedaços quebra das duas formas possíveis: descartando o quadro-chave que
+/// vinha depois do comum, ou lendo o meio de um quadro comum como se fosse um
+/// cabeçalho novo — `Enquadramento::entrada` explica os dois casos por
+/// extenso. `repassar` descarta todo pedaço até o primeiro em que
+/// `Enquadramento::entrada` acha um quadro-chave, repassa desse deslocamento
+/// em diante, e a partir daí não descarta mais nada.
 ///
 /// # Errors
 ///
-/// [`ErroDePar::Escuta`] quando o par para de aceitar bytes — o fluxo não
-/// abre, a abertura não escreve, ou um pedaço não escreve.
+/// [`ErroDePar::Repasse`] quando o fluxo não abre, um pedaço não escreve, os
+/// bytes que chegam já não formam um enquadramento válido, ou o par não
+/// confirma o fim da transmissão.
 pub async fn repassar(
     ligado: &ParLigado,
     abertura: &[u8],
     mut pedacos: tokio::sync::mpsc::Receiver<Vec<u8>>,
 ) -> Result<(), ErroDePar> {
+    let par = ligado.conexao.remote_address();
     let mut fluxo = ligado
         .conexao
         .open_uni()
         .await
-        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+        .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
+    // Abaixo de tudo o mais que esta máquina escreve — a mesma prioridade que
+    // todo outro fluxo de tela do produto usa
+    // (`crate::tela::Transmissao::abrir`, `seele-server/src/tela.rs::bombear`,
+    // os dois com `PRIORIDADE_DA_TELA`). Quem repassa é quem empresta a
+    // subida, e está numa chamada de voz — o §3.2 («a voz nunca cede à
+    // tela») também se sustenta por esta linha. Só falha em fluxo já
+    // fechado, que aqui acabou de nascer; mesmo assim não vale derrubar o
+    // repasse por uma prioridade não aplicada.
+    let _ = fluxo.set_priority(crate::tela::PRIORIDADE_DA_TELA);
     // O tipo do fluxo antes do cabeçalho, e o cabeçalho antes de qualquer
     // pedaço — a mesma ordem que `crate::tela::Transmissao::abrir` já escreve
     // para o servidor, porque é a mesma leitura que `Recepcao::do_fluxo` faz
@@ -773,37 +805,67 @@ pub async fn repassar(
     fluxo
         .write_all(&[seele_proto::stream::StreamType::Screen.byte()])
         .await
-        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+        .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
     fluxo
         .write_all(abertura)
         .await
-        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+        .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
+    tracing::info!(%par, "repasse de tela para o par começou");
 
-    // Descarta até o primeiro quadro-chave — ver a seção acima. Uma vez visto
-    // um, esta bandeira nunca mais volta a `false`: nada é descartado depois
-    // dele.
+    // Conta bytes através dos pedaços para achar onde um quadro-chave começa
+    // — ver a seção acima. Chamado em **todo** pedaço, mesmo depois de
+    // `viu_a_chave` virar `true`: é assim que este laço continua sabendo,
+    // quadro a quadro, se os bytes que chegam ainda formam um enquadramento
+    // válido.
+    let mut enquadramento = crate::tela::Enquadramento::novo();
     let mut viu_a_chave = false;
+    let mut descartados = 0_u64;
     while let Some(pedaco) = pedacos.recv().await {
-        if !viu_a_chave {
-            let e_chave = pedaco
-                .first()
-                .copied()
-                .and_then(crate::tela::TipoDeQuadro::de_byte)
-                .is_some_and(crate::tela::TipoDeQuadro::e_chave);
-            if !e_chave {
-                continue;
-            }
-            viu_a_chave = true;
+        let porta = enquadramento
+            .entrada(&pedaco)
+            .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
+        if viu_a_chave {
+            fluxo
+                .write_all(&pedaco)
+                .await
+                .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
+            continue;
         }
+        let Some(deslocamento) = porta else {
+            descartados += 1;
+            continue;
+        };
+        viu_a_chave = true;
+        tracing::debug!(%par, descartados, "quadro-chave achado; repasse ao par passa a valer");
         fluxo
-            .write_all(&pedaco)
+            .write_all(pedaco.get(deslocamento..).unwrap_or_default())
             .await
-            .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+            .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
+    }
+    if !viu_a_chave {
+        tracing::warn!(
+            %par,
+            descartados,
+            "o canal de pedaços fechou e nenhum quadro-chave chegou a atravessar"
+        );
     }
     fluxo
         .finish()
-        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
-    Ok(())
+        .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
+    // Espera o par confirmar antes de devolver. Sem isto, devolver soltaria o
+    // lado de envio e os últimos pedaços podiam ainda não ter saído — o mesmo
+    // achado que `Client::send_attachment` já documenta em `client.rs`: quem
+    // chama `repassar` não teria como saber quando é seguro soltar o par.
+    match fluxo.stopped().await {
+        Ok(None) => {
+            tracing::info!(%par, "repasse de tela para o par terminou e foi confirmado");
+            Ok(())
+        }
+        Ok(Some(codigo)) => Err(ErroDePar::Repasse(format!(
+            "o par parou de aceitar bytes (código {codigo})"
+        ))),
+        Err(erro) => Err(ErroDePar::Repasse(erro.to_string())),
+    }
 }
 
 /// De onde a imagem desta transmissão vai vir.
@@ -895,12 +957,16 @@ fn motivo_de_falha(erro: &ErroDePar) -> seele_proto::control::MotivoDeFalhaDePar
         ErroDePar::RecusadoDepoisDeLigar(_) => {
             seele_proto::control::MotivoDeFalhaDePar::NaoFuiAceito
         }
+        // `Repasse` nunca sai de `ligar` — só de `repassar`, bem depois de a
+        // ligação já ter sido dada por boa — então esta função nunca a
+        // recebe de verdade. O braço existe só para a exaustão do `match`;
+        // cai no mesmo balde de rotina de rede por não ter nada a provar
+        // sobre a declaração publicada, a mesma razão dos outros três.
         ErroDePar::Certificado(_)
         | ErroDePar::Escuta(_)
         | ErroDePar::NaoAlcancou
-        | ErroDePar::ConfirmacaoNaoChegouATempo => {
-            seele_proto::control::MotivoDeFalhaDePar::NaoAlcancou
-        }
+        | ErroDePar::ConfirmacaoNaoChegouATempo
+        | ErroDePar::Repasse(_) => seele_proto::control::MotivoDeFalhaDePar::NaoAlcancou,
     }
 }
 
@@ -1911,6 +1977,18 @@ mod testes {
         eco.await.expect("a tarefa de eco do servidor morreu");
     }
 
+    /// Monta os bytes de um quadro completo — cabeçalho e corpo —, do jeito
+    /// que `crate::tela::escrever_cabecalho_de_quadro` grava no fio. Aquela
+    /// função é privada ao módulo `tela`, então os testes daqui reconstroem
+    /// os cinco bytes à mão: um de tipo, quatro de tamanho em big-endian.
+    fn quadro(tipo: crate::tela::TipoDeQuadro, corpo: &[u8]) -> Vec<u8> {
+        let tamanho = u32::try_from(corpo.len()).unwrap();
+        let mut bytes = vec![tipo.byte()];
+        bytes.extend_from_slice(&tamanho.to_be_bytes());
+        bytes.extend_from_slice(corpo);
+        bytes
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn o_par_recebe_a_abertura_e_os_pedacos_na_ordem() {
         // **Por pedaço, e nunca remontando quadro.** É a mesma regra que o
@@ -1920,16 +1998,6 @@ mod testes {
         // um tempo de quadro de atraso a cada salto. Numa árvore de profundidade
         // três isso seria três quadros, que é o orçamento inteiro.
         let (a, b, ligado) = duas_pontas_ligadas().await;
-        // **Mantida viva além do `spawn`.** `repassar` recebe `ligado` por
-        // referência, mas o `'static` do `spawn` obriga a movê-lo para dentro
-        // do bloco — e soltar a última alça de uma `quinn::Connection` fecha a
-        // ligação na hora (`ConnectionRef::drop` chama `implicit_close`), antes
-        // de o laço de I/O da conexão sequer ter tido a chance de escrever os
-        // bytes já aceitos no buffer. Este clone é a alça extra que falta:
-        // quem chama `repassar` de verdade mantém `ParLigado` vivo por uma
-        // sessão inteira, bem além de uma chamada só, e este clone reproduz
-        // essa mesma garantia aqui.
-        let mantida_viva = ligado.conexao.clone();
 
         let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
         let abertura_clone = abertura.clone();
@@ -1937,8 +2005,13 @@ mod testes {
         let repassando =
             tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
 
-        manda.send(vec![1, 2, 3]).await.unwrap();
-        manda.send(vec![4, 5]).await.unwrap();
+        // Dois quadros completos, em pedaços separados — o primeiro já é
+        // chave, então nada é descartado, e o segundo prova que tudo o que
+        // vem depois da chave atravessa, seja qual for o tipo.
+        let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[1, 2, 3]);
+        let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[4, 5]);
+        manda.send(chave.clone()).await.unwrap();
+        manda.send(comum.clone()).await.unwrap();
         drop(manda);
 
         // Do outro lado, o que chega é: o byte de tipo, a abertura, e os pedaços
@@ -1950,16 +2023,13 @@ mod testes {
         let veio = fluxo.read_to_end(1024).await.unwrap();
         assert_eq!(
             veio,
-            [
-                vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN],
-                vec![1, 2, 3],
-                vec![4, 5]
-            ]
-            .concat(),
+            [abertura, chave, comum].concat(),
             "o que chegou ao par não é a abertura seguida dos pedaços na ordem"
         );
+        // `repassar` só devolve depois de o par confirmar o fim do fluxo
+        // (`fluxo.stopped()`) — não há mais corrida com o `drop` de `ligado`
+        // no fim deste `spawn` para segurar com um clone extra da conexão.
         repassando.await.unwrap().unwrap();
-        drop(mantida_viva);
         drop(b);
     }
 
@@ -1973,15 +2043,9 @@ mod testes {
         // quadro-chave seguinte — e não tem como saber por quê.
         //
         // O que se prende aqui é que `repassar` **descarta** o que vem antes do
-        // primeiro pedaço marcado como chave, e nada depois dele. A marca é o
-        // primeiro byte do pedaço, lido como `crate::tela::TipoDeQuadro` — o
-        // mesmo byte que o cabeçalho de quadro já escreve no fio.
+        // primeiro quadro-chave achado pelo `crate::tela::Enquadramento`, e
+        // nada depois dele.
         let (a, b, ligado) = duas_pontas_ligadas().await;
-        // Ver o comentário equivalente em
-        // `o_par_recebe_a_abertura_e_os_pedacos_na_ordem`: sem este clone, o
-        // `spawn` solta a última alça da conexão assim que `repassar` volta, e
-        // ela fecha antes de o laço de I/O escrever o que já foi aceito.
-        let mantida_viva = ligado.conexao.clone();
 
         let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
         let abertura_clone = abertura.clone();
@@ -1989,8 +2053,8 @@ mod testes {
         let repassando =
             tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
 
-        let comum = [vec![crate::tela::TipoDeQuadro::Comum.byte()], vec![1, 2]].concat();
-        let chave = [vec![crate::tela::TipoDeQuadro::Chave.byte()], vec![3, 4]].concat();
+        let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[1, 2]);
+        let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[3, 4]);
         manda.send(comum).await.unwrap();
         manda.send(chave.clone()).await.unwrap();
         drop(manda);
@@ -2002,10 +2066,227 @@ mod testes {
         assert_eq!(
             veio,
             [abertura, chave].concat(),
-            "o pedaço comum que veio antes da chave atravessou, ou a chave não atravessou"
+            "o quadro comum que veio antes da chave atravessou, ou a chave não atravessou"
         );
         repassando.await.unwrap().unwrap();
-        drop(mantida_viva);
         drop(b);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_pedaco_com_dois_quadros_nao_perde_o_quadro_chave_que_vem_depois_do_comum() {
+        // **Modo A do Critical do fix round 1.** Um pedaço não é um quadro: é
+        // o que uma leitura devolveu de uma vez, e pode carregar dois quadros
+        // inteiros — é literalmente o que uma leitura de
+        // `quinn::RecvStream::read` entrega ao `Enquadramento` do servidor em
+        // `session.rs`. Ler só o primeiro byte do pedaço como se fosse sempre
+        // o byte de tipo do quadro julgava o pedaço inteiro pelo quadro comum
+        // do começo, e o quadro-chave que vinha logo depois — no mesmo
+        // pedaço — nunca atravessava. Do lado de quem recebe isso não dava
+        // erro nenhum: `Recepcao::proximo_quadro` bateria em
+        // `FinishedEarly(0)` e devolveria `Ok(None)` — «quem compartilha
+        // parou» — sem nenhum dado dizendo por quê.
+        let (a, b, ligado) = duas_pontas_ligadas().await;
+
+        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
+        let abertura_clone = abertura.clone();
+        let (manda, recebe) = tokio::sync::mpsc::channel(8);
+        let repassando =
+            tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
+
+        let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[1, 2]);
+        let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[3, 4]);
+        let um_pedaco_so = [comum, chave.clone()].concat();
+        manda.send(um_pedaco_so).await.unwrap();
+        drop(manda);
+
+        let mut fluxo = a.accept_uni().await.unwrap();
+        let mut tipo = [0_u8; 1];
+        fluxo.read_exact(&mut tipo).await.unwrap();
+        let veio = fluxo.read_to_end(1024).await.unwrap();
+        assert_eq!(
+            veio,
+            [abertura, chave].concat(),
+            "o quadro-chave que vinha depois do comum, no mesmo pedaço, não atravessou"
+        );
+        repassando.await.unwrap().unwrap();
+        drop(b);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_quadro_comum_partido_entre_pedacos_nao_vira_cabecalho_falso() {
+        // **Modo B do Critical do fix round 1.** `Transmissao` já escreve um
+        // quadro em duas chamadas — cabeçalho e depois corpo
+        // (`tela.rs::Transmissao::escrever`, chamada de `enviar_quadro` e de
+        // `escrever_fatia`) —, e o corpo de um payload H.264 Annex-B está
+        // cheio de `0x00` e `0x01`: não é caso de canto. Sob o guarda antigo
+        // (ler só o primeiro byte de cada pedaço), um segundo pedaço que
+        // continuasse o corpo de um quadro comum e por acaso começasse em `1`
+        // era lido como se fosse o começo de um quadro-chave — e os quatro
+        // bytes seguintes do corpo, lidos como o **tamanho** daquele quadro
+        // inventado, atravessavam para o par. Do lado de quem recebe isso não
+        // é ruído: é `QuadroGrandeDemais` acusando o par de anunciar um
+        // tamanho absurdo, por causa de um corte que o repasse local fez.
+        let (a, b, ligado) = duas_pontas_ligadas().await;
+
+        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
+        let abertura_clone = abertura.clone();
+        let (manda, recebe) = tokio::sync::mpsc::channel(8);
+        let repassando =
+            tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
+
+        // Um quadro comum de seis bytes de corpo, com o quarto byte do corpo
+        // sendo `1` — o byte de `TipoDeQuadro::Chave` —, partido bem ali: o
+        // segundo pedaço começa exatamente nesse `1`.
+        let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[9, 9, 9, 1, 9, 9]);
+        let (primeiro_pedaco, segundo_pedaco) =
+            comum.split_at(crate::tela::CABECALHO_DE_QUADRO_LEN + 3);
+        assert_eq!(
+            segundo_pedaco.first().copied(),
+            Some(crate::tela::TipoDeQuadro::Chave.byte()),
+            "o teste não montou o corte que provoca o Modo B"
+        );
+        let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[7, 8]);
+        manda.send(primeiro_pedaco.to_vec()).await.unwrap();
+        manda.send(segundo_pedaco.to_vec()).await.unwrap();
+        manda.send(chave.clone()).await.unwrap();
+        drop(manda);
+
+        let mut fluxo = a.accept_uni().await.unwrap();
+        let mut tipo = [0_u8; 1];
+        fluxo.read_exact(&mut tipo).await.unwrap();
+        let veio = fluxo.read_to_end(1024).await.unwrap();
+        assert_eq!(
+            veio,
+            [abertura, chave].concat(),
+            "o corpo do quadro comum, partido ao meio, atravessou como se fosse um cabeçalho"
+        );
+        repassando.await.unwrap().unwrap();
+        drop(b);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn quem_caiu_antes_do_repasse_e_relatado_como_repasse_e_nao_escuta() {
+        // **Guarda do achado Important 5 do fix round 1.** `ErroDePar::Escuta`
+        // documenta «não deu para pôr esta ponta a atender» — a frase certa
+        // para um `set_server_config` que falhou, e enganosa para um par que
+        // caiu no meio de uma transmissão de tela já em andamento. Fechar a
+        // conexão do lado de quem atende antes de `repassar` sequer abrir o
+        // fluxo reproduz exatamente essa queda: `open_uni` falha porque o par
+        // já não aceita mais nada. O que se prende aqui é a variante do erro
+        // que volta, não o `Ok`/`Err` — os dois braços do `match` antigo já
+        // devolviam erro, só que com a frase errada.
+        let (a, b, ligado) = duas_pontas_ligadas().await;
+        a.close(0_u32.into(), b"caiu antes do repasse");
+        // Espera este lado também ver a conexão fechada, para o teste não
+        // torcer com a rede: sem isto, `open_uni` podia correr contra o
+        // `CONNECTION_CLOSE` que ainda não chegou e passar por sorte de
+        // tempo.
+        let _ = ligado.conexao.closed().await;
+
+        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
+        let (_manda, recebe) = tokio::sync::mpsc::channel(8);
+        let erro = repassar(&ligado, &abertura, recebe)
+            .await
+            .expect_err("o par já caiu; repassar não deveria conseguir abrir um fluxo");
+        assert!(
+            matches!(erro, ErroDePar::Repasse(_)),
+            "queda no meio do repasse voltou como {erro:?}, não como ErroDePar::Repasse"
+        );
+        drop(b);
+    }
+
+    /// Um [`tracing::Subscriber`] mínimo que só guarda a linha de cada evento,
+    /// formatada como `nível: mensagem`.
+    ///
+    /// Existe porque nenhum teste deste crate até aqui precisou inspecionar
+    /// rastro — `seele-core` não tem `tracing-subscriber` nas dependências de
+    /// teste, e acrescentá-la só para isto seria uma dependência nova por um
+    /// `assert` só. `tracing-core` já expõe o necessário: implementar o
+    /// `Subscriber` à mão é código repetitivo, mas é código que já está na
+    /// árvore.
+    #[derive(Default)]
+    struct CapturaDeRastro {
+        eventos: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl tracing::Subscriber for CapturaDeRastro {
+        fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Mensagem(String);
+            impl tracing::field::Visit for Mensagem {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    valor: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" {
+                        self.0 = format!("{valor:?}");
+                    }
+                }
+            }
+            let mut mensagem = Mensagem(String::new());
+            event.record(&mut mensagem);
+            if let Ok(mut eventos) = self.eventos.lock() {
+                eventos.push(format!("{}: {}", event.metadata().level(), mensagem.0));
+            }
+        }
+
+        fn enter(&self, _span: &tracing::span::Id) {}
+
+        fn exit(&self, _span: &tracing::span::Id) {}
+    }
+
+    #[tokio::test]
+    async fn repassar_avisa_quando_o_canal_fecha_sem_a_chave_chegar() {
+        // **Guarda do achado Important 4 do fix round 1.** `repassar` era a
+        // única função de peso em `par.rs` sem `tracing::` nenhum — quem
+        // opera via ao log e via silêncio nos dois casos mais importantes de
+        // diagnosticar: um par que nunca recebeu quadro-chave nenhum, e
+        // quantos pedaços foram descartados até lá (ou para sempre, como
+        // aqui). Este teste manda um quadro comum, nunca um quadro-chave, e
+        // fecha o canal — o caso em que o `warn!` tem de disparar.
+        //
+        // `#[tokio::test]` (de thread única, não `multi_thread`) de propósito:
+        // `tracing::subscriber::set_default` fixa o `Subscriber` só na
+        // `thread` corrente, e uma runtime de thread única roda toda tarefa
+        // — inclusive o `tokio::spawn(atender(..))` de dentro de
+        // `duas_pontas_ligadas` — nessa mesma `thread`. Numa `multi_thread` a
+        // tarefa spawnada podia cair noutra `thread` e o rastro dela sumir
+        // para este `Subscriber`; aqui não há essa aposta.
+        let captura = std::sync::Arc::new(CapturaDeRastro::default());
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+
+        let (a, b, ligado) = duas_pontas_ligadas().await;
+        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
+        let (manda, recebe) = tokio::sync::mpsc::channel(8);
+
+        let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[1, 2]);
+        manda.send(comum).await.unwrap();
+        drop(manda);
+
+        repassar(&ligado, &abertura, recebe)
+            .await
+            .expect("nenhum par caiu; o repasse tem de terminar limpo mesmo sem chave");
+        drop(a);
+        drop(b);
+
+        let eventos = captura.eventos.lock().unwrap();
+        assert!(
+            eventos
+                .iter()
+                .any(|linha| linha.starts_with("WARN") && linha.contains("nenhum quadro-chave")),
+            "o canal fechou sem chave nenhuma atravessar, e nenhum WARN foi ao rastro: {eventos:?}"
+        );
     }
 }

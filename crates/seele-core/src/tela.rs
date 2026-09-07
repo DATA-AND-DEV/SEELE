@@ -985,6 +985,111 @@ fn escrever_cabecalho_de_quadro(tipo: TipoDeQuadro, tamanho: u32) -> [u8; CABECA
     bytes
 }
 
+/// Onde o enquadramento de um fluxo de tela está, quadro a quadro.
+///
+/// **O gêmeo deste tipo em `seele-server::tela::Enquadramento` faz a mesma
+/// coisa do lado do servidor** — a mesma duplicação deliberada que o
+/// cabeçalho deste módulo já explica para as constantes de enquadramento:
+/// *«quarenta linhas repetidas custam menos que um crate de transporte que os
+/// dois dependeriam e nenhum seria dono»*. O sentido em que nenhum dos dois
+/// pode depender do outro é o do ADR 0002 — que proíbe o **daemon** de
+/// depender do **cliente**, não o contrário — e aqui a direção seria a
+/// oposta: é o `seele-server` que teria de depender do `seele-core` para
+/// reaproveitar isto, não este crate que precisaria do servidor.
+///
+/// # Por que contar bytes, e não olhar o primeiro byte do pedaço
+///
+/// Um pedaço que chega a [`crate::par::repassar`] não é um quadro: é o que uma
+/// leitura devolveu, ou o que uma escrita entregou de uma vez — e as duas
+/// coisas cortam onde o I/O corta, não onde um quadro começa ou termina. Um
+/// pedaço pode carregar dois quadros inteiros, um comum seguido de um
+/// quadro-chave; ou pode carregar só a metade de um quadro comum, cuja outra
+/// metade só chega no pedaço seguinte. Ler o primeiro byte de cada pedaço como
+/// se fosse sempre um byte de tipo lê lixo nos dois casos: no primeiro, o
+/// quadro-chave que vem depois do comum nunca é visto, porque o pedaço inteiro
+/// é julgado pelo byte errado; no segundo, o meio de um quadro comum — que em
+/// H.264 Annex-B está cheio de `0x00` e `0x01`, não é caso de canto — é lido
+/// como se fosse um cabeçalho novo. Contar bytes, como este tipo faz, é a
+/// única forma de saber onde um cabeçalho de verdade começa.
+#[derive(Debug, Default)]
+pub struct Enquadramento {
+    /// Quantos bytes faltam do quadro que está passando.
+    restam: usize,
+    /// O cabeçalho do próximo quadro, enquanto ele chega partido em dois
+    /// pedaços.
+    cabecalho: Vec<u8>,
+}
+
+impl Enquadramento {
+    /// Um enquadramento no começo de um fluxo, esperando o primeiro cabeçalho.
+    #[must_use]
+    pub fn novo() -> Self {
+        Self::default()
+    }
+
+    /// Passa um pedaço pelo enquadramento e diz onde alguém pode entrar.
+    ///
+    /// Devolve o deslocamento, dentro deste pedaço, do primeiro cabeçalho de
+    /// **quadro-chave que começa e termina neste mesmo pedaço**. Um cabeçalho
+    /// partido entre dois pedaços não vira porta de entrada: os bytes da
+    /// primeira metade já podem ter saído para quem já está do outro lado, e
+    /// quem entrasse agora receberia a segunda metade de um cabeçalho como se
+    /// fosse a primeira.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeTela::QuadroVazio`] para um tamanho de quadro zero,
+    /// [`ErroDeTela::QuadroGrandeDemais`] para um acima de [`MAX_QUADRO_LEN`],
+    /// e [`ErroDeTela::TipoDesconhecido`] para um byte de tipo que
+    /// [`TipoDeQuadro::de_byte`] não reconhece.
+    pub fn entrada(&mut self, bytes: &[u8]) -> Result<Option<usize>, ErroDeTela> {
+        let mut entrada = None;
+        let mut i = 0;
+        while i < bytes.len() {
+            if self.restam > 0 {
+                let anda = self.restam.min(bytes.len().saturating_sub(i));
+                self.restam -= anda;
+                i += anda;
+                continue;
+            }
+            let comeca_aqui = self.cabecalho.is_empty();
+            let inicio = i;
+            let falta = CABECALHO_DE_QUADRO_LEN.saturating_sub(self.cabecalho.len());
+            let anda = falta.min(bytes.len().saturating_sub(i));
+            self.cabecalho
+                .extend_from_slice(bytes.get(i..i.saturating_add(anda)).unwrap_or_default());
+            i += anda;
+            if self.cabecalho.len() < CABECALHO_DE_QUADRO_LEN {
+                break;
+            }
+            let byte_de_tipo = self.cabecalho.first().copied().unwrap_or(u8::MAX);
+            let Some(tipo) = TipoDeQuadro::de_byte(byte_de_tipo) else {
+                return Err(ErroDeTela::TipoDesconhecido { byte: byte_de_tipo });
+            };
+            let tamanho = self
+                .cabecalho
+                .get(1..CABECALHO_DE_QUADRO_LEN)
+                .and_then(|quatro| <[u8; 4]>::try_from(quatro).ok())
+                .map_or(0, u32::from_be_bytes) as usize;
+            self.cabecalho.clear();
+            if tamanho == 0 {
+                return Err(ErroDeTela::QuadroVazio);
+            }
+            if tamanho > MAX_QUADRO_LEN {
+                return Err(ErroDeTela::QuadroGrandeDemais { len: tamanho });
+            }
+            self.restam = tamanho;
+            // **A porta de entrada é um quadro-chave de imagem, e só ele.** Um
+            // quadro de som não serve a quem chega no meio: ele não começa
+            // nada, e entrar por ele entregaria imagem pela metade.
+            if tipo.e_chave() && comeca_aqui && entrada.is_none() {
+                entrada = Some(inicio);
+            }
+        }
+        Ok(entrada)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Erros
 // ---------------------------------------------------------------------------
@@ -1018,6 +1123,20 @@ pub enum ErroDeTela {
     /// A conexão, o fluxo ou a leitura acabaram.
     #[error("screen stream: {0}")]
     Fluxo(String),
+    /// Um byte de tipo que nenhum [`TipoDeQuadro`] reconhece.
+    ///
+    /// Só [`Enquadramento::entrada`] devolve isto. Quem lê um quadro inteiro em
+    /// [`Recepcao::proximo_quadro`] trata um tipo desconhecido como fim de
+    /// fluxo, não como erro — ver a doc de [`TipoDeQuadro::de_byte`]. Aqui é
+    /// diferente: o enquadramento só está contando bytes para achar onde um
+    /// quadro-chave começa, e um tipo que ele não reconhece quer dizer que a
+    /// contagem já perdeu o passo — continuar seria repassar lixo daí em
+    /// diante.
+    #[error("unknown frame type byte {byte}")]
+    TipoDesconhecido {
+        /// O byte que não bateu com nenhum [`TipoDeQuadro`].
+        byte: u8,
+    },
 }
 
 // ---------------------------------------------------------------------------
