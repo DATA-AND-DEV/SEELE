@@ -4983,8 +4983,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "ed25519-dalek",
+ "quinn",
  "rand 0.10.2",
  "ratatui",
+ "rustls",
  "seele-audio",
  "seele-core",
  "seele-encontro",

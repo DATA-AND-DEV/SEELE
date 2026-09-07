@@ -2220,25 +2220,53 @@ async fn run_session(
                         // inventado seria um jeito de assinar a transmissão de
                         // outra sala — e a cópia sairia da subida de quem
                         // hospeda sem ninguém daquela sala ter pedido.
-                        let daqui = match current_voice_room {
+                        //
+                        // **Quem compartilha vem junto da conferência**, e não
+                        // numa segunda busca: `Pares::escolher` precisa saber
+                        // quem é o dono para nunca o escolher para servir a
+                        // própria tela, e procurá-lo de novo mais abaixo seria
+                        // uma segunda leitura do mesmo registro, com o mutex
+                        // solto no meio, podendo discordar da primeira.
+                        let dono = match current_voice_room {
                             Some(voice_room) => server
                                 .telas
                                 .lock()
                                 .await
                                 .em(voice_room)
-                                .iter()
-                                .any(|(_, corrente)| *corrente == screen),
-                            None => false,
+                                .into_iter()
+                                .find(|(_, corrente)| *corrente == screen)
+                                .map(|(quem, _)| quem),
+                            None => None,
                         };
-                        if let (true, Some(voice_room)) = (daqui, current_voice_room) {
+                        if let (Some(dono), Some(voice_room)) = (dono, current_voice_room) {
                             let assistir =
                                 matches!(message, ClientMessage::WatchScreen { .. });
-                            let comando = if assistir {
+                            // **O caminho entre pares é perguntado antes do
+                            // cano do servidor**, e é o ponto inteiro da malha:
+                            // quando um par assume, esta cópia não sai desta
+                            // máquina. Quando não há par — ninguém emprestando,
+                            // ninguém com identidade declarada, todo mundo já
+                            // servindo —, nada muda em relação a antes desta
+                            // onda existir, que é o que «a malha é alívio,
+                            // nunca dependência» quer dizer no código.
+                            let pelo_par = assistir
+                                && apontar_um_par(server, screen, dono, session.person).await;
+                            let comando = if assistir && !pelo_par {
                                 VoiceRoomCommand::TelaAssistir {
                                     person: session.person,
                                     screen,
                                 }
                             } else {
+                                // **Desligado, e não «não ligado».** Quem entra
+                                // numa sala com uma transmissão só já entra
+                                // ligado nela (`VoiceRoom::tela_abriu`), então
+                                // um par que assume encontra o cano do servidor
+                                // **já aberto** para esta pessoa. Sem esta
+                                // linha o servidor continuaria subindo a cópia
+                                // que o par acabou de assumir, e a malha não
+                                // teria aliviado nada — que é exatamente o
+                                // defeito indistinguível de sucesso se ninguém
+                                // olhar de onde os bytes vieram.
                                 VoiceRoomCommand::TelaParouDeAssistir {
                                     person: session.person,
                                     screen,
@@ -2357,10 +2385,13 @@ async fn run_session(
                         let apontado = pares.quem_foi_apontado(screen);
                         match crate::pares::quem_desacreditar(motivo, apontado) {
                             Some(quem) => pares.desacreditar(quem),
-                            // Sem nomeação guardada — hoje é sempre o caso
-                            // para `ImpressaoNaoBate`, porque nenhum despacho
-                            // chama `Pares::apontou` ainda (Task 10). Sem
-                            // saber quem foi apontado, não há quem
+                            // Sem nomeação guardada — `apontar_um_par` (Task
+                            // 10) já chama `Pares::apontou` antes de mandar
+                            // `SirvaTelaPara`/`AssistaTelaPor`, então este
+                            // ramo é a corrida, não a regra: um `ParFalhou`
+                            // que chegue antes da nomeação, ou depois de ela
+                            // já ter sido substituída por outra transmissão.
+                            // Sem saber quem foi apontado, não há quem
                             // desacreditar; ficar quieto é mais seguro do que
                             // adivinhar.
                             None if motivo == MotivoDeFalhaDePar::ImpressaoNaoBate => {
@@ -2370,6 +2401,42 @@ async fn run_session(
                                 );
                             }
                             None => {}
+                        }
+                        // A nomeação morre com o relato, **seja qual for o
+                        // motivo**. `desacreditar` já apaga as nomeações de
+                        // quem apagou; esta linha cobre os quatro motivos de
+                        // rotina, em que ninguém é desacreditado e a nomeação
+                        // ficaria de pé apontando um par que já não serve —
+                        // e um `ParFalhou` seguinte resolveria contra ela.
+                        pares.desapontou(screen);
+                        drop(pares);
+                        // **E o servidor assume.** É a metade que faz a
+                        // promessa da spec de 05/09 valer — *«ninguém perde
+                        // imagem por causa da máquina de outra pessoa»* —, e
+                        // ela não é opcional: quem relata está sem cano nenhum
+                        // desde que o par foi apontado (ver o braço de
+                        // `WatchScreen`), então sem esta linha o relato seria
+                        // um aviso que não conserta nada e a tela ficaria
+                        // parada para sempre.
+                        //
+                        // `TelaAssistir` põe a pessoa na fila do próximo
+                        // quadro-chave, e não no meio do fluxo: entrar num byte
+                        // qualquer desloca o enquadramento para sempre.
+                        if let Some(voice_room) = current_voice_room {
+                            tracing::info!(
+                                person = %session.person,
+                                %screen,
+                                %voice_room,
+                                "o servidor assume a transmissão que o par deixou de servir"
+                            );
+                            let _ = voice_rooms
+                                .of(voice_room)
+                                .await
+                                .send(VoiceRoomCommand::TelaAssistir {
+                                    person: session.person,
+                                    screen,
+                                })
+                                .await;
                         }
                     }
 
@@ -2945,6 +3012,80 @@ async fn moderavel(
     !alvo_administra || quem_administra
 }
 
+/// Tenta pôr um par a servir esta transmissão a quem acabou de pedir para vê-la.
+///
+/// `true` quando um par foi apontado e as duas mensagens saíram — e é o `true`
+/// que faz o braço de `WatchScreen` **não** abrir o cano do servidor para esta
+/// pessoa. `false` é o caminho de sempre, e ele é a maioria dos casos: ninguém
+/// emprestando na sala, ninguém livre, ou quem pediu sem identidade declarada.
+///
+/// # As duas declarações, e por que as duas
+///
+/// Uma ligação entre pares tem parede simétrica (Task 5): quem atende confere
+/// quem chega contra a impressão que o servidor apresentou, e quem disca
+/// confere quem atendeu contra a impressão que o servidor apresentou. Então o
+/// servidor precisa das **duas** declarações — a de quem empresta, que
+/// [`crate::pares::Pares::escolher`] devolve, e a de quem pediu, que só
+/// [`crate::pares::Pares::declaracao_de`] tem. Sem a segunda, `SirvaTelaPara`
+/// sairia sem impressão a conferir e quem empresta recusaria a ligação de quem
+/// ele mesmo foi mandado servir.
+///
+/// # `SirvaTelaPara` primeiro, e não por estilo
+///
+/// Quem empresta precisa **passar a atender** antes de quem assiste discar:
+/// `crate::pares` não guarda ninguém escutando, e a porta de quem empresta só
+/// é armada quando a mensagem chega lá. Os dois avisos saem no mesmo instante
+/// pelo mesmo barramento, então esta ordem é só o que dá a quem empresta a
+/// dianteira que ele precisa — quem assiste tenta de novo dentro do prazo se
+/// chegar cedo demais.
+async fn apontar_um_par(
+    server: &Server,
+    screen: ScreenId,
+    dono: PersonId,
+    quem_quer: PersonId,
+) -> bool {
+    let (empresta, quem) = {
+        let mut pares = server.pares.lock().await;
+        let ja_servindo = pares.ja_servindo();
+        let Some(empresta) = pares.escolher(dono, quem_quer, &ja_servindo) else {
+            return false;
+        };
+        let Some(quem) = pares.declaracao_de(quem_quer).cloned() else {
+            // Quem nunca declarou identidade não tem impressão para
+            // apresentar, e a parede simétrica recusaria a ligação. Cair para o
+            // servidor é o certo, e o rastro diz de quem se fala.
+            tracing::debug!(
+                person = %quem_quer,
+                %screen,
+                "quem pediu para assistir não declarou identidade de par; a tela vem do servidor"
+            );
+            return false;
+        };
+        pares.apontou(screen, empresta.pessoa);
+        (empresta, quem)
+    };
+    tracing::info!(
+        %screen,
+        empresta = %empresta.pessoa,
+        assiste = %quem_quer,
+        enderecos = ?empresta.enderecos,
+        "o servidor apontou um par para servir esta transmissão"
+    );
+    let _ = server.events.send(Event::SirvaTelaPara {
+        screen,
+        quem_empresta: empresta.pessoa,
+        enderecos: quem.enderecos,
+        impressao: quem.impressao,
+    });
+    let _ = server.events.send(Event::AssistaTelaPor {
+        screen,
+        quem_assiste: quem_quer,
+        enderecos: empresta.enderecos,
+        impressao: empresta.impressao,
+    });
+    true
+}
+
 /// Lê o fluxo de quem compartilha e o entrega à sala de voz, que o encaminha.
 ///
 /// §5.1, decidido em 22/08/2026: **o servidor encaminha, como já faz com a
@@ -3409,6 +3550,35 @@ fn translate(
         } => (*sharer == self_person).then_some(ServerMessage::KeyFrameRequested {
             screen: *screen,
             person: *person,
+        }),
+
+        // As duas exceções do caminho entre pares, pela mesma razão do
+        // `KeyFrameRequested` acima: são endereçadas a uma pessoa. E aqui a
+        // audiência estreita é **também** privacidade — cada mensagem carrega o
+        // endereço e a impressão digital de alguém, e difundi-los à sala
+        // inteira daria a topologia de rede de quem empresta a quem nunca vai
+        // discar para ela. O §5 da spec de 05/09 nomeia privacidade como a
+        // primeira das duas razões do opt-in; espalhar aqui o que o opt-in
+        // guardou lá desfaria o opt-in.
+        Event::SirvaTelaPara {
+            screen,
+            quem_empresta,
+            enderecos,
+            impressao,
+        } => (*quem_empresta == self_person).then(|| ServerMessage::SirvaTelaPara {
+            screen: *screen,
+            enderecos: enderecos.clone(),
+            impressao: impressao.clone(),
+        }),
+        Event::AssistaTelaPor {
+            screen,
+            quem_assiste,
+            enderecos,
+            impressao,
+        } => (*quem_assiste == self_person).then(|| ServerMessage::AssistaTelaPor {
+            screen: *screen,
+            enderecos: enderecos.clone(),
+            impressao: impressao.clone(),
         }),
     }
 }

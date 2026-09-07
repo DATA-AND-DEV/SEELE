@@ -198,14 +198,37 @@ impl Pares {
             .cloned()
     }
 
+    /// Quem já está apontado para servir alguma transmissão agora.
+    ///
+    /// É o `ja_servindo` que [`Self::escolher`] recebe. Sai das próprias
+    /// nomeações do servidor porque elas são o único registro de quem ele já
+    /// pôs para trabalhar — contar de outro lugar seria uma segunda conta a
+    /// discordar desta no primeiro dia ruim.
+    #[must_use]
+    pub fn ja_servindo(&self) -> HashSet<PersonId> {
+        self.nomeacoes.values().copied().collect()
+    }
+
     /// O servidor apontou `quem` para servir `screen`.
     ///
     /// Chamado por quem despacha `SirvaTelaPara`/`AssistaTelaPor`, depois de
-    /// [`Self::escolher`] decidir — ainda sem chamador em produção; é o
-    /// despacho da Task 10. Substitui a nomeação anterior desta transmissão,
-    /// se havia uma: só a mais recente importa para resolver um `ParFalhou`.
+    /// [`Self::escolher`] decidir. Substitui a nomeação anterior desta
+    /// transmissão, se havia uma: só a mais recente importa para resolver um
+    /// `ParFalhou`.
     pub fn apontou(&mut self, screen: ScreenId, quem: PersonId) {
         self.nomeacoes.insert(screen, quem);
+    }
+
+    /// Esta transmissão deixou de ter par apontado.
+    ///
+    /// **Diferente de [`Self::desacreditar`], e a diferença é quem paga.** Ali
+    /// a declaração inteira de uma pessoa é apagada, porque ela foi provada
+    /// falsa; aqui só a nomeação some, e quem emprestava continua declarado e
+    /// elegível. É o que um `ParFalhou` de rotina — o par caiu, o par parou de
+    /// mandar — merece: a transmissão volta ao servidor, e ninguém é punido
+    /// por a rede de alguém ter oscilado.
+    pub fn desapontou(&mut self, screen: ScreenId) {
+        self.nomeacoes.remove(&screen);
     }
 
     /// Quem foi apontado por último para servir esta transmissão, se alguém.

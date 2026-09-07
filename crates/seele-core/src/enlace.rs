@@ -385,6 +385,21 @@ enum Comando {
     /// `&mut self` inteiro, e não só do `&mut Client` que
     /// [`Motor::executar`] empresta para todo o resto deste `enum`.
     DeclararIdentidadeDePar,
+    /// «Eu empresto a minha subida», ou «deixei de emprestar».
+    ///
+    /// **Opt-in explícito, e é o comando que faltava.** Até aqui os dois
+    /// pontos que declaravam identidade passavam sempre `emprestando: false`,
+    /// e o doc de [`Motor::declarar_identidade_de_par`] dizia isso com todas
+    /// as letras: *«não há ainda um comando de emprestar a subida neste
+    /// enlace»*. Sem ele, nenhuma máquina deste produto podia entrar na malha
+    /// — havia servidor para escolher pares e cliente para servi-los, e
+    /// ninguém que pudesse dizer que sim.
+    ///
+    /// Guardado em [`Motor::emprestando`] e redito a cada reconexão: a
+    /// declaração é efêmera e morre com a sessão que a fez
+    /// (`Pares::saiu`, no servidor), então uma reconexão que não a repetisse
+    /// tiraria a pessoa da malha em silêncio.
+    EmprestarSubida(bool),
     Sair,
 }
 
@@ -405,6 +420,25 @@ const ESPERA_DE_ANEXO: Duration = Duration::from_secs(10);
 /// servidor sem drama, e é exatamente esse o ponto da malha ser alívio e nunca
 /// dependência.
 const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
+
+/// Quanto dura **cada** tentativa de discar para um par, dentro de
+/// [`PRAZO_DO_PAR`].
+///
+/// Ver [`discar_ate_o_prazo`] para por que são várias e não uma. Meio segundo
+/// é folgado para um aperto de mão em rede local e curto o bastante para
+/// caberem seis tentativas no prazo — um par que exista responde na primeira
+/// ou na segunda, e um que não exista custa o mesmo prazo total de antes.
+const TENTATIVA_DE_PAR: Duration = Duration::from_millis(500);
+
+/// Por quanto tempo [`servir_um_par`] ainda recusa uma ligação que chegue
+/// depois de a corrida entre atender e discar já ter um vencedor.
+///
+/// **Curta de propósito.** Uma sobra de verdade — a segunda de duas
+/// tentativas simultâneas para a mesma pessoa — chega dentro de um RTT da
+/// vencedora, não de um prazo de discagem inteiro: as duas saem do mesmo
+/// [`par::ligar`], no mesmo instante. Ver [`recusar_sobras`] para o porquê de
+/// a janela existir.
+const JANELA_DE_SOBRAS: Duration = Duration::from_millis(150);
 
 /// O que uma tentativa do caminho entre pares, resolvida numa tarefa solta,
 /// devolve ao laço de [`Motor::rodar`] para ele agir.
@@ -1278,6 +1312,8 @@ impl Enlace {
             caminho: crate::caminho::Sonda::nova(),
             identidade_de_par: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            emprestando: false,
+            repasse: Arc::new(RepasseDeTela::default()),
             resultados_do_par,
             resultados_do_par_tx,
         };
@@ -1863,6 +1899,22 @@ impl Enlace {
         self.mandar(Comando::DeclararIdentidadeDePar).await
     }
 
+    /// Diz ao servidor que esta máquina empresta a subida — ou que deixou de
+    /// emprestar.
+    ///
+    /// **É opt-in, e as duas razões são independentes** (§5 da spec de
+    /// 05/09): privacidade, porque emprestar publica os endereços de rede
+    /// local desta máquina a quem for servido; e custo, porque a máquina passa
+    /// a subir cópias para outras pessoas. Nada disto acontece sem esta
+    /// chamada.
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a sessão já acabou.
+    pub async fn emprestar_subida(&self, emprestando: bool) -> Result<(), Fechado> {
+        self.mandar(Comando::EmprestarSubida(emprestando)).await
+    }
+
     async fn mandar(&self, comando: Comando) -> Result<(), Fechado> {
         self.comandos.send(comando).await.map_err(|_| Fechado)
     }
@@ -1969,6 +2021,17 @@ struct Motor {
     /// [`Motor::servir_par`] cria precisa devolver a vaga quando termina, e
     /// ela não tem `&mut Motor` — só a cópia deste punho.
     atendendo_pares: Arc<std::sync::atomic::AtomicBool>,
+    /// Se esta máquina empresta a subida, como a pessoa escolheu.
+    ///
+    /// Guardado aqui e não só mandado uma vez porque a declaração **não
+    /// sobrevive à sessão**: o servidor a apaga em `Pares::saiu` quando a
+    /// conexão morre, e cada reconexão tem de dizer de novo quem esta máquina
+    /// é e se ela empresta. Sem este campo, uma queda de rede tiraria a pessoa
+    /// da malha caladamente e ela só descobriria por ninguém mais ser servido.
+    emprestando: bool,
+    /// Onde o repasse ao par vai buscar os bytes da tela que chega do
+    /// servidor. Ver [`RepasseDeTela`].
+    repasse: Arc<RepasseDeTela>,
     /// Por onde as tarefas soltas do caminho entre pares devolvem o que
     /// decidiram — ver [`ResultadoDoPar`].
     resultados_do_par: mpsc::UnboundedReceiver<ResultadoDoPar>,
@@ -2047,6 +2110,11 @@ impl Motor {
                 .as_ref()
                 .map(crate::client::Client::fila_de_telas);
             let avisos_da_tela = self.avisos.clone();
+            // Pelo mesmo motivo dos dois de cima, e é um `Arc`: quem lê a tela
+            // do servidor precisa do ponto de encontro com quem serve um par
+            // (ver `RepasseDeTela`), e o braço logo abaixo não pode pedir
+            // `self` de novo.
+            let repasse_da_tela = Arc::clone(&self.repasse);
             // Tirado pela mesma razão dos dois de cima: `resultados_do_par` é
             // um campo próprio, disjunto de `self.cliente`, e emprestá-lo aqui
             // é o que deixa o braço novo do `select!` chamar `cliente.par_falhou`
@@ -2060,7 +2128,11 @@ impl Motor {
                     // Uma tela alheia chegando. O roteador de `Client::connect`
                     // já separou este fluxo dos anexos; aqui ele vira quadros.
                     Some(fluxo) = espera_da_fila(&fila_de_telas) => {
-                        escoar_tela_alheia(avisos_da_tela.clone(), fluxo);
+                        escoar_tela_alheia(
+                            avisos_da_tela.clone(),
+                            fluxo,
+                            DeOndeVeioATela::Servidor(Arc::clone(&repasse_da_tela)),
+                        );
                         None
                     }
                     // O que uma tarefa solta do caminho entre pares (ver
@@ -2308,7 +2380,12 @@ impl Motor {
                 // pessoa reconecta sem identidade nenhuma registrada até a
                 // próxima vez que este método for chamado por acaso. Ver o
                 // doc de `Motor::declarar_identidade_de_par`.
-                self.declarar_identidade_de_par(false).await;
+                //
+                // **Com a escolha de emprestar, e não com `false` fixo.** Quem
+                // optou por emprestar a subida sairia da malha na primeira
+                // queda de rede, sem nada na tela mudando — ver o doc de
+                // `Motor::emprestando`.
+                self.declarar_identidade_de_par(self.emprestando).await;
 
                 let _ = self.avisos.send(Aviso::Reconectado {
                     media: Box::new(media),
@@ -2335,9 +2412,24 @@ impl Motor {
         // cliente — ver `Motor::declarar_identidade_de_par`), e o resto deste
         // método já empresta só `self.cliente`. Os dois empréstimos não
         // convivem no mesmo escopo.
-        if matches!(comando, Comando::DeclararIdentidadeDePar) {
-            self.declarar_identidade_de_par(false).await;
-            return;
+        //
+        // **A opção de emprestar é lembrada, e é ela que vai no fio nas duas.**
+        // `DeclararIdentidadeDePar` é chamada na conexão e em cada reconexão,
+        // e passava `false` fixo; com o comando de emprestar existindo, um
+        // `false` fixo aqui desfaria em silêncio, na primeira queda de rede, a
+        // escolha que a pessoa fez — ela continuaria na malha na tela dela e
+        // fora dela no servidor.
+        match comando {
+            Comando::DeclararIdentidadeDePar => {
+                self.declarar_identidade_de_par(self.emprestando).await;
+                return;
+            }
+            Comando::EmprestarSubida(emprestando) => {
+                self.emprestando = emprestando;
+                self.declarar_identidade_de_par(emprestando).await;
+                return;
+            }
+            _ => {}
         }
         let Some(cliente) = self.cliente.as_mut() else {
             return;
@@ -2385,11 +2477,11 @@ impl Motor {
             Comando::ApagarVoiceRoom { voice_room } => cliente.delete_voice_room(voice_room).await,
             Comando::ApagarLinha { linha } => cliente.delete_channel(linha).await,
             Comando::PesarLinha { linha } => cliente.weigh_channel(linha).await,
-            // Tratado acima, antes deste empréstimo de `cliente` — nunca
-            // chega aqui de verdade. `match` continua exaustivo porque o
+            // Tratados acima, antes deste empréstimo de `cliente` — nunca
+            // chegam aqui de verdade. `match` continua exaustivo porque o
             // `enum` inteiro é um só, e um braço a menos aqui quebraria a
             // primeira vez que `Comando` ganhasse mais uma variante.
-            Comando::DeclararIdentidadeDePar => Ok(()),
+            Comando::DeclararIdentidadeDePar | Comando::EmprestarSubida(_) => Ok(()),
 
             // Numa tarefa própria, e não aqui dentro. Executar vinte megabytes
             // no laço de comandos devolveria, dentro do cliente, exatamente o
@@ -2691,11 +2783,11 @@ impl Motor {
     /// servidor já vê na conexão de controle basta para quem empresta discar
     /// de volta, e o furo simultâneo cobre o resto.
     ///
-    /// Hoje os dois pontos que chamam este método (a conexão inicial e cada
-    /// reconexão) sempre passam `emprestando: false` — não há ainda um
-    /// comando de "emprestar a subida" neste `enlace`. `locais_de_pares` fica
-    /// pronta para quando ele existir e puder chamar
-    /// `declarar_identidade_de_par(true)`, sem rodar enquanto ele não existe.
+    /// Quem chama passa a escolha da pessoa, guardada em
+    /// [`Motor::emprestando`]: `Comando::EmprestarSubida` a muda, e a conexão
+    /// inicial e cada reconexão a repetem. Enquanto ninguém optar por
+    /// emprestar, `locais_de_pares` nem chega a rodar — ver
+    /// [`locais_a_publicar`].
     async fn declarar_identidade_de_par(&mut self, emprestando: bool) {
         let identidade = match self.identidade_de_par() {
             Ok(identidade) => identidade,
@@ -2769,22 +2861,22 @@ impl Motor {
         let avisos = self.avisos.clone();
         let resultados = self.resultados_do_par_tx.clone();
         tokio::spawn(async move {
-            match par::por_onde(
-                &ponta,
-                &enderecos,
-                impressao,
-                Some(&identidade),
-                PRAZO_DO_PAR,
-            )
-            .await
-            {
+            match discar_ate_o_prazo(&ponta, &enderecos, &impressao, &identidade).await {
                 par::PorOndeAssistir::Par(ligado) => {
                     // A conta de bytes é de quem empresta — `crate::par::repassar`
                     // escreve por pedaço do lado dele. Do lado de quem assiste
-                    // não muda nada: `escoar_tela_alheia` já não sabe, e não
-                    // precisa saber, se o fluxo veio do servidor ou de um par.
+                    // muda uma coisa só, e ela está no doc de
+                    // `DeOndeVeioATela`: um fluxo que acaba no meio é o par
+                    // tendo caído, e é daqui que o servidor fica sabendo.
                     match tokio::time::timeout(PRAZO_DO_PAR, ligado.conexao.accept_uni()).await {
-                        Ok(Ok(fluxo)) => escoar_tela_alheia(avisos, fluxo),
+                        Ok(Ok(fluxo)) => escoar_tela_alheia(
+                            avisos,
+                            fluxo,
+                            DeOndeVeioATela::Par {
+                                screen,
+                                resultados: resultados.clone(),
+                            },
+                        ),
                         Ok(Err(erro)) => {
                             tracing::warn!(%erro, ?screen, "o par ligou e a transmissão não abriu");
                             let _ = resultados.send(ResultadoDoPar::ParFalhou {
@@ -2854,16 +2946,19 @@ impl Motor {
         self.atendendo_pares
             .store(true, std::sync::atomic::Ordering::Relaxed);
         let atendendo_pares = Arc::clone(&self.atendendo_pares);
+        let repasse = Arc::clone(&self.repasse);
         tokio::spawn(async move {
             let ligado = servir_um_par(ponta, identidade, enderecos, impressao).await;
-            atendendo_pares.store(false, std::sync::atomic::Ordering::Relaxed);
             match ligado {
-                Some(ligado) => tracing::info!(
-                    par = %ligado.conexao.remote_address(),
-                    como = ?ligado.como,
-                    ?screen,
-                    "este par está sendo servido"
-                ),
+                Some(ligado) => {
+                    tracing::info!(
+                        par = %ligado.conexao.remote_address(),
+                        como = ?ligado.como,
+                        ?screen,
+                        "este par está sendo servido"
+                    );
+                    repassar_a_tela(&repasse, &ligado, screen).await;
+                }
                 // As duas tentativas — passar_a_atender+atender e ligar — não
                 // deram em nada. Sem `ParFalhou` daqui: é quem assiste que vai
                 // notar a falta de imagem e avisar o servidor.
@@ -2872,8 +2967,100 @@ impl Motor {
                     "nenhuma das duas tentativas de servir este par deu certo"
                 ),
             }
+            // **Devolvida depois do repasse, e não depois da ligação.** A vaga
+            // é «estou servindo um par», e servir é o repasse — devolvê-la
+            // assim que a conexão fecha deixaria um segundo `SirvaTelaPara`
+            // entrar por cima de um repasse em curso, e `crate::par::atender`
+            // só tem uma vaga.
+            atendendo_pares.store(false, std::sync::atomic::Ordering::Relaxed);
         });
     }
+}
+
+/// Repassa a este par a tela que esta máquina está recebendo do servidor.
+///
+/// **É o último elo do subprojeto A.** As tarefas anteriores fazem dois
+/// clientes se ligarem e fazem `crate::par::repassar` saber escrever; esta
+/// função é o que liga a tela que chega à ligação que existe — sem ela, quem
+/// empresta a subida abre a conexão com o par e não lhe manda byte nenhum, e
+/// quem assiste vê exatamente o que veria se a malha não existisse.
+///
+/// Não devolve nada e não avisa o servidor de falha nenhuma, de propósito:
+/// `seele_proto::control::ClientMessage::ParFalhou` é explícita que só quem
+/// **recebe** manda essa mensagem. Um repasse que morre no meio é imagem que
+/// para do lado de lá, e é de lá que o aviso sai.
+async fn repassar_a_tela(repasse: &RepasseDeTela, ligado: &par::ParLigado, screen: ScreenId) {
+    // Sem abertura não há o que repassar: ou nenhuma transmissão está chegando
+    // agora, ou ela acabou entre o pedido do servidor e a ligação fechar. Um
+    // par ligado num fluxo sem cabeçalho não decodifica nada, e mandar-lhe
+    // pedaços soltos seria pior que não mandar nada.
+    let Some(abertura) = repasse.abertura() else {
+        tracing::warn!(
+            ?screen,
+            "o par ligou e não há transmissão nenhuma chegando do servidor para lhe repassar"
+        );
+        return;
+    };
+    let (pedacos_tx, pedacos_rx) = mpsc::channel(PEDACOS_A_ESPERA_DO_PAR);
+    repasse.ligar(pedacos_tx);
+    let resultado = par::repassar(ligado, &abertura, pedacos_rx).await;
+    repasse.desligar();
+    match resultado {
+        Ok(()) => tracing::info!(?screen, "o repasse desta tela ao par terminou"),
+        Err(erro) => tracing::warn!(%erro, ?screen, "o repasse desta tela ao par falhou"),
+    }
+}
+
+/// Disca para o par até o prazo acabar, e não uma vez só.
+///
+/// # Por que a primeira tentativa pode falhar sem ninguém ter feito nada errado
+///
+/// O servidor manda `SirvaTelaPara` e `AssistaTelaPor` no mesmo instante, pelo
+/// mesmo barramento. Quem empresta só **passa a atender** quando a mensagem
+/// dele chega e a tarefa dele roda (`crate::par::passar_a_atender`), e quem
+/// assiste disca quando a mensagem dele chega e a tarefa dele roda. Se a
+/// segunda vencer a primeira por um milissegundo, a discagem bate numa porta
+/// que ainda não abriu — e uma tentativa única leria isso como
+/// `NaoAlcancou`, que faria o servidor assumir uma transmissão que o par
+/// serviria perfeitamente um instante depois.
+///
+/// Não é folga inventada: é o mesmo prazo de sempre, [`PRAZO_DO_PAR`],
+/// gasto em tentativas de [`TENTATIVA_DE_PAR`] em vez de numa espera só.
+///
+/// **`ImpressaoNaoBate` não é retentada.** É evento de segurança — alguém
+/// respondeu no lugar de quem o servidor apresentou —, e insistir contra quem
+/// se faz passar por outro é dar-lhe mais tentativas, não menos.
+async fn discar_ate_o_prazo(
+    ponta: &quinn::Endpoint,
+    enderecos: &[SocketAddr],
+    impressao: &str,
+    identidade: &par::Identidade,
+) -> par::PorOndeAssistir {
+    let ate = tokio::time::Instant::now() + PRAZO_DO_PAR;
+    let mut ultimo = MotivoDeFalhaDePar::NaoAlcancou;
+    while tokio::time::Instant::now() < ate {
+        match par::por_onde(
+            ponta,
+            enderecos,
+            impressao.to_owned(),
+            Some(identidade),
+            TENTATIVA_DE_PAR,
+        )
+        .await
+        {
+            par::PorOndeAssistir::Par(ligado) => return par::PorOndeAssistir::Par(ligado),
+            par::PorOndeAssistir::Servidor(MotivoDeFalhaDePar::ImpressaoNaoBate) => {
+                return par::PorOndeAssistir::Servidor(MotivoDeFalhaDePar::ImpressaoNaoBate);
+            }
+            par::PorOndeAssistir::Servidor(motivo) => ultimo = motivo,
+        }
+    }
+    tracing::info!(
+        ?ultimo,
+        ?PRAZO_DO_PAR,
+        "o prazo do par acabou sem ligação; a tela vem do servidor"
+    );
+    par::PorOndeAssistir::Servidor(ultimo)
 }
 
 /// Passa a atender e disca para o outro lado, ao mesmo tempo — as duas
@@ -2905,11 +3092,56 @@ async fn servir_um_par(
         atendido = atende => atendido,
         discado = disca => discado.ok(),
     };
+    // A sobra de uma corrida que a linha acima já decidiu, recusada antes de
+    // desarmar — ver o doc de `recusar_sobras` para o pânico que evita.
+    recusar_sobras(&ponta).await;
     // **Desarma sempre, sirva ou não sirva.** Achado do fix round 3: sem
     // isto a ponta continuava aceitando conexões pelo resto da sessão — ver
     // o doc de `par::parar_de_atender`.
     par::parar_de_atender(&ponta);
     resultado
+}
+
+/// Recusa qualquer tentativa de ligação que já tenha chegado a esta ponta e
+/// ainda não foi aceita, antes de [`par::parar_de_atender`] desarmá-la.
+///
+/// # O pânico que este dreno evita
+///
+/// `par::ligar` disca todos os endereços declarados em paralelo, e
+/// `enlace::locais_a_publicar` pode declarar mais de um endereço para a
+/// mesma pessoa — o local de rede e o público que o servidor viu. Quando os
+/// dois caem no mesmo soquete do outro lado — sempre em `localhost`, e em
+/// rede real atrás de um roteador com NAT *hairpin* —, o `quinn` enxerga duas
+/// tentativas de ligação separadas para a mesma pessoa, não uma só.
+/// [`par::atender`] aceita a primeira que chega; a segunda fica esquecida no
+/// `quinn`, sem ninguém para aceitá-la ou recusá-la, porque `atender` serve
+/// **uma** vaga só.
+///
+/// Se essa sobra continuar esquecida quando `parar_de_atender` zera o
+/// `ServerConfig` da ponta, uma retransmissão dela — o `quinn` reenvia o
+/// pacote inicial de toda tentativa sem resposta — encontra a rota ainda
+/// indexada e o servidor já desarmado, e o `quinn-proto` 0.11.16
+/// (`endpoint.rs:217`) entra em pânico num `.unwrap()` que supõe o contrário.
+/// O pânico é num `Drop`, então não é só a tentativa que morre: **o processo
+/// inteiro aborta**. `crates/seele-conformance/tests/tela_por_um_par.rs`
+/// reproduz isto toda vez que roda, porque o servidor de testes escuta em
+/// `127.0.0.1` e a máquina de CI sempre tem pelo menos uma interface de rede
+/// além do loopback.
+///
+/// Recusar — e não `accept` nem ignorar — é o que fecha a ligação de
+/// verdade: `Incoming::ignore` não manda pacote nenhum, e a sobra continuaria
+/// esperando uma resposta que nunca chegaria da mesma forma que crashava
+/// antes. `Incoming::refuse` manda o fechamento e tira a entrada do índice do
+/// `quinn` — depois disso, uma retransmissão não acha rota nenhuma, e não há
+/// `server_config` nenhum para desembrulhar.
+async fn recusar_sobras(ponta: &quinn::Endpoint) {
+    while let Ok(Some(sobrando)) = tokio::time::timeout(JANELA_DE_SOBRAS, ponta.accept()).await {
+        tracing::debug!(
+            par = %sobrando.remote_address(),
+            "uma segunda tentativa de ligação da mesma corrida foi recusada"
+        );
+        sobrando.refuse();
+    }
 }
 
 /// Os endereços de rede local desta máquina, na porta que `ponta` já usa.
@@ -2987,6 +3219,147 @@ fn e_endereco_de_rede_local(ip: IpAddr) -> bool {
     }
 }
 
+/// Quantos pedaços de tela ficam à espera de sair para o par.
+///
+/// **Um número, e a razão de ele existir é o que se faz quando ele estoura.**
+/// Quem repassa está assistindo à mesma tela, e a leitura dele não pode
+/// esperar a escrita para o par: um par que parou de ler prenderia a imagem de
+/// quem empresta, que é o oposto de «a malha é alívio». Cheio, o repasse é
+/// **desligado inteiro** — nunca é descartado um pedaço no meio, porque um
+/// buraco no fluxo desloca o enquadramento de quem recebe para sempre. Quem
+/// assiste nota a falta de imagem e cai para o servidor pelo caminho de sempre.
+///
+/// Trinta e dois pedaços são cerca de um segundo a trinta quadros por segundo,
+/// que é muito mais do que uma escrita para um par saudável leva e pouco o
+/// bastante para a memória não crescer sem limite atrás de um par doente.
+const PEDACOS_A_ESPERA_DO_PAR: usize = 32;
+
+/// A tela que chega do servidor, aberta para quem a repassa a um par.
+///
+/// # Por que um lugar partilhado, e não um argumento
+///
+/// As duas pontas desta ligação nascem em momentos diferentes e vivem em
+/// tarefas diferentes. A tela alheia chega quando quem compartilha abre o
+/// fluxo, e é lida por [`escoar_tela_alheia`], numa tarefa própria que dura o
+/// que a transmissão durar. O pedido para servir um par chega depois — pode
+/// chegar muito depois — como `ServerMessage::SirvaTelaPara`, e é atendido por
+/// outra tarefa ([`Motor::servir_par`]). Nenhuma das duas pode ser argumento
+/// da outra; o que as liga é este ponto de encontro, que o [`Motor`] cria uma
+/// vez e empresta às duas.
+///
+/// # O que ele guarda
+///
+/// A **abertura** da transmissão que está chegando — os bytes crus do
+/// cabeçalho, que [`crate::par::repassar`] escreve tal e qual —, e o
+/// **destino** dos pedaços, quando há um par sendo servido. Sem abertura não
+/// há o que repassar: um par ligado no meio de uma transmissão cujo cabeçalho
+/// ele nunca viu não decodifica nada.
+///
+/// `std::sync::Mutex` e não o do `tokio`: nada aqui dentro espera por nada, e
+/// os dois punhos são segurados por microssegundos. Um mutex assíncrono aqui
+/// só acrescentaria pontos de suspensão a caminhos que não os têm.
+#[derive(Debug, Default)]
+struct RepasseDeTela {
+    /// Os bytes crus do cabeçalho da transmissão que chega agora do servidor.
+    abertura: std::sync::Mutex<Option<Vec<u8>>>,
+    /// Para onde copiar cada quadro, enquanto há um par a servir.
+    destino: std::sync::Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+}
+
+impl RepasseDeTela {
+    /// Uma transmissão do servidor abriu com este cabeçalho.
+    fn abriu(&self, abertura: Vec<u8>) {
+        if let Ok(mut guarda) = self.abertura.lock() {
+            *guarda = Some(abertura);
+        }
+    }
+
+    /// A transmissão do servidor acabou: não há mais o que repassar, e o par
+    /// que estava sendo servido vê o fluxo terminar direito.
+    fn fechou(&self) {
+        if let Ok(mut guarda) = self.abertura.lock() {
+            *guarda = None;
+        }
+        self.desligar();
+    }
+
+    /// O cabeçalho da transmissão que está chegando, se há uma.
+    fn abertura(&self) -> Option<Vec<u8>> {
+        self.abertura.lock().ok().and_then(|guarda| guarda.clone())
+    }
+
+    /// Passa a copiar os pedaços para aqui.
+    fn ligar(&self, destino: mpsc::Sender<Vec<u8>>) {
+        if let Ok(mut guarda) = self.destino.lock() {
+            *guarda = Some(destino);
+        }
+    }
+
+    /// Para de copiar. O `Sender` largado fecha o canal, e
+    /// [`crate::par::repassar`] termina o fluxo do par direito.
+    fn desligar(&self) {
+        if let Ok(mut guarda) = self.destino.lock() {
+            *guarda = None;
+        }
+    }
+
+    /// Copia mais um quadro para o par, se há um sendo servido.
+    ///
+    /// **Nunca espera, e nunca descarta um pedaço só.** Ver o doc de
+    /// [`PEDACOS_A_ESPERA_DO_PAR`].
+    fn pedaco(&self, bytes: Vec<u8>) {
+        let Ok(mut guarda) = self.destino.lock() else {
+            return;
+        };
+        let Some(destino) = guarda.as_ref() else {
+            return;
+        };
+        match destino.try_send(bytes) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!(
+                    quantos = PEDACOS_A_ESPERA_DO_PAR,
+                    "o par parou de aceitar bytes; o repasse para ele é desligado"
+                );
+                *guarda = None;
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => *guarda = None,
+        }
+    }
+}
+
+/// De onde uma transmissão de tela alheia está chegando.
+///
+/// **As duas pontas leem o mesmo formato e fazem coisas diferentes com o fim
+/// dele**, e é isso que este `enum` carrega. Do servidor, o fim é a
+/// transmissão acabando, e os pedaços do meio podem interessar a um par que
+/// esta máquina sirva. De um par, o fim no meio é o par tendo caído — e quem
+/// assiste é a **única** pessoa que sabe disso (ver o doc de
+/// `ClientMessage::ParFalhou`), então é daqui que sai o aviso ao servidor.
+///
+/// # O byte de tipo, que só um dos dois já leu
+///
+/// Do servidor, o fluxo chega pelo roteador de `Client::connect`, que lê o
+/// byte de tipo para saber para qual fila mandar o fluxo — então este lado
+/// continua de onde ele parou (`Recepcao::do_fluxo_ja_tipado`). De um par não
+/// há roteador nenhum: `crate::par::repassar` escreve o byte de tipo como
+/// primeiro byte do fluxo, e quem lê tem de lê-lo (`Recepcao::do_fluxo`).
+/// Trocar os dois é ler o primeiro byte do cabeçalho como se fosse o tipo, e
+/// o cabeçalho inteiro sai deslocado.
+enum DeOndeVeioATela {
+    /// Do servidor. Os pedaços são copiados para o par que esta máquina serve,
+    /// se ela estiver servindo algum.
+    Servidor(Arc<RepasseDeTela>),
+    /// De um par. Uma queda no meio vira `ParFalhou`.
+    Par {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// Por onde avisar o laço de [`Motor::rodar`], que é quem fala com o
+        /// servidor.
+        resultados: mpsc::UnboundedSender<ResultadoDoPar>,
+    },
+}
+
 /// A espera de uma fila que pode não existir.
 ///
 /// `None` quando não há conexão, e aí este braço do `select!` nunca acorda —
@@ -3012,10 +3385,24 @@ async fn espera_da_fila(fila: &Option<crate::client::FilaDeTelas>) -> Option<qui
 ///
 /// Os quadros saem pelo mesmo canal de avisos que todo o resto, e por isso
 /// chegam à casca na ordem em que foram lidos.
-fn escoar_tela_alheia(avisos: mpsc::UnboundedSender<Aviso>, fluxo: quinn::RecvStream) {
+///
+/// `de_onde` diz por onde a transmissão veio, e as duas coisas que dependem
+/// disso — quem lê o byte de tipo, e o que significa o fluxo acabar no meio —
+/// estão no doc de [`DeOndeVeioATela`].
+fn escoar_tela_alheia(
+    avisos: mpsc::UnboundedSender<Aviso>,
+    fluxo: quinn::RecvStream,
+    de_onde: DeOndeVeioATela,
+) {
     {
         tokio::spawn(async move {
-            let mut recepcao = match crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await {
+            let aberto = match &de_onde {
+                DeOndeVeioATela::Servidor(_) => {
+                    crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await
+                }
+                DeOndeVeioATela::Par { .. } => crate::tela::Recepcao::do_fluxo(fluxo).await,
+            };
+            let mut recepcao = match aberto {
                 Ok(recepcao) => recepcao,
                 Err(erro) => {
                     // **`warn!` e não `debug!`, e a casca fica sabendo.**
@@ -3035,11 +3422,24 @@ fn escoar_tela_alheia(avisos: mpsc::UnboundedSender<Aviso>, fluxo: quinn::RecvSt
                     let _ = avisos.send(Aviso::TelaIlegivel {
                         motivo: erro.to_string(),
                     });
+                    // Um par que abre um fluxo ilegível é um par que não está
+                    // servindo nada. Sem este aviso, quem assiste esperaria a
+                    // imagem de alguém que nunca a vai mandar, e o servidor
+                    // nunca saberia que tem de assumir.
+                    if let DeOndeVeioATela::Par { screen, resultados } = &de_onde {
+                        let _ = resultados.send(ResultadoDoPar::ParFalhou {
+                            screen: *screen,
+                            motivo: MotivoDeFalhaDePar::CaiuNoMeio,
+                        });
+                    }
                     return;
                 }
             };
             let cabecalho = *recepcao.cabecalho();
             let tela = cabecalho.screen;
+            if let DeOndeVeioATela::Servidor(repasse) = &de_onde {
+                repasse.abriu(recepcao.abertura().to_vec());
+            }
             if avisos
                 .send(Aviso::TelaAbriu {
                     tela,
@@ -3054,6 +3454,16 @@ fn escoar_tela_alheia(avisos: mpsc::UnboundedSender<Aviso>, fluxo: quinn::RecvSt
             loop {
                 match recepcao.proximo_quadro().await {
                     Ok(Some(quadro)) => {
+                        // **A cópia para o par sai daqui, antes de qualquer
+                        // decisão sobre o que a casca desenha.** Os bytes
+                        // repassados são os mesmos que chegaram, na mesma
+                        // ordem, som incluído: quem recebe do par tem de ver a
+                        // mesma transmissão que quem recebe do servidor, e
+                        // filtrar aqui produziria duas telas diferentes com o
+                        // mesmo nome.
+                        if let DeOndeVeioATela::Servidor(repasse) = &de_onde {
+                            repasse.pedaco(quadro.no_fio());
+                        }
                         // **O som não atravessa a ponte.** Ele vai para a
                         // mistura, aqui em Rust, e nunca para a casca: a janela
                         // não tem o que fazer com um pacote Opus, e mandá-la
@@ -3087,9 +3497,24 @@ fn escoar_tela_alheia(avisos: mpsc::UnboundedSender<Aviso>, fluxo: quinn::RecvSt
                         // `TelaFechou` logo abaixo ao menos apaga o palco, que é
                         // mais do que o caso do cabeçalho tinha.
                         tracing::warn!(%erro, %tela, "a transmissão alheia terminou torta");
+                        // **Do par, isto é o par tendo caído** — e quem
+                        // assiste é a única pessoa que sabe. É este aviso que
+                        // faz o servidor assumir, e sem ele a promessa da spec
+                        // («ninguém perde imagem por causa da máquina de outra
+                        // pessoa») ficaria escrita e não cumprida: a tela
+                        // congelaria e ninguém do outro lado ficaria sabendo.
+                        if let DeOndeVeioATela::Par { screen, resultados } = &de_onde {
+                            let _ = resultados.send(ResultadoDoPar::ParFalhou {
+                                screen: *screen,
+                                motivo: MotivoDeFalhaDePar::CaiuNoMeio,
+                            });
+                        }
                         break;
                     }
                 }
+            }
+            if let DeOndeVeioATela::Servidor(repasse) = &de_onde {
+                repasse.fechou();
             }
             let _ = avisos.send(Aviso::TelaFechou { tela });
         });
@@ -4660,6 +5085,8 @@ mod tests {
             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             identidade_de_par: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            emprestando: false,
+            repasse: Arc::new(RepasseDeTela::default()),
             resultados_do_par,
             resultados_do_par_tx,
         }

@@ -287,6 +287,41 @@ pub enum Event {
         sharer: PersonId,
     },
 
+    // ---- o caminho entre pares ----
+    //
+    // Os dois são endereçados a **uma** pessoa e entregues a todas, como o
+    // [`Self::KeyFrameRequested`] logo acima e pela mesma razão: um servidor
+    // não tem outra maneira de uma sessão alcançar outra, e o barramento já é
+    // o que toda conexão drena. Quem estreita a audiência é `session::translate`.
+    //
+    // São dois eventos e não um porque as duas pontas recebem coisas
+    // diferentes: quem empresta recebe o endereço de quem vai assistir, e quem
+    // assiste recebe o de quem empresta. Um evento só carregaria os dois pares
+    // de endereços para as duas pontas, e cada uma leria o endereço da outra
+    // sem precisar dele.
+    /// O servidor apontou esta pessoa para servir uma transmissão a outra.
+    SirvaTelaPara {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// A quem entregar: quem empresta a subida.
+        quem_empresta: PersonId,
+        /// Onde alcançar quem vai assistir.
+        enderecos: Vec<std::net::SocketAddr>,
+        /// A impressão digital que quem vai assistir apresenta.
+        impressao: String,
+    },
+    /// O servidor mandou esta pessoa buscar a imagem num par, e não nele.
+    AssistaTelaPor {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// A quem entregar: quem pediu para assistir.
+        quem_assiste: PersonId,
+        /// Onde alcançar quem empresta a subida.
+        enderecos: Vec<std::net::SocketAddr>,
+        /// A impressão digital que quem empresta apresenta.
+        impressao: String,
+    },
+
     // ---- o bitrate adaptativo do ADR 0036 ----
     /// Quanto da voz de alguém não está chegando.
     ///

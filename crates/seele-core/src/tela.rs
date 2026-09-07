@@ -1556,6 +1556,39 @@ impl QuadroRecebido {
     pub const fn chave(&self) -> bool {
         self.tipo.e_chave()
     }
+
+    /// Este quadro **exatamente como veio do fio**: cabeçalho e corpo, na
+    /// ordem em que [`Recepcao::proximo_quadro`] os leu.
+    ///
+    /// # Por que existe, e por que não é «remontar»
+    ///
+    /// Quem empresta a subida recebe a tela do servidor por
+    /// [`Recepcao`] — que lê quadro a quadro para a casca poder desenhar — e
+    /// precisa repassar os mesmos bytes a um par, por
+    /// [`crate::par::repassar`], que fala em pedaços do fio. Sem isto, o único
+    /// caminho seria escrever o cabeçalho de quadro à mão em `enlace.rs`, e o
+    /// formato passaria a ter dois donos: quem o escreve em
+    /// [`Transmissao::enviar_quadro`] e quem o reescreve lá. Dois donos do
+    /// mesmo enquadramento é o defeito de uma linha que ninguém acha.
+    ///
+    /// Não é remontagem de quadro no sentido que o doc de
+    /// [`crate::par::repassar`] proíbe: aquilo é **esperar** o quadro inteiro
+    /// para só então repassar, e acrescenta um tempo de quadro de atraso por
+    /// salto. Aqui o quadro já chegou inteiro — quem repassa é quem também
+    /// está assistindo, e ele não pode desenhar meio quadro.
+    #[must_use]
+    pub fn no_fio(&self) -> Vec<u8> {
+        // Um quadro que não coubesse num `u32` não teria passado por
+        // `proximo_quadro`, que recusa acima de `MAX_QUADRO_LEN` antes de
+        // alocar. O `unwrap_or` é a resposta honesta a um caso que o tipo
+        // permite e o caminho não produz.
+        let tamanho = u32::try_from(self.bytes.len()).unwrap_or(u32::MAX);
+        let cabecalho = escrever_cabecalho_de_quadro(self.tipo, tamanho);
+        let mut fora = Vec::with_capacity(CABECALHO_DE_QUADRO_LEN + self.bytes.len());
+        fora.extend_from_slice(&cabecalho);
+        fora.extend_from_slice(&self.bytes);
+        fora
+    }
 }
 
 /// Uma transmissão de tela chegando nesta máquina.
@@ -1563,6 +1596,14 @@ impl QuadroRecebido {
 pub struct Recepcao {
     fluxo: quinn::RecvStream,
     cabecalho: ScreenHeader,
+    /// Os bytes crus do cabeçalho de abertura, como vieram do fio.
+    ///
+    /// Guardados e não recodificados a partir de [`Self::cabecalho`]: quem
+    /// repassa esta transmissão a um par (`crate::par::repassar`) escreve esta
+    /// abertura tal e qual, e uma recodificação seria uma segunda opinião
+    /// sobre o formato — que só se descobre errada do outro lado, na forma de
+    /// um enquadramento deslocado para sempre.
+    abertura: [u8; SCREEN_HEADER_LEN],
 }
 
 impl Recepcao {
@@ -1629,13 +1670,24 @@ impl Recepcao {
             .await
             .map_err(|erro| ErroDeTela::Fluxo(erro.to_string()))?;
         let (cabecalho, _) = ScreenHeader::decode(&abertura)?;
-        Ok(Self { fluxo, cabecalho })
+        Ok(Self {
+            fluxo,
+            cabecalho,
+            abertura,
+        })
     }
 
     /// O cabeçalho com que esta transmissão abriu.
     #[must_use]
     pub const fn cabecalho(&self) -> &ScreenHeader {
         &self.cabecalho
+    }
+
+    /// Os bytes crus desse cabeçalho — o que [`crate::par::repassar`] escreve
+    /// como abertura para o par que vai receber esta mesma transmissão.
+    #[must_use]
+    pub const fn abertura(&self) -> &[u8] {
+        &self.abertura
     }
 
     /// Lê o próximo quadro, ou `None` quando o outro lado encerrou.

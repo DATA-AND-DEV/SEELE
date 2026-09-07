@@ -33,6 +33,12 @@ ed25519-dalek = "3"
 rand = "0.10"
 anyhow = "1"
 tempfile = "3.27.0"
+# `tela_por_um_par.rs` fala QUIC cru — o par "compartilha" é deliberadamente um
+# par cru, não um `Enlace` — e precisa das mesmas versões que `seele-server`
+# usa, para o `AceitaQualquer` copiado de `subida_no_arranque.rs` bater com o
+# tipo que `quinn` devolve.
+quinn = "0.11.11"
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
 
 [lints]
 workspace = true
