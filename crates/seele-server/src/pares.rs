@@ -55,6 +55,27 @@ pub struct QuemDeclarou {
     /// vivas com o mesmo `PersonId`; sem isto, o encerramento de uma conexão
     /// que perdeu a corrida apagaria a declaração de uma que ganhou. Ver o
     /// doc do módulo.
+    ///
+    /// # A ressalva, e o que quebra se ela cair
+    ///
+    /// `stable_id()` é, no `quinn` 0.11, o **endereço de alocação** do estado
+    /// interno da conexão. Ele é estável enquanto a conexão vive, que é tudo
+    /// o que este campo precisa — mas ele pode ser **reusado** depois que ela
+    /// morre, porque o alocador pode devolver o mesmo endereço a outra
+    /// conexão.
+    ///
+    /// Se essa suposição cair, [`Pares::saiu`] passa a apagar a declaração
+    /// **viva** de outra conexão: o encerramento tardio de uma conexão morta
+    /// chegaria com um `id_da_conexao` que agora pertence a outra pessoa, a
+    /// conferência bateria por engano, e quem acabou de declarar sairia da
+    /// malha sem ter feito nada — caladamente, porque não há erro nenhum a
+    /// dar nesse caminho.
+    ///
+    /// Este campo passou de decoração a **carregar a correção** de uma rodada
+    /// de conserto; a suposição está escrita aqui, onde a invariante mora, e
+    /// não num relatório. O dia em que `stable_id` deixar de servir, é este
+    /// doc que diz o que pôr no lugar: um identificador de sessão que o
+    /// servidor mesmo atribua, e que não venha do alocador de ninguém.
     pub id_da_conexao: u64,
     /// A impressão digital que apresenta.
     pub impressao: String,
