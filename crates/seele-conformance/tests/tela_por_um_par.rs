@@ -754,11 +754,18 @@ async fn quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem() -> Result
     .await?;
     println!("o quadro {pelo_par} chegou pelo par; agora quem empresta morre");
 
-    // **À força, e não com `sair()`.** Uma despedida limpa é o caso fácil: o
-    // servidor vê a sessão acabar e podia limpar sozinho. O que a propriedade
-    // promete é o caso difícil — a máquina de alguém sumindo —, e é ele que
-    // este `drop` produz: `Enlace::drop` aborta a tarefa que fala com o
-    // servidor e larga a conexão QUIC no meio de uma transmissão.
+    // **À força, e não com `sair()`.** O que este teste cobre é a máquina de
+    // alguém sumindo: `Enlace::drop` aborta a tarefa que fala com o servidor e
+    // larga a conexão QUIC no meio de uma transmissão, e do lado de quem
+    // assiste isso chega como um fluxo cortado — um erro de leitura.
+    //
+    // **A despedida limpa não é o caso fácil**, e este comentário já disse
+    // que era. Um fluxo de par que termina direito é indistinguível, para
+    // quem assiste, de uma transmissão que acabou — e quem assiste já saiu do
+    // cano do servidor desde que o par foi apontado, então calar ali era tela
+    // em branco permanente. O caso limpo tem prova própria, em
+    // `o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor`, e o conserto
+    // dele está no `Ok(None)` de `escoar_tela_alheia`.
     drop(empresta);
 
     // O quadro que prova a promessa é um **posterior** ao último que o par
@@ -941,6 +948,134 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+
+    drop(compartilha);
+    drop(empresta);
+    drop(assiste);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **Um repasse que termina limpo devolve quem assiste ao servidor.**
+///
+/// O irmão de `quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem`, e
+/// o caso que ele **não** cobre. Lá o fluxo do par é cortado no meio e a
+/// leitura devolve erro; aqui ele termina direito — `finish()` do outro lado,
+/// `Ok(None)` desta — com a transmissão ainda no ar.
+///
+/// # Por que o caso limpo não é o caso fácil
+///
+/// Porque quem assiste **não tem como distinguir** «a tela acabou» de «o par
+/// calou»: as duas chegam como um fluxo que termina sem erro. E o cano do
+/// servidor para esta pessoa foi desligado quando o par foi apontado
+/// (`TelaParouDeAssistir`), então calar aqui é tela em branco permanente, sem
+/// ninguém saber.
+///
+/// # Como o fim limpo é produzido
+///
+/// Quem empresta para de assistir. O cano do servidor para ele fecha, a tarefa
+/// que lê a tela alheia dele chega ao fim do fluxo, `RepasseDeTela::fechou`
+/// desliga o destino, e `par::repassar` termina o fluxo do par direito — com a
+/// transmissão de quem compartilha continuando no ar para todo mundo. É um dos
+/// três caminhos do fim limpo (os outros são a contrapressão de
+/// `PEDACOS_A_ESPERA_DO_PAR` e quem empresta sair da sala), e é o único que um
+/// teste produz sem tocar em relógio nem em memória.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor() -> Result<()> {
+    let Cenario {
+        servidor,
+        compartilha,
+        empresta,
+        mut assiste,
+        screen,
+        copias,
+    } = cenario().await?;
+
+    // **O repasse tem de estar mesmo no ar antes de acabar.** Uma versão
+    // anterior deste teste pedia «o primeiro quadro» e mandava quem empresta
+    // parar de assistir logo depois: o quadro era o `seq` 0, que já estava na
+    // fila desde antes da malha, e quem empresta parava **antes** de a ligação
+    // com o par sequer fechar. O que o teste media então era o caminho de
+    // `AssistaTelaPor` sem par nenhum do outro lado — não o fim limpo de um
+    // repasse. A prova de que o par está servindo é a mesma do teste central:
+    // um piso drenado, e um segundo de imagem acima dele com o servidor
+    // subindo uma cópia só.
+    let piso_inicial = maior_seq_ja_enfileirado(&mut assiste, screen).await;
+    assiste.assistir(screen, true).await?;
+    ate("o servidor parar de subir a cópia de quem assiste", || {
+        copias.agora() == 1
+    })
+    .await?;
+    let mut piso = piso_inicial;
+    for indice in 0..QUADROS_PARA_PROVAR {
+        let (seq, _) = esperar(
+            &mut assiste,
+            "um quadro chegar pelo par, acima do piso, com o cano do servidor desligado",
+            |aviso| match aviso {
+                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
+                    .filter(|seq| piso.is_none_or(|p| *seq > p))
+                    .map(|seq| (seq, ())),
+                _ => None,
+            },
+        )
+        .await?;
+        assert_eq!(
+            copias.agora(),
+            1,
+            "o servidor voltou a subir a cópia de quem assiste antes de o repasse começar de \
+             verdade (quadro {indice} de {QUADROS_PARA_PROVAR}, seq {seq})"
+        );
+        piso = Some(seq);
+    }
+    println!("o repasse pelo par está no ar até o quadro {piso:?}; agora ele termina limpo");
+
+    // **Sem `drop`, e sem erro nenhum.** Quem empresta continua conectado, na
+    // sala e vivo; só deixa de assistir. O repasse acaba pelo caminho educado.
+    empresta.assistir(screen, false).await?;
+
+    // O fim do fluxo do par, visto de dentro de quem assiste. Daqui para
+    // frente, tudo o que chegar tem de ter vindo de outro lugar.
+    esperar(&mut assiste, "o fluxo do par terminar", |aviso| {
+        matches!(aviso, Aviso::TelaFechou { tela } if *tela == screen).then_some(())
+    })
+    .await?;
+
+    // **Um piso novo, e é ele que faz esta prova valer.** O canal de avisos é
+    // FIFO e o par entregou quadros até calar; pedir um `seq` acima do último
+    // que se leu passaria com o defeito no lugar, servido pela fila. Drenar
+    // até a fila esvaziar é o que separa «o servidor voltou a servir» de
+    // «ainda havia imagem velha guardada».
+    let depois_do_par = maior_seq_ja_enfileirado(&mut assiste, screen).await;
+    println!("a fila de quem assiste esvaziou no quadro {depois_do_par:?}");
+
+    // E sustentação, pela mesma razão do teste central: um quadro isolado
+    // acima do piso ainda cabe num punhado em voo; um segundo inteiro de
+    // imagem, cada quadro acima do anterior, não cabe.
+    let mut anterior = depois_do_par;
+    for indice in 0..QUADROS_PARA_PROVAR {
+        let (seq, bytes) = esperar(
+            &mut assiste,
+            "um quadro chegar pelo servidor depois de o repasse ter terminado limpo",
+            |aviso| match aviso {
+                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
+                    .filter(|seq| anterior.is_none_or(|p| *seq > p))
+                    .map(|seq| (seq, bytes.clone())),
+                _ => None,
+            },
+        )
+        .await?;
+        assert_eq!(
+            bytes,
+            corpo(seq),
+            "o quadro {seq} chegou e não é o que saiu de quem compartilha (quadro {indice} de \
+             {QUADROS_PARA_PROVAR})"
+        );
+        anterior = Some(seq);
+    }
+    println!(
+        "{QUADROS_PARA_PROVAR} quadros seguidos chegaram pelo servidor depois do fim limpo do \
+         repasse, todos acima de {depois_do_par:?}"
+    );
 
     drop(compartilha);
     drop(empresta);

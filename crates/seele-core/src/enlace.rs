@@ -3175,8 +3175,18 @@ fn e_endereco_de_rede_local(ip: IpAddr) -> bool {
 /// esperar a escrita para o par: um par que parou de ler prenderia a imagem de
 /// quem empresta, que é o oposto de «a malha é alívio». Cheio, o repasse é
 /// **desligado inteiro** — nunca é descartado um pedaço no meio, porque um
-/// buraco no fluxo desloca o enquadramento de quem recebe para sempre. Quem
-/// assiste nota a falta de imagem e cai para o servidor pelo caminho de sempre.
+/// buraco no fluxo desloca o enquadramento de quem recebe para sempre.
+///
+/// # Por qual mecanismo quem assiste volta ao servidor
+///
+/// Desligado o destino, o `Sender` cai, [`crate::par::repassar`] termina o
+/// fluxo do par **direito** — e um fluxo que termina direito não é um erro do
+/// outro lado. Por isso o fim limpo de um fluxo de par é reportado como
+/// `ClientMessage::ParFalhou { motivo: ParouDeMandar }` em
+/// [`escoar_tela_alheia`], e não só o fim torto: é esse relato que faz o
+/// servidor religar o cano de quem assiste. Sem ele, esta constante estourar
+/// seria tela em branco permanente — quem assiste já saiu do cano do servidor
+/// desde que o par foi apontado, e nada o recolocaria lá.
 ///
 /// Trinta e dois pedaços são cerca de um segundo a trinta quadros por segundo,
 /// que é muito mais do que uma escrita para um par saudável leva e pouco o
@@ -3435,7 +3445,36 @@ fn escoar_tela_alheia(
                             return;
                         }
                     }
-                    Ok(None) => break,
+                    Ok(None) => {
+                        // **O fim limpo também é um `ParFalhou`.** Quem
+                        // assiste não tem como distinguir «a transmissão
+                        // acabou» de «o par calou»: as duas chegam como um
+                        // fluxo que termina sem erro. E há três caminhos que
+                        // terminam limpo com a transmissão ainda no ar — a
+                        // contrapressão de [`PEDACOS_A_ESPERA_DO_PAR`], quem
+                        // empresta reconectando ao servidor, e quem empresta
+                        // saindo da sala. Calar aqui é tela em branco
+                        // permanente, porque o cano do servidor para esta
+                        // pessoa foi desligado quando o par foi apontado.
+                        //
+                        // Então reporta sempre, e deixa o **servidor**
+                        // adjudicar: ele é o único que sabe se a transmissão
+                        // ainda existe, e o braço de `ParFalhou` dele já não
+                        // faz nada quando ela acabou de verdade.
+                        //
+                        // `ParouDeMandar` e não `CaiuNoMeio`: nada caiu. O par
+                        // fechou o fluxo direito e simplesmente não manda
+                        // mais. Nenhum dos dois desacredita ninguém
+                        // (`crate::pares::quem_desacreditar`, no servidor), e
+                        // o motivo é o que fica no rastro.
+                        if let DeOndeVeioATela::Par { screen, resultados } = &de_onde {
+                            let _ = resultados.send(ResultadoDoPar::ParFalhou {
+                                screen: *screen,
+                                motivo: MotivoDeFalhaDePar::ParouDeMandar,
+                            });
+                        }
+                        break;
+                    }
                     Err(erro) => {
                         // Um quadro torto encerra esta transmissão e não a
                         // conexão: o fluxo já perdeu o sincronismo, e continuar
