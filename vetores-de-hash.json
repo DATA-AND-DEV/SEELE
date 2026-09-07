@@ -1,0 +1,11 @@
+{
+  "gerado_por": "seele-proto content_hash",
+  "vetores": [
+    { "nome": "vazio", "arquivos": [], "hash": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc" },
+    { "nome": "um-arquivo", "arquivos": [{ "caminho": "mod.json", "bytes_b64": "eyJzY2hlbWEiOjF9" }], "hash": "6fc8b2d4e7cf4558cc34395891a0709c988c7db0f20cf086ffcc8139929de1d5" },
+    { "nome": "fronteira-ab-c", "arquivos": [{ "caminho": "ab", "bytes_b64": "Yw==" }], "hash": "da077ff3048c298eed07da526ddf708fbea0a652518a988493b804416dd0008d" },
+    { "nome": "fronteira-a-bc", "arquivos": [{ "caminho": "a", "bytes_b64": "YmM=" }], "hash": "fc37d51db89930a9486d09a9251efdcc349eba376f0ef4d7680bdc6f91054592" },
+    { "nome": "utf8-no-caminho", "arquivos": [{ "caminho": "ícone/ação.js", "bytes_b64": "eA==" }], "hash": "7ce968afd47f468a9ec91b11092c044263f57ecb172d28b06452acf00a145c7a" },
+    { "nome": "ordem-invertida", "arquivos": [{ "caminho": "z.js", "bytes_b64": "Wg==" }, { "caminho": "a.js", "bytes_b64": "QQ==" }], "hash": "d804257b292584f298c68ebf28ae703202ae049d652fb6f78e12ff94ca54f7d3" }
+  ]
+}
