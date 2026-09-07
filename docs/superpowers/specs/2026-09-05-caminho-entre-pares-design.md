@@ -175,6 +175,36 @@ endereço público de cada uma como origem da conexão. Pedir a um terceiro que
 descubra o que o segundo já sabe é um salto de rede e um serviço a mais no
 caminho crítico, por nada.
 
+### 3.3.1 · Um disca, o outro atende — revisão de 07/09/2026
+
+**Escrito depois de a revisão final ler o código que o §3.3 descreve.** Os dois
+lados discam, sim — mas **só um dos dois atende**, e o desenho acima implica
+que qualquer um pode aceitar. O código nunca fez isso, e a diferença importa.
+
+Quem **empresta** passa a atender (`par::passar_a_atender`) e depois disca.
+Quem **assiste** apenas disca: `Motor::assistir_por_par` não chama
+`par::atender` em ponto nenhum. Então a ligação que fecha é sempre a de quem
+assiste chegando a quem empresta; a discagem de quem empresta **não pode**
+fechar, porque não há quem a atenda do outro lado.
+
+Ela continua existindo, e continua sendo metade do furo: são as tentativas de
+conexão dela que abrem o mapeamento de NAT do lado de quem empresta, para a
+discagem de quem assiste entrar por ele. Ela existe pelo efeito, não pelo
+resultado.
+
+**O que isto custou.** Enquanto o desenho dizia «os dois discam», o código
+esperava as duas e tomava a primeira que terminasse como resposta — e um erro
+rápido da discagem de quem empresta (família de endereço incompatível,
+`connect_with` recusando na hora, todos os candidatos falhando) cancelava o
+atendimento e fazia quem empresta desistir de servir alguém que estava
+chegando. O conserto é o desenho real escrito no código: o braço da discagem
+não decide nada, e o prazo é o de quem atende.
+
+As três coisas boas do §3.3 continuam valendo, com uma correção na primeira: o
+caso assimétrico se resolve sozinho **enquanto quem assiste conseguir sair** —
+se só quem empresta conseguir, a ligação não acontece e a tela vem do servidor,
+que é o caminho de sempre.
+
 ### 3.4 · O que já é agnóstico, e por isso não entra na conta
 
 O lado que recebe tela **já não sabe de onde o fluxo vem**:

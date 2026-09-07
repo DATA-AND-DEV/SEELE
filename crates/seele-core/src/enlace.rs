@@ -3085,7 +3085,20 @@ async fn servir_um_par(
     );
     let resultado = tokio::select! {
         atendido = atende => atendido,
-        discado = disca => discado.ok(),
+        // **O fim da discagem não é uma resposta**, e tratá-lo como uma era
+        // desistir de servir alguém que estava chegando. Quem assiste nunca
+        // chama `par::atender` — só disca —, então a discagem **desta** ponta
+        // não tem quem a atenda e não pode fechar. Ela existe por um efeito
+        // só, que é metade do §3.3: abrir o mapeamento de NAT deste lado para
+        // a discagem do outro entrar. Quando ela erra cedo — família de
+        // endereço incompatível, `connect_with` recusando na hora, todos os
+        // candidatos falhando rápido —, o braço que a esperava cancelava
+        // `atender` e devolvia `None`.
+        //
+        // O prazo global continua sendo o de `par::atender`, que é o mesmo
+        // [`PRAZO_DO_PAR`]: este braço nunca resolve, então é sempre o outro
+        // que termina a espera.
+        () = discagem_so_pelo_furo(disca) => None,
     };
     // **Desarma sempre, sirva ou não sirva.** Achado do fix round 3: sem
     // isto a ponta continuava aceitando conexões pelo resto da sessão — ver
@@ -3096,6 +3109,29 @@ async fn servir_um_par(
     // `servir_um_par` de amanhã sem essa linha não devia poder reabri-lo.
     par::parar_de_atender(&ponta).await;
     resultado
+}
+
+/// A discagem de quem empresta, que abre o furo e não decide nada.
+///
+/// **Nunca resolve, de propósito.** Um `select!` que espera esta função espera
+/// só o outro braço; o que esta metade faz é manter a discagem viva enquanto
+/// [`par::atender`] tem prazo, pelo efeito de abrir o mapeamento de NAT desta
+/// ponta. O resultado dela vai para o rastro e para lugar nenhum mais: quem
+/// assiste nunca atende, então uma discagem que «deu certo» aqui seria uma
+/// surpresa, e uma que falhou é o esperado.
+async fn discagem_so_pelo_furo<F>(disca: F)
+where
+    F: std::future::Future<Output = Result<par::ParLigado, par::ErroDePar>>,
+{
+    match disca.await {
+        // Não é o caminho de produção — quem assiste não atende —, mas se um
+        // dia for, largar a conexão aqui é o certo: é `atender` que decide.
+        Ok(_) => tracing::debug!("a discagem de quem empresta fechou; quem decide é o atendimento"),
+        Err(erro) => {
+            tracing::debug!(%erro, "a discagem de quem empresta não fechou, como se espera")
+        }
+    }
+    std::future::pending().await
 }
 
 /// Os endereços de rede local desta máquina, na porta que `ponta` já usa.
@@ -5308,5 +5344,61 @@ mod tests {
         // E o fim da primeira, esse sim, encerra o repasse.
         repasse.fechou(primeira);
         assert_eq!(repasse.abertura_de(primeira), None);
+    }
+
+    /// **A discagem de quem empresta falha na hora, e `atender` ainda serve.**
+    ///
+    /// Quem assiste nunca chama `par::atender` — só disca. Então a discagem de
+    /// quem empresta não tem quem a atenda e **não pode** fechar: ela existe
+    /// por um efeito só, abrir o mapeamento de NAT desta ponta. O `select!`
+    /// tratava o fim dela como resposta, e bastava um erro rápido — lista de
+    /// candidatos vazia, família de endereço incompatível, `connect_with`
+    /// recusando na hora — para `atender` ser cancelado e quem empresta
+    /// desistir de servir alguém que estava no meio do caminho.
+    ///
+    /// A lista vazia é o erro instantâneo mais limpo que existe: `par::ligar`
+    /// não tem candidato para tentar e devolve `NaoAlcancou` sem esperar um
+    /// milissegundo.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_discagem_que_falha_na_hora_nao_cancela_o_atendimento() {
+        let ponta_empresta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let onde_empresta = ponta_empresta.local_addr().unwrap();
+        let identidade_empresta = par::identidade_efemera().unwrap();
+        let impressao_empresta = par::impressao(&identidade_empresta);
+
+        let identidade_assiste = par::identidade_efemera().unwrap();
+        let impressao_assiste = par::impressao(&identidade_assiste);
+
+        // **Sem endereço nenhum para discar.** `par::ligar` desiste no mesmo
+        // instante, e é esse instante que cancelava o `atender`.
+        let servindo = tokio::spawn(servir_um_par(
+            ponta_empresta.clone(),
+            identidade_empresta,
+            Vec::new(),
+            impressao_assiste.clone(),
+        ));
+
+        // E quem assiste chega, como sempre chega: discando.
+        let ponta_assiste = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ligado = par::ligar(
+            &ponta_assiste,
+            &[onde_empresta],
+            impressao_empresta,
+            Some(&identidade_assiste),
+            Duration::from_secs(3),
+        )
+        .await;
+
+        let resultado = servindo.await.expect("a tarefa de servir_um_par");
+        assert!(
+            resultado.is_some(),
+            "a discagem de quem empresta falhou na hora e levou o `atender` junto: quem \
+             empresta desistiu de servir alguém que estava chegando"
+        );
+        assert!(
+            ligado.is_ok(),
+            "quem assiste discou para uma ponta que devia estar atendendo e não fechou: {:?}",
+            ligado.err()
+        );
     }
 }
