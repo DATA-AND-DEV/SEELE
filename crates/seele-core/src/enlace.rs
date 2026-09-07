@@ -1228,7 +1228,7 @@ impl Enlace {
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
         let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
 
-        let motor = Motor {
+        let mut motor = Motor {
             destino,
             // Guardado para a reconexão, e não só para a primeira entrada: uma
             // reconexão sai de um socket novo, com uma porta nova, e o caminho
@@ -1260,6 +1260,9 @@ impl Enlace {
             resultados_do_par,
             resultados_do_par_tx,
         };
+        // Antes de o laço começar, e não sob demanda: ver o doc de
+        // `Motor::declarar_identidade_de_par` para o porquê.
+        motor.declarar_identidade_de_par().await;
         let tarefa = tokio::spawn(motor.rodar(comandos_rx));
 
         Ok(Self {
@@ -2263,6 +2266,12 @@ impl Motor {
                 let media = cliente.media();
                 self.cliente = Some(cliente);
                 self.bateria.on_reconnected();
+                // A sessão anterior já foi apagada de `Pares` (`Pares::saiu`,
+                // no servidor) quando ela caiu — sem redeclarar aqui, esta
+                // pessoa reconecta sem identidade nenhuma registrada até a
+                // próxima vez que este método for chamado por acaso. Ver o
+                // doc de `Motor::declarar_identidade_de_par`.
+                self.declarar_identidade_de_par().await;
 
                 let _ = self.avisos.send(Aviso::Reconectado {
                     media: Box::new(media),
@@ -2594,6 +2603,54 @@ impl Motor {
         Ok(identidade)
     }
 
+    /// Declara ao servidor a identidade efêmera deste par — **mesmo sem optar
+    /// por emprestar a subida**.
+    ///
+    /// # Por que declarar sempre, e não só quando alguém empresta
+    ///
+    /// Achado do fix round 1 da Task 8: a parede simétrica da Task 5 exige
+    /// certificado dos dois lados de toda ligação entre pares, e quem só
+    /// assiste (`AssistaTelaPor`) também disca com a própria identidade
+    /// quando `SirvaTelaPara` manda alguém procurá-la — ver
+    /// [`Motor::assistir_por_par`]. Sem esta declaração, só quem emprestasse
+    /// teria impressão registrada no servidor, e a discagem de todo mundo que
+    /// só assiste seria recusada como `SemCertificado`. Um ruling meu de
+    /// pré-voo misturava «quem eu sou» com «eu empresto»; `crate::par` e
+    /// `seele-server/src/pares.rs` documentam a separação inteira.
+    ///
+    /// # Por que aqui, e não sob demanda na primeira mensagem do caminho
+    ///
+    /// Por então já seria tarde: o servidor só pode apontar esta pessoa a
+    /// quem for procurá-la se a declaração já tiver chegado **antes** de
+    /// alguém pedir. Por isso é chamada na conexão inicial e em cada
+    /// reconexão — a sessão anterior já foi apagada de `Pares` na saída
+    /// (`Pares::saiu`, no servidor), e a identidade efêmera não sobrevive a
+    /// ela sem ser dita de novo.
+    ///
+    /// `locais` sai vazio: sem opt-in de emprestar não há por que publicar
+    /// endereços para alguém discar **para** esta ponta — ela só chama
+    /// `par::passar_a_atender` quando `SirvaTelaPara` de fato pede (ver
+    /// [`Motor::servir_par`]). O endereço que sobra para o servidor apontar é
+    /// o público, que ele já vê na própria conexão.
+    async fn declarar_identidade_de_par(&mut self) {
+        let identidade = match self.identidade_de_par() {
+            Ok(identidade) => identidade,
+            Err(erro) => {
+                tracing::warn!(%erro, "não deu para gerar a identidade deste par");
+                return;
+            }
+        };
+        let Some(cliente) = self.cliente.as_mut() else {
+            return;
+        };
+        if let Err(erro) = cliente
+            .emprestar_subida(false, par::impressao(&identidade), Vec::new())
+            .await
+        {
+            tracing::warn!(%erro, "não deu para declarar a identidade deste par ao servidor");
+        }
+    }
+
     /// `ServerMessage::AssistaTelaPor`: vá buscar esta tela naquele par.
     ///
     /// Roda numa tarefa solta porque `par::por_onde` pode levar até
@@ -2603,9 +2660,16 @@ impl Motor {
     ///
     /// `por_onde` **nunca erra** — essa é a promessa dela, escrita no próprio
     /// doc: quem chama não tem decisão a tomar sobre a falha do par. O que
-    /// este método faz com o `PorOndeAssistir::Servidor` que ela devolve é
-    /// mandar o aviso ao servidor pelo canal de [`ResultadoDoPar`]: só o laço
-    /// de `rodar`, dono do `&mut Client`, pode falar com ele.
+    /// este método faz com o `PorOndeAssistir::Servidor` que ela devolve —
+    /// desde o fix round 1, já com o motivo enumerado dentro — é mandar o
+    /// aviso ao servidor pelo canal de [`ResultadoDoPar`]: só o laço de
+    /// `rodar`, dono do `&mut Client`, pode falar com ele.
+    ///
+    /// Disca com a **própria** identidade — a parede simétrica da Task 5 faz
+    /// quem atende exigir certificado sempre, e sem uma identidade para
+    /// apresentar todo `SirvaTelaPara` real seria recusado como
+    /// `SemCertificado`. `Motor::declarar_identidade_de_par` garante que ela
+    /// já existe (e já foi dita ao servidor) desde a conexão.
     fn assistir_por_par(
         &mut self,
         screen: ScreenId,
@@ -2623,10 +2687,29 @@ impl Motor {
                 return;
             }
         };
+        let identidade = match self.identidade_de_par() {
+            Ok(identidade) => identidade,
+            Err(erro) => {
+                tracing::warn!(%erro, ?screen, "não deu para gerar a identidade deste par");
+                let _ = self.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
+                    screen,
+                    motivo: MotivoDeFalhaDePar::NaoAlcancou,
+                });
+                return;
+            }
+        };
         let avisos = self.avisos.clone();
         let resultados = self.resultados_do_par_tx.clone();
         tokio::spawn(async move {
-            match par::por_onde(&ponta, &enderecos, impressao, PRAZO_DO_PAR).await {
+            match par::por_onde(
+                &ponta,
+                &enderecos,
+                impressao,
+                Some(&identidade),
+                PRAZO_DO_PAR,
+            )
+            .await
+            {
                 par::PorOndeAssistir::Par(ligado) => {
                     // A conta de bytes é de quem empresta — `crate::par::repassar`
                     // escreve por pedaço do lado dele. Do lado de quem assiste
@@ -2653,19 +2736,12 @@ impl Motor {
                         }
                     }
                 }
-                // `por_onde` já registrou o motivo detalhado no `tracing` dela.
-                // O que chega aqui é só "não deu", de propósito — é a mesma
-                // promessa que o doc dela faz. `NaoAlcancou` é a leitura mais
-                // honesta que dá para mandar ao servidor sem esse detalhe: o
-                // evento de segurança de uma impressão que não bate já foi
-                // denunciado localmente (`classificar`, em `par.rs`), e a
-                // escolha de hoje do servidor (`Pares::escolher`) é burra de
-                // propósito e não age diferente por causa do motivo.
-                par::PorOndeAssistir::Servidor => {
-                    let _ = resultados.send(ResultadoDoPar::ParFalhou {
-                        screen,
-                        motivo: MotivoDeFalhaDePar::NaoAlcancou,
-                    });
+                // `por_onde` já classificou o motivo — `ImpressaoNaoBate`
+                // continua sendo o evento de segurança que é, agora também
+                // para o servidor, e não só no `tracing` local de
+                // `classificar` em `par.rs`.
+                par::PorOndeAssistir::Servidor(motivo) => {
+                    let _ = resultados.send(ResultadoDoPar::ParFalhou { screen, motivo });
                 }
             }
         });

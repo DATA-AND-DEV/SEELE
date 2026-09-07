@@ -701,16 +701,25 @@ pub async fn atender(
 /// De onde a imagem desta transmissão vai vir.
 ///
 /// `Box` em [`Self::Par`] porque [`ParLigado`] carrega uma [`quinn::Connection`]
-/// e [`Self::Servidor`] não carrega nada: sem a caixa o `enum` inteiro teria o
-/// tamanho da maior variante, e o `clippy::large_enum_variant` reclamaria com
-/// razão — a variante pequena pagaria pelo tamanho da grande a cada vez que
-/// aparecesse.
+/// e [`Self::Servidor`] não carrega nada além do motivo: sem a caixa o `enum`
+/// inteiro teria o tamanho da maior variante, e o `clippy::large_enum_variant`
+/// reclamaria com razão — a variante pequena pagaria pelo tamanho da grande a
+/// cada vez que aparecesse.
 #[derive(Debug)]
 pub enum PorOndeAssistir {
     /// Por este par.
     Par(Box<ParLigado>),
-    /// Pelo servidor, como sempre.
-    Servidor,
+    /// Pelo servidor, como sempre — e por quê.
+    ///
+    /// **Achado do fix round 1 da Task 8.** A primeira versão não devolvia
+    /// motivo nenhum, só o registrava no `tracing`; mas o motivo enumerado
+    /// existe para o **servidor** saber o que aconteceu, não só para quem lê
+    /// o log desta máquina. `ImpressaoNaoBate` é o evento de segurança que o
+    /// §4 da spec quer contado como tal, e escondê-lo dentro de um
+    /// `NaoAlcancou` genérico apagaria a diferença entre «ninguém respondeu» e
+    /// «alguém respondeu no lugar do par» bem no ponto em que ela mais
+    /// importa: o relato que chega ao servidor.
+    Servidor(seele_proto::control::MotivoDeFalhaDePar),
 }
 
 /// Tenta o par, e cai para o servidor sem drama quando ele não vem.
@@ -720,21 +729,61 @@ pub enum PorOndeAssistir {
 /// dela existir, e isso não é um erro, é o normal — a mesma regra que a spec de
 /// 05/09 registra: ninguém perde imagem por causa da máquina de outra pessoa.
 ///
-/// O motivo enumerado da falha **não some**: vai para o `tracing` aqui. Quem
-/// chama não recebe o [`ErroDePar`] de volta — essa é a metade da promessa
-/// acima, «quem chama não tem decisão a tomar» — mas o rastro fica escrito para
-/// quem for investigar depois.
+/// `identidade_propria` é o que esta ponta apresenta como certificado de
+/// cliente ao discar — ver o parâmetro de mesmo nome em [`ligar`]. **Não é
+/// opcional na prática**, mesmo sendo `Option` aqui: a parede simétrica da
+/// Task 5 faz quem atende exigir certificado sempre
+/// (`ConfereQuemChega::client_auth_mandatory`), então quem chama sem
+/// identidade recebe `RecusadoDepoisDeLigar(SemCertificado)` de qualquer par
+/// que exista de verdade. `None` só serve para o caso em que não há
+/// identidade nenhuma a apresentar — o que hoje não deveria acontecer, porque
+/// `enlace::Motor` declara a própria identidade ao servidor assim que conecta
+/// (ver o doc de `Motor::declarar_identidade_de_par`), empreste ela a subida
+/// ou não.
+///
+/// O motivo enumerado da falha **não some**: vai para o `tracing` **e** para o
+/// [`PorOndeAssistir::Servidor`] que esta função devolve — quem chama não
+/// precisa mais adivinhar ou achatar tudo num motivo genérico para avisar o
+/// servidor.
 pub async fn por_onde(
     ponta: &quinn::Endpoint,
     enderecos: &[std::net::SocketAddr],
     impressao: String,
+    identidade_propria: Option<&Identidade>,
     prazo: std::time::Duration,
 ) -> PorOndeAssistir {
-    match ligar(ponta, enderecos, impressao, None, prazo).await {
+    match ligar(ponta, enderecos, impressao, identidade_propria, prazo).await {
         Ok(ligado) => PorOndeAssistir::Par(Box::new(ligado)),
         Err(erro) => {
-            tracing::info!(%erro, "o par não veio; a tela vem do servidor");
-            PorOndeAssistir::Servidor
+            let motivo = motivo_de_falha(&erro);
+            tracing::info!(%erro, ?motivo, "o par não veio; a tela vem do servidor");
+            PorOndeAssistir::Servidor(motivo)
+        }
+    }
+}
+
+/// Traduz o motivo detalhado de [`ligar`] para o motivo enumerado que o
+/// protocolo leva ao servidor.
+///
+/// **Só [`ErroDePar::ImpressaoNaoBate`] é evento de segurança**, e é a única
+/// tradução exata que existe: alguém respondeu no lugar de quem o servidor
+/// apresentou. Tudo o mais — certificado que não gerou, ponta que não abriu,
+/// silêncio, recusa depois de ligar, confirmação que não chegou a tempo — é
+/// rotina de rede sem nada a provar sobre a declaração publicada, e cai em
+/// [`MotivoDeFalhaDePar::NaoAlcancou`]: a leitura mais honesta disponível sem
+/// inventar uma das outras três variantes, que descrevem falhas de **depois**
+/// de já estar servindo (`CaiuNoMeio`, `ParouDeMandar`), não desta discagem.
+fn motivo_de_falha(erro: &ErroDePar) -> seele_proto::control::MotivoDeFalhaDePar {
+    match erro {
+        ErroDePar::ImpressaoNaoBate { .. } => {
+            seele_proto::control::MotivoDeFalhaDePar::ImpressaoNaoBate
+        }
+        ErroDePar::Certificado(_)
+        | ErroDePar::Escuta(_)
+        | ErroDePar::NaoAlcancou
+        | ErroDePar::RecusadoDepoisDeLigar(_)
+        | ErroDePar::ConfirmacaoNaoChegouATempo => {
+            seele_proto::control::MotivoDeFalhaDePar::NaoAlcancou
         }
     }
 }
@@ -1462,13 +1511,56 @@ mod testes {
             &ponta,
             &[ninguem],
             "a".repeat(64),
+            None,
             std::time::Duration::from_millis(300),
         )
         .await;
 
         assert!(
-            matches!(onde, PorOndeAssistir::Servidor),
-            "o par não ligou e o cliente não caiu para o servidor: alguém ficou sem imagem"
+            matches!(
+                onde,
+                PorOndeAssistir::Servidor(seele_proto::control::MotivoDeFalhaDePar::NaoAlcancou)
+            ),
+            "o par não ligou e o cliente não caiu para o servidor com o motivo certo: {onde:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn quando_alguem_responde_no_lugar_do_par_o_motivo_nao_vira_naoalcancou() {
+        // **Achado do fix round 1.** A primeira versão de `por_onde` escondia
+        // até o motivo detalhado do chamador, e por isso todo `Servidor` saía
+        // com `NaoAlcancou` — inclusive quando alguém tinha respondido no
+        // lugar do par de verdade. `NaoAlcancou` é rotina; `ImpressaoNaoBate`
+        // é o evento de segurança do §4 da spec, e o servidor precisa saber a
+        // diferença, não só o `tracing` local desta máquina.
+        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        passar_a_atender(
+            &a,
+            identidade_efemera().unwrap(),
+            impressao(&identidade_efemera().unwrap()),
+        )
+        .unwrap();
+        let endereco_a = a.local_addr().unwrap();
+        let _atendendo_a = tokio::spawn(atender(a, PRAZO_DE_CONFIRMACAO_NO_TESTE));
+
+        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let onde = por_onde(
+            &b,
+            &[endereco_a],
+            "f".repeat(64),
+            None,
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                onde,
+                PorOndeAssistir::Servidor(
+                    seele_proto::control::MotivoDeFalhaDePar::ImpressaoNaoBate
+                )
+            ),
+            "alguém respondeu no lugar do par, e o motivo devolvido não foi o de segurança: {onde:?}"
         );
     }
 }

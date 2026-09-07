@@ -1322,6 +1322,38 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::ParFalhou { screen, motivo }).await
     }
 
+    /// Declara ao servidor a identidade deste par — e se ela empresta a
+    /// subida agora, ou só existe.
+    ///
+    /// **`emprestando: false` não é "esqueça-me".** Desde o fix round 1 da
+    /// Task 8, `impressao` e `locais` continuam significando "eu sou esta
+    /// pessoa, alcançável aqui" mesmo quando `emprestando` é falso — só a
+    /// saída da sessão (do lado do servidor) apaga a declaração. Quem só
+    /// assiste (nunca opta por emprestar) ainda precisa mandar isto **uma
+    /// vez**, com `emprestando: false`: sem identidade declarada, a discagem
+    /// dele para um par não tem certificado para apresentar quando
+    /// `client_auth_mandatory` exigir um.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn emprestar_subida(
+        &mut self,
+        emprestando: bool,
+        impressao: String,
+        locais: Vec<SocketAddr>,
+    ) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::EmprestarSubida {
+                emprestando,
+                impressao,
+                locais,
+            },
+        )
+        .await
+    }
+
     /// Abre o fluxo de vídeo desta transmissão.
     ///
     /// Na conexão que já existe, e num fluxo unidirecional — as duas metades do

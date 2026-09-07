@@ -2281,24 +2281,26 @@ async fn run_session(
                         // sem saber que está confiando na palavra de um
                         // estranho.
                         let publico = connection.remote_address();
-                        // «Deixei de emprestar» chega como `emprestando: false`
-                        // por cima de uma `impressao` que o protocolo não força
-                        // a vir vazia — quem decide o que ela significa é este
-                        // despacho, e não o campo em si. `Pares::declarou` só
-                        // entende opt-out como impressão vazia (decisão de
-                        // 05/09), e é essa tradução que acontece aqui.
-                        let impressao = if emprestando { impressao } else { String::new() };
+                        // Os dois valores viajam como vieram, sem tradução —
+                        // achado do fix round 1 da Task 8. `impressao` e
+                        // `locais` não significam mais "eu empresto"; significam
+                        // "eu sou esta pessoa, alcançável aqui" e sobrevivem a
+                        // `emprestando: false`. É `Pares::escolher`, não
+                        // `Pares::declarou`, quem decide quem serve — ver o doc
+                        // de `crate::pares`.
                         tracing::info!(
                             person = %session.person,
                             %publico,
                             emprestando,
                             "declaração de empréstimo de subida no caminho entre pares"
                         );
-                        server
-                            .pares
-                            .lock()
-                            .await
-                            .declarou(session.person, impressao, locais, publico);
+                        server.pares.lock().await.declarou(
+                            session.person,
+                            emprestando,
+                            impressao,
+                            locais,
+                            publico,
+                        );
                     }
                     ClientMessage::ParFalhou { screen, motivo } => {
                         // O rastro fica mesmo quando não há o que fazer: quem
