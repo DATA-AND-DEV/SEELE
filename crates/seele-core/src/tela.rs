@@ -3118,3 +3118,156 @@ mod o_som_no_mesmo_fluxo {
         assert_eq!(&cabecalho[1..], &4_u32.to_be_bytes());
     }
 }
+
+#[cfg(test)]
+mod o_enquadramento {
+    //! `Enquadramento::entrada` chegou a este crate no fix round 1 da Task 9
+    //! sem suíte própria — só o exercício indireto que `crate::par::repassar`
+    //! faz dele. O fix round 2 mediu o preço: um revisor quebrou cada
+    //! invariante que a doc do tipo promete, um de cada vez, e a suíte
+    //! inteira de `seele-core` (278 testes) continuou verde nas cinco vezes —
+    //! inclusive na mais grave, `comeca_aqui` removido, que é metade do
+    //! próprio Critical que este tipo veio consertar (um cabeçalho partido ao
+    //! meio virando porta de entrada, e a segunda metade dele lida como
+    //! tamanho de quadro).
+    //!
+    //! Os oito testes abaixo são portados do gêmeo em
+    //! `crates/seele-server/src/tela.rs` (módulo de testes logo depois da
+    //! definição de `Enquadramento` de lá), adaptados ao `TipoDeQuadro` e aos
+    //! erros nomeados deste crate — o servidor não distingue quadro vazio de
+    //! tamanho grande demais de tipo desconhecido (os três caem em
+    //! `FimDaTela::FluxoMalformado`), e `seele-core` tem uma variante para
+    //! cada um.
+
+    use super::{Enquadramento, ErroDeTela, TipoDeQuadro, MAX_QUADRO_LEN};
+
+    /// Um quadro como este módulo escreve no fio: tipo, tamanho, corpo.
+    fn quadro(tipo: TipoDeQuadro, tamanho: usize) -> Vec<u8> {
+        let mut bytes = vec![tipo.byte()];
+        bytes.extend_from_slice(&(tamanho as u32).to_be_bytes());
+        bytes.extend(std::iter::repeat_n(0xAB, tamanho));
+        bytes
+    }
+
+    #[test]
+    fn a_porta_de_entrada_e_o_comeco_de_um_quadro_chave() {
+        let mut enq = Enquadramento::novo();
+        let mut fluxo = quadro(TipoDeQuadro::Comum, 10);
+        let onde = fluxo.len();
+        fluxo.extend(quadro(TipoDeQuadro::Chave, 20));
+        fluxo.extend(quadro(TipoDeQuadro::Comum, 5));
+        assert_eq!(enq.entrada(&fluxo), Ok(Some(onde)));
+    }
+
+    #[test]
+    fn sem_quadro_chave_nao_ha_porta() {
+        let mut enq = Enquadramento::novo();
+        let mut fluxo = quadro(TipoDeQuadro::Comum, 10);
+        fluxo.extend(quadro(TipoDeQuadro::Comum, 20));
+        assert_eq!(enq.entrada(&fluxo), Ok(None));
+    }
+
+    #[test]
+    fn um_cabecalho_partido_ao_meio_nao_vira_porta() {
+        // **A metade do Critical que uma divisão exata esconderia.** Os bytes
+        // da primeira metade do cabeçalho já podem ter saído para quem já
+        // está do outro lado de `crate::par::repassar`; ligar alguém agora
+        // faria quem entra ler a segunda metade como se fosse a primeira —
+        // em H.264 Annex-B isso é ler lixo do meio do corpo como tamanho de
+        // quadro. A porta é pulada; quem entrou pede um quadro-chave e espera
+        // o próximo.
+        let mut enq = Enquadramento::novo();
+        let chave = quadro(TipoDeQuadro::Chave, 20);
+        assert_eq!(enq.entrada(chave.get(..3).unwrap_or_default()), Ok(None));
+        assert_eq!(enq.entrada(chave.get(3..).unwrap_or_default()), Ok(None));
+        // E o passo continua certo: o quadro seguinte é reconhecido.
+        assert_eq!(enq.entrada(&quadro(TipoDeQuadro::Chave, 8)), Ok(Some(0)));
+    }
+
+    #[test]
+    fn o_enquadramento_atravessa_pedacos_de_qualquer_tamanho() {
+        // O tamanho do pedaço é do QUIC (ou do canal de
+        // `crate::par::repassar`), não nosso: o mesmo fluxo tem de dar a
+        // mesma resposta byte a byte e de uma vez só.
+        let mut fluxo = quadro(TipoDeQuadro::Comum, 300);
+        let onde = fluxo.len();
+        fluxo.extend(quadro(TipoDeQuadro::Chave, 100));
+        let mut inteiro = Enquadramento::novo();
+        assert_eq!(inteiro.entrada(&fluxo), Ok(Some(onde)));
+
+        let mut picado = Enquadramento::novo();
+        let mut achado = None;
+        for (i, byte) in fluxo.iter().enumerate() {
+            if let Ok(Some(_)) = picado.entrada(&[*byte]) {
+                achado = Some(i);
+            }
+        }
+        // Um cabeçalho que chega byte a byte nunca começa e termina no mesmo
+        // pedaço, então não há porta — e é exatamente o que a regra diz.
+        assert_eq!(achado, None);
+    }
+
+    #[test]
+    fn um_tamanho_impossivel_encerra_o_fluxo() {
+        let mut enq = Enquadramento::novo();
+        let mut cabecalho = vec![TipoDeQuadro::Comum.byte()];
+        let tamanho = MAX_QUADRO_LEN as u32 + 1;
+        cabecalho.extend_from_slice(&tamanho.to_be_bytes());
+        assert_eq!(
+            enq.entrada(&cabecalho),
+            Err(ErroDeTela::QuadroGrandeDemais {
+                len: tamanho as usize
+            })
+        );
+    }
+
+    #[test]
+    fn um_quadro_vazio_encerra_o_fluxo() {
+        let mut enq = Enquadramento::novo();
+        assert_eq!(
+            enq.entrada(&[TipoDeQuadro::Comum.byte(), 0, 0, 0, 0]),
+            Err(ErroDeTela::QuadroVazio)
+        );
+    }
+
+    #[test]
+    fn um_byte_de_tipo_que_este_fluxo_nao_conhece_o_encerra() {
+        // Nunca «pular pelo tamanho»: o tamanho é o único número que um fluxo
+        // de lixo controla, e confiar nele para pular é pedir a alocação que
+        // ele quiser. Um tipo desconhecido tem de encerrar o enquadramento na
+        // hora, e não virar `Comum` em silêncio.
+        let byte = 3_u8;
+        let mut enq = Enquadramento::novo();
+        assert_eq!(
+            enq.entrada(&[byte, 0, 0, 0, 8]),
+            Err(ErroDeTela::TipoDesconhecido { byte })
+        );
+    }
+
+    #[test]
+    fn um_quadro_de_som_atravessa_e_nao_e_porta_de_entrada() {
+        // `Enquadramento` não entende o som: ele só conta bytes para achar
+        // onde um quadro-chave começa. O que ele precisa saber é que o byte é
+        // legítimo, para não confundir um fluxo bom com lixo.
+        let mut enq = Enquadramento::novo();
+        let som = quadro(TipoDeQuadro::Som, 4);
+        assert_eq!(
+            enq.entrada(&som),
+            Ok(None),
+            "um quadro de som foi tratado como fluxo malformado"
+        );
+
+        // E ele não abre a porta para quem chega no meio: quem entra precisa
+        // de uma imagem que baste a si mesma, e som não começa imagem
+        // nenhuma.
+        let mut enq = Enquadramento::novo();
+        let mut fluxo = quadro(TipoDeQuadro::Som, 4);
+        let onde = fluxo.len();
+        fluxo.extend(quadro(TipoDeQuadro::Chave, 20));
+        assert_eq!(
+            enq.entrada(&fluxo),
+            Ok(Some(onde)),
+            "a porta de entrada não é o quadro-chave de imagem"
+        );
+    }
+}

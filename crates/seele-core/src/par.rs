@@ -2210,8 +2210,13 @@ mod testes {
     }
 
     impl tracing::Subscriber for CapturaDeRastro {
-        fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
-            true
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            // Só o que um `WARN` (ou mais grave) precisaria — não o `INFO` de
+            // rotina e não o `TRACE` do `quinn`. Sem este filtro, o teste que
+            // falha por causa deste `Subscriber` despeja umas 180 linhas de
+            // handshake do `quinn` na mensagem do `assert!`, e quem depura
+            // tem de procurar a ausência de um `WARN` no meio delas.
+            *metadata.level() <= tracing::Level::WARN
         }
 
         fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
