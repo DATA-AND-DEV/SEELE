@@ -5,8 +5,9 @@
 //!
 //! Ela não segue critério visível nenhum — nem latência, nem ordem de
 //! chegada: `self.quem` é um `HashMap`, e a ordem de iteração dele não é a de
-//! inserção. O que ela garante é só isto — não é quem compartilha, e ainda
-//! não serve ninguém. É um espaço reservado com a forma certa: o
+//! inserção. O que ela garante é só isto — não é quem compartilha, ainda não
+//! serve ninguém, e **está na mesma sala de voz da transmissão**. É um espaço
+//! reservado com a forma certa: o
 //! **subprojeto B** é quem olha subida medida e topologia para escolher bem.
 //! Chamar isto de «escolha automática» seria vender como pronto o que é um
 //! lugar guardado — e a spec de 05/09 diz isso com todas as letras.
@@ -69,7 +70,13 @@ pub struct QuemDeclarou {
     pub emprestando: bool,
 }
 
-/// Quem declarou identidade para o caminho entre pares nesta sala, agora.
+/// Quem declarou identidade para o caminho entre pares neste daemon, agora.
+///
+/// **Global ao daemon, e não por sala de voz.** Uma pessoa declara identidade
+/// uma vez por sessão, e continua a mesma pessoa ao trocar de sala. É por isso
+/// que [`Self::escolher`] recebe de fora quem está na sala da transmissão: a
+/// pergunta «quem é você» mora aqui, e a pergunta «onde você está agora» mora
+/// na `crate::server::Occupancy`, que é reescrita a cada entrada e saída.
 #[derive(Debug, Default)]
 pub struct Pares {
     quem: HashMap<PersonId, QuemDeclarou>,
@@ -182,12 +189,33 @@ impl Pares {
     /// Só considera quem declarou `emprestando: true` — ter identidade
     /// guardada não é o mesmo que ter optado por emprestar. Ver o doc de
     /// [`QuemDeclarou::emprestando`] e do módulo.
+    ///
+    /// # `na_sala` não é um refinamento: é a parede
+    ///
+    /// Este registro é **global ao daemon**, e não por sala: uma pessoa
+    /// declara identidade uma vez por sessão, não uma vez por sala em que
+    /// senta. Sem `na_sala`, quem empresta na sala B era escolhido para servir
+    /// a tela da sala A — e o cliente dele repassa o que **ele** está
+    /// recebendo, que é a tela da sala B. Quem assiste na sala A recebia,
+    /// decodificava e mostrava conteúdo de uma sala em que nunca entrou.
+    ///
+    /// O §5 do desenho justifica a privacidade do repasse dizendo que «quem
+    /// repassa já é espectador autorizado daquele fluxo». A frase só é
+    /// verdade se quem repassa e quem recebe estiverem na mesma sala, e é
+    /// esta linha que faz disso um fato em vez de uma suposição.
+    ///
+    /// `na_sala` é quem está **agora** na sala de voz da transmissão, e vem de
+    /// fora de propósito: a fonte viva é `crate::server::Occupancy`, que é
+    /// reescrita a cada entrada e saída. Guardar a sala dentro de
+    /// [`QuemDeclarou`] daria um campo escrito uma vez na declaração e nunca
+    /// mais — e pessoas trocam de sala sem redeclarar nada.
     #[must_use]
     pub fn escolher(
         &self,
         dono: PersonId,
         quem_quer: PersonId,
         ja_servindo: &HashSet<PersonId>,
+        na_sala: &HashSet<PersonId>,
     ) -> Option<QuemDeclarou> {
         self.quem
             .values()
@@ -196,6 +224,7 @@ impl Pares {
                     && candidato.pessoa != dono
                     && candidato.pessoa != quem_quer
                     && !ja_servindo.contains(&candidato.pessoa)
+                    && na_sala.contains(&candidato.pessoa)
             })
             .cloned()
     }
@@ -291,6 +320,15 @@ mod testes {
         SocketAddr::from(([192, 168, 1, n], 8383))
     }
 
+    /// A sala de voz em que todo mundo deste módulo de teste está sentado.
+    ///
+    /// Os testes que não falam de sala nenhuma passam esta: eles afirmam
+    /// outras regras de `escolher`, e uma sala vazia as tornaria vácuas —
+    /// passariam por não haver ninguém na sala, não pela regra sob teste.
+    fn toda_a_sala() -> HashSet<PersonId> {
+        (1..=9).map(PersonId).collect()
+    }
+
     #[test]
     fn quem_compartilha_nunca_e_escolhido_para_servir_a_si_mesmo() {
         // O espelho infinito, na versão da malha: quem compartilha servindo a
@@ -306,7 +344,7 @@ mod testes {
             endereco(1),
         );
         assert!(pares
-            .escolher(PersonId(1), PersonId(2), &HashSet::new())
+            .escolher(PersonId(1), PersonId(2), &HashSet::new(), &toda_a_sala())
             .is_none());
     }
 
@@ -338,8 +376,73 @@ mod testes {
             endereco(3),
         );
         assert!(pares
-            .escolher(PersonId(1), PersonId(2), &HashSet::new())
+            .escolher(PersonId(1), PersonId(2), &HashSet::new(), &toda_a_sala())
             .is_none());
+    }
+
+    #[test]
+    fn quem_empresta_de_outra_sala_de_voz_nunca_e_escolhido() {
+        // **Vazamento de conteúdo entre salas.** `Pares` é global ao daemon:
+        // a pessoa 4 declarou que empresta enquanto estava numa sala, e a
+        // transmissão sob escolha está em outra. Se ela for apontada, o
+        // cliente dela repassa o que **ela** recebe — a tela da sala dela — e
+        // quem assiste na sala da transmissão vê conteúdo de uma sala em que
+        // nunca entrou. A declaração é global; a escolha não pode ser.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(4),
+            1,
+            true,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        // Quem compartilha, quem quer assistir — e mais ninguém. A pessoa 4
+        // está noutro lugar.
+        let na_sala = HashSet::from([PersonId(1), PersonId(2)]);
+        assert!(
+            pares
+                .escolher(PersonId(1), PersonId(2), &HashSet::new(), &na_sala)
+                .is_none(),
+            "alguém de outra sala de voz foi apontado para servir esta tela — \
+             o repasse dele carrega a tela da sala dele"
+        );
+    }
+
+    #[test]
+    fn entre_dois_que_emprestam_so_o_da_sala_da_tela_e_escolhido() {
+        // A outra metade do guarda: com um candidato de cada lado, a escolha
+        // não pode ser «o primeiro que o `HashMap` devolver». Sem o filtro,
+        // este teste passaria metade das vezes — e um teste que passa metade
+        // das vezes é o pior guarda que existe.
+        let na_sala = HashSet::from([PersonId(1), PersonId(2), PersonId(4)]);
+        // **Um `Pares` novo a cada rodada, e não um reusado.** A ordem de
+        // iteração de um `HashMap` é fixa enquanto o mapa vive; ela só muda
+        // com a semente, que é sorteada uma vez por mapa. Um laço sobre o
+        // mesmo mapa repetiria cinquenta vezes a mesma ordem — e um guarda
+        // que depende de a ordem ter caído do lado errado é um guarda que
+        // passa metade das vezes.
+        for _ in 0..50 {
+            let mut pares = Pares::nova();
+            for pessoa in [3_u8, 4] {
+                pares.declarou(
+                    PersonId(u64::from(pessoa)),
+                    1,
+                    true,
+                    "c".repeat(64),
+                    vec![endereco(pessoa)],
+                    endereco(pessoa),
+                );
+            }
+            let escolhido = pares
+                .escolher(PersonId(1), PersonId(2), &HashSet::new(), &na_sala)
+                .expect("havia um par elegível na sala da transmissão");
+            assert_eq!(
+                escolhido.pessoa,
+                PersonId(4),
+                "a escolha saiu da sala da transmissão"
+            );
+        }
     }
 
     #[test]
@@ -357,7 +460,9 @@ mod testes {
             endereco(3),
         );
         let ja = HashSet::from([PersonId(3)]);
-        assert!(pares.escolher(PersonId(1), PersonId(2), &ja).is_none());
+        assert!(pares
+            .escolher(PersonId(1), PersonId(2), &ja, &toda_a_sala())
+            .is_none());
     }
 
     #[test]
@@ -376,7 +481,7 @@ mod testes {
             publico,
         );
         let escolhido = pares
-            .escolher(PersonId(1), PersonId(2), &HashSet::new())
+            .escolher(PersonId(1), PersonId(2), &HashSet::new(), &toda_a_sala())
             .unwrap();
         assert!(escolhido.enderecos.contains(&publico));
         assert!(escolhido.enderecos.contains(&endereco(3)));

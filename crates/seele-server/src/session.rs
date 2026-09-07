@@ -2250,7 +2250,14 @@ async fn run_session(
                             // onda existir, que é o que «a malha é alívio,
                             // nunca dependência» quer dizer no código.
                             let pelo_par = assistir
-                                && apontar_um_par(server, screen, dono, session.person).await;
+                                && apontar_um_par(
+                                    server,
+                                    screen,
+                                    voice_room,
+                                    dono,
+                                    session.person,
+                                )
+                                .await;
                             let comando = if assistir && !pelo_par {
                                 VoiceRoomCommand::TelaAssistir {
                                     person: session.person,
@@ -3017,7 +3024,8 @@ async fn moderavel(
 /// `true` quando um par foi apontado e as duas mensagens saíram — e é o `true`
 /// que faz o braço de `WatchScreen` **não** abrir o cano do servidor para esta
 /// pessoa. `false` é o caminho de sempre, e ele é a maioria dos casos: ninguém
-/// emprestando na sala, ninguém livre, ou quem pediu sem identidade declarada.
+/// emprestando **nesta sala**, ninguém livre, ou quem pediu sem identidade
+/// declarada.
 ///
 /// # As duas declarações, e por que as duas
 ///
@@ -3041,13 +3049,33 @@ async fn moderavel(
 async fn apontar_um_par(
     server: &Server,
     screen: ScreenId,
+    voice_room: VoiceRoomId,
     dono: PersonId,
     quem_quer: PersonId,
 ) -> bool {
+    // **Quem está na sala agora, perguntado agora.** `crate::pares::Pares` é
+    // global ao daemon — uma pessoa declara identidade uma vez por sessão, não
+    // uma vez por sala —, então sem esta pergunta quem empresta na sala B seria
+    // apontado para servir a tela da sala A, e repassaria a tela da sala B a
+    // quem nunca entrou nela. A fonte é a `Occupancy`, que é reescrita a cada
+    // entrada e saída; guardar a sala dentro da declaração daria um valor
+    // escrito uma vez e nunca mais.
+    //
+    // Lido **antes** de tomar `pares`, e não dentro: dois mutexes tomados na
+    // mesma ordem em todo lugar são uma ordem; tomados em ordens diferentes
+    // são um travamento esperando o primeiro dia ruim.
+    let na_sala: std::collections::HashSet<PersonId> = server
+        .occupancy
+        .lock()
+        .await
+        .in_voice_room(voice_room)
+        .into_iter()
+        .map(|ocupante| ocupante.person)
+        .collect();
     let (empresta, quem) = {
         let mut pares = server.pares.lock().await;
         let ja_servindo = pares.ja_servindo();
-        let Some(empresta) = pares.escolher(dono, quem_quer, &ja_servindo) else {
+        let Some(empresta) = pares.escolher(dono, quem_quer, &ja_servindo, &na_sala) else {
             return false;
         };
         let Some(quem) = pares.declaracao_de(quem_quer).cloned() else {
