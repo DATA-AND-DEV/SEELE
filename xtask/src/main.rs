@@ -5,11 +5,13 @@
 
 use std::process::ExitCode;
 
+mod check_api;
 mod check_deps;
 
 fn main() -> ExitCode {
     let command = std::env::args().nth(1);
     match command.as_deref() {
+        Some("check-api") => check_api::run(),
         Some("check-deps") => check_deps::run(),
         Some(other) => {
             eprintln!("xtask: unknown command `{other}`");
@@ -27,5 +29,6 @@ fn usage() {
     eprintln!("usage: cargo xtask <command>");
     eprintln!();
     eprintln!("commands:");
+    eprintln!("  check-api    enforce the MOD API façade from `api/` (ADR 0045)");
     eprintln!("  check-deps   enforce the dependency rule from specs/01-arquitetura.md");
 }

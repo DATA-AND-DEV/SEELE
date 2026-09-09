@@ -27,6 +27,7 @@ pub mod control;
 pub mod encontro;
 pub mod ids;
 pub mod media;
+pub mod mods;
 pub mod screen;
 pub mod signal;
 pub mod stream;

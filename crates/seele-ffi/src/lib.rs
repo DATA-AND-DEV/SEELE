@@ -33,6 +33,7 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod mods;
 pub mod types;
 
 use std::net::{SocketAddr, ToSocketAddrs};

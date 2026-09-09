@@ -30,6 +30,7 @@ pub mod aparencia;
 pub mod attachments;
 pub mod channels;
 pub mod messages;
+pub mod mods;
 pub mod schema;
 pub mod subida;
 
@@ -400,6 +401,13 @@ mod tests {
                      DELETE FROM schema_version WHERE version >= 3;
                      DROP TABLE attachments;
                      DROP TABLE portaria;
+
+                     -- A parte da migração 11 (ADR 0045), pela regra que o
+                     -- comentário acima escreve: ela cria duas tabelas, e o
+                     -- replay refaz o `CREATE TABLE` de cada uma. `mod_data`
+                     -- primeiro porque ela referencia `mods`.
+                     DROP TABLE mod_data;
+                     DROP TABLE mods;
 
                      -- A parte da migração 10, pela mesma regra: ela acrescenta
                      -- uma coluna, e um `ALTER TABLE ADD COLUMN` reaplicado

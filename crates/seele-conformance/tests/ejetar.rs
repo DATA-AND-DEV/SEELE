@@ -309,12 +309,12 @@ async fn hospedar_ejetar_e_hospedar_de_novo_libera_a_porta() -> Result<()> {
     // A porta sai da primeira hospedagem, que subiu com zero: pedir uma porta
     // ao sistema e reusá-la é a única forma de testar «a mesma porta» sem
     // escolher um número que possa ser de outra pessoa.
-    let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa").await?;
+    let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None).await?;
     let porta = primeira.endereco().port();
     assert_ne!(porta, 0, "o sistema não escolheu porta");
     primeira.encerrar().await;
 
-    let segunda = Hospedagem::iniciar(porta, Location::Memory, "Casa").await;
+    let segunda = Hospedagem::iniciar(porta, Location::Memory, "Casa", None).await;
     let segunda = match segunda {
         Ok(hospedagem) => hospedagem,
         Err(erro) => panic!("a porta não voltou depois de encerrar: {erro:?}"),

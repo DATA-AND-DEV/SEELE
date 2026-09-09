@@ -484,6 +484,38 @@ pub const MIGRATIONS: &[Migration] = &[
             ALTER TABLE people ADD COLUMN icon BLOB;
         "#,
     },
+    Migration {
+        version: 11,
+        description: "MODs habilitados neste servidor, e o quintal de dados de cada um",
+        sql: r#"
+            -- ADR 0045. O que este servidor exige de quem entra.
+            --
+            -- `hash` é texto e não BLOB porque ele é lido por uma pessoa
+            -- comparando com o que o indexador publica — a mesma razão pela
+            -- qual o `pins` do ADR 0017 é texto puro.
+            --
+            -- `enabled` é coluna e não a ausência da linha porque desabilitar
+            -- preserva os dados: apagar a linha ao desabilitar tornaria o ato
+            -- destrutivo, e ninguém desabilita para testar o que não volta.
+            CREATE TABLE mods (
+                id         TEXT PRIMARY KEY NOT NULL,
+                version    TEXT NOT NULL,
+                hash       TEXT NOT NULL,
+                enabled    INTEGER NOT NULL DEFAULT 1,
+                config     TEXT NOT NULL DEFAULT '{}'
+            );
+
+            -- O quintal do ADR 0045: cada MOD escreve só sob a chave dele, com
+            -- teto conferido no código. Tabela e não coluna porque são muitas
+            -- linhas por MOD e nenhuma é lida junto do resto.
+            CREATE TABLE mod_data (
+                mod_id     TEXT NOT NULL REFERENCES mods(id),
+                key        TEXT NOT NULL,
+                value      BLOB NOT NULL,
+                PRIMARY KEY (mod_id, key)
+            );
+        "#,
+    },
 ];
 
 #[cfg(test)]

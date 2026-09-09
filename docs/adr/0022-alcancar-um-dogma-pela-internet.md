@@ -1,7 +1,13 @@
 # ADR 0022 — Alcançar um Dogma pela internet
 
-**Estado:** aceito
+**Estado:** aceito — **o degrau 5 foi emendado pelo [ADR 0045](0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md)** em 2026-09-05
 **Data:** 2026-08-10
+
+> **Retransmissão de terceiro deixou de estar fora de escopo por completo.** O
+> 0045 permite que um MOD abra túnel — playit.gg, ngrok e afins —, com uma tela
+> que nomeia o terceiro e diz que todo o áudio e o texto daquele servidor passam
+> por ele. A escada desta página continua sendo a resposta do produto; o que
+> mudou é que ela deixou de ser a única possível.
 **Degraus 2 e 3 implementados:** 2026-08-17 — ver "O que a implementação
 ensinou", no fim, e "O que a primeira máquina de outra pessoa ensinou", logo
 depois: três decisões deste ADR foram corrigidas por um relato de campo, e a

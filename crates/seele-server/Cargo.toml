@@ -39,6 +39,38 @@ igd-next = { version = "0.17.1", default-features = false, features = ["aio_toki
 # entram os `netlink-*` no lugar dos `objc2-*`, e no Windows nada além do
 # `windows-sys` que o quinn já traz. Ver `alcance::pcp::roteador_padrao`.
 netdev = { version = "0.46.1", default-features = false, features = ["gateway"] }
+# O interpretador dos MODs (ADR 0045). QuickJS pelo binding, e não Boa: o spike
+# `spikes/mod-em-js/` mediu 11× menos binário (+1 098 KiB contra +12 088), ~2×
+# menos custo por chamada (39 ns contra 73) e ~4× menos memória com 50 contextos
+# (5,9 MB contra 24,8). Contra o orçamento de 1 vCPU / 512 MB que o
+# `check_deps` protege, a diferença decide.
+#
+# MIT, então nenhuma exceção nova no `deny.toml`. Custo medido contra o
+# `Cargo.lock` deste workspace: **4 crates novas** — `rquickjs`,
+# `rquickjs-core`, `rquickjs-sys` e `relative-path`. É menos que o `netdev`
+# acima custou.
+#
+# **O custo que ele traz, e é novo neste projeto:** `rquickjs-sys` compila fonte
+# em C, então construir este crate passa a exigir um compilador de C. Existe nos
+# três alvos — Xcode CLT, MSVC nos runners de Windows, `cc` no Linux — e é a
+# primeira vez que o Rust sozinho não basta.
+rquickjs = "0.12.2"
+# A rede que um MOD alcança (ADR 0045, bloco `world`). `blocking`, porque quem
+# chama é a thread dos MODs, que de propósito não é do Tokio.
+#
+# Custo medido contra o `Cargo.lock`: **0 crates novas** — o `seele-app` já
+# traz esta versão inteira pelo atualizador do ADR 0026, e `rustls` e `ring`
+# já estavam aqui pelo quinn. O que entra é uma aresta, não uma árvore.
+#
+# `default-features = false` mantém fora o `native-tls`: uma segunda pilha de
+# TLS num binário que já tem a do quinn seria duas de tudo.
+reqwest = { version = "0.13", default-features = false, features = [
+    "blocking",
+    # Mesma feature que o `seele-app` já usa, e pelo mesmo motivo: o provedor
+    # de criptografia é escolhido pelo processo, e duas escolhas no mesmo
+    # binário seriam duas pilhas de TLS.
+    "rustls-no-provider",
+] }
 seele-proto = { path = "../seele-proto" }
 quinn = "0.11.11"
 rand = "0.10.2"
