@@ -362,7 +362,9 @@ pub async fn serve(
     // Out of every room, not out of the one this connection remembers. The loop
     // above can end at any `?`, and a path that returns early does not know
     // where the person was sitting.
-    voice_rooms.leave_everywhere(session.person).await;
+    voice_rooms
+        .leave_everywhere(session.person, session.ssrc)
+        .await;
     soltar_telas_e_pares_de(&server, session.person).await;
 
     // And **announced**, which it was not. `Event::PersonLeft` was sent only
@@ -378,7 +380,7 @@ pub async fn serve(
         .occupancy
         .lock()
         .await
-        .vacate_everywhere(session.person)
+        .vacate_everywhere(session.person, session.ssrc)
     {
         let _ = server.events.send(Event::PersonLeft {
             voice_room,
@@ -390,7 +392,12 @@ pub async fn serve(
     // laço acima: sem isto, todo cliente acumula o nome de quem já conectou
     // alguma vez e desenha todos como presentes. `PersonLeft` não cobre — ele
     // diz que uma sala esvaziou, e quem nunca se sentou não produz nenhum.
-    if server.presentes.lock().await.saiu(session.person) {
+    if server
+        .presentes
+        .lock()
+        .await
+        .saiu(session.person, session.ssrc)
+    {
         let _ = server.events.send(Event::PersonGone {
             person: session.person,
         });
@@ -1559,7 +1566,9 @@ async fn run_session(
                         midia.entrou(current_voice_room);
                     }
                     ClientMessage::LeaveVoiceRoom => {
-                        voice_rooms.leave_everywhere(session.person).await;
+                        voice_rooms
+                            .leave_everywhere(session.person, session.ssrc)
+                            .await;
                         soltar_telas_e_pares_de(server, session.person).await;
                         if let Some(id) = current_voice_room.take() {
                             midia.entrou(current_voice_room);
@@ -2633,7 +2642,9 @@ async fn run_session(
                     // client is ever holding a roster for a room it has already
                     // been told to forget.
                     Event::VoiceRoomDeleted { voice_room: id } if current_voice_room == Some(*id) => {
-                        voice_rooms.leave_everywhere(session.person).await;
+                        voice_rooms
+                            .leave_everywhere(session.person, session.ssrc)
+                            .await;
                         soltar_telas_e_pares_de(server, session.person).await;
                         current_voice_room = None;
                         midia.entrou(current_voice_room);
@@ -2844,7 +2855,9 @@ async fn assentar(
     // Out of the old room before into the new one. Without this a person who
     // walks from one voice room to another is still a member of the first, and goes
     // on hearing it.
-    voice_rooms.leave_everywhere(session.person).await;
+    voice_rooms
+        .leave_everywhere(session.person, session.ssrc)
+        .await;
     // E a tela vai junto. Uma transmissão não anda de sala com quem a manda:
     // quem ficou na sala anterior continuaria vendo o cabeçalho de um fluxo que
     // agora aponta para outro lugar, e o §6 item 3 só permite uma por sala —
@@ -2869,7 +2882,7 @@ async fn assentar(
     // walking into would be telling it something it already knows.
     let saiu_de = {
         let mut occupancy = server.occupancy.lock().await;
-        let mut saiu_de = occupancy.vacate_everywhere(session.person);
+        let mut saiu_de = occupancy.vacate_everywhere(session.person, session.ssrc);
         saiu_de.retain(|anterior| *anterior != destino);
         occupancy.seat(
             destino,

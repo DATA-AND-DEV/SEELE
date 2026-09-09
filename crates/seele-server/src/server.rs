@@ -599,9 +599,32 @@ impl Presentes {
         self.por_person.insert(quem.person, quem).is_none()
     }
 
-    /// Tira alguém, e diz se havia o que tirar.
-    pub fn saiu(&mut self, person: PersonId) -> bool {
-        self.por_person.remove(&person).is_some()
+    /// Tira alguém **se a ficha for desta conexão**, e diz se tirou.
+    ///
+    /// # O `ssrc`, e o relato que o pôs aqui
+    ///
+    /// 07/09/2026, do campo: *«ele entrava na sala, ficava alguns segundos e
+    /// saía, e não aparecia pra mim — mas pra ele, ele tava dentro.»*
+    ///
+    /// O cliente tenta vários caminhos ao mesmo tempo (ADR 0037) e fica com o
+    /// primeiro que abre. Os outros são abandonados e fecham logo depois — **e
+    /// fechar roda a saída inteira**. Medido: o abandonado fecha uns 80 ms
+    /// depois de o bom ter registrado a ficha, e a saída dele, chaveada só por
+    /// [`PersonId`], apagava a ficha de quem estava vivo. Nada reanuncia, então
+    /// a pessoa some da lista de todo mundo pelo resto da sessão, com a conexão
+    /// dela saudável do outro lado.
+    ///
+    /// O `ssrc` distingue as duas porque [`crate::session::Registry`] emite um
+    /// por conexão, e o [`Occupant`] já o guardava. Faltava conferi-lo.
+    pub fn saiu(&mut self, person: PersonId, ssrc: Ssrc) -> bool {
+        let e_desta_conexao = self
+            .por_person
+            .get(&person)
+            .is_some_and(|quem| quem.ssrc == ssrc);
+        if e_desta_conexao {
+            self.por_person.remove(&person);
+        }
+        e_desta_conexao
     }
 
     /// Todo mundo que está aqui agora.
@@ -645,7 +668,13 @@ impl Occupancy {
     /// re-enters the same voice room, and a roster with the same person twice is a
     /// roster nobody trusts.
     pub fn seat(&mut self, voice_room: VoiceRoomId, occupant: Occupant) {
-        let _ = self.vacate_everywhere(occupant.person);
+        // **Sentar é por pessoa, e não por conexão.** Sentar-se diz «meu lugar
+        // é este agora», e um assento antigo da mesma pessoa tem de sair venha
+        // ele de que conexão vier. É o oposto de `vacate_everywhere` na saída,
+        // onde apagar o de outra conexão é justamente o defeito.
+        for sentados in self.by_voice_room.values_mut() {
+            sentados.retain(|quem| quem.person != occupant.person);
+        }
         self.by_voice_room
             .entry(voice_room)
             .or_default()
@@ -680,11 +709,14 @@ impl Occupancy {
     /// connection both clear the seat and tell everybody about it — the same
     /// reasoning `crate::voice_room::voice_rooms::leave_everywhere` gives for being
     /// broadcast rather than aimed.
-    pub fn vacate_everywhere(&mut self, person: PersonId) -> Vec<VoiceRoomId> {
+    /// O `ssrc` é o que impede a conexão abandonada de esvaziar o assento da
+    /// que está viva — ver o doc de [`Presentes::saiu`], mesmo defeito e mesmo
+    /// relato.
+    pub fn vacate_everywhere(&mut self, person: PersonId, ssrc: Ssrc) -> Vec<VoiceRoomId> {
         let mut vacated = Vec::new();
         for (voice_room, seated) in &mut self.by_voice_room {
             let before = seated.len();
-            seated.retain(|occupant| occupant.person != person);
+            seated.retain(|occupant| occupant.person != person || occupant.ssrc != ssrc);
             if seated.len() != before {
                 vacated.push(*voice_room);
             }
@@ -1029,7 +1061,7 @@ mod tests {
         occupancy.seat(VoiceRoomId(7), occupant(1, "marcela"));
 
         assert_eq!(
-            occupancy.vacate_everywhere(PersonId(1)),
+            occupancy.vacate_everywhere(PersonId(1), Ssrc(10)),
             vec![VoiceRoomId(7)]
         );
         assert!(occupancy.everywhere().is_empty());
@@ -1045,7 +1077,9 @@ mod tests {
         occupancy.vacate(VoiceRoomId(7), PersonId(1));
 
         assert!(
-            occupancy.vacate_everywhere(PersonId(1)).is_empty(),
+            occupancy
+                .vacate_everywhere(PersonId(1), Ssrc(10))
+                .is_empty(),
             "a person who had already left was announced as leaving again"
         );
     }
@@ -1059,7 +1093,7 @@ mod tests {
         occupancy.seat(VoiceRoomId(1), occupant(1, "marcela"));
 
         assert_eq!(
-            occupancy.vacate_everywhere(PersonId(1)),
+            occupancy.vacate_everywhere(PersonId(1), Ssrc(10)),
             vec![VoiceRoomId(1)]
         );
         occupancy.seat(VoiceRoomId(2), occupant(1, "marcela"));
