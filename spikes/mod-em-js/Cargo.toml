@@ -6,7 +6,7 @@ edition = "2021"
 publish = false
 
 # Fora do workspace de propósito, como os spikes anteriores. Existe para
-# responder **uma** pergunta — qual motor o ADR 0044 embute no servidor — e
+# responder **uma** pergunta — qual motor o ADR 0045 embute no servidor — e
 # morre com a resposta. Nada pode depender dele.
 [workspace]
 

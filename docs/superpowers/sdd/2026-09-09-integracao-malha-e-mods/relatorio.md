@@ -95,15 +95,58 @@ público; os dois dos MODs ainda são propostas de um ramo não mergeado.
 | `0045-toda-versao-continua-de-pe` | **0046** | proposto |
 | `0044-o-portao-divide-a-subida-medida` | fica | aceito |
 
-75 referências acompanharam, em 29 arquivos. As duas páginas renumeradas abrem
-com uma nota dizendo o número antigo, porque commits e conversas anteriores a
-hoje dizem «ADR 0044» querendo dizer a página dos MODs.
+**118 referências** acompanharam, em **35 arquivos**. As duas páginas
+renumeradas abrem com uma nota dizendo o número antigo, porque commits e
+conversas anteriores a hoje dizem «ADR 0044» querendo dizer a página dos MODs.
 
 Ficaram de fora da troca, conferidos um a um: o próprio
 `0044-o-portao-divide-a-subida-medida.md` e a única citação a ele fora dali, em
-`docs/superpowers/specs/2026-09-05-caminho-entre-pares-design.md`. Antes de
-trocar, as 63 ocorrências de `0044`/`0045` nos arquivos alvo foram lidas: todas
-eram referência a ADR, nenhuma era outro número.
+`docs/superpowers/specs/2026-09-05-caminho-entre-pares-design.md` (§11, «o
+servidor mede a própria subida desde o ADR 0044»). Antes de trocar, as
+ocorrências de `0044`/`0045` nos arquivos alvo foram lidas: todas eram
+referência a ADR, nenhuma era outro número.
+
+**A primeira passada errou, e o conferidor de links é que pegou.** Ela cobriu
+29 arquivos, achados por um `grep` que não incluía `docs/superpowers/plans/`
+nem `spikes/` — e deixou **seis** arquivos apontando para um `0044-mods-….md`
+que já não existia: os dois planos dos MODs, o `README.md`, o `Cargo.toml` e
+dois `src/bin/` do spike. Quatro deles eram link de markdown quebrado, e nenhum
+teste, `fmt`, `clippy` ou `check-api` teria reclamado: são comentários e prosa.
+
+O que pegou foi uma varredura que resolve **todo** link `(NNNN-….md)` do
+repositório contra a lista real de `docs/adr/`. Ela agora dá zero, e é a
+conferência que vale a pena repetir depois de qualquer renumeração:
+
+```sh
+# zero = nenhum link de ADR aponta para arquivo que não existe
+python3 - <<'PY'
+import os, re
+alvos = set(os.listdir('docs/adr'))
+ruins = []
+for base, _, arqs in os.walk('.'):
+    if '/.git' in base or './target' in base:
+        continue
+    for a in arqs:
+        if not a.endswith(('.md', '.rs', '.toml', '.js', '.json')):
+            continue
+        p = os.path.join(base, a)
+        try:
+            txt = open(p, encoding='utf-8').read()
+        except Exception:
+            continue
+        for m in re.finditer(r'\(([^()]*?adr/)?(\d{4}-[a-z0-9-]+\.md)\)', txt):
+            if m.group(2) not in alvos:
+                ruins.append((p, m.group(2)))
+print('links de ADR quebrados:', len(ruins))
+for p, l in ruins:
+    print(' ', p, '->', l)
+PY
+```
+
+(A cópia preservada em `sdd/2026-09-06-caminho-entre-pares/` fica **fora** da
+renumeração de propósito: ela é registro conferido por hash, e reescrevê-la
+invalidaria o inventário. Os relatórios de lá dizem «0044» com o sentido que
+tinham no dia em que foram escritos.)
 
 ### O que **não** conflitou, ao contrário do previsto
 

@@ -8,7 +8,7 @@
 
 **Tech Stack:** `rquickjs` 0.12.2 (MIT), medido em `spikes/mod-em-js/`.
 
-**Spec:** `docs/superpowers/specs/2026-09-05-mods-design.md` · ADR [0044](../../adr/0044-mods-o-produto-base-tem-regras-e-um-mod-nao.md)
+**Spec:** `docs/superpowers/specs/2026-09-05-mods-design.md` · ADR [0045](../../adr/0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md)
 
 **Plano anterior:** `2026-09-05-mods-nucleo-local.md` (concluído). **Spike:** `spikes/mod-em-js/README.md` (concluído).
 
@@ -34,7 +34,7 @@ dados** do MOD, **rede de saída** (o MOD de túnel do dono depende disso) e
 
 ## Quando congelar passa a doer, e por que isso não bloqueia este plano
 
-O ADR 0044 diz que uma versão de API nunca é editada depois de publicada, e é
+O ADR 0045 diz que uma versão de API nunca é editada depois de publicada, e é
 verdade. **Mas «publicada» quer dizer «existe MOD de terceiro no mundo», e o
 indexador é o plano 6.** Até lá, `api/v1.json` ainda se mexe: o guarda de
 append-only nasce aqui e o teste que o prende ao mundo nasce com o indexador.
@@ -99,7 +99,7 @@ que ninguém repare.
 Em `crates/seele-server/Cargo.toml`, em `[dependencies]`, em ordem alfabética:
 
 ```toml
-# O interpretador dos MODs (ADR 0044). QuickJS e não Boa, e não por gosto:
+# O interpretador dos MODs (ADR 0045). QuickJS e não Boa, e não por gosto:
 # `spikes/mod-em-js/` mediu 11× menos binário, ~2× menos custo por chamada e
 # ~4× menos memória com 50 contextos. MIT, então nada muda no `deny.toml`.
 #
@@ -131,7 +131,7 @@ mod tests {
             .expect("chamar");
     }
 
-    /// O teto de memória do ADR 0044, e a metade que importa: **a sala
+    /// O teto de memória do ADR 0045, e a metade que importa: **a sala
     /// continua**. Um MOD que aloca sem parar é cortado, e o contexto dele
     /// segue respondendo — medido em `spikes/mod-em-js/src/bin/tetos.rs`.
     #[test]
@@ -232,7 +232,7 @@ No topo de `crates/seele-server/src/mods/mod.rs`:
 ```rust
 //! Where a MOD's server half runs.
 //!
-//! ADR 0044. A MOD is third-party code with real access, by decision — the
+//! ADR 0045. A MOD is third-party code with real access, by decision — the
 //! product's rules protect the product and do not reach a MOD. What this module
 //! does is not restrict it: it is to keep one bad MOD from taking the room down
 //! with it.
@@ -549,7 +549,7 @@ Um arquivo por versão, e **nenhum deles é editado depois de publicado**.
 
 ## Por que congelado
 
-O ADR 0044 decidiu que a API de MOD é uma **fachada** e não uma projeção do
+O ADR 0045 decidiu que a API de MOD é uma **fachada** e não uma projeção do
 protocolo. A diferença é a que importa quando alguém renomeia um campo:
 
 - projeção: o nome muda por dentro, a API muda junto, **todo MOD quebra**;
@@ -578,7 +578,7 @@ fecha.
   e passam pelas **mesmas permissões** que a janela atravessa: não há caminho
   paralelo, então não há semântica paralela para divergir.
 - **`own`** e **`world`** — o quintal de dados do MOD, e o que não está no
-  protocolo: rede, relógio e log. É onde a «liberdade total» do ADR 0044 mora, e
+  protocolo: rede, relógio e log. É onde a «liberdade total» do ADR 0045 mora, e
   é a parte que a tela de aceite tem de dizer em voz alta.
 ```
 
@@ -661,7 +661,7 @@ No topo de `xtask/src/check_api.rs`:
 ```rust
 //! Enforces the MOD API façade from `api/`.
 //!
-//! ADR 0044. The question this asks, and the direction is the whole point:
+//! ADR 0045. The question this asks, and the direction is the whole point:
 //!
 //! > Does every name in `api/vN.json` still point at something?
 //!
@@ -792,7 +792,7 @@ e no `match`, antes do braço `Some(other)`:
 e no `usage()`:
 
 ```rust
-    eprintln!("  check-api    enforce the MOD API façade from `api/` (ADR 0044)");
+    eprintln!("  check-api    enforce the MOD API façade from `api/` (ADR 0045)");
 ```
 
 O `xtask` precisa de `serde_json` no `Cargo.toml` dele, na mesma versão dos

@@ -4,7 +4,7 @@
 
 ## A pergunta
 
-O [ADR 0044](../../docs/adr/0044-mods-o-produto-base-tem-regras-e-um-mod-nao.md)
+O [ADR 0045](../../docs/adr/0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md)
 decide que um MOD é **JavaScript nos dois lados**, e deixa uma pendência escrita
 como pendência em vez de resolvida por intuição:
 

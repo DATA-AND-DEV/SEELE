@@ -1,4 +1,4 @@
-// Segunda metade do spike: os dois tetos que o ADR 0044 promete existem?
+// Segunda metade do spike: os dois tetos que o ADR 0045 promete existem?
 // Sem eles, um MOD em laço infinito é a diferença entre a sala funcionar e não.
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

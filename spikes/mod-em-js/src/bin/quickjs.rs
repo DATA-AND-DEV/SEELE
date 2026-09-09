@@ -1,4 +1,4 @@
-// Spike do ADR 0044: quanto custa um interpretador JS dentro de um SFU de
+// Spike do ADR 0045: quanto custa um interpretador JS dentro de um SFU de
 // 1 vCPU / 512 MB. Mede o que decide, e nada além.
 //
 // O programa é o mesmo do `boa.rs` de propósito: comparar dois motores com dois

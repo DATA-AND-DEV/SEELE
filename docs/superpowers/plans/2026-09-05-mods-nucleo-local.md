@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 1.97, `serde_json` 1.0.151 (já na árvore em três crates), `sha2` 0.11 (já em `seele-proto`), Tauri 2, JavaScript sem framework.
 
-**Spec:** `docs/superpowers/specs/2026-09-05-mods-design.md` · ADRs [0044](../../adr/0044-mods-o-produto-base-tem-regras-e-um-mod-nao.md) e [0045](../../adr/0045-toda-versao-continua-de-pe.md)
+**Spec:** `docs/superpowers/specs/2026-09-05-mods-design.md` · ADRs [0045](../../adr/0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md) e [0046](../../adr/0046-toda-versao-continua-de-pe.md)
 
 ## Escopo deste plano
 
@@ -18,7 +18,7 @@ Este é o **plano 1 de 5**, e cobre as etapas 1 e 2 da ordem de entrega do spec.
 
 **Não entra, e cada um ganha plano próprio:** o spike do interpretador (etapa 3), o runtime no servidor e a API congelada (4), os verbos de protocolo e a tela de aceite (5), multi-versão (6), indexador (7).
 
-**O que está funcionando ao fim deste plano:** alguém põe um diretório de MOD em disco, habilita no servidor que hospeda nesta máquina, e o JS daquele MOD roda na janela com acesso ao DOM inteiro — que é, pelo ADR 0044, exatamente o alcance decidido. Um MOD de cor ou de layout já funciona. Nada atravessa o fio e nada vem do indexador.
+**O que está funcionando ao fim deste plano:** alguém põe um diretório de MOD em disco, habilita no servidor que hospeda nesta máquina, e o JS daquele MOD roda na janela com acesso ao DOM inteiro — que é, pelo ADR 0045, exatamente o alcance decidido. Um MOD de cor ou de layout já funciona. Nada atravessa o fio e nada vem do indexador.
 
 ## Global Constraints
 
@@ -28,7 +28,7 @@ Copiados do spec e das convenções do repositório. Valem para toda tarefa.
 - **`unwrap_used` e `expect_used` são `deny`** fora de teste (`specs/10-convencoes.md`). Em teste, o módulo relaxa com `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]` — é como os módulos existentes fazem.
 - **`missing_docs = "warn"`**: todo item público leva doc.
 - **Código, identificadores e comentários em inglês; documentação, specs e ADRs em português** (`specs/10-convencoes.md`, ADR 0013). Módulos recentes do `seele-core` seguem inglês (ADR 0023).
-- **Chaves do `mod.json` em inglês** (ADR 0044).
+- **Chaves do `mod.json` em inglês** (ADR 0045).
 - **Nenhuma razão de erro em texto livre chega à interface** (`specs/02-protocolo.md`): cada recusa é uma variante com os números dentro, e a casca decide como escrever. É o padrão de `seele_proto::version::Incompatible`.
 - **Regra de dependência**: `proto` não depende de ninguém; `core` depende de `proto` e `audio`; `server` depende de `proto` e **nunca** de `core` nem de `audio`; cascas dependem só de `core`. Conferido por `cargo xtask check-deps`.
 - **Migrações são append-only e sem passo de descida.** `no_migration_contains_a_down_step` reprova `DROP TABLE` e `DROP COLUMN`.
@@ -76,7 +76,7 @@ Em `crates/seele-proto/Cargo.toml`, na seção `[dependencies]`, em ordem alfab�
 
 ```toml
 # O manifesto de um MOD é JSON, e não postcard: ele é escrito à mão por
-# terceiros e lido por uma pessoa antes de instalar (ADR 0044). Já está na
+# terceiros e lido por uma pessoa antes de instalar (ADR 0045). Já está na
 # árvore em `seele-app`, `seele-ffi` e `seele-server`, na mesma versão, então
 # não há exceção nova no `deny.toml`.
 serde_json = "1.0.151"
@@ -114,7 +114,7 @@ mod tests {
         assert_eq!(lido.server, None);
     }
 
-    /// Chave desconhecida é recusada, e o motivo é do ADR 0029 e sobrevive no 0044.
+    /// Chave desconhecida é recusada, e o motivo é do ADR 0029 e sobrevive no 0045.
     ///
     /// `vesion` com um `s` a menos instalaria calado um MOD sem versão, e o
     /// autor nunca ficaria sabendo. Recusar é a única forma de retorno que um
@@ -140,7 +140,7 @@ mod tests {
         );
     }
 
-    /// ADR 0044: «o MOD não carrega, e diz» — nomeando os dois números.
+    /// ADR 0045: «o MOD não carrega, e diz» — nomeando os dois números.
     #[test]
     fn uma_api_do_futuro_e_recusada_com_os_dois_numeros() {
         let texto = manifesto_minimo().replace(
@@ -164,7 +164,7 @@ mod tests {
 
     /// Um MOD que não declara nenhuma das duas metades não faz nada, e um MOD
     /// que não faz nada instalado em silêncio é a instalação parcial silenciosa
-    /// que o ADR 0029 nomeia e o 0044 herda.
+    /// que o ADR 0029 nomeia e o 0045 herda.
     #[test]
     fn um_mod_sem_nenhuma_das_duas_metades_e_recusado() {
         let texto = format!(
@@ -224,7 +224,7 @@ No topo de `crates/seele-proto/src/mods.rs`, antes do `mod tests`:
 ```rust
 //! What a MOD declares about itself, and what the product refuses.
 //!
-//! ADR 0044. A MOD is a directory with a `mod.json`, an optional client half
+//! ADR 0045. A MOD is a directory with a `mod.json`, an optional client half
 //! and an optional server half. This module is the manifest and nothing else:
 //! reading disk belongs to `seele-core`, storing state belongs to
 //! `seele-server`.
@@ -243,7 +243,7 @@ use thiserror::Error;
 
 /// Version of the `mod.json` format this build reads.
 ///
-/// An integer and not semver, for the reason ADR 0029 gave and 0044 keeps:
+/// An integer and not semver, for the reason ADR 0029 gave and 0045 keeps:
 /// semver invites an argument about what is compatible, and here there is none
 /// — the schema only grows.
 pub const MANIFEST_SCHEMA: u32 = 1;
@@ -252,7 +252,7 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 ///
 /// Separate from [`MANIFEST_SCHEMA`] because they move for different reasons:
 /// the schema changes when the *manifest* gains a field, the API when what a
-/// MOD can *call* changes. ADR 0044 freezes each API version in its own file,
+/// MOD can *call* changes. ADR 0045 freezes each API version in its own file,
 /// never edited once shipped.
 pub const MOD_API_VERSION: u32 = 1;
 
@@ -273,7 +273,7 @@ pub struct Manifest {
     pub version: String,
     /// MOD API version this MOD was written against.
     pub api: u32,
-    /// The public repository. Required — ADR 0044 makes it a condition of
+    /// The public repository. Required — ADR 0045 makes it a condition of
     /// publication, and this is where it is stated.
     pub repo: String,
     /// What this MOD asks to reach, for the acceptance screen to show before
@@ -417,7 +417,7 @@ Expected: sem saída de erro nos dois.
 git add crates/seele-proto/src/mods.rs crates/seele-proto/src/lib.rs crates/seele-proto/Cargo.toml
 git commit -m "feat(mods): o manifesto existe, e cada recusa carrega os números
 
-ADR 0044. Chave desconhecida é recusada porque um \`vesion\` com um s a menos
+ADR 0045. Chave desconhecida é recusada porque um \`vesion\` com um s a menos
 instalaria calado um MOD sem o que o autor achava essencial, e recusar é a
 única forma de retorno que um autor tem.
 
@@ -658,7 +658,7 @@ No topo de `crates/seele-core/src/mods.rs`:
 ```rust
 //! MODs installed on this machine.
 //!
-//! ADR 0044. This module does the I/O and nothing else: what a manifest *is*,
+//! ADR 0045. This module does the I/O and nothing else: what a manifest *is*,
 //! and what makes one invalid, lives in `seele_proto::mods`. Splitting them is
 //! what lets the server share the validation without depending on this crate,
 //! which `xtask/src/check_deps.rs` forbids.
@@ -878,7 +878,7 @@ Em `crates/seele-server/src/persistence/schema.rs`, **ao fim** de `MIGRATIONS`, 
         version: 11,
         description: "MODs habilitados neste servidor, e o quintal de dados de cada um",
         sql: r#"
-            -- ADR 0044. O que este servidor exige de quem entra.
+            -- ADR 0045. O que este servidor exige de quem entra.
             --
             -- `hash` é texto e não BLOB porque ele é lido por uma pessoa
             -- comparando com o que o indexador publica — a mesma razão pela
@@ -895,7 +895,7 @@ Em `crates/seele-server/src/persistence/schema.rs`, **ao fim** de `MIGRATIONS`, 
                 config     TEXT NOT NULL DEFAULT '{}'
             );
 
-            -- O quintal do ADR 0044: cada MOD escreve só sob a chave dele, com
+            -- O quintal do ADR 0045: cada MOD escreve só sob a chave dele, com
             -- teto conferido no código. Tabela e não coluna porque são muitas
             -- linhas por MOD e nenhuma é lida junto do resto.
             CREATE TABLE mod_data (
@@ -942,7 +942,7 @@ mod tests {
         assert_eq!(lista[0].hash, "abc123");
     }
 
-    /// ADR 0044: desabilitar preserva. Se a linha sumisse, desabilitar seria
+    /// ADR 0045: desabilitar preserva. Se a linha sumisse, desabilitar seria
     /// destrutivo e ninguém desabilitaria para testar.
     #[test]
     fn desabilitar_tira_da_lista_e_preserva_a_linha() {
@@ -1006,7 +1006,7 @@ No topo de `crates/seele-server/src/persistence/mods.rs`:
 ```rust
 //! Which MODs this server requires, and whether each is on.
 //!
-//! ADR 0044. The rows say what a joining client has to fetch and verify; the
+//! ADR 0045. The rows say what a joining client has to fetch and verify; the
 //! bytes never live here.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
@@ -1085,7 +1085,7 @@ Expected: PASS — os quatro novos mais os três guardas de migração.
 git add crates/seele-server/src/persistence/
 git commit -m "feat(mods): migração 11, e desabilitar deixa de ser destrutivo
 
-\`enabled\` é coluna e não a ausência da linha porque o ADR 0044 decidiu que
+\`enabled\` é coluna e não a ausência da linha porque o ADR 0045 decidiu que
 desabilitar preserva e remover apaga. Se desabilitar apagasse, ninguém
 desabilitaria para testar — e o teste que cobra isso confere que a linha e o
 quintal de dados continuam lá depois."
@@ -1202,7 +1202,7 @@ fn habilitar_mod(app: AppHandle, session: State<'_, Session>, id: String) -> Res
     })
 }
 
-/// Turns a MOD off. Its data stays (ADR 0044).
+/// Turns a MOD off. Its data stays (ADR 0045).
 ///
 /// # Errors
 ///
@@ -1372,7 +1372,7 @@ No topo de `apps/seele-app/src/mods.rs`:
 ```rust
 //! Serving a MOD's own files to the window, under `mod://`.
 //!
-//! ADR 0044. `script-src 'self'` refuses any script not compiled into the
+//! ADR 0045. `script-src 'self'` refuses any script not compiled into the
 //! binary, and loosening it to `unsafe-eval` would open the widest door in the
 //! building to solve the narrowest problem. So the files stay on disk and a
 //! scheme of our own serves them, with the CSP widened by exactly one scheme.
@@ -1453,7 +1453,7 @@ Expected: PASS, cinco testes.
 Em `apps/seele-app/src/main.rs`, no `tauri::Builder`, antes de `.invoke_handler(...)`:
 
 ```rust
-        // ADR 0044. O único esquema além de `self` que a CSP admite, e ele só
+        // ADR 0045. O único esquema além de `self` que a CSP admite, e ele só
         // devolve o que `mods::serve` aprovou.
         .register_uri_scheme_protocol("mod", |ctx, request| {
             let caminho = request.uri().path().to_owned();
@@ -1500,7 +1500,7 @@ Em `apps/seele-app/tests/frontend.rs`, ao fim:
 ```rust
 /// A CSP admite `mod:` e nada mais que isso.
 ///
-/// O ADR 0044 escreveu como critério e não como coincidência: se aplicar um
+/// O ADR 0045 escreveu como critério e não como coincidência: se aplicar um
 /// MOD exigisse `unsafe-inline` ou `unsafe-eval`, o desenho estaria errado.
 #[test]
 fn the_csp_admits_mods_and_never_loosens_further() {
@@ -1523,7 +1523,7 @@ fn the_csp_admits_mods_and_never_loosens_further() {
 E emendar o escopo do guarda existente. Localize `the_page_loads_only_files_that_are_shipped` (`frontend.rs:520`) e acrescente ao doc-comment dele, sem mudar o corpo:
 
 ```rust
-/// **Escopo, desde o ADR 0044:** este guarda vale sobre `self` — os arquivos
+/// **Escopo, desde o ADR 0045:** este guarda vale sobre `self` — os arquivos
 /// embutidos em `ui/`. Bytes servidos sob `mod://` não passam por aqui e têm o
 /// guarda deles em `apps/seele-app/src/mods.rs`: nada é servido que o manifesto
 /// do MOD não declare, e nada sobe de diretório. A emenda é de alcance e não de
@@ -1540,7 +1540,7 @@ Expected: PASS — o novo, o emendado e todos os que já existiam.
 Em `apps/seele-app/ui/base.js`, acrescentar a função abaixo e chamá-la **depois** do primeiro `desenhar(await invoke("snapshot"))` (linha 100), para que a página exista antes de um MOD tentar mexer nela:
 
 ```js
-// ADR 0044. Um MOD roda com acesso à janela inteira, por decisão: as regras do
+// ADR 0045. Um MOD roda com acesso à janela inteira, por decisão: as regras do
 // produto base — palheta congelada, movimento diagnóstico, os guardas do
 // vermelho — protegem o produto e não alcançam MOD. A defesa é o repositório
 // público e a revisão de código de cada versão, e ela não mora aqui.
@@ -1563,7 +1563,7 @@ async function carregarMods() {
         const script = document.createElement("script");
         script.type = "module";
         script.src = `mod://localhost/${mod.id}/${mod.client}`;
-        // Um MOD que quebra não leva a janela junto — ADR 0044, «falha
+        // Um MOD que quebra não leva a janela junto — ADR 0045, «falha
         // isolada». Sem isto, um erro de sintaxe num MOD de terceiro é uma tela
         // preta que ninguém sabe explicar.
         script.addEventListener("error", () => {
