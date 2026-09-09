@@ -193,7 +193,11 @@ arquivos não rastreados — a análise não deixou artefato em disco.
 
 ## 6 · As verificações, e o que cada falha é
 
-Comandos rodados na ponta da integração (`f1993b7`), com o resultado literal:
+Comandos rodados em `f1993b7` — a ponta de **código** desta branch —, com o
+resultado literal. Os dois commits depois dele mexem só em `docs/`, `spikes/` e
+comentários: nenhuma linha compilada mudou, e `cargo check --workspace
+--all-targets` e `cargo xtask check-api` foram repetidos na ponta real
+(`5e03d19`) e continuam limpos.
 
 | comando | resultado |
 |---|---|
@@ -378,8 +382,22 @@ verificação de permissão foi desativada.**
 
 **Branch:** `orbita/f6ee869a`
 
-**Commit:** `f1993b7` — `merge(integração): os MODs entram sobre a malha e o
-conserto da ficha`
+**Commit a aproveitar:** a ponta de `orbita/f6ee869a`. O handle estável é a
+**branch**, e não um sha que este próprio relatório empurra para a frente toda
+vez que é corrigido.
+
+Os commits da branch, do mais antigo:
+
+| commit | o que é |
+|---|---|
+| `21393ce` | merge 1 — `bug/ficha-da-conexao-abandonada` sobre `malha` |
+| `f1993b7` | merge 2 — `desenho/mods` sobre o resultado; **ponta de código**, e é onde as verificações do §6 rodaram |
+| `f7edfda` | a cópia durável dos relatórios, o inventário e este relatório |
+| `5e03d19` | os seis links de ADR que a renumeração deixou para trás |
+| daí para frente | só correções deste relatório |
+
+`f1993b7` é o commit que importa para quem for mergear código: tudo depois dele
+é prosa e comentário.
 
 Os três commits de origem continuam de pé e alcançáveis: `desenho/mods`
 (`a695fe5`), `malha/caminho-entre-pares` (`004322a`) e
