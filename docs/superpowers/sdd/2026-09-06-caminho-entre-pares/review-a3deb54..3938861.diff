@@ -1,0 +1,37 @@
+# Review package: a3deb54..HEAD
+
+## Commits
+3938861 fix(par): remove vacuous spawn/abort that didn't assert anything
+
+## Files changed
+ crates/seele-core/src/par.rs | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+## Diff
+diff --git a/crates/seele-core/src/par.rs b/crates/seele-core/src/par.rs
+index 3f0d480..c3e5f44 100644
+--- a/crates/seele-core/src/par.rs
++++ b/crates/seele-core/src/par.rs
+@@ -155,19 +155,15 @@ mod testes {
+         let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+         let porta_antes = ponta.local_addr().unwrap();
+ 
+         passar_a_atender(&ponta, identidade_efemera().unwrap()).unwrap();
+ 
+         assert_eq!(
+             ponta.local_addr().unwrap(),
+             porta_antes,
+             "atender trocou a porta: o mapeamento de NAT que já estava vivo se perdeu"
+         );
+-        // E ela de fato aceita: sem `set_server_config`, `accept()` devolve `None`
+-        // na hora em que a ponta é fechada. **A prova de que atender funciona é
+-        // da Task 4**, porque esta asserção não cobre se `set_server_config` foi
+-        // de verdade chamado.
+-        let aceitando = tokio::spawn(async move { ponta.accept().await.is_some() });
+-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+-        aceitando.abort();
++        // **A prova de que atender funciona é da Task 4**, porque esta asserção
++        // só confere que a porta não mudou. Se `set_server_config` foi de verdade
++        // chamado com a configuração correta, é testado lá.
+     }
+ }

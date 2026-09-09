@@ -1,0 +1,1143 @@
+# Review package: 51f6a0f..86aea6d
+
+## Commits
+86aea6d style(par): rustfmt no guarda do opt-in de `locais`
+ea9d2bd fix(par): a conexão importa, a decisão vira função pura, e a ponta desarma
+
+## Files changed
+ crates/seele-core/src/enlace.rs    | 117 ++++++++++++++++++---
+ crates/seele-core/src/par.rs       | 188 +++++++++++++++++++++++++++++++++
+ crates/seele-server/src/pares.rs   | 207 +++++++++++++++++++++++++++++++++++--
+ crates/seele-server/src/session.rs |  91 ++++++++--------
+ 4 files changed, 537 insertions(+), 66 deletions(-)
+
+## Diff
+diff --git a/crates/seele-core/src/enlace.rs b/crates/seele-core/src/enlace.rs
+index 1d6963e..0cbdf70 100644
+--- a/crates/seele-core/src/enlace.rs
++++ b/crates/seele-core/src/enlace.rs
+@@ -2301,21 +2301,21 @@ impl Motor {
+ 
+                 let sessao = cliente.session().clone();
+                 let media = cliente.media();
+                 self.cliente = Some(cliente);
+                 self.bateria.on_reconnected();
+                 // A sessão anterior já foi apagada de `Pares` (`Pares::saiu`,
+                 // no servidor) quando ela caiu — sem redeclarar aqui, esta
+                 // pessoa reconecta sem identidade nenhuma registrada até a
+                 // próxima vez que este método for chamado por acaso. Ver o
+                 // doc de `Motor::declarar_identidade_de_par`.
+-                self.declarar_identidade_de_par().await;
++                self.declarar_identidade_de_par(false).await;
+ 
+                 let _ = self.avisos.send(Aviso::Reconectado {
+                     media: Box::new(media),
+                     sessao: Box::new(sessao),
+                 });
+             }
+             // Uma recusa não melhora com insistência, e insistir contra uma
+             // credencial rejeitada é a diferença entre reconectar e martelar.
+             Err(erro) if !vale_insistir(&erro) => {
+                 self.encerrar(Motivo::Recusado(format!("{erro:?}")));
+@@ -2329,21 +2329,21 @@ impl Motor {
+     }
+ 
+     async fn executar(&mut self, comando: Comando) {
+         self.lembrar(&comando);
+         // Especial, e antes do empréstimo de `cliente` logo abaixo: declarar
+         // identidade precisa do `&mut self` inteiro (identidade **e**
+         // cliente — ver `Motor::declarar_identidade_de_par`), e o resto deste
+         // método já empresta só `self.cliente`. Os dois empréstimos não
+         // convivem no mesmo escopo.
+         if matches!(comando, Comando::DeclararIdentidadeDePar) {
+-            self.declarar_identidade_de_par().await;
++            self.declarar_identidade_de_par(false).await;
+             return;
+         }
+         let Some(cliente) = self.cliente.as_mut() else {
+             return;
+         };
+         let resultado = match comando {
+             // Nada a mandar ao servidor: é estado desta máquina.
+             Comando::LembrarCaminho(_) => Ok(()),
+             Comando::EntrarNaVoiceRoom(voice_room) => cliente.enter_voice_room(voice_room).await,
+             Comando::SairDaVoiceRoom => cliente.leave_voice_room().await,
+@@ -2673,44 +2673,53 @@ impl Motor {
+     ///
+     /// # Por que aqui, e não sob demanda na primeira mensagem do caminho
+     ///
+     /// Por então já seria tarde: o servidor só pode apontar esta pessoa a
+     /// quem for procurá-la se a declaração já tiver chegado **antes** de
+     /// alguém pedir. Por isso é chamada na conexão inicial e em cada
+     /// reconexão — a sessão anterior já foi apagada de `Pares` na saída
+     /// (`Pares::saiu`, no servidor), e a identidade efêmera não sobrevive a
+     /// ela sem ser dita de novo.
+     ///
+-    /// `locais` leva os endereços de rede local desta máquina, na porta que a
+-    /// ponta de pares já usa (ver [`locais_de_pares`]) — mesmo sem opt-in de
+-    /// emprestar. **Achado do fix round 2**: quem só assiste também pode ser
+-    /// alcançado pela LAN, quando `SirvaTelaPara` aponta alguém para discar
+-    /// para ela; sem `locais`, o único endereço que sobraria para o servidor
+-    /// apontar seria o público da conexão de controle, e um par na mesma rede
+-    /// pagaria o furo à toa quando a LAN bastava.
+-    async fn declarar_identidade_de_par(&mut self) {
++    /// `locais` só leva os endereços de rede local desta máquina quando
++    /// `emprestando` for `true` — **achado do fix round 3, e correção de um
++    /// vazamento de privacidade que o round 2 introduziu.** O §5 da spec
++    /// nomeia privacidade como a primeira das duas razões independentes do
++    /// opt-in — um servidor não é necessariamente entre amigos (ADR 0021) —,
++    /// e o round 2 fez esta função publicar a topologia de rede interna de
++    /// **toda** máquina que apenas conecta, `emprestando: false` incluído.
++    /// Quem só assiste declara a impressão e nada mais: o público que o
++    /// servidor já vê na conexão de controle basta para quem empresta discar
++    /// de volta, e o furo simultâneo cobre o resto.
++    ///
++    /// Hoje os dois pontos que chamam este método (a conexão inicial e cada
++    /// reconexão) sempre passam `emprestando: false` — não há ainda um
++    /// comando de "emprestar a subida" neste `enlace`. `locais_de_pares` fica
++    /// pronta para quando ele existir e puder chamar
++    /// `declarar_identidade_de_par(true)`, sem rodar enquanto ele não existe.
++    async fn declarar_identidade_de_par(&mut self, emprestando: bool) {
+         let identidade = match self.identidade_de_par() {
+             Ok(identidade) => identidade,
+             Err(erro) => {
+                 tracing::warn!(%erro, "não deu para gerar a identidade deste par");
+                 return;
+             }
+         };
+         let Some(ponta) = self.ponta_de_pares() else {
+             return;
+         };
+-        let locais = locais_de_pares(&ponta);
++        let locais = locais_a_publicar(emprestando, || locais_de_pares(&ponta));
+         let Some(cliente) = self.cliente.as_mut() else {
+             return;
+         };
+         if let Err(erro) = cliente
+-            .emprestar_subida(false, par::impressao(&identidade), locais)
++            .emprestar_subida(emprestando, par::impressao(&identidade), locais)
+             .await
+         {
+             tracing::warn!(%erro, "não deu para declarar a identidade deste par ao servidor");
+         }
+     }
+ 
+     /// `ServerMessage::AssistaTelaPor`: vá buscar esta tela naquele par.
+     ///
+     /// Roda numa tarefa solta porque `par::por_onde` pode levar até
+     /// [`PRAZO_DO_PAR`] — bloquear o laço de [`Motor::rodar`] por isso
+@@ -2885,24 +2894,29 @@ async fn servir_um_par(
+         return None;
+     }
+     let atende = par::atender(ponta.clone(), PRAZO_DO_PAR);
+     let disca = par::ligar(
+         &ponta,
+         &enderecos,
+         impressao,
+         Some(&identidade),
+         PRAZO_DO_PAR,
+     );
+-    tokio::select! {
++    let resultado = tokio::select! {
+         atendido = atende => atendido,
+         discado = disca => discado.ok(),
+-    }
++    };
++    // **Desarma sempre, sirva ou não sirva.** Achado do fix round 3: sem
++    // isto a ponta continuava aceitando conexões pelo resto da sessão — ver
++    // o doc de `par::parar_de_atender`.
++    par::parar_de_atender(&ponta);
++    resultado
+ }
+ 
+ /// Os endereços de rede local desta máquina, na porta que `ponta` já usa.
+ ///
+ /// **Achado do fix round 2.** Enumeração simples, sem a ordenação por
+ /// heurística de VPN que `seele-server::alcance::interfaces::descobrir` faz
+ /// para o convite: aqui não há convite nem degrau de furo a preparar, só uma
+ /// lista de candidatos que `par::ligar` já tenta todos em paralelo. O ADR
+ /// 0002 proíbe este crate de depender de `seele-server`, então a pergunta —
+ /// "quais endereços desta máquina servem para alguém bater neles" — é
+@@ -2923,20 +2937,45 @@ fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
+             .filter(|ip| e_endereco_de_rede_local(*ip))
+             .map(|ip| SocketAddr::new(ip, local.port()))
+             .collect(),
+         Err(erro) => {
+             tracing::warn!(%erro, "não deu para enumerar os endereços locais desta máquina");
+             Vec::new()
+         }
+     }
+ }
+ 
++/// Quais endereços de rede local uma declaração publica.
++///
++/// **A regra do opt-in, isolada para poder ser presa por teste — achado do
++/// fix round 3.** Só quem optou por emprestar publica os endereços da própria
++/// máquina: o §5 da spec nomeia privacidade como a primeira das duas razões
++/// independentes do opt-in, e lembra que um servidor não é necessariamente
++/// entre amigos (ADR 0021). Quem só assiste declara a impressão e nada mais —
++/// o público que o servidor já vê na conexão de controle basta para quem
++/// empresta discar de volta, e o furo simultâneo cobre o resto.
++///
++/// `todos` é adiado (`FnOnce`) de propósito: enumerar as interfaces desta
++/// máquina é trabalho que quem não empresta nem chega a fazer, e um argumento
++/// já avaliado esconderia dentro do chamador justamente a decisão que este
++/// guarda existe para prender.
++fn locais_a_publicar<F: FnOnce() -> Vec<SocketAddr>>(
++    emprestando: bool,
++    todos: F,
++) -> Vec<SocketAddr> {
++    if emprestando {
++        todos()
++    } else {
++        Vec::new()
++    }
++}
++
+ /// Se este endereço vale como "local" para o caminho entre pares.
+ ///
+ /// Loopback e não especificado não saem desta máquina; link-local
+ /// (`169.254.0.0/16`, `fe80::/10`) não sai do cabo — o mesmo motivo que
+ /// `seele-server::alcance::interfaces::descobrir` já documenta para o
+ /// convite. Tudo o mais entra, inclusive um endereço público diretamente
+ /// atribuído a uma interface: um duplicado do que o servidor já vê não faz
+ /// mal, `Pares::declarou` já lida com isso.
+ fn e_endereco_de_rede_local(ip: IpAddr) -> bool {
+     if ip.is_loopback() || ip.is_unspecified() {
+@@ -3711,20 +3750,70 @@ fn vale_insistir(erro: &ConnectError) -> bool {
+         ConnectError::PinChanged { .. }
+             | ConnectError::Refused { .. }
+             | ConnectError::InviteMismatch { .. }
+     )
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn so_quem_empresta_publica_os_enderecos_da_propria_maquina() {
++        // **O guarda do achado de privacidade do fix round 3.** O round 2
++        // passou a publicar os endereços de interface de *todo* cliente,
++        // inclusive de quem manda `emprestando: false` — contra o §5 da spec,
++        // que nomeia privacidade como a primeira das duas razões do opt-in.
++        // Quem só assiste declara a impressão e nada mais.
++        //
++        // Os endereços são inventados de propósito: a decisão não pode
++        // depender de quais interfaces a máquina que roda o teste tem, senão
++        // o guarda passa a valer só onde há uma LAN.
++        let da_maquina = || vec![SocketAddr::from(([192, 168, 1, 10], 4444))];
++        assert!(
++            locais_a_publicar(false, da_maquina).is_empty(),
++            "quem só assiste publicou a topologia de rede interna da máquina"
++        );
++        assert_eq!(
++            locais_a_publicar(true, da_maquina),
++            da_maquina(),
++            "quem optou por emprestar deixou de publicar por onde ser alcançado"
++        );
++    }
++
++    #[test]
++    fn enderecos_locais_excluem_loopback_nao_especificado_e_link_local() {
++        // A parte que `locais_de_pares` não pode errar: publicar loopback ou
++        // um não-especificado não ajuda ninguém a discar, e link-local não
++        // sai do cabo — mesmo motivo que
++        // `seele-server::alcance::interfaces::descobrir` já documenta para o
++        // convite.
++        let locais = [IpAddr::from([192, 168, 1, 10]), IpAddr::from([10, 0, 0, 5])];
++        for ip in locais {
++            assert!(e_endereco_de_rede_local(ip), "{ip} devia contar como local");
++        }
++        let excluidos = [
++            IpAddr::from([127, 0, 0, 1]),
++            IpAddr::from([0, 0, 0, 0]),
++            IpAddr::from([169, 254, 1, 1]),
++            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
++            IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
++            IpAddr::V6(std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
++        ];
++        for ip in excluidos {
++            assert!(
++                !e_endereco_de_rede_local(ip),
++                "{ip} não devia contar como local"
++            );
++        }
++    }
++
+     #[test]
+     fn insistir_contra_recusa_nao_muda_a_resposta() {
+         // A diferença entre reconectar e martelar. Uma chave trocada é o alerta
+         // do ADR 0003 e tentar de novo só o repetiria a cada backoff.
+         assert!(!vale_insistir(&ConnectError::PinChanged {
+             pinned: "a".into(),
+             offered: "b".into(),
+         }));
+         // Um convite que não confere também não melhora com repetição: seria o
+         // mesmo link errado contra o mesmo servidor a cada backoff.
+diff --git a/crates/seele-core/src/par.rs b/crates/seele-core/src/par.rs
+index 9ee11b0..366ec57 100644
+--- a/crates/seele-core/src/par.rs
++++ b/crates/seele-core/src/par.rs
+@@ -176,20 +176,39 @@ pub fn passar_a_atender(
+         .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+     tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+     let quic = quinn::crypto::rustls::QuicServerConfig::try_from(tls)
+         .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+     ponta.set_server_config(Some(quinn::ServerConfig::with_crypto(std::sync::Arc::new(
+         quic,
+     ))));
+     Ok(())
+ }
+ 
++/// Desarma o que [`passar_a_atender`] armou.
++///
++/// **Não é limpeza opcional — achado do fix round 3.** Sem isto, a ponta
++/// continua aceitando conexões pelo resto da sessão, muito depois de a única
++/// vaga de [`atender`] já ter sido servida, com o verificador ainda fixado na
++/// impressão do **último** par apontado. E QUIC sem `use_retry` responde ao
++/// primeiro pacote de quem quer que bata, antes de qualquer autenticação:
++/// uma porta armada é um refletor de amplificação (até 3× o `Initial`
++/// recebido, contra qualquer endereço de origem que o pacote alegue) por todo
++/// esse tempo — não só enquanto está de fato servindo alguém.
++///
++/// Chame depois que [`atender`] devolver, sirva ele ou não sirva. A conexão
++/// de controle desta mesma ponta não é afetada: `set_server_config` só rege
++/// o que a ponta faz com um `Initial` que chega, e uma conexão já
++/// estabelecida não passa por aí de novo.
++pub fn parar_de_atender(ponta: &quinn::Endpoint) {
++    ponta.set_server_config(None);
++}
++
+ /// Confere quem **chega**, contra a impressão que o servidor apresentou.
+ ///
+ /// Espelho de [`ConfereImpressao`] na outra direção. As duas existem porque os
+ /// dois lados discam: quem disca confere com aquele, quem atende confere com
+ /// este, e sem os dois metade das ligações não passaria por conferência nenhuma.
+ #[derive(Debug)]
+ pub(crate) struct ConfereQuemChega {
+     esperada: String,
+     provedor: std::sync::Arc<rustls::crypto::CryptoProvider>,
+ }
+@@ -1604,11 +1623,180 @@ mod testes {
+         .await;
+ 
+         assert!(
+             matches!(
+                 onde,
+                 PorOndeAssistir::Servidor(seele_proto::control::MotivoDeFalhaDePar::NaoFuiAceito)
+             ),
+             "o anfitrião recusou a identidade de quem discou, e o motivo não foi NaoFuiAceito: {onde:?}"
+         );
+     }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn parar_de_atender_desarma_o_que_passar_a_atender_armou() {
++        // **O achado do fix round 3.** Sem `parar_de_atender`, a ponta
++        // continua aceitando conexões pelo resto da sessão depois de servir a
++        // única vaga de `atender` — com o verificador fixado na impressão do
++        // último par, e funcionando como refletor de amplificação para quem
++        // quer que bata, sem `use_retry`.
++        // As duas identidades combinam de propósito: se `parar_de_atender`
++        // não desarmar nada, este par fecha o aperto de mão sem obstáculo
++        // nenhum, e o guarda tem algo de verdade para prender — um `ligar`
++        // que desse `NaoAlcancou` mesmo com a ponta armada (por exemplo, por
++        // impressões que nunca bateriam) não provaria nada sobre
++        // `parar_de_atender`.
++        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let identidade_da_ponta = identidade_efemera().unwrap();
++        let impressao_da_ponta = impressao(&identidade_da_ponta);
++        let identidade_de_quem_discaria = identidade_efemera().unwrap();
++        let impressao_de_quem_discaria = impressao(&identidade_de_quem_discaria);
++        passar_a_atender(&ponta, identidade_da_ponta, impressao_de_quem_discaria).unwrap();
++        let onde = ponta.local_addr().unwrap();
++
++        parar_de_atender(&ponta);
++
++        // Alguém pronto para aceitar, mesmo assim: se a ponta continuasse
++        // armada, é `atender` quem completaria o aperto de mão.
++        let _atendendo = tokio::spawn(atender(ponta, PRAZO_DE_CONFIRMACAO_NO_TESTE));
++
++        let discando = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let tentou = ligar(
++            &discando,
++            &[onde],
++            impressao_da_ponta,
++            Some(&identidade_de_quem_discaria),
++            std::time::Duration::from_millis(300),
++        )
++        .await;
++
++        assert!(
++            matches!(tentou, Err(ErroDePar::NaoAlcancou)),
++            "a ponta continuou atendendo depois de parar_de_atender: {tentou:?}"
++        );
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn a_ponta_atende_um_par_sem_derrubar_a_conexao_de_controle() {
++        // **A propriedade central do §3.1, provada em código.** O teste
++        // antigo (`uma_ponta_de_cliente_passa_a_atender_sem_socket_novo`) só
++        // confere que a porta local não muda — ele nunca tem conexão nenhuma
++        // no ar para derrubar, e o próprio comentário dele admite isso. Aqui
++        // há uma conexão de controle de verdade, contra um "servidor" QUIC de
++        // teste, **antes** de `passar_a_atender` entrar em cena na MESMA
++        // ponta; a prova que importa é que essa conexão continua trocando
++        // bytes depois.
++
++        // O "servidor" — um par comum atendendo, fazendo o papel do
++        // seele-server só para dar a `ponta` uma conexão de controle de
++        // verdade.
++        let servidor = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let identidade_do_servidor = identidade_efemera().unwrap();
++        let impressao_do_servidor = impressao(&identidade_do_servidor);
++        let identidade_da_ponta = identidade_efemera().unwrap();
++        let impressao_da_ponta = impressao(&identidade_da_ponta);
++        passar_a_atender(&servidor, identidade_do_servidor, impressao_da_ponta).unwrap();
++        let endereco_do_servidor = servidor.local_addr().unwrap();
++        let atendendo_o_controle = tokio::spawn(atender(servidor, PRAZO_DE_CONFIRMACAO_NO_TESTE));
++
++        // `ponta`: só disca, do jeito que uma conexão de controle sai — sem
++        // `passar_a_atender` nenhum ainda.
++        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let controle = ligar(
++            &ponta,
++            &[endereco_do_servidor],
++            impressao_do_servidor,
++            Some(&identidade_da_ponta),
++            std::time::Duration::from_secs(5),
++        )
++        .await
++        .expect("a conexão de controle não fechou");
++        let controle_do_lado_do_servidor = atendendo_o_controle
++            .await
++            .expect("a tarefa do servidor de teste morreu")
++            .expect("o servidor de teste não aceitou a conexão de controle");
++
++        // Um eco simples do lado do servidor: aceita um fluxo, devolve o que
++        // recebeu. Só o suficiente para provar, depois de tudo que acontece a
++        // seguir, que os bytes ainda atravessam nos dois sentidos.
++        //
++        // A tarefa recebe um **clone** da conexão, e não o `ParLigado`
++        // inteiro: soltar a última alça de uma `quinn::Connection` fecha a
++        // ligação, e a tarefa termina (e larga a dela) assim que ecoa —
++        // antes de o lado do cliente terminar de ler. `controle_do_lado_do_servidor`
++        // continua viva no escopo do teste até o fim, e é essa cópia que
++        // mantém a conexão de pé.
++        let conexao_para_o_eco = controle_do_lado_do_servidor.conexao.clone();
++        let eco = tokio::spawn(async move {
++            let (mut envio, mut recebe) = conexao_para_o_eco
++                .accept_bi()
++                .await
++                .expect("o servidor de teste não recebeu o fluxo de prova");
++            let mut buf = [0_u8; 10];
++            recebe
++                .read_exact(&mut buf)
++                .await
++                .expect("a leitura da prova falhou");
++            envio
++                .write_all(&buf)
++                .await
++                .expect("a escrita da prova falhou");
++            let _ = envio.finish();
++        });
++
++        // Agora, na MESMA `ponta` — nem escuta nova, nem porta nova —, ela
++        // também passa a atender um par, exatamente como `Motor::servir_par`
++        // faz.
++        let identidade_para_o_par = identidade_efemera().unwrap();
++        let impressao_de_quem_atende = impressao(&identidade_para_o_par);
++        let identidade_do_terceiro = identidade_efemera().unwrap();
++        let impressao_do_terceiro = impressao(&identidade_do_terceiro);
++        passar_a_atender(&ponta, identidade_para_o_par, impressao_do_terceiro).unwrap();
++        let onde_a_ponta_atende = ponta.local_addr().unwrap();
++        let atendendo_o_par = tokio::spawn(atender(ponta.clone(), PRAZO_DE_CONFIRMACAO_NO_TESTE));
++
++        // Um terceiro par — quem `SirvaTelaPara` mandaria discar para
++        // `ponta` — liga para ela.
++        let terceiro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let ligado_pelo_terceiro = ligar(
++            &terceiro,
++            &[onde_a_ponta_atende],
++            impressao_de_quem_atende,
++            Some(&identidade_do_terceiro),
++            std::time::Duration::from_secs(5),
++        )
++        .await
++        .expect("o terceiro par não conseguiu ligar para a ponta que também atende");
++        // Guardado, e não descartado: soltar o `ParLigado` deste lado
++        // fecharia a conexão imediatamente, e a asserção abaixo veria uma
++        // ligação morta por causa do próprio teste, não por
++        // `passar_a_atender`.
++        let _atendido_do_lado_da_ponta = atendendo_o_par
++            .await
++            .expect("a tarefa que atende o par morreu")
++            .expect("a ponta não aceitou o par que discou para ela");
++        assert!(
++            ligado_pelo_terceiro.conexao.close_reason().is_none(),
++            "a ligação com o terceiro par já morreu"
++        );
++
++        // **A prova que importa:** a conexão de controle, aberta antes de
++        // tudo isso, continua viva e trocando bytes — não foi derrubada nem
++        // por `passar_a_atender` nem pelo aperto de mão do terceiro par.
++        let (mut envio, mut recebe) = controle
++            .conexao
++            .open_bi()
++            .await
++            .expect("a conexão de controle não abre mais fluxo nenhum");
++        envio
++            .write_all(b"ainda viva")
++            .await
++            .expect("a escrita na conexão de controle falhou");
++        let _ = envio.finish();
++        let mut resposta = [0_u8; 10];
++        recebe
++            .read_exact(&mut resposta)
++            .await
++            .expect("a leitura na conexão de controle falhou");
++        assert_eq!(&resposta, b"ainda viva");
++        eco.await.expect("a tarefa de eco do servidor morreu");
++    }
+ }
+diff --git a/crates/seele-server/src/pares.rs b/crates/seele-server/src/pares.rs
+index 1eb5fa8..43cfe67 100644
+--- a/crates/seele-server/src/pares.rs
++++ b/crates/seele-server/src/pares.rs
+@@ -14,32 +14,52 @@
+ //! Achado do fix round 1 da Task 8, sobre um ruling meu de pré-voo que
+ //! misturava duas perguntas diferentes: **quem eu sou** e **eu empresto**. A
+ //! parede simétrica da Task 5 exige certificado dos dois lados de toda
+ //! ligação entre pares — quem atende confere quem chega contra a impressão
+ //! que o servidor apresentou. Quem só assiste (nunca opta por emprestar)
+ //! também disca com a própria identidade quando `SirvaTelaPara` manda alguém
+ //! procurá-lo; se a única mensagem que carrega impressão a apagasse ao dizer
+ //! «não empresto», ninguém que só assistisse teria certificado para
+ //! apresentar, e a discagem dele seria sempre recusada como `SemCertificado`.
+ //! Por isso `declarou` guarda sempre, e só `escolher` olha `emprestando`.
++//!
++//! # Por que a declaração carrega a conexão que a fez
++//!
++//! Achado do fix round 3. Uma corrida de candidatos (ADR 0037, do lado do
++//! cliente) pode deixar duas conexões vivas com o mesmo `PersonId` ao mesmo
++//! tempo: cada candidato completa o próprio aperto de mão contra este
++//! servidor antes de a corrida decidir quem venceu. Se `saiu` apagasse pela
++//! pessoa sozinha, o encerramento do candidato perdedor — que chega **depois**
++//! de o vencedor já ter declarado — apagaria a declaração viva. Por isso
++//! [`QuemDeclarou`] guarda a conexão que a fez, e [`Pares::saiu`] só apaga se
++//! ainda for a mesma.
+ 
+ use std::collections::{HashMap, HashSet};
+ use std::net::SocketAddr;
+ 
++use seele_proto::control::MotivoDeFalhaDePar;
+ use seele_proto::ids::{PersonId, ScreenId};
+ 
+ /// Uma identidade e onde alcançá-la, que uma pessoa declarou para o caminho
+ /// entre pares.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct QuemDeclarou {
+     /// Quem.
+     pub pessoa: PersonId,
++    /// Qual conexão fez esta declaração — `quinn::Connection::stable_id`,
++    /// como `session.rs` já usa para `Subida::esquecer`.
++    ///
++    /// **Não é decoração.** Uma corrida de candidatos pode ter duas conexões
++    /// vivas com o mesmo `PersonId`; sem isto, o encerramento de uma conexão
++    /// que perdeu a corrida apagaria a declaração de uma que ganhou. Ver o
++    /// doc do módulo.
++    pub id_da_conexao: u64,
+     /// A impressão digital que apresenta.
+     pub impressao: String,
+     /// Onde alcançá-la: os locais que declarou, mais o público que o servidor
+     /// **viu**. Nesta ordem, porque a rede local dispensa furo e é a que
+     /// responde mais rápido — a mesma razão do ADR 0037.
+     pub enderecos: Vec<SocketAddr>,
+     /// Se, além de existir, também empresta a subida agora.
+     ///
+     /// É só este campo que [`Pares::escolher`] olha. Ter identidade aqui e
+     /// `emprestando: false` é o caso comum de quem só assiste — ver o doc do
+@@ -68,52 +88,85 @@ impl Pares {
+         Self::default()
+     }
+ 
+     /// Alguém declarou identidade — e disse se empresta a subida com ela.
+     ///
+     /// **Guarda sempre**, `emprestando` sendo o que for. Um `false` não
+     /// apaga a declaração: significa «esta sou eu, e não empresto agora», não
+     /// «esqueça que existo» — só [`Self::saiu`] apaga, porque só a saída da
+     /// sessão torna a identidade obsoleta.
+     ///
+-    /// `publico` é a origem da conexão desta pessoa, vista pelo servidor.
++    /// `id_da_conexao` é de quem esta declaração pertence — ver o doc de
++    /// [`QuemDeclarou::id_da_conexao`]. `publico` é a origem da conexão desta
++    /// pessoa, vista pelo servidor.
+     pub fn declarou(
+         &mut self,
+         pessoa: PersonId,
++        id_da_conexao: u64,
+         emprestando: bool,
+         impressao: String,
+         locais: Vec<SocketAddr>,
+         publico: SocketAddr,
+     ) {
+         let mut enderecos = locais;
+         if !enderecos.contains(&publico) {
+             enderecos.push(publico);
+         }
+         self.quem.insert(
+             pessoa,
+             QuemDeclarou {
+                 pessoa,
++                id_da_conexao,
+                 impressao,
+                 enderecos,
+                 emprestando,
+             },
+         );
+     }
+ 
+-    /// Esta pessoa saiu. A identidade é efêmera e não sobrevive à sessão —
+-    /// sem isto, uma discagem futura apontaria para uma impressão de uma
+-    /// sessão que não existe mais, e não só a escolha de quem serve.
++    /// Esta conexão saiu. A identidade é efêmera e não sobrevive à sessão que
++    /// a declarou — mas só a ela.
++    ///
++    /// **Verificado por conexão, não só por pessoa** — achado do fix round 3.
++    /// Uma corrida de candidatos pode deixar duas conexões vivas com o mesmo
++    /// `PersonId`; se esta função apagasse por `pessoa` sozinha, o
++    /// encerramento de uma candidata que perdeu a corrida — chegando depois
++    /// de a vencedora já ter declarado — apagaria a declaração viva. Se
++    /// `id_da_conexao` não bater com o que está publicado, não há nada a
++    /// fazer: outra conexão já substituiu esta declaração.
++    pub fn saiu(&mut self, pessoa: PersonId, id_da_conexao: u64) {
++        let e_esta_conexao = self
++            .quem
++            .get(&pessoa)
++            .is_some_and(|declarado| declarado.id_da_conexao == id_da_conexao);
++        if e_esta_conexao {
++            self.esquecer(pessoa);
++        }
++    }
++
++    /// Desacredita a declaração desta pessoa, **seja qual for a conexão que a
++    /// fez**.
+     ///
+-    /// Também esquece toda nomeação que apontava para ela: uma transmissão
+-    /// que ainda "apontasse" para quem já foi embora resolveria um
+-    /// `ParFalhou` contra ninguém.
+-    pub fn saiu(&mut self, pessoa: PersonId) {
++    /// Diferente de [`Self::saiu`]: ali o motivo é a conexão ter acabado, e a
++    /// checagem por `id_da_conexao` existe para não confundir sessões.
++    /// Aqui o motivo é a **declaração** ter sido provada falsa —
++    /// `ImpressaoNaoBate`, quando alguém respondeu no lugar de quem foi
++    /// apontado — e a conexão que a fez pode continuar perfeitamente viva; é
++    /// a identidade publicada que deixou de merecer confiança. Ver
++    /// [`quem_desacreditar`].
++    pub fn desacreditar(&mut self, pessoa: PersonId) {
++        self.esquecer(pessoa);
++    }
++
++    /// O que [`Self::saiu`] e [`Self::desacreditar`] têm em comum: apagar a
++    /// declaração e qualquer nomeação que apontava para ela.
++    fn esquecer(&mut self, pessoa: PersonId) {
+         self.quem.remove(&pessoa);
+         self.nomeacoes.retain(|_, quem| *quem != pessoa);
+     }
+ 
+     /// A declaração desta pessoa, exista ela para emprestar ou só para ser
+     /// alcançada.
+     ///
+     /// `None` se ela nunca declarou, ou já saiu. Quem vai montar
+     /// `SirvaTelaPara`/`AssistaTelaPor` precisa disto para a identidade de
+     /// **quem pediu** — `escolher` só devolve a de quem empresta.
+@@ -160,20 +213,53 @@ impl Pares {
+     /// É contra isto que um `ClientMessage::ParFalhou { screen }` se resolve:
+     /// a mensagem só carrega a transmissão, nunca a identidade de quem
+     /// falhou, porque quem relata é quem estava esperando a imagem — a
+     /// vítima, não quem investiga.
+     #[must_use]
+     pub fn quem_foi_apontado(&self, screen: ScreenId) -> Option<PersonId> {
+         self.nomeacoes.get(&screen).copied()
+     }
+ }
+ 
++/// Dado o motivo de um `ClientMessage::ParFalhou` e quem o servidor tinha
++/// apontado para a transmissão, quem (se alguém) desacreditar.
++///
++/// **Função pura, extraída no fix round 3.** É onde o defeito do round 2
++/// morava — `session.rs` chamava `saiu(session.person)`, que é sempre quem
++/// **relata**, nunca quem falhou — e o round 2 corrigiu isso em `session.rs`
++/// sem deixar um teste que exercitasse a decisão em si: o revisor reintroduziu
++/// o defeito e os 361 testes do `seele-server` passaram porque o único teste
++/// que citava o achado exercitava `apontou`/`quem_foi_apontado` isolados, não
++/// este raciocínio. Extraída para cá, a decisão é testável sem sessão, sem
++/// conexão e sem `Pares` nenhum.
++///
++/// Só [`MotivoDeFalhaDePar::ImpressaoNaoBate`] desacredita alguém — é o único
++/// motivo que prova algo sobre a **declaração** (alguém respondeu no lugar de
++/// quem foi apontado). `NaoFuiAceito` é o inverso — a suspeita cai sobre quem
++/// relata, não sobre o par apontado — e os outros dois são rotina de rede.
++/// `apontado` vem de [`Pares::quem_foi_apontado`]; `None` quando o servidor
++/// não tem nomeação guardada para a transmissão (hoje, sempre — ver o doc do
++/// módulo).
++#[must_use]
++pub fn quem_desacreditar(
++    motivo: MotivoDeFalhaDePar,
++    apontado: Option<PersonId>,
++) -> Option<PersonId> {
++    match motivo {
++        MotivoDeFalhaDePar::ImpressaoNaoBate => apontado,
++        MotivoDeFalhaDePar::NaoAlcancou
++        | MotivoDeFalhaDePar::CaiuNoMeio
++        | MotivoDeFalhaDePar::ParouDeMandar
++        | MotivoDeFalhaDePar::NaoFuiAceito => None,
++    }
++}
++
+ #[cfg(test)]
+ #[allow(
+     clippy::unwrap_used,
+     clippy::expect_used,
+     reason = "um teste que trata o caso impossível deixa de ser uma afirmação sobre o código"
+ )]
+ mod testes {
+     use super::*;
+ 
+     fn endereco(n: u8) -> SocketAddr {
+@@ -181,20 +267,21 @@ mod testes {
+     }
+ 
+     #[test]
+     fn quem_compartilha_nunca_e_escolhido_para_servir_a_si_mesmo() {
+         // O espelho infinito, na versão da malha: quem compartilha servindo a
+         // própria tela a si mesmo. `crate::voice_room` já prende isto para o
+         // caminho do servidor; aqui é a mesma regra no caminho novo.
+         let mut pares = Pares::nova();
+         pares.declarou(
+             PersonId(1),
++            1,
+             true,
+             "a".repeat(64),
+             vec![endereco(1)],
+             endereco(1),
+         );
+         assert!(pares
+             .escolher(PersonId(1), PersonId(2), &HashSet::new())
+             .is_none());
+     }
+ 
+@@ -204,63 +291,67 @@ mod testes {
+         // sinal de "não empresto" e `declarou` apagava a pessoa inteira. Agora
+         // quem só assiste também declara identidade (para poder apresentar
+         // certificado quando `SirvaTelaPara` mandar alguém discar para ela) —
+         // e a impressão continua guardada mesmo com `emprestando: false`.
+         // `escolher` tem de respeitar o opt-in olhando o campo `emprestando`,
+         // e não mais se há impressão guardada; do contrário quem disse "não
+         // empresto" seria escolhido mesmo assim.
+         let mut pares = Pares::nova();
+         pares.declarou(
+             PersonId(3),
++            1,
+             true,
+             "c".repeat(64),
+             vec![endereco(3)],
+             endereco(3),
+         );
+         pares.declarou(
+             PersonId(3),
++            1,
+             false,
+             "c".repeat(64),
+             vec![endereco(3)],
+             endereco(3),
+         );
+         assert!(pares
+             .escolher(PersonId(1), PersonId(2), &HashSet::new())
+             .is_none());
+     }
+ 
+     #[test]
+     fn quem_ja_esta_servindo_nao_e_escolhido_de_novo() {
+         // **Um par por vez, no A1.** Quantos um cliente aguenta é a conta do
+         // subprojeto B, e supor «dois» aqui seria inventar um número que
+         // ninguém mediu.
+         let mut pares = Pares::nova();
+         pares.declarou(
+             PersonId(3),
++            1,
+             true,
+             "c".repeat(64),
+             vec![endereco(3)],
+             endereco(3),
+         );
+         let ja = HashSet::from([PersonId(3)]);
+         assert!(pares.escolher(PersonId(1), PersonId(2), &ja).is_none());
+     }
+ 
+     #[test]
+     fn o_endereco_publico_vem_do_servidor_e_nao_do_cliente() {
+         // Um endereço público que o cliente afirma é um endereço que ele pode
+         // mentir — e mentir aqui manda outra pessoa discar para onde o mentiroso
+         // quiser. O servidor vê a origem da conexão; é ela que vale.
+         let mut pares = Pares::nova();
+         let publico = SocketAddr::from(([203, 0, 113, 9], 8383));
+         pares.declarou(
+             PersonId(3),
++            1,
+             true,
+             "c".repeat(64),
+             vec![endereco(3)],
+             publico,
+         );
+         let escolhido = pares
+             .escolher(PersonId(1), PersonId(2), &HashSet::new())
+             .unwrap();
+         assert!(escolhido.enderecos.contains(&publico));
+         assert!(escolhido.enderecos.contains(&endereco(3)));
+@@ -272,67 +363,163 @@ mod testes {
+         // (`quem_nao_empresta_nunca_e_escolhido_mesmo_com_impressao_guardada`)
+         // só afirma a metade `escolher`; esta prova a outra metade — que
+         // `declarou` de fato **guarda** a declaração de quem só assiste, e
+         // não a apaga por `emprestando` ser falso. Sem este teste, um
+         // `declarou` revertido para o comportamento velho (apagar quando a
+         // pessoa "não empresta") passaria pela suíte inteira sem tropeçar:
+         // nenhum outro teste lê a declaração de volta.
+         let mut pares = Pares::nova();
+         pares.declarou(
+             PersonId(3),
++            1,
+             false,
+             "c".repeat(64),
+             vec![endereco(3)],
+             endereco(3),
+         );
+         let declaracao = pares
+             .declaracao_de(PersonId(3))
+             .expect("a declaração de quem só assiste desapareceu");
+         assert_eq!(declaracao.impressao, "c".repeat(64));
+         assert!(declaracao.enderecos.contains(&endereco(3)));
+         assert!(!declaracao.emprestando);
+     }
+ 
+     #[test]
+     fn saiu_apaga_tambem_a_declaracao() {
+         let mut pares = Pares::nova();
+         pares.declarou(
+             PersonId(3),
++            1,
+             false,
+             "c".repeat(64),
+             vec![endereco(3)],
+             endereco(3),
+         );
+-        pares.saiu(PersonId(3));
++        pares.saiu(PersonId(3), 1);
+         assert!(
+             pares.declaracao_de(PersonId(3)).is_none(),
+             "a identidade sobreviveu à saída da sessão"
+         );
+     }
+ 
++    #[test]
++    fn a_saida_de_uma_conexao_velha_nao_apaga_a_declaracao_de_uma_nova() {
++        // **Achado do fix round 3.** Uma corrida de candidatos pode deixar
++        // duas conexões vivas com o mesmo `PersonId`. A candidata 1 declara,
++        // perde a corrida e sua conexão é fechada; a candidata 2 (a
++        // vencedora) já declarou de novo antes de o encerramento da 1
++        // terminar de rodar. `saiu` chamado com o `id_da_conexao` da
++        // candidata 1 não pode apagar a declaração que a 2 acabou de fazer.
++        let mut pares = Pares::nova();
++        pares.declarou(
++            PersonId(3),
++            1, // candidata 1, perdedora
++            true,
++            "c".repeat(64),
++            vec![endereco(3)],
++            endereco(3),
++        );
++        pares.declarou(
++            PersonId(3),
++            2, // candidata 2, vencedora — substitui a declaração acima
++            true,
++            "c".repeat(64),
++            vec![endereco(3)],
++            endereco(3),
++        );
++        pares.saiu(PersonId(3), 1); // o encerramento tardio da candidata 1
++        assert!(
++            pares.declaracao_de(PersonId(3)).is_some(),
++            "o encerramento de uma conexão que perdeu a corrida apagou a \
++             declaração da que venceu"
++        );
++    }
++
+     #[test]
+     fn um_parfalhou_resolve_contra_a_propria_nomeacao_e_nao_contra_quem_relata() {
+         // **Achado do fix round 2.** `ParFalhou { screen }` não carrega quem
+         // falhou — só quem relata sabe que a imagem parou, e relatar não é o
+         // mesmo que saber a identidade do impostor. O servidor tem de
+         // resolver `screen` contra a própria nomeação (`apontou`), não contra
+         // `session.person` do despacho — esse é sempre quem relatou, a
+         // vítima, nunca o par apontado.
+         let mut pares = Pares::nova();
+         let tela = ScreenId(9);
+         pares.apontou(tela, PersonId(5));
+         assert_eq!(pares.quem_foi_apontado(tela), Some(PersonId(5)));
+     }
+ 
+     #[test]
+     fn quem_sai_deixa_de_ser_a_resposta_de_uma_nomeacao_velha() {
+         let mut pares = Pares::nova();
++        pares.declarou(
++            PersonId(5),
++            1,
++            true,
++            "e".repeat(64),
++            vec![endereco(5)],
++            endereco(5),
++        );
+         let tela = ScreenId(9);
+         pares.apontou(tela, PersonId(5));
+-        pares.saiu(PersonId(5));
++        pares.saiu(PersonId(5), 1);
+         assert_eq!(
+             pares.quem_foi_apontado(tela),
+             None,
+             "quem já foi embora continuou sendo a resposta de uma nomeação"
+         );
+     }
++
++    #[test]
++    fn desacreditar_apaga_independente_da_conexao() {
++        let mut pares = Pares::nova();
++        pares.declarou(
++            PersonId(3),
++            1,
++            true,
++            "c".repeat(64),
++            vec![endereco(3)],
++            endereco(3),
++        );
++        pares.desacreditar(PersonId(3));
++        assert!(
++            pares.declaracao_de(PersonId(3)).is_none(),
++            "desacreditar não apagou a declaração"
++        );
++    }
++
++    #[test]
++    fn impressaonaobate_desacredita_quem_foi_apontado_nunca_quem_relata() {
++        // **O guarda que faltava no round 2.** `quem_desacreditar` é a
++        // função pura onde o defeito do round 2 morava — o teste de lá só
++        // exercitava `apontou`/`quem_foi_apontado`, nunca esta decisão.
++        assert_eq!(
++            quem_desacreditar(MotivoDeFalhaDePar::ImpressaoNaoBate, Some(PersonId(9))),
++            Some(PersonId(9))
++        );
++    }
++
++    #[test]
++    fn sem_nomeacao_guardada_ninguem_e_desacreditado() {
++        assert_eq!(
++            quem_desacreditar(MotivoDeFalhaDePar::ImpressaoNaoBate, None),
++            None
++        );
++    }
++
++    #[test]
++    fn motivos_que_nao_sao_impressaonaobate_nunca_desacreditam_ninguem() {
++        for motivo in [
++            MotivoDeFalhaDePar::NaoAlcancou,
++            MotivoDeFalhaDePar::CaiuNoMeio,
++            MotivoDeFalhaDePar::ParouDeMandar,
++            MotivoDeFalhaDePar::NaoFuiAceito,
++        ] {
++            assert_eq!(
++                quem_desacreditar(motivo, Some(PersonId(9))),
++                None,
++                "{motivo:?} desacreditou alguém, e só ImpressaoNaoBate deveria"
++            );
++        }
++    }
+ }
+diff --git a/crates/seele-server/src/session.rs b/crates/seele-server/src/session.rs
+index 4170b1c..c369540 100644
+--- a/crates/seele-server/src/session.rs
++++ b/crates/seele-server/src/session.rs
+@@ -393,21 +393,31 @@ pub async fn serve(
+     if server.presentes.lock().await.saiu(session.person) {
+         let _ = server.events.send(Event::PersonGone {
+             person: session.person,
+         });
+     }
+ 
+     // E sai de quem empresta a subida, pelo mesmo motivo de todo o resto desta
+     // seção: sem isto a escolha (`Pares::escolher`) continuaria apontando para
+     // alguém que já foi embora, e quem_quer discaria para um endereço que não
+     // atende mais.
+-    server.pares.lock().await.saiu(session.person);
++    //
++    // `id_da_conexao` vai junto — achado do fix round 3: uma corrida de
++    // candidatos pode deixar duas conexões vivas com o mesmo `session.person`,
++    // e `Pares::saiu` só apaga se a conexão que está saindo ainda for a que
++    // publicou a declaração. Sem isso, o encerramento de uma candidata que
++    // perdeu a corrida apagaria a declaração que a vencedora acabou de fazer.
++    server
++        .pares
++        .lock()
++        .await
++        .saiu(session.person, id_da_conexao);
+ 
+     // E os contadores desta conexão saem da soma da subida.
+     //
+     // Sem isto eles ficariam para sempre: a janela seguinte veria os bytes de
+     // quem saiu sumirem de uma vez, o `saturating_sub` transformaria o delta
+     // negativo em zero, e uma janela que carregou o cano inteiro apareceria como
+     // «não entregou nada» — a sonda recuaria por causa de alguém desligando.
+     server.subida.lock().await.esquecer(id_da_conexao);
+ 
+     // **O motivo, quando há um.** Esta linha dizia «session ended» e mais nada,
+@@ -1014,20 +1024,30 @@ async fn run_session(
+     // O apelido que vale **agora**, e não o do aperto de mão.
+     //
+     // `session` é imutável aqui, e desde o `SetNickname` da 0.9.0 o nome pode
+     // mudar no meio da sessão. Toda mensagem publicada guarda o apelido de quem
+     // a escreveu no instante em que foi escrita — é isso que faz o histórico
+     // continuar dizendo o nome antigo, que é o que quem desenha decidiu —, e
+     // ler `session.nickname` aqui faria tudo que viesse depois da troca sair
+     // com o nome de antes dela.
+     let mut apelido_de_agora = session.nickname.clone();
+ 
++    // A mesma identidade que `handle_connection` já calcula antes de chamar
++    // esta função (`id_da_conexao`, ali). Recalculada aqui porque
++    // `EmprestarSubida`/`ParFalhou` são tratados dentro deste laço, e
++    // `stable_id` devolve o mesmo número para o mesmo `Connection` em
++    // qualquer ponto da vida dele — não é um novo identificador, é o mesmo
++    // lido de novo. `crate::pares::Pares::declarou`/`saiu` precisam dele para
++    // não confundir duas conexões da mesma pessoa numa corrida de candidatos
++    // (fix round 3 da Task 8).
++    let id_da_conexao = connection.stable_id() as u64;
++
+     let (para_dentro, mut entrada) = mpsc::channel::<ClientMessage>(ENTRADA_DEPTH);
+     let leitora = tokio::spawn(async move {
+         let mut recv = recv;
+         loop {
+             match frame::ler::<ClientMessage>(&mut recv).await {
+                 Ok(mensagem) => {
+                     if para_dentro.send(mensagem).await.is_err() {
+                         return;
+                     }
+                 }
+@@ -2289,20 +2309,21 @@ async fn run_session(
+                         // `Pares::declarou`, quem decide quem serve — ver o doc
+                         // de `crate::pares`.
+                         tracing::info!(
+                             person = %session.person,
+                             %publico,
+                             emprestando,
+                             "declaração de empréstimo de subida no caminho entre pares"
+                         );
+                         server.pares.lock().await.declarou(
+                             session.person,
++                            id_da_conexao,
+                             emprestando,
+                             impressao,
+                             locais,
+                             publico,
+                         );
+                     }
+                     ClientMessage::ParFalhou { screen, motivo } => {
+                         // O rastro fica mesmo quando não há o que fazer: quem
+                         // investigar um par que nunca serve ninguém precisa
+                         // achar aqui todo relato que chegou, não só os que
+@@ -2314,62 +2335,48 @@ async fn run_session(
+                             "par relatado como falho no caminho entre pares"
+                         );
+                         // **`session.person` é quem relatou — a vítima, nunca
+                         // quem falhou.** Achado do fix round 2: a primeira
+                         // versão chamava `saiu(session.person)`, e uma
+                         // `ImpressaoNaoBate` — que só prova que ALGUÉM
+                         // enganou quem relata — apagava a identidade de quem
+                         // relata pela sessão inteira, porque nada a
+                         // redeclara. `ParFalhou` carrega só `screen` de
+                         // propósito: quem relata nunca soube a identidade de
+-                        // quem o enganou, só que a imagem parou. Quem sabe
+-                        // disso é o próprio servidor, que emitiu
+-                        // `SirvaTelaPara`/`AssistaTelaPor` e guardou a própria
+-                        // nomeação (`Pares::apontou`) — resolver `screen`
+-                        // contra ela é a única forma de descobrir de quem
+-                        // reclamar sem inventar protocolo novo.
+-                        match motivo {
+-                            // Evento de segurança: alguém respondeu no lugar
+-                            // de quem o servidor apresentou. Desacredita o
+-                            // par **apontado** — nunca `session.person`.
+-                            MotivoDeFalhaDePar::ImpressaoNaoBate => {
+-                                let mut pares = server.pares.lock().await;
+-                                if let Some(apontado) = pares.quem_foi_apontado(screen) {
+-                                    pares.saiu(apontado);
+-                                } else {
+-                                    // Sem nomeação guardada — hoje é sempre o
+-                                    // caso, porque nenhum despacho chama
+-                                    // `Pares::apontou` ainda (Task 10). Sem
+-                                    // saber quem foi apontado, não há quem
+-                                    // desacreditar; ficar quieto é mais seguro
+-                                    // do que adivinhar.
+-                                    tracing::debug!(
+-                                        %screen,
+-                                        "ImpressaoNaoBate relatado sem nomeação guardada para a transmissão"
+-                                    );
+-                                }
++                        // quem o enganou, só que a imagem parou.
++                        //
++                        // **A decisão em si é função pura** —
++                        // `crate::pares::quem_desacreditar` — achado do fix
++                        // round 3: o teste que o round 2 escreveu exercitava
++                        // `apontou`/`quem_foi_apontado` isolados, nunca este
++                        // braço, e o revisor reintroduziu
++                        // `saiu(session.person)` aqui sem que os 361 testes
++                        // do `seele-server` tropeçassem. Extraída, a decisão
++                        // é testável sem sessão nenhuma, e este braço só
++                        // executa o que ela decidiu.
++                        let mut pares = server.pares.lock().await;
++                        let apontado = pares.quem_foi_apontado(screen);
++                        match crate::pares::quem_desacreditar(motivo, apontado) {
++                            Some(quem) => pares.desacreditar(quem),
++                            // Sem nomeação guardada — hoje é sempre o caso
++                            // para `ImpressaoNaoBate`, porque nenhum despacho
++                            // chama `Pares::apontou` ainda (Task 10). Sem
++                            // saber quem foi apontado, não há quem
++                            // desacreditar; ficar quieto é mais seguro do que
++                            // adivinhar.
++                            None if motivo == MotivoDeFalhaDePar::ImpressaoNaoBate => {
++                                tracing::debug!(
++                                    %screen,
++                                    "ImpressaoNaoBate relatado sem nomeação guardada para a transmissão"
++                                );
+                             }
+-                            // «Não me aceitaram» — o inverso de `ImpressaoNaoBate`:
+-                            // quase sempre a própria declaração de quem
+-                            // relata está desatualizada, não impostura do par
+-                            // apontado. O conserto certo (pedir a quem relata
+-                            // que declare de novo) ainda não tem mensagem
+-                            // própria no protocolo; por ora só o rastro acima
+-                            // registra o caso, e desacreditar o par apontado
+-                            // — o conserto de `ImpressaoNaoBate` — seria
+-                            // castigar quem não errou nada.
+-                            MotivoDeFalhaDePar::NaoFuiAceito => {}
+-                            // Rotina de rede: nenhuma prova sobre nenhuma
+-                            // declaração.
+-                            MotivoDeFalhaDePar::NaoAlcancou
+-                            | MotivoDeFalhaDePar::CaiuNoMeio
+-                            | MotivoDeFalhaDePar::ParouDeMandar => {}
++                            None => {}
+                         }
+                     }
+ 
+                     // The handshake is over. Repeating it is a protocol
+                     // violation, not a re-authentication.
+                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
+                 }
+             }
+ 
+             // Os dois braços de voz que ficavam aqui vivem agora na tarefa de

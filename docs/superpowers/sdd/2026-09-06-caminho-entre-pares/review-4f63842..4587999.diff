@@ -1,0 +1,578 @@
+# Review package: 4f63842..4587999
+
+## Commits
+4587999 fix(par): a prova de que o quadro atravessa o par vira piso e sustentação
+
+## Files changed
+ crates/seele-conformance/tests/tela_por_um_par.rs | 135 ++++++++++++++-----
+ crates/seele-core/src/enlace.rs                   | 154 ++++++++++++++--------
+ crates/seele-core/src/par.rs                      |  63 ++++++++-
+ 3 files changed, 258 insertions(+), 94 deletions(-)
+
+## Diff
+diff --git a/crates/seele-conformance/tests/tela_por_um_par.rs b/crates/seele-conformance/tests/tela_por_um_par.rs
+index 22093e5..2fc724b 100644
+--- a/crates/seele-conformance/tests/tela_por_um_par.rs
++++ b/crates/seele-conformance/tests/tela_por_um_par.rs
+@@ -504,120 +504,185 @@ async fn cenario() -> Result<Cenario> {
+     Ok(Cenario {
+         servidor,
+         compartilha,
+         empresta,
+         assiste,
+         screen,
+         copias,
+     })
+ }
+ 
++/// O maior `seq` de tela já enfileirado nos avisos deste cliente, sem esperar
++/// nenhum quadro novo.
++///
++/// **Frisar em tentativas curtas, e não varrer uma vez só.** O canal de
++/// avisos é FIFO e o produtor (`compartilhar`) nunca para de mandar quadro
++/// novo — a cada [`INTERVALO`]. Parar de drenar por causa de uma tentativa
++/// que não achou nada dentro da janela é a única forma de saber que o canal
++/// está momentaneamente vazio; ele nunca fica vazio *para sempre* enquanto a
++/// transmissão durar.
++async fn maior_seq_ja_enfileirado(enlace: &mut Enlace, screen: ScreenId) -> Option<u32> {
++    let mut maior = None;
++    loop {
++        let Ok(aviso) = tokio::time::timeout(Duration::from_millis(20), enlace.proximo()).await
++        else {
++            return maior;
++        };
++        if let Aviso::TelaQuadro { tela, bytes, .. } = aviso {
++            if tela == screen {
++                if let Some(seq) = seq_de(&bytes) {
++                    maior = Some(maior.map_or(seq, |atual: u32| atual.max(seq)));
++                }
++            }
++        }
++    }
++}
++
++/// Quantos quadros seguidos, todos pelo par, provam recepção sustentada — e
++/// não um quadro isolado que ainda coubesse num punhado em voo.
++///
++/// A trinta quadros por segundo (`INTERVALO`), é um segundo de vídeo. Um cano
++/// que o servidor desligou não entrega um segundo de imagem por acidente.
++const QUADROS_PARA_PROVAR: u32 = 30;
++
+ /// O quadro chega ao segundo cliente **pelo primeiro**, e o servidor não o subiu.
+ ///
+ /// # A prova que importa é a negativa
+ ///
+ /// Que o quadro chegou, um teste ingênuo prova sem querer: o servidor sabe
+ /// servir tela desde agosto, e um caminho novo que não funcione é
+ /// indistinguível de um que funcione se ninguém olhar de onde os bytes vieram.
+ /// Então a asserção é dupla: o quadro bate byte a byte **e** o contador do
+ /// servidor diz que aquela cópia não saiu dele. É a mesma forma de prova que
+ /// `subida_no_arranque.rs` usa.
+ ///
+-/// E é dupla no tempo também. O contador cair para uma cópia prova que o
+-/// servidor deixou de subir para quem assiste; o quadro exigido depois disso é
+-/// um quadro que **só existiu** com o cano do servidor já desligado, e que
+-/// portanto não pode ter vindo dele. Um teste que só olhasse o último quadro
+-/// recebido passaria com um que o servidor tivesse mandado um instante antes.
++/// # Por que a prova de tempo não é "o quadro que só existiu depois"
++///
++/// Uma versão anterior deste teste median o tempo entre `assistir()` e o
++/// quadro chegar, e chamava um quadro rápido demais de prova. Estava errada:
++/// `esperar` lê um canal FIFO, e o canal já tinha o quadro 0 na fila — o
++/// servidor o entregou muito antes de `assistir()` ser chamado, enquanto
++/// ainda servia as duas cópias. Um `Instant::now()` medido depois de
++/// `assistir()` limita **quanto se espera**, nunca **de onde o quadro veio**;
++/// um teste que só olhasse esse relógio passava em microssegundos com um
++/// `pop` de fila em memória, não com rede nenhuma atravessada.
++///
++/// A prova de verdade tem duas pernas. **Primeiro**, um piso: antes de pedir
++/// para assistir, [`maior_seq_ja_enfileirado`] drena o que já chegou e guarda
++/// o maior `seq` visto — só um `seq` estritamente maior que esse piso pode
++/// ter atravessado depois do corte. **Segundo**, sustentação: um `seq` isolado
++/// acima do piso ainda cabe num candidato a mais em voo (a discagem
++/// simultânea dos dois lados admite isso, de propósito). [`QUADROS_PARA_PROVAR`]
++/// quadros seguidos — um segundo inteiro —, cada um estritamente maior que o
++/// anterior e com o contador do servidor em uma cópia o tempo todo, não cabem
++/// em voo nenhum: só cabem vindo de um cano que o servidor não subiu.
+ #[tokio::test(flavor = "multi_thread")]
+ async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
+     let Cenario {
+         servidor,
+         compartilha,
+         empresta,
+         mut assiste,
+         screen,
+         copias,
+     } = cenario().await?;
+ 
+     // **O vazamento de privacidade, preso no ponto de chamada.** `enlace.rs`
+     // decide o que publicar em `locais_a_publicar`, e a Task 8 provou a função
+     // sem provar quem a chama. Aqui as duas declarações que existem no servidor
+     // vieram de dois clientes de verdade que passaram por aquela linha: quem
+     // empresta publicou endereços de rede local, e quem só assiste publicou
+     // exatamente um endereço — o público que o servidor **viu**, e que
+     // `Pares::declarou` acrescenta sozinho. Um `locais_a_publicar` chamado com
+     // `true` fixo publicaria a topologia interna de quem nunca optou por nada.
++    //
++    // Os `PersonId` vêm de `.sessao().person`, e não escritos à mão: os dois
++    // são clientes de verdade, e a ordem em que o servidor lhes atribuiu
++    // identidade não é contrato — escrevê-los à mão prenderia esta afirmação
++    // a essa ordem por acidente.
+     {
++        let empresta_quem = empresta.sessao().person;
++        let assiste_quem = assiste.sessao().person;
+         let pares = servidor.server().pares.lock().await;
+         let quem_assiste = pares
+-            .declaracao_de(PersonId(3))
++            .declaracao_de(assiste_quem)
+             .expect("quem assiste conectou e não declarou identidade nenhuma")
+             .clone();
+         let quem_empresta = pares
+-            .declaracao_de(PersonId(2))
++            .declaracao_de(empresta_quem)
+             .expect("quem empresta optou por emprestar e não declarou identidade")
+             .clone();
+         assert!(
+             quem_empresta.emprestando,
+             "quem chamou `emprestar_subida(true)` chegou ao servidor como quem não empresta"
+         );
+         assert!(
+             !quem_assiste.emprestando,
+             "quem nunca optou por emprestar chegou ao servidor como quem empresta"
+         );
+         assert_eq!(
+             quem_assiste.enderecos.len(),
+             1,
+             "quem só assiste publicou {:?} — o opt-in de `locais_a_publicar` não valeu no \
+              ponto de chamada, e a topologia de rede interna desta máquina foi para o servidor \
+              sem ninguém ter pedido",
+             quem_assiste.enderecos
+         );
+     }
+ 
++    // O piso: nenhum quadro daqui para trás prova nada sobre o par, porque
++    // todos ainda podem ter vindo do servidor.
++    let piso_inicial = maior_seq_ja_enfileirado(&mut assiste, screen).await;
++
+     // Quem assiste pede para ver, e é aqui que o servidor escolhe o par.
+     assiste.assistir(screen, true).await?;
+ 
+     ate("o servidor parar de subir a cópia de quem assiste", || {
+         copias.agora() == 1
+     })
+     .await?;
+ 
+-    // A partir de agora, todo quadro que chegar a quem assiste é um quadro que
+-    // o servidor não subiu para ela.
+-    let desde = Instant::now();
+-    let (seq, bytes) = esperar(
+-        &mut assiste,
+-        "um quadro chegar pelo par depois de o servidor ter desligado o cano",
+-        |aviso| match aviso {
+-            Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => {
+-                seq_de(bytes).map(|seq| (seq, bytes.clone()))
+-            }
+-            _ => None,
+-        },
+-    )
+-    .await?;
++    // A prova de verdade: `QUADROS_PARA_PROVAR` seguidos, cada um acima do
++    // piso anterior (o próprio piso avança a cada quadro aceito, então dois
++    // quadros iguais ou fora de ordem não colam), e o servidor contando uma
++    // cópia só do primeiro ao último.
++    let mut piso = piso_inicial;
++    for indice in 0..QUADROS_PARA_PROVAR {
++        let (seq, bytes) = esperar(
++            &mut assiste,
++            "um quadro chegar pelo par, estritamente depois do piso, com o cano do servidor \
++             desligado",
++            |aviso| match aviso {
++                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
++                    .filter(|seq| piso.is_none_or(|p| *seq > p))
++                    .map(|seq| (seq, bytes.clone())),
++                _ => None,
++            },
++        )
++        .await?;
++        assert_eq!(
++            bytes,
++            corpo(seq),
++            "o quadro {seq} chegou e não é o que saiu: os bytes não batem"
++        );
++        assert_eq!(
++            copias.agora(),
++            1,
++            "o servidor voltou a subir a cópia de quem assiste no meio da recepção sustentada \
++             (quadro {indice} de {QUADROS_PARA_PROVAR}, seq {seq}): este quadro pode ter vindo \
++             dele, e a malha não provou nada"
++        );
++        piso = Some(seq);
++    }
+     println!(
+-        "o quadro {seq} chegou a quem assiste {:?} depois de o cano do servidor ser desligado",
+-        desde.elapsed()
+-    );
+-
+-    assert_eq!(
+-        bytes,
+-        corpo(seq),
+-        "o quadro chegou e não é o que saiu: os bytes não batem"
+-    );
+-    assert_eq!(
+-        copias.agora(),
+-        1,
+-        "o servidor voltou a subir a cópia de quem assiste: este quadro pode ter vindo dele, \
+-         e a malha não provou nada"
++        "{QUADROS_PARA_PROVAR} quadros seguidos chegaram a quem assiste, todos com seq acima de \
++         {piso_inicial:?}, com o servidor subindo uma cópia só do primeiro ao último"
+     );
+ 
+     // Sem isto os clientes caem antes do servidor e o desligamento vira corrida.
+     drop(compartilha);
+     drop(empresta);
+     drop(assiste);
+     servidor.shutdown();
+     Ok(())
+ }
+ 
+diff --git a/crates/seele-core/src/enlace.rs b/crates/seele-core/src/enlace.rs
+index 24fcf6e..ffac2b7 100644
+--- a/crates/seele-core/src/enlace.rs
++++ b/crates/seele-core/src/enlace.rs
+@@ -423,30 +423,20 @@ const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
+ 
+ /// Quanto dura **cada** tentativa de discar para um par, dentro de
+ /// [`PRAZO_DO_PAR`].
+ ///
+ /// Ver [`discar_ate_o_prazo`] para por que são várias e não uma. Meio segundo
+ /// é folgado para um aperto de mão em rede local e curto o bastante para
+ /// caberem seis tentativas no prazo — um par que exista responde na primeira
+ /// ou na segunda, e um que não exista custa o mesmo prazo total de antes.
+ const TENTATIVA_DE_PAR: Duration = Duration::from_millis(500);
+ 
+-/// Por quanto tempo [`servir_um_par`] ainda recusa uma ligação que chegue
+-/// depois de a corrida entre atender e discar já ter um vencedor.
+-///
+-/// **Curta de propósito.** Uma sobra de verdade — a segunda de duas
+-/// tentativas simultâneas para a mesma pessoa — chega dentro de um RTT da
+-/// vencedora, não de um prazo de discagem inteiro: as duas saem do mesmo
+-/// [`par::ligar`], no mesmo instante. Ver [`recusar_sobras`] para o porquê de
+-/// a janela existir.
+-const JANELA_DE_SOBRAS: Duration = Duration::from_millis(150);
+-
+ /// O que uma tentativa do caminho entre pares, resolvida numa tarefa solta,
+ /// devolve ao laço de [`Motor::rodar`] para ele agir.
+ ///
+ /// Só existe porque a tentativa é assíncrona e pode levar até
+ /// [`PRAZO_DO_PAR`]: bloquear o laço principal por isso pausaria a voz, o ping
+ /// e o resto desta sessão até o par responder ou o prazo vencer. A tarefa roda
+ /// solta (ver [`Motor::assistir_por_par`]) e devolve o que decidiu por aqui; só
+ /// quem tem o `&mut Client` — o laço de `rodar` — pode falar com o servidor.
+ #[derive(Debug)]
+ enum ResultadoDoPar {
+@@ -3085,72 +3075,31 @@ async fn servir_um_par(
+         &ponta,
+         &enderecos,
+         impressao,
+         Some(&identidade),
+         PRAZO_DO_PAR,
+     );
+     let resultado = tokio::select! {
+         atendido = atende => atendido,
+         discado = disca => discado.ok(),
+     };
+-    // A sobra de uma corrida que a linha acima já decidiu, recusada antes de
+-    // desarmar — ver o doc de `recusar_sobras` para o pânico que evita.
+-    recusar_sobras(&ponta).await;
+     // **Desarma sempre, sirva ou não sirva.** Achado do fix round 3: sem
+     // isto a ponta continuava aceitando conexões pelo resto da sessão — ver
+-    // o doc de `par::parar_de_atender`.
+-    par::parar_de_atender(&ponta);
++    // o doc de [`par::parar_de_atender`]. A função já drena e recusa
++    // sozinha qualquer sobra da corrida acima antes de desarmar de verdade —
++    // ver o doc dela para o pânico que isso evita — porque o perigo mora no
++    // `set_server_config(None)` que ela faz, não neste ponto de chamada: um
++    // `servir_um_par` de amanhã sem essa linha não devia poder reabri-lo.
++    par::parar_de_atender(&ponta).await;
+     resultado
+ }
+ 
+-/// Recusa qualquer tentativa de ligação que já tenha chegado a esta ponta e
+-/// ainda não foi aceita, antes de [`par::parar_de_atender`] desarmá-la.
+-///
+-/// # O pânico que este dreno evita
+-///
+-/// `par::ligar` disca todos os endereços declarados em paralelo, e
+-/// `enlace::locais_a_publicar` pode declarar mais de um endereço para a
+-/// mesma pessoa — o local de rede e o público que o servidor viu. Quando os
+-/// dois caem no mesmo soquete do outro lado — sempre em `localhost`, e em
+-/// rede real atrás de um roteador com NAT *hairpin* —, o `quinn` enxerga duas
+-/// tentativas de ligação separadas para a mesma pessoa, não uma só.
+-/// [`par::atender`] aceita a primeira que chega; a segunda fica esquecida no
+-/// `quinn`, sem ninguém para aceitá-la ou recusá-la, porque `atender` serve
+-/// **uma** vaga só.
+-///
+-/// Se essa sobra continuar esquecida quando `parar_de_atender` zera o
+-/// `ServerConfig` da ponta, uma retransmissão dela — o `quinn` reenvia o
+-/// pacote inicial de toda tentativa sem resposta — encontra a rota ainda
+-/// indexada e o servidor já desarmado, e o `quinn-proto` 0.11.16
+-/// (`endpoint.rs:217`) entra em pânico num `.unwrap()` que supõe o contrário.
+-/// O pânico é num `Drop`, então não é só a tentativa que morre: **o processo
+-/// inteiro aborta**. `crates/seele-conformance/tests/tela_por_um_par.rs`
+-/// reproduz isto toda vez que roda, porque o servidor de testes escuta em
+-/// `127.0.0.1` e a máquina de CI sempre tem pelo menos uma interface de rede
+-/// além do loopback.
+-///
+-/// Recusar — e não `accept` nem ignorar — é o que fecha a ligação de
+-/// verdade: `Incoming::ignore` não manda pacote nenhum, e a sobra continuaria
+-/// esperando uma resposta que nunca chegaria da mesma forma que crashava
+-/// antes. `Incoming::refuse` manda o fechamento e tira a entrada do índice do
+-/// `quinn` — depois disso, uma retransmissão não acha rota nenhuma, e não há
+-/// `server_config` nenhum para desembrulhar.
+-async fn recusar_sobras(ponta: &quinn::Endpoint) {
+-    while let Ok(Some(sobrando)) = tokio::time::timeout(JANELA_DE_SOBRAS, ponta.accept()).await {
+-        tracing::debug!(
+-            par = %sobrando.remote_address(),
+-            "uma segunda tentativa de ligação da mesma corrida foi recusada"
+-        );
+-        sobrando.refuse();
+-    }
+-}
+-
+ /// Os endereços de rede local desta máquina, na porta que `ponta` já usa.
+ ///
+ /// **Achado do fix round 2.** Enumeração simples, sem a ordenação por
+ /// heurística de VPN que `seele-server::alcance::interfaces::descobrir` faz
+ /// para o convite: aqui não há convite nem degrau de furo a preparar, só uma
+ /// lista de candidatos que `par::ligar` já tenta todos em paralelo. O ADR
+ /// 0002 proíbe este crate de depender de `seele-server`, então a pergunta —
+ /// "quais endereços desta máquina servem para alguém bater neles" — é
+ /// refeita aqui, com o mesmo crate (`if_addrs`).
+ ///
+@@ -5084,11 +5033,102 @@ mod tests {
+             caminho: crate::caminho::Sonda::nova(),
+             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+             identidade_de_par: None,
+             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+             emprestando: false,
+             repasse: Arc::new(RepasseDeTela::default()),
+             resultados_do_par,
+             resultados_do_par_tx,
+         }
+     }
++
++    /// O ponto de chamada de `par::parar_de_atender` dentro de
++    /// `servir_um_par` desarma a ponta de quem empresta depois de servir.
++    ///
++    /// # O achado do round 1 desta tarefa
++    ///
++    /// A tentativa anterior deste guarda media só do lado de quem **disca**
++    /// uma segunda vez contra a ponta já servida — e lá, armada e desarmada
++    /// são indistinguíveis: sem ninguém para chamar `ponta.accept()` de
++    /// novo, as duas produzem o mesmo silêncio até o próprio prazo de
++    /// discagem vencer. Medido e descartado — ver o relatório da Task 10.
++    ///
++    /// O sinal mora do lado de quem **atende**, como
++    /// `par::testes::parar_de_atender_desarma_o_que_passar_a_atender_armou`
++    /// já prova para a função isolada: pôr alguém pronto para aceitar
++    /// (`par::atender`) depois do desarme, e só então discar. Armada, o
++    /// aperto de mão completa; desarmada, `accept()` nunca rende nada e quem
++    /// disca esgota o próprio prazo. Este teste faz o mesmo, mas contra
++    /// `servir_um_par` — o ponto de chamada de produção, não a função pura.
++    #[tokio::test(flavor = "multi_thread")]
++    async fn servir_um_par_desarma_a_ponta_de_quem_empresta_depois_de_servir() {
++        let ponta_empresta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let onde_empresta = ponta_empresta.local_addr().unwrap();
++        let identidade_empresta = par::identidade_efemera().unwrap();
++        let impressao_empresta = par::impressao(&identidade_empresta);
++
++        // Quem "assiste": só disca, nunca atende — o mesmo papel de
++        // `Motor::assistir_por_par`.
++        let identidade_assiste = par::identidade_efemera().unwrap();
++        let impressao_assiste = par::impressao(&identidade_assiste);
++
++        // Um buraco negro: uma ponta de verdade, bindada, mas sem
++        // `ServerConfig` nenhum. É o endereço que `servir_um_par` tenta
++        // discar do lado dele — precisa ser um alvo que nunca responde, para
++        // a corrida interna resolver pelo lado de `atender`, que é o que a
++        // discagem de verdade abaixo aciona. Um pacote UDP para uma porta
++        // fechada arriscaria um erro rápido demais (`ECONNREFUSED` do SO) e
++        // venceria a corrida errada; este alvo só ignora, do jeito que um par
++        // de verdade que não respondesse também ignoraria.
++        let buraco_negro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let onde_buraco_negro = buraco_negro.local_addr().unwrap();
++
++        let servindo = tokio::spawn(servir_um_par(
++            ponta_empresta.clone(),
++            identidade_empresta,
++            vec![onde_buraco_negro],
++            impressao_assiste.clone(),
++        ));
++
++        // A discagem de verdade, de fora da tarefa acima — o papel de
++        // `Motor::assistir_por_par` do lado de quem assiste.
++        let ponta_assiste = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let ligado = par::ligar(
++            &ponta_assiste,
++            &[onde_empresta],
++            impressao_empresta.clone(),
++            Some(&identidade_assiste),
++            Duration::from_secs(3),
++        )
++        .await
++        .expect("a discagem de quem assiste tinha tudo para fechar e não fechou");
++        drop(ligado);
++
++        let resultado = servindo.await.expect("a tarefa de servir_um_par");
++        assert!(
++            resultado.is_some(),
++            "servir_um_par não serviu ninguém, e o resto deste teste não prova nada"
++        );
++
++        // **O discriminador.** Alguém pronto para aceitar, depois de
++        // `servir_um_par` já ter devolvido: se a ponta continuasse armada —
++        // por exemplo, com a chamada a `par::parar_de_atender` removida
++        // deste ponto de chamada —, é este `atender` quem completaria o
++        // aperto de mão, com a MESMA impressão que `passar_a_atender` já
++        // tinha fixado dentro de `servir_um_par`.
++        let _atendendo = tokio::spawn(par::atender(ponta_empresta, Duration::from_secs(2)));
++        let ponta_de_novo = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let tentou = par::ligar(
++            &ponta_de_novo,
++            &[onde_empresta],
++            impressao_empresta,
++            Some(&identidade_assiste),
++            Duration::from_millis(300),
++        )
++        .await;
++        assert!(
++            matches!(tentou, Err(par::ErroDePar::NaoAlcancou)),
++            "a ponta de quem empresta continuou atendendo depois de servir_um_par devolver: \
++             {tentou:?}"
++        );
++    }
+ }
+diff --git a/crates/seele-core/src/par.rs b/crates/seele-core/src/par.rs
+index 1d9d329..6a7dd44 100644
+--- a/crates/seele-core/src/par.rs
++++ b/crates/seele-core/src/par.rs
+@@ -190,36 +190,95 @@ pub fn passar_a_atender(
+         .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+     tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+     let quic = quinn::crypto::rustls::QuicServerConfig::try_from(tls)
+         .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
+     ponta.set_server_config(Some(quinn::ServerConfig::with_crypto(std::sync::Arc::new(
+         quic,
+     ))));
+     Ok(())
+ }
+ 
++/// Por quanto tempo [`parar_de_atender`] ainda recusa uma ligação que chegue
++/// depois de a corrida em [`atender`]/[`ligar`] já ter um vencedor, antes de
++/// desarmar de verdade.
++///
++/// **Curta de propósito.** Uma sobra de verdade — a segunda de duas
++/// tentativas simultâneas para a mesma pessoa — chega dentro de um RTT da
++/// vencedora, não de um prazo de discagem inteiro: as duas saem do mesmo
++/// [`ligar`], no mesmo instante. Ver o doc de [`parar_de_atender`] para o
++/// pânico que a janela evita.
++const JANELA_DE_SOBRAS: std::time::Duration = std::time::Duration::from_millis(150);
++
+ /// Desarma o que [`passar_a_atender`] armou.
+ ///
+ /// **Não é limpeza opcional — achado do fix round 3.** Sem isto, a ponta
+ /// continua aceitando conexões pelo resto da sessão, muito depois de a única
+ /// vaga de [`atender`] já ter sido servida, com o verificador ainda fixado na
+ /// impressão do **último** par apontado. E QUIC sem `use_retry` responde ao
+ /// primeiro pacote de quem quer que bata, antes de qualquer autenticação:
+ /// uma porta armada é um refletor de amplificação (até 3× o `Initial`
+ /// recebido, contra qualquer endereço de origem que o pacote alegue) por todo
+ /// esse tempo — não só enquanto está de fato servindo alguém.
+ ///
+ /// Chame depois que [`atender`] devolver, sirva ele ou não sirva. A conexão
+ /// de controle desta mesma ponta não é afetada: `set_server_config` só rege
+ /// o que a ponta faz com um `Initial` que chega, e uma conexão já
+ /// estabelecida não passa por aí de novo.
+-pub fn parar_de_atender(ponta: &quinn::Endpoint) {
++///
++/// # Por que esta função drena sobras antes de desarmar, e não quem a chama
++///
++/// **O perigo mora aqui, no `set_server_config(None)`, e não em nenhum
++/// ponto de chamada** — então é aqui que o guarda tem de estar, onde ninguém
++/// que vier a chamar `parar_de_atender` (o subprojeto B, um teste novo desta
++/// função) pode esquecê-lo.
++///
++/// [`ligar`] disca todos os endereços declarados em paralelo, e
++/// `enlace::locais_a_publicar` pode declarar mais de um endereço para a
++/// mesma pessoa — o local de rede e o público que o servidor viu. Quando os
++/// dois caem no mesmo soquete do outro lado — sempre em `localhost`, e em
++/// rede real atrás de um roteador com NAT *hairpin* —, o `quinn` enxerga isso
++/// como **duas** tentativas de ligação separadas para a mesma pessoa, não uma
++/// só. [`atender`] aceita a primeira que chega; a segunda fica esquecida no
++/// `quinn`, sem ninguém para aceitá-la ou recusá-la, porque `atender` serve
++/// **uma** vaga só.
++///
++/// Se essa sobra continuar esquecida quando esta função zera o
++/// `ServerConfig` da ponta, uma retransmissão dela — o `quinn` reenvia o
++/// pacote inicial de toda tentativa sem resposta — encontra a rota ainda
++/// indexada e o servidor já desarmado, e o `quinn-proto` 0.11.16
++/// (`endpoint.rs:217`) entra em pânico num `.unwrap()` que supõe o contrário.
++/// O pânico é num `Drop`, então não é só a tentativa que morre: **o processo
++/// inteiro aborta**. `crates/seele-conformance/tests/tela_por_um_par.rs`
++/// reproduz isto toda vez que roda, porque o servidor de testes escuta em
++/// `127.0.0.1` e a máquina de CI sempre tem pelo menos uma interface de rede
++/// além do loopback.
++///
++/// # `refuse`, e não `ignore` — mas não pela razão que uma versão anterior
++/// deste doc registrou
++///
++/// As duas limpam o mesmo estado: `Incoming::refuse` e `Incoming::ignore`
++/// chamam, os dois, `clean_up_incoming` por dentro do `quinn`
++/// (`endpoint.rs:715` e `785` do `quinn-proto` 0.11.16) — tirar a entrada do
++/// índice não é privilégio de um dos dois, e uma versão anterior deste doc
++/// dizia o contrário. A diferença real é o que sai no fio: `refuse` manda um
++/// `CONNECTION_REFUSED` na hora; `ignore` não manda nada. Escolho `refuse`
++/// porque avisa quem perdeu a corrida imediatamente, em vez de deixá-lo
++/// esperando o próprio prazo de discagem inteiro por um silêncio que já era
++/// definitivo — não porque `ignore` deixasse a sobra presa (não deixa).
++pub async fn parar_de_atender(ponta: &quinn::Endpoint) {
++    while let Ok(Some(sobrando)) = tokio::time::timeout(JANELA_DE_SOBRAS, ponta.accept()).await {
++        tracing::debug!(
++            par = %sobrando.remote_address(),
++            "uma segunda tentativa de ligação da mesma corrida foi recusada"
++        );
++        sobrando.refuse();
++    }
+     ponta.set_server_config(None);
+ }
+ 
+ /// Confere quem **chega**, contra a impressão que o servidor apresentou.
+ ///
+ /// Espelho de [`ConfereImpressao`] na outra direção. As duas existem porque os
+ /// dois lados discam: quem disca confere com aquele, quem atende confere com
+ /// este, e sem os dois metade das ligações não passaria por conferência nenhuma.
+ #[derive(Debug)]
+ pub(crate) struct ConfereQuemChega {
+@@ -1822,21 +1881,21 @@ mod testes {
+         // impressões que nunca bateriam) não provaria nada sobre
+         // `parar_de_atender`.
+         let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+         let identidade_da_ponta = identidade_efemera().unwrap();
+         let impressao_da_ponta = impressao(&identidade_da_ponta);
+         let identidade_de_quem_discaria = identidade_efemera().unwrap();
+         let impressao_de_quem_discaria = impressao(&identidade_de_quem_discaria);
+         passar_a_atender(&ponta, identidade_da_ponta, impressao_de_quem_discaria).unwrap();
+         let onde = ponta.local_addr().unwrap();
+ 
+-        parar_de_atender(&ponta);
++        parar_de_atender(&ponta).await;
+ 
+         // Alguém pronto para aceitar, mesmo assim: se a ponta continuasse
+         // armada, é `atender` quem completaria o aperto de mão.
+         let _atendendo = tokio::spawn(atender(ponta, PRAZO_DE_CONFIRMACAO_NO_TESTE));
+ 
+         let discando = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+         let tentou = ligar(
+             &discando,
+             &[onde],
+             impressao_da_ponta,

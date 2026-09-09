@@ -1,0 +1,342 @@
+# Review package: 86aea6d..499c9ec
+
+## Commits
+499c9ec feat(par): quem empresta repassa por pedaço, a partir de um quadro-chave
+
+## Files changed
+ crates/seele-core/src/par.rs | 253 +++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 231 insertions(+), 22 deletions(-)
+
+## Diff
+diff --git a/crates/seele-core/src/par.rs b/crates/seele-core/src/par.rs
+index 366ec57..6ed9013 100644
+--- a/crates/seele-core/src/par.rs
++++ b/crates/seele-core/src/par.rs
+@@ -710,20 +710,109 @@ pub async fn atender(
+     let ida_e_volta = conexao.rtt();
+     let como = como_chegou(conexao.remote_address());
+     tracing::info!(par = %conexao.remote_address(), ?como, ?ida_e_volta, "um par foi atendido");
+     Some(ParLigado {
+         conexao,
+         como,
+         ida_e_volta,
+     })
+ }
+ 
++/// Escreve uma transmissão de tela para um par, por pedaço, a partir do
++/// primeiro quadro-chave.
++///
++/// **É o trabalho todo do subprojeto A.** As sete tarefas anteriores fazem
++/// dois clientes se ligarem; nenhuma faz um byte de tela atravessar. É esta
++/// função — chamada por quem empresta a subida, com `ligado` sendo o par que
++/// não alcança o servidor — que faz o quadro passar de um lado ao outro.
++///
++/// # Por pedaço, e nunca remontando quadro
++///
++/// A mesma regra do encaminhamento do servidor, pela mesma razão: um fluxo
++/// QUIC é uma sequência ordenada de bytes, e esperar o quadro inteiro para
++/// repassar acrescenta um tempo de quadro de atraso **a cada salto**. Numa
++/// árvore de profundidade três isso é três quadros, que é o orçamento
++/// inteiro. Por isso `repassar` escreve cada pedaço assim que chega, sem
++/// jamais montar um quadro para depois desmontá-lo.
++///
++/// # A abertura vai primeiro, e pedaço nenhum antes dela
++///
++/// Quem recebe usa `crate::tela::Recepcao::do_fluxo`, que lê o byte de tipo e
++/// o [`seele_proto::screen::ScreenHeader`] antes de qualquer coisa. Um pedaço
++/// que chegasse antes deslocaria o enquadramento **para sempre** — é o defeito
++/// que o §5.2 do desenho de compartilhamento de tela nomeia, e ele não se
++/// corrige depois.
++///
++/// # Quem entra por um par entra num quadro-chave
++///
++/// Ligar no meio de um quadro é ligar em lixo. O servidor já sabe disto:
++/// `EmCurso::esperando`, em `crates/seele-server/src/voice_room.rs`, segura
++/// quem chega numa lista de espera até o próximo quadro-chave. `repassar` faz
++/// o mesmo: descarta todo pedaço até o primeiro cujo primeiro byte seja
++/// [`crate::tela::TipoDeQuadro::Chave`], e a partir dele repassa tudo, sem
++/// descartar mais nada. Sem esta regra, quem entra por um par veria blocos
++/// coloridos até o quadro-chave seguinte, sem como saber por quê.
++///
++/// # Errors
++///
++/// [`ErroDePar::Escuta`] quando o par para de aceitar bytes — o fluxo não
++/// abre, a abertura não escreve, ou um pedaço não escreve.
++pub async fn repassar(
++    ligado: &ParLigado,
++    abertura: &[u8],
++    mut pedacos: tokio::sync::mpsc::Receiver<Vec<u8>>,
++) -> Result<(), ErroDePar> {
++    let mut fluxo = ligado
++        .conexao
++        .open_uni()
++        .await
++        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
++    // O tipo do fluxo antes do cabeçalho, e o cabeçalho antes de qualquer
++    // pedaço — a mesma ordem que `crate::tela::Transmissao::abrir` já escreve
++    // para o servidor, porque é a mesma leitura que `Recepcao::do_fluxo` faz
++    // do outro lado, venha o fluxo de onde vier.
++    fluxo
++        .write_all(&[seele_proto::stream::StreamType::Screen.byte()])
++        .await
++        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
++    fluxo
++        .write_all(abertura)
++        .await
++        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
++
++    // Descarta até o primeiro quadro-chave — ver a seção acima. Uma vez visto
++    // um, esta bandeira nunca mais volta a `false`: nada é descartado depois
++    // dele.
++    let mut viu_a_chave = false;
++    while let Some(pedaco) = pedacos.recv().await {
++        if !viu_a_chave {
++            let e_chave = pedaco
++                .first()
++                .copied()
++                .and_then(crate::tela::TipoDeQuadro::de_byte)
++                .is_some_and(crate::tela::TipoDeQuadro::e_chave);
++            if !e_chave {
++                continue;
++            }
++            viu_a_chave = true;
++        }
++        fluxo
++            .write_all(&pedaco)
++            .await
++            .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
++    }
++    fluxo
++        .finish()
++        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
++    Ok(())
++}
++
+ /// De onde a imagem desta transmissão vai vir.
+ ///
+ /// `Box` em [`Self::Par`] porque [`ParLigado`] carrega uma [`quinn::Connection`]
+ /// e [`Self::Servidor`] não carrega nada além do motivo: sem a caixa o `enum`
+ /// inteiro teria o tamanho da maior variante, e o `clippy::large_enum_variant`
+ /// reclamaria com razão — a variante pequena pagaria pelo tamanho da grande a
+ /// cada vez que aparecesse.
+ #[derive(Debug)]
+ pub enum PorOndeAssistir {
+     /// Por este par.
+@@ -972,20 +1061,63 @@ mod testes {
+     use super::*;
+ 
+     /// O prazo de confirmação que os testes deste módulo dão a `atender`.
+     ///
+     /// Generoso para `127.0.0.1` (onde um RTT real custa microssegundos) e
+     /// curto o bastante para um teste que trava por causa deste prazo faltar
+     /// não segurar a suíte pelos 30 s do `max_idle_timeout` do `quinn`, ou
+     /// pior, para sempre.
+     const PRAZO_DE_CONFIRMACAO_NO_TESTE: std::time::Duration = std::time::Duration::from_secs(2);
+ 
++    /// Liga duas pontas de par, uma contra a outra, e devolve os dois lados.
++    ///
++    /// Extraído de `dois_pares_se_ligam_e_o_teste_sabe_como`, que já montava
++    /// exatamente isto — duplicar o bloco aqui seria dois lugares para
++    /// consertar no dia em que a assinatura de [`ligar`] mudar.
++    ///
++    /// Devolve a conexão **do lado de quem atende** (por onde um teste lê o
++    /// que [`repassar`] escreveu do outro lado), o `Endpoint` de quem discou
++    /// — soltá-lo cedo demais arrisca a conexão que ele sustenta, então quem
++    /// chama decide quando `drop`á-lo — e o [`ParLigado`] de quem discou, que
++    /// é o que [`repassar`] recebe.
++    async fn duas_pontas_ligadas() -> (quinn::Connection, quinn::Endpoint, ParLigado) {
++        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let ia = identidade_efemera().unwrap();
++        let impressao_a = impressao(&ia);
++        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
++        let ib = identidade_efemera().unwrap();
++        let impressao_b = impressao(&ib);
++        passar_a_atender(&a, ia, impressao_b).unwrap();
++        let endereco_a = a.local_addr().unwrap();
++        let atendendo_a = tokio::spawn(atender(a, PRAZO_DE_CONFIRMACAO_NO_TESTE));
++
++        let ib_para_discar = ib.clone();
++        passar_a_atender(&b, ib, impressao_a.clone()).unwrap();
++
++        let ligado = ligar(
++            &b,
++            &[endereco_a],
++            impressao_a,
++            Some(&ib_para_discar),
++            std::time::Duration::from_secs(5),
++        )
++        .await
++        .expect("os dois pares não se ligaram");
++
++        let do_lado_de_quem_atende = atendendo_a
++            .await
++            .expect("a tarefa que atende travou")
++            .expect("quem atende não recebeu ninguém");
++
++        (do_lado_de_quem_atende.conexao, b, ligado)
++    }
++
+     #[test]
+     fn cada_identidade_e_nova_e_a_impressao_a_distingue() {
+         // **Efêmero é o ponto, e não um detalhe.** O certificado do servidor é
+         // persistido porque o pino do ADR 0003 depende dele. Este não é pinado
+         // por ninguém: quem confere recebe a impressão digital pelo servidor a
+         // cada apresentação. Guardá-lo em disco criaria um identificador
+         // estável da máquina de quem empresta, que é metadado que ninguém pediu.
+         let uma = identidade_efemera().unwrap();
+         let outra = identidade_efemera().unwrap();
+         assert_ne!(
+@@ -1072,42 +1204,21 @@ mod testes {
+         // **Os dois discam, e o furo sai de graça.** Como as duas pontas atendem,
+         // as próprias tentativas de conexão são os pacotes que abrem o NAT dos dois
+         // lados; a primeira que fecha o aperto de mão vence e a outra é descartada.
+         // Resolve o caso assimétrico sozinho — se só um lado consegue sair, é a
+         // conexão dele que vinga — e usa só a API pública do `quinn`.
+         //
+         // Em `127.0.0.1` não há NAT a furar, então o que este teste prende é o
+         // resto: que a ligação fecha, que a impressão digital é conferida no
+         // caminho, e que o resultado diz **como** chegou. A taxa de furo de verdade
+         // é o roteiro de duas máquinas que mede, e nenhum teste daqui pode medi-la.
+-        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+-        let ia = identidade_efemera().unwrap();
+-        let impressao_a = impressao(&ia);
+-        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+-        let ib = identidade_efemera().unwrap();
+-        let impressao_b = impressao(&ib);
+-        passar_a_atender(&a, ia, impressao_b).unwrap();
+-        let endereco_a = a.local_addr().unwrap();
+-        let _atendendo_a = tokio::spawn(atender(a, PRAZO_DE_CONFIRMACAO_NO_TESTE));
+-
+-        let ib_para_discar = ib.clone();
+-        passar_a_atender(&b, ib, impressao_a.clone()).unwrap();
+-
+-        let ligado = ligar(
+-            &b,
+-            &[endereco_a],
+-            impressao_a,
+-            Some(&ib_para_discar),
+-            std::time::Duration::from_secs(5),
+-        )
+-        .await
+-        .expect("os dois pares não se ligaram");
++        let (_do_lado_de_quem_atende, _b, ligado) = duas_pontas_ligadas().await;
+ 
+         assert_eq!(
+             ligado.como,
+             ComoChegou::Local,
+             "127.0.0.1 não é rede local?"
+         );
+         assert!(
+             ligado.conexao.close_reason().is_none(),
+             "a conexão já morreu"
+         );
+@@ -1792,11 +1903,109 @@ mod testes {
+             .expect("a escrita na conexão de controle falhou");
+         let _ = envio.finish();
+         let mut resposta = [0_u8; 10];
+         recebe
+             .read_exact(&mut resposta)
+             .await
+             .expect("a leitura na conexão de controle falhou");
+         assert_eq!(&resposta, b"ainda viva");
+         eco.await.expect("a tarefa de eco do servidor morreu");
+     }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn o_par_recebe_a_abertura_e_os_pedacos_na_ordem() {
++        // **Por pedaço, e nunca remontando quadro.** É a mesma regra que o
++        // encaminhamento do servidor segue — *«o encaminhamento é por pedaço, sem
++        // remontar quadro»* —, e ela não é estilo: um fluxo QUIC é uma sequência
++        // ordenada de bytes, e esperar o quadro inteiro para repassar acrescenta
++        // um tempo de quadro de atraso a cada salto. Numa árvore de profundidade
++        // três isso seria três quadros, que é o orçamento inteiro.
++        let (a, b, ligado) = duas_pontas_ligadas().await;
++        // **Mantida viva além do `spawn`.** `repassar` recebe `ligado` por
++        // referência, mas o `'static` do `spawn` obriga a movê-lo para dentro
++        // do bloco — e soltar a última alça de uma `quinn::Connection` fecha a
++        // ligação na hora (`ConnectionRef::drop` chama `implicit_close`), antes
++        // de o laço de I/O da conexão sequer ter tido a chance de escrever os
++        // bytes já aceitos no buffer. Este clone é a alça extra que falta:
++        // quem chama `repassar` de verdade mantém `ParLigado` vivo por uma
++        // sessão inteira, bem além de uma chamada só, e este clone reproduz
++        // essa mesma garantia aqui.
++        let mantida_viva = ligado.conexao.clone();
++
++        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
++        let abertura_clone = abertura.clone();
++        let (manda, recebe) = tokio::sync::mpsc::channel(8);
++        let repassando =
++            tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
++
++        manda.send(vec![1, 2, 3]).await.unwrap();
++        manda.send(vec![4, 5]).await.unwrap();
++        drop(manda);
++
++        // Do outro lado, o que chega é: o byte de tipo, a abertura, e os pedaços
++        // na ordem em que foram mandados.
++        let mut fluxo = a.accept_uni().await.unwrap();
++        let mut tipo = [0_u8; 1];
++        fluxo.read_exact(&mut tipo).await.unwrap();
++        assert_eq!(tipo[0], seele_proto::stream::StreamType::Screen.byte());
++        let veio = fluxo.read_to_end(1024).await.unwrap();
++        assert_eq!(
++            veio,
++            [
++                vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN],
++                vec![1, 2, 3],
++                vec![4, 5]
++            ]
++            .concat(),
++            "o que chegou ao par não é a abertura seguida dos pedaços na ordem"
++        );
++        repassando.await.unwrap().unwrap();
++        drop(mantida_viva);
++        drop(b);
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn quem_entra_por_um_par_entra_num_quadro_chave() {
++        // **Ligar no meio de um quadro é ligar em lixo.** O servidor já sabe disto:
++        // ele segura quem chega numa lista de espera e só abre a cópia no começo do
++        // próximo quadro-chave (`EmCurso::esperando`, em
++        // `crates/seele-server/src/voice_room.rs`). Quem repassa tem de fazer o
++        // mesmo, ou a pessoa que entrou por um par vê blocos coloridos até o
++        // quadro-chave seguinte — e não tem como saber por quê.
++        //
++        // O que se prende aqui é que `repassar` **descarta** o que vem antes do
++        // primeiro pedaço marcado como chave, e nada depois dele. A marca é o
++        // primeiro byte do pedaço, lido como `crate::tela::TipoDeQuadro` — o
++        // mesmo byte que o cabeçalho de quadro já escreve no fio.
++        let (a, b, ligado) = duas_pontas_ligadas().await;
++        // Ver o comentário equivalente em
++        // `o_par_recebe_a_abertura_e_os_pedacos_na_ordem`: sem este clone, o
++        // `spawn` solta a última alça da conexão assim que `repassar` volta, e
++        // ela fecha antes de o laço de I/O escrever o que já foi aceito.
++        let mantida_viva = ligado.conexao.clone();
++
++        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
++        let abertura_clone = abertura.clone();
++        let (manda, recebe) = tokio::sync::mpsc::channel(8);
++        let repassando =
++            tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
++
++        let comum = [vec![crate::tela::TipoDeQuadro::Comum.byte()], vec![1, 2]].concat();
++        let chave = [vec![crate::tela::TipoDeQuadro::Chave.byte()], vec![3, 4]].concat();
++        manda.send(comum).await.unwrap();
++        manda.send(chave.clone()).await.unwrap();
++        drop(manda);
++
++        let mut fluxo = a.accept_uni().await.unwrap();
++        let mut tipo = [0_u8; 1];
++        fluxo.read_exact(&mut tipo).await.unwrap();
++        let veio = fluxo.read_to_end(1024).await.unwrap();
++        assert_eq!(
++            veio,
++            [abertura, chave].concat(),
++            "o pedaço comum que veio antes da chave atravessou, ou a chave não atravessou"
++        );
++        repassando.await.unwrap().unwrap();
++        drop(mantida_viva);
++        drop(b);
++    }
+ }

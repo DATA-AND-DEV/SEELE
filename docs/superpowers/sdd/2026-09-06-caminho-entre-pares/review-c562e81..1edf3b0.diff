@@ -1,0 +1,547 @@
+# Review package: c562e81..1edf3b0
+
+## Commits
+1edf3b0 feat(proto): a v4 leva as quatro mensagens do caminho entre pares
+
+## Files changed
+ crates/seele-core/src/state.rs     |   9 ++
+ crates/seele-proto/src/control.rs  | 171 ++++++++++++++++++++++++++++++++++---
+ crates/seele-proto/src/version.rs  |  55 +++++++++---
+ crates/seele-server/src/session.rs |  14 +++
+ 4 files changed, 226 insertions(+), 23 deletions(-)
+
+## Diff
+diff --git a/crates/seele-core/src/state.rs b/crates/seele-core/src/state.rs
+index 1b643bb..e5c0287 100644
+--- a/crates/seele-core/src/state.rs
++++ b/crates/seele-core/src/state.rs
+@@ -1196,20 +1196,29 @@ impl Room {
+             // Quanto da nossa voz não chega. Só o servidor pode medi-la, e
+             // ele a manda só para quem a produziu. Ver o ADR 0036.
+             ServerMessage::UplinkLoss { fraction } => {
+                 self.perda_de_subida = Some(*fraction);
+                 changed.telemetry = true;
+             }
+ 
+             // Consumed by the handshake and by the round-trip measurement, both
+             // of which are over before any shell is watching.
+             ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
++
++            // O protocolo já leva os dois verbos do caminho entre pares
++            // (`PROTOCOL_VERSION` 4), mas quem os liga ao `crate::caminho` é
++            // uma tarefa futura deste plano — que ainda não existe neste
++            // commit. Rastreado, e não calado: um quadro que este `Room` ainda
++            // não sabe usar não pode desaparecer sem deixar rastro.
++            ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => {
++                tracing::debug!("caminho entre pares recebido antes de o cliente estar ligado");
++            }
+         }
+ 
+         changed
+     }
+ 
+     fn absorb_state(&mut self, state: &PersonState) {
+         let person = self.people.entry(state.person).or_insert_with(|| {
+             Person::new(state.person, format!("pessoa {}", state.person.0), None)
+         });
+         person.muted = state.muted;
+diff --git a/crates/seele-proto/src/control.rs b/crates/seele-proto/src/control.rs
+index 58bcb59..657a6c6 100644
+--- a/crates/seele-proto/src/control.rs
++++ b/crates/seele-proto/src/control.rs
+@@ -220,20 +220,30 @@ pub const PUBLIC_KEY_LEN: usize = 32;
+ 
+ /// Length of an Ed25519 signature, in bytes.
+ pub const SIGNATURE_LEN: usize = 64;
+ 
+ /// Longest authentication proof, in bytes.
+ ///
+ /// An Ed25519 signature is 64 bytes (ADR 0004); the slack is for whatever a
+ /// password fallback needs.
+ pub const MAX_PROOF_LEN: usize = 256;
+ 
++/// Length of uma impressão digital em hex minúsculo.
++///
++/// Um SHA-256 em hexadecimal são exatamente 64 caracteres — nem mais, nem
++/// menos, o mesmo tamanho que [`crate::uri`] já confere para o `fp=` do
++/// `seele://`. Só o tamanho é conferido aqui: se os caracteres são hex e se a
++/// impressão bate com um certificado de verdade é o que o aperto de mão
++/// descobre, e é para isso que [`MotivoDeFalhaDePar::ImpressaoNaoBate`]
++/// existe.
++pub const MAX_IMPRESSAO_LEN: usize = 64;
++
+ /// Why a control frame could not be handled.
+ #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+ pub enum ControlError {
+     /// An empty frame carries not even a version.
+     #[error("control frame is empty")]
+     Empty,
+ 
+     /// Longer than [`MAX_FRAME_LEN`].
+     #[error("control frame is {len} bytes, over the {MAX_FRAME_LEN}-byte limit")]
+     TooLong {
+@@ -720,20 +730,38 @@ pub enum AlertReason {
+         /// conta e o que ela supõe.
+         precisa_bps: u64,
+         /// A subida que o servidor mediu para si, em bits por segundo.
+         ///
+         /// Nunca zero: sem medida não há aviso, porque «não sei» não vira
+         /// número inventado.
+         medido_bps: u32,
+     },
+ }
+ 
++/// Por que um par deixou de servir uma transmissão.
++///
++/// Cada variante distingue um conserto diferente, e é por isso que são quatro e
++/// não uma. `ImpressaoNaoBate` **não** é `NaoAlcancou`: a diferença entre «não
++/// consegui falar com ele» e «alguém respondeu no lugar dele» é a informação
++/// inteira, e é a mesma distinção que o ADR 0003 existe para nomear.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++pub enum MotivoDeFalhaDePar {
++    /// Nenhum dos endereços fechou aperto de mão.
++    NaoAlcancou,
++    /// Alguém respondeu, e não era quem o servidor apresentou.
++    ImpressaoNaoBate,
++    /// Estava servindo, e a conexão morreu.
++    CaiuNoMeio,
++    /// Conexão viva, e quadro nenhum dentro do prazo.
++    ParouDeMandar,
++}
++
+ /// Client to server.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ pub enum ClientMessage {
+     /// Opens the handshake. `specs/02-protocolo.md`.
+     Hello {
+         /// Convite de uso único ou senha do servidor, quando ele exige um.
+         ///
+         /// Viaja no `Hello`, portanto **antes** do desafio-resposta. Isso é
+         /// deliberado: o segredo diz se esta conexão tem direito de existir, e
+         /// gastar um desafio criptográfico com quem nem devia estar batendo à
+@@ -1199,20 +1227,54 @@ pub enum ClientMessage {
+     /// Para de receber a imagem desta transmissão.
+     ///
+     /// Fechar o fluxo diria quase o mesmo, e não serve pelo mesmo motivo que
+     /// [`Self::StopScreenShare`] existe: um verbo que só existe como ausência
+     /// não distingue «fechei a janela» de «minha conexão caiu», e o servidor
+     /// precisa saber a diferença para devolver o teto a quem ficou.
+     UnwatchScreen {
+         /// Qual transmissão.
+         screen: ScreenId,
+     },
++    /// «Eu empresto a minha subida», ou «deixei de emprestar».
++    ///
++    /// **Opt-in, e por duas razões independentes.** A primeira é privacidade:
++    /// numa malha, quem assiste passa a conhecer o endereço de quem lhe
++    /// repassa, e hoje ninguém conhece endereço de ninguém — um servidor não é
++    /// necessariamente entre amigos, e o ADR 0021 deixa a admissão poder ser
++    /// aberta. A segunda é custo: a máquina de quem empresta passa a subir
++    /// cópias para outras pessoas, e ninguém deve gastar a internet de alguém
++    /// sem perguntar.
++    EmprestarSubida {
++        /// Se empresta a partir de agora.
++        emprestando: bool,
++        /// SHA-256 do certificado desta sessão, em hex minúsculo. O mesmo
++        /// formato do `fp=` do `seele://` e do pino do ADR 0003 — um formato só
++        /// para a mesma coisa.
++        impressao: String,
++        /// Endereços de **rede local** por onde este par atende.
++        ///
++        /// O público não vem daqui: ele é a origem da conexão que já está
++        /// aberta, e o servidor o tem sem perguntar. Um endereço público que o
++        /// cliente afirma seria um endereço que ele pode mentir.
++        locais: Vec<std::net::SocketAddr>,
++    },
++    /// O par que estava servindo esta transmissão não serve mais.
++    ///
++    /// **Mandada por quem recebe, e nunca por quem empresta:** quem sabe que a
++    /// imagem parou é quem estava esperando por ela, e quem empresta pode ter
++    /// caído sem chegar a saber de nada.
++    ParFalhou {
++        /// Qual transmissão.
++        screen: ScreenId,
++        /// O que aconteceu.
++        motivo: MotivoDeFalhaDePar,
++    },
+ }
+ 
+ /// Server to client.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ pub enum ServerMessage {
+     /// Asks the client to prove who it is.
+     ///
+     /// Present in the handshake diagram of `specs/02-protocolo.md` but missing
+     /// from its message table.
+     Challenge {
+@@ -1766,20 +1828,46 @@ pub enum ServerMessage {
+     ///
+     /// Difundido a todos. Quem recebe troca o nome **no roster** e em mais lugar
+     /// nenhum: o histórico guarda o apelido de quando cada mensagem foi escrita,
+     /// e é esse que continua valendo. Ver [`ClientMessage::SetNickname`].
+     PersonRenamed {
+         /// Quem.
+         person: PersonId,
+         /// O nome novo.
+         nickname: String,
+     },
++    /// Sirva esta transmissão a este par.
++    ///
++    /// Quem recebe isto disca para os endereços **e** passa a atender: as duas
++    /// tentativas simultâneas são o que abre o NAT dos dois lados, e a primeira
++    /// que fecha o aperto de mão vence.
++    SirvaTelaPara {
++        /// Qual transmissão.
++        screen: ScreenId,
++        /// Onde o outro par pode ser alcançado.
++        enderecos: Vec<std::net::SocketAddr>,
++        /// A impressão digital que o outro par vai apresentar.
++        impressao: String,
++    },
++    /// Assista a esta transmissão por este par, em vez de esperar por mim.
++    ///
++    /// Simétrica de [`Self::SirvaTelaPara`] de propósito: os dois lados fazem a
++    /// mesma coisa com ela — discar e conferir a impressão digital —, e a
++    /// assimetria fica só em quem já tem os bytes.
++    AssistaTelaPor {
++        /// Qual transmissão.
++        screen: ScreenId,
++        /// Onde o par pode ser alcançado.
++        enderecos: Vec<std::net::SocketAddr>,
++        /// A impressão digital que ele vai apresentar.
++        impressao: String,
++    },
+ }
+ 
+ /// Serialises a message into a frame, version byte first.
+ ///
+ /// `specs/02-protocolo.md`: "The first byte of every control frame is the
+ /// protocol version."
+ ///
+ /// # Errors
+ ///
+ /// Returns [`ControlError::FieldTooLong`] if a field exceeds its limit, or
+@@ -2067,20 +2155,26 @@ impl Validate for ClientMessage {
+             | Self::FetchAttachment { .. }
+             | Self::StartScreenShare
+             | Self::StopScreenShare
+             | Self::RequestKeyFrame { .. }
+             // A `ScreenId` não se valida aqui: um número qualquer é uma tela que
+             // não existe, e quem sabe disso é o servidor, que tem o registro. O
+             // que ele faz com um id inventado está em `session.rs`, junto da
+             // mesma conferência que o pedido de quadro-chave já faz.
+             | Self::WatchScreen { .. }
+             | Self::UnwatchScreen { .. } => Ok(()),
++            Self::EmprestarSubida { impressao, .. } => {
++                check("impressao", impressao.len(), MAX_IMPRESSAO_LEN)
++            }
++            // O motivo é um enumerado de tamanho fixo, e a `ScreenId` segue a
++            // mesma regra do braço acima: quem sabe se ela existe é o servidor.
++            Self::ParFalhou { .. } => Ok(()),
+         }
+     }
+ }
+ 
+ impl Validate for ServerMessage {
+     fn validate(&self) -> Result<(), ControlError> {
+         match self {
+             Self::Challenge { nonce } => check("nonce", nonce.len(), MAX_PROOF_LEN),
+             Self::Session {
+                 server,
+@@ -2164,20 +2258,23 @@ impl Validate for ServerMessage {
+             | Self::VoiceRoomDeleted { .. }
+             | Self::ChannelDeleted { .. }
+             | Self::ChannelWeighed { .. }
+             | Self::AttachmentRefused { .. }
+             | Self::AttachmentUnavailable { .. }
+             | Self::ScreenShareStarted { .. }
+             | Self::ScreenShareStopped { .. }
+             | Self::KeyFrameRequested { .. }
+             | Self::ScreenViewers { .. }
+             | Self::HostUplink { .. } => Ok(()),
++            Self::SirvaTelaPara { impressao, .. } | Self::AssistaTelaPor { impressao, .. } => {
++                check("impressao", impressao.len(), MAX_IMPRESSAO_LEN)
++            }
+         }
+     }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use proptest::prelude::*;
+ 
+     fn hello() -> ClientMessage {
+@@ -2221,20 +2318,69 @@ mod tests {
+         let frame = encode(&hello()).unwrap();
+         assert_eq!(decode::<ClientMessage>(&frame).unwrap(), hello());
+     }
+ 
+     #[test]
+     fn a_server_message_round_trips() {
+         let frame = encode(&session()).unwrap();
+         assert_eq!(decode::<ServerMessage>(&frame).unwrap(), session());
+     }
+ 
++    #[test]
++    fn as_mensagens_do_caminho_entre_pares_atravessam_o_fio() {
++        // Ida e volta pelo `postcard`, como as outras. O que este teste prende de
++        // verdade é a **posição** das variantes: o `postcard` indexa variante por
++        // posição, então acrescentar no meio troca o significado de todas as
++        // seguintes para quem já está no ar.
++        let emprestar = ClientMessage::EmprestarSubida {
++            emprestando: true,
++            impressao: "a".repeat(64),
++            locais: vec!["192.168.1.7:41234".parse().unwrap()],
++        };
++        assert_eq!(
++            postcard::from_bytes::<ClientMessage>(&postcard::to_allocvec(&emprestar).unwrap())
++                .unwrap(),
++            emprestar
++        );
++
++        let falhou = ClientMessage::ParFalhou {
++            screen: ScreenId(7),
++            motivo: MotivoDeFalhaDePar::ImpressaoNaoBate,
++        };
++        assert_eq!(
++            postcard::from_bytes::<ClientMessage>(&postcard::to_allocvec(&falhou).unwrap())
++                .unwrap(),
++            falhou
++        );
++
++        let sirva = ServerMessage::SirvaTelaPara {
++            screen: ScreenId(7),
++            enderecos: vec!["203.0.113.9:8383".parse().unwrap()],
++            impressao: "b".repeat(64),
++        };
++        assert_eq!(
++            postcard::from_bytes::<ServerMessage>(&postcard::to_allocvec(&sirva).unwrap()).unwrap(),
++            sirva
++        );
++
++        let assista = ServerMessage::AssistaTelaPor {
++            screen: ScreenId(7),
++            enderecos: vec!["203.0.113.9:8383".parse().unwrap()],
++            impressao: "b".repeat(64),
++        };
++        assert_eq!(
++            postcard::from_bytes::<ServerMessage>(&postcard::to_allocvec(&assista).unwrap())
++                .unwrap(),
++            assista
++        );
++    }
++
+     #[test]
+     fn the_version_byte_comes_first() {
+         // specs/02-protocolo.md: "the first byte of every control frame is the
+         // protocol version". Asserted at the byte level, because a round-trip
+         // test alone would pass with the version anywhere.
+         let frame = encode(&hello()).unwrap();
+         assert_eq!(frame.first(), Some(&PROTOCOL_VERSION));
+     }
+ 
+     #[test]
+@@ -3482,44 +3628,49 @@ mod o_vocabulario_e_a_versao {
+     /// exatamente os dois atos que pedem a decisão.
+     ///
+     /// **Quando este teste reprovar**, a pergunta não é «como faço passar». É:
+     /// um par da versão anterior recebe esta variante nova? Se recebe, ou
+     /// `PROTOCOL_VERSION` sobe e a linha de baixo acompanha, ou quem manda passa
+     /// a perguntar a versão do par antes — como `session.rs` já faz para o
+     /// `UplinkLoss`.
+     #[test]
+     fn o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou() {
+         assert_eq!(
+-            ordinal(&ClientMessage::UnwatchScreen {
+-                screen: ScreenId(1)
++            ordinal(&ClientMessage::ParFalhou {
++                screen: ScreenId(1),
++                motivo: MotivoDeFalhaDePar::NaoAlcancou,
+             }),
+-            31,
++            33,
+             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
+              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
+              sobre esta linha"
+         );
+         assert_eq!(
+-            ordinal(&ServerMessage::PersonRenamed {
+-                person: PersonId(1),
+-                nickname: "x".into()
++            ordinal(&ServerMessage::AssistaTelaPor {
++                screen: ScreenId(1),
++                enderecos: vec![],
++                impressao: String::new(),
+             }),
+-            33,
++            35,
+             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
+              de mexer no número"
+         );
+ 
+         // E o número da versão, preso ao lado deles. Ele é o que diz a um par se
+         // vale a pena tentar — e enquanto ele não subir, dois builds com listas
+         // diferentes vão continuar se cumprimentando como iguais.
+-        // **Este número já cumpriu o trabalho dele uma vez.** Ele estava em 2
++        // **Este número já cumpriu o trabalho dele duas vezes.** Ele estava em 2
+         // quando `WatchScreen` e `UnwatchScreen` entraram na lista sem que
+         // ninguém decidisse sobre a versão; este teste reprovou na primeira vez
+         // que alguém mexeu na lista depois disso, e a decisão foi tomada — a
+-        // versão subiu para 3 em 04/09/2026.
++        // versão subiu para 3 em 04/09/2026. A segunda vez foi o caminho entre
++        // pares: `EmprestarSubida`, `ParFalhou`, `SirvaTelaPara` e
++        // `AssistaTelaPor` entraram, os dois braços acima passaram a apontar
++        // para o verbo novo de cada lista, e a versão subiu para 4.
+         assert_eq!(
+             crate::version::PROTOCOL_VERSION,
+-            3,
++            4,
+             "a versão do protocolo mudou; confira se os ordinais acima e a janela \
+              de compatibilidade continuam contando a mesma história"
+         );
+     }
+ }
+diff --git a/crates/seele-proto/src/version.rs b/crates/seele-proto/src/version.rs
+index 19ecf4d..6fe830a 100644
+--- a/crates/seele-proto/src/version.rs
++++ b/crates/seele-proto/src/version.rs
+@@ -42,21 +42,37 @@ use thiserror::Error;
+ ///   janela. Quem tem de se conter é o servidor, e é o que `session.rs` já faz
+ ///   com o `UplinkLoss`.
+ ///
+ /// O que ela **custa**: a janela desliza e a v1 deixa de ser aceita. Combinado
+ /// com quem hospeda: não há ninguém na 0.9.x, que é onde a v1 vivia.
+ ///
+ /// O que ela **não** conserta é o compartilhamento de tela entre versões — esse
+ /// era outro defeito, e está em [`crate::screen::SCREEN_HEADER_VERSION`]: o
+ /// cabeçalho da tela carregava este número e herdava esta janela, apesar de os
+ /// onze bytes dele nunca terem mudado.
+-pub const PROTOCOL_VERSION: u8 = 3;
++///
++/// **4 desde 06/09/2026**, com o caminho entre pares.
++///
++/// A v3 **já tinha saído** — release `v0.10.5-1`, commit `12a6401a6` — quando as
++/// quatro variantes abaixo entraram, então elas não puderam pegar carona numa
++/// versão ainda não publicada como as do ADR 0036 pegaram na v2. Foram
++/// acrescentadas [`crate::control::ClientMessage::EmprestarSubida`],
++/// [`crate::control::ClientMessage::ParFalhou`],
++/// [`crate::control::ServerMessage::SirvaTelaPara`] e
++/// [`crate::control::ServerMessage::AssistaTelaPor`] — o cliente que empresta a
++/// própria subida para outro par assistir, e o servidor que orquestra o
++/// encontro entre os dois.
++///
++/// Um cliente v3 continua entrando num servidor v4, porque 3 está na janela; só
++/// nunca recebe as variantes novas, e é servido pelo servidor como sempre foi
++/// — o mesmo comportamento que um cliente v2 já tinha diante da v3.
++pub const PROTOCOL_VERSION: u8 = 4;
+ 
+ /// How many past versions a peer accepts, beyond the current one.
+ ///
+ /// `specs/10-convencoes.md`: "protocol compatibility: a window of N−1".
+ pub const COMPATIBILITY_WINDOW: u8 = 1;
+ 
+ /// Lowest protocol version this build can still talk to.
+ #[must_use]
+ pub const fn oldest_supported_version() -> u8 {
+     PROTOCOL_VERSION.saturating_sub(COMPATIBILITY_WINDOW)
+@@ -142,35 +158,48 @@ mod tests {
+     /// O ADR 0036 sobe a versão para carregar `ServerMessage::UplinkLoss`, e a
+     /// promessa que acompanha a subida é esta: ninguém que já instalou perde o
+     /// servidor. Um cliente v1 conecta, não recebe o quadro novo, e roda no
+     /// bitrate fixo — que é exatamente o comportamento que ele já tinha.
+     ///
+     /// Escrito como teste e não como comentário porque a janela é a única coisa
+     /// entre «subimos a versão» e «quebramos todo mundo que não atualizou no
+     /// mesmo minuto».
+     #[test]
+     fn a_versao_anterior_continua_dentro_da_janela() {
+-        // **Os números mudaram em 04/09/2026, e a janela deslizou junto.**
++        // **Os números mudaram de novo em 06/09/2026, com o caminho entre
++        // pares, e a janela deslizou junto.**
+         //
+-        // A v1 saiu da janela, e a decisão foi de quem hospeda: «não tem ninguém
+-        // na 0.9.x», que é onde a v1 vivia. O que fica preso aqui é a forma —
+-        // aceita-se a de agora e a anterior, recusa-se a seguinte —, e ela vale
+-        // para qualquer número.
+-        assert_eq!(PROTOCOL_VERSION, 3);
+-        assert_eq!(oldest_supported_version(), 2);
+-        assert!(negotiate(2).is_ok(), "a versão anterior foi recusada");
+-        assert!(negotiate(3).is_ok());
++        // Desta vez quem sai da janela é a v2, e a diferença para a subida
++        // anterior é esta: a v3 **já tinha saído** — release `v0.10.5-1`, commit
++        // `12a6401a6` — então existe gente rodando exatamente essa versão, e é
++        // ela que a janela precisa continuar cobrindo. O que fica preso aqui é a
++        // forma — aceita-se a de agora e a anterior, recusa-se a seguinte —, e
++        // ela vale para qualquer número.
++        assert_eq!(PROTOCOL_VERSION, 4);
++        assert_eq!(oldest_supported_version(), 3);
++        assert!(negotiate(3).is_ok(), "a versão anterior foi recusada");
++        assert!(negotiate(4).is_ok());
+         assert!(
+-            negotiate(1).is_err(),
+-            "a v1 continuou aceita depois de a janela deslizar"
++            negotiate(2).is_err(),
++            "a v2 continuou aceita depois de a janela deslizar"
+         );
+-        assert!(negotiate(4).is_err(), "um cliente do futuro foi aceito");
++        assert!(negotiate(5).is_err(), "um cliente do futuro foi aceito");
++    }
++
++    #[test]
++    fn a_versao_subiu_para_a_do_caminho_entre_pares() {
++        // A v3 **já saiu** no release `v0.10.5-1` (commit `12a6401a6`), então as
++        // quatro mensagens novas não pegam carona como as do ADR 0036 pegaram na
++        // v2. Um cliente v3 conecta pela janela, nunca recebe as mensagens novas, e
++        // é servido pelo servidor — que é o comportamento de antes desta onda.
++        assert_eq!(PROTOCOL_VERSION, 4);
++        assert_eq!(oldest_supported_version(), 3);
+     }
+ 
+     #[test]
+     fn own_version_is_always_accepted() {
+         assert_eq!(negotiate(PROTOCOL_VERSION), Ok(PROTOCOL_VERSION));
+     }
+ 
+     #[test]
+     fn newer_peer_is_refused_with_a_specific_reason() {
+         assert_eq!(
+diff --git a/crates/seele-server/src/session.rs b/crates/seele-server/src/session.rs
+index c334dc5..bba74a7 100644
+--- a/crates/seele-server/src/session.rs
++++ b/crates/seele-server/src/session.rs
+@@ -2255,20 +2255,34 @@ async fn run_session(
+                             em_curso.into_iter().find(|(_, corrente)| *corrente == screen)
+                         {
+                             let _ = server.events.send(Event::KeyFrameRequested {
+                                 screen,
+                                 person: session.person,
+                                 sharer,
+                             });
+                         }
+                     }
+ 
++                    // O protocolo já leva os dois verbos do caminho entre
++                    // pares (`PROTOCOL_VERSION` 4), mas quem os liga a
++                    // `pares.rs` é a próxima tarefa deste plano — que ainda não
++                    // existe neste commit. Rastreado, e não calado: uma pessoa
++                    // que emprestou a subida ou relatou um par que falhou não
++                    // pode descobrir dias depois, sem dado nenhum, que o
++                    // servidor nunca fez nada com o pedido dela.
++                    ClientMessage::EmprestarSubida { .. } | ClientMessage::ParFalhou { .. } => {
++                        tracing::debug!(
++                            person = %session.person,
++                            "caminho entre pares recebido antes de o despacho existir"
++                        );
++                    }
++
+                     // The handshake is over. Repeating it is a protocol
+                     // violation, not a re-authentication.
+                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
+                 }
+             }
+ 
+             // Os dois braços de voz que ficavam aqui vivem agora na tarefa de
+             // mídia, criada acima. Ver a nota lá: enquanto estavam neste
+             // `select!`, uma espera do plano de controle — o mutex do SQLite,
+             // ou uma escrita para um par que parou de ler — parava a voz.

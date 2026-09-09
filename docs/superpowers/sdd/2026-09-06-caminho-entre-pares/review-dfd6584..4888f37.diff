@@ -1,0 +1,400 @@
+# Review package: dfd6584..4888f37
+
+## Commits
+4888f37 feat(pares): o servidor guarda quem empresta e aponta quem serve quem
+
+## Files changed
+ crates/seele-server/src/lib.rs     |   2 +
+ crates/seele-server/src/pares.rs   | 159 +++++++++++++++++++++++++++++++++++++
+ crates/seele-server/src/server.rs  |   3 +
+ crates/seele-server/src/session.rs |  77 +++++++++++++++---
+ 4 files changed, 229 insertions(+), 12 deletions(-)
+
+## Diff
+diff --git a/crates/seele-server/src/lib.rs b/crates/seele-server/src/lib.rs
+index 47db419..62108f0 100644
+--- a/crates/seele-server/src/lib.rs
++++ b/crates/seele-server/src/lib.rs
+@@ -27,20 +27,21 @@
+ use std::net::SocketAddr;
+ use std::sync::Arc;
+ 
+ use anyhow::{Context, Result};
+ use seele_proto::ids::VoiceRoomId;
+ 
+ pub mod admissao;
+ pub mod alcance;
+ pub mod frame;
+ pub mod hospedagem;
++pub mod pares;
+ pub mod perda_de_subida;
+ pub mod permissions;
+ pub mod persistence;
+ pub mod portaria;
+ pub mod server;
+ pub mod session;
+ pub mod taxa;
+ pub mod tela;
+ pub mod tls;
+ pub mod transfer;
+@@ -398,20 +399,21 @@ impl Daemon {
+             slots: Arc::new(tokio::sync::Mutex::new(server::Slots::default())),
+             occupancy: Arc::new(tokio::sync::Mutex::new(server::Occupancy::default())),
+             presentes: Arc::new(tokio::sync::Mutex::new(server::Presentes::default())),
+             subida: Arc::new(tokio::sync::Mutex::new(match subida_lembrada {
+                 Some(bps) => crate::tela::Subida::partindo_de(bps),
+                 None => crate::tela::Subida::nova(),
+             })),
+             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
+             atrasos: Arc::new(server::Atrasos::default()),
+             telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),
++            pares: Arc::new(tokio::sync::Mutex::new(pares::Pares::nova())),
+             anexos,
+             caminho_bps: config.caminho_bps,
+         });
+ 
+         // Held seats have to be released even if nobody reconnects, or a server
+         // slowly fills with places kept for people who left for good.
+         let sweeper = Arc::clone(&server.slots);
+         tokio::spawn(async move {
+             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+             loop {
+diff --git a/crates/seele-server/src/pares.rs b/crates/seele-server/src/pares.rs
+new file mode 100644
+index 0000000..c157a07
+--- /dev/null
++++ b/crates/seele-server/src/pares.rs
+@@ -0,0 +1,159 @@
++//! Quem declarou que empresta a subida, e quem serve quem.
++//!
++//! # A escolha aqui é deliberadamente burra
++//!
++//! Ela aponta o primeiro que declarou, não é quem compartilha, e ainda não
++//! serve ninguém. É um espaço reservado com a forma certa: o **subprojeto B** é
++//! quem olha subida medida e topologia para escolher bem. Chamar isto de
++//! «escolha automática» seria vender como pronto o que é um lugar guardado — e
++//! a spec de 05/09 diz isso com todas as letras.
++
++use std::collections::{HashMap, HashSet};
++use std::net::SocketAddr;
++
++use seele_proto::ids::PersonId;
++
++/// Alguém que declarou que empresta, e como alcançá-lo.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct QuemEmpresta {
++    /// Quem.
++    pub pessoa: PersonId,
++    /// A impressão digital que ele vai apresentar.
++    pub impressao: String,
++    /// Onde ele atende: os locais que declarou, mais o público que o servidor
++    /// **viu**. Nesta ordem, porque a rede local dispensa furo e é a que
++    /// responde mais rápido — a mesma razão do ADR 0037.
++    pub enderecos: Vec<SocketAddr>,
++}
++
++/// Quem empresta a subida nesta sala, agora.
++#[derive(Debug, Default)]
++pub struct Pares {
++    quem: HashMap<PersonId, QuemEmpresta>,
++}
++
++impl Pares {
++    /// Ninguém emprestando ainda.
++    #[must_use]
++    pub fn nova() -> Self {
++        Self::default()
++    }
++
++    /// Alguém declarou que empresta — ou que deixou de emprestar.
++    ///
++    /// `publico` é a origem da conexão desta pessoa, vista pelo servidor. Uma
++    /// declaração com `impressao` vazia é «deixei de emprestar», e é assim que
++    /// `emprestando: false` chega aqui.
++    pub fn declarou(
++        &mut self,
++        pessoa: PersonId,
++        impressao: String,
++        locais: Vec<SocketAddr>,
++        publico: SocketAddr,
++    ) {
++        if impressao.is_empty() {
++            self.quem.remove(&pessoa);
++            return;
++        }
++        let mut enderecos = locais;
++        if !enderecos.contains(&publico) {
++            enderecos.push(publico);
++        }
++        self.quem.insert(
++            pessoa,
++            QuemEmpresta {
++                pessoa,
++                impressao,
++                enderecos,
++            },
++        );
++    }
++
++    /// Esta pessoa saiu. Sem isto, a escolha aponta para quem já foi embora.
++    pub fn saiu(&mut self, pessoa: PersonId) {
++        self.quem.remove(&pessoa);
++    }
++
++    /// Quem pode servir esta transmissão a esta pessoa, se alguém.
++    #[must_use]
++    pub fn escolher(
++        &self,
++        dono: PersonId,
++        quem_quer: PersonId,
++        ja_servindo: &HashSet<PersonId>,
++    ) -> Option<QuemEmpresta> {
++        self.quem
++            .values()
++            .find(|candidato| {
++                candidato.pessoa != dono
++                    && candidato.pessoa != quem_quer
++                    && !ja_servindo.contains(&candidato.pessoa)
++            })
++            .cloned()
++    }
++}
++
++#[cfg(test)]
++#[allow(
++    clippy::unwrap_used,
++    clippy::expect_used,
++    reason = "um teste que trata o caso impossível deixa de ser uma afirmação sobre o código"
++)]
++mod testes {
++    use super::*;
++
++    fn endereco(n: u8) -> SocketAddr {
++        SocketAddr::from(([192, 168, 1, n], 8383))
++    }
++
++    #[test]
++    fn quem_compartilha_nunca_e_escolhido_para_servir_a_si_mesmo() {
++        // O espelho infinito, na versão da malha: quem compartilha servindo a
++        // própria tela a si mesmo. `crate::voice_room` já prende isto para o
++        // caminho do servidor; aqui é a mesma regra no caminho novo.
++        let mut pares = Pares::nova();
++        pares.declarou(PersonId(1), "a".repeat(64), vec![endereco(1)], endereco(1));
++        assert!(pares
++            .escolher(PersonId(1), PersonId(2), &HashSet::new())
++            .is_none());
++    }
++
++    #[test]
++    fn quem_nao_declarou_nunca_e_escolhido() {
++        // O opt-in é a decisão de 05/09, e ela tem de ser respeitada aqui e não
++        // só na interface: uma escolha que ignora o `emprestando` gastaria a
++        // internet de alguém que disse não.
++        let mut pares = Pares::nova();
++        pares.declarou(PersonId(3), "c".repeat(64), vec![endereco(3)], endereco(3));
++        pares.declarou(PersonId(3), String::new(), Vec::new(), endereco(3));
++        assert!(pares
++            .escolher(PersonId(1), PersonId(2), &HashSet::new())
++            .is_none());
++    }
++
++    #[test]
++    fn quem_ja_esta_servindo_nao_e_escolhido_de_novo() {
++        // **Um par por vez, no A1.** Quantos um cliente aguenta é a conta do
++        // subprojeto B, e supor «dois» aqui seria inventar um número que
++        // ninguém mediu.
++        let mut pares = Pares::nova();
++        pares.declarou(PersonId(3), "c".repeat(64), vec![endereco(3)], endereco(3));
++        let ja = HashSet::from([PersonId(3)]);
++        assert!(pares.escolher(PersonId(1), PersonId(2), &ja).is_none());
++    }
++
++    #[test]
++    fn o_endereco_publico_vem_do_servidor_e_nao_do_cliente() {
++        // Um endereço público que o cliente afirma é um endereço que ele pode
++        // mentir — e mentir aqui manda outra pessoa discar para onde o mentiroso
++        // quiser. O servidor vê a origem da conexão; é ela que vale.
++        let mut pares = Pares::nova();
++        let publico = SocketAddr::from(([203, 0, 113, 9], 8383));
++        pares.declarou(PersonId(3), "c".repeat(64), vec![endereco(3)], publico);
++        let escolhido = pares
++            .escolher(PersonId(1), PersonId(2), &HashSet::new())
++            .unwrap();
++        assert!(escolhido.enderecos.contains(&publico));
++        assert!(escolhido.enderecos.contains(&endereco(3)));
++    }
++}
+diff --git a/crates/seele-server/src/server.rs b/crates/seele-server/src/server.rs
+index ca11438..6e3bfd6 100644
+--- a/crates/seele-server/src/server.rs
++++ b/crates/seele-server/src/server.rs
+@@ -757,20 +757,23 @@ pub struct Server {
+     pub subida: Arc<Mutex<crate::tela::Subida>>,
+     /// Quantos apertos de mão cada endereço ainda pode gastar.
+     ///
+     /// Antes de autenticar, portanto sem identidade nenhuma para contar: a
+     /// chave é o endereço de origem. Ver [`crate::taxa`].
+     pub portaria: Arc<Mutex<crate::taxa::Portaria>>,
+     /// How often the bus outran a session. See [`Atrasos`].
+     pub atrasos: Arc<Atrasos>,
+     /// Quem está compartilhando tela em cada sala de voz. Ver [`Telas`].
+     pub telas: Arc<Mutex<Telas>>,
++    /// Quem declarou que empresta a subida, e quem serve quem. Ver
++    /// [`crate::pares::Pares`].
++    pub pares: Arc<Mutex<crate::pares::Pares>>,
+     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
+     ///
+     /// `None` when this server has nowhere to keep blobs, which is the in-memory
+     /// case. A transfer then meets `AttachmentRefusal::Unavailable` — a
+     /// sentence — rather than a directory appearing wherever the process
+     /// started.
+     pub anexos: Option<Arc<crate::transfer::Vault>>,
+     /// Quanto a subida desta máquina carrega, em bits por segundo, ou `None`.
+     ///
+     /// A cópia de `ServerConfig::caminho_bps` que o resto do daemon alcança, e
+diff --git a/crates/seele-server/src/session.rs b/crates/seele-server/src/session.rs
+index 8333d2f..800edce 100644
+--- a/crates/seele-server/src/session.rs
++++ b/crates/seele-server/src/session.rs
+@@ -28,22 +28,22 @@
+ //! convenience.
+ 
+ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+ use std::sync::Arc;
+ use std::time::{Duration, Instant};
+ 
+ use anyhow::{bail, Context, Result};
+ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+ use seele_proto::control::{
+     AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
+-    Permission, PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem,
+-    SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
++    MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role, ServerMessage,
++    Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
+ };
+ use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
+ use seele_proto::screen::SCREEN_HEADER_LEN;
+ use seele_proto::signal::{Signal, SyncInputs};
+ use seele_proto::transport::HANDSHAKE_TIMEOUT;
+ use tokio::sync::mpsc;
+ 
+ use crate::permissions::{self, Permissions};
+ use crate::persistence::channels::{Channels, LastVoiceRoom};
+ use crate::persistence::messages::{Messages, PendingMessage, DEFAULT_PAGE};
+@@ -389,20 +389,26 @@ pub async fn serve(
+     // E some da lista de presentes, pelo mesmo caminho e pelo mesmo motivo do
+     // laço acima: sem isto, todo cliente acumula o nome de quem já conectou
+     // alguma vez e desenha todos como presentes. `PersonLeft` não cobre — ele
+     // diz que uma sala esvaziou, e quem nunca se sentou não produz nenhum.
+     if server.presentes.lock().await.saiu(session.person) {
+         let _ = server.events.send(Event::PersonGone {
+             person: session.person,
+         });
+     }
+ 
++    // E sai de quem empresta a subida, pelo mesmo motivo de todo o resto desta
++    // seção: sem isto a escolha (`Pares::escolher`) continuaria apontando para
++    // alguém que já foi embora, e quem_quer discaria para um endereço que não
++    // atende mais.
++    server.pares.lock().await.saiu(session.person);
++
+     // E os contadores desta conexão saem da soma da subida.
+     //
+     // Sem isto eles ficariam para sempre: a janela seguinte veria os bytes de
+     // quem saiu sumirem de uma vez, o `saturating_sub` transformaria o delta
+     // negativo em zero, e uma janela que carregou o cano inteiro apareceria como
+     // «não entregou nada» — a sonda recuaria por causa de alguém desligando.
+     server.subida.lock().await.esquecer(id_da_conexao);
+ 
+     // **O motivo, quando há um.** Esta linha dizia «session ended» e mais nada,
+     // e o `result` — que carrega o erro — ia embora sem ser lido. Quem
+@@ -2255,32 +2261,79 @@ async fn run_session(
+                             em_curso.into_iter().find(|(_, corrente)| *corrente == screen)
+                         {
+                             let _ = server.events.send(Event::KeyFrameRequested {
+                                 screen,
+                                 person: session.person,
+                                 sharer,
+                             });
+                         }
+                     }
+ 
+-                    // O protocolo já leva os dois verbos do caminho entre
+-                    // pares (`PROTOCOL_VERSION` 4), mas quem os liga a
+-                    // `pares.rs` é a próxima tarefa deste plano — que ainda não
+-                    // existe neste commit. Rastreado, e não calado: uma pessoa
+-                    // que emprestou a subida ou relatou um par que falhou não
+-                    // pode descobrir dias depois, sem dado nenhum, que o
+-                    // servidor nunca fez nada com o pedido dela.
+-                    ClientMessage::EmprestarSubida { .. } | ClientMessage::ParFalhou { .. } => {
+-                        tracing::warn!(
++                    ClientMessage::EmprestarSubida {
++                        emprestando,
++                        impressao,
++                        locais,
++                    } => {
++                        // O público **não** vem do cliente: `locais` é o que ele
++                        // afirma sobre a própria rede, mas o único endereço em
++                        // que este servidor pode confiar é o de onde a conexão
++                        // realmente veio. Um público que o cliente inventasse
++                        // seria um endereço para o qual outra pessoa discaria
++                        // sem saber que está confiando na palavra de um
++                        // estranho.
++                        let publico = connection.remote_address();
++                        // «Deixei de emprestar» chega como `emprestando: false`
++                        // por cima de uma `impressao` que o protocolo não força
++                        // a vir vazia — quem decide o que ela significa é este
++                        // despacho, e não o campo em si. `Pares::declarou` só
++                        // entende opt-out como impressão vazia (decisão de
++                        // 05/09), e é essa tradução que acontece aqui.
++                        let impressao = if emprestando { impressao } else { String::new() };
++                        tracing::info!(
++                            person = %session.person,
++                            %publico,
++                            emprestando,
++                            "declaração de empréstimo de subida no caminho entre pares"
++                        );
++                        server
++                            .pares
++                            .lock()
++                            .await
++                            .declarou(session.person, impressao, locais, publico);
++                    }
++                    ClientMessage::ParFalhou { screen, motivo } => {
++                        // O rastro fica mesmo quando não há o que fazer: quem
++                        // investigar um par que nunca serve ninguém precisa
++                        // achar aqui todo relato que chegou, não só os que
++                        // mudaram algum estado.
++                        tracing::info!(
+                             person = %session.person,
+-                            "caminho entre pares recebido antes de o despacho existir"
++                            %screen,
++                            ?motivo,
++                            "par relatado como falho no caminho entre pares"
+                         );
++                        // Só `ImpressaoNaoBate` diz algo sobre a **declaração**:
++                        // as outras três razões são da rede — endereço que não
++                        // respondeu, conexão que caiu, quadro que parou de vir —
++                        // e nenhuma delas prova que o que está publicado em
++                        // `Pares` deixou de ser de quem o publicou. Quem caiu de
++                        // verdade já sai daqui pela saída de sessão, mais abaixo
++                        // neste arquivo — `Pares::saiu` é chamado lá para todo
++                        // encerramento, e não só para este relato. `ImpressaoNaoBate`
++                        // é diferente: prova que alguém respondeu no lugar de
++                        // quem o servidor apresentou, o que discredita a
++                        // declaração mesmo que quem a fez continue conectado a
++                        // este servidor — daí valer a pena remover a própria
++                        // declaração desta pessoa, e não esperar pela saída dela.
++                        if motivo == MotivoDeFalhaDePar::ImpressaoNaoBate {
++                            server.pares.lock().await.saiu(session.person);
++                        }
+                     }
+ 
+                     // The handshake is over. Repeating it is a protocol
+                     // violation, not a re-authentication.
+                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
+                 }
+             }
+ 
+             // Os dois braços de voz que ficavam aqui vivem agora na tarefa de
+             // mídia, criada acima. Ver a nota lá: enquanto estavam neste

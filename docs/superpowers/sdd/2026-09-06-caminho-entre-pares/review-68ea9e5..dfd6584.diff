@@ -1,0 +1,102 @@
+# Review package: 68ea9e5..dfd6584
+
+## Commits
+dfd6584 fix: três consertos em andaimes do caminho entre pares
+
+## Files changed
+ crates/seele-core/src/state.rs     | 10 +++++-----
+ crates/seele-proto/src/control.rs  |  2 +-
+ crates/seele-server/src/session.rs |  2 +-
+ 3 files changed, 7 insertions(+), 7 deletions(-)
+
+## Diff
+diff --git a/crates/seele-core/src/state.rs b/crates/seele-core/src/state.rs
+index e5c0287..5cda8f1 100644
+--- a/crates/seele-core/src/state.rs
++++ b/crates/seele-core/src/state.rs
+@@ -1198,26 +1198,26 @@ impl Room {
+             ServerMessage::UplinkLoss { fraction } => {
+                 self.perda_de_subida = Some(*fraction);
+                 changed.telemetry = true;
+             }
+ 
+             // Consumed by the handshake and by the round-trip measurement, both
+             // of which are over before any shell is watching.
+             ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
+ 
+             // O protocolo já leva os dois verbos do caminho entre pares
+-            // (`PROTOCOL_VERSION` 4), mas quem os liga ao `crate::caminho` é
+-            // uma tarefa futura deste plano — que ainda não existe neste
+-            // commit. Rastreado, e não calado: um quadro que este `Room` ainda
+-            // não sabe usar não pode desaparecer sem deixar rastro.
++            // (`PROTOCOL_VERSION` 4). A integração com o despacho de pares é
++            // andaime para Task 8 («O cliente pede ao par, e cai para o servidor
++            // quando falha»). Rastreado, e não calado: uma mensagem que chega e é
++            // descartada sem resposta nenhuma não pode desaparecer sem deixar rastro.
+             ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => {
+-                tracing::debug!("caminho entre pares recebido antes de o cliente estar ligado");
++                tracing::warn!("caminho entre pares recebido antes de o cliente estar ligado");
+             }
+         }
+ 
+         changed
+     }
+ 
+     fn absorb_state(&mut self, state: &PersonState) {
+         let person = self.people.entry(state.person).or_insert_with(|| {
+             Person::new(state.person, format!("pessoa {}", state.person.0), None)
+         });
+diff --git a/crates/seele-proto/src/control.rs b/crates/seele-proto/src/control.rs
+index 657a6c6..b7a3f17 100644
+--- a/crates/seele-proto/src/control.rs
++++ b/crates/seele-proto/src/control.rs
+@@ -220,21 +220,21 @@ pub const PUBLIC_KEY_LEN: usize = 32;
+ 
+ /// Length of an Ed25519 signature, in bytes.
+ pub const SIGNATURE_LEN: usize = 64;
+ 
+ /// Longest authentication proof, in bytes.
+ ///
+ /// An Ed25519 signature is 64 bytes (ADR 0004); the slack is for whatever a
+ /// password fallback needs.
+ pub const MAX_PROOF_LEN: usize = 256;
+ 
+-/// Length of uma impressão digital em hex minúsculo.
++/// Tamanho de uma impressão digital em hex minúsculo.
+ ///
+ /// Um SHA-256 em hexadecimal são exatamente 64 caracteres — nem mais, nem
+ /// menos, o mesmo tamanho que [`crate::uri`] já confere para o `fp=` do
+ /// `seele://`. Só o tamanho é conferido aqui: se os caracteres são hex e se a
+ /// impressão bate com um certificado de verdade é o que o aperto de mão
+ /// descobre, e é para isso que [`MotivoDeFalhaDePar::ImpressaoNaoBate`]
+ /// existe.
+ pub const MAX_IMPRESSAO_LEN: usize = 64;
+ 
+ /// Why a control frame could not be handled.
+diff --git a/crates/seele-server/src/session.rs b/crates/seele-server/src/session.rs
+index bba74a7..8333d2f 100644
+--- a/crates/seele-server/src/session.rs
++++ b/crates/seele-server/src/session.rs
+@@ -2263,21 +2263,21 @@ async fn run_session(
+                     }
+ 
+                     // O protocolo já leva os dois verbos do caminho entre
+                     // pares (`PROTOCOL_VERSION` 4), mas quem os liga a
+                     // `pares.rs` é a próxima tarefa deste plano — que ainda não
+                     // existe neste commit. Rastreado, e não calado: uma pessoa
+                     // que emprestou a subida ou relatou um par que falhou não
+                     // pode descobrir dias depois, sem dado nenhum, que o
+                     // servidor nunca fez nada com o pedido dela.
+                     ClientMessage::EmprestarSubida { .. } | ClientMessage::ParFalhou { .. } => {
+-                        tracing::debug!(
++                        tracing::warn!(
+                             person = %session.person,
+                             "caminho entre pares recebido antes de o despacho existir"
+                         );
+                     }
+ 
+                     // The handshake is over. Repeating it is a protocol
+                     // violation, not a re-authentication.
+                     ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
+                 }
+             }
