@@ -538,6 +538,21 @@ async fn cenario_sobre(
     servidor: Arc<Daemon>,
     geracao: u32,
 ) -> Result<Cenario> {
+    cenario_por(endereco, endereco, servidor, geracao).await
+}
+
+/// O mesmo, com quem assiste chegando **por outro endereço**.
+///
+/// Existe para [`Rele`]: a queda assimétrica precisa que só o caminho de quem
+/// assiste até o servidor possa ser cortado, e quem compartilha e quem empresta
+/// continuem falando com ele direto. Os dois endereços levam ao mesmo servidor;
+/// o que muda é por onde os pacotes de uma das três conexões passam.
+async fn cenario_por(
+    endereco: SocketAddr,
+    endereco_de_quem_assiste: SocketAddr,
+    servidor: Arc<Daemon>,
+    geracao: u32,
+) -> Result<Cenario> {
     let mut compartilha = abrir(endereco, 1).await?;
     let sala = compartilha.sala;
     frame::write(
@@ -556,7 +571,7 @@ async fn cenario_sobre(
     // cópias, como sempre serviu.
     empresta.emprestar_subida(true).await?;
 
-    let assiste = cliente(endereco, 3, "assiste").await?;
+    let assiste = cliente(endereco_de_quem_assiste, 3, "assiste").await?;
     assiste.entrar_na_voice_room(sala).await?;
 
     let mut empresta = empresta;
@@ -2542,6 +2557,302 @@ async fn a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo
         );
     }
 
+    drop(compartilha);
+    drop(empresta);
+    drop(assiste);
+    servidor.shutdown();
+    Ok(())
+}
+
+// ------------------------------------------------------- a queda assimétrica
+
+/// Um relé UDP: um segundo endereço que leva ao mesmo servidor, e que se corta.
+///
+/// # Por que um relé, e não `Daemon::shutdown`
+///
+/// Derrubar o servidor mata **os dois lados** de todo caminho de par: o fluxo de
+/// quem empresta termina, `RepasseDeTela::fechou` larga o destino, e a tarefa
+/// que lia do par vê o fim do fluxo e morre sozinha. É por isso que o teste da
+/// substituição da conexão não conseguiu prender
+/// `Motor::largar_o_caminho_entre_pares` — naquele cenário ele é cinto sobre
+/// suspensório, e o relatório de 10/09 mediu isso em vez de supor.
+///
+/// A queda que **precisa** do guarda é a assimétrica: a conexão com o servidor
+/// morre e o par continua vivo do outro lado. Um relé produz exatamente isso —
+/// quem assiste fala com o servidor por aqui, quem compartilha e quem empresta
+/// falam direto, e cortar o relé derruba uma conexão e só ela. O caminho entre
+/// pares não passa por aqui: ele é discado direto para o endereço que quem
+/// empresta publicou.
+struct Rele {
+    endereco: SocketAddr,
+    tarefa: tokio::task::JoinHandle<()>,
+}
+
+impl Rele {
+    /// Abre um relé numa porta que o sistema escolhe.
+    async fn abrir(destino: SocketAddr) -> Result<Self> {
+        Self::na_porta(0, destino).await
+    }
+
+    /// Abre um relé numa porta escolhida — **a mesma na segunda vez**.
+    ///
+    /// Pelo motivo que [`servidor_em`] documenta: o `Destino` que o cliente
+    /// guarda não muda, e a reconexão volta ao endereço que atendeu. Um relé que
+    /// voltasse noutra porta seria destino novo, e não reconexão.
+    async fn na_porta(porta: u16, destino: SocketAddr) -> Result<Self> {
+        let socket = tokio::net::UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], porta))).await?;
+        let endereco = socket.local_addr()?;
+        let tarefa = tokio::spawn(async move {
+            // Um socket só para as duas direções: o que vem do servidor vai
+            // para o último cliente que falou, e o resto vai para o servidor.
+            // Basta porque **uma** conexão passa por aqui, e é a única coisa
+            // que este relé promete.
+            let mut balde = vec![0_u8; 64 * 1024];
+            let mut cliente: Option<SocketAddr> = None;
+            loop {
+                let Ok((quantos, de)) = socket.recv_from(&mut balde).await else {
+                    return;
+                };
+                let Some(pedaco) = balde.get(..quantos) else {
+                    continue;
+                };
+                if de == destino {
+                    if let Some(para) = cliente {
+                        let _ = socket.send_to(pedaco, para).await;
+                    }
+                } else {
+                    // A porta de origem muda a cada reconexão — `Motor::tentar`
+                    // sai de um socket novo —, então o cliente é sempre o
+                    // último que falou, e não o primeiro.
+                    cliente = Some(de);
+                    let _ = socket.send_to(pedaco, destino).await;
+                }
+            }
+        });
+        Ok(Self { endereco, tarefa })
+    }
+
+    /// Corta o caminho e devolve a porta, para que ele possa voltar nela.
+    ///
+    /// Espera a tarefa terminar de verdade antes de devolver: sem isso a porta
+    /// ainda estaria presa quando o relé novo tentasse tomá-la, e o teste
+    /// falharia por corrida de bind em vez de por afirmação nenhuma.
+    async fn cortar(self) -> u16 {
+        let porta = self.endereco.port();
+        let tarefa = self.tarefa;
+        tarefa.abort();
+        let _ = tarefa.await;
+        porta
+    }
+}
+
+/// Quanto silêncio se exige de quem assiste enquanto a bateria corre.
+///
+/// Dois segundos, e o número é escolhido contra o que ele tem de separar: a
+/// transmissão manda um quadro a cada [`INTERVALO`], trinta por segundo, então
+/// um caminho de par vivo entrega uns **sessenta** quadros nesta janela. Não é
+/// um prazo apertado que alguma máquina lenta derrubaria; é a diferença entre
+/// zero e sessenta.
+const SILENCIO_DA_QUEDA: Duration = Duration::from_secs(2);
+
+/// Quanto se drena antes de exigir o silêncio.
+///
+/// O canal de avisos é FIFO e a bateria começa **quatorze segundos** depois do
+/// corte: o que estava em voo no instante do cancelamento ainda está na fila, e
+/// exigir silêncio sem esvaziá-la mediria a fila e não o caminho. Fixo, e não
+/// «até ficar quieto», pelo motivo que [`DRENAGEM_DEPOIS_DO_FIM`] documenta.
+const DRENAGEM_ANTES_DO_SILENCIO: Duration = Duration::from_millis(500);
+
+/// **A conexão de quem assiste morre sozinha, o par continua vivo, e o caminho
+/// entre pares cai junto com ela.**
+///
+/// # A lacuna que este teste fecha, e por que ela sobreviveu a três entregas
+///
+/// `Motor::largar_o_caminho_entre_pares` foi escrito para a queda, e até aqui
+/// nenhum teste de rede o prendeu. O relatório de 10/09 mediu por quê e deixou
+/// escrito: naquele cenário — o **servidor** caindo — o guarda é cinto sobre
+/// suspensório. A queda do servidor mata os dois lados de todo caminho de par,
+/// a tarefa que lê do par vê o fim do fluxo e morre sozinha, e retirar o guarda
+/// não muda nada que se possa medir.
+///
+/// A queda que precisa dele é a **assimétrica**: a conexão com o servidor morre
+/// e o par continua vivo do outro lado. É a queda comum de verdade — a rota que
+/// some, o NAT que reescreve, a máquina que dorme —, e é a que um [`Rele`]
+/// produz: quem assiste fala com o servidor por um caminho que se pode cortar,
+/// quem compartilha e quem empresta falam direto, e o caminho entre pares é
+/// discado direto e não passa pelo relé.
+///
+/// # O defeito que este teste encontrou, e que ele existe para prender
+///
+/// Medido antes de consertado, com este mesmo cenário: **`Motor::cair` nunca
+/// corria.** Há duas portas para a bateria interna e só uma passava por ele.
+/// `cair` trata a queda que o transporte *avisa* — um fluxo que devolve erro. Uma
+/// conexão que some sem avisar não devolve erro nenhum: ela produz silêncio, e
+/// quem conta silêncio é o `Ping`. Três sem resposta e `Battery::poll_online`
+/// põe a bateria de pé **por dentro**, devolvendo `Action::Wait`.
+///
+/// O resultado, medido: a tarefa de par da conexão morta atravessava a bateria e
+/// a reconexão inteiras, e **1336 quadros da mídia velha** chegavam à casca
+/// depois de `Reconectado`, por um caminho que o servidor novo não montou e não
+/// conhece. O conserto é uma linha em `Motor::passo`: a porta dos pings passa
+/// pela mesma soltura que a do erro.
+///
+/// # Por que a prova é a janela da bateria, e não uma marca na mídia
+///
+/// Entre `InternalBattery` e `Reconectado`, quem assiste **não tem conexão com o
+/// servidor** — é o que a bateria significa. Nessa janela não existe cano do
+/// servidor para confundir com caminho de par: qualquer quadro que chegue só
+/// pode ter vindo do par. É um discriminador mais forte que uma geração de
+/// mídia, que separa duas transmissões mas não duas origens.
+///
+/// A geração continua marcada ([`ANTES_DA_QUEDA`]) e continua servindo: ela é o
+/// que faz a mensagem de falha dizer **de qual mídia** era o quadro que não
+/// devia estar ali.
+///
+/// # As três pernas que impedem esta prova de ser vazia
+///
+/// 1. **Havia caminho de par antes do corte.** [`ate_o_par_estar_servindo`]
+///    exige um segundo de imagem pelo par com o servidor subindo uma cópia só.
+///    Sem isso o silêncio depois não diria nada.
+/// 2. **O ambiente não acabou.** Quem empresta, que continua conectado direto,
+///    recebe [`QUADROS_PARA_PROVAR`] quadros novos **na mesma janela** em que se
+///    exige silêncio de quem assiste. Sem esta perna, um servidor morto ou uma
+///    transmissão que parou passariam por conserto.
+/// 3. **A sessão volta a funcionar.** Silêncio também é o que um cliente morto
+///    produz. Depois de o relé voltar, quem assiste reconecta e volta a receber
+///    imagem — e é aí que se sabe que o silêncio foi o caminho do par caindo, e
+///    não o `Enlace` inteiro.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_queda_de_uma_conexao_so_derruba_o_caminho_do_par_com_o_par_ainda_vivo() -> Result<()> {
+    let (endereco, daemon) = servidor_em(0, Location::Memory).await?;
+    let rele = Rele::abrir(endereco).await?;
+    let endereco_do_rele = rele.endereco;
+
+    let Cenario {
+        servidor,
+        compartilha,
+        mut empresta,
+        mut assiste,
+        screen,
+        copias,
+    } = cenario_por(endereco, endereco_do_rele, daemon, ANTES_DA_QUEDA).await?;
+
+    let piso =
+        ate_o_par_estar_servindo(&mut assiste, screen, &copias, "a queda assimétrica").await?;
+    println!(
+        "o par serve quem assiste — piso {piso:?}, o servidor sobe {} cópia(s)",
+        copias.agora()
+    );
+
+    // ---- o corte: uma conexão, e só ela ----
+    //
+    // Quem compartilha e quem empresta não passam por aqui, e o caminho entre
+    // pares é discado direto para o endereço que quem empresta publicou. Nada
+    // além da conexão de quem assiste com o servidor é tocado.
+    let corte = Instant::now();
+    let porta = rele.cortar().await;
+
+    // Drenar até a bateria começar, e não esperar de braços cruzados: são uns
+    // quatorze segundos de `Ping` sem resposta, e um canal FIFO que ninguém lê
+    // acumula a transmissão inteira — quatrocentos quadros que depois seriam
+    // lidos dentro da janela de silêncio, provando o contrário do que se quer.
+    let mut na_bateria = false;
+    while !na_bateria {
+        anyhow::ensure!(
+            corte.elapsed() < PACIENCIA,
+            "a paciência acabou esperando a bateria interna começar depois do corte"
+        );
+        if let Ok(aviso) = tokio::time::timeout(Duration::from_millis(50), assiste.proximo()).await
+        {
+            na_bateria = matches!(
+                aviso,
+                Aviso::Estado {
+                    estado: Link::InternalBattery { .. },
+                    ..
+                }
+            );
+        }
+    }
+    println!(
+        "a bateria interna começou {:?} depois do corte",
+        corte.elapsed()
+    );
+
+    // O que estava em voo no instante do cancelamento ainda está na fila.
+    let fim_da_drenagem = Instant::now() + DRENAGEM_ANTES_DO_SILENCIO;
+    while Instant::now() < fim_da_drenagem {
+        let _ = tokio::time::timeout(Duration::from_millis(20), assiste.proximo()).await;
+    }
+
+    // ---- a afirmação: silêncio de um lado, imagem do outro, na mesma janela ----
+    let mut de_quem_assiste: Vec<u32> = Vec::new();
+    let mut de_quem_empresta = 0_u32;
+    let fim_do_silencio = Instant::now() + SILENCIO_DA_QUEDA;
+    while Instant::now() < fim_do_silencio {
+        if let Ok(Aviso::TelaQuadro { tela, bytes, .. }) =
+            tokio::time::timeout(Duration::from_millis(10), assiste.proximo()).await
+        {
+            if tela == screen {
+                if let Some(seq) = seq_de(&bytes) {
+                    de_quem_assiste.push(seq);
+                }
+            }
+        }
+        if let Ok(Aviso::TelaQuadro { tela, bytes, .. }) =
+            tokio::time::timeout(Duration::from_millis(10), empresta.proximo()).await
+        {
+            if tela == screen && seq_de(&bytes).is_some() {
+                de_quem_empresta += 1;
+            }
+        }
+    }
+
+    assert!(
+        de_quem_empresta >= QUADROS_PARA_PROVAR,
+        "quem empresta recebeu só {de_quem_empresta} quadro(s) nos {SILENCIO_DA_QUEDA:?} em que \
+         se exigiu silêncio de quem assiste: o ambiente parou, e o silêncio do outro lado não \
+         diz nada sobre caminho de par nenhum"
+    );
+    assert!(
+        de_quem_assiste.is_empty(),
+        "a conexão de quem assiste caiu e o caminho do par continuou entregando: {} quadro(s) \
+         chegaram durante a bateria interna, o primeiro deles o seq {:?} da geração {:?}. \
+         Nessa janela não há conexão com o servidor — a imagem só pode ter vindo da tarefa de \
+         par da conexão que morreu",
+        de_quem_assiste.len(),
+        de_quem_assiste.first(),
+        de_quem_assiste.first().copied().map(geracao_de),
+    );
+    println!(
+        "{SILENCIO_DA_QUEDA:?} de silêncio para quem assiste, com {de_quem_empresta} quadros \
+         novos para quem empresta na mesma janela"
+    );
+
+    // ---- a terceira perna: o silêncio não era um cliente morto ----
+    let de_volta = Rele::na_porta(porta, endereco).await?;
+    esperar(
+        &mut assiste,
+        "quem assiste reconectar ao servidor",
+        |aviso| matches!(aviso, Aviso::Reconectado { .. }).then_some(()),
+    )
+    .await?;
+    // Sem `assistir` nenhum: o servidor religa ao cano quem volta para uma sala
+    // onde há transmissão, e é dele que esta imagem vem — `copias` volta a dois.
+    // Aqui isso é exatamente o que se quer afirmar: **há um cliente vivo**.
+    let (seq, _) = esperar(
+        &mut assiste,
+        "a imagem voltar a chegar depois da reconexão",
+        |aviso| match aviso {
+            Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => {
+                seq_de(bytes).map(|seq| (seq, ()))
+            }
+            _ => None,
+        },
+    )
+    .await?;
+    println!("depois da volta, a imagem chega de novo — seq {seq}");
+
+    let _ = de_volta.cortar().await;
     drop(compartilha);
     drop(empresta);
     drop(assiste);

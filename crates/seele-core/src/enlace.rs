@@ -2436,7 +2436,31 @@ impl Motor {
         // leitura depois disso seria contra um cliente que já foi embora.
         self.medir_o_caminho();
         let agora = self.inicio.elapsed();
-        match self.bateria.poll(agora) {
+        let antes = self.bateria.state();
+        let acao = self.bateria.poll(agora);
+        // **A segunda porta da bateria, e por muito tempo a única sem porteiro.**
+        //
+        // [`Motor::cair`] trata a queda que o transporte *avisa*: o fluxo
+        // devolve erro e o motor larga a conexão inteira, caminho entre pares
+        // junto. Mas há outra porta, e é aqui: três `Ping` sem resposta
+        // (`Battery::poll_online`) põem a bateria de pé **por dentro**, e
+        // devolvem `Action::Wait` — nenhum erro, nenhuma chamada a `cair`.
+        //
+        // É a porta que uma queda de verdade usa. Um caminho que some sem
+        // avisar — NAT que reescreve, rota que cai, a máquina que dorme — não
+        // produz erro de fluxo nenhum: produz silêncio, e silêncio é o que os
+        // pings contam. Medido em
+        // `a_queda_de_uma_conexao_so_derruba_o_caminho_do_par`, com um relé
+        // cortado: sem esta linha, a tarefa de par da conexão morta atravessa a
+        // bateria **e a reconexão** inteiras, e 1336 quadros da mídia velha
+        // chegam à casca depois de `Reconectado` — por um caminho que o servidor
+        // novo não montou e não conhece.
+        if matches!(antes, Link::Online)
+            && matches!(self.bateria.state(), Link::InternalBattery { .. })
+        {
+            self.soltar_a_conexao();
+        }
+        match acao {
             Action::SendPing => {
                 if let Some(cliente) = self.cliente.as_mut() {
                     if cliente.send_ping().await.is_err() {
@@ -2460,8 +2484,29 @@ impl Motor {
         false
     }
 
-    /// A conexão morreu. Entra na bateria e conta para a casca.
+    /// A conexão morreu, e o transporte avisou. Entra na bateria e conta para a
+    /// casca.
     fn cair(&mut self) {
+        self.soltar_a_conexao();
+        let agora = self.inicio.elapsed();
+        let antes = self.bateria.state();
+        self.bateria.on_connection_lost(agora);
+        if antes != self.bateria.state() {
+            self.anunciar();
+        }
+    }
+
+    /// Tudo o que uma conexão perdida leva junto, **sem tocar na bateria**.
+    ///
+    /// Separado de [`Self::cair`] porque há duas portas para a bateria e as
+    /// duas têm de passar por aqui: o erro de fluxo, que chega a `cair`, e três
+    /// `Ping` sem resposta, que põem a bateria de pé por dentro de
+    /// `Battery::poll` sem erro nenhum — ver o comentário em [`Self::passo`].
+    /// Naquela porta a bateria já mudou de estado quando isto corre, e chamar
+    /// `on_connection_lost` de novo reiniciaria a contagem dos cinco minutos.
+    ///
+    /// Idempotente: chamada duas vezes, a segunda não tem o que largar.
+    fn soltar_a_conexao(&mut self) {
         self.cliente = None;
         // Os contadores do `quinn` morrem com a conexão, e a janela aberta
         // contra eles daria uma medida absurda na conexão seguinte. O que se
@@ -2480,12 +2525,6 @@ impl Motor {
         self.tela_pedida = None;
         self.parar_a_tela();
         self.largar_o_caminho_entre_pares();
-        let agora = self.inicio.elapsed();
-        let antes = self.bateria.state();
-        self.bateria.on_connection_lost(agora);
-        if antes != self.bateria.state() {
-            self.anunciar();
-        }
     }
 
     /// O caminho entre pares não sobrevive à conexão que o montou.
