@@ -262,6 +262,42 @@ async fn uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao() -> 
     enlace.abrir_linha(ChannelId(LINE)).await?;
     assert_eq!(enlace.estado(), Link::Online);
 
+    // ---- a barreira: a sessão está de pé **do lado de lá**, e não só aqui
+    //
+    // `abrir_linha` e `entrar_na_voice_room` não esperam resposta: põem o pedido na
+    // fila do motor e voltam. O `assert_eq!` acima também é local — lê o estado
+    // que este objeto guarda. Nenhum dos três prova que o servidor já processou
+    // coisa alguma desta conexão, e é isso que a injeção logo abaixo precisa:
+    // `Event::SessionEnded` vai para o barramento, que só entrega a quem já
+    // assinou, e a sessão do servidor assina depois de responder ao handshake
+    // (`seele-server/src/session.rs:1243`).
+    //
+    // Uma ida e volta pela Linha fecha essa classe inteira **por construção**:
+    // a mensagem só volta se o laço da sessão a leu, e o laço começa depois da
+    // assinatura. Custa um par de milissegundos e transforma três suposições em
+    // uma medida. Ela também é o «antes» do passo Quatro: sem isto, uma Linha
+    // que nunca chegou a abrir se pareceria, lá embaixo, com uma Linha que a
+    // reconexão não reabriu.
+    enlace
+        .dizer(ChannelId(LINE), "estou aqui".to_owned(), ClientMessageId(0))
+        .await?;
+    let pronta = esperar(&mut enlace, Duration::from_secs(10), |aviso| {
+        matches!(
+            aviso,
+            Aviso::Mensagem(mensagem)
+                if matches!(
+                    &**mensagem,
+                    ServerMessage::MessageReceived { body, .. } if body == "estou aqui"
+                )
+        )
+    })
+    .await;
+    assert!(
+        pronta.is_some(),
+        "a sessão não ficou de pé do lado do servidor: a Linha não devolveu o que foi dito nela, \
+         e uma despedida injetada agora mediria o preparo em vez da fronteira"
+    );
+
     let quem = enlace.sessao().person;
     let ssrc_de_antes = enlace.sessao().ssrc;
 
@@ -290,10 +326,38 @@ async fn uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao() -> 
         )
     })
     .await;
-    assert!(
-        recebida.is_some(),
-        "a despedida recuperável não chegou ao Enlace; não há fronteira a medir"
-    );
+    // Quando ela **não** chega, duas coisas muito diferentes cabem no mesmo
+    // vermelho, e um teste que não as separa manda quem lê adivinhar — que é o
+    // defeito mais caro desta casa. Então ele mede o que o `Enlace` via no
+    // instante da desistência e diz de qual das duas se trata:
+    //
+    // - **ainda `Online` com o mesmo `ssrc`**: o servidor não agiu sobre o
+    //   evento. A despedida não foi escrita no fio, e isso é regressão do lado
+    //   de lá — o braço de `Event::SessionEnded` deixou de responder.
+    // - **fora de `Online`, ou com `ssrc` novo**: a conexão caiu e a sessão
+    //   seguiu sem o motivo. O quadro se perdeu junto com a conexão que o
+    //   carregava — o `Disconnecting` é escrito e a conexão é fechada logo
+    //   atrás (`despedir`, em `seele-server/src/session.rs`) —, e o que se
+    //   perdeu foi a **explicação**, não a decisão.
+    //
+    // Este teste ficou vermelho duas vezes em 10/09, as duas aqui, e **nenhuma
+    // delas foi diagnosticada**: a distinção acima só existe a partir de agora.
+    // Quatro hipóteses foram medidas e refutadas — relatório de 496ba8c5, §6.2.
+    // Quem apanhar o próximo vermelho tem, nesta linha, a metade que faltava.
+    if recebida.is_none() {
+        let estado = enlace.estado();
+        let ssrc_agora = enlace.sessao().ssrc;
+        let leitura = if estado == Link::Online && ssrc_agora == ssrc_de_antes {
+            "o Enlace seguiu Online na mesma conexão: o servidor não escreveu a despedida no fio"
+        } else {
+            "a conexão de antes não está mais de pé: a despedida se perdeu com ela, \
+             e o que faltou foi o motivo — não a reconexão"
+        };
+        panic!(
+            "a despedida recuperável não chegou ao Enlace em 10 s; não há fronteira a medir \
+             ({estado:?}, ssrc {ssrc_de_antes:?} → {ssrc_agora:?}): {leitura}"
+        );
+    }
 
     // Dois: a sessão **não acaba**. `Encerrado` aqui é a regressão inteira —
     // é o que uma `a_sessao_acabou_aqui` alargada produz.

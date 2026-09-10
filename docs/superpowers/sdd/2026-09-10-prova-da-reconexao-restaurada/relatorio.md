@@ -122,7 +122,8 @@ com a origem.
 | `cargo test -p seele-conformance --test bateria_interna` | **0** | `5 passed; 0 failed` — inclui o teste novo |
 | `cargo test -p seele-conformance --test moderacao` | **0** | `6 passed; 0 failed` |
 | `cargo test -p seele-core --lib` | **0** | `297 passed; 0 failed` — inclui `toda_despedida_do_protocolo_escolhe_um_lado` |
-| `cargo test` / `cargo test --no-fail-fast` (workspace) | **101, 101, 0, 0** | quatro corridas; **1771 testes em 70 alvos**; ver §6 |
+| `cargo test` / `cargo test --no-fail-fast` (workspace) | **101, 101, 0, 0** | quatro corridas da manhã; **1771 testes em 70 alvos**; ver §6 |
+| `cargo test --workspace --no-fail-fast` (árvore final) | **0, 0, 0** | três corridas seguidas, `1771 passed; 0 failed` em cada; ver §6.2 |
 
 ```
 running 5 tests
@@ -177,6 +178,82 @@ assertion `left == right` failed: Incompatible mudou de lado sem que este teste 
 Que `moderacao` continue verde sob a mutação não é detalhe: é a medida de que a
 expulsão e o banimento seguem encerrando a sessão como devem, e de que a suíte
 que já existia era, sozinha, cega para o lado de reconectar.
+
+### 5.3 · As quatro suítes do aceite, com a saída inteira e o `$?` de cada uma
+
+A revisão cobrou isto com todas as letras: a aprovação não podia depender da
+palavra de quem executou. Segue a saída **completa** das cinco verificações, na
+árvore final desta candidata — cada `EXIT=` é o `$?` do comando imediatamente
+acima, sem `|` no meio. Reexecutadas **depois** das mudanças de §6.2, para que
+não sejam a medida de uma árvore anterior.
+
+```
+### 2026-09-10T15:37:34Z · load averages: 1.80 4.61 6.33
+
+$ cargo fmt --all -- --check
+EXIT=0
+
+$ cargo test -p seele-conformance --test bateria_interna
+running 5 tests
+test sair_encerra_sem_esperar_a_bateria ... ok
+test uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao ... ok
+test o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar ... ok
+test o_que_a_pessoa_escolheu_volta_com_ela ... ok
+test as_tentativas_aparecem_enquanto_a_bateria_corre ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.09s
+EXIT=0
+
+$ cargo test -p seele-conformance --test bateria_interna -- --exact \
+      uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao
+running 1 test
+test uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.41s
+EXIT=0
+
+$ cargo test -p seele-core --lib -- --exact \
+      enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado
+running 1 test
+test enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 296 filtered out; finished in 0.00s
+EXIT=0
+
+$ cargo test -p seele-conformance --test moderacao
+running 6 tests
+test banir_acaba_com_a_sessao_e_impede_de_voltar ... ok
+test expulsar_acaba_com_a_sessao_e_deixa_voltar ... ok
+test um_operador_modera_pessoas_e_nao_o_comandante ... ok
+test mover_leva_a_pessoa_e_a_conta_na_sala_nova ... ok
+test um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca ... ok
+test apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+EXIT=0
+```
+
+E a prova por reversão, refeita na mesma árvore (saída podada nas duas linhas que
+importam; os comandos e os `EXIT=` estão em §6.2):
+
+```
+$ cargo test -p seele-conformance --test bateria_interna -- --exact uma_despedida_…
+panicked at crates/seele-conformance/tests/bateria_interna.rs:366:43:
+uma despedida recuperável acabou com a sessão (Moderado(FellBehind)): quem a bateria
+interna existe para segurar foi posto para fora
+EXIT=101
+
+$ cargo test -p seele-core --lib -- --exact enlace::tests::toda_despedida_…
+panicked at crates/seele-core/src/enlace.rs:4760:13:
+assertion `left == right` failed: Incompatible mudou de lado sem que este teste mudasse junto
+  left: true
+ right: false
+EXIT=101
+
+$ cargo test -p seele-conformance --test moderacao
+test result: ok. 6 passed; 0 failed
+EXIT=0
+```
 
 ## 6 · O `exit 101` da validação independente de `858903f7`, esclarecido
 
@@ -238,9 +315,30 @@ mesmo erro:
 `SemResposta` é `quinn::ConnectionError::TimedOut` traduzido em
 `client.rs:1509`: **prazo de conexão estourado**, e não asserção violada. Os dois
 testes conectam em `127.0.0.1` e dependem de tempo de parede
-(`sleep(150ms)`/`sleep(300ms)` em `acceptance_m3.rs:343,350`). Sob o workspace
-inteiro a suíte `acceptance_m3` leva **20,2 s**; sozinha, **1,7 s** — doze vezes
-mais devagar. Rodada isolada, ela passa: 3/3 no teste, 2/2 na suíte.
+(`sleep(150ms)`/`sleep(300ms)` em `acceptance_m3.rs:343,350`). Rodada isolada, a
+suíte passa: 3/3 no teste, 2/2 na suíte.
+
+> **Retificação medida, escrita depois dos dois commits.** Esta seção dizia:
+> «sob o workspace inteiro a suíte `acceptance_m3` leva 20,2 s; sozinha, 1,7 s —
+> doze vezes mais devagar». **A frase estava errada, e o erro era de leitura do
+> próprio número.** Os 20,15 s são a duração da suíte na corrida **vermelha** —
+> quer dizer, o tempo que o prazo levou para estourar, e não o tempo que a suíte
+> leva quando roda. Usar esse número para explicar por que o prazo estourou é
+> circular: ele **é** o prazo. E 20 s é exatamente `IDLE_TIMEOUT`
+> (`crates/seele-proto/src/transport.rs:33`).
+>
+> O tempo real da suíte sob o workspace inteiro foi medido nas duas corridas
+> verdes: `acceptance_m3` em **1,74 s** e **1,77 s**; `acceptance_m2` em
+> **0,95 s** e **0,97 s** — contra 1,7 s e ~0,9 s isoladas. Ou seja: **não há
+> lentidão de doze vezes**; sob o workspace a suíte custa praticamente o mesmo
+> que sozinha. A única suíte que leva ~20 s numa corrida verde é `acceptance_m5`,
+> e de propósito: ela conecta em `127.0.0.1:1`, onde nada escuta.
+>
+> O que sobra, e é menos do que a frase antiga prometia: as duas falhas são
+> prazos de conexão estourados, os dois testes dependem de tempo de parede, e a
+> causa dessa espera **não foi identificada** por medida nenhuma feita aqui.
+> Contenção continua sendo a hipótese mais simples, e §6.2 registra as tentativas
+> de confirmá-la — todas negativas.
 
 Nada disso toca a fronteira entre acabar e reconectar, e **o diff desta entrega
 não altera uma linha de produção** — só acrescenta um teste em outro crate e
@@ -269,6 +367,121 @@ de parede e falham por `SemResposta` sob carga.* Note que o relatório históric
 de 10/09 registra `1769 passaram, 0 falharam` numa única corrida — uma corrida
 verde não mede uma falha intermitente.
 
+### 6.2 · O que foi medido **depois** dos dois commits
+
+A revisão apontou, com razão, que a entrega estava congelada num estado anterior
+às medições que vieram depois — e que a seção que o aceite manda registrar com
+precisão era justamente a que dependia delas. Esta seção é essa lacuna fechada, e
+o commit que a carrega é o terceiro desta candidata.
+
+#### O teste novo ficou vermelho duas vezes, e as duas no mesmo lugar
+
+Nas duas, em `bateria_interna.rs`, na primeira asserção: a despedida recuperável
+não apareceu no `Enlace` dentro de 10 s.
+
+| quando | em que corrida | máquina |
+|---|---|---|
+| 11:48 | workspace inteiro, sob saturação provocada (carga ~31) | junto com `tela_por_um_par`, da base, que caiu na mesma corrida |
+| 12:20 | `bateria_interna` sozinha | carga 1 min ≈ 2,3 |
+
+A segunda é a que desmonta a explicação fácil: **não havia carga**. Depois dela,
+o teste passou **44 vezes seguidas**, em quatro regimes diferentes — e nenhum
+deles reproduziu a falha:
+
+| regime | corridas | vermelhas |
+|---|---|---|
+| suíte em paralelo, máquina ociosa | 3 | 0 |
+| suíte com `--test-threads=1` | 3 | 0 |
+| suíte sob saturação de CPU e E/S (30 processos + 3 de disco, carga até **32,6**) | 6 | 0 |
+| **4 cópias da suíte ao mesmo tempo** (contenção de runtime, ~300 threads em 15 núcleos) | 24 | 0 |
+
+Nas corridas D e E do workspace sob saturação, o teste novo passou e quem caiu
+foi `tela_por_um_par`, da base — testes **diferentes** a cada vez, sempre por
+prazo de espera. É o mesmo desenho de falha de §6.1, e ele não é desta entrega.
+
+#### Quatro hipóteses, medidas e **refutadas**
+
+Nenhuma sobreviveu à medida, e isso é o que há de mais sólido a dizer aqui:
+
+| hipótese | como foi testada | resultado |
+|---|---|---|
+| a conexão morre antes de o quadro sair: `despedir` espera 1 s pelo `stopped()` e fecha (`seele-server/src/session.rs:458`) | a espera foi **zerada** nesta árvore (`from_secs(1)` → `from_millis(0)`), o pior caso possível | **refutada** — 3/3 verdes; o quadro chega mesmo com o fechamento imediato |
+| a janela do barramento: a sessão do servidor só assina os eventos **depois** do handshake (`session.rs:1243`), e um evento injetado antes disso se perde | teste temporário com 20 rodadas injetando **logo depois** de `conectar`, sem barreira nenhuma | **refutada** — 20/20 chegaram (e 20/20 com barreira) |
+| saturação de CPU e disco | 6 corridas da suíte com carga até 32,6 | **refutada** — 6/6 verdes |
+| contenção de runtime como a de uma corrida de workspace | 4 cópias simultâneas da suíte, 6 rodadas | **refutada** — 24/24 verdes no teste novo |
+
+A mutação de `despedir` foi retirada e o arquivo conferido por SHA-256
+(`bbb538b9…`, igual antes e depois); o teste temporário foi apagado.
+
+**O mecanismo continua sem nome, e está dito assim de propósito.** O que há é
+uma falha rara — duas em cerca de cinquenta execuções medidas hoje — que
+nenhuma das quatro hipóteses explica. Concluir mais do que isso seria a terceira
+vez que uma hipótese confiante custa mais do que a medida teria custado.
+
+#### O que mudou no teste por causa disso
+
+Duas coisas, as duas em teste; **nenhuma linha de produção foi alterada**.
+
+1. **Um vermelho que diz qual das duas coisas aconteceu.** A asserção antiga
+   dizia só «a despedida recuperável não chegou ao Enlace» — e sob essa frase
+   cabem duas situações opostas: o servidor não ter escrito a despedida no fio
+   (regressão do lado de lá) ou a conexão ter caído levando o motivo junto
+   (a explicação perdida, não a decisão). O teste agora **mede** o estado do
+   `Enlace` e o `ssrc` no instante da desistência e nomeia qual das duas é. É o
+   critério que faltava para separar falha de ambiente de regressão futura: quem
+   ler o próximo vermelho não vai precisar adivinhar.
+2. **Uma barreira antes da injeção.** `abrir_linha` e `entrar_na_voice_room` não
+   esperam resposta, e `estado()` é leitura local: nada disso provava que o
+   servidor já havia processado alguma coisa desta conexão. O teste agora diz
+   uma frase na Linha e **espera ela voltar** antes de injetar a despedida. Isso
+   fecha por construção a classe inteira da segunda hipótese — a mensagem só
+   volta se o laço da sessão a leu, e o laço começa depois de a sessão assinar o
+   barramento. **Não é apresentada como conserto da falha observada:** a
+   hipótese que ela fecha foi refutada, e nada aqui prova que era essa a causa.
+
+A prova por reversão foi **refeita depois destas mudanças**, para que a
+sensibilidade à mutação não fosse tomada como herdada: com
+`a_sessao_acabou_aqui` devolvendo `true` para tudo, o teste volta a cair em
+`Moderado(FellBehind)`, o guarda unitário cai em `Incompatible` e `moderacao`
+segue verde. `enlace.rs` foi restaurado e conferido por SHA-256
+(`6d34140f…`, igual antes e depois).
+
+#### O conjunto inteiro, três vezes seguidas, verde
+
+A revisão cobrou que a candidata não tinha corrida de workspace verde
+**repetível**. Na árvore final, depois de tudo o que esta seção descreve:
+
+| corrida | começou | exit | resultado |
+|---|---|---|---|
+| F | 12:38 | **0** | `1771 passed; 0 failed`, 70 alvos |
+| G | 12:42 | **0** | `1771 passed; 0 failed`, 70 alvos |
+| H | 12:45 | **0** | `1771 passed; 0 failed`, 70 alvos |
+
+Com as quatro da manhã, a conta do dia nesta candidata é **cinco verdes em
+sete**, e as duas vermelhas foram as **duas primeiras**. Três verdes seguidas não
+provam que a instabilidade de §6.1 sumiu — ela é intermitente, e sumir não é uma
+coisa que três corridas mostrem —, mas desfazem a leitura de que a candidata não
+fecha verde de forma repetível: fecha, e fechou três vezes seguidas com os 1771
+testes, sem `--no-fail-fast` escondendo nada (ele estava ligado nas três).
+
+#### Um comando do aceite estava medindo nada
+
+Registrado porque é exatamente o defeito que esta casa mais paga caro:
+
+```
+$ cargo test -p seele-core --lib toda_despedida_do_protocolo_escolhe_um_lado -- --exact
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 297 filtered out
+EXIT=0
+```
+
+**Exit 0 com zero teste executado.** Com `--exact`, o filtro tem de ser o caminho
+inteiro; o nome curto não casa com nada, e o `cargo` chama isso de sucesso. O
+comando correto é `-- --exact enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado`,
+e é ele que está em §5.3 — onde a linha `running 1 test` prova que o guarda
+rodou. A tabela de §5.1 não dependia disso: lá o guarda foi medido dentro de
+`cargo test -p seele-core --lib`, com os 297.
+
 ## 7 · Limitações desta entrega
 
 - **Nada de Windows.** Nenhuma tentativa foi repetida: o ambiente não mudou
@@ -278,9 +491,22 @@ verde não mede uma falha intermitente.
   uma Linha, `127.0.0.1`. Nada aqui mede rede de verdade, NAT ou latência.
 - **O `exit 101` de `858903f7` está explicado, não relido.** Ver o parágrafo de
   indisponibilidade em §6.
-- **O workspace desta candidata não é verde em toda corrida.** Duas de quatro
-  terminaram em `101` por `SemResposta`, sem relação com este escopo (§6.1). Não
-  foi consertado, e não deve ser lido como se fosse.
+- **O workspace desta candidata não é verde em toda corrida.** Duas de sete
+  terminaram em `101` por `SemResposta`, sem relação com este escopo (§6.1) — as
+  duas de manhã; as três da árvore final foram verdes (§6.2). Não foi
+  consertado, e não deve ser lido como se fosse.
+- **O mecanismo da falha intermitente do teste novo continua sem nome.** Quatro
+  hipóteses foram medidas e **refutadas** (§6.2), e nenhuma das duas ocorrências
+  foi diagnosticada — o diagnóstico só passa a existir daqui para a frente, na
+  própria mensagem do teste. Dizer «era contenção» seria repetir o erro que §6.1
+  corrige.
+- **Um caminho do servidor descarta o erro da despedida, e isso não foi medido
+  como causa de nada.** `frame::write(... Disconnecting ...)` sai sob `let _ =`
+  e `despedir` desiste depois de 1 s (`seele-server/src/session.rs:458`): se o
+  motivo se perder, ninguém fica sabendo dos dois lados. Zerar aquela espera
+  **não** derrubou o teste (§6.2), então isto fica anotado como observação sobre
+  o produto — fora deste escopo, e sem evidência de ter causado as duas
+  vermelhas.
 - **Os 1769 testes da candidata anterior não foram recontados como se fossem
   desta tarefa.** Os números de §5 são de agora, deste worktree, e estão
   separados de propósito.
