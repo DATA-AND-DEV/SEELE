@@ -4689,15 +4689,29 @@ mod tests {
     ///
     /// Ele **não** prova comportamento: o que segura a expulsão é
     /// `expulsar_acaba_com_a_sessao_e_deixa_voltar`, em `seele-conformance`, e
-    /// esse teste foi provado por reversão. Medido, e vale estar escrito: com
-    /// esta função devolvendo `true` para tudo, a suíte inteira do workspace
-    /// continua verde — **nenhum teste de comportamento segura a fronteira
-    /// entre acabar e reconectar.**
+    /// esse teste foi provado por reversão.
     ///
     /// O que ele prova é contra deriva: o `match` abaixo é exaustivo sem braço
     /// `_`, então uma variante nova de [`DisconnectReason`] **não compila** até
     /// alguém dizer de que lado ela cai. Sem isto ela cairia calada no lado de
     /// reconectar, que é onde estava o defeito que este conserto fechou.
+    ///
+    /// # Retificação de 10/09
+    ///
+    /// A versão anterior deste doc dizia que, com esta função devolvendo `true`
+    /// para tudo, «a suíte inteira do workspace continua verde». **É falso, e
+    /// este próprio teste é quem desmente**: ele não confere a tabela contra si
+    /// mesma — escreve a decisão esperada variante a variante, à parte da
+    /// função, e compara. Sob aquela mutação a primeira variante da lista já
+    /// derruba o `assert_eq!` abaixo: `Incompatible`, esperado `false`, volta
+    /// `true`. Medido às 05:51 de 10/09 e remedido na candidata de 496ba8c5.
+    ///
+    /// A lacuna real era outra, e mais estreita: **nenhum teste de
+    /// comportamento** segurava o lado de reconectar da fronteira, com um
+    /// servidor de verdade escrevendo a despedida no fio. Quem a fechou foi
+    /// `uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao`, em
+    /// `seele-conformance/tests/bateria_interna.rs`. O relatório histórico de
+    /// 10/09 não foi reescrito; a retificação está no complemento de 496ba8c5.
     #[test]
     fn toda_despedida_do_protocolo_escolhe_um_lado() {
         // `DisconnectReason::` escrito por extenso e sem `_`: é o `match` que

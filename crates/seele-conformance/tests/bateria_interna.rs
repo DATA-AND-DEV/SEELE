@@ -19,8 +19,10 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
 use seele_core::{Link, MemoryPinStore};
+use seele_proto::control::{DisconnectReason, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_server::persistence::Location;
+use seele_server::server::Event;
 use seele_server::{Daemon, ServerConfig};
 
 const VOICE_ROOM: u32 = 1;
@@ -205,6 +207,146 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
     );
 
     de_novo.shutdown();
+    Ok(())
+}
+
+/// Uma despedida **recuperável** chega pelo fio, e a sessão volta em vez de acabar.
+///
+/// # A lacuna que este teste fecha
+///
+/// `Enlace::a_sessao_acabou_aqui` decide, para cada `Disconnecting` do
+/// protocolo, entre **acabar** com a sessão e **reconectar**. Metade dessa
+/// fronteira tinha prova de **comportamento** e a outra metade não: expulsar e
+/// banir são cobrados de ponta a ponta por `moderacao.rs`, mas nada exercia o
+/// lado de reconectar com um servidor de verdade escrevendo a despedida no fio.
+/// Uma despedida recuperável tratada como fim de sessão tira do ar exatamente
+/// quem a bateria interna existe para segurar.
+///
+/// A lacuna é **comportamental**, e é só isso. O relatório de 10/09 registrou a
+/// afirmação mais larga de que, com aquela função devolvendo `true` para tudo,
+/// o workspace inteiro continuava verde — e a medida de 10/09 05:51 desmente
+/// essa parte: sob essa mesma mutação, o guarda unitário
+/// `toda_despedida_do_protocolo_escolhe_um_lado`, em `seele-core`, **falha**.
+/// Ele não confere a tabela contra si mesma: escreve a decisão esperada
+/// variante a variante, à parte da função, e compara. O que faltava não era um
+/// guarda que percebesse a mutação — era um que a percebesse **por fora**, com
+/// o servidor real no meio. É o que este teste faz: o `Enlace` público — o
+/// mesmo objeto que a casca segura — tem de sobreviver à despedida que chega
+/// pelo protocolo.
+///
+/// # Como a despedida é injetada
+///
+/// Pelo **mesmo caminho de servidor que a expulsão usa**: `Event::SessionEnded`
+/// no barramento, que é como uma sessão alcança outra (ver a nota em
+/// `server::Event`). O braço que o atende escreve `Disconnecting { reason }` e
+/// se despede da conexão; só o motivo muda. É o que torna esta a medida da
+/// fronteira e não de dois caminhos diferentes: a única diferença entre este
+/// teste e `expulsar_acaba_com_a_sessao_e_deixa_voltar` é qual
+/// [`DisconnectReason`] viajou.
+///
+/// [`DisconnectReason::FellBehind`] porque é a despedida recuperável que este
+/// servidor realmente emite sozinho — quando o barramento passa à frente de uma
+/// sessão — e o doc dela diz com todas as letras que reconectar e buscar o
+/// histórico é o conserto, «que é o que a bateria interna faz sozinha».
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao() -> Result<()> {
+    let (endereco, servidor) = server(0, Location::Memory).await?;
+
+    let mut enlace = Enlace::conectar(
+        destino(endereco),
+        ed25519_dalek::SigningKey::from_bytes(&[46; 32]),
+        Arc::new(MemoryPinStore::new()),
+    )
+    .await?;
+    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
+    enlace.abrir_linha(ChannelId(LINE)).await?;
+    assert_eq!(enlace.estado(), Link::Online);
+
+    let quem = enlace.sessao().person;
+    let ssrc_de_antes = enlace.sessao().ssrc;
+
+    // ---- a despedida recuperável, escrita no fio pelo servidor
+    servidor
+        .server()
+        .events
+        .send(Event::SessionEnded {
+            person: quem,
+            reason: DisconnectReason::FellBehind,
+        })
+        .expect("o barramento do servidor está de pé");
+
+    // Um: ela **chegou pelo protocolo**. Sem esta asserção o teste passaria com
+    // uma queda de transporte qualquer, que é outra coisa e já tem teste acima.
+    let recebida = esperar(&mut enlace, Duration::from_secs(10), |aviso| {
+        matches!(
+            aviso,
+            Aviso::Mensagem(mensagem)
+                if matches!(
+                    &**mensagem,
+                    ServerMessage::Disconnecting {
+                        reason: DisconnectReason::FellBehind
+                    }
+                )
+        )
+    })
+    .await;
+    assert!(
+        recebida.is_some(),
+        "a despedida recuperável não chegou ao Enlace; não há fronteira a medir"
+    );
+
+    // Dois: a sessão **não acaba**. `Encerrado` aqui é a regressão inteira —
+    // é o que uma `a_sessao_acabou_aqui` alargada produz.
+    let desfecho = esperar(&mut enlace, Duration::from_secs(30), |aviso| {
+        matches!(aviso, Aviso::Reconectado { .. } | Aviso::Encerrado(_))
+    })
+    .await;
+    match desfecho {
+        Some(Aviso::Reconectado { .. }) => {}
+        Some(Aviso::Encerrado(motivo)) => panic!(
+            "uma despedida recuperável acabou com a sessão ({motivo:?}): quem a bateria \
+             interna existe para segurar foi posto para fora"
+        ),
+        outro => panic!("a sessão não reconectou nem acabou: {outro:?}"),
+    }
+
+    // Três: a reconexão é **efetiva**, e não um aviso sobre nada. O `ssrc` é por
+    // conexão (falha G1), então um número novo é a conexão nova.
+    assert_eq!(enlace.estado(), Link::Online);
+    assert_ne!(
+        enlace.sessao().ssrc,
+        ssrc_de_antes,
+        "o aviso de reconexão saiu sem conexão nova por baixo"
+    );
+
+    // Quatro: e ela **serve**. Falar e ouvir de volta é o que prova que a Linha
+    // foi reaberta do outro lado — sem `join_channel` o servidor aceita a
+    // mensagem e não a devolve para ninguém. Voltar sem poder falar é voltar
+    // para nada.
+    enlace
+        .dizer(
+            ChannelId(LINE),
+            "continuo aqui".to_owned(),
+            ClientMessageId(1),
+        )
+        .await?;
+    let ouviu = esperar(&mut enlace, Duration::from_secs(10), |aviso| {
+        matches!(
+            aviso,
+            Aviso::Mensagem(mensagem)
+                if matches!(
+                    &**mensagem,
+                    ServerMessage::MessageReceived { body, .. } if body == "continuo aqui"
+                )
+        )
+    })
+    .await;
+    assert!(
+        ouviu.is_some(),
+        "a sessão voltou muda: a Linha não foi reaberta depois da despedida recuperável"
+    );
+
+    servidor.shutdown();
     Ok(())
 }
 
