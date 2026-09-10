@@ -218,6 +218,18 @@ sequer ser conferido sintaticamente: não há `pwsh` nesta máquina. A pendênci
   do workspace continua verde. O estreitamento para `Kicked | Banned` segue o que
   os docs de `FellBehind`, `ScheduledMaintenance` e `ServerShuttingDown` já
   dizem, e está preso só contra deriva.
+
+  > **Retificado em 2026-09-10 — as duas frases acima estão erradas, e ficam
+  > aqui como estavam.** A segunda é falsa por medida: sob aquela mutação o
+  > guarda unitário `enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado`
+  > falha, então a suíte do workspace **não** continua verde. A primeira deixou
+  > de valer: existe teste de comportamento desde `5146c04ba617` —
+  > `uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao`, em
+  > `crates/seele-conformance/tests/bateria_interna.rs`, que sob a mutação cai
+  > dizendo qual regressão pegou. A retificação inteira, com comandos e códigos
+  > de saída, está em
+  > `docs/superpowers/sdd/2026-09-10-prova-da-reconexao-restaurada/relatorio.md`
+  > (§4, §5.2 e §9).
 - **A prova da fila da conexão velha continua sendo de unidade.** A queda
   assimétrica prende as tarefas de par e o repasse; a troca das pontas de
   `resultados_do_par` é a rede de segurança de uma corrida entre o `abort` e o

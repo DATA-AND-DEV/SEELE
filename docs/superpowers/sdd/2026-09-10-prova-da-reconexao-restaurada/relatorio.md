@@ -105,8 +105,10 @@ o título «Retificação de 10/09», com a distinção entre as duas evidência
   verdade escrevendo a despedida no fio. É essa que o teste novo fecha.
 
 `docs/superpowers/sdd/2026-09-10-consolidacao-para-a-main/relatorio.md:216-220`
-carrega o mesmo texto e **não foi tocado**: é relatório histórico, e a
-retificação é este documento.
+carrega o mesmo texto. **A frase histórica não foi reescrita** — continua lá,
+letra por letra —, mas a revisão apontou que ela ficava legível sem caminho até a
+correção. Passou a haver, logo abaixo dela, um bloco de retificação que diz o que
+a medida mostrou e aponta para cá. Ver §9.3.
 
 ## 5 · Comandos, códigos de saída e o que cada um mediu
 
@@ -148,6 +150,13 @@ $ shasum -a 256 crates/seele-core/src/enlace.rs   # depois de restaurar
 8b21356f1a3fa75062d1a48ae31902df8d83b864d2b0bc6877b81aa8bb841e67
 ```
 
+> **Procedência deste par (§9).** Ele foi medido na árvore de trabalho daquele
+> momento, ainda antes da redação final do doc do guarda, e por isso **não bate
+> com o arquivo entregue**. O que ele prova continua de pé — antes e depois são
+> iguais, logo a mutação saiu inteira —, mas quem quiser reproduzir tem de usar o
+> par do arquivo commitado, medido de novo hoje e igual em todos os quatro
+> commits desta candidata: `6d34140f8535b61d59bb377ed0c5501a7ca90123b69a89926e3010f2976d6f4a`.
+
 Com a mutação viva:
 
 | comando | exit | o que disse |
@@ -156,7 +165,9 @@ Com a mutação viva:
 | `cargo test -p seele-core --lib enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado` | **101** | `FAILED` |
 | `cargo test -p seele-conformance --test moderacao` | **0** | `6 passed` — a mutação **não** é vista aqui |
 
-O teste novo falha dizendo exatamente a regressão que ele existe para pegar:
+O teste novo falha dizendo exatamente a regressão que ele existe para pegar
+(saída **da árvore do commit `5146c04`**, onde o `panic!` morava na linha 306; na
+árvore entregue ele está em 370 — ver §9):
 
 ```
 thread 'uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao' panicked at
@@ -174,6 +185,11 @@ assertion `left == right` failed: Incompatible mudou de lado sem que este teste 
   left: true
  right: false
 ```
+
+> A linha citada **dentro de `enlace.rs`** depende do tamanho da própria mutação:
+> o `assert_eq!` mora em 4758 no arquivo entregue, e a mutação daquela corrida
+> ocupava duas linhas a mais que o original, empurrando-o para 4760. A mensagem e
+> a variante que cai são o que importa, e as duas conferem. Ver §9.
 
 Que `moderacao` continue verde sob a mutação não é detalhe: é a medida de que a
 expulsão e o banimento seguem encerrando a sessão como devem, e de que a suíte
@@ -233,18 +249,20 @@ test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 EXIT=0
 ```
 
-E a prova por reversão, refeita na mesma árvore (saída podada nas duas linhas que
-importam; os comandos e os `EXIT=` estão em §6.2):
+E a prova por reversão, refeita **na árvore entregue** — a corrida abaixo é a de
+2026-09-10T16:19Z, feita depois da revisão, com o arquivo commitado e restaurado
+ao fim (saída podada nas duas linhas que importam; os `EXIT=` são os capturados,
+sem `|`):
 
 ```
 $ cargo test -p seele-conformance --test bateria_interna -- --exact uma_despedida_…
-panicked at crates/seele-conformance/tests/bateria_interna.rs:366:43:
+panicked at crates/seele-conformance/tests/bateria_interna.rs:370:43:
 uma despedida recuperável acabou com a sessão (Moderado(FellBehind)): quem a bateria
 interna existe para segurar foi posto para fora
 EXIT=101
 
 $ cargo test -p seele-core --lib -- --exact enlace::tests::toda_despedida_…
-panicked at crates/seele-core/src/enlace.rs:4760:13:
+panicked at crates/seele-core/src/enlace.rs:4758:13:
 assertion `left == right` failed: Incompatible mudou de lado sem que este teste mudasse junto
   left: true
  right: false
@@ -499,7 +517,12 @@ rodou. A tabela de §5.1 não dependia disso: lá o guarda foi medido dentro de
   hipóteses foram medidas e **refutadas** (§6.2), e nenhuma das duas ocorrências
   foi diagnosticada — o diagnóstico só passa a existir daqui para a frente, na
   própria mensagem do teste. Dizer «era contenção» seria repetir o erro que §6.1
-  corrige.
+  corrige. O risco entra na suíte **de olhos abertos**: um teste de ~21 s com
+  intermitência conhecida, mitigado só pela mensagem que separa as duas leituras
+  possíveis do vermelho. A revisão `5d3668ea` mediu por conta própria e o teste
+  passou nas três execuções dela (suíte, teste isolado e workspace); somadas às
+  desta entrega, isso não fecha o mecanismo, e não é apresentado como se
+  fechasse.
 - **Um caminho do servidor descarta o erro da despedida, e isso não foi medido
   como causa de nada.** `frame::write(... Disconnecting ...)` sai sob `let _ =`
   e `despedir` desiste depois de 1 s (`seele-server/src/session.rs:458`): se o
@@ -521,19 +544,121 @@ rodou. A tabela de §5.1 não dependia disso: lá o guarda foi medido dentro de
 - **Commit da candidata:** `5146c04ba61742fb21db0513ed34506ee5c7b128` —
   `test(enlace): a despedida recuperável reconecta, e agora há prova por fora`.
   Pai: `81edc3219f484219ed665385e76bf1b566ae677e`, a base, intacta.
-  Diff: `+457 −4` em três arquivos — o teste novo (+142), a retificação do doc
-  de `enlace.rs` (+22 −4) e este relatório.
+  Diff: `+457 −4` em três arquivos — o teste novo (+142 −0), a retificação do doc
+  de `enlace.rs` (**+18 −4**) e este relatório (+297 −0). Os números são de
+  `git diff --numstat`; o `22` que aparece no `--stat` é o **total de linhas
+  mexidas**, não de adições (ver §9).
 - **Correção da revisão:** `d3522a2c6969734eefa96e1327cb333e94ad1c1b` —
   `test(enlace): o vermelho que faltava dizer, e a medida que desfaz a explicação errada`.
-  Diff: `+301 −11` em dois arquivos — o teste (+72 −0: a barreira e o vermelho
-  que se explica) e este relatório (§5.1, §5.3, §6.1, §6.2 e §7). **Nenhuma
+  Diff: `+301 −11` em dois arquivos — o teste (**+68 −4**: a barreira e o vermelho
+  que se explica) e este relatório (+233 −7: §5.1, §5.3, §6.1, §6.2 e §7). O `72`
+  publicado antes era o mesmo engano de leitura do `--stat`. **Nenhuma
   linha de produção**: `git show --stat d3522a2` mostra os dois arquivos, e
   nenhum deles está em `crates/*/src`.
-- **Ponta a consumir:** este quarto commit, que só acrescenta o SHA acima a esta
-  seção. `git log --oneline -4` no worktree confirma os quatro, e o quarto é a
+- **Retificação dos números (§9):** o quinto commit desta candidata, só neste
+  relatório e no ponteiro deixado no relatório histórico. **Nenhuma linha de
+  código** — nem de produção, nem de teste.
+- **Ponta a consumir:** o sexto commit, que só acrescenta a esta seção o SHA do
+  quinto. `git log --oneline -6` no worktree confirma a sequência, e o sexto é a
   ponta de `orbita/496ba8c5`.
 - **Estado Git:** limpo — nada pendente na árvore de trabalho. A base
   `81edc32` continua sendo ancestral direta, sem merge refeito e sem reescrita.
 
 Nada foi feito fora deste worktree: sem `push`, sem `main`, sem tag, sem
 release, sem chave, sem tocar em `858903f7` ou em qualquer outra origem.
+
+## 9 · Retificação pedida pela revisão `5d3668ea`
+
+A revisão aprovou a candidata duas vezes — uma por leitura, outra remedindo tudo
+por conta própria — e deixou quatro travas. Três eram números **errados neste
+relatório**; a quarta é risco já declarado. Nenhuma tocava o comportamento do
+produto, e a correção abaixo também não toca: ela mexe em texto e num ponteiro.
+
+**Todos os números publicados aqui foram medidos de novo hoje, na árvore
+entregue.** O padrão do erro era sempre o mesmo — número colhido numa árvore de
+trabalho intermediária, ou lido do `--stat` como se fosse adição — e é ele que
+esta seção fecha.
+
+| o que a revisão apontou | o que estava escrito | o que a medida diz | onde |
+|---|---|---|---|
+| linha do vermelho da prova por reversão | `bateria_interna.rs:366:43` | **`370:43`** — corrida de hoje, `EXIT=101` | §5.3 |
+| linha do vermelho do guarda unitário | `enlace.rs:4760:13` | **`4758:13`** com mutação do mesmo tamanho do original; `4760` sai quando a mutação ocupa duas linhas a mais | §5.2, §5.3 |
+| tamanho da retificação de `enlace.rs` | `+22 −4` | **`+18 −4`** (`git diff --numstat 81edc32 5146c04`); `22` é o total de linhas mexidas do `--stat` | §8 |
+| tamanho do teste no commit da correção | `+72 −0` | **`+68 −4`** — mesmo engano, mesmo `--stat` | §8 |
+| par de SHA-256 de `enlace.rs` na prova por reversão | `8b21356f…` | não bate com o arquivo entregue: o par é de uma árvore intermediária. O do arquivo commitado, igual nos quatro commits, é **`6d34140f…`** | §5.2 |
+
+### 9.1 · A prova por reversão, refeita na árvore entregue
+
+Não bastava trocar o número: publicar linha que não foi medida é o defeito que
+se está corrigindo. A mutação foi reaplicada **no arquivo commitado**, medida, e
+retirada — `a_sessao_acabou_aqui` devolvendo `true` para todo motivo, três linhas
+como as três originais:
+
+```
+$ shasum -a 256 crates/seele-core/src/enlace.rs        # antes de mutar
+6d34140f8535b61d59bb377ed0c5501a7ca90123b69a89926e3010f2976d6f4a
+
+$ cargo test -p seele-conformance --test bateria_interna \
+    -- --exact uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao
+panicked at crates/seele-conformance/tests/bateria_interna.rs:370:43:
+uma despedida recuperável acabou com a sessão (Moderado(FellBehind)): quem a bateria
+interna existe para segurar foi posto para fora
+EXIT_A=101
+
+$ cargo test -p seele-core --lib \
+    -- --exact enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado
+panicked at crates/seele-core/src/enlace.rs:4758:13:
+assertion `left == right` failed: Incompatible mudou de lado sem que este teste mudasse junto
+EXIT_B=101
+
+$ cargo test -p seele-conformance --test moderacao
+test result: ok. 6 passed; 0 failed
+EXIT_C=0
+
+$ git checkout -- crates/seele-core/src/enlace.rs
+$ shasum -a 256 crates/seele-core/src/enlace.rs        # depois de restaurar
+6d34140f8535b61d59bb377ed0c5501a7ca90123b69a89926e3010f2976d6f4a
+$ git status --porcelain                               # vazio
+```
+
+O desenho continua o mesmo, e agora com par de hash que qualquer um reproduz no
+arquivo entregue: o teste novo e o guarda unitário caem, `moderacao` não vê nada.
+
+### 9.2 · O aceite, remedido depois da restauração
+
+Para que a retificação não fosse entregue sobre uma árvore só presumida limpa
+(2026-09-10T16:24Z, carga 1 min ≈ 4,1):
+
+| comando | exit | resultado |
+|---|---|---|
+| `cargo fmt --all -- --check` | **0** | sem diferença |
+| `cargo test -p seele-conformance --test bateria_interna` | **0** | `5 passed; 0 failed` — inclui o teste novo, 21,09 s |
+| `cargo test -p seele-conformance --test moderacao` | **0** | `6 passed; 0 failed` |
+| `cargo test -p seele-core --lib -- --exact enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado` | **0** | `running 1 test`, `1 passed`, 296 filtrados |
+
+A validação independente que acompanhou a revisão também fechou verde, sem um
+único alvo vermelho — o `exit 101` que abriu esta tarefa não voltou, e §6 já
+explica de onde ele vinha.
+
+### 9.3 · A divergência documental, fechada dos dois lados
+
+A revisão observou, com razão, que a frase falsa continuava legível **sem
+caminho até a correção**: quem abrisse
+`docs/superpowers/sdd/2026-09-10-consolidacao-para-a-main/relatorio.md` leria «a
+suíte inteira do workspace continua verde» sob a mutação e não teria como saber
+que isso foi medido como falso.
+
+O relatório histórico **não foi reescrito**: a frase original continua ali, letra
+por letra. O que se acrescentou foi um ponteiro imediatamente abaixo dela,
+dizendo o que a medida mostrou e para onde ir. Corrigir o texto antigo apagaria o
+erro; o ponteiro o deixa legível junto com sua retificação, que é o que a §4
+deste relatório existe para registrar.
+
+### 9.4 · O que **não** mudou
+
+- Nenhuma linha de `crates/*/src` e nenhuma linha de teste. O diff desta
+  retificação é este relatório e o ponteiro no histórico.
+- A base `81edc32` continua ancestral direta; a origem `858903f7` continua
+  intocada; nada de `push`, `main`, tag, release ou chave.
+- A trava do mecanismo intermitente **continua aberta** e está em §7. Ela não
+  foi fechada aqui, e nada nesta seção deve ser lido como se tivesse fechado.
