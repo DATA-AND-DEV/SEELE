@@ -523,9 +523,17 @@ rodou. A tabela de §5.1 não dependia disso: lá o guarda foi medido dentro de
   Pai: `81edc3219f484219ed665385e76bf1b566ae677e`, a base, intacta.
   Diff: `+457 −4` em três arquivos — o teste novo (+142), a retificação do doc
   de `enlace.rs` (+22 −4) e este relatório.
-- **Ponta a consumir:** este segundo commit, que só acrescenta o SHA acima a
-  esta seção. `git log --oneline -3` no worktree confirma os dois.
-- **Estado Git:** limpo — nada pendente na árvore de trabalho.
+- **Correção da revisão:** `d3522a2c6969734eefa96e1327cb333e94ad1c1b` —
+  `test(enlace): o vermelho que faltava dizer, e a medida que desfaz a explicação errada`.
+  Diff: `+301 −11` em dois arquivos — o teste (+72 −0: a barreira e o vermelho
+  que se explica) e este relatório (§5.1, §5.3, §6.1, §6.2 e §7). **Nenhuma
+  linha de produção**: `git show --stat d3522a2` mostra os dois arquivos, e
+  nenhum deles está em `crates/*/src`.
+- **Ponta a consumir:** este quarto commit, que só acrescenta o SHA acima a esta
+  seção. `git log --oneline -4` no worktree confirma os quatro, e o quarto é a
+  ponta de `orbita/496ba8c5`.
+- **Estado Git:** limpo — nada pendente na árvore de trabalho. A base
+  `81edc32` continua sendo ancestral direta, sem merge refeito e sem reescrita.
 
 Nada foi feito fora deste worktree: sem `push`, sem `main`, sem tag, sem
 release, sem chave, sem tocar em `858903f7` ou em qualquer outra origem.
