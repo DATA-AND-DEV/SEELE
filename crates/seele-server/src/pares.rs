@@ -91,20 +91,6 @@ pub struct QuemDeclarou {
     pub emprestando: bool,
 }
 
-/// Uma nomeação do servidor: quem empresta, e para quem.
-///
-/// **Os dois lados, e não só quem empresta.** Guardar quem empresta basta para
-/// resolver um `ParFalhou`, mas não para desfazer a nomeação quando quem
-/// assiste vai embora — e uma nomeação que não é desfeita é um par que o
-/// servidor nunca mais escolhe. Ver [`Pares::desapontou`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Nomeacao {
-    /// Quem foi apontado para servir.
-    empresta: PersonId,
-    /// A quem ele foi mandado servir.
-    assiste: PersonId,
-}
-
 /// Quem declarou identidade para o caminho entre pares neste daemon, agora.
 ///
 /// **Global ao daemon, e não por sala de voz.** Uma pessoa declara identidade
@@ -115,15 +101,24 @@ struct Nomeacao {
 #[derive(Debug, Default)]
 pub struct Pares {
     quem: HashMap<PersonId, QuemDeclarou>,
-    /// Quem o servidor apontou por último para servir cada transmissão, e a
-    /// quem.
+    /// Quem o servidor apontou para servir cada transmissão **a cada
+    /// espectador**: `(transmissão, quem assiste) → quem empresta`.
     ///
     /// **A própria nomeação do servidor, guardada para poder ser desfeita.**
     /// Achado do fix round 2: sem isto, um `ParFalhou { screen }` não tem
     /// como saber de quem reclamar — ele só carrega a transmissão, e nunca
     /// deveria carregar a identidade de quem falhou, porque quem relata é a
     /// vítima, não quem investiga. Ver [`Self::apontou`].
-    nomeacoes: HashMap<ScreenId, Nomeacao>,
+    ///
+    /// **Quem assiste faz parte da chave, e não é enfeite.** Enquanto a chave
+    /// era só a transmissão, uma tela com dois espectadores pela malha cabia
+    /// numa entrada só: o segundo `WatchScreen` sobrescrevia a nomeação do
+    /// primeiro, o par que servia o primeiro sumia de [`Self::ja_servindo`] —
+    /// e voltava a ser escolhível enquanto ainda repassava — e um
+    /// `UnwatchScreen` de qualquer um dos dois soltava a vaga dos dois. Uma
+    /// transmissão tem um dono e vários espectadores; a nomeação é por
+    /// espectador, porque é por espectador que o repasse existe.
+    nomeacoes: HashMap<(ScreenId, PersonId), PersonId>,
 }
 
 impl Pares {
@@ -212,8 +207,7 @@ impl Pares {
     /// declaração e qualquer nomeação que apontava para ela.
     fn esquecer(&mut self, pessoa: PersonId) {
         self.quem.remove(&pessoa);
-        self.nomeacoes
-            .retain(|_, nomeacao| nomeacao.empresta != pessoa);
+        self.nomeacoes.retain(|_, empresta| *empresta != pessoa);
     }
 
     /// Esta pessoa deixou de assistir a tudo — saiu da sala, ou a sessão dela
@@ -227,8 +221,7 @@ impl Pares {
     /// Os dois lados discordariam em silêncio, e a malha degradaria para a
     /// estrela sem um rastro.
     pub fn quem_assiste_saiu(&mut self, pessoa: PersonId) {
-        self.nomeacoes
-            .retain(|_, nomeacao| nomeacao.assiste != pessoa);
+        self.nomeacoes.retain(|(_, assiste), _| *assiste != pessoa);
     }
 
     /// A declaração desta pessoa, exista ela para emprestar ou só para ser
@@ -295,33 +288,38 @@ impl Pares {
     /// discordar desta no primeiro dia ruim.
     #[must_use]
     pub fn ja_servindo(&self) -> HashSet<PersonId> {
-        self.nomeacoes
-            .values()
-            .map(|nomeacao| nomeacao.empresta)
-            .collect()
+        self.nomeacoes.values().copied().collect()
     }
 
     /// O servidor apontou `empresta` para servir `screen` a `assiste`.
     ///
     /// Chamado por quem despacha `SirvaTelaPara`/`AssistaTelaPor`, depois de
-    /// [`Self::escolher`] decidir. Substitui a nomeação anterior desta
-    /// transmissão, se havia uma: só a mais recente importa para resolver um
-    /// `ParFalhou`.
+    /// [`Self::escolher`] decidir. Substitui a nomeação anterior **deste
+    /// espectador para esta transmissão**, se havia uma: só a mais recente
+    /// importa para resolver um `ParFalhou` dele. A nomeação de outro
+    /// espectador da mesma transmissão fica onde estava — ver o doc de
+    /// [`Self::nomeacoes`].
     pub fn apontou(&mut self, screen: ScreenId, empresta: PersonId, assiste: PersonId) {
-        self.nomeacoes
-            .insert(screen, Nomeacao { empresta, assiste });
+        self.nomeacoes.insert((screen, assiste), empresta);
     }
 
-    /// Esta transmissão deixou de ter par apontado.
+    /// **Este espectador** deixou de ter par apontado para esta transmissão.
     ///
-    /// **Chamada em todo caminho que encerra o repasse**, e não só no
-    /// `ParFalhou`: quem assiste faz `UnwatchScreen`, quem compartilha para,
-    /// a sala é apagada. Enquanto só o relato de falha a chamava, um repasse
-    /// que terminasse **bem** deixava a nomeação de pé, e
-    /// [`Self::ja_servindo`] contava aquele par como ocupado pelo resto da
-    /// sessão do daemon — com o cliente dele já tendo devolvido a vaga. A
-    /// malha degradava para a estrela, um par por transmissão encerrada, sem
-    /// um único rastro dizendo por quê.
+    /// **Chamada em todo caminho que encerra o repasse dele**, e não só no
+    /// `ParFalhou`: quem assiste faz `UnwatchScreen`, ou relata falha.
+    /// Enquanto só o relato de falha a chamava, um repasse que terminasse
+    /// **bem** deixava a nomeação de pé, e [`Self::ja_servindo`] contava
+    /// aquele par como ocupado pelo resto da sessão do daemon — com o cliente
+    /// dele já tendo devolvido a vaga. A malha degradava para a estrela, um
+    /// par por transmissão encerrada, sem um único rastro dizendo por quê.
+    ///
+    /// **`assiste` não é opcional, e é o conserto de um segundo defeito.**
+    /// Quando a chave era só a transmissão, esta função soltava a vaga de
+    /// *todos* os espectadores dela: um deles fechando a janela devolvia à
+    /// fila um par que continuava repassando para o outro, e aquele par podia
+    /// então ser apontado uma segunda vez. Para o fim da transmissão inteira —
+    /// quem compartilha para, a sala é apagada — a função é
+    /// [`Self::a_transmissao_acabou`].
     ///
     /// **Diferente de [`Self::desacreditar`], e a diferença é quem paga.** Ali
     /// a declaração inteira de uma pessoa é apagada, porque ela foi provada
@@ -329,21 +327,34 @@ impl Pares {
     /// elegível. É o que um `ParFalhou` de rotina — o par caiu, o par parou de
     /// mandar — merece: a transmissão volta ao servidor, e ninguém é punido
     /// por a rede de alguém ter oscilado.
-    pub fn desapontou(&mut self, screen: ScreenId) {
-        self.nomeacoes.remove(&screen);
+    pub fn desapontou(&mut self, screen: ScreenId, assiste: PersonId) {
+        self.nomeacoes.remove(&(screen, assiste));
     }
 
-    /// Quem foi apontado por último para servir esta transmissão, se alguém.
+    /// A transmissão inteira acabou: **nenhum** espectador dela tem mais par
+    /// apontado.
+    ///
+    /// É o caminho de quem compartilha parando (`StopScreenShare`), da sala
+    /// sendo apagada e da sessão de quem compartilha acabando — ali não sobra
+    /// repasse para espectador nenhum, e cada par apontado tem de voltar à
+    /// fila. [`Self::desapontou`] é a outra metade, para um espectador só.
+    pub fn a_transmissao_acabou(&mut self, screen: ScreenId) {
+        self.nomeacoes.retain(|(tela, _), _| *tela != screen);
+    }
+
+    /// Quem foi apontado para servir esta transmissão **a esta pessoa**, se
+    /// alguém.
     ///
     /// É contra isto que um `ClientMessage::ParFalhou { screen }` se resolve:
     /// a mensagem só carrega a transmissão, nunca a identidade de quem
     /// falhou, porque quem relata é quem estava esperando a imagem — a
-    /// vítima, não quem investiga.
+    /// vítima, não quem investiga. `assiste` é justamente quem relatou, que o
+    /// servidor conhece pela sessão de onde a mensagem veio — e é o que torna
+    /// a resposta exata quando a mesma tela é repassada a mais de uma pessoa
+    /// por pares diferentes.
     #[must_use]
-    pub fn quem_foi_apontado(&self, screen: ScreenId) -> Option<PersonId> {
-        self.nomeacoes
-            .get(&screen)
-            .map(|nomeacao| nomeacao.empresta)
+    pub fn quem_foi_apontado(&self, screen: ScreenId, assiste: PersonId) -> Option<PersonId> {
+        self.nomeacoes.get(&(screen, assiste)).copied()
     }
 }
 
@@ -649,7 +660,10 @@ mod testes {
         let mut pares = Pares::nova();
         let tela = ScreenId(9);
         pares.apontou(tela, PersonId(5), PersonId(2));
-        assert_eq!(pares.quem_foi_apontado(tela), Some(PersonId(5)));
+        assert_eq!(
+            pares.quem_foi_apontado(tela, PersonId(2)),
+            Some(PersonId(5))
+        );
     }
 
     #[test]
@@ -667,7 +681,7 @@ mod testes {
         pares.apontou(tela, PersonId(5), PersonId(2));
         pares.saiu(PersonId(5), 1);
         assert_eq!(
-            pares.quem_foi_apontado(tela),
+            pares.quem_foi_apontado(tela, PersonId(2)),
             None,
             "quem já foi embora continuou sendo a resposta de uma nomeação"
         );
@@ -721,7 +735,7 @@ mod testes {
         pares.apontou(ScreenId(9), PersonId(4), PersonId(2));
         pares.quem_assiste_saiu(PersonId(7));
         assert_eq!(
-            pares.quem_foi_apontado(ScreenId(9)),
+            pares.quem_foi_apontado(ScreenId(9), PersonId(2)),
             Some(PersonId(4)),
             "a saída de quem não assistia esta tela derrubou a nomeação dela"
         );
@@ -738,6 +752,106 @@ mod testes {
         assert!(
             pares.ja_servindo().is_empty(),
             "a sessão de quem assiste acabou e o par apontado continuou ocupado"
+        );
+    }
+
+    #[test]
+    fn dois_espectadores_da_mesma_tela_ocupam_dois_pares() {
+        // **Achado da revisão de 10/09.** A nomeação era guardada por
+        // `ScreenId` sozinho, e uma tela tem um dono e vários espectadores: o
+        // segundo `WatchScreen` sobrescrevia a nomeação do primeiro. O par que
+        // servia o primeiro sumia de `ja_servindo` enquanto ainda repassava, e
+        // `escolher` voltava a oferecê-lo — dois repasses na mesma subida, que
+        // é exatamente o que `ja_servindo` existe para impedir.
+        let mut pares = Pares::nova();
+        for (pessoa, letra, n) in [(PersonId(4), "d", 4), (PersonId(5), "e", 5)] {
+            pares.declarou(
+                pessoa,
+                1,
+                true,
+                letra.repeat(64),
+                vec![endereco(n)],
+                endereco(n),
+            );
+        }
+        let tela = ScreenId(9);
+        pares.apontou(tela, PersonId(4), PersonId(2));
+        pares.apontou(tela, PersonId(5), PersonId(3));
+
+        let ocupados = pares.ja_servindo();
+        assert!(
+            ocupados.contains(&PersonId(4)) && ocupados.contains(&PersonId(5)),
+            "os dois pares repassam a mesma tela e nem todos foram contados como \
+             ocupados: {ocupados:?}"
+        );
+        assert_eq!(
+            pares.quem_foi_apontado(tela, PersonId(2)),
+            Some(PersonId(4)),
+            "a nomeação do primeiro espectador foi sobrescrita pela do segundo"
+        );
+        assert_eq!(
+            pares.quem_foi_apontado(tela, PersonId(3)),
+            Some(PersonId(5)),
+            "a nomeação do segundo espectador não foi guardada"
+        );
+    }
+
+    #[test]
+    fn quem_fecha_a_janela_nao_solta_o_par_de_quem_continua_assistindo() {
+        // A outra metade do mesmo achado: com a chave sendo só a tela,
+        // `desapontou` soltava a vaga dos **dois** espectadores. O par do
+        // segundo voltava à fila enquanto ainda repassava, e podia ser
+        // apontado uma segunda vez.
+        let mut pares = Pares::nova();
+        let tela = ScreenId(9);
+        pares.apontou(tela, PersonId(4), PersonId(2));
+        pares.apontou(tela, PersonId(5), PersonId(3));
+
+        pares.desapontou(tela, PersonId(2));
+
+        assert_eq!(
+            pares.quem_foi_apontado(tela, PersonId(2)),
+            None,
+            "quem fechou a janela continuou com par apontado"
+        );
+        assert_eq!(
+            pares.quem_foi_apontado(tela, PersonId(3)),
+            Some(PersonId(5)),
+            "a saída de um espectador derrubou a nomeação do outro"
+        );
+        assert_eq!(
+            pares.ja_servindo(),
+            HashSet::from([PersonId(5)]),
+            "a vaga de quem continua repassando não ficou ocupada"
+        );
+    }
+
+    #[test]
+    fn a_transmissao_acabando_solta_o_par_de_todo_espectador() {
+        // Quem compartilha parar, a sala ser apagada e a sessão de quem
+        // compartilha acabar não encerram o repasse de uma pessoa: encerram o
+        // de todas. É a metade que `desapontou` deixou de fazer ao ganhar
+        // `assiste`, e sem ela cada transmissão encerrada queimaria os pares
+        // dos espectadores que não avisaram nada.
+        let mut pares = Pares::nova();
+        let tela = ScreenId(9);
+        let outra = ScreenId(10);
+        pares.apontou(tela, PersonId(4), PersonId(2));
+        pares.apontou(tela, PersonId(5), PersonId(3));
+        pares.apontou(outra, PersonId(6), PersonId(2));
+
+        pares.a_transmissao_acabou(tela);
+
+        assert_eq!(
+            pares.ja_servindo(),
+            HashSet::from([PersonId(6)]),
+            "a transmissão acabou e algum par dela continuou contado como ocupado \
+             — ou o par de outra transmissão foi solto junto"
+        );
+        assert_eq!(
+            pares.quem_foi_apontado(outra, PersonId(2)),
+            Some(PersonId(6)),
+            "o fim de uma transmissão derrubou a nomeação de outra"
         );
     }
 

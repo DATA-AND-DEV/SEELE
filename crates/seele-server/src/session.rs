@@ -2064,7 +2064,10 @@ async fn run_session(
                                 // uma em curso, e um aviso só deixaria as outras
                                 // desenhadas para sempre na tela de quem assiste.
                                 for screen in server.telas.lock().await.encerrar_voice_room(id) {
-                                    server.pares.lock().await.desapontou(screen);
+                                    // A transmissão inteira acabou: solta o par
+                                    // de **todos** os espectadores dela, e não
+                                    // o de um só.
+                                    server.pares.lock().await.a_transmissao_acabou(screen);
                                     let _ = server.events.send(Event::ScreenShareStopped {
                                         voice_room: id,
                                         screen,
@@ -2327,7 +2330,16 @@ async fn run_session(
                                 // contava aquele par como ocupado pelo resto
                                 // da sessão do daemon — com o cliente dele já
                                 // tendo devolvido a vaga.
-                                server.pares.lock().await.desapontou(screen);
+                                //
+                                // **Só a nomeação de quem pediu para sair.** A
+                                // mesma tela pode estar sendo repassada a outra
+                                // pessoa por outro par, e aquele par continua
+                                // ocupado.
+                                server
+                                    .pares
+                                    .lock()
+                                    .await
+                                    .desapontou(screen, session.person);
                             }
                         }
                     }
@@ -2338,8 +2350,8 @@ async fn run_session(
                         };
                         if let (Some(voice_room), Some(screen)) = (current_voice_room, parada) {
                             // A transmissão acabou: não há repasse dela para
-                            // ninguém, e o par que a servia volta à fila.
-                            server.pares.lock().await.desapontou(screen);
+                            // ninguém, e todo par que a servia volta à fila.
+                            server.pares.lock().await.a_transmissao_acabou(screen);
                             let _ = server.events.send(Event::ScreenShareStopped { voice_room, screen });
                         }
                     }
@@ -2437,7 +2449,12 @@ async fn run_session(
                         // é testável sem sessão nenhuma, e este braço só
                         // executa o que ela decidiu.
                         let mut pares = server.pares.lock().await;
-                        let apontado = pares.quem_foi_apontado(screen);
+                        // **Resolvido contra a nomeação de quem relata.** A
+                        // mesma tela pode ter nomeação para vários
+                        // espectadores, por pares diferentes; sem
+                        // `session.person` na pergunta, um `ImpressaoNaoBate`
+                        // desacreditaria o par de outra pessoa.
+                        let apontado = pares.quem_foi_apontado(screen, session.person);
                         match crate::pares::quem_desacreditar(motivo, apontado) {
                             Some(quem) => pares.desacreditar(quem),
                             // Sem nomeação guardada — `apontar_um_par` (Task
@@ -2463,7 +2480,7 @@ async fn run_session(
                         // rotina, em que ninguém é desacreditado e a nomeação
                         // ficaria de pé apontando um par que já não serve —
                         // e um `ParFalhou` seguinte resolveria contra ela.
-                        pares.desapontou(screen);
+                        pares.desapontou(screen, session.person);
                         drop(pares);
                         // **E o servidor assume.** É a metade que faz a
                         // promessa da spec de 05/09 valer — *«ninguém perde
@@ -3359,7 +3376,9 @@ async fn soltar_telas_e_pares_de(server: &Server, person: PersonId) {
     {
         let mut pares = server.pares.lock().await;
         for (_, screen) in &encerradas {
-            pares.desapontou(*screen);
+            // As transmissões **desta** pessoa acabaram: nenhum espectador
+            // delas segue sendo servido, seja quem for.
+            pares.a_transmissao_acabou(*screen);
         }
         pares.quem_assiste_saiu(person);
     }

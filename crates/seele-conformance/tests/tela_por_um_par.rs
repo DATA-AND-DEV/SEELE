@@ -954,7 +954,7 @@ async fn quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem() -> Result
         .pares
         .lock()
         .await
-        .quem_foi_apontado(screen);
+        .quem_foi_apontado(screen, assiste.sessao().person);
     assert_eq!(
         apontado, None,
         "o par morreu e o servidor continua com a nomeação dele de pé"
@@ -1062,7 +1062,7 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
             .pares
             .lock()
             .await
-            .quem_foi_apontado(screen);
+            .quem_foi_apontado(screen, assiste_quem);
         if apontado == Some(empresta_quem) {
             break;
         }
@@ -1359,7 +1359,7 @@ async fn um_unwatch_devolve_a_vaga_do_par_e_ele_volta_a_ser_escolhido() -> Resul
     {
         let pares = servidor.server().pares.lock().await;
         assert_eq!(
-            pares.quem_foi_apontado(screen),
+            pares.quem_foi_apontado(screen, assiste.sessao().person),
             Some(empresta_quem),
             "o servidor não apontou quem empresta para servir esta transmissão"
         );
@@ -1401,7 +1401,7 @@ async fn um_unwatch_devolve_a_vaga_do_par_e_ele_volta_a_ser_escolhido() -> Resul
                 .pares
                 .lock()
                 .await
-                .quem_foi_apontado(screen);
+                .quem_foi_apontado(screen, assiste.sessao().person);
             if apontado == Some(empresta_quem) {
                 break;
             }
@@ -1725,7 +1725,7 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
             .pares
             .lock()
             .await
-            .quem_foi_apontado(screen);
+            .quem_foi_apontado(screen, assiste.pessoa);
         if apontado == Some(empresta_quem) {
             break;
         }
@@ -1747,7 +1747,7 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
                 .pares
                 .lock()
                 .await
-                .quem_foi_apontado(screen);
+                .quem_foi_apontado(screen, assiste.pessoa);
             if apontado.is_none() || Instant::now() >= fim {
                 assert_eq!(
                     apontado, None,
@@ -2126,7 +2126,7 @@ async fn destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_se
             .pares
             .lock()
             .await
-            .quem_foi_apontado(screen);
+            .quem_foi_apontado(screen, de_novo.sessao().person);
         if apontado == Some(quem_empresta) {
             break;
         }
@@ -2461,7 +2461,12 @@ async fn a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo
 
     let fim = Instant::now() + PACIENCIA;
     loop {
-        let apontado = servidor.server().pares.lock().await.quem_foi_apontado(nova);
+        let apontado = servidor
+            .server()
+            .pares
+            .lock()
+            .await
+            .quem_foi_apontado(nova, quem_assiste);
         if apontado == Some(quem_empresta) {
             break;
         }
