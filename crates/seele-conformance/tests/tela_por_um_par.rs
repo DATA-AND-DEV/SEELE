@@ -1035,7 +1035,6 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
     let empresta_quem = empresta.sessao().person;
     let assiste_quem = assiste.pessoa;
 
-    ate("as duas declarações chegarem ao servidor", || true).await?;
     // Quem empresta tem de estar declarado antes do pedido: `Pares::escolher`
     // não tem candidato nenhum antes disso, e o teste mediria o caminho de
     // sempre pensando estar medindo a malha.
@@ -1697,10 +1696,6 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
     // Quem empresta tem de estar declarado antes do pedido, senão
     // `Pares::escolher` não tem candidato e o teste mediria o caminho de
     // sempre pensando estar medindo a malha.
-    ate("a declaração de quem empresta chegar ao servidor", || {
-        true
-    })
-    .await?;
     {
         let fim = Instant::now() + PACIENCIA;
         loop {
@@ -1744,7 +1739,6 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
 
     // A janela fecha. Daqui para frente esta pessoa não quer mais a tela.
     frame::write(&mut assiste.envio, &ClientMessage::UnwatchScreen { screen }).await?;
-    ate("o servidor soltar a nomeação do par", || true).await?;
     {
         let fim = Instant::now() + PACIENCIA;
         loop {
