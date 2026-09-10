@@ -555,9 +555,11 @@ rodou. A tabela de §5.1 não dependia disso: lá o guarda foi medido dentro de
   publicado antes era o mesmo engano de leitura do `--stat`. **Nenhuma
   linha de produção**: `git show --stat d3522a2` mostra os dois arquivos, e
   nenhum deles está em `crates/*/src`.
-- **Retificação dos números (§9):** o quinto commit desta candidata, só neste
-  relatório e no ponteiro deixado no relatório histórico. **Nenhuma linha de
-  código** — nem de produção, nem de teste.
+- **Retificação dos números (§9):** `a022f06641a54e7984853d1194b60c5fe4c37e08` —
+  `docs(retificação): os números medidos de novo, e o ponteiro que faltava no histórico`.
+  Diff: `+139 −14` neste relatório e `+12 −0` no histórico. **Nenhuma linha de
+  código** — nem de produção, nem de teste: `git show --numstat a022f06` não lista
+  nada em `crates/`.
 - **Ponta a consumir:** o sexto commit, que só acrescenta a esta seção o SHA do
   quinto. `git log --oneline -6` no worktree confirma a sequência, e o sexto é a
   ponta de `orbita/496ba8c5`.
@@ -636,9 +638,19 @@ Para que a retificação não fosse entregue sobre uma árvore só presumida lim
 | `cargo test -p seele-conformance --test moderacao` | **0** | `6 passed; 0 failed` |
 | `cargo test -p seele-core --lib -- --exact enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado` | **0** | `running 1 test`, `1 passed`, 296 filtrados |
 
-A validação independente que acompanhou a revisão também fechou verde, sem um
-único alvo vermelho — o `exit 101` que abriu esta tarefa não voltou, e §6 já
-explica de onde ele vinha.
+E o produto inteiro mais uma vez, porque nesta sessão houve código mutado e
+restaurado, e restaurar sem remedir seria supor:
+
+```
+$ cargo test --workspace --no-fail-fast        # 16:27Z → 16:30Z
+EXIT_WS=0
+1771 testes passaram, em 70 alvos; nenhuma linha `FAILED`, nenhum `panicked at`
+```
+
+Corrida **I**, na mesma numeração de §6.2: a quarta verde seguida na árvore
+final. A validação independente que acompanhou a revisão também fechou verde,
+sem um único alvo vermelho — o `exit 101` que abriu esta tarefa não voltou, e §6
+já explica de onde ele vinha.
 
 ### 9.3 · A divergência documental, fechada dos dois lados
 
