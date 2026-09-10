@@ -3,7 +3,8 @@
 **Data:** 2026-09-10
 **Worktree:** `/Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/87002ad5-5bea-4479-87c9-583d842db506`
 **Branch:** `orbita/87002ad5` · **Base:** `d5628513cfefd385b9cc5b22b5cedd427f2dbf2e`
-**Ponta desta entrega:** `4f942e7`
+**Ponta de quando este texto foi escrito:** `4f942e7`
+**Ponta da entrega fechada:** `0ddead3` — ver o §9, escrito depois
 
 A `main` não foi movida, nada foi publicado, nenhuma tag foi criada, nenhum
 `push` foi feito, nenhuma chave foi tocada, nenhuma permissão foi alterada,
@@ -295,3 +296,75 @@ commits  4  (1 de importação, 3 de conserto)
 Nada a fazer antes da conferência: a suíte está verde, o `fmt` e o `clippy`
 estão limpos, e os dois `check` do `xtask` passam. A geração da versão e o merge
 pertencem a quem pediu.
+
+> **O §8 acima descreve a ponta de quando ele foi escrito, e fica como estava.**
+> A ponta desta entrega é a do §9.
+
+## 9 · O fecho, sobre a candidata de `496ba8c5`
+
+Escrito depois de o aplicativo reiniciar no meio da execução. Nada foi refeito: o
+worktree foi inspecionado, estava limpo em `81edc32`, e a continuação já havia
+entregado uma candidata **descendente**. Ela entrou aqui por **avanço rápido** —
+`81edc32` é ancestral de `0ddead3`, conferido —, sem merge e sem commit de fusão.
+
+```
+branch   orbita/87002ad5
+ponta    0ddead3
+base     d562851
+árvore   limpa
+commits  11 desde d562851  (1 de importação, 3 de conserto, 2 de prova nova,
+                            5 de relato)
+```
+
+### O que a continuação acrescentou, e por que ela estava certa
+
+Ela fechou a limitação que o §6 desta entrega tinha registrado, e **corrigiu uma
+afirmação falsa que eu havia deixado nele**. As duas coisas foram remedidas aqui,
+por conta própria, e não aceitas de palavra:
+
+| medida | resultado |
+|---|---|
+| `a_sessao_acabou_aqui` devolvendo `true` para tudo → `seele-core --lib` | **FALHA** — «`Incompatible` mudou de lado sem que este teste mudasse junto» |
+| a mesma mutação → `seele-conformance --test bateria_interna` | **FALHA** — «uma despedida recuperável acabou com a sessão (`Moderado(FellBehind)`)» |
+
+A minha frase — «sob essa mutação a suíte inteira continua verde» — era uma
+medida tirada **antes** de eu acrescentar o guarda de deriva, carregada adiante
+sem ser refeita. O guarda escreve a decisão esperada variante a variante, à parte
+da função, então ele pega a mutação na primeira delas. Foi a forma exata de erro
+que o `CLAUDE.md` desta casa manda desconfiar, na direção contrária:
+não «existir não é funcionar», mas «medi antes e supus que continuava valendo».
+
+A lacuna verdadeira era mais estreita, e agora está fechada: faltava um guarda
+que pegasse a mutação **por fora**, com servidor de verdade escrevendo a
+despedida no fio. É o que
+`uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao` faz, pelo
+mesmo caminho de servidor que a expulsão usa — só o motivo muda —, e ele é o
+lado de reconectar da fronteira que nenhum teste de comportamento segurava.
+
+Os textos anteriores não foram reescritos: a retificação está anexada ao §6, e o
+relatório inteiro dela está em
+`docs/superpowers/sdd/2026-09-10-prova-da-reconexao-restaurada/relatorio.md`.
+
+### As verificações, refeitas nesta ponta
+
+| comando | resultado |
+|---|---|
+| `cargo test --workspace --all-targets --no-fail-fast` | **1770 passaram, 0 falharam**, 74 alvos |
+| `cargo fmt --all -- --check` | limpo |
+| `cargo clippy --workspace --all-targets` | limpo, zero avisos |
+| `cargo xtask check-deps` / `check-api` | passam |
+| `conferir-inventario.py` | sai 0 |
+
+A conta fecha: 1769 na ponta anterior mais o teste de comportamento novo = 1770,
+e zero falhas.
+
+### O estado, conferido de novo e não herdado
+
+As quatro frentes, a base `d562851`, o release publicado `12a6401a6` e a ponta
+anterior `81edc32` continuam **todos contidos**. Nenhum ramo do repositório tem
+commit exclusivo. `main` continua em `15a0406`, não há tag `0.11`, a pilha de
+`stash` está vazia, o worktree de origem `94b614e6` está como estava e o
+checkout principal segue limpo em `a695fe5`.
+
+O inventário do §7 continua valendo inteiro — nada saiu de «fora da futura
+versão» para dentro, e nada de dentro saiu.
