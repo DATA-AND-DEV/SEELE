@@ -41,7 +41,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
-use seele_proto::control::{MotivoDeFalhaDePar, ServerMessage};
+use seele_proto::control::{DisconnectReason, MotivoDeFalhaDePar, ServerMessage};
 use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId,
 };
@@ -235,6 +235,38 @@ pub enum Motivo {
     Recusado(String),
     /// Alguém pediu para sair.
     Pedido,
+    /// Um operador acabou com esta sessão, e o motivo veio no fio.
+    ///
+    /// Separado de [`Self::Recusado`] porque a casca precisa dizer **qual** foi:
+    /// «você foi expulso» e «você foi banido» são frases diferentes, e
+    /// `EndReason::CredentialRejected` — o que `Recusado` vira do outro lado do
+    /// FFI — mandaria a pessoa conferir a senha de uma conta que está certa.
+    Moderado(DisconnectReason),
+}
+
+/// As despedidas que **acabam** com a sessão, em vez de começarem a bateria.
+///
+/// Quase toda `Disconnecting` é uma queda com nome: manutenção, desligamento,
+/// keepalive vencido, ficar para trás no barramento. Para todas elas reconectar
+/// é o conserto, e é o que a bateria interna existe para fazer — o próprio
+/// [`DisconnectReason::FellBehind`] tem isso escrito no doc dele.
+///
+/// Estas duas são o contrário: alguém do outro lado decidiu que esta pessoa não
+/// fica. Reconectar as desfaz — e não em teoria. Medido em
+/// `expulsar_acaba_com_a_sessao_e_deixa_voltar`, com sonda no servidor: a
+/// conexão expulsa fecha, a bateria sobe outra em seguida, e ela **redeclara a
+/// sala de voz guardada**. A pessoa expulsa reaparece sentada onde estava,
+/// segundos depois, sem que ninguém tenha apertado nada; e como o assento agora
+/// pertence à conexão nova, a saída da conexão expulsa não esvazia nada e
+/// ninguém na sala é informado de que ela saiu. O verbo inteiro desfeito por um
+/// recurso feito para túnel de trem.
+///
+/// `Banned` está aqui pelo mesmo motivo, e não porque a volta funcione: a
+/// portaria a recusa. O que ela produz hoje é uma reconexão inútil a cada
+/// batida da bateria por cinco minutos, e uma casca que diz «reconectando» a
+/// quem foi banido.
+fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
+    matches!(motivo, DisconnectReason::Kicked | DisconnectReason::Banned)
 }
 
 /// O que a casca manda fazer.
@@ -2345,12 +2377,29 @@ impl Motor {
                                     .store(micros.max(1), std::sync::atomic::Ordering::Relaxed);
                             }
                         }
+                        // A despedida que não é queda — ver `a_sessao_acabou_aqui`.
+                        // Lida aqui e agida **depois** do aviso, logo abaixo:
+                        // quem desenha a tela precisa da mensagem para saber
+                        // dizer «você foi expulso», e um `return` antes dela
+                        // trocaria a frase certa por um fim mudo.
+                        let despedida = match &mensagem {
+                            ServerMessage::Disconnecting { reason }
+                                if a_sessao_acabou_aqui(*reason) =>
+                            {
+                                Some(*reason)
+                            }
+                            _ => None,
+                        };
                         // Antes de o aviso sair, porque a tela é a única coisa
                         // desta casa que **age** sobre uma mensagem em vez de
                         // repassá-la: é aqui que a transmissão ganha nome e a
                         // bomba nasce.
                         self.a_tela_ouviu(&mensagem);
                         let _ = self.avisos.send(Aviso::Mensagem(Box::new(mensagem)));
+                        if let Some(reason) = despedida {
+                            tracing::info!(?reason, "o servidor acabou com esta sessão");
+                            return self.encerrar(Motivo::Moderado(reason));
+                        }
                     }
                     // O fluxo caiu. Não é o fim da sessão: é o começo da
                     // bateria.
@@ -4594,6 +4643,72 @@ fn vale_insistir(erro: &ConnectError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Toda despedida do protocolo tem de escolher um lado, e escolher **aqui**.
+    ///
+    /// # O que este teste prova, e o que ele não prova
+    ///
+    /// Ele **não** prova comportamento: o que segura a expulsão é
+    /// `expulsar_acaba_com_a_sessao_e_deixa_voltar`, em `seele-conformance`, e
+    /// esse teste foi provado por reversão. Medido, e vale estar escrito: com
+    /// esta função devolvendo `true` para tudo, a suíte inteira do workspace
+    /// continua verde — **nenhum teste de comportamento segura a fronteira
+    /// entre acabar e reconectar.**
+    ///
+    /// O que ele prova é contra deriva: o `match` abaixo é exaustivo sem braço
+    /// `_`, então uma variante nova de [`DisconnectReason`] **não compila** até
+    /// alguém dizer de que lado ela cai. Sem isto ela cairia calada no lado de
+    /// reconectar, que é onde estava o defeito que este conserto fechou.
+    #[test]
+    fn toda_despedida_do_protocolo_escolhe_um_lado() {
+        // `DisconnectReason::` escrito por extenso e sem `_`: é o `match` que
+        // fica vermelho, e não uma lista que alguém esqueceria de atualizar.
+        for motivo in [
+            DisconnectReason::Incompatible,
+            DisconnectReason::CredentialRejected,
+            DisconnectReason::HandshakeTimeout,
+            DisconnectReason::Kicked,
+            DisconnectReason::Banned,
+            DisconnectReason::ServerFull,
+            DisconnectReason::ScheduledMaintenance,
+            DisconnectReason::ServerShuttingDown,
+            DisconnectReason::Timeout,
+            DisconnectReason::ProtocolViolation,
+            DisconnectReason::RateLimited,
+            DisconnectReason::FellBehind,
+            DisconnectReason::AdmissionPending,
+            DisconnectReason::AdmissionDenied,
+            DisconnectReason::NicknameTaken,
+        ] {
+            let acaba = match motivo {
+                // Alguém decidiu que esta pessoa não fica. Reconectar desfaz.
+                DisconnectReason::Kicked | DisconnectReason::Banned => true,
+                // A bateria é o conserto: o servidor volta, ou o cliente
+                // reconecta e busca o histórico que faltou. O doc de
+                // `FellBehind` diz isso com todas as letras.
+                DisconnectReason::ScheduledMaintenance
+                | DisconnectReason::ServerShuttingDown
+                | DisconnectReason::Timeout
+                | DisconnectReason::FellBehind
+                | DisconnectReason::RateLimited
+                | DisconnectReason::ProtocolViolation => false,
+                // Nunca chegam ao motor: a portaria as devolve como
+                // `ConnectError::Refused`, e não há sessão para acabar.
+                DisconnectReason::Incompatible
+                | DisconnectReason::CredentialRejected
+                | DisconnectReason::HandshakeTimeout
+                | DisconnectReason::ServerFull
+                | DisconnectReason::AdmissionPending
+                | DisconnectReason::AdmissionDenied
+                | DisconnectReason::NicknameTaken => false,
+            };
+            assert_eq!(
+                a_sessao_acabou_aqui(motivo),
+                acaba,
+                "{motivo:?} mudou de lado sem que este teste mudasse junto"
+            );
+        }
+    }
 
     #[test]
     fn so_quem_empresta_publica_os_enderecos_da_propria_maquina() {

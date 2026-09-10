@@ -3293,6 +3293,13 @@ async fn drive(
                             seele_core::enlace::Motivo::Descarregou => EndReason::LinkLost,
                             seele_core::enlace::Motivo::Recusado(_) => EndReason::CredentialRejected,
                             seele_core::enlace::Motivo::Pedido => EndReason::LinkLost,
+                            // O motivo enumerado que o servidor mandou, e não
+                            // uma tradução dele: quem foi expulso tem de ler
+                            // «expulso». Cair aqui em `CredentialRejected`
+                            // mandaria a pessoa conferir uma senha que está
+                            // certa — a mesma armadilha que o doc de
+                            // `DisconnectReason::NicknameTaken` registra.
+                            seele_core::enlace::Motivo::Moderado(porque) => porque.into(),
                         };
                         shared.notify(&Event::Ended { reason });
                         break;
