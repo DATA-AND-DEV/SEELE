@@ -292,6 +292,14 @@ verde não mede uma falha intermitente.
 
 - **Worktree:** `/Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/496ba8c5-8040-415c-9032-b1420580f1ab`
 - **Branch:** `orbita/496ba8c5`
-- **Commit:** registrado na seção final desta entrega (SHA informado na resposta
-  da tarefa; `git log -1` no worktree acima confirma).
+- **Commit da candidata:** `5146c04ba61742fb21db0513ed34506ee5c7b128` —
+  `test(enlace): a despedida recuperável reconecta, e agora há prova por fora`.
+  Pai: `81edc3219f484219ed665385e76bf1b566ae677e`, a base, intacta.
+  Diff: `+457 −4` em três arquivos — o teste novo (+142), a retificação do doc
+  de `enlace.rs` (+22 −4) e este relatório.
+- **Ponta a consumir:** este segundo commit, que só acrescenta o SHA acima a
+  esta seção. `git log --oneline -3` no worktree confirma os dois.
 - **Estado Git:** limpo — nada pendente na árvore de trabalho.
+
+Nada foi feito fora deste worktree: sem `push`, sem `main`, sem tag, sem
+release, sem chave, sem tocar em `858903f7` ou em qualquer outra origem.
