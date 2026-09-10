@@ -496,3 +496,155 @@ O estado do §9 continua valendo inteiro: `main` intacta em `15a0406`, nenhuma
 tag `0.11`, pilha de `stash` vazia, árvore limpa, nada publicado, nada com
 `push`, nenhuma permissão tocada e nenhum arquivo fora deste worktree
 modificado. Nenhum impedimento por permissão apareceu nesta rodada.
+
+## 11 · A segunda revisão de fora: um achado virou conserto, três não tinham o que consertar
+
+A revisão aprovou a candidata («nenhuma trava para o merge») e levantou quatro
+achados, os quatro declarados não bloqueantes. Nenhum era falso. **Um pedia
+código, e virou o commit `5133fb0`; os outros três não têm conserto a fazer, e
+esta seção diz por quê em vez de fingir que fez.**
+
+| achado | o que foi feito |
+|---|---|
+| `Pares::apontou` guarda uma nomeação por `ScreenId` | **consertado** — `5133fb0`, com prova por reversão |
+| a malha não tem exposição no aplicativo | nada a consertar: é instrução desta tarefa, e já está no §7 |
+| a instabilidade de `acceptance_m2`/`m3` segue sem mecanismo | nada a consertar sem reprodução; medida de novo aqui |
+| a mensagem de `7079d6b` carrega uma frase falsa | não se conserta sem reescrever histórico; o ponteiro já está no §6 |
+
+### 11.1 · A nomeação era por transmissão, e tinha de ser por espectador
+
+O registro de quem o servidor apontou para servir cada tela era um
+`HashMap<ScreenId, …>`. Uma transmissão tem um dono e **vários** espectadores, e
+pela malha cada espectador ganha um par próprio — então dois espectadores da
+mesma tela cabiam numa entrada só, e o segundo `WatchScreen` apagava o registro
+do primeiro. O revisor chamou de observação de desenho e não a reproduziu como
+defeito. **Reproduzi**, e por isso ela virou conserto:
+
+```
+$ cargo test -p seele-server --lib   # dois espectadores, mesma tela
+o par do primeiro espectador sumiu de ja_servindo: {PersonId(5)}
+```
+
+Três consequências, do mesmo ponto:
+
+1. o par que servia o primeiro espectador saía de `ja_servindo` **enquanto ainda
+   repassava**, e `escolher` voltava a oferecê-lo — dois repasses na mesma
+   subida emprestada, que é exatamente o que `ja_servindo` existe para impedir;
+2. `desapontou(screen)` soltava a vaga dos dois: quem fechasse a janela
+   devolvia à fila um par que continuava servindo outra pessoa;
+3. um `ParFalhou` com `ImpressaoNaoBate` se resolveria contra a nomeação de
+   outro espectador — e desacreditaria o par errado, tirando da malha quem não
+   fez nada.
+
+O conserto é a chave: `(transmissão, quem assiste) → quem empresta`.
+`desapontou` passa a receber quem assiste — é o fim do repasse de **uma**
+pessoa — e o fim da transmissão inteira ganha função própria,
+`a_transmissao_acabou`, usada onde quem compartilha para, onde a sala é apagada
+e onde a sessão de quem compartilha acaba. `quem_foi_apontado` passa a receber
+quem relatou, que a sessão já conhece.
+
+**As provas por reversão, com os dois vermelhos medidos:**
+
+| o que foi revertido | resultado |
+|---|---|
+| a chave só por `ScreenId` — o código de antes | **FAILED** — `ja_servindo` = `{PersonId(5)}`, sem o par do primeiro |
+| a chave colapsada em `(screen, PersonId(0))` | **FAILED** — 4 dos 21 testes de `pares`, entre eles os dois guardas novos |
+
+A segunda reversão é mais larga do que o defeito original (ela também apaga o
+registro de **quem** assiste, que o código antigo guardava), e por isso derruba
+dois testes que já existiam além dos novos. Está dito assim de propósito: o
+vermelho que corresponde ao achado é o **primeiro**.
+
+Restaurado, `pares::` fecha em 21 passando e o arquivo volta ao SHA-256
+`08cbbedf…` que tinha antes da mutação — conferido, não suposto.
+
+Três testes novos, todos de unidade e todos por medida: dois espectadores da
+mesma tela ocupam dois pares; quem fecha a janela não solta o par de quem
+continua assistindo; a transmissão acabando solta o par de todo espectador (e
+não o de outra transmissão).
+
+**O que este conserto não é.** Ele não é a escolha boa de par — isso continua
+sendo do subprojeto B, e o módulo continua dizendo que a escolha é
+deliberadamente burra. E ele **não tem caminho de usuário hoje**: sem exposição
+no aplicativo, ninguém chega a um segundo espectador pela malha. É conserto de
+correção, não de sintoma relatado.
+
+### 11.2 · Os três que não tinham conserto
+
+**A malha sem interface no aplicativo.** Conferido de novo aqui, por busca
+direta: `emprestar` não aparece em `apps/seele-app/src`, `apps/seele-app/ui`
+nem `crates/seele-ffi/src`. É o §7 desde a primeira entrega, e construir essa
+interface é justamente o que esta tarefa manda **não** fazer («não implementar
+agora launcher, interfaces de consentimento ou catálogo»). Consertar aqui seria
+desobedecer, não entregar.
+
+**A instabilidade de `acceptance_m2`/`m3`.** Não reproduzida nesta rodada:
+
+| corrida | resultado |
+|---|---|
+| `cargo test --workspace --all-targets --no-fail-fast` | 1773 passando, 0 falhando, 74 alvos |
+| `cargo test` (o comando exato da validação) | **exit 0**, 1774 passando, 70 alvos |
+| `acceptance_m2` + `acceptance_m3`, isolados | **5 voltas, 5 verdes** |
+| `tela_por_um_par` | 13 passando, 3 voltas |
+
+O revisor também não a reproduziu. Quatro hipóteses já foram medidas e
+**refutadas** em `2026-09-10-prova-da-reconexao-restaurada/relatorio.md` §6.2, e
+esta casa tem regra escrita contra repetir campanha sem mudança que a
+justifique. Sem reprodução, apertar prazo ou serializar a suíte seria conserto
+às cegas — e apertar prazo é, além disso, enfraquecer teste. **Continua
+pendência aberta, de olhos abertos**, e entra na `main` declarada.
+
+**A frase falsa na mensagem de `7079d6b`.** Continua verdade que ela é falsa, e
+continua verdade que mensagem de commit não se reescreve sem reescrever o
+histórico desta candidata. O ponteiro nos dois sentidos está no §6 e não foi
+tocado.
+
+### 11.3 · A «falha de validação», pela segunda vez: não existe na saída anexada
+
+A saída de `cargo test` que veio com o pedido **não contém um único
+`test result: FAILED`**, não contém `panicked`, e termina nos *doc-tests* — que
+rodam por último. Como o comando é `cargo test` sem `--no-fail-fast`, um alvo
+vermelho teria parado a corrida antes deles. O que a saída tem é buraco no
+começo (falta o bloco de `seele-core`, entre outros), que é feitio de texto
+cortado por tamanho.
+
+Rodei o mesmo comando nesta árvore e registro o número que importa, que a saída
+anexada não trazia: **`EXIT=0`**. Duas vezes — antes e depois do conserto.
+
+Se houve falha, ela não estava na saída que me chegou e não a reproduzi. **Não
+enfraqueci, apaguei nem afrouxei prazo de teste nenhum**: o diff desta rodada
+acrescenta três testes e não remove nenhum.
+
+### 11.4 · Verificações desta rodada
+
+| comando | resultado |
+|---|---|
+| `cargo test --workspace --all-targets --no-fail-fast` | **1773 passando, 0 falhando**, 74 alvos |
+| `cargo test` | **exit 0** — 1774 passando, 70 alvos |
+| `cargo test -p seele-server --lib pares::` | 21 passando (eram 18) |
+| `cargo test -p seele-conformance --test tela_por_um_par` | 13 passando × 3 |
+| `cargo test -p seele-conformance --test acceptance_m2 --test acceptance_m3` | verdes × 5 |
+| `cargo fmt --all -- --check` | limpo |
+| `cargo clippy --workspace --all-targets` | limpo, zero avisos |
+| `cargo xtask check-deps` / `check-api` | passam — 11 crates, 1 versão de MOD |
+| `conferir-inventario.py` | sai 0 — «50 relatórios e 1 patch, tudo bate» |
+
+A conta fecha: 1770 na ponta anterior + 3 testes novos = **1773** com
+`--all-targets`; 1771 + 3 = **1774** no comando da validação, que conta o
+doc-test e não conta os alvos de bancada.
+
+**Windows: nada mudou e nada foi tentado de novo.** O ambiente é o mesmo (sem
+SDK do Windows, sem `pwsh`), e este conserto não toca empacotamento. Nada aqui
+afirma build ou teste nesse sistema.
+
+### 11.5 · A ponta
+
+A regra do §10 continua valendo: a ponta é o **último commit de relato**, e ele
+só toca este arquivo. O último commit de **código** desta rodada é `5133fb0` —
+«a nomeação é por espectador, e não por transmissão» —, e entre os dois não há
+nada além deste texto.
+
+`main` intacta em `15a0406`, nenhuma tag `0.11`, pilha de `stash` vazia, árvore
+limpa, nada publicado, nada com `push`, nenhuma chave tocada, nenhuma permissão
+alterada e nenhum arquivo fora deste worktree modificado. Nenhum impedimento
+por permissão apareceu nesta rodada.
