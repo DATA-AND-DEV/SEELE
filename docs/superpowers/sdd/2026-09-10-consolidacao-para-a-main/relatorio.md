@@ -5,6 +5,8 @@
 **Branch:** `orbita/87002ad5` · **Base:** `d5628513cfefd385b9cc5b22b5cedd427f2dbf2e`
 **Ponta de quando este texto foi escrito:** `4f942e7`
 **Ponta da entrega fechada:** `0ddead3` — ver o §9, escrito depois
+**Consertos da revisão:** `172738c` (código de teste) e o commit deste texto,
+que é a ponta atual — ver o §10
 
 A `main` não foi movida, nada foi publicado, nenhuma tag foi criada, nenhum
 `push` foi feito, nenhuma chave foi tocada, nenhuma permissão foi alterada,
@@ -231,6 +233,27 @@ sequer ser conferido sintaticamente: não há `pwsh` nesta máquina. A pendênci
   > de saída, está em
   > `docs/superpowers/sdd/2026-09-10-prova-da-reconexao-restaurada/relatorio.md`
   > (§4, §5.2 e §9).
+  >
+  > **O SHA que carrega a frase errada é `7079d6b`.** A tabela «As provas por
+  > reversão» da mensagem daquele commit diz, na linha B, «**passou** — e a
+  > suíte inteira do workspace também». A segunda metade é falsa pela mesma
+  > medida: sob aquela mutação caem `bateria_interna.rs`
+  > («uma despedida recuperável acabou com a sessão (`Moderado(FellBehind)`)») e
+  > o guarda unitário `toda_despedida_do_protocolo_escolhe_um_lado` que o próprio
+  > `7079d6b` acrescentou. Mensagem de commit não se reescreve sem reescrever o
+  > histórico, e o histórico desta candidata não vai ser reescrito — então fica
+  > o ponteiro nos dois sentidos: quem chegar pelo `git log` a `7079d6b` tem a
+  > correção aqui, e quem chegar aqui sabe qual commit ler com ressalva.
+- **`acceptance_m2` e `acceptance_m3` falham de vez em quando por prazo de
+  conexão, e o mecanismo não tem nome.** Registrado com as medidas em
+  `docs/superpowers/sdd/2026-09-10-prova-da-reconexao-restaurada/relatorio.md`
+  (§6.1 e §6.2): duas de sete corridas do workspace terminaram em `exit 101` com
+  `SemResposta` — `quinn::ConnectionError::TimedOut`, prazo estourado, e não
+  asserção violada. Quatro hipóteses foram medidas e refutadas lá; contenção de
+  CPU vinda de fora continua sendo a mais simples e não pôde ser confirmada nem
+  descartada. **Não é falha de produto conhecida, e também não está provada como
+  ambiente** — entra na `main` de olhos abertos, e nenhum teste foi enfraquecido
+  para escondê-la. O §10 mede de novo, nesta ponta.
 - **A prova da fila da conexão velha continua sendo de unidade.** A queda
   assimétrica prende as tarefas de par e o repasse; a troca das pontas de
   `resultados_do_par` é a rede de segurança de uma corrida entre o `abort` e o
@@ -368,3 +391,108 @@ checkout principal segue limpo em `a695fe5`.
 
 O inventário do §7 continua valendo inteiro — nada saiu de «fora da futura
 versão» para dentro, e nada de dentro saiu.
+
+## 10 · A revisão de fora, e o que ela mudou aqui
+
+A revisão independente aprovou a candidata e levantou cinco achados, todos
+declarados não bloqueantes. Nenhum deles era falso, e quatro pediam mudança.
+
+| achado | o que foi feito |
+|---|---|
+| espera vazia em `tela_por_um_par.rs` | **as três** foram removidas |
+| a mensagem de `7079d6b` carrega a frase errada | ponteiro escrito no §6 |
+| instabilidade de `acceptance_m2`/`m3` sem mecanismo | trazida para o §6 deste relatório e medida de novo aqui |
+| a ponta não é nomeada por documento nenhum | nomeada abaixo, com a regra que impede nomear a si mesma |
+| nenhuma verificação executa código de Windows | nada a corrigir: já estava dito assim |
+
+### As esperas vazias, e por que eram três
+
+O achado apontou `ate("as duas declarações chegarem ao servidor", || true)`: a
+condição é o literal `true`, então a linha volta na primeira conferência e não
+espera nada. Varrido o arquivo inteiro atrás da mesma forma, havia **mais duas**
+— `"a declaração de quem empresta chegar ao servidor"` e `"o servidor soltar a
+nomeação do par"`, no teste do `ParFalhou` depois do `UnwatchScreen`.
+
+Removidas as três. **Nenhuma asserção foi enfraquecida, e nada passou a esperar
+menos:** em cada um dos três lugares a conferência de verdade — o laço que
+segura a paciência e afirma com a mesma frase da mensagem — já vinha na linha
+seguinte, e a chamada vazia custava zero (com `|| true` ela retorna antes do
+primeiro `sleep`). O que sai é exatamente a linha que promete uma sincronização
+que não existe: «existir não é funcionar», na letra do `CLAUDE.md` desta casa.
+
+`cargo test -p seele-conformance --test tela_por_um_par`, três voltas depois da
+remoção: **13 passaram** em cada uma, 18,45 s / 18,46 s / 18,65 s.
+
+### A falha de validação relatada: não reproduzida, e a medida está aqui
+
+O pedido veio com uma saída de `cargo test` anexada e a instrução de corrigir «a
+falha de validação». **Não achei falha nenhuma para corrigir, e o que posso
+afirmar é o que medi:**
+
+| corrida | resultado |
+|---|---|
+| `cargo test --no-fail-fast` × 4 (nesta ponta) | **verde nas quatro**, nenhuma linha `FAILED`, nenhum `panicked` |
+| `cargo test -p seele-conformance --test tela_por_um_par` × 3 | 13 passaram em cada |
+
+Sobre a saída anexada, uma leitura e não um palpite: ela não contém um único
+`test result: FAILED`, e termina nos *doc-tests*, que rodam por último. Como
+aquele comando é `cargo test` sem `--no-fail-fast`, um alvo vermelho teria
+parado a corrida ali — os *doc-tests* no fim dizem que nenhum alvo daquela
+corrida caiu. O que a saída tem é **buraco**: faltam blocos inteiros no meio
+(`tela_por_um_par`, `moderacao`, `bateria_interna`, `acceptance_m2`/`m3`/`m5`),
+o que é feitio de saída cortada por tamanho, não de suíte interrompida.
+
+Duas coisas, então, ficam ditas com todas as letras. A primeira: **se houve
+falha, ela não estava na saída que me chegou, e não a reproduzi em quatro
+corridas do workspace inteiro.** A segunda: **não enfraqueci, apaguei nem
+afrouxei prazo de teste nenhum para produzir verde** — o único código de teste
+que este conserto toca são as três linhas que não esperavam nada.
+
+A suspeita mais provável, se a falha existiu, é a instabilidade que o §6 agora
+registra: `acceptance_m2`/`m3` caindo por `SemResposta` (prazo de conexão
+estourado, não asserção violada), documentada com quatro hipóteses medidas e
+refutadas em
+`docs/superpowers/sdd/2026-09-10-prova-da-reconexao-restaurada/relatorio.md`
+§6.1 e §6.2. Ela **não foi consertada aqui, de propósito**: apertar prazo ou
+serializar suíte é mudança de infraestrutura fora deste escopo, e sem
+reprodução seria conserto às cegas — a terceira coisa que o `CLAUDE.md` desta
+casa manda não fazer. Se quem revisar quiser que ela feche antes do merge, é um
+pedido novo e legítimo, e ele muda o escopo.
+
+### A ponta, nomeada
+
+O achado está certo: os relatórios paravam em `0ddead3`, e a ponta era o commit
+que escreve o §9 — que nenhum documento nomeava. **Um commit não pode conter o
+próprio SHA**, então a regra que fecha isso não é escrever mais um número, é
+escrever a regra:
+
+> A ponta desta candidata é sempre o **último commit de relato**, e ele só toca
+> este arquivo. O último commit de **código** está nomeado no parágrafo acima
+> dele. `git log --oneline -1` diz o resto, e não há nada entre os dois além de
+> texto.
+
+Nesta rodada de consertos são dois commits. O de **código de teste** é
+`172738c` — «três esperas que não esperavam nada saem do teste», e é o único
+que toca `crates/`. O de **relato** é esta seção, ele só toca este arquivo, e
+é a ponta.
+
+### As verificações, refeitas depois do conserto
+
+| comando | resultado |
+|---|---|
+| `cargo test --workspace --all-targets --no-fail-fast` | **1770 passaram, 0 falharam**, 74 alvos |
+| `cargo test --no-fail-fast` (o comando da validação) | verde, 4 corridas |
+| `cargo test -p seele-conformance --test tela_por_um_par` | 13 passaram, 3 voltas |
+| `cargo fmt --all -- --check` | limpo |
+| `cargo clippy --workspace --all-targets` | limpo, zero avisos |
+| `cargo xtask check-deps` | passa — 11 crates |
+| `cargo xtask check-api` | passa — 1 versão de MOD |
+| `conferir-inventario.py` | sai 0 — «50 relatórios e 1 patch, tudo bate» |
+
+A conta continua fechando em **1770**: tirar três chamadas que não esperavam
+nada não tira teste nenhum, e nenhum alvo mudou de contagem.
+
+O estado do §9 continua valendo inteiro: `main` intacta em `15a0406`, nenhuma
+tag `0.11`, pilha de `stash` vazia, árvore limpa, nada publicado, nada com
+`push`, nenhuma permissão tocada e nenhum arquivo fora deste worktree
+modificado. Nenhum impedimento por permissão apareceu nesta rodada.
