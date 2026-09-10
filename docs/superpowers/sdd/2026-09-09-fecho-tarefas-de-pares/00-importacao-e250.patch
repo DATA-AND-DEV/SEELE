@@ -1,0 +1,869 @@
+diff --git a/crates/seele-conformance/tests/tela_por_um_par.rs b/crates/seele-conformance/tests/tela_por_um_par.rs
+index 885e7ed..3cb6bd4 100644
+--- a/crates/seele-conformance/tests/tela_por_um_par.rs
++++ b/crates/seele-conformance/tests/tela_por_um_par.rs
+@@ -725,6 +725,53 @@ async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
+ /// transmissão. O segundo é o do servidor: o braço de `ParFalhou` tem de
+ /// **religar o cano** de quem relatou, e não só registrar o relato — quem
+ /// relata está sem cano nenhum desde que o par foi apontado.
++///
++/// # Qual mecanismo este teste prende, medido e não suposto
++///
++/// **Não é o braço `Err`.** A dispensa de fechamento mandava provar este teste
++/// contra o `send(ParFalhou { CaiuNoMeio })` do braço `Err` de
++/// `ler_a_tela_alheia`, e medindo se vê que aquele braço **nunca corre neste
++/// cenário**: com ele removido e todo o resto de pé, o teste — já na forma
++/// forte — passa. A máquina de quem empresta sumindo chega a quem assiste como
++/// um fluxo que **termina limpo**, e não como erro de leitura: a conexão QUIC
++/// fechada leva o fluxo a `Ok(None)`.
++///
++/// Quem carrega a recuperação, então, é o `send(ParFalhou { ParouDeMandar })`
++/// do braço `Ok(None)` — o conserto do fim limpo. Removido ele, este teste
++/// falha, e falha esperando o primeiro quadro acima do piso do corte:
++/// «a paciência acabou esperando: um quadro chegar pelo servidor depois de o
++/// par morrer, acima do piso do corte», **três vezes em três**.
++///
++/// É por isso que o comentário do braço `Ok(None)` em `seele-core/src/enlace.rs`
++/// lista «quem empresta saindo da sala» entre os fins limpos: a morte da
++/// máquina cai na mesma porta.
++///
++/// # A forma anterior afirmava e não prendia
++///
++/// O revisor removeu o `send(ParFalhou { CaiuNoMeio })` do braço `Err` de
++/// `escoar_tela_alheia` e o teste **passou três vezes em três**, em 0,24 s
++/// cada. Dois defeitos se somavam ali, e um escondia o outro: o braço removido
++/// não era o que corre, **e** o teste não media recuperação nenhuma. O rastro
++/// dizia por quê: o
++/// «primeiro quadro pelo par» era o **seq 0**, o mais velho da fila FIFO,
++/// entregue pelo servidor antes de `assistir()` ser chamado, quando as duas
++/// cópias ainda subiam. O alvo virava `seq > 1`, e o quadro «que provava» já
++/// estava enfileirado desde antes do corte. Era um teste verde que não media
++/// nada — a forma de falha que este repositório paga mais caro.
++///
++/// O conserto é o que os irmãos deste arquivo já fazem, nas três pernas:
++///
++/// 1. **Antes do corte**, provar que quem assiste está mesmo atrás do par —
++///    [`QUADROS_PARA_PROVAR`] quadros acima do piso com o servidor subindo uma
++///    cópia só. Sem isso, o teste mediria a recuperação de um caminho que nunca
++///    existiu.
++/// 2. **No corte**, drenar a fila com [`maior_seq_ja_enfileirado`] e guardar o
++///    maior `seq` já enfileirado. Só um `seq` estritamente maior que esse pode
++///    ter atravessado depois de o par morrer.
++/// 3. **Depois do corte**, sustentação: [`QUADROS_PARA_PROVAR`] quadros
++///    seguidos, cada um acima do anterior. Um quadro isolado ainda caberia num
++///    punhado em voo; um segundo inteiro de imagem só cabe vindo de um cano que
++///    o servidor reabriu.
+ #[tokio::test(flavor = "multi_thread")]
+ async fn quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem() -> Result<()> {
+     let Cenario {
+@@ -736,23 +783,39 @@ async fn quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem() -> Result
+         copias,
+     } = cenario().await?;
+ 
++    let piso_inicial = maior_seq_ja_enfileirado(&mut assiste, screen).await;
+     assiste.assistir(screen, true).await?;
+     ate("o servidor parar de subir a cópia de quem assiste", || {
+         copias.agora() == 1
+     })
+     .await?;
+-    let (pelo_par, _) = esperar(
+-        &mut assiste,
+-        "o primeiro quadro pelo par",
+-        |aviso| match aviso {
+-            Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => {
+-                seq_de(bytes).map(|seq| (seq, ()))
+-            }
+-            _ => None,
+-        },
+-    )
+-    .await?;
+-    println!("o quadro {pelo_par} chegou pelo par; agora quem empresta morre");
++
++    // Perna 1: o par está servindo **de verdade**. Sem esta prova, o corte
++    // aconteceria sobre um caminho que talvez nunca tivesse saído do servidor,
++    // e a recuperação seguinte não diria nada sobre a malha.
++    let mut piso = piso_inicial;
++    for indice in 0..QUADROS_PARA_PROVAR {
++        let (seq, _) = esperar(
++            &mut assiste,
++            "um quadro chegar pelo par, acima do piso, com o cano do servidor desligado",
++            |aviso| match aviso {
++                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
++                    .filter(|seq| piso.is_none_or(|p| *seq > p))
++                    .map(|seq| (seq, ())),
++                _ => None,
++            },
++        )
++        .await?;
++        assert_eq!(
++            copias.agora(),
++            1,
++            "o servidor voltou a subir a cópia de quem assiste antes do corte (quadro {indice} \
++             de {QUADROS_PARA_PROVAR}, seq {seq}): o par não estava servindo, e matá-lo não \
++             provaria recuperação nenhuma"
++        );
++        piso = Some(seq);
++    }
++    println!("o par serviu até o quadro {piso:?}; agora quem empresta morre");
+ 
+     // **À força, e não com `sair()`.** O que este teste cobre é a máquina de
+     // alguém sumindo: `Enlace::drop` aborta a tarefa que fala com o servidor e
+@@ -768,25 +831,42 @@ async fn quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem() -> Result
+     // dele está no `Ok(None)` de `escoar_tela_alheia`.
+     drop(empresta);
+ 
+-    // O quadro que prova a promessa é um **posterior** ao último que o par
+-    // entregou. Um que já estivesse na fila de avisos não provaria nada.
+-    let alvo = pelo_par + 1;
+-    let (seq, bytes) = esperar(
+-        &mut assiste,
+-        "um quadro chegar pelo servidor depois de o par morrer",
+-        |aviso| match aviso {
+-            Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
+-                .filter(|seq| *seq > alvo)
+-                .map(|seq| (seq, bytes.clone())),
+-            _ => None,
+-        },
+-    )
+-    .await?;
+-    println!("o quadro {seq} chegou pelo servidor depois de o par ter morrido");
+-    assert_eq!(
+-        bytes,
+-        corpo(seq),
+-        "o servidor assumiu e o que ele entregou não é o que saiu de quem compartilha"
++    // Perna 2: **drenar antes de afirmar.** O canal de avisos é FIFO e o par
++    // entregou até o instante em que morreu; o piso é o maior `seq` que já
++    // estava enfileirado depois do corte, e nenhum quadro daqui para trás pode
++    // provar coisa alguma sobre a recuperação. Drenar **depois** do corte, e
++    // não antes, é o que fecha a janela entre a drenagem e a morte do par.
++    let piso_do_corte = maior_seq_ja_enfileirado(&mut assiste, screen).await;
++    println!("a fila esvaziou no quadro {piso_do_corte:?}; daqui para cima é o servidor");
++
++    // Perna 3: sustentação. Um quadro isolado acima do piso ainda caberia num
++    // punhado em voo — [`QUADROS_PARA_PROVAR`] seguidos, cada um acima do
++    // anterior, são um segundo inteiro de imagem, e isso só chega por um cano
++    // que o servidor reabriu por causa do relato.
++    let mut piso = piso_do_corte;
++    for indice in 0..QUADROS_PARA_PROVAR {
++        let (seq, bytes) = esperar(
++            &mut assiste,
++            "um quadro chegar pelo servidor depois de o par morrer, acima do piso do corte",
++            |aviso| match aviso {
++                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
++                    .filter(|seq| piso.is_none_or(|p| *seq > p))
++                    .map(|seq| (seq, bytes.clone())),
++                _ => None,
++            },
++        )
++        .await?;
++        assert_eq!(
++            bytes,
++            corpo(seq),
++            "o servidor assumiu e o que ele entregou não é o que saiu de quem compartilha \
++             (quadro {indice} de {QUADROS_PARA_PROVAR}, seq {seq})"
++        );
++        piso = Some(seq);
++    }
++    println!(
++        "{QUADROS_PARA_PROVAR} quadros seguidos chegaram pelo servidor depois de o par ter \
++         morrido, até o {piso:?}"
+     );
+ 
+     // E a nomeação não sobreviveu ao par: um `ParFalhou` seguinte se resolveria
+@@ -1123,12 +1203,16 @@ async fn um_repasse_encerrado_normalmente_devolve_o_par_a_fila() -> Result<()> {
+     }
+ 
+     // **Quem assiste sai da sala**, e é este o caminho que nenhuma mensagem do
+-    // cliente cobre. Um `UnwatchScreen` também encerra o repasse, mas depois
+-    // do conserto do fim limpo o `ParFalhou` que ele provoca já solta a
+-    // nomeação pelo braço de sempre — reverter a linha do `UnwatchScreen` não
+-    // faz teste nenhum falhar. A saída da sala não tem esse socorro: o
+-    // cliente não relata nada, e se o servidor não soltar a nomeação sozinho
+-    // ela fica de pé para sempre.
++    // cliente cobre: o cliente não relata nada, e se o servidor não soltar a
++    // nomeação sozinho ela fica de pé para sempre.
++    //
++    // O `UnwatchScreen` é o caminho vizinho, e tem prova própria em
++    // `um_unwatch_devolve_a_vaga_do_par_e_ele_volta_a_ser_escolhido`. (Este
++    // comentário já disse que reverter a linha do `UnwatchScreen` não fazia
++    // teste nenhum falhar, e era verdade enquanto o `ParFalhou` de rotina
++    // saía depois e soltava a nomeação pelo braço de sempre. Agora que o
++    // cliente derruba o caminho do par no próprio `UnwatchScreen`, relato
++    // nenhum sai e aquele `desapontou` é o único mecanismo que resta.)
+     assiste.sair_da_voice_room().await?;
+ 
+     let fim = Instant::now() + PACIENCIA;
+@@ -1153,6 +1237,140 @@ async fn um_repasse_encerrado_normalmente_devolve_o_par_a_fila() -> Result<()> {
+     Ok(())
+ }
+ 
++/// **Um `UnwatchScreen` devolve a vaga do par, e ele volta a ser escolhido.**
++///
++/// # O guarda que não tinha teste
++///
++/// `server.pares.desapontou(screen)`, no braço de `UnwatchScreen` de
++/// `seele-server/src/session.rs`, é o **único** mecanismo que solta a vaga do
++/// par ali. Ele entrou na onda anterior com a explicação de que o conserto do
++/// fim limpo já cobria aquele caminho — e cobria pelo lado errado: quem soltava
++/// a nomeação era o `ParFalhou` de rotina que saía **depois**, quando o fluxo do
++/// par enfim terminava. Agora que `assistir(tela, false)` derruba o caminho do
++/// par no cliente (ver
++/// `um_unwatch_derruba_o_caminho_do_par_e_a_imagem_para`), relato nenhum sai
++/// depois de um `UnwatchScreen`, e esta linha é tudo o que existe. Enquanto o
++/// socorro estava lá, removê-la deixava a suíte inteira verde — medido.
++///
++/// # Por que a afirmação é dupla
++///
++/// «A nomeação sumiu» é estado interno, e sozinho não diz que a malha voltou a
++/// funcionar. A segunda perna é a que vale: quem assiste pede a tela de novo, e
++/// o **mesmo** par volta a servi-la — [`QUADROS_PARA_PROVAR`] quadros acima do
++/// piso, com o servidor subindo uma cópia só do primeiro ao último. Sem a vaga
++/// devolvida, `Pares::escolher` pula aquele candidato por `ja_servindo` e o
++/// servidor reassume: a cópia volta a ser duas, e é assim que a reversão deste
++/// guarda aparece.
++#[tokio::test(flavor = "multi_thread")]
++async fn um_unwatch_devolve_a_vaga_do_par_e_ele_volta_a_ser_escolhido() -> Result<()> {
++    let Cenario {
++        servidor,
++        compartilha,
++        empresta,
++        mut assiste,
++        screen,
++        copias,
++    } = cenario().await?;
++
++    let empresta_quem = empresta.sessao().person;
++
++    assiste.assistir(screen, true).await?;
++    ate("o servidor parar de subir a cópia de quem assiste", || {
++        copias.agora() == 1
++    })
++    .await?;
++    {
++        let pares = servidor.server().pares.lock().await;
++        assert_eq!(
++            pares.quem_foi_apontado(screen),
++            Some(empresta_quem),
++            "o servidor não apontou quem empresta para servir esta transmissão"
++        );
++        assert!(
++            pares.ja_servindo().contains(&empresta_quem),
++            "o servidor apontou um par e não o contou como ocupado"
++        );
++    }
++
++    // A janela fecha. Nada mais será relatado por esta tela: o caminho do par
++    // cai no cliente, e o `ParFalhou` que antes socorria este braço não sai.
++    assiste.assistir(screen, false).await?;
++
++    let fim = Instant::now() + PACIENCIA;
++    loop {
++        let ocupados = servidor.server().pares.lock().await.ja_servindo();
++        if ocupados.is_empty() {
++            break;
++        }
++        assert!(
++            Instant::now() < fim,
++            "o `UnwatchScreen` encerrou o repasse e o par continua contado como ocupado \
++             ({ocupados:?}) — o servidor nunca mais vai escolhê-lo, e o cliente dele já \
++             devolveu a vaga"
++        );
++        tokio::time::sleep(Duration::from_millis(20)).await;
++    }
++    println!("a vaga do par voltou à fila depois do `UnwatchScreen`");
++
++    // E a prova que importa: com a vaga devolvida, o mesmo par volta a ser
++    // escolhido e a servir de verdade.
++    let piso_inicial = maior_seq_ja_enfileirado(&mut assiste, screen).await;
++    assiste.assistir(screen, true).await?;
++    {
++        let fim = Instant::now() + PACIENCIA;
++        loop {
++            let apontado = servidor
++                .server()
++                .pares
++                .lock()
++                .await
++                .quem_foi_apontado(screen);
++            if apontado == Some(empresta_quem) {
++                break;
++            }
++            assert!(
++                Instant::now() < fim,
++                "a vaga voltou à fila e o servidor não escolheu aquele par de novo (apontou \
++                 {apontado:?}): a vaga foi devolvida no papel e não na prática"
++            );
++            tokio::time::sleep(Duration::from_millis(20)).await;
++        }
++    }
++
++    let mut piso = piso_inicial;
++    for indice in 0..QUADROS_PARA_PROVAR {
++        let (seq, _) = esperar(
++            &mut assiste,
++            "um quadro chegar pelo par de novo, acima do piso, com o cano do servidor desligado",
++            |aviso| match aviso {
++                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
++                    .filter(|seq| piso.is_none_or(|p| *seq > p))
++                    .map(|seq| (seq, ())),
++                _ => None,
++            },
++        )
++        .await?;
++        assert_eq!(
++            copias.agora(),
++            1,
++            "o servidor voltou a subir a cópia de quem assiste (quadro {indice} de \
++             {QUADROS_PARA_PROVAR}, seq {seq}): o par não reassumiu a transmissão, então a \
++             vaga dele não tinha voltado à fila"
++        );
++        piso = Some(seq);
++    }
++    println!(
++        "o mesmo par voltou a servir {QUADROS_PARA_PROVAR} quadros seguidos, até o {piso:?}, \
++         com o servidor subindo uma cópia só"
++    );
++
++    drop(compartilha);
++    drop(empresta);
++    drop(assiste);
++    servidor.shutdown();
++    Ok(())
++}
++
+ /// **O contador não pode calar quando o barramento atrasa.**
+ ///
+ /// `ContadorDeCopias` é a metade negativa de toda prova deste arquivo: um
+@@ -1201,3 +1419,301 @@ async fn o_contador_de_copias_sobrevive_a_um_atraso_do_barramento() -> Result<()
+     .await?;
+     Ok(())
+ }
++
++/// Quanto tempo de silêncio prova que o caminho parou de entregar imagem.
++///
++/// A trinta quadros por segundo (`INTERVALO`), um segundo é trinta quadros que
++/// **não** chegaram. Um caminho vivo não fica um segundo calado com a
++/// transmissão no ar.
++const SILENCIO_PARA_PROVAR: Duration = Duration::from_secs(1);
++
++/// **Quem para de assistir para de receber, e o caminho do par cai junto.**
++///
++/// # O que estava aberto
++///
++/// `Comando::Assistir { quero: false }` fazia uma coisa só: mandar
++/// `UnwatchScreen` ao servidor. Nada derrubava o caminho do par — a tarefa de
++/// `escoar_tela_alheia` e a conexão com o par seguiam vivas —, então quem
++/// tinha acabado de fechar a janela **continuava recebendo a tela por baixo**,
++/// pelo par, e continuava gastando a subida de quem empresta. O servidor
++/// obedecia ao pedido (`TelaParouDeAssistir`) e a máquina de quem pediu não.
++///
++/// # A prova é o silêncio, e ela precisa das duas metades
++///
++/// Só «parou de chegar quadro» não basta: a transmissão podia ter acabado, e
++/// aí o silêncio não diz nada sobre o `UnwatchScreen`. Por isso quem empresta
++/// — que continua assistindo pelo servidor — é lido no mesmo intervalo: ele
++/// tem de continuar recebendo enquanto quem parou não recebe nada.
++#[tokio::test(flavor = "multi_thread")]
++async fn um_unwatch_derruba_o_caminho_do_par_e_a_imagem_para() -> Result<()> {
++    let Cenario {
++        servidor,
++        compartilha,
++        mut empresta,
++        mut assiste,
++        screen,
++        copias,
++    } = cenario().await?;
++
++    // O par tem de estar servindo **de verdade** antes de o `UnwatchScreen`
++    // significar alguma coisa: um piso drenado e um segundo de imagem acima
++    // dele, com o servidor subindo uma cópia só. É a mesma prova dos irmãos
++    // deste arquivo, e sem ela este teste mediria o silêncio de um caminho que
++    // nunca existiu.
++    let piso_inicial = maior_seq_ja_enfileirado(&mut assiste, screen).await;
++    assiste.assistir(screen, true).await?;
++    ate("o servidor parar de subir a cópia de quem assiste", || {
++        copias.agora() == 1
++    })
++    .await?;
++    let mut piso = piso_inicial;
++    for indice in 0..QUADROS_PARA_PROVAR {
++        let (seq, _) = esperar(
++            &mut assiste,
++            "um quadro chegar pelo par, acima do piso, com o cano do servidor desligado",
++            |aviso| match aviso {
++                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
++                    .filter(|seq| piso.is_none_or(|p| *seq > p))
++                    .map(|seq| (seq, ())),
++                _ => None,
++            },
++        )
++        .await?;
++        assert_eq!(
++            copias.agora(),
++            1,
++            "o servidor voltou a subir a cópia de quem assiste antes do `UnwatchScreen` \
++             (quadro {indice} de {QUADROS_PARA_PROVAR}, seq {seq})"
++        );
++        piso = Some(seq);
++    }
++    println!("o par está servindo até o quadro {piso:?}; agora quem assiste fecha a janela");
++
++    assiste.assistir(screen, false).await?;
++
++    // **Drenar antes de afirmar.** O canal de avisos é FIFO e o par entregou
++    // quadros até o instante do pedido; exigir silêncio sem esvaziar a fila
++    // seria falhar por causa de imagem que já tinha chegado.
++    let ultimo = maior_seq_ja_enfileirado(&mut assiste, screen).await;
++    println!("a fila de quem parou de assistir esvaziou no quadro {ultimo:?}");
++
++    // E agora o silêncio, com a transmissão comprovadamente no ar: quem
++    // empresta continua recebendo pelo servidor no mesmo intervalo.
++    let fim = Instant::now() + SILENCIO_PARA_PROVAR;
++    while Instant::now() < fim {
++        if let Ok(Aviso::TelaQuadro { tela, bytes, .. }) =
++            &tokio::time::timeout(Duration::from_millis(50), assiste.proximo()).await
++        {
++            assert!(
++                *tela != screen,
++                "quem pediu para parar de assistir recebeu o quadro {:?} depois do \
++                 `UnwatchScreen`: o caminho do par continuou vivo por baixo, gastando a \
++                 subida de quem empresta e entregando imagem que ninguém pediu",
++                seq_de(bytes)
++            );
++        }
++    }
++    let ainda_chega = maior_seq_ja_enfileirado(&mut empresta, screen).await;
++    assert!(
++        ainda_chega.is_some(),
++        "quem empresta parou de receber junto: o silêncio de quem parou de assistir não prova \
++         nada, porque a transmissão inteira pode ter morrido"
++    );
++    println!(
++        "um segundo sem um único quadro para quem parou de assistir, com quem empresta \
++         recebendo até o quadro {ainda_chega:?}"
++    );
++
++    drop(compartilha);
++    drop(empresta);
++    drop(assiste);
++    servidor.shutdown();
++    Ok(())
++}
++
++/// **Um `ParFalhou` que chega depois do `UnwatchScreen` não reabre o cano.**
++///
++/// # A regressão que a onda de consertos criou
++///
++/// Depois do conserto do fim limpo, **todo** fim de fluxo de par vira
++/// `ParFalhou` — inclusive o de rotina: contrapressão, quem empresta
++/// reconectando, quem empresta saindo da sala. E o braço de `ParFalhou` no
++/// servidor mandava `TelaAssistir` para quem relatou sem conferir se essa
++/// pessoa ainda queria a tela. Então: alguém fecha a janela; algum tempo
++/// depois o fluxo do par termina; o relato sai; e **o servidor volta a subir a
++/// cópia para quem tinha pedido para parar** — a subida que a malha existe
++/// para aliviar, gasta com imagem que ninguém está olhando.
++///
++/// # Por que quem assiste é um par cru aqui
++///
++/// Porque a metade do cliente tem prova própria
++/// (`um_unwatch_derruba_o_caminho_do_par_e_a_imagem_para`), e com ela no lugar
++/// nenhum cliente de verdade manda `ParFalhou` depois de um `UnwatchScreen`.
++/// Um teste que dependesse do cliente para produzir o relato estaria provando
++/// o conserto do cliente uma segunda vez, e deixaria o braço do servidor sem
++/// guarda nenhum — que é exatamente a forma de falha que este repositório paga
++/// mais caro. Cru, o relato sai à mão, e o que está sob teste é só a decisão
++/// do servidor.
++///
++/// # O que é observado, e por que não é o contador de cópias
++///
++/// `Event::ScreenViewers` só sai de `VoiceRoom::reconferir_o_teto`, e o braço
++/// de `TelaAssistir` não o chama: o contador de cópias **não se mexe** quando
++/// o servidor readmite alguém, e afirmar sobre ele aqui seria afirmar sobre um
++/// número que não responde ao defeito. O que responde é o fio: readmitido, o
++/// espectador entra em `esperando` e ganha um cano no próximo quadro-chave — e
++/// um cano é um fluxo uni novo aberto para esta conexão. Nenhum fluxo novo,
++/// nenhuma cópia.
++#[tokio::test(flavor = "multi_thread")]
++async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tela() -> Result<()> {
++    let (endereco, servidor) = servidor_com(Location::Memory).await?;
++
++    let mut compartilha = abrir(endereco, 1).await?;
++    let sala = compartilha.sala;
++    frame::write(
++        &mut compartilha.envio,
++        &ClientMessage::EnterVoiceRoom {
++            voice_room: sala,
++            password: None,
++        },
++    )
++    .await?;
++
++    let empresta = cliente(endereco, 2, "empresta").await?;
++    empresta.entrar_na_voice_room(sala).await?;
++    empresta.emprestar_subida(true).await?;
++
++    let mut assiste = abrir(endereco, 3).await?;
++    frame::write(
++        &mut assiste.envio,
++        &ClientMessage::EnterVoiceRoom {
++            voice_room: sala,
++            password: None,
++        },
++    )
++    .await?;
++    // A identidade de quem só assiste, à mão: sem ela `apontar_um_par` não tem
++    // impressão de quem pediu para apresentar a quem empresta, e nenhum par é
++    // apontado.
++    frame::write(
++        &mut assiste.envio,
++        &ClientMessage::EmprestarSubida {
++            emprestando: false,
++            impressao: "a".repeat(64),
++            locais: Vec::new(),
++        },
++    )
++    .await?;
++
++    let screen = compartilhar(&mut compartilha).await?;
++    let empresta_quem = empresta.sessao().person;
++
++    // O cano do servidor de antes da malha: quem está na sala quando a única
++    // transmissão abre entra ligado nela, e ligado é um fluxo uni.
++    let _cano_do_servidor = tokio::time::timeout(PACIENCIA, assiste.conexao.accept_uni())
++        .await
++        .map_err(|_| {
++            anyhow::anyhow!("o servidor nunca abriu o cano da tela para quem assiste")
++        })??;
++
++    // Quem empresta tem de estar declarado antes do pedido, senão
++    // `Pares::escolher` não tem candidato e o teste mediria o caminho de
++    // sempre pensando estar medindo a malha.
++    ate("a declaração de quem empresta chegar ao servidor", || {
++        true
++    })
++    .await?;
++    {
++        let fim = Instant::now() + PACIENCIA;
++        loop {
++            let pronto = servidor
++                .server()
++                .pares
++                .lock()
++                .await
++                .declaracao_de(empresta_quem)
++                .is_some();
++            if pronto || Instant::now() >= fim {
++                assert!(
++                    pronto,
++                    "a declaração de quem empresta não chegou ao servidor"
++                );
++                break;
++            }
++            tokio::time::sleep(Duration::from_millis(20)).await;
++        }
++    }
++
++    frame::write(&mut assiste.envio, &ClientMessage::WatchScreen { screen }).await?;
++    let fim = Instant::now() + PACIENCIA;
++    loop {
++        let apontado = servidor
++            .server()
++            .pares
++            .lock()
++            .await
++            .quem_foi_apontado(screen);
++        if apontado == Some(empresta_quem) {
++            break;
++        }
++        assert!(
++            Instant::now() < fim,
++            "o servidor não apontou quem empresta para servir esta transmissão (apontou \
++             {apontado:?})"
++        );
++        tokio::time::sleep(Duration::from_millis(20)).await;
++    }
++
++    // A janela fecha. Daqui para frente esta pessoa não quer mais a tela.
++    frame::write(&mut assiste.envio, &ClientMessage::UnwatchScreen { screen }).await?;
++    ate("o servidor soltar a nomeação do par", || true).await?;
++    {
++        let fim = Instant::now() + PACIENCIA;
++        loop {
++            let apontado = servidor
++                .server()
++                .pares
++                .lock()
++                .await
++                .quem_foi_apontado(screen);
++            if apontado.is_none() || Instant::now() >= fim {
++                assert_eq!(
++                    apontado, None,
++                    "o `UnwatchScreen` não soltou a nomeação do par"
++                );
++                break;
++            }
++            tokio::time::sleep(Duration::from_millis(20)).await;
++        }
++    }
++
++    // E só agora o fluxo do par termina — o fim de rotina que o conserto do
++    // fim limpo transformou em relato.
++    frame::write(
++        &mut assiste.envio,
++        &ClientMessage::ParFalhou {
++            screen,
++            motivo: seele_proto::control::MotivoDeFalhaDePar::ParouDeMandar,
++        },
++    )
++    .await?;
++
++    // Nenhum cano novo. Dois segundos são sessenta quadros e vinte
++    // quadros-chave (`A_CADA_QUANTOS_UMA_CHAVE`) — um espectador readmitido
++    // teria ganho o cano dele em qualquer um deles.
++    match tokio::time::timeout(Duration::from_secs(2), assiste.conexao.accept_uni()).await {
++        Err(_) => {}
++        Ok(_) => panic!(
++            "o servidor abriu um cano de tela novo para quem tinha acabado de mandar \
++             `UnwatchScreen`: um `ParFalhou` de rotina desfez o pedido de parar, e a subida \
++             que a malha existe para aliviar voltou a sair daqui para uma janela fechada"
++        ),
++    }
++    println!("dois segundos depois do relato, e nenhum cano novo para quem parou de assistir");
++
++    drop(compartilha);
++    drop(empresta);
++    drop(assiste);
++    servidor.shutdown();
++    Ok(())
++}
+diff --git a/crates/seele-core/src/enlace.rs b/crates/seele-core/src/enlace.rs
+index deb1a84..7535c81 100644
+--- a/crates/seele-core/src/enlace.rs
++++ b/crates/seele-core/src/enlace.rs
+@@ -1306,6 +1306,7 @@ impl Enlace {
+             repasse: Arc::new(RepasseDeTela::default()),
+             resultados_do_par,
+             resultados_do_par_tx,
++            caminhos_de_par: std::collections::HashMap::new(),
+         };
+         // **Não declara identidade aqui.** Achado do fix round 2:
+         // `conectar_por` é o funil que **cada candidato** de uma conexão com
+@@ -2029,6 +2030,22 @@ struct Motor {
+     /// para mandar de volta. Clonada a cada tarefa nova: um `Sender` barato
+     /// de clonar, e cada tarefa é dona da própria cópia.
+     resultados_do_par_tx: mpsc::UnboundedSender<ResultadoDoPar>,
++    /// A alça da tarefa que busca cada tela num par — a única coisa que
++    /// alcança aquele caminho depois de ele ter começado.
++    ///
++    /// **Sem ela, `assistir(tela, false)` mentia.** Ele mandava
++    /// `UnwatchScreen` ao servidor e nada mais: a tarefa de
++    /// [`Motor::assistir_por_par`] seguia viva, lendo do par, e quem tinha
++    /// acabado de fechar a janela continuava recebendo a tela por baixo —
++    /// gastando a subida de quem empresta com imagem que ninguém olhava. Pior,
++    /// quando aquele fluxo enfim terminasse, o `ParFalhou` de rotina sairia e
++    /// pediria ao servidor a tela de volta.
++    ///
++    /// Por [`ScreenId`] porque é isso que o comando nomeia. Um `AssistaTelaPor`
++    /// novo para a mesma tela substitui a alça e aborta a anterior: duas
++    /// tarefas lendo a mesma tela seriam duas cópias chegando, e a segunda
++    /// nomeação é a que o servidor tem de pé.
++    caminhos_de_par: std::collections::HashMap<ScreenId, tokio::task::JoinHandle<()>>,
+ }
+ 
+ /// Uma transmissão desta pessoa que está no ar.
+@@ -2611,6 +2628,23 @@ impl Motor {
+                 if quero {
+                     cliente.watch_screen(tela).await
+                 } else {
++                    // **Quem para de assistir para de receber, e o caminho do
++                    // par cai junto.** Avisar só o servidor deixava metade: a
++                    // tarefa de [`Motor::assistir_por_par`] continuava lendo do
++                    // par, e a imagem seguia chegando por baixo do pedido de
++                    // parar — gastando a subida de quem empresta com uma janela
++                    // fechada. E o `ParFalhou` de rotina que aquele fluxo
++                    // acabaria mandando pedia a tela de volta ao servidor.
++                    //
++                    // `abort` e não um sinal cooperativo: a tarefa passa a vida
++                    // parada num `read` do par, e ela não tem ponto onde
++                    // conferir um pedido de parada. É por isso que ela é **uma
++                    // tarefa só** — ver [`ler_a_tela_alheia`]: enquanto a
++                    // leitura acontecia numa segunda tarefa, abortar esta
++                    // deixava aquela lendo.
++                    if let Some(caminho) = self.caminhos_de_par.remove(&tela) {
++                        caminho.abort();
++                    }
+                     cliente.unwatch_screen(tela).await
+                 }
+             }
+@@ -2850,7 +2884,7 @@ impl Motor {
+         };
+         let avisos = self.avisos.clone();
+         let resultados = self.resultados_do_par_tx.clone();
+-        tokio::spawn(async move {
++        let tarefa = tokio::spawn(async move {
+             match discar_ate_o_prazo(&ponta, &enderecos, &impressao, &identidade).await {
+                 par::PorOndeAssistir::Par(ligado) => {
+                     // A conta de bytes é de quem empresta — `crate::par::repassar`
+@@ -2859,14 +2893,23 @@ impl Motor {
+                     // `DeOndeVeioATela`: um fluxo que acaba no meio é o par
+                     // tendo caído, e é daqui que o servidor fica sabendo.
+                     match tokio::time::timeout(PRAZO_DO_PAR, ligado.conexao.accept_uni()).await {
+-                        Ok(Ok(fluxo)) => escoar_tela_alheia(
+-                            avisos,
+-                            fluxo,
+-                            DeOndeVeioATela::Par {
+-                                screen,
+-                                resultados: resultados.clone(),
+-                            },
+-                        ),
++                        // [`ler_a_tela_alheia`] e não [`escoar_tela_alheia`],
++                        // que é a diferença entre a alça valer e não valer:
++                        // `escoar` abre uma tarefa nova, e abortar **esta**
++                        // deixaria aquela lendo do par. Aqui a leitura acontece
++                        // dentro da tarefa que o motor guarda, e é por isso que
++                        // o corpo foi separado da tarefa.
++                        Ok(Ok(fluxo)) => {
++                            ler_a_tela_alheia(
++                                avisos,
++                                fluxo,
++                                DeOndeVeioATela::Par {
++                                    screen,
++                                    resultados: resultados.clone(),
++                                },
++                            )
++                            .await;
++                        }
+                         Ok(Err(erro)) => {
+                             tracing::warn!(%erro, ?screen, "o par ligou e a transmissão não abriu");
+                             let _ = resultados.send(ResultadoDoPar::ParFalhou {
+@@ -2895,6 +2938,13 @@ impl Motor {
+                 }
+             }
+         });
++        // As que já acabaram sozinhas saem daqui: a alça de uma tarefa morta
++        // não aborta nada, e sem esta linha o mapa cresceria por sessão a cada
++        // transmissão assistida.
++        self.caminhos_de_par.retain(|_, alca| !alca.is_finished());
++        if let Some(anterior) = self.caminhos_de_par.insert(screen, tarefa) {
++            anterior.abort();
++        }
+     }
+ 
+     /// `ServerMessage::SirvaTelaPara`: passe a atender, e disque para o outro
+@@ -3490,9 +3540,26 @@ fn escoar_tela_alheia(
+     avisos: mpsc::UnboundedSender<Aviso>,
+     fluxo: quinn::RecvStream,
+     de_onde: DeOndeVeioATela,
++) {
++    tokio::spawn(ler_a_tela_alheia(avisos, fluxo, de_onde));
++}
++
++/// O corpo de [`escoar_tela_alheia`], sem a tarefa.
++///
++/// **Separado para que o caminho do par caiba numa tarefa só.**
++/// [`Motor::assistir_por_par`] já roda solta — discar pode levar
++/// [`PRAZO_DO_PAR`] —, e a leitura acontece dentro dela. Enquanto a leitura
++/// abria uma **segunda** tarefa, a alça que o motor guardava não alcançava a
++/// parte que importa: abortar a de fora deixava a de dentro lendo do par, e
++/// quem tinha pedido para parar de assistir continuava recebendo imagem por
++/// baixo. Uma tarefa só é o que faz a alça valer.
++async fn ler_a_tela_alheia(
++    avisos: mpsc::UnboundedSender<Aviso>,
++    fluxo: quinn::RecvStream,
++    de_onde: DeOndeVeioATela,
+ ) {
+     {
+-        tokio::spawn(async move {
++        {
+             let aberto = match &de_onde {
+                 DeOndeVeioATela::Servidor(_) => {
+                     crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await
+@@ -3643,7 +3710,7 @@ fn escoar_tela_alheia(
+                 repasse.fechou(tela);
+             }
+             let _ = avisos.send(Aviso::TelaFechou { tela });
+-        });
++        }
+     }
+ }
+ 
+@@ -5215,6 +5282,7 @@ mod tests {
+             repasse: Arc::new(RepasseDeTela::default()),
+             resultados_do_par,
+             resultados_do_par_tx,
++            caminhos_de_par: std::collections::HashMap::new(),
+         }
+     }
+ 
+diff --git a/crates/seele-server/src/session.rs b/crates/seele-server/src/session.rs
+index 85e84f1..eebc325 100644
+--- a/crates/seele-server/src/session.rs
++++ b/crates/seele-server/src/session.rs
+@@ -1243,6 +1243,22 @@ async fn run_session(
+     let mut events = server.events.subscribe();
+     let mut channels: Vec<ChannelId> = Vec::new();
+     let mut current_voice_room: Option<VoiceRoomId> = None;
++    // **Quais telas esta pessoa pediu para assistir e ainda não desistiu.**
++    //
++    // Por sessão, e aqui, porque é aqui que as três mensagens que decidem
++    // isso chegam: `WatchScreen` põe, `UnwatchScreen` tira, `ParFalhou`
++    // pergunta. Nenhuma outra estrutura do servidor responde a essa pergunta.
++    // A sala de voz guarda **quem tem cano**, e o cano de quem é servido por
++    // um par é desligado no `WatchScreen` (ver aquele braço), então lá «não
++    // tem cano» quer dizer as duas coisas ao mesmo tempo — «foi para o par» e
++    // «parou de assistir». E `crate::pares` guarda a **nomeação**, que é
++    // apagada exatamente pelos eventos que provocam o relato: o par cair
++    // apaga a nomeação dele (`Pares::saiu`), e então ela não pode ser a prova
++    // de que quem relata ainda queria a tela.
++    //
++    // Não é limpo ao trocar de sala de propósito: uma tela de outra sala não
++    // existe na sala nova, e `VoiceRoom::assistir` já recusa o que não é dela.
++    let mut telas_pedidas: std::collections::HashSet<ScreenId> = std::collections::HashSet::new();
+ 
+     // A origem contra a qual o plano de mídia carimba o último datagrama.
+     let inicio = Instant::now();
+@@ -2294,6 +2310,15 @@ async fn run_session(
+                             // conferência e o envio já não tem transmissão para
+                             // assistir, e não há o que dizer a quem pediu.
+                             let _ = voice_rooms.of(voice_room).await.send(comando).await;
++                            // O registro do pedido, e é contra ele que o
++                            // braço de `ParFalhou` confere se ainda há o que
++                            // reabrir. Escrito depois da conferência da tela:
++                            // um `ScreenId` que não é desta sala nunca entra.
++                            if assistir {
++                                telas_pedidas.insert(screen);
++                            } else {
++                                telas_pedidas.remove(&screen);
++                            }
+                             if !assistir {
+                                 // **O fim bom do repasse, e ele também solta o
+                                 // par.** Enquanto só `ParFalhou` chamava
+@@ -2452,7 +2477,27 @@ async fn run_session(
+                         // `TelaAssistir` põe a pessoa na fila do próximo
+                         // quadro-chave, e não no meio do fluxo: entrar num byte
+                         // qualquer desloca o enquadramento para sempre.
+-                        if let Some(voice_room) = current_voice_room {
++                        //
++                        // **Mas só para quem ainda quer esta tela**, e é a
++                        // regressão que o conserto do fim limpo criou: depois
++                        // dele, **todo** fim de fluxo de par vira `ParFalhou`,
++                        // inclusive os de rotina — a contrapressão, quem
++                        // empresta reconectando, quem empresta saindo da sala
++                        // —, e todos acontecem com a transmissão ainda no ar.
++                        // Sem esta conferência, a sequência «alguém manda
++                        // `UnwatchScreen`; algum tempo depois o repasse dele
++                        // termina; o relato sai» fazia o servidor **desfazer o
++                        // pedido de parar**: a cópia voltava a subir daqui
++                        // para uma janela fechada, que é o oposto do alívio
++                        // que a malha existe para dar.
++                        if !telas_pedidas.contains(&screen) {
++                            tracing::info!(
++                                person = %session.person,
++                                %screen,
++                                "um relato de par falho chegou de quem já tinha parado de \
++                                 assistir esta transmissão; o cano dela não é reaberto"
++                            );
++                        } else if let Some(voice_room) = current_voice_room {
+                             tracing::info!(
+                                 person = %session.person,
+                                 %screen,

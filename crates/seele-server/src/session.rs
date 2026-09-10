@@ -1243,6 +1243,22 @@ async fn run_session(
     let mut events = server.events.subscribe();
     let mut channels: Vec<ChannelId> = Vec::new();
     let mut current_voice_room: Option<VoiceRoomId> = None;
+    // **Quais telas esta pessoa pediu para assistir e ainda não desistiu.**
+    //
+    // Por sessão, e aqui, porque é aqui que as três mensagens que decidem
+    // isso chegam: `WatchScreen` põe, `UnwatchScreen` tira, `ParFalhou`
+    // pergunta. Nenhuma outra estrutura do servidor responde a essa pergunta.
+    // A sala de voz guarda **quem tem cano**, e o cano de quem é servido por
+    // um par é desligado no `WatchScreen` (ver aquele braço), então lá «não
+    // tem cano» quer dizer as duas coisas ao mesmo tempo — «foi para o par» e
+    // «parou de assistir». E `crate::pares` guarda a **nomeação**, que é
+    // apagada exatamente pelos eventos que provocam o relato: o par cair
+    // apaga a nomeação dele (`Pares::saiu`), e então ela não pode ser a prova
+    // de que quem relata ainda queria a tela.
+    //
+    // Não é limpo ao trocar de sala de propósito: uma tela de outra sala não
+    // existe na sala nova, e `VoiceRoom::assistir` já recusa o que não é dela.
+    let mut telas_pedidas: std::collections::HashSet<ScreenId> = std::collections::HashSet::new();
 
     // A origem contra a qual o plano de mídia carimba o último datagrama.
     let inicio = Instant::now();
@@ -2294,6 +2310,15 @@ async fn run_session(
                             // conferência e o envio já não tem transmissão para
                             // assistir, e não há o que dizer a quem pediu.
                             let _ = voice_rooms.of(voice_room).await.send(comando).await;
+                            // O registro do pedido, e é contra ele que o
+                            // braço de `ParFalhou` confere se ainda há o que
+                            // reabrir. Escrito depois da conferência da tela:
+                            // um `ScreenId` que não é desta sala nunca entra.
+                            if assistir {
+                                telas_pedidas.insert(screen);
+                            } else {
+                                telas_pedidas.remove(&screen);
+                            }
                             if !assistir {
                                 // **O fim bom do repasse, e ele também solta o
                                 // par.** Enquanto só `ParFalhou` chamava
@@ -2452,7 +2477,27 @@ async fn run_session(
                         // `TelaAssistir` põe a pessoa na fila do próximo
                         // quadro-chave, e não no meio do fluxo: entrar num byte
                         // qualquer desloca o enquadramento para sempre.
-                        if let Some(voice_room) = current_voice_room {
+                        //
+                        // **Mas só para quem ainda quer esta tela**, e é a
+                        // regressão que o conserto do fim limpo criou: depois
+                        // dele, **todo** fim de fluxo de par vira `ParFalhou`,
+                        // inclusive os de rotina — a contrapressão, quem
+                        // empresta reconectando, quem empresta saindo da sala
+                        // —, e todos acontecem com a transmissão ainda no ar.
+                        // Sem esta conferência, a sequência «alguém manda
+                        // `UnwatchScreen`; algum tempo depois o repasse dele
+                        // termina; o relato sai» fazia o servidor **desfazer o
+                        // pedido de parar**: a cópia voltava a subir daqui
+                        // para uma janela fechada, que é o oposto do alívio
+                        // que a malha existe para dar.
+                        if !telas_pedidas.contains(&screen) {
+                            tracing::info!(
+                                person = %session.person,
+                                %screen,
+                                "um relato de par falho chegou de quem já tinha parado de \
+                                 assistir esta transmissão; o cano dela não é reaberto"
+                            );
+                        } else if let Some(voice_room) = current_voice_room {
                             tracing::info!(
                                 person = %session.person,
                                 %screen,

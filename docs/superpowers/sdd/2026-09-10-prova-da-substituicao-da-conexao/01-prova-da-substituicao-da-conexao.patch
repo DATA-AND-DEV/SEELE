@@ -1,0 +1,485 @@
+--- a/crates/seele-conformance/tests/tela_por_um_par.rs
++++ b/crates/seele-conformance/tests/tela_por_um_par.rs
+@@ -56,7 +56,7 @@
+ use anyhow::Result;
+ use ed25519_dalek::{Signer, SigningKey};
+ use seele_core::enlace::{Aviso, Destino, Enlace};
+-use seele_core::{MemoryPinStore, PinStore};
++use seele_core::{Link, MemoryPinStore, PinStore};
+ use seele_proto::control::{ClientMessage, ServerMessage};
+ use seele_proto::ids::{PersonId, ScreenId, VoiceRoomId};
+ use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource, SCREEN_HEADER_LEN};
+@@ -146,9 +146,20 @@
+ /// larga para três pessoas e 256 bytes por quadro, e tira o teto do caminho
+ /// destas afirmações.
+ async fn servidor_com(database: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
++    servidor_em(0, database).await
++}
++
++/// O mesmo, numa porta escolhida — **a mesma na segunda vez**.
++///
++/// É o que `bateria_interna.rs` faz para que um reinício seja uma *reconexão* e
++/// não um destino novo: o cliente volta ao endereço que atendeu, e o `Destino`
++/// dele não muda. Com o banco em [`Location::File`], o servidor que sobe
++/// apresenta **o mesmo certificado** — sem isso o TOFU do cliente veria troca de
++/// chave, que é o alerta do ADR 0003 e o contrário de uma reconexão.
++async fn servidor_em(porta: u16, database: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
+     let config = ServerConfig {
+         name: "Casa".into(),
+-        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
++        listen: SocketAddr::from(([127, 0, 0, 1], porta)),
+         database,
+         caminho_bps: Some(10_000_000),
+         ..ServerConfig::default()
+@@ -312,6 +323,35 @@
+     fora
+ }
+ 
++/// De quanto em quanto começa cada geração de mídia.
++///
++/// # Por que gerações, e não o `ScreenId`
++///
++/// Porque **o `ScreenId` não distingue as duas**. Ele é emitido por
++/// `Registry::issue_screen`, um contador em memória do daemon: um servidor que
++/// reinicia recomeça a numerar do mesmo lugar, e a transmissão que abre depois
++/// da volta ganha, muito provavelmente, **o mesmo nome** que a de antes da
++/// queda. Duas mídias diferentes com o mesmo rótulo é a receita exata do
++/// falso-verde que este arquivo já pagou duas vezes: um quadro velho, entregue
++/// por uma tarefa que sobreviveu à conexão que a criou, passaria por prova de
++/// recuperação.
++///
++/// A marca, então, vai no **corpo** do quadro, que é a única coisa que quem
++/// assiste confere byte a byte — ver [`corpo`]. Cada geração começa a numerar
++/// um milhão acima da anterior, folga larga sobre os poucos milhares de quadros
++/// que um teste destes chega a produzir, e [`geracao_de`] lê a marca de volta.
++const PASSO_DA_GERACAO: u32 = 1_000_000;
++
++/// O primeiro `seq` desta geração de mídia.
++fn primeiro_seq_da(geracao: u32) -> u32 {
++    geracao * PASSO_DA_GERACAO
++}
++
++/// De que geração de mídia este `seq` é.
++fn geracao_de(seq: u32) -> u32 {
++    seq / PASSO_DA_GERACAO
++}
++
+ /// Põe este par cru a transmitir uma tela, e devolve o nome que o servidor deu
+ /// a ela.
+ ///
+@@ -319,6 +359,15 @@
+ /// assiste precisa de quadros **novos** depois de cada mudança de caminho, e
+ /// uma rajada finita acabaria antes de a afirmação poder ser feita.
+ async fn compartilhar(par: &mut Par) -> Result<ScreenId> {
++    compartilhar_desde(par, primeiro_seq_da(0)).await
++}
++
++/// O mesmo, numerando os quadros a partir de `primeiro`.
++///
++/// Existe para [`PASSO_DA_GERACAO`]: a segunda transmissão de um teste de
++/// reinício precisa produzir imagem que **não se confunda** com a da primeira,
++/// e o `ScreenId` não serve para isso.
++async fn compartilhar_desde(par: &mut Par, primeiro: u32) -> Result<ScreenId> {
+     frame::write(&mut par.envio, &ClientMessage::StartScreenShare).await?;
+     let screen = loop {
+         match frame::read::<ServerMessage>(&mut par.recebe).await? {
+@@ -346,7 +395,7 @@
+     fluxo.write_all(&abertura).await?;
+ 
+     tokio::spawn(async move {
+-        let mut seq = 0_u32;
++        let mut seq = primeiro;
+         loop {
+             if fluxo.write_all(&quadro(seq)).await.is_err() {
+                 return;
+@@ -474,7 +523,21 @@
+ /// servidor**, e ninguém pediu par nenhum ainda.
+ async fn cenario() -> Result<Cenario> {
+     let (endereco, servidor) = servidor_com(Location::Memory).await?;
++    cenario_sobre(endereco, servidor, 0).await
++}
+ 
++/// O mesmo, sobre um servidor que quem chama já subiu, e com a mídia marcada.
++///
++/// Separado de [`cenario`] para o teste do reinício, que precisa das duas coisas
++/// que aquele fixa: um servidor com **porta e banco escolhidos** (ver
++/// [`servidor_em`]) e imagem de uma **geração** identificável (ver
++/// [`PASSO_DA_GERACAO`]). Tudo o que vem depois desta linha é igual para os dois
++/// — é o mesmo cenário, e não um parecido.
++async fn cenario_sobre(
++    endereco: SocketAddr,
++    servidor: Arc<Daemon>,
++    geracao: u32,
++) -> Result<Cenario> {
+     let mut compartilha = abrir(endereco, 1).await?;
+     let sala = compartilha.sala;
+     frame::write(
+@@ -498,7 +561,7 @@
+ 
+     let mut empresta = empresta;
+     let mut assiste = assiste;
+-    let screen = compartilhar(&mut compartilha).await?;
++    let screen = compartilhar_desde(&mut compartilha, primeiro_seq_da(geracao)).await?;
+     let copias = ContadorDeCopias::de(&servidor, screen);
+ 
+     // Os dois entram ligados no cano do servidor, porque é o que
+@@ -2129,6 +2192,359 @@
+     drop(compartilha);
+     drop(empresta);
+     drop(de_novo);
++    servidor.shutdown();
++    Ok(())
++}
++
++/// A geração de mídia de antes da queda do servidor.
++const ANTES_DA_QUEDA: u32 = 0;
++
++/// A geração de mídia da transmissão que nasce depois da volta.
++///
++/// Um número diferente, e não «a mesma tela de novo»: com o `ScreenId`
++/// recomeçando do mesmo lugar num daemon reiniciado (ver [`PASSO_DA_GERACAO`]),
++/// é a marca no corpo do quadro que separa recuperação de fila velha.
++const DEPOIS_DA_VOLTA: u32 = 1;
++
++/// **A conexão que caiu não fala pela que a substitui, e o par volta a servir a
++/// substituta.**
++///
++/// # A lacuna que este teste fecha
++///
++/// [`Motor::cair`](seele_core::enlace) é o **único** caminho em que o motor
++/// sobrevive ao corte: a sessão entra na bateria interna, e volta noutra
++/// conexão. Todos os outros fins de caminho de par deste arquivo matam o motor
++/// junto — `sair()`, a destruição do `Enlace`, a morte do par —, e por isso
++/// nenhum deles exercita `Motor::largar_o_caminho_entre_pares`, que é o guarda
++/// escrito para **esta** substituição.
++///
++/// Ele existia provado por unidade, em duas metades, e nenhuma delas toca a
++/// rede: `enlace::testes::cair_devolve_a_vaga_de_quem_estava_servindo_um_par`
++/// monta a tarefa que serve à mão, e
++/// `enlace::testes::cair_nao_deixa_a_fila_da_conexao_velha_alcancar_a_substituta`
++/// escreve na fila à mão e a lê de volta. A costura — servidor de verdade caindo
++/// e voltando, dois `Enlace` públicos atravessando a bateria, e o caminho por
++/// par tendo de existir de novo do outro lado — é o que faltava, e é o §8 do
++/// relatório da entrega anterior.
++///
++/// # Reconexão, e não destino novo
++///
++/// O servidor volta **na mesma porta e com o mesmo banco** — a receita de
++/// `bateria_interna.rs`. As duas metades importam: a porta, porque o `Destino`
++/// do cliente não muda e a reconexão volta ao endereço que atendeu; o banco em
++/// arquivo, porque com ele o certificado é o mesmo, e um certificado novo seria
++/// **troca de identidade** para o TOFU do cliente — o alerta do ADR 0003, e o
++/// contrário de uma reconexão. Que os dois `Enlace` voltem a `Online` sem serem
++/// recusados é, por si, a prova de que foi reconexão.
++///
++/// # Os comandos explícitos, e o que **não** volta sozinho
++///
++/// `Motor::cair` zera `tela_pedida` e para a captura de propósito: uma
++/// transmissão que voltasse sozinha poria a tela de alguém no ar sem ninguém ter
++/// apertado nada. Este teste respeita isso e **não** introduz retomada
++/// automática nenhuma — quem compartilhava reaperta o botão (um
++/// `StartScreenShare` novo, numa conexão nova), e quem assistia pede a tela de
++/// novo (`assistir(tela, true)`). O que o contrato manda voltar sozinho volta
++/// sozinho, e é afirmado: a sala de voz e a **declaração de quem empresta**, que
++/// `Motor::tentar` redeclara com a escolha guardada.
++///
++/// # As quatro coisas que impedem esta prova de ser vazia
++///
++/// 1. **Havia caminho de par antes da queda.** [`ate_o_par_estar_servindo`]
++///    exige um segundo de imagem pelo par com o servidor subindo uma cópia só;
++///    sem isso, o que se mede depois não diz nada sobre substituição de caminho
++///    nenhum.
++/// 2. **A mídia nova é distinguível da velha.** Toda afirmação daqui para baixo
++///    exige [`DEPOIS_DA_VOLTA`] no corpo do quadro. Um quadro da geração antiga
++///    chegando depois da volta **derruba o teste**, e é assim que a interferência
++///    da conexão anterior aparece: o `ScreenId` sozinho não a acusaria, porque o
++///    daemon reiniciado reemite o mesmo.
++/// 3. **O piso é tirado depois da nomeação.** O servidor liga quem está na sala
++///    ao cano dele quando a tela abre; drenar só depois de ele ter apontado o par
++///    e desligado esse cano é o que separa quadro enfileirado de imagem nova.
++/// 4. **A imagem tem de chegar dentro de [`SEM_IMAGEM_TOLERAVEL`].** Uma vaga de
++///    atendimento que não voltou não impede a imagem de aparecer — ela a atrasa
++///    em `PRAZO_DO_PAR`, com o cano do servidor já desligado. É tela preta, e sem
++///    este prazo o teste a daria por boa.
++#[tokio::test(flavor = "multi_thread")]
++async fn a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo() -> Result<()> {
++    let pasta = tempfile::tempdir()?;
++    let banco = pasta.path().join("seele.db");
++    let (endereco, primeiro) = servidor_em(0, Location::File(banco.clone())).await?;
++    let porta = endereco.port();
++
++    let Cenario {
++        servidor,
++        compartilha,
++        mut empresta,
++        mut assiste,
++        screen,
++        copias,
++    } = cenario_sobre(endereco, primeiro, ANTES_DA_QUEDA).await?;
++
++    let quem_empresta = empresta.sessao().person;
++    let quem_assiste = assiste.sessao().person;
++    let conexao_velha_de_quem_empresta = empresta.sessao().id;
++    let conexao_velha_de_quem_assiste = assiste.sessao().id;
++
++    let piso =
++        ate_o_par_estar_servindo(&mut assiste, screen, &copias, "a queda do servidor").await?;
++    {
++        let pares = servidor.server().pares.lock().await;
++        assert!(
++            pares.ja_servindo().contains(&quem_empresta),
++            "o servidor apontou um par e não o contou como ocupado: não havia caminho de par \
++             para a queda substituir"
++        );
++    }
++    println!(
++        "o par serviu a tela {screen} até o quadro {piso:?} (geração {ANTES_DA_QUEDA}); agora o \
++         servidor cai"
++    );
++
++    // ---- a queda, do jeito que `bateria_interna.rs` a produz
++    servidor.shutdown();
++    servidor.wait_idle().await;
++    drop(servidor);
++
++    // **Os dois `Enlace` continuam vivos, e é isso que os distingue dos outros
++    // testes deste arquivo.** Ninguém foi destruído nem saiu: o motor sobrevive
++    // ao corte, entra na bateria, e é dele que a limpeza do caminho de par tem
++    // de partir.
++    esperar(&mut assiste, "quem assiste entrar na bateria", |aviso| {
++        matches!(
++            aviso,
++            Aviso::Estado {
++                estado: Link::InternalBattery { .. },
++                ..
++            }
++        )
++        .then_some(())
++    })
++    .await?;
++    esperar(&mut empresta, "quem empresta entrar na bateria", |aviso| {
++        matches!(
++            aviso,
++            Aviso::Estado {
++                estado: Link::InternalBattery { .. },
++                ..
++            }
++        )
++        .then_some(())
++    })
++    .await?;
++    println!("os dois `Enlace` viram a queda e entraram na bateria interna");
++
++    // ---- e o servidor volta: mesma porta, mesmo banco, mesmo certificado
++    let (_, servidor) = servidor_em(porta, Location::File(banco)).await?;
++
++    esperar(&mut assiste, "quem assiste reconectar", |aviso| {
++        matches!(aviso, Aviso::Reconectado { .. }).then_some(())
++    })
++    .await?;
++    esperar(&mut empresta, "quem empresta reconectar", |aviso| {
++        matches!(aviso, Aviso::Reconectado { .. }).then_some(())
++    })
++    .await?;
++    assert_eq!(assiste.estado(), Link::Online);
++    assert_eq!(empresta.estado(), Link::Online);
++
++    // **A conexão é outra, e quem diz isso é o par de avisos — nunca o
++    // `SessionId`.**
++    //
++    // Medido, e a primeira versão deste teste errava aqui: `SessionId` sai de
++    // `Registry::issue`, o mesmo contador em memória que emite o `ScreenId`
++    // (ver [`PASSO_DA_GERACAO`]). Um daemon reiniciado recomeça a numerar do
++    // mesmo lugar, e a conexão nova pode receber **exatamente o id da que
++    // caiu** — depende só da ordem em que as três reconexões chegam. Um
++    // `assert_ne!` sobre ele reprovava uma volta em cada oito, e reprovava por
++    // motivo errado: não havia defeito nenhum nas voltas que ele derrubou.
++    //
++    // O que prova a substituição é o caminho público que este teste já
++    // atravessou: `InternalBattery` (a conexão morreu) seguido de
++    // `Reconectado`, que `Motor::tentar` só emite depois de um `Client` novo ter
++    // apertado a mão. Os ids ficam impressos porque ajudam a ler o rastro, e
++    // não porque afirmem alguma coisa.
++    assert_eq!(
++        assiste.sessao().person,
++        quem_assiste,
++        "quem assiste voltou como outra pessoa: isto é troca de identidade, e não reconexão"
++    );
++    assert_eq!(
++        empresta.sessao().person,
++        quem_empresta,
++        "quem empresta voltou como outra pessoa: isto é troca de identidade, e não reconexão"
++    );
++    println!(
++        "reconectados: quem assiste {conexao_velha_de_quem_assiste} → {}, quem empresta \
++         {conexao_velha_de_quem_empresta} → {} (as pessoas são as mesmas)",
++        assiste.sessao().id,
++        empresta.sessao().id
++    );
++
++    // **A declaração de quem empresta volta sozinha, e é contrato.**
++    // `Motor::tentar` a refaz com a escolha guardada — sem isso, quem optou por
++    // emprestar sairia da malha na primeira queda de rede sem nada na tela mudar,
++    // e o resto deste teste mediria o caminho de sempre.
++    {
++        let fim = Instant::now() + PACIENCIA;
++        loop {
++            let declarado = {
++                let pares = servidor.server().pares.lock().await;
++                pares
++                    .declaracao_de(quem_empresta)
++                    .map(|declaracao| declaracao.emprestando)
++            };
++            if declarado == Some(true) {
++                break;
++            }
++            assert!(
++                Instant::now() < fim,
++                "quem empresta reconectou e o servidor novo não o tem como quem empresta \
++                 (declaração: {declarado:?}): a escolha não sobreviveu à substituição da conexão"
++            );
++            tokio::time::sleep(Duration::from_millis(20)).await;
++        }
++    }
++
++    // ---- a transmissão recomeça, e **por um comando explícito**
++    //
++    // A captura morre na queda por desenho (`Motor::cair` para a tela e esquece o
++    // pedido), então quem compartilha reconecta e reaperta o botão. Nada aqui
++    // retoma compartilhamento sozinho — seria construir a resposta que o teste
++    // deveria estar exigindo.
++    drop(compartilha);
++    let mut compartilha = abrir(endereco, 1).await?;
++    let sala = compartilha.sala;
++    frame::write(
++        &mut compartilha.envio,
++        &ClientMessage::EnterVoiceRoom {
++            voice_room: sala,
++            password: None,
++        },
++    )
++    .await?;
++    let nova = compartilhar_desde(&mut compartilha, primeiro_seq_da(DEPOIS_DA_VOLTA)).await?;
++    let copias = ContadorDeCopias::de(&servidor, nova);
++    println!(
++        "a transmissão nova é a tela {nova} (a de antes era a {screen}), com mídia da geração \
++         {DEPOIS_DA_VOLTA}"
++    );
++
++    esperar(&mut assiste, "quem assiste ver a tela nova", |aviso| {
++        matches!(aviso, Aviso::TelaAbriu { tela, .. } if *tela == nova).then_some(())
++    })
++    .await?;
++    esperar(&mut empresta, "quem empresta ver a tela nova", |aviso| {
++        matches!(aviso, Aviso::TelaAbriu { tela, .. } if *tela == nova).then_some(())
++    })
++    .await?;
++    ate(
++        "o servidor contar as duas cópias que ele mesmo sobe",
++        || copias.agora() == 2,
++    )
++    .await?;
++
++    // O outro comando explícito: quem assistia pede a tela **de novo**. O pedido
++    // anterior morreu com a conexão anterior, e é assim que tem de ser.
++    let pedido_em = Instant::now();
++    assiste.assistir(nova, true).await?;
++
++    let fim = Instant::now() + PACIENCIA;
++    loop {
++        let apontado = servidor.server().pares.lock().await.quem_foi_apontado(nova);
++        if apontado == Some(quem_empresta) {
++            break;
++        }
++        assert!(
++            Instant::now() < fim,
++            "o servidor não apontou quem empresta para servir a transmissão nova (apontou \
++             {apontado:?}): a vaga de atendimento dele pode não ter voltado da conexão anterior"
++        );
++        tokio::time::sleep(Duration::from_millis(20)).await;
++    }
++    ate(
++        "o servidor desligar o cano de quem assiste, por ter apontado o par",
++        || copias.agora() == 1,
++    )
++    .await?;
++
++    // Perna 3: o piso sai **daqui**, com o cano do servidor já desligado.
++    let mut piso_novo = maior_seq_ja_enfileirado(&mut assiste, nova).await;
++    println!("a fila de quem assiste esvaziou no quadro {piso_novo:?}; daqui para cima é o par");
++
++    for indice in 0..QUADROS_PARA_PROVAR {
++        let (seq, bytes) = esperar(
++            &mut assiste,
++            "um quadro da geração nova chegar pelo par depois da reconexão, acima do piso",
++            |aviso| match aviso {
++                Aviso::TelaQuadro { tela, bytes, .. } if *tela == nova => {
++                    let seq = seq_de(bytes)?;
++                    // **A interferência da conexão anterior morre aqui.** O
++                    // `ScreenId` não a acusaria: o daemon reiniciado reemitiu o
++                    // mesmo nome, e um quadro entregue por uma tarefa de par que
++                    // sobrevivesse à queda entraria por este mesmo braço com o
++                    // rótulo certo. A marca no corpo é o que os separa.
++                    assert_eq!(
++                        geracao_de(seq),
++                        DEPOIS_DA_VOLTA,
++                        "chegou o quadro {seq}, da geração {} — imagem da conexão que caiu, \
++                         entregue depois da reconexão e com o nome da transmissão nova: uma \
++                         tarefa de par sobreviveu à substituição da conexão e continua \
++                         escrevendo no canal de avisos desta sessão",
++                        geracao_de(seq)
++                    );
++                    (piso_novo.is_none_or(|p| seq > p)).then(|| (seq, bytes.clone()))
++                }
++                _ => None,
++            },
++        )
++        .await?;
++        assert_eq!(
++            copias.agora(),
++            1,
++            "o servidor voltou a subir a cópia de quem assiste (quadro {indice} de \
++             {QUADROS_PARA_PROVAR}, seq {seq}): depois da reconexão o caminho por par não se \
++             refez, e a subida que a malha existe para aliviar voltou a sair de quem hospeda"
++        );
++        assert_eq!(
++            bytes,
++            corpo(seq),
++            "o que chegou pelo par não é o que saiu de quem compartilha (quadro {indice} de \
++             {QUADROS_PARA_PROVAR}, seq {seq})"
++        );
++        if indice == 0 {
++            let esperou = pedido_em.elapsed();
++            assert!(
++                esperou < SEM_IMAGEM_TOLERAVEL,
++                "o espectador passou {esperou:?} sem um quadro depois de pedir a tela de novo, \
++                 com o cano do servidor já desligado: quem emprestava recusou o pedido em \
++                 silêncio pela vaga que o caminho de par da conexão anterior não devolveu, e a \
++                 imagem só chegou depois de a discagem gastar o prazo inteiro"
++            );
++            println!("o primeiro quadro pelo par chegou em {esperou:?}");
++        }
++        piso_novo = Some(seq);
++    }
++    println!(
++        "{QUADROS_PARA_PROVAR} quadros seguidos da geração {DEPOIS_DA_VOLTA} chegaram pelo par \
++         depois da reconexão, até o {piso_novo:?}, com o servidor subindo uma cópia só"
++    );
++
++    // E o servidor não guarda nomeação nenhuma da conexão que caiu: a única de
++    // pé é a que ele fez para a substituta.
++    {
++        let pares = servidor.server().pares.lock().await;
++        let ocupados = pares.ja_servindo();
++        assert!(
++            ocupados.len() == 1 && ocupados.contains(&quem_empresta),
++            "o servidor conta como ocupado alguém que não é o par apontado agora ({ocupados:?})"
++        );
++    }
++
++    drop(compartilha);
++    drop(empresta);
++    drop(assiste);
+     servidor.shutdown();
+     Ok(())
+ }

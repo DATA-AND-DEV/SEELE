@@ -1306,6 +1306,7 @@ impl Enlace {
             repasse: Arc::new(RepasseDeTela::default()),
             resultados_do_par,
             resultados_do_par_tx,
+            tarefas_de_par: TarefasDePar::default(),
         };
         // **Não declara identidade aqui.** Achado do fix round 2:
         // `conectar_por` é o funil que **cada candidato** de uma conexão com
@@ -2029,6 +2030,21 @@ struct Motor {
     /// para mandar de volta. Clonada a cada tarefa nova: um `Sender` barato
     /// de clonar, e cada tarefa é dona da própria cópia.
     resultados_do_par_tx: mpsc::UnboundedSender<ResultadoDoPar>,
+    /// As tarefas soltas do caminho entre pares — a única coisa que alcança
+    /// aquele caminho depois de ele ter começado.
+    ///
+    /// **Sem elas, `assistir(tela, false)` mentia.** Ele mandava
+    /// `UnwatchScreen` ao servidor e nada mais: a tarefa de
+    /// [`Motor::assistir_por_par`] seguia viva, lendo do par, e quem tinha
+    /// acabado de fechar a janela continuava recebendo a tela por baixo —
+    /// gastando a subida de quem empresta com imagem que ninguém olhava. Pior,
+    /// quando aquele fluxo enfim terminasse, o `ParFalhou` de rotina sairia e
+    /// pediria ao servidor a tela de volta.
+    ///
+    /// **E guardá-las num mapa cru não bastava**, pelo mesmo motivo por outra
+    /// porta: um mapa largado desprende as tarefas em vez de cancelá-las, e
+    /// elas sobreviviam à morte do motor inteiro. Ver [`TarefasDePar`].
+    tarefas_de_par: TarefasDePar,
 }
 
 /// Uma transmissão desta pessoa que está no ar.
@@ -2046,6 +2062,152 @@ struct TelaViva {
     /// O que a pessoa escolheu, guardado porque o teto é recalculado a cada
     /// `ScreenViewers` e a escolha é uma das pernas dele (§5).
     limites: LimitesDeTela,
+}
+
+/// As tarefas soltas do caminho entre pares, e quem é dono delas.
+///
+/// # Uma alça largada desprende a tarefa; não a cancela
+///
+/// Enquanto estas alças moravam num `HashMap` cru dentro do [`Motor`], os dois
+/// caminhos que matam o motor largavam o mapa sem tocá-lo — [`Enlace::drop`]
+/// aborta a tarefa de [`Motor::rodar`], e um `Comando::Sair` a faz voltar —, e
+/// cada tarefa de par ficava **viva** depois disso: lendo do par, com a conexão
+/// QUIC de pé, gastando a subida de quem empresta por uma sessão que já tinha
+/// acabado. E não em silêncio: a tarefa escreve no mesmo canal de avisos que o
+/// `Enlace` continua segurando depois de `sair()`, então a casca recebia quadro
+/// de tela **depois** do `Encerrado` que ela mesma pediu.
+///
+/// A tarefa de servir um par ([`Motor::servir_par`]) era pior: a alça dela não
+/// era guardada em lugar nenhum. Ela não tinha sequer o acidente que salvava as
+/// outras — descobrir no primeiro `send` que ninguém escuta —, porque não fala
+/// com a casca: repassa bytes ao par até a conexão morrer.
+///
+/// # Por que um dono com `Drop`, e não uma chamada de limpeza
+///
+/// Porque «alguém tem de se lembrar de cancelar» é a forma de defeito que este
+/// arquivo já pagou duas vezes. Atrás de um dono, cancelar passa a ser o que
+/// acontece quando o motor some — por `abort`, por `return`, ou por um caminho
+/// que ainda não existe.
+///
+/// É a escolha oposta à de [`TelaViva`], e o contraste é de propósito: a bomba
+/// tem um fim direito a esperar — o `Fim` que fecha o fluxo —, e abortá-la
+/// cortaria um quadro no meio. Estas tarefas não têm fim nenhum a esperar:
+/// passam a vida paradas num `read` do par, sem ponto onde conferir um pedido
+/// de parada.
+#[derive(Default)]
+struct TarefasDePar {
+    /// A alça da tarefa que busca cada tela num par.
+    ///
+    /// Por [`ScreenId`] porque é isso que o comando nomeia — ver
+    /// [`Motor::assistir_por_par`].
+    caminhos: std::collections::HashMap<ScreenId, tokio::task::JoinHandle<()>>,
+    /// A alça da tarefa que serve um par, quando esta máquina está servindo.
+    ///
+    /// Uma só porque no A1 quem empresta serve um par por vez — ver
+    /// [`Motor::atendendo_pares`] e [`VagaDeAtendimento`].
+    servindo: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl TarefasDePar {
+    /// Passa a ser dona da tarefa que busca esta tela num par.
+    ///
+    /// Um `AssistaTelaPor` novo para a mesma tela substitui a alça e aborta a
+    /// anterior: duas tarefas lendo a mesma tela seriam duas cópias chegando, e
+    /// a segunda nomeação é a que o servidor tem de pé.
+    fn assistir(&mut self, screen: ScreenId, tarefa: tokio::task::JoinHandle<()>) {
+        // As que já acabaram sozinhas saem daqui: a alça de uma tarefa morta
+        // não aborta nada, e sem esta linha o mapa cresceria por sessão a cada
+        // transmissão assistida.
+        self.caminhos.retain(|_, alca| !alca.is_finished());
+        if let Some(anterior) = self.caminhos.insert(screen, tarefa) {
+            anterior.abort();
+        }
+    }
+
+    /// Derruba o caminho desta tela, se houver um.
+    fn parar_de_assistir(&mut self, screen: ScreenId) {
+        if let Some(caminho) = self.caminhos.remove(&screen) {
+            caminho.abort();
+        }
+    }
+
+    /// Passa a ser dona da tarefa que serve um par.
+    ///
+    /// A anterior é abortada por garantia e não por necessidade:
+    /// [`VagaDeAtendimento`] já impede que uma segunda comece enquanto a
+    /// primeira corre, e uma alça que sobre aqui é de tarefa morta, sobre a
+    /// qual `abort` não faz nada.
+    fn servir(&mut self, tarefa: tokio::task::JoinHandle<()>) {
+        if let Some(anterior) = self.servindo.replace(tarefa) {
+            anterior.abort();
+        }
+    }
+
+    /// Cancela tudo o que está de pé.
+    ///
+    /// Chamado por [`Motor::cair`], onde o motor **sobrevive** ao corte e por
+    /// isso não há `Drop` nenhum para fazer isto sozinho.
+    fn largar_tudo(&mut self) {
+        for (_, caminho) in self.caminhos.drain() {
+            caminho.abort();
+        }
+        if let Some(servindo) = self.servindo.take() {
+            servindo.abort();
+        }
+    }
+}
+
+impl Drop for TarefasDePar {
+    fn drop(&mut self) {
+        self.largar_tudo();
+    }
+}
+
+/// A vaga de «estou servindo um par», enquanto ela está tomada.
+///
+/// # Por que um punho com `Drop`, e não duas escritas
+///
+/// A vaga era tomada no laço do motor e devolvida na **última linha** do corpo
+/// da tarefa que serve. Enquanto ninguém cancelava aquela tarefa, as duas
+/// escritas bastavam. Cancelá-la — e é o que [`TarefasDePar`] passou a fazer —
+/// faz a última linha nunca correr, e uma vaga que não volta é esta máquina
+/// **fora da malha para sempre**, sem erro em lugar nenhum: o servidor continua
+/// apontando este par, porque a vaga dele voltou, e o cliente recusa cada
+/// pedido em silêncio pela vaga que ficou.
+///
+/// Como guarda, devolver a vaga passa a ser o que acontece de todo jeito — pelo
+/// fim do corpo, pelas saídas antecipadas de [`Motor::servir_par`], e pelo
+/// `abort`, que solta a tarefa e com ela tudo o que ela segurava.
+struct VagaDeAtendimento(Arc<std::sync::atomic::AtomicBool>);
+
+impl VagaDeAtendimento {
+    /// Toma a vaga, se ela estiver livre.
+    ///
+    /// `compare_exchange` e não um `load` seguido de `store`: conferir e tomar
+    /// viram um ato só, sem instante entre os dois por onde um segundo pedido
+    /// passasse pela mesma porta.
+    ///
+    /// `AcqRel` e não `Relaxed` porque a vaga guarda mais do que si mesma: quem
+    /// a toma arma a ponta com `par::passar_a_atender`, e quem a devolve a
+    /// desarmou antes. As duas metades têm de ser vistas em ordem por quem
+    /// tomar a vaga depois.
+    fn tomar(punho: &Arc<std::sync::atomic::AtomicBool>) -> Option<Self> {
+        punho
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .ok()?;
+        Some(Self(Arc::clone(punho)))
+    }
+}
+
+impl Drop for VagaDeAtendimento {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// Em que faixa o sinal da voz começa, antes de o servidor dizer a primeira.
@@ -2268,12 +2430,58 @@ impl Motor {
         // poria a tela de alguém no ar sem que ninguém tivesse apertado nada.
         self.tela_pedida = None;
         self.parar_a_tela();
+        self.largar_o_caminho_entre_pares();
         let agora = self.inicio.elapsed();
         let antes = self.bateria.state();
         self.bateria.on_connection_lost(agora);
         if antes != self.bateria.state() {
             self.anunciar();
         }
+    }
+
+    /// O caminho entre pares não sobrevive à conexão que o montou.
+    ///
+    /// # Por que a queda derruba isto, e não só a saída
+    ///
+    /// [`Motor::encerrar`] não precisa disto: `rodar` devolve logo depois, o
+    /// `Motor` é solto, e [`TarefasDePar`] cancela tudo ao ser solto junto.
+    /// **[`Motor::cair`] é o caso em que o motor sobrevive ao corte** — a
+    /// sessão entra na bateria e volta noutra conexão —, e é o único em que
+    /// alguém tem de pedir.
+    ///
+    /// E tem de pedir porque nada daquele caminho vale para a conexão nova. A
+    /// nomeação que pôs estas tarefas de pé foi feita pela sessão que morreu, e
+    /// o servidor já a apagou do lado dele (`Pares::saiu`); as tarefas discam
+    /// pela ponta QUIC daquele cliente, que morreu com ele. O que sobra é
+    /// imagem chegando por um caminho que ninguém mais reconhece.
+    ///
+    /// # A fila é trocada, e não esvaziada
+    ///
+    /// `resultados_do_par` não tem fundo, e o braço que o lê em [`Motor::rodar`]
+    /// **só existe quando há cliente**: durante a bateria tudo o que as tarefas
+    /// disseram fica parado ali. A primeira volta do laço depois da reconexão
+    /// entregaria esses relatos à conexão nova — um `ParFalhou` de uma nomeação
+    /// que morreu com a sessão anterior, mandando o servidor desfazer um
+    /// caminho que ele acabou de montar para a substituta.
+    ///
+    /// Trocar o par de pontas, em vez de drenar a fila, é o que fecha a corrida
+    /// junto: uma tarefa abortada ainda pode escrever entre o pedido de
+    /// cancelamento e o `await` em que ela morre, e drenar antes disso deixaria
+    /// esse relato passar. Com as pontas trocadas ela escreve para um recebedor
+    /// que já não existe, e o `send` falha — que é o que se quer dela.
+    ///
+    /// O que vier **depois** da queda continua chegando: quem for criado da
+    /// reconexão em diante clona a ponta nova.
+    fn largar_o_caminho_entre_pares(&mut self) {
+        self.tarefas_de_par.largar_tudo();
+        // O repasse ao par morre com elas: o `Sender` largado fecha o canal, e
+        // quem estivesse escrevendo termina o fluxo direito em vez de ficar
+        // parado num canal que ninguém mais alimenta. Sem isto, o punho do
+        // repasse atravessaria a queda apontando para um par de outra sessão.
+        self.repasse.desligar();
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.resultados_do_par_tx = tx;
+        self.resultados_do_par = rx;
     }
 
     /// Conta à casca onde o enlace está e quanto falta.
@@ -2611,6 +2819,21 @@ impl Motor {
                 if quero {
                     cliente.watch_screen(tela).await
                 } else {
+                    // **Quem para de assistir para de receber, e o caminho do
+                    // par cai junto.** Avisar só o servidor deixava metade: a
+                    // tarefa de [`Motor::assistir_por_par`] continuava lendo do
+                    // par, e a imagem seguia chegando por baixo do pedido de
+                    // parar — gastando a subida de quem empresta com uma janela
+                    // fechada. E o `ParFalhou` de rotina que aquele fluxo
+                    // acabaria mandando pedia a tela de volta ao servidor.
+                    //
+                    // `abort` e não um sinal cooperativo: a tarefa passa a vida
+                    // parada num `read` do par, e ela não tem ponto onde
+                    // conferir um pedido de parada. É por isso que ela é **uma
+                    // tarefa só** — ver [`ler_a_tela_alheia`]: enquanto a
+                    // leitura acontecia numa segunda tarefa, abortar esta
+                    // deixava aquela lendo.
+                    self.tarefas_de_par.parar_de_assistir(tela);
                     cliente.unwatch_screen(tela).await
                 }
             }
@@ -2850,7 +3073,7 @@ impl Motor {
         };
         let avisos = self.avisos.clone();
         let resultados = self.resultados_do_par_tx.clone();
-        tokio::spawn(async move {
+        let tarefa = tokio::spawn(async move {
             match discar_ate_o_prazo(&ponta, &enderecos, &impressao, &identidade).await {
                 par::PorOndeAssistir::Par(ligado) => {
                     // A conta de bytes é de quem empresta — `crate::par::repassar`
@@ -2859,14 +3082,23 @@ impl Motor {
                     // `DeOndeVeioATela`: um fluxo que acaba no meio é o par
                     // tendo caído, e é daqui que o servidor fica sabendo.
                     match tokio::time::timeout(PRAZO_DO_PAR, ligado.conexao.accept_uni()).await {
-                        Ok(Ok(fluxo)) => escoar_tela_alheia(
-                            avisos,
-                            fluxo,
-                            DeOndeVeioATela::Par {
-                                screen,
-                                resultados: resultados.clone(),
-                            },
-                        ),
+                        // [`ler_a_tela_alheia`] e não [`escoar_tela_alheia`],
+                        // que é a diferença entre a alça valer e não valer:
+                        // `escoar` abre uma tarefa nova, e abortar **esta**
+                        // deixaria aquela lendo do par. Aqui a leitura acontece
+                        // dentro da tarefa que o motor guarda, e é por isso que
+                        // o corpo foi separado da tarefa.
+                        Ok(Ok(fluxo)) => {
+                            ler_a_tela_alheia(
+                                avisos,
+                                fluxo,
+                                DeOndeVeioATela::Par {
+                                    screen,
+                                    resultados: resultados.clone(),
+                                },
+                            )
+                            .await;
+                        }
                         Ok(Err(erro)) => {
                             tracing::warn!(%erro, ?screen, "o par ligou e a transmissão não abriu");
                             let _ = resultados.send(ResultadoDoPar::ParFalhou {
@@ -2895,6 +3127,7 @@ impl Motor {
                 }
             }
         });
+        self.tarefas_de_par.assistir(screen, tarefa);
     }
 
     /// `ServerMessage::SirvaTelaPara`: passe a atender, e disque para o outro
@@ -2906,10 +3139,12 @@ impl Motor {
     /// quem recebe manda essa mensagem, porque só quem recebe sabe que a
     /// imagem parou — quem empresta pode ter caído sem chegar a saber de nada.
     fn servir_par(&mut self, screen: ScreenId, enderecos: Vec<SocketAddr>, impressao: String) {
-        if self
-            .atendendo_pares
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        // **Tomada aqui, e devolvida por quem a segura.** Ver
+        // [`VagaDeAtendimento`]: enquanto isto eram duas escritas, a devolução
+        // morava na última linha do corpo da tarefa — e um `abort` faz essa
+        // linha nunca correr. Como guarda, cada saída antecipada abaixo
+        // devolve a vaga ao voltar, sem precisar dizer.
+        let Some(vaga) = VagaDeAtendimento::tomar(&self.atendendo_pares) else {
             // No A1 quem empresta serve um par por vez (`par::atender` só
             // aceita uma ligação). Sem vaga, e sem resposta esperada desta
             // mensagem — só o rastro.
@@ -2918,7 +3153,7 @@ impl Motor {
                 "um pedido para servir chegou enquanto este par já servia outro"
             );
             return;
-        }
+        };
         let Some(ponta) = self.ponta_de_pares() else {
             tracing::warn!(
                 ?screen,
@@ -2933,11 +3168,41 @@ impl Motor {
                 return;
             }
         };
-        self.atendendo_pares
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        let atendendo_pares = Arc::clone(&self.atendendo_pares);
+        self.passar_a_servir(vaga, ponta, identidade, screen, enderecos, impressao);
+    }
+
+    /// Põe de pé a tarefa que serve este par, e passa a ser dono dela.
+    ///
+    /// # Por que separada de [`Motor::servir_par`]
+    ///
+    /// Porque é a metade que dá para provar. O que fica lá em cima precisa de
+    /// um [`Client`] vivo — `ponta_de_pares` sai dele —, e um `Client` precisa
+    /// de um servidor do outro lado: nada disso cabe num teste de unidade
+    /// deste crate, e é por isso que o resto do caminho entre pares é provado
+    /// em `seele-conformance`. **A posse da alça não estava em nenhum dos
+    /// dois.** Medido: com `self.tarefas_de_par.servir(tarefa)` trocado por
+    /// largar a alça, a suíte inteira continuava verde.
+    ///
+    /// Daqui para baixo não há `Client` nenhum — só uma ponta QUIC, uma
+    /// identidade e endereços —, e é o que
+    /// `testes::cair_devolve_a_vaga_de_quem_estava_servindo_um_par` monta à
+    /// mão para prender as duas coisas que este método faz: guardar a alça e
+    /// entregar a vaga a quem a solta.
+    fn passar_a_servir(
+        &mut self,
+        vaga: VagaDeAtendimento,
+        ponta: quinn::Endpoint,
+        identidade: par::Identidade,
+        screen: ScreenId,
+        enderecos: Vec<SocketAddr>,
+        impressao: String,
+    ) {
         let repasse = Arc::clone(&self.repasse);
-        tokio::spawn(async move {
+        let tarefa = tokio::spawn(async move {
+            // **A vaga viaja para dentro da tarefa, e morre com ela.** É o que
+            // faz o `abort` de [`TarefasDePar`] devolvê-la: soltar a tarefa
+            // solta tudo o que ela segurava, e o guarda é uma dessas coisas.
+            let _vaga = vaga;
             let ligado = servir_um_par(ponta, identidade, enderecos, impressao).await;
             match ligado {
                 Some(ligado) => {
@@ -2961,9 +3226,14 @@ impl Motor {
             // é «estou servindo um par», e servir é o repasse — devolvê-la
             // assim que a conexão fecha deixaria um segundo `SirvaTelaPara`
             // entrar por cima de um repasse em curso, e `crate::par::atender`
-            // só tem uma vaga.
-            atendendo_pares.store(false, std::sync::atomic::Ordering::Relaxed);
+            // só tem uma vaga. É onde `_vaga` morre, e é por isso que ele é
+            // ligado no topo deste corpo e não perto de `servir_um_par`.
+            drop(_vaga);
         });
+        // E o motor passa a ser dono dela: sem esta linha a tarefa não tinha
+        // alça nenhuma em lugar nenhum, e sobrevivia à sessão inteira
+        // repassando a tela a um par por uma conexão que já tinha morrido.
+        self.tarefas_de_par.servir(tarefa);
     }
 }
 
@@ -3491,8 +3761,25 @@ fn escoar_tela_alheia(
     fluxo: quinn::RecvStream,
     de_onde: DeOndeVeioATela,
 ) {
+    tokio::spawn(ler_a_tela_alheia(avisos, fluxo, de_onde));
+}
+
+/// O corpo de [`escoar_tela_alheia`], sem a tarefa.
+///
+/// **Separado para que o caminho do par caiba numa tarefa só.**
+/// [`Motor::assistir_por_par`] já roda solta — discar pode levar
+/// [`PRAZO_DO_PAR`] —, e a leitura acontece dentro dela. Enquanto a leitura
+/// abria uma **segunda** tarefa, a alça que o motor guardava não alcançava a
+/// parte que importa: abortar a de fora deixava a de dentro lendo do par, e
+/// quem tinha pedido para parar de assistir continuava recebendo imagem por
+/// baixo. Uma tarefa só é o que faz a alça valer.
+async fn ler_a_tela_alheia(
+    avisos: mpsc::UnboundedSender<Aviso>,
+    fluxo: quinn::RecvStream,
+    de_onde: DeOndeVeioATela,
+) {
     {
-        tokio::spawn(async move {
+        {
             let aberto = match &de_onde {
                 DeOndeVeioATela::Servidor(_) => {
                     crate::tela::Recepcao::do_fluxo_ja_tipado(fluxo).await
@@ -3643,7 +3930,7 @@ fn escoar_tela_alheia(
                 repasse.fechou(tela);
             }
             let _ = avisos.send(Aviso::TelaFechou { tela });
-        });
+        }
     }
 }
 
@@ -5215,7 +5502,223 @@ mod tests {
             repasse: Arc::new(RepasseDeTela::default()),
             resultados_do_par,
             resultados_do_par_tx,
+            tarefas_de_par: TarefasDePar::default(),
         }
+    }
+
+    /// **Uma tarefa de par não sobrevive ao motor que a criou.**
+    ///
+    /// # A alça largada não aborta nada
+    ///
+    /// `Motor::caminhos_de_par` guardava `JoinHandle`s num mapa comum, e
+    /// **largar um `JoinHandle` desprende a tarefa — não a cancela**. Os dois
+    /// caminhos que matam este motor largam o mapa sem tocá-lo:
+    /// `Enlace::drop` aborta a tarefa de `rodar`, e um `Comando::Sair` a faz
+    /// voltar; nos dois o `Motor` é solto, o mapa vai junto, e cada tarefa de
+    /// par fica viva — lendo do par, com a conexão QUIC de pé, para uma sessão
+    /// que já acabou.
+    ///
+    /// O que este teste prende é a **posse**: quem for dono das alças tem de
+    /// abortá-las ao ser solto, e não confiar em ninguém se lembrar de pedir.
+    /// A tarefa aqui é um contador que não para sozinho nunca — se ele
+    /// continuar subindo depois de o motor sumir, é porque ninguém a cancelou.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn destruir_o_motor_aborta_as_tarefas_de_par_que_ele_guarda() {
+        let mut motor = motor_de_teste();
+
+        let batidas = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let contando = Arc::clone(&batidas);
+        let tarefa = tokio::spawn(async move {
+            loop {
+                contando.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        });
+        motor.tarefas_de_par.assistir(ScreenId(1), tarefa);
+
+        // Andar de verdade antes do corte: um contador parado em zero passaria
+        // este teste sem que tarefa nenhuma tivesse chegado a existir.
+        ate_que(
+            "a tarefa de par dar sinal de vida antes de o motor ser destruído",
+            Duration::from_secs(5),
+            || batidas.load(std::sync::atomic::Ordering::Relaxed) > 0,
+        )
+        .await;
+
+        drop(motor);
+
+        // `abort` é um pedido, não um corte instantâneo: o runtime solta a
+        // tarefa no próximo toque nela. A margem é para isso, e não para
+        // esconder um cancelamento que não aconteceu — o que decide é o
+        // contador ter **parado**, não onde ele parou.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let parou_em = batidas.load(std::sync::atomic::Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let depois = batidas.load(std::sync::atomic::Ordering::Relaxed);
+
+        assert_eq!(
+            depois, parou_em,
+            "a tarefa de par continuou correndo depois de o motor ser destruído (subiu de \
+             {parou_em} para {depois}): a alça foi largada em vez de abortada, e quem fechou a \
+             sessão continua lendo do par com a conexão de pé"
+        );
+    }
+
+    /// **Abortar quem servia um par devolve a vaga, em vez de prendê-la.**
+    ///
+    /// # O risco que o conserto vizinho criou
+    ///
+    /// Cancelar as tarefas de par fecha um defeito e abre outro. A vaga de
+    /// `Motor::atendendo_pares` era devolvida na **última linha** do corpo da
+    /// tarefa que serve — e um `abort` faz a última linha nunca correr. Uma
+    /// vaga que não volta é esta máquina fora da malha para sempre e **sem erro
+    /// em lugar nenhum**: o servidor continua apontando este par, porque a vaga
+    /// dele voltou na queda, e o cliente recusa cada pedido em silêncio pela
+    /// vaga que ficou. Ninguém do outro lado fica sabendo; só a imagem para de
+    /// aliviar.
+    ///
+    /// É por isso que a vaga virou [`VagaDeAtendimento`], um punho com `Drop`:
+    /// soltar a tarefa solta o guarda, e soltar o guarda devolve a vaga.
+    ///
+    /// # O que é de produção aqui, e o que não é
+    ///
+    /// De produção: quem toma a vaga (`VagaDeAtendimento::tomar`), quem põe a
+    /// tarefa de pé e guarda a alça (`Motor::passar_a_servir`) e quem corta
+    /// (`Motor::cair`). Montado à mão: só o que `Motor::servir_par` tiraria de
+    /// um `Client` — a ponta QUIC, a identidade e o endereço do outro lado —,
+    /// porque um `Client` precisa de um servidor e isso mora em
+    /// `seele-conformance`.
+    ///
+    /// # Por que o prazo curto é o discriminador
+    ///
+    /// O alvo é um **buraco negro**: uma ponta bindada de verdade, sem
+    /// `ServerConfig` nenhum, que nunca responde — o mesmo truque de
+    /// [`servir_um_par_desarma_a_ponta_de_quem_empresta_depois_de_servir`], e
+    /// pela mesma razão de não arriscar um `ECONNREFUSED` rápido do sistema.
+    /// Contra ele `servir_um_par` gasta [`PRAZO_DO_PAR`] inteiro — três
+    /// segundos — antes de desistir e devolver a vaga pelo fim do corpo.
+    ///
+    /// Então a vaga voltar **dentro de um segundo** só pode ter vindo do
+    /// cancelamento, e não do fim natural. É esse intervalo que separa o
+    /// conserto do defeito, e é por isso que a espera aqui tem prazo próprio em
+    /// vez do de [`ate_que`]: sem a alça guardada não há o que abortar, e sem o
+    /// `Drop` do guarda o `abort` prende a vaga para sempre.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cair_devolve_a_vaga_de_quem_estava_servindo_um_par() {
+        let mut motor = motor_de_teste();
+        let punho = Arc::clone(&motor.atendendo_pares);
+
+        let vaga = VagaDeAtendimento::tomar(&punho).expect("a vaga nasce livre");
+        assert!(
+            punho.load(std::sync::atomic::Ordering::Acquire),
+            "tomar a vaga não a marcou como tomada, e o resto deste teste não mede nada"
+        );
+        assert!(
+            VagaDeAtendimento::tomar(&punho).is_none(),
+            "a vaga foi tomada duas vezes: `crate::par::atender` só aceita uma ligação, e um \
+             segundo `SirvaTelaPara` entraria por cima de um repasse em curso"
+        );
+
+        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let buraco_negro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let onde_ninguem_atende = buraco_negro.local_addr().unwrap();
+        let identidade = par::identidade_efemera().unwrap();
+        let impressao = par::impressao(&identidade);
+        motor.passar_a_servir(
+            vaga,
+            ponta,
+            identidade,
+            ScreenId(1),
+            vec![onde_ninguem_atende],
+            impressao,
+        );
+
+        motor.cair();
+
+        ate_que(
+            "a vaga de quem servia um par voltar depois da queda, antes de `PRAZO_DO_PAR`",
+            Duration::from_secs(1),
+            || !punho.load(std::sync::atomic::Ordering::Acquire),
+        )
+        .await;
+
+        // E a prova que importa: a vaga não voltou só no papel. A conexão que
+        // substitui a que caiu precisa **conseguir tomá-la**, senão esta
+        // máquina reconecta viva e fora da malha.
+        assert!(
+            VagaDeAtendimento::tomar(&punho).is_some(),
+            "a vaga voltou a `false` e mesmo assim não pôde ser tomada de novo"
+        );
+    }
+
+    /// **A fila da conexão que caiu não fala pela que a substitui.**
+    ///
+    /// # Por que um relato velho é pior do que um relato perdido
+    ///
+    /// `resultados_do_par` é um canal sem fundo, e o braço que o lê em
+    /// `Motor::rodar` só existe **quando há cliente**. Durante a bateria não há:
+    /// tudo o que as tarefas de par mandaram fica parado na fila. Quando
+    /// `Motor::tentar` põe um cliente novo no lugar do que morreu, o primeiro
+    /// braço a rodar entrega esses relatos **à conexão nova** — um `ParFalhou`
+    /// de uma nomeação que morreu com a sessão anterior, pedindo ao servidor
+    /// que desfaça um caminho que ele acabou de montar para a substituta.
+    ///
+    /// A segunda metade é a que impede o conserto de virar mudez: o que
+    /// acontecer **depois** da queda continua tendo de chegar. Esvaziar a fila
+    /// não pode ser fechá-la.
+    #[tokio::test]
+    async fn cair_nao_deixa_a_fila_da_conexao_velha_alcancar_a_substituta() {
+        let mut motor = motor_de_teste();
+
+        // O relato da conexão que está morrendo, ainda em voo quando ela morre.
+        let _ = motor.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
+            screen: ScreenId(1),
+            motivo: MotivoDeFalhaDePar::ParouDeMandar,
+        });
+
+        motor.cair();
+
+        assert!(
+            motor.resultados_do_par.try_recv().is_err(),
+            "o relato da conexão que caiu continuou na fila: a próxima conexão o receberia como \
+             se fosse dela, e mandaria o servidor desfazer um caminho que ele montou depois"
+        );
+
+        // E a atividade nova passa: a fila foi esvaziada, não fechada.
+        let _ = motor.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
+            screen: ScreenId(2),
+            motivo: MotivoDeFalhaDePar::CaiuNoMeio,
+        });
+        assert!(
+            matches!(
+                motor.resultados_do_par.try_recv(),
+                Ok(ResultadoDoPar::ParFalhou {
+                    screen: ScreenId(2),
+                    ..
+                })
+            ),
+            "esvaziar a fila da conexão velha calou também o que veio depois da queda"
+        );
+    }
+
+    /// Espera a condição valer, ou desiste com a mensagem de quem esperava.
+    ///
+    /// Dormir um tanto e afirmar é o que produz o teste que passa só na máquina
+    /// de quem o escreveu.
+    ///
+    /// A paciência é de quem chama, e não uma constante daqui: em
+    /// [`cair_devolve_a_vaga_de_quem_estava_servindo_um_par`] ela **é** a
+    /// afirmação — esperar mais que [`PRAZO_DO_PAR`] deixaria o fim natural da
+    /// tarefa passar por cancelamento.
+    async fn ate_que<F: FnMut() -> bool>(o_que: &str, paciencia: Duration, mut condicao: F) {
+        let fim = Instant::now() + paciencia;
+        while Instant::now() < fim {
+            if condicao() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("a paciência acabou esperando: {o_que}");
     }
 
     /// O ponto de chamada de `par::parar_de_atender` dentro de

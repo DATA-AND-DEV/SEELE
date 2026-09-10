@@ -1,0 +1,253 @@
+diff --git a/crates/seele-conformance/tests/tela_por_um_par.rs b/crates/seele-conformance/tests/tela_por_um_par.rs
+index 76cf960..55d1c2e 100644
+--- a/crates/seele-conformance/tests/tela_por_um_par.rs
++++ b/crates/seele-conformance/tests/tela_por_um_par.rs
+@@ -1887,3 +1887,248 @@ async fn uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para() -> Result
+     servidor.shutdown();
+     Ok(())
+ }
++
++/// Quanto tempo o espectador novo pode passar sem imagem antes de a prova de
++/// que a vaga voltou virar uma prova vazia.
++///
++/// # É tela preta, e não velocidade
++///
++/// Quando o servidor aponta um par, ele **desliga** o cano daquela pessoa: cada
++/// milissegundo sem quadro daqui para frente é um milissegundo em que ela não vê
++/// nada. Um teste que só esperasse «a imagem acabou chegando» daria por boa uma
++/// máquina que serve com três segundos de tela preta no meio — e é exatamente
++/// isso que a reversão dos guardas produz.
++///
++/// # Por que um segundo, e não um número redondo qualquer
++///
++/// Medido, três vezes, com os guardas de pé: o primeiro quadro pelo par chega em
++/// **232, 235 e 232 ms**. A maior parte disso é [`seele_core`]`::enlace::
++/// ESPERA_DO_FURO` — os 200 ms fixos que quem assiste espera entre avisar o
++/// ponto de encontro e discar —, e não trabalho de processador, que é o que
++/// torna o número estável numa máquina carregada.
++///
++/// Do outro lado: com a vaga de quem empresta presa, o pedido é recusado **em
++/// silêncio** e a discagem gasta `PRAZO_DO_PAR` inteiro, três segundos, antes de
++/// a imagem aparecer por qualquer outro caminho. Medido também: 2,9 s.
++///
++/// Um segundo é quatro vezes o caso bom e um terço do custo da recusa. Os dois
++/// lados cabem folgados, e nenhum encosta no outro.
++const SEM_IMAGEM_TOLERAVEL: Duration = Duration::from_secs(1);
++
++/// **Destruir o `Enlace` encerra o caminho por par que ele criou — na rede, e
++/// não só na posse.**
++///
++/// # A lacuna que este teste fecha
++///
++/// A prova de que `Enlace::drop` derruba as tarefas de par existia em duas
++/// metades, e nenhuma delas era esta. `enlace::testes::
++/// destruir_o_motor_aborta_as_tarefas_de_par_que_ele_guarda` solta o **`Motor`**
++/// à mão e mede que o dono cancela o que guarda — que `Enlace::drop` solta esse
++/// dono era, até aqui, propriedade da linguagem sem teste próprio. E
++/// [`uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para`] atravessa a
++/// rede inteira, mas por `sair()`: ali o `Enlace` **sobrevive** ao corte, e é
++/// justamente por sobreviver que aquele teste pode ler o silêncio no canal de
++/// avisos dele.
++///
++/// Um `Enlace` destruído não tem canal para ler. É a razão de esta prova não
++/// existir antes, e é o que decide a forma dela.
++///
++/// # De onde a prova sai, já que a ponta que sumiu não fala mais
++///
++/// De **quem emprestava**. A vaga de `atendendo_pares` é uma por máquina — no A1
++/// quem empresta serve um par por vez —, e ela só volta quando a tarefa que
++/// serve termina, o que só acontece quando a conexão QUIC com quem assistia
++/// morre. Enquanto o caminho de par do `Enlace` destruído estiver de pé, quem
++/// emprestava está **ocupado servindo um fantasma**: o servidor o aponta, porque
++/// do lado dele a vaga voltou junto com a sessão que caiu, e o cliente recusa o
++/// pedido em silêncio pela vaga que ficou.
++///
++/// Então a afirmação é a que se pode ver de fora: um espectador **novo**, um
++/// `Enlace` de verdade que entra depois, é servido **pelo mesmo par**. Não é
++/// estado interno de ninguém — é imagem atravessando um cano que o servidor não
++/// subiu, por uma máquina que só pode servi-la se tiver largado a anterior.
++///
++/// # As quatro coisas que impedem esta prova de ser vazia
++///
++/// 1. **A transmissão continua no ar.** Quem empresta é lido logo depois da
++///    destruição e tem de receber [`QUADROS_PARA_PROVAR`] quadros novos. Sem
++///    isso, tudo o que vem depois poderia estar medindo um ambiente que acabou —
++///    a aprovação por encerramento de todo o ambiente.
++/// 2. **O piso é tirado depois da nomeação, e não antes.** Entre entrar na sala
++///    e o par ser apontado, o servidor pode ter ligado o espectador novo ao cano
++///    dele e enfileirado quadros. Drenar **depois** de o servidor ter apontado o
++///    par e desligado esse cano é o que separa quadro enfileirado de atividade
++///    nova; é a perna 2 de
++///    [`quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem`], pelo mesmo
++///    motivo.
++/// 3. **O contador do servidor fica em uma cópia do primeiro quadro ao último.**
++///    Essa cópia é a de quem empresta. Um segundo inteiro de imagem chegando ao
++///    espectador novo com o servidor subindo uma cópia só não cabe em voo
++///    nenhum: só cabe vindo do par.
++/// 4. **A imagem tem de chegar dentro de [`SEM_IMAGEM_TOLERAVEL`].** Esta é a
++///    perna que a primeira versão deste teste não tinha, e sem ela ele **passava
++///    com os guardas retirados**: uma vaga presa não impede a imagem de aparecer,
++///    ela a atrasa em `PRAZO_DO_PAR` — três segundos de tela preta com o cano do
++///    servidor já desligado. Medido, e não suposto: 230 ms com os guardas de pé,
++///    2,9 s sem eles.
++#[tokio::test(flavor = "multi_thread")]
++async fn destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_servir() -> Result<()>
++{
++    let Cenario {
++        servidor,
++        compartilha,
++        mut empresta,
++        mut assiste,
++        screen,
++        copias,
++    } = cenario().await?;
++    let endereco = servidor.local_addr()?;
++    let sala = compartilha.sala;
++    let quem_empresta = empresta.sessao().person;
++
++    let piso = ate_o_par_estar_servindo(&mut assiste, screen, &copias, "a destruição").await?;
++    {
++        let pares = servidor.server().pares.lock().await;
++        assert!(
++            pares.ja_servindo().contains(&quem_empresta),
++            "o servidor apontou um par e não o contou como ocupado: o que for destruído agora não \
++             tinha caminho de par nenhum"
++        );
++    }
++    println!("o par serviu até o quadro {piso:?}; agora o `Enlace` de quem assiste é destruído");
++
++    // **Destruído, e não `sair()`.** `Enlace::drop` aborta a tarefa do motor sem
++    // passar por `Motor::encerrar`: não há `Comando::Sair`, não há
++    // `Client::disconnect`, e não há `Aviso::Encerrado` — a casca simplesmente
++    // some, que é o que acontece quando a janela fecha ou o processo cai. O
++    // caminho de par foi criado por este `Enlace` e não é filho da tarefa dele;
++    // se ninguém o derrubar, ele fica lendo do par com a conexão QUIC de pé.
++    drop(assiste);
++
++    // Perna 1: o ambiente **não** acabou. Quem empresta continua na sala, vendo
++    // a tela pelo servidor, e recebe imagem nova depois da destruição.
++    let mut piso_dele = maior_seq_ja_enfileirado(&mut empresta, screen).await;
++    for _ in 0..QUADROS_PARA_PROVAR {
++        let (seq, _) = esperar(
++            &mut empresta,
++            "quem empresta receber imagem nova depois de o outro `Enlace` ser destruído",
++            |aviso| match aviso {
++                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
++                    .filter(|seq| piso_dele.is_none_or(|p| *seq > p))
++                    .map(|seq| (seq, ())),
++                _ => None,
++            },
++        )
++        .await?;
++        piso_dele = Some(seq);
++    }
++    println!("a transmissão continua no ar: quem empresta recebeu até o quadro {piso_dele:?}");
++
++    // O servidor solta a nomeação de quem sumiu — sem isto ele nunca escolheria
++    // este par de novo, e o que vem abaixo mediria a recusa **dele**, não a do
++    // cliente. É pré-condição do teste, e não a afirmação dele.
++    let fim = Instant::now() + PACIENCIA;
++    loop {
++        let ocupados = servidor.server().pares.lock().await.ja_servindo();
++        if ocupados.is_empty() {
++            break;
++        }
++        assert!(
++            Instant::now() < fim,
++            "o `Enlace` que assistia foi destruído e o servidor continua contando o par como \
++             ocupado ({ocupados:?})"
++        );
++        tokio::time::sleep(Duration::from_millis(20)).await;
++    }
++
++    // A afirmação: um espectador novo, e o **mesmo** par o serve.
++    let mut de_novo = cliente(endereco, 4, "assiste-de-novo").await?;
++    de_novo.entrar_na_voice_room(sala).await?;
++    let pedido_em = Instant::now();
++    de_novo.assistir(screen, true).await?;
++
++    let fim = Instant::now() + PACIENCIA;
++    loop {
++        let apontado = servidor
++            .server()
++            .pares
++            .lock()
++            .await
++            .quem_foi_apontado(screen);
++        if apontado == Some(quem_empresta) {
++            break;
++        }
++        assert!(
++            Instant::now() < fim,
++            "o servidor não apontou quem empresta para servir o espectador novo (apontado: \
++             {apontado:?})"
++        );
++        tokio::time::sleep(Duration::from_millis(20)).await;
++    }
++    ate(
++        "o servidor desligar o cano do espectador novo, por ter apontado o par",
++        || copias.agora() == 1,
++    )
++    .await?;
++
++    // Perna 2: o piso sai **daqui**, depois de o cano do servidor estar
++    // desligado. Nada que já estivesse na fila pode provar o que vem abaixo.
++    let mut piso_novo = maior_seq_ja_enfileirado(&mut de_novo, screen).await;
++    println!("a fila do espectador novo esvaziou no quadro {piso_novo:?}; daqui para cima é o par");
++
++    // Perna 3: sustentação, com o contador do servidor em uma cópia do primeiro
++    // quadro ao último.
++    for indice in 0..QUADROS_PARA_PROVAR {
++        let (seq, bytes) = esperar(
++            &mut de_novo,
++            "o espectador novo receber um quadro pelo par, acima do piso",
++            |aviso| match aviso {
++                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
++                    .filter(|seq| piso_novo.is_none_or(|p| *seq > p))
++                    .map(|seq| (seq, bytes.clone())),
++                _ => None,
++            },
++        )
++        .await?;
++        assert_eq!(
++            copias.agora(),
++            1,
++            "o servidor voltou a subir a cópia do espectador novo (quadro {indice} de \
++             {QUADROS_PARA_PROVAR}, seq {seq}): quem emprestava recusou o pedido em silêncio, \
++             porque a vaga dele continua tomada pelo caminho de par do `Enlace` destruído — a \
++             tarefa sobreviveu à destruição e esta máquina saiu da malha sem erro em lugar nenhum"
++        );
++        assert_eq!(
++            bytes,
++            corpo(seq),
++            "o que chegou pelo par não é o que saiu de quem compartilha (quadro {indice} de \
++             {QUADROS_PARA_PROVAR}, seq {seq})"
++        );
++        // **A vaga voltou, ou a imagem só apareceu depois de o silêncio custar
++        // `PRAZO_DO_PAR`.** Ver [`SEM_IMAGEM_TOLERAVEL`]: sem este prazo, o
++        // teste dá por boa uma máquina que recusa o pedido em silêncio e deixa
++        // o espectador novo três segundos no escuro antes de a imagem enfim vir.
++        if indice == 0 {
++            let esperou = pedido_em.elapsed();
++            assert!(
++                esperou < SEM_IMAGEM_TOLERAVEL,
++                "o espectador novo passou {esperou:?} sem um quadro depois de pedir a tela, com o \
++                 cano do servidor já desligado: quem emprestava recusou o pedido em silêncio pela \
++                 vaga que o caminho de par do `Enlace` destruído não devolveu, e a imagem só \
++                 chegou depois de a discagem gastar o prazo inteiro"
++            );
++            println!("o primeiro quadro pelo par chegou em {esperou:?}");
++        }
++        piso_novo = Some(seq);
++    }
++    println!(
++        "{QUADROS_PARA_PROVAR} quadros seguidos chegaram ao espectador novo pelo mesmo par, até o \
++         {piso_novo:?}: o caminho de par do `Enlace` destruído tinha mesmo acabado"
++    );
++
++    drop(compartilha);
++    drop(empresta);
++    drop(de_novo);
++    servidor.shutdown();
++    Ok(())
++}
