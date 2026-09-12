@@ -129,6 +129,13 @@ const RULES: &[(&str, &[&str])] = &[
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
     // product to compile before it could check the product.
     ("xtask", &[]),
+    // O núcleo do launcher, pela mesma razão do instalador e com uma a mais
+    // que é própria dele — ADR 0045. Este crate escolhe *qual* versão do
+    // produto roda; se ele dependesse do produto, a peça que decide entre a
+    // 0.10.4 e a 0.10.5 seria construída junto de uma delas, e uma mudança no
+    // produto poderia trancar alguém fora de uma versão que já estava
+    // instalada e funcionando.
+    ("seele-lancador", &[]),
     // O instalador, pela mesma razão e com a mesma força — ADR 0043. Se ele
     // dependesse do `seele-core`, construir o instalador exigiria construir o
     // produto, e uma mudança no produto poderia quebrar a instalação de todo

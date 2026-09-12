@@ -1,0 +1,52 @@
+[package]
+name = "seele-lancador"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "O núcleo do launcher: resolve, instala e inicia versões lado a lado. Ver ADR 0045."
+
+# **Nenhuma dependência do produto, e isto é regra e não economia.**
+#
+# O mesmo argumento do `seele-instalador` (ADR 0043), com uma razão a mais que é
+# própria daqui: este crate escolhe *qual* versão do produto roda. Se ele
+# dependesse do produto, a peça que decide entre a 0.10.4 e a 0.10.5 seria
+# construída junto de uma delas — e uma mudança no produto poderia trancar
+# alguém fora de uma versão que já estava instalada e funcionando.
+#
+# `xtask/src/check_deps.rs` prende isso.
+[dependencies]
+# O manifesto de versões é JSON, como o `latest.json` que ele estende.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.151"
+# **A mesma conferência de assinatura que o atualizador já faz**, e não uma
+# segunda: `tauri-plugin-updater` verifica o pacote com este crate, neste
+# formato, contra a chave pública que está no `tauri.conf.json`. Reaproveitar a
+# biblioteca é o que garante que um pacote aceito aqui é o mesmo que seria
+# aceito lá — duas implementações seriam duas chances de divergir sobre o que
+# conta como assinado.
+minisign-verify = "0.2.5"
+# A soma que o manifesto declara por pacote. A mesma versão que o
+# `seele-proto` usa, para o `Cargo.lock` não carregar duas cópias.
+sha2 = "0.11.0"
+# As assinaturas e o documento de revogação viajam em base64 dentro do JSON,
+# pelo mesmo motivo que o `latest.json` já carrega a assinatura assim.
+base64 = "0.22"
+
+[dev-dependencies]
+# **Para assinar dentro do teste, e não para conferir.** Um teste que só
+# conferisse assinaturas prontas provaria que elas continuam válidas; assinar
+# ali na hora é o que permite provar o contrário — que uma assinatura de outra
+# chave, ou de outro conteúdo, é recusada.
+#
+# As duas já estão na árvore (`seele-core`, `seele-server`), então isto não
+# acrescenta crate nenhuma ao grafo do produto — e nenhuma delas entra no
+# binário: são de teste.
+ed25519-dalek = "3.0.0"
+# O minisign moderno assina o resumo BLAKE2b-512 do conteúdo, não o conteúdo.
+# Sem isto não há como produzir uma assinatura que o `minisign-verify` aceite
+# fora do modo legado — que é justamente o modo que este crate recusa.
+blake2 = "0.10"
+
+[lints]
+workspace = true

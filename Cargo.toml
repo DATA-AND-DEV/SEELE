@@ -8,6 +8,7 @@ members = [
     "crates/seele-core",
     "crates/seele-server",
     "crates/seele-ffi",
+    "crates/seele-lancador",
     "apps/seele-app",
     "apps/seele-instalador",
     "crates/seele-conformance",
