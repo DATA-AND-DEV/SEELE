@@ -684,6 +684,7 @@ function desenharCanais(snapshot) {
     ir.type = "button";
     ir.dataset.voice_room = String(voice_room.id);
     ir.dataset.dentro = dentro_da_sala ? "sim" : "nao";
+    ir.dataset.senha_necessaria = voice_room.password_required ? "sim" : "nao";
     ir.title = dentro_da_sala
       ? `voltar para a grade de ${voice_room.name}; você já está dentro`
       : `entrar e falar com quem está em ${voice_room.name}`;
@@ -2339,7 +2340,14 @@ async function alternarCanal(evento) {
         // (`ArgumentCase::Camel` é o padrão do `#[tauri::command]`). Enquanto
         // o argumento se chamou `cage`, uma palavra só, as duas formas eram a
         // mesma string e isso não aparecia.
-        await invoke("enter_voice_room", { voiceRoom: voice_room });
+        //
+        // Sala com senha pede a senha antes de mandar o pedido: o servidor
+        // não confirma a entrada (`admissao::voice_room_liberado`), então uma
+        // senha errada só se descobre pela recusa que chega depois, em
+        // `desenharAviso`.
+        const senha =
+          item.dataset.senha_necessaria === "sim" ? window.prompt("Senha da sala") : null;
+        await invoke("enter_voice_room", { voiceRoom: voice_room, senha });
         entrou = true;
       }
     } else if (item.dataset.linha) {

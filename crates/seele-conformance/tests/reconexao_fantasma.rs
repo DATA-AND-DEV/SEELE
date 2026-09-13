@@ -131,7 +131,7 @@ async fn quem_saiu_durante_a_queda_do_host_nao_volta_como_fantasma() -> Result<(
     // A é quem cai e reconecta; o roster dele é o que este teste afirma.
     let mut a = conectar(endereco, 91, "a").await?;
     let voice_room = VoiceRoomId(a.sessao().voice_rooms[0].id.get());
-    a.entrar_na_voice_room(voice_room).await?;
+    a.entrar_na_voice_room(voice_room, None).await?;
 
     // O `Room` de A, alimentado como a casca de verdade faz: `adopt` na
     // conexão, e o assento local próprio na hora em que o comando é mandado —
@@ -142,12 +142,12 @@ async fn quem_saiu_durante_a_queda_do_host_nao_volta_como_fantasma() -> Result<(
     sala_de_a.enter_voice_room(voice_room);
 
     let b = conectar(endereco, 92, "b").await?;
-    b.entrar_na_voice_room(voice_room).await?;
+    b.entrar_na_voice_room(voice_room, None).await?;
 
     // Uma testemunha que nunca cai, só para saber, sem adivinhar, que a saída
     // de B já foi processada pelo servidor antes de A reconectar.
     let mut testemunha = conectar(endereco, 93, "testemunha").await?;
-    testemunha.entrar_na_voice_room(voice_room).await?;
+    testemunha.entrar_na_voice_room(voice_room, None).await?;
     let mut sala_da_testemunha = Room::new();
     sala_da_testemunha.adopt(testemunha.sessao(), "testemunha");
     sala_da_testemunha.enter_voice_room(voice_room);

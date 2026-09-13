@@ -666,15 +666,23 @@ impl Client {
 
     /// Enters a voice room. `InserirPlug` in `specs/02-protocolo.md`.
     ///
+    /// `password` is only looked at by the server when the room actually
+    /// needs one (`admissao::voice_room_liberado`); a password for an open
+    /// room is simply ignored on that side.
+    ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn enter_voice_room(&mut self, voice_room: VoiceRoomId) -> Result<()> {
+    pub async fn enter_voice_room(
+        &mut self,
+        voice_room: VoiceRoomId,
+        password: Option<String>,
+    ) -> Result<()> {
         frame::write(
             &mut self.send,
             &ClientMessage::EnterVoiceRoom {
                 voice_room,
-                password: None,
+                password,
             },
         )
         .await

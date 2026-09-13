@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 
-use seele_proto::control::{ChannelInfo, Permission, PersonState, VoiceRoomInfo};
+use seele_proto::control::{AlertReason, ChannelInfo, Permission, PersonState, VoiceRoomInfo};
 use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, Ssrc, VoiceRoomId};
 use seele_proto::signal::SignalBand;
 use seele_proto::ServerMessage;
@@ -939,6 +939,19 @@ impl Room {
                     operator_text: operator_text.clone(),
                 });
                 changed.notice = true;
+
+                // O servidor recusa a entrada sem nunca ter sentado a
+                // pessoa (`admissao::voice_room_liberado` em session.rs faz
+                // `continue` antes de anunciar). Mas o cliente já havia se
+                // sentado sozinho, sem esperar confirmação, ao mandar o
+                // pedido — ver `enter_voice_room` acima. Sem desfazer aqui,
+                // o assento local nunca mais bate com o do servidor: a
+                // pessoa se vê na sala para sempre, e o anfitrião nunca a vê
+                // nem a ouve.
+                if *reason == AlertReason::VoiceRoomEntryRefused {
+                    self.leave_voice_room();
+                    changed.roster = true;
+                }
             }
 
             // ---- attachments ----
@@ -1660,6 +1673,35 @@ mod tests {
         });
         assert!(changed.notice);
         assert!(!changed.telemetry);
+    }
+
+    #[test]
+    fn a_recusa_de_entrada_desfaz_o_assento_que_o_cliente_tinha_tomado_sozinho() {
+        // O cliente se senta a si mesmo ao mandar `EnterVoiceRoom`, sem
+        // esperar confirmação (ver `room()` acima). Quando o servidor
+        // recusa — sala com senha errada, lotada, etc. — ele nunca chegou a
+        // sentar ninguém e nunca vai anunciar `PersonLeft` de uma entrada que
+        // não aconteceu. Sem desfazer aqui, a pessoa se vê sentada para
+        // sempre numa sala que, do outro lado, não a tem.
+        let mut room = room();
+        assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
+        assert!(room
+            .seats
+            .get(&VOICE_ROOM)
+            .is_some_and(|seats| seats.contains(&PersonId(7))));
+
+        let changed = room.apply(&ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason: AlertReason::VoiceRoomEntryRefused,
+            operator_text: None,
+        });
+
+        assert!(changed.roster);
+        assert_eq!(room.current_voice_room, None);
+        assert!(!room
+            .seats
+            .get(&VOICE_ROOM)
+            .is_some_and(|seats| seats.contains(&PersonId(7))));
     }
 
     #[test]

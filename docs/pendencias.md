@@ -1779,3 +1779,36 @@ do cliente.
 
 **Quando dói.** Sempre que alguém procurar, neste repositório, um teste que já
 prove reconexão de roster e citar este arquivo por engano.
+
+## 37 · A entrada numa sala de voz ainda se confirma pelo silêncio
+
+**O sintoma que este número documenta já foi corrigido do lado do cliente**
+(a pessoa que via a sala como sua e o anfitrião nunca via nem ouvia): a senha
+agora chega ao servidor de verdade (`Client::enter_voice_room`,
+`Enlace::entrar_na_voice_room`, `Command::EnterVoiceRoom` na FFI, até o
+comando do Tauri e o `prompt` da tela), e uma recusa (`Alert
+VoiceRoomEntryRefused`) agora desfaz o assento que o cliente havia tomado
+sozinho, em `Room::apply` (`crates/seele-core/src/state.rs`).
+
+**O que continua pendente, e por quê.** O cliente ainda se senta **antes** de
+o servidor confirmar — `specs/02-protocolo.md` continua confirmando a entrada
+pelo silêncio, e não por uma mensagem própria. O conserto deste número fecha o
+sintoma (o assento errado não sobrevive à recusa), mas não fecha a causa: entre
+o pedido e a recusa chegar, a tela deste cliente mostra por um instante uma
+sala que ainda não é sua, e qualquer novo motivo de recusa que o protocolo
+venha a ganhar exigiria lembrar de novo de desfazer o assento à mão, em vez de
+o próprio protocolo garantir isso.
+
+**Por que não foi resolvido agora.** O relatório de origem (seção 2.4 de
+`Órbita/Relatórios/Desenvolvimento/1881a3cb-e333-48a9-9fd4-185153456c71.md`)
+recomenda uma confirmação do servidor no fio como o conserto de raiz — mas
+isso é mensagem de protocolo nova, e mexe em `PROTOCOL_VERSION`. A tarefa
+d81586e0 já está subindo essa versão para 5; uma segunda mudança de protocolo
+concorrente, na mesma janela, é como duas pessoas mexendo no mesmo número ao
+mesmo tempo — colide. Esta tarefa teve escopo explícito de **não** tocar
+protocolo, e o que ela entrega — repasse de senha e desfazer o assento na
+recusa — já resolve o sintoma relatado sem esperar por isso.
+
+**Quando dói.** Sempre que uma sala de voz tem senha, ou ganha algum outro
+motivo de recusa no futuro: o intervalo entre pedir e ouvir a recusa continua
+existindo, só não sobrevive mais a ele.

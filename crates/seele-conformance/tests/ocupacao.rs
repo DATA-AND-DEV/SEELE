@@ -176,11 +176,11 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
     // Duas pessoas sentam, uma em cada sala de voz, **antes** de a testemunha existir.
     let mut rafael = conectar(endereco, 47, "rafael").await?;
     rafael
-        .entrar_na_voice_room(voice_room_um)
+        .entrar_na_voice_room(voice_room_um, None)
         .await
         .expect("sessão acabou");
     carla
-        .entrar_na_voice_room(voice_room_dois)
+        .entrar_na_voice_room(voice_room_dois, None)
         .await
         .expect("sessão acabou");
     // Um instante para os dois assentos existirem no servidor antes do aperto de
@@ -226,7 +226,7 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
     let voice_room_dois = segundo_voice_room(&anfitriao, &mut rei, &mut sala_rei).await?;
 
     // A testemunha senta no primeiro voice room e fica lá o teste inteiro.
-    rei.entrar_na_voice_room(voice_room_um)
+    rei.entrar_na_voice_room(voice_room_um, None)
         .await
         .expect("sessão acabou");
     sala_rei.enter_voice_room(voice_room_um);
@@ -235,7 +235,7 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
     // aperto de mão estaria certo até aqui e erraria a partir daqui.
     let rafael = conectar(endereco, 47, "rafael").await?;
     rafael
-        .entrar_na_voice_room(voice_room_dois)
+        .entrar_na_voice_room(voice_room_dois, None)
         .await
         .expect("sessão acabou");
 
@@ -280,7 +280,7 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
 
     let rafael = conectar(endereco, 47, "rafael").await?;
     rafael
-        .entrar_na_voice_room(voice_room_um)
+        .entrar_na_voice_room(voice_room_um, None)
         .await
         .expect("sessão acabou");
     // Mais um comando atrás do primeiro, para que a entrada tenha sido
@@ -343,7 +343,7 @@ async fn quem_volta_para_o_assento_guardado_reaparece_para_quem_ficou() -> Resul
 
     let visitante = {
         let visitante = conectar(endereco, 62, "visitante").await?;
-        visitante.entrar_na_voice_room(VoiceRoomId(1)).await?;
+        visitante.entrar_na_voice_room(VoiceRoomId(1), None).await?;
         // O anfitrião tem de **ver** a entrada normal antes, ou a asserção do fim
         // poderia passar por um `PersonJoined` que nunca foi embora.
         assert!(

@@ -284,7 +284,7 @@ enum Comando {
     /// Chegar depois da conexão não custa nada: a sonda só começa a medir
     /// quando a tela transmite, e ninguém transmite antes de entrar.
     LembrarCaminho(u32),
-    EntrarNaVoiceRoom(VoiceRoomId),
+    EntrarNaVoiceRoom(VoiceRoomId, Option<String>),
     SairDaVoiceRoom,
     AbrirLinha(ChannelId),
     Dizer {
@@ -1470,8 +1470,13 @@ impl Enlace {
     /// # Errors
     ///
     /// Falha se a sessão já tiver acabado.
-    pub async fn entrar_na_voice_room(&self, voice_room: VoiceRoomId) -> Result<(), Fechado> {
-        self.mandar(Comando::EntrarNaVoiceRoom(voice_room)).await
+    pub async fn entrar_na_voice_room(
+        &self,
+        voice_room: VoiceRoomId,
+        password: Option<String>,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::EntrarNaVoiceRoom(voice_room, password))
+            .await
     }
 
     /// Sai da sala de voz.
@@ -2687,7 +2692,12 @@ impl Motor {
                 // "reconectado" e perguntasse a sala de voz antes de ele existir veria
                 // uma sala vazia e acharia que perdeu gente.
                 if let Some(voice_room) = self.voice_room {
-                    let _ = cliente.enter_voice_room(voice_room).await;
+                    // A senha não é guardada para a reconexão: uma sala com
+                    // senha exigiria pedi-la de novo aqui, e isso é o mesmo
+                    // gap que existe para toda credencial nesta struct —
+                    // fora do escopo desta correção, que é só o pedido de
+                    // entrada de quem está conectando pela primeira vez.
+                    let _ = cliente.enter_voice_room(voice_room, None).await;
                 }
                 if let Some(linha) = self.linha {
                     let _ = cliente.join_channel(linha).await;
@@ -2764,7 +2774,9 @@ impl Motor {
         let resultado = match comando {
             // Nada a mandar ao servidor: é estado desta máquina.
             Comando::LembrarCaminho(_) => Ok(()),
-            Comando::EntrarNaVoiceRoom(voice_room) => cliente.enter_voice_room(voice_room).await,
+            Comando::EntrarNaVoiceRoom(voice_room, password) => {
+                cliente.enter_voice_room(voice_room, password).await
+            }
             Comando::SairDaVoiceRoom => cliente.leave_voice_room().await,
             Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
             Comando::Dizer { linha, corpo, id } => cliente.send_message(linha, &corpo, id).await,
@@ -4366,7 +4378,9 @@ impl Motor {
                 tracing::info!(bps, "a sonda começa do caminho lembrado deste servidor");
                 self.caminho = crate::caminho::Sonda::partindo_de(*bps);
             }
-            Comando::EntrarNaVoiceRoom(voice_room) => self.voice_room = Some(*voice_room),
+            Comando::EntrarNaVoiceRoom(voice_room, _password) => {
+                self.voice_room = Some(*voice_room)
+            }
             Comando::SairDaVoiceRoom => self.voice_room = None,
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
             Comando::Muted(ligado) => self.muted = *ligado,
@@ -5182,7 +5196,7 @@ mod tests {
     fn o_que_a_reconexao_restaura_e_o_que_a_pessoa_escolheu() {
         let mut motor = motor_de_teste();
 
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2)));
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
         motor.lembrar(&Comando::AbrirLinha(ChannelId(7)));
         motor.lembrar(&Comando::Muted(true));
         motor.lembrar(&Comando::Isolamento(true));
@@ -5368,7 +5382,7 @@ mod tests {
         // minutos depois, alguém que já tinha reconectado cairia de novo, sem
         // ninguém ter pedido nada. O mesmo para banir.
         let mut motor = motor_de_teste();
-        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2)));
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
 
         motor.lembrar(&Comando::Expulsar {
             pessoa: PersonId(9),
