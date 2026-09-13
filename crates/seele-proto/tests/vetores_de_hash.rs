@@ -7,11 +7,6 @@
 //!
 //! O arquivo é comitado nos dois repositórios, e nenhum precisa do outro
 //! para rodar os próprios testes.
-#![allow(
-    clippy::indexing_slicing,
-    clippy::expect_used,
-    reason = "num teste, o pânico é o relatório"
-)]
 
 #![allow(
     clippy::expect_used,

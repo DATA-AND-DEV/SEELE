@@ -1816,6 +1816,15 @@ existindo, só não sobrevive mais a ele.
 
 ## 38 · O workflow de CI existe escrito, e ninguém provou que ele roda
 
+**Numeração.** Este item nasceu como #34 numa ponta que nunca chegou a se
+integrar com a main: enquanto este branch escrevia sobre o workflow de CI, a
+main recebeu quatro itens próprios com os números 34, 35, 36 e 37 (casca sem
+dizer de onde vem a tela, contador de espectadores não reanunciado, a
+cobertura enganosa de `voz_na_reconexao.rs` e a entrada em sala de voz que se
+confirma pelo silêncio — nenhum deles sobre CI ou sobre `seele-conformance`).
+Renumerado para #38 para não colidir na integração; o conteúdo abaixo é o
+mesmo que já foi revisado e aprovado.
+
 **Sintoma.** `.github/workflows/ci.yml` foi escrito com um job `windows-2022`
 para `clippy` e `test` — justamente para exercitar os blocos `#[cfg(windows)]`
 de `crates/seele-audio/src/device.rs` e o arquivo inteiro de

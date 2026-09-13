@@ -106,10 +106,11 @@ jobs:
       # paper over it with a silent retry — a suite that only passes on the
       # second attempt has stopped being evidence.
       #
-      # docs/pendencias.md does not (yet, on this branch) contain items #35 or
-      # #36 referenced when this job was specified; only #29 exists here as of
-      # this workflow's introduction. If they land later and say something
-      # different about this crate, this comment and the command below are
-      # what to revisit.
+      # #35 and #36 (as numbered on main, not on this branch — see
+      # docs/pendencias.md #37 for why the numbering diverged) turned out to
+      # be about screen-relay viewer counts and a misleadingly named
+      # reconnection test, not about seele-conformance concurrency. Neither
+      # changes the call made here: #29 remains the only pendência that
+      # measured this crate's parallelism and it says serialize.
       - name: cargo test (seele-conformance, serialized — see comment)
         run: cargo test -p seele-conformance -- --test-threads=1
