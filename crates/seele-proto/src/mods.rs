@@ -14,7 +14,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -241,6 +241,155 @@ pub fn inner_path(parts: &[&str]) -> Option<std::path::PathBuf> {
     Some(relative)
 }
 
+// ---------------------------------------------------------------- o anúncio
+//
+// ADR 0045, «o que quem entra vê, e o que ele pode recusar». O servidor diz o
+// que exige **antes** de a pessoa entrar, e quem não aceita não entra.
+//
+// Estes tipos moram aqui, e não em `control.rs`, pela razão do cabeçalho deste
+// módulo: o manifesto é lido nas duas pontas, e `seele-proto` é o único crate
+// que `seele-core` e `seele-server` alcançam os dois.
+
+/// Versão do protocolo em que o anúncio de MODs viaja.
+///
+/// # Por que ela é uma constante separada, e não `PROTOCOL_VERSION`
+///
+/// Um par que não conhece uma variante **não a ignora**: o postcard indexa
+/// variante por posição, e um quadro desconhecido desloca a leitura do fluxo
+/// para sempre. Quem manda uma variante nova tem de perguntar antes a versão do
+/// par — é o que `session.rs` já faz com o `UplinkLoss` e com as duas mensagens
+/// da v4.
+///
+/// **O número aqui é 5 e `PROTOCOL_VERSION` ainda é 4, e isso é deliberado.**
+/// Esta entrega e a da malha acrescentam variantes ao mesmo par de listas ao
+/// mesmo tempo; se cada uma subisse a versão global por conta própria, as duas
+/// chamariam «5» a vocabulários diferentes — que é exatamente o defeito que o
+/// guarda dos ordinais em `control.rs` existe para pegar, e que já custou uma
+/// tela preta sem mensagem nenhuma.
+///
+/// **O contrato da integração conjunta, numa linha:** quando as duas entregas
+/// se juntarem, `PROTOCOL_VERSION` passa a 5, esta constante continua 5, e o
+/// anúncio passa a sair sozinho — nada além disso.
+///
+/// **Enquanto isso não acontece o portão fica dormente**, e a razão é que ele
+/// não teria a quem proteger: nenhuma conexão negocia acima da versão global,
+/// então não existe par capaz de aceitar, e recusar quem não alcança seria
+/// recusar todo mundo. O servidor admite como sempre admitiu e avisa quem
+/// hospeda pelo log. Ver `seele_server::mods::anuncio::o_anuncio_alcanca_alguem`
+/// e `docs/superpowers/specs/2026-09-10-anuncio-e-aceite-de-mods.md`.
+pub const VERSAO_DO_ANUNCIO: u8 = 5;
+
+/// Quantos dígitos tem um hash de conteúdo escrito em hexadecimal.
+pub const HASH_EM_HEX_LEN: usize = 64;
+
+/// Um MOD que este servidor exige, como ele atravessa o fio.
+///
+/// # O que cada campo está aqui para responder
+///
+/// Os três primeiros são **identidade**: quem é, qual versão, e quais bytes. O
+/// hash é o que prova; o nome é conveniência (ADR 0026, alternativa 5).
+///
+/// Os três últimos existem para a **tela de aceite**, e não para o servidor:
+/// ADR 0045 exige que a pessoa leia «nome, autor, versão, repositório, e o
+/// `reach` declarado» *antes* de qualquer byte ser baixado. Sem eles no
+/// anúncio, a única forma de a tela saber o que o MOD alcança seria baixá-lo
+/// primeiro — o que é decidir antes de perguntar.
+///
+/// **Nada aqui pode divergir do hash sem que o hash mude**, e é a propriedade
+/// que faz o anúncio valer alguma coisa: `repo`, `reach` e a metade de servidor
+/// saem do `mod.json`, e o `mod.json` está dentro de [`content_hash`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModAnunciado {
+    /// `autor/nome`.
+    pub id: String,
+    /// A versão que o autor declara.
+    pub version: String,
+    /// O hash do conteúdo, em hexadecimal minúsculo.
+    pub hash: String,
+    /// O repositório público. ADR 0045 o torna condição de publicação.
+    pub repo: String,
+    /// O que este MOD declara alcançar, como o manifesto o escreve.
+    pub reach: Vec<String>,
+    /// Se este MOD roda na máquina de quem hospeda.
+    ///
+    /// **É o campo que a tela de aceite não pode omitir.** Um MOD com metade de
+    /// servidor alcança o bloco `world` do `api/v1.json` — rede de saída,
+    /// relógio e log — a partir da máquina de quem hospeda, e o plano do runtime
+    /// nomeia isso como «a parte que a tela de aceite tem de dizer em voz alta».
+    ///
+    /// Um MOD só de aparência não tem nada disso, e a diferença entre os dois é
+    /// a diferença entre repintar uma janela e abrir conexões da casa de
+    /// alguém.
+    pub no_servidor: bool,
+}
+
+/// Um hash de conteúdo em hexadecimal minúsculo, e nada mais.
+///
+/// **Tamanho exato e caixa fixa, e não um teto.** O mesmo argumento de
+/// `control::check_impressao`, mais um que é só daqui: a identidade do conjunto
+/// é calculada sobre este texto, então `ABC…` e `abc…` dariam **duas
+/// identidades para os mesmos bytes** — e um aceite guardado deixaria de valer
+/// por causa de uma letra maiúscula.
+#[must_use]
+pub fn e_hash_de_conteudo(texto: &str) -> bool {
+    texto.len() == HASH_EM_HEX_LEN
+        && texto
+            .chars()
+            .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase() && c.is_ascii_hexdigit())
+}
+
+/// Um hash de 32 bytes em hexadecimal minúsculo.
+///
+/// Uma implementação só para os dois lados: `seele-core` a reexporta em vez de
+/// escrever a segunda, porque duas seriam dois lugares para a formatação
+/// derivar — e derivar aqui lê-se como um MOD que mudou.
+#[must_use]
+pub fn hex(hash: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    hash.iter().fold(String::new(), |mut texto, byte| {
+        let _ = write!(texto, "{byte:02x}");
+        texto
+    })
+}
+
+/// A identidade do conjunto que um servidor exige.
+///
+/// # Por que o conjunto tem identidade própria
+///
+/// O aceite de quem entra vale para **o conjunto que ele leu**, e não para cada
+/// MOD solto. ADR 0045: «um servidor que troca de MOD pergunta de novo». Sem um
+/// número que resuma o conjunto inteiro, «trocou» não teria como ser percebido:
+/// acrescentar um MOD deixaria os aceites dos outros de pé e a pessoa entraria
+/// sem nunca ter lido o novo.
+///
+/// Deterministica pelas mesmas três regras de [`content_hash`], e pelo mesmo
+/// motivo — duas máquinas têm de chegar ao mesmo número:
+///
+/// - **a lista é ordenada**, porque a ordem do banco não é promessa de ninguém;
+/// - **todo tamanho entra antes dos bytes dele**, então `("ab","c")` e
+///   `("a","bc")` não colidem;
+/// - tamanhos entram como oito bytes big-endian, então um tamanho nunca é ele
+///   mesmo ambíguo.
+///
+/// **Só identidade entra na conta** — `id`, `version` e `hash`. `repo`, `reach`
+/// e a metade de servidor saem do `mod.json`, que está dentro do `hash`: incluí-los
+/// seria contar a mesma coisa duas vezes, e deixá-los de fora não abre folga
+/// nenhuma.
+#[must_use]
+pub fn identidade_do_conjunto(mods: &mut [ModAnunciado]) -> [u8; 32] {
+    mods.sort_by(|esquerda, direita| esquerda.id.cmp(&direita.id));
+
+    let mut hasher = Sha256::new();
+    hasher.update((mods.len() as u64).to_be_bytes());
+    for anunciado in mods.iter() {
+        for campo in [&anunciado.id, &anunciado.version, &anunciado.hash] {
+            hasher.update((campo.len() as u64).to_be_bytes());
+            hasher.update(campo.as_bytes());
+        }
+    }
+    hasher.finalize().into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,5 +582,157 @@ mod tests {
         for texto in ["", "{", "null", "[]", "{\"schema\":}", "\u{0}"] {
             let _ = read_manifest(texto);
         }
+    }
+    // ------------------------------------------------- o conjunto anunciado
+
+    fn anunciado(id: &str, version: &str, hash: &str) -> ModAnunciado {
+        ModAnunciado {
+            id: id.to_owned(),
+            version: version.to_owned(),
+            hash: hash.to_owned(),
+            repo: "https://github.com/seele/exemplo".to_owned(),
+            reach: vec!["dom".to_owned()],
+            no_servidor: false,
+        }
+    }
+
+    fn conjunto() -> Vec<ModAnunciado> {
+        vec![
+            anunciado("seele/cor", "1.0.0", &"a1".repeat(32)),
+            anunciado("seele/placar", "2.1.0", &"b2".repeat(32)),
+        ]
+    }
+
+    #[test]
+    fn o_mesmo_conjunto_da_a_mesma_identidade() {
+        assert_eq!(
+            identidade_do_conjunto(&mut conjunto()),
+            identidade_do_conjunto(&mut conjunto())
+        );
+    }
+
+    /// A ordem em que o banco devolve as linhas não pode mudar a identidade: o
+    /// aceite que uma pessoa guardou tem de continuar valendo na reconexão
+    /// seguinte, e `ORDER BY` não é promessa que atravesse versão de SQLite.
+    #[test]
+    fn a_ordem_das_linhas_nao_muda_a_identidade() {
+        let mut invertido = conjunto();
+        invertido.reverse();
+        assert_eq!(
+            identidade_do_conjunto(&mut conjunto()),
+            identidade_do_conjunto(&mut invertido)
+        );
+    }
+
+    /// ADR 0045: «um servidor que troca de MOD pergunta de novo». Sem isto,
+    /// quem já tinha aceito entraria sem nunca ter lido o MOD novo.
+    #[test]
+    fn acrescentar_um_mod_muda_a_identidade() {
+        let mut com_mais_um = conjunto();
+        com_mais_um.push(anunciado("seele/tunel", "1.0.0", &"c3".repeat(32)));
+        assert_ne!(
+            identidade_do_conjunto(&mut conjunto()),
+            identidade_do_conjunto(&mut com_mais_um)
+        );
+    }
+
+    #[test]
+    fn tirar_um_mod_muda_a_identidade() {
+        let mut com_um_so = vec![conjunto().swap_remove(0)];
+        assert_ne!(
+            identidade_do_conjunto(&mut conjunto()),
+            identidade_do_conjunto(&mut com_um_so)
+        );
+    }
+
+    /// Subir a versão de um MOD é trocar o MOD, e o aceite anterior não vale.
+    #[test]
+    fn subir_a_versao_de_um_mod_muda_a_identidade() {
+        let mut outra_versao = conjunto();
+        outra_versao[0].version = "1.0.1".to_owned();
+        assert_ne!(
+            identidade_do_conjunto(&mut conjunto()),
+            identidade_do_conjunto(&mut outra_versao)
+        );
+    }
+
+    /// Os mesmos nome e versão com outros bytes é outro MOD, e é o caso que o
+    /// nome sozinho não pega — o motivo de o hash existir (ADR 0026,
+    /// alternativa 5).
+    #[test]
+    fn outros_bytes_sob_o_mesmo_nome_mudam_a_identidade() {
+        let mut remendado = conjunto();
+        remendado[0].hash = "f0".repeat(32);
+        assert_ne!(
+            identidade_do_conjunto(&mut conjunto()),
+            identidade_do_conjunto(&mut remendado)
+        );
+    }
+
+    /// Sem tamanho contado antes de cada campo, `("ab","c")` e `("a","bc")`
+    /// colidiriam — e dois conjuntos diferentes teriam a mesma identidade.
+    #[test]
+    fn mover_bytes_de_um_campo_para_o_outro_muda_a_identidade() {
+        let mut um = vec![anunciado("a/b", "10", "0")];
+        let mut outro = vec![anunciado("a/b", "1", "00")];
+        assert_ne!(
+            identidade_do_conjunto(&mut um),
+            identidade_do_conjunto(&mut outro)
+        );
+    }
+
+    /// `repo` e `reach` saem do `mod.json`, e o `mod.json` está dentro do hash:
+    /// contá-los de novo seria contar a mesma coisa duas vezes. Este teste
+    /// prende a decisão para que ela não vire acidente.
+    #[test]
+    fn o_que_o_hash_ja_cobre_nao_entra_na_identidade() {
+        let mut outro_repo = conjunto();
+        outro_repo[0].repo = "https://example.invalid/outro".to_owned();
+        outro_repo[0].reach = vec!["ler".to_owned()];
+        outro_repo[0].no_servidor = true;
+        assert_eq!(
+            identidade_do_conjunto(&mut conjunto()),
+            identidade_do_conjunto(&mut outro_repo)
+        );
+    }
+
+    #[test]
+    fn o_hash_de_um_conteudo_e_um_hash_de_conteudo() {
+        let mut arquivos = arquivos();
+        assert!(e_hash_de_conteudo(&hex(&content_hash(&mut arquivos))));
+    }
+
+    /// Caixa fixa, e o motivo não é purismo: a identidade do conjunto é
+    /// calculada sobre este texto, então maiúscula e minúscula dariam duas
+    /// identidades para os mesmos bytes, e um aceite guardado deixaria de valer
+    /// por causa de uma letra.
+    #[test]
+    fn um_hash_que_nao_e_hexadecimal_minusculo_de_64_e_recusado() {
+        for ruim in [
+            String::new(),
+            "a".repeat(63),
+            "a".repeat(65),
+            "A1".repeat(32),
+            "g1".repeat(32),
+            " ".repeat(64),
+        ] {
+            assert!(!e_hash_de_conteudo(&ruim), "`{ruim}` passou por hash");
+        }
+    }
+
+    /// O anúncio não sai enquanto a versão global não o alcançar, e a linha que
+    /// decide isso é uma só. Preso aqui para que a integração conjunta com a
+    /// malha seja uma decisão e não um descuido: quando os dois conjuntos de
+    /// variantes entrarem juntos, `PROTOCOL_VERSION` sobe para 5 e este teste
+    /// passa a dizer que o anúncio vale.
+    #[test]
+    fn o_anuncio_pede_uma_versao_que_a_global_ainda_nao_alcancou() {
+        assert_eq!(VERSAO_DO_ANUNCIO, 5);
+        assert_eq!(
+            crate::version::PROTOCOL_VERSION,
+            4,
+            "a versão global mudou: confira o contrato de integração no desenho \
+             do anúncio antes de mexer nesta linha"
+        );
     }
 }

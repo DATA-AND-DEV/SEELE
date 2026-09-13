@@ -335,7 +335,18 @@ mod tests {
         use seele_proto::ids::{PersonId, VoiceRoomId};
 
         let banco = Persistence::open(&Location::Memory).expect("banco");
-        crate::persistence::mods::enable(&banco, "seele/contador", "1.0.0", "h").expect("ligar");
+        crate::persistence::mods::enable(
+            &banco,
+            &crate::persistence::mods::EnabledMod {
+                id: "seele/contador".to_owned(),
+                version: "1.0.0".to_owned(),
+                hash: "h".to_owned(),
+                repo: String::new(),
+                reach: Vec::new(),
+                server_half: true,
+            },
+        )
+        .expect("ligar");
         let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
 
         let (despachante, _) = Despachante::iniciar(vec![(
@@ -395,7 +406,18 @@ mod tests {
         use seele_proto::ids::{PersonId, VoiceRoomId};
 
         let banco = Persistence::open(&Location::Memory).expect("banco");
-        crate::persistence::mods::enable(&banco, "seele/ruim", "1.0.0", "h").expect("ligar");
+        crate::persistence::mods::enable(
+            &banco,
+            &crate::persistence::mods::EnabledMod {
+                id: "seele/ruim".to_owned(),
+                version: "1.0.0".to_owned(),
+                hash: "h".to_owned(),
+                repo: String::new(),
+                reach: Vec::new(),
+                server_half: true,
+            },
+        )
+        .expect("ligar");
         let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
 
         let (despachante, _) = Despachante::iniciar(vec![(

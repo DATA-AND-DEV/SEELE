@@ -42,6 +42,13 @@ pub enum LinkTrust {
     Verified,
 }
 
+/// Quanto se espera para ter certeza de que a recusa dos MODs chegou.
+///
+/// Curto porque é tempo gasto por quem já decidiu não entrar, e existe porque
+/// uma recusa não confirmada é indistinguível de uma conexão que caiu — ver
+/// onde ela é usada.
+const ESPERA_DA_RECUSA: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Why a connection did not happen.
 ///
 /// Enumerated rather than an opaque error, because `specs/06-clientes-gui.md`
@@ -111,6 +118,28 @@ pub enum ConnectError {
         expected: String,
         /// What the server offered.
         offered: String,
+    },
+
+    /// O servidor exige MODs que esta máquina ainda não aceitou. ADR 0045.
+    ///
+    /// # Por que ela carrega a lista, e por que isso não é um erro falante
+    ///
+    /// As outras variantes descrevem o que deu errado. Esta descreve **uma
+    /// pergunta que ninguém respondeu ainda**, e a resposta depende de dados
+    /// que só chegaram agora: quem são os MODs, de que repositório vieram, o
+    /// que declaram alcançar, e quais deles rodam na máquina de quem hospeda.
+    ///
+    /// Sem eles aqui, a casca teria de reconectar só para poder perguntar — ou
+    /// pior, perguntaria sem ter o que mostrar. Nada aqui é texto de erro: são
+    /// campos que a casca desenha e traduz (ADR 0012), como todo o resto.
+    ///
+    /// O caminho que ela abre é um só: a tela mostra, a pessoa aceita, a casca
+    /// guarda a identidade em `crate::aceites` e conecta de novo.
+    ModsNaoAceitos {
+        /// O que o servidor exige, como ele anunciou.
+        mods: Vec<seele_proto::mods::ModAnunciado>,
+        /// A identidade do conjunto, que é o que se guarda ao aceitar.
+        conjunto: String,
     },
 }
 
@@ -424,6 +453,15 @@ impl Client {
     ///
     /// A [`ConnectError`] variant, never a message. Every caller has to be able
     /// to say which of these happened in its own words.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "o oitavo é o aceite de MODs do ADR 0045, e ele é do mesmo par \
+                  que `pins`: o que esta máquina já decidiu sobre este servidor. \
+                  Agrupar os oito num tipo é a saída certa e não é desta entrega \
+                  — ela tocaria todo chamador do produto por uma razão que não é \
+                  a desta tarefa, e o `connect_por` logo abaixo já carrega a \
+                  mesma dispensa desde antes"
+    )]
     pub async fn connect(
         server: SocketAddr,
         server_name: &str,
@@ -432,6 +470,7 @@ impl Client {
         signing_key: &SigningKey,
         pins: Arc<dyn PinStore>,
         join_secret: Option<&str>,
+        aceito: Option<&str>,
     ) -> Result<Self, ConnectError> {
         let endpoint = local_endpoint(None)?;
         Self::connect_por(
@@ -443,6 +482,7 @@ impl Client {
             signing_key,
             pins,
             join_secret,
+            aceito,
         )
         .await
     }
@@ -474,6 +514,7 @@ impl Client {
         signing_key: &SigningKey,
         pins: Arc<dyn PinStore>,
         join_secret: Option<&str>,
+        aceito: Option<&str>,
     ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -529,7 +570,14 @@ impl Client {
         let _ = send.set_priority(CONTROL_PRIORITY);
         let session = tokio::time::timeout(
             HANDSHAKE_TIMEOUT,
-            handshake(&mut send, &mut recv, nickname, signing_key, join_secret),
+            handshake(
+                &mut send,
+                &mut recv,
+                nickname,
+                signing_key,
+                join_secret,
+                aceito,
+            ),
         )
         .await
         .map_err(|_| ConnectError::HandshakeTimeout)??;
@@ -1535,6 +1583,7 @@ async fn handshake(
     nickname: &str,
     signing_key: &SigningKey,
     join_secret: Option<&str>,
+    aceito: Option<&str>,
 ) -> Result<SessionInfo, ConnectError> {
     frame::write(
         send,
@@ -1581,10 +1630,68 @@ async fn handshake(
         ConnectError::Unreachable
     })?;
 
-    let answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+    let mut answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
         tracing::warn!(%error, "no Session came back");
         ConnectError::Unreachable
     })?;
+
+    // O anúncio de MODs, quando o servidor exige algum. ADR 0045.
+    //
+    // # Por que a decisão não é tomada aqui
+    //
+    // Aceitar é de uma pessoa, e um aperto de mão não tem como perguntar a
+    // ninguém: ele corre dentro de um prazo, sem tela e sem ninguém olhando.
+    // O que este código faz é comparar com o que **já foi** aceito, e devolver
+    // a lista para a casca quando não bate.
+    //
+    // É a mesma forma do TOFU dos pins (ADR 0003): o núcleo confere contra o
+    // que está guardado, e quem decide o que guardar é quem tem uma tela.
+    if let ServerMessage::ModsExigidos { mods, conjunto } = answer {
+        if aceito == Some(conjunto.as_str()) {
+            frame::write(
+                send,
+                &ClientMessage::AceitarMods {
+                    conjunto: conjunto.clone(),
+                },
+            )
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, "could not send AceitarMods");
+                ConnectError::Unreachable
+            })?;
+            answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+                tracing::warn!(%error, "no Session came back after accepting the MODs");
+                ConnectError::Unreachable
+            })?;
+        } else {
+            // **Recusa explícita, e não sumir.** Quem hospeda precisa distinguir
+            // «leu e não quis» de «a conexão caiu» — ver
+            // `ClientMessage::RecusarMods`. O erro devolvido não é uma queixa:
+            // é a pergunta, com o que a casca precisa para fazê-la.
+            let _ = frame::write(send, &ClientMessage::RecusarMods).await;
+            // **E uma recusa que não chega não é uma recusa.**
+            //
+            // Escrever não é entregar: logo abaixo esta função devolve erro, e
+            // quem a chamou larga o `Endpoint` — que é dono do socket. O quadro
+            // escrito e não confirmado morre com ele, e quem hospeda vê um
+            // aperto de mão que sumiu no meio, que é a leitura errada.
+            //
+            // Encontrado por teste, e não por leitura: o servidor de mentira de
+            // `aceite_dos_mods.rs` recebia a recusa numa corrida e não na
+            // outra. `stopped` volta quando o outro lado confirmou tudo depois
+            // do `finish`, e o prazo existe para que um servidor que não lê
+            // nunca prenda quem está saindo.
+            let _ = send.finish();
+            let _ = tokio::time::timeout(ESPERA_DA_RECUSA, send.stopped()).await;
+            tracing::info!(
+                %conjunto,
+                quantos = mods.len(),
+                "o servidor exige um conjunto de MODs que esta máquina não aceitou"
+            );
+            return Err(ConnectError::ModsNaoAceitos { mods, conjunto });
+        }
+    }
+
     match answer {
         ServerMessage::Session {
             id,

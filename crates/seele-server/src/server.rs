@@ -868,6 +868,14 @@ pub struct Server {
     /// `HostUplink` que a sessão escreve manda **zero**, que pelo protocolo é
     /// «não medi». Ver `crate::tela::caminho_no_fio`.
     pub caminho_bps: Option<u32>,
+    /// A partir de que versão do protocolo o anúncio de MODs sai.
+    ///
+    /// A cópia de [`crate::ServerConfig::versao_do_anuncio`] que o aperto de
+    /// mão e o laço de sessão alcançam, e ela mora aqui pela mesma razão que
+    /// [`Self::caminho_bps`]. O que ela decide, e onde: se o portão do ADR 0045
+    /// está de pé ou dormente — [`crate::mods::anuncio::o_anuncio_alcanca_alguem`] —
+    /// e, quando de pé, qual par é velho demais para ser perguntado.
+    pub versao_do_anuncio: u8,
 }
 
 /// Starts the batching writer.

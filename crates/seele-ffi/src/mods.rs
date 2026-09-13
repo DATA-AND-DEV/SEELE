@@ -30,6 +30,23 @@ pub struct ModInstalado {
     pub hash: String,
     /// O caminho do script que a janela carrega, se há metade de cliente.
     pub client: Option<String>,
+    /// O repositório público que o manifesto declara. ADR 0045 o torna
+    /// condição de publicação, e é o que uma pessoa abre para ler o que vai
+    /// rodar na máquina dela.
+    pub repo: String,
+    /// O que este MOD declara alcançar.
+    ///
+    /// Vai para a tela **antes** de qualquer byte ser baixado: ADR 0045 exige
+    /// que quem entra leia o alcance declarado antes de aceitar.
+    pub reach: Vec<String>,
+    /// Se este MOD tem metade de servidor.
+    ///
+    /// **A linha que a tela de aceite não pode omitir.** Um MOD com metade de
+    /// servidor roda na máquina de quem hospeda e alcança o bloco `world` do
+    /// `api/v1.json` — rede de saída, relógio e log. A diferença entre isto e um
+    /// MOD só de aparência é a diferença entre repintar uma janela e abrir
+    /// conexões a partir da casa de alguém.
+    pub server: bool,
     /// O nome da recusa, de uma lista fechada, quando houve uma.
     pub refused: Option<String>,
 }
@@ -59,6 +76,9 @@ pub fn ler_um(pasta: &str, id: &str) -> Result<ModInstalado, String> {
             version: instalado.manifest.version,
             hash: hex(&instalado.hash),
             client: instalado.manifest.client,
+            repo: instalado.manifest.repo,
+            reach: instalado.manifest.reach,
+            server: instalado.manifest.server.is_some(),
             refused: None,
         }),
         Err(why) => Err(refusal_name(&why).to_owned()),
@@ -73,6 +93,9 @@ fn achatar(found: Found) -> ModInstalado {
             version: instalado.manifest.version,
             hash: hex(&instalado.hash),
             client: instalado.manifest.client,
+            repo: instalado.manifest.repo,
+            reach: instalado.manifest.reach,
+            server: instalado.manifest.server.is_some(),
             refused: None,
         },
         Found::Refused { id, why } => ModInstalado {
@@ -80,6 +103,9 @@ fn achatar(found: Found) -> ModInstalado {
             version: String::new(),
             hash: String::new(),
             client: None,
+            repo: String::new(),
+            reach: Vec::new(),
+            server: false,
             refused: Some(refusal_name(&why).to_owned()),
         },
     }
@@ -101,4 +127,96 @@ fn achatar(found: Found) -> ModInstalado {
 #[must_use]
 pub fn caminho_interno(partes: &[&str]) -> Option<std::path::PathBuf> {
     seele_core::mods::inner_path(partes)
+}
+
+// ------------------------------------------------- o aceite de quem entra
+//
+// ADR 0045: «aceitou uma vez, entra direto nas próximas». Guardar o sim é da
+// casca, porque é ela que tem a tela onde ele é dado; **onde** ele é guardado é
+// do núcleo, porque é o mesmo diretório de onde saem a identidade e os pins
+// (ADR 0017).
+//
+// Estes três verbos existem porque sem eles o contrato não fecha: a casca recebe
+// a lista pelo `ConnectionError::ModsNaoAceitos` e não teria como registrar a
+// resposta — `check_deps` a deixa ver `seele-ffi` e nada além.
+
+/// O que esta máquina já aceitou para este servidor, se algo.
+///
+/// `alvo` é o endereço **como a pessoa o digitou** ou como o convite o trouxe;
+/// a forma canônica sob a qual ele é arquivado sai de
+/// [`crate::chave_do_servidor`], e não da casca — ver o porquê ali.
+#[must_use]
+pub fn aceite_de(home: &str, alvo: &str) -> Option<String> {
+    let chave = crate::chave_do_servidor(alvo)?;
+    seele_core::aceites::Aceites::em(std::path::Path::new(home)).aceito_de(&chave)
+}
+
+/// Guarda o sim que a pessoa acabou de dar a um conjunto de MODs.
+///
+/// A entrada seguinte neste servidor passa direto, e só neste — um aceite é de
+/// um servidor, e não desta máquina.
+///
+/// # Errors
+///
+/// Devolve `"NaoDeuParaGravar"` quando o arquivo não pôde ser escrito, e
+/// `"EnderecoInvalido"` quando o alvo não é um endereço. Nomes de recusa e não
+/// frases, como as vizinhas: a fronteira erro→texto é do frontend.
+///
+/// Recusar um alvo inválido em vez de gravá-lo como veio é o que impede o modo
+/// de falha mudo: um aceite arquivado sob uma chave que ninguém lê é um sim que
+/// a pessoa deu e que o produto vai pedir de novo em toda entrada.
+pub fn aceitar(home: &str, alvo: &str, conjunto: &str) -> Result<(), String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    seele_core::aceites::Aceites::em(std::path::Path::new(home))
+        .aceitar_agora(&chave, conjunto)
+        .map_err(|_| "NaoDeuParaGravar".to_owned())
+}
+
+/// Desfaz o sim dado a este servidor.
+///
+/// Existe porque um consentimento que não se retira não é consentimento: a
+/// entrada seguinte volta a mostrar a lista.
+///
+/// # Errors
+///
+/// Devolve `"NaoDeuParaGravar"` quando o arquivo não pôde ser escrito, e
+/// `"EnderecoInvalido"` quando o alvo não é um endereço.
+pub fn esquecer_aceite(home: &str, alvo: &str) -> Result<(), String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    seele_core::aceites::Aceites::em(std::path::Path::new(home))
+        .esquecer(&chave)
+        .map_err(|_| "NaoDeuParaGravar".to_owned())
+}
+
+#[cfg(test)]
+mod tests_do_aceite {
+    use super::*;
+
+    fn pasta(nome: &str) -> String {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static QUAL: AtomicUsize = AtomicUsize::new(0);
+        let n = QUAL.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "seele-ffi-aceites-{nome}-{}-{n}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temporário");
+        dir.to_string_lossy().into_owned()
+    }
+
+    /// O caminho inteiro que a casca percorre: não há aceite, ela guarda um, e
+    /// a entrada seguinte o encontra.
+    #[test]
+    fn a_casca_guarda_o_aceite_e_o_encontra_na_entrada_seguinte() {
+        let home = pasta("guarda");
+        let conjunto = "a1".repeat(32);
+        assert_eq!(aceite_de(&home, "casa:8383"), None);
+
+        aceitar(&home, "casa:8383", &conjunto).expect("guardar");
+        assert_eq!(aceite_de(&home, "casa:8383"), Some(conjunto));
+
+        esquecer_aceite(&home, "casa:8383").expect("esquecer");
+        assert_eq!(aceite_de(&home, "casa:8383"), None);
+    }
 }

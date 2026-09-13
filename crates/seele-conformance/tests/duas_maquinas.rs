@@ -64,6 +64,7 @@ async fn o_caminho_ate_a_outra_maquina_esta_aberto() {
         &ed25519_dalek::SigningKey::from_bytes(&[42_u8; 32]),
         Arc::new(MemoryPinStore::new()) as Arc<dyn PinStore>,
         None,
+        None,
     )
     .await;
     let levou = comecou.elapsed();

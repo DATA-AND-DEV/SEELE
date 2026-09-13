@@ -432,6 +432,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
         &ed25519_dalek::SigningKey::from_bytes(&[42; 32]),
         Arc::new(MemoryPinStore::new()),
         None,
+        None,
     )
     .await?;
 

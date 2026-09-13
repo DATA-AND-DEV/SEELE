@@ -116,6 +116,7 @@ fn destino_com_nome(alvo: &str, nome_tls: &str) -> Destino {
         apelido: "pessoa".to_owned(),
         segredo: None,
         impressao_esperada: Some(IMPRESSAO.to_owned()),
+        aceito: None,
     }
 }
 

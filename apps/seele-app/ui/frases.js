@@ -75,6 +75,32 @@ const MOTIVOS = {
     "ESTE APELIDO JÁ É DE OUTRA PESSOA NESTE SERVIDOR.\n" +
     "Não é o convite nem a senha: escolha outro apelido e entre de novo.",
 
+  // ---- os MODs do ADR 0045 ----
+  //
+  // As três dizem a mesma coisa por dentro — o que este servidor exige não bate
+  // com o que esta máquina aceitou — e pedem coisas diferentes de quem lê, que
+  // é por isso que são três.
+  //
+  // Nenhuma delas fala em credencial, e a diferença não é cosmética: o primeiro
+  // instinto de quem lê CREDENCIAL RECUSADA é conferir convite e senha, e aqui
+  // os dois estão certos.
+  ModsRecusados:
+    "ESTE SERVIDOR EXIGE MODS QUE VOCÊ NÃO ACEITOU.\n" +
+    "Entrar de novo mostra a lista outra vez: o que cada MOD é, de onde ele vem, " +
+    "e o que ele alcança.",
+  // Esta é a única que descreve uma sessão que estava funcionando. A pessoa não
+  // fez nada — quem mudou foi o servidor —, e dizer isso evita que ela procure
+  // erro no lado dela.
+  ModsMudaram:
+    "OS MODS DESTE SERVIDOR MUDARAM.\n" +
+    "O que você aceitou não é mais o que ele exige: entre de novo para ler a lista nova.",
+  // Nada a fazer do lado de quem lê, e a frase diz isso em vez de sugerir uma
+  // tentativa que vai falhar igual. Quem conserta é quem hospeda, e o motivo
+  // está no log da máquina dele.
+  ModsIndisponiveis:
+    "ESTE SERVIDOR EXIGE MODS QUE ELE NÃO CONSEGUE DESCREVER.\n" +
+    "Não é a sua entrada: avise quem hospeda.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 
@@ -326,6 +352,38 @@ function fraseDeErro(erro, apelido) {
         `esperada: ${erro.InviteMismatch.expected}\n` +
         `ofertada: ${erro.InviteMismatch.offered}\n` +
         "Confirme o link com quem o mandou."
+      );
+    }
+    // **O servidor exige MODs que esta máquina não aceitou.** ADR 0045.
+    //
+    // Não é uma falha: é uma pergunta que ainda não tem tela. Enquanto ela não
+    // existe, a lista é lida **aqui** — porque a alternativa é a frase genérica
+    // do fim desta função, e «o produto sabe e não conta» é o defeito que mais
+    // caro custou neste repositório.
+    //
+    // Cada MOD sai com o que o ADR 0045 manda mostrar antes de qualquer byte
+    // ser baixado: quem é, de onde veio, e o que alcança. A linha de `world` é
+    // separada das outras de propósito — ela não é mais um alcance na lista, é
+    // código de terceiro rodando na máquina de outra pessoa.
+    if (erro.ModsNaoAceitos) {
+      const lista = (erro.ModsNaoAceitos.mods ?? [])
+        .map((mod) => {
+          const linhas = [`• ${mod.id} ${mod.version}`, `  repositório: ${mod.repo || "não declarado"}`];
+          linhas.push(
+            `  alcança: ${mod.reach && mod.reach.length ? mod.reach.join(", ") : "nada declarado"}`,
+          );
+          if (mod.no_servidor) {
+            linhas.push(
+              "  roda na máquina de quem hospeda: rede de saída, relógio e registro",
+            );
+          }
+          return linhas.join("\n");
+        })
+        .join("\n");
+      return (
+        "ESTE SERVIDOR EXIGE MODS QUE VOCÊ AINDA NÃO ACEITOU.\n" +
+        lista +
+        "\nA tela para ler e aceitar esta lista ainda não existe neste app."
       );
     }
     if (erro.Refused) {

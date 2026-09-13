@@ -2984,14 +2984,48 @@ fn resolve(target: &str) -> Result<(SocketAddr, String, String), ConnectionError
         alvo.maquina.to_owned()
     };
     // The pin key is written back in the canonical form rather than as typed, so
-    // `[::1]:8383` and `[::1]` file under one entry instead of two. An IPv6 goes
-    // back into its brackets: without them the key is ambiguous with `host:port`.
-    let pin_key = if address.is_ipv6() && alvo.maquina.contains(':') {
-        format!("[{}]:{}", alvo.maquina, alvo.porta)
-    } else {
-        format!("{}:{}", alvo.maquina, alvo.porta)
-    };
+    // `[::1]:8383` and `[::1]` file under one entry instead of two.
+    //
+    // **Uma função só, e por quê.** Esta chave não arquiva mais só o pin: desde
+    // o anúncio de MODs ela arquiva também o aceite, e quem grava o aceite é a
+    // casca, por um verbo que não tem socket nenhum. Duas cópias da regra
+    // seriam duas chaves para o mesmo servidor no dia em que uma delas mudasse
+    // — e o efeito de errar a chave é mudo: o aceite fica escrito onde ninguém
+    // lê, e a pessoa que já disse sim é perguntada de novo para sempre.
+    let pin_key = chave_do_servidor(target).ok_or(ConnectionError::UnresolvableHost)?;
+    debug_assert_eq!(
+        pin_key.contains('['),
+        address.is_ipv6() && alvo.maquina.contains(':'),
+        "a chave canônica discordou da resolução sobre ser um IPv6 literal"
+    );
     Ok((address, server_name, pin_key))
+}
+
+/// A chave sob a qual tudo que é **deste servidor** é arquivado nesta máquina.
+///
+/// O pin do certificado (ADR 0022) e o aceite dos MODs (ADR 0045) moram os dois
+/// sob ela, e é de propósito: são duas memórias sobre o mesmo servidor, e uma
+/// pessoa que apaga um servidor da lista espera apagar as duas.
+///
+/// É `host:porta` na forma canônica — a porta preenchida quando quem digitou a
+/// omitiu, e um IPv6 literal de volta entre colchetes, sem os quais a chave
+/// seria ambígua com `host:porta`. **Não resolve nome nenhum:** é uma decisão
+/// sobre o texto, e por isso vale igual dentro de um comando da janela, onde
+/// não há socket.
+///
+/// Devolve `None` quando o alvo não é um endereço — o mesmo caso em que
+/// `resolve` devolve [`ConnectionError::UnresolvableHost`].
+#[must_use]
+pub fn chave_do_servidor(alvo: &str) -> Option<String> {
+    let alvo = seele_core::uri::separar(alvo).ok()?;
+    // `maquina` só contém `:` quando veio de dentro de colchetes: `separar`
+    // recusa um IPv6 escrito cru e corta a porta em qualquer outro caso. Então
+    // este teste diz «é um IPv6 literal» sem precisar resolver o nome.
+    if alvo.maquina.contains(':') {
+        Some(format!("[{}]:{}", alvo.maquina, alvo.porta))
+    } else {
+        Some(format!("{}:{}", alvo.maquina, alvo.porta))
+    }
 }
 
 /// Turns a [`ConnectConfig`] and what [`resolve`] made of it into a
@@ -3017,6 +3051,13 @@ fn build_destino(
         apelido: config.nickname.clone(),
         segredo: config.join_secret.clone(),
         impressao_esperada: config.expected_fingerprint.clone(),
+        // Lido de disco aqui, e não pedido à casca: o `home` é o mesmo caminho
+        // de onde saem a identidade e os pins (ADR 0017), e quem sabe persistir
+        // é o núcleo. Uma casca que tivesse de carregar o aceite junto seria uma
+        // casca que pode esquecer de carregá-lo — e esquecer, aqui, é perguntar
+        // de novo a quem já respondeu.
+        aceito: seele_core::aceites::Aceites::em(std::path::Path::new(&config.home))
+            .aceito_de(pin_key),
     }
 }
 
@@ -4041,6 +4082,18 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                 offered: offered.clone(),
             }
         }
+        // Não é uma falha traduzida: é a pergunta do ADR 0045 atravessando
+        // inteira, com o que a tela precisa para fazê-la.
+        seele_core::ConnectError::ModsNaoAceitos { mods, conjunto } => {
+            ConnectionError::ModsNaoAceitos {
+                mods: mods
+                    .iter()
+                    .cloned()
+                    .map(crate::types::ModExigido::from)
+                    .collect(),
+                conjunto: conjunto.clone(),
+            }
+        }
         seele_core::ConnectError::HandshakeTimeout => ConnectionError::HandshakeTimeout,
         seele_core::ConnectError::SemResposta => ConnectionError::SemResposta,
         seele_core::ConnectError::Refused { reason } => ConnectionError::Refused {
@@ -4123,6 +4176,77 @@ mod tests {
         };
         let destino = build_destino(&without, address, &name, &pin);
         assert_eq!(destino.impressao_esperada, None);
+    }
+
+    /// O sim que a casca guarda é lido pela conexão seguinte.
+    ///
+    /// **A trava que este teste põe.** São dois caminhos que nunca se
+    /// encontram: `mods::aceitar` grava sem socket nenhum, de dentro de um
+    /// comando da janela, e `build_destino` lê já com o endereço resolvido. Se
+    /// os dois derivarem a chave por conta própria, o dia em que uma das regras
+    /// mudar é um dia em que o aceite é escrito num lugar e procurado noutro —
+    /// e o sintoma é mudo: ninguém vê um erro, a pessoa só é perguntada de novo
+    /// em toda entrada, para sempre.
+    ///
+    /// As três formas abaixo são as que já custaram caro em outro lugar: a
+    /// porta omitida (que a lista de visitados duplicava), o IPv6 literal (ADR
+    /// 0022, passo 2) e o endereço comum.
+    #[test]
+    fn o_aceite_e_guardado_sob_a_chave_que_a_conexao_vai_procurar() {
+        let home =
+            std::env::temp_dir().join(format!("seele-ffi-chave-do-aceite-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("temporário");
+        let casa = home.to_string_lossy().into_owned();
+        let conjunto = "b2".repeat(32);
+
+        for digitado in ["localhost:8383", "localhost", "[::1]:8383"] {
+            let (address, name, pin) = resolve(digitado).expect("resolve");
+
+            crate::mods::aceitar(&casa, digitado, &conjunto).expect("guardar o sim");
+
+            let config = ConnectConfig {
+                server: digitado.into(),
+                alternate_servers: Vec::new(),
+                nickname: "rafael".into(),
+                home: casa.clone(),
+                join_secret: None,
+                expected_fingerprint: None,
+                bilhete: None,
+                audio: false,
+                capture_device: None,
+                playback_device: None,
+            };
+            let destino = build_destino(&config, address, &name, &pin);
+            assert_eq!(
+                destino.aceito,
+                Some(conjunto.clone()),
+                "o aceite guardado para «{digitado}» não foi encontrado pela conexão"
+            );
+
+            crate::mods::esquecer_aceite(&casa, digitado).expect("esquecer");
+            let destino = build_destino(&config, address, &name, &pin);
+            assert_eq!(
+                destino.aceito, None,
+                "retirar o consentimento de «{digitado}» não chegou à conexão"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Um alvo que não é endereço é recusado por nome, e não gravado como veio.
+    ///
+    /// Gravá-lo criaria a entrada que nada lê — ver o teste acima.
+    #[test]
+    fn um_alvo_que_nao_e_endereco_nao_vira_um_aceite_escrito_no_vazio() {
+        let casa = std::env::temp_dir().to_string_lossy().into_owned();
+        assert_eq!(
+            crate::mods::aceitar(&casa, "::1", &"c3".repeat(32)),
+            Err("EnderecoInvalido".to_owned()),
+            "um IPv6 sem colchetes foi aceito como chave"
+        );
+        assert_eq!(crate::mods::aceite_de(&casa, "::1"), None);
     }
 
     #[test]

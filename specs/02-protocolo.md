@@ -37,6 +37,18 @@ Cliente                                Servidor
    │◀── Sessao { id, server, voice_rooms, papeis }│   → conexão segura
 ```
 
+Num servidor com MOD habilitado entra mais uma volta, **depois da `Resposta` e antes da `Sessao`** (ADR 0045):
+
+```
+   │◀── ModsExigidos { mods, conjunto } ───│   (só se houver MOD habilitado)
+   │── AceitarMods { conjunto } ──────────▶│   ou RecusarMods
+   │◀── Sessao … ─────────────────────────│   (só para quem aceitou)
+```
+
+Depois da assinatura porque a lista de MODs é configuração de quem hospeda; antes da `Sessao` porque a `Sessao` é o fluxo protegido, e «não entra» tem de querer dizer «não recebe nada». Ver `docs/superpowers/specs/2026-09-10-anuncio-e-aceite-de-mods.md`.
+
+Esta volta **ainda não sai no fio**: o anúncio viaja numa versão que a versão global do protocolo não alcançou, pelo contrato de integração conjunta com a malha. Até lá o servidor admite como admitia antes e avisa quem hospeda pelo log — um portão que nenhum par pode atravessar recusaria todo mundo sem dar a ninguém a chance de aceitar. Ver `seele_proto::mods::VERSAO_DO_ANUNCIO` e a pendência #39.
+
 Antes da `Sessao`, o cliente está em **PADRÃO: LARANJA** — conectado, não verificado. A interface deve refletir esse estado, não escondê-lo.
 
 Timeout de handshake: 10 s. Falha → `PadraoAzulNaoEstabelecido` com motivo específico (nunca genérico).
@@ -55,6 +67,8 @@ Timeout de handshake: 10 s. Falha → `PadraoAzulNaoEstabelecido` com motivo esp
 | `DefinirATField` | bool | Mudo local, anunciado ao servidor |
 | `DefinirEstado` | enum presença | |
 | `Ping` | timestamp | Base para o cálculo de sincronização |
+| `AceitarMods` | identidade do conjunto | Resposta ao `ModsExigidos`. ADR 0045 |
+| `RecusarMods` | — | «Li e não quero.» Verbo próprio, e não ausência |
 
 ## Mensagens de controle — servidor → cliente
 
@@ -69,6 +83,7 @@ Timeout de handshake: 10 s. Falha → `PadraoAzulNaoEstabelecido` com motivo esp
 | `Alerta` | severidade, motivo, texto |
 | `Pong` | eco do timestamp |
 | `Desconectando` | motivo enumerado |
+| `ModsExigidos` | os MODs habilitados — identidade, versão, hash, repositório, alcance declarado, e se rodam na máquina de quem hospeda — mais a identidade do conjunto |
 
 **Todos os motivos de erro são enumerados.** Nada de string livre chegando na interface — a casca decide como apresentar cada variante.
 

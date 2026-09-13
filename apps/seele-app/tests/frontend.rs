@@ -442,7 +442,25 @@ fn every_command_the_frontend_calls_is_registered() {
 // FFI e o banco estão prontos, e a tela que liga e desliga MOD é de um plano
 // posterior. `mods_instalados` **não** está aqui — o `base.js` já o chama para
 // carregar os MODs habilitados, que é a metade que existe hoje.
-const AGUARDANDO_TELA: &[&str] = &["habilitar_mod", "desabilitar_mod"];
+// `aceite_de_mods`, `aceitar_mods` e `esquecer_aceite_de_mods` entram pelo outro
+// lado do mesmo ADR 0045: os três de cima são de quem hospeda e decidem o que a
+// sala exige; estes três são de quem entra e registram o que esta máquina
+// respondeu. O protocolo, o servidor, o núcleo e o FFI estão prontos — a lista
+// já chega à janela pelo `ConnectionError::ModsNaoAceitos`, e o `frases.js` a
+// desenha —, e o que falta é a tela com o botão de aceitar, que é de um plano
+// posterior junto com o download dos bytes.
+//
+// **Por que registrá-los antes da tela**, em vez de esperar por ela: sem eles a
+// pergunta que a janela já mostra não tem resposta possível. A pessoa lê o que o
+// servidor exige e não tem o que fazer com a leitura — que é meia funcionalidade
+// entregue como se fosse uma.
+const AGUARDANDO_TELA: &[&str] = &[
+    "habilitar_mod",
+    "desabilitar_mod",
+    "aceite_de_mods",
+    "aceitar_mods",
+    "esquecer_aceite_de_mods",
+];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

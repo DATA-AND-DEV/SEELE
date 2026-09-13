@@ -27,6 +27,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod anuncio;
 pub mod arquivos;
 pub mod despacho;
 pub mod mundo;

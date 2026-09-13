@@ -1895,3 +1895,161 @@ disputados — e continua sem diagnóstico. Esta tarefa é só de infraestrutura
 de CI e não mexe em código de teste; o registro fica aqui para quem for
 investigar não gastar tempo checando `-j1` ou concorrência entre binários de
 novo.
+
+## 39 · O anúncio de MODs está pronto e não sai, esperando uma subida de versão
+
+**Estado.** O anúncio, o aceite e a recusa de MODs estão implementados dos dois
+lados e cobertos por testes — inclusive por fluxos QUIC de verdade. O que não
+acontece é o anúncio **sair**: ele viaja em `seele_proto::mods::VERSAO_DO_ANUNCIO`,
+que é 5, e `PROTOCOL_VERSION` continua 4.
+
+**Por que ele não subiu junto.** O postcard indexa variante por posição. O
+anúncio de MODs e a entrega da malha acrescentam variantes ao mesmo par de
+listas ao mesmo tempo; se cada uma subisse a versão global por conta própria, as
+duas chamariam «5» a vocabulários diferentes — que é exatamente o defeito que o
+guarda dos ordinais existe para pegar, e que já custou uma tela preta sem
+mensagem nenhuma (pendência #33 e o histórico em `version.rs`).
+
+**O que vale enquanto isso.** O portão fica **dormente**, e nada muda para
+ninguém: um servidor com MOD habilitado admite quem entra como admitia antes
+desta entrega e avisa quem hospeda pelo log de que a exigência ainda não vale no
+fio; uma troca de MOD com gente dentro não derruba a sala; e um servidor sem MOD
+habilitado, que é a maioria, não troca nenhum quadro novo.
+
+A primeira versão desta entrega recusava todo cliente com `Incompatible` nesse
+estado, e isso era uma regressão: enquanto nenhum par pode aceitar, recusar não
+protege ninguém — só fecha uma casa que funcionava. Ver
+`mods::anuncio::o_anuncio_alcanca_alguem`.
+
+**O que fecha.** Subir `PROTOCOL_VERSION` para 5 uma vez, com as variantes das
+duas entregas já na lista, e reconferir os ordinais que o guarda
+`o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou` prende. O contrato
+inteiro está em `docs/superpowers/specs/2026-09-10-anuncio-e-aceite-de-mods.md`.
+
+**O que a subida custa, medido e não suposto.** O último release publicado é o
+`v0.10.5-1`, de 05/09/2026, e o `crates/seele-proto/src/version.rs` daquele
+commit fala `PROTOCOL_VERSION = 3`. A janela de compatibilidade é N−1, então:
+
+| versão global | mais antiga aceita | o que acontece com quem já instalou |
+|---|---|---|
+| 4 (hoje, não publicada) | 3 | o cliente publicado continua entrando |
+| 5 (o dia do portão) | 4 | **o cliente publicado deixa de entrar**, com `Incompatible` |
+
+Ou seja, ligar o portão e tirar do ar quem está em campo são o **mesmo ato**,
+até que uma versão falando 4 seja publicada e instalada. É por isso que a
+decisão não cabe nesta tarefa: ela não é sobre MODs, é sobre quem perde o
+servidor na segunda-feira.
+
+**O caminho que evita o custo**, e é o que sugere a ordem: publicar antes uma
+versão que fale 4 — a entrega da malha, que já está em `main` e ainda não saiu —,
+esperar o campo atualizar, e só então subir para 5. Aí a janela cobre quem
+atualizou e o portão liga sem tirar ninguém do ar.
+
+**O que não resolve, e por que foi descartado.** Fazer o servidor **recusar**
+quem não alcança o limiar, em vez de admitir, faz a frase «quem não aceitou não
+entra» virar verdade — mas só porque ninguém entra. Enquanto nenhum par
+consegue aceitar, «recusar quem não alcança» e «recusar todo mundo» são a mesma
+coisa, e a metade «quem aceita, entra» continua sem existir. Troca-se um
+critério não cumprido por outro, e de quebra habilitar um MOD passa a trancar a
+sala. O estado dormente é o único que não mente sobre o que o produto faz hoje.
+
+**O que esta entrega fechou desta pendência.** Uma revisão apontou que o portão
+dormente, sozinho, deixa quem hospeda sem informação: a tela de habilitar lia
+`enabled: true` e não tinha como saber que isso ainda não tranca ninguém na
+rede — o "produto sabe e não conta" que o `CLAUDE.md` deste repositório nomeia
+como o defeito mais caro daqui, e desta vez cometido contra quem hospeda, não
+contra quem entra. `mods_instalados` agora devolve também
+`exigencia_vale_na_rede` (`seele_server::mods::anuncio::exigencia_vale_na_rede`,
+coberta por teste que falha no dia em que o portão ligar), então quem monta a
+tela de habilitar tem como avisar "exigido, mas ainda não bloqueia ninguém pela
+rede" em vez de deixar o interruptor mentir por omissão. Isso não move a data
+em que o portão liga de verdade — continua dependendo da subida de
+`PROTOCOL_VERSION` descrita abaixo — só impede que o estado dormente seja
+tomado por ativo por quem lê a tela.
+
+**O que ainda falta depois disso**, e não é esta pendência: a tela de aceite —
+os dados chegam à casca pelo `ConnectionError::ModsNaoAceitos`, o `frases.js` já
+desenha a lista, e os três verbos de responder estão registrados como comando da
+janela (`aceite_de_mods`, `aceitar_mods`, `esquecer_aceite_de_mods`), declarados
+no `AGUARDANDO_TELA` de `apps/seele-app/tests/frontend.rs`; o que não há é a tela
+com o botão. E o download dos bytes em `mods.seele.app.br`, que é outra etapa.
+
+## 40 · Uma reprovação intermitente, rara, no teste do cliente contra o anúncio
+
+**O que foi visto.** `um_aceite_guardado_de_outro_conjunto_nao_e_reaproveitado`,
+em `crates/seele-conformance/tests/aceite_dos_mods.rs`, reprovou **uma vez**: o
+`Client::connect` devolveu `SemResposta` — a conexão morreu antes de qualquer
+resposta chegar — no lugar da pergunta com a lista de MODs. A execução levou
+20,01 s, que é exatamente o `IDLE_TIMEOUT` do transporte, e não os 10 s do
+orçamento do aperto de mão. Isso põe a parada **antes** do aperto de mão, na
+conexão QUIC em si, contra o servidor de mentira que o próprio teste levanta.
+
+**O que foi medido, e não deu.** Depois da ocorrência: 40 execuções isoladas, 20
+com `RUST_LOG` ligado, 20 sob carga de CPU e mais 60 do binário inteiro — **zero
+reprovações em cerca de 170 execuções**. Isoladamente o teste leva 0,21 s. Não
+reproduzi, e por isso não conserto: um conserto sem reprodução seria uma
+hipótese vestida de correção.
+
+**O que mudou mesmo assim.** O teste passou a contar o que o servidor de mentira
+fez quando o cliente reprova — `o_que_o_servidor_fez`. Antes, a mensagem
+descrevia só o sintoma do cliente e a tarefa do outro lado morria sem ser
+recolhida; foi isso que impediu o diagnóstico. Na próxima ocorrência a mensagem
+diz se o servidor leu a recusa, parou com erro, ou nem chegou lá.
+
+**O que não é.** Não é a falha de validação que derrubou a bateria e foi
+consertada nesta mesma passagem — aquela era a despedida de mudança de MODs
+saindo sem `despedir`, reproduzível a ~8%, e está fechada com guarda
+determinístico. Esta é outra, mais rara, e num teste que usa servidor de mentira.
+
+## 41 · A bateria de tela por um par reprova por espera, e não é desta entrega
+
+**O que foi visto.** `crates/seele-conformance/tests/tela_por_um_par.rs` reprova
+de forma intermitente com «a paciência acabou esperando: o servidor contar as
+duas cópias que ele mesmo sobe», em pelo menos dois testes diferentes do mesmo
+binário — `destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_servir`
+e `uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para`. Medido em **duas
+reprovações em doze execuções do binário**; isolado, um dos dois testes não
+reprovou em vinte execuções, o que põe a causa na concorrência entre os treze
+testes do arquivo e não no teste sozinho. A espera que estoura é o `ate(...)` com a `PACIENCIA` do
+arquivo, o que põe a causa na contagem de cópias do servidor não chegar ao valor
+esperado dentro do prazo — a mesma família de defeito que a entrega da malha já
+documentou uma vez, no contador que congelava sob estouro de fila.
+
+**A atribuição, medida dos dois lados e não deduzida.** O argumento de que «é de
+outra frente» valia por leitura do diff; agora vale por medida. Esta árvore e uma
+exportação limpa do commit anterior — `ae5b65e`, sem nenhuma das mudanças de MOD
+— foram rodadas **intercaladas**, uma rodada de cada por vez, para que as duas
+pegassem a mesma carga de máquina:
+
+| árvore | reprovações |
+|---|---|
+| com as mudanças de MOD | 2 em 20 |
+| `ae5b65e` limpo, sem elas | 2 em 20 |
+
+Intercalar não é detalhe: medidas separadas deram 3 em 10 aqui contra 0 em 10 lá,
+e a diferença toda era a máquina estar mais ou menos ocupada na hora. Quem
+concluísse dali teria culpado a entrega errada.
+
+Ao todo caíram **cinco testes diferentes** do mesmo arquivo entre as duas
+árvores, todos pela mesma espera. Não é um teste ruim: é o arquivo inteiro
+correndo apertado.
+
+**Por que está registrada aqui e não consertada.** É da frente da malha, e não
+do anúncio de MODs. A única linha que esta entrega tocou neste arquivo é um
+`aceito: None` num literal de struct, acrescentado porque o campo nasceu agora —
+não tem como mexer em tempo. Consertar a espera seria mexer no teste de outra
+frente sem a medida que a frente dela já tem, e ampliar o escopo desta tarefa.
+
+**O efeito prático.** `cargo test` no repositório inteiro pode reprovar por esta
+causa, sem relação com o anúncio e o aceite de MODs. Quem repetir a bateria vê
+o binário `tela_por_um_par` no lugar de `aceite_dos_mods`. A bateria completa
+**passou inteira** numa execução desta árvore — 1838 testes em 71 binários, sem
+nenhuma reprovação —, o que diz que uma execução verde não prova estabilidade e
+uma vermelha não prova regressão: nas duas direções, a atribuição precisa da
+medida acima.
+
+**Numeração.** Estes três itens nasceram como #34, #35 e #36 numa ponta que
+ainda não tinha se integrado à main. Enquanto isso, a main recebeu quatro
+itens próprios com esses números (34 a 37) e a ponta do CI ocupou o #38.
+Renumerados para #39, #40 e #41 na integração; o conteúdo é o mesmo que já foi
+revisado e aprovado.

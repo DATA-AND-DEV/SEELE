@@ -45,6 +45,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client, ConnectErro
         &ed25519_dalek::SigningKey::from_bytes(&[semente; 32]),
         Arc::new(MemoryPinStore::new()),
         None,
+        None,
     )
     .await
 }
@@ -96,6 +97,7 @@ async fn uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada() -> Result<()> {
         apelido: "marcela".into(),
         segredo: None,
         impressao_esperada: None,
+        aceito: None,
     };
 
     // Mesma situação do teste acima: outra identidade pedindo um apelido que já

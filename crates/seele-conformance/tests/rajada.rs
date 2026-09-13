@@ -91,6 +91,7 @@ async fn entrar(address: SocketAddr, apelido: &str, semente: u8) -> Result<Clien
         &ed25519_dalek::SigningKey::from_bytes(&[semente; 32]),
         Arc::new(MemoryPinStore::new()),
         None,
+        None,
     )
     .await?;
     cliente

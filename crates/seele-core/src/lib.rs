@@ -24,6 +24,7 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod aceites;
 pub mod battery;
 pub mod bomba;
 pub mod caminho;

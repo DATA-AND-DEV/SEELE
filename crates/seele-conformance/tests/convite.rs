@@ -97,6 +97,7 @@ fn destino(endereco: SocketAddr, apelido: &str, impressao_esperada: Option<&str>
         apelido: apelido.to_owned(),
         segredo: None,
         impressao_esperada: impressao_esperada.map(str::to_owned),
+        aceito: None,
     }
 }
 

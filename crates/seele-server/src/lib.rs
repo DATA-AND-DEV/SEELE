@@ -157,6 +157,28 @@ pub struct ServerConfig {
     /// pelo protocolo é «não medi» e não «zero bit por segundo». Ver
     /// `crate::tela::caminho_no_fio`.
     pub caminho_bps: Option<u32>,
+    /// A partir de que versão do protocolo o anúncio de MODs sai.
+    ///
+    /// O padrão é [`seele_proto::mods::VERSAO_DO_ANUNCIO`] e **quase ninguém
+    /// deve mexer nisto**. Existe por uma razão só, e ela tem data de validade:
+    /// enquanto a versão global do protocolo não alcança a do anúncio, nenhum
+    /// par consegue aceitar coisa nenhuma, e sem esta porta o caminho
+    /// verdadeiro — servidor de produção anunciando, cliente de produção
+    /// aceitando — não roda em lugar nenhum, nem em teste. Cada metade ficaria
+    /// provada contra um dublê da outra, que é «existir não é funcionar».
+    ///
+    /// # O que baixar isto custa
+    ///
+    /// Mandar o anúncio a um par que não conhece a variante **mata o fluxo de
+    /// controle dele**: o postcard indexa variante por posição, e um quadro
+    /// desconhecido desloca a leitura para sempre. É a tela preta sem mensagem
+    /// nenhuma. Por isso quem baixa o valor está declarando que as duas pontas
+    /// são a mesma build — verdade num teste do workspace, e só nele. O
+    /// arranque avisa no log de quem hospeda quando isto acontece.
+    ///
+    /// Não há como configurar isto de fora: [`ServerConfig`] não é
+    /// desserializada de arquivo nenhum.
+    pub versao_do_anuncio: u8,
 }
 
 impl Default for ServerConfig {
@@ -184,6 +206,7 @@ impl Default for ServerConfig {
             mods_dir: None,
             anexos: None,
             caminho_bps: None,
+            versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
         }
     }
 }
@@ -398,6 +421,21 @@ impl Daemon {
             ),
         }
 
+        // **O aviso de quem baixou o limiar do anúncio.** Ver
+        // `ServerConfig::versao_do_anuncio`: abaixo da versão global, o anúncio
+        // sai para pares que podem não conhecer a variante, e o fluxo de
+        // controle deles morre sem uma palavra. É verdade num teste do
+        // workspace, onde as duas pontas são a mesma build, e é um defeito em
+        // qualquer outro lugar — então ele aparece no log.
+        if config.versao_do_anuncio < seele_proto::mods::VERSAO_DO_ANUNCIO {
+            tracing::warn!(
+                limiar = config.versao_do_anuncio,
+                padrao = seele_proto::mods::VERSAO_DO_ANUNCIO,
+                "este servidor anuncia MODs abaixo da versão em que o anúncio viaja; \
+                 um par publicado que receba o quadro perde o fluxo de controle"
+            );
+        }
+
         let persistence = Arc::new(tokio::sync::Mutex::new(persistence));
 
         let (events, _) = tokio::sync::broadcast::channel(1024);
@@ -419,6 +457,7 @@ impl Daemon {
             pares: Arc::new(tokio::sync::Mutex::new(pares::Pares::nova())),
             anexos,
             caminho_bps: config.caminho_bps,
+            versao_do_anuncio: config.versao_do_anuncio,
         });
 
         // Os MODs deste servidor, se houver pasta. ADR 0045.

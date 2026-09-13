@@ -49,6 +49,7 @@ async fn conectar(
         &SigningKey::from_bytes(&[semente; 32]),
         pins,
         segredo,
+        None,
     )
     .await
 }
