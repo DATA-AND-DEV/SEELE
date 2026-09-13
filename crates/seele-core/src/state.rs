@@ -1685,7 +1685,10 @@ mod tests {
         // sempre numa sala que, do outro lado, não a tem.
         let mut room = room();
         assert_eq!(room.current_voice_room, Some(VOICE_ROOM));
-        assert!(room.seats.get(&VOICE_ROOM).is_some_and(|seats| seats.contains(&PersonId(7))));
+        assert!(room
+            .seats
+            .get(&VOICE_ROOM)
+            .is_some_and(|seats| seats.contains(&PersonId(7))));
 
         let changed = room.apply(&ServerMessage::Alert {
             severity: AlertSeverity::Warning,
@@ -1695,7 +1698,10 @@ mod tests {
 
         assert!(changed.roster);
         assert_eq!(room.current_voice_room, None);
-        assert!(!room.seats.get(&VOICE_ROOM).is_some_and(|seats| seats.contains(&PersonId(7))));
+        assert!(!room
+            .seats
+            .get(&VOICE_ROOM)
+            .is_some_and(|seats| seats.contains(&PersonId(7))));
     }
 
     #[test]

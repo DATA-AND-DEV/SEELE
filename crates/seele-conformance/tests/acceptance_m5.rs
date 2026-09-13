@@ -437,7 +437,9 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
     let mut room = Room::new();
     room.adopt(terminal.session(), "marcela");
-    terminal.enter_voice_room(VoiceRoomId(VOICE_ROOM), None).await?;
+    terminal
+        .enter_voice_room(VoiceRoomId(VOICE_ROOM), None)
+        .await?;
     room.enter_voice_room(VoiceRoomId(VOICE_ROOM));
     terminal.join_channel(ChannelId(CHANNEL)).await?;
     room.open_channel(ChannelId(CHANNEL));

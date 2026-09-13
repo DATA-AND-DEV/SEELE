@@ -4378,7 +4378,9 @@ impl Motor {
                 tracing::info!(bps, "a sonda começa do caminho lembrado deste servidor");
                 self.caminho = crate::caminho::Sonda::partindo_de(*bps);
             }
-            Comando::EntrarNaVoiceRoom(voice_room, _password) => self.voice_room = Some(*voice_room),
+            Comando::EntrarNaVoiceRoom(voice_room, _password) => {
+                self.voice_room = Some(*voice_room)
+            }
             Comando::SairDaVoiceRoom => self.voice_room = None,
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
             Comando::Muted(ligado) => self.muted = *ligado,

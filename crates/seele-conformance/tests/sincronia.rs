@@ -103,7 +103,9 @@ async fn sentar(endereco: SocketAddr, semente: u8, apelido: &str) -> Result<(Enl
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM), None).await?;
+    enlace
+        .entrar_na_voice_room(VoiceRoomId(VOICE_ROOM), None)
+        .await?;
 
     let mut sala = Room::new();
     sala.adopt(enlace.sessao(), apelido);

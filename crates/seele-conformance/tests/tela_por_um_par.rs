@@ -618,14 +618,14 @@ async fn cenario_com(
     .await?;
 
     let empresta = cliente(endereco, 2, "empresta").await?;
-    empresta.entrar_na_voice_room(sala).await?;
+    empresta.entrar_na_voice_room(sala, None).await?;
     // **O opt-in de quem empresta, e é ele que põe esta máquina na malha.**
     // Sem esta linha `Pares::escolher` não tem candidato nenhum e o servidor
     // serve as duas cópias, como sempre serviu.
     empresta.consentir_no_caminho_entre_pares(EMPRESTA).await?;
 
     let assiste = cliente(endereco_de_quem_assiste, 3, "assiste").await?;
-    assiste.entrar_na_voice_room(sala).await?;
+    assiste.entrar_na_voice_room(sala, None).await?;
     // **O opt-in de quem assiste, e ele é a metade nova do §5.** `SirvaTelaPara`
     // entrega o endereço de quem pediu a quem vai servi-lo: sem este
     // consentimento, o endereço de quem assiste seria publicado por uma decisão
@@ -1087,7 +1087,7 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
     .await?;
 
     let mut empresta = cliente(endereco, 2, "empresta").await?;
-    empresta.entrar_na_voice_room(sala).await?;
+    empresta.entrar_na_voice_room(sala, None).await?;
     empresta.consentir_no_caminho_entre_pares(EMPRESTA).await?;
 
     // Quem assiste é cru, e declara a própria identidade à mão — é o que
@@ -2123,7 +2123,7 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
     .await?;
 
     let mut empresta = cliente(endereco, 2, "empresta").await?;
-    empresta.entrar_na_voice_room(sala).await?;
+    empresta.entrar_na_voice_room(sala, None).await?;
     empresta.consentir_no_caminho_entre_pares(EMPRESTA).await?;
 
     let mut assiste = abrir(endereco, 3).await?;
@@ -2477,7 +2477,7 @@ async fn a_saida_de_quem_empresta_reabre_o_cano_de_quem_ficou_orfao_sem_esperar_
     .await?;
 
     let empresta = cliente(endereco, 2, "empresta").await?;
-    empresta.entrar_na_voice_room(sala).await?;
+    empresta.entrar_na_voice_room(sala, None).await?;
     empresta.consentir_no_caminho_entre_pares(EMPRESTA).await?;
     let quem_empresta = empresta.sessao().person;
 
@@ -2896,7 +2896,7 @@ async fn destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_se
 
     // A afirmação: um espectador novo, e o **mesmo** par o serve.
     let mut de_novo = cliente(endereco, 4, "assiste-de-novo").await?;
-    de_novo.entrar_na_voice_room(sala).await?;
+    de_novo.entrar_na_voice_room(sala, None).await?;
     // **Consentir precede ser apontado**, e sem esta linha o servidor recusa:
     // `SirvaTelaPara` entregaria o endereço deste espectador a quem empresta,
     // e ninguém tomou essa decisão por ele. Medido: sem ela, este teste falha

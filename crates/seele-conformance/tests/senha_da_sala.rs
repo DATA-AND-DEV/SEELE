@@ -129,9 +129,12 @@ async fn entrar_com_senha_errada_nao_deixa_o_cliente_sentado_nele_mesmo() -> Res
         "sanidade: o assento especulativo tem de existir antes da recusa chegar"
     );
 
-    let desfez = absorver_ate(&mut visita, &mut sala_visita, Duration::from_secs(15), |room| {
-        room.current_voice_room.is_none()
-    })
+    let desfez = absorver_ate(
+        &mut visita,
+        &mut sala_visita,
+        Duration::from_secs(15),
+        |room| room.current_voice_room.is_none(),
+    )
     .await;
 
     assert!(
@@ -141,7 +144,10 @@ async fn entrar_com_senha_errada_nao_deixa_o_cliente_sentado_nele_mesmo() -> Res
         sala_visita.current_voice_room
     );
     assert!(
-        sala_visita.seats.get(&voice_room).is_none_or(|seats| seats.is_empty()),
+        sala_visita
+            .seats
+            .get(&voice_room)
+            .is_none_or(|seats| seats.is_empty()),
         "a própria pessoa continua no assento da sala mesmo com a entrada recusada: {:?}",
         sala_visita.seats.get(&voice_room)
     );
@@ -186,14 +192,20 @@ async fn entrar_com_a_senha_certa_senta_de_verdade_nas_duas_pontas() -> Result<(
         &mut anfitriao,
         &mut sala_anfitriao,
         Duration::from_secs(15),
-        |room| room.roster(voice_room).any(|pessoa| pessoa.nickname == "visita"),
+        |room| {
+            room.roster(voice_room)
+                .any(|pessoa| pessoa.nickname == "visita")
+        },
     )
     .await;
 
     assert!(
         viu_a_visita,
         "a visita entrou com a senha certa e o anfitrião não a vê na sala: {:?}",
-        sala_anfitriao.roster(voice_room).map(|p| p.nickname.clone()).collect::<Vec<_>>()
+        sala_anfitriao
+            .roster(voice_room)
+            .map(|p| p.nickname.clone())
+            .collect::<Vec<_>>()
     );
 
     drop(anfitriao);
