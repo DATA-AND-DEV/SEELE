@@ -1,7 +1,7 @@
 # O caminho entre pares — desenho
 
 **Data:** 2026-09-05
-**Estado:** desenho aprovado, implementação por fazer
+**Estado:** desenho aprovado, implementado; emendado em 06/09, 07/09 e 10/09/2026
 **Subprojeto A de três.** B é a árvore, C é o interruptor adaptativo. Cada um
 com spec, plano e implementação próprios.
 
@@ -320,6 +320,122 @@ imagem.
 custaria a v5 para carregar uma decisão que já está tomada hoje. Uma decisão
 tomada não deve pagar duas vezes.
 
+### 5.1 · O consentimento é de dois lados — emenda de 2026-09-10
+
+**Escrito depois de a primeira implementação do §5 ser lida contra o próprio
+parágrafo que a justifica.** O §5 dá duas razões independentes para o opt-in, e
+a redação original implementou só a segunda. A razão **2 (custo)** é de quem
+empresta. A razão **1 (privacidade)** é **dos dois lados**, e o próprio §5 diz
+por quê: numa malha, «espectadores passam a conhecer o endereço IP uns dos
+outros».
+
+O que o código fazia: `ServerMessage::SirvaTelaPara` leva a quem empresta o
+endereço **de quem assiste**, para ele discar de volta (§3.2.1). Esse endereço
+era publicado sem quem assiste ter escolhido nada — o opt-in de **outra
+pessoa**, a de emprestar, é que destrancava a exposição do dele. Quem só
+conectava já tinha o endereço público registrado (o servidor o vê como origem
+da conexão) e entregue ao primeiro par que fosse apontado para servi-lo.
+
+**O conserto é separar as duas metades num tipo só**,
+`seele_proto::control::ConsentimentoDePar`:
+
+| metade | o que destranca | quem paga |
+|---|---|---|
+| `pares_que_atende` | esta máquina sobe cópias para outras pessoas, e até quantas ao mesmo tempo | a internet de quem empresta |
+| `assiste_por_par` | o endereço desta máquina pode ser **entregue** a quem for servi-la | a privacidade de quem assiste |
+
+Elas não se implicam. Quem só assiste por par **não** publica os endereços de
+rede local (`locais` continua sendo só de quem empresta): quem assiste é
+alcançado pelo endereço público, que o servidor já vê e não precisa que ninguém
+afirme. Destrancar a topologia interna com o consentimento menor daria a quem
+consentiu no menor o custo do maior.
+
+**Recusar mantém o caminho de sempre.** Sem `assiste_por_par`,
+`apontar_um_par` devolve `false` e o cano do servidor é aberto como antes desta
+onda existir. A malha é alívio, nunca dependência — e agora isso vale também
+para quem escolheu não estar nela.
+
+**`pares_que_atende` é número e não interruptor**, e não é o subprojeto B
+antecipado. O B decide *quem* serve *quem*; este campo responde a outra
+pergunta, que é de quem paga: *quanto* da minha internet eu aceito gastar. O
+`0` **é** «não empresto» — dois campos deixariam existir «empresto, teto zero»,
+que é uma contradição que cada lado resolveria de um jeito. Esta versão do
+cliente honra no máximo um par (`seele_core::enlace::PARES_QUE_ESTA_VERSAO_ATENDE`)
+e **baixa** um teto maior antes de declará-lo: declarar o que não se pode
+cumprir faria a segunda pessoa esperar o prazo do par vencer por uma promessa
+que nunca teve como ser honrada.
+
+### 5.2 · A retirada alcança o que já está no ar — emenda de 2026-09-10
+
+Um consentimento que só valesse para a escolha seguinte deixaria o repasse em
+curso subindo depois de o interruptor ter sido desligado. A pessoa continuaria
+pagando pela decisão que acabou de desfazer, e o único aviso seria a conta de
+internet no fim do mês.
+
+Então a retirada desfaz, nos dois lados e no mesmo ato:
+
+- **no cliente** — `Motor::passar_a_consentir` cancela a tarefa que serve um par
+  (a vaga volta pelo `Drop` de `VagaDeAtendimento`) e derruba os caminhos de par
+  abertos, **antes** de a declaração nova sair;
+- **no servidor** — `Pares::declarou` devolve os repasses que a declaração nova
+  revoga, e `session::devolver_ao_servidor` reabre o cano de cada espectador
+  órfão. Para o lado de quem empresta, o `ParFalhou` do fim limpo quase
+  bastaria; para o lado de **quem assiste** não há relato nenhum a esperar —
+  nada falhou —, e sem esta linha a tela dele simplesmente pararia.
+
+**E não há reativação tardia.** O servidor escolhe e difunde `SirvaTelaPara` /
+`AssistaTelaPor` pelo barramento; a retirada viaja no sentido contrário, e as
+duas se cruzam no fio. O cliente recusa o pedido que chega depois da retirada —
+o guarda mora **aqui** e não só no servidor, porque o consentimento é da máquina
+que paga por ele, e um guarda que só existisse do outro lado seria um
+consentimento guardado por quem ele restringe.
+
+### 5.3 · A escolha respeita sala, transmissão e teto — emenda de 2026-09-10
+
+`Pares::escolher` já filtrava por sala de voz (fix round 2 da Task 8). Faltavam
+duas paredes, e as duas custam tela parada quando ausentes:
+
+- **a transmissão** — um par repassa o que ele mesmo está recebendo. Estar na
+  sala não é estar assistindo: apontar quem não abriu a transmissão faz quem
+  pediu ficar com o cano do servidor **desligado**, esperar a ligação fechar,
+  esperar o prazo do par vencer, e só então relatar. A fonte é a sala de voz,
+  que é quem liga e desliga os canos (`VoiceRoomCommand::QuemRecebe`) — contar
+  de outro lugar seria uma segunda conta a discordar desta;
+- **o teto** — `pares_que_atende`, contado pelas próprias nomeações do servidor.
+
+Só quem recebe **do servidor** entra nessa conta, e é deliberado: quem recebe
+por um par já está a um salto, e repassar dali seria o segundo salto de uma
+árvore que o A1 não entrega (§2). Quando o B trouxer a árvore, é este conjunto
+que cresce.
+
+### 5.4 · O contrato com os MODs, e por que ele fica escrito aqui
+
+**A versão global do protocolo não subiu, e não devia subir.** O release mais
+recente publicado (`v0.10.5-1`, de 05/09/2026) carrega `PROTOCOL_VERSION = 3`;
+a v4 existe só neste repositório e nunca saiu. Alterar a forma das mensagens da
+v4 não quebra ninguém que esteja no ar, e **subir para v5 custaria a janela de
+compatibilidade sem nada em troca**.
+
+O que fica registrado para a integração conjunta com os MODs, que mexem no
+mesmo `seele-proto`:
+
+1. **`PROTOCOL_VERSION` continua 4 e `COMPATIBILITY_WINDOW` continua 1.** Quem
+   integrar não precisa renegociar versão por causa desta onda.
+2. **`ClientMessage::EmprestarSubida` trocou `emprestando: bool` por
+   `consentimento: ConsentimentoDePar`.** A **posição** da variante no
+   enumerado não mudou — o `postcard` indexa variante por posição, e é isso que
+   quebraria quem já estivesse no ar. O que mudou é o corpo dela.
+3. **`ConsentimentoDePar` é uma `struct` de dois campos** (`u8`, `bool`), e no
+   `postcard` ocupa o lugar exato do `bool` que substituiu mais um byte. Ela é
+   pública em `seele_proto::control` e pode ser citada por quem precisar.
+4. **Nenhuma variante nova foi acrescentada a `ClientMessage` nem a
+   `ServerMessage`.** As quatro mensagens do §4 continuam as mesmas quatro.
+5. **`VoiceRoomCommand::QuemRecebe` é interno ao servidor** e não atravessa fio
+   nenhum: não entra em contrato de protocolo.
+
+Se os MODs precisarem subir a versão por conta própria, esta onda não impõe
+nada — ela cabe inteira dentro da v4 que ainda não saiu.
+
 ## 6 · O que se mede, e é metade da razão do A1
 
 Toda a aritmética do §0 depende de dois números **estimados e não medidos**. Se
@@ -423,7 +539,15 @@ malha entra quando ela deixa de entregar.
   promovido a repassar passa a encher o próprio cano, e a `caminho::Sonda` que já
   existe no cliente mede de graça. **O primeiro palpite de cada pessoa continua
   sendo um palpite**, e a rede de segurança é o §7.
-- **Quantos pares um cliente serve ao mesmo tempo** é decisão do B, e o A1 não
-  a antecipa: aqui é sempre um.
+- **Quantos pares um cliente serve ao mesmo tempo** continua sendo um nesta
+  versão do cliente (`PARES_QUE_ESTA_VERSAO_ATENDE`), e a política de *quem*
+  serve *quem* continua sendo do B. O que deixou de ser decisão do código é o
+  **teto**, que passou a ser declarado por quem paga por ele — ver §5.1.
+- **A casca não é avisada quando o caminho de par dela acaba por decisão
+  própria.** Retirar o consentimento de assistir por par cancela a tarefa de
+  leitura, e uma tarefa cancelada não emite fim de fluxo. Não custa imagem — o
+  servidor reabre o cano e os quadros continuam chegando —, mas a casca não tem
+  como dizer «isto voltou a vir do servidor». Registrado em
+  `docs/pendencias.md`.
 - **O aviso a quem entra na sala** — que a malha está ligada e o que ela expõe —
   é interface, e a tela dele é do B. O A1 carrega o dado; não desenha a frase.

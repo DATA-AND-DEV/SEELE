@@ -449,3 +449,73 @@ fração de furo — em `docs/m1-medicoes.md`, ao lado dos outros. **Enquanto el
 não existirem, a aritmética da malha na spec continua sendo estimativa**, e ela
 já está marcada como tal em `docs/superpowers/specs/2026-09-05-caminho-entre-pares-design.md`
 (§2: *"dois números que hoje são estimativa"*).
+
+## O que a suíte local prova, e o que ela não tem como provar
+
+**Escrito em 2026-09-10**, junto do consentimento de dois lados. A separação
+existe porque as duas coisas já foram confundidas neste repositório, e a
+confusão sempre anda no mesmo sentido: um teste verde em `127.0.0.1` sendo lido
+como se dissesse algo sobre uma sala de gente de verdade.
+
+### Prova local, automática, a cada `cargo test`
+
+`crates/seele-conformance/tests/tela_por_um_par.rs` sobe um servidor de verdade
+e clientes de verdade, e prende **comportamento**:
+
+- que o quadro atravessa o par, e que o servidor **não** subiu aquela cópia;
+- que quem consentiu em assistir por par é apontado, e que quem **recusa** não
+  tem o endereço entregue a ninguém e continua vendo a tela pelo servidor, com
+  a imagem inteira — quem recusa não fica sem tela;
+- que a retirada do consentimento — dos dois lados — encerra o repasse e
+  devolve quem assistia ao servidor sem perder imagem;
+- que a saída de quem empresta reabre o cano de quem ficava atrás dele **sem
+  depender de relato nenhum** da outra ponta;
+- que a vaga do par volta à fila em todo caminho que encerra um repasse.
+
+São três pessoas e uma transmissão, tudo na mesma máquina, pela interface de
+loopback.
+
+Cada uma dessas afirmações foi provada por **reversão**: o guarda correspondente
+foi desfeito no código e o teste ficou vermelho, com a mensagem nomeando o
+defeito. Um teste que passa com e sem o conserto não prova o conserto, e é esse
+o filtro que separa esta lista de uma lista de nomes de teste.
+
+### O que ela **não** diz, e nenhuma execução dela vai dizer
+
+1. **Nada sobre furo de NAT.** Em `127.0.0.1` não há NAT para furar. É a seção
+   de duas máquinas acima que produz esse número.
+2. **Nada sobre a subida de ninguém.** Loopback não tem cano: o repasse entre
+   dois processos da mesma máquina não gasta a internet de nenhuma delas, que é
+   exatamente a grandeza que a malha existe para economizar.
+3. **Nada sobre qual mecanismo salvou a imagem, quando há mais de um.** Medido
+   em 2026-09-11: quando quem empresta sai da sala, o cano de quem ficou órfão
+   é reaberto por dois caminhos independentes — o servidor, na própria saída, e
+   o relato de fim de repasse que a máquina do órfão manda ao perceber. Em
+   `127.0.0.1` o segundo volta dentro de um intervalo de quadro, então a imagem
+   não pisca nem quando o primeiro é removido do código. Separar os dois exigiu
+   uma ponta de teste que **não sabe relatar**; numa rede de verdade, com
+   latência e perda, a diferença entre os dois caminhos é justamente o que a
+   pessoa veria congelar.
+4. **Nada sobre salas com mais de cinco pessoas.** O pedido que originou o
+   subprojeto (§0 do desenho de 05/09) é *«numa call de 5 pessoas, 2 querem
+   transmitir a tela»*, e a propriedade pedida é que **o número de pessoas
+   deixe de ser um problema**. Uma propriedade sobre N não se prova com N
+   fixo em três.
+
+### A medição real, e por que ela é outra coisa
+
+Para dizer qualquer coisa sobre a aritmética do §0 é preciso **mais de cinco
+participantes em máquinas distintas, em redes distintas**, com duas
+transmissões no ar. O que se anota lá é o que a suíte local não alcança:
+
+| o que | como se lê |
+|---|---|
+| subida de quem hospeda, com e sem malha | o contador do servidor, e a conta de quantas cópias ele subiu |
+| qualidade vista por cada pessoa | `:sync` em cada máquina, não numa só |
+| fração de furo com N pares | a seção de duas máquinas acima, repetida por par |
+| o que acontece quando um par cai numa sala cheia | quem ficou órfão voltou ao servidor, e em quanto tempo |
+
+**Enquanto essa medição não existir, nenhum número da malha pode ser
+apresentado como medido.** A suíte local prova que o mecanismo funciona; ela
+não prova que ele alivia. As duas frases são diferentes, e escrever a segunda
+com a evidência da primeira é o erro que este documento existe para impedir.

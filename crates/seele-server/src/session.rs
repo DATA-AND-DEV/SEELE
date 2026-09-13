@@ -365,7 +365,7 @@ pub async fn serve(
     voice_rooms
         .leave_everywhere(session.person, session.ssrc)
         .await;
-    soltar_telas_e_pares_de(&server, session.person).await;
+    soltar_telas_e_pares_de(&server, &voice_rooms, session.person).await;
 
     // And **announced**, which it was not. `Event::PersonLeft` was sent only
     // from the `LeaveVoiceRoom` branch, so a person who closed their client, lost
@@ -1585,7 +1585,7 @@ async fn run_session(
                         voice_rooms
                             .leave_everywhere(session.person, session.ssrc)
                             .await;
-                        soltar_telas_e_pares_de(server, session.person).await;
+                        soltar_telas_e_pares_de(server, voice_rooms, session.person).await;
                         if let Some(id) = current_voice_room.take() {
                             midia.entrou(current_voice_room);
                             server.occupancy.lock().await.vacate(id, session.person);
@@ -2281,6 +2281,7 @@ async fn run_session(
                             let pelo_par = assistir
                                 && apontar_um_par(
                                     server,
+                                    voice_rooms,
                                     screen,
                                     voice_room,
                                     dono,
@@ -2384,7 +2385,7 @@ async fn run_session(
                     }
 
                     ClientMessage::EmprestarSubida {
-                        emprestando,
+                        consentimento,
                         impressao,
                         locais,
                     } => {
@@ -2406,17 +2407,31 @@ async fn run_session(
                         tracing::info!(
                             person = %session.person,
                             %publico,
-                            emprestando,
-                            "declaração de empréstimo de subida no caminho entre pares"
+                            empresta_conexao = consentimento.empresta_conexao(),
+                            pares_que_atende = consentimento.pares_que_atende,
+                            assiste_por_par = consentimento.assiste_por_par,
+                            "declaração de consentimento no caminho entre pares"
                         );
-                        server.pares.lock().await.declarou(
+                        // **A declaração nova desfaz o que ela revoga, e as
+                        // duas coisas são um ato só.** Enquanto ela valesse
+                        // apenas para a escolha seguinte, baixar o teto — ou o
+                        // interruptor de emprestar ir a zero — não desligaria
+                        // nada do que já está no ar: a pessoa continuaria
+                        // subindo a cópia que acabou de dizer que não quer mais
+                        // subir, e o único aviso seria a conta de internet
+                        // dela. Vale igual para o outro lado: quem retira o
+                        // consentimento de assistir por par deixa de ter o
+                        // próprio endereço valendo, e o repasse que existe por
+                        // causa daquele endereço tem de acabar.
+                        let encerrar = server.pares.lock().await.declarou(
                             session.person,
                             id_da_conexao,
-                            emprestando,
+                            consentimento,
                             impressao,
                             locais,
                             publico,
                         );
+                        devolver_ao_servidor(server, voice_rooms, &encerrar).await;
                     }
                     ClientMessage::ParFalhou { screen, motivo } => {
                         // O rastro fica mesmo quando não há o que fazer: quem
@@ -2707,7 +2722,7 @@ async fn run_session(
                         voice_rooms
                             .leave_everywhere(session.person, session.ssrc)
                             .await;
-                        soltar_telas_e_pares_de(server, session.person).await;
+                        soltar_telas_e_pares_de(server, voice_rooms, session.person).await;
                         current_voice_room = None;
                         midia.entrou(current_voice_room);
                         server.occupancy.lock().await.vacate(*id, session.person);
@@ -2925,7 +2940,7 @@ async fn assentar(
     // agora aponta para outro lugar, e o §6 item 3 só permite uma por sala —
     // levar a transmissão pela mão faria a pessoa tomar a vaga da sala nova sem
     // ter pedido.
-    soltar_telas_e_pares_de(server, session.person).await;
+    soltar_telas_e_pares_de(server, voice_rooms, session.person).await;
     voice_rooms
         .of(destino)
         .await
@@ -3138,6 +3153,54 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
     }
 }
 
+/// Devolve ao cano do servidor quem estava sendo servido por um par que deixou
+/// de ser consentido.
+///
+/// # Por que o servidor age, em vez de esperar o relato de quem assiste
+///
+/// Para o lado de quem **empresta**, esperar quase bastaria: o cliente dele
+/// cancela o repasse, o fluxo do par termina limpo, e o `ParFalhou`
+/// (`ParouDeMandar`) do fim limpo já reabre o cano — é o caminho provado em
+/// 2026-09-09. Para o lado de quem **assiste**, não há relato nenhum a esperar:
+/// nada falhou. Quem retirou o consentimento desligou o próprio caminho de
+/// propósito, e se o servidor não reabrisse o cano a tela dele simplesmente
+/// pararia — o pior defeito desta casa, que é o produto saber e não contar.
+///
+/// Agir nos dois lados também tira a ida e volta do caminho de quem empresta, e
+/// não custa nada: `VoiceRoom::assistir` recusa quem já está assistindo, então
+/// um `TelaAssistir` que se cruze com o do relato não abre cano nenhum a mais.
+///
+/// **A sala é a de quem assiste, e não a de quem retirou.** A declaração de par
+/// é global ao daemon e as pessoas trocam de sala sem redeclarar nada — ver
+/// [`crate::server::Occupancy::onde_esta`].
+async fn devolver_ao_servidor(
+    server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
+    encerrar: &[crate::pares::RepasseAEncerrar],
+) {
+    for repasse in encerrar {
+        let Some(voice_room) = server.occupancy.lock().await.onde_esta(repasse.assiste) else {
+            // Quem já não está sentado em lugar nenhum não tem cano a reabrir:
+            // a saída dele já desfez a nomeação por outro caminho.
+            continue;
+        };
+        tracing::info!(
+            screen = %repasse.screen,
+            assiste = %repasse.assiste,
+            empresta = %repasse.empresta,
+            "o consentimento do caminho entre pares foi retirado; esta tela volta a vir do servidor"
+        );
+        let _ = voice_rooms
+            .of(voice_room)
+            .await
+            .send(VoiceRoomCommand::TelaAssistir {
+                person: repasse.assiste,
+                screen: repasse.screen,
+            })
+            .await;
+    }
+}
+
 /// Tenta pôr um par a servir esta transmissão a quem acabou de pedir para vê-la.
 ///
 /// `true` quando um par foi apontado e as duas mensagens saíram — e é o `true`
@@ -3167,6 +3230,7 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
 /// chegar cedo demais.
 async fn apontar_um_par(
     server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
     screen: ScreenId,
     voice_room: VoiceRoomId,
     dono: PersonId,
@@ -3191,20 +3255,56 @@ async fn apontar_um_par(
         .into_iter()
         .map(|ocupante| ocupante.person)
         .collect();
+    // **Quem está recebendo esta transmissão agora.** Um par repassa o que ele
+    // mesmo recebe (`crate::enlace::RepasseDeTela::abertura_de`): apontar
+    // alguém que não a abriu é mandar quem pediu esperar a ligação fechar, o
+    // prazo do par vencer e o `ParFalhou` voltar — segundos de tela parada por
+    // uma escolha que este servidor tinha como não fazer.
+    //
+    // **Só quem recebe do servidor**, e é deliberado: quem recebe por um par já
+    // está a um salto, e repassar dali seria o segundo salto de uma árvore que
+    // o A1 não entrega (§2 da spec de 05/09). Quando o subprojeto B trouxer a
+    // árvore, é este conjunto que cresce.
+    //
+    // Lido **antes** de tomar `pares`, como `na_sala`, e pela mesma razão:
+    // esperar uma resposta de outra tarefa com um mutex do servidor na mão é o
+    // travamento esperando o primeiro dia ruim.
+    let recebendo = {
+        let (responder, resposta) = tokio::sync::oneshot::channel();
+        let canal = voice_rooms.of(voice_room).await;
+        if canal
+            .send(VoiceRoomCommand::QuemRecebe { screen, responder })
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        // A sala que sumiu entre a pergunta e a resposta não tem transmissão
+        // para repassar; cair para o servidor é o certo.
+        resposta.await.unwrap_or_default()
+    };
     let (empresta, quem) = {
         let mut pares = server.pares.lock().await;
-        let ja_servindo = pares.ja_servindo();
-        let Some(empresta) = pares.escolher(dono, quem_quer, &ja_servindo, &na_sala) else {
+        let Some(empresta) = pares.escolher(dono, quem_quer, &na_sala, &recebendo) else {
             return false;
         };
-        let Some(quem) = pares.declaracao_de(quem_quer).cloned() else {
-            // Quem nunca declarou identidade não tem impressão para
-            // apresentar, e a parede simétrica recusaria a ligação. Cair para o
-            // servidor é o certo, e o rastro diz de quem se fala.
+        // **O consentimento de quem assiste, e não só o de quem empresta.**
+        // `SirvaTelaPara` entrega o endereço de quem pediu a quem vai servi-lo:
+        // sem esta porta, o endereço de quem nunca consentiu seria publicado
+        // por uma decisão que **outra pessoa** tomou — a de emprestar. O §5 da
+        // spec de 05/09 nomeia privacidade como a primeira das duas razões do
+        // opt-in, e numa malha «espectadores passam a conhecer o endereço IP
+        // uns dos outros».
+        //
+        // Recusar aqui é cair para o servidor, que é o caminho de sempre: a
+        // malha é alívio, nunca dependência, e ninguém perde imagem por ter
+        // dito não.
+        let Some(quem) = pares.quem_consentiu_assistir_por_par(quem_quer).cloned() else {
             tracing::debug!(
                 person = %quem_quer,
                 %screen,
-                "quem pediu para assistir não declarou identidade de par; a tela vem do servidor"
+                "quem pediu para assistir não consentiu em assistir por par (ou não declarou \
+                 identidade); a tela vem do servidor"
             );
             return false;
         };
@@ -3301,7 +3401,7 @@ async fn receber_tela(
             // Anunciado, porque o plano de controle é o único lugar de onde a
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
             // transmissão que já não tem quem a bombeie.
-            soltar_telas_e_pares_de(server, person).await;
+            soltar_telas_e_pares_de(server, voice_rooms, person).await;
             // E com nome, para quem a mandava. `ScreenShareStopped` vai para a
             // sala inteira e não carrega razão de propósito — as duas maneiras
             // comuns de acabar já se distinguem sozinhas —, mas esta terceira
@@ -3371,9 +3471,13 @@ async fn receber_tela(
 /// deixaria uma nomeação de pé, `crate::pares::Pares::ja_servindo` contaria
 /// aquele par como ocupado pelo resto da sessão do daemon, e a malha
 /// degradaria para a estrela sem um rastro.
-async fn soltar_telas_e_pares_de(server: &Server, person: PersonId) {
+async fn soltar_telas_e_pares_de(
+    server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
+    person: PersonId,
+) {
     let encerradas = server.telas.lock().await.encerrar_de(person);
-    {
+    let orfaos = {
         let mut pares = server.pares.lock().await;
         for (_, screen) in &encerradas {
             // As transmissões **desta** pessoa acabaram: nenhum espectador
@@ -3381,7 +3485,13 @@ async fn soltar_telas_e_pares_de(server: &Server, person: PersonId) {
             pares.a_transmissao_acabou(*screen);
         }
         pares.quem_assiste_saiu(person);
-    }
+        // **A terceira direção, e a que faltava.** Um par repassa o que ele
+        // mesmo recebe: saindo da sala ele para de receber, e quem estava
+        // atrás dele fica sem imagem. Quem reabre o cano é a linha abaixo,
+        // agora, em vez do prazo do par vencendo do outro lado.
+        pares.quem_empresta_parou(person)
+    };
+    devolver_ao_servidor(server, voice_rooms, &orfaos).await;
     for (voice_room, screen) in encerradas {
         let _ = server
             .events

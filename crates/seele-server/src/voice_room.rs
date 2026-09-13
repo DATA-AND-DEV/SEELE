@@ -139,6 +139,24 @@ pub enum VoiceRoomCommand {
         /// O quê.
         screen: ScreenId,
     },
+    /// Quem está recebendo esta transmissão desta sala, agora?
+    ///
+    /// **A única pergunta deste canal, e ela existe porque a resposta mora
+    /// aqui.** `crate::pares::Pares::escolher` precisa saber quem pode
+    /// repassar uma transmissão, e um par só repassa o que ele mesmo está
+    /// recebendo — quem liga e desliga os canos é a sala, e perguntar a
+    /// qualquer outro registro seria uma segunda conta a discordar desta.
+    ///
+    /// Responde **sempre**, inclusive com o conjunto vazio para uma
+    /// transmissão que não existe nesta sala: quem perguntou está esperando o
+    /// canal, e um `responder` largado sem valor trocaria uma resposta por um
+    /// erro de canal fechado no meio de `WatchScreen`.
+    QuemRecebe {
+        /// Qual transmissão.
+        screen: ScreenId,
+        /// Por onde a resposta volta.
+        responder: tokio::sync::oneshot::Sender<std::collections::HashSet<PersonId>>,
+    },
     /// A subida desta máquina foi **medida**, e o número mudou.
     ///
     /// A sala nasce com [`crate::tela::caminho_do_server`] — o declarado, ou a
@@ -476,6 +494,30 @@ impl VoiceRoom {
                 if self.telas.contains_key(&from) {
                     self.encerrar_tela(from, None);
                 }
+            }
+            VoiceRoomCommand::QuemRecebe { screen, responder } => {
+                // **Os ligados mais os que esperam**, pela mesma razão que
+                // `EmCurso::recebem` conta os dois: quem entrou no meio ainda
+                // não tem cano, e vai ter em milissegundos. Deixá-lo de fora
+                // faria a escolha do par recusar, por um instante, alguém que
+                // está recebendo.
+                let quem = self
+                    .telas
+                    .values()
+                    .find(|curso| curso.screen == screen)
+                    .map(|curso| {
+                        curso
+                            .canos
+                            .keys()
+                            .chain(curso.esperando.iter())
+                            .copied()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // O resultado é descartado: quem perguntou pode ter desistido
+                // entre a pergunta e a resposta, e não há o que fazer a
+                // respeito.
+                let _ = responder.send(quem);
             }
             VoiceRoomCommand::Subida => {
                 // **O número já chegou**, pelo `Arc` que esta sala partilha com
@@ -1709,6 +1751,58 @@ mod tests {
             bytes: quadro(true, 30),
         });
         assert_eq!(carol.try_recv().map(|c| c.screen), Ok(ScreenId(8)));
+    }
+
+    #[test]
+    fn quem_recebe_uma_transmissao_pode_ser_perguntado_de_fora() {
+        // **Um par repassa o que ele mesmo recebe.** Quem escolhe o par
+        // (`crate::pares::Pares::escolher`) precisa saber quem está recebendo
+        // aquela transmissão **agora**, e quem sabe isso é a sala: é ela que
+        // liga e desliga os canos. Perguntar de outro lugar seria uma segunda
+        // conta, a discordar desta no primeiro dia ruim.
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _alice = espectador(&mut voice_room, 1);
+        let _bob = espectador(&mut voice_room, 2);
+        let _carol = espectador(&mut voice_room, 3);
+        let _fim = compartilhar(&mut voice_room, 1, 7);
+
+        // Bob e Carol entraram antes: a única transmissão da sala chega a eles
+        // sem pedir. Quem compartilha não recebe a própria tela.
+        assert_eq!(
+            perguntar_quem_recebe(&mut voice_room, ScreenId(7)),
+            std::collections::HashSet::from([PersonId(2), PersonId(3)])
+        );
+
+        voice_room.handle(VoiceRoomCommand::TelaParouDeAssistir {
+            person: PersonId(3),
+            screen: ScreenId(7),
+        });
+        assert_eq!(
+            perguntar_quem_recebe(&mut voice_room, ScreenId(7)),
+            std::collections::HashSet::from([PersonId(2)]),
+            "quem fechou a janela continuou contado como quem recebe"
+        );
+    }
+
+    #[test]
+    fn perguntar_por_uma_transmissao_que_nao_existe_devolve_ninguem() {
+        // E não fica sem resposta: quem perguntou está esperando o canal, e um
+        // `responder` largado sem valor faria `apontar_um_par` esperar por um
+        // erro em vez de por uma resposta.
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let _alice = espectador(&mut voice_room, 1);
+        assert!(perguntar_quem_recebe(&mut voice_room, ScreenId(99)).is_empty());
+    }
+
+    fn perguntar_quem_recebe(
+        voice_room: &mut VoiceRoom,
+        screen: ScreenId,
+    ) -> std::collections::HashSet<PersonId> {
+        let (responder, resposta) = tokio::sync::oneshot::channel();
+        voice_room.handle(VoiceRoomCommand::QuemRecebe { screen, responder });
+        resposta
+            .blocking_recv()
+            .expect("a sala não respondeu quem recebe a transmissão")
     }
 
     #[test]

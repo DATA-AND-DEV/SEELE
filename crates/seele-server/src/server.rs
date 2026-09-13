@@ -733,6 +733,21 @@ impl Occupancy {
             .unwrap_or_default()
     }
 
+    /// Em que sala esta pessoa está sentada agora, se alguma.
+    ///
+    /// Quem precisa disto é a retirada de consentimento no caminho entre pares:
+    /// quem deixa de emprestar encerra os repasses que fazia, e cada espectador
+    /// órfão volta a ser servido **pela sala em que ele está**. A sala de quem
+    /// retirou não serve: a declaração de par é global ao daemon, e pessoas
+    /// trocam de sala sem redeclarar nada.
+    #[must_use]
+    pub fn onde_esta(&self, person: PersonId) -> Option<VoiceRoomId> {
+        self.by_voice_room
+            .iter()
+            .find(|(_, seated)| seated.iter().any(|occupant| occupant.person == person))
+            .map(|(voice_room, _)| *voice_room)
+    }
+
     /// Everybody seated anywhere, with the voice room they are seated in.
     ///
     /// Flattened rather than handed back as a map, because the only caller
@@ -1049,6 +1064,22 @@ mod tests {
         everywhere.sort_unstable();
 
         assert_eq!(everywhere, [(1, 1), (1, 2), (2, 3)]);
+    }
+
+    #[test]
+    fn onde_uma_pessoa_esta_sentada_e_perguntavel_pelo_nome_dela() {
+        // Quem precisa disto é a retirada de consentimento no caminho entre
+        // pares: quem deixa de emprestar encerra os repasses que fazia, e cada
+        // espectador órfão tem de voltar a ser servido **pela sala em que ele
+        // está** — que não é necessariamente a de quem retirou, porque pessoas
+        // trocam de sala sem redeclarar nada.
+        let mut occupancy = Occupancy::default();
+        occupancy.seat(VoiceRoomId(1), occupant(1, "marcela"));
+        occupancy.seat(VoiceRoomId(2), occupant(3, "carla"));
+
+        assert_eq!(occupancy.onde_esta(PersonId(1)), Some(VoiceRoomId(1)));
+        assert_eq!(occupancy.onde_esta(PersonId(3)), Some(VoiceRoomId(2)));
+        assert_eq!(occupancy.onde_esta(PersonId(9)), None);
     }
 
     #[test]
