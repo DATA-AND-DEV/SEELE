@@ -1812,3 +1812,46 @@ recusa — já resolve o sintoma relatado sem esperar por isso.
 **Quando dói.** Sempre que uma sala de voz tem senha, ou ganha algum outro
 motivo de recusa no futuro: o intervalo entre pedir e ouvir a recusa continua
 existindo, só não sobrevive mais a ele.
+
+
+## 38 · O workflow de CI existe escrito, e ninguém provou que ele roda
+
+**Sintoma.** `.github/workflows/ci.yml` foi escrito com um job `windows-2022`
+para `clippy` e `test` — justamente para exercitar os blocos `#[cfg(windows)]`
+de `crates/seele-audio/src/device.rs` e o arquivo inteiro de
+`laco_por_processo.rs` (`#![cfg(windows)]`), que é onde vive o defeito relatado
+de troca de fone e microfone (item 31). Mas o arquivo nunca foi enviado ao
+GitHub: a autorização desta tarefa não incluía `push` nem `merge`, e sem
+`push` nenhum workflow novo dispara — arquivo não versionado no remoto não é
+workflow que rodou, é workflow que foi só desenhado.
+
+**O que foi medido, e o que não foi.** Rodado nesta máquina — **macOS**, com
+`rustup`, a toolchain fixada e o alvo `x86_64-pc-windows-msvc` já instalados,
+mas sem `gh` para inspecionar ou disparar Actions — `cargo fmt --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` e
+`cargo test --workspace` passam. Isso prova que o job `linux`/`ubuntu-24.04`
+do workflow tem chance real de passar (a plataforma é próxima o bastante) e
+que nada no restante do workspace quebrou. **Isso não prova nada sobre o job
+`windows-2022`**: em macOS, `laco_por_processo.rs` compila vazio porque
+`#![cfg(windows)]` cobre o arquivo inteiro, e os ramos `#[cfg(windows)]` de
+`device.rs` — incluindo o consentimento de microfone — nem chegam a ser
+compilados, muito menos linkados ou executados. Tentar cruzar para o alvo
+Windows a partir daqui (`cargo check -p seele-audio --target
+x86_64-pc-windows-msvc`) nem chega a compilar: a build de `shiguredo_opus`
+precisa do gerador do Visual Studio via CMake, e essa máquina não tem Visual
+Studio nem o `vcvars` correspondente — a barreira é o linker/gerador nativo do
+Windows, não a ausência de `rustup` ou do alvo. Nenhum comando rodado
+localmente toca essa área; só um runner Windows de verdade toca.
+
+**Por que não se fecha esta pendência daqui.** Fechar exigiria um dos dois: um
+push real que dispare o Actions com o job `windows-2022`, ou uma máquina
+Windows local para reproduzir os mesmos comandos. Nenhum dos dois está ao
+alcance de quem escreveu este workflow nesta sessão — a tarefa que o criou foi
+explicitamente proibida de publicar. Isso não é um defeito do workflow: é uma
+lacuna de prova que só quem tem permissão de `push` pode fechar, e este
+registro existe para que a primeira pessoa que enviar o branch saiba que ainda
+falta olhar o resultado real do job `windows-2022` antes de confiar nele.
+
+**Quando dói.** Toda vez que alguém disser «o CI cobre o Windows agora» antes
+de ter visto ao menos uma execução real do job `windows-2022` passar ou
+reprovar no GitHub Actions.
