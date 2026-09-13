@@ -737,6 +737,101 @@ pub enum AlertReason {
     },
 }
 
+/// O que uma pessoa consentiu no caminho entre pares — as duas metades do §5,
+/// separadas porque são independentes.
+///
+/// # Por que duas, e não uma
+///
+/// O §5 da spec de 05/09 dá **duas razões independentes** para o opt-in, e a
+/// primeira redação do protocolo só implementou a segunda:
+///
+/// 1. **privacidade** — numa malha, quem assiste e quem repassa passam a
+///    conhecer o endereço um do outro. Um servidor não é necessariamente entre
+///    amigos: o ADR 0021 deixa a admissão poder ser aberta.
+/// 2. **custo real** — a máquina de quem empresta passa a subir cópias para
+///    outras pessoas, e ninguém deve gastar a internet de alguém sem perguntar.
+///
+/// A razão 2 é só de quem empresta. A razão 1 é **dos dois lados**: quem
+/// assiste por um par tem o próprio endereço entregue àquele par, em
+/// `ServerMessage::SirvaTelaPara`. Enquanto houve um campo só, o endereço de
+/// quem só assistia era publicado por uma decisão que ele nunca tomou — o
+/// consentimento de outra pessoa, a de emprestar, é que destrancava a
+/// exposição do dele.
+///
+/// # Compartilhar a própria tela não mora aqui
+///
+/// São três escolhas distintas, e a casca precisa distingui-las:
+/// **compartilhar a tela própria** (`ClientMessage::StartScreenShare`),
+/// **emprestar a conexão** ([`Self::pares_que_atende`]) e **assistir por par**
+/// ([`Self::assiste_por_par`]). A primeira é de quem transmite e não tem nada
+/// a ver com a malha; as duas outras são deste tipo. Juntá-las num interruptor
+/// só faria a pessoa pagar por uma para ter a outra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsentimentoDePar {
+    /// Quantos pares esta pessoa aceita atender **ao mesmo tempo**. `0` é «não
+    /// empresto a conexão».
+    ///
+    /// **Número, e não interruptor, e não é o subprojeto B antecipado.** O que
+    /// o B decide é *quem* serve *quem* — subida medida, topologia, leque. O
+    /// que este campo carrega é a outra pergunta, que é de quem paga a conta:
+    /// *quanto* da minha internet eu aceito gastar. Um interruptor responderia
+    /// essa pergunta por quem empresta, fixando o teto em um; e um teto que só
+    /// o código conhece não pode ser baixado por quem está pagando por ele.
+    ///
+    /// **O `0` não é um estado a mais.** Ele *é* «não empresto», e é por isso
+    /// que não há um booleano ao lado: dois campos deixariam existir
+    /// `empresta = true` com teto `0`, que é uma contradição que alguém teria
+    /// de resolver em algum lugar — e o lugar seria diferente em cada lado.
+    /// Ver [`Self::empresta_conexao`].
+    ///
+    /// Nesta versão o servidor nunca aponta mais de um par por transmissão por
+    /// espectador: a **escolha** continua sendo a do §2, deliberadamente burra.
+    /// O teto é o limite de quem empresta, não a política de quem escolhe.
+    pub pares_que_atende: u8,
+    /// Se aceita que o **próprio endereço** seja entregue a quem for servi-la.
+    ///
+    /// Sem isto, `ServerMessage::SirvaTelaPara` não tem para onde mandar quem
+    /// empresta discar, e a tela vem do servidor — que é o caminho de sempre,
+    /// e o que «a malha é alívio, nunca dependência» quer dizer para quem
+    /// recusa.
+    pub assiste_por_par: bool,
+}
+
+impl ConsentimentoDePar {
+    /// Quem não consentiu em nada: nem empresta, nem assiste por par.
+    ///
+    /// É o padrão, e é deliberado que ele seja: um opt-in que começasse ligado
+    /// não seria um opt-in.
+    #[must_use]
+    pub const fn de_ninguem() -> Self {
+        Self {
+            pares_que_atende: 0,
+            assiste_por_par: false,
+        }
+    }
+
+    /// Se empresta a conexão a alguém — isto é, se o teto dela não é zero.
+    ///
+    /// Uma função e não um campo, para que «emprestar» e «até quantos» não
+    /// possam discordar. Ver [`Self::pares_que_atende`].
+    #[must_use]
+    pub const fn empresta_conexao(&self) -> bool {
+        self.pares_que_atende > 0
+    }
+
+    /// Se esta declaração tem algum destinatário possível para um endereço.
+    ///
+    /// É o que decide se `locais` pode vir preenchido: quem não empresta e não
+    /// assiste por par não aparece em nenhuma das duas mensagens que o servidor
+    /// manda, então um endereço declarado por ele seria um endereço publicado
+    /// sem ninguém a quem publicar. Ver a validação de
+    /// [`ClientMessage::EmprestarSubida`].
+    #[must_use]
+    pub const fn alcancavel_por_alguem(&self) -> bool {
+        self.empresta_conexao() || self.assiste_por_par
+    }
+}
+
 /// Por que um par deixou de servir uma transmissão.
 ///
 /// Cada variante distingue um conserto diferente, e é por isso que são cinco e
@@ -1268,8 +1363,12 @@ pub enum ClientMessage {
     /// cópias para outras pessoas, e ninguém deve gastar a internet de alguém
     /// sem perguntar.
     EmprestarSubida {
-        /// Se empresta a partir de agora.
-        emprestando: bool,
+        /// O que esta pessoa consente agora no caminho entre pares.
+        ///
+        /// **Substituiu um booleano `emprestando`.** Ele misturava as duas
+        /// razões independentes do §5 num interruptor só — ver
+        /// [`ConsentimentoDePar`].
+        consentimento: ConsentimentoDePar,
         /// SHA-256 do certificado desta sessão, em hex minúsculo. O mesmo
         /// formato do `fp=` do `seele://` e do pino do ADR 0003 — um formato só
         /// para a mesma coisa.
@@ -2209,7 +2308,30 @@ impl Validate for ClientMessage {
             // mesma conferência que o pedido de quadro-chave já faz.
             | Self::WatchScreen { .. }
             | Self::UnwatchScreen { .. } => Ok(()),
-            Self::EmprestarSubida { impressao, .. } => check_impressao(impressao),
+            Self::EmprestarSubida {
+                consentimento,
+                impressao,
+                locais,
+            } => {
+                check_impressao(impressao)?;
+                // **A regra do opt-in, no fio.** `locais` é a topologia de
+                // rede interna da máquina de quem declara, e só quem empresta
+                // a conexão tem razão para publicá-la: quem assiste é
+                // alcançado pelo endereço público, que o servidor já vê como
+                // origem da conexão e não precisa que ninguém afirme.
+                // Recusá-la custa um quadro de controle — enquanto guardá-la
+                // custaria a privacidade que o §5 nomeia como a primeira das
+                // duas razões do opt-in.
+                //
+                // O guarda do cliente (`enlace::locais_a_publicar`) continua de
+                // pé e é o que evita mandar; este é o que evita guardar. Uma
+                // regra que só vive no cliente é uma regra que o servidor
+                // confia a quem ela restringe.
+                if !consentimento.empresta_conexao() && !locais.is_empty() {
+                    return Err(ControlError::FieldOutOfRange { field: "locais" });
+                }
+                Ok(())
+            }
             // O motivo é um enumerado de tamanho fixo, e a `ScreenId` segue a
             // mesma regra do braço acima: quem sabe se ela existe é o servidor.
             Self::ParFalhou { .. } => Ok(()),
@@ -2375,13 +2497,89 @@ mod tests {
     }
 
     #[test]
+    fn quem_nao_consentiu_nada_nao_pode_publicar_endereco_nenhum() {
+        // **O consentimento é regra de fio, e não disciplina de cliente.** O §5
+        // da spec de 05/09 nomeia privacidade como a primeira das duas razões
+        // do opt-in, e `locais` é exatamente o que ele guarda: a topologia de
+        // rede interna da máquina de quem declara. Enquanto a regra vivesse só
+        // no cliente (`enlace::locais_a_publicar`), um cliente remendado —  ou
+        // uma versão antiga com o guarda de outro jeito — publicaria a
+        // topologia de quem nunca consentiu, e o servidor a guardaria sem uma
+        // pergunta.
+        //
+        // Quem não empresta a conexão não é procurado por ninguém na rede
+        // local: quem assiste é alcançado pelo endereço **público**, que o
+        // servidor já vê como origem da conexão. Um `locais` não vazio aqui é
+        // topologia de rede interna publicada sem destinatário — e a recusa
+        // custa um quadro de controle.
+        //
+        // **Consentir em assistir por par não destranca isto**, e a segunda
+        // metade do teste é o que prende a diferença: as duas metades do §5
+        // protegem coisas diferentes, e a menor não pode pagar pela maior.
+        for calado in [
+            ConsentimentoDePar::de_ninguem(),
+            ConsentimentoDePar {
+                pares_que_atende: 0,
+                assiste_por_par: true,
+            },
+        ] {
+            let mensagem = ClientMessage::EmprestarSubida {
+                consentimento: calado,
+                impressao: "a".repeat(64),
+                locais: vec!["192.168.1.7:41234".parse().unwrap()],
+            };
+            assert_eq!(
+                mensagem.validate(),
+                Err(ControlError::FieldOutOfRange { field: "locais" }),
+                "{calado:?} publicou a topologia de rede interna da máquina"
+            );
+        }
+
+        // A outra metade: um guarda que recusasse todo mundo desligaria o
+        // atalho de rede local sem um erro em lugar nenhum.
+        let empresta = ClientMessage::EmprestarSubida {
+            consentimento: ConsentimentoDePar {
+                pares_que_atende: 1,
+                assiste_por_par: false,
+            },
+            impressao: "a".repeat(64),
+            locais: vec!["192.168.1.7:41234".parse().unwrap()],
+        };
+        assert_eq!(empresta.validate(), Ok(()));
+    }
+
+    #[test]
+    fn consentir_em_assistir_por_par_nao_e_consentir_em_emprestar_a_conexao() {
+        // As duas metades do §5 são independentes, e é por isso que elas são
+        // dois campos e não um: «o meu endereço pode ser dado a quem me serve»
+        // não diz nada sobre «eu subo cópias para outras pessoas», e a
+        // aritmética do §0 só cobra a segunda.
+        let so_assiste = ConsentimentoDePar {
+            pares_que_atende: 0,
+            assiste_por_par: true,
+        };
+        assert!(so_assiste.assiste_por_par);
+        assert!(!so_assiste.empresta_conexao());
+
+        let so_empresta = ConsentimentoDePar {
+            pares_que_atende: 1,
+            assiste_por_par: false,
+        };
+        assert!(so_empresta.empresta_conexao());
+        assert!(!so_empresta.assiste_por_par);
+    }
+
+    #[test]
     fn as_mensagens_do_caminho_entre_pares_atravessam_o_fio() {
         // Ida e volta pelo `postcard`, como as outras. O que este teste prende de
         // verdade é a **posição** das variantes: o `postcard` indexa variante por
         // posição, então acrescentar no meio troca o significado de todas as
         // seguintes para quem já está no ar.
         let emprestar = ClientMessage::EmprestarSubida {
-            emprestando: true,
+            consentimento: ConsentimentoDePar {
+                pares_que_atende: 1,
+                assiste_por_par: true,
+            },
             impressao: "a".repeat(64),
             locais: vec!["192.168.1.7:41234".parse().unwrap()],
         };
@@ -3746,7 +3944,10 @@ mod o_vocabulario_e_a_versao {
         ] {
             let quantos = ruim.len();
             let mensagem = ClientMessage::EmprestarSubida {
-                emprestando: true,
+                consentimento: ConsentimentoDePar {
+                    pares_que_atende: 1,
+                    assiste_por_par: true,
+                },
                 impressao: ruim,
                 locais: Vec::new(),
             };
@@ -3766,7 +3967,10 @@ mod o_vocabulario_e_a_versao {
         // para a mesma coisa.
         for boa in ["3c".repeat(32), "3C".repeat(32)] {
             let mensagem = ClientMessage::EmprestarSubida {
-                emprestando: true,
+                consentimento: ConsentimentoDePar {
+                    pares_que_atende: 1,
+                    assiste_por_par: true,
+                },
                 impressao: boa.clone(),
                 locais: Vec::new(),
             };

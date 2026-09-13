@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
-use seele_proto::control::{ClientMessage, ServerMessage};
+use seele_proto::control::{ClientMessage, ConsentimentoDePar, ServerMessage};
 use seele_proto::ids::{
     ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId,
 };
@@ -1347,28 +1347,31 @@ impl Client {
     /// Declara ao servidor a identidade deste par — e se ela empresta a
     /// subida agora, ou só existe.
     ///
-    /// **`emprestando: false` não é "esqueça-me".** Desde o fix round 1 da
+    /// **Não consentir em nada não é "esqueça-me".** Desde o fix round 1 da
     /// Task 8, `impressao` e `locais` continuam significando "eu sou esta
-    /// pessoa, alcançável aqui" mesmo quando `emprestando` é falso — só a
+    /// pessoa, alcançável aqui" mesmo com o consentimento vazio — só a
     /// saída da sessão (do lado do servidor) apaga a declaração. Quem só
-    /// assiste (nunca opta por emprestar) ainda precisa mandar isto **uma
-    /// vez**, com `emprestando: false`: sem identidade declarada, a discagem
-    /// dele para um par não tem certificado para apresentar quando
+    /// conecta ainda precisa mandar isto **uma vez**, com
+    /// `ConsentimentoDePar::de_ninguem()`: sem identidade declarada, a
+    /// discagem dele para um par não tem certificado para apresentar quando
     /// `client_auth_mandatory` exigir um.
+    ///
+    /// `locais` tem de vir vazio quando o consentimento não alcança ninguém —
+    /// é regra de fio, e `ClientMessage::validate` a cobra do outro lado.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
     pub async fn emprestar_subida(
         &mut self,
-        emprestando: bool,
+        consentimento: ConsentimentoDePar,
         impressao: String,
         locais: Vec<SocketAddr>,
     ) -> Result<()> {
         frame::write(
             &mut self.send,
             &ClientMessage::EmprestarSubida {
-                emprestando,
+                consentimento,
                 impressao,
                 locais,
             },

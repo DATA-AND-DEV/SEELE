@@ -55,9 +55,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
-use seele_core::enlace::{Aviso, Destino, Enlace};
+use seele_core::enlace::{Aviso, Destino, Enlace, PARES_QUE_ESTA_VERSAO_ATENDE};
 use seele_core::{Link, MemoryPinStore, PinStore};
-use seele_proto::control::{ClientMessage, ServerMessage};
+use seele_proto::control::{ClientMessage, ConsentimentoDePar, ServerMessage};
 use seele_proto::ids::{PersonId, ScreenId, VoiceRoomId};
 use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource, SCREEN_HEADER_LEN};
 use seele_server::persistence::Location;
@@ -457,16 +457,24 @@ struct ContadorDeCopias {
 }
 
 impl ContadorDeCopias {
-    /// Passa a seguir o contador desta transmissão.
-    fn de(servidor: &Daemon, screen: ScreenId) -> Self {
-        Self::seguindo(servidor.server().events.subscribe(), screen)
-    }
-
-    /// O mesmo, a partir de uma assinatura já feita do barramento.
+    /// Passa a seguir o contador desta transmissão, a partir de uma assinatura
+    /// **já feita** do barramento.
     ///
-    /// Existe separado de [`Self::de`] para que
-    /// [`o_contador_de_copias_sobrevive_a_um_atraso_do_barramento`] possa
-    /// entregar um recebedor **já atrasado** — coisa que um daemon de verdade
+    /// **A assinatura é um argumento, e não uma conveniência que este construtor
+    /// faça por conta própria.** Houve uma versão que assinava aqui dentro, e
+    /// quem chamava assinava depois de abrir a transmissão: o servidor anuncia
+    /// `ScreenViewers` uma vez ao ligar os espectadores no cano e não repete, e
+    /// uma assinatura tardia perdia esse anúncio único — o contador ficava em
+    /// `u32::MAX` para sempre e a espera de quem chamava esgotava a paciência
+    /// inteira sem nada de errado ter acontecido. Medido em 2026-09-11: um
+    /// atraso de trezentos milissegundos entre abrir a transmissão e assinar
+    /// reproduzia o vermelho falso todas as vezes. Pedir a assinatura pronta
+    /// obriga quem chama a fazê-la antes, que é o único momento em que ela é
+    /// segura.
+    ///
+    /// Serve também a
+    /// [`o_contador_de_copias_sobrevive_a_um_atraso_do_barramento`], que
+    /// entrega um recebedor **já atrasado** — coisa que um daemon de verdade
     /// não sabe produzir sob encomenda.
     fn seguindo(mut eventos: tokio::sync::broadcast::Receiver<Event>, screen: ScreenId) -> Self {
         let quantos = Arc::new(std::sync::atomic::AtomicU32::new(u32::MAX));
@@ -507,6 +515,25 @@ impl ContadorDeCopias {
         self.quantos.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
+
+/// Quem consente em **emprestar a conexão**: aceita subir cópias para outras
+/// pessoas, até o teto desta versão do cliente.
+const EMPRESTA: ConsentimentoDePar = ConsentimentoDePar {
+    pares_que_atende: PARES_QUE_ESTA_VERSAO_ATENDE,
+    assiste_por_par: false,
+};
+
+/// Quem consente em **assistir por par**: aceita que o próprio endereço seja
+/// entregue a quem for servi-lo.
+///
+/// As duas metades do §5 são independentes de propósito, e estas duas
+/// constantes existem separadas para que os testes digam qual delas estão
+/// exercitando. Quem empresta aqui não assiste por par, e vice-versa: nenhum
+/// teste deste arquivo depende de as duas virem juntas.
+const ASSISTE_POR_PAR: ConsentimentoDePar = ConsentimentoDePar {
+    pares_que_atende: 0,
+    assiste_por_par: true,
+};
 
 /// O cenário inteiro montado: servidor, quem compartilha, quem empresta, quem
 /// assiste, e a transmissão no ar chegando aos dois pelo servidor.
@@ -553,6 +580,32 @@ async fn cenario_por(
     servidor: Arc<Daemon>,
     geracao: u32,
 ) -> Result<Cenario> {
+    cenario_com(
+        endereco,
+        endereco_de_quem_assiste,
+        servidor,
+        geracao,
+        ASSISTE_POR_PAR,
+    )
+    .await
+}
+
+/// O mesmo cenário, com quem assiste declarando **o consentimento que se
+/// pede** em vez do de sempre.
+///
+/// Existe para o teste da recusa: o aceite diz que «recusa mantém caminho pelo
+/// servidor», e provar isso precisa de uma pessoa que declare identidade de par
+/// — para que a declaração exista e possa ser consultada — e mesmo assim
+/// **negue** `assiste_por_par`. Passar [`EMPRESTA`] aqui é exatamente essa
+/// pessoa: está na malha, empresta a própria subida, e não quer o próprio
+/// endereço entregue a ninguém.
+async fn cenario_com(
+    endereco: SocketAddr,
+    endereco_de_quem_assiste: SocketAddr,
+    servidor: Arc<Daemon>,
+    geracao: u32,
+    consentimento_de_quem_assiste: ConsentimentoDePar,
+) -> Result<Cenario> {
     let mut compartilha = abrir(endereco, 1).await?;
     let sala = compartilha.sala;
     frame::write(
@@ -566,18 +619,34 @@ async fn cenario_por(
 
     let empresta = cliente(endereco, 2, "empresta").await?;
     empresta.entrar_na_voice_room(sala).await?;
-    // **O opt-in, e é ele que põe esta máquina na malha.** Sem esta linha
-    // `Pares::escolher` não tem candidato nenhum e o servidor serve as duas
-    // cópias, como sempre serviu.
-    empresta.emprestar_subida(true).await?;
+    // **O opt-in de quem empresta, e é ele que põe esta máquina na malha.**
+    // Sem esta linha `Pares::escolher` não tem candidato nenhum e o servidor
+    // serve as duas cópias, como sempre serviu.
+    empresta.consentir_no_caminho_entre_pares(EMPRESTA).await?;
 
     let assiste = cliente(endereco_de_quem_assiste, 3, "assiste").await?;
     assiste.entrar_na_voice_room(sala).await?;
+    // **O opt-in de quem assiste, e ele é a metade nova do §5.** `SirvaTelaPara`
+    // entrega o endereço de quem pediu a quem vai servi-lo: sem este
+    // consentimento, o endereço de quem assiste seria publicado por uma decisão
+    // que **outra pessoa** tomou — a de emprestar. Com esta linha comentada,
+    // todo teste de repasse deste arquivo reprova, e é essa a prova de que o
+    // consentimento precede a exposição do endereço.
+    assiste
+        .consentir_no_caminho_entre_pares(consentimento_de_quem_assiste)
+        .await?;
 
     let mut empresta = empresta;
     let mut assiste = assiste;
+    // **A assinatura do barramento vem antes de a transmissão existir.** O
+    // servidor anuncia `ScreenViewers` **uma vez** quando liga os dois no cano,
+    // e não repete: um contador que assinasse depois podia perder esse anúncio
+    // único e ficar em `u32::MAX` para sempre, e a espera logo abaixo então
+    // esgotava a paciência inteira sem nada de errado ter acontecido. Era um
+    // vermelho falso, e um vermelho falso ensina a ignorar a suíte.
+    let ouve = servidor.server().events.subscribe();
     let screen = compartilhar_desde(&mut compartilha, primeiro_seq_da(geracao)).await?;
-    let copias = ContadorDeCopias::de(&servidor, screen);
+    let copias = ContadorDeCopias::seguindo(ouve, screen);
 
     // Os dois entram ligados no cano do servidor, porque é o que
     // `VoiceRoom::tela_abriu` faz com quem já está na sala quando há uma
@@ -636,6 +705,18 @@ async fn maior_seq_ja_enfileirado(enlace: &mut Enlace, screen: ScreenId) -> Opti
         }
     }
 }
+
+/// Quanto se admite de intervalo entre quem empresta sair da sala e a imagem de
+/// quem estava atrás dele voltar.
+///
+/// **Medido, e não escolhido.** Com o servidor reabrindo o cano na saída, o
+/// primeiro quadro volta em dezenas de milissegundos. Sem essa linha, quem
+/// ficou órfão espera o prazo do par do outro lado — `PRAZO_DO_PAR`, três
+/// segundos em `seele_core::enlace` — antes de qualquer coisa acontecer. Um
+/// segundo fica confortavelmente entre os dois: folgado o bastante para uma
+/// máquina de integração carregada, curto o bastante para não caber o prazo que
+/// esta entrega existe para evitar.
+const GRACA_DA_SAIDA: Duration = Duration::from_secs(1);
 
 /// Quantos quadros seguidos, todos pelo par, provam recepção sustentada — e
 /// não um quadro isolado que ainda coubesse num punhado em voo.
@@ -712,11 +793,11 @@ async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
             .expect("quem empresta optou por emprestar e não declarou identidade")
             .clone();
         assert!(
-            quem_empresta.emprestando,
-            "quem chamou `emprestar_subida(true)` chegou ao servidor como quem não empresta"
+            quem_empresta.consentimento.empresta_conexao(),
+            "quem consentiu em emprestar a conexão chegou ao servidor como quem não empresta"
         );
         assert!(
-            !quem_assiste.emprestando,
+            !quem_assiste.consentimento.empresta_conexao(),
             "quem nunca optou por emprestar chegou ao servidor como quem empresta"
         );
         assert_eq!(
@@ -1005,9 +1086,9 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
     )
     .await?;
 
-    let empresta = cliente(endereco, 2, "empresta").await?;
+    let mut empresta = cliente(endereco, 2, "empresta").await?;
     empresta.entrar_na_voice_room(sala).await?;
-    empresta.emprestar_subida(true).await?;
+    empresta.consentir_no_caminho_entre_pares(EMPRESTA).await?;
 
     // Quem assiste é cru, e declara a própria identidade à mão — é o que
     // `Enlace` faz por dentro ao conectar, e sem ela o servidor não teria
@@ -1024,7 +1105,7 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
     frame::write(
         &mut assiste.envio,
         &ClientMessage::EmprestarSubida {
-            emprestando: false,
+            consentimento: ASSISTE_POR_PAR,
             impressao: "a".repeat(64),
             locais: Vec::new(),
         },
@@ -1053,6 +1134,21 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
+
+    // **E tem de estar recebendo a transmissão**, que é a segunda
+    // pré-condição e a que faltava aqui. Um par repassa o que ele mesmo
+    // recebe, então `Pares::escolher` não o considera antes de o cano dele
+    // estar ligado. A escolha acontece **uma vez**, no `WatchScreen`: pedir
+    // cedo demais mede o caminho de sempre achando que mede a malha, e o
+    // sintoma é este teste esgotando a paciência em «o servidor não apontou
+    // quem empresta». `cenario_por` já espera por isto; este teste monta o
+    // cenário à mão e não esperava.
+    esperar(
+        &mut empresta,
+        "quem empresta ver a tela pelo servidor",
+        |aviso| matches!(aviso, Aviso::TelaAbriu { tela, .. } if *tela == screen).then_some(()),
+    )
+    .await?;
 
     frame::write(&mut assiste.envio, &ClientMessage::WatchScreen { screen }).await?;
     let fim = Instant::now() + PACIENCIA;
@@ -1232,6 +1328,376 @@ async fn o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor() -> Result<()>
     println!(
         "{QUADROS_PARA_PROVAR} quadros seguidos chegaram pelo servidor depois do fim limpo do \
          repasse, todos acima de {depois_do_par:?}"
+    );
+
+    drop(compartilha);
+    drop(empresta);
+    drop(assiste);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **Quem retira o consentimento de emprestar para de subir a cópia na hora, e
+/// quem estava atrás dele não perde imagem.**
+///
+/// # O que um consentimento que só valesse adiante custaria
+///
+/// A pessoa desliga o interruptor e continua pagando. A declaração nova
+/// entraria em `Pares` e mudaria a **escolha seguinte**, enquanto o repasse em
+/// curso seguiria subindo pela conexão dela — sem prazo para acabar, porque
+/// nada nele repara em consentimento. O único aviso seria a conta de internet
+/// no fim do mês, e é a forma mais cara do defeito que esta casa mais comete:
+/// o produto sabe e não conta.
+///
+/// # As três pernas
+///
+/// 1. **antes**: o par está servindo de verdade — `ate_o_par_estar_servindo`
+///    prova o piso, a queda do contador para uma cópia e trinta quadros
+///    sustentados. Sem esta perna o resto mediria o silêncio de um caminho que
+///    nunca existiu;
+/// 2. **no corte**: a vaga do par volta à fila — os dois lados da nomeação
+///    desfeitos, e não só um;
+/// 3. **depois**: trinta quadros estritamente crescentes acima do piso,
+///    chegando pelo servidor. É o que separa «o repasse acabou» de «a tela de
+///    quem assiste parou», que é o desfecho que a malha existe para nunca ter.
+///
+/// Esta prova não afirma que a contagem de espectadores volte a anunciar duas
+/// cópias no corte — o produto hoje não reemite esse aviso ao reabrir o cano
+/// (pendência registrada em `docs/pendencias.md`); só o repasse em si.
+#[tokio::test(flavor = "multi_thread")]
+async fn retirar_o_consentimento_de_emprestar_encerra_o_repasse_e_o_servidor_reassume() -> Result<()>
+{
+    let Cenario {
+        servidor,
+        compartilha,
+        empresta,
+        mut assiste,
+        screen,
+        copias,
+    } = cenario().await?;
+
+    let piso = ate_o_par_estar_servindo(
+        &mut assiste,
+        screen,
+        &copias,
+        "a retirada do consentimento de emprestar",
+    )
+    .await?;
+    println!("o par serviu até o quadro {piso:?}; agora quem empresta retira o consentimento");
+
+    empresta
+        .consentir_no_caminho_entre_pares(ConsentimentoDePar::de_ninguem())
+        .await?;
+
+    // O fim do fluxo do par, visto de dentro de quem assiste. Daqui para
+    // frente, tudo o que chegar tem de ter vindo de outro lugar — e o único
+    // outro lugar é o servidor.
+    esperar(
+        &mut assiste,
+        "o fluxo do par terminar depois de quem empresta retirar o consentimento",
+        |aviso| matches!(aviso, Aviso::TelaFechou { tela } if *tela == screen).then_some(()),
+    )
+    .await?;
+
+    // A vaga do par volta à fila: os dois lados da nomeação desfeitos, e não
+    // só o do cliente. Sem isto o servidor continuaria contando quem retirou
+    // como ocupado pelo resto da sessão do daemon.
+    let fim = Instant::now() + PACIENCIA;
+    loop {
+        let ocupados = servidor.server().pares.lock().await.ja_servindo();
+        if ocupados.is_empty() {
+            break;
+        }
+        assert!(
+            Instant::now() < fim,
+            "quem retirou o consentimento continua contado como par ocupado ({ocupados:?}): a \
+             vaga não voltou à fila"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // **Um piso novo, e é ele que faz esta prova valer.** O canal de avisos é
+    // FIFO e o par entregou quadros até calar; pedir um `seq` acima do último
+    // que se leu passaria com o defeito no lugar, servido pela fila.
+    let depois = maior_seq_ja_enfileirado(&mut assiste, screen).await;
+    println!("a fila esvaziou no quadro {depois:?}; daqui para cima é o servidor");
+    let mut anterior = depois;
+    for indice in 0..QUADROS_PARA_PROVAR {
+        let (seq, bytes) = esperar(
+            &mut assiste,
+            "um quadro chegar pelo servidor depois de quem empresta retirar o consentimento",
+            |aviso| match aviso {
+                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
+                    .filter(|seq| anterior.is_none_or(|p| *seq > p))
+                    .map(|seq| (seq, bytes.clone())),
+                _ => None,
+            },
+        )
+        .await?;
+        assert_eq!(
+            bytes,
+            corpo(seq),
+            "o quadro {seq} chegou e não é o que saiu de quem compartilha (quadro {indice} de \
+             {QUADROS_PARA_PROVAR})"
+        );
+        anterior = Some(seq);
+    }
+    println!(
+        "{QUADROS_PARA_PROVAR} quadros seguidos chegaram pelo servidor depois da retirada, todos \
+         acima de {depois:?}"
+    );
+
+    drop(compartilha);
+    drop(empresta);
+    drop(assiste);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **Quem retira o consentimento de assistir por par volta a ser servido pelo
+/// servidor, e não fica no escuro.**
+///
+/// O outro lado da retirada, e ele é o que **não tem relato a esperar**: quando
+/// quem empresta desliga, o fluxo do par termina e o `ParFalhou` do fim limpo
+/// reabre o cano. Aqui nada falhou — quem assiste desligou o próprio caminho de
+/// propósito. Se o servidor não reabrisse o cano ao receber a declaração nova,
+/// a tela desta pessoa simplesmente pararia, sem erro em lugar nenhum.
+#[tokio::test(flavor = "multi_thread")]
+async fn retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor() -> Result<()> {
+    let Cenario {
+        servidor,
+        compartilha,
+        empresta,
+        mut assiste,
+        screen,
+        copias,
+    } = cenario().await?;
+
+    let piso = ate_o_par_estar_servindo(
+        &mut assiste,
+        screen,
+        &copias,
+        "a retirada do consentimento de assistir por par",
+    )
+    .await?;
+    println!("o par serviu até o quadro {piso:?}; agora quem assiste retira o consentimento");
+
+    assiste
+        .consentir_no_caminho_entre_pares(ConsentimentoDePar::de_ninguem())
+        .await?;
+
+    // **Não há fim de fluxo a esperar deste lado, e isso é medido e não
+    // suposto.** Quando quem *empresta* retira, a conexão do par morre e quem
+    // assiste vê `TelaFechou`. Aqui é esta máquina que cancela a própria
+    // tarefa de leitura, e uma tarefa cancelada não emite fim nenhum — a
+    // primeira versão deste teste esperou por `TelaFechou` e esgotou a
+    // paciência. Fica registrado em `docs/pendencias.md`: a casca não é
+    // avisada de que o caminho de par dela acabou, e o que a segura é a
+    // imagem não parar.
+    //
+    // O que se afirma, então, são as duas coisas que **têm** de valer: o
+    // servidor desfez a nomeação, e a imagem continua chegando.
+    //
+    // A vaga de quem emprestava volta à fila: o repasse acabou para os dois.
+    let fim = Instant::now() + PACIENCIA;
+    loop {
+        let ocupados = servidor.server().pares.lock().await.ja_servindo();
+        if ocupados.is_empty() {
+            break;
+        }
+        assert!(
+            Instant::now() < fim,
+            "quem emprestava continua contado como ocupado ({ocupados:?}) depois de quem assiste \
+             ter retirado o consentimento"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let depois = maior_seq_ja_enfileirado(&mut assiste, screen).await;
+    println!("a fila esvaziou no quadro {depois:?}; daqui para cima é o servidor");
+    let mut anterior = depois;
+    for indice in 0..QUADROS_PARA_PROVAR {
+        let (seq, bytes) = esperar(
+            &mut assiste,
+            "um quadro chegar pelo servidor depois de quem assiste retirar o consentimento",
+            |aviso| match aviso {
+                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
+                    .filter(|seq| anterior.is_none_or(|p| *seq > p))
+                    .map(|seq| (seq, bytes.clone())),
+                _ => None,
+            },
+        )
+        .await?;
+        assert_eq!(
+            bytes,
+            corpo(seq),
+            "o quadro {seq} chegou e não é o que saiu de quem compartilha (quadro {indice} de \
+             {QUADROS_PARA_PROVAR})"
+        );
+        anterior = Some(seq);
+    }
+    println!(
+        "{QUADROS_PARA_PROVAR} quadros seguidos chegaram pelo servidor depois de quem assiste \
+         retirar o consentimento"
+    );
+
+    drop(compartilha);
+    drop(empresta);
+    drop(assiste);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// Se o servidor chegou a **entregar o endereço** de quem assiste a alguém.
+///
+/// `SirvaTelaPara` é a única mensagem desta casa que publica o endereço de um
+/// espectador para outra máquina — é literalmente o que o §5 da spec de 05/09
+/// chama de «espectadores passam a conhecer o endereço IP uns dos outros». O
+/// aceite pede que o consentimento **preceda** essa exposição, e uma afirmação
+/// sobre de onde os bytes vêm não diz nada sobre isso: um servidor que
+/// entregasse o endereço e falhasse em montar o caminho serviria a tela do
+/// mesmo jeito, com a privacidade já perdida.
+///
+/// Por isso esta escuta existe separada do [`ContadorDeCopias`]: uma mede o
+/// alívio, e esta mede a exposição.
+struct EnderecosEntregues {
+    aconteceu: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl EnderecosEntregues {
+    /// Passa a escutar as entregas de endereço desta transmissão.
+    fn de(servidor: &Daemon, screen: ScreenId) -> Self {
+        let mut eventos = servidor.server().events.subscribe();
+        let aconteceu = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let escrevendo = Arc::clone(&aconteceu);
+        tokio::spawn(async move {
+            loop {
+                match eventos.recv().await {
+                    Ok(Event::SirvaTelaPara { screen: qual, .. }) if qual == screen => {
+                        escrevendo.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Ok(_) => {}
+                    // Pela mesma razão do contador de cópias: parar de ler
+                    // custa a prova. Aqui custa mais ainda, porque o valor
+                    // seguro para esta afirmação é o `false`, e um laço morto
+                    // devolve `false` para sempre.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+        Self { aconteceu }
+    }
+
+    /// Se alguma entrega de endereço já saiu pelo barramento.
+    fn houve(&self) -> bool {
+        self.aconteceu.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// **Quem recusa assistir por par continua vendo a tela pelo servidor, e o
+/// endereço dele não é entregue a ninguém.**
+///
+/// # A metade do aceite que não tinha guarda
+///
+/// O aceite tem duas frases: «consentimento explícito precede exposição do
+/// endereço do espectador» e «recusa mantém caminho pelo servidor». A segunda
+/// não era exercitada por teste nenhum — todo cenário deste arquivo passava por
+/// [`cenario_por`], que sempre consente —, e a revisão mediu o que isso custava:
+/// trocando a porta de `apontar_um_par` pela versão de antes desta onda
+/// (`declaracao_de` no lugar de `quem_consentiu_assistir_por_par`), a suíte
+/// inteira seguia verde. A regressão voltaria calada, que é o defeito que o
+/// `CLAUDE.md` desta casa chama de «existir não é funcionar».
+///
+/// # Por que quem recusa aqui **declara** identidade
+///
+/// Uma pessoa que nunca declarou nada não prova nada: o servidor a recusaria
+/// pela falta de declaração, muito antes de chegar ao consentimento. Quem
+/// assiste aqui declara [`EMPRESTA`] — está na malha, empresta a própria
+/// subida, tem endereço e impressão publicados — e só **não** quer o próprio
+/// endereço entregue. É esse o caso que distingue as duas versões da porta, e
+/// é o único que prende a regra.
+///
+/// # As três afirmações
+///
+/// O endereço não saiu (`SirvaTelaPara` nenhum pela transmissão), o servidor
+/// continuou subindo as **duas** cópias do primeiro ao último quadro, e a
+/// imagem chegou inteira — recusar não é ficar sem tela. Nenhum par foi
+/// nomeado, e é o que se confere no fim.
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_recusa_assistir_por_par_continua_sendo_servido_pelo_servidor() -> Result<()> {
+    let (endereco, daemon) = servidor_com(Location::Memory).await?;
+    let Cenario {
+        servidor,
+        compartilha,
+        empresta,
+        mut assiste,
+        screen,
+        copias,
+    } = cenario_com(endereco, endereco, daemon, 0, EMPRESTA).await?;
+
+    let enderecos = EnderecosEntregues::de(&servidor, screen);
+    let piso = maior_seq_ja_enfileirado(&mut assiste, screen).await;
+    println!("a fila esvaziou no quadro {piso:?}; agora quem recusou pede para assistir");
+    assiste.assistir(screen, true).await?;
+
+    let mut anterior = piso;
+    for indice in 0..QUADROS_PARA_PROVAR {
+        let chegou = esperar(
+            &mut assiste,
+            "um quadro chegar pelo servidor depois de quem recusou pedir para assistir",
+            |aviso| match aviso {
+                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
+                    .filter(|seq| anterior.is_none_or(|p| *seq > p))
+                    .map(|seq| (seq, bytes.clone())),
+                _ => None,
+            },
+        )
+        .await;
+        // **A falha desta espera é um achado, e não um relógio curto.** Quando
+        // a porta do consentimento cai, o servidor desliga o cano desta pessoa
+        // para dar lugar ao par — e a máquina dela recusa a discagem, porque o
+        // cliente também sabe que ela não consentiu. O resultado é a tela
+        // parando, e uma paciência esgotada não contaria ao leitor por quê.
+        let (seq, bytes) = match chegou {
+            Ok(quadro) => quadro,
+            Err(erro) => panic!(
+                "a imagem de quem recusou assistir por par parou no quadro {indice} de \
+                 {QUADROS_PARA_PROVAR}: o endereço dele foi entregue? {}; cópias que o servidor \
+                 ainda sobe: {} (esperava 2). A recusa tinha de manter o caminho pelo servidor. \
+                 {erro}",
+                enderecos.houve(),
+                copias.agora()
+            ),
+        };
+        assert!(
+            !enderecos.houve(),
+            "o servidor entregou o endereço de quem recusou assistir por par (quadro {indice} de \
+             {QUADROS_PARA_PROVAR}, seq {seq}): o consentimento tem de preceder a exposição"
+        );
+        assert_eq!(
+            copias.agora(),
+            2,
+            "o servidor parou de subir a cópia de quem recusou assistir por par (quadro {indice} \
+             de {QUADROS_PARA_PROVAR}, seq {seq}): a recusa tinha de manter o caminho pelo \
+             servidor"
+        );
+        assert_eq!(
+            bytes,
+            corpo(seq),
+            "o quadro {seq} chegou e não é o que saiu de quem compartilha (quadro {indice} de \
+             {QUADROS_PARA_PROVAR})"
+        );
+        anterior = Some(seq);
+    }
+    println!(
+        "{QUADROS_PARA_PROVAR} quadros seguidos chegaram pelo servidor, com as duas cópias de pé"
+    );
+
+    let nomeados = servidor.server().pares.lock().await.ja_servindo();
+    assert!(
+        nomeados.is_empty(),
+        "o servidor nomeou um par ({nomeados:?}) para servir quem recusou assistir por par"
     );
 
     drop(compartilha);
@@ -1656,9 +2122,9 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
     )
     .await?;
 
-    let empresta = cliente(endereco, 2, "empresta").await?;
+    let mut empresta = cliente(endereco, 2, "empresta").await?;
     empresta.entrar_na_voice_room(sala).await?;
-    empresta.emprestar_subida(true).await?;
+    empresta.consentir_no_caminho_entre_pares(EMPRESTA).await?;
 
     let mut assiste = abrir(endereco, 3).await?;
     frame::write(
@@ -1675,7 +2141,7 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
     frame::write(
         &mut assiste.envio,
         &ClientMessage::EmprestarSubida {
-            emprestando: false,
+            consentimento: ASSISTE_POR_PAR,
             impressao: "a".repeat(64),
             locais: Vec::new(),
         },
@@ -1692,6 +2158,18 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
         .map_err(|_| {
             anyhow::anyhow!("o servidor nunca abriu o cano da tela para quem assiste")
         })??;
+
+    // **E tem de estar recebendo a transmissão**, pela mesma razão do irmão
+    // deste arquivo: um par repassa o que ele mesmo recebe, e a escolha
+    // acontece uma vez só, no `WatchScreen`. Aqui o cano de quem assiste já
+    // provou que `tela_abriu` correu — e ela liga todo mundo da sala no mesmo
+    // instante —, mas a pré-condição fica escrita em vez de deduzida.
+    esperar(
+        &mut empresta,
+        "quem empresta ver a tela pelo servidor",
+        |aviso| matches!(aviso, Aviso::TelaAbriu { tela, .. } if *tela == screen).then_some(()),
+    )
+    .await?;
 
     // Quem empresta tem de estar declarado antes do pedido, senão
     // `Pares::escolher` não tem candidato e o teste mediria o caminho de
@@ -1872,6 +2350,309 @@ async fn ate_o_par_estar_servindo(
         piso = Some(seq);
     }
     Ok(piso)
+}
+
+/// Um espectador **cru**: recebe a tela do servidor, declara identidade de par,
+/// e nunca disca nem relata nada.
+///
+/// Existe para uma medida que nenhum cliente de verdade sabe dar. Quem assiste
+/// por um `Enlace` conserta sozinho todo caminho de par que acaba: o fluxo do
+/// par termina, ele manda `ParFalhou`, e o servidor reabre o cano dele na volta
+/// do relato. Numa máquina só, essa volta cabe dentro de um quadro — e então
+/// **toda** afirmação sobre imagem passa igual com ou sem o servidor ter feito
+/// a própria parte. Esta ponta não relata nada, e o que sobra é só o que o
+/// servidor decidiu sozinho.
+struct EspectadorCru {
+    par: Par,
+    aberturas: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl EspectadorCru {
+    /// Quantas vezes o servidor abriu um fluxo de tela para esta máquina.
+    ///
+    /// É a medida de «o cano do servidor está aberto para esta pessoa», e ela é
+    /// de contagem e não de estado de propósito: reabrir é um evento, e um
+    /// booleano que voltasse a `true` não diria se voltou por causa da saída ou
+    /// se nunca chegou a cair.
+    fn aberturas(&self) -> u32 {
+        self.aberturas.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Sobe um [`EspectadorCru`] já sentado na sala e já declarado como par.
+async fn espectador_cru(
+    endereco: SocketAddr,
+    semente: u8,
+    sala: VoiceRoomId,
+) -> Result<EspectadorCru> {
+    let mut par = abrir(endereco, semente).await?;
+    frame::write(
+        &mut par.envio,
+        &ClientMessage::EnterVoiceRoom {
+            voice_room: sala,
+            password: None,
+        },
+    )
+    .await?;
+    // A declaração de quem **assiste** por par, escrita no fio à mão: é ela que
+    // faz o servidor ter endereço e impressão para pôr num `SirvaTelaPara`, e
+    // sem ela a porta do consentimento recusaria a nomeação antes de o teste
+    // chegar ao que ele mede.
+    frame::write(
+        &mut par.envio,
+        &ClientMessage::EmprestarSubida {
+            consentimento: ASSISTE_POR_PAR,
+            impressao: "b".repeat(64),
+            locais: Vec::new(),
+        },
+    )
+    .await?;
+
+    let conexao = par.conexao.clone();
+    let aberturas = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let contando = Arc::clone(&aberturas);
+    tokio::spawn(async move {
+        while let Ok(mut fluxo) = conexao.accept_uni().await {
+            let mut tipo = [0_u8; 1];
+            if fluxo.read_exact(&mut tipo).await.is_err() {
+                continue;
+            }
+            if tipo[0] != seele_proto::stream::StreamType::Screen.byte() {
+                continue;
+            }
+            contando.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // **Drenado, e não só contado.** Um fluxo que ninguém lê enche a
+            // fila deste espectador, e a sala corta quem não acompanha — o cano
+            // fecharia sozinho e o teste estaria medindo a própria negligência
+            // em vez da saída de quem empresta.
+            tokio::spawn(async move {
+                while let Ok(Some(_)) = fluxo.read_chunk(64 * 1024, false).await {}
+            });
+        }
+    });
+
+    Ok(EspectadorCru { par, aberturas })
+}
+
+/// **A saída de quem empresta reabre o cano de quem ficou atrás dele, sem
+/// esperar relato nenhum.**
+///
+/// # A terceira direção
+///
+/// Um par repassa o que ele mesmo recebe. Saindo da sala ele para de receber, e
+/// quem estava atrás dele fica sem imagem — sem ninguém ter falhado e sem
+/// ninguém ter pedido nada. O servidor é o único que sabe disso no instante em
+/// que acontece: `Pares::quem_empresta_parou` devolve os órfãos justamente para
+/// que `devolver_ao_servidor` reabra o cano de cada um ali, em vez de esperar a
+/// outra ponta perceber.
+///
+/// # Por que quem fica órfão aqui é uma ponta crua
+///
+/// Medido, e é o que dá forma a este teste: com um `Enlace` de verdade no lugar
+/// do órfão, **os dois mundos são indistinguíveis**. O fluxo do par termina
+/// limpo quando quem empresta sai, o cliente manda `ParFalhou`, e numa máquina
+/// só a volta desse relato cabe dentro de um intervalo de quadro — a imagem não
+/// pisca nem com a linha nem sem ela. Um teste de imagem ali afirma uma coisa
+/// verdadeira e não prende nada.
+///
+/// [`EspectadorCru`] tira o relato da conta: ele recebe a tela do servidor,
+/// declara identidade de par para poder ser nomeado, e nunca disca nem relata.
+/// Quem empresta também não relata — `ClientMessage::ParFalhou` é explícita que
+/// só quem assiste a manda. Então o que reabre o cano deste espectador só pode
+/// ser o servidor, por conta própria, na saída.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saida_de_quem_empresta_reabre_o_cano_de_quem_ficou_orfao_sem_esperar_relato(
+) -> Result<()> {
+    let (endereco, servidor) = servidor_com(Location::Memory).await?;
+
+    let mut compartilha = abrir(endereco, 1).await?;
+    let sala = compartilha.sala;
+    frame::write(
+        &mut compartilha.envio,
+        &ClientMessage::EnterVoiceRoom {
+            voice_room: sala,
+            password: None,
+        },
+    )
+    .await?;
+
+    let empresta = cliente(endereco, 2, "empresta").await?;
+    empresta.entrar_na_voice_room(sala).await?;
+    empresta.consentir_no_caminho_entre_pares(EMPRESTA).await?;
+    let quem_empresta = empresta.sessao().person;
+
+    let mut orfao = espectador_cru(endereco, 3, sala).await?;
+
+    // Assinado antes de a transmissão existir, pela razão escrita em
+    // `cenario_com`: o anúncio de espectadores é único, e quem assina depois
+    // dele pode nunca ver número nenhum.
+    let ouve = servidor.server().events.subscribe();
+    let screen = compartilhar(&mut compartilha).await?;
+    let copias = ContadorDeCopias::seguindo(ouve, screen);
+    ate(
+        "o servidor contar as duas cópias que ele mesmo sobe",
+        || copias.agora() == 2,
+    )
+    .await?;
+    ate("o servidor abrir o fluxo de tela para a ponta crua", || {
+        orfao.aberturas() == 1
+    })
+    .await?;
+
+    // O pedido que põe um par no meio. `SirvaTelaPara` sai para quem empresta,
+    // que vai discar para esta ponta e não vai conseguir — ela não atende
+    // ligação nenhuma. Não faz diferença para o que se mede: quem empresta não
+    // relata falha de par, e esta ponta não relata nada.
+    frame::write(&mut orfao.par.envio, &ClientMessage::WatchScreen { screen }).await?;
+    let prazo = Instant::now() + PACIENCIA;
+    loop {
+        if servidor
+            .server()
+            .pares
+            .lock()
+            .await
+            .ja_servindo()
+            .contains(&quem_empresta)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < prazo,
+            "o servidor não nomeou par nenhum para a ponta crua: o que este teste mede depois \
+             não diria nada sobre a saída de quem empresta"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    ate("o servidor desligar o cano da ponta crua", || {
+        copias.agora() == 1
+    })
+    .await?;
+
+    let aberturas_antes = orfao.aberturas();
+    assert_eq!(
+        aberturas_antes, 1,
+        "o servidor abriu {aberturas_antes} fluxos de tela para a ponta crua antes da saída, e \
+         esperava-se um só"
+    );
+
+    println!("o par foi nomeado e o cano do servidor caiu; agora quem empresta sai da sala");
+    let saiu_em = Instant::now();
+    empresta.sair_da_voice_room().await?;
+
+    let prazo = saiu_em + GRACA_DA_SAIDA;
+    while orfao.aberturas() == aberturas_antes {
+        assert!(
+            Instant::now() < prazo,
+            "quem empresta saiu da sala há {:?} e o servidor não reabriu o cano de quem ficava \
+             atrás dele: essa pessoa está sem imagem, e ninguém vai relatar nada — nem ela, que \
+             não sabe relatar, nem quem emprestava, que por protocolo nunca relata",
+            saiu_em.elapsed()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    println!(
+        "o servidor reabriu o cano de quem ficou órfão em {:?}",
+        saiu_em.elapsed()
+    );
+
+    drop(compartilha);
+    drop(empresta);
+    drop(orfao);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **Quem empresta sair da sala não deixa quem estava atrás dele no escuro.**
+///
+/// A promessa vista de fora, com clientes de verdade dos dois lados: a imagem
+/// de quem ficou órfão não pisca. É a frase do aceite — «saída encerra o
+/// repasse» — medida onde alguém a sentiria.
+///
+/// # O que este teste prova, e o que ele não prova
+///
+/// Ele **não** prende a linha que reabre o cano na saída. Medido: revertendo-a,
+/// estes trinta quadros chegam igualzinho, porque numa máquina só o relato de
+/// fim limpo do par volta dentro de um intervalo de quadro e reabre o cano por
+/// outro caminho. Quem prende aquela linha é
+/// [`a_saida_de_quem_empresta_reabre_o_cano_de_quem_ficou_orfao_sem_esperar_relato`],
+/// que tira o relato da conta.
+///
+/// O que este prende são os **dois** caminhos de uma vez: se nem o servidor
+/// reabrir na saída nem o relato chegar, a imagem para, e é aqui que isso
+/// aparece. É a diferença entre medir um mecanismo e medir a promessa, e este
+/// arquivo precisa dos dois.
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_empresta_saindo_da_sala_nao_deixa_quem_estava_atras_dele_sem_imagem() -> Result<()> {
+    let Cenario {
+        servidor,
+        compartilha,
+        empresta,
+        mut assiste,
+        screen,
+        copias,
+    } = cenario().await?;
+
+    let piso = ate_o_par_estar_servindo(
+        &mut assiste,
+        screen,
+        &copias,
+        "a saída de quem empresta da sala",
+    )
+    .await?;
+    println!("o par serviu até o quadro {piso:?}; agora quem empresta sai da sala");
+
+    let saiu_em = Instant::now();
+    empresta.sair_da_voice_room().await?;
+
+    // O piso é relido **depois** da saída: o que já estava na fila atravessou
+    // enquanto o par ainda servia, e um quadro velho não diz nada sobre o cano
+    // que o servidor tinha de reabrir.
+    let depois = maior_seq_ja_enfileirado(&mut assiste, screen).await;
+    let mut anterior = depois;
+    for indice in 0..QUADROS_PARA_PROVAR {
+        let chegou = esperar(
+            &mut assiste,
+            "um quadro chegar depois de quem emprestava sair da sala",
+            |aviso| match aviso {
+                Aviso::TelaQuadro { tela, bytes, .. } if *tela == screen => seq_de(bytes)
+                    .filter(|seq| anterior.is_none_or(|p| *seq > p))
+                    .map(|seq| (seq, bytes.clone())),
+                _ => None,
+            },
+        )
+        .await;
+        let (seq, bytes) = match chegou {
+            Ok(quadro) => quadro,
+            Err(erro) => panic!(
+                "a imagem de quem estava atrás do par parou no quadro {indice} de \
+                 {QUADROS_PARA_PROVAR} depois de quem emprestava sair da sala: nem o servidor \
+                 reabriu o cano na saída, nem o relato de fim do par chegou. {erro}"
+            ),
+        };
+        if indice == 0 {
+            let intervalo = saiu_em.elapsed();
+            println!("o primeiro quadro depois da saída chegou em {intervalo:?}");
+            assert!(
+                intervalo < GRACA_DA_SAIDA,
+                "a imagem de quem estava atrás do par voltou só depois de {intervalo:?}: para \
+                 quem está olhando, a tela congelou"
+            );
+        }
+        assert_eq!(
+            bytes,
+            corpo(seq),
+            "o quadro {seq} chegou e não é o que saiu de quem compartilha (quadro {indice} de \
+             {QUADROS_PARA_PROVAR})"
+        );
+        anterior = Some(seq);
+    }
+    println!("{QUADROS_PARA_PROVAR} quadros seguidos chegaram a quem ficou órfão depois da saída");
+
+    drop(compartilha);
+    drop(empresta);
+    drop(assiste);
+    servidor.shutdown();
+    Ok(())
 }
 
 /// **Quem sai da sessão de propósito para de receber, e o caminho do par cai
@@ -2116,6 +2897,13 @@ async fn destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_se
     // A afirmação: um espectador novo, e o **mesmo** par o serve.
     let mut de_novo = cliente(endereco, 4, "assiste-de-novo").await?;
     de_novo.entrar_na_voice_room(sala).await?;
+    // **Consentir precede ser apontado**, e sem esta linha o servidor recusa:
+    // `SirvaTelaPara` entregaria o endereço deste espectador a quem empresta,
+    // e ninguém tomou essa decisão por ele. Medido: sem ela, este teste falha
+    // em «o servidor não apontou quem empresta (apontado: None)».
+    de_novo
+        .consentir_no_caminho_entre_pares(ASSISTE_POR_PAR)
+        .await?;
     let pedido_em = Instant::now();
     de_novo.assistir(screen, true).await?;
 
@@ -2402,7 +3190,7 @@ async fn a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo
                 let pares = servidor.server().pares.lock().await;
                 pares
                     .declaracao_de(quem_empresta)
-                    .map(|declaracao| declaracao.emprestando)
+                    .map(|declaracao| declaracao.consentimento.empresta_conexao())
             };
             if declarado == Some(true) {
                 break;
@@ -2433,8 +3221,10 @@ async fn a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo
         },
     )
     .await?;
+    // Idem: antes da transmissão nova, e não depois dela.
+    let ouve = servidor.server().events.subscribe();
     let nova = compartilhar_desde(&mut compartilha, primeiro_seq_da(DEPOIS_DA_VOLTA)).await?;
-    let copias = ContadorDeCopias::de(&servidor, nova);
+    let copias = ContadorDeCopias::seguindo(ouve, nova);
     println!(
         "a transmissão nova é a tela {nova} (a de antes era a {screen}), com mídia da geração \
          {DEPOIS_DA_VOLTA}"

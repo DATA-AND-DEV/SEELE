@@ -41,7 +41,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
-use seele_proto::control::{DisconnectReason, MotivoDeFalhaDePar, ServerMessage};
+use seele_proto::control::{
+    ConsentimentoDePar, DisconnectReason, MotivoDeFalhaDePar, ServerMessage,
+};
 use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId,
 };
@@ -417,21 +419,13 @@ enum Comando {
     /// `&mut self` inteiro, e não só do `&mut Client` que
     /// [`Motor::executar`] empresta para todo o resto deste `enum`.
     DeclararIdentidadeDePar,
-    /// «Eu empresto a minha subida», ou «deixei de emprestar».
+    /// «Isto é o que eu consinto no caminho entre pares», inclusive quando a
+    /// resposta nova é «nada».
     ///
-    /// **Opt-in explícito, e é o comando que faltava.** Até aqui os dois
-    /// pontos que declaravam identidade passavam sempre `emprestando: false`,
-    /// e o doc de [`Motor::declarar_identidade_de_par`] dizia isso com todas
-    /// as letras: *«não há ainda um comando de emprestar a subida neste
-    /// enlace»*. Sem ele, nenhuma máquina deste produto podia entrar na malha
-    /// — havia servidor para escolher pares e cliente para servi-los, e
-    /// ninguém que pudesse dizer que sim.
-    ///
-    /// Guardado em [`Motor::emprestando`] e redito a cada reconexão: a
-    /// declaração é efêmera e morre com a sessão que a fez
-    /// (`Pares::saiu`, no servidor), então uma reconexão que não a repetisse
-    /// tiraria a pessoa da malha em silêncio.
-    EmprestarSubida(bool),
+    /// Substituiu um `EmprestarSubida(bool)`, que misturava as duas razões
+    /// independentes do §5 — ver [`ConsentimentoDePar`]. Guardado em
+    /// [`Motor::consentimento`] e redito a cada reconexão.
+    ConsentirNoCaminhoEntrePares(ConsentimentoDePar),
     Sair,
 }
 
@@ -1334,7 +1328,7 @@ impl Enlace {
             caminho: crate::caminho::Sonda::nova(),
             identidade_de_par: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            emprestando: false,
+            consentimento: ConsentimentoDePar::de_ninguem(),
             repasse: Arc::new(RepasseDeTela::default()),
             resultados_do_par,
             resultados_do_par_tx,
@@ -1922,20 +1916,44 @@ impl Enlace {
         self.mandar(Comando::DeclararIdentidadeDePar).await
     }
 
-    /// Diz ao servidor que esta máquina empresta a subida — ou que deixou de
-    /// emprestar.
+    /// Passa a valer este consentimento no caminho entre pares — inclusive
+    /// quando a resposta nova é «nada».
     ///
-    /// **É opt-in, e as duas razões são independentes** (§5 da spec de
-    /// 05/09): privacidade, porque emprestar publica os endereços de rede
-    /// local desta máquina a quem for servido; e custo, porque a máquina passa
-    /// a subir cópias para outras pessoas. Nada disto acontece sem esta
+    /// **É opt-in, e as duas metades são independentes** (§5 da spec de
+    /// 05/09). Ver [`ConsentimentoDePar`]: privacidade, porque o endereço de
+    /// quem consente é entregue à outra ponta; e custo, porque quem empresta
+    /// passa a subir cópias para outras pessoas. Nada disto acontece sem esta
     /// chamada.
+    ///
+    /// **A retirada alcança o que já está no ar.** Desligar não é só parar de
+    /// aceitar pedidos novos: o repasse em curso é cancelado e os caminhos de
+    /// par abertos são derrubados, aqui, antes de a declaração nova sair —
+    /// ver `Motor::passar_a_consentir`. Quem estava sendo servido por esta
+    /// máquina volta a ser servido pelo servidor.
+    ///
+    /// # O teto desta versão
+    ///
+    /// [`PARES_QUE_ESTA_VERSAO_ATENDE`] é o máximo que este cliente consegue
+    /// honrar, e valores acima dele são **baixados** antes de virar declaração:
+    /// declarar um teto que esta máquina não atende faria o servidor apontá-la
+    /// duas vezes e a segunda pessoa esperar o prazo do par vencer por uma
+    /// promessa que nunca teve como ser cumprida.
     ///
     /// # Errors
     ///
     /// [`Fechado`] quando a sessão já acabou.
-    pub async fn emprestar_subida(&self, emprestando: bool) -> Result<(), Fechado> {
-        self.mandar(Comando::EmprestarSubida(emprestando)).await
+    pub async fn consentir_no_caminho_entre_pares(
+        &self,
+        consentimento: ConsentimentoDePar,
+    ) -> Result<ConsentimentoDePar, Fechado> {
+        // **Um `let` só, usado duas vezes.** O que vai no fio e o que volta a
+        // quem pediu não podem diferir, e a maneira de garantir isso é não
+        // haver dois valores — e não uma asserção dizendo que os dois são
+        // iguais.
+        let valeu = cabivel(consentimento);
+        self.mandar(Comando::ConsentirNoCaminhoEntrePares(valeu))
+            .await?;
+        Ok(valeu)
     }
 
     async fn mandar(&self, comando: Comando) -> Result<(), Fechado> {
@@ -2044,14 +2062,18 @@ struct Motor {
     /// [`Motor::servir_par`] cria precisa devolver a vaga quando termina, e
     /// ela não tem `&mut Motor` — só a cópia deste punho.
     atendendo_pares: Arc<std::sync::atomic::AtomicBool>,
-    /// Se esta máquina empresta a subida, como a pessoa escolheu.
+    /// O que a pessoa consentiu no caminho entre pares.
     ///
     /// Guardado aqui e não só mandado uma vez porque a declaração **não
     /// sobrevive à sessão**: o servidor a apaga em `Pares::saiu` quando a
     /// conexão morre, e cada reconexão tem de dizer de novo quem esta máquina
-    /// é e se ela empresta. Sem este campo, uma queda de rede tiraria a pessoa
-    /// da malha caladamente e ela só descobriria por ninguém mais ser servido.
-    emprestando: bool,
+    /// é e o que ela consente. Sem este campo, uma queda de rede tiraria a
+    /// pessoa da malha caladamente e ela só descobriria por ninguém mais ser
+    /// servido.
+    ///
+    /// Nasce em [`ConsentimentoDePar::de_ninguem`]: um opt-in que começasse
+    /// ligado não seria um opt-in.
+    consentimento: ConsentimentoDePar,
     /// Onde o repasse ao par vai buscar os bytes da tela que chega do
     /// servidor. Ver [`RepasseDeTela`].
     repasse: Arc<RepasseDeTela>,
@@ -2175,17 +2197,37 @@ impl TarefasDePar {
         }
     }
 
+    /// Derruba **todos** os caminhos de par abertos, e deixa o resto de pé.
+    ///
+    /// Quem chama é a retirada do consentimento de assistir por par
+    /// ([`Motor::passar_a_consentir`]): os caminhos existem por causa do
+    /// endereço que a pessoa acabou de tirar de circulação. A tarefa que
+    /// **serve** não é tocada — é o outro consentimento, e retirar um não é
+    /// retirar o outro.
+    fn parar_de_assistir_a_tudo(&mut self) {
+        for (_, caminho) in self.caminhos.drain() {
+            caminho.abort();
+        }
+    }
+
+    /// Cancela a tarefa que serve um par, se houver uma.
+    ///
+    /// Quem chama é a retirada do consentimento de emprestar a conexão. A vaga
+    /// volta por tabela: ela viaja para dentro da tarefa, e o [`Drop`] de
+    /// [`VagaDeAtendimento`] a devolve quando a tarefa é solta.
+    fn parar_de_servir(&mut self) {
+        if let Some(servindo) = self.servindo.take() {
+            servindo.abort();
+        }
+    }
+
     /// Cancela tudo o que está de pé.
     ///
     /// Chamado por [`Motor::cair`], onde o motor **sobrevive** ao corte e por
     /// isso não há `Drop` nenhum para fazer isto sozinho.
     fn largar_tudo(&mut self) {
-        for (_, caminho) in self.caminhos.drain() {
-            caminho.abort();
-        }
-        if let Some(servindo) = self.servindo.take() {
-            servindo.abort();
-        }
+        self.parar_de_assistir_a_tudo();
+        self.parar_de_servir();
     }
 }
 
@@ -2670,8 +2712,8 @@ impl Motor {
                 // **Com a escolha de emprestar, e não com `false` fixo.** Quem
                 // optou por emprestar a subida sairia da malha na primeira
                 // queda de rede, sem nada na tela mudando — ver o doc de
-                // `Motor::emprestando`.
-                self.declarar_identidade_de_par(self.emprestando).await;
+                // `Motor::consentimento`.
+                self.declarar_identidade_de_par(self.consentimento).await;
 
                 let _ = self.avisos.send(Aviso::Reconectado {
                     media: Box::new(media),
@@ -2707,12 +2749,11 @@ impl Motor {
         // fora dela no servidor.
         match comando {
             Comando::DeclararIdentidadeDePar => {
-                self.declarar_identidade_de_par(self.emprestando).await;
+                self.declarar_identidade_de_par(self.consentimento).await;
                 return;
             }
-            Comando::EmprestarSubida(emprestando) => {
-                self.emprestando = emprestando;
-                self.declarar_identidade_de_par(emprestando).await;
+            Comando::ConsentirNoCaminhoEntrePares(novo) => {
+                self.passar_a_consentir(novo).await;
                 return;
             }
             _ => {}
@@ -2767,7 +2808,7 @@ impl Motor {
             // chegam aqui de verdade. `match` continua exaustivo porque o
             // `enum` inteiro é um só, e um braço a menos aqui quebraria a
             // primeira vez que `Comando` ganhasse mais uma variante.
-            Comando::DeclararIdentidadeDePar | Comando::EmprestarSubida(_) => Ok(()),
+            Comando::DeclararIdentidadeDePar | Comando::ConsentirNoCaminhoEntrePares(_) => Ok(()),
 
             // Numa tarefa própria, e não aqui dentro. Executar vinte megabytes
             // no laço de comandos devolveria, dentro do cliente, exatamente o
@@ -3089,7 +3130,7 @@ impl Motor {
     /// inicial e cada reconexão a repetem. Enquanto ninguém optar por
     /// emprestar, `locais_de_pares` nem chega a rodar — ver
     /// [`locais_a_publicar`].
-    async fn declarar_identidade_de_par(&mut self, emprestando: bool) {
+    async fn declarar_identidade_de_par(&mut self, consentimento: ConsentimentoDePar) {
         let identidade = match self.identidade_de_par() {
             Ok(identidade) => identidade,
             Err(erro) => {
@@ -3100,16 +3141,49 @@ impl Motor {
         let Some(ponta) = self.ponta_de_pares() else {
             return;
         };
-        let locais = locais_a_publicar(emprestando, || locais_de_pares(&ponta));
+        let locais = locais_a_publicar(consentimento, || locais_de_pares(&ponta));
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
         if let Err(erro) = cliente
-            .emprestar_subida(emprestando, par::impressao(&identidade), locais)
+            .emprestar_subida(consentimento, par::impressao(&identidade), locais)
             .await
         {
             tracing::warn!(%erro, "não deu para declarar a identidade deste par ao servidor");
         }
+    }
+
+    /// Passa a valer este consentimento — e desfaz agora o que ele revoga.
+    ///
+    /// # Por que a retirada alcança o que já está no ar
+    ///
+    /// Porque o contrário é a pessoa continuar pagando pela decisão que acabou
+    /// de desfazer. Um consentimento que só valesse para o pedido seguinte
+    /// deixaria a cópia em curso subindo depois de o interruptor ter sido
+    /// desligado, e o único aviso seria a conta de internet dela.
+    ///
+    /// As duas metades caem em lugares diferentes, porque são coisas
+    /// diferentes:
+    ///
+    /// - **deixar de emprestar a conexão** cancela a tarefa que serve um par,
+    ///   e o [`Drop`] de [`VagaDeAtendimento`] devolve a vaga por tabela;
+    /// - **deixar de assistir por par** derruba os caminhos abertos. Quem
+    ///   reabre o cano do servidor para esta máquina é o **servidor**, ao
+    ///   receber a declaração nova — ver `session::devolver_ao_servidor`. Ele
+    ///   é quem tem o cano; este lado só desfaz o que é dele.
+    ///
+    /// **Só o que o consentimento novo revoga.** A declaração é repetida a
+    /// cada reconexão, e uma retirada escrita larga demais derrubaria todo
+    /// caminho vivo a cada volta da bateria interna.
+    async fn passar_a_consentir(&mut self, novo: ConsentimentoDePar) {
+        if !novo.empresta_conexao() {
+            self.tarefas_de_par.parar_de_servir();
+        }
+        if !novo.assiste_por_par {
+            self.tarefas_de_par.parar_de_assistir_a_tudo();
+        }
+        self.consentimento = novo;
+        self.declarar_identidade_de_par(novo).await;
     }
 
     /// `ServerMessage::AssistaTelaPor`: vá buscar esta tela naquele par.
@@ -3137,6 +3211,19 @@ impl Motor {
         enderecos: Vec<SocketAddr>,
         impressao: String,
     ) {
+        // **O pedido que chegou depois da retirada.** O servidor escolhe e
+        // difunde; a retirada desta máquina viaja no sentido contrário. As
+        // duas se cruzam no fio, e atender o pedido velho seria discar — e ser
+        // discado — com o endereço que esta máquina acabou de tirar de
+        // circulação. Quem tem a palavra final é quem paga a conta.
+        if !self.consentimento.assiste_por_par {
+            tracing::info!(
+                ?screen,
+                "chegou um pedido para assistir por par depois de este consentimento ter sido \
+                 retirado; esta tela continua vindo do servidor"
+            );
+            return;
+        }
         let Some(ponta) = self.ponta_de_pares() else {
             tracing::warn!(
                 ?screen,
@@ -3227,6 +3314,16 @@ impl Motor {
     /// quem recebe manda essa mensagem, porque só quem recebe sabe que a
     /// imagem parou — quem empresta pode ter caído sem chegar a saber de nada.
     fn servir_par(&mut self, screen: ScreenId, enderecos: Vec<SocketAddr>, impressao: String) {
+        // O mesmo cruzamento, do lado de quem empresta — e aqui o que estava
+        // em jogo é a subida desta máquina. Ver [`Motor::assistir_por_par`].
+        if !self.consentimento.empresta_conexao() {
+            tracing::info!(
+                ?screen,
+                "chegou um pedido para servir um par depois de este consentimento ter sido \
+                 retirado; esta máquina não sobe esta cópia"
+            );
+            return;
+        }
         // **Tomada aqui, e devolvida por quem a segura.** Ver
         // [`VagaDeAtendimento`]: enquanto isto eram duas escritas, a devolução
         // morava na última linha do corpo da tarefa — e um `abort` faz essa
@@ -3534,6 +3631,37 @@ fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
     }
 }
 
+/// Quantos pares esta versão do cliente consegue atender ao mesmo tempo.
+///
+/// **Um, e o número é desta implementação e não do protocolo.**
+/// `crate::par::atender` aceita uma ligação por vez e
+/// [`VagaDeAtendimento`] é um punho só, então servir dois seria uma promessa
+/// que este cliente não tem como cumprir — e quem pagaria por ela seria a
+/// segunda pessoa, esperando o prazo do par vencer por uma cópia que nunca
+/// chegaria. A casa chama isto de «existir não é funcionar», e é por isso que
+/// [`Enlace::consentir_no_caminho_entre_pares`] **baixa** um teto maior em vez
+/// de o mandar adiante.
+///
+/// O campo no fio é um `u8` e o servidor respeita o número que chegar
+/// (`seele_server::pares::Pares::escolher`): quando o subprojeto B ensinar
+/// este cliente a servir vários, é esta constante que sobe, e nada mais — sem
+/// versão nova de protocolo.
+pub const PARES_QUE_ESTA_VERSAO_ATENDE: u8 = 1;
+
+/// Baixa um consentimento ao que esta versão do cliente consegue honrar.
+///
+/// Só o teto muda; `assiste_por_par` atravessa como veio, porque não há nada
+/// nesta máquina que o limite. Ver [`PARES_QUE_ESTA_VERSAO_ATENDE`] para o
+/// porquê de baixar em vez de mandar adiante.
+fn cabivel(consentimento: ConsentimentoDePar) -> ConsentimentoDePar {
+    ConsentimentoDePar {
+        pares_que_atende: consentimento
+            .pares_que_atende
+            .min(PARES_QUE_ESTA_VERSAO_ATENDE),
+        ..consentimento
+    }
+}
+
 /// Quais endereços de rede local uma declaração publica.
 ///
 /// **A regra do opt-in, isolada para poder ser presa por teste — achado do
@@ -3543,6 +3671,16 @@ fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
 /// entre amigos (ADR 0021). Quem só assiste declara a impressão e nada mais —
 /// o público que o servidor já vê na conexão de controle basta para quem
 /// empresta discar de volta, e o furo simultâneo cobre o resto.
+///
+/// # Consentir em assistir por par **não** destranca esta publicação
+///
+/// E é deliberado. As duas metades do §5 protegem coisas diferentes:
+/// `assiste_por_par` decide se o endereço **público** desta máquina — o que o
+/// servidor já vê, e o único de que quem empresta precisa — pode ser
+/// *entregue* a quem a serve; `empresta_conexao` decide se a **topologia de
+/// rede interna** desta máquina é publicada, o que só faz sentido para quem
+/// vai ser procurado por vários. Destrancar a segunda com a primeira daria a
+/// quem consentiu no menor o custo do maior.
 ///
 /// `todos` é adiado (`FnOnce`) de propósito: enumerar as interfaces desta
 /// máquina é trabalho que quem não empresta nem chega a fazer, e um argumento
@@ -3558,10 +3696,10 @@ fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
 /// por teste; o que não foi exercitado é o **caminho de LAN** que ele
 /// destranca. Ver `docs/teste-duas-maquinas.md`, que registra o mesmo.
 fn locais_a_publicar<F: FnOnce() -> Vec<SocketAddr>>(
-    emprestando: bool,
+    consentimento: ConsentimentoDePar,
     todos: F,
 ) -> Vec<SocketAddr> {
-    if emprestando {
+    if consentimento.empresta_conexao() {
         todos()
     } else {
         Vec::new()
@@ -4767,20 +4905,39 @@ mod tests {
     fn so_quem_empresta_publica_os_enderecos_da_propria_maquina() {
         // **O guarda do achado de privacidade do fix round 3.** O round 2
         // passou a publicar os endereços de interface de *todo* cliente,
-        // inclusive de quem manda `emprestando: false` — contra o §5 da spec,
-        // que nomeia privacidade como a primeira das duas razões do opt-in.
-        // Quem só assiste declara a impressão e nada mais.
+        // inclusive de quem não empresta — contra o §5 da spec, que nomeia
+        // privacidade como a primeira das duas razões do opt-in.
+        //
+        // **E consentir em assistir por par não basta**, que é a metade nova:
+        // aquele consentimento decide se o endereço **público** desta máquina
+        // pode ser entregue a quem a serve, e não se a topologia interna dela
+        // é publicada. Destrancar a segunda com a primeira daria a quem
+        // consentiu no menor o custo do maior — ver o doc desta função.
         //
         // Os endereços são inventados de propósito: a decisão não pode
         // depender de quais interfaces a máquina que roda o teste tem, senão
         // o guarda passa a valer só onde há uma LAN.
         let da_maquina = || vec![SocketAddr::from(([192, 168, 1, 10], 4444))];
-        assert!(
-            locais_a_publicar(false, da_maquina).is_empty(),
-            "quem só assiste publicou a topologia de rede interna da máquina"
-        );
+        for calado in [
+            ConsentimentoDePar::de_ninguem(),
+            ConsentimentoDePar {
+                pares_que_atende: 0,
+                assiste_por_par: true,
+            },
+        ] {
+            assert!(
+                locais_a_publicar(calado, da_maquina).is_empty(),
+                "quem não empresta ({calado:?}) publicou a topologia de rede interna da máquina"
+            );
+        }
         assert_eq!(
-            locais_a_publicar(true, da_maquina),
+            locais_a_publicar(
+                ConsentimentoDePar {
+                    pares_que_atende: 1,
+                    assiste_por_par: false,
+                },
+                da_maquina
+            ),
             da_maquina(),
             "quem optou por emprestar deixou de publicar por onde ser alcançado"
         );
@@ -5666,7 +5823,7 @@ mod tests {
             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             identidade_de_par: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            emprestando: false,
+            consentimento: ConsentimentoDePar::de_ninguem(),
             repasse: Arc::new(RepasseDeTela::default()),
             resultados_do_par,
             resultados_do_par_tx,
@@ -5818,6 +5975,207 @@ mod tests {
             "a vaga voltou a `false` e mesmo assim não pôde ser tomada de novo"
         );
     }
+
+    /// **A reativação tardia, e ela não é hipótese.** O servidor escolhe um
+    /// par, difunde `AssistaTelaPor` pelo barramento, e só então a retirada de
+    /// consentimento desta máquina chega lá. As duas se cruzam no fio, e sem o
+    /// guarda o pedido velho seria atendido: esta máquina discaria — e seria
+    /// discada — com o endereço que acabou de tirar de circulação.
+    ///
+    /// # Por que a asserção é sobre o relato, e não sobre a alça
+    ///
+    /// **Porque a alça não distingue nada, e a primeira versão deste teste
+    /// passava sem o guarda.** Um `Motor` de unidade não tem `Client`, então
+    /// `ponta_de_pares` devolve `None` e `assistir_por_par` sai cedo de
+    /// qualquer maneira — `caminhos` fica vazio nos dois casos, e o teste
+    /// media um estado idêntico chamando-o de prova. Medido revertendo o
+    /// guarda: a suíte continuava verde.
+    ///
+    /// O que **de fato** difere é o relato. A saída por falta de ponta manda
+    /// `ParFalhou { NaoAlcancou }` ao servidor; a saída por consentimento
+    /// retirado não manda nada, e não deve mandar — nada falhou na rede, esta
+    /// máquina é que recusou. Um relato de falha aqui seria o produto dizendo
+    /// ao servidor uma coisa que não aconteceu.
+    /// **Quem pede precisa saber o que valeu, e não o que pediu.**
+    ///
+    /// O teto desta versão do cliente é um par
+    /// ([`PARES_QUE_ESTA_VERSAO_ATENDE`]), e um pedido acima dele é **baixado**
+    /// antes de virar declaração — declarar o que esta máquina não atende faria
+    /// a segunda pessoa esperar o prazo do par vencer por uma promessa que
+    /// nunca teve como ser cumprida.
+    ///
+    /// Se essa correção fosse calada, a casca desenharia um deslizante em
+    /// quatro e o servidor trabalharia com um, sem nada em lugar nenhum
+    /// dizendo qual dos dois números vale. É a forma do defeito que mais custou
+    /// caro neste repositório: o produto sabe e não conta. Por isso
+    /// [`Enlace::consentir_no_caminho_entre_pares`] **devolve** o que valeu.
+    ///
+    /// # Por que o teste entra por [`cabivel`], e por que isso basta aqui
+    ///
+    /// Porque construir um [`Enlace`] de mentira exigiria um construtor que só
+    /// os testes usam, dentro de um tipo de produção — e a casa já pagou por
+    /// um guarda que existia e não funcionava porque o teste entrava por uma
+    /// porta que a produção não usa.
+    ///
+    /// O que sobraria para aquele teste provar — que o valor devolvido é o
+    /// mesmo que saiu no fio — **não é uma propriedade testável, é uma
+    /// propriedade estrutural**: os dois saem do mesmo `let`, e não há caminho
+    /// no código em que possam diferir. Uma asserção sobre isso mediria o
+    /// compilador.
+    #[test]
+    fn o_teto_pedido_acima_do_que_esta_versao_atende_e_baixado() {
+        assert_eq!(
+            cabivel(ConsentimentoDePar {
+                pares_que_atende: 9,
+                assiste_por_par: true,
+            }),
+            ConsentimentoDePar {
+                pares_que_atende: PARES_QUE_ESTA_VERSAO_ATENDE,
+                assiste_por_par: true,
+            },
+            "o teto pedido não foi baixado para o que esta versão atende"
+        );
+    }
+
+    #[test]
+    fn um_teto_que_cabe_atravessa_intacto() {
+        // A outra metade: um guarda que baixasse tudo para zero passaria no
+        // teste acima e desligaria a malha inteira sem um erro em lugar
+        // nenhum. E a retirada — `de_ninguem` — tem de atravessar como está,
+        // senão retirar o consentimento viraria um pedido de emprestar.
+        for cabe in [
+            ConsentimentoDePar::de_ninguem(),
+            ConsentimentoDePar {
+                pares_que_atende: PARES_QUE_ESTA_VERSAO_ATENDE,
+                assiste_por_par: false,
+            },
+            ConsentimentoDePar {
+                pares_que_atende: 0,
+                assiste_por_par: true,
+            },
+        ] {
+            assert_eq!(cabivel(cabe), cabe, "{cabe:?} foi alterado sem precisar");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_pedido_para_assistir_por_par_que_chega_depois_da_retirada_nao_e_atendido() {
+        let mut motor = motor_de_teste();
+        motor.consentimento = ConsentimentoDePar::de_ninguem();
+
+        motor.assistir_por_par(ScreenId(1), vec![endereco_qualquer()], impressao_qualquer());
+
+        assert!(
+            motor.resultados_do_par.try_recv().is_err(),
+            "um `AssistaTelaPor` que chegou depois da retirada foi atendido: a discagem correu e \
+             relatou uma falha de rede que não aconteceu"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deixar_de_emprestar_cancela_o_repasse_que_ja_estava_em_curso() {
+        // **A retirada alcança o que já está no ar, e não só o pedido
+        // seguinte.** Sem isto, desligar o empréstimo pararia de aceitar
+        // pedidos novos e deixaria a cópia em curso subindo — a pessoa
+        // continuaria pagando pela decisão que acabou de desfazer, e o único
+        // aviso seria a conta de internet dela.
+        //
+        // A vaga voltar **antes** de `PRAZO_DO_PAR` é o discriminador, e ele é
+        // escolhido e não arbitrário: o alvo é um buraco negro (uma ponta sem
+        // `ServerConfig`, que nunca responde), contra o qual a tarefa gasta os
+        // três segundos inteiros antes de desistir pelo fim do corpo.
+        let mut motor = motor_de_teste();
+        let punho = Arc::clone(&motor.atendendo_pares);
+        let vaga = VagaDeAtendimento::tomar(&punho).expect("a vaga nasce livre");
+
+        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let buraco_negro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let onde_ninguem_atende = buraco_negro.local_addr().unwrap();
+        let identidade = par::identidade_efemera().unwrap();
+        let impressao = par::impressao(&identidade);
+        motor.passar_a_servir(
+            vaga,
+            ponta,
+            identidade,
+            ScreenId(1),
+            vec![onde_ninguem_atende],
+            impressao,
+        );
+
+        motor
+            .passar_a_consentir(ConsentimentoDePar::de_ninguem())
+            .await;
+
+        ate_que(
+            "a vaga de quem servia um par voltar depois da retirada, antes de `PRAZO_DO_PAR`",
+            Duration::from_secs(1),
+            || !punho.load(std::sync::atomic::Ordering::Acquire),
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deixar_de_assistir_por_par_derruba_os_caminhos_de_par_abertos() {
+        // A retirada do outro consentimento, e o mesmo princípio: quem diz
+        // «não quero mais o meu endereço no ar» tem o caminho que existe por
+        // causa daquele endereço desfeito agora, e não na próxima tela que
+        // pedir. Quem reabre o cano do servidor é o servidor, ao receber a
+        // declaração nova — ver `session::devolver_ao_servidor`.
+        let mut motor = motor_de_teste();
+        motor.tarefas_de_par.assistir(
+            ScreenId(1),
+            tokio::spawn(async { std::future::pending::<()>().await }),
+        );
+        assert_eq!(motor.tarefas_de_par.caminhos.len(), 1);
+
+        motor
+            .passar_a_consentir(ConsentimentoDePar {
+                pares_que_atende: 1,
+                assiste_por_par: false,
+            })
+            .await;
+
+        assert!(
+            motor.tarefas_de_par.caminhos.is_empty(),
+            "retirar o consentimento de assistir por par deixou o caminho aberto de pé"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn continuar_consentindo_no_mesmo_nao_derruba_nada() {
+        // O guarda contra o oposto, e ele é o que impede a malha de morrer na
+        // primeira bateria interna: a declaração é repetida a **cada
+        // reconexão** (`Motor::declarar_identidade_de_par`), e uma retirada
+        // escrita larga demais derrubaria todo caminho vivo a cada volta.
+        let mut motor = motor_de_teste();
+        motor.consentimento = CONSENTE_TUDO;
+        motor.tarefas_de_par.assistir(
+            ScreenId(1),
+            tokio::spawn(async { std::future::pending::<()>().await }),
+        );
+
+        motor.passar_a_consentir(CONSENTE_TUDO).await;
+
+        assert_eq!(
+            motor.tarefas_de_par.caminhos.len(),
+            1,
+            "redeclarar o mesmo consentimento derrubou um caminho de par vivo"
+        );
+    }
+
+    fn endereco_qualquer() -> SocketAddr {
+        SocketAddr::from(([192, 168, 1, 10], 4444))
+    }
+
+    fn impressao_qualquer() -> String {
+        "a".repeat(64)
+    }
+
+    /// Quem consentiu nas duas metades, com o teto desta versão.
+    const CONSENTE_TUDO: ConsentimentoDePar = ConsentimentoDePar {
+        pares_que_atende: PARES_QUE_ESTA_VERSAO_ATENDE,
+        assiste_por_par: true,
+    };
 
     /// **A fila da conexão que caiu não fala pela que a substitui.**
     ///

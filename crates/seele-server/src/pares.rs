@@ -39,7 +39,7 @@
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
-use seele_proto::control::MotivoDeFalhaDePar;
+use seele_proto::control::{ConsentimentoDePar, MotivoDeFalhaDePar};
 use seele_proto::ids::{PersonId, ScreenId};
 
 /// Uma identidade e onde alcançá-la, que uma pessoa declarou para o caminho
@@ -83,12 +83,30 @@ pub struct QuemDeclarou {
     /// **viu**. Nesta ordem, porque a rede local dispensa furo e é a que
     /// responde mais rápido — a mesma razão do ADR 0037.
     pub enderecos: Vec<SocketAddr>,
-    /// Se, além de existir, também empresta a subida agora.
+    /// O que esta pessoa consentiu no caminho entre pares.
     ///
-    /// É só este campo que [`Pares::escolher`] olha. Ter identidade aqui e
-    /// `emprestando: false` é o caso comum de quem só assiste — ver o doc do
-    /// módulo.
-    pub emprestando: bool,
+    /// Ter identidade aqui e não consentir em nada é o caso comum de quem só
+    /// conectou — ver o doc do módulo. As duas metades do consentimento são
+    /// lidas em lugares diferentes e por razões diferentes:
+    /// [`Pares::escolher`] olha `empresta_conexao`, e
+    /// [`Pares::quem_consentiu_assistir_por_par`] olha `assiste_por_par`.
+    pub consentimento: ConsentimentoDePar,
+}
+
+/// Um repasse que deixou de ser consentido e por isso tem de acabar.
+///
+/// Devolvido por [`Pares::declarou`] porque declarar e desfazer o que a
+/// declaração nova revoga são **o mesmo ato**: separá-los daria a quem chama a
+/// oportunidade de fazer só metade, e a metade que sobraria é a que deixa
+/// alguém pagando por um consentimento que retirou.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepasseAEncerrar {
+    /// Qual transmissão.
+    pub screen: ScreenId,
+    /// Quem estava recebendo por par, e volta a ser servido pelo servidor.
+    pub assiste: PersonId,
+    /// Quem estava repassando.
+    pub empresta: PersonId,
 }
 
 /// Quem declarou identidade para o caminho entre pares neste daemon, agora.
@@ -142,11 +160,15 @@ impl Pares {
         &mut self,
         pessoa: PersonId,
         id_da_conexao: u64,
-        emprestando: bool,
+        consentimento: ConsentimentoDePar,
         impressao: String,
         locais: Vec<SocketAddr>,
         publico: SocketAddr,
-    ) {
+    ) -> Vec<RepasseAEncerrar> {
+        let encerrar = self.o_que_o_consentimento_novo_revoga(pessoa, consentimento);
+        for repasse in &encerrar {
+            self.nomeacoes.remove(&(repasse.screen, repasse.assiste));
+        }
         let mut enderecos = locais;
         if !enderecos.contains(&publico) {
             enderecos.push(publico);
@@ -158,9 +180,80 @@ impl Pares {
                 id_da_conexao,
                 impressao,
                 enderecos,
-                emprestando,
+                consentimento,
             },
         );
+        encerrar
+    }
+
+    /// Quais repasses vivos um consentimento novo desta pessoa revoga.
+    ///
+    /// Duas perguntas, e as duas são de consentimento retirado:
+    ///
+    /// - **como quem empresta** — quantos pares ela ainda aceita atender. O que
+    ///   passa do teto novo tem de acabar, e o caso `0` (deixou de emprestar)
+    ///   não é especial: é o teto valendo.
+    /// - **como quem assiste** — se ainda aceita ter o próprio endereço
+    ///   entregue a quem a serve. Retirado, o repasse que existe por causa
+    ///   daquele endereço acaba, e a tela volta a vir do servidor.
+    ///
+    /// **A ordem é fixada de propósito.** `nomeacoes` é um `HashMap`, e
+    /// escolher «os que passam do teto» pela ordem de iteração dele daria um
+    /// resultado diferente a cada execução — e um teste que passa metade das
+    /// vezes. Ordenar por `(tela, quem assiste)` não é uma política de quem
+    /// fica (essa é do subprojeto B); é só a promessa de que a mesma entrada
+    /// dá a mesma saída.
+    fn o_que_o_consentimento_novo_revoga(
+        &self,
+        pessoa: PersonId,
+        novo: ConsentimentoDePar,
+    ) -> Vec<RepasseAEncerrar> {
+        let mut encerrar = Vec::new();
+
+        let mut atendidos: Vec<(ScreenId, PersonId)> = self
+            .nomeacoes
+            .iter()
+            .filter(|(_, empresta)| **empresta == pessoa)
+            .map(|((tela, assiste), _)| (*tela, *assiste))
+            .collect();
+        atendidos.sort_unstable();
+        for (screen, assiste) in atendidos
+            .into_iter()
+            .skip(usize::from(novo.pares_que_atende))
+        {
+            encerrar.push(RepasseAEncerrar {
+                screen,
+                assiste,
+                empresta: pessoa,
+            });
+        }
+
+        if !novo.assiste_por_par {
+            let mut recebidos: Vec<(ScreenId, PersonId)> = self
+                .nomeacoes
+                .iter()
+                .filter(|((_, assiste), _)| *assiste == pessoa)
+                .map(|((tela, _), empresta)| (*tela, *empresta))
+                .collect();
+            recebidos.sort_unstable();
+            for (screen, empresta) in recebidos {
+                let repasse = RepasseAEncerrar {
+                    screen,
+                    assiste: pessoa,
+                    empresta,
+                };
+                // Quem empresta a si mesmo não existe (`escolher` recusa), mas
+                // uma nomeação vinda de outro caminho não pode entrar duas
+                // vezes na lista: quem chama desfaz cada item, e desfazer duas
+                // vezes o mesmo repasse mandaria dois `TelaAssistir` para a
+                // mesma pessoa.
+                if !encerrar.contains(&repasse) {
+                    encerrar.push(repasse);
+                }
+            }
+        }
+
+        encerrar
     }
 
     /// Esta conexão saiu. A identidade é efêmera e não sobrevive à sessão que
@@ -235,6 +328,59 @@ impl Pares {
         self.quem.get(&pessoa)
     }
 
+    /// Esta pessoa deixou de poder repassar: saiu da sala, ou a transmissão
+    /// que ela recebia acabou para ela.
+    ///
+    /// **A terceira direção da saída.** [`Self::a_transmissao_acabou`] desfaz
+    /// pelo lado de quem compartilha e [`Self::quem_assiste_saiu`] pelo lado de
+    /// quem assiste; esta desfaz pelo lado de **quem empresta**. Um par repassa
+    /// o que ele mesmo recebe: saindo da sala, ele para de receber, e quem
+    /// estava atrás dele fica sem imagem.
+    ///
+    /// Devolve o que foi desfeito porque quem chama tem de reabrir o cano de
+    /// cada espectador órfão — esperar o relato de quem ficou no escuro é
+    /// esperar o prazo do par vencer do outro lado.
+    ///
+    /// Diferente de [`Self::saiu`]: ali a **sessão** acabou e a declaração
+    /// inteira vai junto; aqui a pessoa continua conectada e continua
+    /// declarada, e só as nomeações caem.
+    pub fn quem_empresta_parou(&mut self, pessoa: PersonId) -> Vec<RepasseAEncerrar> {
+        let mut encerrar: Vec<RepasseAEncerrar> = self
+            .nomeacoes
+            .iter()
+            .filter(|(_, empresta)| **empresta == pessoa)
+            .map(|((screen, assiste), empresta)| RepasseAEncerrar {
+                screen: *screen,
+                assiste: *assiste,
+                empresta: *empresta,
+            })
+            .collect();
+        encerrar.sort_unstable_by_key(|repasse| (repasse.screen, repasse.assiste));
+        self.nomeacoes.retain(|_, empresta| *empresta != pessoa);
+        encerrar
+    }
+
+    /// A declaração de quem consentiu em **assistir por par** — a única que
+    /// pode ser entregue a quem vai servi-la.
+    ///
+    /// `None` quando a pessoa não declarou, já saiu, ou **não consentiu**.
+    #[must_use]
+    pub fn quem_consentiu_assistir_por_par(&self, pessoa: PersonId) -> Option<&QuemDeclarou> {
+        self.quem
+            .get(&pessoa)
+            .filter(|declarado| declarado.consentimento.assiste_por_par)
+    }
+
+    /// Quantos pares esta pessoa está atendendo agora, pelas nomeações deste
+    /// servidor.
+    #[must_use]
+    pub fn quantos_atende(&self, pessoa: PersonId) -> usize {
+        self.nomeacoes
+            .values()
+            .filter(|empresta| **empresta == pessoa)
+            .count()
+    }
+
     /// Quem pode servir esta transmissão a esta pessoa, se alguém.
     ///
     /// Só considera quem declarou `emprestando: true` — ter identidade
@@ -265,17 +411,19 @@ impl Pares {
         &self,
         dono: PersonId,
         quem_quer: PersonId,
-        ja_servindo: &HashSet<PersonId>,
         na_sala: &HashSet<PersonId>,
+        recebendo: &HashSet<PersonId>,
     ) -> Option<QuemDeclarou> {
         self.quem
             .values()
             .find(|candidato| {
-                candidato.emprestando
+                candidato.consentimento.empresta_conexao()
                     && candidato.pessoa != dono
                     && candidato.pessoa != quem_quer
-                    && !ja_servindo.contains(&candidato.pessoa)
+                    && self.quantos_atende(candidato.pessoa)
+                        < usize::from(candidato.consentimento.pares_que_atende)
                     && na_sala.contains(&candidato.pessoa)
+                    && recebendo.contains(&candidato.pessoa)
             })
             .cloned()
     }
@@ -400,6 +548,12 @@ pub fn quem_desacreditar(
 mod testes {
     use super::*;
 
+    /// Alguém que consentiu nas duas metades, com o teto de um par.
+    const CONSENTE_TUDO: ConsentimentoDePar = ConsentimentoDePar {
+        pares_que_atende: 1,
+        assiste_por_par: true,
+    };
+
     fn endereco(n: u8) -> SocketAddr {
         SocketAddr::from(([192, 168, 1, n], 8383))
     }
@@ -413,6 +567,307 @@ mod testes {
         (1..=9).map(PersonId).collect()
     }
 
+    /// Quem só conectou: identidade declarada, consentimento nenhum.
+    const NAO_CONSENTE: ConsentimentoDePar = ConsentimentoDePar::de_ninguem();
+
+    #[test]
+    fn o_endereco_de_quem_nao_consentiu_assistir_por_par_nao_e_entregue_a_ninguem() {
+        // **A metade do §5 que a primeira redação não implementou.** O opt-in
+        // existia só para quem empresta; quem assistia tinha o próprio
+        // endereço posto em `SirvaTelaPara` e entregue ao par que fosse
+        // servi-lo, por uma decisão que **outra pessoa** tomou — a de
+        // emprestar. O §5 diz que privacidade é a primeira das duas razões, e
+        // ela é dos dois lados: numa malha «espectadores passam a conhecer o
+        // endereço IP uns dos outros».
+        //
+        // A declaração continua guardada (a parede simétrica da Task 5 precisa
+        // da impressão dos dois lados); o que o consentimento destranca é a
+        // **entrega do endereço**, e é isso que esta função separa de
+        // `declaracao_de`.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(2),
+            1,
+            NAO_CONSENTE,
+            "b".repeat(64),
+            Vec::new(),
+            endereco(2),
+        );
+        assert!(
+            pares.declaracao_de(PersonId(2)).is_some(),
+            "a identidade de quem só conecta tem de sobreviver: a parede simétrica precisa dela"
+        );
+        assert!(
+            pares.quem_consentiu_assistir_por_par(PersonId(2)).is_none(),
+            "o endereço de quem nunca consentiu em assistir por par foi liberado para entrega"
+        );
+    }
+
+    #[test]
+    fn quem_consentiu_assistir_por_par_tem_o_endereco_entregue() {
+        // A outra metade do guarda: um portão que recusasse todo mundo
+        // passaria no teste acima e desligaria a malha inteira sem um erro.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(2),
+            1,
+            CONSENTE_TUDO,
+            "b".repeat(64),
+            vec![endereco(2)],
+            endereco(2),
+        );
+        assert!(pares.quem_consentiu_assistir_por_par(PersonId(2)).is_some());
+    }
+
+    #[test]
+    fn um_par_que_nao_recebe_a_transmissao_nao_e_escolhido_para_repassa_la() {
+        // **Um par repassa o que ele mesmo está recebendo, e nada além.** Estar
+        // na sala não é estar assistindo: quem entrou e não abriu a
+        // transmissão não tem quadro nenhum para repassar, e o cliente dele
+        // recusa o pedido em silêncio (`RepasseDeTela::abertura_de` devolve
+        // `None`).
+        //
+        // O custo de escolhê-lo assim mesmo não é zero, e é esse o defeito:
+        // quem pediu para assistir fica com o cano do servidor **desligado**,
+        // espera a ligação fechar, espera o prazo do par vencer e só então
+        // manda `ParFalhou` — segundos de tela parada por uma escolha que o
+        // servidor tinha como não fazer.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(4),
+            1,
+            CONSENTE_TUDO,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        let na_sala = HashSet::from([PersonId(1), PersonId(2), PersonId(4)]);
+        // Quem compartilha manda; quem assiste pediu agora. A pessoa 4 está na
+        // sala e não abriu a transmissão.
+        let recebendo = HashSet::new();
+        assert!(
+            pares
+                .escolher(PersonId(1), PersonId(2), &na_sala, &recebendo)
+                .is_none(),
+            "um par que não recebe esta transmissão foi apontado para repassá-la"
+        );
+    }
+
+    #[test]
+    fn entre_dois_da_sala_so_o_que_recebe_a_transmissao_e_escolhido() {
+        // A outra metade, e pela mesma razão do irmão da sala de voz: com um
+        // candidato de cada lado, um guarda ausente passaria metade das vezes.
+        let na_sala = HashSet::from([PersonId(1), PersonId(2), PersonId(3), PersonId(4)]);
+        let recebendo = HashSet::from([PersonId(4)]);
+        for _ in 0..50 {
+            let mut pares = Pares::nova();
+            for pessoa in [3_u8, 4] {
+                pares.declarou(
+                    PersonId(u64::from(pessoa)),
+                    1,
+                    CONSENTE_TUDO,
+                    "c".repeat(64),
+                    vec![endereco(pessoa)],
+                    endereco(pessoa),
+                );
+            }
+            let escolhido = pares
+                .escolher(PersonId(1), PersonId(2), &na_sala, &recebendo)
+                .expect("havia um par recebendo a transmissão");
+            assert_eq!(
+                escolhido.pessoa,
+                PersonId(4),
+                "a escolha saiu de quem não está recebendo esta transmissão"
+            );
+        }
+    }
+
+    #[test]
+    fn o_teto_de_quem_empresta_e_dele_e_nao_do_codigo() {
+        // **Quantos pares um cliente atende é de quem paga a conta.** Com teto
+        // 2, a segunda escolha tem de sair; com teto 1, não. Um `== 0` fixo
+        // passaria na metade de baixo deste teste e reprovaria na de cima, e
+        // é essa a diferença entre um teto declarado e um teto que só o
+        // código conhece.
+        let dois = ConsentimentoDePar {
+            pares_que_atende: 2,
+            assiste_por_par: false,
+        };
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(4),
+            1,
+            dois,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        let tela = ScreenId(9);
+        pares.apontou(tela, PersonId(4), PersonId(2));
+        let escolhido = pares
+            .escolher(PersonId(1), PersonId(3), &toda_a_sala(), &toda_a_sala())
+            .expect("quem aceitou atender dois pares foi recusado no segundo");
+        assert_eq!(escolhido.pessoa, PersonId(4));
+
+        pares.apontou(tela, PersonId(4), PersonId(3));
+        assert!(
+            pares
+                .escolher(PersonId(1), PersonId(5), &toda_a_sala(), &toda_a_sala())
+                .is_none(),
+            "o teto declarado por quem empresta foi estourado"
+        );
+    }
+
+    #[test]
+    fn baixar_o_teto_encerra_o_repasse_que_deixou_de_caber() {
+        // **A mudança de capacidade tem de alcançar o que já está no ar.**
+        // Enquanto a declaração nova só valesse para a escolha seguinte,
+        // baixar o teto — ou o deslizante da casca ir a zero — não desligaria
+        // nada: a pessoa continuaria subindo a cópia que acabou de dizer que
+        // não quer mais subir, e o único aviso seria a conta de internet dela.
+        let dois = ConsentimentoDePar {
+            pares_que_atende: 2,
+            assiste_por_par: false,
+        };
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(4),
+            1,
+            dois,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        let tela = ScreenId(9);
+        pares.apontou(tela, PersonId(4), PersonId(2));
+        pares.apontou(tela, PersonId(4), PersonId(3));
+
+        let um = ConsentimentoDePar {
+            pares_que_atende: 1,
+            assiste_por_par: false,
+        };
+        let encerrar = pares.declarou(
+            PersonId(4),
+            1,
+            um,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        assert_eq!(
+            encerrar.len(),
+            1,
+            "baixar o teto de dois para um não encerrou exatamente um repasse: {encerrar:?}"
+        );
+        assert_eq!(encerrar[0].empresta, PersonId(4));
+        assert_eq!(pares.quantos_atende(PersonId(4)), 1);
+    }
+
+    #[test]
+    fn deixar_de_emprestar_encerra_todos_os_repasses_em_curso() {
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(4),
+            1,
+            CONSENTE_TUDO,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        pares.apontou(ScreenId(9), PersonId(4), PersonId(2));
+        let encerrar = pares.declarou(
+            PersonId(4),
+            1,
+            NAO_CONSENTE,
+            "d".repeat(64),
+            Vec::new(),
+            endereco(4),
+        );
+        assert_eq!(
+            encerrar,
+            vec![RepasseAEncerrar {
+                screen: ScreenId(9),
+                assiste: PersonId(2),
+                empresta: PersonId(4),
+            }],
+            "quem retirou o consentimento de emprestar continuou repassando"
+        );
+        assert_eq!(pares.quantos_atende(PersonId(4)), 0);
+    }
+
+    #[test]
+    fn retirar_o_consentimento_de_assistir_por_par_encerra_o_proprio_repasse() {
+        // O outro lado da retirada, e ele é o do §5 que faltava: quem assiste
+        // muda de ideia sobre ter o endereço entregue, e o repasse que existe
+        // por causa daquele endereço tem de acabar — voltando ao servidor, que
+        // é o caminho de sempre.
+        let mut pares = Pares::nova();
+        for pessoa in [2_u8, 4] {
+            pares.declarou(
+                PersonId(u64::from(pessoa)),
+                1,
+                CONSENTE_TUDO,
+                "d".repeat(64),
+                vec![endereco(pessoa)],
+                endereco(pessoa),
+            );
+        }
+        pares.apontou(ScreenId(9), PersonId(4), PersonId(2));
+        let so_empresta = ConsentimentoDePar {
+            pares_que_atende: 1,
+            assiste_por_par: false,
+        };
+        let encerrar = pares.declarou(
+            PersonId(2),
+            1,
+            so_empresta,
+            "d".repeat(64),
+            vec![endereco(2)],
+            endereco(2),
+        );
+        assert_eq!(
+            encerrar,
+            vec![RepasseAEncerrar {
+                screen: ScreenId(9),
+                assiste: PersonId(2),
+                empresta: PersonId(4),
+            }],
+            "quem retirou o consentimento continuou recebendo por par"
+        );
+        assert_eq!(pares.quantos_atende(PersonId(4)), 0);
+    }
+
+    #[test]
+    fn redeclarar_o_mesmo_consentimento_nao_encerra_nada() {
+        // O guarda contra o oposto: uma reconciliação escrita larga demais
+        // derrubaria todo repasse a cada redeclaração — e a declaração é
+        // repetida a **cada reconexão** (`Motor::declarar_identidade_de_par`),
+        // então a malha morreria na primeira bateria interna.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(4),
+            1,
+            CONSENTE_TUDO,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        pares.apontou(ScreenId(9), PersonId(4), PersonId(2));
+        let encerrar = pares.declarou(
+            PersonId(4),
+            1,
+            CONSENTE_TUDO,
+            "d".repeat(64),
+            vec![endereco(4)],
+            endereco(4),
+        );
+        assert!(
+            encerrar.is_empty(),
+            "redeclarar o mesmo consentimento encerrou um repasse: {encerrar:?}"
+        );
+        assert_eq!(pares.quantos_atende(PersonId(4)), 1);
+    }
+
     #[test]
     fn quem_compartilha_nunca_e_escolhido_para_servir_a_si_mesmo() {
         // O espelho infinito, na versão da malha: quem compartilha servindo a
@@ -422,13 +877,13 @@ mod testes {
         pares.declarou(
             PersonId(1),
             1,
-            true,
+            CONSENTE_TUDO,
             "a".repeat(64),
             vec![endereco(1)],
             endereco(1),
         );
         assert!(pares
-            .escolher(PersonId(1), PersonId(2), &HashSet::new(), &toda_a_sala())
+            .escolher(PersonId(1), PersonId(2), &toda_a_sala(), &toda_a_sala())
             .is_none());
     }
 
@@ -446,7 +901,7 @@ mod testes {
         pares.declarou(
             PersonId(3),
             1,
-            true,
+            CONSENTE_TUDO,
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),
@@ -454,13 +909,13 @@ mod testes {
         pares.declarou(
             PersonId(3),
             1,
-            false,
+            ConsentimentoDePar::de_ninguem(),
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),
         );
         assert!(pares
-            .escolher(PersonId(1), PersonId(2), &HashSet::new(), &toda_a_sala())
+            .escolher(PersonId(1), PersonId(2), &toda_a_sala(), &toda_a_sala())
             .is_none());
     }
 
@@ -476,7 +931,7 @@ mod testes {
         pares.declarou(
             PersonId(4),
             1,
-            true,
+            CONSENTE_TUDO,
             "d".repeat(64),
             vec![endereco(4)],
             endereco(4),
@@ -486,7 +941,7 @@ mod testes {
         let na_sala = HashSet::from([PersonId(1), PersonId(2)]);
         assert!(
             pares
-                .escolher(PersonId(1), PersonId(2), &HashSet::new(), &na_sala)
+                .escolher(PersonId(1), PersonId(2), &na_sala, &toda_a_sala())
                 .is_none(),
             "alguém de outra sala de voz foi apontado para servir esta tela — \
              o repasse dele carrega a tela da sala dele"
@@ -512,14 +967,14 @@ mod testes {
                 pares.declarou(
                     PersonId(u64::from(pessoa)),
                     1,
-                    true,
+                    CONSENTE_TUDO,
                     "c".repeat(64),
                     vec![endereco(pessoa)],
                     endereco(pessoa),
                 );
             }
             let escolhido = pares
-                .escolher(PersonId(1), PersonId(2), &HashSet::new(), &na_sala)
+                .escolher(PersonId(1), PersonId(2), &na_sala, &toda_a_sala())
                 .expect("havia um par elegível na sala da transmissão");
             assert_eq!(
                 escolhido.pessoa,
@@ -538,14 +993,16 @@ mod testes {
         pares.declarou(
             PersonId(3),
             1,
-            true,
+            CONSENTE_TUDO,
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),
         );
-        let ja = HashSet::from([PersonId(3)]);
+        // A vaga é tomada pela nomeação, que é o único registro de quem o
+        // servidor já pôs para trabalhar.
+        pares.apontou(ScreenId(9), PersonId(3), PersonId(8));
         assert!(pares
-            .escolher(PersonId(1), PersonId(2), &ja, &toda_a_sala())
+            .escolher(PersonId(1), PersonId(2), &toda_a_sala(), &toda_a_sala())
             .is_none());
     }
 
@@ -559,13 +1016,13 @@ mod testes {
         pares.declarou(
             PersonId(3),
             1,
-            true,
+            CONSENTE_TUDO,
             "c".repeat(64),
             vec![endereco(3)],
             publico,
         );
         let escolhido = pares
-            .escolher(PersonId(1), PersonId(2), &HashSet::new(), &toda_a_sala())
+            .escolher(PersonId(1), PersonId(2), &toda_a_sala(), &toda_a_sala())
             .unwrap();
         assert!(escolhido.enderecos.contains(&publico));
         assert!(escolhido.enderecos.contains(&endereco(3)));
@@ -585,7 +1042,7 @@ mod testes {
         pares.declarou(
             PersonId(3),
             1,
-            false,
+            ConsentimentoDePar::de_ninguem(),
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),
@@ -595,7 +1052,7 @@ mod testes {
             .expect("a declaração de quem só assiste desapareceu");
         assert_eq!(declaracao.impressao, "c".repeat(64));
         assert!(declaracao.enderecos.contains(&endereco(3)));
-        assert!(!declaracao.emprestando);
+        assert!(!declaracao.consentimento.empresta_conexao());
     }
 
     #[test]
@@ -604,7 +1061,7 @@ mod testes {
         pares.declarou(
             PersonId(3),
             1,
-            false,
+            ConsentimentoDePar::de_ninguem(),
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),
@@ -628,7 +1085,7 @@ mod testes {
         pares.declarou(
             PersonId(3),
             1, // candidata 1, perdedora
-            true,
+            CONSENTE_TUDO,
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),
@@ -636,7 +1093,7 @@ mod testes {
         pares.declarou(
             PersonId(3),
             2, // candidata 2, vencedora — substitui a declaração acima
-            true,
+            CONSENTE_TUDO,
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),
@@ -672,7 +1129,7 @@ mod testes {
         pares.declarou(
             PersonId(5),
             1,
-            true,
+            CONSENTE_TUDO,
             "e".repeat(64),
             vec![endereco(5)],
             endereco(5),
@@ -698,7 +1155,7 @@ mod testes {
         pares.declarou(
             PersonId(4),
             1,
-            true,
+            CONSENTE_TUDO,
             "d".repeat(64),
             vec![endereco(4)],
             endereco(4),
@@ -716,14 +1173,51 @@ mod testes {
         );
         assert!(
             pares
-                .escolher(
-                    PersonId(1),
-                    PersonId(3),
-                    &pares.ja_servindo(),
-                    &toda_a_sala()
-                )
+                .escolher(PersonId(1), PersonId(3), &toda_a_sala(), &toda_a_sala())
                 .is_some(),
             "o par não voltou a ser escolhível depois de o repasse acabar"
+        );
+    }
+
+    #[test]
+    fn quem_empresta_saindo_da_sala_devolve_ao_servidor_quem_ele_servia() {
+        // **A terceira direção da saída, e a que faltava.**
+        // `soltar_telas_e_pares_de` já desfazia duas: as transmissões desta
+        // pessoa acabaram, e o que ela assistia acabou para ela. A que faltava
+        // é ela **emprestando**: saindo da sala, ela para de receber a
+        // transmissão que repassava, e quem estava atrás dela fica sem imagem
+        // até o prazo do par vencer do outro lado.
+        //
+        // Devolver a lista, e não só apagar, é o que permite reabrir o cano de
+        // cada espectador órfão na hora — em vez de esperar o relato de quem
+        // ficou no escuro.
+        let mut pares = Pares::nova();
+        pares.apontou(ScreenId(9), PersonId(4), PersonId(2));
+        pares.apontou(ScreenId(9), PersonId(4), PersonId(3));
+        pares.apontou(ScreenId(8), PersonId(5), PersonId(2));
+
+        let mut encerrar = pares.quem_empresta_parou(PersonId(4));
+        encerrar.sort_unstable_by_key(|repasse| repasse.assiste);
+        assert_eq!(
+            encerrar,
+            vec![
+                RepasseAEncerrar {
+                    screen: ScreenId(9),
+                    assiste: PersonId(2),
+                    empresta: PersonId(4),
+                },
+                RepasseAEncerrar {
+                    screen: ScreenId(9),
+                    assiste: PersonId(3),
+                    empresta: PersonId(4),
+                },
+            ]
+        );
+        assert_eq!(pares.quantos_atende(PersonId(4)), 0);
+        assert_eq!(
+            pares.quantos_atende(PersonId(5)),
+            1,
+            "a saída de um par derrubou a nomeação de outro"
         );
     }
 
@@ -768,7 +1262,7 @@ mod testes {
             pares.declarou(
                 pessoa,
                 1,
-                true,
+                CONSENTE_TUDO,
                 letra.repeat(64),
                 vec![endereco(n)],
                 endereco(n),
@@ -861,7 +1355,7 @@ mod testes {
         pares.declarou(
             PersonId(3),
             1,
-            true,
+            CONSENTE_TUDO,
             "c".repeat(64),
             vec![endereco(3)],
             endereco(3),

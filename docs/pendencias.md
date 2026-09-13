@@ -1689,3 +1689,58 @@ unidade nas duas plataformas. O que os testes não tocam é o caminho de captura
 
 **Quando dói.** Sempre que duas máquinas Windows tentam. É o caso da casa de
 quem relatou.
+
+## 34 · A casca não sabe dizer de onde a tela está vindo agora
+
+**Aberta em 2026-09-10**, junto do consentimento de dois lados do caminho entre
+pares (§5.1 do desenho de 05/09).
+
+**O que não existe.** Nada no canal de avisos do `Enlace` diz «esta tela está
+vindo por um par» ou «voltou a vir do servidor». A casca sabe o que a pessoa
+**escolheu** — foi ela que chamou `consentir_no_caminho_entre_pares` — e não
+sabe o que está **acontecendo**.
+
+**Onde isso aparece primeiro.** Quando quem assiste retira o próprio
+consentimento, o cliente cancela a tarefa que lia do par, e **uma tarefa
+cancelada não emite fim de fluxo**: não sai `TelaFechou`, não sai erro, não sai
+nada. Medido, e não suposto — a primeira versão de
+`retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor`
+esperou por `TelaFechou` e esgotou a paciência inteira.
+
+**Por que não é urgente.** Não custa imagem: o servidor reabre o cano ao
+receber a declaração nova, e o teste prova trinta quadros seguidos chegando
+byte a byte depois da retirada. O que falta é a frase, não a tela.
+
+**O que ela precisaria ser.** Um aviso por transmissão com a origem de agora —
+servidor ou par —, emitido quando ela muda. É a mesma informação que o §6 do
+desenho quer medir (`Local`, `Furo`, `Falhou`), e a tela que a mostra é do
+subprojeto B.
+
+## 35 · O número de espectadores não é reanunciado quando alguém volta ao servidor
+
+**Aberta em 2026-09-10**, medida enquanto se escrevia a prova da retirada de
+consentimento.
+
+**O que acontece.** `Event::ScreenViewers` — o **N** que o §5.1 divide para
+achar o teto por cópia — sai de `VoiceRoom::anunciar_espectadores`, e ela é
+chamada quando uma transmissão abre e quando ela para. **Não** é chamada quando
+alguém passa a assistir (`VoiceRoomCommand::TelaAssistir`): a pessoa entra na
+fila do próximo quadro-chave e o N anunciado continua o de antes.
+
+**Como apareceu.** A primeira versão dos dois testes de retirada afirmava que o
+contador de cópias voltava a 2 depois de o espectador ser devolvido ao
+servidor. Ele fica em 1, por horas se for o caso. Medido com sonda: a nomeação
+some de `Pares`, o `TelaAssistir` é mandado e aceito, os quadros voltam a
+chegar — e o número anunciado não se mexe.
+
+**Por que dói.** O teto de admissão de cada cliente é calculado sobre esse N.
+Um N menor que o real devolve um teto **maior** que o real, que é o sentido
+errado do erro: a sala aceita mais gente do que a subida carrega.
+
+**É anterior a esta onda.** O mesmo vale para a recuperação por `ParFalhou`,
+que está no ar desde o fecho de 09/09. Não foi consertada aqui porque a
+instrução era não ampliar o escopo, e porque o conserto é da sala de voz e não
+do caminho entre pares.
+
+**Quando dói.** Em sala com malha ligada e espectadores indo e voltando entre
+par e servidor. Com a malha desligada o caminho nem corre.
