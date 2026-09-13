@@ -213,6 +213,26 @@ pub enum DeviceError {
         #[source]
         source: cpal::Error,
     },
+
+    /// The resampler could not be built for the rate the device reported.
+    ///
+    /// Its own variant rather than folding into [`DeviceError::NoOutputDevice`]
+    /// or [`DeviceError::NoInputDevice`]: the device is there and answered fine,
+    /// it is the conversion from its native rate to [`crate::SAMPLE_RATE_HZ`]
+    /// that failed. Blaming "no device" here sends whoever investigates to the
+    /// wrong place — see `crates/seele-audio/src/laco.rs`.
+    #[error("could not convert the {side} device's {from} Hz to {to} Hz: {source}")]
+    Resample {
+        /// Which side failed.
+        side: Side,
+        /// The device's native rate.
+        from: u32,
+        /// The rate the pipeline needs.
+        to: u32,
+        /// Underlying resampler error.
+        #[source]
+        source: crate::resample::ConversionError,
+    },
 }
 
 impl DeviceError {
@@ -228,7 +248,9 @@ impl DeviceError {
         match self {
             Self::NoInputDevice | Self::CaptureDeviceGone { .. } => Side::Input,
             Self::NoOutputDevice | Self::PlaybackDeviceGone { .. } => Side::Output,
-            Self::UnsupportedSampleFormat { side, .. } | Self::Device { side, .. } => *side,
+            Self::UnsupportedSampleFormat { side, .. }
+            | Self::Device { side, .. }
+            | Self::Resample { side, .. } => *side,
         }
     }
 }

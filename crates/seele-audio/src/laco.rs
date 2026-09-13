@@ -38,6 +38,7 @@
 //! `cfg` a mais.
 
 use std::num::NonZeroU16;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait as _, StreamTrait as _};
@@ -84,6 +85,16 @@ pub struct CapturaDaSaida {
     contadores: Arc<StreamCounters>,
     taxa_do_dispositivo: u32,
     canais: NonZeroU16,
+    /// Quantas vezes [`Self::tomar`] emudeceu por uma falha, e não por não
+    /// haver som.
+    ///
+    /// **Existe porque as duas causas eram indistinguíveis de fora.** Um
+    /// cadeado envenenado e um reamostrador recusando um bloco devolviam o
+    /// mesmo `Vec::new()` que uma máquina calada devolve, e a única pista
+    /// ficava num `debug!` que ninguém lê em produção. Este contador é o que
+    /// [`Self::capturadas`] e [`Self::perdidas`] já são para os outros dois
+    /// jeitos desta captura ir mal: um número que quem chama pode observar.
+    falhas_silenciosas: AtomicU64,
 }
 
 impl std::fmt::Debug for CapturaDaSaida {
@@ -93,6 +104,113 @@ impl std::fmt::Debug for CapturaDaSaida {
             .field("canais", &self.canais)
             .finish_non_exhaustive()
     }
+}
+
+/// Constrói o reamostrador para a taxa do dispositivo, quando ele é preciso.
+///
+/// Separada de [`CapturaDaSaida::abrir`] para poder ser provada sem uma placa
+/// de som: o defeito que ela conserta — um erro do reamostrador virando
+/// [`DeviceError::NoOutputDevice`] — não depende de hardware nenhum, só de uma
+/// taxa que o reamostrador recusa.
+fn construir_reamostrador(
+    taxa_do_dispositivo: u32,
+) -> Result<Option<std::sync::Mutex<crate::resample::RateConverter>>, DeviceError> {
+    // O reamostrador só existe quando é preciso: na taxa da casa, converter
+    // seria copiar amostra por amostra por nada.
+    if taxa_do_dispositivo == SAMPLE_RATE_HZ {
+        return Ok(None);
+    }
+
+    match crate::resample::RateConverter::new(taxa_do_dispositivo, SAMPLE_RATE_HZ) {
+        Ok(conversor) => Ok(Some(std::sync::Mutex::new(conversor))),
+        Err(erro) => {
+            // Aqui sim não há o que fazer: sem conversor e fora da taxa,
+            // qualquer amostra entregue sairia rápida ou lenta demais.
+            tracing::warn!(%erro, taxa = taxa_do_dispositivo,
+                "não converso a taxa desta saída; a transmissão sai muda");
+            // **A causa vai junto, e não é mais trocada por outra.** Era
+            // `NoOutputDevice` aqui — e a saída existe, respondeu, abriu; quem
+            // não serviu foi o reamostrador. Culpar o dispositivo mandava
+            // quem investigasse para o lugar errado.
+            Err(DeviceError::Resample {
+                side: Side::Output,
+                from: taxa_do_dispositivo,
+                to: SAMPLE_RATE_HZ,
+                source: erro,
+            })
+        }
+    }
+}
+
+/// O que [`CapturaDaSaida::tomar`] precisa de um reamostrador: só o passo que
+/// pode falhar.
+///
+/// Existe para abrir um lugar onde um teste possa provar a recusa. `rubato`
+/// não tem um jeito de forçar [`crate::resample::RateConverter::push`] a
+/// recusar um bloco sem simular o hardware inteiro por trás dele; um dublê que
+/// implementa este traço recusa por vontade própria.
+trait Conversor {
+    fn converter(
+        &mut self,
+        entrada: &[f32],
+        saida: &mut Vec<f32>,
+    ) -> Result<(), crate::resample::ConversionError>;
+}
+
+impl Conversor for crate::resample::RateConverter {
+    fn converter(
+        &mut self,
+        entrada: &[f32],
+        saida: &mut Vec<f32>,
+    ) -> Result<(), crate::resample::ConversionError> {
+        self.push(entrada, saida)
+    }
+}
+
+/// A lógica de [`CapturaDaSaida::tomar`], livre do fluxo de dispositivo — o
+/// que a deixa provável com um anel e um reamostrador de mentira, sem
+/// hardware nenhum.
+///
+/// Nenhum dos três jeitos de emudecer devolve `Vec::new()` em silêncio puro:
+/// os três somam em `falhas_silenciosas` antes, que é o que
+/// [`CapturaDaSaida::falhas_silenciosas`] expõe.
+fn tomar_de<R: Conversor>(
+    amostras: &std::sync::Mutex<Consumer<f32>>,
+    reamostrador: Option<&std::sync::Mutex<R>>,
+    quantas: usize,
+    falhas_silenciosas: &AtomicU64,
+) -> Vec<f32> {
+    let Ok(mut amostras) = amostras.lock() else {
+        // O cadeado das amostras envenenado é um pânico em algum lugar deste
+        // laço — não «não há som», e a diferença tem de sobreviver à saída.
+        falhas_silenciosas.fetch_add(1, Ordering::Relaxed);
+        return Vec::new();
+    };
+    let mut cruas = Vec::new();
+    while cruas.len() < quantas {
+        let Ok(amostra) = amostras.pop() else {
+            break;
+        };
+        cruas.push(amostra);
+    }
+    drop(amostras);
+
+    // Na taxa da casa, as amostras saem como entraram.
+    let Some(reamostrador) = reamostrador else {
+        return cruas;
+    };
+    let Ok(mut reamostrador) = reamostrador.lock() else {
+        falhas_silenciosas.fetch_add(1, Ordering::Relaxed);
+        return Vec::new();
+    };
+    let mut saida = Vec::new();
+    if let Err(erro) = reamostrador.converter(&cruas, &mut saida) {
+        tracing::warn!(%erro, "o reamostrador recusou um bloco do som da tela; \
+            a transmissão emudeceu neste bloco");
+        falhas_silenciosas.fetch_add(1, Ordering::Relaxed);
+        return Vec::new();
+    }
+    saida
 }
 
 impl CapturaDaSaida {
@@ -164,25 +282,7 @@ impl CapturaDaSaida {
             source,
         })?;
 
-        // O reamostrador só existe quando é preciso: na taxa da casa, converter
-        // seria copiar amostra por amostra por nada.
-        let reamostrador = if taxa_do_dispositivo == SAMPLE_RATE_HZ {
-            None
-        } else {
-            match crate::resample::RateConverter::new(taxa_do_dispositivo, SAMPLE_RATE_HZ) {
-                Ok(conversor) => Some(std::sync::Mutex::new(conversor)),
-                Err(erro) => {
-                    // Aqui sim não há o que fazer: sem conversor e fora da taxa,
-                    // qualquer amostra entregue sairia rápida ou lenta demais.
-                    tracing::warn!(%erro, taxa = taxa_do_dispositivo,
-                        "não converso a taxa desta saída; a transmissão sai muda");
-                    // `NoOutputDevice` porque é o que sobra de verdade: existe
-                    // uma saída, e ela não serve a esta captura. Quem chama trata
-                    // do mesmo jeito — transmite muda, e não deixa de transmitir.
-                    return Err(DeviceError::NoOutputDevice);
-                }
-            }
-        };
+        let reamostrador = construir_reamostrador(taxa_do_dispositivo)?;
 
         Ok(Self {
             _fluxo: fluxo,
@@ -191,6 +291,7 @@ impl CapturaDaSaida {
             contadores,
             taxa_do_dispositivo,
             canais,
+            falhas_silenciosas: AtomicU64::new(0),
         })
     }
 
@@ -198,33 +299,17 @@ impl CapturaDaSaida {
     ///
     /// Vazio quando não há nada — que é diferente de não haver caminho: o
     /// silêncio também produz amostras, e é [`Self::capturadas`] que separa os
-    /// dois.
+    /// dois. Uma falha também devolve vazio — não há amostra que inventar —
+    /// mas soma em [`Self::falhas_silenciosas`], que é o que separa isto de
+    /// silêncio de verdade.
     #[must_use]
     pub fn tomar(&self, quantas: usize) -> Vec<f32> {
-        let Ok(mut amostras) = self.amostras.lock() else {
-            return Vec::new();
-        };
-        let mut cruas = Vec::new();
-        while cruas.len() < quantas {
-            let Ok(amostra) = amostras.pop() else {
-                break;
-            };
-            cruas.push(amostra);
-        }
-
-        // Na taxa da casa, as amostras saem como entraram.
-        let Some(reamostrador) = self.reamostrador.as_ref() else {
-            return cruas;
-        };
-        let Ok(mut reamostrador) = reamostrador.lock() else {
-            return Vec::new();
-        };
-        let mut saida = Vec::new();
-        if let Err(erro) = reamostrador.push(&cruas, &mut saida) {
-            tracing::debug!(%erro, "o reamostrador recusou um bloco do som da tela");
-            return Vec::new();
-        }
-        saida
+        tomar_de(
+            &self.amostras,
+            self.reamostrador.as_ref(),
+            quantas,
+            &self.falhas_silenciosas,
+        )
     }
 
     /// A taxa em que as amostras saem, que **não** é a da casa.
@@ -249,6 +334,18 @@ impl CapturaDaSaida {
         self.contadores.snapshot().capture_overruns
     }
 
+    /// Quantas vezes [`Self::tomar`] devolveu vazio por uma falha — cadeado
+    /// envenenado ou reamostrador recusando um bloco —, e não por a máquina
+    /// estar calada.
+    ///
+    /// Zero não prova que nada deu errado num sistema sem este contador
+    /// consultado; prova que, enquanto alguém olhou, nada deu. É o mesmo
+    /// contrato que [`Self::perdidas`] já tem.
+    #[must_use]
+    pub fn falhas_silenciosas(&self) -> u64 {
+        self.falhas_silenciosas.load(Ordering::Relaxed)
+    }
+
     /// A taxa da casa, para quem precisa comparar.
     #[must_use]
     pub const fn taxa_da_casa() -> u32 {
@@ -259,6 +356,122 @@ impl CapturaDaSaida {
 #[cfg(test)]
 mod testes {
     use cpal::traits::{DeviceTrait as _, HostTrait as _};
+
+    use super::*;
+
+    /// O achado D: um erro do reamostrador na abertura não pode virar
+    /// "não há dispositivo de saída".
+    ///
+    /// A saída existe, respondeu e abriu — quem não serviu foi a conversão de
+    /// taxa. `ConversionError::ZeroRate` é o jeito determinístico de forçar
+    /// essa falha sem depender de hardware nenhum: qualquer taxa de
+    /// dispositivo diferente de [`SAMPLE_RATE_HZ`] entra em
+    /// `RateConverter::new`, e `0` é sempre recusado por ele.
+    ///
+    /// Antes da correção isto devolvia [`DeviceError::NoOutputDevice`], que
+    /// manda quem investiga para o dispositivo — o lugar errado, porque o
+    /// dispositivo nunca foi o problema.
+    #[test]
+    fn erro_do_reamostrador_na_abertura_nao_vira_ausencia_de_saida() {
+        let erro =
+            construir_reamostrador(0).expect_err("taxa zero deve ser recusada pelo reamostrador");
+
+        assert!(
+            !matches!(erro, DeviceError::NoOutputDevice),
+            "o erro do reamostrador foi disfarçado de ausência de dispositivo \
+             de saída, o que manda quem investiga para o lugar errado: {erro}"
+        );
+        assert!(
+            matches!(erro, DeviceError::Resample { .. }),
+            "o erro não identifica o reamostrador como a causa verdadeira: {erro}"
+        );
+        assert!(
+            std::error::Error::source(&erro).is_some(),
+            "o erro do reamostrador perdeu a causa original ao ser propagado"
+        );
+    }
+
+    /// Um reamostrador de mentira que recusa todo bloco, para provar o achado
+    /// E sem depender de `rubato` entrar num estado de erro de verdade.
+    struct ReamostradorQueRecusa;
+
+    impl Conversor for ReamostradorQueRecusa {
+        fn converter(
+            &mut self,
+            _entrada: &[f32],
+            _saida: &mut Vec<f32>,
+        ) -> Result<(), crate::resample::ConversionError> {
+            Err(crate::resample::ConversionError::BufferShape { frames: 0 })
+        }
+    }
+
+    fn anel_com(amostras: &[f32]) -> std::sync::Mutex<Consumer<f32>> {
+        let (mut produtor, consumidor) = rtrb::RingBuffer::<f32>::new(amostras.len().max(1) + 1);
+        for &amostra in amostras {
+            produtor
+                .push(amostra)
+                .expect("anel de teste tem espaço de sobra");
+        }
+        std::sync::Mutex::new(consumidor)
+    }
+
+    /// O achado E (recusa do reamostrador): `tomar()` não pode devolver um
+    /// buffer vazio que pareça silêncio quando o reamostrador recusou o
+    /// bloco.
+    ///
+    /// Antes da correção o retorno era `Vec::new()` com o único vestígio num
+    /// `tracing::debug!` — invisível em produção. Depois, a falha soma em
+    /// `falhas_silenciosas`, que é observável por quem chama.
+    #[test]
+    fn recusa_do_reamostrador_em_tomar_nao_vira_buffer_vazio_silencioso() {
+        let amostras = anel_com(&[0.1, 0.2, 0.3]);
+        let reamostrador = std::sync::Mutex::new(ReamostradorQueRecusa);
+        let falhas = AtomicU64::new(0);
+
+        let saida = tomar_de(&amostras, Some(&reamostrador), 3, &falhas);
+
+        assert!(
+            saida.is_empty(),
+            "não há amostra convertida para entregar quando o reamostrador recusa"
+        );
+        assert_eq!(
+            falhas.load(Ordering::Relaxed),
+            1,
+            "a recusa do reamostrador em tomar() teve de ficar observável, e não \
+             desaparecer como se fosse uma máquina calada"
+        );
+    }
+
+    /// O mesmo achado E, para o cadeado das amostras envenenado.
+    ///
+    /// Um pânico em outra thread com o cadeado na mão é um defeito deste
+    /// laço, não "não há som". Antes da correção os dois eram indistinguíveis
+    /// de fora: ambos devolviam `Vec::new()`.
+    #[test]
+    fn cadeado_de_amostras_envenenado_em_tomar_nao_vira_buffer_vazio_silencioso() {
+        let amostras = Arc::new(anel_com(&[0.1, 0.2]));
+        let travado = Arc::clone(&amostras);
+        let _ = std::thread::spawn(move || {
+            let _guarda = travado.lock().unwrap();
+            panic!("envenenando de propósito, para o teste");
+        })
+        .join();
+        assert!(amostras.is_poisoned(), "o cadeado de teste não envenenou");
+
+        let falhas = AtomicU64::new(0);
+        let saida = tomar_de::<crate::resample::RateConverter>(&amostras, None, 2, &falhas);
+
+        assert!(
+            saida.is_empty(),
+            "um cadeado envenenado não tem o que entregar"
+        );
+        assert_eq!(
+            falhas.load(Ordering::Relaxed),
+            1,
+            "o cadeado envenenado teve de ficar observável, e não desaparecer \
+             como se fosse uma máquina calada"
+        );
+    }
 
     /// A suposição que faltava conferir, e que custou o som da tela inteiro.
     ///
@@ -296,8 +509,6 @@ mod testes {
              mudou, releia `CapturaDaSaida::abrir` antes de confiar na resposta."
         );
     }
-
-    use super::*;
 
     /// A prova de campo: o som que esta máquina está tocando.
     ///
