@@ -218,7 +218,7 @@ async fn a_senha_do_voice_room_e_conferida() -> Result<()> {
 
     // A entrada sem senha é recusada com um alerta, não com uma queda: a sala de voz
     // é um cômodo, e errar a senha dele não derruba a sessão.
-    cliente.enter_voice_room(VOICE_ROOM).await?;
+    cliente.enter_voice_room(VOICE_ROOM, None).await?;
     let alerta = tokio::time::timeout(
         std::time::Duration::from_secs(3),
         aguardar_recusa(&mut cliente),

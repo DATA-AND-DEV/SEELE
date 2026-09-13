@@ -503,7 +503,7 @@ pub trait EventListener: Send + Sync {
 enum Command {
     /// Devolve à sonda o caminho medido da última visita a este servidor.
     LembrarCaminho(u32),
-    EnterVoiceRoom(VoiceRoomId),
+    EnterVoiceRoom(VoiceRoomId, Option<String>),
     LeaveVoiceRoom,
     OpenChannel(ChannelId),
     Send {
@@ -1160,8 +1160,12 @@ impl Connection {
     /// # Errors
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
-    pub fn enter_voice_room(&self, voice_room: u32) -> Result<(), ConnectionError> {
-        self.command(Command::EnterVoiceRoom(VoiceRoomId(voice_room)))
+    pub fn enter_voice_room(
+        &self,
+        voice_room: u32,
+        password: Option<String>,
+    ) -> Result<(), ConnectionError> {
+        self.command(Command::EnterVoiceRoom(VoiceRoomId(voice_room), password))
     }
 
     /// Takes the connection out.
@@ -3677,8 +3681,12 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         Command::LembrarCaminho(bps) => {
             let _ = client.lembrar_o_caminho(bps).await;
         }
-        Command::EnterVoiceRoom(voice_room) => {
-            if client.entrar_na_voice_room(voice_room).await.is_err() {
+        Command::EnterVoiceRoom(voice_room, password) => {
+            if client
+                .entrar_na_voice_room(voice_room, password)
+                .await
+                .is_err()
+            {
                 return false;
             }
             if let Ok(mut room) = shared.room.lock() {

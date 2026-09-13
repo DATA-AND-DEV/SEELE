@@ -206,7 +206,7 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
     // testemunha ao mesmo tempo: se qualquer verbo tivesse passado, a sessão
     // dele acabaria, ou ele mudaria de sala.
     let anfitriao = entrar(endereco, "anfitriao-recusa").await?;
-    anfitriao.enter_voice_room(VOICE_ROOM)?;
+    anfitriao.enter_voice_room(VOICE_ROOM, None)?;
     anfitriao.open_channel(LINE)?;
     anfitriao.send_message(LINE, "verificando harmônicos".into())?;
     assert!(
@@ -296,7 +296,7 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
     );
 
     let visita = entrar(endereco, "visita-expulsar").await?;
-    visita.enter_voice_room(VOICE_ROOM)?;
+    visita.enter_voice_room(VOICE_ROOM, None)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
         ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM)
@@ -452,7 +452,7 @@ async fn mover_leva_a_pessoa_e_a_conta_na_sala_nova() -> Result<()> {
     let destino = anfitriao.snapshot().voice_rooms[1].id;
 
     let visita = entrar(endereco, "visita-mover").await?;
-    visita.enter_voice_room(VOICE_ROOM)?;
+    visita.enter_voice_room(VOICE_ROOM, None)?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
     assert!(
         ate(&visita, |connection| connection

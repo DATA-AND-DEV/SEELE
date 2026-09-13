@@ -182,7 +182,7 @@ async fn entering_a_voice_room_puts_us_on_our_own_roster() -> Result<()> {
     let (address, server) = start().await?;
     let connection = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
 
-    connection.enter_voice_room(VOICE_ROOM)?;
+    connection.enter_voice_room(VOICE_ROOM, None)?;
 
     assert!(
         until(&connection, |connection| {
@@ -218,7 +218,7 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     let (address, server) = start().await?;
     let connection = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
 
-    connection.enter_voice_room(VOICE_ROOM)?;
+    connection.enter_voice_room(VOICE_ROOM, None)?;
     assert!(
         until(&connection, |connection| {
             connection.snapshot().voice_rooms.iter().any(|voice_room| {
@@ -255,7 +255,7 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
     // the seat never clearing, that button stayed on `SAIR DA JAULA` for the
     // rest of the session and every press ejected again: the voice room could not be
     // left on screen **and could not be re-entered**.
-    connection.enter_voice_room(VOICE_ROOM)?;
+    connection.enter_voice_room(VOICE_ROOM, None)?;
     assert!(
         until(&connection, |connection| {
             connection.snapshot().voice_rooms.iter().any(|voice_room| {
@@ -280,7 +280,7 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
     listener.subscribe(Arc::clone(&heard) as Arc<dyn EventListener>);
 
     for connection in [&speaker, &listener] {
-        connection.enter_voice_room(VOICE_ROOM)?;
+        connection.enter_voice_room(VOICE_ROOM, None)?;
         connection.open_channel(CHANNEL)?;
     }
 
@@ -326,8 +326,8 @@ async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
     let muted = tokio::task::spawn_blocking(move || connect(address, "helena")).await??;
     let watcher = tokio::task::spawn_blocking(move || connect(address, "daniel")).await??;
 
-    muted.enter_voice_room(VOICE_ROOM)?;
-    watcher.enter_voice_room(VOICE_ROOM)?;
+    muted.enter_voice_room(VOICE_ROOM, None)?;
+    watcher.enter_voice_room(VOICE_ROOM, None)?;
     assert!(
         until(&watcher, |connection| {
             let snapshot = connection.snapshot();
@@ -369,7 +369,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     let (address, server) = start().await?;
 
     let first = tokio::task::spawn_blocking(move || connect(address, "maya")).await??;
-    first.enter_voice_room(VOICE_ROOM)?;
+    first.enter_voice_room(VOICE_ROOM, None)?;
     first.open_channel(CHANNEL)?;
     first.send_message(CHANNEL, "primeira coisa dita".into())?;
     assert!(
@@ -437,7 +437,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 
     let mut room = Room::new();
     room.adopt(terminal.session(), "marcela");
-    terminal.enter_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
+    terminal.enter_voice_room(VoiceRoomId(VOICE_ROOM), None).await?;
     room.enter_voice_room(VoiceRoomId(VOICE_ROOM));
     terminal.join_channel(ChannelId(CHANNEL)).await?;
     room.open_channel(ChannelId(CHANNEL));
@@ -582,7 +582,7 @@ async fn the_volume_of_a_stranger_is_refused_by_name() -> Result<()> {
 async fn dropping_the_handle_disconnects() -> Result<()> {
     let (address, server) = start().await?;
     let connection = tokio::task::spawn_blocking(move || connect(address, "aoba")).await??;
-    connection.enter_voice_room(VOICE_ROOM)?;
+    connection.enter_voice_room(VOICE_ROOM, None)?;
     assert!(until(&connection, |connection| connection
         .snapshot()
         .link_state
@@ -650,7 +650,7 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
 
     // And the room is a room: somebody can walk into it. A voice room that exists in
     // a list and cannot be entered is a row, not a channel.
-    connection.enter_voice_room(2)?;
+    connection.enter_voice_room(2, None)?;
     assert!(until(&connection, |connection| connection
         .snapshot()
         .voice_rooms

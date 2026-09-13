@@ -90,7 +90,7 @@ async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<(
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
+    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM), None).await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
     assert_eq!(enlace.estado(), Link::Online);
 
@@ -162,7 +162,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
         Arc::new(MemoryPinStore::new()),
     )
     .await?;
-    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM)).await?;
+    enlace.entrar_na_voice_room(VoiceRoomId(VOICE_ROOM), None).await?;
     enlace.abrir_linha(ChannelId(LINE)).await?;
     enlace.muted(true).await?;
 

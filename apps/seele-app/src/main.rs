@@ -1004,8 +1004,12 @@ fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, Conn
 }
 
 #[tauri::command]
-fn enter_voice_room(session: State<'_, Session>, voice_room: u32) -> Result<(), ConnectionError> {
-    session.connection()?.enter_voice_room(voice_room)
+fn enter_voice_room(
+    session: State<'_, Session>,
+    voice_room: u32,
+    senha: Option<String>,
+) -> Result<(), ConnectionError> {
+    session.connection()?.enter_voice_room(voice_room, senha)
 }
 
 #[tauri::command]
