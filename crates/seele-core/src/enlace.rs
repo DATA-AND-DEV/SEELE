@@ -2691,22 +2691,36 @@ impl Motor {
                 // Restaurar antes de anunciar. Uma casca que recebesse
                 // "reconectado" e perguntasse a sala de voz antes de ele existir veria
                 // uma sala vazia e acharia que perdeu gente.
-                if let Some(voice_room) = self.voice_room {
-                    // A senha não é guardada para a reconexão: uma sala com
-                    // senha exigiria pedi-la de novo aqui, e isso é o mesmo
-                    // gap que existe para toda credencial nesta struct —
-                    // fora do escopo desta correção, que é só o pedido de
-                    // entrada de quem está conectando pela primeira vez.
-                    let _ = cliente.enter_voice_room(voice_room, None).await;
-                }
-                if let Some(linha) = self.linha {
-                    let _ = cliente.join_channel(linha).await;
-                }
-                if self.muted {
-                    let _ = cliente.set_muted(true).await;
-                }
-                if self.isolamento {
-                    let _ = cliente.set_total_isolation(true).await;
+                //
+                // As quatro chamadas aqui dentro escreviam com `let _ =`: se o
+                // envio falhasse — a mensagem nem chegava a sair, porque o
+                // aperto de mão desta tentativa acabou de terminar e a conexão
+                // já morreu de novo —, o código adiante seguia como se tivesse
+                // dado certo. `self.cliente` virava `Some`, `Aviso::Reconectado`
+                // saía, e a casca se dava por dentro da sala de voz sem que o
+                // servidor jamais tivesse recebido o pedido. É o mecanismo do
+                // §2.2: o servidor confirma por silêncio, e aqui nem o silêncio
+                // vinha do servidor — vinha do cliente jogando fora o próprio
+                // erro. Falhar aqui agora conta como a mesma coisa que a
+                // tentativa de `connect_por` ter falhado: a bateria continua
+                // correndo, e a próxima tentativa tenta de novo.
+                if let Err(erro) = restabelecer(
+                    &mut cliente,
+                    self.voice_room,
+                    self.linha,
+                    self.muted,
+                    self.isolamento,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        ?erro,
+                        "a reconexão completou o aperto de mão mas não restabeleceu \
+                         o estado de antes da queda; contando como tentativa que não deu"
+                    );
+                    self.bateria.on_reconnect_failed(agora);
+                    self.anunciar();
+                    return;
                 }
 
                 let sessao = cliente.session().clone();
@@ -4631,6 +4645,47 @@ async fn avisar_pelo_candidato(
     }))
 }
 
+/// Refaz, na conexão nova de uma reconexão, o que a pessoa tinha escolhido
+/// antes da queda: a sala de voz, a Linha, o mudo, o isolamento total.
+///
+/// Para na primeira chamada que falhar, e não tenta as seguintes: a chamada
+/// que falhou já prova que esta conexão nova não serve, e continuar mandando
+/// coisa por ela só empilharia erro em cima de erro. Quem chama trata
+/// qualquer `Err` daqui como o mesmo caso de um `Client::connect_por` que não
+/// deu — a tentativa não conta como reconexão, e a bateria continua.
+///
+/// # Errors
+///
+/// Falha se qualquer uma das chamadas não conseguir sair — tipicamente porque
+/// a conexão que acabou de completar o aperto de mão já morreu de novo.
+async fn restabelecer(
+    cliente: &mut Client,
+    voice_room: Option<VoiceRoomId>,
+    linha: Option<ChannelId>,
+    muted: bool,
+    isolamento: bool,
+) -> anyhow::Result<()> {
+    if let Some(voice_room) = voice_room {
+        // A senha não é guardada para a reconexão: uma sala com senha exigiria
+        // pedi-la de novo aqui, e isso é o mesmo gap que existe para toda
+        // credencial nesta struct — fora do escopo desta correção, que é só
+        // não engolir a falha do restabelecimento. O que muda em relação ao
+        // `let _ =` de antes é que a recusa por senha ausente agora conta como
+        // tentativa que não deu, em vez de passar por reconexão bem-sucedida.
+        cliente.enter_voice_room(voice_room, None).await?;
+    }
+    if let Some(linha) = linha {
+        cliente.join_channel(linha).await?;
+    }
+    if muted {
+        cliente.set_muted(true).await?;
+    }
+    if isolamento {
+        cliente.set_total_isolation(true).await?;
+    }
+    Ok(())
+}
+
 /// Se este endereço é de uma rede privada — a de casa **ou** a de outra casa.
 ///
 /// Sem loopback de propósito: `127.0.0.1` não é uma rede de ninguém, e as duas
@@ -5360,6 +5415,158 @@ mod tests {
              avisos: a repetição não foi abortada",
             *conta
         );
+    }
+
+    /// Um servidor que fala só o aperto de mão do protocolo e derruba a
+    /// conexão assim que ele termina — antes que quem está do outro lado
+    /// consiga escrever mais nada por ela.
+    ///
+    /// Existe para reproduzir o §2.2 do relatório sem depender de uma queda de
+    /// rede de verdade acontecer bem no instante certo — isso seria uma
+    /// corrida contra o relógio, e uma corrida não prova a mesma coisa duas
+    /// vezes seguidas. Aqui não há corrida: a conexão morre porque **este
+    /// servidor a derruba**, no mesmo fôlego em que confirma o aperto de mão
+    /// como bom. `Client::connect_por` sai com sucesso; a escrita seguinte,
+    /// na mesma conexão, é a que encontra a queda.
+    async fn servidor_que_aperta_a_mao_e_cai() -> SocketAddr {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let certificado =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificado");
+        let cadeia = vec![rustls::pki_types::CertificateDer::from(
+            certificado.cert.der().to_vec(),
+        )];
+        let chave =
+            rustls::pki_types::PrivatePkcs8KeyDer::from(certificado.signing_key.serialize_der());
+
+        let mut tls_servidor = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cadeia, chave.into())
+            .expect("config do servidor");
+        tls_servidor.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+        let servidor_config = quinn::ServerConfig::with_crypto(Arc::new(
+            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
+        ));
+
+        let escuta =
+            quinn::Endpoint::server(servidor_config, SocketAddr::from(([127, 0, 0, 1], 0)))
+                .expect("escutar");
+        let endereco = escuta.local_addr().expect("endereço");
+
+        tokio::spawn(async move {
+            let Some(entrada) = escuta.accept().await else {
+                return;
+            };
+            let Ok(conexao) = entrada.await else {
+                return;
+            };
+            let Ok((mut envio, mut recebe)) = conexao.accept_bi().await else {
+                return;
+            };
+
+            // `Hello`, ignorado: este servidor de teste aceita qualquer um.
+            if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            if crate::frame::write(
+                &mut envio,
+                &seele_proto::control::ServerMessage::Challenge { nonce: vec![0; 32] },
+            )
+            .await
+            .is_err()
+            {
+                return;
+            }
+            // `Response`, também ignorado: não há assinatura para conferir
+            // aqui, só o aperto de mão precisa completar.
+            if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            // A parada sai **antes** do `Session`, e não depois — de propósito.
+            // `stop_sending` e o quadro do `Session` seguem os dois na mesma
+            // direção (deste servidor para o cliente), então chegam juntos ou
+            // quase juntos, e o processamento das duas mensagens acontece na
+            // mesma passada de leitura da conexão do cliente, antes que o
+            // código dele sequer acorde do `await` que lê o `Session`. Fechar
+            // a conexão inteira **depois** do `Session` sair é uma corrida —
+            // ou o fecho alcança o `Session` no meio do caminho, ou não
+            // alcança a próxima escrita do cliente a tempo, dependendo de
+            // quanto a rede demorar. `stop_sending` na direção que o cliente
+            // escreve não tem essa corrida: uma vez que o cliente processa o
+            // pacote, a próxima escrita dele volta erro na hora, sem depender
+            // de outro round-trip.
+            let _ = recebe.stop(0_u32.into());
+            let _ = crate::frame::write(
+                &mut envio,
+                &seele_proto::control::ServerMessage::Session {
+                    id: seele_proto::ids::SessionId(1),
+                    person: PersonId(1),
+                    ssrc: seele_proto::ids::Ssrc(1),
+                    server: "servidor de teste".into(),
+                    voice_rooms: vec![],
+                    channels: vec![],
+                    roles: vec![],
+                    permissions: vec![],
+                },
+            )
+            .await;
+            // A conexão fica viva de propósito — é o `stop_sending` acima que
+            // derruba só a direção que importa. Vazam porque o teste é curto e
+            // derrubar os endpoints fecharia a conexão que ele ainda mede.
+            std::mem::forget(escuta);
+            std::mem::forget(conexao);
+        });
+
+        endereco
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_reentrada_na_sala_falha_na_reconexao_e_o_cliente_nao_se_da_por_sentado() {
+        // O mecanismo do §2.2 do relatório: o servidor confirma por silêncio,
+        // então uma falha de envio que ninguém confere vira divergência
+        // permanente. É a terceira via para o mesmo sintoma relatado — «pra
+        // mim ele não está na call, pra ele sim» — e aqui é o espelho: pra
+        // esta pessoa ela está, e o servidor nunca recebeu o pedido.
+        let endereco = servidor_que_aperta_a_mao_e_cai().await;
+
+        let mut motor = motor_de_teste();
+        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
+        motor.avisos = avisos;
+        motor.destino.servidor = endereco;
+        motor.destino.nome_tls = "localhost".into();
+        motor.destino.chave_do_pin = endereco.to_string();
+        // A sala que a pessoa tinha escolhido antes de cair — o que
+        // `Motor::tentar` tenta restaurar nesta reconexão, e o que a queda
+        // desta conexão vai impedir de restaurar.
+        motor.voice_room = Some(VoiceRoomId(9));
+
+        motor.tentar().await;
+
+        assert!(
+            motor.cliente.is_none(),
+            "a reentrada na sala falhou, mas o motor se deu por reconectado do mesmo jeito \
+             — exatamente o defeito: o cliente se acha dentro da sala, e o servidor nunca \
+             recebeu o pedido."
+        );
+
+        while let Ok(aviso) = avisos_rx.try_recv() {
+            assert!(
+                !matches!(aviso, Aviso::Reconectado { .. }),
+                "o motor anunciou reconexão mesmo sem ter restaurado a sala de voz — é isto \
+                 que faz a casca se dar por dentro da sala para si mesma enquanto o servidor \
+                 nunca a teve."
+            );
+        }
+
+        // A intenção continua guardada: a próxima tentativa da bateria tenta
+        // de novo a mesma sala, e não esquece o que a pessoa escolheu.
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(9)));
     }
 
     #[test]

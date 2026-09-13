@@ -292,24 +292,40 @@ pub fn criar_convite(persistence: &mut Persistence, observacao: &str) -> Result<
 ///
 /// Recusa quando o banco não responde. É a única resposta segura: uma consulta
 /// que falha não é prova de que a porta pode abrir.
+///
+/// Mas «não responde» tinha um só disfarce para dois defeitos diferentes:
+/// `.ok()` jogava fora o `Err`, e um banco ocupado (`SQLITE_BUSY`) virava
+/// exatamente a mesma coisa que uma sala inexistente — recusa correta, causa
+/// invisível. Quem opera não tem como saber se a porta certa não existe ou se
+/// o banco travou, e as duas pedem ações bem diferentes. Por isso o erro real
+/// vai para o log antes de virar a mesma recusa seguras de sempre.
 #[must_use]
 pub fn voice_room_liberado(
     persistence: &Persistence,
     voice_room: VoiceRoomId,
     senha: Option<&str>,
 ) -> bool {
-    let hash: Option<Option<String>> = persistence
-        .connection()
-        .query_row(
-            "SELECT password_hash FROM voice_rooms WHERE id = ?1",
-            params![i64::from(voice_room.get())],
-            |linha| linha.get(0),
-        )
-        .ok();
+    let hash: Option<Option<String>> = match persistence.connection().query_row(
+        "SELECT password_hash FROM voice_rooms WHERE id = ?1",
+        params![i64::from(voice_room.get())],
+        |linha| linha.get(0),
+    ) {
+        Ok(hash) => Some(hash),
+        // sala de voz inexistente. Recusar aqui evita que um erro de digitação
+        // vire uma entrada silenciosa em lugar nenhum. Não é erro de
+        // infraestrutura, então não vai para o log como um.
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(erro) => {
+            tracing::error!(
+                %erro,
+                ?voice_room,
+                "não consegui checar a sala de voz no banco; recusando por segurança"
+            );
+            None
+        }
+    };
 
     match hash {
-        // sala de voz inexistente. Recusar aqui evita que um erro de digitação vire
-        // uma entrada silenciosa em lugar nenhum.
         None => false,
         Some(None) => true,
         Some(Some(hash)) => senha.is_some_and(|senha| verificar_senha(senha, &hash)),
@@ -687,6 +703,60 @@ mod tests {
         // nenhum.
         let persistence = persistence();
         assert!(!voice_room_liberado(&persistence, VoiceRoomId(9999), None));
+    }
+
+    #[test]
+    fn erro_de_infraestrutura_no_banco_fica_distinguivel_de_sala_inexistente() {
+        // `.ok()` fazia um SQLITE_BUSY passar pelo mesmo caminho de «essa sala
+        // não existe» — a mesma recusa seja qual for o motivo, e nenhum jeito
+        // de saber depois qual dos dois aconteceu. A recusa continua igual
+        // (é a resposta segura dos dois lados), mas o motivo tem que ficar no
+        // log: quem opera precisa saber se digitou o número errado ou se o
+        // banco travou.
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("lock").extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let persistence = persistence();
+        // Uma falha de infraestrutura de verdade, e não uma sala que nunca
+        // existiu: a tabela sai debaixo da consulta.
+        persistence
+            .connection()
+            .execute("DROP TABLE voice_rooms", [])
+            .expect("derrubar a tabela para simular a falha");
+
+        let buffer = Buffer::default();
+        let capturado = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || capturado.clone())
+            .without_time()
+            .finish();
+
+        let liberado = tracing::subscriber::with_default(subscriber, || {
+            voice_room_liberado(&persistence, VoiceRoomId(1), None)
+        });
+
+        assert!(
+            !liberado,
+            "erro de banco continua recusando — é a resposta segura"
+        );
+        let log = String::from_utf8(buffer.0.lock().expect("lock").clone()).expect("utf8");
+        assert!(
+            log.contains("não consegui checar a sala de voz"),
+            "o erro de infraestrutura tinha que aparecer no log, distinto de uma \
+             sala que não existe: {log:?}"
+        );
     }
 
     #[test]
