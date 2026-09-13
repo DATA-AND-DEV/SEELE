@@ -1,0 +1,116 @@
+name: CI
+
+# Runs on every push and every pull request. This is the workflow release.yml
+# never was: `release.yml` only ever builds installers on a tag, and neither
+# it nor anything else in this repository has ever run `cargo fmt`, `cargo
+# clippy`, or `cargo test` automatically. In particular, no CI job has ever
+# compiled this workspace for Windows outside of cutting an actual release —
+# which means every `#[cfg(windows)]` block in `seele-audio` (device.rs) and
+# all of `laco_por_processo.rs` (`#![cfg(windows)]` for the whole file) has
+# never been type-checked, linted, or exercised by anything automatic. That
+# blind spot is exactly where the reported "switching headphones/microphone on
+# Windows" bug lives (docs/pendencias.md #31).
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Formatting does not need a full build or platform-specific system
+  # dependencies, so it runs once instead of once per OS.
+  fmt:
+    name: fmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy (${{ matrix.name }})
+    strategy:
+      # One platform failing must not hide the other's result.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+          - os: windows-2022
+            name: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ALSA and the webkit2gtk stack the workspace needs to compile
+      # apps/seele-app on Linux (same action release.yml uses, so the
+      # dependency list has exactly one home).
+      - name: System dependencies (Linux)
+        if: matrix.name == 'linux'
+        uses: ./.github/actions/deps-linux
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-clippy-${{ matrix.name }}
+
+      # `--all-targets` reaches tests, examples and benches too — including
+      # laco_por_processo.rs, which has no unit tests of its own and would
+      # otherwise never be looked at by anything except a Windows release
+      # build.
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test:
+    name: test (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+          - os: windows-2022
+            name: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies (Linux)
+        if: matrix.name == 'linux'
+        uses: ./.github/actions/deps-linux
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-test-${{ matrix.name }}
+
+      # seele-audio's device tests look for a real microphone/speaker and skip
+      # loudly (`eprintln!("skipped ...")`) when the machine has none — see
+      # crates/seele-audio/src/device.rs. GitHub-hosted runners have no audio
+      # hardware on either OS, so those skips are expected here and are not
+      # masking a bug: the point of this job is to prove the `#[cfg(windows)]`
+      # paths still *compile and link*, which every run of this step already
+      # does for the whole workspace, hardware or not.
+      #
+      # seele-conformance is excluded from this run and executed on its own
+      # below — see the next step for why.
+      - name: cargo test (workspace, excluding seele-conformance)
+        run: cargo test --workspace --exclude seele-conformance --all-targets
+
+      # docs/pendencias.md #29 measured this precisely: every conformance test
+      # passes alone in well under a second, but the suite spawns one real
+      # QUIC server (handshake, TLS, database) per test, and under `cargo
+      # test`'s default parallelism those servers fight each other for ports,
+      # disk and CPU. On the machine in #29, running the crate with
+      # `--test-threads=1` took 23s and passed 15/15 every time, while the
+      # parallel run finished faster (~20s) but failed a different test in
+      # roughly two of every three rounds. The pendência's own conclusion was
+      # explicit: serialize this crate, don't widen the deadline, and don't
+      # paper over it with a silent retry — a suite that only passes on the
+      # second attempt has stopped being evidence.
+      #
+      # #35 and #36 (as numbered on main, not on this branch — see
+      # docs/pendencias.md #37 for why the numbering diverged) turned out to
+      # be about screen-relay viewer counts and a misleadingly named
+      # reconnection test, not about seele-conformance concurrency. Neither
+      # changes the call made here: #29 remains the only pendência that
+      # measured this crate's parallelism and it says serialize.
+      - name: cargo test (seele-conformance, serialized — see comment)
+        run: cargo test -p seele-conformance -- --test-threads=1

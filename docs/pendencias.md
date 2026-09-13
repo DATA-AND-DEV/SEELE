@@ -1812,3 +1812,86 @@ recusa — já resolve o sintoma relatado sem esperar por isso.
 **Quando dói.** Sempre que uma sala de voz tem senha, ou ganha algum outro
 motivo de recusa no futuro: o intervalo entre pedir e ouvir a recusa continua
 existindo, só não sobrevive mais a ele.
+
+
+## 38 · O workflow de CI existe escrito, e ninguém provou que ele roda
+
+**Numeração.** Este item nasceu como #34 numa ponta que nunca chegou a se
+integrar com a main: enquanto este branch escrevia sobre o workflow de CI, a
+main recebeu quatro itens próprios com os números 34, 35, 36 e 37 (casca sem
+dizer de onde vem a tela, contador de espectadores não reanunciado, a
+cobertura enganosa de `voz_na_reconexao.rs` e a entrada em sala de voz que se
+confirma pelo silêncio — nenhum deles sobre CI ou sobre `seele-conformance`).
+Renumerado para #38 para não colidir na integração; o conteúdo abaixo é o
+mesmo que já foi revisado e aprovado.
+
+**Sintoma.** `.github/workflows/ci.yml` foi escrito com um job `windows-2022`
+para `clippy` e `test` — justamente para exercitar os blocos `#[cfg(windows)]`
+de `crates/seele-audio/src/device.rs` e o arquivo inteiro de
+`laco_por_processo.rs` (`#![cfg(windows)]`), que é onde vive o defeito relatado
+de troca de fone e microfone (item 31). Mas o arquivo nunca foi enviado ao
+GitHub: a autorização desta tarefa não incluía `push` nem `merge`, e sem
+`push` nenhum workflow novo dispara — arquivo não versionado no remoto não é
+workflow que rodou, é workflow que foi só desenhado.
+
+**O que foi medido, e o que não foi.** Rodado nesta máquina — **macOS**, com
+`rustup`, a toolchain fixada e o alvo `x86_64-pc-windows-msvc` já instalados,
+mas sem `gh` para inspecionar ou disparar Actions — `cargo fmt --check`,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` e
+`cargo test --workspace` passam. Isso prova que o job `linux`/`ubuntu-24.04`
+do workflow tem chance real de passar (a plataforma é próxima o bastante) e
+que nada no restante do workspace quebrou. **Isso não prova nada sobre o job
+`windows-2022`**: em macOS, `laco_por_processo.rs` compila vazio porque
+`#![cfg(windows)]` cobre o arquivo inteiro, e os ramos `#[cfg(windows)]` de
+`device.rs` — incluindo o consentimento de microfone — nem chegam a ser
+compilados, muito menos linkados ou executados. Tentar cruzar para o alvo
+Windows a partir daqui (`cargo check -p seele-audio --target
+x86_64-pc-windows-msvc`) nem chega a compilar: a build de `shiguredo_opus`
+precisa do gerador do Visual Studio via CMake, e essa máquina não tem Visual
+Studio nem o `vcvars` correspondente — a barreira é o linker/gerador nativo do
+Windows, não a ausência de `rustup` ou do alvo. Nenhum comando rodado
+localmente toca essa área; só um runner Windows de verdade toca.
+
+**Por que não se fecha esta pendência daqui.** Fechar exigiria um dos dois: um
+push real que dispare o Actions com o job `windows-2022`, ou uma máquina
+Windows local para reproduzir os mesmos comandos. Nenhum dos dois está ao
+alcance de quem escreveu este workflow nesta sessão — a tarefa que o criou foi
+explicitamente proibida de publicar. Isso não é um defeito do workflow: é uma
+lacuna de prova que só quem tem permissão de `push` pode fechar, e este
+registro existe para que a primeira pessoa que enviar o branch saiba que ainda
+falta olhar o resultado real do job `windows-2022` antes de confiar nele.
+
+**Quando dói.** Toda vez que alguém disser «o CI cobre o Windows agora» antes
+de ter visto ao menos uma execução real do job `windows-2022` passar ou
+reprovar no GitHub Actions.
+
+### Uma alegação de medição sobre `-j1` que não se reproduziu, e foi revertida
+
+Numa retomada anterior desta tarefa, este registro chegou a afirmar que
+`cargo test -p seele-conformance -- --test-threads=1` (sem `-j1`) reprovava
+`moderacao::expulsar_acaba_com_a_sessao_e_deixa_voltar` por contenção entre os
+24 binários de integração do crate rodando como processos concorrentes, e que
+acrescentar `-j1` corrigia isso. Uma revisão independente contestou a
+explicação técnica — o `-j` do `cargo test` não governa quantos binários de
+teste já compilados rodam ao mesmo tempo — e pediu reprodução.
+
+Rodei o comando sem `-j1` três vezes nesta sessão: as três passaram 100% dos
+testes, incluindo o citado como reprovado, sem qualquer serialização extra.
+A alegação anterior não se sustentou à medição repetida, então a mudança em
+`ci.yml` (o `-j1`) foi revertida e o comando voltou ao que a pendência #29 já
+tinha decidido: `cargo test -p seele-conformance -- --test-threads=1`.
+
+**Quando dói.** Toda vez que uma explicação técnica plausível for escrita como
+fato a partir de uma única observação não repetida — é exatamente o tipo de
+conclusão que este arquivo pede para não fazer.
+
+**O que sobrou, e não é o mesmo problema.** Rodando só `tests/moderacao.rs`
+sozinho, sem nenhum outro binário disputando porta — então sem a contenção
+entre binários que a explicação revertida descrevia —, uma de quatro
+execuções ainda reprovou `expulsar_acaba_com_a_sessao_e_deixa_voltar` num
+`assert!` de tempo (a função `ate(...)`, que espera até um prazo). Isso é
+instabilidade intrínseca ao teste — provavelmente de tempo, não de recursos
+disputados — e continua sem diagnóstico. Esta tarefa é só de infraestrutura
+de CI e não mexe em código de teste; o registro fica aqui para quem for
+investigar não gastar tempo checando `-j1` ou concorrência entre binários de
+novo.
