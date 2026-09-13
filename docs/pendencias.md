@@ -1744,3 +1744,38 @@ do caminho entre pares.
 
 **Quando dói.** Em sala com malha ligada e espectadores indo e voltando entre
 par e servidor. Com a malha desligada o caminho nem corre.
+
+## 36 · `voz_na_reconexao.rs` não é cobertura de reconexão de roster
+
+**O nome convida ao engano.** `crates/seele-conformance/tests/voz_na_reconexao.rs`
+não conecta cliente nenhum a servidor nenhum: `braco_da_reconexao` (linhas
+55-64) lê `crates/seele-ffi/src/lib.rs` como texto, recorta o trecho entre
+`Aviso::Reconectado` e o próximo `Aviso::`, e confere que ele contém `reopen` e
+não contém `Voice::start`/`switch_capture`/`switch_playback`. É uma escolha
+declarada e justificada no próprio cabeçalho do arquivo (linhas 3-12) — o
+defeito que ele guarda é "a casca chamou a função errada" para reabrir os
+**controles de áudio** (mudo, Isolamento total, modo, ganhos), e isso não
+aparece em tipo nenhum nem quebra asserção de comportamento sem placa de som.
+
+**O que ele não afirma.** Nada sobre o **roster** sobreviver a uma reconexão —
+quem continua sentado, quem devia ter saído, o que `Room::adopt` ou
+`Room::apply(ServerMessage::Session)` fazem com `seats`, `presentes` ou
+`current_voice_room`. Um arquivo chamado `voz_na_reconexao` ao lado de
+`ocupacao.rs` e `sincronia.rs` sugere cobertura de reconexão em geral; cobre só
+a metade do áudio. Registrado aqui para não ser contado como prova de
+comportamento de reconexão em auditorias futuras — é o caso "existir não é
+funcionar" do `CLAUDE.md`: o teste existe, passa, e mede outra coisa.
+
+**Relação com a pendência #11.** #11 é a corrida do **servidor**: o desmonte
+de uma sessão vieja, chaveado só por `PersonId`, pode apagar o assento da
+sessão nova. O fantasma do lado do **cliente** — `Room::adopt` e o braço
+`ServerMessage::Session` de `Room::apply` deixavam `seats`, `presentes` e
+`current_voice_room` de pé por cima da fotografia de reabertura, que é
+puramente aditiva — foi fechado nesta tarefa (Órbita d4350fdb), fundindo as
+duas cópias da contabilidade numa só e limpando os três campos antes de
+aplicar a fotografia. A corrida do servidor em #11 continua aberta; o teste
+novo `crates/seele-conformance/tests/reconexao_fantasma.rs` prova só a metade
+do cliente.
+
+**Quando dói.** Sempre que alguém procurar, neste repositório, um teste que já
+prove reconexão de roster e citar este arquivo por engano.

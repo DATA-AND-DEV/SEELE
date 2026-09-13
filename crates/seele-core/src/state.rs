@@ -414,9 +414,52 @@ impl Room {
     /// in because the server announces arrivals to everybody *else*: nothing on
     /// the wire ever tells this client who it is.
     pub fn adopt(&mut self, info: &SessionInfo, nickname: &str) {
-        self.me = Some(info.person);
-        self.ssrc = Some(info.ssrc);
-        self.server = info.server.clone();
+        self.reabrir(
+            info.person,
+            info.ssrc,
+            info.server.clone(),
+            info.voice_rooms.clone(),
+            info.channels.clone(),
+            info.permissions.clone(),
+        );
+        self.people.insert(
+            info.person,
+            Person::new(info.person, nickname.to_owned(), Some(info.ssrc)),
+        );
+    }
+
+    /// O que `adopt` e o braço `ServerMessage::Session` de [`Self::apply`] têm
+    /// em comum, numa implementação só.
+    ///
+    /// As duas eram cópias que já haviam divergido: `adopt` limpava
+    /// `person_icons`, `telas`, `caminho_de_quem_hospeda_bps` e
+    /// `perda_de_subida`; o braço de `apply` não limpava nenhum dos quatro.
+    /// Como a casca roda `adopt` e a conformidade roda `apply`, um teste verde
+    /// em `apply(Session)` não dizia nada sobre o que a casca faz na
+    /// reconexão — exatamente o padrão que o CLAUDE.md chama de duas cópias da
+    /// mesma contabilidade divergindo.
+    ///
+    /// **`seats`, `presentes` e `current_voice_room` também são limpos aqui —
+    /// e não eram, nas duas cópias.** A fotografia de reabertura que o
+    /// servidor manda logo depois (`PersonPresent` e `PersonJoined`, uma vez
+    /// para cada sala) é puramente aditiva: ela diz quem está sentado agora,
+    /// mas não remove ninguém. Sem esta limpeza, quem saiu da sala — ou do
+    /// servidor — enquanto esta conexão estava fora do ar continua sentado
+    /// para sempre: um participante fantasma, visível e mudo, que o áudio do
+    /// servidor já trata como `not_a_member` mas que a tela nunca tira do
+    /// roster.
+    fn reabrir(
+        &mut self,
+        person: PersonId,
+        ssrc: Ssrc,
+        server: String,
+        voice_rooms: Vec<VoiceRoomInfo>,
+        channels: Vec<ChannelInfo>,
+        permissions: Vec<Permission>,
+    ) {
+        self.me = Some(person);
+        self.ssrc = Some(ssrc);
+        self.server = server;
         // Cleared, and not left alone, because this runs again on every
         // reconnection. The handshake describes the server from scratch and the
         // picture arrives just behind it when there is one; keeping the old one
@@ -429,9 +472,9 @@ impl Room {
         // depois do aperto de mão. Guardá-las seria confiar num quadro que
         // pode não vir.
         self.person_icons.clear();
-        self.voice_rooms = info.voice_rooms.clone();
-        self.channels = info.channels.clone();
-        self.permissions = info.permissions.clone();
+        self.voice_rooms = voice_rooms;
+        self.channels = channels;
+        self.permissions = permissions;
         // Limpas pelo mesmo motivo do ícone, e o estrago aqui é maior: uma
         // conexão nova não tem fluxo de tela nenhum — o `Client` que os
         // carregava morreu com ela —, então uma transmissão herdada seria a
@@ -451,10 +494,15 @@ impl Room {
         // pode ser v1 e nunca mandar nada, deixando o número velho na tela para
         // sempre, sem nada que o contradiga.
         self.perda_de_subida = None;
-        self.people.insert(
-            info.person,
-            Person::new(info.person, nickname.to_owned(), Some(info.ssrc)),
-        );
+        // O assento e a presença de **todo mundo**, self incluído — não só de
+        // quem esta conexão vier a descobrir de novo. A fotografia que segue
+        // não anuncia partidas, só chegadas; um assento ou uma presença que
+        // sobrevivesse aqui só desapareceria se a pessoa saísse e voltasse a
+        // entrar depois desta reconexão, o que é exatamente o fantasma
+        // relatado.
+        self.seats.clear();
+        self.presentes.clear();
+        self.current_voice_room = None;
     }
 
     /// Records that this person's connection is now in a voice room, and seats them in it.
@@ -722,15 +770,20 @@ impl Room {
                 permissions,
                 ..
             } => {
-                self.me = Some(*person);
-                self.ssrc = Some(*ssrc);
-                self.server.clone_from(server);
-                // For the reason [`Self::adopt`] gives: a handshake describes
-                // the server from scratch, picture included.
-                self.icon = None;
-                self.voice_rooms.clone_from(voice_rooms);
-                self.channels.clone_from(channels);
-                self.permissions.clone_from(permissions);
+                // A mesma reabertura que [`Self::adopt`] roda — é o que a casca
+                // chama na reconexão. Antes, este braço era uma segunda cópia
+                // que não limpava `person_icons`, `telas`,
+                // `caminho_de_quem_hospeda_bps` nem `perda_de_subida`, e o
+                // caminho que a conformidade media não era o que a casca
+                // rodava.
+                self.reabrir(
+                    *person,
+                    *ssrc,
+                    server.clone(),
+                    voice_rooms.clone(),
+                    channels.clone(),
+                    permissions.clone(),
+                );
                 self.people
                     .entry(*person)
                     .or_insert_with(|| Person::new(*person, format!("pessoa {}", person.0), None))
