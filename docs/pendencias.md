@@ -1855,3 +1855,34 @@ falta olhar o resultado real do job `windows-2022` antes de confiar nele.
 **Quando dói.** Toda vez que alguém disser «o CI cobre o Windows agora» antes
 de ter visto ao menos uma execução real do job `windows-2022` passar ou
 reprovar no GitHub Actions.
+
+### Uma alegação de medição sobre `-j1` que não se reproduziu, e foi revertida
+
+Numa retomada anterior desta tarefa, este registro chegou a afirmar que
+`cargo test -p seele-conformance -- --test-threads=1` (sem `-j1`) reprovava
+`moderacao::expulsar_acaba_com_a_sessao_e_deixa_voltar` por contenção entre os
+24 binários de integração do crate rodando como processos concorrentes, e que
+acrescentar `-j1` corrigia isso. Uma revisão independente contestou a
+explicação técnica — o `-j` do `cargo test` não governa quantos binários de
+teste já compilados rodam ao mesmo tempo — e pediu reprodução.
+
+Rodei o comando sem `-j1` três vezes nesta sessão: as três passaram 100% dos
+testes, incluindo o citado como reprovado, sem qualquer serialização extra.
+A alegação anterior não se sustentou à medição repetida, então a mudança em
+`ci.yml` (o `-j1`) foi revertida e o comando voltou ao que a pendência #29 já
+tinha decidido: `cargo test -p seele-conformance -- --test-threads=1`.
+
+**Quando dói.** Toda vez que uma explicação técnica plausível for escrita como
+fato a partir de uma única observação não repetida — é exatamente o tipo de
+conclusão que este arquivo pede para não fazer.
+
+**O que sobrou, e não é o mesmo problema.** Rodando só `tests/moderacao.rs`
+sozinho, sem nenhum outro binário disputando porta — então sem a contenção
+entre binários que a explicação revertida descrevia —, uma de quatro
+execuções ainda reprovou `expulsar_acaba_com_a_sessao_e_deixa_voltar` num
+`assert!` de tempo (a função `ate(...)`, que espera até um prazo). Isso é
+instabilidade intrínseca ao teste — provavelmente de tempo, não de recursos
+disputados — e continua sem diagnóstico. Esta tarefa é só de infraestrutura
+de CI e não mexe em código de teste; o registro fica aqui para quem for
+investigar não gastar tempo checando `-j1` ou concorrência entre binários de
+novo.
