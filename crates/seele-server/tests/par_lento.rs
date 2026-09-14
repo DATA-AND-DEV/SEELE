@@ -307,7 +307,18 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     // O que se perdeu foi a **entrega**, e não a mensagem: tudo o que os
     // falantes disseram está em PERSISTENCE, que é o que faz de reconectar um
     // conserto e não um consolo.
-    let gravadas = servidor.quantas_mensagens(ChannelId(LINE)).await?;
+    // A gravação sai em lote, uma volta a cada 200 ms, e ler o contador no
+    // instante seguinte ao desligamento é perguntar antes de o lote ter vez.
+    // Numa máquina carregada isso reprovava com 1155 de 1160 — falta de tempo,
+    // não de mensagem. Espera-se o lote por até cinco segundos e pergunta-se de
+    // novo; se faltar mensagem de verdade, ela continua faltando no fim do
+    // prazo e a asserção abaixo é exatamente a mesma.
+    let mut gravadas = servidor.quantas_mensagens(ChannelId(LINE)).await?;
+    let prazo_do_lote = tokio::time::Instant::now() + Duration::from_secs(5);
+    while gravadas < ditas as u64 && tokio::time::Instant::now() < prazo_do_lote {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        gravadas = servidor.quantas_mensagens(ChannelId(LINE)).await?;
+    }
     assert_eq!(
         gravadas, ditas as u64,
         "o servidor perdeu mensagem antes de gravar, e aí reconectar não repõe nada"

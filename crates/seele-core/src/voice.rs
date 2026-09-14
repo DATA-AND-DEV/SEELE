@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -33,6 +33,7 @@ use seele_audio::mixer::Mixer;
 use seele_audio::pacing::RingPacer;
 use seele_audio::playout::PlayoutClock;
 use seele_audio::resample::RateConverter;
+use seele_audio::supervisor::{AvisoDeAparelho, CicloDoAparelho, DeviceState, Reabertura};
 use seele_audio::telemetry::{AudioTelemetry, FalhaLocal, LocalTelemetry, SourceTelemetry};
 use seele_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
 use seele_proto::ids::Ssrc;
@@ -292,6 +293,222 @@ fn playback_into_core(found: device::PlaybackDevice) -> PlaybackDevice {
     }
 }
 
+/// Em que pé está o aparelho de áudio desta sessão.
+///
+/// Tipo próprio e não um reexport de `seele_audio::supervisor::DeviceState`
+/// pela mesma razão que [`CaptureDevice`] é próprio: o ADR 0002 impede a casca
+/// de nomear `seele-audio`.
+///
+/// # Por que a interface precisa disto
+///
+/// Porque até aqui ela não era avisada. Quando o aparelho sumia, o único sinal
+/// era o contador de erros crescendo, que a telemetria transformava num
+/// `local_fault` — um aviso que diz «a máquina, não a rede» e **apaga sozinho**
+/// quando o contador para de crescer. Quem tirou o fone lia «falha local» por
+/// alguns segundos e depois tinha silêncio limpo, sem nada na tela. Isto é a
+/// frase que faltava: o aparelho mudou, está mudando, ou foi-se.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EstadoDoAparelho {
+    /// Há som entrando e saindo pelo aparelho que a sessão diz usar.
+    #[default]
+    Funcionando,
+    /// O aparelho caiu ou o sistema o trocou, e a reabertura está em curso.
+    Trocando,
+    /// Todas as tentativas falharam: não há áudio agora. A sessão continua
+    /// olhando devagar, e um aparelho que reapareça volta a tocar sozinho — a
+    /// pessoa também pode escolher um na tela e não esperar.
+    Perdido,
+}
+
+impl From<DeviceState> for EstadoDoAparelho {
+    fn from(estado: DeviceState) -> Self {
+        match estado {
+            DeviceState::Running => Self::Funcionando,
+            DeviceState::Recovering { .. } => Self::Trocando,
+            DeviceState::Lost => Self::Perdido,
+        }
+    }
+}
+
+/// Os aparelhos que esta sessão está usando **agora**.
+///
+/// Lido pela casca a cada quadro de telemetria. Escrito pelo laço de áudio,
+/// que é o único lugar onde um aparelho pode ser aberto — ver o cabeçalho de
+/// [`Voice::start_on`] sobre `cpal` e `Send`.
+///
+/// [`Self::reaberturas`] é o que permite à interface dizer «o aparelho mudou»
+/// em vez de só desenhar um nome diferente sem explicação: ele cresce uma vez
+/// por reabertura conseguida.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EstadoDoAudio {
+    /// O microfone que está aberto de verdade.
+    pub capture: Option<CaptureDevice>,
+    /// Onde o som está saindo de verdade.
+    pub playback: Option<PlaybackDevice>,
+    /// Em que pé está o aparelho.
+    pub estado: EstadoDoAparelho,
+    /// Quantas vezes o laço reabriu num aparelho, desde que esta voz começou.
+    pub reaberturas: u64,
+    /// A que taxas o aparelho **de agora** roda.
+    ///
+    /// Aqui e não num campo parado dentro de [`Voice`] porque elas mudam junto
+    /// com o aparelho: um fone de 44,1 kHz que entra no lugar de uma placa de
+    /// 48 kHz muda as duas, e quem guardasse as da primeira abertura passaria a
+    /// responder um número que já não é de ninguém.
+    pub taxas: DeviceRates,
+}
+
+impl EstadoDoAudio {
+    /// Anota o que uma reabertura entregou.
+    ///
+    /// Uma função e não três atribuições espalhadas porque é ela que o teste de
+    /// conformidade da troca exercita: o que o laço escreve no painel e o que o
+    /// teste confere têm de ser o mesmo código, ou o teste prova o teste.
+    pub fn reaberto(&mut self, aberto: &impl AparelhosAbertos, ciclo: &CicloDoAparelho) {
+        self.capture = aberto.microfone();
+        self.playback = aberto.saida();
+        self.taxas = aberto.taxas();
+        self.estado = ciclo.estado().into();
+        self.reaberturas = ciclo.reaberturas();
+    }
+
+    /// Anota o andamento quando ainda não há aparelho novo.
+    ///
+    /// Separada de [`Self::reaberto`] porque aqui os nomes **não** mudam: o que
+    /// muda é o estado. Escrever o aparelho velho como se fosse novo seria a
+    /// interface afirmando que há som saindo dele.
+    pub fn andamento(&mut self, ciclo: &CicloDoAparelho) {
+        self.estado = ciclo.estado().into();
+    }
+
+    /// O aparelho abriu e mesmo assim não há laço possível com ele.
+    ///
+    /// Acontece quando o reamostrador recusa as taxas do que abriu. É raro, e
+    /// era o único caminho em que o laço encerrava **depois** de o painel já
+    /// ter sido escrito como «funcionando» com o nome do aparelho novo: a
+    /// pessoa ficava sem som nenhum lendo normalidade na tela. Aqui o nome fica
+    /// (foi ele mesmo que abriu), e o estado diz a verdade.
+    pub fn sem_laco_possivel(&mut self) {
+        self.estado = EstadoDoAparelho::Perdido;
+    }
+}
+
+/// O que um aparelho recém-aberto sabe dizer sobre si.
+///
+/// Traço e não campo porque é o que permite ao teste de conformidade abrir um
+/// aparelho de mentira e passar pela **mesma** orquestração que roda em
+/// produção. `cpal` não abre nada numa máquina sem placa de som, e essa é a
+/// única parte que um teste não alcança; tudo o que decide *quando* reabrir,
+/// *o que* anotar e *o que a interface vê* fica deste lado do traço.
+pub trait AparelhosAbertos {
+    /// O microfone que abriu, quando o sistema o descreve.
+    fn microfone(&self) -> Option<CaptureDevice>;
+    /// A saída que abriu, quando o sistema a descreve.
+    fn saida(&self) -> Option<PlaybackDevice>;
+    /// A que taxas ele abriu, que é o que dimensiona o laço inteiro.
+    fn taxas(&self) -> DeviceRates;
+}
+
+impl AparelhosAbertos for AudioIo {
+    fn microfone(&self) -> Option<CaptureDevice> {
+        self.capture.clone().map(into_core)
+    }
+
+    fn saida(&self) -> Option<PlaybackDevice> {
+        self.playback.clone().map(playback_into_core)
+    }
+
+    fn taxas(&self) -> DeviceRates {
+        DeviceRates {
+            capture_hz: self.capture_rate_hz,
+            playback_hz: self.playback_rate_hz,
+        }
+    }
+}
+
+/// O ciclo do aparelho mais o painel que a interface lê.
+///
+/// # Por que isto não mora dentro do laço
+///
+/// Porque o laço não é testável: ele tem `cpal` de um lado e um socket QUIC do
+/// outro. Esta peça é a decisão inteira — ler o aviso, mandar reabrir, anotar o
+/// que abriu, contar a troca para a interface — e ela roda igual com um
+/// aparelho de verdade e com um de mentira. É o que faz a troca de aparelho ter
+/// finalmente um teste de **comportamento**, e não um teste que lê o próprio
+/// código-fonte à procura de uma palavra.
+#[derive(Debug)]
+pub struct Acompanhamento {
+    ciclo: CicloDoAparelho,
+    /// O último estado que o painel já viu, para não travar o cadeado à toa.
+    anotado: DeviceState,
+}
+
+impl Default for Acompanhamento {
+    fn default() -> Self {
+        Self::novo()
+    }
+}
+
+/// O painel, mesmo que o cadeado esteja envenenado.
+///
+/// Um pânico noutra thread envenena o cadeado para sempre. Com `if let Ok`, o
+/// preço disso seria a interface congelar no último estado que ela viu — sem
+/// dizer nada — enquanto o aparelho troca ou some. É exatamente «o produto sabe
+/// e não conta», e aqui não há dado a proteger: o painel é um punhado de campos
+/// que cada escrita substitui inteiros, não uma estrutura pela metade.
+fn painel_mesmo_envenenado(painel: &Mutex<EstadoDoAudio>) -> MutexGuard<'_, EstadoDoAudio> {
+    painel.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Acompanhamento {
+    /// Um acompanhamento para uma sessão cujo aparelho está funcionando.
+    #[must_use]
+    pub fn novo() -> Self {
+        Self {
+            ciclo: CicloDoAparelho::novo(),
+            anotado: DeviceState::Running,
+        }
+    }
+
+    /// Em que pé está o aparelho.
+    #[must_use]
+    pub fn estado(&self) -> EstadoDoAparelho {
+        self.ciclo.estado().into()
+    }
+
+    /// Uma volta do laço: decide, reabre quando for a hora, e conta à interface.
+    ///
+    /// Devolve o aparelho novo **só** quando um abriu; o chamador troca o que
+    /// tem pelo que voltar aqui. `None` é o caso comum e não é falha.
+    pub fn passo<R>(
+        &mut self,
+        aviso: AvisoDeAparelho,
+        agora_ms: f64,
+        abridor: &mut R,
+        painel: &Mutex<EstadoDoAudio>,
+    ) -> Option<R::Aberto>
+    where
+        R: Reabertura,
+        R::Aberto: AparelhosAbertos,
+    {
+        if let Some(aberto) = self.ciclo.passo(aviso, agora_ms, abridor) {
+            painel_mesmo_envenenado(painel).reaberto(&aberto, &self.ciclo);
+            self.anotado = self.ciclo.estado();
+            return Some(aberto);
+        }
+
+        if self.ciclo.estado() != self.anotado {
+            // A interface é avisada **enquanto** a troca acontece, e não só
+            // quando ela termina: `specs/03-audio.md` pede «tell the
+            // interface», e o que ela via até aqui era um aviso de falha local
+            // que apagava sozinho quando o contador parava de crescer.
+            self.anotado = self.ciclo.estado();
+            painel_mesmo_envenenado(painel).andamento(&self.ciclo);
+        }
+        None
+    }
+}
+
 /// Which devices to open, as ids.
 ///
 /// One value rather than two arguments, because the two are the same type: a
@@ -333,7 +550,7 @@ impl DeviceChoice {
 }
 
 /// What the devices turned out to be.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DeviceRates {
     /// Native capture rate. Not necessarily 48 kHz — gap G7.
     pub capture_hz: u32,
@@ -393,18 +610,17 @@ pub const SSRC_DA_TELA: u32 = u32::MAX;
 pub struct Voice {
     controls: Arc<Controls>,
     telemetry: Arc<Mutex<AudioTelemetry>>,
-    rates: DeviceRates,
-    /// The microphone this path actually opened.
+    /// Os aparelhos abertos de verdade, e em que pé eles estão.
     ///
     /// Read off the device rather than remembered from the request, so that a
     /// path started with no preference can still say which microphone it got.
-    capture: Option<CaptureDevice>,
-    /// Where this path is actually playing.
     ///
-    /// Same rule as [`Voice::capture`], and it carries more weight here: a
-    /// fallback to the machine's default output makes no sound of its own, so
-    /// reading this channel is the only way to find out it happened.
-    playback: Option<PlaybackDevice>,
+    /// **Compartilhado com a thread do laço**, e era um par de campos fixos.
+    /// Fixos, eles só podiam dizer a verdade até a primeira vez que o sistema
+    /// trocasse o aparelho por baixo da sessão — e como o laço é o único lugar
+    /// onde `cpal` pode abrir um fluxo, era ele quem sabia e não tinha onde
+    /// escrever. Ver [`EstadoDoAudio`].
+    aparelhos: Arc<Mutex<EstadoDoAudio>>,
     /// What was *asked* for, which is not what opened.
     ///
     /// Kept so that changing one side does not quietly reset the other:
@@ -429,6 +645,73 @@ pub struct Voice {
     /// continua sendo `Controls::bitrate`, que é atômico e não espera por
     /// ninguém: nada deste cadeado alcança a thread que não pode bloquear.
     faixa: Mutex<seele_audio::bitrate::Controlador>,
+}
+
+impl Controls {
+    /// Controles zerados, como uma voz que acabou de abrir.
+    ///
+    /// Uma função e não um literal no meio de `around` porque
+    /// `carregar_controles` precisa de dois deles para ser exercitada sem placa
+    /// de som — ver `os_controles_atravessam_a_reabertura`.
+    fn novos() -> Self {
+        Self {
+            muted: AtomicBool::new(false),
+            total_isolation: AtomicBool::new(false),
+            key_held: AtomicBool::new(false),
+            // specs/03-audio.md makes push-to-talk the default because it never
+            // false-triggers, and a client that transmits a room by accident is
+            // worse than one that misses a word.
+            mode: AtomicU8::new(VoiceMode::PushToTalk.as_byte()),
+            bitrate: AtomicU32::new(DEFAULT_BITRATE_BPS),
+            speaking: AtomicBool::new(false),
+            stop: AtomicBool::new(false),
+            relogio_seq: AtomicU32::new(0),
+            relogio_carimbo: AtomicU32::new(0),
+            recusados: std::sync::atomic::AtomicU64::new(0),
+            anel_cheio: std::sync::atomic::AtomicU64::new(0),
+            gains: Mutex::new(HashMap::new()),
+            som_da_tela: Mutex::new(std::collections::VecDeque::new()),
+        }
+    }
+}
+
+/// Leva para `para` tudo o que uma reabertura não pode perder.
+///
+/// **A lista mora aqui, uma vez.** Trocar de microfone, trocar de saída e
+/// reabrir numa reconexão passam todos por ela, e um item acrescentado vale
+/// para os três no mesmo dia. O item que machuca é o mudo: uma reabertura que
+/// desliga o mudo sozinha põe uma sala no ar.
+///
+/// Função sobre dois [`Controls`] e não um método de [`Voice`] para que ela
+/// tenha teste: dois `Voice` exigem duas placas de som, dois `Controls` não
+/// exigem nada. O guarda que existia para isto lia o texto-fonte da casca
+/// atrás da palavra `reopen` — o que prova que alguém a escreveu, e nada sobre
+/// o que sobrevive de verdade.
+fn carregar_controles(de: &Controls, para: &Controls) {
+    para.muted
+        .store(de.muted.load(Ordering::Relaxed), Ordering::Relaxed);
+    para.total_isolation.store(
+        de.total_isolation.load(Ordering::Relaxed),
+        Ordering::Relaxed,
+    );
+    para.mode
+        .store(de.mode.load(Ordering::Relaxed), Ordering::Relaxed);
+    para.key_held
+        .store(de.key_held.load(Ordering::Relaxed), Ordering::Relaxed);
+    // O relógio de mídia junto, e é o item cuja falta calava a pessoa. Ver
+    // `Controls::relogio_seq` para o porquê e `salto_do_relogio` para o
+    // tamanho do pulo.
+    let (seq, carimbo) = Voice::salto_do_relogio(
+        de.relogio_seq.load(Ordering::Relaxed) as u16,
+        de.relogio_carimbo.load(Ordering::Relaxed),
+    );
+    para.relogio_seq.store(u32::from(seq), Ordering::Relaxed);
+    para.relogio_carimbo.store(carimbo, Ordering::Relaxed);
+    if let (Ok(antigos), Ok(mut novos)) = (de.gains.lock(), para.gains.lock()) {
+        for (talker, gain) in antigos.iter() {
+            novos.insert(*talker, *gain);
+        }
+    }
 }
 
 impl Voice {
@@ -505,35 +788,25 @@ impl Voice {
 
     /// Wraps devices that are already open in a running pipeline.
     fn around(io: AudioIo, chosen: DeviceChoice, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
-        let rates = DeviceRates {
-            capture_hz: io.capture_rate_hz,
-            playback_hz: io.playback_rate_hz,
-        };
-        let capture = io.capture.clone().map(into_core);
-        let playback = io.playback.clone().map(playback_into_core);
+        let aparelhos = Arc::new(Mutex::new(EstadoDoAudio {
+            capture: io.microfone(),
+            playback: io.saida(),
+            estado: EstadoDoAparelho::Funcionando,
+            reaberturas: 0,
+            taxas: io.taxas(),
+        }));
 
-        let controls = Arc::new(Controls {
-            muted: AtomicBool::new(false),
-            total_isolation: AtomicBool::new(false),
-            key_held: AtomicBool::new(false),
-            // specs/03-audio.md makes push-to-talk the default because it never
-            // false-triggers, and a client that transmits a room by accident is
-            // worse than one that misses a word.
-            mode: AtomicU8::new(VoiceMode::PushToTalk.as_byte()),
-            bitrate: AtomicU32::new(DEFAULT_BITRATE_BPS),
-            speaking: AtomicBool::new(false),
-            stop: AtomicBool::new(false),
-            relogio_seq: AtomicU32::new(0),
-            relogio_carimbo: AtomicU32::new(0),
-            recusados: std::sync::atomic::AtomicU64::new(0),
-            anel_cheio: std::sync::atomic::AtomicU64::new(0),
-            gains: Mutex::new(HashMap::new()),
-            som_da_tela: Mutex::new(std::collections::VecDeque::new()),
-        });
+        let controls = Arc::new(Controls::novos());
         let telemetry = Arc::new(Mutex::new(AudioTelemetry::default()));
 
         let thread_controls = Arc::clone(&controls);
         let thread_telemetry = Arc::clone(&telemetry);
+        let thread_aparelhos = Arc::clone(&aparelhos);
+        // A escolha vai junto para a thread: reabrir num aparelho novo é
+        // repetir **o pedido**, não o resultado. Quem pediu o padrão do sistema
+        // quer o padrão de agora; quem pediu um aparelho por id quer aquele de
+        // volta assim que ele aparecer.
+        let thread_escolha = chosen.clone();
         std::thread::Builder::new()
             .name("seele-voice".into())
             .spawn(move || {
@@ -544,15 +817,21 @@ impl Voice {
                     Ok(runtime) => runtime,
                     Err(_) => return,
                 };
-                runtime.block_on(pipeline(io, media, ssrc, thread_controls, thread_telemetry));
+                runtime.block_on(pipeline(
+                    io,
+                    media,
+                    ssrc,
+                    thread_controls,
+                    thread_telemetry,
+                    thread_aparelhos,
+                    thread_escolha,
+                ));
             })?;
 
         Ok(Self {
             controls,
             telemetry,
-            rates,
-            capture,
-            playback,
+            aparelhos,
             chosen,
             falha_local: Mutex::new(FalhaLocal::new()),
             faixa: Mutex::new(seele_audio::bitrate::Controlador::novo()),
@@ -560,9 +839,13 @@ impl Voice {
     }
 
     /// What the devices actually run at.
+    ///
+    /// Lido do painel e não de um campo guardado na abertura, porque o aparelho
+    /// pode ter sido trocado por baixo da sessão desde então — ver
+    /// [`EstadoDoAudio::taxas`].
     #[must_use]
     pub fn rates(&self) -> DeviceRates {
-        self.rates
+        self.estado_do_audio().taxas
     }
 
     /// Dobra a perda de subida que o servidor relatou, e move a faixa se ela
@@ -601,9 +884,23 @@ impl Voice {
     /// `None` when the backend would not describe the device it opened. Audio is
     /// still running in that case — an interface must draw an unnamed device,
     /// not a missing one.
+    ///
+    /// Devolve cópia e não empréstimo porque o valor **muda enquanto a sessão
+    /// vive**: o laço o reescreve quando o sistema troca o aparelho. Um
+    /// empréstimo para dentro do `Voice` prometeria um valor parado.
     #[must_use]
-    pub fn capture(&self) -> Option<&CaptureDevice> {
-        self.capture.as_ref()
+    pub fn capture(&self) -> Option<CaptureDevice> {
+        self.estado_do_audio().capture
+    }
+
+    /// Os aparelhos em uso e em que pé eles estão, de uma vez.
+    ///
+    /// É o que a casca desenha. Uma leitura só, porque as três respostas têm de
+    /// ser do mesmo instante: nome novo com estado velho é a interface dizendo
+    /// que já trocou quando ainda está trocando.
+    #[must_use]
+    pub fn estado_do_audio(&self) -> EstadoDoAudio {
+        painel_mesmo_envenenado(&self.aparelhos).clone()
     }
 
     /// Where this path is actually playing.
@@ -612,9 +909,11 @@ impl Voice {
     /// the same reason: what opened, never what was asked for. It is the only
     /// evidence a person gets that a chosen output was not there — nothing about
     /// falling back to the machine's speakers announces itself.
+    ///
+    /// Cópia e não empréstimo, pela razão escrita em [`Voice::capture`].
     #[must_use]
-    pub fn playback(&self) -> Option<&PlaybackDevice> {
-        self.playback.as_ref()
+    pub fn playback(&self) -> Option<PlaybackDevice> {
+        self.estado_do_audio().playback
     }
 
     /// Which devices this path asked for, which is not what it got.
@@ -734,30 +1033,7 @@ impl Voice {
 
     /// Puts this path's controls onto a freshly opened one.
     fn carry_over(&self, fresh: &Self) {
-        fresh.set_muted(self.muted());
-        fresh.set_total_isolation(self.total_isolation());
-        fresh.set_mode(self.mode());
-        fresh.set_key_held(self.controls.key_held.load(Ordering::Relaxed));
-        // O relógio de mídia junto, e é o item cuja falta calava a pessoa. Ver
-        // `Controls::relogio_seq` para o porquê e `salto_do_relogio` para o
-        // tamanho do pulo.
-        let (seq, carimbo) = Self::salto_do_relogio(
-            self.controls.relogio_seq.load(Ordering::Relaxed) as u16,
-            self.controls.relogio_carimbo.load(Ordering::Relaxed),
-        );
-        fresh
-            .controls
-            .relogio_seq
-            .store(u32::from(seq), Ordering::Relaxed);
-        fresh
-            .controls
-            .relogio_carimbo
-            .store(carimbo, Ordering::Relaxed);
-        if let Ok(gains) = self.controls.gains.lock() {
-            for (talker, gain) in gains.iter() {
-                fresh.set_gain(*talker, *gain);
-            }
-        }
+        carregar_controles(&self.controls, &fresh.controls);
     }
 
     /// Onde o relógio de mídia recomeça depois de trocar de dispositivo.
@@ -960,6 +1236,117 @@ struct Source {
 /// encher de novo na primeira palavra — algumas dezenas de milissegundos.
 const SILENCIO_ATE_ESQUECER_MS: f64 = 30_000.0;
 
+/// Quem reabre os aparelhos por conta do laço.
+///
+/// Repete **o pedido** e não o resultado, e cai para o aparelho da máquina um
+/// lado de cada vez — é `open_preferring`, o mesmo caminho de uma reconexão.
+/// Reabrir com o id do aparelho que acabou de sumir prenderia a sessão a um
+/// aparelho que não existe; reabrir sempre no padrão jogaria fora a escolha de
+/// quem escolheu.
+///
+/// Reenumera a cada tentativa: `device::open` pergunta ao host de novo, e é aí
+/// que o padrão de agora — o que a pessoa acabou de escolher na bandeja do
+/// sistema — entra.
+struct ReabrirAparelhos<'a> {
+    escolha: &'a DeviceChoice,
+}
+
+impl Reabertura for ReabrirAparelhos<'_> {
+    type Aberto = AudioIo;
+    type Erro = device::DeviceError;
+
+    fn reabrir(&mut self) -> Result<AudioIo, device::DeviceError> {
+        open_preferring(self.escolha).inspect_err(|falha| {
+            tracing::warn!(%falha, "a reabertura do aparelho não conseguiu abrir nada");
+        })
+    }
+
+    /// Os contadores do aparelho que acabou de abrir, que nascem zerados em
+    /// `device::open` — e é deles que a volta seguinte do laço lê, porque ela
+    /// troca o `AudioIo` inteiro.
+    fn aviso_de(&self, aberto: &AudioIo) -> AvisoDeAparelho {
+        aberto.counters.aviso_de_aparelho()
+    }
+}
+
+/// Tudo o que as taxas do aparelho dimensionam, numa peça só.
+///
+/// Numa peça só e construídas num lugar só porque as quatro têm de ser refeitas
+/// **juntas** quando o aparelho muda: um reamostrador da taxa antiga com um anel
+/// da taxa nova toca rápido ou devagar para sempre — o defeito que chega como «a
+/// voz ficou estranha depois que troquei o fone». Separadas, a reabertura podia
+/// refazer três e esquecer a quarta, e nada no código diria isso.
+///
+/// Fora do laço pelo mesmo motivo que [`Acompanhamento`]: o laço tem `cpal` de um
+/// lado e um socket do outro, e não é testável. Isto é.
+struct Dimensoes {
+    /// Do aparelho de captura para os 48 kHz do encanamento.
+    para_o_laco: RateConverter,
+    /// Dos 48 kHz para a saída, ajustável — ver o comentário em `pipeline`.
+    para_o_aparelho: RateConverter,
+    /// Capacidade do anel de saída, em amostras.
+    anel: usize,
+    /// A malha que segura o anel longe das duas pontas.
+    ritmo: RingPacer,
+}
+
+impl Dimensoes {
+    /// As dimensões de um aparelho que acabou de abrir.
+    ///
+    /// `None` quando o reamostrador recusa as taxas dele, que é o único caso em
+    /// que não há laço possível com este aparelho.
+    fn do_aparelho(captura_hz: u32, saida_hz: u32, anel: usize) -> Option<Self> {
+        let (Ok(para_o_laco), Ok(para_o_aparelho)) = (
+            RateConverter::new(captura_hz, SAMPLE_RATE_HZ),
+            RateConverter::new_adjustable(SAMPLE_RATE_HZ, saida_hz),
+        ) else {
+            return None;
+        };
+        Some(Self {
+            para_o_laco,
+            para_o_aparelho,
+            anel,
+            ritmo: RingPacer::new(saida_hz, anel),
+        })
+    }
+}
+
+/// As dimensões do aparelho, **e** a tela dizendo a verdade quando não há.
+///
+/// Uma função só porque as duas coisas não podem se separar: recusar as taxas
+/// encerra o laço, e um laço que encerra deixando o painel em «funcionando» é a
+/// pessoa sem som nenhum lendo normalidade na tela. Junto aqui, o teste
+/// consegue provar a ligação entre as duas — separadas, ela só existia na
+/// ordem em que o laço, que nenhum teste alcança, chamava uma e depois a outra.
+fn dimensoes_ou_dizer_que_nao_ha(
+    painel: &Mutex<EstadoDoAudio>,
+    captura_hz: u32,
+    saida_hz: u32,
+    anel: usize,
+) -> Option<Dimensoes> {
+    let dimensoes = Dimensoes::do_aparelho(captura_hz, saida_hz, anel);
+    if dimensoes.is_none() {
+        tracing::error!(
+            captura_hz,
+            saida_hz,
+            "o aparelho abriu e o reamostrador recusou as taxas dele; não há laço possível"
+        );
+        painel_mesmo_envenenado(painel).sem_laco_possivel();
+    }
+    dimensoes
+}
+
+/// Esvazia o que ficou a caminho, porque era do aparelho anterior.
+///
+/// Amostras na taxa de antes, tocadas no aparelho de agora, saem como um estalo
+/// ou um trecho acelerado no instante da troca — o primeiro som que a pessoa
+/// ouve do aparelho novo, e o pior possível.
+fn esvaziar_o_que_era_do_antigo(restos: [&mut Vec<f32>; 4]) {
+    for resto in restos {
+        resto.clear();
+    }
+}
+
 /// The whole loop, on its own thread.
 #[allow(
     clippy::too_many_lines,
@@ -971,6 +1358,8 @@ async fn pipeline(
     ssrc: Ssrc,
     controls: Arc<Controls>,
     telemetry: Arc<Mutex<AudioTelemetry>>,
+    aparelhos: Arc<Mutex<EstadoDoAudio>>,
+    escolha: DeviceChoice,
 ) {
     let Ok(mut encoder) = VoiceEncoder::with_defaults() else {
         return;
@@ -986,15 +1375,28 @@ async fn pipeline(
     // diferença de cristal de lá não se acumula em anel nenhum. Ela sai daqui
     // como quadros ligeiramente mais rápidos ou mais lentos, e quem a corrige é
     // o `DriftTracker` de quem recebe.
-    let (Ok(mut to_pipeline), Ok(mut to_device)) = (
-        RateConverter::new(io.capture_rate_hz, SAMPLE_RATE_HZ),
-        RateConverter::new_adjustable(SAMPLE_RATE_HZ, io.playback_rate_hz),
-    ) else {
+    let Some(Dimensoes {
+        para_o_laco: mut to_pipeline,
+        para_o_aparelho: mut to_device,
+        anel: mut anel_de_saida,
+        mut ritmo,
+    }) = dimensoes_ou_dizer_que_nao_ha(
+        &aparelhos,
+        io.capture_rate_hz,
+        io.playback_rate_hz,
+        io.to_device.buffer().capacity(),
+    )
+    else {
         return;
     };
-    let anel_de_saida = io.to_device.buffer().capacity();
-    let mut ritmo = RingPacer::new(io.playback_rate_hz, anel_de_saida);
     let mut ritmo_avisado = false;
+
+    // O ciclo do aparelho. Sem ele, um aparelho trocado no sistema operacional
+    // só valia reiniciando o aplicativo: o `cpal` avisava pelo retorno de erro,
+    // o aviso virava «mais um» num contador, e este laço seguia falando com um
+    // endpoint que já não era o de ninguém.
+    let mut acompanhamento = Acompanhamento::novo();
+    let mut abridor = ReabrirAparelhos { escolha: &escolha };
 
     let mut gate = VoiceGate::new(GateConfig::default(), GateMode::PushToTalk);
     let mut mixer = Mixer::new();
@@ -1033,6 +1435,59 @@ async fn pipeline(
     let mut next_telemetry = Instant::now() + TELEMETRY_EVERY;
 
     while !controls.stop.load(Ordering::Relaxed) {
+        // ---- o aparelho, antes de qualquer amostra ----
+        //
+        // Duas leituras atômicas por volta quando não há nada acontecendo, que é
+        // o caso comum. Primeiro de tudo porque capturar e tocar num aparelho
+        // que já foi embora é gastar uma volta inteira para produzir silêncio.
+        let relogio_ms = started.elapsed().as_secs_f64() * 1000.0;
+        if let Some(novo) = acompanhamento.passo(
+            io.counters.aviso_de_aparelho(),
+            relogio_ms,
+            &mut abridor,
+            &aparelhos,
+        ) {
+            io = novo;
+            // Tudo o que foi dimensionado pelas taxas do aparelho antigo é
+            // refeito: o aparelho novo pode ter outra taxa e outro anel, e
+            // reaproveitar os de antes é tocar mais rápido ou mais devagar para
+            // sempre — um defeito que soa como «a voz ficou estranha depois que
+            // troquei o fone».
+            let Some(novas) = dimensoes_ou_dizer_que_nao_ha(
+                &aparelhos,
+                io.capture_rate_hz,
+                io.playback_rate_hz,
+                io.to_device.buffer().capacity(),
+            ) else {
+                return;
+            };
+            to_pipeline = novas.para_o_laco;
+            to_device = novas.para_o_aparelho;
+            anel_de_saida = novas.anel;
+            ritmo = novas.ritmo;
+            ritmo_avisado = false;
+            esvaziar_o_que_era_do_antigo([
+                &mut pending,
+                &mut captured,
+                &mut at_48k,
+                &mut for_device,
+            ]);
+            // Abrir um endpoint custa centenas de milissegundos, e essa pausa é
+            // desta volta do laço. Sem reacertar, ela entraria no relógio de
+            // reprodução como reacerto e como atraso máximo — e o instrumento
+            // que responde *é a rede ou é esta máquina?* passaria a acusar a
+            // máquina de quem apenas trocou de fone. Ver
+            // `PlayoutClock::reacertar`.
+            playout.reacertar(Instant::now());
+
+            tracing::info!(
+                microfone = ?io.capture.as_ref().map(|aparelho| &aparelho.name),
+                saida = ?io.playback.as_ref().map(|aparelho| &aparelho.name),
+                estado = ?acompanhamento.estado(),
+                "o aparelho de áudio mudou; a voz foi reaberta no aparelho de agora"
+            );
+        }
+
         // ---- receive ----
         while let Ok(Ok(bytes)) = tokio::time::timeout(Duration::from_millis(1), media.next()).await
         {
@@ -1416,6 +1871,55 @@ mod relogio_de_midia {
 #[cfg(test)]
 mod tests {
 
+    /// O laço de áudio conduz o acompanhamento do aparelho a cada volta.
+    ///
+    /// Sem esta chamada, todo o ciclo de reabertura continua existindo, continua
+    /// correto e continua provado pelos testes de conformidade — e nunca corre.
+    /// O defeito de origem volta inteiro: trocar de fone ou de microfone pelo
+    /// sistema operacional só vale depois de reiniciar o aplicativo. Foi medido:
+    /// apagando o bloco de `pipeline` que chama `passo`, a suíte inteira
+    /// continua verde.
+    ///
+    /// Ler o fonte porque não há tipo que expresse «este laço chama aquela
+    /// função». É o mesmo recurso do guarda de ordem logo acima, pela mesma
+    /// razão: o teste de conformidade refaz a volta do laço à mão, então ele
+    /// prova o ciclo e não prova que alguém o conduz.
+    ///
+    /// A âncora é o **laço**, e não o nome da função que o contém: renomear
+    /// `pipeline` ou mudar a forma como ela fecha não faz este guarda entrar em
+    /// pânico com uma mensagem de que ninguém entende a causa. O que ele exige é
+    /// que a chamada esteja depois da volta que roda enquanto a chamada dura, e
+    /// antes do primeiro `#[cfg(test)]` — quer dizer, no programa e não num
+    /// teste. Se um dia o laço deixar de ser escrito assim, o guarda diz isso
+    /// com todas as letras, em vez de morrer num `expect` cru.
+    #[test]
+    fn o_laco_de_audio_conduz_o_acompanhamento_do_aparelho() {
+        let fonte = include_str!("voice.rs");
+        // Só o que vira programa: daqui em diante é bateria de testes, e uma
+        // chamada aqui de dentro não conduziria aparelho nenhum de ninguém.
+        let programa = match fonte.find("\n#[cfg(test)]") {
+            Some(corte) => &fonte[..corte],
+            None => fonte,
+        };
+        let Some(laco) = programa.find("while !controls.stop") else {
+            panic!(
+                "o laço de áudio deixou de ser uma volta sobre `controls.stop`, \
+                 e este guarda não sabe mais onde procurar.\n\
+                 Ele não está dizendo que o programa quebrou: está dizendo que \
+                 precisa ser reapontado para a forma nova do laço, senão a troca \
+                 de aparelho fica sem quem a verifique."
+            )
+        };
+        let depois_do_laco = &programa[laco..];
+        assert!(
+            depois_do_laco.contains("acompanhamento.passo("),
+            "o laço de áudio deixou de conduzir o acompanhamento do aparelho.\n\
+             O supervisor volta a ser código morto e a troca de microfone ou de \
+             fone feita no sistema operacional volta a só valer depois de \
+             reiniciar o aplicativo."
+        );
+    }
+
     /// O ganho do microfone corre **depois** do portão de voz.
     ///
     /// A ordem é a coisa toda, e ela some numa refatoração sem que nada quebre:
@@ -1574,5 +2078,185 @@ mod faixa_de_bitrate {
     #[test]
     fn o_controlador_nasce_no_mesmo_valor_que_o_encoder() {
         assert_eq!(Controlador::novo().bitrate_bps(), DEFAULT_BITRATE_BPS);
+    }
+}
+
+#[cfg(test)]
+mod controles_na_reabertura {
+    //! O que **não** pode se perder quando a voz reabre num aparelho novo.
+    //!
+    //! Reabrir acontece de três jeitos — trocar de microfone, trocar de saída,
+    //! e a reabertura automática quando o sistema troca o aparelho por baixo da
+    //! sessão — e os três passam por `carregar_controles`. O guarda que existia
+    //! para isto lia o texto-fonte da casca à procura da palavra `reopen`: ele
+    //! prova que alguém a escreveu, e **nada** sobre o que sobrevive. Um
+    //! `carregar_controles` que esquecesse o mudo passaria por ele inteiro.
+    //!
+    //! O item que machuca é o mudo: uma reabertura que o desliga sozinha põe no
+    //! ar uma sala que estava calada, sem ninguém ter pedido.
+
+    use super::{carregar_controles, Controls, VoiceMode};
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn os_controles_atravessam_a_reabertura() {
+        let velho = Controls::novos();
+        velho.muted.store(true, Ordering::Relaxed);
+        velho.total_isolation.store(true, Ordering::Relaxed);
+        velho.key_held.store(true, Ordering::Relaxed);
+        velho
+            .mode
+            .store(VoiceMode::VoiceActivated.as_byte(), Ordering::Relaxed);
+        velho.gains.lock().expect("ganhos").insert(7, 0.25);
+
+        let novo = Controls::novos();
+        carregar_controles(&velho, &novo);
+
+        assert!(
+            novo.muted.load(Ordering::Relaxed),
+            "a reabertura desligou o mudo sozinha, que é pôr uma sala no ar"
+        );
+        assert!(
+            novo.total_isolation.load(Ordering::Relaxed),
+            "quem estava em Isolamento total voltou ouvindo todo mundo"
+        );
+        assert!(novo.key_held.load(Ordering::Relaxed));
+        assert_eq!(
+            novo.mode.load(Ordering::Relaxed),
+            VoiceMode::VoiceActivated.as_byte(),
+            "o modo do microfone voltou ao padrão"
+        );
+        assert_eq!(
+            novo.gains.lock().expect("ganhos").get(&7).copied(),
+            Some(0.25),
+            "o volume que alguém ajustou para uma pessoa voltou ao padrão"
+        );
+    }
+
+    #[test]
+    fn o_relogio_de_midia_pula_para_a_frente_em_vez_de_recomecar() {
+        // O defeito que calava a pessoa do outro lado: um caminho novo sobre o
+        // mesmo `ssrc` contando do zero é descartado inteiro por quem recebe.
+        let velho = Controls::novos();
+        velho.relogio_seq.store(4_000, Ordering::Relaxed);
+        velho.relogio_carimbo.store(1_000_000, Ordering::Relaxed);
+
+        let novo = Controls::novos();
+        carregar_controles(&velho, &novo);
+
+        assert_eq!(novo.relogio_seq.load(Ordering::Relaxed), 4_001);
+        assert_eq!(
+            novo.relogio_carimbo.load(Ordering::Relaxed),
+            1_000_000 + seele_audio::SAMPLE_RATE_HZ,
+            "sem a folga de um segundo, os quadros do caminho novo chegam \
+             atrás dos do velho, que ainda está no ar"
+        );
+    }
+}
+
+/// O dimensionamento do aparelho recém-aberto, que é a outra metade da troca.
+///
+/// Reabrir no aparelho certo e seguir tocando com as medidas do anterior é
+/// trocar um defeito por outro: o som sai, mas rápido ou devagar para sempre.
+/// Estes guardas provam que as medidas seguem o aparelho de agora, e que o que
+/// estava a caminho no aparelho de antes não é despejado no novo.
+#[cfg(test)]
+mod dimensoes_do_aparelho {
+    use super::{
+        dimensoes_ou_dizer_que_nao_ha, esvaziar_o_que_era_do_antigo, Dimensoes, EstadoDoAparelho,
+        EstadoDoAudio, Mutex,
+    };
+    use seele_audio::SAMPLE_RATE_HZ;
+
+    /// Um painel de sessão que a interface leria como normalidade.
+    fn painel_de_quem_estava_ouvindo() -> Mutex<EstadoDoAudio> {
+        Mutex::new(EstadoDoAudio {
+            estado: EstadoDoAparelho::Funcionando,
+            ..EstadoDoAudio::default()
+        })
+    }
+
+    #[test]
+    fn as_medidas_seguem_o_aparelho_de_agora_e_nao_o_de_antes() {
+        // Um fone de 48 kHz com anel de 20 ms, e depois um de 44,1 kHz com anel
+        // maior — o caso comum de trocar fone de USB por saída embutida.
+        let antes = Dimensoes::do_aparelho(48_000, 48_000, 960)
+            .expect("48 kHz dos dois lados é o caso mais simples que existe");
+        let depois = Dimensoes::do_aparelho(44_100, 44_100, 4_410)
+            .expect("44,1 kHz é taxa de aparelho de verdade, não de exceção");
+
+        assert_eq!(depois.para_o_laco.from_hz(), 44_100);
+        assert_eq!(depois.para_o_laco.to_hz(), SAMPLE_RATE_HZ);
+        assert_eq!(depois.para_o_aparelho.from_hz(), SAMPLE_RATE_HZ);
+        assert_eq!(
+            depois.para_o_aparelho.to_hz(),
+            44_100,
+            "o reamostrador de saída ficou na taxa do aparelho anterior; a voz \
+             sai acelerada enquanto a sessão durar"
+        );
+        assert_eq!(depois.anel, 4_410);
+        assert_ne!(
+            depois.ritmo.target_samples(),
+            antes.ritmo.target_samples(),
+            "a malha do anel ficou com a medida do aparelho anterior; ela vai \
+             mirar uma profundidade que este anel não tem"
+        );
+    }
+
+    #[test]
+    fn uma_taxa_que_o_reamostrador_recusa_nao_vira_laco() {
+        // Zero não é aparelho: é o que sobra quando a descrição do dispositivo
+        // vem vazia. Melhor não abrir laço nenhum do que dividir por ela.
+        assert!(Dimensoes::do_aparelho(0, 48_000, 960).is_none());
+        assert!(Dimensoes::do_aparelho(48_000, 0, 960).is_none());
+    }
+
+    #[test]
+    fn o_aparelho_cuja_taxa_e_recusada_nao_fica_na_tela_como_funcionando() {
+        let painel = painel_de_quem_estava_ouvindo();
+
+        let dimensoes = dimensoes_ou_dizer_que_nao_ha(&painel, 0, 48_000, 960);
+
+        assert!(dimensoes.is_none(), "não há laço possível com taxa zero");
+        assert_eq!(
+            painel.lock().expect("painel só é travado aqui").estado,
+            EstadoDoAparelho::Perdido,
+            "o laço vai encerrar e a tela continua dizendo que está tudo              funcionando; a pessoa fica sem som nenhum sem nada que explique"
+        );
+    }
+
+    #[test]
+    fn o_aparelho_que_o_laco_aceita_nao_e_anunciado_como_perdido() {
+        let painel = painel_de_quem_estava_ouvindo();
+
+        let dimensoes = dimensoes_ou_dizer_que_nao_ha(&painel, 44_100, 48_000, 960);
+
+        assert!(dimensoes.is_some(), "44,1 kHz de entrada é aparelho comum");
+        assert_eq!(
+            painel.lock().expect("painel só é travado aqui").estado,
+            EstadoDoAparelho::Funcionando,
+            "um aparelho que abriu e serve foi anunciado como perdido"
+        );
+    }
+
+    #[test]
+    fn o_que_estava_a_caminho_do_aparelho_antigo_nao_toca_no_novo() {
+        let (mut pendentes, mut capturadas) = (vec![0.1_f32; 480], vec![0.2_f32; 240]);
+        let (mut em_48k, mut para_o_aparelho) = (vec![0.3_f32; 960], vec![0.4_f32; 120]);
+
+        esvaziar_o_que_era_do_antigo([
+            &mut pendentes,
+            &mut capturadas,
+            &mut em_48k,
+            &mut para_o_aparelho,
+        ]);
+
+        for resto in [&pendentes, &capturadas, &em_48k, &para_o_aparelho] {
+            assert!(
+                resto.is_empty(),
+                "restou amostra da taxa do aparelho anterior para tocar no novo; \
+                 é um estalo no primeiro instante do fone que a pessoa acabou de pôr"
+            );
+        }
     }
 }

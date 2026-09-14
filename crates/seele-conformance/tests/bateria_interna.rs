@@ -34,6 +34,10 @@ async fn server(porta: u16, banco: Location) -> Result<(SocketAddr, Arc<Daemon>)
         database: banco,
         ..ServerConfig::default()
     };
+    // Pendência 29: uma vaga por thread de teste, para que os servidores de
+    // verdade deste crate não saturem a máquina e queimem o prazo do
+    // `connect` de quem estiver ao lado. Ver `seele_conformance::vaga`.
+    seele_conformance::vaga();
     let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);

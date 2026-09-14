@@ -37,6 +37,10 @@ async fn start(database: PathBuf) -> Result<(SocketAddr, Arc<Daemon>)> {
         database: Location::File(database),
         ..ServerConfig::default()
     };
+    // Pendência 29: uma vaga por thread de teste, para que os servidores de
+    // verdade deste crate não saturem a máquina e queimem o prazo do
+    // `connect` de quem estiver ao lado. Ver `seele_conformance::vaga`.
+    seele_conformance::vaga();
     let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     // `run` borrows, so the handle stays with the test and can shut the
@@ -257,6 +261,10 @@ async fn a_person_without_write_permission_is_refused() -> Result<()> {
         observers: vec!["observador".into()],
         ..ServerConfig::default()
     };
+    // Pendência 29: uma vaga por thread de teste, para que os servidores de
+    // verdade deste crate não saturem a máquina e queimem o prazo do
+    // `connect` de quem estiver ao lado. Ver `seele_conformance::vaga`.
+    seele_conformance::vaga();
     let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     let accepting = Arc::clone(&server);

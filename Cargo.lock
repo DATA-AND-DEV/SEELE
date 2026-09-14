@@ -5021,6 +5021,7 @@ name = "seele-conformance"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cpal",
  "ed25519-dalek",
  "rand 0.10.2",
  "ratatui",

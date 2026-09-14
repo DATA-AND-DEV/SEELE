@@ -178,6 +178,29 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     })
 }
 
+/// Escreve num fluxo de saída aceitando que o outro lado já tenha parado de ouvir.
+///
+/// Os dois testes daqui mandam bytes que o servidor **não vai ler**: num deles o
+/// tipo é recusado, no outro não há diretório de anexos e só o cabeçalho
+/// interessa. Nos dois casos o servidor larga o fluxo assim que decide, e largar
+/// um fluxo de entrada no QUIC manda `STOP_SENDING` de volta — de modo que a
+/// escrita seguinte do cliente falha com `Stopped`.
+///
+/// Isso é o servidor acertando: ele não gasta leitura com byte que não vai
+/// guardar. Quem errava era o teste, que tratava a corrida como erro e reprovava
+/// sob carga com «sending stopped by peer: error 0» — uma reprovação por tempo,
+/// não por comportamento. O que cada teste prova está nas asserções depois daqui,
+/// e nenhuma delas depende de o corpo ter chegado.
+///
+/// Qualquer outro erro de escrita continua reprovando: só o corte do par é
+/// tolerado.
+async fn escrever_mesmo_que_parem(fluxo: &mut quinn::SendStream, bytes: &[u8]) -> Result<()> {
+    match fluxo.write_all(bytes).await {
+        Ok(()) | Err(quinn::WriteError::Stopped(_)) => Ok(()),
+        Err(erro) => Err(erro.into()),
+    }
+}
+
 /// O quadro de um cabeçalho de transferência: quatro bytes de tamanho e o corpo.
 fn cabecalho_de_anexo(chave: u64) -> Vec<u8> {
     let header = AttachmentHeader {
@@ -222,9 +245,9 @@ async fn o_byte_reservado_e_recusado_em_vez_de_ser_lido_como_anexo() -> Result<(
     let mut fluxo = par.conexao.open_uni().await?;
     // O quadro do jeito antigo: os quatro bytes do comprimento inteiros, com o
     // zero na frente fazendo as vezes do tipo. É o que a aritmética lia.
-    fluxo.write_all(&cabecalho_de_anexo(1)).await?;
-    fluxo.write_all(&[1, 2, 3, 4]).await?;
-    fluxo.finish()?;
+    escrever_mesmo_que_parem(&mut fluxo, &cabecalho_de_anexo(1)).await?;
+    escrever_mesmo_que_parem(&mut fluxo, &[1, 2, 3, 4]).await?;
+    let _ = fluxo.finish();
 
     // Nada volta. Se voltasse, o servidor teria lido o cabeçalho — quer dizer,
     // teria adivinhado o tipo do fluxo a partir do conteúdo dele.
@@ -276,10 +299,10 @@ async fn um_fluxo_que_diz_ser_anexo_e_lido_como_anexo() -> Result<()> {
     let mut par = abrir(endereco, 2).await?;
 
     let mut fluxo = par.conexao.open_uni().await?;
-    fluxo.write_all(&[StreamType::Attachment.byte()]).await?;
-    fluxo.write_all(&cabecalho_de_anexo(77)).await?;
-    fluxo.write_all(&[1, 2, 3, 4]).await?;
-    fluxo.finish()?;
+    escrever_mesmo_que_parem(&mut fluxo, &[StreamType::Attachment.byte()]).await?;
+    escrever_mesmo_que_parem(&mut fluxo, &cabecalho_de_anexo(77)).await?;
+    escrever_mesmo_que_parem(&mut fluxo, &[1, 2, 3, 4]).await?;
+    let _ = fluxo.finish();
 
     // Este servidor não guarda arquivo, então a resposta honesta é `Unavailable` —
     // e ela só existe porque o cabeçalho foi lido: é dele que sai o nome a quem

@@ -201,7 +201,10 @@ impl LocalTelemetry {
 /// alguma coisa.
 ///
 /// Agora é derivada: falha é o contador **crescer** entre duas olhadas. Acende
-/// enquanto o problema acontece e apaga sozinho quando para.
+/// enquanto o problema acontece e apaga sozinho quando para. Quando o contador
+/// **encolhe**, os contadores reiniciaram — trocar de aparelho abre um
+/// `AudioIo` novo, zerado —, e a régua se muda para o valor novo em vez de
+/// ficar presa no máximo do aparelho anterior.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FalhaLocal {
     visto: u64,
@@ -227,17 +230,37 @@ impl FalhaLocal {
     /// Olha os contadores e diz se a máquina está falhando agora.
     pub fn observar(&mut self, agora: &LocalTelemetry) -> bool {
         let total = agora.tropecos();
-        if total > self.visto {
+        if total < self.visto {
+            // Contador menor que o visto: os contadores reiniciaram. É o que
+            // acontece a cada reabertura de aparelho — o `AudioIo` novo traz
+            // `StreamCounters` zerados. Sem adotar o novo ponto de partida, o
+            // total do aparelho novo jamais superaria a marca do anterior e o
+            // aviso ficaria cego pelo resto da sessão. Reiniciar não é falha:
+            // só reposiciona a régua. E, como olhada, é tão quieta quanto
+            // qualquer outra sem crescimento: o aparelho novo não tropeçou
+            // nada, então ela conta na folga em vez de fazer um aviso já aceso
+            // sobreviver uma olhada além do conserto.
+            self.visto = total;
+            self.contar_quieta();
+        } else if total > self.visto {
             self.visto = total;
             self.quietas = 0;
             self.acesa = true;
-        } else if self.acesa {
-            self.quietas = self.quietas.saturating_add(1);
-            if self.quietas >= QUIETAS_PARA_APAGAR {
-                self.acesa = false;
-            }
+        } else {
+            self.contar_quieta();
         }
         self.acesa
+    }
+
+    /// Uma olhada sem crescimento: anda a folga e apaga o aviso no fim dela.
+    fn contar_quieta(&mut self) {
+        if !self.acesa {
+            return;
+        }
+        self.quietas = self.quietas.saturating_add(1);
+        if self.quietas >= QUIETAS_PARA_APAGAR {
+            self.acesa = false;
+        }
     }
 
     /// O que a última olhada concluiu.
@@ -434,6 +457,59 @@ mod falha_local {
         detector.observar(&com(1));
         assert!(detector.observar(&com(1)), "apagou cedo demais");
         assert!(detector.observar(&com(2)));
+    }
+
+    #[test]
+    fn o_aviso_nao_fica_cego_depois_de_trocar_de_aparelho() {
+        // Trocar de aparelho abre um `AudioIo` novo, e com ele contadores que
+        // nascem zerados. Se o detector guardasse só uma marca de máximo, o
+        // total menor do aparelho novo nunca "cresceria" e o aviso ficaria
+        // cego justamente depois da troca — o evento que esta parte do produto
+        // existe para seguir.
+        let mut detector = FalhaLocal::new();
+        detector.observar(&com(3392));
+        for _ in 0..QUIETAS_PARA_APAGAR {
+            detector.observar(&com(3392));
+        }
+        assert!(!detector.acesa());
+
+        // A reabertura: contadores do aparelho novo, começando do zero.
+        assert!(
+            !detector.observar(&com(0)),
+            "o zero da reabertura não é falha nenhuma"
+        );
+
+        assert!(
+            detector.observar(&com(5)),
+            "o aparelho novo tropeçou e o aviso não acendeu — detector cego \
+             depois da troca"
+        );
+    }
+
+    #[test]
+    fn a_reabertura_conta_como_amostra_quieta() {
+        // A reabertura é uma olhada sem crescimento como qualquer outra: o
+        // aparelho novo não tropeçou nada. Se ela não contasse na folga, um
+        // aviso já aceso gastaria uma olhada a mais para apagar justamente
+        // depois do conserto — o produto continuaria dizendo que falha logo
+        // depois de a falha ter sido resolvida.
+        let mut detector = FalhaLocal::new();
+        assert!(
+            detector.observar(&com(3392)),
+            "não acendeu quando aconteceu"
+        );
+
+        // A reabertura zera os contadores, e em seguida a máquina fica quieta.
+        detector.observar(&com(0));
+        for _ in 0..QUIETAS_PARA_APAGAR - 1 {
+            detector.observar(&com(0));
+        }
+
+        assert!(
+            !detector.acesa(),
+            "a reabertura não entrou na folga: o aviso sobrevive uma olhada \
+             além do conserto"
+        );
     }
 
     #[test]

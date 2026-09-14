@@ -150,6 +150,23 @@ impl PlayoutClock {
         frames
     }
 
+    /// Reparte de `now`, sem contar a pausa como atraso da máquina.
+    ///
+    /// Existe para **uma** pausa: a que o laço tira de propósito para reabrir o
+    /// aparelho quando ele muda no sistema operacional. Abrir um endpoint custa
+    /// centenas de milissegundos, e esse custo não é o laço perdendo o compasso
+    /// — é o laço fazendo o que foi mandado fazer.
+    ///
+    /// Sem isto, cada troca de fone deixaria um `resyncs` e um
+    /// `worst_lateness_ms` de meio segundo para trás, e o instrumento que existe
+    /// para separar *é a rede ou é esta máquina?* passaria a responder «é esta
+    /// máquina» para quem só trocou de fone. A pausa continua contada: a
+    /// reabertura tem aviso próprio e contador próprio de trocas — o que este
+    /// método impede é ela ser contada **como outra coisa**.
+    pub fn reacertar(&mut self, now: Instant) {
+        self.next = now;
+    }
+
     /// O que este relógio viu.
     #[must_use]
     pub fn metrics(&self) -> PlayoutMetrics {
@@ -323,5 +340,57 @@ mod tests {
         }
         assert_eq!(clock.due(start + ms(20)), 1);
         assert_eq!(clock.metrics().frames_due, 2);
+    }
+
+    #[test]
+    fn a_pausa_de_reabrir_o_aparelho_nao_vira_atraso_da_maquina() {
+        // Trocar de fone no sistema operacional faz o laço parar de propósito
+        // para abrir o endpoint novo — meio segundo é normal. Sem `reacertar`,
+        // essa pausa entraria como um reacerto e como meio segundo de atraso
+        // máximo, e quem lesse o instrumento depois concluiria que a máquina
+        // não dá conta de 50 quadros por segundo. O defeito não seria o áudio:
+        // seria o diagnóstico seguinte, tomado por um número que mentiu.
+        let start = base();
+        let mut clock = PlayoutClock::new(start, FRAME_MS);
+        clock.due(start);
+
+        let depois_da_troca = start + ms(520);
+        clock.reacertar(depois_da_troca);
+
+        assert_eq!(
+            clock.due(depois_da_troca),
+            1,
+            "o compasso recomeça em um quadro, e não num despejo de reposição"
+        );
+        let medido = clock.metrics();
+        assert_eq!(
+            medido.resyncs, 0,
+            "a pausa foi contada como máquina travada"
+        );
+        assert_eq!(
+            medido.catchup_frames, 0,
+            "meio segundo de reabertura virou reposição a repor"
+        );
+        assert!(
+            medido.worst_lateness_ms < f64::from(FRAME_MS),
+            "o atraso máximo passou a ser a reabertura, e não a volta do laço: {}",
+            medido.worst_lateness_ms
+        );
+    }
+
+    #[test]
+    fn sem_reacertar_a_mesma_pausa_apareceria_como_maquina_travada() {
+        // A outra metade do par: prova que `reacertar` não está escondendo uma
+        // pausa que já não apareceria. Sem ele, a mesma meia volta de relógio
+        // produz reacerto e atraso de meio segundo.
+        let start = base();
+        let mut clock = PlayoutClock::new(start, FRAME_MS);
+        clock.due(start);
+
+        clock.due(start + ms(520));
+
+        let medido = clock.metrics();
+        assert_eq!(medido.resyncs, 1);
+        assert!(medido.worst_lateness_ms > 400.0);
     }
 }
