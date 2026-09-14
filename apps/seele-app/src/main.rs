@@ -1654,7 +1654,7 @@ struct ModNaTela {
     /// que está gravado no banco desta janela; esta responde o que esse
     /// registro *faz* hoje na rede — e as duas podem discordar: um MOD pode
     /// estar `enabled: true` e ninguém ser barrado por ele, porque o anúncio
-    /// que o exige ainda está dormente (`docs/pendencias.md` #34). Sem este
+    /// que o exige ainda está dormente (`docs/pendencias.md` #39). Sem este
     /// campo, quem hospeda liga o interruptor e lê "exigido" numa tela que não
     /// tranca ninguém — o "produto sabe e não conta" que o `CLAUDE.md` deste
     /// repositório nomeia como o defeito mais caro daqui, cometido contra a

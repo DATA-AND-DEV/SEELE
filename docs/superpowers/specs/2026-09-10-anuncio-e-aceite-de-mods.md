@@ -224,7 +224,7 @@ que a de aceitar diria: quem hospeda está decidindo pela sala inteira.
 toda a lista — não é uma propriedade do MOD, é uma propriedade do momento.
 `enabled` diz o que está gravado no banco; este campo diz o que esse registro
 **faz** na rede hoje, e as duas coisas podem discordar enquanto
-`docs/pendencias.md` #34 estiver aberta: com `PROTOCOL_VERSION = 4` e
+`docs/pendencias.md` #39 estiver aberta: com `PROTOCOL_VERSION = 4` e
 `VERSAO_DO_ANUNCIO = 5`, um MOD pode estar `enabled: true` sem que
 `exigencia_vale_na_rede` acompanhe — o portão está dormente, e quem entra entra
 sem ler nada. A tela de habilitar precisa dizer isso ao lado do interruptor;

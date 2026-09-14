@@ -194,7 +194,7 @@ pub const fn o_anuncio_alcanca_alguem(limiar: u8) -> bool {
 /// que os testes de `session` usam para simular o dia em que o portão liga, não
 /// é uma pergunta que a casca faz.
 ///
-/// Ver `docs/pendencias.md` #34.
+/// Ver `docs/pendencias.md` #39.
 #[must_use]
 pub const fn exigencia_vale_na_rede() -> bool {
     o_anuncio_alcanca_alguem(seele_proto::mods::VERSAO_DO_ANUNCIO)
@@ -216,7 +216,7 @@ mod tests {
         assert!(
             !o_anuncio_alcanca_alguem(seele_proto::mods::VERSAO_DO_ANUNCIO),
             "PROTOCOL_VERSION alcançou VERSAO_DO_ANUNCIO: o anúncio passou a sair, e \
-             `docs/pendencias.md` #34 pode ser fechado"
+             `docs/pendencias.md` #39 pode ser fechado"
         );
         assert!(
             o_anuncio_alcanca_alguem(seele_proto::version::PROTOCOL_VERSION),
