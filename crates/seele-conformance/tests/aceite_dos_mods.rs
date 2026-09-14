@@ -8,19 +8,27 @@
 //!
 //! # As duas metades, e por que elas são testes diferentes
 //!
-//! **O portão de pé.** O anúncio viaja numa versão do protocolo que a versão
-//! global ainda não alcançou — [`seele_proto::mods::VERSAO_DO_ANUNCIO`], pelo
-//! contrato de integração conjunta com a malha. Estes testes baixam o limiar
-//! por `ServerConfig::versao_do_anuncio`, que é a costura documentada dessa
-//! integração, e com isso o caminho verdadeiro corre inteiro: anúncio, aceite,
-//! recusa, aceite velho e troca de MOD no meio da sessão. As duas pontas são a
-//! mesma build, que é exatamente a condição que o campo exige.
+//! **O portão de pé, e desde 14/09/2026 é o de todo servidor.** O anúncio viaja
+//! em [`seele_proto::mods::VERSAO_DO_ANUNCIO`], e a integração conjunta com a
+//! malha subiu `PROTOCOL_VERSION` para 5, que o alcança. Estes testes nasceram
+//! baixando o limiar por `ServerConfig::versao_do_anuncio` porque era o único
+//! jeito de o caminho verdadeiro correr; **agora eles usam a configuração
+//! padrão, sem sobrescrever nada**, e o caminho corre inteiro assim mesmo:
+//! anúncio, aceite, recusa, aceite velho e troca de MOD no meio da sessão. É
+//! essa troca que prova que o anúncio saiu da dormência — não um limiar que o
+//! teste escolheu.
 //!
-//! **O portão dormente.** Com o limiar padrão — o de todo servidor publicado
-//! hoje — não existe par capaz de aceitar, e recusar seria cem por cento de
-//! recusa em troca de nada. Os dois últimos testes provam que habilitar um MOD
-//! hoje não tranca a porta nem derruba a sala: é a regressão que esta entrega
-//! chegou a introduzir, e eles são o guarda dela.
+//! **O portão dormente continua coberto**, com um limiar acima da versão global
+//! — a situação em que nenhum par pode aceitar e recusar seria cem por cento de
+//! recusa em troca de nada. Os dois últimos testes provam que, nesse estado,
+//! habilitar um MOD não tranca a porta nem derruba a sala: é a regressão que a
+//! entrega do anúncio chegou a introduzir, e eles são o guarda dela.
+//!
+//! **E a janela de compatibilidade**, no fim: um par falando a versão anterior
+//! continua entrando num servidor sem MOD, e é recusado por um que exige MOD.
+//! O que estes testes **não** provam, de propósito, é que a última release
+//! publicada continue entrando — não continua, e a medida disso está em
+//! `seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
 
@@ -54,15 +62,39 @@ async fn servidor_com_limiar(limiar: u8) -> Result<(SocketAddr, Arc<Daemon>)> {
     Ok((endereco, daemon))
 }
 
-/// Um servidor com o portão dos MODs **de pé**, no limiar que o `Hello` de um
-/// cliente de produção negocia.
+/// Um servidor como quem hospeda o levanta: **nada sobrescrito**.
+///
+/// É de propósito que esta função não passa por `servidor_com_limiar`. Enquanto
+/// o anúncio era dormente, todo teste da costura tinha de baixar o limiar à mão
+/// para que o caminho verdadeiro corresse — e uma costura provada só sob um
+/// limiar escolhido pelo teste não diz nada sobre o servidor que alguém liga em
+/// casa. Com a integração conjunta cumprida, o padrão basta, e **é o padrão que
+/// estes testes exercitam agora**. Se o anúncio voltar a ser dormente, os testes
+/// da costura reprovam aqui em vez de continuarem verdes num mundo forjado.
 async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
-    servidor_com_limiar(seele_proto::version::PROTOCOL_VERSION).await
+    let config = ServerConfig {
+        name: "Casa".into(),
+        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+        database: Location::Memory,
+        ..ServerConfig::default()
+    };
+    let daemon = Arc::new(Daemon::bind(config).await?);
+    let endereco = daemon.local_addr()?;
+    let atendendo = Arc::clone(&daemon);
+    tokio::spawn(async move {
+        let _ = atendendo.run().await;
+    });
+    Ok((endereco, daemon))
 }
 
-/// Um servidor como todo servidor publicado hoje: o portão dormente.
-async fn servidor_de_hoje() -> Result<(SocketAddr, Arc<Daemon>)> {
-    servidor_com_limiar(seele_proto::mods::VERSAO_DO_ANUNCIO).await
+/// Um servidor com o portão **dormente**: limiar acima da versão global.
+///
+/// Nenhuma conexão pode negociar acima de `PROTOCOL_VERSION`, então com este
+/// limiar não existe par capaz de ler o anúncio nem de responder a ele. Era o
+/// estado de todo servidor antes de 14/09/2026; hoje só se chega nele por
+/// configuração — ou pela próxima variante que nascer adiantada.
+async fn servidor_com_o_portao_dormente() -> Result<(SocketAddr, Arc<Daemon>)> {
+    servidor_com_limiar(seele_proto::version::PROTOCOL_VERSION.saturating_add(1)).await
 }
 
 fn um_mod(id: &str, hash_de: u8) -> EnabledMod {
@@ -364,24 +396,30 @@ async fn uma_sessao_sobrevive_ao_que_nao_muda_o_conjunto() -> Result<()> {
 
 // ------------------------------------------- o portão enquanto dorme
 //
-// Daqui para baixo o servidor é o de hoje: limiar padrão, e portanto nenhum par
-// no mundo capaz de ler o anúncio. Os dois testes provam que, nesse estado,
-// exigir um MOD não é a mesma coisa que fechar a casa.
+// Daqui para baixo o servidor tem o portão dormente: um limiar que nenhuma
+// conexão pode negociar, e portanto nenhum par no mundo capaz de ler o anúncio.
+// Os dois testes provam que, nesse estado, exigir um MOD não é a mesma coisa que
+// fechar a casa.
+//
+// **Eles descreviam o servidor de todo mundo até 14/09/2026** e passaram a
+// descrever um servidor configurado assim de propósito. Continuam aqui porque o
+// ramo dormente continua no código: «existir não é funcionar», e um ramo que
+// ninguém mais exercita apodrece em silêncio até a próxima variante nascer
+// adiantada e precisar dele.
 
-/// **Habilitar um MOD hoje não tranca a porta de um servidor que funcionava.**
+/// **Com o portão dormente, habilitar um MOD não tranca a porta de um servidor
+/// que funcionava.**
 ///
-/// O guarda de uma regressão de verdade: na primeira versão desta entrega, uma
+/// O guarda de uma regressão de verdade: na primeira versão daquela entrega, uma
 /// linha habilitada passou a recusar toda entrada com `Incompatible` — e sem
 /// dar a ninguém a chance de aceitar, porque o anúncio não tinha como sair. Um
 /// portão que ninguém pode atravessar não protege, só recusa.
 ///
-/// Quando `PROTOCOL_VERSION` alcançar a versão do anúncio este teste passa a
-/// descrever o outro mundo, e quem o vir falhar tem em
-/// `um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou` o comportamento que
-/// passa a valer.
+/// O outro mundo — o portão de pé, que é o do servidor padrão — está em
+/// `um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou`.
 #[tokio::test(flavor = "multi_thread")]
-async fn enquanto_o_anuncio_nao_sai_habilitar_um_mod_nao_fecha_a_casa() -> Result<()> {
-    let (endereco, daemon) = servidor_de_hoje().await?;
+async fn com_o_portao_dormente_habilitar_um_mod_nao_fecha_a_casa() -> Result<()> {
+    let (endereco, daemon) = servidor_com_o_portao_dormente().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
 
     entrar(endereco, 21)
@@ -398,8 +436,8 @@ async fn enquanto_o_anuncio_nao_sai_habilitar_um_mod_nao_fecha_a_casa() -> Resul
 /// nunca foi perguntada é tirar da sala alguém que entraria de volta no segundo
 /// seguinte, sem nunca ter lido lista nenhuma. Reconectar por reconectar.
 #[tokio::test(flavor = "multi_thread")]
-async fn enquanto_o_anuncio_nao_sai_habilitar_um_mod_nao_derruba_a_sala() -> Result<()> {
-    let (endereco, daemon) = servidor_de_hoje().await?;
+async fn com_o_portao_dormente_habilitar_um_mod_nao_derruba_a_sala() -> Result<()> {
+    let (endereco, daemon) = servidor_com_o_portao_dormente().await?;
     let mut par = abrir(endereco, 22).await?;
 
     habilitar(&daemon, &um_mod("seele/cor", 0xb2)).await;
@@ -516,6 +554,24 @@ async fn motivo_do_fechamento(par: &Par, prazo: Duration) -> Option<Vec<u8>> {
 
 /// Faz o aperto de mão à mão, para que a despedida possa ser lida no fio.
 async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
+    abrir_falando(endereco, semente, seele_proto::PROTOCOL_VERSION).await
+}
+
+/// O mesmo, declarando no `Hello` a versão que se quiser.
+///
+/// **É a única forma de um par mais velho aparecer neste crate**, e é uma
+/// simulação parcial — dizê-lo é metade do valor deste comentário. As duas
+/// pontas são a mesma build: o quadro sai carimbado com `PROTOCOL_VERSION` por
+/// `control::encode`, e volta a ser lido por este mesmo codec. Só o campo
+/// `Hello.version` fala a versão pedida.
+///
+/// Isto mede o lado do **servidor** — a janela de compatibilidade e o limiar do
+/// anúncio, que decidem sobre o número declarado. Não mede o lado do cliente
+/// velho, que recusaria o carimbo antes de ler o corpo: essa metade está em
+/// `seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`, e é
+/// por isso que nenhum teste deste arquivo promete que a release publicada
+/// conecta.
+async fn abrir_falando(endereco: SocketAddr, semente: u8, versao: u8) -> Result<Par> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let provider = Arc::new(rustls::crypto::ring::default_provider());
 
@@ -538,7 +594,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     frame::write(
         &mut envio,
         &ClientMessage::Hello {
-            version: seele_proto::PROTOCOL_VERSION,
+            version: versao,
             client: "par-cru".into(),
             nickname: format!("pessoa{semente:03}"),
             public_key: chave.verifying_key().to_bytes().to_vec(),
@@ -793,5 +849,126 @@ async fn um_aceite_guardado_de_outro_conjunto_nao_e_reaproveitado() -> Result<()
         panic!("o cliente reaproveitou um aceite inválido: {erro:?}; {la}");
     }
     assert_eq!(servidor.await??, Resposta::Recusou);
+    Ok(())
+}
+
+// ------------------------------------- a integração conjunta, no fio
+//
+// O contrato que `seele_proto::mods::VERSAO_DO_ANUNCIO` carregava desde que
+// nasceu: quando a malha e o anúncio se juntassem, `PROTOCOL_VERSION` subiria
+// para 5 **uma vez**, a constante do anúncio continuaria em 5, e o anúncio
+// passaria a sair sozinho. Estes três testes são a cobrança dele contra bytes de
+// verdade — a constante já está provada em `seele-proto`, e uma constante não é
+// um comportamento.
+
+/// **O anúncio sai de um servidor que ninguém configurou.**
+///
+/// A diferença para `um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou`
+/// é o que está sendo afirmado. Lá, o assunto é a lista: quais campos a tela de
+/// aceite recebe. Aqui é a **dormência**: que o limiar padrão passou a ser
+/// alcançável e que o portão liga sem ninguém mexer em nada.
+///
+/// Enquanto o anúncio dormia, este teste era impossível de escrever — a mesma
+/// entrada, no mesmo servidor padrão, devolvia uma sessão. É por isso que ele
+/// vale como prova do contrato cumprido, e não como repetição do de cima.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_anuncio_sai_do_servidor_padrao_sem_ninguem_baixar_limiar() -> Result<()> {
+    assert!(
+        ServerConfig::default().versao_do_anuncio <= seele_proto::PROTOCOL_VERSION,
+        "o limiar padrão voltou a ficar acima da versão global, e o portão \
+         voltou a ser dormente para todo servidor"
+    );
+
+    let (endereco, daemon) = servidor().await?;
+
+    // Sem MOD nenhum, a porta é a de sempre. É o controle: sem ele, um servidor
+    // que recusasse tudo passaria na metade de baixo deste teste.
+    entrar(endereco, 51)
+        .await
+        .expect("um servidor sem MOD deixou de deixar entrar");
+
+    habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
+
+    let Err(erro) = entrar(endereco, 52).await else {
+        panic!(
+            "o anúncio continua dormente: um MOD habilitado num servidor padrão \
+             não perguntou nada a quem entrou"
+        );
+    };
+    assert!(
+        matches!(erro, ConnectError::ModsNaoAceitos { .. }),
+        "o servidor padrão não devolveu a pergunta, devolveu {erro:?}"
+    );
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **Um par da versão anterior continua entrando, e é só isso que a janela
+/// promete.**
+///
+/// A janela de compatibilidade é N−1: a v5 desta build ouve a v4. Este teste
+/// prende esse lado — o `Hello` sai com o número anterior de verdade e o aperto
+/// de mão inteiro corre até `Session`, sem baixar constante nenhuma.
+///
+/// **O que ele deliberadamente não promete:** que a release publicada
+/// `v0.10.5-1`, que fala protocolo 3, continue entrando. Ela não continua, e a
+/// janela não tem como fazê-la continuar — o quadro do servidor sai carimbado
+/// com a versão global e aquele build recusa o carimbo antes de ler o corpo.
+/// Medido em `seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`
+/// e contado por inteiro na pendência #42.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_par_da_versao_anterior_continua_entrando() -> Result<()> {
+    let anterior = seele_proto::version::oldest_supported_version();
+    assert!(
+        anterior < seele_proto::PROTOCOL_VERSION,
+        "a janela fechou sobre a própria versão: não há vocabulário anterior vivo"
+    );
+
+    let (endereco, daemon) = servidor().await?;
+
+    // `abrir` só devolve `Par` depois de ler o `Session`, então chegar aqui é a
+    // prova: o aperto de mão inteiro correu com o número anterior.
+    let _par = abrir_falando(endereco, 53, anterior)
+        .await
+        .map_err(|erro| anyhow::anyhow!("um par da versão anterior não entrou: {erro}"))?;
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **E o que a subida cobra de quem está em campo, dito por inteiro.**
+///
+/// O par da versão anterior entra num servidor sem MOD — e num servidor **com
+/// MOD habilitado** ele não entra, porque está dentro da janela mas abaixo de
+/// `VERSAO_DO_ANUNCIO`: não tem como ler o anúncio nem responder a ele. É uma
+/// recusa, e é a recusa certa: a alternativa seria mandar-lhe um quadro que ele
+/// não sabe decodificar, e o postcard não ignora uma variante desconhecida —
+/// ela desloca a leitura do fluxo de controle dele para sempre, que é a «tela
+/// preta, sem mensagem nenhuma» do histórico deste repositório.
+///
+/// Escrito para que o custo fique **provado e não suposto**: habilitar um MOD
+/// hoje barra quem entra pela janela, e quem hospeda precisa saber disso pelo
+/// produto, não pela pessoa que não conseguiu entrar.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_par_dentro_da_janela_e_recusado_por_um_servidor_que_exige_mod() -> Result<()> {
+    let (endereco, daemon) = servidor().await?;
+    habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
+
+    let anterior = seele_proto::version::oldest_supported_version();
+    assert!(
+        anterior < seele_proto::mods::VERSAO_DO_ANUNCIO,
+        "a versão anterior alcança o anúncio: este teste deixou de medir a \
+         recusa por limiar"
+    );
+    let resultado = abrir_falando(endereco, 54, anterior).await;
+    assert!(
+        resultado.is_err(),
+        "um par que não alcança a versão do anúncio recebeu `Session` de um \
+         servidor que exige MOD: ou ele leu uma lista que não sabe ler, ou a \
+         exigência não vale para ele"
+    );
+
+    daemon.shutdown();
     Ok(())
 }

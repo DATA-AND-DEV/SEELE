@@ -65,11 +65,75 @@ use thiserror::Error;
 /// Um cliente v3 continua entrando num servidor v4, porque 3 está na janela; só
 /// nunca recebe as variantes novas, e é servido pelo servidor como sempre foi
 /// — o mesmo comportamento que um cliente v2 já tinha diante da v3.
-pub const PROTOCOL_VERSION: u8 = 4;
+///
+/// **5 desde 14/09/2026, e é uma subida só para duas entregas.**
+///
+/// A malha e o anúncio de MODs acrescentaram variantes às **mesmas duas listas**
+/// em paralelo. Se cada uma tivesse subido a versão por conta própria, as duas
+/// teriam chamado «5» a vocabulários diferentes — o defeito exato que
+/// `control.rs::o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou`
+/// existe para pegar, e que já custou uma tela preta sem mensagem nenhuma. Por
+/// isso o anúncio nasceu com uma constante própria,
+/// [`crate::mods::VERSAO_DO_ANUNCIO`], já em 5 e deliberadamente acima desta —
+/// esperando a integração conjunta em vez de disputá-la.
+///
+/// **Esta é a integração conjunta, e o contrato dela se cumpre aqui:** as duas
+/// listas já convivem numa ordem única — `EmprestarSubida`, `ParFalhou`,
+/// `AceitarMods` e `RecusarMods` no cliente; `SirvaTelaPara`, `AssistaTelaPor` e
+/// `ModsExigidos` no servidor —, os ordinais da v4 continuam onde estavam, e
+/// este número passa a 5 uma vez só. `VERSAO_DO_ANUNCIO` continua 5 e agora é
+/// alcançada, então o portão do anúncio liga sozinho: ver
+/// [`crate::mods::VERSAO_DO_ANUNCIO`] e
+/// `seele_server::mods::anuncio::o_anuncio_alcanca_alguem`.
+///
+/// **E uma correção que vale para todas as subidas acima, medida em
+/// 14/09/2026.** Cada uma delas diz que quem ficou na versão anterior «continua
+/// entrando». Isso é verdade sobre o que *esta* build aceita ouvir, e só: todo
+/// quadro sai carimbado com este número, então a build mais velha recusa a
+/// resposta do servidor antes de ler o corpo dela. A janela de compatibilidade
+/// abaixo explica a medida. A consequência prática, que precisa ser dita antes
+/// de publicar e não depois: **publicar a v5 tira do ar quem está na v3
+/// publicada**, e a janela não muda isso.
+pub const PROTOCOL_VERSION: u8 = 5;
 
 /// How many past versions a peer accepts, beyond the current one.
 ///
 /// `specs/10-convencoes.md`: "protocol compatibility: a window of N−1".
+///
+/// # Continua 1, e a medida que fez o 2 voltar atrás
+///
+/// Esta janela esteve em 2 por um dia, junto com a subida para a v5, e a
+/// justificativa era esta: a v4 nunca foi publicada, a última release —
+/// `v0.10.5-1`, de 05/09/2026, commit `12a6401a6` — fala **protocolo 3**, e uma
+/// janela de N−1 recusaria a única versão instalada em campo em nome de uma que
+/// ninguém tem.
+///
+/// **A premissa está certa e a conclusão era inútil.** A janela governa só
+/// metade do encontro: o que *esta* build aceita ouvir. O que a outra ponta
+/// ouve é decidido por [`crate::control::encode`], que carimba
+/// [`PROTOCOL_VERSION`] no primeiro byte de **todo** quadro — sempre o número
+/// global, nunca o negociado. O `decode` daquele commit publicado é este mesmo
+/// e chama `negotiate` nesse byte antes de ler o corpo, com
+/// `PROTOCOL_VERSION = 3` e `COMPATIBILITY_WINDOW = 1`: qualquer carimbo acima
+/// de 3 morre ali, com `PeerTooNew`. Um par v3 de verdade recebe o primeiro
+/// quadro de um servidor v5 e fecha — num servidor sem MOD nenhum, e com esta
+/// janela em 2 do mesmo jeito. Preso em
+/// `control.rs::a_release_publicada_recusa_o_carimbo_desta_build`.
+///
+/// Então o 2 não comprava nada que o 1 não comprasse: só deixava o par v3 morrer
+/// mais tarde, no meio do aperto de mão, em vez de receber `Incompatible` na
+/// primeira leitura. Voltou para 1 — a regra da spec —, e a versão anterior viva
+/// aqui é a v4.
+///
+/// **O que isso cobra, dito por inteiro:** publicar a v5 tira do ar quem está na
+/// v3, e nenhum número escrito nesta linha evita isso. Quem evita é o seletor de
+/// versão do ADR 0046 e, antes dele, carimbar o quadro com a versão negociada em
+/// vez da global — que é mudança de protocolo com custo próprio, porque o
+/// servidor passaria a ter de calar as variantes fora do vocabulário do par, sob
+/// pena de o postcard deslocar a leitura dele para sempre. Registrado na
+/// pendência #42.
+///
+/// Preso em `a_versao_anterior_continua_dentro_da_janela`.
 pub const COMPATIBILITY_WINDOW: u8 = 1;
 
 /// Lowest protocol version this build can still talk to.
@@ -162,37 +226,52 @@ mod tests {
     ///
     /// Escrito como teste e não como comentário porque a janela é a única coisa
     /// entre «subimos a versão» e «quebramos todo mundo que não atualizou no
-    /// mesmo minuto».
+    /// mesmo minuto» — **do lado de quem ouve**. Do lado de quem fala ela não
+    /// alcança nada, e essa metade está medida no corpo do teste.
     #[test]
     fn a_versao_anterior_continua_dentro_da_janela() {
-        // **Os números mudaram de novo em 06/09/2026, com o caminho entre
-        // pares, e a janela deslizou junto.**
+        // **Os números mudaram de novo em 14/09/2026, com a integração conjunta
+        // da malha e do anúncio de MODs — e a janela continuou em 1.**
         //
-        // Desta vez quem sai da janela é a v2, e a diferença para a subida
-        // anterior é esta: a v3 **já tinha saído** — release `v0.10.5-1`, commit
-        // `12a6401a6` — então existe gente rodando exatamente essa versão, e é
-        // ela que a janela precisa continuar cobrindo. O que fica preso aqui é a
-        // forma — aceita-se a de agora e a anterior, recusa-se a seguinte —, e
-        // ela vale para qualquer número.
-        assert_eq!(PROTOCOL_VERSION, 4);
-        assert_eq!(oldest_supported_version(), 3);
-        assert!(negotiate(3).is_ok(), "a versão anterior foi recusada");
-        assert!(negotiate(4).is_ok());
+        // Ela esteve em 2 por um dia, para alcançar a v3 da release publicada
+        // `v0.10.5-1` (commit `12a6401a6`), já que a v4 nunca saiu. Não
+        // alcançava: todo quadro sai carimbado com `PROTOCOL_VERSION`, e o build
+        // v3 recusa o carimbo 5 antes de ler o corpo. Ver
+        // `control.rs::a_release_publicada_recusa_o_carimbo_desta_build`.
+        //
+        // O que fica preso aqui, então, é o que a janela de fato faz — a versão
+        // anterior deste vocabulário continua sendo ouvida — e não uma promessa
+        // sobre quem está em campo, que ela não tem como cumprir sozinha.
+        assert_eq!(PROTOCOL_VERSION, 5);
+        assert_eq!(oldest_supported_version(), 4);
+        assert!(negotiate(4).is_ok(), "a v4 anterior foi recusada");
+        assert!(negotiate(5).is_ok());
         assert!(
-            negotiate(2).is_err(),
-            "a v2 continuou aceita depois de a janela deslizar"
+            negotiate(3).is_err(),
+            "a v3 foi aceita: a janela voltou a prometer o que o carimbo não \
+             entrega"
         );
-        assert!(negotiate(5).is_err(), "um cliente do futuro foi aceito");
+        assert!(negotiate(6).is_err(), "um cliente do futuro foi aceito");
     }
 
+    /// A prova de que a subida é **uma só** para as duas entregas.
+    ///
+    /// A malha e o anúncio de MODs acrescentaram variantes às mesmas duas
+    /// listas. Duas subidas independentes para «5» dariam dois vocabulários com
+    /// o mesmo número — o defeito que o guarda dos ordinais em `control.rs`
+    /// existe para pegar. Esta linha diz que a subida aconteceu uma vez e que o
+    /// anúncio, que esperava por ela, passou a alcançar.
     #[test]
-    fn a_versao_subiu_para_a_do_caminho_entre_pares() {
-        // A v3 **já saiu** no release `v0.10.5-1` (commit `12a6401a6`), então as
-        // quatro mensagens novas não pegam carona como as do ADR 0036 pegaram na
-        // v2. Um cliente v3 conecta pela janela, nunca recebe as mensagens novas, e
-        // é servido pelo servidor — que é o comportamento de antes desta onda.
-        assert_eq!(PROTOCOL_VERSION, 4);
-        assert_eq!(oldest_supported_version(), 3);
+    fn a_versao_subiu_uma_vez_so_para_a_malha_e_para_os_mods() {
+        assert_eq!(PROTOCOL_VERSION, 5);
+        assert_eq!(oldest_supported_version(), 4);
+        assert_eq!(
+            crate::mods::VERSAO_DO_ANUNCIO,
+            PROTOCOL_VERSION,
+            "o anúncio de MODs deixou de coincidir com a versão global: ou ele \
+             voltou a ficar dormente, ou passou a pedir mais do que a versão \
+             global entrega"
+        );
     }
 
     #[test]

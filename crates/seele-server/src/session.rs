@@ -1025,7 +1025,14 @@ async fn handshake(
 /// três viram uma recusa de cem por cento sem nada em troca — ver
 /// [`crate::mods::anuncio::o_anuncio_alcanca_alguem`], que é onde essa decisão
 /// mora e está escrita por extenso. Nesse estado esta função admite como o
-/// servidor admitia antes desta entrega e avisa quem hospeda pelo log.
+/// servidor admitia antes daquela entrega e avisa quem hospeda pelo log.
+///
+/// **Com o limiar padrão isso deixou de ser o caso em 14/09/2026**, quando
+/// `PROTOCOL_VERSION` subiu para 5 na integração conjunta com a malha e alcançou
+/// [`seele_proto::mods::VERSAO_DO_ANUNCIO`]: os três itens acima passaram a
+/// valer no fio. O ramo dormente continua aqui porque um servidor pode declarar
+/// um limiar mais alto por [`crate::ServerConfig::versao_do_anuncio`], e porque
+/// a próxima variante que nascer adiantada cai nele de novo.
 ///
 /// # Errors
 ///
@@ -3474,7 +3481,7 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
     match message {
         // A v2 acrescentou esta. O `>= 2` de antes já era vácuo — a janela de
         // compatibilidade do ADR 0036 é de uma versão, e
-        // `oldest_supported_version()` já é 3, então nenhuma sessão viva chega
+        // `oldest_supported_version()` já é 4, então nenhuma sessão viva chega
         // aqui com menos que isso. Fica escrito com a versão em que a variante
         // nasceu, e não apagado: no dia em que a janela alargar, é este número
         // que volta a morder, e reconstruí-lo por arqueologia custaria mais do
@@ -3482,17 +3489,18 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
         ServerMessage::UplinkLoss { .. } => versao >= 2,
         // As duas da v4, o caminho entre pares.
         ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => versao >= 4,
-        // O anúncio de MODs pede uma versão que a global ainda não alcançou —
-        // ver `seele_proto::mods::VERSAO_DO_ANUNCIO` e o contrato de integração
-        // que ela carrega. Enquanto ela não subir, ninguém passa por este
-        // gatilho, e um servidor com MOD habilitado recusa quem não o entende
-        // com `Incompatible` em vez de mandar um quadro que mataria o fluxo de
-        // controle do outro lado.
+        // O anúncio de MODs, e desde 14/09/2026 a global o alcança: o dia do
+        // `PROTOCOL_VERSION` 5 chegou, e esta linha estava escrita à espera dele
+        // — ver `seele_proto::mods::VERSAO_DO_ANUNCIO`. Quem fica de fora agora
+        // é o par da janela anterior, a v4: um servidor com MOD habilitado o
+        // recusa com `Incompatible` no aperto de mão, em vez de mandar um quadro
+        // que mataria o fluxo de controle dele. O par da v3 da release
+        // `v0.10.5-1` já não chega a esse ponto — a janela de compatibilidade
+        // não o alcança mais, e ele é recusado com `PeerTooOld` antes de
+        // qualquer conversa sobre MOD.
         // O anúncio nunca passa por aqui na prática — ele sai do aperto de mão,
         // que decide com o limiar de `ServerConfig::versao_do_anuncio` e não com
-        // a constante. A linha existe para que a tabela fique completa e para
-        // que o dia do `PROTOCOL_VERSION` 5 não encontre uma variante sem
-        // resposta.
+        // a constante. A linha existe para que a tabela fique completa.
         ServerMessage::ModsExigidos { .. } => versao >= seele_proto::mods::VERSAO_DO_ANUNCIO,
         _ => true,
     }
@@ -4299,7 +4307,11 @@ mod versao_no_fio {
         // exige `emprestando: true`, e isso só chega por `EmprestarSubida`,
         // que é v4. Um invariante de outra tarefa não é a promessa; estas
         // asserções são.
-        for versao in [seele_proto::version::oldest_supported_version(), 3] {
+        //
+        // O laço cobre **toda** versão abaixo da v4, e não só a mais velha
+        // dentro da janela: a regra é por mensagem e não pode passar a depender
+        // de onde a janela está parada — ela mexeu duas vezes em duas semanas.
+        for versao in 0..4 {
             assert!(
                 !entende_a_mensagem(&sirva(), versao),
                 "SirvaTelaPara saiu para um cliente v{versao}"
@@ -4330,7 +4342,12 @@ mod versao_no_fio {
         // O `>= 2` de `UplinkLoss` é vácuo desde que a janela do ADR 0036
         // subiu o piso para 3 — este teste é o que o diz em voz alta, e é o
         // que vai falhar no dia em que a janela alargar e ele deixar de ser.
-        assert_eq!(seele_proto::version::oldest_supported_version(), 3);
+        //
+        // Com a v5 o piso é 4, e o `>= 2` segue vácuo pela mesma razão. A
+        // janela chegou a ir para 2 na subida da v5 e voltou no mesmo dia: ela
+        // não alcança um par publicado, porque o quadro sai carimbado com a
+        // versão global. Ver `seele_proto::version::COMPATIBILITY_WINDOW`.
+        assert_eq!(seele_proto::version::oldest_supported_version(), 4);
         assert!(entende_a_mensagem(
             &ServerMessage::UplinkLoss { fraction: 0.0 },
             seele_proto::version::oldest_supported_version()
@@ -4342,14 +4359,18 @@ mod versao_no_fio {
 ///
 /// # Por que os fluxos são de verdade e o `Hello` não é
 ///
-/// O aperto de mão inteiro não pode ser percorrido hoje: ele começa por
-/// `version::negotiate`, e por padrão o anúncio pede
-/// [`seele_proto::mods::VERSAO_DO_ANUNCIO`], que é uma acima da versão global —
-/// pelo contrato de integração conjunta que aquela constante carrega.
+/// Estes testes nasceram quando o aperto de mão inteiro não podia ser
+/// percorrido: ele começa por `version::negotiate`, e o anúncio pedia
+/// [`seele_proto::mods::VERSAO_DO_ANUNCIO`], então uma acima da versão global —
+/// pelo contrato de integração conjunta que aquela constante carregava. **Esse
+/// contrato foi cumprido em 14/09/2026** e o limiar padrão passou a ser
+/// alcançável; o aperto de mão completo, das duas pontas de produção, está em
+/// `tests/aceite_dos_mods.rs`.
 ///
-/// Então estes testes abrem uma conexão QUIC de verdade, entregam as duas pontas
-/// do fluxo de controle à mesma função que o aperto de mão chama, e baixam o
-/// limiar do anúncio por [`crate::ServerConfig::versao_do_anuncio`] — o mesmo
+/// A forma daqui continua valendo e não foi desfeita, porque é ela que cobre o
+/// limiar declarado: estes testes abrem uma conexão QUIC de verdade, entregam as
+/// duas pontas do fluxo de controle à mesma função que o aperto de mão chama, e
+/// fixam o limiar do anúncio por [`crate::ServerConfig::versao_do_anuncio`] — o mesmo
 /// caminho que `tests/aceite_dos_mods.rs` usa para pôr um cliente de produção do
 /// outro lado. **O que corre é o código de produção, sobre bytes de produção, na
 /// versão que um `Hello` de verdade negocia**: nada de versão forjada.
@@ -4486,7 +4507,8 @@ mod o_aceite_dos_mods {
     ///
     /// `limiar` é a versão a partir da qual o anúncio sai. Quem quer provar o
     /// portão passa [`PROTOCOL_VERSION`], que é o que um `Hello` de verdade
-    /// negocia; quem quer provar a dormência passa o padrão.
+    /// negocia e é o padrão desde que a versão global alcançou o anúncio; quem
+    /// quer provar a dormência passa um número acima dela.
     async fn servidor_com_limiar(limiar: u8) -> anyhow::Result<Arc<crate::Daemon>> {
         let config = crate::ServerConfig {
             name: "Casa".into(),
@@ -4501,6 +4523,16 @@ mod o_aceite_dos_mods {
     /// Um servidor com o portão dos MODs **de pé**, no limiar que roda hoje.
     async fn servidor() -> anyhow::Result<Arc<crate::Daemon>> {
         servidor_com_limiar(PROTOCOL_VERSION).await
+    }
+
+    /// Um servidor com o portão **dormente**: limiar acima da versão global.
+    ///
+    /// Nenhuma conexão pode negociar acima de `PROTOCOL_VERSION`, então aqui não
+    /// existe par capaz de ler o anúncio. Era o estado de todo servidor até
+    /// 14/09/2026, quando a integração conjunta com a malha subiu a versão
+    /// global para 5 e ela alcançou `seele_proto::mods::VERSAO_DO_ANUNCIO`.
+    async fn servidor_dormente() -> anyhow::Result<Arc<crate::Daemon>> {
+        servidor_com_limiar(PROTOCOL_VERSION.saturating_add(1)).await
     }
 
     fn linha(id: &str, hash_de: u8, no_servidor: bool) -> EnabledMod {
@@ -4793,24 +4825,29 @@ mod o_aceite_dos_mods {
 
     // ------------------------------------------- o portão enquanto dorme
     //
-    // Os testes acima baixam o limiar para provar o portão. Estes dois usam o
-    // padrão — o que todo servidor publicado tem hoje — e provam o contrário:
-    // que ele **não** recusa ninguém enquanto não existe par capaz de aceitar.
+    // Os testes acima correm com o portão de pé, que é o de todo servidor desde
+    // que a versão global alcançou a do anúncio. Estes dois correm com o portão
+    // dormente — um limiar que nenhum par pode negociar — e provam o contrário:
+    // que nesse estado ele **não** recusa ninguém, porque não existe par capaz
+    // de aceitar.
     //
     // Eles são o guarda de uma regressão de verdade, e não uma hipótese: na
-    // primeira versão desta entrega, habilitar um MOD passou a recusar toda
+    // primeira versão daquela entrega, habilitar um MOD passou a recusar toda
     // entrada com `Incompatible` num servidor que funcionava — e sem dar a
     // ninguém a chance de aceitar, porque o anúncio não tinha como sair.
+    //
+    // Continuam aqui porque o ramo dormente continua no código, à espera da
+    // próxima variante que nascer adiantada: «existir não é funcionar», e um
+    // ramo que ninguém exercita apodrece em silêncio.
 
-    /// **Habilitar um MOD hoje não tranca a porta.**
+    /// **Com o portão dormente, habilitar um MOD não tranca a porta.**
     ///
-    /// Com o limiar padrão nenhum par alcança o anúncio, então recusar seria
-    /// cem por cento de recusa em troca de nada. Quem hospeda lê o aviso no
-    /// log; quem entra entra, como entrava antes desta entrega existir.
+    /// Se nenhum par alcança o anúncio, recusar seria cem por cento de recusa
+    /// em troca de nada. Quem hospeda lê o aviso no log; quem entra entra, como
+    /// entrava antes de o anúncio existir.
     #[tokio::test(flavor = "multi_thread")]
-    async fn enquanto_o_anuncio_nao_sai_habilitar_um_mod_nao_recusa_ninguem() -> anyhow::Result<()>
-    {
-        let daemon = servidor_com_limiar(seele_proto::mods::VERSAO_DO_ANUNCIO).await?;
+    async fn com_o_portao_dormente_habilitar_um_mod_nao_recusa_ninguem() -> anyhow::Result<()> {
+        let daemon = servidor_dormente().await?;
         habilitar(&daemon, &linha("seele/bot", 0xa1, true)).await;
 
         let mut fluxo = fluxo().await?;
@@ -4845,11 +4882,11 @@ mod o_aceite_dos_mods {
     /// e ele está nomeado em `NaoDaParaAnunciar::HashQueNaoEHash`. Com o portão
     /// de pé ele barra todo mundo, e é o certo — ver o teste irmão acima. Com o
     /// portão dormente, barrar seria trancar um servidor que funcionava por uma
-    /// exigência que ainda não vale no fio.
+    /// exigência que não vale no fio.
     #[tokio::test(flavor = "multi_thread")]
-    async fn enquanto_o_anuncio_nao_sai_uma_linha_estragada_nao_tranca_o_servidor(
-    ) -> anyhow::Result<()> {
-        let daemon = servidor_com_limiar(seele_proto::mods::VERSAO_DO_ANUNCIO).await?;
+    async fn com_o_portao_dormente_uma_linha_estragada_nao_tranca_o_servidor() -> anyhow::Result<()>
+    {
+        let daemon = servidor_dormente().await?;
         let mut torta = linha("seele/primeiro", 0x00, false);
         torta.hash = String::new();
         habilitar(&daemon, &torta).await;

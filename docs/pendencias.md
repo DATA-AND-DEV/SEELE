@@ -1513,6 +1513,22 @@ alvo é outro.
 **Quando dói.** Em toda rodada de `cargo test --workspace`, que é o comando que
 este projeto usa para dizer que está verde.
 
+### Continua viva em 2026-09-14, e custou uma rodada de revisão
+
+Na subida do protocolo para a v5 ela apareceu duas vezes, em testes diferentes e
+sem relação com a mudança — que, fora comentários, só toca testes de versão.
+Primeiro `sair_encerra_sem_esperar_a_bateria` (`bateria_interna`), depois
+`o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo` (`salas`), este último
+reprovando a **20,07 s** dentro do `cargo test` inteiro e passando em **3,09 s**
+quando o arquivo roda sozinho — o padrão de carga descrito acima, no prazo
+descrito acima. Quatro rodadas completas seguidas depois disso ficaram verdes,
+e a falha não voltou.
+
+O custo desta vez não foi o minuto de reexecução: foi uma revisão independente
+ter de gastar parágrafo distinguindo «carga» de «regressão» antes de poder
+aprovar. É o «deixa de ser evidência» do registro de 2026-08-31, agora cobrado
+de terceiros.
+
 ## 30 · Fechada em 2026-08-31 · O `seeled` não sabia dizer que versão é
 
 **Sintoma.** `seeled --version` não existe. O argumento cai no ramo que lê
@@ -1896,12 +1912,45 @@ de CI e não mexe em código de teste; o registro fica aqui para quem for
 investigar não gastar tempo checando `-j1` ou concorrência entre binários de
 novo.
 
-## 39 · O anúncio de MODs está pronto e não sai, esperando uma subida de versão
+## 39 · Fechada em 2026-09-14 · O anúncio de MODs está pronto e não sai, esperando uma subida de versão
 
-**Estado.** O anúncio, o aceite e a recusa de MODs estão implementados dos dois
-lados e cobertos por testes — inclusive por fluxos QUIC de verdade. O que não
-acontece é o anúncio **sair**: ele viaja em `seele_proto::mods::VERSAO_DO_ANUNCIO`,
-que é 5, e `PROTOCOL_VERSION` continua 4.
+**Como fechou.** `PROTOCOL_VERSION` subiu para 5 na integração conjunta com a
+malha, `VERSAO_DO_ANUNCIO` continuou em 5, e o portão ligou sem uma linha a mais
+dentro de `o_anuncio_alcanca_alguem` — a comparação que ela sempre fez passou a
+dar verdadeiro. Um servidor padrão com MOD habilitado agora anuncia, e quem não
+aceita não entra: provado em
+`o_anuncio_sai_do_servidor_padrao_sem_ninguem_baixar_limiar`, e os testes da
+costura em `aceite_dos_mods.rs` deixaram de baixar o limiar à mão — correm na
+configuração padrão.
+
+**E o custo previsto abaixo é pago, não evitado — a tentativa de evitá-lo durou
+um dia.** A tabela deste registro diz que subir para 5 tira do ar o cliente
+publicado. Uma terceira saída pareceu existir quando a medida foi refeita — **a
+v4 nunca foi publicada**, então N−1 protegeria uma fronteira que não existe — e
+`COMPATIBILITY_WINDOW` foi para 2. A revisão mostrou que a saída era inerte: a
+janela decide só o que esta build **ouve**, e todo quadro sai carimbado com a
+versão global, que o build v3 recusa antes de ler o corpo. A janela voltou a 1.
+Medido em `seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`;
+contado por inteiro no ADR 0046, seção «A janela não estica o que parecia», e
+aberto como pendência #42.
+
+**O que a subida cobra de quem está em campo, e é preciso dizer inteiro:** quem
+está na v3 publicada **perde o servidor** quando a v5 for publicada, com MOD ou
+sem MOD. Dentro da janela, um par da v4 entra num servidor sem MOD — provado em
+`um_par_da_versao_anterior_continua_entrando` — e é recusado com `Incompatible`
+por um servidor **com MOD habilitado**, porque não alcança `VERSAO_DO_ANUNCIO` e
+mandar-lhe o anúncio mataria o fluxo de controle dele. Provado em
+`um_par_dentro_da_janela_e_recusado_por_um_servidor_que_exige_mod`.
+
+**O que continua aberto e não é esta pendência:** a tela de aceite (os dados
+chegam à casca, falta o botão) e o download dos bytes em `mods.seele.app.br`.
+
+---
+
+**Estado de então.** O anúncio, o aceite e a recusa de MODs estão implementados
+dos dois lados e cobertos por testes — inclusive por fluxos QUIC de verdade. O
+que não acontece é o anúncio **sair**: ele viaja em
+`seele_proto::mods::VERSAO_DO_ANUNCIO`, que é 5, e `PROTOCOL_VERSION` continua 4.
 
 **Por que ele não subiu junto.** O postcard indexa variante por posição. O
 anúncio de MODs e a entrega da malha acrescentam variantes ao mesmo par de
@@ -1945,6 +1994,14 @@ versão que fale 4 — a entrega da malha, que já está em `main` e ainda não 
 esperar o campo atualizar, e só então subir para 5. Aí a janela cobre quem
 atualizou e o portão liga sem tirar ninguém do ar.
 
+> **O que aconteceu, e o que a tabela acima não mostra.** A linha «5 → mais
+> antiga aceita: 4» descreve a janela, e a janela é só o lado que ouve. Esticá-la
+> para 2 faria a coluna do meio dizer 3 — e não faria um par v3 conectar, porque
+> quem o barra é o carimbo de versão no primeiro byte do quadro que **sai**
+> daqui, não a coluna desta tabela. Foi tentado e desfeito em 14/09/2026. A
+> ordem sugerida abaixo (publicar antes uma versão falando 4) tampouco resolve
+> pelo mesmo motivo: o build v4 recusaria o carimbo 5 igualmente. Ver #42.
+
 **O que não resolve, e por que foi descartado.** Fazer o servidor **recusar**
 quem não alcança o limiar, em vez de admitir, faz a frase «quem não aceitou não
 entra» virar verdade — mas só porque ninguém entra. Enquanto nenhum par
@@ -1960,9 +2017,15 @@ rede — o "produto sabe e não conta" que o `CLAUDE.md` deste repositório nome
 como o defeito mais caro daqui, e desta vez cometido contra quem hospeda, não
 contra quem entra. `mods_instalados` agora devolve também
 `exigencia_vale_na_rede` (`seele_server::mods::anuncio::exigencia_vale_na_rede`,
-coberta por teste que falha no dia em que o portão ligar), então quem monta a
+coberta por teste que falhou no dia em que o portão ligou — e falhou mesmo, que é
+como esta pendência foi conferida de propósito em vez de descoberta pelo primeiro
+servidor que passou a recusar), então quem monta a
 tela de habilitar tem como avisar "exigido, mas ainda não bloqueia ninguém pela
-rede" em vez de deixar o interruptor mentir por omissão. Isso não move a data
+rede" em vez de deixar o interruptor mentir por omissão. **Com o portão ligado o
+campo vale sempre verdadeiro, e nenhum arquivo da casca o lê** — ele chega em
+`mods_instalados` e para ali; quem hospeda continua sem ver na tela que habilitar
+um MOD passou a barrar pares. Fica aqui como parte da tela de aceite, que é o que
+segue aberto. Isso não move a data
 em que o portão liga de verdade — continua dependendo da subida de
 `PROTOCOL_VERSION` descrita abaixo — só impede que o estado dormente seja
 tomado por ativo por quem lê a tela.
@@ -2053,3 +2116,51 @@ ainda não tinha se integrado à main. Enquanto isso, a main recebeu quatro
 itens próprios com esses números (34 a 37) e a ponta do CI ocupou o #38.
 Renumerados para #39, #40 e #41 na integração; o conteúdo é o mesmo que já foi
 revisado e aprovado.
+
+## 42 · A janela de compatibilidade não atravessa o fio: todo quadro sai carimbado com a versão global
+
+**O que foi medido.** `seele_proto::control::encode` põe `PROTOCOL_VERSION` — o
+número global desta build, nunca o negociado — no primeiro byte de todo quadro, e
+`decode` recusa o byte recebido fora da janela **antes** de ler o corpo. Os dois
+juntos dizem o seguinte: a janela de compatibilidade vale só para o lado que
+ouve. Um servidor v5 aceita o `Hello` de um par mais velho que esteja na janela
+dele, e no quadro seguinte manda a esse par um carimbo que o build dele recusa.
+
+A conta, contra o código publicado e não contra suposição: a última release é a
+`v0.10.5-1` de 05/09/2026 (commit `12a6401a6`), cujo `version.rs` tem
+`PROTOCOL_VERSION = 3` e `COMPATIBILITY_WINDOW = 1` e cujo `decode` é o mesmo
+desta árvore. Ela aceita o primeiro byte 2 ou 3 e recusa o resto com
+`PeerTooNew`. Preso em
+`seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`.
+
+**Por que isso importa agora.** A subida para a v5 alargou a janela para 2 em
+nome de «quem já instalou não perde o servidor», e essa promessa não tem como ser
+cumprida por nenhum valor desta janela. O número voltou a 1 e os textos foram
+corrigidos (`version.rs`, ADR 0046, `specs/02-protocolo.md`,
+`specs/10-convencoes.md`, #39). Fica valendo, então, o custo cru: **publicar a v5
+tira do ar quem está na v3**, e o mesmo valeu para toda subida de versão desde a
+primeira — as frases de «continua entrando» escritas nas subidas anteriores
+descrevem só o lado que ouve.
+
+**O que consertaria, e o que cada saída custa.**
+
+1. **O seletor de versão do ADR 0046.** É a decisão já tomada: os dois lados
+   sabem a versão antes de falar, e a negociação volta a ser conferência de
+   coerência. Aposenta a pendência inteira, e não existe ainda.
+
+2. **Carimbar o quadro com a versão negociada.** Barato de escrever e caro de
+   acertar: o servidor passaria a ter de **calar** toda variante fora do
+   vocabulário do par — hoje `SirvaTelaPara`, `AssistaTelaPor`, `ModsExigidos` —
+   porque o postcard indexa variante por posição e uma variante desconhecida
+   desloca a leitura do fluxo do outro lado para sempre. É a «tela preta, sem
+   mensagem nenhuma» deste repositório, e foi por causa dela que este carimbo
+   nasceu global. Precisa de ADR próprio, e de um teste por variante nova.
+
+3. **Não fazer nada e avisar.** Enquanto o seletor não sai, publicar uma versão
+   de protocolo nova é uma atualização obrigatória para todo mundo ao mesmo
+   tempo. Isso é dizível no produto e nas notas da release; hoje não é dito em
+   lugar nenhum, o que é o «o produto sabe e não conta» do `CLAUDE.md`.
+
+**O que não é.** Não é uma regressão desta entrega: já valia na v4 não publicada
+e em todas as subidas anteriores. O que esta entrega mudou foi deixar de afirmar
+o contrário.

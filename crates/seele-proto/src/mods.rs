@@ -260,23 +260,39 @@ pub fn inner_path(parts: &[&str]) -> Option<std::path::PathBuf> {
 /// par — é o que `session.rs` já faz com o `UplinkLoss` e com as duas mensagens
 /// da v4.
 ///
-/// **O número aqui é 5 e `PROTOCOL_VERSION` ainda é 4, e isso é deliberado.**
-/// Esta entrega e a da malha acrescentam variantes ao mesmo par de listas ao
-/// mesmo tempo; se cada uma subisse a versão global por conta própria, as duas
-/// chamariam «5» a vocabulários diferentes — que é exatamente o defeito que o
-/// guarda dos ordinais em `control.rs` existe para pegar, e que já custou uma
-/// tela preta sem mensagem nenhuma.
+/// **Este número nasceu em 5 enquanto `PROTOCOL_VERSION` ainda era 4, e isso
+/// era deliberado.** Esta entrega e a da malha acrescentavam variantes ao mesmo
+/// par de listas ao mesmo tempo; se cada uma subisse a versão global por conta
+/// própria, as duas chamariam «5» a vocabulários diferentes — que é exatamente
+/// o defeito que o guarda dos ordinais em `control.rs` existe para pegar, e que
+/// já custou uma tela preta sem mensagem nenhuma. Enquanto isso o portão ficava
+/// **dormente**, porque não teria a quem proteger: nenhuma conexão negocia acima
+/// da versão global, então não existia par capaz de aceitar, e recusar quem não
+/// alcança seria recusar todo mundo.
 ///
-/// **O contrato da integração conjunta, numa linha:** quando as duas entregas
-/// se juntarem, `PROTOCOL_VERSION` passa a 5, esta constante continua 5, e o
-/// anúncio passa a sair sozinho — nada além disso.
+/// **O contrato está cumprido desde 14/09/2026.** As duas entregas se juntaram,
+/// as variantes das duas convivem numa ordem única,
+/// [`crate::version::PROTOCOL_VERSION`] subiu para 5 **uma vez só**, e esta
+/// constante continuou em 5 — como estava escrito que aconteceria, e nada além
+/// disso. Nenhuma linha de código precisou mudar aqui nem no portão: o teste
+/// abaixo e `o_anuncio_alcanca_alguem` comparam as duas, e a comparação virou
+/// verdadeira sozinha.
 ///
-/// **Enquanto isso não acontece o portão fica dormente**, e a razão é que ele
-/// não teria a quem proteger: nenhuma conexão negocia acima da versão global,
-/// então não existe par capaz de aceitar, e recusar quem não alcança seria
-/// recusar todo mundo. O servidor admite como sempre admitiu e avisa quem
-/// hospeda pelo log. Ver `seele_server::mods::anuncio::o_anuncio_alcanca_alguem`
-/// e `docs/superpowers/specs/2026-09-10-anuncio-e-aceite-de-mods.md`.
+/// **O que mudou para quem usa:** habilitar um MOD num servidor passou a valer
+/// no fio. Quem entra recebe a lista antes de entrar e pode recusar; quem recusa
+/// não entra. Antes, ligar o interruptor gravava a exigência e não trancava
+/// ninguém — e a casca **tinha como** dizer isso, por
+/// `seele_server::mods::anuncio::exigencia_vale_na_rede`, que chega a ela junto
+/// com a lista de MODs instalados. Nenhuma tela lê esse campo ainda, e por isso
+/// quem hospeda continua sem ver o efeito do interruptor: está em aberto na
+/// pendência #39, junto com a tela de aceite.
+///
+/// **Ela continua sendo uma constante separada** e não vira um alias de
+/// `PROTOCOL_VERSION`: é ela que diz *a partir de qual versão* o anúncio viaja,
+/// e na próxima subida global as duas voltam a divergir — 5 aqui, 6 lá — sem que
+/// o anúncio precise de nada. Ver
+/// `seele_server::mods::anuncio::o_anuncio_alcanca_alguem` e
+/// `docs/superpowers/specs/2026-09-10-anuncio-e-aceite-de-mods.md`.
 pub const VERSAO_DO_ANUNCIO: u8 = 5;
 
 /// Quantos dígitos tem um hash de conteúdo escrito em hexadecimal.
@@ -720,19 +736,29 @@ mod tests {
         }
     }
 
-    /// O anúncio não sai enquanto a versão global não o alcançar, e a linha que
-    /// decide isso é uma só. Preso aqui para que a integração conjunta com a
-    /// malha seja uma decisão e não um descuido: quando os dois conjuntos de
-    /// variantes entrarem juntos, `PROTOCOL_VERSION` sobe para 5 e este teste
-    /// passa a dizer que o anúncio vale.
+    /// O anúncio não saía enquanto a versão global não o alcançasse, e a linha
+    /// que decidia isso era uma só. Este teste ficou preso aqui para que a
+    /// integração conjunta com a malha fosse uma decisão e não um descuido — e
+    /// agora diz a outra metade: a versão global alcançou, e o anúncio vale.
+    ///
+    /// **A igualdade das duas é o que o guarda protege**, e não o número 5 em
+    /// si. Um anúncio acima da global volta a ser dormente; um anúncio abaixo
+    /// dela sairia para pares que não sabem lê-lo, e o postcard não ignora uma
+    /// variante desconhecida — ele desloca a leitura do fluxo para sempre.
     #[test]
-    fn o_anuncio_pede_uma_versao_que_a_global_ainda_nao_alcancou() {
+    fn o_anuncio_pede_uma_versao_que_a_global_alcanca() {
         assert_eq!(VERSAO_DO_ANUNCIO, 5);
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            4,
+            5,
             "a versão global mudou: confira o contrato de integração no desenho \
              do anúncio antes de mexer nesta linha"
         );
+        // A desigualdade que importa — `VERSAO_DO_ANUNCIO <= PROTOCOL_VERSION`,
+        // sem a qual o portão volta a ser dormente — já está dita pelas duas
+        // igualdades acima, e escrevê-la de novo seria uma asserção de valor
+        // constante que o clippy recusa com razão. Quem a cobra como relação, e
+        // não como par de números, é
+        // `version::tests::a_versao_subiu_uma_vez_so_para_a_malha_e_para_os_mods`.
     }
 }

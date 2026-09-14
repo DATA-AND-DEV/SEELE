@@ -54,6 +54,8 @@ Curto. Cinco a quinze linhas. O valor está em existir, não em ser longo.
 
 SemVer. O protocolo tem versão própria, independente da versão do produto (`02`). Compatibilidade de protocolo: janela de N−1.
 
+**A janela vale só para o lado que ouve, e isso precisa ser lido junto com a regra.** Todo quadro sai carimbado com a `PROTOCOL_VERSION` global (`control::encode`), nunca com a versão negociada, e a build mais velha recusa o carimbo antes de ler o corpo. Então alargar a janela não faz um par publicado voltar a conectar — foi tentado em 2026-09-14, com a subida para a v5, e desfeito pela medida no mesmo dia. Quem não atualizou perde o servidor quando a versão sobe, e o que resolve isso é o seletor de versão do ADR 0046 ou carimbar a versão negociada (pendência #42), não o número desta janela.
+
 ## Observabilidade
 
 - `tracing` em todo lugar, com spans nas fronteiras: conexão, VoiceRoom, sessão.

@@ -1653,12 +1653,17 @@ struct ModNaTela {
     /// **A metade que `enabled` sozinho não conta.** `enabled` responde só o
     /// que está gravado no banco desta janela; esta responde o que esse
     /// registro *faz* hoje na rede — e as duas podem discordar: um MOD pode
-    /// estar `enabled: true` e ninguém ser barrado por ele, porque o anúncio
-    /// que o exige ainda está dormente (`docs/pendencias.md` #39). Sem este
-    /// campo, quem hospeda liga o interruptor e lê "exigido" numa tela que não
-    /// tranca ninguém — o "produto sabe e não conta" que o `CLAUDE.md` deste
-    /// repositório nomeia como o defeito mais caro daqui, cometido contra a
-    /// própria pessoa que hospeda.
+    /// estar `enabled: true` e ninguém ser barrado por ele, se o anúncio que o
+    /// exige estiver dormente. Sem este campo, quem hospeda liga o interruptor
+    /// e lê "exigido" numa tela que não tranca ninguém — o "produto sabe e não
+    /// conta" que o `CLAUDE.md` deste repositório nomeia como o defeito mais
+    /// caro daqui, cometido contra a própria pessoa que hospeda.
+    ///
+    /// **Com a versão 5 do protocolo as duas concordam**: o anúncio saiu da
+    /// dormência em 14/09/2026 e este campo devolve verdadeiro para todo
+    /// servidor que esta janela levanta. Ele não foi removido porque a pergunta
+    /// é do produto e não do dia: a resposta volta a ser falsa na próxima
+    /// variante que nascer adiantada, e a tela precisa continuar sabendo.
     exigencia_vale_na_rede: bool,
 }
 

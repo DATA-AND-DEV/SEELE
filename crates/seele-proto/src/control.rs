@@ -2839,6 +2839,37 @@ mod tests {
         assert_eq!(frame.first(), Some(&PROTOCOL_VERSION));
     }
 
+    /// O outro lado da janela de compatibilidade, que é onde ela não chega.
+    ///
+    /// `encode` carimba `PROTOCOL_VERSION` — o número **global**, não o
+    /// negociado — no primeiro byte de todo quadro, e o teste acima prende isso.
+    /// A consequência é este teste: a última release publicada, `v0.10.5-1`
+    /// (commit `12a6401a6`), traz este mesmo `decode`, e o `version.rs` de lá
+    /// tem `PROTOCOL_VERSION = 3` com `COMPATIBILITY_WINDOW = 1`. Ela aceita o
+    /// primeiro byte 2 ou 3 e recusa qualquer outro com `PeerTooNew`, **antes**
+    /// de olhar para o corpo.
+    ///
+    /// Então um par v3 de verdade não completa o aperto de mão com esta build,
+    /// por mais larga que seja a janela **daqui** — e nenhum teste que simule o
+    /// par velho só pelo campo `Hello.version` mede isso, porque nele os dois
+    /// lados são o mesmo codec.
+    #[test]
+    fn a_release_publicada_recusa_o_carimbo_desta_build() {
+        const PUBLICADA: u8 = 3;
+        const JANELA_DA_PUBLICADA: u8 = 1;
+
+        let frame = encode(&hello()).unwrap();
+        let carimbo = *frame.first().expect("quadro sem carimbo");
+        let janela_de_la = (PUBLICADA - JANELA_DA_PUBLICADA)..=PUBLICADA;
+
+        assert!(
+            !janela_de_la.contains(&carimbo),
+            "um par da release publicada aceitaria este quadro: se isso passou a \
+             ser verdade, o carimbo deixou de ser a versão global e o texto de \
+             version.rs precisa mudar junto"
+        );
+    }
+
     #[test]
     fn a_foreign_version_is_refused_before_the_body_is_read() {
         let mut frame = encode(&hello()).unwrap();
@@ -4128,15 +4159,23 @@ mod o_vocabulario_e_a_versao {
     /// 2. **O caminho entre pares** — `EmprestarSubida`, `ParFalhou`,
     ///    `SirvaTelaPara`, `AssistaTelaPor` —, e a versão foi para 4.
     /// 3. **O anúncio e o aceite de MODs** — `AceitarMods`, `RecusarMods`,
-    ///    `ModsExigidos` —, e desta vez a decisão foi **a outra**: a versão
-    ///    global fica em 4 e quem manda pergunta antes, contra
+    ///    `ModsExigidos` —, e naquele momento a decisão foi **a outra**: a
+    ///    versão global ficou em 4 e quem manda passou a perguntar antes, contra
     ///    [`crate::mods::VERSAO_DO_ANUNCIO`].
     ///
     /// O motivo de a terceira ser diferente está escrito naquela constante e
-    /// vale repetir em uma linha: esta entrega e a da malha acrescentam
+    /// vale repetir em uma linha: aquela entrega e a da malha acrescentavam
     /// variantes ao mesmo tempo, e duas subidas independentes para «5» dariam
     /// dois vocabulários com o mesmo número — que é o defeito que este guarda
     /// existe para pegar, cometido por quem o estava obedecendo.
+    ///
+    /// 4. **A integração conjunta das duas**, em 14/09/2026, e é o que a lista
+    ///    abaixo prende hoje. As duas listas passaram a conviver numa ordem
+    ///    única — os ordinais da v4 parados onde estavam, os três verbos de MOD
+    ///    depois deles — e `PROTOCOL_VERSION` subiu para 5 **uma vez só**, para
+    ///    as duas. `VERSAO_DO_ANUNCIO` continuou em 5 e passou a ser alcançada,
+    ///    então o portão do anúncio ligou sem uma linha a mais. O contrato que a
+    ///    terceira vez deixou escrito está cumprido.
     #[test]
     fn o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou() {
         assert_eq!(
@@ -4180,15 +4219,23 @@ mod o_vocabulario_e_a_versao {
 
         // E o número da versão, preso ao lado delas. Ele é o que diz a um par se
         // vale a pena tentar — e enquanto ele não subir, dois builds com listas
-        // diferentes vão continuar se cumprimentando como iguais. É por isso que
-        // o anúncio de MODs não sai para ninguém hoje, e é o contrato da
-        // integração conjunta com a malha.
+        // diferentes continuam se cumprimentando como iguais. Subiu para 5 na
+        // integração conjunta, uma vez para os dois conjuntos de variantes, e é
+        // por isso que o anúncio de MODs passou a sair.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            4,
+            5,
             "a versão do protocolo mudou; confira se os ordinais acima, a janela \
              de compatibilidade e `mods::VERSAO_DO_ANUNCIO` continuam contando a \
              mesma história"
+        );
+        assert_eq!(
+            crate::mods::VERSAO_DO_ANUNCIO,
+            crate::version::PROTOCOL_VERSION,
+            "os três verbos de MOD acima só saem no fio para um par que negocie \
+             `VERSAO_DO_ANUNCIO`, e nenhum par negocia acima da versão global: \
+             se as duas divergirem, ou o anúncio voltou a ser dormente, ou ele \
+             passou a sair para quem não sabe lê-lo"
         );
     }
 
