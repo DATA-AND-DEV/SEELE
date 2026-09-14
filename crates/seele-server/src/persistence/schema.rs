@@ -516,6 +516,38 @@ pub const MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 12,
+        description: "o que a tela de aceite precisa dizer antes de qualquer byte ser baixado",
+        sql: r#"
+            -- ADR 0045. O anúncio manda identidade, versão e hash — e mais três
+            -- coisas que a pessoa lê **antes** de decidir: de que repositório o
+            -- MOD veio, o que ele declara alcançar, e se ele roda na máquina de
+            -- quem hospeda.
+            --
+            -- Colunas e não leitura do disco no aperto de mão, por duas razões:
+            --
+            --   1. elas são gravadas no mesmo ato que grava o `hash`, portanto
+            --      descrevem **os bytes que o hash cobre**. Lidas do disco a
+            --      cada entrada, descreveriam o que estiver lá agora — e uma
+            --      pasta mexida depois de habilitada faria o anúncio contar uma
+            --      coisa e o hash provar outra;
+            --   2. o aperto de mão é o pior lugar para ir ao disco: é uma
+            --      leitura por MOD por pessoa que entra.
+            --
+            -- `reach` é JSON, pela mesma razão que `roles.permissions`: são
+            -- poucos nomes, crescem, e um dump tem de continuar legível.
+            --
+            -- Os padrões existem porque a migração roda contra linhas que já
+            -- existem. Uma linha escrita antes desta coluna fica sem repositório
+            -- e sem alcance declarado — e é isto que ela de fato é: o produto
+            -- não sabe. Quem quiser a informação re-habilita o MOD, que é um
+            -- clique, e a re-habilitação regrava as três.
+            ALTER TABLE mods ADD COLUMN repo        TEXT    NOT NULL DEFAULT '';
+            ALTER TABLE mods ADD COLUMN reach       TEXT    NOT NULL DEFAULT '[]';
+            ALTER TABLE mods ADD COLUMN server_half INTEGER NOT NULL DEFAULT 0;
+        "#,
+    },
 ];
 
 #[cfg(test)]

@@ -53,6 +53,7 @@ fn destino(endereco: SocketAddr) -> Destino {
         apelido: "marcela".into(),
         segredo: None,
         impressao_esperada: None,
+        aceito: None,
     }
 }
 

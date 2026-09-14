@@ -1648,6 +1648,18 @@ struct ModNaTela {
     instalado: seele_ffi::mods::ModInstalado,
     /// Se o servidor desta janela o exige agora.
     enabled: bool,
+    /// Se, com essa exigência, quem não aceita já é barrado pela rede.
+    ///
+    /// **A metade que `enabled` sozinho não conta.** `enabled` responde só o
+    /// que está gravado no banco desta janela; esta responde o que esse
+    /// registro *faz* hoje na rede — e as duas podem discordar: um MOD pode
+    /// estar `enabled: true` e ninguém ser barrado por ele, porque o anúncio
+    /// que o exige ainda está dormente (`docs/pendencias.md` #39). Sem este
+    /// campo, quem hospeda liga o interruptor e lê "exigido" numa tela que não
+    /// tranca ninguém — o "produto sabe e não conta" que o `CLAUDE.md` deste
+    /// repositório nomeia como o defeito mais caro daqui, cometido contra a
+    /// própria pessoa que hospeda.
+    exigencia_vale_na_rede: bool,
 }
 
 /// Todo MOD em `mods/`, com o que o servidor desta máquina tem ligado.
@@ -1659,10 +1671,12 @@ async fn mods_instalados(
     let ligados = mods_ligados(&session).await?;
     let pasta = config_dir(&app);
 
+    let exigencia_vale_na_rede = seele_server::mods::anuncio::exigencia_vale_na_rede();
     Ok(seele_ffi::mods::listar(&pasta)
         .into_iter()
         .map(|instalado| ModNaTela {
             enabled: ligados.contains(&instalado.id),
+            exigencia_vale_na_rede,
             instalado,
         })
         .collect())
@@ -1680,11 +1694,21 @@ async fn habilitar_mod(
 
     let persistence = persistence_do_mod(&session)?;
     let persistence = persistence.lock().await;
+    // Os seis campos de uma vez, e não só os três de identidade: o que a tela
+    // de aceite de quem entra vai ler — repositório, alcance declarado, e se o
+    // MOD roda na máquina de quem hospeda — é gravado **no mesmo ato** que
+    // grava o hash, e por isso descreve exatamente os bytes que o hash cobre.
+    // Ver a migração 12.
     seele_server::persistence::mods::enable(
         &persistence,
-        &instalado.id,
-        &instalado.version,
-        &instalado.hash,
+        &seele_server::persistence::mods::EnabledMod {
+            id: instalado.id,
+            version: instalado.version,
+            hash: instalado.hash,
+            repo: instalado.repo,
+            reach: instalado.reach,
+            server_half: instalado.server,
+        },
     )
     .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
 }
@@ -1696,6 +1720,52 @@ async fn desabilitar_mod(session: State<'_, Session>, id: String) -> Result<(), 
     let persistence = persistence.lock().await;
     seele_server::persistence::mods::disable(&persistence, &id)
         .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+}
+
+// --------------------------------------------- o aceite de quem entra
+//
+// Os três acima são de quem **hospeda** — decidem o que a sala exige. Os três
+// abaixo são de quem **entra** — registram o que esta máquina respondeu, e não
+// tocam em servidor nenhum: valem numa janela que nunca hospedou nada.
+//
+// Existem porque sem eles o contrato do ADR 0045 não fecha deste lado. A lista
+// de MODs chega à tela pelo `ConnectionError::ModsNaoAceitos`, e sem um verbo
+// de gravar o sim a pergunta não teria resposta possível — a pessoa leria a
+// lista e não teria o que fazer com ela.
+//
+// **A tela que mostra a lista e tem o botão ainda não existe**, e está fora
+// desta etapa. O que existe é a superfície: os mesmos três verbos que a tela
+// vai chamar, no mesmo lugar em que `habilitar_mod` já espera a dela.
+
+/// O conjunto de MODs que esta máquina já aceitou para este servidor, se algum.
+///
+/// `alvo` é o endereço como a pessoa o digitou; a forma canônica sob a qual ele
+/// é arquivado é decidida pelo `seele-ffi`, e não aqui — é a mesma chave que a
+/// conexão procura, e reproduzi-la nesta camada seria convidar as duas a
+/// discordarem.
+#[tauri::command]
+fn aceite_de_mods(app: AppHandle, alvo: String) -> Option<String> {
+    seele_ffi::mods::aceite_de(&config_dir(&app), &alvo)
+}
+
+/// Guarda o sim que a pessoa deu à lista de MODs deste servidor.
+///
+/// `conjunto` é a identidade que veio no `ConnectionError::ModsNaoAceitos` —
+/// inteira e como chegou. A entrada seguinte neste servidor passa direto, e só
+/// neste: um aceite é de um servidor, e não desta máquina.
+#[tauri::command]
+fn aceitar_mods(app: AppHandle, alvo: String, conjunto: String) -> Result<(), FalhaNoMod> {
+    seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &conjunto)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })
+}
+
+/// Desfaz o sim dado a este servidor: a entrada seguinte volta a perguntar.
+///
+/// Um consentimento que não se retira não é consentimento — ADR 0045.
+#[tauri::command]
+fn esquecer_aceite_de_mods(app: AppHandle, alvo: String) -> Result<(), FalhaNoMod> {
+    seele_ffi::mods::esquecer_aceite(&config_dir(&app), &alvo)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })
 }
 
 /// Os identificadores ligados, ou vazio quando esta janela não hospeda.
@@ -3625,6 +3695,9 @@ fn main() {
             mods_instalados,
             habilitar_mod,
             desabilitar_mod,
+            aceite_de_mods,
+            aceitar_mods,
+            esquecer_aceite_de_mods,
             icone_do_server,
             expulsar_pessoa,
             banir_pessoa,

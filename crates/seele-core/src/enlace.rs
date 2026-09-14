@@ -76,6 +76,17 @@ pub struct Destino {
     /// `None` para quem digitou o endereço à mão — aí não há o que conferir, e
     /// o primeiro contato segue sendo cego, como sempre foi.
     pub impressao_esperada: Option<String>,
+    /// A identidade do conjunto de MODs que esta máquina já aceitou para este
+    /// servidor. ADR 0045.
+    ///
+    /// Mora no destino, e não num argumento de `conectar`, porque a bateria
+    /// interna reconecta sozinha por cinco minutos: um aceite que só existisse
+    /// na primeira chamada faria toda reconexão ser recusada por não ter o que
+    /// responder ao anúncio.
+    ///
+    /// `None` em quem nunca aceitou nada daquele servidor — que é o estado de
+    /// toda primeira entrada, e de todo servidor sem MOD.
+    pub aceito: Option<String>,
 }
 
 /// O que a casca precisa saber.
@@ -267,8 +278,19 @@ pub enum Motivo {
 /// portaria a recusa. O que ela produz hoje é uma reconexão inútil a cada
 /// batida da bateria por cinco minutos, e uma casca que diz «reconectando» a
 /// quem foi banido.
+///
+/// [`DisconnectReason::ModsMudaram`] entrou pela mesma porta e por um motivo
+/// próprio: **reconectar não pode dar certo sozinho.** O servidor passou a
+/// exigir um conjunto que esta máquina não aceitou, e o anúncio da reconexão
+/// vai encontrar exatamente o mesmo não. Uma bateria batendo por cinco minutos
+/// contra uma decisão que só uma pessoa pode tomar é a casca dizendo
+/// «reconectando» para quem precisa ler uma lista e responder — ADR 0045, «um
+/// servidor que troca de MOD pergunta de novo», e perguntar exige alguém.
 fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
-    matches!(motivo, DisconnectReason::Kicked | DisconnectReason::Banned)
+    matches!(
+        motivo,
+        DisconnectReason::Kicked | DisconnectReason::Banned | DisconnectReason::ModsMudaram
+    )
 }
 
 /// O que a casca manda fazer.
@@ -1035,8 +1057,7 @@ impl Enlace {
             return resultado;
         }
 
-        let mut primeira_falha: Option<ConnectError> = None;
-        let mut respondeu: Option<ConnectError> = None;
+        let mut a_mostrar = FalhaAMostrar::default();
 
         // Duas voltas: a primeira com pouca paciência para todo mundo, a
         // segunda com a paciência inteira. Ver `PRAZO_DA_PRIMEIRA_VOLTA`.
@@ -1185,17 +1206,10 @@ impl Enlace {
         for (posicao, falha) in corrida.falhas {
             let onde = todos.get(posicao).map(|destino| destino.servidor);
             tracing::info!(?onde, erro = %falha, "este endereço do convite não deu");
-            if respondeu.is_none() && alguem_respondeu(&falha) {
-                respondeu = Some(falha.clone());
-            }
-            if primeira_falha.is_none() {
-                primeira_falha = Some(falha);
-            }
+            a_mostrar.anotar(falha);
         }
 
-        Err(respondeu
-            .or(primeira_falha)
-            .unwrap_or(ConnectError::Unreachable))
+        Err(a_mostrar.escolhida())
     }
 
     /// Conecta pela primeira vez.
@@ -1245,6 +1259,7 @@ impl Enlace {
             &chave,
             Arc::clone(&pins),
             destino.segredo.as_deref(),
+            destino.aceito.as_deref(),
         )
         .await;
 
@@ -2673,6 +2688,7 @@ impl Motor {
                     &self.chave,
                     Arc::clone(&self.pins),
                     self.destino.segredo.as_deref(),
+                    self.destino.aceito.as_deref(),
                 )
                 .await
             }
@@ -4855,6 +4871,46 @@ fn mesma_rede(daqui: IpAddr, la: IpAddr) -> bool {
     }
 }
 
+/// Qual falha a pessoa vê quando nenhum candidato entra.
+///
+/// Um convite traz vários endereços do mesmo servidor e eles correm juntos
+/// (ADR 0006). Quando todos falham sobra escolher **uma** para mostrar, e a
+/// ordem de chegada é a pior régua possível: um endereço morto falha em
+/// milissegundos, enquanto quem respondeu alguma coisa gastou o aperto de mão
+/// inteiro para responder. Por ordem de chegada, o «não alcancei» ganha quase
+/// sempre.
+///
+/// Era código solto dentro de `conectar_entre`, e a decisão que ele toma não
+/// tinha teste nenhum — foi assim que [`ConnectError::ModsNaoAceitos`] entrou
+/// na enumeração sem entrar na regra. Aqui ela tem nome e é chamável de um
+/// teste.
+#[derive(Debug, Default)]
+struct FalhaAMostrar {
+    /// A primeira falha de alguém que disse alguma coisa sobre o mundo.
+    respondeu: Option<ConnectError>,
+    /// A primeira de todas, por ordem de conclusão.
+    primeira: Option<ConnectError>,
+}
+
+impl FalhaAMostrar {
+    /// Registra mais um candidato que não deu.
+    fn anotar(&mut self, falha: ConnectError) {
+        if self.respondeu.is_none() && alguem_respondeu(&falha) {
+            self.respondeu = Some(falha.clone());
+        }
+        if self.primeira.is_none() {
+            self.primeira = Some(falha);
+        }
+    }
+
+    /// A que sobra. Sem candidato nenhum, «não alcancei» é a verdade.
+    fn escolhida(self) -> ConnectError {
+        self.respondeu
+            .or(self.primeira)
+            .unwrap_or(ConnectError::Unreachable)
+    }
+}
+
 /// Se este erro veio de alguém que **respondeu**.
 ///
 /// A diferença decide qual erro sobra quando nenhum candidato entra. Um servidor
@@ -4862,28 +4918,63 @@ fn mesma_rede(daqui: IpAddr, la: IpAddr) -> bool {
 /// mundo; um "não alcancei" de um endereço que nunca ia voltar não disse nada,
 /// e mostrá-lo no lugar do outro manda a pessoa procurar problema de rede
 /// enquanto o servidor está ali, recusando.
+///
+/// # `match` exaustivo, e sem braço `_`
+///
+/// Os dois predicados deste par decidem **o que a pessoa vê** e **se a bateria
+/// insiste**, e nenhum dos dois tem como cair num padrão por omissão sem
+/// alguém perceber: foi exatamente o que aconteceu com
+/// [`ConnectError::ModsNaoAceitos`], que entrou na enumeração e ficou de fora
+/// das duas decisões. O irmão dela do lado das despedidas —
+/// [`a_sessao_acabou_aqui`] — já era preso por um teste exaustivo; este lado
+/// não era preso por nada. Agora uma variante nova **não compila** até alguém
+/// escrever de que lado ela cai.
 fn alguem_respondeu(erro: &ConnectError) -> bool {
-    matches!(
-        erro,
+    match erro {
         ConnectError::PinChanged { .. }
-            | ConnectError::InviteMismatch { .. }
-            | ConnectError::Refused { .. }
-            | ConnectError::TlsRefused
-            | ConnectError::ProtocolViolation
-    )
+        | ConnectError::InviteMismatch { .. }
+        | ConnectError::Refused { .. }
+        | ConnectError::TlsRefused
+        | ConnectError::ProtocolViolation => true,
+        // **Respondeu, e respondeu a coisa mais informativa do conjunto:** a
+        // lista inteira do que exige. Sem isto ela perde a corrida de
+        // `conectar_entre` para o `Unreachable` de um endereço morto — que
+        // falha rápido, enquanto o anúncio exige o aperto de mão inteiro — e a
+        // casca recebe «não alcancei» sem ter o que mostrar, contra o contrato
+        // da própria entrega: a tela mostra, a pessoa aceita, a casca guarda.
+        ConnectError::ModsNaoAceitos { .. } => true,
+        ConnectError::LocalEndpoint
+        | ConnectError::Unreachable
+        | ConnectError::HandshakeTimeout
+        | ConnectError::SemResposta => false,
+    }
 }
 
 /// Se insistir pode dar em outra coisa.
 ///
 /// Uma credencial rejeitada ou um banimento não mudam de resposta por
 /// repetição; uma queda de rede muda.
+///
+/// Exaustivo pela razão que [`alguem_respondeu`] escreve.
 fn vale_insistir(erro: &ConnectError) -> bool {
-    !matches!(
-        erro,
+    match erro {
         ConnectError::PinChanged { .. }
-            | ConnectError::Refused { .. }
-            | ConnectError::InviteMismatch { .. }
-    )
+        | ConnectError::Refused { .. }
+        | ConnectError::InviteMismatch { .. } => false,
+        // **Só uma pessoa desfaz isto**, e é a metade simétrica do que
+        // `a_sessao_acabou_aqui` já dizia para `DisconnectReason::ModsMudaram`:
+        // a reconexão encontra o mesmo anúncio e o mesmo não. Insistir manda
+        // `RecusarMods` ao servidor a cada batida por cinco minutos, e deixa a
+        // casca dizendo «reconectando» a quem precisa ler uma lista e
+        // responder.
+        ConnectError::ModsNaoAceitos { .. } => false,
+        ConnectError::LocalEndpoint
+        | ConnectError::Unreachable
+        | ConnectError::TlsRefused
+        | ConnectError::HandshakeTimeout
+        | ConnectError::SemResposta
+        | ConnectError::ProtocolViolation => true,
+    }
 }
 
 #[cfg(test)]
@@ -4939,10 +5030,17 @@ mod tests {
             DisconnectReason::AdmissionPending,
             DisconnectReason::AdmissionDenied,
             DisconnectReason::NicknameTaken,
+            DisconnectReason::ModsRecusados,
+            DisconnectReason::ModsMudaram,
+            DisconnectReason::ModsIndisponiveis,
         ] {
             let acaba = match motivo {
                 // Alguém decidiu que esta pessoa não fica. Reconectar desfaz.
                 DisconnectReason::Kicked | DisconnectReason::Banned => true,
+                // O servidor passou a exigir um conjunto de MODs que esta
+                // máquina não aceitou. Reconectar encontra o mesmo não, e quem
+                // desfaz é uma pessoa lendo a lista nova.
+                DisconnectReason::ModsMudaram => true,
                 // A bateria é o conserto: o servidor volta, ou o cliente
                 // reconecta e busca o histórico que faltou. O doc de
                 // `FellBehind` diz isso com todas as letras.
@@ -4960,7 +5058,12 @@ mod tests {
                 | DisconnectReason::ServerFull
                 | DisconnectReason::AdmissionPending
                 | DisconnectReason::AdmissionDenied
-                | DisconnectReason::NicknameTaken => false,
+                | DisconnectReason::NicknameTaken
+                // Nascem no aperto de mão, como as de cima: quem recusa os MODs
+                // ou encontra um servidor que não consegue anunciá-los nunca
+                // chegou a ter sessão.
+                | DisconnectReason::ModsRecusados
+                | DisconnectReason::ModsIndisponiveis => false,
             };
             assert_eq!(
                 a_sessao_acabou_aqui(motivo),
@@ -5057,6 +5160,79 @@ mod tests {
         assert!(vale_insistir(&ConnectError::HandshakeTimeout));
     }
 
+    /// Um conjunto de MODs a aceitar não é uma queda de rede.
+    ///
+    /// # As duas metades, e por que elas estavam faltando
+    ///
+    /// [`ConnectError::ModsNaoAceitos`] entrou na enumeração e ficou de fora
+    /// das duas decisões que a usam. Sem a primeira, a pergunta com a lista
+    /// perde a corrida de `conectar_entre` para o «não alcancei» de um endereço
+    /// morto — que falha primeiro porque falhar é rápido — e a casca fica sem o
+    /// que mostrar. Sem a segunda, a bateria interna reconecta por cinco
+    /// minutos contra uma decisão que só uma pessoa pode tomar, mandando
+    /// `RecusarMods` a cada batida.
+    ///
+    /// É a metade simétrica do que `a_sessao_acabou_aqui` já dizia para
+    /// `DisconnectReason::ModsMudaram`, e agora as duas estão escritas.
+    #[test]
+    fn um_conjunto_de_mods_a_aceitar_nao_e_falha_de_rede() {
+        let pergunta = || ConnectError::ModsNaoAceitos {
+            mods: Vec::new(),
+            conjunto: "9f86d0".into(),
+        };
+
+        assert!(
+            alguem_respondeu(&pergunta()),
+            "a lista de MODs veio de um servidor que respondeu o aperto de mão inteiro"
+        );
+        assert!(
+            !vale_insistir(&pergunta()),
+            "a reconexão automática encontra o mesmo anúncio e o mesmo não"
+        );
+    }
+
+    /// **E a pergunta sobrevive à corrida.** O guarda de comportamento do
+    /// achado acima: não basta o predicado dizer «respondeu», é a escolha da
+    /// falha que precisa mudar.
+    ///
+    /// A ordem aqui é a do caso típico e não uma conveniência: o endereço morto
+    /// é anotado **primeiro**, porque um destino inalcançável falha em
+    /// milissegundos enquanto o anúncio exige o aperto de mão inteiro.
+    /// Revertendo qualquer uma das duas metades do conserto, este teste vê
+    /// `Unreachable` — que é a casca dizendo «não alcancei» sobre um servidor
+    /// que estava ali, com a lista na mão.
+    #[test]
+    fn a_pergunta_dos_mods_ganha_do_endereco_morto_que_falhou_antes() {
+        let mut a_mostrar = FalhaAMostrar::default();
+        a_mostrar.anotar(ConnectError::Unreachable);
+        a_mostrar.anotar(ConnectError::ModsNaoAceitos {
+            mods: Vec::new(),
+            conjunto: "9f86d0".into(),
+        });
+
+        assert!(
+            matches!(a_mostrar.escolhida(), ConnectError::ModsNaoAceitos { .. }),
+            "a pergunta com a lista de MODs foi descartada em favor de um «não alcancei»"
+        );
+    }
+
+    /// Sem ninguém que tenha respondido, a primeira falha é a que sobra — e sem
+    /// falha nenhuma sobra a verdade. As duas outras pernas de
+    /// [`FalhaAMostrar`], para que o teste acima não seja o único a passar por
+    /// aqui.
+    #[test]
+    fn sem_ninguem_que_respondeu_sobra_a_primeira_falha() {
+        let mut a_mostrar = FalhaAMostrar::default();
+        a_mostrar.anotar(ConnectError::SemResposta);
+        a_mostrar.anotar(ConnectError::Unreachable);
+        assert!(matches!(a_mostrar.escolhida(), ConnectError::SemResposta));
+
+        assert!(matches!(
+            FalhaAMostrar::default().escolhida(),
+            ConnectError::Unreachable
+        ));
+    }
+
     #[test]
     fn uma_recusa_desfaz_o_pin_que_o_verificador_acabou_de_escrever() {
         // Sem isto a recusa é decorativa: a visita seguinte, sem link para
@@ -5103,6 +5279,7 @@ mod tests {
             apelido: "pessoa".into(),
             segredo: None,
             impressao_esperada: impressao_esperada.map(str::to_owned),
+            aceito: None,
         }
     }
 
@@ -5317,6 +5494,7 @@ mod tests {
             impressao_esperada: Some(
                 "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
             ),
+            aceito: None,
         };
         let refletido: SocketAddr = "203.0.113.7:8383".parse().expect("endereço");
 
@@ -6023,6 +6201,7 @@ mod tests {
                 apelido: "pessoa".into(),
                 segredo: None,
                 impressao_esperada: None,
+                aceito: None,
             },
             chave: SigningKey::from_bytes(&[7; 32]),
             pins: Arc::new(crate::tofu::MemoryPinStore::new()),

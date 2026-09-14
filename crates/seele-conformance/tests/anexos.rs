@@ -83,6 +83,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client> {
         &ed25519_dalek::SigningKey::from_bytes(&[semente; 32]),
         Arc::new(MemoryPinStore::new()),
         None,
+        None,
     )
     .await?;
     cliente.join_channel(LINHA).await?;

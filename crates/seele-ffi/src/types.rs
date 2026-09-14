@@ -295,6 +295,22 @@ pub enum EndReason {
     /// tela dava — «confira o convite» — mandava a pessoa mexer na única coisa
     /// que não era o problema.
     NicknameTaken,
+    /// Esta máquina não aceitou os MODs que o servidor exige. ADR 0045.
+    ///
+    /// Chega como fim de sessão só quando o servidor recusa a entrada; o caso
+    /// normal é a tela de aceite, que vem por
+    /// [`ConnectionError::ModsNaoAceitos`] e não por aqui.
+    ModsRecusados,
+    /// Os MODs do servidor mudaram enquanto a sessão corria. ADR 0045.
+    ///
+    /// A sessão acaba e a pessoa lê o conjunto novo ao entrar de novo — é a
+    /// forma de «um servidor que troca de MOD pergunta de novo».
+    ModsMudaram,
+    /// O servidor exige MODs que ele mesmo não consegue descrever. ADR 0045.
+    ///
+    /// Não é sobre a credencial de quem tentou entrar: é configuração do
+    /// servidor, e quem hospeda tem o motivo no log dele.
+    ModsIndisponiveis,
     /// The link died without the server saying why.
     LinkLost,
 }
@@ -317,6 +333,58 @@ impl From<seele_core::DisconnectReason> for EndReason {
             seele_core::DisconnectReason::AdmissionPending => Self::AdmissionPending,
             seele_core::DisconnectReason::AdmissionDenied => Self::AdmissionDenied,
             seele_core::DisconnectReason::NicknameTaken => Self::NicknameTaken,
+            seele_core::DisconnectReason::ModsRecusados => Self::ModsRecusados,
+            seele_core::DisconnectReason::ModsMudaram => Self::ModsMudaram,
+            seele_core::DisconnectReason::ModsIndisponiveis => Self::ModsIndisponiveis,
+        }
+    }
+}
+
+/// Um MOD que um servidor exige, como a tela de aceite o lê. ADR 0045.
+///
+/// # O que cada campo responde, e por que `no_servidor` não pode faltar
+///
+/// Os três primeiros são identidade — quem é, qual versão, quais bytes. O
+/// `hash` é o que uma pessoa compara a olho com o que o indexador publica, e é
+/// o que o cliente confere antes de servir um arquivo sob `mod://`.
+///
+/// `repo` e `reach` são o que o ADR 0045 manda mostrar **antes** de qualquer
+/// byte ser baixado: de onde o código veio, e o que ele declara alcançar.
+///
+/// `no_servidor` é a linha que a tela não pode omitir. Um MOD com metade de
+/// servidor roda na máquina de **quem hospeda**, e alcança o bloco `world` do
+/// `api/v1.json`: rede de saída, relógio e log. Em português de tela, é a
+/// diferença entre um MOD que repinta uma janela e um que abre conexões a
+/// partir da casa de outra pessoa — e o plano do runtime nomeia isso como «a
+/// parte que a tela de aceite tem de dizer em voz alta».
+///
+/// Quem escreve a frase é o `frases.js`, como sempre: aqui só atravessam
+/// campos (ADR 0012).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ModExigido {
+    /// `autor/nome`.
+    pub id: String,
+    /// A versão que o autor declara.
+    pub version: String,
+    /// O hash do conteúdo, em hexadecimal minúsculo.
+    pub hash: String,
+    /// O repositório público.
+    pub repo: String,
+    /// O que este MOD declara alcançar.
+    pub reach: Vec<String>,
+    /// Se ele roda na máquina de quem hospeda, com o alcance do bloco `world`.
+    pub no_servidor: bool,
+}
+
+impl From<seele_core::mods::ModAnunciado> for ModExigido {
+    fn from(anunciado: seele_core::mods::ModAnunciado) -> Self {
+        Self {
+            id: anunciado.id,
+            version: anunciado.version,
+            hash: anunciado.hash,
+            repo: anunciado.repo,
+            reach: anunciado.reach,
+            no_servidor: anunciado.no_servidor,
         }
     }
 }
@@ -1413,6 +1481,21 @@ pub enum LinkState {
 pub enum ConnectionError {
     /// No connection, or it is already gone.
     NotConnected,
+    /// O servidor exige MODs que esta máquina ainda não aceitou. ADR 0045.
+    ///
+    /// **Não é uma falha: é uma pergunta.** Carrega o que a tela de aceite tem
+    /// de mostrar antes de qualquer byte ser baixado — quem é cada MOD, de que
+    /// repositório veio, o que declara alcançar, e quais rodam na máquina de
+    /// quem hospeda.
+    ///
+    /// O caminho que ela abre: a tela mostra, a pessoa aceita, a casca chama o
+    /// verbo que guarda a identidade, e conecta de novo.
+    ModsNaoAceitos {
+        /// Os MODs exigidos, como o servidor os anunciou.
+        mods: Vec<ModExigido>,
+        /// A identidade do conjunto — o que se guarda ao aceitar.
+        conjunto: String,
+    },
     /// A connection is already open on this handle.
     AlreadyConnected,
     /// The address could not be resolved.

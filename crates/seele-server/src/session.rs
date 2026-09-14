@@ -247,6 +247,21 @@ pub struct Session {
     /// desconhecida não é ignorada — ela desloca a leitura do fluxo daquele par
     /// para sempre. Ver o ADR 0036 e `seele_proto::version`.
     pub protocol_version: u8,
+    /// A identidade do conjunto de MODs que esta conexão aceitou para entrar.
+    ///
+    /// **Sempre preenchida, inclusive num servidor sem MOD nenhum** — ali ela é
+    /// a identidade do conjunto vazio. Não é zelo: é o que faz habilitar o
+    /// primeiro MOD de um servidor valer para quem já está dentro. Se o campo
+    /// fosse vazio no caso comum, a sala inteira continuaria conversando sem
+    /// nunca ter lido o MOD que acabou de ser ligado.
+    pub conjunto_aceito: String,
+    /// Onde esta sessão fica sabendo que a lista de MODs mudou.
+    ///
+    /// Assinado **dentro do aperto de mão**, logo depois do aceite, e não no
+    /// laço da sessão: entre uma coisa e outra há esperas — o `Session`, os
+    /// ícones —, e uma troca de MOD que caísse nessa fresta não acordaria
+    /// ninguém.
+    pub aviso_de_mods: tokio::sync::watch::Receiver<u64>,
 }
 
 /// Runs the handshake, then the session, then cleans up.
@@ -811,6 +826,31 @@ async fn handshake(
         }
     };
 
+    // ---------------------------------------------------------------- MODs
+    //
+    // ADR 0045: «quem não aceita, não entra».
+    //
+    // **Aqui**, e as duas pontas do lugar são decisões:
+    //
+    // - **depois da assinatura e da portaria**, porque a lista de MODs é
+    //   configuração de quem hospeda, e quem varre a internet não tem por que
+    //   recebê-la só por abrir uma conexão;
+    // - **antes do `Session`**, porque o `Session` é o fluxo protegido — é dele
+    //   que saem as salas, os canais, os papéis e as permissões. Não entrar tem
+    //   de querer dizer não receber nada.
+    //
+    // Não há prazo próprio: o aperto de mão inteiro já corre dentro do
+    // `HANDSHAKE_TIMEOUT`, então quem não responde encontra
+    // `DisconnectReason::HandshakeTimeout` — que é o que de fato aconteceu.
+    // **Assinado antes de ler a tabela**, e a ordem é o conserto de uma corrida
+    // estreita: entre a leitura do conjunto e a assinatura cabe uma troca de
+    // MOD, e uma sessão que assinasse depois entraria com um aceite velho sem
+    // nunca ser acordada. Assinando antes, qualquer mudança a partir daqui
+    // acorda esta conexão — e uma que tenha acontecido no meio acorda de graça,
+    // porque o laço compara identidades em vez de confiar no aviso.
+    let aviso_de_mods = server.persistence.lock().await.mods_mudaram();
+    let conjunto_aceito = exigir_aceite_dos_mods(send, recv, server, version).await?;
+
     // Lido do PERSISTENCE, e não da [`ServerConfig`] que subiu o processo: renomear
     // com o servidor no ar é o caso normal — ADR 0032 —, e um nome que voltasse ao
     // do arranque no próximo reinício não seria um nome, seria uma sessão.
@@ -954,7 +994,197 @@ async fn handshake(
         // O que **o par** declarou, e não `PROTOCOL_VERSION`: o que se decide
         // com isto é o que ele consegue ler.
         protocol_version: version,
+        conjunto_aceito,
+        aviso_de_mods,
     })
+}
+
+/// Anuncia o que este servidor exige e espera a resposta.
+///
+/// Devolve a identidade do conjunto que esta conexão aceitou — a do conjunto
+/// vazio quando o servidor não exige MOD nenhum, pela razão que
+/// [`Session::conjunto_aceito`] escreve.
+///
+/// # O que ele recusa, e em que ordem
+///
+/// 1. **Um servidor que não consegue se descrever.** Uma linha habilitada com
+///    hash que não é hash, ou MODs demais para um quadro: ninguém entra, e o
+///    log nomeia a linha. Ver [`crate::mods::anuncio`].
+/// 2. **Um par que não alcança a versão do anúncio.** Ele não teria como ser
+///    informado nem como responder, e mandar-lhe o quadro mataria o fluxo de
+///    controle dele sem uma palavra — o defeito que já apareceu como «tela
+///    preta, sem mensagem nenhuma». Recusa com `Incompatible`, que é
+///    exatamente o que aconteceu.
+/// 3. **Quem diz não**, e **quem diz sim para outro conjunto** — um aceite
+///    guardado de antes de o servidor trocar de MOD.
+///
+/// # E o que ele **não** recusa enquanto o anúncio não sai
+///
+/// Os três itens acima pressupõem que exista alguém capaz de aceitar. Enquanto
+/// a versão global do protocolo não alcança a do anúncio não existe, e aí os
+/// três viram uma recusa de cem por cento sem nada em troca — ver
+/// [`crate::mods::anuncio::o_anuncio_alcanca_alguem`], que é onde essa decisão
+/// mora e está escrita por extenso. Nesse estado esta função admite como o
+/// servidor admitia antes desta entrega e avisa quem hospeda pelo log.
+///
+/// # Errors
+///
+/// [`Refusal`] com o motivo enumerado, já traduzido para o que o par consegue
+/// decodificar.
+async fn exigir_aceite_dos_mods(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    server: &Server,
+    versao: u8,
+) -> std::result::Result<String, Refusal> {
+    let limiar = server.versao_do_anuncio;
+    let exigido = {
+        let guard = server.persistence.lock().await;
+        crate::mods::anuncio::conjunto_exigido(&guard)
+    };
+
+    // **O portão dormente**, e ele vem antes de tudo o que recusa.
+    //
+    // Nenhuma conexão pode negociar acima de `PROTOCOL_VERSION`, então com o
+    // limiar acima dela não existe par capaz de ler o anúncio nem de responder.
+    // Recusar aqui não protegeria ninguém: trancaria a sala inteira — inclusive
+    // por uma linha de banco com hash vazio, que é o caso que o plano do núcleo
+    // local mandou escrever à mão. Ver `o_anuncio_alcanca_alguem`.
+    if !crate::mods::anuncio::o_anuncio_alcanca_alguem(limiar) {
+        return Ok(match exigido {
+            Ok(conjunto) if conjunto.vazio() => conjunto.identidade,
+            Ok(conjunto) => {
+                tracing::warn!(
+                    quantos = conjunto.mods.len(),
+                    conjunto = %conjunto.identidade,
+                    limiar,
+                    global = seele_proto::version::PROTOCOL_VERSION,
+                    "este servidor exige MODs e ainda não tem como anunciá-los: a versão \
+                     do protocolo não alcança a do anúncio, e quem entra entra sem ler a \
+                     lista. A exigência passa a valer quando as versões se juntarem"
+                );
+                conjunto.identidade
+            }
+            Err(motivo) => {
+                // Quem hospeda precisa consertar a linha de qualquer forma — o
+                // anúncio vai sair um dia. O que não pode é isto trancar hoje
+                // um servidor que funcionava.
+                tracing::error!(
+                    %motivo,
+                    "este servidor exige MODs que ele não consegue anunciar; hoje ninguém \
+                     é barrado por isso, porque o anúncio ainda não sai, e no dia em que \
+                     ele sair ninguém entra enquanto a linha não for consertada"
+                );
+                seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(&mut []))
+            }
+        });
+    }
+
+    let exigido = match exigido {
+        Ok(exigido) => exigido,
+        Err(motivo) => {
+            // O log de quem hospeda, porque é ele quem conserta. A pessoa do
+            // outro lado lê um motivo enumerado e nada mais — nenhuma string
+            // livre atravessa (`specs/02-protocolo.md`).
+            tracing::error!(
+                %motivo,
+                "este servidor exige MODs que ele não consegue anunciar; ninguém entra \
+                 enquanto isso não for consertado"
+            );
+            return Err(recusa_de_mod(
+                versao,
+                limiar,
+                DisconnectReason::ModsIndisponiveis,
+                format!("anúncio de MODs: {motivo}"),
+            ));
+        }
+    };
+
+    // O caso normal, e é o que preserva o comportamento de antes desta mudança:
+    // sem MOD habilitado não sai quadro nenhum e não se espera resposta
+    // nenhuma. Um servidor de hoje troca exatamente os quadros que trocava.
+    if exigido.vazio() {
+        return Ok(exigido.identidade);
+    }
+
+    let anuncio = exigido.anuncio();
+    if versao < limiar {
+        return Err(Refusal {
+            reason: DisconnectReason::Incompatible,
+            detail: format!(
+                "o servidor exige {} MOD(s) e o par fala a v{versao}, abaixo da v{limiar} \
+                 do anúncio",
+                exigido.mods.len(),
+            ),
+        });
+    }
+
+    frame::write(send, &anuncio)
+        .await
+        .map_err(|error| Refusal {
+            reason: DisconnectReason::ProtocolViolation,
+            detail: format!("could not send ModsExigidos: {error}"),
+        })?;
+
+    let resposta = frame::read::<ClientMessage>(recv)
+        .await
+        .map_err(|error| Refusal {
+            reason: DisconnectReason::ProtocolViolation,
+            detail: format!("could not read the answer to ModsExigidos: {error}"),
+        })?;
+
+    match resposta {
+        ClientMessage::AceitarMods { conjunto } if conjunto == exigido.identidade => {
+            tracing::info!(
+                conjunto = %exigido.identidade,
+                quantos = exigido.mods.len(),
+                "o conjunto de MODs deste servidor foi aceito"
+            );
+            Ok(exigido.identidade)
+        }
+        // **Um sim dado a outra lista não é um sim a esta.** É o caso de quem
+        // guardou o aceite de ontem e o servidor trocou de MOD desde então —
+        // ADR 0045, «um servidor que troca de MOD pergunta de novo».
+        ClientMessage::AceitarMods { conjunto } => Err(recusa_de_mod(
+            versao,
+            limiar,
+            DisconnectReason::ModsRecusados,
+            format!(
+                "aceite para o conjunto {conjunto}, e este servidor exige {}",
+                exigido.identidade
+            ),
+        )),
+        ClientMessage::RecusarMods => Err(recusa_de_mod(
+            versao,
+            limiar,
+            DisconnectReason::ModsRecusados,
+            format!("recusou o conjunto {}", exigido.identidade),
+        )),
+        outra => Err(Refusal {
+            reason: DisconnectReason::ProtocolViolation,
+            detail: format!("esperava aceite ou recusa dos MODs, veio {outra:?}"),
+        }),
+    }
+}
+
+/// Traduz um motivo de MOD para o que o par consegue decodificar.
+///
+/// **Um motivo que o par não decodifica não é um motivo: é um fluxo de controle
+/// morto.** Os três motivos de MOD entraram depois da v4, e o postcard indexa
+/// variante por posição — um cliente v4 que recebesse `ModsRecusados` não leria
+/// «recusado», leria um erro de quadro, e a pessoa veria a conexão morrer sem
+/// uma palavra.
+///
+/// Para quem está abaixo da versão do anúncio o motivo verdadeiro é
+/// `Incompatible`, e não é um consolo: a build dele não tem como ser informada
+/// do que este servidor exige, que é literalmente incompatibilidade.
+fn recusa_de_mod(versao: u8, limiar: u8, reason: DisconnectReason, detail: String) -> Refusal {
+    let reason = if versao >= limiar {
+        reason
+    } else {
+        DisconnectReason::Incompatible
+    };
+    Refusal { reason, detail }
 }
 
 /// What the handshake learned from PERMISSIONS and PERSISTENCE.
@@ -1037,6 +1267,12 @@ async fn run_session(
     // ler `session.nickname` aqui faria tudo que viesse depois da troca sair
     // com o nome de antes dela.
     let mut apelido_de_agora = session.nickname.clone();
+
+    // Clonado para fora da `&Session` porque esperar por ele pede `&mut`, e a
+    // sessão é emprestada. Um `watch::Receiver` clonado guarda a própria marca
+    // de «já vi esta versão», e a desta cópia é a do aperto de mão — que é
+    // exatamente a que interessa.
+    let mut aviso_de_mods = session.aviso_de_mods.clone();
 
     // A mesma identidade que `handle_connection` já calcula antes de chamar
     // esta função (`id_da_conexao`, ali). Recalculada aqui porque
@@ -2549,7 +2785,19 @@ async fn run_session(
 
                     // The handshake is over. Repeating it is a protocol
                     // violation, not a re-authentication.
-                    ClientMessage::Response { .. } | ClientMessage::Hello { .. } => break,
+                    //
+                    // Os dois verbos de MOD estão aqui pela mesma razão, e ela
+                    // vale ser dita: o aceite é **do aperto de mão**, e não uma
+                    // permissão que se concede depois. Quem já está dentro
+                    // aceitou o conjunto de quando entrou; se o conjunto mudar,
+                    // a sessão acaba e a pessoa lê o novo ao reconectar — ver
+                    // `DisconnectReason::ModsMudaram`. Aceitar aqui seria um
+                    // segundo caminho para a mesma decisão, e o segundo caminho
+                    // é sempre o que esquece uma conferência.
+                    ClientMessage::Response { .. }
+                    | ClientMessage::Hello { .. }
+                    | ClientMessage::AceitarMods { .. }
+                    | ClientMessage::RecusarMods => break,
                 }
             }
 
@@ -2557,6 +2805,91 @@ async fn run_session(
             // mídia, criada acima. Ver a nota lá: enquanto estavam neste
             // `select!`, uma espera do plano de controle — o mutex do SQLite,
             // ou uma escrita para um par que parou de ler — parava a voz.
+
+            // A lista de MODs deste servidor mudou enquanto esta sessão corria.
+            //
+            // **O aceite vale para o conjunto que foi lido**, e quem está dentro
+            // leu o de antes. ADR 0045: «um servidor que troca de MOD pergunta
+            // de novo» — e perguntar aqui criaria um terceiro estado, dentro e
+            // sem ter aceito o que vale agora, que ninguém sabe o que enxerga.
+            // Reconectar já é um caminho que existe e que a bateria interna
+            // percorre sozinha, e ele passa pelo anúncio.
+            //
+            // `changed()` é cancel-safe, que é o requisito para estar num
+            // `select!` — ver a nota da tarefa leitora sobre o que o
+            // `frame::read` custava aqui.
+            //
+            // Vale também para **ligar o primeiro MOD**: quem estava numa sala
+            // sem MOD nenhum aceitou o conjunto vazio, e o conjunto vazio tem
+            // identidade como qualquer outro. Sem isto, habilitar um MOD só
+            // valeria para quem entrasse depois — e a sala inteira continuaria
+            // conversando sem nunca ter lido o que passou a ser exigido.
+            mudou = aviso_de_mods.changed() => {
+                if mudou.is_err() {
+                    // O banco foi embora, e com ele o servidor. Nada a decidir.
+                    break;
+                }
+                // **Dormente pela mesma razão que a entrada.** Se o anúncio não
+                // alcança par nenhum nesta build, esta sessão nunca foi
+                // perguntada e a reconexão também não perguntaria: derrubá-la
+                // seria tirar da sala quem entraria de volta no segundo
+                // seguinte, sem nunca ler lista nenhuma. Ver
+                // `crate::mods::anuncio::o_anuncio_alcanca_alguem`.
+                if !crate::mods::anuncio::o_anuncio_alcanca_alguem(server.versao_do_anuncio) {
+                    continue;
+                }
+                let agora = {
+                    let guard = server.persistence.lock().await;
+                    crate::mods::anuncio::conjunto_exigido(&guard)
+                };
+                // Um conjunto que não dá para anunciar é tratado como mudança:
+                // esta sessão não tem mais como provar que aceitou o que o
+                // servidor exige, e continuar seria admitir sem anunciar.
+                let identidade_agora = match &agora {
+                    Ok(conjunto) => Some(conjunto.identidade.as_str()),
+                    Err(motivo) => {
+                        tracing::error!(%motivo, "o conjunto de MODs deixou de poder ser anunciado");
+                        None
+                    }
+                };
+                if identidade_agora != Some(session.conjunto_aceito.as_str()) {
+                    tracing::info!(
+                        person = %session.person,
+                        aceito = %session.conjunto_aceito,
+                        "os MODs deste servidor mudaram; a sessão acaba e a pessoa lê o \
+                         conjunto novo ao reconectar"
+                    );
+                    let motivo = if session.protocol_version >= server.versao_do_anuncio {
+                        DisconnectReason::ModsMudaram
+                    } else {
+                        // Pela razão que `recusa_de_mod` escreve: um motivo que
+                        // o par não decodifica é um fluxo de controle morto, e
+                        // não um motivo.
+                        DisconnectReason::Incompatible
+                    };
+                    let _ = frame::write(
+                        &mut send,
+                        &ServerMessage::Disconnecting { reason: motivo },
+                    )
+                    .await;
+                    // **Escrever não é entregar**, e este ramo era o único com
+                    // despedida a sair sem `despedir`. Sem ele a `Connection` é
+                    // recolhida no `break` e o QUIC derruba tudo, inclusive o
+                    // quadro que ainda não tinha saído — a pessoa lia erro de
+                    // transporte e a casca dizia «não foi possível alcançar o
+                    // servidor», mandando-a procurar problema de rede enquanto a
+                    // resposta era «os MODs deste servidor mudaram».
+                    //
+                    // Não é hipótese: era uma falha intermitente da bateria, ~8%
+                    // das execuções deste ramo, e foi assim que ela apareceu —
+                    // o teste lia o fluxo fechado em 0,01 s, e não um tempo
+                    // esgotado. O irmão dela, a moderação, já chamava `despedir`
+                    // logo abaixo, e por isso nunca falhou.
+                    let _ = send.finish();
+                    despedir(&connection, &mut send, b"mods changed").await;
+                    break;
+                }
+            }
 
             aviso = avisos_rx.recv() => {
                 // A razão de uma transferência recusada, ou de um arquivo que
@@ -3149,6 +3482,18 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
         ServerMessage::UplinkLoss { .. } => versao >= 2,
         // As duas da v4, o caminho entre pares.
         ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => versao >= 4,
+        // O anúncio de MODs pede uma versão que a global ainda não alcançou —
+        // ver `seele_proto::mods::VERSAO_DO_ANUNCIO` e o contrato de integração
+        // que ela carrega. Enquanto ela não subir, ninguém passa por este
+        // gatilho, e um servidor com MOD habilitado recusa quem não o entende
+        // com `Incompatible` em vez de mandar um quadro que mataria o fluxo de
+        // controle do outro lado.
+        // O anúncio nunca passa por aqui na prática — ele sai do aperto de mão,
+        // que decide com o limiar de `ServerConfig::versao_do_anuncio` e não com
+        // a constante. A linha existe para que a tabela fique completa e para
+        // que o dia do `PROTOCOL_VERSION` 5 não encontre uma variante sem
+        // resposta.
+        ServerMessage::ModsExigidos { .. } => versao >= seele_proto::mods::VERSAO_DO_ANUNCIO,
         _ => true,
     }
 }
@@ -3990,5 +4335,536 @@ mod versao_no_fio {
             &ServerMessage::UplinkLoss { fraction: 0.0 },
             seele_proto::version::oldest_supported_version()
         ));
+    }
+}
+
+/// O anúncio e o aceite dos MODs, sobre fluxos QUIC de verdade. ADR 0045.
+///
+/// # Por que os fluxos são de verdade e o `Hello` não é
+///
+/// O aperto de mão inteiro não pode ser percorrido hoje: ele começa por
+/// `version::negotiate`, e por padrão o anúncio pede
+/// [`seele_proto::mods::VERSAO_DO_ANUNCIO`], que é uma acima da versão global —
+/// pelo contrato de integração conjunta que aquela constante carrega.
+///
+/// Então estes testes abrem uma conexão QUIC de verdade, entregam as duas pontas
+/// do fluxo de controle à mesma função que o aperto de mão chama, e baixam o
+/// limiar do anúncio por [`crate::ServerConfig::versao_do_anuncio`] — o mesmo
+/// caminho que `tests/aceite_dos_mods.rs` usa para pôr um cliente de produção do
+/// outro lado. **O que corre é o código de produção, sobre bytes de produção, na
+/// versão que um `Hello` de verdade negocia**: nada de versão forjada.
+///
+/// A outra metade — as duas pontas de produção completando o aceite juntas —
+/// está em `tests/aceite_dos_mods.rs`, que é o único crate onde as duas cabem.
+#[cfg(test)]
+mod o_aceite_dos_mods {
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    use seele_proto::version::PROTOCOL_VERSION;
+
+    use super::*;
+    use crate::persistence::mods::{disable, enable, EnabledMod};
+    use crate::persistence::Location;
+
+    #[derive(Debug)]
+    struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
+
+    impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls12_signature(
+                message,
+                cert,
+                dss,
+                &self.0.signature_verification_algorithms,
+            )
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &self.0.signature_verification_algorithms,
+            )
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            self.0.signature_verification_algorithms.supported_schemes()
+        }
+    }
+
+    /// Um fluxo de controle de verdade, com as quatro pontas na mão.
+    struct Fluxo {
+        servidor_envia: quinn::SendStream,
+        servidor_recebe: quinn::RecvStream,
+        cliente_envia: quinn::SendStream,
+        cliente_recebe: quinn::RecvStream,
+        // Vivos enquanto o teste correr: um `Endpoint` que cai fecha o socket,
+        // e uma `Connection` que cai fecha os fluxos dela.
+        _pontas: (quinn::Endpoint, quinn::Endpoint),
+        _conexoes: (quinn::Connection, quinn::Connection),
+    }
+
+    /// Abre a conexão e deixa o fluxo bidirecional #0 na posição em que o aperto
+    /// de mão o deixa: aberto pelo cliente, com o servidor já tendo lido dele.
+    ///
+    /// O `Ping` de abertura não é cerimônia: um fluxo aberto pelo cliente só
+    /// aparece do lado do servidor quando o primeiro byte chega, e o anúncio é
+    /// escrito **pelo servidor**. Sem um quadro de ida, o `accept_bi` esperaria
+    /// para sempre.
+    async fn fluxo() -> anyhow::Result<Fluxo> {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+
+        let identidade = crate::tls::Identity::self_signed(vec!["localhost".to_owned()])?;
+        let ponta_servidor = quinn::Endpoint::server(
+            crate::tls::server_config(identidade)?,
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+        )?;
+        let endereco = ponta_servidor.local_addr()?;
+
+        let mut tls = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
+            .with_no_client_auth();
+        tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+        let mut ponta_cliente = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
+        ponta_cliente.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+            quinn::crypto::rustls::QuicClientConfig::try_from(tls)?,
+        )));
+
+        let atendendo = ponta_servidor.accept();
+        let discando = ponta_cliente.connect(endereco, "localhost")?;
+        let conexao_servidor = atendendo
+            .await
+            .ok_or_else(|| anyhow::anyhow!("ninguém bateu na ponta do servidor"))?
+            .await?;
+        let conexao_cliente = discando.await?;
+
+        let (mut cliente_envia, cliente_recebe) = conexao_cliente.open_bi().await?;
+        let aceitando = conexao_servidor.accept_bi();
+        frame::write(&mut cliente_envia, &ClientMessage::Ping { timestamp: 0 }).await?;
+        let (servidor_envia, mut servidor_recebe) = aceitando.await?;
+        let _: ClientMessage = frame::read(&mut servidor_recebe).await?;
+
+        Ok(Fluxo {
+            servidor_envia,
+            servidor_recebe,
+            cliente_envia,
+            cliente_recebe,
+            _pontas: (ponta_servidor, ponta_cliente),
+            _conexoes: (conexao_servidor, conexao_cliente),
+        })
+    }
+
+    /// Um servidor de verdade, em memória, sem ninguém atendendo.
+    ///
+    /// Não roda o laço: o que estes testes chamam é uma etapa do aperto de mão,
+    /// e ela só precisa do banco e do estado compartilhado.
+    ///
+    /// `limiar` é a versão a partir da qual o anúncio sai. Quem quer provar o
+    /// portão passa [`PROTOCOL_VERSION`], que é o que um `Hello` de verdade
+    /// negocia; quem quer provar a dormência passa o padrão.
+    async fn servidor_com_limiar(limiar: u8) -> anyhow::Result<Arc<crate::Daemon>> {
+        let config = crate::ServerConfig {
+            name: "Casa".into(),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::Memory,
+            versao_do_anuncio: limiar,
+            ..crate::ServerConfig::default()
+        };
+        Ok(Arc::new(crate::Daemon::bind(config).await?))
+    }
+
+    /// Um servidor com o portão dos MODs **de pé**, no limiar que roda hoje.
+    async fn servidor() -> anyhow::Result<Arc<crate::Daemon>> {
+        servidor_com_limiar(PROTOCOL_VERSION).await
+    }
+
+    fn linha(id: &str, hash_de: u8, no_servidor: bool) -> EnabledMod {
+        EnabledMod {
+            id: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            hash: format!("{hash_de:02x}").repeat(32),
+            repo: "https://github.com/seele/exemplo".to_owned(),
+            reach: vec!["ler".to_owned()],
+            server_half: no_servidor,
+        }
+    }
+
+    async fn habilitar(daemon: &crate::Daemon, ligado: &EnabledMod) {
+        let banco = daemon.server().persistence.lock().await;
+        enable(&banco, ligado).expect("habilitar");
+    }
+
+    /// **O anúncio.** Identidade, versão e hash — e o que a tela de aceite tem
+    /// de dizer antes de qualquer byte ser baixado, inclusive que este MOD roda
+    /// na máquina de quem hospeda.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_servidor_anuncia_os_mods_por_identidade_versao_e_hash() -> anyhow::Result<()> {
+        let daemon = servidor().await?;
+        habilitar(&daemon, &linha("seele/bot", 0xa1, true)).await;
+
+        let mut fluxo = fluxo().await?;
+        let servidor = Arc::clone(daemon.server());
+        let etapa = tokio::spawn(async move {
+            exigir_aceite_dos_mods(
+                &mut fluxo.servidor_envia,
+                &mut fluxo.servidor_recebe,
+                &servidor,
+                PROTOCOL_VERSION,
+            )
+            .await
+            .map_err(|recusa| recusa.reason)
+        });
+
+        // Este teste não roda a etapa e o cliente no mesmo lugar porque os dois
+        // esperam um pelo outro: a etapa escreve e fica esperando a resposta.
+        let mut cliente_recebe = fluxo.cliente_recebe;
+        let ServerMessage::ModsExigidos { mods, conjunto } =
+            frame::read::<ServerMessage>(&mut cliente_recebe).await?
+        else {
+            anyhow::bail!("o servidor não anunciou os MODs");
+        };
+
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0].id, "seele/bot");
+        assert_eq!(mods[0].version, "1.0.0");
+        assert_eq!(mods[0].hash, "a1".repeat(32));
+        assert_eq!(mods[0].repo, "https://github.com/seele/exemplo");
+        assert_eq!(mods[0].reach, vec!["ler"]);
+        assert!(
+            mods[0].no_servidor,
+            "o anúncio não disse que este MOD roda na máquina de quem hospeda"
+        );
+        assert!(
+            !conjunto.is_empty(),
+            "o anúncio veio sem a identidade do conjunto, que é contra o que o \
+             aceite é guardado"
+        );
+
+        // E o aceite fecha a etapa com a mesma identidade que foi anunciada.
+        frame::write(
+            &mut fluxo.cliente_envia,
+            &ClientMessage::AceitarMods {
+                conjunto: conjunto.clone(),
+            },
+        )
+        .await?;
+        assert_eq!(etapa.await?, Ok(conjunto));
+        Ok(())
+    }
+
+    /// **A recusa.** Quem lê e diz que não, não entra — e o motivo é o dele, e
+    /// não «credencial recusada».
+    #[tokio::test(flavor = "multi_thread")]
+    async fn quem_recusa_os_mods_nao_passa_do_anuncio() -> anyhow::Result<()> {
+        let daemon = servidor().await?;
+        habilitar(&daemon, &linha("seele/cor", 0xa1, false)).await;
+
+        let mut fluxo = fluxo().await?;
+        let servidor = Arc::clone(daemon.server());
+        let etapa = tokio::spawn(async move {
+            exigir_aceite_dos_mods(
+                &mut fluxo.servidor_envia,
+                &mut fluxo.servidor_recebe,
+                &servidor,
+                PROTOCOL_VERSION,
+            )
+            .await
+            .map_err(|recusa| recusa.reason)
+        });
+
+        let mut cliente_recebe = fluxo.cliente_recebe;
+        let _ = frame::read::<ServerMessage>(&mut cliente_recebe).await?;
+        frame::write(&mut fluxo.cliente_envia, &ClientMessage::RecusarMods).await?;
+
+        assert_eq!(etapa.await?, Err(DisconnectReason::ModsRecusados));
+        Ok(())
+    }
+
+    /// **O aceite de ontem não vale hoje.** ADR 0045: «um servidor que troca de
+    /// MOD pergunta de novo». Este é o caso da reconexão: a máquina tem um
+    /// aceite guardado, o servidor trocou de MOD desde então, e o sim antigo
+    /// não abre a porta.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_aceite_de_outro_conjunto_nao_reabre_a_porta() -> anyhow::Result<()> {
+        let daemon = servidor().await?;
+        habilitar(&daemon, &linha("seele/cor", 0xa1, false)).await;
+
+        // O que a máquina guardou na visita anterior.
+        let antes = {
+            let banco = daemon.server().persistence.lock().await;
+            crate::mods::anuncio::conjunto_exigido(&banco)
+                .expect("montar")
+                .identidade
+        };
+
+        // E o servidor trocou de MOD entre uma visita e outra.
+        habilitar(&daemon, &linha("seele/bot", 0xb2, true)).await;
+        let agora = {
+            let banco = daemon.server().persistence.lock().await;
+            crate::mods::anuncio::conjunto_exigido(&banco)
+                .expect("montar")
+                .identidade
+        };
+        assert_ne!(antes, agora, "o conjunto não mudou; o teste não testa nada");
+
+        let mut fluxo = fluxo().await?;
+        let servidor = Arc::clone(daemon.server());
+        let etapa = tokio::spawn(async move {
+            exigir_aceite_dos_mods(
+                &mut fluxo.servidor_envia,
+                &mut fluxo.servidor_recebe,
+                &servidor,
+                PROTOCOL_VERSION,
+            )
+            .await
+            .map_err(|recusa| recusa.reason)
+        });
+
+        let mut cliente_recebe = fluxo.cliente_recebe;
+        let _ = frame::read::<ServerMessage>(&mut cliente_recebe).await?;
+        frame::write(
+            &mut fluxo.cliente_envia,
+            &ClientMessage::AceitarMods { conjunto: antes },
+        )
+        .await?;
+
+        assert_eq!(etapa.await?, Err(DisconnectReason::ModsRecusados));
+        Ok(())
+    }
+
+    /// Desabilitar também troca o conjunto, e o aceite de quando o MOD estava
+    /// ligado deixa de valer. Tirar é uma mudança como pôr.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn desabilitar_um_mod_tambem_invalida_o_aceite_anterior() -> anyhow::Result<()> {
+        let daemon = servidor().await?;
+        habilitar(&daemon, &linha("seele/cor", 0xa1, false)).await;
+        habilitar(&daemon, &linha("seele/bot", 0xb2, true)).await;
+        let antes = {
+            let banco = daemon.server().persistence.lock().await;
+            crate::mods::anuncio::conjunto_exigido(&banco)
+                .expect("montar")
+                .identidade
+        };
+
+        {
+            let banco = daemon.server().persistence.lock().await;
+            disable(&banco, "seele/bot").expect("desabilitar");
+        }
+
+        let mut fluxo = fluxo().await?;
+        let servidor = Arc::clone(daemon.server());
+        let etapa = tokio::spawn(async move {
+            exigir_aceite_dos_mods(
+                &mut fluxo.servidor_envia,
+                &mut fluxo.servidor_recebe,
+                &servidor,
+                PROTOCOL_VERSION,
+            )
+            .await
+            .map_err(|recusa| recusa.reason)
+        });
+
+        let mut cliente_recebe = fluxo.cliente_recebe;
+        let _ = frame::read::<ServerMessage>(&mut cliente_recebe).await?;
+        frame::write(
+            &mut fluxo.cliente_envia,
+            &ClientMessage::AceitarMods { conjunto: antes },
+        )
+        .await?;
+
+        assert_eq!(etapa.await?, Err(DisconnectReason::ModsRecusados));
+        Ok(())
+    }
+
+    /// **Um servidor sem MOD não muda de comportamento.** Nenhum quadro sai,
+    /// nada é esperado, e a etapa devolve na hora — que é o que mantém todo
+    /// servidor de hoje trocando exatamente os quadros que trocava.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_servidor_sem_mod_nao_anuncia_nem_espera() -> anyhow::Result<()> {
+        let daemon = servidor().await?;
+        let mut fluxo = fluxo().await?;
+
+        let aceito = exigir_aceite_dos_mods(
+            &mut fluxo.servidor_envia,
+            &mut fluxo.servidor_recebe,
+            daemon.server(),
+            PROTOCOL_VERSION,
+        )
+        .await
+        .map_err(|recusa| recusa.reason)
+        .expect("um servidor sem MOD não recusa ninguém");
+        assert!(!aceito.is_empty(), "o conjunto vazio também tem identidade");
+
+        // E nada foi escrito para o outro lado. Um `read` com prazo é a única
+        // forma de provar ausência num fluxo que continua aberto.
+        let quadro = tokio::time::timeout(
+            std::time::Duration::from_millis(300),
+            frame::read::<ServerMessage>(&mut fluxo.cliente_recebe),
+        )
+        .await;
+        assert!(
+            quadro.is_err(),
+            "um servidor sem MOD mandou um quadro que não existia antes desta mudança"
+        );
+        Ok(())
+    }
+
+    /// Uma linha habilitada com hash que não é hash tranca a porta, e o motivo
+    /// não é sobre a credencial de quem tentou entrar.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_servidor_que_nao_consegue_se_descrever_nao_admite_ninguem() -> anyhow::Result<()> {
+        let daemon = servidor().await?;
+        let mut torta = linha("seele/primeiro", 0x00, false);
+        torta.hash = String::new();
+        habilitar(&daemon, &torta).await;
+
+        let mut fluxo = fluxo().await?;
+        let recusa = exigir_aceite_dos_mods(
+            &mut fluxo.servidor_envia,
+            &mut fluxo.servidor_recebe,
+            daemon.server(),
+            PROTOCOL_VERSION,
+        )
+        .await
+        .map_err(|recusa| recusa.reason);
+        assert_eq!(recusa, Err(DisconnectReason::ModsIndisponiveis));
+        Ok(())
+    }
+
+    /// **Quem não alcança a versão do anúncio não entra, e não recebe um quadro
+    /// que mataria o fluxo de controle dele.**
+    ///
+    /// É o comportamento que vale hoje para todo cliente publicado, e o motivo
+    /// é o verdadeiro: a build dele não tem como ser informada do que este
+    /// servidor exige.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_par_velho_e_recusado_sem_receber_o_anuncio() -> anyhow::Result<()> {
+        let daemon = servidor().await?;
+        habilitar(&daemon, &linha("seele/cor", 0xa1, false)).await;
+
+        let mut fluxo = fluxo().await?;
+        let recusa = exigir_aceite_dos_mods(
+            &mut fluxo.servidor_envia,
+            &mut fluxo.servidor_recebe,
+            daemon.server(),
+            PROTOCOL_VERSION - 1,
+        )
+        .await
+        .map_err(|recusa| recusa.reason);
+        assert_eq!(recusa, Err(DisconnectReason::Incompatible));
+
+        let quadro = tokio::time::timeout(
+            std::time::Duration::from_millis(300),
+            frame::read::<ServerMessage>(&mut fluxo.cliente_recebe),
+        )
+        .await;
+        assert!(
+            quadro.is_err(),
+            "o anúncio saiu para um par que não sabe decodificá-lo, e o fluxo de \
+             controle dele morre sem uma palavra"
+        );
+        Ok(())
+    }
+
+    // ------------------------------------------- o portão enquanto dorme
+    //
+    // Os testes acima baixam o limiar para provar o portão. Estes dois usam o
+    // padrão — o que todo servidor publicado tem hoje — e provam o contrário:
+    // que ele **não** recusa ninguém enquanto não existe par capaz de aceitar.
+    //
+    // Eles são o guarda de uma regressão de verdade, e não uma hipótese: na
+    // primeira versão desta entrega, habilitar um MOD passou a recusar toda
+    // entrada com `Incompatible` num servidor que funcionava — e sem dar a
+    // ninguém a chance de aceitar, porque o anúncio não tinha como sair.
+
+    /// **Habilitar um MOD hoje não tranca a porta.**
+    ///
+    /// Com o limiar padrão nenhum par alcança o anúncio, então recusar seria
+    /// cem por cento de recusa em troca de nada. Quem hospeda lê o aviso no
+    /// log; quem entra entra, como entrava antes desta entrega existir.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn enquanto_o_anuncio_nao_sai_habilitar_um_mod_nao_recusa_ninguem() -> anyhow::Result<()>
+    {
+        let daemon = servidor_com_limiar(seele_proto::mods::VERSAO_DO_ANUNCIO).await?;
+        habilitar(&daemon, &linha("seele/bot", 0xa1, true)).await;
+
+        let mut fluxo = fluxo().await?;
+        let aceito = exigir_aceite_dos_mods(
+            &mut fluxo.servidor_envia,
+            &mut fluxo.servidor_recebe,
+            daemon.server(),
+            PROTOCOL_VERSION,
+        )
+        .await
+        .map_err(|recusa| recusa.reason)
+        .expect("um MOD habilitado trancou um servidor que ninguém consegue sequer perguntar");
+        assert!(!aceito.is_empty(), "todo conjunto tem identidade");
+
+        // E nada saiu no fio: mandar o anúncio a um par que não conhece a
+        // variante mataria o fluxo de controle dele.
+        let quadro = tokio::time::timeout(
+            std::time::Duration::from_millis(300),
+            frame::read::<ServerMessage>(&mut fluxo.cliente_recebe),
+        )
+        .await;
+        assert!(
+            quadro.is_err(),
+            "o anúncio saiu num limiar que nenhum par alcança"
+        );
+        Ok(())
+    }
+
+    /// **E uma linha de banco estragada também não tranca.**
+    ///
+    /// O hash vazio é o caso que o plano do núcleo local mandou escrever à mão,
+    /// e ele está nomeado em `NaoDaParaAnunciar::HashQueNaoEHash`. Com o portão
+    /// de pé ele barra todo mundo, e é o certo — ver o teste irmão acima. Com o
+    /// portão dormente, barrar seria trancar um servidor que funcionava por uma
+    /// exigência que ainda não vale no fio.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn enquanto_o_anuncio_nao_sai_uma_linha_estragada_nao_tranca_o_servidor(
+    ) -> anyhow::Result<()> {
+        let daemon = servidor_com_limiar(seele_proto::mods::VERSAO_DO_ANUNCIO).await?;
+        let mut torta = linha("seele/primeiro", 0x00, false);
+        torta.hash = String::new();
+        habilitar(&daemon, &torta).await;
+
+        let mut fluxo = fluxo().await?;
+        let aceito = exigir_aceite_dos_mods(
+            &mut fluxo.servidor_envia,
+            &mut fluxo.servidor_recebe,
+            daemon.server(),
+            PROTOCOL_VERSION,
+        )
+        .await
+        .map_err(|recusa| recusa.reason)
+        .expect("uma linha com hash vazio trancou o servidor antes de o anúncio existir");
+        assert!(!aceito.is_empty(), "todo conjunto tem identidade");
+        Ok(())
     }
 }

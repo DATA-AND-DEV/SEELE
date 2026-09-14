@@ -71,6 +71,7 @@ fn destinos_mortos_de_teste() -> Vec<Destino> {
                 apelido: "pessoa".into(),
                 segredo: None,
                 impressao_esperada: None,
+                aceito: None,
             }
         })
         .collect()

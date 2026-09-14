@@ -93,6 +93,25 @@ pub enum Location {
 /// The persistent store.
 pub struct Persistence {
     connection: Connection,
+    /// Um contador que anda toda vez que a lista de MODs exigidos muda.
+    ///
+    /// # Por que ele mora aqui, e não no `Server`
+    ///
+    /// Quem escreve na tabela de MODs são dois, e nenhum dos dois tem o
+    /// `Server` na mão: a janela que hospeda, pelos comandos do Tauri, e o
+    /// despachante, que **desabilita sozinho** um MOD que lançou exceção (ADR
+    /// 0045, «falha isolada»). O segundo é o caso que obriga: a lista pode
+    /// mudar sem ninguém ter clicado em nada.
+    ///
+    /// O que os dois têm em comum é este banco. Pendurar o aviso aqui é
+    /// pendurá-lo no único lugar por onde toda mudança passa — e `enable` e
+    /// `disable` são as duas únicas funções que o tocam.
+    ///
+    /// Um contador, e não a lista: quem acorda vai ao banco perguntar o que
+    /// mudou. A alternativa — publicar o conjunto novo — poria a montagem do
+    /// anúncio dentro de quem grava, e uma falha ao montar passaria a poder
+    /// fazer `disable` falhar.
+    mods_mudaram: tokio::sync::watch::Sender<u64>,
 }
 
 impl Persistence {
@@ -122,7 +141,10 @@ impl Persistence {
         // Without this a second writer fails instantly instead of waiting.
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
 
-        let mut persistence = Self { connection };
+        let mut persistence = Self {
+            connection,
+            mods_mudaram: tokio::sync::watch::Sender::new(0),
+        };
         persistence.migrate()?;
         Ok(persistence)
     }
@@ -130,6 +152,30 @@ impl Persistence {
     /// Borrows the connection.
     pub(crate) fn connection(&self) -> &Connection {
         &self.connection
+    }
+
+    /// Onde uma sessão fica sabendo que a lista de MODs exigidos mudou.
+    ///
+    /// O valor é um contador sem significado próprio: o que importa é que ele
+    /// andou. Quem acorda relê a tabela e compara com o conjunto que aceitou.
+    ///
+    /// Existe porque um aceite vale para **o conjunto que foi lido**, e quem
+    /// está dentro leu o de antes — ver
+    /// [`seele_proto::control::DisconnectReason::ModsMudaram`].
+    #[must_use]
+    pub fn mods_mudaram(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.mods_mudaram.subscribe()
+    }
+
+    /// Avisa quem espera que a lista de MODs exigidos mudou.
+    ///
+    /// `pub(crate)` e chamada por exatamente duas funções — `mods::enable` e
+    /// `mods::disable` —, porque um aviso que qualquer um pudesse dar seria um
+    /// aviso que ninguém consegue confiar.
+    pub(crate) fn anotar_mudanca_nos_mods(&self) {
+        self.mods_mudaram.send_modify(|quantas| {
+            *quantas = quantas.saturating_add(1);
+        });
     }
 
     /// Borrows the connection mutably, for a transaction.

@@ -58,6 +58,7 @@ async fn connect(address: SocketAddr, nickname: &str) -> Result<Client> {
         &key,
         Arc::new(MemoryPinStore::new()),
         None,
+        None,
     )
     .await
     .map_err(Into::into)
@@ -246,6 +247,7 @@ async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
         &key,
         Arc::clone(&pins) as Arc<_>,
         None,
+        None,
     )
     .await?;
     assert!(matches!(
@@ -262,6 +264,7 @@ async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
         "marcela",
         &key,
         Arc::clone(&pins) as Arc<_>,
+        None,
         None,
     )
     .await
@@ -283,6 +286,7 @@ async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
         "marcela",
         &key,
         Arc::clone(&pins) as Arc<_>,
+        None,
         None,
     )
     .await?;
@@ -308,6 +312,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
         &key,
         Arc::clone(&pins) as Arc<_>,
         None,
+        None,
     )
     .await?;
     assert!(matches!(
@@ -322,6 +327,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
         "marcela",
         &key,
         Arc::clone(&pins) as Arc<_>,
+        None,
         None,
     )
     .await?;

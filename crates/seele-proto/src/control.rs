@@ -237,6 +237,38 @@ pub const MAX_PROOF_LEN: usize = 256;
 /// [`MotivoDeFalhaDePar::ImpressaoNaoBate`] existe.
 pub const IMPRESSAO_LEN: usize = 64;
 
+// ------------------------------------------------- os tetos do anúncio de MODs
+//
+// ADR 0045. O anúncio é a primeira coisa que quem entra lê de um servidor com
+// MOD, e ele viaja num quadro de controle como qualquer outro — portanto dentro
+// dos 16 KiB de [`MAX_FRAME_LEN`]. Os números abaixo existem para que um
+// servidor não consiga montar um anúncio que não cabe, e o teste
+// `um_anuncio_cheio_ainda_cabe_num_quadro` prova que eles somam menos que o
+// quadro.
+
+/// Quantos MODs um servidor pode exigir de uma vez.
+///
+/// **É teto de quadro, e não de gosto.** Um servidor que precise de mais que
+/// isto encontra a recusa em vez de um anúncio cortado pela metade — que seria
+/// a instalação parcial silenciosa que o ADR 0029 nomeia e o 0045 herda. Quem
+/// hospeda lê no log qual é o número e quantos ele ligou.
+pub const MAX_MODS_NO_ANUNCIO: usize = 12;
+
+/// Teto de `autor/nome`.
+pub const MAX_MOD_ID_LEN: usize = 96;
+
+/// Teto da versão que o autor declara. Nunca lida por nós, então só o tamanho.
+pub const MAX_MOD_VERSION_LEN: usize = 32;
+
+/// Teto do endereço do repositório público.
+pub const MAX_MOD_REPO_LEN: usize = 256;
+
+/// Quantos alcances um MOD pode declarar.
+pub const MAX_REACH_ITENS: usize = 16;
+
+/// Teto de cada nome de alcance.
+pub const MAX_REACH_LEN: usize = 32;
+
 /// Why a control frame could not be handled.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ControlError {
@@ -575,6 +607,48 @@ pub enum DisconnectReason {
     ///
     /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
     NicknameTaken,
+
+    /// Leu o que o servidor exige e disse que não. ADR 0045.
+    ///
+    /// Também é a resposta a um aceite que chega com **outro** conjunto: quem
+    /// diz sim para uma lista que não é a deste servidor não disse sim para
+    /// esta, e as duas coisas terminam a conexão do mesmo jeito. A diferença
+    /// entre elas não muda o que a pessoa faz em seguida — ler a lista de agora
+    /// e decidir —, e um motivo a mais seria uma distinção sem consequência.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    ModsRecusados,
+
+    /// Os MODs deste servidor mudaram enquanto a sessão corria. ADR 0045.
+    ///
+    /// # Por que a sessão acaba em vez de perguntar ali mesmo
+    ///
+    /// O aceite vale para **o conjunto que foi lido**, e quem está dentro leu o
+    /// de antes. Perguntar no meio da sessão criaria um terceiro estado —
+    /// dentro, sem ter aceito o que vale agora — e alguém teria de decidir o
+    /// que esse estado enxerga enquanto não responde. Não há resposta boa: se
+    /// enxerga tudo, o aceite não vale nada; se não enxerga nada, é uma sessão
+    /// encerrada com outro nome.
+    ///
+    /// Reconectar já é um caminho que existe e que a bateria interna percorre
+    /// sozinha, e ele passa pelo anúncio — então a pessoa lê a lista nova e
+    /// decide, que é o que o ADR 0045 pede quando um servidor troca de MOD.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    ModsMudaram,
+
+    /// O servidor exige MODs que ele mesmo não consegue descrever. ADR 0045.
+    ///
+    /// Uma linha habilitada cujo hash não é um hash, ou cujo manifesto não abre,
+    /// ou MODs demais para um quadro. Ninguém entra, e isso é decisão: admitir
+    /// sem anunciar seria exigir na tabela e não exigir no fio, que é a
+    /// instalação parcial silenciosa do ADR 0029 vestida de conveniência.
+    ///
+    /// Quem hospeda lê no log **qual** MOD e **por quê**; quem tenta entrar lê
+    /// que o servidor está mal configurado, e não que a credencial dele é ruim.
+    ///
+    /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
+    ModsIndisponiveis,
 }
 
 /// How loud an alert is.
@@ -1391,6 +1465,38 @@ pub enum ClientMessage {
         /// O que aconteceu.
         motivo: MotivoDeFalhaDePar,
     },
+
+    // ---- os MODs deste servidor, ADR 0045 ----
+    //
+    // No fim da lista, pela razão que as variantes acima já escrevem. Os dois
+    // verbos são a resposta ao [`ServerMessage::ModsExigidos`], e não existe um
+    // terceiro: ou se aceita o conjunto que foi lido, ou não se entra.
+    /// «Li o que este servidor exige, e aceito **este** conjunto.»
+    ///
+    /// # Por que o conjunto viaja de volta
+    ///
+    /// Um aceite sem o número que ele aceita é um aceite sobre nada. Ele volta
+    /// por duas razões, e as duas são casos reais:
+    ///
+    /// - **o cliente guardou o aceite de ontem.** Um servidor que trocou de MOD
+    ///   recebe um conjunto que não é mais o dele e recusa, que é exatamente o
+    ///   «pergunta de novo» do ADR 0045. Sem o número de volta, o servidor
+    ///   aceitaria um sim dado a outra coisa;
+    /// - **o anúncio e a resposta se cruzaram.** O conjunto pode ter mudado
+    ///   entre o quadro que saiu e o que voltou, e o servidor tem de poder
+    ///   perceber isso em vez de admitir alguém que leu a lista anterior.
+    AceitarMods {
+        /// A identidade do conjunto aceito, em hexadecimal minúsculo.
+        conjunto: String,
+    },
+    /// «Não aceito», e a conexão acaba.
+    ///
+    /// Verbo próprio em vez de simplesmente sumir, pela mesma razão que
+    /// [`Self::StopScreenShare`] existe: uma recusa que só existe como ausência
+    /// não distingue «li e não quero» de «minha conexão caiu», e quem hospeda
+    /// precisa da diferença — a primeira é uma decisão sobre os MODs dele, a
+    /// segunda é rede.
+    RecusarMods,
 }
 
 /// Server to client.
@@ -1984,6 +2090,38 @@ pub enum ServerMessage {
         /// A impressão digital que ele vai apresentar.
         impressao: String,
     },
+
+    // ---- os MODs deste servidor, ADR 0045 ----
+    //
+    // No fim da lista, pela razão que as variantes acima já escrevem.
+    /// O que este servidor exige de quem entra, antes de deixar entrar.
+    ///
+    /// # Onde ela cai no aperto de mão, e por quê
+    ///
+    /// **Depois da assinatura conferida e antes da [`Self::Session`].** As duas
+    /// pontas dessa frase são decisões:
+    ///
+    /// - **depois da assinatura**, porque a lista de MODs é configuração de
+    ///   quem hospeda, e quem varre a internet não tem por que recebê-la só por
+    ///   abrir uma conexão;
+    /// - **antes da `Session`**, porque a `Session` é o fluxo protegido — é
+    ///   dela que saem as salas, os canais, os papéis e as permissões. ADR 0045:
+    ///   «quem não aceita, não entra», e não entrar tem de querer dizer não
+    ///   receber nada.
+    ///
+    /// Um servidor sem MOD habilitado **não manda este quadro**, e por isso
+    /// troca exatamente os quadros que trocava antes de esta variante existir.
+    ModsExigidos {
+        /// Os MODs habilitados, por identidade, versão e hash — mais o que a
+        /// tela de aceite precisa dizer antes de baixar qualquer byte.
+        mods: Vec<crate::mods::ModAnunciado>,
+        /// A identidade do conjunto inteiro, em hexadecimal minúsculo.
+        ///
+        /// É contra este número que um aceite guardado é conferido, e é ele que
+        /// muda quando o servidor troca de MOD. Ver
+        /// [`crate::mods::identidade_do_conjunto`].
+        conjunto: String,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2073,6 +2211,65 @@ fn check_impressao(impressao: &str) -> Result<(), ControlError> {
         return Ok(());
     }
     Err(ControlError::FieldOutOfRange { field: "impressao" })
+}
+
+/// Recusa um conjunto de MODs que este quadro não deveria poder carregar.
+///
+/// # O que ele confere, e por que a última linha é a que importa
+///
+/// Tetos primeiro — quantos MODs, e o tamanho de cada campo —, porque um
+/// anúncio que não cabe no quadro não chega inteiro do outro lado.
+///
+/// Depois, e é o guarda de verdade: **a identidade declarada tem de ser a
+/// identidade da lista declarada**. Sem esta linha, `conjunto` seria um número
+/// que quem manda escolhe — e o aceite de quem entra é guardado contra ele.
+/// Um servidor que anunciasse um conjunto e declarasse a identidade de outro
+/// faria todo aceite guardado valer para uma lista que a pessoa nunca leu.
+///
+/// Conferido em `validate`, portanto nas **duas** pontas e nos dois sentidos
+/// (`encode` e `decode` o chamam): nem se monta um quadro assim, nem se aceita
+/// um montado à mão.
+///
+/// # Errors
+///
+/// [`ControlError::FieldTooLong`] para um campo acima do teto, ou
+/// [`ControlError::FieldOutOfRange`] para um hash que não é hash, uma
+/// identidade que não bate com a lista, ou dois MODs com o mesmo identificador.
+fn check_anuncio(mods: &[crate::mods::ModAnunciado], conjunto: &str) -> Result<(), ControlError> {
+    check_bounds("mods", mods.len(), MAX_MODS_NO_ANUNCIO)?;
+    if !crate::mods::e_hash_de_conteudo(conjunto) {
+        return Err(ControlError::FieldOutOfRange { field: "conjunto" });
+    }
+
+    for anunciado in mods {
+        check("mod_id", anunciado.id.len(), MAX_MOD_ID_LEN)?;
+        check("mod_version", anunciado.version.len(), MAX_MOD_VERSION_LEN)?;
+        check("mod_repo", anunciado.repo.len(), MAX_MOD_REPO_LEN)?;
+        check_bounds("reach", anunciado.reach.len(), MAX_REACH_ITENS)?;
+        for alcance in &anunciado.reach {
+            check("reach", alcance.len(), MAX_REACH_LEN)?;
+        }
+        if !crate::mods::e_hash_de_conteudo(&anunciado.hash) {
+            return Err(ControlError::FieldOutOfRange { field: "mod_hash" });
+        }
+    }
+
+    // Dois MODs com o mesmo identificador tornariam a identidade ambígua — e a
+    // tabela não produz isso (`id` é chave primária), então quem produz é um
+    // quadro montado à mão.
+    let mut identificadores: Vec<&str> = mods.iter().map(|um| um.id.as_str()).collect();
+    identificadores.sort_unstable();
+    let quantos = identificadores.len();
+    identificadores.dedup();
+    if identificadores.len() != quantos {
+        return Err(ControlError::FieldOutOfRange { field: "mod_id" });
+    }
+
+    let mut copia = mods.to_vec();
+    if crate::mods::hex(&crate::mods::identidade_do_conjunto(&mut copia)) != conjunto {
+        return Err(ControlError::FieldOutOfRange { field: "conjunto" });
+    }
+    Ok(())
 }
 
 /// Refuses a field longer than its documented limit.
@@ -2332,6 +2529,17 @@ impl Validate for ClientMessage {
                 }
                 Ok(())
             }
+            // O mesmo formato exato do anúncio que ele responde: um aceite cujo
+            // número não é um número de conjunto não pode bater com conjunto
+            // nenhum, e recusar aqui custa um quadro em vez de uma consulta.
+            Self::AceitarMods { conjunto } => {
+                if crate::mods::e_hash_de_conteudo(conjunto) {
+                    Ok(())
+                } else {
+                    Err(ControlError::FieldOutOfRange { field: "conjunto" })
+                }
+            }
+            Self::RecusarMods => Ok(()),
             // O motivo é um enumerado de tamanho fixo, e a `ScreenId` segue a
             // mesma regra do braço acima: quem sabe se ela existe é o servidor.
             Self::ParFalhou { .. } => Ok(()),
@@ -2439,6 +2647,7 @@ impl Validate for ServerMessage {
             Self::SirvaTelaPara { impressao, .. } | Self::AssistaTelaPor { impressao, .. } => {
                 check_impressao(impressao)
             }
+            Self::ModsExigidos { mods, conjunto } => check_anuncio(mods, conjunto),
         }
     }
 }
@@ -3847,6 +4056,48 @@ mod o_vocabulario_e_a_versao {
         *bytes.get(1).expect("todo quadro tem versão e variante")
     }
 
+    /// Qual é o ordinal da **última** variante de uma lista, contado pelo fio.
+    ///
+    /// # Por que contar em vez de nomear um verbo
+    ///
+    /// A versão anterior deste guarda prendia o ordinal de um verbo pelo nome —
+    /// `ParFalhou` em 33 — e escrevia que «ele só muda quando alguém acrescenta
+    /// ou remove». **Não muda:** acrescentar *depois* dele deixa o 33 onde
+    /// estava, e o guarda passa calado. Foi o que aconteceu quando as duas
+    /// variantes dos MODs entraram, e é a razão de ele ter sido reescrito.
+    ///
+    /// O postcard indexa variante por posição, então perguntar ao próprio
+    /// decodificador «esta posição existe?» conta a lista sem macro e sem
+    /// derivação: um ordinal que existe decodifica de uma carga de zeros —
+    /// zero é um número válido, um texto vazio e uma lista vazia —, e um que
+    /// não existe não decodifica de carga nenhuma.
+    ///
+    /// `take_from_bytes` e não `decode`: o que se pergunta aqui é se a
+    /// **variante** existe, e `decode` também roda `validate`, que recusaria
+    /// uma carga de zeros por outros motivos — e a resposta viria errada.
+    ///
+    /// **O que este truque não alcança**, dito aqui para não ser descoberto por
+    /// um teste vermelho sem explicação: uma variante futura cujos campos não
+    /// aceitem zeros — um `char`, um inteiro que não pode ser zero — não
+    /// decodifica, e a contagem para antes dela. O teste então diz que a lista
+    /// **encolheu**, que é falso mas leva quem lê exatamente a esta linha.
+    fn ultima_variante<T>() -> u8
+    where
+        T: for<'a> serde::Deserialize<'a>,
+    {
+        let mut ultima = 0;
+        for ordinal in 0..=u8::MAX {
+            let mut quadro = vec![ordinal];
+            quadro.extend(std::iter::repeat_n(0_u8, 64));
+            if postcard::take_from_bytes::<T>(&quadro).is_ok() {
+                ultima = ordinal;
+            } else {
+                break;
+            }
+        }
+        ultima
+    }
+
     /// **Acrescentar uma variante é decidir sobre a versão do protocolo.**
     ///
     /// # O que este guarda existe para impedir
@@ -3858,27 +4109,34 @@ mod o_vocabulario_e_a_versao {
     /// as whatever *it* has at 25 — which is nothing, so it refuses the frame,
     /// which is the contract».
     ///
-    /// O que faltava era a outra metade: **a versão não subiu junto**.
+    /// O que faltava era a outra metade: **a versão não subiu junto.**
     /// `WatchScreen` e `UnwatchScreen` entraram e `PROTOCOL_VERSION` continuou 2.
     /// Dois builds diferentes passaram a dizer «2» e a falar vocabulários
     /// diferentes — e a negociação, que existe justamente para pegar isso, deixou
-    /// os dois entrarem.
-    ///
-    /// O relato: «se usuários de diferentes versões estão compartilhando a tela,
-    /// a stream cai». O caminho inteiro era cego, e a raiz era esta: o número que
-    /// deveria denunciar a diferença estava mentindo.
-    ///
-    /// # Por que ele prende o ordinal e não conta variantes
-    ///
-    /// Contar exigiria macro ou derivação. O ordinal do último de cada lista dá
-    /// a mesma resposta: ele só muda quando alguém acrescenta ou remove, que são
-    /// exatamente os dois atos que pedem a decisão.
+    /// os dois entrarem. O relato: «se usuários de diferentes versões estão
+    /// compartilhando a tela, a stream cai».
     ///
     /// **Quando este teste reprovar**, a pergunta não é «como faço passar». É:
     /// um par da versão anterior recebe esta variante nova? Se recebe, ou
     /// `PROTOCOL_VERSION` sobe e a linha de baixo acompanha, ou quem manda passa
     /// a perguntar a versão do par antes — como `session.rs` já faz para o
     /// `UplinkLoss`.
+    ///
+    /// # As três vezes em que ele cobrou a decisão
+    ///
+    /// 1. **`WatchScreen`/`UnwatchScreen`**, a versão foi para 3 em 04/09/2026.
+    /// 2. **O caminho entre pares** — `EmprestarSubida`, `ParFalhou`,
+    ///    `SirvaTelaPara`, `AssistaTelaPor` —, e a versão foi para 4.
+    /// 3. **O anúncio e o aceite de MODs** — `AceitarMods`, `RecusarMods`,
+    ///    `ModsExigidos` —, e desta vez a decisão foi **a outra**: a versão
+    ///    global fica em 4 e quem manda pergunta antes, contra
+    ///    [`crate::mods::VERSAO_DO_ANUNCIO`].
+    ///
+    /// O motivo de a terceira ser diferente está escrito naquela constante e
+    /// vale repetir em uma linha: esta entrega e a da malha acrescentam
+    /// variantes ao mesmo tempo, e duas subidas independentes para «5» dariam
+    /// dois vocabulários com o mesmo número — que é o defeito que este guarda
+    /// existe para pegar, cometido por quem o estava obedecendo.
     #[test]
     fn o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou() {
         assert_eq!(
@@ -3887,9 +4145,8 @@ mod o_vocabulario_e_a_versao {
                 motivo: MotivoDeFalhaDePar::NaoAlcancou,
             }),
             33,
-            "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
-             de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
-             sobre esta linha"
+            "os verbos da v4 saíram do lugar; um cliente v4 passaria a ler outra \
+             coisa no lugar deles"
         );
         assert_eq!(
             ordinal(&ServerMessage::AssistaTelaPor {
@@ -3902,26 +4159,36 @@ mod o_vocabulario_e_a_versao {
                 impressao: "3c".repeat(32),
             }),
             35,
+            "as mensagens da v4 saíram do lugar"
+        );
+
+        // E o fim de cada lista, contado pelo fio: é esta metade que dispara
+        // quando alguém acrescenta, e é a que faltava.
+        assert_eq!(
+            ultima_variante::<ClientMessage>(),
+            35,
+            "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
+             de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
+             sobre esta linha"
+        );
+        assert_eq!(
+            ultima_variante::<ServerMessage>(),
+            36,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
 
-        // E o número da versão, preso ao lado deles. Ele é o que diz a um par se
+        // E o número da versão, preso ao lado delas. Ele é o que diz a um par se
         // vale a pena tentar — e enquanto ele não subir, dois builds com listas
-        // diferentes vão continuar se cumprimentando como iguais.
-        // **Este número já cumpriu o trabalho dele duas vezes.** Ele estava em 2
-        // quando `WatchScreen` e `UnwatchScreen` entraram na lista sem que
-        // ninguém decidisse sobre a versão; este teste reprovou na primeira vez
-        // que alguém mexeu na lista depois disso, e a decisão foi tomada — a
-        // versão subiu para 3 em 04/09/2026. A segunda vez foi o caminho entre
-        // pares: `EmprestarSubida`, `ParFalhou`, `SirvaTelaPara` e
-        // `AssistaTelaPor` entraram, os dois braços acima passaram a apontar
-        // para o verbo novo de cada lista, e a versão subiu para 4.
+        // diferentes vão continuar se cumprimentando como iguais. É por isso que
+        // o anúncio de MODs não sai para ninguém hoje, e é o contrato da
+        // integração conjunta com a malha.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
             4,
-            "a versão do protocolo mudou; confira se os ordinais acima e a janela \
-             de compatibilidade continuam contando a mesma história"
+            "a versão do protocolo mudou; confira se os ordinais acima, a janela \
+             de compatibilidade e `mods::VERSAO_DO_ANUNCIO` continuam contando a \
+             mesma história"
         );
     }
 
@@ -3998,5 +4265,164 @@ mod o_vocabulario_e_a_versao {
             impressao: "z".repeat(64),
         };
         assert!(assista.validate().is_err());
+    }
+}
+
+/// O anúncio de MODs no fio. ADR 0045.
+#[cfg(test)]
+mod os_mods_no_fio {
+    use super::*;
+    use crate::mods::{hex, identidade_do_conjunto, ModAnunciado};
+
+    fn um_mod(id: &str, hash_de: u8) -> ModAnunciado {
+        ModAnunciado {
+            id: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            hash: format!("{hash_de:02x}").repeat(32),
+            repo: "https://github.com/seele/exemplo".to_owned(),
+            reach: vec!["dom".to_owned()],
+            no_servidor: false,
+        }
+    }
+
+    /// Monta o anúncio como o servidor o monta: a identidade sai da lista.
+    fn anuncio(mut mods: Vec<ModAnunciado>) -> ServerMessage {
+        let conjunto = hex(&identidade_do_conjunto(&mut mods));
+        ServerMessage::ModsExigidos { mods, conjunto }
+    }
+
+    #[test]
+    fn o_anuncio_vai_e_volta_inteiro() {
+        let original = anuncio(vec![um_mod("seele/cor", 0xa1), um_mod("seele/bot", 0xb2)]);
+        let quadro = encode(&original).expect("o anúncio serializa");
+        let voltou: ServerMessage = decode(&quadro).expect("o anúncio volta");
+        assert_eq!(voltou, original);
+    }
+
+    #[test]
+    fn o_aceite_e_a_recusa_vao_e_voltam() {
+        let conjunto = "7f".repeat(32);
+        for original in [
+            ClientMessage::AceitarMods {
+                conjunto: conjunto.clone(),
+            },
+            ClientMessage::RecusarMods,
+        ] {
+            let quadro = encode(&original).expect("serializa");
+            let voltou: ClientMessage = decode(&quadro).expect("volta");
+            assert_eq!(voltou, original);
+        }
+    }
+
+    /// **O guarda de verdade do anúncio.** Sem ele, `conjunto` seria um número
+    /// que quem manda escolhe — e é contra ele que o aceite de quem entra é
+    /// guardado. Um servidor que anunciasse uma lista e declarasse a identidade
+    /// de outra faria todo aceite guardado valer para algo que ninguém leu.
+    #[test]
+    fn uma_identidade_que_nao_e_a_da_lista_e_recusada() {
+        let ServerMessage::ModsExigidos { mods, .. } = anuncio(vec![um_mod("seele/cor", 0xa1)])
+        else {
+            unreachable!("acabou de ser montado")
+        };
+        let mentiroso = ServerMessage::ModsExigidos {
+            mods,
+            conjunto: "0e".repeat(32),
+        };
+        assert_eq!(
+            mentiroso.validate(),
+            Err(ControlError::FieldOutOfRange { field: "conjunto" })
+        );
+    }
+
+    /// Trocar um MOD sem recalcular a identidade é a mesma mentira pelo outro
+    /// lado, e é o caso que um servidor descuidado produziria sozinho.
+    #[test]
+    fn mexer_na_lista_sem_refazer_a_identidade_e_recusado() {
+        let ServerMessage::ModsExigidos { mut mods, conjunto } =
+            anuncio(vec![um_mod("seele/cor", 0xa1)])
+        else {
+            unreachable!("acabou de ser montado")
+        };
+        mods.push(um_mod("seele/bot", 0xb2));
+        assert!(ServerMessage::ModsExigidos { mods, conjunto }
+            .validate()
+            .is_err());
+    }
+
+    #[test]
+    fn dois_mods_com_o_mesmo_identificador_sao_recusados() {
+        let anunciado = anuncio(vec![um_mod("seele/cor", 0xa1), um_mod("seele/cor", 0xa1)]);
+        assert_eq!(
+            anunciado.validate(),
+            Err(ControlError::FieldOutOfRange { field: "mod_id" })
+        );
+    }
+
+    #[test]
+    fn um_hash_que_nao_e_hash_nao_atravessa_o_fio() {
+        let mut torto = um_mod("seele/cor", 0xa1);
+        torto.hash = String::new();
+        assert_eq!(
+            anuncio(vec![torto]).validate(),
+            Err(ControlError::FieldOutOfRange { field: "mod_hash" })
+        );
+    }
+
+    #[test]
+    fn um_aceite_que_nao_carrega_uma_identidade_e_recusado() {
+        assert_eq!(
+            ClientMessage::AceitarMods {
+                conjunto: "não é hash".to_owned()
+            }
+            .validate(),
+            Err(ControlError::FieldOutOfRange { field: "conjunto" })
+        );
+    }
+
+    #[test]
+    fn mais_mods_do_que_cabem_num_quadro_sao_recusados() {
+        let demais: Vec<ModAnunciado> = (0..=MAX_MODS_NO_ANUNCIO)
+            .map(|n| um_mod(&format!("seele/m{n}"), 0x11))
+            .collect();
+        assert!(matches!(
+            anuncio(demais).validate(),
+            Err(ControlError::FieldTooLong { field: "mods", .. })
+        ));
+    }
+
+    /// **Os tetos somam menos que o quadro, e isto é medido e não suposto.**
+    ///
+    /// Um anúncio com todos os campos no teto tem de caber nos
+    /// [`MAX_FRAME_LEN`] bytes, ou um servidor legítimo montaria um quadro que
+    /// não sai — e a pessoa leria «este servidor não consegue se descrever»
+    /// por causa de uma conta que ninguém fez.
+    #[test]
+    fn um_anuncio_cheio_ainda_cabe_num_quadro() {
+        let cheio: Vec<ModAnunciado> = (0..MAX_MODS_NO_ANUNCIO)
+            .map(|n| ModAnunciado {
+                // Um identificador no teto, e único: `seele/` mais enchimento.
+                id: format!("{:0>width$}/{n:03}", "a", width = MAX_MOD_ID_LEN - 5),
+                version: "9".repeat(MAX_MOD_VERSION_LEN),
+                hash: format!("{n:02x}").repeat(32),
+                repo: "r".repeat(MAX_MOD_REPO_LEN),
+                reach: vec!["a".repeat(MAX_REACH_LEN); MAX_REACH_ITENS],
+                no_servidor: true,
+            })
+            .collect();
+        let quadro = encode(&anuncio(cheio)).expect("um anúncio no teto serializa");
+        assert!(
+            quadro.len() <= MAX_FRAME_LEN,
+            "um anúncio cheio ocupa {} dos {MAX_FRAME_LEN} bytes do quadro",
+            quadro.len()
+        );
+    }
+
+    /// Um servidor sem MOD nenhum não é um caso de erro: é todo servidor que
+    /// existe hoje. Ele não manda este quadro — e se mandasse, o quadro vazio
+    /// ainda seria válido, com a identidade do conjunto vazio.
+    #[test]
+    fn o_conjunto_vazio_tem_identidade_e_atravessa() {
+        let quadro = encode(&anuncio(vec![])).expect("o conjunto vazio serializa");
+        let _: ServerMessage = decode(&quadro).expect("volta");
     }
 }

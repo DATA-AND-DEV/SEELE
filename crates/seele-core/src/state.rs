@@ -1292,6 +1292,16 @@ impl Room {
             // `changed`: não é a mesma omissão do andaime — aquele calava uma
             // mensagem que ninguém tratava; esta é dita e decidida.
             ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => {}
+
+            // O anúncio de MODs não chega aqui, e é por construção: ele
+            // acontece **dentro do aperto de mão**, antes de existir sessão —
+            // ver `client::handshake`. Um `Room` só existe depois do `Session`,
+            // e quem recebesse este quadro já teria entrado, que é o oposto do
+            // que o ADR 0045 pede.
+            //
+            // Dito e decidido, e não calado: se um servidor o mandar depois da
+            // entrada, não há o que absorver, e o roster não muda.
+            ServerMessage::ModsExigidos { .. } => {}
         }
 
         changed
