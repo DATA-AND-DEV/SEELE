@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use seele_proto::control::{ChannelInfo, PersonProfile, PersonState, VoiceRoomInfo};
-use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, Ssrc, VoiceRoomId};
+use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
@@ -373,7 +373,13 @@ pub enum Event {
 /// que é o que [`Telas::encerrar_de`] existe para fazer numa chamada só.
 #[derive(Debug, Default)]
 pub struct Telas {
-    por_voice_room: HashMap<VoiceRoomId, Vec<(PersonId, ScreenId)>>,
+    /// Por sala: quem transmite, **de qual conexão**, e qual transmissão é.
+    ///
+    /// A sessão está aqui pelo mesmo motivo que está no [`Occupant`]: quem
+    /// encerra precisa saber de qual conexão a transmissão é, ou a conexão velha
+    /// de alguém, ao morrer, apaga a tela que a conexão nova dele acabou de
+    /// abrir.
+    por_voice_room: HashMap<VoiceRoomId, Vec<(PersonId, SessionId, ScreenId)>>,
 }
 
 // **Não há constante de quantas transmissões cabem numa sala, e isso é a
@@ -400,24 +406,56 @@ impl Telas {
     /// vaga nova: é um cliente que reabriu o botão, ou um `StartScreenShare`
     /// depois de reconectar. Mandar duas telas dobraria a subida de quem manda
     /// sem que ninguém tivesse pedido a segunda.
-    pub fn comecar(&mut self, voice_room: VoiceRoomId, person: PersonId, screen: ScreenId) {
+    ///
+    /// # Por que devolve a tela trocada
+    ///
+    /// Porque a troca é o único ponto do desmonte em que a identidade da sessão é
+    /// **sobrescrita** em vez de conferida — e sobrescrever calado deixa o
+    /// `ScreenId` anterior desenhado para sempre em quem assiste: o cliente funde
+    /// aditivamente, e só um `ScreenShareStopped` apaga um cabeçalho de
+    /// transmissão. Devolvendo, quem chama anuncia o fim da antiga antes do começo
+    /// da nova, e a substituição deixa de ser silenciosa. Achado por revisão
+    /// independente; é a mesma família de «o produto sabe e não conta».
+    #[must_use]
+    pub fn comecar(
+        &mut self,
+        voice_room: VoiceRoomId,
+        person: PersonId,
+        sessao: SessionId,
+        screen: ScreenId,
+    ) -> Option<ScreenId> {
         let vagas = self.por_voice_room.entry(voice_room).or_default();
 
-        if let Some(minha) = vagas.iter_mut().find(|(dono, _)| *dono == person) {
-            minha.1 = screen;
-            return;
+        if let Some(minha) = vagas.iter_mut().find(|(dono, _, _)| *dono == person) {
+            let substituida = minha.2;
+            minha.1 = sessao;
+            minha.2 = screen;
+            return Some(substituida);
         }
-        vagas.push((person, screen));
+        vagas.push((person, sessao, screen));
+        None
     }
 
     /// Encerra a transmissão desta pessoa nesta sala, se houver.
     ///
     /// Conferido, e não apagado às cegas: um `StopScreenShare` de quem não está
     /// transmitindo derrubaria a tela de quem está.
-    pub fn parar(&mut self, voice_room: VoiceRoomId, person: PersonId) -> Option<ScreenId> {
+    ///
+    /// Conferida também a **sessão**, pela mesma razão de [`Self::encerrar_de`]:
+    /// numa queda silenciosa a conexão velha da pessoa segue viva por alguns
+    /// segundos, e um `StopScreenShare` atrasado dela derrubaria a transmissão
+    /// que a conexão nova acabou de abrir.
+    pub fn parar(
+        &mut self,
+        voice_room: VoiceRoomId,
+        person: PersonId,
+        sessao: SessionId,
+    ) -> Option<ScreenId> {
         let vagas = self.por_voice_room.get_mut(&voice_room)?;
-        let onde = vagas.iter().position(|(dono, _)| *dono == person)?;
-        let (_, screen) = vagas.remove(onde);
+        let onde = vagas
+            .iter()
+            .position(|(dono, de_quem, _)| *dono == person && *de_quem == sessao)?;
+        let (_, _, screen) = vagas.remove(onde);
         if vagas.is_empty() {
             self.por_voice_room.remove(&voice_room);
         }
@@ -428,12 +466,23 @@ impl Telas {
     ///
     /// Devolve as salas e as transmissões, porque alguém tem de anunciar o fim e
     /// quem chama nem sempre sabe a sala — uma sessão acaba em qualquer `?` do
-    /// meio do laço dela. É o mesmo raciocínio de [`Occupancy::vacate_everywhere`].
-    pub fn encerrar_de(&mut self, person: PersonId) -> Vec<(VoiceRoomId, ScreenId)> {
+    /// meio do laço dela. É o mesmo raciocínio de
+    /// [`Occupancy::vacate_everywhere_da_sessao`].
+    ///
+    /// `sessao` é `Some` quando quem encerra é uma conexão, e aí só encerra o que
+    /// **aquela** conexão abriu: sem isso, a conexão velha de alguém apagaria, ao
+    /// morrer, a transmissão que a conexão nova dele acabou de abrir.
+    pub fn encerrar_de(
+        &mut self,
+        person: PersonId,
+        sessao: Option<SessionId>,
+    ) -> Vec<(VoiceRoomId, ScreenId)> {
         let mut encerradas = Vec::new();
         for (voice_room, vagas) in &mut self.por_voice_room {
-            if let Some(onde) = vagas.iter().position(|(dono, _)| *dono == person) {
-                let (_, screen) = vagas.remove(onde);
+            if let Some(onde) = vagas.iter().position(|(dono, de_quem, _)| {
+                *dono == person && sessao.is_none_or(|qual| *de_quem == qual)
+            }) {
+                let (_, _, screen) = vagas.remove(onde);
                 encerradas.push((*voice_room, screen));
             }
         }
@@ -447,7 +496,7 @@ impl Telas {
             .remove(&voice_room)
             .unwrap_or_default()
             .into_iter()
-            .map(|(_, screen)| screen)
+            .map(|(_, _, screen)| screen)
             .collect()
     }
 
@@ -456,7 +505,12 @@ impl Telas {
     pub fn em(&self, voice_room: VoiceRoomId) -> Vec<(PersonId, ScreenId)> {
         self.por_voice_room
             .get(&voice_room)
-            .cloned()
+            .map(|vagas| {
+                vagas
+                    .iter()
+                    .map(|(dono, _, screen)| (*dono, *screen))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -473,13 +527,18 @@ impl Telas {
     /// Uma pessoa transmite **uma** tela por vez, mesmo com mais de uma vaga na
     /// sala: o que a segunda vaga permite é outra pessoa, não outra janela da
     /// mesma.
+    ///
+    /// A `sessao` é conferida porque quem pergunta é **uma conexão**: um fluxo
+    /// aberto pela conexão velha de alguém não pode ser aceito como se fosse da
+    /// transmissão que a conexão nova registrou — o cabeçalho ainda casaria, e o
+    /// que chegaria à sala seriam duas fontes escrevendo o mesmo `ScreenId`.
     #[must_use]
-    pub fn de(&self, person: PersonId) -> Option<(VoiceRoomId, ScreenId)> {
+    pub fn de(&self, person: PersonId, sessao: SessionId) -> Option<(VoiceRoomId, ScreenId)> {
         self.por_voice_room.iter().find_map(|(voice_room, vagas)| {
             vagas
                 .iter()
-                .find(|(dono, _)| *dono == person)
-                .map(|(_, screen)| (*voice_room, *screen))
+                .find(|(dono, de_quem, _)| *dono == person && *de_quem == sessao)
+                .map(|(_, _, screen)| (*voice_room, *screen))
         })
     }
 
@@ -495,7 +554,7 @@ impl Telas {
             .flat_map(|(voice_room, vagas)| {
                 vagas
                     .iter()
-                    .map(move |(person, screen)| (*voice_room, *person, *screen))
+                    .map(move |(person, _, screen)| (*voice_room, *person, *screen))
             })
             .collect()
     }
@@ -508,6 +567,10 @@ impl Telas {
 /// a tunnel comes back to find their voice room full.
 #[derive(Debug, Clone, Copy)]
 struct ReservedSlot {
+    /// A conexão que guardou o assento. É o que separa «a reserva que eu mesmo
+    /// acabei de escrever» de «a reserva que uma conexão anterior deixou», e sem
+    /// ela o descarte depende de uma ordem que nenhum tipo confere.
+    sessao: SessionId,
     voice_room: VoiceRoomId,
     ssrc: Ssrc,
     expires_at: Instant,
@@ -521,10 +584,18 @@ pub struct Slots {
 
 impl Slots {
     /// Holds a seat for the grace period.
-    pub fn reserve(&mut self, person: PersonId, voice_room: VoiceRoomId, ssrc: Ssrc, now: Instant) {
+    pub fn reserve(
+        &mut self,
+        person: PersonId,
+        sessao: SessionId,
+        voice_room: VoiceRoomId,
+        ssrc: Ssrc,
+        now: Instant,
+    ) {
         self.reserved.insert(
             person,
             ReservedSlot {
+                sessao,
                 voice_room,
                 ssrc,
                 expires_at: now + seele_proto::transport::SESSION_GRACE,
@@ -544,6 +615,21 @@ impl Slots {
         }
         self.reserved.remove(&person);
         Some((slot.voice_room, slot.ssrc))
+    }
+
+    /// Joga fora o assento guardado para esta pessoa **por outra conexão**, e diz
+    /// se havia um. A reserva escrita pela própria sessão vigente fica onde está.
+    ///
+    /// Existe para a janela que [`reservar_o_assento_da_carencia`] não alcança:
+    /// ver [`descartar_a_reserva_de_quem_ja_voltou`], que é quem chama.
+    pub fn descartar(&mut self, person: PersonId, vigente: SessionId) -> bool {
+        let Some(slot) = self.reserved.get(&person) else {
+            return false;
+        };
+        if slot.sessao == vigente {
+            return false;
+        }
+        self.reserved.remove(&person).is_some()
     }
 
     /// Drops seats whose grace period has passed.
@@ -569,6 +655,14 @@ pub struct Occupant {
     pub nickname: String,
     /// Their media source.
     pub ssrc: Ssrc,
+    /// **Qual conexão** desta pessoa pôs este registro aqui.
+    ///
+    /// A chave continua sendo a pessoa — duas linhas para ela seriam dois nomes
+    /// na lista —, mas quem **apaga** precisa saber de qual sessão o registro é.
+    /// Sem isto, a sessão que morre aos 20 s de silêncio apagava a que subiu aos
+    /// 15 s: o desmonte era chaveado por pessoa e nunca perguntava se aquela
+    /// pessoa ainda era dele. Ver `desassentar` em `crate::session`.
+    pub sessao: SessionId,
 }
 
 /// Quem está conectado neste servidor agora, sentado numa sala ou não.
@@ -595,41 +689,221 @@ impl Presentes {
     /// O `bool` é o que evita anunciar duas vezes: uma reconexão dentro da
     /// carência passa por aqui de novo, e um segundo `PersonPresent` faria a
     /// lista de todo mundo piscar sem nada ter mudado.
+    ///
+    /// **Aqui a última gravação vence, e isso se apoia em ordem, não em
+    /// identidade.** Todo o resto desta família ([`Presentes::saiu`],
+    /// [`Presentes::e_a_vigente`], `Occupancy::vacate_da_sessao`) compara a
+    /// sessão gravada antes de mexer; esta não compara, porque quem chega é,
+    /// por construção, a conexão mais nova: o `handshake` da conexão velha
+    /// terminou antes de a nova sequer existir. Se algum dia o `handshake`
+    /// passar a acontecer fora dessa ordem — reaproveitado, repetido ou
+    /// adiado —, esta linha volta a ser o buraco que o resto fechou, e passa a
+    /// precisar do mesmo cuidado: só sobrescrever quando a sessão que chega for
+    /// posterior à gravada.
+    ///
+    /// O que sobrescrever significa para o resto está preso em
+    /// `quem_reconecta_passa_a_ser_a_vigente_e_a_anterior_perde_a_autoridade`:
+    /// é daqui que sai a resposta de quem é a conexão vigente de uma pessoa, e
+    /// sem isso os guardas continuariam passando enquanto apontam para a
+    /// conexão errada.
     pub fn chegou(&mut self, quem: Occupant) -> bool {
         self.por_person.insert(quem.person, quem).is_none()
     }
 
-    /// Tira alguém **se a ficha for desta conexão**, e diz se tirou.
+    /// Tira alguém, e diz se havia o que tirar — **se a sessão for a dele**.
     ///
-    /// # O `ssrc`, e o relato que o pôs aqui
+    /// O identificador de sessão não é decoração: numa queda silenciosa a
+    /// conexão nova da mesma pessoa sobe por volta de 15 s e a velha só é
+    /// desmontada aos 20 s. Chaveado só por pessoa, o desmonte da velha tirava
+    /// dos presentes quem estava conectado agora, e o `PersonGone` que ele
+    /// difundia apagava a pessoa da lista de todo mundo — **sem nunca avisar a
+    /// própria**, porque `translate` não manda `PersonGone` para si.
     ///
-    /// 07/09/2026, do campo: *«ele entrava na sala, ficava alguns segundos e
-    /// saía, e não aparecia pra mim — mas pra ele, ele tava dentro.»*
+    /// # O relato de 07/09/2026, e por que ele fica coberto aqui
     ///
-    /// O cliente tenta vários caminhos ao mesmo tempo (ADR 0037) e fica com o
-    /// primeiro que abre. Os outros são abandonados e fecham logo depois — **e
-    /// fechar roda a saída inteira**. Medido: o abandonado fecha uns 80 ms
-    /// depois de o bom ter registrado a ficha, e a saída dele, chaveada só por
-    /// [`PersonId`], apagava a ficha de quem estava vivo. Nada reanuncia, então
-    /// a pessoa some da lista de todo mundo pelo resto da sessão, com a conexão
-    /// dela saudável do outro lado.
+    /// *«Ele entrava na sala, ficava alguns segundos e saía, e não aparecia pra
+    /// mim — mas pra ele, ele tava dentro.»* A linha principal já havia
+    /// consertado esse caso conferindo o `ssrc`: o cliente tenta vários caminhos
+    /// ao mesmo tempo (ADR 0037), fica com o primeiro que abre, e os abandonados
+    /// fecham uns 80 ms depois — e fechar roda a saída inteira, que apagava a
+    /// ficha de quem estava vivo.
     ///
-    /// O `ssrc` distingue as duas porque [`crate::session::Registry`] emite um
-    /// por conexão, e o [`Occupant`] já o guardava. Faltava conferi-lo.
-    pub fn saiu(&mut self, person: PersonId, ssrc: Ssrc) -> bool {
-        let e_desta_conexao = self
-            .por_person
-            .get(&person)
-            .is_some_and(|quem| quem.ssrc == ssrc);
-        if e_desta_conexao {
-            self.por_person.remove(&person);
+    /// **É o mesmo defeito, e a conferência de sessão o cobre inteiro.** O
+    /// caminho abandonado e a conexão que morre 20 s depois de a pessoa já ter
+    /// voltado são o mesmo caso visto de dois relógios: uma conexão que não é
+    /// mais a vigente removendo estado de quem é. Conferir a sessão substitui a
+    /// conferência de `ssrc` em vez de conviver com ela, porque [`SessionId`] é o
+    /// identificador que todo o desmonte já carrega — inclusive onde não há
+    /// `ssrc` à mão, como nas telas e nas reservas de assento.
+    pub fn saiu(&mut self, person: PersonId, sessao: SessionId) -> bool {
+        match self.por_person.get(&person) {
+            Some(quem) if quem.sessao == sessao => {
+                self.por_person.remove(&person);
+                true
+            }
+            _ => false,
         }
-        e_desta_conexao
+    }
+
+    /// Se esta sessão ainda é a conexão vigente desta pessoa.
+    ///
+    /// A autoridade mora aqui porque [`Presentes`] já responde «quem está
+    /// conectado», e uma quarta tabela só para dizer «qual conexão» seria uma
+    /// segunda cópia da mesma contabilidade — exatamente o que produziu este
+    /// defeito.
+    ///
+    /// **Sem registro nenhum é recusa, e isso foi um conserto.** A primeira
+    /// versão respondia «sim» quando não havia registro, com o argumento de que
+    /// uma sessão morta antes de se anunciar presente não deve deixar assento de
+    /// fantasma para trás. O argumento estava certo e a conclusão invertida: quem
+    /// nunca se anunciou presente também nunca entrou em sala nenhuma, de modo
+    /// que não chega a perguntar isto — e o ramo permissivo só disparava no caso
+    /// oposto, o de o registro **já ter sido tirado por uma sessão posterior**.
+    ///
+    /// O encadeamento que ele deixava aberto: a sessão A cai calada, B reconecta,
+    /// B sai da sala de propósito e se desconecta, e só então A morre. Sem
+    /// registro a que se comparar, A gravava uma reserva de cinco minutos com a
+    /// sala e o `ssrc` velhos, e o `handshake` seguinte re-sentava quem tinha
+    /// saído por vontade própria — exatamente o sintoma que este conserto fecha.
+    #[must_use]
+    pub fn e_a_vigente(&self, person: PersonId, sessao: SessionId) -> bool {
+        self.por_person
+            .get(&person)
+            .is_some_and(|quem| quem.sessao == sessao)
+    }
+
+    /// Se esta pessoa tem **alguma** conexão viva, seja ela qual for.
+    ///
+    /// Diferente de [`Presentes::e_a_vigente`], que pergunta por uma sessão
+    /// nomeada. A distinção é o que deixa uma conexão que acabou saber por que
+    /// não tinha nada seu para remover: porque a pessoa não está mais aqui, ou
+    /// porque ela já voltou por outra conexão. Ver [`Desassentamentos`].
+    #[must_use]
+    pub fn esta_presente(&self, person: PersonId) -> bool {
+        self.por_person.contains_key(&person)
     }
 
     /// Todo mundo que está aqui agora.
     pub fn todos(&self) -> Vec<Occupant> {
         self.por_person.values().cloned().collect()
+    }
+}
+
+/// Guarda o assento da carência para uma conexão que acabou — **se ainda for a
+/// desta pessoa** — e diz se guardou.
+///
+/// Mora aqui, e não solta no fim da sessão, porque um guarda dentro de uma função
+/// de trezentas linhas que só roda com servidor, QUIC e relógio de verdade é um
+/// guarda que nenhum teste alcança: era exatamente o achado da revisão. Com a
+/// decisão num nome só, revertê-la faz um teste reprovar.
+///
+/// A reserva obsoleta é da mesma família do defeito que `session::desassentar`
+/// fecha: quem saiu da sala de propósito e caiu em seguida era re-sentado na
+/// conexão seguinte por uma reserva deixada por uma conexão anterior, e essa
+/// reserva vale cinco minutos.
+pub fn reservar_o_assento_da_carencia(
+    presentes: &Presentes,
+    slots: &mut Slots,
+    person: PersonId,
+    sessao: SessionId,
+    voice_room: VoiceRoomId,
+    ssrc: Ssrc,
+    now: Instant,
+) -> bool {
+    if !presentes.e_a_vigente(person, sessao) {
+        return false;
+    }
+    slots.reserve(person, sessao, voice_room, ssrc, now);
+    true
+}
+
+/// Joga fora a reserva que uma conexão **anterior** tenha deixado depois de esta
+/// já ter resgatado a sua — e diz se havia uma.
+///
+/// # A janela que o guarda da reserva não alcança
+///
+/// [`reservar_o_assento_da_carencia`] pergunta a [`Presentes`] quem é a sessão
+/// vigente, e a conexão nova só entra em `Presentes` depois do `handshake`. Entre
+/// uma coisa e outra há um intervalo em que a sessão velha ainda é a vigente: se
+/// ela morrer exatamente aí, a pergunta responde «sim» e a reserva obsoleta é
+/// gravada assim mesmo — com a sala e o `ssrc` velhos, valendo cinco minutos.
+/// Achado por revisão independente, e não por defeito de campo, porque a janela é
+/// de microssegundos.
+///
+/// O outro lado da mesma pergunta fecha-a sem cronômetro nenhum: quando uma
+/// conexão se declara presente, o `handshake` dela **já resgatou** o que houvesse
+/// para resgatar. Qualquer reserva que exista neste instante foi escrita depois
+/// disso, quer dizer, por uma conexão que já não é a desta pessoa. Não há caso
+/// legítimo a perder — e o que se perde, se este descarte não existir, é a pessoa
+/// ser re-sentada numa sala de onde ela saiu de propósito.
+///
+/// # Por que este descarte também é chaveado por sessão
+///
+/// O parágrafo acima é um argumento de ordem: «o resgate já aconteceu, logo o que
+/// existir agora é de outra conexão». O argumento se sustenta no fluxo de hoje,
+/// mas era o único guarda desta família que não conferia sessão nenhuma — achado
+/// de revisão independente —, e uma ordem que só o texto garante é uma ordem que
+/// a próxima mudança pode quebrar sem nenhum teste reclamar. Com a sessão gravada
+/// na reserva, a pergunta deixa de ser «quando isto aconteceu» e passa a ser
+/// «quem escreveu isto»: só some a reserva de quem já não é esta conexão.
+pub fn descartar_a_reserva_de_quem_ja_voltou(
+    slots: &mut Slots,
+    person: PersonId,
+    vigente: SessionId,
+) -> bool {
+    slots.descartar(person, vigente)
+}
+
+/// O que aconteceu quando uma conexão pediu para transmitir a tela dela.
+///
+/// Existe para que a recusa tenha nome: quem chama precisa distinguir «a vaga é
+/// sua» de «esta conexão já não é a desta pessoa», e um `Option` não diz qual das
+/// duas foi.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AberturaDeTela {
+    /// A vaga é desta conexão. `substituida` é a tela que ela trocou, quando
+    /// havia uma — quem chama anuncia o fim dela antes do começo da nova.
+    Aberta {
+        /// A tela que saiu do lugar, se saiu.
+        substituida: Option<ScreenId>,
+    },
+    /// Esta conexão já não é a vigente da pessoa dela, e nada foi escrito.
+    DeConexaoVelha,
+}
+
+/// Registra a transmissão desta conexão — **se ela ainda for a vigente desta
+/// pessoa**.
+///
+/// # A última escrita por pessoa desta família
+///
+/// [`Telas::comecar`] é chaveada por pessoa e **sobrescreve** a sessão dona da
+/// vaga, porque é assim que um `StartScreenShare` depois de reconectar toma a
+/// vaga que a conexão anterior tinha: a troca é legítima e é o caso comum.
+/// Sobrescrever sem conferir, no entanto, faz a mesma coisa ao contrário — um
+/// `StartScreenShare` **atrasado** da conexão velha toma a vaga da nova e, de
+/// lambuja, manda `ScreenShareStopped` da tela que a nova acabou de abrir, que é
+/// exatamente a imagem parada que esta pendência existe para não deixar
+/// acontecer. Achado por revisão independente; inalcançável pela queda silenciosa,
+/// em que a conexão velha está muda, mas alcançável quando as duas conexões estão
+/// vivas ao mesmo tempo — que é o que a janela de cinco segundos permite.
+///
+/// A conferência mora aqui, num nome só, e não dentro do laço da sessão, pela
+/// mesma razão de [`reservar_o_assento_da_carencia`]: um guarda dentro de uma
+/// função que só roda com servidor, QUIC e relógio de verdade é um guarda que
+/// nenhum teste alcança.
+pub fn comecar_a_tela_da_conexao_vigente(
+    presentes: &Presentes,
+    telas: &mut Telas,
+    voice_room: VoiceRoomId,
+    person: PersonId,
+    sessao: SessionId,
+    screen: ScreenId,
+) -> AberturaDeTela {
+    if !presentes.e_a_vigente(person, sessao) {
+        return AberturaDeTela::DeConexaoVelha;
+    }
+    AberturaDeTela::Aberta {
+        substituida: telas.comecar(voice_room, person, sessao, screen),
     }
 }
 
@@ -662,23 +936,30 @@ pub struct Occupancy {
 }
 
 impl Occupancy {
-    /// Seats a person, replacing any earlier seat they held.
+    /// Seats a person, replacing any earlier seat they held, and says which
+    /// voice rooms that emptied.
     ///
     /// Replacing rather than appending: a reconnection inside the grace period
     /// re-enters the same voice room, and a roster with the same person twice is a
     /// roster nobody trusts.
-    pub fn seat(&mut self, voice_room: VoiceRoomId, occupant: Occupant) {
-        // **Sentar é por pessoa, e não por conexão.** Sentar-se diz «meu lugar
-        // é este agora», e um assento antigo da mesma pessoa tem de sair venha
-        // ele de que conexão vier. É o oposto de `vacate_everywhere` na saída,
-        // onde apagar o de outra conexão é justamente o defeito.
-        for sentados in self.by_voice_room.values_mut() {
-            sentados.retain(|quem| quem.person != occupant.person);
-        }
+    ///
+    /// As salas devolvidas são o que `assentar` precisa para contar a saída à sala
+    /// anterior. Vêm daqui, e não de uma chamada separada, porque a única remoção
+    /// por pessoa que este tipo ainda faz é esta — e ela é a única correta:
+    /// sentar é o momento em que o assento anterior **deve** cair, de qual sessão
+    /// for. Todo o resto passa pelas versões com sessão
+    /// ([`Self::vacate_da_sessao`], [`Self::vacate_everywhere_da_sessao`]).
+    pub fn seat(&mut self, voice_room: VoiceRoomId, occupant: Occupant) -> Vec<VoiceRoomId> {
+        let vacated = self.vacate_everywhere(occupant.person);
+        // Sem guarda de sessão, e de propósito: sentar alguém tem de tirar
+        // **todo** assento anterior dessa pessoa, de qual sessão for, ou a
+        // reconexão deixaria a mesma pessoa sentada duas vezes — um roster com o
+        // mesmo nome duas vezes é um roster em que ninguém confia.
         self.by_voice_room
             .entry(voice_room)
             .or_default()
             .push(occupant);
+        vacated
     }
 
     /// Quantas pessoas estão nesta sala.
@@ -693,11 +974,23 @@ impl Occupancy {
             .map_or(0, std::vec::Vec::len)
     }
 
-    /// Removes a person from one voice room.
-    pub fn vacate(&mut self, voice_room: VoiceRoomId, person: PersonId) {
-        if let Some(seated) = self.by_voice_room.get_mut(&voice_room) {
-            seated.retain(|occupant| occupant.person != person);
-        }
+    /// Tira de uma sala o assento **desta sessão**, e diz se havia o que tirar.
+    ///
+    /// O `bool` é o que decide se o `PersonLeft` sai: anunciar uma saída que não
+    /// aconteceu apaga da tela de todo mundo alguém que está na sala, e é esse o
+    /// defeito que o identificador de sessão existe para fechar.
+    pub fn vacate_da_sessao(
+        &mut self,
+        voice_room: VoiceRoomId,
+        person: PersonId,
+        sessao: SessionId,
+    ) -> bool {
+        let Some(seated) = self.by_voice_room.get_mut(&voice_room) else {
+            return false;
+        };
+        let antes = seated.len();
+        seated.retain(|occupant| occupant.person != person || occupant.sessao != sessao);
+        seated.len() != antes
     }
 
     /// Removes a person from wherever they were, and says where that was.
@@ -709,14 +1002,40 @@ impl Occupancy {
     /// connection both clear the seat and tell everybody about it — the same
     /// reasoning `crate::voice_room::voice_rooms::leave_everywhere` gives for being
     /// broadcast rather than aimed.
-    /// O `ssrc` é o que impede a conexão abandonada de esvaziar o assento da
-    /// que está viva — ver o doc de [`Presentes::saiu`], mesmo defeito e mesmo
-    /// relato.
-    pub fn vacate_everywhere(&mut self, person: PersonId, ssrc: Ssrc) -> Vec<VoiceRoomId> {
+    ///
+    /// **Privada, e é a decisão.** Era pública, e enquanto era, cada caminho novo
+    /// de desmonte podia chamá-la sem conferir sessão nenhuma — foi assim que o
+    /// defeito de campo nasceu seis vezes no mesmo arquivo. O único chamador
+    /// legítimo é [`Self::seat`], porque sentar tem de derrubar o assento
+    /// anterior de qual sessão for; quem desmonta uma conexão chama
+    /// [`Self::vacate_everywhere_da_sessao`], e agora não tem escolha.
+    fn vacate_everywhere(&mut self, person: PersonId) -> Vec<VoiceRoomId> {
         let mut vacated = Vec::new();
         for (voice_room, seated) in &mut self.by_voice_room {
             let before = seated.len();
-            seated.retain(|occupant| occupant.person != person || occupant.ssrc != ssrc);
+            seated.retain(|occupant| occupant.person != person);
+            if seated.len() != before {
+                vacated.push(*voice_room);
+            }
+        }
+        vacated
+    }
+
+    /// O mesmo, mas só para os assentos **desta sessão**.
+    ///
+    /// É o que o fim de uma conexão tem de chamar. A versão por pessoa era o
+    /// coração do defeito: uma queda silenciosa põe duas sessões da mesma pessoa
+    /// vivas ao mesmo tempo, e a velha, ao morrer aos 20 s, desocupava o assento
+    /// que a nova tinha tomado aos 15 s.
+    pub fn vacate_everywhere_da_sessao(
+        &mut self,
+        person: PersonId,
+        sessao: SessionId,
+    ) -> Vec<VoiceRoomId> {
+        let mut vacated = Vec::new();
+        for (voice_room, seated) in &mut self.by_voice_room {
+            let before = seated.len();
+            seated.retain(|occupant| occupant.person != person || occupant.sessao != sessao);
             if seated.len() != before {
                 vacated.push(*voice_room);
             }
@@ -812,6 +1131,44 @@ impl Atrasos {
     }
 }
 
+/// Quantas conexões velhas morreram sem levar ninguém junto.
+///
+/// **Existe porque o conserto, funcionando, não deixa rastro nenhum.** O guarda
+/// de sessão acerta calando-se: a sessão velha morre, não encontra nada seu para
+/// remover, e todo mundo continua exatamente onde estava. Do lado de fora, isso é
+/// indistinguível de a sessão velha nunca ter morrido — e um teste que não
+/// distingue as duas coisas passa por ausência de evento, e não por defesa.
+///
+/// Este número é a diferença entre as duas. Cada unidade aqui é uma conexão que
+/// chegou ao fim depois de a mesma pessoa já ter reconectado por outra: a queda
+/// silenciosa de rede que o `docs/pendencias.md` #11 descreve. Zero é o normal
+/// numa rede que não cai; um número que cresce durante uma chamada é a rede de
+/// alguém piscando — e, antes do guarda, era essa pessoa ficando muda e invisível
+/// para quem ficou, sem nenhum sinal para ela própria.
+///
+/// Do processo inteiro e não por sessão, pela mesma razão que [`Atrasos`]: um
+/// contador que morre com a conexão que o incrementou responde com silêncio a
+/// «este servidor já fez isto alguma vez?».
+#[derive(Debug, Default)]
+pub struct Desassentamentos {
+    conexoes_velhas: std::sync::atomic::AtomicU64,
+}
+
+impl Desassentamentos {
+    /// Registra uma conexão que morreu já não sendo a vigente da pessoa dela.
+    pub fn conexao_velha(&self) {
+        self.conexoes_velhas
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Quantas foram até agora.
+    #[must_use]
+    pub fn conexoes_velhas(&self) -> u64 {
+        self.conexoes_velhas
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// One message on its way to the batch, with somewhere to report the outcome.
 pub struct WriteRequest {
     /// What to write.
@@ -844,6 +1201,9 @@ pub struct Server {
     pub portaria: Arc<Mutex<crate::taxa::Portaria>>,
     /// How often the bus outran a session. See [`Atrasos`].
     pub atrasos: Arc<Atrasos>,
+    /// Quantas conexões velhas o guarda de sessão já defendeu. Ver
+    /// [`Desassentamentos`].
+    pub desassentamentos: Arc<Desassentamentos>,
     /// Quem está compartilhando tela em cada sala de voz. Ver [`Telas`].
     pub telas: Arc<Mutex<Telas>>,
     /// Quem declarou que empresta a subida, e quem serve quem. Ver
@@ -984,7 +1344,7 @@ mod tests {
         // minutes as the client's internal battery.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), SessionId(1), VoiceRoomId(1), Ssrc(7), now);
 
         let reclaimed = slots.reclaim(PersonId(1), now + Duration::from_secs(60));
         assert_eq!(reclaimed, Some((VoiceRoomId(1), Ssrc(7))));
@@ -997,7 +1357,7 @@ mod tests {
         // from scratch.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), VoiceRoomId(2), Ssrc(42), now);
+        slots.reserve(PersonId(1), SessionId(1), VoiceRoomId(2), Ssrc(42), now);
 
         let (voice_room, ssrc) = slots.reclaim(PersonId(1), now).expect("seat held");
         assert_eq!(voice_room, VoiceRoomId(2));
@@ -1008,7 +1368,7 @@ mod tests {
     fn an_expired_seat_is_not_reclaimable() {
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), SessionId(1), VoiceRoomId(1), Ssrc(7), now);
 
         let after = now + seele_proto::transport::SESSION_GRACE + Duration::from_secs(1);
         assert_eq!(slots.reclaim(PersonId(1), after), None);
@@ -1020,7 +1380,7 @@ mod tests {
         // person occupy two.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(7), now);
+        slots.reserve(PersonId(1), SessionId(1), VoiceRoomId(1), Ssrc(7), now);
 
         assert!(slots.reclaim(PersonId(1), now).is_some());
         assert!(slots.reclaim(PersonId(1), now).is_none());
@@ -1032,8 +1392,8 @@ mod tests {
         // never coming back, and specs/04 caps a voice room at a member limit.
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(1), now);
-        slots.reserve(PersonId(2), VoiceRoomId(1), Ssrc(2), now);
+        slots.reserve(PersonId(1), SessionId(1), VoiceRoomId(1), Ssrc(1), now);
+        slots.reserve(PersonId(2), SessionId(2), VoiceRoomId(1), Ssrc(2), now);
         assert_eq!(slots.held(), 2);
 
         let after = now + seele_proto::transport::SESSION_GRACE + Duration::from_secs(1);
@@ -1045,7 +1405,7 @@ mod tests {
     fn the_sweeper_leaves_live_seats_alone() {
         let mut slots = Slots::default();
         let now = instant();
-        slots.reserve(PersonId(1), VoiceRoomId(1), Ssrc(1), now);
+        slots.reserve(PersonId(1), SessionId(1), VoiceRoomId(1), Ssrc(1), now);
         assert_eq!(slots.sweep(now + Duration::from_secs(30)), 0);
         assert_eq!(slots.held(), 1);
     }
@@ -1053,10 +1413,17 @@ mod tests {
     // ---- who is in which voice room ----
 
     fn occupant(person: u64, nickname: &str) -> Occupant {
+        sentado(person, nickname, SessionId(person))
+    }
+
+    /// O mesmo, com a sessão escolhida: é o que separa duas conexões da mesma
+    /// pessoa, que é o caso que o guarda existe para atender.
+    fn sentado(person: u64, nickname: &str, sessao: SessionId) -> Occupant {
         Occupant {
             person: PersonId(person),
             nickname: nickname.to_owned(),
             ssrc: Ssrc(u32::try_from(person * 10).expect("ssrc")),
+            sessao,
         }
     }
 
@@ -1107,10 +1474,345 @@ mod tests {
         occupancy.seat(VoiceRoomId(7), occupant(1, "marcela"));
 
         assert_eq!(
-            occupancy.vacate_everywhere(PersonId(1), Ssrc(10)),
+            occupancy.vacate_everywhere(PersonId(1)),
             vec![VoiceRoomId(7)]
         );
         assert!(occupancy.everywhere().is_empty());
+    }
+
+    #[test]
+    fn a_sessao_velha_nao_desocupa_o_assento_que_a_nova_tomou() {
+        // **O defeito de campo, em três linhas.** Numa queda silenciosa a conexão
+        // nova da mesma pessoa sobe perto dos 15 s e a velha só é desmontada aos
+        // 20 s, quando o tempo ocioso do transporte estoura. Chaveado só por
+        // pessoa, o desmonte da velha apagava o assento da nova — e quem foi
+        // apagado não recebe `PersonLeft`, então continua se vendo na sala
+        // enquanto desapareceu da de todo mundo.
+        let mut occupancy = Occupancy::default();
+        occupancy.seat(VoiceRoomId(1), sentado(1, "marcela", SessionId(7)));
+        // A reconexão: a mesma pessoa, outra conexão. Sentar substitui, e não
+        // acumula — um roster com o mesmo nome duas vezes é um roster em que
+        // ninguém confia.
+        occupancy.seat(VoiceRoomId(1), sentado(1, "marcela", SessionId(8)));
+
+        assert!(
+            occupancy
+                .vacate_everywhere_da_sessao(PersonId(1), SessionId(7))
+                .is_empty(),
+            "a conexão velha desocupou o assento da nova, e ainda anunciaria a saída"
+        );
+        assert_eq!(occupancy.in_voice_room(VoiceRoomId(1)).len(), 1);
+
+        // E a conexão vigente continua podendo sair.
+        assert_eq!(
+            occupancy.vacate_everywhere_da_sessao(PersonId(1), SessionId(8)),
+            vec![VoiceRoomId(1)]
+        );
+    }
+
+    #[test]
+    fn a_sessao_velha_nao_tira_da_sala_o_assento_que_a_nova_tomou() {
+        // O mesmo, pelo caminho de uma sala só: é o que `SairDaVoiceRoom` e a
+        // sala apagada usam, e eram duas cópias parciais desta contabilidade.
+        let mut occupancy = Occupancy::default();
+        occupancy.seat(VoiceRoomId(3), sentado(1, "marcela", SessionId(7)));
+        occupancy.seat(VoiceRoomId(3), sentado(1, "marcela", SessionId(8)));
+
+        assert!(
+            !occupancy.vacate_da_sessao(VoiceRoomId(3), PersonId(1), SessionId(7)),
+            "a saída da conexão velha valeu, e o `PersonLeft` dela apagaria da tela \
+             de todo mundo alguém que está na sala"
+        );
+        assert!(occupancy.vacate_da_sessao(VoiceRoomId(3), PersonId(1), SessionId(8)));
+    }
+
+    #[test]
+    fn a_sessao_velha_nao_tira_dos_presentes_quem_esta_conectado() {
+        // Sem isto, o `PersonGone` da conexão velha apagava a pessoa da lista de
+        // todo mundo — e `translate` não manda `PersonGone` para a própria
+        // pessoa, de modo que ela nunca saberia que foi apagada.
+        let mut presentes = Presentes::default();
+        assert!(presentes.chegou(sentado(1, "marcela", SessionId(7))));
+        // A reconexão não é uma chegada nova: é a mesma pessoa, e um segundo
+        // anúncio faria a lista de todo mundo piscar sem nada ter mudado.
+        assert!(!presentes.chegou(sentado(1, "marcela", SessionId(8))));
+
+        assert!(
+            !presentes.saiu(PersonId(1), SessionId(7)),
+            "a conexão velha tirou dos presentes quem está conectado agora"
+        );
+        assert_eq!(presentes.todos().len(), 1);
+        assert!(presentes.saiu(PersonId(1), SessionId(8)));
+    }
+
+    #[test]
+    fn quem_reconecta_passa_a_ser_a_vigente_e_a_anterior_perde_a_autoridade() {
+        // A invariante de que todo o resto desta família depende, e que uma
+        // revisão independente apontou não estar presa por teste nenhum:
+        // `chegou` não compara sessão, então é a **chegada** que decide quem é a
+        // conexão vigente de uma pessoa. Se ela deixasse de sobrescrever, os
+        // guardas continuariam «funcionando» e apontariam para a conexão errada:
+        // a velha seguiria vigente, poderia desocupar e desistir de reservar
+        // assento pela nova, e nenhum dos testes acima reclamaria — eles só
+        // olham `saiu`.
+        let mut presentes = Presentes::default();
+        assert!(presentes.chegou(sentado(1, "marcela", SessionId(7))));
+        assert!(presentes.e_a_vigente(PersonId(1), SessionId(7)));
+
+        assert!(!presentes.chegou(sentado(1, "marcela", SessionId(8))));
+        assert!(
+            presentes.e_a_vigente(PersonId(1), SessionId(8)),
+            "a conexão que acabou de reconectar não é a vigente desta pessoa, e \
+             tudo o que ela fizer daqui para a frente será recusado como se \
+             fosse de uma sessão morta"
+        );
+        assert!(
+            !presentes.e_a_vigente(PersonId(1), SessionId(7)),
+            "a conexão velha continua vigente depois de a nova chegar, e é ela \
+             quem vai poder desocupar e anunciar a saída de quem está aqui"
+        );
+    }
+
+    #[test]
+    fn sem_registro_de_presenca_ninguem_e_a_vigente() {
+        // O ramo que a primeira versão deixava permissivo. Ele não protege quem
+        // morreu antes de se anunciar presente — essa conexão nunca entrou em
+        // sala e nunca chega a perguntar isto —; ele só disparava quando o
+        // registro já tinha sido tirado por uma sessão posterior.
+        let presentes = Presentes::default();
+        assert!(!presentes.e_a_vigente(PersonId(1), SessionId(7)));
+    }
+
+    #[test]
+    fn a_sessao_velha_nao_reserva_assento_depois_de_a_nova_ter_saido_de_proposito() {
+        // O encadeamento que sobrou da primeira versão deste guarda, e que uma
+        // revisão encontrou: a sessão 7 cai calada; a 8 reconecta e toma o
+        // registro de presença; a 8 sai da sala de propósito e se desconecta,
+        // levando o registro embora; só então a 7 morre, até vinte segundos
+        // depois. Sem registro a que se comparar, a 7 gravava uma reserva de
+        // cinco minutos com a sala e o `ssrc` velhos, e a conexão seguinte
+        // re-sentava na sala quem tinha saído por vontade própria.
+        let mut presentes = Presentes::default();
+        assert!(presentes.chegou(sentado(1, "marcela", SessionId(7))));
+        assert!(!presentes.chegou(sentado(1, "marcela", SessionId(8))));
+        assert!(presentes.saiu(PersonId(1), SessionId(8)));
+
+        let mut slots = Slots::default();
+        assert!(
+            !reservar_o_assento_da_carencia(
+                &presentes,
+                &mut slots,
+                PersonId(1),
+                SessionId(7),
+                VoiceRoomId(3),
+                Ssrc(70),
+                Instant::now(),
+            ),
+            "a conexão velha guardou assento para quem tinha acabado de sair de propósito"
+        );
+        assert_eq!(slots.held(), 0);
+        assert_eq!(slots.reclaim(PersonId(1), Instant::now()), None);
+    }
+
+    #[test]
+    fn a_sessao_velha_nao_reserva_o_assento_de_quem_ja_voltou() {
+        // A reserva é da mesma família do resto: ela vale cinco minutos e
+        // re-senta a pessoa na conexão seguinte. Gravada pela conexão velha que
+        // morre depois da volta, ela põe de novo na sala quem tinha acabado de
+        // sair de propósito — e com o `ssrc` errado.
+        let mut presentes = Presentes::default();
+        assert!(presentes.chegou(sentado(1, "marcela", SessionId(8))));
+        let mut slots = Slots::default();
+
+        assert!(
+            !reservar_o_assento_da_carencia(
+                &presentes,
+                &mut slots,
+                PersonId(1),
+                SessionId(7),
+                VoiceRoomId(3),
+                Ssrc(70),
+                Instant::now(),
+            ),
+            "a conexão velha guardou um assento para uma pessoa que já voltou por outra"
+        );
+        assert_eq!(slots.held(), 0);
+
+        // E o outro lado, que é o que impede o guarda de cobrar caro de quem
+        // caiu de verdade: a conexão vigente reserva.
+        assert!(reservar_o_assento_da_carencia(
+            &presentes,
+            &mut slots,
+            PersonId(1),
+            SessionId(8),
+            VoiceRoomId(3),
+            Ssrc(10),
+            Instant::now(),
+        ));
+        assert_eq!(
+            slots.reclaim(PersonId(1), Instant::now()),
+            Some((VoiceRoomId(3), Ssrc(10)))
+        );
+    }
+
+    #[test]
+    fn a_reserva_escrita_depois_da_volta_e_descartada_por_quem_voltou() {
+        // A janela que o guarda da reserva não alcança: a conexão nova resgata o
+        // assento no `handshake` e só depois entra em `Presentes`. Uma conexão
+        // velha que morra no meio disso ainda é «a vigente» e grava a reserva —
+        // com a sala e o `ssrc` velhos, valendo cinco minutos. Quem volta
+        // descarta, porque o resgate dela já aconteceu e nada legítimo pode ter
+        // sido escrito depois.
+        const VELHA: SessionId = SessionId(1);
+        const NOVA: SessionId = SessionId(2);
+
+        let mut slots = Slots::default();
+        slots.reserve(PersonId(1), VELHA, VoiceRoomId(3), Ssrc(70), Instant::now());
+
+        assert!(
+            descartar_a_reserva_de_quem_ja_voltou(&mut slots, PersonId(1), NOVA),
+            "a reserva obsoleta da conexão velha sobreviveu à volta da pessoa, e \
+             cinco minutos depois ela é re-sentada numa sala de onde saiu"
+        );
+        assert_eq!(slots.held(), 0);
+        assert_eq!(slots.reclaim(PersonId(1), Instant::now()), None);
+
+        // E o outro lado, para que o teste não passe por descartar sempre: sem
+        // reserva nenhuma não há o que descartar, e ninguém mente dizendo que
+        // descartou. A reserva de outra pessoa fica onde está.
+        assert!(!descartar_a_reserva_de_quem_ja_voltou(
+            &mut slots,
+            PersonId(1),
+            NOVA
+        ));
+        slots.reserve(PersonId(2), VELHA, VoiceRoomId(3), Ssrc(20), Instant::now());
+        assert!(!descartar_a_reserva_de_quem_ja_voltou(
+            &mut slots,
+            PersonId(1),
+            NOVA
+        ));
+        assert_eq!(slots.held(), 1);
+    }
+
+    #[test]
+    fn a_reserva_da_propria_sessao_vigente_nao_e_descartada() {
+        // O descarte era o único guarda desta família que se apoiava só na ordem
+        // dos acontecimentos: «o resgate já foi, logo o que existe é de outra
+        // conexão». Chaveado por sessão, ele responde à pergunta certa — quem
+        // escreveu — e uma reserva escrita pela conexão vigente sobrevive, mesmo
+        // que uma mudança futura passe a gravá-la antes deste ponto.
+        const VIGENTE: SessionId = SessionId(9);
+
+        let mut slots = Slots::default();
+        slots.reserve(
+            PersonId(1),
+            VIGENTE,
+            VoiceRoomId(3),
+            Ssrc(70),
+            Instant::now(),
+        );
+
+        assert!(
+            !descartar_a_reserva_de_quem_ja_voltou(&mut slots, PersonId(1), VIGENTE),
+            "o descarte comeu a reserva da própria conexão vigente, que é o \
+             assento que ela espera resgatar quando cair"
+        );
+        assert_eq!(
+            slots.reclaim(PersonId(1), Instant::now()),
+            Some((VoiceRoomId(3), Ssrc(70)))
+        );
+    }
+
+    #[test]
+    fn a_tela_pedida_pela_conexao_velha_nao_toma_a_vaga_da_nova() {
+        // A última escrita por pessoa desta família. A vaga de tela é
+        // sobrescrita de propósito — é assim que quem reconecta toma a vaga da
+        // conexão anterior —, e sem conferir a sessão a mesma porta serve ao
+        // contrário: um `StartScreenShare` atrasado da conexão velha toma a vaga
+        // da nova e ainda manda `ScreenShareStopped` da tela que a nova acabou
+        // de abrir, apagando da tela de quem assiste a transmissão viva.
+        let mut presentes = Presentes::default();
+        assert!(presentes.chegou(sentado(10, "marcela", SessionId(7))));
+        assert!(!presentes.chegou(sentado(10, "marcela", SessionId(8))));
+
+        let mut telas = Telas::default();
+        assert_eq!(
+            comecar_a_tela_da_conexao_vigente(
+                &presentes,
+                &mut telas,
+                VoiceRoomId(1),
+                PersonId(10),
+                SessionId(8),
+                ScreenId(2),
+            ),
+            AberturaDeTela::Aberta { substituida: None }
+        );
+
+        assert_eq!(
+            comecar_a_tela_da_conexao_vigente(
+                &presentes,
+                &mut telas,
+                VoiceRoomId(1),
+                PersonId(10),
+                SessionId(7),
+                ScreenId(1),
+            ),
+            AberturaDeTela::DeConexaoVelha,
+            "a conexão velha tomou a vaga de tela da nova, e quem chama vai \
+             anunciar o fim da transmissão que está no ar"
+        );
+        // E nada foi escrito: a vaga continua sendo da conexão nova, com a tela
+        // dela.
+        assert_eq!(
+            telas.de(PersonId(10), SessionId(8)),
+            Some((VoiceRoomId(1), ScreenId(2)))
+        );
+        assert_eq!(telas.em(VoiceRoomId(1)), vec![(PersonId(10), ScreenId(2))]);
+        assert_eq!(telas.de(PersonId(10), SessionId(7)), None);
+
+        // E o outro lado, para que o teste não passe por recusar sempre: a
+        // conexão vigente troca a própria tela e recebe de volta a que saiu.
+        assert_eq!(
+            comecar_a_tela_da_conexao_vigente(
+                &presentes,
+                &mut telas,
+                VoiceRoomId(1),
+                PersonId(10),
+                SessionId(8),
+                ScreenId(3),
+            ),
+            AberturaDeTela::Aberta {
+                substituida: Some(ScreenId(2))
+            }
+        );
+    }
+
+    #[test]
+    fn quem_troca_a_propria_tela_recebe_de_volta_a_que_saiu() {
+        // A vaga de tela é o único estado do desmonte cuja sessão é sobrescrita
+        // em vez de conferida — e sobrescrever calado deixa o `ScreenId` antigo
+        // desenhado para sempre em quem assiste, porque o cliente funde
+        // aditivamente. Devolvendo a tela trocada, quem chama anuncia o fim dela.
+        let mut telas = Telas::default();
+
+        assert_eq!(
+            telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(7), ScreenId(1)),
+            None,
+            "a primeira transmissão não substituiu transmissão nenhuma e disse que sim"
+        );
+        assert_eq!(
+            telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(8), ScreenId(2)),
+            Some(ScreenId(1)),
+            "a conexão nova tomou a vaga da velha em silêncio: o cabeçalho da \
+             transmissão antiga fica na tela de quem assiste prometendo um fluxo \
+             que já não tem de onde vir"
+        );
+        // E a vaga é uma só, da sessão nova.
+        assert_eq!(telas.em(VoiceRoomId(1)).len(), 1);
+        assert_eq!(
+            telas.de(PersonId(10), SessionId(8)),
+            Some((VoiceRoomId(1), ScreenId(2)))
+        );
     }
 
     #[test]
@@ -1119,13 +1821,18 @@ mod tests {
         // twice: `serve` calls this after every session, including the ones that
         // already left through `LeaveVoiceRoom` and said so.
         let mut occupancy = Occupancy::default();
-        occupancy.seat(VoiceRoomId(7), occupant(1, "marcela"));
-        occupancy.vacate(VoiceRoomId(7), PersonId(1));
+        occupancy.seat(VoiceRoomId(7), sentado(1, "marcela", SessionId(7)));
+        assert!(
+            occupancy.vacate_da_sessao(VoiceRoomId(7), PersonId(1), SessionId(7)),
+            "havia o que desocupar e a saída disse que não"
+        );
+        assert!(
+            !occupancy.vacate_da_sessao(VoiceRoomId(7), PersonId(1), SessionId(7)),
+            "a segunda saída inventou uma despedida que já tinha sido dita"
+        );
 
         assert!(
-            occupancy
-                .vacate_everywhere(PersonId(1), Ssrc(10))
-                .is_empty(),
+            occupancy.vacate_everywhere(PersonId(1)).is_empty(),
             "a person who had already left was announced as leaving again"
         );
     }
@@ -1139,7 +1846,7 @@ mod tests {
         occupancy.seat(VoiceRoomId(1), occupant(1, "marcela"));
 
         assert_eq!(
-            occupancy.vacate_everywhere(PersonId(1), Ssrc(10)),
+            occupancy.vacate_everywhere(PersonId(1)),
             vec![VoiceRoomId(1)]
         );
         occupancy.seat(VoiceRoomId(2), occupant(1, "marcela"));
@@ -1163,9 +1870,10 @@ mod tests {
         // que é uma frase que explica. Aqui só se guarda quem está transmitindo.
         let mut telas = Telas::default();
         for pessoa in 10_u32..20 {
-            telas.comecar(
+            let _ = telas.comecar(
                 VoiceRoomId(1),
                 PersonId(u64::from(pessoa)),
+                SessionId(u64::from(pessoa)),
                 ScreenId(pessoa),
             );
         }
@@ -1178,7 +1886,7 @@ mod tests {
         // O que ele ainda recusa é a mesma pessoa ocupando duas vagas: uma
         // pessoa manda **uma** tela, e mandar duas dobraria a subida dela sem
         // que ninguém tivesse pedido a segunda.
-        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(99));
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(10), ScreenId(99));
         assert_eq!(
             telas.em(VoiceRoomId(1)).len(),
             10,
@@ -1193,8 +1901,8 @@ mod tests {
         // perdeu uma vaga para si mesma — e ocupar uma vaga nova gastaria a
         // segunda com a mesma pessoa, tirando-a de quem ainda não transmitiu.
         let mut telas = Telas::default();
-        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
-        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(2));
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(10), ScreenId(1));
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(10), ScreenId(2));
 
         assert_eq!(
             telas.em(VoiceRoomId(1)),
@@ -1210,13 +1918,19 @@ mod tests {
         // nem `ScreenId` de propósito, então não há nada além do registro para
         // separar as duas.
         let mut telas = Telas::default();
-        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
-        telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(2));
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(10), ScreenId(1));
+        let _ = telas.comecar(VoiceRoomId(2), PersonId(20), SessionId(20), ScreenId(2));
 
-        assert_eq!(telas.parar(VoiceRoomId(1), PersonId(30)), None);
+        assert_eq!(
+            telas.parar(VoiceRoomId(1), PersonId(30), SessionId(30)),
+            None
+        );
         assert_eq!(telas.em(VoiceRoomId(1)).len(), 1, "ninguém saiu");
 
-        assert_eq!(telas.parar(VoiceRoomId(1), PersonId(10)), Some(ScreenId(1)));
+        assert_eq!(
+            telas.parar(VoiceRoomId(1), PersonId(10), SessionId(10)),
+            Some(ScreenId(1))
+        );
         assert!(telas.em(VoiceRoomId(1)).is_empty());
         assert_eq!(
             telas.em(VoiceRoomId(2)),
@@ -1227,16 +1941,16 @@ mod tests {
 
     #[test]
     fn a_tela_de_quem_sai_para_junto_com_ele_e_so_a_dele() {
-        // O mesmo defeito que `Occupancy::vacate_everywhere` conserta para a
+        // O mesmo defeito que `Occupancy::vacate_everywhere_da_sessao` conserta para a
         // pessoa fantasma, com a diferença de que aqui a sala fica prometendo
         // imagem em movimento que não tem mais de onde vir: o fluxo morreu com a
         // conexão.
         let mut telas = Telas::default();
-        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
-        telas.comecar(VoiceRoomId(2), PersonId(10), ScreenId(3));
-        telas.comecar(VoiceRoomId(3), PersonId(20), ScreenId(2));
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(10), ScreenId(1));
+        let _ = telas.comecar(VoiceRoomId(2), PersonId(10), SessionId(10), ScreenId(3));
+        let _ = telas.comecar(VoiceRoomId(3), PersonId(20), SessionId(20), ScreenId(2));
 
-        let encerradas = telas.encerrar_de(PersonId(10));
+        let encerradas = telas.encerrar_de(PersonId(10), None);
         assert_eq!(encerradas.len(), 2, "as duas salas em que ela transmitia");
         assert!(encerradas.contains(&(VoiceRoomId(1), ScreenId(1))));
         assert!(encerradas.contains(&(VoiceRoomId(2), ScreenId(3))));
@@ -1248,7 +1962,33 @@ mod tests {
             vec![(PersonId(20), ScreenId(2))],
             "a de quem ficou não pode cair junto"
         );
-        assert!(telas.encerrar_de(PersonId(10)).is_empty());
+        assert!(telas.encerrar_de(PersonId(10), None).is_empty());
+    }
+
+    #[test]
+    fn a_sessao_velha_nao_apaga_a_tela_que_a_nova_abriu() {
+        // A quarta das quatro operações do desmonte, e a que explica a metade
+        // «não vejo esse amigo» do relato. Quem reconecta e volta a compartilhar
+        // ocupa a mesma vaga com outra sessão; a conexão velha, ao morrer,
+        // encerrava a transmissão nova e a sala ficava com a tela apagada sem
+        // ninguém saber por quê.
+        let mut telas = Telas::default();
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(7), ScreenId(1));
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(8), ScreenId(2));
+
+        assert!(
+            telas
+                .encerrar_de(PersonId(10), Some(SessionId(7)))
+                .is_empty(),
+            "a conexão velha encerrou a transmissão que a nova abriu"
+        );
+        assert_eq!(telas.em(VoiceRoomId(1)), vec![(PersonId(10), ScreenId(2))]);
+
+        // E a sessão vigente continua podendo encerrar a dela.
+        assert_eq!(
+            telas.encerrar_de(PersonId(10), Some(SessionId(8))),
+            vec![(VoiceRoomId(1), ScreenId(2))]
+        );
     }
 
     #[test]
@@ -1258,7 +1998,7 @@ mod tests {
         // de quem assiste. Hoje a sala guarda uma; a forma devolve lista para
         // que o dia em que guardar duas não passe por aqui sem ninguém notar.
         let mut telas = Telas::default();
-        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(10), ScreenId(1));
 
         assert_eq!(telas.encerrar_voice_room(VoiceRoomId(1)), vec![ScreenId(1)]);
         assert!(telas.encerrar_voice_room(VoiceRoomId(1)).is_empty());
@@ -1271,12 +2011,69 @@ mod tests {
         // da sessão: é a única fonte que sabe sala e tela ao mesmo tempo. Com
         // duas transmissões na sala, achar «a da sala» deixou de bastar.
         let mut telas = Telas::default();
-        telas.comecar(VoiceRoomId(1), PersonId(10), ScreenId(1));
-        telas.comecar(VoiceRoomId(2), PersonId(20), ScreenId(2));
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(10), ScreenId(1));
+        let _ = telas.comecar(VoiceRoomId(2), PersonId(20), SessionId(20), ScreenId(2));
 
-        assert_eq!(telas.de(PersonId(10)), Some((VoiceRoomId(1), ScreenId(1))));
-        assert_eq!(telas.de(PersonId(20)), Some((VoiceRoomId(2), ScreenId(2))));
-        assert_eq!(telas.de(PersonId(30)), None);
+        assert_eq!(
+            telas.de(PersonId(10), SessionId(10)),
+            Some((VoiceRoomId(1), ScreenId(1)))
+        );
+        assert_eq!(
+            telas.de(PersonId(20), SessionId(20)),
+            Some((VoiceRoomId(2), ScreenId(2)))
+        );
+        assert_eq!(telas.de(PersonId(30), SessionId(30)), None);
         assert_eq!(telas.todas().len(), 2);
+    }
+
+    #[test]
+    fn a_sessao_velha_nao_para_nem_assina_a_tela_que_a_nova_abriu() {
+        // As duas perguntas que sobraram chaveadas só por pessoa, e a mesma
+        // queda silenciosa das outras: a conexão velha segue viva até o tempo
+        // ocioso do transporte estourar, e nesse meio-tempo a nova já registrou
+        // a transmissão.
+        //
+        // `parar` sem sessão: um `StopScreenShare` atrasado da conexão velha
+        // derrubava a tela que a nova acabou de abrir — e quem transmite não
+        // recebe aviso nenhum, então fica mandando quadros para uma sala que
+        // já não os encaminha.
+        //
+        // `de` sem sessão: um fluxo aberto pela conexão velha era aceito como se
+        // fosse o da nova, e a sala passava a receber duas fontes escrevendo o
+        // mesmo `ScreenId`.
+        let mut telas = Telas::default();
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(7), ScreenId(1));
+        // A reconexão: mesma pessoa, outra conexão, tela nova. `comecar` troca a
+        // tela da pessoa em vez de ocupar outra vaga.
+        let _ = telas.comecar(VoiceRoomId(1), PersonId(10), SessionId(8), ScreenId(2));
+
+        assert_eq!(
+            telas.parar(VoiceRoomId(1), PersonId(10), SessionId(7)),
+            None,
+            "a conexão velha parou a transmissão da nova"
+        );
+        assert_eq!(
+            telas.em(VoiceRoomId(1)),
+            vec![(PersonId(10), ScreenId(2))],
+            "a transmissão vigente saiu do registro"
+        );
+
+        assert_eq!(
+            telas.de(PersonId(10), SessionId(7)),
+            None,
+            "um fluxo da conexão velha seria aceito como o da nova"
+        );
+        assert_eq!(
+            telas.de(PersonId(10), SessionId(8)),
+            Some((VoiceRoomId(1), ScreenId(2))),
+            "a conexão vigente deixou de ser encontrada"
+        );
+
+        // E a conexão vigente continua podendo parar a própria tela.
+        assert_eq!(
+            telas.parar(VoiceRoomId(1), PersonId(10), SessionId(8)),
+            Some(ScreenId(2))
+        );
+        assert!(telas.em(VoiceRoomId(1)).is_empty());
     }
 }

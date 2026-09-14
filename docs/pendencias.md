@@ -361,57 +361,1097 @@ Não está registrado no sistema operacional. Quando for, o cliente **precisa
 perguntar antes de conectar**: um link que inicia conexão sozinho é superfície
 nova. Ver ADR 0006.
 
-## 11 · Reconectar rápido pode esvaziar o roster da sala de voz
+## 11 · Fechada em 2026-09-13 · A sessão velha apagava a nova
 
-**Sintoma esperado.** Alguém dá `:ejetar` e entra de novo em seguida. A sessão
-nova sobe, fala e ouve normalmente, e a sala de voz aparece **vazio** — sem nem a
-própria pessoa — até o movimento de alguém redesenhar a lista.
+**O que era.** Todo o desmonte de uma sessão era chaveado por `PersonId` e nunca
+comparava a sessão que está morrendo com a que está viva. Quatro operações
+soltas no fim da conexão — sair da tarefa da sala, encerrar a tela, desocupar o
+assento, sair dos presentes — mais uma quinta cópia parcial em `LeaveVoiceRoom` e
+uma sexta em `VoiceRoomDeleted`. Com duas conexões da mesma pessoa vivas ao mesmo
+tempo, a que morria levava a que tinha acabado de chegar: fora do roster, fora
+dos presentes, fora da tarefa de mídia e fora da tela, de uma vez.
 
-**O que se sabe.** É uma corrida entre a sessão que morre e a que nasce, e as
-duas mexem na lotação pela mesma chave. `Occupancy::seat` começa apagando o
-pessoa de toda parte antes de sentá-lo (`server.rs:171-174`), e o desmonte da
-sessão antiga chama `occupancy.vacate(voice_room, person)` (`session.rs:845`). Como
-`vacate` filtra só por `PersonId` (`server.rs:177-181`), ele não distingue a
-cadeira da sessão velha da cadeira da sessão nova: se o desmonte da primeira
-chegar **depois** do `seat` da segunda, apaga a segunda. A ordem depende de
-quando a conexão QUIC antiga é dada por morta, o que ninguém controla.
+**Relato de campo, e não defeito de leitura.** «Como anfitrião, eu não vejo um
+amigo que se vê dentro da sala, e não ouço nem vejo esse amigo.» A auditoria
+1881a3cb mapeou o caminho inteiro por arquivo e linha.
 
-Só atinge a mesma identidade voltando — dois pessoas diferentes não colidem,
-porque as chaves diferem. E o cliente não tem como serializar isso do lado dele:
-`Drop for Enlace` é um `abort()`, que é assíncrono.
+**O que foi consertado.** Existe uma saída simétrica de `assentar`:
+`desassentar`, em `session.rs`, e as seis cópias passaram a chamá-la. Os quatro
+estados que uma saída mexe — a lotação, a lista de presentes, o membro da tarefa
+da sala e a transmissão de tela — passaram a **carregar o identificador da
+sessão**, e cada um confere no próprio registro de qual conexão ele é. Uma sessão
+só apaga o que ela mesma escreveu, e `PersonLeft` e `PersonGone` saem apenas
+quando houve de verdade o que desocupar. A reserva de assento da carência ganhou
+a pergunta correlata — «esta conexão ainda é a desta pessoa?», respondida só por
+registro de presença que exista e bata —, de modo que uma sessão que morre depois
+de a pessoa já ter voltado não guarda mais uma reserva de cinco minutos que
+re-sentaria alguém que saiu de propósito.
 
-**Encontrado lendo, não observado.** Saiu da revisão do
-`crates/seele-conformance/tests/ejetar.rs`, ao perguntar por que os dois lados
-do teste usavam a mesma semente. **Não foi reproduzido em uso**, e fica
-registrado como defeito de leitura, e não como relato de campo.
+**Selo no registro, e não uma pergunta central.** A primeira versão deste
+conserto fazia uma pergunta só, no começo de `desassentar`, e voltava sem fazer
+nada quando a resposta era «esta já não é a conexão vigente». Isso **custava o
+contrário** do que queria comprar, e o teste de expulsão mostrou: quem é expulso
+reconecta em milissegundos, a sessão expulsa morre depois, e a pergunta central a
+impedia de limpar o que era dela — quem foi expulso ficava desenhado na sala para
+quem ficou. Conferir no registro não depende de ordem nenhuma e não tem como
+virar vazamento.
 
-**A janela tem dois tamanhos, e o segundo não é estreito.** Com a rede
-entregando, o `CONNECTION_CLOSE` da conexão antiga chega e o servidor desmonta
-aquela sessão em milissegundos — aí a corrida exige que o desmonte caia depois
-de um handshake inteiro, e é de fato improvável. Mas o `CONNECTION_CLOSE` é um
-pacote só e não é retransmitido: se ele se perder, o servidor não fica sabendo de
-nada e só derruba a sessão pelo tempo ocioso, que é o
-`seele_proto::transport::IDLE_TIMEOUT` de **20 s**. Contra um handshake com
-orçamento de 10 s, a janela deixa de ser uma corrida e passa a ser a regra —
-qualquer volta dentro desses 20 s cai nela. Perder um datagrama numa rede real
-não é exótico, e é justamente ao ejetar por causa de uma conexão ruim que se
-volta depressa.
+**Onde o registro anterior estava errado, e importa.**
 
-**O que ficou tentado.** Nada, de propósito — mas o `ejetar.rs` foi escrito para
-não depender disto: o teste que mede lotação usa duas identidades distintas, e o
-que faz a mesma pessoa voltar não olha a lotação. Está comentado nos dois
-lugares, senão alguém junta os dois "simplificando" e ganha uma reprovação
-intermitente no lugar do defeito.
+1. **«Some assim que qualquer pessoa entra ou sai, porque aí o roster é
+   reconstruído.»** Não some. `translate`, em `session.rs`, difunde apenas o
+   evento de quem se mexeu, e o cliente funde `seats` de maneira **aditiva**
+   (`state.rs`). Não existe evento que reconstrua roster nenhum. A divergência
+   ficava de pé pelo resto da sessão de quem ficou — e é por isso que o relato de
+   campo diz «com frequência» em vez de «pisca e passa».
+2. **O escopo não era `:ejetar` e reentrada.** A aritmética das constantes diz o
+   resto: o cliente entra na bateria interna com três `Ping` perdidos a 5 s cada
+   — perto de 15 s — e o servidor só desiste da conexão muda aos 20 s de
+   `IDLE_TIMEOUT`. Numa queda silenciosa a sessão nova sobe **antes** de a velha
+   morrer, com cerca de cinco segundos de folga. Não é uma corrida com
+   probabilidade: é a ordem esperada de qualquer queda de rede.
+3. **O guarda projetado só sobre `vacate` era insuficiente.** Sem cobrir a saída
+   da tarefa da sala e o encerramento da tela, a metade do relato que diz «não
+   ouço nem vejo esse amigo» ficava sem explicação e sem conserto.
 
-**Por que não foi resolvido.** O conserto é no servidor, não no cliente: `vacate`
-precisa saber de qual sessão veio o pedido — carregar o `SessionId` no
-`Occupant` e só desocupar se for o mesmo —, e isso mexe em `seat`, `vacate`,
-`vacate_everywhere` e nos avisos de roster. É tarefa própria, com revisão
-própria, e não um remendo no fim de uma tarefa de teste.
+**Como está provado.** Um teste de conformidade novo
+(`crates/seele-conformance/tests/desassentar.rs`) derruba a conexão do visitante
+**sem** `CONNECTION_CLOSE` — o objeto é esquecido e o runtime dele é desligado,
+de modo que ninguém responde ao keepalive — reconecta na hora e, passado o tempo
+ocioso inteiro mais margem, afirma três coisas: o anfitrião continua com o
+visitante no roster, o visitante continua nos presentes do servidor, e um
+datagrama dele ainda é encaminhado. O teste reprovava antes do conserto e a
+reversão do guarda o faz reprovar de novo com a mesma mensagem. Quatro testes de
+unidade cobrem os guardas um a um, e também reprovam quando revertidos.
 
-**Quando dói.** `:ejetar` seguido de reconexão imediata no mesmo VoiceRoom, que é
-exatamente o que a tela de seleção convida a fazer. Some assim que qualquer
-pessoa entra ou sai, porque aí o roster é reconstruído.
+**E o teste afirma que o guarda disparou, não que nada aconteceu.** Achado de
+revisão, e o mais importante dos três: as três asserções acima passariam também
+num mundo em que a sessão velha simplesmente não tivesse sido desmontada dentro
+do prazo medido — passariam por ausência de evento, e não por defesa, que é o
+contrário do que o arquivo existe para provar. O conserto, funcionando, não
+deixa rastro nenhum: ele acerta calando-se. Então há agora um contador do
+processo inteiro, `Server::desassentamentos`
+(`crates/seele-server/src/server.rs`, no formato do `Atrasos` que já existia),
+que anda uma unidade toda vez que uma conexão chega ao fim e encontra a pessoa
+dela **já presente por outra conexão** — exatamente a queda silenciosa desta
+pendência. O teste afirma esse número antes de qualquer outra coisa, e a mesma
+linha sai por `tracing` para quem opera: zero é o normal numa rede que não cai, e
+um número que cresce durante uma chamada é a rede de alguém piscando.
+
+A prova de reversão foi refeita com a asserção nova em vigor, e ela separa as
+duas coisas como deveria: revertendo o guarda da tarefa da sala, a asserção do
+contador do processo **passa** — o desmonte da sessão velha de facto rodou — e o
+teste reprova adiante, em «a voz do visitante deixou de ser encaminhada». Antes,
+essa mesma reprovação não distinguia defesa de inércia.
+
+> **Este parágrafo é a rodada de então, e a ordem da reprovação já mudou.** Ele
+> ficou porque é o registro de por que o contador do processo existe, não porque
+> descreva o que se vê hoje. Depois dele entrou um segundo contador, o da própria
+> tarefa da sala, e uma asserção sobre ele **antes** das de estado: revertendo o
+> mesmo guarda hoje, o teste reprova primeiro ali — «a tarefa da sala não
+> registrou nenhuma saída de sessão velha barrada» —, e só com essa asserção
+> neutralizada é que ele chega à voz que deixou de ser encaminhada. A rodada
+> corrente está descrita adiante, na décima revisão.
+
+**O que a revisão cobrou, e foi fechado.** Três coisas, todas da família «existir
+não é funcionar». A primeira: a recusa de uma saída de sessão velha era só um
+contador que ninguém lê fora dos testes — agora ela também sai por `tracing`, e
+pode sair por evento sem virar enxurrada porque acontece no máximo uma vez por
+conexão desmontada, e não por quadro (é justamente por isso que o resto de
+`DropCounts` não pode fazer o mesmo). A segunda: o guarda da reserva de assento
+morava solto dentro de uma função que só roda com servidor, QUIC e relógio de
+verdade, e portanto nenhum teste o alcançava; virou
+`reservar_o_assento_da_carencia`, em `server.rs`, com teste próprio — e a
+reversão foi provada, reprovando com «a conexão velha guardou um assento para uma
+pessoa que já voltou por outra». A terceira: a saída por pessoa sem guarda de
+sessão numa sala só (`Occupancy::vacate`) tinha ficado pública e sem nenhum
+chamador de produção, ou seja, pronta para ser a sétima cópia do defeito; foi
+removida, e o teste que a usava passou a exercitar a versão com guarda e a
+afirmar que a segunda saída não inventa uma despedida.
+
+**O que a segunda revisão cobrou, e foi fechado.** Duas coisas, e as duas da
+mesma família. A primeira: sobrara um desmonte chaveado só por pessoa — o fim de
+uma transmissão decidido pelo servidor, em `receber_tela`. Aquela tarefa vive
+fora do laço da sessão e pode chegar ao fim depois de a conexão nova da mesma
+pessoa já ter reaberto a tela; era a sétima cópia da mesma contabilidade e a
+única sem o selo. Agora a sessão é levada até lá e o encerramento confere de qual
+conexão a transmissão é. Não ganhou teste próprio: o caminho só existe com fluxo
+QUIC de verdade, e o que se pode afirmar é a simetria com as outras seis — está
+dito aqui em vez de ficar implícito.
+
+A segunda: entrar de novo na tarefa da sala trocava o membro da pessoa mas não
+retirava o **número de voz** (`ssrc`) da conexão substituída. Antes do guarda,
+quem apagava esse resto era a saída da sessão velha; com o guarda, ela volta cedo
+e não apaga mais nada. O efeito não era só memória crescendo por reconexão: o
+número de uma conexão morta continuava valendo, e um datagrama com ele seria
+encaminhado em nome da pessoa. A entrada agora retira o número anterior, e o
+teste `o_ssrc_da_conexao_velha_para_de_valer_quando_a_pessoa_entra_de_novo`
+prova os dois lados — revertendo a linha, ele reprova com «o ssrc da conexão
+morta continuou entregando voz em nome de quem reconectou».
+
+**O que a terceira revisão cobrou, e foi fechado.** Três achados, nenhum
+bloqueante, e dois deles viraram código.
+
+O primeiro era um resíduo de verdade na reserva de assento. A pergunta que
+`reservar_o_assento_da_carencia` faz respondia **«sim» quando não havia registro
+de presença nenhum**, com o argumento de que uma sessão morta antes de se
+anunciar presente não deve deixar assento de fantasma para trás. O argumento
+estava certo e a conclusão, invertida: quem nunca se anunciou presente também
+nunca entrou em sala, e portanto nunca chega a essa linha — só se chega lá com
+uma sala na mão. O ramo permissivo, então, só disparava no caso oposto, o de o
+registro **já ter sido tirado por uma sessão posterior**: a sessão A cai calada,
+B reconecta, B sai da sala de propósito e se desconecta, e só então A morre, até
+vinte segundos depois. Sem registro a que se comparar, A gravava uma reserva de
+cinco minutos com a sala e o `ssrc` velhos, e o `handshake` seguinte re-sentava
+na sala quem tinha saído por vontade própria — o mesmo sintoma que esta pendência
+diz ter fechado. A ausência de registro passou a ser **recusa**, e o teste
+`a_sessao_velha_nao_reserva_assento_depois_de_a_nova_ter_saido_de_proposito`
+percorre o encadeamento inteiro. Reversão provada: voltando a ausência a ser
+permissão, ele reprova com «a conexão velha guardou assento para quem tinha
+acabado de sair de propósito», junto com
+`sem_registro_de_presenca_ninguem_e_a_vigente`.
+
+O segundo era um estreitamento que o próprio conserto tinha introduzido: em
+`LeaveVoiceRoom`, o desmonte passou a rodar só dentro de um `if let Some(id) =
+current_voice_room.take()`. Antes, a saída da tarefa da sala e o encerramento da
+tela eram incondicionais, e por isso **corrigiam** qualquer divergência entre o
+que a conexão lembra e o que o servidor tem. Não há hoje caminho conhecido em que
+a pessoa seja membro da sala com a conexão não lembrando de nenhuma — não é
+defeito reproduzível —, mas trocar uma saída corretiva por uma que só limpa
+quando já está tudo certo é exatamente o tipo de perda silenciosa que esta
+pendência existe para não repetir. `Saida::Sala` passou a carregar
+`Option<VoiceRoomId>`: a mídia e a tela morrem sempre, e só o assento e o
+`PersonLeft` dependem de haver sala conhecida. A expulsão, que tinha a mesma
+forma, mudou junto. (Este último pedaço — «só o assento depende de haver sala
+conhecida» — foi corrigido na quarta revisão, logo abaixo.)
+
+O terceiro é cobertura, e fica registrado sem conserto: o guarda de sessão do fim
+de tela decidido pelo servidor (`receber_tela`) continua sem teste próprio. Vale
+dizer por que, em vez de deixar implícito. Alcançá-lo de fora exigiria que a
+conexão velha ainda tivesse um fluxo de tela vivo **e** que a conexão nova da
+mesma pessoa tivesse reaberto a transmissão; mas a tarefa da sala recusa a
+segunda abertura da mesma pessoa enquanto a primeira está registrada, de modo que
+não há caminho de conformidade que monte esse estado. O que o guarda faz continua
+provado onde a decisão mora — `Telas::encerrar_de` com sessão, com teste e
+reversão —; o que não está provado é o **local da chamada** passar a sessão em
+vez de `None`. É defesa em profundidade, e é assim que deve ser lido. (Este
+parágrafo caducou na sétima revisão, abaixo: o local da chamada passou a ter
+guarda próprio, e o que ele diz de «sem teste próprio» já não vale.)
+
+Fora do escopo desta pendência, e **desfeito depois da última revisão**:
+`crates/seele-proto/tests/vetores_de_hash.rs`. Este ramo nasceu num commit em que
+o portão do repositório
+(`cargo clippy --workspace --all-targets --all-features -- -D warnings`) estava
+vermelho nesse arquivo — `expect_used` negado no workspace, `indexing_slicing`
+virando erro, e formatação fora do padrão —, e a correção foi feita aqui para o
+portão passar. Enquanto isso a linha principal consertou o mesmo arquivo por
+conta própria, em `74056b8`, e melhor: o `type_complexity` lá saiu por um
+`type Caso`, não por mais uma dispensa. Manter a nossa cópia só criaria conflito
+num arquivo que nada tem a ver com sessão, então o arquivo passou a ser **byte a
+byte o da linha principal**. Voltar à versão da base foi medido e descartado no
+caminho: sem nenhuma das duas correções, `cargo fmt --check` reprova em três
+pontos desse arquivo e o portão de clippy do workspace volta a ficar vermelho — o
+defeito é herdado, mas deixá-lo aberto seria trocar ruído no diff por portão
+quebrado. Adotar a versão de lá resolve os dois: o portão passa, o diff desta
+tarefa contra a linha principal não mostra mais nenhuma alteração em
+`seele-proto`, e a reaplicação não terá conflito nesse arquivo.
+
+**O que a quarta revisão cobrou.** Três achados, nenhum bloqueante; um virou
+código e dois já estavam registrados aqui.
+
+O que virou código foi o ramo vazio da saída sem sala lembrada
+(`Saida::Sala(None)`). Ele desmontava mídia e tela e **não varria lotação
+nenhuma** — a única das saídas a deixar assento para trás. A justificativa
+anterior, escrita dois parágrafos acima e agora corrigida, era que anunciar a
+saída de uma sala que não se sabe qual é seria adivinhar. Não era preciso
+adivinhar: `vacate_everywhere_da_sessao` devolve exatamente as salas em que
+**esta sessão** tinha assento, e se não tinha nenhum a varredura não faz nada e
+não anuncia nada. O ramo passou a fazer o mesmo que a saída de conexão faz, que
+é o análogo seguro. Não há defeito de campo atrás disto — hoje o caminho quase
+não se alcança, porque o assentamento sempre grava a sala na conexão —, e é
+exatamente por isso que ele estava errado sem ninguém notar: uma conexão que
+perdeu a conta de onde estava é a que mais provavelmente deixou assento atrás.
+
+Os outros dois já estão ditos acima e continuam valendo como estão: o guarda do
+fim de tela decidido pelo servidor (`receber_tela`) segue sem teste próprio, pelo
+motivo já explicado, e o teste de expulsão em `moderacao.rs` mede agora depois do
+fechamento do cliente — e por isso deixou de afirmar o efeito **imediato** da
+expulsão sobre a sala. A causa dessa perda é anterior a este trabalho
+(`EnterVoiceRoom` não confere `Permission::EnterVoiceRoom`, achado aberto da
+auditoria), e consertá-la aqui seria outro escopo; o que o teste afirma hoje é
+verdadeiro e está declarado no próprio arquivo.
+
+**Um vizinho que apareceu, e está medido.** O teste de expulsão
+(`moderacao.rs`) passava por causa deste mesmo defeito: ele afirmava que a sala
+esvazia para quem ficou, e o que a esvaziava era a sessão expulsa morrendo depois
+e anunciando uma saída que já não era dela. O cliente expulso reconecta na hora e
+**reentra na sala**, porque `EnterVoiceRoom` não confere
+`Permission::EnterVoiceRoom` (achado próprio da auditoria, aberto). O teste agora
+fecha o cliente antes de medir — e aí vem a segunda medida: fechar o cliente
+depois de uma expulsão **não se despede** do servidor, porque o `disconnect` da
+ponte chega a um motor que já parou. O servidor só dá aquela conexão por morta no
+tempo ocioso do QUIC: medido em 2026-09-13, entre 20 s e 22 s. É um defeito de
+cliente, fica registrado aqui e não foi consertado nesta pendência.
+
+**A quinta revisão não pediu código, pediu medida.** Dos três achados dela, dois
+já estão escritos acima e continuam valendo — a expulsão que não segura ninguém
+fora da sala (pendência #45) e o guarda do fim de tela sem teste próprio. O
+terceiro era sobre a **prova**, e não sobre o conserto: a saída de validação
+anexada junto com a entrega era de outra bateria, a de empacotamento, e portanto
+não continha um único teste desta pendência; e a prova de reversão estava
+registrada aqui sem ter sido refeita por quem revisou. As duas coisas foram
+medidas de novo em 2026-09-13, nesta ordem:
+
+- `seele-server` e `seele-proto`: 400 e 200 testes, mais os de integração — tudo
+  passou, sem falha nenhuma.
+- Conformidade inteira, serializada: 27 binários, 116 testes, zero falhas,
+  incluindo o teste desta pendência.
+- Portão do repositório (`clippy --workspace --all-targets --all-features
+  -D warnings`): passou sem um aviso.
+- Reversão refeita à mão: desarmando o guarda da saída da sala, o teste reprova
+  em 31 s com exatamente a mensagem registrada — «a voz do visitante deixou de
+  ser encaminhada: a sessão velha o tirou da tarefa da sala ao morrer». Com o
+  guarda de volta, ele passa em 28 s. A prova deixou de ser um parágrafo sobre
+  uma medida antiga.
+
+**A sexta revisão fechou as duas últimas cópias por pessoa, e trancou a porta.**
+Três achados, todos não bloqueantes, todos viraram código.
+
+O primeiro eram `Telas::parar` e `Telas::de`, que continuavam chaveados só por
+pessoa. Fora do caminho da queda silenciosa — a sessão velha está muda —, mas da
+mesma família, e cada uma com um efeito próprio: um `StopScreenShare` atrasado da
+conexão velha derrubava a transmissão que a nova acabou de abrir, e quem transmite
+não recebe aviso nenhum, então segue mandando quadros para uma sala que já não os
+encaminha; e `de`, que é a pergunta que a tarefa dos fluxos faz para decidir se
+aceita um fluxo de tela, casava um fluxo da conexão velha com a transmissão
+registrada pela nova — duas fontes escrevendo o mesmo `ScreenId`. As duas passaram
+a receber `SessionId` e a conferir. Reversão provada nas **duas metades
+separadamente**, porque a primeira asserção a reprovar esconde a segunda:
+desarmando só `parar`, o teste
+`a_sessao_velha_nao_para_nem_assina_a_tela_que_a_nova_abriu` reprova em «a conexão
+velha parou a transmissão da nova»; desarmando só `de`, reprova em «um fluxo da
+conexão velha seria aceito como o da nova». Com os dois no lugar, passa.
+
+O segundo era a porta que sobrou: `Occupancy::vacate_everywhere`, a versão sem
+guarda, continuava **pública**. Ela não era chamada por nenhum caminho de
+desmonte, e é justamente essa a forma do defeito que esta pendência mediu seis
+vezes — uma remoção por pessoa disponível é uma remoção por pessoa que o próximo
+caminho vai usar. Ela passou a ser privada. O único chamador legítimo é
+`Occupancy::seat`, porque sentar tem de derrubar o assento anterior de qual sessão
+for, e `seat` passou a **devolver** as salas que esvaziaram — que era a única razão
+pela qual `assentar` a chamava por fora. Quem desmonta uma conexão agora não tem
+escolha: as versões com sessão são as únicas alcançáveis de fora do módulo. A
+prova aqui é de compilação, e não de teste: o portão do workspace inteiro passa, e
+nenhum caminho fora de `server.rs` consegue mais nomeá-la.
+
+O terceiro era a perda de cobertura no teste de expulsão, já registrada acima.
+(Também caducou na sétima revisão: a cobertura voltou, por outro caminho.) Não
+mudou de estado na sexta — enquanto a pendência #45 estiver aberta a reentrada é legítima e
+não há o que afirmar sobre a sala com o cliente expulso ainda conectado —, mas
+deixou de estar registrada só aqui: o próprio `moderacao.rs` agora diz, no lugar
+onde a asserção mudou, **o que deixou de ser afirmado**, por que medir essa janela
+seria medir o relógio, e o que continua provado sobre a expulsão e onde. Um teste
+que perdeu alcance e não conta é a mesma falha de «o produto sabe e não conta»,
+uma altura acima.
+
+**A sétima revisão aprovou, e os dois achados de cobertura viraram código.**
+Ambos eram da mesma forma: uma propriedade que o repositório sabia ser verdadeira
+e não afirmava em lugar nenhum.
+
+O primeiro era o teste de expulsão. Duas revisões seguidas registraram que ele
+tinha deixado de provar o esvaziamento **imediato** da sala, e as duas concluíram
+que não havia o que fazer enquanto a pendência #45 estivesse aberta. A conclusão
+estava errada, e o erro era de enquadramento: o que atrapalhava a medida não era a
+permissão que falta, era a **bateria interna do cliente expulso**, que reconecta em
+milissegundos e reentra na sala no meio da janela. Parar o cliente **antes** da
+expulsão tira a bateria do caminho e a janela volta a ser mensurável, sem depender
+da #45 em nada. É o que o teste faz agora, numa segunda visita calada de
+propósito: ela senta, o cliente dela para, o anfitrião a expulsa, e o assento tem
+de sumir dentro de 10 s. O prazo é o discriminante — se o assento sumisse por
+tempo ocioso do transporte, sumiria em 20 s —, e o próprio teste confere essa
+relação numa asserção antes de medir, para que encurtar o tempo ocioso um dia não
+transforme a medida em outra coisa calada. Reversão provada: retirando a chamada
+de expulsão, reprova em 10,3 s com «a expulsão não tirou a pessoa da sala de voz
+dentro de 10s»; com ela, os 6 testes do arquivo passam em 21 s. A asserção lenta
+anterior continua onde estava, provando a outra metade — que quem foi expulso e
+fechou o cliente some de vez.
+
+O segundo era o guarda de sessão no fim de tela decidido pelo servidor, em
+`receber_tela`, registrado duas vezes como «defesa em profundidade sem teste
+próprio». Continua sendo verdade que nenhum teste de conformidade alcança aquele
+estado, pela razão já escrita acima. Mas o que faltava provar não era o
+comportamento: era **o local da chamada passar `Some(sessao)` e não `None`** — e
+isso se lê no próprio código. `todo_fim_de_tela_declara_de_qual_sessao_e`, ao lado
+do guarda de plano de mídia que já usava essa forma, percorre `session.rs` e exige
+que cada uma das três chamadas de `encerrar_telas_de` case com o que sua função
+declara: `desassentar` encerra só o desta conexão, `assentar` encerra a pessoa
+inteira porque andar de sala tem de levar toda transmissão anterior embora, e
+`receber_tela` encerra só o desta conexão. Uma chamada nova em função não listada
+reprova pedindo classificação, em vez de herdar um padrão calado. Reversão
+provada: trocando `Some(sessao)` por `None` em `receber_tela`, o teste reprova
+nomeando a linha, a função, o que esperava e o que encontrou.
+
+**A oitava revisão aprovou, e o único achado de código virou a asserção que
+faltava.** Os dois apontamentos eram não bloqueantes e de prova, não de
+comportamento.
+
+O primeiro era que a prova de reversão estava registrada mas não tinha sido
+reexecutada por quem revisou — a revisão não altera arquivos, e desarmar um guarda
+exige alterar um. Foi reexecutada aqui, e nas **duas metades**, porque cada uma
+reprova numa asserção diferente e a primeira esconde a segunda. Desarmando só o
+guarda da sala de voz, o teste reprova em «a voz do visitante deixou de ser
+encaminhada», 31,0 s — é a metade que o usuário relatou como «não ouço nem vejo
+esse amigo». Desarmando só o filtro por sessão de `vacate_everywhere_da_sessao`, ele
+reprova em «a sessão velha, ao morrer, apagou a nova do roster do anfitrião:
+["anfitriao"]», 28,0 s, e a mensagem carrega junto o que o servidor tinha
+(`["anfitriao/sessão 1"]`) e que o enlace do anfitrião piscou zero vezes — quer
+dizer, a reprovação é do servidor e não da máquina. Com os dois guardas no lugar,
+passa em 28,0 s.
+
+O segundo era um contador que ninguém lia de ponta a ponta.
+`DropCounts::saida_de_sessao_velha` anda dentro da tarefa da sala toda vez que uma
+conexão velha morre tentando tirar da sala a conexão nova da mesma pessoa — é o
+defeito se defendendo —, e até aqui só tinha cobertura de unidade. O teste de
+conformidade provava a metade de mídia **pelo efeito**: o datagrama chega. O efeito
+sozinho não distingue «a sala barrou a saída velha» de «a saída velha nunca chegou
+à sala», e essa é exatamente a diferença entre um guarda que funciona e um teste
+que passa por inércia — a armadilha do «existir não é funcionar» que este
+repositório já pagou caro. A sala é uma tarefa e seus contadores são um campo dela,
+então ler de fora pedia um caminho: `VoiceRoomCommand::Contadores` responde por
+`oneshot` pela mesma fila, o que também **ordena** a resposta depois de todo comando
+já enfileirado; `VoiceRooms::contadores` pergunta e devolve `None` para sala que
+não existe, de propósito sem fazê-la nascer, porque uma leitura que cria a coisa
+medida mede outra; e `Daemon::voice_rooms` abre a porta para o teste. Nada disso
+toca o protocolo: `VoiceRoomCommand` é interno ao servidor. A asserção nova entrou
+antes das três de estado, ao lado da que já exigia `conexoes_velhas() >= 1`.
+Reversão provada: desarmando o guarda da sala, o teste agora reprova **primeiro**
+nela — «a tarefa da sala não registrou nenhuma saída de sessão velha barrada»,
+despejando os contadores inteiros — em vez de reprovar só lá adiante no datagrama.
+
+**A nona revisão aprovou sem achado de código, e a falha de validação relatada
+junto não reproduz.** Os três apontamentos dela são não bloqueantes e já estão
+escritos acima, cada um no lugar onde a decisão foi tomada: a cobertura da janela
+curta da expulsão, que voltou pela segunda visita calada e cujo resto está atado à
+pendência #45, ainda aberta; o custo de relógio do teste novo, que é o tempo ocioso
+do transporte e não folga de implementação — medir a reconexão silenciosa custa
+esperar o servidor desistir da conexão velha; e a formatação mais o `allow` de
+clippy em `crates/seele-proto/tests/vetores_de_hash.rs`, fora do tema desta
+pendência mas necessários para o portão de qualidade passar, e sem efeito de
+comportamento.
+
+A falha de validação que veio anexada foi procurada antes de ser explicada, e não
+apareceu. Aqui, em 2026-09-13: `cargo test` do workspace inteiro verde (69
+binários, nenhuma falha, `desassentar` incluído e passando), `cargo fmt --check`
+limpo, `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+limpo, e a suíte de conformidade repetida mais duas vezes em seguida, verde nas
+duas. A saída relatada na validação estava truncada no começo e tudo o que ela
+mostra passa; não há falha reproduzível para consertar, e inventar um conserto
+para uma falha não observada seria o erro que este arquivo já registra três vezes.
+Se ela voltar, o suspeito conhecido é o tempo: as asserções deste arquivo e de
+`moderacao.rs` esperam relógio de transporte, e uma máquina carregada é o caminho
+mais curto para uma reprovação por prazo.
+
+**A décima revisão aprovou, e o achado que ela deixou virou teste de
+comportamento.** Ela apontou que o fim de tela por sessão estava provado lendo o
+próprio texto do arquivo — o guarda casava argumentos e contava chamadas — e que
+o efeito continuava provado só de lado, pelo registro das transmissões e pelo
+teste de conformidade. Era a queixa certa: um guarda textual protege contra a
+regressão que ele imagina, e é justamente disso que o repositório desconfia.
+
+Duas coisas mudaram. A primeira é de forma: o fim de tela deixou de receber «de
+qual sessão» como um valor que podia ser vazio e virou **duas funções nomeadas** —
+uma que encerra a transmissão desta conexão e outra que encerra a da pessoa
+inteira, esta com um chamador só, a troca de sala, que precisa mesmo levar tudo
+embora. A troca de um caractere que devolvia o defeito inteiro deixou de compilar.
+A segunda é de prova: há agora teste que exercita o servidor de verdade — a mesma
+pessoa transmitindo por duas conexões, a velha morrendo depois de a nova ter
+reaberto — e afirma as duas metades, que a transmissão nova continua encaminhável
+e que **nenhum** anúncio de fim de tela sai, porque é ele que apaga a imagem da
+tela de quem assiste. Reversão provada: fazendo o fim de tela ignorar a sessão, o
+teste novo reprova dizendo que a conexão velha apagou a transmissão que a nova
+tinha acabado de abrir — e o guarda textual, sozinho, continuava verde, que é
+exatamente o que a revisão previu.
+
+O guarda textual ficou, com o escopo encolhido e dito em voz alta no próprio
+comentário: ele decide qual das duas funções cada lugar chama, que é uma escolha
+que nenhum tipo impede, e não afirma mais nada sobre efeito.
+
+O segundo apontamento era sobre este arquivo: o parágrafo da rodada de reversão
+anterior descrevia uma ordem de reprovação que já não é a de hoje. Ele foi mantido
+como registro, com um aviso em cima dizendo que é histórico e apontando para a
+rodada corrente.
+
+**A décima primeira revisão aprovou, e o único achado de código virou a asserção
+que faltava pela letra.** Ela observou que o teste provava o encaminhamento
+recebendo o datagrama no anfitrião, mas não afirmava em lugar nenhum que
+`DropCounts::not_a_member` tinha ficado parado — o aceite pede as duas coisas, e
+só uma estava escrita. A diferença não é cerimônia: o encaminhamento pode
+sobreviver a um descarte parcial — um segundo ouvinte barrado, por exemplo — e aí
+a asserção do datagrama passaria com a sala ainda esquecendo alguém.
+
+A asserção (d) entrou no fim do teste, lendo os contadores da sala pelo caminho
+que a rodada anterior abriu. Ela compara com a leitura tirada **antes** do envio,
+e não com zero cru, para falar do datagrama que este teste mandou e não herdar
+ruído de nada que tenha acontecido antes. A ordem está garantida pela fila: mídia
+e contadores viajam pelo mesmo `mpsc` da tarefa da sala, então a resposta vem
+depois do datagrama já aplicado.
+
+Prova de que ela não é decorativa, feita por falsificação em vez de por reversão —
+desarmar o guarda faria o teste reprovar na asserção anterior, e (d) nunca chegaria
+a correr. Trocando a linha de base para `+ 1`, o teste reprova em 28,0 s com
+`left: 0, right: 1` e despeja os contadores inteiros, entre eles
+`not_a_member: 0` e `saida_de_sessao_velha: 1`: quer dizer que a asserção lê estado
+vivo da sala, que o número real é zero, e que o guarda de fato agiu na medida.
+Restaurada a linha de base, o teste passa em 28,0 s.
+
+A falha de validação anexada a esta rodada também não reproduz: `cargo test` do
+workspace inteiro terminou com código de saída 0 aqui, sem nenhuma falha. Como na
+nona rodada, a saída relatada vinha truncada no começo e tudo o que ela mostra
+passa.
+
+**A décima segunda revisão aprovou, e as duas notas que ela deixou são de
+registro.** A primeira era sobre a validação anexada à rodada: a saída de
+`cargo test` que veio com o pedido é a da bateria das ferramentas de publicação e
+não passa por nenhuma das crates tocadas aqui. Ela não mostra falha nenhuma, e
+também não mostra o que interessa. A medida certa foi refeita nesta rodada e está
+adiante, na seção da validação.
+
+A segunda é um limite conhecido, e fica dito em voz alta em vez de ficar
+implícito: se a conexão velha morrer **antes** de a conexão nova se anunciar
+presente, o registro de presença ainda é o da velha, o guarda casa por direito e
+`PersonGone` sai; a nova reanuncia `PersonPresent` logo em seguida e a lista
+converge. Quem assiste vê a lista piscar, e não vê ninguém sumir. O assento não é
+afetado, porque a lotação confere a sessão no próprio registro dela e não depende
+da lista de presentes. Não há conserto sem inventar uma ordem entre duas conexões
+que a rede não garante, e o preço de errar essa ordem para o outro lado seria uma
+presença fantasma permanente — que é o defeito desta pendência ao contrário.
+
+**A décima terceira revisão aprovou, e os dois achados de código dela foram
+consertados.** Nenhum dos dois era regressão: os dois eram buraco que o guarda
+novo deixou à mostra ao arrumar o resto.
+
+O primeiro é uma janela estreita na reserva do assento da carência. O guarda
+pergunta a `Presentes` quem é a sessão vigente, e a conexão nova só entra em
+`Presentes` depois do `handshake`: uma conexão velha que morra exatamente entre
+uma coisa e outra ainda é «a vigente», a pergunta responde «sim» e a reserva
+obsoleta é gravada assim mesmo, com a sala e o `ssrc` velhos, valendo cinco
+minutos — que é o defeito de re-sentar quem saiu de propósito, de volta pela porta
+dos fundos. Fechada pelo outro lado da mesma pergunta, e sem cronômetro nenhum:
+quando uma conexão se declara presente, o `handshake` dela **já resgatou** o que
+houvesse para resgatar, de modo que qualquer reserva que exista naquele instante
+foi escrita depois disso — quer dizer, por uma conexão que já não é a desta
+pessoa. `descartar_a_reserva_de_quem_ja_voltou` joga-a fora e diz no registro que
+jogou. Não há caso legítimo a perder: o descarte só alcança o que foi escrito
+depois do resgate.
+
+O segundo é a vaga de tela, que era o único estado do desmonte cuja identidade de
+sessão era **sobrescrita** em vez de conferida. Quem já transmite e pede de novo
+troca a própria tela — é o `StartScreenShare` depois de reconectar —, e a troca
+acontecia calada: o cliente funde aditivamente, e só um `ScreenShareStopped`
+apaga um cabeçalho de transmissão, de modo que o `ScreenId` anterior ficava
+desenhado para sempre em quem assiste, prometendo um fluxo que já não tem de onde
+vir. `Telas::comecar` passou a devolver a tela que substituiu, e quem chama
+anuncia o fim dela antes do começo da nova. É a família «o produto sabe e não
+conta», e o conserto é dizer.
+
+Reversão provada para os dois, e com a mensagem esperada: tornando o descarte um
+`false` constante, `a_reserva_escrita_depois_da_volta_e_descartada_por_quem_voltou`
+reprova em «a reserva obsoleta da conexão velha sobreviveu à volta da pessoa»;
+fazendo `comecar` devolver `None` na troca,
+`quem_troca_a_propria_tela_recebe_de_volta_a_que_saiu` reprova dizendo que a
+conexão nova tomou a vaga da velha em silêncio. Restaurado o arquivo, os dois
+passam. Os dois testes afirmam também o outro lado — sem reserva não se mente
+dizendo que descartou, a reserva de outra pessoa fica onde está, e a primeira
+transmissão não substitui transmissão nenhuma —, para que não passem por fazer
+sempre a mesma coisa.
+
+A terceira nota da revisão era sobre a validação anexada ao pedido, que de novo
+era a bateria das ferramentas de publicação e não toca nenhuma crate desta
+pendência. A medida certa está adiante.
+
+**A décima quarta revisão aprovou, e o achado que ela deixou fechou a última porta
+por pessoa desta família.** Ela observou que `VoiceRoomCommand::TelaFechou` — o
+fim do fluxo de tela no plano de dados — continuava chaveado só por `PersonId`, e
+que o mapa de transmissões da sala não guardava de qual conexão cada uma saiu. O
+argumento de que o risco era estreito está certo e não basta: numa queda
+silenciosa a tarefa da tela morre no `?` da leitura e nunca chega a mandar o
+comando, mas num fim **limpo** do fluxo velho — que acontece, por exemplo, quando
+a conexão velha fecha ordenadamente enquanto a nova já transmite — a sala apagava
+a transmissão da conexão nova, e é a mesma imagem parada que esta pendência
+inteira existe para não deixar acontecer.
+
+A transmissão passou a carregar a sessão, copiada do `Member` no instante da
+abertura e não recebida do comando: a sala já sabe qual é a conexão vigente de
+cada pessoa, e o que ela sabe não precisa ser jurado por quem fala com ela. O
+`TelaFechou` declara de qual conexão é, e só encerra quando bate.
+
+O conserto descobriu a metade que faltava do próprio guarda de saída. Com a saída
+da sessão velha voltando cedo, a transmissão **dela** — que já não tem de onde
+receber bytes — ficava no mapa para sempre, e trancava a vaga de tela da sala
+contra a conexão nova da mesma pessoa, que abriria e receberia `tela_ja_tomada`
+por causa de uma tela morta. O guarda passou a ser preciso em vez de grosso: a
+saída da conexão velha não mexe no que é da nova, e leva embora o que ainda é
+dela.
+
+Reversão provada nas duas metades, cada uma reprovando com a sua mensagem.
+Fazendo o fim de tela ignorar a sessão,
+`o_fim_da_tela_da_conexao_velha_nao_apaga_a_transmissao_da_nova` reprova em «o fim
+do fluxo da conexão velha apagou a transmissão da nova», com `left: None` e
+`right: Some(ScreenId(90))`. Tirando o encerramento da transmissão da conexão
+morta do ramo do guarda, o mesmo teste reprova antes, em «a transmissão da conexão
+morta ficou no mapa trancando a vaga de tela da sala contra a conexão nova da mesma
+pessoa». Restaurado o arquivo, passa. O teste afirma também o outro lado — a
+conexão que abriu a transmissão continua encerrando-a, e quem assiste continua
+recebendo quadros da transmissão que ficou no ar —, para que não passe por não
+encerrar nunca.
+
+**A décima quinta revisão aprovou, e o achado dela fechou a escrita que sobrava.**
+Ela observou que `Telas::comecar` era a única escrita desta família ainda chaveada
+só por `PersonId`, e que ela **sobrescreve** a sessão dona da vaga em vez de
+conferi-la. A sobrescrita é de propósito — é assim que um `StartScreenShare`
+depois de reconectar toma a vaga que a conexão anterior tinha, e é o caso comum —,
+mas a mesma porta serve ao contrário: um `StartScreenShare` **atrasado** da
+conexão velha toma a vaga da nova e, de lambuja, manda `ScreenShareStopped` da
+tela que a nova acabou de abrir. A revisão classificou o achado como não
+bloqueante, e com razão: pela queda silenciosa não se chega lá, porque a conexão
+velha está muda. Com as duas conexões vivas ao mesmo tempo — que é o que a janela
+de cinco segundos permite — chega-se.
+
+O guarda tem nome próprio e mora fora do laço da sessão, pela mesma razão de
+`reservar_o_assento_da_carencia`: `comecar_a_tela_da_conexao_vigente` confere em
+`Presentes` quem é a conexão vigente antes de deixar escrever, e devolve
+`AberturaDeTela::DeConexaoVelha` em vez de um `Option` que não distinguiria «a vaga
+é sua, e não substituiu nada» de «esta conexão já não é a desta pessoa». Nada é
+escrito, nada é anunciado e nada é recusado a quem pediu — a recusa iria para uma
+ponta que ninguém está lendo —, e o caso soma no mesmo contador de conexões velhas
+em que o resto do guarda se conta, com uma linha de registro dizendo o que
+aconteceu.
+
+Reversão provada, com a mensagem esperada: tirando a conferência da sessão,
+`a_tela_pedida_pela_conexao_velha_nao_toma_a_vaga_da_nova` reprova em «a conexão
+velha tomou a vaga de tela da nova, e quem chama vai anunciar o fim da transmissão
+que está no ar», com `left: Aberta { substituida: Some(ScreenId(2)) }` e
+`right: DeConexaoVelha`. Restaurado o arquivo, passa. O teste afirma também o
+outro lado — a conexão vigente abre a primeira transmissão e troca a própria tela
+recebendo de volta a que saiu —, para que não passe por recusar sempre.
+
+A segunda nota da revisão, o custo de relógio que a asserção «Três» de
+`moderacao.rs` acrescentou, é a mesma da nona rodada e continua sendo o tempo
+ocioso do transporte, não folga de implementação: medir a reconexão silenciosa
+custa esperar o servidor desistir da conexão velha. A cobertura da janela curta
+ficou na asserção «Dois», e o resto segue atado à pendência #45, aberta.
+
+**Validação desta rodada.** `cargo test` das três crates tocadas — `seele-server`,
+`seele-proto` e `seele-conformance` — terminou com código de saída 0: 740 testes
+passando, nenhuma falha e um ignorado (o de plataforma, como sempre), com
+`desassentar.rs` entre eles em 28,03 s — um a mais que a rodada anterior, que é o
+guarda da vaga de tela contra o pedido atrasado da conexão velha. `cargo clippy
+--all-targets -- -D warnings` das crates tocadas, limpo, e `cargo fmt --check`
+limpo.
+
+A «falha de validação» anexada a esta rodada é, pela terceira vez, a saída da
+bateria das ferramentas de publicação: ela não toca nenhuma crate desta pendência
+e, no que mostra, não reprova nada. A medida que interessa é a de cima.
+
+**A décima primeira revisão aprovou sem achado de código, e o único apontamento
+que sobrava era sobre prova, não sobre comportamento**: as reversões estavam
+registradas aqui mas a revisão não podia reexecutá-las, porque revisar não altera
+fonte. Reexecutada à mão nesta rodada, a do guarda da sala: trocando a pergunta
+«esta saída é da sessão que ainda é membro?» por um `false`, `desassentar` reprova
+em 28,03 s com exatamente a mensagem registrada acima — «a tarefa da sala não
+registrou nenhuma saída de sessão velha barrada» — e despeja os contadores com
+`saida_de_sessao_velha: 0`. Restaurado o arquivo byte a byte, passa em 28,04 s. A
+prova, portanto, deixou de ser só escrita.
+
+**Uma reprovação nova apareceu e não é desta pendência.**
+`bateria_interna.rs::o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar`
+reprovou uma vez em «não deu para ligar em 127.0.0.1:56025 · Address already in
+use», e passou sozinho e passou de novo na bateria inteira logo em seguida. O
+arquivo não é tocado por esta pendência e a causa é do desenho dele: ele pede uma
+porta ao sistema, derruba o servidor, espera cerca de vinte segundos a sessão
+entrar na bateria e só então religa **a mesma** porta — e a porta que o sistema deu
+está na faixa efêmera, de onde outro binário de teste rodando em paralelo pode
+tomá-la durante esses vinte segundos. Escolher um número fixo trocaria esta
+corrida por outra, e o repositório já decidiu o contrário em
+`ejetar.rs:310`. Fica anotado como defeito de teste, não de servidor; consertá-lo
+é mexer num arquivo fora do escopo desta tarefa.
+
+**A décima segunda revisão aprovou e deixou dois apontamentos, ambos de texto ou
+de escopo, nenhum de comportamento.**
+
+O primeiro era uma frase que prometia mais do que o código garante: a mensagem da
+asserção «Dois» de `moderacao.rs` dizia que o tempo ocioso do transporte «é mais
+que o dobro» do prazo medido, quando a conferência logo acima pede `PRAZO * 2 <=
+IDLE_TIMEOUT` e hoje isso é igualdade exata — dez segundos contra vinte. A
+asserção continua correta (a janela medida começa na queda do cliente calado e
+termina dez segundos antes de o tempo ocioso poder desocupar o assento), mas o
+texto descrevia uma folga inexistente e enganaria quem encurtasse o tempo ocioso.
+A frase passou a dizer «é pelo menos o dobro deste prazo, como a conferência logo
+acima garante»: agora texto e guarda afirmam a mesma coisa, e é a conferência —
+não a prosa — que sustenta a afirmação.
+
+O segundo é a última porta desta família e **fica registrada, não remendada**:
+`EnterVoiceRoom` (`session.rs`, no `assentar`) continua sendo caminho de escrita
+sem a pergunta `e_a_vigente`. Uma conexão velha ainda viva que mande
+`EnterVoiceRoom` reassenta a pessoa pela sessão velha e derruba o membro da
+conexão nova. Não está no aceite desta tarefa — o aceite nomeia as seis cópias de
+saída e a reserva de assento, todas cobertas — e não é a mesma coisa que os
+guardas de saída consertam: aqui não é a morte da sessão velha que apaga a nova, é
+um **comando** da sessão velha. O conserto certo é o da pendência #45, que já tem
+de decidir o que `EnterVoiceRoom` confere na entrada (a permissão, hoje não lida) e
+como o servidor responde em vez de «confirmar por silêncio»; acrescentar a
+pergunta da sessão vigente ali, sem essas duas decisões, seria mexer no caminho de
+entrada com meia resposta. Fica atado a #45 como terceira metade dela.
+
+**Validação desta rodada.** `cargo test` das três crates tocadas — `seele-server`,
+`seele-proto` e `seele-conformance` — e `cargo fmt --check`; o resultado real está
+no relato da rodada, e não na saída da bateria das ferramentas de publicação, que
+voltou anexada pela quarta vez e não toca nenhuma crate desta pendência.
+
+**A junção com a linha principal é tarefa própria, e a tentativa mediu por quê.**
+Este trabalho nasceu sobre uma base que a linha principal deixou 88 commits para
+trás, e que reescreveu os mesmos arquivos. Tentada a reaplicação sobre a linha
+principal, com o trabalho já comitado e uma referência de segurança, o resultado
+foi medido e depois desfeito sem perda: cinco arquivos em conflito, dos quais dois
+são triviais (um `allow` de clippy e o bloco de testes, que só concatena) e três
+não são. O que os torna não-triviais não é o tamanho:
+
+1. **A linha principal consertou parte do mesmo defeito por outro caminho.**
+   `Presentes::saiu` lá já confere o `ssrc` da conexão, com um relato de campo de
+   07/09 idêntico ao desta pendência. É a mesma família de defeito resolvida com
+   outra chave: `ssrc` distingue conexões, `SessionId` também, e o guarda daqui é
+   o mais amplo — cobre as seis saídas e as escritas, e não só os presentes.
+   Escolher uma das duas chaves e retirar a outra é decisão de desenho, não
+   resolução de conflito.
+2. **A linha principal trouxe um subsistema que não existia aqui.** O empréstimo
+   de subida entre pares entrou junto do desmonte de conexão: onde esta pendência
+   chama `desassentar`, lá se chama `soltar_telas_e_pares_de`, que encerra telas
+   **e** devolve ao servidor quem assistia por um par que saiu. Fundir as duas é
+   decidir se as operações de pares também passam a conferir a sessão vigente — e
+   a resposta provável é que sim, pelo mesmo argumento desta pendência, o que faz
+   disso trabalho novo sobre código novo, com diagnóstico próprio.
+
+Resolver isso às cegas seria mexer no subsistema de pares sem a investigação que
+ele merece. Fica registrado como a próxima tarefa, com a medida já feita; o
+trabalho desta pendência segue comitado no ramo, inteiro e validado sobre a base
+em que foi escrito.
+
+**A revisão seguinte aprovou, e o único achado acionável era deriva de escopo.**
+Dos três apontamentos, dois já estão escritos acima e continuam valendo sem
+mudança de código: a expulsão que deixou de ser encoberta pelo `PersonLeft`
+indevido e por isso passou a mostrar o defeito da pendência #45 — é ganho de
+verdade, e o custo é que quem modera passa a ver o tamanho real do problema —; e a
+impossibilidade de a revisão reexecutar as reversões, que já foi respondida
+reexecutando uma à mão na rodada anterior e que o próprio teste compensa exigindo
+os dois contadores antes das asserções de estado.
+
+O terceiro virou código, no sentido de tirar código: a formatação e o `allow` de
+clippy em `crates/seele-proto/tests/vetores_de_hash.rs` saíram do diff, pelo
+motivo registrado lá em cima — a linha principal já conserta esse arquivo em
+`74056b8`, e melhor. O arquivo ficou igual ao de lá, e o diff desta tarefa contra
+a linha principal voltou a tocar só `seele-server`, `seele-conformance` e este
+documento.
+
+**O que ficou de fora.** Os outros achados da auditoria 1881a3cb — a entrada em sala
+confirmada «por silêncio», a senha de sala que o cliente nunca manda, o `adopt`
+que não limpa assentos, o limite de sala que não barra — seguem abertos e não são
+desta pendência.
+
+**A revisão seguinte aprovou de novo, e o que sobrou dela era prova — desta vez
+refeita, e em dobro.** Dos apontamentos, quatro são confirmação do que já está
+escrito acima e dois pediam medida: que as reversões não tinham sido reexecutadas
+por quem revisa (revisar não altera fonte) e que a saída de teste anexada pelo
+coordenador continuava sendo a da bateria das ferramentas de publicação, que não
+toca nenhuma crate desta pendência — quinta vez.
+
+As duas foram respondidas medindo, e as reversões foram feitas em **dois pontos
+diferentes de propósito**, para que a prova não dependa de um único guarda:
+
+1. **O guarda da saída na tarefa da sala.** Trocada a pergunta «esta saída é da
+   sessão que ainda é membro?» por `false`, `desassentar` reprova em 28,04 s com a
+   mensagem já registrada — «a tarefa da sala não registrou nenhuma saída de
+   sessão velha barrada» — e despeja `saida_de_sessao_velha: 0`. Esta reversão
+   derruba a asserção **do contador**: prova que o guarda existe e dispara.
+2. **O guarda da desocupação por sessão.** Devolvido `vacate_everywhere_da_sessao`
+   ao filtro só por pessoa — que é literalmente o código de antes do conserto —,
+   `desassentar` reprova em 28,03 s numa asserção **de estado**, e com o sintoma
+   que o usuário relatou: «a sessão velha, ao morrer, apagou a nova do roster do
+   anfitrião: ["anfitriao"]», com a sala do servidor mostrando só
+   `anfitriao/sessão 1`. A mensagem ainda informa que o enlace do anfitrião piscou
+   zero vez durante a medida, o que separa reprovação de servidor de reprovação de
+   máquina.
+
+Que as duas reversões derrubem asserções **diferentes** é o que fecha o buraco que
+o próprio teste poderia ter: o contador impede que ele passe por inércia, e a
+asserção de roster impede que ele passe por um contador que anda sem o estado
+acompanhar. Os dois arquivos foram restaurados byte a byte depois de cada medida
+(a árvore volta a zero arquivo modificado) e `desassentar` passa em 28,04 s.
+
+**Validação desta rodada, com o número real.** `cargo test -p seele-server -p
+seele-conformance -p seele-proto` terminou com código de saída 0: **740 testes
+passando, nenhuma falha, um ignorado** — o de duas máquinas, que é de plataforma.
+A repartição, para que ninguém precise repetir a soma: 422 na crate do servidor
+(408 de unidade, 3 do binário e 11 nos testes de integração dela), 116 na de
+conformidade, 202 na de protocolo (200 de unidade, 1 de vetores e 1 de
+documentação). `desassentar.rs` entre eles.
+
+**A bateria repetida, e o que a repetição mostrou que uma rodada só esconde.** A
+rodada de validação seguinte repetiu `cargo test` das três crates várias vezes, e
+aí apareceu o que uma execução única não mostra: de vez em quando um teste de
+conformidade reprova por espera estourada — `anexos`, `acceptance_seguranca`,
+`acceptance_m5`, `ejetar` —, sempre numa suíte que sob carga leva ~20 s, sempre
+com a espera voltando vazia, e nunca o mesmo teste duas vezes. `desassentar`
+nunca esteve entre eles.
+
+A suspeita óbvia era esta pendência: o teste novo segura 28 s de relógio esperando
+o tempo ocioso do transporte e, rodando junto com as outras suítes, poderia estar
+apertando a máquina a ponto de estourar as esperas alheias. **Foi medido em vez de
+suposto**, em dois passos. Primeiro, pulando `desassentar` da bateria: a
+instabilidade continuou, 1 reprovação em 6 rodadas. Depois, no marco **anterior ao
+conserto** — uma cópia de trabalho descartável em `a695fe5`, que não tem guarda
+nenhum destes —, a mesma bateria repetida seis vezes reprovou uma vez, em
+`a_senha_do_voice_room_e_conferida`, com a mesma assinatura de 20 s e espera vazia.
+
+Mesma taxa, mesma assinatura, antes e depois: a instabilidade é **anterior a este
+conserto** e é da bateria de conformidade sob paralelismo, não do guarda. Em
+isolamento essas suítes passam — `anexos` passou 10/10 em seis rodadas seguidas, a
+1,2 s cada, contra os 20 s que leva quando a máquina está cheia. Não foi tocada
+aqui, por ser de outra família e fora do escopo desta pendência; fica registrada
+para quem for encarar o tempo das esperas dos testes de conformidade. O que vale
+dizer de uma vez: **a bateria das três crates passa integralmente quando a máquina
+não está saturada** — 740 passando, nenhuma falha, um ignorado —, e nenhuma das
+reprovações observadas foi de asserção de comportamento; todas foram de espera.
+
+**O achado da revisão, e o que ele custou.** A revisão independente aprovou o
+conserto e deixou uma aresta: o teste novo não tinha prazo nenhum nos passos que
+falam com a rede — o aperto de mão do anfitrião, a entrada dele na sala, a volta
+do visitante e a reentrada dela. Numa máquina saturada isso não reprova: **pendura**.
+O binário chegou a passar minutos acima dos ~28 s esperados sem dizer uma palavra,
+e um teste pendurado não diz nada a quem espera por ele. Cada um desses quatro
+passos passou a correr com prazo próprio de 20 s, e o estouro reprova nomeando
+**qual** passo não voltou. Vinte segundos é folga larga contra `127.0.0.1`; o
+número não é o ponto, o ponto é existir. A subida da conexão emudecível já tinha
+o seu, e é o mesmo.
+
+**As duas reversões, refeitas nesta rodada e não só citadas.** A revisão observou,
+com razão, que a prova de reversão que ela leu era evidência documental — quem
+revisa não altera fonte. As duas foram reexecutadas aqui, sobre o código atual e
+já com os prazos novos, com o mesmo resultado: desarmando o guarda da saída na
+tarefa da sala, `desassentar` reprova em 28,04 s na asserção do contador
+(`saida_de_sessao_velha: 0`); devolvendo `vacate_everywhere_da_sessao` ao filtro
+só por pessoa, reprova em 28,05 s na asserção de roster, com o sintoma de campo —
+«apagou a nova do roster do anfitrião: ["anfitriao"]» — e o enlace do anfitrião
+piscando zero vez, o que exclui a máquina. Os dois arquivos foram restaurados
+byte a byte depois de cada medida.
+
+**E a bateria, desta vez das crates certas.** A validação anexada à revisão
+anterior era a das ferramentas de publicação — 66 testes que não tocam nenhuma
+crate desta pendência. A lacuna foi suprida: `cargo test -p seele-server -p
+seele-proto` passa integralmente (408 de unidade do servidor e 200 do protocolo
+entre os demais) e `cargo test -p seele-conformance` passou **limpo numa rodada
+inteira**: 116 passando, nenhuma falha, um ignorado, `desassentar` entre eles em
+28,06 s. As mesmas 740 de antes. `cargo fmt` e `clippy -D warnings` limpos na
+crate tocada.
+
+**O último guarda que não conferia sessão.** A revisão seguinte aprovou o conserto
+e deixou uma observação que era justa: `descartar_a_reserva_de_quem_ja_voltou`
+apagava a reserva de carência da pessoa **sem comparar sessão nenhuma**, apoiado
+num argumento de ordem — «o aperto de mão desta conexão já resgatou o que havia,
+logo o que existir agora foi escrito por outra». O argumento se sustenta no fluxo
+de hoje, mas era o único desta família que dependia de uma invariante que nenhum
+tipo confere, e uma ordem garantida só pelo texto é uma ordem que a próxima
+mudança quebra em silêncio. A reserva passou a guardar a sessão que a escreveu
+(`ReservedSlot::sessao`), e o descarte pergunta **quem escreveu** em vez de
+**quando isto aconteceu**: só some a reserva de quem já não é a conexão vigente.
+No fluxo atual o comportamento observável é o mesmo — nenhuma reserva da conexão
+vigente pode existir naquele instante —, e é exatamente por isso que o guarda
+precisava de teste próprio, senão ninguém saberia quando ele deixasse de valer.
+`a_reserva_da_propria_sessao_vigente_nao_e_descartada` cobre o lado novo, e a
+reversão foi provada: tornando o descarte incondicional de novo, ele reprova com
+«o descarte comeu a reserva da própria conexão vigente, que é o assento que ela
+espera resgatar quando cair». A bateria de unidade do servidor passou de 408 para
+409 e continua inteira: `cargo test -p seele-server -p seele-proto` passa por
+completo (409 e 200 de unidade entre os demais) e `cargo test -p seele-conformance`
+fechou uma rodada limpa em 116 passando, nenhuma falha, um ignorado, com
+`desassentar` entre eles. `fmt` e `clippy -D warnings` limpos nas três crates.
+Duas rodadas anteriores da conformidade reprovaram um teste cada — `recusa` numa,
+`convite` na outra —, sempre estourando 20 s e sempre passando em 0,03 s e 0,23 s
+quando rodados sozinhos: é a instabilidade sob carga paralela já medida nesta
+pendência, em testes que não tocam reserva, sessão nem sala.
+
+**O único ponto desta família que ainda se apoia em ordem, e por que fica assim.**
+A revisão seguinte aprovou o conserto e deixou uma observação de cobertura:
+`Presentes::chegou` sobrescreve o registro da pessoa sem comparar sessão nenhuma —
+a última gravação vence. No fluxo de hoje isso é inalcançável, porque o aperto de
+mão da conexão velha terminou antes de a nova sequer existir: nunca há uma chegada
+fora de ordem para sobrescrever a vigente. Trocar a escrita por uma comparação de
+ordem aqui seria inventar uma regra de precedência entre sessões que o resto do
+código não tem — e um guarda sem teste que o prove é exatamente o que esta
+pendência passou o dia desmontando. Ficou o registro no próprio tipo: quem mexer
+no aperto de mão — reaproveitando, repetindo ou adiando — lê no lugar certo que
+esta linha volta a ser o buraco que o resto fechou.
+
+**A bateria desta rodada, medida com a máquina cheia.** `cargo test` do projeto
+inteiro fechou sem uma reprovação sequer, e `cargo test -p seele-server -p
+seele-proto -p seele-conformance` somou **741 passando, nenhuma falha, um
+ignorado** — o ignorado é o de plataforma —, com `desassentar` entre eles em
+28,05 s. As 741 são as 740 de antes mais o teste novo da reserva. Vale o registro
+de que a medida saiu com a máquina a *load average* 75, várias baterias de outras
+worktrees rodando junto: é exatamente a condição sob a qual esta pendência mediu
+instabilidade antes, e desta vez ela não apareceu. `cargo fmt --check` e
+`clippy --all-targets -D warnings` limpos na crate tocada.
+
+**A reprovação que veio de fora, medida em dez rodadas.** A validação seguinte
+anexou uma reprovação de `cargo test` do projeto inteiro:
+`acceptance_m2::two_servers_on_one_machine_do_not_share_a_pin`, `SemResposta` aos
+20,22 s. Nenhuma asserção de comportamento — é o prazo por candidato de
+`Enlace::conectar` (`enlace.rs`) queimando inteiro sem resposta. Sozinho, esse
+teste passou 5 de 5 vezes em 0,95 s cada.
+
+Como a suspeita natural era o teste novo desta pendência, que segura 28 s de
+relógio, **foi medido em vez de suposto**, alternando rodadas para que a carga da
+máquina não decidisse sozinha: cinco rodadas do workspace inteiro com o teste novo
+e cinco com ele pulado (`-- --skip quem_reconecta_antes_de_o_servidor_desistir`),
+intercaladas. Com ele: duas reprovações, em `acceptance_m2` e depois em
+`acceptance_m3::a_message_reaches_everybody_on_the_line`, 20,22 s e 20,14 s, nunca
+o mesmo teste, nunca uma asserção. Sem ele: cinco rodadas limpas. Dois em cinco
+contra zero em cinco não separa nada com essa amostra — e a medida do marco
+**anterior ao conserto**, registrada acima, já tinha reprovado uma vez em seis
+com a mesma assinatura, sem que existisse teste novo nenhum para culpar. A
+máquina esteve o tempo todo entre *load average* 60 e 93, com baterias de outras
+worktrees rodando junto.
+
+O que se conclui, e o que não: a instabilidade é a mesma já medida aqui — prazos
+de rede dos testes de conformidade sob saturação —, é anterior a este conserto e
+não é dele. Alargar o prazo por candidato do cliente, ou os prazos das suítes de
+aceitação, é mudança de produto em código que esta pendência não toca; fica
+registrada para quem encarar o tempo das esperas da conformidade. As crates
+tocadas passam integralmente: `cargo test -p seele-server -p seele-conformance`
+fechou verde (409 de unidade do servidor, 116 de conformidade, `desassentar` entre
+eles em 28,07 s). `cargo fmt --all --check` e `clippy --all-targets -D warnings`
+nas duas crates, limpos.
+
+**A revisão que aprovou, e a medida que ela pediu de novo.** A revisão
+independente seguinte aprovou o conserto e voltou a apontar a mesma lacuna de
+evidência: a saída de `cargo test` anexada pelo coordenador era outra vez a da
+bateria das ferramentas de publicação — 66 testes que não tocam crate nenhuma
+desta pendência. A lacuna é de anexo, não de código, e foi suprida medindo aqui:
+`cargo test -p seele-server -p seele-proto` fechou verde com **409 de unidade do
+servidor, 200 de `seele-proto`** e os binários de teste do servidor junto, nenhuma
+falha; `cargo test -p seele-conformance` fechou a bateria inteira com **116
+passando, nenhuma falha e um ignorado** (o de plataforma), com `desassentar`
+entre eles em 28,06 s. `cargo fmt --check` e `clippy --all-targets -D warnings`
+nas três crates, limpos. As outras duas observações da revisão já estavam
+respondidas acima: a prova de reversão, nas duas metades com as mensagens
+esperadas, e `Presentes::chegou`, que segue sem guarda por ser inalcançável no
+aperto de mão de hoje e está registrado no próprio tipo.
+
+**A invariante de que todos os guardas dependem, agora presa por teste.** A
+revisão seguinte aprovou de novo e deixou a observação mais útil da série: o
+registro em `Presentes::chegou` decide **quem é a conexão vigente** de uma pessoa,
+e nenhum teste prendia isso. Trocar a escrita por uma comparação de precedência
+entre sessões continua fora de escopo — seria inventar uma ordem que o resto do
+código não tem —, mas a lacuna real não era a comparação: era que, se a chegada
+deixasse de sobrescrever, todos os guardas desta pendência continuariam
+«passando» enquanto apontam para a conexão errada, e a conexão velha voltaria a
+ser a vigente sem uma única reprovação. Os testes de presença que existiam só
+olhavam `saiu`. `quem_reconecta_passa_a_ser_a_vigente_e_a_anterior_perde_a_autoridade`
+prende a invariante pelos dois lados: depois da reconexão, a sessão nova é a
+vigente e a velha deixou de ser. A reversão foi provada aqui: fazendo `chegou`
+não sobrescrever (só inserir quando ainda não havia registro), ele reprova com «a
+conexão que acabou de reconectar não é a vigente desta pessoa, e tudo o que ela
+fizer daqui para a frente será recusado como se fosse de uma sessão morta».
+
+**As duas reversões do teste de conformidade, reexecutadas nesta rodada.** A
+revisão registrou, com razão, que não podia executá-las — revisor não altera
+fonte —, e que a evidência delas era documental. Foram refeitas aqui, cada uma
+isolada e com a árvore restaurada em seguida. Primeira: devolvendo a desocupação
+ao filtro só por pessoa (nos dois pontos de `Occupancy`), `desassentar` reprova
+com «a sessão velha, ao morrer, apagou a nova do roster do anfitrião:
+["anfitriao"]», e o diagnóstico ainda informa que o enlace do anfitrião não
+piscou nenhuma vez — ou seja, a reprovação é do servidor e não da máquina.
+Segunda: desarmando o guarda de sessão na saída da sala de voz, ele reprova antes
+disso, com «a tarefa da sala não registrou nenhuma saída de sessão velha
+barrada», e o despejo dos contadores junto. Duas reprovações em pontos diferentes
+e com mensagens diferentes: o teste não passa por inércia.
+
+**A bateria desta rodada.** `cargo test -p seele-server -p seele-proto` verde com
+**410 de unidade do servidor** — as 409 mais o teste novo da vigência — e **200
+de `seele-proto`**, mais os binários de teste do servidor, nenhuma falha.
+`cargo test -p seele-conformance` fechou a bateria inteira com **116 passando,
+nenhuma falha e um ignorado** (o de plataforma), com `desassentar` em 28,04 s.
+`cargo fmt --all --check` limpo e `clippy --all-targets -D warnings` limpo nas
+três crates. A validação anexada pelo coordenador voltou a ser a das ferramentas
+de publicação (66 testes, todos passando, nenhuma crate desta pendência): não há
+reprovação a consertar ali, há a lacuna de anexo que esta medida supre.
+
+**A revisão seguinte aprovou sem nenhum achado de código, e os dois
+apontamentos eram de prova e de escopo.** Nenhum dos dois pedia mudar
+comportamento, e nenhum dos dois foi deixado só escrito.
+
+O primeiro é o caminho de **entrada**, e continua de fora de propósito: no
+`assentar`, `encerrar_telas_da_pessoa` e a varredura por pessoa são chamadas sem
+sessão porque andar de sala tem de levar toda transmissão anterior embora. Numa
+janela de sobreposição, a conexão velha que ainda respira e reage ao movimento da
+mesma pessoa re-senta a si própria e derruba a tela da nova. Isso não é a saída
+que esta pendência fechou: é a entrada, já registrada acima e atada à #45, e
+mexer nela aqui seria ampliar o escopo depois do aceite atendido. Fica nomeado no
+lugar certo em vez de descoberto de novo daqui a três revisões.
+
+O segundo era, pela sexta vez, **a prova não reexecutada por quem revisa** —
+revisar não altera fonte, e desarmar um guarda exige alterar uma. Foram refeitas
+aqui, nos mesmos dois pontos distintos, e reprovaram nos dois lugares esperados:
+
+1. Trocada por `false` a pergunta «esta saída é da sessão que ainda é membro?» na
+   tarefa da sala, `desassentar` reprova em 28,04 s na asserção **do contador** —
+   «a tarefa da sala não registrou nenhuma saída de sessão velha barrada» — com
+   `saida_de_sessao_velha: 0` no despejo.
+2. Devolvida a desocupação ao filtro só por pessoa — o código literal de antes do
+   conserto —, ele reprova em 28,04 s numa asserção **de estado**, com o sintoma
+   que o usuário relatou: «a sessão velha, ao morrer, apagou a nova do roster do
+   anfitrião: ["anfitriao"]», a sala do servidor mostrando só `anfitriao/sessão 1`
+   e o enlace do anfitrião piscando zero vez — o que separa reprovação de servidor
+   de reprovação de máquina.
+
+Os dois arquivos voltaram byte a byte depois de cada medida (a árvore volta ao
+mesmo diff de antes) e `desassentar` passa de novo em 28,05 s.
+
+**A bateria desta rodada, com o número inteiro.**
+`cargo test -p seele-server -p seele-proto -p seele-conformance` fechou com
+**742 passando, nenhuma falha e um ignorado** — o ignorado é o que precisa de duas
+máquinas —, sendo 410 de unidade do servidor, 200 de `seele-proto`, um de
+documentação e o resto repartido entre os binários de integração das duas crates,
+com `desassentar` entre eles em 28,11 s. `cargo fmt --check` limpo e
+`clippy --all-targets -D warnings` limpo nas três crates. A saída anexada pelo
+coordenador voltou a ser a das ferramentas de publicação (66 testes, todos
+passando, nenhuma crate desta pendência): não há reprovação a consertar ali — há a
+lacuna de anexo, e é ela que esta medida supre.
+
+**A rodada seguinte: o espaço inteiro medido de uma vez, e as reversões de novo.**
+A revisão aprovou outra vez sem achado de código, e a validação anexada pedia
+conserto de uma reprovação — que não existe. Em vez de medir só as três crates
+tocadas, esta rodada mediu **o espaço de trabalho inteiro numa execução só**, com
+`--no-fail-fast` para que nada parasse na primeira falha: **1706 passando,
+nenhuma falha, quatro ignorados**, 69 baterias, e o processo saiu com zero. Não
+há reprovação a consertar: a saída anexada continua sendo a das ferramentas de
+publicação, cujos 66 testes passam e não tocam crate nenhuma desta pendência.
+Vale o registro para a instabilidade sob carga já medida acima: desta vez a
+bateria inteira, rodando em paralelo com todas as outras crates, fechou limpa —
+o que confirma que aquelas reprovações eram de espera sob saturação e não de
+comportamento. `cargo fmt --all --check` e `clippy --workspace --all-targets
+-D warnings` limpos no espaço inteiro.
+
+E, pela sétima vez, as duas reversões foram **reexecutadas** em vez de citadas,
+porque quem revisa não altera fonte e por isso a prova sempre chega até ela como
+papel. Desarmado o guarda de sessão na saída da sala de voz, `desassentar`
+reprova em 28,04 s na asserção do contador, com `saida_de_sessao_velha: 0` no
+despejo. Devolvida `vacate_everywhere_da_sessao` ao filtro só por pessoa, reprova
+em 28,03 s na asserção de estado, com o sintoma de campo — «a sessão velha, ao
+morrer, apagou a nova do roster do anfitrião: ["anfitriao"]» — e o enlace do
+anfitrião piscando zero vez, o que exclui a máquina. Os dois arquivos voltaram
+byte a byte depois de cada medida e `desassentar` passa de novo em 28,04 s.
+
+**A rodada seguinte: a primeira reprovação de carga que dá para nomear.** A
+revisão aprovou de novo sem achado de código — as três notas eram as de sempre: o
+caminho de **entrada** continua chaveado só por pessoa, de propósito e anotado
+como pendência à parte; as reversões estão escritas aqui e quem revisa não pode
+reexecutá-las; e a validação anexada era, pela quarta vez, a das ferramentas de
+publicação.
+
+Desta vez a bateria das três crates tocadas **reprovou de verdade**, e vale
+registrar como a atribuição foi feita em vez de decretada.
+`acceptance_seguranca::um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral`
+parou em «a chave aprovada não entrou: `Some(SemResposta)`» — o transporte
+desistiu de esperar, não a portaria recusou —, num arquivo que esta pendência não
+toca e num caminho que o diff não encosta: nenhuma linha de admissão foi alterada.
+Rodado sozinho, o mesmo binário fecha 8 de 8 **três vezes seguidas** em 2,74 s;
+dentro da bateria, os mesmos 8 testes levaram 22,50 s, oito vezes mais. Olhando a
+máquina no meio da medida, a causa aparece com nome: **outro worktree deste mesmo
+repositório estava com a bateria dele rodando em paralelo**, com processos de
+servidor de teste vivos havia mais de dezessete horas. É a pendência #29 outra
+vez, e agora com o culpado identificado em vez de suposto.
+
+A bateria inteira, repetida com a máquina menos disputada, fechou limpa:
+**742 passando, nenhuma falha, um ignorado** — o de plataforma —, 38 binários, com
+`desassentar` em 28,10 s e o `acceptance_seguranca` em 8 de 8 em 2,75 s.
+`cargo fmt --all --check` limpo.
+
+E a prova de reversão foi refeita **nesta** rodada, pela oitava vez, para que ela
+não chegue à revisão só como papel: devolvendo `vacate_everywhere_da_sessao` ao
+filtro só por pessoa, `desassentar` reprova em 28,04 s com exatamente o sintoma de
+campo — «a sessão velha, ao morrer, apagou a nova do roster do anfitrião:
+["anfitriao"]», com a sala do servidor mostrando `["anfitriao/sessão 1"]` — e com
+o enlace do anfitrião piscando **zero** vez durante a medida, o que exclui a
+máquina como explicação. Restaurado o arquivo byte a byte — a árvore volta a não
+ter diferença nenhuma —, o teste passa em 28,05 s.
+
+**A medida refeita nas crates certas, com a carga da máquina nomeada.** A
+validação voltou mais uma vez com a saída das ferramentas de publicação — 66
+testes que não encostam em nada disto —, então a bateria foi refeita onde o
+trabalho está. `seele-server` e `seele-proto` juntas: **626 passando, nenhuma
+falha, nenhum ignorado**. `seele-conformance` inteira: **116 passando, nenhuma
+falha, um ignorado** — o de duas máquinas, que é de plataforma e já era ignorado
+antes desta pendência —, com `desassentar` verde em 28,02 s. `cargo fmt --check`
+e `cargo clippy --all-targets -- -D warnings` limpos nas três crates. Somando,
+os mesmos **742** de sempre.
+
+A carga desta rodada também dá para nomear, e desta vez não era outro worktree:
+eram **42 processos `yes` órfãos**, sem pai, restos de um gerador de carga de uma
+medida anterior desta própria pendência, que ficaram girando por trinta e oito
+minutos e seguravam a média de carga em 58 para 15 núcleos. Não foram mortos —
+podiam ser de outra sessão medindo —, terminaram sozinhos no meio da bateria, e a
+média caiu para 22 ao fim. A bateria fechou limpa nas duas metades, o que é o
+dado útil: desta vez a saturação não produziu reprovação nenhuma. Fica a lição
+operacional para a #29: antes de atribuir uma reprovação ao código, `ps` na
+máquina — o culpado costuma estar lá, com nome e hora de início.
+
+**A reaplicação sobre a linha principal, em 2026-09-14, e o conserto que ela
+absorveu.** Este trabalho nasceu sobre uma base anterior e, no caminho até a
+integração, a linha principal recebeu um conserto próprio do **mesmo defeito**:
+a saída de uma conexão deixou de apagar a ficha de outra da mesma pessoa,
+conferindo o número de voz (`ssrc`) em `Presentes::saiu`, em
+`Occupancy::vacate_everywhere` e no `Leave` da tarefa da sala. Ele veio de outro
+relato de campo — o cliente tenta vários caminhos ao mesmo tempo (ADR 0037),
+fica com o primeiro que abre, e os abandonados fecham uns 80 ms depois rodando a
+saída inteira.
+
+**Os dois relatos são o mesmo defeito visto de dois relógios**: uma conexão que
+não é mais a vigente removendo estado de quem é. Um deles mede 80 ms, o outro
+mede vinte segundos. Por isso a conferência de sessão **substituiu** a de
+`ssrc`, em vez de conviver com ela: duas perguntas para a mesma coisa seriam a
+segunda cópia de contabilidade que produziu esta família inteira, e o
+identificador de sessão é o único que todo o desmonte já carrega — inclusive
+onde não há `ssrc` à mão, como nas telas e na reserva de assento. O caso do
+caminho abandonado continua coberto, e está escrito no doc de `Presentes::saiu`
+para que ninguém conclua que ele se perdeu na integração.
+
+**O que a integração ainda teve de costurar.** A linha principal transformou o
+fim de tela em «encerra a tela **e solta os pares** que a pessoa sustentava»,
+para que a malha do §5.1 não degradasse para a estrela sem rastro. As duas
+funções de fim de tela desta pendência passaram a fazer isso também. As
+nomeações de par são chaveadas por transmissão e por pessoa, sem sessão, então
+as duas direções que são **por pessoa** passaram a correr apenas quando esta
+conexão é a vigente da pessoa, ou quando a pessoa não tem mais conexão nenhuma —
+a estratégia de escrita já descrita acima. Dar sessão ao registro de pares é
+tarefa própria e não desta; sem o guarda, porém, a conexão que morre aos vinte
+segundos derrubaria para a estrela a malha que a conexão nova acabou de montar.
+
+**Medido depois da reaplicação, nesta base.** `seele-server` 471 testes,
+`seele-proto` 228, e a bateria de conformidade inteira em execução serializada
+(31 conjuntos, nenhuma reprovação), com
+`quem_reconecta_antes_de_o_servidor_desistir_da_conexao_velha_continua_no_roster_do_host`
+verde em 28,07 s. `cargo fmt --all --check` e
+`cargo clippy --all-targets --all-features -D warnings` limpos nas crates
+tocadas.
+
+**E as duas reversões, refeitas nesta base, não herdadas da anterior.**
+Revertendo o guarda da tarefa da sala, o teste reprova na asserção do contador
+da sala — «a tarefa da sala não registrou nenhuma saída de sessão velha
+barrada», com `saida_de_sessao_velha: 0` impresso junto. Revertendo o guarda de
+`Presentes::saiu`, ele reprova antes disso, na asserção (0): a sessão velha
+apagou a pessoa dos presentes, de modo que o desmonte não encontrou mais ninguém
+a quem defender e o contador do processo não andou. As duas reversões foram
+desfeitas e a bateria voltou ao verde com a árvore limpa.
 
 ## 12 · Fechada em 2026-08-13 · A conferência da impressão digital do convite
 
@@ -2904,3 +3944,51 @@ Anotado também um efeito observado de passagem, sem diagnóstico: na rodada 2 o
 testes de dispositivos do `seele-ffi` ficaram acima de 60 s cada antes de passar.
 Não reprovaram e não são desta entrega; ficam aqui para quem for medir o tempo da
 suíte.
+
+## 45 · Expulsar não mantém ninguém fora da sala
+
+**Sintoma.** Quem hospeda usa `:expulsar`. A sessão da pessoa acaba de verdade, com
+o motivo certo na tela dela — e em milissegundos ela está de volta, sentada na
+mesma sala, ouvindo e sendo ouvida. O verbo interrompe a conexão e não remove
+ninguém de nada por mais de um instante.
+
+**Por que.** Duas metades, e cada uma sozinha já basta:
+
+1. `EnterVoiceRoom`, no servidor, confere existência e senha da sala e **não**
+   confere `Permission::EnterVoiceRoom`. A permissão existe no protocolo e não é
+   lida em lugar nenhum. Uma expulsão não deixa marca que impeça a reentrada:
+   para isso existe `:banir`, que é outro verbo.
+2. A bateria interna do cliente reconecta sozinha e **restaura a sala em que
+   estava** — é o que ela existe para fazer quando a rede cai, e ela não
+   distingue «a rede caiu» de «um operador me tirou daqui».
+
+**Como apareceu.** Escondida por um defeito, e é isso que a torna interessante.
+Até 2026-09-13 o teste de conformidade da expulsão afirmava que «a sala esvazia
+para quem ficou», e ele passava: a sessão expulsa, ao morrer **depois** da
+reconexão, anunciava um `PersonLeft` que já não era dela, e esse anúncio apagava
+do roster de quem ficou alguém que estava sentado. Quando esse anúncio indevido
+foi fechado (pendência #11), o teste passou a reprovar e mostrou o que havia
+atrás: o expulso nunca tinha saído.
+
+**O conserto não é de uma linha**, e é por isso que fica registrado em vez de
+remendado: conferir a permissão na entrada é metade, e a outra é decidir o que a
+bateria do cliente deve fazer quando a sessão acabou por decisão de um operador —
+restaurar a sala ali é desfazer o verbo de quem modera. Provavelmente o servidor
+precisa responder à entrada em vez de «confirmar por silêncio», que é outro achado
+aberto da mesma auditoria.
+
+**Uma terceira metade chegou em 2026-09-14**, pela revisão da pendência #11:
+`EnterVoiceRoom` também não confere se quem pede ainda é a sessão vigente da
+pessoa. Uma conexão velha ainda viva reassenta pela sessão velha e derruba o
+membro da conexão nova — o espelho, no caminho de entrada, do que os guardas de
+saída da #11 fecharam. As três se consertam juntas, porque todas mudam o que
+`EnterVoiceRoom` confere e o que ele responde.
+
+**Quando dói.** Toda expulsão. O efeito prático hoje é derrubar a conexão de
+alguém por alguns segundos, e quem modera acredita ter feito mais que isso.
+
+**Numeração.** Este item nasceu como #34 numa ponta que ainda não tinha se
+integrado à main. Enquanto isso a main recebeu os seus próprios #34 a #44 — os três
+últimos (#42 a #44) chegaram pela subida do protocolo para a v5, já depois de
+este item ter sido escrito como #42. Renumerado para #45 na integração; o
+conteúdo é o mesmo que já foi revisado.

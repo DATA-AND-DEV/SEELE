@@ -126,7 +126,18 @@ async fn voltar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Connection>> 
 
 /// Espera até o snapshot dizer o que o teste quer, ou desistir.
 fn ate<F: Fn(&Connection) -> bool>(connection: &Connection, pronto: F) -> bool {
-    let fim = Instant::now() + PRAZO;
+    ate_em(connection, PRAZO, pronto)
+}
+
+/// O mesmo, com prazo escolhido.
+///
+/// Existe para a única espera deste arquivo que depende do **transporte** e não
+/// do servidor: `Connection::disconnect` para o laço da casca, e o `Drop` do
+/// enlace é um `abort`, de modo que nenhum `CONNECTION_CLOSE` sai. O servidor só
+/// dá aquela conexão por morta no tempo ocioso do QUIC, e esperar menos que isso
+/// seria medir o relógio da máquina.
+fn ate_em<F: Fn(&Connection) -> bool>(connection: &Connection, prazo: Duration, pronto: F) -> bool {
+    let fim = Instant::now() + prazo;
     while Instant::now() < fim {
         if pronto(connection) {
             return true;
@@ -144,6 +155,20 @@ fn sentados(connection: &Connection, voice_room: u32) -> usize {
         .iter()
         .find(|desenhado| desenhado.id == voice_room)
         .map_or(0, |desenhado| desenhado.people.len())
+}
+
+/// Se o snapshot desenha **esta pessoa** sentada num voice room.
+///
+/// Contar não serve quando há mais de uma visita em jogo: um assento que some e
+/// outro que aparece no mesmo instante deixam a conta parada, e a asserção
+/// passaria por empate.
+fn sentado(connection: &Connection, voice_room: u32, quem: u64) -> bool {
+    connection
+        .snapshot()
+        .voice_rooms
+        .iter()
+        .find(|desenhado| desenhado.id == voice_room)
+        .is_some_and(|desenhado| desenhado.people.iter().any(|pessoa| pessoa.id == quem))
 }
 
 /// O último aviso que a tela mostraria.
@@ -318,14 +343,93 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
         "a visita foi derrubada sem saber que foi expulsa"
     );
 
-    // Dois: a sala esvazia para quem ficou.
+    // Dois: expulsar esvazia a sala **na hora** — e isto se mede sem corrida,
+    // numa segunda visita que fica calada de propósito.
+    //
+    // A asserção seguinte («Três») custa o tempo ocioso do transporte inteiro
+    // porque espera o cliente expulso fechar; ela prova que a pessoa some, mas
+    // não prova **quando**. A diferença importa: uma expulsão que só esvaziasse a
+    // sala aos 20 s, junto com o tempo ocioso, seria indistinguível de uma
+    // expulsão que não desocupa nada — e foi exatamente essa cobertura que se
+    // perdeu quando «Três» passou a fechar o cliente antes de medir.
+    //
+    // Aqui ela volta, por construção e não por sorte: o cliente é parado **antes**
+    // da expulsão, então não há bateria interna reconectando e reentrando na sala
+    // no meio da medida, e o único evento capaz de desocupar o assento dentro do
+    // prazo é a própria expulsão. O prazo é o discriminante, e ele é conferido
+    // logo abaixo em vez de ficar de palavra.
     assert!(
-        ate(&anfitriao, |connection| sentados(connection, VOICE_ROOM)
-            == 0),
-        "quem foi expulso continua desenhado na sala de voz"
+        PRAZO * 2 <= seele_proto::transport::IDLE_TIMEOUT,
+        "o prazo desta asserção deixou de ser mais curto que o tempo ocioso do \
+         transporte: o assento sumindo por tempo ocioso passaria por expulsão, e a \
+         asserção deixaria de medir o que diz medir"
+    );
+    let calada = entrar(endereco, "visita-calada").await?;
+    calada.enter_voice_room(VOICE_ROOM, None)?;
+    let quem_calou = calada
+        .snapshot()
+        .me
+        .expect("a segunda visita tem identidade");
+    assert!(
+        ate(&anfitriao, |connection| sentado(
+            connection, VOICE_ROOM, quem_calou
+        )),
+        "a segunda visita não chegou a sentar; expulsá-la não mediria nada"
+    );
+    calada.disconnect();
+    anfitriao.kick_person(quem_calou)?;
+    assert!(
+        ate(&anfitriao, |connection| !sentado(
+            connection, VOICE_ROOM, quem_calou
+        )),
+        "a expulsão não tirou a pessoa da sala de voz dentro de {PRAZO:?}. Como o \
+         cliente dela já estava parado, nada além da expulsão podia desocupar o \
+         assento — e o tempo ocioso do transporte, que desocuparia, é pelo menos o \
+         dobro deste prazo, como a conferência logo acima garante."
     );
 
-    // Três: expulsar é esta sessão e nada além dela — e o assento **não** fica
+    // Três: a sala esvazia para quem ficou — **depois** de o cliente expulso ser
+    // fechado de verdade.
+    //
+    // Esta linha media outra coisa até 2026-09-13, e media por um defeito. A
+    // bateria interna do cliente reconecta em milissegundos e **reentra na sala
+    // em que estava**, então a pessoa expulsa volta a ocupar o assento quase no
+    // mesmo instante. O que esvaziava a sala na tela de quem ficou era a sessão
+    // morrendo depois disso e anunciando uma saída que já não era dela: o
+    // `PersonLeft` chegava **atrás** do `PersonJoined` da conexão nova e apagava
+    // do roster alguém que estava sentado. É exatamente o defeito de campo «o
+    // anfitrião não vê um amigo que se vê dentro da sala», e desde que o desmonte
+    // passou a conferir de qual sessão ele é (ver `desassentar`), esse anúncio
+    // indevido não sai mais.
+    //
+    // Então o teste fecha o cliente antes de medir. O que fica provado é o que o
+    // servidor promete: a expulsão acaba com a sessão, e a sala esvazia quando não
+    // há mais conexão daquela pessoa. **Que um expulso consiga reentrar na hora
+    // não é deste teste e não é conserto deste guarda** — `EnterVoiceRoom` não
+    // confere `Permission::EnterVoiceRoom`, e isso é a pendência #34 de
+    // `docs/pendencias.md`, aberta e com as duas metades descritas.
+    //
+    // O que **esta** linha não cobre, e por isso a asserção «Dois» existe acima:
+    // com o cliente expulso ainda conectado, aqui não se afirma nada sobre a
+    // janela curta, porque enquanto a #34 estiver aberta a reentrada é legítima e
+    // medir 0 sentados nessa janela seria medir quem chega primeiro ao relógio.
+    //
+    // O que continua provado sobre a expulsão em si: a sessão acaba de verdade e
+    // com o motivo certo (a asserção acima), o assento **não** fica guardado pela
+    // carência (a asserção «Quatro», abaixo) e a contabilidade por sessão que a
+    // expulsão usa está provada nos testes de unidade de `Occupancy` e `Presentes`
+    // em `seele-server`.
+    visita.disconnect();
+    assert!(
+        ate_em(
+            &anfitriao,
+            seele_proto::transport::IDLE_TIMEOUT + Duration::from_secs(8),
+            |connection| sentados(connection, VOICE_ROOM) == 0
+        ),
+        "quem foi expulso e desconectou continua desenhado na sala de voz"
+    );
+
+    // Quatro: expulsar é esta sessão e nada além dela — e o assento **não** fica
     // guardado. A janela de carência existe para um trem entrando num túnel;
     // aplicada aqui, devolveria a pessoa à sala de voz de onde ela foi tirada no
     // instante em que reconectasse, e o verbo estaria desfeito por um recurso
