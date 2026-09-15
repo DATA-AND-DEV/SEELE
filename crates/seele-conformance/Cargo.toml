@@ -12,7 +12,8 @@ publish.workspace = true
 # link the daemon.
 #
 # Putting the test here keeps that rule intact and gives the exception a name.
-# It ships nothing: `src/lib.rs` is empty and every dependency is a dev one.
+# It ships nothing: every dependency is a dev one, and `src/lib.rs` holds only
+# the slot gate that every test binary of this crate has to share — see `vaga`.
 [dependencies]
 
 [dev-dependencies]
@@ -31,6 +32,9 @@ ratatui = "0.30.2"
 # O teste da troca de aparelho monta os erros que o sistema operacional manda
 # pelo retorno do `cpal` e os empurra pelo caminho de verdade. Sem isto, ele
 # teria de inventar o evento em vez de reproduzi-lo.
+# Não custa compilação nenhuma: o `seele-audio` logo acima já traz este mesmo
+# `cpal` 0.18.1, então nomeá-lo aqui só dá ao teste o direito de escrever
+# `cpal::ErrorKind` — a caixa já ia ser compilada de todo jeito.
 cpal = "0.18.1"
 tokio = { version = "1", features = ["full"] }
 ed25519-dalek = "3"

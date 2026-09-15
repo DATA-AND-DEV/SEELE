@@ -2608,6 +2608,103 @@ inteira quando ela é a única coisa rodando; ele não cabe uma bateria dividind
 máquina com outra. Isso não é um defeito desta tarefa nem do código: é o mesmo
 efeito do item 29, agora com número em cima.
 
+**Medida pela décima primeira vez em 2026-09-15, na retomada que pediu a falha de
+validação pelo nome.** A rodada de validação anterior voltou de novo sem nomear
+teste reprovado nenhum — a saída registrada termina com suites passando. Refeita
+aqui a bateria inteira, `cargo test --workspace` numa execução só, sem
+serializar nada: **`EXIT=0`, 1.735 passados, 0 reprovados, 4 ignorados, 69
+alvos, nenhum `FAILED` em parte alguma do registro**. Pelo nome, os que esta
+tarefa criou: `troca_de_aparelho` **7 de 7**, da troca do padrão no sistema ao
+fone religado depois da desistência. `cargo fmt --all --check` saiu **0** e
+`cargo clippy --workspace --all-targets` saiu **0 e sem um aviso**. Inclusive
+`acceptance_m2::a_second_connection_reuses_the_pin`, que a revisão viu reprovar
+uma vez sob carga, passou nesta rodada — o que confirma o diagnóstico de tempo,
+e não de comportamento.
+
+**A reversão central, refeita nesta mesma retomada.** A revisão registrou, com
+razão, que desta vez ela leu as reversões em vez de executá-las. Foi refeita à
+mão: trocando o corpo de `classificar` em `crates/seele-audio/src/device.rs` por
+`FalhaDeAparelho::Transitoria` — quer dizer, voltando a tratar a troca e o
+sumiço do aparelho como estalo —, a unidade de `seele-audio` reprova
+**4 de 220** (`a_troca_de_aparelho_do_sistema_pede_reabertura`,
+`o_aparelho_que_sumiu_pede_reabertura`,
+`a_troca_feita_no_sistema_chega_ao_laco_como_troca` e
+`o_aparelho_arrancado_chega_ao_laco_como_sumico`, com «left: Transitoria, right:
+Trocado» e «right: Sumiu»), e a conformidade reprova **6 de 7** em
+`troca_de_aparelho`. O sétimo que continua passando é o controle negativo,
+`um_estalo_no_fluxo_nao_troca_o_aparelho_de_ninguem`: ele existe justamente para
+não passar a impressão de que qualquer erro reabre aparelho. Uma das mensagens,
+por inteiro: «a sessão nunca desistiu, e um estado de "trocando" eterno é a mesma
+mentira do silêncio calado — left: Funcionando, right: Perdido». O arquivo foi
+restaurado e conferido por hash SHA-256 (idêntico byte a byte, árvore limpa), e
+os dois conjuntos voltaram a passar: 220 e 7.
+
+**A falha de validação, enfim cronometrada em 2026-09-15.** A rodada automática
+voltou de novo dizendo só «excedeu o limite de 900s», sem nome de teste. Em vez
+de supor de novo, medi. `cargo test --workspace` numa execução só, com a máquina
+dividida com outra sessão de `cargo test` de outro worktree (média de carga 4,0
+no começo): **406 s, `EXIT=0`, 1.735 passados, 0 reprovados, 4 ignorados, 69
+alvos**. Quer dizer: a bateria inteira cabe em menos da metade do prazo mesmo
+com a máquina ocupada, e o estouro do coordenador não é esta bateria.
+
+O que estoura o prazo é a **conformidade serializada**, e agora com número:
+`cargo test -p seele-conformance -- --test-threads=1` levou **1.580 s** (26
+minutos) para 25 alvos, **122 passados, 0 reprovados, `EXIT=0`**. Quase todo
+esse tempo é espera de relógio, não de processador — a soma dos tempos que os
+próprios alvos relatam não chega a dois minutos; o resto é o `--test-threads=1`
+esperando cada alvo de cada vez, com os que têm rodadas de rede (`limite_de_taxa`
+à frente) mandando no total. Então: a serialização é necessária pelo esgotamento
+de portas efêmeras (item 29), mas ela sozinha passa de 900 s. Quem for medir o
+prazo desta tarefa deve medir `cargo test`, que cabe; a conformidade em série é
+verificação à parte, e foi feita aqui, verde.
+
+Isso fecha também a ressalva da revisão que dizia não ter rodado a conformidade
+inteira em série: rodou, aqui, e os 25 alvos passaram — inclusive
+`troca_de_aparelho` (7 de 7, 26,05 s, o alvo mais demorado da suíte) e
+`voz_na_reconexao`.
+
+**O que faltava medir, e que enfim foi medido em 2026-09-15: a espera por vaga
+alheia.** A revisão anterior suspeitou, sem poder provar, que o portão de vagas
+do item 29 fosse cúmplice do estouro de 900 s. Era. A causa tem nome e número:
+o conjunto de vagas é da máquina inteira (de propósito — ver `vaga`), o `cargo`
+roda os alvos de teste **um de cada vez**, e o prazo de espera era de 90 s **por
+alvo**. Com outra árvore de trabalho ao lado — e havia uma, rodando
+`cargo test -p seele-conformance -- --test-threads=1`, que nesse modo segura uma
+vaga do primeiro ao último teste, por 26 minutos —, os 25 alvos deste crate
+pagam o prazo um por um: até 37 minutos de relógio gastos só esperando, sem um
+único teste reprovando. É por isso que a validação automática voltava dizendo
+«excedeu o limite de 900 s» sem nome de teste nenhum: não havia teste vermelho,
+havia fila.
+
+O conserto põe um **teto no estrago**, e não desliga o portão: a espera caiu de
+90 s para 20 s, e uma desistência — esperar o prazo inteiro sem conseguir vaga —
+fica registrada na pasta das vagas por 60 s, calando a espera dos alvos
+seguintes. A marca desliga a **espera**, nunca a **tomada**: um alvo que chegue
+com o conjunto livre continua pegando a sua vaga na hora, e a proteção do item 29
+contra a saturação da própria suíte continua de pé. O que some é a soma: a rodada
+paga a descoberta uma vez e depois corre saturada, que é exatamente o
+comportamento de antes do portão — degradação limitada, em vez de acumulada.
+
+Isso é comportamento, e está provado como comportamento. O teste
+`o_alvo_seguinte_nao_paga_a_espera_de_novo_quando_a_vaga_e_de_outro`
+(`crates/seele-conformance/src/lib.rs`) toma a única vaga de um conjunto seu,
+cronometra a desistência seguinte — que tem de esperar o prazo — e cronometra a
+terceira chamada, que não pode mais esperar. **Prova de reversão, executada:**
+voltando a linha do desvio para `let esperar = true`, o teste reprova com «o alvo
+seguinte voltou a pagar a espera inteira (324,1 ms de 300 ms). Com 25 alvos neste
+crate, essa conta é a diferença entre uma bateria que cabe no prazo da validação
+e uma que estoura em espera de vaga alheia.» O arquivo foi restaurado e conferido
+por SHA-256, idêntico byte a byte. O segundo teste,
+`quem_ja_desistiu_nao_faz_o_alvo_seguinte_esperar_de_novo`, guarda as duas bordas
+da marca: pasta limpa não parece desistência, e desistência velha caduca.
+
+**A medida depois do conserto, 2026-09-15.** Com o teto no lugar e o crate
+inteiro conferido pelo clippy, o `cargo test` do workspace — o mesmo comando da
+validação automática que vinha estourando — terminou em **4 min 36 s**: 1737
+testes, 69 alvos, nenhuma reprovação. É um terço do prazo de 900 s, contra os
+mais de 18 minutos da rodada que o estourou. A diferença não está em teste
+nenhum ter ficado mais rápido: está em ninguém mais pagar a fila 25 vezes.
+
 
 ## 32 · O botão ENVIAR sai da barra de compor
 
