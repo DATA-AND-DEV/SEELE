@@ -1513,6 +1513,33 @@ acaba. A execução final, em série e com a árvore restaurada, passou inteira:
 487 asserções em `seele-server` e 150 em `seele-conformance`, uma ignorada por
 plataforma, zero reprovações.
 
+**O que este guarda de propósito não cobre, e por quê.** Mover alguém de sala por
+moderação (`PersonMoved`) chama `assentar`, que tira a pessoa de toda sala
+anterior **sem** perguntar de qual sessão é — e tem de ser assim, ou quem anda de
+uma sala para outra continuaria ouvindo a sala de onde saiu. A consequência é
+que, na mesma janela de queda silenciosa, a conexão velha ainda viva também
+recebe o evento e se re-assenta com o ssrc antigo. É comportamento anterior a
+esta entrega, não regressão dela, e consertá-lo pede decidir o que «mover» quer
+dizer quando a pessoa tem duas conexões — decisão que não cabia neste escopo.
+Fica aqui registrado para não voltar como surpresa.
+
+**Provas de reversão reexecutadas ao vivo em 2026-09-15.** As duas metades foram
+desarmadas de novo, uma de cada vez, nesta mesma árvore, e reprovaram com as
+mensagens da tabela acima, cada uma depois dos mesmos ~28 s de espera pelo prazo
+de desistência; a árvore foi restaurada e conferida limpa entre uma e outra. A
+revisão independente não podia fazê-lo por não alterar fontes; agora a prova não
+é só documental.
+
+**Conferência final das crates tocadas, 2026-09-15.** Uma validação anterior
+anexada a esta pendência era a bateria das ferramentas de publicação, que não
+compila nenhuma das crates alteradas e por isso não provava nada aqui. A
+execução que vale foi refeita nesta árvore: `seele-server` passou com 487
+asserções e `seele-conformance`, em série, com 150 — uma ignorada por
+plataforma, nenhuma reprovação nas duas. Dentro dela, o teste novo
+`quem_reconecta_antes_de_o_servidor_desistir_da_conexao_velha_continua_no_roster_do_host`
+passou em 28,04 s, o tempo de esperar o prazo de desistência inteiro antes de
+afirmar.
+
 ## 12 · Fechada em 2026-08-13 · A conferência da impressão digital do convite
 
 **O que era.** O app lia a impressão digital de um `seele://` e não a conferia:
