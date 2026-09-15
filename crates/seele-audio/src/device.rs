@@ -812,11 +812,25 @@ mod tests {
             // `Xrun` é um estalo, não um aparelho que foi embora. Reabrir por
             // causa dele trocaria um clique por um segundo de silêncio, várias
             // vezes ao dia, em toda máquina carregada.
+            //
+            // A lista é **todas** as variantes que o `cpal` 0.18 tem hoje e que
+            // não são das duas famílias acima. `ErrorKind` é `non_exhaustive`,
+            // então nenhuma anotação de tipo obriga esta lista a crescer junto
+            // com o `cpal`; o que dá para fazer é prender por comportamento a
+            // superfície de hoje inteira, e é isto. O dia em que subir o `cpal`
+            // e uma variante nova aparecer, ela é a única que estará fora — e
+            // decidir onde ela cai é revisão de quem sobe a dependência, não
+            // uma omissão que passa calada.
             for tropeco in [
                 ErrorKind::Xrun,
                 ErrorKind::DeviceBusy,
                 ErrorKind::RealtimeDenied,
                 ErrorKind::BackendError,
+                ErrorKind::InvalidInput,
+                ErrorKind::PermissionDenied,
+                ErrorKind::ResourceExhausted,
+                ErrorKind::UnsupportedConfig,
+                ErrorKind::UnsupportedOperation,
                 ErrorKind::Other,
             ] {
                 assert_eq!(

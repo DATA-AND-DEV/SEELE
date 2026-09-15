@@ -86,6 +86,16 @@ fn vagas() -> usize {
 /// Chamar duas vezes na mesma thread não toma duas vagas: a segunda chamada vê
 /// que a thread já tem a sua e volta na hora.
 ///
+/// **O conjunto é da máquina inteira, e isso é de propósito.** As vagas moram na
+/// pasta temporária do sistema, então duas árvores de trabalho rodando a bateria
+/// ao mesmo tempo disputam o mesmo conjunto e se serializam uma contra a outra.
+/// Não é descuido de escopo: o que satura é a máquina — núcleos e portas
+/// efêmeras —, e um conjunto por árvore daria a cada uma o direito de levantar o
+/// seu tanto de servidores QUIC, que somados são exatamente a saturação que o
+/// portão existe para evitar. Quem quiser as árvores independentes tem
+/// `SEELE_VAGAS` para repartir o teto entre elas, ou `SEELE_VAGAS=0` para
+/// desligar o portão de uma delas.
+///
 /// **Chame daqui de dentro do corpo do teste, nunca de dentro de um
 /// `tokio::spawn`.** Nos testes `#[tokio::test(flavor = "multi_thread")]` o
 /// `block_on` conduz o futuro na própria thread do `libtest`, então uma chamada

@@ -1347,6 +1347,44 @@ fn esvaziar_o_que_era_do_antigo(restos: [&mut Vec<f32>; 4]) {
     }
 }
 
+/// Tudo o que precisa acontecer na volta em que o aparelho mudou.
+///
+/// Uma função só, e pelo mesmo motivo de [`dimensoes_ou_dizer_que_nao_ha`]: os
+/// três passos não se separam, e nenhum teste alcança o laço onde eles moravam.
+/// Separados, cada um tinha o seu teste de unidade e a **ordem** entre eles —
+/// que é o que a pessoa ouve — não tinha nenhum.
+///
+/// O que cada passo impede, se faltar:
+///
+/// - **Redimensionar.** O aparelho novo pode ter outra taxa e outro anel, e
+///   reaproveitar os de antes é tocar mais rápido ou mais devagar para sempre —
+///   o defeito que soa como «a voz ficou estranha depois que troquei o fone».
+/// - **Esvaziar.** Amostras na taxa de antes, tocadas no aparelho de agora,
+///   saem como um estalo no primeiro instante do aparelho novo.
+/// - **Reacertar o relógio.** Abrir um endpoint custa centenas de
+///   milissegundos, e essa pausa é desta volta do laço. Sem reacertar, ela
+///   entraria no relógio de reprodução como reacerto e como atraso máximo — e o
+///   instrumento que responde *é a rede ou é esta máquina?* passaria a acusar a
+///   máquina de quem apenas trocou de fone. Ver [`PlayoutClock::reacertar`].
+///
+/// `None` quando o reamostrador recusa as taxas do aparelho novo: aí não há
+/// laço possível, o painel já foi avisado e não há o que esvaziar nem
+/// reacertar, porque o laço acaba nesta volta.
+fn recomecar_no_aparelho_novo(
+    painel: &Mutex<EstadoDoAudio>,
+    captura_hz: u32,
+    saida_hz: u32,
+    anel: usize,
+    restos: [&mut Vec<f32>; 4],
+    playout: &mut PlayoutClock,
+    agora: Instant,
+) -> Option<Dimensoes> {
+    let dimensoes = dimensoes_ou_dizer_que_nao_ha(painel, captura_hz, saida_hz, anel)?;
+    esvaziar_o_que_era_do_antigo(restos);
+    playout.reacertar(agora);
+    Some(dimensoes)
+}
+
 /// The whole loop, on its own thread.
 #[allow(
     clippy::too_many_lines,
@@ -1448,16 +1486,14 @@ async fn pipeline(
             &aparelhos,
         ) {
             io = novo;
-            // Tudo o que foi dimensionado pelas taxas do aparelho antigo é
-            // refeito: o aparelho novo pode ter outra taxa e outro anel, e
-            // reaproveitar os de antes é tocar mais rápido ou mais devagar para
-            // sempre — um defeito que soa como «a voz ficou estranha depois que
-            // troquei o fone».
-            let Some(novas) = dimensoes_ou_dizer_que_nao_ha(
+            let Some(novas) = recomecar_no_aparelho_novo(
                 &aparelhos,
                 io.capture_rate_hz,
                 io.playback_rate_hz,
                 io.to_device.buffer().capacity(),
+                [&mut pending, &mut captured, &mut at_48k, &mut for_device],
+                &mut playout,
+                Instant::now(),
             ) else {
                 return;
             };
@@ -1466,19 +1502,6 @@ async fn pipeline(
             anel_de_saida = novas.anel;
             ritmo = novas.ritmo;
             ritmo_avisado = false;
-            esvaziar_o_que_era_do_antigo([
-                &mut pending,
-                &mut captured,
-                &mut at_48k,
-                &mut for_device,
-            ]);
-            // Abrir um endpoint custa centenas de milissegundos, e essa pausa é
-            // desta volta do laço. Sem reacertar, ela entraria no relógio de
-            // reprodução como reacerto e como atraso máximo — e o instrumento
-            // que responde *é a rede ou é esta máquina?* passaria a acusar a
-            // máquina de quem apenas trocou de fone. Ver
-            // `PlayoutClock::reacertar`.
-            playout.reacertar(Instant::now());
 
             tracing::info!(
                 microfone = ?io.capture.as_ref().map(|aparelho| &aparelho.name),
@@ -2163,10 +2186,11 @@ mod controles_na_reabertura {
 #[cfg(test)]
 mod dimensoes_do_aparelho {
     use super::{
-        dimensoes_ou_dizer_que_nao_ha, esvaziar_o_que_era_do_antigo, Dimensoes, EstadoDoAparelho,
-        EstadoDoAudio, Mutex,
+        dimensoes_ou_dizer_que_nao_ha, esvaziar_o_que_era_do_antigo, recomecar_no_aparelho_novo,
+        Dimensoes, EstadoDoAparelho, EstadoDoAudio, Instant, Mutex, PlayoutClock,
     };
-    use seele_audio::SAMPLE_RATE_HZ;
+    use seele_audio::{FRAME_MS, SAMPLE_RATE_HZ};
+    use std::time::Duration;
 
     /// Um painel de sessão que a interface leria como normalidade.
     fn painel_de_quem_estava_ouvindo() -> Mutex<EstadoDoAudio> {
@@ -2258,5 +2282,106 @@ mod dimensoes_do_aparelho {
                  é um estalo no primeiro instante do fone que a pessoa acabou de pôr"
             );
         }
+    }
+
+    /// A volta inteira em que o aparelho mudou, e não cada peça dela.
+    ///
+    /// Redimensionar, esvaziar e reacertar o relógio têm guarda cada um acima.
+    /// O que este prova é a **ordem entre os três** numa só troca: é ela que a
+    /// pessoa ouve, e era ela que só existia dentro do laço, onde nenhum teste
+    /// chegava.
+    #[test]
+    fn a_troca_redimensiona_esvazia_e_reacerta_o_relogio_na_mesma_volta() {
+        let painel = painel_de_quem_estava_ouvindo();
+        let (mut pendentes, mut capturadas) = (vec![0.1_f32; 480], vec![0.2_f32; 240]);
+        let (mut em_48k, mut para_o_aparelho) = (vec![0.3_f32; 960], vec![0.4_f32; 120]);
+
+        // O relógio vinha em compasso e a reabertura custou meio segundo, que é
+        // o preço normal de abrir um endpoint.
+        let partida = Instant::now();
+        let mut relogio = PlayoutClock::new(partida, FRAME_MS);
+        relogio.due(partida);
+        let depois_da_troca = partida + Duration::from_millis(520);
+
+        let novas = recomecar_no_aparelho_novo(
+            &painel,
+            44_100,
+            44_100,
+            4_410,
+            [
+                &mut pendentes,
+                &mut capturadas,
+                &mut em_48k,
+                &mut para_o_aparelho,
+            ],
+            &mut relogio,
+            depois_da_troca,
+        )
+        .expect("44,1 kHz dos dois lados é aparelho de verdade");
+
+        assert_eq!(
+            novas.para_o_aparelho.to_hz(),
+            44_100,
+            "as medidas ficaram nas do aparelho anterior; a voz sai acelerada \
+             enquanto a sessão durar"
+        );
+        assert_eq!(novas.anel, 4_410);
+        for resto in [&pendentes, &capturadas, &em_48k, &para_o_aparelho] {
+            assert!(
+                resto.is_empty(),
+                "restou amostra da taxa de antes para tocar no aparelho novo"
+            );
+        }
+        assert_eq!(
+            relogio.due(depois_da_troca),
+            1,
+            "o compasso recomeçou num despejo de reposição em vez de um quadro"
+        );
+        assert_eq!(
+            relogio.metrics().resyncs,
+            0,
+            "a pausa de reabrir o aparelho foi contada como máquina travada"
+        );
+        assert_eq!(
+            painel.lock().expect("painel só é travado aqui").estado,
+            EstadoDoAparelho::Funcionando,
+            "o aparelho novo abriu e serve, e a tela o anuncia como perdido"
+        );
+    }
+
+    #[test]
+    fn o_aparelho_novo_que_o_reamostrador_recusa_encerra_a_volta_sem_mexer_em_nada() {
+        // Taxa zero é o que sobra quando a descrição do dispositivo vem vazia.
+        // Aqui o laço acaba nesta volta: não há o que esvaziar nem relógio a
+        // reacertar, e o que **não** pode faltar é a tela dizer a verdade.
+        let painel = painel_de_quem_estava_ouvindo();
+        let (mut pendentes, mut capturadas) = (vec![0.1_f32; 480], vec![0.2_f32; 240]);
+        let (mut em_48k, mut para_o_aparelho) = (vec![0.3_f32; 960], vec![0.4_f32; 120]);
+
+        let partida = Instant::now();
+        let mut relogio = PlayoutClock::new(partida, FRAME_MS);
+
+        let novas = recomecar_no_aparelho_novo(
+            &painel,
+            0,
+            48_000,
+            960,
+            [
+                &mut pendentes,
+                &mut capturadas,
+                &mut em_48k,
+                &mut para_o_aparelho,
+            ],
+            &mut relogio,
+            partida,
+        );
+
+        assert!(novas.is_none(), "não há laço possível com taxa zero");
+        assert_eq!(
+            painel.lock().expect("painel só é travado aqui").estado,
+            EstadoDoAparelho::Perdido,
+            "o laço vai encerrar e a tela continua dizendo que está tudo \
+             funcionando; a pessoa fica sem som nenhum sem nada que explique"
+        );
     }
 }

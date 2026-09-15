@@ -201,6 +201,24 @@ async fn escrever_mesmo_que_parem(fluxo: &mut quinn::SendStream, bytes: &[u8]) -
     }
 }
 
+/// Encerra o fluxo pela mesma corrida, e só por ela.
+///
+/// Quando o servidor manda `STOP_SENDING`, o quinn reseta a ponta de escrita
+/// aqui do lado; o `finish` que vem depois encontra um fluxo já fechado e
+/// devolve `ClosedStream`. Essa é a única falha que `finish` sabe devolver — o
+/// caso `Stopped` ele próprio já trata como sucesso —, e a anotação de tipo
+/// abaixo é o que garante isso: se o quinn passar a devolver um erro mais
+/// largo, esta linha deixa de compilar em vez de calar a diferença. É o oposto
+/// de descartar o resultado com `let _`, que toleraria qualquer erro futuro.
+fn encerrar_mesmo_que_parem(fluxo: &mut quinn::SendStream) {
+    let encerramento: Result<(), quinn::ClosedStream> = fluxo.finish();
+    match encerramento {
+        Ok(()) => {}
+        // O par cortou antes de a gente encerrar: é a corrida descrita acima.
+        Err(_fluxo_ja_fechado) => {}
+    }
+}
+
 /// O quadro de um cabeçalho de transferência: quatro bytes de tamanho e o corpo.
 fn cabecalho_de_anexo(chave: u64) -> Vec<u8> {
     let header = AttachmentHeader {
@@ -247,7 +265,7 @@ async fn o_byte_reservado_e_recusado_em_vez_de_ser_lido_como_anexo() -> Result<(
     // zero na frente fazendo as vezes do tipo. É o que a aritmética lia.
     escrever_mesmo_que_parem(&mut fluxo, &cabecalho_de_anexo(1)).await?;
     escrever_mesmo_que_parem(&mut fluxo, &[1, 2, 3, 4]).await?;
-    let _ = fluxo.finish();
+    encerrar_mesmo_que_parem(&mut fluxo);
 
     // Nada volta. Se voltasse, o servidor teria lido o cabeçalho — quer dizer,
     // teria adivinhado o tipo do fluxo a partir do conteúdo dele.
@@ -302,7 +320,7 @@ async fn um_fluxo_que_diz_ser_anexo_e_lido_como_anexo() -> Result<()> {
     escrever_mesmo_que_parem(&mut fluxo, &[StreamType::Attachment.byte()]).await?;
     escrever_mesmo_que_parem(&mut fluxo, &cabecalho_de_anexo(77)).await?;
     escrever_mesmo_que_parem(&mut fluxo, &[1, 2, 3, 4]).await?;
-    let _ = fluxo.finish();
+    encerrar_mesmo_que_parem(&mut fluxo);
 
     // Este servidor não guarda arquivo, então a resposta honesta é `Unavailable` —
     // e ela só existe porque o cabeçalho foi lido: é dele que sai o nome a quem
