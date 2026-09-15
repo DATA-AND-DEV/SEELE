@@ -1571,6 +1571,18 @@ para a bateria do repositório inteiro num único comando: essa nunca chegou ao
 fim dentro do limite do coordenador enquanto outra sessão ocupava a máquina, e
 não foi tentada de novo com a máquina livre.
 
+**Revalidada sobre a base nova, depois da subida do protocolo para a v5.** Esta
+ponta foi rebaseada sobre a `main` que já traz a v5; o único choque foi de
+documentação — este arquivo —, e era de numeração: a `main` passou a ocupar #42,
+#43 e #44, e o registro da expulsão que nasceu aqui como #42 virou **#45**, com
+as referências internas desta pendência corrigidas junto. Nenhum arquivo de
+código conflitou. Refeitas as baterias sobre essa base: `seele-server` fechou com
+**488 asserções, nenhuma reprovação**; `seele-conformance`, em série, fechou com
+**saída 0, nenhuma reprovação e uma única ignorada** (a que exige duas
+máquinas), com o teste desta pendência verde em 28,04 s. `cargo fmt --all
+--check` limpo e `cargo clippy` das duas crates tocadas, com `-D warnings`,
+limpo.
+
 ## 12 · Fechada em 2026-08-13 · A conferência da impressão digital do convite
 
 **O que era.** O app lia a impressão digital de um `seele://` e não a conferia:
