@@ -64,6 +64,17 @@ pub struct LocalTelemetry {
     pub playback_underruns: u64,
     /// Device-level errors, such as a disconnection.
     pub device_errors: u64,
+    /// Quantos daqueles erros eram o sistema mexendo no aparelho.
+    ///
+    /// Subconjunto de [`Self::device_errors`]: uma troca de rota e um aparelho
+    /// que sumiu entram nos dois, porque continuam sendo erro do fluxo para
+    /// quem soma telemetria. Ele existe para que [`Self::tropecos`] possa
+    /// **descontá-los**: quem troca de fone não está com a máquina derrubando
+    /// áudio, e acender «ÁUDIO LOCAL FALHANDO» ao lado de «TROCANDO DE
+    /// APARELHO» culpa a máquina de quem só mudou de aparelho. O que a troca
+    /// tem a dizer já tem lugar próprio na tela — ver `EstadoDoAparelho` em
+    /// `seele-core`.
+    pub device_events: u64,
 
     /// A volta mais longa que o laço de voz deu entre dois quadros, em ms.
     ///
@@ -136,6 +147,7 @@ impl LocalTelemetry {
             capture_overruns: stream.capture_overruns,
             playback_underruns: stream.playback_underruns,
             device_errors: stream.stream_errors,
+            device_events: stream.device_changed.saturating_add(stream.device_lost),
             playout_worst_lateness_ms: 0.0,
             playout_catchup_frames: 0,
             playout_resyncs: 0,
@@ -181,11 +193,19 @@ impl LocalTelemetry {
     ///
     /// Cumulativo. Quem quer saber se está dando errado **agora** pergunta ao
     /// [`FalhaLocal`], não a este número.
+    ///
+    /// **Eventos de aparelho não contam.** Ver [`Self::device_events`]: o
+    /// sistema trocar a rota de áudio chega ao produto como erro do fluxo, e
+    /// somá-lo aqui fazia a régua de falha local acender no instante da troca —
+    /// o aviso que diz «esta máquina está derrubando áudio» aparecendo para
+    /// quem apenas trocou de fone, junto com o aviso certo. Fica de fora o
+    /// evento; fica dentro o tropeço transitório, que é erro de fluxo de
+    /// verdade.
     #[must_use]
     pub fn tropecos(&self) -> u64 {
         self.capture_overruns
             .saturating_add(self.playback_underruns)
-            .saturating_add(self.device_errors)
+            .saturating_add(self.device_errors.saturating_sub(self.device_events))
     }
 }
 
@@ -457,6 +477,63 @@ mod falha_local {
         detector.observar(&com(1));
         assert!(detector.observar(&com(1)), "apagou cedo demais");
         assert!(detector.observar(&com(2)));
+    }
+
+    /// O que o `cpal` entrega quando o sistema mexe no aparelho, montado pelo
+    /// mesmo caminho do produto: contadores de verdade, classificação de
+    /// produção, e a telemetria armada a partir deles.
+    fn depois_de(falhas: &[crate::supervisor::FalhaDeAparelho]) -> LocalTelemetry {
+        let contadores = crate::rt::StreamCounters::shared();
+        for falha in falhas {
+            contadores.record_stream_error(*falha);
+        }
+        LocalTelemetry::assemble(
+            contadores.snapshot(),
+            GateMetrics::default(),
+            MixMetrics::default(),
+            32_000,
+            false,
+        )
+    }
+
+    #[test]
+    fn trocar_de_aparelho_no_sistema_nao_acende_o_aviso_de_falha_local() {
+        // O achado. Uma troca de rota e um aparelho que sai da tomada chegam
+        // ao produto como erro do fluxo, e a régua de falha local somava os
+        // dois: durante a reabertura a tela acendia "ÁUDIO LOCAL FALHANDO"
+        // junto com "TROCANDO DE APARELHO", acusando a máquina de quem só
+        // trocou de fone. Os dois avisos significam coisas diferentes, e é
+        // esse um que apaga sozinho e não explica nada.
+        use crate::supervisor::FalhaDeAparelho::{Sumiu, Trocado};
+
+        let mut detector = FalhaLocal::new();
+        detector.observar(&depois_de(&[]));
+
+        assert!(
+            !detector.observar(&depois_de(&[Trocado])),
+            "a troca de rota feita no sistema não é esta máquina derrubando áudio"
+        );
+        assert!(
+            !detector.observar(&depois_de(&[Trocado, Sumiu, Sumiu])),
+            "o fone saindo da tomada não é esta máquina derrubando áudio"
+        );
+    }
+
+    #[test]
+    fn um_tropeco_de_verdade_continua_acendendo_o_aviso() {
+        // A outra metade, e o que impede o conserto de virar um aviso que
+        // nunca acende: um erro de fluxo que **não** é evento de aparelho
+        // continua sendo falha local, que é o caso que a régua existe para
+        // relatar.
+        let mut detector = FalhaLocal::new();
+        detector.observar(&depois_de(&[]));
+
+        assert!(
+            detector.observar(&depois_de(&[
+                crate::supervisor::FalhaDeAparelho::Transitoria
+            ])),
+            "um tropeço de fluxo é exatamente o que este aviso deve acusar"
+        );
     }
 
     #[test]

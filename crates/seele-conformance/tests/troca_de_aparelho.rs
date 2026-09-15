@@ -27,14 +27,19 @@
 //! código morto — que foi exatamente o estado em que este defeito viveu.
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use seele_audio::device::retorno_de_erro;
+use seele_audio::playout::PlayoutClock;
 use seele_audio::rt::StreamCounters;
 use seele_audio::supervisor::{AvisoDeAparelho, Reabertura};
 use seele_core::{
-    Acompanhamento, AparelhosAbertos, CaptureDevice, DeviceRates, EstadoDoAparelho, EstadoDoAudio,
-    PlaybackDevice,
+    seguir_o_aparelho, Acompanhamento, AparelhosAbertos, CaptureDevice, DeviceRates,
+    EstadoDoAparelho, EstadoDoAudio, PassoDoAparelho, PlaybackDevice,
 };
+
+/// O quadro de voz, como `specs/03-audio.md` o define.
+const QUADRO_MS: u32 = 20;
 
 /// A máquina de quem usa: o que ela oferece como padrão, agora.
 ///
@@ -67,7 +72,14 @@ impl AparelhoDeMentira {
     fn novo(nome: &'static str) -> Self {
         // Taxa tirada do nome para que cada aparelho deste teste tenha a sua,
         // sem uma tabela à parte que pudesse discordar de quem o abriu.
-        let hz = if nome.contains("usb") { 44_100 } else { 48_000 };
+        let hz = match nome {
+            // O aparelho que abre e com o qual não há laço possível. Existe
+            // porque é um caminho de produção — o reamostrador recusar as taxas
+            // do que abriu — e sem ele esse caminho não tem teste nenhum.
+            "aparelho-de-taxa-impossivel" => 0,
+            outro if outro.contains("usb") => 44_100,
+            _ => 48_000,
+        };
         Self {
             nome,
             hz,
@@ -99,6 +111,14 @@ impl AparelhosAbertos for AparelhoDeMentira {
             playback_hz: self.hz,
         }
     }
+
+    /// Cem milissegundos de anel, na taxa **deste** aparelho.
+    ///
+    /// Amarrada à taxa de propósito: é o que faz a troca para um aparelho de
+    /// 44,1 kHz mudar o anel junto com o reamostrador, como em produção.
+    fn capacidade_de_saida(&self) -> usize {
+        (self.hz as usize / 10).max(1)
+    }
 }
 
 impl Reabertura for MaquinaDaPessoa {
@@ -129,6 +149,17 @@ struct SessaoDeVoz {
     acompanhamento: Acompanhamento,
     painel: Mutex<EstadoDoAudio>,
     maquina: MaquinaDaPessoa,
+    /// As quatro filas de amostras que o laço tem a caminho.
+    ///
+    /// Elas estão na taxa do aparelho de **antes**, e é por isso que a troca
+    /// tem de esvaziá-las: tocadas no aparelho de agora, saem como um estalo no
+    /// primeiro instante dele.
+    restos: [Vec<f32>; 4],
+    /// O relógio de reprodução do laço, que a reabertura reacerta.
+    relogio: PlayoutClock,
+    comecou: Instant,
+    /// O aparelho abriu e o reamostrador recusou as taxas dele: o laço acaba.
+    sem_laco_possivel: bool,
 }
 
 impl SessaoDeVoz {
@@ -148,6 +179,10 @@ impl SessaoDeVoz {
                 padrao: Some(aparelho),
                 aberturas: 0,
             },
+            restos: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            relogio: PlayoutClock::new(Instant::now(), QUADRO_MS),
+            comecou: Instant::now(),
+            sem_laco_possivel: false,
         }
     }
 
@@ -164,24 +199,44 @@ impl SessaoDeVoz {
 
     /// Uma volta do laço de áudio.
     ///
-    /// Quando a reabertura entrega um aparelho, o laço troca o que tem pelo que
-    /// voltou — e com ele os contadores que vai ler dali em diante.
+    /// Pela **mesma função que o laço de produção chama** —
+    /// [`seguir_o_aparelho`] —, e não por uma volta refeita à mão. A diferença
+    /// importa: refeita à mão, este teste provava o ciclo e o teste, não a
+    /// composição que a pessoa ouve (ler o aviso, reabrir, redimensionar,
+    /// esvaziar o que era do aparelho antigo e reacertar o relógio, nessa
+    /// ordem). O que fica fora do alcance de qualquer teste é só o `cpal`.
+    ///
+    /// Quando a troca acontece, o laço passa a ler os contadores do aparelho
+    /// que voltou — como em produção, onde ele larga o `AudioIo` inteiro.
     fn uma_volta(&mut self, agora_ms: f64) {
-        if let Some(novo) = self.acompanhamento.passo(
+        let [pendentes, capturadas, em_48k, para_o_aparelho] = &mut self.restos;
+        let passo = seguir_o_aparelho(
+            &mut self.acompanhamento,
             self.contadores.aviso_de_aparelho(),
             agora_ms,
             &mut self.maquina,
             &self.painel,
-        ) {
-            self.contadores = novo.contadores;
+            [pendentes, capturadas, em_48k, para_o_aparelho],
+            &mut self.relogio,
+            self.comecou + Duration::from_micros((agora_ms * 1000.0) as u64),
+        );
+        match passo {
+            PassoDoAparelho::Segue => {}
+            PassoDoAparelho::Reaberto(troca) => {
+                self.contadores = troca.aberto.contadores;
+            }
+            // Em produção esta é a volta em que o laço encerra.
+            PassoDoAparelho::SemLacoPossivel => self.sem_laco_possivel = true,
         }
     }
 
     /// Voltas até o relógio andar `quanto_ms`, como o laço anda de 2 em 2 ms.
+    ///
+    /// Para quando não há mais laço possível, porque é o que o laço faz.
     fn voltas_por(&mut self, desde_ms: f64, quanto_ms: f64) -> f64 {
         let mut agora = desde_ms;
         let fim = desde_ms + quanto_ms;
-        while agora < fim {
+        while agora < fim && !self.sem_laco_possivel {
             self.uma_volta(agora);
             agora += 2.0;
         }
@@ -404,14 +459,39 @@ fn um_panico_noutra_parte_do_programa_nao_congela_a_tela_no_aparelho_antigo() {
     // pelo de agora: a forma pequena de «o produto sabe e não conta».
     let mut sessao = SessaoDeVoz::comecou_em("fone-usb");
 
-    let anterior = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let envenenou = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let com_o_painel_na_mao = sessao.painel.lock().ok();
-        assert!(com_o_painel_na_mao.is_some(), "o painel começa são");
-        panic!("um pânico qualquer noutra parte do programa, com o painel na mão");
+    // O hook de pânico é do processo inteiro, não deste teste: calá-lo de
+    // vez apagaria a mensagem de qualquer outro teste do mesmo binário que
+    // falhasse enquanto este corre. Por isso o pânico proposital acontece numa
+    // thread com nome próprio e o hook cala **só** ela, repassando todo o
+    // resto a quem já estava lá.
+    const THREAD_DO_PANICO: &str = "panico-proposital-do-painel";
+    let anterior = std::sync::Arc::new(std::panic::take_hook());
+    let repassa = std::sync::Arc::clone(&anterior);
+    std::panic::set_hook(Box::new(move |aviso| {
+        if std::thread::current().name() == Some(THREAD_DO_PANICO) {
+            return;
+        }
+        repassa(aviso);
     }));
-    std::panic::set_hook(anterior);
+
+    let painel = &sessao.painel;
+    let envenenou = std::thread::scope(|escopo| {
+        let subiu = std::thread::Builder::new()
+            .name(THREAD_DO_PANICO.to_owned())
+            .spawn_scoped(escopo, move || {
+                let com_o_painel_na_mao = painel.lock().ok();
+                assert!(com_o_painel_na_mao.is_some(), "o painel começa são");
+                panic!("um pânico qualquer noutra parte do programa, com o painel na mão");
+            });
+        match subiu {
+            Ok(thread) => thread.join(),
+            Err(erro) => panic!("a thread do pânico proposital não subiu: {erro}"),
+        }
+    });
+
+    // Devolve o comportamento de antes: o `Box` original não sai do `Arc`, mas
+    // o hook restaurado chama exatamente ele, sem o filtro.
+    std::panic::set_hook(Box::new(move |aviso| anterior(aviso)));
     assert!(
         envenenou.is_err(),
         "o pânico deste teste tinha de acontecer"
@@ -436,5 +516,75 @@ fn um_panico_noutra_parte_do_programa_nao_congela_a_tela_no_aparelho_antigo() {
         depois.estado,
         EstadoDoAparelho::Funcionando,
         "o estado do aparelho parou no que a tela via antes do pânico"
+    );
+}
+
+#[test]
+fn a_troca_nao_toca_no_aparelho_novo_o_que_era_do_antigo() {
+    // O primeiro som do aparelho novo é o que a pessoa julga. As quatro filas
+    // do laço estão na taxa do aparelho de antes; tocadas no de agora, saem
+    // como um estalo ou um trecho acelerado — e o reamostrador de antes com o
+    // anel de agora sai como «a voz ficou estranha depois que troquei o fone».
+    //
+    // Este cenário existe porque a ordem entre reabrir, redimensionar e
+    // esvaziar é o que se perde numa refatoração sem nada quebrar: cada passo
+    // tinha o seu teste de unidade e a composição não tinha nenhum.
+    let mut sessao = SessaoDeVoz::comecou_em("fone-usb");
+    sessao.restos = [
+        vec![0.5_f32; 480],
+        vec![0.25_f32; 480],
+        vec![0.1_f32; 960],
+        vec![0.3_f32; 441],
+    ];
+
+    // De 44,1 kHz para 48 kHz: a troca que muda taxa, anel e reamostradores.
+    sessao.maquina.padrao = Some("caixas-da-mesa");
+    sessao.o_cpal_avisa(cpal::ErrorKind::DeviceChanged);
+    sessao.voltas_por(0.0, 500.0);
+
+    let painel = sessao.painel();
+    assert_eq!(
+        painel.playback.map(|saida| saida.name),
+        Some("caixas-da-mesa".to_owned())
+    );
+    assert_eq!(
+        painel.taxas,
+        DeviceRates {
+            capture_hz: 48_000,
+            playback_hz: 48_000,
+        }
+    );
+    assert!(
+        sessao.restos.iter().all(Vec::is_empty),
+        "amostras do aparelho de antes ficaram a caminho do de agora; elas \
+         saem como um estalo no primeiro instante do aparelho novo"
+    );
+    assert!(
+        !sessao.sem_laco_possivel,
+        "havia laço possível com este aparelho"
+    );
+}
+
+#[test]
+fn um_aparelho_que_abre_e_nao_da_laco_nao_e_desenhado_como_funcionando() {
+    // O caminho estreito: o aparelho abre, e o reamostrador recusa as taxas
+    // dele. Era o único em que o painel já tinha sido escrito como
+    // «funcionando», com o nome do aparelho novo, e o laço encerrava depois —
+    // a pessoa ficava sem som nenhum lendo normalidade na tela. É a forma
+    // pequena de «o produto sabe e não conta».
+    let mut sessao = SessaoDeVoz::comecou_em("fone-usb");
+
+    sessao.maquina.padrao = Some("aparelho-de-taxa-impossivel");
+    sessao.o_cpal_avisa(cpal::ErrorKind::DeviceChanged);
+    sessao.voltas_por(0.0, 500.0);
+
+    assert!(
+        sessao.sem_laco_possivel,
+        "o laço seguiu com um aparelho cujas taxas o reamostrador recusa"
+    );
+    assert_eq!(
+        sessao.painel().estado,
+        EstadoDoAparelho::Perdido,
+        "a tela diz «funcionando» sobre um aparelho que não produz som nenhum"
     );
 }

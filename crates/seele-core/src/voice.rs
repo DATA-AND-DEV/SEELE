@@ -407,6 +407,13 @@ pub trait AparelhosAbertos {
     fn saida(&self) -> Option<PlaybackDevice>;
     /// A que taxas ele abriu, que é o que dimensiona o laço inteiro.
     fn taxas(&self) -> DeviceRates;
+
+    /// Quantos quadros cabem no anel de saída que ele abriu.
+    ///
+    /// Aqui e não como número solto porque é dele que sai a reserva que o
+    /// compasso segura: um aparelho com anel menor pede outra reserva, e
+    /// reaproveitar a do anterior é o anel encostando no fundo para sempre.
+    fn capacidade_de_saida(&self) -> usize;
 }
 
 impl AparelhosAbertos for AudioIo {
@@ -423,6 +430,10 @@ impl AparelhosAbertos for AudioIo {
             capture_hz: self.capture_rate_hz,
             playback_hz: self.playback_rate_hz,
         }
+    }
+
+    fn capacidade_de_saida(&self) -> usize {
+        self.to_device.buffer().capacity()
     }
 }
 
@@ -1385,6 +1396,85 @@ fn recomecar_no_aparelho_novo(
     Some(dimensoes)
 }
 
+/// O que uma troca conseguida entrega ao laço.
+///
+/// O aparelho aberto e as dimensões dele **juntos**, porque quem recebe um sem
+/// o outro é quem toca no aparelho novo com o reamostrador do velho.
+pub struct TrocaFeita<A> {
+    /// O aparelho que abriu. O laço larga o que tinha e passa a ler deste.
+    pub aberto: A,
+    dimensoes: Dimensoes,
+}
+
+/// O que a volta do laço descobriu sobre o aparelho.
+pub enum PassoDoAparelho<A> {
+    /// Nada aconteceu com o aparelho. O caso comum, e não é falha.
+    Segue,
+    /// Um aparelho novo abriu e já está dimensionado.
+    ///
+    /// Numa caixa porque o caso comum é [`Self::Segue`], devolvido a cada volta
+    /// do laço: sem a caixa, toda volta carregaria de volta o tamanho de dois
+    /// reamostradores para dizer «nada aconteceu». A alocação cai na volta em
+    /// que o aparelho mudou, que é a volta em que um endpoint acabou de ser
+    /// aberto — ela não se compara ao que já custou ali.
+    Reaberto(Box<TrocaFeita<A>>),
+    /// O aparelho abriu e o reamostrador recusou as taxas dele.
+    ///
+    /// Não há laço possível: o painel já foi avisado e quem chama encerra.
+    SemLacoPossivel,
+}
+
+/// A volta do laço no que diz respeito ao aparelho, inteira.
+///
+/// # Por que ela existe em vez de morar dentro de `pipeline`
+///
+/// Porque morando lá dentro ela não tinha teste de comportamento nenhum. O
+/// ciclo tinha o seu, o redimensionamento tinha o seu, e a **composição** dos
+/// dois — ler o aviso, reabrir, redimensionar junto, largar o que era do
+/// aparelho antigo e reacertar o relógio, nessa ordem — só existia na ordem em
+/// que o laço as chamava, e nenhum teste alcança o laço: ele tem `cpal` de um
+/// lado e um socket QUIC do outro. O teste de conformidade da troca refazia
+/// essa composição à mão, e um teste que refaz o que ele deveria provar prova o
+/// teste. Agora é esta função que ele conduz, e ela é a mesma que roda em
+/// produção; o que sobra do outro lado do traço é só a atribuição das peças
+/// devolvidas — e um `cpal` que nenhuma máquina de CI tem como exercer.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "são os locais do próprio laço; uma estrutura para agrupá-los \
+              existiria só para o lint e teria de ser desmontada dos dois lados"
+)]
+pub fn seguir_o_aparelho<R>(
+    acompanhamento: &mut Acompanhamento,
+    aviso: AvisoDeAparelho,
+    relogio_ms: f64,
+    abridor: &mut R,
+    painel: &Mutex<EstadoDoAudio>,
+    restos: [&mut Vec<f32>; 4],
+    playout: &mut PlayoutClock,
+    agora: Instant,
+) -> PassoDoAparelho<R::Aberto>
+where
+    R: Reabertura,
+    R::Aberto: AparelhosAbertos,
+{
+    let Some(aberto) = acompanhamento.passo(aviso, relogio_ms, abridor, painel) else {
+        return PassoDoAparelho::Segue;
+    };
+    let taxas = aberto.taxas();
+    let Some(dimensoes) = recomecar_no_aparelho_novo(
+        painel,
+        taxas.capture_hz,
+        taxas.playback_hz,
+        aberto.capacidade_de_saida(),
+        restos,
+        playout,
+        agora,
+    ) else {
+        return PassoDoAparelho::SemLacoPossivel;
+    };
+    PassoDoAparelho::Reaberto(Box::new(TrocaFeita { aberto, dimensoes }))
+}
+
 /// The whole loop, on its own thread.
 #[allow(
     clippy::too_many_lines,
@@ -1479,36 +1569,35 @@ async fn pipeline(
         // o caso comum. Primeiro de tudo porque capturar e tocar num aparelho
         // que já foi embora é gastar uma volta inteira para produzir silêncio.
         let relogio_ms = started.elapsed().as_secs_f64() * 1000.0;
-        if let Some(novo) = acompanhamento.passo(
+        match seguir_o_aparelho(
+            &mut acompanhamento,
             io.counters.aviso_de_aparelho(),
             relogio_ms,
             &mut abridor,
             &aparelhos,
+            [&mut pending, &mut captured, &mut at_48k, &mut for_device],
+            &mut playout,
+            Instant::now(),
         ) {
-            io = novo;
-            let Some(novas) = recomecar_no_aparelho_novo(
-                &aparelhos,
-                io.capture_rate_hz,
-                io.playback_rate_hz,
-                io.to_device.buffer().capacity(),
-                [&mut pending, &mut captured, &mut at_48k, &mut for_device],
-                &mut playout,
-                Instant::now(),
-            ) else {
-                return;
-            };
-            to_pipeline = novas.para_o_laco;
-            to_device = novas.para_o_aparelho;
-            anel_de_saida = novas.anel;
-            ritmo = novas.ritmo;
-            ritmo_avisado = false;
+            PassoDoAparelho::Segue => {}
+            // O painel já diz que não há laço possível; ver
+            // `EstadoDoAudio::sem_laco_possivel`.
+            PassoDoAparelho::SemLacoPossivel => return,
+            PassoDoAparelho::Reaberto(troca) => {
+                io = troca.aberto;
+                to_pipeline = troca.dimensoes.para_o_laco;
+                to_device = troca.dimensoes.para_o_aparelho;
+                anel_de_saida = troca.dimensoes.anel;
+                ritmo = troca.dimensoes.ritmo;
+                ritmo_avisado = false;
 
-            tracing::info!(
-                microfone = ?io.capture.as_ref().map(|aparelho| &aparelho.name),
-                saida = ?io.playback.as_ref().map(|aparelho| &aparelho.name),
-                estado = ?acompanhamento.estado(),
-                "o aparelho de áudio mudou; a voz foi reaberta no aparelho de agora"
-            );
+                tracing::info!(
+                    microfone = ?io.capture.as_ref().map(|aparelho| &aparelho.name),
+                    saida = ?io.playback.as_ref().map(|aparelho| &aparelho.name),
+                    estado = ?acompanhamento.estado(),
+                    "o aparelho de áudio mudou; a voz foi reaberta no aparelho de agora"
+                );
+            }
         }
 
         // ---- receive ----
@@ -1905,8 +1994,9 @@ mod tests {
     ///
     /// Ler o fonte porque não há tipo que expresse «este laço chama aquela
     /// função». É o mesmo recurso do guarda de ordem logo acima, pela mesma
-    /// razão: o teste de conformidade refaz a volta do laço à mão, então ele
-    /// prova o ciclo e não prova que alguém o conduz.
+    /// razão: o teste de conformidade conduz [`seguir_o_aparelho`], que é a
+    /// decisão inteira, mas nem ele nem tipo nenhum alcança a **chamada** dela
+    /// aqui dentro — e sem a chamada a decisão inteira não roda para ninguém.
     ///
     /// A âncora é o **laço**, e não o nome da função que o contém: renomear
     /// `pipeline` ou mudar a forma como ela fecha não faz este guarda entrar em
@@ -1935,8 +2025,8 @@ mod tests {
         };
         let depois_do_laco = &programa[laco..];
         assert!(
-            depois_do_laco.contains("acompanhamento.passo("),
-            "o laço de áudio deixou de conduzir o acompanhamento do aparelho.\n\
+            depois_do_laco.contains("seguir_o_aparelho("),
+            "o laço de áudio deixou de conduzir o passo do aparelho.\n\
              O supervisor volta a ser código morto e a troca de microfone ou de \
              fone feita no sistema operacional volta a só valer depois de \
              reiniciar o aplicativo."

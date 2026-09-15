@@ -36,10 +36,6 @@ async fn start(observers: Vec<String>) -> Result<SocketAddr> {
         observers,
         ..ServerConfig::default()
     };
-    // Pendência 29: uma vaga por thread de teste, para que os servidores de
-    // verdade deste crate não saturem a máquina e queimem o prazo do
-    // `connect` de quem estiver ao lado. Ver `seele_conformance::vaga`.
-    seele_conformance::vaga();
     let server = Daemon::bind(config).await?;
     let address = server.local_addr()?;
     tokio::spawn(async move {

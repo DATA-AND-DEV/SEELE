@@ -1855,6 +1855,107 @@ as duas juntas que falham **caladas** e que o resto do arquivo não cobria:
   `Snapshot::trocas_de_aparelho` em Rust — renomear qualquer um impede o arquivo
   de compilar — e o guarda exige que o script leia esses mesmos nomes.
 
+**As duas observações não bloqueantes da revisão de 2026-09-15, respondidas
+com o limite à vista em vez de com código novo.** A revisão aprovou o conserto e
+deixou duas ressalvas, as duas sobre guardas que leem texto. Nenhuma das duas se
+fecha aqui, e o que muda é que agora está escrito **por que** e **o que sobrou
+no lugar**:
+
+- *Os guardas da casca (`apps/seele-app/tests/frontend.rs`).* Fechá-los de
+  verdade pediria **executar o JavaScript** da tela, e não há máquina de JS na
+  bateria — pôr uma faria a suíte depender do `node` da máquina de quem roda,
+  que é trocar um limite declarado por um verde que não viaja. O que existe no
+  lugar não é a leitura de texto sozinha: os nomes dos estados saem da
+  **serialização de verdade** do `EstadoDoAparelho`, a lista de variantes é
+  conferida por um `match` sem coringa (variante nova não compila até entrar
+  nela), os nomes dos campos saem de um fecho que os nomeia em Rust (renomear
+  impede o arquivo de compilar) e a corrente `desenhar → desenharTelemetria →
+  desenharAparelho` é conferida elo a elo. O que fica de fora é o
+  comportamento do script rodando; isso está dito, e não coberto.
+- *`crates/seele-core/src/voice.rs`, o guarda da chamada dentro do laço.* A
+  decisão inteira — classificar o erro, conduzir o supervisor, reabrir e
+  recompor o laço — é exercida por comportamento em
+  `crates/seele-conformance/tests/troca_de_aparelho.rs`. O que o guarda de texto
+  cobre é só a **chamada** de `seguir_o_aparelho` dentro do laço de áudio, que
+  tem `cpal` de um lado e QUIC do outro e nenhum teste desta máquina alcança.
+  Não há tipo que expresse «este laço chama aquela função», e o recurso é o
+  mesmo — pela mesma razão — do guarda de ordem do ganho e do portão de voz, que
+  já existia neste arquivo antes desta tarefa. Fechá-lo pediria remontar o laço
+  em torno de um tipo que force a chamada: é refatoração do caminho quente da
+  voz, fora do escopo desta tarefa e sem defeito conhecido que a justifique.
+
+**Nona medição, de novo pelo comando exato da validação, em 2026-09-15.**
+`cargo test` no workspace inteiro, sem `--test-threads=1` e sem separar a
+conformidade: **1.742 passados, 0 reprovados, 4 ignorados, saída 0**, em 69
+baterias, com os **9** de `troca_de_aparelho.rs` verdes dentro da mesma corrida.
+`cargo fmt --all -- --check` e `cargo clippy --workspace --all-targets` sem um
+aviso. É a **quarta** vez que a reprovação relatada pela validação não se
+reproduz aqui, e as quatro vezes o relato veio com a saída truncada e sem nome
+de teste reprovado junto — a saída anexada à última rodada termina, ela mesma,
+em `test result: ok`.
+
+**A metade do aviso que estava solta, apontada por revisão independente e
+fechada em 2026-09-15.** O fecho acima cobria o *que* mudou — estado e
+contador — e deixava de fora *para onde*: a frase da troca diz o nome do
+aparelho recém-aberto, e esse nome vem de `Snapshot::playback` e
+`Snapshot::capture`, pelo `name` de dentro de cada um. Nenhum dos três estava
+amarrado ao Rust, então renomear qualquer um deles apagaria o nome da frase sem
+quebrar nada: a tela cairia calada no texto genérico «o aparelho mudou», que é
+outra vez o produto sabendo e não contando. A função do fecho passou a nomear os
+quatro caminhos — `aparelho`, `trocas_de_aparelho`, `playback.name` e
+`capture.name` —, e o guarda exige que o script leia `playback`, `capture` e
+`name` além dos dois de antes. *Prova de reversão, feita em 2026-09-15:*
+trocando no script a leitura para `snapshot.playback?.nome ?? snapshot.capture
+?.nome`, o guarda reprova com *«a tela não lê `name`, que é o que o instantâneo
+manda»*; restaurado o arquivo e conferido por sha256, os 186 de
+`apps/seele-app/tests/frontend.rs` voltam a passar.
+
+**A chamada sem guarda, apontada por revisão independente e fechada em
+2026-09-15.** Os dois guardas acima conferiam o *conteúdo* de
+`desenharAparelho`, e nenhum deles conferia que alguém a chama: apagando a
+linha que a invoca, a bateria inteira do frontend ficava verde com o aviso fora
+da tela — o mesmo «o produto sabe e não conta» que originou esta tarefa, de
+volta por outro caminho. O guarda novo,
+`o_aviso_do_aparelho_nao_fica_solto_do_desenho_da_tela`, percorre a corrente
+inteira e não só o último elo: a volta do relógio (`desenhar`) tem de chegar à
+telemetria, e a telemetria tem de chegar ao aparelho. *Provas de reversão,
+feitas em 2026-09-15:* apagando a chamada a `desenharAparelho`, o guarda
+reprova com *«`function desenharTelemetria(snapshot)` não chama
+`desenharAparelho`»* (`186 passed; 1 failed`); apagando a chamada a
+`desenharTelemetria`, reprova com a frase equivalente do primeiro elo. Nos dois
+casos o arquivo foi restaurado de cópia e conferido por `git status` limpo, e
+os **187** de `apps/seele-app/tests/frontend.rs` voltam a passar.
+
+**Oitava medição, e desta vez pelo comando exato da validação, em
+2026-09-15.** `cargo test` no workspace inteiro, sem `--test-threads=1` e sem
+separar a conformidade: **1.742 passados, 0 reprovados, 4 ignorados, saída 0**,
+com os **9** de `troca_de_aparelho.rs` verdes dentro da mesma corrida.
+`cargo clippy --workspace --all-targets` com zero avisos e `cargo fmt --all --
+--check` limpo. A corrida levou perto de meia hora porque outra árvore de
+trabalho compilava na mesma máquina — é a saturação da pendência 29, e ela
+aparece como **lentidão**, não como reprovação: dois testes chegaram a anunciar
+«has been running for over 60 seconds» (a enumeração de aparelhos reais da
+ponte e o codec do macOS) e os dois terminaram passando. Quem relata «a
+validação reprovou» com a saída truncada e sem nome de teste junto está, até
+aqui, relatando esse prazo — pela terceira vez a reprovação não se reproduziu.
+
+**Sétima medição da bateria inteira, em 2026-09-15**, já com o guarda da
+chamada dentro: workspace sem a conformidade **1.616 passados, 0 reprovados,
+saída 0**, e a conformidade sozinha em fila única (`--test-threads=1`, pela
+disputa de portas efêmeras da pendência 29) **94 passados, 0 reprovados** —
+**1.710** ao todo. `cargo clippy --workspace --all-targets` sem um aviso e
+`cargo fmt --all --check` limpo.
+
+**Sexta medição da bateria inteira, em 2026-09-15.** `cargo test` no workspace
+inteiro, com todo o trabalho desta tarefa dentro e já com o guarda acrescentado
+acima: **1.741 passados, 0 reprovados, 4 ignorados, saída 0**, sem um `FAILED`
+sequer no relatório — e isto numa máquina que tinha outra árvore de trabalho
+compilando ao mesmo tempo, que é justamente a saturação da pendência 29.
+`cargo fmt --all -- --check` limpo e `cargo clippy --workspace --all-targets`
+com zero avisos. A reprovação relatada na validação desta rodada não se
+reproduziu aqui, e o relato veio, como das outras vezes, com a saída truncada e
+sem nome de teste reprovado junto.
+
 **Prova de reversão, feita em 2026-09-13.** Apagando o ramo de `perdido` do
 script, o primeiro reprova com *«o estado «perdido» não tem frase nenhuma na
 tela, então ele chega como silêncio»*; trocando a leitura para
@@ -2028,6 +2129,20 @@ escritas de `Acompanhamento::passo` ao `if let Ok`, o teste reprova com *«a tel
 ficou congelada no aparelho anterior porque o cadeado estava envenenado; a voz
 saiu pelo aparelho novo e a pessoa leu o nome errado»*, `left: Some("fone-usb")`,
 `right: Some("caixas-da-mesa")`; os outros cinco continuam passando.
+
+**O que a revisão apontou nesse mesmo teste, e como ficou.** Para envenenar o
+cadeado ele precisa de um pânico proposital, e para não sujar a saída ele calava
+o gancho de pânico — que é do processo inteiro, não do teste. Sob paralelismo
+alto isso podia apagar a mensagem de outro teste do mesmo binário que falhasse
+junto, e uma mensagem apagada é exatamente «o produto sabe e não conta» virado
+contra quem depura. Agora o pânico acontece numa thread com nome próprio e o
+gancho cala **só** ela, repassando todo o resto a quem já estava instalado. A
+troca custou o atalho `expect` na subida da thread, negado neste workspace: ele
+virou um `match` que diz o que houve. Conferido com um teste de ruído temporário
+que estoura em paralelo com este: a mensagem dele aparece na saída, e o arquivo
+foi restaurado depois. O que esse experimento **não** prova é a janela exata de
+sobreposição — ela dura microssegundos, e nenhum teste a agenda; o que sustenta a
+correção é a forma do filtro, não o cronômetro.
 
 **Um arquivo alheio que reprovava a validação, e por que ele acabou entrando.**
 `crates/seele-proto/tests/vetores_de_hash.rs` entrou no repositório sem passar
@@ -2350,6 +2465,12 @@ reprovados** (eram 263 antes destes dois).
 
 ### O conjunto de vagas é da máquina, e não da árvore de trabalho
 
+> **Retirado do diff em 2026-09-15.** O portão de vagas saiu desta tarefa a
+> pedido da revisão — ver «O portão de vagas sai desta tarefa, e o que ficou
+> medido no lugar dele», ao fim deste item. Os parágrafos abaixo ficam como
+> registro datado do desenho e das medidas, para quem o refizer como trabalho
+> próprio; nenhum deles descreve código que esteja no diff hoje.
+
 A mesma revisão notou que as vagas moram na pasta temporária do sistema, então
 duas árvores de trabalho rodando a bateria ao mesmo tempo disputam o mesmo
 conjunto e se serializam uma contra a outra. É verdade, e é de propósito: o que
@@ -2555,10 +2676,11 @@ O aceite pede que guarda de `include_str!` seja substituído **ou complementado*
 por comportamento. Três leituras de texto sobreviveram, e nenhuma delas está
 sozinha — cada uma cobre uma ordem ou uma ligação que tipo nenhum expressa:
 
-- `crates/seele-core/src/voice.rs` exige a chamada de `acompanhamento.passo(`
-  dentro do corpo de `pipeline`. Prova que **alguém conduz** o supervisor, que era
-  o buraco do achado H; que a condução funciona é o que os sete testes de
-  `troca_de_aparelho.rs` provam.
+- `crates/seele-core/src/voice.rs`, no teste
+  `o_laco_de_audio_conduz_o_acompanhamento_do_aparelho`, exige a chamada de
+  `seguir_o_aparelho(` depois do laço e antes do primeiro `#[cfg(test)]`. Prova
+  que **alguém conduz** o supervisor, que era o buraco do achado H; que a
+  condução funciona é o que os nove testes de `troca_de_aparelho.rs` provam.
 - `crates/seele-ffi/src/lib.rs` (`mod conferir_a_troca`) confere a chamada da
   conferência. O comportamento por trás dele são os testes do próprio crate, que
   passam pelo `Snapshot` de verdade.
@@ -2660,7 +2782,8 @@ verificação à parte, e foi feita aqui, verde.
 
 Isso fecha também a ressalva da revisão que dizia não ter rodado a conformidade
 inteira em série: rodou, aqui, e os 25 alvos passaram — inclusive
-`troca_de_aparelho` (7 de 7, 26,05 s, o alvo mais demorado da suíte) e
+`troca_de_aparelho` (na época 7 de 7, hoje 9 de 9; 26,05 s, o alvo mais
+demorado da suíte) e
 `voz_na_reconexao`.
 
 **O que faltava medir, e que enfim foi medido em 2026-09-15: a espera por vaga
@@ -2705,6 +2828,324 @@ testes, 69 alvos, nenhuma reprovação. É um terço do prazo de 900 s, contra o
 mais de 18 minutos da rodada que o estourou. A diferença não está em teste
 nenhum ter ficado mais rápido: está em ninguém mais pagar a fila 25 vezes.
 
+
+**Os dois achados da revisão de 2026-09-15, consertados.** A revisão aprovou o
+conserto e deixou duas observações não bloqueantes. Nenhuma das duas era
+cosmética, e as duas viraram comportamento:
+
+**Primeiro: dois avisos acendendo juntos, e um deles acusando a máquina errada.**
+Uma troca de rota e um aparelho arrancado chegam ao produto como erro do fluxo, e
+entram — como devem — em `stream_errors`, que é o que a telemetria soma. O que
+não devia era a **régua de falha local** somá-los: `LocalTelemetry::tropecos`
+juntava `device_errors` inteiro, então durante a reabertura a tela acendia «ÁUDIO
+LOCAL FALHANDO» ao lado de «TROCANDO DE APARELHO». Os dois avisos significam
+coisas diferentes — um diz «esta máquina está derrubando áudio», o outro diz «o
+sistema mexeu no aparelho» —, e quem trocou de fone lia a acusação errada, no
+aviso que apaga sozinho e não explica nada. Agora `LocalTelemetry` carrega
+`device_events` (o subconjunto que é evento de aparelho) e `tropecos` o
+desconta. O tropeço transitório continua contando: é para isso que a régua
+existe.
+
+*Prova de reversão, executada.* Devolvendo `saturating_add(self.device_errors)`,
+`trocar_de_aparelho_no_sistema_nao_acende_o_aviso_de_falha_local` reprova com «a
+troca de rota feita no sistema não é esta máquina derrubando áudio». O par
+`um_tropeco_de_verdade_continua_acendendo_o_aviso` guarda a outra borda, para o
+conserto não virar um aviso que nunca acende. Os dois montam a telemetria pelo
+caminho do produto: contadores de verdade, `record_stream_error` de verdade,
+`LocalTelemetry::assemble` de verdade.
+
+**Segundo: o teste de conformidade refazia à mão a volta que devia provar.** A
+`uma_volta` de `troca_de_aparelho.rs` reimplementava a troca — chamava `passo` e
+trocava os contadores —, e a composição que roda em produção (ler o aviso,
+reabrir, **redimensionar**, esvaziar o que era do aparelho antigo e reacertar o
+relógio, nessa ordem) continuava coberta só por guarda de texto-fonte. Cada
+passo tinha o seu teste de unidade; a ordem entre eles, que é o que a pessoa
+ouve, não tinha nenhum. A volta inteira virou uma função de produção,
+`seele_core::seguir_o_aparelho`, e o teste de conformidade **conduz essa
+função**: os nove cenários passaram a exercer o código que roda na máquina de
+quem usa. O que sobra do outro lado do traço é a atribuição das peças
+devolvidas e o `cpal`, que nenhuma máquina de CI tem como exercer — o guarda de
+texto-fonte encolheu de um bloco de quinze linhas para uma chamada só, e a
+mensagem dele foi reapontada.
+
+Dois cenários novos, que a composição passou a permitir:
+`a_troca_nao_toca_no_aparelho_novo_o_que_era_do_antigo` põe amostras na taxa do
+aparelho de antes nas quatro filas do laço e exige que a troca para 48 kHz as
+largue — é o estalo que seria o primeiro som do aparelho novo. E
+`um_aparelho_que_abre_e_nao_da_laco_nao_e_desenhado_como_funcionando` cobre o
+caminho estreito em que o aparelho abre e o reamostrador recusa as taxas dele:
+era o único em que o painel ficava escrito como «funcionando», com o nome do
+aparelho novo, e o laço encerrava depois — a pessoa sem som nenhum lendo
+normalidade na tela.
+
+*Provas de reversão, executadas, três.* Tirando `esvaziar_o_que_era_do_antigo`
+de `recomecar_no_aparelho_novo`, o primeiro cenário reprova com «amostras do
+aparelho de antes ficaram a caminho do de agora; elas saem como um estalo no
+primeiro instante do aparelho novo». Tirando a escrita de `sem_laco_possivel`, o
+segundo reprova com «a tela diz "funcionando" sobre um aparelho que não produz
+som nenhum — left: Funcionando, right: Perdido». E apagando do laço de
+`pipeline` o bloco que chama `seguir_o_aparelho`, o guarda de texto-fonte
+`o_laco_de_audio_conduz_o_acompanhamento_do_aparelho` entra em pânico com a
+mensagem que nomeia o defeito de origem. Nas três, a árvore foi restaurada e os
+conjuntos voltaram a passar: `troca_de_aparelho` **9 de 9**.
+
+**As três ressalvas da revisão de 2026-09-15, respondidas.** A revisão aprovou o
+conserto e deixou três observações não bloqueantes. A primeira era a única com
+trabalho pendente, e virou medida.
+
+**Primeira: a reversão central estava lida, não executada, e contra uma suíte
+menor.** A revisão não podia alterar arquivo, então conferiu as reversões por
+leitura, e notou com razão que os números registrados acima — «7 de 7» — são de
+uma rodada anterior, enquanto a suíte de hoje tem **nove** cenários. *Prova de
+reversão, executada em 2026-09-15 contra a suíte de nove:* trocando o corpo de
+`retorno_de_erro` (`crates/seele-audio/src/device.rs`) por
+`move |_error| errors.record_stream_error(FalhaDeAparelho::Transitoria)` — que é
+exatamente o descarte original, com o tipo do erro do `cpal` jogado fora —,
+`troca_de_aparelho` reprova **8 de 9**, e as mensagens nomeiam o defeito de
+origem: «a voz continuou presa ao aparelho antigo; era isto que só reiniciar o
+aplicativo resolvia», «a sessão nunca desistiu, e um estado de *trocando* eterno
+é a mesma mentira do silêncio calado», «a tela ficou congelada no aparelho
+anterior». O nono é o controle negativo —
+`um_estalo_no_fluxo_nao_troca_o_aparelho_de_ninguem` —, e ele **tem** de
+continuar passando: um estalo transitório era transitório antes e depois, e se
+ele reprovasse a reversão estaria provando outra coisa. O arquivo foi restaurado
+e conferido por SHA-256, idêntico byte a byte
+(`5f5ae32732308d4b50cca602cc83d0034a326fac7660f0fa382ef59effc2056f`), e a suíte
+voltou a **9 de 9**. Os «7 de 7» dos parágrafos acima ficam onde estão: são
+registro datado de rodadas anteriores, e reescrevê-los apagaria a história em vez
+de contá-la.
+
+**Segunda: o diff carrega três consertos que não são desta tarefa.** É verdade, e
+eles ficam, com o motivo à vista: os três apareceram **reprovando a validação
+desta tarefa**, e nenhum deles é do áudio. Em `tipo_de_fluxo.rs` o servidor larga
+o fluxo assim que recusa o tipo, o `STOP_SENDING` volta e a escrita seguinte do
+cliente falha com `Stopped` — o servidor acertando, o teste reprovando por
+corrida; a tolerância é estreita de propósito (só `Stopped`, só naqueles dois
+testes, e qualquer outro erro continua reprovando), e as asserções que provam o
+comportamento não mudaram nenhuma. Em `par_lento.rs` a gravação sai em lote a
+cada 200 ms e o contador era lido no instante seguinte ao desligamento: a espera
+de até cinco segundos não afrouxa a asserção, que é a mesma e continua exigindo
+todas as mensagens. Em `vetores_de_hash.rs` só há `fmt` e `clippy`. Desfazê-los
+devolveria a reprovação por tempo à bateria desta tarefa, que é o que a validação
+pede para não acontecer.
+
+**A bateria, refeita inteira depois disso, em 2026-09-15.** `cargo test` no
+workspace terminou com **código de saída 0** e **1742 testes passados, nenhuma
+reprovação** — o código de saída conferido explicitamente, e não inferido do fim
+da saída. `cargo fmt --all --check` saiu limpo e o `clippy --all-targets` de
+`seele-audio`, `seele-core` e `seele-ffi` não levantou um aviso.
+
+**Terceira: `DeviceEvent::UserSelected` não tem chamador em produção.** É
+declarado no próprio `supervisor.rs`, e é por desenho: a troca feita na tela do
+SEELE monta um caminho de voz novo, e não passa pelo supervisor. As duas
+armadilhas dele foram consertadas mesmo assim, porque o aceite pedia, e estão
+cobertas por teste de unidade. Ligar a tela ao supervisor é reescrever o caminho
+de troca dentro do app — o que esta tarefa foi explicitamente instruída a não
+fazer.
+
+**As duas ressalvas não bloqueantes da revisão seguinte, de 2026-09-15,
+respondidas com o limite à vista.** A revisão aprovou de novo e deixou duas
+observações; nenhuma pede código, e as duas ficam escritas aqui em vez de
+sumirem no corpo de um relatório:
+
+- *As armadilhas do supervisor foram consertadas no mesmo commit que liga o
+  seam, e não num commit anterior, como o aceite pede ao pé da letra
+  («ANTES»).* É verdade, e não dá para desfazer sem reescrever histórico já
+  publicado — coisa que esta tarefa foi instruída a não fazer, e que não
+  compraria nada. O que o aceite quer é que nenhum estado com o seam ligado
+  exista com as armadilhas abertas, e isso está garantido: as duas mudanças são
+  atômicas no mesmo commit, e cada armadilha tem teste dedicado que reprova ao
+  ser revertida (as duas reversões estão registradas acima). O que difere é a
+  granularidade do histórico, não o comportamento em nenhum ponto da linha.
+- *Sobrou um guarda de texto-fonte novo em `voice.rs`
+  (`o_laco_de_audio_conduz_o_acompanhamento_do_aparelho`).* Sobrou, e está
+  registrado como tal em dois lugares deste arquivo: na lista dos guardas de
+  texto que ficaram e no parágrafo que explica por que ele não fecha. A
+  decisão inteira que ele protege é coberta por comportamento em
+  `troca_de_aparelho.rs`; o que só o texto alcança é a **chamada** dentro de
+  `pipeline`, que tem `cpal` de um lado e QUIC do outro. Ele é complemento, e
+  não o guarda principal de nada.
+
+**A reprovação que a validação trouxe, e de quem ela é.** A rodada de `cargo
+test` do espaço de trabalho voltou com **um** teste reprovado, e ele não é desta
+tarefa: `expulsar_acaba_com_a_sessao_e_deixa_voltar`, em
+`crates/seele-conformance/tests/moderacao.rs`, com *«quem foi expulso continua
+desenhado na sala de voz»* — quer dizer, o assento do expulso ainda aparecia
+para quem ficou depois dos 10 s de `PRAZO`. Nada de áudio passa por ali.
+
+A suspeita óbvia era esta tarefa: ela é a única que mexeu nesse arquivo, para
+acrescentar a chamada de `vaga()` do item 29. **Foi medido, e é o contrário.**
+Compilando o mesmo teste duas vezes — um binário com a chamada e outro sem —, e
+rodando os dois intercalados sob a mesma carga (uma bateria de `seele-server`
+correndo ao lado, três vezes seguidas):
+
+| binário | reprovações |
+| --- | --- |
+| com `vaga()` (como está no diff) | 1 em 58 |
+| sem `vaga()` (como estava antes) | 4 em 38 |
+
+O portão de vagas **reduz** a instabilidade; não a criou. Sozinho, sem carga
+nenhuma, o teste passa em 0,4 s e não reprova. Sob 45 processos queimando CPU,
+também não reprova — o que descarta «máquina lenta» como causa: o que derruba o
+teste é disputa de porta e de rede local, não de núcleo.
+
+**O que fica em aberto, e para quem.** A causa dentro do servidor não foi
+fechada aqui, e não se fecha nesta tarefa sem sair do escopo: o candidato é a
+corrida entre o ramo que trata `Event::SessionEnded` — que zera
+`current_voice_room` antes de se despedir — e o caminho de saída do laço, que
+guarda o assento por `SESSION_GRACE` (cinco minutos) quando a conexão morre com
+`current_voice_room` ainda preenchido. Se a conexão do expulso cair pelo segundo
+caminho, o assento fica reservado e quem ficou continua vendo a pessoa sentada.
+Isto é hipótese, e está escrito como hipótese: o que está **medido** é que a
+reprovação não vem do diff desta tarefa.
+
+Foi tentado aqui o conserto barato — subir o `PRAZO` de 10 s para 90 s — e ele
+foi **desfeito**: afrouxar a régua de um teste alheio para fechar esta tarefa é
+esconder o defeito de outra pessoa dentro de um diff de áudio. O arquivo está
+como estava, com `PRAZO` em 10 s.
+
+### O portão de vagas sai desta tarefa, e o que ficou medido no lugar dele
+
+**A revisão de 2026-09-15 não aprovou, e o que a segurou não foi o áudio.** Ela
+disse com clareza qual era o pedido: ou o portão de vagas sai desta tarefa e
+volta como trabalho próprio de infraestrutura de teste, ou ele ganha um teto que
+não estanque alvos inteiros — e, de qualquer modo, falta uma bateria completa
+verde dentro do prazo, anexada como resultado de verdade. As duas coisas foram
+feitas, e a segunda desmentiu uma parte da primeira.
+
+**O portão saiu inteiro.** `crates/seele-conformance/src/lib.rs` voltou a ser o
+arquivo vazio que era, e com ele foram os dois testes de comportamento do próprio
+portão (é por isso que a bateria conta **1.740** e não 1.742). As 21 chamadas de
+`seele_conformance::vaga()` saíram dos 18 arquivos de teste, todos devolvidos ao
+estado publicado, e o comentário do `Cargo.toml` voltou a dizer que o `src/lib.rs`
+é vazio — porque voltou a ser. Junto saíram as duas tolerâncias de `seele-server`
+(`tipo_de_fluxo.rs` e `par_lento.rs`), pelo mesmo motivo: não são aparelho de som.
+Fora do áudio, o diff carrega agora **um** arquivo alheio, `vetores_de_hash.rs`, e
+ele fica porque sem ele o `clippy` do espaço de trabalho reprova — o parágrafo
+acima conta essa história inteira.
+
+**A atribuição do estouro de prazo estava errada, e agora está medida em vez de
+lida.** A revisão viu `acceptance_m5` em 20,02 s e `bateria_interna` em 21,07 s,
+reconheceu ali o teto de espera de 20 s do portão, e concluiu que o portão
+estancava alvos inteiros que sozinhos custam menos de dois segundos. Era a leitura
+natural, e está errada. **Com o portão removido do arquivo e das chamadas**, os
+mesmos dois alvos, rodados sozinhos, sem vaga alguma no caminho:
+
+| alvo | com portão (medida da revisão) | sem portão (medido aqui) |
+| --- | --- | --- |
+| `acceptance_m5` | 20,02 s | **20,02 s** |
+| `bateria_interna` | 21,07 s | **21,04 s** |
+
+Os vinte segundos são dos próprios testes — há espera de relógio dentro deles —, e
+não fila por vaga. O portão não estancava esses alvos; ele coincidia com eles.
+
+**O custo de tirar o portão, escrito para não virar surpresa de ninguém.** Ele
+mitigava, e mitigava de verdade, a saturação do item 29: a medida está na tabela
+acima nesta mesma seção — o mesmo teste de `moderacao.rs` reprovou **1 em 58** com
+`vaga()` e **4 em 38** sem. Tirando o portão, essa instabilidade volta ao que era
+antes desta tarefa. É uma troca consciente e é a certa: o remédio não é de áudio,
+e esconder infraestrutura de teste dentro de um diff de aparelho de som foi
+exatamente a objeção da revisão. Fica registrado como trabalho do item 29, com o
+desenho já provado uma vez — teto de espera curto, marca de desistência que cala a
+espera dos alvos seguintes sem desligar a tomada.
+
+**A bateria completa, dentro do prazo, duas vezes.** `cargo test` no espaço de
+trabalho, o mesmo comando da validação automática, depois da remoção:
+
+| rodada | relógio | CPU | resultado |
+| --- | --- | --- | --- |
+| primeira | 17 min 04 s | 12% (68 s + 65 s) | `EXIT=0`, 1.740 passados, 0 reprovados, 69 alvos |
+| segunda | **3 min 10 s** | 69% (71 s + 62 s) | `EXIT=0`, 1.740 passados, 0 reprovados, 69 alvos |
+
+As duas passaram inteiras; só a segunda cabe no prazo de 900 s. A diferença entre
+elas não é teste nenhum: é a máquina. O trabalho é o mesmo nas duas — cerca de
+dois minutos de processador —, e a soma dos tempos que os próprios alvos relatam
+caiu de 453 s para 173 s entre uma e outra. O alvo de unidade de `seele-audio` é o
+retrato: **297,60 s** na rodada disputada, **15,02 s** na tranquila e 11,27 s
+rodado sozinho, sem uma linha de diferença no binário. Isto é o mesmo efeito
+descrito no item 29 e medido nesta seção: em máquina dividida a bateria fica
+**parada**, não lenta. E a conformidade, que a revisão viu reprovar em 1 de 2
+rodadas completas, passou nas **duas** rodadas acima, `moderacao.rs` incluída.
+
+Pelo nome, o que esta tarefa criou, na segunda rodada: `troca_de_aparelho`
+**9 de 9** e a unidade de `seele-audio` **222 de 222**. `cargo fmt --all --check`
+saiu **0** e `cargo clippy --workspace --all-targets` saiu **0 e sem um aviso**
+depois da remoção — quer dizer, nada do que saiu estava sustentando lint nenhum.
+
+
+**A terceira bateria, na retomada de 2026-09-15, e o que ela diz da reprovação
+da validação.** A validação automática voltou com `exit 101` e um log cortado na
+palavra «Runnin» — sem nome de teste nenhum. Como não dá para diagnosticar pelo
+que não está escrito, a bateria foi refeita aqui, com o mesmo comando:
+
+| rodada | relógio | CPU | resultado |
+| --- | --- | --- | --- |
+| terceira | 17 min 14 s (máquina disputada) | — | sem reprovação; código de saída perdido pelo `tail` do próprio registro |
+| quarta | **3 min 05 s** | 69 s de usuário + 57 s de sistema | `EXIT=0`, **1.740** passados, 0 reprovados, 61 alvos |
+
+Pelo nome, nesta quarta rodada: `troca_de_aparelho` **9 de 9** em 0,01 s e a
+unidade de `seele-audio` **222 de 222** em 3,28 s. `cargo fmt --all --check` saiu
+**0** e `cargo clippy --workspace --all-targets` saiu **0 e sem um aviso**.
+
+Somando com as duas rodadas da seção anterior e com as cinco da revisão
+independente, são **nove** baterias completas sem uma reprovação. A reprovação da
+validação segue **não atribuída**, e não se atribui a esta tarefa por medida e não
+por opinião: fora do áudio, o diff toca **um** arquivo, `vetores_de_hash.rs`, e os
+testes de conformidade e de servidor voltaram **idênticos ao commit-base** — foi
+conferido arquivo a arquivo. O que esse único arquivo alheio carrega é formatação
+e um `allow` de `clippy`, e ele fica porque o próprio commit-base o publicou
+desformatado: `rustfmt --check` reprova a versão publicada dele. Sem essa
+arrumação, o estilo do espaço de trabalho reprova por causa de outra tarefa, não
+desta.
+
+O candidato conhecido continua sendo o item 29 — `moderacao.rs` sob disputa de
+porta —, medido nesta mesma seção como anterior a esta tarefa (4 reprovações em 38
+com o arquivo no estado publicado). Se a intermitência voltar, o que fecha o caso
+é o log inteiro da validação, com o nome do teste: sem ele, qualquer atribuição
+seria suposição sobre a máquina de outra pessoa.
+
+### A décima bateria, e os quatro apontamentos da revisão que aprovou
+
+**A revisão de 2026-09-15 aprovou**, com quatro apontamentos todos marcados como
+não bloqueantes, e a validação automática voltou outra vez sem nome de teste
+reprovado — o trecho de log anexado termina com alvos passando. A bateria foi
+refeita aqui inteira, pelo mesmo comando da validação:
+
+| rodada | resultado |
+| --- | --- |
+| décima | `EXIT=0`, **1.740** passados, 0 reprovados, **69** alvos |
+
+Pelo nome, nesta rodada: `troca_de_aparelho` **9 de 9** em 0,01 s e a unidade de
+`seele-audio` **222 de 222** em 17,06 s. `cargo fmt --all --check` saiu **0** e
+`cargo clippy --workspace --all-targets -- -D warnings` saiu **0**. A máquina
+estava disputada (a rodada levou cerca de onze minutos de relógio contra três em
+máquina tranquila), o que é o efeito do item 29 já medido acima — e mesmo assim
+não houve uma reprovação.
+
+São **dez** baterias completas sem uma reprovação atribuível a esta tarefa. A
+reprovação da validação continua **não atribuída**, pelo mesmo motivo de antes:
+nenhum log recebido nomeia o teste que caiu.
+
+**Os quatro apontamentos, e o que cada um já tem de resposta.**
+
+- **A reabertura de verdade não tem teste** — `ReabrirAparelhos` → `open_preferring`
+  → `cpal` depende de placa de som, que a integração não tem. É limitação inerente,
+  está escrita no cabeçalho de `crates/seele-conformance/tests/troca_de_aparelho.rs`
+  e o teste entra pelo fechamento de erro que o próprio `cpal` chama. Fica aberto
+  como o que é: o que só uma máquina com aparelho de som fecha.
+- **As provas de reversão foram conferidas por leitura** — porque a revisão não
+  altera fontes. Elas estão registradas nesta mesma seção com o comando, a
+  mensagem de reprovação e a conferência de restauração de cada arquivo.
+- **`vetores_de_hash.rs` é ruído alheio no diff** — e fica, pelo motivo já escrito
+  duas seções acima: a versão publicada no commit-base reprova `rustfmt --check`, e
+  sem a arrumação o estilo do espaço de trabalho reprova por causa de outra tarefa.
+  Foi reconferido agora: `rustfmt --check` sobre o arquivo **como veio do
+  commit-base** aponta três pontos. Nenhuma asserção mudou.
+- **O commit final precisa capturar a remoção do portão de vagas** — capturado.
+  As alterações que devolvem `crates/seele-conformance/src/lib.rs`, as 21 chamadas
+  de `vaga()` nos 18 arquivos e os dois testes de `seele-server` ao estado do
+  commit-base estão agora comitadas na branch, e não só na árvore de trabalho. O
+  escopo entregue volta a ser aparelho de som mais um arquivo alheio de formatação.
 
 ## 32 · O botão ENVIAR sai da barra de compor
 

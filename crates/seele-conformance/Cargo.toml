@@ -12,8 +12,7 @@ publish.workspace = true
 # link the daemon.
 #
 # Putting the test here keeps that rule intact and gives the exception a name.
-# It ships nothing: every dependency is a dev one, and `src/lib.rs` holds only
-# the slot gate that every test binary of this crate has to share — see `vaga`.
+# It ships nothing: `src/lib.rs` is empty and every dependency is a dev one.
 [dependencies]
 
 [dev-dependencies]

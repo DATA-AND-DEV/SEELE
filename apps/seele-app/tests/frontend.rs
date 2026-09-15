@@ -1075,17 +1075,59 @@ fn a_tela_le_do_instantaneo_os_campos_que_o_rust_realmente_manda() {
     // O fecho abaixo não é enfeite: ele **nomeia os campos em Rust**, então
     // renomear qualquer um deles impede este arquivo de compilar, e quem
     // renomeia é obrigado a passar aqui — e daqui, pelo script.
+    // O estado e o contador dizem **que** o aparelho mudou; quem diz **para
+    // onde** é o nome do aparelho aberto, e é ele que a frase da troca carrega.
+    // Deixá-lo fora deste fecho era deixar metade do aviso solta: renomear
+    // `playback`, `capture` ou o `name` de dentro deles apagaria o nome da
+    // frase sem quebrar nada, e a tela voltaria a dizer só «o aparelho mudou».
     fn _liga_os_dois_lados(
         instantaneo: &seele_ffi::Snapshot,
-    ) -> (seele_ffi::EstadoDoAparelho, u64) {
-        (instantaneo.aparelho, instantaneo.trocas_de_aparelho)
+    ) -> (seele_ffi::EstadoDoAparelho, u64, Option<&str>, Option<&str>) {
+        (
+            instantaneo.aparelho,
+            instantaneo.trocas_de_aparelho,
+            instantaneo.playback.as_ref().map(|onde| onde.name.as_str()),
+            instantaneo.capture.as_ref().map(|onde| onde.name.as_str()),
+        )
     }
     let corpo = body_of(&scripts(), "function desenharAparelho(snapshot)");
 
-    for campo in ["aparelho", "trocas_de_aparelho"] {
+    for campo in [
+        "aparelho",
+        "trocas_de_aparelho",
+        "playback",
+        "capture",
+        "name",
+    ] {
         assert!(
             names(&corpo, campo),
             "a tela não lê `{campo}`, que é o que o instantâneo manda"
+        );
+    }
+}
+
+#[test]
+fn o_aviso_do_aparelho_nao_fica_solto_do_desenho_da_tela() {
+    // Os dois guardas acima conferem o **conteúdo** de `desenharAparelho`, e
+    // nenhum deles confere que alguém a chama. Apagar a chamada deixava a
+    // bateria inteira verde com o aviso fora da tela — o mesmo «o produto sabe
+    // e não conta» que esta tarefa existe para consertar, de volta por outro
+    // caminho.
+    //
+    // Por isso a corrente inteira, e não só o último elo: a volta do relógio
+    // (`desenhar`) tem de chegar à telemetria, e a telemetria tem de chegar ao
+    // aparelho. Cortar qualquer um dos dois apaga o aviso da tela.
+    let elos = [
+        ("function desenhar(snapshot)", "desenharTelemetria"),
+        ("function desenharTelemetria(snapshot)", "desenharAparelho"),
+    ];
+
+    for (de, para) in elos {
+        let corpo = body_of(&scripts(), de);
+        assert!(
+            names(&corpo, para),
+            "`{de}` não chama `{para}`: o estado do aparelho pode ser desenhado \
+             por ninguém, e a tela volta a calar sobre a troca"
         );
     }
 }

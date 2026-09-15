@@ -65,10 +65,6 @@ async fn server(teto: u64) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir
         database: Location::File(banco),
         ..ServerConfig::default()
     };
-    // Pendência 29: uma vaga por thread de teste, para que os servidores de
-    // verdade deste crate não saturem a máquina e queimem o prazo do
-    // `connect` de quem estiver ao lado. Ver `seele_conformance::vaga`.
-    seele_conformance::vaga();
     let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
@@ -360,10 +356,6 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
         observers: vec!["marcela".into()],
         ..ServerConfig::default()
     };
-    // Pendência 29: uma vaga por thread de teste, para que os servidores de
-    // verdade deste crate não saturem a máquina e queimem o prazo do
-    // `connect` de quem estiver ao lado. Ver `seele_conformance::vaga`.
-    seele_conformance::vaga();
     let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
@@ -403,10 +395,6 @@ async fn um_server_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() 
         database: Location::Memory,
         ..ServerConfig::default()
     };
-    // Pendência 29: uma vaga por thread de teste, para que os servidores de
-    // verdade deste crate não saturem a máquina e queimem o prazo do
-    // `connect` de quem estiver ao lado. Ver `seele_conformance::vaga`.
-    seele_conformance::vaga();
     let servidor = Arc::new(Daemon::bind(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);

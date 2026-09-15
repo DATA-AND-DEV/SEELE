@@ -99,8 +99,9 @@ pub use seele_video::modulo::{
 };
 pub use seele_video::{BibliotecaDeVideo, ErroDeVideo};
 pub use voice::{
-    capture_devices, playback_devices, Acompanhamento, AparelhosAbertos, CaptureDevice,
-    DeviceChoice, DeviceRates, EstadoDoAparelho, EstadoDoAudio, PlaybackDevice, Voice, VoiceMode,
+    capture_devices, playback_devices, seguir_o_aparelho, Acompanhamento, AparelhosAbertos,
+    CaptureDevice, DeviceChoice, DeviceRates, EstadoDoAparelho, EstadoDoAudio, PassoDoAparelho,
+    PlaybackDevice, TrocaFeita, Voice, VoiceMode,
 };
 
 /// The surface a shell is allowed to see.

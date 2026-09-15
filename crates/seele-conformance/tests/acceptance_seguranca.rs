@@ -25,10 +25,6 @@ async fn subir(caminho: &std::path::Path) -> Result<(SocketAddr, Arc<Daemon>)> {
         database: Location::File(caminho.to_path_buf()),
         ..ServerConfig::default()
     };
-    // Pendência 29: uma vaga por thread de teste, para que os servidores de
-    // verdade deste crate não saturem a máquina e queimem o prazo do
-    // `connect` de quem estiver ao lado. Ver `seele_conformance::vaga`.
-    seele_conformance::vaga();
     let server = Arc::new(Daemon::bind(config).await?);
     let address = server.local_addr()?;
     let aceitando = Arc::clone(&server);
