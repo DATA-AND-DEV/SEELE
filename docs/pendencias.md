@@ -2538,7 +2538,13 @@ e `InvalidInput`, `PermissionDenied`, `ResourceExhausted`, `UnsupportedConfig` e
 `UnsupportedOperation` estavam classificadas sem prova nenhuma. Com isso, no dia
 em que o `cpal` subir, a variante nova é a única fora da lista, e decidir onde
 ela cai vira revisão de quem sobe a dependência em vez de omissão que passa
-calada. As outras duas ressalvas da revisão — o conjunto de vagas ser da máquina
+calada. A revisão seguinte voltou ao mesmo ponto, e o que faltava era pequeno e
+vale: as dez variantes estavam presas no teste, mas escondidas atrás do `_` no
+próprio `match`. Agora elas estão escritas uma a uma em `classificar`, com o `_`
+atrás delas como rede e não como decisão — o comportamento é o mesmo, e quem
+subir o `cpal` vê a superfície de hoje no lugar onde vai mexer, em vez de
+precisar procurar o teste para descobrir o que já foi decidido. As outras
+duas ressalvas da revisão — o conjunto de vagas ser da máquina
 inteira e a tolerância a `WriteError::Stopped` — já estão justificadas acima, nos
 seus próprios blocos, e a revisão as classificou como efeito fora do escopo desta
 tarefa.

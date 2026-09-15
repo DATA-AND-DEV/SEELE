@@ -136,6 +136,15 @@ pub(crate) fn abrir_entrada(
 /// entendeu custaria um segundo de silêncio sem motivo. As duas famílias que **pedem** reabertura são as que o cabeçalho
 /// de [`crate::supervisor::FalhaDeAparelho`] explica.
 ///
+/// Mesmo assim as variantes de hoje estão **escritas uma a uma** abaixo, e não
+/// escondidas atrás do `_`. A revisão apontou o risco real: com só o coringa, o
+/// dia em que o `cpal` ganhar uma variante que signifique «aparelho ausente»,
+/// ela entra calada como tropeço e o defeito de origem volta sem ninguém ver.
+/// `ErrorKind` é `#[non_exhaustive]`, então nenhum tipo obriga a lista a
+/// crescer — o que dá para fazer é deixar a superfície de hoje à vista de quem
+/// sobe a dependência, para que a variante nova apareça como a única que não
+/// está aqui. O `_` fica atrás dela, como rede e não como decisão.
+///
 /// Mora neste módulo porque é a tradução da fronteira do `cpal`, e é uma das
 /// poucas coisas aqui que um teste alcança sem placa de som: `cpal::Error::new`
 /// é público — e é por isso que ela é pública também. O teste de conformidade
@@ -152,7 +161,21 @@ pub fn classificar(error: &cpal::Error) -> FalhaDeAparelho {
         | cpal::ErrorKind::StreamInvalidated
         | cpal::ErrorKind::HostUnavailable => FalhaDeAparelho::Sumiu,
         // Estalo, disputa, limite, recusa de prioridade, erro não classificado:
-        // contados, e nada mais.
+        // contados, e nada mais. É a superfície do `cpal` 0.18 inteira, escrita
+        // para ficar à vista de quem subir a dependência.
+        cpal::ErrorKind::Xrun
+        | cpal::ErrorKind::DeviceBusy
+        | cpal::ErrorKind::RealtimeDenied
+        | cpal::ErrorKind::BackendError
+        | cpal::ErrorKind::InvalidInput
+        | cpal::ErrorKind::PermissionDenied
+        | cpal::ErrorKind::ResourceExhausted
+        | cpal::ErrorKind::UnsupportedConfig
+        | cpal::ErrorKind::UnsupportedOperation
+        | cpal::ErrorKind::Other => FalhaDeAparelho::Transitoria,
+        // A rede para a variante que ainda não existe. Quem a vir aparecer aqui
+        // decide onde ela cai; até lá, o silêncio de um segundo não é cobrado
+        // de ninguém por um erro que ninguém entendeu.
         _ => FalhaDeAparelho::Transitoria,
     }
 }
