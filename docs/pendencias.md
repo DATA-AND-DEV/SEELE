@@ -1453,6 +1453,66 @@ apagou a pessoa dos presentes, de modo que o desmonte não encontrou mais ningu�
 a quem defender e o contador do processo não andou. As duas reversões foram
 desfeitas e a bateria voltou ao verde com a árvore limpa.
 
+**Remedido em 2026-09-14, na árvore entregue.** A validação anexada à entrega
+anterior era a bateria das ferramentas de publicação — 66 testes de empacotamento
+e release — e não continha um único teste das crates desta pendência; não servia
+de prova. Refeita sobre a árvore atual: `cargo test -p seele-server` termina com
+código 0 e 487 asserções somadas nos nove conjuntos, nenhuma reprovação;
+`cargo test -p seele-conformance -- --test-threads=1` termina com código 0 e 150
+asserções somadas, nenhuma reprovação, com
+`quem_reconecta_antes_de_o_servidor_desistir_da_conexao_velha_continua_no_roster_do_host`
+verde em 28,06 s — o tempo varia alguns décimos entre execuções, porque o teste
+espera o prazo de desistência da conexão velha. `cargo fmt --all --check` limpo e
+`cargo clippy -p seele-server -p seele-conformance --all-targets --all-features
+-- -D warnings` sem aviso. A contagem de 471 registrada acima veio de outra forma
+de somar os conjuntos; o que vale como prova é a saída com código 0 e zero
+reprovações, reproduzida agora.
+
+**Sobre interrupções da máquina, não do código.** Duas execuções desta mesma
+bateria foram cortadas no meio por SIGTERM enviado de fora ao binário de teste
+(uma em `voz_sob_carga`, outra em `acceptance_seguranca`), com o cargo saindo em
+101 sem nenhuma reprovação registrada. Rodados sozinhos, os mesmos testes passam,
+e a bateria inteira passou em seguida com código 0. Um corte por sinal externo
+não é reprovação: quem ler o código 101 precisa conferir se há `signal: 15` na
+saída antes de concluir defeito.
+
+**As duas provas de reversão, reexecutadas agora e não só relembradas.** A
+revisão anterior observou, com razão, que quem revisa não altera fontes e por
+isso não podia reexecutá-las. Foram refeitas nesta passagem, uma de cada vez,
+com a árvore restaurada em seguida e conferida limpa:
+
+| metade desarmada | onde o teste reprova | mensagem |
+|---|---|---|
+| o filtro por sessão ao desocupar o assento | asserção do roster | «a sessão velha, ao morrer, apagou a nova do roster do anfitrião: ["anfitriao"]» |
+| a pergunta de sessão na saída pedida à sala | asserção do contador | «a tarefa da sala não registrou nenhuma saída de sessão velha barrada», com `saida_de_sessao_velha: 0` |
+
+Nas duas, o teste levou os mesmos 28,03 s antes de reprovar — ele espera o prazo
+de desistência da conexão velha, e reprovar depressa seria sinal de que mediu
+outra coisa. Com o guarda de volta, o mesmo teste passa em 28,03 s. Cada metade
+sozinha derruba o teste, o que é a prova de que nenhuma das duas é enfeite.
+
+**A reprovação intermitente de `tela_por_um_par` não é desta entrega, e isso foi
+medido.** Numa execução em série da bateria de conformidade,
+`a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo`
+reprovou em «o servidor apontou um par e não o contou como ocupado». Sozinho, o
+teste passa em 3,66 s; o binário inteiro em série passa em 51,6 s. Em vez de
+deduzir do diff, a atribuição foi medida como a pendência #41 manda — **rodadas
+intercaladas**, uma desta árvore e uma de uma exportação limpa da `main`, para
+que as duas pegassem a mesma carga de máquina:
+
+| árvore | reprovações |
+|---|---|
+| esta entrega | 0 em 10 |
+| `main` limpa, sem este conserto | 1 em 10 |
+
+A base reproduz sozinha o que se viu aqui, e esta árvore não reproduziu nenhuma
+vez: a intermitência é a já registrada em #41, da frente da malha, e não uma
+regressão deste guarda. O diff desta entrega não toca `Pares` fora do fim de
+tela, que só corre quando uma conexão acaba — e no trecho que reprova nenhuma
+acaba. A execução final, em série e com a árvore restaurada, passou inteira:
+487 asserções em `seele-server` e 150 em `seele-conformance`, uma ignorada por
+plataforma, zero reprovações.
+
 ## 12 · Fechada em 2026-08-13 · A conferência da impressão digital do convite
 
 **O que era.** O app lia a impressão digital de um `seele://` e não a conferia:
