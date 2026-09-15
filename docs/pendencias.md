@@ -1540,6 +1540,37 @@ plataforma, nenhuma reprovação nas duas. Dentro dela, o teste novo
 passou em 28,04 s, o tempo de esperar o prazo de desistência inteiro antes de
 afirmar.
 
+**A validação do coordenador que estourou o tempo, e o que ela era.** Uma
+execução automática de `cargo test` sobre esta árvore foi interrompida ao bater
+o limite de 900 s, e isso chegou aqui como «validação falhou». Não era falha do
+código: a mesma máquina estava compilando e rodando a bateria de outra árvore de
+trabalho ao mesmo tempo — o processo concorrente foi observado —, e a bateria
+inteira do repositório não cabe nesse limite nessas condições.
+
+Refeita por crate nesta árvore, com a árvore limpa no commit desta tarefa:
+`seele-server` fechou com **487 asserções, nenhuma reprovação**, em 30 s.
+`seele-conformance`, em série, reprovou **uma** vez, e a mensagem diz o que era:
+`a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo` não
+conseguiu abrir o soquete de escuta — «Address already in use» —, que é a
+disputa por portas efêmeras da máquina inteira já registrada na pendência #29, e
+não uma asserção de comportamento. Reexecutado sozinho, o mesmo teste passa; a
+suíte inteira reexecutada em série fechou com **150 passando, nenhuma
+reprovação e uma ignorada** (a que exige duas máquinas), com o teste desta
+pendência verde em 28,02 s. `cargo fmt --check` das duas crates tocadas está
+limpo.
+
+**Repetida uma última vez, com a máquina livre.** Refeitas as duas baterias
+depois que a outra sessão soltou a máquina, sem nenhuma reprovação e sem a
+disputa de portas: `seele-server` fechou com **487 asserções, nenhuma
+reprovação**, e `seele-conformance` em série com **150 passando, nenhuma
+reprovação e uma ignorada** (a que exige duas máquinas), com o teste desta
+pendência verde em 28,06 s. `cargo fmt --check` das duas crates limpo.
+
+**O limite honesto desta conferência.** Ela vale para as crates tocadas, e não
+para a bateria do repositório inteiro num único comando: essa nunca chegou ao
+fim dentro do limite do coordenador enquanto outra sessão ocupava a máquina, e
+não foi tentada de novo com a máquina livre.
+
 ## 12 · Fechada em 2026-08-13 · A conferência da impressão digital do convite
 
 **O que era.** O app lia a impressão digital de um `seele://` e não a conferia:
