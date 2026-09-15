@@ -160,12 +160,18 @@ pub struct ServerConfig {
     /// A partir de que versão do protocolo o anúncio de MODs sai.
     ///
     /// O padrão é [`seele_proto::mods::VERSAO_DO_ANUNCIO`] e **quase ninguém
-    /// deve mexer nisto**. Existe por uma razão só, e ela tem data de validade:
-    /// enquanto a versão global do protocolo não alcança a do anúncio, nenhum
-    /// par consegue aceitar coisa nenhuma, e sem esta porta o caminho
-    /// verdadeiro — servidor de produção anunciando, cliente de produção
-    /// aceitando — não roda em lugar nenhum, nem em teste. Cada metade ficaria
-    /// provada contra um dublê da outra, que é «existir não é funcionar».
+    /// deve mexer nisto**. Nasceu por uma razão que tinha data de validade, e a
+    /// data passou: enquanto a versão global do protocolo não alcançava a do
+    /// anúncio, nenhum par conseguia aceitar coisa nenhuma, e sem esta porta o
+    /// caminho verdadeiro — servidor de produção anunciando, cliente de
+    /// produção aceitando — não rodava em lugar nenhum, nem em teste.
+    ///
+    /// **Desde 14/09/2026 o padrão já é alcançável** (`PROTOCOL_VERSION` subiu
+    /// para 5 na integração conjunta com a malha), e os testes da costura em
+    /// `crates/seele-conformance/tests/aceite_dos_mods.rs` correm sem tocar
+    /// neste campo. O que sobrou para ele é o outro lado: **subir** o limiar,
+    /// para exercitar o ramo dormente de propósito em vez de deixá-lo apodrecer
+    /// — «existir não é funcionar».
     ///
     /// # O que baixar isto custa
     ///

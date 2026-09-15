@@ -875,6 +875,13 @@ pub struct Server {
     /// [`Self::caminho_bps`]. O que ela decide, e onde: se o portão do ADR 0045
     /// está de pé ou dormente — [`crate::mods::anuncio::o_anuncio_alcanca_alguem`] —
     /// e, quando de pé, qual par é velho demais para ser perguntado.
+    ///
+    /// **No padrão ele está de pé desde 14/09/2026**, quando `PROTOCOL_VERSION`
+    /// alcançou [`seele_proto::mods::VERSAO_DO_ANUNCIO`]. Quem é velho demais
+    /// para ser perguntado, hoje, é o par da v4 — a única versão anterior que a
+    /// janela de compatibilidade ainda alcança. O par da v3 da release
+    /// `v0.10.5-1` não chega até este limiar: ele é recusado antes, no aperto de
+    /// mão, com `PeerTooOld`, num servidor com MOD habilitado ou sem.
     pub versao_do_anuncio: u8,
 }
 

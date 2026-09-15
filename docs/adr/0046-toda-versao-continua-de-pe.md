@@ -32,8 +32,11 @@ O pedido do dono, depois de o desenho de MODs estar fechado:
 ### A tolerância corre para o lado errado deste pedido
 
 Há uma janela de compatibilidade no protocolo, e ela é assimétrica.
-`crates/seele-proto/src/version.rs`: `PROTOCOL_VERSION = 3`,
-`COMPATIBILITY_WINDOW = 1`. O comentário do próprio módulo diz o resultado:
+`crates/seele-proto/src/version.rs`, quando esta página foi escrita:
+`PROTOCOL_VERSION = 3`, `COMPATIBILITY_WINDOW = 1`. A versão mudou desde então —
+hoje é 5, e a janela continua 1 pela medida em «A janela não estica o que
+parecia, e a medida que mostrou isso», abaixo —, mas a assimetria que motiva
+esta decisão é a mesma. O comentário do próprio módulo diz o resultado:
 
 > **«um cliente v3 não alcança mais um servidor v2»** — o servidor faz
 > `negotiate(3)`, vê 3 acima do que ele fala, e recusa com `Incompatible`.
@@ -149,6 +152,10 @@ quanto e permite apagar.
    com cada variante nova para sempre. Some-se que a UI teria de ter uma cara por
    versão — 15 mil linhas de JavaScript que ninguém versiona hoje.
 
+   **Continua recusada, e nenhum número de janela a substitui.** Ver a seção
+   abaixo: alargar a janela não faz um par velho conectar, porque não é a janela
+   que o barra.
+
 3. **Versionar só o servidor, e manter um cliente só.** O host escolhe a versão do
    servidor; o cliente é sempre o mais novo. Mais barato, e quebra pela metade: um
    MOD de cliente — que é metade dos exemplos que o dono deu — não teria versão
@@ -158,6 +165,52 @@ quanto e permite apagar.
    graça. Recusada pelo pedido, e por uma consequência que o pedido antecipa: um
    catálogo cujos MODs quebram a cada release é um catálogo que apodrece sozinho,
    e o indexador do 0045 seria infraestrutura mantida para nada.
+
+## A janela não estica o que parecia, e a medida que mostrou isso
+
+**14/09/2026.** `PROTOCOL_VERSION` subiu de 4 para 5 — a integração conjunta da
+malha e do anúncio de MODs, uma subida só para as duas entregas, porque as duas
+acrescentavam variantes às mesmas listas e duas subidas independentes chamariam
+«5» a vocabulários diferentes. Junto com ela, `COMPATIBILITY_WINDOW` foi de 1
+para 2, **e voltou para 1 no mesmo dia.** O que aconteceu no meio é o registro
+mais útil desta seção.
+
+**O raciocínio que levou ao 2.** A última release publicada é a `v0.10.5-1`, de
+05/09/2026 (commit `12a6401a6`), e o `version.rs` daquele commit fala **protocolo
+3**. A v4 nasceu e morreu dentro da `main`: nenhum binário falando 4 chegou à mão
+de ninguém. Com a janela em 1, a v5 recusaria a v3 com `PeerTooOld` para
+preservar compatibilidade com uma versão que não existe em campo — e trancaria do
+lado de fora a única que existe. A premissa está certa.
+
+**A conclusão não valia, e quem mostrou foi a revisão.** A janela decide só o que
+*esta* build aceita ouvir. O que a outra ponta ouve é decidido por
+`control::encode`, que carimba a `PROTOCOL_VERSION` global no primeiro byte de
+**todo** quadro — nunca a versão negociada. O `decode` do commit publicado chama
+`negotiate` nesse byte antes de ler o corpo, com `PROTOCOL_VERSION = 3` e
+`COMPATIBILITY_WINDOW = 1`, e recusa qualquer carimbo acima de 3 com
+`PeerTooNew`. Um par v3 de verdade recebe o primeiro quadro de um servidor v5 e
+fecha — num servidor sem MOD nenhum, e com a janela daqui em 2 do mesmo jeito.
+Preso em `control.rs::a_release_publicada_recusa_o_carimbo_desta_build`, que lê o
+carimbo de um quadro real e o confere contra a janela do build publicado.
+
+Então o 2 era inerte: só adiava a morte do par v3 para o meio do aperto de mão,
+em vez de dar-lhe `Incompatible` na primeira leitura. A janela voltou a 1, que é
+a regra de `specs/10-convencoes.md`, e a versão anterior viva é a v4.
+
+**O custo, que agora é pago e não evitado:** publicar a v5 tira do ar quem está
+na v3. Isso não é um efeito desta subida em particular — é a assimetria desta
+página, valendo para toda subida de versão desde sempre, e as promessas de
+«continua entrando» escritas nas subidas anteriores só valiam para o lado que
+ouve. É exatamente o problema que esta decisão existe para aposentar: com o
+seletor de versão, os dois lados sabem a versão antes de falar. Antes dele, a
+única saída técnica é carimbar o quadro com a versão negociada — o que obriga o
+servidor a calar as variantes fora do vocabulário do par, sob pena de o postcard
+deslocar a leitura dele para sempre. Não é desta entrega; está na pendência #42.
+
+**E ela continua sendo a defesa provisória que esta decisão aposenta.** Enquanto
+o seletor não existe, a janela é tudo o que há entre «subimos a versão» e
+«quebramos quem fala o vocabulário anterior» — e, medida de perto, cobre menos do
+que se supunha.
 
 ## Consequências
 

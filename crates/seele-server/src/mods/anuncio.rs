@@ -163,14 +163,23 @@ pub fn conjunto_exigido(persistence: &Persistence) -> Result<Conjunto, NaoDaPara
 /// já estava dentro, e nada em troca: ninguém ganhou a chance de aceitar.
 ///
 /// Então enquanto o anúncio não alcança ninguém ele fica **dormente**: o
-/// servidor admite como admitia antes desta entrega e diz no log de quem
-/// hospeda que a exigência ainda não vale no fio. No dia em que
-/// `PROTOCOL_VERSION` alcançar o limiar — a integração conjunta com a malha que
-/// `VERSAO_DO_ANUNCIO` descreve — o portão liga sozinho, sem uma linha a mais.
+/// servidor admite como admitia antes daquela entrega e diz no log de quem
+/// hospeda que a exigência ainda não vale no fio.
 ///
-/// A partir daí recusar um par abaixo do limiar volta a ser a coisa certa, e é
-/// o que `session::exigir_aceite_dos_mods` continua fazendo: aí existem builds
-/// que aceitam, e uma que não alcança é incompatível de verdade.
+/// # E o dia chegou, em 14/09/2026
+///
+/// `PROTOCOL_VERSION` subiu para 5 na integração conjunta com a malha — a que
+/// `VERSAO_DO_ANUNCIO` descreve —, alcançou o limiar padrão, e **o portão ligou
+/// sozinho, sem uma linha a mais aqui dentro**. Esta função não mudou; a
+/// comparação que ela sempre fez passou a dar verdadeiro.
+///
+/// Recusar um par abaixo do limiar volta a ser a coisa certa agora, e é o que
+/// `session::exigir_aceite_dos_mods` continua fazendo: já existem builds que
+/// aceitam, e uma que não alcança é incompatível de verdade. **A dormência
+/// continua implementada de propósito** — ela não é entulho da transição: um
+/// servidor com `versao_do_anuncio` acima da global, seja por configuração, seja
+/// pela próxima variante que nascer adiantada, cai nela de novo e volta a
+/// admitir em vez de recusar todo mundo.
 #[must_use]
 pub const fn o_anuncio_alcanca_alguem(limiar: u8) -> bool {
     limiar <= seele_proto::version::PROTOCOL_VERSION
@@ -186,7 +195,12 @@ pub const fn o_anuncio_alcanca_alguem(limiar: u8) -> bool {
 /// [`o_anuncio_alcanca_alguem`] devolver falso para o limiar padrão, ligar um
 /// MOD aqui não tranca ninguém na porta — é exatamente o «produto sabe e não
 /// conta» que o `CLAUDE.md` deste repositório nomeia como o defeito mais caro,
-/// e que só não vira um agora porque este nome existe para ser perguntado.
+/// e que só não virou um porque este nome existe para ser perguntado.
+///
+/// **Desde 14/09/2026 ela devolve verdadeiro**, com a subida de
+/// `PROTOCOL_VERSION` para 5. A pergunta continua valendo a pena: a resposta é
+/// de quem hospeda, não do código que a lê, e ela volta a ser falsa em qualquer
+/// build cujo limiar padrão suba sem a versão global junto.
 ///
 /// Usa [`seele_proto::mods::VERSAO_DO_ANUNCIO`] — o limiar padrão, o mesmo que
 /// `ServerConfig::versao_do_anuncio` assume quando ninguém o sobrescreve, o que
@@ -206,21 +220,39 @@ mod tests {
     use crate::persistence::mods::{disable, enable, EnabledMod};
     use crate::persistence::Location;
 
-    /// O estado de hoje, escrito para que a mudança de amanhã seja vista.
+    /// O portão ligou, e é isto que fica escrito no lugar do estado anterior.
     ///
-    /// Quando `PROTOCOL_VERSION` subir para 5 este teste falha, e é o ponto em
-    /// que alguém confere de propósito que o portão ligou — em vez de descobrir
-    /// pelo primeiro servidor que passou a recusar.
+    /// A versão antiga deste teste dizia «hoje o anúncio ainda não alcança par
+    /// nenhum» e existia para falhar no dia da integração conjunta — para que
+    /// alguém conferisse de propósito que o portão ligou, em vez de descobrir
+    /// pelo primeiro servidor que passou a recusar. Ele falhou, foi conferido, e
+    /// agora prende a outra ponta.
     #[test]
-    fn hoje_o_anuncio_ainda_nao_alcanca_par_nenhum() {
+    fn o_anuncio_alcanca_quem_negocia_a_versao_de_hoje() {
         assert!(
-            !o_anuncio_alcanca_alguem(seele_proto::mods::VERSAO_DO_ANUNCIO),
-            "PROTOCOL_VERSION alcançou VERSAO_DO_ANUNCIO: o anúncio passou a sair, e \
-             `docs/pendencias.md` #39 pode ser fechado"
+            o_anuncio_alcanca_alguem(seele_proto::mods::VERSAO_DO_ANUNCIO),
+            "o anúncio voltou a ser dormente: habilitar um MOD deixou de trancar \
+             quem não aceita, e a casca precisa voltar a dizer isso"
         );
         assert!(
             o_anuncio_alcanca_alguem(seele_proto::version::PROTOCOL_VERSION),
             "um limiar na versão global tem de alcançar quem negocia a versão global"
+        );
+    }
+
+    /// A dormência não virou código morto, e esta é a prova.
+    ///
+    /// `existir não é funcionar`: um ramo que ninguém mais exercita é um ramo
+    /// que apodrece em silêncio até a próxima variante nascer adiantada e
+    /// precisar dele. Um limiar acima da versão global continua sem alcançar
+    /// ninguém, e o servidor volta a admitir em vez de recusar cem por cento.
+    #[test]
+    fn um_limiar_acima_da_versao_global_continua_sem_alcancar_ninguem() {
+        assert!(
+            !o_anuncio_alcanca_alguem(seele_proto::version::PROTOCOL_VERSION + 1),
+            "um limiar que nenhuma conexão pode negociar passou a contar como \
+             alcançável, e um portão assim recusa todo mundo sem dar a ninguém a \
+             chance de aceitar"
         );
     }
 
@@ -234,10 +266,10 @@ mod tests {
             o_anuncio_alcanca_alguem(seele_proto::mods::VERSAO_DO_ANUNCIO)
         );
         assert!(
-            !exigencia_vale_na_rede(),
-            "a interface passaria a anunciar `enabled` como uma trava que já vale, \
-             quando na verdade ela só passa a valer agora — confira o texto que \
-             `frases.js`/`base.js` mostram ao lado do interruptor"
+            exigencia_vale_na_rede(),
+            "a interface voltaria a ter de avisar que `enabled` ainda não tranca \
+             ninguém na porta — confira o texto que `frases.js`/`base.js` mostram \
+             ao lado do interruptor antes de mexer nesta linha"
         );
     }
 

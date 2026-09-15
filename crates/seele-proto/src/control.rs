@@ -2839,6 +2839,37 @@ mod tests {
         assert_eq!(frame.first(), Some(&PROTOCOL_VERSION));
     }
 
+    /// O outro lado da janela de compatibilidade, que é onde ela não chega.
+    ///
+    /// `encode` carimba `PROTOCOL_VERSION` — o número **global**, não o
+    /// negociado — no primeiro byte de todo quadro, e o teste acima prende isso.
+    /// A consequência é este teste: a última release publicada, `v0.10.5-1`
+    /// (commit `12a6401a6`), traz este mesmo `decode`, e o `version.rs` de lá
+    /// tem `PROTOCOL_VERSION = 3` com `COMPATIBILITY_WINDOW = 1`. Ela aceita o
+    /// primeiro byte 2 ou 3 e recusa qualquer outro com `PeerTooNew`, **antes**
+    /// de olhar para o corpo.
+    ///
+    /// Então um par v3 de verdade não completa o aperto de mão com esta build,
+    /// por mais larga que seja a janela **daqui** — e nenhum teste que simule o
+    /// par velho só pelo campo `Hello.version` mede isso, porque nele os dois
+    /// lados são o mesmo codec.
+    #[test]
+    fn a_release_publicada_recusa_o_carimbo_desta_build() {
+        const PUBLICADA: u8 = 3;
+        const JANELA_DA_PUBLICADA: u8 = 1;
+
+        let frame = encode(&hello()).unwrap();
+        let carimbo = *frame.first().expect("quadro sem carimbo");
+        let janela_de_la = (PUBLICADA - JANELA_DA_PUBLICADA)..=PUBLICADA;
+
+        assert!(
+            !janela_de_la.contains(&carimbo),
+            "um par da release publicada aceitaria este quadro: se isso passou a \
+             ser verdade, o carimbo deixou de ser a versão global e o texto de \
+             version.rs precisa mudar junto"
+        );
+    }
+
     #[test]
     fn a_foreign_version_is_refused_before_the_body_is_read() {
         let mut frame = encode(&hello()).unwrap();
@@ -4056,7 +4087,8 @@ mod o_vocabulario_e_a_versao {
         *bytes.get(1).expect("todo quadro tem versão e variante")
     }
 
-    /// Qual é o ordinal da **última** variante de uma lista, contado pelo fio.
+    /// Qual é o ordinal da **última** variante de uma lista, perguntado ao
+    /// próprio `serde`.
     ///
     /// # Por que contar em vez de nomear um verbo
     ///
@@ -4066,36 +4098,145 @@ mod o_vocabulario_e_a_versao {
     /// estava, e o guarda passa calado. Foi o que aconteceu quando as duas
     /// variantes dos MODs entraram, e é a razão de ele ter sido reescrito.
     ///
-    /// O postcard indexa variante por posição, então perguntar ao próprio
-    /// decodificador «esta posição existe?» conta a lista sem macro e sem
-    /// derivação: um ordinal que existe decodifica de uma carga de zeros —
-    /// zero é um número válido, um texto vazio e uma lista vazia —, e um que
-    /// não existe não decodifica de carga nenhuma.
+    /// # Por que não decodificando uma carga de zeros
     ///
-    /// `take_from_bytes` e não `decode`: o que se pergunta aqui é se a
-    /// **variante** existe, e `decode` também roda `validate`, que recusaria
-    /// uma carga de zeros por outros motivos — e a resposta viria errada.
+    /// A primeira reescrita perguntava ao decodificador «esta posição existe?»,
+    /// tentando decodificar um quadro de zeros em cada ordinal até um falhar. O
+    /// truque funcionava, e tinha um buraco exatamente onde este guarda mais
+    /// precisa acertar: **uma variante nova acrescentada no fim**, com um campo
+    /// que não aceita zeros — um `char`, um `NonZeroU32` —, não decodifica; a
+    /// contagem para antes dela e devolve o mesmo número de ontem. O teste passa
+    /// verde para a adição que ele existe para cobrar, que é a falha cara: a
+    /// versão não sobe, e dois builds com listas diferentes voltam a se
+    /// cumprimentar como iguais.
     ///
-    /// **O que este truque não alcança**, dito aqui para não ser descoberto por
-    /// um teste vermelho sem explicação: uma variante futura cujos campos não
-    /// aceitem zeros — um `char`, um inteiro que não pode ser zero — não
-    /// decodifica, e a contagem para antes dela. O teste então diz que a lista
-    /// **encolheu**, que é falso mas leva quem lê exatamente a esta linha.
+    /// A pergunta certa não passa pela carga. `serde` entrega a lista de nomes
+    /// das variantes ao `Deserializer` em `deserialize_enum`, antes de qualquer
+    /// campo: [`quantas_variantes`] implementa um `Deserializer` que só sabe
+    /// atender a essa chamada, anota `variants.len()` e desiste. Nenhum campo é
+    /// lido, então nenhum tipo de campo muda a resposta.
     fn ultima_variante<T>() -> u8
     where
         T: for<'a> serde::Deserialize<'a>,
     {
-        let mut ultima = 0;
-        for ordinal in 0..=u8::MAX {
-            let mut quadro = vec![ordinal];
-            quadro.extend(std::iter::repeat_n(0_u8, 64));
-            if postcard::take_from_bytes::<T>(&quadro).is_ok() {
-                ultima = ordinal;
-            } else {
-                break;
+        let quantas = quantas_variantes::<T>();
+        assert!(
+            quantas >= 1 && quantas <= usize::from(u8::MAX) + 1,
+            "uma lista de {quantas} variantes não cabe no ordinal de um byte que \
+             o postcard escreve"
+        );
+        u8::try_from(quantas - 1).expect("a asserção acima já garantiu o teto")
+    }
+
+    /// Quantas variantes tem o enum `T`, contadas pela lista que o `derive` do
+    /// `serde` entrega ao `Deserializer`.
+    ///
+    /// Não decodifica nada: o `Deserializer` abaixo atende só `deserialize_enum`
+    /// — onde a lista chega — e erra em todo o resto. O erro devolvido depois de
+    /// anotar é como ele desiste sem precisar construir um valor de `T`.
+    fn quantas_variantes<T>() -> usize
+    where
+        T: for<'a> serde::Deserialize<'a>,
+    {
+        use std::cell::Cell;
+        use std::fmt;
+
+        #[derive(Debug)]
+        struct Desistencia(String);
+
+        impl fmt::Display for Desistencia {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
             }
         }
-        ultima
+
+        impl std::error::Error for Desistencia {}
+
+        impl serde::de::Error for Desistencia {
+            fn custom<M: fmt::Display>(msg: M) -> Self {
+                Desistencia(msg.to_string())
+            }
+        }
+
+        struct Perguntador<'a>(&'a Cell<Option<usize>>);
+
+        impl<'de> serde::Deserializer<'de> for Perguntador<'_> {
+            type Error = Desistencia;
+
+            fn deserialize_enum<V>(
+                self,
+                _nome: &'static str,
+                variantes: &'static [&'static str],
+                _visitor: V,
+            ) -> Result<V::Value, Self::Error>
+            where
+                V: serde::de::Visitor<'de>,
+            {
+                self.0.set(Some(variantes.len()));
+                Err(serde::de::Error::custom(
+                    "a pergunta era quantas variantes existem, e ela já foi \
+                     respondida",
+                ))
+            }
+
+            fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+            where
+                V: serde::de::Visitor<'de>,
+            {
+                Err(serde::de::Error::custom(
+                    "este Deserializer só sabe responder por um enum",
+                ))
+            }
+
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str
+                string bytes byte_buf option unit unit_struct newtype_struct seq
+                tuple tuple_struct map struct identifier ignored_any
+            }
+        }
+
+        let contagem = Cell::new(None);
+        let _ = T::deserialize(Perguntador(&contagem));
+        contagem
+            .get()
+            .expect("esta lista é um enum, e `deserialize_enum` é por onde ela entra")
+    }
+
+    /// **A prova de que a troca do contador valeu a pena.**
+    ///
+    /// Esta lista imita o caso que o contador antigo deixava passar: uma
+    /// variante acrescentada no fim cujo corpo **não** decodifica de zeros —
+    /// `NonZeroU32` recusa o zero. Contando pela carga, o fim da lista seria 1;
+    /// contando pela lista de nomes, é 2, que é a verdade.
+    ///
+    /// Reverter [`quantas_variantes`] para o laço de cargas de zeros faz esta
+    /// asserção falhar, e é essa falha que diz que o guarda de cima voltou a ser
+    /// cego para uma adição no fim.
+    #[test]
+    fn uma_variante_que_nao_aceita_zeros_ainda_e_contada() {
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        enum ListaDeMentira {
+            Primeira,
+            Segunda(u32),
+            NaoAceitaZero(std::num::NonZeroU32),
+        }
+
+        // Pela carga: o ordinal 2 existe, mas um quadro de zeros nele não
+        // decodifica, então o laço antigo pararia em 1.
+        let quadro_de_zeros = {
+            let mut quadro = vec![2_u8];
+            quadro.extend(std::iter::repeat_n(0_u8, 64));
+            quadro
+        };
+        assert!(
+            postcard::take_from_bytes::<ListaDeMentira>(&quadro_de_zeros).is_err(),
+            "se um quadro de zeros passasse a decodificar aqui, esta prova \
+             deixaria de provar o que promete"
+        );
+
+        // Pela lista de nomes: três variantes, fim em 2.
+        assert_eq!(ultima_variante::<ListaDeMentira>(), 2);
     }
 
     /// **Acrescentar uma variante é decidir sobre a versão do protocolo.**
@@ -4128,15 +4269,23 @@ mod o_vocabulario_e_a_versao {
     /// 2. **O caminho entre pares** — `EmprestarSubida`, `ParFalhou`,
     ///    `SirvaTelaPara`, `AssistaTelaPor` —, e a versão foi para 4.
     /// 3. **O anúncio e o aceite de MODs** — `AceitarMods`, `RecusarMods`,
-    ///    `ModsExigidos` —, e desta vez a decisão foi **a outra**: a versão
-    ///    global fica em 4 e quem manda pergunta antes, contra
+    ///    `ModsExigidos` —, e naquele momento a decisão foi **a outra**: a
+    ///    versão global ficou em 4 e quem manda passou a perguntar antes, contra
     ///    [`crate::mods::VERSAO_DO_ANUNCIO`].
     ///
     /// O motivo de a terceira ser diferente está escrito naquela constante e
-    /// vale repetir em uma linha: esta entrega e a da malha acrescentam
+    /// vale repetir em uma linha: aquela entrega e a da malha acrescentavam
     /// variantes ao mesmo tempo, e duas subidas independentes para «5» dariam
     /// dois vocabulários com o mesmo número — que é o defeito que este guarda
     /// existe para pegar, cometido por quem o estava obedecendo.
+    ///
+    /// 4. **A integração conjunta das duas**, em 14/09/2026, e é o que a lista
+    ///    abaixo prende hoje. As duas listas passaram a conviver numa ordem
+    ///    única — os ordinais da v4 parados onde estavam, os três verbos de MOD
+    ///    depois deles — e `PROTOCOL_VERSION` subiu para 5 **uma vez só**, para
+    ///    as duas. `VERSAO_DO_ANUNCIO` continuou em 5 e passou a ser alcançada,
+    ///    então o portão do anúncio ligou sem uma linha a mais. O contrato que a
+    ///    terceira vez deixou escrito está cumprido.
     #[test]
     fn o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou() {
         assert_eq!(
@@ -4180,15 +4329,23 @@ mod o_vocabulario_e_a_versao {
 
         // E o número da versão, preso ao lado delas. Ele é o que diz a um par se
         // vale a pena tentar — e enquanto ele não subir, dois builds com listas
-        // diferentes vão continuar se cumprimentando como iguais. É por isso que
-        // o anúncio de MODs não sai para ninguém hoje, e é o contrato da
-        // integração conjunta com a malha.
+        // diferentes continuam se cumprimentando como iguais. Subiu para 5 na
+        // integração conjunta, uma vez para os dois conjuntos de variantes, e é
+        // por isso que o anúncio de MODs passou a sair.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            4,
+            5,
             "a versão do protocolo mudou; confira se os ordinais acima, a janela \
              de compatibilidade e `mods::VERSAO_DO_ANUNCIO` continuam contando a \
              mesma história"
+        );
+        assert_eq!(
+            crate::mods::VERSAO_DO_ANUNCIO,
+            crate::version::PROTOCOL_VERSION,
+            "os três verbos de MOD acima só saem no fio para um par que negocie \
+             `VERSAO_DO_ANUNCIO`, e nenhum par negocia acima da versão global: \
+             se as duas divergirem, ou o anúncio voltou a ser dormente, ou ele \
+             passou a sair para quem não sabe lê-lo"
         );
     }
 

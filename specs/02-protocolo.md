@@ -47,7 +47,11 @@ Num servidor com MOD habilitado entra mais uma volta, **depois da `Resposta` e a
 
 Depois da assinatura porque a lista de MODs é configuração de quem hospeda; antes da `Sessao` porque a `Sessao` é o fluxo protegido, e «não entra» tem de querer dizer «não recebe nada». Ver `docs/superpowers/specs/2026-09-10-anuncio-e-aceite-de-mods.md`.
 
-Esta volta **ainda não sai no fio**: o anúncio viaja numa versão que a versão global do protocolo não alcançou, pelo contrato de integração conjunta com a malha. Até lá o servidor admite como admitia antes e avisa quem hospeda pelo log — um portão que nenhum par pode atravessar recusaria todo mundo sem dar a ninguém a chance de aceitar. Ver `seele_proto::mods::VERSAO_DO_ANUNCIO` e a pendência #39.
+Esta volta **sai no fio desde a versão 5 do protocolo** (14/09/2026), que é a subida conjunta da malha e dos MODs — o contrato de integração que `seele_proto::mods::VERSAO_DO_ANUNCIO` carregava desde que nasceu. Antes dela o anúncio viajava numa versão que a global não alcançava, e o servidor admitia como admitia antes, avisando quem hospeda pelo log: um portão que nenhum par pode atravessar recusaria todo mundo sem dar a ninguém a chance de aceitar.
+
+Esse estado dormente continua implementado, para um servidor cujo limiar de anúncio esteja acima da versão global — hoje só por configuração, amanhã pela próxima variante que nascer adiantada. Ver `seele_server::mods::anuncio::o_anuncio_alcanca_alguem`.
+
+**Quem não alcança a versão do anúncio é recusado com `Incompatible`** por um servidor com MOD habilitado, mesmo estando dentro da janela de compatibilidade (N−1). E a v3 da última release publicada não chega nem a essa recusa: ela está fora da janela, e o carimbo de versão no primeiro byte de cada quadro a barraria de qualquer forma — **subir a versão do protocolo tira do ar quem está na versão publicada**, com ou sem MOD. Ver `seele_proto::version::COMPATIBILITY_WINDOW` e a pendência #42.
 
 Antes da `Sessao`, o cliente está em **PADRÃO: LARANJA** — conectado, não verificado. A interface deve refletir esse estado, não escondê-lo.
 

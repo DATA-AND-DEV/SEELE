@@ -25,6 +25,10 @@ use seele_server::persistence::Location;
 use seele_server::server::Event;
 use seele_server::{Daemon, ServerConfig};
 
+/// A espera pela porta que outro binário da suíte levou por um instante.
+mod porta;
+use porta::ligar_insistindo;
+
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
@@ -36,7 +40,7 @@ async fn server(porta: u16, banco: Location) -> Result<(SocketAddr, Arc<Daemon>)
         database: banco,
         ..ServerConfig::default()
     };
-    let servidor = Arc::new(Daemon::bind(config).await?);
+    let servidor = Arc::new(ligar_insistindo(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
