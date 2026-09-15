@@ -2587,6 +2587,27 @@ A serialização da conformidade não é máscara: está documentada no item 29 
 mesmo arquivo — as vagas de porta efêmera são da máquina inteira, e rodadas
 concorrentes as esgotam. É a mesma razão pela qual o CI já serializa essa crate.
 
+**A segunda validação estourou de novo, e desta vez a causa foi medida em vez de
+suposta.** A rodada de `cargo test` na raiz levou **57 min 53 s de relógio** e
+foi encerrada por tempo — mas gastou só **2 min de CPU** nesse período inteiro
+(`66,65 s user`, `53,60 s system`, `3% cpu`). Quase uma hora de espera para dois
+minutos de trabalho: a bateria não estava lenta, estava **parada**. O que ela
+esperava estava fora dela — outra árvore de trabalho rodando a própria bateria
+na mesma máquina, com `syspolicyd` a 43% conferindo assinatura de cada binário
+de teste, `target/debug/deps` com **506 mil arquivos** (só listar essa pasta
+leva 16 s) e a memória virtual com 3 GB dos 4 GB de troca em uso. O sintoma mais
+claro: `cargo test -p seele-server --doc`, que roda **zero** testes de
+documentação, imprimiu o resultado em 0,00 s e mesmo assim demorou **7 min 39
+s** para terminar de existir, com 0% de CPU.
+
+Com a máquina livre, a **mesma bateria, o mesmo comando, a mesma árvore**:
+**1.735 testes passados em 69 alvos, 0 reprovados, `EXIT=0`, em 3 min 08 s** —
+com os mesmos 67 s de CPU da rodada de uma hora. É a prova de que a diferença
+era espera, e não trabalho. O prazo de 900 s é folgado três vezes para a bateria
+inteira quando ela é a única coisa rodando; ele não cabe uma bateria dividindo a
+máquina com outra. Isso não é um defeito desta tarefa nem do código: é o mesmo
+efeito do item 29, agora com número em cima.
+
 
 ## 32 · O botão ENVIAR sai da barra de compor
 
