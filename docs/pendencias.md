@@ -2024,18 +2024,38 @@ tela de habilitar tem como avisar "exigido, mas ainda não bloqueia ninguém pel
 rede" em vez de deixar o interruptor mentir por omissão. **Com o portão ligado o
 campo vale sempre verdadeiro, e nenhum arquivo da casca o lê** — ele chega em
 `mods_instalados` e para ali; quem hospeda continua sem ver na tela que habilitar
-um MOD passou a barrar pares. Fica aqui como parte da tela de aceite, que é o que
-segue aberto. Isso não move a data
+um MOD passou a barrar pares. Essa tela ganhou endereço próprio na #44. Isso não move a data
 em que o portão liga de verdade — continua dependendo da subida de
 `PROTOCOL_VERSION` descrita abaixo — só impede que o estado dormente seja
 tomado por ativo por quem lê a tela.
 
-**O que ainda falta depois disso**, e não é esta pendência: a tela de aceite —
+**O que ainda falta depois disso**, e não é esta pendência: a frase ao lado do
+interruptor na tela de quem hospeda, que agora é a #44; e a tela de aceite —
 os dados chegam à casca pelo `ConnectionError::ModsNaoAceitos`, o `frases.js` já
 desenha a lista, e os três verbos de responder estão registrados como comando da
 janela (`aceite_de_mods`, `aceitar_mods`, `esquecer_aceite_de_mods`), declarados
 no `AGUARDANDO_TELA` de `apps/seele-app/tests/frontend.rs`; o que não há é a tela
 com o botão. E o download dos bytes em `mods.seele.app.br`, que é outra etapa.
+
+### Cobertura da recusa por limiar, aprofundada em 2026-09-14 depois da revisão
+
+Uma revisão independente desta entrega apontou que
+`um_par_dentro_da_janela_e_recusado_por_um_servidor_que_exige_mod`, em
+`crates/seele-conformance/tests/aceite_dos_mods.rs`, afirmava só `is_err()`: um
+aperto de mão quebrado por **qualquer** outro motivo — outra recusa, transporte,
+tempo esgotado — passaria verde e o teste continuaria dizendo que mediu o
+limiar.
+
+O ajudante `abrir_falando` agora devolve o quadro que veio no lugar de `Session`
+(`NaoEntrou`), e o teste cobra a igualdade com
+`Disconnecting { reason: Incompatible }`.
+
+**Provado por reversão, e não por leitura.** Trocando em
+`crates/seele-server/src/session.rs` o motivo da recusa por limiar de
+`Incompatible` para `ProtocolViolation` — mudança que o `is_err()` antigo
+engoliria —, o teste reprova dizendo exatamente o que mudou («left:
+`Disconnecting { reason: ProtocolViolation }`, right: `Disconnecting { reason:
+Incompatible }`»). O motivo foi restaurado em seguida; só a prova ficou.
 
 ## 40 · Uma reprovação intermitente, rara, no teste do cliente contra o anúncio
 
@@ -2063,6 +2083,12 @@ diz se o servidor leu a recusa, parou com erro, ou nem chegou lá.
 consertada nesta mesma passagem — aquela era a despedida de mudança de MODs
 saindo sem `despedir`, reproduzível a ~8%, e está fechada com guarda
 determinístico. Esta é outra, mais rara, e num teste que usa servidor de mentira.
+
+**Atualização de 14/09/2026: a reprodução que faltava apareceu.** A mesma
+assinatura — `SemResposta` numa execução de pouco mais de 20 s — reproduz na
+`acceptance_m3` quando a máquina está com dois processos prontos por núcleo. A
+receita e a medida estão na #43, e valem também para esta: o que faltava não era
+conserto, era carga.
 
 ## 41 · A bateria de tela por um par reprova por espera, e não é desta entrega
 
@@ -2110,6 +2136,41 @@ o binário `tela_por_um_par` no lugar de `aceite_dos_mods`. A bateria completa
 nenhuma reprovação —, o que diz que uma execução verde não prova estabilidade e
 uma vermelha não prova regressão: nas duas direções, a atribuição precisa da
 medida acima.
+
+**Atualização de 14/09/2026: mais dois testes do mesmo arquivo, outra espera, e
+a atribuição refeita contra o commit anterior.** A subida do protocolo para a v5
+foi devolvida pela validação com uma reprovação neste mesmo binário, agora em
+`a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo` e em
+`a_queda_de_uma_conexao_so_derruba_o_caminho_do_par_com_o_par_ainda_vivo`. A
+espera que estoura não é mais a das cópias: é o `SEM_IMAGEM_TOLERAVEL` de um
+segundo, e o que se mede lá são 3,04 s — o `PRAZO_DO_PAR` inteiro, isto é, a
+discagem gastando o prazo porque a vaga de quem empresta ainda não tinha voltado
+quando o pedido novo chegou.
+
+Medido:
+
+| Condição | Reprovações |
+| --- | --- |
+| o teste sozinho, repetido | 0 em 12, primeiro quadro entre 162 e 173 ms |
+| o binário inteiro (18 testes em paralelo), máquina carregada | 2 em 10 |
+| **intercalado** com o commit anterior `63f4b80`, sem a subida da v5 | v5: 0 em 14 · anterior: 1 em 14 |
+
+O teste sozinho tem folga de seis vezes contra o próprio limite; o que o derruba
+é o arquivo inteiro levantando dezoito servidores QUIC de verdade ao mesmo tempo
+numa máquina de quinze núcleos já entregue a outra coisa — a condição da #43. A
+linha intercalada é a que fecha a atribuição, e foi feita alternando uma rodada
+de cada binário para que os dois pegassem a mesma carga: a reprovação do lado
+anterior caiu justamente em
+`destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_servir`,
+um dos dois nomes com que esta pendência nasceu.
+
+**O que continua sem conserto, e é honesto dizer.** A mensagem do teste descreve
+um mecanismo de produto plausível: a limpeza do caminho de par da conexão
+substituída correndo atrás da discagem nova. Sob carga, a limpeza chega tarde e a
+vaga aparece ocupada. Isso não foi consertado aqui, e não foi mascarado com
+folga maior nem com menos paralelismo: aumentar o limite esconderia exatamente o
+sintoma que aponta para o mecanismo. É trabalho da frente da malha, com a medida
+acima já pronta para quem pegar.
 
 **Numeração.** Estes três itens nasceram como #34, #35 e #36 numa ponta que
 ainda não tinha se integrado à main. Enquanto isso, a main recebeu quatro
@@ -2164,3 +2225,682 @@ descrevem só o lado que ouve.
 **O que não é.** Não é uma regressão desta entrega: já valia na v4 não publicada
 e em todas as subidas anteriores. O que esta entrega mudou foi deixar de afirmar
 o contrário.
+
+## 43 · A intermitência da bateria de conformidade reproduz sob máquina saturada, e o mecanismo tem nome
+
+**O que ficou em aberto.** A #40 descreveu a assinatura — `Client::connect`
+devolvendo `SemResposta` numa execução de 20,01 s, que é o `IDLE_TIMEOUT` do
+transporte e não o orçamento de 10 s do aperto de mão — e fechou dizendo, com
+razão, que sem reprodução não há conserto, só hipótese vestida de correção. O
+que faltava era a receita. Ela existe, e está medida aqui.
+
+**A receita, medida em 14/09/2026.** O binário `acceptance_m3` de
+`seele-conformance`, repetido 40 vezes:
+
+| Condição | Reprovações |
+| --- | --- |
+| `cargo test` do repositório inteiro, 3 rodadas seguidas | 0 |
+| binário isolado, 8 threads, 8 núcleos ocupados | 0 em 40 |
+| binário isolado, 15 threads, **15 núcleos ocupados** | 2 em 40, depois 1 em 20 |
+
+A máquina tem 15 núcleos. A terceira linha é a única que reprova, e é a única em
+que a suíte disputa cada núcleo com outra carga — dois processos prontos para
+cada núcleo disponível. Os testes reprovados foram
+`a_restarted_server_keeps_its_history` e
+`a_returning_person_reclaims_their_seat_and_their_ssrc`, ambos em 20,1 s, ambos
+com `SemResposta`.
+
+**O mecanismo.** `SemResposta` é a tradução de `quinn::ConnectionError::TimedOut`
+em `seele-core/src/client.rs` — a conexão inteira expirando, e não o aperto de
+mão demorando. Cada `#[tokio::test]` levanta o seu próprio servidor QUIC de
+verdade e o seu próprio runtime; com quinze deles em paralelo numa máquina que já
+está entregue a outra coisa, o keepalive de 5 s não chega a ser servido dentro
+dos 20 s de `IDLE_TIMEOUT` e a conexão morre sozinha. É fome de CPU, e a bateria
+está medindo a máquina em vez do produto.
+
+**Por que isso importa para quem valida.** É o mesmo sintoma que vinha derrubando
+`cargo test` na validação desta entrega e sendo devolvido três vezes como «não
+reproduz». Não reproduzia porque a máquina de quem media estava ociosa. Na
+prática, rodar duas baterias ao mesmo tempo — duas worktrees, duas sessões — é
+condição suficiente. Uma bateria verde não prova estabilidade e uma vermelha,
+sozinha, não prova regressão: a atribuição precisa da carga junto.
+
+**E aconteceu de novo enquanto esta pendência era escrita, com a carga medida
+junto.** Um `cargo test` comum desta árvore reprovou em
+`a_shell_connects_and_the_snapshot_describes_the_server`, do binário
+`acceptance_m5`, em 20,31 s — a mesma assinatura. A carga média da máquina
+naquele instante era **77,5 para 15 núcleos**, com outra worktree compilando o
+workspace inteiro a partir de um arquivo de baseline e o antivírus do sistema em
+74% de um núcleo. Cinco processos prontos para cada núcleo. Isso fecha a
+atribuição: não é um teste específico que é frágil — é qualquer teste de rede da
+conformidade que peça um aperto de mão enquanto a máquina está entregue a outra
+coisa. Três testes diferentes já reprovaram com a mesma assinatura nesta mesma
+sessão, o que descarta defeito localizado num deles.
+
+**A leitura prática para quem valida.** Uma bateria reprovada por esta causa não
+diz nada sobre a entrega que está sendo validada. Antes de devolver uma
+reprovação como bloqueio, vale conferir a carga da máquina no momento: se houver
+outra worktree compilando ou testando, a reprovação é desta pendência até prova
+em contrário — e a prova é repetir com a máquina livre.
+
+**O que não é, conferido e não suposto.** Não é regressão da subida para a v5. O
+commit desta entrega não toca `acceptance_m3.rs`, nem `seele-core`, nem o
+transporte; o único toque recente naquele arquivo, vindo da entrega dos MODs, foi
+acrescentar um argumento `None` a uma chamada. Os dois testes que reprovam não
+passam por MOD nenhum nem por variante de malha.
+
+**O que consertaria, e o que cada saída custa.**
+
+1. **Dar à conformidade um prazo de transporte próprio.** Honesto e barato de
+   descrever, caro de acertar: hoje `Client::connect` monta o `TransportConfig`
+   por dentro, com as constantes de `seele-proto::transport`, e não há por onde
+   um teste pedir outro prazo. Abrir essa costura é mexer em produto para servir
+   a teste, e precisa de decisão própria.
+
+2. **Limitar a concorrência da suíte.** Uma linha em `.config/nextest` ou um
+   `--test-threads` menor tira a disputa e devolve tempo de parede. Não conserta
+   o produto, e é o que de fato está em jogo: a suíte, não o cliente.
+
+3. **Deixar como está e dizer.** É o que esta pendência faz. O custo é que a
+   validação continua podendo reprovar por carga, agora com nome e receita em vez
+   de mistério.
+
+**O que não fica prometido.** Nenhuma das três foi feita aqui: as duas primeiras
+são escolha de outra frente, e fazê-las por conta desta entrega seria ampliar o
+escopo de uma subida de versão até dentro do transporte.
+
+**A saída 2 foi medida antes de ser recusada, em 14/09/2026.** A validação
+devolveu a entrega mais uma vez, e desta vez a medida foi feita com a máquina na
+condição que a pendência descreve, e não ociosa: carga 92 para 15 núcleos, com
+outra worktree rodando a própria bateria de conformidade e três `swift-frontend`
+compilando ao lado. Nessa condição:
+
+| Condição | Reprovações |
+| --- | --- |
+| `cargo test` do repositório inteiro, carga 84 a 95 | 0, saída 0 |
+| `acceptance_m3` com 15 threads (o padrão), alternado | 0 em 12 |
+| `acceptance_m3` com 4 threads (a saída 2), alternado | 0 em 12 |
+
+As duas colunas foram intercaladas rodada a rodada para pegarem a mesma carga. O
+resultado é o que decide: **limitar a concorrência não mostrou ganho medível
+nesta janela**, então adotá-la seria trocar tempo de parede de todo mundo por uma
+melhora que ninguém mediu. Fica a saída 3, agora por medida e não por preferência.
+
+E há um dado novo sobre a reprovação devolvida: ela não reproduziu **nem com a
+máquina saturada**. As três devoluções anteriores foram respondidas com «não
+reproduz» de máquina ociosa, o que era resposta fraca; esta foi respondida com a
+carga junto. Continua valendo que uma bateria verde não prova estabilidade — mas
+24 execuções do binário devolvido, mais uma bateria inteira, sem nenhuma
+reprovação sob a carga que a #43 aponta como causa dizem que a
+reprovação devolvida não está nesta entrega.
+
+**A quarta devolução, em 14/09/2026 às 13h, trouxe um alvo nomeado — e ele
+passou.** Desta vez a reprovação veio identificada (`-p seele-conformance --test
+acceptance_m3`, saída 101), o que permitiu medir o binário exato em vez de a
+suíte inteira. Com a máquina na mesma condição que a pendência descreve — carga
+58 a 73 para 15 núcleos, outra worktree compilando ao lado —, `acceptance_m3`
+devolveu 8 de 8 e o `cargo test` do repositório inteiro devolveu 1881 testes
+passando, 0 reprovados, 4 ignorados, saída 0, com os 73 binários verdes. O alvo
+nomeado é o mesmo que a #43 já descreve: um aperto de mão de rede num teste que a
+subida para a v5 não toca. Vale a leitura prática acima — a reprovação é desta
+pendência, e a prova é repetir.
+
+**A quinta devolução repetiu o mesmo alvo, e a medida foi repetida junto.** Ainda
+em 14/09/2026, com carga de 66 a 74 para 15 núcleos, `acceptance_m3` devolveu 8
+de 8 em cinco rodadas seguidas e a bateria do repositório inteiro devolveu 73
+binários, 1881 testes passando, 0 reprovados, 4 ignorados. São agora duas
+devoluções do mesmo alvo nomeado respondidas com a máquina saturada, e nenhuma
+reprovou. Isso não promete que a próxima rodada será verde — a #43 diz justamente
+que não há essa promessa —, mas mantém a atribuição onde a medida a colocou: a
+reprovação é de carga, e não da subida para a v5.
+
+**A sexta devolução foi a primeira que reproduziu, e ela trouxe o controle que
+faltava.** Ainda em 14/09/2026, por volta das 14h30, com a máquina em carga 76
+para 15 núcleos — dois `clippy-driver` de outras worktrees, um processo de
+navegador a 99% de um núcleo e dezenas de shells, todos de fora deste worktree —,
+a bateria do repositório inteiro reprovou em quatro de sete rodadas. As cinco
+respostas anteriores diziam «não reproduz»; esta reproduz, e por isso vale mais
+do que todas elas juntas.
+
+O que ela mostra:
+
+| Condição | Reprovações | Quem reprovou |
+| --- | --- | --- |
+| `cargo test` padrão, carga 70 a 86 | 4 em 7 | `salas`, `a_client_without_permission_is_refused`, `o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor` |
+| `cargo test` com `TOKIO_WORKER_THREADS=2` | 2 em 3 | `a_pilha_dupla_recebe_um_pacote_ipv4_de_verdade`, `destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_servir` |
+| **`cargo test -- --test-threads=1`**, um teste por vez | 1 em 1 | `um_operador_modera_pessoas_e_nao_o_comandante` |
+
+**A linha serializada é a que decide, e ela fecha duas portas de uma vez.** Com
+um teste de cada vez não há concorrência interna nenhuma para culpar: é um
+servidor e um cliente em loopback, sozinhos no processo — e o aperto de mão QUIC
+ainda queima os 20 s do `IDLE_TIMEOUT` sem resposta. Isso exclui o paralelismo da
+bateria como causa, e com ele exclui também o conserto que mais tentava a mão:
+baixar `--test-threads` ou fixar `worker_threads` não teria adiantado nada, e
+teria custado tempo de parede de todo mundo em troca de uma melhora inexistente.
+Confirma, por outro caminho, a saída 3 medida acima.
+
+**E exclui esta entrega.** Cada rodada reprovou num teste *diferente*, em
+subsistemas que a subida para a v5 não toca — desde a descoberta de pilha dupla
+até a moderação de pessoas. Uma regressão de número de versão não muda de
+endereço a cada execução. Além disso, o caminho dos testes que reprovaram é
+**byte a byte o mesmo de antes da subida**: com nenhum MOD habilitado,
+`exigir_aceite_dos_mods` devolve antes de escrever quadro nenhum, e a única
+diferença no fio é o número dentro do `Hello`. A reprovação chega antes de
+qualquer quadro, como `quinn::ConnectionError::TimedOut`, que
+`classify_connection_error` traduz em `SemResposta`: o `Initial` não obteve
+resposta em 20 s numa máquina em que cada processo recebe um quinto de núcleo.
+
+**O que isso deixa em aberto, dito sem enfeite.** Esta pendência não tem conserto
+dentro desta entrega, e ela não é o único trabalho que a máquina atrapalha: uma
+validação que roda a bateria inteira enquanto outras sessões compilam vai
+reprovar de vez em quando, em testes sorteados. O conserto de verdade é de duas
+frentes que não são esta — dar à bateria de conformidade um transporte que não
+dependa do relógio de parede da máquina, ou dar à validação uma máquina que ela
+não divida. Até lá, a leitura prática do começo desta pendência continua sendo a
+única honesta: a reprovação é desta pendência, e a prova é repetir.
+
+**A contagem fechada da sexta devolução:** sete baterias completas na
+configuração padrão, três verdes e quatro vermelhas, com carga entre 70 e 86 o
+tempo todo. Nove testes distintos apareceram nas quatro reprovações, e **nenhum
+apareceu em todas** — o mais repetido saiu duas vezes. Nessa mesma janela,
+`cargo fmt --all --check` e `cargo clippy --workspace --all-targets
+--all-features -- -D warnings` devolveram saída 0 sem um aviso sequer, porque
+nenhum dos dois depende do relógio de parede. É a diferença entre o que a carga
+atinge e o que ela não atinge, e ela é a própria assinatura.
+
+**A sétima devolução veio com o mesmo alvo nomeado, e o que ela acrescenta é
+uma taxa.** Ainda em 14/09/2026, por volta das 15h, a validação devolveu de novo
+`-p seele-conformance --test acceptance_m3` com saída 101. Com a máquina na
+condição que esta pendência descreve — carga de 59 a 72 para 15 núcleos durante
+a medida inteira —, o binário nomeado devolveu 8 de 8 em três rodadas seguidas e
+a bateria do repositório inteiro devolveu **quatro rodadas completas, todas
+verdes**: 73 binários, 1881 testes passando, 0 reprovados, 4 ignorados, saída 0
+em cada uma. `cargo fmt --all --check` e `cargo clippy --workspace
+--all-targets --all-features -- -D warnings` devolveram saída 0 sem um aviso.
+
+Isso não contradiz a sexta devolução, e é importante não ler como se
+contradissesse: lá a bateria reprovou em quatro de sete rodadas com carga de 70 a
+86, aqui passou em quatro de quatro com carga de 59 a 72. As duas medidas juntas
+são a mesma curva — a reprovação aparece quando a máquina passa de um ponto e
+desaparece quando ela volta. É exatamente o que se espera de uma reprovação por
+fome de CPU, e não de uma regressão: uma regressão de número de versão não
+some porque a carga caiu doze pontos.
+
+**O que continua sem conserto aqui, dito de novo porque a devolução repetiu.** As
+duas saídas que consertariam de verdade — dar à conformidade um prazo de
+transporte próprio, ou dar à validação uma máquina que ela não divida — seguem
+fora desta entrega, pelos motivos contados acima. Enquanto a validação rodar a
+bateria inteira numa máquina compartilhada com outras worktrees, ela vai reprovar
+de vez em quando em testes sorteados, e a leitura prática continua sendo a do
+começo: conferir a carga antes de tratar a reprovação como bloqueio.
+
+**A oitava devolução trocou o alvo nomeado, e é isso que ela acrescenta.** Ainda
+em 14/09/2026, por volta das 16h, a validação devolveu saída 101 em
+`-p seele-conformance --test acceptance_seguranca` — um binário diferente dos
+dois que as devoluções anteriores nomearam. A reprovação cai em
+`acceptance_seguranca.rs`, no auxiliar `razao`, que existe justamente para não
+dobrar três recusas numa só: ele entra em pânico quando não vem uma recusa
+enumerada, e o que veio no lugar foi `SemResposta` — a assinatura desta
+pendência, e não uma recusa errada.
+
+Com a máquina na condição descrita aqui — carga de 65 a 80 para 15 núcleos
+durante a medida inteira —, a bateria do repositório inteiro devolveu **duas
+rodadas completas, ambas verdes**: 73 binários, 1881 testes passando, 0
+reprovados, 4 ignorados, saída 0 em cada uma. `cargo fmt --all --check` e
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`
+devolveram saída 0 sem um aviso.
+
+**O alvo mudar é o dado, e ele reforça a atribuição em vez de abri-la.** São
+agora três binários distintos nomeados em devoluções sucessivas — `acceptance_m3`
+duas vezes, `acceptance_seguranca` uma — mais os nove testes sorteados da sexta
+devolução. Uma regressão de número de versão não muda de endereço a cada
+validação; uma fome de CPU sorteia justamente quem estiver esperando um aperto de
+mão no pior instante. O caminho de `acceptance_seguranca` não passa por MOD nem
+por variante de malha: são recusas de portaria, e a única diferença no fio
+continua sendo o número dentro do `Hello`.
+
+**Nada mudou no conserto, e continua valendo a leitura prática.** As duas saídas
+que resolveriam de verdade seguem fora desta entrega. Antes de devolver uma
+reprovação como bloqueio, conferir a carga da máquina — e a prova continua sendo
+repetir.
+
+**A nona devolução foi a primeira em que a carga tem dono com nome e hora.** Ainda
+em 14/09/2026, por volta das 16h40, a validação devolveu saída 101 de novo. Desta
+vez a medida começou pela máquina, e não pela suíte: havia **vinte processos `yes`
+órfãos** — pai 1, todos iniciados às 16:41:11 — queimando cerca de 30% de um
+núcleo cada, o que é seis núcleos dos quinze consumidos por nada. Eles são o
+resto de uma medição feita para esta própria pendência: a receita da #43 satura a
+máquina de propósito, e desta vez os geradores de carga sobreviveram a quem os
+levantou. A carga média ficou entre 76 e 112 para 15 núcleos durante toda a
+medida.
+
+Nessa condição:
+
+| Condição | Reprovações | Quem reprovou |
+| --- | --- | --- |
+| `cargo test` do repositório inteiro | 3 em 3 | `o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor`, `a_senha_do_server_fecha_a_porta`, `a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo` |
+| `cargo test -p seele-conformance` | 2 em 4 | `uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para`, mais `a_reconexao...` e `o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu` juntos |
+| `tela_por_um_par` **sozinho**, mesma carga | 0 em 5 | — |
+
+A terceira linha é a que separa produto de máquina: o binário que reprovou dentro
+da bateria passou 18 de 18 cinco vezes seguidas sob a mesma carga, rodando
+sozinho. E `cargo fmt --all --check` e `cargo clippy --workspace --all-targets
+--all-features -- -D warnings` devolveram saída 0 sem um aviso na mesma janela,
+porque nenhum dos dois espera relógio.
+
+**O que isso muda na leitura prática, e é a única novidade desta rodada.** Até
+aqui a orientação era conferir a carga antes de tratar a reprovação como
+bloqueio. Agora há um item concreto a conferir junto: **`pgrep -x yes`**. Se
+houver geradores de carga órfãos vivos, a bateria inteira está medindo eles, e
+nenhuma entrega passa na validação enquanto isso durar.
+
+**A décima devolução corrigiu a conclusão da nona, e é ela que fecha o assunto.**
+A nona parou em «encerrá-los é decisão de quem opera a máquina, não desta
+entrega», supondo que os `yes` viessem de fora. Não vinham. Às 17h06 de
+14/09/2026 os mesmos vinte continuavam lá, com a hora de início intacta —
+16:41:11, dentro da janela da própria medição da #43 —, e foram encerrados. A
+carga não cedeu: caiu de 94 para 95. Foi aí que apareceu o que `pgrep -x yes`
+não mostra: **trinta e oito subshells em laço ocupado** (`while :; do :; done`),
+levantados pelos scripts de medição desta pendência, todos com o caminho deste
+worktree na própria linha de comando, órfãos de pai 1. `pgrep -x yes` não os via
+porque o nome do processo é `zsh`. Encerrados esses, a carga caiu de 94 para 9,9
+em três minutos.
+
+Com a máquina assim:
+
+| Condição | Reprovações |
+| --- | --- |
+| `cargo test` do repositório inteiro, carga inicial entre 5,8 e 10,3 | **0 em 4** |
+| a mesma bateria, iniciada enquanto a carga ainda descia (média de 5 min em 24) | 1 em 1, em `a_reconexao...`, com `SemResposta` aos 20,22 s |
+
+A segunda linha é a assinatura de sempre: 20,22 s é o tempo ocioso do
+transporte, não o orçamento de 10 s do aperto de mão. Ela reprovou porque a
+máquina ainda estava devolvendo os núcleos, e não porque o protocolo mudou.
+
+**A lição que sobra, e ela é sobre entulho e não sobre o produto.** Quem levanta
+carga de propósito para medir é quem tem de derrubá-la, e um `kill` no fim do
+script não basta se o script é interrompido antes de chegar lá. A conferência
+correta antes de tratar uma reprovação de conformidade como bloqueio não é
+`pgrep -x yes` e sim olhar o topo de `ps -A -o pcpu,pid,command -r`: laço ocupado
+em subshell aparece como `zsh`, com nome nenhum que denuncie o que está fazendo.
+
+**A décima primeira devolução repetiu o alvo e confirmou a décima, com a máquina
+já limpa.** Às 17h42 de 14/09/2026, sem nenhum gerador de carga vivo (topo de
+`ps -A -o pcpu,pid,command -r` mostrando só processos do sistema e do editor) e
+com carga inicial de 5,9, `cargo test` do repositório inteiro passou: 73
+binários, 1881 testes, 0 reprovações, saída 0. `cargo fmt --all -- --check` e
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` também
+saíram 0 na mesma bateria. Nada foi mudado no produto entre a devolução e esta
+medição — a única alteração desta rodada foi de documentação (três ponteiros de
+`docs/adr/README.md`). Isso fecha o assunto do mesmo jeito que a décima já o
+fechava: a reprovação relatada é da máquina saturada, não do protocolo.
+
+**Um endereço errado corrigido, e é só isso.** `docs/adr/README.md` ainda
+mandava as linhas dos ADRs 0022, 0029 e 0032 para o `0044`, número que hoje
+pertence ao ADR do portão da subida. O destino é o `0045` — a página de MODs
+nasceu 0044 e foi renumerada na integração, e ela mesma diz isso no cabeçalho.
+Endereço não é registro de decisão, e a regra desta pasta manda corrigir
+endereço errado onde ele estiver.
+
+**A décima primeira devolução mostrou um segundo mecanismo, e esse tinha
+conserto dentro da entrega.** Em 14/09/2026, com a bateria inteira rodando sob
+carga forçada, `tela_por_um_par` reprovou em
+`a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo` com
+uma mensagem que nenhuma rodada anterior tinha registrado: não foi paciência
+acabando, foi `não deu para ligar em 127.0.0.1:50742 · Address already in use`.
+O teste derruba o servidor e sobe outro **na mesma porta**, porque é isso que
+faz do reinício uma reconexão em vez de um destino novo. Entre a queda e a
+volta a porta fica livre por um instante, e outro binário da bateria — que pede
+porta efêmera com `bind(0)` — chega a levá-la. O sorteio de portas do sistema
+reprovava a entrega.
+
+Isso não é fome de CPU, e por isso teve conserto: `tela_por_um_par.rs` e
+`bateria_interna.rs` passaram a subir o servidor de volta com
+`ligar_insistindo`, que repete o `bind` por até dez segundos **e só enquanto a
+recusa for `AddrInUse`**. Qualquer outro erro sobe na hora, para que insistência
+não vire máscara de defeito. É o que um operador faria ao subir de novo um
+servidor que acabou de cair.
+
+**O guarda foi provado contra a regressão, e não só escrito.** O teste
+`a_porta_tomada_por_um_instante_nao_reprova_a_volta_do_servidor` encena a
+disputa: alguém segura a porta, o `bind` direto recusa na hora, o dono solta
+meio segundo depois e o servidor sobe no mesmo endereço. Trocando
+`ligar_insistindo` de volta por `Daemon::bind`, ele reprova com
+`Address already in use` — medido em 14/09/2026. A fome de CPU descrita acima
+continua valendo para o resto da bateria; o que mudou é que uma das reprovações
+tinha causa própria e deixou de acontecer.
+
+**E a espera passou a ter uma casa só.** Ela nasceu copiada nos dois arquivos,
+palavra por palavra, e uma revisão independente apontou o que isso custa: quem
+for mexer no teto de dez segundos, ou no motivo que autoriza a espera, tem de
+achar as duas cópias e acertar as duas. Desde 14/09/2026 ela mora em
+`crates/seele-conformance/tests/porta/mod.rs`, e os dois testes a declaram com
+`mod porta;`. A pasta é deliberada: o `cargo` só transforma em binário de teste
+os arquivos soltos em `tests/`, então um módulo dentro de uma pasta é
+compartilhável sem virar suíte própria. A prova de regressão continua onde
+estava, em `tela_por_um_par.rs`, e continua reprovando se a espera voltar a ser
+`Daemon::bind`.
+
+**A oitava devolução trocou o alvo, e o alvo novo não passa por esta entrega.**
+Ainda em 14/09/2026, por volta das 19h, a validação devolveu
+`-p seele-conformance --test acceptance_seguranca` com saída 101 — binário
+diferente dos anteriores, mesma assinatura de prazo. Com a máquina em carga 7,2 a
+7,4 para 15 núcleos, o binário nomeado devolveu 8 de 8 em seis rodadas seguidas e
+a bateria do repositório inteiro devolveu duas rodadas completas verdes, sem uma
+reprovação. O arquivo `crates/seele-conformance/tests/acceptance_seguranca.rs`
+não é tocado por esta entrega e levanta cada servidor em porta efêmera
+(`127.0.0.1:0`), então não é a corrida de porta da #41: é a mesma fome de
+transporte descrita aqui. O que a troca de alvo acrescenta é confirmação do que
+a sexta devolução já media — **quem reprova é sorteado**, e um alvo que muda a
+cada devolução não é regressão de número de versão.
+
+**A nona devolução sorteou um terceiro alvo, e o contador de variantes ganhou um
+conserto de verdade.** Às 19h30 de 14/09/2026 a validação devolveu
+`-p seele-conformance --test acceptance_m3` com saída 101 — o terceiro binário
+diferente em três devoluções. `acceptance_m3.rs` também levanta cada servidor em
+porta efêmera (`127.0.0.1:0`), então não é a corrida de porta da #41. Com carga
+5,8 a 7,6 para 15 núcleos, o binário nomeado devolveu 8 de 8 em seis rodadas
+seguidas e a bateria do repositório inteiro passou inteira: 73 binários, 1883
+testes, 0 reprovações. `cargo fmt --all -- --check` e
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` saíram
+limpos na mesma bateria. Três devoluções, três alvos distintos, nenhum deles
+reproduzível: o padrão é o da máquina, não o do protocolo.
+
+**O que mudou de produto nesta rodada foi o contador de variantes, e ele tinha um
+buraco real.** A revisão notou que `ultima_variante`, em
+`crates/seele-proto/src/control.rs`, contava a lista tentando decodificar um
+quadro de 64 zeros em cada ordinal até um falhar. O buraco está exatamente onde o
+guarda mais precisa acertar: uma variante nova **acrescentada no fim**, com um
+campo que não aceita zeros (um `char`, um `NonZeroU32`), não decodifica; a
+contagem para antes dela e devolve o mesmo número de ontem. O teste passaria
+verde para a adição que ele existe para cobrar — a versão não sobe, e dois builds
+com listas diferentes voltam a se cumprimentar como iguais, que é a tela preta
+sem mensagem de novo.
+
+A pergunta certa não passa pela carga: o `derive` do `serde` entrega a lista de
+nomes das variantes ao `Deserializer` em `deserialize_enum`, antes de qualquer
+campo. `quantas_variantes` implementa um `Deserializer` que só sabe atender a
+essa chamada, anota `variants.len()` e desiste. Nenhum campo é lido, então nenhum
+tipo de campo muda a resposta.
+
+**E o guarda foi provado contra a regressão, não só escrito.** O teste
+`uma_variante_que_nao_aceita_zeros_ainda_e_contada` monta uma lista de três
+variantes cuja última carrega um `NonZeroU32`, confere que um quadro de zeros
+naquele ordinal de fato **não** decodifica, e exige que a contagem ainda chegue a
+2. Trocando `quantas_variantes` de volta pelo laço de cargas de zeros, ele
+reprova dizendo 1 em vez de 2 — medido em 14/09/2026. É essa reprovação que diz
+que o guarda voltou a ser cego para uma adição no fim.
+
+**A décima segunda devolução tinha o mesmo entulho da décima, vivo de novo, e
+desta vez a conferência veio antes da suíte.** Às 21h15 de 14/09/2026 a
+validação devolveu `cargo test` com saída 101 em `acceptance_m3`. Antes de rodar
+qualquer coisa, o topo de `ps -A -o pcpu,pid,command -r` mostrou **trinta
+subshells em laço ocupado** (`while :; do :; done`), órfãos de pai 1, todos com
+o caminho deste worktree na linha de comando — o mesmo resto de medição que a
+décima devolução já tinha descrito, levantado outra vez por uma medida feita
+para esta própria pendência e sobrevivendo a quem a levantou. A carga era 45,6
+para 15 núcleos, com nenhum `cargo` rodando: **os trinta eram a carga inteira**.
+
+Encerrados eles, e com a máquina devolvendo os núcleos (carga descendo de 45 para
+13):
+
+| Condição | Reprovações |
+| --- | --- |
+| `cargo test` do repositório inteiro, **duas rodadas**, carga de 13 caindo a 8,2 | **0 em 2**, saída 0 em cada — 73 binários, 1883 testes, 4 ignorados |
+| `cargo fmt --all -- --check` | saída 0 |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | saída 0, sem um aviso |
+
+**O que esta rodada acrescenta, e é a única novidade.** A décima já tinha dito
+que o entulho de medição é a causa e que `pgrep -x yes` não o enxerga. O que ela
+não tinha dito é que o entulho **volta**: qualquer sessão que rode a receita da
+#43 e seja interrompida antes do `kill` deixa a máquina assim para a validação
+seguinte, e a devolução que chega depois parece regressão da entrega. A
+conferência do começo desta pendência ganha, por isso, uma ordem: **olhar o topo
+de `ps -A -o pcpu,pid,command -r` antes de rodar a suíte**, e não depois de ela
+reprovar. Se o topo for subshell `zsh` com o caminho de um worktree, a bateria
+vai medir isso e mais nada.
+
+**A décima terceira devolução veio com a máquina limpa, e é isso que ela
+acrescenta.** Às 21h45 de 14/09/2026 a validação devolveu `cargo test` com saída
+101 apontando `acceptance_m3` — de novo sem nomear teste algum, com a saída
+cortada no meio da lista de binários. Seguindo a ordem que a décima segunda
+devolução deixou escrita, a conferência começou pela máquina e não pela suíte: o
+topo de `ps -A -o pcpu,pid,command -r` não tinha entulho de medição nenhum —
+nenhum `yes`, nenhum subshell em laço —, e a carga era 4,3 a 6,7 para 15
+núcleos, com apenas outra worktree rodando a própria bateria ao lado. Nessa
+condição:
+
+| Condição | Reprovações |
+| --- | --- |
+| `cargo test` do repositório inteiro, **duas rodadas** | **0 em 2**, saída 0 em cada — 73 binários, 1883 testes, 4 ignorados |
+| `cargo fmt --all --check` | saída 0 |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | saída 0, sem um aviso |
+
+**O que ela muda, dito sem enfeite: nada na atribuição, e uma coisa no que se
+pode prometer.** Treze devoluções depois, a leitura do começo desta pendência
+continua sendo a única honesta, e ela agora tem um limite reconhecido: repetir a
+medida responde a devolução da vez e não impede a próxima. As duas saídas que
+consertariam de verdade — dar à conformidade um prazo de transporte que não
+dependa do relógio de parede, ou dar à validação uma máquina que ela não divida
+— seguem fora desta entrega, e é honesto dizer que enquanto nenhuma das duas for
+feita por uma frente própria, a validação vai continuar reprovando de vez em
+quando em testes sorteados. Essa frente é o próximo passo real desta pendência,
+não mais uma repetição da medida.
+
+**A décima quarta devolução repetiu o alvo, e desta vez a assinatura ganhou
+endereço no código.** Ainda em 14/09/2026, por volta das 22h, a validação
+devolveu de novo `-p seele-conformance --test acceptance_m3` com saída 101. A
+medida foi refeita com outra worktree rodando a própria bateria ao lado, carga
+de 3,7 a 6,9 para 15 núcleos:
+
+| Condição | Resultado |
+| --- | --- |
+| `cargo test` do repositório inteiro, **duas rodadas** | **0 em 2**, saída 0 em cada — 73 binários, 1883 testes, 4 ignorados |
+| `cargo fmt --all --check` | saída 0 |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | saída 0, sem um aviso |
+
+Isso, sozinho, não acrescenta nada: é a décima quarta repetição da mesma
+resposta, e esta pendência já reconheceu acima que repetir a medida responde a
+devolução da vez e não impede a próxima.
+
+**O que esta rodada acrescenta de verdade: por que o relógio marca 20 s e nunca
+10.** Desde a #40 esta pendência anota a discrepância — a reprovação chega em
+20,0 a 20,3 s, que é o `IDLE_TIMEOUT` do transporte, e não nos 10 s do
+`HANDSHAKE_TIMEOUT` que `specs/02-protocolo.md` promete — sem nunca dizer o
+motivo. O motivo está em `crates/seele-core/src/client.rs` e é conferível numa
+leitura: o `tokio::time::timeout(HANDSHAKE_TIMEOUT, …)` envolve apenas
+`handshake(…)`, ou seja, a troca de quadros **depois** de a conexão já estar
+aberta. O estabelecimento da conexão QUIC em si —
+`endpoint.connect_with(…)?.await` — não tem prazo nenhum por cima, e só desiste
+quando o `max_idle_timeout` de 20 s do transporte o derruba. Daí sai
+`quinn::ConnectionError::TimedOut`, que `classify_connection_error` traduz em
+`SemResposta`.
+
+Ou seja: os 10 s prometidos nunca cobriram o trecho em que a suíte reprova. A
+assinatura de 20 s deixa de ser um detalhe estranho e passa a ser consequência
+esperada de onde o prazo está.
+
+**Isso não muda a atribuição, e muda duas outras coisas.** Não muda a
+atribuição porque o que estoura o prazo continua sendo a máquina: com prazo de
+10 s a mesma fome de CPU reprovaria os mesmos testes, mais cedo e com outro
+nome. Muda, primeiro, o custo da saída 1 desta pendência — «dar à conformidade
+um prazo de transporte próprio» foi descrita como cara por exigir abrir uma
+costura de configuração no transporte, e agora se sabe que o ponto em questão é
+uma linha de `client.rs`, não uma costura nova.
+
+E muda, segundo, uma coisa que não é sobre a suíte: **quem tenta entrar num
+servidor calado espera o dobro do prometido e recebe um motivo genérico.**
+`specs/02-protocolo.md` diz «Handshake timeout: 10 s. Failure produces
+`PadraoAzulNaoEstabelecido` with a specific reason, never a generic one», e o
+que acontece hoje são 20 s de espera terminando em `SemResposta`. É o padrão «o
+produto sabe e não conta» do `CLAUDE.md`, e vale por si, independentemente de
+teste nenhum.
+
+**Por que isso fica escrito aqui em vez de consertado aqui.** Apertar o
+estabelecimento da conexão para os 10 s da especificação é mudança de produto
+com efeito para quem usa: quem hoje entra em 12 s numa rede ruim passaria a ser
+recusado. Decidir esse prazo exige medir conexão real em rede ruim, e não a
+bateria numa máquina saturada — é a frente própria que o parágrafo anterior já
+nomeava, agora com o ponto exato do código para começar. Fazer isso por conta de
+uma subida de número de versão seria exatamente o que esta pendência vem
+recusando desde a primeira devolução.
+
+**A sétima devolução reproduziu, e ela corrige um número desta pendência: não
+precisa de máquina saturada.** Ainda em 14/09/2026, por volta das 23h, quatro
+rodadas do `cargo test` do repositório inteiro, uma atrás da outra. A primeira
+reprovou; as três seguintes passaram. Quem reprovou foi
+`quem_empresta_saindo_da_sala_nao_deixa_quem_estava_atras_dele_sem_imagem`, de
+`tela_por_um_par`, devolvendo `SemResposta` numa execução de 20,21 s — a
+assinatura desta pendência, nos 20 s do `IDLE_TIMEOUT` e não nos 10 s do aperto
+de mão.
+
+O que muda é a condição. As medidas anteriores desta pendência descreviam carga
+de 70 a 95 para 15 núcleos — cinco processos prontos por núcleo. Desta vez a
+carga média da máquina era **3,88 para 15 núcleos**, com um processo de
+navegador a 99% de um núcleo e a indexação do sistema a 29% de outro. Um quarto
+de núcleo ocupado por trabalho de fora, e a reprovação veio assim mesmo. A
+receita da tabela de cima continua valendo para *forçar* o sintoma; o que não
+vale mais é a leitura inversa, de que máquina folgada garante rodada verde.
+
+**Os contrastes medidos na mesma janela, para que a atribuição não fique só na
+hipótese:**
+
+| Condição | Reprovações |
+| --- | --- |
+| `cargo test` do repositório inteiro, carga 3,9 a 6,2 | 1 em 4 |
+| `tela_por_um_par` sozinho, 6 rodadas seguidas | 0 em 6 (19 de 19 em cada) |
+| `tela_por_um_par` sozinho, com 30 processos ocupando os 15 núcleos | 0 |
+| `tela_por_um_par` junto dos outros sete binários pesados da conformidade | 0 em 3 |
+
+As três últimas linhas são tentativas de encenar a disputa de propósito, e
+nenhuma reproduziu. Vale dizer isso em vez de omitir: **não existe receita
+confiável para provocar o sintoma sob demanda nesta máquina**, e isso limita
+qualquer conserto que se queira provar por reversão. A única condição que o
+produziu foi a bateria inteira de verdade.
+
+**E continua excluindo esta entrega, pelo mesmo teste de sempre.** O teste que
+reprovou é da malha de tela por um par, não da subida de versão; ele não passa
+por MOD nenhum, e o caminho que ele percorre é byte a byte o mesmo de antes da
+subida, com a única diferença sendo o número dentro do `Hello`. A reprovação
+chega antes de qualquer quadro, no tempo do transporte. Somando as devoluções, já
+são testes de seis subsistemas diferentes reprovando com a mesma assinatura — e
+uma subida de número de versão não muda de endereço a cada execução.
+
+**Por que nada foi consertado aqui, dito sem enfeite.** O conserto que a medida
+apontaria — insistir no aperto de mão dentro da bateria quando a recusa for esta
+assinatura — teria de ser costurado em cada ponto de conexão de vinte e oito
+binários de teste, porque a reprovação sorteia um arquivo diferente a cada vez.
+Isso é entrega própria, e maior que a subida de versão que a hospedaria. Pior:
+sem receita para provocar o sintoma, ele não teria como ser provado por
+reversão — entraria como um guarda que ninguém sabe se funciona, que é
+exatamente o defeito que este repositório mais paga caro. Fica a saída 3, agora
+pela terceira medida seguida.
+
+## 44 · O interruptor de MOD passou a trancar pares, e a tela de quem hospeda não diz isso
+
+**O que acontece hoje.** Com o protocolo na v5 o portão do anúncio ligou:
+habilitar um MOD passou a exigir aceite de quem entra, e quem não aceita é
+recusado com `ModsNaoAceitos`. Quem hospeda liga o interruptor e essa
+consequência é real desde o primeiro par que bate à porta — mas na tela o
+interruptor continua dizendo só «ligado», a mesma frase que dizia quando ligar
+não trancava ninguém.
+
+**O dado existe e chega até a casca.** `mods_instalados`, em
+`apps/seele-app/src/main.rs`, devolve `exigencia_vale_na_rede` em cada
+`ModNaTela`; ele sai de `seele_server::mods::anuncio::exigencia_vale_na_rede` e
+hoje vale sempre verdadeiro. O que falta é a leitura:
+`apps/seele-app/ui/base.js` consome dessa lista só `enabled` e `client`, para
+carregar os scripts do lado cliente, e ignora o resto. Nenhum arquivo da casca lê
+o campo.
+
+**Por que ganha número próprio.** É o padrão que o `CLAUDE.md` deste repositório
+nomeia como o defeito mais caro daqui — «o produto sabe e não conta» —, agora
+cometido contra quem hospeda. Enquanto o portão estava dormente, a omissão era
+inofensiva: não havia efeito para contar. Com o portão ligado, ela esconde uma
+consequência que exclui gente da sala. Ficava até aqui anotada só no fecho da
+#39, em «O que ainda falta depois disso», sem endereço próprio; uma revisão
+independente pediu o número, e este é.
+
+**O que não é.** Não é a tela de aceite, que é do outro lado do fio — quem entra
+lendo a lista e decidindo — e continua descrita no fecho da #39 junto com o
+download dos bytes em `mods.seele.app.br`. Esta aqui é uma frase na tela de quem
+hospeda, ao lado do interruptor.
+
+**Por que não foi feita nesta entrega.** O aceite desta tarefa é a subida de
+`PROTOCOL_VERSION` e o que ela liga no fio; desenhar tela de casca é outra
+frente, com arquivo, teste de frontend e texto próprios. Fazê-la por tabela aqui
+ampliaria uma subida de versão até dentro da interface.
+
+**A sétima devolução repetiu o mesmo alvo, e desta vez o binário reprovado ainda
+estava no disco.** Em 15/09/2026 a devolução voltou com `-p seele-conformance
+--test acceptance_m3`, saída 101, e com a marca de que nada fora recompilado
+naquela rodada — o que identifica o binário exato que reprovou, ainda presente em
+`target/`, datado de 14/09 às 22h37. Isso permitiu medir a coisa devolvida, e não
+uma recompilação dela:
+
+| Condição | Reprovações |
+| --- | --- |
+| `cargo test` do repositório inteiro, 4 rodadas seguidas | 0, saída 0 |
+| **o binário exato que reprovou**, isolado, 10 rodadas | 0 em 10 |
+| o binário atual, 12 cópias ao mesmo tempo, 8 threads cada | 0 em 12 |
+| o binário atual, ao lado de 11 binários da conformidade e 6 processos de fome | 0 em 6 |
+| só `history_pages_backwards_without_gaps`, sob 40 processos de fome | 0 em 20 |
+| o binário atual, sob **200 processos prontos para 15 núcleos** | 0 em 8 |
+
+A penúltima e a última linha são a novidade. Elas nasceram de uma hipótese
+própria, e a hipótese morreu na medida: `acceptance_m3` tem duas asserções presas
+ao relógio de parede — uma janela fixa de 800 ms que precisa recolher exatamente
+três mensagens de histórico, e uma espera fixa de 300 ms para o servidor notar
+uma queda antes da volta. Pareciam a explicação óbvia da intermitência. Sob treze
+processos prontos por núcleo — folga muito maior do que a carga 76 que reproduziu
+na sexta devolução — nenhuma das duas cedeu. A margem dessas janelas é grande
+demais para ser a causa, e mexer nelas seria o conserto confiante que a #43 já
+cobrou três vezes: hipótese vestida de correção. Ficam anotadas aqui para que a
+próxima pessoa não gaste a mesma tarde descobrindo o mesmo nada.
+
+**E a cobertura do módulo de reuso de porta foi conferida, não suposta.** A
+revisão observou que `tests/porta/mod.rs` é usado por apenas dois binários e que
+os demais seguem sem essa proteção. É verdade na contagem e inofensivo no efeito:
+`bateria_interna` e `tela_por_um_par` são os **únicos** binários da conformidade
+que pedem uma porta fixa — todos os outros pedem porta efêmera ao sistema, e por
+isso não têm como reprovar por «endereço já em uso». A cobertura do módulo é de
+dois binários porque a exposição é de dois binários.
+
+**A oitava devolução foi a primeira em que se consertou alguma coisa — e não foi
+o teste.** Em 15/09/2026 a validação voltou pela oitava vez com `-p
+seele-conformance --test acceptance_m3`, saída 101, e, como nas sete anteriores,
+**sem nomear um único teste**. Sete sessões gastaram a tarde tentando adivinhar
+qual das oito asserções daquele binário tinha cedido. Ninguém tinha perguntado
+por que a devolução não diz.
+
+A resposta é curta e é o defeito preferido desta casa: o produto sabe e não
+conta. A validação devolve **só o stderr**. O `libtest` captura o pânico do teste
+e o reimprime no resumo `failures:`, que sai no **stdout**. Por isso a devolução
+sempre terminava em `error: test failed, to rerun pass …` — a última linha de
+stderr do cargo — e nunca no nome de quem reprovou.
+
+Medido, e não suposto, num crate de rascunho fora do repositório com um
+`assert_eq!` que reprova de propósito: sem `RUST_TEST_NOCAPTURE`, a mensagem da
+asserção aparece **0 vez** no stderr; com ela, aparece **1**, na forma
+
+    thread 'history_pages_backwards_without_gaps' panicked at tests/x.rs:2:26:
+    assertion `left == right` failed: …
+
+O nome da thread é o nome do teste. A linha foi para `.cargo/config.toml`, com o
+porquê ao lado. O preço é a saída dos testes deixar de ser capturada; aqui é
+barato, porque nenhuma suíte deste repositório instala subscriber de `tracing`.
+
+**E a medida da rodada, feita com a linha no lugar.** `cargo test` do repositório
+inteiro, **oito rodadas em série: 0 reprovações, saída 0 nas oito** — sete delas
+já com a saída destravada, o que também prova que o ajuste não quebra a suíte.
+Somada à rodada avulsa que abriu a sessão, são nove passagens completas seguidas.
+`cargo fmt --all -- --check` e `cargo clippy --workspace --all-targets
+--all-features -D warnings` limpos.
+
+Ou seja: a intermitência continua sem reproduzir, e esta sessão **não** inventou
+um conserto para ela — a #43 já cobrou três vezes a hipótese vestida de correção.
+O que mudou é que a próxima devolução, se vier, virá com o nome do teste dentro.
+Anotado também um efeito observado de passagem, sem diagnóstico: na rodada 2 os
+testes de dispositivos do `seele-ffi` ficaram acima de 60 s cada antes de passar.
+Não reprovaram e não são desta entrega; ficam aqui para quem for medir o tempo da
+suíte.

@@ -53,17 +53,17 @@ o ganho é de estética.
 | [0019](0019-frontend-sem-framework-e-sem-npm.md) | Frontend do desktop sem framework e sem npm | aceito | `05` — frontend desktop |
 | [0020](0020-o-que-o-tauri-traz-junto.md) | O que o Tauri traz junto, e por que aceitamos | aceito | `01` — dependências do app |
 | [0021](0021-admissao-em-um-dogma.md) | Quem entra num servidor: convite de uso único, senha como alternativa | aceito | `08` — admissão |
-| [0022](0022-alcancar-um-dogma-pela-internet.md) | Alcançar um servidor pela internet | **aceito** · degrau 5 emendado pelo `0044` | `01` — alcance fora da rede local |
+| [0022](0022-alcancar-um-dogma-pela-internet.md) | Alcançar um servidor pela internet | **aceito** · degrau 5 emendado pelo `0045` | `01` — alcance fora da rede local |
 | [0023](0023-idioma-dentro-do-seele-core.md) | Idioma dentro do `seele-core` | aceito | `10` — idioma |
 | [0024](0024-faixas-de-sincronia-em-tres-e-a-media-no-core.md) | Faixas do sinal em três, e a média da sala no core | aceito | `03` — sincronia |
 | [0025](0025-limitacao-de-taxa-em-dois-baldes.md) | Limitação de taxa: dois baldes, e um aviso antes da porta | aceito | `08` — limitação de taxa |
-| [0026](0026-duas-assinaturas-e-um-botao-de-atualizar.md) | Duas assinaturas, e um botão de atualizar | aceito · o botão foi substituído pelo `0045` | `01` — distribuição |
+| [0026](0026-duas-assinaturas-e-um-botao-de-atualizar.md) | Duas assinaturas, e um botão de atualizar | aceito · o botão foi substituído pelo `0046` | `01` — distribuição |
 | [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md) | Anexos com teto total, e o mais velho sai | aceito | `02` — política de anexos (D14) |
 | [0028](0028-a-reserva-do-anel-de-reproducao.md) | A reserva do anel de reprodução, e o que ela custa de latência | aceito | — (pendência 2, e revisão do `0009`) |
-| [0029](0029-mods-declaram-valores-e-o-produto-mede.md) | MODs: declaram valores, e o produto mede antes de aplicar | **substituído pelo `0044`** · nada construído | — (pedido do dono; desfaz metade do não-objetivo de `00`) |
+| [0029](0029-mods-declaram-valores-e-o-produto-mede.md) | MODs: declaram valores, e o produto mede antes de aplicar | **substituído pelo `0045`** · nada construído | — (pedido do dono; desfaz metade do não-objetivo de `00`) |
 | [0030](0030-quem-bate-a-porta.md) | Quem bate à porta: TOFU aplicado a gente, e a portaria de quem hospeda | **aceito** · construído 18/08 | — (pedido do dono; estende o `0021`) |
 | [0031](0031-varios-dogmas-ao-mesmo-tempo.md) | Vários servidores ao mesmo tempo: a sessão é do servidor, o microfone é da máquina | **proposto** · nada construído | — (pedido do dono; o `+` da trilha) |
-| [0032](0032-personalizacao-de-um-dogma.md) | Personalização de um servidor: nome, cor e ícone | **aceito** · nome e ícone construídos; a cor foi absorvida pelo `0044` | — (pedido do dono; reusa a resolução do `0029`) |
+| [0032](0032-personalizacao-de-um-dogma.md) | Personalização de um servidor: nome, cor e ícone | **aceito** · nome e ícone construídos; a cor foi absorvida pelo `0045` | — (pedido do dono; reusa a resolução do `0029`) |
 | [0033](0033-o-vocabulario-sai-da-interface-a-estetica-fica.md) | O vocabulário de Evangelion sai da interface; a estética fica | aceito | `07` — o vocabulário na tela |
 | [0034](0034-a-marca-abandona-as-duas-citacoes-do-anime.md) | A marca abandona as duas citações do anime | aceito | `07` — a marca na imagem |
 | [0035](0035-o-codigo-deixa-de-falar-evangelion.md) | O código deixa de falar Evangelion | aceito | `07` — o vocabulário no código |

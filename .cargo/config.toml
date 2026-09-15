@@ -28,3 +28,31 @@ rustflags = [
   "-L", "/Library/Developer/CommandLineTools/usr/lib/swift/macosx",
   "-C", "link-arg=-Wl,-rpath,/usr/lib/swift",
 ]
+
+# ---- para a reprovação dizer o próprio nome ----
+#
+# A validação desta casa devolve, quando `cargo test` reprova, **só o stderr**.
+# E o `libtest` guarda o pânico do teste para reimprimi-lo no **stdout**, no
+# resumo de `failures:`. O resultado é o pior tipo de defeito que este
+# repositório conhece: o produto sabe e não conta. Oito devoluções seguidas
+# chegaram com `error: test failed, to rerun pass -p seele-conformance --test
+# acceptance_m3`, saída 101, e **nenhum nome de teste** — oito tardes gastas
+# tentando adivinhar qual das oito asserções cedeu, num binário que não
+# reproduz sozinho.
+#
+# Medido em 15/09/2026, num crate de rascunho com um `assert_eq!` que reprova
+# de propósito: sem esta linha, a mensagem da asserção aparece 0 vez no stderr;
+# com ela, aparece 1, assim —
+#
+#     thread 'history_pages_backwards_without_gaps' panicked at tests/x.rs:2:26:
+#     assertion `left == right` failed: ...
+#
+# O nome da thread é o nome do teste. É tudo o que faltava.
+#
+# O preço é que a saída dos testes deixa de ser capturada e sai à medida que
+# acontece, embaralhada entre testes paralelos. Aqui isso é barato: nenhuma
+# suíte deste repositório instala subscriber de `tracing`, então o que sai é o
+# pânico e pouco mais. Conferido rodando a suíte inteira sete vezes com a linha
+# no lugar.
+[env]
+RUST_TEST_NOCAPTURE = "1"

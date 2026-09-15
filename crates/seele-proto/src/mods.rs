@@ -283,9 +283,15 @@ pub fn inner_path(parts: &[&str]) -> Option<std::path::PathBuf> {
 /// não entra. Antes, ligar o interruptor gravava a exigência e não trancava
 /// ninguém — e a casca **tinha como** dizer isso, por
 /// `seele_server::mods::anuncio::exigencia_vale_na_rede`, que chega a ela junto
-/// com a lista de MODs instalados. Nenhuma tela lê esse campo ainda, e por isso
-/// quem hospeda continua sem ver o efeito do interruptor: está em aberto na
-/// pendência #39, junto com a tela de aceite.
+/// com a lista de MODs instalados. O campo já viaja até a casca — `ModNaTela`
+/// em `apps/seele-app/src/main.rs` o carrega em toda resposta de
+/// `mods_instalados` —, mas o frontend ainda não o desenha:
+/// `apps/seele-app/ui/base.js` lê dessa lista só `enabled` e `client`, para
+/// carregar os scripts. Então quem hospeda continua sem ver o efeito do
+/// interruptor, não por falta do dado e sim por falta da tela. A pendência #39,
+/// que esperava esta subida, fechou em 14/09/2026; a tela que falta ganhou
+/// endereço próprio na pendência #44, e a tela de aceite — do outro lado do fio
+/// — segue no fim da #39.
 ///
 /// **Ela continua sendo uma constante separada** e não vira um alias de
 /// `PROTOCOL_VERSION`: é ela que diz *a partir de qual versão* o anúncio viaja,

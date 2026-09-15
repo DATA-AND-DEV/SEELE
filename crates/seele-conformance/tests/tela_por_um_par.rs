@@ -64,6 +64,10 @@ use seele_server::persistence::Location;
 use seele_server::server::Event;
 use seele_server::{frame, Daemon, ServerConfig};
 
+/// A espera pela porta que outro binário da suíte levou por um instante.
+mod porta;
+use porta::{a_porta_e_de_outro, ligar_insistindo};
+
 /// Quanto tempo se espera por qualquer coisa antes de dar o teste por falho.
 ///
 /// Generoso porque o caminho entre pares tem prazos próprios — três segundos
@@ -164,13 +168,53 @@ async fn servidor_em(porta: u16, database: Location) -> Result<(SocketAddr, Arc<
         caminho_bps: Some(10_000_000),
         ..ServerConfig::default()
     };
-    let servidor = Arc::new(Daemon::bind(config).await?);
+    let servidor = Arc::new(ligar_insistindo(config).await?);
     let endereco = servidor.local_addr()?;
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
         let _ = aceitando.run().await;
     });
     Ok((endereco, servidor))
+}
+
+/// **A prova de que a insistência serve para alguma coisa.**
+///
+/// Sem ela o teste da reconexão reprovava quando outro binário da suíte levava
+/// a porta no intervalo entre a queda e a volta. Aqui a disputa é encenada de
+/// propósito: alguém segura a porta, o `bind` direto recusa na hora, e o mesmo
+/// endereço sobe assim que o dono anterior solta. Trocar `ligar_insistindo`
+/// de volta por `Daemon::bind` faz este teste reprovar na mesma linha em que a
+/// suíte reprovava.
+#[tokio::test]
+async fn a_porta_tomada_por_um_instante_nao_reprova_a_volta_do_servidor() -> Result<()> {
+    let ocupante = std::net::UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0)))?;
+    let porta = ocupante.local_addr()?.port();
+    let config = ServerConfig {
+        name: "Casa".into(),
+        listen: SocketAddr::from(([127, 0, 0, 1], porta)),
+        database: Location::Memory,
+        ..ServerConfig::default()
+    };
+
+    let recusa = Daemon::bind(config.clone())
+        .await
+        .err()
+        .expect("com a porta de outro, o `bind` direto tem de recusar");
+    assert!(
+        a_porta_e_de_outro(&recusa),
+        "a recusa com a porta ocupada veio por outro motivo: {recusa:#}"
+    );
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        drop(ocupante);
+    });
+
+    let daemon = ligar_insistindo(config)
+        .await
+        .expect("a porta foi solta dentro do teto; a volta tinha de acontecer");
+    assert_eq!(daemon.local_addr()?.port(), porta);
+    Ok(())
 }
 
 /// Um par cru: a conexão QUIC e o fluxo de controle, sem tarefa leitora.

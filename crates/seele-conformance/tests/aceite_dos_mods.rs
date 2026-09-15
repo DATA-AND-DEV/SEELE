@@ -557,6 +557,26 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     abrir_falando(endereco, semente, seele_proto::PROTOCOL_VERSION).await
 }
 
+/// O quadro que veio no lugar de `Session`, guardado em vez de resumido.
+///
+/// # Por que isto não é um `bail!` com texto
+///
+/// Um teste que só afirme `is_err()` passa igual se o aperto de mão quebrar por
+/// outro motivo — outra recusa, um erro de transporte, um tempo esgotado. Foi
+/// esse o buraco apontado na revisão desta entrega. Carregando o quadro inteiro,
+/// quem afirma pode cobrar **qual** recusa veio, e uma regressão que troque o
+/// motivo reprova em vez de passar verde.
+#[derive(Debug)]
+struct NaoEntrou(ServerMessage);
+
+impl std::fmt::Display for NaoEntrou {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "em vez de `Session` o servidor mandou {:?}", self.0)
+    }
+}
+
+impl std::error::Error for NaoEntrou {}
+
 /// O mesmo, declarando no `Hello` a versão que se quiser.
 ///
 /// **É a única forma de um par mais velho aparecer neste crate**, e é uma
@@ -614,8 +634,9 @@ async fn abrir_falando(endereco: SocketAddr, semente: u8, versao: u8) -> Result<
         },
     )
     .await?;
-    let ServerMessage::Session { .. } = frame::read::<ServerMessage>(&mut recebe).await? else {
-        anyhow::bail!("o servidor não mandou Session");
+    let ultimo = frame::read::<ServerMessage>(&mut recebe).await?;
+    let ServerMessage::Session { .. } = ultimo else {
+        return Err(NaoEntrou(ultimo).into());
     };
 
     Ok(Par {
@@ -961,12 +982,25 @@ async fn um_par_dentro_da_janela_e_recusado_por_um_servidor_que_exige_mod() -> R
         "a versão anterior alcança o anúncio: este teste deixou de medir a \
          recusa por limiar"
     );
-    let resultado = abrir_falando(endereco, 54, anterior).await;
-    assert!(
-        resultado.is_err(),
+    let erro = abrir_falando(endereco, 54, anterior).await.err().expect(
         "um par que não alcança a versão do anúncio recebeu `Session` de um \
-         servidor que exige MOD: ou ele leu uma lista que não sabe ler, ou a \
-         exigência não vale para ele"
+             servidor que exige MOD: ou ele leu uma lista que não sabe ler, ou a \
+             exigência não vale para ele",
+    );
+
+    // Não basta ter falhado: **qual** recusa veio é o que separa o limiar do
+    // anúncio de um aperto de mão quebrado por outra coisa. Sem esta
+    // igualdade, trocar o motivo — ou derrubar a conexão por um defeito
+    // qualquer — passaria verde.
+    let recusa = erro
+        .downcast_ref::<NaoEntrou>()
+        .unwrap_or_else(|| panic!("a conexão caiu sem o servidor dizer por quê: {erro:#}"));
+    assert_eq!(
+        recusa.0,
+        ServerMessage::Disconnecting {
+            reason: DisconnectReason::Incompatible
+        },
+        "o servidor barrou o par, mas não pelo limiar do anúncio"
     );
 
     daemon.shutdown();
