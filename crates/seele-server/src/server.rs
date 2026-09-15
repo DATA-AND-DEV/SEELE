@@ -907,6 +907,32 @@ pub fn comecar_a_tela_da_conexao_vigente(
     }
 }
 
+/// Se a mudança de sala anunciada para esta pessoa é para **esta** conexão.
+///
+/// `Event::PersonMoved` é difundido para todo mundo, e toda conexão da pessoa
+/// movida o recebe — inclusive a velha da queda silenciosa, que está muda no fio
+/// mas com a tarefa dela viva e lendo o barramento. Sem esta pergunta, essa
+/// conexão respondia ao anúncio chamando `session::assentar`, que **de propósito**
+/// tira a pessoa de toda sala anterior sem conferir sessão nenhuma (andar de uma
+/// sala para outra tem de tirar todo membro anterior, ou a pessoa seguiria
+/// ouvindo a sala de onde saiu). O resultado era o defeito desta pendência pela
+/// porta de trás: a conexão velha desmontava a mídia e a tela da nova e a
+/// re-sentava com o `ssrc` e o canal dela, já mortos.
+///
+/// Fica de fora de `assentar` porque o resgate do assento da carência chama
+/// `assentar` **antes** de a conexão se declarar presente: ali a resposta seria
+/// «não é a vigente» para a única conexão que existe. A pergunta é desta porta —
+/// a do anúncio que chega de fora —, e é só aqui que há duas conexões possíveis
+/// para a mesma pessoa.
+#[must_use]
+pub fn a_mudanca_de_sala_e_desta_conexao(
+    presentes: &Presentes,
+    person: PersonId,
+    sessao: SessionId,
+) -> bool {
+    presentes.e_a_vigente(person, sessao)
+}
+
 /// Who is in which voice room at this moment.
 ///
 /// Separate from [`Slots`], which holds seats for people who are *away*. This
@@ -1721,6 +1747,33 @@ mod tests {
             slots.reclaim(PersonId(1), Instant::now()),
             Some((VoiceRoomId(3), Ssrc(70)))
         );
+    }
+
+    #[test]
+    fn a_mudanca_de_sala_anunciada_nao_e_respondida_pela_conexao_velha() {
+        // `Event::PersonMoved` chega a **todas** as conexões da pessoa movida, e
+        // a resposta a ele — `session::assentar` — tira a pessoa de toda sala
+        // anterior sem conferir sessão, de propósito. Respondido pela conexão
+        // velha, o anúncio vira o mesmo defeito por outra porta: a mídia e a tela
+        // da conexão nova desmontadas, e a pessoa re-sentada com um `ssrc` e um
+        // canal que já morreram.
+        let mut presentes = Presentes::default();
+        assert!(presentes.chegou(sentado(10, "marcela", SessionId(7))));
+        assert!(!presentes.chegou(sentado(10, "marcela", SessionId(8))));
+
+        assert!(
+            !a_mudanca_de_sala_e_desta_conexao(&presentes, PersonId(10), SessionId(7)),
+            "a conexão velha respondeu à mudança de sala e vai desmontar a sala \
+             da conexão nova para sentar com o canal dela, que já morreu"
+        );
+        // E o outro lado, para que o teste não passe por recusar sempre: quem é
+        // a conexão vigente responde ao anúncio, que é o caso comum — mover
+        // alguém por moderação.
+        assert!(a_mudanca_de_sala_e_desta_conexao(
+            &presentes,
+            PersonId(10),
+            SessionId(8)
+        ));
     }
 
     #[test]

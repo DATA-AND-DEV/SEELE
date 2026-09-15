@@ -3099,6 +3099,33 @@ async fn run_session(
                         break;
                     }
                     Event::PersonMoved { person, voice_room: destino } if *person == session.person => {
+                        // A sétima porta, e a única em que o guarda não está no
+                        // desmonte: este anúncio chega a **todas** as conexões
+                        // desta pessoa, e respondê-lo chama `assentar`, que tira
+                        // a pessoa de toda sala anterior sem conferir sessão —
+                        // de propósito, para que andar de uma sala para outra não
+                        // deixe membro para trás. Respondido pela conexão velha
+                        // da queda silenciosa, isso desmonta a mídia e a tela da
+                        // nova e a re-senta com um canal morto. Achado por
+                        // revisão independente; ver
+                        // [`crate::server::a_mudanca_de_sala_e_desta_conexao`].
+                        let e_minha = {
+                            let presentes = server.presentes.lock().await;
+                            crate::server::a_mudanca_de_sala_e_desta_conexao(
+                                &presentes,
+                                session.person,
+                                session.id,
+                            )
+                        };
+                        if !e_minha {
+                            server.desassentamentos.conexao_velha();
+                            tracing::info!(
+                                person = %session.person,
+                                sessao = %session.id,
+                                "uma conexão velha recebeu a mudança de sala desta pessoa; nada foi mexido"
+                            );
+                            continue;
+                        }
                         assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, *destino).await?;
                         current_voice_room = Some(*destino);
                         midia.entrou(current_voice_room);

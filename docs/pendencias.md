@@ -1583,6 +1583,54 @@ máquinas), com o teste desta pendência verde em 28,04 s. `cargo fmt --all
 --check` limpo e `cargo clippy` das duas crates tocadas, com `-D warnings`,
 limpo.
 
+**A sétima porta, que era o único apontamento vivo: o anúncio de mudança de sala.**
+As revisões anteriores vinham repetindo, e este arquivo vinha registrando, que o
+caminho de **entrada** ficava de fora de propósito e que mexer nele seria ampliar
+o escopo. **A parte "de propósito" continua certa; a conclusão de deixá-lo fora,
+não.** `assentar` chama a saída por pessoa sem conferir sessão porque andar de uma
+sala para outra tem de tirar todo membro anterior — isso é correto e não mudou.
+O que faltava conferir não é o que `assentar` faz, é **quem manda `assentar`
+rodar**: `Event::PersonMoved` é difundido, e toda conexão da pessoa movida o
+recebe, inclusive a velha da queda silenciosa, que está muda no fio mas com a
+tarefa dela viva lendo o barramento. Respondendo ao anúncio, ela desmontava a
+mídia e a tela da conexão nova e re-sentava a pessoa com o canal e o `ssrc` dela,
+já mortos — o defeito desta pendência inteiro, entrando pela porta dos fundos, com
+um moderador movendo alguém como gatilho.
+
+O guarda mora num nome só, `server::a_mudanca_de_sala_e_desta_conexao`, pela mesma
+razão dos outros: guarda dentro de laço de sessão é guarda que teste nenhum
+alcança. E mora **nessa porta**, e não dentro de `assentar`, porque o resgate do
+assento da carência chama `assentar` antes de a conexão se declarar presente —
+lá dentro, a pergunta responderia «não é a vigente» para a única conexão que
+existe. A conexão velha que recebe o anúncio agora não mexe em nada e soma no
+mesmo contador `Desassentamentos` das outras, que é o que faz um guarda que dá
+certo deixar rastro.
+
+**Prova de reversão, refeita e não citada.** Trocado o corpo do guarda por `true`
+— o comportamento de antes —, o teste de unidade
+`a_mudanca_de_sala_anunciada_nao_e_respondida_pela_conexao_velha` reprova com «a
+conexão velha respondeu à mudança de sala e vai desmontar a sala da conexão nova
+para sentar com o canal dela, que já morreu». Restaurado o arquivo, passa.
+
+**A bateria desta rodada, medida nas crates certas.** A validação anexada voltou,
+pela quinta vez, a ser a das ferramentas de publicação (66 testes, nenhuma crate
+desta pendência): não há reprovação a consertar ali, há a lacuna de anexo que esta
+medida supre. `seele-server`: **489 passando, nenhuma falha** — 488 de antes mais
+o teste novo do guarda. `seele-proto`: **232 passando, nenhuma falha**.
+`seele-conformance` inteira, serializada em 29 binários: **154 passando, nenhuma
+falha, uma ignorada** (a que exige duas máquinas, ignorada desde antes desta
+pendência), com `desassentar` verde em 28,03 s. `cargo fmt --all --check` limpo e
+`cargo clippy --all-targets -- -D warnings` limpo nas três crates.
+
+**E a medida que faltava: o `cargo test` do repositório inteiro, sem filtro.**
+Era esse o comando da validação anexada, e a lacuna era de anexo, não de
+reprovação. Rodado aqui sobre esta árvore, com a sétima porta dentro, ele fecha
+com saída 0: **74 binários de teste, 1904 asserções passando, nenhuma falha,
+quatro ignoradas** — as que exigem duas máquinas. A bateria de conformidade foi
+junto, em paralelo e não serializada, e o teste de repasse de tela que a revisão
+viu reprovar uma vez sob disputa de máquina passou; é instabilidade de máquina
+disputada, a mesma já registrada em #29, e não regressão desta pendência.
+
 ## 12 · Fechada em 2026-08-13 · A conferência da impressão digital do convite
 
 **O que era.** O app lia a impressão digital de um `seele://` e não a conferia:
