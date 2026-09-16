@@ -1,0 +1,18 @@
+--- ANTES DE DESARMAR ---
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/299c2412-1abd-4516-9748-226ce1950e3e/crates/seele-conformance/tests/vaga/mod.rs
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /tmp/o29/vaga_ARMADO7.backup.rs
+81:const VAGAS: usize = usize::MAX;
+ROTULO=revws7_1 SAIDA=0 PAREDE=210.814072000s
+ROTULO=revws7_2 SAIDA=0 PAREDE=185.288985000s
+ROTULO=revws7_3 SAIDA=0 PAREDE=186.369155000s
+ROTULO=revws7_4 SAIDA=101 PAREDE=114.386885000s
+REPROVOU DESARMADO na rodada 4
+--- fim das rodadas desarmadas ---
+--- RESTAURACAO ---
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /tmp/o29/vaga_ARMADO7.backup.rs
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/299c2412-1abd-4516-9748-226ce1950e3e/crates/seele-conformance/tests/vaga/mod.rs
+RESTAURADO: identico byte-a-byte ao backup
+81:const VAGAS: usize = 1;
+ROTULO=pos_rev7 SAIDA=0 PAREDE=284.825839000s
+FIM DO CICLO 7
+CADEIA 7 CONCLUIDA

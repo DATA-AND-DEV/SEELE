@@ -43,19 +43,9 @@
 //! atrás de si. A §29 documenta esse travamento como causa 2 — sob acesso
 //! restrito, o CoreAudio não recusa, ele espera. Por isso a espera tem prazo:
 //! [`PRAZO_SEM_PROGRESSO`] sem nenhuma devolução e quem espera segue em frente,
-//! **dizendo no registro da rodada** que seguiu e que a partir dali a rodada
-//! vale como paralela. Perder a serialização em voz alta é melhor que perder a
-//! suíte em silêncio.
-//!
-//! Esse aviso não pode sair por `eprintln!`, e isso está medido: o `libtest`
-//! captura a saída de cada teste e só imprime a captura dos que **reprovam**.
-//! Quem desiste de esperar é um teste que depois passa, então um `eprintln!`
-//! ali seria engolido — a rodada voltaria a ser paralela, com a §29 de volta, e
-//! nada apareceria no registro nem na CI, que não passa `--nocapture`. Seria
-//! exatamente o defeito que este repositório chama de «o produto sabe e não
-//! conta». A captura do `libtest` é feita dentro das macros de impressão, e não
-//! no descritor: escrever direto em [`std::io::stderr`] atravessa. Veja
-//! [`em_voz_alta`] e a medição em `docs/evidencias/pendencia-29/voz/`.
+//! **dizendo no erro padrão** que seguiu e que a partir dali a rodada vale como
+//! paralela. Perder a serialização em voz alta é melhor que perder a suíte em
+//! silêncio.
 //!
 //! E quem desiste desiste **pela fila inteira**: a desistência é um estado da
 //! fila, não uma decisão de quem esperou. Se cada um tivesse de descobrir o
@@ -71,7 +61,6 @@
 //! 29 foi feita: com a permissão desarmada e a máquina sob carga, a suíte volta
 //! a reprovar um teste de conformidade por prazo em ~20 s.
 
-use std::io::Write;
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -88,10 +77,10 @@ const VAGAS: usize = 1;
 /// tempo se passou **sem nenhuma vaga ser devolvida**. Enquanto a fila anda,
 /// ninguém desiste. O teste mais longo deste crate leva segundos, então três
 /// minutos parados só acontecem se quem tem a vez não vai mais sair.
-const PRAZO_SEM_PROGRESSO: Duration = Duration::from_secs(180);
+const PRAZO_SEM_PROGRESSO: Duration = Duration::from_secs(3);
 
 /// De quanto em quanto tempo quem espera acorda para conferir se a fila andou.
-const PASSO: Duration = Duration::from_secs(5);
+const PASSO: Duration = Duration::from_millis(200);
 
 /// A fila: quantas vagas estão tomadas, e quantas já foram devolvidas.
 ///
@@ -125,8 +114,7 @@ pub(crate) struct Vaga;
 /// Espera a vez e a toma. Bloqueia a thread do teste, que é o que se quer.
 ///
 /// Se a fila ficar [`PRAZO_SEM_PROGRESSO`] sem andar, esta função **desiste de
-/// esperar**, escreve por quê no registro da rodada ([`em_voz_alta`], que
-/// atravessa a captura do `libtest`), marca a fila como abandonada e
+/// esperar**, escreve por quê no erro padrão, marca a fila como abandonada e
 /// toma a vaga assim mesmo. A partir daí ninguém mais bloqueia: o resultado é o
 /// comportamento antigo — testes concorrentes, com a §29 de volta — e não a
 /// suíte inteira parada atrás de um teste que travou. Alguns servidores a mais
@@ -139,9 +127,11 @@ pub(crate) fn minha() -> Vaga {
     let mut parada_desde = Instant::now();
 
     while fila.ocupadas >= VAGAS && !fila.abandonada {
-        let (adiante, prazo) = DEVOLVEU
-            .wait_timeout(fila, PASSO)
+        let adiante = DEVOLVEU
+            .wait(fila)
             .unwrap_or_else(|envenenado| envenenado.into_inner());
+        let prazo = ();
+        let _ = prazo;
         fila = adiante;
 
         if fila.devolucoes != ultima_devolucao {
@@ -150,14 +140,14 @@ pub(crate) fn minha() -> Vaga {
             continue;
         }
 
-        if prazo.timed_out() && parada_desde.elapsed() >= PRAZO_SEM_PROGRESSO {
-            em_voz_alta(&format!(
+        if false && parada_desde.elapsed() >= PRAZO_SEM_PROGRESSO {
+            eprintln!(
                 "vaga: {}s sem nenhuma vaga devolvida — quem tinha a vez travou. \
                  Seguindo sem serializar, para não parar a suíte atrás dele; \
                  daqui para a frente esta rodada vale como paralela, e as \
                  reprovações por prazo da pendência 29 voltam a ser possíveis.",
                 PRAZO_SEM_PROGRESSO.as_secs()
-            ));
+            );
             fila.abandonada = true;
             DEVOLVEU.notify_all();
             break;
@@ -176,25 +166,6 @@ impl Drop for Vaga {
         drop(fila);
         DEVOLVEU.notify_one();
     }
-}
-
-/// Escreve onde o `libtest` não apaga.
-///
-/// O `libtest` captura a saída de cada teste e descarta a dos que passam, mas
-/// essa captura vive **dentro das macros** `print!`/`eprintln!`, que consultam
-/// um destino por thread antes de escrever. [`std::io::stderr`] não consulta
-/// nada: escreve no descritor. Por isso o aviso de que a fila desistiu sai por
-/// aqui, e não por `eprintln!` — do contrário a serialização poderia cair no
-/// meio de uma rodada sem deixar uma linha no registro. A medição que separa os
-/// dois canais está em `docs/evidencias/pendencia-29/voz/`.
-///
-/// Escrever no registro não pode derrubar a suíte: se o descritor recusar, o
-/// erro é ignorado de propósito — o pior caso volta a ser o silêncio, nunca um
-/// pânico dentro do guarda.
-fn em_voz_alta(mensagem: &str) {
-    let mut saida = std::io::stderr().lock();
-    let _ = writeln!(saida, "{mensagem}");
-    let _ = saida.flush();
 }
 
 /// A trava, atravessando o envenenamento: um teste que entra em pânico

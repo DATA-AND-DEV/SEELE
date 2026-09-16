@@ -110,19 +110,38 @@ jobs:
         # on their own machine.
         #
         # Measured before removing it (#29, closing entry): five consecutive
-        # rounds of this exact command under 12 deliberate CPU burners on a
-        # 15-core machine, all exit 0, 1883 tests each, wall times within 0.9s
-        # of each other. The permit costs +76s per round and it buys back a
-        # suite that is evidence again.
+        # rounds of `cargo test --workspace` under 8 deliberate CPU burners on
+        # a 15-core machine, all exit 0, 1883 tests each, zero FAILED lines,
+        # wall times spread over 1.4s (259.76s to 261.18s). Note the measured
+        # command lacked the `--all-targets` this step passes; on this tree the
+        # two select the same work, which was checked and not assumed — both
+        # enumerate 73 sets and 1883 tests (see #29's closing entry). The cost
+        # per round is in
+        # #29's closing entry and is deliberately not copied here — copying a
+        # measured number into a second place is how this file ended up quoting
+        # figures that had already been retired.
+        #
+        # Not all of it: a sixth armed round under the same load failed, in
+        # moderacao::um_operador_modera_pessoas_e_nao_o_comandante, the set
+        # ending at 21.28s on `Error: SemResposta` — while the same set alone
+        # under the same load passes in 1.4s, 4 times out of 4. #29 is heavily
+        # reduced, not eliminated: 1 failure in 6 armed rounds against roughly
+        # 2 in 3 before. See #29's closing entry; do not cite the five without
+        # the sixth.
+        #
+        # What proves the permit is acting, in those same five rounds: the
+        # acceptance_m5 binary closes at 22.96-23.06s with 15/15. That is the
+        # *serial* figure measured on 2026-08-31 (23.02s), not the parallel one
+        # (~20.01s, flush against the 20s IDLE_TIMEOUT).
         #
         # What those five rounds do *not* prove, stated here so nobody cites
-        # them for more than they are: a CPU burner does not reproduce #29.
-        # Seven rounds with the permit *disarmed* under the same load — four of
-        # them under 30 burners — also came out 0 (docs/evidencias/
-        # pendencia-29/reversao/). What blows the 20s IDLE_TIMEOUT is waiting on
-        # the network and the database, and the failure only came back under
-        # disk and paging contention. So the five rounds prove no regression and
-        # the cost; what proves the permit is acting is the armed/disarmed wall
-        # time of the same binary — acceptance_m5 at 23.04s serialized against
-        # 20.02s parallel, one step from the cliff.
+        # them for more than they are: a CPU burner on its own does not
+        # reproduce #29 — disarmed rounds under that load also came out 0. The
+        # load that does reproduce it adds six loops running conformance
+        # binaries *outside* cargo, and under that load, disarmed, the failure
+        # comes straight back: --workspace, exit 101, the conformance set
+        # ending at 20.32s on `Error: SemResposta`. So the five rounds prove no
+        # regression, the cost and that the permit acts; the reversal cycle is
+        # what proves it holds under the load that caused the failure. Both
+        # live in docs/evidencias/pendencia-29/arquivo-entregue/.
         run: cargo test --workspace --all-targets

@@ -1,0 +1,10 @@
+--- ARQUIVO SOB MEDIÇÃO ---
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  crates/seele-conformance/tests/vaga/mod.rs
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /tmp/o29/vaga_ARMADO7.backup.rs
+--- (a) PROVA ESTRUTURAL: o que o seele-server compila mudou desde a base 3c59eec? ---
+(nada impresso acima = nenhum byte de diferença)
+--- (b) paralelo, árvore entregue, sob carga ---
+ROTULO=srv2_paralelo SAIDA=0 PAREDE=29.343063000s
+--- (c) contrafactual serializado, mesmo binário, mesma carga ---
+ROTULO=srv2_serie SAIDA=0 PAREDE=46.629745000s
+FIM DO ALCANCE 2

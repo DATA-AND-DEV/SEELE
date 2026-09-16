@@ -1,0 +1,12 @@
+vaga: 3s sem nenhuma vaga devolvida — quem tinha a vez travou. Seguindo sem serializar, para não parar a suíte atrás dele; daqui para a frente esta rodada vale como paralela, e as reprovações por prazo da pendência 29 voltam a ser possíveis.
+vaga: 3s sem nenhuma vaga devolvida — quem tinha a vez travou. Seguindo sem serializar, para não parar a suíte atrás dele; daqui para a frente esta rodada vale como paralela, e as reprovações por prazo da pendência 29 voltam a ser possíveis.
+teste 1 seguiu aos 3.352269916s
+teste 2 seguiu aos 3.352279708s
+teste 4 seguiu aos 3.35228125s
+teste 6 seguiu aos 3.352286375s
+teste 5 seguiu aos 3.352289166s
+teste 7 seguiu aos 3.352292583s
+teste 3 seguiu aos 3.352348166s
+teste 0 seguiu aos 3.35235475s
+TODOS SEGUIRAM em 3.352653583s
+SAIDA=0

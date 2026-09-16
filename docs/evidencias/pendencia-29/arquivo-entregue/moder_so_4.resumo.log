@@ -1,0 +1,7 @@
+carga: 8 queimadores de processador, nenhum binário de conformidade fora do cargo; load = 15.47 15.55 15.92
+processos do usuario com a carga ligada: 416
+
+     Running tests/moderacao.rs (target/debug/deps/moderacao-e39a12130df0ede6)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.40s
+
+=== ROTULO=moder_so_4 SAIDA=0 PAREDE=1.648565000s ===

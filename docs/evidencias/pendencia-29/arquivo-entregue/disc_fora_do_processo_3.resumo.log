@@ -1,0 +1,7 @@
+carga: 8 queimadores + 6 laços de conformidade fora do cargo (bateria_interna-d13e05667ae84c37); load = 15.18 15.00 15.81
+processos do usuario com a carga ligada: 477
+
+     Running tests/tela_por_um_par.rs (target/debug/deps/tela_por_um_par-c0e3b99816493bdb)
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 51.99s
+
+=== ROTULO=disc_fora_do_processo_3 SAIDA=0 PAREDE=52.208093000s ===

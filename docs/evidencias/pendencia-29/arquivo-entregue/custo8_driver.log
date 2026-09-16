@@ -1,0 +1,18 @@
+--- ANTES DE DESARMAR ---
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/299c2412-1abd-4516-9748-226ce1950e3e/crates/seele-conformance/tests/vaga/mod.rs
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /tmp/o29/vaga_ARMADO7.backup.rs
+81:const VAGAS: usize = usize::MAX;
+ROTULO=custo8_desarmada_1 SAIDA=0 PAREDE=204.590236000s
+ROTULO=custo8_desarmada_2 SAIDA=0 PAREDE=190.273303000s
+ROTULO=custo8_desarmada_3 SAIDA=0 PAREDE=181.954029000s
+--- RESTAURACAO ---
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /tmp/o29/vaga_ARMADO7.backup.rs
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/299c2412-1abd-4516-9748-226ce1950e3e/crates/seele-conformance/tests/vaga/mod.rs
+RESTAURADO: identico byte-a-byte ao backup
+81:const VAGAS: usize = 1;
+ROTULO=custo8_pos SAIDA=101 PAREDE=160.736031000s
+--- CONFERENCIA FINAL DO ARQUIVO ENTREGUE ---
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/299c2412-1abd-4516-9748-226ce1950e3e/crates/seele-conformance/tests/vaga/mod.rs
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /tmp/o29/vaga_ARMADO7.backup.rs
+IDENTICO
+FIM DO CUSTO 8

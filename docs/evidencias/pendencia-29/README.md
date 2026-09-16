@@ -20,6 +20,20 @@ o condensado e comparar, enquanto os brutos existirem em `/tmp/o29/` — o nome 
 bruto é o do resumo, com uma exceção: `rodadas/pos_revisao_1` saiu de
 `final_ws_1.log`.
 
+## Qual diretório vale — leia isto antes de citar qualquer número daqui
+
+**`arquivo-entregue/` tem precedência sobre todos os outros.** `rodadas/`,
+`alcance/` e `reversao/` foram medidos sobre a versão **anterior** do
+`crates/seele-conformance/tests/vaga/mod.rs` (SHA-256 `73bdeb64…`), antes de a
+fila ganhar prazo, abandono coletivo e aviso por `stderr`. O arquivo entregue é
+outro (`1515219068…`), e número medido num arquivo não vale para outro. Os três
+diretórios ficam porque são o histórico honesto de como se chegou aqui; eles
+não são a prova do que está sendo entregue.
+
+Onde os dois discordarem, vale `arquivo-entregue/`, que imprime o hash do
+arquivo sob medição dentro de cada `*_driver.log`. O README de lá traz **todas**
+as rodadas armadas em ordem e sem seleção, incluindo as duas que reprovaram.
+
 ## `rodadas/` — o critério 1: cinco rodadas seguidas, todas 0
 
 `cargo test --workspace --all-targets`, com a permissão armada, sob 12
@@ -58,7 +72,23 @@ queimador de processador **não reproduz** o defeito da §29 — está medido em
 custo**, não robustez sob a carga que causava a reprovação. Quem prova que a
 permissão age é o diferencial de tempo de parede da tabela de `reversao/`.
 
-## `alcance/` — o critério 2: a serialização só alcança um crate
+## `arquivo-entregue/` — tudo o que foi medido sobre o arquivo como ele é entregue
+
+O diretório que a §29 cita para o aceite. Traz, com o hash impresso em cada
+registro: as cinco rodadas do critério 1 (`verde10_*`), o ciclo de reversão do
+critério 3 (`revws7_*` → restauração conferida → `pos_rev7`), o alcance do
+critério 2 sobre esta árvore (`srv2_paralelo`, `srv2_serie`, `alcance2_driver`),
+o custo com a carga casada (`custo8_*`), o `fmt` e o `clippy` do critério 4, e o
+discriminador de carga sobre o teste da causa 5 (`disc_*`, doze registros). O
+`README.md` de lá explica cada um.
+
+## `alcance/` — o critério 2, na versão **aposentada** do módulo
+
+**Leia a ressalva antes do número.** Esta medida saiu da versão anterior do
+`vaga/mod.rs` (`73bdeb64…`), e vale para ela — não para o arquivo entregue. O
+critério 2 sobre o arquivo entregue está em
+`arquivo-entregue/srv2_paralelo.resumo.log` contra `srv2_serie.resumo.log`, e é
+essa a medida a citar. Esta fica pelo histórico.
 
 `cargo test -p seele-server`, sob a mesma carga, com a árvore «antes» realmente
 sem o módulo `vaga`:
@@ -110,8 +140,43 @@ de reproduzir: 10 execuções do teste sozinho sob 12 queimadores, **10 verdes**
 Está documentada como causa 3 da §29 e **não** foi consertada — a tarefa proíbe
 tocar em `crates/seele-server/`.
 
+## `destravamento/` — o risco que a fila criou, fechado
+
+Apontado pela revisão independente, não pela medição: a espera da vaga não tinha
+prazo, então um teste que **travasse** — a causa 2 da §29 — estagnaria os 138
+seguintes em silêncio. A espera passou a ter prazo, medido sobre a **falta de
+progresso da fila** e não sobre o tempo de espera de cada um, e ao estourar ela
+diz no registro da rodada que vai seguir sem serializar. `com_prazo.log` (saída
+0, os **oito** que esperavam atrás do travado seguem juntos aos 3,35 s) contra
+`sem_prazo.log` (saída 9, ninguém segue) é a prova por reversão. O README de lá
+explica o método, e traz também `cascata.log`, que é por que a desistência é
+coletiva.
+
+## `voz/` — por onde esse aviso sai, e por que não por `eprintln!`
+
+Achado da segunda revisão independente, e um defeito de verdade, não de texto: o
+aviso acima saía por `eprintln!`, e o `libtest` captura a saída de cada teste e
+imprime só a dos que **reprovam**. Quem desiste de esperar é um teste que depois
+passa — então a fila podia ser abandonada, a rodada voltar a ser paralela e a
+§29 voltar **sem uma linha no registro**, nem na CI, que não passa
+`--nocapture`. O README de `voz/` traz a medição dos dois canais e o conserto:
+`writeln!` direto em `std::io::stderr()`, que atravessa a captura.
+
 ## `motor/`
 
-Os geradores, para que a medida possa ser refeita: `rodada.sh` (carga + parede),
-`srv.sh` (alcance), `reversao5.sh` (ciclo de reversão) e `condensa.sh` (o filtro
-que produziu cada `*.resumo.log` a partir do bruto).
+Os geradores, para que a medida possa ser refeita. Os do arquivo **entregue**,
+que são os que valem para o aceite:
+
+| gerador | o que produz |
+| --- | --- |
+| `rodada5.sh` | a carga do critério 1: 8 queimadores, nada fora do `cargo` |
+| `rodada4.sh` | a carga do **limite**: acrescenta 6 laços de conformidade fora do `cargo` |
+| `final29.sh` | as cinco rodadas do aceite (`verde10_*`) e o discriminador (`disc_*`) |
+| `alcance2.sh` | o critério 2 (`srv2_paralelo`, `srv2_serie`) |
+| `reversao7.sh` | o ciclo de reversão do critério 3 (`revws7_*`, `pos_rev7`) |
+| `custo8.sh` | o custo com as duas metades sob a **mesma** carga (`custo8_*`) |
+| `condensa.sh`, `condensa2.sh` | o filtro que produziu cada `*.resumo.log` a partir do bruto |
+
+Os demais (`rodada.sh`, `rodada3.sh`, `srv.sh`, `reversao5.sh`, `reversao6.sh`,
+`verde8.sh`, `verde9.sh`, `ate_falhar3.sh`) produziram os diretórios históricos
+e ficam para que aquelas medidas também possam ser refeitas.

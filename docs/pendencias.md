@@ -1570,32 +1570,50 @@ a vaga não impede que nasçam, impede que **rodem juntas** — quem espera no
 serialização; tempo de parede mede.
 
 **As cinco rodadas do aceite**, `cargo test --workspace`, na mesma máquina de 15
-núcleos, cada uma com **12 queimadores de CPU** ligados de propósito antes do
-`cargo` e desligados depois (carga média de 23 a 37 no minuto anterior a cada
-rodada):
+núcleos, cada uma com **8 queimadores de CPU** ligados de propósito antes do
+`cargo` e desligados depois (carga média de 9,9 a 20,5 no minuto de cada
+rodada). Gerador `motor/final29.sh`; registros em
+`docs/evidencias/pendencia-29/arquivo-entregue/verde10_*.resumo.log`:
 
-| Rodada | Saída | Tempo de parede | Conjuntos | Testes |
-| --- | --- | --- | --- | --- |
-| 1 | 0 | 293,46 s | 73 | 1.883 |
-| 2 | 0 | 271,21 s | 73 | 1.883 |
-| 3 | 0 | 272,08 s | 73 | 1.883 |
-| 4 | 0 | 271,31 s | 73 | 1.883 |
-| 5 | 0 | 271,96 s | 73 | 1.883 |
+| Rodada | Saída | Tempo de parede | Conjuntos | Testes | `acceptance_m5` |
+| --- | --- | --- | --- | --- | --- |
+| `verde10_1` | 0 | 260,49 s | 73 | 1.883 | 15/15 em 22,97 s |
+| `verde10_2` | 0 | 260,06 s | 73 | 1.883 | 15/15 em 22,96 s |
+| `verde10_3` | 0 | 260,46 s | 73 | 1.883 | 15/15 em 23,01 s |
+| `verde10_4` | 0 | 261,18 s | 73 | 1.883 | 15/15 em 23,06 s |
+| `verde10_5` | 0 | 259,76 s | 73 | 1.883 | 15/15 em 23,00 s |
 
-Cinco de cinco, sem uma reprovação por prazo. A primeira rodada é 22 s mais
-lenta que as outras quatro porque pagou o aquecimento de cache de disco; as
-quatro seguintes ficam dentro de **0,9 s** umas das outras, o que já é um sinal
-por si: a suíte voltou a ter um tempo, em vez de uma distribuição.
+Cinco de cinco, sem uma reprovação por prazo, com **zero linhas `FAILED`** nos
+cinco registros. A dispersão de parede entre elas é de **1,4 s**: a suíte voltou
+a ter um tempo, em vez de uma distribuição. E o `acceptance_m5` fecha em
+**23,0 s com 15 de 15** nas cinco — o número da **série** medido em 2026-08-31,
+não o do paralelo (~20,01 s, encostado no prazo). A permissão está agindo, e
+está agindo nas cinco.
+
+**Esta tabela substitui uma anterior, e o motivo importa.** A versão publicada
+antes desta (293,46 / 271,21 / 272,08 / 271,31 / 271,96 s) foi medida sobre a
+**versão anterior** do `crates/seele-conformance/tests/vaga/mod.rs`, SHA-256
+`73bdeb64…`, sem o prazo da fila e sem o abandono coletivo. O arquivo entregue é
+o `1515219068…`. Número medido num arquivo não vale para outro, e a evidência
+já dizia isso enquanto esta seção seguia citando os números velhos. As cinco
+rodadas acima imprimem o hash do arquivo sob medição no próprio registro, para
+que a confusão não possa se repetir em silêncio.
+
+**E há uma sexta rodada armada, sob a mesma carga, que reprovou.** Ela está
+descrita com nome, número e registro em «A sexta rodada armada, que reprovou»,
+mais adiante nesta mesma seção. Quem citar as cinco tem de citar a sexta: a taxa
+honesta desta entrega é **1 reprovação em 6 rodadas armadas**, contra cerca de
+2 em 3 antes do conserto.
 
 **O que estas cinco rodadas não provam, dito aqui e não só lá embaixo.**
-Queimador de processador **não reproduz** o defeito da §29 — está medido na
-prova de reversão adiante, em sete rodadas *desarmadas* que também saíram 0 sob
-esta mesma carga, quatro delas com 30 queimadores. Logo estas cinco provam
-**ausência de regressão e o custo**, e não robustez sob a carga que causava a
-reprovação. Quem prova que a permissão está agindo é o par de tempos de parede
-armado/desarmado do mesmo binário, na tabela da reversão. Quem citar esta tabela
-— o comentário do `ci.yml` inclusive, onde a ressalva está escrita junto — tem
-de citar as duas coisas.
+Queimador de processador, sozinho, **não reproduz** o defeito da §29: há rodadas
+*desarmadas* que saíram 0 sob essa mesma carga. O que reproduz é a carga do
+`motor/rodada4.sh`, que soma aos queimadores seis laços rodando binários de
+conformidade **fora do `cargo`** — e sob ela, desarmado, o defeito volta
+(`revws7_4`, adiante). Logo estas cinco provam **ausência de regressão, o custo
+e que a permissão está agindo**; a robustez sob a carga que causava a reprovação
+quem prova é o ciclo de reversão. Quem citar esta tabela — o comentário do
+`ci.yml` inclusive — tem de citar as duas coisas.
 
 **Onde está o registro bruto.** Em `docs/evidencias/pendencia-29/`, dentro do
 repositório: as cinco rodadas, o alcance no servidor, o ciclo de reversão e os
@@ -1604,20 +1622,94 @@ avisar, e uma tabela cuja fonte sumiu volta a ser afirmação. O `README.md` de 
 diz o que foi cortado de cada registro e o que é verbatim.
 
 **A serialização alcança somente a conformidade, e isto é medido, não
-argumentado.** `cargo test -p seele-server` sob a mesma carga de 12 queimadores,
-com a árvore original e depois com a árvore armada:
+argumentado.** A medida está sobre o arquivo entregue, e não repete o erro que
+a terceira revisão apontou — o par `antes/depois` que esta seção publicava saiu
+da versão aposentada do módulo, e um número medido num arquivo não vale para
+outro. Ele foi refeito com um desenho que nem precisa de duas árvores
+(`motor/alcance2.sh`):
 
-| Árvore | Tempo de parede | Binário principal |
+Primeiro, a prova estrutural: `git diff --stat 3c59eec -- crates/seele-server/
+.cargo/ Cargo.toml Cargo.lock` não imprime uma linha. Nada do que o
+`seele-server` compila mudou, e as duas medidas abaixo rodam o **mesmo
+binário** — `seele_server-b79839397f752fd8`, com o identificador impresso nos
+dois registros. Depois, o contrafactual, que é o que de fato prova: em vez de
+comparar duas árvores, mede-se o preço que o critério 2 **proíbe** pagar.
+
+| Rodada | Como | `seele_server` (lib, 453 testes) | Conjunto |
+| --- | --- | --- | --- |
+| `srv2_paralelo` | a árvore como é entregue | **8,01 s** | 29,34 s |
+| `srv2_serie` | o mesmo binário com `--test-threads=1` | **24,47 s** | 46,63 s |
+
+Serializar aqueles 453 testes custaria **três vezes mais** — 8,01 s viram
+24,47 s, e o conjunto do crate ganha 17,3 s. A árvore entregue marca o número do
+paralelo. Se a fila tivesse escapado para o `seele-server`, a linha de cima
+seria a de baixo, e não é. As duas rodaram sob 8 queimadores e saíram 0;
+registros em `arquivo-entregue/srv2_paralelo.resumo.log` e `srv2_serie.resumo.log`.
+
+### A prova de reversão — o critério 3, sobre o arquivo entregue
+
+**Leia esta subseção antes da seguinte, e saiba por quê.** A subseção logo
+abaixo — «O primeiro ciclo de reversão, medido na versão aposentada do módulo» —
+descreve um ciclo real, mas medido sobre a versão **anterior** do
+`crates/seele-conformance/tests/vaga/mod.rs` (SHA-256 `73bdeb645b92…`), sem o
+prazo da fila, sem o abandono coletivo e sem o aviso por `stderr`. Ela fica
+registrada porque o que ela ensinou sobre a natureza da carga continua valendo;
+ela **não** é a prova do critério 3, e a versão anterior deste documento a
+apresentava como se fosse, sem dizer em que arquivo tinha sido medida. Quem
+lesse saía com a prova errada. A prova do critério 3, medida sobre o arquivo que
+está sendo entregue, é esta:
+
+```
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  crates/seele-conformance/tests/vaga/mod.rs
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  docs/evidencias/pendencia-29/arquivo-entregue/vaga_ARMADO7.backup.rs
+```
+
+O backup contra o qual a restauração é conferida está **dentro do repositório**,
+no caminho acima, e não mais só em `/tmp` — que é apagado sem aviso, e onde uma
+conferência byte-a-byte não é reproduzível por terceiros. Ciclo completo
+(gerador: `docs/evidencias/pendencia-29/motor/reversao7.sh`, registro:
+`arquivo-entregue/reversao7_driver.log`), todo em `cargo test --workspace`:
+
+| rodada | permissão | saída | parede | o que mostra |
+| --- | --- | --- | --- | --- |
+| `revws7_1` | desarmada | 0 | 210,81 s | — |
+| `revws7_2` | desarmada | 0 | 185,29 s | — |
+| `revws7_3` | desarmada | 0 | 186,37 s | — |
+| `revws7_4` | desarmada | **101** | 114,39 s | `tela_por_um_par` reprova, **conjunto em 20,32 s** |
+| *restauração* | — | — | — | `cmp` sem diferença, SHA-256 igual ao backup |
+| `pos_rev7` | restaurada | 0 | 284,83 s | volta a passar |
+
+A reprovação de `revws7_4` é a forma exata que o aceite pedia: em `--workspace`,
+com a permissão desarmada, e **por prazo** — `Error: SemResposta`, conjunto
+encerrando em 20,32 s, encostado no `IDLE_TIMEOUT` de 20 s do transporte.
+
+**E o diferencial armado/desarmado, no mesmo arquivo e no mesmo dia**, que é a
+prova que não depende de sorte nenhuma — mesmos binários, mesma carga, mesma
+máquina, mudando só a largura da permissão:
+
+| binário | desarmada (`revws7_1..3`) | armada (`verde8_1..4`, `pos_rev7`) |
 | --- | --- | --- |
-| original, sem a vaga | 31,55 s | 453 testes em **8,04 s** |
-| com a vaga armada | 27,09 s | 453 testes em **8,07 s** |
+| `acceptance_m2` (9 testes) | 0,95 / 0,98 / 0,97 s | **3,17 – 3,19 s** |
+| `acceptance_m5` (15 testes) | 20,01 / 20,02 / 20,04 s | **22,92 – 23,06 s** |
+| soma dos 28 binários | 183,4 / 181,3 / 182,4 s | **254,3 – 275,8 s** |
 
-Os 469 testes do servidor continuam em paralelo: três centésimos de diferença no
-binário que carrega 453 deles. Serializados, aqueles 8 s virariam minutos. A
-diferença de 4 s no total é ruído da carga de fundo, e vai no sentido contrário
-ao de uma regressão.
+**Uma armadilha do método, que custou uma reprovação de revisão e fica escrita.**
+Desarmar a permissão é uma edição na árvore de trabalho, e os geradores de
+medição desarmam, medem e só então restauram. Se a sessão termina no meio do
+ciclo, a árvore fica com `VAGAS = usize::MAX` — a serialização desligada,
+`cargo clippy` reprovando em `absurd_extreme_comparisons`, e toda a evidência
+descrevendo um arquivo que não é o que está lá. Foi exatamente o que uma revisão
+independente encontrou, e ela estava certa em reprovar. Quem for medir de novo:
+**confira `const VAGAS` e o SHA-256 da árvore contra o backup antes de dar
+qualquer coisa por entregue** — é uma linha de `shasum`, e é a diferença entre
+uma entrega e uma entrega desarmada.
 
-### A prova de reversão, e o que ela ensinou de novo
+### O primeiro ciclo de reversão, medido na versão aposentada do módulo
+
+**Tudo nesta subseção foi medido sobre `73bdeb645b92…`, a versão anterior do
+módulo.** Os números não valem para o arquivo entregue; o que vale, e é por isso
+que ela fica, é o que ela ensinou sobre que tipo de carga reproduz esta
+pendência.
 
 `VAGAS` é a largura da permissão. Trocar o `1` por `usize::MAX` a desarma sem
 apagar uma linha — `while *ocupadas >= VAGAS` nunca bloqueia, e `vaga::minha()`
@@ -1659,8 +1751,8 @@ contou como ocupado»*, conjunto encerrando em 18,96 s.
 byte-a-byte — `cmp` sem diferença e SHA-256 igual dos dois lados:
 
 ```
-73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  (backup)
-73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  (árvore)
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  (backup, versão aposentada)
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  (árvore, versão aposentada)
 ```
 
 E, restaurada, voltou a passar: `cargo test -p seele-conformance` sob a mesma
@@ -1732,16 +1824,159 @@ uma reprovação por rodada, num teste diferente a cada vez. O registro de
 gastar parágrafo distinguindo carga de regressão antes de poder aprovar» —, e
 esse custo se cobra de terceiros, repetidamente, e não em segundos.
 
+**A sexta rodada armada, que reprovou, e que é o limite honesto desta entrega.**
+As cinco do aceite saíram 0. A **sexta** rodada armada sob a mesma carga do
+`rodada5.sh` — a rodada de referência do `motor/custo8.sh`, logo depois da
+restauração conferida por hash — saiu **101**:
+
+```
+     Running tests/moderacao.rs
+Error: SemResposta
+test um_operador_modera_pessoas_e_nao_o_comandante ... FAILED
+test result: FAILED. 5 passed; 1 failed; ... finished in 21.28s
+```
+
+É a assinatura da §29, e não adianta chamá-la de outra coisa: conjunto encostado
+nos 20 s do `IDLE_TIMEOUT`, e **o mesmo conjunto passa sozinho sob a mesma carga
+em 1,4 s, quatro vezes de quatro** (`motor/moderacao3.sh`,
+`arquivo-entregue/moder_so_*.resumo.log`: 1,48 / 1,39 / 1,45 / 1,40 s, saída 0).
+Não é instabilidade do teste — é contenção que sobrou. O registro da rodada
+**não** tem o aviso de fila abandonada, então a permissão estava agindo.
+
+**Por que sobra contenção, e por que ela sobra por desenho.** A permissão
+serializa a conformidade **contra ela mesma**. Ela não serializa a conformidade
+contra o resto do workspace, e não deve: o critério 2 desta entrega exige
+exatamente que os ~489 testes do `seele-server` continuem em paralelo. Enquanto
+um teste de conformidade levanta o seu servidor QUIC, os binários do servidor, de
+áudio e de vídeo estão rodando ao lado. Com 8 queimadores por cima, isso ainda
+alcança os 20 s de vez em quando.
+
+**O número, sem arredondar para o lado bom: 1 reprovação em 6 rodadas armadas**
+sob a carga que está dentro do alcance do conserto. Antes do conserto a taxa era
+de cerca de 2 em 3, e num teste diferente a cada rodada. A §29 está **muito**
+reduzida e **não** está eliminada, e quem citar as cinco rodadas verdes sem citar
+a sexta estará citando menos do que este documento sabe.
+
+**O custo medido com carga casada, sobre o arquivo entregue.** A tabela acima
+compara duas metades que correram sob cargas diferentes, o que compara cargas e
+não permissões. Refeito com as duas metades sob o **mesmo** `motor/rodada5.sh`,
+8 queimadores, e sobre o arquivo entregue (gerador `motor/custo8.sh`, registro
+`arquivo-entregue/custo8_driver.log`):
+
+| | parede do `--workspace` |
+| --- | --- |
+| desarmada, 3 rodadas | 204,59 / 190,27 / 181,95 s — média **192,3 s** |
+| armada, as 5 do aceite | 259,76 – 261,18 s — média **260,4 s** |
+| **custo** | **+68,1 s (+35 %)** |
+
 **O que ainda mereceria medida, e não foi feito aqui:** a vaga é uma só. Duas ou
 três provavelmente comprariam parte do tempo de volta sem trazer a reprovação, já
 que o estouro é de 20 s e o aperto de mão sozinho leva décimos. Não foi medido,
 então não foi feito: `VAGAS` está em um porque é o valor cuja prova existe.
 
+### O risco que a fila criou, e como ele foi fechado
+
+Ele não veio da medição: veio da **revisão independente desta entrega**, que
+leu o desenho e apontou o que nenhuma das cinco rodadas podia mostrar. Fica
+escrito porque é dívida que este conserto contraiu, e não defeito que ele herdou.
+
+**O risco.** Serializar troca uma reprovação isolada por uma fila, e uma fila
+tem um modo de falha próprio: quem toma a vaga e **nunca a devolve**. Na
+primeira versão, `vaga::minha()` esperava no `Condvar` sem prazo nenhum. Um
+teste que travasse — e a causa 2 logo abaixo documenta exatamente isso, o
+CoreAudio que sob acesso restrito não recusa e sim espera — deixaria de ser uma
+reprovação isolada e passaria a **estagnar os 138 testes seguintes** até o tempo
+limite da CI. Com `--test-threads=1` o efeito era o mesmo, então não é
+regressão; mas a partir desta entrega ele vale também para quem roda
+`cargo test --workspace` na própria máquina, e isso é novo.
+
+**O conserto, em duas partes.** A primeira: a espera passou a ter prazo, e o que
+ele mede importa. **Não** é quanto tempo um teste esperou — o último da fila
+espera legitimamente a suíte inteira, minutos — e sim quanto tempo se passou
+**sem nenhuma vaga ser devolvida**. Um contador de devoluções distingue «a fila
+anda devagar» de «a fila parou». Enquanto ela anda, ninguém desiste. Parada por
+`PRAZO_SEM_PROGRESSO` = 180 s, quem espera **escreve no registro da rodada que
+vai seguir sem serializar, e segue**. O teste mais longo deste crate leva
+segundos, então três minutos parados só acontecem se quem tem a vez não vai mais
+sair.
+
+A segunda parte existe porque a primeira não bastava, e quem cobrou foi a
+medida. Na versão inicial cada teste tinha de descobrir o travamento por conta
+própria, e como quem fura a fila **devolve** a vaga ao terminar, o relógio de
+«sem progresso» reiniciava para todos os outros. A fila soltava então **um teste
+por prazo, em cascata**: medido com prazo de 3 s e oito testes atrás de um
+travado, o último só seguiu aos **18,64 s**
+(`destravamento/cascata.log`). Com os 180 s entregues e os 138 testes deste
+crate, isso seria um travamento com outro nome, e o texto que prometia volta ao
+paralelo estaria mentindo. Agora a desistência é **da fila**: quem desiste marca
+`abandonada` e acorda todos, e a partir dali ninguém mais bloqueia. Na mesma
+medida, os oito seguem **juntos, aos 3,35 s**.
+
+O resultado é uma degradação e não um conserto, e está dito assim de propósito:
+a rodada volta ao comportamento antigo — testes concorrentes, §29 de volta —
+**em voz alta**. Alguns servidores a mais são ruins; 138 testes que nunca
+reportam nada é pior. Isto é a regra da casa aplicada a uma ferramenta de teste:
+o que falha tem de dizer que falhou.
+
+**A prova, em `docs/evidencias/pendencia-29/destravamento/`.** O módulo real
+compilado fora do `cargo`, com duas trocas de número e nenhuma de lógica (prazo
+de 180 s para 3 s, passo de 5 s para 200 ms, para caber num registro): um dono
+toma a vaga e nunca a devolve, **oito** testes entram atrás dele.
+
+| Registro | Permissão | Resultado |
+| --- | --- | --- |
+| `com_prazo.log` | como está entregue | os oito seguem **juntos**, aos 3,35 s; saída **0** |
+| `cascata.log` | desistência individual, a versão anterior | um por prazo: 3,36 s … **18,64 s**; saída **0** |
+| `sem_prazo.log` | espera sem prazo, como era no começo | **ninguém** segue; o vigia do programa mata aos 30 s; saída **9** |
+
+A terceira linha é a prova por reversão: com a espera sem prazo de volta, a fila
+não anda nunca — que é o que teria acontecido com a suíte inteira. A segunda é a
+prova de que a desistência coletiva não é enfeite, e é o registro que contradiz
+o que este parágrafo dizia antes de ser medido.
+
+#### O aviso saía por um canal que o `libtest` engole
+
+Este é o achado da **segunda** revisão independente, e é um defeito de verdade,
+não de prosa: o aviso acima saía por `eprintln!`. O `libtest` captura a saída de
+cada teste e imprime **apenas a dos que reprovam** — e quem desiste de esperar é
+um teste que depois **passa**. Ou seja: a fila podia ser abandonada, a rodada
+voltar a ser paralela, a §29 voltar com ela, e não haver **uma linha** sobre isso
+no registro, nem na CI, que não passa `--nocapture`. A promessa de degradar «em
+voz alta» era falsa, e o modo de falha era justamente o que o `CLAUDE.md` deste
+repositório nomeia: *«o produto sabe e não conta»*.
+
+Medido com um teste que passa e escreve a mesma frase pelos dois caminhos
+(`docs/evidencias/pendencia-29/voz/`):
+
+| execução | `eprintln!` | `writeln!` em `std::io::stderr()` |
+| --- | --- | --- |
+| `cargo test` — o que a CI roda | **não aparece** | aparece |
+| `cargo test -- --nocapture` | aparece | aparece |
+
+A captura do `libtest` vive **dentro das macros** de impressão, que consultam um
+destino por thread antes de escrever; `std::io::stderr()` escreve no descritor e
+não consulta nada. O aviso passou a sair por `vaga::em_voz_alta`, que é
+`writeln!` nesse descritor, com o erro de escrita ignorado de propósito — o pior
+caso de um registro que falha tem de ser o silêncio, nunca um pânico dentro do
+guarda. A linha `--nocapture` da tabela é a prova por reversão: é exatamente o
+que se veria se o aviso voltasse para a macro, visível só para quem pede, e a CI
+não pede.
+
+Por que a prova do destravamento não pegou isso: `destravamento/prova.rs` roda
+como binário comum, fora do `libtest`, onde `eprintln!` aparece sempre. Uma
+prova montada fora do arnês não vê o que o arnês faz — e é por isso que a
+medição nova foi feita **dentro** de `cargo test`.
+
+**O que esta prova não cobre.** Ela exercita a fila, não um teste de
+conformidade travado de verdade. Reproduzir o travamento real exigiria rodar sob
+acesso restrito, que é a causa 2 e está fora deste escopo. O que está provado é
+que a fila destrava e que sem o prazo ela não destravava.
+
 ### As causas que esta entrega NÃO consertou, com nome próprio
 
 Elas ficam escritas para não serem redescobertas como se fossem a §29, o que já
-aconteceu mais de uma vez. O aceite pedia duas; a medição achou quatro, e as
-quatro estão aqui. A quarta
+aconteceu mais de uma vez. O aceite pedia duas; a medição achou **cinco**, e as
+cinco estão aqui. A quarta
 (`furo::o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele`, uma
 janela de 600 ms que recebeu 7,07 s com a máquina a três vezes a capacidade)
 apareceu durante a prova de reversão acima, é da mesma família da primeira e da
@@ -1808,6 +2043,70 @@ atrás do `--exclude seele-conformance`, que nunca a excluiu —, mas a partir
 desta entrega ela é a instabilidade mais provável do comando único, e é por isso
 que está nomeada.
 
+**5. `tela_por_um_par::a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_\
+atrapalhar_o_par_novo` reprova com a permissão armada, e é o achado da terceira
+revisão independente.** Ela não veio da minha medição: veio de a revisão ler os
+registros que eu **anexei e não li até o fim** — a quinta das cinco rodadas do
+aceite tinha reprovado, e a tabela que eu publiquei listava as outras quatro.
+O conserto dessa omissão está em
+`docs/evidencias/pendencia-29/arquivo-entregue/README.md`, com todas as rodadas
+armadas em ordem e sem seleção.
+
+O dado é este: **2 reprovações em 8 rodadas armadas** de `cargo test --workspace`
+sobre o arquivo entregue, e as duas **no mesmo teste**. Isso é o que a distingue
+da §29, e é o motivo de ela ser causa e não recaída: a §29 reprovava *um teste
+diferente a cada rodada* — foi essa aleatoriedade que a tornou «não-evidência».
+Aqui o endereço é fixo, e um endereço fixo é diagnosticável.
+
+As duas reprovações têm naturezas diferentes dentro do mesmo teste, o que
+provavelmente quer dizer que o teste é longo demais e não que haja um defeito só:
+
+| rodada | onde reprovou | mensagem | conjunto |
+| --- | --- | --- | --- |
+| `verde8_5` | `tela_por_um_par.rs:3155`, a barreira de encenação | «o servidor apontou um par e não o contou como ocupado: não havia caminho de par para a queda substituir» | 52,35 s |
+| `verde9_1` | espera de conexão | `Error: SemResposta`, com «running for over 60 seconds» antes | 68,59 s |
+
+O de `verde8_5` é o mais informativo, e aponta para uma **corrida no teste, não
+no servidor**: os 30 quadros pelo par já tinham chegado, com o servidor subindo
+uma cópia só — `ate_o_par_estar_servindo` afirma isso quadro a quadro, então o
+caminho de par **existia**. O que falhou foi a leitura de `pares.ja_servindo()`
+feita **depois** dela, num `lock()` separado. Entre o último quadro e essa
+leitura há uma janela, e numa máquina saturada ela é grande: se o fluxo do par
+terminar ali, o servidor devolve a vaga e a barreira encontra a contabilidade já
+zerada. É a mesma família das causas 1, 3 e 4 — afirmação sobre um instante que
+o teste não controla —, e não contenção que a fila possa remover.
+
+**Por que a fila não alcança nenhuma das duas.** Ela garante que só um teste de
+conformidade corra por vez; ela não encurta o que um teste sozinho espera. Este
+é o conjunto mais longo do crate (52 a 69 s) e o único que levanta servidor,
+derruba-o e o levanta de novo. Serializar não muda nada disso.
+
+**O discriminador foi rodado, e não discriminou.** A medida que faltava era
+rodar `tela_por_um_par` sozinho, muitas vezes, sob as duas cargas, para separar
+«é o teste» de «é a máquina» (`motor/final29.sh`, parte B). Ela terminou, e as
+doze rodadas estão em `arquivo-entregue/disc_*.resumo.log`:
+
+| Carga | Rodadas | Saída | Conjunto (19 testes) |
+| --- | --- | --- | --- |
+| 8 queimadores (`rodada5.sh`) | `disc_queimador_1..6` | 0 nas seis | 51,22 – 52,06 s |
+| +6 laços fora do `cargo` (`rodada4.sh`) | `disc_fora_do_processo_1..6` | 0 nas seis | 51,71 – 54,57 s |
+
+As duas cargas saíram **indistinguíveis**, e o conjunto sozinho **não reprovou
+nenhuma vez**. A hipótese que esta bateria ia testar — que a carga de fora do
+processo é o que derruba este conjunto — **não foi confirmada**. Fica escrito
+assim porque é o que saiu; a atribuição continua apoiada só em 0 reprovações em
+6 rodadas sob `rodada5.sh` contra 2 em 8 sob `rodada4.sh`, que é correlação com
+amostra pequena e não causa medida.
+
+Duas coisas ela mostrou, e as duas apontam para dentro do teste: a reprovação
+exige a **bateria inteira** correndo junto, já que carga de máquina sozinha não
+a produz; e o conjunto leva **~52 s mesmo sozinho**, de modo que `verde8_5`,
+que reprovou com o conjunto em 52,35 s, reprovou **em tempo normal** — não foi
+lentidão, foi a corrida de leitura descrita acima. Só `verde9_1` (68,59 s) saiu
+da faixa. O que **não** foi feito é o conserto: ele é do
+teste, e o teste é o arquivo que a tarefa e13d0b38 está alterando em paralelo —
+mexer nele agora é o conflito que a restrição desta tarefa manda evitar.
+
 ### O `ci.yml`, conferido
 
 A etapa avulsa `cargo test -p seele-conformance -- --test-threads=1` **foi
@@ -1821,8 +2120,17 @@ separada serializava o crate inteiro **e** exigia excluí-lo da outra etapa,
 deixando dois comandos onde o projeto tem um — e deixando quem roda
 `cargo test --workspace` na própria máquina sem a garantia que a CI tinha. Agora
 os dois têm a mesma. A prova de que a remoção não regride nada é a tabela das
-cinco rodadas acima, que é exatamente o comando que sobrou no `ci.yml`, sob
-carga que a CI não tem.
+cinco rodadas acima, sob carga que a CI não tem.
+
+**Uma diferença de uma palavra entre o que foi medido e o que a CI roda, dita
+porque a terceira revisão a pegou.** As cinco rodadas mediram
+`cargo test --workspace`; o passo do `ci.yml` passa também `--all-targets`.
+Nesta árvore os dois selecionam o mesmo trabalho, e isso foi **conferido, não
+suposto**: `cargo test --workspace -- --list` e
+`cargo test --workspace --all-targets -- --list` enumeram os mesmos 73 conjuntos
+e os mesmos 1.883 testes. A frase anterior — «é exatamente o comando que sobrou
+no `ci.yml`» — era literalmente falsa, e ficou escrito o que ela deveria ter
+dito.
 
 ## 30 · Fechada em 2026-08-31 · O `seeled` não sabia dizer que versão é
 

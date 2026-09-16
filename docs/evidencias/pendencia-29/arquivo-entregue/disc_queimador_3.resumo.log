@@ -1,0 +1,7 @@
+carga: 8 queimadores de processador, nenhum binário de conformidade fora do cargo; load = 16.89 16.82 16.87
+processos do usuario com a carga ligada: 456
+
+     Running tests/tela_por_um_par.rs (target/debug/deps/tela_por_um_par-c0e3b99816493bdb)
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 51.96s
+
+=== ROTULO=disc_queimador_3 SAIDA=0 PAREDE=52.775229000s ===

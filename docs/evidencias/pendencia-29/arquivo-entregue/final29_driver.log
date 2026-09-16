@@ -1,0 +1,24 @@
+--- ARQUIVO SOB MEDIÇÃO ---
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  crates/seele-conformance/tests/vaga/mod.rs
+1515219068d8ee61ce24645e9c8d161afda2237d7a0bbb8a39664c963473d749  /tmp/o29/vaga_ARMADO7.backup.rs
+81:const VAGAS: usize = 1;
+--- PARTE A: 5 rodadas de --workspace sob carga de queimadores ---
+ROTULO=verde10_1 SAIDA=0 PAREDE=260.493944000s
+ROTULO=verde10_2 SAIDA=0 PAREDE=260.064166000s
+ROTULO=verde10_3 SAIDA=0 PAREDE=260.462660000s
+ROTULO=verde10_4 SAIDA=0 PAREDE=261.176493000s
+ROTULO=verde10_5 SAIDA=0 PAREDE=259.755025000s
+--- PARTE B: discriminador de carga sobre tela_por_um_par ---
+ROTULO=disc_queimador_1 SAIDA=0 PAREDE=55.526568000s
+ROTULO=disc_queimador_2 SAIDA=0 PAREDE=52.853339000s
+ROTULO=disc_queimador_3 SAIDA=0 PAREDE=52.775229000s
+ROTULO=disc_queimador_4 SAIDA=0 PAREDE=51.971231000s
+ROTULO=disc_queimador_5 SAIDA=0 PAREDE=52.250777000s
+ROTULO=disc_queimador_6 SAIDA=0 PAREDE=52.539714000s
+ROTULO=disc_fora_do_processo_1 SAIDA=0 PAREDE=51.956614000s
+ROTULO=disc_fora_do_processo_2 SAIDA=0 PAREDE=52.013690000s
+ROTULO=disc_fora_do_processo_3 SAIDA=0 PAREDE=52.208093000s
+ROTULO=disc_fora_do_processo_4 SAIDA=0 PAREDE=52.169717000s
+ROTULO=disc_fora_do_processo_5 SAIDA=0 PAREDE=51.955439000s
+ROTULO=disc_fora_do_processo_6 SAIDA=0 PAREDE=54.800233000s
+FIM DA BATERIA DE FECHAMENTO
