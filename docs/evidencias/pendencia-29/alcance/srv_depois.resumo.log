@@ -1,0 +1,22 @@
+carga ligada: 12 processos; load antes = 23.04 17.64 17.60
+
+     Running unittests src/lib.rs (target/debug/deps/seele_server-b79839397f752fd8)
+test result: ok. 453 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.07s
+     Running unittests src/main.rs (target/debug/deps/seeled-4f7609ea01e5184f)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/par_lento.rs (target/debug/deps/par_lento-d7a0921d40aef220)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.17s
+     Running tests/perda_de_subida_no_fio.rs (target/debug/deps/perda_de_subida_no_fio-77460c25e1749211)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.73s
+     Running tests/personalizacao.rs (target/debug/deps/personalizacao-66a4a6354167a138)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+     Running tests/subida_no_arranque.rs (target/debug/deps/subida_no_arranque-1aa5fe0a6c323d2a)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.84s
+     Running tests/tipo_de_fluxo.rs (target/debug/deps/tipo_de_fluxo-ef3a0e7cea102f3d)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+     Running tests/voz_sob_carga.rs (target/debug/deps/voz_sob_carga-1bc3d2e58277e4a9)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.30s
+   Doc-tests seele_server
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== ROTULO=srv_depois SAIDA=0 PAREDE=27.090057000s ===

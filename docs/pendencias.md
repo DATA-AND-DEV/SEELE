@@ -1587,6 +1587,22 @@ lenta que as outras quatro porque pagou o aquecimento de cache de disco; as
 quatro seguintes ficam dentro de **0,9 s** umas das outras, o que já é um sinal
 por si: a suíte voltou a ter um tempo, em vez de uma distribuição.
 
+**O que estas cinco rodadas não provam, dito aqui e não só lá embaixo.**
+Queimador de processador **não reproduz** o defeito da §29 — está medido na
+prova de reversão adiante, em sete rodadas *desarmadas* que também saíram 0 sob
+esta mesma carga, quatro delas com 30 queimadores. Logo estas cinco provam
+**ausência de regressão e o custo**, e não robustez sob a carga que causava a
+reprovação. Quem prova que a permissão está agindo é o par de tempos de parede
+armado/desarmado do mesmo binário, na tabela da reversão. Quem citar esta tabela
+— o comentário do `ci.yml` inclusive, onde a ressalva está escrita junto — tem
+de citar as duas coisas.
+
+**Onde está o registro bruto.** Em `docs/evidencias/pendencia-29/`, dentro do
+repositório: as cinco rodadas, o alcance no servidor, o ciclo de reversão e os
+geradores que produziram cada medida. Ficavam em `/tmp`, que o sistema apaga sem
+avisar, e uma tabela cuja fonte sumiu volta a ser afirmação. O `README.md` de lá
+diz o que foi cortado de cada registro e o que é verbatim.
+
 **A serialização alcança somente a conformidade, e isto é medido, não
 argumentado.** `cargo test -p seele-server` sob a mesma carga de 12 queimadores,
 com a árvore original e depois com a árvore armada:
@@ -1718,13 +1734,15 @@ três provavelmente comprariam parte do tempo de volta sem trazer a reprovação
 que o estouro é de 20 s e o aperto de mão sozinho leva décimos. Não foi medido,
 então não foi feito: `VAGAS` está em um porque é o valor cuja prova existe.
 
-### Duas causas que esta entrega NÃO consertou, com nome próprio
+### As causas que esta entrega NÃO consertou, com nome próprio
 
 Elas ficam escritas para não serem redescobertas como se fossem a §29, o que já
-aconteceu mais de uma vez. A terceira, descoberta durante a prova de reversão
-acima (`furo::o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele`, uma
-janela de 600 ms que recebeu 7,07 s com a máquina a três vezes a capacidade), é
-da mesma família da primeira e está registrada lá.
+aconteceu mais de uma vez. O aceite pedia duas; a medição achou quatro, e as
+quatro estão aqui. A quarta
+(`furo::o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele`, uma
+janela de 600 ms que recebeu 7,07 s com a máquina a três vezes a capacidade)
+apareceu durante a prova de reversão acima, é da mesma família da primeira e da
+terceira, e está registrada lá.
 
 **1. `moderacao::expulsar_acaba_com_a_sessao_e_deixa_voltar` é instável por si.**
 Medido antes desta entrega, no levantamento que a originou: reprovou **1 de 4** execuções *rodando o arquivo sozinho*, sem carga e sem
@@ -1745,6 +1763,47 @@ Esta sessão **não** rodou com acesso restrito: os três testes correram normai
 nas cinco rodadas acima, e o único pânico que aparece nos registros é o
 proposital de `laco.rs:456` («envenenando de propósito, para o teste»), cujo
 teste passa.
+
+**3. `seele-server::alcance::encontro::testes::\
+a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar` é frágil no tempo, e
+ninguém a tinha escrito em lugar nenhum.** Não foi esta sessão que a achou: foi
+a revisão independente desta entrega, na primeira rodada de
+`cargo test --workspace --all-targets`, que saiu 101 com **53 furos contra um
+teto de 60** (`crates/seele-server/src/alcance/encontro.rs:1383`). Passa 3 de 3
+rodando sozinha e passou na rodada seguinte da própria revisão.
+
+Tentei reproduzi-la e **não consegui**, o que é um dado e não uma lacuna: 10
+execuções do teste sozinho sob 12 queimadores de processador, **10 verdes**. E
+na rodada de `cargo test --workspace --all-targets` desta sessão, saída 0, ela
+passou. Isto a coloca exatamente onde a §29 já tinha colocado o resto: o que a
+derruba não é processador ocupado, é a contenção de disco, rede e banco da suíte
+inteira — a mesma que o queimador não produz. Quem for consertá-la não perca
+tempo com carga de CPU.
+
+O mecanismo se lê do código, sem precisar reproduzir. O teste dispara
+`FUROS_POR_JANELA + 1` = 61 avisos e conta os furos que voltam, com
+`timeout(600ms)` em **cada leitura** e `break` no primeiro estouro
+(`encontro.rs:1374-1378`). O servidor emite um furo a cada `INTERVALO_DO_FURO` =
+120 ms, então a fila normal gasta ~7,3 s de parede e a margem por leitura é de
+5×. Numa máquina saturada, um único intervalo de 120 ms que escorregue além de
+600 ms encerra a contagem no meio — 53 é exatamente onde a contagem parou, não
+um teto que mudou. É a mesma família da causa 1: prazo curto contra máquina
+lenta, dentro do próprio teste.
+
+**Por que não foi consertada aqui.** A restrição desta tarefa proíbe tocar em
+`crates/seele-server/`, que tem alterações de outra tarefa ainda por integrar.
+E o conserto não é a vaga: a permissão é do crate de conformidade e não alcança
+os testes de unidade do servidor — nem deveria, porque serializar os ~453 testes
+do `seele-server` é exatamente o que o critério 2 desta entrega proíbe. O
+conserto certo é do teste, e provavelmente é trocar o `break` na primeira
+leitura lenta por um prazo global, que o teste já tem (40 s) e não usa como
+único critério.
+
+**O que isso custa ao `ci.yml`.** O job agora roda um comando só, e esta
+fragilidade pode derrubá-lo. Ela não foi introduzida aqui — vivia escondida
+atrás do `--exclude seele-conformance`, que nunca a excluiu —, mas a partir
+desta entrega ela é a instabilidade mais provável do comando único, e é por isso
+que está nomeada.
 
 ### O `ci.yml`, conferido
 

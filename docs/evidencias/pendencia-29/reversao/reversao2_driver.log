@@ -1,0 +1,13 @@
+51:const VAGAS: usize = usize::MAX;
+ROTULO=rev30_1 SAIDA=0 PAREDE=253.464986000s
+ROTULO=rev30_2 SAIDA=0 PAREDE=226.650938000s
+ROTULO=rev30_3 SAIDA=0 PAREDE=229.560985000s
+ROTULO=rev30_4 SAIDA=0 PAREDE=227.601500000s
+TODAS AS 4 RODADAS SAIRAM 0
+--- fim das rodadas desarmadas com 30 queimadores ---
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  /tmp/o29/vaga_ARMADO.backup.rs
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  /Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/299c2412-1abd-4516-9748-226ce1950e3e/crates/seele-conformance/tests/vaga/mod.rs
+RESTAURADO: identico byte-a-byte ao backup
+51:const VAGAS: usize = 1;
+ROTULO=armado30_1 SAIDA=101 PAREDE=1114.123675000s
+REPROVOU na rodada 1

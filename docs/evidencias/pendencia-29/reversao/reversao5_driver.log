@@ -1,0 +1,11 @@
+ROTULO=base_armado SAIDA=0 PAREDE=2477.740865000s
+51:const VAGAS: usize = usize::MAX;
+ROTULO=revconf2_1 SAIDA=0 PAREDE=1626.824238000s
+ROTULO=revconf2_2 SAIDA=101 PAREDE=975.051761000s
+REPROVOU na rodada 2
+--- fim das rodadas desarmadas ---
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  /tmp/o29/vaga_ARMADO.backup.rs
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  /Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/299c2412-1abd-4516-9748-226ce1950e3e/crates/seele-conformance/tests/vaga/mod.rs
+RESTAURADO: identico byte-a-byte ao backup
+51:const VAGAS: usize = 1;
+ROTULO=pos_armado SAIDA=101 PAREDE=3663.898886000s

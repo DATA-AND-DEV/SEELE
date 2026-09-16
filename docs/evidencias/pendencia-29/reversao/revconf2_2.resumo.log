@@ -1,0 +1,25 @@
+carga ligada: 12 processos; load antes = 20.87 31.43 60.86
+
+     Running unittests src/lib.rs (target/debug/deps/seele_conformance-e750483e5bb913f6)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/acceptance_m2.rs (target/debug/deps/acceptance_m2-875e8e31d7dabcc7)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+     Running tests/acceptance_m3.rs (target/debug/deps/acceptance_m3-87a9413c769cefdf)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.73s
+     Running tests/acceptance_m5.rs (target/debug/deps/acceptance_m5-125f32dc48a1473c)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.02s
+     Running tests/acceptance_seguranca.rs (target/debug/deps/acceptance_seguranca-5d4ab371fe108495)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.80s
+     Running tests/aceite_dos_mods.rs (target/debug/deps/aceite_dos_mods-b52faa9b6c918606)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.18s
+     Running tests/anexos.rs (target/debug/deps/anexos-fbe7e7eb96cdd0c0)
+thread 'o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou' (22667586) panicked at crates/seele-conformance/tests/anexos.rs:266:28:
+o anexo 18 não foi publicado
+test o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou ... FAILED
+failures:
+failures:
+    o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou
+test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.14s
+error: test failed, to rerun pass `-p seele-conformance --test anexos`
+
+=== ROTULO=revconf2_2 SAIDA=101 PAREDE=975.051761000s ===

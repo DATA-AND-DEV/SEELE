@@ -1,0 +1,65 @@
+carga ligada: 30 processos; load antes = 48.94 43.90 36.83
+
+     Running unittests src/main.rs (target/debug/deps/seele_app-a4c45c69f67cbcae)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.45s
+     Running tests/empacotamento.rs (target/debug/deps/empacotamento-18b8dca52925f756)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/encerramento.rs (target/debug/deps/encerramento-af93e7ba37c90508)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/fontes.rs (target/debug/deps/fontes-099de967fc3fe774)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/frontend.rs (target/debug/deps/frontend-789c9058a9f916d0)
+test result: ok. 184 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+     Running tests/marca.rs (target/debug/deps/marca-9e788da0ebcd7c2e)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/permissoes.rs (target/debug/deps/permissoes-131099c295dbea56)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+     Running tests/tokens.rs (target/debug/deps/tokens-656e93ea9a439e42)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/seele_audio-c7c0ccbbf727848f)
+thread '<unnamed>' (20741689) panicked at crates/seele-audio/src/laco.rs:456:13:
+envenenando de propósito, para o teste
+test result: ok. 199 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+     Running tests/opus_toolchain.rs (target/debug/deps/opus_toolchain-e009170dab0bd588)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/realtime_safety.rs (target/debug/deps/realtime_safety-78d926d44086c643)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/seele_conformance-19fa08d0df6a64d8)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/acceptance_m2.rs (target/debug/deps/acceptance_m2-73b960a2cccad021)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.22s
+     Running tests/acceptance_m3.rs (target/debug/deps/acceptance_m3-33d3a0d1c9735b83)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.12s
+     Running tests/acceptance_m5.rs (target/debug/deps/acceptance_m5-216e2217c0911376)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 23.04s
+     Running tests/acceptance_seguranca.rs (target/debug/deps/acceptance_seguranca-ad79f67ea711b966)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.68s
+     Running tests/aceite_dos_mods.rs (target/debug/deps/aceite_dos_mods-6ec3c300f424c93a)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.41s
+     Running tests/anexos.rs (target/debug/deps/anexos-69c2eb276bf16bef)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.93s
+     Running tests/bateria_interna.rs (target/debug/deps/bateria_interna-d13e05667ae84c37)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 23.90s
+     Running tests/cancelamento.rs (target/debug/deps/cancelamento-d3a5473112c521aa)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/candidatos.rs (target/debug/deps/candidatos-2f69390d7a0969f2)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.14s
+     Running tests/convite.rs (target/debug/deps/convite-2882af9e5d3fe0f5)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
+     Running tests/duas_maquinas.rs (target/debug/deps/duas_maquinas-cd251c37fb109d7a)
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/ejetar.rs (target/debug/deps/ejetar-e1950d3bc3a4e6b6)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.67s
+     Running tests/estados.rs (target/debug/deps/estados-9be40e3973863546)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.79s
+     Running tests/furo.rs (target/debug/deps/furo-983a575e2b6ab2d5)
+thread 'o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele' (20746263) panicked at crates/seele-conformance/tests/furo.rs:242:5:
+o Initial saiu 7.067630166s depois do LEVE: o furo do outro lado já fechou, que é exatamente o defeito de origem
+test o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele ... FAILED
+failures:
+failures:
+    o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.90s
+error: test failed, to rerun pass `-p seele-conformance --test furo`
+
+=== ROTULO=armado30_1 SAIDA=101 PAREDE=1114.123675000s ===

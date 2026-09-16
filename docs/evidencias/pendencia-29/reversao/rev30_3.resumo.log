@@ -1,0 +1,152 @@
+carga ligada: 30 processos; load antes = 45.59 38.92 31.12
+
+     Running unittests src/main.rs (target/debug/deps/seele_app-a4c45c69f67cbcae)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 27.39s
+     Running tests/empacotamento.rs (target/debug/deps/empacotamento-18b8dca52925f756)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/encerramento.rs (target/debug/deps/encerramento-af93e7ba37c90508)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/fontes.rs (target/debug/deps/fontes-099de967fc3fe774)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/frontend.rs (target/debug/deps/frontend-789c9058a9f916d0)
+test result: ok. 184 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+     Running tests/marca.rs (target/debug/deps/marca-9e788da0ebcd7c2e)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/permissoes.rs (target/debug/deps/permissoes-131099c295dbea56)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/tokens.rs (target/debug/deps/tokens-656e93ea9a439e42)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/seele_audio-c7c0ccbbf727848f)
+thread '<unnamed>' (20686794) panicked at crates/seele-audio/src/laco.rs:456:13:
+envenenando de propósito, para o teste
+test result: ok. 199 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.77s
+     Running tests/opus_toolchain.rs (target/debug/deps/opus_toolchain-e009170dab0bd588)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/realtime_safety.rs (target/debug/deps/realtime_safety-78d926d44086c643)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/seele_conformance-19fa08d0df6a64d8)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/acceptance_m2.rs (target/debug/deps/acceptance_m2-73b960a2cccad021)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+     Running tests/acceptance_m3.rs (target/debug/deps/acceptance_m3-33d3a0d1c9735b83)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.78s
+     Running tests/acceptance_m5.rs (target/debug/deps/acceptance_m5-216e2217c0911376)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.03s
+     Running tests/acceptance_seguranca.rs (target/debug/deps/acceptance_seguranca-ad79f67ea711b966)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.00s
+     Running tests/aceite_dos_mods.rs (target/debug/deps/aceite_dos_mods-6ec3c300f424c93a)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.24s
+     Running tests/anexos.rs (target/debug/deps/anexos-69c2eb276bf16bef)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+     Running tests/bateria_interna.rs (target/debug/deps/bateria_interna-d13e05667ae84c37)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.31s
+     Running tests/cancelamento.rs (target/debug/deps/cancelamento-d3a5473112c521aa)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/candidatos.rs (target/debug/deps/candidatos-2f69390d7a0969f2)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.53s
+     Running tests/convite.rs (target/debug/deps/convite-2882af9e5d3fe0f5)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+     Running tests/duas_maquinas.rs (target/debug/deps/duas_maquinas-cd251c37fb109d7a)
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/ejetar.rs (target/debug/deps/ejetar-e1950d3bc3a4e6b6)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.89s
+     Running tests/estados.rs (target/debug/deps/estados-9be40e3973863546)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.28s
+     Running tests/furo.rs (target/debug/deps/furo-983a575e2b6ab2d5)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.97s
+     Running tests/icone_na_chegada.rs (target/debug/deps/icone_na_chegada-1004522c4b560fe8)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+     Running tests/limite_de_taxa.rs (target/debug/deps/limite_de_taxa-5aea02ce213570b8)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+     Running tests/moderacao.rs (target/debug/deps/moderacao-02fd79bf1145829d)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+     Running tests/ocupacao.rs (target/debug/deps/ocupacao-f20c7806df113d89)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+     Running tests/quarto.rs (target/debug/deps/quarto-0c7fda07939565c0)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+     Running tests/rajada.rs (target/debug/deps/rajada-61a26009a132fb3a)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+     Running tests/reconexao_fantasma.rs (target/debug/deps/reconexao_fantasma-a073f477d58c1e6a)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+     Running tests/recusa.rs (target/debug/deps/recusa-ae3dca36423a0e19)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+     Running tests/salas.rs (target/debug/deps/salas-6de7e8557c3c72c1)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.11s
+     Running tests/senha_da_sala.rs (target/debug/deps/senha_da_sala-0e4db2cf34f29916)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s
+     Running tests/sincronia.rs (target/debug/deps/sincronia-37a890047ee09480)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+     Running tests/soak_audio.rs (target/debug/deps/soak_audio-1bbce9ae6f1003c0)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.54s
+     Running tests/tela_por_um_par.rs (target/debug/deps/tela_por_um_par-a944b0f57ee9f0b6)
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.77s
+     Running tests/voz_na_reconexao.rs (target/debug/deps/voz_na_reconexao-2895f8b0d6eb1cd4)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/seele_core-ddd0003e3ec8a33d)
+test result: ok. 314 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.72s
+     Running unittests src/lib.rs (target/debug/deps/seele_encontro-a70fbd00b11d75da)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+     Running unittests src/main.rs (target/debug/deps/seele_encontro-e7c17cffef82b2c6)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/apresentacao.rs (target/debug/deps/apresentacao-05910ca366bd830b)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+     Running unittests src/lib.rs (target/debug/deps/seele_ffi-b8308668bd75ca4c)
+test result: ok. 88 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+     Running unittests src/main.rs (target/debug/deps/seele_instalador-75d6697440dd3048)
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/seele_proto-0f4db4b0ee04963b)
+test result: ok. 230 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+     Running tests/vetores_de_hash.rs (target/debug/deps/vetores_de_hash-b0ef70c865851a10)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/seele_server-e239e41e23e44477)
+test result: ok. 453 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.14s
+     Running unittests src/main.rs (target/debug/deps/seeled-0cb9f63c609cea18)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/par_lento.rs (target/debug/deps/par_lento-39b48f2d15413396)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.20s
+     Running tests/perda_de_subida_no_fio.rs (target/debug/deps/perda_de_subida_no_fio-dc1ae8d5011a4350)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.74s
+     Running tests/personalizacao.rs (target/debug/deps/personalizacao-43ca7bc76529905b)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+     Running tests/subida_no_arranque.rs (target/debug/deps/subida_no_arranque-88b887e69716ec08)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.83s
+     Running tests/tipo_de_fluxo.rs (target/debug/deps/tipo_de_fluxo-8f5345d0243f1640)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+     Running tests/voz_sob_carga.rs (target/debug/deps/voz_sob_carga-9eda092f63c89c63)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.36s
+     Running unittests src/lib.rs (target/debug/deps/seele_video-813201643f4f4402)
+test result: ok. 43 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 53.94s
+     Running tests/ida_e_volta.rs (target/debug/deps/ida_e_volta-9ba257becca273ba)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/modulo_publicado.rs (target/debug/deps/modulo_publicado-92775898db5632c4)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/qualidade-do-codec.rs (target/debug/deps/qualidade_do_codec-e5aa72009a6aa690)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/debug/deps/xtask-ab685f648f28fdda)
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/adr_index.rs (target/debug/deps/adr_index-41dc5f0e675c6b28)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/empacotamento.rs (target/debug/deps/empacotamento-251beafcaa917f8d)
+test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.36s
+     Running tests/folha_de_lints.rs (target/debug/deps/folha_de_lints-0e6257f03ef9ae17)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/plataforma.rs (target/debug/deps/plataforma-1cf55d20c350109b)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+   Doc-tests seele_audio
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests seele_conformance
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests seele_core
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests seele_encontro
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests seele_ffi
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests seele_proto
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+   Doc-tests seele_server
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests seele_video
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== ROTULO=rev30_3 SAIDA=0 PAREDE=229.560985000s ===

@@ -1,0 +1,18 @@
+# NOTA: esta tentativa NÃO é medição. O gerador de carga esgotou a tabela de
+# processos da máquina ('job table full' / 'fork failed'), o `cargo` nunca
+# chegou a rodar, e o `REPROVOU na rodada 1` abaixo é falso: veio de um
+# `grep` sobre um arquivo de registro que não existe. Fica aqui porque foi
+# a tentativa que ensinou a conferir o `ps` antes de relançar. As 329 linhas
+# repetidas de 'fork failed' foram cortadas; o resto é verbatim.
+#
+51:const VAGAS: usize = usize::MAX;
+/tmp/o29/rodada3.sh:17: job table full
+grep: /tmp/o29/revserv_1.log: No such file or directory
+REPROVOU na rodada 1
+--- fim das rodadas desarmadas com servidores concorrentes ---
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  /tmp/o29/vaga_ARMADO.backup.rs
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  /Users/dev-alexandre/Documents/Obsidian Vault/Órbita/.orbita/worktrees/299c2412-1abd-4516-9748-226ce1950e3e/crates/seele-conformance/tests/vaga/mod.rs
+RESTAURADO: identico byte-a-byte ao backup
+51:const VAGAS: usize = 1;
+grep: /tmp/o29/armadoserv_1.log: No such file or directory
+REPROVOU na rodada 1

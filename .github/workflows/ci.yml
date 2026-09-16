@@ -114,4 +114,15 @@ jobs:
         # 15-core machine, all exit 0, 1883 tests each, wall times within 0.9s
         # of each other. The permit costs +76s per round and it buys back a
         # suite that is evidence again.
+        #
+        # What those five rounds do *not* prove, stated here so nobody cites
+        # them for more than they are: a CPU burner does not reproduce #29.
+        # Seven rounds with the permit *disarmed* under the same load — four of
+        # them under 30 burners — also came out 0 (docs/evidencias/
+        # pendencia-29/reversao/). What blows the 20s IDLE_TIMEOUT is waiting on
+        # the network and the database, and the failure only came back under
+        # disk and paging contention. So the five rounds prove no regression and
+        # the cost; what proves the permit is acting is the armed/disarmed wall
+        # time of the same binary — acceptance_m5 at 23.04s serialized against
+        # 20.02s parallel, one step from the cliff.
         run: cargo test --workspace --all-targets
