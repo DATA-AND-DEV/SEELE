@@ -1,8 +1,9 @@
 #!/bin/zsh
 # Condensa um registro bruto de `cargo test` preservando, verbatim: o cabeçalho
 # de carga, cada linha `Running`/`Doc-tests`, cada `test result:`, cada
-# reprovação (com a mensagem do pânico), o bloco `failures:` e o rodapé com o
-# tempo de parede. O que sai são as linhas `test ... ok`, que são o volume.
+# reprovação — com a mensagem do pânico, e com a linha `Error:` de quem reprova
+# devolvendo erro em vez de entrar em pânico —, o bloco `failures:` e o rodapé
+# com o tempo de parede. O que sai são as linhas `test ... ok`, que são o volume.
 set -u
 IN="$1"; OUT="$2"
 {
@@ -10,6 +11,7 @@ IN="$1"; OUT="$2"
   echo
   awk '
     /^     Running|^   Doc-tests|^test result:|^error: test failed/ { print; next }
+    /^Error: /                 { print; next }
     / panicked at /            { print; guarda = 1; next }
     guarda == 1                { print; guarda = 0; next }
     /\.\.\. FAILED$/           { print; next }

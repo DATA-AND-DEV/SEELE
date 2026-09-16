@@ -1695,7 +1695,10 @@ ressurgindo: é de novo uma espera de tempo absoluto dentro do teste, numa
 máquina dezenove vezes mais lenta que o normal. A conferência foi refeita depois
 que a máquina voltou ao normal — calibrada pelo `acceptance_m2`, que marcou
 **3,17 s** contra os 3,18 s da medida sadia —, e aí a rodada armada saiu 0. Fica
-registrado do jeito que aconteceu, e não do jeito que seria mais limpo contar.
+registrado do jeito que aconteceu, e não do jeito que seria mais limpo contar —
+e o registro bruto dessa rodada reprovada está arquivado com os outros, em
+`docs/evidencias/pendencia-29/reversao/pos_armado.resumo.log`, para que ela não
+seja conhecida apenas por esta prosa.
 
 **E uma terceira causa, descoberta aqui, que a vaga também não cura.** Com 30
 queimadores (carga 49, mais de três vezes os núcleos), a suíte **armada**

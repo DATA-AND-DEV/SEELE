@@ -1,0 +1,66 @@
+carga ligada: 12 processos; load antes = 16.93 28.75 58.19
+
+     Running unittests src/lib.rs (target/debug/deps/seele_conformance-e750483e5bb913f6)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/acceptance_m2.rs (target/debug/deps/acceptance_m2-875e8e31d7dabcc7)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.19s
+     Running tests/acceptance_m3.rs (target/debug/deps/acceptance_m3-87a9413c769cefdf)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.07s
+     Running tests/acceptance_m5.rs (target/debug/deps/acceptance_m5-125f32dc48a1473c)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.98s
+     Running tests/acceptance_seguranca.rs (target/debug/deps/acceptance_seguranca-5d4ab371fe108495)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.57s
+     Running tests/aceite_dos_mods.rs (target/debug/deps/aceite_dos_mods-b52faa9b6c918606)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.27s
+     Running tests/anexos.rs (target/debug/deps/anexos-fbe7e7eb96cdd0c0)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.57s
+     Running tests/bateria_interna.rs (target/debug/deps/bateria_interna-9103a91d54b41ece)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 23.68s
+     Running tests/cancelamento.rs (target/debug/deps/cancelamento-f617ece03f684f13)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/candidatos.rs (target/debug/deps/candidatos-991e852aacc0d241)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.14s
+     Running tests/convite.rs (target/debug/deps/convite-2d226ad764977b5a)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+     Running tests/duas_maquinas.rs (target/debug/deps/duas_maquinas-99ab7292db720e6e)
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/ejetar.rs (target/debug/deps/ejetar-41bfeb8b2f6c49da)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.69s
+     Running tests/estados.rs (target/debug/deps/estados-7c8a5292a4aa2ba0)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.80s
+     Running tests/furo.rs (target/debug/deps/furo-f48f67eeb1f125d3)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.03s
+     Running tests/icone_na_chegada.rs (target/debug/deps/icone_na_chegada-ca220b842d84e34f)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+     Running tests/limite_de_taxa.rs (target/debug/deps/limite_de_taxa-96da850016bfaaef)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+     Running tests/moderacao.rs (target/debug/deps/moderacao-e39a12130df0ede6)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.54s
+     Running tests/ocupacao.rs (target/debug/deps/ocupacao-59615ee0c4ed67f4)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s
+     Running tests/quarto.rs (target/debug/deps/quarto-60e512807b5a6164)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+     Running tests/rajada.rs (target/debug/deps/rajada-9c57f5acdb00cf94)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+     Running tests/reconexao_fantasma.rs (target/debug/deps/reconexao_fantasma-2af396391bbd5252)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+     Running tests/recusa.rs (target/debug/deps/recusa-8610f191866d5155)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+     Running tests/salas.rs (target/debug/deps/salas-ede7feb70e54a9c9)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.09s
+     Running tests/senha_da_sala.rs (target/debug/deps/senha_da_sala-4849f2d906e5c1ed)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.61s
+     Running tests/sincronia.rs (target/debug/deps/sincronia-30277cecb4b6f923)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+     Running tests/soak_audio.rs (target/debug/deps/soak_audio-22d5ab62a5fab410)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.22s
+     Running tests/tela_por_um_par.rs (target/debug/deps/tela_por_um_par-c0e3b99816493bdb)
+Error: a paciência acabou esperando: o fluxo do par terminar depois de quem empresta retirar o consentimento
+test retirar_o_consentimento_de_emprestar_encerra_o_repasse_e_o_servidor_reassume ... FAILED
+failures:
+failures:
+    retirar_o_consentimento_de_emprestar_encerra_o_repasse_e_o_servidor_reassume
+test result: FAILED. 18 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 83.68s
+error: test failed, to rerun pass `-p seele-conformance --test tela_por_um_par`
+
+=== ROTULO=pos_armado SAIDA=101 PAREDE=3663.898886000s ===
