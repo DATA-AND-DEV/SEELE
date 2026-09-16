@@ -34,6 +34,8 @@ use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::Location;
 use seele_server::{admissao, Daemon, ServerConfig};
 
+mod vaga;
+
 const SENHA_CERTA: &str = "coelho-branco-42";
 
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
@@ -107,6 +109,7 @@ async fn trancar_sala_padrao(servidor: &Daemon, voice_room: VoiceRoomId) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entrar_com_senha_errada_nao_deixa_o_cliente_sentado_nele_mesmo() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let voice_room = VoiceRoomId(anfitriao.sessao().voice_rooms[0].id.get());
@@ -161,6 +164,7 @@ async fn entrar_com_senha_errada_nao_deixa_o_cliente_sentado_nele_mesmo() -> Res
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entrar_com_a_senha_certa_senta_de_verdade_nas_duas_pontas() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
     let mut anfitriao = conectar(endereco, 46, "anfitriao").await?;
     let voice_room = VoiceRoomId(anfitriao.sessao().voice_rooms[0].id.get());

@@ -58,6 +58,8 @@ use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
@@ -103,6 +105,7 @@ async fn entrar(address: SocketAddr, apelido: &str, semente: u8) -> Result<Clien
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_rajada_de_mensagens_grandes_chega_inteira() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = server().await?;
 
     let mut autor = entrar(address, "marcela", 11).await?;

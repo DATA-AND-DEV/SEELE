@@ -16,6 +16,8 @@ use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::{Location, Persistence};
 use seele_server::{admissao, Daemon, ServerConfig};
 
+mod vaga;
+
 const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 
 async fn subir(caminho: &std::path::Path) -> Result<(SocketAddr, Arc<Daemon>)> {
@@ -62,6 +64,7 @@ async fn conectar(
 /// ensina a ignorar o único aviso que não pode ser ignorado.
 #[tokio::test]
 async fn reiniciar_o_server_nao_troca_a_chave() -> Result<()> {
+    let _vaga = vaga::minha();
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
 
@@ -102,6 +105,7 @@ async fn reiniciar_o_server_nao_troca_a_chave() -> Result<()> {
 /// Um servidor com senha recusa quem não a tem.
 #[tokio::test]
 async fn a_senha_do_server_fecha_a_porta() -> Result<()> {
+    let _vaga = vaga::minha();
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
 
@@ -154,6 +158,7 @@ async fn a_senha_do_server_fecha_a_porta() -> Result<()> {
 /// Um convite vale uma vez, e é isso que o torna seguro num link.
 #[tokio::test]
 async fn um_convite_serve_a_uma_pessoa_so() -> Result<()> {
+    let _vaga = vaga::minha();
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
 
@@ -196,6 +201,7 @@ async fn um_convite_serve_a_uma_pessoa_so() -> Result<()> {
 /// A senha de uma sala de voz é conferida, e não só anunciada.
 #[tokio::test]
 async fn a_senha_do_voice_room_e_conferida() -> Result<()> {
+    let _vaga = vaga::minha();
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
 
@@ -251,6 +257,7 @@ async fn aguardar_recusa(cliente: &mut Client) {
 /// Um servidor sem configuração continua aberto — e isso é escolha, não descuido.
 #[tokio::test]
 async fn um_server_novo_aceita_qualquer_um() -> Result<()> {
+    let _vaga = vaga::minha();
     let pasta = tempfile::tempdir()?;
     let (endereco, servidor) = subir(&pasta.path().join("seele.db")).await?;
 
@@ -308,6 +315,7 @@ fn impressao_de(semente: u8) -> String {
 /// bastaria vazar um convite para pular a decisão de quem hospeda.
 #[tokio::test]
 async fn um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> Result<()> {
+    let _vaga = vaga::minha();
     use seele_proto::control::DisconnectReason;
     use seele_server::portaria;
 
@@ -522,6 +530,7 @@ async fn um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral() -> R
 /// dobrar as duas mandaria embora quem só precisava esperar.
 #[tokio::test]
 async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
+    let _vaga = vaga::minha();
     use seele_proto::control::DisconnectReason;
     use seele_server::portaria;
 
@@ -621,6 +630,7 @@ async fn quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera() -> Result<()> {
 /// **sem segredo**, e é essa que tem de entrar depois da aprovação.
 #[tokio::test]
 async fn quem_foi_aprovado_entra_na_batida_seguinte_que_vai_sem_segredo() -> Result<()> {
+    let _vaga = vaga::minha();
     use seele_proto::control::DisconnectReason;
     use seele_server::portaria;
 

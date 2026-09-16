@@ -22,6 +22,8 @@ use seele_ffi::{
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 const VOICE_ROOM: u32 = 1;
 const CHANNEL: u32 = 1;
 const WAIT: Duration = Duration::from_secs(5);
@@ -155,6 +157,7 @@ fn until<F: Fn(&Connection) -> bool>(connection: &Connection, done: F) -> bool {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
 
     // `connect` blocks, and a shell must call it off the thread that draws.
@@ -179,6 +182,7 @@ async fn a_shell_connects_and_the_snapshot_describes_the_server() -> Result<()> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entering_a_voice_room_puts_us_on_our_own_roster() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
     let connection = tokio::task::spawn_blocking(move || connect(address, "rei")).await??;
 
@@ -200,6 +204,7 @@ async fn entering_a_voice_room_puts_us_on_our_own_roster() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
+    let _vaga = vaga::minha();
     // The mirror of the test above, and it was missing.
     //
     // The server does not echo `PersonLeft` to the person who caused it — "they
@@ -271,6 +276,7 @@ async fn leaving_a_voice_room_takes_us_off_our_own_roster() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn two_shells_hold_a_conversation() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
 
     let speaker = tokio::task::spawn_blocking(move || connect(address, "rafael")).await??;
@@ -321,6 +327,7 @@ async fn two_shells_hold_a_conversation() -> Result<()> {
 /// server ignored the message outright and the marker could never light up.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
 
     let muted = tokio::task::spawn_blocking(move || connect(address, "helena")).await??;
@@ -366,6 +373,7 @@ async fn a_muted_mic_is_visible_to_everybody_else() -> Result<()> {
 /// pode ser retomada em outro cliente sem perda de histórico."
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
 
     let first = tokio::task::spawn_blocking(move || connect(address, "maya")).await??;
@@ -418,6 +426,7 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
 /// `connection` de um lado e o do app do outro, que é o que a frase quer dizer.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()> {
+    let _vaga = vaga::minha();
     use seele_core::{Client, MemoryPinStore, Room};
     use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 
@@ -508,6 +517,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
 /// Every failure is an enum a shell can write its own sentence for.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unreachable_server_is_an_enum_and_not_a_message() -> Result<()> {
+    let _vaga = vaga::minha();
     // Port 1 on the loopback: nothing listens, and nothing will.
     let nowhere = SocketAddr::from(([127, 0, 0, 1], 1));
     let failure = tokio::task::spawn_blocking(move || connect(nowhere, "ninguem"))
@@ -544,6 +554,7 @@ async fn an_unreachable_server_is_an_enum_and_not_a_message() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
+    let _vaga = vaga::minha();
     let failure = tokio::task::spawn_blocking(|| {
         Connection::connect(ConnectConfig {
             server: "nao-existe.invalid:8383".into(),
@@ -568,6 +579,7 @@ async fn a_name_that_does_not_resolve_says_so_specifically() -> Result<()> {
 /// Adjusting the volume of somebody who is not here is a named failure.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_volume_of_a_stranger_is_refused_by_name() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
     let connection = tokio::task::spawn_blocking(move || connect(address, "hyuga")).await??;
 
@@ -583,6 +595,7 @@ async fn the_volume_of_a_stranger_is_refused_by_name() -> Result<()> {
 /// Dropping the handle ends the session.
 #[tokio::test(flavor = "multi_thread")]
 async fn dropping_the_handle_disconnects() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
     let connection = tokio::task::spawn_blocking(move || connect(address, "aoba")).await??;
     connection.enter_voice_room(VOICE_ROOM, None)?;
@@ -611,6 +624,7 @@ async fn dropping_the_handle_disconnects() -> Result<()> {
 /// The button would have done nothing at all, silently, in the shipped app.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
     let connection = tokio::task::spawn_blocking(move || connect(address, "anfitria")).await??;
 
@@ -675,6 +689,7 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
 /// enumerated notice and no room.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_shell_without_the_permission_is_refused_by_the_server() -> Result<()> {
+    let _vaga = vaga::minha();
     let (address, server) = start().await?;
 
     // Whoever connects first hosts. This one is the guest.
@@ -726,6 +741,7 @@ async fn a_shell_without_the_permission_is_refused_by_the_server() -> Result<()>
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_revisao_das_mensagens_anda_quando_alguem_fala() -> Result<()> {
+    let _vaga = vaga::minha();
     // **O que o `two_shells_hold_a_conversation` não cobre.**
     //
     // Aquele teste lê `listener.messages()` direto, e prova que a mensagem
@@ -812,6 +828,7 @@ fn espere_ate(mut condicao: impl FnMut() -> bool) -> bool {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_nao_abriu_a_linha_nao_recebe_nada_e_isso_e_a_regra() -> Result<()> {
+    let _vaga = vaga::minha();
     // **A regra que fez um defeito de corrida virar uma conversa muda.**
     //
     // O servidor entrega `MessageReceived` filtrando por `channels.contains`, e

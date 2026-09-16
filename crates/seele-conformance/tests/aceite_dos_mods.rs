@@ -45,6 +45,8 @@ use seele_server::persistence::mods::{enable, EnabledMod};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 async fn servidor_com_limiar(limiar: u8) -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
         name: "Casa".into(),
@@ -166,6 +168,7 @@ async fn conjunto_exigido(daemon: &Daemon) -> String {
 /// para saber o que ele alcança — que é decidir antes de perguntar.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
     let exigido = conjunto_exigido(&daemon).await;
@@ -210,6 +213,7 @@ async fn um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou() -> Result<()> 
 /// função: quem não aceita não acessa o fluxo protegido, e quem aceita acessa.
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_ja_aceitou_o_conjunto_entra_sem_perguntar_de_novo() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
     let exigido = conjunto_exigido(&daemon).await;
@@ -257,6 +261,7 @@ async fn quem_ja_aceitou_o_conjunto_entra_sem_perguntar_de_novo() -> Result<()> 
 /// mesma regra nas duas pontas.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_aceite_de_ontem_nao_vale_para_o_conjunto_de_hoje() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
     let de_ontem = conjunto_exigido(&daemon).await;
@@ -295,6 +300,7 @@ async fn um_aceite_de_ontem_nao_vale_para_o_conjunto_de_hoje() -> Result<()> {
 /// tentativa seguinte, contra o mesmo servidor, sem ele ter mudado nada.
 #[tokio::test(flavor = "multi_thread")]
 async fn reconectar_com_o_conjunto_novo_aceito_abre_a_porta() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
     let de_ontem = conjunto_exigido(&daemon).await;
@@ -319,6 +325,7 @@ async fn reconectar_com_o_conjunto_novo_aceito_abre_a_porta() -> Result<()> {
 /// E sem MOD habilitado nada muda. É o servidor de todo mundo hoje.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_servidor_sem_mod_continua_deixando_entrar() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     entrar(endereco, 2)
         .await
@@ -337,6 +344,7 @@ async fn um_servidor_sem_mod_continua_deixando_entrar() -> Result<()> {
 /// continuaria conversando sem nunca ter lido o que passou a ser exigido.
 #[tokio::test(flavor = "multi_thread")]
 async fn habilitar_um_mod_acaba_com_a_sessao_de_quem_aceitou_outro_conjunto() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
 
     // Um par cru, para ler a despedida no fio em vez de deduzi-la de um erro.
@@ -371,6 +379,7 @@ async fn habilitar_um_mod_acaba_com_a_sessao_de_quem_aceitou_outro_conjunto() ->
 /// mensagem de sala com um bot ligado acabaria com a sessão de todo mundo.
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_sessao_sobrevive_ao_que_nao_muda_o_conjunto() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     let mut par = abrir(endereco, 4).await?;
 
@@ -419,6 +428,7 @@ async fn uma_sessao_sobrevive_ao_que_nao_muda_o_conjunto() -> Result<()> {
 /// `um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou`.
 #[tokio::test(flavor = "multi_thread")]
 async fn com_o_portao_dormente_habilitar_um_mod_nao_fecha_a_casa() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor_com_o_portao_dormente().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
 
@@ -437,6 +447,7 @@ async fn com_o_portao_dormente_habilitar_um_mod_nao_fecha_a_casa() -> Result<()>
 /// seguinte, sem nunca ter lido lista nenhuma. Reconectar por reconectar.
 #[tokio::test(flavor = "multi_thread")]
 async fn com_o_portao_dormente_habilitar_um_mod_nao_derruba_a_sala() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor_com_o_portao_dormente().await?;
     let mut par = abrir(endereco, 22).await?;
 
@@ -789,6 +800,7 @@ fn anunciado(id: &str, hash_de: u8) -> seele_proto::mods::ModAnunciado {
 /// máquina de quem hospeda.
 #[tokio::test(flavor = "multi_thread")]
 async fn sem_aceite_guardado_o_cliente_recusa_e_devolve_a_lista() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = servidor_que_anuncia(vec![anunciado("seele/bot", 0xa1)]).await?;
 
     let resultado = entrar(endereco, 5).await;
@@ -818,6 +830,7 @@ async fn sem_aceite_guardado_o_cliente_recusa_e_devolve_a_lista() -> Result<()> 
 /// direto nas próximas.»
 #[tokio::test(flavor = "multi_thread")]
 async fn com_o_aceite_guardado_o_cliente_entra_direto() -> Result<()> {
+    let _vaga = vaga::minha();
     let mut mods = vec![anunciado("seele/bot", 0xa1)];
     let conjunto = seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(&mut mods));
     let (endereco, servidor) = servidor_que_anuncia(mods).await?;
@@ -847,6 +860,7 @@ async fn com_o_aceite_guardado_o_cliente_entra_direto() -> Result<()> {
 /// devolve a lista nova para a tela.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_aceite_guardado_de_outro_conjunto_nao_e_reaproveitado() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = servidor_que_anuncia(vec![anunciado("seele/bot", 0xa1)]).await?;
 
     let resultado = Client::connect(
@@ -894,6 +908,7 @@ async fn um_aceite_guardado_de_outro_conjunto_nao_e_reaproveitado() -> Result<()
 /// vale como prova do contrato cumprido, e não como repetição do de cima.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_anuncio_sai_do_servidor_padrao_sem_ninguem_baixar_limiar() -> Result<()> {
+    let _vaga = vaga::minha();
     assert!(
         ServerConfig::default().versao_do_anuncio <= seele_proto::PROTOCOL_VERSION,
         "o limiar padrão voltou a ficar acima da versão global, e o portão \
@@ -940,6 +955,7 @@ async fn o_anuncio_sai_do_servidor_padrao_sem_ninguem_baixar_limiar() -> Result<
 /// e contado por inteiro na pendência #42.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_par_da_versao_anterior_continua_entrando() -> Result<()> {
+    let _vaga = vaga::minha();
     let anterior = seele_proto::version::oldest_supported_version();
     assert!(
         anterior < seele_proto::PROTOCOL_VERSION,
@@ -973,6 +989,7 @@ async fn um_par_da_versao_anterior_continua_entrando() -> Result<()> {
 /// produto, não pela pessoa que não conseguiu entrar.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_par_dentro_da_janela_e_recusado_por_um_servidor_que_exige_mod() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
 

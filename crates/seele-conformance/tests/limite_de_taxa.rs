@@ -28,6 +28,8 @@ use seele_server::persistence::Location;
 use seele_server::taxa::{APERTOS_DE_RAJADA, PACIENCIA, QUADROS_DE_RAJADA};
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
         name: "Casa".into(),
@@ -65,6 +67,7 @@ async fn entrar(endereco: SocketAddr) -> Result<Client, ConnectError> {
 /// varre a rede compra milissegundos de CPU do anfitrião.
 #[tokio::test(flavor = "current_thread")]
 async fn quem_bate_a_porta_em_laco_e_recusado_por_taxa() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     // A rajada inteira passa. Uma casa atrás de um NAT, com três clientes
@@ -107,6 +110,7 @@ async fn quem_bate_a_porta_em_laco_e_recusado_por_taxa() -> Result<()> {
 /// mesmo assim não pode gastar o servidor inteiro.
 #[tokio::test(flavor = "current_thread")]
 async fn quem_inunda_depois_de_entrar_e_avisado_e_depois_derrubado() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
     let mut cliente = entrar(endereco).await.expect("o convidado entra");
 

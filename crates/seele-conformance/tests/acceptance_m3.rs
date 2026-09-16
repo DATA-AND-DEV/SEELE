@@ -24,6 +24,8 @@ use seele_proto::ServerMessage;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 const LINE: ChannelId = ChannelId(1);
 const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
 const WAIT: Duration = Duration::from_secs(5);
@@ -85,6 +87,7 @@ where
 
 #[tokio::test]
 async fn a_restarted_server_keeps_its_history() -> Result<()> {
+    let _vaga = vaga::minha();
     // The headline criterion. specs/04-servidor-seele.md is stronger still:
     // "Reinício não perde mensagem confirmada ao cliente", which is why a
     // message is broadcast only after its batch has committed.
@@ -142,6 +145,7 @@ async fn a_restarted_server_keeps_its_history() -> Result<()> {
 
 #[tokio::test]
 async fn a_restarted_server_keeps_its_accounts() -> Result<()> {
+    let _vaga = vaga::minha();
     // The other half of "preserva estado". ADR 0004 makes the key the identity,
     // so the same key must find the same account — otherwise every restart
     // orphans everybody's history.
@@ -170,6 +174,7 @@ async fn a_restarted_server_keeps_its_accounts() -> Result<()> {
 
 #[tokio::test]
 async fn a_message_reaches_everybody_on_the_line() -> Result<()> {
+    let _vaga = vaga::minha();
     let directory = tempfile::tempdir()?;
     let (address, server) = start(directory.path().join("seele.db")).await?;
 
@@ -199,6 +204,7 @@ async fn a_message_reaches_everybody_on_the_line() -> Result<()> {
 
 #[tokio::test]
 async fn a_resent_message_is_not_posted_twice() -> Result<()> {
+    let _vaga = vaga::minha();
     // specs/02-protocolo.md: idempotent by client_msg_id. The case is a client
     // that resends because the acknowledgement was lost, not because the user
     // pressed enter twice.
@@ -248,6 +254,7 @@ async fn a_resent_message_is_not_posted_twice() -> Result<()> {
 
 #[tokio::test]
 async fn a_person_without_write_permission_is_refused() -> Result<()> {
+    let _vaga = vaga::minha();
     // The permission matrix proper lives in seele-server's unit tests; this
     // checks the wiring, that the refusal actually reaches the wire.
     // specs/08-seguranca.md: the server denying is the security.
@@ -291,6 +298,7 @@ async fn a_person_without_write_permission_is_refused() -> Result<()> {
 
 #[tokio::test]
 async fn telemetry_carries_a_sync_ratio() -> Result<()> {
+    let _vaga = vaga::minha();
     // specs/07-estetica.md makes this the most visible number on screen,
     // and specs/02-protocolo.md derives it from RTT, jitter and loss. On
     // loopback it should be nominal.
@@ -330,6 +338,7 @@ async fn telemetry_carries_a_sync_ratio() -> Result<()> {
 
 #[tokio::test]
 async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
+    let _vaga = vaga::minha();
     // specs/09-roadmap.md: "Queda de rede de 60 s é recuperada de forma
     // transparente." The observable half of transparent is that the person comes
     // back as themselves: same account, same ssrc, same voice room. Otherwise the
@@ -368,6 +377,7 @@ async fn a_returning_person_reclaims_their_seat_and_their_ssrc() -> Result<()> {
 
 #[tokio::test]
 async fn history_pages_backwards_without_gaps() -> Result<()> {
+    let _vaga = vaga::minha();
     // specs/02-protocolo.md: "Paginação por cursor, nunca offset."
     let directory = tempfile::tempdir()?;
     let (address, server) = start(directory.path().join("seele.db")).await?;

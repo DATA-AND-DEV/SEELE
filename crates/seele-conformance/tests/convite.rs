@@ -50,6 +50,8 @@ use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
@@ -171,6 +173,7 @@ async fn falar_e_ouvir(enlace: &mut Enlace, o_que: &str) -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_impressao_que_o_convite_promete_verifica_o_primeiro_contato() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
     // A impressão de verdade, lida do servidor que está de pé: é isto que o
     // `seeled convite` põe no link, e o que um link honesto carrega.
@@ -211,6 +214,7 @@ async fn a_impressao_que_o_convite_promete_verifica_o_primeiro_contato() -> Resu
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
     let real = servidor.fingerprint().to_owned();
     let chave_do_pin = endereco.to_string();
@@ -288,6 +292,7 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
 
 #[tokio::test(flavor = "multi_thread")]
 async fn um_link_velho_contra_um_server_ja_conhecido_avisa_e_nao_derruba() -> Result<()> {
+    let _vaga = vaga::minha();
     // A metade oposta da recusa, e a que some sem ninguém notar. Com pin
     // estabelecido, o TOFU já provou que este é o servidor de ontem: quem está
     // errado é o link. Derrubar aqui trancaria a pessoa para fora de um servidor

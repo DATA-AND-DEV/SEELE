@@ -20,6 +20,8 @@ use seele_core::{Client, ConnectError, MemoryPinStore, PinStore};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
         name: "Casa".into(),
@@ -52,6 +54,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Client, ConnectErro
 
 #[tokio::test(flavor = "multi_thread")]
 async fn um_apelido_de_outro_dono_e_recusa_e_nao_rede() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     // O primeiro reivindica o apelido. ADR 0017: PERSISTENCE prende o apelido à
@@ -83,6 +86,7 @@ async fn um_apelido_de_outro_dono_e_recusa_e_nao_rede() -> Result<()> {
 /// aviso em vez de uma recusa, sem ninguém ter decidido isso.
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     let primeiro = entrar(endereco, 1).await.expect("o primeiro deve entrar");

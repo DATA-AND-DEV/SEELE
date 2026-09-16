@@ -43,6 +43,8 @@ use seele_server::persistence::Location;
 use seele_server::server::Occupant;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 
@@ -197,6 +199,7 @@ async fn ocupantes(servidor: &Daemon, esperados: usize, prazo: Duration) -> Vec<
 
 #[tokio::test(flavor = "multi_thread")]
 async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     let primeiro = conectar_e_falar(endereco, 46, "marcela", "primeira volta").await?;
@@ -256,6 +259,7 @@ async fn conectar_ejetar_e_conectar_de_novo_no_mesmo_processo() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
+    let _vaga = vaga::minha();
     // A mesma chave e o mesmo apelido: é isto que o `:ejetar` faz de verdade —
     // a pessoa cai na tela de seleção e entra de novo, sendo ela mesma. Se o
     // servidor tratasse a volta como intrusa, o laço externo seria inviável, e o
@@ -305,6 +309,7 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
 // um teste que pega a falha por um que não pega.
 #[tokio::test]
 async fn hospedar_ejetar_e_hospedar_de_novo_libera_a_porta() -> Result<()> {
+    let _vaga = vaga::minha();
     // `Hospedagem::encerrar` espera a porta voltar. Sem essa espera, a segunda
     // volta do laço falharia com porta ocupada — e é esse o caminho que a tela
     // de seleção oferece quando diz «hospedar aqui».

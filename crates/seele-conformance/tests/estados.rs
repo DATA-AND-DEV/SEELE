@@ -25,6 +25,8 @@ use seele_ffi::{ConnectConfig, ConnectStage, Connection, Event, EventListener};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 /// A base de uma configuração de entrada, para os testes que só trocam um campo.
 fn config_de_teste(server: String, casa: &std::path::Path) -> ConnectConfig {
     ConnectConfig {
@@ -112,6 +114,7 @@ fn avisar_nunca_reprova_uma_chegada() {
 
 #[tokio::test]
 async fn a_trilha_sobrevive_a_uma_chegada_que_falhou() {
+    let _vaga = vaga::minha();
     // «Tentei quatro candidatos, o primeiro deu prazo esgotado em 4 s, o quarto
     // recusou» é o dado que faltou quando o teste das duas casas falhou e
     // ninguém soube dizer por quê.
@@ -139,6 +142,7 @@ async fn a_trilha_sobrevive_a_uma_chegada_que_falhou() {
 
 #[tokio::test]
 async fn quem_acompanha_uma_chegada_recebe_a_ultima_etapa_dela() {
+    let _vaga = vaga::minha();
     // A metade que a tela lê. A trilha é o registro; o `watch` é o que apaga o
     // spinner mudo enquanto a travessia corre, e ele só vale se a publicação
     // estiver na mesma linha que escreve a trilha — um `send` que sumisse
@@ -430,6 +434,7 @@ async fn ponto_que_conta() -> Option<(SocketAddr, Arc<AtomicUsize>)> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
+    let _vaga = vaga::minha();
     let Some((server, servidor)) = server_de_teste().await else {
         panic!("o servidor de teste não subiu");
     };
@@ -473,6 +478,7 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mesma_conexao_sem_aviso_nenhum_diz_endereco_publico() {
+    let _vaga = vaga::minha();
     // O outro lado do par. Mesmo endereço, mesmo server, mesma impressão
     // digital: só o bilhete sai. Sem ele nenhum `LEVE` é mandado, e o nome tem
     // de mudar — se não mudar, `Snapshot.caminho` está sendo decidido só pela

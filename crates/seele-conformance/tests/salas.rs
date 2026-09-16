@@ -48,6 +48,8 @@ use seele_proto::ids::{ChannelId, VoiceRoomId};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 /// Sobe um servidor numa porta que o sistema escolhe.
 ///
 /// Porta zero, nunca um número escrito à mão, que colidiria com o servidor que a
@@ -147,6 +149,7 @@ fn e_recusa(aviso: &Aviso) -> bool {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     // Quem hospeda é quem conecta primeiro ao próprio servidor. Medido em
@@ -193,6 +196,7 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
@@ -255,6 +259,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     // O anfitrião conecta primeiro e fica de pé, calado, como testemunha. Ele é
@@ -371,6 +376,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
 
 #[tokio::test(flavor = "multi_thread")]
 async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;

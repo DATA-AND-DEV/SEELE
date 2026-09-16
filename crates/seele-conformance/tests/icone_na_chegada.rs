@@ -25,6 +25,8 @@ use seele_ffi::{ConnectConfig, Connection, ConnectionError};
 use seele_server::persistence::{Location, Persistence};
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 /// Um PNG quadrado e opaco, do tamanho que o protocolo aceita.
 fn png(lado: u32) -> Vec<u8> {
     let mut quadro = image_de_teste(lado);
@@ -107,6 +109,7 @@ fn conectar(endereco: SocketAddr, casa: &str) -> Result<Arc<Connection>, Connect
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_conecta_recebe_o_icone_que_o_server_ja_tinha() -> Result<()> {
+    let _vaga = vaga::minha();
     let pasta = std::env::temp_dir().join(format!("seele-icone-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pasta);
     std::fs::create_dir_all(&pasta)?;

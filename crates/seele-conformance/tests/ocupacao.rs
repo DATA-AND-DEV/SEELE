@@ -45,6 +45,8 @@ use seele_proto::ids::{ChannelId, VoiceRoomId};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 /// Sobe um servidor numa porta que o sistema escolhe, com duas salas de voz.
 ///
 /// Dois, e esse é o ponto do arquivo inteiro: com um só, o filtro que este
@@ -166,6 +168,7 @@ async fn segundo_voice_room(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
@@ -218,6 +221,7 @@ async fn quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu() -> Result<
 
 #[tokio::test(flavor = "multi_thread")]
 async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
@@ -272,6 +276,7 @@ async fn entrar_num_voice_room_aparece_para_quem_esta_noutro() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     let anfitriao = conectar(endereco, 46, "anfitriao").await?;
@@ -318,6 +323,7 @@ async fn uma_conexao_que_cai_sai_do_roster_de_todo_mundo() -> Result<()> {
 
 #[tokio::test]
 async fn quem_volta_para_o_assento_guardado_reaparece_para_quem_ficou() -> Result<()> {
+    let _vaga = vaga::minha();
     // **O defeito que este teste registra veio de campo assim:** «se você fecha o
     // app dentro de uma sala, ao entrar no servidor, você volta para a sala no
     // áudio, mas não aparece para o host».

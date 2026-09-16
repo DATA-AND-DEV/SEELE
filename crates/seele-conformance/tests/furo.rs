@@ -36,6 +36,8 @@ use std::time::{Duration, Instant};
 use seele_core::enlace::{Destino, Enlace};
 use seele_core::{ConnectError, MemoryPinStore, PinStore};
 
+mod vaga;
+
 /// A impressão digital que o convite promete.
 ///
 /// Obrigatória: é dela que sai a marca do aviso, e sem marca não se prepara
@@ -161,6 +163,7 @@ async fn tentar_convite_de_teste(
 
 #[tokio::test]
 async fn o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele() {
+    let _vaga = vaga::minha();
     // O teste-carro-chefe do ciclo, e ele tem de prender o aviso **dos dois
     // lados**. Um limite inferior sozinho («saiu depois de 500 ms») não prende
     // nada: o conserto inteiro desfeito, com um aviso único antes do laço
@@ -245,6 +248,7 @@ async fn o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele() {
 
 #[tokio::test]
 async fn um_candidato_da_rede_de_casa_nao_gasta_aviso_nenhum() {
+    let _vaga = vaga::minha();
     // Um convite só com endereços privados não precisa de furo nenhum. Avisar
     // ali gastaria metadado de quem não pediu e furos da janela do anfitrião:
     // com três avisos por candidato, quatro candidatos privados custariam doze
@@ -292,6 +296,7 @@ async fn um_candidato_da_rede_de_casa_nao_gasta_aviso_nenhum() {
 
 #[tokio::test]
 async fn um_candidato_privado_na_forma_mapeada_nao_engana_a_guarda() {
+    let _vaga = vaga::minha();
     // A forma mapeada não é borda: um ponto de encontro atrás de socket de pilha
     // dupla reflete a origem de quem bateu como `::ffff:a.b.c.d`, e é essa
     // origem que volta no `AQUI` e entra no convite. Uma classificação que só
@@ -374,6 +379,7 @@ async fn um_candidato_privado_na_forma_mapeada_nao_engana_a_guarda() {
 
 #[tokio::test]
 async fn um_convite_de_enderecos_mortos_termina_em_segundos_e_nao_em_dezenas() {
+    let _vaga = vaga::minha();
     // Quatro endereços privados de outra casa: cada um custava
     // PRAZO_POR_CANDIDATO = 4 s, e a má notícia chegava em dezesseis segundos.
     // Com o prazo curto do candidato distante o pior caso cai para poucos.
@@ -403,6 +409,7 @@ async fn um_convite_de_enderecos_mortos_termina_em_segundos_e_nao_em_dezenas() {
 
 #[tokio::test]
 async fn o_aviso_se_repete_enquanto_o_aperto_de_mao_corre() {
+    let _vaga = vaga::minha();
     // A retentativa que não existia. Um `AQUI` perdido no caminho custava a
     // conexão inteira em silêncio: o anfitrião nunca furava, o candidato
     // queimava os quatro segundos, e o erro que saía era o de outro endereço.
@@ -460,6 +467,7 @@ async fn o_aviso_se_repete_enquanto_o_aperto_de_mao_corre() {
 
 #[tokio::test]
 async fn a_repeticao_para_quando_o_candidato_acaba() {
+    let _vaga = vaga::minha();
     // Avisar sobre um candidato que já terminou gasta furo da janela do
     // anfitrião por um caminho que ninguém vai tentar de novo — e a janela é o
     // que separa "quem tem o link entra" de "quem tem o link faz o servidor jorrar
@@ -515,6 +523,7 @@ async fn a_repeticao_para_quando_o_candidato_acaba() {
 
 #[tokio::test]
 async fn um_aviso_recusado_pelo_kernel_nao_derruba_o_laco() {
+    let _vaga = vaga::minha();
     // A decisão que o laço toma com o erro de `Batida::avisar`, e a única que
     // não troca um defeito por outro: registrar e ir ao candidato seguinte.
     //

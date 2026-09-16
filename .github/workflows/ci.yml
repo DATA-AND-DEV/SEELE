@@ -88,29 +88,30 @@ jobs:
       # masking a bug: the point of this job is to prove the `#[cfg(windows)]`
       # paths still *compile and link*, which every run of this step already
       # does for the whole workspace, hardware or not.
-      #
-      # seele-conformance is excluded from this run and executed on its own
-      # below — see the next step for why.
-      - name: cargo test (workspace, excluding seele-conformance)
-        run: cargo test --workspace --exclude seele-conformance --all-targets
-
-      # docs/pendencias.md #29 measured this precisely: every conformance test
-      # passes alone in well under a second, but the suite spawns one real
-      # QUIC server (handshake, TLS, database) per test, and under `cargo
-      # test`'s default parallelism those servers fight each other for ports,
-      # disk and CPU. On the machine in #29, running the crate with
-      # `--test-threads=1` took 23s and passed 15/15 every time, while the
-      # parallel run finished faster (~20s) but failed a different test in
-      # roughly two of every three rounds. The pendência's own conclusion was
-      # explicit: serialize this crate, don't widen the deadline, and don't
-      # paper over it with a silent retry — a suite that only passes on the
-      # second attempt has stopped being evidence.
-      #
-      # #35 and #36 (as numbered on main, not on this branch — see
-      # docs/pendencias.md #37 for why the numbering diverged) turned out to
-      # be about screen-relay viewer counts and a misleadingly named
-      # reconnection test, not about seele-conformance concurrency. Neither
-      # changes the call made here: #29 remains the only pendência that
-      # measured this crate's parallelism and it says serialize.
-      - name: cargo test (seele-conformance, serialized — see comment)
-        run: cargo test -p seele-conformance -- --test-threads=1
+      - name: cargo test (workspace)
+        # One command. The separate `cargo test -p seele-conformance --
+        # --test-threads=1` step, and the `--exclude seele-conformance` it
+        # forced on the step above it, were both removed on 2026-09-16.
+        #
+        # They existed because of docs/pendencias.md #29: every test in
+        # seele-conformance brings up a real QUIC server — handshake, TLS,
+        # database — `libtest` runs them in parallel inside the binary, and
+        # under load the concurrent handshakes blew the transport's 20s
+        # IDLE_TIMEOUT. One conformance test failed per round, a different one
+        # each time.
+        #
+        # The serialization now lives inside the crate itself, as an RAII
+        # permit (crates/seele-conformance/tests/vaga/mod.rs) that each test
+        # holds for its whole duration. That makes the separate step redundant,
+        # and better than redundant: the permit reaches *only* this crate,
+        # while `--test-threads=1` in a step of its own also forced excluding
+        # the crate from the other step — two commands where the project has
+        # one, and no guarantee at all for whoever ran `cargo test --workspace`
+        # on their own machine.
+        #
+        # Measured before removing it (#29, closing entry): five consecutive
+        # rounds of this exact command under 12 deliberate CPU burners on a
+        # 15-core machine, all exit 0, 1883 tests each, wall times within 0.9s
+        # of each other. The permit costs +76s per round and it buys back a
+        # suite that is evidence again.
+        run: cargo test --workspace --all-targets

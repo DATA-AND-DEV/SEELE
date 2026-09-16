@@ -22,6 +22,8 @@ use seele_proto::ids::{Ssrc, VoiceRoomId};
 use seele_proto::MediaHeader;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 /// How long to wait for a datagram before calling it lost.
 ///
 /// Generous: this runs on loopback, so anything approaching this is a hang
@@ -82,6 +84,7 @@ fn media(ssrc: Ssrc, seq: u16, payload: &[u8]) -> Vec<u8> {
 
 #[tokio::test]
 async fn three_clients_in_one_voice_room_hear_each_other() -> Result<()> {
+    let _vaga = vaga::minha();
     // The headline criterion of specs/09-roadmap.md.
     let address = start(Vec::new()).await?;
 
@@ -140,6 +143,7 @@ async fn three_clients_in_one_voice_room_hear_each_other() -> Result<()> {
 
 #[tokio::test]
 async fn a_client_without_permission_is_refused() -> Result<()> {
+    let _vaga = vaga::minha();
     // The second criterion. specs/04-servidor-seele.md: "always validate — do not
     // trust the client"; specs/07 calls the role that may listen but not speak
     // an Observador.
@@ -172,6 +176,7 @@ async fn a_client_without_permission_is_refused() -> Result<()> {
 
 #[tokio::test]
 async fn a_forged_ssrc_is_refused() -> Result<()> {
+    let _vaga = vaga::minha();
     // Gap G2. specs/08-seguranca.md promises that "a client forging another's
     // identity" is handled because the ssrc is server-assigned, but nothing said
     // the header had to be checked against the connection. Without that check a
@@ -210,6 +215,7 @@ async fn a_forged_ssrc_is_refused() -> Result<()> {
 
 #[tokio::test]
 async fn the_first_connection_pins_the_certificate() -> Result<()> {
+    let _vaga = vaga::minha();
     // ADR 0003. The pin is what makes the change warning of specs/08 possible at
     // all, so the first contact has to record something.
     let address = start(Vec::new()).await?;
@@ -225,6 +231,7 @@ async fn the_first_connection_pins_the_certificate() -> Result<()> {
 
 #[tokio::test]
 async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
+    let _vaga = vaga::minha();
     // The bug this exists to stop: both shells hand TLS the name `localhost`
     // for any IP address, because that is the name the M2 certificate carries.
     // While the pin was filed under that same label, two servers shared one
@@ -297,6 +304,7 @@ async fn two_servers_on_one_machine_do_not_share_a_pin() -> Result<()> {
 
 #[tokio::test]
 async fn a_second_connection_reuses_the_pin() -> Result<()> {
+    let _vaga = vaga::minha();
     // The store is shared between the two connections, as it would be on disk.
     let address = start(Vec::new()).await?;
     let pins = Arc::new(MemoryPinStore::new());
@@ -338,6 +346,7 @@ async fn a_second_connection_reuses_the_pin() -> Result<()> {
 
 #[tokio::test]
 async fn a_ping_comes_back_as_a_pong() -> Result<()> {
+    let _vaga = vaga::minha();
     // specs/02-protocolo.md makes this the base of the Sync Ratio, and the one
     // input seele-audio cannot produce on its own.
     //
@@ -368,6 +377,7 @@ async fn a_ping_comes_back_as_a_pong() -> Result<()> {
 
 #[tokio::test]
 async fn the_session_names_the_server_and_its_voice_room() -> Result<()> {
+    let _vaga = vaga::minha();
     // specs/02-protocolo.md: the Session carries the server description and the
     // tree of voice_rooms and Channels, which is what a shell draws its first screen from.
     let address = start(Vec::new()).await?;
@@ -386,6 +396,7 @@ async fn the_session_names_the_server_and_its_voice_room() -> Result<()> {
 
 #[tokio::test]
 async fn media_before_entering_a_voice_room_goes_nowhere() -> Result<()> {
+    let _vaga = vaga::minha();
     // A connection that authenticated but never inserted its connection has no
     // business reaching a voice room. specs/04: validate that the sender is in it.
     let address = start(Vec::new()).await?;

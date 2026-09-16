@@ -1440,7 +1440,7 @@ aparelho, não sobre este código.
 **Quando dói.** Numa casa cujo roteador tenha tabela de NAT pequena ou limite de
 criação de mapeamento por segundo. Não aparece em LAN, onde nenhum aviso sai.
 
-## 29 · A conformidade reprova sob a carga da própria suíte
+## 29 · Fechada em 2026-09-16 · A conformidade reprova sob a carga da própria suíte
 
 **Sintoma, observado em 2026-08-31.** `cargo test --workspace` reprova um teste
 de conformidade por rodada, **sempre um diferente**, e sempre estourando um prazo
@@ -1528,6 +1528,239 @@ O custo desta vez não foi o minuto de reexecução: foi uma revisão independen
 ter de gastar parágrafo distinguindo «carga» de «regressão» antes de poder
 aprovar. É o «deixa de ser evidência» do registro de 2026-08-31, agora cobrado
 de terceiros.
+
+### Fechada em 2026-09-16 · uma permissão que cada teste segura pela sua duração
+
+**O conserto.** `crates/seele-conformance/tests/vaga/mod.rs` — um semáforo de
+processo com um guarda de RAII. Cada um dos **139 testes assíncronos** do crate
+o toma na primeira linha (`let _vaga = vaga::minha();`) e o devolve no `Drop`,
+o que inclui o caminho do pânico: um teste que reprova não leva a vaga consigo
+e não tranca a suíte atrás dele. O diff é uma linha de `mod vaga;` por arquivo e
+uma linha de guarda por teste, em 25 arquivos, mais o módulo novo — nenhuma
+linha removida, e nenhum arquivo de `crates/seele-server/` tocado. Os testes que
+não levantam servidor (`cancelamento`, `soak_audio`, `voz_na_reconexao`, e os
+seis de `estados` e um de `quarto` que só leem código-fonte) não pedem vaga: não
+pagam por um problema que não têm.
+
+**Por que pela duração do teste, e não em volta do `Daemon::bind`.** Tentativas
+anteriores erraram exatamente aqui, e o levantamento de custo da nona medição
+(§43) já dizia por quê: *«o que estoura é o aperto de mão, não a abertura da
+porta»*. Um guarda solto logo depois do `bind` devolveria a vaga antes de o
+cliente tentar conectar, e o `IDLE_TIMEOUT` de 20 s continuaria estourando.
+
+**Por que aqui e não em `RUST_TEST_THREADS`.** Aquela chave vale para o
+workspace inteiro e serializaria também os ~489 testes do `seele-server`, que
+não têm este problema e não têm por que pagar por ele. `-j1` no `cargo test`
+também estava descartado, e pelo motivo que a §38 registra: `-j` governa
+compilação, não quantos binários já compilados rodam juntos — a medição que
+alegava o contrário não se reproduziu e foi revertida.
+
+**A prova de que a permissão está agindo, e não apenas contando.** O
+`acceptance_m5` é a régua da §29: em série levava **23,02 s** e passava 15 de
+15; em paralelo terminava em **~20,01 s** e reprovava um teste em duas de cada
+três rodadas. Com a vaga armada, dentro do `--workspace` sob carga, ele passa
+**15 de 15 em 23,04 s** — o número da série, e não o do paralelo. É essa
+coincidência de dois centésimos que distingue «serializou» de «compilou».
+
+Vale registrar o que **não** serve de prova, porque custou uma rodada de
+revisão: a **ordem** em que os resultados são impressos continua embaralhada
+mesmo com a vaga armada. O `libtest` cria todas as threads de teste de uma vez;
+a vaga não impede que nasçam, impede que **rodem juntas** — quem espera no
+`Condvar` acorda na ordem que o sistema quiser. Ordem de impressão não mede
+serialização; tempo de parede mede.
+
+**As cinco rodadas do aceite**, `cargo test --workspace`, na mesma máquina de 15
+núcleos, cada uma com **12 queimadores de CPU** ligados de propósito antes do
+`cargo` e desligados depois (carga média de 23 a 37 no minuto anterior a cada
+rodada):
+
+| Rodada | Saída | Tempo de parede | Conjuntos | Testes |
+| --- | --- | --- | --- | --- |
+| 1 | 0 | 293,46 s | 73 | 1.883 |
+| 2 | 0 | 271,21 s | 73 | 1.883 |
+| 3 | 0 | 272,08 s | 73 | 1.883 |
+| 4 | 0 | 271,31 s | 73 | 1.883 |
+| 5 | 0 | 271,96 s | 73 | 1.883 |
+
+Cinco de cinco, sem uma reprovação por prazo. A primeira rodada é 22 s mais
+lenta que as outras quatro porque pagou o aquecimento de cache de disco; as
+quatro seguintes ficam dentro de **0,9 s** umas das outras, o que já é um sinal
+por si: a suíte voltou a ter um tempo, em vez de uma distribuição.
+
+**A serialização alcança somente a conformidade, e isto é medido, não
+argumentado.** `cargo test -p seele-server` sob a mesma carga de 12 queimadores,
+com a árvore original e depois com a árvore armada:
+
+| Árvore | Tempo de parede | Binário principal |
+| --- | --- | --- |
+| original, sem a vaga | 31,55 s | 453 testes em **8,04 s** |
+| com a vaga armada | 27,09 s | 453 testes em **8,07 s** |
+
+Os 469 testes do servidor continuam em paralelo: três centésimos de diferença no
+binário que carrega 453 deles. Serializados, aqueles 8 s virariam minutos. A
+diferença de 4 s no total é ruído da carga de fundo, e vai no sentido contrário
+ao de uma regressão.
+
+### A prova de reversão, e o que ela ensinou de novo
+
+`VAGAS` é a largura da permissão. Trocar o `1` por `usize::MAX` a desarma sem
+apagar uma linha — `while *ocupadas >= VAGAS` nunca bloqueia, e `vaga::minha()`
+vira um contador sem efeito. É assim que se prova que ela serve.
+
+**Primeiro, a prova de que a trava está agindo**, que não depende de sorte
+nenhuma. Na mesma rodada de `--workspace`, sob a mesma carga:
+
+| Binário | desarmada | armada |
+| --- | --- | --- |
+| `acceptance_m2` (9 testes) | 0,96 s | **3,18 s** |
+| `acceptance_m5` (15 testes) | 20,02 s | **23,04 s** |
+| soma dos 28 binários | 95,3 s | **171,3 s** |
+
+O `acceptance_m5` desarmado para em **20,02 s** — encostado no `IDLE_TIMEOUT` de
+20 s do transporte, que é a beirada do precipício desta pendência. Armado, vai a
+23,04 s, que é o número da série medido em 2026-08-31. A trava age.
+
+**Depois, a reprovação de volta.** Com a permissão desarmada e a máquina sob
+carga, `cargo test -p seele-conformance` reprovou na **segunda** rodada:
+
+```
+thread 'o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou'
+panicked at crates/seele-conformance/tests/anexos.rs:266:28:
+o anexo 18 não foi publicado
+test result: FAILED. 9 passed; 1 failed; ... finished in 7.14s
+error: test failed, to rerun pass `-p seele-conformance --test anexos`
+```
+
+O `ate(...)` de `anexos.rs` espera **5 s** por um evento; sob os apertos de mão
+concorrentes o décimo oitavo anexo não chegou dentro deles. Na mesma máquina, no
+mesmo minuto e com a mesma carga, a rodada de referência **armada** saiu 0. E
+antes desta, com a permissão desarmada, já se tinha visto a assinatura clássica
+de ~20 s: `tela_por_um_par::destruir_o_enlace_encerra_o_caminho_do_par_e_quem_\
+emprestava_volta_a_servir`, reprovando com *«o servidor apontou um par e não o
+contou como ocupado»*, conjunto encerrando em 18,96 s.
+
+**Restaurada e conferida.** O arquivo voltou do backup e foi conferido
+byte-a-byte — `cmp` sem diferença e SHA-256 igual dos dois lados:
+
+```
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  (backup)
+73bdeb645b92ab543a0d12839fb89870799b5b830f9dcf55813266ee9ef0b501  (árvore)
+```
+
+E, restaurada, voltou a passar: `cargo test -p seele-conformance` sob a mesma
+carga de 12 queimadores, **saída 0**, 28 conjuntos, nenhuma reprovação. Os três
+passos do ciclo, portanto, na ordem: referência armada 0 → desarmada reprova →
+restaurada por backup, conferida por hash, 0 de novo.
+
+**O que a reversão ensinou de novo, e que vale mais que a própria prova:
+queimador de processador não reproduz esta pendência.** Sete rodadas de
+`--workspace` com a permissão desarmada — quatro delas com **30** queimadores
+numa máquina de 15 núcleos, carga média 49 — saíram **todas 0**. A reprovação só
+voltou quando a contenção foi de **disco e de troca de páginas**, não de CPU. É
+coerente com o mecanismo: o que estoura é espera de rede e de banco, e um
+laço apertado de CPU não disputa nem uma coisa nem outra. Quem for medir esta
+pendência de novo deve saturar **entrada e saída**, e não somente o processador.
+
+**Um custo que eu mesmo paguei, e que fica registrado.** Ao montar essa carga de
+disco, um glob mal escrito meu abriu processos até encher a tabela do sistema;
+a máquina entrou em troca de páginas (quase 8 milhões de páginas trocadas) e
+ficou **treze vezes mais lenta** por mais de uma hora — a mesma rodada de
+conformidade que leva 191 s passou a levar 2.478 s. As medidas desta seção
+marcadas como «sob carga de 12 queimadores» são as da máquina sã; as da prova de
+reversão são as da máquina degradada, e por isso **os tempos de parede das duas
+não se comparam entre si** — só dentro de cada par. O que se compara, e é o que
+a prova precisa, é armada contra desarmada no mesmo minuto.
+
+Nessa mesma máquina degradada, a primeira rodada **armada** depois da
+restauração também reprovou — em
+`tela_por_um_par::retirar_o_consentimento_de_emprestar_encerra_o_repasse_e_o_\
+servidor_reassume`, com *«a paciência acabou esperando»*. Não é a §29
+ressurgindo: é de novo uma espera de tempo absoluto dentro do teste, numa
+máquina dezenove vezes mais lenta que o normal. A conferência foi refeita depois
+que a máquina voltou ao normal — calibrada pelo `acceptance_m2`, que marcou
+**3,17 s** contra os 3,18 s da medida sadia —, e aí a rodada armada saiu 0. Fica
+registrado do jeito que aconteceu, e não do jeito que seria mais limpo contar.
+
+**E uma terceira causa, descoberta aqui, que a vaga também não cura.** Com 30
+queimadores (carga 49, mais de três vezes os núcleos), a suíte **armada**
+reprovou em `furo::o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele`
+(`crates/seele-conformance/tests/furo.rs:242`): um `assert!` que exige que o
+`Initial` saia **menos de 600 ms** depois do aviso, e recebeu **7,07 s**.
+Serializar não alcança isso — a janela é de 600 ms e o escalonador estava
+entregando fatias de segundos. É a mesma família do defeito de `moderacao`
+descrito abaixo: janela de tempo absoluta dentro de um teste. Numa máquina
+sadia, e nas cinco rodadas do aceite, nenhum dos dois apareceu.
+
+**O custo, escrito mesmo sendo o que é.** Somando o «finished in» dos 28
+binários do `seele-conformance` dentro da mesma rodada de `--workspace`:
+
+| | Conformidade | Workspace (parede) |
+| --- | --- | --- |
+| permissão desarmada (paralelo) | 95,3 s | 195,6 s |
+| permissão armada (série) | 171,3 s | 271,9 s |
+| **custo** | **+76,0 s (+80 %)** | **+76,3 s (+39 %)** |
+
+As duas colunas foram medidas separadamente e chegam ao mesmo número com três
+décimos de diferença, o que é a própria conferência do cálculo: tudo o que a
+serialização acrescenta ao workspace, ela acrescenta dentro deste crate e em
+nenhum outro lugar. Os valores se repetem entre rodadas dentro de 0,03 s na
+coluna da conformidade.
+
+**Setenta e seis segundos é caro, e mesmo assim é o lado barato.** O que se
+compra por eles está medido acima: cinco rodadas seguidas saindo 0 em vez de
+uma reprovação por rodada, num teste diferente a cada vez. O registro de
+2026-09-14 já tinha posto preço no outro lado — «uma revisão independente ter de
+gastar parágrafo distinguindo carga de regressão antes de poder aprovar» —, e
+esse custo se cobra de terceiros, repetidamente, e não em segundos.
+
+**O que ainda mereceria medida, e não foi feito aqui:** a vaga é uma só. Duas ou
+três provavelmente comprariam parte do tempo de volta sem trazer a reprovação, já
+que o estouro é de 20 s e o aperto de mão sozinho leva décimos. Não foi medido,
+então não foi feito: `VAGAS` está em um porque é o valor cuja prova existe.
+
+### Duas causas que esta entrega NÃO consertou, com nome próprio
+
+Elas ficam escritas para não serem redescobertas como se fossem a §29, o que já
+aconteceu mais de uma vez. A terceira, descoberta durante a prova de reversão
+acima (`furo::o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele`, uma
+janela de 600 ms que recebeu 7,07 s com a máquina a três vezes a capacidade), é
+da mesma família da primeira e está registrada lá.
+
+**1. `moderacao::expulsar_acaba_com_a_sessao_e_deixa_voltar` é instável por si.**
+Medido antes desta entrega, no levantamento que a originou: reprovou **1 de 4** execuções *rodando o arquivo sozinho*, sem carga e sem
+concorrência — num `assert!` de tempo dentro da função `ate(...)`. Isso não é
+contenção de recurso: é o próprio teste. A vaga não alcança este defeito e não
+foi desenhada para alcançá-lo. Continua **sem diagnóstico**.
+
+**2. Sob ambiente com acesso restrito, testes de áudio e de rede travam em vez
+de falhar.** `a_saida_desta_maquina_abre_como_entrada` e
+`uma_saida_nao_responde_configuracao_de_entrada`
+(`crates/seele-audio/src/laco.rs`) ficam presos dentro de
+`manter_a_saida_tocando` / `playback_devices`: sem permissão de microfone o
+CoreAudio **não recusa**, ele espera. `empacotamento` (`apps/seele-app`) faz o
+mesmo com rede e chegou a levar **24 minutos** onde leva 16 s. É uma segunda
+causa, independente da §29, e atinge qualquer sessão que rode com esse acesso —
+foi ela, e não a §29, que produziu registros cortados em validações anteriores.
+Esta sessão **não** rodou com acesso restrito: os três testes correram normais
+nas cinco rodadas acima, e o único pânico que aparece nos registros é o
+proposital de `laco.rs:456` («envenenando de propósito, para o teste»), cujo
+teste passa.
+
+### O `ci.yml`, conferido
+
+A etapa avulsa `cargo test -p seele-conformance -- --test-threads=1` **foi
+removida**, junto com o `--exclude seele-conformance` que ela obrigava a
+existir, e o job passa a rodar o comando único do projeto:
+`cargo test --workspace --all-targets`.
+
+Ela ficou redundante porque a serialização deixou de morar no comando e passou a
+morar no crate. E é melhor que redundante: `--test-threads=1` numa etapa
+separada serializava o crate inteiro **e** exigia excluí-lo da outra etapa,
+deixando dois comandos onde o projeto tem um — e deixando quem roda
+`cargo test --workspace` na própria máquina sem a garantia que a CI tinha. Agora
+os dois têm a mesma. A prova de que a remoção não regride nada é a tabela das
+cinco rodadas acima, que é exatamente o comando que sobrou no `ci.yml`, sob
+carga que a CI não tem.
 
 ## 30 · Fechada em 2026-08-31 · O `seeled` não sabia dizer que versão é
 

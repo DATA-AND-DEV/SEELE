@@ -27,6 +27,7 @@ use seele_server::{Daemon, ServerConfig};
 
 /// A espera pela porta que outro binário da suíte levou por um instante.
 mod porta;
+mod vaga;
 use porta::ligar_insistindo;
 
 const VOICE_ROOM: u32 = 1;
@@ -79,6 +80,7 @@ where
 
 #[tokio::test(flavor = "multi_thread")]
 async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<()> {
+    let _vaga = vaga::minha();
     // O banco em arquivo, e não em memória: o servidor que sobe depois tem que ser
     // o mesmo servidor, com o mesmo certificado. Um certificado novo pareceria uma
     // troca de chave ao cliente, que é o alerta do ADR 0003 e não uma
@@ -155,6 +157,7 @@ async fn o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar() -> Result<(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
+    let _vaga = vaga::minha();
     // Reconectar no lugar errado é quase tão ruim quanto não reconectar: quem
     // estava numa sala de voz conversando volta calado noutro canto sem entender por
     // quê.
@@ -259,6 +262,7 @@ async fn o_que_a_pessoa_escolheu_volta_com_ela() -> Result<()> {
 /// histórico é o conserto, «que é o que a bateria interna faz sozinha».
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server(0, Location::Memory).await?;
 
     let mut enlace = Enlace::conectar(
@@ -427,6 +431,7 @@ async fn uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao() -> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn sair_encerra_sem_esperar_a_bateria() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server(0, Location::Memory).await?;
     let mut enlace = Enlace::conectar(
         destino(endereco),
@@ -452,6 +457,7 @@ async fn sair_encerra_sem_esperar_a_bateria() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn as_tentativas_aparecem_enquanto_a_bateria_corre() -> Result<()> {
+    let _vaga = vaga::minha();
     // `specs/07-estetica.md` pede "tentativas de reconexão listadas". Um
     // contador que fica em zero enquanto o programa tenta é pior que não ter:
     // parece que ninguém está fazendo nada.

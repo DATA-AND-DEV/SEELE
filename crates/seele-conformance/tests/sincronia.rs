@@ -48,6 +48,8 @@ use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 const VOICE_ROOM: u32 = 1;
 
 /// Quanto se espera a difusão periódica.
@@ -147,6 +149,7 @@ fn minha_taxa(sala: &Room) -> Option<u8> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
     let (mut enlace, mut sala) = sentar(endereco, 46, "marcela").await?;
 
@@ -184,6 +187,7 @@ async fn o_roster_mostra_a_taxa_do_proprio_pessoa() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_media_do_voice_room_conta_a_propria_linha() -> Result<()> {
+    let _vaga = vaga::minha();
     // A média sai de `Room::voice_room_sync`, que soma as cadeiras. Enquanto a linha
     // de `me` ficava em zero, uma pessoa sozinha via média da sala: 0 — e numa
     // sala de voz cheia cada pessoa via a média puxada para baixo pela própria linha,

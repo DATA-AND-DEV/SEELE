@@ -66,6 +66,7 @@ use seele_server::{frame, Daemon, ServerConfig};
 
 /// A espera pela porta que outro binário da suíte levou por um instante.
 mod porta;
+mod vaga;
 use porta::{a_porta_e_de_outro, ligar_insistindo};
 
 /// Quanto tempo se espera por qualquer coisa antes de dar o teste por falho.
@@ -187,6 +188,7 @@ async fn servidor_em(porta: u16, database: Location) -> Result<(SocketAddr, Arc<
 /// suíte reprovava.
 #[tokio::test]
 async fn a_porta_tomada_por_um_instante_nao_reprova_a_volta_do_servidor() -> Result<()> {
+    let _vaga = vaga::minha();
     let ocupante = std::net::UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0)))?;
     let porta = ocupante.local_addr()?.port();
     let config = ServerConfig {
@@ -803,6 +805,7 @@ const QUADROS_PARA_PROVAR: u32 = 30;
 /// em voo nenhum: só cabem vindo de um cano que o servidor não subiu.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -978,6 +981,7 @@ async fn o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu() -> Result<()> {
 ///    o servidor reabriu.
 #[tokio::test(flavor = "multi_thread")]
 async fn quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -1118,6 +1122,7 @@ async fn quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem() -> Result
 /// onde vier.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = servidor_com(Location::Memory).await?;
 
     let mut compartilha = abrir(endereco, 1).await?;
@@ -1280,6 +1285,7 @@ async fn um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima() 
 /// teste produz sem tocar em relógio nem em memória.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -1412,6 +1418,7 @@ async fn o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor() -> Result<()>
 #[tokio::test(flavor = "multi_thread")]
 async fn retirar_o_consentimento_de_emprestar_encerra_o_repasse_e_o_servidor_reassume() -> Result<()>
 {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -1509,6 +1516,7 @@ async fn retirar_o_consentimento_de_emprestar_encerra_o_repasse_e_o_servidor_rea
 /// a tela desta pessoa simplesmente pararia, sem erro em lugar nenhum.
 #[tokio::test(flavor = "multi_thread")]
 async fn retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -1671,6 +1679,7 @@ impl EnderecosEntregues {
 /// nomeado, e é o que se confere no fim.
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_recusa_assistir_por_par_continua_sendo_servido_pelo_servidor() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor_com(Location::Memory).await?;
     let Cenario {
         servidor,
@@ -1766,6 +1775,7 @@ async fn quem_recusa_assistir_por_par_continua_sendo_servido_pelo_servidor() -> 
 /// a vaga era queimada, e é lá que o teste tem de olhar.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_repasse_encerrado_normalmente_devolve_o_par_a_fila() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -1851,6 +1861,7 @@ async fn um_repasse_encerrado_normalmente_devolve_o_par_a_fila() -> Result<()> {
 /// guarda aparece.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_unwatch_devolve_a_vaga_do_par_e_ele_volta_a_ser_escolhido() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -1974,6 +1985,7 @@ async fn um_unwatch_devolve_a_vaga_do_par_e_ele_volta_a_ser_escolhido() -> Resul
 /// chega depois da perda.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_contador_de_copias_sobrevive_a_um_atraso_do_barramento() -> Result<()> {
+    let _vaga = vaga::minha();
     let screen = ScreenId(7);
     let voice_room = VoiceRoomId(1);
 
@@ -2034,6 +2046,7 @@ const SILENCIO_PARA_PROVAR: Duration = Duration::from_secs(1);
 /// tem de continuar recebendo enquanto quem parou não recebe nada.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_unwatch_derruba_o_caminho_do_par_e_a_imagem_para() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -2154,6 +2167,7 @@ async fn um_unwatch_derruba_o_caminho_do_par_e_a_imagem_para() -> Result<()> {
 /// nenhuma cópia.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tela() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = servidor_com(Location::Memory).await?;
 
     let mut compartilha = abrir(endereco, 1).await?;
@@ -2508,6 +2522,7 @@ async fn espectador_cru(
 #[tokio::test(flavor = "multi_thread")]
 async fn a_saida_de_quem_empresta_reabre_o_cano_de_quem_ficou_orfao_sem_esperar_relato(
 ) -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = servidor_com(Location::Memory).await?;
 
     let mut compartilha = abrir(endereco, 1).await?;
@@ -2628,6 +2643,7 @@ async fn a_saida_de_quem_empresta_reabre_o_cano_de_quem_ficou_orfao_sem_esperar_
 /// arquivo precisa dos dois.
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_empresta_saindo_da_sala_nao_deixa_quem_estava_atras_dele_sem_imagem() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -2726,6 +2742,7 @@ async fn quem_empresta_saindo_da_sala_nao_deixa_quem_estava_atras_dele_sem_image
 /// sessão inteira em vez de ao fim de uma tela.
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para() -> Result<()> {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -2872,6 +2889,7 @@ const SEM_IMAGEM_TOLERAVEL: Duration = Duration::from_secs(1);
 #[tokio::test(flavor = "multi_thread")]
 async fn destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_servir() -> Result<()>
 {
+    let _vaga = vaga::minha();
     let Cenario {
         servidor,
         compartilha,
@@ -3110,6 +3128,7 @@ const DEPOIS_DA_VOLTA: u32 = 1;
 ///    este prazo o teste a daria por boa.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo() -> Result<()> {
+    let _vaga = vaga::minha();
     let pasta = tempfile::tempdir()?;
     let banco = pasta.path().join("seele.db");
     let (endereco, primeiro) = servidor_em(0, Location::File(banco.clone())).await?;
@@ -3558,6 +3577,7 @@ const DRENAGEM_ANTES_DO_SILENCIO: Duration = Duration::from_millis(500);
 ///    não o `Enlace` inteiro.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_queda_de_uma_conexao_so_derruba_o_caminho_do_par_com_o_par_ainda_vivo() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor_em(0, Location::Memory).await?;
     let rele = Rele::abrir(endereco).await?;
     let endereco_do_rele = rele.endereco;

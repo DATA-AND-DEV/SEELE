@@ -41,6 +41,8 @@ use seele_server::persistence::attachments::per_file_limit;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 /// How long a test waits for a file the server agreed to send.
 const ESPERA: Duration = Duration::from_secs(5);
 
@@ -131,6 +133,7 @@ async fn ate<T>(
 
 #[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_sobe_inteiro_e_a_mensagem_so_aparece_depois() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor, casa) = server(64 * 1024).await?;
     let quem_manda = entrar(endereco, 7).await?;
     let mut quem_espera = entrar(endereco, 9).await?;
@@ -186,6 +189,7 @@ async fn um_arquivo_sobe_inteiro_e_a_mensagem_so_aparece_depois() -> Result<()> 
 
 #[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio() -> Result<()> {
+    let _vaga = vaga::minha();
     // O teto por arquivo é derivado do total, e um arquivo acima dele é
     // recusado — não aceito para ser jogado fora depois. A razão carrega o
     // limite, senão a pessoa tenta de novo com um arquivo igualmente grande.
@@ -229,6 +233,7 @@ async fn um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio() -> Re
 
 #[tokio::test(flavor = "current_thread")]
 async fn o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou() -> Result<()> {
+    let _vaga = vaga::minha();
     // O teste que mais importa, pela porta da frente: o disco enchendo de
     // verdade, medido a cada arquivo, e o texto sobrevivendo ao anexo.
     let teto = 64 * 1024_u64;
@@ -317,6 +322,7 @@ async fn o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expiro
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_mesma_foto_de_duas_pessoas_e_um_arquivo_so() -> Result<()> {
+    let _vaga = vaga::minha();
     let teto = 64 * 1024_u64;
     let (endereco, _servidor, casa) = server(teto).await?;
     let caminho = arquivo(casa.path(), "igual.png", 2_000, 0x5A);
@@ -346,6 +352,7 @@ async fn a_mesma_foto_de_duas_pessoas_e_um_arquivo_so() -> Result<()> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
+    let _vaga = vaga::minha();
     // «Pode escrever» e «pode pôr um gigabyte no meu notebook» são perguntas
     // diferentes, e esta é a segunda. O Observador é negado explicitamente.
     let casa = tempfile::tempdir()?;
@@ -385,6 +392,7 @@ async fn quem_nao_pode_anexar_e_recusado_com_razao() -> Result<()> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn um_server_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado() -> Result<()> {
+    let _vaga = vaga::minha();
     // Um servidor em memória não tem diretório para chamar de seu, e a resposta
     // certa é uma frase. Não aceitar o fluxo deixaria a barra do outro lado
     // parada em zero até o tempo ocioso do QUIC recolher a conexão — que é a
@@ -488,6 +496,7 @@ async fn prever(cliente: &mut Client, anexo: AttachmentId, limite: u64) -> Resul
 
 #[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_cujos_bytes_discordam_do_nome_nao_e_desenhado() -> Result<()> {
+    let _vaga = vaga::minha();
     // O teste que mais importa deste trabalho. O arquivo se chama `foto.png` e
     // é alegado `image/png` — as duas coisas escritas por quem mandou —, e os
     // bytes dele são de um JPEG.
@@ -538,6 +547,7 @@ async fn um_arquivo_cujos_bytes_discordam_do_nome_nao_e_desenhado() -> Result<()
 
 #[tokio::test(flavor = "current_thread")]
 async fn um_programa_com_nome_de_imagem_tambem_nao_e_desenhado() -> Result<()> {
+    let _vaga = vaga::minha();
     // O caso mais afiado do mesmo defeito: os bytes não são de imagem nenhuma.
     // `MZ` é o começo de um executável do Windows, e o arquivo se chama
     // `gatinho.png`.
@@ -572,6 +582,7 @@ async fn um_programa_com_nome_de_imagem_tambem_nao_e_desenhado() -> Result<()> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_que_e_o_que_diz_ser_vira_uma_figura() -> Result<()> {
+    let _vaga = vaga::minha();
     // O outro ramo, pela mesma porta: os bytes concordam com a alegação, e o
     // tipo de mídia do `data:` sai do que foi **achado**.
     let (endereco, _servidor, casa) = server(64 * 1024).await?;
@@ -609,6 +620,7 @@ async fn um_arquivo_que_e_o_que_diz_ser_vira_uma_figura() -> Result<()> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_maior_que_o_limite_da_previa_nao_e_baixado() -> Result<()> {
+    let _vaga = vaga::minha();
     // O limite da prévia é decidido **separado** do limite por arquivo, porque
     // as duas coisas protegem máquinas diferentes: aquele é o disco de quem
     // hospeda, este é a memória de quem lê. Aqui o servidor aceita o arquivo de bom

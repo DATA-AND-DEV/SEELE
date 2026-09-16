@@ -40,9 +40,12 @@ use std::sync::Arc;
 
 use seele_core::{Client, MemoryPinStore, PinStore};
 
+mod vaga;
+
 #[tokio::test]
 #[ignore = "precisa de duas máquinas: ver o cabeçalho deste arquivo"]
 async fn o_caminho_ate_a_outra_maquina_esta_aberto() {
+    let _vaga = vaga::minha();
     let Ok(alvo) = std::env::var("SEELE_ALVO") else {
         panic!(
             "faltou `SEELE_ALVO`. Exemplo:\n  \

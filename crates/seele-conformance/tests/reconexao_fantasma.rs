@@ -48,6 +48,8 @@ use seele_proto::ids::VoiceRoomId;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
         name: "Casa".into(),
@@ -127,6 +129,7 @@ fn sentados(room: &Room, voice_room: VoiceRoomId) -> Vec<String> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_saiu_durante_a_queda_do_host_nao_volta_como_fantasma() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
     // A é quem cai e reconecta; o roster dele é o que este teste afirma.

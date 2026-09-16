@@ -37,6 +37,8 @@ use seele_server::permissions::{Permissions, COMMANDER_ROLE, OPERATOR_ROLE, PERS
 use seele_server::persistence::{Location, Persistence};
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 const VOICE_ROOM: u32 = 1;
 const LINE: u32 = 1;
 const PRAZO: Duration = Duration::from_secs(10);
@@ -200,6 +202,7 @@ fn dar_papel(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor, _arquivo) = server("recusa").await?;
 
     // O anfitrião conecta primeiro e vira Comandante. Aqui ele é a vítima e a
@@ -287,6 +290,7 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
 
 #[tokio::test(flavor = "multi_thread")]
 async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor, _arquivo) = server("expulsar").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-expulsar").await?;
@@ -347,6 +351,7 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn banir_acaba_com_a_sessao_e_impede_de_voltar() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor, _arquivo) = server("banir").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-banir").await?;
@@ -379,6 +384,7 @@ async fn banir_acaba_com_a_sessao_e_impede_de_voltar() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor, _arquivo) = server("apagar").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-apagar").await?;
@@ -437,6 +443,7 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mover_leva_a_pessoa_e_a_conta_na_sala_nova() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor, _arquivo) = server("mover").await?;
 
     let anfitriao = entrar(endereco, "anfitriao-mover").await?;
@@ -517,6 +524,7 @@ async fn mover_leva_a_pessoa_e_a_conta_na_sala_nova() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn um_operador_modera_pessoas_e_nao_o_comandante() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, servidor, arquivo) = server("hierarquia").await?;
 
     // O anfitrião é Comandante por ser o primeiro a chegar.

@@ -21,6 +21,8 @@ use std::sync::Arc;
 use seele_core::encontro::{onde_mora, Marca};
 use seele_proto::encontro::{moro, Vizinhanca, TAMANHO};
 
+mod vaga;
+
 /// Um ponto de encontro de verdade, atendendo numa linha própria.
 fn subir_o_ponto() -> SocketAddr {
     let ponto = seele_encontro::Ponto::abrir_com_quarto(
@@ -38,6 +40,7 @@ fn subir_o_ponto() -> SocketAddr {
 
 #[tokio::test]
 async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
+    let _vaga = vaga::minha();
     let onde_fica = subir_o_ponto();
     let marca = Marca::nova("abcdef0123456789").expect("é uma marca");
     let mut balde = [0_u8; TAMANHO];
@@ -77,6 +80,7 @@ async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
 
 #[tokio::test]
 async fn um_ponto_que_nao_conhece_a_pergunta_apenas_cala() {
+    let _vaga = vaga::minha();
     // O caso de campo mais provável durante a migração: o serviço no ar é o de
     // antes desta mudança. Ele não responde a `QUEM`, e o que tem de acontecer é
     // a espera vencer e a conexão seguir com os endereços guardados — nunca uma
@@ -103,6 +107,7 @@ async fn um_ponto_que_nao_conhece_a_pergunta_apenas_cala() {
 
 #[tokio::test]
 async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele() {
+    let _vaga = vaga::minha();
     // Qualquer um manda `MORO` com a marca de outro. Isto não é autenticação —
     // este serviço não tem chave nenhuma para conferir — e não precisa ser: quem
     // chega confere a impressão digital de qualquer jeito (ADR 0003), então um
@@ -146,6 +151,7 @@ async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele()
 
 #[tokio::test]
 async fn um_nome_que_nao_resolve_nao_atrasa_quem_esta_na_lan() {
+    let _vaga = vaga::minha();
     // **É o pedaço que caía em cima de quem menos precisa dele.**
     //
     // O prazo cobria só a leitura do socket; resolver o nome do ponto de
