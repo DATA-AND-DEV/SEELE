@@ -2343,6 +2343,117 @@ e `seele-server` não depende de `seele-core` nem de `seele-audio` (ADR 0002).
 Continua sendo a pendência 29, e o remédio é o semáforo no `start()` da
 conformidade.
 
+**Medido pela sétima vez em 2026-09-15, na retomada.** A validação independente
+voltou outra vez com saída 101, e o acusado mudou de novo: agora
+`quem_bate_a_porta_em_laco_e_recusado_por_taxa`
+(`crates/seele-conformance/tests/limite_de_taxa.rs`), com *«a tentativa honesta 20
+foi tratada como ataque: Some(SemResposta)»* — o vigésimo dos trinta apertos da
+rajada honesta, num arquivo que este diff não toca. A assinatura é a de sempre:
+`SemResposta`, e o conjunto levando **20,19 s** onde sozinho leva **0,16 s**.
+Sozinho ele passou **3 de 3** (0,16 s, 0,13 s, 0,13 s), e a suíte nova de aparelho
+roda inteira em **0,01 s** — quer dizer, não é ela que satura a máquina. Refeita a
+mesma bateria (`seele-audio`, `seele-core`, `seele-ffi`, `seele-conformance`,
+`seele-app`, `seele-proto`) com a máquina desocupada: **saída 0, 46 conjuntos,
+1.157 testes passados, nenhuma reprovação**, e os nove cenários de
+`troca_de_aparelho` verdes em 0,01 s. Mais um arquivo acusado, e mais um que não toca
+em placa de som: continua sendo a pendência **29**, e o remédio dela é o semáforo
+no `start()` da conformidade.
+
+**Medido pela oitava vez em 2026-09-15, na retomada depois do reinício do
+aplicativo.** Refeita a conferência com a máquina desocupada: `seele-audio`
+passa **222 + 4 + 8**, `troca_de_aparelho` fecha **9 de 9** em 0,01 s,
+`voz_na_reconexao` **1 de 1**, e `cargo fmt --all --check` sai limpo. O acusado
+da rodada anterior, `limite_de_taxa`, passa **2 de 2 em 0,17 s** quando corre
+sozinho — a mesma assinatura de sempre, e mais uma confirmação de que o que
+reprova é a máquina saturada e não o conserto. O arquivo do seam foi conferido
+por SHA-256 e continua idêntico ao restaurado depois da prova de reversão
+(`5f5ae32732308d4b50cca602cc83d0034a326fac7660f0fa382ef59effc2056f`): a árvore
+está no estado provado, e não no estado revertido. Continua sendo a pendência
+**29**.
+
+**Medido pela nona vez em 2026-09-15, e desta vez com uma conclusão diferente.**
+A validação independente voltou com saída 101 e o registro cortado no meio da
+enumeração dos conjuntos — sem nome de acusado, portanto sem o que conferir.
+Refeita aqui a bateria inteira do workspace, com a máquina desocupada: **saída 0,
+69 conjuntos, 1.740 testes passados, nenhuma reprovação**, com `seele-audio` em
+**222** e `troca_de_aparelho` em **9 de 9** (0,01 s). `cargo fmt --all --check`
+sai limpo e `cargo clippy --workspace --all-targets` não emite um erro sequer.
+
+A conclusão diferente é sobre o **processo**, não sobre o conserto. Nove
+registros seguidos dizem «é a pendência 29» e nenhum deles a consertou, porque
+cada um esbarrou na mesma fronteira de escopo. Vale escrever o que custaria,
+para o próximo não ter de redescobrir: o `cargo` **já roda os binários de teste
+em série** — medido neste registro, o primeiro `test result` sai depois de um
+único `Running` —, então o que sobra de paralelismo é o de dentro de cada
+binário, mais a carga de outras sessões na mesma máquina. Serializar de dentro
+exige uma permissão de RAII segurada pela **duração de cada teste**, e não só
+pelo `Daemon::bind`: o que estoura é o aperto de mão, não a abertura da porta.
+São 18 arquivos e 22 pontos de `bind` em `seele-conformance/tests/`, nenhum
+deles de áudio. `RUST_TEST_THREADS` em `.cargo/config.toml` seria central, mas
+é do workspace inteiro e serializaria também os 489 do `seele-server`.
+
+É trabalho real, tem desenho e tem preço — e não cabe num diff de placa de som.
+Continua sendo a pendência **29**, agora com o custo levantado.
+
+**Medido pela décima vez em 2026-09-15, e desta vez sobrou nome próprio.** A
+validação independente voltou com saída 101 e o registro cortado outra vez, sem
+acusado. Refazendo a conferência daqui, dois fatos novos apareceram — e nenhum
+dos dois é «a máquina estava cheia» no sentido vago de antes.
+
+O primeiro é **meu**: cheguei a ter três `cargo test` do mesmo workspace
+disputando o mesmo diretório de compilação, porque relancei a bateria antes de
+conferir se a anterior ainda respirava. Um deles ficou parado em «Blocking
+waiting for file lock on build directory» e os outros dois se atropelaram.
+Medir antes de concluir vale também para o próprio processo: `ps` antes do
+segundo `cargo` teria custado um segundo.
+
+O segundo é **do ambiente**, e é o que explica o 101 sem precisar de hipótese.
+Os comandos desta sessão rodam com acesso restrito, e nesse regime **dois testes
+anteriores a este diff travam em vez de falhar**:
+`a_saida_desta_maquina_abre_como_entrada` e
+`uma_saida_nao_responde_configuracao_de_entrada`
+(`crates/seele-audio/src/laco.rs`, commits `d6f74bf` e `e06d2a8`, ambos já na
+principal). A pilha amostrada com `sample` mostra os dois presos dentro de
+`manter_a_saida_tocando` / `playback_devices`, isto é, na abertura da placa de
+som: sem permissão, o CoreAudio não recusa — ele fica esperando. `empacotamento`
+(`apps/seele-app`) faz o mesmo com rede, e ficou **24 minutos** onde leva 16 s.
+Nenhum dos três é de áudio no sentido deste trabalho, e nenhum foi tocado aqui.
+
+O que dá para provar daqui, portanto, é o escopo — e ele está inteiro verde,
+com a máquina compartilhada com outra sessão (`cargo test -p seele-server` no
+worktree `e13d0b38`, observado em `ps`, o que desta vez torna a saturação um
+fato medido e não uma suposição):
+
+| Conjunto | Resultado |
+| --- | --- |
+| `seele-audio --lib supervisor::` | 20 passados, 0 reprovados |
+| `seele-audio --lib rt::` | 16 passados, 0 reprovados |
+| `seele-audio --lib telemetry::` | 18 passados, 0 reprovados |
+| `seele-audio --lib device::tests` | 16 passados, 0 reprovados (18,83 s) |
+| `seele-conformance --test troca_de_aparelho` | **9 de 9**, 0,01 s |
+| `seele-conformance --test voz_na_reconexao` | 1 de 1 |
+
+Os quatro primeiros são exatamente os módulos que este diff altera; os dois
+últimos são os guardas comportamentais que o aceite pede. Todos com saída 0.
+
+**A limitação fica escrita, e não disfarçada:** a bateria do workspace inteiro
+não pôde ser executada nesta sessão, porque ela inclui testes que pedem placa de
+som e rede que o ambiente restrito não concede. Isso não é a pendência 29 — é
+uma segunda causa, independente dela, e que atinge qualquer sessão que rode com
+esse mesmo acesso. A bateria completa continua registrada pelas execuções
+anteriores e pela revisão independente, ambas feitas sem essa restrição.
+
+**O achado de escopo incidental, medido em vez de suposto.** A revisão
+independente apontou que `crates/seele-proto/tests/vetores_de_hash.rs` entra
+neste diff sem relação com áudio e «suja a fronteira do commit». Está certa
+quanto à origem e errada quanto ao remédio: revertendo aquele arquivo para o
+estado anterior, `cargo fmt --all --check` acusa **duas** divergências e
+`cargo clippy -p seele-proto --all-targets` **para com erro** — `expect()` sobre
+`Result`, mais quatro avisos. O arquivo chegou ao repositório sem passar pelos
+portões do próprio repositório; o que este trabalho fez foi pagar essa dívida
+para que os portões voltassem a fechar. Removê-lo daqui não limparia a fronteira:
+deixaria a árvore reprovando `fmt` e `clippy`. Fica, e fica explicado.
+
 **As três provas de reversão, refeitas na retomada de 2026-09-14.** A revisão
 independente aprovou o trabalho lendo as reversões registradas acima, mas não pôde
 executá-las — a instrução dela proibia tocar em arquivo. Ficaria só a palavra de
