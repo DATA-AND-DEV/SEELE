@@ -736,7 +736,13 @@ fn without_comments(text: &str) -> String {
 
     out.lines()
         .map(|channel| match channel.find("//") {
-            Some(at) if !channel[..at].contains('"') => &channel[..at],
+            // As três aspas, e não só a dupla. `mod://localhost` numa crase
+            // escapava desta proteção: a linha era cortada em `` `mod: ``, o
+            // literal ficava aberto, e `sem_texto` engolia tudo até a próxima
+            // crase. O efeito era um guarda que parava de guardar no meio do
+            // `base.js` — funções declaradas depois dali viravam fantasmas, e
+            // um fantasma de verdade ali passaria sem ser visto.
+            Some(at) if !channel[..at].contains(['"', '`', '\'']) => &channel[..at],
             _ => channel,
         })
         .collect::<Vec<_>>()
