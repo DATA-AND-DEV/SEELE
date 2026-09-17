@@ -25,7 +25,8 @@
 
 use std::path::{Path, PathBuf};
 
-use seele_proto::mods::{content_hash, read_manifest};
+pub use seele_proto::mods::content_hash;
+use seele_proto::mods::read_manifest;
 
 // Republicados de propósito, e não por conveniência. `xtask/src/check_deps.rs`
 // impede `seele-ffi` — e portanto a casca — de nomear `seele-proto`: «reaching

@@ -114,6 +114,21 @@ pub fn ler_pasta(caminho: &str) -> Result<ModInstalado, String> {
     }
 }
 
+/// O hash do conjunto de arquivos de um MOD, em hexadecimal minúsculo.
+///
+/// O **mesmo** número que o servidor anuncia, que a tela de aceite mostra e que
+/// o catálogo do indexador publica — e é essa unicidade que faz a conferência
+/// valer. Um segundo jeito de calcular «o hash de um MOD» seria um segundo
+/// número para discordar do primeiro, e a pergunta que ele responde — «estes
+/// bytes são os que foram revisados?» — não tolera duas respostas.
+///
+/// Toma `&mut` porque a ordenação acontece em quem digere: uma lista de
+/// arquivos em ordem diferente tem de dar o mesmo hash em toda máquina.
+#[must_use]
+pub fn hash_do_conjunto(arquivos: &mut [(String, Vec<u8>)]) -> String {
+    hex(&seele_core::mods::content_hash(arquivos))
+}
+
 /// Um achado do `seele-core` em campos que atravessam a fronteira.
 fn achatar(found: Found) -> ModInstalado {
     match found {

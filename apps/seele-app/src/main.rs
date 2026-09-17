@@ -26,6 +26,7 @@
 // razão, que a de `seele-video`.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod catalogo;
 mod icone;
 mod mods;
 mod versoes;
@@ -2068,6 +2069,39 @@ fn estou_hospedando(session: State<'_, Session>) -> bool {
         .is_ok_and(|aberto| aberto.is_some())
 }
 
+/// O catálogo de MODs, baixado e conferido contra a chave embutida.
+///
+/// **Só quando alguém pede.** Não há consulta ao abrir o app — ADR 0026, e é a
+/// mesma regra do botão de atualizar: um produto que fala com a rede por ter
+/// sido aberto é um produto que conta a alguém que ele foi aberto.
+///
+/// # Errors
+///
+/// [`catalogo::FalhaNoCatalogo`], uma variante por motivo.
+#[tauri::command]
+async fn catalogo_de_mods() -> Result<catalogo::Catalogo, catalogo::FalhaNoCatalogo> {
+    catalogo::buscar_catalogo().await
+}
+
+/// Baixa do catálogo uma versão de um MOD e a instala nesta máquina.
+///
+/// Confere a assinatura do catálogo, a lista de revogações, e o **hash do
+/// conjunto** dos arquivos baixados — nesta ordem, e nada vai para o disco
+/// antes da última. Instala desligado, como toda instalação de MOD: ligar é
+/// outra decisão.
+///
+/// # Errors
+///
+/// [`catalogo::FalhaNoCatalogo`], uma variante por motivo.
+#[tauri::command]
+async fn instalar_mod_do_catalogo(
+    app: AppHandle,
+    id: String,
+    versao: String,
+) -> Result<(), catalogo::FalhaNoCatalogo> {
+    catalogo::instalar_do_catalogo(&config_dir(&app), &id, &versao).await
+}
+
 /// Todo sim que esta máquina já deu a um servidor.
 ///
 /// ADR 0045: «um consentimento que não se retira não é consentimento». Sem esta
@@ -4027,6 +4061,8 @@ fn main() {
             aceites_de_mods,
             estou_hospedando,
             baixar_versao,
+            catalogo_de_mods,
+            instalar_mod_do_catalogo,
             disconnect,
             snapshot,
             messages,

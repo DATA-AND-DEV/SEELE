@@ -10586,3 +10586,72 @@ fn as_listas_de_aparelho_avisam_que_escolher_pelo_nome_fixa() {
          fica sabendo que perdeu algo e não como recuperá-lo"
     );
 }
+
+#[test]
+fn nenhuma_tabela_de_frases_declara_a_mesma_chave_duas_vezes() {
+    // **Como isto foi encontrado, e por que dói calado.**
+    //
+    // Um objeto literal em JavaScript aceita a mesma chave duas vezes sem
+    // reclamar, e a última vence. Acrescentei uma frase para a assinatura do
+    // catálogo de MODs chamada `AssinaturaRecusada`, e o nome já era de outra
+    // coisa — o pacote do atualizador. Nada ficou vermelho. O que a pessoa lia
+    // ao receber um catálogo adulterado era «O PACOTE BAIXADO NÃO FOI ASSINADO
+    // POR ESTE PROJETO»: uma frase sobre um download que ela não tinha feito,
+    // sem a única instrução que aquele momento exige, que é **parar**.
+    //
+    // É a pior forma do defeito que este repositório mais persegue — o produto
+    // sabendo e contando outra coisa — e o custo de achá-lo foi um roteiro que
+    // imprimiu a frase errada. Sem ele, ninguém veria.
+    //
+    // Cobrado sobre **todas** as tabelas de frases e não sobre a lista de hoje:
+    // uma quarta escrita amanhã tem de nascer com isto.
+    let fonte = read("ui/frases.js");
+
+    for tabela in [
+        "MOTIVOS",
+        "FRASES",
+        "NOMES_RECUSADOS",
+        "MOTIVOS_DE_REVOGACAO",
+    ] {
+        let agulha = format!("const {tabela} = {{");
+        let Some(inicio) = fonte.find(&agulha) else {
+            panic!("a tabela `{tabela}` sumiu de frases.js, e este guarda ficou cego");
+        };
+        let corpo = &fonte[inicio + agulha.len()..];
+        // Até a primeira linha que fecha na coluna zero: as tabelas são
+        // literais de topo, e o `};` do fim delas é o único nessa coluna.
+        let fim = corpo.find("\n};").unwrap_or(corpo.len());
+        let corpo = &corpo[..fim];
+
+        let mut vistas: BTreeSet<String> = BTreeSet::new();
+        let mut repetidas: Vec<String> = Vec::new();
+        for linha in corpo.lines() {
+            let sem_espaco = linha.trim_start();
+            // Só o que abre uma entrada: um identificador seguido de dois
+            // pontos. Comentários e continuações de frase não entram — uma
+            // continuação começa com aspas, e um comentário com barras.
+            let Some((nome, _)) = sem_espaco.split_once(':') else {
+                continue;
+            };
+            let nome = nome.trim().trim_matches('"');
+            if nome.is_empty()
+                || sem_espaco.starts_with("//")
+                || sem_espaco.starts_with('*')
+                || !nome
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                continue;
+            }
+            if !vistas.insert(nome.to_owned()) {
+                repetidas.push(nome.to_owned());
+            }
+        }
+        assert!(
+            repetidas.is_empty(),
+            "`{tabela}` declara a mesma chave duas vezes: {repetidas:?}\n\
+             A última vence, em silêncio, e quem lê a tela recebe a frase de \
+             outra falha. Dê um nome próprio a cada uma."
+        );
+    }
+}

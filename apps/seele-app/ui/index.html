@@ -2521,6 +2521,30 @@
             </div>
           </div>
 
+          <!--
+            O catálogo — ADR 0045. **Nada é consultado ao abrir esta seção**: a
+            busca sai de um botão, pela mesma regra do botão de atualizar. Um
+            produto que fala com a rede por ter sido aberto é um produto que
+            conta a alguém que ele foi aberto.
+          -->
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">CATÁLOGO</h3>
+              <p class="nota">MODs avaliados, em mods.seele.app.br</p>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <button id="catalogo-buscar" class="botao" type="button">BUSCAR NO CATÁLOGO</button>
+                <p id="catalogo-estado" class="nota" role="status"></p>
+                <ul id="lista-catalogo" class="server-dispositivos mods-rolagem"></ul>
+                <p class="nota">O catálogo é conferido contra a chave que veio
+                  dentro deste SEELE, e os arquivos de cada MOD contra o hash que
+                  o catálogo declara. Um MOD que não passa nas duas conferências
+                  não chega ao disco.</p>
+              </div>
+            </div>
+          </div>
+
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">SERVIDORES A QUEM VOCÊ DISSE SIM</h3>

@@ -420,3 +420,127 @@ async function instalarUmMod() {
 $("mods-instalar").addEventListener("click", () => {
   instalarUmMod().catch((falha) => console.warn("instalar mod:", falha));
 });
+
+// ------------------------------------------------------ o catálogo, no cliente
+//
+// A outra metade do ADR 0045, e a que não existia: o indexador tinha gerador,
+// assinador e site — 167 testes — e o cliente não tinha **uma linha** sobre o
+// catálogo. Nem a chave pública de MOD estava embutida.
+//
+// **Nada é consultado ao abrir a seção.** A busca sai de um botão, pela mesma
+// regra do botão de atualizar (ADR 0026): um produto que fala com a rede por ter
+// sido aberto é um produto que conta a alguém que ele foi aberto.
+
+/** O que o catálogo devolveu na última busca, para instalar sem buscar de novo. */
+let catalogoEmMaos = null;
+
+/** O nível de avaliação, escrito como a pessoa lê. */
+const NIVEIS = {
+  oficial: "OFICIAL",
+  verificado: "VERIFICADO",
+  "com-notas": "PUBLICADO COM NOTAS",
+};
+
+/** Desenha uma linha do catálogo. */
+function linhaDoCatalogo(mod, instalados) {
+  const linha = elemento("li");
+  const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
+  const texto = elemento("span", "server-dispositivo-nome");
+
+  texto.append(elemento("span", "mods-id", mod.titulo || mod.id));
+  texto.append(elemento("span", "mods-versao", mod.id));
+  if (mod.resumo) texto.append(elemento("span", "mods-versao", mod.resumo));
+
+  // **A última versão, e o selo dela — não o do MOD.** O `nivel` do topo é a
+  // avaliação mais recente e serve para listar; quem carimba um número de
+  // versão é o `nivel` de dentro daquela versão, porque o veredito ao lado de
+  // um hash tem de ser o veredito daqueles bytes.
+  const ultima = (mod.versoes ?? [])[(mod.versoes ?? []).length - 1];
+  if (!ultima) {
+    texto.append(elemento("span", "mods-recusado", "sem versão publicada"));
+    caixa.append(texto);
+    linha.append(caixa);
+    return linha;
+  }
+  texto.append(
+    elemento("span", "mods-versao", `versão ${ultima.versao} · ${NIVEIS[ultima.nivel] ?? ultima.nivel}`),
+  );
+  for (const alcance of ultima.alcanca ?? []) {
+    texto.append(elemento("span", "mods-etiqueta", alcance));
+  }
+  caixa.append(texto);
+
+  const jaTem = instalados.some((i) => i.instalado.id === mod.id);
+  if (jaTem) {
+    caixa.append(elemento("span", "server-dispositivo-marca", "JÁ INSTALADO"));
+  } else {
+    const botao = elemento("button", "botao-fantasma");
+    botao.type = "button";
+    botao.textContent = "INSTALAR";
+    botao.addEventListener("click", () => {
+      instalarDoCatalogo(mod.id, ultima.versao).catch((falha) =>
+        console.warn("instalar do catálogo:", falha),
+      );
+    });
+    caixa.append(botao);
+  }
+
+  linha.append(caixa);
+  return linha;
+}
+
+/** Busca o catálogo e desenha o que veio. */
+async function buscarOCatalogo() {
+  const botao = $("catalogo-buscar");
+  const estado = $("catalogo-estado");
+  botao.disabled = true;
+  estado.classList.remove("mods-recusado");
+  estado.textContent = "buscando…";
+  try {
+    catalogoEmMaos = await invoke("catalogo_de_mods");
+  } catch (falha) {
+    estado.classList.add("mods-recusado");
+    estado.textContent = fraseDeErro(falha);
+    botao.disabled = false;
+    return;
+  }
+  botao.disabled = false;
+
+  let instalados = [];
+  try {
+    instalados = await invoke("mods_instalados");
+  } catch {
+    instalados = [];
+  }
+
+  const mods = catalogoEmMaos.mods ?? [];
+  estado.textContent =
+    mods.length === 0
+      ? "o catálogo está no ar e ainda não lista nenhum MOD."
+      : `${mods.length} no catálogo.`;
+  repovoar(
+    $("lista-catalogo"),
+    mods.map((mod) => linhaDoCatalogo(mod, instalados)),
+  );
+}
+
+/** Baixa e instala uma versão do catálogo. */
+async function instalarDoCatalogo(id, versao) {
+  const estado = $("catalogo-estado");
+  estado.classList.remove("mods-recusado");
+  estado.textContent = `baixando ${id} ${versao}…`;
+  try {
+    await invoke("instalar_mod_do_catalogo", { id, versao });
+    estado.textContent = `${id} ${versao} instalado, e desligado. Ligue quando quiser que ele valha.`;
+  } catch (falha) {
+    estado.classList.add("mods-recusado");
+    estado.textContent = fraseDeErro(falha);
+  }
+  await desenharMods();
+  // A lista do catálogo mostra JÁ INSTALADO, e ela acabou de mudar.
+  if (catalogoEmMaos) await buscarOCatalogo();
+}
+
+$("catalogo-buscar").addEventListener("click", () => {
+  buscarOCatalogo().catch((falha) => console.warn("catálogo:", falha));
+});

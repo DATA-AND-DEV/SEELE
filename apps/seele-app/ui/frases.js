@@ -355,6 +355,24 @@ function fraseDeCaminho(caminho) {
  * `http://casa.exemplo` tem as duas coisas, e ler «tire a barra» mandaria
  * apagar o caractere errado.
  */
+/**
+ * Por que uma versão de MOD foi retirada de circulação.
+ *
+ * A lista é fechada e mora no indexador (`listas.json`); aqui ficam as frases,
+ * como o ADR 0012 manda. Um motivo que chegue sem frase aparece como o
+ * identificador cru — o que é feio e honesto, e melhor que uma frase genérica
+ * que esconda qual dos sete defeitos aconteceu.
+ */
+const MOTIVOS_DE_REVOGACAO = {
+  "credencial-vazada": "uma credencial vazou no código publicado",
+  "leitura-de-disco-fora-da-pasta": "ele lia arquivos fora da pasta dele",
+  "rede-nao-declarada": "ele falava com a rede sem declarar isso",
+  "dado-enviado-a-terceiro": "ele mandava dados para um terceiro",
+  "nao-corresponde-ao-commit": "os arquivos publicados não batem com o commit avaliado",
+  "pedido-do-autor": "o autor pediu a retirada",
+  "migracao-que-corrompe": "uma migração dele corrompia os dados guardados",
+};
+
 const NOMES_RECUSADOS = {
   Vazio: "ESTE NOME É SÓ ESPAÇO.\nDeixe o campo em branco para usar o endereço numérico de sempre.",
   ComEspaco:
@@ -427,6 +445,50 @@ function fraseDeErro(erro, apelido) {
     // dentro. «Inválido» não diz o que fazer, e este campo é digitado à mão por
     // alguém que acabou de configurar um DNS: a chance de errar por um detalhe
     // é alta, e o detalhe é sempre um só.
+    // As recusas do catálogo que carregam detalhe dentro.
+    if (erro.NaoRespondeu) {
+      return (
+        "O CATÁLOGO NÃO RESPONDEU.\n" +
+        "Pode ser a sua rede, ou o indexador fora do ar. Tente de novo mais tarde."
+      );
+    }
+    if (erro.NaoEUmCatalogo) {
+      return (
+        "O CATÁLOGO VEIO QUEBRADO.\n" +
+        "A assinatura passou, então ele é nosso — e o conteúdo não é o que este " +
+        "SEELE sabe ler. Avise quem publica."
+      );
+    }
+    if (erro.MaisNovoQueEsteBuild) {
+      return (
+        "ESTE SEELE É VELHO DEMAIS PARA ESTE CATÁLOGO.\n" +
+        "Nada de errado com o catálogo: atualize o SEELE em CONFIGURAÇÕES."
+      );
+    }
+    if (erro.NaoEstaNoCatalogo) {
+      return `O CATÁLOGO NÃO LISTA «${erro.NaoEstaNoCatalogo}».`;
+    }
+    if (erro.ConteudoDivergente) {
+      return (
+        "OS ARQUIVOS QUE CHEGARAM NÃO SÃO OS QUE O CATÁLOGO DECLARA.\n" +
+        "Quase sempre é um download que veio pela metade — tente de novo.\n" +
+        `esperado: ${erro.ConteudoDivergente.esperado}\n` +
+        `obtido:   ${erro.ConteudoDivergente.obtido}`
+      );
+    }
+    // **A revogação não é falha de rede: é um aviso de segurança.** Ela diz o
+    // defeito e, quando há, onde ele foi consertado — porque saber que não pode
+    // instalar sem saber o que fazer é meia resposta.
+    if (erro.Revogada) {
+      const conserto = erro.Revogada.corrigido_em
+        ? `\nCorrigido na ${erro.Revogada.corrigido_em}: instale aquela.`
+        : "\nAinda não há versão corrigida.";
+      return (
+        "ESTA VERSÃO FOI RETIRADA DE CIRCULAÇÃO.\n" +
+        `Motivo: ${MOTIVOS_DE_REVOGACAO[erro.Revogada.motivo] ?? erro.Revogada.motivo}` +
+        conserto
+      );
+    }
     if (erro.NomeRecusado) {
       return NOMES_RECUSADOS[erro.NomeRecusado] ?? "ESTE NOME NÃO PODE VIRAR LINK";
     }
@@ -599,6 +661,17 @@ const FRASES = {
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O SERVIDOR AQUI",
+
+    // O catálogo de MODs — ADR 0045.
+    //
+    // `AssinaturaRecusada` é a única desta lista em que a frase manda **parar**.
+    // As outras convidam a tentar de novo, e esta não pode: um catálogo que não
+    // passa na assinatura é um catálogo adulterado ou um endereço sequestrado,
+    // e insistir é exatamente o comportamento que o atacante quer.
+    AssinaturaDoCatalogoRecusada:
+      "O CATÁLOGO NÃO É O NOSSO.\n" +
+      "A assinatura não confere com a chave deste SEELE. Não tente de novo: " +
+      "avise quem publica.",
 
     // A portaria — ADR 0030. As duas falam de uma porta que não existe daqui.
     //
