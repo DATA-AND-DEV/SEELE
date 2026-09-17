@@ -114,12 +114,23 @@ jobs:
         # a 15-core machine, all exit 0, 1883 tests each, zero FAILED lines,
         # wall times spread over 1.4s (259.76s to 261.18s). Note the measured
         # command lacked the `--all-targets` this step passes; on this tree the
-        # two select the same work, which was checked and not assumed — both
-        # enumerate 73 sets and 1883 tests (see #29's closing entry). The cost
+        # two select overlapping but *different* work — see the note below on
+        # doctests, added after the claim was measured and found false. The cost
         # per round is in
         # #29's closing entry and is deliberately not copied here — copying a
         # measured number into a second place is how this file ended up quoting
         # figures that had already been retired.
+        #
+        # The `--all-targets` this step used to pass was dropped on 2026-09-17,
+        # and the sentence above claiming it selected the same work was wrong.
+        # `--all-targets` does not run doctests, and `-- --list` does not
+        # enumerate them, so the check that was cited could not have shown it.
+        # Measured: `cargo test --workspace --all-targets` prints 0 `Doc-tests`
+        # sections and `cargo test --workspace` prints 8. This job had never run
+        # a single doctest. What `--all-targets` did add over the plain command
+        # is the bench in seele-audio and the examples — and the clippy job
+        # above already passes `--all-targets --all-features`, so both are still
+        # compiled on every push. Nothing was lost and 8 sections were gained.
         #
         # Not all of it: a sixth armed round under the same load failed, in
         # moderacao::um_operador_modera_pessoas_e_nao_o_comandante, the set
@@ -144,4 +155,4 @@ jobs:
         # regression, the cost and that the permit acts; the reversal cycle is
         # what proves it holds under the load that caused the failure. Both
         # live in docs/evidencias/pendencia-29/arquivo-entregue/.
-        run: cargo test --workspace --all-targets
+        run: cargo test --workspace

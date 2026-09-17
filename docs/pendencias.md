@@ -2122,15 +2122,52 @@ deixando dois comandos onde o projeto tem um — e deixando quem roda
 os dois têm a mesma. A prova de que a remoção não regride nada é a tabela das
 cinco rodadas acima, sob carga que a CI não tem.
 
-**Uma diferença de uma palavra entre o que foi medido e o que a CI roda, dita
-porque a terceira revisão a pegou.** As cinco rodadas mediram
-`cargo test --workspace`; o passo do `ci.yml` passa também `--all-targets`.
-Nesta árvore os dois selecionam o mesmo trabalho, e isso foi **conferido, não
-suposto**: `cargo test --workspace -- --list` e
-`cargo test --workspace --all-targets -- --list` enumeram os mesmos 73 conjuntos
-e os mesmos 1.883 testes. A frase anterior — «é exatamente o comando que sobrou
-no `ci.yml`» — era literalmente falsa, e ficou escrito o que ela deveria ter
-dito.
+### Corrigida em 2026-09-17 · a conferência citada não conferia o que dizia
+
+**A afirmação anterior era falsa, e a medida que a sustentava não podia
+sustentá-la.** Ficava escrito aqui que `cargo test --workspace` e
+`cargo test --workspace --all-targets` «selecionam o mesmo trabalho», e que isso
+fora «conferido, não suposto» por `-- --list` nos dois. **`--all-targets` não
+roda doctest, e `-- --list` não enumera doctest** — a conferência citada não
+alcançava a diferença que ela dizia ter descartado.
+
+Medido nesta árvore, e é uma linha:
+
+| comando | seções `Doc-tests` |
+|---|---|
+| `cargo test --workspace --all-targets` | **0** |
+| `cargo test --workspace` | **8** |
+
+A consequência não é de texto: **o job de teste da CI nunca rodou um doctest
+sequer**, desde que existe. O passo passou a ser `cargo test --workspace`, sem
+`--all-targets`. O que o `--all-targets` acrescentava sobre o comando simples é
+o bench do `seele-audio` e os exemplos — e o job de clippy logo acima já roda
+`--all-targets --all-features`, então os dois continuam sendo compilados a cada
+push. Não se perdeu nada e ganharam-se 8 seções.
+
+### Medido em 2026-09-17 · o alcance da vaga, que faltava estabelecer
+
+A revisão perguntou, com razão, se a permissão alcança o defeito. Faltava um
+fato para responder: **o `cargo` roda os binários de teste em paralelo?** Se
+rodasse, uma `static` por processo não serializaria nada entre arquivos, e 26
+binários de conformidade concorrentes reporiam a §29 por cima da permissão.
+
+Amostrado a cada 0,5 s durante uma rodada inteira de `cargo test -p
+seele-conformance`, contando binários de teste vivos: **máximo 1**. Em 266
+amostras com algum binário vivo, todas as 266 marcaram exatamente 1; nenhuma
+marcou 2 ou mais. O `cargo` roda os binários em série, `libtest` paraleliza
+dentro de cada um — que é exatamente a fatia que a vaga fecha. **A permissão
+alcança o crate inteiro**, e não só o arquivo em que está.
+
+Isso fecha a dúvida sobre o alcance e **não** desmente o resíduo: a reprovação
+que sobrou sob carga deliberada não é contenção entre binários. É uma máquina
+saturada estourando um prazo de **transporte** — os 20 s da `IDLE_TIMEOUT`, que
+são política de produto presa à especificação (Ping a cada 5 s, `Reconectando`
+depois de três perdidos) e não se alargam para fazer teste passar. Sob oito
+queimadores mais seis laços rodando binários fora do `cargo`, um aperto de mão
+sozinho passa de 20 s, e nenhuma serialização conserta isso porque não é disso
+que se trata. É medida da máquina, não do produto, e está dito aqui para não ser
+contado como a §29 de volta.
 
 ## 30 · Fechada em 2026-08-31 · O `seeled` não sabia dizer que versão é
 
