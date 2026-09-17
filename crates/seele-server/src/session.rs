@@ -4745,21 +4745,78 @@ mod versao_no_fio {
         ));
     }
 
+    fn resposta_de_mod() -> ServerMessage {
+        ServerMessage::ModReply {
+            request: 1,
+            part: 0,
+            total: 1,
+            payload: "{}".into(),
+        }
+    }
+
     #[test]
-    fn a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v4() {
-        // O `>= 2` de `UplinkLoss` é vácuo desde que a janela do ADR 0036
-        // subiu o piso para 3 — este teste é o que o diz em voz alta, e é o
-        // que vai falhar no dia em que a janela alargar e ele deixar de ser.
+    fn a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v6() {
+        // **Este teste existe para reprovar quando a janela anda**, e já
+        // reprovou duas vezes fazendo exatamente isso. O registro das duas fica
+        // porque é ele que explica por que os números abaixo são o que são.
         //
-        // Com a v5 o piso é 4, e o `>= 2` segue vácuo pela mesma razão. A
-        // janela chegou a ir para 2 na subida da v5 e voltou no mesmo dia: ela
-        // não alcança um par publicado, porque o quadro sai carimbado com a
-        // versão global. Ver `seele_proto::version::COMPATIBILITY_WINDOW`.
-        assert_eq!(seele_proto::version::oldest_supported_version(), 4);
+        // Com a v5 o piso era 4, e o `>= 2` de `UplinkLoss` era vácuo. Com a
+        // **v6 o piso é 5**, e agora são *três* portões vácuos: o `>= 2` do
+        // `UplinkLoss`, o `>= 4` das duas mensagens da malha, e o `>= 5` do
+        // anúncio de MODs. Nenhum deles é apagado por isso — no dia em que a
+        // janela alargar, são estes números que voltam a morder, e
+        // reconstruí-los por arqueologia custaria mais do que a linha custa.
+        //
+        // O portão que **morde hoje** é o da v6, e é a razão de o nome deste
+        // teste ter mudado junto com a versão: a resposta privada de um MOD não
+        // sai para o par da janela anterior.
+        assert_eq!(seele_proto::version::oldest_supported_version(), 5);
+
+        for (mensagem, nome) in [
+            (ServerMessage::UplinkLoss { fraction: 0.0 }, "UplinkLoss"),
+            (sirva(), "SirvaTelaPara"),
+            (assista(), "AssistaTelaPor"),
+        ] {
+            assert!(
+                entende_a_mensagem(&mensagem, seele_proto::version::oldest_supported_version()),
+                "{nome} deixou de sair para a versão mais velha ainda aceita"
+            );
+        }
+
+        assert!(
+            !entende_a_mensagem(
+                &resposta_de_mod(),
+                seele_proto::version::oldest_supported_version()
+            ),
+            "a resposta de MOD saiu para a v5, que não sabe decodificá-la: o \
+             postcard não é autodescritivo e o fluxo de controle dela fica \
+             deslocado para sempre"
+        );
+    }
+
+    #[test]
+    fn a_resposta_de_mod_sai_para_um_cliente_da_versao_de_hoje() {
+        // A outra metade do portão acima. Sem esta linha, um guarda que
+        // barrasse todo mundo passaria no teste anterior e desligaria a ponte
+        // inteira sem deixar rastro — é o mesmo par de asserções que as duas
+        // mensagens da v4 já têm, pela mesma razão.
         assert!(entende_a_mensagem(
-            &ServerMessage::UplinkLoss { fraction: 0.0 },
-            seele_proto::version::oldest_supported_version()
+            &resposta_de_mod(),
+            seele_proto::version::PROTOCOL_VERSION
         ));
+    }
+
+    #[test]
+    fn a_resposta_de_mod_nao_sai_para_ninguem_abaixo_da_v6() {
+        // Por mensagem e não pela janela, como
+        // `as_duas_mensagens_da_v4_nao_saem_para_um_cliente_v3`: a regra é da
+        // variante, e não pode passar a depender de onde a janela está parada.
+        for versao in 0..6 {
+            assert!(
+                !entende_a_mensagem(&resposta_de_mod(), versao),
+                "ModReply saiu para um cliente v{versao}"
+            );
+        }
     }
 }
 
@@ -5353,6 +5410,10 @@ mod fim_de_tela_por_sessao {
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,
             caminho_bps: None,
+            // Nenhum destes testes executa MOD: eles medem o fim de tela. Sem
+            // pasta, um pedido de MOD é recusado antes de chegar ao runtime, que
+            // é a resposta certa para um servidor que não hospeda nenhum.
+            mods_dir: None,
         }
     }
 
