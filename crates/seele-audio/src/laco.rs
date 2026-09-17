@@ -38,6 +38,8 @@
 //! `cfg` a mais.
 
 use std::num::NonZeroU16;
+
+use crate::supervisor::AvisoDeAparelho;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -320,6 +322,18 @@ impl CapturaDaSaida {
     #[must_use]
     pub const fn taxa(&self) -> u32 {
         self.taxa_do_dispositivo
+    }
+
+    /// O que o `cpal` avisou sobre **este** aparelho desde que ele abriu.
+    ///
+    /// O mesmo `AvisoDeAparelho` que a voz lê, e pelo mesmo retorno de erro:
+    /// `device::abrir_entrada` instala `retorno_de_erro` no fluxo do loopback
+    /// como o instala no da voz, de modo que trocas e sumiços já eram contados
+    /// aqui desde sempre. O que não existia era alguém para lê-los — o som da
+    /// tela abria uma vez e ficava preso ao aparelho de então.
+    #[must_use]
+    pub fn aviso(&self) -> AvisoDeAparelho {
+        self.contadores.aviso_de_aparelho()
     }
 
     /// Quantas amostras já foram capturadas. Para provar que não é silêncio.

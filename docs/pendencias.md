@@ -6806,6 +6806,42 @@ reversão — entraria como um guarda que ninguém sabe se funciona, que é
 exatamente o defeito que este repositório mais paga caro. Fica a saída 3, agora
 pela terceira medida seguida.
 
+## 45 · O caminho de Windows do som da tela não é compilado neste Mac
+
+**Aberta em 2026-09-17**, junto do conserto que faz o som da transmissão seguir
+a troca de aparelho.
+
+**O que foi consertado.** `seele-core/src/video.rs` abria o *loopback* uma vez —
+o padrão do sistema naquele instante — e o segurava pela transmissão inteira.
+Agora a decisão mora em `seele_core::som_que_segue`, que conduz o mesmo
+`CicloDoAparelho` que a voz conduz e reabre no padrão de agora. Três testes de
+conformidade o exercitam, e a prova de reversão está registrada.
+
+**O que não foi verificado, e é honesto separar.** `som_da_maquina` e o braço
+`SomDaTela::DaMaquina` de `tomar_som` estão atrás de `#[cfg(target_os =
+"windows")]`. **Nesta máquina eles não são compilados**, e não há como compilar
+cruzado: `cargo check -p seele-core --target x86_64-pc-windows-msvc` para no
+`cc`, no `ring`, com `fatal error: 'assert.h' file not found` — faltam os
+cabeçalhos C do Windows.
+
+**O que foi feito a respeito, em vez de deixar por isso mesmo.** A parte de
+plataforma foi encolhida até quase nada:
+
+- a decisão inteira saiu do `cfg` e virou `som_que_segue`, compilada e testada
+  aqui;
+- os dois adaptadores — `AbrirOSomDaMaquina` e `SomAberto for CapturaDaSaida` —
+  **também** saíram do `cfg`. `CapturaDaSaida` compila em toda plataforma de
+  propósito, então eles têm os tipos conferidos a cada `cargo build` no Mac;
+- os acoplamentos que restavam estão presos por asserções de tipo em
+  `video.rs`, no mesmo recurso que o arquivo já usava para o `Send` do
+  `CapturaComSom`. Conferido que elas mordem: apagando o `impl SomAberto`, o
+  build sai com `the trait bound CapturaDaSaida: SomAberto is not satisfied`.
+
+O que sobra sem compilação nesta máquina é `som_da_maquina` — uma chamada e um
+`match` — e um braço de `match` de três linhas. **É pouco e não é zero**, e só
+deixa de ser suposição no dia em que o job `windows` da CI rodar de verdade, que
+é a pendência 38 e continua aberta.
+
 ## 44 · O interruptor de MOD passou a trancar pares, e a tela de quem hospeda não diz isso
 
 **O que acontece hoje.** Com o protocolo na v5 o portão do anúncio ligou:

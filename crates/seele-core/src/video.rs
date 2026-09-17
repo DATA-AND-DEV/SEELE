@@ -153,7 +153,7 @@ enum SomDaTela {
     /// do `cpal` inteiro; ao lado da outra, a diferença fazia toda `SomDaTela`
     /// ocupar o tamanho da maior — inclusive nos casos em que a menor está
     /// dentro.
-    DaMaquina(Box<seele_audio::laco::CapturaDaSaida>),
+    DaMaquina(Box<std::sync::Mutex<crate::som_que_segue::SomQueSegue<AbrirOSomDaMaquina>>>),
 }
 
 /// `Fonte` tem de ser `Send`: ela nasce na thread que abre a captura e vive na
@@ -195,7 +195,19 @@ impl FonteDeQuadros for CapturaComSom {
         // `CapturaDaSaida` converte, com o mesmo `RateConverter` que a voz usa
         // desde sempre. O que sai de `tomar` está na taxa da casa, sempre.
         match captura {
-            SomDaTela::DaMaquina(captura) => captura.tomar(TETO),
+            // **Uma volta do seguidor, e não só um `tomar`.** Ela lê o que o
+            // `cpal` avisou sobre o aparelho aberto, deixa o ciclo do supervisor
+            // decidir, e reabre no padrão de agora quando ele manda. Sem isto, a
+            // transmissão ficava presa ao aparelho de quando ela começou.
+            //
+            // O cadeado é o preço de `tomar_som` receber `&self`: reabrir muda o
+            // que está aberto. Ele nunca é disputado — quem chama é a thread do
+            // codificador, sozinha — e um envenenamento aqui não pode calar a
+            // transmissão, então ele é atravessado.
+            SomDaTela::DaMaquina(seguidor) => seguidor
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .tomar(TETO),
             // A captura por processo já nasce em 48 kHz — ela **declara** o
             // formato em vez de aceitar o do dispositivo, porque nesta ativação
             // não há dispositivo a quem perguntar. Não há taxa a converter.
@@ -1185,12 +1197,102 @@ fn som_da_maquina() -> Option<SomDaTela> {
                 taxa = captura.taxa(),
                 "o som desta máquina abriu para a transmissão"
             );
-            Some(SomDaTela::DaMaquina(Box::new(captura)))
+            Some(SomDaTela::DaMaquina(Box::new(std::sync::Mutex::new(
+                crate::som_que_segue::SomQueSegue::novo(captura, AbrirOSomDaMaquina),
+            ))))
         }
         Err(erro) => {
             tracing::warn!(%erro, "não abri o som desta máquina; a transmissão sai muda");
             None
         }
+    }
+}
+
+/// O que este Mac consegue conferir do caminho de Windows do som da tela.
+///
+/// **Não é enfeite: é o que sobrou de verificável.** `som_da_maquina` e o braço
+/// `SomDaTela::DaMaquina` de `tomar_som` estão atrás de
+/// `#[cfg(target_os = "windows")]`, e nesta máquina não há como compilar cruzado
+/// para o Windows — o `ring` pede cabeçalhos C que ela não tem, e `cargo check
+/// --target x86_64-pc-windows-msvc` para no `cc`. Aquelas linhas não são
+/// compiladas aqui, e dizer o contrário seria o «existir não é funcionar» do
+/// `CLAUDE.md`.
+///
+/// O que dá para prender daqui são os **acoplamentos**, que é onde um conserto
+/// destes quebra de verdade: que a captura de loopback satisfaça o que o
+/// seguidor pede dela, e que a abertura entregue exatamente o tipo que ele
+/// guarda. Se alguém trocar uma das pontas, isto fica vermelho no Mac, hoje, em
+/// vez de ficar vermelho no Windows de outra pessoa, depois.
+///
+/// O mesmo recurso que este arquivo já usa logo acima para o `Send` do
+/// `CapturaComSom`.
+const _: fn() = || {
+    fn satisfaz_o_seguidor<T: crate::som_que_segue::SomAberto>() {}
+    satisfaz_o_seguidor::<seele_audio::laco::CapturaDaSaida>();
+
+    fn abre_o_que_o_seguidor_guarda<R>()
+    where
+        R: seele_audio::supervisor::Reabertura<Aberto = seele_audio::laco::CapturaDaSaida>,
+    {
+    }
+    abre_o_que_o_seguidor_guarda::<AbrirOSomDaMaquina>();
+
+    // E que o tipo inteiro que a variante guarda seja construível como ela o
+    // declara. Um `Mutex` esquecido ou um `Box` a mais aparece aqui.
+    fn e_o_que_a_variante_guarda(
+        _: &std::sync::Mutex<crate::som_que_segue::SomQueSegue<AbrirOSomDaMaquina>>,
+    ) {
+    }
+    let _ = e_o_que_a_variante_guarda;
+};
+
+/// Reabrir o *loopback* no padrão de agora.
+///
+/// A única parte disto que é do Windows, e ela não decide nada: quem decide
+/// **quando** é o [`CicloDoAparelho`](seele_audio::supervisor::CicloDoAparelho),
+/// pelo `crate::som_que_segue`, que não sabe que existe Windows e por isso pode
+/// ser provado num Mac.
+///
+/// `abrir(None)` e não o id de antes: é justamente o padrão **novo** que se quer.
+/// Guardar o id do aparelho de quando a transmissão começou reabriria no
+/// aparelho que a pessoa acabou de abandonar.
+///
+/// # Por que ela **não** está atrás de um `cfg`
+///
+/// Porque um `cfg(target_os = "windows")` aqui sairia inteira do build do Mac,
+/// e nesta máquina não há como compilar cruzado para o Windows — o `ring` pede
+/// cabeçalhos C que ela não tem. Código de plataforma que ninguém compila é o
+/// «existir não é funcionar» do `CLAUDE.md` esperando a vez.
+///
+/// `CapturaDaSaida` compila em toda plataforma de propósito — «porque o cpal
+/// compila em toda plataforma, e falha ao abrir onde o sistema não empresta a
+/// saída» —, então estes dois `impl` compilam junto e têm os tipos conferidos a
+/// cada `cargo build` neste Mac. O que fica mesmo só no Windows é
+/// [`som_da_maquina`], que é uma chamada e um `match`.
+pub struct AbrirOSomDaMaquina;
+
+impl seele_audio::supervisor::Reabertura for AbrirOSomDaMaquina {
+    type Aberto = seele_audio::laco::CapturaDaSaida;
+    type Erro = seele_audio::device::DeviceError;
+
+    fn reabrir(&mut self) -> Result<Self::Aberto, Self::Erro> {
+        seele_audio::laco::CapturaDaSaida::abrir(None).inspect_err(|erro| {
+            tracing::warn!(%erro, "o som da transmissão não reabriu; tentarei de novo");
+        })
+    }
+
+    fn aviso_de(&self, aberto: &Self::Aberto) -> seele_audio::supervisor::AvisoDeAparelho {
+        aberto.aviso()
+    }
+}
+
+impl crate::som_que_segue::SomAberto for seele_audio::laco::CapturaDaSaida {
+    fn tomar(&self, teto: usize) -> Vec<f32> {
+        Self::tomar(self, teto)
+    }
+
+    fn aviso(&self) -> seele_audio::supervisor::AvisoDeAparelho {
+        Self::aviso(self)
     }
 }
 

@@ -40,6 +40,7 @@ pub mod par;
 pub mod preferences;
 pub mod preview;
 pub mod search;
+pub mod som_que_segue;
 pub mod state;
 pub mod tela;
 pub mod tofu;
