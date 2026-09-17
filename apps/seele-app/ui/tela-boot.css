@@ -681,14 +681,35 @@
 #tela-servidores,
 #tela-boot {
   overflow-y: auto;
+  /* **Centralizada, e cortada nunca.** `safe` é a palavra inteira desta regra:
+     centraliza enquanto cabe e alinha ao topo quando não cabe, que é
+     exatamente a diferença entre as duas coisas que se quer.
+
+     A primeira tentativa foi `margin-block: 0` abaixo de 820px de altura, e
+     estava errada: ela tirava a centralização de toda janela baixa, inclusive
+     das que cabem com folga — a caixa grudava no topo sem motivo. O corte só
+     acontece quando o conteúdo passa da janela, e é só aí que a centralização
+     tem de ceder.
+
+     As duas linhas são uma escada, e a ordem é a escada. `safe` é palavra
+     recente do alinhamento de caixa: um motor que não a conhece descarta a
+     declaração **inteira** e cairia no `flex-start` — a caixa grudada no topo,
+     que é exatamente o defeito que esta regra conserta. Com `center` antes, ele
+     fica com o comportamento de sempre; quem conhece `safe` fica com o melhor.
+     Este binário roda no WebKit do sistema, e o sistema de quem usa não é
+     escolha nossa. */
+  justify-content: center;
+  justify-content: safe center;
 }
 
-@media (max-height: 820px) {
-  #tela-preparar .boot-caixa,
-  #tela-servidores .boot-caixa,
-  #tela-boot .boot-caixa {
-    margin-block: 0;
-  }
+/* O `auto` vertical da `.boot-caixa` é justamente o que come o topo quando o
+   conteúdo transborda, e é ele que `justify-content` substitui aqui. O
+   horizontal fica: centrar de lado não corta nada. */
+#tela-preparar .boot-caixa,
+#tela-servidores .boot-caixa,
+#tela-boot .boot-caixa {
+  margin-block: 0;
+  margin-inline: auto;
 }
 
 /* A de entrada tinha o mesmo defeito, e ele é anterior a esta tela: com os dois
