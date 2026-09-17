@@ -121,7 +121,10 @@ function desenharSaidas() {
 async function reconectar() {
   const botao = $("botao-voltar");
   botao.disabled = true;
-  await limparSessaoEncerrada();
+  // **A hospedagem fica de pé.** Ver `limparSessaoEncerrada`: este botão
+  // promete voltar, e derrubar o próprio servidor no caminho — com quem estava
+  // dentro junto — é o contrário do que ele diz.
+  await limparSessaoEncerrada({ pararDeHospedar: false });
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
@@ -136,7 +139,7 @@ async function reconectar() {
 
 /** Fecha o assunto: entrada limpa, sem tentar de novo. */
 async function sairParaAEntrada() {
-  await limparSessaoEncerrada();
+  await limparSessaoEncerrada({ pararDeHospedar: true });
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
@@ -154,11 +157,23 @@ async function sairParaAEntrada() {
  * cada trecho de topo inteiro, e um `hidden = false` sem o `abrirTela` do mesmo
  * trecho é exatamente a transição que deixa o teclado no `<body>`.
  */
-async function limparSessaoEncerrada() {
-  await invoke("disconnect");
-  // O `disconnect` também derruba o servidor hospedado. O link some junto, ou
-  // a configuração ficaria oferecendo um que não leva mais a lugar nenhum.
-  esquecerOLinkDaPorta();
+async function limparSessaoEncerrada({ pararDeHospedar }) {
+  // **As duas saídas desmontam a sessão; só uma fecha o servidor.**
+  //
+  // A03 da auditoria de 17/09: RECONECTAR passava por `disconnect`, que também
+  // derruba a hospedagem, e logo depois tentava entrar no endereço que acabara
+  // de tirar do ar. Quem hospedava e teve a sessão encerrada por uma troca de
+  // MODs apertava um botão que promete voltar e desligava o próprio servidor,
+  // levando junto quem estava dentro.
+  // Dois nomes escritos por extenso, e não um montado no lugar: um `invoke`
+  // com nome dinâmico não é conferível por nenhum guarda, e é assim que um
+  // comando some do registro sem ninguém perceber.
+  if (pararDeHospedar) await invoke("disconnect");
+  else await invoke("desmontar_a_sessao");
+  // O link só some quando o servidor some com ele: enquanto a hospedagem está
+  // de pé, ele continua levando a algum lugar, e apagá-lo faria a configuração
+  // esconder um endereço que funciona.
+  if (pararDeHospedar) esquecerOLinkDaPorta();
   mostrarVeredito(null);
   desenhado = null;
   linhaAberta = null;

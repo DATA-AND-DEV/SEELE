@@ -1169,46 +1169,32 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
     FalhaAoHospedar::NaoSubiu
 }
 
+/// Termina a sessão **desta janela** e deixa a hospedagem de pé.
+///
+/// **A03 da auditoria de 17/09.** RECONECTAR passava por `disconnect`, que
+/// também derruba o servidor hospedado — e em seguida tentava entrar no
+/// endereço que ele acabara de tirar do ar. Quem hospedava e teve a sessão
+/// local encerrada, inclusive por uma troca de MODs, apertava um botão que
+/// promete voltar e desligava o próprio servidor, levando junto todo mundo que
+/// estava dentro.
+///
+/// Verbo próprio, e não `disconnect` com um argumento: são duas intenções
+/// diferentes da mesma pessoa. SAIR fecha o assunto e o anfitrião fecha junto;
+/// RECONECTAR diz «volto já», e derrubar quem ficou é o contrário disso.
+///
+/// # Errors
+///
+/// Nunca: o tipo existe para a ponte, e desmontar o que já está desmontado é o
+/// desfecho normal de quem apertou duas vezes.
+#[tauri::command]
+async fn desmontar_a_sessao(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
+    desmontar_o_cliente(&app, &session);
+    Ok(())
+}
+
 #[tauri::command]
 async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
-    let connection = session
-        .connection
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.take());
-
-    // **A medida da escada sobrevive à sessão**, e este é o único ponto que tem
-    // as duas coisas na mão: a conexão que mediu e o endereço que a nomeia.
-    //
-    // Zero não apaga o que estava guardado — `anotar_caminho_medido` recusa —,
-    // porque a sonda só mede enquanto a tela transmite: uma sessão em que
-    // ninguém compartilhou nada devolve zero, e sobrescrever com ele desfaria
-    // justamente o que a memória serve para evitar.
-    if let Some(viva) = connection.as_ref() {
-        let medido = viva.caminho_medido();
-        let alvo = session.alvo.lock().ok().and_then(|a| a.clone());
-        if let (Some(alvo), true) = (alvo, medido != 0) {
-            if let Ok(mut lista) =
-                seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
-            {
-                if let Err(erro) = lista.anotar_caminho_medido(&alvo, medido) {
-                    tracing::debug!(%erro, "não guardei o caminho medido deste servidor");
-                }
-            }
-        }
-    }
-    // Dropping the handle is what ends the session; taking it out of the slot
-    // is what makes the next `connect` allowed.
-    drop(connection);
-
-    // O convite morre com a sessão que ele abriu. Enquanto nada era conferido
-    // isto era inerte; deixou de ser no momento em que `expected_fingerprint`
-    // passou a sair daqui — quem sai, digita outro endereço e entra de novo
-    // levaria a impressão prometida por um link anterior para um servidor que
-    // nunca a prometeu, e a recusa apareceria sem nada na tela que a explique.
-    if let Ok(mut slot) = session.convite.lock() {
-        *slot = None;
-    }
+    desmontar_o_cliente(&app, &session);
 
     // Quem hospedava para de hospedar ao sair, e quem estava dentro é
     // derrubado. É o comportamento certo: o anfitrião fechou. `encerrar`
@@ -1228,6 +1214,48 @@ async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Resul
         *no_ar = None;
     }
     Ok(())
+}
+
+/// A metade que as duas saídas fazem igual: desmontar a sessão de cliente.
+fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
+    let connection = session
+        .connection
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take());
+
+    // **A medida da escada sobrevive à sessão**, e este é o único ponto que tem
+    // as duas coisas na mão: a conexão que mediu e o endereço que a nomeia.
+    //
+    // Zero não apaga o que estava guardado — `anotar_caminho_medido` recusa —,
+    // porque a sonda só mede enquanto a tela transmite: uma sessão em que
+    // ninguém compartilhou nada devolve zero, e sobrescrever com ele desfaria
+    // justamente o que a memória serve para evitar.
+    if let Some(viva) = connection.as_ref() {
+        let medido = viva.caminho_medido();
+        let alvo = session.alvo.lock().ok().and_then(|a| a.clone());
+        if let (Some(alvo), true) = (alvo, medido != 0) {
+            if let Ok(mut lista) =
+                seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(app))
+            {
+                if let Err(erro) = lista.anotar_caminho_medido(&alvo, medido) {
+                    tracing::debug!(%erro, "não guardei o caminho medido deste servidor");
+                }
+            }
+        }
+    }
+    // Dropping the handle is what ends the session; taking it out of the slot
+    // is what makes the next `connect` allowed.
+    drop(connection);
+
+    // O convite morre com a sessão que ele abriu. Enquanto nada era conferido
+    // isto era inerte; deixou de ser no momento em que `expected_fingerprint`
+    // passou a sair daqui — quem sai, digita outro endereço e entra de novo
+    // levaria a impressão prometida por um link anterior para um servidor que
+    // nunca a prometeu, e a recusa apareceria sem nada na tela que a explique.
+    if let Ok(mut slot) = session.convite.lock() {
+        *slot = None;
+    }
 }
 
 #[tauri::command]
@@ -4158,6 +4186,7 @@ fn main() {
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,
+            desmontar_a_sessao,
             snapshot,
             messages,
             enter_voice_room,

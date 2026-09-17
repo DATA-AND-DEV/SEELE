@@ -1336,12 +1336,25 @@ fn leaving_forgets_the_invite_that_let_us_in() {
     // that `connect` checks against comes from this slot. Left behind, the next
     // connection to a different server would be checked against the previous
     // link's promise and refused for a reason nobody could explain.
-    let body = body_of(&read("src/main.rs"), "async fn disconnect");
+    // A limpeza mudou de casa com o A03 da auditoria: `disconnect` e
+    // `desmontar_a_sessao` dividem `desmontar_o_cliente`, e é ele quem recolhe
+    // a conexão e o convite. Cobrar no auxiliar é cobrar nas duas saídas de uma
+    // vez — e o guarda continua falhando se alguém tirar a linha de lá.
+    let source = read("src/main.rs");
+    let body = body_of(&source, "fn desmontar_o_cliente");
     assert!(
         body.contains("session.convite"),
-        "`disconnect` drops the connection and the hosting but keeps the invite, so a \
-         fingerprint from a previous link outlives the session it belonged to"
+        "quem desmonta a sessão larga a conexão mas guarda o convite, e a impressão \
+         prometida por um link anterior sobrevive à sessão a que ela pertencia"
     );
+    // E as duas saídas passam por ele: uma delas que não passasse levaria o
+    // convite adiante sem nada dizer.
+    for saida in ["async fn disconnect", "async fn desmontar_a_sessao"] {
+        assert!(
+            body_of(&source, saida).contains("desmontar_o_cliente"),
+            "`{saida}` não desmonta a sessão de cliente"
+        );
+    }
 }
 
 #[test]
@@ -10833,4 +10846,76 @@ fn nenhum_id_aparece_duas_vezes_na_pagina() {
          erro nenhum: {}",
         repetidos.join(", ")
     );
+}
+
+/// RECONECTAR não passa pelo verbo que derruba a hospedagem.
+///
+/// **A03 da auditoria de 17/09.** `reconectar` chamava `limparSessaoEncerrada`,
+/// que chamava `disconnect` — e `disconnect` recolhe a conexão **e** a
+/// hospedagem, com `encerrar().await`. Em seguida ele tentava entrar no
+/// endereço que acabara de tirar do ar. Quem hospedava e teve a sessão local
+/// encerrada, inclusive por uma troca de MODs, apertava um botão que promete
+/// voltar e desligava o próprio servidor, levando junto quem estava dentro.
+///
+/// **O que este guarda não prova.** A aceitação que a auditoria pede é de duas
+/// máquinas — anfitrião e convidado, encerrar só a sessão local, ver que a
+/// escuta continua e o convidado não cai. Isso precisa de campo. O que se cobra
+/// aqui é a única metade que um teste de texto alcança: que a intenção esteja
+/// escrita na chamada, e que ninguém possa chamar a limpeza sem escolher.
+#[test]
+fn reconectar_desmonta_a_sessao_sem_fechar_o_servidor() {
+    let fonte = without_comments(&read("ui/tela-fim.js"));
+
+    let corpo = |nome: &str| -> String {
+        let Some(de) = fonte.find(&format!("function {nome}(")) else {
+            panic!("`{nome}` saiu de `tela-fim.js`; se foi de propósito, ajuste este guarda");
+        };
+        // Até a próxima declaração de topo, que é o fim prático do corpo. O
+        // `+1` pula o `f` do próprio `function`, para que a busca pela próxima
+        // não encontre esta — e a fatia começa em `de` para a mensagem de falha
+        // sair com o nome inteiro.
+        let resto = fonte.get(de..).unwrap_or("");
+        let busca = resto.get(1..).unwrap_or("");
+        let ate = busca
+            .find("\nasync function ")
+            .or_else(|| busca.find("\nfunction "))
+            .map(|n| n + 1);
+        resto
+            .get(..ate.unwrap_or(resto.len()))
+            .unwrap_or("")
+            .to_owned()
+    };
+
+    let reconectar = corpo("reconectar");
+    assert!(
+        reconectar.contains("pararDeHospedar: false"),
+        "RECONECTAR tem de dizer que a hospedagem fica de pé: {reconectar}"
+    );
+
+    let sair = corpo("sairParaAEntrada");
+    assert!(
+        sair.contains("pararDeHospedar: true"),
+        "SAIR fecha o assunto, e o anfitrião fecha junto: {sair}"
+    );
+
+    // E ninguém chama a limpeza sem escolher: um `limparSessaoEncerrada()` sem
+    // argumento estoura ao desestruturar, e um com o padrão errado seria o
+    // defeito de volta em silêncio.
+    for (at, _) in fonte.match_indices("limparSessaoEncerrada(") {
+        // A própria declaração casa com o mesmo texto, e ela é a que **recebe**
+        // o argumento em vez de passá-lo.
+        if fonte
+            .get(..at)
+            .is_some_and(|antes| antes.ends_with("function "))
+        {
+            continue;
+        }
+        let depois = fonte
+            .get(at + "limparSessaoEncerrada(".len()..)
+            .unwrap_or("");
+        assert!(
+            depois.starts_with("{ pararDeHospedar:"),
+            "esta chamada a `limparSessaoEncerrada` não diz o que fazer com a hospedagem"
+        );
+    }
 }
