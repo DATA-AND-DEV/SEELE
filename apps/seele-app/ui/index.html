@@ -291,6 +291,43 @@
       <button id="botao-hospedar" type="button" class="botao botao-secundario">HOSPEDAR AQUI</button>
     </div>
 
+    <!--
+      **Fechado por padrão, e não um campo a mais nesta tela.** Quem aperta
+      HOSPEDAR AQUI quer hospedar; um nome público é coisa de quem já tem um DNS
+      apontado, que é uma minoria conhecendo o próprio caso. Um `<details>`
+      fechado custa uma linha a quem não precisa e está inteiro a quem precisa.
+
+      O campo é opcional e nasce vazio — vazio é a ausência de escolha e dá no
+      link numérico de sempre, que é o comportamento de hoje inteiro preservado.
+    -->
+    <details id="boot-nome-publico" class="boot-nome-publico">
+      <summary>Tenho um nome apontado para esta máquina</summary>
+      <div class="server-campo">
+        <label class="rotulo" for="campo-nome-publico">NOME PÚBLICO (OPCIONAL)</label>
+        <input id="campo-nome-publico" type="text" autocomplete="off"
+               spellcheck="false" placeholder="casa.exemplo.br" />
+        <p class="nota">
+          O link sai com este nome no lugar do endereço numérico. Ele só serve se
+          o nome estiver apontado para este endereço — quem receber e não
+          conseguir resolver cai no endereço numérico, que vai junto no link.
+        </p>
+        <!--
+          O aviso do TOFU, e ele não é detalhe. A chave do pino é **o texto do
+          alvo** (`crates/seele-core/src/tofu.rs`), então o nome e o número são
+          dois pinos para o mesmo servidor. Quem já entrou por um e passa a
+          entrar pelo outro é perguntado de novo sobre a impressão digital — e
+          uma pergunta de segurança que chega sem explicação é uma pergunta que
+          se responde no automático, que é o contrário do que ela existe para
+          fazer.
+        -->
+        <p id="nota-nome-publico-tofu" class="nota">
+          Quem já entrou aqui pelo endereço numérico vai ser perguntado de novo
+          sobre a impressão digital ao entrar pelo nome: para o SEELE, os dois
+          são endereços diferentes do mesmo servidor.
+        </p>
+      </div>
+    </details>
+
     <div class="boot-rodape">
       <button id="boot-perfil" class="boot-perfil" type="button"
               aria-label="Personalizar seu perfil" title="o nome com que você entra">

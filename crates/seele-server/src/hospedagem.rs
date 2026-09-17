@@ -220,6 +220,54 @@ impl Hospedagem {
         }
     }
 
+    /// O mesmo convite, com um **nome público** no lugar do endereço numérico.
+    ///
+    /// # Por que o nome vira o alvo e os números viram alternativos
+    ///
+    /// Porque um nome é uma promessa de que alguém tem de cumprir no DNS, e um
+    /// número é um fato. Pondo o nome na frente, quem recebe o link tenta o nome
+    /// primeiro — que é o ponto de ter um nome: ele continua valendo amanhã,
+    /// quando o endereço da casa mudar. Os números ficam logo atrás, e é o que
+    /// faz o link não piorar nada: se o nome não resolver na rede de quem
+    /// recebe, o caminho de hoje ainda está lá.
+    ///
+    /// # O que isto custa a quem já entrou pelo número
+    ///
+    /// Uma pergunta de confiança a mais. A chave do pino do TOFU é **o texto do
+    /// alvo** (`seele-core/src/tofu.rs`), então `casa.exemplo` e `203.0.113.9`
+    /// são dois pinos diferentes para o mesmo servidor: quem já entrou pelo
+    /// número e passar a entrar pelo nome é perguntado de novo sobre a
+    /// impressão digital. Não é defeito e não se conserta daqui — é o que TOFU
+    /// quer dizer —, e por isso a tela avisa antes em vez de a pessoa descobrir
+    /// no susto.
+    ///
+    /// `None` devolve [`Self::convite`] sem tirar nem pôr nada: o campo vazio é
+    /// a ausência de escolha, e ela tem de continuar dando no link de sempre.
+    #[must_use]
+    pub fn convite_com_nome(&self, nome: Option<&str>) -> String {
+        let Some(nome) = nome else {
+            return self.convite();
+        };
+        match seele_proto::uri::analisar(&self.convite()) {
+            Ok(convite) => {
+                let mut alternativos = convite.alternativos.clone();
+                // O alvo de antes desce para a primeira alternativa, e não some:
+                // ele é o caminho que funciona **agora**, e o nome é o que
+                // promete funcionar amanhã.
+                alternativos.insert(0, convite.alvo.clone());
+                seele_proto::uri::Convite {
+                    alvo: nome.to_owned(),
+                    alternativos,
+                    ..convite
+                }
+                .to_string()
+            }
+            // Impossível na prática — é o link que acabamos de montar. Devolver
+            // o numérico é melhor que devolver nada a quem quer convidar.
+            Err(_) => self.convite(),
+        }
+    }
+
     /// O PERSISTENCE deste servidor, para quem hospeda mexer na própria porta.
     ///
     /// ADR 0030. É por aqui que a janela fecha o servidor, gera convite e decide
@@ -322,6 +370,42 @@ mod tests {
             hospedagem.impressao_digital().len(),
             64,
             "a impressão digital não é um SHA-256"
+        );
+    }
+
+    /// O link com nome público, exercido pelo que ele **produz**.
+    ///
+    /// Comportamento e não texto-fonte: o que se afirma é a URI que sai, lida de
+    /// volta pelo analisador de `seele-proto`. Um guarda que procurasse a
+    /// palavra «nome» neste arquivo ficaria verde com o nome sendo ignorado.
+    #[tokio::test]
+    async fn o_nome_publico_vira_o_alvo_do_link_e_o_numero_desce_para_alternativo() {
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+            .await
+            .expect("subir");
+
+        let sem_nome = hospedagem.convite_com_nome(None);
+        assert_eq!(
+            sem_nome,
+            hospedagem.convite(),
+            "o campo vazio mudou o link: a ausência de escolha tem de dar no              comportamento de hoje, inteiro e sem tirar nem pôr"
+        );
+
+        let numerico = seele_proto::uri::analisar(&sem_nome).expect("o link de sempre analisa");
+
+        let com_nome = hospedagem.convite_com_nome(Some("casa.exemplo.br"));
+        let lido = seele_proto::uri::analisar(&com_nome).expect("o link com nome analisa");
+        assert_eq!(
+            lido.alvo, "casa.exemplo.br",
+            "o nome não virou o alvo do link"
+        );
+        assert!(
+            lido.alternativos.contains(&numerico.alvo),
+            "o endereço numérico sumiu do link. Ele é o caminho que funciona              **agora**; o nome é o que promete funcionar amanhã, e tirar o              primeiro para pôr o segundo é piorar hoje por uma promessa."
+        );
+        assert_eq!(
+            lido.impressao_digital, numerico.impressao_digital,
+            "a impressão digital não atravessou: um link sem ela é um link em              que a primeira visita não confere nada"
         );
     }
 

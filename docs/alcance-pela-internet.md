@@ -50,6 +50,68 @@ funcionou — os dois na mesma rede. Um link antigo, de um endereço só, contin
 sendo aceito, e um cliente antigo lê o primeiro endereço do link novo e ignora o
 resto.
 
+## Um nome no lugar do número, e o que ele custa
+
+O link sai com um endereço numérico. Ele funciona, e ele **muda**: a maioria das
+casas recebe um endereço novo quando o roteador reinicia, e aí o link que você
+mandou na semana passada aponta para a casa de outra pessoa. Um nome apontado
+para a sua máquina resolve isso — o link passa a valer enquanto o nome valer.
+
+Na tela de hospedar, abra **«Tenho um nome apontado para esta máquina»** e
+escreva o nome. Em branco é o comportamento de sempre, e continua sendo o padrão.
+
+### A receita, inteira
+
+1. **Crie um registro `A`** no seu DNS, apontando o nome para o endereço público
+   da sua casa. Se você tem IPv6 e quer que ele também sirva, crie um `AAAA`
+   junto, com o endereço v6.
+2. **Não crie `CNAME`** para a raiz de um domínio; e não aponte para um serviço
+   que faz proxy do tráfego — o SEELE fala QUIC sobre UDP, e um proxy de HTTP
+   não o carrega.
+3. **A porta não vai no DNS.** Ela vai no link, e o SEELE a põe lá sozinho: o
+   que sai é `seele://casa.exemplo.br:8383/?fp=…`. O DNS só responde «que
+   endereço é este nome».
+4. **Se o seu endereço público muda**, quem mantém o registro atualizado é um
+   cliente de DNS dinâmico — o seu provedor de DNS explica qual. Sem isso, o
+   nome vira um apontador para o endereço de ontem, que é o problema de partida
+   com um passo a mais.
+
+### Nenhum certificado precisa mudar
+
+E isto vale a pena dizer porque é o que todo mundo espera ter de fazer: **não há
+certificado a emitir para o nome**. O SEELE não confere nome nenhum contra um
+certificado — a verificação é a impressão digital, fixada na primeira visita
+(TOFU, [ADR 0003](adr/0003-certificados-tofu.md)).
+
+Está no código, e não é interpretação: o verificador em
+`crates/seele-core/src/tofu.rs` recebe o `server_name` e o ignora, com a decisão
+escrita ao lado — *«Deliberately not derived from `_server_name`»*. O que ele
+compara é o certificado apresentado contra o pino guardado.
+
+### A ressalva, e ela é de verdade
+
+**A chave do pino é o texto do alvo.** Para o SEELE, `casa.exemplo.br` e
+`203.0.113.9` são dois endereços do mesmo servidor, e cada um tem o seu pino.
+
+Na prática: quem já entrou na sua casa pelo endereço numérico e passar a entrar
+pelo nome **vai ser perguntado de novo** sobre a impressão digital, como se
+fosse um servidor novo. Não é defeito e não dá para consertar sem desmontar o
+TOFU — é o que «confiança na primeira visita» quer dizer quando o endereço muda
+de forma.
+
+O que dá para fazer é avisar antes, e a tela avisa. Diga às pessoas que a
+pergunta vai aparecer e que a impressão digital é a mesma de sempre — a de
+sempre, e não «pode confiar»: se ela **não** for a mesma, a pergunta está
+fazendo exatamente o trabalho dela.
+
+### O número continua no link
+
+O nome vira o alvo e o endereço numérico desce para a lista de alternativos, que
+o link já carrega desde sempre. Quem receber o link e não conseguir resolver o
+nome — DNS ainda propagando, rede com resolvedor teimoso — cai no endereço
+numérico e entra do mesmo jeito. **Pôr um nome não tira nada**; ele acrescenta um
+caminho que dura mais, à frente dos que já existiam.
+
 ## O que a tela te diz, e o que fazer com cada resposta
 
 A tela diz **uma frase**, e uma segunda só quando ela muda o que você faz. É de

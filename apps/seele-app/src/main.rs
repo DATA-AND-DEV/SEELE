@@ -592,6 +592,16 @@ enum FalhaAoHospedar {
     PortaOcupada,
     /// Qualquer outro motivo para o servidor não subir.
     NaoSubiu,
+    /// O nome público digitado não pode virar link, e por quê.
+    ///
+    /// **Recusado antes de o servidor subir**, e essa ordem é a decisão: subir
+    /// e depois recusar deixaria a pessoa hospedando com um link que ela não
+    /// pediu, e teria de haver um segundo caminho para desfazer. Conferir
+    /// primeiro custa nada e não tem esse segundo caminho.
+    ///
+    /// O nome da variante e não uma frase, como as três acima: a frase mora no
+    /// `FRASES` do JavaScript, e é lá que ela é traduzida.
+    NomeRecusado(seele_ffi::uri::NomeRecusado),
 }
 
 /// Sobe um servidor dentro do app e devolve o link do convite.
@@ -608,7 +618,25 @@ enum FalhaAoHospedar {
 async fn hospedar(
     app: AppHandle,
     session: State<'_, Session>,
+    // Vazio é a ausência de escolha e é o padrão: o link numérico de sempre.
+    nome_publico: Option<String>,
 ) -> Result<Anfitriao, FalhaAoHospedar> {
+    // Conferido **antes** de subir o servidor. Ver `FalhaAoHospedar::NomeRecusado`.
+    //
+    // Um campo em branco não é um nome recusado: é alguém que não quis um nome.
+    // Só o que tem algum caractere é conferido, e aí a recusa é dita na hora —
+    // um link torto não falha aqui, falha dias depois na tela de outra pessoa,
+    // como «não conecta», com quem hospedou já tendo ido dormir.
+    let nome_publico = match nome_publico
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
+        Some(bruto) => Some(
+            seele_ffi::uri::conferir_nome_publico(bruto).map_err(FalhaAoHospedar::NomeRecusado)?,
+        ),
+        None => None,
+    };
     {
         let aberto = session
             .hospedagem
@@ -673,7 +701,7 @@ async fn hospedar(
     let alcance = server.alcance();
     let anfitriao = Anfitriao {
         aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
-        convite: server.convite(),
+        convite: server.convite_com_nome(nome_publico.as_deref()),
         alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau().nome()),
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
         encontro_recusado: alcance

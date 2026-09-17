@@ -1047,3 +1047,175 @@ mod tests {
         }
     }
 }
+
+/// Por que um nome público não pôde virar link.
+///
+/// Uma variante por recusa, com o motivo dentro, pela mesma regra que
+/// `specs/02-protocolo.md` dá ao resto deste protocolo: nenhuma frase livre
+/// atravessa para a interface — quem escreve a frase é a casca, e ela precisa
+/// saber **qual** recusa foi para escrever a frase certa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NomeRecusado {
+    /// Só espaço, ou nada.
+    ///
+    /// Separado de «não preencheu»: o campo vazio é a ausência de escolha e não
+    /// é erro nenhum — é o link numérico de sempre. Um campo com três espaços é
+    /// alguém que achou que preencheu.
+    Vazio,
+    /// Tem espaço no meio.
+    ///
+    /// Um nome com espaço não sobrevive a ser colado: quem recebe o link o vê
+    /// partido em dois no meio da mensagem, e a metade da frente não leva a
+    /// lugar nenhum.
+    ComEspaco,
+    /// Veio com esquema — `http://`, `https://`, `seele://`.
+    ///
+    /// É o erro mais comum de todos, porque a pessoa copia da barra do
+    /// navegador. Recusado com nome próprio para a frase poder dizer o conserto
+    /// em vez de dizer «inválido»: tire o `http://` da frente.
+    ComEsquema,
+    /// Tem barra.
+    ///
+    /// `casa.exemplo/sala` não é um endereço de servidor, é um caminho dentro
+    /// de um. O `seele://` não tem caminho — o que vem depois da barra é
+    /// consulta —, então uma barra aqui vira um link que analisa e aponta para
+    /// outro lugar.
+    ComBarra,
+    /// Tem caractere que nome de máquina não tem.
+    ///
+    /// O resto: `?`, `#`, `@`, aspas, acentos. A lista do que **pode** é a de
+    /// nome de máquina — letra, dígito, hífen e ponto —, mais os dois-pontos da
+    /// porta, e é ela que decide.
+    ComCaractereQueNaoServe,
+}
+
+impl fmt::Display for NomeRecusado {
+    fn fmt(&self, formatador: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatador, "{self:?}")
+    }
+}
+
+impl std::error::Error for NomeRecusado {}
+
+/// Confere um nome público antes de ele virar link, e devolve-o aparado.
+///
+/// # Por que conferir aqui, e não deixar o link nascer torto
+///
+/// Porque um link torto **não falha na hora**: ele falha do outro lado, dias
+/// depois, como «não conecta» na tela de outra pessoa. Quem hospedou já foi
+/// dormir. É o defeito que este repositório chama de «o produto sabe e não
+/// conta», e o momento de contar é enquanto quem digitou ainda está olhando.
+///
+/// # O que ele **não** confere, e é honesto dizer
+///
+/// Que o nome exista no DNS, e que ele aponte para esta máquina. Isso não se
+/// sabe daqui — a resolução acontece na máquina de quem recebe o link, na rede
+/// dela, e um nome que resolve aqui pode não resolver lá. Por isso a tela diz,
+/// em vez de prometer: ver `docs/alcance-pela-internet.md`.
+///
+/// # Errors
+///
+/// [`NomeRecusado`], uma variante por motivo, para a casca escrever a frase.
+pub fn conferir_nome_publico(nome: &str) -> Result<String, NomeRecusado> {
+    let nome = nome.trim();
+    if nome.is_empty() {
+        return Err(NomeRecusado::Vazio);
+    }
+    // O esquema primeiro, e antes da barra: `http://casa.exemplo` tem as duas
+    // coisas, e quem colou da barra do navegador precisa ler «tire o http://»
+    // e não «tire a barra», que não diria o que fazer.
+    let minusculo = nome.to_ascii_lowercase();
+    if minusculo.contains("://") {
+        return Err(NomeRecusado::ComEsquema);
+    }
+    if nome.contains('/') {
+        return Err(NomeRecusado::ComBarra);
+    }
+    if nome.contains(char::is_whitespace) {
+        return Err(NomeRecusado::ComEspaco);
+    }
+    if !nome
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == ':')
+    {
+        return Err(NomeRecusado::ComCaractereQueNaoServe);
+    }
+    Ok(nome.to_owned())
+}
+
+#[cfg(test)]
+mod o_nome_publico {
+    use super::{conferir_nome_publico, NomeRecusado};
+
+    #[test]
+    fn um_nome_de_maquina_passa_e_volta_aparado() {
+        assert_eq!(
+            conferir_nome_publico("  casa.exemplo.br  "),
+            Ok("casa.exemplo.br".to_owned()),
+            "o espaço em volta é de quem colou, e não do nome"
+        );
+        assert_eq!(
+            conferir_nome_publico("casa.exemplo.br:8383"),
+            Ok("casa.exemplo.br:8383".to_owned()),
+            "a porta faz parte do alvo e não pode ser recusada com ele"
+        );
+    }
+
+    #[test]
+    fn cada_recusa_diz_qual_foi() {
+        // Uma por uma, porque a frase que a tela escreve depende de **qual**
+        // delas: «inválido» não diz o que fazer, e é o que havia antes de
+        // existirem variantes.
+        assert_eq!(conferir_nome_publico("   "), Err(NomeRecusado::Vazio));
+        assert_eq!(
+            conferir_nome_publico("http://casa.exemplo"),
+            Err(NomeRecusado::ComEsquema),
+            "o erro mais comum de todos — copiar da barra do navegador — tem \
+             de ter nome próprio, ou a frase não diz «tire o http://»"
+        );
+        assert_eq!(
+            conferir_nome_publico("seele://casa.exemplo"),
+            Err(NomeRecusado::ComEsquema)
+        );
+        assert_eq!(
+            conferir_nome_publico("casa.exemplo/sala"),
+            Err(NomeRecusado::ComBarra)
+        );
+        assert_eq!(
+            conferir_nome_publico("minha casa"),
+            Err(NomeRecusado::ComEspaco)
+        );
+        assert_eq!(
+            conferir_nome_publico("casa.exemplo?x=1"),
+            Err(NomeRecusado::ComCaractereQueNaoServe)
+        );
+        assert_eq!(
+            conferir_nome_publico("minha-casa.exemplo#topo"),
+            Err(NomeRecusado::ComCaractereQueNaoServe)
+        );
+    }
+
+    #[test]
+    fn o_esquema_e_recusado_antes_da_barra() {
+        // `http://casa.exemplo` tem esquema **e** barra. A ordem da conferência
+        // é o que decide qual frase a pessoa lê, e ler «tire a barra» diante de
+        // um `http://` manda apagar o caractere errado.
+        assert_eq!(
+            conferir_nome_publico("HTTP://casa.exemplo"),
+            Err(NomeRecusado::ComEsquema),
+            "e sem depender da caixa: quem cola da barra cola como estava lá"
+        );
+    }
+
+    #[test]
+    fn o_que_passa_daqui_analisa_como_link() {
+        // A conferência só vale se o que ela aprova vira um link que o próprio
+        // analisador deste arquivo lê de volta. Sem esta linha, ela poderia
+        // aprovar um nome que produz uma URI que ninguém consegue abrir — que é
+        // a definição de link quebrado, só que com um guarda verde ao lado.
+        let nome = conferir_nome_publico("casa.exemplo.br").expect("nome bom");
+        let texto = super::Convite::novo(nome.clone()).to_string();
+        let de_volta = super::analisar(&texto).expect("o link montado tem de analisar");
+        assert_eq!(de_volta.alvo, nome);
+    }
+}

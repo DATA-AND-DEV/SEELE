@@ -330,6 +330,30 @@ function fraseDeCaminho(caminho) {
  * Um `PinChanged` carrega as duas impressões digitais porque a coisa toda é um
  * humano compará-las (ADR 0003).
  */
+/**
+ * Por que um nome público não virou link, com o conserto na própria frase.
+ *
+ * Uma por recusa, e não uma frase genérica: quem digita este campo acabou de
+ * mexer num DNS e erra por um detalhe de cada vez. «Nome inválido» manda a
+ * pessoa procurar o que está errado; estas dizem.
+ *
+ * `ComEsquema` é a mais comum de todas, porque o gesto natural é copiar da
+ * barra do navegador — e é por isso que o Rust a confere antes da barra: um
+ * `http://casa.exemplo` tem as duas coisas, e ler «tire a barra» mandaria
+ * apagar o caractere errado.
+ */
+const NOMES_RECUSADOS = {
+  Vazio: "ESTE NOME É SÓ ESPAÇO.\nDeixe o campo em branco para usar o endereço numérico de sempre.",
+  ComEspaco:
+    "UM NOME DE SERVIDOR NÃO PODE TER ESPAÇO.\nQuem receber o link o veria partido no meio da mensagem.",
+  ComEsquema:
+    "TIRE O «http://» DA FRENTE.\nAqui vai só o nome — casa.exemplo.br —, sem o que o navegador põe na barra.",
+  ComBarra:
+    "TIRE O QUE VEM DEPOIS DA BARRA.\nAqui vai o endereço do servidor, e não um caminho dentro dele.",
+  ComCaractereQueNaoServe:
+    "ESTE NOME TEM CARACTERE QUE ENDEREÇO NÃO TEM.\nValem letras, números, hífen e ponto — e os dois-pontos da porta.",
+};
+
 function fraseDeErro(erro, apelido) {
   if (typeof erro === "string") return FRASES[erro] ?? erro;
   if (erro && typeof erro === "object") {
@@ -385,6 +409,13 @@ function fraseDeErro(erro, apelido) {
         lista +
         "\nA tela para ler e aceitar esta lista ainda não existe neste app."
       );
+    }
+    // **O nome público que não pode virar link**, e cada recusa com o conserto
+    // dentro. «Inválido» não diz o que fazer, e este campo é digitado à mão por
+    // alguém que acabou de configurar um DNS: a chance de errar por um detalhe
+    // é alta, e o detalhe é sempre um só.
+    if (erro.NomeRecusado) {
+      return NOMES_RECUSADOS[erro.NomeRecusado] ?? "ESTE NOME NÃO PODE VIRAR LINK";
     }
     if (erro.Refused) {
       // **O apelido recusado entra na frase**, e é conserto de uma coisa cruel.

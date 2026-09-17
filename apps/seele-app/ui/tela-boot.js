@@ -377,7 +377,12 @@ async function hospedar() {
   erro.hidden = true;
 
   try {
-    const anfitriao = await invoke("hospedar");
+    // O campo é opcional; vazio vira `null`, que é como o Rust escreve «sem
+    // nome público» e dá no link numérico de sempre.
+    const nome = $("campo-nome-publico").value.trim();
+    const anfitriao = await invoke("hospedar", {
+      nomePublico: nome === "" ? null : nome,
+    });
     // Hospedar aqui é entrar aqui: o endereço da própria máquina vira o
     // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
     // vai usar.

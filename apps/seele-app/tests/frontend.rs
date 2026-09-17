@@ -166,6 +166,21 @@ fn command_parameters(source: &str) -> std::collections::BTreeMap<String, BTreeS
         };
         let mut parametros = BTreeSet::new();
         for parte in resto[abre + 1..abre + fecha].split(',') {
+            // **Os comentários saem antes de o nome ser lido.** Comentar um
+            // parâmetro é Rust legítimo e é a norma deste repositório; sem esta
+            // limpeza, a primeira linha de um `///` ou `//` acima do parâmetro
+            // virava o nome dele, e este guarda acusava um defeito que era dele
+            // mesmo — «o comando procura {"// Vazio é a ausência de escolha"}».
+            //
+            // Conservador de propósito: só linhas que **começam** com `//` são
+            // descartadas. Um `//` no fim de uma linha que também traz o
+            // parâmetro não acontece aqui e, se acontecesse, cortar por ele
+            // arriscaria comer o que vem antes.
+            let parte: String = parte
+                .lines()
+                .filter(|linha| !linha.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join(" ");
             let Some((chave, tipo)) = parte.split_once(':') else {
                 continue;
             };
