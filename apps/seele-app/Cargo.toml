@@ -90,6 +90,9 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # com este `tauri.conf.json` e com a ACL gerada dele — e fazer a mesma chamada
 # de IPC que o frontend faz, sem servidor gráfico nenhum.
 tauri = { version = "2", features = ["test"] }
+# O registro de servidores escreve em disco, e o teste dele precisa de uma pasta
+# de configuração que não seja a de quem está rodando o teste.
+tempfile = "3.27.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

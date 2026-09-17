@@ -389,7 +389,11 @@ async function hospedar() {
     const nome = $("campo-nome-publico").value.trim();
     const anfitriao = await invoke("hospedar", {
       nomePublico: nome === "" ? null : nome,
+      // `null` é o banco de sempre: toda máquina que hospedou antes de os
+      // servidores guardados existirem.
+      servidor: servidorEscolhido,
     });
+    servidorEscolhido = null;
     // Hospedar aqui é entrar aqui: o endereço da própria máquina vira o
     // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
     // vai usar.
@@ -558,6 +562,93 @@ async function cumprirAAbertura() {
 // **O desvio.** HOSPEDAR AQUI não hospeda mais direto: ele abre a tela onde as
 // três escolhas cabem. Quem hospeda continua sendo `hospedar()`, chamada de lá.
 $("botao-hospedar").addEventListener("click", () => {
+  abrirHospedagem().catch((falha) => console.warn("hospedar:", falha));
+});
+
+/**
+ * O desvio de HOSPEDAR AQUI.
+ *
+ * **Com servidor guardado, a lista; sem nenhum, a criação.** Quem já hospedou
+ * na maioria das vezes quer o mesmo servidor de novo, e obrigá-lo a passar pela
+ * tela de criar toda vez foi o que a tela de preparar fez de errado no dia em
+ * que nasceu.
+ */
+async function abrirHospedagem() {
+  let guardados = [];
+  try {
+    guardados = await invoke("servidores_guardados");
+  } catch (falha) {
+    // Sem registro legível, criar é o caminho que sempre funcionou.
+    console.warn("servidores:", falha);
+  }
+  if (guardados.length === 0) {
+    await abrirPreparar();
+    return;
+  }
+
+  guardarFoco("tela-boot");
+  $("tela-boot").hidden = true;
+  $("tela-servidores").hidden = false;
+  $("servidores-erro").hidden = true;
+  desenharServidoresGuardados(guardados);
+  abrirTela("tela-servidores");
+}
+
+/** Desenha a lista, do mais recente para o mais antigo. */
+function desenharServidoresGuardados(guardados) {
+  repovoar(
+    $("lista-servidores"),
+    guardados.map((s) => {
+      const linha = elemento("li");
+      const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
+      const texto = elemento("span", "server-dispositivo-nome");
+      // **O adotado tem frase, e não identificador.** O servidor de quem já
+      // hospedava antes desta versão não tem nome — ninguém lhe deu um, porque
+      // não havia onde. Mostrar `principal` seria mostrar um detalhe do disco a
+      // quem só quer reconhecer o próprio servidor; a frase diz qual é.
+      const adotado = !s.nome && s.caminho === null;
+      texto.append(
+        elemento("span", "mods-id", s.nome || (adotado ? "O SERVIDOR QUE JÁ ESTAVA AQUI" : s.id)),
+      );
+      if (s.versao) {
+        texto.append(elemento("span", "mods-versao", `criado na ${s.versao}`));
+      } else if (adotado) {
+        texto.append(
+          elemento("span", "mods-versao", "as conversas que você já tinha, onde sempre estiveram"),
+        );
+      }
+      caixa.append(texto);
+
+      const botao = elemento("button", "botao-fantasma");
+      botao.type = "button";
+      botao.textContent = "HOSPEDAR";
+      botao.addEventListener("click", () => {
+        hospedarGuardado(s.id).catch((falha) => console.warn("hospedar:", falha));
+      });
+      caixa.append(botao);
+      linha.append(caixa);
+      return linha;
+    }),
+  );
+}
+
+/** Levanta um servidor que já existe, sem passar por tela nenhuma. */
+async function hospedarGuardado(id) {
+  $("tela-servidores").hidden = true;
+  $("tela-boot").hidden = false;
+  voltarParaTela("tela-boot");
+  servidorEscolhido = id;
+  await hospedar();
+}
+
+$("servidores-voltar").addEventListener("click", () => {
+  $("tela-servidores").hidden = true;
+  $("tela-boot").hidden = false;
+  voltarParaTela("tela-boot");
+});
+
+$("servidores-novo").addEventListener("click", () => {
+  $("tela-servidores").hidden = true;
   abrirPreparar().catch((falha) => console.warn("preparar:", falha));
 });
 
@@ -652,6 +743,9 @@ desenharPerfilDaEntrada().catch((falha) => console.warn("perfil da entrada:", fa
 // --------------------------------------------------------------------------
 // Preparar o servidor antes de levantá-lo
 // --------------------------------------------------------------------------
+
+/** Qual servidor guardado a próxima chamada a `hospedar` deve levantar. */
+let servidorEscolhido = null;
 
 /** A imagem escolhida, já encolhida pelo Rust, esperando um servidor. */
 let iconePreparado = null;
@@ -813,6 +907,12 @@ async function confirmarPreparar() {
       return;
     }
 
+    // **Registrar antes de levantar.** Um registro com um servidor que nunca
+    // subiu se explica; um servidor no ar que ninguém pediu, não.
+    const nome = $("preparar-nome").value.trim();
+    const guardado = await invoke("criar_servidor", { nome });
+    servidorEscolhido = guardado.id;
+
     // A entrada volta, e com ela o foco: `hospedar()` desenha o progresso lá.
     $("tela-preparar").hidden = true;
     $("tela-boot").hidden = false;
@@ -820,7 +920,6 @@ async function confirmarPreparar() {
     await hospedar();
 
     // Depois de conectar, e só depois: os dois viajam pela conexão.
-    const nome = $("preparar-nome").value.trim();
     if (nome !== "") await invoke("renomear_server", { name: nome });
     if (iconePreparado) await invoke("aplicar_icone_do_server", { icone: iconePreparado });
   } catch (falha) {

@@ -678,12 +678,14 @@
    margem vira `0` acima do mínimo: melhor a caixa encostar no alto e ser
    inteira do que ficar centrada e sem começo. */
 #tela-preparar,
+#tela-servidores,
 #tela-boot {
   overflow-y: auto;
 }
 
 @media (max-height: 820px) {
   #tela-preparar .boot-caixa,
+  #tela-servidores .boot-caixa,
   #tela-boot .boot-caixa {
     margin-block: 0;
   }
@@ -696,12 +698,15 @@
    dizendo que havia mais embaixo. Medido, não deduzido. */
 
 #tela-preparar .server-campo,
-#tela-preparar .boot-saidas {
+#tela-preparar .boot-saidas,
+#tela-servidores .server-dispositivos,
+#tela-servidores .boot-saidas {
   margin-top: 20px;
 }
 
 /* O par de botões fica separado dos campos por mais que os campos entre si:
    confirmar e voltar são a saída da tela, e não mais um campo dela. */
-#tela-preparar .boot-saidas {
+#tela-preparar .boot-saidas,
+#tela-servidores .boot-saidas {
   margin-top: 28px;
 }

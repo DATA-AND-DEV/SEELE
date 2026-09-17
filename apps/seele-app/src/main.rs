@@ -29,6 +29,7 @@
 mod catalogo;
 mod icone;
 mod mods;
+mod servidores;
 mod versoes;
 
 use std::sync::{Arc, Mutex};
@@ -74,6 +75,13 @@ struct Session {
     /// Vive aqui e não numa variável local porque tem que sobreviver ao comando
     /// que o criou: o servidor fica de pé enquanto a janela estiver aberta.
     hospedagem: Mutex<Option<seele_server::hospedagem::Hospedagem>>,
+    /// Qual servidor guardado esta janela levantou, quando levantou um.
+    ///
+    /// Existe para que renomear em CONFIGURAÇÕES não deixe a lista de
+    /// servidores mentindo: sem isto, ela continuaria mostrando o nome do dia
+    /// da criação, e escolher entre dois servidores pelo nome errado é pior do
+    /// que escolher por um identificador cru.
+    servidor_no_ar: Mutex<Option<String>>,
     /// A busca corrente. O cursor é estado de sessão, e é o que impede a regra
     /// de dar-a-volta de ser reescrita em JavaScript.
     busca: Mutex<Option<seele_ffi::search::Search>>,
@@ -683,6 +691,35 @@ enum FalhaAoHospedar {
     NomeRecusado(seele_ffi::uri::NomeRecusado),
 }
 
+/// Os servidores que esta máquina guarda, do mais recente ao mais antigo.
+///
+/// Listar é o que adota o servidor antigo: uma máquina que já hospedou antes
+/// desta versão tem um `seele.db` e nenhum registro, e a primeira listagem o
+/// põe na lista apontando para onde ele já está. Ver `servidores.rs`.
+#[tauri::command]
+fn servidores_guardados(app: AppHandle) -> Vec<servidores::Servidor> {
+    servidores::listar(&config_dir(&app))
+}
+
+/// Guarda um servidor novo e devolve o que foi guardado.
+///
+/// **Não o levanta.** Criar e hospedar são dois passos porque a tela de
+/// preparar ainda pode ser abandonada depois de escrever o nome, e um registro
+/// com um servidor que nunca subiu é mais fácil de explicar do que um servidor
+/// no ar que ninguém pediu.
+/// A versão sai de `versoes::em_uso` e não da tela: é a mesma fonte do `Hello`
+/// do cliente e do `seeled --versao`, e uma casca que a escrevesse por conta
+/// própria seria a segunda cópia de um número que já tem dono. Um build feito à
+/// mão não a carimba, e aí a entrada fica sem versão — que é a verdade.
+#[tauri::command]
+fn criar_servidor(app: AppHandle, nome: String) -> servidores::Servidor {
+    servidores::criar(
+        &config_dir(&app),
+        &nome,
+        versoes::em_uso().unwrap_or_default(),
+    )
+}
+
 /// Que versões do SEELE estão instaladas nesta máquina.
 ///
 /// ADR 0046. A lista é a do **depósito**, e não a do manifesto: este caminho é
@@ -762,6 +799,9 @@ async fn hospedar(
     session: State<'_, Session>,
     // Vazio é a ausência de escolha e é o padrão: o link numérico de sempre.
     nome_publico: Option<String>,
+    // Qual servidor guardado levantar. `None` é o banco de sempre — o que toda
+    // máquina que já hospedou antes desta versão tem.
+    servidor: Option<String>,
 ) -> Result<Anfitriao, FalhaAoHospedar> {
     // Conferido **antes** de subir o servidor. Ver `FalhaAoHospedar::NomeRecusado`.
     //
@@ -789,8 +829,20 @@ async fn hospedar(
         }
     }
 
-    let banco =
-        seele_server::persistence::banco_do_cliente(std::path::Path::new(&config_dir(&app)));
+    // **Qual banco, e por que isso passa pelo registro.** Até aqui era sempre
+    // `<config>/seele.db`, um por máquina. `servidores::banco` devolve esse
+    // mesmo caminho quando ninguém escolheu nada — e é o que faz hospedar
+    // continuar funcionando numa máquina sem registro nenhum.
+    let config = config_dir(&app);
+    let banco = match servidor.as_deref() {
+        Some(id) => {
+            servidores::marcar_uso(&config, id);
+            servidores::banco(&config, Some(id))
+        }
+        // O legado, e ele não é um caso de canto: é toda máquina que já
+        // hospedou antes desta versão existir.
+        None => seele_server::persistence::banco_do_cliente(std::path::Path::new(&config)),
+    };
     let server = seele_server::hospedagem::Hospedagem::iniciar(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
@@ -858,6 +910,11 @@ async fn hospedar(
         .lock()
         .map_err(|_| FalhaAoHospedar::NaoSubiu)?
         .replace(server);
+    // Anotado depois de o servidor estar de pé: uma janela que não hospeda não
+    // pode dizer que hospeda um servidor guardado.
+    if let Ok(mut no_ar) = session.servidor_no_ar.lock() {
+        *no_ar = servidor;
+    }
 
     Ok(anfitriao)
 }
@@ -1619,8 +1676,23 @@ fn renomear_linha(
 /// permissão recebe `Alert`/`PermissionDenied` do servidor, e é lá que a
 /// `specs/08-seguranca.md` põe a segurança — nunca no controle escondido.
 #[tauri::command]
-fn renomear_server(session: State<'_, Session>, name: String) -> Result<(), ConnectionError> {
-    session.connection()?.rename_server(name)
+fn renomear_server(
+    app: AppHandle,
+    session: State<'_, Session>,
+    name: String,
+) -> Result<(), ConnectionError> {
+    session.connection()?.rename_server(name.clone())?;
+    // **E a lista para de mentir.** O nome de verdade mora no banco do
+    // servidor; o do registro é só o que a lista mostra para se escolher entre
+    // um e outro sem abrir os dois. Sem esta linha ele ficaria congelado no dia
+    // da criação, e escolher pelo nome errado é pior que escolher por um
+    // identificador cru.
+    if let Ok(no_ar) = session.servidor_no_ar.lock() {
+        if let Some(id) = no_ar.as_deref() {
+            servidores::renomear(&config_dir(&app), id, &name);
+        }
+    }
+    Ok(())
 }
 
 /// O que a tela pode dizer sobre a imagem **antes** de alguém escolher uma.
@@ -4069,6 +4141,8 @@ fn main() {
             connect,
             hospedar,
             versoes_instaladas,
+            servidores_guardados,
+            criar_servidor,
             abrir_versao,
             abertura,
             instalar_mod,

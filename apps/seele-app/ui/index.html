@@ -371,6 +371,40 @@
 </section>
 
 <!--
+  **Os servidores desta máquina.**
+
+  Hospedar abria sempre o mesmo banco, um por máquina — o nome e a imagem já
+  sobreviviam entre uma sessão e outra; o que não havia era **mais de um**. E a
+  tela de preparar, recém-chegada, piorou o que funcionava: ela passou a
+  aparecer toda vez, inclusive para quem só queria levantar de novo o mesmo
+  servidor de sempre.
+
+  Esta tela é a resposta às duas coisas. Ela lista o que já existe, e criar é um
+  botão dentro dela e não o caminho obrigatório. Quem nunca hospedou não a vê:
+  sem nada para listar, HOSPEDAR AQUI vai direto para a de preparar.
+-->
+<section id="tela-servidores" class="tela" tabindex="-1" hidden
+         data-foco="servidores-novo" aria-labelledby="servidores-titulo"
+         data-anuncio="Os servidores desta máquina.">
+  <div class="boot-caixa">
+    <h1 id="servidores-titulo" class="boot-titulo">HOSPEDAR</h1>
+    <p class="nota">
+      Cada servidor guarda as próprias conversas, os próprios canais e quais
+      MODs estão ligados. Levantar um não toca nos outros.
+    </p>
+
+    <ul id="lista-servidores" class="server-dispositivos"></ul>
+
+    <div class="boot-saidas">
+      <button id="servidores-novo" type="button" class="botao">NOVO SERVIDOR</button>
+      <button id="servidores-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
+    </div>
+
+    <p id="servidores-erro" class="erro" role="alert" hidden></p>
+  </div>
+</section>
+
+<!--
   **Preparar o servidor, antes de levantá-lo.**
 
   HOSPEDAR AQUI levava direto ao servidor de pé, e o nome e a imagem só
