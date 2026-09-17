@@ -68,13 +68,31 @@
   `06-clientes-gui.md` obriga a haver caminho para tudo. Mover a janela pelo
   teclado continua sendo o do sistema, nos dois.
 -->
-<header id="barra-janela" class="barra-janela" data-plataforma="">
-  <span class="barra-marca">SEELE</span>
-  <span class="barra-servidor">
-    <span id="barra-servidor-nome" class="barra-servidor-nome"></span>
-    <span id="barra-servidor-sub" class="barra-servidor-sub"></span>
+<!--
+  **`data-tauri-drag-region` e não só `-webkit-app-region`.**
+
+  Relatado do uso real: «não consigo arrastar o SEELE pela barra superior no
+  Mac». O CSS pede `-webkit-app-region: drag`, e isso é um recurso do
+  Chromium: o WebView2 do Windows o entende, o **WKWebView do macOS não**.
+  Arrastar pela nossa barra nunca funcionou aqui — o que havia era a faixa de
+  título do sistema, e com `titleBarStyle: Overlay` o conteúdo da página fica
+  por cima dela.
+
+  O mecanismo do Tauri é este atributo, e ele vai em cada parte que não é
+  botão: o atributo é conferido no alvo do clique, então pô-lo só no `<header>`
+  deixaria de fora tudo o que estiver escrito nele — que é quase toda a barra.
+
+  Os botões ficam de fora de propósito, pelo mesmo motivo que já pediam
+  `no-drag`: um clique neles viraria um arrasto de zero pixel e o botão nunca
+  dispararia.
+-->
+<header id="barra-janela" class="barra-janela" data-plataforma="" data-tauri-drag-region>
+  <span class="barra-marca" data-tauri-drag-region>SEELE</span>
+  <span class="barra-servidor" data-tauri-drag-region>
+    <span id="barra-servidor-nome" class="barra-servidor-nome" data-tauri-drag-region></span>
+    <span id="barra-servidor-sub" class="barra-servidor-sub" data-tauri-drag-region></span>
   </span>
-  <time id="barra-relogio" class="barra-relogio">--:--:--</time>
+  <time id="barra-relogio" class="barra-relogio" data-tauri-drag-region>--:--:--</time>
   <span class="barra-controles">
     <button id="janela-minimizar" class="barra-controle" type="button"
             aria-label="Minimizar" title="minimizar">&#8211;</button>

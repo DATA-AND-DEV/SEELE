@@ -10732,3 +10732,62 @@ fn toda_tela_de_cartao_declara_a_propria_rolagem() {
          então o que passar da janela é cortado sem barra e sem aviso: {sem_rolagem:?}"
     );
 }
+
+/// A barra da janela arrasta pelo mecanismo que o macOS entende.
+///
+/// **Relatado do uso real:** «não consigo arrastar o SEELE pela barra superior
+/// no Mac».
+///
+/// O CSS pede `-webkit-app-region: drag`, e isso é um recurso do Chromium: o
+/// WebView2 do Windows o entende, o **WKWebView do macOS não**. Arrastar pela
+/// nossa barra nunca funcionou lá — o que havia era a faixa de título do
+/// sistema, e com `titleBarStyle: Overlay` o conteúdo da página fica por cima
+/// dela.
+///
+/// O mecanismo do Tauri é `data-tauri-drag-region`, e ele **precisa das duas
+/// metades**: o atributo na página e `core:window:allow-start-dragging` na
+/// capacidade. Faltando a segunda, o arrasto é recusado em silêncio — que é a
+/// forma exata do defeito que este repositório mais paga caro.
+///
+/// O guarda cobra as duas juntas porque é só juntas que elas valem.
+#[test]
+fn a_barra_da_janela_arrasta_nos_dois_mecanismos() {
+    let page = read("ui/index.html");
+    let css = ui_files(".css")
+        .iter()
+        .map(|name| read(&format!("ui/{name}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let capacidade = read("capabilities/janela.json");
+
+    assert!(
+        css.contains("-webkit-app-region: drag"),
+        "sem isto a barra não arrasta no Windows, onde o WebView2 é Chromium"
+    );
+    assert!(
+        page.contains("data-tauri-drag-region"),
+        "sem isto a barra não arrasta no macOS, onde o WKWebView ignora `-webkit-app-region`"
+    );
+    assert!(
+        capacidade.contains("core:window:allow-start-dragging"),
+        "o atributo está na página e a permissão não foi concedida: o Tauri recusa o \
+         arrasto sem dizer nada, e a barra fica parecendo que funciona"
+    );
+
+    // E o atributo alcança o que está **escrito** na barra, e não só a moldura
+    // dela: o Tauri confere o alvo do clique, então um `<span>` sem o atributo
+    // é um pedaço da barra que não arrasta. É quase toda a barra.
+    for dentro in ["barra-marca", "barra-servidor-nome", "barra-relogio"] {
+        let Some(at) = page.find(dentro) else {
+            panic!("`{dentro}` saiu da barra; se foi de propósito, tire-o daqui também");
+        };
+        let linha = page[..at].rfind('<').map_or("", |de| {
+            let fim = page[de..].find('>').map_or(page.len(), |f| de + f);
+            page.get(de..fim).unwrap_or("")
+        });
+        assert!(
+            linha.contains("data-tauri-drag-region"),
+            "`{dentro}` é um pedaço da barra que não arrasta: {linha}"
+        );
+    }
+}
