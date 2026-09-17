@@ -127,8 +127,9 @@ pub(crate) fn abrir(
     versao: &str,
     hospedar: bool,
     nome_publico: Option<&str>,
+    link: Option<&str>,
 ) -> Result<(), FalhaAoAbrirVersao> {
-    preparar(config, versao, hospedar, nome_publico)?
+    preparar(config, versao, hospedar, nome_publico, link)?
         .iniciar()
         .map(|_| ())
         .map_err(|erro| FalhaAoAbrirVersao::NaoIniciou(erro.to_string()))
@@ -157,6 +158,7 @@ fn preparar(
     versao: &str,
     hospedar: bool,
     nome_publico: Option<&str>,
+    link: Option<&str>,
 ) -> Result<Lancamento, FalhaAoAbrirVersao> {
     let versao = Versao::nova(versao).map_err(|_| FalhaAoAbrirVersao::IdentificadorInvalido)?;
     let deposito = Deposito::em(raiz_do_deposito(config));
@@ -178,6 +180,15 @@ fn preparar(
             argumentos.push(nome.to_owned());
         }
     }
+    // O outro motivo de abrir outra versão, e o que o ADR 0046 quer de
+    // verdade: **entrar** num servidor que roda aquela versão. O link vai
+    // inteiro — ele carrega a impressão digital, os endereços alternativos e o
+    // convite de uso único, e reconstruí-lo do outro lado a partir de pedaços
+    // seria um segundo analisador para discordar do primeiro.
+    if let Some(link) = link {
+        argumentos.push("--entrar".to_owned());
+        argumentos.push(link.to_owned());
+    }
 
     let resolvida = seele_lancador::VersaoResolvida {
         versao: instalacao.versao,
@@ -193,6 +204,163 @@ fn preparar(
     }
 
     Ok(Lancamento::de(&resolvida, argumentos))
+}
+
+/// Por que não deu para baixar e instalar uma versão.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) enum FalhaAoBaixarVersao {
+    /// Nenhum dos endereços do catálogo respondeu.
+    ///
+    /// A rede, o GitHub fora do ar, ou uma máquina sem saída. Separado de tudo
+    /// o mais porque a resposta é a mesma de sempre: tentar de novo depois.
+    CatalogoNaoRespondeu,
+    /// O catálogo respondeu e não é um catálogo, ou é mais novo que este build.
+    CatalogoNaoServe(String),
+    /// O catálogo não traz pacote para este sistema.
+    ///
+    /// No Windows isto é o estado normal e não um defeito: o que o catálogo
+    /// publica ali é um **instalador**, que instala por cima da instalação
+    /// única — não um pacote que se abra ao lado de outro. Ver a nota em
+    /// [`desempacotar_alvo`].
+    SemPacoteParaEsteSistema(String),
+    /// Já está instalada. Não é falha, e a tela diz isso em vez de um erro.
+    JaInstalada(String),
+    /// O download não completou.
+    NaoBaixei(String),
+    /// O pacote chegou e não passou na conferência, com o motivo.
+    ///
+    /// Assinatura recusada e conteúdo divergente chegam os dois por aqui **com
+    /// o nome de cada um dentro**: as respostas são opostas — «baixe de novo» e
+    /// «não tente de novo» — e uma frase só mandaria a pessoa insistir contra
+    /// um pacote adulterado.
+    PacoteRecusado(String),
+}
+
+/// O alvo deste sistema, na nomenclatura do atualizador.
+///
+/// A mesma que o `latest.json` já usa — `darwin-aarch64`, `windows-x86_64`,
+/// `linux-x86_64` —, porque o manifesto do launcher estende aquele arquivo e
+/// não inventa um segundo vocabulário para a mesma pergunta.
+#[must_use]
+pub(crate) fn alvo_deste_sistema() -> String {
+    let sistema = match std::env::consts::OS {
+        "macos" => "darwin",
+        outro => outro,
+    };
+    // A arquitetura vai como o Rust a escreve. O `match` que estava aqui
+    // mapeava `x86_64` para `x86_64` e `aarch64` para `aarch64` — clippy o
+    // apontou, com razão: era uma tabela que não traduzia nada, dando a
+    // impressão de que a nomenclatura do atualizador diverge da do Rust nesta
+    // metade. Ela diverge só no sistema, e é lá que a tabela fica.
+    format!("{sistema}-{}", std::env::consts::ARCH)
+}
+
+/// Abre um `.tar.gz` dentro da pasta de destino.
+///
+/// # O que este formato cobre, e o que ele não cobre
+///
+/// O `.app.tar.gz` do macOS e o pacote do Linux — que são o que o catálogo
+/// publica para o atualizador, e são arquivos que se abrem ao lado de outro.
+///
+/// **O Windows não passa por aqui, e é honesto dizer por quê.** O que o
+/// catálogo publica ali é um `.exe` de instalação: ele instala por cima da
+/// instalação única da máquina, mexe no registro e no menu iniciar. Abrir isso
+/// «ao lado» não é uma questão de formato — é uma coisa que aquele artefato não
+/// sabe ser. Versões lado a lado no Windows precisam de um pacote próprio no
+/// catálogo, e ele não existe ainda.
+struct DesempacotarTarGz;
+
+impl seele_lancador::Desempacotador for DesempacotarTarGz {
+    fn desempacotar(&self, pacote: &[u8], destino: &std::path::Path) -> std::io::Result<()> {
+        let leitor = flate2::read::GzDecoder::new(pacote);
+        let mut arquivo = tar::Archive::new(leitor);
+        // `unpack` já recusa caminho absoluto e `..` — o `tar` deste crate faz
+        // isso por padrão, e é a mesma defesa que o `seele-instalador` usa.
+        arquivo.unpack(destino)
+    }
+}
+
+/// Baixa do catálogo a versão mais nova e a instala ao lado das outras.
+///
+/// # A ordem, e por que ela é esta
+///
+/// Catálogo, conferência do catálogo, pacote, conferência do pacote, e só então
+/// disco. **Nada é escrito antes de a assinatura passar** — é o contrato do
+/// `Deposito::instalar`, e o motivo é o mesmo de sempre: meia instalação é o
+/// estado que ninguém sabe desfazer.
+///
+/// # Errors
+///
+/// [`FalhaAoBaixarVersao`], uma variante por motivo.
+pub(crate) async fn baixar_a_mais_nova(
+    config: &str,
+    pubkey: &str,
+    enderecos: &[String],
+) -> Result<String, FalhaAoBaixarVersao> {
+    let chave = seele_lancador::Chave::do_formato_do_atualizador(pubkey)
+        .map_err(|erro| FalhaAoBaixarVersao::CatalogoNaoServe(format!("{erro:?}")))?;
+
+    let cliente = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|erro| FalhaAoBaixarVersao::NaoBaixei(erro.to_string()))?;
+
+    // Os endereços em ordem, como o atualizador os tenta: o primeiro que
+    // responde vale. Um espelho existe justamente para o dia em que o outro
+    // está fora.
+    let mut bytes_do_catalogo = None;
+    for endereco in enderecos {
+        if let Ok(resposta) = cliente.get(endereco).send().await {
+            if resposta.status().is_success() {
+                if let Ok(bytes) = resposta.bytes().await {
+                    bytes_do_catalogo = Some(bytes.to_vec());
+                    break;
+                }
+            }
+        }
+    }
+    let Some(bytes_do_catalogo) = bytes_do_catalogo else {
+        return Err(FalhaAoBaixarVersao::CatalogoNaoRespondeu);
+    };
+
+    let manifesto = seele_lancador::Manifesto::ler(&bytes_do_catalogo, &chave)
+        .map_err(|erro| FalhaAoBaixarVersao::CatalogoNaoServe(format!("{erro:?}")))?;
+    let publicacao = manifesto.mais_nova().clone();
+    let versao_texto = publicacao.version.como_texto().to_owned();
+
+    let deposito = Deposito::em(raiz_do_deposito(config));
+    if deposito.esta_instalada(&publicacao.version) {
+        return Err(FalhaAoBaixarVersao::JaInstalada(versao_texto));
+    }
+
+    let alvo = alvo_deste_sistema();
+    let Some(pacote) = publicacao.platforms.get(&alvo) else {
+        return Err(FalhaAoBaixarVersao::SemPacoteParaEsteSistema(alvo));
+    };
+    let Some(url) = pacote.url() else {
+        return Err(FalhaAoBaixarVersao::SemPacoteParaEsteSistema(alvo));
+    };
+
+    let bytes = cliente
+        .get(url)
+        .send()
+        .await
+        .map_err(|erro| FalhaAoBaixarVersao::NaoBaixei(erro.to_string()))?
+        .bytes()
+        .await
+        .map_err(|erro| FalhaAoBaixarVersao::NaoBaixei(erro.to_string()))?;
+
+    // O trabalho pesado sai da Tokio: conferir a assinatura e abrir o arquivo
+    // são CPU e disco, e segurá-los aqui prenderia o executor da janela.
+    let raiz = raiz_do_deposito(config);
+    tauri::async_runtime::spawn_blocking(move || {
+        Deposito::em(raiz).instalar(&publicacao, &alvo, &bytes, &chave, &DesempacotarTarGz)
+    })
+    .await
+    .map_err(|erro| FalhaAoBaixarVersao::NaoBaixei(erro.to_string()))?
+    .map_err(|erro| FalhaAoBaixarVersao::PacoteRecusado(format!("{erro:?}")))?;
+
+    Ok(versao_texto)
 }
 
 #[cfg(test)]
@@ -245,7 +413,7 @@ mod o_launcher_ligado_ao_produto {
         let config = raiz.to_string_lossy().into_owned();
         deposito_com(&raiz, "0.10.5", "bin/seele");
 
-        let lancamento = preparar(&config, "0.10.5", true, Some("casa.exemplo.br"))
+        let lancamento = preparar(&config, "0.10.5", true, Some("casa.exemplo.br"), None)
             .expect("uma versão instalada e com procedência tem de preparar");
 
         let deposito = Deposito::em(super::raiz_do_deposito(&config));
@@ -281,6 +449,31 @@ mod o_launcher_ligado_ao_produto {
     }
 
     #[test]
+    fn entrar_num_servidor_leva_o_link_inteiro_para_a_versao_aberta() {
+        // **O coração do ADR 0046**: quem clica num `seele://` de um servidor
+        // que roda outra versão tem aquela versão aberta, já indo para lá.
+        //
+        // O link vai **inteiro**, e não em pedaços: ele carrega a impressão
+        // digital, os endereços alternativos e o convite de uso único.
+        // Remontá-lo do outro lado a partir de campos seria um segundo
+        // analisador de URI para discordar do primeiro — e o que se perderia
+        // primeiro é justamente a impressão digital, que é a única coisa que
+        // prova que o servidor do outro lado é o do link.
+        let raiz = pasta("entrar");
+        let config = raiz.to_string_lossy().into_owned();
+        deposito_com(&raiz, "0.10.5", "bin/seele");
+        let link = format!("seele://casa.exemplo:8383/?fp={}", "a".repeat(64));
+
+        let lancamento = preparar(&config, "0.10.5", false, None, Some(&link)).expect("preparar");
+        assert_eq!(
+            lancamento.argumentos,
+            vec!["--entrar".to_owned(), link.clone()],
+            "o link não atravessou para a versão aberta, ou atravessou partido"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[test]
     fn sem_pedir_para_hospedar_nenhum_argumento_atravessa() {
         // A outra metade: um lançamento que sempre mandasse `--hospedar`
         // passaria no teste de cima e faria toda abertura virar hospedagem.
@@ -289,7 +482,7 @@ mod o_launcher_ligado_ao_produto {
         deposito_com(&raiz, "0.10.5", "bin/seele");
 
         let lancamento =
-            preparar(&config, "0.10.5", false, Some("casa.exemplo.br")).expect("preparar");
+            preparar(&config, "0.10.5", false, Some("casa.exemplo.br"), None).expect("preparar");
         assert!(
             lancamento.argumentos.is_empty(),
             "abrir sem pedir para hospedar mandou argumento assim mesmo"
@@ -304,12 +497,12 @@ mod o_launcher_ligado_ao_produto {
         deposito_com(&raiz, "0.10.5", "bin/seele");
 
         assert!(matches!(
-            preparar(&config, "nao/e/uma/versao", true, None),
+            preparar(&config, "nao/e/uma/versao", true, None, None),
             Err(FalhaAoAbrirVersao::IdentificadorInvalido)
         ));
         assert!(
             matches!(
-                preparar(&config, "9.9.9", true, None),
+                preparar(&config, "9.9.9", true, None, None),
                 Err(FalhaAoAbrirVersao::NaoInstalada)
             ),
             "uma versão que não está no disco tem de dizer isso, e não «não \
@@ -323,7 +516,7 @@ mod o_launcher_ligado_ao_produto {
         std::fs::write(deposito.pasta_da_versao(&v).join("INSTALADA"), b"0.10.5\n").unwrap();
         assert!(
             matches!(
-                preparar(&config, "0.10.5", true, None),
+                preparar(&config, "0.10.5", true, None, None),
                 Err(FalhaAoAbrirVersao::SemProcedencia)
             ),
             "uma instalação sem procedência tem de ser separada de uma ausente: \
@@ -372,7 +565,7 @@ mod o_launcher_ligado_ao_produto {
         let raiz = pasta("nao-inicia");
         let config = raiz.to_string_lossy().into_owned();
         deposito_com(&raiz, "0.10.5", "bin/seele");
-        let resultado = abrir(&config, "0.10.5", false, None);
+        let resultado = abrir(&config, "0.10.5", false, None, None);
         assert!(
             matches!(resultado, Err(FalhaAoAbrirVersao::NaoIniciou(_))) || resultado.is_ok(),
             "o caminho de abrir devolveu algo que não é nem sucesso nem \

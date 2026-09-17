@@ -525,7 +525,23 @@ async function cumprirAAbertura() {
   } catch {
     return;
   }
-  if (!pedido || !pedido.hospedar) return;
+  if (!pedido) return;
+  // **Entrar vem antes de hospedar**, e os dois nunca chegam juntos: o launcher
+  // manda um ou outro. A ordem é escrita assim mesmo para que, no dia em que
+  // alguém passar os dois, o que aconteça seja o que a pessoa pediu ao clicar
+  // num link — e não um servidor subindo sozinho por baixo dela.
+  if (pedido.entrar) {
+    try {
+      const convite = await invoke("analisar_convite", { link: pedido.entrar });
+      await conectar(convite.alvo, null, convite.token ?? null);
+    } catch (falha) {
+      const erro = $("boot-erro");
+      erro.hidden = false;
+      erro.textContent = fraseDeErro(falha);
+    }
+    return;
+  }
+  if (!pedido.hospedar) return;
   if (pedido.nome_publico) {
     $("campo-nome-publico").value = pedido.nome_publico;
   }

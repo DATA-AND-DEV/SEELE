@@ -50,11 +50,12 @@ repositório já pagou caro por isso.
 
 ### O que esta versão **não** carrega, e podia parecer que carrega
 
-- **O indexador de MODs não está no ar.** Os MODs funcionam entre quem já tem os
-  arquivos; nenhum MOD de terceiro tem como chegar a ninguém.
-- **O launcher não baixa versão.** Ele lista e abre o que já está instalado
-  nesta máquina. Baixar precisa do catálogo, e continua sendo do botão de
-  atualizar.
+- **O indexador de MODs não está no ar.** Instalar um MOD é apontar para uma
+  pasta que já está na máquina; não há catálogo de onde baixar um, e não há
+  verificação de assinatura de MOD.
+- **Versões lado a lado não valem no Windows.** O que o catálogo publica ali é
+  um instalador `.exe`, que instala por cima da instalação única da máquina.
+  Guardar versões ao lado precisa de um pacote que se abra numa pasta.
 
 ## 1 · Estreitada em 2026-08-17 · Rajada perde entrega quando um par para de ler
 

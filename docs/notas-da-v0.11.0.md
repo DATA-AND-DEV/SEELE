@@ -66,6 +66,17 @@ resposta que vai **só para quem perguntou**, em vez de sair pelo barramento que
 todo mundo lê. A identidade de quem pergunta é escrita pelo servidor a partir da
 sessão autenticada, nunca pelo pedido — um cliente que a forje não muda nada.
 
+E as duas telas, sem as quais nada disso era usável. **Ao entrar** num servidor
+que exige MODs, uma tela mostra a lista antes de qualquer byte: quem é cada MOD,
+que versão, que hash, de que repositório, o que ele alcança, e quais rodam na
+máquina de quem hospeda. Aceitar vale para aquela combinação; trocou um MOD, a
+pergunta volta — e a tela avisa quando o servidor mudou a lista desde o seu
+último sim. **Em CONFIGURAÇÕES · MODS**, quem hospeda instala um MOD de uma
+pasta, liga e desliga; e qualquer pessoa vê a quem já disse sim e pode desfazer.
+
+Até esta versão nada disso tinha tela: um servidor com MOD habilitado
+simplesmente **não tinha como ser entrado** pelo aplicativo.
+
 ### Trocar de fone ou de microfone vale na hora
 
 Era preciso reiniciar o aplicativo. O produto ignorava o aviso que o sistema já
@@ -100,13 +111,25 @@ e não só escondida na tela.
 
 ### Versões lado a lado
 
-O núcleo do launcher entra ligado ao produto: o app lista as versões instaladas
-nesta máquina e abre outra, já hospedando, com os dados dela em separado. É o
-pedido de quem hospeda com MODs feitos para uma versão anterior.
+O app vira launcher, e as três metades estão de pé.
 
-**O que ainda não faz:** baixar uma versão que não está instalada. Isso precisa
-do catálogo, que vem da rede, e continua sendo trabalho do botão de atualizar.
-O que existe funciona offline.
+**Guardar uma versão ao lado** — em CONFIGURAÇÕES · VERSÕES, o botão baixa do
+catálogo a mais nova e a guarda **sem substituir** a que está aberta. Cada
+versão tem o diretório de dados dela.
+
+**Hospedar com outra versão** — na tela de entrada, quando há mais de uma
+guardada.
+
+**E entrar num servidor abre a versão daquele servidor**, que é a frase da
+decisão. A versão que hospeda viaja no próprio `seele://`, e é lida **antes** de
+conectar: um servidor de uma versão anterior pode falar um protocolo que este
+cliente já não alcança, e seria recusado com «versão incompatível» sem chegar a
+dizer uma palavra sobre si. O link chega antes disso.
+
+**O que não vale no Windows:** o que o catálogo publica ali é um instalador
+`.exe`, que instala por cima da instalação única da máquina. Guardar versões ao
+lado precisa de um pacote que se abra numa pasta, e ele ainda não existe no
+catálogo para Windows.
 
 ### Um link com nome, em vez de um número que muda
 
@@ -187,8 +210,13 @@ tem relato de campo em aberto.
 - **O caminho de Windows do som da tela não é compilado no Mac de quem fechou
   esta versão** (pendência 46). A parte que decide foi tirada de dentro do `cfg`
   e é testada; o que sobra sem compilação é uma chamada e um `match`.
-- **O indexador de MODs não está no ar**, então nenhum MOD de terceiro tem como
-  chegar a ninguém ainda.
+- **O indexador de MODs não está no ar**, então não há catálogo de onde baixar
+  um MOD: instalar é apontar para uma pasta que já está na máquina. E não há
+  verificação de assinatura de MOD — por isso a tela de aceite mostra hash e
+  repositório, e **não** mostra selo de «oficial» ou «verificado»: um selo que o
+  código não sustenta é justamente aquilo em que alguém se apoiaria para dizer
+  sim sem ler o resto.
+- **Versões lado a lado não valem no Windows**, pelo motivo acima.
 - **Descer de versão não leva as conversas junto.** Cada versão tem o próprio
   diretório de dados, de propósito, e o produto diz isso na tela.
 

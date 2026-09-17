@@ -3259,6 +3259,11 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
             // metade dela, os aceites, vale justamente para quem só entra nos
             // servidores dos outros.
             "secao-mods",
+            // VERSÕES, vizinha de MODS e não de ATUALIZAÇÃO — e a vizinhança é
+            // o argumento. Uma versão guardada ao lado existe **por causa** de
+            // um MOD feito para ela; ATUALIZAÇÃO é a outra coisa, trocar a
+            // versão em uso por uma mais nova, substituindo.
+            "secao-versoes",
             // The fourth is not the comp's — it predates the update button
             // existing at all (ADR 0026). It lands here because what this screen
             // adjusts is *this machine*, and which SEELE is installed on it is

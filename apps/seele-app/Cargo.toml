@@ -21,6 +21,11 @@ seele-server = { path = "../../crates/seele-server" }
 # junto de nenhuma versão do produto. A peça que decide entre a 0.10.5 e a
 # 0.11.0 não pode ser parte de uma delas.
 seele-lancador = { path = "../../crates/seele-lancador" }
+# Abrir o pacote de uma versão baixada do catálogo — ADR 0046. As mesmas duas
+# que o `seele-instalador` usa, e pelo mesmo motivo: é o formato que o
+# atualizador já publica.
+tar = "0.4"
+flate2 = "1"
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 # Não é escolha de arquitetura: `tauri::generate_context!` gera código que

@@ -105,6 +105,22 @@ pub struct Convite {
     pub token: Option<String>,
     /// sala de voz a entrar assim que conectar.
     pub voice_room: Option<u32>,
+    /// Qual versão do SEELE hospeda este servidor, quando o link a traz.
+    ///
+    /// # Por que ela viaja no link, e não no fio
+    ///
+    /// Porque é **antes** de conectar que ela serve. O ADR 0046 quer que, ao
+    /// entrar num servidor, o cliente rode a versão daquele servidor — e a
+    /// janela em que essa decisão precisa ser tomada é a que existe antes de
+    /// qualquer aperto de mão. Um servidor de uma versão anterior pode falar um
+    /// protocolo que este cliente já não alcança: ele é recusado com
+    /// `Incompatible` sem chegar a dizer uma palavra sobre si. O link chega
+    /// antes disso, por uma conversa, e não depende de protocolo nenhum.
+    ///
+    /// `None` num link de antes deste campo, e num link de um servidor que não
+    /// sabe a própria versão — um build feito à mão. Nos dois casos quem lê
+    /// segue como sempre seguiu: tenta com o que tem.
+    pub versao: Option<String>,
 }
 
 impl Convite {
@@ -118,7 +134,15 @@ impl Convite {
             impressao_digital: None,
             token: None,
             voice_room: None,
+            versao: None,
         }
+    }
+
+    /// Diz que versão hospeda este servidor.
+    #[must_use]
+    pub fn com_versao(mut self, versao: impl Into<String>) -> Self {
+        self.versao = Some(versao.into());
+        self
     }
 
     /// Acrescenta o bilhete de encontro. Degrau 4 do ADR 0022.
@@ -361,6 +385,14 @@ impl fmt::Display for Convite {
         }
         if let Some(voice_room) = self.voice_room {
             write!(formatador, "{separador}room={voice_room}")?;
+            separador = '&';
+        }
+        // **Por último**, e é a mesma ordem de sempre: o que fica no fim é o
+        // que pode sumir numa colagem cortada sem custar a entrada. Um link sem
+        // a versão continua entrando — perde-se a escolha da versão, não o
+        // servidor.
+        if let Some(versao) = &self.versao {
+            write!(formatador, "{separador}v={versao}")?;
         }
         Ok(())
     }
@@ -426,6 +458,26 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
             "enc" => convite.bilhete = Some(Bilhete::ler(valor)?),
             "room" => {
                 convite.voice_room = Some(valor.parse().map_err(|_| ErroDeUri::VoiceRoomInvalido)?);
+            }
+            // A versão que hospeda, para o launcher decidir antes de conectar.
+            //
+            // **Conferida como versão**, e não aceita como texto: ela vira nome
+            // de pasta no depósito de versões, e um valor com `..` ou com barra
+            // seria travessia de diretório vinda de um link colado de uma
+            // conversa. O `seele-lancador` tem a regra; aqui fica a forma
+            // mínima que impede o pior, porque `seele-proto` não pode depender
+            // dele — e um valor que não passa é **ignorado**, e não recusado:
+            // recusar o link inteiro por causa de um campo novo malformado
+            // trancaria a pessoa fora de um servidor que ela alcança.
+            "v" => {
+                let serve = !valor.is_empty()
+                    && valor.len() <= 64
+                    && valor
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '+');
+                if serve {
+                    convite.versao = Some(valor.to_owned());
+                }
             }
             // Parâmetro desconhecido é ignorado, e de propósito: é o que
             // permite acrescentar um campo depois sem que clientes velhos
@@ -1217,5 +1269,52 @@ mod o_nome_publico {
         let texto = super::Convite::novo(nome.clone()).to_string();
         let de_volta = super::analisar(&texto).expect("o link montado tem de analisar");
         assert_eq!(de_volta.alvo, nome);
+    }
+}
+
+#[cfg(test)]
+mod a_versao_no_link {
+    use super::{analisar, Convite};
+
+    #[test]
+    fn ela_atravessa_inteira_e_volta() {
+        let texto = Convite::novo("casa.exemplo:8383")
+            .com_impressao_digital("a".repeat(64))
+            .com_versao("0.11.0")
+            .to_string();
+        assert!(texto.ends_with("&v=0.11.0"), "{texto}");
+        assert_eq!(
+            analisar(&texto).expect("o link montado analisa").versao,
+            Some("0.11.0".to_owned())
+        );
+    }
+
+    #[test]
+    fn um_link_sem_versao_continua_sendo_um_link() {
+        // A compatibilidade nos dois sentidos, que é a regra desta página: um
+        // convite de antes deste campo vira `None`, e um cliente de antes lê
+        // `v` como parâmetro desconhecido e o ignora.
+        let velho = "seele://casa.exemplo:8383/?fp=".to_owned() + &"a".repeat(64);
+        assert_eq!(analisar(&velho).expect("analisa").versao, None);
+    }
+
+    #[test]
+    fn uma_versao_que_nao_serve_e_ignorada_sem_derrubar_o_link() {
+        // **Ignorada e não recusada.** Este valor vira nome de pasta no
+        // depósito de versões, então `..` e barra não podem passar — e recusar
+        // o link inteiro por causa dele trancaria a pessoa fora de um servidor
+        // que ela alcança perfeitamente.
+        for veneno in ["../../etc", "a/b", "com espaço", "", &"x".repeat(65)] {
+            let texto = format!(
+                "seele://casa.exemplo:8383/?fp={}&v={veneno}",
+                "a".repeat(64)
+            );
+            let lido = analisar(&texto).expect("o link continua valendo");
+            assert_eq!(
+                lido.versao, None,
+                "«{veneno}» passou como versão e vira nome de pasta"
+            );
+            assert_eq!(lido.alvo, "casa.exemplo:8383", "o alvo se perdeu junto");
+        }
     }
 }

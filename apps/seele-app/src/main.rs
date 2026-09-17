@@ -145,6 +145,14 @@ struct Abertura {
     hospedar: bool,
     /// O nome público que ela escolheu, quando escolheu.
     nome_publico: Option<String>,
+    /// O servidor em que entrar assim que a janela subir, como link inteiro.
+    ///
+    /// É o coração do ADR 0046: quem clica num `seele://` de um servidor que
+    /// roda outra versão tem **aquela** versão aberta, já indo para lá. O link
+    /// vai inteiro porque ele carrega a impressão digital e o convite de uso
+    /// único — e um link remontado de pedaços é um segundo analisador para
+    /// discordar do primeiro.
+    entrar: Option<String>,
 }
 
 impl Abertura {
@@ -165,6 +173,7 @@ impl Abertura {
                 // forma que o `Lancamento` monta, e aceitar as duas seria
                 // aceitar uma que ninguém produz.
                 "--nome-publico" => aberta.nome_publico = argumentos.next(),
+                "--entrar" => aberta.entrar = argumentos.next(),
                 _ => {}
             }
         }
@@ -698,6 +707,7 @@ fn abrir_versao(
     versao: String,
     hospedar: bool,
     nome_publico: Option<String>,
+    link: Option<String>,
 ) -> Result<(), versoes::FalhaAoAbrirVersao> {
     // O nome público é conferido **aqui também**, e não só no `hospedar`: ele
     // vai virar argumento de linha de comando de outro processo, e um nome com
@@ -717,7 +727,22 @@ fn abrir_versao(
         },
         None => None,
     };
-    versoes::abrir(&config_dir(&app), &versao, hospedar, nome.as_deref())
+    // O link é conferido antes de virar argumento de outro processo: um texto
+    // que não é um `seele://` não deve ser repassado como se fosse.
+    let link = match link.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        Some(bruto) => match seele_ffi::uri::analisar(bruto) {
+            Ok(_) => Some(bruto.to_owned()),
+            Err(_) => return Err(versoes::FalhaAoAbrirVersao::IdentificadorInvalido),
+        },
+        None => None,
+    };
+    versoes::abrir(
+        &config_dir(&app),
+        &versao,
+        hospedar,
+        nome.as_deref(),
+        link.as_deref(),
+    )
 }
 
 /// Sobe um servidor dentro do app e devolve o link do convite.
@@ -1976,6 +2001,56 @@ async fn instalar_mod(app: AppHandle) -> Result<Option<String>, mods::FalhaAoIns
     mods::instalar_de(std::path::Path::new(&config_dir(&app)), &pasta).map(Some)
 }
 
+/// Baixa do catálogo a versão mais nova e a instala ao lado das outras.
+///
+/// # De onde saem a chave e os endereços
+///
+/// Do `tauri.conf.json`, do mesmo bloco do atualizador — e não de constantes
+/// próprias. Duas listas de endereços para o mesmo catálogo divergiriam no dia
+/// em que uma delas mudasse, e a que ficasse velha apontaria para um lugar que
+/// não publica mais. A chave pública é a mesma pelo mesmo motivo: o ADR 0026 a
+/// tem como a única que autoriza instalar programa nesta máquina.
+///
+/// # Errors
+///
+/// [`versoes::FalhaAoBaixarVersao`], uma variante por motivo.
+#[tauri::command]
+async fn baixar_versao(app: AppHandle) -> Result<String, versoes::FalhaAoBaixarVersao> {
+    let atualizador = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let pubkey = atualizador
+        .get("pubkey")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let enderecos: Vec<String> = atualizador
+        .get("endpoints")
+        .and_then(serde_json::Value::as_array)
+        .map(|lista| {
+            lista
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if pubkey.is_empty() || enderecos.is_empty() {
+        // Um build sem o bloco do atualizador não tem catálogo a consultar, e
+        // dizer isso é melhor que tentar e falhar na rede: o motivo é outro e
+        // o conserto é outro.
+        return Err(versoes::FalhaAoBaixarVersao::CatalogoNaoServe(
+            "este build não declara catálogo nem chave".to_owned(),
+        ));
+    }
+    versoes::baixar_a_mais_nova(&config_dir(&app), &pubkey, &enderecos).await
+}
+
 /// Se **esta janela** está hospedando um servidor agora.
 ///
 /// # Por que a tela precisa perguntar isto separado
@@ -2930,6 +3005,18 @@ struct ConviteLido {
     alvo: String,
     /// O convite de uso único, quando o link trouxe um.
     token: Option<String>,
+    /// Que versão do SEELE hospeda este servidor, quando o link a traz.
+    ///
+    /// ADR 0046. `None` num link de antes deste campo, ou de um servidor que
+    /// não sabe a própria versão.
+    versao: Option<String>,
+    /// Se essa versão é diferente da que está rodando **e** está instalada aqui.
+    ///
+    /// Respondido no Rust e não na casca: comparar duas cadeias seria fácil de
+    /// escrever ali e fácil de errar — a resposta depende de saber qual versão
+    /// é esta, o que só o `option_env!` do build sabe, e de olhar o depósito,
+    /// que é disco. A casca recebe o veredito.
+    pode_abrir_naquela_versao: bool,
 }
 
 /// Lê um `seele://` colado.
@@ -2938,13 +3025,30 @@ struct ConviteLido {
 /// segundo analisador de URI seria um segundo conjunto de casos de borda para
 /// discordar do primeiro.
 #[tauri::command]
-fn analisar_convite(session: State<'_, Session>, link: String) -> Result<ConviteLido, String> {
+fn analisar_convite(
+    app: AppHandle,
+    session: State<'_, Session>,
+    link: String,
+) -> Result<ConviteLido, String> {
     let convite =
         seele_ffi::uri::analisar(&link).map_err(|erro| nome_da_falha(&erro).to_owned())?;
+
+    // A versão que o link anuncia, e se dá para abri-la aqui. Ver ADR 0046: é
+    // **antes** de conectar que esta pergunta serve, porque um servidor de uma
+    // versão anterior pode falar um protocolo que este cliente já não alcança.
+    let versao = convite.versao.clone();
+    let pode_abrir_naquela_versao = versao.as_deref().is_some_and(|pedida| {
+        versoes::em_uso() != Some(pedida)
+            && versoes::instaladas(&config_dir(&app))
+                .iter()
+                .any(|instalada| instalada.versao == pedida && instalada.abrivel)
+    });
 
     let lido = ConviteLido {
         alvo: convite.alvo.clone(),
         token: convite.token.clone(),
+        versao,
+        pode_abrir_naquela_versao,
     };
 
     // Guardado inteiro deste lado da ponte. Ver o campo em `Session`.
@@ -3922,6 +4026,7 @@ fn main() {
             instalar_mod,
             aceites_de_mods,
             estou_hospedando,
+            baixar_versao,
             disconnect,
             snapshot,
             messages,

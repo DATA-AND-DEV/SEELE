@@ -2011,6 +2011,24 @@
             </span>
           </button>
         </li>
+        <li>
+          <!--
+            VERSÕES — ADR 0046. Vizinha de MODS e não de ATUALIZAÇÃO, e a
+            vizinhança é o argumento: uma versão guardada ao lado existe **por
+            causa** de um MOD feito para ela. ATUALIZAÇÃO é a outra coisa —
+            trocar a versão em uso por uma mais nova, substituindo.
+          -->
+          <button id="secao-versoes" class="server-secao" type="button"
+                  data-painel="painel-versoes"
+                  data-titulo="VERSÕES"
+                  data-sub="As versões guardadas nesta máquina, lado a lado">
+            <span class="server-secao-icone" data-glifo="chave"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">VERSÕES</span>
+              <span class="nota">Lado a lado</span>
+            </span>
+          </button>
+        </li>
         <!--
           A quinta, e a única que o comp v3 não desenha: ele foi feito antes de
           existir um botão de atualizar. Ela é desta tela e não de outra pelo
@@ -2514,6 +2532,39 @@
                 <p class="nota">Desfazer um sim faz a lista de MODs daquele
                   servidor ser perguntada de novo na próxima entrada. Um
                   consentimento que não se retira não é consentimento.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------------- VERSÕES -->
+        <!--
+          ADR 0046. **Diferente de ATUALIZAÇÃO**, e a diferença é a decisão
+          inteira: ali se troca a versão em uso por uma mais nova, substituindo;
+          aqui se guarda uma versão **ao lado**, sem tirar nada.
+
+          Por que alguém guardaria: um MOD é feito para uma versão. Quem hospeda
+          com MODs de uma versão anterior precisa dela de pé, e o ADR promete
+          que toda versão publicada continua hospedável para sempre, exceto as
+          revogadas.
+        -->
+        <section id="painel-versoes" class="server-painel-secao"
+                 aria-labelledby="secao-versoes" hidden>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">GUARDADAS NESTA MÁQUINA</h3>
+              <p class="nota">Cada versão tem os dados dela, em separado</p>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <ul id="lista-versoes-instaladas" class="server-dispositivos mods-rolagem"></ul>
+                <button id="versoes-baixar" class="botao" type="button">GUARDAR A MAIS NOVA DO CATÁLOGO</button>
+                <p id="versoes-estado" class="nota" role="status"></p>
+                <p class="nota">Guardar uma versão <b>não substitui</b> a que
+                  está aberta. Entrar num servidor que roda outra versão abre
+                  aquela versão sozinho, quando ela está aqui.</p>
+                <p class="nota">Descer de versão não leva as conversas junto:
+                  cada uma escreve no diretório dela.</p>
               </div>
             </div>
           </div>
@@ -3233,6 +3284,7 @@
 <script src="camada-ajuda.js"></script>
 <script src="camada-nomear.js"></script>
 <script src="camada-mods.js"></script>
+<script src="camada-versoes.js"></script>
 <script src="camada-servidores.js"></script>
 <!--
   Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,

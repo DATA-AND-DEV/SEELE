@@ -135,6 +135,9 @@ function abrirSecao(id) {
     if (atual && botao.dataset.painel === "painel-mods") {
       desenharMods().catch((falha) => console.warn("mods:", falha));
     }
+    if (atual && botao.dataset.painel === "painel-versoes") {
+      desenharPainelDeVersoes().catch((falha) => console.warn("versões:", falha));
+    }
   }
 }
 

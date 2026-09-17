@@ -4982,6 +4982,7 @@ name = "seele-app"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "image",
  "reqwest",
  "rustls",
@@ -4990,6 +4991,7 @@ dependencies = [
  "seele-server",
  "serde",
  "serde_json",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

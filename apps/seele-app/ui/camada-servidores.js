@@ -174,6 +174,21 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
       // `seele://` com convite de uso único é uma credencial; ler só o
       // endereço dele é chegar sem ela, e o servidor recusa na porta.
       token = convite.token ?? null;
+      // **O servidor roda outra versão, e ela está aqui** — ADR 0046.
+      //
+      // Perguntado antes de conectar de propósito: um servidor de uma versão
+      // anterior pode falar um protocolo que este cliente já não alcança, e
+      // seria recusado com «versão incompatível» sem chegar a dizer uma palavra
+      // sobre si. O link chega antes disso.
+      //
+      // Só quando a versão **está instalada**: oferecer abrir o que não está
+      // no disco seria um botão que falha. Baixá-la é o outro caminho, e o
+      // botão dele fica em CONFIGURAÇÕES · VERSÕES.
+      if (convite.pode_abrir_naquela_versao) {
+        fecharServidores();
+        abrirNaVersaoDoServidor(convite.versao, escrito);
+        return;
+      }
     } catch (falha) {
       console.warn("analisar_convite:", falha);
       recusarServidor(fraseDeErro(falha));
