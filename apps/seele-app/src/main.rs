@@ -2045,7 +2045,6 @@ async fn mods_instalados(
 }
 
 /// Liga um MOD no servidor que este processo hospeda.
-#[tauri::command]
 async fn habilitar_mod(
     app: AppHandle,
     session: State<'_, Session>,
@@ -2076,12 +2075,75 @@ async fn habilitar_mod(
 }
 
 /// Desliga um MOD. Os dados dele ficam — ADR 0045.
-#[tauri::command]
 async fn desabilitar_mod(session: State<'_, Session>, id: String) -> Result<(), FalhaNoMod> {
     let persistence = persistence_do_mod(&session)?;
     let persistence = persistence.lock().await;
     seele_server::persistence::mods::disable(&persistence, &id)
         .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+}
+
+/// Muda o conjunto deste servidor **e** registra o sim desta máquina a ele.
+///
+/// **A04 da auditoria de 17/09.** `habilitar_mod` gravava a exigência no banco
+/// do servidor e não registrava consentimento nenhum no cliente local. O
+/// servidor então encerra as conexões cujo conjunto aceito mudou — sem
+/// distinguir quem fez a mudança —, e na entrada seguinte quem acabara de
+/// ligar o MOD via a tela genérica de aceite, para decidir de novo o que tinha
+/// acabado de decidir.
+///
+/// Instalar, exigir num servidor e consentir com execução nesta máquina são
+/// três decisões tecnicamente diferentes. Duas delas são da **mesma pessoa no
+/// mesmo instante**, e expor a separação interna como duas perguntas iguais é
+/// cobrar dela o preço de um detalhe de implementação.
+///
+/// # O que isto **não** é
+///
+/// Não é isenção por papel. Não há atalho por «é localhost», «é administrador»
+/// ou «é o dono» — nada aqui olha para quem pediu. O que se registra é a
+/// decisão que a pessoa acabou de tomar, **para o conjunto exato que resulta
+/// dela** e para o endereço desta sessão. Um servidor alterado depois, por
+/// outro processo ou outro operador, produz outro conjunto, e outro conjunto
+/// volta a perguntar — que é a proteção que o ADR 0045 existe para dar.
+///
+/// Sem sessão não há endereço a que prender um sim, e aí só a exigência é
+/// gravada. É o caso de uma janela que hospeda sem ter entrado, e ele não é
+/// erro.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando o MOD não serve, quando esta janela não hospeda, ou
+/// quando o banco não responde.
+#[tauri::command]
+async fn aplicar_mod(
+    app: AppHandle,
+    session: State<'_, Session>,
+    id: String,
+    ligar: bool,
+) -> Result<String, FalhaNoMod> {
+    if ligar {
+        habilitar_mod(app.clone(), session.clone(), id).await?;
+    } else {
+        desabilitar_mod(session.clone(), id).await?;
+    }
+
+    // A identidade do conjunto **resultante**, lida do banco depois da mudança
+    // e pela mesma função que o anúncio usa. Calculá-la aqui de outro jeito
+    // seria uma segunda definição do que é «o mesmo conjunto», e as duas
+    // discordariam no dia em que um campo entrasse no anúncio.
+    let persistence = persistence_do_mod(&session)?;
+    let identidade = {
+        let persistence = persistence.lock().await;
+        seele_server::mods::anuncio::conjunto_exigido(&persistence)
+            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+            .identidade
+    };
+
+    let alvo = session.alvo.lock().ok().and_then(|a| a.clone());
+    if let Some(alvo) = alvo {
+        seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
+            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    }
+    Ok(identidade)
 }
 
 // --------------------------------------------- o aceite de quem entra
@@ -4214,8 +4276,7 @@ fn main() {
             tirar_icone_do_server,
             mods_instalados,
             mod_request,
-            habilitar_mod,
-            desabilitar_mod,
+            aplicar_mod,
             aceite_de_mods,
             aceitar_mods,
             esquecer_aceite_de_mods,

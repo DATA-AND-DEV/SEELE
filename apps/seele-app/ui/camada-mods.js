@@ -260,9 +260,7 @@ function linhaDeModInstalado(mod, hospedando) {
   // logo abaixo da lista: um botão morto sem motivo é uma pergunta sem resposta.
   botao.disabled = !hospedando;
   botao.addEventListener("click", () => {
-    trocarOMod(mod.id, !mod.enabled).catch((falha) =>
-      console.warn("trocar mod:", falha),
-    );
+    perguntarETrocarOMod(mod);
   });
   caixa.append(botao);
 
@@ -270,21 +268,68 @@ function linhaDeModInstalado(mod, hospedando) {
   return linha;
 }
 
+/**
+ * Pergunta antes de mudar o que a sala exige — A04 e A08 da auditoria.
+ *
+ * **Ligar era uma decisão que virava duas perguntas.** A exigência era gravada
+ * no servidor e nenhum consentimento era registrado nesta máquina; o servidor
+ * então encerra as conexões cujo conjunto mudou, e na entrada seguinte quem
+ * acabara de ligar via a tela genérica de aceite, para decidir de novo o que
+ * tinha acabado de decidir. Agora é uma decisão só, dita por inteiro.
+ *
+ * **E desligar não é uma ação sem impacto.** Ela parece mais branda que ligar e
+ * derruba as mesmas sessões, pelo mesmo motivo: o conjunto mudou. A pendência
+ * 44 já dizia isso.
+ *
+ * O que muda de verdade é dito com o dado que a ponte já manda:
+ * `exigencia_vale_na_rede` responde se a exigência **barra** alguém hoje, e não
+ * só se está gravada. Sem ele a frase prometeria uma tranca que pode estar
+ * dormente.
+ */
+function perguntarETrocarOMod(mod) {
+  const ligar = !mod.enabled;
+  const alcance = (mod.reach ?? []).join(", ");
+  const derruba = mod.exigencia_vale_na_rede;
+
+  const linhas = ligar
+    ? [
+        `«${mod.id}» passa a ser exigido neste servidor.`,
+        alcance ? `Ele declara alcançar: ${alcance}.` : "Ele não declara alcance nenhum.",
+        mod.server
+          ? "Metade dele roda na máquina de quem hospeda — a sua."
+          : "Ele roda só na janela de quem entra.",
+        derruba
+          ? "Quem está dentro agora cai e precisa aceitar de novo, no aparelho de cada um."
+          : "A exigência fica gravada, mas hoje ela não barra ninguém na rede.",
+        "Ligar aqui também registra o seu sim nesta máquina, para este conjunto exato — " +
+          "você não vai ser perguntado outra vez pela decisão que acabou de tomar.",
+      ]
+    : [
+        `«${mod.id}» deixa de ser exigido neste servidor.`,
+        derruba
+          ? "Quem está dentro agora cai igual, e precisa entrar de novo: desligar muda o " +
+            "conjunto tanto quanto ligar."
+          : "Quem está dentro agora cai igual: desligar muda o conjunto tanto quanto ligar.",
+        "O MOD continua instalado nesta máquina. Isto não apaga nada.",
+      ];
+
+  abrirConfirmacao(
+    ligar ? "EXIGIR NESTE SERVIDOR E USAR NESTE COMPUTADOR" : "DEIXAR DE EXIGIR",
+    linhas.join("\n"),
+    ligar ? "LIGAR" : "DESLIGAR",
+    () => trocarOMod(mod.id, ligar),
+  );
+}
+
 /** Liga ou desliga, e redesenha. */
 async function trocarOMod(id, ligar) {
   const erro = $("mods-gestao-erro");
   erro.hidden = true;
   try {
-    // Os dois nomes escritos por extenso, e não um `invoke(condição ? a : b)`.
-    // Um nome de comando computado é invisível para
-    // `no_command_is_registered_and_never_called`, que existe justamente para
-    // achar o comando que ninguém chama — e um guarda cego é pior que guarda
-    // nenhum, porque ele continua verde.
-    if (ligar) {
-      await invoke("habilitar_mod", { id });
-    } else {
-      await invoke("desabilitar_mod", { id });
-    }
+    // **Um comando, e não dois.** Mudar a exigência e registrar o sim desta
+    // máquina ao conjunto resultante são a mesma decisão, e separá-los era o
+    // que fazia o servidor perguntar de novo a quem acabara de responder.
+    await invoke("aplicar_mod", { id, ligar });
   } catch (falha) {
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
