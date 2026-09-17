@@ -31,6 +31,7 @@ pub mod anuncio;
 pub mod arquivos;
 pub mod despacho;
 pub mod mundo;
+pub mod pedidos;
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -317,6 +318,41 @@ impl Anfitriao {
             self.recolher_quintal(id, quintal)?;
         }
         resultado
+    }
+
+    /// Calls API v2's authenticated request handler and commits its yard only on success.
+    /// Returns a bounded JSON response, or a runtime failure.
+    pub fn pedir(
+        &mut self,
+        id: &str,
+        contexto: &str,
+        pedido: &str,
+        quintal: &mut BTreeMap<String, String>,
+    ) -> Result<String, Falha> {
+        let hospede = self.hospedes.get(id).ok_or(Falha::Lancou)?;
+        hospede.passos.store(0, Ordering::Relaxed);
+        let resposta = hospede.contexto.with(|ctx| {
+            let dados = rquickjs::Object::new(ctx.clone()).map_err(|_| Falha::Lancou)?;
+            for (k, v) in quintal.iter() {
+                dados
+                    .set(k.as_str(), v.as_str())
+                    .map_err(|_| Falha::Lancou)?;
+            }
+            ctx.globals()
+                .set("dados", dados)
+                .map_err(|_| Falha::Lancou)?;
+            let f = ctx
+                .globals()
+                .get::<_, Function<'_>>("aoPedir")
+                .map_err(|_| Falha::Lancou)?;
+            f.call::<_, String>((contexto, pedido))
+                .map_err(|_| Falha::Lancou)
+        })?;
+        if resposta.len() > 1024 * 1024 {
+            return Err(Falha::QuintalCheio);
+        }
+        self.recolher_quintal(id, quintal)?;
+        Ok(resposta)
     }
 
     /// Copies the JS `dados` object back into the map, refusing an oversized

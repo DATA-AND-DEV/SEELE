@@ -1302,6 +1302,7 @@ impl Room {
             // Dito e decidido, e não calado: se um servidor o mandar depois da
             // entrada, não há o que absorver, e o roster não muda.
             ServerMessage::ModsExigidos { .. } => {}
+            ServerMessage::ModReply { .. } => {}
         }
 
         changed

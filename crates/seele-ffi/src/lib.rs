@@ -501,6 +501,12 @@ pub trait EventListener: Send + Sync {
 
 /// A command on its way to the driver thread.
 enum Command {
+    ModRequest {
+        request: u32,
+        id: String,
+        channel: ChannelId,
+        payload: String,
+    },
     /// Devolve à sonda o caminho medido da última visita a este servidor.
     LembrarCaminho(u32),
     EnterVoiceRoom(VoiceRoomId, Option<String>),
@@ -1309,6 +1315,23 @@ impl Connection {
         self.command(Command::Send {
             channel: ChannelId(channel),
             body,
+        })
+    }
+
+    /// Requests an enabled MOD action. Responses arrive as `Event::ModReply`.
+    /// Returns an error when disconnected.
+    pub fn mod_request(
+        &self,
+        request: u32,
+        id: String,
+        channel: u32,
+        payload: String,
+    ) -> Result<(), ConnectionError> {
+        self.command(Command::ModRequest {
+            request,
+            id,
+            channel: ChannelId(channel),
+            payload,
         })
     }
 
@@ -3407,6 +3430,21 @@ fn remember_media(shared: &Arc<Shared>, media: MediaChannel, ssrc: Ssrc) {
 
 /// Folds a server message into the room and tells the shell what moved.
 fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
+    if let seele_core::ServerMessage::ModReply {
+        request,
+        part,
+        total,
+        payload,
+    } = message
+    {
+        shared.notify(&Event::ModReply {
+            request: *request,
+            part: *part,
+            total: *total,
+            payload: payload.clone(),
+        });
+        return;
+    }
     let changed = match shared.room.lock() {
         Ok(mut room) => room.apply(message),
         Err(_) => return,
@@ -3774,6 +3812,20 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             let id = ClientMessageId(next_client_message_id());
             if client
                 .dizer(channel, body.trim().to_owned(), id)
+                .await
+                .is_err()
+            {
+                return false;
+            }
+        }
+        Command::ModRequest {
+            request,
+            id,
+            channel,
+            payload,
+        } => {
+            if client
+                .mod_request(request, id, channel, payload)
                 .await
                 .is_err()
             {

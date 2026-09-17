@@ -1802,6 +1802,14 @@ async fn run_session(
                 }
 
                 match message {
+                    ClientMessage::ModRequest { request, id, channel, payload } => {
+                        let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
+                        let parts = crate::mods::pedidos::partes(&response);
+                        let total = parts.len() as u32;
+                        for (part, payload) in parts.into_iter().enumerate() {
+                            frame::write(&mut send, &ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
+                        }
+                    }
                     ClientMessage::EnterVoiceRoom { voice_room: id, password } => {
                         // A senha da sala de voz era declarada no protocolo, relatada
                         // ao cliente em `password_required` e **nunca
@@ -3502,6 +3510,7 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
         // que decide com o limiar de `ServerConfig::versao_do_anuncio` e não com
         // a constante. A linha existe para que a tabela fique completa.
         ServerMessage::ModsExigidos { .. } => versao >= seele_proto::mods::VERSAO_DO_ANUNCIO,
+        ServerMessage::ModReply { .. } => versao >= 6,
         _ => true,
     }
 }
@@ -4804,7 +4813,7 @@ mod o_aceite_dos_mods {
             &mut fluxo.servidor_envia,
             &mut fluxo.servidor_recebe,
             daemon.server(),
-            PROTOCOL_VERSION - 1,
+            seele_proto::mods::VERSAO_DO_ANUNCIO - 1,
         )
         .await
         .map_err(|recusa| recusa.reason);

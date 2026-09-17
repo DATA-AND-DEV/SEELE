@@ -412,32 +412,101 @@ function ligarControlesDaJanela() {
  * um MOD que rodasse antes de a página existir não acharia o que veio mexer, e
  * falharia de um jeito que parece defeito do MOD sem ser.
  */
+const pedidosDeMod = new Map();
+let proximoPedidoDeMod = 0;
+const ouvirMod = listen("seele://event", ({ payload }) => {
+  const reply = payload?.ModReply;
+  if (!reply) return;
+  const pending = pedidosDeMod.get(reply.request);
+  if (!pending || reply.total > 128 || reply.part >= reply.total) return;
+  pending.parts[reply.part] = reply.payload;
+  if (pending.parts.filter(v => v !== undefined).length === reply.total) {
+    clearTimeout(pending.timer); pedidosDeMod.delete(reply.request);
+    try { pending.resolve(JSON.parse(pending.parts.join(""))); }
+    catch { pending.reject(new Error("invalid-response")); }
+  }
+});
+globalThis.SeeleMods = Object.freeze({
+  async request(id, channel, value) {
+    await ouvirMod;
+    if (pedidosDeMod.size >= 8) throw new Error("too-many-requests");
+    const request = ++proximoPedidoDeMod;
+    const payload = JSON.stringify(value);
+    if (new TextEncoder().encode(payload).length > 12 * 1024) throw new Error("request-too-large");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pedidosDeMod.delete(request); reject(new Error("timeout")); }, 15000);
+      pedidosDeMod.set(request, { resolve, reject, timer, parts: [] });
+      invoke("mod_request", { request, id, channel, payload }).catch(error => {
+        clearTimeout(timer); pedidosDeMod.delete(request); reject(error);
+      });
+    });
+  },
+  snapshot: () => invoke("snapshot"),
+});
+const modsCarregados = new Map();
+let conferindoMods = false;
+let ultimoErroDeMods = "";
 async function carregarMods() {
+  if (conferindoMods) return;
+  conferindoMods = true;
   let instalados;
   try {
+    await invoke("snapshot");
     instalados = await invoke("mods_instalados");
+    const catalogo = await globalThis.SeeleMods.request("", 0, {});
+    if (!catalogo.ok) throw new Error("catalogue-refused");
+    for (const [id, node] of modsCarregados) {
+      if (!catalogo.mods.some(m => m.id === id && m.hash === node.dataset.hash)) {
+        globalThis.dispatchEvent(new CustomEvent("seele-mod-unload", { detail: id }));
+        node.remove(); modsCarregados.delete(id);
+      }
+    }
+    const ausentes = catalogo.mods.filter(active => !instalados.some(m => m.id === active.id && m.hash === active.hash));
+    const diagnostico = ausentes.map(m => m.id).join(", ");
+    if (diagnostico && diagnostico !== ultimoErroDeMods) {
+      console.warn(`MODs exigidos sem pacote local correspondente: ${diagnostico}. Instale a mesma versão do servidor e reconecte.`);
+    }
+    ultimoErroDeMods = diagnostico;
+    instalados = instalados.filter(m => catalogo.mods.some(active => active.id === m.id && active.hash === m.hash));
   } catch (erro) {
-    // Não hospedar não é falha, e o comando já devolve lista vazia nesse caso.
-    // O que chega aqui é banco que não respondeu, e isso se conta.
-    console.error("MODs: não deu para listar", erro);
+    const mensagem = String(erro);
+    if (!mensagem.includes("NotConnected") && mensagem !== ultimoErroDeMods) {
+      console.warn("Não foi possível conferir os MODs:", erro);
+      ultimoErroDeMods = mensagem;
+    }
+    conferindoMods = false;
     return;
   }
 
   for (const mod of instalados) {
-    if (!mod.enabled || !mod.client) continue;
+    if (!mod.client || modsCarregados.has(mod.id)) continue;
 
     const script = document.createElement("script");
     script.type = "module";
-    script.src = `mod://localhost/${mod.id}/${mod.client}`;
+    script.src = `mod://localhost/${mod.id}/${mod.client}?hash=${mod.hash}&load=${Date.now()}`;
+    script.dataset.hash = mod.hash;
     // Um MOD que quebra não leva a janela junto — ADR 0045, «falha isolada».
     // Sem isto, um erro de sintaxe num MOD de terceiro é uma tela preta que
     // ninguém sabe explicar.
     script.addEventListener("error", () => {
       console.error(`MOD ${mod.id}: não carregou`);
+      modsCarregados.delete(mod.id); script.remove();
     });
+    modsCarregados.set(mod.id, script);
     document.head.appendChild(script);
   }
+  conferindoMods = false;
 }
 
 ligarControlesDaJanela();
 carregarMods();
+setInterval(carregarMods, 4000);
+listen("seele://event", ({ payload }) => {
+  if (!payload?.Ended) return;
+  for (const [id, node] of modsCarregados) {
+    globalThis.dispatchEvent(new CustomEvent("seele-mod-unload", { detail: id })); node.remove();
+  }
+  modsCarregados.clear();
+  for (const p of pedidosDeMod.values()) { clearTimeout(p.timer); p.reject(new Error("disconnected")); }
+  pedidosDeMod.clear();
+});

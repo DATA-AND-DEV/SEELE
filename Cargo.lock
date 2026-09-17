@@ -5032,6 +5032,7 @@ dependencies = [
  "seele-ffi",
  "seele-proto",
  "seele-server",
+ "serde_json",
  "tempfile",
  "tokio",
 ]

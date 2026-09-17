@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "extends": 1,
+  "actions": { "pedir": "ModRequest" },
+  "reads": { "resposta": "ModReply", "contexto.pessoa": "PersonId", "contexto.canal": "ChannelId" },
+  "handlers": ["aoPedir"],
+  "notes": "aoPedir(contextJSON, requestJSON) returns a JSON string; dados commits only after successful bounded execution. Identity, admin and write grants are supplied by the server. Poll for updates; replies are private."
+}

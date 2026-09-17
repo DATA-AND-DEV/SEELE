@@ -1497,6 +1497,17 @@ pub enum ClientMessage {
     /// precisa da diferença — a primeira é uma decisão sobre os MODs dele, a
     /// segunda é rede.
     RecusarMods,
+    /// Authenticated request to an enabled MOD (wire v6). Identity is server supplied.
+    ModRequest {
+        /// Correlation identifier, scoped to this connection.
+        request: u32,
+        /// Installed author/name, or empty to list enabled MODs.
+        id: String,
+        /// Channel context.
+        channel: ChannelId,
+        /// Bounded JSON owned by the MOD.
+        payload: String,
+    },
 }
 
 /// Server to client.
@@ -2122,6 +2133,17 @@ pub enum ServerMessage {
         /// [`crate::mods::identidade_do_conjunto`].
         conjunto: String,
     },
+    /// One bounded part of a private MOD response, sent only to the requester.
+    ModReply {
+        /// Request correlation.
+        request: u32,
+        /// Zero-based part number.
+        part: u32,
+        /// Total parts (at most 128).
+        total: u32,
+        /// UTF-8 JSON fragment.
+        payload: String,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2540,6 +2562,10 @@ impl Validate for ClientMessage {
                 }
             }
             Self::RecusarMods => Ok(()),
+            Self::ModRequest { id, payload, .. } => {
+                check("mod_id", id.len(), 128)?;
+                check("mod_payload", payload.len(), 12 * 1024)
+            }
             // O motivo é um enumerado de tamanho fixo, e a `ScreenId` segue a
             // mesma regra do braço acima: quem sabe se ela existe é o servidor.
             Self::ParFalhou { .. } => Ok(()),
@@ -2648,6 +2674,17 @@ impl Validate for ServerMessage {
                 check_impressao(impressao)
             }
             Self::ModsExigidos { mods, conjunto } => check_anuncio(mods, conjunto),
+            Self::ModReply {
+                part,
+                total,
+                payload,
+                ..
+            } => {
+                if *total == 0 || *total > 128 || part >= total {
+                    return Err(ControlError::FieldOutOfRange { field: "mod_part" });
+                }
+                check("mod_payload", payload.len(), 12 * 1024)
+            }
         }
     }
 }
@@ -4315,14 +4352,14 @@ mod o_vocabulario_e_a_versao {
         // quando alguém acrescenta, e é a que faltava.
         assert_eq!(
             ultima_variante::<ClientMessage>(),
-            35,
+            36,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            36,
+            37,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4334,14 +4371,14 @@ mod o_vocabulario_e_a_versao {
         // por isso que o anúncio de MODs passou a sair.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            5,
+            6,
             "a versão do protocolo mudou; confira se os ordinais acima, a janela \
              de compatibilidade e `mods::VERSAO_DO_ANUNCIO` continuam contando a \
              mesma história"
         );
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
-            crate::version::PROTOCOL_VERSION,
+            5,
             "os três verbos de MOD acima só saem no fio para um par que negocie \
              `VERSAO_DO_ANUNCIO`, e nenhum par negocia acima da versão global: \
              se as duas divergirem, ou o anúncio voltou a ser dormente, ou ele \

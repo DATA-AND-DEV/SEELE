@@ -1031,6 +1031,19 @@ fn send_message(
     session.connection()?.send_message(channel, body)
 }
 
+#[tauri::command]
+fn mod_request(
+    session: State<'_, Session>,
+    request: u32,
+    id: String,
+    channel: u32,
+    payload: String,
+) -> Result<(), ConnectionError> {
+    session
+        .connection()?
+        .mod_request(request, id, channel, payload)
+}
+
 // ---------------------------------------------------------------- anexos
 //
 // ADR 0027. Quatro comandos, e o que **não** existe entre eles é a decisão: não
@@ -3584,6 +3597,13 @@ fn main() {
         .register_uri_scheme_protocol("mod", |ctx, request| {
             let caminho = request.uri().path().to_owned();
             let pasta = config_dir(ctx.app_handle());
+            let expected = request
+                .uri()
+                .query()
+                .and_then(|q| q.split('&').find_map(|part| part.strip_prefix("hash=")));
+            if !mods::hash_confere(std::path::Path::new(&pasta), &caminho, expected) {
+                return recusa_do_mod();
+            }
             match mods::serve(std::path::Path::new(&pasta), &caminho) {
                 Some(corpo) => tauri::http::Response::builder()
                     .header("Content-Type", "text/javascript; charset=utf-8")
@@ -3698,6 +3718,7 @@ fn main() {
             meu_retrato,
             tirar_icone_do_server,
             mods_instalados,
+            mod_request,
             habilitar_mod,
             desabilitar_mod,
             aceite_de_mods,

@@ -296,6 +296,12 @@ fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
 /// O que a casca manda fazer.
 #[derive(Debug)]
 enum Comando {
+    ModRequest {
+        request: u32,
+        id: String,
+        channel: ChannelId,
+        payload: String,
+    },
     /// Semeia a sonda com o caminho medido da última vez com este servidor.
     ///
     /// Comando e não parâmetro de `conectar`: os quatro `conectar*` públicos
@@ -1510,6 +1516,23 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn abrir_linha(&self, linha: ChannelId) -> Result<(), Fechado> {
         self.mandar(Comando::AbrirLinha(linha)).await
+    }
+
+    /// Queues a MOD request; fails if the connection task is closed.
+    pub async fn mod_request(
+        &self,
+        request: u32,
+        id: String,
+        channel: ChannelId,
+        payload: String,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::ModRequest {
+            request,
+            id,
+            channel,
+            payload,
+        })
+        .await
     }
 
     /// Diz alguma coisa.
@@ -2810,6 +2833,12 @@ impl Motor {
             Comando::SairDaVoiceRoom => cliente.leave_voice_room().await,
             Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
             Comando::Dizer { linha, corpo, id } => cliente.send_message(linha, &corpo, id).await,
+            Comando::ModRequest {
+                request,
+                id,
+                channel,
+                payload,
+            } => cliente.mod_request(request, id, channel, payload).await,
             Comando::Historico { linha, limite } => {
                 cliente.fetch_history(linha, None, limite).await
             }

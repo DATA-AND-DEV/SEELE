@@ -31,7 +31,7 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 /// the schema changes when the *manifest* gains a field, the API when what a
 /// MOD can *call* changes. ADR 0045 freezes each API version in its own file,
 /// never edited once shipped.
-pub const MOD_API_VERSION: u32 = 1;
+pub const MOD_API_VERSION: u32 = 2;
 
 /// What a MOD declares about itself.
 ///
@@ -756,7 +756,7 @@ mod tests {
         assert_eq!(VERSAO_DO_ANUNCIO, 5);
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            5,
+            6,
             "a versão global mudou: confira o contrato de integração no desenho \
              do anúncio antes de mexer nesta linha"
         );

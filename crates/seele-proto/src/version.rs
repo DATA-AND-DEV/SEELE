@@ -94,7 +94,8 @@ use thiserror::Error;
 /// abaixo explica a medida. A consequência prática, que precisa ser dita antes
 /// de publicar e não depois: **publicar a v5 tira do ar quem está na v3
 /// publicada**, e a janela não muda isso.
-pub const PROTOCOL_VERSION: u8 = 5;
+/// v6 adds authenticated MOD requests and private, chunked replies.
+pub const PROTOCOL_VERSION: u8 = 6;
 
 /// How many past versions a peer accepts, beyond the current one.
 ///
@@ -242,16 +243,17 @@ mod tests {
         // O que fica preso aqui, então, é o que a janela de fato faz — a versão
         // anterior deste vocabulário continua sendo ouvida — e não uma promessa
         // sobre quem está em campo, que ela não tem como cumprir sozinha.
-        assert_eq!(PROTOCOL_VERSION, 5);
-        assert_eq!(oldest_supported_version(), 4);
-        assert!(negotiate(4).is_ok(), "a v4 anterior foi recusada");
+        assert_eq!(PROTOCOL_VERSION, 6);
+        assert_eq!(oldest_supported_version(), 5);
+        assert!(negotiate(4).is_err(), "a v4 saiu da janela N−1");
         assert!(negotiate(5).is_ok());
         assert!(
             negotiate(3).is_err(),
             "a v3 foi aceita: a janela voltou a prometer o que o carimbo não \
              entrega"
         );
-        assert!(negotiate(6).is_err(), "um cliente do futuro foi aceito");
+        assert!(negotiate(6).is_ok());
+        assert!(negotiate(7).is_err(), "um cliente do futuro foi aceito");
     }
 
     /// A prova de que a subida é **uma só** para as duas entregas.
@@ -262,12 +264,12 @@ mod tests {
     /// existe para pegar. Esta linha diz que a subida aconteceu uma vez e que o
     /// anúncio, que esperava por ela, passou a alcançar.
     #[test]
-    fn a_versao_subiu_uma_vez_so_para_a_malha_e_para_os_mods() {
-        assert_eq!(PROTOCOL_VERSION, 5);
-        assert_eq!(oldest_supported_version(), 4);
+    fn a_api_de_pedidos_preserva_o_limiar_do_anuncio_original() {
+        assert_eq!(PROTOCOL_VERSION, 6);
+        assert_eq!(oldest_supported_version(), 5);
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
-            PROTOCOL_VERSION,
+            5,
             "o anúncio de MODs deixou de coincidir com a versão global: ou ele \
              voltou a ficar dormente, ou passou a pedir mais do que a versão \
              global entrega"
