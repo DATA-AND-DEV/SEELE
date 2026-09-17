@@ -4203,3 +4203,86 @@ fn despedir_se(handle: &tauri::AppHandle) {
     connection.disconnect();
     std::thread::sleep(std::time::Duration::from_millis(150));
 }
+
+#[cfg(test)]
+mod a_tela_le_o_que_o_rust_manda {
+    use super::ModNaTela;
+    use seele_ffi::mods::ModInstalado;
+    use std::collections::BTreeSet;
+
+    /// As chaves que um `ModNaTela` de verdade produz, e não as que parecem.
+    fn chaves_serializadas() -> BTreeSet<String> {
+        let amostra = ModNaTela {
+            instalado: ModInstalado {
+                id: "autor/nome".to_owned(),
+                version: "1.0.0".to_owned(),
+                hash: "0".repeat(64),
+                client: Some("cliente/main.js".to_owned()),
+                repo: "https://exemplo".to_owned(),
+                reach: vec!["dom".to_owned()],
+                server: true,
+                refused: None,
+            },
+            enabled: false,
+            exigencia_vale_na_rede: true,
+        };
+        let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(amostra) else {
+            panic!("um `ModNaTela` tem de serializar para objeto");
+        };
+        mapa.keys().cloned().collect()
+    }
+
+    /// **O defeito que este guarda existe para impedir, e que já aconteceu.**
+    ///
+    /// `ModNaTela` embrulha um `ModInstalado` num campo `instalado`, e o campo
+    /// tem `#[serde(flatten)]` — então o invólucro **não existe** no JSON: os
+    /// campos saem no topo. A página lia `mod.instalado.id` em sete lugares.
+    /// `mod.instalado` é `undefined`, e `undefined.id` lança.
+    ///
+    /// O que isso fazia na tela é a metade que dói: a contagem do catálogo é
+    /// escrita **antes** da lista, e o erro subia até um `console.warn`. Quem
+    /// usava lia «1 no catálogo» ao lado de lista nenhuma, sem uma palavra
+    /// sobre o motivo — o «o produto sabe e não conta» do `CLAUDE.md`, e ainda
+    /// por cima quebrando a gestão de MODs inteira junto.
+    ///
+    /// Nenhum teste viu porque nenhum tinha um MOD instalado: com a lista
+    /// vazia o `some()` nunca chama o predicado, e o caminho quebrado não é
+    /// percorrido.
+    ///
+    /// A regra é sobre a **forma** do defeito, e não sobre o nome `instalado`:
+    /// ler `x.<meio>.<folha>` em que `<meio>` não é chave e `<folha>` é, é
+    /// exatamente atravessar um invólucro que o `flatten` apagou.
+    #[test]
+    fn a_pagina_nao_atravessa_um_involucro_que_o_flatten_apagou() {
+        let chaves = chaves_serializadas();
+        assert!(
+            !chaves.contains("instalado"),
+            "o `flatten` saiu do `ModNaTela`; este guarda foi escrito para quando ele estava lá"
+        );
+
+        let script = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/camada-mods.js"),
+        )
+        .unwrap_or_else(|erro| panic!("a camada de MODs tem de ser legível: {erro}"));
+
+        let mut culpados = Vec::new();
+        for palavra in script.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.')) {
+            let partes: Vec<&str> = palavra.split('.').collect();
+            for janela in partes.windows(3) {
+                let [inicio, meio, folha] = janela else {
+                    continue;
+                };
+                if !chaves.contains(*meio) && chaves.contains(*folha) {
+                    culpados.push(format!("{inicio}.{meio}.{folha}"));
+                }
+            }
+        }
+
+        assert!(
+            culpados.is_empty(),
+            "a página lê {culpados:?}, e o meio dessas cadeias não é campo nenhum do que o \
+             Rust serializa — quase sempre um invólucro que o `flatten` apagou. As chaves \
+             que existem são {chaves:?}"
+        );
+    }
+}

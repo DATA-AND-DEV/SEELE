@@ -229,14 +229,14 @@ function linhaDeModInstalado(mod, hospedando) {
   const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
 
   const texto = elemento("span", "server-dispositivo-nome");
-  texto.append(elemento("span", "mods-id", mod.instalado.id));
+  texto.append(elemento("span", "mods-id", mod.id));
 
   // **Um MOD recusado aparece, e aparece dizendo por quê.** Escondê-lo faria a
   // pessoa que copiou a pasta procurar um MOD que o produto viu e descartou em
   // silêncio — «o produto sabe e não conta».
-  if (mod.instalado.refused) {
+  if (mod.refused) {
     texto.append(
-      elemento("span", "mods-recusado", `não serve: ${mod.instalado.refused}`),
+      elemento("span", "mods-recusado", `não serve: ${mod.refused}`),
     );
     caixa.append(texto);
     linha.append(caixa);
@@ -244,9 +244,9 @@ function linhaDeModInstalado(mod, hospedando) {
   }
 
   texto.append(
-    elemento("span", "mods-versao", `versão ${mod.instalado.version}`),
+    elemento("span", "mods-versao", `versão ${mod.version}`),
   );
-  if (mod.instalado.server) {
+  if (mod.server) {
     texto.append(
       elemento("span", "mods-servidor", "roda na máquina de quem hospeda"),
     );
@@ -260,7 +260,7 @@ function linhaDeModInstalado(mod, hospedando) {
   // logo abaixo da lista: um botão morto sem motivo é uma pergunta sem resposta.
   botao.disabled = !hospedando;
   botao.addEventListener("click", () => {
-    trocarOMod(mod.instalado.id, !mod.enabled).catch((falha) =>
+    trocarOMod(mod.id, !mod.enabled).catch((falha) =>
       console.warn("trocar mod:", falha),
     );
   });
@@ -470,7 +470,7 @@ function linhaDoCatalogo(mod, instalados) {
   }
   caixa.append(texto);
 
-  const jaTem = instalados.some((i) => i.instalado.id === mod.id);
+  const jaTem = instalados.some((i) => i.id === mod.id);
   if (jaTem) {
     caixa.append(elemento("span", "server-dispositivo-marca", "JÁ INSTALADO"));
   } else {
@@ -478,9 +478,12 @@ function linhaDoCatalogo(mod, instalados) {
     botao.type = "button";
     botao.textContent = "INSTALAR";
     botao.addEventListener("click", () => {
-      instalarDoCatalogo(mod.id, ultima.versao).catch((falha) =>
-        console.warn("instalar do catálogo:", falha),
-      );
+      instalarDoCatalogo(mod.id, ultima.versao).catch((falha) => {
+        console.warn("instalar do catálogo:", falha);
+        const estado = $("catalogo-estado");
+        estado.classList.add("mods-recusado");
+        estado.textContent = fraseDeErro(falha);
+      });
     });
     caixa.append(botao);
   }
@@ -541,6 +544,16 @@ async function instalarDoCatalogo(id, versao) {
   if (catalogoEmMaos) await buscarOCatalogo();
 }
 
+// **Uma falha aqui tem de chegar à tela.** Ela já chegou só ao console uma
+// vez: a contagem é escrita antes da lista, então quem usava lia «1 no
+// catálogo» ao lado de lista nenhuma e não tinha o que fazer com isso. Um
+// `console.warn` num aplicativo empacotado é uma mensagem para ninguém.
 $("catalogo-buscar").addEventListener("click", () => {
-  buscarOCatalogo().catch((falha) => console.warn("catálogo:", falha));
+  buscarOCatalogo().catch((falha) => {
+    console.warn("catálogo:", falha);
+    const estado = $("catalogo-estado");
+    estado.classList.add("mods-recusado");
+    estado.textContent = fraseDeErro(falha);
+    $("catalogo-buscar").disabled = false;
+  });
 });
