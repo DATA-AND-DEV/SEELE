@@ -23,9 +23,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use seele_proto::ids::{PersonId, ScreenId, Ssrc, VoiceRoomId};
+use seele_proto::ids::{PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use seele_proto::transport::MAX_FRAMES_PER_SECOND;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::server::Event;
 use crate::tela::{AberturaDeTela, Enquadramento, FimDaTela, Pedaco};
@@ -52,6 +52,8 @@ pub enum VoiceRoomCommand {
     Join {
         /// Who.
         person: PersonId,
+        /// **Qual conexão** desta pessoa. Ver [`Self::Leave`].
+        sessao: SessionId,
         /// The media source the server assigned to their connection.
         ssrc: Ssrc,
         /// Whether they may transmit.
@@ -71,12 +73,19 @@ pub enum VoiceRoomCommand {
     Leave {
         /// Who.
         person: PersonId,
-        /// De qual conexão. O cliente tenta vários caminhos ao mesmo tempo
-        /// (ADR 0037) e abandona os perdedores, que fecham logo depois — e
-        /// fechar roda a saída. Sem isto, a conexão abandonada tirava da sala
-        /// quem estava vivo, e a pessoa parava de ouvir e de ser ouvida
-        /// continuando a se ver dentro.
-        ssrc: Ssrc,
+        /// De **qual conexão** dessa pessoa é esta saída.
+        ///
+        /// `Some` quando quem sai é uma sessão: a saída só vale se o membro
+        /// ainda for dela. Numa queda silenciosa há duas sessões da mesma pessoa
+        /// vivas ao mesmo tempo — a nova sobe perto dos 15 s e a velha só morre
+        /// aos 20 s —, e sem esta conferência a velha tirava a nova da tarefa da
+        /// sala. É a metade do defeito que o usuário relata como «não ouço nem
+        /// vejo esse amigo».
+        ///
+        /// `None` quando quem decide é pela pessoa inteira, de qual conexão for:
+        /// andar de uma sala para outra, por exemplo, tem de tirar o membro
+        /// anterior seja qual for a sessão que o pôs ali.
+        sessao: Option<SessionId>,
     },
     /// A datagram arrived from a connection.
     Datagram {
@@ -120,6 +129,11 @@ pub enum VoiceRoomCommand {
     TelaFechou {
         /// Quem.
         from: PersonId,
+        /// **De qual conexão.** A tarefa da tela vive fora do laço da sessão e
+        /// pode chegar ao fim depois de a conexão nova da mesma pessoa já ter
+        /// reaberto a transmissão; sem a sessão, o fim da velha apagaria a nova.
+        /// É a última porta desta família que ainda era só por pessoa.
+        sessao: SessionId,
     },
     /// Alguém pediu para assistir a uma transmissão desta sala.
     ///
@@ -166,6 +180,20 @@ pub enum VoiceRoomCommand {
     /// `HostUplink`, e o portão que decide quem entra continuava dividindo a
     /// hipótese. O produto media a perna certa e não a usava onde ela decide.
     Subida,
+    /// Quanto esta sala descartou, e por quê — perguntado de fora da tarefa.
+    ///
+    /// Existe para que um teste de ponta a ponta possa afirmar que o guarda de
+    /// sessão **agiu**, e não apenas que nada de ruim aconteceu:
+    /// [`DropCounts::saida_de_sessao_velha`] só anda quando uma conexão velha
+    /// morre tentando tirar da sala a conexão nova da mesma pessoa. Sem esta
+    /// pergunta, o contador existia e ninguém de fora do módulo o lia — e um
+    /// contador que ninguém lê não prova nada.
+    ///
+    /// A resposta vai por `oneshot` porque a sala é uma tarefa: os contadores
+    /// são um campo dela, e a fila é o único caminho para dentro. Perguntar pela
+    /// mesma fila também **ordena** a resposta depois de todo comando já
+    /// enfileirado, que é exatamente o que um teste precisa.
+    Contadores(oneshot::Sender<DropCounts>),
 }
 
 /// Why a datagram was not forwarded.
@@ -176,6 +204,16 @@ pub enum VoiceRoomCommand {
 pub struct DropCounts {
     /// The sender is not in this voice room.
     pub not_a_member: u64,
+    /// Uma saída chegou de uma sessão que já não era a desta pessoa.
+    ///
+    /// Contado porque é o defeito se defendendo, e não nada acontecendo: cada
+    /// unidade aqui é uma conexão velha que morreu tentando tirar da sala a
+    /// conexão nova da mesma pessoa. Zero é o normal; um número que cresce
+    /// durante uma chamada é a rede de alguém caindo e voltando — e, antes do
+    /// guarda, seria uma pessoa ficando muda e invisível sem ninguém saber por
+    /// quê.
+    pub saida_de_sessao_velha: u64,
+
     /// The sender lacks [`seele_proto::control::Permission::Speak`].
     pub not_permitted: u64,
     /// The `ssrc` in the header did not match the connection that sent it.
@@ -213,6 +251,9 @@ pub struct DropCounts {
 /// One member of a voice room.
 struct Member {
     ssrc: Ssrc,
+    /// Qual conexão desta pessoa é este membro. Ver [`VoiceRoomCommand::Leave`].
+    sessao: SessionId,
+
     may_speak: bool,
     outbound: mpsc::Sender<Vec<u8>>,
     /// This sender's media budget.
@@ -244,6 +285,12 @@ struct Member {
 /// primeiro, porque é o mesmo mapa de onde saem as cópias.
 struct EmCurso {
     dono: PersonId,
+    /// A conexão de onde esta transmissão saiu.
+    ///
+    /// Copiada do `Member` no instante da abertura, e não recebida do comando,
+    /// pela mesma razão que o `ssrc`: a sala já sabe de quem é a sessão vigente,
+    /// e o que ela sabe não precisa ser jurado por quem fala com ela.
+    sessao: SessionId,
     /// Como o servidor batizou esta transmissão. Vai no convite de cada
     /// espectador; o cabeçalho de abertura o repete, porque é ele que atravessa
     /// o fio.
@@ -389,16 +436,31 @@ impl VoiceRoom {
         match command {
             VoiceRoomCommand::Join {
                 person,
+                sessao,
                 ssrc,
                 may_speak,
                 outbound,
                 tela,
             } => {
+                // O `ssrc` de quem está sendo substituído sai junto. Entrar de
+                // novo troca o `Member` desta pessoa, mas `by_ssrc` é outro
+                // mapa: sem esta linha o número antigo continuaria apontando
+                // para ela, e agora que a saída da sessão velha volta cedo —
+                // porque o guarda de sessão a impede de apagar o que é da
+                // conexão nova — ninguém mais apagaria esse resto. Seria uma
+                // entrada a mais por reconexão, pela vida inteira da sala.
+                if let Some(anterior) = self.members.get(&person) {
+                    if anterior.ssrc != ssrc {
+                        self.by_ssrc.remove(&anterior.ssrc);
+                    }
+                }
                 self.by_ssrc.insert(ssrc, person);
                 self.members.insert(
                     person,
                     Member {
                         ssrc,
+                        sessao,
+
                         may_speak,
                         outbound,
                         orcamento: crate::taxa::Balde::novo(
@@ -447,13 +509,42 @@ impl VoiceRoom {
                 }
                 self.reconferir_o_teto();
             }
-            VoiceRoomCommand::Leave { person, ssrc } => {
-                // Só sai quem é desta conexão. Ver o doc da variante.
-                if !self
-                    .members
-                    .get(&person)
-                    .is_some_and(|member| member.ssrc == ssrc)
-                {
+            VoiceRoomCommand::Leave { person, sessao } => {
+                // **Só sai quem ainda é membro desta sessão.** Sem esta
+                // pergunta, a conexão velha de alguém, ao morrer, tirava da sala
+                // a conexão nova da mesma pessoa: ela continuava desenhada na
+                // tela de quem a pôs lá e a voz dela era descartada aqui como
+                // `not_a_member`, sem aviso para ninguém.
+                if sessao.is_some_and(|quem| {
+                    self.members
+                        .get(&person)
+                        .is_some_and(|member| member.sessao != quem)
+                }) {
+                    self.drops.saida_de_sessao_velha += 1;
+                    // **Menos o que ainda é da conexão que morreu.** A sala não
+                    // mexe no que é da nova, mas a transmissão da velha não tem
+                    // mais de onde receber bytes e, deixada no mapa, tranca a
+                    // vaga de tela desta sala contra a própria conexão nova
+                    // desta pessoa — que abriria e receberia `tela_ja_tomada`
+                    // por uma tela que já morreu.
+                    if self
+                        .telas
+                        .get(&person)
+                        .is_some_and(|curso| Some(curso.sessao) == sessao)
+                    {
+                        self.encerrar_tela(person, None);
+                    }
+                    // E dito em voz alta, não só contado. O contador é para o
+                    // teste; quem opera precisa saber que a rede de alguém caiu
+                    // e voltou, e este é o único lugar que sabe. Pode sair por
+                    // evento sem virar enxurrada: acontece no máximo uma vez por
+                    // conexão desmontada, e não por quadro — é a razão pela qual
+                    // o resto de `DropCounts` não pode fazer o mesmo.
+                    tracing::info!(
+                        %person,
+                        sessao = ?sessao,
+                        "uma conexão velha tentou sair da sala pela nova desta pessoa; a sala não mexeu"
+                    );
                     return;
                 }
                 if let Some(member) = self.members.remove(&person) {
@@ -490,8 +581,16 @@ impl VoiceRoom {
             VoiceRoomCommand::TelaParouDeAssistir { person, screen } => {
                 self.parar_de_assistir(person, screen);
             }
-            VoiceRoomCommand::TelaFechou { from } => {
-                if self.telas.contains_key(&from) {
+            VoiceRoomCommand::TelaFechou { from, sessao } => {
+                // **Só encerra a transmissão a conexão que a abriu.** O fim
+                // limpo do fluxo velho, chegando depois de a conexão nova ter
+                // reaberto a tela, deixaria quem assiste com o palco apagado
+                // enquanto quem transmite continua mandando bytes.
+                if self
+                    .telas
+                    .get(&from)
+                    .is_some_and(|curso| curso.sessao == sessao)
+                {
                     self.encerrar_tela(from, None);
                 }
             }
@@ -518,6 +617,11 @@ impl VoiceRoom {
                 // entre a pergunta e a resposta, e não há o que fazer a
                 // respeito.
                 let _ = responder.send(quem);
+            }
+            VoiceRoomCommand::Contadores(responder) => {
+                // Quem perguntou pode ter desistido; a sala não tem o que fazer
+                // a respeito, e derrubá-la por isso seria pior que o silêncio.
+                let _ = responder.send(self.drops);
             }
             VoiceRoomCommand::Subida => {
                 // **O número já chegou**, pelo `Arc` que esta sala partilha com
@@ -643,6 +747,9 @@ impl VoiceRoom {
             self.drops.not_permitted += 1;
             return;
         }
+        // Guardada agora, do `Member` vigente, para viajar com a transmissão
+        // até o fim dela.
+        let sessao = member.sessao;
         // Uma por sala (§6 item 3). A corrida já foi decidida no controle; isto
         // é a parede que não depende de o cliente ter respeitado a resposta.
         if self.telas.contains_key(&from) {
@@ -667,6 +774,7 @@ impl VoiceRoom {
             from,
             EmCurso {
                 dono: from,
+                sessao,
                 screen,
                 abertura,
                 enquadramento: Enquadramento::novo(),
@@ -1109,6 +1217,23 @@ impl VoiceRooms {
         }
     }
 
+    /// Os contadores de uma sala que já existe, perguntados de fora.
+    ///
+    /// `None` quando ninguém nunca entrou nessa sala — e de propósito não a faz
+    /// nascer: uma pergunta de leitura que cria uma tarefa mudaria o que ela foi
+    /// chamada para medir. `None` também quando a tarefa já morreu.
+    ///
+    /// Ver [`VoiceRoomCommand::Contadores`] para por que a resposta vem por
+    /// `oneshot` e o que ela prova.
+    pub async fn contadores(&self, id: VoiceRoomId) -> Option<DropCounts> {
+        let sala = self.tasks.lock().await.get(&id).cloned()?;
+        let (responder, resposta) = oneshot::channel();
+        sala.send(VoiceRoomCommand::Contadores(responder))
+            .await
+            .ok()?;
+        resposta.await.ok()
+    }
+
     /// The way in to one voice room, starting its task if this is the first arrival.
     pub async fn of(&self, id: VoiceRoomId) -> mpsc::Sender<VoiceRoomCommand> {
         self.tasks
@@ -1128,11 +1253,14 @@ impl VoiceRooms {
     /// somebody's `ssrc` receiving audio in a room they left. `Leave` for a
     /// person who is not there is a no-op, and `specs/04-servidor-seele.md` sizes
     /// a server at five active voice_rooms, so the fan-out is five sends.
-    pub async fn leave_everywhere(&self, person: PersonId, ssrc: Ssrc) {
+    /// `sessao` é `Some` quando quem sai é uma conexão, e aí a saída só vale para
+    /// os membros que **aquela** conexão pôs na sala — ver
+    /// [`VoiceRoomCommand::Leave`].
+    pub async fn leave_everywhere(&self, person: PersonId, sessao: Option<SessionId>) {
         let tasks: Vec<mpsc::Sender<VoiceRoomCommand>> =
             self.tasks.lock().await.values().cloned().collect();
         for task in tasks {
-            let _ = task.send(VoiceRoomCommand::Leave { person, ssrc }).await;
+            let _ = task.send(VoiceRoomCommand::Leave { person, sessao }).await;
         }
     }
 
@@ -1202,6 +1330,7 @@ mod tests {
         let (tela, _) = mpsc::channel(4);
         voice_room.handle(VoiceRoomCommand::Join {
             person: PersonId(person),
+            sessao: SessionId(person),
             ssrc: Ssrc(ssrc),
             may_speak,
             outbound: tx,
@@ -1216,6 +1345,7 @@ mod tests {
         let (tela, tela_rx) = mpsc::channel(crate::tela::ABERTURAS_DEPTH);
         voice_room.handle(VoiceRoomCommand::Join {
             person: PersonId(person),
+            sessao: SessionId(person),
             ssrc: Ssrc(person as u32 * 10),
             may_speak: true,
             outbound,
@@ -1473,6 +1603,188 @@ mod tests {
     }
 
     #[test]
+    fn a_saida_da_sessao_velha_nao_tira_da_sala_a_conexao_nova() {
+        // **A metade do defeito que o usuário relata como «não ouço nem vejo esse
+        // amigo».** Numa queda silenciosa há duas conexões da mesma pessoa vivas
+        // ao mesmo tempo: a nova sobe perto dos 15 s e a velha só é desmontada
+        // aos 20 s. Sem conferir de qual sessão é a saída, a velha tirava a nova
+        // da tarefa da sala — e a voz dela passava a morrer aqui como
+        // `not_a_member`, sem aviso para ninguém.
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let mut ouvinte = member(&mut voice_room, 1, 100, true);
+        let (tx, _rx) = mpsc::channel(64);
+        let (tela, _) = mpsc::channel(4);
+        // A reconexão: mesma pessoa, outra sessão, outro `ssrc`.
+        voice_room.handle(VoiceRoomCommand::Join {
+            person: PersonId(2),
+            sessao: SessionId(8),
+            ssrc: Ssrc(201),
+            may_speak: true,
+            outbound: tx,
+            tela,
+        });
+
+        // E agora a conexão velha morre.
+        voice_room.handle(VoiceRoomCommand::Leave {
+            person: PersonId(2),
+            sessao: Some(SessionId(7)),
+        });
+
+        assert_eq!(
+            voice_room.occupancy(),
+            2,
+            "a conexão velha tirou da sala a conexão nova da mesma pessoa"
+        );
+        assert_eq!(
+            voice_room.drops().saida_de_sessao_velha,
+            1,
+            "o guarda trabalhou e não contou; uma defesa que não conta não aparece \
+             em nenhuma investigação"
+        );
+
+        // A prova do que isso compra: a voz de quem reconectou ainda é entregue.
+        voice_room.handle(VoiceRoomCommand::Datagram {
+            from: Ssrc(201),
+            bytes: datagram(201, 1),
+        });
+        assert!(
+            ouvinte.try_recv().is_ok(),
+            "a voz de quem reconectou deixou de ser encaminhada"
+        );
+        assert_eq!(voice_room.drops().not_a_member, 0);
+
+        // E a sessão vigente continua podendo sair.
+        voice_room.handle(VoiceRoomCommand::Leave {
+            person: PersonId(2),
+            sessao: Some(SessionId(8)),
+        });
+        assert_eq!(voice_room.occupancy(), 1);
+    }
+
+    #[test]
+    fn o_fim_da_tela_da_conexao_velha_nao_apaga_a_transmissao_da_nova() {
+        // A última porta desta família que ainda era só por pessoa. A tarefa que
+        // lê o fluxo de tela vive **fora** do laço da sessão: ela pode terminar
+        // limpa depois de a conexão nova da mesma pessoa já ter reaberto a
+        // transmissão, e o `TelaFechou` da velha apagava a nova — palco apagado
+        // para quem assiste enquanto quem transmite segue mandando bytes.
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let mut convites = espectador(&mut voice_room, 1);
+
+        let (outbound, _rx) = mpsc::channel(64);
+        let (tela, _telas) = mpsc::channel(4);
+        voice_room.handle(VoiceRoomCommand::Join {
+            person: PersonId(2),
+            sessao: SessionId(7),
+            ssrc: Ssrc(200),
+            may_speak: true,
+            outbound,
+            tela,
+        });
+        let _fim_velho = compartilhar(&mut voice_room, 2, 70);
+        let _convite_velho = convites
+            .try_recv()
+            .expect("quem já estava na sala entra na única");
+
+        // A reconexão, e a conexão velha morrendo em seguida.
+        let (outbound, _rx) = mpsc::channel(64);
+        let (tela, _telas) = mpsc::channel(4);
+        voice_room.handle(VoiceRoomCommand::Join {
+            person: PersonId(2),
+            sessao: SessionId(8),
+            ssrc: Ssrc(201),
+            may_speak: true,
+            outbound,
+            tela,
+        });
+        voice_room.handle(VoiceRoomCommand::Leave {
+            person: PersonId(2),
+            sessao: Some(SessionId(7)),
+        });
+        assert!(
+            voice_room.telas.is_empty(),
+            "a transmissão da conexão morta ficou no mapa trancando a vaga de tela \
+             da sala contra a conexão nova da mesma pessoa"
+        );
+
+        // E a conexão nova abre a dela.
+        let _fim_novo = compartilhar(&mut voice_room, 2, 90);
+        let mut convite_novo = convites
+            .try_recv()
+            .expect("a transmissão nova convidou quem assiste");
+
+        // Agora o fim limpo do fluxo velho, atrasado.
+        voice_room.handle(VoiceRoomCommand::TelaFechou {
+            from: PersonId(2),
+            sessao: SessionId(7),
+        });
+        assert_eq!(
+            voice_room.telas.get(&PersonId(2)).map(|curso| curso.screen),
+            Some(ScreenId(90)),
+            "o fim do fluxo da conexão velha apagou a transmissão da nova"
+        );
+        voice_room.handle(VoiceRoomCommand::TelaBytes {
+            from: PersonId(2),
+            bytes: quadro(true, 32),
+        });
+        assert!(
+            !recebido(&mut convite_novo).is_empty(),
+            "quem assistia parou de receber uma transmissão que continuava no ar"
+        );
+
+        // O contrapeso: a própria conexão que a abriu ainda a encerra.
+        voice_room.handle(VoiceRoomCommand::TelaFechou {
+            from: PersonId(2),
+            sessao: SessionId(8),
+        });
+        assert!(
+            voice_room.telas.is_empty(),
+            "o fim do fluxo desta conexão deixou de encerrar a transmissão dela"
+        );
+    }
+
+    #[test]
+    fn o_ssrc_da_conexao_velha_para_de_valer_quando_a_pessoa_entra_de_novo() {
+        // O outro lado do guarda de sessão. Entrar de novo troca o `Member`
+        // desta pessoa, e antes disso a saída da conexão velha era quem
+        // apagava o número antigo de `by_ssrc`; agora ela volta cedo e não
+        // apaga nada. Sem tirar o número na entrada, o `ssrc` de uma conexão
+        // morta seguiria entregando voz em nome desta pessoa, e a sala
+        // guardaria uma entrada a mais a cada reconexão.
+        let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
+        let mut ouvinte = member(&mut voice_room, 1, 100, true);
+        let _velha = member(&mut voice_room, 2, 200, true);
+
+        let (tx, _rx) = mpsc::channel(64);
+        let (tela, _) = mpsc::channel(4);
+        voice_room.handle(VoiceRoomCommand::Join {
+            person: PersonId(2),
+            sessao: SessionId(8),
+            ssrc: Ssrc(201),
+            may_speak: true,
+            outbound: tx,
+            tela,
+        });
+
+        voice_room.handle(VoiceRoomCommand::Datagram {
+            from: Ssrc(200),
+            bytes: datagram(200, 1),
+        });
+        assert!(
+            ouvinte.try_recv().is_err(),
+            "o ssrc da conexão morta continuou entregando voz em nome de quem reconectou"
+        );
+        assert_eq!(voice_room.drops().not_a_member, 1);
+
+        // E o número novo continua valendo.
+        voice_room.handle(VoiceRoomCommand::Datagram {
+            from: Ssrc(201),
+            bytes: datagram(201, 1),
+        });
+        assert!(ouvinte.try_recv().is_ok(), "a voz de quem reconectou sumiu");
+    }
+
+    #[test]
     fn leaving_stops_delivery_and_frees_the_ssrc() {
         let mut voice_room = VoiceRoom::new(VoiceRoomId(1));
         let _alice = member(&mut voice_room, 1, 100, true);
@@ -1481,7 +1793,7 @@ mod tests {
 
         voice_room.handle(VoiceRoomCommand::Leave {
             person: PersonId(2),
-            ssrc: Ssrc(200),
+            sessao: None,
         });
         assert_eq!(voice_room.occupancy(), 1);
 
@@ -1520,6 +1832,7 @@ mod tests {
             pontas.push((ouve, convites));
             sala.send(VoiceRoomCommand::Join {
                 person: PersonId(pessoa),
+                sessao: SessionId(pessoa),
                 ssrc: Ssrc(pessoa as u32 * 10),
                 may_speak: true,
                 outbound,
@@ -1566,6 +1879,7 @@ mod tests {
         primeiro
             .send(VoiceRoomCommand::Join {
                 person: PersonId(1),
+                sessao: SessionId(1),
                 ssrc: Ssrc(100),
                 may_speak: true,
                 outbound: alice_tx,
@@ -1578,6 +1892,7 @@ mod tests {
         segundo
             .send(VoiceRoomCommand::Join {
                 person: PersonId(2),
+                sessao: SessionId(2),
                 ssrc: Ssrc(200),
                 may_speak: true,
                 outbound: bob_tx,
@@ -1627,6 +1942,7 @@ mod tests {
         let (alice_tx, mut alice) = mpsc::channel(8);
         sala.send(VoiceRoomCommand::Join {
             person: PersonId(1),
+            sessao: SessionId(1),
             ssrc: Ssrc(100),
             may_speak: true,
             outbound: alice_tx,
@@ -1637,6 +1953,7 @@ mod tests {
         let (bob_tx, _bob) = mpsc::channel(8);
         sala.send(VoiceRoomCommand::Join {
             person: PersonId(2),
+            sessao: SessionId(2),
             ssrc: Ssrc(200),
             may_speak: true,
             outbound: bob_tx,
@@ -1645,7 +1962,7 @@ mod tests {
         .await
         .unwrap();
 
-        voice_rooms.leave_everywhere(PersonId(1), Ssrc(100)).await;
+        voice_rooms.leave_everywhere(PersonId(1), None).await;
 
         sala.send(VoiceRoomCommand::Datagram {
             from: Ssrc(200),
@@ -1861,7 +2178,7 @@ mod tests {
 
         voice_room.handle(VoiceRoomCommand::Leave {
             person: PersonId(1),
-            ssrc: Ssrc(10),
+            sessao: None,
         });
         assert!(
             matches!(convite.pedacos.try_recv(), Ok(Pedaco::Fim)),
@@ -1972,7 +2289,7 @@ mod tests {
         // E a saída é a metade boa de N mudar: ela devolve teto.
         voice_room.handle(VoiceRoomCommand::Leave {
             person: PersonId(2),
-            ssrc: Ssrc(20),
+            sessao: None,
         });
         assert_eq!(contagens(&mut ouvinte), vec![1]);
     }
@@ -2218,6 +2535,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         voice_room.handle(VoiceRoomCommand::Join {
             person: PersonId(2),
+            sessao: SessionId(2),
             ssrc: Ssrc(200),
             may_speak: true,
             outbound: tx,

@@ -230,6 +230,14 @@ impl Registry {
 pub struct Session {
     /// Which account this connection is.
     pub person: PersonId,
+    /// **Qual conexão** desta pessoa é esta.
+    ///
+    /// O mesmo número que foi para o cliente no `ServerMessage::Session`, e o que
+    /// separa duas conexões da mesma pessoa vivas ao mesmo tempo — que é o caso
+    /// comum, e não o raro: numa queda silenciosa a conexão nova sobe perto dos
+    /// 15 s e a velha só é desmontada aos 20 s, quando o tempo ocioso do
+    /// transporte estoura. Ver [`desassentar`].
+    pub id: SessionId,
     /// The media source bound to this connection.
     pub ssrc: Ssrc,
     /// Display name.
@@ -377,46 +385,12 @@ pub async fn serve(
     // Out of every room, not out of the one this connection remembers. The loop
     // above can end at any `?`, and a path that returns early does not know
     // where the person was sitting.
-    voice_rooms
-        .leave_everywhere(session.person, session.ssrc)
-        .await;
-    soltar_telas_e_pares_de(&server, &voice_rooms, session.person).await;
-
-    // And **announced**, which it was not. `Event::PersonLeft` was sent only
-    // from the `LeaveVoiceRoom` branch, so a person who closed their client, lost
-    // their network or hit any `?` in the loop stayed in everybody else's
-    // roster until they reconnected. Nobody saw it while a client only drew the
-    // voice room it was sitting in and only learned of that voice room's arrivals; now that
-    // every voice room is drawn with the people in it, a ghost is a ghost on screen.
     //
-    // Here rather than at the end of `run_session` for the same reason as the
-    // channel above: this is the one place every exit path passes through.
-    for voice_room in server
-        .occupancy
-        .lock()
-        .await
-        .vacate_everywhere(session.person, session.ssrc)
-    {
-        let _ = server.events.send(Event::PersonLeft {
-            voice_room,
-            person: session.person,
-        });
-    }
-
-    // E some da lista de presentes, pelo mesmo caminho e pelo mesmo motivo do
-    // laço acima: sem isto, todo cliente acumula o nome de quem já conectou
-    // alguma vez e desenha todos como presentes. `PersonLeft` não cobre — ele
-    // diz que uma sala esvaziou, e quem nunca se sentou não produz nenhum.
-    if server
-        .presentes
-        .lock()
-        .await
-        .saiu(session.person, session.ssrc)
-    {
-        let _ = server.events.send(Event::PersonGone {
-            person: session.person,
-        });
-    }
+    // E numa chamada só, guardada pela sessão: ver [`desassentar`], que é a
+    // saída simétrica de [`assentar`]. Aqui havia quatro operações soltas, todas
+    // chaveadas por pessoa, e era a ordem normal de uma queda de rede que as
+    // fazia apagar a conexão seguinte da mesma pessoa.
+    desassentar(&server, &voice_rooms, &session, Saida::Conexao).await;
 
     // E sai de quem empresta a subida, pelo mesmo motivo de todo o resto desta
     // seção: sem isto a escolha (`Pares::escolher`) continuaria apontando para
@@ -986,6 +960,7 @@ async fn handshake(
     let _ = client;
     Ok(Session {
         person: account.id,
+        id: session_id,
         ssrc,
         nickname: account.nickname,
         may_speak: account.may_speak,
@@ -1380,6 +1355,7 @@ async fn run_session(
         let avisos = avisos_tx.clone();
         let conexao = connection.clone();
         let pessoa = session.person;
+        let sessao = session.id;
         let apelido = session.nickname.clone();
         let salas = Arc::clone(voice_rooms);
         tokio::spawn(async move {
@@ -1411,7 +1387,8 @@ async fn run_session(
                         // arquivo.
                         tokio::spawn(async move {
                             if let Err(erro) =
-                                receber_tela(&contexto, &salas, pessoa, &avisos, &mut fluxo).await
+                                receber_tela(&contexto, &salas, pessoa, sessao, &avisos, &mut fluxo)
+                                    .await
                             {
                                 tracing::debug!(%pessoa, %erro, "o fluxo de tela terminou");
                             }
@@ -1669,6 +1646,7 @@ async fn run_session(
             person: session.person,
             nickname: session.nickname.clone(),
             ssrc: session.ssrc,
+            sessao: session.id,
         });
         if chegou {
             let _ = server.events.send(Event::PersonPresent {
@@ -1676,8 +1654,34 @@ async fn run_session(
                     person: session.person,
                     nickname: session.nickname.clone(),
                     ssrc: session.ssrc,
+                    sessao: session.id,
                 },
             });
+        }
+
+        // E a janela que o guarda da reserva de carência não alcança fecha aqui.
+        //
+        // Aquele guarda pergunta a `Presentes` quem é a sessão vigente, e esta
+        // conexão só passou a ser a vigente na linha acima: uma conexão velha que
+        // morresse entre o `handshake` desta e este instante gravaria a reserva
+        // obsoleta com a sala e o `ssrc` dela, valendo cinco minutos. O
+        // `handshake` desta conexão já resgatou o que houvesse para resgatar, de
+        // modo que qualquer reserva que exista agora foi escrita depois disso —
+        // e é de quem já não é esta pessoa. O descarte não se apoia só nessa
+        // ordem: a reserva guarda a sessão que a escreveu, e só some a de outra
+        // conexão.
+        let mut slots = server.slots.lock().await;
+        if crate::server::descartar_a_reserva_de_quem_ja_voltou(
+            &mut slots,
+            session.person,
+            session.id,
+        ) {
+            tracing::info!(
+                person = %session.person,
+                sessao = %session.id,
+                "uma conexão anterior guardou assento depois de esta já ter voltado; \
+                 a reserva obsoleta foi descartada"
+            );
         }
     }
 
@@ -1825,18 +1829,19 @@ async fn run_session(
                         midia.entrou(current_voice_room);
                     }
                     ClientMessage::LeaveVoiceRoom => {
-                        voice_rooms
-                            .leave_everywhere(session.person, session.ssrc)
-                            .await;
-                        soltar_telas_e_pares_de(server, voice_rooms, session.person).await;
-                        if let Some(id) = current_voice_room.take() {
-                            midia.entrou(current_voice_room);
-                            server.occupancy.lock().await.vacate(id, session.person);
-                            let _ = server.events.send(Event::PersonLeft {
-                                voice_room: id,
-                                person: session.person,
-                            });
-                        }
+                        // Pela mesma `desassentar` do fim da conexão. Era a
+                        // quinta cópia desta contabilidade, e uma cópia que não
+                        // confere a sessão deixa a conexão velha de alguém tirar
+                        // da sala a conexão nova dele.
+                        // Chamada **sempre**, e não só quando esta conexão se
+                        // lembra de uma sala. Antes deste conserto a saída era
+                        // incondicional e por isso corrigia qualquer dessincronia
+                        // entre o que a conexão lembra e o que o servidor tem;
+                        // pô-la dentro do `if` teria trocado um defeito de sessão
+                        // por uma saída que só limpa quando já está tudo certo.
+                        let sala = current_voice_room.take();
+                        midia.entrou(current_voice_room);
+                        desassentar(server, voice_rooms, session, Saida::Sala(sala)).await;
                     }
                     ClientMessage::JoinChannel { channel } => {
                         if !channels.contains(&channel) {
@@ -2474,11 +2479,52 @@ async fn run_session(
                         // hospeda e conta as cópias — e diz isso com
                         // `AlemDoQueOHospedeiroCarrega`, que é uma frase, e não
                         // com `ScreenShareTaken`, que era «alguém chegou antes».
-                        server
-                            .telas
-                            .lock()
-                            .await
-                            .comecar(voice_room, session.person, screen);
+                        // Conferida a sessão, e a vaga de tela é a última escrita
+                        // desta família que sobrescrevia em vez de conferir: um
+                        // `StartScreenShare` atrasado da conexão velha tomaria a
+                        // vaga da nova e anunciaria o fim da tela que a nova
+                        // acabou de abrir. Ver
+                        // `crate::server::comecar_a_tela_da_conexao_vigente`.
+                        let presentes = server.presentes.lock().await;
+                        let abertura = crate::server::comecar_a_tela_da_conexao_vigente(
+                            &presentes,
+                            &mut *server.telas.lock().await,
+                            voice_room,
+                            session.person,
+                            session.id,
+                            screen,
+                        );
+                        drop(presentes);
+                        let substituida = match abertura {
+                            crate::server::AberturaDeTela::Aberta { substituida } => substituida,
+                            // Nada escrito, nada anunciado. Também nada recusado
+                            // a quem pediu: quem pediu é uma conexão que esta
+                            // pessoa já abandonou, e a resposta iria para uma
+                            // ponta que ninguém está lendo. Contado no mesmo
+                            // lugar em que o resto do guarda se conta.
+                            crate::server::AberturaDeTela::DeConexaoVelha => {
+                                server.desassentamentos.conexao_velha();
+                                tracing::info!(
+                                    person = %session.person,
+                                    sessao = %session.id,
+                                    "uma conexão velha pediu para transmitir a tela depois de esta pessoa já ter voltado por outra; a vaga da conexão nova ficou onde estava"
+                                );
+                                continue;
+                            }
+                        };
+                        // A tela que esta pessoa já transmitia aqui acabou de ser
+                        // trocada por esta — e quem assiste precisa ouvir isso.
+                        // O cliente funde aditivamente: sem o fim da antiga, o
+                        // cabeçalho dela fica desenhado para sempre, prometendo
+                        // um fluxo que já não tem de onde vir. É o caso do
+                        // `StartScreenShare` depois de reconectar, em que a vaga
+                        // troca de sessão sem passar por `parar`.
+                        if let Some(velha) = substituida {
+                            let _ = server.events.send(Event::ScreenShareStopped {
+                                voice_room,
+                                screen: velha,
+                            });
+                        }
                         let _ = server.events.send(Event::ScreenShareStarted {
                             voice_room,
                             person: session.person,
@@ -2589,7 +2635,13 @@ async fn run_session(
                     }
                     ClientMessage::StopScreenShare => {
                         let parada = match current_voice_room {
-                            Some(voice_room) => server.telas.lock().await.parar(voice_room, session.person),
+                            Some(voice_room) => {
+                                server.telas.lock().await.parar(
+                                    voice_room,
+                                    session.person,
+                                    session.id,
+                                )
+                            }
                             None => None,
                         };
                         if let (Some(voice_room), Some(screen)) = (current_voice_room, parada) {
@@ -3018,6 +3070,25 @@ async fn run_session(
                         // they were removed from the moment they reconnected,
                         // which is the whole verb undone by a feature meant for
                         // something else.
+                        //
+                        // **Desocupado aqui, e não no fim da conexão.** O fim
+                        // chega depois da despedida, e nesse meio-tempo o cliente
+                        // expulso já reconectou e já reentrou na sala — a bateria
+                        // interna dele restaura a sala em que estava. Quem ficou
+                        // via a sala esvaziar por um instante só porque a sessão
+                        // morrendo anunciava uma saída que já não era dela; agora
+                        // a saída sai no instante da expulsão, que é quando ela
+                        // de fato acontece, e com a sessão certa no anúncio.
+                        //
+                        // Que o cliente consiga reentrar em seguida é outro
+                        // assunto, e não deste guarda: `EnterVoiceRoom` não
+                        // confere `Permission::EnterVoiceRoom`. Está registrado na
+                        // auditoria como achado próprio.
+                        // Sem `if` pelo mesmo motivo do `LeaveVoiceRoom`: a
+                        // mídia e a tela de quem foi expulso têm de morrer mesmo
+                        // que esta conexão tenha perdido a conta da sala.
+                        desassentar(server, voice_rooms, session, Saida::Sala(current_voice_room))
+                            .await;
                         current_voice_room = None;
                         midia.entrou(current_voice_room);
                         let _ = frame::write(&mut send, &ServerMessage::Disconnecting {
@@ -3028,6 +3099,42 @@ async fn run_session(
                         break;
                     }
                     Event::PersonMoved { person, voice_room: destino } if *person == session.person => {
+                        // A sétima porta, e a única em que o guarda não está no
+                        // desmonte: este anúncio chega a **todas** as conexões
+                        // desta pessoa, e respondê-lo chama `assentar`, que tira
+                        // a pessoa de toda sala anterior sem conferir sessão —
+                        // de propósito, para que andar de uma sala para outra não
+                        // deixe membro para trás. Respondido pela conexão velha
+                        // da queda silenciosa, isso desmonta a mídia e a tela da
+                        // nova e a re-senta com um canal morto. Achado por
+                        // revisão independente; ver
+                        // [`crate::server::a_mudanca_de_sala_e_desta_conexao`].
+                        //
+                        // Quem prova que esta chamada continua aqui é o teste de
+                        // conformidade
+                        // `o_anuncio_de_mudanca_de_sala_nao_e_respondido_pela_conexao_velha`,
+                        // contra um servidor de verdade: apagada a conferência,
+                        // ele reprova. Houve aqui, antes dele, uma prova que lia
+                        // este arquivo e cobrava a forma literal do desvio;
+                        // revisão independente apontou que ela reprovaria também
+                        // numa reescrita equivalente e correta, e ela saiu.
+                        let e_minha = {
+                            let presentes = server.presentes.lock().await;
+                            crate::server::a_mudanca_de_sala_e_desta_conexao(
+                                &presentes,
+                                session.person,
+                                session.id,
+                            )
+                        };
+                        if !e_minha {
+                            server.desassentamentos.conexao_velha();
+                            tracing::info!(
+                                person = %session.person,
+                                sessao = %session.id,
+                                "uma conexão velha recebeu a mudança de sala desta pessoa; nada foi mexido"
+                            );
+                            continue;
+                        }
                         assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, *destino).await?;
                         current_voice_room = Some(*destino);
                         midia.entrou(current_voice_room);
@@ -3059,17 +3166,13 @@ async fn run_session(
                     // client is ever holding a roster for a room it has already
                     // been told to forget.
                     Event::VoiceRoomDeleted { voice_room: id } if current_voice_room == Some(*id) => {
-                        voice_rooms
-                            .leave_everywhere(session.person, session.ssrc)
-                            .await;
-                        soltar_telas_e_pares_de(server, voice_rooms, session.person).await;
+                        // A sexta cópia, agora pela mesma `desassentar`. Os
+                        // quadros abaixo ficam de fora do guarda de propósito:
+                        // dizer a **este** cliente que a sala acabou é verdade
+                        // sobre a sala, e não sobre quem é a sessão vigente.
+                        desassentar(server, voice_rooms, session, Saida::Sala(Some(*id))).await;
                         current_voice_room = None;
                         midia.entrou(current_voice_room);
-                        server.occupancy.lock().await.vacate(*id, session.person);
-                        let _ = server.events.send(Event::PersonLeft {
-                            voice_room: *id,
-                            person: session.person,
-                        });
                         frame::write(&mut send, &ServerMessage::VoiceRoomDeleted {
                             voice_room: *id,
                         }).await?;
@@ -3204,9 +3307,36 @@ async fn run_session(
 
     // The connection is gone. Hold the seat for the grace window rather than
     // letting a tunnel cost somebody their place — specs/02-protocolo.md.
+    //
+    // **Só se esta ainda for a conexão desta pessoa.** Uma sessão que morre
+    // depois de a pessoa já ter voltado guardava um assento com o `ssrc` dela, e
+    // essa reserva obsoleta vale cinco minutos: quem saiu da sala de propósito e
+    // se desconectou em seguida era re-sentado na conexão seguinte por causa de
+    // uma reserva deixada por uma conexão anterior. Mesma família do defeito que
+    // `desassentar` fecha, e a mesma pergunta o resolve.
     if let Some(id) = current_voice_room {
+        let presentes = server.presentes.lock().await;
         let mut slots = server.slots.lock().await;
-        slots.reserve(session.person, id, session.ssrc, Instant::now());
+        if !crate::server::reservar_o_assento_da_carencia(
+            &presentes,
+            &mut slots,
+            session.person,
+            session.id,
+            id,
+            session.ssrc,
+            Instant::now(),
+        ) {
+            // Contado, e não só dito: o guarda acerta **não** escrevendo, e um
+            // teste de ponta a ponta não tem como distinguir «a reserva foi
+            // recusada» de «esta conexão nunca chegou ao fim» olhando só para o
+            // efeito. Ver [`crate::server::Desassentamentos::reserva_obsoleta`].
+            server.desassentamentos.reserva_obsoleta();
+            tracing::info!(
+                person = %session.person,
+                sessao = %session.id,
+                "esta conexão já não é a desta pessoa; o assento não foi reservado por ela"
+            );
+        }
     }
     // Coming out of the occupancy — and being announced — is `serve`'s job, and
     // it happens the moment this returns. It used to happen here, which meant
@@ -3252,6 +3382,203 @@ async fn run_session(
     Ok(())
 }
 
+/// O que uma saída alcança.
+///
+/// Duas e não quatro: ou a conexão acabou — e aí a pessoa sai de toda sala, da
+/// lista de presentes e da tela —, ou ela só saiu de uma sala e a conexão segue
+/// viva. Era essa distinção que as seis cópias espalhadas pelo arquivo
+/// reimplementavam, cada uma esquecendo uma parte diferente.
+#[derive(Debug, Clone, Copy)]
+enum Saida {
+    /// A conexão acabou, por despedida ou por qualquer `?` do meio do laço.
+    Conexao,
+    /// A pessoa saiu desta sala, e a conexão continua.
+    ///
+    /// `None` quando esta conexão não se lembra de sala nenhuma: a mídia, a tela
+    /// e a lotação desta sessão são desmontadas do mesmo jeito, porque uma
+    /// conexão que perdeu a conta de onde estava é precisamente a que pode ter
+    /// deixado estado atrás.
+    Sala(Option<VoiceRoomId>),
+}
+
+/// Tira esta conexão de onde ela estava, e conta a quem precisa saber.
+///
+/// A saída simétrica de [`assentar`], e pelo mesmo motivo: escrita seis vezes,
+/// a cópia que ganha uma linha nova nunca é a sexta, e a que fica velha é a que
+/// deixa alguém numa sala em que não está — ou, pior, **tira** da sala alguém
+/// que está.
+///
+/// # O guarda, e por que ele não é um detalhe de corrida
+///
+/// Todo o desmonte era chaveado por `PersonId` e nunca comparava a sessão que
+/// está morrendo com a que está viva. A aritmética das constantes diz o resto:
+/// o cliente manda um `Ping` a cada `KEEPALIVE` (5 s) e entra na bateria interna
+/// depois de três perdidos — perto de 15 s —, enquanto o servidor só desiste da
+/// conexão muda em `IDLE_TIMEOUT` (20 s). Numa queda **silenciosa** — Wi-Fi
+/// oscilando, máquina dormindo, NAT trocando a porta, `CONNECTION_CLOSE` perdido,
+/// que é um pacote só e não é retransmitido — a conexão nova sobe **antes** de a
+/// velha morrer. Não é uma corrida com probabilidade: é a ordem esperada, com
+/// cerca de cinco segundos de folga.
+///
+/// E o estrago não voltava sozinho. `PersonLeft` e `PersonGone` não são enviados
+/// para a própria pessoa (ver `translate`), então quem foi apagado continua
+/// desenhando a sala como ocupada por ele; e o cliente funde os eventos de
+/// maneira aditiva, sem nenhum evento que reconstrua o roster. A divergência
+/// ficava de pé pelo resto da sessão de quem ficou: invisível, mudo, sem vídeo, e
+/// sem nenhum sinal para quem foi apagado. É o relato de campo inteiro.
+///
+/// # Duas estratégias, e qual copiar
+///
+/// Quem escrever a próxima saída daqui precisa saber que há **duas** formas de
+/// perguntar «de quem é esta conexão», e que elas não são intercambiáveis:
+///
+/// - **Para remover**, cada estado confere no **próprio registro** de qual
+///   sessão ele é (`Occupancy::vacate_da_sessao`, `Presentes::saiu(pessoa,
+///   sessão)`, `Telas` com `SessionId`, `VoiceRoomCommand::Leave` com sessão).
+///   Uma sessão só apaga o que ela mesma escreveu. É o que esta função usa, e é
+///   mais forte do que perguntar quem é a vigente, porque não depende de ordem
+///   nenhuma — nem a de uma expulsão, em que a conexão nova já subiu quando a
+///   expulsa morre.
+/// - **Para escrever**, aí sim se pergunta a [`crate::server::Presentes`] se
+///   esta é a sessão vigente ([`crate::server::reservar_o_assento_da_carencia`],
+///   [`crate::server::comecar_a_tela_da_conexao_vigente`]). Não há registro
+///   anterior para comparar: o que se está impedindo é uma conexão velha
+///   **gravar** por cima da nova.
+///
+/// Copiar o modelo de escrita numa remoção reintroduz este defeito pelo avesso;
+/// copiar o modelo de remoção numa escrita não tem contra o que comparar. O que
+/// **não** se faz, nos dois casos, é uma quarta tabela só para guardar «qual
+/// conexão»: uma segunda cópia da mesma contabilidade é o que produziu este
+/// defeito.
+async fn desassentar(
+    server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
+    session: &Session,
+    escopo: Saida,
+) {
+    // **Sem pergunta central, e isso é a decisão.** A primeira versão deste
+    // conserto perguntava uma vez — «esta conexão ainda é a desta pessoa?» — e
+    // voltava sem fazer nada quando a resposta era não. Custava o contrário do
+    // que ela queria comprar: numa expulsão, a pessoa reconecta em milissegundos
+    // e a sessão expulsa morre **depois**, de modo que a pergunta central a
+    // impedia de limpar **o que era dela**, e quem foi expulso continuava
+    // desenhado na sala para quem ficou.
+    //
+    // Então o guarda não pergunta quem é a vigente: cada estado confere, no
+    // próprio registro, de qual conexão ele é. Uma sessão só apaga o que ela
+    // mesma escreveu — é mais forte que a pergunta central, porque não depende de
+    // ordem nenhuma, e não tem como virar vazamento.
+    // A mídia e a tela primeiro, como as quatro linhas soltas já faziam: elas são
+    // o que a pessoa **sente** (não ouvir, não ver), e o roster é o que ela vê.
+    //
+    // Com a sessão na mão: a tarefa da sala confere o membro antes de tirá-lo, de
+    // modo que mesmo uma pergunta respondida entre o assento da conexão nova e o
+    // anúncio de presença dela não consegue tirar a nova da sala.
+    voice_rooms
+        .leave_everywhere(session.person, Some(session.id))
+        .await;
+    encerrar_telas_desta_conexao(server, voice_rooms, session.person, session.id).await;
+
+    match escopo {
+        Saida::Sala(Some(id)) => {
+            // Anunciado **só quando houve o que desocupar**. Um `PersonLeft` de
+            // uma saída que não aconteceu apaga da tela de todo mundo alguém que
+            // está na sala, que é a metade deste defeito que mais custou.
+            let desocupou =
+                server
+                    .occupancy
+                    .lock()
+                    .await
+                    .vacate_da_sessao(id, session.person, session.id);
+            if desocupou {
+                let _ = server.events.send(Event::PersonLeft {
+                    voice_room: id,
+                    person: session.person,
+                });
+            }
+        }
+        // Sem sala lembrada, varre-se a lotação **por sessão**, como a saída de
+        // conexão faz. A versão anterior deste ramo era vazia, com o argumento de
+        // que anunciar a saída de uma sala que não se sabe qual é seria adivinhar
+        // — mas não é preciso adivinhar nada: `vacate_everywhere_da_sessao`
+        // devolve exatamente as salas em que **esta** sessão tinha assento, e se
+        // não tinha nenhum a varredura não faz nada e não anuncia nada. Era a
+        // única das saídas que desmontava mídia e tela e deixava lotação atrás,
+        // que é precisamente a forma do defeito que esta função existe para
+        // fechar: uma conexão que perdeu a conta de onde estava é a que mais
+        // provavelmente deixou assento para trás.
+        Saida::Sala(None) => {
+            for sala in server
+                .occupancy
+                .lock()
+                .await
+                .vacate_everywhere_da_sessao(session.person, session.id)
+            {
+                let _ = server.events.send(Event::PersonLeft {
+                    voice_room: sala,
+                    person: session.person,
+                });
+            }
+        }
+        Saida::Conexao => {
+            // De toda sala, e não daquela de que esta conexão se lembra: o laço
+            // acima pode acabar em qualquer `?`, e um caminho que volta cedo não
+            // sabe onde a pessoa estava sentada.
+            for sala in server
+                .occupancy
+                .lock()
+                .await
+                .vacate_everywhere_da_sessao(session.person, session.id)
+            {
+                let _ = server.events.send(Event::PersonLeft {
+                    voice_room: sala,
+                    person: session.person,
+                });
+            }
+
+            // E sai da lista de presentes, que é o que cobre quem conectou e
+            // nunca se sentou: `PersonLeft` diz que uma sala esvaziou, e quem
+            // nunca se sentou não produz nenhum.
+            let mut presentes = server.presentes.lock().await;
+
+            // Esta conexão ainda é a vigente desta pessoa? **Perguntado antes de
+            // remover, e não deduzido do que a remoção devolveu.** A primeira
+            // versão contava «não removeu nada e a pessoa continua aqui», o que
+            // parece a mesma coisa e não é: desarmado o filtro de sessão de
+            // [`Presentes::saiu`], a remoção passa a devolver verdadeiro e o
+            // contador nunca anda — então a prova de reversão reprovava na
+            // asserção do contador, acusando margem curta, em vez de reprovar na
+            // asserção que descreve o defeito. Contado aqui, o número diz o que o
+            // nome dele promete: uma conexão velha chegou ao fim depois de a
+            // pessoa já ter voltado por outra. Isso é verdade com o guarda armado
+            // e com ele desarmado — é a encenação do teste, não o veredito dele.
+            // Ver [`crate::server::Desassentamentos`].
+            let e_a_vigente = presentes.e_a_vigente(session.person, session.id);
+            let pessoa_continua_aqui = presentes.esta_presente(session.person);
+            if !e_a_vigente && pessoa_continua_aqui {
+                server.desassentamentos.conexao_velha();
+            }
+
+            let saiu = presentes.saiu(session.person, session.id);
+            // E o guarda tendo trabalhado de fato: nada seu para tirar, e a
+            // pessoa segue aqui por outra conexão.
+            let defendeu = !saiu && pessoa_continua_aqui;
+            drop(presentes);
+            if saiu {
+                let _ = server.events.send(Event::PersonGone {
+                    person: session.person,
+                });
+            } else if defendeu {
+                tracing::info!(
+                    person = %session.person,
+                    sessao = %session.id,
+                    "uma conexão velha acabou depois de esta pessoa já ter voltado por outra; nada foi desmontado"
+                );
+            }
+        }
+    }
+}
+
 /// Puts this connection's connection into a voice room, and tells the server.
 ///
 /// One function because there are two ways in — the person asks
@@ -3272,20 +3599,22 @@ async fn assentar(
     // Out of the old room before into the new one. Without this a person who
     // walks from one voice room to another is still a member of the first, and goes
     // on hearing it.
-    voice_rooms
-        .leave_everywhere(session.person, session.ssrc)
-        .await;
+    // Sem guarda de sessão, e de propósito: andar de uma sala para outra tem de
+    // tirar desta pessoa **todo** membro anterior, de qual conexão for, ou ela
+    // seguiria ouvindo a sala de onde saiu.
+    voice_rooms.leave_everywhere(session.person, None).await;
     // E a tela vai junto. Uma transmissão não anda de sala com quem a manda:
     // quem ficou na sala anterior continuaria vendo o cabeçalho de um fluxo que
     // agora aponta para outro lugar, e o §6 item 3 só permite uma por sala —
     // levar a transmissão pela mão faria a pessoa tomar a vaga da sala nova sem
     // ter pedido.
-    soltar_telas_e_pares_de(server, voice_rooms, session.person).await;
+    encerrar_telas_da_pessoa(server, voice_rooms, session.person).await;
     voice_rooms
         .of(destino)
         .await
         .send(VoiceRoomCommand::Join {
             person: session.person,
+            sessao: session.id,
             ssrc: session.ssrc,
             may_speak: session.may_speak,
             outbound: outbound.clone(),
@@ -3299,16 +3628,21 @@ async fn assentar(
     // walking into would be telling it something it already knows.
     let saiu_de = {
         let mut occupancy = server.occupancy.lock().await;
-        let mut saiu_de = occupancy.vacate_everywhere(session.person, session.ssrc);
-        saiu_de.retain(|anterior| *anterior != destino);
-        occupancy.seat(
+        // O assento anterior cai dentro do próprio `seat`, que é quem sabe que
+        // sentar substitui — e devolve as salas que esvaziaram, que é o que o
+        // aviso de saída à sala de onde a pessoa veio precisa. Pedir a remoção
+        // por fora seria a sétima cópia do desmonte por pessoa, e é justamente a
+        // família de defeito que esta tarefa fechou.
+        let mut saiu_de = occupancy.seat(
             destino,
             crate::server::Occupant {
                 person: session.person,
                 nickname: session.nickname.clone(),
                 ssrc: session.ssrc,
+                sessao: session.id,
             },
         );
+        saiu_de.retain(|anterior| *anterior != destino);
         saiu_de
     };
 
@@ -3706,10 +4040,11 @@ async fn receber_tela(
     server: &Server,
     voice_rooms: &crate::voice_room::VoiceRooms,
     person: PersonId,
+    sessao: SessionId,
     avisos: &mpsc::Sender<ServerMessage>,
     fluxo: &mut quinn::RecvStream,
 ) -> Result<()> {
-    let Some((voice_room, screen)) = server.telas.lock().await.de(person) else {
+    let Some((voice_room, screen)) = server.telas.lock().await.de(person, sessao) else {
         // Parar o fluxo e não ignorá-lo: um cliente que abriu sem pedir tem de
         // descobrir agora, e não pela imagem que nunca aparece do outro lado.
         let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
@@ -3754,7 +4089,12 @@ async fn receber_tela(
             // Anunciado, porque o plano de controle é o único lugar de onde a
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
             // transmissão que já não tem quem a bombeie.
-            soltar_telas_e_pares_de(server, voice_rooms, person).await;
+            //
+            // Com a sessão na mão, como todo o resto do desmonte: esta
+            // tarefa vive fora do laço da sessão e pode chegar aqui depois de
+            // a conexão nova da mesma pessoa já ter reaberto a transmissão.
+            // Sem o guarda, o fim da tela velha apagaria a nova.
+            encerrar_telas_desta_conexao(server, voice_rooms, person, sessao).await;
             // E com nome, para quem a mandava. `ScreenShareStopped` vai para a
             // sala inteira e não carrega razão de propósito — as duas maneiras
             // comuns de acabar já se distinguem sozinhas —, mas esta terceira
@@ -3800,49 +4140,104 @@ async fn receber_tela(
     // controle, e é ele que anuncia; quem sumiu é recolhido pelo fim da sessão.
     // Aqui só o encaminhamento morre, que é o que o §5.1 pôs sob esta função.
     let _ = sala
-        .send(VoiceRoomCommand::TelaFechou { from: person })
+        .send(VoiceRoomCommand::TelaFechou {
+            from: person,
+            sessao,
+        })
         .await;
     Ok(())
 }
 
-/// Encerra e anuncia o que esta pessoa estivesse transmitindo, e solta os pares
-/// que ela sustentava.
+/// Encerra e anuncia o que **esta conexão** estivesse transmitindo.
 ///
-/// Chamado em todo lugar onde alguém sai de uma sala de voz — sair, ser movido, ser
-/// expulso, ou a conexão acabar em qualquer `?` do meio do laço. Uma
-/// transmissão que sobrevivesse à saída de quem a manda ficaria desenhada para
-/// sempre na sala, prometendo um fluxo que não tem mais de onde vir: é o mesmo
-/// defeito da pessoa fantasma que `serve` conserta logo acima, com a diferença
-/// de que aqui a promessa é de imagem em movimento.
+/// Chamado onde uma conexão acaba — o desmonte de `desassentar` e o fim decidido
+/// pelo servidor lá dentro da tarefa da tela. Uma transmissão que sobrevivesse à
+/// saída de quem a manda ficaria desenhada para sempre na sala, prometendo um
+/// fluxo que não tem mais de onde vir: é o mesmo defeito da pessoa fantasma que
+/// `serve` conserta logo acima, com a diferença de que aqui a promessa é de
+/// imagem em movimento.
 ///
-/// # E as nomeações de par, nas duas direções
+/// # Por que são duas funções e não um `Option`
 ///
-/// Sair da sala encerra um repasse tanto quanto um `UnwatchScreen`, e por dois
-/// caminhos: as transmissões **desta** pessoa acabaram (então o par que as
-/// servia está livre), e o que **ela** assistia acabou para ela (então o par
-/// apontado para lhe servir está livre). Sem as duas linhas, cada saída
-/// deixaria uma nomeação de pé, `crate::pares::Pares::ja_servindo` contaria
-/// aquele par como ocupado pelo resto da sessão do daemon, e a malha
-/// degradaria para a estrela sem um rastro.
-async fn soltar_telas_e_pares_de(
+/// Porque a assinatura de antes — `sessao: Option<SessionId>` — aceitava calada o
+/// argumento errado. Trocar `Some(sessao)` por `None` aqui compilava, passava em
+/// toda a árvore e devolvia o defeito inteiro: a tarefa da tela vive **fora** do
+/// laço da sessão e pode chegar ao fim depois de a conexão nova da mesma pessoa
+/// já ter reaberto a transmissão, e aí o fim da velha apaga a nova. Com dois
+/// nomes, essa troca deixou de ser um caractere e passou a ser um `SessionId` que
+/// não tem para onde ir — não compila.
+async fn encerrar_telas_desta_conexao(
+    server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
+    person: PersonId,
+    sessao: SessionId,
+) {
+    encerrar_telas(server, voice_rooms, person, Some(sessao)).await;
+}
+
+/// Encerra e anuncia o que esta pessoa estivesse transmitindo, de qual conexão for.
+///
+/// Um chamador só, e nomeado para que ele tenha de se explicar: andar de uma sala
+/// para outra tem de levar embora **toda** transmissão anterior desta pessoa, ou
+/// quem ficou na sala de origem segue vendo o cabeçalho de um fluxo que já aponta
+/// para outro lugar.
+async fn encerrar_telas_da_pessoa(
     server: &Server,
     voice_rooms: &crate::voice_room::VoiceRooms,
     person: PersonId,
 ) {
-    let encerradas = server.telas.lock().await.encerrar_de(person);
+    encerrar_telas(server, voice_rooms, person, None).await;
+}
+
+/// O corpo das duas acima. Privado: quem chama escolhe pelo nome, não pelo valor.
+///
+/// # E as nomeações de par, nas três direções
+///
+/// Sair encerra um repasse tanto quanto um `UnwatchScreen`, e por três caminhos:
+/// as transmissões **desta** conexão acabaram (então o par que as servia está
+/// livre), o que **a pessoa** assistia acabou para ela (então o par apontado para
+/// lhe servir está livre), e um par repassa o que ele mesmo recebe, de modo que
+/// ele parando deixa sem imagem quem estava atrás dele. Sem as três, cada saída
+/// deixaria uma nomeação de pé, `crate::pares::Pares::ja_servindo` contaria
+/// aquele par como ocupado pelo resto da sessão do daemon, e a malha degradaria
+/// para a estrela sem um rastro.
+///
+/// **As duas últimas são por pessoa, e por isso passam pelo guarda.**
+/// `crate::pares::Pares` é chaveado por transmissão e por pessoa, sem sessão —
+/// dar-lhe uma seria uma tarefa inteira e outra tabela. A primeira direção não
+/// precisa: as telas encerradas já vêm filtradas pela sessão, e uma transmissão
+/// pertence a uma conexão só. As outras duas só correm quando esta conexão
+/// **é** a vigente da pessoa, ou quando a pessoa não tem mais conexão nenhuma —
+/// é a estratégia de escrita descrita em [`desassentar`], e é o que impede a
+/// conexão que morreu aos 20 s de derrubar para a estrela a malha que a conexão
+/// nova da mesma pessoa acabou de montar.
+async fn encerrar_telas(
+    server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
+    person: PersonId,
+    sessao: Option<SessionId>,
+) {
+    let pela_pessoa_inteira = match sessao {
+        None => true,
+        Some(sessao) => {
+            let presentes = server.presentes.lock().await;
+            !presentes.esta_presente(person) || presentes.e_a_vigente(person, sessao)
+        }
+    };
+    let encerradas = server.telas.lock().await.encerrar_de(person, sessao);
     let orfaos = {
         let mut pares = server.pares.lock().await;
         for (_, screen) in &encerradas {
-            // As transmissões **desta** pessoa acabaram: nenhum espectador
+            // As transmissões **desta** conexão acabaram: nenhum espectador
             // delas segue sendo servido, seja quem for.
             pares.a_transmissao_acabou(*screen);
         }
-        pares.quem_assiste_saiu(person);
-        // **A terceira direção, e a que faltava.** Um par repassa o que ele
-        // mesmo recebe: saindo da sala ele para de receber, e quem estava
-        // atrás dele fica sem imagem. Quem reabre o cano é a linha abaixo,
-        // agora, em vez do prazo do par vencendo do outro lado.
-        pares.quem_empresta_parou(person)
+        if pela_pessoa_inteira {
+            pares.quem_assiste_saiu(person);
+            pares.quem_empresta_parou(person)
+        } else {
+            Vec::new()
+        }
     };
     devolver_ao_servidor(server, voice_rooms, &orfaos).await;
     for (voice_room, screen) in encerradas {
@@ -4244,7 +4639,11 @@ mod plano_de_midia {
             // A declaração não é uma troca, e o `Midia::entrou` que a segue não
             // existiria: a tarefa de mídia nasce logo depois dela.
             let e_troca = corte.starts_with("current_voice_room = ") && corte.ends_with(';');
-            let e_take = corte == "if let Some(id) = current_voice_room.take() {";
+            // O `take` que tira a conexão da sala conta como troca pelo mesmo
+            // motivo, escrito com `if let` ou com `let` solto — a saída passou a
+            // ser incondicional para não deixar de corrigir dessincronia.
+            let e_take = corte == "if let Some(id) = current_voice_room.take() {"
+                || (corte.starts_with("let ") && corte.ends_with("= current_voice_room.take();"));
             if !e_troca && !e_take {
                 continue;
             }
@@ -4903,5 +5302,248 @@ mod o_aceite_dos_mods {
         .expect("uma linha com hash vazio trancou o servidor antes de o anúncio existir");
         assert!(!aceito.is_empty(), "todo conjunto tem identidade");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod fim_de_tela_por_sessao {
+    use std::sync::Arc;
+
+    use seele_proto::ids::{PersonId, ScreenId, SessionId, VoiceRoomId};
+    use tokio::sync::{broadcast, Mutex};
+
+    use crate::persistence::{Location, Persistence};
+    use crate::server::{spawn_writer, Event, Server, Telas};
+
+    /// Um servidor de mentira, com só o que o fim de tela toca: o registro das
+    /// transmissões e o barramento por onde o fim é anunciado.
+    fn servidor() -> Server {
+        let persistence = Arc::new(Mutex::new(
+            Persistence::open(&Location::Memory).expect("banco em memória"),
+        ));
+        let (events, _) = broadcast::channel(64);
+        let writes = spawn_writer(Arc::clone(&persistence), events.clone());
+        Server {
+            persistence,
+            events,
+            writes,
+            slots: Arc::new(Mutex::new(crate::server::Slots::default())),
+            occupancy: Arc::new(Mutex::new(crate::server::Occupancy::default())),
+            presentes: Arc::new(Mutex::new(crate::server::Presentes::default())),
+            subida: Arc::new(Mutex::new(crate::tela::Subida::nova())),
+            portaria: Arc::new(Mutex::new(crate::taxa::Portaria::nova())),
+            atrasos: Arc::new(crate::server::Atrasos::default()),
+            desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
+            pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
+            versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
+            telas: Arc::new(Mutex::new(Telas::default())),
+            anexos: None,
+            caminho_bps: None,
+        }
+    }
+
+    /// As salas de voz que o fim de tela agora atravessa: ele devolve ao
+    /// servidor os repasses que o par deixou órfãos, e para isso precisa de quem
+    /// falar com a sala. Nenhum destes testes abre sala nenhuma, de modo que a
+    /// lista fica vazia e as devoluções não têm a quem ir — que é exatamente o
+    /// que se quer medir aqui, o fim de tela e não a malha.
+    fn salas(server: &Server) -> crate::voice_room::VoiceRooms {
+        crate::voice_room::VoiceRooms::new(0, server.events.clone())
+    }
+
+    const SALA: VoiceRoomId = VoiceRoomId(1);
+    const PESSOA: PersonId = PersonId(10);
+    const VELHA: SessionId = SessionId(7);
+    const NOVA: SessionId = SessionId(8);
+    const TELA_VELHA: ScreenId = ScreenId(100);
+    const TELA_NOVA: ScreenId = ScreenId(101);
+
+    /// O fim da tela da conexão velha não apaga a tela da conexão nova.
+    ///
+    /// O caminho de verdade, e não o texto do arquivo: a tarefa da tela vive
+    /// **fora** do laço da sessão, e numa queda silenciosa ela chega ao fim
+    /// depois de a conexão nova da mesma pessoa já ter reaberto a transmissão. É
+    /// o mesmo defeito de `desassentar`, com imagem em movimento no lugar do
+    /// assento, e o relato de campo em que ele aparece é «não ouço nem vejo esse
+    /// amigo».
+    ///
+    /// As duas metades são afirmadas: o `ScreenShareStopped` **não** sai — porque
+    /// é ele que apaga a transmissão da tela de quem assiste —, e a transmissão
+    /// da conexão nova continua encaminhável, que é o que `Telas::de` responde ao
+    /// fluxo que chega.
+    #[tokio::test]
+    async fn o_fim_da_tela_da_conexao_velha_nao_apaga_a_da_nova() {
+        let server = servidor();
+        let mut barramento = server.events.subscribe();
+
+        let _ = server
+            .telas
+            .lock()
+            .await
+            .comecar(SALA, PESSOA, VELHA, TELA_VELHA);
+        // A reconexão: a mesma pessoa, de outra conexão, reabre a transmissão.
+        let _ = server
+            .telas
+            .lock()
+            .await
+            .comecar(SALA, PESSOA, NOVA, TELA_NOVA);
+
+        super::encerrar_telas_desta_conexao(&server, &salas(&server), PESSOA, VELHA).await;
+
+        assert_eq!(
+            server.telas.lock().await.de(PESSOA, NOVA),
+            Some((SALA, TELA_NOVA)),
+            "a conexão velha, ao morrer, apagou a transmissão que a conexão nova \
+             tinha acabado de abrir — quem assiste deixa de ver, e quem transmite \
+             não descobre por nada"
+        );
+        assert!(
+            matches!(
+                barramento.try_recv(),
+                Err(broadcast::error::TryRecvError::Empty)
+            ),
+            "saiu anúncio de fim de tela por causa de uma conexão que já não é a \
+             vigente: é ele que apaga a transmissão da tela de quem assiste"
+        );
+
+        // E a simetria, para que o teste não passe por o fim nunca acontecer: a
+        // conexão vigente encerra e anuncia.
+        super::encerrar_telas_desta_conexao(&server, &salas(&server), PESSOA, NOVA).await;
+        assert_eq!(server.telas.lock().await.de(PESSOA, NOVA), None);
+        assert!(matches!(
+            barramento.try_recv(),
+            Ok(Event::ScreenShareStopped {
+                voice_room: SALA,
+                screen: TELA_NOVA
+            })
+        ));
+    }
+
+    /// A troca de sala leva embora **toda** transmissão anterior da pessoa.
+    ///
+    /// O contrapeso do teste acima, e a razão de `encerrar_telas_da_pessoa`
+    /// existir com nome próprio: aqui o guarda de sessão seria o defeito. Quem
+    /// anda de uma sala para outra e deixasse para trás a transmissão de uma
+    /// conexão anterior faria quem ficou na sala de origem seguir vendo o
+    /// cabeçalho de um fluxo que já aponta para outro lugar.
+    #[tokio::test]
+    async fn andar_de_sala_leva_embora_a_tela_de_qualquer_conexao() {
+        let server = servidor();
+
+        let _ = server
+            .telas
+            .lock()
+            .await
+            .comecar(SALA, PESSOA, VELHA, TELA_VELHA);
+
+        super::encerrar_telas_da_pessoa(&server, &salas(&server), PESSOA).await;
+
+        assert!(
+            server.telas.lock().await.em(SALA).is_empty(),
+            "a transmissão de uma conexão anterior ficou desenhada na sala de onde \
+             a pessoa saiu"
+        );
+    }
+
+    /// Todo fim de tela diz **de qual conexão** ele é — ou é a pessoa inteira,
+    /// nomeada.
+    ///
+    /// # O que este guarda prova, e o que ele não prova
+    ///
+    /// Ele lê o próprio arquivo, e por isso prova só o **local da chamada**:
+    /// quais funções encerram a tela de uma conexão só e quais encerram a da
+    /// pessoa inteira. O efeito é dos dois testes acima, que exercitam o
+    /// servidor.
+    ///
+    /// O que sobra para ele é a escolha entre os dois nomes, que nenhum valor
+    /// expõe e nenhum tipo impede: `encerrar_telas_da_pessoa` num lugar onde
+    /// devia estar `encerrar_telas_desta_conexao` compila e devolve o defeito
+    /// inteiro. A troca mais fácil de fazer por descuido — `Some(sessao)` virar
+    /// `None` — deixou de existir quando o `Option` virou dois nomes: hoje ela
+    /// não compila.
+    ///
+    /// **E ele deixou de ser a única coisa que prende o fim de tela do
+    /// desmonte.** Revisão independente registrou a ressalva: uma prova que lê a
+    /// fonte reprova numa reescrita equivalente e correta, e passaria num
+    /// servidor em que a chamada certa não produzisse o efeito certo — foi por
+    /// isso que uma prova desse feitio saiu do guarda de mudança de sala nesta
+    /// mesma entrega. O efeito do fim de tela por sessão passou a ser medido
+    /// contra um servidor de verdade pelo teste de conformidade
+    /// `a_conexao_velha_nao_encerra_a_tela_que_a_nova_abriu`: trocando a chamada
+    /// da linha do desmonte pela da pessoa inteira, ele reprova dizendo que a
+    /// transmissão da conexão nova sumiu do servidor. Este teste continua aqui
+    /// pelo que ele ainda é o único a fazer: cobrar classificação de uma chamada
+    /// nova, em função que ninguém listou.
+    ///
+    /// Os fins da pessoa inteira estão nomeados um a um de propósito. Uma chamada
+    /// nova em função não listada reprova pedindo classificação, em vez de
+    /// escolher um padrão por ela.
+    #[test]
+    fn todo_fim_de_tela_declara_de_qual_sessao_e() {
+        let fonte = include_str!("session.rs");
+
+        let esperado = |funcao: &str| match funcao {
+            // O desmonte da sessão: só encerra o que for desta conexão.
+            "desassentar" => Some("encerrar_telas_desta_conexao("),
+            // A troca de sala: leva embora toda transmissão anterior da pessoa.
+            "assentar" => Some("encerrar_telas_da_pessoa("),
+            // O fim decidido pelo servidor, de dentro da tarefa da tela.
+            "receber_tela" => Some("encerrar_telas_desta_conexao("),
+            _ => None,
+        };
+
+        let mut funcao = "<fora de qualquer função>";
+        let mut chamadas = 0_usize;
+        let mut erradas = Vec::new();
+
+        for (numero, linha) in fonte.lines().enumerate() {
+            if let Some(nome) = linha
+                .strip_prefix("async fn ")
+                .or_else(|| linha.strip_prefix("fn "))
+            {
+                funcao = nome.split('(').next().unwrap_or(nome);
+                continue;
+            }
+            let corte = linha.trim();
+            if !corte.starts_with("encerrar_telas_desta_conexao(")
+                && !corte.starts_with("encerrar_telas_da_pessoa(")
+            {
+                continue;
+            }
+            chamadas += 1;
+            match esperado(funcao) {
+                Some(nome) if corte.starts_with(nome) => {}
+                Some(nome) => erradas.push(format!(
+                    "linha {}: em `{funcao}` esperava-se `{nome}`, e está `{corte}`",
+                    numero + 1
+                )),
+                None => erradas.push(format!(
+                    "linha {}: `{funcao}` não está classificada aqui — diga se este \
+                     fim de tela é de uma conexão só ou da pessoa inteira, e por quê",
+                    numero + 1
+                )),
+            }
+        }
+
+        assert!(
+            erradas.is_empty(),
+            "o fim de tela deixou de dizer de qual sessão é:\n{}\n\
+             Encerrar a pessoa inteira onde havia uma conexão faz o fim da \
+             transmissão da conexão velha apagar a transmissão da conexão nova da \
+             mesma pessoa — a que subiu enquanto a velha ainda não tinha estourado \
+             o tempo ocioso.",
+            erradas.join("\n")
+        );
+        // Sem isto o guarda passa a não guardar nada no dia em que as chamadas
+        // mudarem de forma, e passa calado.
+        assert!(
+            chamadas >= 3,
+            "só {chamadas} fins de tela encontrados — o guarda perdeu o alvo"
+        );
     }
 }

@@ -459,6 +459,7 @@ impl Daemon {
             })),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
             atrasos: Arc::new(server::Atrasos::default()),
+            desassentamentos: Arc::new(server::Desassentamentos::default()),
             telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),
             pares: Arc::new(tokio::sync::Mutex::new(pares::Pares::nova())),
             anexos,
@@ -642,6 +643,17 @@ impl Daemon {
     #[must_use]
     pub fn server(&self) -> &Arc<server::Server> {
         &self.server
+    }
+
+    /// As salas de voz vivas, for tests and for tooling.
+    ///
+    /// Existe para que um teste de ponta a ponta possa ler os contadores de uma
+    /// sala — em particular o do guarda de sessão, que é a única prova de que
+    /// uma conexão velha morreu **e foi barrada**, e não de que ela simplesmente
+    /// não chegou a morrer. Ver [`voice_room::VoiceRooms::contadores`].
+    #[must_use]
+    pub fn voice_rooms(&self) -> &Arc<voice_room::VoiceRooms> {
+        &self.voice_rooms
     }
 
     /// How many messages PERSISTENCE holds on o canal.
