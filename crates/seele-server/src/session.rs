@@ -1586,6 +1586,7 @@ async fn run_session(
             &outbound_tx,
             &tela_tx,
             reclaimed,
+            None,
         )
         .await?;
         current_voice_room = Some(reclaimed);
@@ -1820,6 +1821,26 @@ async fn run_session(
                         // conferida**. Uma fechadura que se anuncia trancada e
                         // não está é pior que porta aberta: quem confia nela
                         // toma decisão errada sobre o que dizer ali dentro.
+                        // **A permissão, conferida de novo e aqui.**
+                        // `Permission::EnterVoiceRoom` é resolvida no aperto de
+                        // mão e viaja em `SessionInfo::permissions`, cuja
+                        // documentação promete, com todas as letras, que o
+                        // servidor «recusa de novo seja qual for esta lista».
+                        // Para entrar numa sala ele não recusava: conferia a
+                        // existência e a senha, e sentava. Uma casca hostil —
+                        // ou uma casca com um botão que devia estar escondido —
+                        // entrava em qualquer sala de qualquer servidor.
+                        //
+                        // `specs/08-seguranca.md`: a segurança é o servidor
+                        // recusando. Esconder o botão é conforto.
+                        if !pode(server, session.person, Permission::EnterVoiceRoom).await {
+                            frame::write(&mut send, &ServerMessage::Alert {
+                                severity: AlertSeverity::Warning,
+                                reason: AlertReason::VoiceRoomEntryRefused,
+                                operator_text: None,
+                            }).await?;
+                            continue;
+                        }
                         if !crate::admissao::voice_room_liberado(
                             &*server.persistence.lock().await,
                             id,
@@ -1832,7 +1853,45 @@ async fn run_session(
                             }).await?;
                             continue;
                         }
-                        assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, id).await?;
+                        // O teto que quem hospeda declarou, lido agora e não
+                        // guardado: `ManageVoiceRooms` pode tê-lo mudado desde
+                        // que esta conexão recebeu a lista das salas, e um teto
+                        // lido no aperto de mão seria o teto de antes.
+                        //
+                        // Uma sala que sumiu do banco entre a conferência da
+                        // senha e esta linha não é recusada aqui por falta de
+                        // teto: `voice_room_liberado` acima já recusa a sala
+                        // inexistente, e é dela que sai a frase certa.
+                        let teto = {
+                            let db = server.persistence.lock().await;
+                            crate::persistence::channels::Channels::new(&db)
+                                .voice_rooms()
+                                .ok()
+                                .and_then(|salas| {
+                                    salas.into_iter().find(|sala| sala.id == id).map(|sala| sala.limit)
+                                })
+                        };
+                        let Some(teto) = teto else {
+                            frame::write(&mut send, &ServerMessage::Alert {
+                                severity: AlertSeverity::Warning,
+                                reason: AlertReason::VoiceRoomEntryRefused,
+                                operator_text: None,
+                            }).await?;
+                            continue;
+                        };
+                        if !assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, id, Some(teto)).await? {
+                            // Recusado pelo teto. `current_voice_room` **não**
+                            // se mexe: esta conexão continua onde estava, e o
+                            // motivo vai por um alerta próprio para o cliente
+                            // poder desfazer o assento que ele já tinha dado a
+                            // si mesmo — ver `Room::apply`, braço `Alert`.
+                            frame::write(&mut send, &ServerMessage::Alert {
+                                severity: AlertSeverity::Warning,
+                                reason: AlertReason::VoiceRoomFull,
+                                operator_text: None,
+                            }).await?;
+                            continue;
+                        }
                         current_voice_room = Some(id);
                         midia.entrou(current_voice_room);
                     }
@@ -3143,7 +3202,7 @@ async fn run_session(
                             );
                             continue;
                         }
-                        assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, *destino).await?;
+                        assentar(server, voice_rooms, session, &outbound_tx, &tela_tx, *destino, None).await?;
                         current_voice_room = Some(*destino);
                         midia.entrou(current_voice_room);
                         // Where the connection is now, and then that somebody put it
@@ -3603,7 +3662,17 @@ async fn assentar(
     outbound: &mpsc::Sender<Vec<u8>>,
     tela: &mpsc::Sender<crate::tela::AberturaDeTela>,
     destino: VoiceRoomId,
-) -> Result<()> {
+    // O teto declarado da sala, quando esta entrada deve respeitá-lo.
+    //
+    // `None` para as duas chamadas que **não** são uma entrada pedida por quem
+    // chega, e cada uma por um motivo diferente. A retomada de assento depois de
+    // uma reconexão devolve um lugar que já era da pessoa: recusá-la ali seria
+    // expulsar alguém por ter caído a rede, e a sala não cresceu por causa dela.
+    // A mudança feita por quem tem `MovePerson` é a decisão de um operador sobre
+    // o servidor dele, e tem a permissão própria dela como guarda — o teto barra
+    // **entrada**, e uma remoção de sala decidida por terceiro não é entrada.
+    teto: Option<u16>,
+) -> Result<bool> {
     // Out of the old room before into the new one. Without this a person who
     // walks from one voice room to another is still a member of the first, and goes
     // on hearing it.
@@ -3641,15 +3710,33 @@ async fn assentar(
         // aviso de saída à sala de onde a pessoa veio precisa. Pedir a remoção
         // por fora seria a sétima cópia do desmonte por pessoa, e é justamente a
         // família de defeito que esta tarefa fechou.
-        let mut saiu_de = occupancy.seat(
-            destino,
-            crate::server::Occupant {
-                person: session.person,
-                nickname: session.nickname.clone(),
-                ssrc: session.ssrc,
-                sessao: session.id,
+        let quem = crate::server::Occupant {
+            person: session.person,
+            nickname: session.nickname.clone(),
+            ssrc: session.ssrc,
+            sessao: session.id,
+        };
+        // A conta do teto e a inserção sob a mesma trava. Ver
+        // [`crate::server::Occupancy::sentar_se_couber`]: contar fora e sentar
+        // dentro deixaria duas entradas simultâneas passarem pela última vaga.
+        let mut saiu_de = match teto {
+            Some(teto) => match occupancy.sentar_se_couber(destino, quem, teto) {
+                Ok(saiu_de) => saiu_de,
+                Err(crate::server::Lotada) => {
+                    // **A sala não foi tocada.** Nada de anunciar saída, nada de
+                    // mexer na mídia, nada de fechar tela: quem não coube
+                    // continua exatamente onde estava.
+                    tracing::info!(
+                        person = %session.person,
+                        voice_room = %destino,
+                        teto,
+                        "recusada a entrada: a sala já tem o tanto de gente que quem hospeda declarou"
+                    );
+                    return Ok(false);
+                }
             },
-        );
+            None => occupancy.seat(destino, quem),
+        };
         saiu_de.retain(|anterior| *anterior != destino);
         saiu_de
     };
@@ -3726,7 +3813,7 @@ async fn assentar(
     // acontecendo antes de esta conexão existir — é mandado uma vez, no começo
     // da sessão, ao lado do retrato da ocupação. Reenviar aqui seria o mesmo
     // quadro duas vezes para quem já o tinha.
-    Ok(())
+    Ok(true)
 }
 
 /// Asks PERMISSIONS, right now, whether this person may do something.

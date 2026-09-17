@@ -961,6 +961,13 @@ pub struct Occupancy {
     by_voice_room: HashMap<VoiceRoomId, Vec<Occupant>>,
 }
 
+/// A sala já tem o tanto de gente que quem hospeda declarou.
+///
+/// Um tipo, e não um `bool`: quem chama precisa dizer ao excedente **por que**
+/// foi recusado, e `false` não carrega motivo nenhum até a frase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lotada;
+
 impl Occupancy {
     /// Seats a person, replacing any earlier seat they held, and says which
     /// voice rooms that emptied.
@@ -986,6 +993,45 @@ impl Occupancy {
             .or_default()
             .push(occupant);
         vacated
+    }
+
+    /// Senta alguém **se a sala declarada comportar**, e diz se sentou.
+    ///
+    /// # Por que aqui, e não numa conferência antes de chamar [`Self::seat`]
+    ///
+    /// Porque contar fora e sentar dentro são dois instantes, e entre eles cabe
+    /// outra pessoa. Duas entradas simultâneas numa sala com uma vaga passariam
+    /// as duas pela conferência e sentariam as duas — um teto com corrida
+    /// dentro é um teto que falha exatamente quando a sala está cheia, que é o
+    /// único momento em que ele existe para valer. Aqui a conta e a inserção
+    /// acontecem sob o mesmo `&mut self`.
+    ///
+    /// # Quem já está na sala sempre cabe
+    ///
+    /// Reentrar não é entrar. Se esta pessoa já ocupa a sala de destino, ela
+    /// não consome uma vaga nova, e recusá-la a tiraria de onde já está por
+    /// causa de um assento que é dela. Conferido **antes** de qualquer remoção,
+    /// pela mesma razão: [`Self::seat`] esvazia os assentos anteriores da pessoa
+    /// como primeiro passo, então uma recusa depois disso a teria expulsado da
+    /// sala em que estava para dizer-lhe que não cabe na nova.
+    ///
+    /// O ADR 0038 é quem decide que este número barra: a estimativa de subida
+    /// avisa e nunca recusa, e *«o `limit` que quem hospeda escreveu continua
+    /// sendo o único que barra alguém»*.
+    pub fn sentar_se_couber(
+        &mut self,
+        voice_room: VoiceRoomId,
+        occupant: Occupant,
+        teto: u16,
+    ) -> Result<Vec<VoiceRoomId>, Lotada> {
+        let ja_esta_aqui = self
+            .by_voice_room
+            .get(&voice_room)
+            .is_some_and(|gente| gente.iter().any(|quem| quem.person == occupant.person));
+        if !ja_esta_aqui && self.quantos(voice_room) >= usize::from(teto) {
+            return Err(Lotada);
+        }
+        Ok(self.seat(voice_room, occupant))
     }
 
     /// Quantas pessoas estão nesta sala.

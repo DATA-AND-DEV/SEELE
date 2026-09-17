@@ -948,7 +948,17 @@ impl Room {
                 // o assento local nunca mais bate com o do servidor: a
                 // pessoa se vê na sala para sempre, e o anfitrião nunca a vê
                 // nem a ouve.
-                if *reason == AlertReason::VoiceRoomEntryRefused {
+                //
+                // `VoiceRoomFull` entra aqui pela mesma razão, e não por
+                // simetria: ele **é** uma recusa de entrada, só que com o
+                // motivo que o ADR 0038 manda dar — o teto que quem hospeda
+                // declarou. Deixá-lo de fora reporia o defeito inteiro com um
+                // motivo novo: a pessoa se vendo dentro de uma sala onde
+                // ninguém a vê nem a ouve.
+                if matches!(
+                    *reason,
+                    AlertReason::VoiceRoomEntryRefused | AlertReason::VoiceRoomFull
+                ) {
                     self.leave_voice_room();
                     changed.roster = true;
                 }
