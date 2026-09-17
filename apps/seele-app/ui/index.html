@@ -1448,6 +1448,17 @@
       ÁUDIO LOCAL FALHANDO
     </span>
     <!--
+      O aparelho de áudio, e não a rede nem a máquina em geral.
+
+      Vizinho de `tel-local` e diferente dele de propósito: aquele diz «esta
+      máquina está derrubando áudio» e **apaga sozinho** quando o contador para
+      de crescer. Este diz o que aconteceu com o aparelho — o sistema o trocou,
+      ele sumiu, ou a voz já está saindo por outro — e fica enquanto for
+      verdade. Quem puxa o fone no meio de uma conversa lia «falha local» por
+      alguns segundos e depois tinha silêncio limpo, sem nada na tela.
+    -->
+    <span id="tel-aparelho" class="falha-local" hidden title="o aparelho de áudio desta máquina"></span>
+    <!--
       Aqui ficavam as três luzes PERMISSIONS · MEDIA · PERSISTENCE, e elas saíram.
 
       O argumento antigo era que o quadrado vazado **é** o estado: o protocolo

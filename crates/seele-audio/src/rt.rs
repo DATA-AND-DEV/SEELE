@@ -28,6 +28,8 @@ use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
 
+use crate::supervisor::AvisoDeAparelho;
+
 /// Per-sample decay applied while the playback ring is starved.
 ///
 /// `specs/03-audio.md` asks for "silence with fade" rather than an abrupt cut,
@@ -124,6 +126,10 @@ pub struct StreamCounters {
     playback_underruns: AtomicU64,
     playback_burst_frames: AtomicU64,
     stream_errors: AtomicU64,
+    /// Quantas vezes o sistema disse que a rota de áudio mudou.
+    device_changed: AtomicU64,
+    /// Quantas vezes o aparelho foi dado por ausente.
+    device_lost: AtomicU64,
 }
 
 impl StreamCounters {
@@ -149,6 +155,8 @@ impl StreamCounters {
             )
             .unwrap_or(usize::MAX),
             stream_errors: self.stream_errors.load(Ordering::Relaxed),
+            device_changed: self.device_changed.load(Ordering::Relaxed),
+            device_lost: self.device_lost.load(Ordering::Relaxed),
         }
     }
 
@@ -162,13 +170,39 @@ impl StreamCounters {
         usize::try_from(self.playback_burst_frames.load(Ordering::Relaxed)).unwrap_or(usize::MAX)
     }
 
-    /// Records a device-level stream error.
+    /// Records a device-level stream error, **keeping what kind it was**.
     ///
-    /// Called from `cpal`'s error callback, which is the seam device hot-swap
-    /// (task M1.14) grows out of. Counting is all this does today; the point is
-    /// that an unplugged headset is never silently swallowed.
-    pub fn record_stream_error(&self) {
+    /// Chamado do retorno de erro do `cpal`. Ele roda na thread de tempo real,
+    /// então aqui não há log, alocação nem cadeado: três somas atômicas e nada
+    /// mais. O que o tipo da falha carrega — e o que o produto descartava — é a
+    /// diferença entre um estalo e um aparelho que foi embora; ver
+    /// [`crate::supervisor::FalhaDeAparelho`] e [`Self::aviso_de_aparelho`].
+    pub fn record_stream_error(&self, falha: crate::supervisor::FalhaDeAparelho) {
+        use crate::supervisor::FalhaDeAparelho;
+
         self.stream_errors.fetch_add(1, Ordering::Relaxed);
+        match falha {
+            FalhaDeAparelho::Trocado => {
+                self.device_changed.fetch_add(1, Ordering::Relaxed);
+            }
+            FalhaDeAparelho::Sumiu => {
+                self.device_lost.fetch_add(1, Ordering::Relaxed);
+            }
+            FalhaDeAparelho::Transitoria => {}
+        }
+    }
+
+    /// O que o laço de áudio precisa saber sobre o aparelho, numa leitura.
+    ///
+    /// Dois números e não uma bandeira, porque quem escreve não pode esperar
+    /// ninguém ler: o laço compara com o que já tinha visto. Ver
+    /// [`crate::supervisor::CicloDoAparelho::passo`].
+    #[must_use]
+    pub fn aviso_de_aparelho(&self) -> AvisoDeAparelho {
+        AvisoDeAparelho {
+            trocas: self.device_changed.load(Ordering::Relaxed),
+            sumicos: self.device_lost.load(Ordering::Relaxed),
+        }
     }
 }
 
@@ -193,6 +227,10 @@ pub struct StreamMetrics {
     pub playback_burst_frames: usize,
     /// Errors reported by the device itself, such as a disconnection.
     pub stream_errors: u64,
+    /// Quantas vezes o sistema trocou a rota de áudio por baixo deste fluxo.
+    pub device_changed: u64,
+    /// Quantas vezes o aparelho foi dado por ausente.
+    pub device_lost: u64,
 }
 
 /// The capture half of the boundary. Lives inside the `cpal` input callback.
@@ -374,6 +412,56 @@ pub fn playback_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// O aviso que o retorno de erro do cpal deixa para o laço.
+    ///
+    /// Os contadores são o único canal que atravessa a fronteira de tempo real:
+    /// o retorno de erro não pode alocar, não pode travar e não pode registrar
+    /// nada em log. Somar num atômico pode — e é o que transporta o **tipo** da
+    /// falha até quem tem o direito de reabrir um aparelho.
+    mod aviso_de_aparelho {
+        use super::*;
+        use crate::supervisor::FalhaDeAparelho;
+
+        #[test]
+        fn a_troca_e_o_sumico_chegam_separados_ao_laco() {
+            let contadores = StreamCounters::shared();
+            assert_eq!(contadores.aviso_de_aparelho(), AvisoDeAparelho::default());
+
+            contadores.record_stream_error(FalhaDeAparelho::Trocado);
+            contadores.record_stream_error(FalhaDeAparelho::Sumiu);
+            contadores.record_stream_error(FalhaDeAparelho::Sumiu);
+
+            let aviso = contadores.aviso_de_aparelho();
+            assert_eq!(aviso.trocas, 1);
+            assert_eq!(aviso.sumicos, 2);
+        }
+
+        #[test]
+        fn um_tropeco_e_contado_sem_pedir_reabertura() {
+            // Continua entrando em `stream_errors`, que é o que a telemetria
+            // soma em `tropecos()`: nada deixa de ser contado. O que ele não faz
+            // é mexer no aviso que manda o laço largar o aparelho.
+            let contadores = StreamCounters::shared();
+            contadores.record_stream_error(FalhaDeAparelho::Transitoria);
+
+            assert_eq!(contadores.snapshot().stream_errors, 1);
+            assert_eq!(contadores.aviso_de_aparelho(), AvisoDeAparelho::default());
+        }
+
+        #[test]
+        fn toda_falha_continua_sendo_contada_como_erro_de_fluxo() {
+            let contadores = StreamCounters::shared();
+            for falha in [
+                FalhaDeAparelho::Trocado,
+                FalhaDeAparelho::Sumiu,
+                FalhaDeAparelho::Transitoria,
+            ] {
+                contadores.record_stream_error(falha);
+            }
+            assert_eq!(contadores.snapshot().stream_errors, 3);
+        }
+    }
 
     const MONO: NonZeroU16 = NonZeroU16::new(1).unwrap();
     const STEREO: NonZeroU16 = NonZeroU16::new(2).unwrap();

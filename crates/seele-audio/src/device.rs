@@ -27,7 +27,27 @@ use crate::rt::{
     capacity_for_ms, capture_path, playback_path, CaptureSink, PlaybackSource, RawSample,
     StreamCounters,
 };
+use crate::supervisor::FalhaDeAparelho;
 use crate::SAMPLE_RATE_HZ;
+
+/// O retorno de erro que os dois lados entregam ao `cpal`.
+///
+/// **É o seam da troca de aparelho, e existe como função por causa do teste.**
+/// Era aqui que o erro do `cpal` era descartado, e é por isso que trocar de
+/// microfone ou de fone no sistema operacional só valia depois de reiniciar o
+/// app. Construir o fluxo em si precisa de placa de som e nenhum teste alcança;
+/// o *retorno* não precisa de nada — com ela nomeada, um teste monta o erro que
+/// o sistema operacional manda, chama o mesmo fechamento que o `cpal` chamaria e
+/// confere que o tipo da falha chegou ao contador. Sem isso, voltar ao descarte
+/// original não reprovaria teste nenhum: ver
+/// `retorno_de_erro_do_cpal` em `mod tests`.
+///
+/// Pública porque o teste de conformidade da troca de aparelho tem de entrar
+/// por aqui: entrando por [`classificar`] ele saltaria justamente o ponto onde
+/// o erro era descartado, e ficaria verde com o defeito de volta.
+pub fn retorno_de_erro(errors: Arc<StreamCounters>) -> impl FnMut(cpal::Error) + Send + 'static {
+    move |error: cpal::Error| errors.record_stream_error(classificar(&error))
+}
 
 /// Builds an input stream for one concrete device sample format.
 ///
@@ -42,10 +62,7 @@ fn input_stream<T: RawSample + cpal::SizedSample>(
     device.build_input_stream(
         config,
         move |data: &[T], _info: &cpal::InputCallbackInfo| sink.on_capture(data),
-        // Counting is all this does today. Task M1.14 grows device hot-swap out
-        // of this seam; what matters now is that an unplugged headset is never
-        // silently swallowed.
-        move |_error: cpal::Error| errors.record_stream_error(),
+        retorno_de_erro(errors),
         None,
     )
 }
@@ -60,7 +77,7 @@ fn output_stream<T: RawSample + cpal::SizedSample>(
     device.build_output_stream(
         config,
         move |data: &mut [T], _info: &cpal::OutputCallbackInfo| source.on_playback(data),
-        move |_error: cpal::Error| errors.record_stream_error(),
+        retorno_de_erro(errors),
         None,
     )
 }
@@ -108,6 +125,59 @@ pub(crate) fn abrir_entrada(
         stage: Stage::Build,
         source,
     })
+}
+
+/// O que o `cpal` disse, traduzido para o que o produto faz a respeito.
+///
+/// Definida para todo erro que chegar, inclusive os que ainda não existem: o
+/// último braço do `match` é um `_` de propósito, e não a lista fechada das
+/// variantes de hoje. Uma variante nova do `cpal` tem de cair em algum lugar, e
+/// o lugar seguro é «tropeço» — reabrir o aparelho por um erro que ninguém
+/// entendeu custaria um segundo de silêncio sem motivo. As duas famílias que **pedem** reabertura são as que o cabeçalho
+/// de [`crate::supervisor::FalhaDeAparelho`] explica.
+///
+/// Mesmo assim as variantes de hoje estão **escritas uma a uma** abaixo, e não
+/// escondidas atrás do `_`. A revisão apontou o risco real: com só o coringa, o
+/// dia em que o `cpal` ganhar uma variante que signifique «aparelho ausente»,
+/// ela entra calada como tropeço e o defeito de origem volta sem ninguém ver.
+/// `ErrorKind` é `#[non_exhaustive]`, então nenhum tipo obriga a lista a
+/// crescer — o que dá para fazer é deixar a superfície de hoje à vista de quem
+/// sobe a dependência, para que a variante nova apareça como a única que não
+/// está aqui. O `_` fica atrás dela, como rede e não como decisão.
+///
+/// Mora neste módulo porque é a tradução da fronteira do `cpal`, e é uma das
+/// poucas coisas aqui que um teste alcança sem placa de som: `cpal::Error::new`
+/// é público — e é por isso que ela é pública também. O teste de conformidade
+/// da troca de aparelho entra por aqui: ele monta o erro que o sistema
+/// operacional manda e segue o caminho inteiro até o aparelho novo abrir, em
+/// vez de conferir se alguém escreveu certas palavras no arquivo.
+pub fn classificar(error: &cpal::Error) -> FalhaDeAparelho {
+    match error.kind() {
+        // A rota mudou. No Windows o fluxo segue no aparelho **antigo**.
+        cpal::ErrorKind::DeviceChanged => FalhaDeAparelho::Trocado,
+        // O aparelho foi embora, a configuração não vale mais, ou o host
+        // inteiro sumiu. Nos três, o fluxo que existe não volta a tocar.
+        cpal::ErrorKind::DeviceNotAvailable
+        | cpal::ErrorKind::StreamInvalidated
+        | cpal::ErrorKind::HostUnavailable => FalhaDeAparelho::Sumiu,
+        // Estalo, disputa, limite, recusa de prioridade, erro não classificado:
+        // contados, e nada mais. É a superfície do `cpal` 0.18 inteira, escrita
+        // para ficar à vista de quem subir a dependência.
+        cpal::ErrorKind::Xrun
+        | cpal::ErrorKind::DeviceBusy
+        | cpal::ErrorKind::RealtimeDenied
+        | cpal::ErrorKind::BackendError
+        | cpal::ErrorKind::InvalidInput
+        | cpal::ErrorKind::PermissionDenied
+        | cpal::ErrorKind::ResourceExhausted
+        | cpal::ErrorKind::UnsupportedConfig
+        | cpal::ErrorKind::UnsupportedOperation
+        | cpal::ErrorKind::Other => FalhaDeAparelho::Transitoria,
+        // A rede para a variante que ainda não existe. Quem a vir aparecer aqui
+        // decide onde ela cai; até lá, o silêncio de um segundo não é cobrado
+        // de ninguém por um erro que ninguém entendeu.
+        _ => FalhaDeAparelho::Transitoria,
+    }
 }
 
 /// Which half of the device pair a failure came from.
@@ -737,6 +807,142 @@ pub fn open(wanted: Wanted<'_>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// O que o cpal manda pelo retorno de erro, e o que o produto faz com isso.
+    ///
+    /// Testável em qualquer máquina — inclusive na CI, que não tem placa de som
+    /// — porque `cpal::Error::new` é público e a classificação é uma função
+    /// total sobre o enum. Era exatamente esta informação que o produto jogava
+    /// fora em `input_stream` e `output_stream`: o erro chegava, era contado, e
+    /// o tipo dele — a única parte que diz se o aparelho **mudou** ou só
+    /// tropeçou — morria ali.
+    mod classificacao_do_erro_do_cpal {
+        use super::*;
+        use crate::supervisor::FalhaDeAparelho;
+        use cpal::ErrorKind;
+
+        #[test]
+        fn a_troca_de_aparelho_do_sistema_pede_reabertura() {
+            // Windows/WASAPI manda isto quando o padrão do sistema muda ou o
+            // aparelho é desconectado, e **continua tocando no endpoint
+            // antigo**. Sem reabrir, quem trocou de fone pela bandeja fica preso
+            // ao anterior até reiniciar o app — que é o defeito relatado.
+            assert_eq!(
+                classificar(&cpal::Error::new(ErrorKind::DeviceChanged)),
+                FalhaDeAparelho::Trocado
+            );
+        }
+
+        #[test]
+        fn o_aparelho_que_sumiu_pede_reabertura() {
+            // macOS: a entrada, e qualquer aparelho aberto por id, vão para o
+            // `DisconnectManager`, que pausa o fluxo e devolve isto sem nunca
+            // despausar.
+            for sumiu in [
+                ErrorKind::DeviceNotAvailable,
+                ErrorKind::StreamInvalidated,
+                ErrorKind::HostUnavailable,
+            ] {
+                assert_eq!(
+                    classificar(&cpal::Error::new(sumiu)),
+                    FalhaDeAparelho::Sumiu,
+                    "{sumiu:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn um_tropeco_nao_derruba_um_aparelho_que_esta_funcionando() {
+            // A outra metade, e a que protege contra o conserto exagerado: um
+            // `Xrun` é um estalo, não um aparelho que foi embora. Reabrir por
+            // causa dele trocaria um clique por um segundo de silêncio, várias
+            // vezes ao dia, em toda máquina carregada.
+            //
+            // A lista é **todas** as variantes que o `cpal` 0.18 tem hoje e que
+            // não são das duas famílias acima. `ErrorKind` é `non_exhaustive`,
+            // então nenhuma anotação de tipo obriga esta lista a crescer junto
+            // com o `cpal`; o que dá para fazer é prender por comportamento a
+            // superfície de hoje inteira, e é isto. O dia em que subir o `cpal`
+            // e uma variante nova aparecer, ela é a única que estará fora — e
+            // decidir onde ela cai é revisão de quem sobe a dependência, não
+            // uma omissão que passa calada.
+            for tropeco in [
+                ErrorKind::Xrun,
+                ErrorKind::DeviceBusy,
+                ErrorKind::RealtimeDenied,
+                ErrorKind::BackendError,
+                ErrorKind::InvalidInput,
+                ErrorKind::PermissionDenied,
+                ErrorKind::ResourceExhausted,
+                ErrorKind::UnsupportedConfig,
+                ErrorKind::UnsupportedOperation,
+                ErrorKind::Other,
+            ] {
+                assert_eq!(
+                    classificar(&cpal::Error::new(tropeco)),
+                    FalhaDeAparelho::Transitoria,
+                    "{tropeco:?}"
+                );
+            }
+        }
+    }
+
+    /// O fechamento que o `cpal` chama quando o aparelho reclama.
+    ///
+    /// Estes testes existem porque a revisão achou o buraco: `classificar`
+    /// estava coberta, o laço estava coberto, e **a ligação entre as duas** —
+    /// o retorno de erro que o `cpal` recebe — não estava. Trocar o corpo do
+    /// retorno por «conta e esquece» reproduzia o defeito original sem reprovar
+    /// nada. Abrir o fluxo precisa de placa de som; chamar o retorno não, e é
+    /// exatamente o retorno que carrega o conserto.
+    mod retorno_de_erro_do_cpal {
+        use super::*;
+        use crate::supervisor::AvisoDeAparelho;
+        use cpal::ErrorKind;
+
+        /// Chama o retorno com os erros dados e devolve o que o laço leria.
+        fn o_que_o_laco_le(erros: &[ErrorKind]) -> AvisoDeAparelho {
+            let contadores = Arc::new(StreamCounters::default());
+            let mut retorno = retorno_de_erro(Arc::clone(&contadores));
+            for kind in erros {
+                retorno(cpal::Error::new(*kind));
+            }
+            contadores.aviso_de_aparelho()
+        }
+
+        #[test]
+        fn a_troca_feita_no_sistema_chega_ao_laco_como_troca() {
+            assert_eq!(
+                o_que_o_laco_le(&[ErrorKind::DeviceChanged]),
+                AvisoDeAparelho {
+                    trocas: 1,
+                    sumicos: 0
+                }
+            );
+        }
+
+        #[test]
+        fn o_aparelho_arrancado_chega_ao_laco_como_sumico() {
+            assert_eq!(
+                o_que_o_laco_le(&[ErrorKind::DeviceNotAvailable, ErrorKind::StreamInvalidated]),
+                AvisoDeAparelho {
+                    trocas: 0,
+                    sumicos: 2
+                }
+            );
+        }
+
+        #[test]
+        fn um_estalo_nao_vira_aviso_de_aparelho_nenhum() {
+            // A outra metade do guarda: se o retorno passasse a mandar tudo
+            // como «sumiu», o laço reabriria a cada estalo. Este teste é o que
+            // impede o conserto exagerado.
+            assert_eq!(
+                o_que_o_laco_le(&[ErrorKind::Xrun, ErrorKind::DeviceBusy, ErrorKind::Other]),
+                AvisoDeAparelho::default()
+            );
+        }
+    }
 
     /// The devices this machine is offering, or `None` when it offers none.
     ///

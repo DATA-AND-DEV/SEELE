@@ -1031,6 +1031,125 @@ fn names(text: &str, word: &str) -> bool {
     })
 }
 
+/// Todo estado de aparelho que a ponte sabe mandar.
+///
+/// A lista é conferida por um `match` sem braço coringa logo abaixo dela: uma
+/// variante nova **não compila** até entrar aqui, e é assim que o guarda deixa
+/// de ser uma lista que alguém esquece de estender.
+fn todos_os_estados_do_aparelho() -> Vec<seele_ffi::EstadoDoAparelho> {
+    use seele_ffi::EstadoDoAparelho::{Funcionando, Perdido, Trocando};
+    let todos = vec![Funcionando, Trocando, Perdido];
+    for estado in &todos {
+        match estado {
+            Funcionando | Trocando | Perdido => {}
+        }
+    }
+    todos
+}
+
+#[test]
+fn todo_estado_do_aparelho_que_a_ponte_manda_chega_dito_na_tela() {
+    // O defeito que esta tarefa conserta era o produto saber e não contar: o
+    // aparelho mudava, o núcleo sabia, e a tela não dizia nada. Um estado novo
+    // sem frase seria o mesmo silêncio de volta, por outro caminho.
+    //
+    // Os nomes saem da **serialização de verdade** do `EstadoDoAparelho`, e não
+    // de uma lista de textos: renomear a variante em Rust quebra isto, em vez
+    // de deixar um ramo morto no script. Comentários são retirados antes —
+    // `body_of` faz isso — porque o comentário desta própria função nomeia os
+    // três estados em prosa, e sem tirá-lo apagar o ramo deixaria o guarda
+    // verde na força de uma explicação.
+    let corpo = body_of(&scripts(), "function desenharAparelho(snapshot)");
+
+    for estado in todos_os_estados_do_aparelho() {
+        let Ok(json) = serde_json::to_string(&estado) else {
+            panic!("EstadoDoAparelho não serializa: nenhuma casca consegue lê-lo");
+        };
+        let nome = json.trim_matches('"');
+
+        if estado == seele_ffi::EstadoDoAparelho::default() {
+            assert!(
+                !names(&corpo, nome),
+                "«{nome}» é o normal e não se anuncia: uma frase permanente na \
+                 tela vira moldura e ninguém mais a lê"
+            );
+            continue;
+        }
+        assert!(
+            names(&corpo, nome),
+            "o estado «{nome}» não tem frase nenhuma na tela, então ele chega \
+             como silêncio — que é exatamente o defeito de origem"
+        );
+    }
+}
+
+#[test]
+fn a_tela_le_do_instantaneo_os_campos_que_o_rust_realmente_manda() {
+    // `Snapshot` não carrega `serde(rename)`, então o nome do campo em Rust é
+    // o nome que chega ao script. Um campo renomeado de um lado só faz o
+    // script ler `undefined` — sem erro nenhum, e com a tela desenhando o
+    // estado de sempre enquanto o aparelho muda por baixo.
+    //
+    // O fecho abaixo não é enfeite: ele **nomeia os campos em Rust**, então
+    // renomear qualquer um deles impede este arquivo de compilar, e quem
+    // renomeia é obrigado a passar aqui — e daqui, pelo script.
+    // O estado e o contador dizem **que** o aparelho mudou; quem diz **para
+    // onde** é o nome do aparelho aberto, e é ele que a frase da troca carrega.
+    // Deixá-lo fora deste fecho era deixar metade do aviso solta: renomear
+    // `playback`, `capture` ou o `name` de dentro deles apagaria o nome da
+    // frase sem quebrar nada, e a tela voltaria a dizer só «o aparelho mudou».
+    fn _liga_os_dois_lados(
+        instantaneo: &seele_ffi::Snapshot,
+    ) -> (seele_ffi::EstadoDoAparelho, u64, Option<&str>, Option<&str>) {
+        (
+            instantaneo.aparelho,
+            instantaneo.trocas_de_aparelho,
+            instantaneo.playback.as_ref().map(|onde| onde.name.as_str()),
+            instantaneo.capture.as_ref().map(|onde| onde.name.as_str()),
+        )
+    }
+    let corpo = body_of(&scripts(), "function desenharAparelho(snapshot)");
+
+    for campo in [
+        "aparelho",
+        "trocas_de_aparelho",
+        "playback",
+        "capture",
+        "name",
+    ] {
+        assert!(
+            names(&corpo, campo),
+            "a tela não lê `{campo}`, que é o que o instantâneo manda"
+        );
+    }
+}
+
+#[test]
+fn o_aviso_do_aparelho_nao_fica_solto_do_desenho_da_tela() {
+    // Os dois guardas acima conferem o **conteúdo** de `desenharAparelho`, e
+    // nenhum deles confere que alguém a chama. Apagar a chamada deixava a
+    // bateria inteira verde com o aviso fora da tela — o mesmo «o produto sabe
+    // e não conta» que esta tarefa existe para consertar, de volta por outro
+    // caminho.
+    //
+    // Por isso a corrente inteira, e não só o último elo: a volta do relógio
+    // (`desenhar`) tem de chegar à telemetria, e a telemetria tem de chegar ao
+    // aparelho. Cortar qualquer um dos dois apaga o aviso da tela.
+    let elos = [
+        ("function desenhar(snapshot)", "desenharTelemetria"),
+        ("function desenharTelemetria(snapshot)", "desenharAparelho"),
+    ];
+
+    for (de, para) in elos {
+        let corpo = body_of(&scripts(), de);
+        assert!(
+            names(&corpo, para),
+            "`{de}` não chama `{para}`: o estado do aparelho pode ser desenhado \
+             por ninguém, e a tela volta a calar sobre a troca"
+        );
+    }
+}
+
 #[test]
 fn every_verdict_the_bridge_can_send_has_its_own_sentence_in_the_page() {
     // A variant with no sentence is a blank screen at the moment it most needs

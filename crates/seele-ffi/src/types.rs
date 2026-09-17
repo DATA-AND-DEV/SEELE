@@ -624,6 +624,34 @@ pub struct PlaybackDevice {
     pub default: bool,
 }
 
+/// Em que pé está o aparelho de áudio.
+///
+/// Espelha `seele_core::EstadoDoAparelho`; tipo próprio porque o ADR 0002
+/// impede esta casca de nomear `seele-audio`, e a tradução tem de parar aqui.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstadoDoAparelho {
+    /// Há som entrando e saindo pelo aparelho que a sessão diz usar.
+    #[default]
+    Funcionando,
+    /// O aparelho caiu ou o sistema o trocou, e a reabertura está em curso.
+    Trocando,
+    /// Todas as tentativas falharam: não há áudio agora. A sessão continua
+    /// olhando devagar, e um aparelho que reapareça volta a tocar sozinho — a
+    /// pessoa também pode escolher um na tela e não esperar.
+    Perdido,
+}
+
+impl From<seele_core::EstadoDoAparelho> for EstadoDoAparelho {
+    fn from(estado: seele_core::EstadoDoAparelho) -> Self {
+        match estado {
+            seele_core::EstadoDoAparelho::Funcionando => Self::Funcionando,
+            seele_core::EstadoDoAparelho::Trocando => Self::Trocando,
+            seele_core::EstadoDoAparelho::Perdido => Self::Perdido,
+        }
+    }
+}
+
 /// Connection quality.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
 pub struct Telemetry {
@@ -1014,6 +1042,28 @@ pub struct Snapshot {
     /// hears nothing has this channel and nothing else to tell them the pick did
     /// not take.
     pub playback: Option<PlaybackDevice>,
+    /// Em que pé está o aparelho de áudio desta sessão.
+    ///
+    /// # Por que uma casca precisa disto
+    ///
+    /// Porque trocar de microfone ou de fone **no sistema operacional** não é a
+    /// mesma coisa que trocar na tela do SEELE, e até aqui a segunda era a
+    /// única que a interface sabia contar. Quando o sistema trocava o aparelho
+    /// padrão ou alguém tirava o fone da tomada, o produto sabia — o `cpal`
+    /// avisa — e não dizia nada: o único sinal era `local_fault`, que diz «a
+    /// máquina, não a rede» e **apaga sozinho** quando o contador para de
+    /// crescer.
+    ///
+    /// [`EstadoDoAparelho::Trocando`] é o instante entre o aparelho cair e o
+    /// novo abrir; [`EstadoDoAparelho::Perdido`] é o que sobra quando nenhuma
+    /// tentativa deu certo, e aí a única saída é a pessoa escolher um.
+    pub aparelho: EstadoDoAparelho,
+    /// Quantas vezes esta sessão reabriu o áudio num aparelho.
+    ///
+    /// Cresce uma vez por reabertura conseguida. É o que deixa uma casca dizer
+    /// «o aparelho mudou» — um nome diferente sem aviso é a mesma tela de
+    /// sempre com outra palavra, e ninguém repara.
+    pub trocas_de_aparelho: u64,
     /// Whether this person may make and rename voice_rooms and Channels.
     ///
     /// So a shell can decide whether the control exists at all. `ManageVoiceRooms`

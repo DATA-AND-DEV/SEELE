@@ -28,6 +28,13 @@ seele-ffi = { path = "../seele-ffi" }
 seele-encontro = { path = "../seele-encontro" }
 # The acceptance tests draw the real interface into an off-screen buffer.
 ratatui = "0.30.2"
+# O teste da troca de aparelho monta os erros que o sistema operacional manda
+# pelo retorno do `cpal` e os empurra pelo caminho de verdade. Sem isto, ele
+# teria de inventar o evento em vez de reproduzi-lo.
+# Não custa compilação nenhuma: o `seele-audio` logo acima já traz este mesmo
+# `cpal` 0.18.1, então nomeá-lo aqui só dá ao teste o direito de escrever
+# `cpal::ErrorKind` — a caixa já ia ser compilada de todo jeito.
+cpal = "0.18.1"
 tokio = { version = "1", features = ["full"] }
 ed25519-dalek = "3"
 rand = "0.10"

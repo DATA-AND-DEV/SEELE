@@ -1624,8 +1624,66 @@ function desenharTelemetria(snapshot) {
   }
 
   $("tel-local").hidden = !tel.local_fault;
+  desenharAparelho(snapshot);
 
   desenharEnlace(snapshot.link);
+}
+
+/** Quantas trocas de aparelho esta tela já anunciou. */
+let trocasDeAparelhoVistas = null;
+/** Até quando a frase «o áudio mudou de aparelho» fica na tela. */
+let ateQuandoAnunciarOAparelho = 0;
+
+/**
+ * O que aconteceu com o microfone e o fone desta máquina.
+ *
+ * Três frases e nenhuma delas inventada pela tela: o núcleo diz em que pé está
+ * o aparelho, e aqui isso vira palavra.
+ *
+ * - `trocando`: o aparelho caiu ou o sistema o trocou, e a voz está sendo
+ *   reaberta. Dura o instante da reabertura, e é justamente o instante em que
+ *   antes não havia som e não havia explicação.
+ * - `perdido`: nenhuma tentativa deu certo e não há áudio agora — e isso está
+ *   escrito, em vez de ser silêncio. O núcleo continua olhando devagar, então
+ *   um fone religado tira a frase da tela sozinho; escolher um aparelho aqui
+ *   é o atalho, não a única saída.
+ * - uma troca **que deu certo**: o contador do núcleo anda, e a tela diz por
+ *   onde o som está saindo agora. Some sozinha depois de alguns segundos
+ *   porque é notícia, não estado.
+ *
+ * O contador começa valendo o que o primeiro instantâneo trouxer: entrar numa
+ * sessão que já reabriu duas vezes não é uma troca que aconteceu agora.
+ */
+function desenharAparelho(snapshot) {
+  const alvo = $("tel-aparelho");
+  const trocas = snapshot.trocas_de_aparelho ?? 0;
+  if (trocasDeAparelhoVistas === null) trocasDeAparelhoVistas = trocas;
+  // O contador é da **voz**, e uma voz nova começa do zero: sair de uma sessão
+  // que trocou de aparelho duas vezes e entrar noutra deixaria a conta desta
+  // tela acima da do núcleo, e a próxima troca de verdade nunca seria contada.
+  if (trocas < trocasDeAparelhoVistas) trocasDeAparelhoVistas = trocas;
+  if (trocas > trocasDeAparelhoVistas) {
+    trocasDeAparelhoVistas = trocas;
+    ateQuandoAnunciarOAparelho = Date.now() + 8000;
+  }
+
+  if (snapshot.aparelho === "trocando") {
+    alvo.hidden = false;
+    alvo.textContent = "TROCANDO DE APARELHO";
+    return;
+  }
+  if (snapshot.aparelho === "perdido") {
+    alvo.hidden = false;
+    alvo.textContent = "SEM APARELHO DE ÁUDIO";
+    return;
+  }
+  if (Date.now() < ateQuandoAnunciarOAparelho) {
+    const nome = snapshot.playback?.name ?? snapshot.capture?.name;
+    alvo.hidden = false;
+    alvo.textContent = nome ? `ÁUDIO AGORA EM ${nome.toUpperCase()}` : "O APARELHO DE ÁUDIO MUDOU";
+    return;
+  }
+  alvo.hidden = true;
 }
 
 /** `HH:MM:SS` desde um instante local, ou o travessão antes de haver um. */

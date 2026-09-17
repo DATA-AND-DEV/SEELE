@@ -64,6 +64,17 @@ pub struct LocalTelemetry {
     pub playback_underruns: u64,
     /// Device-level errors, such as a disconnection.
     pub device_errors: u64,
+    /// Quantos daqueles erros eram o sistema mexendo no aparelho.
+    ///
+    /// Subconjunto de [`Self::device_errors`]: uma troca de rota e um aparelho
+    /// que sumiu entram nos dois, porque continuam sendo erro do fluxo para
+    /// quem soma telemetria. Ele existe para que [`Self::tropecos`] possa
+    /// **descontá-los**: quem troca de fone não está com a máquina derrubando
+    /// áudio, e acender «ÁUDIO LOCAL FALHANDO» ao lado de «TROCANDO DE
+    /// APARELHO» culpa a máquina de quem só mudou de aparelho. O que a troca
+    /// tem a dizer já tem lugar próprio na tela — ver `EstadoDoAparelho` em
+    /// `seele-core`.
+    pub device_events: u64,
 
     /// A volta mais longa que o laço de voz deu entre dois quadros, em ms.
     ///
@@ -136,6 +147,7 @@ impl LocalTelemetry {
             capture_overruns: stream.capture_overruns,
             playback_underruns: stream.playback_underruns,
             device_errors: stream.stream_errors,
+            device_events: stream.device_changed.saturating_add(stream.device_lost),
             playout_worst_lateness_ms: 0.0,
             playout_catchup_frames: 0,
             playout_resyncs: 0,
@@ -181,11 +193,19 @@ impl LocalTelemetry {
     ///
     /// Cumulativo. Quem quer saber se está dando errado **agora** pergunta ao
     /// [`FalhaLocal`], não a este número.
+    ///
+    /// **Eventos de aparelho não contam.** Ver [`Self::device_events`]: o
+    /// sistema trocar a rota de áudio chega ao produto como erro do fluxo, e
+    /// somá-lo aqui fazia a régua de falha local acender no instante da troca —
+    /// o aviso que diz «esta máquina está derrubando áudio» aparecendo para
+    /// quem apenas trocou de fone, junto com o aviso certo. Fica de fora o
+    /// evento; fica dentro o tropeço transitório, que é erro de fluxo de
+    /// verdade.
     #[must_use]
     pub fn tropecos(&self) -> u64 {
         self.capture_overruns
             .saturating_add(self.playback_underruns)
-            .saturating_add(self.device_errors)
+            .saturating_add(self.device_errors.saturating_sub(self.device_events))
     }
 }
 
@@ -201,7 +221,10 @@ impl LocalTelemetry {
 /// alguma coisa.
 ///
 /// Agora é derivada: falha é o contador **crescer** entre duas olhadas. Acende
-/// enquanto o problema acontece e apaga sozinho quando para.
+/// enquanto o problema acontece e apaga sozinho quando para. Quando o contador
+/// **encolhe**, os contadores reiniciaram — trocar de aparelho abre um
+/// `AudioIo` novo, zerado —, e a régua se muda para o valor novo em vez de
+/// ficar presa no máximo do aparelho anterior.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FalhaLocal {
     visto: u64,
@@ -227,17 +250,37 @@ impl FalhaLocal {
     /// Olha os contadores e diz se a máquina está falhando agora.
     pub fn observar(&mut self, agora: &LocalTelemetry) -> bool {
         let total = agora.tropecos();
-        if total > self.visto {
+        if total < self.visto {
+            // Contador menor que o visto: os contadores reiniciaram. É o que
+            // acontece a cada reabertura de aparelho — o `AudioIo` novo traz
+            // `StreamCounters` zerados. Sem adotar o novo ponto de partida, o
+            // total do aparelho novo jamais superaria a marca do anterior e o
+            // aviso ficaria cego pelo resto da sessão. Reiniciar não é falha:
+            // só reposiciona a régua. E, como olhada, é tão quieta quanto
+            // qualquer outra sem crescimento: o aparelho novo não tropeçou
+            // nada, então ela conta na folga em vez de fazer um aviso já aceso
+            // sobreviver uma olhada além do conserto.
+            self.visto = total;
+            self.contar_quieta();
+        } else if total > self.visto {
             self.visto = total;
             self.quietas = 0;
             self.acesa = true;
-        } else if self.acesa {
-            self.quietas = self.quietas.saturating_add(1);
-            if self.quietas >= QUIETAS_PARA_APAGAR {
-                self.acesa = false;
-            }
+        } else {
+            self.contar_quieta();
         }
         self.acesa
+    }
+
+    /// Uma olhada sem crescimento: anda a folga e apaga o aviso no fim dela.
+    fn contar_quieta(&mut self) {
+        if !self.acesa {
+            return;
+        }
+        self.quietas = self.quietas.saturating_add(1);
+        if self.quietas >= QUIETAS_PARA_APAGAR {
+            self.acesa = false;
+        }
     }
 
     /// O que a última olhada concluiu.
@@ -434,6 +477,116 @@ mod falha_local {
         detector.observar(&com(1));
         assert!(detector.observar(&com(1)), "apagou cedo demais");
         assert!(detector.observar(&com(2)));
+    }
+
+    /// O que o `cpal` entrega quando o sistema mexe no aparelho, montado pelo
+    /// mesmo caminho do produto: contadores de verdade, classificação de
+    /// produção, e a telemetria armada a partir deles.
+    fn depois_de(falhas: &[crate::supervisor::FalhaDeAparelho]) -> LocalTelemetry {
+        let contadores = crate::rt::StreamCounters::shared();
+        for falha in falhas {
+            contadores.record_stream_error(*falha);
+        }
+        LocalTelemetry::assemble(
+            contadores.snapshot(),
+            GateMetrics::default(),
+            MixMetrics::default(),
+            32_000,
+            false,
+        )
+    }
+
+    #[test]
+    fn trocar_de_aparelho_no_sistema_nao_acende_o_aviso_de_falha_local() {
+        // O achado. Uma troca de rota e um aparelho que sai da tomada chegam
+        // ao produto como erro do fluxo, e a régua de falha local somava os
+        // dois: durante a reabertura a tela acendia "ÁUDIO LOCAL FALHANDO"
+        // junto com "TROCANDO DE APARELHO", acusando a máquina de quem só
+        // trocou de fone. Os dois avisos significam coisas diferentes, e é
+        // esse um que apaga sozinho e não explica nada.
+        use crate::supervisor::FalhaDeAparelho::{Sumiu, Trocado};
+
+        let mut detector = FalhaLocal::new();
+        detector.observar(&depois_de(&[]));
+
+        assert!(
+            !detector.observar(&depois_de(&[Trocado])),
+            "a troca de rota feita no sistema não é esta máquina derrubando áudio"
+        );
+        assert!(
+            !detector.observar(&depois_de(&[Trocado, Sumiu, Sumiu])),
+            "o fone saindo da tomada não é esta máquina derrubando áudio"
+        );
+    }
+
+    #[test]
+    fn um_tropeco_de_verdade_continua_acendendo_o_aviso() {
+        // A outra metade, e o que impede o conserto de virar um aviso que
+        // nunca acende: um erro de fluxo que **não** é evento de aparelho
+        // continua sendo falha local, que é o caso que a régua existe para
+        // relatar.
+        let mut detector = FalhaLocal::new();
+        detector.observar(&depois_de(&[]));
+
+        assert!(
+            detector.observar(&depois_de(&[
+                crate::supervisor::FalhaDeAparelho::Transitoria
+            ])),
+            "um tropeço de fluxo é exatamente o que este aviso deve acusar"
+        );
+    }
+
+    #[test]
+    fn o_aviso_nao_fica_cego_depois_de_trocar_de_aparelho() {
+        // Trocar de aparelho abre um `AudioIo` novo, e com ele contadores que
+        // nascem zerados. Se o detector guardasse só uma marca de máximo, o
+        // total menor do aparelho novo nunca "cresceria" e o aviso ficaria
+        // cego justamente depois da troca — o evento que esta parte do produto
+        // existe para seguir.
+        let mut detector = FalhaLocal::new();
+        detector.observar(&com(3392));
+        for _ in 0..QUIETAS_PARA_APAGAR {
+            detector.observar(&com(3392));
+        }
+        assert!(!detector.acesa());
+
+        // A reabertura: contadores do aparelho novo, começando do zero.
+        assert!(
+            !detector.observar(&com(0)),
+            "o zero da reabertura não é falha nenhuma"
+        );
+
+        assert!(
+            detector.observar(&com(5)),
+            "o aparelho novo tropeçou e o aviso não acendeu — detector cego \
+             depois da troca"
+        );
+    }
+
+    #[test]
+    fn a_reabertura_conta_como_amostra_quieta() {
+        // A reabertura é uma olhada sem crescimento como qualquer outra: o
+        // aparelho novo não tropeçou nada. Se ela não contasse na folga, um
+        // aviso já aceso gastaria uma olhada a mais para apagar justamente
+        // depois do conserto — o produto continuaria dizendo que falha logo
+        // depois de a falha ter sido resolvida.
+        let mut detector = FalhaLocal::new();
+        assert!(
+            detector.observar(&com(3392)),
+            "não acendeu quando aconteceu"
+        );
+
+        // A reabertura zera os contadores, e em seguida a máquina fica quieta.
+        detector.observar(&com(0));
+        for _ in 0..QUIETAS_PARA_APAGAR - 1 {
+            detector.observar(&com(0));
+        }
+
+        assert!(
+            !detector.acesa(),
+            "a reabertura não entrou na folga: o aviso sobrevive uma olhada \
+             além do conserto"
+        );
     }
 
     #[test]

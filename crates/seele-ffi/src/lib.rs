@@ -50,8 +50,8 @@ use seele_core::{
 
 pub use types::{
     Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight, ConnectionError,
-    EndReason, Event, FonteDeTela, LimitesDeTela, LinkState, LinkTrust, Message, Notice,
-    NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
+    EndReason, EstadoDoAparelho, Event, FonteDeTela, LimitesDeTela, LinkState, LinkTrust, Message,
+    Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
     PreviewRefusal, PreviewRules, Severity, SignalBand as Band, Snapshot, TelaEmCurso, Telemetry,
     Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync,
 };
@@ -1864,22 +1864,10 @@ impl Connection {
             return Ok(());
         };
         let aberto = match lado {
-            Lado::Entrada => running.capture().map(|d| d.id.clone()),
-            Lado::Saida => running.playback().map(|d| d.id.clone()),
+            Lado::Entrada => running.capture().map(|aparelho| aparelho.id),
+            Lado::Saida => running.playback().map(|aparelho| aparelho.id),
         };
-        if aberto.as_deref() == Some(pedido) {
-            return Ok(());
-        }
-        tracing::warn!(
-            ?pedido,
-            ?aberto,
-            ?lado,
-            "a troca de dispositivo voltou sem erro e o aberto não é o pedido"
-        );
-        Err(match lado {
-            Lado::Entrada => ConnectionError::CaptureDeviceGone,
-            Lado::Saida => ConnectionError::PlaybackDeviceGone,
-        })
+        conferencia(Some(pedido), aberto.as_deref(), lado)
     }
 
     /// Replaces the live voice path with one the caller reopens.
@@ -2271,6 +2259,8 @@ impl Connection {
             audio_available: audio.available,
             capture: audio.capture,
             playback: audio.playback,
+            aparelho: audio.aparelho,
+            trocas_de_aparelho: audio.trocas_de_aparelho,
             may_manage_voice_rooms: room
                 .permissions
                 .contains(&seele_core::Permission::ManageVoiceRooms),
@@ -2340,6 +2330,9 @@ impl Connection {
             return AudioState::silent();
         };
         let telemetry = voice.telemetry();
+        // Uma leitura só do painel: nome novo com estado velho seria a
+        // interface dizendo que já trocou quando ainda está trocando.
+        let aparelhos = voice.estado_do_audio();
         AudioState {
             available: true,
             mode: voice.mode().into(),
@@ -2350,18 +2343,58 @@ impl Connection {
             local_fault: voice.falha_local(),
             frames_refused: voice.quadros_recusados(),
             bitrate_bps: telemetry.local.bitrate_bps,
-            capture: voice.capture().map(|device| CaptureDevice {
-                id: device.id.clone(),
-                name: device.name.clone(),
+            capture: aparelhos.capture.map(|device| CaptureDevice {
+                id: device.id,
+                name: device.name,
                 default: device.default,
             }),
-            playback: voice.playback().map(|device| PlaybackDevice {
-                id: device.id.clone(),
-                name: device.name.clone(),
+            playback: aparelhos.playback.map(|device| PlaybackDevice {
+                id: device.id,
+                name: device.name,
                 default: device.default,
             }),
+            aparelho: aparelhos.estado.into(),
+            trocas_de_aparelho: aparelhos.reaberturas,
         }
     }
+}
+
+/// O veredito da conferência da troca, sem sessão nenhuma por perto.
+///
+/// Uma função sobre dois `Option<&str>` e não um método porque é assim que ela
+/// vira **teste de comportamento**. O guarda que existia lia o texto-fonte deste
+/// arquivo com `include_str!` e conferia se certas palavras apareciam no corpo
+/// do método — o que prova que alguém escreveu as palavras, e nada sobre o que
+/// o produto faz. «Existir não é funcionar»: um `contains` verde sobreviveria a
+/// uma comparação invertida.
+///
+/// # Errors
+///
+/// [`ConnectionError::CaptureDeviceGone`] ou
+/// [`ConnectionError::PlaybackDeviceGone`] quando o aparelho aberto não é o que
+/// foi pedido. Sem pedido — o padrão do sistema — qualquer um que abra é o
+/// certo.
+fn conferencia(
+    pedido: Option<&str>,
+    aberto: Option<&str>,
+    lado: Lado,
+) -> Result<(), ConnectionError> {
+    let Some(pedido) = pedido else {
+        return Ok(());
+    };
+    if aberto == Some(pedido) {
+        return Ok(());
+    }
+    tracing::warn!(
+        ?pedido,
+        ?aberto,
+        ?lado,
+        "a troca de dispositivo voltou sem erro e o aberto não é o pedido"
+    );
+    Err(match lado {
+        Lado::Entrada => ConnectionError::CaptureDeviceGone,
+        Lado::Saida => ConnectionError::PlaybackDeviceGone,
+    })
 }
 
 /// What the voice path is doing, read once per [`Connection::snapshot`].
@@ -2382,6 +2415,8 @@ struct AudioState {
     bitrate_bps: u32,
     capture: Option<CaptureDevice>,
     playback: Option<PlaybackDevice>,
+    aparelho: EstadoDoAparelho,
+    trocas_de_aparelho: u64,
 }
 
 impl AudioState {
@@ -2404,6 +2439,10 @@ impl AudioState {
             bitrate_bps: 0,
             capture: None,
             playback: None,
+            // Sem voz não há aparelho a acompanhar. `Perdido` seria uma falha
+            // que não houve: ninguém pediu áudio nesta sessão.
+            aparelho: EstadoDoAparelho::Funcionando,
+            trocas_de_aparelho: 0,
         }
     }
 }
@@ -3294,41 +3333,38 @@ async fn drive(
                         // reabrir, a voz sairia por uma conexão morta.
                         remember_media(&shared, (*media).clone(), sessao.ssrc);
                         if let Ok(mut slot) = shared.voice.lock() {
-                            if let Some(atual) = slot.as_ref() {
-                                // `reopen` e não `start_on`, porque os controles
-                                // têm que atravessar a reabertura. A lista mora
-                                // em `Voice::switch_capture` — mudo,
-                                // Isolamento total, o modo, a tecla segura, cada
-                                // ganho por interlocutor — e está lá justamente
-                                // para que nenhuma casca esqueça um item. Esta
-                                // esquecia todos.
-                                //
-                                // O que torna isto pior que "volta desmutado" é
-                                // que `Enlace::tentar` **restaura** o mudo
-                                // no servidor: o roster continuava mostrando a
-                                // pessoa muda enquanto o portão local voltava
-                                // aberto, e o indicador que todo mundo lê
-                                // passava a mentir.
-                                //
-                                // `reopen` também é quem sabe **o que** reabrir:
-                                // a voz guarda os dois dispositivos que pediu, e
-                                // volta pedindo os mesmos. Sem isso, voltar do ar
-                                // trocaria o microfone e a saída de quem está no
-                                // meio de uma conversa — e trocaria calado, que é
-                                // a pior parte. O recuo por lado é o mesmo do
-                                // caminho de conexão: uma interface que sumiu
-                                // enquanto estávamos fora do ar não pode custar a
-                                // voz do resto da sessão.
-                                match atual.reopen((*media).clone(), sessao.ssrc) {
-                                    Ok(voice) => *slot = Some(voice),
-                                    // A mesma degradação do caminho de conexão:
-                                    // a metade de texto continua funcionando, e
-                                    // `audio_available` diz qual metade é esta.
-                                    Err(error) => {
-                                        tracing::warn!(%error, "no audio device after reconnecting; text only");
-                                        *slot = None;
-                                    }
-                                }
+                            // `reopen` e não `start_on`, porque os controles
+                            // têm que atravessar a reabertura. A lista mora
+                            // em `Voice::switch_capture` — mudo,
+                            // Isolamento total, o modo, a tecla segura, cada
+                            // ganho por interlocutor — e está lá justamente
+                            // para que nenhuma casca esqueça um item. Esta
+                            // esquecia todos.
+                            //
+                            // O que torna isto pior que "volta desmutado" é
+                            // que `Enlace::tentar` **restaura** o mudo
+                            // no servidor: o roster continuava mostrando a
+                            // pessoa muda enquanto o portão local voltava
+                            // aberto, e o indicador que todo mundo lê
+                            // passava a mentir.
+                            //
+                            // `reopen` também é quem sabe **o que** reabrir:
+                            // a voz guarda os dois dispositivos que pediu, e
+                            // volta pedindo os mesmos. Sem isso, voltar do ar
+                            // trocaria o microfone e a saída de quem está no
+                            // meio de uma conversa — e trocaria calado, que é
+                            // a pior parte. O recuo por lado é o mesmo do
+                            // caminho de conexão: uma interface que sumiu
+                            // enquanto estávamos fora do ar não pode custar a
+                            // voz do resto da sessão.
+                            //
+                            // A mesma degradação do caminho de conexão: a
+                            // metade de texto continua funcionando, e
+                            // `audio_available` diz qual metade é esta.
+                            if let Err(error) = reabrir_voz_na_reconexao(&mut slot, |atual| {
+                                atual.reopen((*media).clone(), sessao.ssrc)
+                            }) {
+                                tracing::warn!(%error, "no audio device after reconnecting; text only");
                             }
                         }
                         shared.notify(&Event::TelemetryChanged);
@@ -3395,6 +3431,35 @@ fn chosen_devices(config: &ConnectConfig) -> seele_core::DeviceChoice {
     seele_core::DeviceChoice {
         capture: config.capture_device.clone(),
         playback: config.playback_device.clone(),
+    }
+}
+
+/// O que a reconexão faz com a voz que estava viva.
+///
+/// Mora aqui fora, e não dentro do braço de `Aviso::Reconectado`, para que a
+/// decisão tenha guarda de comportamento: ninguém constrói uma
+/// [`seele_core::Voice`] sem placa de som, mas nada do que se decide aqui
+/// depende de placa nenhuma. São três decisões, e as três já foram o defeito:
+/// reabrir **a partir** da voz viva (é o que carrega os controles), não abrir
+/// voz para quem estava em texto puro, e não guardar a voz que não reabriu.
+///
+/// O erro volta para quem chamou anunciar: aqui não se sabe registrar nada.
+fn reabrir_voz_na_reconexao<V, E>(
+    slot: &mut Option<V>,
+    reabrir: impl FnOnce(&V) -> Result<V, E>,
+) -> Result<(), E> {
+    let Some(atual) = slot.as_ref() else {
+        return Ok(());
+    };
+    match reabrir(atual) {
+        Ok(nova) => {
+            *slot = Some(nova);
+            Ok(())
+        }
+        Err(erro) => {
+            *slot = None;
+            Err(erro)
+        }
     }
 }
 
@@ -6582,6 +6647,14 @@ mod conferir_a_troca {
             .unwrap_or_else(|| panic!("`{assinatura}` nunca fecha"))
     }
 
+    /// Este continua lendo texto-fonte, e de propósito.
+    ///
+    /// O que ele guarda não é o que a conferência decide — isso agora é
+    /// comportamento, no `mod comportamento` logo abaixo. O que ele guarda é a
+    /// casca **chamar** a conferência: `set_capture_device` e a irmã dela
+    /// abrem aparelho de verdade, e conformidade roda sem placa de som, então
+    /// não há como exercitá-las aqui. Quem apaga a chamada volta a devolver
+    /// `Ok` para uma troca que não aconteceu, e nenhum tipo acusa isso.
     #[test]
     fn as_duas_trocas_conferem_o_que_pediram() {
         for assinatura in [
@@ -6598,24 +6671,57 @@ mod conferir_a_troca {
         }
     }
 
-    #[test]
-    fn a_conferencia_compara_o_aberto_com_o_pedido() {
-        let corpo = corpo("fn conferir_troca(&self, pedido: Option<&str>, lado: Lado)");
-        assert!(
-            corpo.contains("running.playback()") && corpo.contains("running.capture()"),
-            "a conferência não lê o dispositivo que de fato abriu:\n{corpo}"
-        );
-        assert!(
-            corpo.contains("aberto.as_deref() == Some(pedido)"),
-            "a conferência não compara o aberto com o pedido:\n{corpo}"
-        );
-        // Sem pedido não há o que conferir: o padrão do sistema é qualquer um
-        // que abra, e exigir igualdade ali recusaria o caso mais comum de todos.
-        assert!(
-            corpo.contains("let Some(pedido) = pedido else"),
-            "a conferência exige igualdade mesmo quando ninguém pediu um \
-             dispositivo em particular, o que recusaria o padrão do sistema:\n{corpo}"
-        );
+    /// A conferência, exercitada pelo que ela **faz**.
+    ///
+    /// Substitui o guarda que lia o corpo de `conferir_troca` com
+    /// `include_str!` e conferia se certas palavras estavam lá. Aquele guarda
+    /// passaria com a comparação invertida, com o lado trocado, e com um `Ok`
+    /// devolvido sempre — nenhuma dessas três coisas é texto que falte, e todas
+    /// as três são o defeito que ele existe para acusar.
+    mod comportamento {
+        use super::super::{conferencia, ConnectionError, Lado};
+
+        #[test]
+        fn abrir_o_que_se_pediu_passa() {
+            assert!(conferencia(Some("fone-usb"), Some("fone-usb"), Lado::Saida).is_ok());
+        }
+
+        #[test]
+        fn abrir_outro_aparelho_e_recusado_pelo_lado_certo() {
+            // O defeito relatado: «mostra EM USO num e ESCOLHIDO no que eu
+            // escolhi, mas não muda». Voltar `Ok` aqui é o produto afirmando
+            // que fez o que não fez.
+            assert_eq!(
+                conferencia(Some("fone-usb"), Some("caixas-da-mesa"), Lado::Saida),
+                Err(ConnectionError::PlaybackDeviceGone)
+            );
+            assert_eq!(
+                conferencia(
+                    Some("microfone-bom"),
+                    Some("microfone-do-laptop"),
+                    Lado::Entrada
+                ),
+                Err(ConnectionError::CaptureDeviceGone)
+            );
+        }
+
+        #[test]
+        fn nao_abrir_nada_tambem_e_recusado() {
+            // Um aparelho que o sistema não descreve não é um aparelho que
+            // atende ao pedido: `None` não é «qualquer um serve».
+            assert_eq!(
+                conferencia(Some("fone-usb"), None, Lado::Saida),
+                Err(ConnectionError::PlaybackDeviceGone)
+            );
+        }
+
+        #[test]
+        fn sem_pedido_qualquer_aparelho_que_abra_esta_certo() {
+            // O caso mais comum de todos: o padrão da máquina. Exigir igualdade
+            // aqui recusaria toda sessão que nunca escolheu nada.
+            assert!(conferencia(None, Some("qualquer-um"), Lado::Entrada).is_ok());
+            assert!(conferencia(None, None, Lado::Saida).is_ok());
+        }
     }
 }
 
@@ -6662,4 +6768,98 @@ pub async fn onde_mora_hoje(
         onde_mora(ponto, &do_server, PRAZO_DO_QUARTO),
         onde_mora(ponto, &do_aviso, PRAZO_DO_QUARTO),
     )
+}
+
+#[cfg(test)]
+mod a_voz_quando_o_enlace_volta {
+    //! O braço da reconexão, exercitado pelo que ele **faz**.
+    //!
+    //! Complementa o guarda de texto-fonte de
+    //! `crates/seele-conformance/tests/voz_na_reconexao.rs`, que só conseguia
+    //! afirmar que a palavra `reopen` aparecia no braço. Três coisas que aquele
+    //! guarda deixaria passar são defeitos de verdade, e são estas:
+    //!
+    //! - reabrir **a partir** da voz viva, e não construir uma do zero — é o
+    //!   que carrega mudo, Isolamento total, modo e ganhos por cima da
+    //!   reabertura;
+    //! - abrir voz para quem estava em texto puro, que devolveria microfone a
+    //!   quem não tem nenhum;
+    //! - guardar uma voz que não reabriu, que deixaria a casca falando por uma
+    //!   conexão morta em vez de esmaecer para texto.
+
+    use super::reabrir_voz_na_reconexao;
+
+    /// Uma voz de mentira: o que interessa é o que atravessa a reabertura.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct Voz {
+        controles: Vec<&'static str>,
+        ssrc: u32,
+    }
+
+    #[test]
+    fn a_voz_viva_reabre_carregando_os_controles() {
+        let mut slot = Some(Voz {
+            controles: vec!["mudo", "isolamento", "ganho de quem fala alto"],
+            ssrc: 1,
+        });
+
+        let feito = reabrir_voz_na_reconexao(&mut slot, |atual| {
+            // A reabertura parte da voz que estava viva: é daí que os
+            // controles vêm. Quem chama `start_on` não precisa deste `&atual`.
+            Ok::<_, ()>(Voz {
+                controles: atual.controles.clone(),
+                ssrc: 2,
+            })
+        });
+
+        assert_eq!(feito, Ok(()));
+        assert_eq!(
+            slot,
+            Some(Voz {
+                controles: vec!["mudo", "isolamento", "ganho de quem fala alto"],
+                ssrc: 2,
+            }),
+            "a reconexão devolveu uma voz nova sem os controles de agora: o \
+             roster continua mostrando quem estava mudo como mudo, e o \
+             microfone volta aberto"
+        );
+    }
+
+    #[test]
+    fn quem_estava_em_texto_puro_continua_em_texto_puro() {
+        let mut slot: Option<Voz> = None;
+        let mut tentou = false;
+
+        let feito = reabrir_voz_na_reconexao(&mut slot, |_| {
+            tentou = true;
+            Ok::<_, ()>(Voz {
+                controles: vec![],
+                ssrc: 2,
+            })
+        });
+
+        assert_eq!(feito, Ok(()));
+        assert!(
+            !tentou && slot.is_none(),
+            "a reconexão abriu voz para quem não tinha nenhuma; sem placa de \
+             som isso é abrir um microfone que não existe"
+        );
+    }
+
+    #[test]
+    fn a_voz_que_nao_reabre_da_lugar_ao_texto() {
+        let mut slot = Some(Voz {
+            controles: vec!["mudo"],
+            ssrc: 1,
+        });
+
+        let feito = reabrir_voz_na_reconexao(&mut slot, |_| Err::<Voz, _>("sem aparelho"));
+
+        assert_eq!(feito, Err("sem aparelho"));
+        assert!(
+            slot.is_none(),
+            "a reconexão guardou a voz que não reabriu: ela sai por uma \
+             conexão morta, com `ssrc` velho, e `audio_available` mente"
+        );
+    }
 }

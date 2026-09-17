@@ -11,6 +11,18 @@
 //! JavaScript: quando o defeito é "a casca chamou a função errada" e o
 //! compilador aceita as duas, o texto é o que resta.
 //!
+//! # Este guarda não está mais sozinho
+//!
+//! Ler texto-fonte prova que a casca **escreveu** a chamada certa; não prova
+//! que a chamada certa **faz** a coisa certa. A segunda metade agora existe:
+//! `mod a_voz_quando_o_enlace_volta`, em `crates/seele-ffi/src/lib.rs`,
+//! exercita `reabrir_voz_na_reconexao` — o mesmo auxiliar que o braço real da
+//! reconexão chama — e cobre por comportamento a voz reaberta com os controles
+//! de agora, a voz ausente que nada tem a reabrir e a reabertura que falha sem
+//! deixar o lugar vazio. Os dois guardas ficam: este pega a casca que troca a
+//! chamada, aquele pega o auxiliar que deixa de carregar os controles. Nenhum
+//! dos dois sozinho pega os dois defeitos.
+//!
 //! # O defeito, e por que ele é grave
 //!
 //! Numa reconexão o `ssrc` e o canal de mídia são novos, então a voz **tem**
