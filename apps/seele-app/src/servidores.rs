@@ -190,7 +190,55 @@ pub(crate) fn banco(config: &str, id: Option<&str>) -> PathBuf {
     if let Some(pasta) = caminho.parent() {
         let _ = std::fs::create_dir_all(pasta);
     }
+    uma_chave_por_maquina(config, &caminho);
     caminho
+}
+
+/// Faz este banco apresentar a **mesma** chave que o resto da máquina.
+///
+/// **Relatado do uso real, e o defeito era meu:** «deu erro quando saí de um
+/// server e tentei entrar em outro — A CHAVE DO SERVIDOR MUDOU».
+///
+/// A identidade TLS mora no banco, e cada servidor guardado ganhou banco
+/// próprio. A chave do pino do TOFU, porém, é **o texto do alvo**: o mesmo
+/// endereço para todos eles. Trocar de servidor passou a disparar o alerta
+/// bloqueante do ADR 0003, o que é reservado para ataque.
+///
+/// O `tls.rs` já carregava a lição, escrita quando reiniciar o `seeled` trocava
+/// a chave: «um reinício de rotina disparando o aviso reservado para ataque é
+/// pior que não ter o aviso: ensina a ignorá-lo». Repeti a mesma numa forma
+/// nova.
+///
+/// **Por que aqui dentro, e não num passo ao lado.** A primeira versão era uma
+/// função que `hospedar` chamava, e a prova por reversão a desmascarou: apagar
+/// a chamada não fazia teste nenhum ficar vermelho, porque o teste chamava a
+/// função direto. Um passo que se pode esquecer é um passo que se esquece. Aqui
+/// não há o que esquecer: quem pede o caminho do banco recebe a chave plantada
+/// junto, e não há como pedir um sem o outro.
+///
+/// A chave herdada é a do **banco de sempre**, e não a do primeiro que subir. É
+/// o que preserva o pino que as pessoas já têm.
+///
+/// Silenciosa por escolha: não herdar significa que o servidor gera a própria
+/// chave, que é o comportamento de antes desta função existir.
+fn uma_chave_por_maquina(config: &str, banco: &Path) {
+    use seele_server::persistence::{Location, Persistence};
+
+    let legado = Path::new(config).join("seele.db");
+    if banco == legado || !legado.exists() {
+        return;
+    }
+    let (Ok(de), Ok(para)) = (
+        Persistence::open(&Location::File(legado)),
+        Persistence::open(&Location::File(banco.to_path_buf())),
+    ) else {
+        return;
+    };
+    match seele_server::tls::herdar_identidade(&de, &para) {
+        Ok(true) => tracing::info!("o servidor novo herdou a chave desta máquina"),
+        Ok(false) => {}
+        Err(erro) => tracing::warn!(%erro, "não deu para herdar a chave desta máquina"),
+    }
 }
 
 /// Anota que este servidor foi usado agora, para a lista vir na ordem certa.
@@ -301,6 +349,40 @@ mod os_servidores_guardados {
             b"antigo"
         );
         assert_eq!(listar(&config).len(), 2);
+    }
+
+    /// **O defeito relatado, e a prova de que pedir o banco já o conserta.**
+    ///
+    /// Sair de um servidor desta máquina e entrar em outro dava «A CHAVE DO
+    /// SERVIDOR MUDOU»: o pino do TOFU é o endereço, e cada banco tinha a
+    /// própria identidade. A herança mora dentro de `banco` justamente para
+    /// que não exista um passo a esquecer — este teste não chama nada além do
+    /// que `hospedar` chama.
+    #[test]
+    fn pedir_o_banco_de_um_servidor_novo_ja_planta_a_chave_desta_maquina() {
+        use seele_server::persistence::{Location, Persistence};
+        use seele_server::tls::{identidade_guardada, Identity};
+
+        let dir = pasta();
+        let config = texto(&dir);
+
+        let legado = dir.path().join("seele.db");
+        let velho = Persistence::open(&Location::File(legado)).expect("abrir o legado");
+        Identity::load_or_create(&velho, vec!["localhost".to_owned()]).expect("identidade");
+        let fixada = identidade_guardada(&velho).expect("o legado tem identidade");
+        drop(velho);
+
+        let novo = criar(&config, "Mesa de RPG", "0.11.0");
+        let caminho = banco(&config, Some(&novo.id));
+
+        let aberto = Persistence::open(&Location::File(caminho)).expect("abrir o novo");
+        let identidade =
+            Identity::load_or_create(&aberto, vec!["localhost".to_owned()]).expect("subir");
+        assert_eq!(
+            identidade.chain.first().map(|c| c.as_ref().to_vec()),
+            Some(fixada.0),
+            "o servidor novo apresenta a chave que as pessoas já fixaram"
+        );
     }
 
     #[test]

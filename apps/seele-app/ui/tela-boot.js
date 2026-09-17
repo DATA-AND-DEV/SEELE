@@ -816,8 +816,13 @@ async function desenharVersoesParaHospedar() {
     console.warn("versoes:", falha);
   }
   const abriveis = versoes.filter((v) => v.abrivel || v.em_uso);
-  $("preparar-versoes").hidden = abriveis.length < 2;
-  if (abriveis.length < 2) return;
+  // **Sempre visível, mesmo com uma só.** Escondê-lo era o que fazia a pergunta
+  // «não mostra as versões disponíveis» ter razão: para quem olha, um bloco que
+  // some e uma coisa que não existe são indistinguíveis. Com uma versão só, o
+  // bloco diz que é uma só e onde arrumar outra.
+  $("preparar-versoes").hidden = abriveis.length === 0;
+  $("preparar-versao-unica").hidden = abriveis.length !== 1;
+  if (abriveis.length === 0) return;
 
   repovoar(
     $("preparar-lista-versoes"),

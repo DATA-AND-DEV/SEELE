@@ -74,7 +74,7 @@ pub(crate) struct VersaoInstalada {
 pub(crate) fn instaladas(config: &str) -> Vec<VersaoInstalada> {
     let deposito = Deposito::em(raiz_do_deposito(config));
     let agora = em_uso();
-    deposito
+    let mut lista: Vec<VersaoInstalada> = deposito
         .instaladas()
         .into_iter()
         .map(|versao| VersaoInstalada {
@@ -82,7 +82,33 @@ pub(crate) fn instaladas(config: &str) -> Vec<VersaoInstalada> {
             abrivel: deposito.instalacao(&versao).is_some(),
             versao: versao.como_texto().to_owned(),
         })
-        .collect()
+        .collect();
+
+    // **A que está rodando entra mesmo sem estar no depósito.**
+    //
+    // Relatado do uso real: «não mostra as versões disponíveis para o server».
+    // A lista vinha só do depósito, e quem instalou pelo `.dmg` — que é como
+    // toda primeira instalação acontece — não tem depósito nenhum. O resultado
+    // era uma lista vazia numa máquina que tem, obviamente, uma versão: a que
+    // está desenhando a tela.
+    //
+    // `abrivel: false` porque o launcher de fato não sabe abri-la: ela não tem
+    // instalação no depósito. Isso não é recusa de nada — ela **já está
+    // aberta**, e a tela lê `em_uso` antes de `abrivel` justamente para dizer
+    // isso em vez de oferecer um botão que não teria o que fazer.
+    if let Some(versao) = agora {
+        if !lista.iter().any(|v| v.versao == versao) {
+            lista.insert(
+                0,
+                VersaoInstalada {
+                    versao: versao.to_owned(),
+                    em_uso: true,
+                    abrivel: false,
+                },
+            );
+        }
+    }
+    lista
 }
 
 /// Por que não deu para abrir a versão pedida.
@@ -572,5 +598,41 @@ mod o_launcher_ligado_ao_produto {
              `NaoIniciou`: {resultado:?}"
         );
         let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **Relatado do uso real:** «não mostra as versões disponíveis para o
+    /// server».
+    ///
+    /// A lista vinha só do depósito, e quem instalou pelo `.dmg` — que é como
+    /// toda primeira instalação acontece — não tem depósito nenhum. Numa
+    /// máquina que tem, obviamente, uma versão rodando, a tela mostrava nada.
+    #[test]
+    fn a_versao_que_esta_rodando_aparece_mesmo_sem_deposito() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+
+        let lista = instaladas(&config);
+
+        match super::em_uso() {
+            // O caso de quem usa: este binário foi carimbado, e a versão dele
+            // aparece ainda que o depósito esteja vazio.
+            Some(versao) => {
+                let achada = lista
+                    .iter()
+                    .find(|v| v.versao == versao)
+                    .expect("a versão que está rodando tem de aparecer na lista");
+                assert!(achada.em_uso, "e marcada como a que está aberta");
+                assert!(
+                    !achada.abrivel,
+                    "o launcher não sabe abri-la: ela não está no depósito — e não precisa"
+                );
+            }
+            // Um build feito à mão não carimba a versão, e aí não há o que
+            // acrescentar. Dito em vez de silenciosamente pulado.
+            None => assert!(
+                lista.is_empty(),
+                "sem carimbo de versão e sem depósito, não há o que listar"
+            ),
+        }
     }
 }
