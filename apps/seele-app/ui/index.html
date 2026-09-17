@@ -2091,6 +2091,19 @@
                 -->
                 <p id="server-erro" class="erro" role="alert" hidden></p>
                 <p class="nota">A troca vale agora e fica guardada nesta máquina.</p>
+                <!--
+                  O achado B da auditoria de áudio, dito em vez de consertado, e
+                  a decisão está escrita em
+                  `crates/seele-conformance/tests/troca_de_aparelho.rs`: escolher
+                  pelo nome fixa o aparelho, inclusive quando o nome escolhido é
+                  o do padrão de agora. No macOS isso troca o modo do AudioUnit e
+                  tira o reencaminhamento automático do CoreAudio — e esta lista
+                  oferecia `PADRÃO DA MÁQUINA` e um nome como se fossem a mesma
+                  coisa. Promover a escolha a seguidora quando ela coincide com o
+                  padrão trocaria um defeito de informação por um de
+                  comportamento; a frase é a saída barata e honesta.
+                -->
+                <p id="nota-fixa-entrada" class="nota">Escolher um aparelho pelo nome fixa ele: se o sistema trocar de padrão depois, o SEELE fica no que você escolheu. <b>PADRÃO DA MÁQUINA</b> é a opção que acompanha a troca.</p>
               </div>
 
               <div class="server-campo">
@@ -2179,6 +2192,8 @@
                 -->
                 <ul id="lista-saidas" class="server-dispositivos"></ul>
                 <p class="nota">Trocar vale na hora, sem sair da conversa.</p>
+                <!-- O mesmo aviso da entrada; ver o comentário lá em cima. -->
+                <p id="nota-fixa-saida" class="nota">Escolher um aparelho pelo nome fixa ele: se o sistema trocar de padrão depois, o SEELE fica no que você escolheu. <b>PADRÃO DA MÁQUINA</b> é a opção que acompanha a troca.</p>
               </div>
             </div>
           </div>

@@ -49,6 +49,15 @@ const QUADRO_MS: u32 = 20;
 struct MaquinaDaPessoa {
     padrao: Option<&'static str>,
     aberturas: u32,
+    /// O aparelho que a pessoa escolheu **pelo nome**, na tela do SEELE.
+    ///
+    /// `None` é a ausência de escolha — a linha `PADRÃO DA MÁQUINA` —, e é o
+    /// que faz a reabertura resolver o padrão de agora. Com um id aqui, a
+    /// reabertura pede **aquele aparelho**, que é literalmente o que
+    /// `voice::open_preferring` faz com `DeviceChoice::wanted`.
+    escolha: Option<&'static str>,
+    /// Os aparelhos que a máquina ainda tem, para a escolha poder sumir.
+    presentes: Vec<&'static str>,
 }
 
 /// O que uma abertura entrega ao laço, no lugar do `AudioIo` de verdade.
@@ -127,6 +136,15 @@ impl Reabertura for MaquinaDaPessoa {
 
     fn reabrir(&mut self) -> Result<Self::Aberto, Self::Erro> {
         self.aberturas += 1;
+        // A escada de `voice::open_preferring`, na mesma ordem: pede-se o
+        // aparelho escolhido; se ele não está mais aí, desce-se para o da
+        // máquina. Sem a descida, um fone escolhido e desconectado deixaria a
+        // sessão muda — e é por isso que a escada existe em produção.
+        if let Some(escolhido) = self.escolha {
+            if self.presentes.contains(&escolhido) {
+                return Ok(AparelhoDeMentira::novo(escolhido));
+            }
+        }
         self.padrao
             .map(AparelhoDeMentira::novo)
             .ok_or("a máquina não está oferecendo aparelho nenhum")
@@ -178,6 +196,8 @@ impl SessaoDeVoz {
             maquina: MaquinaDaPessoa {
                 padrao: Some(aparelho),
                 aberturas: 0,
+                escolha: None,
+                presentes: vec![aparelho],
             },
             restos: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             relogio: PlayoutClock::new(Instant::now(), QUADRO_MS),
@@ -587,4 +607,94 @@ fn um_aparelho_que_abre_e_nao_da_laco_nao_e_desenhado_como_funcionando() {
         EstadoDoAparelho::Perdido,
         "a tela diz «funcionando» sobre um aparelho que não produz som nenhum"
     );
+}
+
+/// O par que torna verdadeira a frase nova da tela de configuração.
+///
+/// # O achado B, e por que a saída escolhida foi dizer em vez de consertar
+///
+/// A auditoria de áudio registrou, com gravidade alta: no macOS, todo `Device`
+/// vindo de enumeração ou de `device_by_id` nasce com `is_default_output:
+/// false` (`cpal enumerate.rs:78`), e o `cpal` o abre por um *AudioUnit* fixo
+/// em vez do *DefaultOutput* que o CoreAudio reencaminha sozinho. **Escolher
+/// pelo nome o mesmo aparelho que já era o padrão desliga o «seguir o
+/// sistema»** — e a tela oferecia `PADRÃO DA MÁQUINA` e o nome do aparelho como
+/// se fossem a mesma coisa.
+///
+/// As duas saídas que a auditoria pôs na mesa, e o custo de cada uma:
+///
+/// - **Promover a escolha a «seguir o sistema» quando ela coincide com o padrão
+///   de agora.** Custo: uma escolha explícita vira um seguidor, calado. Quem
+///   escolheu os alto-falantes do laptop justamente para um monitor HDMI não
+///   roubar o som passaria a ter exatamente isso acontecendo, sem nada na tela
+///   ter mudado. E as duas situações ficariam indistinguíveis dentro do próprio
+///   produto: não haveria estado que as separasse para desfazer depois.
+/// - **Dizer.** Custo: uma frase na tela, e a pessoa precisa lê-la.
+///
+/// Escolhida a segunda, porque a primeira **troca um defeito de informação por
+/// um defeito de comportamento** — e porque o comportamento de hoje é o certo:
+/// um aparelho escolhido deve ficar escolhido. A frase só pode ser escrita se
+/// for verdade, e estes dois testes são o que a torna verdade.
+///
+/// Este é o lado que a frase promete sobre escolher: **o padrão do sistema muda
+/// e a voz não vai atrás**. O outro lado — sem escolha, a voz segue — é
+/// `trocar_o_aparelho_padrao_no_sistema_reabre_a_voz_no_novo`, lá em cima.
+#[test]
+fn com_um_aparelho_escolhido_a_troca_do_padrao_do_sistema_nao_move_a_voz() {
+    let mut sessao = SessaoDeVoz::comecou_em("fone-usb");
+    // A pessoa escolheu o fone pelo nome, na tela do SEELE.
+    sessao.maquina.escolha = Some("fone-usb");
+    sessao.maquina.presentes = vec!["fone-usb", "caixas-da-mesa"];
+
+    // E o sistema passa a oferecer outro padrão.
+    sessao.maquina.padrao = Some("caixas-da-mesa");
+    sessao.o_cpal_avisa(cpal::ErrorKind::DeviceChanged);
+    sessao.voltas_por(0.0, 500.0);
+
+    let painel = sessao.painel();
+    assert_eq!(
+        painel.playback.map(|saida| saida.name),
+        Some("fone-usb".to_owned()),
+        "a voz foi para o padrão novo do sistema apesar de haver um aparelho \
+         escolhido. Uma escolha que o sistema desfaz não é uma escolha, e a \
+         tela passaria a prometer o contrário do que o produto faz."
+    );
+    assert_eq!(
+        painel.capture.map(|microfone| microfone.name),
+        Some("fone-usb".to_owned()),
+        "a entrada abandonou o aparelho escolhido"
+    );
+    assert_eq!(painel.estado, EstadoDoAparelho::Funcionando);
+}
+
+/// E a escada que impede a escolha de virar silêncio.
+///
+/// Escolher um aparelho é fixá-lo, **não** é prometer que ele existe para
+/// sempre. Quando o aparelho escolhido some — o fone sai da tomada —, o produto
+/// desce para o da máquina em vez de ficar mudo esperando um aparelho que não
+/// vai voltar. É o `open_preferring` de `seele-core/src/voice.rs`, que larga um
+/// lado por vez e só desiste quando já está no aparelho da própria máquina.
+///
+/// Sem esta metade, a frase da tela seria uma armadilha: «escolher desliga o
+/// seguir o sistema» leria-se como «escolher pode te deixar mudo».
+#[test]
+fn o_aparelho_escolhido_que_some_desce_para_o_da_maquina_em_vez_de_emudecer() {
+    let mut sessao = SessaoDeVoz::comecou_em("fone-usb");
+    sessao.maquina.escolha = Some("fone-usb");
+    sessao.maquina.presentes = vec!["fone-usb", "alto-falante-do-laptop"];
+
+    // O fone escolhido sai da tomada: some da máquina, e o sistema elege outro.
+    sessao.maquina.presentes = vec!["alto-falante-do-laptop"];
+    sessao.maquina.padrao = Some("alto-falante-do-laptop");
+    sessao.o_cpal_avisa(cpal::ErrorKind::DeviceNotAvailable);
+    sessao.voltas_por(0.0, 3_000.0);
+
+    let painel = sessao.painel();
+    assert_eq!(
+        painel.playback.map(|saida| saida.name),
+        Some("alto-falante-do-laptop".to_owned()),
+        "o aparelho escolhido sumiu e a voz ficou presa a ele: escolher um \
+         aparelho passou a ser um jeito de ficar mudo"
+    );
+    assert_eq!(painel.estado, EstadoDoAparelho::Funcionando);
 }

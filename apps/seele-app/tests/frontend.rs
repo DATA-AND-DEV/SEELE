@@ -10502,3 +10502,52 @@ fn the_page_loads_mods_after_the_first_draw() {
          falha de um jeito que parece defeito dele"
     );
 }
+
+/// As duas listas de aparelho dizem que escolher pelo nome fixa.
+///
+/// # Por que esta frase precisa de um guarda
+///
+/// Ela é o **conserto inteiro** do achado B da auditoria de áudio. A tela
+/// oferecia `PADRÃO DA MÁQUINA` e o nome de um aparelho lado a lado, como se
+/// escolher qualquer um dos dois desse no mesmo — e no macOS não dá: um
+/// aparelho vindo da lista abre por um AudioUnit fixo e perde o
+/// reencaminhamento que o CoreAudio faz sozinho no padrão. A auditoria
+/// classificou como gravidade alta com esta frase: *«quem usa a tela de
+/// configuração fica pior do que quem não usa»*.
+///
+/// Escolheu-se dizer em vez de promover a escolha a seguidora, porque promover
+/// trocaria um defeito de informação por um de comportamento — uma escolha
+/// explícita viraria um seguidor calado. A escolha está justificada por escrito
+/// em `crates/seele-conformance/tests/troca_de_aparelho.rs`, e os dois testes
+/// de comportamento que a tornam verdade estão lá:
+/// `com_um_aparelho_escolhido_a_troca_do_padrao_do_sistema_nao_move_a_voz` e
+/// `o_aparelho_escolhido_que_some_desce_para_o_da_maquina_em_vez_de_emudecer`.
+///
+/// Sem este guarda, apagar a frase devolve a piora invisível sem nada ficar
+/// vermelho — que é como ela viveu até aqui.
+#[test]
+fn as_listas_de_aparelho_avisam_que_escolher_pelo_nome_fixa() {
+    let page = without_comments(&read("ui/index.html"));
+
+    for id in ["nota-fixa-entrada", "nota-fixa-saida"] {
+        assert!(
+            page.contains(id),
+            "sumiu a nota `{id}`: a tela voltou a oferecer `PADRÃO DA MÁQUINA` \
+             e um nome de aparelho como se fossem a mesma coisa, e no macOS \
+             escolher pelo nome desliga o reencaminhamento automático"
+        );
+    }
+    assert_eq!(
+        page.matches("fixa ele").count(),
+        2,
+        "a frase que explica a fixação existe em número diferente de duas: as \
+         duas listas — entrada e saída — têm o mesmo comportamento e precisam \
+         do mesmo aviso"
+    );
+    assert!(
+        page.contains("<b>PADRÃO DA MÁQUINA</b> é a opção que acompanha a troca."),
+        "a nota deixou de nomear a opção que acompanha a troca. Dizer que \
+         escolher fixa, sem dizer qual é a alternativa, é meio aviso: a pessoa \
+         fica sabendo que perdeu algo e não como recuperá-lo"
+    );
+}
