@@ -297,7 +297,17 @@
         ela vale — o texto de controle — e a abrir exceção para esta caixa, que
         é a única transcrição da janela.
       -->
-      <span class="boot-linha">quic/tls1.3 · porta udp aberta</span>
+      <!--
+        **Era «porta udp aberta», e a tela não mede isso** — A12 da auditoria de
+        17/09. A frase aparecia sem hospedar, sem escuta e sem sonda: ela não
+        estava errada por acaso, estava afirmando um estado que nada nesta
+        janela apurou. Quem mede o alcance é `mostrarAlcance`, depois de
+        `hospedar` responder, e é lá que ele é dito.
+
+        O que sobra aqui é o que o produto **é**, que é o que esta caixa sempre
+        quis dizer: o transporte que ele usa.
+      -->
+      <span class="boot-linha">quic/tls1.3 · sobre udp</span>
       <span class="boot-linha">ed25519 · impressão digital fixada na primeira visita</span>
       <span class="boot-linha boot-linha-pronto">
         <span>pronto.</span>
@@ -2452,7 +2462,13 @@
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">ATALHOS DE TECLADO</h3>
-              <p class="nota">Estas teclas não mudam.</p>
+              <!--
+                **Era «Estas teclas não mudam», com uma que muda logo abaixo** —
+                A13. A de falar é trocável, e o botão ao lado dela diz isso; a
+                nota geral dizia o contrário, e quem lia as duas tinha de mexer
+                numa preferência para descobrir qual valia.
+              -->
+              <p class="nota">Só a tecla de falar é trocável; as outras são fixas.</p>
             </div>
             <ul class="server-atalhos">
               <li class="server-atalho">

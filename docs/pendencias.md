@@ -50,9 +50,12 @@ repositório já pagou caro por isso.
 
 ### O que esta versão **não** carrega, e podia parecer que carrega
 
-- **O indexador de MODs não está no ar.** Instalar um MOD é apontar para uma
-  pasta que já está na máquina; não há catálogo de onde baixar um, e não há
-  verificação de assinatura de MOD.
+- ~~**O indexador de MODs não está no ar.**~~ **Subiu em 2026-09-17**, em
+  `mods.seele.app.br`, com o MESA 1.2.0 como primeiro MOD avaliado. O catálogo
+  inteiro é assinado e o aplicativo o confere contra a chave que veio compilada
+  dentro dele. **O que continua valendo:** não há assinatura por autor — o que
+  prova os bytes de cada versão é o hash do conteúdo, e o que fixa o que foi
+  avaliado é o commit.
 - **Versões lado a lado não valem no Windows.** O que o catálogo publica ali é
   um instalador `.exe`, que instala por cima da instalação única da máquina.
   Guardar versões ao lado precisa de um pacote que se abra numa pasta.
@@ -2776,6 +2779,11 @@ seção 7 de `docs/teste-duas-maquinas.md`.
 > **O que não fechou junto, e não é isto aqui:** o indexador não está no ar, então
 > nenhum MOD de terceiro tem como chegar a ninguém ainda. E o interruptor de MOD
 > tem o seu próprio defeito aberto, na pendência 44.
+>
+> **Estreitado em 2026-09-17.** O indexador subiu, e a primeira frase deixou de
+> valer. A segunda continua: a 44 foi tratada na mesma rodada da auditoria de
+> experiência, e o que ela cobrava — dizer a consequência antes da troca — está
+> feito e **não** foi testado em campo com anfitrião e convidado.
 >
 > O texto original fica abaixo, como a regra desta página manda.
 
@@ -7043,6 +7051,28 @@ bateria do cliente deve fazer quando a sessão acabou por decisão de um operado
 restaurar a sala ali é desfazer o verbo de quem modera. Provavelmente o servidor
 precisa responder à entrada em vez de «confirmar por silêncio», que é outro achado
 aberto da mesma auditoria.
+
+> **Estreitada em 2026-09-17, e não fechada.** A auditoria de experiência
+> apontou que esta página descrevia como vigente um estado que o código já tinha
+> mudado. Conferido nas duas metades, e nesta ordem — implementado, testado,
+> publicado:
+>
+> - **`EnterVoiceRoom` confere `Permission::EnterVoiceRoom`.** Implementado e
+>   com teste. Havia um comentário em `session.rs` afirmando o contrário, três
+>   mil linhas depois da linha que confere; ele saiu junto com esta nota.
+> - **A bateria distingue queda de expulsão.** `a_sessao_acabou_aqui` trata
+>   `Kicked`, `Banned` e `ModsMudaram` como fim, e não como rede caída.
+>   Implementado e com teste.
+>
+> **O que continua aberto**, e é o motivo de a pendência não fechar: nada disto
+> foi provado em campo, com duas máquinas e um operador expulsando alguém de
+> verdade. E a terceira parte do texto acima — o servidor responder à entrada em
+> vez de «confirmar por silêncio» — não foi tocada.
+>
+> A regra desta página vale aqui também: o texto original fica, e o que mudou é
+> dito por cima dele. Uma pendência que descreve o passado como presente é pior
+> que uma pendência aberta — alguém a lê e reabre um conserto que já existe, que
+> foi exatamente o que quase aconteceu.
 
 **Uma terceira metade chegou em 2026-09-14**, pela revisão da pendência #11:
 `EnterVoiceRoom` também não confere se quem pede ainda é a sessão vigente da

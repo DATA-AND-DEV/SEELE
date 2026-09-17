@@ -3162,9 +3162,14 @@ async fn run_session(
                         // de fato acontece, e com a sessão certa no anúncio.
                         //
                         // Que o cliente consiga reentrar em seguida é outro
-                        // assunto, e não deste guarda: `EnterVoiceRoom` não
-                        // confere `Permission::EnterVoiceRoom`. Está registrado na
-                        // auditoria como achado próprio.
+                        // assunto, e não deste guarda. Este comentário dizia que
+                        // `EnterVoiceRoom` não confere
+                        // `Permission::EnterVoiceRoom`; ele passou a conferir,
+                        // e o texto ficou para trás afirmando o contrário do
+                        // código logo acima — ver a linha da permissão em
+                        // `EnterVoiceRoom`. Um comentário que contradiz a fonte
+                        // é pior que comentário nenhum: alguém o lê e reabre um
+                        // conserto que já existe.
                         // Sem `if` pelo mesmo motivo do `LeaveVoiceRoom`: a
                         // mídia e a tela de quem foi expulso têm de morrer mesmo
                         // que esta conexão tenha perdido a conta da sala.
