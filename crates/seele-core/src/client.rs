@@ -1596,6 +1596,54 @@ fn classify_connection_error(
     }
 }
 
+/// Como este build se apresenta ao servidor, no `Hello`.
+///
+/// # Por que não `CARGO_PKG_VERSION`
+///
+/// Porque ele diz `0.0.0`, e dizia. A versão do workspace é `0.0.0` de
+/// propósito — o número de verdade é escolhido no empacotamento —, então o que
+/// atravessava o fio era `connection/0.0.0` de toda máquina do mundo, de toda
+/// release. É o mesmo raciocínio que a pendência 30 já tinha escrito para o
+/// `seeled --versao`, aplicado ao lugar onde ele valia igual e ninguém tinha
+/// olhado.
+///
+/// `SEELE_VERSAO` é passada pelo empacotamento. Um build feito à mão não a tem
+/// e **diz isso**, em vez de inventar um número: um cliente de
+/// desenvolvimento se anunciando como `0.10.5` é pior que um que se anuncia
+/// como local, porque o primeiro mente para quem está lendo o registro de um
+/// servidor tentando descobrir quem está com qual build.
+fn quem_sou_eu() -> &'static str {
+    match option_env!("SEELE_VERSAO") {
+        Some(versao) => versao,
+        None => "connection/local",
+    }
+}
+
+#[cfg(test)]
+mod como_este_build_se_apresenta {
+    #[test]
+    fn a_apresentacao_nunca_e_a_versao_do_cargo_toml() {
+        // O guarda irmão do que `seele-instalador` já tem, e pela mesma razão:
+        // `0.0.0` é a versão do workspace e nunca foi a do produto. Um `Hello`
+        // que a carrega enche o registro de todo servidor com um número que não
+        // distingue build nenhum de build nenhum.
+        assert!(
+            !super::quem_sou_eu().contains("0.0.0"),
+            "o Hello voltou a se apresentar com a versão do Cargo.toml"
+        );
+    }
+
+    #[test]
+    fn um_build_sem_carimbo_diz_que_e_local_em_vez_de_inventar() {
+        // Nesta árvore, rodando o teste sem `SEELE_VERSAO`, é o que tem de sair.
+        // Com a variável posta pelo empacotamento, sai o número — e aí este
+        // teste não roda, porque quem empacota não roda testes.
+        if option_env!("SEELE_VERSAO").is_none() {
+            assert_eq!(super::quem_sou_eu(), "connection/local");
+        }
+    }
+}
+
 async fn handshake(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
@@ -1608,7 +1656,7 @@ async fn handshake(
         send,
         &ClientMessage::Hello {
             version: seele_proto::PROTOCOL_VERSION,
-            client: concat!("connection/", env!("CARGO_PKG_VERSION")).into(),
+            client: quem_sou_eu().into(),
             nickname: nickname.to_owned(),
             public_key: signing_key.verifying_key().to_bytes().to_vec(),
             join_secret: join_secret.map(str::to_owned),

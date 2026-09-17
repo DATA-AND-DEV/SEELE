@@ -27,6 +27,30 @@ jobs:
       - uses: actions/checkout@v4
       - run: cargo fmt --all -- --check
 
+  # As três conferências de regra do repositório, rodadas contra a **árvore de
+  # verdade**.
+  #
+  # Elas existem desde sempre e nenhuma CI as rodava: os testes que vivem dentro
+  # de `xtask` são sobre fixtures — eles provam que a lógica sabe reprovar uma
+  # aresta inventada, e não que esta árvore passa. A verificação real só
+  # acontecia quando alguém lembrava de digitar o comando, que é o «existir não
+  # é funcionar» do CLAUDE.md com três anos de idade.
+  #
+  # Num job próprio e leve: as três leem arquivos e não compilam o produto.
+  regras:
+    name: regras do repositório
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # A fachada da API de MOD (ADR 0045): todo nome de `api/` ainda aponta
+      # para alguma coisa.
+      - run: cargo xtask check-api
+      # A regra de dependência de specs/01-arquitetura.md.
+      - run: cargo xtask check-deps
+      # E que a versão do produto alcance tudo o que a carrega. Ver
+      # `xtask/src/check_versao.rs` para o que já ficou para trás sem isto.
+      - run: cargo xtask check-versao
+
   clippy:
     name: clippy (${{ matrix.name }})
     strategy:

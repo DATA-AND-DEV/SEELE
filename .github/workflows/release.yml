@@ -400,6 +400,11 @@ jobs:
         if: matrix.nome == 'macos'
         working-directory: apps/seele-app
         env:
+          # A mesma versão que vai para o `seeled`, e pelo mesmo motivo: o
+          # `Hello` do cliente se apresenta com ela. Sem esta linha ele diria
+          # «connection/local» numa release — ver `quem_sou_eu` em
+          # `seele-core/src/client.rs`.
+          SEELE_VERSAO: ${{ needs.versao.outputs.numero }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -420,6 +425,7 @@ jobs:
         if: matrix.nome == 'windows'
         working-directory: apps/seele-app
         env:
+          SEELE_VERSAO: ${{ needs.versao.outputs.numero }}
           # As três que a ferramenta de assinatura troca por um token no Azure.
           # Ela as lê do ambiente sozinha; não aparecem no `signCommand`, e é
           # bom que não apareçam — argumento de linha de comando é visível para
@@ -435,6 +441,7 @@ jobs:
         if: matrix.nome == 'linux'
         working-directory: apps/seele-app
         env:
+          SEELE_VERSAO: ${{ needs.versao.outputs.numero }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cargo tauri build --bundles ${{ matrix.bundles }}

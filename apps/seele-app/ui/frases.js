@@ -18,7 +18,20 @@
  * português, porque é o mesmo produto.
  */
 const MOTIVOS = {
-  Incompatible: "VERSÃO INCOMPATÍVEL COM ESTE SERVIDOR",
+  // **A frase diz o que fazer, e passou a dizer na v0.11.0.**
+  //
+  // Ela era só «VERSÃO INCOMPATÍVEL COM ESTE SERVIDOR» — verdadeira, e sem
+  // saída. A v0.11.0 é a release em que ela vai aparecer para todo mundo: a
+  // publicada anterior fala protocolo 3, esta fala 6, e a janela alcança uma
+  // versão. Os dois lados se recusam.
+  //
+  // «Um dos dois» e não «o seu», porque o motivo é o mesmo nos dois sentidos:
+  // `negotiate` devolve `PeerTooOld` ou `PeerTooNew`, e as duas chegam aqui
+  // como `Incompatible`. Uma frase que mandasse *você* atualizar estaria errada
+  // metade das vezes, e erraria justamente com quem já está atualizado.
+  Incompatible:
+    "VERSÃO INCOMPATÍVEL COM ESTE SERVIDOR.\n" +
+    "Um dos dois lados está desatualizado — atualize o SEELE nas duas máquinas e tente de novo.",
   CredentialRejected: "CREDENCIAL RECUSADA",
   // **Esta é o servidor dizendo que desistiu de esperar por nós.** Ela chega
   // pelo fio, num `Disconnecting`, então o outro lado recebeu o que mandamos e

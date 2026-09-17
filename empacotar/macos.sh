@@ -120,7 +120,10 @@ fi
 # construído — o `.dmg` é uma imagem com ele dentro —, mas pedi-lo por nome é o
 # que faz sair o `.app.tar.gz` que o atualizador baixa.
 echo "→ empacotando o .dmg"
-(cd apps/seele-app && cargo tauri build --config tauri.release.conf.json --bundles app,dmg)
+# A mesma versão que foi para o seeled, e pelo mesmo motivo: o `Hello` do
+# cliente se apresenta com ela. Sem isto o app empacotado aqui diria
+# "connection/local" — ver `quem_sou_eu` em seele-core/src/client.rs.
+(cd apps/seele-app && SEELE_VERSAO="$VERSAO" cargo tauri build --config tauri.release.conf.json --bundles app,dmg)
 
 DESTINO=entrega
 mkdir -p "$DESTINO"

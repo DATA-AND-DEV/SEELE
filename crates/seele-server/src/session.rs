@@ -957,7 +957,21 @@ async fn handshake(
         }
     }
 
-    let _ = client;
+    // **O que o cliente disse que é, escrito no registro.** Ele atravessava o
+    // fio e morria aqui num `let _ = client`: a primeira pergunta de qualquer
+    // suporte — «qual versão está rodando?» — chegava ao servidor e era jogada
+    // fora. É o defeito que este repositório chama de «o produto sabe e não
+    // conta», na variante em que ele é **avisado** e não escuta.
+    //
+    // `info!` e não `debug!`, pela mesma razão que o som da tela: a pergunta é
+    // feita depois do fato, por alguém lendo o arquivo.
+    tracing::info!(
+        pessoa = %account.id,
+        sessao = %session_id,
+        protocolo = version,
+        cliente = %client,
+        "entrou"
+    );
     Ok(Session {
         person: account.id,
         id: session_id,

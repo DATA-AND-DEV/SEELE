@@ -257,10 +257,15 @@ try {
     $env:SEELE_VERSAO = $Versao
     cargo build --release --bin seeled
     if ($LASTEXITCODE -ne 0) { throw "a compilação da CLI falhou" }
-    # Limpa a variável para o `cargo build` do app, logo abaixo, não a herdar.
-    # Ele não a lê hoje, e uma variável de ambiente que sobra é a que aparece
-    # num build futuro sem que ninguém a tenha posto ali.
-    Remove-Item Env:\SEELE_VERSAO -ErrorAction SilentlyContinue
+    # **A variável FICA para o build do app**, e isto mudou em 2026-09-17.
+    #
+    # Aqui havia um `Remove-Item` com o argumento «ele não a lê hoje». Ele lia
+    # errado e agora lê: o `Hello` do cliente se apresenta com esta versão — ver
+    # `quem_sou_eu` em `crates/seele-core/src/client.rs`. Antes, o que
+    # atravessava o fio era `connection/0.0.0`, de toda máquina e de toda
+    # release, e o servidor jogava a string fora sem ler. Limpar a variável aqui
+    # devolveria metade daquele defeito: o app empacotado se anunciaria como
+    # `connection/local` num pacote de release.
 
     # O Tauri procura acompanhantes pelo nome com o alvo no fim.
     $Binarios = "apps\seele-app\binaries"
