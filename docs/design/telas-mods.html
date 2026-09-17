@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEELE — estudo de telas para MODs</title>
+<link rel="stylesheet" href="../../apps/seele-app/ui/fontes.css">
+<style>
+:root {
+  --negro: #050403;
+  --painel: #0a0806;
+  --linha: #241f19;
+  --linha-forte: #3a322a;
+  --osso: #eae3cf;
+  --apagado: #908574;
+  --laranja: #f2521f;
+  --laranja-fraco: #331704;
+  --vermelho: #ff1a1a;
+  --vermelho-fraco: #2c0508;
+  --fosforo: #6bffb6;
+  --fosforo-fraco: #06220f;
+  --azul: #2f8fe0;
+  --azul-fraco: #04182b;
+  --display: "Saira Condensed", "Arial Narrow", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; width: 100%; min-height: 100%; background: var(--negro); color: var(--osso); }
+body { font: 13px/1.45 var(--mono); overflow: hidden; }
+button { font: inherit; }
+.app { width: 100vw; height: 100vh; min-width: 1040px; min-height: 680px; background: var(--negro); position: relative; overflow: hidden; }
+.titlebar { height: 30px; border-bottom: 1px solid var(--linha); display: grid; grid-template-columns: 1fr auto auto; align-items: center; color: var(--apagado); font-size: 9px; letter-spacing: .18em; }
+.traffic { padding-left: 14px; color: var(--laranja); letter-spacing: .3em; }
+.clock { padding: 0 14px; border-left: 1px solid var(--linha); height: 100%; display: grid; place-items: center; }
+.brand { color: var(--laranja); font: 700 11px var(--display); letter-spacing: .08em; padding: 0 14px; border-left: 1px solid var(--linha); height: 100%; display: grid; place-items: center; }
+.session { height: calc(100vh - 30px); display: grid; grid-template-columns: 260px 1fr 300px; grid-template-rows: 1fr 34px; }
+.rail, .chat, .people { min-width: 0; border-right: 1px solid var(--linha); background: var(--painel); }
+.rail { padding: 16px; }
+.chat { background: var(--negro); padding: 18px 24px; }
+.people { border-right: 0; }
+.panel-title { margin: 0 0 16px; color: var(--apagado); font-size: 9px; letter-spacing: .22em; font-weight: 400; }
+.room { border-top: 1px solid var(--linha); padding: 14px 0; }
+.room strong { font-weight: 400; letter-spacing: .06em; }
+.room small { display: block; color: var(--apagado); margin-top: 8px; }
+.channel { border-left: 2px solid var(--laranja); padding: 8px 12px; color: var(--osso); }
+.chat-head { display: flex; justify-content: space-between; border-bottom: 1px solid var(--linha); padding-bottom: 16px; color: var(--apagado); }
+.message { margin-top: 34px; padding-left: 14px; border-left: 2px solid var(--linha); color: #8a8275; }
+.message b { color: var(--azul); font-weight: 400; }
+.people-head { background: var(--laranja); color: var(--negro); font: 700 17px var(--display); letter-spacing: .12em; padding: 10px 16px; }
+.person { padding: 22px 16px; border-bottom: 1px solid var(--linha); }
+.person strong { font-weight: 400; }
+.signal { color: var(--fosforo); font-size: 24px; float: right; }
+.meter { height: 10px; width: 140px; margin-top: 12px; background: repeating-linear-gradient(90deg,var(--fosforo) 0 6px,transparent 6px 8px); opacity: .55; }
+.telemetry { grid-column: 1 / -1; border-top: 1px solid var(--linha); display: flex; align-items: center; gap: 0; background: var(--negro); color: var(--apagado); font-size: 9px; letter-spacing: .06em; }
+.telemetry span { height: 100%; display: grid; place-items: center; padding: 0 18px; border-right: 1px solid var(--linha); }
+.telemetry b { color: var(--osso); font-weight: 400; margin-left: 7px; }
+.dim { position: absolute; inset: 30px 0 0; background: rgba(5,4,3,.78); }
+.scan { pointer-events: none; position: absolute; inset: 0; background: repeating-linear-gradient(180deg,transparent 0 3px,rgba(234,227,207,.018) 3px 4px); mix-blend-mode: screen; }
+.modal { position: absolute; left: 50%; top: calc(50% + 15px); transform: translate(-50%,-50%); width: min(820px, calc(100vw - 96px)); max-height: calc(100vh - 96px); border: 1px solid var(--laranja); background: var(--negro); display: flex; flex-direction: column; box-shadow: 12px 12px 0 rgba(0,0,0,.35); }
+.modal.wide { width: min(940px, calc(100vw - 96px)); }
+.modal-head { min-height: 48px; background: var(--laranja); color: var(--negro); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+.modal-head h1 { margin: 0; font: 900 19px var(--display); letter-spacing: .08em; }
+.counter { border: 1px solid var(--negro); padding: 4px 8px; font-size: 10px; letter-spacing: .1em; }
+.modal-body { padding: 24px; overflow: auto; }
+.lead { margin: 0 0 18px; max-width: 700px; }
+.lead strong { color: var(--laranja); font-weight: 500; }
+.mods { border-top: 1px solid var(--linha-forte); }
+.mod { display: grid; grid-template-columns: 32px minmax(220px,1fr) 1.5fr auto; gap: 16px; align-items: start; padding: 16px 0; border-bottom: 1px solid var(--linha); }
+.index { color: var(--laranja); font: 900 18px var(--display); }
+.mod-name { font: 700 18px var(--display); letter-spacing: .04em; }
+.mod-id { color: var(--apagado); font-size: 10px; margin-top: 3px; }
+.seal { display: inline-flex; border: 1px solid currentColor; padding: 3px 7px; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; margin: 0 0 7px; }
+.seal.official { color: var(--azul); background: var(--azul-fraco); }
+.seal.verified { color: var(--fosforo); background: var(--fosforo-fraco); }
+.seal.notes { color: var(--laranja); background: var(--laranja-fraco); }
+.reach { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag { border-left: 2px solid var(--linha-forte); padding: 2px 7px; color: var(--apagado); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.detail { border: 1px solid var(--linha-forte); color: var(--osso); background: none; padding: 6px 10px; cursor: pointer; }
+.detail:hover, .detail:focus { border-color: var(--laranja); }
+.repo { color: var(--apagado); font-size: 10px; margin: 6px 0 0; }
+.repo b { color: var(--osso); font-weight: 400; }
+.notice { border-left: 3px solid var(--laranja); background: var(--laranja-fraco); padding: 12px 14px; margin: 18px 0 0; color: var(--osso); }
+.notice.danger { border-color: var(--vermelho); background: var(--vermelho-fraco); }
+.modal-actions { border-top: 1px solid var(--linha); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.hint { color: var(--apagado); font-size: 10px; max-width: 420px; }
+.actions { display: flex; gap: 8px; }
+.button { border: 1px solid var(--linha-forte); background: transparent; color: var(--osso); padding: 11px 16px; letter-spacing: .12em; font-size: 10px; cursor: pointer; text-transform: uppercase; }
+.button.primary { color: var(--negro); background: var(--laranja); border-color: var(--laranja); font-weight: 600; }
+.button.danger { color: var(--vermelho); border-color: var(--vermelho); }
+.back { color: var(--negro); background: none; border: 1px solid var(--negro); padding: 5px 8px; cursor: pointer; font-size: 10px; }
+.detail-layout { display: grid; grid-template-columns: 220px 1fr; min-height: 430px; }
+.detail-side { padding: 24px; border-right: 1px solid var(--linha); background: var(--painel); }
+.detail-side .seal { margin-top: 16px; }
+.detail-main { padding: 24px; }
+.eyebrow { color: var(--apagado); font-size: 9px; letter-spacing: .2em; text-transform: uppercase; }
+.detail-main h2 { font: 700 28px var(--display); margin: 4px 0 18px; letter-spacing: .04em; }
+.facts { display: grid; grid-template-columns: 150px 1fr; border-top: 1px solid var(--linha); margin-top: 22px; }
+.facts dt, .facts dd { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--linha); }
+.facts dt { color: var(--apagado); font-size: 9px; letter-spacing: .14em; }
+.note-card { border: 1px solid var(--laranja); background: var(--laranja-fraco); padding: 16px; margin-top: 18px; }
+.note-card h3 { margin: 0 0 8px; font: 700 16px var(--display); letter-spacing: .06em; }
+.settings { position: absolute; inset: 30px 0 0; background: var(--negro); display: grid; grid-template-columns: 250px 1fr; }
+.settings-nav { border-right: 1px solid var(--linha); background: var(--painel); padding: 24px 0; }
+.settings-nav h1 { font: 900 24px var(--display); margin: 0 24px 24px; letter-spacing: .08em; }
+.nav-item { padding: 10px 24px; color: var(--apagado); border-left: 3px solid transparent; font-size: 10px; letter-spacing: .1em; }
+.nav-item.active { color: var(--osso); border-color: var(--laranja); background: var(--laranja-fraco); }
+.settings-main { padding: 32px 48px; overflow: auto; max-width: 980px; }
+.settings-main h2 { font: 900 30px var(--display); letter-spacing: .08em; margin: 0; }
+.sub { color: var(--apagado); margin: 5px 0 26px; }
+.summary { display: grid; grid-template-columns: repeat(3,1fr); border: 1px solid var(--linha); margin-bottom: 24px; }
+.summary div { padding: 14px 16px; border-right: 1px solid var(--linha); }
+.summary div:last-child { border-right: 0; }
+.summary span { color: var(--apagado); font-size: 9px; letter-spacing: .14em; display: block; }
+.summary b { font-size: 18px; font-weight: 400; color: var(--fosforo); }
+.manage-row { display: grid; grid-template-columns: 1fr 150px 180px; gap: 18px; padding: 17px 0; border-top: 1px solid var(--linha); align-items: center; }
+.manage-row:last-child { border-bottom: 1px solid var(--linha); }
+.state-on { color: var(--fosforo); }
+.state-off { color: var(--apagado); }
+.row-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.mini { background: none; border: 1px solid var(--linha-forte); color: var(--osso); padding: 6px 8px; font-size: 9px; }
+.mini.remove { color: var(--vermelho); border-color: var(--vermelho); }
+.failure { width: min(720px, calc(100vw - 96px)); }
+.failure .modal-head { background: var(--vermelho); }
+.failure-code { display: grid; grid-template-columns: 90px 1fr; gap: 0; border: 1px solid var(--linha); margin: 20px 0; }
+.failure-code div { padding: 10px; border-bottom: 1px solid var(--linha); }
+.failure-code div:nth-last-child(-n+2) { border-bottom: 0; }
+.failure-code .label { color: var(--apagado); font-size: 9px; letter-spacing: .14em; border-right: 1px solid var(--linha); }
+.safe { color: var(--fosforo); border-left: 3px solid var(--fosforo); background: var(--fosforo-fraco); padding: 12px 14px; }
+.prototype-nav { position: fixed; z-index: 50; left: 12px; bottom: 46px; display: flex; gap: 4px; padding: 4px; background: rgba(5,4,3,.92); border: 1px solid var(--linha-forte); }
+.prototype-nav button { color: var(--apagado); background: none; border: 0; padding: 6px 8px; font-size: 9px; cursor: pointer; }
+.prototype-nav button.active { color: var(--negro); background: var(--laranja); }
+body.capture .prototype-nav { display: none; }
+@media (max-width: 1100px) { .session { grid-template-columns: 220px 1fr 250px; } .modal { width: calc(100vw - 64px); } }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="titlebar"><span class="traffic">● ● ●</span><span class="clock">21:47:13</span><span class="brand">SEELE</span></header>
+
+  <section class="session" aria-hidden="true">
+    <aside class="rail">
+      <h2 class="panel-title">SALAS DE VOZ</h2>
+      <div class="room"><strong>CENTRAL</strong><small>2/15 · você está aqui</small></div>
+      <div class="room"><strong>OFICINA</strong><small>ninguém aqui</small></div>
+      <h2 class="panel-title" style="margin-top:28px">CANAIS</h2>
+      <div class="channel"># geral</div>
+    </aside>
+    <section class="chat">
+      <div class="chat-head"><span># geral</span><span>⌕</span></div>
+      <div class="message"><b>maria</b> 21:41<br>o caminho direto estabilizou em 34 ms</div>
+      <div class="message"><b>você</b> 21:42<br>recebido. áudio nominal.</div>
+    </section>
+    <aside class="people">
+      <div class="people-head">PESSOAS</div>
+      <div class="person"><span class="signal">92</span><strong>você</strong><div class="meter"></div></div>
+      <div class="person"><span class="signal">88</span><strong>maria</strong><div class="meter" style="width:126px"></div></div>
+    </aside>
+    <footer class="telemetry"><span>ATRASO <b>34ms</b></span><span>JITTER <b>2ms</b></span><span>DISTÚRBIO <b>0.2%</b></span><span>CAMINHO <b>FURO DE NAT</b></span><span>SINAL <b>90</b></span></footer>
+  </section>
+
+  <section id="screen-consent" class="screen">
+    <div class="dim"></div>
+    <article class="modal wide">
+      <header class="modal-head"><h1>ESTE SERVIDOR USA MODS</h1><span class="counter">CASA · 3 MODS</span></header>
+      <div class="modal-body">
+        <p class="lead"><strong>MODs são parte deste servidor.</strong> Eles executam código nesta máquina e podem mudar a interface. Leia o alcance de cada um antes de entrar.</p>
+        <div class="mods">
+          <div class="mod">
+            <span class="index">01</span><div><div class="mod-name">Placar</div><div class="mod-id">seele/placar · 1.4.0</div><p class="repo">por <b>SEELE</b> · código público</p></div>
+            <div><span class="seal official">OFICIAL · ASSINADO</span><div class="reach"><span class="tag">janela inteira</span><span class="tag">mensagens do servidor</span></div></div><button class="detail" data-open-detail>DETALHES</button>
+          </div>
+          <div class="mod">
+            <span class="index">02</span><div><div class="mod-name">Salas de RPG</div><div class="mod-id">lume/salas-rpg · 2.1.3</div><p class="repo">por <b>Lume</b> · código público</p></div>
+            <div><span class="seal verified">VERIFICADO · ASSINADO</span><div class="reach"><span class="tag">janela inteira</span><span class="tag">lê o que você escreve</span><span class="tag">disco do MOD</span></div></div><button class="detail" data-open-detail>DETALHES</button>
+          </div>
+          <div class="mod">
+            <span class="index">03</span><div><div class="mod-name">Ponte exterior</div><div class="mod-id">ponte/retransmissor · 0.8.2</div><p class="repo">por <b>Ponte Labs</b> · código público</p></div>
+            <div><span class="seal notes">PUBLICADO COM NOTAS</span><div class="reach"><span class="tag">rede de saída</span><span class="tag">roda no servidor</span><span class="tag">registro</span></div></div><button class="detail" data-open-detail>LER NOTAS</button>
+          </div>
+        </div>
+        <div class="notice">O servidor mudou sua lista de MODs desde o último aceite. A versão anterior não autoriza esta.</div>
+      </div>
+      <footer class="modal-actions"><span class="hint">Aceitar vale somente para esta combinação de servidor, MODs e versões. Qualquer mudança pergunta de novo.</span><div class="actions"><button class="button">RECUSAR E VOLTAR</button><button class="button primary">ACEITAR 3 MODS E ENTRAR</button></div></footer>
+    </article>
+  </section>
+
+  <section id="screen-detail" class="screen" hidden>
+    <div class="dim"></div>
+    <article class="modal wide">
+      <header class="modal-head"><button class="back" data-screen="consent">← VOLTAR À LISTA</button><span class="counter">03 / 03</span></header>
+      <div class="detail-layout">
+        <aside class="detail-side"><img src="../../apps/seele-app/ui/marca-simbolo.svg" width="56" height="56" alt=""><div class="seal notes">PUBLICADO COM NOTAS</div><p class="repo">avaliação assinada<br><b>commit 84f6a2b</b></p><p class="repo">API DO MOD<br><b>1</b></p><p class="repo">VERSÃO<br><b>0.8.2</b></p></aside>
+        <section class="detail-main"><div class="eyebrow">ponte/retransmissor</div><h2>Ponte exterior</h2><p>Retransmite áudio para um serviço configurado por quem hospeda. A metade do cliente só desenha o estado da ponte.</p>
+          <dl class="facts"><dt>REPOSITÓRIO</dt><dd>github.com/ponte/retransmissor</dd><dt>AUTOR</dt><dd>Ponte Labs</dd><dt>ALCANÇA</dt><dd>rede de saída · relógio · registro</dd><dt>RODA ONDE</dt><dd>na máquina de quem hospeda</dd></dl>
+          <div class="note-card"><h3>NOTA DA AVALIAÇÃO</h3><p>Este MOD abre conexão com <b>relay.ponte.example</b> e envia os quadros de áudio da sala. Isso é necessário para o que ele promete e também permite que um terceiro receba a conversa. Aceite somente se você confia em quem hospeda e nesse serviço.</p></div>
+        </section>
+      </div>
+      <footer class="modal-actions"><span class="hint">A nota faz parte da assinatura desta versão. Se ela mudar, a assinatura deixa de conferir.</span><div class="actions"><button class="button" data-screen="consent">VOLTAR</button></div></footer>
+    </article>
+  </section>
+
+  <section id="screen-manage" class="screen" hidden>
+    <div class="settings">
+      <nav class="settings-nav"><h1>CONFIGURAÇÕES</h1><div class="nav-item">A PORTA</div><div class="nav-item">MICROFONE E SOM</div><div class="nav-item">ATALHOS</div><div class="nav-item">APARÊNCIA</div><div class="nav-item">IDENTIDADE</div><div class="nav-item active">MODS</div><div class="nav-item">ATUALIZAÇÃO</div><div class="nav-item">SERVIDOR</div></nav>
+      <section class="settings-main"><div class="eyebrow">SERVIDOR HOSPEDADO NESTA MÁQUINA</div><h2>MODS</h2><p class="sub">Habilite o que passa a fazer parte deste servidor. Quem entra precisa aceitar a lista inteira.</p>
+        <div class="notice danger"><b>O PRIMEIRO MOD MUDA O ALCANCE DESTE SERVIDOR.</b><br>Com qualquer MOD habilitado, toda entrada precisa alcançar o indexador para baixar e conferir os bytes. Sem internet, ninguém entra — inclusive quem hospeda.</div>
+        <div class="summary"><div><span>ENCONTRADOS</span><b>4</b></div><div><span>HABILITADOS</span><b>3</b></div><div><span>COM FALHA</span><b style="color:var(--vermelho)">1</b></div></div>
+        <div class="manage-row"><div><div class="mod-name">Placar</div><div class="mod-id">seele/placar · 1.4.0 · oficial</div></div><div class="state-on">■ HABILITADO</div><div class="row-actions"><button class="mini">DESABILITAR</button><button class="mini remove">REMOVER</button></div></div>
+        <div class="manage-row"><div><div class="mod-name">Salas de RPG</div><div class="mod-id">lume/salas-rpg · 2.1.3 · verificado</div></div><div class="state-on">■ HABILITADO</div><div class="row-actions"><button class="mini">DESABILITAR</button><button class="mini remove">REMOVER</button></div></div>
+        <div class="manage-row"><div><div class="mod-name">Ponte exterior</div><div class="mod-id">ponte/retransmissor · 0.8.2 · publicado com notas</div></div><div style="color:var(--vermelho)">× FALHA ISOLADA</div><div class="row-actions"><button class="mini">DETALHES</button><button class="mini remove">REMOVER</button></div></div>
+        <div class="manage-row"><div><div class="mod-name">Tema fósforo</div><div class="mod-id">lume/fosforo · 1.0.1 · verificado</div></div><div class="state-off">□ DESABILITADO</div><div class="row-actions"><button class="mini">HABILITAR</button><button class="mini remove">REMOVER</button></div></div>
+      </section>
+    </div>
+  </section>
+
+  <section id="screen-failure" class="screen" hidden>
+    <div class="dim"></div>
+    <article class="modal failure">
+      <header class="modal-head"><h1>MOD DESABILITADO</h1><span class="counter">FALHA ISOLADA</span></header>
+      <div class="modal-body"><p class="lead"><strong>Ponte exterior parou de responder.</strong> O SEELE desligou este MOD para proteger o restante da sessão.</p>
+        <div class="failure-code"><div class="label">MOD</div><div>ponte/retransmissor · 0.8.2</div><div class="label">QUANDO</div><div>21:47:08</div><div class="label">ONDE</div><div>servidor/main.js · linha 184</div><div class="label">MOTIVO</div><div>tempo de execução excedeu 2 s</div></div>
+        <div class="safe">■ SESSÃO CONTINUA · voz, vídeo e texto do produto base não foram interrompidos.</div>
+      </div>
+      <footer class="modal-actions"><span class="hint">Reabilitar repete o mesmo código. Leia o registro antes de tentar de novo.</span><div class="actions"><button class="button">ABRIR REGISTRO</button><button class="button primary">CONTINUAR SEM O MOD</button></div></footer>
+    </article>
+  </section>
+
+  <div class="scan"></div>
+  <nav class="prototype-nav" aria-label="Estados do protótipo"><button data-screen="consent">ACEITE</button><button data-screen="detail">DETALHES</button><button data-screen="manage">ADMINISTRAÇÃO</button><button data-screen="failure">FALHA</button></nav>
+</main>
+<script>
+const screens = [...document.querySelectorAll('.screen')];
+const controls = [...document.querySelectorAll('[data-screen]')];
+function show(name) {
+  screens.forEach(screen => { screen.hidden = screen.id !== `screen-${name}`; });
+  controls.forEach(control => control.classList.toggle('active', control.dataset.screen === name));
+  const url = new URL(location.href); url.searchParams.set('screen', name); history.replaceState(null, '', url);
+}
+document.addEventListener('click', event => {
+  const control = event.target.closest('[data-screen]');
+  if (control) show(control.dataset.screen);
+  if (event.target.closest('[data-open-detail]')) show('detail');
+});
+const params = new URLSearchParams(location.search);
+if (params.has('capture')) document.body.classList.add('capture');
+show(params.get('screen') || 'consent');
+</script>
+</body>
+</html>
