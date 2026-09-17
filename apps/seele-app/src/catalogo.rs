@@ -553,7 +553,10 @@ mod o_catalogo {
         // `seele-proto` (ADR 0039), e copiar `MOD_API_VERSION` para dentro dela
         // seria a terceira cópia do número cuja divergência custou a primeira
         // publicação.
-        assert!(versao.api > 0, "uma versão sem API declarada não é instalável");
+        assert!(
+            versao.api > 0,
+            "uma versão sem API declarada não é instalável"
+        );
         assert!(
             catalogo.gerado_em > 0,
             "o catálogo não diz quando foi gerado"

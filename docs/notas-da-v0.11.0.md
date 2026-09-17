@@ -77,6 +77,49 @@ pasta, liga e desliga; e qualquer pessoa vê a quem já disse sim e pode desfaze
 Até esta versão nada disso tinha tela: um servidor com MOD habilitado
 simplesmente **não tinha como ser entrado** pelo aplicativo.
 
+### O indexador de MODs está no ar
+
+`mods.seele.app.br` abriu nesta rodada, e com ele o catálogo deixa de ser
+promessa: em **CONFIGURAÇÕES · MODS**, um botão busca o catálogo, lista o que
+há com o que cada MOD alcança, e instala sem sair do aplicativo — além de
+apontar para uma pasta, que continua valendo. Não há filtro de texto, e nada é
+consultado ao abrir a seção: a busca sai de um botão, para que abrir
+CONFIGURAÇÕES não conte a ninguém que você a abriu.
+
+O catálogo **inteiro** é assinado uma vez, na máquina de quem tem a chave, e o
+aplicativo o confere contra a chave pública que veio compilada dentro dele. Não
+há assinatura por autor: o que prova os bytes de cada versão é o hash do
+conteúdo, e o que fixa o que foi avaliado é o commit. Um push do autor depois da
+aprovação não muda o que ninguém baixa.
+
+O primeiro MOD avaliado é o **MESA** 1.2.0 — uma mesa de RPG por canal, com
+fichas, tabuleiro, compêndio e iniciativa, enquanto a voz continua na sala do
+SEELE. Ele saiu como `verificado`, com as duas notas que a tela mostra antes do
+botão de instalar: metade dele roda na máquina de quem hospeda, e ele grava
+coisas em disco.
+
+**E a avaliação é um filtro, não uma prova.** Ela pega o óbvio — código que
+baixa e executa texto de fora, exfiltração escancarada, travessia de caminho — e
+não pega o caminho sutil na décima função de um arquivo limpo. «Verificado»
+quer dizer que passou no filtro.
+
+### E isto custa uma dependência que o SEELE não tinha
+
+Um produto que se vende como auto-hospedado passou a ter uma peça numa CDN: o
+catálogo é servido pelo Cloudflare Pages, e quem busca um MOD aparece nos
+registros que a Cloudflare guarda para si. Isso é dito aqui em voz alta em vez
+de ficar para alguém descobrir.
+
+O que **não** foi ligado, e a ausência é a decisão: nada de análise de tráfego,
+nada de Logpush, nada de etiqueta de terceiro. O argumento do ADR 0045 para um
+catálogo estático é que «com API o indexador aprende cada termo que alguém
+digitou; com catálogo, aprende que alguém buscou o catálogo» — ligar análise
+desfaria isso por fora, sem tocar numa linha de código.
+
+E nada do servidor depende dela: um SEELE hospedado por você funciona inteiro
+sem jamais falar com `mods.seele.app.br`. O que se perde sem a CDN é procurar
+MODs novos, não usar os que já estão instalados.
+
 ### Trocar de fone ou de microfone vale na hora
 
 Era preciso reiniciar o aplicativo. O produto ignorava o aviso que o sistema já
@@ -210,12 +253,13 @@ tem relato de campo em aberto.
 - **O caminho de Windows do som da tela não é compilado no Mac de quem fechou
   esta versão** (pendência 46). A parte que decide foi tirada de dentro do `cfg`
   e é testada; o que sobra sem compilação é uma chamada e um `match`.
-- **O indexador de MODs não está no ar**, então não há catálogo de onde baixar
-  um MOD: instalar é apontar para uma pasta que já está na máquina. E não há
-  verificação de assinatura de MOD — por isso a tela de aceite mostra hash e
-  repositório, e **não** mostra selo de «oficial» ou «verificado»: um selo que o
-  código não sustenta é justamente aquilo em que alguém se apoiaria para dizer
-  sim sem ler o resto.
+- **A tela de aceite não mostra selo de «oficial» ou «verificado»**, e mostra
+  hash e repositório. O indexador subiu no meio desta rodada e o catálogo é
+  conferido por assinatura (abaixo), mas o aceite fala dos MODs que **um
+  servidor declara**, e um servidor pode declarar um MOD que não está no
+  catálogo nenhum. Cruzar as duas listas é trabalho que o código ainda não faz,
+  e um selo que o código não sustenta é justamente aquilo em que alguém se
+  apoiaria para dizer sim sem ler o resto.
 - **Versões lado a lado não valem no Windows**, pelo motivo acima.
 - **Descer de versão não leva as conversas junto.** Cada versão tem o próprio
   diretório de dados, de propósito, e o produto diz isso na tela.

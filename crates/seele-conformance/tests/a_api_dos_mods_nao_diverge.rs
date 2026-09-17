@@ -25,6 +25,8 @@
 //! indexador, e não sobre a API de um MOD publicado. Um MOD que pede menos do
 //! que este build oferece é o caso normal de todo MOD antigo.
 
+#![allow(clippy::expect_used)]
+
 use seele_proto::mods::MOD_API_VERSION;
 
 /// O catálogo que o indexador assinou, como ele chegou.
@@ -65,7 +67,10 @@ fn nenhum_mod_publicado_pede_mais_api_do_que_este_build_oferece() {
         .expect("o catálogo tem uma lista de MODs, ainda que vazia");
 
     for m in mods {
-        let id = m.get("id").and_then(serde_json::Value::as_str).unwrap_or("?");
+        let id = m
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("?");
         let versoes = m
             .get("versoes")
             .and_then(serde_json::Value::as_array)
