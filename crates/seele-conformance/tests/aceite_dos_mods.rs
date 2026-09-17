@@ -974,50 +974,33 @@ async fn um_par_da_versao_anterior_continua_entrando() -> Result<()> {
     Ok(())
 }
 
-/// **E o que a subida cobra de quem está em campo, dito por inteiro.**
-///
-/// O par da versão anterior entra num servidor sem MOD — e num servidor **com
-/// MOD habilitado** ele não entra, porque está dentro da janela mas abaixo de
-/// `VERSAO_DO_ANUNCIO`: não tem como ler o anúncio nem responder a ele. É uma
-/// recusa, e é a recusa certa: a alternativa seria mandar-lhe um quadro que ele
-/// não sabe decodificar, e o postcard não ignora uma variante desconhecida —
-/// ela desloca a leitura do fluxo de controle dele para sempre, que é a «tela
-/// preta, sem mensagem nenhuma» do histórico deste repositório.
-///
-/// Escrito para que o custo fique **provado e não suposto**: habilitar um MOD
-/// hoje barra quem entra pela janela, e quem hospeda precisa saber disso pelo
-/// produto, não pela pessoa que não conseguiu entrar.
+/// Na v6, a janela N−1 já alcança o anúncio v5. O servidor deve anunciar
+/// antes de Session, sem dispensar o aceite do par anterior. A recusa por
+/// estar abaixo do limiar continua coberta na unidade do servidor com v4.
 #[tokio::test(flavor = "multi_thread")]
-async fn um_par_dentro_da_janela_e_recusado_por_um_servidor_que_exige_mod() -> Result<()> {
+async fn um_par_dentro_da_janela_recebe_o_anuncio_antes_de_entrar() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
 
     let anterior = seele_proto::version::oldest_supported_version();
     assert!(
-        anterior < seele_proto::mods::VERSAO_DO_ANUNCIO,
-        "a versão anterior alcança o anúncio: este teste deixou de medir a \
-         recusa por limiar"
+        anterior >= seele_proto::mods::VERSAO_DO_ANUNCIO,
+        "a janela atual deve alcançar o anúncio original"
     );
-    let erro = abrir_falando(endereco, 54, anterior).await.err().expect(
-        "um par que não alcança a versão do anúncio recebeu `Session` de um \
-             servidor que exige MOD: ou ele leu uma lista que não sabe ler, ou a \
-             exigência não vale para ele",
-    );
+    let erro = abrir_falando(endereco, 54, anterior)
+        .await
+        .err()
+        .expect("o servidor entregou Session sem primeiro exigir o aceite dos MODs");
 
-    // Não basta ter falhado: **qual** recusa veio é o que separa o limiar do
-    // anúncio de um aperto de mão quebrado por outra coisa. Sem esta
-    // igualdade, trocar o motivo — ou derrubar a conexão por um defeito
-    // qualquer — passaria verde.
+    // O helper esperava Session; o que veio precisa ser o anúncio, não uma
+    // desconexão ou falha de transporte mascarada como sucesso do teste.
     let recusa = erro
         .downcast_ref::<NaoEntrou>()
         .unwrap_or_else(|| panic!("a conexão caiu sem o servidor dizer por quê: {erro:#}"));
-    assert_eq!(
-        recusa.0,
-        ServerMessage::Disconnecting {
-            reason: DisconnectReason::Incompatible
-        },
-        "o servidor barrou o par, mas não pelo limiar do anúncio"
+    assert!(
+        matches!(&recusa.0, ServerMessage::ModsExigidos { mods, .. } if mods.len() == 1 && mods[0].id == "seele/bot"),
+        "a v5 recebe o anúncio e precisa aceitá-lo antes de Session"
     );
 
     daemon.shutdown();

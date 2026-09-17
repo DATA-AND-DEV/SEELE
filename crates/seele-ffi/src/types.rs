@@ -1169,6 +1169,17 @@ pub struct TransmissaoNaSala {
 /// reimplementing the fold that `seele_core::state` already does.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum Event {
+    /// A private part of a MOD response, forwarded without interpreting its JSON.
+    ModReply {
+        /// Request correlation.
+        request: u32,
+        /// Zero-based index.
+        part: u32,
+        /// Total number of parts.
+        total: u32,
+        /// JSON fragment.
+        payload: String,
+    },
     /// Somebody joined, left, or changed state.
     RosterChanged,
     /// A message arrived, changed, or went away.

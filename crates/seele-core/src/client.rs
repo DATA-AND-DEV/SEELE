@@ -806,6 +806,25 @@ impl Client {
     }
 
     // ---- attachments, ADR 0027 ----
+    /// Sends an authenticated MOD request. Fails when the control stream closes.
+    pub async fn mod_request(
+        &mut self,
+        request: u32,
+        id: String,
+        channel: ChannelId,
+        payload: String,
+    ) -> Result<()> {
+        frame::write(
+            &mut self.send,
+            &ClientMessage::ModRequest {
+                request,
+                id,
+                channel,
+                payload,
+            },
+        )
+        .await
+    }
 
     /// The file-moving half of this connection.
     ///

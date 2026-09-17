@@ -1233,6 +1233,8 @@ pub struct WriteRequest {
 
 /// Everything a connection needs from the server.
 pub struct Server {
+    /// Directory containing enabled MOD packages.
+    pub mods_dir: Option<std::path::PathBuf>,
     /// Persistent state. One connection, one mutex — SQLite has one writer.
     pub persistence: Arc<Mutex<Persistence>>,
     /// The event bus.

@@ -19,6 +19,19 @@
 
 use std::path::Path;
 
+/// Checks the immutable package against the hash announced by the server.
+pub(crate) fn hash_confere(config_dir: &Path, url_path: &str, expected: Option<&str>) -> bool {
+    let mut parts = url_path.trim_start_matches('/').split('/');
+    let (Some(author), Some(name), Some(expected)) = (parts.next(), parts.next(), expected) else {
+        return false;
+    };
+    if seele_ffi::mods::caminho_interno(&[author, name]).is_none() {
+        return false;
+    }
+    seele_ffi::mods::ler_um(&config_dir.to_string_lossy(), &format!("{author}/{name}"))
+        .is_ok_and(|m| m.hash == expected)
+}
+
 /// Serves one path under `mod://`, or nothing.
 ///
 /// `url_path` is the path component of the URL, e.g.

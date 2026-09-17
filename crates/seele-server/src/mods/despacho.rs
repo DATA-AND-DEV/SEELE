@@ -95,9 +95,12 @@ impl Despachante {
                     let mut falharam = Vec::new();
 
                     for (id, mut quintal) in pedido.quintais {
+                        let antes = quintal.clone();
                         match anfitriao.chamar(&id, &pedido.momento, &pedido.carga, &mut quintal) {
                             Ok(()) => {
-                                quintais.insert(id, quintal);
+                                if quintal != antes {
+                                    quintais.insert(id, quintal);
+                                }
                             }
                             Err(falha) => falharam.push((id, falha)),
                         }

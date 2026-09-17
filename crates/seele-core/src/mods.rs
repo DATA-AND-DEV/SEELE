@@ -134,6 +134,13 @@ fn collect(root: &Path, dir: &Path) -> Vec<(String, Vec<u8>)> {
     };
     for entry in entries.flatten() {
         let path = entry.path();
+        // Runtime data is not part of the immutable, consented package.
+        if dir == root && entry.file_name() == "dados" {
+            continue;
+        }
+        if entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
+            continue;
+        }
         if path.is_dir() {
             files.extend(collect(root, &path));
         } else if let (Ok(relative), Ok(bytes)) = (path.strip_prefix(root), std::fs::read(&path)) {

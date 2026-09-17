@@ -447,6 +447,7 @@ impl Daemon {
         let (events, _) = tokio::sync::broadcast::channel(1024);
         let writes = server::spawn_writer(Arc::clone(&persistence), events.clone());
         let server = Arc::new(server::Server {
+            mods_dir: config.mods_dir.clone(),
             persistence,
             events,
             writes,
