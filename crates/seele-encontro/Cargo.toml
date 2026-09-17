@@ -34,3 +34,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "seele-encontro"
 path = "src/main.rs"
+
+# `test = true` porque `sondar` tem teste próprio, provando que ele classifica
+# um ponto de encontro velho como velho e não como no ar — sem isto `cargo
+# test` nunca compilaria nem rodaria esse teste.
+[[example]]
+name = "sondar"
+path = "examples/sondar.rs"
+test = true
