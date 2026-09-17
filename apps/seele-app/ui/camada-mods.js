@@ -569,20 +569,43 @@ function linhaDoCatalogo(mod, instalados) {
   }
   caixa.append(texto);
 
-  const jaTem = instalados.some((i) => i.id === mod.id);
-  if (jaTem) {
+  // **A09 da auditoria: instalado não é a mesma coisa que igual.**
+  //
+  // A decisão saía só de `i.id === mod.id`, e versão e hash não entravam nela.
+  // Quem tinha uma versão diferente da que o servidor exige via JÁ INSTALADO e
+  // nenhum caminho: instalar de novo era recusado, e o conserto virava apagar
+  // pasta à mão.
+  const instalado = instalados.find((i) => i.id === mod.id);
+  const mesmoConteudo = instalado?.hash === ultima.hash;
+  if (instalado && mesmoConteudo) {
     caixa.append(elemento("span", "server-dispositivo-marca", "JÁ INSTALADO"));
   } else {
+    if (instalado) {
+      texto.append(
+        elemento(
+          "span",
+          "mods-recusado",
+          `você tem a versão ${instalado.version || "?"}; esta é a ${ultima.versao}`,
+        ),
+      );
+    }
     const botao = elemento("button", "botao-fantasma");
     botao.type = "button";
-    botao.textContent = "INSTALAR";
+    botao.textContent = instalado ? "ATUALIZAR" : "INSTALAR";
     botao.addEventListener("click", () => {
-      instalarDoCatalogo(mod.id, ultima.versao).catch((falha) => {
-        console.warn("instalar do catálogo:", falha);
-        const estado = $("catalogo-estado");
-        estado.classList.add("mods-recusado");
-        estado.textContent = fraseDeErro(falha);
-      });
+      // **Desabilitado enquanto baixa** — A11. Sem isto, dois cliques começam
+      // duas instalações sobre o mesmo destino.
+      botao.disabled = true;
+      instalarDoCatalogo(mod.id, ultima.versao)
+        .catch((falha) => {
+          console.warn("instalar do catálogo:", falha);
+          const estado = $("catalogo-estado");
+          estado.classList.add("mods-recusado");
+          estado.textContent = fraseDeErro(falha);
+        })
+        .finally(() => {
+          botao.disabled = false;
+        });
     });
     caixa.append(botao);
   }
@@ -607,22 +630,32 @@ async function buscarOCatalogo() {
     return;
   }
   botao.disabled = false;
+  await desenharCatalogoEmMaos();
+  const mods = catalogoEmMaos.mods ?? [];
+  estado.textContent =
+    mods.length === 0
+      ? "o catálogo está no ar e ainda não lista nenhum MOD."
+      : `${mods.length} no catálogo.`;
+}
 
+/**
+ * Desenha a lista que já está em mãos, sem ir à rede.
+ *
+ * Separado da busca por causa do A11: depois de instalar, o que mudou é o que
+ * está **nesta máquina**, e não o catálogo. Buscar de novo só para redesenhar
+ * dava à rede a chance de apagar, com um erro de consulta, a frase que dizia
+ * que a instalação tinha dado certo.
+ */
+async function desenharCatalogoEmMaos() {
   let instalados = [];
   try {
     instalados = await invoke("mods_instalados");
   } catch {
     instalados = [];
   }
-
-  const mods = catalogoEmMaos.mods ?? [];
-  estado.textContent =
-    mods.length === 0
-      ? "o catálogo está no ar e ainda não lista nenhum MOD."
-      : `${mods.length} no catálogo.`;
   repovoar(
     $("lista-catalogo"),
-    mods.map((mod) => linhaDoCatalogo(mod, instalados)),
+    (catalogoEmMaos?.mods ?? []).map((mod) => linhaDoCatalogo(mod, instalados)),
   );
 }
 
@@ -631,16 +664,32 @@ async function instalarDoCatalogo(id, versao) {
   const estado = $("catalogo-estado");
   estado.classList.remove("mods-recusado");
   estado.textContent = `baixando ${id} ${versao}…`;
+  let resultado;
   try {
     await invoke("instalar_mod_do_catalogo", { id, versao });
-    estado.textContent = `${id} ${versao} instalado, e desligado. Ligue quando quiser que ele valha.`;
+    resultado = `${id} ${versao} instalado, e desligado. Ligue quando quiser que ele valha.`;
   } catch (falha) {
     estado.classList.add("mods-recusado");
     estado.textContent = fraseDeErro(falha);
+    await desenharMods();
+    return;
   }
+  estado.textContent = resultado;
   await desenharMods();
-  // A lista do catálogo mostra JÁ INSTALADO, e ela acabou de mudar.
-  if (catalogoEmMaos) await buscarOCatalogo();
+
+  // **A11: o resultado da instalação não é apagado pelo estado da consulta.**
+  //
+  // Aqui havia um `buscarOCatalogo()`, que escreve «buscando…» e depois a
+  // contagem — por cima da frase que dizia que a instalação deu certo. Se a
+  // rede caísse logo depois de instalar, quem lia via um erro de catálogo e
+  // concluía que a instalação falhara.
+  //
+  // E não é preciso ir à rede: a lista já está em `catalogoEmMaos`, e o que
+  // mudou foi o que está instalado nesta máquina. Redesenhar basta.
+  if (catalogoEmMaos) {
+    await desenharCatalogoEmMaos();
+    estado.textContent = resultado;
+  }
 }
 
 // **Uma falha aqui tem de chegar à tela.** Ela já chegou só ao console uma

@@ -209,7 +209,11 @@ pub(crate) enum FalhaAoInstalarMod {
 /// # Errors
 ///
 /// [`FalhaAoInstalarMod`], uma variante por motivo.
-pub(crate) fn instalar_de(config_dir: &Path, origem: &Path) -> Result<String, FalhaAoInstalarMod> {
+pub(crate) fn instalar_de(
+    config_dir: &Path,
+    origem: &Path,
+    substituir: bool,
+) -> Result<String, FalhaAoInstalarMod> {
     if !origem.join("mod.json").is_file() {
         return Err(FalhaAoInstalarMod::SemManifesto);
     }
@@ -218,11 +222,69 @@ pub(crate) fn instalar_de(config_dir: &Path, origem: &Path) -> Result<String, Fa
     let id = lido.id;
 
     let destino = config_dir.join("mods").join(&id);
-    if destino.exists() {
+    if destino.exists() && !substituir {
         return Err(FalhaAoInstalarMod::JaInstalado { id });
     }
-    copiar_arvore(origem, &destino)
-        .map_err(|erro| FalhaAoInstalarMod::NaoCopiei(erro.to_string()))?;
+
+    // **A10 da auditoria: monta ao lado, publica de uma vez.**
+    //
+    // Antes a cópia ia direto para o destino final. Um erro de leitura ou de
+    // escrita no meio — disco cheio, arquivo que sumiu — deixava lá uma pasta
+    // com parte do MOD, e a tentativa seguinte a encontrava e respondia «já
+    // instalado». O conserto normal virava apagar pasta à mão.
+    //
+    // A estufa fica **fora** de `mods/`, e não é detalhe: `listar` lê `mods/`
+    // como autor/nome, e uma pasta de obras lá dentro apareceria como um MOD
+    // pela metade enquanto a cópia acontece.
+    let estufa = config_dir.join(".mods-em-obras").join(&id);
+    let _ = std::fs::remove_dir_all(&estufa);
+    if let Err(erro) = copiar_arvore(origem, &estufa) {
+        // Só a estufa desta tentativa, nunca o destino: o que estava instalado
+        // antes não tem culpa de uma cópia que falhou.
+        let _ = std::fs::remove_dir_all(&estufa);
+        return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
+    }
+
+    if let Some(pai) = destino.parent() {
+        if let Err(erro) = std::fs::create_dir_all(pai) {
+            let _ = std::fs::remove_dir_all(&estufa);
+            return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
+        }
+    }
+
+    // **Os dados de campanha atravessam a troca.** Eles vivem em `dados/`, que
+    // o `content_hash` já exclui do pacote — «runtime data is not part of the
+    // immutable, consented package» — e atualizar um MOD não pode apagar a
+    // mesa de ninguém.
+    let dados = destino.join("dados");
+    if dados.is_dir() {
+        if let Err(erro) = std::fs::rename(&dados, estufa.join("dados")) {
+            let _ = std::fs::remove_dir_all(&estufa);
+            return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
+        }
+    }
+
+    if destino.exists() {
+        // O anterior sai do caminho antes de o novo entrar, e volta se o novo
+        // não entrar. Em nenhum instante o destino fica sem nada por escolha.
+        let anterior = config_dir
+            .join(".mods-em-obras")
+            .join(format!("{id}.anterior"));
+        let _ = std::fs::remove_dir_all(&anterior);
+        if let Err(erro) = std::fs::rename(&destino, &anterior) {
+            let _ = std::fs::remove_dir_all(&estufa);
+            return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
+        }
+        if let Err(erro) = std::fs::rename(&estufa, &destino) {
+            let _ = std::fs::rename(&anterior, &destino);
+            let _ = std::fs::remove_dir_all(&estufa);
+            return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
+        }
+        let _ = std::fs::remove_dir_all(&anterior);
+    } else if let Err(erro) = std::fs::rename(&estufa, &destino) {
+        let _ = std::fs::remove_dir_all(&estufa);
+        return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
+    }
     Ok(id)
 }
 
@@ -293,7 +355,7 @@ mod instalar {
         let origem = pacote(&raiz, "autor/exemplo");
         let config = raiz.join("config");
 
-        let id = instalar_de(&config, &origem).expect("um pacote válido tem de instalar");
+        let id = instalar_de(&config, &origem, false).expect("um pacote válido tem de instalar");
         assert_eq!(id, "autor/exemplo", "o identificador não saiu do manifesto");
         assert!(
             config.join("mods/autor/exemplo/cliente/main.js").is_file(),
@@ -312,7 +374,7 @@ mod instalar {
         let vazia = raiz.join("vazia");
         std::fs::create_dir_all(&vazia).unwrap();
         assert!(matches!(
-            instalar_de(&config, &vazia),
+            instalar_de(&config, &vazia, false),
             Err(FalhaAoInstalarMod::SemManifesto)
         ));
         assert!(
@@ -326,7 +388,7 @@ mod instalar {
         std::fs::create_dir_all(&torto).unwrap();
         std::fs::write(torto.join("mod.json"), b"{ nao e json }").unwrap();
         assert!(matches!(
-            instalar_de(&config, &torto),
+            instalar_de(&config, &torto, false),
             Err(FalhaAoInstalarMod::ManifestoRecusado(_))
         ));
 
@@ -340,11 +402,11 @@ mod instalar {
         let raiz = pasta("ja-instalado");
         let origem = pacote(&raiz, "autor/exemplo");
         let config = raiz.join("config");
-        instalar_de(&config, &origem).expect("a primeira instala");
+        instalar_de(&config, &origem, false).expect("a primeira instala");
         std::fs::write(config.join("mods/autor/exemplo/marca-de-dados"), b"x").unwrap();
 
         assert!(matches!(
-            instalar_de(&config, &origem),
+            instalar_de(&config, &origem, false),
             Err(FalhaAoInstalarMod::JaInstalado { .. })
         ));
         assert!(
@@ -368,10 +430,110 @@ mod instalar {
             let config = raiz.join("config");
 
             assert!(matches!(
-                instalar_de(&config, &origem),
+                instalar_de(&config, &origem, false),
                 Err(FalhaAoInstalarMod::NaoCopiei(_))
             ));
             let _ = std::fs::remove_dir_all(&raiz);
         }
+    }
+
+    /// **A10 da auditoria: uma cópia que falha não deixa nada pela metade.**
+    ///
+    /// Antes a cópia ia direto para o destino final. Um erro no meio — disco
+    /// cheio, arquivo que sumiu — deixava lá uma pasta com parte do MOD, e a
+    /// tentativa seguinte a encontrava e respondia «já instalado». O conserto
+    /// normal virava apagar pasta à mão.
+    ///
+    /// A falha é injetada com um atalho dentro do pacote, que `copiar_arvore`
+    /// recusa **depois** de já ter criado diretório e copiado arquivo — que é
+    /// exatamente a sequência que o achado descreve.
+    #[test]
+    fn uma_copia_que_falha_no_meio_nao_deixa_destino_pela_metade() {
+        let raiz = pasta("meio");
+        let origem = pacote(&raiz, "autor/exemplo");
+        let config = raiz.join("config");
+        std::fs::create_dir_all(origem.join("extra")).unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", origem.join("extra/atalho")).unwrap();
+
+        let erro = instalar_de(&config, &origem, false);
+
+        assert!(matches!(erro, Err(FalhaAoInstalarMod::NaoCopiei(_))));
+        assert!(
+            !config.join("mods/autor/exemplo").exists(),
+            "sobrou um destino pela metade, e a próxima tentativa vai chamá-lo de instalado"
+        );
+        assert!(
+            !config.join(".mods-em-obras/autor/exemplo").exists(),
+            "a estufa da tentativa que falhou não foi recolhida"
+        );
+    }
+
+    /// E ela não toca no que já estava instalado.
+    #[test]
+    fn uma_atualizacao_que_falha_preserva_o_pacote_anterior() {
+        let raiz = pasta("preserva");
+        let origem = pacote(&raiz, "autor/exemplo");
+        let config = raiz.join("config");
+        instalar_de(&config, &origem, false).expect("a primeira instala");
+
+        let torto = pacote(&raiz.join("torto"), "autor/exemplo");
+        std::fs::create_dir_all(torto.join("extra")).unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", torto.join("extra/atalho")).unwrap();
+        let erro = instalar_de(&config, &torto, true);
+
+        assert!(matches!(erro, Err(FalhaAoInstalarMod::NaoCopiei(_))));
+        assert_eq!(
+            std::fs::read(config.join("mods/autor/exemplo/cliente/main.js")).unwrap(),
+            b"globalThis.x = 1;",
+            "a atualização falhou e levou o pacote que funcionava junto"
+        );
+    }
+
+    /// **A09: atualizar não apaga a mesa de ninguém.**
+    ///
+    /// `dados/` é o quintal do MOD, e o `content_hash` já o exclui do pacote —
+    /// «runtime data is not part of the immutable, consented package». Trocar
+    /// a árvore inteira o levaria junto, e com ele as campanhas.
+    #[test]
+    fn atualizar_um_mod_preserva_os_dados_de_campanha() {
+        let raiz = pasta("dados");
+        let origem = pacote(&raiz, "autor/exemplo");
+        let config = raiz.join("config");
+        instalar_de(&config, &origem, false).expect("a primeira instala");
+
+        let quintal = config.join("mods/autor/exemplo/dados/canal-1");
+        std::fs::create_dir_all(&quintal).unwrap();
+        std::fs::write(quintal.join("mapa.png"), b"a campanha de alguem").unwrap();
+
+        let nova = pacote(&raiz.join("v2"), "autor/exemplo");
+        std::fs::write(nova.join("cliente/main.js"), b"globalThis.x = 2;").unwrap();
+        instalar_de(&config, &nova, true).expect("a atualização instala");
+
+        assert_eq!(
+            std::fs::read(config.join("mods/autor/exemplo/cliente/main.js")).unwrap(),
+            b"globalThis.x = 2;",
+            "o pacote não foi trocado"
+        );
+        assert_eq!(
+            std::fs::read(quintal.join("mapa.png")).unwrap(),
+            b"a campanha de alguem",
+            "a atualização apagou os dados de campanha"
+        );
+    }
+
+    /// E o caminho feliz não deixa rastro: uma estufa esquecida é disco ocupado
+    /// que ninguém sabe explicar.
+    #[test]
+    fn uma_instalacao_que_deu_certo_nao_deixa_estufa() {
+        let raiz = pasta("limpo");
+        let origem = pacote(&raiz, "autor/exemplo");
+        let config = raiz.join("config");
+
+        instalar_de(&config, &origem, false).expect("instala");
+
+        assert!(!config.join(".mods-em-obras/autor/exemplo").exists());
+        assert!(!config
+            .join(".mods-em-obras/autor/exemplo.anterior")
+            .exists());
     }
 }

@@ -467,7 +467,7 @@ pub(crate) async fn instalar_do_catalogo(
         std::fs::write(&destino, bytes)
             .map_err(|erro| FalhaNoCatalogo::NaoRespondeu(erro.to_string()))?;
     }
-    let resultado = crate::mods::instalar_de(std::path::Path::new(config), &passagem)
+    let resultado = crate::mods::instalar_de(std::path::Path::new(config), &passagem, true)
         .map(|_| ())
         .map_err(|erro| FalhaNoCatalogo::NaoEUmCatalogo(format!("{erro:?}")));
     let _ = std::fs::remove_dir_all(&passagem);
