@@ -48,6 +48,8 @@ use seele_proto::MediaHeader;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod vaga;
+
 /// Quanto se espera além do tempo ocioso antes de conferir o estrago.
 ///
 /// O desmonte da sessão velha acontece **depois** de o servidor desistir dela, e
@@ -344,6 +346,7 @@ impl Emudecivel {
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_reconecta_antes_de_o_servidor_desistir_da_conexao_velha_continua_no_roster_do_host(
 ) -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
 
     let mut anfitriao = com_prazo("o aperto de mão do anfitrião", anfitriao(endereco)).await?;
@@ -578,6 +581,7 @@ async fn quem_reconecta_antes_de_o_servidor_desistir_da_conexao_velha_continua_n
 /// Não custa o tempo ocioso: aqui ninguém espera o servidor desistir de nada.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_saida_pedida_pela_conexao_velha_nao_tira_da_sala_a_conexao_nova() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
 
     let mut anfitriao = com_prazo("o aperto de mão do anfitrião", anfitriao(endereco)).await?;
@@ -757,6 +761,7 @@ async fn a_saida_pedida_pela_conexao_velha_nao_tira_da_sala_a_conexao_nova() -> 
 /// não.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_conexao_velha_nao_guarda_assento_para_quem_ja_voltou_por_outra() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
 
     let mut anfitriao = com_prazo("o aperto de mão do anfitrião", anfitriao(endereco)).await?;
@@ -921,6 +926,7 @@ async fn a_conexao_velha_nao_guarda_assento_para_quem_ja_voltou_por_outra() -> R
 /// Não custa o tempo ocioso: ninguém espera o servidor desistir de conexão nenhuma.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_anuncio_de_mudanca_de_sala_nao_e_respondido_pela_conexao_velha() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
 
     let mut anfitriao = com_prazo("o aperto de mão do anfitrião", anfitriao(endereco)).await?;
@@ -1120,6 +1126,7 @@ async fn o_anuncio_de_mudanca_de_sala_nao_e_respondido_pela_conexao_velha() -> R
 /// pessoa. A nova abre a dela, e só então a velha se despede.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_conexao_velha_nao_encerra_a_tela_que_a_nova_abriu() -> Result<()> {
+    let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
 
     let mut anfitriao = com_prazo("o aperto de mão do anfitrião", anfitriao(endereco)).await?;
