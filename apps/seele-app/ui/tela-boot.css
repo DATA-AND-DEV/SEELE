@@ -652,3 +652,56 @@
   max-height: 14em;
   overflow-y: auto;
 }
+
+/* ---------- preparar o servidor ---------- */
+
+/* **Os campos chegavam encostados, medidos em 0px entre os três.**
+   `.server-campo` nasceu dentro do painel de CONFIGURAÇÕES, onde quem espaça
+   os blocos é o pai: `.server-bloco-corpo` é flex com `gap: 16px`. A
+   `.boot-caixa` é `display: block`, e reusar a classe trouxe o campo sem o pai
+   que o espaçava — o rótulo IMAGEM encostava no campo de nome, e VERSÃO QUE VAI
+   HOSPEDAR encostava no botão acima.
+
+   O espaço é dado aqui e não no `.server-campo`: mexer nele mudaria o painel
+   inteiro de CONFIGURAÇÕES, que não tem defeito nenhum. As margens de bloco
+   colapsam com as do título e da nota, então o topo da tela não ganha folga
+   dupla. */
+/* **E ela rola.** O `body` é `overflow: hidden` e a `.tela` nasce
+   `overflow-y: visible`: uma tela mais alta que a janela é cortada em silêncio,
+   sem barra e sem nada que diga que há mais abaixo. A de entrada nunca chegou
+   lá; esta chega com três campos e a lista de versões — medida em 758px de
+   conteúdo contra 736px de janela, ou seja, já cortando o VOLTAR numa janela
+   de tamanho comum.
+
+   `margin: auto` da `.boot-caixa` centraliza enquanto cabe. Quando não cabe,
+   `auto` em cima de um item que transborda come o topo, e é por isso que a
+   margem vira `0` acima do mínimo: melhor a caixa encostar no alto e ser
+   inteira do que ficar centrada e sem começo. */
+#tela-preparar,
+#tela-boot {
+  overflow-y: auto;
+}
+
+@media (max-height: 820px) {
+  #tela-preparar .boot-caixa,
+  #tela-boot .boot-caixa {
+    margin-block: 0;
+  }
+}
+
+/* A de entrada tinha o mesmo defeito, e ele é anterior a esta tela: com os dois
+   `<details>` abertos — quem tem um DNS apontado e mais de uma versão — são
+   1074px de conteúdo. Numa janela de 560px o PERFIL e a engrenagem de
+   CONFIGURAÇÕES ficavam fora do alcance, sem barra de rolagem e sem nada
+   dizendo que havia mais embaixo. Medido, não deduzido. */
+
+#tela-preparar .server-campo,
+#tela-preparar .boot-saidas {
+  margin-top: 20px;
+}
+
+/* O par de botões fica separado dos campos por mais que os campos entre si:
+   confirmar e voltar são a saída da tela, e não mais um campo dela. */
+#tela-preparar .boot-saidas {
+  margin-top: 28px;
+}

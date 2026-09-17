@@ -10661,3 +10661,74 @@ fn nenhuma_tabela_de_frases_declara_a_mesma_chave_duas_vezes() {
         );
     }
 }
+
+/// Toda tela que desenha uma `.boot-caixa` sabe rolar sozinha.
+///
+/// **O defeito, medido e não deduzido.** `body` é `overflow: hidden` e `.tela`
+/// nasce `overflow-y: visible`, com `height: calc(100vh - barra)`. Uma tela
+/// mais alta que a janela não ganha barra: ela é **cortada em silêncio**, e
+/// nada na tela diz que há mais embaixo.
+///
+/// A `.boot-caixa` é justamente o padrão que cresce — uma coluna de campos numa
+/// largura fixa. Numa janela de 560px, a tela de entrada com os dois
+/// `<details>` abertos (quem tem um DNS apontado e mais de uma versão) dá
+/// 1074px de conteúdo: o botão PERFIL e a engrenagem de CONFIGURAÇÕES ficavam
+/// fora do alcance, sem rolagem possível. A tela de preparar o servidor nasceu
+/// com o mesmo problema e foi o que fez a medida acontecer.
+///
+/// O guarda é sobre a declaração porque é a declaração que falta: quem
+/// acrescentar a terceira tela de cartão vai esquecer a mesma linha.
+#[test]
+fn toda_tela_de_cartao_declara_a_propria_rolagem() {
+    let page = read("ui/index.html");
+    let css = ui_files(".css")
+        .iter()
+        .map(|name| read(&format!("ui/{name}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // As telas que desenham o cartão, colhidas da página e não escritas aqui.
+    let mut de_cartao: BTreeSet<String> = BTreeSet::new();
+    let mut atual: Option<String> = None;
+    for linha in page.lines() {
+        if let Some(resto) = linha.split_once("<section id=\"tela-").map(|(_, r)| r) {
+            atual = resto.split('"').next().map(|id| format!("tela-{id}"));
+        }
+        if linha.contains("boot-caixa") {
+            if let Some(id) = &atual {
+                de_cartao.insert(id.clone());
+            }
+        }
+    }
+    assert!(
+        !de_cartao.is_empty(),
+        "nenhuma tela desenha `.boot-caixa`; se o padrão saiu, este guarda sai junto"
+    );
+
+    // O seletor tem de ser o **identificador inteiro**, e não um prefixo dele.
+    // A primeira versão casava por substring, e a prova por reversão passou
+    // verde contra `#tela-preparar-DESLIGADO` — um guarda que erra para o lado
+    // do «está tudo bem» é pior que guarda nenhum, porque ninguém vai conferir.
+    let cita_o_id = |seletores: &str, id: &str| {
+        let alvo = format!("#{id}");
+        seletores.match_indices(&alvo).any(|(at, _)| {
+            let depois = seletores[at + alvo.len()..].chars().next();
+            !matches!(depois, Some(c) if c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        })
+    };
+    let declara_rolagem = |id: &str| {
+        css.split('}').any(|bloco| {
+            let Some((seletores, corpo)) = bloco.split_once('{') else {
+                return false;
+            };
+            cita_o_id(seletores, id) && corpo.contains("overflow-y")
+        })
+    };
+    let sem_rolagem: Vec<&String> = de_cartao.iter().filter(|id| !declara_rolagem(id)).collect();
+
+    assert!(
+        sem_rolagem.is_empty(),
+        "estas telas desenham um cartão que cresce e não declaram `overflow-y`, \
+         então o que passar da janela é cortado sem barra e sem aviso: {sem_rolagem:?}"
+    );
+}
