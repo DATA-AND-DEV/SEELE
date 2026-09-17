@@ -122,6 +122,17 @@ existe aqui, e ela não zera o custo.
 A mesma peça serve à remoção de um MOD do indexador (ADR 0045), e as duas devem
 ser a mesma coisa — duas listas de revogação seriam duas chances de esquecer uma.
 
+> **Emenda, 10/09/2026 — «a mesma coisa» é o código, não o arquivo.** «Uma lista
+> só» não cabe junto com a chave separada que o ADR 0044 exige do indexador: ou
+> tirar um MOD do ar passaria a precisar da chave que autoriza instalar
+> programa, ou a chave do indexador passaria a poder impedir um programa de
+> rodar. O que ficou: **uma implementação, dois documentos, e cada fato num
+> lugar só** — versões revogadas no manifesto, com a chave do atualizador; MODs
+> removidos no catálogo, com a chave do indexador. O argumento inteiro, o
+> formato e o procedimento estão em
+> [`docs/versoes-lado-a-lado.md`](../versoes-lado-a-lado.md), que é também
+> onde mora o contrato do manifesto e a lista do que falta publicar.
+
 ### O que o ADR 0026 perde, e o que ele mantém
 
 **Mantém:** as duas assinaturas, o manifesto no release, «quem decide é a

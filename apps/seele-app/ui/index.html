@@ -328,6 +328,27 @@
       </div>
     </details>
 
+    <!--
+      **As versões lado a lado — ADR 0046.** O bloco só aparece quando há mais
+      de uma versão instalada; numa máquina com uma só, ele seria uma escolha
+      sem alternativa.
+
+      A lista é a do depósito desta máquina, e não a do catálogo: baixar uma
+      versão que não está aqui precisa da rede e é trabalho do atualizador. O
+      caso que este bloco cobre é o do pedido do dono — hospedar numa versão
+      anterior porque um MOD foi feito para ela —, e quem faz isso já a tem.
+    -->
+    <details id="boot-versoes" class="boot-nome-publico" hidden>
+      <summary>Hospedar com outra versão do SEELE</summary>
+      <div class="server-campo">
+        <ul id="lista-versoes" class="server-dispositivos"></ul>
+        <p class="nota">
+          Cada versão guarda as conversas dela em separado. Abrir outra versão
+          não leva o que foi escrito nesta — e não apaga nada.
+        </p>
+      </div>
+    </details>
+
     <div class="boot-rodape">
       <button id="boot-perfil" class="boot-perfil" type="button"
               aria-label="Personalizar seu perfil" title="o nome com que você entra">

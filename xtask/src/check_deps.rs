@@ -125,10 +125,25 @@ const RULES: &[(&str, &[&str])] = &[
     // The desktop shell. Sees `seele-ffi`, which sees `seele-core`. Reaching past
     // it would put protocol knowledge in a Tauri command — specs/06-clientes-gui.md.
     // Mesma exceção, mesmo motivo: o botão **Hospedar**. Ver `seele-tui`.
-    ("seele-app", &["seele-ffi", "seele-server"]),
+    // A casca vê o lançador, e a aresta é segura na direção que importa: o
+    // lançador não depende de nada (regra abaixo), então ele continua não sendo
+    // construído junto de nenhuma versão do produto — que é a propriedade
+    // inteira da regra dele. O contrário — o lançador vendo a casca — é o que
+    // trancaria alguém fora de uma versão que já funcionava.
+    (
+        "seele-app",
+        &["seele-ffi", "seele-server", "seele-lancador"],
+    ),
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
     // product to compile before it could check the product.
     ("xtask", &[]),
+    // O núcleo do launcher, pela mesma razão do instalador e com uma a mais
+    // que é própria dele — ADR 0045. Este crate escolhe *qual* versão do
+    // produto roda; se ele dependesse do produto, a peça que decide entre a
+    // 0.10.4 e a 0.10.5 seria construída junto de uma delas, e uma mudança no
+    // produto poderia trancar alguém fora de uma versão que já estava
+    // instalada e funcionando.
+    ("seele-lancador", &[]),
     // O instalador, pela mesma razão e com a mesma força — ADR 0043. Se ele
     // dependesse do `seele-core`, construir o instalador exigiria construir o
     // produto, e uma mudança no produto poderia quebrar a instalação de todo

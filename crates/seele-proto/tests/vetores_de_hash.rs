@@ -8,6 +8,8 @@
 //! O arquivo é comitado nos dois repositórios, e nenhum precisa do outro
 //! para rodar os próprios testes.
 
+// Este arquivo é anterior ao lançador e reprovava o `clippy --all-targets` do
+// workspace inteiro. A permissão é a mesma dos testes de `seele-conformance`.
 #![allow(
     clippy::expect_used,
     clippy::indexing_slicing,

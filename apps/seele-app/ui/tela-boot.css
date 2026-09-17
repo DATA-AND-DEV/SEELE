@@ -602,3 +602,53 @@
 
 .boot-rodape > .botao-fantasma .glifo { width: 1.15em; height: 1.15em; }
 
+
+/* ----------------------------------------- as duas caixas que abrem na entrada
+ *
+ * O nome público (link com nome) e as versões lado a lado (ADR 0046). As duas
+ * são `<details>` fechados: quem aperta HOSPEDAR AQUI quer hospedar, e nenhuma
+ * das duas é o caminho comum. Fechadas, custam uma linha; abertas, estão
+ * inteiras.
+ *
+ * `margin-inline: auto` com a mesma largura do bloco de botões acima para que
+ * elas não flutuem soltas quando abrem. */
+.boot-nome-publico {
+  width: 100%;
+  max-width: 420px;
+  margin-inline: auto;
+  margin-top: 10px;
+  text-align: left;
+}
+
+.boot-nome-publico > summary {
+  cursor: pointer;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+  padding: 6px 0;
+}
+
+.boot-nome-publico > summary:hover { color: var(--seele-osso); }
+
+.boot-nome-publico input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* **A lista rola, e isto não é enfeite.**
+ *
+ * Ela é preenchida com o que houver no depósito da máquina, e nada limita
+ * quantas versões alguém acumula ao longo de dois anos de atualizações. Sem
+ * altura máxima e sem rolagem, a partir de um certo número as linhas de baixo
+ * deixam de existir: o `base.css` põe `overflow: hidden` no `body`, então nem a
+ * janela rola atrás delas. Foi exatamente assim que as salas de voz sumiram
+ * para quem tinha mais de uma tela cheia, e há um guarda em
+ * `tests/frontend.rs` que cobra isto de toda lista vinda de fora.
+ *
+ * O teto em `em` e não em pixels: ele acompanha quem aumenta o corpo do texto
+ * no sistema, que é justamente quem mais perde linha por corte. */
+.boot-nome-publico .server-dispositivos {
+  max-height: 14em;
+  overflow-y: auto;
+}

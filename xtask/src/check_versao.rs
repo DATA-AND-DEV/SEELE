@@ -73,9 +73,18 @@ const NAO_PODEM_LER_O_CARGO: &[&str] = &[
 
 /// Roda a conferência.
 pub(crate) fn run() -> ExitCode {
-    let raiz = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("xtask mora dentro do workspace");
+    // Sem `expect`: `specs/10-convencoes.md` o proíbe fora de teste, e o
+    // workspace o nega no `clippy`. Aqui ele seria quase sempre verdadeiro e
+    // quase não é motivo — um `xtask` movido para fora do workspace deve dizer
+    // isso e sair, não entrar em pânico dentro de uma conferência.
+    let Some(raiz) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() else {
+        eprintln!(
+            "check-versao: `{}` não tem pasta acima; este comando espera rodar \
+             de dentro do workspace.",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        return ExitCode::FAILURE;
+    };
     let mut faltas: Vec<String> = Vec::new();
 
     for (arquivo, o_que_e) in ENTREGAS {

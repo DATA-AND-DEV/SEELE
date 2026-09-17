@@ -16,6 +16,11 @@ seele-ffi = { path = "../../crates/seele-ffi" }
 # botão **Hospedar** põe o servidor dentro do app. Aresta lateral no topo do
 # grafo, não inversão — este binário contém os dois papéis.
 seele-server = { path = "../../crates/seele-server" }
+# O núcleo do launcher — ADR 0046. A aresta é segura na direção que importa:
+# `seele-lancador` não depende de nada, então ele continua não sendo construído
+# junto de nenhuma versão do produto. A peça que decide entre a 0.10.5 e a
+# 0.11.0 não pode ser parte de uma delas.
+seele-lancador = { path = "../../crates/seele-lancador" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 # Não é escolha de arquitetura: `tauri::generate_context!` gera código que

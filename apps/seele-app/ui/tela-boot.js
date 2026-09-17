@@ -417,6 +417,114 @@ async function hospedar() {
   }
 }
 
+/**
+ * As versões lado a lado desta máquina — ADR 0046.
+ *
+ * **O bloco fica escondido com uma versão só**, e não desabilitado: uma escolha
+ * com uma alternativa só não é uma escolha, e mostrá-la ensina a procurar um
+ * problema que não existe.
+ *
+ * A que está em uso aparece marcada e **sem botão**: abrir a versão que já está
+ * aberta seria uma segunda janela do mesmo SEELE, que é exatamente o que o ADR
+ * 0039 decidiu não ter.
+ *
+ * Uma instalação sem procedência — marcador antigo, executável apagado —
+ * aparece dita, e também sem botão. Oferecer um botão que vai falhar é o
+ * defeito que este repositório chama de «o produto sabe e não conta».
+ */
+async function desenharVersoes() {
+  const bloco = $("boot-versoes");
+  let versoes = [];
+  try {
+    versoes = await invoke("versoes_instaladas");
+  } catch {
+    // Um depósito ilegível não é motivo para não deixar a pessoa hospedar aqui.
+    // O bloco some, e o caminho de sempre continua inteiro.
+    bloco.hidden = true;
+    return;
+  }
+  if (versoes.length < 2) {
+    bloco.hidden = true;
+    return;
+  }
+  bloco.hidden = false;
+
+  const linhas = versoes.map((v) => {
+    const linha = elemento("li");
+    if (v.em_uso) {
+      const marca = elemento("span", "server-dispositivo");
+      marca.append(
+        elemento("span", "server-dispositivo-nome", v.versao),
+        elemento("span", "server-dispositivo-marca", "EM USO"),
+      );
+      linha.append(marca);
+      return linha;
+    }
+    if (!v.abrivel) {
+      const sem = elemento("span", "server-dispositivo");
+      sem.append(
+        elemento("span", "server-dispositivo-nome", v.versao),
+        elemento("span", "server-dispositivo-marca", "REINSTALE PARA USAR"),
+      );
+      linha.append(sem);
+      return linha;
+    }
+    const botao = elemento("button", "server-dispositivo");
+    botao.type = "button";
+    botao.append(
+      elemento("span", "server-dispositivo-nome", v.versao),
+      elemento("span", "server-dispositivo-marca", "HOSPEDAR COM ESTA"),
+    );
+    botao.addEventListener("click", () => abrirVersao(v.versao));
+    linha.append(botao);
+    return linha;
+  });
+  repovoar($("lista-versoes"), linhas);
+}
+
+/**
+ * Abre outra versão, já hospedando, com o nome público que estiver no campo.
+ *
+ * **Esta janela não fecha.** Quem lançou não segura o processo filho, e fechar
+ * daqui deixaria a pessoa sem nada na tela se o outro não subisse.
+ */
+async function abrirVersao(versao) {
+  const erro = $("boot-erro");
+  erro.hidden = true;
+  const nome = $("campo-nome-publico").value.trim();
+  try {
+    await invoke("abrir_versao", {
+      versao,
+      hospedar: true,
+      nomePublico: nome === "" ? null : nome,
+    });
+  } catch (falha) {
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
+  }
+}
+
+/**
+ * O que o launcher pediu a esta janela ao abri-la.
+ *
+ * Sem isto, «HOSPEDAR COM 0.10.5» abriria a 0.10.5 parada na tela de entrada e
+ * a pessoa teria de apertar o botão de novo — a tela prometeria uma coisa e
+ * faria outra.
+ */
+async function cumprirAAbertura() {
+  let pedido;
+  try {
+    pedido = await invoke("abertura");
+  } catch {
+    return;
+  }
+  if (!pedido || !pedido.hospedar) return;
+  if (pedido.nome_publico) {
+    $("campo-nome-publico").value = pedido.nome_publico;
+  }
+  await hospedar();
+}
+
 // ------------------------------------------------------------------- ligação
 
 // `paste` dispara antes de o valor entrar no campo; o tique seguinte já o tem.
@@ -425,6 +533,13 @@ async function hospedar() {
 // campo por código, e atribuição não dispara `input` — só o teclado chega aqui.
 
 $("botao-hospedar").addEventListener("click", hospedar);
+
+// As versões e a intenção de abertura, nesta ordem: desenhar primeiro deixa a
+// lista pronta caso o `hospedar` automático falhe e a pessoa queira escolher
+// outra. Nenhuma das duas pode derrubar a tela de entrada, e por isso as duas
+// engolem a própria falha — ver os `catch` de cada uma.
+desenharVersoes();
+cumprirAAbertura();
 
 // **Aqui havia um `desenharVisitados()` de um `desenharVisitados` que não
 // existe mais**, e ele foi o defeito mais caro desta leva: uma chamada solta no

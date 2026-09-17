@@ -28,6 +28,7 @@
 
 mod icone;
 mod mods;
+mod versoes;
 
 use std::sync::{Arc, Mutex};
 
@@ -55,6 +56,17 @@ const CANAL_DE_ATUALIZACAO: &str = "seele://atualizacao";
 /// Everything the commands share.
 #[derive(Default)]
 struct Session {
+    /// Com que intenção este processo foi aberto, se com alguma.
+    ///
+    /// É por onde o launcher fala com a versão que ele abriu: `--hospedar`, e
+    /// o `--nome-publico` que o acompanha. Lida uma vez no arranque e nunca
+    /// mais — argumentos de linha de comando não mudam durante a execução, e um
+    /// campo que os relesse esconderia isso de quem lê.
+    ///
+    /// **Uma versão que não conhece estes argumentos os ignora**, e é o que faz
+    /// o launcher valer também para as publicadas antes dele. Ela abre; quem
+    /// aperta o botão é a pessoa.
+    abertura: Abertura,
     connection: Mutex<Option<Arc<Connection>>>,
     /// O servidor que este app está hospedando, quando está.
     ///
@@ -111,6 +123,63 @@ struct Session {
     /// é por isso que ele recusa com [`FalhaAoAtualizar::NadaEscolhido`] em vez
     /// de silenciosamente ir procurar.
     atualizacao: Mutex<Option<tauri_plugin_updater::Update>>,
+}
+
+/// Com que intenção este processo foi aberto.
+///
+/// # Por que ela existe
+///
+/// Porque o launcher abre **outro** processo, e precisa dizer a ele o que a
+/// pessoa pediu. Sem isto, escolher «hospedar com a 0.10.5» abriria a 0.10.5
+/// parada na tela de entrada, e a pessoa teria de apertar HOSPEDAR AQUI de
+/// novo — a tela prometeria uma coisa e faria outra.
+///
+/// Lida uma vez, no arranque. Nada aqui é segredo e nada aqui é confiável do
+/// ponto de vista de segurança: são argumentos que qualquer um pode passar. O
+/// que eles disparam é o mesmo botão que a pessoa apertaria com o mouse, e o
+/// nome público volta a ser conferido pelo `hospedar` como se tivesse sido
+/// digitado.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+struct Abertura {
+    /// A pessoa pediu para hospedar assim que a janela subir.
+    hospedar: bool,
+    /// O nome público que ela escolheu, quando escolheu.
+    nome_publico: Option<String>,
+}
+
+impl Abertura {
+    /// O que a linha de comando deste processo diz.
+    ///
+    /// **Tolerante de propósito.** Um argumento desconhecido não é erro: uma
+    /// versão publicada antes do launcher recebe estes mesmos argumentos e os
+    /// ignora, e é isso que faz versões lado a lado funcionarem com o que já
+    /// está no mundo. Aqui, a mesma tolerância vale para o caminho oposto — uma
+    /// versão futura passando um argumento que esta não conhece.
+    fn da_linha_de_comando() -> Self {
+        let mut aberta = Self::default();
+        let mut argumentos = std::env::args().skip(1);
+        while let Some(argumento) = argumentos.next() {
+            match argumento.as_str() {
+                "--hospedar" => aberta.hospedar = true,
+                // O valor vem no argumento seguinte, e não colado com `=`: é a
+                // forma que o `Lancamento` monta, e aceitar as duas seria
+                // aceitar uma que ninguém produz.
+                "--nome-publico" => aberta.nome_publico = argumentos.next(),
+                _ => {}
+            }
+        }
+        aberta
+    }
+}
+
+/// Com que intenção esta janela foi aberta.
+///
+/// A casca pergunta uma vez, no arranque, e age: é o que faz «HOSPEDAR COM
+/// 0.10.5» abrir a 0.10.5 **hospedando**, em vez de abri-la parada na tela de
+/// entrada com a pessoa tendo de apertar o botão de novo.
+#[tauri::command]
+fn abertura(session: State<'_, Session>) -> Abertura {
+    session.abertura.clone()
 }
 
 impl Session {
@@ -602,6 +671,53 @@ enum FalhaAoHospedar {
     /// O nome da variante e não uma frase, como as três acima: a frase mora no
     /// `FRASES` do JavaScript, e é lá que ela é traduzida.
     NomeRecusado(seele_ffi::uri::NomeRecusado),
+}
+
+/// Que versões do SEELE estão instaladas nesta máquina.
+///
+/// ADR 0046. A lista é a do **depósito**, e não a do manifesto: este caminho é
+/// offline de propósito — ver `crate::versoes`. Ela nunca diz qual é a mais
+/// nova, porque quem sabe isso é o manifesto e ele não passa por aqui.
+#[tauri::command]
+fn versoes_instaladas(app: AppHandle) -> Vec<versoes::VersaoInstalada> {
+    versoes::instaladas(&config_dir(&app))
+}
+
+/// Abre uma versão instalada, com os dados dela, e opcionalmente já hospedando.
+///
+/// **Não fecha esta janela.** Quem lançou não segura o processo filho (ADR 0039
+/// quer uma casca só, e o `Lancamento` não espera), e fechar daqui deixaria a
+/// pessoa sem nada na tela caso o outro processo não suba. Quem fecha é ela.
+///
+/// # Errors
+///
+/// [`versoes::FalhaAoAbrirVersao`], uma variante por motivo.
+#[tauri::command]
+fn abrir_versao(
+    app: AppHandle,
+    versao: String,
+    hospedar: bool,
+    nome_publico: Option<String>,
+) -> Result<(), versoes::FalhaAoAbrirVersao> {
+    // O nome público é conferido **aqui também**, e não só no `hospedar`: ele
+    // vai virar argumento de linha de comando de outro processo, e um nome com
+    // espaço ou com barra chegaria lá partido ou apontando para outro lugar.
+    let nome = match nome_publico
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
+        Some(bruto) => match seele_ffi::uri::conferir_nome_publico(bruto) {
+            Ok(nome) => Some(nome),
+            // A recusa do nome não é a recusa da versão, e misturar as duas
+            // daria à tela uma frase sobre launcher para um erro de digitação.
+            // Abrir sem o nome seria pior: a pessoa hospedaria com o link que
+            // ela não pediu. Então não abre, e o motivo é o do nome.
+            Err(_) => return Err(versoes::FalhaAoAbrirVersao::IdentificadorInvalido),
+        },
+        None => None,
+    };
+    versoes::abrir(&config_dir(&app), &versao, hospedar, nome.as_deref())
 }
 
 /// Sobe um servidor dentro do app e devolve o link do convite.
@@ -3584,7 +3700,7 @@ fn main() {
     let filtro = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         "seele_app=info,seele_ffi=info,seele_core=info,\
          seele_video=info,seele_audio=info,seele_server=info,seele_proto=info,\
-         seele_encontro=info"
+         seele_encontro=info,seele_lancador=info"
             .into()
     });
     match arquivo_de_log() {
@@ -3650,7 +3766,13 @@ fn main() {
                 None => recusa_do_mod(),
             }
         })
-        .manage(Session::default())
+        .manage(Session {
+            // Lida aqui e não dentro do `Default`: um `Default` que lê o
+            // ambiente é um `Default` que se comporta diferente em teste e em
+            // produção sem nada no tipo dizendo isso.
+            abertura: Abertura::da_linha_de_comando(),
+            ..Session::default()
+        })
         .setup(move |app| {
             // **A decoração do Windows sai; a do macOS fica.**
             //
@@ -3731,6 +3853,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             connect,
             hospedar,
+            versoes_instaladas,
+            abrir_versao,
+            abertura,
             disconnect,
             snapshot,
             messages,
