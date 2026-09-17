@@ -532,15 +532,28 @@ mod o_catalogo {
         let catalogo = ler_catalogo(bytes, assinatura)
             .expect("o catálogo que o indexador assinou tem de passar neste cliente");
         assert_eq!(catalogo.esquema, 1);
-        // **Vazio de propósito**, e o teste afirma isso em vez de contorná-lo:
-        // nenhum MOD foi avaliado ainda. Um catálogo vazio e assinado é o
-        // estado correto de um indexador que acabou de subir, e um cliente que
-        // o recusasse recusaria o primeiro dia do serviço.
-        assert!(
-            catalogo.mods.is_empty(),
-            "este vetor deixou de ser o catálogo vazio; se foi de propósito, \
-             troque a afirmação junto com o arquivo"
-        );
+        // O vetor era o catálogo vazio, e a afirmação era `mods.is_empty()`
+        // com um recado pedindo que ela mudasse junto com o arquivo. Mudou: o
+        // MESA é o primeiro MOD avaliado, e um catálogo com uma entrada de
+        // verdade exercita o que o vazio não exercitava — a análise de um
+        // `ModNoCatalogo` inteiro, com versão, hash, alcance e notas.
+        let mesa = catalogo
+            .mods
+            .iter()
+            .find(|m| m.id == "seele/mesa")
+            .expect("o vetor do indexador tem de trazer o MESA");
+        let versao = mesa
+            .versoes
+            .first()
+            .expect("um MOD no catálogo sem versão nenhuma não é instalável");
+        assert_eq!(versao.versao, "1.2.0");
+        assert_eq!(versao.hash.len(), 64, "o hash do conteúdo é um SHA-256");
+        // Que a API publicada caiba nesta build é conferido em
+        // `seele-conformance`, e não aqui: esta casca não depende do
+        // `seele-proto` (ADR 0039), e copiar `MOD_API_VERSION` para dentro dela
+        // seria a terceira cópia do número cuja divergência custou a primeira
+        // publicação.
+        assert!(versao.api > 0, "uma versão sem API declarada não é instalável");
         assert!(
             catalogo.gerado_em > 0,
             "o catálogo não diz quando foi gerado"

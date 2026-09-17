@@ -1,5 +1,58 @@
 {
   "esquema": 1,
-  "gerado_em": 1789676982,
-  "mods": []
+  "api_oferecida": 2,
+  "gerado_em": 1789680764,
+  "mods": [
+    {
+      "id": "seele/mesa",
+      "autor": "seele",
+      "nome": "mesa",
+      "titulo": "Mesa",
+      "resumo": "Mesa de RPG por canal: fichas, tabuleiro com peças, compêndio, iniciativa e ambientação. A voz continua na sala do SEELE.",
+      "repo": "https://github.com/DATA-AND-DEV/MESA",
+      "oficial": false,
+      "nivel": "verificado",
+      "commit": "743bf6f2d842d7420a2115bf15eb8e7cbc51e06b",
+      "notas": [
+        "roda-no-servidor",
+        "guarda-dados-na-maquina"
+      ],
+      "versoes": [
+        {
+          "versao": "1.2.0",
+          "api": 2,
+          "publicado_em": 1789679950,
+          "hash": "ab12b0645dc51fd984d480213ad19c0352e967f0846dff48a515ae04913e2a32",
+          "alcanca": [
+            "dom",
+            "estado da campanha no servidor",
+            "arquivos de mapas e cenas"
+          ],
+          "arquivos": [
+            "README.md",
+            "cliente/main.js",
+            "ferramentas/mesa-package.mjs",
+            "ferramentas/mesa-preview.cjs",
+            "ferramentas/quickjs-check/Cargo.lock",
+            "ferramentas/quickjs-check/Cargo.toml",
+            "ferramentas/quickjs-check/smoke.js",
+            "ferramentas/quickjs-check/src/main.rs",
+            "ferramentas/servidor-de-desenvolvimento.rs.referencia",
+            "ferramentas/test-mesa-ui.cjs",
+            "mod.json",
+            "package-lock.json",
+            "package.json",
+            "servidor/main.js",
+            "test/mesa.test.cjs"
+          ],
+          "nivel": "verificado",
+          "notas": [
+            "roda-no-servidor",
+            "guarda-dados-na-maquina"
+          ],
+          "commit": "743bf6f2d842d7420a2115bf15eb8e7cbc51e06b"
+        }
+      ]
+    }
+  ]
 }
