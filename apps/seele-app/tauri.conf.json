@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self'; script-src 'self' mod:; img-src 'self' data: mod:; font-src 'self'; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; style-src 'self'; script-src 'self' mod: http://mod.localhost; img-src 'self' data: mod: http://mod.localhost; font-src 'self'; connect-src ipc: http://ipc.localhost"
     },
     "withGlobalTauri": true
   },

@@ -446,6 +446,27 @@ globalThis.SeeleMods = Object.freeze({
 const modsCarregados = new Map();
 let conferindoMods = false;
 let ultimoErroDeMods = "";
+
+// **O que aconteceu com cada MOD, por fase** — A06 da auditoria de 17/09.
+//
+// Tudo aqui dentro comunicava por `console.warn` e `console.error`: pacote
+// ausente, hash divergente, catálogo recusado e script que não carregou. A
+// gestão mostrava instalado e ligado, e nunca «carregado», «falhou» ou
+// «incompatível». Quem usa ficava sem próximo passo, e num aplicativo
+// empacotado o console não é lugar nenhum.
+//
+// A distinção que a auditoria pede está nos nomes: `carregado` quer dizer que
+// os **bytes executaram**, e não que o MOD terminou de se inicializar — isso o
+// MOD sabe e nós não, e prometer o segundo seria inventar.
+const estadoDosMods = new Map();
+
+/** Anota a fase de um MOD e avisa quem desenha. */
+function anotarEstadoDoMod(id, fase, detalhe = "") {
+  const antes = estadoDosMods.get(id);
+  if (antes?.fase === fase && antes?.detalhe === detalhe) return;
+  estadoDosMods.set(id, { fase, detalhe });
+  globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
+}
 async function carregarMods() {
   if (conferindoMods) return;
   conferindoMods = true;
@@ -455,17 +476,40 @@ async function carregarMods() {
     instalados = await invoke("mods_instalados");
     const catalogo = await globalThis.SeeleMods.request("", 0, {});
     if (!catalogo.ok) throw new Error("catalogue-refused");
+    // O catálogo respondeu: a notícia de que ele não respondia deixou de valer.
+    if (estadoDosMods.has("")) {
+      estadoDosMods.delete("");
+      globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
+    }
     for (const [id, node] of modsCarregados) {
       if (!catalogo.mods.some(m => m.id === id && m.hash === node.dataset.hash)) {
         globalThis.dispatchEvent(new CustomEvent("seele-mod-unload", { detail: id }));
         node.remove(); modsCarregados.delete(id);
+        anotarEstadoDoMod(id, "descarregado");
+      }
+    }
+    // E o que voltou a bater deixa de ser notícia ruim: sem isto, um MOD que
+    // aparecia como «outra versão» continuaria assim depois de instalado.
+    for (const m of catalogo.mods) {
+      if (["sem-pacote", "outra-versao"].includes(estadoDosMods.get(m.id)?.fase)
+          && instalados.some(i => i.id === m.id && i.hash === m.hash)) {
+        estadoDosMods.delete(m.id);
+        globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
       }
     }
     const ausentes = catalogo.mods.filter(active => !instalados.some(m => m.id === active.id && m.hash === active.hash));
-    const diagnostico = ausentes.map(m => m.id).join(", ");
-    if (diagnostico && diagnostico !== ultimoErroDeMods) {
-      console.warn(`MODs exigidos sem pacote local correspondente: ${diagnostico}. Instale a mesma versão do servidor e reconecte.`);
+    for (const m of ausentes) {
+      // **Duas causas, duas frases.** Ter o id e não ter o hash é versão
+      // diferente da exigida — e mandar «instale» quem já instalou é mandar
+      // fazer de novo o que não resolve.
+      const temOId = instalados.some(i => i.id === m.id);
+      anotarEstadoDoMod(
+        m.id,
+        temOId ? "outra-versao" : "sem-pacote",
+        temOId ? `o servidor exige o conteúdo ${m.hash.slice(0, 16)}…` : "",
+      );
     }
+    const diagnostico = ausentes.map(m => m.id).join(", ");
     ultimoErroDeMods = diagnostico;
     instalados = instalados.filter(m => catalogo.mods.some(active => active.id === m.id && active.hash === m.hash));
   } catch (erro) {
@@ -473,6 +517,9 @@ async function carregarMods() {
     if (!mensagem.includes("NotConnected") && mensagem !== ultimoErroDeMods) {
       console.warn("Não foi possível conferir os MODs:", erro);
       ultimoErroDeMods = mensagem;
+      // Sem sessão não há o que dizer: a lista de exigidos é do servidor, e
+      // ninguém prometeu nada a conferir. Com sessão, a falha é notícia.
+      anotarEstadoDoMod("", "catalogo-recusado", mensagem);
     }
     conferindoMods = false;
     return;
@@ -483,15 +530,30 @@ async function carregarMods() {
 
     const script = document.createElement("script");
     script.type = "module";
-    script.src = `mod://localhost/${mod.id}/${mod.client}?hash=${mod.hash}&load=${Date.now()}`;
+    // **A URL sai do conversor do Tauri, e não de texto montado aqui** — A07.
+    //
+    // `mod://localhost/...` é a forma do macOS e do Linux. No Windows e no
+    // Android o mesmo protocolo é servido como `http://mod.localhost/...`, e
+    // uma URL escrita à mão não abre lá. `convertFileSrc` é quem sabe a forma
+    // de cada plataforma, e ele escapa o caminho — o manipulador do lado Rust
+    // desfaz o escape antes de conferir o hash.
+    const caminho = `${mod.id}/${mod.client}`;
+    const base = window.__TAURI__.core.convertFileSrc(caminho, "mod");
+    script.src = `${base}?hash=${mod.hash}&load=${Date.now()}`;
     script.dataset.hash = mod.hash;
+    anotarEstadoDoMod(mod.id, "carregando");
     // Um MOD que quebra não leva a janela junto — ADR 0045, «falha isolada».
     // Sem isto, um erro de sintaxe num MOD de terceiro é uma tela preta que
     // ninguém sabe explicar.
     script.addEventListener("error", () => {
       console.error(`MOD ${mod.id}: não carregou`);
+      anotarEstadoDoMod(mod.id, "nao-carregou");
       modsCarregados.delete(mod.id); script.remove();
     });
+    // **`load` diz que os bytes executaram, e só isso.** Se o MOD estourou
+    // dentro da própria inicialização, o `load` acontece do mesmo jeito — quem
+    // sabe disso é ele, e prometer o contrário seria inventar.
+    script.addEventListener("load", () => anotarEstadoDoMod(mod.id, "carregado"));
     modsCarregados.set(mod.id, script);
     document.head.appendChild(script);
   }

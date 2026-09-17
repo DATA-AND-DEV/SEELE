@@ -246,6 +246,26 @@ function linhaDeModInstalado(mod, hospedando) {
   texto.append(
     elemento("span", "mods-versao", `versão ${mod.version}`),
   );
+  // **O que aconteceu com ele, por fase** — A06 da auditoria.
+  //
+  // A gestão dizia instalado e ligado, e nada mais. Tudo o que podia dar errado
+  // — pacote ausente, versão diferente da exigida, catálogo sem resposta,
+  // script que não carregou — morria no console, e num aplicativo empacotado o
+  // console não é lugar nenhum. Quem usava via o MOD na lista e nenhum botão
+  // dele na tela, sem próximo passo.
+  const estado = estadoDosMods.get(mod.id);
+  if (estado) {
+    const frase = FASES_DO_MOD[estado.fase];
+    if (frase) {
+      // Só o que deu certo fica com a cor de nota; o resto é recusa, e recusa
+      // tem cor própria nesta casca.
+      const tranquilo = ["carregado", "carregando"].includes(estado.fase);
+      const classe = tranquilo ? "mods-versao" : "mods-recusado";
+      texto.append(
+        elemento("span", classe, estado.detalhe ? `${frase} — ${estado.detalhe}` : frase),
+      );
+    }
+  }
   if (mod.server) {
     texto.append(
       elemento("span", "mods-servidor", "roda na máquina de quem hospeda"),
@@ -321,6 +341,26 @@ function perguntarETrocarOMod(mod) {
   );
 }
 
+/**
+ * O que cada fase quer dizer para quem lê — A06.
+ *
+ * Identificador de um lado, frase do outro, como todo o resto desta casca: a
+ * fase é escrita pelo carregador em `base.js`, e uma fase sem frase aqui
+ * simplesmente não é desenhada, em vez de mostrar o identificador cru.
+ *
+ * «Carregado» é sobre os **bytes**, e a frase diz isso: se o MOD estourou
+ * dentro da própria inicialização, o navegador avisa que carregou do mesmo
+ * jeito. Quem sabe se ele terminou de subir é ele.
+ */
+const FASES_DO_MOD = {
+  carregando: "buscando o código deste MOD…",
+  carregado: "código carregado nesta janela",
+  "nao-carregou": "o código não carregou — reconecte para tentar de novo",
+  "sem-pacote": "o servidor exige este MOD e ele não está instalado aqui",
+  "outra-versao": "o que está instalado aqui não é o que o servidor exige",
+  descarregado: "descarregado: o servidor deixou de exigi-lo",
+};
+
 /** Liga ou desliga, e redesenha. */
 async function trocarOMod(id, ligar) {
   const erro = $("mods-gestao-erro");
@@ -346,6 +386,20 @@ async function desenharMods() {
     const erro = $("mods-gestao-erro");
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
+  }
+
+  // **A falha que não é de nenhum MOD** — A06. O carregador guarda sob a chave
+  // vazia o caso em que o próprio catálogo do servidor não respondeu: aí não dá
+  // para saber o que é exigido, e nenhuma linha da lista pode dizer isso por
+  // ele. Sem esta frase, a tela mostraria MODs instalados e quietos, como se
+  // estivesse tudo certo.
+  const doCatalogo = estadoDosMods.get("");
+  if (doCatalogo) {
+    const erro = $("mods-gestao-erro");
+    erro.hidden = false;
+    erro.textContent =
+      "não deu para saber quais MODs este servidor exige, então nada foi " +
+      "carregado. Reconecte para tentar de novo.";
   }
 
   // Hospedar é o que decide se LIGAR vale. `mods_instalados` devolve `enabled`
@@ -601,4 +655,12 @@ $("catalogo-buscar").addEventListener("click", () => {
     estado.textContent = fraseDeErro(falha);
     $("catalogo-buscar").disabled = false;
   });
+});
+
+// O painel redesenha quando uma fase muda, e não só quando alguém o abre: um
+// MOD que falha quatro segundos depois de a tela estar aberta é justamente o
+// caso em que ninguém vai reabrir para descobrir.
+globalThis.addEventListener("seele-mods-estado", () => {
+  if ($("tela-server").hidden) return;
+  desenharMods().catch((falha) => console.warn("mods:", falha));
 });

@@ -10938,3 +10938,101 @@ fn reconectar_desmonta_a_sessao_sem_fechar_o_servidor() {
         );
     }
 }
+
+/// O que falha ao carregar um MOD chega à tela, e a URL serve nas duas formas.
+///
+/// **A06 e A07 da auditoria de 17/09.**
+///
+/// O carregador distinguia pacote ausente, hash divergente, catálogo recusado e
+/// script que não carregou — e comunicava os quatro por `console.warn` e
+/// `console.error`. A gestão mostrava instalado e ligado, nunca «carregado» ou
+/// «falhou». Num aplicativo empacotado o console não é lugar nenhum: quem usa
+/// via o MOD na lista, nenhum botão dele na tela, e nenhum próximo passo.
+///
+/// E a URL era `mod://localhost/...` escrita à mão. Essa é a forma do macOS e
+/// do Linux; no Windows e no Android o mesmo protocolo é servido como
+/// `http://mod.localhost/...`, que a CSP nem sequer permitia.
+///
+/// **O que este guarda não prova:** que o Mesa abre. Isso é um teste de fumaça
+/// no binário nativo de cada sistema, e a auditoria o pede em separado. O que
+/// se cobra aqui é que a falha tenha para onde ir e que a URL tenha de onde
+/// vir.
+#[test]
+fn o_carregador_de_mods_diz_na_tela_e_monta_a_url_pelo_tauri() {
+    // Sem comentários: o texto que **explica** a forma antiga cita a forma
+    // antiga, e um guarda que não distingue os dois acusa a própria explicação.
+    let base = without_comments(&read("ui/base.js"));
+    let painel = read("ui/camada-mods.js");
+    let config = read("tauri.conf.json");
+
+    // A URL vem do conversor, e não de texto montado aqui.
+    assert!(
+        base.contains("convertFileSrc"),
+        "a URL do MOD é escrita à mão, e a forma de `mod://localhost` não abre \
+         no Windows nem no Android"
+    );
+    assert!(
+        !base.contains("`mod://localhost/"),
+        "sobrou uma URL de MOD montada à mão; ela só vale em dois dos sistemas"
+    );
+
+    // E a CSP permite as duas formas do mesmo protocolo.
+    for forma in ["mod:", "http://mod.localhost"] {
+        assert!(
+            config.contains(forma),
+            "a CSP não permite `{forma}`, então o script do MOD é bloqueado \
+             antes de qualquer código dele rodar"
+        );
+    }
+
+    // Toda fase que o carregador anota tem frase no painel: uma fase sem frase
+    // não é desenhada, e o defeito volta a ser silencioso.
+    let mut fases: BTreeSet<String> = BTreeSet::new();
+    for (at, _) in base.match_indices("anotarEstadoDoMod(") {
+        let Some(resto) = base.get(at + "anotarEstadoDoMod(".len()..) else {
+            continue;
+        };
+        // Até o fecha-parênteses desta chamada, contando os que abrem no meio:
+        // o segundo argumento pode ser um ternário com duas fases dentro, e
+        // pegar só a primeira string depois da vírgula perde uma delas.
+        let mut nivel = 1usize;
+        let mut fim = resto.len();
+        for (i, c) in resto.char_indices() {
+            match c {
+                '(' => nivel += 1,
+                ')' => {
+                    nivel -= 1;
+                    if nivel == 0 {
+                        fim = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let chamada = resto.get(..fim).unwrap_or("");
+        // Toda string literal da chamada que tem cara de identificador de fase:
+        // minúsculas e hífen. O detalhe é frase, e frase tem espaço ou acento.
+        for pedaco in chamada.split('"').skip(1).step_by(2) {
+            if !pedaco.is_empty() && pedaco.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                fases.insert(pedaco.to_owned());
+            }
+        }
+    }
+    assert!(
+        !fases.is_empty(),
+        "o carregador não anota fase nenhuma; sem isso a tela não tem o que dizer"
+    );
+    let sem_frase: Vec<&String> = fases
+        .iter()
+        // `catalogo-recusado` não é de nenhum MOD: ele vira a frase do painel
+        // inteiro, e não uma linha da lista.
+        .filter(|f| *f != "catalogo-recusado")
+        .filter(|f| !painel.contains(&format!("\"{f}\"")) && !painel.contains(&format!("{f}:")))
+        .collect();
+    assert!(
+        sem_frase.is_empty(),
+        "estas fases são anotadas pelo carregador e não têm frase no painel, \
+         então elas não aparecem para ninguém: {sem_frase:?}"
+    );
+}

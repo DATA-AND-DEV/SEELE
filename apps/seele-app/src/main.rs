@@ -919,6 +919,37 @@ async fn hospedar(
     Ok(anfitriao)
 }
 
+/// Desfaz `%XX` num caminho de URL. O resto passa inteiro.
+///
+/// Escrito aqui, e não trazido numa dependência: são quinze linhas, e o
+/// `Cargo.toml` deste app é curto de propósito — cada caixa a mais é mais uma
+/// coisa que um invasor alcança sem tocar em nada nosso.
+///
+/// Um `%` solto ou seguido de coisa que não é hexadecimal fica como está. É o
+/// comportamento certo para o que vem depois: quem decide se o caminho serve é
+/// a conferência de hash e o `serve`, e os dois recusam o que não conhecem.
+fn por_cento_desfeito(cru: &str) -> String {
+    let bytes = cru.as_bytes();
+    let mut saida = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let Some(&b) = bytes.get(i) else { break };
+        if b == b'%' {
+            let par = cru
+                .get(i + 1..i + 3)
+                .and_then(|h| u8::from_str_radix(h, 16).ok());
+            if let Some(byte) = par {
+                saida.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        saida.push(b);
+        i += 1;
+    }
+    String::from_utf8(saida).unwrap_or_else(|_| cru.to_owned())
+}
+
 /// Se a regra de firewall desta máquina **não** cobre o executável que está
 /// rodando, e por quê.
 ///
@@ -4132,7 +4163,18 @@ fn main() {
         // MOD declarou, e nada que suba de diretório. A conferência é ali, e
         // não aqui, para caber num teste sem subir uma janela.
         .register_uri_scheme_protocol("mod", |ctx, request| {
-            let caminho = request.uri().path().to_owned();
+            // **Decodificado antes de qualquer coisa.** A página monta a URL com
+            // o `convertFileSrc` do Tauri — A07 da auditoria —, e ele passa o
+            // caminho inteiro por `encodeURIComponent`: `autor/nome/cliente.js`
+            // chega como `autor%2Fnome%2Fcliente.js`. Sem desfazer isso, a
+            // conferência de hash e a leitura procurariam um arquivo com esse
+            // nome literal e recusariam tudo.
+            //
+            // A decodificação vem **antes** da conferência de propósito: se ela
+            // viesse depois, o hash seria conferido sobre um texto e o arquivo
+            // lido por outro, que é a forma clássica de uma checagem valer para
+            // uma coisa e a leitura acontecer sobre outra.
+            let caminho = por_cento_desfeito(request.uri().path());
             let pasta = config_dir(ctx.app_handle());
             let expected = request
                 .uri()
@@ -4144,6 +4186,15 @@ fn main() {
             match mods::serve(std::path::Path::new(&pasta), &caminho) {
                 Some(corpo) => tauri::http::Response::builder()
                     .header("Content-Type", "text/javascript; charset=utf-8")
+                    // **A06.** O script é `type="module"`, e `mod://localhost`
+                    // é origem diferente de `tauri://localhost`: um módulo entre
+                    // origens é recusado pelo motor sem este cabeçalho, e a
+                    // recusa chega como um `error` sem mensagem nenhuma.
+                    //
+                    // Não é afrouxamento: este esquema só é alcançável de dentro
+                    // desta janela, e o que ele serve já passou pela conferência
+                    // de hash e de caminho logo acima.
+                    .header("Access-Control-Allow-Origin", "*")
                     .body(corpo)
                     .unwrap_or_else(|_| recusa_do_mod()),
                 None => recusa_do_mod(),
@@ -4533,5 +4584,56 @@ mod a_tela_le_os_limites_que_o_rust_manda {
             "estas telas leem um limite de imagem que o Rust não serializa, e o que \
              chega é `undefined`: {culpados:?}. As chaves que existem são {chaves:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod o_caminho_do_mod_chega_inteiro {
+    use super::por_cento_desfeito;
+
+    /// **A07 da auditoria.** A página monta a URL com `convertFileSrc`, que
+    /// passa o caminho por `encodeURIComponent` — as barras de `autor/nome`
+    /// viram `%2F`. Sem desfazer, o `serve` procuraria um arquivo com esse nome
+    /// literal e recusaria todo MOD.
+    #[test]
+    fn as_barras_de_um_id_com_autor_voltam_a_ser_barras() {
+        assert_eq!(
+            por_cento_desfeito("/seele%2Fmesa%2Fcliente%2Fmain.js"),
+            "/seele/mesa/cliente/main.js"
+        );
+    }
+
+    #[test]
+    fn um_caminho_sem_nada_escapado_passa_igual() {
+        assert_eq!(
+            por_cento_desfeito("/seele/mesa/cliente/main.js"),
+            "/seele/mesa/cliente/main.js"
+        );
+    }
+
+    /// Acento existe em nome de arquivo, e `encodeURIComponent` o manda em
+    /// UTF-8 escapado byte a byte.
+    #[test]
+    fn um_nome_com_acento_volta_em_utf8() {
+        assert_eq!(por_cento_desfeito("/a%C3%A7%C3%A3o.js"), "/ação.js");
+    }
+
+    /// Um `%` que não abre um par fica como está. Quem decide se o caminho
+    /// serve é a conferência de hash e o `serve`, e os dois recusam o que não
+    /// conhecem — inventar um byte aqui seria decidir por eles.
+    #[test]
+    fn um_porcento_solto_nao_vira_lixo_nem_entra_em_panico() {
+        assert_eq!(por_cento_desfeito("/100%"), "/100%");
+        assert_eq!(por_cento_desfeito("/100%zz.js"), "/100%zz.js");
+        assert_eq!(por_cento_desfeito("%"), "%");
+    }
+
+    /// E a travessia continua sendo recusada **depois**, por quem já a recusava:
+    /// desfazer o escape não pode virar um jeito de escrever `..` sem que o
+    /// `serve` o veja. O que este teste fixa é que o texto chega inteiro até
+    /// lá, e não que ele seja aceito.
+    #[test]
+    fn a_travessia_escapada_chega_visivel_para_quem_a_recusa() {
+        assert_eq!(por_cento_desfeito("/..%2F..%2Fetc"), "/../../etc");
     }
 }
