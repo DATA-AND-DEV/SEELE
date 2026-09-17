@@ -660,6 +660,17 @@ pub struct Alcance {
     /// ausência dela obrigaria quem lê a adivinhar entre "não pedi" e "pedi e
     /// deu certo".
     pcp_recusada: Option<String>,
+    /// Por que a porta do degrau 3 não é a canônica (8383) — quando ele **deu
+    /// certo**, mas com o recuo de "qualquer porta".
+    ///
+    /// Ao contrário de [`Alcance::porta_recusada`], que fala do degrau
+    /// falhando, este campo fala do degrau vencendo do jeito errado: o
+    /// roteador abriu uma porta, só que não a de sempre. `None` é o caso
+    /// comum — a 8383 abriu, ou o degrau 3 nem chegou a valer. `Some` só
+    /// depois de o `porta` recuar para "qualquer porta", e é a informação que
+    /// falta para um link guardado numa lista de servidores explicar por que
+    /// pode parar de servir depois do próximo reinício.
+    porta_nao_canonica: Option<String>,
 }
 
 impl Alcance {
@@ -868,6 +879,7 @@ impl Alcance {
                 porta_recusada
             },
             pcp_recusada,
+            porta_nao_canonica: None,
         }
     }
 
@@ -878,6 +890,18 @@ impl Alcance {
     /// sobraram, e um motivo não é um endereço.
     fn com_recusa_do_encontro(mut self, motivo: Option<String>) -> Self {
         self.encontro_recusado = motivo;
+        self
+    }
+
+    /// Guarda por que a porta do degrau 3 não é a canônica, quando ele venceu
+    /// assim mesmo.
+    ///
+    /// Mesmo motivo de [`Alcance::com_recusa_do_encontro`] estar separado de
+    /// `decidir`: só faz sentido perguntar depois de saber qual degrau
+    /// venceu, e `decidir` decide sobre endereços, não sobre o aviso que o
+    /// `porta` devolveu junto do mapeamento.
+    fn com_aviso_de_porta_nao_canonica(mut self, aviso: Option<String>) -> Self {
+        self.porta_nao_canonica = aviso;
         self
     }
 
@@ -923,6 +947,18 @@ impl Alcance {
     #[must_use]
     pub fn pcp_recusada(&self) -> Option<&str> {
         self.pcp_recusada.as_deref()
+    }
+
+    /// Por que a porta do degrau 3 não é a canônica (8383), quando ele venceu
+    /// assim mesmo.
+    ///
+    /// `None` é o caso comum: ou a 8383 abriu, ou nenhum endereço do degrau 3
+    /// está no convite. `Some` é o aviso que falta para quem hospeda entender
+    /// por que um link guardado hoje pode não servir depois do próximo
+    /// reinício — ver "O quarto" no ADR 0022.
+    #[must_use]
+    pub fn porta_nao_canonica(&self) -> Option<&str> {
+        self.porta_nao_canonica.as_deref()
     }
 }
 
@@ -1006,6 +1042,16 @@ impl Escada {
             recusa_do_pcp,
         )
         .com_recusa_do_encontro(recusa_do_encontro);
+        // Só faz sentido avisar sobre a porta não-canônica quando ela é de
+        // fato o degrau 3 do convite: um mapeamento que não sobreviveu ao
+        // corte, ou que a escuta não atende, não é o que vai no `seele://`.
+        let eh_degrau_3 = alcance.degrau() == Degrau::PortaNoRoteador;
+        let alcance = alcance.com_aviso_de_porta_nao_canonica(
+            mapeada
+                .as_ref()
+                .filter(|_| eh_degrau_3)
+                .and_then(porta::PortaAberta::aviso),
+        );
         // A porta só é guardada se ela produziu o degrau. Um mapeamento que a
         // escuta não serve é devolvido na hora, e não largado: uma regra de
         // encaminhamento que sobra no roteador aponta para uma máquina que não
@@ -1612,6 +1658,46 @@ mod testes {
                 .any(|alvo| alvo.ip().to_string() == "2606:4700:110:8a3f::2"),
             "o endereço do túnel sumiu do convite: {:?}",
             alcance.alvos()
+        );
+    }
+
+    #[test]
+    fn o_aviso_de_porta_nao_canonica_chega_a_quem_hospeda() {
+        // `porta::PortaAberta::aviso` só existe quando o degrau 3 recuou para
+        // "qualquer porta"; aqui a preocupação é só que o aviso, uma vez
+        // dado, atravesse até o getter público de `Alcance` — e não fique
+        // preso num campo que ninguém lê.
+        let alcance = Alcance::decidir_sem_encontro(
+            Escuta::nova(8383, Pilha::Dupla),
+            Some(SocketAddr::from(([203, 0, 113, 9], 54321))),
+            &[],
+            None,
+        )
+        .com_aviso_de_porta_nao_canonica(Some(
+            "o roteador não abriu a porta 8383 de sempre".to_owned(),
+        ));
+
+        assert_eq!(alcance.degrau(), Degrau::PortaNoRoteador);
+        assert_eq!(
+            alcance.porta_nao_canonica(),
+            Some("o roteador não abriu a porta 8383 de sempre")
+        );
+    }
+
+    #[test]
+    fn sem_recuo_a_porta_nao_canonica_fica_none() {
+        let alcance = Alcance::decidir_sem_encontro(
+            Escuta::nova(8383, Pilha::Dupla),
+            Some(SocketAddr::from(([203, 0, 113, 9], 8383))),
+            &[],
+            None,
+        );
+
+        assert_eq!(alcance.degrau(), Degrau::PortaNoRoteador);
+        assert_eq!(
+            alcance.porta_nao_canonica(),
+            None,
+            "sem aviso, o campo não pode inventar um"
         );
     }
 

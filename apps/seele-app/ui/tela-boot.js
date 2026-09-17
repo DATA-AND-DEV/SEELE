@@ -273,7 +273,13 @@ listen("seele://event", (evento) => {
  * `RedeLocalOuVpn` conta como perto: quem hospeda com uma VPN de navegação
  * ligada tem um endereço que parece alcançar o mundo e não aceita ninguém.
  */
-function mostrarAlcance(alcance, portaRecusada, encontroRecusado, firewallNaoCobre) {
+function mostrarAlcance(
+  alcance,
+  portaRecusada,
+  encontroRecusado,
+  firewallNaoCobre,
+  portaNaoCanonica,
+) {
   const onde = $("convite-alcance");
   const frase = fraseDeErro(alcance);
   const soPerto = alcance === "SoRedeLocal" || alcance === "RedeLocalOuVpn";
@@ -346,7 +352,7 @@ function mostrarAlcance(alcance, portaRecusada, encontroRecusado, firewallNaoCob
     onde.append(abrir);
   }
 
-  for (const motivo of [portaRecusada, encontroRecusado]) {
+  for (const motivo of [portaRecusada, encontroRecusado, portaNaoCanonica]) {
     if (!motivo) continue;
     const detalhe = document.createElement("span");
     detalhe.className = "convite-alcance-detalhe";
@@ -383,6 +389,7 @@ async function hospedar() {
       anfitriao.porta_recusada,
       anfitriao.encontro_recusado,
       anfitriao.firewall_nao_cobre,
+      anfitriao.porta_nao_canonica,
     );
 
     // **O link, guardado e mostrado.** A comp da 0.9.0 promove a um diálogo o

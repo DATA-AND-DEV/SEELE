@@ -568,6 +568,14 @@ struct Anfitriao {
     ///
     /// Nada nesta tela dizia isso. O relato foi «teste em LAN não funciona».
     firewall_nao_cobre: Option<String>,
+    /// O roteador abriu a porta, só que não a canônica (8383) — ver "O
+    /// quarto" no ADR 0022.
+    ///
+    /// `None` é o caso comum: a 8383 abriu, ou o degrau 3 nem venceu. `Some`
+    /// é o aviso de que o link funciona agora e pode parar de servir depois
+    /// do próximo reinício, porque um link guardado numa lista de servidores
+    /// depende de a 8383 continuar sendo a porta que o roteador dá.
+    porta_nao_canonica: Option<String>,
 }
 
 /// Por que não deu para hospedar.
@@ -671,6 +679,8 @@ async fn hospedar(
         encontro_recusado: alcance
             .and_then(|alcance| alcance.encontro_recusado().map(str::to_owned)),
         firewall_nao_cobre: firewall_nao_cobre_este_executavel(),
+        porta_nao_canonica: alcance
+            .and_then(|alcance| alcance.porta_nao_canonica().map(str::to_owned)),
     };
 
     session
