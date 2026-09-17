@@ -370,6 +370,81 @@
   </div>
 </section>
 
+<!--
+  **Preparar o servidor, antes de levantá-lo.**
+
+  HOSPEDAR AQUI levava direto ao servidor de pé, e o nome e a imagem só
+  existiam depois, escondidos em CONFIGURAÇÕES — quem hospedava pela primeira
+  vez subia um servidor sem nome e sem cara, e só descobria onde arrumar isso
+  procurando. A versão era um `<details>` recolhido na tela de entrada, que
+  aparecia só quando havia mais de uma instalada.
+
+  As três escolhas viraram uma tela, e ela é o desvio de HOSPEDAR AQUI.
+
+  **Por que o nome e a imagem são aplicados depois de conectar.** Os dois são
+  verbos de protocolo (`rename_server`, `set_server_icon`): eles viajam pela
+  conexão autenticada, e não há a quem mandá-los enquanto o servidor não está
+  de pé. Então esta tela **junta** as escolhas, e quem as aplica é o mesmo
+  caminho de sempre, logo depois de entrar. A ordem não é contornável, e vale
+  dizê-la aqui para que ninguém a "simplifique" mandando tudo no `hospedar`.
+
+  **Por que a versão é diferente das outras duas.** Escolher outra versão não é
+  um campo a mais: é **outra janela** que hospeda, porque uma versão não
+  hospeda em nome de outra (ADR 0046). O nome e a imagem escolhidos aqui não
+  atravessam para lá, e a tela diz isso em vez de perdê-los em silêncio.
+-->
+<section id="tela-preparar" class="tela" tabindex="-1" hidden
+         data-foco="preparar-confirmar" aria-labelledby="preparar-titulo"
+         data-anuncio="Preparar este servidor: nome, imagem e versão.">
+  <div class="boot-caixa">
+    <h1 id="preparar-titulo" class="boot-titulo">PREPARAR ESTE SERVIDOR</h1>
+    <p class="nota">
+      O nome e a imagem são o que as pessoas veem ao entrar. Os dois são
+      opcionais e mudam depois, em CONFIGURAÇÕES.
+    </p>
+
+    <div class="server-campo">
+      <label class="server-nome-campo">
+        <span class="rotulo">NOME DESTE SERVIDOR</span>
+        <input id="preparar-nome" type="text" maxlength="64" spellcheck="false"
+               autocomplete="off" placeholder="nome do servidor">
+      </label>
+    </div>
+
+    <div class="server-campo">
+      <span class="rotulo">IMAGEM</span>
+      <div class="server-icone-molde">
+        <img id="preparar-icone-previa" class="server-icone-previa" alt="" hidden>
+        <span id="preparar-icone-vazio" class="server-icone-vazio">SEM IMAGEM</span>
+      </div>
+      <!-- O limite é dito antes do seletor, e vem do Rust: quem só o descobre
+           pela recusa já foi até a pasta das fotos à toa. -->
+      <p id="preparar-icone-regra" class="server-frase"></p>
+      <div class="server-icone-botoes">
+        <button id="preparar-icone-escolher" class="botao" type="button">ESCOLHER IMAGEM</button>
+        <button id="preparar-icone-tirar" class="botao-fantasma" type="button" hidden>TIRAR</button>
+      </div>
+    </div>
+
+    <div id="preparar-versoes" class="server-campo" hidden>
+      <span class="rotulo">VERSÃO QUE VAI HOSPEDAR</span>
+      <ul id="preparar-lista-versoes" class="server-dispositivos"></ul>
+      <p id="preparar-versao-aviso" class="nota" hidden>
+        Quem hospeda é a outra janela, então o nome e a imagem escolhidos aqui
+        não vão junto — você os define lá.
+      </p>
+    </div>
+
+    <div class="boot-saidas">
+      <button id="preparar-confirmar" type="button" class="botao">HOSPEDAR</button>
+      <button id="preparar-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
+    </div>
+
+    <p id="preparar-etapa" class="etapa" role="status" hidden></p>
+    <p id="preparar-erro" class="erro" role="alert" hidden></p>
+  </div>
+</section>
+
 <!-- Operação. -->
 <!--
   Sem `data-foco`, e a ausência é a escolha. Esta tela não tem **uma** ação: são

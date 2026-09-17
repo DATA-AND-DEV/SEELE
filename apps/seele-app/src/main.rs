@@ -1743,19 +1743,43 @@ async fn escolher_icone_do_server(
     app: AppHandle,
     session: State<'_, Session>,
 ) -> Result<bool, ConnectionError> {
+    let Some(pronto) = escolher_e_encolher(&app, "Escolha a imagem deste servidor").await? else {
+        return Ok(false);
+    };
+    session.connection()?.set_server_icon(Some(pronto))?;
+    Ok(true)
+}
+
+/// Abre o seletor, lê e encolhe — e devolve os bytes, sem aplicar nada.
+///
+/// A metade comum dos três lugares que escolhem uma imagem. Era duas cópias com
+/// um comentário dizendo que eram cópias de propósito; a terceira é que não
+/// cabia, porque a tela de preparar o servidor precisa da imagem **antes** de
+/// existir servidor para aplicá-la.
+///
+/// `Ok(None)` é ter fechado o seletor sem escolher, e é o desfecho mais comum.
+///
+/// # Errors
+///
+/// [`ConnectionError::IconNotAPicture`] quando o arquivo não vira um PNG dentro
+/// do teto.
+async fn escolher_e_encolher(
+    app: &AppHandle,
+    titulo: &str,
+) -> Result<Option<Vec<u8>>, ConnectionError> {
     use std::io::Read as _;
     use tauri_plugin_dialog::DialogExt as _;
 
     let (envia, mut recebe) = tauri::async_runtime::channel(1);
     app.dialog()
         .file()
-        .set_title("Escolha a imagem deste servidor")
+        .set_title(titulo)
         .pick_file(move |escolha| {
             let _ = envia.try_send(escolha);
         });
 
     let Some(Some(escolha)) = recebe.recv().await else {
-        return Ok(false);
+        return Ok(None);
     };
     let Ok(caminho) = escolha.into_path() else {
         // Só o Android devolve `content://`, e este binário não roda lá.
@@ -1780,16 +1804,50 @@ async fn escolher_icone_do_server(
     // Fora da linha principal: uma foto de doze megapixels leva um tempo visível
     // para ser decodificada e reduzida, e fazer isso no laço de eventos congela
     // a janela inteira no meio de um gesto que parecia instantâneo.
-    let Ok(Some(pronto)) =
-        tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes)).await
+    let Ok(pronto) = tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes)).await
     else {
-        // Não é imagem, ou é uma que nem o último degrau fez caber. As duas
-        // dizem a mesma coisa a quem escolheu: este arquivo não vira ícone.
         return Err(ConnectionError::IconNotAPicture);
     };
+    // Não é imagem, ou é uma que nem o último degrau fez caber. As duas dizem a
+    // mesma coisa a quem escolheu: este arquivo não vira ícone.
+    pronto.map(Some).ok_or(ConnectionError::IconNotAPicture)
+}
 
-    session.connection()?.set_server_icon(Some(pronto))?;
-    Ok(true)
+/// Escolhe a imagem do servidor **antes** de existir servidor.
+///
+/// A tela de preparar hospedagem precisa mostrar a imagem escolhida enquanto
+/// ainda não há nada para aplicá-la: `renomear_server` e `set_server_icon` são
+/// verbos de protocolo e só valem depois de conectar. Então esta devolve os
+/// bytes já encolhidos, a página os segura, e `aplicar_icone_do_server` os
+/// manda quando o servidor estiver de pé.
+///
+/// `Ok(None)` é ter fechado o seletor sem escolher.
+///
+/// # Errors
+///
+/// [`ConnectionError::IconNotAPicture`] quando o arquivo não vira um PNG dentro
+/// do teto.
+#[tauri::command]
+async fn preparar_icone_do_server(app: AppHandle) -> Result<Option<Vec<u8>>, ConnectionError> {
+    escolher_e_encolher(&app, "Escolha a imagem deste servidor").await
+}
+
+/// Põe no servidor uma imagem que já veio pronta.
+///
+/// Gêmea de [`escolher_icone_do_server`] sem o seletor: os bytes vêm da tela de
+/// preparar, que os escolheu antes de hospedar. **Não** encolhe de novo — eles
+/// já passaram por `icone::encolher`, e encolher duas vezes só perderia
+/// qualidade para chegar ao mesmo lugar.
+///
+/// # Errors
+///
+/// O que a sessão devolver, incluindo a recusa do servidor.
+#[tauri::command]
+fn aplicar_icone_do_server(
+    session: State<'_, Session>,
+    icone: Vec<u8>,
+) -> Result<(), ConnectionError> {
+    session.connection()?.set_server_icon(Some(icone))
 }
 
 /// Tira a imagem do servidor, deixando-o sem nenhuma.
@@ -2177,53 +2235,9 @@ async fn escolher_minha_imagem(
     app: AppHandle,
     session: State<'_, Session>,
 ) -> Result<bool, ConnectionError> {
-    use std::io::Read as _;
-    use tauri_plugin_dialog::DialogExt as _;
-
-    let (envia, mut recebe) = tauri::async_runtime::channel(1);
-    app.dialog()
-        .file()
-        .set_title("Escolha a sua imagem")
-        .pick_file(move |escolha| {
-            let _ = envia.try_send(escolha);
-        });
-
-    let Some(Some(escolha)) = recebe.recv().await else {
+    let Some(pronto) = escolher_e_encolher(&app, "Escolha a sua imagem").await? else {
         return Ok(false);
     };
-    let Ok(caminho) = escolha.into_path() else {
-        return Err(ConnectionError::IconNotAPicture);
-    };
-    let Ok(arquivo) = std::fs::File::open(&caminho) else {
-        return Err(ConnectionError::IconNotAPicture);
-    };
-    let mut bytes = Vec::new();
-    if arquivo
-        .take(icone::TETO_DA_ORIGEM.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .is_err()
-    {
-        return Err(ConnectionError::IconNotAPicture);
-    }
-
-    let Ok(Some(pronto)) =
-        tauri::async_runtime::spawn_blocking(move || icone::encolher(&bytes)).await
-    else {
-        return Err(ConnectionError::IconNotAPicture);
-    };
-
-    // **Guardado aqui antes de ser mandado.**
-    //
-    // O retrato é seu, e não do servidor em que você está: o apelido já é assim
-    // — `preferences` o guarda nesta máquina e a conexão o leva — e não havia
-    // razão para a imagem ser diferente. Enquanto ela só existia do lado do
-    // servidor, o diálogo de perfil da tela inicial não tinha o que mostrar, e
-    // sumia com o bloco inteiro: dois diálogos com o mesmo nome e conteúdos
-    // diferentes, que foi o relato de campo.
-    //
-    // Gravar antes de mandar, e não depois: uma gravação que falha é uma
-    // imagem que some no próximo início do programa, e é melhor descobrir isso
-    // agora do que no dia em que a pessoa reabrir o app.
     gravar_retrato(&app, Some(&pronto))?;
     // E, se há sessão, o servidor sabe agora. Sem sessão não é erro nenhum —
     // é o caso da tela inicial, e a imagem sobe no próximo `connect`.
@@ -4079,6 +4093,8 @@ fn main() {
             modulo_de_video_a_baixar,
             baixar_modulo_de_video,
             escolher_icone_do_server,
+            preparar_icone_do_server,
+            aplicar_icone_do_server,
             escolher_minha_imagem,
             escolher_apelido,
             apelido_local,

@@ -555,7 +555,11 @@ async function cumprirAAbertura() {
 // Digitar outro endereço à mão desfaz o convite. `lerConvite` escreve neste
 // campo por código, e atribuição não dispara `input` — só o teclado chega aqui.
 
-$("botao-hospedar").addEventListener("click", hospedar);
+// **O desvio.** HOSPEDAR AQUI não hospeda mais direto: ele abre a tela onde as
+// três escolhas cabem. Quem hospeda continua sendo `hospedar()`, chamada de lá.
+$("botao-hospedar").addEventListener("click", () => {
+  abrirPreparar().catch((falha) => console.warn("preparar:", falha));
+});
 
 // As versões e a intenção de abertura, nesta ordem: desenhar primeiro deixa a
 // lista pronta caso o `hospedar` automático falhe e a pessoa queira escolher
@@ -643,3 +647,191 @@ $("boot-perfil").addEventListener("click", () => {
 });
 
 desenharPerfilDaEntrada().catch((falha) => console.warn("perfil da entrada:", falha));
+
+
+// --------------------------------------------------------------------------
+// Preparar o servidor antes de levantá-lo
+// --------------------------------------------------------------------------
+
+/** A imagem escolhida, já encolhida pelo Rust, esperando um servidor. */
+let iconePreparado = null;
+
+/** A versão escolhida, ou `null` para «esta mesma». */
+let versaoEscolhida = null;
+
+/** Mostra a tela de preparar, com as versões e a regra da imagem. */
+async function abrirPreparar() {
+  iconePreparado = null;
+  versaoEscolhida = null;
+  $("preparar-erro").hidden = true;
+  $("preparar-etapa").hidden = true;
+  $("preparar-versao-aviso").hidden = true;
+  pintarIconePreparado();
+
+  guardarFoco("tela-boot");
+  $("tela-boot").hidden = true;
+  $("tela-preparar").hidden = false;
+  abrirTela("tela-preparar");
+
+  // A regra vem do Rust pelo mesmo motivo que na tela de configuração: dois
+  // números escritos à mão divergem do protocolo um dia.
+  try {
+    const regras = await invoke("regras_do_icone_do_server");
+    $("preparar-icone-regra").textContent =
+      `Até ${Math.round(regras.teto_em_bytes / 1024)} KiB, ` +
+      `${regras.lado_maximo} px de lado. Uma foto maior é reduzida aqui mesmo.`;
+  } catch (falha) {
+    console.warn("regras do ícone:", falha);
+  }
+
+  await desenharVersoesParaHospedar();
+}
+
+/** Volta para a tela de entrada sem hospedar nada. */
+function fecharPreparar() {
+  $("tela-preparar").hidden = true;
+  $("tela-boot").hidden = false;
+  voltarParaTela("tela-boot");
+}
+
+/** Desenha a prévia da imagem escolhida, ou a ausência dela. */
+function pintarIconePreparado() {
+  const previa = $("preparar-icone-previa");
+  if (iconePreparado) {
+    previa.src = uriDeIcone(iconePreparado);
+    previa.hidden = false;
+  } else {
+    previa.removeAttribute("src");
+    previa.hidden = true;
+  }
+  $("preparar-icone-vazio").hidden = Boolean(iconePreparado);
+  $("preparar-icone-tirar").hidden = !iconePreparado;
+}
+
+/**
+ * Lista as versões instaladas, quando há mais de uma.
+ *
+ * Com uma só, o bloco inteiro fica escondido: uma escolha sem alternativa é
+ * ruído na tela de quem só quer hospedar.
+ */
+async function desenharVersoesParaHospedar() {
+  let versoes = [];
+  try {
+    versoes = await invoke("versoes_instaladas");
+  } catch (falha) {
+    console.warn("versoes:", falha);
+  }
+  const abriveis = versoes.filter((v) => v.abrivel || v.em_uso);
+  $("preparar-versoes").hidden = abriveis.length < 2;
+  if (abriveis.length < 2) return;
+
+  repovoar(
+    $("preparar-lista-versoes"),
+    abriveis.map((v) => {
+      const linha = elemento("li");
+      const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
+      const texto = elemento("span", "server-dispositivo-nome");
+      texto.append(elemento("span", "mods-id", v.versao));
+      if (v.em_uso) texto.append(elemento("span", "mods-versao", "esta janela"));
+      caixa.append(texto);
+
+      const botao = elemento("button", "botao-fantasma");
+      botao.type = "button";
+      const escolhida = v.em_uso ? versaoEscolhida === null : versaoEscolhida === v.versao;
+      botao.textContent = escolhida ? "ESCOLHIDA" : "USAR ESTA";
+      botao.disabled = escolhida;
+      botao.addEventListener("click", () => {
+        versaoEscolhida = v.em_uso ? null : v.versao;
+        // **A frase existe porque o nome e a imagem não atravessam.** Quem
+        // hospeda passa a ser a outra janela, e o protocolo só aceita
+        // `rename_server` de dentro dela — perder as escolhas em silêncio seria
+        // o «o produto sabe e não conta» de novo.
+        $("preparar-versao-aviso").hidden = versaoEscolhida === null;
+        $("preparar-confirmar").textContent =
+          versaoEscolhida === null ? "HOSPEDAR" : `ABRIR A ${versaoEscolhida} PARA HOSPEDAR`;
+        desenharVersoesParaHospedar().catch((f) => console.warn("versoes:", f));
+      });
+      caixa.append(botao);
+      linha.append(caixa);
+      return linha;
+    }),
+  );
+}
+
+$("preparar-voltar").addEventListener("click", fecharPreparar);
+
+$("preparar-icone-escolher").addEventListener("click", () => {
+  $("preparar-erro").hidden = true;
+  invoke("preparar_icone_do_server")
+    .then((bytes) => {
+      // `null` é ter fechado o seletor sem escolher, e não é falha de nada.
+      if (!bytes) return;
+      iconePreparado = bytes;
+      pintarIconePreparado();
+    })
+    .catch((falha) => {
+      $("preparar-erro").hidden = false;
+      $("preparar-erro").textContent = fraseDeErro(falha);
+    });
+});
+
+$("preparar-icone-tirar").addEventListener("click", () => {
+  iconePreparado = null;
+  pintarIconePreparado();
+});
+
+$("preparar-confirmar").addEventListener("click", () => {
+  confirmarPreparar().catch((falha) => console.warn("hospedar:", falha));
+});
+
+/**
+ * Leva as três escolhas adiante.
+ *
+ * Dois desfechos, e eles não são variações do mesmo: com outra versão, quem
+ * hospeda é outro processo e esta janela só o abre; com esta, é o caminho de
+ * sempre — `hospedar`, conectar, e só então o nome e a imagem, que são verbos
+ * de protocolo e não existem antes de haver conexão.
+ */
+async function confirmarPreparar() {
+  const erro = $("preparar-erro");
+  const confirmar = $("preparar-confirmar");
+  erro.hidden = true;
+  confirmar.disabled = true;
+
+  const nomePublico = $("campo-nome-publico").value.trim() || null;
+
+  try {
+    if (versaoEscolhida !== null) {
+      await invoke("abrir_versao", {
+        versao: versaoEscolhida,
+        hospedar: true,
+        nomePublico,
+        link: null,
+      });
+      $("preparar-etapa").hidden = false;
+      $("preparar-etapa").textContent = `abrindo a versão ${versaoEscolhida} para hospedar`;
+      return;
+    }
+
+    // A entrada volta, e com ela o foco: `hospedar()` desenha o progresso lá.
+    $("tela-preparar").hidden = true;
+    $("tela-boot").hidden = false;
+    voltarParaTela("tela-boot");
+    await hospedar();
+
+    // Depois de conectar, e só depois: os dois viajam pela conexão.
+    const nome = $("preparar-nome").value.trim();
+    if (nome !== "") await invoke("renomear_server", { name: nome });
+    if (iconePreparado) await invoke("aplicar_icone_do_server", { icone: iconePreparado });
+  } catch (falha) {
+    // Se `hospedar` já mostrou o erro na tela de entrada, esta linha não é
+    // alcançada — ela cobre o nome, a imagem e a abertura de outra versão, que
+    // sem isto falhariam sem dizer nada.
+    if (!$("tela-preparar").hidden) {
+      erro.hidden = false;
+      erro.textContent = fraseDeErro(falha);
+    }
+  } finally {
+    confirmar.disabled = false;
+  }
+}

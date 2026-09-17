@@ -505,30 +505,6 @@ let regrasDoIcone = null;
  */
 const iconeDesenhado = { revisao: null, uri: null };
 
-/**
- * Os bytes de um PNG como um `data:` que um `<img>` aceita.
- *
- * Montado aqui, tipo de mídia incluído, e isso seria errado para um anexo — lá
- * o tipo é uma **alegação** de quem mandou, e o ADR 0027 proíbe a tela de
- * juntar as duas coisas. Aqui não há alegação nenhuma para o conteúdo
- * desmentir: a mensagem do protocolo carrega bytes e mais nada, e o que ela
- * aceita é PNG e só PNG, conferido nas duas pontas pela assinatura. `image/png`
- * não é uma promessa desta linha; é o que estes bytes já provaram ser antes de
- * chegarem aqui.
- *
- * `data:` e não um blob porque a Content Security Policy desta janela é
- * `img-src 'self' data:` e não se mexe nela por causa de uma imagem.
- */
-function uriDeIcone(bytes) {
-  // Em pedaços, e não `String.fromCharCode(...bytes)`: espalhar oito mil
-  // argumentos numa chamada estoura a pilha em alguns motores, e a falha
-  // apareceria como a imagem simplesmente não desenhando.
-  let cru = "";
-  for (let de = 0; de < bytes.length; de += 4096) {
-    cru += String.fromCharCode.apply(null, bytes.slice(de, de + 4096));
-  }
-  return `data:image/png;base64,${btoa(cru)}`;
-}
 
 /**
  * Põe a imagem guardada onde ela se desenha, ou a tira.
@@ -1180,3 +1156,28 @@ $("boot-microfone-ajustes").addEventListener("click", () => {
     console.warn("abrir_ajustes_do_microfone:", falha),
   );
 });
+
+/**
+ * Os bytes de um PNG como um `data:` que um `<img>` aceita.
+ *
+ * Montado aqui, tipo de mídia incluído, e isso seria errado para um anexo — lá
+ * o tipo é uma **alegação** de quem mandou, e o ADR 0027 proíbe a tela de
+ * juntar as duas coisas. Aqui não há alegação nenhuma para o conteúdo
+ * desmentir: a mensagem do protocolo carrega bytes e mais nada, e o que ela
+ * aceita é PNG e só PNG, conferido nas duas pontas pela assinatura. `image/png`
+ * não é uma promessa desta linha; é o que estes bytes já provaram ser antes de
+ * chegarem aqui.
+ *
+ * `data:` e não um blob porque a Content Security Policy desta janela é
+ * `img-src 'self' data:` e não se mexe nela por causa de uma imagem.
+ */
+function uriDeIcone(bytes) {
+  // Em pedaços, e não `String.fromCharCode(...bytes)`: espalhar oito mil
+  // argumentos numa chamada estoura a pilha em alguns motores, e a falha
+  // apareceria como a imagem simplesmente não desenhando.
+  let cru = "";
+  for (let de = 0; de < bytes.length; de += 4096) {
+    cru += String.fromCharCode.apply(null, bytes.slice(de, de + 4096));
+  }
+  return `data:image/png;base64,${btoa(cru)}`;
+}
