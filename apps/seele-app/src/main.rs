@@ -1221,6 +1221,12 @@ async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Resul
     if let Some(server) = server {
         server.encerrar().await;
     }
+    // E esta janela deixa de hospedar um servidor guardado. Sem isto, um
+    // `renomear_server` depois de entrar em **outro** servidor acertaria o nome
+    // do que ficou para trás.
+    if let Ok(mut no_ar) = session.servidor_no_ar.lock() {
+        *no_ar = None;
+    }
     Ok(())
 }
 

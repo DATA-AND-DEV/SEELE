@@ -194,8 +194,23 @@ pub fn guardar_identidade(
 /// **são** a mesma máquina e o mesmo endereço. Uma chave por máquina é a
 /// verdade que o pino já afirmava.
 ///
-/// Devolve se herdou. Não sobrescreve: um banco que já tem identidade tem
-/// clientes que a fixaram.
+/// **Sobrescreve, e esta é a segunda metade da lição.** A primeira versão
+/// recusava sobrescrever, com o argumento de que um banco com identidade já tem
+/// clientes que a fixaram. O argumento é bom em geral e **não vale aqui**: o
+/// pino é por endereço, e dois servidores guardados nesta máquina dividem o
+/// mesmo. É impossível alguém ter fixado os dois — quem fixou o segundo já
+/// tinha perdido o pino do primeiro.
+///
+/// A recusa deixava sem conserto justamente as máquinas onde o defeito já
+/// aconteceu: um servidor criado antes desta correção fica com a chave própria
+/// para sempre, e continua disparando o alerta a cada troca. Medido na máquina
+/// de quem relatou — dois bancos, duas chaves, um endereço.
+///
+/// A chave de `de` é a do banco de sempre, e é a que as pessoas têm fixada.
+/// Fazer todo servidor desta máquina falar com essa voz é o que zera os
+/// alertas, não o que os causa.
+///
+/// Devolve se mudou alguma coisa.
 ///
 /// # Errors
 ///
@@ -204,12 +219,12 @@ pub fn herdar_identidade(
     de: &crate::persistence::Persistence,
     para: &crate::persistence::Persistence,
 ) -> Result<bool> {
-    if identidade_guardada(para).is_some() {
-        return Ok(false);
-    }
     let Some((cert, key)) = identidade_guardada(de) else {
         return Ok(false);
     };
+    if identidade_guardada(para).as_ref() == Some(&(cert.clone(), key.clone())) {
+        return Ok(false);
+    }
     guardar_identidade(para, &cert, &key)?;
     Ok(true)
 }
@@ -249,23 +264,39 @@ mod uma_chave_por_maquina {
         );
     }
 
-    /// A outra metade, e sem ela o teste acima passaria com uma função que
-    /// sobrescreve tudo: um banco que já tem identidade tem clientes que a
-    /// fixaram, e trocá-la é justamente o alerta que se quer evitar.
+    /// **O caso que o primeiro conserto deixou de fora, e era o do relato.**
+    ///
+    /// Um servidor criado antes da correção já tem chave própria. A primeira
+    /// versão recusava sobrescrever — e com isso deixava sem conserto
+    /// justamente a máquina onde o defeito já tinha acontecido: dois bancos,
+    /// duas chaves, um endereço, e o alerta a cada troca, para sempre.
     #[test]
-    fn herdar_nunca_sobrescreve_uma_identidade_que_ja_tem_dono() {
+    fn um_servidor_que_ja_tem_chave_propria_passa_a_usar_a_da_maquina() {
         let velho = com_identidade();
         let outro = com_identidade();
-        let antes = identidade_guardada(&outro);
-
-        assert!(!herdar_identidade(&velho, &outro).expect("herdar"));
-
-        assert_eq!(identidade_guardada(&outro), antes);
         assert_ne!(
             identidade_guardada(&outro),
             identidade_guardada(&velho),
-            "cada um continua com a sua"
+            "antes, cada um com a sua"
         );
+
+        assert!(herdar_identidade(&velho, &outro).expect("herdar"));
+
+        assert_eq!(
+            identidade_guardada(&outro),
+            identidade_guardada(&velho),
+            "depois, a máquina fala com uma voz só"
+        );
+    }
+
+    /// E herdar duas vezes não é uma segunda escrita: sem isto, toda vez que
+    /// alguém pedisse o banco haveria uma gravação no disco sem nada mudar.
+    #[test]
+    fn herdar_de_novo_nao_muda_nada_e_diz_que_nao_mudou() {
+        let velho = com_identidade();
+        let outro = banco();
+        assert!(herdar_identidade(&velho, &outro).expect("primeira"));
+        assert!(!herdar_identidade(&velho, &outro).expect("segunda"));
     }
 
     #[test]
