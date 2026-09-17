@@ -1940,6 +1940,69 @@ fn esquecer_aceite_de_mods(app: AppHandle, alvo: String) -> Result<(), FalhaNoMo
         .map_err(|motivo| FalhaNoMod::Recusado { motivo })
 }
 
+/// Escolhe uma pasta e instala o MOD que houver nela.
+///
+/// A pasta vem do diálogo do sistema, e não de texto digitado: um caminho
+/// escrito à mão é um caminho que erra, e o engano mais provável — apontar para
+/// a pasta que **contém** o MOD em vez da pasta do MOD — tem recusa própria.
+///
+/// `None` é a pessoa tendo fechado o diálogo, e não é falha: desistir de
+/// escolher é uma resposta.
+///
+/// Devolve o identificador que o manifesto declara, para a tela dizer **o que**
+/// foi instalado em vez de só dizer que deu certo.
+///
+/// # Errors
+///
+/// [`mods::FalhaAoInstalarMod`], uma variante por motivo.
+#[tauri::command]
+async fn instalar_mod(app: AppHandle) -> Result<Option<String>, mods::FalhaAoInstalarMod> {
+    use tauri_plugin_dialog::DialogExt as _;
+
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title("Escolha a pasta do MOD")
+        .pick_folder(move |escolha| {
+            let _ = envia.try_send(escolha);
+        });
+
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(None);
+    };
+    let Ok(pasta) = escolha.into_path() else {
+        return Err(mods::FalhaAoInstalarMod::SemManifesto);
+    };
+    mods::instalar_de(std::path::Path::new(&config_dir(&app)), &pasta).map(Some)
+}
+
+/// Se **esta janela** está hospedando um servidor agora.
+///
+/// # Por que a tela precisa perguntar isto separado
+///
+/// Porque `mods_instalados` devolve `enabled: false` para todos quando não há
+/// servidor hospedado — e isso é indistinguível de «há servidor e nenhum MOD
+/// está ligado» olhando só a lista. A tela desenharia botões de LIGAR que não
+/// têm onde ligar, e a pessoa apertaria um e leria uma recusa que não explica
+/// nada sobre o que ela fez de errado: ela não fez nada de errado.
+#[tauri::command]
+fn estou_hospedando(session: State<'_, Session>) -> bool {
+    session
+        .hospedagem
+        .lock()
+        .is_ok_and(|aberto| aberto.is_some())
+}
+
+/// Todo sim que esta máquina já deu a um servidor.
+///
+/// ADR 0045: «um consentimento que não se retira não é consentimento». Sem esta
+/// lista, `esquecer_aceite_de_mods` só podia ser chamada por quem já soubesse o
+/// endereço de cor — o que é o mesmo que não poder ser chamada.
+#[tauri::command]
+fn aceites_de_mods(app: AppHandle) -> Vec<seele_ffi::mods::AceiteGuardado> {
+    seele_ffi::mods::aceites_guardados(&config_dir(&app))
+}
+
 /// Os identificadores ligados, ou vazio quando esta janela não hospeda.
 ///
 /// Não hospedar não é falha aqui: a lista de MODs instalados é útil de qualquer
@@ -3856,6 +3919,9 @@ fn main() {
             versoes_instaladas,
             abrir_versao,
             abertura,
+            instalar_mod,
+            aceites_de_mods,
+            estou_hospedando,
             disconnect,
             snapshot,
             messages,

@@ -127,6 +127,14 @@ function abrirSecao(id) {
     if (!atual) continue;
     $("server-titulo").textContent = botao.dataset.titulo;
     $("server-subtitulo").textContent = botao.dataset.sub;
+    // **Desenhada ao abrir, e não ao subir a janela.** As duas listas de MODS
+    // leem disco e perguntam ao servidor hospedado; fazê-lo no arranque
+    // custaria isso a toda pessoa que nunca abre esta seção. E elas mudam por
+    // fora — instalar um MOD copiando a pasta à mão, hospedar depois de já
+    // estar aqui —, então o momento certo de ler é o de olhar.
+    if (atual && botao.dataset.painel === "painel-mods") {
+      desenharMods().catch((falha) => console.warn("mods:", falha));
+    }
   }
 }
 

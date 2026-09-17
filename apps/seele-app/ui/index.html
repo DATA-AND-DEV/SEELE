@@ -39,6 +39,7 @@
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
+<link rel="stylesheet" href="camada-mods.css">
 <link rel="stylesheet" href="camada-servidores.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="camada-compartilhar.css">
@@ -1987,6 +1988,29 @@
             </span>
           </button>
         </li>
+        <li>
+          <!--
+            MODS — ADR 0045. Aqui, e não na sessão, pelo mesmo argumento que põe
+            o microfone nesta tela: o que se ajusta aqui é **desta máquina**.
+            Quais MODs estão no disco e a que servidores esta máquina já disse
+            sim são as duas coisas mais desta máquina que existem.
+
+            A seção não é escondida para quem não hospeda, como A PORTA é: metade
+            dela — os aceites que esta máquina deu — vale para quem só entra nos
+            servidores dos outros, e é justamente quem mais precisa poder
+            desfazê-los.
+          -->
+          <button id="secao-mods" class="server-secao" type="button"
+                  data-painel="painel-mods"
+                  data-titulo="MODS"
+                  data-sub="O que está instalado nesta máquina e a quem você já disse sim">
+            <span class="server-secao-icone" data-glifo="chave"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">MODS</span>
+              <span class="nota">Instalados e aceites</span>
+            </span>
+          </button>
+        </li>
         <!--
           A quinta, e a única que o comp v3 não desenha: ele foi feito antes de
           existir um botão de atualizar. Ela é desta tela e não de outra pelo
@@ -2442,6 +2466,55 @@
                 seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> servidor
                 que você já visitou, e não há como recuperá-lo sem um operador de
                 cada um deles.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------------------------------------------------- MODS -->
+        <!--
+          ADR 0045, e é a tela que faltava do lado de quem hospeda — o par da
+          camada de aceite, que é do lado de quem entra.
+
+          Os verbos existiam desde a entrega do ADR: `mods_instalados`,
+          `habilitar_mod` e `desabilitar_mod` estavam registrados no `main.rs` e
+          **não eram chamados por nenhuma tela**. Sem isto, habilitar um MOD só
+          era possível editando o banco à mão.
+        -->
+        <section id="painel-mods" class="server-painel-secao"
+                 aria-labelledby="secao-mods" hidden>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">MODS DESTA MÁQUINA</h3>
+              <p class="nota">O que está no disco, e o que este servidor exige</p>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <ul id="lista-mods" class="server-dispositivos mods-rolagem"></ul>
+                <p id="mods-sem-hospedar" class="nota" hidden>Ligar e desligar MOD
+                  é do servidor que <b>esta janela</b> hospeda. Sem hospedar, a
+                  lista mostra o que está instalado e mais nada.</p>
+                <p id="mods-gestao-erro" class="erro" role="alert" hidden></p>
+                <button id="mods-instalar" class="botao" type="button">INSTALAR MOD DE UMA PASTA</button>
+                <p class="nota">Um MOD é uma pasta com <code>mod.json</code> dentro.
+                  Instalar copia os arquivos para esta máquina e <b>não liga</b> o
+                  MOD: ligar é outra decisão, e é o que permite examinar antes de
+                  deixar rodar.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">SERVIDORES A QUEM VOCÊ DISSE SIM</h3>
+              <p class="nota">Cada sim vale para uma combinação de MODs e versões</p>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <ul id="lista-aceites" class="server-dispositivos mods-rolagem"></ul>
+                <p class="nota">Desfazer um sim faz a lista de MODs daquele
+                  servidor ser perguntada de novo na próxima entrada. Um
+                  consentimento que não se retira não é consentimento.</p>
+              </div>
             </div>
           </div>
         </section>
@@ -3088,6 +3161,54 @@
   </div>
 </div>
 
+<!--
+  O aceite dos MODs de um servidor — ADR 0045.
+
+  **A tela que faltava.** O anúncio atravessava o fio, o core recusava a entrada
+  com a lista na mão, e os três verbos de gravar o sim estavam registrados no
+  `main.rs` sem nenhum chamador. Um servidor com MOD habilitado simplesmente não
+  tinha como ser entrado por este aplicativo.
+
+  Ela mostra o que o produto sabe provar — identificador, versão, hash do
+  conteúdo, repositório e alcance — e **não** mostra selo de procedência. O
+  protótipo desenha «OFICIAL · ASSINADO»; nada aqui verifica assinatura de MOD
+  hoje, e um selo que o código não sustenta é a coisa em que a pessoa se apoiaria
+  para dizer sim sem ler o resto.
+-->
+<div id="mods-aceite" class="camada-mods" role="dialog" aria-modal="true"
+     aria-labelledby="mods-titulo" tabindex="-1" hidden>
+  <div class="mods-caixa">
+    <div class="mods-cabeca">
+      <h2 id="mods-titulo" class="mods-titulo">ESTE SERVIDOR USA MODS</h2>
+      <span id="mods-contagem" class="mods-contagem"></span>
+    </div>
+    <div class="mods-corpo-geral">
+      <p class="mods-prosa"><b>MODs são parte deste servidor.</b> Eles executam
+        código nesta máquina e podem mudar a janela inteira. Leia o que cada um
+        alcança antes de entrar.</p>
+      <p class="mods-servidor-alvo">Servidor: <span id="mods-alvo" class="mods-alvo"></span></p>
+      <ul id="mods-lista" class="mods-lista"></ul>
+      <!--
+        Só aparece quando esta máquina já disse sim a **outra** lista deste
+        mesmo servidor. É a diferença entre uma primeira visita e um servidor
+        que trocou de MOD — e a segunda é justamente quando ler a lista importa
+        mais.
+      -->
+      <p id="mods-mudou" class="mods-mudou" hidden>Este servidor mudou a lista
+        de MODs desde a última vez que você disse sim. O aceite anterior não
+        autoriza esta lista.</p>
+      <p class="nota">Aceitar vale somente para esta combinação de servidor,
+        MODs e versões. Qualquer mudança pergunta de novo, e o sim pode ser
+        desfeito em CONFIGURAÇÕES.</p>
+      <p id="mods-erro" class="nomear-erro" role="alert" hidden></p>
+      <div class="mods-acoes">
+        <button id="mods-recusar" class="botao-fantasma" type="button">RECUSAR E VOLTAR</button>
+        <button id="mods-aceitar" class="nomear-confirmar" type="button">ACEITAR E ENTRAR</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="base.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>
@@ -3111,6 +3232,7 @@
 <script src="camada-portaria.js"></script>
 <script src="camada-ajuda.js"></script>
 <script src="camada-nomear.js"></script>
+<script src="camada-mods.js"></script>
 <script src="camada-servidores.js"></script>
 <!--
   Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,

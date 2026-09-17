@@ -85,6 +85,35 @@ pub fn ler_um(pasta: &str, id: &str) -> Result<ModInstalado, String> {
     }
 }
 
+/// Lê um pacote de MOD de uma pasta qualquer desta máquina.
+///
+/// Diferente de [`ler_um`], que procura dentro da pasta de MODs instalados:
+/// aqui a pasta é a que a pessoa escolheu, e ainda não é instalação nenhuma.
+///
+/// Existe para a tela de instalar: ela precisa dizer **qual** MOD a pessoa
+/// apontou, e recusar o que não serve, antes de qualquer byte ser copiado.
+/// Copiar primeiro e conferir depois deixaria meia instalação em disco toda vez
+/// que alguém apontasse para a pasta errada.
+///
+/// # Errors
+///
+/// Devolve o nome da recusa quando o manifesto falta ou não vale.
+pub fn ler_pasta(caminho: &str) -> Result<ModInstalado, String> {
+    match seele_core::mods::read_one(std::path::Path::new(caminho)) {
+        Ok(instalado) => Ok(ModInstalado {
+            id: instalado.manifest.id,
+            version: instalado.manifest.version,
+            hash: hex(&instalado.hash),
+            client: instalado.manifest.client,
+            repo: instalado.manifest.repo,
+            reach: instalado.manifest.reach,
+            server: instalado.manifest.server.is_some(),
+            refused: None,
+        }),
+        Err(why) => Err(refusal_name(&why).to_owned()),
+    }
+}
+
 /// Um achado do `seele-core` em campos que atravessam a fronteira.
 fn achatar(found: Found) -> ModInstalado {
     match found {
@@ -149,6 +178,36 @@ pub fn caminho_interno(partes: &[&str]) -> Option<std::path::PathBuf> {
 pub fn aceite_de(home: &str, alvo: &str) -> Option<String> {
     let chave = crate::chave_do_servidor(alvo)?;
     seele_core::aceites::Aceites::em(std::path::Path::new(home)).aceito_de(&chave)
+}
+
+/// Um aceite guardado, como a tela o desenha.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AceiteGuardado {
+    /// Sob que chave o servidor está arquivado. A mesma do pin.
+    pub alvo: String,
+    /// A identidade do conjunto aceito.
+    pub conjunto: String,
+    /// Quando, em segundos desde a época.
+    pub quando: i64,
+}
+
+/// Todo sim que esta máquina já deu, para a tela poder desfazê-los.
+///
+/// Existe porque a promessa do ADR 0045 — «um consentimento que não se retira
+/// não é consentimento» — precisa de um lugar onde a pessoa **veja** o que
+/// aceitou. `esquecer_aceite` já existia e só podia ser chamada por quem já
+/// soubesse o endereço de cor.
+#[must_use]
+pub fn aceites_guardados(home: &str) -> Vec<AceiteGuardado> {
+    seele_core::aceites::Aceites::em(std::path::Path::new(home))
+        .listar()
+        .into_iter()
+        .map(|aceite| AceiteGuardado {
+            alvo: aceite.alvo,
+            conjunto: aceite.conjunto,
+            quando: aceite.quando,
+        })
+        .collect()
 }
 
 /// Guarda o sim que a pessoa acabou de dar a um conjunto de MODs.

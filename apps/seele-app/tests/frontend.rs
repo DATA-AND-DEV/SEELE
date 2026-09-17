@@ -469,13 +469,18 @@ fn every_command_the_frontend_calls_is_registered() {
 // pergunta que a janela já mostra não tem resposta possível. A pessoa lê o que o
 // servidor exige e não tem o que fazer com a leitura — que é meia funcionalidade
 // entregue como se fosse uma.
-const AGUARDANDO_TELA: &[&str] = &[
-    "habilitar_mod",
-    "desabilitar_mod",
-    "aceite_de_mods",
-    "aceitar_mods",
-    "esquecer_aceite_de_mods",
-];
+// **A lista voltou a ser vazia em 2026-09-17**, e o estado de repouso dela é
+// este. As cinco entradas que estavam aqui saíram juntas, com as duas telas que
+// faltavam: a camada de aceite (`camada-mods.js`), que é de quem entra, e a
+// seção MODS de CONFIGURAÇÕES, que é de quem hospeda mais a metade que vale
+// para todo mundo — desfazer um sim já dado.
+//
+// `aceite_de_mods` foi a última a sair, e por pouco ela teria ficado com um
+// comentário dizendo que o guarda de baixo a cobrava — o que é falso: estar
+// nesta lista é justamente o que impede aquele guarda de vê-la. Ela ganhou o
+// chamador que faltava, e ele é o aviso que o protótipo desenha: quando esta
+// máquina já disse sim a **outra** lista deste mesmo servidor, a tela diz isso.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -3244,6 +3249,16 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
             // ajuste; uma linha que diz `DESLIGADO NO SISTEMA` informa.
             "secao-aparencia",
             "secao-identidade",
+            // MODS, de 2026-09-17, e ela chega **depois** de IDENTIDADE pelo
+            // mesmo critério que pôs ATUALIZAÇÃO ali: o que se ajusta nesta
+            // tela é desta máquina, e quais MODs estão no disco dela — e a
+            // quem ela já disse sim — é tão local quanto qual SEELE está
+            // instalado.
+            //
+            // Ela não é escondida para quem não hospeda, como A PORTA é:
+            // metade dela, os aceites, vale justamente para quem só entra nos
+            // servidores dos outros.
+            "secao-mods",
             // The fourth is not the comp's — it predates the update button
             // existing at all (ADR 0026). It lands here because what this screen
             // adjusts is *this machine*, and which SEELE is installed on it is

@@ -210,7 +210,14 @@ async function conectar(alvo, apelido, token) {
     // uma falha que chega enquanto essa tela está na frente pertence a ela:
     // `#boot-erro` estaria escondido atrás. `levarParaAEspera` responde se
     // tratou a falha, e só o que sobra vira a linha vermelha daqui.
-    if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
+    // A pergunta dos MODs tem tela própria — ADR 0045 —, e ela é uma pergunta
+    // e não uma falha: a lista chega inteira no erro, e o que falta é a pessoa
+    // ler e responder. Antes desta linha o que acontecia era uma frase
+    // vermelha terminando em «a tela ainda não existe neste app», e o servidor
+    // ficava inentrável.
+    if (levarParaOAceiteDeMods(motivo, ultimoAlvo ?? "")) {
+      // Nada de linha vermelha: quem manda agora é o diálogo.
+    } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
       erro.hidden = false;
       // O apelido que esta tentativa mandou, para a recusa por nome tomado
       // poder dizer **qual** nome foi recusado. Ver `fraseDeErro`.

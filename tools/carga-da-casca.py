@@ -130,7 +130,18 @@ window.__TAURI__ = {
       if (cmd === "connect" || cmd === "hospedar") window.__SEELE_EM_SESSAO = true;
       if (cmd === "disconnect") window.__SEELE_EM_SESSAO = false;
       if (cmd === "snapshot" && !window.__SEELE_EM_SESSAO) throw "NotConnected";
-      if (cmd in SEELE_RESPOSTAS) return SEELE_RESPOSTAS[cmd];
+      // **Um comando pode recusar.** Sem isto o duble só sabia responder, e
+      // metade da casca — toda tela que existe por causa de uma recusa — não
+      // tinha como ser exercitada aqui. Um roteiro põe
+      // `SEELE_RESPOSTAS.connect = { __recusa: {...} }` e o `invoke` estoura
+      // com o objeto de dentro, que é a forma que o Tauri entrega.
+      if (cmd in SEELE_RESPOSTAS) {
+        const resposta = SEELE_RESPOSTAS[cmd];
+        if (resposta && typeof resposta === "object" && "__recusa" in resposta) {
+          throw resposta.__recusa;
+        }
+        return resposta;
+      }
       if (/conhecid|fontes|lista|dispositiv|visitad|salas|canais|pessoas/i.test(cmd)) return [];
       // Um retrato para uma pessoa só: o que se quer ver é a diferença entre um
       // avatar com imagem e um com iniciais, lado a lado no mesmo quadro.

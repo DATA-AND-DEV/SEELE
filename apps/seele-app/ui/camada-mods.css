@@ -1,0 +1,255 @@
+/* O aceite dos MODs — ADR 0045.
+ *
+ * A moldura e o véu são os da `camada-nomear`, de propósito: este é o mesmo
+ * tipo de momento — o produto parou e está esperando uma resposta —, e um
+ * segundo vocabulário visual para a mesma coisa ensinaria a lê-los como coisas
+ * diferentes.
+ *
+ * O que muda é a largura e a lista. Uma pergunta sobre rodar código de terceiro
+ * na própria máquina não cabe na caixa de 420px em que se digita um nome: aqui
+ * a pessoa **compara** itens, e comparar precisa de linha. */
+
+.camada-mods {
+  position: fixed;
+  inset: 0;
+  z-index: 27;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.camada-mods::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.78;
+}
+
+.mods-caixa {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  /* A caixa nunca passa da janela, e é o corpo que rola — ver `.mods-lista`.
+   * Um diálogo mais alto que a tela põe os botões fora dela, e os botões são a
+   * única saída desta pergunta. */
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-laranja-nerv);
+}
+
+.mods-cabeca {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
+  flex: 0 0 auto;
+}
+
+.mods-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+
+.mods-contagem {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.08em;
+}
+
+.mods-corpo-geral {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.mods-prosa {
+  margin: 0;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.45;
+  color: var(--seele-osso);
+}
+
+.mods-servidor-alvo {
+  margin: 0;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+}
+
+.mods-alvo {
+  font-family: var(--seele-mono);
+  color: var(--seele-osso);
+}
+
+/* **A lista rola, e o resto não.**
+ *
+ * O número de MODs vem do servidor, e nada o limita a caber numa tela. Sem
+ * isto, um servidor com muitos MODs empurraria os botões para fora da janela —
+ * e o `base.css` põe `overflow: hidden` no `body`, então nem a janela rolaria
+ * atrás. A pessoa ficaria presa numa pergunta sem como respondê-la. */
+.mods-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  min-height: 0;
+  background: var(--seele-linha);
+  border: 1px solid var(--seele-linha);
+}
+
+.mods-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--seele-negro-painel);
+}
+
+.mods-ordem {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  color: var(--seele-osso-apagado);
+  flex: 0 0 auto;
+  padding-top: 2px;
+}
+
+.mods-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mods-id {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-corpo);
+  color: var(--seele-osso);
+  word-break: break-all;
+}
+
+.mods-versao {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+}
+
+.mods-repo,
+.mods-hash {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+  word-break: break-all;
+}
+
+.mods-alcances {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.mods-etiqueta {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+}
+
+.mods-etiqueta-vazia { color: var(--seele-osso-apagado); }
+
+/* Laranja e não mais uma etiqueta cinza: rodar na máquina de quem hospeda não é
+ * mais um alcance entre outros — é código de terceiro rodando no computador de
+ * outra pessoa, e o ADR 0045 o separa pelo mesmo motivo. */
+.mods-servidor {
+  margin: 4px 0 0;
+  font-size: var(--seele-t-dado);
+  line-height: 1.4;
+  color: var(--seele-laranja-nerv);
+}
+
+.mods-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------ a gestão, na tela de CONFIGURAÇÕES
+ *
+ * As duas listas desta seção reusam `.server-dispositivos`, que é a lista de
+ * aparelhos: são a mesma forma — uma linha por coisa, com uma ação à direita —
+ * e um segundo vocabulário para a mesma forma ensinaria a lê-las como coisas
+ * diferentes. O que estas classes acrescentam é só o que difere. */
+
+/* A linha tem duas colunas: o que a coisa é, e o que se faz com ela. O botão
+ * não estica junto com o nome — um DESLIGAR largo como o identificador de um
+ * MOD vira um alvo de clique do tamanho da tela. */
+.mods-linha-gestao {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.mods-linha-gestao > .server-dispositivo-nome {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.mods-linha-gestao > .botao-fantasma { flex: 0 0 auto; }
+
+/* Vermelho, que o `07-estetica.md` reserva para erro. Um MOD que não serve
+ * **aparece na lista** em vez de ser escondido: quem copiou a pasta precisa
+ * saber que o produto a viu e a descartou, e por quê. Escondê-lo seria o
+ * produto sabendo e não contando. */
+.mods-recusado {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-vermelho-alerta);
+}
+
+/* As duas listas leem de fora — do disco e do servidor hospedado — e nada
+ * limita o tamanho delas. O mesmo motivo do `.mods-lista` do diálogo. */
+.mods-rolagem {
+  max-height: 16em;
+  overflow-y: auto;
+}
+
+/* O aviso de que deu certo ocupa o mesmo lugar do erro, e a cor é o que os
+ * separa. Um segundo elemento para a resposta boa ficaria vazio na maior parte
+ * do tempo e empurraria o botão para baixo quando aparecesse. */
+.mods-aviso-bom { color: var(--seele-fosforo); }
+
+/* O aviso de que a lista mudou desde o último sim. Laranja e não vermelho: não
+ * é erro — é a informação que decide se vale a pena ler a lista de novo. */
+.mods-mudou {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--seele-laranja-nerv);
+  font-size: var(--seele-t-dado);
+  line-height: 1.4;
+  color: var(--seele-laranja-nerv);
+}
