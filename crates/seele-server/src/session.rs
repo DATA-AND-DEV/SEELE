@@ -3109,6 +3109,15 @@ async fn run_session(
                         // nova e a re-senta com um canal morto. Achado por
                         // revisão independente; ver
                         // [`crate::server::a_mudanca_de_sala_e_desta_conexao`].
+                        //
+                        // Quem prova que esta chamada continua aqui é o teste de
+                        // conformidade
+                        // `o_anuncio_de_mudanca_de_sala_nao_e_respondido_pela_conexao_velha`,
+                        // contra um servidor de verdade: apagada a conferência,
+                        // ele reprova. Houve aqui, antes dele, uma prova que lia
+                        // este arquivo e cobrava a forma literal do desvio;
+                        // revisão independente apontou que ela reprovaria também
+                        // numa reescrita equivalente e correta, e ela saiu.
                         let e_minha = {
                             let presentes = server.presentes.lock().await;
                             crate::server::a_mudanca_de_sala_e_desta_conexao(
@@ -3317,6 +3326,11 @@ async fn run_session(
             session.ssrc,
             Instant::now(),
         ) {
+            // Contado, e não só dito: o guarda acerta **não** escrevendo, e um
+            // teste de ponta a ponta não tem como distinguir «a reserva foi
+            // recusada» de «esta conexão nunca chegou ao fim» olhando só para o
+            // efeito. Ver [`crate::server::Desassentamentos::reserva_obsoleta`].
+            server.desassentamentos.reserva_obsoleta();
             tracing::info!(
                 person = %session.person,
                 sessao = %session.id,
@@ -3526,21 +3540,35 @@ async fn desassentar(
             // nunca se sentou: `PersonLeft` diz que uma sala esvaziou, e quem
             // nunca se sentou não produz nenhum.
             let mut presentes = server.presentes.lock().await;
+
+            // Esta conexão ainda é a vigente desta pessoa? **Perguntado antes de
+            // remover, e não deduzido do que a remoção devolveu.** A primeira
+            // versão contava «não removeu nada e a pessoa continua aqui», o que
+            // parece a mesma coisa e não é: desarmado o filtro de sessão de
+            // [`Presentes::saiu`], a remoção passa a devolver verdadeiro e o
+            // contador nunca anda — então a prova de reversão reprovava na
+            // asserção do contador, acusando margem curta, em vez de reprovar na
+            // asserção que descreve o defeito. Contado aqui, o número diz o que o
+            // nome dele promete: uma conexão velha chegou ao fim depois de a
+            // pessoa já ter voltado por outra. Isso é verdade com o guarda armado
+            // e com ele desarmado — é a encenação do teste, não o veredito dele.
+            // Ver [`crate::server::Desassentamentos`].
+            let e_a_vigente = presentes.e_a_vigente(session.person, session.id);
+            let pessoa_continua_aqui = presentes.esta_presente(session.person);
+            if !e_a_vigente && pessoa_continua_aqui {
+                server.desassentamentos.conexao_velha();
+            }
+
             let saiu = presentes.saiu(session.person, session.id);
-            // Uma conexão que não tinha nada seu para tirar e cuja pessoa
-            // continua aqui é **o guarda tendo trabalhado**: a sessão velha da
-            // queda silenciosa, morrendo depois de a nova já ter subido. Contado
-            // porque, dando certo, ele não deixa outro rastro — nada muda, e nada
-            // mudar é indistinguível de a sessão velha nunca ter morrido. Ver
-            // [`crate::server::Desassentamentos`].
-            let defendeu = !saiu && presentes.esta_presente(session.person);
+            // E o guarda tendo trabalhado de fato: nada seu para tirar, e a
+            // pessoa segue aqui por outra conexão.
+            let defendeu = !saiu && pessoa_continua_aqui;
             drop(presentes);
             if saiu {
                 let _ = server.events.send(Event::PersonGone {
                     person: session.person,
                 });
             } else if defendeu {
-                server.desassentamentos.conexao_velha();
                 tracing::info!(
                     person = %session.person,
                     sessao = %session.id,
@@ -5438,6 +5466,19 @@ mod fim_de_tela_por_sessao {
     /// inteiro. A troca mais fácil de fazer por descuido — `Some(sessao)` virar
     /// `None` — deixou de existir quando o `Option` virou dois nomes: hoje ela
     /// não compila.
+    ///
+    /// **E ele deixou de ser a única coisa que prende o fim de tela do
+    /// desmonte.** Revisão independente registrou a ressalva: uma prova que lê a
+    /// fonte reprova numa reescrita equivalente e correta, e passaria num
+    /// servidor em que a chamada certa não produzisse o efeito certo — foi por
+    /// isso que uma prova desse feitio saiu do guarda de mudança de sala nesta
+    /// mesma entrega. O efeito do fim de tela por sessão passou a ser medido
+    /// contra um servidor de verdade pelo teste de conformidade
+    /// `a_conexao_velha_nao_encerra_a_tela_que_a_nova_abriu`: trocando a chamada
+    /// da linha do desmonte pela da pessoa inteira, ele reprova dizendo que a
+    /// transmissão da conexão nova sumiu do servidor. Este teste continua aqui
+    /// pelo que ele ainda é o único a fazer: cobrar classificação de uma chamada
+    /// nova, em função que ninguém listou.
     ///
     /// Os fins da pessoa inteira estão nomeados um a um de propósito. Uma chamada
     /// nova em função não listada reprova pedindo classificação, em vez de

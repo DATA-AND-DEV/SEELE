@@ -1157,7 +1157,8 @@ impl Atrasos {
     }
 }
 
-/// Quantas conexões velhas morreram sem levar ninguém junto.
+/// Quantas conexões velhas chegaram ao fim depois de a pessoa delas já ter
+/// voltado por outra.
 ///
 /// **Existe porque o conserto, funcionando, não deixa rastro nenhum.** O guarda
 /// de sessão acerta calando-se: a sessão velha morre, não encontra nada seu para
@@ -1165,12 +1166,19 @@ impl Atrasos {
 /// indistinguível de a sessão velha nunca ter morrido — e um teste que não
 /// distingue as duas coisas passa por ausência de evento, e não por defesa.
 ///
-/// Este número é a diferença entre as duas. Cada unidade aqui é uma conexão que
-/// chegou ao fim depois de a mesma pessoa já ter reconectado por outra: a queda
-/// silenciosa de rede que o `docs/pendencias.md` #11 descreve. Zero é o normal
-/// numa rede que não cai; um número que cresce durante uma chamada é a rede de
-/// alguém piscando — e, antes do guarda, era essa pessoa ficando muda e invisível
-/// para quem ficou, sem nenhum sinal para ela própria.
+/// Este número é a diferença entre as duas. Ele conta a **encenação**, e não o
+/// veredito: a conexão velha morreu enquanto a pessoa estava aqui por outra. Um
+/// teste o lê para saber que o momento que ele queria medir chegou a acontecer,
+/// e só então as asserções de estado dele querem dizer alguma coisa. De
+/// propósito ele não depende de o guarda ter funcionado — se dependesse,
+/// desarmar o guarda faria o próprio contador parar, e a reprovação apontaria
+/// para o relógio em vez de apontar para o estado apagado. Cada unidade aqui é
+/// uma conexão que chegou ao fim depois de a mesma pessoa já ter reconectado
+/// por outra: a queda silenciosa de rede que o `docs/pendencias.md` #11
+/// descreve. Zero é o normal numa rede que não cai; um número que cresce
+/// durante uma chamada é a rede de alguém piscando — e, antes do guarda, era
+/// essa pessoa ficando muda e invisível para quem ficou, sem nenhum sinal para
+/// ela própria.
 ///
 /// Do processo inteiro e não por sessão, pela mesma razão que [`Atrasos`]: um
 /// contador que morre com a conexão que o incrementou responde com silêncio a
@@ -1178,6 +1186,7 @@ impl Atrasos {
 #[derive(Debug, Default)]
 pub struct Desassentamentos {
     conexoes_velhas: std::sync::atomic::AtomicU64,
+    reservas_obsoletas: std::sync::atomic::AtomicU64,
 }
 
 impl Desassentamentos {
@@ -1191,6 +1200,27 @@ impl Desassentamentos {
     #[must_use]
     pub fn conexoes_velhas(&self) -> u64 {
         self.conexoes_velhas
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Registra uma reserva de assento que **não** foi gravada porque quem a
+    /// pediria já não era a conexão desta pessoa.
+    ///
+    /// Contado pela mesma razão que [`Self::conexao_velha`], e não junto com
+    /// ela: são dois guardas diferentes, e somá-los faria um teste que mede um
+    /// passar por causa do outro. A reserva obsoleta vale cinco minutos e
+    /// re-senta numa sala de onde a pessoa saiu de propósito — quem investiga
+    /// «voltei e caí dentro de uma sala que eu tinha deixado» precisa achar
+    /// este número, e não deduzi-lo.
+    pub fn reserva_obsoleta(&self) {
+        self.reservas_obsoletas
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Quantas reservas obsoletas o guarda já recusou.
+    #[must_use]
+    pub fn reservas_obsoletas(&self) -> u64 {
+        self.reservas_obsoletas
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 }
