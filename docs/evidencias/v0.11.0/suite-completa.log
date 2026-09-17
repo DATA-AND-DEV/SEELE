@@ -1,0 +1,2745 @@
+   Compiling seele-app v0.0.0 (/Users/dev-alexandre/SEELE/apps/seele-app)
+   Compiling seele-lancador v0.0.0 (/Users/dev-alexandre/SEELE/crates/seele-lancador)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.36s
+     Running unittests src/main.rs (target/debug/deps/seele_app-fd659a596652f30a)
+
+running 14 tests
+test mods::tests::um_mod_que_nao_existe_nao_e_servido ... ok
+test icone::testes::o_que_nao_e_imagem_nao_vira_icone ... ok
+test icone::testes::uma_imagem_que_ja_cabia_atravessa_sem_perder_nada ... ok
+test mods::tests::um_caminho_que_tenta_subir_nao_e_servido ... ok
+test mods::tests::nenhum_caminho_causa_panico ... ok
+test mods::tests::um_arquivo_que_o_manifesto_nao_declara_nao_e_servido ... ok
+test mods::tests::um_arquivo_declarado_no_manifesto_e_servido ... ok
+test versoes::o_launcher_ligado_ao_produto::a_versao_escolhida_recebe_o_executavel_dela_e_os_dados_dela ... ok
+test versoes::o_launcher_ligado_ao_produto::cada_recusa_diz_qual_foi ... ok
+test versoes::o_launcher_ligado_ao_produto::sem_pedir_para_hospedar_nenhum_argumento_atravessa ... ok
+test versoes::o_launcher_ligado_ao_produto::abrir_o_que_nao_existe_falha_sem_panico ... ok
+test versoes::o_launcher_ligado_ao_produto::a_lista_marca_o_que_esta_em_uso_e_o_que_nao_da_para_abrir ... ok
+test icone::testes::a_pior_imagem_possivel_ainda_cabe ... ok
+test icone::testes::o_lado_nunca_passa_do_que_o_protocolo_aceita ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.88s
+
+     Running tests/empacotamento.rs (target/debug/deps/empacotamento-c2bbc5df6b285fc2)
+
+running 22 tests
+test compilar_o_app_nao_exige_binario_nenhum_pronto ... ok
+test a_instalacao_e_da_maquina_porque_a_regra_de_firewall_depende_disso ... ok
+test o_app_declara_para_que_quer_a_rede_de_casa ... ok
+test a_regra_de_firewall_e_por_programa_e_nao_por_porta ... ok
+test a_regra_de_firewall_sai_junto_com_o_programa ... ok
+test o_app_declara_para_que_quer_o_microfone ... ok
+test a_regra_de_firewall_e_apagada_antes_de_ser_criada ... ok
+test o_build_ad_hoc_do_mac_nao_liga_o_hardened_runtime ... ok
+test o_atualizador_esta_declarado_na_configuracao ... ok
+test o_bundle_do_macos_e_assinado ... ok
+test o_app_declara_para_que_quer_a_tela ... ok
+test no_linux_o_servidor_vai_para_o_path ... ok
+test nenhum_comentario_do_modelo_parece_handlebars ... ok
+test o_instalador_cria_a_regra_de_firewall_de_entrada ... ok
+test o_empacotamento_leva_o_servidor_e_nao_leva_o_cliente_de_terminal ... ok
+test o_modelo_bifurcado_guarda_o_que_faz_a_atualizacao_funcionar ... ok
+test o_repositorio_nao_pede_artefatos_de_atualizacao ... ok
+test o_modulo_de_video_e_procurado_fora_do_pacote ... ok
+test o_windows_recebe_um_instalador_so ... ok
+test o_rastro_do_windows_fica_ao_lado_das_preferencias ... ok
+PARCIAL: o `tauri-bundler` não está no registro desta máquina; a bifurcação diz vir da 2.9.4 e ninguém a contradiz aqui.
+test a_bifurcacao_do_modelo_ainda_corresponde_ao_tauri_instalado ... ok
+test todo_crate_do_produto_pode_falar_no_log ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/encerramento.rs (target/debug/deps/encerramento-86353ba0922031da)
+
+running 2 tests
+test a_despedida_espera_o_quadro_sair ... ok
+test fechar_a_janela_avisa_o_servidor ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/fontes.rs (target/debug/deps/fontes-7460b8f9242a9a3e)
+
+running 5 tests
+test the_faces_are_held_rather_than_swapped_in ... ok
+test every_file_a_font_face_points_at_is_in_the_tree ... ok
+test every_face_the_tokens_name_is_actually_served ... ok
+test every_face_carries_the_licence_it_was_given_under ... ok
+test no_shipped_face_file_is_left_unserved ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/frontend.rs (target/debug/deps/frontend-33752b4eaaf6dfb5)
+
+running 188 tests
+test a_ajuda_nao_rouba_a_interrogacao_de_quem_esta_escrevendo ... ok
+test a_message_arriving_does_not_throw_the_search_back_to_the_first_occurrence ... ok
+test a_escolha_da_transmissao_e_uma_intencao_e_nao_o_estado_do_fluxo ... ok
+test a_caixa_de_compartilhar_troca_de_janela_sem_parar_antes ... ok
+test a_file_that_is_not_what_it_says_it_is_gets_its_own_sentence ... ok
+test a_parede_do_firewall_traz_o_conserto_junto ... ok
+test a_message_whose_file_expired_still_says_what_the_file_was ... ok
+test a_file_offered_with_no_line_open_is_refused_out_loud ... ok
+test a_entrada_desenha_a_marca_nova_e_nenhuma_citacao_do_anime ... ok
+test a_file_goes_on_its_own_path_and_never_through_send_message ... ok
+test a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug ... ok
+test a_person_card_passes_the_band_through_and_never_measures_anything_itself ... ok
+test a_tela_parada_por_falta_de_subida_do_anfitriao_nao_acusa_quem_le ... ok
+test a_preview_already_fetched_is_redrawn_and_never_fetched_twice ... ok
+test a_espera_so_bate_enquanto_alguem_esta_olhando ... ok
+test a_transfer_that_falls_says_that_trying_again_starts_from_zero ... ok
+test a_knock_is_identified_by_its_fingerprint_and_never_by_the_name_it_claims ... ok
+test as_listas_de_aparelho_avisam_que_escolher_pelo_nome_fixa ... ok
+test a_tela_le_do_instantaneo_os_campos_que_o_rust_realmente_manda ... ok
+test a_lista_de_servidores_vazia_diz_por_que_esta_vazia ... ok
+test a_count_that_did_not_arrive_stops_the_question_instead_of_rounding_it ... ok
+test a_preview_is_asked_for_by_a_press_and_by_nothing_else ... ok
+test a_preview_is_not_an_open_and_is_not_a_save ... ok
+test a_nota_que_promete_o_enter_tem_quem_a_cumpra ... ok
+test a_ajuda_so_promete_teclas_que_a_janela_atende ... ok
+test a_file_that_cannot_be_read_says_so_where_it_can_be_seen ... ok
+test arriving_at_a_server_opens_a_line_and_does_not_put_anybody_in_a_voice_room ... ok
+test ending_the_session_takes_the_call_screen_down_with_it ... ok
+test destroying_a_room_says_what_it_does_to_the_people_and_to_the_other_room ... ok
+test a_failure_this_screen_cannot_name_still_says_what_it_was ... ok
+test escolher_um_canal_leva_para_a_conversa_dele ... ok
+test destroying_a_room_is_offered_by_the_permission_that_destroys_it ... ok
+test every_reason_a_screen_share_can_stop_for_has_a_sentence ... ok
+test every_path_a_connection_can_take_has_a_sentence_in_the_page ... ok
+test as_duas_saidas_continuam_dizendo_qual_delas_larga_a_sala ... ok
+test every_failure_the_rust_side_can_name_has_a_sentence_here ... ok
+test every_glyph_the_page_asks_for_is_one_glifos_js_can_draw ... ok
+test every_rung_of_the_reachability_ladder_has_a_sentence ... ok
+test entering_and_leaving_a_voice_room_are_labelled_buttons_and_not_a_click_on_the_row ... ok
+test entering_another_server_leaves_this_one_and_says_so_with_both_names ... ok
+test every_stage_of_an_arrival_has_a_sentence_in_the_page ... ok
+test every_refusal_the_server_can_send_has_a_sentence ... ok
+test each_moderation_verb_is_offered_by_its_own_permission ... ok
+test every_screen_says_where_the_focus_lands_and_what_to_announce ... ok
+test every_command_the_frontend_calls_is_registered ... ok
+test every_surface_that_draws_a_person_dresses_their_portrait ... ok
+test creating_a_room_is_offered_by_permission_and_sized_by_the_server ... ok
+test every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_opens ... ok
+test leaving_forgets_the_invite_that_let_us_in ... ok
+test every_list_the_server_fills_lives_inside_something_that_scrolls ... ok
+test every_reason_a_session_can_end_with_has_a_sentence_in_the_page ... ok
+test both_sides_of_the_audio_picker_are_drawn_by_the_same_code ... ok
+test moving_somebody_says_they_did_not_ask_and_that_both_rooms_watch_it_happen ... ok
+test nada_finge_ter_um_passado_que_esta_janela_nao_viu ... ok
+test every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page ... ok
+test neither_side_of_the_bridge_collapses_whitespace ... ok
+test every_key_the_shortcut_table_names_is_one_a_script_listens_for ... ok
+test every_verdict_the_bridge_can_send_has_its_own_sentence_in_the_page ... ok
+test no_sentence_the_screen_writes_reaches_a_third_line ... ok
+test no_sentence_the_screen_writes_runs_past_the_length_that_gets_read ... ok
+test no_class_is_drawn_by_two_stylesheets_without_being_a_declared_refinement ... ok
+test every_transition_that_puts_a_screen_on_hands_it_the_keyboard ... ok
+test nenhum_convite_sobrevive_a_troca_de_servidor ... ok
+test every_way_the_update_can_fail_asks_something_different_of_the_reader ... ok
+test no_two_screens_claim_the_same_class_name ... ok
+test no_command_is_registered_and_never_called ... ok
+test o_bilhete_da_atualizacao_e_escrito_antes_de_o_processo_poder_morrer ... ok
+test o_glifo_de_um_botao_nao_e_alvo_de_clique ... ok
+test o_canal_tem_um_lapis_grudado_no_x_e_nao_so_o_nome_da_barra_de_cima ... ok
+test no_two_scripts_declare_the_same_top_level_name ... ok
+test o_aviso_do_aparelho_nao_fica_solto_do_desenho_da_tela ... ok
+test no_screen_of_this_product_opens_a_file ... ok
+test o_nome_do_canal_so_vira_botao_para_quem_administra ... ok
+test o_recurso_do_apelido_sai_da_impressao_desta_maquina ... ok
+test o_isolamento_total_diz_que_cala_a_tela_tambem ... ok
+test o_renomear_do_canal_le_qual_canal_esta_aberto_na_hora_do_clique ... ok
+test o_servidor_nao_impoe_uma_transmissao_que_ninguem_pediu ... ok
+test o_rodape_do_operador_muda_de_oficio_com_a_sala ... ok
+test o_andamento_da_conexao_e_frase_e_nao_enfeite ... ok
+test no_two_scripts_declare_the_same_name_at_the_top_level ... ok
+test nothing_arms_an_act_in_a_box_it_never_opened ... ok
+test opening_a_stream_asks_for_a_key_frame ... ok
+test sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo ... ok
+test os_pacotes_que_nao_voltam_nao_se_chamam_sincronizacao ... ok
+test onde_se_escolhe_um_servidor_explica_o_que_se_digita ... ok
+test nothing_waits_for_a_screen_that_already_draws_it ... ok
+test nothing_draws_a_battery_bar_out_of_a_denominator_the_wire_never_sent ... ok
+test the_alert_and_the_battery_are_layers_over_the_session_and_not_screens ... ok
+test the_alert_box_does_not_spend_the_red_reserved_for_a_dropped_link ... ok
+test saving_never_writes_to_a_path_this_window_cannot_name ... ok
+test no_moderation_act_reaches_the_server_without_a_sentence_that_says_what_it_costs ... ok
+test saving_says_out_loud_what_this_product_does_not_promise ... ok
+test the_alarm_names_the_rungs_the_ladder_actually_reports ... ok
+test the_app_opens_on_exactly_one_screen ... ok
+test the_ban_says_that_nothing_in_this_product_undoes_it ... ok
+test the_attachment_button_opens_a_chooser ... ok
+test the_bar_measures_bytes_and_never_pretends ... ok
+test the_bridge_maps_every_refusal_the_wire_can_carry ... ok
+test o_palco_le_o_que_foi_pedido_do_snapshot_e_nao_da_memoria_da_janela ... ok
+test o_padrao_da_tecla_de_falar_e_o_mesmo_nos_dois_lugares ... ok
+test opening_the_moderation_carries_the_keyboard_and_closing_gives_it_back ... ok
+test the_bound_name_is_stated_once_and_never_worn_as_a_badge ... ok
+test the_content_security_policy_did_not_move_to_make_room_for_a_picture ... ok
+test the_csp_admits_mods_and_never_loosens_further ... ok
+test no_act_of_the_doorkeeper_reaches_the_server_without_a_sentence_that_says_what_it_costs ... ok
+test the_ceiling_for_the_picture_is_said_before_the_picker_and_never_written_in_the_page ... ok
+test the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening ... ok
+test the_alert_box_has_one_way_out_and_the_keyboard_can_take_it ... ok
+test the_button_that_stopped_inserting_the_plug_stopped_saying_it_does ... ok
+test the_doorkeeper_spends_the_alarm_red_only_on_a_door_open_to_the_internet ... ok
+test the_failed_connection_hands_the_shell_the_trail_it_kept ... ok
+test the_download_bar_is_left_unmeasured_when_the_package_carries_no_total ... ok
+test the_highlight_ranges_land_on_the_term_inside_the_body_the_page_draws ... ok
+test the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after ... ok
+test the_add_server_button_carries_one_verb_and_not_the_two_the_v2_conflated ... ok
+test the_decoder_profile_is_read_from_the_stream_and_never_spelled_out ... ok
+test the_ipv6_sentence_teaches_the_fix_with_an_address_that_would_work ... ok
+test no_script_calls_a_function_that_no_script_declares ... ok
+test the_event_name_the_script_branches_on_is_the_one_the_bridge_sends ... ok
+test the_key_frame_that_arms_the_decoder_is_handed_to_it ... ok
+test the_current_occurrence_is_not_marked_out_by_colour_alone ... ok
+test the_enumerated_reason_reaches_the_screen_and_is_not_only_carried ... ok
+test the_comparison_stays_in_rust_and_only_its_verdict_crosses ... ok
+test the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carried ... ok
+test the_button_with_no_command_behind_it_cannot_be_pressed_and_the_one_that_grew_one_asks_first ... ok
+test the_mod_commands_the_page_invokes_exist_in_rust ... ok
+test the_moderation_does_not_spend_the_red_reserved_for_alarm_and_collapse ... ok
+test the_line_confirmation_counts_what_it_is_about_to_destroy ... ok
+test the_nat_punching_rung_names_its_cost_where_the_cost_is_paid ... ok
+test the_ordinal_indexes_the_same_list_the_page_groups_by_message ... ok
+test the_note_beside_a_control_is_not_painted_in_the_colour_reserved_for_large_text ... ok
+test the_page_loads_mods_after_the_first_draw ... ok
+test the_moderation_is_a_layer_over_the_session_and_never_replaces_it ... ok
+test the_informative_verdicts_do_not_spend_the_alarm_reserved_for_a_key_change ... ok
+test the_knock_is_read_out_once_per_appearance_and_not_once_per_poll ... ok
+test the_knock_notice_never_takes_the_keyboard_from_somebody_mid_sentence ... ok
+test the_name_travels_as_it_was_and_the_type_is_carried_as_a_claim ... ok
+test the_phrase_for_an_unknown_failure_reads_an_error_before_stringifying_it ... ok
+test the_last_voice_room_is_offered_disabled_with_the_reason_written_on_it ... ok
+test the_note_beside_a_control_is_defined_once_and_never_by_a_screen ... ok
+test the_path_is_written_beside_the_numbers_and_then_left_alone ... ok
+test the_picture_crosses_the_bridge_only_when_its_revision_moved ... ok
+test nenhum_termo_aposentado_volta_para_o_texto_da_interface ... ok
+test the_remove_control_hides_at_rest_and_the_keyboard_still_finds_it ... ok
+test the_picker_sends_back_the_id_and_never_the_name ... ok
+test the_page_loads_only_files_that_are_shipped ... ok
+test the_screen_never_invents_a_word_for_a_path_it_does_not_know ... ok
+test the_microphone_list_reads_the_field_names_a_device_actually_serialises ... ok
+test the_reason_a_picture_was_not_drawn_is_written_where_it_can_be_seen ... ok
+test the_server_section_confirms_by_state_and_not_by_a_save_button ... ok
+test the_host_is_told_how_far_the_link_they_are_about_to_send_reaches ... ok
+test the_reason_a_rung_failed_is_not_prefixed_by_a_label_it_already_carries ... ok
+test the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead ... ok
+test the_server_section_is_offered_from_the_snapshot_and_never_judged_by_the_screen ... ok
+test the_refused_invite_reaches_the_screen_with_both_fingerprints ... ok
+test the_screen_says_which_microphone_is_open_and_not_only_which_was_chosen ... ok
+test the_shell_never_remembers_a_nickname_nobody_chose ... ok
+test the_shared_layer_loads_before_the_screens_and_accessibility_loads_last ... ok
+test the_frontend_never_names_a_protocol_concept ... ok
+test the_stage_that_gives_up_names_no_cause_it_does_not_know ... ok
+test the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row ... ok
+test the_shell_reaches_mods_through_the_ffi_and_not_past_it ... ok
+test the_update_screen_says_the_window_closes_and_that_a_hosted_server_falls_with_it ... ok
+test the_severity_of_a_notice_reads_without_colour ... ok
+test the_vpn_rung_names_the_vpn_that_is_why_the_link_stops_here ... ok
+test the_search_command_puts_the_cursor_back_after_rebuilding ... ok
+test the_page_never_composes_the_media_type_a_picture_is_decoded_with ... ok
+test the_script_reads_the_field_names_a_match_actually_serialises ... ok
+test the_state_of_a_person_is_a_word_and_never_only_a_colour ... ok
+test the_trilha_lists_the_history_and_never_offers_the_server_it_is_already_on ... ok
+test the_update_is_only_ever_asked_for_by_a_press ... ok
+test trocar_para_a_mesma_fonte_nao_corta_a_imagem_de_quem_assiste ... ok
+test um_retrato_transitorio_nao_apaga_a_escolha_de_quem_esta_na_sala ... ok
+test uma_atualizacao_que_nao_pegou_e_dita_e_nao_descoberta ... ok
+test the_voice_room_says_who_is_inside_and_says_their_state_in_words ... ok
+test the_search_starts_closed_and_opens_from_something_that_says_buscar ... ok
+test voltar_a_um_servidor_leva_o_apelido_daquela_vez ... ok
+test todo_estado_do_aparelho_que_a_ponte_manda_chega_dito_na_tela ... ok
+test the_volume_control_does_not_hide_behind_the_pointer ... ok
+test the_captions_mode_does_not_come_back_by_accident ... ok
+test the_variant_names_the_shell_sends_are_the_ones_the_wire_uses ... ok
+test the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless ... ok
+test toda_camada_fecha_apertando_fora_dela ... ok
+test the_page_never_draws_a_glyph_the_data_face_does_not_have ... ok
+test todo_argumento_que_o_frontend_manda_existe_no_comando ... ok
+test toda_classe_que_o_script_aplica_tem_regra_de_css ... ok
+test there_is_no_blocklist_of_extensions_anywhere_in_the_frontend ... ok
+test every_element_the_script_reaches_for_exists_in_the_page ... ok
+
+test result: ok. 188 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/marca.rs (target/debug/deps/marca-1e479cad6a726973)
+
+running 9 tests
+test o_ico_do_windows_traz_todos_os_tamanhos ... ok
+test o_favicon_e_a_forma_muda ... ok
+test os_icones_de_windows_e_linux_sao_png_de_32_bits ... ok
+test cada_faixa_de_icone_aguenta_os_pixeis_dela ... ok
+test a_marca_servida_pelo_app_e_a_marca_de_design ... ok
+test a_marca_so_usa_cores_que_os_tokens_definem ... ok
+test toda_variacao_carrega_a_geometria_do_simbolo ... ok
+test a_marca_nunca_usa_o_vermelho_de_falha ... ok
+test os_glifos_da_marca_estao_em_contorno ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/permissoes.rs (target/debug/deps/permissoes-bf52f087d7027e55)
+
+running 4 tests
+test guardas::the_shells_own_commands_stay_reachable_from_the_page ... ok
+test guardas::the_page_cannot_open_a_dialog_of_its_own ... ok
+test guardas::the_page_may_stop_listening ... ok
+test guardas::the_page_may_register_an_event_listener ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tokens.rs (target/debug/deps/tokens-3e1838fb3c114625)
+
+running 3 tests
+test the_served_tokens_are_the_frozen_tokens ... ok
+test the_scanline_does_not_take_a_token_below_the_contrast_it_already_had ... ok
+test the_stylesheet_uses_no_colour_the_tokens_do_not_define ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_audio-c7c0ccbbf727848f)
+
+running 225 tests
+test bitrate::tests::oscilar_na_zona_morta_nao_troca_de_faixa ... ok
+test bitrate::tests::subir_duas_faixas_custa_duas_permanencias ... ok
+test bitrate::tests::sobe_depois_da_permanencia ... ok
+test bitrate::tests::nao_sobe_antes_da_permanencia_inteira ... ok
+test bitrate::tests::perda_alta_derruba_uma_faixa_por_medida ... ok
+test bitrate::tests::uma_medida_ruim_recomeca_a_contagem ... ok
+test bitrate::tests::comeca_na_faixa_de_cima ... ok
+test bitrate::tests::o_piso_da_spec_e_o_piso_de_verdade ... ok
+test device::taxa_do_aparelho::a_lista_e_varrida_ate_achar_uma_que_sirva ... ok
+test device::taxa_do_aparelho::um_aparelho_que_so_oferece_taxa_baixa_nao_e_forcado ... ok
+test device::taxa_do_aparelho::nem_formato_nem_canal_sao_trocados_de_carona ... ok
+test device::taxa_do_aparelho::um_aparelho_que_aceita_a_taxa_do_projeto_recebe_o_pedido ... ok
+test codec::tests::a_corrupt_payload_is_an_error_and_not_a_panic ... ok
+test device::tests::a_playback_id_that_names_no_device_is_an_enum_and_not_a_panic ... ok
+test device::tests::a_playback_refusal_carries_the_id_that_was_asked_for ... ok
+test device::tests::an_id_that_names_no_device_is_an_enum_and_not_a_panic ... ok
+test device::tests::classificacao_do_erro_do_cpal::o_aparelho_que_sumiu_pede_reabertura ... ok
+test device::tests::a_refusal_carries_the_id_that_was_asked_for ... ok
+test device::tests::classificacao_do_erro_do_cpal::a_troca_de_aparelho_do_sistema_pede_reabertura ... ok
+test device::tests::classificacao_do_erro_do_cpal::um_tropeco_nao_derruba_um_aparelho_que_esta_funcionando ... ok
+test device::tests::every_failure_blames_exactly_one_side ... ok
+test device::tests::retorno_de_erro_do_cpal::a_troca_feita_no_sistema_chega_ao_laco_como_troca ... ok
+test device::tests::retorno_de_erro_do_cpal::o_aparelho_arrancado_chega_ao_laco_como_sumico ... ok
+test codec::tests::a_frame_of_the_wrong_length_is_refused_by_name ... ok
+test codec::tests::setting_the_bitrate_it_already_has_changes_nothing ... ok
+test device::tests::retorno_de_erro_do_cpal::um_estalo_nao_vira_aviso_de_aparelho_nenhum ... ok
+test codec::tests::the_bitrate_is_clamped_to_the_allowed_range ... ok
+test drift::tests::a_silent_window_does_not_produce_an_estimate ... ok
+test drift::tests::an_absurd_drift_is_clamped_rather_than_obeyed ... ok
+test codec::tests::concealment_produces_a_full_frame ... ok
+test codec::tests::a_bitrate_change_keeps_the_stream_encodable ... ok
+test drift::tests::no_estimate_exists_before_two_windows ... ok
+test drift::tests::a_perfect_clock_reads_as_no_drift ... ok
+test drift::tests::a_fast_sender_is_measured_as_positive_drift ... ok
+test codec::tests::a_frame_survives_the_round_trip_with_its_shape ... ok
+test drift::tests::a_slow_sender_is_measured_as_negative_drift ... ok
+test drift::tests::reset_forgets_a_stream_that_restarted ... ok
+test drift::tests::drift_is_still_found_underneath_heavy_jitter_and_loss ... ok
+test ganho::testes::a_subida_e_lenta_o_bastante_para_ninguem_ouvir ... ok
+test drift::tests::small_drift_is_left_alone ... ok
+test ganho::testes::uma_voz_alta_nunca_e_amplificada ... ok
+test drift::tests::the_correction_ratio_points_the_right_way ... ok
+test drift::tests::ten_minutes_at_a_realistic_drift_is_a_whole_jitter_buffer ... ok
+test gate::tests::a_level_between_the_thresholds_does_not_open_but_does_hold ... ok
+test gate::tests::changing_mode_never_leaves_a_hot_microphone ... ok
+test codec::tests::silence_costs_nothing_on_the_wire ... ok
+test drift::tests::jitter_does_not_masquerade_as_drift ... ok
+test gate::tests::hangover_keeps_the_tail_of_a_sentence ... ok
+test ganho::testes::o_silencio_nao_e_amplificado ... ok
+test ganho::testes::um_grito_depois_do_sussurro_nao_estoura ... ok
+test gate::tests::open_mode_always_transmits ... ok
+test gate::tests::rms_matches_constant_magnitude ... ok
+test gate::tests::rms_of_silence_is_zero ... ok
+test gate::tests::push_to_talk_follows_the_key_and_ignores_level ... ok
+test gate::tests::the_closing_threshold_is_below_the_opening_one ... ok
+test gate::tests::voice_activation_opens_above_the_opening_threshold ... ok
+test gate::tests::continued_speech_refreshes_the_hangover ... ok
+test jitter::tests::a_frame_that_arrives_after_its_slot_is_discarded_and_counted ... ok
+test jitter::tests::a_gap_conceals_once_then_falls_back_to_silence ... ok
+test jitter::tests::a_pause_does_not_push_playout_permanently_behind ... ok
+test jitter::tests::a_quiet_conversation_reports_no_loss_at_all ... ok
+test jitter::tests::a_perfect_network_plays_every_frame_in_order ... ok
+test jitter::tests::an_implausible_gap_resyncs_instead_of_grinding ... ok
+test jitter::tests::an_empty_buffer_reports_starved_not_loss ... ok
+test gate::tests::metrics_account_for_every_frame ... ok
+test jitter::tests::dtx_silence_is_not_counted_as_loss ... ok
+test jitter::tests::duplicates_are_ignored ... ok
+test jitter::tests::loss_inside_a_silence_is_separated_exactly ... ok
+test ganho::testes::uma_voz_baixa_sobe_ate_perto_do_alvo ... ok
+test jitter::tests::real_loss_is_still_counted_as_loss ... ok
+test jitter::tests::reordered_frames_are_put_back_in_order ... ok
+test jitter::tests::sequence_delta_handles_wrap ... ok
+test jitter::tests::silence_is_not_compressed_into_a_moment ... ok
+test jitter::tests::target_grows_fast_and_shrinks_slowly ... ok
+test gate::tests::a_single_threshold_would_chatter_and_hysteresis_does_not ... ok
+test jitter::tests::overflow_is_bounded_and_counted ... ok
+test jitter::tests::a_wide_jitter_path_holds_more_delay_than_a_quiet_one ... ok
+
+thread '<unnamed>' (949243) panicked at crates/seele-audio/src/laco.rs:470:13:
+envenenando de propósito, para o teste
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test laco::testes::cadeado_de_amostras_envenenado_em_tomar_nao_vira_buffer_vazio_silencioso ... ok
+test jitter::tests::the_buffer_is_deterministic ... ok
+test laco::testes::erro_do_reamostrador_na_abertura_nao_vira_ausencia_de_saida ... ok
+test laco::testes::recusa_do_reamostrador_em_tomar_nao_vira_buffer_vazio_silencioso ... ok
+test jitter::tests::the_acceptance_profile_stays_mostly_intelligible ... ok
+test gate::tests::room_tone_does_not_open_the_gate ... ok
+test jitter::tests::target_stays_inside_the_spec_bounds ... ok
+test latency::tests::a_recording_shorter_than_the_click_is_no_measurement ... ok
+test latency::tests::a_run_that_mostly_failed_is_not_trustworthy ... ok
+test latency::tests::an_empty_run_reports_nothing_rather_than_zero ... ok
+test codec::tests::nenhum_quadro_de_voz_chega_perto_do_piso_de_datagrama_do_quic ... ok
+test drift::tests::uncorrected_drift_makes_latency_creep ... ok
+test latency::tests::the_median_ignores_one_wild_outlier ... ok
+test mixer::tests::a_single_source_at_unity_passes_through_untouched ... ok
+test mixer::tests::forgetting_a_source_returns_it_to_unity ... ok
+test mixer::tests::loud_mixes_are_bent_not_crunched ... ok
+test mixer::tests::master_gain_at_zero_is_total_isolation ... ok
+test mixer::tests::muting_one_source_leaves_the_others_alone ... ok
+test mixer::tests::negative_gain_is_rejected_rather_than_inverting_phase ... ok
+test mixer::tests::no_sources_is_silence_not_stale_memory ... ok
+test mixer::tests::per_source_gain_is_applied ... ok
+test mixer::tests::shorter_sources_do_not_truncate_the_slot ... ok
+test mixer::tests::soft_clip_is_monotonic_and_continuous ... ok
+test mixer::tests::soft_clip_is_transparent_below_the_knee ... ok
+test mixer::tests::soft_clip_never_exceeds_full_scale ... ok
+test mixer::tests::sources_are_summed ... ok
+test netsim::tests::a_drifting_sender_skews_wall_clock_but_not_its_timestamps ... ok
+test netsim::tests::a_perfect_path_delivers_everything_in_order ... ok
+test netsim::tests::a_talker_keeps_sequence_contiguous_across_silence ... ok
+test netsim::tests::arrivals_come_out_in_receive_order ... ok
+test jitter::tests::no_profile_makes_the_buffer_panic_or_lose_track ... ok
+test latency::tests::a_click_is_found_where_it_was_put ... ok
+test netsim::tests::duplicates_are_delivered_and_flagged ... ok
+test netsim::tests::different_seeds_give_different_runs ... ok
+test latency::tests::an_inverted_click_is_still_the_click ... ok
+test netsim::tests::jitter_causes_reordering_without_being_injected ... ok
+test netsim::tests::no_jitter_means_no_reordering ... ok
+test netsim::tests::same_seed_gives_an_identical_run ... ok
+test netsim::tests::sender_stream_matches_the_spec_frame_layout ... ok
+test netsim::tests::spikes_produce_a_long_tail ... ok
+test netsim::tests::mean_burst_length_is_honoured ... ok
+test netsim::tests::total_loss_delivers_nothing ... ok
+test netsim::tests::transit_time_respects_the_configured_floor ... ok
+test netsim::tests::zero_drift_is_the_ordinary_stream ... ok
+test netsim::tests::observed_loss_tracks_the_configured_rate ... ok
+test netsim::tests::the_generator_is_uniform_enough_to_trust ... ok
+test pacing::tests::a_correcao_nao_se_mexe_depressa_o_bastante_para_ser_ouvida ... ok
+test latency::tests::a_click_buried_in_loud_noise_is_reported_with_lower_confidence ... ok
+test pacing::tests::nada_e_corrigido_durante_o_aquecimento_e_tudo_e_corrigido_depois ... ok
+test netsim::tests::bursty_loss_clusters_and_independent_loss_does_not ... ok
+test pacing::tests::empurrada_para_fora_do_alvo_ela_volta_sem_oscilar ... ok
+test pacing::tests::nem_o_pior_alias_tira_o_anel_das_duas_paredes ... ok
+test drift::tests::correction_holds_the_buffer_steady ... ok
+test pacing::tests::o_alvo_vem_do_bloco_do_dispositivo ... ok
+test pacing::tests::o_anel_vazio_recebe_silencio_em_vez_de_um_minuto_de_rampa ... ok
+test pacing::tests::o_absurdo_e_grampeado_e_contado ... ok
+test pacing::tests::o_absurdo_na_outra_direcao_aparece_como_reposicao_e_nao_como_deriva ... ok
+test pacing::tests::no_silencio_a_malha_continua_medindo ... ok
+test pacing::tests::um_laco_parado_nao_e_lido_como_deriva ... ok
+test playout::tests::a_pausa_de_reabrir_o_aparelho_nao_vira_atraso_da_maquina ... ok
+test playout::tests::no_compasso_normal_sai_um_quadro_por_periodo ... ok
+test playout::tests::o_atraso_maximo_e_a_duracao_da_volta_do_laco ... ok
+test playout::tests::o_primeiro_quadro_vence_na_hora ... ok
+test playout::tests::perguntar_antes_do_prazo_nao_produz_nada_e_nao_estraga_o_compasso ... ok
+test playout::tests::sem_reacertar_a_mesma_pausa_apareceria_como_maquina_travada ... ok
+test playout::tests::um_laco_mais_lento_que_o_quadro_continua_em_tempo_real ... ok
+test playout::tests::um_relogio_com_periodo_zero_nao_divide_por_zero ... ok
+test playout::tests::uma_hibernacao_reacerta_em_vez_de_despejar_horas_de_audio ... ok
+test playout::tests::uma_pausa_curta_e_reposta_inteira ... ok
+test resample::tests::adjusting_a_passthrough_is_harmless ... ok
+test pacing::tests::sem_a_malha_o_anel_encosta_na_parede_e_nao_sai_mais ... ok
+test pacing::tests::um_relogio_perfeito_nao_inventa_deriva ... ok
+test pacing::tests::o_deslocamento_em_regime_cabe_dentro_de_um_quadro ... ok
+test latency::tests::a_quiet_echo_is_found_as_well_as_a_loud_one ... ok
+test resample::tests::filter_delay_is_reported_when_converting ... ok
+test resample::tests::matching_rates_are_a_passthrough ... ok
+test pacing::tests::a_razao_converge_para_a_deriva_do_cristal ... ok
+test pacing::tests::a_malha_para_a_perda_e_ela_nao_volta ... ok
+test resample::tests::zero_rate_is_rejected ... ok
+test rt::tests::aviso_de_aparelho::a_troca_e_o_sumico_chegam_separados_ao_laco ... ok
+test rt::tests::aviso_de_aparelho::toda_falha_continua_sendo_contada_como_erro_de_fluxo ... ok
+test rt::tests::aviso_de_aparelho::um_tropeco_e_contado_sem_pedir_reabertura ... ok
+test rt::tests::capacity_matches_the_spec_frame ... ok
+test rt::tests::capture_converts_integer_input ... ok
+test rt::tests::capture_counts_overruns_instead_of_blocking ... ok
+test rt::tests::capture_takes_channel_zero_of_each_frame ... ok
+test rt::tests::format_conversion_clamps_instead_of_wrapping ... ok
+test rt::tests::format_conversion_round_trips_within_one_quantisation_step ... ok
+test rt::tests::playback_duplicates_mono_across_channels ... ok
+test rt::tests::playback_on_empty_ring_is_silence_not_garbage ... ok
+test rt::tests::ragged_device_buffer_leaves_no_stale_memory ... ok
+test rt::tests::round_trip_through_both_rings_preserves_the_signal ... ok
+test rt::tests::sustained_underrun_reaches_silence ... ok
+test rt::tests::the_largest_block_the_device_asked_for_is_reported ... ok
+test rt::tests::underrun_fades_rather_than_cutting ... ok
+test supervisor::tests::a_escolha_do_usuario_nao_declara_sucesso_antes_de_reabrir ... ok
+test supervisor::tests::a_escolha_do_usuario_que_nao_abre_continua_sendo_tentada ... ok
+test supervisor::tests::a_healthy_device_does_nothing ... ok
+test supervisor::tests::a_retirada_do_aparelho_e_seguida_ate_a_maquina_ter_um_de_novo ... ok
+test supervisor::tests::a_ronda_de_quem_desistiu_nao_para_na_primeira_recusa ... ok
+test supervisor::tests::a_segunda_troca_da_sessao_tambem_e_seguida ... ok
+test supervisor::tests::a_troca_do_padrao_do_sistema_reabre_no_aparelho_novo ... ok
+test supervisor::tests::backoff_doubles_between_attempts_and_is_capped ... ok
+test supervisor::tests::every_state_change_is_visible_to_the_interface ... ok
+test supervisor::tests::it_gives_up_after_a_bounded_number_of_attempts ... ok
+test supervisor::tests::o_fone_religado_depois_da_desistencia_volta_a_ter_som ... ok
+test supervisor::tests::o_mesmo_aviso_lido_de_novo_nao_reabre_duas_vezes ... ok
+test supervisor::tests::quem_nao_relata_a_tentativa_nao_fica_sem_cronometro ... ok
+test supervisor::tests::recovering_twice_is_counted_twice ... ok
+test supervisor::tests::repeated_failure_events_do_not_burn_attempts ... ok
+test supervisor::tests::the_user_can_always_recover_a_lost_device ... ok
+test supervisor::tests::um_tropeco_transitorio_nao_derruba_o_aparelho ... ok
+test supervisor::tests::uma_abertura_depois_da_desistencia_nao_acontece_escondida ... ok
+test supervisor::tests::uma_falha_de_reabertura_sobre_um_estado_sao_nao_e_engolida ... ok
+test supervisor::tests::unplugging_a_headset_recovers_on_the_new_default ... ok
+test telemetry::falha_local::a_reabertura_conta_como_amostra_quieta ... ok
+test telemetry::falha_local::maquina_saudavel_nunca_acende ... ok
+test telemetry::falha_local::nao_pisca_a_cada_amostra_parada ... ok
+test telemetry::falha_local::o_aviso_nao_fica_cego_depois_de_trocar_de_aparelho ... ok
+test telemetry::falha_local::o_aviso_volta_quando_o_problema_volta ... ok
+test telemetry::falha_local::trocar_de_aparelho_no_sistema_nao_acende_o_aviso_de_falha_local ... ok
+test telemetry::falha_local::um_estouro_no_arranque_nao_acende_o_aviso_para_sempre ... ok
+test telemetry::falha_local::um_tropeco_de_verdade_continua_acendendo_o_aviso ... ok
+test telemetry::tests::an_empty_roster_reports_zero_rather_than_panicking ... ok
+test telemetry::tests::as_duas_grandezas_chamadas_jitter_nao_devolvem_uma_a_outra ... ok
+test telemetry::tests::assembly_pulls_each_field_from_the_module_that_measures_it ... ok
+test telemetry::tests::o_compasso_chega_inteiro_e_nao_conta_como_tropeco ... ok
+test telemetry::tests::os_tropecos_desta_maquina_somam_as_tres_origens ... ok
+test telemetry::tests::per_source_numbers_survive_aggregation ... ok
+test telemetry::tests::rtt_is_absent_until_the_protocol_layer_supplies_it ... ok
+test telemetry::tests::sem_fonte_nenhuma_nao_ha_jitter_de_chegada_a_dizer ... ok
+test telemetry::tests::silence_never_reaches_the_loss_figure ... ok
+test telemetry::tests::source_telemetry_carries_the_names_from_the_spec ... ok
+test tests::frame_is_960_samples ... ok
+test resample::tests::ratio_can_be_nudged_for_clock_drift ... ok
+test resample::tests::an_adjustable_converter_steers_even_at_matching_rates ... ok
+test resample::tests::downsampling_48000_to_44100_produces_the_right_length ... ok
+test resample::tests::upsampling_44100_to_48000_produces_the_right_length ... ok
+test resample::tests::arbitrary_input_lengths_are_buffered ... ok
+test resample::tests::conversion_preserves_pitch ... ok
+test latency::tests::noise_alone_produces_no_measurement ... ok
+test laco::testes::uma_saida_nao_responde_configuracao_de_entrada ... ok
+test device::tests::every_listed_device_is_labelled_and_at_most_one_is_the_default ... ok
+test device::tests::every_listed_output_is_labelled_and_at_most_one_is_the_default ... ok
+test device::tests::every_listed_id_finds_its_device_again ... ok
+test device::tests::every_listed_output_id_finds_its_device_again ... ok
+test device::tests::a_listed_output_opens_and_reports_itself ... ok
+PARCIAL: fora do Windows não há loopback — o fluxo abre e não anda. Só a taxa é conferida aqui; as amostras, no Windows.
+test laco::testes::a_saida_desta_maquina_abre_como_entrada ... ok
+
+test result: ok. 225 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s
+
+     Running tests/opus_toolchain.rs (target/debug/deps/opus_toolchain-e009170dab0bd588)
+
+running 4 tests
+opus encoder lookahead: 312 samples (6.50 ms)
+test encoder_lookahead_is_within_the_latency_budget ... ok
+test packet_loss_concealment_produces_a_full_frame ... ok
+test encode_decode_round_trip_preserves_signal ... ok
+test encoder_honours_the_bitrate_range_from_the_spec ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/realtime_safety.rs (target/debug/deps/realtime_safety-78d926d44086c643)
+
+running 8 tests
+test integer_format_playback_does_not_allocate ... ok
+test reading_metrics_from_a_callback_does_not_allocate ... ok
+test playback_callback_does_not_allocate ... ok
+test playback_underrun_path_does_not_allocate ... ok
+test integer_format_conversion_does_not_allocate ... ok
+test capture_overrun_path_does_not_allocate ... ok
+test capture_callback_does_not_allocate ... ok
+test the_guard_actually_catches_allocation ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_conformance-ebe37a08487aed09)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/acceptance_m2.rs (target/debug/deps/acceptance_m2-e3cedcdde92c4aa3)
+
+running 9 tests
+test media_before_entering_a_voice_room_goes_nowhere ... ok
+test two_servers_on_one_machine_do_not_share_a_pin ... ok
+test three_clients_in_one_voice_room_hear_each_other ... ok
+test a_second_connection_reuses_the_pin ... ok
+test the_first_connection_pins_the_certificate ... ok
+test the_session_names_the_server_and_its_voice_room ... ok
+test a_ping_comes_back_as_a_pong ... ok
+test a_forged_ssrc_is_refused ... ok
+test a_client_without_permission_is_refused ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.22s
+
+     Running tests/acceptance_m3.rs (target/debug/deps/acceptance_m3-115bd5ee84d2dd7f)
+
+running 8 tests
+test a_returning_person_reclaims_their_seat_and_their_ssrc ... ok
+test a_message_reaches_everybody_on_the_line ... ok
+test a_person_without_write_permission_is_refused ... ok
+test a_resent_message_is_not_posted_twice ... ok
+test telemetry_carries_a_sync_ratio ... ok
+test a_restarted_server_keeps_its_history ... ok
+test history_pages_backwards_without_gaps ... ok
+test a_restarted_server_keeps_its_accounts ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.05s
+
+     Running tests/acceptance_m5.rs (target/debug/deps/acceptance_m5-66aac060fefed1ff)
+
+running 15 tests
+test a_shell_connects_and_the_snapshot_describes_the_server ... ok
+test a_session_started_in_the_terminal_resumes_in_the_desktop ... ok
+test a_second_client_resumes_the_conversation_with_its_history ... ok
+test entering_a_voice_room_puts_us_on_our_own_roster ... ok
+test an_unreachable_server_is_an_enum_and_not_a_message ... ok
+test two_shells_hold_a_conversation ... ok
+test leaving_a_voice_room_takes_us_off_our_own_roster ... ok
+test a_revisao_das_mensagens_anda_quando_alguem_fala ... ok
+test a_shell_asks_for_a_room_and_the_server_makes_it ... ok
+test dropping_the_handle_disconnects ... ok
+test a_shell_without_the_permission_is_refused_by_the_server ... ok
+test the_volume_of_a_stranger_is_refused_by_name ... ok
+test quem_nao_abriu_a_linha_nao_recebe_nada_e_isso_e_a_regra ... ok
+test a_name_that_does_not_resolve_says_so_specifically ... ok
+test a_muted_mic_is_visible_to_everybody_else ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.90s
+
+     Running tests/acceptance_seguranca.rs (target/debug/deps/acceptance_seguranca-00ad2f63ddc7cdac)
+
+running 8 tests
+test quem_foi_recusado_ouve_outra_coisa_de_quem_so_espera ... ok
+test quem_foi_aprovado_entra_na_batida_seguinte_que_vai_sem_segredo ... ok
+test um_server_novo_aceita_qualquer_um ... ok
+test a_senha_do_voice_room_e_conferida ... ok
+test um_convite_serve_a_uma_pessoa_so ... ok
+test a_senha_do_server_fecha_a_porta ... ok
+test um_server_com_portaria_nao_admite_ninguem_por_um_caminho_lateral ... ok
+test reiniciar_o_server_nao_troca_a_chave ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.84s
+
+     Running tests/aceite_dos_mods.rs (target/debug/deps/aceite_dos_mods-c9c2411957b45c7f)
+
+running 15 tests
+test uma_sessao_sobrevive_ao_que_nao_muda_o_conjunto ... ok
+test com_o_aceite_guardado_o_cliente_entra_direto ... ok
+test reconectar_com_o_conjunto_novo_aceito_abre_a_porta ... ok
+test sem_aceite_guardado_o_cliente_recusa_e_devolve_a_lista ... ok
+test o_anuncio_sai_do_servidor_padrao_sem_ninguem_baixar_limiar ... ok
+test habilitar_um_mod_acaba_com_a_sessao_de_quem_aceitou_outro_conjunto ... ok
+test um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou ... ok
+test quem_ja_aceitou_o_conjunto_entra_sem_perguntar_de_novo ... ok
+test um_par_dentro_da_janela_recebe_o_anuncio_antes_de_entrar ... ok
+test um_servidor_sem_mod_continua_deixando_entrar ... ok
+test com_o_portao_dormente_habilitar_um_mod_nao_fecha_a_casa ... ok
+test um_aceite_guardado_de_outro_conjunto_nao_e_reaproveitado ... ok
+test um_aceite_de_ontem_nao_vale_para_o_conjunto_de_hoje ... ok
+test com_o_portao_dormente_habilitar_um_mod_nao_derruba_a_sala ... ok
+test um_par_da_versao_anterior_continua_entrando ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.34s
+
+     Running tests/anexos.rs (target/debug/deps/anexos-d71a8d77b52a3795)
+
+running 10 tests
+test a_mesma_foto_de_duas_pessoas_e_um_arquivo_so ... ok
+test um_arquivo_maior_que_o_limite_da_previa_nao_e_baixado ... ok
+test um_programa_com_nome_de_imagem_tambem_nao_e_desenhado ... ok
+test quem_nao_pode_anexar_e_recusado_com_razao ... ok
+test um_arquivo_que_e_o_que_diz_ser_vira_uma_figura ... ok
+test um_arquivo_cujos_bytes_discordam_do_nome_nao_e_desenhado ... ok
+test o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expirou ... ok
+test um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio ... ok
+test um_server_que_nao_guarda_arquivo_diz_isso_em_vez_de_deixar_pendurado ... ok
+test um_arquivo_sobe_inteiro_e_a_mensagem_so_aparece_depois ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.63s
+
+     Running tests/bateria_interna.rs (target/debug/deps/bateria_interna-998169368beb2400)
+
+running 5 tests
+test uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao ... ok
+test sair_encerra_sem_esperar_a_bateria ... ok
+test o_server_cai_e_a_sessao_entra_na_bateria_em_vez_de_acabar ... ok
+test as_tentativas_aparecem_enquanto_a_bateria_corre ... ok
+test o_que_a_pessoa_escolheu_volta_com_ela ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 23.70s
+
+     Running tests/cancelamento.rs (target/debug/deps/cancelamento-9d561d5b160ac59e)
+
+running 4 tests
+test o_teste_enxerga_o_defeito_que_existia ... ok
+test um_comentario_que_fala_do_defeito_nao_e_o_defeito ... ok
+test o_teste_nao_acusa_o_que_esta_certo ... ok
+test nenhum_select_le_um_quadro_direto_do_fluxo ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/candidatos.rs (target/debug/deps/candidatos-20ae0e7a0eaf11f8)
+
+running 3 tests
+test a_conexao_cai_para_o_proximo_endereco_do_convite ... ok
+test um_convite_de_um_endereco_so_continua_conectando_como_antes ... ok
+três candidatos mortos levaram 4.50700125s e devolveram SemResposta
+test nenhum_endereco_atendendo_falha_e_nao_trava ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.17s
+
+     Running tests/convite.rs (target/debug/deps/convite-b142e14c2428782e)
+
+running 3 tests
+test a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin ... ok
+test a_impressao_que_o_convite_promete_verifica_o_primeiro_contato ... ok
+test um_link_velho_contra_um_server_ja_conhecido_avisa_e_nao_derruba ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+
+     Running tests/desassentar.rs (target/debug/deps/desassentar-de1d670c266721d8)
+
+running 5 tests
+test a_conexao_velha_nao_encerra_a_tela_que_a_nova_abriu ... ok
+test a_conexao_velha_nao_guarda_assento_para_quem_ja_voltou_por_outra ... ok
+test o_anuncio_de_mudanca_de_sala_nao_e_respondido_pela_conexao_velha ... ok
+test a_saida_pedida_pela_conexao_velha_nao_tira_da_sala_a_conexao_nova ... ok
+test quem_reconecta_antes_de_o_servidor_desistir_da_conexao_velha_continua_no_roster_do_host ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 39.19s
+
+     Running tests/duas_maquinas.rs (target/debug/deps/duas_maquinas-c2bab0243b90be0a)
+
+running 1 test
+test o_caminho_ate_a_outra_maquina_esta_aberto ... ignored, precisa de duas máquinas: ver o cabeçalho deste arquivo
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ejetar.rs (target/debug/deps/ejetar-e7ff0885488716cf)
+
+running 3 tests
+test conectar_ejetar_e_conectar_de_novo_no_mesmo_processo ... ok
+test a_mesma_pessoa_volta_pela_tela_de_selecao ... ok
+test hospedar_ejetar_e_hospedar_de_novo_libera_a_porta ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.61s
+
+     Running tests/estados.rs (target/debug/deps/estados-5842acfc6f5f2357)
+
+running 10 tests
+test avisar_nunca_reprova_uma_chegada ... ok
+test a_lista_de_etapas_tem_uma_entrada_por_variante_do_enum ... ok
+test a_lista_de_caminhos_tem_uma_entrada_por_braco_do_match ... ok
+test cada_etapa_atravessa_o_ffi_com_o_nome_que_o_nucleo_deu ... ok
+test quem_acompanha_uma_chegada_recebe_a_ultima_etapa_dela ... ok
+test quem_liga_a_ponte_antes_do_bloqueio_ve_as_etapas_acontecerem ... ok
+test a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca ... ok
+test a_trilha_sobrevive_a_uma_chegada_que_falhou ... ok
+test a_mesma_conexao_sem_aviso_nenhum_diz_endereco_publico ... ok
+test uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.79s
+
+     Running tests/furo.rs (target/debug/deps/furo-af854db89e2658c9)
+
+running 7 tests
+test um_convite_de_enderecos_mortos_termina_em_segundos_e_nao_em_dezenas ... ok
+test um_candidato_da_rede_de_casa_nao_gasta_aviso_nenhum ... ok
+test o_aviso_se_repete_enquanto_o_aperto_de_mao_corre ... ok
+test um_aviso_recusado_pelo_kernel_nao_derruba_o_laco ... ok
+test o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele ... ok
+test a_repeticao_para_quando_o_candidato_acaba ... ok
+test um_candidato_privado_na_forma_mapeada_nao_engana_a_guarda ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.02s
+
+     Running tests/icone_na_chegada.rs (target/debug/deps/icone_na_chegada-a94adeddd2155511)
+
+running 1 test
+test quem_conecta_recebe_o_icone_que_o_server_ja_tinha ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/limite_de_taxa.rs (target/debug/deps/limite_de_taxa-af33fdfd91474cee)
+
+running 2 tests
+test quem_inunda_depois_de_entrar_e_avisado_e_depois_derrubado ... ok
+test quem_bate_a_porta_em_laco_e_recusado_por_taxa ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/moderacao.rs (target/debug/deps/moderacao-39d706f880b38562)
+
+running 6 tests
+test expulsar_acaba_com_a_sessao_e_deixa_voltar ... ok
+test um_operador_modera_pessoas_e_nao_o_comandante ... ok
+test banir_acaba_com_a_sessao_e_impede_de_voltar ... ok
+test apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo ... ok
+test mover_leva_a_pessoa_e_a_conta_na_sala_nova ... ok
+test um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.45s
+
+     Running tests/ocupacao.rs (target/debug/deps/ocupacao-18eb5b845e411698)
+
+running 4 tests
+test quem_volta_para_o_assento_guardado_reaparece_para_quem_ficou ... ok
+test entrar_num_voice_room_aparece_para_quem_esta_noutro ... ok
+test uma_conexao_que_cai_sai_do_roster_de_todo_mundo ... ok
+test quem_chega_ve_todos_os_voice_rooms_ocupados_e_nao_so_o_seu ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+
+     Running tests/ponte_de_pedidos.rs (target/debug/deps/ponte_de_pedidos-17e6515c3fb351f1)
+
+running 3 tests
+test a_resposta_volta_so_para_quem_pediu_e_sobrevive_a_reconexao ... ok
+test a_ponte_entrega_a_identidade_da_sessao_e_ignora_a_que_o_pedido_afirma ... ok
+test a_resposta_grande_chega_inteira_em_partes_numeradas ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+
+     Running tests/quarto.rs (target/debug/deps/quarto-6d67b766bfeea6d0)
+
+running 5 tests
+test resolver_o_nome_acontece_dentro_do_prazo_e_nao_antes_dele ... ok
+test um_nome_que_nao_resolve_nao_atrasa_quem_esta_na_lan ... ok
+test um_ponto_que_nao_conhece_a_pergunta_apenas_cala ... ok
+test quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele ... ok
+test um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/rajada.rs (target/debug/deps/rajada-15365fd03307cedd)
+
+running 1 test
+test uma_rajada_de_mensagens_grandes_chega_inteira ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running tests/reconexao_fantasma.rs (target/debug/deps/reconexao_fantasma-b67a386ca35a3a0a)
+
+running 1 test
+test quem_saiu_durante_a_queda_do_host_nao_volta_como_fantasma ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests/recusa.rs (target/debug/deps/recusa-8870e7a270549a94)
+
+running 2 tests
+test uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada ... ok
+test um_apelido_de_outro_dono_e_recusa_e_nao_rede ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/salas.rs (target/debug/deps/salas-85493e63a61d9b24)
+
+running 4 tests
+test um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casca ... ok
+test quem_hospeda_vira_comandante_e_a_segunda_conta_nao ... ok
+test o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo ... ok
+test uma_sala_criada_aparece_para_quem_ja_estava_conectado ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.13s
+
+     Running tests/senha_da_sala.rs (target/debug/deps/senha_da_sala-df7a329397b341fa)
+
+running 2 tests
+test entrar_com_senha_errada_nao_deixa_o_cliente_sentado_nele_mesmo ... ok
+test entrar_com_a_senha_certa_senta_de_verdade_nas_duas_pontas ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests/sincronia.rs (target/debug/deps/sincronia-ed9f84eb6b72deaa)
+
+running 2 tests
+test o_roster_mostra_a_taxa_do_proprio_pessoa ... ok
+test a_media_do_voice_room_conta_a_propria_linha ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/soak_audio.rs (target/debug/deps/soak_audio-73e1c5822a81632c)
+
+running 3 tests
+test the_five_percent_profile_really_loses_about_five_percent ... ok
+test five_percent_loss_is_concealed_rather_than_dropped ... ok
+test ten_minutes_on_a_good_network_does_not_drift_or_starve ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.63s
+
+     Running tests/som_da_tela_segue_o_aparelho.rs (target/debug/deps/som_da_tela_segue_o_aparelho-5be4b6efe19688f3)
+
+running 3 tests
+test o_som_da_transmissao_reabre_no_padrao_novo_quando_o_sistema_troca ... ok
+test a_saida_retirada_leva_o_som_para_a_que_sobrou ... ok
+test um_aviso_que_nao_anda_nao_reabre_nada ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tela_por_um_par.rs (target/debug/deps/tela_por_um_par-3fd1a7b5a43ab58a)
+
+running 19 tests
+30 quadros seguidos chegaram a quem assiste, todos com seq acima de Some(0), com o servidor subindo uma cópia só do primeiro ao último
+test o_quadro_chega_pelo_par_e_o_servidor_nao_o_subiu ... ok
+test a_porta_tomada_por_um_instante_nao_reprova_a_volta_do_servidor ... ok
+o par serviu até o quadro Some(38); agora quem empresta morre
+a fila esvaziou no quadro None; daqui para cima é o servidor
+30 quadros seguidos chegaram pelo servidor depois de o par ter morrido, até o Some(68)
+test quando_o_par_morre_o_servidor_assume_e_ninguem_perde_imagem ... ok
+o par serviu até o quadro Some(35); agora o `Enlace` de quem assiste é destruído
+a transmissão continua no ar: quem empresta recebeu até o quadro Some(65)
+a fila do espectador novo esvaziou no quadro None; daqui para cima é o par
+o primeiro quadro pelo par chegou em 233.422833ms
+30 quadros seguidos chegaram ao espectador novo pelo mesmo par, até o Some(101): o caminho de par do `Enlace` destruído tinha mesmo acabado
+test destruir_o_enlace_encerra_o_caminho_do_par_e_quem_emprestava_volta_a_servir ... ok
+a vaga do par voltou à fila depois do `UnwatchScreen`
+o mesmo par voltou a servir 30 quadros seguidos, até o Some(122), com o servidor subindo uma cópia só
+test um_unwatch_devolve_a_vaga_do_par_e_ele_volta_a_ser_escolhido ... ok
+o par está servindo até o quadro Some(38); agora quem assiste sai da sessão
+a fila de quem saiu esvaziou no quadro None
+um segundo sem um único quadro para quem saiu, com quem empresta recebendo até o quadro Some(77)
+test uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para ... ok
+o repasse pelo par está no ar até o quadro Some(38); agora ele termina limpo
+a fila de quem assiste esvaziou no quadro None
+30 quadros seguidos chegaram pelo servidor depois do fim limpo do repasse, todos acima de None
+test o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor ... ok
+o par serve quem assiste — piso Some(35), o servidor sobe 1 cópia(s)
+a bateria interna começou 13.997675084s depois do corte
+2s de silêncio para quem assiste, com 149 quadros novos para quem empresta na mesma janela
+depois da volta, a imagem chega de novo — seq 537
+test a_queda_de_uma_conexao_so_derruba_o_caminho_do_par_com_o_par_ainda_vivo ... ok
+o par voltou à fila depois de o repasse ter sido encerrado normalmente
+test um_repasse_encerrado_normalmente_devolve_o_par_a_fila ... ok
+o par está servindo até o quadro Some(35); agora quem assiste fecha a janela
+a fila de quem parou de assistir esvaziou no quadro None
+um segundo sem um único quadro para quem parou de assistir, com quem empresta recebendo até o quadro Some(66)
+test um_unwatch_derruba_o_caminho_do_par_e_a_imagem_para ... ok
+dois segundos depois do relato, e nenhum cano novo para quem parou de assistir
+test um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tela ... ok
+a fila esvaziou no quadro Some(3); agora quem recusou pede para assistir
+30 quadros seguidos chegaram pelo servidor, com as duas cópias de pé
+test quem_recusa_assistir_por_par_continua_sendo_servido_pelo_servidor ... ok
+test um_parfalhou_por_impressao_desacredita_o_par_apontado_e_nao_a_vitima ... ok
+o par serviu até o quadro Some(35); agora quem empresta sai da sala
+o primeiro quadro depois da saída chegou em 33.601167ms
+30 quadros seguidos chegaram a quem ficou órfão depois da saída
+test quem_empresta_saindo_da_sala_nao_deixa_quem_estava_atras_dele_sem_imagem ... ok
+o par serviu até o quadro Some(35); agora quem empresta retira o consentimento
+a fila esvaziou no quadro None; daqui para cima é o servidor
+30 quadros seguidos chegaram pelo servidor depois da retirada, todos acima de None
+test retirar_o_consentimento_de_emprestar_encerra_o_repasse_e_o_servidor_reassume ... ok
+o par serviu a tela 1 até o quadro Some(38) (geração 0); agora o servidor cai
+os dois `Enlace` viram a queda e entraram na bateria interna
+reconectados: quem assiste 3 → 2, quem empresta 2 → 1 (as pessoas são as mesmas)
+a transmissão nova é a tela 1 (a de antes era a 1), com mídia da geração 1
+a fila de quem assiste esvaziou no quadro Some(1000000); daqui para cima é o par
+o primeiro quadro pelo par chegou em 170.637084ms
+30 quadros seguidos da geração 1 chegaram pelo par depois da reconexão, até o Some(1000034), com o servidor subindo uma cópia só
+test a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_atrapalhar_o_par_novo ... ok
+o par serviu até o quadro Some(35); agora quem assiste retira o consentimento
+a fila esvaziou no quadro Some(36); daqui para cima é o servidor
+30 quadros seguidos chegaram pelo servidor depois de quem assiste retirar o consentimento
+test retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor ... ok
+o par foi nomeado e o cano do servidor caiu; agora quem empresta sai da sala
+o servidor reabriu o cano de quem ficou órfão em 71.393625ms
+test a_saida_de_quem_empresta_reabre_o_cano_de_quem_ficou_orfao_sem_esperar_relato ... ok
+test o_contador_de_copias_sobrevive_a_um_atraso_do_barramento ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 51.83s
+
+     Running tests/teto_e_permissao_da_sala.rs (target/debug/deps/teto_e_permissao_da_sala-aa8a7585f5c271db)
+
+running 2 tests
+test quem_nao_tem_a_permissao_e_recusado_pelo_servidor_mesmo_forjando_a_mensagem ... ok
+test quem_passa_do_teto_da_sala_e_recusado_e_nao_senta_em_nenhuma_das_pontas ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+
+     Running tests/troca_de_aparelho.rs (target/debug/deps/troca_de_aparelho-8e41d4e5ae6d9046)
+
+running 11 tests
+test um_estalo_no_fluxo_nao_troca_o_aparelho_de_ninguem ... ok
+test um_aparelho_que_abre_e_nao_da_laco_nao_e_desenhado_como_funcionando ... ok
+test um_aparelho_que_nunca_volta_acaba_dito_perdido ... ok
+test trocar_o_aparelho_padrao_no_sistema_reabre_a_voz_no_novo ... ok
+test um_panico_noutra_parte_do_programa_nao_congela_a_tela_no_aparelho_antigo ... ok
+test tirar_o_fone_da_tomada_leva_a_voz_para_o_aparelho_que_sobrou ... ok
+test a_troca_nao_toca_no_aparelho_novo_o_que_era_do_antigo ... ok
+test o_aparelho_escolhido_que_some_desce_para_o_da_maquina_em_vez_de_emudecer ... ok
+test com_um_aparelho_escolhido_a_troca_do_padrao_do_sistema_nao_move_a_voz ... ok
+test o_fone_religado_depois_de_a_sessao_desistir_volta_a_ter_som ... ok
+test trocar_de_aparelho_duas_vezes_na_mesma_sessao_e_seguido_das_duas_vezes ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/voz_na_reconexao.rs (target/debug/deps/voz_na_reconexao-d3265db9e5352f57)
+
+running 1 test
+test nenhuma_casca_reabre_a_voz_jogando_fora_os_controles ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_core-ddd0003e3ec8a33d)
+
+running 326 tests
+test battery::tests::a_recovered_link_returns_to_online_and_resets_everything ... ok
+test battery::tests::the_countdown_is_five_minutes ... ok
+test battery::tests::attempts_are_counted_for_the_interface ... ok
+test battery::tests::nothing_counts_down_while_the_link_is_healthy ... ok
+test battery::tests::a_sixty_second_outage_is_survived ... ok
+test battery::tests::the_session_ends_when_the_battery_runs_out ... ok
+test battery::tests::a_discharged_battery_stops_asking ... ok
+test battery::tests::three_missed_pings_start_the_battery ... ok
+test battery::tests::two_missed_pings_are_not_enough ... ok
+test battery::tests::the_window_is_not_extended_by_retrying ... ok
+test battery::tests::a_healthy_link_pings_on_the_documented_interval ... ok
+test battery::tests::backoff_grows_and_is_capped ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test bomba::tests::o_sinal_critico_para_o_video_e_o_sinal_que_volta_o_rearma ... ok
+PULADO: o módulo de vídeo não está nesta máquina (test bomba::tests::a_bomba_vai_da_captura_ao_quadro_e_para_quando_mandam ... 1ok
+ pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test bomba::tests::um_tique_sem_imagem_pede_para_escoar_o_que_ficou_no_ar ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test bomba::tests::trocar_de_degrau_recomeca_captura_codificador_e_fluxo ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test bomba::tests::a_escolha_da_pessoa_troca_o_degrau_e_a_mesma_escolha_nao_troca_nada ... ok
+test bomba::tests::o_som_da_captura_vira_pacote_no_fio ... ok
+test caminho::tests::a_conexao_nova_fecha_a_janela_e_guarda_a_estimativa ... ok
+test caminho::tests::a_faixa_da_voz_nao_corta_a_estimativa_uma_segunda_vez ... ok
+test caminho::tests::a_estimativa_sobe_por_evidencia_e_chega_perto_do_cano_em_segundos ... ok
+test caminho::tests::a_sonda_que_lembra_nao_recomeca_do_palpite ... ok
+test caminho::tests::a_perna_de_quem_hospeda_apertando_nao_ensina_nada_sobre_a_nossa ... ok
+test caminho::tests::cada_sinal_de_piora_sozinho_derruba_a_estimativa ... ok
+test caminho::tests::a_estimativa_tem_piso_e_teto_e_os_dois_tem_conta_atras ... ok
+test caminho::tests::sem_a_subida_do_server_a_medida_desta_maquina_nao_levanta_o_teto ... ok
+test caminho::tests::um_caminho_em_cima_de_um_limiar_nao_vira_tempestade_de_quadro_chave ... ok
+test caminho::tests::um_teto_parado_nao_e_uma_medida_de_caminho ... ok
+test caminho::tests::uma_tela_parada_nao_derruba_a_estimativa ... ok
+test aceites::tests::sem_arquivo_nao_ha_aceite_nenhum ... ok
+test chegada::tests::sem_saber_o_caminho_a_casca_nao_escreve_nada ... ok
+test chegada::tests::uma_desistencia_com_candidatos_por_tentar_nao_e_uma_desistencia ... ok
+test chegada::tests::o_caminho_e_o_da_tentativa_que_venceu_e_nao_o_da_primeira ... ok
+test chegada::tests::a_forma_do_endereco_decide_o_caminho_e_o_aviso_desempata ... ok
+test client::como_este_build_se_apresenta::a_apresentacao_nunca_e_a_versao_do_cargo_toml ... ok
+test aceites::tests::uma_linha_estragada_e_pulada_sem_derrubar_as_outras ... ok
+test client::como_este_build_se_apresenta::um_build_sem_carimbo_diz_que_e_local_em_vez_de_inventar ... ok
+test aceites::tests::esquecer_faz_a_proxima_entrada_perguntar_de_novo ... ok
+test aceites::tests::um_aceite_nao_vale_para_outro_servidor ... ok
+test aceites::tests::o_que_foi_aceito_volta_na_proxima_entrada ... ok
+test chegada::tests::um_convite_sem_impressao_digital_nao_promete_aviso_nenhum ... ok
+test chegada::tests::quem_acompanha_ve_a_etapa_mudar ... ok
+test caminho::tests::a_reserva_da_voz_sobrevive_a_sonda ... ok
+test aceites::tests::um_aceite_novo_substitui_o_anterior_do_mesmo_servidor ... ok
+test chegada::tests::uma_transicao_que_a_maquina_nao_tem_nao_entra_na_trilha ... ok
+test conhecidos::tests::a_linha_carrega_o_ultimo_caminho_medido ... ok
+test conhecidos::a_escada_do_convite::uma_linha_de_sete_campos_continua_sendo_lida ... ok
+test conhecidos::a_escada_do_convite::uma_linha_de_versao_anterior_continua_sendo_lida ... PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+ok
+test conhecidos::tests::uma_linha_de_quatro_campos_continua_sendo_lida ... ok
+test bomba::tests::a_bomba_atravessa_a_conexao_e_o_outro_lado_le_o_que_saiu ... ok
+test conhecidos::a_escada_do_convite::a_escada_sobrevive_a_ida_e_volta_do_arquivo ... ok
+test encontro::testes::o_ponto_de_encontro_e_o_da_familia_do_anfitriao ... ok
+test conhecidos::tests::o_arquivo_nao_e_legivel_por_outros ... ok
+test encontro::testes::a_batida_clonada_avisa_pelo_mesmo_socket ... ok
+test conhecidos::tests::uma_visita_sobrevive_ao_processo ... ok
+test conhecidos::a_escada_do_convite::a_impressao_sobrevive_a_uma_visita_que_nao_a_traz ... ok
+test conhecidos::tests::uma_linha_corrompida_e_pulada_e_nao_derruba_o_cliente ... ok
+test conhecidos::a_escada_do_convite::os_outros_caminhos_sobrevivem_a_uma_volta_sem_convite ... ok
+test conhecidos::tests::tabulacao_no_apelido_nao_quebra_o_arquivo ... ok
+test encontro::testes::avisar_devolve_o_erro_em_vez_de_engoli_lo ... ok
+test encontro::testes::o_socket_emprestado_e_a_mesma_porta_de_onde_o_aviso_saiu ... ok
+test conhecidos::tests::esquecer_tira_da_lista ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso. Aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test encontro::testes::sem_impressao_digital_nao_se_bate_em_ponto_nenhum ... ok
+test encontro::testes::preparar_da_certo_no_mesmo_bilhete_em_que_avisar_falha ... ok
+test encontro::testes::um_aviso_logo_depois_de_preparar_nao_se_perde ... ok
+test enlace::tests::a_pergunta_dos_mods_ganha_do_endereco_morto_que_falhou_antes ... ok
+test enlace::tests::a_bomba_so_nasce_quando_o_server_da_nome_a_transmissao ... ok
+test enlace::tests::a_faixa_da_voz_desce_pelo_que_o_server_devolve ... ok
+test conhecidos::tests::a_lista_vem_do_mais_recente_para_o_mais_antigo ... ok
+test conhecidos::tests::visitar_de_novo_atualiza_em_vez_de_duplicar ... ok
+test enlace::tests::compartilhar_tela_nao_e_lembrado_para_a_reconexao ... ok
+test enlace::tests::cair_nao_deixa_a_fila_da_conexao_velha_alcancar_a_substituta ... ok
+test conhecidos::tests::o_nome_e_a_imagem_sobrevivem_a_uma_visita_que_nao_os_traz ... ok
+test enlace::tests::dizer_nao_e_lembrado ... ok
+test enlace::tests::enderecos_locais_excluem_loopback_nao_especificado_e_link_local ... ok
+test enlace::tests::insistir_contra_recusa_nao_muda_a_resposta ... ok
+test enlace::tests::moderar_nao_e_lembrado ... ok
+test enlace::tests::o_que_a_reconexao_restaura_e_o_que_a_pessoa_escolheu ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso. Aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test enlace::tests::o_teto_pedido_acima_do_que_esta_versao_atende_e_baixado ... ok
+test enlace::tests::o_teto_sai_do_caminho_que_a_sonda_mediu_e_nao_da_suposicao ... ok
+test enlace::tests::do_pedido_guardado_ao_quadro_lido_do_outro_lado ... ok
+test enlace::tests::sem_ninguem_que_respondeu_sobra_a_primeira_falha ... ok
+test enlace::tests::sem_pedido_guardado_um_nome_de_transmissao_nao_liga_nada ... ok
+test enlace::tests::sem_tela_no_ar_a_sonda_nao_e_alimentada ... ok
+test enlace::tests::sem_convite_o_primeiro_contato_segue_cego_como_sempre_foi ... ok
+test enlace::tests::so_quem_empresta_publica_os_enderecos_da_propria_maquina ... ok
+test enlace::tests::so_uma_tela_por_vez_e_repassada_e_o_fim_da_outra_nao_a_derruba ... ok
+test enlace::tests::toda_despedida_do_protocolo_escolhe_um_lado ... ok
+test enlace::tests::um_aperto_de_mao_que_falhou_nao_deixa_o_pin_que_o_tls_escreveu ... ok
+test enlace::tests::um_conjunto_de_mods_a_aceitar_nao_e_falha_de_rede ... ok
+test enlace::tests::um_convite_que_concorda_com_o_pin_nao_tem_nada_a_dizer ... ok
+test enlace::tests::um_convite_que_confere_deixa_seguir_e_diz_que_foi_conferido ... ok
+test enlace::tests::continuar_consentindo_no_mesmo_nao_derruba_nada ... ok
+test enlace::tests::um_convite_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin ... ok
+test enlace::tests::um_convite_velho_contra_um_pin_que_bate_avisa_e_nao_derruba ... ok
+test enlace::tests::um_pin_que_ja_existia_sobrevive_a_um_aperto_que_falhou ... ok
+test enlace::tests::deixar_de_assistir_por_par_derruba_os_caminhos_de_par_abertos ... ok
+test enlace::tests::um_teto_que_cabe_atravessa_intacto ... ok
+test enlace::tests::um_veredito_que_nao_recusa_deixa_o_pin_onde_esta ... ok
+test enlace::tests::uma_recusa_desfaz_o_pin_que_o_verificador_acabou_de_escrever ... ok
+test enlace::tests::deixar_de_emprestar_cancela_o_repasse_que_ja_estava_em_curso ... ok
+test chegada::tests::um_candidato_que_falha_sem_ceder_a_vez_ainda_entra_na_trilha ... ok
+test identity::tests::a_corrupt_pin_file_costs_a_repin_and_not_a_failure_to_start ... ok
+test enlace::tests::um_pedido_para_assistir_por_par_que_chega_depois_da_retirada_nao_e_atendido ... ok
+test encontro::testes::um_ponto_de_encontro_que_nao_resolve_nao_segura_a_conexao ... ok
+test identity::tests::a_file_that_is_not_a_key_is_reported_rather_than_replaced ... ok
+test enlace::tests::a_reentrada_na_sala_falha_na_reconexao_e_o_cliente_nao_se_da_por_sentado ... ok
+test identity::tests::a_pin_survives_the_process_that_made_it ... ok
+test enlace::tests::cair_devolve_a_vaga_de_quem_estava_servindo_um_par ... ok
+test identity::tests::an_identity_survives_the_process_that_made_it ... ok
+test mods::tests::um_diretorio_de_mods_que_nao_existe_da_lista_vazia ... ok
+test identity::tests::an_unpin_survives_the_process_that_made_it ... ok
+test par::testes::a_impressao_e_a_do_certificado_e_no_formato_de_sempre ... ok
+test identity::tests::repinning_a_host_replaces_rather_than_appends ... ok
+test identity::tests::the_identity_file_is_not_readable_by_anybody_else ... ok
+test par::testes::cada_identidade_e_nova_e_a_impressao_a_distingue ... ok
+test mods::tests::um_id_que_nao_bate_com_o_diretorio_e_recusado ... ok
+test mods::tests::um_mod_em_disco_e_lido_com_hash ... ok
+test mods::tests::um_mod_invalido_aparece_recusado_em_vez_de_sumir ... ok
+test par::testes::o_par_certo_passa_e_o_errado_e_recusado_com_o_motivo_certo ... ok
+test par::testes::dois_pares_se_ligam_e_o_teste_sabe_como ... ok
+test par::testes::dois_pares_apresentados_se_ligam_pelos_dois_lados ... ok
+test par::testes::o_que_e_da_mesma_rede_nunca_conta_como_furo ... ok
+test par::testes::a_ponta_atende_um_par_sem_derrubar_a_conexao_de_controle ... ok
+test par::testes::quando_alguem_responde_no_lugar_do_par_o_motivo_nao_vira_naoalcancou ... ok
+test par::testes::quando_o_anfitriao_recusa_minha_identidade_o_motivo_e_naofuiaceito ... ok
+test par::testes::quem_atende_recusa_quem_nao_apresentou_certificado_nenhum ... ok
+test par::testes::quem_atende_recusa_quem_o_servidor_nao_apresentou ... ok
+test chegada::tests::a_trilha_mede_o_tempo_desde_o_comeco_e_nao_desde_o_passo_anterior ... ok
+test par::testes::quem_caiu_antes_do_repasse_e_relatado_como_repasse_e_nao_escuta ... ok
+test par::testes::quem_entra_por_um_par_entra_num_quadro_chave ... ok
+test par::testes::repassar_avisa_quando_o_canal_fecha_sem_a_chave_chegar ... ok
+test par::testes::um_par_com_a_impressao_errada_nao_liga ... ok
+test par::testes::o_par_recebe_a_abertura_e_os_pedacos_na_ordem ... ok
+test par::testes::um_pedaco_com_dois_quadros_nao_perde_o_quadro_chave_que_vem_depois_do_comum ... ok
+test par::testes::uma_ponta_de_cliente_passa_a_atender_sem_socket_novo ... ok
+test preferences::tests::a_chosen_microphone_survives_the_process ... ok
+test preferences::tests::a_chosen_output_survives_the_process ... ok
+test preferences::tests::a_file_full_of_nonsense_reads_as_the_defaults ... ok
+test preferences::tests::a_tecla_nao_pode_quebrar_o_formato ... ok
+test preferences::tests::an_id_with_a_tab_in_it_cannot_forge_a_second_setting ... ok
+test preferences::tests::an_output_id_with_a_tab_in_it_cannot_forge_the_microphone_setting ... ok
+test preferences::tests::going_back_to_the_default_erases_the_choice ... ok
+test preferences::tests::nothing_written_down_means_the_machines_default ... ok
+test preferences::tests::o_modo_escolhido_atravessa_o_processo ... ok
+test par::testes::um_quadro_comum_partido_entre_pedacos_nao_vira_cabecalho_falso ... ok
+test preferences::tests::the_two_settings_do_not_read_as_each_other ... ok
+test preferences::tests::um_modo_que_esta_versao_nao_conhece_le_como_nao_escolhido ... ok
+test preview::tests::a_file_whose_bytes_disagree_with_its_name_is_never_drawn ... ok
+test preview::tests::a_picture_that_will_not_do_as_an_icon_is_refused_before_it_is_sent ... ok
+test preview::tests::agreement_in_both_directions_is_what_draws ... ok
+test preview::tests::base64_matches_rfc_4648 ... ok
+test preview::tests::good_bytes_under_a_claim_that_is_not_a_picture_are_not_drawn ... ok
+test preferences::tests::writing_one_setting_does_not_erase_the_other ... ok
+test preview::tests::the_media_type_handed_on_comes_from_the_bytes ... ok
+test preview::tests::the_preview_limit_is_far_under_the_server_default_per_file_limit ... ok
+test preview::tests::the_four_are_recognised_by_their_leading_bytes ... ok
+test preview::tests::too_heavy_is_its_own_answer_and_carries_the_ceiling ... ok
+test preview::tests::what_is_not_one_of_the_four_is_not_sniffed_into_one ... ok
+test search::tests::accent_folding_keeps_the_match_range_correct ... ok
+test search::tests::a_term_longer_than_the_body_does_not_overflow ... ok
+test search::tests::an_empty_or_whitespace_only_term_matches_nothing ... ok
+test search::tests::case_does_not_matter ... ok
+test search::tests::multiple_occurrences_in_the_same_message_count_separately ... ok
+test search::tests::no_match_is_not_an_error_or_a_panic ... ok
+test search::tests::normalize_collapses_whitespace_the_way_the_tui_wrap_does ... ok
+test search::tests::occurrences_finds_all_matches_in_order ... ok
+test search::tests::resuming_into_nothing_does_not_panic ... ok
+test search::tests::resuming_lands_on_the_first_match_at_or_after_the_previous_one ... ok
+test search::tests::resuming_past_the_end_lands_on_the_last_match ... ok
+test search::tests::the_accent_folds_in_both_directions ... ok
+test search::tests::the_cursor_wraps_at_both_ends ... ok
+test search::tests::the_ordinal_counts_within_the_message_and_not_the_total ... ok
+test state::tests::a_destroyed_line_takes_the_conversation_off_the_screen ... ok
+test state::tests::a_destroyed_voice_room_leaves_the_list_and_takes_its_seats_with_it ... ok
+test state::tests::a_half_point_rounds_up_and_never_lands_between_two_numbers ... ok
+test state::tests::a_handshake_forgets_the_picture_the_last_one_left ... ok
+test state::tests::a_handshake_message_changes_nothing_a_shell_would_redraw ... ok
+test state::tests::a_line_is_found_with_or_without_its_hash ... ok
+test state::tests::a_line_made_now_joins_the_list_without_a_reconnection ... ok
+test state::tests::a_media_source_is_addressable_by_nickname ... ok
+test state::tests::a_message_carries_the_servers_clock_and_not_the_arrival_time ... ok
+test state::tests::a_message_from_somebody_never_introduced_is_still_kept ... ok
+test state::tests::a_person_who_ejected_stops_counting_towards_the_room ... ok
+test state::tests::a_recusa_de_entrada_desfaz_o_assento_que_o_cliente_tinha_tomado_sozinho ... ok
+test state::tests::a_person_who_leaves_keeps_their_name_for_what_they_already_said ... ok
+test state::tests::a_rename_keeps_the_room_in_its_place ... ok
+test state::tests::a_subida_de_quem_hospeda_com_zero_e_ausencia_e_nao_um_teto_de_zero ... ok
+test state::tests::a_removal_takes_the_message_off_the_screen ... ok
+test state::tests::a_voice_room_is_found_by_number_or_by_part_of_its_name ... ok
+test state::tests::an_edit_rewrites_in_place_instead_of_appending ... ok
+test state::tests::a_voice_room_made_now_joins_the_list_without_a_reconnection ... ok
+test state::tests::an_unmeasured_sync_ratio_reads_as_zero_and_not_as_perfect ... ok
+test state::tests::an_empty_voice_room_has_no_average_rather_than_a_zero ... ok
+test state::tests::changing_the_line_clears_what_belonged_to_the_old_one ... ok
+test state::tests::being_moved_takes_this_client_with_it ... ok
+test state::tests::destroying_some_other_voice_room_leaves_this_client_where_it_is ... ok
+test state::tests::destroying_a_room_this_client_never_heard_of_changes_nothing ... ok
+test state::tests::editing_something_not_on_screen_changes_nothing ... ok
+test state::tests::messages_end_up_in_the_servers_order_however_they_arrive ... ok
+test state::tests::moving_between_voice_rooms_does_not_leave_a_copy_behind ... ok
+test state::tests::opening_the_line_already_open_keeps_the_conversation ... ok
+test state::tests::ordering_follows_the_id_and_not_the_clock ... ok
+test state::tests::os_espectadores_do_fio_apertam_o_teto_e_nao_a_voz ... ok
+test state::tests::our_own_messages_are_marked_as_ours ... ok
+test state::tests::reconectar_nao_herda_transmissao_nenhuma ... ok
+test state::tests::renaming_a_room_this_client_never_heard_of_changes_nothing ... ok
+test state::tests::renaming_the_server_reaches_a_client_that_never_asked ... ok
+test state::tests::state_updates_reach_the_person_they_are_about ... ok
+test state::tests::telemetry_and_notices_are_reported_as_separate_changes ... ok
+test state::tests::the_average_is_the_seated_persons_rounded_to_a_whole_point ... ok
+test state::tests::the_end_of_a_session_is_recorded_with_its_reason ... ok
+test state::tests::the_person_is_seated_in_their_own_roster ... ok
+test state::tests::the_same_message_arriving_twice_is_stored_once ... ok
+test state::tests::the_same_room_announced_twice_appears_once ... ok
+test state::tests::the_server_icon_arrives_and_can_be_taken_down_again ... ok
+test state::tests::the_session_carries_what_this_person_may_do ... ok
+test state::tests::the_session_message_fills_in_the_server_and_the_channels ... ok
+test state::tests::the_weight_of_a_line_is_read_where_it_was_asked_for_and_not_stored ... ok
+test state::tests::this_client_leaves_a_voice_room_that_no_longer_exists ... ok
+test state::tests::trocar_de_nome_nao_reescreve_o_que_ja_foi_dito ... ok
+test state::tests::um_fim_atrasado_nao_apaga_a_transmissao_que_comecou_depois ... ok
+test state::tests::um_pedido_de_quadro_chave_fica_numa_vaga_so ... ok
+test state::tests::uma_transmissao_anunciada_fica_no_voice_room_e_some_quando_para ... ok
+test tela::o_eixo_da_degradacao::a_escolha_continua_sendo_teto_e_nunca_piso ... ok
+test tela::o_eixo_da_degradacao::cada_limiar_compra_a_resolucao_que_promete ... ok
+test tela::o_eixo_da_degradacao::movimento_cede_quadro_quando_o_teto_deixaria_de_ser_teto ... ok
+test tela::o_eixo_da_degradacao::movimento_nao_desce_abaixo_do_piso_da_lista ... ok
+test tela::o_eixo_da_degradacao::movimento_nao_paga_duas_vezes_pela_mesma_falta_de_banda ... ok
+test tela::o_eixo_da_degradacao::movimento_troca_um_degrau_de_resolucao_por_quadros ... ok
+test tela::o_eixo_da_degradacao::o_degrau_de_cima_da_escada_e_alcancavel ... ok
+test tela::o_eixo_da_degradacao::o_padrao_continua_sendo_o_do_paragrafo_dois ... ok
+test tela::o_eixo_da_degradacao::o_quadro_cede_quando_a_resolucao_nao_tem_bits ... ok
+test tela::o_eixo_da_degradacao::o_teto_da_estimativa_alcanca_os_oito_megabits_que_o_produto_quer ... ok
+test tela::o_eixo_da_degradacao::oito_megabits_compram_1080p_a_trinta_com_folga ... ok
+test tela::o_enquadramento::a_porta_de_entrada_e_o_comeco_de_um_quadro_chave ... ok
+test tela::o_enquadramento::sem_quadro_chave_nao_ha_porta ... ok
+test tela::o_enquadramento::o_enquadramento_atravessa_pedacos_de_qualquer_tamanho ... ok
+test tela::o_enquadramento::um_byte_de_tipo_que_este_fluxo_nao_conhece_o_encerra ... ok
+test tela::o_enquadramento::um_cabecalho_partido_ao_meio_nao_vira_porta ... ok
+test tela::o_enquadramento::um_quadro_de_som_atravessa_e_nao_e_porta_de_entrada ... ok
+test tela::o_enquadramento::um_quadro_vazio_encerra_o_fluxo ... ok
+test tela::o_enquadramento::um_tamanho_impossivel_encerra_o_fluxo ... ok
+test tela::o_som_no_mesmo_fluxo::o_cabecalho_do_som_leva_o_tipo_e_o_tamanho ... ok
+test tela::o_som_no_mesmo_fluxo::os_tres_tipos_vao_e_voltam ... ok
+test tela::o_som_no_mesmo_fluxo::so_a_imagem_chave_e_porta_de_entrada ... ok
+test tela::o_som_no_mesmo_fluxo::um_byte_que_nao_e_dos_tres_nao_vira_tipo_nenhum ... ok
+test tela::tests::a_escolha_da_pessoa_e_teto_e_nunca_piso ... ok
+test tela::tests::a_escolha_de_resolucao_continua_teto_e_nunca_piso ... ok
+test tela::tests::a_resolucao_acompanha_o_teto_e_nao_a_contagem_de_gente ... ok
+test tela::tests::a_tela_pode_dizer_qual_perna_apertou ... ok
+test tela::tests::a_voz_nunca_cede_a_tela ... ok
+test tela::tests::abaixo_do_piso_o_video_para_com_nome_em_vez_de_degradar_para_sempre ... ok
+test tela::tests::o_balde_repoe_com_o_tempo_e_nunca_passa_da_capacidade ... ok
+test tela::tests::baixar_o_teto_nao_devolve_fichas ... ok
+test tela::tests::o_fim_do_fluxo_e_o_fim_da_transmissao_e_nao_um_erro ... ok
+test tela::tests::o_quadro_chave_sai_espalhado_e_chega_inteiro ... ok
+test tela::tests::o_quadro_chave_fecha_com_a_tela_parada ... ok
+test tela::tests::o_teto_e_uma_fracao_do_caminho_e_nao_um_numero_fixo ... ok
+test tela::tests::o_som_nao_atravessa_um_quadro_chave_pela_metade ... ok
+test tela::tests::os_degraus_de_resolucao_sao_o_que_a_unica_medida_sustenta ... ok
+test tela::tests::o_video_vai_no_fluxo_e_nunca_no_datagrama ... ok
+test tela::tests::um_quadro_acima_do_teto_e_descartado_e_nao_enfileirado ... ok
+test tela::tests::um_quadro_grande_demais_ou_vazio_nao_sai ... ok
+test tela::tests::um_tamanho_absurdo_do_par_e_recusado_antes_de_alocar ... ok
+test tofu::tests::a_changed_certificate_does_not_overwrite_the_pin ... ok
+test tofu::tests::a_changed_certificate_is_reported_with_both_fingerprints ... ok
+test tofu::tests::a_first_contact_the_invite_confirms_is_verified ... ok
+test tofu::tests::a_first_contact_the_invite_contradicts_is_refused ... ok
+test tofu::tests::a_first_contact_with_no_invite_is_blind_and_says_so ... ok
+test tofu::tests::a_matching_pin_the_invite_confirms_has_nothing_to_say_either ... ok
+test tofu::tests::a_matching_pin_the_invite_contradicts_warns_and_does_not_refuse ... ok
+test tofu::tests::a_matching_pin_with_no_invite_has_nothing_to_say ... ok
+test tofu::tests::hosts_are_pinned_independently ... ok
+test tofu::tests::the_comparison_ignores_case ... ok
+test tofu::tests::the_comparison_ignores_case_for_a_matching_pin_too ... ok
+test tofu::tests::the_first_contact_is_recorded_and_allowed ... ok
+test tofu::tests::the_same_certificate_matches_afterwards ... ok
+test tofu::tests::unpinning_a_host_makes_the_next_visit_a_first_contact_again ... ok
+test tofu::tests::unpinning_a_host_that_was_never_pinned_is_not_an_error ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test video::tests::a_cadencia_volta_quando_a_sala_esvazia ... ok
+test video::tests::a_cola_nao_arma_codificador_por_fora_da_costura ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test video::tests::a_cola_vai_da_captura_ao_quadro_codificado ... ok
+test tela::tests::uma_resolucao_fora_do_teto_nao_abre_fluxo_nenhum ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test video::tests::a_sala_que_cresce_aperta_o_codificador_e_nao_a_voz ... ok
+test video::tests::a_sala_que_cresce_faz_o_quadro_ceder_e_nao_so_a_resolucao ... ok
+test video::tests::o_teto_decide_a_configuracao_do_codificador_sem_precisar_de_codificador ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2test video::tests::refazer_o_degrau_recalcula_a_cadencia_para_o_degrau_novo ... ok
+ e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test video::tests::um_teto_parado_nao_arma_codificador_nenhum ... ok
+test voice::controles_na_reabertura::o_relogio_de_midia_pula_para_a_frente_em_vez_de_recomecar ... ok
+test voice::controles_na_reabertura::os_controles_atravessam_a_reabertura ... ok
+test voice::dimensoes_do_aparelho::a_troca_redimensiona_esvazia_e_reacerta_o_relogio_na_mesma_volta ... ok
+test voice::dimensoes_do_aparelho::o_aparelho_cuja_taxa_e_recusada_nao_fica_na_tela_como_funcionando ... ok
+test voice::dimensoes_do_aparelho::as_medidas_seguem_o_aparelho_de_agora_e_nao_o_de_antes ... ok
+test voice::dimensoes_do_aparelho::o_aparelho_novo_que_o_reamostrador_recusa_encerra_a_volta_sem_mexer_em_nada ... ok
+test voice::dimensoes_do_aparelho::o_que_estava_a_caminho_do_aparelho_antigo_nao_toca_no_novo ... ok
+test voice::dimensoes_do_aparelho::o_aparelho_que_o_laco_aceita_nao_e_anunciado_como_perdido ... ok
+test voice::dimensoes_do_aparelho::uma_taxa_que_o_reamostrador_recusa_nao_vira_laco ... ok
+test voice::faixa_de_bitrate::as_faixas_vao_do_teto_ao_piso_da_spec ... ok
+test voice::faixa_de_bitrate::o_controlador_nasce_no_mesmo_valor_que_o_encoder ... ok
+test voice::faixa_de_bitrate::o_padrao_do_codec_e_a_faixa_de_cima ... ok
+test voice::faixa_de_bitrate::toda_faixa_cabe_no_que_o_codec_aceita ... ok
+test voice::relogio_de_midia::a_sequencia_anda_um_e_nao_mil ... ok
+test voice::relogio_de_midia::o_salto_passa_na_frente_do_caminho_que_ainda_esta_no_ar ... ok
+test voice::tests::a_side_already_on_the_default_has_nothing_left_to_give_up ... ok
+test voice::relogio_de_midia::um_relogio_que_recomeca_do_zero_e_descartado_inteiro ... ok
+test voice::tests::an_unknown_byte_falls_back_to_the_safe_mode ... ok
+test voice::tests::giving_up_one_side_leaves_the_other_alone ... ok
+test voice::tests::modes_survive_the_round_trip_through_an_atomic ... ok
+test voice::tests::o_ganho_do_microfone_corre_depois_do_portao ... ok
+test voice::tests::o_laco_de_audio_conduz_o_acompanhamento_do_aparelho ... ok
+test voice::tests::the_ask_crosses_into_the_audio_layer_on_the_side_it_was_made ... ok
+test voice::tests::the_default_is_push_to_talk ... ok
+test encontro::testes::preparar_abre_o_socket_e_nao_manda_pacote_nenhum ... ok
+test enlace::tests::a_discagem_que_falha_na_hora_nao_cancela_o_atendimento ... ok
+test par::testes::atender_nao_trava_para_sempre_com_um_par_que_aperta_a_mao_e_para ... ok
+test par::testes::um_impostor_na_lista_nao_derruba_a_discagem_inteira ... ok
+test frame::tests::cancelar_a_leitura_no_meio_do_quadro_dessincroniza_o_fluxo ... ok
+test enlace::tests::o_aperto_de_mao_sai_da_mesma_porta_que_bateu_no_ponto_de_encontro ... ok
+test par::testes::o_prazo_manda_quando_ninguem_responde ... ok
+test par::testes::ligar_nao_diz_naoalcancou_para_quem_apertou_a_mao_e_travou ... ok
+test par::testes::quando_o_par_nao_liga_a_resposta_e_o_servidor ... ok
+test enlace::tests::destruir_o_motor_aborta_as_tarefas_de_par_que_ele_guarda ... ok
+test enlace::tests::servir_um_par_desarma_a_ponta_de_quem_empresta_depois_de_servir ... ok
+test par::testes::parar_de_atender_desarma_o_que_passar_a_atender_armou ... ok
+test enlace::tests::a_reconexao_tambem_para_a_repeticao_quando_a_tentativa_acaba ... ok
+
+test result: ok. 326 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.72s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_encontro-a70fbd00b11d75da)
+
+running 6 tests
+test o_quarto::uma_marca_que_ninguem_registrou_nao_tem_endereco ... ok
+test o_quarto::quem_escreveu_primeiro_fica_enquanto_estiver_no_ar ... ok
+test o_quarto::quem_mora_muda_de_porta_e_continua_sendo_encontrado ... ok
+test tests::as_duas_familias_cabem_na_mesma_porta ... ok
+test o_quarto::o_ponto_responde_quem_com_o_endereco_que_moro_registrou ... ok
+test o_quarto::o_quarto_tem_teto_porque_escrever_nele_e_de_graca ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/main.rs (target/debug/deps/seele_encontro-e7c17cffef82b2c6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/apresentacao.rs (target/debug/deps/apresentacao-05910ca366bd830b)
+
+running 6 tests
+test um_datagrama_atendido_diz_quem_foi_apresentado_a_quem ... ok
+test a_apresentacao_funciona_sem_ninguem_ter_se_cadastrado_antes ... ok
+test o_anfitriao_descobre_o_proprio_endereco_publico ... ok
+test um_ponto_de_encontro_reiniciado_responde_igual ... ok
+test o_aviso_chega_ao_anfitriao_com_o_endereco_para_onde_furar ... ok
+test lixo_e_calado_e_nao_recusado ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running unittests examples/sondar.rs (target/debug/examples/sondar-7fe2af79739f5921)
+
+running 1 test
+test testes::um_ponto_que_so_sabe_onde_e_classificado_como_velho_e_nao_como_no_ar ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_ffi-b8308668bd75ca4c)
+
+running 94 tests
+test a_voz_quando_o_enlace_volta::quem_estava_em_texto_puro_continua_em_texto_puro ... ok
+test conferir_a_troca::comportamento::sem_pedido_qualquer_aparelho_que_abra_esta_certo ... ok
+test conferir_a_troca::comportamento::abrir_o_que_se_pediu_passa ... ok
+test base64_escrito_a_mao::os_bytes_altos_tambem ... ok
+test base64_escrito_a_mao::os_vetores_do_rfc_4648 ... ok
+test a_voz_quando_o_enlace_volta::a_voz_que_nao_reabre_da_lugar_ao_texto ... ok
+test base64_ida_e_volta::o_que_o_navegador_escreve_e_lido ... ok
+test base64_ida_e_volta::espaco_em_branco_nao_atrapalha ... ok
+test conferir_a_troca::comportamento::nao_abrir_nada_tambem_e_recusado ... ok
+test conferir_a_troca::comportamento::abrir_outro_aparelho_e_recusado_pelo_lado_certo ... ok
+test previa::a_session_that_ended_mid_fetch_is_not_a_picture_and_not_a_panic ... ok
+test previa::a_file_over_the_limit_says_so_and_says_what_the_limit_is ... ok
+test base64_ida_e_volta::texto_que_nao_e_base64_nao_vira_bytes_truncados ... ok
+test a_voz_quando_o_enlace_volta::a_voz_viva_reabre_carregando_os_controles ... ok
+test base64_ida_e_volta::a_volta_desfaz_a_ida_em_todo_tamanho ... ok
+test previa::a_claim_never_reaches_the_string_a_window_draws_from ... ok
+test previa::bytes_that_disagree_with_the_claim_come_back_with_no_picture_at_all ... ok
+test previa::bytes_that_agree_with_the_claim_come_back_as_a_picture ... ok
+test tests::a_profundidade_do_anel_vai_para_o_sync_ratio_e_a_chegada_para_a_tela ... ok
+test tests::a_pong_wakes_nobody ... ok
+test tests::a_snapshot_of_an_empty_room_is_empty_and_not_a_panic ... ok
+test tests::a_capture_device_serialises_the_field_names_a_shell_reads ... ok
+test tests::a_snapshot_with_no_audio_names_no_microphone ... ok
+test tests::a_sync_band_travels_beside_its_number ... ok
+test tests::a_tela_de_quem_compartilha_se_reconhece ... ok
+test tests::a_listener_hears_what_the_room_folded ... ok
+test tests::a_playback_device_serialises_the_field_names_a_shell_reads ... ok
+test tests::a_tela_conta_quem_compartilha_e_quem_assiste ... ok
+test tests::a_chave_de_mensagem_nao_comeca_num_valor_fixo ... ok
+test tests::a_room_made_now_reaches_the_shell_as_a_channel_change ... ok
+test tests::a_tela_nao_finge_saber_o_que_esta_saindo ... ok
+test tests::an_unknown_pattern_byte_reads_as_offline ... ok
+test mods::tests_do_aceite::a_casca_guarda_o_aceite_e_o_encontra_na_entrada_seguinte ... ok
+test tests::a_weight_for_another_line_leaves_this_caller_waiting ... ok
+test tests::gravar_o_mesmo_jitter_duas_vezes_nao_e_uma_mudanca ... ok
+test tests::an_address_is_pinned_under_a_name_a_certificate_can_carry ... ok
+test tests::nao_ha_tela_quando_ninguem_compartilha ... ok
+test tests::dressing_the_server_is_a_permission_of_its_own_field ... ok
+test tests::asking_for_a_room_with_no_name_asks_for_nothing ... ok
+test tests::destroying_a_room_is_a_permission_of_its_own_and_not_the_one_that_makes_them ... ok
+test tests::o_evento_de_telemetria_conta_a_variacao_do_jitter ... ok
+test tests::o_jitter_da_tela_nao_e_a_profundidade_do_anel ... ok
+test tests::message_identifiers_never_repeat_within_a_process ... ok
+test tests::o_jitter_que_o_laco_de_voz_grava_e_o_que_a_casca_le ... ok
+test tests::a_picture_that_will_not_do_never_leaves_this_crate ... ok
+test tests::o_pedido_so_aparece_ao_lado_da_propria_tela ... ok
+test tests::o_pedido_morre_com_a_transmissao_e_nao_com_o_roster ... ok
+test tests::o_roster_redesenha_a_tela_so_quando_ha_tela ... ok
+test tests::o_snapshot_le_o_jitter_que_o_laco_de_voz_gravou_e_nao_o_do_server ... ok
+test tests::sem_fonte_nenhuma_a_tela_nao_recebe_um_zero_inventado ... ok
+test tests::sem_volta_de_audio_nenhuma_o_ultimo_jitter_medido_fica ... ok
+test tests::the_pattern_survives_the_round_trip_through_an_atomic ... ok
+test tests::a_bare_host_gets_the_default_port ... ok
+test tests::the_server_name_rides_the_snapshot_and_the_picture_rides_a_revision ... ok
+test tests::the_snapshot_answers_each_moderation_verb_on_its_own ... ok
+test tests::the_snapshot_marks_which_person_is_us ... ok
+test tests::every_expected_fingerprint_reaches_the_destino_it_promised ... ok
+test tests::the_snapshot_says_whether_this_person_may_make_rooms ... ok
+test tests::the_voice_rooms_average_crosses_already_banded ... ok
+test tests::o_laco_entrega_a_volta_de_audio_que_ele_leu ... ok
+test tests::um_alvo_que_nao_e_endereco_nao_vira_um_aceite_escrito_no_vazio ... ok
+test tests::um_jitter_de_fracao_de_milissegundo_nao_e_arredondado_para_zero ... ok
+test tests::um_jitter_impossivel_nao_atravessa_a_ponte ... ok
+test tests::todo_motivo_de_parada_tem_um_nome_na_lista ... ok
+test tests::um_nome_novo_nao_faz_a_revisao_dos_retratos_andar ... ok
+test conferir_a_troca::as_duas_trocas_conferem_o_que_pediram ... ok
+test tests::um_ouvinte_sabe_que_a_tela_comecou_e_que_a_sala_cresceu ... ok
+test tests::esta_ponte_nao_decide_quem_perdeu_a_corrida_da_tela ... ok
+test tests::um_retrato_novo_faz_a_revisao_dos_retratos_andar ... ok
+test tests::uma_volta_grava_o_jitter_de_chegada_e_nao_a_reserva_do_anel ... ok
+test trilha_no_log::a_escolha_da_pessoa_vira_degrau_arredondando_para_baixo ... ok
+test types::tests::a_tela_em_curso_atravessa_pelo_nome_e_diz_o_que_nao_sabe ... ok
+test types::tests::a_permissao_de_tela_atravessa_com_os_nomes_que_a_casca_ramifica ... ok
+test trilha_no_log::o_modulo_de_video_e_procurado_onde_a_casca_o_poe ... ok
+test tests::the_weight_of_a_line_reaches_the_caller_who_asked_for_it ... ok
+test types::tests::a_tela_tem_evento_proprio_no_barramento ... ok
+test types::tests::a_tela_tomada_nao_e_uma_recusa_de_permissao ... ok
+test types::tests::every_alert_reason_maps_to_one_of_its_own ... ok
+test trilha_no_log::o_log_da_trilha_diz_qual_candidato_deu_o_que ... ok
+test types::tests::every_verdict_the_core_produces_has_a_shell_facing_twin ... ok
+test types::tests::every_disconnect_reason_the_protocol_has_maps_to_one_here ... ok
+test types::tests::no_error_variant_carries_free_text ... ok
+test tests::um_pedido_recusado_nao_vira_memoria ... ok
+test types::tests::os_limites_da_tela_atravessam_pelo_nome ... ok
+test types::tests::quem_so_assiste_nao_recebe_um_pedido_que_nao_e_dele ... ok
+test types::tests::the_band_a_shell_reads_is_spelled_the_way_the_comp_bands_it ... ok
+test types::tests::the_bands_agree_with_the_core ... ok
+test tests::o_aceite_e_guardado_sob_a_chave_que_a_conexao_vai_procurar ... ok
+test tests::a_host_that_does_not_exist_is_an_enum_and_not_a_panic ... ok
+test types::tests::the_snapshot_does_not_carry_the_conversation ... ok
+test aviso_de_mensagens::nobody_raises_the_event_without_moving_the_revision ... ok
+test tests::a_playback_device_crosses_with_both_halves_of_its_identity ... ok
+test tests::a_capture_device_crosses_with_both_halves_of_its_identity ... ok
+test tests::the_two_device_lists_are_not_the_same_list ... ok
+
+test result: ok. 94 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+     Running unittests src/main.rs (target/debug/deps/seele_instalador-75d6697440dd3048)
+
+running 24 tests
+test carga::testes::sem_carga_o_instalador_sabe_que_esta_vazio ... ok
+test linha::testes::desinstalar_nao_se_confunde_com_instalar ... ok
+test linha::testes::a_linha_inteira_que_o_atualizador_manda ... ok
+test linha::testes::o_que_nao_e_nosso_volta_para_o_app ... ok
+test linha::testes::sem_argumento_nenhum_a_janela_aparece ... ok
+test linha::testes::o_que_o_atualizador_passa_e_entendido ... ok
+test linha::testes::o_arquivo_chamado_desinstalar_desinstala_mesmo_sem_argumento ... ok
+test linha::testes::o_que_vem_depois_de_args_e_do_app_e_o_que_vem_antes_nao ... ok
+test linha::testes::a_caixa_da_letra_nao_importa ... ok
+test linha::testes::o_segundo_tempo_vence_o_nome ... ok
+test linha::testes::o_instalador_baixado_nao_e_confundido_com_o_desinstalador ... ok
+test linha::testes::o_silencioso_do_nsis_tambem_vale ... ok
+test pele::testes::a_ordem_dos_canais_e_a_do_gdi_e_nao_a_do_css ... ok
+test testes::nenhuma_obrigacao_esta_sem_consequencia ... ok
+test testes::o_botao_que_diz_abrir_o_seele_abre_o_seele ... ok
+test pele::testes::as_cores_daqui_sao_as_do_produto ... ok
+test testes::o_contrato_daqui_e_o_mesmo_que_o_adr_escreveu ... ok
+test testes::a_regra_de_firewall_nomeia_o_perfil_que_ela_cobre ... ok
+test testes::a_instalacao_leva_junto_o_entulho_das_anteriores ... ok
+test testes::o_painel_do_windows_chama_o_desinstalador_no_modo_de_desinstalar ... ok
+test testes::a_versao_anunciada_nao_e_a_do_cargo_toml ... ok
+test testes::a_janela_da_remocao_tem_os_passos_dela ... ok
+test testes::a_remocao_nao_se_desenha_com_as_medidas_da_instalacao ... ok
+test testes::apagar_os_dados_e_escolha_e_a_nota_diz_o_preco ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_lancador-53755b4fd3aae1f5)
+
+running 91 tests
+test assinatura::testes::chave_malformada_e_recusada_em_vez_de_derrubar_o_app ... ok
+test assinatura::testes::a_chave_de_producao_que_esta_no_tauri_conf_abre_por_este_caminho ... ok
+test assinatura::testes::texto_que_nao_e_assinatura_nao_causa_panico_e_diz_o_motivo ... ok
+test assinatura::testes::o_modo_legado_do_minisign_e_recusado ... ok
+test assinatura::testes::a_assinatura_de_outra_chave_e_recusada_e_o_motivo_a_nomeia ... ok
+test dados::testes::duas_versoes_nunca_dividem_o_diretorio_de_dados ... ok
+test assinatura::testes::um_byte_trocado_no_pacote_derruba_a_assinatura ... ok
+test dados::testes::a_primeira_versao_de_uma_maquina_limpa_nao_avisa_perda_nenhuma ... ok
+test dados::testes::o_plano_nao_toca_em_disco ... ok
+test assinatura::testes::uma_assinatura_da_chave_certa_sobre_os_bytes_certos_confere ... ok
+test deposito::testes::sem_lista_em_lugar_nenhum_a_resposta_e_que_nao_ha_lista ... ok
+test deposito::testes::sem_executavel_no_manifesto_nao_se_instala_para_descobrir_depois ... ok
+test deposito::testes::um_deposito_que_nao_existe_responde_sem_panico ... ok
+test deposito::testes::sem_pacote_para_este_sistema_a_recusa_nomeia_o_alvo ... ok
+test dados::testes::o_marcador_da_origem_nao_e_copiado_junto ... ok
+test dados::testes::nao_se_semeia_de_uma_versao_que_o_manifesto_nao_ordena ... ok
+test dados::testes::uma_pasta_pela_metade_nao_conta_como_conversa_em_outro_lugar ... ok
+test deposito::testes::um_pacote_assinado_por_outra_chave_nao_chega_a_tocar_o_disco ... ok
+test dados::testes::descer_de_versao_comeca_vazio_e_o_plano_avisa_antes ... ok
+test deposito::testes::um_pacote_com_soma_errada_nao_chega_a_tocar_o_disco ... ok
+test dados::testes::uma_versao_que_ja_tem_dados_nao_e_semeada_de_novo ... ok
+test deposito::testes::um_pacote_sem_assinatura_declarada_e_recusado_por_isso_e_nao_instala ... ok
+test dados::testes::a_meia_copia_de_uma_tentativa_nao_sobrevive_a_seguinte ... ok
+test deposito::testes::um_executavel_que_sai_da_instalacao_e_recusado_antes_de_o_disco_ser_tocado ... ok
+test dados::testes::uma_semeadura_que_parou_no_meio_nao_passa_por_dados_proprios ... ok
+test deposito::testes::instalar_publica_a_versao_e_o_executavel_declarado ... ok
+test deposito::testes::o_deposito_diz_qual_e_o_executavel_de_uma_versao_instalada ... ok
+test executavel::testes::a_contrabarra_do_windows_e_separador_em_todo_sistema ... ok
+test executavel::testes::a_versao_e_o_executavel_concordam_sobre_nome_reservado ... ok
+test executavel::testes::nenhum_caminho_sai_da_pasta_da_versao ... ok
+test executavel::testes::nenhuma_entrada_causa_panico ... ok
+test dados::testes::uma_ligacao_simbolica_nao_faz_a_semeadura_escrever_fora_do_destino ... ok
+test executavel::testes::nome_que_o_windows_nao_cria_e_recusado_em_todo_sistema ... ok
+test executavel::testes::nome_reservado_do_windows_e_recusado_em_todo_sistema ... ok
+test executavel::testes::o_motivo_da_recusa_e_especifico_e_nao_generico ... ok
+test executavel::testes::os_caminhos_que_os_tres_sistemas_declaram_passam ... ok
+test executavel::testes::todo_caminho_aceito_fica_dentro_da_instalacao ... ok
+test inicializacao::testes::iniciar_um_executavel_que_sumiu_devolve_erro_em_vez_de_panico ... ok
+test dados::testes::subir_de_versao_semeia_da_mais_nova_entre_as_mais_velhas ... ok
+test deposito::testes::um_executavel_apagado_depois_da_instalacao_nao_e_prometido ... ok
+test manifesto::testes::a_ordem_do_manifesto_e_quem_diz_qual_e_a_mais_nova ... ok
+test manifesto::testes::a_unidade_de_uma_versao_e_lida_quando_declarada ... ok
+test deposito::testes::instalar_de_novo_uma_versao_completa_nao_mexe_nela ... ok
+test deposito::testes::um_pacote_sem_o_executavel_declarado_nao_vira_instalacao ... ok
+test manifesto::testes::o_manifesto_de_hoje_e_lido_como_uma_publicacao_so ... ok
+test manifesto::testes::o_manifesto_de_hoje_nao_declara_executavel_e_diz_isso ... ok
+test manifesto::testes::um_campo_que_este_build_nao_conhece_nao_derruba_o_manifesto ... ok
+test deposito::testes::uma_lista_que_some_do_manifesto_nao_vira_nada_revogado ... ok
+test manifesto::testes::um_executavel_que_sai_da_instalacao_nao_derruba_o_manifesto_inteiro ... ok
+test manifesto::testes::um_pacote_sem_url_ou_sem_assinatura_nao_derruba_o_manifesto_inteiro ... ok
+test manifesto::testes::nenhuma_entrada_causa_panico ... ok
+test manifesto::testes::um_manifesto_sem_publicacao_nenhuma_e_recusado_por_isso ... ok
+test manifesto::testes::uma_versao_que_atravessa_diretorio_derruba_o_manifesto_inteiro ... ok
+test manifesto::testes::um_schema_mais_novo_diz_que_o_launcher_e_que_esta_velho ... ok
+test deposito::testes::uma_lista_guardada_que_nao_confere_mais_e_ignorada ... ok
+test deposito::testes::um_marcador_sem_a_linha_do_executavel_responde_que_nao_sabe ... ok
+test deposito::testes::a_ordem_do_disco_e_de_nome_e_nao_serve_para_dizer_qual_e_a_mais_nova ... ok
+test deposito::testes::uma_lista_que_recua_recusa_o_ato_em_vez_de_seguir_calada ... ok
+test resolucao::testes::um_manifesto_sem_unidade_declarada_nao_inventa_a_conferencia ... ok
+test deposito::testes::uma_instalacao_sem_o_marcador_nao_conta_como_instalada ... ok
+test resolucao::testes::um_servidor_que_anuncia_versao_e_protocolo_que_nao_batem_e_recusado ... ok
+test deposito::testes::uma_instalacao_completa_publicada_por_outro_processo_nao_e_varrida ... ok
+test inicializacao::testes::os_argumentos_chegam_a_versao_escolhida_como_vieram ... ok
+test resolucao::testes::uma_versao_publicada_e_nao_instalada_diz_que_ha_pacote_para_este_sistema ... ok
+test resolucao::testes::uma_instalacao_pela_metade_pede_outra_coisa_que_uma_nao_instalada ... ok
+test deposito::testes::uma_pasta_de_instalacao_incompleta_nao_impede_instalar_de_novo ... ok
+test resolucao::testes::uma_versao_que_o_manifesto_nao_lista_e_recusada_por_isso ... ok
+test revogacao::testes::a_mesma_lista_de_novo_e_aceita_sem_reclamar ... ok
+test revogacao::testes::nenhuma_entrada_causa_panico ... ok
+test revogacao::testes::uma_lista_assinada_pelo_projeto_abre_e_diz_o_defeito ... ok
+test revogacao::testes::uma_lista_assinada_por_outra_chave_e_recusada ... ok
+test deposito::testes::uma_instalacao_que_falha_no_meio_nao_alcanca_a_que_ja_estava_la ... ok
+test versao::testes::as_versoes_que_o_projeto_publicou_de_fato_sao_aceitas ... ok
+test versao::testes::a_serializacao_passa_pela_mesma_conferencia_da_construcao ... ok
+test revogacao::testes::uma_lista_editada_depois_de_assinada_e_recusada ... ok
+test resolucao::testes::sem_executavel_declarado_a_recusa_nomeia_a_versao_e_o_alvo ... ok
+test versao::testes::nenhum_identificador_atravessa_diretorio ... ok
+test versao::testes::nenhuma_entrada_causa_panico ... ok
+test versao::testes::nome_reservado_do_windows_e_recusado_em_todo_sistema ... ok
+test versao::testes::o_motivo_da_recusa_e_especifico_e_nao_generico ... ok
+test resolucao::testes::um_executavel_que_sumiu_depois_de_instalado_e_recusado_por_isso ... ok
+test revogacao::testes::uma_lista_mais_velha_que_a_ja_vista_e_recusada ... ok
+test inicializacao::testes::o_lancamento_de_cada_versao_aponta_para_os_dados_dela ... ok
+test resolucao::testes::um_executavel_absoluto_no_manifesto_nao_substitui_a_instalacao ... ok
+test resolucao::testes::cada_versao_resolve_para_o_executavel_e_os_dados_dela ... ok
+test resolucao::testes::uma_versao_nao_revogada_hospeda_com_a_lista_na_mao ... ok
+test resolucao::testes::a_resolucao_le_a_lista_conciliada_e_nao_o_bloco_do_manifesto ... ok
+test resolucao::testes::um_executavel_com_travessia_nao_alcanca_o_binario_de_outra_versao ... ok
+test resolucao::testes::uma_versao_revogada_continua_abrindo_para_ler_o_que_ficou_la ... ok
+test resolucao::testes::uma_versao_revogada_nao_hospeda_e_nao_entra ... ok
+test resolucao::testes::uma_revogacao_ja_vista_continua_recusando_com_o_manifesto_de_hoje_sem_lista ... ok
+
+test result: ok. 91 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/interoperabilidade-com-o-minisign.rs (target/debug/deps/interoperabilidade_com_o_minisign-12b92693bf29a2c5)
+
+running 2 tests
+test um_byte_trocado_no_documento_derruba_a_assinatura_do_minisign ... ok
+test uma_lista_assinada_pelo_minisign_de_verdade_abre_por_este_caminho ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_proto-0f4db4b0ee04963b)
+
+running 234 tests
+test control::icon_tests::a_picture_that_is_not_a_png_is_refused ... ok
+test control::icon_tests::a_blank_name_never_leaves_the_server_either ... ok
+test control::icon_tests::a_side_of_zero_is_refused ... ok
+test control::icon_tests::a_png_that_stops_inside_its_own_header_is_refused_and_does_not_panic ... ok
+test control::icon_tests::a_small_file_declaring_an_enormous_picture_is_refused ... ok
+test attachment::tests::an_oversized_body_is_refused_on_the_attachment_path_too ... ok
+test attachment::tests::an_empty_file_is_refused ... ok
+test attachment::tests::a_name_with_a_null_byte_is_refused ... ok
+test attachment::tests::the_digest_taken_block_by_block_equals_the_one_taken_at_once ... ok
+test control::key_tests::a_hello_without_a_real_key_is_refused ... ok
+test attachment::tests::a_file_with_no_name_is_refused_in_both_directions ... ok
+test attachment::tests::hex_is_lowercase_and_sixty_four_characters ... ok
+test attachment::tests::a_delivery_round_trips ... ok
+test attachment::tests::a_path_in_the_name_is_carried_rather_than_refused ... ok
+test attachment::tests::a_header_round_trips ... ok
+test attachment::tests::a_header_carries_the_version_byte_like_every_other_frame ... ok
+test control::numeric_tests::a_nan_never_reaches_the_sync_ratio ... ok
+test control::numeric_tests::a_sync_ratio_above_one_hundred_is_refused ... ok
+test control::numeric_tests::infinities_are_refused_too ... ok
+test control::numeric_tests::a_hostile_peer_cannot_smuggle_a_nan_past_the_encoder ... ok
+test control::icon_tests::a_server_name_is_bounded_at_both_ends ... ok
+test control::icon_tests::having_no_icon_is_a_value_and_not_a_refusal ... ok
+test control::key_tests::a_thirty_two_byte_key_is_accepted ... ok
+test control::icon_tests::an_icon_round_trips_in_both_directions ... ok
+test control::numeric_tests::negative_and_impossible_readings_are_refused ... ok
+test control::numeric_tests::sane_telemetry_round_trips ... ok
+test control::o_vocabulario_e_a_versao::as_duas_mensagens_do_servidor_conferem_a_impressao_com_a_mesma_regra ... ok
+test control::o_vocabulario_e_a_versao::uma_impressao_de_verdade_continua_passando ... ok
+test control::icon_tests::an_icon_at_the_ceiling_still_leaves_the_frame_with_room_to_spare ... ok
+test control::icon_tests::an_icon_over_the_ceiling_is_refused_in_both_directions ... ok
+test control::os_mods_no_fio::dois_mods_com_o_mesmo_identificador_sao_recusados ... ok
+test control::os_mods_no_fio::mexer_na_lista_sem_refazer_a_identidade_e_recusado ... ok
+test control::os_mods_no_fio::o_aceite_e_a_recusa_vao_e_voltam ... ok
+test control::os_mods_no_fio::mais_mods_do_que_cabem_num_quadro_sao_recusados ... ok
+test control::o_vocabulario_e_a_versao::uma_impressao_que_nao_e_um_sha256_em_hex_e_recusada_no_fio ... ok
+test control::o_vocabulario_e_a_versao::o_ultimo_verbo_de_cada_lista_esta_onde_esta_versao_o_deixou ... ok
+test control::o_vocabulario_e_a_versao::uma_variante_que_nao_aceita_zeros_ainda_e_contada ... ok
+test control::os_mods_no_fio::o_anuncio_vai_e_volta_inteiro ... ok
+test control::os_mods_no_fio::um_aceite_que_nao_carrega_uma_identidade_e_recusado ... ok
+test control::os_mods_no_fio::o_conjunto_vazio_tem_identidade_e_atravessa ... ok
+test control::os_mods_no_fio::um_hash_que_nao_e_hash_nao_atravessa_o_fio ... ok
+test control::os_mods_no_fio::uma_identidade_que_nao_e_a_da_lista_e_recusada ... ok
+test control::screen_tests::a_room_that_is_already_being_shared_says_so_in_its_own_words ... ok
+test control::screen_tests::a_transmission_is_named_by_a_screen_id_and_never_by_an_ssrc ... ok
+test control::screen_tests::an_unmeasured_uplink_travels_as_zero_rather_than_being_refused ... ok
+test control::screen_tests::the_screen_verbs_round_trip_and_sit_where_they_were_appended ... ok
+test control::screen_tests::the_two_frames_the_ceiling_needs_sit_after_the_verbs_and_shift_nothing ... ok
+test control::tests::a_blank_name_never_leaves_the_server_inside_a_session ... ok
+test control::tests::a_client_message_round_trips ... ok
+test control::os_mods_no_fio::um_anuncio_cheio_ainda_cabe_num_quadro ... ok
+test control::tests::a_control_frame_stays_small ... ok
+test control::tests::a_destroyed_room_is_announced_by_identifier_and_nothing_else ... ok
+test control::tests::a_foreign_version_is_refused_before_the_body_is_read ... ok
+test control::tests::a_joining_person_carries_their_ssrc ... ok
+test control::tests::a_release_publicada_recusa_o_carimbo_desta_build ... ok
+test control::tests::a_room_with_no_name_is_refused_in_both_directions ... ok
+test control::tests::a_server_message_round_trips ... ok
+test control::tests::a_voice_room_that_holds_nobody_or_everybody_is_refused ... ok
+test control::tests::an_empty_frame_is_rejected ... ok
+test control::tests::an_oversized_ban_reason_is_refused_in_both_directions ... ok
+test control::tests::an_oversized_frame_is_rejected_before_allocating ... ok
+test control::tests::an_oversized_body_is_refused_in_both_directions ... ok
+test control::tests::an_oversized_nickname_is_refused ... ok
+test control::tests::an_oversized_room_name_is_refused ... ok
+test control::tests::being_moved_round_trips ... ok
+test control::tests::as_mensagens_do_caminho_entre_pares_atravessam_o_fio ... ok
+test control::tests::being_turned_out_of_a_room_has_its_own_reason_for_each_kind ... ok
+test control::tests::consentir_em_assistir_por_par_nao_e_consentir_em_emprestar_a_conexao ... ok
+test control::tests::moderation_asks_for_a_person_and_never_for_a_sentence ... ok
+test control::tests::person_state_carries_both_mute_controls ... ok
+test control::tests::quem_nao_consentiu_nada_nao_pode_publicar_endereco_nenhum ... ok
+test control::tests::sending_a_message_carries_its_idempotency_key ... ok
+test control::tests::the_deleting_verbs_round_trip ... ok
+test control::tests::the_doorkeeper_reasons_round_trip_and_do_not_read_as_an_older_one ... ok
+test control::tests::the_room_making_announcements_round_trip ... ok
+test control::tests::the_moderation_verbs_round_trip ... ok
+test control::tests::the_room_making_verbs_round_trip ... ok
+test control::tests::the_session_carries_the_ssrc ... ok
+test control::tests::the_session_says_what_this_person_may_do ... ok
+test control::tests::the_version_byte_comes_first ... ok
+test control::tests::the_weight_of_a_line_survives_the_wire_exactly ... ok
+test encontro::testes::a_mesma_pergunta_tem_a_mesma_resposta_sempre ... ok
+test encontro::testes::a_porta_padrao_fica_ao_lado_da_do_server ... ok
+test encontro::testes::a_vizinhanca_maior_abre_a_rede_local_e_nao_a_porta_de_servico ... ok
+test encontro::testes::lixo_nao_vira_resposta ... ok
+test encontro::testes::nada_do_pedido_atravessa_para_a_resposta_alem_da_marca ... ok
+test encontro::testes::o_pacote_do_furo_nao_e_coisa_do_ponto_de_encontro ... ok
+test encontro::testes::nenhuma_resposta_e_maior_que_o_pedido_que_a_causou ... ok
+test encontro::testes::um_leve_apresenta_os_dois_sem_nunca_ter_ouvido_falar_de_nenhum ... ok
+test encontro::testes::um_leve_nao_alcanca_porta_de_servico ... ok
+test encontro::testes::um_leve_nao_alcanca_rede_que_nao_e_da_internet ... ok
+test encontro::testes::um_onde_volta_para_quem_perguntou_com_o_endereco_que_o_ponto_viu ... ok
+test encontro::testes::um_pedido_curto_e_recusado_mesmo_estando_certo ... ok
+test encontro::testes::uma_marca_e_curta_e_alfanumerica ... ok
+test encontro::testes::uma_resposta_nao_e_um_pedido ... ok
+test ids::tests::identifiers_are_transparent_on_the_wire ... ok
+test ids::tests::identifiers_do_not_interchange ... ok
+test media::tests::a_datagram_round_trips ... ok
+test media::tests::a_foreign_version_is_refused_with_the_numbers ... ok
+test media::tests::a_header_with_no_audio_is_rejected ... ok
+test media::tests::an_empty_payload_is_refused_on_the_way_out_too ... ok
+test media::tests::a_truncated_datagram_is_rejected_not_misread ... ok
+test media::tests::an_oversized_datagram_is_rejected_before_anything_is_allocated ... ok
+test media::tests::encoding_into_a_small_buffer_fails_instead_of_truncating ... ok
+test media::tests::extreme_field_values_survive_a_round_trip ... ok
+test media::tests::overhead_matches_what_the_spec_budgeted ... ok
+test media::tests::the_header_is_exactly_eleven_bytes ... ok
+test media::tests::the_wire_layout_is_big_endian_and_in_the_documented_order ... ok
+test mods::tests::a_ordem_das_linhas_nao_muda_a_identidade ... ok
+test mods::tests::a_ordem_dos_arquivos_nao_muda_o_hash ... ok
+test mods::tests::acrescentar_um_mod_muda_a_identidade ... ok
+test mods::tests::mover_bytes_de_um_campo_para_o_outro_muda_a_identidade ... ok
+test mods::tests::mover_bytes_do_nome_para_o_conteudo_muda_o_hash ... ok
+test mods::tests::nenhum_caminho_com_dois_pontos_vira_caminho_interno ... ok
+test mods::tests::nenhuma_entrada_causa_panico ... ok
+test mods::tests::o_anuncio_pede_uma_versao_que_a_global_alcanca ... ok
+test mods::tests::o_hash_de_um_conteudo_e_um_hash_de_conteudo ... ok
+test mods::tests::o_mesmo_conteudo_da_o_mesmo_hash ... ok
+test mods::tests::o_mesmo_conjunto_da_a_mesma_identidade ... ok
+test mods::tests::o_que_o_hash_ja_cobre_nao_entra_na_identidade ... ok
+test mods::tests::reach_e_state_sao_lidos_mesmo_sem_consumidor ... ok
+test mods::tests::subir_a_versao_de_um_mod_muda_a_identidade ... ok
+test mods::tests::outros_bytes_sob_o_mesmo_nome_mudam_a_identidade ... ok
+test mods::tests::tirar_um_mod_muda_a_identidade ... ok
+test mods::tests::um_caminho_comum_vira_caminho_interno ... ok
+test mods::tests::um_byte_diferente_da_um_hash_diferente ... ok
+test mods::tests::um_esquema_do_futuro_e_recusado_com_os_dois_numeros ... ok
+test mods::tests::um_hash_que_nao_e_hexadecimal_minusculo_de_64_e_recusado ... ok
+test mods::tests::um_identificador_sem_autor_e_recusado ... ok
+test mods::tests::um_manifesto_completo_e_lido ... ok
+test mods::tests::um_manifesto_sem_reach_nem_state_e_lido ... ok
+test mods::tests::um_mod_sem_nenhuma_das_duas_metades_e_recusado ... ok
+test mods::tests::uma_api_do_futuro_e_recusada_com_os_dois_numeros ... ok
+test mods::tests::uma_chave_desconhecida_e_recusada ... ok
+test screen::entre_versoes::quem_transmite_escreve_a_versao_do_layout_e_nao_a_do_protocolo ... ok
+test screen::tests::a_foreign_version_is_refused_with_the_numbers ... ok
+test screen::tests::a_header_round_trips_and_keeps_what_followed_it ... ok
+test screen::tests::a_screen_is_not_an_audio_source ... ok
+test screen::tests::a_resolution_outside_the_ceiling_is_refused_in_both_directions ... ok
+test screen::tests::a_screen_stood_on_end_is_carried_and_not_refused ... ok
+test screen::tests::a_truncated_header_is_rejected_not_misread ... ok
+test screen::tests::an_unknown_source_or_codec_is_refused_rather_than_guessed ... ok
+test screen::tests::encoding_into_a_small_buffer_fails_instead_of_truncating ... ok
+test screen::tests::every_offered_resolution_fits_the_header ... ok
+test screen::tests::the_opening_header_is_exactly_eleven_bytes ... ok
+test screen::tests::the_wire_layout_is_big_endian_and_in_the_documented_order ... ok
+test signal::tests::a_perfect_connection_scores_one_hundred ... ok
+test signal::tests::a_person_with_no_measurements_reads_as_nominal ... ok
+test signal::tests::a_sustained_problem_does_arrive ... ok
+test signal::tests::every_penalty_respects_its_ceiling ... ok
+test signal::tests::loss_is_punished_harder_than_delay ... ok
+test signal::tests::smoothing_stops_the_number_flickering ... ok
+test signal::tests::nonsense_input_cannot_produce_a_nonsense_score ... ok
+test signal::tests::the_bands_break_where_the_comp_breaks_them ... ok
+test signal::tests::the_first_measurement_is_taken_whole ... ok
+test signal::tests::the_loss_curve_is_steep_near_zero ... ok
+test signal::tests::the_measured_network_profiles_land_in_sensible_bands ... ok
+test signal::tests::the_rtt_penalty_grows_above_forty_milliseconds_not_below ... ok
+test signal::tests::there_is_no_band_between_degraded_and_nominal ... ok
+test stream::tests::a_stream_that_closed_before_its_first_byte_is_refused_not_misread ... ok
+test stream::tests::an_unknown_type_is_refused_rather_than_guessed ... ok
+test stream::tests::the_attachment_header_is_unchanged_and_merely_sits_one_byte_later ... ok
+test stream::tests::the_screen_header_is_unchanged_and_merely_sits_one_byte_later ... ok
+test stream::tests::the_two_types_travel_as_one_and_two_and_stay_there ... ok
+test stream::tests::zero_is_refused_by_name_so_an_older_peer_fails_loudly ... ok
+test transport::fingerprint_tests::a_different_certificate_prints_differently ... ok
+test transport::fingerprint_tests::a_fingerprint_is_sixty_four_hex_characters ... ok
+test transport::fingerprint_tests::a_person_prints_in_the_same_shape_as_a_machine ... ok
+test transport::fingerprint_tests::an_empty_certificate_still_prints ... ok
+test transport::fingerprint_tests::an_empty_key_still_prints ... ok
+test transport::fingerprint_tests::the_same_certificate_always_prints_the_same ... ok
+test transport::fingerprint_tests::two_people_print_differently ... ok
+test transport::tests::a_conta_cresce_com_o_quadrado_da_sala ... ok
+test transport::tests::a_sala_maior_possivel_nao_estoura_a_conta ... ok
+test transport::tests::dez_pessoas_no_teto_pedem_alguns_megabits ... ok
+test transport::tests::keepalive_fits_inside_the_idle_timeout ... ok
+test transport::tests::o_aviso_sai_em_quem_cruza_e_nao_em_quem_vem_depois ... ok
+test transport::tests::o_bitrate_maior_cobra_proporcionalmente_mais ... ok
+test transport::tests::sem_medida_nao_ha_aviso ... ok
+test transport::tests::the_application_notices_a_dead_peer_before_quic_does ... ok
+test transport::tests::the_flood_limit_leaves_room_for_a_hiccup ... ok
+test transport::tests::the_handshake_budget_is_shorter_than_the_idle_timeout ... ok
+test transport::tests::um_orcamento_menor_faz_a_sala_estourar_de_novo ... ok
+test transport::tests::uma_sala_de_zero_ou_uma_pessoa_nao_pede_subida ... ok
+test transport::tests::uma_sala_que_cabe_nao_avisa ... ok
+test uri::o_nome_publico::cada_recusa_diz_qual_foi ... ok
+test uri::o_nome_publico::o_esquema_e_recusado_antes_da_barra ... ok
+test uri::o_nome_publico::o_que_passa_daqui_analisa_como_link ... ok
+test uri::o_nome_publico::um_nome_de_maquina_passa_e_volta_aparado ... ok
+test uri::tests::a_barra_antes_da_consulta_e_opcional ... ok
+test uri::tests::a_impressao_digital_normaliza_para_minusculas ... ok
+test uri::tests::a_interpolacao_a_mao_e_justamente_a_que_nao_passa ... ok
+test uri::tests::a_senha_nunca_viaja_no_link ... ok
+test uri::tests::espaco_em_volta_nao_atrapalha ... ok
+test uri::tests::ida_e_volta_com_tudo ... ok
+test uri::tests::o_aviso_do_bilhete_e_um_endereco_e_nao_um_nome ... ok
+test uri::tests::o_convite_cabe_todos_os_alvos_que_a_escada_entrega ... ok
+test uri::tests::o_minimo_e_um_endereco ... ok
+test uri::tests::o_ponto_de_encontro_sem_porta_nao_herda_a_porta_do_server ... ok
+test uri::tests::outro_esquema_e_recusado ... ok
+test uri::tests::todo_socketaddr_atravessa_o_convite_e_volta_igual ... ok
+test uri::tests::o_link_nao_cresce_sem_limite_nem_repete_endereco ... ok
+test uri::tests::parametro_desconhecido_e_ignorado_em_vez_de_recusado ... ok
+test uri::tests::um_alvo_que_analisar_aceitou_sempre_se_separa ... ok
+test uri::tests::um_bilhete_de_encontro_vai_e_volta_com_as_duas_metades ... ok
+test uri::tests::um_bilhete_pela_metade_ou_torto_e_recusado ... ok
+test uri::tests::um_cliente_que_nao_conhece_alt_le_o_primeiro_endereco ... ok
+test uri::tests::um_cliente_que_nao_conhece_enc_perde_o_degrau_4_e_nada_mais ... ok
+test uri::tests::um_colchete_sem_fecho_nao_passa ... ok
+test uri::tests::um_convite_com_varios_enderecos_vai_e_volta_na_ordem ... ok
+test uri::tests::um_convite_de_um_endereco_so_continua_sendo_o_de_antes ... ok
+test uri::tests::um_endereco_alternativo_torto_e_recusado_como_o_principal ... ok
+test uri::tests::um_endereco_com_coisa_estranha_nao_passa ... ok
+test uri::tests::um_endereco_ipv6_atravessa_inteiro ... ok
+test uri::tests::um_ipv6_cru_no_link_e_recusado_com_o_motivo ... ok
+test uri::tests::um_ipv6_se_separa_sem_os_colchetes_e_com_a_porta_escrita ... ok
+test uri::tests::um_ipv6_sem_colchetes_diz_que_faltam_os_colchetes ... ok
+test uri::tests::um_ipv6_sem_porta_fica_com_a_porta_padrao ... ok
+test uri::tests::um_nome_e_um_ipv4_continuam_se_separando_como_antes ... ok
+test uri::tests::um_token_com_caractere_estranho_nao_passa ... ok
+test uri::tests::uma_impressao_digital_que_nao_e_uma_nao_passa ... ok
+test uri::tests::uma_porta_que_nao_e_numero_e_recusada_aqui_e_nao_la_adiante ... ok
+test version::tests::a_api_de_pedidos_preserva_o_limiar_do_anuncio_original ... ok
+test version::tests::a_versao_anterior_continua_dentro_da_janela ... ok
+test version::tests::own_version_is_always_accepted ... ok
+test version::tests::compatibility_window_never_underflows ... ok
+test version::tests::newer_peer_is_refused_with_a_specific_reason ... ok
+test version::tests::negotiated_version_is_always_speakable ... ok
+test version::tests::accepts_exactly_the_window ... ok
+test version::tests::never_panics_for_any_byte ... ok
+test version::tests::refusal_carries_actionable_numbers ... ok
+test control::tests::decoding_arbitrary_bytes_never_panics ... ok
+test control::tests::a_correct_version_does_not_excuse_a_bad_body ... ok
+test control::tests::text_messages_round_trip ... ok
+
+test result: ok. 234 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/vetores_de_hash.rs (target/debug/deps/vetores_de_hash-b0ef70c865851a10)
+
+running 1 test
+test os_vetores_comitados_batem_com_esta_implementacao ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_server-13b29620bf6c6ea0)
+
+running 481 tests
+test admissao::tests::conferir_um_convite_nao_o_gasta ... ok
+test admissao::tests::um_convite_vencido_nao_abre ... ok
+test admissao::tests::um_convite_vale_uma_vez_e_so ... ok
+test admissao::tests::erro_de_infraestrutura_no_banco_fica_distinguivel_de_sala_inexistente ... ok
+test admissao::tests::o_token_da_para_ditar_por_telefone ... ok
+test alcance::encontro::testes::a_janela_de_furos_fecha_e_depois_reabre ... ok
+test admissao::tests::dois_passes_do_mesmo_convite_nao_entram_os_dois ... ok
+test alcance::encontro::testes::a_marca_do_convite_sai_da_impressao_digital_e_nada_mais ... ok
+test alcance::encontro::testes::a_rede_do_padrao_existe_e_serve_esta_maquina ... ok
+test admissao::tests::um_server_sem_configuracao_deixa_qualquer_um_entrar ... ok
+test admissao::tests::um_hash_corrompido_recusa_em_vez_de_aceitar ... ok
+test alcance::encontro::testes::desligar_o_degrau_4_e_uma_variavel_de_ambiente ... ok
+test alcance::encontro::testes::o_ipv4_e_tentado_antes_do_ipv6_quando_os_dois_existem ... ok
+test alcance::encontro::testes::o_ponto_padrao_que_nao_resolve_nao_culpa_a_maquina_de_quem_hospeda ... ok
+test alcance::encontro::testes::o_prazo_e_curto_porque_o_caminho_comum_o_paga_inteiro ... ok
+test alcance::encontro::testes::atender_fura_para_aqui_que_veio_do_ponto ... ok
+test alcance::encontro::testes::o_server_de_pilha_dupla_alcanca_um_ponto_de_encontro_ipv4 ... ok
+test alcance::encontro::testes::toda_falha_do_degrau_4_diz_o_que_aconteceu ... ok
+test alcance::encontro::testes::um_aqui_de_origem_estranha_nao_vira_furo ... ok
+test alcance::encontro::testes::o_recuo_nunca_atravessa_o_ponto_que_outra_pessoa_escolheu ... ok
+test admissao::tests::dois_tokens_nunca_saem_iguais ... ok
+test alcance::encontro::testes::um_endereco_de_familia_inalcancavel_nao_come_o_prazo ... ok
+test admissao::tests::um_voice_room_sem_senha_aceita_qualquer_membro ... ok
+test alcance::firewall::testes::a_regra_vale_mesmo_com_o_programa_noutro_lugar ... ok
+test admissao::tests::um_voice_room_que_nao_existe_nao_libera ... ok
+test alcance::firewall::testes::com_regra_para_este_programa_a_entrada_esta_liberada ... ok
+test alcance::firewall::testes::o_comando_nomeia_o_executavel_que_precisa_da_regra ... ok
+test alcance::firewall::testes::a_saida_em_portugues_e_entendida ... ok
+test alcance::firewall::testes::sem_regra_para_este_programa_a_entrada_esta_barrada ... ok
+test alcance::firewall::testes::uma_saida_que_nao_se_entende_vira_nao_sei_e_nunca_barrada ... ok
+a rota padrão sai por 192.168.50.142; a enumeração achou [Achado { ip: 192.168.50.142, mascara: Some(255.255.255.0), origem: Fisica }]
+test alcance::interfaces::testes::a_enumeracao_de_verdade_acha_o_endereco_da_rota_padrao ... ok
+test alcance::interfaces::testes::a_ordem_das_classes_poe_a_placa_de_rede_na_frente ... ok
+test alcance::interfaces::testes::loopback_e_link_local_nao_viram_candidato ... ok
+test alcance::interfaces::testes::a_mesma_sub_rede_e_o_que_o_degrau_3_pergunta ... ok
+test alcance::interfaces::testes::o_endereco_da_rede_local_aparece_mesmo_com_a_vpn_com_a_rota_padrao ... ok
+test alcance::interfaces::testes::o_endereco_do_tunel_nao_passa_por_endereco_da_rede_local ... ok
+test alcance::interfaces::testes::os_nomes_de_tunel_conhecidos_sao_reconhecidos ... ok
+test alcance::interfaces::testes::o_ipv6_do_tunel_e_global_e_ainda_assim_vem_do_tunel ... ok
+test alcance::interfaces::testes::sem_mascara_ninguem_esta_na_mesma_rede ... ok
+test alcance::interfaces::testes::uma_ponte_de_conteiner_nao_e_a_rede_de_casa ... ok
+test alcance::pcp::testes::a_espera_toda_cabe_no_prazo ... ok
+test alcance::pcp::testes::a_recusa_carrega_o_codigo_da_rfc_para_quem_for_procurar ... ok
+esta máquina não tem IPv6 global de placa
+test alcance::pcp::testes::a_renovacao_cabe_com_folga_dentro_da_validade ... ok
+test alcance::pcp::testes::a_maquina_que_roda_o_teste_diz_qual_e_o_roteador_dela ... ok
+test alcance::pcp::testes::cada_codigo_de_recusa_da_rfc_vira_uma_falha_com_o_numero_certo ... ok
+test alcance::pcp::testes::o_endereco_a_abrir_e_o_da_placa_e_nunca_o_do_tunel ... ok
+test alcance::pcp::testes::o_recuo_para_nat_pmp_e_uma_falha_e_nunca_um_sucesso ... ok
+test alcance::pcp::testes::o_codigo_12_nao_e_recusa_do_roteador_e_sim_limite_daqui ... ok
+test alcance::pcp::testes::sem_ipv6_global_de_placa_nao_ha_o_que_pedir ... ok
+test alcance::pcp::testes::toda_falha_diz_o_que_aconteceu_sem_repetir_a_anterior ... ok
+test alcance::pcp::testes::uma_ponte_de_conteiner_nao_vira_pedido_de_firewall ... ok
+test alcance::porta::testes::a_faixa_de_cgnat_nao_conta_como_saida ... ok
+test alcance::porta::testes::a_porta_canonica_volta_a_servir_quando_o_mapeamento_antigo_ja_caducou ... ok
+test alcance::porta::testes::a_porta_ocupada_tenta_a_canonica_de_novo_antes_de_pedir_qualquer_uma ... ok
+test alcance::porta::testes::a_procura_nao_faz_ninguem_esperar_muito ... ok
+test alcance::porta::testes::a_renovacao_cabe_com_folga_dentro_da_validade ... ok
+test alcance::porta::testes::as_faixas_privadas_tambem_nao_contam ... ok
+test alcance::porta::testes::o_roteador_recebe_o_endereco_da_rede_dele_e_nao_o_do_tunel ... ok
+pulado (parcialmente): esta rede respondeu «o roteador não respondeu ao pedido de abrir uma porta — procure «UPnP» nos ajustes dele e ligue, se existir»
+test alcance::porta::testes::pedir_porta_numa_rede_sem_roteador_falha_dizendo_isso ... ok
+test alcance::porta::testes::sem_mascara_sobra_a_placa_de_rede_na_faixa_privada ... ok
+test alcance::porta::testes::sem_nenhum_endereco_na_rede_do_roteador_o_pedido_nao_e_feito ... ok
+test alcance::porta::testes::toda_falha_diz_o_que_aconteceu_sem_repetir_a_anterior ... ok
+test alcance::porta::testes::um_endereco_publico_de_verdade_conta ... ok
+esta rede parou em SoRedeLocal
+test alcance::testes::a_escada_para_num_degrau_e_diz_qual_e_por_que ... ok
+test alcance::testes::a_escuta_padrao_atende_as_duas_familias ... ok
+test alcance::testes::a_ordem_do_convite_sai_do_tipo_do_candidato ... ok
+test alcance::testes::a_ordem_dos_tipos_nao_tem_empate_nem_buraco ... ok
+test alcance::testes::a_pilha_dupla_recebe_um_pacote_ipv4_de_verdade ... ok
+test alcance::testes::a_porta_aberta_no_roteador_nunca_e_truncada_para_fora_do_convite ... ok
+test alcance::testes::a_porta_no_roteador_continua_ganhando_do_furo_de_nat ... ok
+pulado (parcialmente): esta rede respondeu «não deu para descobrir o roteador desta rede»
+test alcance::testes::a_promocao_do_pcp_nao_pede_furo_a_ninguem ... ok
+test alcance::pcp::testes::pedir_para_abrir_o_firewall_sem_roteador_falha_dizendo_isso ... ok
+test alcance::testes::a_recusa_do_pcp_sobra_quando_o_firewall_nao_abriu_e_some_quando_abriu ... ok
+test alcance::testes::a_rede_de_casa_e_sempre_o_primeiro_candidato ... ok
+test alcance::testes::cada_degrau_tem_nome_proprio_e_estavel ... ok
+test alcance::testes::entre_dois_ipv6_globais_o_liberado_e_o_que_sobrevive_ao_corte ... ok
+test alcance::testes::o_aviso_de_porta_nao_canonica_chega_a_quem_hospeda ... ok
+test alcance::testes::o_convite_leva_a_rede_de_casa_mesmo_quando_o_degrau_e_mais_alto ... ok
+test alcance::testes::o_convite_nao_cresce_sem_limite ... ok
+test alcance::testes::o_endereco_furado_nunca_e_truncado_para_fora_do_convite ... ok
+test alcance::testes::o_furo_de_nat_vira_candidato_e_degrau_quando_o_roteador_nao_abriu ... ok
+test alcance::testes::o_alvo_da_escada_sempre_vira_um_convite_que_se_le_de_volta ... ok
+test alcance::testes::o_furo_fica_de_pe_mesmo_quando_a_porta_do_roteador_nomeia_o_degrau ... ok
+test alcance::testes::o_ok_do_pcp_nao_muda_o_degrau_nem_acrescenta_candidato ... ok
+test alcance::testes::o_ok_do_pcp_nao_passa_na_frente_do_endereco_refletido ... ok
+test alcance::testes::os_enderecos_que_nao_saem_da_rede_sao_recusados ... ok
+test alcance::testes::quem_ja_tem_endereco_publico_nao_pede_apresentacao_a_ninguem ... ok
+test alcance::testes::sem_endereco_nenhum_o_alvo_ainda_e_um_lugar ... ok
+test alcance::testes::sem_recuo_a_porta_nao_canonica_fica_none ... ok
+test alcance::testes::um_degrau_nomeado_sempre_tem_o_endereco_dele_no_convite ... ok
+test alcance::testes::um_endereco_de_encontro_que_a_escuta_nao_serve_nao_vira_degrau_4 ... ok
+pulado: esta máquina não tem rota IPv6 global
+test alcance::testes::um_endereco_de_saida_v6_e_global_ou_nao_existe ... ok
+test alcance::testes::um_endereco_publico_nao_e_um_link_que_so_funciona_na_sua_rede ... ok
+test alcance::testes::um_firewall_aberto_que_a_escuta_nao_serve_nao_vira_promocao_nem_apaga_a_recusa ... ok
+test alcance::testes::um_ipv6_de_tunel_nao_vira_promessa_de_alcance ... ok
+test alcance::testes::uma_escuta_de_pilha_dupla_continua_subindo_a_escada_inteira ... ok
+test alcance::testes::uma_escuta_so_ipv4_nunca_declara_um_degrau_de_ipv6 ... ok
+test alcance::testes::um_endereco_nomeado_e_uma_ordem ... ok
+test alcance::testes::uma_escuta_so_ipv6_nunca_anuncia_o_ipv4_da_maquina ... ok
+test alcance::testes::uma_porta_aberta_que_a_escuta_nao_atende_nao_vira_degrau_3 ... ok
+test alcance::testes::uma_vps_de_pilha_dupla_nao_promete_so_ipv6_tendo_ipv4_publico ... ok
+test alcance::testes::zero_zero_zero_zero_continua_querendo_dizer_ipv4 ... ok
+test alcance::testes::uma_porta_ocupada_falha_dizendo_onde ... ok
+test hospedagem::tests::escuta_em_todas_as_interfaces_e_nao_so_em_localhost ... ok
+test hospedagem::tests::o_convite_carrega_a_impressao_digital_desta_instancia ... ok
+test admissao::tests::a_senha_do_voice_room_tambem_e_hasheada ... ok
+test admissao::tests::tirar_a_senha_reabre_o_server_se_nao_houver_convites ... ok
+test admissao::tests::a_senha_nao_fica_em_texto_puro_no_banco ... ok
+test hospedagem::tests::o_convite_leva_o_endereco_da_rede_local_quando_ele_existe ... ok
+test hospedagem::tests::o_endereco_para_os_amigos_nao_e_o_de_escuta ... ok
+test hospedagem::tests::o_nome_publico_vira_o_alvo_do_link_e_o_numero_desce_para_alternativo ... ok
+test hospedagem::tests::um_server_hospedado_aceita_conexao ... ok
+test mods::anuncio::tests::exigencia_vale_na_rede_concorda_com_o_limiar_padrao ... ok
+test alcance::encontro::testes::atender_recusa_furo_para_aqui_que_nao_veio_do_ponto ... ok
+test mods::anuncio::tests::o_anuncio_alcanca_quem_negocia_a_versao_de_hoje ... ok
+test alcance::encontro::testes::um_aviso_faz_sair_um_furo_e_nunca_um_segundo ... ok
+test mods::anuncio::tests::um_limiar_acima_da_versao_global_continua_sem_alcancar_ninguem ... ok
+test mods::anuncio::tests::desabilitar_tira_do_conjunto_e_muda_a_identidade ... ok
+test mods::anuncio::tests::mods_demais_para_um_quadro_nao_viram_um_anuncio_pela_metade ... ok
+test mods::arquivos::tests::apagar_tira_o_arquivo_da_listagem ... ok
+test mods::arquivos::tests::nenhum_caminho_sai_da_pasta_do_mod ... ok
+test mods::arquivos::tests::o_arquivo_do_vizinho_existe_e_continua_fora_de_alcance ... ok
+test mods::arquivos::tests::subpastas_sao_criadas ... ok
+test mods::arquivos::tests::um_arquivo_grande_demais_e_recusado ... ok
+test mods::arquivos::tests::um_mod_escreve_e_le_na_pasta_dele ... ok
+test mods::despacho::tests::um_apelido_hostil_nao_quebra_o_json_que_chega_ao_mod ... ok
+test mods::anuncio::tests::o_anuncio_carrega_identidade_versao_hash_e_o_que_a_tela_precisa ... ok
+test mods::anuncio::tests::um_servidor_sem_mod_exige_um_conjunto_vazio ... ok
+test mods::despacho::tests::um_mod_que_lanca_nao_leva_o_vizinho_junto ... ok
+test mods::despacho::tests::um_mod_que_nao_compila_e_nomeado_e_o_resto_sobe ... ok
+test mods::despacho::tests::um_mod_eterno_nao_segura_a_fila ... ok
+test mods::despacho::tests::um_momento_chega_a_todo_mod_ligado ... ok
+test mods::mundo::tests::o_relogio_anda_para_a_frente ... ok
+test mods::mundo::tests::so_http_e_https_atravessam ... ok
+test hospedagem::tests::encerrar_libera_a_porta_para_hospedar_de_novo ... ok
+test mods::pedidos::tests::replies_preserve_unicode_and_frame_limits ... ok
+test mods::tests::dois_mods_nao_dividem_o_mesmo_global ... ok
+test mods::tests::o_que_estava_no_quintal_chega_ao_mod ... ok
+test mods::tests::o_que_um_mod_guarda_no_quintal_volta ... ok
+test mods::anuncio::tests::a_identidade_nao_depende_da_ordem_em_que_os_mods_foram_ligados ... ok
+test mods::tests::o_teto_de_memoria_e_aplicado ... ok
+test admissao::tests::um_passe_de_senha_nao_deve_nada ... ok
+test mods::tests::um_mod_escreve_um_arquivo_de_dentro_do_javascript ... ok
+test mods::tests::um_mod_le_o_relogio_e_escreve_no_log ... ok
+test mods::tests::um_mod_nao_le_arquivo_pela_rede ... ok
+test mods::anuncio::tests::uma_linha_habilitada_sem_hash_conferivel_e_nomeada ... ok
+test mods::tests::um_laco_infinito_e_interrompido ... ok
+test mods::tests::um_mod_que_carrega_responde_a_um_momento ... ok
+test mods::tests::um_mod_que_lanca_no_meio_nao_deixa_meia_escrita ... ok
+test mods::tests::um_mod_que_nao_compila_e_recusado_ao_carregar ... ok
+test mods::tests::um_mod_que_tenta_sair_da_pasta_pelo_javascript_recebe_recusa ... ok
+test mods::tests::um_mod_sem_ao_acontecer_nao_e_falha ... ok
+test pares::testes::a_impressao_sobrevive_a_emprestando_false ... ok
+test pares::testes::a_saida_de_quem_assiste_nao_derruba_a_nomeacao_de_outra_pessoa ... ok
+test pares::testes::a_saida_de_uma_conexao_velha_nao_apaga_a_declaracao_de_uma_nova ... ok
+test pares::testes::a_sessao_que_acaba_devolve_o_par_que_servia_esta_pessoa ... ok
+test pares::testes::a_transmissao_acabando_solta_o_par_de_todo_espectador ... ok
+test pares::testes::baixar_o_teto_encerra_o_repasse_que_deixou_de_caber ... ok
+test pares::testes::deixar_de_emprestar_encerra_todos_os_repasses_em_curso ... ok
+test pares::testes::desacreditar_apaga_independente_da_conexao ... ok
+test pares::testes::dois_espectadores_da_mesma_tela_ocupam_dois_pares ... ok
+test pares::testes::entre_dois_da_sala_so_o_que_recebe_a_transmissao_e_escolhido ... ok
+test pares::testes::entre_dois_que_emprestam_so_o_da_sala_da_tela_e_escolhido ... ok
+test pares::testes::impressaonaobate_desacredita_quem_foi_apontado_nunca_quem_relata ... ok
+test pares::testes::motivos_que_nao_sao_impressaonaobate_nunca_desacreditam_ninguem ... ok
+test pares::testes::o_endereco_de_quem_nao_consentiu_assistir_por_par_nao_e_entregue_a_ninguem ... ok
+test pares::testes::o_endereco_publico_vem_do_servidor_e_nao_do_cliente ... ok
+test pares::testes::o_teto_de_quem_empresta_e_dele_e_nao_do_codigo ... ok
+test pares::testes::quem_assiste_indo_embora_devolve_o_par_a_quem_pode_escolher ... ok
+test pares::testes::quem_compartilha_nunca_e_escolhido_para_servir_a_si_mesmo ... ok
+test pares::testes::quem_consentiu_assistir_por_par_tem_o_endereco_entregue ... ok
+test pares::testes::quem_empresta_de_outra_sala_de_voz_nunca_e_escolhido ... ok
+test pares::testes::quem_empresta_saindo_da_sala_devolve_ao_servidor_quem_ele_servia ... ok
+test pares::testes::quem_fecha_a_janela_nao_solta_o_par_de_quem_continua_assistindo ... ok
+test pares::testes::quem_ja_esta_servindo_nao_e_escolhido_de_novo ... ok
+test pares::testes::quem_nao_empresta_nunca_e_escolhido_mesmo_com_impressao_guardada ... ok
+test pares::testes::quem_sai_deixa_de_ser_a_resposta_de_uma_nomeacao_velha ... ok
+test pares::testes::redeclarar_o_mesmo_consentimento_nao_encerra_nada ... ok
+test pares::testes::retirar_o_consentimento_de_assistir_por_par_encerra_o_proprio_repasse ... ok
+test pares::testes::saiu_apaga_tambem_a_declaracao ... ok
+test pares::testes::sem_nomeacao_guardada_ninguem_e_desacreditado ... ok
+test pares::testes::um_par_que_nao_recebe_a_transmissao_nao_e_escolhido_para_repassa_la ... ok
+test pares::testes::um_parfalhou_resolve_contra_a_propria_nomeacao_e_nao_contra_quem_relata ... ok
+test perda_de_subida::tests::a_janela_desliza_e_a_fracao_volta_a_cair ... ok
+test perda_de_subida::tests::a_volta_do_u16_e_continuidade_e_nao_lacuna ... ok
+test perda_de_subida::tests::abaixo_do_minimo_a_resposta_e_nao_sei ... ok
+test perda_de_subida::tests::duplicata_nao_conta ... ok
+test perda_de_subida::tests::silencio_de_dtx_nao_conta_como_perda ... ok
+test perda_de_subida::tests::uma_lacuna_de_seq_e_perda ... ok
+test perda_de_subida::tests::uma_sequencia_sem_lacuna_nao_perde_nada ... ok
+test mods::tests::um_quintal_grande_demais_e_recusado_e_nao_aparado ... ok
+test mods::despacho::tests::um_evento_do_barramento_chega_ao_mod_e_o_quintal_e_gravado ... ok
+test mods::despacho::tests::um_mod_que_quebra_e_desabilitado_no_banco ... ok
+test mods::tests::um_mod_que_aloca_sem_parar_e_cortado_e_o_contexto_sobrevive ... ok
+test alcance::encontro::testes::um_candidato_que_engole_em_silencio_nao_come_a_vez_do_proximo ... ok
+test permissions::tests::a_ban_beats_every_permission ... ok
+test permissions::tests::a_ban_can_be_lifted ... ok
+test permissions::tests::a_commander_has_everything ... ok
+test permissions::tests::a_different_key_cannot_take_a_nickname ... ok
+test permissions::tests::a_key_gets_the_same_account_every_time ... ok
+test permissions::tests::a_person_is_denied_every_moderation_permission ... ok
+test permissions::tests::a_person_with_no_roles_can_do_nothing ... ok
+test admissao::tests::senha_e_convite_convivem ... ok
+test admissao::tests::com_senha_configurada_a_porta_fecha ... ok
+test permissions::tests::a_returning_account_does_not_claim_the_commandership_again ... ok
+test permissions::tests::a_returning_key_takes_the_name_it_asks_for ... ok
+test admissao::tests::um_voice_room_com_senha_recusa_quem_nao_a_tem ... ok
+test permissions::tests::a_revoked_commander_does_not_get_it_back_by_reconnecting ... ok
+test permissions::tests::an_account_older_than_the_commandership_can_still_take_it ... ok
+test permissions::tests::an_expired_ban_stops_applying ... ok
+test permissions::tests::an_observer_is_denied_every_permission_it_should_not_have ... ok
+test permissions::tests::an_unknown_person_is_refused_rather_than_defaulted ... ok
+test permissions::tests::an_operator_moderates_but_does_not_administer ... ok
+test permissions::tests::banning_needs_the_permission_to_ban ... ok
+test permissions::tests::denial_beats_a_grant_from_another_role ... ok
+test permissions::tests::renaming_is_not_a_way_to_take_somebody_elses_name ... ok
+test permissions::tests::the_first_account_becomes_the_commander ... ok
+test permissions::tests::the_second_account_is_only_a_person ... ok
+test persistence::aparencia::testes::o_icone_gravado_volta_byte_a_byte ... ok
+test permissions::tests::two_arrivals_at_once_produce_exactly_one_commander ... ok
+test persistence::aparencia::testes::o_nome_e_aparado_antes_de_ser_gravado ... ok
+test persistence::aparencia::testes::o_nome_escolhido_vence_o_do_arranque ... ok
+test persistence::aparencia::testes::o_nome_e_o_icone_sobrevivem_a_um_reinicio ... ok
+test persistence::attachments::tests::a_file_name_that_draws_nothing_is_refused ... ok
+test alcance::encontro::testes::um_ponto_de_encontro_que_nao_existe_nao_segura_ninguem ... ok
+test persistence::aparencia::testes::tirar_o_icone_apaga_a_linha_em_vez_de_esvazia_la ... ok
+test persistence::aparencia::testes::sem_escolha_vale_o_nome_do_arranque ... ok
+test persistence::aparencia::testes::trocar_o_icone_nao_deixa_o_anterior_para_tras ... ok
+test persistence::aparencia::testes::um_nome_branco_e_recusado ... ok
+test persistence::aparencia::testes::um_nome_branco_escrito_a_mao_no_banco_nao_chega_a_uma_tela ... ok
+test persistence::aparencia::testes::um_server_sem_icone_diz_que_nao_tem ... ok
+test persistence::attachments::tests::a_blob_that_vanished_from_the_disk_reads_as_expired ... ok
+test persistence::attachments::tests::a_ceiling_of_zero_is_refused ... ok
+test persistence::attachments::tests::a_file_over_the_per_file_limit_is_refused_and_nothing_is_evicted ... ok
+test persistence::attachments::tests::the_per_file_limit_is_derived_and_leaves_room_for_a_history ... ok
+test persistence::attachments::tests::a_server_that_was_never_configured_is_at_the_default ... ok
+test persistence::attachments::tests::an_orphan_blob_is_swept_at_boot ... ok
+test persistence::attachments::tests::choosing_a_ceiling_survives_a_reopen ... ok
+test persistence::attachments::tests::eviction_happens_before_the_first_byte_and_not_after ... ok
+test persistence::attachments::tests::expiring_one_copy_leaves_the_other_readable ... ok
+test persistence::attachments::tests::expiring_keeps_the_row_so_the_message_can_still_say_what_was_here ... ok
+test alcance::encontro::testes::a_janela_cabe_uma_entrada_legitima_inteira ... ok
+test persistence::attachments::tests::the_same_file_from_two_people_is_one_blob_and_two_rows ... ok
+test persistence::attachments::tests::transfers_in_flight_cannot_each_believe_they_fit ... ok
+test persistence::attachments::tests::lowering_the_ceiling_below_what_is_stored_evicts_at_the_next_boot ... ok
+test persistence::channels::tests::a_created_voice_room_reads_back_the_way_it_was_asked_for ... ok
+test persistence::attachments::tests::the_ceiling_holds_when_the_disk_fills ... ok
+test persistence::channels::tests::a_fresh_store_has_no_rooms_until_somebody_makes_one ... ok
+test persistence::channels::tests::a_message_already_taken_off_the_line_is_not_counted_again ... ok
+test persistence::channels::tests::a_rename_keeps_the_identifier_and_the_place_in_the_list ... ok
+test persistence::channels::tests::a_reply_from_another_line_does_not_block_the_destruction ... ok
+test persistence::channels::tests::a_voice_room_bound_to_a_destroyed_line_keeps_existing_without_it ... ok
+test persistence::channels::tests::an_empty_line_weighs_nothing_and_has_no_date_to_give ... ok
+test persistence::channels::tests::a_voice_room_bound_to_a_line_that_is_not_there_is_refused_by_name ... ok
+test persistence::channels::tests::destroying_a_line_destroys_what_was_written_in_it ... ok
+test persistence::channels::tests::destroying_a_voice_room_leaves_the_line_it_was_bound_to_alone ... ok
+test persistence::channels::tests::destroying_a_voice_room_that_is_not_there_says_so ... ok
+test persistence::channels::tests::renaming_something_that_is_not_there_says_so ... ok
+test mods::tests::o_teto_de_tempo_e_aplicado ... ok
+test persistence::channels::tests::rooms_come_back_in_the_order_they_were_made ... ok
+test persistence::channels::tests::the_last_voice_room_is_refused_by_name ... ok
+test persistence::channels::tests::the_padding_around_a_name_is_not_part_of_it ... ok
+test persistence::channels::tests::the_weight_of_a_line_is_counted_and_never_guessed ... ok
+test persistence::channels::tests::weighing_something_that_is_not_there_says_so ... ok
+test persistence::messages::tests::a_key_that_comes_back_with_another_body_answers_with_the_one_on_disk ... ok
+test persistence::messages::tests::a_batch_is_written_and_comes_back_with_ids ... ok
+test persistence::messages::tests::a_message_arriving_mid_walk_does_not_shift_the_page ... ok
+test persistence::messages::tests::a_page_of_history_carries_the_files_hanging_off_it ... ok
+test persistence::messages::tests::a_page_is_bounded_however_much_is_asked_for ... ok
+test persistence::messages::tests::a_removed_message_leaves_history_but_not_its_body ... ok
+test hospedagem::tests::um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada ... ok
+test persistence::messages::tests::a_reply_keeps_pointing_at_its_parent ... ok
+test persistence::messages::tests::a_retried_send_does_not_post_twice ... ok
+test persistence::messages::tests::an_empty_batch_touches_nothing ... ok
+test persistence::messages::tests::history_comes_back_newest_first ... ok
+test persistence::messages::tests::lines_do_not_leak_into_each_other ... ok
+test persistence::messages::tests::only_the_author_may_edit ... ok
+test persistence::messages::tests::messages_survive_a_reopen ... ok
+test persistence::messages::tests::removing_twice_is_refused_rather_than_silently_fine ... ok
+test persistence::attachments::tests::the_ceiling_holds_at_every_instant_under_interleaved_transfers ... ok
+test persistence::messages::tests::the_cursor_walks_backwards_without_gaps_or_repeats ... ok
+test persistence::messages::tests::the_text_survives_the_file_and_the_page_still_says_what_it_was ... ok
+test persistence::messages::tests::two_authors_may_use_the_same_key ... ok
+test persistence::messages::tests::unlimited_retention_prunes_nothing ... ok
+test persistence::schema::tests::every_migration_says_what_it_is_for ... ok
+test persistence::schema::tests::no_migration_contains_a_down_step ... ok
+test persistence::schema::tests::versions_start_at_one_and_never_skip ... ok
+test persistence::mods::tests::desabilitar_tira_da_lista_e_preserva_a_linha ... ok
+test persistence::mods::tests::escrever_no_quintal_nao_avisa_mudanca_de_conjunto ... ok
+test persistence::mods::tests::gravar_substitui_e_uma_chave_apagada_some ... ok
+test persistence::mods::tests::habilitar_de_novo_atualiza_em_vez_de_duplicar ... ok
+test persistence::mods::tests::habilitar_e_depois_listar_devolve_o_mod ... ok
+test persistence::mods::tests::habilitar_e_desabilitar_avisam_quem_espera ... ok
+test persistence::mods::tests::o_dado_do_mod_sobrevive_a_desabilitar ... ok
+test persistence::mods::tests::o_quintal_de_um_mod_nao_aparece_no_do_outro ... ok
+test persistence::mods::tests::o_quintal_ida_e_volta ... ok
+test persistence::mods::tests::o_repositorio_o_alcance_e_a_metade_de_servidor_voltam_do_banco ... ok
+test persistence::mods::tests::um_alcance_ilegivel_vira_nenhum_alcance_e_nao_uma_leitura_que_falha ... ok
+test persistence::mods::tests::uma_linha_de_antes_das_colunas_novas_continua_legivel ... ok
+test persistence::subida::testes::medir_de_novo_substitui_e_nao_acumula ... ok
+test persistence::subida::testes::o_que_foi_medido_volta_no_proximo_arranque ... ok
+test persistence::subida::testes::sem_nada_medido_a_resposta_e_nao_sei ... ok
+test persistence::subida::testes::um_zero_guardado_conta_como_nada_medido ... ok
+test persistence::tests::a_fresh_database_reaches_the_latest_version ... ok
+test persistence::tests::a_nickname_cannot_be_taken_twice ... ok
+test persistence::tests::foreign_keys_are_enforced ... ok
+test persistence::tests::an_observer_cannot_speak_and_a_person_can ... ok
+test persistence::tests::migrating_twice_is_a_no_op ... ok
+test persistence::tests::the_four_default_roles_exist ... ok
+test persistence::tests::the_permission_is_not_added_twice_by_a_second_boot ... ok
+test persistence::tests::the_three_roles_that_may_speak_may_also_attach_and_the_observer_is_denied ... ok
+test persistence::tests::write_ahead_logging_is_on ... ok
+test mods::mundo::tests::um_endereco_que_nunca_responde_e_cortado_pelo_teto ... ok
+test portaria::a_volta_de_quem_ja_foi_aprovado::quem_foi_aprovado_volta_sem_precisar_de_um_convite_novo ... ok
+test portaria::tests::a_fila_poe_quem_espera_antes_de_quem_ja_foi_decidido ... ok
+test server::tests::a_mudanca_de_sala_anunciada_nao_e_respondida_pela_conexao_velha ... ok
+test server::tests::a_reconnecting_person_gets_their_own_ssrc_back ... ok
+test server::tests::a_reserva_da_propria_sessao_vigente_nao_e_descartada ... ok
+test server::tests::a_reserva_escrita_depois_da_volta_e_descartada_por_quem_voltou ... ok
+test server::tests::a_seat_is_held_for_the_grace_period ... ok
+test server::tests::a_sessao_velha_nao_apaga_a_tela_que_a_nova_abriu ... ok
+test server::tests::a_sessao_velha_nao_desocupa_o_assento_que_a_nova_tomou ... ok
+test server::tests::a_sessao_velha_nao_para_nem_assina_a_tela_que_a_nova_abriu ... ok
+test server::tests::a_sessao_velha_nao_reserva_assento_depois_de_a_nova_ter_saido_de_proposito ... ok
+test server::tests::a_sessao_velha_nao_reserva_o_assento_de_quem_ja_voltou ... ok
+test server::tests::a_sessao_velha_nao_tira_da_sala_o_assento_que_a_nova_tomou ... ok
+test server::tests::a_sessao_velha_nao_tira_dos_presentes_quem_esta_conectado ... ok
+test server::tests::a_tela_de_quem_sai_para_junto_com_ele_e_so_a_dele ... ok
+test server::tests::a_tela_pedida_pela_conexao_velha_nao_toma_a_vaga_da_nova ... ok
+test server::tests::an_expired_seat_is_not_reclaimable ... ok
+test server::tests::leaving_a_room_nobody_was_in_announces_nothing ... ok
+test server::tests::leaving_says_which_rooms_were_left ... ok
+test server::tests::o_encaminhamento_acha_a_tela_de_cada_pessoa ... ok
+test server::tests::o_registro_nao_limita_o_numero_de_transmissoes ... ok
+test server::tests::onde_uma_pessoa_esta_sentada_e_perguntavel_pelo_nome_dela ... ok
+test server::tests::parar_a_tela_de_outra_pessoa_nao_para_nada ... ok
+test server::tests::quem_ja_transmite_pedindo_de_novo_troca_a_propria_tela ... ok
+test server::tests::quem_reconecta_passa_a_ser_a_vigente_e_a_anterior_perde_a_autoridade ... ok
+test server::tests::quem_troca_a_propria_tela_recebe_de_volta_a_que_saiu ... ok
+test server::tests::reclaiming_twice_only_works_once ... ok
+test server::tests::sem_registro_de_presenca_ninguem_e_a_vigente ... ok
+test server::tests::the_sweeper_frees_expired_seats ... ok
+test server::tests::the_sweeper_leaves_live_seats_alone ... ok
+test server::tests::the_whole_server_is_readable_at_once_and_not_one_room_at_a_time ... ok
+test server::tests::uma_sala_destruida_leva_todas_as_transmissoes_dela ... ok
+test server::tests::walking_between_rooms_reports_the_room_that_was_left ... ok
+test portaria::tests::a_semente_nao_rearma_o_interruptor_de_quem_o_desligou ... ok
+test portaria::tests::aprovado_uma_vez_entra_nas_proximas_sem_perguntar ... ok
+test session::fim_de_tela_por_sessao::todo_fim_de_tela_declara_de_qual_sessao_e ... ok
+test portaria::tests::decidir_sobre_uma_pessoa_nao_decide_sobre_outra ... ok
+test portaria::tests::desligar_a_portaria_nao_apaga_quem_ja_foi_recusado ... ok
+test portaria::tests::hospedar_de_novo_nao_desfaz_uma_recusa_que_ja_foi_dada ... ok
+test portaria::tests::o_primeiro_contato_de_uma_pessoa_fica_pendente_e_o_segundo_tambem ... ok
+test portaria::tests::o_apelido_de_quem_ja_foi_decidido_nao_e_reescrito_por_uma_batida ... ok
+test portaria::tests::quem_hospeda_entra_na_propria_casa_sem_esperar_ninguem ... ok
+test portaria::tests::recusado_continua_recusado_e_nao_volta_para_a_fila ... ok
+test portaria::tests::um_pedido_guarda_o_convite_com_que_a_pessoa_chegou ... ok
+test portaria::tests::revogar_faz_a_pessoa_voltar_a_ser_desconhecida_em_vez_de_barrada ... ok
+test session::plano_de_midia::toda_troca_de_sala_atravessa_para_o_plano_de_midia ... ok
+test session::versao_no_fio::a_resposta_de_mod_nao_sai_para_ninguem_abaixo_da_v6 ... ok
+test session::versao_no_fio::a_resposta_de_mod_sai_para_um_cliente_da_versao_de_hoje ... ok
+test session::versao_no_fio::a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v6 ... ok
+test session::versao_no_fio::as_duas_mensagens_da_v4_nao_saem_para_um_cliente_v3 ... ok
+test session::versao_no_fio::as_duas_mensagens_da_v4_saem_para_um_cliente_v4 ... ok
+test taxa::testes::a_casa_atras_do_nat_nunca_encosta_no_limite ... ok
+test taxa::testes::a_portaria_conta_por_endereco ... ok
+test taxa::testes::a_portaria_esquece_quem_se_repos_por_inteiro ... ok
+test taxa::testes::a_portaria_nao_esquece_quem_ainda_esta_devendo ... ok
+test portaria::tests::uma_portaria_desligada_deixa_tudo_como_estava ... ok
+test taxa::testes::a_tabela_de_pessoas_tem_teto ... ok
+test taxa::testes::a_taxa_sustentada_e_a_de_reposicao_e_nao_o_dobro ... ok
+test taxa::testes::as_fichas_voltam_com_o_tempo ... ok
+test taxa::testes::esvaziar_o_server_repetidamente_passa_a_custar_horas ... ok
+test persistence::tests::a_server_that_predates_attachments_gets_the_permission_at_the_next_boot ... ok
+test taxa::testes::o_balde_de_bytes_conta_por_pessoa_e_nao_por_conexao ... ok
+test taxa::testes::o_balde_comeca_cheio_e_a_rajada_cabe_inteira ... ok
+test taxa::testes::o_balde_nao_acumula_alem_da_capacidade ... ok
+test taxa::testes::o_vigia_avisa_antes_de_descartar ... ok
+test taxa::testes::o_vigia_de_quadros_e_cego_para_um_anexo_e_por_isso_ha_um_terceiro_balde ... ok
+test taxa::testes::o_vigia_deixa_passar_a_rajada_de_entrada ... ok
+test taxa::testes::o_vigia_derruba_quem_nao_para ... ok
+test taxa::testes::passada_a_rajada_o_balde_recusa ... ok
+test taxa::testes::quem_se_aquieta_e_perdoado ... ok
+test taxa::testes::um_instante_para_tras_nao_derruba_o_balde ... ok
+test taxa::testes::uma_foto_nunca_encosta_no_balde_de_bytes ... ok
+test taxa::testes::uma_conversa_de_pessoa_nunca_encosta_no_vigia ... ok
+test taxa::testes::uma_transferencia_recusada_depois_e_devolvida_ao_balde ... ok
+test tela::a_sonda_em_lan::com_uma_pessoa_assistindo_e_sem_dor_a_estimativa_sobe ... ok
+test tela::tests::a_conversa_que_enche_o_cano_ensina_a_subida_antes_da_primeira_tela ... ok
+test tela::tests::a_dor_com_o_teto_cheio_fixa_a_subida_no_que_passou ... ok
+test tela::tests::a_hipotese_admite_aqui_dentro_e_nao_atravessa_o_fio ... ok
+test tela::tests::a_medida_vence_o_que_o_operador_declarou ... ok
+test tela::tests::a_ordem_do_arranque_e_medida_declarado_hipotese ... ok
+test tela::tests::a_sonda_que_lembra_a_medida_nao_recomeca_da_hipotese ... ok
+test tela::tests::a_porta_de_entrada_e_o_comeco_de_um_quadro_chave ... ok
+test tela::tests::a_subida_nunca_cai_abaixo_do_que_o_piso_do_video_exige ... ok
+test tela::tests::a_subida_que_lembra_ja_nasce_medida ... ok
+test tela::tests::a_suposicao_nunca_atravessa_o_fio ... ok
+test tela::tests::abaixo_do_piso_nao_ha_teto_baixo_ha_parada ... ok
+test tela::tests::antes_da_janela_fechar_a_sonda_nao_responde ... ok
+test tela::tests::encher_o_teto_sem_dor_levanta_a_subida ... ok
+test tela::tests::o_cano_que_reclama_nao_levanta_a_subida_por_mais_que_entregue ... ok
+test tela::tests::o_enquadramento_atravessa_pedacos_de_qualquer_tamanho ... ok
+test tela::tests::o_que_o_operador_declara_vale_nos_dois_lugares ... ok
+test tela::tests::o_teto_do_hospedeiro_e_dividido_pelos_espectadores ... ok
+test tela::tests::o_teto_nao_da_a_volta_numa_casa_de_fibra ... ok
+test tela::tests::sem_quadro_chave_nao_ha_porta ... ok
+test tela::tests::um_byte_de_tipo_que_este_fluxo_nao_conhece_o_encerra ... ok
+test tela::tests::um_cabecalho_partido_ao_meio_nao_vira_porta ... ok
+test tela::tests::um_caminho_curto_sobe_mais_depressa_que_um_longo ... ok
+test tela::tests::um_quadro_de_som_atravessa_e_nao_e_porta_de_entrada ... ok
+test tela::tests::um_quadro_vazio_encerra_o_fluxo ... ok
+test tela::tests::um_tamanho_impossivel_encerra_o_fluxo ... ok
+test tela::tests::uma_casa_de_fibra_nao_e_cortada_pelo_teto_da_estimativa ... ok
+test tela::tests::uma_sala_parada_nao_derruba_a_subida ... ok
+test tela::tests::zero_declarado_e_um_campo_em_branco_e_nao_um_pedido_para_desligar ... ok
+test session::fim_de_tela_por_sessao::andar_de_sala_leva_embora_a_tela_de_qualquer_conexao ... ok
+test session::fim_de_tela_por_sessao::o_fim_da_tela_da_conexao_velha_nao_apaga_a_da_nova ... ok
+test taxa::testes::a_tabela_da_portaria_tem_teto ... ok
+test session::o_aceite_dos_mods::com_o_portao_dormente_uma_linha_estragada_nao_tranca_o_servidor ... ok
+test session::o_aceite_dos_mods::desabilitar_um_mod_tambem_invalida_o_aceite_anterior ... ok
+test session::o_aceite_dos_mods::o_servidor_anuncia_os_mods_por_identidade_versao_e_hash ... ok
+test transfer::tests::a_digest_survives_the_round_trip_through_its_written_form ... ok
+test transfer::tests::a_sender_that_declared_less_than_it_sent_is_cut_and_refused ... ok
+test transfer::tests::a_declared_size_that_lies_never_closes_its_hash ... ok
+test transfer::tests::a_sender_that_declared_more_than_it_sent_is_refused ... ok
+test transfer::tests::an_unreadable_digest_fails_closed ... ok
+test transfer::tests::control_outranks_every_transfer ... ok
+test voice_room::tests::a_datagram_reaches_everybody_but_its_sender ... ok
+test transfer::tests::an_honest_transfer_hashes_to_what_arrived ... ok
+test voice_room::tests::a_flood_is_cut_off_at_the_documented_rate ... ok
+test voice_room::tests::a_forged_ssrc_is_refused ... ok
+test voice_room::tests::a_malformed_datagram_is_counted_not_forwarded ... ok
+test voice_room::tests::a_lagging_subscriber_is_dropped_rather_than_blocking_the_voice_room ... ok
+test voice_room::tests::a_person_without_permission_cannot_speak ... ok
+test voice_room::tests::a_mesma_pessoa_abrindo_duas_vezes_continua_sendo_uma_transmissao ... ok
+test voice_room::tests::a_saida_da_sessao_velha_nao_tira_da_sala_a_conexao_nova ... ok
+test voice_room::tests::a_sala_que_cresce_alem_da_subida_deixa_de_fora_quem_chegou ... ok
+test voice_room::tests::a_sala_que_cresce_nao_derruba_a_transmissao_de_quem_ja_estava ... ok
+test voice_room::tests::a_sala_relata_a_perda_de_subida_de_quem_fala ... ok
+test voice_room::tests::a_stranger_is_refused ... ok
+test voice_room::tests::a_subida_medida_abre_a_porta_que_a_hipotese_tinha_fechado ... ok
+test voice_room::tests::a_subida_medida_que_encolhe_aperta_o_teto_e_nao_so_o_afrouxa ... ok
+test voice_room::tests::an_honest_sender_is_never_rate_limited ... ok
+test voice_room::tests::duas_pessoas_transmitem_e_cada_espectador_recebe_as_duas ... ok
+test session::o_aceite_dos_mods::quem_recusa_os_mods_nao_passa_do_anuncio ... ok
+test voice_room::tests::leaving_stops_delivery_and_frees_the_ssrc ... ok
+test voice_room::tests::o_fim_da_tela_da_conexao_velha_nao_apaga_a_transmissao_da_nova ... ok
+test voice_room::tests::o_n_da_sala_e_anunciado_ao_abrir_e_a_cada_entrada_e_saida ... ok
+test voice_room::tests::o_quadro_chega_a_cada_espectador_e_nunca_a_quem_compartilha ... ok
+test voice_room::tests::o_ssrc_da_conexao_velha_para_de_valer_quando_a_pessoa_entra_de_novo ... ok
+test voice_room::tests::perguntar_por_uma_transmissao_que_nao_existe_devolve_ninguem ... ok
+test voice_room::tests::quadro_barrado_pelo_limitador_nao_conta_como_perda ... ok
+test voice_room::tests::quem_entra_no_meio_so_e_ligado_num_quadro_chave ... ok
+test voice_room::tests::quem_fecha_a_janela_devolve_a_copia ... ok
+test voice_room::tests::quem_nao_cabe_fica_de_fora_e_a_contagem_nao_muda ... ok
+test voice_room::tests::quem_nao_pode_falar_tambem_nao_pode_mostrar ... ok
+test voice_room::tests::quem_recebe_uma_transmissao_pode_ser_perguntado_de_fora ... ok
+test voice_room::tests::sair_da_sala_encerra_a_transmissao ... ok
+test voice_room::tests::the_limit_has_no_edge_to_synchronise_with ... ok
+test voice_room::tests::the_payload_is_forwarded_byte_for_byte ... ok
+test voice_room::tests::the_same_voice_room_is_asked_for_twice_and_started_once ... ok
+test session::o_aceite_dos_mods::um_aceite_de_outro_conjunto_nao_reabre_a_porta ... ok
+test voice_room::tests::um_espectador_que_nao_acompanha_e_cortado_e_nao_descartado ... ok
+test voice_room::tests::um_fluxo_de_quem_nao_esta_transmitindo_nao_passa ... ok
+test voice_room::tests::uma_sala_sem_transmissao_nao_anuncia_contagem_nenhuma ... ok
+test voice_room::tests::uma_subida_limpa_e_relatada_como_zero ... ok
+test voice_room::tests::a_sala_que_nasce_depois_da_medida_nasce_com_ela ... ok
+test voice_room::tests::leaving_everywhere_reaches_the_room_the_person_was_actually_in ... ok
+test session::o_aceite_dos_mods::um_servidor_que_nao_consegue_se_descrever_nao_admite_ninguem ... ok
+test voice_room::tests::two_rooms_do_not_hear_each_other ... ok
+test tests::a_destroyed_opening_voice_room_does_not_come_back_at_the_next_boot ... ok
+test tests::a_destroyed_opening_line_does_not_come_back_at_the_next_boot ... ok
+test tests::a_new_server_opens_with_somewhere_to_go ... ok
+test tests::a_second_boot_does_not_add_a_second_set_of_rooms ... ok
+test tests::a_renamed_opening_voice_room_keeps_its_new_name_across_a_restart ... ok
+test tests::a_server_seeded_by_an_older_build_is_not_seeded_twice ... ok
+test session::o_aceite_dos_mods::com_o_portao_dormente_habilitar_um_mod_nao_recusa_ninguem ... ok
+test session::o_aceite_dos_mods::um_par_velho_e_recusado_sem_receber_o_anuncio ... ok
+test session::o_aceite_dos_mods::um_servidor_sem_mod_nao_anuncia_nem_espera ... ok
+test alcance::encontro::testes::a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar ... ok
+
+test result: ok. 481 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.02s
+
+     Running unittests src/main.rs (target/debug/deps/seeled-cbf253c0bff67f21)
+
+running 3 tests
+test testes::o_tamanho_e_lido_em_binario_e_nao_em_decimal ... ok
+test testes::o_tamanho_volta_escrito_como_alguem_o_escreveria ... ok
+test testes::um_tamanho_que_nao_e_tamanho_recusa_em_vez_de_virar_zero ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/par_lento.rs (target/debug/deps/par_lento-9dce054afd72098a)
+
+running 1 test
+ditas 1160, chegaram 0, perdidos no barramento 1206, desligado Some(FellBehind)
+test o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.20s
+
+     Running tests/perda_de_subida_no_fio.rs (target/debug/deps/perda_de_subida_no_fio-976094a63a30fae3)
+
+running 1 test
+relatos de perda: [0.0, 0.008, 0.0058479533]
+test quem_perde_pacote_e_avisado_e_o_vizinho_nao ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.75s
+
+     Running tests/personalizacao.rs (target/debug/deps/personalizacao-aebfa54f8c8088dd)
+
+running 5 tests
+test renomear_com_o_server_no_ar_chega_a_quem_nao_pediu_nada ... ok
+test o_nome_e_o_icone_sobrevivem_a_um_reinicio ... ok
+test quem_nao_administra_e_recusado_e_nada_muda ... ok
+test o_icone_chega_a_quem_esta_dentro_e_a_quem_entra_depois ... ok
+test tirar_o_icone_e_dito_a_quem_esta_dentro ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/subida_no_arranque.rs (target/debug/deps/subida_no_arranque-b91537ce5ea675f0)
+
+running 2 tests
+subida medida: Some(7244980)
+test a_conversa_ensina_o_cano_e_a_medida_chega_ao_portao_e_ao_disco ... ok
+o primeiro arranque mediu 7307645 bps
+test o_segundo_arranque_comeca_onde_o_primeiro_parou ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.71s
+
+     Running tests/tipo_de_fluxo.rs (target/debug/deps/tipo_de_fluxo-77b8fe1f5a617620)
+
+running 3 tests
+test a_versao_sem_carimbo_diz_que_nao_foi_carimbada ... ok
+test um_fluxo_que_diz_ser_anexo_e_lido_como_anexo ... ok
+test o_byte_reservado_e_recusado_em_vez_de_ser_lido_como_anexo ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/voz_sob_carga.rs (target/debug/deps/voz_sob_carga-04ea41064a779ce2)
+
+running 1 test
+mandados 50, chegaram 50
+test a_voz_atravessa_enquanto_o_controle_do_falante_esta_preso ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.27s
+
+     Running unittests src/lib.rs (target/debug/deps/seele_video-813201643f4f4402)
+
+running 46 tests
+test captura::macos::medicao_do_som_por_janela::o_filtro_por_janela_isola_o_som_do_aplicativo ... ignored, medição: precisa de caixa de som e de uma janela na tela
+test captura::reamostragem::medicao::quanto_custa_de_verdade ... ignored, cronômetro, não afirmação: rode de propósito
+test captura::macos::testes::a_vaga_substitui_e_conta ... ok
+test captura::macos::testes::o_preenchimento_da_linha_nao_entra_no_quadro ... ok
+test captura::macos::testes::o_croma_entrelacado_vira_dois_planos ... ok
+test captura::macos::testes::uma_linha_curta_e_recusada_com_nome ... ok
+test captura::macos::testes::faltando_linha_o_codec_e_quem_recusa ... ok
+test codec::macos::testes::quanto_o_videotoolbox_gasta_do_teto ... ignored, medida, não asserção: rode com --ignored --nocapture
+test codec::testes::as_medidas_seguem_a_proporcao_da_fonte ... ok
+test codec::testes::compactar_joga_fora_o_enchimento_de_cada_linha ... ok
+test codec::testes::compactar_nao_entra_em_panico_com_um_passo_mentiroso ... ok
+test codec::testes::o_quadro_chave_leva_sps_e_pps_na_frente ... ok
+test codec::testes::a_lista_de_resolucoes_e_a_que_o_spike_fechou ... ok
+test codec::testes::a_lista_de_quadros_nao_oferece_o_piso ... ok
+test codec::testes::o_teto_zero_cai_no_da_prova ... ok
+test codec::testes::os_planos_de_um_i420_fecham_a_conta ... ok
+test codec::testes::um_quadro_comum_nao_ganha_parametros_que_nao_tem ... ok
+test modulo::testes::a_origem_e_a_do_cisco_e_por_https ... ok
+test modulo::testes::achar_e_achar_o_primeiro_que_existe ... ok
+test modulo::testes::o_modulo_de_verdade_expande_e_grava ... ok
+test modulo::testes::o_hash_fixado_recusa_o_que_nao_e_o_modulo ... ok
+test modulo::testes::o_hexadecimal_tem_sessenta_e_quatro_digitos_minusculos ... ok
+test modulo::testes::os_nomes_publicados_sao_os_que_alguem_conferiu ... ok
+test modulo::testes::bytes_que_nao_conferem_nao_chegam_ao_disco ... ok
+test vui::sps_de_verdade::o_sps_de_verdade_e_reconhecido ... ok
+test modulo::testes::sem_o_modulo_o_motivo_diz_onde_se_procurou ... ok
+test modulo::testes::uma_pasta_com_o_nome_do_modulo_nao_conta_como_modulo ... ok
+test vui::testes::o_escritor_e_o_leitor_fecham_um_no_outro ... ok
+test vui::testes::escapar_e_desescapar_sao_inversos ... ok
+test vui::sps_de_verdade::o_sps_de_verdade_ganha_a_cor ... ok
+test vui::testes::o_leitor_le_exp_golomb_como_a_norma_manda ... ok
+test vui::testes::um_fluxo_sem_sps_sai_intacto ... ok
+test vui::testes::um_sps_truncado_nao_trava_o_leitor ... ok
+test vui::testes::um_sps_que_nao_se_entende_sai_intacto ... ok
+test modulo::testes::um_arquivo_que_nao_e_biblioteca_e_ilegivel_e_nao_derruba_o_processo ... ok
+PULADO: o TCC não concedeu gravação de tela a este processo. Num app não assinado a concessão morre a cada build (§4); em terminal, quem a tem é o terminal.
+test captura::macos::testes::captura_um_quadro_da_tela_de_verdade ... ok
+PULADO: o TCC não concedeu gravação de tela a este processo.
+test captura::macos::testes::a_captura_entrega_quadros_ao_longo_do_tempo ... ok
+PULADO: o TCC não concedeu gravação de tela a este processo.
+test captura::macos::testes::o_som_do_sistema_chega_junto_com_a_imagem ... ok
+test captura::reamostragem::testes::o_vermelho_nao_vira_azul ... ok
+test captura::reamostragem::testes::o_passo_maior_que_a_largura_nao_vaza ... ok
+test captura::reamostragem::testes::a_proporcao_e_preservada_e_o_resto_vira_tarja ... ok
+test captura::reamostragem::testes::a_media_le_a_area_inteira_e_nao_um_vizinho ... ok
+test codec::macos::testes::um_quadro_de_outro_tamanho_e_recusado ... ok
+test codec::macos::testes::o_primeiro_quadro_sai_com_sps_pps_e_idr ... ok
+test codec::macos::testes::o_segundo_quadro_e_comum_e_menor ... ok
+test captura::reamostragem::varredura::nenhum_formato_real_falha_nem_sai_preto ... ok
+
+test result: ok. 43 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 24.70s
+
+     Running tests/ida_e_volta.rs (target/debug/deps/ida_e_volta-9ba257becca273ba)
+
+running 8 tests
+PULADO: o módulo não está nesta máquina.
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s))test o_modulo_que_esta_nesta_maquina_bate_com_o_hash_fixado ... ok
+.
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test quem_recebe_pede_e_recebe_um_quadro_chave ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test o_teto_de_banda_muda_sem_derrubar_o_fluxo ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test um_quadro_do_tamanho_errado_e_recusado_por_nome ... ok
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test um_quadro_atravessa_o_codec_e_volta_com_o_tamanho_certo ... ok
+PULADO: test armar_o_codificador_custa_o_mesmo_em_qualquer_thread ... ok
+o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+PULADO: o módulo de vídeo não está nesta máquina (1 pasta(s) olhada(s)).
+  O produto não vem com codec, e é a licença que impõe isso.
+  Busque https://ciscobinary.openh264.org/libopenh264-2.6.0-mac-arm64.dylib.bz2 e aponte-o com SEELE_OPENH264.
+  Ligue SEELE_EXIGE_CODEC para que faltar vire falha em vez de pulo.
+test o_codificador_armado_nao_sai_em_baseline ... ok
+test sem_pedido_nao_ha_quadro_chave_depois_do_primeiro ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/modulo_publicado.rs (target/debug/deps/modulo_publicado-92775898db5632c4)
+
+running 3 tests
+test quem_publica_roda_a_bateria_nos_dois_sistemas ... ok
+test quem_publica_exige_o_codec ... ok
+test a_bateria_do_windows_julga_pelo_codigo_de_saida ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/qualidade-do-codec.rs (target/debug/deps/qualidade_do_codec-e5aa72009a6aa690)
+
+running 2 tests
+PULADO: sem o módulo do Cisco não há com o que comparar.
+PULADO: sem o módulo do Cisco não há com o que comparar.
+test o_codificador_do_sistema_ao_lado_do_de_software ... ok
+test quanto_a_cadencia_compra_pelo_mesmo_teto ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/xtask-ab685f648f28fdda)
+
+running 14 tests
+test check_api::tests::um_nome_que_aponta_para_algo_que_existe_passa ... ok
+test check_api::tests::um_tipo_novo_no_interior_que_a_api_nao_menciona_nao_reprova ... ok
+test check_deps::tests::the_meeting_point_sees_the_wire_format_and_nothing_else ... ok
+test check_api::tests::um_nome_que_aponta_para_o_que_sumiu_reprova ... ok
+test check_deps::tests::the_screen_crate_is_a_leaf_next_to_audio ... ok
+test check_deps::tests::third_party_edges_are_ignored ... ok
+test check_deps::tests::inverted_dev_dependency_is_rejected ... ok
+test check_deps::tests::allowed_edges_pass ... ok
+test check_deps::tests::the_exception_does_not_leak_to_anybody_else ... ok
+test check_deps::tests::server_must_not_link_the_client_or_the_audio_stack ... ok
+test check_deps::tests::unknown_workspace_crate_is_rejected ... ok
+test check_deps::tests::inverted_edge_is_rejected ... ok
+test check_deps::tests::the_conformance_crate_may_see_both_ends ... ok
+test check_deps::tests::shell_reaching_past_core_is_rejected ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/adr_index.rs (target/debug/deps/adr_index-41dc5f0e675c6b28)
+
+running 4 tests
+test the_status_is_read_as_a_word_and_never_as_a_sentence_about_it ... ok
+test the_index_links_no_adr_that_does_not_exist ... ok
+test every_adr_on_disk_is_listed_in_the_index ... ok
+test the_index_agrees_with_each_adr_about_whether_it_is_still_only_proposed ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/empacotamento.rs (target/debug/deps/empacotamento-251beafcaa917f8d)
+
+running 66 tests
+test a_casa_padrao_e_so_a_das_versoes_e_a_ponte_fica_registrada ... ok
+test a_chave_publica_do_atualizador_decodifica_no_que_ela_diz_ser ... ok
+test a_bateria_confere_aviso_de_seguranca_e_nao_so_licenca ... ok
+test a_bateria_formata_o_workspace_inteiro_e_nao_a_raiz_vazia ... ok
+test a_bateria_tem_prazo_e_nao_espera_para_sempre ... ok
+test a_versao_publicada_deixa_marca_no_repositorio_do_codigo ... ok
+test a_limpeza_do_windows_restaura_so_o_arquivo_conhecido ... ok
+test a_versao_sendo_publicada_nao_e_a_faixa_dela_mesma ... ok
+test a_faixa_comeca_na_versao_publicada_antes_desta ... ok
+test a_publicacao_parcial_diz_quem_fica_para_tras ... ok
+test a_decima_versao_nao_perde_para_a_nona ... ok
+test nenhum_script_le_texto_sem_dizer_o_encoding ... ok
+test a_linha_da_mudanca_e_uma_frase_e_nao_uma_tabela ... ok
+test nenhum_segredo_atravessa_por_argumento ... ok
+test docs_test_e_chore_nao_entram ... ok
+test o_commit_vai_para_o_remoto_antes_de_o_windows_buscar ... ok
+test o_corpo_do_release_lista_os_commits_da_mesma_faixa_que_resume ... ok
+test nada_pronto_nao_publica_nem_com_parcial ... ok
+test o_endereco_antigo_continua_na_lista_enquanto_a_migracao_dura ... ok
+test o_instalador_do_windows_remove_a_instalacao_por_usuario_de_antes ... ok
+test o_assunto_atravessa_byte_a_byte ... ok
+test o_orquestrador_nao_pode_ganhar_bom ... ok
+test as_mudancas_separam_o_que_a_pessoa_sente_do_que_e_ferramenta ... ok
+test a_ordem_dentro_de_uma_secao_e_a_que_entrou ... ok
+test o_que_vem_do_windows_e_lido_byte_a_byte ... ok
+test o_script_do_windows_mantem_o_bom_que_ele_proprio_precisa ... ok
+test o_titulo_da_janela_atravessou_inteiro ... ok
+test o_orquestrador_e_shell_posix_valido ... ok
+test a_versao_invalida_morre_antes_de_qualquer_pergunta_cara ... ok
+test o_windows_instala_para_a_maquina_e_nao_para_o_usuario ... ok
+test o_docker_fora_do_ar_reprova_antes_da_primeira_compilacao ... ok
+test o_windows_inalcancavel_reprova_antes_do_linux_emulado ... ok
+test o_token_recusado_reprova_antes_de_compilar ... ok
+test os_tres_prontos_viram_rascunho ... ok
+test o_windows_que_nao_chega_ao_commit_nao_compila_nada ... ok
+test quem_ja_terminava_em_pontuacao_nao_ganha_outro_ponto ... ok
+test quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio ... ok
+test com_tudo_no_lugar_as_conferencias_passam_sem_compilar_nada ... ok
+test sem_feat_nem_fix_na_faixa_nao_se_inventa_secao ... ok
+test sem_sistema_pedido_a_publicacao_sozinha_e_legitima ... ok
+test a_chave_pela_metade_reprova_e_sem_assinatura_libera ... ok
+test a_arvore_suja_impede_o_empacotamento ... ok
+test sem_tag_anterior_a_faixa_e_vazia_e_isso_nao_e_erro ... ok
+test um_escopo_desconhecido_aparece_em_vez_de_sumir ... ok
+test um_escopo_de_varias_palavras_acha_o_que_conhece_dentro ... ok
+test um_escopo_desconhecido_pede_para_ser_classificado ... ok
+test um_feat_sem_escopo_nao_e_descartado ... ok
+test um_ganho_de_desempenho_e_mudanca_que_a_pessoa_sente ... ok
+test um_sistema_faltando_nao_vira_rascunho_calado ... ok
+test um_sistema_que_nao_existe_e_recusado ... ok
+test pular_um_sistema_dispensa_a_ferramenta_dele ... ok
+test a_versao_gravada_nao_fica_no_repositorio ... ok
+test um_release_ja_publicado_nao_e_substituido ... ok
+test um_token_sem_escrita_reprova ... ok
+test uma_entrega_com_so_o_lixo_do_finder_para_antes_de_publicar ... ok
+test com_parcial_o_release_sai_dizendo_quem_faltou ... ok
+test o_arquivo_que_o_finder_escreve_nao_e_entrega_de_ninguem ... ok
+test o_release_sai_rascunho_e_confessa_a_falta_de_procedencia ... ok
+test a_entrega_da_versao_corrente_sobrevive_a_limpeza ... ok
+test o_windows_noutro_commit_e_levado_ao_commit_certo ... ok
+test o_trabalho_solto_no_windows_e_guardado_e_nao_apagado ... ok
+test um_sistema_que_falha_nao_leva_os_outros_junto ... ok
+test os_tres_correm_do_mais_barato_para_o_mais_caro ... ok
+test a_versao_sai_em_todas_as_casas_listadas_numa_execucao_so ... ok
+test cada_casa_recebe_o_manifesto_que_aponta_para_ela_mesma ... ok
+test restos_de_outra_versao_sao_apagados_e_nomeados ... ok
+
+test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.08s
+
+     Running tests/folha_de_lints.rs (target/debug/deps/folha_de_lints-0e6257f03ef9ae17)
+
+running 1 test
+test toda_folha_propria_so_difere_do_workspace_no_unsafe ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/plataforma.rs (target/debug/deps/plataforma-1cf55d20c350109b)
+
+running 1 test
+test todo_import_de_plataforma_esta_dentro_de_um_cfg ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+   Doc-tests seele_audio
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests seele_conformance
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests seele_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests seele_encontro
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests seele_ffi
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests seele_lancador
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests seele_proto
+
+running 1 test
+test crates/seele-proto/src/version.rs - version::negotiate (line 189) ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+   Doc-tests seele_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests seele_video
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+real 298.20
+user 83.37
+sys 49.46

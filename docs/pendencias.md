@@ -8,6 +8,54 @@ citados de fora — "pendência #9" aparece em `docs/` e em `specs/` — e renum
 faria cada citação apontar para outra coisa. Ela fica no lugar, marcada como
 fechada, com a data e com o que a substituiu.
 
+## O que a v0.11.0 fechou, e o que ela não fechou
+
+**Escrito em 2026-09-17**, ao fechar a versão. É um índice, não uma entrada:
+cada item aponta para a seção que tem a história.
+
+### Fechadas nesta versão
+
+| # | o quê |
+|---|---|
+| 11 | a sessão velha apagava a nova ao morrer |
+| 22 | MODs estavam desenhados e não construídos |
+| 29 | a conformidade reprovava sob a carga da própria suíte |
+
+### Consertadas, e sem confirmação de campo
+
+| # | o quê | o que falta |
+|---|---|---|
+| 31 | trocar de fone ou microfone exigia reiniciar | alguém trocando o fone num Windows, no meio de uma conversa |
+
+A distinção não é formalidade. Nenhuma máquina de integração contínua tem duas
+placas de som, e o que os testes fingem é a abertura do aparelho. Escrever
+«fechada» sem a confirmação seria afirmar o que não foi medido — e este
+repositório já pagou caro por isso.
+
+### Abertas, e nomeadas de propósito
+
+- **38 — o job `windows-2022` nunca rodou.** O workflow existe escrito e
+  conferido, e ninguém o viu executar. A tarefa de fechamento da v0.11.0 registra
+  que a execução real foi **adiada por decisão explícita** naquela rodada, e nada
+  nesta sessão mudou isso: nenhum push foi feito, então o workflow continua sem
+  ter rodado nem uma vez. É a pendência que mais custa hoje, porque três das
+  outras dependem dela para sair do «não dá para conferir daqui».
+- **33 — tela entre duas máquinas Windows.** Quatro suspeitos eliminados por
+  medida; o que sobra exige sessão gráfica.
+- **37 — a entrada em sala se confirma pelo silêncio.** Ela previu o que
+  aconteceu nesta versão, e por isso ficou **mais cara**: ver a seção.
+- **44 — o interruptor de MOD tranca pares** e a tela de quem hospeda não diz.
+- **46 — o caminho de Windows do som da tela** não é compilado no Mac de quem
+  fechou esta versão.
+
+### O que esta versão **não** carrega, e podia parecer que carrega
+
+- **O indexador de MODs não está no ar.** Os MODs funcionam entre quem já tem os
+  arquivos; nenhum MOD de terceiro tem como chegar a ninguém.
+- **O launcher não baixa versão.** Ele lista e abre o que já está instalado
+  nesta máquina. Baixar precisa do catálogo, e continua sendo do botão de
+  atualizar.
+
 ## 1 · Estreitada em 2026-08-17 · Rajada perde entrega quando um par para de ler
 
 **Sintoma original.** Dez mensagens de ~3,9 KB enviadas em rajada, sem o
@@ -2716,7 +2764,19 @@ diz.
 **O que nenhum teste automático cobre**, e onde está escrito o que fazer: o furo
 em si, que precisa de duas redes atrás de NATs diferentes. O roteiro está na
 seção 7 de `docs/teste-duas-maquinas.md`.
-## 22 · MODs estão desenhados e não construídos
+## 22 · Fechada em 2026-09-17 · MODs estão desenhados e não construídos
+
+> **Fechada na v0.11.0.** O que faltava era tudo: hoje o servidor sobe os MODs
+> habilitados e os executa, o anúncio e o aceite atravessam o protocolo — quem
+> entra vê identidade, versão, hash, repositório e alcance antes de qualquer
+> byte —, um MOD obrigatório recusado barra a entrada, e a ponte de pedidos deixa
+> um MOD responder a uma pessoa só, com a identidade escrita pelo servidor.
+>
+> **O que não fechou junto, e não é isto aqui:** o indexador não está no ar, então
+> nenhum MOD de terceiro tem como chegar a ninguém ainda. E o interruptor de MOD
+> tem o seu próprio defeito aberto, na pendência 44.
+>
+> O texto original fica abaixo, como a regra desta página manda.
 
 **Sintoma.** Não dá para mudar nada da aparência do produto. A tela de
 configurações não oferece `TEMA` — e há teste cobrando que ela não ofereça
@@ -3957,7 +4017,26 @@ cobra isso nos dois sentidos.
 Também sai da fórmula de Homebrew a ressalva sobre isto: o `brew test` pode
 voltar a conferir a versão, que é o que aquele teste existe para fazer.
 
-## 31 · Trocar de fone ou microfone no Windows exige reiniciar o aplicativo
+## 31 · Consertada em 2026-09-17, sem confirmação de campo · Trocar de fone ou microfone no Windows exige reiniciar o aplicativo
+
+> **A causa foi achada e consertada na v0.11.0**, e o título fica como estava
+> porque o sintoma é o que se procura. O `cpal` avisava dos três casos — padrão
+> do sistema trocado, aparelho retirado, estalo — pelo retorno de erro do fluxo,
+> e o produto contava «mais um erro» e jogava fora o **tipo** dele. O supervisor
+> que saberia o que fazer existia e era código morto, não referenciado por
+> nenhum arquivo fora de si mesmo.
+>
+> Hoje o tipo do erro é preservado e conduz o ciclo do aparelho, a reabertura
+> acontece nos dois lados, a interface é avisada **enquanto** a troca acontece, e
+> onze testes de conformidade exercitam comportamento — não texto-fonte.
+>
+> **Por que não está escrito «fechada».** Nenhuma máquina de CI tem duas placas
+> de som e nenhuma tem tomada para puxar um fone: o que os testes fingem é a
+> abertura do aparelho, e tudo o que decidia errado é o de verdade. Falta a
+> confirmação de quem relatou, num Windows, trocando o fone no meio de uma
+> conversa. Escrever «fechada» antes disso seria afirmar o que não foi medido.
+>
+> O texto original fica abaixo.
 
 **Sintoma, relatado por quem usa em 2026-08-31**, num teste em LAN entre Mac e
 Windows: *«no Windows a troca de fone e microfone não aconteceu em tempo real,
@@ -5835,9 +5914,26 @@ mesmo tempo — colide. Esta tarefa teve escopo explícito de **não** tocar
 protocolo, e o que ela entrega — repasse de senha e desfazer o assento na
 recusa — já resolve o sintoma relatado sem esperar por isso.
 
-**Quando dói.** Sempre que uma sala de voz tem senha, ou ganha algum outro
-motivo de recusa no futuro: o intervalo entre pedir e ouvir a recusa continua
-existindo, só não sobrevive mais a ele.
+### A previsão desta seção se cumpriu em 2026-09-17
+
+Ficava escrito aqui que *«qualquer novo motivo de recusa que o protocolo venha a
+ganhar exigiria lembrar de novo de desfazer o assento à mão»*. A v0.11.0 ganhou
+**dois**: o teto declarado da sala (`VoiceRoomFull`) e a permissão de entrar.
+
+E foi exatamente isso que aconteceu: o conserto do teto só ficou correto depois
+de acrescentar `VoiceRoomFull` ao braço de `Room::apply` que desfaz o assento.
+Sem essa linha, o defeito inteiro voltava com um motivo novo — a pessoa se vendo
+dentro de uma sala onde ninguém a vê. A recusa por permissão escapou por sorte:
+ela reusa `VoiceRoomEntryRefused`, que já estava na lista.
+
+**Isto não fecha esta pendência; encarece-a.** A cada motivo de recusa novo, a
+lista do cliente precisa crescer junto, e nada no tipo obriga. O conserto de
+raiz continua sendo o mesmo do relatório de origem — confirmação do servidor no
+fio — e continua exigindo mensagem de protocolo nova.
+
+**Quando dói.** Sempre que uma sala de voz tem senha, está cheia, ou ganha algum
+outro motivo de recusa no futuro: o intervalo entre pedir e ouvir a recusa
+continua existindo, só não sobrevive mais a ele.
 
 
 ## 38 · O workflow de CI existe escrito, e ninguém provou que ele roda
@@ -6806,42 +6902,6 @@ reversão — entraria como um guarda que ninguém sabe se funciona, que é
 exatamente o defeito que este repositório mais paga caro. Fica a saída 3, agora
 pela terceira medida seguida.
 
-## 45 · O caminho de Windows do som da tela não é compilado neste Mac
-
-**Aberta em 2026-09-17**, junto do conserto que faz o som da transmissão seguir
-a troca de aparelho.
-
-**O que foi consertado.** `seele-core/src/video.rs` abria o *loopback* uma vez —
-o padrão do sistema naquele instante — e o segurava pela transmissão inteira.
-Agora a decisão mora em `seele_core::som_que_segue`, que conduz o mesmo
-`CicloDoAparelho` que a voz conduz e reabre no padrão de agora. Três testes de
-conformidade o exercitam, e a prova de reversão está registrada.
-
-**O que não foi verificado, e é honesto separar.** `som_da_maquina` e o braço
-`SomDaTela::DaMaquina` de `tomar_som` estão atrás de `#[cfg(target_os =
-"windows")]`. **Nesta máquina eles não são compilados**, e não há como compilar
-cruzado: `cargo check -p seele-core --target x86_64-pc-windows-msvc` para no
-`cc`, no `ring`, com `fatal error: 'assert.h' file not found` — faltam os
-cabeçalhos C do Windows.
-
-**O que foi feito a respeito, em vez de deixar por isso mesmo.** A parte de
-plataforma foi encolhida até quase nada:
-
-- a decisão inteira saiu do `cfg` e virou `som_que_segue`, compilada e testada
-  aqui;
-- os dois adaptadores — `AbrirOSomDaMaquina` e `SomAberto for CapturaDaSaida` —
-  **também** saíram do `cfg`. `CapturaDaSaida` compila em toda plataforma de
-  propósito, então eles têm os tipos conferidos a cada `cargo build` no Mac;
-- os acoplamentos que restavam estão presos por asserções de tipo em
-  `video.rs`, no mesmo recurso que o arquivo já usava para o `Send` do
-  `CapturaComSom`. Conferido que elas mordem: apagando o `impl SomAberto`, o
-  build sai com `the trait bound CapturaDaSaida: SomAberto is not satisfied`.
-
-O que sobra sem compilação nesta máquina é `som_da_maquina` — uma chamada e um
-`match` — e um braço de `match` de três linhas. **É pouco e não é zero**, e só
-deixa de ser suposição no dia em que o job `windows` da CI rodar de verdade, que
-é a pendência 38 e continua aberta.
-
 ## 44 · O interruptor de MOD passou a trancar pares, e a tela de quem hospeda não diz isso
 
 **O que acontece hoje.** Com o protocolo na v5 o portão do anúncio ligou:
@@ -6998,3 +7058,45 @@ integrado à main. Enquanto isso a main recebeu os seus próprios #34 a #44 — 
 últimos (#42 a #44) chegaram pela subida do protocolo para a v5, já depois de
 este item ter sido escrito como #42. Renumerado para #45 na integração; o
 conteúdo é o mesmo que já foi revisado.
+
+## 46 · O caminho de Windows do som da tela não é compilado neste Mac
+
+> **Nasceu como 45 e foi renumerada no mesmo dia.** Havia outra 45 — «expulsar
+> não mantém ninguém fora da sala» — que chegou por um merge, e escrevi por
+> cima do número sem conferir. O commit que a criou, `2cfffce`, diz «pendência
+> 45» querendo dizer esta. Quem renumera é a mais nova, pela regra que o
+> `README.md` dos ADRs já dá para os renomes.
+
+**Aberta em 2026-09-17**, junto do conserto que faz o som da transmissão seguir
+a troca de aparelho.
+
+**O que foi consertado.** `seele-core/src/video.rs` abria o *loopback* uma vez —
+o padrão do sistema naquele instante — e o segurava pela transmissão inteira.
+Agora a decisão mora em `seele_core::som_que_segue`, que conduz o mesmo
+`CicloDoAparelho` que a voz conduz e reabre no padrão de agora. Três testes de
+conformidade o exercitam, e a prova de reversão está registrada.
+
+**O que não foi verificado, e é honesto separar.** `som_da_maquina` e o braço
+`SomDaTela::DaMaquina` de `tomar_som` estão atrás de `#[cfg(target_os =
+"windows")]`. **Nesta máquina eles não são compilados**, e não há como compilar
+cruzado: `cargo check -p seele-core --target x86_64-pc-windows-msvc` para no
+`cc`, no `ring`, com `fatal error: 'assert.h' file not found` — faltam os
+cabeçalhos C do Windows.
+
+**O que foi feito a respeito, em vez de deixar por isso mesmo.** A parte de
+plataforma foi encolhida até quase nada:
+
+- a decisão inteira saiu do `cfg` e virou `som_que_segue`, compilada e testada
+  aqui;
+- os dois adaptadores — `AbrirOSomDaMaquina` e `SomAberto for CapturaDaSaida` —
+  **também** saíram do `cfg`. `CapturaDaSaida` compila em toda plataforma de
+  propósito, então eles têm os tipos conferidos a cada `cargo build` no Mac;
+- os acoplamentos que restavam estão presos por asserções de tipo em
+  `video.rs`, no mesmo recurso que o arquivo já usava para o `Send` do
+  `CapturaComSom`. Conferido que elas mordem: apagando o `impl SomAberto`, o
+  build sai com `the trait bound CapturaDaSaida: SomAberto is not satisfied`.
+
+O que sobra sem compilação nesta máquina é `som_da_maquina` — uma chamada e um
+`match` — e um braço de `match` de três linhas. **É pouco e não é zero**, e só
+deixa de ser suposição no dia em que o job `windows` da CI rodar de verdade, que
+é a pendência 38 e continua aberta.
