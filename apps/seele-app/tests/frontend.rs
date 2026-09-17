@@ -10791,3 +10791,46 @@ fn a_barra_da_janela_arrasta_nos_dois_mecanismos() {
         );
     }
 }
+
+/// Nenhum `id` aparece duas vezes na página.
+///
+/// **A01 da auditoria de 17/09, e o defeito é exatamente este guarda faltando.**
+/// `#tela-servidores` nasceu com `servidores-titulo` e `servidores-erro`, que
+/// já existiam no diálogo ONDE VOCÊ JÁ ESTEVE. `document.getElementById`
+/// devolve o **primeiro**, e o primeiro passou a ser o da tela escondida: um
+/// convite malformado escrevia o erro num elemento que ninguém vê, e o diálogo
+/// ficava aberto sem dizer nada.
+///
+/// O mesmo empate fazia o leitor de tela anunciar aquele diálogo como
+/// «HOSPEDAR», porque o `aria-labelledby` resolvia para o título errado.
+///
+/// Nada disso lança. É o «o produto sabe e não conta» na forma mais silenciosa
+/// que existe: a mensagem foi escrita, e foi escrita no lugar errado.
+#[test]
+fn nenhum_id_aparece_duas_vezes_na_pagina() {
+    let page = read("ui/index.html");
+
+    let mut vistos: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut resto = page.as_str();
+    while let Some(at) = resto.find("id=\"") {
+        resto = &resto[at + 4..];
+        let Some(fim) = resto.find('"') else { break };
+        let Some(id) = resto.get(..fim) else { break };
+        *vistos.entry(id.to_owned()).or_default() += 1;
+        resto = &resto[fim..];
+    }
+
+    let repetidos: Vec<String> = vistos
+        .iter()
+        .filter(|(_, n)| **n > 1)
+        .map(|(id, n)| format!("`{id}` ({n}×)"))
+        .collect();
+
+    assert!(
+        repetidos.is_empty(),
+        "estes `id` aparecem mais de uma vez, e `getElementById` devolve sempre \
+         o primeiro — a segunda superfície escreve no elemento da primeira, sem \
+         erro nenhum: {}",
+        repetidos.join(", ")
+    );
+}

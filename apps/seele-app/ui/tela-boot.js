@@ -589,7 +589,7 @@ async function abrirHospedagem() {
   guardarFoco("tela-boot");
   $("tela-boot").hidden = true;
   $("tela-servidores").hidden = false;
-  $("servidores-erro").hidden = true;
+  $("hospedar-erro").hidden = true;
   desenharServidoresGuardados(guardados);
   abrirTela("tela-servidores");
 }
@@ -769,13 +769,27 @@ async function abrirPreparar() {
 
   // A regra vem do Rust pelo mesmo motivo que na tela de configuração: dois
   // números escritos à mão divergem do protocolo um dia.
+  //
+  // **Os nomes são `limite_bytes` e `lado`**, que é o que `RegrasDoIcone`
+  // serializa. Eu tinha escrito `teto_em_bytes` e `lado_maximo`, e a tela
+  // mostrava `Até NaN KiB, undefined px de lado` — porque ler um campo que não
+  // existe não lança, não avisa, e chega inteiro até a frase.
+  const regra = $("preparar-icone-regra");
   try {
     const regras = await invoke("regras_do_icone_do_server");
-    $("preparar-icone-regra").textContent =
-      `Até ${Math.round(regras.teto_em_bytes / 1024)} KiB, ` +
-      `${regras.lado_maximo} px de lado. Uma foto maior é reduzida aqui mesmo.`;
+    // Conferido antes de entrar na frase: um número que não veio vira `NaN` na
+    // conta e `undefined` no texto, e a tela prefere não prometer um limite a
+    // prometer um que não sabe.
+    const kib = Number(regras?.limite_bytes);
+    const lado = Number(regras?.lado);
+    regra.textContent =
+      Number.isFinite(kib) && Number.isFinite(lado)
+        ? `Até ${Math.round(kib / 1024)} KiB, ${lado} px de lado. ` +
+          `Uma foto maior é reduzida aqui mesmo.`
+        : "Uma foto maior é reduzida aqui mesmo.";
   } catch (falha) {
     console.warn("regras do ícone:", falha);
+    regra.textContent = "Uma foto maior é reduzida aqui mesmo.";
   }
 
   await desenharVersoesParaHospedar();
