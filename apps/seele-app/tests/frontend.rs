@@ -8956,42 +8956,61 @@ fn no_class_is_drawn_by_two_stylesheets_without_being_a_declared_refinement() {
 /// caminho — o certificado foi gerado por este mesmo processo, nesta máquina,
 /// segundos antes.
 ///
-/// O que este guarda protege é o **outro** lado da bandeira. Uma tentativa de
-/// hospedar que falha não pode deixá-la ligada para a próxima conexão, que essa
-/// vai a um servidor alheio de verdade: ela é lida e apagada no começo de
-/// `conectar`, antes do `connect`, e não no caminho feliz depois dele.
+/// O que este guarda protege é o **outro** lado da dispensa. Uma tentativa de
+/// hospedar que falha não pode dispensar a conferência da conexão seguinte, que
+/// essa vai a um servidor alheio de verdade.
+///
+/// **A dispensa deixou de ser um sim e passou a ser um endereço** — A05 da
+/// auditoria de 17/09. A bandeira booleana era lida e apagada na primeira linha
+/// de `conectar`, e isso confundia «a tentativa falhou» com «a mesma tentativa
+/// está continuando»: uma entrada que para no aceite de MODs é retomada por
+/// `aceitarOsMods`, e a intenção já tinha sido consumida — quem hospedava caía
+/// na tela de conferir a própria chave.
+///
+/// Guardar o endereço resolve as duas de uma vez, e por construção: continuar
+/// para o mesmo alvo reconhece a intenção, e **qualquer outro alvo não casa**,
+/// então não há o que vazar para a conexão seguinte. É uma propriedade mais
+/// forte que a de antes, e não um afrouxamento dela.
 #[test]
 fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after() {
     let boot = read("ui/tela-boot.js");
     let conectar = js_function(&boot, "async function conectar(");
 
-    let Some((antes, depois)) = conectar.split_once("subindoServidorAqui = false;") else {
-        panic!("`conectar` nunca apaga a bandeira de hospedagem: {conectar}");
-    };
+    // A dispensa é uma comparação com o alvo desta conexão, e não a leitura de
+    // um sim. Sem o `=== ultimoAlvo`, ela voltaria a valer em qualquer endereço.
     assert!(
-        !antes.contains("invoke(\"connect\""),
-        "a bandeira é apagada **depois** do `connect`, então uma tentativa de \
-         hospedar que falha a deixa ligada — e a próxima conexão, a um servidor \
-         alheio, entra sem a conferência de identidade do ADR 0003:\n{conectar}"
+        conectar.contains("nossoServidorEm === ultimoAlvo"),
+        "`conectar` não compara a dispensa com o alvo desta conexão, então ela \
+         valeria para qualquer endereço:\n{conectar}"
     );
     assert!(
-        depois.contains("invoke(\"connect\""),
-        "`conectar` apaga a bandeira mas nunca chama `connect`: {conectar}"
+        !boot.contains("nossoServidorEm = true"),
+        "a dispensa voltou a ser um sim solto; ela tem de ser o endereço que \
+         esta janela hospeda, ou volta a vazar para a conexão seguinte"
     );
 
-    // E quem a liga é só o hospedar. Qualquer outro caminho ligando-a seria uma
-    // conexão a servidor alheio dispensando a conferência.
-    let ligam = boot.matches("subindoServidorAqui = true").count();
+    // E quem a liga é só o hospedar, com o endereço que acabou de subir.
+    let ligam =
+        boot.matches("nossoServidorEm = ").count() - boot.matches("nossoServidorEm = null").count();
     assert_eq!(
         ligam, 1,
-        "a bandeira que dispensa a conferência de chave é ligada em {ligam} \
-         lugares; só `hospedar` pode ligá-la"
+        "a dispensa da conferência de chave é escrita em {ligam} lugares; só \
+         `hospedar` pode escrevê-la"
     );
     let hospedar = js_function(&boot, "async function hospedar(");
     assert!(
-        hospedar.contains("subindoServidorAqui = true"),
-        "`hospedar` não liga a bandeira, então subir um servidor aqui ainda \
-         pede para conferir a própria chave: {hospedar}"
+        hospedar.contains("nossoServidorEm = anfitriao.aqui"),
+        "`hospedar` não prende a dispensa ao endereço que acabou de subir: {hospedar}"
+    );
+
+    // **E ela morre com a hospedagem.** Um endereço de rede local volta a ser de
+    // outra máquina no dia seguinte: mantê-la depois de o servidor cair seria
+    // dispensar a conferência justamente onde ela passa a valer.
+    let fim = read("ui/tela-fim.js");
+    assert!(
+        fim.contains("nossoServidorEm = null"),
+        "nada zera a dispensa quando a hospedagem cai, e o mesmo endereço na mão \
+         de outra máquina herdaria a dispensa"
     );
 
     // **E a bandeira tem de decidir alguma coisa do outro lado.**

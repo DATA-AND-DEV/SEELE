@@ -81,7 +81,24 @@ let ultimoApelido = null;
  * outro arquivo não é um aviso: é `SyntaxError` no arquivo inteiro, que deixa
  * de carregar e leva junto tudo o que declarava.
  */
-let subindoServidorAqui = false;
+// **O endereço que esta janela hospeda e está entrando, ou `null`.**
+//
+// Era uma bandeira `true`/`false`, lida e apagada na primeira linha de
+// `conectar` — para que uma tentativa de hospedar que desse errado não virasse
+// permissão para a conexão seguinte, essa a um servidor alheio de verdade.
+//
+// A05 da auditoria de 17/09: isso confunde «a tentativa falhou» com «a mesma
+// tentativa está continuando». Uma entrada que para no aceite de MODs é
+// retomada por `aceitarOsMods`, que chama `conectar` de novo — e a intenção já
+// tinha sido consumida, então quem hospeda caía na tela ENTRAR NO SERVIDOR
+// para conferir a própria chave.
+//
+// Guardar o **endereço** em vez de um sim resolve as duas coisas de uma vez:
+// continuar para o mesmo alvo reconhece a intenção, e qualquer outro alvo não
+// casa — não há o que vazar. Vive enquanto a hospedagem vive: `tela-fim.js` o
+// zera quando ela cai, senão o mesmo endereço na mão de outra máquina herdaria
+// a dispensa.
+let nossoServidorEm = null;
 
 async function conectar(alvo, apelido, token) {
   ultimoAlvo = alvo ?? ultimoAlvo;
@@ -145,8 +162,9 @@ async function conectar(alvo, apelido, token) {
   // conferência de identidade que é a razão de a `#tela-auth` existir. Uma
   // tentativa de hospedar que dá errado não pode virar permissão para a
   // seguinte.
-  const nossoServidor = subindoServidorAqui;
-  subindoServidorAqui = false;
+  // Casa por alvo, e não por «alguém apertou hospedar»: continuar para o mesmo
+  // endereço é a mesma entrada; qualquer outro é outra conversa.
+  const nossoServidor = nossoServidorEm !== null && nossoServidorEm === ultimoAlvo;
   // **Os valores chegam por argumento desde a 0.9.0.**
   //
   // Eles vinham de dois campos desta tela, e a comp tirou os dois: o endereço
@@ -398,8 +416,11 @@ async function hospedar() {
     // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
     // vai usar.
     ultimoAlvo = anfitriao.aqui;
-    // E entrar aqui não pede para conferir a própria chave — ver `subindoServidorAqui`.
-    subindoServidorAqui = true;
+    // E entrar aqui não pede para conferir a própria chave — ver
+    // `nossoServidorEm`. Preso ao endereço que acabou de subir, e não a um sim
+    // solto: é isso que faz a retomada depois do aceite de MODs continuar sendo
+    // a mesma entrada, sem dispensar nada em nenhum outro endereço.
+    nossoServidorEm = anfitriao.aqui;
     mostrarAlcance(
       anfitriao.alcance,
       anfitriao.porta_recusada,

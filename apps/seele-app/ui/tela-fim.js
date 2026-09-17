@@ -173,7 +173,15 @@ async function limparSessaoEncerrada({ pararDeHospedar }) {
   // O link só some quando o servidor some com ele: enquanto a hospedagem está
   // de pé, ele continua levando a algum lugar, e apagá-lo faria a configuração
   // esconder um endereço que funciona.
-  if (pararDeHospedar) esquecerOLinkDaPorta();
+  //
+  // E com o servidor vai a dispensa de conferir a própria chave. Ela é presa ao
+  // endereço (`nossoServidorEm`), e um endereço de rede local volta a ser de
+  // outra máquina no dia seguinte: mantê-la depois de a hospedagem cair seria
+  // dispensar a conferência justamente onde ela passa a valer.
+  if (pararDeHospedar) {
+    esquecerOLinkDaPorta();
+    nossoServidorEm = null;
+  }
   mostrarVeredito(null);
   desenhado = null;
   linhaAberta = null;
