@@ -501,7 +501,7 @@ que este ADR construiu:
 | caminho | a porta | sobrevive a fechar e abrir? |
 |---|---|---|
 | rede local, `192.168.x.x:8383` | fixa | **sim** |
-| UPnP/PCP, degrau 3 | pede 8383 externa e **recusa** outra | **sim** |
+| UPnP/PCP, degrau 3 | pede 8383 externa e, se o roteador recusar (`PortInUse` ou `SamePortValuesRequired`), aceita qualquer outra que o roteador der (`add_any_port`, `crates/seele-server/src/alcance/porta.rs:354-366`) | **não, quando cai no recuo** — o link novo carrega a porta de hoje e funciona; um link **guardado** aponta para a porta velha e falha |
 | furo de NAT, degrau 4 | a que o roteador deu ao datagrama | **não** |
 
 E **tudo** o que a lista de servidores conhecidos guarda é endereço: o do link,

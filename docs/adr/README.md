@@ -78,6 +78,7 @@ o ganho é de estética.
 | [0044](0044-o-portao-divide-a-subida-medida.md) | O portão divide a subida medida, e a medida sobrevive ao reinício | **aceito** | — (revisa a perna do hospedeiro do `0038`) |
 | [0045](0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md) | MODs: o produto base tem regras, e um MOD não | **proposto** | — (pedido do dono; substitui o `0029`) |
 | [0046](0046-toda-versao-continua-de-pe.md) | Toda versão continua de pé: o app vira launcher | **proposto** | — (pedido do dono; substitui o botão do `0026`) |
+| [0047](0047-o-link-que-volta-a-funcionar-amanha.md) | O link que volta a funcionar amanhã: permanência, multiconexão e chamada privada | **rascunho** | — (pedido do dono; confere o `0022` e o `0031` contra o código) |
 
 ## O que ainda não tem ADR
 
