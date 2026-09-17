@@ -105,6 +105,17 @@ const PROCURA: Duration = Duration::from_secs(3);
 /// Quem for olhar aquela tela merece ver de onde a regra veio.
 const DESCRICAO: &str = "SEELE server";
 
+/// A porta externa que o ADR 0022 promete como âncora estável — "O quarto",
+/// que documenta o que uma lista de servidores salva e o que sobrevive a
+/// fechar e abrir de novo.
+///
+/// Antes deste módulo aceitar qualquer porta que o roteador desse, o degrau 3
+/// já era, na prática, a única das três linhas da tabela do ADR que sobrevivia
+/// a um reinício — mas só enquanto a 8383 continuasse livre. Um link salvo
+/// depende dela ser tentada de novo, e não trocada por outra à primeira
+/// recusa.
+const PORTA_CANONICA: u16 = seele_proto::transport::DEFAULT_PORT;
+
 /// Por que não deu para abrir a porta.
 ///
 /// Cada variante é uma frase diferente para quem hospeda, e é por isso que são
@@ -205,6 +216,9 @@ pub struct PortaAberta {
     roteador: Gateway<Tokio>,
     externo: SocketAddr,
     renovacao: tokio::task::JoinHandle<()>,
+    /// Se a porta externa é a [`PORTA_CANONICA`], ou o recuo de "qualquer
+    /// porta" — ver [`PortaAberta::aviso`].
+    canonica: bool,
 }
 
 impl std::fmt::Debug for PortaAberta {
@@ -224,6 +238,27 @@ impl PortaAberta {
     #[must_use]
     pub fn externo(&self) -> SocketAddr {
         self.externo
+    }
+
+    /// A frase para quem hospeda, quando a porta externa não é a
+    /// [`PORTA_CANONICA`].
+    ///
+    /// `None` é o caso comum: o roteador aceitou a 8383, e um link salvo
+    /// continua tendo por onde voltar depois de fechar e abrir de novo.
+    /// `Some` só depois de [`mapear`] recuar para "qualquer porta" — nem a
+    /// tentativa original nem a segunda, explícita pela 8383, bateram. O link
+    /// gerado agora funciona, mas a próxima porta que o roteador der pode ser
+    /// outra, e é isso que a frase diz.
+    #[must_use]
+    pub fn aviso(&self) -> Option<String> {
+        (!self.canonica).then(|| {
+            format!(
+                "o roteador não abriu a porta {PORTA_CANONICA} de sempre — abriu a {} no \
+                 lugar. o link funciona agora, mas pode não servir mais depois de reiniciar \
+                 o servidor",
+                self.externo.port()
+            )
+        })
     }
 
     /// Devolve a porta ao roteador.
@@ -305,17 +340,76 @@ pub async fn abrir(
     })?;
     let interno = SocketAddr::new(interno, porta);
 
-    let porta = mapear(&roteador, interno).await?;
-    let externo = SocketAddr::new(externo, porta);
-    tracing::info!(%externo, %interno, "o roteador abriu a porta");
+    let mapeamento = mapear(&roteador, interno).await?;
+    let externo = SocketAddr::new(externo, mapeamento.porta);
+    tracing::info!(
+        %externo,
+        %interno,
+        canonica = mapeamento.canonica,
+        "o roteador abriu a porta"
+    );
 
-    let renovacao = tokio::spawn(renovar(roteador.clone(), interno, porta));
+    let renovacao = tokio::spawn(renovar(roteador.clone(), interno, mapeamento.porta));
 
     Ok(PortaAberta {
         roteador,
         externo,
         renovacao,
+        canonica: mapeamento.canonica,
     })
+}
+
+/// O que [`mapear`] devolve: a porta que o roteador deu, e se é a
+/// [`PORTA_CANONICA`] ou o recuo.
+struct Mapeamento {
+    porta: u16,
+    canonica: bool,
+}
+
+/// O que [`mapear`] precisa do roteador, e nada mais — só para que a
+/// retentativa da [`PORTA_CANONICA`] possa ser exercida sem uma rede de
+/// verdade. [`Gateway<Tokio>`] implementa isto abaixo; o `#[cfg(test)]` ganha
+/// uma versão que devolve respostas combinadas.
+trait Roteador {
+    async fn add_port(
+        &self,
+        externa: u16,
+        interno: SocketAddr,
+        validade: u32,
+    ) -> Result<(), igd_next::AddPortError>;
+
+    async fn add_any_port(
+        &self,
+        interno: SocketAddr,
+        validade: u32,
+    ) -> Result<u16, igd_next::AddAnyPortError>;
+}
+
+impl Roteador for Gateway<Tokio> {
+    async fn add_port(
+        &self,
+        externa: u16,
+        interno: SocketAddr,
+        validade: u32,
+    ) -> Result<(), igd_next::AddPortError> {
+        Gateway::add_port(
+            self,
+            PortMappingProtocol::UDP,
+            externa,
+            interno,
+            validade,
+            DESCRICAO,
+        )
+        .await
+    }
+
+    async fn add_any_port(
+        &self,
+        interno: SocketAddr,
+        validade: u32,
+    ) -> Result<u16, igd_next::AddAnyPortError> {
+        Gateway::add_any_port(self, PortMappingProtocol::UDP, interno, validade, DESCRICAO).await
+    }
 }
 
 /// Pede o mapeamento, contornando as duas recusas que são só uma negociação.
@@ -324,45 +418,73 @@ pub async fn abrir(
 /// discordâncias não são falhas: um roteador que só faz mapeamento permanente e
 /// um roteador cuja porta pedida já está tomada. Tratar as duas como erro
 /// devolveria "não deu" para casas em que dá.
-async fn mapear(roteador: &Gateway<Tokio>, interno: SocketAddr) -> Result<u16, FalhaAoAbrir> {
+///
+/// # Por que a porta tomada não cai direto em "qualquer uma"
+///
+/// O ADR 0022 sempre descreveu o degrau 3 como uma âncora estável — a
+/// [`PORTA_CANONICA`], sempre — e é dela que depende um link guardado numa
+/// lista de servidores: o anfitrião reavive o mapeamento a cada renovação
+/// enquanto está no ar, mas na próxima vez que abrir o roteador pode já ter
+/// esquecido a regra antiga e dar outra porta a quem pedir "qualquer uma". Por
+/// isso, antes de aceitar qualquer porta, uma segunda tentativa pede a
+/// [`PORTA_CANONICA`] explicitamente — e só se ela também não der é que
+/// qualquer porta serve, como último recurso, exatamente como antes.
+async fn mapear<R: Roteador>(
+    roteador: &R,
+    interno: SocketAddr,
+) -> Result<Mapeamento, FalhaAoAbrir> {
     let desejada = interno.port();
     let validade = u32::try_from(VALIDADE.as_secs()).unwrap_or(u32::MAX);
 
-    match roteador
-        .add_port(
-            PortMappingProtocol::UDP,
-            desejada,
-            interno,
-            validade,
-            DESCRICAO,
-        )
-        .await
-    {
-        Ok(()) => Ok(desejada),
+    match roteador.add_port(desejada, interno, validade).await {
+        Ok(()) => Ok(Mapeamento {
+            porta: desejada,
+            canonica: desejada == PORTA_CANONICA,
+        }),
 
         // Roteador que só faz mapeamento permanente. Aceitamos, e o preço é a
         // regra sobreviver a uma queda feia — ver VALIDADE.
         Err(igd_next::AddPortError::OnlyPermanentLeasesSupported) => {
             tracing::info!("o roteador só faz mapeamento permanente; pedindo sem prazo");
             roteador
-                .add_port(PortMappingProtocol::UDP, desejada, interno, 0, DESCRICAO)
+                .add_port(desejada, interno, 0)
                 .await
-                .map(|()| desejada)
+                .map(|()| Mapeamento {
+                    porta: desejada,
+                    canonica: desejada == PORTA_CANONICA,
+                })
                 .map_err(|erro| FalhaAoAbrir::RoteadorRecusou(erro.to_string()))
         }
 
         // A porta pedida já está tomada, ou o roteador exige que a externa seja
-        // igual à interna e não pode. Qualquer porta serve: o `seele://` carrega
-        // a porta, então quem receber o link não precisa saber disto.
+        // igual à interna e não pode. Antes de aceitar qualquer porta, tenta a
+        // canônica uma segunda vez — ver o comentário da função.
         Err(
             erro @ (igd_next::AddPortError::PortInUse
             | igd_next::AddPortError::SamePortValuesRequired),
         ) => {
-            tracing::info!(%erro, "a porta pedida não deu; pedindo qualquer uma");
-            roteador
-                .add_any_port(PortMappingProtocol::UDP, interno, validade, DESCRICAO)
-                .await
-                .map_err(|erro| FalhaAoAbrir::RoteadorRecusou(erro.to_string()))
+            tracing::info!(
+                %erro,
+                porta = PORTA_CANONICA,
+                "a porta pedida não deu; tentando a canônica de novo antes de qualquer uma"
+            );
+            match roteador.add_port(PORTA_CANONICA, interno, validade).await {
+                Ok(()) => Ok(Mapeamento {
+                    porta: PORTA_CANONICA,
+                    canonica: true,
+                }),
+                Err(erro) => {
+                    tracing::info!(%erro, "a canônica continua ocupada; pedindo qualquer uma");
+                    roteador
+                        .add_any_port(interno, validade)
+                        .await
+                        .map(|porta| Mapeamento {
+                            porta,
+                            canonica: false,
+                        })
+                        .map_err(|erro| FalhaAoAbrir::RoteadorRecusou(erro.to_string()))
+                }
+            }
         }
 
         Err(erro) => Err(FalhaAoAbrir::RoteadorRecusou(erro.to_string())),
@@ -555,6 +677,136 @@ mod testes {
                 .get(2)
                 .is_some_and(|frase| frase.contains("100.64.0.1")),
             "a falha de CGNAT não diz qual era o endereço"
+        );
+    }
+
+    /// Um roteador falso, só para [`mapear`]: registra toda porta externa
+    /// pedida em `add_port`, e devolve `PortInUse` para as que estiverem na
+    /// lista de ocupadas. `add_any_port` sempre dá certo, e devolve a porta
+    /// combinada — é o recuo de último recurso, e não há o que testar nele
+    /// além de "foi chamado".
+    #[derive(Default)]
+    struct RoteadorFalso {
+        ocupadas: Vec<u16>,
+        externas_pedidas: std::sync::Mutex<Vec<u16>>,
+        qualquer_porta_pedida: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Roteador for RoteadorFalso {
+        async fn add_port(
+            &self,
+            externa: u16,
+            _interno: SocketAddr,
+            _validade: u32,
+        ) -> Result<(), igd_next::AddPortError> {
+            self.externas_pedidas.lock().unwrap().push(externa);
+            if self.ocupadas.contains(&externa) {
+                Err(igd_next::AddPortError::PortInUse)
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn add_any_port(
+            &self,
+            _interno: SocketAddr,
+            _validade: u32,
+        ) -> Result<u16, igd_next::AddAnyPortError> {
+            self.qualquer_porta_pedida
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(51234)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_porta_ocupada_tenta_a_canonica_de_novo_antes_de_pedir_qualquer_uma() {
+        // Uma porta interna diferente de 8383, de propósito: se o teste usasse
+        // a canônica como interna, a primeira e a segunda tentativa pediriam o
+        // mesmo número por acaso, e não provaria que a segunda pede
+        // especificamente PORTA_CANONICA — que é a âncora do ADR 0022, e não
+        // "o que já tinha sido pedido antes".
+        let interna = 9999;
+        let roteador = RoteadorFalso {
+            ocupadas: vec![interna, PORTA_CANONICA],
+            ..Default::default()
+        };
+        let interno = SocketAddr::from(([192, 168, 0, 30], interna));
+
+        let mapeamento = mapear(&roteador, interno)
+            .await
+            .expect("o recuo para qualquer porta não pode falhar aqui");
+
+        assert_eq!(
+            *roteador.externas_pedidas.lock().unwrap(),
+            vec![interna, PORTA_CANONICA],
+            "a segunda tentativa tem de pedir a porta canônica, não repetir a primeira"
+        );
+        assert_eq!(
+            roteador
+                .qualquer_porta_pedida
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "o recuo só entra depois de as duas tentativas por porta fixa falharem"
+        );
+        assert!(
+            !mapeamento.canonica,
+            "a porta do recuo não pode se dizer canônica"
+        );
+        assert_eq!(mapeamento.porta, 51234);
+    }
+
+    #[tokio::test]
+    async fn a_porta_canonica_volta_a_servir_quando_o_mapeamento_antigo_ja_caducou() {
+        // O caso que o relato de campo descreveu: a porta pedida não estava
+        // livre no primeiro pedido, mas o mapeamento antigo para a 8383 já
+        // tinha expirado no roteador — e a segunda tentativa, pela canônica,
+        // encontra o lugar livre. Sem a retentativa, isto cairia direto em
+        // "qualquer porta" e o link guardado deixaria de servir.
+        struct RoteadorComRetentativa {
+            chamadas: std::sync::atomic::AtomicUsize,
+        }
+        impl Roteador for RoteadorComRetentativa {
+            async fn add_port(
+                &self,
+                externa: u16,
+                _interno: SocketAddr,
+                _validade: u32,
+            ) -> Result<(), igd_next::AddPortError> {
+                let numero = self
+                    .chamadas
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if numero == 0 {
+                    Err(igd_next::AddPortError::PortInUse)
+                } else {
+                    assert_eq!(
+                        externa, PORTA_CANONICA,
+                        "a segunda tentativa tem de pedir a porta canônica"
+                    );
+                    Ok(())
+                }
+            }
+
+            async fn add_any_port(
+                &self,
+                _interno: SocketAddr,
+                _validade: u32,
+            ) -> Result<u16, igd_next::AddAnyPortError> {
+                panic!("não devia recuar: a canônica respondeu na segunda tentativa")
+            }
+        }
+
+        let roteador = RoteadorComRetentativa {
+            chamadas: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let interno = SocketAddr::from(([192, 168, 0, 30], 9999));
+        let mapeamento = mapear(&roteador, interno)
+            .await
+            .expect("a segunda tentativa deveria ter dado certo");
+
+        assert_eq!(mapeamento.porta, PORTA_CANONICA);
+        assert!(
+            mapeamento.canonica,
+            "quando a segunda tentativa bate, a porta é a canônica"
         );
     }
 
