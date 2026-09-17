@@ -11036,3 +11036,55 @@ fn o_carregador_de_mods_diz_na_tela_e_monta_a_url_pelo_tauri() {
          então elas não aparecem para ninguém: {sem_frase:?}"
     );
 }
+
+/// Todo `aria-labelledby` e `aria-describedby` aponta para um `id` que existe.
+///
+/// **A14 da auditoria de 17/09**, na mesma família do A01. Um `id` repetido
+/// fazia o leitor de tela anunciar um diálogo pelo título de outro; um `id` que
+/// **não existe** é pior e igualmente silencioso: o atributo é ignorado, o
+/// elemento fica sem nome acessível, e nada na tela muda para quem enxerga.
+///
+/// Nenhum motor avisa, nenhum teste de renderização repara, e a pessoa que
+/// depende disso é justamente a que não pode conferir sozinha.
+#[test]
+fn toda_referencia_de_acessibilidade_aponta_para_algo_que_existe() {
+    let page = without_comments(&read("ui/index.html"));
+
+    let ids: BTreeSet<String> = {
+        let mut achados = BTreeSet::new();
+        let mut resto = page.as_str();
+        while let Some(at) = resto.find("id=\"") {
+            resto = resto.get(at + 4..).unwrap_or("");
+            let Some(fim) = resto.find('"') else { break };
+            if let Some(id) = resto.get(..fim) {
+                achados.insert(id.to_owned());
+            }
+            resto = resto.get(fim..).unwrap_or("");
+        }
+        achados
+    };
+
+    let mut orfas: Vec<String> = Vec::new();
+    for atributo in ["aria-labelledby=\"", "aria-describedby=\"", "for=\""] {
+        let mut resto = page.as_str();
+        while let Some(at) = resto.find(atributo) {
+            resto = resto.get(at + atributo.len()..).unwrap_or("");
+            let Some(fim) = resto.find('"') else { break };
+            let valor = resto.get(..fim).unwrap_or("");
+            // Os dois `aria-` aceitam uma lista separada por espaço.
+            for alvo in valor.split_whitespace() {
+                if !ids.contains(alvo) {
+                    orfas.push(format!("{atributo}{alvo}\""));
+                }
+            }
+            resto = resto.get(fim..).unwrap_or("");
+        }
+    }
+
+    assert!(
+        orfas.is_empty(),
+        "estas referências apontam para um `id` que não existe na página, então \
+         o atributo é ignorado e o elemento fica sem nome acessível — e nada na \
+         tela muda para quem enxerga: {orfas:?}"
+    );
+}

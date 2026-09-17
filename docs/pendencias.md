@@ -7131,3 +7131,44 @@ O que sobra sem compilação nesta máquina é `som_da_maquina` — uma chamada 
 `match` — e um braço de `match` de três linhas. **É pouco e não é zero**, e só
 deixa de ser suposição no dia em que o job `windows` da CI rodar de verdade, que
 é a pendência 38 e continua aberta.
+
+## 47 · A suíte verde não prova que um MOD abre
+
+**Sintoma.** `cargo test -p seele-app --test frontend` passou com 191 verdes no
+dia em que a auditoria de experiência reproduziu, no aplicativo nativo, um
+convite inválido sem mensagem e a frase literal `Até NaN KiB, undefined px`. Os
+dois defeitos estavam no código auditado. Nenhum teste os viu.
+
+**Por que.** O que esta suíte alcança é texto: ela lê o HTML, o CSS e os
+scripts, e cobra propriedades sobre eles. É muito, e não é tudo. Três coisas
+ficam fora por construção:
+
+1. **O DOM de verdade.** Nada aqui monta a página e aperta um botão. Um
+   `getElementById` que devolve o elemento errado, um `undefined` que chega
+   inteiro até uma frase, um `<script type="module">` recusado por origem — os
+   três só aparecem quando a página roda.
+2. **O WebView nativo.** O motor do Tauri é o WebKit do sistema no macOS e o
+   WebView2 no Windows, e eles discordam justamente onde dói: `-webkit-app-region`
+   vale num e não no outro, e `mod://localhost` é servido como
+   `http://mod.localhost` no segundo. Medir num terceiro motor não responde por
+   nenhum dos dois.
+3. **A abertura de um MOD de ponta a ponta.** Que os bytes atravessem origem,
+   CSP, IPC e cheguem a desenhar o botão do MESA é a única pergunta que
+   interessa, e ela não é respondida por nenhuma das duas suítes atuais.
+
+**O que foi feito em 2026-09-17**, e é a parte que texto alcança: unicidade de
+`id` na página; referências de acessibilidade apontando para `id` que existe;
+contratos de IPC cobrados a partir do que o Rust **serializa de verdade**, e não
+de uma lista escrita no teste. Os dois primeiros guardas falharam antes do
+conserto, nomeando exatamente o que a auditoria viu na tela.
+
+**O que falta.** Um teste de fumaça por sistema operacional, sobre o binário que
+vai ser distribuído: subir a janela, instalar um MOD conhecido, e conferir que
+ele abre — e os caminhos de recuperação junto, com hash divergente, script
+ausente e catálogo recusado. Isso precisa de decisão sobre ferramenta e sobre
+CI, e não de mais um guarda de texto.
+
+**Não vale fechar isto acrescentando guardas.** Eles já cobrem o que sabem
+cobrir, e a armadilha é a que a auditoria nomeia: um teste que verifica se a
+correção está escrita passa a valer pela correção, e a suíte fica verde
+afirmando o que ninguém mediu.
