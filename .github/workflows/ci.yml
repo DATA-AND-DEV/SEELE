@@ -130,7 +130,11 @@ jobs:
         # a single doctest. What `--all-targets` did add over the plain command
         # is the bench in seele-audio and the examples — and the clippy job
         # above already passes `--all-targets --all-features`, so both are still
-        # compiled on every push. Nothing was lost and 8 sections were gained.
+        # compiled on every push. Nothing was lost. The gain is small and the
+        # number is here so nobody quotes it bigger: those 8 sections hold one
+        # real doctest (seele-proto::version::negotiate) and 7 empty ones. What
+        # was fixed is the false claim and the gap in the command, not a
+        # coverage hole.
         #
         # Not all of it: a sixth armed round under the same load failed, in
         # moderacao::um_operador_modera_pessoas_e_nao_o_comandante, the set

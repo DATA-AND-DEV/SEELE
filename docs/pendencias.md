@@ -2143,7 +2143,13 @@ sequer**, desde que existe. O passo passou a ser `cargo test --workspace`, sem
 `--all-targets`. O que o `--all-targets` acrescentava sobre o comando simples é
 o bench do `seele-audio` e os exemplos — e o job de clippy logo acima já roda
 `--all-targets --all-features`, então os dois continuam sendo compilados a cada
-push. Não se perdeu nada e ganharam-se 8 seções.
+push. Não se perdeu nada.
+
+**E o ganho é pequeno, dito com o número na mão para não virar a próxima frase
+grande demais:** as 8 seções contêm **um** doctest de verdade —
+`seele-proto::version::negotiate` —, e as outras 7 estão vazias. Rodado agora:
+passa. O que se consertou foi a afirmação e o furo do comando, não uma cobertura
+que estivesse faltando.
 
 ### Medido em 2026-09-17 · o alcance da vaga, que faltava estabelecer
 
