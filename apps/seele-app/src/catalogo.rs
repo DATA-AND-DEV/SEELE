@@ -232,13 +232,24 @@ pub(crate) fn ler_revogacoes(
 /// Nunca contra uma chave que venha junto do arquivo: uma chave que chega pela
 /// mesma porta que o conteúdo não prova nada sobre ele.
 fn conferir_assinatura(bytes: &[u8], assinatura: &str) -> Result<(), FalhaNoCatalogo> {
-    // A linha do comentário do minisign não entra na conferência — o formato do
-    // arquivo `.pub` é duas linhas, e a chave é a segunda.
-    let chave_base64 = CHAVE_DO_CATALOGO.lines().nth(1).unwrap_or_default().trim();
-    let chave = seele_lancador::Chave::do_formato_do_atualizador(chave_base64)
-        .map_err(|_| FalhaNoCatalogo::AssinaturaDoCatalogoRecusada)?;
+    // O arquivo `.pub` **inteiro**, e não a segunda linha dele: `do_arquivo_pub`
+    // lê o formato cru do `minisign`, que é o que o indexador comita. A outra
+    // função, a do atualizador, espera base64 do arquivo — e passar uma para a
+    // outra foi metade deste defeito.
+    //
+    // **A chave que não abre não é assinatura recusada**, e a diferença não é
+    // sutil: a primeira é defeito deste build e a segunda é um catálogo
+    // adulterado. Eu as juntei numa variante só, e o resultado foi o produto me
+    // dizendo «a assinatura não confere» enquanto o erro era eu estar passando a
+    // chave no formato errado — o produto sabendo e contando outra coisa.
+    let chave = seele_lancador::Chave::do_arquivo_pub(CHAVE_DO_CATALOGO).map_err(|erro| {
+        FalhaNoCatalogo::NaoEUmCatalogo(format!("a chave embutida neste SEELE não abre: {erro:?}"))
+    })?;
+    // `conferir_minisig` e não `conferir`: o indexador publica o `.minisig`
+    // cru ao lado do arquivo, e não o base64 dele num campo de JSON. Ver o
+    // porquê dos dois formatos na doc daquela função.
     chave
-        .conferir(bytes, assinatura)
+        .conferir_minisig(bytes, assinatura)
         .map_err(|_| FalhaNoCatalogo::AssinaturaDoCatalogoRecusada)
 }
 
@@ -500,6 +511,61 @@ mod o_catalogo {
 
     fn sem_revogacoes() -> Revogacoes {
         Revogacoes::default()
+    }
+
+    /// **O catálogo de verdade, assinado pelo indexador de verdade.**
+    ///
+    /// Os dois lados desta cadeia moram em repositórios diferentes, com suítes
+    /// diferentes — e as duas podem ficar verdes enquanto discordam. Foi
+    /// exatamente assim que este cliente passou meses sem uma linha sobre o
+    /// catálogo enquanto o indexador tinha 167 testes passando.
+    ///
+    /// Este teste é a costura: ele lê o que o `ferramentas/gerar.py` produziu,
+    /// com a assinatura que o `minisign` fez, contra a chave que este build
+    /// carrega. Se qualquer um dos três mudar sem o outro saber, ele fica
+    /// vermelho. Ver `apps/seele-app/testes/LEIA.md`.
+    #[test]
+    fn o_catalogo_que_o_indexador_gera_e_aceito_por_este_build() {
+        let bytes = include_bytes!("../testes/catalogo-do-indexador.json");
+        let assinatura = include_str!("../testes/catalogo-do-indexador.json.minisig");
+
+        let catalogo = ler_catalogo(bytes, assinatura)
+            .expect("o catálogo que o indexador assinou tem de passar neste cliente");
+        assert_eq!(catalogo.esquema, 1);
+        // **Vazio de propósito**, e o teste afirma isso em vez de contorná-lo:
+        // nenhum MOD foi avaliado ainda. Um catálogo vazio e assinado é o
+        // estado correto de um indexador que acabou de subir, e um cliente que
+        // o recusasse recusaria o primeiro dia do serviço.
+        assert!(
+            catalogo.mods.is_empty(),
+            "este vetor deixou de ser o catálogo vazio; se foi de propósito, \
+             troque a afirmação junto com o arquivo"
+        );
+        assert!(
+            catalogo.gerado_em > 0,
+            "o catálogo não diz quando foi gerado"
+        );
+    }
+
+    #[test]
+    fn as_revogacoes_que_o_indexador_gera_tambem_sao_aceitas() {
+        let bytes = include_bytes!("../testes/revogacoes-do-indexador.json");
+        let assinatura = include_str!("../testes/revogacoes-do-indexador.json.minisig");
+        let revogacoes = super::ler_revogacoes(bytes, assinatura)
+            .expect("a lista de revogações assinada tem de passar");
+        assert!(revogacoes.mods.is_empty());
+    }
+
+    #[test]
+    fn a_assinatura_do_indexador_nao_vale_para_outro_conteudo() {
+        // A metade que prova que a conferência **confere**, e não que ela
+        // aceita qualquer par. Sem ela, um `Ok` acima poderia vir de uma
+        // verificação que sempre passa.
+        let assinatura = include_str!("../testes/catalogo-do-indexador.json.minisig");
+        assert!(matches!(
+            ler_catalogo(br#"{"esquema":1,"mods":[]}"#, assinatura),
+            Err(FalhaNoCatalogo::AssinaturaDoCatalogoRecusada)
+        ));
     }
 
     #[test]

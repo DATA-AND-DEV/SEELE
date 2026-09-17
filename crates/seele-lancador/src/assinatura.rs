@@ -90,6 +90,81 @@ impl Chave {
     ///
     /// [`FalhaDeAssinatura`], uma variante por motivo. Nenhum caminho aqui
     /// toca em disco: a resposta sai dos bytes que entraram.
+    /// Lê a chave de um arquivo `.pub` **cru**, como o `minisign` o escreve.
+    ///
+    /// Duas linhas: um comentário e a chave. É o formato que o indexador de
+    /// MODs comita e publica, e o que qualquer pessoa confere à mão.
+    ///
+    /// Gêmea de [`Self::do_formato_do_atualizador`], que espera outra coisa —
+    /// base64 do arquivo inteiro, porque lá a chave mora dentro de um campo de
+    /// JSON. Confundir as duas custou uma tarde: eu passava a linha da chave
+    /// para a função que espera o base64 do arquivo, ela devolvia
+    /// `ChaveMalformada`, e o chamador traduzia isso para «assinatura
+    /// recusada» — uma frase sobre o catálogo quando o defeito era deste lado.
+    ///
+    /// # Errors
+    ///
+    /// [`FalhaDeAssinatura::ChaveMalformada`] quando o texto não é uma chave
+    /// minisign.
+    pub fn do_arquivo_pub(texto: &str) -> Result<Self, FalhaDeAssinatura> {
+        minisign_verify::PublicKey::decode(texto.trim())
+            .map(Self)
+            .map_err(|_| FalhaDeAssinatura::ChaveMalformada)
+    }
+
+    /// Confere um `.minisig` **cru**, como o arquivo sai do `minisign`.
+    ///
+    /// # Por que há duas, e não uma
+    ///
+    /// Porque há dois formatos no mundo, e os dois são legítimos:
+    ///
+    /// - o **do atualizador** ([`Self::conferir`]) carrega a assinatura como
+    ///   base64 do arquivo inteiro, dentro de um campo do `latest.json`. É o
+    ///   que o `tauri-plugin-updater` publica, e o manifesto de versões o
+    ///   herda;
+    /// - o **do indexador de MODs** publica o `.minisig` ao lado do arquivo,
+    ///   como texto de quatro linhas — porque ele serve arquivos parados, e um
+    ///   `.minisig` ao lado é o que qualquer pessoa confere à mão com o
+    ///   `minisign` sem precisar decodificar nada antes.
+    ///
+    /// Tentei usar a primeira para a segunda, e a assinatura era recusada. Quem
+    /// pegou foi o vetor cruzado de `apps/seele-app/testes/` — um catálogo de
+    /// verdade, assinado de verdade, que as duas suítes verdes não tinham como
+    /// desmentir sozinhas.
+    ///
+    /// # E por que o modo legado é aceito aqui
+    ///
+    /// O indexador assina com `-l`, que assina os bytes crus em vez do BLAKE2b
+    /// deles, e o `ferramentas/assinar.py` escreve o motivo: o pré-hash existe
+    /// para arquivo grande, e o catálogo tem dezenas de KB. Recusar o modo
+    /// legado aqui seria recusar tudo o que ele publica.
+    ///
+    /// # Errors
+    ///
+    /// [`FalhaDeAssinatura`], uma variante por motivo.
+    pub fn conferir_minisig(&self, dados: &[u8], minisig: &str) -> Result<(), FalhaDeAssinatura> {
+        let assinatura = minisign_verify::Signature::decode(minisig.trim())
+            .map_err(|_| FalhaDeAssinatura::AssinaturaMalformada)?;
+        self.0.verify(dados, &assinatura, true).map_err(|erro| {
+            if matches!(erro, minisign_verify::Error::UnexpectedKeyId) {
+                FalhaDeAssinatura::OutraChave
+            } else {
+                FalhaDeAssinatura::NaoConfere
+            }
+        })
+    }
+
+    /// Estes bytes foram assinados por esta chave?
+    ///
+    /// `assinatura_base64` é o conteúdo do `.sig` em base64 — o mesmo campo
+    /// `signature` que o `latest.json` já carrega por plataforma. Para o
+    /// `.minisig` cru que o indexador de MODs publica, ver
+    /// [`Self::conferir_minisig`].
+    ///
+    /// # Errors
+    ///
+    /// [`FalhaDeAssinatura`], uma variante por motivo. Nenhum caminho aqui
+    /// toca em disco: a resposta sai dos bytes que entraram.
     pub fn conferir(&self, dados: &[u8], assinatura_base64: &str) -> Result<(), FalhaDeAssinatura> {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(assinatura_base64.trim())
