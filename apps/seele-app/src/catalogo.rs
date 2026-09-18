@@ -542,19 +542,38 @@ mod o_catalogo {
             .iter()
             .find(|m| m.id == "seele/mesa")
             .expect("o vetor do indexador tem de trazer o MESA");
-        let versao = mesa
+        // **Duas versões, e a ordem importa.** O catálogo publica da mais antiga
+        // para a mais nova, e a tela lê a última para oferecer. Com uma versão
+        // só isto não distinguia nada; com duas, distingue.
+        assert!(
+            mesa.versoes.len() >= 2,
+            "o vetor voltou a ter uma versão só, e a ordem deixa de ser exercitada"
+        );
+        let primeira = mesa
             .versoes
             .first()
             .expect("um MOD no catálogo sem versão nenhuma não é instalável");
-        assert_eq!(versao.versao, "1.2.0");
-        assert_eq!(versao.hash.len(), 64, "o hash do conteúdo é um SHA-256");
+        let ultima = mesa.versoes.last().expect("a lista não está vazia");
+        assert_eq!(primeira.versao, "1.2.0");
+        assert_eq!(ultima.versao, "1.2.1");
+        assert_ne!(
+            primeira.hash, ultima.hash,
+            "duas versões com o mesmo conteúdo são uma publicação errada"
+        );
+        for v in &mesa.versoes {
+            assert_eq!(v.hash.len(), 64, "o hash do conteúdo é um SHA-256");
+            assert!(
+                !v.arquivos.is_empty(),
+                "uma versão sem arquivos não instala"
+            );
+        }
         // Que a API publicada caiba nesta build é conferido em
         // `seele-conformance`, e não aqui: esta casca não depende do
         // `seele-proto` (ADR 0039), e copiar `MOD_API_VERSION` para dentro dela
         // seria a terceira cópia do número cuja divergência custou a primeira
         // publicação.
         assert!(
-            versao.api > 0,
+            mesa.versoes.iter().all(|v| v.api > 0),
             "uma versão sem API declarada não é instalável"
         );
         assert!(

@@ -1,7 +1,7 @@
 {
   "esquema": 1,
   "api_oferecida": 2,
-  "gerado_em": 1789680764,
+  "gerado_em": 1789692144,
   "mods": [
     {
       "id": "seele/mesa",
@@ -12,7 +12,7 @@
       "repo": "https://github.com/DATA-AND-DEV/MESA",
       "oficial": false,
       "nivel": "verificado",
-      "commit": "743bf6f2d842d7420a2115bf15eb8e7cbc51e06b",
+      "commit": "7ca40d1cc98e57adaed17c0e5f007593041c4eef",
       "notas": [
         "roda-no-servidor",
         "guarda-dados-na-maquina"
@@ -51,6 +51,40 @@
             "guarda-dados-na-maquina"
           ],
           "commit": "743bf6f2d842d7420a2115bf15eb8e7cbc51e06b"
+        },
+        {
+          "versao": "1.2.1",
+          "api": 2,
+          "publicado_em": 1789691343,
+          "hash": "983153b0166b59d1fcaa9bc7c347d608e568e9db31f6a3f9a3fbf430b4eaba65",
+          "alcanca": [
+            "dom",
+            "estado da campanha no servidor",
+            "arquivos de mapas e cenas"
+          ],
+          "arquivos": [
+            "README.md",
+            "cliente/main.js",
+            "ferramentas/mesa-package.mjs",
+            "ferramentas/mesa-preview.cjs",
+            "ferramentas/quickjs-check/Cargo.lock",
+            "ferramentas/quickjs-check/Cargo.toml",
+            "ferramentas/quickjs-check/smoke.js",
+            "ferramentas/quickjs-check/src/main.rs",
+            "ferramentas/servidor-de-desenvolvimento.rs.referencia",
+            "ferramentas/test-mesa-ui.cjs",
+            "mod.json",
+            "package-lock.json",
+            "package.json",
+            "servidor/main.js",
+            "test/mesa.test.cjs"
+          ],
+          "nivel": "verificado",
+          "notas": [
+            "roda-no-servidor",
+            "guarda-dados-na-maquina"
+          ],
+          "commit": "7ca40d1cc98e57adaed17c0e5f007593041c4eef"
         }
       ]
     }
