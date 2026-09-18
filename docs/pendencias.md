@@ -7172,3 +7172,39 @@ CI, e não de mais um guarda de texto.
 cobrir, e a armadilha é a que a auditoria nomeia: um teste que verifica se a
 correção está escrita passa a valer pela correção, e a suíte fica verde
 afirmando o que ninguém mediu.
+
+## 48 · O `glib` do build de Linux está numa versão com unsoundness conhecida
+
+**O aviso.** RUSTSEC-2024-0429, no `glib` 0.18.5: `VariantStrIter::impl_get`
+passava um `&p` para uma função C variádica que escreve no ponteiro por baixo —
+a mutabilidade errada não virou erro de compilação justamente por ser argumento
+variádico. Com as otimizações dos compiladores recentes, essas escritas passaram
+a ser simplesmente descartadas, e o `CStr::from_ptr` seguinte recebia `NULL`.
+
+**O que ele é, e o que não é.** O próprio arquivo da advisory marca
+`informational = "unsound"`: não é falha explorável de fora, é desreferência de
+ponteiro nulo — **queda**. As funções alcançadas são
+`VariantStrIter::{next, nth, last, next_back, nth_back}`, nas entranhas do
+GVariant do GTK. Nenhuma linha nossa as chama; quem as alcançaria é o WebKitGTK
+por dentro.
+
+**Onde ele chega, medido e não deduzido** — `cargo tree -e normal` por alvo:
+
+| alvo | ocorrências de `glib` |
+|---|---|
+| `aarch64-apple-darwin` | 0 |
+| `x86_64-pc-windows-msvc` | 0 |
+| `x86_64-unknown-linux-gnu` | 28 |
+
+Ou seja: o `.dmg` e o `.exe` não carregam uma linha disto. **É risco só do
+`.deb`.**
+
+**Por que não é consertável aqui.** `patched = [">=0.20.0"]`, e a versão é
+presa por `atk 0.18.2 → gtk 0.18.2 → muda 0.19.3 → tauri 2.11.5`. Um
+`cargo update -p glib` trava zero pacotes. Sair da 0.18 exige o Tauri mover a
+pilha gtk-rs inteira, que é decisão dele.
+
+**Condição de saída.** Fecha quando o Tauri publicar uma versão que traga
+`glib >= 0.20`, e a conferência é a mesma tabela acima. Fica registrada para
+não voltar a ser um alerta vermelho sem contexto a cada push — que é o modo
+mais rápido de ensinar uma equipe a ignorar alerta.
