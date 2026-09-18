@@ -3323,3 +3323,58 @@ mod o_enquadramento {
         );
     }
 }
+
+#[cfg(test)]
+mod medida_do_anfitriao {
+    use super::{resolucao_para, Prioridade, TetoDeVideo, CAMINHO_DA_PROVA_BPS};
+    use seele_proto::signal::SignalBand;
+
+    /// **O que o anfitrião vê no primeiro segundo da própria transmissão.**
+    ///
+    /// Medida, e não dedução: o relato foi «a imagem começa muito pixelada e
+    /// demora até estabilizar», e a pergunta era se isso alcança também quem
+    /// hospeda — cuja conexão até o próprio servidor é o *loopback*, um cano
+    /// praticamente infinito.
+    ///
+    /// Alcança. A perna de quem compartilha não é o cano: é o que a **sonda
+    /// mediu**, e a sonda começa em [`CAMINHO_DA_PROVA_BPS`] porque ainda não
+    /// mediu nada. Loopback ou fibra, o primeiro segundo é o mesmo.
+    #[test]
+    fn o_anfitriao_tambem_comeca_no_palpite_e_nao_no_cano() {
+        // A subida do anfitrião é generosa — é ele mesmo, e o servidor a mede.
+        // O que aperta tem de ser a outra perna.
+        let no_comeco = TetoDeVideo::com_caminho(CAMINHO_DA_PROVA_BPS)
+            .com_caminho_de_quem_hospeda(50_000_000)
+            .com_espectadores(1);
+
+        let super::Teto::Bps(teto) = no_comeco.teto(SignalBand::Nominal) else {
+            panic!("com 2 Mbps de palpite a transmissão não devia parar");
+        };
+        assert_eq!(teto, 1_200_000, "60% do palpite, e não do loopback");
+        assert_eq!(
+            resolucao_para(teto, Prioridade::Nitidez),
+            super::Resolucao::P540,
+            "o primeiro segundo do anfitrião é 540p, com o cano que for"
+        );
+    }
+
+    /// E com a medida que a máquina já tinha feito, o mesmo instante é outro.
+    ///
+    /// É a diferença que a semente faz — e é ela que o ramo
+    /// `if !hospedado_aqui` nega justamente a quem hospeda.
+    #[test]
+    fn com_o_caminho_lembrado_o_primeiro_segundo_ja_e_bom() {
+        let lembrado = TetoDeVideo::com_caminho(12_000_000)
+            .com_caminho_de_quem_hospeda(50_000_000)
+            .com_espectadores(1);
+
+        let super::Teto::Bps(teto) = lembrado.teto(SignalBand::Nominal) else {
+            panic!("12 Mbps não param nada");
+        };
+        assert_eq!(
+            resolucao_para(teto, Prioridade::Nitidez),
+            super::Resolucao::P1080,
+            "a mesma máquina, no mesmo instante, com a medida de ontem na mão"
+        );
+    }
+}

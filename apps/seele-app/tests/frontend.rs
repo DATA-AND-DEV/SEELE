@@ -11209,3 +11209,52 @@ fn a_malha_tem_onde_ser_consentida_da_tela_ate_o_nucleo() {
         "as duas metades do consentimento viraram um controle só"
     );
 }
+
+/// A sonda é semeada em toda conexão, inclusive na de quem hospeda.
+///
+/// **Medido antes de consertar** (`tela.rs`, `medida_do_anfitriao`): com o
+/// loopback por baixo e cinquenta megabits de subida do anfitrião, o primeiro
+/// segundo da transmissão ainda é **540p** — porque a perna que aperta não é o
+/// cano, é o que a sonda mediu, e ela parte de 2 Mbps enquanto não mediu nada.
+///
+/// A semente por servidor existia e era chamada, mas **dentro** do ramo
+/// `if !hospedado_aqui(&alvo)` — o mesmo ramo que causou o QA-02. Quem hospeda
+/// nunca a recebia, e os vinte e cinco segundos de subida que o comentário de
+/// `camada-compartilhar.js` mediu em campo se repetiam em toda transmissão.
+///
+/// É o terceiro defeito com a mesma forma no mesmo dia: um `if` sobre o
+/// endereço decidindo algo que não é sobre o endereço.
+#[test]
+fn a_sonda_e_semeada_fora_do_filtro_da_lista_de_visitados() {
+    let fonte = read("src/main.rs");
+    let conectar = without_comments(&body_of(&fonte, "async fn connect"));
+
+    let (Some(semente), Some(filtro)) = (
+        conectar.find("lembrar_o_caminho"),
+        conectar.find("if !hospedado_aqui"),
+    ) else {
+        panic!("`connect` deixou de semear a sonda, ou de filtrar a lista de visitados");
+    };
+    assert!(
+        semente < filtro,
+        "a semente da sonda está **dentro** do filtro da lista de visitados, \
+         então quem hospeda nunca a recebe e toda transmissão dele recomeça em \
+         540p — que é o defeito inteiro"
+    );
+
+    // E ela tem as duas fontes, nesta ordem de especificidade: a medida deste
+    // servidor manda, porque o caminho até cada um é diferente; a da máquina é
+    // o ponto de partida de quem ainda não tem uma.
+    assert!(
+        conectar.contains("caminho_bps") && conectar.contains("caminho_da_maquina"),
+        "a semente não tem as duas fontes; sem a da máquina, hospedar aqui e a \
+         primeira visita a um servidor novo continuam partindo do palpite"
+    );
+
+    // E a máquina aprende ao sair, senão não haveria o que semear.
+    let desmontar = without_comments(&body_of(&fonte, "fn desmontar_o_cliente"));
+    assert!(
+        desmontar.contains("anotar_caminho_da_maquina"),
+        "nada guarda a subida desta máquina, então a semente dela nunca existe"
+    );
+}

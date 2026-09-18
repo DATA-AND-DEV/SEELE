@@ -521,6 +521,32 @@ async fn connect(
         }
     }
 
+    // **A semente da sonda, e ela vale também para quem hospeda.**
+    //
+    // A perna que aperta no primeiro segundo não é o cano: é o que a sonda
+    // mediu, e ela parte de `CAMINHO_DA_PROVA_BPS` — 2 Mbps — enquanto não
+    // mediu nada. Medido em `tela.rs`: com loopback por baixo e cinquenta
+    // megabits de subida do anfitrião, o primeiro segundo ainda é **540p**.
+    //
+    // A semente por servidor existe e é chamada, mas **dentro** do ramo
+    // `if !hospedado_aqui(&alvo)` — o mesmo ramo que já tinha causado o QA-02.
+    // Quem hospeda nunca a recebia, e os vinte e cinco segundos de subida se
+    // repetiam em toda transmissão, na mesma máquina, para sempre.
+    //
+    // A ordem é a da especificidade: a medida **deste servidor** manda, porque
+    // o caminho até cada um é diferente; a da máquina é o ponto de partida de
+    // quem ainda não tem uma — hospedando aqui, ou visitando pela primeira vez.
+    {
+        let do_servidor = seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(&app))
+            .ok()
+            .and_then(|lista| lista.buscar(&alvo).and_then(|c| c.caminho_bps));
+        let semente =
+            do_servidor.or_else(|| preferencias(&app).and_then(|p| p.caminho_da_maquina()));
+        if let Some(bps) = semente {
+            connection.lembrar_o_caminho(bps);
+        }
+    }
+
     // **O consentimento do caminho entre pares, declarado a cada conexão.**
     //
     // A declaração de identidade que o núcleo manda sozinho ao conectar leva
@@ -1304,6 +1330,15 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     // justamente o que a memória serve para evitar.
     if let Some(viva) = connection.as_ref() {
         let medido = viva.caminho_medido();
+        // **E a máquina também aprende.** A linha abaixo guarda por servidor, e
+        // um servidor hospedado aqui não entra naquela lista de propósito —
+        // então sem isto a medida de quem hospeda se perdia inteira. A subida é
+        // da máquina; o caminho até cada servidor é que difere.
+        if let Some(mut p) = preferencias(app) {
+            if let Err(erro) = p.anotar_caminho_da_maquina(medido) {
+                tracing::debug!(%erro, "não guardei a subida desta máquina");
+            }
+        }
         let alvo = session.alvo.lock().ok().and_then(|a| a.clone());
         if let (Some(alvo), true) = (alvo, medido != 0) {
             if let Ok(mut lista) =

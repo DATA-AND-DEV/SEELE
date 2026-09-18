@@ -72,6 +72,8 @@ const NICKNAME: &str = "nickname";
 const PARES_QUE_ATENDE: &str = "pares_que_atende";
 /// Se aceita que o próprio endereço seja entregue a quem for servi-la.
 const ASSISTE_POR_PAR: &str = "assiste_por_par";
+/// A maior subida que a sonda já mediu **nesta máquina**, em bits por segundo.
+const CAMINHO_DA_MAQUINA: &str = "caminho_da_maquina_bps";
 
 /// The local settings, on disk.
 #[derive(Debug, Clone, Default)]
@@ -94,6 +96,23 @@ pub struct Preferences {
     /// escolheu é não participar, e é o que o §5 manda.
     pares_que_atende: Option<u8>,
     assiste_por_par: Option<bool>,
+    /// A maior subida que a sonda já mediu nesta máquina.
+    ///
+    /// **Da máquina, e não do servidor.** A lista de conhecidos já guarda uma
+    /// medida por servidor visitado, e ela é mais específica — o caminho até
+    /// cada servidor é diferente. Mas ela não cobre dois casos, e os dois doem:
+    /// um servidor hospedado **aqui** nunca entra naquela lista, de propósito,
+    /// e a primeira visita a um servidor novo não tem entrada nenhuma.
+    ///
+    /// Nos dois, a sonda partia de `CAMINHO_DA_PROVA_BPS` — 2 Mbps —, e 60%
+    /// disso não compra 720p. Medido: o primeiro segundo é 540p mesmo com o
+    /// loopback por baixo e cinquenta megabits de subida, porque a perna que
+    /// aperta não é o cano, é o que a sonda mediu.
+    ///
+    /// A subida é da máquina; o caminho até cada servidor é que difere. Por isso
+    /// este número é um **ponto de partida**, e o da lista de conhecidos, quando
+    /// existe, tem precedência.
+    caminho_da_maquina_bps: Option<u32>,
 }
 
 impl Preferences {
@@ -118,6 +137,7 @@ impl Preferences {
             nickname: None,
             pares_que_atende: None,
             assiste_por_par: None,
+            caminho_da_maquina_bps: None,
         };
         if let Ok(text) = std::fs::read_to_string(&settings.path) {
             for line in text.lines() {
@@ -144,6 +164,10 @@ impl Preferences {
                     // empresto» por causa de um arquivo torto.
                     PARES_QUE_ATENDE => {
                         settings.pares_que_atende = value.as_deref().and_then(|v| v.parse().ok())
+                    }
+                    CAMINHO_DA_MAQUINA => {
+                        settings.caminho_da_maquina_bps =
+                            value.as_deref().and_then(|v| v.parse().ok())
                     }
                     ASSISTE_POR_PAR => {
                         settings.assiste_por_par = match value.as_deref() {
@@ -287,6 +311,38 @@ impl Preferences {
         self.write()
     }
 
+    /// A maior subida já medida nesta máquina, ou `None` enquanto não houve uma.
+    #[must_use]
+    pub fn caminho_da_maquina(&self) -> Option<u32> {
+        self.caminho_da_maquina_bps
+    }
+
+    /// Anota uma medida nova, **se ela for maior que a guardada**.
+    ///
+    /// Maior, e não a última: a sonda mede o que a janela carregou, e uma
+    /// transmissão curta num momento ruim mede pouco sem que o cano tenha
+    /// encolhido. Guardar o menor faria a próxima sessão começar pior por causa
+    /// de um instante, e a sonda desce sozinha quando dói — subir é que custa
+    /// os vinte e cinco segundos.
+    ///
+    /// Zero não anota nada: é o que a sonda devolve quando ninguém compartilhou
+    /// tela, e não é uma medida de zero.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito.
+    pub fn anotar_caminho_da_maquina(&mut self, bps: u32) -> Result<()> {
+        if bps == 0
+            || self
+                .caminho_da_maquina_bps
+                .is_some_and(|antes| antes >= bps)
+        {
+            return Ok(());
+        }
+        self.caminho_da_maquina_bps = Some(bps);
+        self.write()
+    }
+
     /// O consentimento guardado: quantos pares atende, e se aceita ser servida.
     ///
     /// Ausente é «não participo», que é o padrão de quem nunca escolheu.
@@ -323,6 +379,7 @@ impl Preferences {
         let assiste = self
             .assiste_por_par
             .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
+        let caminho = self.caminho_da_maquina_bps.map(|bps| bps.to_string());
         for (name, value) in [
             (CAPTURE, &self.capture),
             (PLAYBACK, &self.playback),
@@ -331,6 +388,7 @@ impl Preferences {
             (NICKNAME, &self.nickname),
             (PARES_QUE_ATENDE, &pares),
             (ASSISTE_POR_PAR, &assiste),
+            (CAMINHO_DA_MAQUINA, &caminho),
         ] {
             let Some(value) = value else {
                 continue;
@@ -657,5 +715,51 @@ mod tests {
                 .caminho_entre_pares(),
             (0, false)
         );
+    }
+
+    /// **A subida da máquina só sobe.**
+    ///
+    /// A sonda mede o que a janela carregou, e uma transmissão curta num
+    /// momento ruim mede pouco sem que o cano tenha encolhido. Guardar o menor
+    /// faria a sessão seguinte começar pior por causa de um instante — e a
+    /// sonda desce sozinha quando dói; subir é que custa os vinte e cinco
+    /// segundos.
+    #[test]
+    fn a_subida_da_maquina_guarda_a_maior_e_ignora_o_instante_ruim() {
+        let caminho = scratch("caminho-da-maquina");
+        let mut p = Preferences::open(caminho.clone()).expect("abrir");
+        assert_eq!(p.caminho_da_maquina(), None, "nada medido ainda");
+
+        p.anotar_caminho_da_maquina(12_000_000).expect("primeira");
+        assert_eq!(p.caminho_da_maquina(), Some(12_000_000));
+
+        p.anotar_caminho_da_maquina(3_000_000)
+            .expect("um instante ruim");
+        assert_eq!(
+            p.caminho_da_maquina(),
+            Some(12_000_000),
+            "uma janela ruim não encolhe o que a máquina já provou carregar"
+        );
+
+        p.anotar_caminho_da_maquina(20_000_000).expect("cano maior");
+        assert_eq!(p.caminho_da_maquina(), Some(20_000_000));
+
+        assert_eq!(
+            Preferences::open(caminho)
+                .expect("reabrir")
+                .caminho_da_maquina(),
+            Some(20_000_000),
+            "e atravessa o fechamento da janela"
+        );
+    }
+
+    /// Zero é «ninguém compartilhou tela», e não uma medida de zero.
+    #[test]
+    fn zero_nao_e_medida_e_nao_apaga_a_que_havia() {
+        let caminho = scratch("caminho-zero");
+        let mut p = Preferences::open(caminho).expect("abrir");
+        p.anotar_caminho_da_maquina(8_000_000).expect("medir");
+        p.anotar_caminho_da_maquina(0).expect("sessão sem tela");
+        assert_eq!(p.caminho_da_maquina(), Some(8_000_000));
     }
 }
