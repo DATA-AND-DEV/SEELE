@@ -1,16 +1,18 @@
 # 0049 — Um MOD deixa de rodar na janela do produto
 
-Status: **rascunho** — desenho, não decisão. Nenhuma linha de produção foi
-tocada para escrevê-lo.
+Status: **aceito** — as três decisões abertas foram respondidas por quem
+responde pelo projeto em 2026-09-18, e estão registradas abaixo com o que cada
+uma custa.
 Data: 2026-09-18
 Sobre o commit `c951c63`.
 
 > **Este documento revisa o [ADR 0045](0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md),
-> que é contrato com quem escreve MOD.** Ele não pode ser aplicado sem migração
-> dos três MODs oficiais e sem um número de versão que diga que o contrato
-> mudou. A escolha do mecanismo de isolamento **não está fechada**: ela depende
-> de um protótipo em macOS e Windows, e esta página diz o que o protótipo tem de
-> responder.
+> que é contrato com quem escreve MOD.**
+>
+> **Decidido:** worker para a lógica e regiões declarativas para o desenho;
+> ruptura limpa na **API 3**, sem caminho de compatibilidade; e a reescrita dos
+> três MODs oficiais fica com o Codex, enquanto este lado entrega a API, o
+> runtime e o guia.
 
 ## O que o 0045 prometeu, e o que ele não pode cumprir
 
@@ -83,11 +85,25 @@ origem ou Shadow DOM, isoladamente, não oferece essa garantia»*.
 - o desenho que o ESTILO faz cabe numa API de tema, ou ele precisa de mais do
   que uma camada declarativa consegue?
 
-**Minha inclinação, e não a decisão:** worker para a lógica, e regiões
-declarativas para o desenho. Ele é o que dá a garantia mais forte com o menor
-risco de plataforma, e empurra o desenho para uma API que precisa existir de
-qualquer forma. O custo está em quem escreve MOD — e é um custo real, que a
-migração dos três oficiais vai medir antes de qualquer outro autor pagá-lo.
+**Decidido: worker para a lógica, regiões declarativas para o desenho.** Ele dá
+a garantia mais forte com o menor risco de plataforma, e empurra o desenho para
+uma API que precisa existir de qualquer forma.
+
+E a escolha **dispensa o protótipo de webview aninhada**, que era o que trazia
+risco de plataforma desconhecido: `Worker` é a mesma coisa nos três sistemas, e
+`terminate()` é o mesmo contrato. As três perguntas que sobram — tempo de
+mensagem, liberação de memória, e se o desenho do ESTILO cabe numa camada
+declarativa — se respondem escrevendo, e não medindo webview.
+
+**Como o código chega ao worker, e por que não por `mod://`.** Um `Worker` não
+aceita URL de outra origem, e `mod://localhost` é outra origem. As saídas
+seriam alargar `connect-src` para buscar o texto por `fetch`, ou pedi-lo pela
+ponte que já existe. A segunda é melhor e não custa nada: o texto vem por um
+comando, que é onde a conferência de hash **já mora**, e vira um `Blob` de mesma
+origem. A CSP ganha `worker-src blob:` e mais nada.
+
+O custo está em quem escreve MOD — e é real. Sem DOM, sem inspetor, e tudo o
+que se desenha passa por uma API que precisa existir primeiro.
 
 ## O que isto quebra, dito antes
 
@@ -101,14 +117,37 @@ MODs oficiais não abrem.
 desde a v0.11.0, e um contrato novo é `3` — com o `api-too-new` do indexador
 recusando pacote velho para build novo, que é o mecanismo que já existe.
 
+**Decidido: ruptura limpa, sem caminho de compatibilidade.** A alternativa era
+deixar MOD de API 2 rodando do jeito antigo, na janela, com aviso — e ela foi
+recusada pela razão certa: enquanto houvesse um MOD antigo carregado, a promessa
+«some quando você sai» continuaria falsa, e o produto passaria a prometer duas
+coisas diferentes ao mesmo tempo. Uma data só, e ela é honesta.
+
 **A promessa do 0045 fica menor, e isso é o ponto.** «Um MOD não tem regras»
 passa a ser «um MOD não tem regras **dentro do que a API alcança**». É menos
 liberdade e mais promessa cumprida, e a troca é deliberada: a liberdade atual é
 o que impede o produto de garantir o que ele já diz garantir.
 
+## Quem escreve o quê, e o risco que isso deixa
+
+**Decidido:** este lado entrega a API, o runtime isolado e o guia de migração; a
+reescrita de MESA, ESTILO e PERFIS fica com o Codex, que já trabalha nesses
+repositórios.
+
+**O risco que a divisão cria, dito por quem a está executando:** uma API que sai
+sem nenhum uso real a provar é uma API que parece pronta. Foi assim que o
+`ida_e_volta` ficou anos verde sem funcionar, e é o padrão que o `CLAUDE.md`
+chama de «existir não é funcionar».
+
+**Como ele é coberto sem pisar nos três:** um MOD de referência entra como
+**vetor deste repositório** — não publicado, não oficial, escrito só para
+exercitar a API de ponta a ponta na bancada. Ele desenha numa região, lê e
+aplica tema, faz um pedido ao servidor e é descarregado, e a bancada afirma
+sobre o que ele faz. Se a API não servir para ele, ela não serve para os três —
+e isso aparece aqui, antes de o Codex começar.
+
 ## O que este ADR não decide
 
-- **o mecanismo**, que depende do protótipo acima;
 - **o prazo**, que depende de quando os três MODs oficiais puderem ser
   reescritos;
 - **o que fazer com quem já instalou um MOD de terceiro.** O catálogo é
