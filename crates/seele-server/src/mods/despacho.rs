@@ -40,11 +40,66 @@ struct Pedido {
 
 /// What came back.
 pub struct Resposta {
-    /// The yards as the MODs left them. Only MODs that finished are here.
-    pub quintais: BTreeMap<String, Quintal>,
+    /// **O que cada MOD mudou**, e não o quintal inteiro como ele ficou.
+    ///
+    /// A diferença é uma corrida. O caminho de eventos lê o quintal, **solta o
+    /// cadeado do banco** — um MOD lento não pode segurar quem está
+    /// conversando —, roda no QuickJS, e só então volta para gravar. Um pedido
+    /// que chegue nesse meio lê, roda e grava antes. Devolvendo o mapa inteiro,
+    /// a gravação do evento passa por cima do que o pedido escreveu, com um
+    /// retrato tirado antes de ele existir.
+    ///
+    /// Devolvendo a **diferença**, a gravação aplica sobre o que está no banco
+    /// agora: as duas escritas convivem quando tocaram chaves diferentes, e só
+    /// colidem quando tocaram a mesma — onde a última vence, que é o que
+    /// qualquer ordem daria.
+    pub quintais: BTreeMap<String, MudancaNoQuintal>,
     /// Who failed, and how. ADR 0045: a MOD that throws is disabled and the
     /// room continues.
     pub falharam: Vec<(String, Falha)>,
+}
+
+/// O que um MOD mudou no quintal dele, por chave.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MudancaNoQuintal {
+    /// Chaves escritas ou reescritas, com o valor novo.
+    pub escritas: BTreeMap<String, String>,
+    /// Chaves que o MOD apagou.
+    pub apagadas: Vec<String>,
+}
+
+impl MudancaNoQuintal {
+    /// A diferença entre o quintal como ele estava e como ficou.
+    #[must_use]
+    pub fn entre(antes: &Quintal, depois: &Quintal) -> Self {
+        let escritas = depois
+            .iter()
+            .filter(|(chave, valor)| antes.get(*chave) != Some(*valor))
+            .map(|(chave, valor)| (chave.clone(), valor.clone()))
+            .collect();
+        let apagadas = antes
+            .keys()
+            .filter(|chave| !depois.contains_key(*chave))
+            .cloned()
+            .collect();
+        Self { escritas, apagadas }
+    }
+
+    /// Há algo a gravar?
+    #[must_use]
+    pub fn vazia(&self) -> bool {
+        self.escritas.is_empty() && self.apagadas.is_empty()
+    }
+
+    /// Aplica esta diferença sobre um quintal — o que estiver no banco **agora**.
+    pub fn aplicar(&self, quintal: &mut Quintal) {
+        for chave in &self.apagadas {
+            quintal.remove(chave);
+        }
+        for (chave, valor) in &self.escritas {
+            quintal.insert(chave.clone(), valor.clone());
+        }
+    }
 }
 
 /// The handle the async side holds.
@@ -98,8 +153,9 @@ impl Despachante {
                         let antes = quintal.clone();
                         match anfitriao.chamar(&id, &pedido.momento, &pedido.carga, &mut quintal) {
                             Ok(()) => {
-                                if quintal != antes {
-                                    quintais.insert(id, quintal);
+                                let mudanca = MudancaNoQuintal::entre(&antes, &quintal);
+                                if !mudanca.vazia() {
+                                    quintais.insert(id, mudanca);
                                 }
                             }
                             Err(falha) => falharam.push((id, falha)),
@@ -207,8 +263,14 @@ pub async fn acompanhar(
         };
 
         let mut banco = persistence.lock().await;
-        for (id, quintal) in &resposta.quintais {
-            if let Err(erro) = crate::persistence::mods::gravar_quintal(&mut banco, id, quintal) {
+        for (id, mudanca) in &resposta.quintais {
+            // **Relido sob o cadeado, e a diferença aplicada sobre ele.** O
+            // retrato que este evento levou pode ter envelhecido enquanto o MOD
+            // rodava: um pedido que chegou no meio já leu, rodou e gravou.
+            // Gravar o retrato antigo apagaria o que ele escreveu.
+            let mut atual = crate::persistence::mods::ler_quintal(&banco, id).unwrap_or_default();
+            mudanca.aplicar(&mut atual);
+            if let Err(erro) = crate::persistence::mods::gravar_quintal(&mut banco, id, &atual) {
                 tracing::error!(%erro, mod_id = %id, "não deu para gravar o quintal do MOD");
             }
         }
@@ -506,7 +568,7 @@ mod tests {
                 resposta.falharam.is_empty(),
                 "`{hostil}` fez o JSON.parse do MOD falhar"
             );
-            let quintal = &resposta.quintais["seele/leitor"];
+            let quintal = &resposta.quintais["seele/leitor"].escritas;
             assert_eq!(
                 quintal.get("apelido").map(String::as_str),
                 Some(hostil),
@@ -550,11 +612,15 @@ mod tests {
 
         assert!(resposta.falharam.is_empty());
         assert_eq!(
-            resposta.quintais["seele/um"].get("viu").map(String::as_str),
+            resposta.quintais["seele/um"]
+                .escritas
+                .get("viu")
+                .map(String::as_str),
             Some("PersonJoined")
         );
         assert_eq!(
             resposta.quintais["seele/dois"]
+                .escritas
                 .get("viu")
                 .map(String::as_str),
             Some("PersonJoined!")
@@ -597,7 +663,10 @@ mod tests {
             Some("seele/ruim")
         );
         assert_eq!(
-            resposta.quintais["seele/bom"].get("ok").map(String::as_str),
+            resposta.quintais["seele/bom"]
+                .escritas
+                .get("ok")
+                .map(String::as_str),
             Some("sim"),
             "o MOD bom não foi chamado porque o vizinho quebrou"
         );
@@ -637,6 +706,7 @@ mod tests {
             .expect("a thread morreu");
         assert_eq!(
             resposta.quintais["seele/inteiro"]
+                .escritas
                 .get("ok")
                 .map(String::as_str),
             Some("sim")
@@ -674,5 +744,92 @@ mod tests {
             "o MOD eterno segurou a fila por {:?}",
             inicio.elapsed()
         );
+    }
+
+    /// **Um evento lento não apaga o que um pedido escreveu no meio.**
+    ///
+    /// A corrida que este desenho fecha, contada pelos tempos: o caminho de
+    /// eventos lê o quintal, solta o cadeado do banco — um MOD lento não pode
+    /// segurar quem está conversando —, roda no QuickJS, e só então volta para
+    /// gravar. Um pedido que chegue nesse meio lê, roda e grava antes.
+    ///
+    /// Com o mapa inteiro de volta, a gravação do evento usava um retrato
+    /// tirado **antes de o pedido existir**, e o apagava. Com a diferença, ela
+    /// aplica sobre o que está no banco agora.
+    #[test]
+    fn a_mudanca_de_um_evento_aplica_sobre_o_que_esta_no_banco_agora() {
+        use super::MudancaNoQuintal;
+        use std::collections::BTreeMap;
+
+        // O quintal como o evento o leu.
+        let antes: BTreeMap<String, String> =
+            [("a".to_owned(), "1".to_owned())].into_iter().collect();
+        // O evento mexeu em `b`, e não tocou em `a`.
+        let depois: BTreeMap<String, String> = [
+            ("a".to_owned(), "1".to_owned()),
+            ("b".to_owned(), "do evento".to_owned()),
+        ]
+        .into_iter()
+        .collect();
+        let mudanca = MudancaNoQuintal::entre(&antes, &depois);
+
+        // Enquanto o MOD rodava, um pedido escreveu em `a` e em `c`.
+        let mut agora: BTreeMap<String, String> = [
+            ("a".to_owned(), "do pedido".to_owned()),
+            ("c".to_owned(), "do pedido".to_owned()),
+        ]
+        .into_iter()
+        .collect();
+
+        mudanca.aplicar(&mut agora);
+
+        assert_eq!(
+            agora.get("a").map(String::as_str),
+            Some("do pedido"),
+            "o evento apagou o que o pedido escreveu numa chave que ele nem tocou"
+        );
+        assert_eq!(agora.get("b").map(String::as_str), Some("do evento"));
+        assert_eq!(
+            agora.get("c").map(String::as_str),
+            Some("do pedido"),
+            "o evento apagou uma chave que só o pedido conhecia"
+        );
+    }
+
+    /// E apagar continua apagando: o MOD que remove uma chave tem a remoção
+    /// levada, e não só as escritas.
+    #[test]
+    fn uma_chave_que_o_mod_apagou_e_apagada_de_verdade() {
+        use super::MudancaNoQuintal;
+        use std::collections::BTreeMap;
+
+        let antes: BTreeMap<String, String> = [
+            ("fica".to_owned(), "1".to_owned()),
+            ("sai".to_owned(), "2".to_owned()),
+        ]
+        .into_iter()
+        .collect();
+        let depois: BTreeMap<String, String> =
+            [("fica".to_owned(), "1".to_owned())].into_iter().collect();
+
+        let mudanca = MudancaNoQuintal::entre(&antes, &depois);
+        assert_eq!(mudanca.apagadas, vec!["sai".to_owned()]);
+
+        let mut agora = antes.clone();
+        mudanca.aplicar(&mut agora);
+        assert!(!agora.contains_key("sai"), "a remoção não atravessou");
+        assert!(agora.contains_key("fica"));
+    }
+
+    /// Um MOD que não mexeu em nada não gera gravação nenhuma: sem isto, todo
+    /// evento reescreveria todo quintal de todo MOD habilitado.
+    #[test]
+    fn quem_nao_mexeu_em_nada_nao_grava() {
+        use super::MudancaNoQuintal;
+        use std::collections::BTreeMap;
+
+        let igual: BTreeMap<String, String> =
+            [("a".to_owned(), "1".to_owned())].into_iter().collect();
+        assert!(MudancaNoQuintal::entre(&igual, &igual).vazia());
     }
 }
