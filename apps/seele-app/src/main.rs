@@ -2243,10 +2243,14 @@ async fn mods_instalados(
     let pasta = config_dir(&app);
 
     let exigencia_vale_na_rede = seele_server::mods::anuncio::exigencia_vale_na_rede();
-    Ok(seele_ffi::mods::listar(&pasta)
+    Ok(seele_ffi::mods::listar_por_conteudo(&pasta)
         .into_iter()
         .map(|instalado| ModNaTela {
-            enabled: ligados.contains(&instalado.id),
+            // Ligado é **este pacote**, e não este MOD: dois conteúdos do mesmo
+            // MOD podem estar no disco, e só um é o que o servidor exige.
+            enabled: ligados
+                .iter()
+                .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash),
             exigencia_vale_na_rede,
             instalado,
         })
@@ -2258,9 +2262,18 @@ async fn habilitar_mod(
     app: AppHandle,
     session: State<'_, Session>,
     id: String,
+    hash: String,
 ) -> Result<(), FalhaNoMod> {
-    let instalado = seele_ffi::mods::ler_um(&config_dir(&app), &id)
+    // Por hash: dois pacotes do mesmo MOD podem estar no disco, e quem liga
+    // sabe quais bytes quer — ler por identificador pegaria «o que estiver
+    // lá», que pode ser o que outro servidor desta máquina baixou depois.
+    let instalado = seele_ffi::mods::ler_por_hash(&config_dir(&app), &hash)
         .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    if instalado.id != id {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "conteudo-de-outro-mod".to_owned(),
+        });
+    }
 
     let persistence = persistence_do_mod(&session)?;
     let persistence = persistence.lock().await;
@@ -2322,15 +2335,23 @@ async fn desabilitar_mod(session: State<'_, Session>, id: String) -> Result<(), 
 ///
 /// [`FalhaNoMod`] quando o MOD não serve, quando esta janela não hospeda, ou
 /// quando o banco não responde.
-#[tauri::command]
+/// **Não é mais comando da janela.** Ele existiu para o botão de cada linha,
+/// que o rascunho e o SALVAR substituíram: a tela não muda mais o conjunto um
+/// MOD por vez, porque cada mudança acordava o anúncio e derrubava a sessão.
+///
+/// Fica como função porque `instalar_mod_do_catalogo` a usa para reaplicar um
+/// MOD que **já era exigido** depois de atualizá-lo — ali a exigência não
+/// muda de conjunto por escolha de ninguém, ela passa a descrever os bytes que
+/// acabaram de chegar.
 async fn aplicar_mod(
     app: AppHandle,
     session: State<'_, Session>,
     id: String,
+    hash: String,
     ligar: bool,
 ) -> Result<String, FalhaNoMod> {
     if ligar {
-        habilitar_mod(app.clone(), session.clone(), id).await?;
+        habilitar_mod(app.clone(), session.clone(), id, hash).await?;
     } else {
         desabilitar_mod(session.clone(), id).await?;
     }
@@ -2497,6 +2518,19 @@ async fn conjunto_exigido_agora(session: State<'_, Session>) -> Result<String, F
         .identidade)
 }
 
+/// Um MOD escolhido pela tela: qual, e **quais bytes**.
+///
+/// O par, e não só o identificador — plano de isolamento de 18/09. Com o cache
+/// por conteúdo, dois pacotes do mesmo MOD podem estar no disco, e escolher um
+/// deles é a decisão que a tela toma.
+#[derive(Debug, serde::Deserialize)]
+struct ModEscolhido {
+    /// `autor/nome`.
+    id: String,
+    /// O hash do conteúdo daquele pacote.
+    hash: String,
+}
+
 /// Aplica um conjunto inteiro de MODs num ato — o SALVAR da tela de gestão.
 ///
 /// # Por que não é um laço sobre [`aplicar_mod`]
@@ -2528,7 +2562,7 @@ async fn conjunto_exigido_agora(session: State<'_, Session>) -> Result<String, F
 async fn aplicar_conjunto_de_mods(
     app: AppHandle,
     session: State<'_, Session>,
-    ligados: Vec<String>,
+    ligados: Vec<ModEscolhido>,
     base: String,
 ) -> Result<String, FalhaNoMod> {
     let persistence = persistence_do_mod(&session)?;
@@ -2537,9 +2571,17 @@ async fn aplicar_conjunto_de_mods(
     // no meio da lista não pode deixar metade do conjunto aplicada: o servidor
     // ficaria exigindo uma mistura que ninguém decidiu.
     let mut linhas = Vec::with_capacity(ligados.len());
-    for id in &ligados {
-        let instalado = seele_ffi::mods::ler_um(&config_dir(&app), id)
+    for escolhido in &ligados {
+        // **Por hash.** A tela manda quais bytes escolheu, e não só qual MOD:
+        // dois pacotes do mesmo MOD podem estar no disco, e «qual deles» é
+        // justamente a decisão que esta chamada aplica.
+        let instalado = seele_ffi::mods::ler_por_hash(&config_dir(&app), &escolhido.hash)
             .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+        if instalado.id != escolhido.id {
+            return Err(FalhaNoMod::Recusado {
+                motivo: "conteudo-de-outro-mod".to_owned(),
+            });
+        }
         linhas.push(seele_server::persistence::mods::EnabledMod {
             id: instalado.id,
             version: instalado.version,
@@ -2770,7 +2812,7 @@ async fn instalar_mod_do_catalogo(
     versao: String,
 ) -> Result<bool, catalogo::FalhaNoCatalogo> {
     let ja_exigido = mod_exigido_aqui(&session, &id).await;
-    catalogo::instalar_do_catalogo(&config_dir(&app), &id, &versao).await?;
+    let hash = catalogo::instalar_do_catalogo(&config_dir(&app), &id, &versao).await?;
 
     // **QA-01: baixar não é aplicar.** Trocar os arquivos no disco não mexe na
     // linha que o servidor guarda, e é o **hash** dela que vai no anúncio.
@@ -2788,7 +2830,7 @@ async fn instalar_mod_do_catalogo(
     // Só para um MOD que **já estava exigido**: atualizar não é ligar, e um que
     // estava desligado continua desligado.
     if ja_exigido {
-        aplicar_mod(app, session, id, true)
+        aplicar_mod(app, session, id, hash, true)
             .await
             .map_err(|erro| catalogo::FalhaNoCatalogo::NaoAplicou(format!("{erro:?}")))?;
     }
@@ -2823,13 +2865,23 @@ fn aceites_de_mods(app: AppHandle) -> Vec<seele_ffi::mods::AceiteGuardado> {
 /// Não hospedar não é falha aqui: a lista de MODs instalados é útil de qualquer
 /// jeito, e desenhar um erro para quem só abriu a tela seria pior que desenhar
 /// a lista com tudo desligado.
-async fn mods_ligados(session: &State<'_, Session>) -> Result<Vec<String>, FalhaNoMod> {
+async fn mods_ligados(session: &State<'_, Session>) -> Result<Vec<(String, String)>, FalhaNoMod> {
     let Ok(persistence) = persistence_do_mod(session) else {
         return Ok(Vec::new());
     };
     let persistence = persistence.lock().await;
+    // **O par, e não só o identificador.** Com o cache por conteúdo pode haver
+    // dois pacotes do mesmo MOD nesta máquina, e «este está ligado» deixa de
+    // ser uma pergunta sobre o identificador: é sobre **quais bytes** este
+    // servidor exige. Marcar os dois como ligados diria que o servidor exige
+    // duas coisas incompatíveis ao mesmo tempo.
     seele_server::persistence::mods::enabled(&persistence)
-        .map(|ligados| ligados.into_iter().map(|ligado| ligado.id).collect())
+        .map(|ligados| {
+            ligados
+                .into_iter()
+                .map(|ligado| (ligado.id, ligado.hash))
+                .collect()
+        })
         .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
 }
 
@@ -4694,7 +4746,11 @@ fn main() {
             if !mods::hash_confere(std::path::Path::new(&pasta), &caminho, expected) {
                 return recusa_do_mod();
             }
-            match mods::serve(std::path::Path::new(&pasta), &caminho) {
+            // `expected` é `Some` aqui: `hash_confere` devolve falso sem ele.
+            let Some(hash) = expected else {
+                return recusa_do_mod();
+            };
+            match mods::serve(std::path::Path::new(&pasta), &caminho, hash) {
                 Some(corpo) => tauri::http::Response::builder()
                     .header("Content-Type", "text/javascript; charset=utf-8")
                     // **A06.** O script é `type="module"`, e `mod://localhost`
@@ -4719,6 +4775,17 @@ fn main() {
             ..Session::default()
         })
         .setup(move |app| {
+            // **Os pacotes do layout antigo, levados uma vez.**
+            //
+            // Quem já tem MODs instalados os tem em `mods/<autor>/<nome>/`, e a
+            // leitura passou a ser por conteúdo. Sem isto eles sumiriam da
+            // lista, e quem usa leria como o produto ter perdido o que estava
+            // instalado. Aqui e não no primeiro uso da tela: a tela pode ser
+            // aberta depois de o servidor já ter subido procurando um pacote.
+            mods::levar_pacotes_antigos_para_o_cache(std::path::Path::new(&config_dir(
+                app.handle(),
+            )));
+
             // **A decoração do Windows sai; a do macOS fica.**
             //
             // A comp da 0.9.0 desenha a barra da janela — marca, servidor,
@@ -4844,7 +4911,6 @@ fn main() {
             tirar_icone_do_server,
             mods_instalados,
             mod_request,
-            aplicar_mod,
             aceite_de_mods,
             aceitar_mods,
             esquecer_aceite_de_mods,

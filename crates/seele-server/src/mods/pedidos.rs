@@ -92,7 +92,7 @@ async fn executar_inner(
         .mods_dir
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("no directory"))?;
-    let root = raizes.pacote_de(id);
+    let root = raizes.pacote_de(&active.hash);
     // **Da instância, e não da máquina.** Ver `RaizesDosMods`: o mesmo MOD em
     // dois servidores lia e escrevia nos mesmos arquivos.
     let dados = raizes.dados_de(id);

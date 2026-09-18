@@ -488,13 +488,19 @@ impl Anfitriao {
 #[must_use]
 pub fn carregar_do_disco(
     raizes: &crate::RaizesDosMods,
-    ids: &[String],
+    exigidos: &[(String, String)],
 ) -> (Vec<(String, String, std::path::PathBuf)>, Vec<String>) {
     let mut prontos = Vec::new();
     let mut queixas = Vec::new();
 
-    for id in ids {
-        let dir = raizes.pacote_de(id);
+    // **Por hash, e é o hash que o banco guardou.** Carregar por identificador
+    // era carregar «o que estiver naquela pasta», e o que estivesse lá podia
+    // não ser o que este servidor exige — outro servidor desta máquina podia
+    // tê-lo atualizado. O hash é o que a exigência diz, e é contra ele que o
+    // `pedidos.rs` já confere a cada pedido; aqui a resolução passa a contar a
+    // mesma história.
+    for (id, hash) in exigidos {
+        let dir = raizes.pacote_de(hash);
         let Ok(texto) = std::fs::read_to_string(dir.join("mod.json")) else {
             queixas.push(format!("{id}: sem mod.json em {}", dir.display()));
             continue;

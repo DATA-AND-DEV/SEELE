@@ -389,7 +389,7 @@ function linhaDeModInstalado(mod, hospedando) {
   // derruba quem está dentro. Relatado assim: «cada ativação expulsa o host da
   // sessão e exige nova entrada; ativar vários MODs repete o processo para
   // cada um». Agora o servidor só muda no SALVAR, e muda de uma vez.
-  const ligadoNoRascunho = rascunho.has(mod.id);
+  const ligadoNoRascunho = rascunho.has(chaveDoPacote(mod));
   const botao = elemento("button", "botao-fantasma");
   botao.type = "button";
   botao.textContent = ligadoNoRascunho ? "DESLIGAR" : "LIGAR";
@@ -409,67 +409,22 @@ function linhaDeModInstalado(mod, hospedando) {
     );
   }
   botao.addEventListener("click", () => {
-    if (ligadoNoRascunho) rascunho.delete(mod.id);
-    else rascunho.add(mod.id);
+    if (ligadoNoRascunho) rascunho.delete(chaveDoPacote(mod));
+    else {
+      // **Um pacote por MOD.** Ligar outro conteúdo do mesmo MOD substitui o
+      // anterior no rascunho: um servidor não exige duas versões do mesmo MOD,
+      // e deixar as duas marcadas diria que exige.
+      for (const chave of [...rascunho]) {
+        if (chave.split("\u0000")[0] === mod.id) rascunho.delete(chave);
+      }
+      rascunho.add(chaveDoPacote(mod));
+    }
     desenharMods().catch((falha) => console.warn("desenhar mods:", falha));
   });
   caixa.append(botao);
 
   linha.append(caixa);
   return linha;
-}
-
-/**
- * Pergunta antes de mudar o que a sala exige — A04 e A08 da auditoria.
- *
- * **Ligar era uma decisão que virava duas perguntas.** A exigência era gravada
- * no servidor e nenhum consentimento era registrado nesta máquina; o servidor
- * então encerra as conexões cujo conjunto mudou, e na entrada seguinte quem
- * acabara de ligar via a tela genérica de aceite, para decidir de novo o que
- * tinha acabado de decidir. Agora é uma decisão só, dita por inteiro.
- *
- * **E desligar não é uma ação sem impacto.** Ela parece mais branda que ligar e
- * derruba as mesmas sessões, pelo mesmo motivo: o conjunto mudou. A pendência
- * 44 já dizia isso.
- *
- * O que muda de verdade é dito com o dado que a ponte já manda:
- * `exigencia_vale_na_rede` responde se a exigência **barra** alguém hoje, e não
- * só se está gravada. Sem ele a frase prometeria uma tranca que pode estar
- * dormente.
- */
-function perguntarETrocarOMod(mod) {
-  const ligar = !mod.enabled;
-  const alcance = (mod.reach ?? []).join(", ");
-  const derruba = mod.exigencia_vale_na_rede;
-
-  const linhas = ligar
-    ? [
-        `«${mod.id}» passa a ser exigido neste servidor.`,
-        alcance ? `Ele declara alcançar: ${alcance}.` : "Ele não declara alcance nenhum.",
-        mod.server
-          ? "Metade dele roda na máquina de quem hospeda — a sua."
-          : "Ele roda só na janela de quem entra.",
-        derruba
-          ? "Quem está dentro agora cai e precisa aceitar de novo, no aparelho de cada um."
-          : "A exigência fica gravada, mas hoje ela não barra ninguém na rede.",
-        "Ligar aqui também registra o seu sim nesta máquina, para este conjunto exato — " +
-          "você não vai ser perguntado outra vez pela decisão que acabou de tomar.",
-      ]
-    : [
-        `«${mod.id}» deixa de ser exigido neste servidor.`,
-        derruba
-          ? "Quem está dentro agora cai igual, e precisa entrar de novo: desligar muda o " +
-            "conjunto tanto quanto ligar."
-          : "Quem está dentro agora cai igual: desligar muda o conjunto tanto quanto ligar.",
-        "O MOD continua instalado nesta máquina. Isto não apaga nada.",
-      ];
-
-  abrirConfirmacao(
-    ligar ? "EXIGIR NESTE SERVIDOR E USAR NESTE COMPUTADOR" : "DEIXAR DE EXIGIR",
-    linhas.join("\n"),
-    ligar ? "LIGAR" : "DESLIGAR",
-    () => trocarOMod(mod.id, ligar),
-  );
 }
 
 /**
@@ -504,8 +459,21 @@ const FASES_DO_MOD = {
 // o SALVAR, que aplica tudo num ato — `aplicar_conjunto_de_mods`, que escreve
 // numa transação e acorda o anúncio uma vez só.
 
-/** O que estaria ligado se esta tela fosse salva agora. */
+/**
+ * O que estaria ligado se esta tela fosse salva agora, por `id\u0000hash`.
+ *
+ * **O par, e não o identificador.** Com o cache por conteúdo pode haver dois
+ * pacotes do mesmo MOD nesta máquina — um que este servidor exige, outro que
+ * outro servidor baixou —, e escolher um deles é a decisão que esta tela toma.
+ * Guardar só o identificador diria «exija este MOD» sem dizer quais bytes, que
+ * é a ambiguidade que o cache por conteúdo existe para acabar.
+ */
 const rascunho = new Set();
+
+/** A chave de um pacote no rascunho: qual MOD, e quais bytes. */
+function chaveDoPacote(mod) {
+  return `${mod.id}\u0000${mod.hash}`;
+}
 
 /** O que o servidor exigia quando esta tela leu a lista. */
 let conjuntoNoServidor = new Set();
@@ -523,8 +491,10 @@ let salvando = false;
 
 /** O que muda do conjunto de pé para o rascunho. */
 function pendencias() {
-  const ligar = [...rascunho].filter((id) => !conjuntoNoServidor.has(id));
-  const desligar = [...conjuntoNoServidor].filter((id) => !rascunho.has(id));
+  // Os nomes que a pessoa lê são os identificadores; a chave é o par.
+  const nome = (chave) => chave.split("\u0000")[0];
+  const ligar = [...rascunho].filter((c) => !conjuntoNoServidor.has(c)).map(nome);
+  const desligar = [...conjuntoNoServidor].filter((c) => !rascunho.has(c)).map(nome);
   return { ligar, desligar };
 }
 
@@ -601,8 +571,12 @@ async function salvarAlteracoes() {
       salvando = true;
       await desenharMods();
       try {
+        const escolhidos = [...rascunho].map((chave) => {
+          const partes = chave.split("\u0000");
+          return { id: partes[0], hash: partes[1] };
+        });
         await invoke("aplicar_conjunto_de_mods", {
-          ligados: [...rascunho],
+          ligados: escolhidos,
           base: baseDoConjunto,
         });
       } catch (falha) {
@@ -625,22 +599,6 @@ async function salvarAlteracoes() {
       await desenharMods();
     },
   );
-}
-
-/** Liga ou desliga, e redesenha. */
-async function trocarOMod(id, ligar) {
-  const erro = $("mods-gestao-erro");
-  erro.hidden = true;
-  try {
-    // **Um comando, e não dois.** Mudar a exigência e registrar o sim desta
-    // máquina ao conjunto resultante são a mesma decisão, e separá-los era o
-    // que fazia o servidor perguntar de novo a quem acabara de responder.
-    await invoke("aplicar_mod", { id, ligar });
-  } catch (falha) {
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
-  }
-  await desenharMods();
 }
 
 /** Desenha as duas listas desta seção. */
@@ -687,9 +645,7 @@ async function desenharMods() {
   // há rascunho, quem avisa é a conferência de conflito do SALVAR, que diz o
   // que houve em vez de escolher sozinha qual das duas decisões vale.
   const tinhaPendencia = haRascunhoPorSalvar();
-  conjuntoNoServidor = new Set(
-    instalados.filter((m) => m.enabled).map((m) => m.id),
-  );
+  conjuntoNoServidor = new Set(instalados.filter((m) => m.enabled).map(chaveDoPacote));
   if (!tinhaPendencia) {
     rascunho.clear();
     for (const id of conjuntoNoServidor) rascunho.add(id);

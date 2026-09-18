@@ -430,7 +430,7 @@ pub(crate) async fn instalar_do_catalogo(
     config: &str,
     id: &str,
     versao: &str,
-) -> Result<(), FalhaNoCatalogo> {
+) -> Result<String, FalhaNoCatalogo> {
     let cliente = cliente()?;
     let catalogo = buscar_catalogo().await?;
     // A lista de revogações é buscada junto, e uma lista que não responde
@@ -475,8 +475,10 @@ pub(crate) async fn instalar_do_catalogo(
         std::fs::write(&destino, bytes)
             .map_err(|erro| FalhaNoCatalogo::NaoRespondeu(erro.to_string()))?;
     }
+    // O hash do que foi publicado volta para quem chamou: é por ele que o
+    // servidor passa a exigir estes bytes, e não «o que estiver instalado».
     let resultado = crate::mods::instalar_de(std::path::Path::new(config), &passagem)
-        .map(|_| ())
+        .map(|publicado| publicado.hash)
         .map_err(|erro| FalhaNoCatalogo::NaoEUmCatalogo(format!("{erro:?}")));
     let _ = std::fs::remove_dir_all(&passagem);
     resultado

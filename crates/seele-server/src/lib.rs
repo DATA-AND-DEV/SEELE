@@ -122,10 +122,19 @@ pub struct RaizesDosMods {
 }
 
 impl RaizesDosMods {
-    /// A pasta do pacote deste MOD.
+    /// A pasta do pacote com **estes bytes**.
+    ///
+    /// Por hash e não por identificador — plano de isolamento de 18/09, P1.
+    /// Dois servidores desta máquina podem exigir conteúdos diferentes do
+    /// mesmo MOD, e por identificador só um cabia: atualizar para um deixava o
+    /// outro exigindo bytes que saíram do disco.
     #[must_use]
-    pub fn pacote_de(&self, id: &str) -> std::path::PathBuf {
-        self.pacotes.join(id)
+    // O nome literal, e não a constante do `seele-core`: este crate não o
+    // tem na árvore, e puxá-lo para cá por uma palavra seria pagar uma
+    // dependência inteira por ela. Quem guarda a constante é
+    // `seele_core::mods::PACOTES`, e o guarda abaixo prende as duas juntas.
+    pub fn pacote_de(&self, hash: &str) -> std::path::PathBuf {
+        self.pacotes.join("mod-packages").join(hash)
     }
 
     /// A pasta mutável deste MOD, nesta instância.
@@ -520,10 +529,16 @@ impl Daemon {
                 let banco = server.persistence.lock().await;
                 crate::persistence::mods::enabled(&banco).unwrap_or_default()
             };
-            let ids: Vec<String> = ligados.into_iter().map(|ligado| ligado.id).collect();
+            // O par, e não só o identificador: é o hash que diz **quais bytes**
+            // este servidor exige, e outro servidor desta máquina pode exigir
+            // outros do mesmo MOD.
+            let exigidos: Vec<(String, String)> = ligados
+                .into_iter()
+                .map(|ligado| (ligado.id, ligado.hash))
+                .collect();
 
-            if !ids.is_empty() {
-                let (fontes, queixas) = crate::mods::carregar_do_disco(&pasta_dos_mods, &ids);
+            if !exigidos.is_empty() {
+                let (fontes, queixas) = crate::mods::carregar_do_disco(&pasta_dos_mods, &exigidos);
                 for queixa in queixas {
                     // Um MOD habilitado que não abre é dito em voz alta. O
                     // silêncio aqui seria quem hospeda perguntando dias depois

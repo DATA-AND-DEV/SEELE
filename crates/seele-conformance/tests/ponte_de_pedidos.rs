@@ -117,8 +117,12 @@ fn instalar(id: &str) -> Result<(std::path::PathBuf, String)> {
             .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos()
     ));
-    let package = root.join(id);
-    std::fs::create_dir_all(package.join("servidor"))?;
+    // **Endereçado pelo conteúdo.** O pacote é montado ao lado, tem o hash
+    // calculado, e só então vai para `mod-packages/<hash>/` — que é o que o
+    // instalador faz, e é onde o servidor o procura.
+    let obras = root.join("em-obras");
+    std::fs::create_dir_all(obras.join("servidor"))?;
+    let package = obras;
     let manifest = serde_json::json!({
         "schema": 1,
         "id": id,
@@ -140,6 +144,9 @@ fn instalar(id: &str) -> Result<(std::path::PathBuf, String)> {
         std::fs::write(package.join(path), bytes)?;
     }
     let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut files));
+    let destino = root.join(seele_core::mods::PACOTES).join(&hash);
+    std::fs::create_dir_all(destino.parent().expect("pai"))?;
+    std::fs::rename(&package, &destino)?;
     Ok((root, hash))
 }
 

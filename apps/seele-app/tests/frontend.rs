@@ -11531,10 +11531,15 @@ fn os_interruptores_de_mod_editam_um_rascunho_e_salvar_aplica_de_uma_vez() {
     let camada = without_comments(&read("ui/camada-mods.js"));
 
     let linha = js_function(&camada, "function linhaDeModInstalado(");
+    // **Pelo par, e não pelo identificador.** Com o cache por conteúdo pode
+    // haver dois pacotes do mesmo MOD no disco, e escolher um deles é a decisão
+    // que esta tela toma — um rascunho por identificador diria «exija este MOD»
+    // sem dizer quais bytes.
     assert!(
-        linha.contains("rascunho.add(mod.id)") && linha.contains("rascunho.delete(mod.id)"),
-        "o interruptor voltou a gravar no servidor em vez de mexer no rascunho: \
-         cada clique derruba todo mundo que está na sessão: {linha}"
+        linha.contains("rascunho.add(chaveDoPacote(mod))")
+            && linha.contains("rascunho.delete(chaveDoPacote(mod))"),
+        "o interruptor voltou a gravar no servidor em vez de mexer no rascunho, \
+         ou voltou a marcar por identificador em vez do par: {linha}"
     );
     assert!(
         !linha.contains("perguntarETrocarOMod"),
@@ -11686,5 +11691,33 @@ fn so_um_link_de_imagem_e_buscado_e_so_uma_vez() {
         buscar.contains("previa_de_link"),
         "a busca deixou de passar pelo comando que confere esquema, tamanho e \
          bytes: {buscar}"
+    );
+}
+
+/// **Um servidor exige um pacote por MOD, e o rascunho não deixa marcar dois.**
+///
+/// Com o cache por conteúdo, dois pacotes do mesmo MOD podem estar no disco —
+/// um que este servidor exige, outro que outro servidor desta máquina baixou.
+/// A tela lista os dois, e ligar o segundo tem de **substituir** o primeiro no
+/// rascunho: um servidor não exige duas versões do mesmo MOD, e deixar as duas
+/// marcadas diria que exige.
+#[test]
+fn ligar_outro_conteudo_do_mesmo_mod_substitui_no_rascunho() {
+    let camada = without_comments(&read("ui/camada-mods.js"));
+    let linha = js_function(&camada, "function linhaDeModInstalado(");
+    assert!(
+        linha.contains("if (chave.split(\"\\u0000\")[0] === mod.id) rascunho.delete(chave);"),
+        "ligar outro conteúdo do mesmo MOD deixou os dois marcados: o SALVAR \
+         mandaria um conjunto que exige duas versões do mesmo MOD: {linha}"
+    );
+
+    // E a chave é o par, em toda a tela: o rascunho, o conjunto de pé e o que
+    // vai ao comando têm de falar a mesma língua, senão a comparação entre eles
+    // acha diferença onde não há.
+    let desenhar = js_function(&camada, "async function desenharMods(");
+    assert!(
+        desenhar.contains("map(chaveDoPacote)"),
+        "o conjunto de pé deixou de ser lido por par: ele passaria a diferir do \
+         rascunho por forma, e não por decisão: {desenhar}"
     );
 }

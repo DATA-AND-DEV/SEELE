@@ -28,8 +28,19 @@ pub(crate) fn hash_confere(config_dir: &Path, url_path: &str, expected: Option<&
     if seele_ffi::mods::caminho_interno(&[author, name]).is_none() {
         return false;
     }
-    seele_ffi::mods::ler_um(&config_dir.to_string_lossy(), &format!("{author}/{name}"))
-        .is_ok_and(|m| m.hash == expected)
+    // **Resolvido pelo hash que a URL pede**, e não pelo identificador.
+    //
+    // Por identificador havia um pacote por MOD, e servir «o que estiver
+    // naquela pasta» funcionava porque só havia um. Com o cache por conteúdo há
+    // vários, e outro servidor desta máquina pode ter instalado outro depois —
+    // servir por identificador entregaria à janela bytes que **este** servidor
+    // não exige.
+    //
+    // A conferência de identidade fica: os bytes têm de dizer que são deste
+    // MOD. Sem ela, uma URL com o hash de um MOD e o nome de outro serviria o
+    // conteúdo do primeiro sob o caminho do segundo.
+    seele_ffi::mods::ler_por_hash(&config_dir.to_string_lossy(), expected)
+        .is_ok_and(|m| m.id == format!("{author}/{name}"))
 }
 
 /// Serves one path under `mod://`, or nothing.
@@ -43,7 +54,7 @@ pub(crate) fn hash_confere(config_dir: &Path, url_path: &str, expected: Option<&
 /// "tried to climb out": a scheme that distinguishes them is a scheme that
 /// answers questions about the disk of whoever is running it.
 #[must_use]
-pub(crate) fn serve(config_dir: &Path, url_path: &str) -> Option<Vec<u8>> {
+pub(crate) fn serve(config_dir: &Path, url_path: &str, hash: &str) -> Option<Vec<u8>> {
     let mut parts = url_path.trim_start_matches('/').split('/');
     let author = parts.next()?;
     let name = parts.next()?;
@@ -54,10 +65,16 @@ pub(crate) fn serve(config_dir: &Path, url_path: &str) -> Option<Vec<u8>> {
 
     let relative = seele_ffi::mods::caminho_interno(&inside)?;
 
+    // **O mesmo pacote que a conferência acima aprovou**, achado pelo mesmo
+    // hash. Achá-lo de outro jeito aqui seria conferir uma coisa e ler outra —
+    // a forma clássica de uma checagem valer para um arquivo e a leitura
+    // acontecer sobre outro.
     let id = format!("{author}/{name}");
-    let declared = seele_ffi::mods::ler_um(&config_dir.to_string_lossy(), &id)
-        .ok()?
-        .client?;
+    let pacote = seele_ffi::mods::ler_por_hash(&config_dir.to_string_lossy(), hash).ok()?;
+    if pacote.id != id {
+        return None;
+    }
+    let declared = pacote.client?;
     // Only what the manifest declares. Today that is the client script; when a
     // MOD may ship more than one file, this list grows and this guard does not
     // change shape.
@@ -67,9 +84,8 @@ pub(crate) fn serve(config_dir: &Path, url_path: &str) -> Option<Vec<u8>> {
 
     std::fs::read(
         config_dir
-            .join("mods")
-            .join(author)
-            .join(name)
+            .join(seele_ffi::mods::PACOTES)
+            .join(hash)
             .join(&relative),
     )
     .ok()
@@ -80,8 +96,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn semear(raiz: &Path, id: &str) -> PathBuf {
-        let dir = raiz.join("mods").join(id);
+    fn semear(raiz: &Path, id: &str) -> (PathBuf, String) {
+        let dir = raiz.join("em-obras");
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("cliente")).expect("criar diretório");
         std::fs::write(
             dir.join("mod.json"),
@@ -94,7 +111,15 @@ mod tests {
         .expect("manifesto");
         std::fs::write(dir.join("cliente/main.js"), "globalThis.MOD_RODOU = true;")
             .expect("script");
-        dir
+        // Publicado pelo conteúdo, como o instalador faz: o nome da pasta é o
+        // hash do que está dentro, e é por ele que o `mod://` resolve.
+        let hash = seele_ffi::mods::ler_pasta(&dir.to_string_lossy())
+            .expect("ler")
+            .hash;
+        let destino = raiz.join(seele_ffi::mods::PACOTES).join(&hash);
+        std::fs::create_dir_all(destino.parent().expect("pai")).expect("raiz");
+        std::fs::rename(&dir, &destino).expect("publicar");
+        (destino, hash)
     }
 
     fn temporario(nome: &str) -> PathBuf {
@@ -108,8 +133,8 @@ mod tests {
     #[test]
     fn um_arquivo_declarado_no_manifesto_e_servido() {
         let raiz = temporario("ok");
-        semear(&raiz, "seele/exemplo");
-        let bytes = serve(&raiz, "/seele/exemplo/cliente/main.js").expect("devia servir");
+        let (_, hash) = semear(&raiz, "seele/exemplo");
+        let bytes = serve(&raiz, "/seele/exemplo/cliente/main.js", &hash).expect("devia servir");
         assert_eq!(bytes, b"globalThis.MOD_RODOU = true;");
     }
 
@@ -118,9 +143,9 @@ mod tests {
     #[test]
     fn um_arquivo_que_o_manifesto_nao_declara_nao_e_servido() {
         let raiz = temporario("nao-declarado");
-        let dir = semear(&raiz, "seele/exemplo");
+        let (dir, hash) = semear(&raiz, "seele/exemplo");
         std::fs::write(dir.join("cliente/extra.js"), "// clandestino").expect("extra");
-        assert_eq!(serve(&raiz, "/seele/exemplo/cliente/extra.js"), None);
+        assert_eq!(serve(&raiz, "/seele/exemplo/cliente/extra.js", &hash), None);
     }
 
     /// Caminho inteiro por `serve`, e **este teste não é a prova da travessia**.
@@ -134,28 +159,64 @@ mod tests {
     #[test]
     fn um_caminho_que_tenta_subir_nao_e_servido() {
         let raiz = temporario("subir");
-        semear(&raiz, "seele/exemplo");
+        let (_, hash) = semear(&raiz, "seele/exemplo");
         for caminho in [
             "/seele/exemplo/../../../etc/passwd",
             "/seele/exemplo/cliente/../../mod.json",
             "/../mods/seele/exemplo/cliente/main.js",
         ] {
-            assert_eq!(serve(&raiz, caminho), None, "subiu com `{caminho}`");
+            assert_eq!(serve(&raiz, caminho, &hash), None, "subiu com `{caminho}`");
         }
+    }
+
+    /// **O hash de um MOD com o nome de outro não serve nenhum dos dois.**
+    ///
+    /// Com o cache por conteúdo, a URL diz **quais bytes** quer. Servir só pelo
+    /// hash entregaria o conteúdo de um MOD sob o caminho de outro — e o
+    /// caminho é o que a janela usa para decidir de quem é o script. Servir só
+    /// pelo identificador entregaria «o que estiver instalado», que pode ser o
+    /// pacote que outro servidor desta máquina baixou depois.
+    ///
+    /// As duas conferências, então: os bytes existem sob aquele hash, **e**
+    /// dizem ser deste MOD.
+    #[test]
+    fn o_hash_de_um_mod_com_o_nome_de_outro_e_recusado() {
+        let raiz = temporario("trocado");
+        let (_, um) = semear(&raiz, "seele/exemplo");
+        let (_, outro) = semear(&raiz, "seele/outro");
+        assert_ne!(um, outro);
+
+        assert!(
+            hash_confere(&raiz, "/seele/exemplo/cliente/main.js", Some(&um)),
+            "o caminho certo com o hash certo tem de passar"
+        );
+        assert!(
+            !hash_confere(&raiz, "/seele/outro/cliente/main.js", Some(&um)),
+            "o hash de um MOD passou sob o nome de outro"
+        );
+        assert_eq!(
+            serve(&raiz, "/seele/outro/cliente/main.js", &um),
+            None,
+            "o conteúdo de um MOD foi servido sob o caminho de outro"
+        );
     }
 
     #[test]
     fn um_mod_que_nao_existe_nao_e_servido() {
         let raiz = temporario("ausente");
-        assert_eq!(serve(&raiz, "/seele/fantasma/cliente/main.js"), None);
+        assert_eq!(
+            serve(&raiz, "/seele/fantasma/cliente/main.js", &"0".repeat(64)),
+            None
+        );
     }
 
     #[test]
     fn nenhum_caminho_causa_panico() {
         let raiz = temporario("panico");
-        semear(&raiz, "seele/exemplo");
+        let (_, hash) = semear(&raiz, "seele/exemplo");
         for caminho in ["", "/", "//", "/a", "/a/b", "\u{0}", "/seele/exemplo/"] {
-            let _ = serve(&raiz, caminho);
+            let _ = serve(&raiz, caminho, &hash);
+            let _ = serve(&raiz, caminho, "");
         }
     }
 }
@@ -206,6 +267,73 @@ pub(crate) enum FalhaAoInstalarMod {
 /// # Errors
 ///
 /// [`FalhaAoInstalarMod`], uma variante por motivo.
+/// Leva os pacotes do layout antigo para o cache por conteúdo, uma vez.
+///
+/// Até a v0.11.x o pacote morava em `mods/<autor>/<nome>/`. Quem já tem MODs
+/// instalados tem os três oficiais lá, e a leitura passou a ser em
+/// `mod-packages/<hash>/`: sem esta mudança eles sumiriam da lista, e quem
+/// usasse leria isso como o produto ter perdido o que estava instalado.
+///
+/// **Copia e não move**, ao contrário da mudança dos dados. Os dois motivos:
+/// o pacote é imutável, então uma segunda cópia não diverge da primeira; e o
+/// layout antigo ainda é lido por `listar`, que a tela de gestão usa enquanto
+/// a migração da interface não fecha. Apagar aqui deixaria a tela mostrando o
+/// que já não existe.
+///
+/// Silenciosa quando não há o que levar, que é toda máquina depois da primeira
+/// vez — o destino é o hash, e um pacote já levado já está lá.
+pub(crate) fn levar_pacotes_antigos_para_o_cache(config_dir: &Path) {
+    let antigos = config_dir.join("mods");
+    let Ok(autores) = std::fs::read_dir(&antigos) else {
+        return;
+    };
+    for autor in autores.flatten() {
+        let Ok(nomes) = std::fs::read_dir(autor.path()) else {
+            continue;
+        };
+        for nome in nomes.flatten() {
+            let dir = nome.path();
+            if !dir.join("mod.json").is_file() {
+                continue;
+            }
+            let Ok(lido) = seele_ffi::mods::ler_pasta(&dir.to_string_lossy()) else {
+                continue;
+            };
+            let destino = config_dir.join(seele_ffi::mods::PACOTES).join(&lido.hash);
+            if destino.exists() {
+                continue;
+            }
+            // Pela estufa, e não direto: uma cópia que falha no meio não pode
+            // deixar no cache uma pasta cujo conteúdo não bate com o nome dela
+            // — a listagem a recusaria, e a recusa apontaria para um defeito
+            // que não existe.
+            let estufa = config_dir.join(".mods-em-obras").join(&lido.hash);
+            let _ = std::fs::remove_dir_all(&estufa);
+            if copiar_arvore(&dir, &estufa).is_err() {
+                let _ = std::fs::remove_dir_all(&estufa);
+                continue;
+            }
+            if let Some(pai) = destino.parent() {
+                if std::fs::create_dir_all(pai).is_err() {
+                    let _ = std::fs::remove_dir_all(&estufa);
+                    continue;
+                }
+            }
+            match std::fs::rename(&estufa, &destino) {
+                Ok(()) => tracing::info!(
+                    mod_id = %lido.id,
+                    hash = %lido.hash,
+                    "pacote levado do layout antigo para o cache por conteúdo"
+                ),
+                Err(erro) => {
+                    tracing::warn!(mod_id = %lido.id, %erro, "não consegui levar este pacote");
+                    let _ = std::fs::remove_dir_all(&estufa);
+                }
+            }
+        }
+    }
+}
+
 /// O que uma instalação publicou.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Publicado {
@@ -550,6 +678,84 @@ mod instalar {
         instalar_de(&config, &origem).expect("instala");
 
         assert!(!config.join(".mods-em-obras/autor/exemplo").exists());
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **Quem já tinha MOD instalado não o perde.**
+    ///
+    /// Até a v0.11.x o pacote morava em `mods/<autor>/<nome>/`, e a leitura
+    /// passou a ser por conteúdo. Sem a mudança, os três MODs oficiais de uma
+    /// máquina em uso sumiriam da lista — e quem usa leria isso como o produto
+    /// ter perdido o que estava instalado, que é o pior jeito de mudar um
+    /// layout.
+    #[test]
+    fn um_pacote_do_layout_antigo_e_levado_para_o_cache() {
+        let raiz = pasta("migracao");
+        let config = raiz.join("config");
+        let antigo = config.join("mods").join("seele").join("exemplo");
+        std::fs::create_dir_all(antigo.join("cliente")).unwrap();
+        std::fs::write(
+            antigo.join("mod.json"),
+            br#"{"schema":1,"id":"seele/exemplo","version":"1.0.0","api":1,
+                "repo":"https://example.invalid/x","reach":["dom"],
+                "client":"cliente/main.js"}"#,
+        )
+        .unwrap();
+        std::fs::write(antigo.join("cliente/main.js"), b"globalThis.x = 1;").unwrap();
+        let hash = seele_ffi::mods::ler_pasta(&antigo.to_string_lossy())
+            .expect("ler")
+            .hash;
+
+        super::levar_pacotes_antigos_para_o_cache(&config);
+
+        let destino = config.join(seele_ffi::mods::PACOTES).join(&hash);
+        assert!(
+            destino.join("cliente/main.js").is_file(),
+            "o pacote do layout antigo não chegou ao cache"
+        );
+        // **Copiado, e não movido.** O pacote é imutável, então a segunda cópia
+        // não diverge; e o layout antigo ainda é lido pela tela de gestão
+        // enquanto a migração da interface não fecha. Apagar aqui a deixaria
+        // mostrando o que já não existe.
+        assert!(
+            antigo.join("cliente/main.js").is_file(),
+            "o layout antigo foi apagado antes de deixar de ser lido"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// E a segunda passagem não faz nada: o destino é o hash, e um pacote já
+    /// levado já está lá.
+    #[test]
+    fn levar_os_pacotes_duas_vezes_nao_duplica_nada() {
+        let raiz = pasta("migracao-dupla");
+        let config = raiz.join("config");
+        let antigo = config.join("mods").join("seele").join("exemplo");
+        std::fs::create_dir_all(antigo.join("cliente")).unwrap();
+        std::fs::write(
+            antigo.join("mod.json"),
+            br#"{"schema":1,"id":"seele/exemplo","version":"1.0.0","api":1,
+                "repo":"https://example.invalid/x","reach":["dom"],
+                "client":"cliente/main.js"}"#,
+        )
+        .unwrap();
+        std::fs::write(antigo.join("cliente/main.js"), b"globalThis.x = 1;").unwrap();
+
+        super::levar_pacotes_antigos_para_o_cache(&config);
+        super::levar_pacotes_antigos_para_o_cache(&config);
+
+        let quantos = std::fs::read_dir(config.join(seele_ffi::mods::PACOTES))
+            .unwrap()
+            .count();
+        assert_eq!(quantos, 1, "o mesmo pacote foi levado duas vezes");
+        assert!(
+            !config.join(".mods-em-obras").exists()
+                || std::fs::read_dir(config.join(".mods-em-obras"))
+                    .unwrap()
+                    .count()
+                    == 0,
+            "a migração deixou estufa para trás"
+        );
         let _ = std::fs::remove_dir_all(&raiz);
     }
 }
