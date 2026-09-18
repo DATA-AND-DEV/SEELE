@@ -271,3 +271,22 @@
   line-height: 1.4;
   color: var(--seele-laranja-nerv);
 }
+
+/* ---------- exigido por este servidor ----------
+
+   Onde quem entrou via um botão DESLIGAR desabilitado. Não é um controle, é
+   um fato: o conjunto foi acordado na porta, e sair dele sem sair do servidor
+   seria estar na sessão fingindo cumprir o que não cumpre.
+
+   Sem cor de recusa — isto não é um erro, é a condição de estar aqui. Fonte
+   de cartela e traço fino, que é como esta casca escreve rótulo. */
+.mods-exigido {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-cartela);
+  font-size: 0.75rem;
+  color: var(--seele-osso-apagado);
+  border: 1px solid currentcolor;
+  padding: 0.25rem 0.5rem;
+  white-space: nowrap;
+}

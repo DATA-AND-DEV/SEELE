@@ -460,6 +460,20 @@ let ultimoErroDeMods = "";
 // MOD sabe e nós não, e prometer o segundo seria inventar.
 const estadoDosMods = new Map();
 
+/**
+ * O que **este** servidor exige agora, por `id`.
+ *
+ * Separado de `estadoDosMods` porque responde outra pergunta. A fase diz o que
+ * aconteceu com um MOD — carregou, faltou o pacote, veio outra versão. Esta
+ * lista diz se ele é **obrigatório aqui**, que é o que a gestão precisa saber
+ * para não oferecer a quem entrou um interruptor de desligar o que o servidor
+ * exige: desligá-lo seria sair do conjunto acordado sem sair do servidor.
+ *
+ * Vazia fora de sessão, e por isso não guarda o que o último servidor exigia:
+ * a exigência é de um destino, e não desta máquina.
+ */
+const modsExigidos = new Set();
+
 /** Anota a fase de um MOD e avisa quem desenha. */
 function anotarEstadoDoMod(id, fase, detalhe = "") {
   const antes = estadoDosMods.get(id);
@@ -497,6 +511,13 @@ async function carregarMods() {
         globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
       }
     }
+    // O conjunto exigido por este destino, como ele acabou de ser anunciado.
+    // Reescrito por inteiro a cada volta: um MOD que saiu da exigência tem de
+    // sair daqui junto, senão a gestão continua chamando de obrigatório o que
+    // o servidor já soltou.
+    modsExigidos.clear();
+    for (const m of catalogo.mods) modsExigidos.add(m.id);
+
     const ausentes = catalogo.mods.filter(active => !instalados.some(m => m.id === active.id && m.hash === active.hash));
     for (const m of ausentes) {
       // **Duas causas, duas frases.** Ter o id e não ter o hash é versão
@@ -514,6 +535,12 @@ async function carregarMods() {
     instalados = instalados.filter(m => catalogo.mods.some(active => active.id === m.id && active.hash === m.hash));
   } catch (erro) {
     const mensagem = String(erro);
+    // Sem sessão não há exigência nenhuma de pé. Deixar a lista cheia faria a
+    // gestão dizer «exigido por este servidor» depois de sair dele.
+    if (modsExigidos.size > 0) {
+      modsExigidos.clear();
+      globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
+    }
     if (!mensagem.includes("NotConnected") && mensagem !== ultimoErroDeMods) {
       console.warn("Não foi possível conferir os MODs:", erro);
       ultimoErroDeMods = mensagem;
@@ -569,6 +596,11 @@ listen("seele://event", ({ payload }) => {
     globalThis.dispatchEvent(new CustomEvent("seele-mod-unload", { detail: id })); node.remove();
   }
   modsCarregados.clear();
+  // A exigência é de um destino, e o destino acabou. Esperar o tique seguinte
+  // deixaria a gestão dizendo «exigido por este servidor» por até quatro
+  // segundos depois de a sessão ter terminado.
+  modsExigidos.clear();
+  globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
   for (const p of pedidosDeMod.values()) { clearTimeout(p.timer); p.reject(new Error("disconnected")); }
   pedidosDeMod.clear();
 });

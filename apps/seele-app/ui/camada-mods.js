@@ -368,6 +368,21 @@ function linhaDeModInstalado(mod, hospedando) {
   }
   caixa.append(texto);
 
+  // **Para quem entrou, não há interruptor — há um fato.**
+  //
+  // Aqui ficava um botão DESLIGAR desabilitado, e um botão morto é uma
+  // pergunta sem resposta: ele sugere que desligar seria possível noutro
+  // momento, e desligar um MOD que o servidor exige **não** é uma decisão que
+  // caiba a quem entrou. O conjunto foi acordado na porta; sair dele sem sair
+  // do servidor seria estar na sessão fingindo cumprir o que não cumpre.
+  //
+  // Quem quer sair do conjunto sai do servidor, e isso a porta já oferece.
+  if (!hospedando && modsExigidos.has(mod.id)) {
+    caixa.append(elemento("span", "mods-exigido", "EXIGIDO POR ESTE SERVIDOR"));
+    linha.append(caixa);
+    return linha;
+  }
+
   const botao = elemento("button", "botao-fantasma");
   botao.type = "button";
   botao.textContent = mod.enabled ? "DESLIGAR" : "LIGAR";

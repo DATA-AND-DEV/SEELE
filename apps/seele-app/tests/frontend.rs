@@ -11417,3 +11417,52 @@ fn um_endereco_numa_mensagem_sai_pelo_navegador_e_nao_por_esta_janela() {
          e ninguém a chama: {corpo}"
     );
 }
+
+/// **Quem entrou não recebe interruptor para o que o servidor exige.**
+///
+/// A gestão mostrava a quem entrou um botão DESLIGAR desabilitado. Um botão
+/// morto é uma pergunta sem resposta: sugere que desligar seria possível
+/// noutro momento. E não é — o conjunto foi acordado na porta, e sair dele sem
+/// sair do servidor é estar na sessão fingindo cumprir o que não cumpre.
+///
+/// O documento de ajustes de 18/09 pede o oposto de um controle: «Exigido por
+/// este servidor», que é um fato, não uma oferta.
+///
+/// A lista do que é exigido tem de vir do **anúncio deste destino**, e não da
+/// fase de cada MOD: a fase diz o que aconteceu com ele, e um MOD que o
+/// servidor soltou continuaria com fase até a volta seguinte.
+#[test]
+fn quem_entrou_nao_recebe_interruptor_para_o_que_o_servidor_exige() {
+    let camada = without_comments(&read("ui/camada-mods.js"));
+    let linha = js_function(&camada, "function linhaDeModInstalado(");
+
+    let rotulo = linha
+        .find("modsExigidos")
+        .expect("a linha tem de perguntar se este MOD é exigido por este servidor");
+    let botao = linha
+        .find("DESLIGAR")
+        .expect("a linha continua sabendo desligar, para quem hospeda");
+    assert!(
+        rotulo < botao,
+        "o interruptor é montado antes da pergunta «é exigido aqui?», então \
+         quem entrou volta a receber um botão para desligar o que o servidor \
+         exige: {linha}"
+    );
+    assert!(
+        linha.contains("!hospedando && modsExigidos.has(mod.id)"),
+        "a condição deixou de juntar as duas metades: para **quem hospeda** o \
+         interruptor continua valendo, e é só para quem entrou que ele vira \
+         rótulo: {linha}"
+    );
+
+    // E a lista tem de ser mantida onde o anúncio do servidor chega, e esvaziada
+    // quando não há sessão — senão a gestão diz «exigido por este servidor»
+    // depois de sair dele.
+    let base = without_comments(&read("ui/base.js"));
+    let carregar = js_function(&base, "async function carregarMods(");
+    assert!(
+        carregar.contains("modsExigidos.clear()") && carregar.contains("modsExigidos.add("),
+        "a lista de exigidos deixou de ser refeita a cada anúncio: um MOD que \
+         o servidor soltou continuaria sendo chamado de obrigatório: {carregar}"
+    );
+}
