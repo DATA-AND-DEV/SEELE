@@ -1,8 +1,73 @@
 {
   "esquema": 1,
   "api_oferecida": 2,
-  "gerado_em": 1789692144,
+  "gerado_em": 1789700772,
   "mods": [
+    {
+      "id": "seele/estilo",
+      "autor": "seele",
+      "nome": "estilo",
+      "titulo": "Estilo",
+      "resumo": "O tema do servidor: cores, cantos, densidade e fonte, escolhidos por quem administra e aplicados na janela de quem entra.",
+      "repo": "https://github.com/DATA-AND-DEV/ESTILO",
+      "oficial": false,
+      "nivel": "verificado",
+      "commit": "a2f33438092389a10cd6e247beac6330e531f3a3",
+      "notas": [
+        "roda-no-servidor"
+      ],
+      "versoes": [
+        {
+          "versao": "1.0.0",
+          "api": 2,
+          "publicado_em": 1789700369,
+          "hash": "f5d2fe124b4aa53463fcb0c8e7428556e29b2b7df692f49dc389d4e53750cd9a",
+          "alcanca": [
+            "dom",
+            "tema do servidor"
+          ],
+          "arquivos": [
+            "README.md",
+            "cliente/main.js",
+            "docs/migracao-diretorios.md",
+            "docs/relatorio-entrega.md",
+            "ferramentas/build.mjs",
+            "ferramentas/estilo.js",
+            "ferramentas/interface.js",
+            "ferramentas/native/fontes.css",
+            "ferramentas/native/fontes/LICENCA-ibm-plex-mono.txt",
+            "ferramentas/native/fontes/LICENCA-noto-sans-jp.txt",
+            "ferramentas/native/fontes/LICENCA-saira-condensed.txt",
+            "ferramentas/native/fontes/PROCEDENCIA.md",
+            "ferramentas/native/fontes/ibm-plex-mono-400.woff2",
+            "ferramentas/native/fontes/ibm-plex-mono-500.woff2",
+            "ferramentas/native/fontes/ibm-plex-mono-600.woff2",
+            "ferramentas/native/fontes/noto-sans-jp-700.woff2",
+            "ferramentas/native/fontes/noto-sans-jp-900.woff2",
+            "ferramentas/native/fontes/saira-condensed-500.woff2",
+            "ferramentas/native/fontes/saira-condensed-700.woff2",
+            "ferramentas/native/fontes/saira-condensed-900.woff2",
+            "ferramentas/native/tokens.css",
+            "ferramentas/preview.cjs",
+            "ferramentas/preview.css",
+            "ferramentas/preview.js",
+            "ferramentas/quickjs-check/Cargo.lock",
+            "ferramentas/quickjs-check/Cargo.toml",
+            "ferramentas/quickjs-check/smoke.js",
+            "ferramentas/quickjs-check/src/main.rs",
+            "mod.json",
+            "package.json",
+            "servidor/main.js",
+            "test/servidor.test.cjs"
+          ],
+          "nivel": "verificado",
+          "notas": [
+            "roda-no-servidor"
+          ],
+          "commit": "a2f33438092389a10cd6e247beac6330e531f3a3"
+        }
+      ]
+    },
     {
       "id": "seele/mesa",
       "autor": "seele",
@@ -85,6 +150,75 @@
             "guarda-dados-na-maquina"
           ],
           "commit": "7ca40d1cc98e57adaed17c0e5f007593041c4eef"
+        }
+      ]
+    },
+    {
+      "id": "seele/perfis",
+      "autor": "seele",
+      "nome": "perfis",
+      "titulo": "Perfis",
+      "resumo": "Um perfil por servidor: nome, pronomes, biografia, cor, avatar e banner — separados do seu perfil no SEELE.",
+      "repo": "https://github.com/DATA-AND-DEV/PERFIS",
+      "oficial": false,
+      "nivel": "verificado",
+      "commit": "90f0859cd0211bf875a2d0cea4ee6275dff25dda",
+      "notas": [
+        "roda-no-servidor",
+        "guarda-dados-na-maquina"
+      ],
+      "versoes": [
+        {
+          "versao": "1.0.0",
+          "api": 2,
+          "publicado_em": 1789700395,
+          "hash": "fd79acaef584dfcef349bc9341bcebef0b94fe761974bbe47270e4096f9dc5c1",
+          "alcanca": [
+            "dom",
+            "perfis por servidor",
+            "imagens e banners animados"
+          ],
+          "arquivos": [
+            "README.md",
+            "cliente/main.js",
+            "docs/migracao-diretorios.md",
+            "docs/relatorio-entrega.md",
+            "ferramentas/build.mjs",
+            "ferramentas/interface.js",
+            "ferramentas/native/fontes.css",
+            "ferramentas/native/fontes/LICENCA-ibm-plex-mono.txt",
+            "ferramentas/native/fontes/LICENCA-noto-sans-jp.txt",
+            "ferramentas/native/fontes/LICENCA-saira-condensed.txt",
+            "ferramentas/native/fontes/PROCEDENCIA.md",
+            "ferramentas/native/fontes/ibm-plex-mono-400.woff2",
+            "ferramentas/native/fontes/ibm-plex-mono-500.woff2",
+            "ferramentas/native/fontes/ibm-plex-mono-600.woff2",
+            "ferramentas/native/fontes/noto-sans-jp-700.woff2",
+            "ferramentas/native/fontes/noto-sans-jp-900.woff2",
+            "ferramentas/native/fontes/saira-condensed-500.woff2",
+            "ferramentas/native/fontes/saira-condensed-700.woff2",
+            "ferramentas/native/fontes/saira-condensed-900.woff2",
+            "ferramentas/native/tokens.css",
+            "ferramentas/perfis.js",
+            "ferramentas/preview.cjs",
+            "ferramentas/preview.css",
+            "ferramentas/preview.js",
+            "ferramentas/quickjs-check/Cargo.lock",
+            "ferramentas/quickjs-check/Cargo.toml",
+            "ferramentas/quickjs-check/smoke.js",
+            "ferramentas/quickjs-check/src/main.rs",
+            "mod.json",
+            "package.json",
+            "servidor/main.js",
+            "test/banner-animado.gif",
+            "test/servidor.test.cjs"
+          ],
+          "nivel": "verificado",
+          "notas": [
+            "roda-no-servidor",
+            "guarda-dados-na-maquina"
+          ],
+          "commit": "90f0859cd0211bf875a2d0cea4ee6275dff25dda"
         }
       ]
     }
