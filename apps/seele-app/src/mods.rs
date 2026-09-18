@@ -174,16 +174,13 @@ pub(crate) enum FalhaAoInstalarMod {
     SemManifesto,
     /// O `mod.json` existe e não vale, com o nome da recusa do `seele-core`.
     ManifestoRecusado(String),
-    /// Já há um MOD instalado com este identificador.
-    ///
-    /// Recusado em vez de sobrescrito, e é a mesma decisão que o depósito de
-    /// versões toma: escrever por cima de uma instalação boa é a operação que
-    /// pode quebrá-la, e aqui ela ainda apagaria os `dados/` daquele MOD.
-    JaInstalado {
-        /// Qual.
-        id: String,
-    },
     /// O disco recusou, e o que ele disse.
+    ///
+    /// **Aqui havia um `JaInstalado`**, e ele saiu com o endereçamento por
+    /// conteúdo. A recusa existia porque havia um lugar por identificador, e
+    /// escrever por cima de uma instalação boa podia quebrá-la. Pastas
+    /// endereçadas pelo conteúdo não se sobrescrevem: bytes iguais são a mesma
+    /// pasta, e bytes diferentes são outra.
     NaoCopiei(String),
 }
 
@@ -209,11 +206,47 @@ pub(crate) enum FalhaAoInstalarMod {
 /// # Errors
 ///
 /// [`FalhaAoInstalarMod`], uma variante por motivo.
+/// O que uma instalação publicou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Publicado {
+    /// `autor/nome`, lido do manifesto.
+    pub(crate) id: String,
+    /// O hash do conteúdo, que é o nome da pasta onde ele ficou.
+    pub(crate) hash: String,
+}
+
+/// Põe um pacote no cache endereçado pelo conteúdo.
+///
+/// # Por que isto encolheu
+///
+/// Antes havia um lugar por identificador, e daí vinha tudo o mais: um sinal
+/// de `substituir`, uma recusa `JaInstalado`, a troca em dois `rename` com
+/// volta atrás, e a mudança do `dados/` de um lado para o outro para que
+/// atualizar não apagasse a mesa de ninguém.
+///
+/// Endereçado pelo conteúdo, nada disso existe:
+///
+///   - **não há substituição.** Bytes iguais dão a mesma pasta; bytes
+///     diferentes dão outra. Instalar por cima é uma operação que não tem como
+///     acontecer;
+///   - **não há «já instalado» como recusa.** Se a pasta existe, o trabalho
+///     está feito — e responder erro a quem pediu exatamente o que já está lá
+///     seria inventar um problema;
+///   - **não há dados a preservar.** Eles saíram do pacote na separação de
+///     raízes: vivem em `servidores/<id>/mod-data`, que é da instância.
+///
+/// A montagem ao lado fica, e pelo motivo de sempre (A10 da auditoria): uma
+/// cópia que falha no meio não pode deixar uma pasta com parte do MOD onde a
+/// leitura seguinte a encontre.
+///
+/// # Errors
+///
+/// [`FalhaAoInstalarMod`] quando falta manifesto, quando ele é recusado, ou
+/// quando a cópia não termina.
 pub(crate) fn instalar_de(
     config_dir: &Path,
     origem: &Path,
-    substituir: bool,
-) -> Result<String, FalhaAoInstalarMod> {
+) -> Result<Publicado, FalhaAoInstalarMod> {
     if !origem.join("mod.json").is_file() {
         return Err(FalhaAoInstalarMod::SemManifesto);
     }
@@ -221,71 +254,45 @@ pub(crate) fn instalar_de(
         .map_err(FalhaAoInstalarMod::ManifestoRecusado)?;
     let id = lido.id;
 
-    let destino = config_dir.join("mods").join(&id);
-    if destino.exists() && !substituir {
-        return Err(FalhaAoInstalarMod::JaInstalado { id });
-    }
-
-    // **A10 da auditoria: monta ao lado, publica de uma vez.**
-    //
-    // Antes a cópia ia direto para o destino final. Um erro de leitura ou de
-    // escrita no meio — disco cheio, arquivo que sumiu — deixava lá uma pasta
-    // com parte do MOD, e a tentativa seguinte a encontrava e respondia «já
-    // instalado». O conserto normal virava apagar pasta à mão.
-    //
-    // A estufa fica **fora** de `mods/`, e não é detalhe: `listar` lê `mods/`
-    // como autor/nome, e uma pasta de obras lá dentro apareceria como um MOD
-    // pela metade enquanto a cópia acontece.
+    // A estufa fica **fora** da raiz dos pacotes, e não é detalhe: a listagem
+    // confere o nome da pasta contra o conteúdo, e uma pasta de obras lá dentro
+    // apareceria como um pacote recusado enquanto a cópia acontece.
     let estufa = config_dir.join(".mods-em-obras").join(&id);
     let _ = std::fs::remove_dir_all(&estufa);
     if let Err(erro) = copiar_arvore(origem, &estufa) {
-        // Só a estufa desta tentativa, nunca o destino: o que estava instalado
-        // antes não tem culpa de uma cópia que falhou.
         let _ = std::fs::remove_dir_all(&estufa);
         return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
     }
 
+    // **O hash sai do que foi copiado, e não do que foi lido.** São a mesma
+    // coisa quando a cópia deu certo — e quando não deu, é o que está em disco
+    // que vai ser servido, então é dele que o nome tem de sair.
+    let copiado = match seele_ffi::mods::ler_pasta(&estufa.to_string_lossy()) {
+        Ok(copiado) => copiado,
+        Err(motivo) => {
+            let _ = std::fs::remove_dir_all(&estufa);
+            return Err(FalhaAoInstalarMod::ManifestoRecusado(motivo));
+        }
+    };
+    let hash = copiado.hash;
+
+    let destino = config_dir.join(seele_ffi::mods::PACOTES).join(&hash);
+    if destino.exists() {
+        // Já está aqui, com estes bytes. Não é erro, e não há o que fazer.
+        let _ = std::fs::remove_dir_all(&estufa);
+        return Ok(Publicado { id, hash });
+    }
     if let Some(pai) = destino.parent() {
         if let Err(erro) = std::fs::create_dir_all(pai) {
             let _ = std::fs::remove_dir_all(&estufa);
             return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
         }
     }
-
-    // **Os dados de campanha atravessam a troca.** Eles vivem em `dados/`, que
-    // o `content_hash` já exclui do pacote — «runtime data is not part of the
-    // immutable, consented package» — e atualizar um MOD não pode apagar a
-    // mesa de ninguém.
-    let dados = destino.join("dados");
-    if dados.is_dir() {
-        if let Err(erro) = std::fs::rename(&dados, estufa.join("dados")) {
-            let _ = std::fs::remove_dir_all(&estufa);
-            return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
-        }
-    }
-
-    if destino.exists() {
-        // O anterior sai do caminho antes de o novo entrar, e volta se o novo
-        // não entrar. Em nenhum instante o destino fica sem nada por escolha.
-        let anterior = config_dir
-            .join(".mods-em-obras")
-            .join(format!("{id}.anterior"));
-        let _ = std::fs::remove_dir_all(&anterior);
-        if let Err(erro) = std::fs::rename(&destino, &anterior) {
-            let _ = std::fs::remove_dir_all(&estufa);
-            return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
-        }
-        if let Err(erro) = std::fs::rename(&estufa, &destino) {
-            let _ = std::fs::rename(&anterior, &destino);
-            let _ = std::fs::remove_dir_all(&estufa);
-            return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
-        }
-        let _ = std::fs::remove_dir_all(&anterior);
-    } else if let Err(erro) = std::fs::rename(&estufa, &destino) {
+    if let Err(erro) = std::fs::rename(&estufa, &destino) {
         let _ = std::fs::remove_dir_all(&estufa);
         return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
     }
-    Ok(id)
+    Ok(Publicado { id, hash })
 }
 
 /// Copia uma árvore de arquivos, recusando atalhos.
@@ -332,8 +339,9 @@ mod instalar {
         caminho
     }
 
-    /// Um pacote de MOD de mentira, válido.
-    fn pacote(raiz: &std::path::Path, id: &str) -> std::path::PathBuf {
+    /// Um pacote de MOD de mentira, válido. `extra` muda os bytes sem mudar o
+    /// identificador — que é como dois pacotes do mesmo MOD existem.
+    fn pacote(raiz: &std::path::Path, id: &str, extra: Option<&str>) -> std::path::PathBuf {
         let origem = raiz.join("origem");
         std::fs::create_dir_all(origem.join("cliente")).unwrap();
         std::fs::write(
@@ -346,22 +354,82 @@ mod instalar {
         )
         .unwrap();
         std::fs::write(origem.join("cliente/main.js"), b"globalThis.x = 1;").unwrap();
+        if let Some(conteudo) = extra {
+            std::fs::write(origem.join("extra.txt"), conteudo).unwrap();
+        }
         origem
     }
 
     #[test]
-    fn um_pacote_bom_chega_inteiro_e_com_o_identificador_do_manifesto() {
+    fn um_pacote_bom_chega_inteiro_e_vai_para_a_pasta_do_conteudo() {
         let raiz = pasta("bom");
-        let origem = pacote(&raiz, "autor/exemplo");
+        let origem = pacote(&raiz, "autor/exemplo", None);
         let config = raiz.join("config");
 
-        let id = instalar_de(&config, &origem, false).expect("um pacote válido tem de instalar");
-        assert_eq!(id, "autor/exemplo", "o identificador não saiu do manifesto");
-        assert!(
-            config.join("mods/autor/exemplo/cliente/main.js").is_file(),
-            "a metade de cliente não foi copiada: o MOD instalado não é o que \
-             a pessoa apontou"
+        let publicado = instalar_de(&config, &origem).expect("um pacote válido tem de instalar");
+
+        assert_eq!(
+            publicado.id, "autor/exemplo",
+            "o identificador não saiu do manifesto"
         );
+        assert_eq!(publicado.hash.len(), 64, "{}", publicado.hash);
+        let destino = config.join(seele_ffi::mods::PACOTES).join(&publicado.hash);
+        assert!(
+            destino.join("cliente/main.js").is_file(),
+            "o pacote não chegou inteiro à pasta do conteúdo"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **Instalar o mesmo pacote de novo não é erro, e não duplica nada.**
+    ///
+    /// Antes havia um lugar por identificador, e instalar por cima era uma
+    /// recusa — `JaInstalado`. Endereçado pelo conteúdo, a pergunta desaparece:
+    /// bytes iguais são a mesma pasta, e responder erro a quem pediu
+    /// exatamente o que já está lá seria inventar um problema.
+    #[test]
+    fn instalar_o_mesmo_pacote_de_novo_e_o_mesmo_lugar_e_nao_e_erro() {
+        let raiz = pasta("de-novo");
+        let origem = pacote(&raiz, "autor/exemplo", None);
+        let config = raiz.join("config");
+
+        let um = instalar_de(&config, &origem).expect("primeira");
+        let outro = instalar_de(&config, &origem).expect("segunda");
+
+        assert_eq!(um, outro, "o mesmo conteúdo foi para dois lugares");
+        let quantos = std::fs::read_dir(config.join(seele_ffi::mods::PACOTES))
+            .unwrap()
+            .count();
+        assert_eq!(quantos, 1, "o mesmo pacote foi guardado duas vezes");
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **Dois conteúdos do mesmo MOD convivem**, que é o P1 que este layout
+    /// conserta: por identificador, instalar a versão que um servidor exige
+    /// apagava a que o outro exigia.
+    #[test]
+    fn dois_conteudos_do_mesmo_mod_ficam_lado_a_lado() {
+        let raiz = pasta("dois");
+        let config = raiz.join("config");
+
+        let um = instalar_de(&config, &pacote(&raiz, "autor/exemplo", None)).expect("primeiro");
+        let _ = std::fs::remove_dir_all(raiz.join("origem"));
+        let outro = instalar_de(
+            &config,
+            &pacote(&raiz, "autor/exemplo", Some("outra coisa")),
+        )
+        .expect("segundo");
+
+        assert_eq!(um.id, outro.id);
+        assert_ne!(um.hash, outro.hash, "bytes diferentes deram o mesmo hash");
+        assert!(config
+            .join(seele_ffi::mods::PACOTES)
+            .join(&um.hash)
+            .is_dir());
+        assert!(config
+            .join(seele_ffi::mods::PACOTES)
+            .join(&outro.hash)
+            .is_dir());
         let _ = std::fs::remove_dir_all(&raiz);
     }
 
@@ -370,49 +438,24 @@ mod instalar {
         let raiz = pasta("recusas");
         let config = raiz.join("config");
 
-        // Apontar para a pasta que contém o MOD, e não para a do MOD.
         let vazia = raiz.join("vazia");
         std::fs::create_dir_all(&vazia).unwrap();
         assert!(matches!(
-            instalar_de(&config, &vazia, false),
+            instalar_de(&config, &vazia),
             Err(FalhaAoInstalarMod::SemManifesto)
         ));
         assert!(
-            !config.join("mods").exists(),
-            "uma recusa criou a pasta de MODs: nada pode ser tocado antes de a \
-             conferência passar"
+            !config.join(seele_ffi::mods::PACOTES).exists(),
+            "uma recusa deixou pacote no cache"
         );
 
-        // Um manifesto que existe e não vale.
         let torto = raiz.join("torto");
         std::fs::create_dir_all(&torto).unwrap();
-        std::fs::write(torto.join("mod.json"), b"{ nao e json }").unwrap();
+        std::fs::write(torto.join("mod.json"), b"{isto nao e json}").unwrap();
         assert!(matches!(
-            instalar_de(&config, &torto, false),
+            instalar_de(&config, &torto),
             Err(FalhaAoInstalarMod::ManifestoRecusado(_))
         ));
-
-        let _ = std::fs::remove_dir_all(&raiz);
-    }
-
-    #[test]
-    fn instalar_por_cima_de_um_ja_instalado_e_recusado() {
-        // Sobrescrever apagaria os `dados/` daquele MOD junto, e essa é uma
-        // perda que não se desfaz.
-        let raiz = pasta("ja-instalado");
-        let origem = pacote(&raiz, "autor/exemplo");
-        let config = raiz.join("config");
-        instalar_de(&config, &origem, false).expect("a primeira instala");
-        std::fs::write(config.join("mods/autor/exemplo/marca-de-dados"), b"x").unwrap();
-
-        assert!(matches!(
-            instalar_de(&config, &origem, false),
-            Err(FalhaAoInstalarMod::JaInstalado { .. })
-        ));
-        assert!(
-            config.join("mods/autor/exemplo/marca-de-dados").is_file(),
-            "a recusa mexeu na instalação que já estava lá"
-        );
         let _ = std::fs::remove_dir_all(&raiz);
     }
 
@@ -423,14 +466,14 @@ mod instalar {
         #[cfg(unix)]
         {
             let raiz = pasta("atalho");
-            let origem = pacote(&raiz, "autor/exemplo");
+            let origem = pacote(&raiz, "autor/exemplo", None);
             let segredo = raiz.join("segredo.txt");
             std::fs::write(&segredo, b"nao sou deste mod").unwrap();
             std::os::unix::fs::symlink(&segredo, origem.join("atalho.txt")).unwrap();
             let config = raiz.join("config");
 
             assert!(matches!(
-                instalar_de(&config, &origem, false),
+                instalar_de(&config, &origem),
                 Err(FalhaAoInstalarMod::NaoCopiei(_))
             ));
             let _ = std::fs::remove_dir_all(&raiz);
@@ -439,98 +482,61 @@ mod instalar {
 
     /// **A10 da auditoria: uma cópia que falha não deixa nada pela metade.**
     ///
-    /// Antes a cópia ia direto para o destino final. Um erro no meio — disco
-    /// cheio, arquivo que sumiu — deixava lá uma pasta com parte do MOD, e a
-    /// tentativa seguinte a encontrava e respondia «já instalado». O conserto
-    /// normal virava apagar pasta à mão.
-    ///
     /// A falha é injetada com um atalho dentro do pacote, que `copiar_arvore`
-    /// recusa **depois** de já ter criado diretório e copiado arquivo — que é
-    /// exatamente a sequência que o achado descreve.
-    // **Só onde há atalho.** A falha é injetada com um link simbólico, e o
-    // Windows não tem `std::os::unix::fs::symlink` — sem isto o teste não
-    // compila lá, e o `test (windows)` da CI cai antes de rodar qualquer
-    // coisa. Mesmo `cfg` que `um_atalho_dentro_do_pacote_nao_e_instalado`
-    // já usava, e que eu não copiei junto com o padrão.
+    /// recusa **depois** de já ter criado diretório e copiado arquivo.
+    // **Só onde há atalho.** O Windows não tem `std::os::unix::fs::symlink`.
     #[cfg(unix)]
     #[test]
-    fn uma_copia_que_falha_no_meio_nao_deixa_destino_pela_metade() {
-        let raiz = pasta("meio");
-        let origem = pacote(&raiz, "autor/exemplo");
-        let config = raiz.join("config");
+    fn uma_copia_que_falha_no_meio_nao_deixa_pacote_pela_metade() {
+        let raiz = pasta("meia-copia");
+        let origem = pacote(&raiz, "autor/exemplo", None);
         std::fs::create_dir_all(origem.join("extra")).unwrap();
         std::os::unix::fs::symlink("/etc/hosts", origem.join("extra/atalho")).unwrap();
+        let config = raiz.join("config");
 
-        let erro = instalar_de(&config, &origem, false);
-
-        assert!(matches!(erro, Err(FalhaAoInstalarMod::NaoCopiei(_))));
+        assert!(matches!(
+            instalar_de(&config, &origem),
+            Err(FalhaAoInstalarMod::NaoCopiei(_))
+        ));
         assert!(
-            !config.join("mods/autor/exemplo").exists(),
-            "sobrou um destino pela metade, e a próxima tentativa vai chamá-lo de instalado"
+            !config.join(seele_ffi::mods::PACOTES).exists()
+                || std::fs::read_dir(config.join(seele_ffi::mods::PACOTES))
+                    .unwrap()
+                    .count()
+                    == 0,
+            "a cópia que falhou publicou um pacote assim mesmo"
         );
-        assert!(
-            !config.join(".mods-em-obras/autor/exemplo").exists(),
-            "a estufa da tentativa que falhou não foi recolhida"
-        );
+        let _ = std::fs::remove_dir_all(&raiz);
     }
 
-    /// E ela não toca no que já estava instalado.
-    // **Só onde há atalho.** A falha é injetada com um link simbólico, e o
-    // Windows não tem `std::os::unix::fs::symlink` — sem isto o teste não
-    // compila lá, e o `test (windows)` da CI cai antes de rodar qualquer
-    // coisa. Mesmo `cfg` que `um_atalho_dentro_do_pacote_nao_e_instalado`
-    // já usava, e que eu não copiei junto com o padrão.
+    /// **E uma cópia que falha não alcança o que já estava publicado.**
+    ///
+    /// Antes isto era uma dança de dois `rename` com volta atrás, porque o
+    /// destino era o mesmo lugar. Agora é uma propriedade do layout: pacotes
+    /// diferentes são pastas diferentes, e uma instalação que falha não tem
+    /// como tocar na de outro.
     #[cfg(unix)]
     #[test]
-    fn uma_atualizacao_que_falha_preserva_o_pacote_anterior() {
-        let raiz = pasta("preserva");
-        let origem = pacote(&raiz, "autor/exemplo");
+    fn uma_copia_que_falha_nao_toca_no_que_ja_estava_publicado() {
+        let raiz = pasta("nao-toca");
         let config = raiz.join("config");
-        instalar_de(&config, &origem, false).expect("a primeira instala");
+        let bom = instalar_de(&config, &pacote(&raiz, "autor/exemplo", None)).expect("o bom");
+        let _ = std::fs::remove_dir_all(raiz.join("origem"));
 
-        let torto = pacote(&raiz.join("torto"), "autor/exemplo");
+        let torto = pacote(&raiz, "autor/exemplo", Some("outro"));
         std::fs::create_dir_all(torto.join("extra")).unwrap();
         std::os::unix::fs::symlink("/etc/hosts", torto.join("extra/atalho")).unwrap();
-        let erro = instalar_de(&config, &torto, true);
+        assert!(instalar_de(&config, &torto).is_err());
 
-        assert!(matches!(erro, Err(FalhaAoInstalarMod::NaoCopiei(_))));
-        assert_eq!(
-            std::fs::read(config.join("mods/autor/exemplo/cliente/main.js")).unwrap(),
-            b"globalThis.x = 1;",
-            "a atualização falhou e levou o pacote que funcionava junto"
+        assert!(
+            config
+                .join(seele_ffi::mods::PACOTES)
+                .join(&bom.hash)
+                .join("cliente/main.js")
+                .is_file(),
+            "a instalação que falhou levou junto o pacote que já estava lá"
         );
-    }
-
-    /// **A09: atualizar não apaga a mesa de ninguém.**
-    ///
-    /// `dados/` é o quintal do MOD, e o `content_hash` já o exclui do pacote —
-    /// «runtime data is not part of the immutable, consented package». Trocar
-    /// a árvore inteira o levaria junto, e com ele as campanhas.
-    #[test]
-    fn atualizar_um_mod_preserva_os_dados_de_campanha() {
-        let raiz = pasta("dados");
-        let origem = pacote(&raiz, "autor/exemplo");
-        let config = raiz.join("config");
-        instalar_de(&config, &origem, false).expect("a primeira instala");
-
-        let quintal = config.join("mods/autor/exemplo/dados/canal-1");
-        std::fs::create_dir_all(&quintal).unwrap();
-        std::fs::write(quintal.join("mapa.png"), b"a campanha de alguem").unwrap();
-
-        let nova = pacote(&raiz.join("v2"), "autor/exemplo");
-        std::fs::write(nova.join("cliente/main.js"), b"globalThis.x = 2;").unwrap();
-        instalar_de(&config, &nova, true).expect("a atualização instala");
-
-        assert_eq!(
-            std::fs::read(config.join("mods/autor/exemplo/cliente/main.js")).unwrap(),
-            b"globalThis.x = 2;",
-            "o pacote não foi trocado"
-        );
-        assert_eq!(
-            std::fs::read(quintal.join("mapa.png")).unwrap(),
-            b"a campanha de alguem",
-            "a atualização apagou os dados de campanha"
-        );
+        let _ = std::fs::remove_dir_all(&raiz);
     }
 
     /// E o caminho feliz não deixa rastro: uma estufa esquecida é disco ocupado
@@ -538,14 +544,12 @@ mod instalar {
     #[test]
     fn uma_instalacao_que_deu_certo_nao_deixa_estufa() {
         let raiz = pasta("limpo");
-        let origem = pacote(&raiz, "autor/exemplo");
+        let origem = pacote(&raiz, "autor/exemplo", None);
         let config = raiz.join("config");
 
-        instalar_de(&config, &origem, false).expect("instala");
+        instalar_de(&config, &origem).expect("instala");
 
         assert!(!config.join(".mods-em-obras/autor/exemplo").exists());
-        assert!(!config
-            .join(".mods-em-obras/autor/exemplo.anterior")
-            .exists());
+        let _ = std::fs::remove_dir_all(&raiz);
     }
 }

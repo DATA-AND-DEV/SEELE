@@ -2666,7 +2666,9 @@ async fn instalar_mod(app: AppHandle) -> Result<Option<String>, mods::FalhaAoIns
     let Ok(pasta) = escolha.into_path() else {
         return Err(mods::FalhaAoInstalarMod::SemManifesto);
     };
-    mods::instalar_de(std::path::Path::new(&config_dir(&app)), &pasta, false).map(Some)
+    // O identificador é o que a tela mostra; o hash é o que o servidor exige,
+    // e quem o escolhe é outra decisão — ver `aplicar_conjunto_de_mods`.
+    mods::instalar_de(std::path::Path::new(&config_dir(&app)), &pasta).map(|p| Some(p.id))
 }
 
 /// Baixa do catálogo a versão mais nova e a instala ao lado das outras.

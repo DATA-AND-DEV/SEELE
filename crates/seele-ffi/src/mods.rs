@@ -51,6 +51,49 @@ pub struct ModInstalado {
     pub refused: Option<String>,
 }
 
+/// Onde os pacotes moram, endereçados pelo conteúdo — ver
+/// [`seele_core::mods::PACOTES`].
+pub const PACOTES: &str = seele_core::mods::PACOTES;
+
+/// Todo pacote guardado, com o conteúdo conferido contra o nome da pasta.
+#[must_use]
+pub fn listar_por_conteudo(pasta: &str) -> Vec<ModInstalado> {
+    seele_core::mods::listar_por_conteudo(std::path::Path::new(pasta))
+        .into_iter()
+        .map(achatar)
+        .collect()
+}
+
+/// Lê um pacote pelo hash do conteúdo dele.
+///
+/// **Por hash e não por identificador**: dois servidores desta máquina podem
+/// exigir bytes diferentes do mesmo MOD, e quem pergunta sabe quais quer.
+///
+/// # Errors
+///
+/// Devolve o nome da recusa quando o manifesto falta, não vale, ou quando o
+/// conteúdo não é o que o nome da pasta promete.
+pub fn ler_por_hash(pasta: &str, hash: &str) -> Result<ModInstalado, String> {
+    let dir = std::path::Path::new(pasta).join(PACOTES).join(hash);
+    match seele_core::mods::read_one(&dir) {
+        Ok(instalado) if seele_core::mods::hex(&instalado.hash) == hash => Ok(ModInstalado {
+            id: instalado.manifest.id,
+            version: instalado.manifest.version,
+            hash: hash.to_owned(),
+            client: instalado.manifest.client,
+            repo: instalado.manifest.repo,
+            reach: instalado.manifest.reach,
+            server: instalado.manifest.server.is_some(),
+            refused: None,
+        }),
+        // O conteúdo não é o que o nome promete. Servir assim mesmo seria
+        // entregar à janela bytes que ninguém revisou sob o hash de bytes que
+        // alguém revisou — que é exatamente a promessa que o hash faz.
+        Ok(_) => Err("conteudo-nao-bate".to_owned()),
+        Err(motivo) => Err(refusal_name(&motivo).to_owned()),
+    }
+}
+
 /// Todo MOD instalado nesta máquina, válido ou não.
 ///
 /// Uma pasta `mods/` que não existe é uma lista vazia, e não um erro: é o estado
