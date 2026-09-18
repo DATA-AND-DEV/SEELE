@@ -465,6 +465,15 @@ function fraseDeErro(erro, apelido) {
         "Nada de errado com o catálogo: atualize o SEELE em CONFIGURAÇÕES."
       );
     }
+    if (erro.NaoAplicou) {
+      // O pacote novo está no disco; o que não mudou foi o que o servidor
+      // exige. Dizer as duas coisas, porque o próximo passo depende de saber
+      // qual delas ficou para trás.
+      return (
+        "A VERSÃO NOVA FOI BAIXADA, MAS O SERVIDOR CONTINUA EXIGINDO A ANTERIOR. " +
+        "DESLIGUE E LIGUE O MOD PARA APLICÁ-LA."
+      );
+    }
     if (erro.NaoEstaNoCatalogo) {
       return `O CATÁLOGO NÃO LISTA «${erro.NaoEstaNoCatalogo}».`;
     }

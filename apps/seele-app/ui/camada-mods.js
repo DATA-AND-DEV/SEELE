@@ -514,6 +514,13 @@ async function instalarUmMod() {
     botao.disabled = false;
   }
   await desenharMods();
+  // **QA-05: o catálogo em mãos também envelheceu.** Instalar por pasta muda o
+  // que está nesta máquina, e é disso que a lista do catálogo tira o JÁ
+  // INSTALADO e o ATUALIZAR. Sem esta linha, ela continuava marcando como
+  // instalada a versão que acabou de ser substituída — e fechar e reabrir as
+  // configurações não resolvia, porque o que estava velho era a lista em
+  // memória, não a tela.
+  if (catalogoEmMaos) await desenharCatalogoEmMaos();
 }
 
 $("mods-instalar").addEventListener("click", () => {
@@ -666,8 +673,15 @@ async function instalarDoCatalogo(id, versao) {
   estado.textContent = `baixando ${id} ${versao}…`;
   let resultado;
   try {
-    await invoke("instalar_mod_do_catalogo", { id, versao });
-    resultado = `${id} ${versao} instalado, e desligado. Ligue quando quiser que ele valha.`;
+    // **QA-03: a frase era fixa e mentia na metade dos casos.** Ela dizia
+    // «instalado, e desligado» também quando a atualização acabara de reaplicar
+    // a exigência num MOD que estava ligado. O comando devolve o que de fato
+    // aconteceu, e a frase passa a sair daí.
+    const reaplicado = await invoke("instalar_mod_do_catalogo", { id, versao });
+    resultado = reaplicado
+      ? `${id} ${versao} instalado e aplicado neste servidor. Quem estava dentro ` +
+        `precisa entrar de novo e aceitar — o conjunto mudou.`
+      : `${id} ${versao} instalado, e desligado. Ligue quando quiser que ele valha.`;
   } catch (falha) {
     estado.classList.add("mods-recusado");
     estado.textContent = fraseDeErro(falha);

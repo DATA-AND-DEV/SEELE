@@ -209,6 +209,9 @@
   justify-content: space-between;
   gap: 12px;
   width: 100%;
+  /* QA-04: em largura pequena a ação desce para a própria linha, em vez de
+   * espremer o texto ao lado dela. */
+  flex-wrap: wrap;
 }
 
 .mods-linha-gestao > .server-dispositivo-nome {
@@ -232,10 +235,25 @@
 }
 
 /* As duas listas leem de fora — do disco e do servidor hospedado — e nada
- * limita o tamanho delas. O mesmo motivo do `.mods-lista` do diálogo. */
+ * limita o tamanho delas. O mesmo motivo do `.mods-lista` do diálogo.
+ *
+ * **QA-04 de 17/09.** Com a barra aparecendo, o botão da ação ficava colado
+ * nela: medido em zero pixel de folga até a borda direita da lista. E a seção
+ * inteira já rola, então a barra de dentro fazia duas regiões de rolagem
+ * disputarem o mesmo gesto num espaço de dezesseis linhas.
+ *
+ * `scrollbar-gutter: stable` reserva o espaço com ou sem barra — sem ele, a
+ * lista muda de largura quando o conteúdo cresce, e o texto reflui sozinho.
+ * O `padding-right` é a folga que faltava entre a ação e a barra.
+ *
+ * O teto sobe para 60% da janela em vez de dezesseis linhas fixas: um item de
+ * catálogo hoje traz título, resumo, versão, etiquetas de alcance e a linha de
+ * versão instalada, e dezesseis linhas eram a altura de **um** deles. */
 .mods-rolagem {
-  max-height: 16em;
+  max-height: 60vh;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
 }
 
 /* O aviso de que deu certo ocupa o mesmo lugar do erro, e a cor é o que os

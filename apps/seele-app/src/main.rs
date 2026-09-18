@@ -97,6 +97,21 @@ struct Session {
     /// `None` quando não há sessão, e também quando o servidor é hospedado aqui:
     /// esse não entra na lista de para-onde-voltar, e anotar sobre ele seria
     /// escrever numa entrada que não existe.
+    /// O endereço desta sessão, **sempre** — inclusive hospedando aqui.
+    ///
+    /// Irmão de `alvo`, e a diferença é o motivo de existirem dois. `alvo` é
+    /// «onde voltar»: ele alimenta a lista de visitados, e por isso exclui de
+    /// propósito um servidor hospedado nesta máquina — `127.0.0.1` não é lugar
+    /// aonde se volta, é o botão HOSPEDAR.
+    ///
+    /// Este é «onde estou», e um sim precisa dele. O QA de 17/09 achou o
+    /// defeito exato: `aplicar_mod` prendia o consentimento a `alvo`, que num
+    /// servidor hospedado aqui está vazio — então o aceite não era gravado, e o
+    /// diálogo que tinha acabado de prometer «você não vai ser perguntado outra
+    /// vez» perguntava de novo na reconexão seguinte.
+    ///
+    /// Um campo servindo a duas perguntas responde mal a uma delas.
+    endereco_da_sessao: Mutex<Option<String>>,
     alvo: Mutex<Option<String>>,
     /// O último `seele://` lido, **inteiro** — impressão digital inclusive.
     ///
@@ -522,6 +537,11 @@ async fn connect(
     // aonde se volta, é o botão HOSPEDAR. O `connection` decide isso pela bandeira
     // `--hospedar`; aqui não há bandeira, e o endereço é o que sobrou para
     // dizer a mesma coisa.
+    // **Fora do `if`, e é essa a correção.** Onde a sessão está não depende de
+    // o endereço merecer entrar na lista de atalhos.
+    if let Ok(mut onde) = session.endereco_da_sessao.lock() {
+        *onde = Some(alvo.clone());
+    }
     if !hospedado_aqui(&alvo) {
         if let Ok(mut guardado) = session.alvo.lock() {
             *guardado = Some(alvo.clone());
@@ -1286,6 +1306,11 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     // nunca a prometeu, e a recusa apareceria sem nada na tela que a explique.
     if let Ok(mut slot) = session.convite.lock() {
         *slot = None;
+    }
+    // Onde a sessão estava deixa de existir com ela: um sim gravado depois
+    // disso iria para o endereço da conversa anterior.
+    if let Ok(mut onde) = session.endereco_da_sessao.lock() {
+        *onde = None;
     }
 }
 
@@ -2169,7 +2194,14 @@ async fn aplicar_mod(
             .identidade
     };
 
-    let alvo = session.alvo.lock().ok().and_then(|a| a.clone());
+    // `endereco_da_sessao` e não `alvo`: o segundo é «onde voltar» e exclui um
+    // servidor hospedado aqui, que é justamente o caso em que quem liga o MOD é
+    // quem hospeda. Ver o campo.
+    let alvo = session
+        .endereco_da_sessao
+        .lock()
+        .ok()
+        .and_then(|a| a.clone());
     if let Some(alvo) = alvo {
         seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
             .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
@@ -2353,10 +2385,47 @@ async fn catalogo_de_mods() -> Result<catalogo::Catalogo, catalogo::FalhaNoCatal
 #[tauri::command]
 async fn instalar_mod_do_catalogo(
     app: AppHandle,
+    session: State<'_, Session>,
     id: String,
     versao: String,
-) -> Result<(), catalogo::FalhaNoCatalogo> {
-    catalogo::instalar_do_catalogo(&config_dir(&app), &id, &versao).await
+) -> Result<bool, catalogo::FalhaNoCatalogo> {
+    let ja_exigido = mod_exigido_aqui(&session, &id).await;
+    catalogo::instalar_do_catalogo(&config_dir(&app), &id, &versao).await?;
+
+    // **QA-01: baixar não é aplicar.** Trocar os arquivos no disco não mexe na
+    // linha que o servidor guarda, e é o **hash** dela que vai no anúncio.
+    // Depois de atualizar um MOD que estava ligado, o disco tinha a versão nova
+    // e o servidor continuava exigindo a antiga — e a tela dizia que o conteúdo
+    // instalado não é o que o servidor exige, sem dizer o que fazer. Sair dali
+    // pedia descobrir sozinho uma sequência de desligar, reconectar, ligar e
+    // reconectar.
+    //
+    // Reaplicar aqui é o que fecha a operação: a exigência passa a descrever os
+    // bytes que acabaram de chegar, e o sim desta máquina é regravado para o
+    // conjunto resultante — que é outro conjunto, e por isso precisa de outro
+    // sim, mesmo sendo a mesma decisão de segundos antes.
+    //
+    // Só para um MOD que **já estava exigido**: atualizar não é ligar, e um que
+    // estava desligado continua desligado.
+    if ja_exigido {
+        aplicar_mod(app, session, id, true)
+            .await
+            .map_err(|erro| catalogo::FalhaNoCatalogo::NaoAplicou(format!("{erro:?}")))?;
+    }
+    Ok(ja_exigido)
+}
+
+/// Se este MOD está exigido pelo servidor que **esta janela** hospeda.
+///
+/// Não hospedar não é falha: é a resposta «não», e é o caso de quem instala do
+/// catálogo sem ter servidor de pé.
+async fn mod_exigido_aqui(session: &State<'_, Session>, id: &str) -> bool {
+    let Ok(persistence) = persistence_do_mod(session) else {
+        return false;
+    };
+    let persistence = persistence.lock().await;
+    seele_server::persistence::mods::enabled(&persistence)
+        .is_ok_and(|ligados| ligados.iter().any(|ligado| ligado.id == id))
 }
 
 /// Todo sim que esta máquina já deu a um servidor.

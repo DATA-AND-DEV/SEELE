@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "seele/estilo",
+  "version": "1.0.0",
+  "api": 2,
+  "repo": "https://github.com/DATA-AND-DEV/SEELE",
+  "reach": ["dom", "aparência compartilhada do servidor"],
+  "client": "cliente/main.js",
+  "server": "servidor/main.js"
+}

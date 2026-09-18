@@ -77,6 +77,14 @@ pub(crate) enum FalhaNoCatalogo {
         conhecido: u32,
     },
     /// Um MOD ou uma versão que o catálogo não lista.
+    /// Os bytes chegaram e a exigência do servidor não acompanhou.
+    ///
+    /// QA-01 de 17/09. Atualizar um MOD que estava ligado troca os arquivos no
+    /// disco, e a linha que o servidor guarda — a que carrega o hash e vai no
+    /// anúncio — continua descrevendo a versão anterior. Reaplicar fecha a
+    /// operação; quando **isso** falha, o desfecho é próprio e merece nome
+    /// próprio: o pacote novo está instalado e o servidor ainda pede o velho.
+    NaoAplicou(String),
     NaoEstaNoCatalogo(String),
     /// Os bytes baixados não são os que o catálogo declara.
     ///

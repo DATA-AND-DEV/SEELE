@@ -11088,3 +11088,47 @@ fn toda_referencia_de_acessibilidade_aponta_para_algo_que_existe() {
          tela muda para quem enxerga: {orfas:?}"
     );
 }
+
+/// Um sim de quem hospeda é gravado para o endereço onde ele está.
+///
+/// **QA-02 do reteste de 17/09, e o defeito era do conserto entregue no mesmo
+/// dia.** `aplicar_mod` prendia o consentimento a `session.alvo` — e `alvo` é
+/// «onde voltar», preenchido **dentro** de `if !hospedado_aqui`, porque
+/// `127.0.0.1` não entra na lista de atalhos. Num servidor hospedado aqui,
+/// que é exatamente o caso de quem liga um MOD, o campo estava vazio: o aceite
+/// não era gravado, e o diálogo que tinha acabado de prometer «você não vai ser
+/// perguntado outra vez» perguntava de novo na reconexão seguinte.
+///
+/// Um campo servindo a duas perguntas responde mal a uma delas. São dois
+/// campos, e este guarda cobra as duas metades: que `aplicar_mod` leia o certo,
+/// e que o certo seja preenchido antes de qualquer condição sobre o endereço.
+#[test]
+fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
+    let fonte = read("src/main.rs");
+
+    let aplicar = body_of(&fonte, "async fn aplicar_mod");
+    assert!(
+        aplicar.contains("endereco_da_sessao"),
+        "`aplicar_mod` não lê o endereço desta sessão: {aplicar}"
+    );
+    assert!(
+        !aplicar.contains("session.alvo"),
+        "`aplicar_mod` lê `alvo`, que é «onde voltar» e está vazio justamente \
+         quando quem liga o MOD é quem hospeda:\n{aplicar}"
+    );
+
+    // E o preenchimento vem antes da condição que exclui o servidor local.
+    let conectar = body_of(&fonte, "async fn connect");
+    let (Some(onde), Some(condicao)) = (
+        conectar.find("session.endereco_da_sessao"),
+        conectar.find("if !hospedado_aqui"),
+    ) else {
+        panic!("`connect` deixou de preencher o endereço da sessão, ou de filtrar a lista de visitados");
+    };
+    assert!(
+        onde < condicao,
+        "o endereço da sessão é gravado **dentro** do filtro da lista de \
+         visitados, então hospedar aqui volta a deixá-lo vazio — que é o \
+         defeito inteiro"
+    );
+}
