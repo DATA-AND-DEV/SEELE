@@ -1,7 +1,7 @@
 {
   "esquema": 1,
   "api_oferecida": 2,
-  "gerado_em": 1789700772,
+  "gerado_em": 1789701073,
   "mods": [
     {
       "id": "seele/estilo",
@@ -10,8 +10,8 @@
       "titulo": "Estilo",
       "resumo": "O tema do servidor: cores, cantos, densidade e fonte, escolhidos por quem administra e aplicados na janela de quem entra.",
       "repo": "https://github.com/DATA-AND-DEV/ESTILO",
-      "oficial": false,
-      "nivel": "verificado",
+      "oficial": true,
+      "nivel": "oficial",
       "commit": "a2f33438092389a10cd6e247beac6330e531f3a3",
       "notas": [
         "roda-no-servidor"
@@ -60,7 +60,7 @@
             "servidor/main.js",
             "test/servidor.test.cjs"
           ],
-          "nivel": "verificado",
+          "nivel": "oficial",
           "notas": [
             "roda-no-servidor"
           ],
@@ -75,8 +75,8 @@
       "titulo": "Mesa",
       "resumo": "Mesa de RPG por canal: fichas, tabuleiro com peças, compêndio, iniciativa e ambientação. A voz continua na sala do SEELE.",
       "repo": "https://github.com/DATA-AND-DEV/MESA",
-      "oficial": false,
-      "nivel": "verificado",
+      "oficial": true,
+      "nivel": "oficial",
       "commit": "7ca40d1cc98e57adaed17c0e5f007593041c4eef",
       "notas": [
         "roda-no-servidor",
@@ -110,7 +110,7 @@
             "servidor/main.js",
             "test/mesa.test.cjs"
           ],
-          "nivel": "verificado",
+          "nivel": "oficial",
           "notas": [
             "roda-no-servidor",
             "guarda-dados-na-maquina"
@@ -144,7 +144,7 @@
             "servidor/main.js",
             "test/mesa.test.cjs"
           ],
-          "nivel": "verificado",
+          "nivel": "oficial",
           "notas": [
             "roda-no-servidor",
             "guarda-dados-na-maquina"
@@ -160,8 +160,8 @@
       "titulo": "Perfis",
       "resumo": "Um perfil por servidor: nome, pronomes, biografia, cor, avatar e banner — separados do seu perfil no SEELE.",
       "repo": "https://github.com/DATA-AND-DEV/PERFIS",
-      "oficial": false,
-      "nivel": "verificado",
+      "oficial": true,
+      "nivel": "oficial",
       "commit": "90f0859cd0211bf875a2d0cea4ee6275dff25dda",
       "notas": [
         "roda-no-servidor",
@@ -213,7 +213,7 @@
             "test/banner-animado.gif",
             "test/servidor.test.cjs"
           ],
-          "nivel": "verificado",
+          "nivel": "oficial",
           "notas": [
             "roda-no-servidor",
             "guarda-dados-na-maquina"
