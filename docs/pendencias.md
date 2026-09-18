@@ -40,6 +40,15 @@ repositório já pagou caro por isso.
   nesta sessão mudou isso: nenhum push foi feito, então o workflow continua sem
   ter rodado nem uma vez. É a pendência que mais custa hoje, porque três das
   outras dependem dela para sair do «não dá para conferir daqui».
+
+  **E agora ela tem preço medido.** No fechamento da v0.11.0 a bateria passou
+  aqui e reprovou na máquina Windows de quem opera — o Git de lá converte LF em
+  CRLF no checkout, e uma assinatura vale sobre bytes. Quem descobriu foi a
+  pessoa, rodando à mão o que o job devia ter rodado a cada push. O `cargo`
+  parou no primeiro alvo e contou dois testes; um clone com
+  `core.autocrlf=true` mostrou 47, incluindo o orquestrador de release inteiro.
+  O conserto é um `.gitattributes`, e cabe em três linhas. O que custou não foi
+  consertar: foi não ter quem visse.
 - **33 — tela entre duas máquinas Windows.** Quatro suspeitos eliminados por
   medida; o que sobra exige sessão gráfica.
 - **37 — a entrada em sala se confirma pelo silêncio.** Ela previu o que

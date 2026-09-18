@@ -4,7 +4,7 @@
 > Ela fica no repositório porque a v0.11.0 ainda **não foi publicada**: a tag e
 > a publicação são passo manual de quem opera, e estão descritos no fim.
 
-_As mudanças de `v0.10.5-1` até `v0.11.0`. São **198 commits em 12 dias**._
+_As mudanças de `v0.10.5-1` até `v0.11.0`. São **187 commits em 13 dias**._
 
 ---
 
@@ -246,6 +246,23 @@ obriga quem chegou a escolher antes de entender a diferença — e a primeira
 escolha de quem não sabe é fechar a aba. O que fica é o instalador que não pede
 administrador.
 
+### Uma falha de TLS fechada antes de sair
+
+O `rustls` que o SEELE usa aceitava mensagens de aperto de mão do TLS 1.3
+atravessando a fronteira entre níveis de cifra — o que a RFC 8446 proíbe na
+seção 5.1, e o que permitiria a alguém no meio do caminho injetar mensagem em
+claro num aperto de mão que devia estar protegido. É a RUSTSEC-2026-0285, e ela
+alcançava tudo: o `quinn`, que é todo o transporte QUIC entre cliente e
+servidor, e o `reqwest`, que busca atualização e catálogo de MODs. Em todos os
+sistemas.
+
+A dependência subiu para 0.23.45, que é a versão que corrige.
+
+Ela quase não foi vista. A conferência de dependências reprovava com o erro na
+**primeira** linha e dez avisos depois dele — dez ignorados que apontavam para
+avisos de GTK3 que o RustSec já havia retirado, e que continuavam ali fazendo
+volume. Os dez saíram. O que sobra da conferência é o que importa.
+
 ### A suíte de testes volta a ser evidência
 
 A bateria de conformidade reprovava um teste por rodada, sempre um diferente,
@@ -258,11 +275,24 @@ E o job de teste da integração contínua, que nunca rodou um doctest sequer,
 passou a rodar; as três conferências de regra do repositório, que existiam e
 ninguém executava, passaram a rodar a cada push.
 
+E a bateria passou a reprovar no Windows — em dois testes, e em nenhum outro.
+Não era o produto: os vetores assinados chegavam convertidos. O Git do Windows
+troca LF por CRLF na cópia de trabalho por padrão, e uma assinatura vale sobre
+**bytes**; o catálogo do indexador chegava lá com 226 bytes de `\r` a mais do
+que o arquivo que foi assinado, e a conferência recusava — como tinha de
+recusar. A mesma conversão alcançava a chave pública que este build confere, e
+uma chave malformada não recusa um catálogo adulterado: recusa todos eles.
+
+Um `.gitattributes` tira do conversor os oito arquivos cujos bytes são o
+contrato. E um guarda reprova **aqui**, em qualquer sistema, se o próximo vetor
+assinado entrar sem ser declarado — porque o conserto é invisível, e quem o
+esquecer vai ver a própria máquina passar.
+
 ---
 
 ## Todos os commits desta versão
 
-São 148, do mais recente ao mais antigo. O resumo curado está acima; esta lista
+São 187, do mais recente ao mais antigo. O resumo curado está acima; esta lista
 é para quem precisa achar o commit que mexeu numa coisa específica.
 
 > Gerada com `git log --oneline v0.10.5-1..v0.11.0 --no-merges` na hora de
@@ -332,18 +362,19 @@ e a publicação são o passo manual descrito abaixo.
 
 ### Os números desta volta
 
-Medidos do commit que gerou a release publicada (`12a6401`) até aqui, e não
-estimados:
+Medidos do commit que gerou a release publicada (`12a6401`) até `29dee8c`, e
+não estimados. O corte é ali de propósito: o commit que escreve estas linhas
+mudaria todos eles, e um número que conta a si mesmo não tem onde parar.
 
 | | v0.10.5-1 | v0.11.0 |
 |---|---|---|
 | protocolo | 3 | **6** |
 | API de MODs | não existia | **2** |
-| funções de teste | 1 530 | **1 997** |
+| funções de teste | 1 609 | **2 161** |
 | crates | — | **+1** (`seele-lancador`) |
 | comandos da ponte | — | **+24**, −2 |
 
-397 arquivos mudaram: +112 656 / −1 450 linhas. As áreas que mais cresceram
+397 arquivos mudaram: +112 821 / −1 469 linhas. As áreas que mais cresceram
 foram documentação, servidor, conformidade e núcleo, nesta ordem.
 
 **Quatro decisões novas ficaram registradas como ADR**, e cada uma governa uma
@@ -364,6 +395,10 @@ das entregas acima:
   Era um defeito desta rodada: `SEELE_VERSAO` não alcançava o build do app.
 - O `tauri.conf.json` voltou a `0.0.0` sozinho depois do empacotamento, como o
   `trap` do script promete. A versão é do artefato, nunca do repositório.
+- **O checkout do Windows foi simulado aqui**, com `git clone -c
+  core.autocrlf=true`. Antes do `.gitattributes`: 47 reprovados em 83 suítes.
+  Depois: a árvore sai byte a byte igual à do Mac — 727 arquivos, zero
+  diferenças — e a bateria fecha em **2 152 passando, nenhuma falha**.
 
 ### O que esta máquina **não** pôde provar
 
@@ -374,7 +409,9 @@ das entregas acima:
   permissão de microfone grudar e **não** vale para o Gatekeeper. Sem
   `TAURI_SIGNING_PRIVATE_KEY` não saiu pacote de atualização — este `.dmg`
   serve para instalar à mão e não serve como origem de atualização.
-- **O job `windows-2022` continua sem nunca ter rodado** (pendência 38).
+- **O job `windows-2022` continua sem nunca ter rodado** (pendência 38). A
+  simulação acima cobre o fim de linha, que é o que quebrou desta vez — e só
+  isso. Nenhum código de caminho de Windows foi executado num Windows.
 
 ### O passo manual, para quem for publicar
 
