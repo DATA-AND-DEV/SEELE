@@ -11258,3 +11258,64 @@ fn a_sonda_e_semeada_fora_do_filtro_da_lista_de_visitados() {
         "nada guarda a subida desta máquina, então a semente dela nunca existe"
     );
 }
+
+/// **O aceite obtém o conjunto que ele autoriza, antes de entrar.**
+///
+/// Relato de campo, na v0.11.0: «entrei como convidado num servidor com MOD de
+/// estilo e a cor do servidor não mudou». O aceite gravava o sim e reconectava,
+/// e mais nada. O que era exigido e não estava na máquina virava a anotação
+/// `sem-pacote`, desenhada **só** dentro da tela de MODs — que é justamente a
+/// tela que quem entra não abriu. O convidado chegava à sessão sem o pacote e
+/// sem ser avisado.
+///
+/// Este guarda prende as três metades do conserto:
+///
+///   1. aceitar chama a obtenção, e só entra depois dela;
+///   2. a obtenção pede o pacote pelo `id` **e** pela versão anunciada;
+///   3. e confere o **hash** exigido depois de obter — porque aceitar autoriza
+///      aquele conteúdo, e não qualquer coisa que leve o mesmo nome.
+#[test]
+fn o_aceite_obtem_o_conjunto_antes_de_entrar() {
+    let camada = without_comments(&read("ui/camada-mods.js"));
+
+    let aceitar = camada
+        .split_once("async function aceitarOsMods()")
+        .expect("a função que grava o sim")
+        .1;
+    let corpo = aceitar
+        .split_once("\nasync function ")
+        .map_or(aceitar, |(antes, _)| antes);
+
+    let obtem = corpo
+        .find("obterOConjunto")
+        .expect("aceitar tem de obter o conjunto que acabou de autorizar");
+    let entra = corpo
+        .find("conectar()")
+        .expect("aceitar continua entrando no servidor");
+    assert!(
+        obtem < entra,
+        "o aceite entra antes de obter os pacotes: o convidado chega à sessão \
+         sem o que o servidor exige e descobre pela cor que não mudou"
+    );
+
+    let obter = camada
+        .split_once("async function obterOConjunto(")
+        .expect("a função que põe o conjunto nesta máquina")
+        .1;
+    assert!(
+        obter.contains("instalar_mod_do_catalogo"),
+        "a obtenção deixou de buscar o pacote: aceitar volta a ser só um sim \
+         gravado, e o MOD exigido nunca chega"
+    );
+    assert!(
+        obter.contains("versao: m.version"),
+        "o pacote passou a ser pedido sem a versão anunciada: o servidor exige \
+         um conteúdo exato, e pedir «a mais nova» é substituí-lo em silêncio"
+    );
+    assert!(
+        obter.contains("i.hash === m.hash"),
+        "a obtenção deixou de conferir o hash exigido: uma cópia local com o \
+         mesmo nome passaria por autorizada, e aceitar viraria confiança em \
+         qualquer versão futura"
+    );
+}

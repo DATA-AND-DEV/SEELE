@@ -106,7 +106,7 @@ function linhaDeMod(mod, indice) {
  * @param {string} conjunto  a identidade do conjunto, para gravar o sim
  */
 async function abrirAceiteDeMods(alvo, mods, conjunto) {
-  aceitePendente = { alvo, conjunto };
+  aceitePendente = { alvo, conjunto, mods };
   focoAntesDoAceite = document.activeElement;
 
   // **Já houve um sim aqui, para outra lista?**
@@ -153,12 +153,29 @@ function fecharAceiteDeMods() {
   focoAntesDoAceite = null;
 }
 
-/** Grava o sim e tenta entrar de novo. */
+/**
+ * Grava o sim, **obtém o conjunto autorizado**, e tenta entrar de novo.
+ *
+ * **Por que a obtenção mora aqui, e não no laço que carrega os MODs.**
+ *
+ * Até a v0.11.0 aceitar gravava o sim e reconectava, e mais nada. O que era
+ * exigido e não estava nesta máquina virava uma anotação — `sem-pacote` — que
+ * só aparecia dentro da tela de MODs. O relato de campo foi «entrei como
+ * convidado num servidor com MOD de estilo e a cor não mudou»: o pacote nunca
+ * chegou, e nada na sessão disse isso a quem estava olhando.
+ *
+ * Obter aqui, e não no `carregarMods`, é o que mantém a promessa do aceite:
+ * ele autoriza **aquele conjunto exato**, o que está escrito na tela e nada
+ * mais. Um conjunto que mude depois é outra decisão e pede outro sim — por
+ * isso o laço periódico continua sem baixar nada por conta própria.
+ */
 async function aceitarOsMods() {
   if (!aceitePendente) return;
-  const { alvo, conjunto } = aceitePendente;
+  const { alvo, conjunto, mods } = aceitePendente;
   const botao = $("mods-aceitar");
+  const erro = $("mods-erro");
   botao.disabled = true;
+  erro.hidden = true;
   try {
     await invoke("aceitar_mods", { alvo, conjunto });
   } catch (falha) {
@@ -166,15 +183,93 @@ async function aceitarOsMods() {
     // novo pelo mesmo motivo, e a pessoa leria a mesma pergunta duas vezes sem
     // saber que o problema foi gravar.
     botao.disabled = false;
-    const erro = $("mods-erro");
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
     return;
   }
+
+  if (!(await obterOConjunto(mods ?? []))) {
+    // **Não entra.** Entrar sem os pacotes é chegar à sessão sem o que o
+    // servidor exige e descobrir depois, pela cor que não mudou. A tela fica
+    // aberta com o motivo, e os dois caminhos que o documento pede — tentar de
+    // novo, ou sair — continuam à mão: o botão volta, e recusar fecha.
+    botao.disabled = false;
+    botao.textContent = "TENTAR DE NOVO";
+    return;
+  }
+
   fecharAceiteDeMods();
   // A mesma porta de sempre. O aceite já está em disco, então esta tentativa
   // passa pelo ponto que recusou a anterior.
   await conectar();
+}
+
+/**
+ * Põe nesta máquina o conjunto exato que acabou de ser autorizado.
+ *
+ * Devolve `true` quando tudo o que o servidor exige está no disco com o hash
+ * exigido. Uma cópia local só vale se **bater o hash**: aceitar não é confiar
+ * em qualquer versão que leve o mesmo nome.
+ *
+ * @param {Array} mods o anúncio, como a tela o mostrou
+ */
+async function obterOConjunto(mods) {
+  const erro = $("mods-erro");
+  const dizer = (frase) => {
+    erro.hidden = false;
+    erro.textContent = frase;
+  };
+
+  let instalados;
+  try {
+    instalados = await invoke("mods_instalados");
+  } catch (falha) {
+    dizer(`não consegui ler o que está instalado aqui: ${fraseDeErro(falha)}`);
+    return false;
+  }
+
+  const temOExato = (m) =>
+    instalados.some((i) => i.id === m.id && i.hash === m.hash);
+  const faltando = mods.filter((m) => !temOExato(m));
+  if (faltando.length === 0) return true;
+
+  for (const [quantos, m] of faltando.entries()) {
+    dizer(`obtendo ${m.id} (${quantos + 1} de ${faltando.length})…`);
+    try {
+      await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version });
+    } catch (falha) {
+      // **Nomeia o MOD, a etapa e o próximo passo.** «Falhou» sozinho manda a
+      // pessoa adivinhar qual dos três, e o que fazer a respeito.
+      dizer(
+        `não consegui obter ${m.id} ${m.version}: ${fraseDeErro(falha)}. ` +
+          "Tente de novo, ou recuse a entrada.",
+      );
+      return false;
+    }
+  }
+
+  // **Conferir depois de obter, e não confiar no sucesso da obtenção.**
+  // O catálogo pode ter servido outra coisa sob a mesma versão; o que vale é o
+  // hash que o servidor exige. Sem esta volta, entrar aqui seria entrar com o
+  // que o catálogo quis dar, e não com o que foi autorizado.
+  dizer("verificando…");
+  try {
+    instalados = await invoke("mods_instalados");
+  } catch (falha) {
+    dizer(`não consegui conferir o que chegou: ${fraseDeErro(falha)}`);
+    return false;
+  }
+  const errados = mods.filter((m) => !temOExato(m));
+  if (errados.length > 0) {
+    dizer(
+      `o que chegou não é o que o servidor exige: ${errados
+        .map((m) => m.id)
+        .join(", ")}. Não vou entrar com outro conteúdo.`,
+    );
+    return false;
+  }
+  erro.hidden = true;
+  return true;
 }
 
 /**
