@@ -776,4 +776,143 @@ mod o_catalogo {
             seele_ffi::mods::hash_do_conjunto(&mut noutra)
         );
     }
+
+    /// **O defeito que não aparece na máquina de quem o introduz.**
+    ///
+    /// Os vetores desta suíte são conferidos por assinatura, e uma assinatura
+    /// vale sobre **bytes**. O Git do Windows converte LF em CRLF na cópia de
+    /// trabalho por padrão: o catálogo chega ao disco com 226 bytes de `\r` a
+    /// mais do que o arquivo que foi assinado, e a conferência recusa — como
+    /// tem de recusar. Foi assim que a bateria da v0.11.0 passou no Mac e
+    /// reprovou no Windows, nestes dois testes e em nenhum outro:
+    ///
+    /// ```text
+    /// o_catalogo_que_o_indexador_gera_e_aceito_por_este_build
+    /// as_revogacoes_que_o_indexador_gera_tambem_sao_aceitas
+    /// ```
+    ///
+    /// E a mensagem falava de assinatura, que é o sintoma. A causa estava no
+    /// checkout, antes de qualquer código rodar.
+    ///
+    /// O conserto é o `.gitattributes` da raiz. Este guarda existe porque o
+    /// conserto é **invisível**: quem acrescentar o próximo vetor assinado não
+    /// tem como descobrir sozinho que precisa declará-lo, porque a máquina dele
+    /// vai passar. Aqui ele descobre na hora, em qualquer sistema.
+    #[test]
+    fn todo_vetor_cujos_bytes_sao_o_contrato_fica_fora_do_conversor_de_fim_de_linha() {
+        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("o `apps/seele-app` mora dois níveis abaixo da raiz")
+            .to_path_buf();
+        let regras = std::fs::read_to_string(raiz.join(".gitattributes")).expect(
+            "o `.gitattributes` da raiz é o que mantém os vetores assinados \
+             intactos no Windows; sem ele a bateria reprova lá e passa aqui",
+        );
+
+        // As linhas que tiram o arquivo do conversor. O que interessa de cada
+        // uma é o padrão — a primeira palavra.
+        let sem_conversao: Vec<&str> = regras
+            .lines()
+            .map(str::trim)
+            .filter(|linha| !linha.starts_with('#') && !linha.is_empty())
+            .filter(|linha| linha.split_whitespace().any(|campo| campo == "-text"))
+            .filter_map(|linha| linha.split_whitespace().next())
+            .collect();
+        assert!(
+            !sem_conversao.is_empty(),
+            "o `.gitattributes` existe mas não tira nada do conversor"
+        );
+
+        // Onde moram os arquivos cujos bytes são conferidos. A prosa que os
+        // explica (`.md`) não é conferida por ninguém, e pode ser convertida à
+        // vontade.
+        // A regra que vale para o repositório inteiro. Sem ela o `\r` alcança
+        // `empacotar/publicar.sh` — `morrer() {` deixa de ser shell válido — e
+        // 44 testes do `xtask` caem junto, atrás destes dois.
+        assert!(
+            regras
+                .lines()
+                .map(str::trim)
+                .any(|linha| linha.starts_with("* ")
+                    && linha.contains("text=auto")
+                    && linha.contains("eol=lf")),
+            "sumiu a regra `* text=auto eol=lf`. É ela que faz a cópia de \
+             trabalho sair com LF em todo sistema; sem ela o Windows converte \
+             os scripts, e o orquestrador de release para de ser shell válido"
+        );
+
+        let pastas = [
+            "apps/seele-app/testes",
+            "apps/seele-app/chaves",
+            "crates/seele-lancador/testes",
+        ];
+        let mut desprotegidos = Vec::new();
+
+        // Um vetor solto na raiz, que este repositório e o indexador têm de ler
+        // byte a byte igual.
+        if !sem_conversao.contains(&"vetores-de-hash.json") {
+            desprotegidos.push("vetores-de-hash.json".to_owned());
+        }
+        for pasta in pastas {
+            let leitura = std::fs::read_dir(raiz.join(pasta))
+                .unwrap_or_else(|erro| panic!("não consegui ler `{pasta}`: {erro}"));
+            for item in leitura {
+                let caminho = item.expect("entrada de diretório").path();
+                if !caminho.is_file() {
+                    continue;
+                }
+                let nome = caminho
+                    .file_name()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .expect("nome de arquivo em UTF-8")
+                    .to_owned();
+                if nome.ends_with(".md") {
+                    continue;
+                }
+                let relativo = format!("{pasta}/{nome}");
+                // Duas formas de declarar, e as duas contam: o caminho inteiro,
+                // ou uma extensão que o alcance.
+                let coberto = sem_conversao.iter().any(|padrao| {
+                    *padrao == relativo
+                        || padrao
+                            .strip_prefix('*')
+                            .is_some_and(|sufixo| nome.ends_with(sufixo))
+                });
+                if !coberto {
+                    desprotegidos.push(relativo);
+                }
+            }
+        }
+        assert!(
+            desprotegidos.is_empty(),
+            "estes arquivos são conferidos byte a byte e o Git do Windows vai \
+             convertê-los no checkout — declare-os com `-text` no \
+             `.gitattributes` da raiz: {desprotegidos:?}"
+        );
+
+        // E a outra metade: se um deles já chegou convertido, a mensagem tem de
+        // dizer isso, e não deixar a suíte falar de assinatura.
+        for (nome, bytes) in [
+            (
+                "apps/seele-app/testes/catalogo-do-indexador.json",
+                &include_bytes!("../testes/catalogo-do-indexador.json")[..],
+            ),
+            (
+                "apps/seele-app/testes/revogacoes-do-indexador.json",
+                &include_bytes!("../testes/revogacoes-do-indexador.json")[..],
+            ),
+            (
+                "apps/seele-app/chaves/mods.pub",
+                super::CHAVE_DO_CATALOGO.as_bytes(),
+            ),
+        ] {
+            assert!(
+                !bytes.contains(&b'\r'),
+                "`{nome}` chegou com CRLF. Não é a assinatura que está errada: \
+                 é o checkout. Confira o `.gitattributes` da raiz e refaça o \
+                 clone, ou rode `git add --renormalize .`"
+            );
+        }
+    }
 }

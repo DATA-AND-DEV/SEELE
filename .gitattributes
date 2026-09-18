@@ -1,0 +1,47 @@
+# Este repositório é escrito com LF, e sai com LF em todo sistema.
+#
+# O Git do Windows converte LF em CRLF na cópia de trabalho por padrão
+# (`core.autocrlf=true`, que é o que o instalador do Git for Windows e as
+# máquinas da integração contínua deixam ligado). Nada aqui ganha com isso, e
+# três coisas quebram:
+#
+#   - **as assinaturas.** Uma assinatura vale sobre bytes. O catálogo do
+#     indexador chega ao Windows com 226 bytes de `\r` a mais do que o arquivo
+#     que foi assinado, e a conferência recusa — como tem de recusar;
+#   - **os scripts.** `morrer() {` com um `\r` no fim não é shell válido. O
+#     `empacotar/publicar.sh`, que é o orquestrador de release inteiro, para de
+#     ser analisável — e com ele 44 testes do `xtask`;
+#   - **os vetores comparados byte a byte**, como o `vetores-de-hash.json` que
+#     o SEELE-MODS-INDEXER confere contra o `hash_conteudo.py`.
+#
+# Isto não é hipótese. A bateria da v0.11.0 passou no Mac e reprovou no
+# Windows, e o `cargo` parou no primeiro alvo — dois testes. Um clone com
+# `core.autocrlf=true` mostrou o que havia atrás deles: 47 reprovados, 2 104
+# passados, nas 83 suítes.
+#
+# `text=auto` deixa o Git detectar o que é texto (binário não é tocado);
+# `eol=lf` manda a cópia de trabalho sair com LF em todo sistema.
+* text=auto eol=lf
+
+# E os arquivos cujos **bytes** são o contrato saem do conversor por inteiro:
+# `-text` é «não normalize na entrada nem converta na saída». A regra de cima
+# já bastaria hoje; esta sobrevive a alguém afrouxá-la.
+
+# Os vetores cruzados: catálogo e revogações de verdade, assinados de verdade
+# pelo indexador, conferidos por este build.
+apps/seele-app/testes/catalogo-do-indexador.json     -text
+apps/seele-app/testes/revogacoes-do-indexador.json   -text
+
+# O vetor de hash que este repositório e o indexador têm de ler igual.
+vetores-de-hash.json                                 -text
+
+# Os vetores do lançador, pelo mesmo motivo.
+crates/seele-lancador/testes/lista-de-revogacao-de-teste.json  -text
+
+# As assinaturas e as chaves. O `.minisig` é texto de quatro linhas e a chave
+# é texto de duas, mas os dois são analisados campo a campo — e uma chave
+# malformada não recusa um catálogo adulterado: recusa **todos** eles, o que no
+# Windows apagaria o catálogo de MODs inteiro do produto.
+*.minisig                                            -text
+*.pub                                                -text
+*.base64                                             -text
