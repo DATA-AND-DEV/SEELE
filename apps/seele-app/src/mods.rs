@@ -447,6 +447,12 @@ mod instalar {
     /// A falha é injetada com um atalho dentro do pacote, que `copiar_arvore`
     /// recusa **depois** de já ter criado diretório e copiado arquivo — que é
     /// exatamente a sequência que o achado descreve.
+    // **Só onde há atalho.** A falha é injetada com um link simbólico, e o
+    // Windows não tem `std::os::unix::fs::symlink` — sem isto o teste não
+    // compila lá, e o `test (windows)` da CI cai antes de rodar qualquer
+    // coisa. Mesmo `cfg` que `um_atalho_dentro_do_pacote_nao_e_instalado`
+    // já usava, e que eu não copiei junto com o padrão.
+    #[cfg(unix)]
     #[test]
     fn uma_copia_que_falha_no_meio_nao_deixa_destino_pela_metade() {
         let raiz = pasta("meio");
@@ -469,6 +475,12 @@ mod instalar {
     }
 
     /// E ela não toca no que já estava instalado.
+    // **Só onde há atalho.** A falha é injetada com um link simbólico, e o
+    // Windows não tem `std::os::unix::fs::symlink` — sem isto o teste não
+    // compila lá, e o `test (windows)` da CI cai antes de rodar qualquer
+    // coisa. Mesmo `cfg` que `um_atalho_dentro_do_pacote_nao_e_instalado`
+    // já usava, e que eu não copiei junto com o padrão.
+    #[cfg(unix)]
     #[test]
     fn uma_atualizacao_que_falha_preserva_o_pacote_anterior() {
         let raiz = pasta("preserva");
