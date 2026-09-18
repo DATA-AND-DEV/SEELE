@@ -11580,3 +11580,60 @@ fn os_interruptores_de_mod_editam_um_rascunho_e_salvar_aplica_de_uma_vez() {
         "fechar a tela descarta o rascunho sem perguntar: {fechar}"
     );
 }
+
+/// **Sair do servidor tem de encerrar o ambiente dos MODs, e sair é local.**
+///
+/// O descarregamento morava dentro do ouvinte de `Ended`, e `Ended` só chega do
+/// outro lado: a sala terminou, o enlace caiu, alguém foi moderado. Sair por
+/// vontade própria não emite nada — `Connection::disconnect` manda `Shutdown`,
+/// e o laço da FFI responde `return false`.
+///
+/// O efeito era o que se via, e foi relatado assim: a cor verde do servidor
+/// ficava na entrada e no launcher depois de sair. O ESTILO escreve os tokens
+/// em `document.documentElement`, e o `restore` dele só roda no descarte
+/// cooperativo — que nunca era pedido.
+///
+/// Este guarda prende as duas metades: existe **um** encerramento, e a saída
+/// local o chama **antes** de mostrar qualquer tela fora do servidor.
+#[test]
+fn sair_do_servidor_encerra_o_ambiente_dos_mods_antes_de_trocar_de_tela() {
+    let base = without_comments(&read("ui/base.js"));
+    let encerrar = js_function(&base, "function encerrarOAmbienteDosMods(");
+    assert!(
+        encerrar.contains("seele-mod-unload") && encerrar.contains("modsCarregados.clear()"),
+        "o encerramento deixou de descarregar os MODs: {encerrar}"
+    );
+
+    // E o ouvinte de `Ended` passa a ser um chamador, e não o dono: se ele
+    // voltar a ter o corpo, o caminho local volta a não ter nenhum.
+    //
+    // Localizado pelo que ele faz — `payload?.Ended` —, e não por ser o
+    // primeiro `listen("seele://event"` do arquivo: há dois, e o outro é o das
+    // respostas de MOD. Casar por posição é o erro que um guarda desta suíte
+    // já cometeu hoje.
+    let ouvinte = base
+        .split_once("if (!payload?.Ended) return;")
+        .expect("o ouvinte do término da sessão")
+        .1;
+    let ate_o_fim = ouvinte.split_once("\n});").map_or(ouvinte, |(a, _)| a);
+    assert!(
+        ate_o_fim.contains("encerrarOAmbienteDosMods()"),
+        "o término remoto deixou de passar pelo encerramento único: {ate_o_fim}"
+    );
+
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let ejetar = js_function(&sessao, "async function ejetar(");
+    let encerra = ejetar.find("encerrarOAmbienteDosMods()").expect(
+        "sair tem de encerrar o ambiente dos MODs: sem isto o tema do \
+                 servidor fica na entrada e no launcher, e só fechar o app o tira",
+    );
+    let esconde = ejetar
+        .find("$(\"tela-sessao\").hidden = true")
+        .expect("sair continua escondendo a sessão");
+    assert!(
+        encerra < esconde,
+        "o encerramento acontece depois de a tela trocar: há um instante com a \
+         tela de fora e o tema de dentro, e uma tarefa atrasada ainda alcança o \
+         MOD: {ejetar}"
+    );
+}

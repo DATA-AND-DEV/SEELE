@@ -590,8 +590,24 @@ async function carregarMods() {
 ligarControlesDaJanela();
 carregarMods();
 setInterval(carregarMods, 4000);
-listen("seele://event", ({ payload }) => {
-  if (!payload?.Ended) return;
+/**
+ * Encerra o ambiente dos MODs desta sessão. **Um caminho só, e idempotente.**
+ *
+ * Antes isto morava dentro do ouvinte de `Ended`, e `Ended` só chega do outro
+ * lado: a sala terminou, o enlace caiu, alguém foi moderado. **Sair por
+ * vontade própria não emite `Ended`** — `Connection::disconnect` manda
+ * `Shutdown`, e o laço responde `return false` sem avisar ninguém.
+ *
+ * O efeito era o que se via: o ESTILO escreve os tokens de tema em
+ * `document.documentElement`, e `restore` só roda no descarte cooperativo. Quem
+ * saía do servidor levava a cor dele para a entrada e para o launcher, e a
+ * única forma de tirá-la era fechar o app.
+ *
+ * Chamado de todo caminho que sai: saída local, término remoto, queda,
+ * expulsão. Chamar duas vezes é seguro e é o ponto — quem sai não precisa saber
+ * se o outro lado também vai avisar.
+ */
+function encerrarOAmbienteDosMods() {
   for (const [id, node] of modsCarregados) {
     globalThis.dispatchEvent(new CustomEvent("seele-mod-unload", { detail: id })); node.remove();
   }
@@ -603,4 +619,9 @@ listen("seele://event", ({ payload }) => {
   globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
   for (const p of pedidosDeMod.values()) { clearTimeout(p.timer); p.reject(new Error("disconnected")); }
   pedidosDeMod.clear();
+}
+
+listen("seele://event", ({ payload }) => {
+  if (!payload?.Ended) return;
+  encerrarOAmbienteDosMods();
 });

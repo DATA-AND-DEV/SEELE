@@ -2763,6 +2763,11 @@ async function sairDoServidorParaAEntrada() {
 /** Ejeta e volta para a tela de entrada, sem fechar o programa. */
 async function ejetar() {
   await invoke("disconnect");
+  // **Antes de mostrar qualquer tela fora do servidor.** `disconnect` manda
+  // `Shutdown`, e o laço para sem emitir `Ended` — que é o evento em que o
+  // descarregamento dos MODs estava pendurado. Sem esta linha, quem sai leva o
+  // tema do servidor para a entrada e para o launcher, e só fechar o app o tira.
+  encerrarOAmbienteDosMods();
   $("tela-sessao").hidden = true;
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
