@@ -132,11 +132,31 @@ mod testes {
             .map(|(_, v)| v.clone())
             .expect("o lançamento tem de dizer onde ficam os dados");
 
-        assert!(dados_novos.ends_with("dados/2.0.0-teste"), "{dados_novos}");
-        assert!(
-            dados_velhos.ends_with("dados/1.0.0-teste"),
-            "{dados_velhos}"
-        );
+        // **Comparado como caminho, e não como texto.** Aqui estava escrito
+        // `dados_novos.ends_with("dados/2.0.0-teste")`, e `dados_novos` é uma
+        // `String`: a barra ia crua para dentro da comparação. No Windows o
+        // valor termina em `dados\\2.0.0-teste`, e o teste reprovava com o
+        // produto certo — encontrado rodando a bateria naquela máquina, no
+        // fechamento da v0.11.0.
+        //
+        // O conserto não é trocar a barra: é parar de afirmar sobre a forma do
+        // texto. O que este teste tem a dizer é que o lançamento aponta para a
+        // pasta de dados **daquela versão**, e o depósito sabe qual é.
+        //
+        // O formato `dados/<versão>` continua preso, em
+        // `resolucao::testes::cada_versao_resolve_para_o_executavel_e_os_dados_dela`:
+        // lá o campo é `PathBuf`, e `Path::ends_with` compara componente a
+        // componente, que atravessa os três sistemas.
+        for (valor, versao) in [
+            (&dados_novos, "2.0.0-teste"),
+            (&dados_velhos, "1.0.0-teste"),
+        ] {
+            assert_eq!(
+                std::path::Path::new(valor),
+                deposito.pasta_de_dados(&Versao::nova(versao).unwrap()),
+                "o lançamento de {versao} não aponta para a pasta de dados dela"
+            );
+        }
         assert_ne!(dados_novos, dados_velhos);
         assert_ne!(nova.programa, velha.programa);
         let _ = std::fs::remove_dir_all(&raiz);

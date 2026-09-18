@@ -4,7 +4,10 @@
 > Ela fica no repositório porque a v0.11.0 ainda **não foi publicada**: a tag e
 > a publicação são passo manual de quem opera, e estão descritos no fim.
 
-_As mudanças de `v0.10.5-1` até `v0.11.0`. São **188 commits em 13 dias**._
+_As mudanças de `v0.10.5-1` até `v0.11.0`, em **13 dias**. O número exato de
+commits sai do `git log` na hora de marcar a tag: copiá-lo aqui seria inventar
+uma precisão que envelhece entre o texto e a publicação — foi o que aconteceu
+com os dois números que estavam neste lugar antes._
 
 ---
 
@@ -293,7 +296,7 @@ esquecer vai ver a própria máquina passar.
 
 ## Todos os commits desta versão
 
-São 188, do mais recente ao mais antigo. O resumo curado está acima; esta lista
+Do mais recente ao mais antigo. O resumo curado está acima; esta lista
 é para quem precisa achar o commit que mexeu numa coisa específica.
 
 > Gerada com `git log --oneline v0.10.5-1..v0.11.0 --no-merges` na hora de

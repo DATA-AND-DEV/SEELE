@@ -49,6 +49,14 @@ repositório já pagou caro por isso.
   `core.autocrlf=true` mostrou 47, incluindo o orquestrador de release inteiro.
   O conserto é um `.gitattributes`, e cabe em três linhas. O que custou não foi
   consertar: foi não ter quem visse.
+
+  **E logo atrás dele veio o segundo.** Com o fim de linha resolvido, a bateria
+  de lá avançou até o `seele-lancador` e parou noutro:
+  `o_lancamento_de_cada_versao_aponta_para_os_dados_dela` afirmava
+  `dados_novos.ends_with("dados/2.0.0-teste")` sobre uma `String` — comparação
+  de texto, com o separador escrito à mão. No Windows o valor termina em
+  contrabarra, e o teste reprovava com o produto certo. Dois defeitos de teste
+  em sequência, nenhum deles do produto, os dois invisíveis nesta máquina.
 - **33 — tela entre duas máquinas Windows.** Quatro suspeitos eliminados por
   medida; o que sobra exige sessão gráfica.
 - **37 — a entrada em sala se confirma pelo silêncio.** Ela previu o que
