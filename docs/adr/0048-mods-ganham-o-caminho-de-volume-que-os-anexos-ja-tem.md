@@ -1,15 +1,16 @@
 # 0048 — MODs ganham o caminho de volume que os anexos já têm
 
-Status: **rascunho** — desenho, não decisão. Nenhuma linha de produção foi
-tocada para escrevê-lo.
+Status: **aceito** — as duas decisões abertas foram respondidas por quem
+responde pelo projeto em 2026-09-18, e estão registradas abaixo com o que cada
+uma custa.
 Data: 2026-09-18
 Sobre o commit `e90bcc16751cad0861c73c3f57bfaa78c5b3e434`.
 
-> **Duas decisões neste documento são de quem responde pelo projeto, e estão
-> marcadas como tal.** Elas não têm resposta técnica única: são escolhas sobre
-> quanto disco de quem hospeda um MOD pode ocupar, e sobre quem confere os
-> bytes quando eles deixam de passar pelo QuickJS. O resto do desenho decorre
-> delas.
+> **As duas decisões foram tomadas**, e o desenho abaixo decorre delas:
+> **sem teto de disco para MODs**, e **o servidor confere os bytes**. A seção
+> «As duas decisões» guarda as alternativas que foram recusadas e o argumento
+> de cada uma — não como hesitação, mas porque um dia alguém vai perguntar por
+> que não há teto, e a resposta tem de estar escrita.
 
 ## O que doeu, medido
 
@@ -97,6 +98,30 @@ possível. O desenho atual de PERFIS já persegue essa propriedade — o coment�
 do autor diz *«Neither QuickJS nor arquivos.ler/escrever ever receives the
 entire 10 MiB image»* — e a paga com 2 331 arquivos. Aqui ela sai de graça.
 
+### A peça que faz a autorização valer: o servidor precisa saber do token
+
+O token nasce dentro do MOD, no QuickJS, e o servidor não interpreta o estado
+do MOD — nem deve. Se o cabeçalho do fluxo trouxesse só `{mod, token}`, o
+servidor não teria contra o que conferir, e «autorizar» seria uma formalidade
+que o cliente poderia pular: bastaria abrir um fluxo com qualquer token.
+
+Então o MOD ganha um verbo que **registra a espera** no servidor, chamado de
+dentro do `aoPedir`, no mesmo ato que responde à janela:
+
+```js
+volume.esperar({ token, caminho, tipos: ['png','jpeg','webp','gif'], prazo: 600 })
+```
+
+O servidor guarda a espera — quem pediu, qual pessoa, qual caminho, quais
+tipos, até quando — e é **contra ela** que o cabeçalho do fluxo é conferido. O
+caminho continua sendo escolhido pelo MOD e passando pelo `inner_path` de
+sempre; o que o servidor acrescenta é que nenhum byte entra sem uma espera
+registrada, com prazo, e para a pessoa certa.
+
+Uma espera é de **uma pessoa** e vale **uma vez**: consumida no primeiro fluxo
+que a case. Sem isso, um token vazado viraria um lugar de escrita permanente na
+pasta do MOD, para quem o tivesse.
+
 ### O que muda em `mods/arquivos.rs`
 
 Um arquivo de volume não é um arquivo de MOD comum, e misturá-los apagaria o
@@ -140,10 +165,27 @@ Três respostas possíveis, e nenhuma é obviamente certa:
   de gastar a cota de todas — mas exige que o servidor saiba de quem é cada
   arquivo, o que hoje ele não sabe: a pasta é do MOD, e o MOD é quem nomeia.
 
-**Minha recomendação: a primeira**, com o teto dito ao MOD na autorização, para
-que ele possa recusar antes de a pessoa esperar o envio inteiro. Ela é a única
-que não apaga nada de ninguém, e «quem hospeda limpa à mão» é honesto — quem
-hospeda escolheu hospedar.
+Minha recomendação foi a primeira, com o teto dito ao MOD na autorização.
+
+**A decisão foi outra: nenhum teto.** Ela é de quem responde pelo projeto, foi
+tomada com a consequência à vista, e o desenho a segue. O que ela significa, dito
+por extenso para não virar surpresa de outra pessoa:
+
+- o teto de 4 MiB por arquivo continua valendo para `arquivos::escrever`, que é
+  o caminho antigo. **O caminho de volume não tem teto**, nem por arquivo nem
+  por MOD;
+- o limite de fato que existia — o ritmo do controle, 20 quadros por segundo —
+  **deixa de existir** neste caminho. Quanto disco de quem hospeda um MOD ocupa
+  passa a depender inteiramente de quem usa o MOD;
+- não há «o mais velho sai». Nada é apagado por conta própria, que era o custo
+  que se queria evitar, e ele foi evitado.
+
+**E é por isso que uma coisa deixa de ser opcional.** Sem teto, quem hospeda
+precisa **ver**: quanto cada MOD ocupa, e desde quando. Um produto que deixasse
+o disco encher sem ter onde olhar seria «o produto sabe e não conta», que é a
+falha que este repositório mais paga. A visibilidade entra junto com o caminho,
+e não depois — ela é a metade que torna «sem teto» uma decisão e não um
+descuido.
 
 ### 2. Quem confere os bytes
 
@@ -159,9 +201,9 @@ quando os bytes não passam pelo QuickJS.
   e move para os MODs uma responsabilidade que eles não têm como cumprir sem
   ver os bytes.
 
-**Minha recomendação: a primeira.** E ela tem um efeito colateral bom: a
-conferência passa a ser do produto, igual para todo MOD, em vez de cada autor
-reescrever a sua — e o ADR 0045 já diz que o produto base tem regras.
+**Decidido: a primeira.** E ela tem um efeito colateral bom: a conferência
+passa a ser do produto, igual para todo MOD, em vez de cada autor reescrever a
+sua — e o ADR 0045 já diz que o produto base tem regras.
 
 ## Consequências
 
@@ -171,8 +213,9 @@ PERFIS perde 2 331 arquivos por imagem, a fila de 125 ms, o índice e a coleta
 de lixo orçamentada — todos existem para contornar a ausência disto.
 
 **Perde-se** simplicidade no protocolo: mais um tipo de fluxo, mais um
-cabeçalho, mais um balde. E o teto de disco passa a ser política escrita, em vez
-de consequência acidental do ritmo do controle — o que é melhor, e é trabalho.
+cabeçalho, mais um balde. E perde-se o limite de disco que existia sem ninguém
+ter decidido — o ritmo do controle. Ele era acidental e agora não existe; no
+lugar dele fica a visibilidade, que é decisão e não acidente.
 
 **O que este ADR não resolve:** dois MODs enviando ao mesmo tempo de conexões
 diferentes não se ordenam entre si, como o 0027 já registra para anexos, e voz
