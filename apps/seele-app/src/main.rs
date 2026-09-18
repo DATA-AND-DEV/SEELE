@@ -2187,6 +2187,17 @@ enum FalhaNoMod {
         /// O nome da recusa, de uma lista fechada.
         motivo: String,
     },
+    /// **O conjunto mudou desde que a tela abriu.**
+    ///
+    /// Outro operador, ou outro processo desta mesma máquina, aplicou um
+    /// conjunto enquanto esta tela estava aberta com um rascunho em cima do
+    /// conjunto antigo. Gravar assim mesmo apagaria a decisão do outro sem que
+    /// ninguém soubesse — e as duas pessoas sairiam achando que a sua valeu.
+    ConjuntoMudou {
+        /// A identidade do conjunto que está de pé agora, para a tela recarregar
+        /// e o rascunho ser refeito sobre ele.
+        atual: String,
+    },
 }
 
 /// Um MOD como a janela o desenha.
@@ -2337,6 +2348,119 @@ async fn aplicar_mod(
     // `endereco_da_sessao` e não `alvo`: o segundo é «onde voltar» e exclui um
     // servidor hospedado aqui, que é justamente o caso em que quem liga o MOD é
     // quem hospeda. Ver o campo.
+    let alvo = session
+        .endereco_da_sessao
+        .lock()
+        .ok()
+        .and_then(|a| a.clone());
+    if let Some(alvo) = alvo {
+        seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
+            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    }
+    Ok(identidade)
+}
+
+/// A identidade do conjunto que este servidor exige agora.
+///
+/// A tela de gestão a lê ao abrir e a guarda como **base** do rascunho. É ela
+/// que o SALVAR devolve para conferência: se o que está de pé na hora de gravar
+/// for outro, alguém aplicou no meio, e gravar por cima apagaria a decisão
+/// dessa pessoa em silêncio.
+///
+/// Vazia quando esta janela não hospeda — não há conjunto de que falar.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando o banco não responde.
+#[tauri::command]
+async fn conjunto_exigido_agora(session: State<'_, Session>) -> Result<String, FalhaNoMod> {
+    let Ok(persistence) = persistence_do_mod(&session) else {
+        return Ok(String::new());
+    };
+    let persistence = persistence.lock().await;
+    Ok(seele_server::mods::anuncio::conjunto_exigido(&persistence)
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+        .identidade)
+}
+
+/// Aplica um conjunto inteiro de MODs num ato — o SALVAR da tela de gestão.
+///
+/// # Por que não é um laço sobre [`aplicar_mod`]
+///
+/// Porque cada chamada daquele acorda o anúncio, e acordar o anúncio derruba
+/// quem está dentro. Ligar três MODs custava três quedas ao operador e a todo
+/// mundo que estava com ele. O documento de ajustes de 18/09 pede «no máximo
+/// um ciclo de reconexão por aplicação, não um por switch», e diz explicitamente
+/// para não construir isto como laço. [`definir_conjunto`] escreve tudo numa
+/// transação e acorda uma vez.
+///
+/// # A conferência de conflito
+///
+/// `base` é a identidade do conjunto que a tela leu quando abriu. Se o que está
+/// de pé agora for outro, alguém aplicou no meio, e gravar por cima apagaria a
+/// decisão dessa pessoa em silêncio. A recusa devolve a identidade atual, para
+/// a tela recarregar e a pessoa refazer o rascunho sabendo o que mudou.
+///
+/// Vazia dispensa a conferência: é o caminho de quem abriu a tela sem conjunto
+/// nenhum de pé.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando um dos MODs não serve, quando esta janela não hospeda,
+/// quando o conjunto mudou por baixo, ou quando o banco não responde. **Nada é
+/// gravado em nenhum desses casos**: a validação inteira acontece antes da
+/// primeira escrita, e a escrita é uma transação.
+#[tauri::command]
+async fn aplicar_conjunto_de_mods(
+    app: AppHandle,
+    session: State<'_, Session>,
+    ligados: Vec<String>,
+    base: String,
+) -> Result<String, FalhaNoMod> {
+    let persistence = persistence_do_mod(&session)?;
+
+    // **Validar tudo antes de escrever qualquer coisa.** Um MOD que não serve
+    // no meio da lista não pode deixar metade do conjunto aplicada: o servidor
+    // ficaria exigindo uma mistura que ninguém decidiu.
+    let mut linhas = Vec::with_capacity(ligados.len());
+    for id in &ligados {
+        let instalado = seele_ffi::mods::ler_um(&config_dir(&app), id)
+            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+        linhas.push(seele_server::persistence::mods::EnabledMod {
+            id: instalado.id,
+            version: instalado.version,
+            hash: instalado.hash,
+            repo: instalado.repo,
+            reach: instalado.reach,
+            server_half: instalado.server,
+        });
+    }
+
+    let identidade = {
+        let persistence = persistence.lock().await;
+
+        let atual = seele_server::mods::anuncio::conjunto_exigido(&persistence)
+            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+            .identidade;
+        if !base.is_empty() && base != atual {
+            return Err(FalhaNoMod::ConjuntoMudou { atual });
+        }
+
+        seele_server::persistence::mods::definir_conjunto(&persistence, &linhas)
+            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+
+        // Lida depois da escrita, e pela mesma função que o anúncio usa — a
+        // mesma razão de `aplicar_mod`: uma segunda definição de «o mesmo
+        // conjunto» discordaria da primeira no dia em que um campo entrasse.
+        seele_server::mods::anuncio::conjunto_exigido(&persistence)
+            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+            .identidade
+    };
+
+    // **Um sim, para o conjunto resultante.** Salvar já é a decisão informada
+    // do operador sobre o conjunto que vai valer; perguntar de novo, logo
+    // depois, seria perguntar o que acabou de ser respondido. Isto não autoriza
+    // mudança futura, e não dispensa o aceite de quem entra.
     let alvo = session
         .endereco_da_sessao
         .lock()
@@ -4557,6 +4681,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             abrir_no_navegador,
+            aplicar_conjunto_de_mods,
+            conjunto_exigido_agora,
             connect,
             hospedar,
             caminho_entre_pares,

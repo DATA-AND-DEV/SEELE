@@ -79,6 +79,62 @@ pub fn enable(persistence: &Persistence, ligado: &EnabledMod) -> Result<()> {
     Ok(())
 }
 
+/// Sets the whole required set in one go: exactly these on, everything else off.
+///
+/// # Why this exists beside `enable` and `disable`
+///
+/// **Because each of those wakes the announcement.** `anotar_mudanca_nos_mods`
+/// is what makes the server re-read the set and drop the sessions whose set
+/// changed; calling it once per switch is one reconnection per switch. An
+/// operator turning three MODs on was kicked out of their own session three
+/// times, and every person in it with them.
+///
+/// Reported in the adjustments document of 18/09: «cada ativação expulsa o host
+/// da sessão e exige nova entrada. Ativar vários MODs repete o processo para
+/// cada um.» The ask is at most **one** transition per apply, and a loop over
+/// the two functions above cannot give it — which is why the document says not
+/// to build it that way.
+///
+/// One transaction, so a failure halfway leaves the previous set whole rather
+/// than a mixture of both; and one wake, after the commit.
+///
+/// # Errors
+///
+/// Fails if the rows cannot be written. Nothing is written when it fails.
+pub fn definir_conjunto(persistence: &Persistence, ligados: &[EnabledMod]) -> Result<()> {
+    // `unchecked_transaction` for the reason `channels::delete_channel` states:
+    // PERSISTENCE is one connection behind one mutex, and nothing nests here.
+    let transaction = persistence.connection().unchecked_transaction()?;
+
+    // Off first, then on. The other order would turn one on and immediately
+    // turn it off again when it is also in the list.
+    transaction.execute("UPDATE mods SET enabled = 0", [])?;
+    for ligado in ligados {
+        let reach = serde_json::to_string(&ligado.reach).unwrap_or_else(|_| "[]".to_owned());
+        transaction.execute(
+            "INSERT INTO mods (id, version, hash, repo, reach, server_half, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, enabled = 1",
+            params![
+                ligado.id,
+                ligado.version,
+                ligado.hash,
+                ligado.repo,
+                reach,
+                i64::from(ligado.server_half)
+            ],
+        )?;
+    }
+    transaction.commit()?;
+
+    // **Once, and after the commit.** Before it would wake the announcement to
+    // read a set that is not yet there; once per row would be the very defect
+    // this function exists to remove.
+    persistence.anotar_mudanca_nos_mods();
+    Ok(())
+}
+
 /// Turns a MOD off, keeping its row and its data.
 ///
 /// # Errors
@@ -446,5 +502,106 @@ mod tests {
             !aviso.has_changed().expect("vivo"),
             "escrever no quintal de um MOD passou por troca de conjunto"
         );
+    }
+
+    /// **Um conjunto, uma queda.**
+    ///
+    /// O defeito que `definir_conjunto` existe para remover: cada `enable` e
+    /// cada `disable` acorda o anúncio, e acordar o anúncio derruba quem estava
+    /// dentro. Ligar três MODs custava três quedas — ao operador e a todo mundo
+    /// que estava com ele.
+    ///
+    /// Medido no contador que o próprio anúncio observa, e não por leitura do
+    /// código: é ele que decide quantas vezes o servidor relê o conjunto.
+    #[test]
+    fn aplicar_um_conjunto_inteiro_acorda_o_anuncio_uma_vez_so() {
+        let persistence = banco();
+        let olho = persistence.mods_mudaram();
+        let antes = *olho.borrow();
+
+        definir_conjunto(
+            &persistence,
+            &[
+                ligado("seele/a", "1.0.0", "ha"),
+                ligado("seele/b", "1.0.0", "hb"),
+                ligado("seele/c", "1.0.0", "hc"),
+            ],
+        )
+        .expect("aplicar");
+
+        assert_eq!(
+            *olho.borrow() - antes,
+            1,
+            "três MODs num ato acordaram o anúncio mais de uma vez: cada acordada \
+             é uma queda para quem está dentro, e é isso que este caminho existe \
+             para não fazer"
+        );
+    }
+
+    /// O conjunto é **o conjunto**: o que não está na lista sai, sem precisar
+    /// ser nomeado. Uma tela que só mandasse o que ligou deixaria o desligado
+    /// ligado, e o servidor continuaria exigindo o que a pessoa acabou de tirar.
+    #[test]
+    fn o_que_nao_esta_na_lista_fica_desligado() {
+        let persistence = banco();
+        enable(&persistence, &ligado("seele/velho", "1.0.0", "hv")).expect("habilitar");
+        enable(&persistence, &ligado("seele/fica", "1.0.0", "hf")).expect("habilitar");
+
+        definir_conjunto(&persistence, &[ligado("seele/fica", "1.0.0", "hf")]).expect("aplicar");
+
+        let ligados: Vec<String> = enabled(&persistence)
+            .expect("ler")
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ligados, vec!["seele/fica".to_owned()]);
+    }
+
+    /// E um conjunto vazio é um conjunto: «este servidor não exige MOD nenhum»
+    /// é uma decisão legítima, e não a ausência de uma.
+    #[test]
+    fn um_conjunto_vazio_desliga_todos_e_nao_e_ignorado() {
+        let persistence = banco();
+        enable(&persistence, &ligado("seele/a", "1.0.0", "ha")).expect("habilitar");
+        enable(&persistence, &ligado("seele/b", "1.0.0", "hb")).expect("habilitar");
+
+        definir_conjunto(&persistence, &[]).expect("aplicar");
+
+        assert!(enabled(&persistence).expect("ler").is_empty());
+    }
+
+    /// Os seis campos atravessam, e não só a identidade — é o que a tela de
+    /// aceite de quem entra lê antes de baixar um byte.
+    #[test]
+    fn a_linha_inteira_atravessa_e_nao_so_o_identificador() {
+        let persistence = banco();
+        let mut esperado = ligado("seele/x", "2.1.0", "hx");
+        esperado.repo = "https://exemplo.br/x".to_owned();
+        esperado.reach = vec!["dom".to_owned(), "world".to_owned()];
+        esperado.server_half = true;
+
+        definir_conjunto(&persistence, std::slice::from_ref(&esperado)).expect("aplicar");
+
+        assert_eq!(enabled(&persistence).expect("ler"), vec![esperado]);
+    }
+
+    /// **Reaplicar o mesmo conjunto não é uma mudança de conjunto** — mas ainda
+    /// é uma escrita, e o anúncio relê. O que não pode é ficar pela metade.
+    #[test]
+    fn aplicar_duas_vezes_o_mesmo_conjunto_deixa_o_mesmo_conjunto() {
+        let persistence = banco();
+        let conjunto = [
+            ligado("seele/a", "1.0.0", "ha"),
+            ligado("seele/b", "1.0.0", "hb"),
+        ];
+        definir_conjunto(&persistence, &conjunto).expect("primeira");
+        definir_conjunto(&persistence, &conjunto).expect("segunda");
+
+        let ligados: Vec<String> = enabled(&persistence)
+            .expect("ler")
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ligados, vec!["seele/a".to_owned(), "seele/b".to_owned()]);
     }
 }

@@ -406,6 +406,35 @@ async function abrirServer(origem) {
 
 /** Fecha e devolve para a tela que a abriu. */
 function fecharServer() {
+  // **Sair com rascunho por salvar perde a decisão sem dizer.**
+  //
+  // O painel de MODs passou a ter estado pendente: os interruptores mexem
+  // numa seleção, e o servidor só muda no SALVAR. Fechar a tela joga essa
+  // seleção fora, e fazer isso calado é o modo de falhar que este repositório
+  // mais conhece — «o produto sabe e não conta».
+  //
+  // Pergunta e volta, em vez de salvar por conta própria: aplicar o conjunto
+  // derruba todo mundo que está dentro, e isso não é coisa que se faça porque
+  // alguém clicou em VOLTAR.
+  if (typeof haRascunhoPorSalvar === "function" && haRascunhoPorSalvar()) {
+    abrirConfirmacao(
+      "SAIR SEM SALVAR?",
+      "Você mudou quais MODs este servidor exige e ainda não salvou.\n" +
+        "Sair agora descarta essas mudanças — o servidor continua exigindo o " +
+        "conjunto de antes.",
+      "SAIR SEM SALVAR",
+      () => {
+        descartarORascunho();
+        fecharServerMesmo();
+      },
+    );
+    return;
+  }
+  fecharServerMesmo();
+}
+
+/** O fechamento propriamente dito, depois de a pergunta acima ter passado. */
+function fecharServerMesmo() {
   guardarFoco("tela-server");
   $("tela-server").hidden = true;
   const volta = telaDeOrigem ?? "tela-boot";

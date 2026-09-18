@@ -2680,6 +2680,27 @@
                 <p id="mods-sem-hospedar" class="nota" hidden>Ligar e desligar MOD
                   é do servidor que <b>esta janela</b> hospeda. Sem hospedar, a
                   lista mostra o que está instalado e mais nada.</p>
+                <!--
+                  **O rascunho, e o ato único que o aplica.**
+
+                  Cada interruptor gravava no servidor na hora, e cada gravação
+                  acorda o anúncio — que derruba quem está dentro. Ligar três
+                  MODs expulsava o operador da própria sessão três vezes, e
+                  todo mundo que estava com ele junto.
+
+                  Agora os interruptores mexem só nesta seleção. O servidor
+                  continua com o conjunto dele até SALVAR, que aplica tudo num
+                  ato só. `aria-live` porque a lista de pendentes muda sem que a
+                  pessoa mude de foco, e quem lê por leitor de tela precisa
+                  saber o que está para ser salvo.
+                -->
+                <div id="mods-rascunho" class="mods-rascunho" hidden>
+                  <p id="mods-pendentes" class="nota" aria-live="polite"></p>
+                  <div class="mods-rascunho-botoes">
+                    <button id="mods-salvar" class="botao" type="button">SALVAR ALTERAÇÕES</button>
+                    <button id="mods-descartar" class="botao-fantasma" type="button">DESCARTAR</button>
+                  </div>
+                </div>
                 <p id="mods-gestao-erro" class="erro" role="alert" hidden></p>
                 <button id="mods-instalar" class="botao" type="button">INSTALAR MOD DE UMA PASTA</button>
                 <p class="nota">Um MOD é uma pasta com <code>mod.json</code> dentro.

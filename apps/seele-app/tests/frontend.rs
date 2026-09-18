@@ -710,6 +710,25 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
 /// comments are stripped for that second reason: every explanation in
 /// `seele.js` is a `/** */`, and a guard a comment can satisfy is a guard that
 /// cannot fail.
+/// The markup with one `<section id="...">` taken out.
+///
+/// For a rule that holds over a screen **except** one panel, where the panel
+/// has a written reason of its own. Cutting by the section keeps the rest of
+/// the screen under the whole rule, rather than weakening the rule for all of
+/// it.
+fn sem_secao(markup: &str, id: &str) -> String {
+    let marca = format!("id=\"{id}\"");
+    let Some(dentro) = markup.find(&marca) else {
+        return markup.to_owned();
+    };
+    // From the `<section` that carries the id to the `</section>` that closes it.
+    let inicio = markup[..dentro].rfind('<').unwrap_or(dentro);
+    let fim = markup[dentro..]
+        .find("</section>")
+        .map_or(markup.len(), |onde| dentro + onde + "</section>".len());
+    format!("{}{}", &markup[..inicio], &markup[fim..])
+}
+
 fn without_comments(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -3696,16 +3715,39 @@ fn the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead()
     let page = read("ui/index.html");
     let server = screen_markup(&page, "tela-server", "tela-fim");
 
-    for absent in [
-        "SALVAR",
-        "DESCARTAR",
-        "RUÍDO",
-        "TEMA",
-        "GANHO",
-        "VOLUME",
-        "GERAR",
-        "COPIAR",
-    ] {
+    // **`SALVAR`/`DESCARTAR` deixaram de ser absolutos, e só no painel de MODs.**
+    //
+    // A razão escrita acima é sobre o painel de áudio, e continua valendo lá: a
+    // escolha vale na hora, e um SALVAR prometeria que nada muda até ser
+    // apertado — falso para som, que você precisa ouvir para saber se acertou.
+    //
+    // No painel de MODs o pendente existe de verdade. Aplicar ali não é
+    // instantâneo nem local: muda o que o servidor exige e derruba todo mundo
+    // que está dentro. Enquanto cada interruptor gravava na hora, ligar três
+    // MODs custava três quedas ao operador e a quem estava com ele — relatado
+    // no documento de ajustes de 18/09, que pede «no máximo um ciclo de
+    // reconexão por aplicação, não um por switch». O rascunho é o que torna
+    // isso possível, e um rascunho sem SALVAR não é um rascunho.
+    //
+    // O recorte é o painel, e não a tela: tudo o mais continua conferido
+    // inteiro, e o áudio segue sem botão nenhum de confirmar.
+    let fora_dos_mods = sem_secao(&server, "painel-mods");
+    for absent in ["SALVAR", "DESCARTAR"] {
+        assert!(
+            !names(&fora_dos_mods, absent),
+            "the settings screen draws `{absent}` outside the MODs panel. The \
+             choice applies now everywhere else, so there is nothing pending \
+             for a button to confirm."
+        );
+    }
+    assert!(
+        names(&server, "SALVAR"),
+        "the MODs panel lost its `SALVAR`: without it every switch writes to \
+         the server on the spot, and turning three MODs on drops everybody in \
+         the session three times"
+    );
+
+    for absent in ["RUÍDO", "TEMA", "GANHO", "VOLUME", "GERAR", "COPIAR"] {
         assert!(
             !names(&server, absent),
             "the settings screen draws `{absent}`, which nothing in this product \
@@ -11464,5 +11506,77 @@ fn quem_entrou_nao_recebe_interruptor_para_o_que_o_servidor_exige() {
         carregar.contains("modsExigidos.clear()") && carregar.contains("modsExigidos.add("),
         "a lista de exigidos deixou de ser refeita a cada anúncio: um MOD que \
          o servidor soltou continuaria sendo chamado de obrigatório: {carregar}"
+    );
+}
+
+/// **Os interruptores editam um rascunho; SALVAR aplica o conjunto uma vez.**
+///
+/// Relatado no documento de ajustes de 18/09: «cada ativação expulsa o host da
+/// sessão e exige nova entrada. Ativar vários MODs repete o processo para cada
+/// um». A causa está no banco — cada `enable`/`disable` chama
+/// `anotar_mudanca_nos_mods`, e acordar o anúncio encerra as sessões cujo
+/// conjunto mudou. Três interruptores, três quedas.
+///
+/// O documento é explícito sobre o conserto: «Não implementar como um laço de
+/// chamadas aos comandos atuais se cada chamada já notifica mudanças e encerra
+/// sessões». Este guarda prende as quatro metades do que ficou:
+///
+///   1. o interruptor mexe no rascunho, e não no servidor;
+///   2. SALVAR chama o comando atômico, e **não** `aplicar_mod` num laço;
+///   3. sem diferença, SALVAR não fica aceso — salvar sem mudança ainda
+///      escreveria, e escrever ainda derruba todo mundo, por nada;
+///   4. um segundo envio não sai enquanto o primeiro não voltou.
+#[test]
+fn os_interruptores_de_mod_editam_um_rascunho_e_salvar_aplica_de_uma_vez() {
+    let camada = without_comments(&read("ui/camada-mods.js"));
+
+    let linha = js_function(&camada, "function linhaDeModInstalado(");
+    assert!(
+        linha.contains("rascunho.add(mod.id)") && linha.contains("rascunho.delete(mod.id)"),
+        "o interruptor voltou a gravar no servidor em vez de mexer no rascunho: \
+         cada clique derruba todo mundo que está na sessão: {linha}"
+    );
+    assert!(
+        !linha.contains("perguntarETrocarOMod"),
+        "o interruptor voltou a aplicar na hora: {linha}"
+    );
+
+    let salvar = js_function(&camada, "async function salvarAlteracoes(");
+    assert!(
+        salvar.contains("aplicar_conjunto_de_mods"),
+        "SALVAR deixou de usar o comando atômico: {salvar}"
+    );
+    assert!(
+        !salvar.contains("aplicar_mod"),
+        "SALVAR virou um laço sobre o comando de um MOD só, que é exatamente o \
+         que o documento manda não fazer — cada chamada acorda o anúncio: \
+         {salvar}"
+    );
+    assert!(
+        salvar.contains("base: baseDoConjunto"),
+        "SALVAR deixou de mandar a base do rascunho, então uma mudança feita \
+         por outra pessoa é sobrescrita em silêncio: {salvar}"
+    );
+    assert!(
+        salvar.contains("salvando = true"),
+        "o envio deixou de ser trancado: dois cliques mandam dois conjuntos, e \
+         o segundo confere a base contra o que o primeiro acabou de gravar: \
+         {salvar}"
+    );
+
+    let barra = js_function(&camada, "function desenharRascunho(");
+    assert!(
+        barra.contains("$(\"mods-salvar\").disabled = !mudou"),
+        "SALVAR fica aceso sem diferença nenhuma: apertá-lo escreveria assim \
+         mesmo, e escrever derruba todo mundo por nada: {barra}"
+    );
+
+    // E sair sem salvar avisa: a seleção pendente é uma decisão, e descartá-la
+    // calado é «o produto sabe e não conta».
+    let server = without_comments(&read("ui/tela-server.js"));
+    let fechar = js_function(&server, "function fecharServer(");
+    assert!(
+        fechar.contains("haRascunhoPorSalvar()") && fechar.contains("abrirConfirmacao"),
+        "fechar a tela descarta o rascunho sem perguntar: {fechar}"
     );
 }

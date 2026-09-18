@@ -290,3 +290,33 @@
   padding: 0.25rem 0.5rem;
   white-space: nowrap;
 }
+
+/* ---------- o rascunho do conjunto ----------
+
+   A barra existe porque aplicar um conjunto de MODs não é uma mudança local:
+   ela derruba todo mundo que está na sessão. O que está pendente fica dito
+   antes, e num lugar que não se confunde com a lista.
+
+   Traço em cima e não caixa inteira: é continuação da lista, e não outro
+   bloco. */
+.mods-rascunho {
+  border-top: 1px solid var(--seele-osso-apagado);
+  padding-top: 0.75rem;
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mods-rascunho-botoes {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* O interruptor de uma linha que difere do servidor. Cor de acento e não de
+   recusa: pendente não é erro, é decisão ainda não aplicada. */
+.mods-pendente {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+}

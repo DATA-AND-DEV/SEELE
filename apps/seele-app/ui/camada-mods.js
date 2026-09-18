@@ -383,14 +383,35 @@ function linhaDeModInstalado(mod, hospedando) {
     return linha;
   }
 
+  // **O interruptor mexe no rascunho, e não no servidor.**
+  //
+  // Antes cada clique gravava na hora, e cada gravação acorda o anúncio — que
+  // derruba quem está dentro. Relatado assim: «cada ativação expulsa o host da
+  // sessão e exige nova entrada; ativar vários MODs repete o processo para
+  // cada um». Agora o servidor só muda no SALVAR, e muda de uma vez.
+  const ligadoNoRascunho = rascunho.has(mod.id);
   const botao = elemento("button", "botao-fantasma");
   botao.type = "button";
-  botao.textContent = mod.enabled ? "DESLIGAR" : "LIGAR";
+  botao.textContent = ligadoNoRascunho ? "DESLIGAR" : "LIGAR";
   // Sem hospedar não há servidor em que ligar. Desabilitado **e** explicado
   // logo abaixo da lista: um botão morto sem motivo é uma pergunta sem resposta.
   botao.disabled = !hospedando;
+  // O que está pendente é dito na própria linha, e não só no rodapé: quem rola
+  // uma lista longa não vê o rodapé enquanto decide.
+  if (hospedando && ligadoNoRascunho !== mod.enabled) {
+    botao.classList.add("mods-pendente");
+    texto.append(
+      elemento(
+        "span",
+        "mods-versao",
+        ligadoNoRascunho ? "vai passar a ser exigido" : "vai deixar de ser exigido",
+      ),
+    );
+  }
   botao.addEventListener("click", () => {
-    perguntarETrocarOMod(mod);
+    if (ligadoNoRascunho) rascunho.delete(mod.id);
+    else rascunho.add(mod.id);
+    desenharMods().catch((falha) => console.warn("desenhar mods:", falha));
   });
   caixa.append(botao);
 
@@ -471,6 +492,141 @@ const FASES_DO_MOD = {
   descarregado: "descarregado: o servidor deixou de exigi-lo",
 };
 
+// ------------------------------------------------- o rascunho do conjunto
+//
+// **Por que existe.** Cada interruptor gravava no servidor na hora, e cada
+// gravação acorda o anúncio, que encerra as sessões cujo conjunto mudou. Ligar
+// três MODs derrubava o operador da própria sessão três vezes, e com ele todo
+// mundo que estava lá. O documento de ajustes de 18/09 pede «no máximo um
+// ciclo de reconexão por aplicação, não um por switch».
+//
+// O rascunho é a seleção pendente. O servidor continua com o conjunto dele até
+// o SALVAR, que aplica tudo num ato — `aplicar_conjunto_de_mods`, que escreve
+// numa transação e acorda o anúncio uma vez só.
+
+/** O que estaria ligado se esta tela fosse salva agora. */
+const rascunho = new Set();
+
+/** O que o servidor exigia quando esta tela leu a lista. */
+let conjuntoNoServidor = new Set();
+
+/**
+ * A identidade do conjunto sobre o qual este rascunho foi feito.
+ *
+ * É a base da conferência de conflito: se outro operador aplicou enquanto esta
+ * tela estava aberta, gravar por cima apagaria a decisão dele em silêncio.
+ */
+let baseDoConjunto = "";
+
+/** Impede o segundo envio enquanto o primeiro não voltou. */
+let salvando = false;
+
+/** O que muda do conjunto de pé para o rascunho. */
+function pendencias() {
+  const ligar = [...rascunho].filter((id) => !conjuntoNoServidor.has(id));
+  const desligar = [...conjuntoNoServidor].filter((id) => !rascunho.has(id));
+  return { ligar, desligar };
+}
+
+/** Há edição por salvar? Lido de fora, pelo aviso de saída. */
+function haRascunhoPorSalvar() {
+  const { ligar, desligar } = pendencias();
+  return ligar.length > 0 || desligar.length > 0;
+}
+
+/** Desenha a barra do rascunho: o que muda, e os dois botões. */
+function desenharRascunho(hospedando) {
+  const barra = $("mods-rascunho");
+  const { ligar, desligar } = pendencias();
+  const mudou = ligar.length > 0 || desligar.length > 0;
+
+  // Sem hospedar não há conjunto a mudar, e a barra não tem o que dizer.
+  barra.hidden = !hospedando;
+  if (!hospedando) return;
+
+  const frases = [];
+  if (ligar.length > 0) frases.push(`passa a exigir: ${ligar.join(", ")}`);
+  if (desligar.length > 0) frases.push(`deixa de exigir: ${desligar.join(", ")}`);
+  $("mods-pendentes").textContent = mudou
+    ? `${frases.join(" · ")}. Nada disso vale até SALVAR.`
+    : "Nada pendente: o que está na lista é o que o servidor exige agora.";
+
+  // **Sem diferença, SALVAR não faz nada** — e um botão que não faz nada não
+  // pode estar aceso. Salvar sem mudança ainda escreveria, e escrever ainda
+  // acorda o anúncio: seria uma queda para todo mundo, por nada.
+  $("mods-salvar").disabled = !mudou || salvando;
+  $("mods-descartar").disabled = !mudou || salvando;
+  $("mods-salvar").textContent = salvando ? "SALVANDO…" : "SALVAR ALTERAÇÕES";
+}
+
+/** Devolve o rascunho ao que o servidor exige agora. */
+function descartarORascunho() {
+  rascunho.clear();
+  for (const id of conjuntoNoServidor) rascunho.add(id);
+  $("mods-gestao-erro").hidden = true;
+  desenharMods().catch((falha) => console.warn("desenhar mods:", falha));
+}
+
+/**
+ * Aplica o rascunho inteiro, num ato.
+ *
+ * O que ele **não** faz: um laço sobre `aplicar_mod`. Cada chamada daquele
+ * acorda o anúncio, e o ganho inteiro desta tela é que isso aconteça uma vez.
+ */
+async function salvarAlteracoes() {
+  if (salvando || !haRascunhoPorSalvar()) return;
+  const { ligar, desligar } = pendencias();
+  const erro = $("mods-gestao-erro");
+  erro.hidden = true;
+
+  const linhas = [
+    "O conjunto que este servidor exige passa a ser outro.",
+    ligar.length > 0 ? `Passa a exigir: ${ligar.join(", ")}.` : "",
+    desligar.length > 0 ? `Deixa de exigir: ${desligar.join(", ")}.` : "",
+    "Quem está dentro agora cai e precisa aceitar o conjunto novo, no aparelho " +
+      "de cada um. Uma vez só, e não uma por MOD.",
+    "Salvar também registra o seu sim nesta máquina para o conjunto resultante — " +
+      "você não vai ser perguntado outra vez pela decisão que acabou de tomar.",
+  ].filter(Boolean);
+
+  abrirConfirmacao(
+    "APLICAR O CONJUNTO NOVO",
+    linhas.join("\n"),
+    "SALVAR",
+    async () => {
+      // **Trancado antes do `await`.** Sem isto, dois cliques rápidos mandam
+      // dois conjuntos, e o segundo confere a base contra o que o primeiro
+      // acabou de gravar.
+      if (salvando) return;
+      salvando = true;
+      await desenharMods();
+      try {
+        await invoke("aplicar_conjunto_de_mods", {
+          ligados: [...rascunho],
+          base: baseDoConjunto,
+        });
+      } catch (falha) {
+        // **O conjunto mudou por baixo.** O rascunho é preservado: refazê-lo à
+        // mão seria perder o trabalho de quem acabou de decidir. A tela
+        // recarrega o que está de pé, e as pendências passam a ser contra ele.
+        const mudou = falha?.ConjuntoMudou;
+        erro.hidden = false;
+        erro.textContent = mudou
+          ? "outra pessoa mudou o conjunto deste servidor enquanto esta tela " +
+            "estava aberta. Nada foi gravado. A lista abaixo já mostra o que " +
+            "está valendo agora — confira o que você queria mudar e salve de novo."
+          : fraseDeErro(falha);
+        salvando = false;
+        if (mudou) baseDoConjunto = mudou.atual;
+        await desenharMods();
+        return;
+      }
+      salvando = false;
+      await desenharMods();
+    },
+  );
+}
+
 /** Liga ou desliga, e redesenha. */
 async function trocarOMod(id, ligar) {
   const erro = $("mods-gestao-erro");
@@ -523,6 +679,28 @@ async function desenharMods() {
   }
   $("mods-sem-hospedar").hidden = hospedando;
 
+  // **O conjunto de pé, e o rascunho por cima dele.**
+  //
+  // O rascunho só é semeado quando não há edição pendente. Refazê-lo a cada
+  // desenho — e esta tela redesenha sozinha — apagaria o que a pessoa acabou
+  // de marcar, no meio de ela marcar. Se o conjunto mudar por baixo enquanto
+  // há rascunho, quem avisa é a conferência de conflito do SALVAR, que diz o
+  // que houve em vez de escolher sozinha qual das duas decisões vale.
+  const tinhaPendencia = haRascunhoPorSalvar();
+  conjuntoNoServidor = new Set(
+    instalados.filter((m) => m.enabled).map((m) => m.id),
+  );
+  if (!tinhaPendencia) {
+    rascunho.clear();
+    for (const id of conjuntoNoServidor) rascunho.add(id);
+    try {
+      baseDoConjunto = await invoke("conjunto_exigido_agora");
+    } catch (falha) {
+      console.warn("conjunto exigido:", falha);
+      baseDoConjunto = "";
+    }
+  }
+
   const lista = $("lista-mods");
   if (instalados.length === 0) {
     repovoar(lista, [
@@ -539,6 +717,7 @@ async function desenharMods() {
     );
   }
 
+  desenharRascunho(hospedando);
   await desenharAceites();
 }
 
@@ -632,6 +811,11 @@ async function instalarUmMod() {
   // memória, não a tela.
   if (catalogoEmMaos) await desenharCatalogoEmMaos();
 }
+
+$("mods-salvar").addEventListener("click", () => {
+  salvarAlteracoes().catch((falha) => console.warn("salvar mods:", falha));
+});
+$("mods-descartar").addEventListener("click", descartarORascunho);
 
 $("mods-instalar").addEventListener("click", () => {
   instalarUmMod().catch((falha) => console.warn("instalar mod:", falha));
