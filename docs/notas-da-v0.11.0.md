@@ -53,6 +53,18 @@ a transmite, com consentimento dos dois lados, e o servidor reassume sozinho
 quando o par falha ou sai. Em sala com muita gente, é a subida de quem hospeda
 que deixa de ser o teto.
 
+**O consentimento fica em CONFIGURAÇÕES · MALHA, e são dois**, porque são duas
+perguntas: emprestar a sua subida é *quanto da sua internet você gasta pelos
+outros*; aceitar ser servida é *aceito que o meu endereço seja entregue a quem
+me servir*. Quem aceita uma não aceita a outra por tabela. Sem escolher nada,
+você não participa — a tela vem do servidor, como sempre veio.
+
+**A frase acima quase saiu mentindo.** Até 17/09 o protocolo, o núcleo e o
+servidor traziam esta metade inteira e **não havia onde consentir**: nenhum
+comando do aplicativo chamava o empréstimo, e em produção ele era sempre falso.
+Esta nota prometia «com consentimento dos dois lados» a quem não tinha onde dar
+consentimento nenhum.
+
 ### MODs saem do papel
 
 O servidor passa a **rodar** os MODs habilitados, e não só a conhecê-los. O
@@ -119,6 +131,24 @@ desfaria isso por fora, sem tocar numa linha de código.
 E nada do servidor depende dela: um SEELE hospedado por você funciona inteiro
 sem jamais falar com `mods.seele.app.br`. O que se perde sem a CDN é procurar
 MODs novos, não usar os que já estão instalados.
+
+### A tela compartilhada começa boa, e não borrada
+
+A resolução sai de um teto medido, e a medida partia de uma suposição de
+2 Mbps enquanto ninguém tinha medido nada — 60% disso é 1,2 Mbps, e 720p pede
+2,76. Toda transmissão começava em 540p e subia conforme a sonda descobria o
+cano: medido em campo, 1,20 → 1,58 Mbps em **vinte e cinco segundos** de
+imagem ruim.
+
+Agora a máquina lembra a própria subida entre sessões, e a sonda parte dela. A
+medida de cada servidor visitado continua tendo precedência, porque o caminho
+até cada um é diferente; a da máquina cobre os dois casos que faltavam —
+hospedar aqui, e a primeira visita a um servidor novo.
+
+**Quem hospeda era o mais prejudicado**, e por um detalhe: a semente existia e
+ficava dentro do filtro que exclui `127.0.0.1` da lista de servidores
+visitados. Com o loopback por baixo e a subida inteira disponível, o primeiro
+segundo continuava sendo 540p.
 
 ### Trocar de fone ou de microfone vale na hora
 
@@ -260,6 +290,11 @@ tem relato de campo em aberto.
   catálogo nenhum. Cruzar as duas listas é trabalho que o código ainda não faz,
   e um selo que o código não sustenta é justamente aquilo em que alguém se
   apoiaria para dizer sim sem ler o resto.
+- **O caminho entre pares nunca rodou sobre rede de verdade.** O teste de
+  conformidade sobe servidor e clientes reais, e roda tudo **em processo**: a
+  discagem entre duas máquinas numa rede local, com NAT e roteador no meio,
+  não foi exercitada uma vez. O que está provado é a lógica; o que falta é o
+  fio.
 - **Versões lado a lado não valem no Windows**, pelo motivo acima.
 - **Descer de versão não leva as conversas junto.** Cada versão tem o próprio
   diretório de dados, de propósito, e o produto diz isso na tela.
