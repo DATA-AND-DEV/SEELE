@@ -109,6 +109,69 @@ pub fn list(config_dir: &Path) -> Vec<Found> {
 /// # Errors
 ///
 /// Returns [`Refused`] when the manifest is missing, unreadable, or invalid.
+/// Onde os pacotes moram, endereçados pelo conteúdo.
+///
+/// Plano de isolamento de 18/09, P1 «uma atualização substitui o pacote de
+/// outros servidores».
+///
+/// Antes o pacote morava em `mods/<autor>/<nome>/`: **um por identificador**.
+/// Dois servidores desta máquina podem exigir hashes diferentes do mesmo MOD —
+/// um ficou na versão que revisou, o outro atualizou — e só um pacote cabia
+/// naquele lugar. Atualizar para um deixava o outro exigindo bytes que saíram
+/// do disco.
+///
+/// Endereçado pelo conteúdo, os dois cabem: são pastas diferentes porque são
+/// bytes diferentes. E a identidade da pasta deixa de ser uma convenção que
+/// alguém pode desrespeitar — ela é **conferível**, e
+/// [`listar_por_conteudo`] a confere.
+pub const PACOTES: &str = "mod-packages";
+
+/// Todo pacote guardado, com o conteúdo conferido contra o nome da pasta.
+///
+/// **A conferência é o ponto.** No layout por identificador, o guarda era «o
+/// `id` do manifesto tem de bater com o caminho» — uma convenção, e um
+/// manifesto trocado depois da instalação a quebrava em silêncio. Aqui o nome
+/// da pasta é o hash do que está dentro: mexer num byte muda o hash, e o
+/// pacote deixa de ser o que a pasta diz que ele é.
+///
+/// Uma pasta cujo conteúdo não bate é **recusada e nomeada**, e não corrigida:
+/// renomeá-la para o hash certo aceitaria bytes que ninguém revisou, e apagá-la
+/// esconderia o que aconteceu de quem precisa saber.
+#[must_use]
+pub fn listar_por_conteudo(config_dir: &Path) -> Vec<Found> {
+    let root = config_dir.join(PACOTES);
+    let mut found = Vec::new();
+
+    let Ok(pastas) = std::fs::read_dir(&root) else {
+        return found;
+    };
+    for pasta in pastas.flatten() {
+        let dir = pasta.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Some(nome) = pasta.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        match read_one(&dir) {
+            Ok(installed) if hex(&installed.hash) == nome => {
+                found.push(Found::Ok(Box::new(installed)));
+            }
+            // O conteúdo não é o que o nome promete. Pode ser um pacote mexido
+            // depois de instalado, uma cópia interrompida, ou uma pasta que
+            // alguém criou à mão — e nenhum dos três pode ser servido a
+            // ninguém como se fosse revisado.
+            Ok(installed) => found.push(Found::Refused {
+                id: installed.manifest.id,
+                why: Refused::MalformedId,
+            }),
+            Err(why) => found.push(Found::Refused { id: nome, why }),
+        }
+    }
+    found.sort_by(|left, right| name_of(left).cmp(name_of(right)));
+    found
+}
+
 pub fn read_one(dir: &Path) -> Result<Installed, Refused> {
     // An unreadable manifest is reported at the position a reader would stop
     // at, which for "there is no file" is the beginning.
@@ -279,5 +342,98 @@ mod tests {
     fn um_diretorio_de_mods_que_nao_existe_da_lista_vazia() {
         let raiz = temporario("vazio");
         assert!(list(&raiz).is_empty());
+    }
+
+    /// Semeia um pacote endereçado pelo conteúdo: grava, lê o hash, renomeia.
+    ///
+    /// É o que o instalador faz, e por isso o teste o faz assim — escrever o
+    /// hash à mão seria testar contra um número inventado em vez de contra a
+    /// função que o produz.
+    fn semear_por_conteudo(raiz: &Path, id: &str, extra: Option<(&str, &str)>) -> String {
+        let provisorio = raiz.join("em-obras");
+        let _ = std::fs::remove_dir_all(&provisorio);
+        std::fs::create_dir_all(provisorio.join("cliente")).expect("criar");
+        std::fs::write(provisorio.join("mod.json"), manifesto(id)).expect("manifesto");
+        std::fs::write(provisorio.join("cliente/main.js"), "/* nada */").expect("script");
+        if let Some((caminho, conteudo)) = extra {
+            std::fs::write(provisorio.join(caminho), conteudo).expect("extra");
+        }
+        let lido = read_one(&provisorio).expect("ler");
+        let hash = hex(&lido.hash);
+        let destino = raiz.join(PACOTES).join(&hash);
+        std::fs::create_dir_all(destino.parent().expect("pai")).expect("raiz dos pacotes");
+        std::fs::rename(&provisorio, &destino).expect("publicar");
+        hash
+    }
+
+    /// **Dois hashes do mesmo MOD cabem lado a lado.**
+    ///
+    /// É o P1 que este layout conserta: por identificador havia um lugar só, e
+    /// atualizar para um servidor deixava o outro exigindo bytes que saíram do
+    /// disco.
+    #[test]
+    fn dois_pacotes_do_mesmo_mod_convivem() {
+        let raiz = temporario("dois-pacotes");
+        let um = semear_por_conteudo(&raiz, "seele/exemplo", None);
+        let outro = semear_por_conteudo(&raiz, "seele/exemplo", Some(("extra.txt", "outra coisa")));
+        assert_ne!(um, outro, "os dois pacotes deram o mesmo hash");
+
+        let achados = listar_por_conteudo(&raiz);
+        assert_eq!(achados.len(), 2, "um dos dois sumiu");
+        for achado in &achados {
+            assert!(
+                matches!(achado, Found::Ok(_)),
+                "um pacote válido foi recusado: {achado:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **O nome da pasta é conferível, e é conferido.**
+    ///
+    /// No layout por identificador o guarda era uma convenção — «o `id` do
+    /// manifesto tem de bater com o caminho» —, e um manifesto trocado depois
+    /// da instalação a quebrava. Aqui mexer num byte muda o hash, e o pacote
+    /// deixa de ser o que a pasta diz que ele é.
+    #[test]
+    fn um_pacote_mexido_depois_de_instalado_e_recusado_e_nomeado() {
+        let raiz = temporario("mexido");
+        let hash = semear_por_conteudo(&raiz, "seele/exemplo", None);
+        std::fs::write(
+            raiz.join(PACOTES).join(&hash).join("cliente/main.js"),
+            "/* outra coisa */",
+        )
+        .expect("mexer");
+
+        let achados = listar_por_conteudo(&raiz);
+        assert_eq!(achados.len(), 1);
+        assert!(
+            matches!(&achados[0], Found::Refused { .. }),
+            "um pacote cujo conteúdo não bate com o nome da pasta foi servido \
+             como se fosse o revisado: {:?}",
+            achados[0]
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// E uma pasta que alguém criou à mão, sem manifesto, é dita e não ignorada.
+    #[test]
+    fn uma_pasta_sem_manifesto_aparece_recusada() {
+        let raiz = temporario("sem-manifesto");
+        std::fs::create_dir_all(raiz.join(PACOTES).join("nao-e-um-hash")).expect("criar");
+
+        let achados = listar_por_conteudo(&raiz);
+        assert_eq!(achados.len(), 1);
+        assert!(matches!(&achados[0], Found::Refused { .. }), "{:?}", achados[0]);
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Sem raiz de pacotes não há pacote, e isso não é erro: é toda máquina
+    /// antes da primeira instalação.
+    #[test]
+    fn sem_a_raiz_de_pacotes_a_lista_vem_vazia() {
+        let raiz = temporario("vazia");
+        assert!(listar_por_conteudo(&raiz).is_empty());
+        let _ = std::fs::remove_dir_all(&raiz);
     }
 }
