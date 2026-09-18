@@ -95,7 +95,19 @@ use thiserror::Error;
 /// de publicar e não depois: **publicar a v5 tira do ar quem está na v3
 /// publicada**, e a janela não muda isso.
 /// v6 adds authenticated MOD requests and private, chunked replies.
-pub const PROTOCOL_VERSION: u8 = 6;
+/// **7 desde 18/09/2026**: a `Session` passa a carregar a identidade do
+/// servidor.
+///
+/// Um campo novo numa variante existente, e o postcard não é autodescritivo:
+/// um cliente v6 leria o campo novo como o começo do próximo e desalinharia o
+/// quadro inteiro. É a mesma armadilha que a subida para 3 registra, e a razão
+/// de este número existir.
+///
+/// Por que um campo e não uma mensagem à parte: a identidade tem de estar
+/// **junto** do resto da sessão. Numa mensagem separada haveria um instante
+/// em que a sessão existe sem se saber de quem ela é — e é justamente nesse
+/// instante que o aceite de MODs e a escolha de raiz precisam decidir.
+pub const PROTOCOL_VERSION: u8 = 7;
 
 /// How many past versions a peer accepts, beyond the current one.
 ///
@@ -243,17 +255,23 @@ mod tests {
         // O que fica preso aqui, então, é o que a janela de fato faz — a versão
         // anterior deste vocabulário continua sendo ouvida — e não uma promessa
         // sobre quem está em campo, que ela não tem como cumprir sozinha.
-        assert_eq!(PROTOCOL_VERSION, 6);
-        assert_eq!(oldest_supported_version(), 5);
-        assert!(negotiate(4).is_err(), "a v4 saiu da janela N−1");
-        assert!(negotiate(5).is_ok());
+        // **A janela continua honesta na subida para 7**, e isso foi escolha
+        // de desenho e não sorte. A identidade do servidor entrou como
+        // **variante nova** e não como campo da `Session`: um campo teria feito
+        // um par v6 desalinhar o quadro, e aí prometer N−1 seria mentira — a
+        // janela teria de cair para zero e toda máquina precisaria atualizar no
+        // mesmo dia. Variante nova, um par v6 não a recebe e continua entrando.
+        assert_eq!(PROTOCOL_VERSION, 7);
+        assert_eq!(oldest_supported_version(), 6);
+        assert!(negotiate(5).is_err(), "a v5 saiu da janela N−1");
+        assert!(negotiate(6).is_ok());
         assert!(
-            negotiate(3).is_err(),
-            "a v3 foi aceita: a janela voltou a prometer o que o carimbo não \
+            negotiate(4).is_err(),
+            "a v4 foi aceita: a janela voltou a prometer o que o carimbo não \
              entrega"
         );
-        assert!(negotiate(6).is_ok());
-        assert!(negotiate(7).is_err(), "um cliente do futuro foi aceito");
+        assert!(negotiate(7).is_ok());
+        assert!(negotiate(8).is_err(), "um cliente do futuro foi aceito");
     }
 
     /// A prova de que a subida é **uma só** para as duas entregas.
@@ -265,8 +283,8 @@ mod tests {
     /// anúncio, que esperava por ela, passou a alcançar.
     #[test]
     fn a_api_de_pedidos_preserva_o_limiar_do_anuncio_original() {
-        assert_eq!(PROTOCOL_VERSION, 6);
-        assert_eq!(oldest_supported_version(), 5);
+        assert_eq!(PROTOCOL_VERSION, 7);
+        assert_eq!(oldest_supported_version(), 6);
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
             5,

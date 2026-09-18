@@ -2144,6 +2144,39 @@ pub enum ServerMessage {
         /// UTF-8 JSON fragment.
         payload: String,
     },
+    /// **Qual servidor é este**, e não por onde se chegou a ele.
+    ///
+    /// Plano de isolamento de 18/09, P1. Endereço e impressão digital, juntos,
+    /// não distinguem dois servidores lógicos: o endereço muda a cada rota — a
+    /// mesma casa responde por um IP de LAN e por um par NAT cuja porta troca a
+    /// cada sessão — e `uma_chave_por_maquina` faz bancos diferentes herdarem a
+    /// mesma chave TLS do legado, de propósito, para que quem já hospedava não
+    /// veja o alarme de chave trocada.
+    ///
+    /// # Por que uma variante, e não um campo da [`Self::Session`]
+    ///
+    /// Foi escrita como campo primeiro, e estava errado. O postcard não é
+    /// autodescritivo: um campo novo numa variante existente faz um par da
+    /// versão anterior ler o campo como o começo do próximo e desalinhar o
+    /// quadro inteiro. A janela de compatibilidade continuaria dizendo que
+    /// aceita N−1 e estaria mentindo — ela teria de cair para zero, e toda
+    /// máquina do mundo precisaria atualizar no mesmo dia.
+    ///
+    /// Variante nova é o caminho que este vocabulário já usa para crescer sem
+    /// quebrar: quem não a conhece não a recebe, e quem decide não mandá-la é a
+    /// sessão do servidor.
+    ///
+    /// # O que ela não é
+    ///
+    /// **Não é segredo e não prova nada sozinha.** Quem quiser repeti-la pode;
+    /// o que prova continua sendo a chave TLS, conferida pelo pin do ADR 0017.
+    /// Esta responde a outra pergunta — «é o mesmo de antes?» — para quem já
+    /// sabe que a chave confere.
+    Instancia {
+        /// Trinta e dois hexadecimais, nascidos no primeiro arranque daquele
+        /// servidor e gravados no banco dele.
+        identidade: String,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2684,6 +2717,22 @@ impl Validate for ServerMessage {
                     return Err(ControlError::FieldOutOfRange { field: "mod_part" });
                 }
                 check("mod_payload", payload.len(), 12 * 1024)
+            }
+            // Trinta e dois hexadecimais, e o tamanho é conferido como todo o
+            // resto: `specs/08-seguranca.md` manda limitar toda entrada de rede
+            // antes de alocar, e «é curta por natureza» não é uma conferência.
+            //
+            // Vazia passa, e é um valor com significado: «este servidor não
+            // sabe dizer». Um banco que não respondeu no aperto de mão manda
+            // vazio em vez de fechar a porta de quem está entrando.
+            Self::Instancia { identidade } => {
+                if identidade.is_empty() {
+                    return Ok(());
+                }
+                if identidade.len() != 32 || !identidade.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(ControlError::FieldOutOfRange { field: "instancia" });
+                }
+                Ok(())
             }
         }
     }
@@ -4359,7 +4408,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            37,
+            38,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4369,9 +4418,14 @@ mod o_vocabulario_e_a_versao {
         // diferentes continuam se cumprimentando como iguais. Subiu para 5 na
         // integração conjunta, uma vez para os dois conjuntos de variantes, e é
         // por isso que o anúncio de MODs passou a sair.
+        // **7 desde 18/09/2026**, pela variante `Instancia`. A lista do
+        // servidor foi de 37 para 38, e a do cliente não mudou. A janela
+        // continua em N−1 e continua honesta: um par v6 não conhece a variante
+        // nova e não a recebe — foi por isso que ela é variante, e não um campo
+        // da `Session`, que teria desalinhado o quadro dele.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            6,
+            7,
             "a versão do protocolo mudou; confira se os ordinais acima, a janela \
              de compatibilidade e `mods::VERSAO_DO_ANUNCIO` continuam contando a \
              mesma história"

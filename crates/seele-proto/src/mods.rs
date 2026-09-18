@@ -753,13 +753,17 @@ mod tests {
     /// variante desconhecida — ele desloca a leitura do fluxo para sempre.
     #[test]
     fn o_anuncio_pede_uma_versao_que_a_global_alcanca() {
+        // O anúncio continua pedindo 5 e a global passou a 7: ele pede um
+        // **limiar**, e o que o guarda protege é que a global o alcance — não
+        // que os dois números sejam iguais. A subida para 7 não mexeu no
+        // anúncio, e não devia: nenhuma variante dele mudou.
         assert_eq!(VERSAO_DO_ANUNCIO, 5);
-        assert_eq!(
-            crate::version::PROTOCOL_VERSION,
-            6,
-            "a versão global mudou: confira o contrato de integração no desenho \
-             do anúncio antes de mexer nesta linha"
-        );
+        // `const` e não `assert!` de execução: os dois lados são constantes, e
+        // o clippy recusa a afirmação de valor fixo — com razão. O que se quer
+        // é que **o compilador** a verifique, e ele verifica: a desigualdade
+        // deixa de compilar no dia em que o anúncio pedir mais do que a global
+        // entrega, que é exatamente quando ela tem de morder.
+        const { assert!(crate::version::PROTOCOL_VERSION >= VERSAO_DO_ANUNCIO) };
         // A desigualdade que importa — `VERSAO_DO_ANUNCIO <= PROTOCOL_VERSION`,
         // sem a qual o portão volta a ser dormente — já está dita pelas duas
         // igualdades acima, e escrevê-la de novo seria uma asserção de valor

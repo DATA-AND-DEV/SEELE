@@ -548,6 +548,43 @@ pub const MIGRATIONS: &[Migration] = &[
             ALTER TABLE mods ADD COLUMN server_half INTEGER NOT NULL DEFAULT 0;
         "#,
     },
+    Migration {
+        version: 13,
+        description: "cada servidor ganha uma identidade própria, que atravessa reinício",
+        sql: r#"
+            -- Plano de isolamento de 18/09, P1 «identidade do servidor e
+            -- identidade da sessão estão incompletas».
+            --
+            -- Até aqui um servidor era reconhecido pelo endereço e pela
+            -- impressão digital do certificado. Nenhum dos dois o identifica:
+            --
+            --   * o endereço muda. A mesma casa responde por `192.168.0.10`, por
+            --     um par NAT com porta que troca a cada sessão, e por um nome que
+            --     alguém registrou ontem;
+            --   * a impressão digital pode **repetir**. `uma_chave_por_maquina`
+            --     faz bancos diferentes herdarem a mesma chave TLS do legado, de
+            --     propósito, para quem já hospedava não ver o alarme de chave
+            --     trocada. Dois servidores desta máquina podem apresentar a
+            --     mesma.
+            --
+            -- Então endereço e impressão, juntos, não distinguem dois servidores
+            -- lógicos — e é sobre essa distinção que o aceite de MODs, o estado e
+            -- os arquivos precisam se apoiar.
+            --
+            -- Uma linha, uma vez, gravada no primeiro arranque e nunca mais. Ela
+            -- é do **banco**: copiar o arquivo copia a identidade, e é isso que
+            -- se quer — um backup restaurado é o mesmo servidor, não outro.
+            --
+            -- `CHECK(id = 1)` porque a tabela tem uma linha só. Sem ele, um
+            -- `INSERT` errado num caminho futuro daria duas identidades ao mesmo
+            -- servidor, e a pergunta «qual das duas» não tem resposta boa.
+            CREATE TABLE IF NOT EXISTS instancia (
+                id           INTEGER PRIMARY KEY CHECK (id = 1),
+                identidade   TEXT    NOT NULL,
+                nascida_em   INTEGER NOT NULL
+            );
+        "#,
+    },
 ];
 
 #[cfg(test)]

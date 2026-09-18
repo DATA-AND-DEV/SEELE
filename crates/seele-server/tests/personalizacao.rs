@@ -194,15 +194,30 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     // O ícone vem logo depois, **num quadro próprio**, e só quando existe. Um
     // servidor sem ícone não manda nada, e é por isso que esta espera é curta: o
     // silêncio é a resposta, não um tempo esgotado.
-    let icone = match tokio::time::timeout(
-        Duration::from_millis(500),
-        frame::read::<ServerMessage>(&mut recebe),
-    )
-    .await
-    {
-        Ok(Ok(ServerMessage::ServerIconChanged { icon })) => icon,
-        _ => None,
-    };
+    //
+    // **Procurado, e não lido como «o próximo».** Antes esta bancada tomava o
+    // primeiro quadro depois do `Session` como sendo o ícone, e a v7 pôs a
+    // identidade do servidor no meio — o teste passou a reprovar num caminho
+    // onde nada do que ele guarda havia mudado. Um cliente de verdade nunca
+    // pôde contar com a ordem; a bancada é que contava.
+    let mut icone = None;
+    loop {
+        match tokio::time::timeout(
+            Duration::from_millis(500),
+            frame::read::<ServerMessage>(&mut recebe),
+        )
+        .await
+        {
+            Ok(Ok(ServerMessage::ServerIconChanged { icon })) => {
+                icone = icon;
+                break;
+            }
+            // Outro quadro do aperto de mão. Segue procurando.
+            Ok(Ok(_)) => {}
+            // Silêncio ou fim: este servidor não tem ícone.
+            _ => break,
+        }
+    }
 
     Ok(Par {
         _conexao: conexao,

@@ -834,8 +834,20 @@ async fn handshake(
     // Uma segunda tomada do mutex, e não um campo a mais na `Account`: são duas
     // perguntas sobre coisas diferentes — o que esta pessoa é, e o que este
     // servidor é — e o aperto de mão já toma este mutex mais de uma vez.
-    let (nome_do_server, icone_do_server, icones_das_pessoas) = {
+    let (nome_do_server, icone_do_server, icones_das_pessoas, identidade_da_instancia) = {
         let guard = server.persistence.lock().await;
+        // **Qual servidor é este**, e não por onde se chegou a ele. Lida no
+        // mesmo mutex que o nome, pela mesma razão: são perguntas sobre o
+        // servidor, e o aperto de mão já o toma.
+        //
+        // Um banco que não responde não pode impedir alguém de entrar: a
+        // identidade sai vazia e quem a recebe trata como «não sei», que é o
+        // que ela de fato é. Recusar a sessão por isso seria trocar um dado a
+        // menos por uma porta fechada.
+        let identidade = crate::persistence::instancia::identidade(&guard).unwrap_or_else(|erro| {
+            tracing::warn!(%erro, "não deu para ler a identidade deste servidor");
+            String::new()
+        });
         let nome =
             crate::persistence::aparencia::nome(&guard, &config.name).unwrap_or_else(|erro| {
                 // Um banco que não responde não pode deixar o servidor sem nome na
@@ -853,7 +865,7 @@ async fn handshake(
             Vec::new()
         });
 
-        (nome, icone, imagens)
+        (nome, icone, imagens, identidade)
     };
 
     let (fresh_ssrc, session_id) = registry.issue();
@@ -889,6 +901,29 @@ async fn handshake(
         reason: DisconnectReason::ProtocolViolation,
         detail: format!("could not send Session: {error}"),
     })?;
+
+    // **Qual servidor é este**, num quadro próprio e logo depois do `Session`.
+    //
+    // Variante nova e não campo do `Session`, e a razão é a janela de
+    // compatibilidade: o postcard não é autodescritivo, então um campo a mais
+    // numa variante existente faria um par da versão anterior desalinhar o
+    // quadro inteiro — e a janela, que promete N−1, teria de cair para zero.
+    // Ver `control::ServerMessage::Instancia`.
+    //
+    // Mandada mesmo quando vazia: vazio quer dizer «este servidor não sabe
+    // dizer», que é o que um banco sem resposta de fato deixou. Calar seria a
+    // mesma ausência sem a diferença entre «não sabe» e «é antigo».
+    let quadro_da_instancia = ServerMessage::Instancia {
+        identidade: identidade_da_instancia,
+    };
+    if entende_a_mensagem(&quadro_da_instancia, version) {
+        if let Err(error) = frame::write(send, &quadro_da_instancia).await {
+            // Não derruba quem está entrando: a identidade é para separar
+            // estado entre servidores, e uma sessão sem ela funciona — só não
+            // distingue.
+            tracing::warn!(%error, "não deu para anunciar a identidade deste servidor");
+        }
+    }
 
     // Logo depois do `Session`, e num quadro próprio: o `Session` já carrega os
     // salas de voz, as Linhas, os papéis e as permissões dentro dos 16 KiB do
@@ -3951,6 +3986,12 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
         // a constante. A linha existe para que a tabela fique completa.
         ServerMessage::ModsExigidos { .. } => versao >= seele_proto::mods::VERSAO_DO_ANUNCIO,
         ServerMessage::ModReply { .. } => versao >= 6,
+        // A v7, e é ela que morde hoje. Um par v6 não conhece esta variante, e
+        // o postcard não ignora o que não conhece — ele desloca a leitura do
+        // fluxo de controle para sempre. Foi por este portão que a identidade
+        // do servidor entrou como variante em vez de campo da `Session`: um
+        // campo não teria portão nenhum, porque a `Session` já sai para todos.
+        ServerMessage::Instancia { .. } => versao >= 7,
         _ => true,
     }
 }
@@ -4861,7 +4902,7 @@ mod versao_no_fio {
     }
 
     #[test]
-    fn a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v6() {
+    fn a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v7() {
         // **Este teste existe para reprovar quando a janela anda**, e já
         // reprovou duas vezes fazendo exatamente isso. O registro das duas fica
         // porque é ele que explica por que os números abaixo são o que são.
@@ -4873,15 +4914,20 @@ mod versao_no_fio {
         // janela alargar, são estes números que voltam a morder, e
         // reconstruí-los por arqueologia custaria mais do que a linha custa.
         //
-        // O portão que **morde hoje** é o da v6, e é a razão de o nome deste
-        // teste ter mudado junto com a versão: a resposta privada de um MOD não
-        // sai para o par da janela anterior.
-        assert_eq!(seele_proto::version::oldest_supported_version(), 5);
+        // Com a **v7 o piso é 6**, e o portão da resposta de MOD — `>= 6` —
+        // passou a ser o quarto vácuo. Ele fica pelo mesmo motivo dos outros
+        // três.
+        //
+        // O portão que **morde hoje** é o da v7: a identidade do servidor não
+        // sai para o par da janela anterior. É a razão de o nome deste teste ter
+        // mudado junto com a versão, pela segunda vez.
+        assert_eq!(seele_proto::version::oldest_supported_version(), 6);
 
         for (mensagem, nome) in [
             (ServerMessage::UplinkLoss { fraction: 0.0 }, "UplinkLoss"),
             (sirva(), "SirvaTelaPara"),
             (assista(), "AssistaTelaPor"),
+            (resposta_de_mod(), "ModReply"),
         ] {
             assert!(
                 entende_a_mensagem(&mensagem, seele_proto::version::oldest_supported_version()),
@@ -4891,12 +4937,14 @@ mod versao_no_fio {
 
         assert!(
             !entende_a_mensagem(
-                &resposta_de_mod(),
+                &ServerMessage::Instancia {
+                    identidade: String::new()
+                },
                 seele_proto::version::oldest_supported_version()
             ),
-            "a resposta de MOD saiu para a v5, que não sabe decodificá-la: o \
-             postcard não é autodescritivo e o fluxo de controle dela fica \
-             deslocado para sempre"
+            "a identidade do servidor saiu para a v6, que não sabe \
+             decodificá-la: o postcard não é autodescritivo e o fluxo de \
+             controle dela fica deslocado para sempre"
         );
     }
 

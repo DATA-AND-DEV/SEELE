@@ -178,6 +178,18 @@ pub struct Ended {
 /// Everything this client knows about the server it is attached to.
 #[derive(Debug, Default, Clone)]
 pub struct Room {
+    /// **Qual servidor é este**, e não por onde se chegou a ele.
+    ///
+    /// Plano de isolamento de 18/09, P1. Endereço e impressão digital, juntos,
+    /// não distinguem dois servidores lógicos: o endereço muda a cada rota, e
+    /// `uma_chave_por_maquina` faz bancos diferentes herdarem a mesma chave
+    /// TLS do legado.
+    ///
+    /// Vazia quando o outro lado não a mandou — um servidor de antes desta
+    /// versão, ou um cujo banco não respondeu no aperto de mão. Vazia quer
+    /// dizer «não sei», e quem a lê tem de tratar assim em vez de comparar
+    /// duas ausências e concluir que são o mesmo servidor.
+    pub instancia: String,
     /// Which person this connection is.
     pub me: Option<PersonId>,
     /// The media source the server assigned — gap G1.
@@ -460,6 +472,12 @@ impl Room {
         self.me = Some(person);
         self.ssrc = Some(ssrc);
         self.server = server;
+        // **Esquecida aqui, e reposta pelo quadro que vem logo atrás.** Sem
+        // isto, entrar num servidor de antes desta versão — que não manda o
+        // quadro — deixaria de pé a identidade do servidor anterior, e o
+        // produto acharia que os dois são o mesmo. Uma identidade herdada é
+        // pior que nenhuma: nenhuma diz «não sei», herdada afirma errado.
+        self.instancia = String::new();
         // Cleared, and not left alone, because this runs again on every
         // reconnection. The handshake describes the server from scratch and the
         // picture arrives just behind it when there is one; keeping the old one
@@ -761,6 +779,13 @@ impl Room {
         let mut changed = Changed::default();
 
         match message {
+            // **Qual servidor é este**, num quadro próprio — ver
+            // `control::ServerMessage::Instancia`. Chega logo depois do
+            // `Session`, e um servidor de antes desta versão não o manda: aí a
+            // identidade fica vazia, que quer dizer «não sei».
+            ServerMessage::Instancia { identidade } => {
+                self.instancia = identidade.clone();
+            }
             ServerMessage::Session {
                 person,
                 ssrc,

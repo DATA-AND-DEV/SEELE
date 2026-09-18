@@ -29,6 +29,7 @@ use seele_proto::ids::PersonId;
 pub mod aparencia;
 pub mod attachments;
 pub mod channels;
+pub mod instancia;
 pub mod messages;
 pub mod mods;
 pub mod schema;
