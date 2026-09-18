@@ -1885,6 +1885,41 @@ button.linha-nome:hover { text-decoration: underline; }
    é a mesma ideia com o que o navegador tem: o corrente inverte o bloco e
    engrossa o traço. Sem cor nenhuma continuam distintos — um é texto claro
    sobre bloco escuro, o outro é texto escuro sobre bloco claro e em negrito. */
+/* ---------- endereços dentro de uma mensagem ----------
+
+   Sublinhado **e** cor, e não cor sozinha: a cor é a informação que some
+   primeiro — em daltonismo, em tela ruim, no contraste alto do sistema —, e um
+   endereço que só se distingue pela cor não se distingue. O sublinhado
+   atravessa os três casos.
+
+   O cursor é o de sempre para algo clicável, e o `title` do elemento diz o
+   endereço inteiro: quem vai clicar num link escrito por outra pessoa lê para
+   onde ele vai antes de ir.
+
+   `word-break` porque um endereço longo não quebra sozinho, e um só deles
+   esticaria a coluna da conversa inteira. */
+.link-externo {
+  color: var(--seele-laranja-nerv);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.link-externo:hover,
+.link-externo:focus-visible {
+  background: var(--seele-laranja-fraco);
+  color: var(--seele-osso);
+}
+
+/* Recusado pelo Rust — esquema que não sai desta janela, ou navegador que não
+   abriu. O `title` já carrega o motivo; isto é o sinal de que houve um. */
+.link-externo.link-recusado {
+  color: var(--seele-osso);
+  text-decoration-style: wavy;
+  cursor: not-allowed;
+}
+
 .realce {
   background: var(--seele-laranja-fraco);
   color: var(--seele-osso);

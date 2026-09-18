@@ -994,6 +994,91 @@ async fn hospedar(
 /// Um `%` solto ou seguido de coisa que não é hexadecimal fica como está. É o
 /// comportamento certo para o que vem depois: quem decide se o caminho serve é
 /// a conferência de hash e o `serve`, e os dois recusam o que não conhecem.
+/// O endereço que pode sair desta janela, ou o motivo de não poder.
+///
+/// **O texto vem de outra pessoa.** Uma mensagem de chat é escrita por quem
+/// está do outro lado, e transformá-la em algo clicável é dar a essa pessoa um
+/// botão na máquina de quem lê. O que este filtro recusa não é estética:
+///
+///   - `file://` abriria o Finder ou o Explorador num caminho escolhido por
+///     terceiro;
+///   - `javascript:` e `data:` executam na origem de quem clica;
+///   - qualquer esquema que o sistema saiba abrir — `smb:`, `vscode:`, `ms-*:`
+///     — é um programa que alguém de fora escolhe iniciar aqui.
+///
+/// Sobram `http` e `https`, que é o que se quer dizer com «abrir no navegador».
+/// Lista do que **pode**, e não do que não pode: uma lista de proibidos erra
+/// no dia em que o sistema aprende um esquema novo, e erra para o lado de
+/// deixar passar.
+///
+/// Espaço e caractere de controle também saem. Eles não aparecem num endereço
+/// legítimo, e são por onde um argumento vira dois.
+fn endereco_que_pode_sair(bruto: &str) -> Result<&str, String> {
+    let url = bruto.trim();
+    if url.len() > 2048 {
+        return Err("endereço longo demais".to_owned());
+    }
+    let minusculo = url.to_ascii_lowercase();
+    if !minusculo.starts_with("http://") && !minusculo.starts_with("https://") {
+        return Err(
+            "só abro endereços `http` e `https`: qualquer outro esquema é um              programa que alguém de fora escolheu iniciar nesta máquina"
+                .to_owned(),
+        );
+    }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("endereço com espaço ou caractere de controle".to_owned());
+    }
+    // Um `http://` sozinho não é endereço nenhum.
+    if url.len() <= "https://".len() {
+        return Err("endereço vazio".to_owned());
+    }
+    Ok(url)
+}
+
+/// Abre um endereço no navegador do sistema.
+///
+/// Fora da janela de propósito: um link de chat que navegasse **esta** janela
+/// trocaria o SEELE por um site, sem botão de voltar — a casca não tem barra de
+/// endereço, e a pessoa ficaria com o produto substituído por uma página que
+/// outra pessoa escolheu.
+///
+/// Sem `tauri-plugin-opener` e sem `tauri-plugin-shell`: o `Cargo.toml` deste
+/// app diz «nada além disso» sobre dependências, e isto cabe em três linhas por
+/// sistema. O que não cabe em três linhas é a conferência acima, e ela é a
+/// parte que importa.
+#[tauri::command]
+fn abrir_no_navegador(url: String) -> Result<(), String> {
+    let alvo = endereco_que_pode_sair(&url)?;
+
+    // Nenhum deles passa por shell: o argumento vai direto ao programa, então
+    // `&`, `|` e aspas dentro do endereço são texto e não sintaxe.
+    #[cfg(target_os = "macos")]
+    let mut comando = {
+        let mut c = std::process::Command::new("open");
+        c.arg(alvo);
+        c
+    };
+    // `rundll32` e não `cmd /c start`: o `cmd` interpreta a linha antes de
+    // qualquer programa vê-la, e um `&` no endereço vira um segundo comando.
+    #[cfg(target_os = "windows")]
+    let mut comando = {
+        let mut c = std::process::Command::new("rundll32.exe");
+        c.args(["url.dll,FileProtocolHandler", alvo]);
+        c
+    };
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let mut comando = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(alvo);
+        c
+    };
+
+    comando
+        .spawn()
+        .map(|_| ())
+        .map_err(|erro| format!("não consegui abrir o navegador: {erro}"))
+}
+
 fn por_cento_desfeito(cru: &str) -> String {
     let bytes = cru.as_bytes();
     let mut saida = Vec::with_capacity(bytes.len());
@@ -4471,6 +4556,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            abrir_no_navegador,
             connect,
             hospedar,
             caminho_entre_pares,
@@ -4777,7 +4863,73 @@ mod a_tela_le_os_limites_que_o_rust_manda {
 
 #[cfg(test)]
 mod o_caminho_do_mod_chega_inteiro {
-    use super::por_cento_desfeito;
+    use super::{endereco_que_pode_sair, por_cento_desfeito};
+
+    /// **O que um link de chat não pode abrir.**
+    ///
+    /// Cada um destes é um programa que alguém do outro lado da conversa
+    /// escolheria iniciar na máquina de quem lê. A lista é de casos vistos em
+    /// produtos que aprenderam isso pelo caminho difícil.
+    #[test]
+    fn so_http_e_https_saem_desta_janela() {
+        for hostil in [
+            "file:///etc/passwd",
+            "file://C:/Windows/System32",
+            "javascript:alert(1)",
+            "data:text/html,<script>x</script>",
+            "smb://servidor/compartilhado",
+            "vscode://file/etc/hosts",
+            "ms-msdt:/id",
+            "seele://casa.exemplo",
+            "//exemplo.br",
+            "exemplo.br",
+            "",
+            "   ",
+            "http://",
+            "https://",
+        ] {
+            assert!(
+                endereco_que_pode_sair(hostil).is_err(),
+                "deixou sair `{hostil}`"
+            );
+        }
+    }
+
+    /// E o que **tem** de sair, senão o ajuste não serve para nada.
+    #[test]
+    fn um_endereco_comum_atravessa_inteiro() {
+        for bom in [
+            "https://exemplo.br",
+            "http://exemplo.br/pagina?a=1&b=2#parte",
+            "HTTPS://EXEMPLO.BR",
+            "https://exemplo.br/caminho%20escapado",
+        ] {
+            assert_eq!(endereco_que_pode_sair(bom), Ok(bom), "recusou `{bom}`");
+        }
+        // O espaço em volta é de quem colou, e não do endereço.
+        assert_eq!(
+            endereco_que_pode_sair("  https://exemplo.br  "),
+            Ok("https://exemplo.br")
+        );
+    }
+
+    /// **O que separa um argumento de dois.** Um endereço com nova linha
+    /// dentro é a forma clássica de fazer um programa ler duas coisas onde
+    /// quem conferiu viu uma.
+    #[test]
+    fn nada_com_espaco_ou_controle_no_meio_atravessa() {
+        for torto in [
+            "https://exemplo.br/a b",
+            "https://exemplo.br\n/etc/passwd",
+            "https://exemplo.br\u{0}",
+            "https://exemplo.br\ta",
+        ] {
+            assert!(
+                endereco_que_pode_sair(torto).is_err(),
+                "deixou sair `{torto:?}`"
+            );
+        }
+    }
 
     /// **A07 da auditoria.** A página monta a URL com `convertFileSrc`, que
     /// passa o caminho por `encodeURIComponent` — as barras de `autor/nome`

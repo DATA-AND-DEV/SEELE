@@ -6892,10 +6892,52 @@ fn a_preview_is_asked_for_by_a_press_and_by_nothing_else() {
         "`verPrevia` is called from {} places: {chamadores:?}",
         chamadores.len()
     );
-    let Some(at) = fonte.find("$(\"lista-mensagens\").addEventListener(\"click\"") else {
-        panic!("the conversation no longer listens for a click at all");
-    };
-    let ouvinte: String = fonte[at..].chars().take(900).collect();
+    // **Located by what it does, not by where it is.** This used to take the
+    // first click listener on the conversation and read 900 characters from
+    // it. The conversation grew a second one — the links in a message body —
+    // and the guard started reading that one instead, failing on a file where
+    // nothing it guards had changed. Matching by position is the same mistake
+    // as a guard that matches its own comment: it agrees with the layout of
+    // the file rather than with the property.
+    // Each listener ends where the next `addEventListener` begins, capped at
+    // 900 characters. A fixed window alone let neighbours bleed into one
+    // another: two listeners closer than the window both appeared to handle
+    // the same press, and the count meant nothing.
+    const PADRAO: &str = "$(\"lista-mensagens\").addEventListener(\"click\"";
+    let inicios: Vec<usize> = fonte.match_indices(PADRAO).map(|(at, _)| at).collect();
+    let ouvintes: Vec<String> = inicios
+        .iter()
+        .map(|&at| {
+            // A partir **depois** do `.addEventListener(` deste ouvinte: de
+            // `at + 1` a busca acha o dele mesmo, vinte caracteres à frente, e
+            // a janela fecha antes do corpo começar.
+            let depois = at + PADRAO.len();
+            let proximo = fonte[depois..]
+                .find(".addEventListener(")
+                .map_or(fonte.len(), |onde| depois + onde);
+            // 900 **caracteres**, e não bytes: cortar por byte num arquivo com
+            // acento encurta a janela sem avisar, e o guarda passa a não
+            // enxergar o que estava lá.
+            fonte[at..proximo].chars().take(900).collect()
+        })
+        .collect();
+    assert!(
+        !ouvintes.is_empty(),
+        "the conversation no longer listens for a click at all"
+    );
+    let candidatos: Vec<&String> = ouvintes
+        .iter()
+        .filter(|um| um.contains("data-anexo-previa"))
+        .collect();
+    assert_eq!(
+        candidatos.len(),
+        1,
+        "the attachment press is handled in {} click listeners on the \
+         conversation; it has to be one, or two of them race for the same \
+         press",
+        candidatos.len()
+    );
+    let ouvinte = candidatos[0].clone();
     assert!(
         ouvinte.contains("verPrevia("),
         "the call to `verPrevia` is not inside the click handler on the \
@@ -11317,5 +11359,61 @@ fn o_aceite_obtem_o_conjunto_antes_de_entrar() {
         "a obtenção deixou de conferir o hash exigido: uma cópia local com o \
          mesmo nome passaria por autorizada, e aceitar viraria confiança em \
          qualquer versão futura"
+    );
+}
+
+/// **Um endereço numa mensagem abre no navegador, e não nesta janela.**
+///
+/// O texto de uma mensagem é escrito por outra pessoa, e torná-lo clicável é
+/// dar a ela um botão na máquina de quem lê. Duas coisas seguram isso, e este
+/// guarda prende as duas:
+///
+///   - **sem `href`.** Com ele, um clique do meio ou um cmd-clique navegam
+///     *esta* janela para o site. A casca não tem barra de endereço nem botão
+///     de voltar: o produto seria substituído por uma página que outra pessoa
+///     escolheu, sem caminho de volta;
+///   - **o esquema é conferido no Rust.** `abrir_no_navegador` recusa tudo o
+///     que não é `http`/`https` — `file:`, `javascript:`, `data:`, e qualquer
+///     esquema que o sistema saiba abrir como programa. A tela não decide isso
+///     sozinha, e a lista de permitidos tem teste próprio em `main.rs`.
+#[test]
+fn um_endereco_numa_mensagem_sai_pelo_navegador_e_nao_por_esta_janela() {
+    let fonte = without_comments(&read("ui/tela-sessao.js"));
+
+    let com_links = js_function(&fonte, "function comLinks(");
+    assert!(
+        !com_links.contains("href"),
+        "o link de mensagem ganhou `href`: um clique do meio troca o SEELE por \
+         um site escolhido por outra pessoa, e esta janela não tem como voltar"
+    );
+    assert!(
+        com_links.contains("data.url = url") || com_links.contains("dataset.url"),
+        "o endereço deixou de viajar num `data-url`, então o ouvinte não tem o \
+         que abrir: {com_links}"
+    );
+    assert!(
+        com_links.contains("setAttribute(\"title\""),
+        "o link deixou de dizer para onde vai: quem clica num endereço escrito \
+         por outra pessoa tem de poder ler o destino antes"
+    );
+
+    let abrir = js_function(&fonte, "function abrirLinkDaMensagem(");
+    assert!(
+        abrir.contains("abrir_no_navegador"),
+        "o clique deixou de passar pelo comando que confere o esquema: {abrir}"
+    );
+    assert!(
+        abrir.contains("preventDefault"),
+        "o clique deixou de ser interceptado, então o navegador desta janela \
+         decide o que fazer com ele: {abrir}"
+    );
+
+    // E o corpo da mensagem tem de passar por ali — senão a função existe e
+    // nada a chama, que é o modo de falhar que este repositório mais conhece.
+    let corpo = js_function(&fonte, "function corpoComRealce(");
+    assert!(
+        corpo.contains("comLinks("),
+        "o corpo da mensagem voltou a ser texto cru: a função de links existe \
+         e ninguém a chama: {corpo}"
     );
 }

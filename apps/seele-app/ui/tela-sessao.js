@@ -1252,23 +1252,107 @@ function desenharMensagens() {
  * registra isto; não é corrigido aqui.
  */
 function corpoComRealce(corpo, intervalos, aceso = null) {
-  if (!intervalos || intervalos.length === 0) return [document.createTextNode(corpo)];
+  if (!intervalos || intervalos.length === 0) return comLinks(corpo);
   const caracteres = [...corpo];
   const pedacos = [];
   let cursor = 0;
   for (const [ordinal, { start, end }] of intervalos.entries()) {
     if (start > cursor) {
-      pedacos.push(document.createTextNode(caracteres.slice(cursor, start).join("")));
+      pedacos.push(...comLinks(caracteres.slice(cursor, start).join("")));
     }
     const classe = ordinal === aceso ? "realce realce-atual" : "realce";
     pedacos.push(elemento("mark", classe, caracteres.slice(start, end).join("")));
     cursor = end;
   }
   if (cursor < caracteres.length) {
-    pedacos.push(document.createTextNode(caracteres.slice(cursor).join("")));
+    pedacos.push(...comLinks(caracteres.slice(cursor).join("")));
   }
   return pedacos;
 }
+
+/**
+ * Onde um endereço começa e termina dentro do texto de uma mensagem.
+ *
+ * Deliberadamente curto: `http://` ou `https://` seguido do que não é espaço.
+ * O que fecha frase — ponto, vírgula, parêntese — é devolvido ao texto, porque
+ * «veja em https://exemplo.br.» tem um ponto que é da frase e não do endereço,
+ * e engoli-lo manda a pessoa para um lugar que não existe.
+ */
+const ENDERECO_NO_TEXTO = /https?:\/\/[^\s]+/gi;
+const PONTUACAO_QUE_FECHA_FRASE = /[.,;:!?)\]}'"»]+$/;
+
+/**
+ * Quebra um trecho de texto em pedaços, com os endereços virando links.
+ *
+ * **O link não leva `href`, e isso é a decisão, não um esquecimento.**
+ *
+ * Com `href`, um clique do meio ou um cmd-clique navegam **esta** janela para o
+ * site. A casca do SEELE não tem barra de endereço nem botão de voltar: o
+ * produto seria substituído por uma página que outra pessoa escolheu, sem
+ * caminho de volta. O endereço vai num `data-url` e o clique passa pelo
+ * `abrir_no_navegador`, que confere o esquema no Rust antes de qualquer coisa
+ * sair daqui.
+ *
+ * O endereço inteiro fica no `title`: quem vai clicar num link escrito por
+ * outra pessoa tem o direito de ler para onde ele vai antes.
+ *
+ * **O que isto não faz:** um endereço partido ao meio pelo realce da busca não
+ * vira link. Os pedaços de realce continuam texto, e remendá-los por cima do
+ * `<mark>` custaria mais do que vale — o endereço volta a ser clicável assim
+ * que a busca fecha.
+ */
+function comLinks(texto) {
+  if (!texto) return [];
+  const pedacos = [];
+  let cursor = 0;
+  ENDERECO_NO_TEXTO.lastIndex = 0;
+  for (const achado of texto.matchAll(ENDERECO_NO_TEXTO)) {
+    let url = achado[0].replace(PONTUACAO_QUE_FECHA_FRASE, "");
+    if (url.length <= "https://".length) continue;
+    const comeco = achado.index;
+    if (comeco > cursor) {
+      pedacos.push(document.createTextNode(texto.slice(cursor, comeco)));
+    }
+    const link = elemento("span", "link-externo", url);
+    link.dataset.url = url;
+    link.setAttribute("role", "link");
+    link.setAttribute("tabindex", "0");
+    link.setAttribute("title", `${url} — abre no navegador`);
+    pedacos.push(link);
+    cursor = comeco + url.length;
+  }
+  if (cursor < texto.length) {
+    pedacos.push(document.createTextNode(texto.slice(cursor)));
+  }
+  return pedacos;
+}
+
+/**
+ * Abre o endereço de um link de mensagem, fora desta janela.
+ *
+ * Ouvinte único na lista, e não um por link: uma conversa longa tem centenas
+ * de mensagens, e redesenhá-la é trocar todos os filhos — ouvintes por
+ * elemento seriam criados e jogados fora a cada desenho.
+ */
+function abrirLinkDaMensagem(evento) {
+  const link = evento.target.closest?.("[data-url]");
+  if (!link) return;
+  evento.preventDefault();
+  invoke("abrir_no_navegador", { url: link.dataset.url }).catch((falha) => {
+    // **Recusar tem de ser visível.** Um clique que não faz nada é lido como
+    // «o app travou», e a pessoa clica de novo.
+    console.warn("abrir link:", falha);
+    link.setAttribute("title", `${link.dataset.url} — ${fraseDeErro(falha)}`);
+    link.classList.add("link-recusado");
+  });
+}
+
+$("lista-mensagens").addEventListener("click", abrirLinkDaMensagem);
+$("lista-mensagens").addEventListener("keydown", (evento) => {
+  if (evento.key !== "Enter" && evento.key !== " ") return;
+  if (!evento.target.closest?.("[data-url]")) return;
+  abrirLinkDaMensagem(evento);
+});
 
 // ------------------------------------------------------------------ pessoas
 
