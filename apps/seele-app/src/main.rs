@@ -75,6 +75,17 @@ struct Session {
     /// Vive aqui e não numa variável local porque tem que sobreviver ao comando
     /// que o criou: o servidor fica de pé enquanto a janela estiver aberta.
     hospedagem: Mutex<Option<seele_server::hospedagem::Hospedagem>>,
+    /// **Qual servidor guardado está de pé**, quando há um.
+    ///
+    /// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca
+    /// inferir o destino apenas de *estou hospedando*». A tela dizia «ligar e
+    /// desligar MOD é do servidor que esta janela hospeda» sem dizer **qual** —
+    /// e com a lista de servidores, quem tem dois não tem como saber em qual
+    /// está mexendo.
+    ///
+    /// `None` com hospedagem de pé é o legado: a máquina que hospedava antes de
+    /// haver lista, e cujo banco é o de sempre.
+    servidor_hospedado: Mutex<Option<String>>,
     /// Qual servidor guardado esta janela levantou, quando levantou um.
     ///
     /// Existe para que renomear em CONFIGURAÇÕES não deixe a lista de
@@ -910,6 +921,11 @@ async fn hospedar(
         // hospedou antes desta versão existir.
         None => seele_server::persistence::banco_do_cliente(std::path::Path::new(&config)),
     };
+    // Guardado **antes** de subir: quem perguntar «qual servidor esta janela
+    // hospeda?» entre o início e o fim recebe a resposta certa, e não «nenhum».
+    if let Ok(mut qual) = session.servidor_hospedado.lock() {
+        *qual = id_do_servidor.map(str::to_owned);
+    }
     let server = seele_server::hospedagem::Hospedagem::iniciar(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
@@ -2778,6 +2794,26 @@ fn estou_hospedando(session: State<'_, Session>) -> bool {
         .hospedagem
         .lock()
         .is_ok_and(|aberto| aberto.is_some())
+}
+
+/// **Qual** servidor guardado esta janela hospeda, quando hospeda um.
+///
+/// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca inferir o
+/// destino apenas de *estou hospedando*». A tela dizia «ligar e desligar MOD é
+/// do servidor que esta janela hospeda» sem dizer qual — e quem tem dois
+/// servidores guardados não tinha como saber em qual estava mexendo.
+///
+/// `None` quando não hospeda, e **também** quando hospeda o legado: a máquina
+/// que já hospedava antes de haver lista, cujo banco é o de sempre. Quem lê
+/// distingue os dois casos pelo `estou_hospedando`, que continua respondendo a
+/// outra pergunta.
+#[tauri::command]
+fn servidor_hospedado(session: State<'_, Session>) -> Option<String> {
+    session
+        .servidor_hospedado
+        .lock()
+        .ok()
+        .and_then(|qual| qual.clone())
 }
 
 /// O catálogo de MODs, baixado e conferido contra a chave embutida.
@@ -4879,6 +4915,7 @@ fn main() {
             instalar_mod,
             aceites_de_mods,
             estou_hospedando,
+            servidor_hospedado,
             baixar_versao,
             catalogo_de_mods,
             instalar_mod_do_catalogo,

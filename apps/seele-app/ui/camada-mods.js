@@ -637,6 +637,38 @@ async function desenharMods() {
   }
   $("mods-sem-hospedar").hidden = hospedando;
 
+  // **De qual servidor esta tela fala.**
+  //
+  // Antes ela dizia «é do servidor que esta janela hospeda» e parava aí. Com a
+  // lista de servidores guardados, quem tem dois não tinha como saber em qual
+  // estava mexendo — e o conjunto de MODs é de um servidor, não da máquina.
+  const alvo = $("mods-alvo-do-servidor");
+  if (hospedando) {
+    let qual = null;
+    try {
+      qual = await invoke("servidor_hospedado");
+    } catch (falha) {
+      console.warn("servidor hospedado:", falha);
+    }
+    let nome = null;
+    if (qual) {
+      try {
+        const lista = await invoke("servidores_guardados");
+        nome = lista.find((s) => s.id === qual)?.nome ?? null;
+      } catch (falha) {
+        console.warn("servidores guardados:", falha);
+      }
+    }
+    // Sem identificador é o legado: a máquina que já hospedava antes de haver
+    // lista. Dizer «o servidor de sempre» é mais honesto que inventar um nome.
+    alvo.textContent = nome
+      ? `Estas escolhas valem para: ${nome}`
+      : "Estas escolhas valem para o servidor de sempre desta máquina";
+    alvo.hidden = false;
+  } else {
+    alvo.hidden = true;
+  }
+
   // **O conjunto de pé, e o rascunho por cima dele.**
   //
   // O rascunho só é semeado quando não há edição pendente. Refazê-lo a cada

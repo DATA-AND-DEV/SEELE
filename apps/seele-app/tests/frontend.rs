@@ -11721,3 +11721,42 @@ fn ligar_outro_conteudo_do_mesmo_mod_substitui_no_rascunho() {
          rascunho por forma, e não por decisão: {desenhar}"
     );
 }
+
+/// **A gestão diz de qual servidor ela fala.**
+///
+/// Plano de isolamento de 18/09: «gestão indica servidor-alvo, sempre
+/// identificando a instância selecionada… nunca inferir o destino apenas de
+/// *estou hospedando*».
+///
+/// A tela dizia «ligar e desligar MOD é do servidor que **esta janela**
+/// hospeda» e parava aí. Com a lista de servidores guardados, quem tem dois não
+/// tinha como saber em qual estava mexendo — e o conjunto de MODs é de um
+/// servidor, não da máquina.
+#[test]
+fn a_gestao_de_mods_nomeia_o_servidor_em_que_esta_mexendo() {
+    let camada = without_comments(&read("ui/camada-mods.js"));
+    let desenhar = js_function(&camada, "async function desenharMods(");
+
+    assert!(
+        desenhar.contains("servidor_hospedado"),
+        "a tela voltou a inferir o destino de «estou hospedando», que responde \
+         outra pergunta: {desenhar}"
+    );
+    assert!(
+        desenhar.contains("mods-alvo-do-servidor"),
+        "o alvo deixou de ser escrito na tela: {desenhar}"
+    );
+    // E o caso do legado é dito, em vez de aparecer como um nome vazio: a
+    // máquina que já hospedava antes de haver lista não tem identificador.
+    assert!(
+        desenhar.contains("servidor de sempre desta máquina"),
+        "o servidor legado deixou de ser nomeado, e a linha some ou fica vazia \
+         justamente para quem hospeda há mais tempo: {desenhar}"
+    );
+
+    let pagina = read("ui/index.html");
+    assert!(
+        pagina.contains("id=\"mods-alvo-do-servidor\""),
+        "o lugar onde o alvo é escrito saiu da página"
+    );
+}
