@@ -4,7 +4,7 @@
 > Ela fica no repositório porque a v0.11.0 ainda **não foi publicada**: a tag e
 > a publicação são passo manual de quem opera, e estão descritos no fim.
 
-_As mudanças de `v0.10.5-1` até `v0.11.0`. São **187 commits em 13 dias**._
+_As mudanças de `v0.10.5-1` até `v0.11.0`. São **188 commits em 13 dias**._
 
 ---
 
@@ -280,8 +280,9 @@ Não era o produto: os vetores assinados chegavam convertidos. O Git do Windows
 troca LF por CRLF na cópia de trabalho por padrão, e uma assinatura vale sobre
 **bytes**; o catálogo do indexador chegava lá com 226 bytes de `\r` a mais do
 que o arquivo que foi assinado, e a conferência recusava — como tinha de
-recusar. A mesma conversão alcançava a chave pública que este build confere, e
-uma chave malformada não recusa um catálogo adulterado: recusa todos eles.
+recusar. A conversão alcançava também a chave pública que este build confere —
+que, medido depois, continua sendo lida mesmo convertida: o analisador tolera o
+`\r`. Ninguém recebeu binário quebrado por isso.
 
 Um `.gitattributes` tira do conversor os oito arquivos cujos bytes são o
 contrato. E um guarda reprova **aqui**, em qualquer sistema, se o próximo vetor
@@ -292,7 +293,7 @@ esquecer vai ver a própria máquina passar.
 
 ## Todos os commits desta versão
 
-São 187, do mais recente ao mais antigo. O resumo curado está acima; esta lista
+São 188, do mais recente ao mais antigo. O resumo curado está acima; esta lista
 é para quem precisa achar o commit que mexeu numa coisa específica.
 
 > Gerada com `git log --oneline v0.10.5-1..v0.11.0 --no-merges` na hora de

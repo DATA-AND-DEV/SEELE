@@ -38,10 +38,16 @@ vetores-de-hash.json                                 -text
 # Os vetores do lançador, pelo mesmo motivo.
 crates/seele-lancador/testes/lista-de-revogacao-de-teste.json  -text
 
-# As assinaturas e as chaves. O `.minisig` é texto de quatro linhas e a chave
-# é texto de duas, mas os dois são analisados campo a campo — e uma chave
-# malformada não recusa um catálogo adulterado: recusa **todos** eles, o que no
-# Windows apagaria o catálogo de MODs inteiro do produto.
+# As assinaturas e as chaves. O `.minisig` é texto de quatro linhas e a chave é
+# texto de duas, e os dois são analisados campo a campo.
+#
+# **Medido, e não suposto:** o `mods.pub` convertido para CRLF *continua* sendo
+# lido — `str::lines()` come o `\r` do fim, e o `do_arquivo_pub` faz `trim()`
+# antes. Nenhum binário de Windows saiu quebrado por causa disto, e esta linha
+# não conserta defeito nenhum que tenha acontecido. Ela está aqui porque um
+# arquivo cujos bytes são conferidos não deve depender de um analisador ser
+# tolerante: no dia em que ele deixar de ser, uma chave malformada não recusa
+# um catálogo adulterado — recusa **todos** eles.
 *.minisig                                            -text
 *.pub                                                -text
 *.base64                                             -text
