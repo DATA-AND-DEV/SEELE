@@ -32,6 +32,7 @@ pub mod arquivos;
 pub mod despacho;
 pub mod mundo;
 pub mod pedidos;
+pub mod volume;
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -115,6 +116,22 @@ pub struct Anfitriao {
     hospedes: BTreeMap<String, Hospede>,
     teto_de_memoria: usize,
     teto_de_consultas: usize,
+    /// As autorizações de escrita por fluxo de volume — ADR 0048.
+    ///
+    /// Compartilhada porque quem a registra e quem a consome estão em lados
+    /// opostos: o MOD registra de dentro do QuickJS, e quem confere é o
+    /// tratador do fluxo que chega, que não tem nada a ver com esta árvore.
+    esperas: Arc<std::sync::Mutex<volume::Esperas>>,
+    /// Quem está sendo atendido agora, posto pelo servidor.
+    ///
+    /// **É o que impede um MOD de prender um token à pessoa errada.** Se
+    /// `volume.esperar` recebesse a pessoa como argumento, um MOD com defeito
+    /// registraria em nome de quem não pediu nada — e um mal-intencionado
+    /// também. Ela vive aqui, no lado Rust, onde o MOD não alcança.
+    ///
+    /// Um valor só, e não um por MOD, porque `pedir` toma `&mut self`: há um
+    /// pedido em curso por vez, e este campo vale exatamente enquanto ele dura.
+    atendendo: Arc<std::sync::Mutex<Option<seele_proto::ids::PersonId>>>,
 }
 
 impl Anfitriao {
@@ -147,6 +164,8 @@ impl Anfitriao {
             hospedes: BTreeMap::new(),
             teto_de_memoria: memoria,
             teto_de_consultas: consultas,
+            esperas: Arc::new(std::sync::Mutex::new(volume::Esperas::default())),
+            atendendo: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -214,6 +233,52 @@ impl Anfitriao {
                 )?;
 
                 ctx.globals().set("arquivos", arquivos_js)?;
+
+                // O bloco de volume — ADR 0048. Ele **não carrega bytes**: o
+                // MOD autoriza, e os bytes vão por um fluxo próprio direto ao
+                // disco, sem passar por aqui. É isso que torna 10 MiB possível.
+                let volume_js = rquickjs::Object::new(ctx.clone())?;
+                let esperas = Arc::clone(&self.esperas);
+                let atendendo = Arc::clone(&self.atendendo);
+                let quem_autoriza = id.to_owned();
+                volume_js.set(
+                    "esperar",
+                    Function::new(
+                        ctx.clone(),
+                        move |token: String, caminho: String, tipos: Vec<String>, prazo: f64| {
+                            // A pessoa vem daqui, e não do argumento. Ver o
+                            // campo `atendendo`.
+                            let Ok(quem) = atendendo.lock() else {
+                                return false;
+                            };
+                            let Some(pessoa) = *quem else {
+                                return false;
+                            };
+                            let Ok(mut esperas) = esperas.lock() else {
+                                return false;
+                            };
+                            let segundos = if prazo.is_finite() && prazo > 0.0 {
+                                prazo
+                            } else {
+                                0.0
+                            };
+                            esperas
+                                .registrar(
+                                    volume::PedidoDeEspera {
+                                        mod_id: quem_autoriza.clone(),
+                                        pessoa,
+                                        token,
+                                        caminho,
+                                        tipos,
+                                        prazo: std::time::Duration::from_secs_f64(segundos),
+                                    },
+                                    std::time::Instant::now(),
+                                )
+                                .is_ok()
+                        },
+                    )?,
+                )?;
+                ctx.globals().set("volume", volume_js)?;
 
                 // O bloco `world` do `api/v1.json`: rede, relógio e registro.
                 // É onde a liberdade total do ADR 0045 mora, e é o que a tela
@@ -325,12 +390,19 @@ impl Anfitriao {
     pub fn pedir(
         &mut self,
         id: &str,
+        quem: seele_proto::ids::PersonId,
         contexto: &str,
         pedido: &str,
         quintal: &mut BTreeMap<String, String>,
     ) -> Result<String, Falha> {
         let hospede = self.hospedes.get(id).ok_or(Falha::Lancou)?;
         hospede.passos.store(0, Ordering::Relaxed);
+
+        // **Quem está sendo atendido, dito pelo servidor.** É contra isto que
+        // `volume.esperar` prende a autorização; ver o campo `atendendo`.
+        if let Ok(mut atendendo) = self.atendendo.lock() {
+            *atendendo = Some(quem);
+        }
         let resposta = hospede.contexto.with(|ctx| {
             let dados = rquickjs::Object::new(ctx.clone()).map_err(|_| Falha::Lancou)?;
             for (k, v) in quintal.iter() {
@@ -347,12 +419,29 @@ impl Anfitriao {
                 .map_err(|_| Falha::Lancou)?;
             f.call::<_, String>((contexto, pedido))
                 .map_err(|_| Falha::Lancou)
-        })?;
+        });
+        // Limpo **antes** de propagar a falha: um MOD que lança não pode deixar
+        // a pessoa dele pendurada aqui, onde o pedido seguinte de outro MOD a
+        // leria como se fosse a sua.
+        if let Ok(mut atendendo) = self.atendendo.lock() {
+            *atendendo = None;
+        }
+        let resposta = resposta?;
         if resposta.len() > 1024 * 1024 {
             return Err(Falha::QuintalCheio);
         }
         self.recolher_quintal(id, quintal)?;
         Ok(resposta)
+    }
+
+    /// As autorizações de escrita por fluxo — ADR 0048.
+    ///
+    /// Pública porque quem as registra e quem as consome estão em lados
+    /// opostos: o MOD registra de dentro do QuickJS, e quem confere o
+    /// cabeçalho do fluxo que chega é o tratador da conexão.
+    #[must_use]
+    pub fn esperas(&self) -> Arc<std::sync::Mutex<volume::Esperas>> {
+        Arc::clone(&self.esperas)
     }
 
     /// Copies the JS `dados` object back into the map, refusing an oversized
@@ -456,6 +545,136 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temporário");
         dir
+    }
+
+    /// **A pessoa de uma espera vem do servidor, e não do MOD** — ADR 0048.
+    ///
+    /// `volume.esperar` não recebe quem é. Se recebesse, um MOD com defeito
+    /// registraria a autorização em nome de quem não pediu nada, e um MOD
+    /// mal-intencionado faria isso de propósito: bastaria escrever o
+    /// identificador de outra pessoa e esperar que ela — ou quem tivesse o
+    /// token — escrevesse na pasta por ela.
+    ///
+    /// Este teste atende **duas pessoas diferentes** com o mesmo MOD e o mesmo
+    /// código, e confere que cada espera saiu presa a quem estava sendo
+    /// atendido naquele momento.
+    #[test]
+    fn a_espera_fica_presa_a_quem_o_servidor_disse_estar_atendendo() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/perfis",
+                // O MOD tenta prender a espera a quem ele quiser: ele escreve
+                // o token e o caminho, e nada mais. Não há argumento de pessoa
+                // para ele preencher — que é a propriedade sob teste.
+                "globalThis.aoPedir = (c, r) => { \
+                   const pedido = JSON.parse(r); \
+                   const ok = volume.esperar(pedido.token, 'volume/x.bin', ['png'], 60); \
+                   return JSON.stringify({ok}); \
+                 };",
+                &pasta_de_teste("espera-por-pessoa"),
+            )
+            .expect("carregar");
+
+        let esperas = anfitriao.esperas();
+        let mut quintal = BTreeMap::new();
+
+        for (pessoa, token) in [(7_u64, "t-sete"), (9, "t-nove")] {
+            let resposta = anfitriao
+                .pedir(
+                    "seele/perfis",
+                    seele_proto::ids::PersonId(pessoa),
+                    "{}",
+                    &format!(r#"{{"token":"{token}"}}"#),
+                    &mut quintal,
+                )
+                .expect("pedir");
+            assert!(resposta.contains("true"), "o MOD não conseguiu registrar");
+        }
+
+        let agora = std::time::Instant::now();
+        let mut esperas = esperas.lock().expect("esperas");
+        assert!(
+            esperas
+                .tomar(
+                    "t-sete",
+                    "seele/perfis",
+                    seele_proto::ids::PersonId(9),
+                    agora
+                )
+                .is_none(),
+            "a espera de uma pessoa foi consumida por outra"
+        );
+        assert!(
+            esperas
+                .tomar(
+                    "t-sete",
+                    "seele/perfis",
+                    seele_proto::ids::PersonId(7),
+                    agora
+                )
+                .is_some(),
+            "a espera não ficou presa a quem o servidor estava atendendo"
+        );
+        assert!(esperas
+            .tomar(
+                "t-nove",
+                "seele/perfis",
+                seele_proto::ids::PersonId(9),
+                agora
+            )
+            .is_some());
+    }
+
+    /// **Carregar um MOD não é atender ninguém.**
+    ///
+    /// O código de topo de um MOD roda no `carregar`, fora de qualquer pedido.
+    /// Se a pessoa do último pedido continuasse de pé, um MOD instalado depois
+    /// registraria uma autorização de escrita **em nome de quem foi atendido
+    /// por último** — sem que essa pessoa tivesse pedido nada, e sem que o MOD
+    /// dela tivesse qualquer relação com ele.
+    ///
+    /// É por isso que `pedir` limpa ao terminar, inclusive quando o MOD lança.
+    ///
+    /// **Este teste já nasceu errado uma vez:** a primeira versão carregava o
+    /// segundo MOD e nunca o executava, então passava sem afirmar nada. Quem
+    /// pegou foi a prova de reversão — tirar a limpeza não o fazia falhar.
+    #[test]
+    fn carregar_um_mod_nao_registra_em_nome_de_quem_foi_atendido_antes() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/explode",
+                "globalThis.aoPedir = () => { throw new Error('eu'); };",
+                &pasta_de_teste("pendurada"),
+            )
+            .expect("carregar");
+        let mut quintal = BTreeMap::new();
+        let _ = anfitriao.pedir(
+            "seele/explode",
+            seele_proto::ids::PersonId(7),
+            "{}",
+            "{}",
+            &mut quintal,
+        );
+
+        // O segundo MOD tenta registrar **no topo**, durante o `carregar` — o
+        // único momento em que não há pedido em curso.
+        anfitriao
+            .carregar(
+                "seele/tenta",
+                "volume.esperar('t','volume/x.bin',['png'],60); \
+                 globalThis.aoPedir = () => '{}';",
+                &pasta_de_teste("pendurada2"),
+            )
+            .expect("carregar");
+
+        assert_eq!(
+            anfitriao.esperas().lock().expect("esperas").quantas(),
+            0,
+            "um MOD registrou autorização de escrita no carregamento, em nome \
+             da pessoa que o servidor atendeu por último"
+        );
     }
 
     #[test]

@@ -121,7 +121,7 @@ async fn executar_inner(
         )?;
         let mut data: BTreeMap<String, String> = mods::ler_quintal(&db, &id)?;
         let before = data.clone();
-        let response = host.pedir(&id, &context, &payload, &mut data)?;
+        let response = host.pedir(&id, person, &context, &payload, &mut data)?;
         if data != before {
             mods::gravar_quintal(&mut db, &id, &data)?;
         }
