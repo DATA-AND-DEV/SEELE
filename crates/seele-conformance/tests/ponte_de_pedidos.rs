@@ -152,7 +152,10 @@ async fn a_ponte_entrega_a_identidade_da_sessao_e_ignora_a_que_o_pedido_afirma()
             name: "Ponte".into(),
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
             database: Location::Memory,
-            mods_dir: Some(root.clone()),
+            mods_dir: Some(seele_server::RaizesDosMods {
+                pacotes: root.clone(),
+                dados: root.join("mod-data"),
+            }),
             ..ServerConfig::default()
         })
         .await?,
@@ -237,7 +240,10 @@ async fn a_resposta_volta_so_para_quem_pediu_e_sobrevive_a_reconexao() -> Result
             name: "Ponte".into(),
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
             database: Location::Memory,
-            mods_dir: Some(root.clone()),
+            mods_dir: Some(seele_server::RaizesDosMods {
+                pacotes: root.clone(),
+                dados: root.join("mod-data"),
+            }),
             ..ServerConfig::default()
         })
         .await?,
@@ -352,7 +358,10 @@ async fn a_resposta_grande_chega_inteira_em_partes_numeradas() -> Result<()> {
             name: "Ponte".into(),
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
             database: Location::Memory,
-            mods_dir: Some(root.clone()),
+            mods_dir: Some(seele_server::RaizesDosMods {
+                pacotes: root.clone(),
+                dados: root.join("mod-data"),
+            }),
             ..ServerConfig::default()
         })
         .await?,

@@ -487,14 +487,14 @@ impl Anfitriao {
 /// for most: whoever enabled it gets no answer.
 #[must_use]
 pub fn carregar_do_disco(
-    pasta_dos_mods: &std::path::Path,
+    raizes: &crate::RaizesDosMods,
     ids: &[String],
 ) -> (Vec<(String, String, std::path::PathBuf)>, Vec<String>) {
     let mut prontos = Vec::new();
     let mut queixas = Vec::new();
 
     for id in ids {
-        let dir = pasta_dos_mods.join(id);
+        let dir = raizes.pacote_de(id);
         let Ok(texto) = std::fs::read_to_string(dir.join("mod.json")) else {
             queixas.push(format!("{id}: sem mod.json em {}", dir.display()));
             continue;
@@ -515,7 +515,8 @@ pub fn carregar_do_disco(
             ));
             continue;
         };
-        prontos.push((id.clone(), fonte, dir.join("dados")));
+        // A pasta mutável é da **instância**, e não sai de dentro do pacote.
+        prontos.push((id.clone(), fonte, raizes.dados_de(id)));
     }
     (prontos, queixas)
 }

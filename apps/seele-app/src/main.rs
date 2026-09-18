@@ -900,7 +900,8 @@ async fn hospedar(
     // mesmo caminho quando ninguém escolheu nada — e é o que faz hospedar
     // continuar funcionando numa máquina sem registro nenhum.
     let config = config_dir(&app);
-    let banco = match servidor.as_deref() {
+    let id_do_servidor = servidor.as_deref();
+    let banco = match id_do_servidor {
         Some(id) => {
             servidores::marcar_uso(&config, id);
             servidores::banco(&config, Some(id))
@@ -913,9 +914,10 @@ async fn hospedar(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
         "Casa",
-        // ADR 0045: os MODs deste servidor moram ao lado do banco dele, na
-        // pasta do ADR 0017 que esta janela já conhece.
-        Some(std::path::Path::new(&config_dir(&app)).join("mods")),
+        // ADR 0045 para o pacote, e o plano de isolamento de 18/09 para os
+        // arquivos: o código é compartilhado porque é imutável e conferido por
+        // hash; o que o MOD escreve é **desta instância**, e não da máquina.
+        Some(servidores::raizes_dos_mods(&config, id_do_servidor)),
     )
     .await
     .map_err(|erro| classificar(&erro))?;

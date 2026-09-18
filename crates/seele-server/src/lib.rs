@@ -94,6 +94,47 @@ pub mod encontro {
 /// Length of an Ed25519 public key, in bytes.
 pub const PUBLIC_KEY_LEN: usize = seele_proto::control::PUBLIC_KEY_LEN;
 
+/// Onde moram o código de um MOD e os arquivos que ele escreve.
+///
+/// **Duas raízes, e não uma** — plano de isolamento de 18/09, P0 «arquivos
+/// mutáveis de servidores diferentes compartilham caminho».
+///
+/// Antes havia um caminho só, e o `dados/` saía de dentro dele:
+/// `config/mods/<autor>/<nome>/dados`. Toda instância hospedada nesta máquina
+/// recebia a mesma raiz, então o mesmo MOD em dois servidores lia e escrevia
+/// **nos mesmos arquivos** — enquanto o `dados` chave-valor já estava
+/// separado, corretamente, em bancos diferentes. Um avatar gravado num
+/// servidor aparecia no outro.
+///
+/// A divisão segue o que cada metade é:
+///
+/// - **o pacote é imutável e conferido por hash.** Dois servidores que exigem
+///   os mesmos bytes podem compartilhá-lo, e compartilhar é o certo: são os
+///   mesmos bytes;
+/// - **os arquivos são da instância.** Eles nascem de quem usa aquele
+///   servidor, e não têm nada a ver com outro.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaizesDosMods {
+    /// Onde os pacotes verificados moram, por identificador.
+    pub pacotes: std::path::PathBuf,
+    /// Onde os arquivos mutáveis **desta instância** moram, por identificador.
+    pub dados: std::path::PathBuf,
+}
+
+impl RaizesDosMods {
+    /// A pasta do pacote deste MOD.
+    #[must_use]
+    pub fn pacote_de(&self, id: &str) -> std::path::PathBuf {
+        self.pacotes.join(id)
+    }
+
+    /// A pasta mutável deste MOD, nesta instância.
+    #[must_use]
+    pub fn dados_de(&self, id: &str) -> std::path::PathBuf {
+        self.dados.join(id)
+    }
+}
+
 /// How a server is configured.
 ///
 /// `specs/04-servidor-seele.md` describes a TOML file; M2 takes the same fields
@@ -106,7 +147,7 @@ pub struct ServerConfig {
     /// `None` desliga MODs inteiramente, e é o padrão: um servidor que nunca
     /// ouviu falar de MOD não deve ganhar uma thread de interpretador por
     /// existir. ADR 0045.
-    pub mods_dir: Option<std::path::PathBuf>,
+    pub mods_dir: Option<RaizesDosMods>,
     /// What this server is called.
     pub name: String,
     /// Where to listen. UDP; QUIC needs no second port.

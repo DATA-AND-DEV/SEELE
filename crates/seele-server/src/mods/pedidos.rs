@@ -88,11 +88,14 @@ async fn executar_inner(
     let write = Permissions::new(&db)
         .may(person, Permission::WriteChannel)
         .unwrap_or(false);
-    let root = server
+    let raizes = server
         .mods_dir
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("no directory"))?
-        .join(id);
+        .ok_or_else(|| anyhow::anyhow!("no directory"))?;
+    let root = raizes.pacote_de(id);
+    // **Da instância, e não da máquina.** Ver `RaizesDosMods`: o mesmo MOD em
+    // dois servidores lia e escrevia nos mesmos arquivos.
+    let dados = raizes.dados_de(id);
     let hash = active.hash.clone();
     let context = serde_json::json!({"person":person.0.to_string(),"channel":channel.0,"admin":admin,"write":write}).to_string();
     let id = id.to_owned();
@@ -114,11 +117,7 @@ async fn executar_inner(
         let relative = seele_proto::mods::inner_path(&entry.split('/').collect::<Vec<_>>())
             .ok_or_else(|| anyhow::anyhow!("bad path"))?;
         let mut host = super::Anfitriao::novo()?;
-        host.carregar(
-            &id,
-            &std::fs::read_to_string(root.join(relative))?,
-            &root.join("dados"),
-        )?;
+        host.carregar(&id, &std::fs::read_to_string(root.join(relative))?, &dados)?;
         let mut data: BTreeMap<String, String> = mods::ler_quintal(&db, &id)?;
         let before = data.clone();
         let response = host.pedir(&id, person, &context, &payload, &mut data)?;

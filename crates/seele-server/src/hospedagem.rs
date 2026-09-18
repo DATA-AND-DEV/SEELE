@@ -77,7 +77,7 @@ impl Hospedagem {
         porta: u16,
         banco: Location,
         nome: &str,
-        pasta_dos_mods: Option<std::path::PathBuf>,
+        pasta_dos_mods: Option<crate::RaizesDosMods>,
     ) -> Result<Self> {
         let config = ServerConfig {
             name: nome.to_owned(),

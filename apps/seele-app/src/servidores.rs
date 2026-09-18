@@ -265,9 +265,96 @@ pub(crate) fn renomear(config: &str, id: &str, nome: &str) {
     gravar(config, &lista);
 }
 
+/// Onde moram o pacote e os arquivos mutáveis dos MODs **desta instância**.
+///
+/// Plano de isolamento de 18/09, P0 «arquivos mutáveis de servidores
+/// diferentes compartilham caminho». Antes havia uma raiz só, e o `dados/`
+/// saía de dentro do pacote: `config/mods/<autor>/<nome>/dados`. Toda
+/// instância hospedada nesta máquina recebia a mesma, então o mesmo MOD em
+/// dois servidores escrevia nos mesmos arquivos — um avatar gravado num
+/// aparecia no outro.
+///
+/// O pacote continua compartilhado, e isso é o certo: ele é imutável e
+/// conferido por hash, e dois servidores que exigem os mesmos bytes exigem os
+/// mesmos bytes.
+///
+/// # O legado, que tem dados de verdade lá dentro
+///
+/// A instância adotada — `caminho: None`, que é toda máquina que hospedou
+/// antes de haver lista — tem perfis, avatares e estado de campanha em
+/// `mods/<id>/dados`. Mudar a raiz dela sem mais nada seria abrir o servidor
+/// com tudo em branco, que quem usa leria como perda.
+///
+/// Então a pasta é **movida**, uma vez, na primeira vez que a raiz é pedida. A
+/// mudança é um `rename` dentro do mesmo volume: ou ela acontece inteira, ou
+/// não acontece. Se não acontecer, a raiz antiga continua valendo — os dados
+/// nunca ficam a meio caminho, e um servidor único não sofre do defeito que
+/// esta separação conserta.
+pub(crate) fn raizes_dos_mods(config: &str, id: Option<&str>) -> seele_server::RaizesDosMods {
+    let base = Path::new(config);
+    let pacotes = base.join("mods");
+    let dados = match id {
+        Some(id) => base.join("servidores").join(id).join("mod-data"),
+        None => base.join("mod-data-legado"),
+    };
+    if id.is_none() {
+        mudar_os_dados_do_legado(&pacotes, &dados);
+    }
+    seele_server::RaizesDosMods { pacotes, dados }
+}
+
+/// Move `mods/<id>/dados` para a raiz nova, uma vez, por MOD.
+///
+/// Silencioso quando não há o que mover — que é o caso de toda máquina depois
+/// da primeira vez. Falhar não interrompe: quem chama recebe a raiz nova de
+/// qualquer forma, e um MOD sem dados ali volta a escrever do zero enquanto a
+/// pasta antiga continua no disco, intacta, para quem for olhar.
+fn mudar_os_dados_do_legado(pacotes: &Path, dados: &Path) {
+    let Ok(autores) = std::fs::read_dir(pacotes) else {
+        return;
+    };
+    for autor in autores.flatten() {
+        let Ok(nomes) = std::fs::read_dir(autor.path()) else {
+            continue;
+        };
+        for nome in nomes.flatten() {
+            let antiga = nome.path().join("dados");
+            if !antiga.is_dir() {
+                continue;
+            }
+            let Some(a) = autor.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let Some(n) = nome.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let nova = dados.join(&a).join(&n);
+            if nova.exists() {
+                continue;
+            }
+            if let Some(pai) = nova.parent() {
+                if std::fs::create_dir_all(pai).is_err() {
+                    continue;
+                }
+            }
+            match std::fs::rename(&antiga, &nova) {
+                Ok(()) => tracing::info!(
+                    mod_id = %format!("{a}/{n}"),
+                    "os arquivos deste MOD passaram para a raiz da instância"
+                ),
+                Err(erro) => tracing::warn!(
+                    mod_id = %format!("{a}/{n}"),
+                    %erro,
+                    "não consegui mover os arquivos deste MOD; a pasta antiga continua no disco"
+                ),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod os_servidores_guardados {
-    use super::{banco, criar, listar, marcar_uso, renomear};
+    use super::{banco, criar, listar, marcar_uso, raizes_dos_mods, renomear};
 
     /// Uma pasta de configuração vazia, só para este teste.
     fn pasta() -> tempfile::TempDir {
@@ -476,5 +563,95 @@ mod os_servidores_guardados {
         // Não entra em pânico, e o caminho de sempre continua respondendo.
         assert!(listar(&config).is_empty());
         assert_eq!(banco(&config, None), dir.path().join("seele.db"));
+    }
+
+    /// **Dois servidores, o mesmo MOD, arquivos separados.**
+    ///
+    /// É o P0 do plano de isolamento: antes a raiz dos arquivos era a mesma
+    /// para toda instância desta máquina, e o `dados/` saía de dentro do
+    /// pacote. Um avatar gravado num servidor aparecia no outro, enquanto o
+    /// `dados` chave-valor já estava separado, corretamente, em bancos
+    /// diferentes — o que tornava o defeito mais confuso, e não menos.
+    #[test]
+    fn dois_servidores_com_o_mesmo_mod_nao_dividem_os_arquivos() {
+        let dir = pasta();
+        let config = texto(&dir);
+        let a = criar(&config, "Casa A", "0.11.3").id;
+        let b = criar(&config, "Casa B", "0.11.3").id;
+
+        let ra = raizes_dos_mods(&config, Some(&a));
+        let rb = raizes_dos_mods(&config, Some(&b));
+
+        assert_ne!(
+            ra.dados_de("seele/perfis"),
+            rb.dados_de("seele/perfis"),
+            "o mesmo MOD em dois servidores escreve no mesmo lugar"
+        );
+        // **E o pacote continua compartilhado, de propósito.** Ele é imutável e
+        // conferido por hash: dois servidores que exigem os mesmos bytes
+        // exigem os mesmos bytes, e duplicá-los seria gastar disco para nada.
+        assert_eq!(
+            ra.pacote_de("seele/perfis"),
+            rb.pacote_de("seele/perfis"),
+            "o pacote foi duplicado por instância; ele é imutável e não precisa"
+        );
+    }
+
+    /// **O legado tem dados de verdade, e eles não podem ficar órfãos.**
+    ///
+    /// Toda máquina que hospedou antes de haver lista tem perfis e avatares em
+    /// `mods/<autor>/<nome>/dados`. Trocar a raiz sem mais nada abriria o
+    /// servidor com tudo em branco — que quem usa lê como perda, e com razão.
+    #[test]
+    fn os_arquivos_do_legado_passam_para_a_raiz_nova_sem_sumir() {
+        let dir = pasta();
+        let config = texto(&dir);
+        let antiga = dir.path().join("mods/seele/perfis/dados");
+        std::fs::create_dir_all(&antiga).expect("pasta antiga");
+        std::fs::write(antiga.join("avatar.txt"), b"o avatar de alguem").expect("dado antigo");
+
+        let raizes = raizes_dos_mods(&config, None);
+        let agora = raizes.dados_de("seele/perfis").join("avatar.txt");
+
+        assert_eq!(
+            std::fs::read(&agora).expect("o dado tem de estar na raiz nova"),
+            b"o avatar de alguem",
+            "o conteúdo mudou na mudança"
+        );
+        assert!(
+            !antiga.exists(),
+            "a pasta antiga ficou para trás: a próxima leitura veria as duas e \
+             não saberia qual vale"
+        );
+    }
+
+    /// E pedir a raiz de novo não desfaz nem duplica: a mudança é uma vez.
+    #[test]
+    fn a_mudanca_do_legado_acontece_uma_vez_e_nao_atrapalha_depois() {
+        let dir = pasta();
+        let config = texto(&dir);
+        let antiga = dir.path().join("mods/seele/perfis/dados");
+        std::fs::create_dir_all(&antiga).expect("pasta antiga");
+        std::fs::write(antiga.join("a.txt"), b"um").expect("dado");
+
+        let raizes = raizes_dos_mods(&config, None);
+        // Alguém escreve depois da mudança, como o MOD faria.
+        std::fs::write(raizes.dados_de("seele/perfis").join("b.txt"), b"dois").expect("dado novo");
+        // E a pasta antiga reaparece vazia, como um pacote reinstalado a deixa.
+        std::fs::create_dir_all(&antiga).expect("pasta antiga de novo");
+
+        let de_novo = raizes_dos_mods(&config, None);
+        assert_eq!(
+            de_novo.dados_de("seele/perfis"),
+            raizes.dados_de("seele/perfis")
+        );
+        assert!(
+            de_novo.dados_de("seele/perfis").join("b.txt").is_file(),
+            "a segunda chamada levou a pasta vazia por cima do que havia"
+        );
+        assert!(
+            de_novo.dados_de("seele/perfis").join("a.txt").is_file(),
+            "o que veio do legado sumiu na segunda chamada"
+        );
     }
 }

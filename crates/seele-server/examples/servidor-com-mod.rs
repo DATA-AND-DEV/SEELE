@@ -104,7 +104,10 @@ async fn main() -> Result<()> {
         name: format!("{} — desenvolvimento", manifesto.id),
         listen: SocketAddr::from(([127, 0, 0, 1], 8384)),
         database: Location::File(mundo.join("seele.db")),
-        mods_dir: Some(mundo.join("mods")),
+        mods_dir: Some(seele_server::RaizesDosMods {
+            pacotes: mundo.join("mods"),
+            dados: mundo.join("mod-data"),
+        }),
         ..ServerConfig::default()
     })
     .await?;
