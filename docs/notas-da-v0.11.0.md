@@ -4,7 +4,7 @@
 > Ela fica no repositório porque a v0.11.0 ainda **não foi publicada**: a tag e
 > a publicação são passo manual de quem opera, e estão descritos no fim.
 
-_As mudanças de `v0.10.5-1` até `v0.11.0`. São 148 commits._
+_As mudanças de `v0.10.5-1` até `v0.11.0`. São **198 commits em 12 dias**._
 
 ---
 
@@ -172,6 +172,23 @@ dentro da sala. Toda a saída passa a ser guardada por identificador de sessão.
 E o fantasma do outro lado saiu junto: reconectar deixava uma cópia velha da
 contabilidade de pé por cima da fotografia nova.
 
+### Expulsar passa a manter alguém fora
+
+`:expulsar` encerrava a sessão da pessoa e, em milissegundos, ela estava de
+volta na mesma sala — o verbo interrompia a conexão e não removia ninguém de
+nada por mais de um instante. Eram duas metades, e cada uma bastava sozinha:
+
+- **`EnterVoiceRoom` não conferia `Permission::EnterVoiceRoom`.** A permissão
+  existia no protocolo e não era lida em lugar nenhum. Agora é.
+- **A bateria interna do cliente reconectava e restaurava a sala**, sem
+  distinguir «a rede caiu» de «um operador me tirou daqui». Agora `Kicked`,
+  `Banned` e `ModsMudaram` são tratados como fim de sessão, e não como queda.
+
+**O que continua aberto, e está registrado na pendência 45:** nada disto foi
+provado em campo, com duas máquinas e alguém expulsando de verdade. E o
+servidor continua «confirmando a entrada por silêncio» em vez de responder a
+ela, que é a terceira parte do mesmo achado.
+
 ### Entrar numa sala com senha funciona, e o teto e a permissão passam a valer
 
 A senha de sala de voz era declarada no protocolo, anunciada ao cliente e
@@ -221,6 +238,13 @@ SEELE, o servidor desistia dela e aceitava qualquer porta — e o link guardado
 por quem hospeda deixava de funcionar. Agora a porta canônica é tentada de novo
 antes do recuo, e **quando o recuo acontece quem hospeda é avisado** de que o
 link gerado pode não servir depois de reiniciar.
+
+### No Windows, um instalador só
+
+O setup do NSIS saiu. Uma página de release com `.exe` e `.msi` lado a lado
+obriga quem chegou a escolher antes de entender a diferença — e a primeira
+escolha de quem não sabe é fechar a aba. O que fica é o instalador que não pede
+administrador.
 
 ### A suíte de testes volta a ser evidência
 
@@ -305,6 +329,30 @@ tem relato de campo em aberto.
 
 **Nada foi publicado.** Nenhum push, nenhuma tag, nenhum binário enviado. A tag
 e a publicação são o passo manual descrito abaixo.
+
+### Os números desta volta
+
+Medidos do commit que gerou a release publicada (`12a6401`) até aqui, e não
+estimados:
+
+| | v0.10.5-1 | v0.11.0 |
+|---|---|---|
+| protocolo | 3 | **6** |
+| API de MODs | não existia | **2** |
+| funções de teste | 1 530 | **1 997** |
+| crates | — | **+1** (`seele-lancador`) |
+| comandos da ponte | — | **+24**, −2 |
+
+397 arquivos mudaram: +112 656 / −1 450 linhas. As áreas que mais cresceram
+foram documentação, servidor, conformidade e núcleo, nesta ordem.
+
+**Quatro decisões novas ficaram registradas como ADR**, e cada uma governa uma
+das entregas acima:
+
+- **0044** — o portão divide a subida medida.
+- **0045** — MODs: o produto base tem regras, e um MOD não.
+- **0046** — toda versão continua de pé.
+- **0047** — o link que volta a funcionar amanhã.
 
 ### O que foi exercitado de verdade, nesta máquina
 
