@@ -27,19 +27,27 @@ ignore = [
     # Entra aqui pela mesma regra do resto desta lista: `unmaintained` é
     # exceção com razão escrita; vulnerabilidade não entra nunca.
     { id = "RUSTSEC-2024-0436", reason = "paste sem manutenção; macro de compilação, não vai ao binário" },
-    # GTK3 bindings. Linux only, and reached only through webkit2gtk, which is
-    # the system webview Tauri uses there. Upstream's migration to GTK4 is
-    # tracked by Tauri, not by us; we do not call these crates directly.
-    { id = "RUSTSEC-2024-0411", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0412", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0413", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0414", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0415", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0416", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0417", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0418", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0419", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
-    { id = "RUSTSEC-2024-0420", reason = "gtk3 bindings via tauri/webkit2gtk, Linux only" },
+    # **As dez de GTK3 saíram daqui em 2026-09-18**, e o motivo não é que o
+    # problema passou: é que o RustSec **retirou as advisories** em 2026-08-14
+    # — `withdrawn` no arquivo de cada uma. Elas não existem mais para casar com
+    # coisa nenhuma.
+    #
+    # Ficaram dez linhas que o `cargo deny` acusava, uma por uma, como
+    # `advisory-not-detected`. Dez avisos que ninguém pode resolver são o modo
+    # mais rápido de ensinar uma equipe a não ler a saída — e foi o que quase
+    # aconteceu: a queixa que trouxe esta conferência apontava para essas
+    # linhas, e a vulnerabilidade de verdade estava na **primeira** linha da
+    # saída, acima de todas elas.
+    #
+    # Medido antes de tirar, e não deduzido: os crates `atk`, `gdk`, `gtk`,
+    # `gdk-pixbuf` e `pango` continuam no `Cargo.lock`, e os quatro alvos —
+    # Linux inclusive — continuam declarados em `[graph]`. Nem a plataforma nem
+    # a configuração explicavam o «não casou»; sete das dez trazem a mesma data
+    # de retirada, e as dez somem com `unmaintained = "all"` também.
+    #
+    # O GTK3 continua sem manutenção, e isso continua chegando por baixo do
+    # Tauri. O que mudou foi o banco deixar de anunciá-lo — e anotar aqui é o
+    # que impede alguém de reabrir a questão achando que a lista foi perdida.
     # Build-time only: a proc-macro helper in tauri's macro crate. Never linked
     # into a shipped binary.
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error, build-time only, via tauri-macros" },
