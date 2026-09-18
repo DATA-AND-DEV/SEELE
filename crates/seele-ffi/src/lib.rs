@@ -70,7 +70,14 @@ pub use types::{
 /// doutrina que `seele-core` já aplica sobre `seele-proto`: acrescentar a esta
 /// lista é a hora de perguntar se a casca precisa do valor ou da decisão por
 /// trás dele.
-pub use seele_core::{conhecidos, preferences, search, uri};
+///
+/// `preview` entrou por essa pergunta, e a resposta é **a decisão**: a casca
+/// desenha imagem vinda de link de conversa, e a única forma de fazê-lo sem
+/// abrir a CSP para `https:` é buscar pelo Rust e conferir os bytes. A regra
+/// de «o tipo alegado tem de bater com o que os bytes dizem» é a mesma do
+/// anexo, e uma segunda cópia dela seria duas regras para discordarem no dia
+/// em que uma mudasse.
+pub use seele_core::{conhecidos, preferences, preview, search, uri};
 
 /// Every microphone this machine is offering, right now.
 ///

@@ -1885,6 +1885,28 @@ button.linha-nome:hover { text-decoration: underline; }
    é a mesma ideia com o que o navegador tem: o corrente inverte o bloco e
    engrossa o traço. Sem cor nenhuma continuam distintos — um é texto claro
    sobre bloco escuro, o outro é texto escuro sobre bloco claro e em negrito. */
+/* ---------- a imagem de um link de imagem ----------
+
+   Desenhada embaixo do link, e não no lugar dele: quem quiser a origem
+   continua podendo abri-la, e uma imagem que não carrega não deixa a mensagem
+   sem nada.
+
+   O teto é de desenho, e não de bytes — o de bytes é do Rust, 4 MiB, o mesmo
+   do anexo. Aqui o que se impede é uma imagem alta demais empurrar a conversa
+   inteira para fora da tela: quem rola procurando o que foi dito não pode ter
+   de atravessar um GIF de tela cheia por mensagem.
+
+   `display: block` porque ela vem depois de texto corrido, e `object-fit`
+   para que o teto não a deforme. */
+.previa-de-link {
+  display: block;
+  margin-top: 0.375rem;
+  max-width: min(100%, 420px);
+  max-height: 320px;
+  object-fit: contain;
+  border: 1px solid var(--seele-osso-apagado);
+}
+
 /* ---------- endereços dentro de uma mensagem ----------
 
    Sublinhado **e** cor, e não cor sozinha: a cor é a informação que some

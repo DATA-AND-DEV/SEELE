@@ -2362,6 +2362,118 @@ async fn aplicar_mod(
     Ok(identidade)
 }
 
+/// O texto deste arquivo, para os guardas que afirmam sobre ele.
+#[cfg(test)]
+const FONTE_DESTE_ARQUIVO: &str = include_str!("main.rs");
+
+/// Por que um link de imagem não virou imagem.
+///
+/// Enum e não frase, como as vizinhas: a fronteira erro→texto é do frontend.
+#[derive(Debug, serde::Serialize)]
+enum FalhaNaPrevia {
+    /// O esquema não sai desta janela. Ver [`endereco_que_pode_sair`].
+    NaoEAberto(String),
+    /// Não respondeu, ou respondeu erro.
+    NaoRespondeu(String),
+    /// Respondeu mais do que uma prévia pode custar.
+    GrandeDemais,
+    /// Respondeu, e o que veio não é imagem — ou não é a imagem que disse ser.
+    NaoEImagem,
+}
+
+/// Busca um link de imagem e devolve um `data:` que a janela pode desenhar.
+///
+/// # Por que passa pelo Rust, e não pela janela
+///
+/// A CSP deste app é `default-src 'self'` com `img-src 'self' data: mod:`, e
+/// ela **não se mexe** — `preview.rs` já diz isso sobre o `data:`. Alargá-la
+/// para `https:` deixaria qualquer imagem remota carregar, de qualquer
+/// origem, inclusive de dentro de um MOD: seria abrir um canal de rastreio
+/// para toda a janela por causa de um GIF.
+///
+/// Aqui a busca é nossa, e com ela vêm as travas que a janela não teria como
+/// aplicar sozinha.
+///
+/// # O que isto entrega a terceiros, dito em voz alta
+///
+/// Desenhar um link é buscá-lo, e buscar é aparecer: quem controla o endereço
+/// aprende o IP de quem está lendo a conversa, e a hora. Não há como desenhar
+/// sem isso. O que **não** acontece: nenhum cookie vai junto, nenhum
+/// `Referer` diz de onde veio, e o conteúdo é conferido contra os bytes antes
+/// de chegar à tela.
+///
+/// # Errors
+///
+/// [`FalhaNaPrevia`], uma variante por motivo.
+#[tauri::command]
+async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
+    let alvo = endereco_que_pode_sair(&url).map_err(FalhaNaPrevia::NaoEAberto)?;
+
+    let cliente = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        // **Sem redirecionamento seguido às cegas.** Um `https://` que
+        // responde `302 file:///…` ou `302 http://192.168.0.1/…` usaria esta
+        // janela para alcançar o que ela recusaria de frente. Cada salto é
+        // conferido pela mesma regra da primeira chamada.
+        .redirect(reqwest::redirect::Policy::custom(|tentativa| {
+            if tentativa.previous().len() >= 3 {
+                return tentativa.stop();
+            }
+            match endereco_que_pode_sair(tentativa.url().as_str()) {
+                Ok(_) => tentativa.follow(),
+                Err(_) => tentativa.stop(),
+            }
+        }))
+        .build()
+        .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?;
+
+    let resposta = cliente
+        .get(alvo)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?;
+
+    // O tipo que o outro lado alega. Ele **não** decide nada sozinho: quem
+    // decide são os bytes, logo abaixo.
+    let alegado = resposta
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+
+    // **O teto é aplicado enquanto chega, e não depois.** Confiar no
+    // `Content-Length` seria confiar em quem está do outro lado; juntar tudo
+    // para medir seria deixá-lo escolher quanta memória esta janela gasta.
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut corpo = resposta;
+    while let Some(pedaco) = corpo
+        .chunk()
+        .await
+        .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?
+    {
+        if bytes.len() + pedaco.len() > seele_ffi::preview::PREVIEW_LIMIT as usize {
+            return Err(FalhaNaPrevia::GrandeDemais);
+        }
+        bytes.extend_from_slice(&pedaco);
+    }
+
+    // A mesma conferência do anexo, e não uma segunda cópia dela: o tipo
+    // alegado tem de bater com o que os bytes dizem ser. Um endereço que
+    // promete `image/gif` e entrega HTML é recusado aqui.
+    match seele_ffi::preview::judge(&alegado, &bytes) {
+        seele_ffi::preview::Verdict::Draw(formato) => {
+            Ok(seele_ffi::preview::data_uri(formato, &bytes))
+        }
+        _ => Err(FalhaNaPrevia::NaoEImagem),
+    }
+}
+
 /// A identidade do conjunto que este servidor exige agora.
 ///
 /// A tela de gestão a lê ao abrir e a guarda como **base** do rascunho. É ela
@@ -4683,6 +4795,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             abrir_no_navegador,
+            previa_de_link,
             aplicar_conjunto_de_mods,
             conjunto_exigido_agora,
             connect,
@@ -4992,6 +5105,61 @@ mod a_tela_le_os_limites_que_o_rust_manda {
 #[cfg(test)]
 mod o_caminho_do_mod_chega_inteiro {
     use super::{endereco_que_pode_sair, por_cento_desfeito};
+
+    /// **A busca de uma imagem de link tem três travas, e elas têm de estar lá.**
+    ///
+    /// Esta busca é a única do produto que vai a um endereço que outra pessoa
+    /// escolheu. O que a segura:
+    ///
+    ///   - **o esquema**, pela mesma lista do `abrir_no_navegador`. Sem ela,
+    ///     um `file://` colado na conversa faria esta janela ler o disco;
+    ///   - **o teto, enquanto chega.** Confiar no `Content-Length` é confiar
+    ///     em quem está do outro lado, e juntar tudo para medir depois é
+    ///     deixá-lo escolher quanta memória esta janela gasta;
+    ///   - **os bytes contra o tipo alegado**, pela mesma regra do anexo. Um
+    ///     endereço que promete `image/gif` e entrega HTML é recusado.
+    ///
+    /// Guarda de texto-fonte porque as três só se exercitam contra um servidor
+    /// de verdade, e um teste que levantasse um seria um teste que sai à rede.
+    #[test]
+    fn a_busca_de_imagem_de_link_confere_esquema_teto_e_bytes() {
+        let fonte = super::FONTE_DESTE_ARQUIVO;
+        let sem_comentario: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .filter(|linha| !linha.trim_start().starts_with("///"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let corpo = sem_comentario
+            .split_once("async fn previa_de_link(")
+            .expect("o comando da prévia de link")
+            .1;
+        let ate_o_fim = corpo
+            .split_once("\n#[tauri::command]")
+            .map_or(corpo, |(antes, _)| antes);
+
+        assert!(
+            ate_o_fim.contains("endereco_que_pode_sair(&url)"),
+            "a prévia deixou de conferir o esquema: um `file://` colado na \
+             conversa faria esta janela ler o disco de quem lê: {ate_o_fim}"
+        );
+        assert!(
+            ate_o_fim.contains("PREVIEW_LIMIT") && ate_o_fim.contains(".chunk()"),
+            "o teto deixou de ser aplicado enquanto os bytes chegam: quem \
+             responde escolhe quanta memória esta janela gasta: {ate_o_fim}"
+        );
+        assert!(
+            ate_o_fim.contains("judge(&alegado, &bytes)"),
+            "os bytes deixaram de ser conferidos contra o tipo alegado: um \
+             endereço que promete imagem e entrega outra coisa passa: {ate_o_fim}"
+        );
+        assert!(
+            ate_o_fim.contains("redirect(reqwest::redirect::Policy::custom"),
+            "os redirecionamentos voltaram a ser seguidos às cegas: um `https` \
+             que responde `302` para outro esquema usaria esta janela para \
+             alcançar o que ela recusaria de frente: {ate_o_fim}"
+        );
+    }
 
     /// **O que um link de chat não pode abrir.**
     ///

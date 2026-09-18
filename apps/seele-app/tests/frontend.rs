@@ -11637,3 +11637,54 @@ fn sair_do_servidor_encerra_o_ambiente_dos_mods_antes_de_trocar_de_tela() {
          MOD: {ejetar}"
     );
 }
+
+/// **Um link de imagem vira imagem — e só um link de imagem é buscado.**
+///
+/// Desenhar um link é buscá-lo, e buscar é aparecer: quem controla o endereço
+/// aprende o IP de quem está lendo a conversa, e a hora. Isso é o preço da
+/// funcionalidade e foi aceito de olhos abertos.
+///
+/// O que **não** foi aceito é pagar esse preço por todo link. Buscar qualquer
+/// endereço colado entregaria o IP de quem lê a todo domínio que aparecesse na
+/// conversa — inclusive a um link posto ali só para colher endereços. Por isso
+/// a busca só sai quando o caminho termina em extensão de imagem: o link
+/// **direto** de mídia atravessa, e uma página que fala de um GIF continua
+/// sendo um link clicável, que é o certo — ela não é uma imagem.
+///
+/// E a busca acontece **uma vez por endereço**: a conversa redesenha a cada
+/// tique, e sem o registro cada desenho seria outra batida na porta de alguém.
+#[test]
+fn so_um_link_de_imagem_e_buscado_e_so_uma_vez() {
+    let fonte = without_comments(&read("ui/tela-sessao.js"));
+
+    let com_links = js_function(&fonte, "function comLinks(");
+    assert!(
+        com_links.contains("pareceImagem(url)"),
+        "todo link passou a ser buscado: o IP de quem lê vai para qualquer \
+         domínio que alguém cole na conversa: {com_links}"
+    );
+
+    let parece = js_function(&fonte, "function pareceImagem(");
+    assert!(
+        parece.contains("new URL(url).pathname"),
+        "a extensão passou a ser procurada na URL inteira, e não no caminho: \
+         `?x=.gif` na consulta faria qualquer página parecer imagem: {parece}"
+    );
+
+    let buscar = js_function(&fonte, "function buscarAPreviaDoLink(");
+    assert!(
+        buscar.contains("if (previasDeLink.has(url)) return;"),
+        "a busca deixou de ser uma vez por endereço: a conversa redesenha a \
+         cada tique, e cada desenho vira outra batida na porta: {buscar}"
+    );
+    assert!(
+        buscar.contains("previasDeLink.set(url, false)"),
+        "o que não deu deixou de ser guardado: um endereço que não responde \
+         vira uma batida constante: {buscar}"
+    );
+    assert!(
+        buscar.contains("previa_de_link"),
+        "a busca deixou de passar pelo comando que confere esquema, tamanho e \
+         bytes: {buscar}"
+    );
+}

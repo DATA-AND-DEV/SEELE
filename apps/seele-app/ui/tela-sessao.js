@@ -1319,12 +1319,76 @@ function comLinks(texto) {
     link.setAttribute("tabindex", "0");
     link.setAttribute("title", `${url} — abre no navegador`);
     pedacos.push(link);
+
+    // E, quando o endereço é de imagem, a imagem embaixo dele. O link fica:
+    // quem quiser a origem continua podendo abri-la, e uma imagem que não
+    // carregou não deixa a mensagem sem nada.
+    if (pareceImagem(url)) {
+      const pronta = previasDeLink.get(url);
+      if (pronta === undefined) buscarAPreviaDoLink(url);
+      if (typeof pronta === "string") {
+        const img = elemento("img", "previa-de-link");
+        img.src = pronta;
+        img.alt = "";
+        img.setAttribute("title", url);
+        pedacos.push(img);
+      }
+    }
     cursor = comeco + url.length;
   }
   if (cursor < texto.length) {
     pedacos.push(document.createTextNode(texto.slice(cursor)));
   }
   return pedacos;
+}
+
+/**
+ * O que já se sabe de cada link de imagem: a imagem, ou que não deu.
+ *
+ * Uma busca por endereço e por sessão. Sem isto, a conversa redesenha e busca
+ * de novo — e cada busca é a janela aparecendo para quem controla o endereço.
+ */
+const previasDeLink = new Map();
+
+/**
+ * Só o que **parece** imagem é buscado, e isso é a metade que protege.
+ *
+ * Desenhar um link é buscá-lo, e buscar é aparecer: quem controla o endereço
+ * aprende o IP de quem está lendo a conversa. Buscar todo link entregaria isso
+ * a qualquer domínio que alguém colasse ali — inclusive a um link posto na
+ * conversa só para colher endereços de quem a lê.
+ *
+ * Pelo caminho terminar em extensão de imagem, o que atravessa é o link
+ * **direto** de mídia, que é o que se cola quando se quer mostrar um GIF. Uma
+ * página que fala de um GIF continua sendo só um link clicável — e é o
+ * comportamento certo: ela não é uma imagem.
+ */
+const EXTENSAO_DE_IMAGEM = /\.(gif|png|jpe?g|webp)$/i;
+
+function pareceImagem(url) {
+  try {
+    return EXTENSAO_DE_IMAGEM.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** Pede a imagem deste endereço, uma vez, e redesenha quando ela chega. */
+function buscarAPreviaDoLink(url) {
+  if (previasDeLink.has(url)) return;
+  previasDeLink.set(url, null);
+  invoke("previa_de_link", { url })
+    .then((uri) => {
+      previasDeLink.set(url, uri);
+      desenharMensagens();
+    })
+    .catch((falha) => {
+      // Guardado como «não deu» e não apagado: sem isto a conversa tentaria de
+      // novo a cada desenho, e um endereço que não responde viraria uma batida
+      // constante na porta de alguém.
+      previasDeLink.set(url, false);
+      console.warn("prévia de link:", falha);
+    });
 }
 
 /**
