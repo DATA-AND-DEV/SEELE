@@ -3139,6 +3139,7 @@ fn build_destino(
     address: SocketAddr,
     server_name: &str,
     pin_key: &str,
+    chave_do_aceite: &str,
 ) -> seele_core::enlace::Destino {
     seele_core::enlace::Destino {
         servidor: address,
@@ -3152,8 +3153,31 @@ fn build_destino(
         // é o núcleo. Uma casca que tivesse de carregar o aceite junto seria uma
         // casca que pode esquecer de carregá-lo — e esquecer, aqui, é perguntar
         // de novo a quem já respondeu.
+        // **A chave do aceite é a do destino, e não a do candidato.**
+        //
+        // O pin é por endereço porque é isso que ele prova: *este* endereço
+        // apresentou *esta* chave. O aceite responde outra pergunta — «eu
+        // autorizei rodar estes MODs neste servidor» —, e o servidor é um só,
+        // por quantos caminhos se chegue a ele.
+        //
+        // Aqui as duas usavam a mesma chave, e o resultado era um laço que
+        // ninguém conseguia romper: a pessoa aceitava, o sim era gravado sob o
+        // endereço que ela digitou, a conexão entrava pelo candidato de
+        // retransmissão — cuja porta o NAT troca a cada sessão —, e o aceite
+        // procurado sob *essa* porta nunca existia. Aceitar de novo gravava sob
+        // o mesmo endereço digitado e falhava de novo, para sempre.
+        //
+        // Visto em produção, com os dados na mão: `aceites` tinha
+        // `192.168.50.30:8383 → acff8e16…`, exatamente o conjunto exigido, e a
+        // conexão que respondia era `187.255.97.152:9368`. O arquivo de pins
+        // tinha nove portas diferentes do mesmo endereço público, uma por
+        // sessão — o rastro do mesmo problema.
+        //
+        // Todos os candidatos de uma chegada são o mesmo servidor: eles vêm do
+        // mesmo convite e são conferidos contra a mesma impressão digital. O
+        // consentimento é daquele servidor, e acompanha a chegada inteira.
         aceito: seele_core::aceites::Aceites::em(std::path::Path::new(&config.home))
-            .aceito_de(pin_key),
+            .aceito_de(chave_do_aceite),
     }
 }
 
@@ -3182,10 +3206,13 @@ async fn drive(
     // `Enlace` e não `Client`: é a sessão que atravessa quedas, com a bateria
     // interna dentro. Antes disto, o app pulava de "conectado" para "encerrado"
     // no primeiro soluço de rede.
+    // O alvo como a pessoa o digitou. É sob ele que a casca grava o sim, e é
+    // ele que vale para todos os candidatos desta chegada.
+    let chave_do_aceite = pin_key.clone();
     let destinos = std::iter::once((address, server_name.clone(), pin_key.clone()))
         .chain(alternates)
         .map(|(address, server_name, pin_key)| {
-            build_destino(&config, address, &server_name, &pin_key)
+            build_destino(&config, address, &server_name, &pin_key, &chave_do_aceite)
         })
         .collect();
     // Uma `Chegada` e não a chamada direta ao laço: ela é quem dá nome a cada
@@ -4334,7 +4361,7 @@ mod tests {
             capture_device: None,
             playback_device: None,
         };
-        let destino = build_destino(&with_fingerprint, address, &name, &pin);
+        let destino = build_destino(&with_fingerprint, address, &name, &pin, &pin);
         assert_eq!(destino.impressao_esperada, Some("aaaa1111".into()));
 
         let without = ConnectConfig {
@@ -4342,8 +4369,114 @@ mod tests {
             bilhete: None,
             ..with_fingerprint
         };
-        let destino = build_destino(&without, address, &name, &pin);
+        let destino = build_destino(&without, address, &name, &pin, &pin);
         assert_eq!(destino.impressao_esperada, None);
+    }
+
+    /// **O aceite acompanha o servidor, e não o caminho até ele.**
+    ///
+    /// Encontrado em produção, e o laço era completo: a pessoa clicava em
+    /// ACEITAR, o sim era gravado sob o endereço que ela digitou, a conexão
+    /// entrava pelo candidato de retransmissão — cuja porta o NAT troca a cada
+    /// sessão — e o aceite, procurado sob *essa* porta, nunca existia. A tela
+    /// de aceite voltava. Aceitar de novo gravava no mesmo lugar e falhava do
+    /// mesmo jeito, para sempre.
+    ///
+    /// Os dados que fecharam o diagnóstico: `aceites` tinha
+    /// `192.168.50.30:8383 → acff8e16…`, exatamente o conjunto exigido, e quem
+    /// respondia era `187.255.97.152:9368`. O arquivo de pins guardava nove
+    /// portas diferentes do mesmo endereço público — uma por sessão.
+    ///
+    /// O pin continua por endereço, porque é isso que ele prova: *este*
+    /// endereço apresentou *esta* chave. O aceite é do **servidor**, e todos os
+    /// candidatos de uma chegada são o mesmo servidor — mesmo convite, mesma
+    /// impressão digital conferida.
+    #[test]
+    fn um_candidato_alternativo_encontra_o_aceite_do_destino() {
+        let home =
+            std::env::temp_dir().join(format!("seele-ffi-aceite-candidato-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("temporário");
+        let casa = home.to_string_lossy().into_owned();
+        let digitado = "192.168.50.30:8383";
+        let conjunto = "acff8e1650272dcca3835f2a8a6dc0af6ce12fd081e9806ee1ced396f3e4339d";
+        crate::mods::aceitar(&casa, digitado, conjunto).expect("gravar o sim");
+
+        let config = ConnectConfig {
+            home: casa.clone(),
+            server: digitado.into(),
+            alternate_servers: Vec::new(),
+            nickname: "alguem".into(),
+            join_secret: None,
+            expected_fingerprint: None,
+            bilhete: None,
+            audio: false,
+            capture_device: None,
+            playback_device: None,
+        };
+
+        // O candidato que de fato responde: outro endereço, outra porta — a
+        // porta que o NAT escolheu nesta sessão e vai trocar na próxima.
+        let alternativo: SocketAddr = "187.255.97.152:9368".parse().expect("endereço");
+        let destino = build_destino(
+            &config,
+            alternativo,
+            "servidor",
+            "187.255.97.152:9368",
+            digitado,
+        );
+        assert_eq!(
+            destino.aceito.as_deref(),
+            Some(conjunto),
+            "o candidato alternativo não encontrou o aceite do destino: a tela \
+             de aceite volta, e aceitar de novo grava no mesmo lugar que já não \
+             é consultado"
+        );
+
+        // E a outra metade: o aceite continua sendo **daquele** servidor. Um
+        // destino que a pessoa nunca autorizou não herda o sim de ninguém.
+        let outro = build_destino(
+            &config,
+            alternativo,
+            "servidor",
+            "187.255.97.152:9368",
+            "outro.exemplo:8383",
+        );
+        assert_eq!(
+            outro.aceito, None,
+            "um servidor que nunca foi aceito herdou o consentimento de outro"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// E a chamada de verdade passa a chave do destino a **todos** os
+    /// candidatos, e não a de cada um.
+    ///
+    /// Pelo mesmo motivo que `every_expected_fingerprint_reaches_the_destino_it_promised`
+    /// existe: `build_destino` pode estar certo e `drive` continuar chamando-o
+    /// com o argumento errado, e essa diferença só um aperto de mão de verdade
+    /// mostraria.
+    #[test]
+    fn a_chave_do_aceite_que_chega_aos_candidatos_e_a_do_destino() {
+        let fonte = include_str!("lib.rs");
+        let sem_comentario: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let chamada = sem_comentario
+            .split_once("std::iter::once((address, server_name.clone(), pin_key.clone()))")
+            .expect("a montagem dos destinos")
+            .1;
+        let ate_o_collect = chamada
+            .split_once(".collect()")
+            .map_or(chamada, |(antes, _)| antes);
+        assert!(
+            ate_o_collect.contains("&chave_do_aceite"),
+            "os candidatos voltaram a receber a própria chave como chave do \
+             aceite: quem entra pelo candidato de retransmissão cai no laço da \
+             tela de aceite: {ate_o_collect}"
+        );
     }
 
     /// O sim que a casca guarda é lido pela conexão seguinte.
@@ -4385,7 +4518,7 @@ mod tests {
                 capture_device: None,
                 playback_device: None,
             };
-            let destino = build_destino(&config, address, &name, &pin);
+            let destino = build_destino(&config, address, &name, &pin, &pin);
             assert_eq!(
                 destino.aceito,
                 Some(conjunto.clone()),
@@ -4393,7 +4526,7 @@ mod tests {
             );
 
             crate::mods::esquecer_aceite(&casa, digitado).expect("esquecer");
-            let destino = build_destino(&config, address, &name, &pin);
+            let destino = build_destino(&config, address, &name, &pin, &pin);
             assert_eq!(
                 destino.aceito, None,
                 "retirar o consentimento de «{digitado}» não chegou à conexão"
