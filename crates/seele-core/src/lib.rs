@@ -120,9 +120,26 @@ pub use voice::{
 /// and that belongs in the core.
 pub use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
 pub use seele_proto::control::{
-    AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal, AttachmentState, ChannelInfo,
-    DisconnectReason, Permission, PersonProfile, PersonState, Presence, ServerMessage, Subsystem,
-    SubsystemHealth, Telemetry, VoiceRoomInfo,
+    AlertReason,
+    AlertSeverity,
+    AttachmentInfo,
+    AttachmentRefusal,
+    AttachmentState,
+    ChannelInfo,
+    // Reexportado porque a casca declara o consentimento do caminho entre pares
+    // e o ADR 0002 não a deixa ver `seele-proto`. Mesmo motivo do
+    // `key_fingerprint` logo abaixo.
+    ConsentimentoDePar,
+    DisconnectReason,
+    Permission,
+    PersonProfile,
+    PersonState,
+    Presence,
+    ServerMessage,
+    Subsystem,
+    SubsystemHealth,
+    Telemetry,
+    VoiceRoomInfo,
 };
 /// A impressão digital de uma chave pública, no formato que o produto mostra.
 ///

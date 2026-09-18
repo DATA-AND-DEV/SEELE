@@ -3288,6 +3288,17 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
             // adjusts is *this machine*, and which SEELE is installed on it is
             // the most machine-local fact there is; and after the three above
             // because it is the one section nobody opens on a normal day.
+            // MALHA, de 2026-09-17, e ela está aqui pelo mesmo critério das
+            // duas acima: o que se decide nela é quanto da internet **deste
+            // computador** vai para servir outras pessoas, e se o endereço
+            // **desta máquina** pode ser entregue a quem for servi-la. As duas
+            // perguntas são da máquina, e não do servidor em que se está.
+            //
+            // Ela nasceu tarde porque o núcleo chegou primeiro: o caminho
+            // entre pares estava inteiro no protocolo, no núcleo e no servidor,
+            // e não havia onde consentir. `emprestando` era sempre falso em
+            // produção, e o `enlace.rs` dizia isso por escrito.
+            "secao-malha",
             "secao-atualizacao",
             // And the fifth is the one that is not about this machine at all:
             // the server's own name and picture, for whoever is allowed to
@@ -11130,5 +11141,71 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
         "o endereço da sessão é gravado **dentro** do filtro da lista de \
          visitados, então hospedar aqui volta a deixá-lo vazio — que é o \
          defeito inteiro"
+    );
+}
+
+/// O caminho entre pares tem onde ser consentido, da tela até o núcleo.
+///
+/// **O defeito que este guarda existe para impedir já durou uma versão.** O
+/// protocolo, o núcleo e o servidor traziam a malha inteira — discagem, furo de
+/// NAT, conferência de impressão digital, volta para o servidor quando o par
+/// cai — e **nada em `apps/` ou no `seele-ffi` declarava o consentimento**. O
+/// `enlace.rs` registrava isso por escrito, o roteiro de duas máquinas marcava
+/// o passo como bloqueado, e as notas da versão prometiam «com consentimento
+/// dos dois lados» a quem não tinha onde consentir.
+///
+/// «Existir não é funcionar», e cinco mil linhas verdes e inalcançáveis são a
+/// forma mais cara disso. O guarda cobra a corrente inteira, elo por elo,
+/// porque foi um elo faltando no meio que a deixou inerte.
+#[test]
+fn a_malha_tem_onde_ser_consentida_da_tela_ate_o_nucleo() {
+    let raiz = app_dir();
+    let ffi = std::fs::read_to_string(raiz.join("../../crates/seele-ffi/src/lib.rs"))
+        .unwrap_or_else(|erro| panic!("o `seele-ffi` tem de ser legível: {erro}"));
+    let app = read("src/main.rs");
+    let page = read("ui/index.html");
+    let scripts = scripts();
+
+    // 1 · O `seele-ffi` alcança o núcleo.
+    assert!(
+        ffi.contains("consentir_no_caminho_entre_pares"),
+        "o `seele-ffi` não expõe o consentimento, e o núcleo fica inalcançável"
+    );
+    // 2 · O app alcança o `seele-ffi`, e por um comando que a página pode chamar.
+    assert!(
+        app.contains("fn consentir_no_caminho_entre_pares"),
+        "o app não tem comando de consentimento"
+    );
+    // 3 · A página chama o comando.
+    assert!(
+        scripts.contains("\"consentir_no_caminho_entre_pares\""),
+        "nenhum script chama o consentimento: o controle existe e não faz nada"
+    );
+    // 4 · E há onde clicar.
+    for id in ["malha-assiste", "malha-empresta"] {
+        assert!(
+            page.contains(&format!("id=\"{id}\"")),
+            "`{id}` não está na página: não há onde consentir"
+        );
+    }
+
+    // **E o consentimento sai a cada conexão.** Ele viaja na declaração de
+    // identidade, que o núcleo manda sozinho com «não empresto nada». Sem esta
+    // linha em `connect`, a escolha guardada valeria só até a janela fechar —
+    // que é uma forma mais sutil da mesma inércia.
+    let conectar = body_of(&app, "async fn connect");
+    assert!(
+        conectar.contains("consentir_no_caminho_entre_pares"),
+        "`connect` não declara o consentimento guardado, então ele vale só na \
+         janela em que foi escolhido"
+    );
+
+    // **Dois controles, e não um.** `control.rs` é explícito: emprestar a
+    // subida e aceitar ser servida são perguntas diferentes, feitas a pessoas
+    // diferentes da mesma conversa. Juntá-las num interruptor responderia uma
+    // delas por quem usa.
+    assert!(
+        page.contains("id=\"malha-assiste\"") && page.contains("id=\"malha-empresta\""),
+        "as duas metades do consentimento viraram um controle só"
     );
 }

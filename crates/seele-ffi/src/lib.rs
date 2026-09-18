@@ -637,6 +637,11 @@ enum Command {
         tela: seele_core::ScreenId,
         quero: bool,
     },
+    /// Dizer ao servidor o que esta máquina aceita no caminho entre pares.
+    ConsentirNoCaminhoEntrePares {
+        pares_que_atende: u8,
+        assiste_por_par: bool,
+    },
     Shutdown,
 }
 
@@ -1812,6 +1817,35 @@ impl Connection {
         self.command(Command::Assistir {
             tela: seele_core::ScreenId(tela),
             quero,
+        })
+    }
+
+    /// Diz o que esta máquina aceita no caminho entre pares — ADR 0045 do §5.
+    ///
+    /// **As duas perguntas são separadas de propósito**, e o `control.rs` é
+    /// explícito em não juntá-las num interruptor só:
+    ///
+    /// - `pares_que_atende` é *quanto da minha internet eu aceito gastar
+    ///   servindo os outros*. Número, e não sim/não: um interruptor responderia
+    ///   pela pessoa, fixando o teto em um. `0` é «não empresto».
+    /// - `assiste_por_par` é *aceito que o meu endereço seja entregue a quem
+    ///   for me servir*. É a metade de privacidade, e ela é de quem recebe.
+    ///
+    /// Esta versão do cliente atende no máximo
+    /// [`pares_que_esta_versao_atende`], e o núcleo **baixa** um pedido maior
+    /// em vez de recusá-lo.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] sem sessão.
+    pub fn consentir_no_caminho_entre_pares(
+        &self,
+        pares_que_atende: u8,
+        assiste_por_par: bool,
+    ) -> Result<(), ConnectionError> {
+        self.command(Command::ConsentirNoCaminhoEntrePares {
+            pares_que_atende,
+            assiste_por_par,
         })
     }
 
@@ -4069,6 +4103,23 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             // fechada não aparece nunca mais.
             if let Err(erro) = client.assistir(tela, quero).await {
                 tracing::debug!(%erro, quero, "não consegui mudar o que assisto");
+            }
+        }
+        Command::ConsentirNoCaminhoEntrePares {
+            pares_que_atende,
+            assiste_por_par,
+        } => {
+            // Falhar aqui não derruba a sessão: sem o consentimento a tela vem
+            // do servidor, que é o caminho de sempre — «a malha é alívio, nunca
+            // dependência».
+            if let Err(erro) = client
+                .consentir_no_caminho_entre_pares(seele_core::ConsentimentoDePar {
+                    pares_que_atende,
+                    assiste_por_par,
+                })
+                .await
+            {
+                tracing::debug!(%erro, "não consegui declarar o consentimento de par");
             }
         }
         Command::RequestKeyFrame { tela } => {
@@ -6914,4 +6965,14 @@ mod a_voz_quando_o_enlace_volta {
              conexão morta, com `ssrc` velho, e `audio_available` mente"
         );
     }
+}
+
+/// Quantos pares esta versão do cliente consegue atender ao mesmo tempo.
+///
+/// Reexportado do núcleo, e não copiado: a tela precisa do número para não
+/// oferecer o que o cliente não honra, e duas cópias do mesmo teto divergem no
+/// dia em que ele subir.
+#[must_use]
+pub const fn pares_que_esta_versao_atende() -> u8 {
+    seele_core::enlace::PARES_QUE_ESTA_VERSAO_ATENDE
 }

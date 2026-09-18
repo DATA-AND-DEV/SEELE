@@ -68,6 +68,10 @@ const PUSH_TO_TALK_KEY: &str = "push_to_talk_key";
 ///
 /// Spelled once, for the reason [`CAPTURE`] gives.
 const NICKNAME: &str = "nickname";
+/// Quantos pares esta máquina aceita atender. `0` é «não empresto».
+const PARES_QUE_ATENDE: &str = "pares_que_atende";
+/// Se aceita que o próprio endereço seja entregue a quem for servi-la.
+const ASSISTE_POR_PAR: &str = "assiste_por_par";
 
 /// The local settings, on disk.
 #[derive(Debug, Clone, Default)]
@@ -78,6 +82,18 @@ pub struct Preferences {
     voice_mode: Option<VoiceMode>,
     push_to_talk_key: Option<String>,
     nickname: Option<String>,
+    /// As duas metades do consentimento do caminho entre pares — §5.
+    ///
+    /// **Guardadas, e não perguntadas a cada sessão.** O consentimento viaja na
+    /// declaração de identidade, que sai a cada conexão; se ele não
+    /// sobrevivesse ao fechamento da janela, quem optou por emprestar teria de
+    /// optar de novo toda vez — e um opt-in que se perde é um opt-in que
+    /// ninguém usa.
+    ///
+    /// Ausente é `0` e `false`, que é «não participo». O padrão de quem nunca
+    /// escolheu é não participar, e é o que o §5 manda.
+    pares_que_atende: Option<u8>,
+    assiste_por_par: Option<bool>,
 }
 
 impl Preferences {
@@ -100,6 +116,8 @@ impl Preferences {
             voice_mode: None,
             push_to_talk_key: None,
             nickname: None,
+            pares_que_atende: None,
+            assiste_por_par: None,
         };
         if let Ok(text) = std::fs::read_to_string(&settings.path) {
             for line in text.lines() {
@@ -121,6 +139,19 @@ impl Preferences {
                     }
                     PUSH_TO_TALK_KEY => settings.push_to_talk_key = value,
                     NICKNAME => settings.nickname = value,
+                    // Um número que não é número lê como não escrito, e não
+                    // como zero: o segundo seria esta versão decidindo «não
+                    // empresto» por causa de um arquivo torto.
+                    PARES_QUE_ATENDE => {
+                        settings.pares_que_atende = value.as_deref().and_then(|v| v.parse().ok())
+                    }
+                    ASSISTE_POR_PAR => {
+                        settings.assiste_por_par = match value.as_deref() {
+                            Some("sim") => Some(true),
+                            Some("nao") => Some(false),
+                            _ => None,
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -256,18 +287,50 @@ impl Preferences {
         self.write()
     }
 
+    /// O consentimento guardado: quantos pares atende, e se aceita ser servida.
+    ///
+    /// Ausente é «não participo», que é o padrão de quem nunca escolheu.
+    #[must_use]
+    pub fn caminho_entre_pares(&self) -> (u8, bool) {
+        (
+            self.pares_que_atende.unwrap_or(0),
+            self.assiste_por_par.unwrap_or(false),
+        )
+    }
+
+    /// Escreve as duas metades do consentimento.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito.
+    pub fn set_caminho_entre_pares(
+        &mut self,
+        pares_que_atende: u8,
+        assiste_por_par: bool,
+    ) -> Result<()> {
+        self.pares_que_atende = Some(pares_que_atende);
+        self.assiste_por_par = Some(assiste_por_par);
+        self.write()
+    }
+
     fn write(&self) -> Result<()> {
         // Every setting, not only the one that just changed: this rewrites the
         // whole file, so a line left out here is a line deleted from disk. That
         // is how a second setting turns into a bug in the first one.
         let mut text = String::new();
         let modo = self.voice_mode.map(|mode| mode.as_str().to_owned());
+        let pares = self.pares_que_atende.map(|n| n.to_string());
+        let assiste = self
+            .assiste_por_par
+            .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
         for (name, value) in [
             (CAPTURE, &self.capture),
             (PLAYBACK, &self.playback),
             (VOICE_MODE, &modo),
             (PUSH_TO_TALK_KEY, &self.push_to_talk_key),
             (NICKNAME, &self.nickname),
+            (PARES_QUE_ATENDE, &pares),
+            (ASSISTE_POR_PAR, &assiste),
         ] {
             let Some(value) = value else {
                 continue;
@@ -540,6 +603,59 @@ mod tests {
             settings.playback(),
             None,
             "an unreadable file must not become an output nobody chose"
+        );
+    }
+
+    /// **O consentimento da malha sobrevive ao fechamento da janela.**
+    ///
+    /// Ele viaja na declaração de identidade, que sai a cada conexão. Se não
+    /// fosse guardado, quem optou por emprestar teria de optar de novo toda
+    /// vez — e um opt-in que se perde é um opt-in que ninguém usa.
+    #[test]
+    fn o_consentimento_do_caminho_entre_pares_atravessa_o_fechamento() {
+        let caminho = scratch("malha-atravessa");
+
+        {
+            let mut p = Preferences::open(caminho.clone()).expect("abrir");
+            assert_eq!(
+                p.caminho_entre_pares(),
+                (0, false),
+                "o padrão é não participar"
+            );
+            p.set_caminho_entre_pares(1, true).expect("gravar");
+        }
+
+        let relido = Preferences::open(caminho).expect("reabrir");
+        assert_eq!(relido.caminho_entre_pares(), (1, true));
+    }
+
+    /// E desligar é um estado gravado, e não a ausência de arquivo: sem isto,
+    /// «desliguei» e «nunca escolhi» seriam indistinguíveis no disco — e a
+    /// primeira escrita seguinte poderia ressuscitar a escolha antiga.
+    #[test]
+    fn desligar_a_malha_e_gravado_e_nao_apagado() {
+        let caminho = scratch("malha-desligada");
+
+        {
+            let mut p = Preferences::open(caminho.clone()).expect("abrir");
+            p.set_caminho_entre_pares(1, true).expect("ligar");
+            p.set_caminho_entre_pares(0, false).expect("desligar");
+        }
+
+        let texto = std::fs::read_to_string(&caminho).expect("ler o arquivo");
+        assert!(
+            texto.contains("pares_que_atende\t0"),
+            "o zero foi gravado: {texto}"
+        );
+        assert!(
+            texto.contains("assiste_por_par\tnao"),
+            "o não foi gravado: {texto}"
+        );
+        assert_eq!(
+            Preferences::open(caminho)
+                .expect("reabrir")
+                .caminho_entre_pares(),
+            (0, false)
         );
     }
 }

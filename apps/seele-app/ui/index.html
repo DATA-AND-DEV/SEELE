@@ -2174,6 +2174,25 @@
           </button>
         </li>
         <!--
+          **A malha, e por que ela é desta tela.** O que se decide aqui é
+          quanto da internet **deste computador** vai para servir outras
+          pessoas, e se o endereço **desta máquina** pode ser entregue a quem
+          for servi-la. As duas são da máquina, como o microfone e a versão —
+          não do servidor em que se está.
+        -->
+        <li>
+          <button id="secao-malha" class="server-secao" type="button"
+                  data-painel="painel-malha"
+                  data-titulo="CAMINHO ENTRE PARES"
+                  data-sub="Receber a tela de quem transmite, e emprestar sua subida">
+            <span class="server-secao-icone" data-glifo="audio"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">MALHA</span>
+              <span class="nota">Tela entre pares</span>
+            </span>
+          </button>
+        </li>
+        <!--
           A quinta, e a única que o comp v3 não desenha: ele foi feito antes de
           existir um botão de atualizar. Ela é desta tela e não de outra pelo
           mesmo argumento que põe o microfone aqui — o que se ajusta aqui é
@@ -2713,6 +2732,70 @@
 
         <!-- ------------------------------------------------------- VERSÕES -->
         <!--
+  **O opt-in do caminho entre pares — §5 da spec de tela.**
+
+  O núcleo, o protocolo e o servidor traziam a malha inteira, e nada na casca
+  declarava o consentimento: o `enlace.rs` registrava isso por escrito e o
+  roteiro de duas máquinas marcava o passo como bloqueado. Sem um lugar para
+  clicar, a tela vinha sempre do servidor.
+
+  **São dois interruptores e não um**, e o `control.rs` é explícito em não
+  juntá-los. Eles respondem perguntas diferentes, feitas a pessoas diferentes
+  da mesma conversa: emprestar é *quanto da minha internet eu gasto pelos
+  outros*; ser servida é *aceito que o meu endereço seja entregue a quem me
+  servir*. Quem aceita uma não aceita a outra por tabela.
+-->
+<section id="painel-malha" class="server-painel-secao"
+         aria-labelledby="secao-malha" hidden>
+  <div class="server-bloco">
+    <div class="server-bloco-topo">
+      <h3 class="server-bloco-nome">RECEBER A TELA DE QUEM TRANSMITE</h3>
+      <p class="nota">Em vez de sempre pelo servidor</p>
+    </div>
+    <div class="server-bloco-corpo">
+      <div class="server-campo">
+        <div class="server-dispositivo mods-linha-gestao">
+          <span class="server-dispositivo-nome">
+            <span class="mods-id">Receber a tela direto de quem transmite</span>
+            <span id="malha-assiste-estado" class="mods-versao">—</span>
+          </span>
+          <button id="malha-assiste" class="botao-fantasma" type="button">LIGAR</button>
+        </div>
+        <p class="nota">
+          Para isso, o seu endereço nesta rede é entregue a quem for te servir —
+          e só a essa pessoa, e só enquanto durar a transmissão. Recusando, a
+          tela vem do servidor, que é o caminho de sempre.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="server-bloco">
+    <div class="server-bloco-topo">
+      <h3 class="server-bloco-nome">EMPRESTAR A SUA SUBIDA</h3>
+      <p class="nota">Servir a tela a outra pessoa, no lugar do servidor</p>
+    </div>
+    <div class="server-bloco-corpo">
+      <div class="server-campo">
+        <div class="server-dispositivo mods-linha-gestao">
+          <span class="server-dispositivo-nome">
+            <span class="mods-id">Servir a tela a outra pessoa</span>
+            <span id="malha-empresta-estado" class="mods-versao">—</span>
+          </span>
+          <button id="malha-empresta" class="botao-fantasma" type="button">LIGAR</button>
+        </div>
+        <p class="nota">
+          Isso gasta a sua internet de subida, e é por isso que a pergunta é
+          separada da de cima. <span id="malha-teto"></span>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <p id="malha-estado" class="nota" role="status"></p>
+</section>
+
+<!--
           ADR 0046. **Diferente de ATUALIZAÇÃO**, e a diferença é a decisão
           inteira: ali se troca a versão em uso por uma mais nova, substituindo;
           aqui se guarda uma versão **ao lado**, sem tirar nada.

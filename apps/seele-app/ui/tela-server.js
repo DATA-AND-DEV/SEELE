@@ -138,6 +138,11 @@ function abrirSecao(id) {
     if (atual && botao.dataset.painel === "painel-versoes") {
       desenharPainelDeVersoes().catch((falha) => console.warn("versões:", falha));
     }
+    // A malha pelo mesmo motivo: a escolha vive em disco e pode ter sido feita
+    // por outra janela desta máquina.
+    if (atual && botao.dataset.painel === "painel-malha") {
+      desenharMalha().catch((falha) => console.warn("malha:", falha));
+    }
   }
 }
 

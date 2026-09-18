@@ -521,6 +521,26 @@ async fn connect(
         }
     }
 
+    // **O consentimento do caminho entre pares, declarado a cada conexão.**
+    //
+    // A declaração de identidade que o núcleo manda sozinho ao conectar leva
+    // `ConsentimentoDePar::de_ninguem()` — «não empresto nada». Quem optou por
+    // participar precisa dizer isso outra vez, aqui, ou a escolha guardada
+    // valeria apenas até a janela fechar. Foi a peça que faltava: o caminho
+    // entre pares estava inteiro no núcleo e inerte em produção porque ninguém
+    // nesta camada o declarava.
+    //
+    // Falhar não derruba a entrada: sem consentimento a tela vem do servidor,
+    // que é o caminho de sempre — «a malha é alívio, nunca dependência».
+    {
+        let (pares, assiste) = preferencias(&app).map_or((0, false), |p| p.caminho_entre_pares());
+        if pares > 0 || assiste {
+            if let Err(erro) = connection.consentir_no_caminho_entre_pares(pares, assiste) {
+                tracing::warn!(?erro, "não declarei o consentimento de par ao entrar");
+            }
+        }
+    }
+
     let snapshot = connection.snapshot();
 
     if let Ok(mut slot) = session.connection.lock() {
@@ -3096,6 +3116,68 @@ fn dispensar_aviso(session: State<'_, Session>) -> Result<(), ConnectionError> {
 /// `Option` e não `Result` porque nenhum chamador tem o que fazer com o motivo:
 /// sem o arquivo, todo ajuste é o padrão, e é exatamente onde o app já estava
 /// antes de o Terminal servidor existir. A mesma política da lista de visitados.
+/// O que esta máquina aceita hoje no caminho entre pares, e o teto da versão.
+///
+/// **§5 da spec de tela, e o opt-in que não existia.** O núcleo, o protocolo e o
+/// servidor traziam a malha inteira desde a v0.11.0, e nada em `apps/` ou no
+/// `seele-ffi` chamava o consentimento — o próprio `enlace.rs` registrava isso
+/// por escrito, e o roteiro de duas máquinas marcava o passo como bloqueado.
+/// Sem um lugar para clicar, `emprestando` era sempre falso em produção e a
+/// tela vinha sempre do servidor.
+#[derive(Debug, serde::Serialize)]
+struct CaminhoEntrePares {
+    /// Quantos pares esta máquina aceita atender. `0` é «não empresto».
+    pares_que_atende: u8,
+    /// Se aceita que o próprio endereço seja entregue a quem for servi-la.
+    assiste_por_par: bool,
+    /// O máximo que **esta versão do cliente** consegue honrar.
+    ///
+    /// Vem do núcleo e não é escrito na tela: duas cópias do mesmo teto
+    /// divergem no dia em que ele subir, e a tela passaria a oferecer o que o
+    /// cliente não cumpre.
+    teto_desta_versao: u8,
+}
+
+#[tauri::command]
+fn caminho_entre_pares(app: AppHandle) -> CaminhoEntrePares {
+    let (pares_que_atende, assiste_por_par) =
+        preferencias(&app).map_or((0, false), |p| p.caminho_entre_pares());
+    CaminhoEntrePares {
+        pares_que_atende,
+        assiste_por_par,
+        teto_desta_versao: seele_ffi::pares_que_esta_versao_atende(),
+    }
+}
+
+/// Guarda a escolha e a declara na sessão, se houver uma.
+///
+/// **As duas coisas, e nesta ordem.** Guardar sem declarar deixaria a escolha
+/// valendo só na conexão seguinte; declarar sem guardar a perderia ao fechar a
+/// janela. A retirada alcança o que já está no ar: o núcleo derruba os caminhos
+/// de par abertos antes de a declaração nova sair.
+///
+/// # Errors
+///
+/// Nunca: sem sessão, a escolha fica guardada e vale na próxima conexão, que é
+/// o desfecho certo para quem escolheu antes de entrar em algum lugar.
+#[tauri::command]
+fn consentir_no_caminho_entre_pares(
+    app: AppHandle,
+    session: State<'_, Session>,
+    pares_que_atende: u8,
+    assiste_por_par: bool,
+) -> Result<(), ()> {
+    if let Some(mut p) = preferencias(&app) {
+        if let Err(erro) = p.set_caminho_entre_pares(pares_que_atende, assiste_por_par) {
+            tracing::warn!(%erro, "não deu para guardar o consentimento de par");
+        }
+    }
+    if let Ok(connection) = session.connection() {
+        let _ = connection.consentir_no_caminho_entre_pares(pares_que_atende, assiste_por_par);
+    }
+    Ok(())
+}
+
 fn preferencias(app: &AppHandle) -> Option<seele_ffi::preferences::Preferences> {
     seele_ffi::preferences::Preferences::open(
         std::path::PathBuf::from(config_dir(app)).join("preferences"),
@@ -4356,6 +4438,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             connect,
             hospedar,
+            caminho_entre_pares,
+            consentir_no_caminho_entre_pares,
             versoes_instaladas,
             servidores_guardados,
             criar_servidor,

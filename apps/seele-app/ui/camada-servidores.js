@@ -245,3 +245,88 @@ function irParaOServidor(alvo, apelido, token, nome) {
     console.warn("conectar:", falha),
   );
 }
+
+// --------------------------------------------------------------------------
+// O caminho entre pares — §5 da spec de tela
+// --------------------------------------------------------------------------
+//
+// **O opt-in que faltava.** O núcleo, o protocolo e o servidor traziam a malha
+// inteira desde a v0.11.0, e nada nesta casca declarava o consentimento — o
+// `enlace.rs` registrava isso por escrito («nada em `apps/` nem no `seele-ffi`
+// chama...») e o roteiro de duas máquinas marcava o passo como bloqueado. Sem
+// um lugar para clicar, `emprestando` era sempre falso em produção e a tela
+// vinha sempre do servidor.
+//
+// São dois interruptores, e o `control.rs` é explícito em não juntá-los: eles
+// respondem perguntas diferentes, e quem aceita uma não aceita a outra por
+// tabela.
+
+
+/** O que está guardado agora, para os dois botões lerem sem perguntar de novo. */
+let malhaEmMaos = { pares_que_atende: 0, assiste_por_par: false, teto_desta_versao: 1 };
+
+/** Lê o que está guardado e desenha as duas escolhas. */
+async function desenharMalha() {
+  try {
+    malhaEmMaos = await invoke("caminho_entre_pares");
+  } catch (falha) {
+    console.warn("malha:", falha);
+    return;
+  }
+  const empresta = malhaEmMaos.pares_que_atende > 0;
+  const assiste = malhaEmMaos.assiste_por_par;
+
+  // **Estado escrito por extenso, e não um botão que muda de cor.** É a regra
+  // desta tela, e o comentário de APARÊNCIA a diz inteira: uma linha que
+  // informa vale mais que um controle que promete.
+  $("malha-assiste-estado").textContent = assiste
+    ? "aceito: a tela pode vir de outra pessoa"
+    : "não aceito: a tela vem sempre do servidor";
+  $("malha-empresta-estado").textContent = empresta
+    ? "aceito: posso servir a tela a mais alguém"
+    : "não empresto a minha subida";
+  $("malha-assiste").textContent = assiste ? "DESLIGAR" : "LIGAR";
+  $("malha-empresta").textContent = empresta ? "DESLIGAR" : "LIGAR";
+
+  // O teto vem do núcleo, e não escrito aqui: duas cópias do mesmo número
+  // divergem no dia em que ele subir, e a tela passaria a prometer o que o
+  // cliente não cumpre.
+  $("malha-teto").textContent =
+    malhaEmMaos.teto_desta_versao === 1
+      ? "Esta versão serve no máximo uma pessoa por vez."
+      : `Esta versão serve no máximo ${malhaEmMaos.teto_desta_versao} pessoas ao mesmo tempo.`;
+}
+
+/** Guarda a escolha, e a declara na sessão se houver uma. */
+async function guardarMalha(empresta, assiste) {
+  const estado = $("malha-estado");
+  try {
+    await invoke("consentir_no_caminho_entre_pares", {
+      paresQueAtende: empresta ? malhaEmMaos.teto_desta_versao : 0,
+      assistePorPar: assiste,
+    });
+    // **Dito, e não suposto.** A retirada alcança o que já está no ar: o núcleo
+    // derruba os caminhos de par abertos antes de a declaração nova sair, e
+    // quem estava sendo servido volta a ser servido pelo servidor. Quem acabou
+    // de desligar precisa saber que isso já aconteceu.
+    estado.textContent =
+      empresta || assiste
+        ? "Guardado. Vale nesta sessão e nas próximas."
+        : "Guardado: você não participa da malha. A tela vem do servidor.";
+  } catch (falha) {
+    estado.textContent = fraseDeErro(falha);
+  }
+  await desenharMalha();
+}
+
+$("malha-assiste").addEventListener("click", () => {
+  guardarMalha(malhaEmMaos.pares_que_atende > 0, !malhaEmMaos.assiste_por_par).catch((falha) =>
+    console.warn("malha:", falha),
+  );
+});
+
+$("malha-empresta").addEventListener("click", () => {
+  guardarMalha(malhaEmMaos.pares_que_atende === 0, malhaEmMaos.assiste_por_par).catch((falha) =>
+    console.warn("malha:", falha),
+  );
+});
