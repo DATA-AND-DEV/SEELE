@@ -31,11 +31,32 @@ use super::{Anfitriao, Falha};
 pub type Quintal = BTreeMap<String, String>;
 
 /// What the dispatcher is asked to do.
-struct Pedido {
-    momento: String,
-    carga: String,
-    quintais: BTreeMap<String, Quintal>,
-    resposta: oneshot::Sender<Resposta>,
+/// O que a fila carrega até a thread dos MODs.
+enum Pedido {
+    /// Um momento para entregar a quem estiver carregado.
+    Momento {
+        momento: String,
+        carga: String,
+        quintais: BTreeMap<String, Quintal>,
+        resposta: oneshot::Sender<Resposta>,
+    },
+    /// **O conjunto mudou; troque o código carregado.**
+    ///
+    /// Sem isto, o despachante nascia no arranque com as fontes de então e
+    /// ficava com elas: ligar um MOD enquanto o servidor está de pé mudava o
+    /// que o anúncio exige e o que os pedidos resolvem, e **não** mudava o que
+    /// reage a evento. Um MOD recém-ligado ficava mudo aos eventos até alguém
+    /// reiniciar o servidor, e um recém-desligado continuava reagindo.
+    ///
+    /// Pela fila, e não por um caminho à parte: a thread é serial de propósito,
+    /// e trocar o código enquanto um MOD roda seria a corrida que essa
+    /// serialização existe para não ter.
+    Recarregar {
+        /// `(id, fonte, pasta de dados)`, como `carregar_do_disco` devolve.
+        fontes: Vec<(String, String, std::path::PathBuf)>,
+        /// Quem não compilou, para quem pediu a troca poder dizer em voz alta.
+        resposta: oneshot::Sender<Vec<(String, Falha)>>,
+    },
 }
 
 /// What came back.
@@ -102,6 +123,40 @@ impl MudancaNoQuintal {
     }
 }
 
+/// Relê o conjunto exigido e troca o código carregado por ele.
+///
+/// Uma falha aqui **não desliga nada**: o MOD que não compila é dito em voz
+/// alta e o conjunto anterior continua de pé, que é o critério da etapa 4 do
+/// plano — «falha mantém conjunto anterior íntegro».
+async fn recarregar_o_conjunto(
+    persistence: &std::sync::Arc<tokio::sync::Mutex<crate::persistence::Persistence>>,
+    despachante: &Despachante,
+    raizes: &crate::RaizesDosMods,
+) {
+    let exigidos: Vec<(String, String)> = {
+        let banco = persistence.lock().await;
+        match crate::persistence::mods::enabled(&banco) {
+            Ok(ligados) => ligados
+                .into_iter()
+                .map(|ligado| (ligado.id, ligado.hash))
+                .collect(),
+            Err(erro) => {
+                tracing::error!(%erro, "não deu para reler o conjunto de MODs");
+                return;
+            }
+        }
+    };
+    let (fontes, queixas) = super::carregar_do_disco(raizes, &exigidos);
+    for queixa in queixas {
+        tracing::error!("MOD exigido e não carregado — {queixa}");
+    }
+    if let Some(recusados) = despachante.recarregar(fontes).await {
+        for (id, falha) in recusados {
+            tracing::error!(mod_id = %id, %falha, "MOD recusado ao recarregar; a sala segue sem ele");
+        }
+    }
+}
+
 /// The handle the async side holds.
 pub struct Despachante {
     fila: mpsc::UnboundedSender<Pedido>,
@@ -146,29 +201,77 @@ impl Despachante {
                 // justamente para que código de MOD nunca ocupe um worker, que é
                 // a thread que o caminho de áudio divide.
                 while let Some(pedido) = de_fora.blocking_recv() {
-                    let mut quintais = BTreeMap::new();
-                    let mut falharam = Vec::new();
-
-                    for (id, mut quintal) in pedido.quintais {
-                        let antes = quintal.clone();
-                        match anfitriao.chamar(&id, &pedido.momento, &pedido.carga, &mut quintal) {
-                            Ok(()) => {
-                                let mudanca = MudancaNoQuintal::entre(&antes, &quintal);
-                                if !mudanca.vazia() {
-                                    quintais.insert(id, mudanca);
+                    match pedido {
+                        Pedido::Recarregar { fontes, resposta } => {
+                            // `carregar` troca o que existe com o mesmo
+                            // identificador, que é o que faz um MOD ser
+                            // atualizável sem reiniciar o servidor.
+                            let mut recusados = Vec::new();
+                            for (id, fonte, pasta) in fontes {
+                                if let Err(falha) = anfitriao.carregar(&id, &fonte, &pasta) {
+                                    recusados.push((id, falha));
                                 }
                             }
-                            Err(falha) => falharam.push((id, falha)),
+                            let _ = resposta.send(recusados);
+                        }
+                        Pedido::Momento {
+                            momento,
+                            carga,
+                            quintais: entrada,
+                            resposta,
+                        } => {
+                            let mut quintais = BTreeMap::new();
+                            let mut falharam = Vec::new();
+
+                            for (id, mut quintal) in entrada {
+                                let antes = quintal.clone();
+                                match anfitriao.chamar(&id, &momento, &carga, &mut quintal) {
+                                    Ok(()) => {
+                                        let mudanca = MudancaNoQuintal::entre(&antes, &quintal);
+                                        if !mudanca.vazia() {
+                                            quintais.insert(id, mudanca);
+                                        }
+                                    }
+                                    Err(falha) => falharam.push((id, falha)),
+                                }
+                            }
+
+                            let _ = resposta.send(Resposta { quintais, falharam });
                         }
                     }
-
-                    let _ = pedido.resposta.send(Resposta { quintais, falharam });
                 }
             })
             .ok();
 
         let recusados = recolher.recv().unwrap_or_default();
         (Self { fila: para_dentro }, recusados)
+    }
+
+    /// Hands one moment to every MOD whose yard is passed in.
+    ///
+    /// Returns `None` when the MOD thread is gone — which is not a failure to
+    /// recover from here: it means the server is shutting down, and the caller
+    /// simply stops asking.
+    ///
+    /// Assíncrono, e é o que impede um MOD lento de segurar o barramento: a
+    /// espera é um `await`, não um bloqueio, então a tarefa que assina os
+    /// eventos continua livre enquanto a thread dos MODs trabalha.
+    /// Troca o código carregado pelo do conjunto que está valendo agora.
+    ///
+    /// Devolve quem não compilou. `None` quando a thread dos MODs já saiu — o
+    /// servidor está descendo, e não há o que recarregar.
+    pub async fn recarregar(
+        &self,
+        fontes: Vec<(String, String, std::path::PathBuf)>,
+    ) -> Option<Vec<(String, Falha)>> {
+        let (responder, esperar) = oneshot::channel();
+        self.fila
+            .send(Pedido::Recarregar {
+                fontes,
+                resposta: responder,
+            })
+            .ok()?;
+        esperar.await.ok()
     }
 
     /// Hands one moment to every MOD whose yard is passed in.
@@ -188,7 +291,7 @@ impl Despachante {
     ) -> Option<Resposta> {
         let (responder, esperar) = oneshot::channel();
         self.fila
-            .send(Pedido {
+            .send(Pedido::Momento {
                 momento: momento.to_owned(),
                 carga: carga.to_owned(),
                 quintais,
@@ -221,16 +324,57 @@ pub async fn acompanhar(
     mut eventos: tokio::sync::broadcast::Receiver<crate::server::Event>,
     persistence: std::sync::Arc<tokio::sync::Mutex<crate::persistence::Persistence>>,
     despachante: Despachante,
+    raizes: crate::RaizesDosMods,
 ) {
+    // **O mesmo sinal que o anúncio observa.** Quem muda o conjunto — o SALVAR
+    // da tela de gestão — o bumpa uma vez, na transação. Sem observá-lo, este
+    // laço ficava para sempre com o código que carregou no arranque: um MOD
+    // recém-ligado era mudo aos eventos, e um recém-desligado continuava
+    // reagindo, até alguém reiniciar o servidor.
+    let mut conjunto_mudou = {
+        let banco = persistence.lock().await;
+        banco.mods_mudaram()
+    };
+
+    // **Reconcilia ao entrar, e não só quando o sinal chega.**
+    //
+    // Esta tarefa é criada com `spawn`, e uma tarefa criada não é uma tarefa
+    // que já rodou: entre a criação e a primeira polida cabe uma escrita no
+    // conjunto. Quem escreveu nesse intervalo bumpou o contador antes de haver
+    // quem o observasse, e o sinal nunca mais chega — o conjunto ficaria
+    // divergente para sempre, com o código do arranque.
+    //
+    // Encontrado por teste, e não por leitura: a primeira versão confiava em
+    // ter assinado a tempo, e o teste de ligar um MOD com o servidor de pé
+    // falhava sem um diagnóstico sequer, porque o laço simplesmente nunca
+    // acordava.
+    //
+    // Custa uma releitura na subida, e é idempotente: carregar o que já está
+    // carregado troca o código pelo mesmo código.
+    recarregar_o_conjunto(&persistence, &despachante, &raizes).await;
+
     loop {
-        let evento = match eventos.recv().await {
-            Ok(evento) => evento,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(quantos)) => {
-                // Um MOD perdeu momentos, e ele não tem como saber sozinho.
-                tracing::warn!(quantos, "o barramento passou na frente dos MODs");
+        let evento = tokio::select! {
+            // **A troca tem prioridade sobre o evento seguinte.** Entregar um
+            // momento ao código antigo depois de o conjunto ter mudado é
+            // entregá-lo a quem já não é exigido.
+            biased;
+            trocou = conjunto_mudou.changed() => {
+                if trocou.is_err() {
+                    break;
+                }
+                recarregar_o_conjunto(&persistence, &despachante, &raizes).await;
                 continue;
             }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            recebido = eventos.recv() => match recebido {
+                Ok(evento) => evento,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(quantos)) => {
+                    // Um MOD perdeu momentos, e ele não tem como saber sozinho.
+                    tracing::warn!(quantos, "o barramento passou na frente dos MODs");
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
         };
 
         let Some((momento, carga)) = momento_de(&evento) else {
@@ -275,6 +419,21 @@ pub async fn acompanhar(
             }
         }
         for (id, falha) in &resposta.falharam {
+            // **Não carregado não é quebrado.** O conjunto vive no banco e o
+            // código vive na thread dos MODs; entre uma escrita e a recarga há
+            // um instante, e um evento que caia nele encontra um MOD exigido e
+            // ainda sem código. Desabilitar por isso era o produto desligar
+            // sozinho o MOD que alguém acabara de ligar — sem ninguém pedir, e
+            // sem dizer por quê. A recarga já está a caminho; este momento se
+            // perde, e o seguinte o encontra de pé.
+            if matches!(falha, crate::mods::Falha::NaoCarregadoAqui) {
+                tracing::debug!(
+                    mod_id = %id,
+                    %momento,
+                    "MOD exigido e ainda não carregado; este momento não o alcança"
+                );
+                continue;
+            }
             tracing::error!(
                 mod_id = %id,
                 %momento,
@@ -430,6 +589,12 @@ mod tests {
             receptor,
             std::sync::Arc::clone(&persistence),
             despachante,
+            // Uma raiz que não existe: estes testes não recarregam, e uma raiz
+            // vazia deixa isso dito em vez de apontar para a pasta de outro.
+            crate::RaizesDosMods {
+                pacotes: std::path::PathBuf::from("sem-pacotes-neste-teste"),
+                dados: std::path::PathBuf::from("sem-dados-neste-teste"),
+            },
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -496,6 +661,12 @@ mod tests {
             receptor,
             std::sync::Arc::clone(&persistence),
             despachante,
+            // Uma raiz que não existe: estes testes não recarregam, e uma raiz
+            // vazia deixa isso dito em vez de apontar para a pasta de outro.
+            crate::RaizesDosMods {
+                pacotes: std::path::PathBuf::from("sem-pacotes-neste-teste"),
+                dados: std::path::PathBuf::from("sem-dados-neste-teste"),
+            },
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -831,5 +1002,186 @@ mod tests {
         let igual: BTreeMap<String, String> =
             [("a".to_owned(), "1".to_owned())].into_iter().collect();
         assert!(MudancaNoQuintal::entre(&igual, &igual).vazia());
+    }
+
+    /// **Ligar um MOD com o servidor de pé faz ele passar a reagir a evento.**
+    ///
+    /// P1 do plano de isolamento: «runtime de eventos e runtime de pedidos
+    /// podem divergir do conjunto». O despachante nascia no arranque com as
+    /// fontes de então e ficava com elas. Os pedidos resolviam pelo banco a
+    /// cada chamada e o anúncio também — só os **eventos** continuavam com o
+    /// código antigo. Um MOD recém-ligado era mudo aos eventos, e um
+    /// recém-desligado continuava reagindo, até alguém reiniciar o servidor.
+    ///
+    /// O sinal já existia: `mods_mudaram`, que a transação do SALVAR bumpa uma
+    /// vez. Faltava alguém deste lado observá-lo.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ligar_um_mod_com_o_servidor_de_pe_faz_ele_reagir_a_evento() {
+        use crate::persistence::{Location, Persistence};
+        use seele_proto::ids::{PersonId, VoiceRoomId};
+
+        let raiz = pasta("recarrega");
+        // O pacote em disco, endereçado pelo conteúdo, como o instalador o
+        // deixa — é daí que a recarga vai lê-lo.
+        let obras = raiz.join("em-obras");
+        std::fs::create_dir_all(obras.join("servidor")).expect("criar");
+        std::fs::write(
+            obras.join("mod.json"),
+            br#"{"schema":1,"id":"seele/tardio","version":"1.0.0","api":2,
+                "repo":"https://example.invalid/t","reach":["estado no servidor"],
+                "server":"servidor/main.js"}"#,
+        )
+        .expect("manifesto");
+        std::fs::write(
+            obras.join("servidor/main.js"),
+            b"globalThis.aoAcontecer = (m) => { dados.viu = m; };",
+        )
+        .expect("fonte");
+        // O mesmo hash que o `seele-proto` calcula, que é o que o produto usa.
+        let mut arquivos = vec![
+            (
+                "mod.json".to_owned(),
+                std::fs::read(obras.join("mod.json")).expect("ler manifesto"),
+            ),
+            (
+                "servidor/main.js".to_owned(),
+                std::fs::read(obras.join("servidor/main.js")).expect("ler fonte"),
+            ),
+        ];
+        let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut arquivos));
+        let destino = raiz.join("mod-packages").join(&hash);
+        std::fs::create_dir_all(destino.parent().expect("pai")).expect("raiz");
+        std::fs::rename(&obras, &destino).expect("publicar");
+
+        // O servidor sobe **sem MOD nenhum** ligado.
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
+        let (despachante, _) = Despachante::iniciar(Vec::new());
+        let (bus, receptor) = tokio::sync::broadcast::channel(16);
+        let acompanhando = tokio::spawn(acompanhar(
+            receptor,
+            std::sync::Arc::clone(&persistence),
+            despachante,
+            crate::RaizesDosMods {
+                pacotes: raiz.clone(),
+                dados: raiz.join("mod-data"),
+            },
+        ));
+
+        // E o MOD é ligado depois, como o SALVAR da tela faz.
+        {
+            let banco = persistence.lock().await;
+            crate::persistence::mods::enable(
+                &banco,
+                &crate::persistence::mods::EnabledMod {
+                    id: "seele/tardio".to_owned(),
+                    version: "1.0.0".to_owned(),
+                    hash: hash.clone(),
+                    repo: String::new(),
+                    reach: Vec::new(),
+                    server_half: true,
+                },
+            )
+            .expect("ligar");
+        }
+
+        // Um evento depois disso tem de alcançá-lo.
+        let mut viu = None;
+        for _ in 0..50 {
+            let _ = bus.send(crate::server::Event::PersonLeft {
+                voice_room: VoiceRoomId(1),
+                person: PersonId(7),
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            let banco = persistence.lock().await;
+            let quintal =
+                crate::persistence::mods::ler_quintal(&banco, "seele/tardio").unwrap_or_default();
+            if let Some(v) = quintal.get("viu") {
+                viu = Some(v.clone());
+                break;
+            }
+        }
+        acompanhando.abort();
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        assert_eq!(
+            viu.as_deref(),
+            Some("PersonLeft"),
+            "o MOD ligado com o servidor de pé continuou mudo aos eventos: o \
+             despachante ficou com o código do arranque"
+        );
+    }
+
+    /// **Um MOD exigido e sem código não é desligado sozinho.**
+    ///
+    /// O conjunto vive no banco e o código vive na thread dos MODs. Eles podem
+    /// divergir: o pacote pode não ter chegado ao disco ainda, a recarga pode
+    /// estar a caminho, ou o pacote pode ter sido apagado por fora.
+    ///
+    /// Antes, um evento nesse estado chamava um MOD que não estava carregado,
+    /// recebia falha, e o caminho de eventos trata falha como «o MOD quebrou»
+    /// — desabilitando no banco. O produto desligava sozinho o MOD que alguém
+    /// acabara de ligar, sem ninguém pedir e sem dizer por quê, e o conjunto
+    /// exigido mudava por conta própria.
+    ///
+    /// Encontrado por teste: o teste da recarga ao vivo falhava com o contador
+    /// de mudanças em **2** — o segundo bump era o produto se desligando.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn um_mod_exigido_sem_codigo_no_disco_nao_e_desligado_pelo_evento() {
+        use crate::persistence::{Location, Persistence};
+        use seele_proto::ids::{PersonId, VoiceRoomId};
+
+        let raiz = pasta("sem-codigo");
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        crate::persistence::mods::enable(
+            &banco,
+            &crate::persistence::mods::EnabledMod {
+                id: "seele/fantasma".to_owned(),
+                version: "1.0.0".to_owned(),
+                // Um hash que não existe em disco nenhum.
+                hash: "f".repeat(64),
+                repo: String::new(),
+                reach: Vec::new(),
+                server_half: true,
+            },
+        )
+        .expect("ligar");
+        let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
+
+        let (despachante, _) = Despachante::iniciar(Vec::new());
+        let (bus, receptor) = tokio::sync::broadcast::channel(16);
+        let acompanhando = tokio::spawn(acompanhar(
+            receptor,
+            std::sync::Arc::clone(&persistence),
+            despachante,
+            crate::RaizesDosMods {
+                pacotes: raiz.clone(),
+                dados: raiz.join("mod-data"),
+            },
+        ));
+
+        for _ in 0..5 {
+            let _ = bus.send(crate::server::Event::PersonLeft {
+                voice_room: VoiceRoomId(1),
+                person: PersonId(7),
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        }
+
+        let continua_ligado = {
+            let banco = persistence.lock().await;
+            crate::persistence::mods::enabled(&banco)
+                .expect("ler")
+                .iter()
+                .any(|m| m.id == "seele/fantasma")
+        };
+        acompanhando.abort();
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        assert!(
+            continua_ligado,
+            "o produto desligou sozinho um MOD que ninguém pediu para desligar: \
+             o conjunto exigido mudou por conta própria"
+        );
     }
 }

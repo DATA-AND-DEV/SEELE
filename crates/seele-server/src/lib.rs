@@ -553,6 +553,7 @@ impl Daemon {
                     server.events.subscribe(),
                     Arc::clone(&server.persistence),
                     despachante,
+                    pasta_dos_mods.clone(),
                 ));
             }
         }

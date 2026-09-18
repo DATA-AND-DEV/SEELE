@@ -90,6 +90,17 @@ pub enum Falha {
     /// It threw.
     #[error("mod threw")]
     Lancou,
+    /// **Não está carregado aqui**, e isso não é defeito dele.
+    ///
+    /// O conjunto exigido vive no banco; o código carregado vive na thread dos
+    /// MODs. Entre uma escrita e a recarga há um instante, e um evento que caia
+    /// nele encontra um MOD exigido e ainda sem código.
+    ///
+    /// Distinta de [`Self::Lancou`] porque o caminho de eventos **desabilita**
+    /// quem falha, e desabilitar por isto era o produto desligar sozinho o MOD
+    /// que alguém acabara de ligar — sem ninguém pedir, e sem dizer por quê.
+    #[error("mod is not loaded here")]
+    NaoCarregadoAqui,
     /// It went past the step ceiling.
     #[error("mod went past its step ceiling")]
     PassouDoTempo,
@@ -340,7 +351,7 @@ impl Anfitriao {
         carga: &str,
         quintal: &mut BTreeMap<String, String>,
     ) -> Result<(), Falha> {
-        let hospede = self.hospedes.get(id).ok_or(Falha::Lancou)?;
+        let hospede = self.hospedes.get(id).ok_or(Falha::NaoCarregadoAqui)?;
         // Each call gets the whole budget: a MOD that was slow once is not a
         // MOD that is broken forever.
         hospede.passos.store(0, Ordering::Relaxed);
@@ -395,7 +406,7 @@ impl Anfitriao {
         pedido: &str,
         quintal: &mut BTreeMap<String, String>,
     ) -> Result<String, Falha> {
-        let hospede = self.hospedes.get(id).ok_or(Falha::Lancou)?;
+        let hospede = self.hospedes.get(id).ok_or(Falha::NaoCarregadoAqui)?;
         hospede.passos.store(0, Ordering::Relaxed);
 
         // **Quem está sendo atendido, dito pelo servidor.** É contra isto que
