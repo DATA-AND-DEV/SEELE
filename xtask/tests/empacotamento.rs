@@ -648,6 +648,38 @@ pathlib.Path(entrega, "latest.json").write_text(
              [ \"${FALSO_DOCKER:-ok}\" = ok ] || exit 1\nexit 0\n",
             true,
         );
+        // **O dublê do `cargo`, que existe por causa de um defeito.**
+        //
+        // O `publicar.sh` assina o nosso instalador com `cargo tauri signer
+        // sign`, e esse trecho nunca tinha rodado aqui: o dublê do `ssh`
+        // devolvia um zip com `-setup.exe` dentro, o laço procurava
+        // `*-instalador.exe` e não achava nada. Um passo inteiro passava
+        // verde sem ser executado — e quando o nome foi corrigido, ele
+        // apareceu de uma vez, com a chave de mentira na mão.
+        //
+        // `FALSO_ASSINATURA` guarda o outro lado: sem ele, o caminho de «não
+        // consegui assinar» voltaria a ser código que ninguém executa.
+        escrever(
+            &base.join("ferramentas/cargo"),
+            r#"#!/bin/sh
+printf 'cargo %s\n' "$*" >> "$SEELE_TESTE_DIARIO"
+case "$*" in
+    *'tauri signer sign'*)
+        if [ "${FALSO_ASSINATURA:-ok}" != ok ]; then
+            echo 'Error failed to decode base64 secret key' >&2
+            exit 1
+        fi
+        alvo=
+        for argumento in "$@"; do alvo="$argumento"; done
+        printf 'assinatura de mentira\n' > "$alvo.sig"
+        echo 'Your signature was generated successfully'
+        exit 0
+        ;;
+esac
+exit 0
+"#,
+            true,
+        );
         // O dublê do `ssh` decodifica o `-EncodedCommand` para saber qual das
         // três conversas é esta. Sem isso não dá para testar o caminho do
         // Windows inteiro — e é justamente o que não roda na máquina de quem
@@ -694,7 +726,7 @@ case "$comando" in
         python3 -c 'import base64, io, sys, zipfile
 memoria = io.BytesIO()
 with zipfile.ZipFile(memoria, "w") as pacote:
-    pacote.writestr("SEELE_%s_x64-setup.exe" % sys.argv[1], "instalador de mentira")
+    pacote.writestr("SEELE_%s_x64-instalador.exe" % sys.argv[1], "instalador de mentira")
 sys.stdout.write(base64.b64encode(memoria.getvalue()).decode())' "${FALSO_VERSAO:-1.2.3}"
         exit 0
         ;;
@@ -2512,5 +2544,156 @@ fn a_bateria_tem_prazo_e_nao_espera_para_sempre() {
     assert!(
         etapa.contains("kill -9"),
         "o prazo vence e nada interrompe o que travou:\n{etapa}"
+    );
+}
+
+/// **O nome do instalador do Windows está escrito em dois arquivos, e nada os
+/// amarrava.**
+///
+/// O `windows.ps1` escreve `SEELE_<versão>_x64-instalador.exe`. O
+/// `publicar.sh` conferia a chegada procurando `*-setup.exe` — o do NSIS, que o
+/// ADR 0043 tirou da entrega. O build de lá terminava certo, o arquivo chegava,
+/// e o orquestrador respondia «veio arquivo do Windows, mas nenhum instalador».
+/// A pior forma de errar: acusar a máquina que fez o trabalho.
+///
+/// Encontrado publicando a v0.11.0, numa execução de verdade. A bancada não
+/// pegou porque o dublê do `ssh` fabricava um zip com `-setup.exe` dentro — o
+/// vetor concordava com o defeito, e os dois estavam errados juntos.
+///
+/// Este guarda não tem vetor nenhum: ele lê os dois arquivos e pergunta se o
+/// nome que um escreve casa com o padrão que o outro procura. Renomear de um
+/// lado só volta a reprovar aqui, em qualquer máquina.
+#[test]
+fn o_nome_que_o_windows_escreve_e_o_que_o_orquestrador_procura() {
+    let ps = std::fs::read_to_string(raiz().join("empacotar/windows.ps1"))
+        .expect("o empacotador do Windows");
+    let sh = std::fs::read_to_string(raiz().join("empacotar/publicar.sh")).expect("o orquestrador");
+
+    let nome = ps
+        .lines()
+        .map(str::trim)
+        .find_map(|linha| linha.strip_prefix("$NomeProprio = \""))
+        .and_then(|resto| resto.split('"').next())
+        .expect("o `windows.ps1` tem de continuar declarando `$NomeProprio`")
+        .replace("${Versao}", "9.9.9")
+        .replace("$Versao", "9.9.9");
+
+    // A linha que decide se o Windows entrou. `-type f -name` e não
+    // `-type f ! -name`: a outra varre restos de versão antiga.
+    let padrao = sh
+        .lines()
+        .find(|linha| linha.contains("/entrega\" -type f -name \""))
+        .and_then(|linha| linha.split("-name \"").nth(1))
+        .and_then(|resto| resto.split('"').next())
+        .expect("o `publicar.sh` tem de continuar conferindo a chegada do instalador")
+        .replace("${VERSAO}", "9.9.9")
+        .replace("$VERSAO", "9.9.9");
+
+    assert!(
+        casa_com_glob(&padrao, &nome),
+        "o `publicar.sh` procura `{padrao}` e o `windows.ps1` escreve `{nome}`: \
+         o build do Windows vai terminar certo e ser declarado ausente"
+    );
+
+    // E o terceiro lugar onde o nome está escrito: a tabela «o que baixar»,
+    // que sai no corpo de **toda** página de release. Ela mandava procurar o
+    // `-setup.exe` — um arquivo que não está lá, para quem acabou de clicar
+    // num link de download e só quer instalar.
+    let notas = std::fs::read_to_string(raiz().join(".github/NOTAS-DE-RELEASE.md"))
+        .expect("o texto que sai em toda página");
+    let linha = notas
+        .lines()
+        .find(|linha| linha.contains("**Windows**"))
+        .expect("a tabela tem de continuar tendo uma linha de Windows");
+    let anunciado = linha
+        .split('`')
+        .nth(1)
+        .expect("o nome do arquivo vem entre crases")
+        .replace("<versão>", "9.9.9");
+    assert_eq!(
+        anunciado, nome,
+        "a página de release manda baixar `{anunciado}` e o `windows.ps1` \
+         escreve `{nome}`: quem chega para instalar procura um arquivo que não \
+         está na página"
+    );
+}
+
+/// Um `fnmatch` do tamanho do que esta conferência precisa: só `*`.
+fn casa_com_glob(padrao: &str, texto: &str) -> bool {
+    let mut restos = padrao.split('*');
+    let Some(comeco) = restos.next() else {
+        return false;
+    };
+    let Some(mut resto) = texto.strip_prefix(comeco) else {
+        return false;
+    };
+    let pedacos: Vec<&str> = restos.collect();
+    let Some((ultimo, meio)) = pedacos.split_last() else {
+        // Sem `*` nenhum: tem de ser igual.
+        return resto.is_empty();
+    };
+    for pedaco in meio {
+        match resto.find(pedaco) {
+            Some(onde) => resto = &resto[onde + pedaco.len()..],
+            None => return false,
+        }
+    }
+    resto.len() >= ultimo.len() && resto.ends_with(ultimo)
+}
+
+/// **O passo que passou verde sem nunca ter rodado.**
+///
+/// O `publicar.sh` assina o nosso instalador com `cargo tauri signer sign`
+/// porque a chave do projeto mora no Mac e não vai para a máquina do Windows.
+/// Até a v0.11.0 esse laço procurava `*-instalador.exe` numa `entrega/` que o
+/// dublê enchia de `-setup.exe`: ele não achava nada, não fazia nada, e a
+/// bancada seguia verde. Quando o nome foi corrigido, o passo apareceu de uma
+/// vez — e não havia um teste sequer a respeito dele.
+///
+/// Estes dois cobrem os dois lados: o `.sig` que tem de ficar ao lado, e a
+/// recusa quando a assinatura não sai.
+#[test]
+fn o_instalador_do_windows_sai_assinado() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        bancada
+            .repo
+            .join("entrega/SEELE_1.2.3_x64-instalador.exe.sig")
+            .is_file(),
+        "o instalador subiu sem `.sig`. O `manifesto.py` só monta entrada para \
+         arquivo assinado: sem ele a página sai sem Windows no `latest.json`, e \
+         quem usa Windows deixa de receber atualização sem ser avisado.\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn uma_assinatura_que_nao_sai_para_a_publicacao_em_vez_de_seguir() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_ASSINATURA", "nao")]);
+    assert_ne!(
+        saida.estado, 0,
+        "uma assinatura que falhou não pode virar release:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("não consegui assinar"),
+        "a recusa tem de nomear o que falhou:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.corpos.is_empty(),
+        "nada podia ter sido enviado ao GitHub depois de a assinatura falhar:\n{}",
+        saida.corpos
     );
 }

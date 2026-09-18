@@ -1708,7 +1708,19 @@ open(sys.argv[2], "wb").write(base64.b64decode(open(sys.argv[1], encoding="ascii
 
     # Chegou mesmo o que interessa? O resto do script trata a ausência do
     # instalador como «o Windows não entrou», e é melhor saber agora.
-    if [ -z "$(find "$RAIZ/entrega" -type f -name "*_${VERSAO}_*-setup.exe" 2>/dev/null)" ]; then
+    #
+    # **O nome é `-instalador.exe`, e não `-setup.exe`.** Aqui estava escrito
+    # `-setup.exe`, que é o do NSIS — e o ADR 0043 tirou o NSIS da entrega: o
+    # `windows.ps1` escreve `SEELE_<versão>_x64-instalador.exe` e mais nada.
+    # O build de lá terminava certo, o arquivo chegava, e esta linha declarava
+    # «o Windows não entrou» — a pior forma de errar, porque acusa a máquina
+    # que fez o trabalho.
+    #
+    # Encontrado publicando a v0.11.0. Nenhum teste pegou porque o dublê de SSH
+    # fabricava um zip com `-setup.exe` dentro: o vetor concordava com o
+    # defeito. Agora há um guarda que amarra este padrão ao nome que o
+    # `windows.ps1` de fato escreve — `xtask/tests/empacotamento.rs`.
+    if [ -z "$(find "$RAIZ/entrega" -type f -name "*_${VERSAO}_*-instalador.exe" 2>/dev/null)" ]; then
         aviso "veio arquivo do Windows, mas nenhum instalador de $VERSAO."
         return 1
     fi
@@ -1927,8 +1939,12 @@ if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             morrer "não consegui assinar $(basename "$ai_um")." \
                 "$(head -c 400 "$TEMPORARIO/assinatura")" \
                 "" \
-                "Sem esta assinatura o manifesto cai no instalador do NSIS, e" \
-                "quem instalou pelo nosso atualiza por outro programa."
+                "Sem esta assinatura não há entrada de Windows no manifesto:" \
+                "o `manifesto.py` só monta entrada para arquivo que tenha um" \
+                "`.sig` ao lado, e o NSIS — que antes caía aqui — saiu da" \
+                "entrega no ADR 0043. A página sai sem Windows no latest.json," \
+                "e quem usa Windows aperta atualizar e não recebe nada, sem ser" \
+                "informado do porquê."
         fi
     done
 fi

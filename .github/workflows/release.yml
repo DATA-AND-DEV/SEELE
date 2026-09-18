@@ -576,7 +576,7 @@ jobs:
       # confiando em quem escreveu a página. O atestado é assinado pelo GitHub e
       # amarra cada arquivo ao commit e à execução que o produziu.
       #
-      #   gh attestation verify SEELE_x.y.z_x64-setup.exe --repo DATA-AND-DEV/SEELE
+      #   gh attestation verify SEELE_x.y.z_x64-instalador.exe --repo DATA-AND-DEV/SEELE
       #
       # Roda **antes** do `SHA256SUMS` de propósito: neste ponto `entrega/` tem
       # exatamente os artefatos do build, e nada mais. Atestar o manifesto junto

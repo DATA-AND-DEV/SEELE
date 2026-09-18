@@ -5,7 +5,7 @@ gráfico e as duas ferramentas de terminal.
 
 | sistema | baixe |
 |---|---|
-| **Windows** | `SEELE_<versão>_x64-setup.exe` |
+| **Windows** | `SEELE_<versão>_x64-instalador.exe` |
 | **macOS** | `SEELE_<versão>_universal.dmg` — Intel e Apple Silicon |
 | **Linux** | `SEELE_<versão>_amd64.deb` — Debian, Ubuntu e derivados |
 
