@@ -172,6 +172,11 @@ pub fn listar_por_conteudo(config_dir: &Path) -> Vec<Found> {
     found
 }
 
+/// Reads one MOD directory.
+///
+/// # Errors
+///
+/// Returns [`Refused`] when the manifest is missing, unreadable, or invalid.
 pub fn read_one(dir: &Path) -> Result<Installed, Refused> {
     // An unreadable manifest is reported at the position a reader would stop
     // at, which for "there is no file" is the beginning.
@@ -424,7 +429,11 @@ mod tests {
 
         let achados = listar_por_conteudo(&raiz);
         assert_eq!(achados.len(), 1);
-        assert!(matches!(&achados[0], Found::Refused { .. }), "{:?}", achados[0]);
+        assert!(
+            matches!(&achados[0], Found::Refused { .. }),
+            "{:?}",
+            achados[0]
+        );
         let _ = std::fs::remove_dir_all(&raiz);
     }
 
