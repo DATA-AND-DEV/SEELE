@@ -239,12 +239,13 @@ async function aJanelaColheEmVezDeReceber() {
 }
 
 (async () => {
-  for (const prova of [
+  const provas = [
     falaAntigaNaoEntraDuranteASubida,
     confirmacaoTardiaConclui,
     umaSegundaTentativaDeEncerrarValeDeNovo,
     aJanelaColheEmVezDeReceber,
-  ]) {
+  ];
+  for (const prova of provas) {
     try {
       await prova();
     } catch (erro) {
@@ -252,7 +253,10 @@ async function aJanelaColheEmVezDeReceber() {
     }
   }
   if (falhas.length === 0) {
-    console.log("ciclo do executor: as três corridas passam");
+    // Contado, e não escrito: a frase dizia «três» com quatro provas na lista
+    // desde que a quarta entrou, e um relatório que não confere com o que
+    // rodou é exatamente o defeito que este repositório mais paga.
+    console.log(`ciclo do executor: as ${provas.length} corridas passam`);
     process.exit(0);
   }
   for (const falha of falhas) console.error(`FALHOU — ${falha}`);

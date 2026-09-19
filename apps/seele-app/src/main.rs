@@ -123,12 +123,7 @@ struct Session {
     /// **Aqui e não na janela** porque o runtime é nativo: quem o desmonta tem
     /// de ser quem o criou, e a janela pode desaparecer antes de pedir.
     mods_nativos: Mutex<ModsNativos>,
-    /// O código de cada instância reservada, esperando a ativação.
-    ///
-    /// Lido do disco na reserva para que a ativação não possa falhar por causa
-    /// dele: entre as duas etapas, o pacote pode ter sido apagado, e falhar ali
-    /// deixaria uma instância reservada que nunca roda e nunca sai.
-    codigos_reservados: Mutex<std::collections::BTreeMap<u64, String>>,
+
     connection: Mutex<Option<Arc<Connection>>>,
     /// O servidor que este app está hospedando, quando está.
     ///
@@ -301,26 +296,7 @@ impl Session {
     /// `await`s, e cada um deles é uma janela por onde um trabalho antigo
     /// entraria.
     fn revogar(&self) -> u64 {
-        let morta = self
-            .geracao
-            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-        // **A revogação nativa encerra os executores dela**, sem esperar a
-        // janela pedir. A diretriz é explícita, e a razão é que a janela pode
-        // não pedir: ela pode estar travada, pode ter fechado, ou pode ter
-        // perdido o número da instância. O dono do runtime é este lado.
-        if let Ok(mut vivos) = self.mods_nativos.lock() {
-            let reservas = vivos.reservas_da_geracao(morta);
-            vivos.revogar_geracao(morta);
-            // **O código reservado entra no mesmo descarte.** A tabela só
-            // perdia uma entrada na ativação; reservar e sair sem ativar
-            // conservava o fonte do MOD na memória desta janela para sempre.
-            if let Ok(mut guardados) = self.codigos_reservados.lock() {
-                for numero in reservas {
-                    guardados.remove(&numero);
-                }
-            }
-        }
-        morta.saturating_add(1)
+        revogar_em(&self.geracao, &self.mods_nativos)
     }
 
     /// Esta geração ainda é a de pé?
@@ -473,6 +449,25 @@ struct InstanciaNativa {
     avisos_perdidos: u32,
     /// O executor confirmou que parou.
     parou: bool,
+    /// O fonte do MOD, enquanto ela estiver só reservada.
+    ///
+    /// **Aqui, e não numa tabela ao lado.** Ele morava em
+    /// `Session::codigos_reservados`, inserido **depois** de a instância ter
+    /// sido registrada e o cadeado liberado — e a revogação que caísse no meio
+    /// apagava um fonte que ainda não existia, e o comando o inseria depois do
+    /// descarte. Sem ativação posterior, ele ficava retido para sempre.
+    ///
+    /// Guardado dentro da instância, ele entra no descarte pelo mesmo ato que
+    /// a descarta. Atômico por construção, e não por cuidado.
+    codigo: Option<String>,
+    /// Há um aviso de «tem o que colher» pendente para a janela.
+    ///
+    /// **No máximo um por instância.** A bomba emitia um evento por fala,
+    /// inclusive pelas que ela agregava ou descartava — e um evento sem corpo
+    /// ainda ocupa memória enquanto a janela não o processa. Agregado, a
+    /// transição vazio→não-vazio continua sendo avisada uma vez, e o resto é
+    /// silêncio até a janela drenar.
+    avisado: bool,
 }
 
 impl InstanciaNativa {
@@ -488,6 +483,9 @@ impl InstanciaNativa {
         if let Some(ultimo) = self.avisos.back_mut() {
             if ultimo.tipo == tipo && ultimo.corpo == corpo {
                 ultimo.vezes = ultimo.vezes.saturating_add(1);
+                // Agregado: o lugar na cota volta, porque nenhuma entrada nova
+                // foi ocupada.
+                self.executor.fila().tirar_aviso();
                 return;
             }
         }
@@ -496,6 +494,7 @@ impl InstanciaNativa {
             // explicam o que está acontecendo agora; e o contador diz que
             // houve mais do que cabe, para ninguém ler a lista como completa.
             self.avisos.pop_front();
+            self.executor.fila().tirar_aviso();
             self.avisos_perdidos = self.avisos_perdidos.saturating_add(1);
         }
         self.avisos.push_back(FalaPendente {
@@ -539,7 +538,10 @@ impl InstanciaNativa {
         // todas as falas colhidas, e erro nunca tinha reservado nada.
         self.executor.fila().tirar_varios(colhidas.len(), bytes);
 
-        colhidas.extend(self.avisos.drain(..));
+        for aviso in self.avisos.drain(..) {
+            self.executor.fila().tirar_aviso();
+            colhidas.push(aviso);
+        }
         if self.avisos_perdidos > 0 {
             colhidas.push(FalaPendente {
                 tipo: "avisos-perdidos".to_owned(),
@@ -548,7 +550,26 @@ impl InstanciaNativa {
             });
             self.avisos_perdidos = 0;
         }
+        // **Rearma a sinalização quando esvaziou.** Com fala ainda pendente ela
+        // fica armada: a janela continua drenando e não precisa de outro aviso.
+        // Vazia, o próximo que chegar volta a avisar — é a transição
+        // vazio→não-vazio, e perdê-la deixaria o MOD mudo.
+        if self.pendentes.is_empty() && self.avisos.is_empty() {
+            self.avisado = false;
+        }
         colhidas
+    }
+
+    /// Precisa avisar a janela por esta fala?
+    ///
+    /// No máximo um aviso pendente por instância. Enquanto ele não for colhido,
+    /// tudo o mais entra em silêncio — a janela já sabe que há o que buscar.
+    fn precisa_avisar(&mut self) -> bool {
+        if self.avisado {
+            return false;
+        }
+        self.avisado = true;
+        true
     }
 
     /// Solta tudo o que ela retém, devolvendo os créditos.
@@ -561,8 +582,16 @@ impl InstanciaNativa {
         let quantas = self.pendentes.len();
         self.pendentes.clear();
         self.bytes_pendentes = 0;
-        self.avisos.clear();
         self.executor.fila().tirar_varios(quantas, bytes);
+        // **Cada classe devolve na cota dela**, inclusive no descarte. Soltar
+        // avisos pela conta das mensagens era a mesma assimetria de antes, do
+        // outro lado.
+        for _ in self.avisos.drain(..) {
+            self.executor.fila().tirar_aviso();
+        }
+        self.avisos_perdidos = 0;
+        // E o fonte sai junto: é o que torna o descarte da reserva atômico.
+        self.codigo = None;
     }
 }
 
@@ -612,16 +641,6 @@ impl ModsNativos {
         self.descartar_geracao(geracao);
     }
 
-    /// Os números das reservas desta geração, para o código delas sair junto.
-    fn reservas_da_geracao(&self, geracao: u64) -> Vec<u64> {
-        self.vivos
-            .iter()
-            .chain(self.encerrando.iter())
-            .filter(|(_, i)| i.geracao == geracao)
-            .map(|(n, _)| *n)
-            .collect()
-    }
-
     /// O executor confirmou: a instância sai da supervisão.
     ///
     /// **Só aqui ela some.** É a diferença entre «encerrou» e «mandei
@@ -654,6 +673,19 @@ impl ModsNativos {
         // MOD disse antes de parar ainda precisa chegar a quem lê.
         if instancia.pendentes.is_empty() && instancia.avisos.is_empty() {
             self.encerrando.remove(&numero);
+        }
+    }
+
+    /// Tira uma instância da supervisão, soltando o que ela retém.
+    ///
+    /// Para o desfazer de uma montagem que não completou: sem ela, uma reserva
+    /// cuja bomba não subiu ficaria na tabela com o fonte dentro, esperando uma
+    /// ativação que não vem.
+    fn descartar(&mut self, numero: u64) {
+        for tabela in [&mut self.vivos, &mut self.encerrando] {
+            if let Some(mut instancia) = tabela.remove(&numero) {
+                instancia.soltar();
+            }
         }
     }
 
@@ -761,13 +793,7 @@ impl EventListener for Bridge {
             // janela pode não pedir — ela pode estar travada ou já ter fechado.
             if let Some(sessao) = self.app.try_state::<Session>() {
                 if let Ok(mut vivos) = sessao.mods_nativos.lock() {
-                    let reservas = vivos.reservas_da_geracao(morta);
                     vivos.revogar_geracao(morta);
-                    if let Ok(mut guardados) = sessao.codigos_reservados.lock() {
-                        for numero in reservas {
-                            guardados.remove(&numero);
-                        }
-                    }
                 }
             }
             tracing::debug!(geracao = morta, "sessão revogada pelo fim que chegou");
@@ -2083,8 +2109,16 @@ struct InstanciaNaTela {
     /// devolvem: uma falha do MOD não pode consumir a cota do que funciona,
     /// nem bloquear mensagens futuras por contabilidade inválida.
     avisos: usize,
-    /// Quantos avisos não couberam e foram perdidos.
+    /// Quantos avisos não couberam e foram perdidos, por instância.
     avisos_perdidos: u32,
+    /// Quantos avisos estão de pé na cota, no canal ou já na instância.
+    avisos_no_motor: usize,
+    /// Quantos avisos o **executor** recusou antes de sair do motor.
+    ///
+    /// Outro ponto de retenção, e outro contador: a cota do canal entre o motor
+    /// e a bomba é separada da lista da instância, e um MOD que lança num laço
+    /// bate primeiro naquela.
+    avisos_recusados_no_motor: usize,
     /// Quantas mensagens dela esperam a janela lê-las.
     saida_na_fila: usize,
     /// Quantas ela quis mandar e não couberam.
@@ -2131,6 +2165,8 @@ fn estado_da_sessao(session: State<'_, Session>) -> EstadoDaSessao {
                         bytes_a_colher: instancia.bytes_pendentes,
                         avisos: instancia.avisos.len(),
                         avisos_perdidos: instancia.avisos_perdidos,
+                        avisos_no_motor: instancia.executor.fila().avisos_de_pe(),
+                        avisos_recusados_no_motor: instancia.executor.fila().avisos_recusados(),
                         saida_na_fila: saida,
                         saida_recusadas: instancia.executor.fila().recusadas(),
                         entrada_na_fila: entrada,
@@ -3174,18 +3210,15 @@ fn mod_nativo_reservar(
     // **Registrar dentro do mesmo cadeado que confere a revogação.** Fora dele,
     // entre conferir e inserir cabe uma desmontagem inteira — e o executor
     // ficaria órfão na tabela de uma sessão que já acabou.
-    let numero = {
-        let mut vivos = session
-            .mods_nativos
-            .lock()
-            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
-        if !session.geracao_vale(geracao) {
-            executor.pedir_encerramento();
-            return Err(FalhaNoMod::Recusado {
-                motivo: "sessao-encerrada".to_owned(),
-            });
-        }
-        vivos.guardar(InstanciaNativa {
+    // **A instância nasce com o fonte dentro.** Ele morava numa tabela ao
+    // lado, inserido depois de este cadeado ser liberado — e a revogação que
+    // caísse no meio apagava um fonte que ainda não existia, deixando o comando
+    // inseri-lo depois do descarte. Guardado aqui, ele é descartado pelo mesmo
+    // ato que descarta a instância.
+    let numero = registrar_reserva(
+        &session.mods_nativos,
+        &|| session.geracao_vale(geracao),
+        InstanciaNativa {
             id: id.clone(),
             geracao,
             hash,
@@ -3196,25 +3229,32 @@ fn mod_nativo_reservar(
             avisos: std::collections::VecDeque::new(),
             avisos_perdidos: 0,
             parou: false,
-        })
-    };
+            codigo: Some(codigo),
+            avisado: false,
+        },
+    )?;
 
     // A bomba **não emite carga**: ela guarda a fala na instância e avisa que
     // há o que colher. Ver `FalaPendente` para o porquê.
     let janela = app.clone();
     let quem = id.clone();
-    std::thread::Builder::new()
+    if std::thread::Builder::new()
         .name("mod-nativo-bomba".into())
         .spawn(move || bombear(&janela, &recebedor, &fila, numero, geracao, &quem))
-        .map_err(|_| FalhaNoMod::Recusado {
+        .is_err()
+    {
+        // **Rollback completo.** Sem isto, a instância ficava na tabela com o
+        // fonte dentro e sem ninguém para escutá-la — e só uma ativação futura,
+        // que pode nunca vir, a tiraria de lá.
+        if let Ok(mut vivos) = session.mods_nativos.lock() {
+            vivos.encerrar(numero);
+            vivos.descartar(numero);
+        }
+        return Err(FalhaNoMod::Recusado {
             motivo: "a-bomba-nao-subiu".to_owned(),
-        })?;
-
-    // O código fica guardado até a ativação. Ele já foi conferido; o que falta
-    // é a janela dizer que está pronta para ouvir.
-    if let Ok(mut guardados) = session.codigos_reservados.lock() {
-        guardados.insert(numero, codigo);
+        });
     }
+
     tracing::info!(mod_id = %id, geracao, instancia = numero, "MOD reservado no executor nativo");
     Ok(numero)
 }
@@ -3235,20 +3275,87 @@ fn mod_nativo_ativar(
     geracao: u64,
     instancia: u64,
 ) -> Result<(), FalhaNoMod> {
-    let codigo = session
-        .codigos_reservados
-        .lock()
-        .ok()
-        .and_then(|mut guardados| guardados.remove(&instancia))
-        .ok_or(FalhaNoMod::Recusado {
-            motivo: "nada-reservado".to_owned(),
-        })?;
+    liberar_reserva(
+        &session.mods_nativos,
+        &|| session.geracao_vale(geracao),
+        geracao,
+        instancia,
+    )?;
+    tracing::info!(instancia, geracao, "MOD ativado no executor nativo");
+    Ok(())
+}
 
-    let mut vivos = session
-        .mods_nativos
-        .lock()
-        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
-    if !session.geracao_vale(geracao) {
+/// **Fecha a geração e varre o que era dela.**
+///
+/// **Fechar a geração e varrer o que era dela é um ato só**, sob o cadeado das
+/// instâncias. Não é o arranjo original: a geração subia **fora** do cadeado,
+/// antes de tomá-lo. Aquela ordem era correta — quem registrasse antes era
+/// varrido, quem registrasse depois via a geração morta —, mas correta de um
+/// jeito que **não dá para provar**: inverter as duas linhas abre uma janela de
+/// poucas instruções entre soltar o cadeado e incrementar, e nenhuma disputa
+/// por thread cai nela, porque acordar de um mutex custa mais do que ela dura.
+/// Medi: com a ordem invertida de propósito, trinta rodadas com quatro
+/// registradores disputando o cadeado passaram todas.
+///
+/// Debaixo do cadeado não há ordem a inverter. Registrar e revogar passam a se
+/// excluir inteiros, e o que sobra é verificável: enquanto alguém registra, a
+/// geração **não muda** — e é isso que o guarda mede.
+fn revogar_em(geracao: &std::sync::atomic::AtomicU64, mods: &std::sync::Mutex<ModsNativos>) -> u64 {
+    let Ok(mut vivos) = mods.lock() else {
+        // Sem cadeado ainda se fecha a geração: uma tabela envenenada não pode
+        // virar uma sessão que continua admitindo efeito.
+        return geracao
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            .saturating_add(1);
+    };
+    let morta = geracao.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    // O fonte de uma reserva sai junto: ele mora **dentro** da instância, e
+    // `soltar` o larga pelo mesmo ato que larga o resto. Antes ele morava numa
+    // tabela ao lado, e uma revogação entre as duas inserções deixava um fonte
+    // órfão.
+    vivos.revogar_geracao(morta);
+    morta.saturating_add(1)
+}
+
+/// **Registra a reserva sob o mesmo cadeado que confere a revogação.**
+///
+/// Extraída do comando para que a corrida entre registrar e revogar possa ser
+/// provada com threads de verdade, e não descrita em prosa. A ordem que a torna
+/// segura mora em dois lugares e só funciona nos dois: [`Session::revogar`]
+/// incrementa a geração **antes** de tomar este cadeado, e aqui a geração é
+/// conferida **depois** de tomá-lo. Quem chega primeiro insere e é varrido pela
+/// revogação; quem chega depois já vê a geração morta e não insere.
+///
+/// A instância chega inteira — **com o fonte dentro** —, e é isso que faz a
+/// revogação não ter onde cair no meio: não há um segundo `insert`.
+fn registrar_reserva(
+    mods: &std::sync::Mutex<ModsNativos>,
+    geracao_vale: &dyn Fn() -> bool,
+    instancia: InstanciaNativa,
+) -> Result<u64, FalhaNoMod> {
+    let mut vivos = mods.lock().map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    if !geracao_vale() {
+        instancia.executor.pedir_encerramento();
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+    Ok(vivos.guardar(instancia))
+}
+
+/// **Libera a execução de uma reserva**, sob o cadeado, conferindo a revogação.
+///
+/// Extraída pela mesma razão que [`registrar_reserva`]: a ativação também é uma
+/// corrida contra a saída da sessão, e uma prova dela não pode precisar de um
+/// `AppHandle`.
+fn liberar_reserva(
+    mods: &std::sync::Mutex<ModsNativos>,
+    geracao_vale: &dyn Fn() -> bool,
+    geracao: u64,
+    instancia: u64,
+) -> Result<(), FalhaNoMod> {
+    let mut vivos = mods.lock().map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    if !geracao_vale() {
         vivos.encerrar(instancia);
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
@@ -3265,14 +3372,88 @@ fn mod_nativo_ativar(
             motivo: "instancia-nao-esta-reservada".to_owned(),
         });
     }
+    // O fonte sai da instância aqui: depois de rodar, ele não serve mais, e
+    // guardá-lo seria guardar uma cópia do MOD por sessão.
+    let codigo = alvo.codigo.take().ok_or(FalhaNoMod::Recusado {
+        motivo: "nada-reservado".to_owned(),
+    })?;
     alvo.executor
         .iniciar(&codigo)
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "executor-nao-aceitou-o-codigo".to_owned(),
         })?;
     alvo.estado = EstadoNativo::Ativa;
-    tracing::info!(instancia, geracao, "MOD ativado no executor nativo");
     Ok(())
+}
+
+/// O que sobra de uma fala depois de assentada.
+#[derive(Debug, PartialEq, Eq)]
+enum Assentada {
+    /// Não era fala: diagnóstico, ou coisa que não chega à janela.
+    Nada,
+    /// Guardada na instância; `avisar` diz se a janela ainda não foi chamada.
+    Guardada { avisar: bool },
+    /// A bomba desce: o MOD parou, ou a supervisão sumiu debaixo dela.
+    Fim { avisar: bool },
+}
+
+/// **O que a bomba faz com uma fala**, sem tocar na janela.
+///
+/// Extraída do laço para que a saturação possa ser medida pelo caminho real:
+/// produzir erros de verdade, não assentá-los, e contar cada ponto de retenção.
+/// Testar isto reimplementando o laço provaria a reimplementação.
+fn assentar_fala(
+    mods: &std::sync::Mutex<ModsNativos>,
+    geracao_vale: &dyn Fn() -> bool,
+    fila: &std::sync::Arc<executor::Fila>,
+    numero: u64,
+    fala: executor::ParaOFora,
+    quem: &str,
+) -> Assentada {
+    let (tipo, corpo, parou) = match fala {
+        executor::ParaOFora::Mensagem(json) => ("mensagem", json, false),
+        executor::ParaOFora::Falhou(motivo) => ("falhou", motivo, false),
+        executor::ParaOFora::Interrompido => ("interrompido", String::new(), false),
+        executor::ParaOFora::Parou => ("parou", String::new(), true),
+        executor::ParaOFora::Diagnostico { relogios } => {
+            tracing::debug!(mod_id = %quem, relogios, "diagnóstico de MOD nativo");
+            return Assentada::Nada;
+        }
+    };
+    tracing::debug!(mod_id = %quem, tipo, "fala de MOD nativo");
+
+    let Ok(mut vivos) = mods.lock() else {
+        return Assentada::Fim { avisar: false };
+    };
+    if parou {
+        // **O caminho de parada é independente do crédito de dados.** Ele não
+        // entra em fila nenhuma, não ocupa byte, e não espera a janela colher:
+        // resolve a supervisão na hora. E avisa sempre, fora de cota.
+        vivos.confirmar_parada(numero);
+        return Assentada::Fim { avisar: true };
+    }
+    if !geracao_vale() {
+        // **Depois da revogação, a fala é descartada aqui.**
+        //
+        // Ela não tem para onde ir: `colher` recusa a geração que saiu, e
+        // guardá-la reteria bytes e a instância para sempre esperando uma
+        // janela que não vai mais pedir.
+        devolver_credito(fila, tipo, corpo.len());
+        vivos.contar_descartada(numero);
+        return Assentada::Guardada { avisar: false };
+    }
+    let Some(instancia) = vivos.achar_mut(numero) else {
+        // Sem instância não há onde guardar.
+        devolver_credito(fila, tipo, corpo.len());
+        return Assentada::Guardada { avisar: false };
+    };
+    instancia.guardar_fala(tipo, corpo);
+    // **No máximo um aviso pendente por instância.** A versão anterior emitia
+    // um evento por fala, inclusive pelas que ela agregava ou descartava — e um
+    // evento sem corpo ainda ocupa memória enquanto a janela não o processa.
+    Assentada::Guardada {
+        avisar: instancia.precisa_avisar(),
+    }
 }
 
 /// A bomba de uma instância: guarda o que o MOD fala e avisa a janela.
@@ -3290,62 +3471,53 @@ fn bombear(
     quem: &str,
 ) {
     while let Ok(fala) = recebedor.recv() {
-        let (tipo, corpo, parou) = match fala {
-            executor::ParaOFora::Mensagem(json) => ("mensagem", json, false),
-            executor::ParaOFora::Falhou(motivo) => ("falhou", motivo, false),
-            executor::ParaOFora::Interrompido => ("interrompido", String::new(), false),
-            executor::ParaOFora::Parou => ("parou", String::new(), true),
-            executor::ParaOFora::Diagnostico { relogios } => {
-                tracing::debug!(mod_id = %quem, relogios, "diagnóstico de MOD nativo");
-                continue;
-            }
-        };
-        tracing::debug!(mod_id = %quem, tipo, "fala de MOD nativo");
-
         let Some(sessao) = janela.try_state::<Session>() else {
             return;
         };
-        {
-            let Ok(mut vivos) = sessao.mods_nativos.lock() else {
-                return;
-            };
-            if parou {
-                // **O caminho de parada é independente do crédito de dados.**
-                // Ele não entra em fila nenhuma, não ocupa byte, e não espera a
-                // janela colher: resolve a supervisão na hora.
-                vivos.confirmar_parada(numero);
-            } else if !sessao.geracao_vale(geracao) {
-                // **Depois da revogação, a fala é descartada aqui.**
-                //
-                // Ela não tem para onde ir: `colher` recusa a geração que saiu,
-                // e guardá-la reteria bytes e a instância para sempre esperando
-                // uma janela que não vai mais pedir. O crédito volta para a
-                // fila do executor não ficar reservada.
-                fila.tirar(corpo.len());
-                vivos.contar_descartada(numero);
-            } else if let Some(instancia) = vivos.achar_mut(numero) {
-                instancia.guardar_fala(tipo, corpo);
-            } else {
-                // Sem instância não há onde guardar, e o crédito volta para a
-                // fila do executor não ficar reservada para sempre.
-                fila.tirar(corpo.len());
-            }
-        }
+        let assentada = assentar_fala(
+            &sessao.mods_nativos,
+            &|| sessao.geracao_vale(geracao),
+            fila,
+            numero,
+            fala,
+            quem,
+        );
+        let (avisar, parou) = match assentada {
+            Assentada::Nada => continue,
+            Assentada::Guardada { avisar } => (avisar, false),
+            Assentada::Fim { avisar } => (avisar, true),
+        };
 
         // O aviso é **sem carga**: ele não pode acumular bytes na janela, e por
         // isso um MOD que fala muito não enche memória de ninguém antes de
-        // alguém ler.
-        let _ = janela.emit(
-            EVENTO_DO_EXECUTOR,
-            AvisoDoMod {
-                instancia: numero,
-                geracao,
-                parou,
-            },
-        );
+        // alguém ler. E é **agregado**: um por instância até a janela drenar.
+        if avisar {
+            let _ = janela.emit(
+                EVENTO_DO_EXECUTOR,
+                AvisoDoMod {
+                    instancia: numero,
+                    geracao,
+                    parou,
+                },
+            );
+        }
         if parou {
             return;
         }
+    }
+}
+
+/// Devolve o crédito **na cota de quem o tomou**.
+///
+/// Mensagem e aviso reservam em pools diferentes, e por isso devolvem em pools
+/// diferentes. Os ramos de descarte da bomba devolviam tudo pela conta das
+/// mensagens — inclusive erros que nunca tinham reservado nada —, e com
+/// mensagens ainda pendentes isso aparecia como crédito a menos.
+fn devolver_credito(fila: &std::sync::Arc<executor::Fila>, tipo: &str, bytes: usize) {
+    if tipo == "mensagem" {
+        fila.tirar(bytes);
+    } else {
+        fila.tirar_aviso();
     }
 }
 
@@ -6562,7 +6734,7 @@ mod o_que_sai_desta_janela_por_um_link {
 /// tabela, os créditos e o que sobra depois.
 #[cfg(test)]
 mod a_supervisao_dos_mods_nativos {
-    use super::{EstadoNativo, InstanciaNativa, ModsNativos};
+    use super::{registrar_reserva, revogar_em, EstadoNativo, InstanciaNativa, ModsNativos};
     use crate::executor::{ExecutorQuickJs, Limites};
 
     /// Uma instância com um executor de verdade, na geração dada.
@@ -6578,6 +6750,8 @@ mod a_supervisao_dos_mods_nativos {
             avisos: std::collections::VecDeque::new(),
             avisos_perdidos: 0,
             parou: false,
+            codigo: Some("/* o fonte do MOD */".to_owned()),
+            avisado: false,
         }
     }
 
@@ -6741,21 +6915,472 @@ mod a_supervisao_dos_mods_nativos {
     /// Medido sobre a mesma lista que a revogação usa: se ela não nomear a
     /// reserva, o código dela fica na memória desta janela para sempre.
     #[test]
-    fn uma_reserva_sem_ativacao_entra_no_descarte() {
+    fn uma_reserva_sem_ativacao_nao_deixa_fonte_orfao() {
         let mut mods = ModsNativos::default();
         let mut reservada = instancia(7);
         reservada.estado = EstadoNativo::Reservada;
         let numero = mods.guardar(reservada);
-
-        let reservas = mods.reservas_da_geracao(7);
         assert!(
-            reservas.contains(&numero),
-            "a reserva não ativada ficou de fora do descarte da geração"
+            mods.vivos
+                .get(&numero)
+                .and_then(|i| i.codigo.as_ref())
+                .is_some(),
+            "a reserva devia nascer com o fonte dentro"
         );
 
-        // E de outra geração não entra: descartar o que não é dela seria
-        // derrubar a sessão seguinte.
-        assert!(mods.reservas_da_geracao(8).is_empty());
+        // Ninguém ativa. A sessão acaba.
+        mods.revogar_geracao(7);
+
+        // **Não há «entre».** O fonte mora dentro da instância, e a revogação o
+        // solta pelo mesmo ato que solta o resto. Na versão anterior ele morava
+        // numa tabela ao lado, inserida **depois** de o cadeado da instância ser
+        // liberado — e uma revogação no meio apagava um fonte que ainda não
+        // existia, deixando o comando inseri-lo depois do descarte.
+        let orfao = mods
+            .vivos
+            .values()
+            .chain(mods.encerrando.values())
+            .any(|i| i.codigo.is_some());
+        assert!(!orfao, "sobrou fonte de uma reserva que nunca foi ativada");
+
+        // E ela continua supervisionada até confirmar — encerrar não é parar.
+        assert!(
+            mods.encerrando.contains_key(&numero),
+            "a reserva revogada saiu da supervisão sem ter confirmado"
+        );
+        mods.confirmar_parada(numero);
+        assert!(mods.encerrando.is_empty() && mods.vivos.is_empty());
+    }
+
+    /// **A corrida entre registrar uma reserva e revogar a geração.**
+    ///
+    /// A revisão pedia «uma prova com barreira entre registrar a instância e
+    /// guardar o fonte». **Essa barreira não tem onde ser posta**: o fonte mora
+    /// dentro da instância, e não há instante entre as duas inserções porque
+    /// não são duas. O que resta para provar é a corrida que sobrou — a que
+    /// existe de verdade — e ela se prova com threads, não com prosa.
+    ///
+    /// A ordem que a torna segura mora em dois lugares e só funciona nos dois:
+    /// [`revogar_em`] incrementa a geração **antes** de tomar o cadeado;
+    /// [`registrar_reserva`] confere a geração **depois** de tomá-lo. Os dois
+    /// desfechos possíveis são bons: quem registra primeiro é varrido pela
+    /// revogação, quem registra depois é recusado.
+    ///
+    /// **A prova precisa de disputa pelo cadeado**, e não de duas threads
+    /// soltas. A janela que a inversão abre fica entre soltar o cadeado e
+    /// incrementar a geração — nanossegundos — e duzentas rodadas sem disputa
+    /// não caem nela nenhuma vez: foi o que a primeira versão deste guarda fez,
+    /// e ela passava com a ordem invertida. Com a tabela povoada, a varredura
+    /// demora, os registradores se empilham no cadeado e acordam exatamente ali
+    /// dentro.
+    #[test]
+    fn registrar_e_revogar_ao_mesmo_tempo_nao_deixa_fonte_orfao() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        const POVOAR: usize = 24;
+        const REGISTRADORES: usize = 4;
+
+        for rodada in 0..30u64 {
+            let mods = std::sync::Arc::new(std::sync::Mutex::new(ModsNativos::default()));
+            let geracao = std::sync::Arc::new(AtomicU64::new(7));
+            {
+                let mut vivos = mods.lock().expect("cadeado");
+                for _ in 0..POVOAR {
+                    let mut habitante = instancia(7);
+                    produzir(&mut habitante, 2, 256);
+                    vivos.guardar(habitante);
+                }
+            }
+            // As instâncias nascem antes da largada: criar um motor QuickJS
+            // custa, e pagar esse custo dentro da corrida a desfaria.
+            let prontas: Vec<InstanciaNativa> = (0..REGISTRADORES)
+                .map(|_| {
+                    let mut nova = instancia(7);
+                    nova.estado = EstadoNativo::Reservada;
+                    nova
+                })
+                .collect();
+
+            let largada = std::sync::Arc::new(std::sync::Barrier::new(REGISTRADORES + 1));
+            let registradores: Vec<_> = prontas
+                .into_iter()
+                .map(|nova| {
+                    let mods = std::sync::Arc::clone(&mods);
+                    let geracao = std::sync::Arc::clone(&geracao);
+                    let largada = std::sync::Arc::clone(&largada);
+                    std::thread::spawn(move || {
+                        largada.wait();
+                        // Um respiro para o revogador tomar o cadeado antes:
+                        // é dentro da varredura dele que se quer chegar.
+                        for _ in 0..64 {
+                            std::hint::spin_loop();
+                        }
+                        registrar_reserva(&mods, &|| geracao.load(Ordering::Acquire) == 7, nova)
+                    })
+                })
+                .collect();
+            let revogador = {
+                let mods = std::sync::Arc::clone(&mods);
+                let geracao = std::sync::Arc::clone(&geracao);
+                let largada = std::sync::Arc::clone(&largada);
+                // **A revogação de verdade**, e não uma cópia da ordem dela:
+                // uma cópia provaria a cópia.
+                std::thread::spawn(move || {
+                    largada.wait();
+                    revogar_em(&geracao, &mods)
+                })
+            };
+            let registradas: Vec<_> = registradores
+                .into_iter()
+                .map(|t| t.join().expect("registrador"))
+                .collect();
+            revogador.join().expect("revogador");
+
+            let vivos = mods.lock().expect("cadeado");
+            let orfao = vivos
+                .vivos
+                .values()
+                .chain(vivos.encerrando.values())
+                .any(|i| i.codigo.is_some());
+            assert!(
+                !orfao,
+                "rodada {rodada}: sobrou fonte de uma geração revogada"
+            );
+            // Registrou antes: a revogação tem de tê-la varrido para o
+            // encerramento, e não pode tê-la deixado viva. Recusou: nada
+            // entrou, nem para ser varrido.
+            for numero in registradas.into_iter().flatten() {
+                assert!(
+                    !vivos.vivos.contains_key(&numero),
+                    "rodada {rodada}: a reserva {numero} ficou viva numa \
+                     geração que já tinha sido revogada"
+                );
+            }
+            assert!(
+                vivos.vivos.is_empty(),
+                "rodada {rodada}: sobrou instância viva de uma geração revogada"
+            );
+        }
+    }
+
+    /// **Enquanto alguém registra, a geração não muda.**
+    ///
+    /// Este é o guarda que a corrida por thread não conseguia ser. A janela que
+    /// a ordem antiga deixava durava poucas instruções, e nenhuma disputa caía
+    /// nela: trinta rodadas com quatro registradores, com a ordem invertida de
+    /// propósito, passaram todas. Um guarda que não falha quando o defeito está
+    /// lá não é um guarda.
+    ///
+    /// Com o incremento **dentro** do cadeado, a propriedade vira observável:
+    /// segurando o cadeado — que é exatamente o que [`registrar_reserva`] faz
+    /// enquanto confere e insere —, a revogação não anda. Nem a geração sobe,
+    /// nem a varredura roda. Tirar o incremento de dentro do cadeado faz esta
+    /// asserção falhar na hora.
+    #[test]
+    fn registrar_e_revogar_se_excluem_inteiros() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let mods = std::sync::Arc::new(std::sync::Mutex::new(ModsNativos::default()));
+        let geracao = std::sync::Arc::new(AtomicU64::new(7));
+        let (avisou, chegou) = std::sync::mpsc::channel::<()>();
+
+        let segurando = mods.lock().expect("cadeado");
+
+        let revogador = {
+            let mods = std::sync::Arc::clone(&mods);
+            let geracao = std::sync::Arc::clone(&geracao);
+            std::thread::spawn(move || {
+                let _ = avisou.send(());
+                revogar_em(&geracao, &mods)
+            })
+        };
+        chegou.recv().expect("o revogador não largou");
+
+        // Espera limitada, e sem prazo fixo: a asserção não é «ainda não
+        // mudou», é «não pode mudar». Sob o arranjo certo isto roda até o fim
+        // sem nunca ver 8; sob o errado, a primeira volta já vê.
+        for volta in 0..2_000 {
+            assert_eq!(
+                geracao.load(Ordering::Acquire),
+                7,
+                "volta {volta}: a geração morreu enquanto um registro estava \
+                 em curso — a revogação voltou a andar fora do cadeado"
+            );
+            std::thread::yield_now();
+        }
+
+        // E o que este registro inseriu é varrido assim que o cadeado sai.
+        let mut reservada = instancia(7);
+        reservada.estado = EstadoNativo::Reservada;
+        let numero = {
+            let mut vivos = segurando;
+            vivos.guardar(reservada)
+        };
+        assert_eq!(revogador.join().expect("revogador"), 8);
+
+        let vivos = mods.lock().expect("cadeado");
+        assert!(
+            !vivos.vivos.contains_key(&numero),
+            "a reserva inserida sob o cadeado escapou da varredura"
+        );
+        assert!(
+            vivos
+                .vivos
+                .values()
+                .chain(vivos.encerrando.values())
+                .all(|i| i.codigo.is_none()),
+            "sobrou fonte de uma geração revogada"
+        );
+    }
+
+    /// Uma instância montada em volta de um executor já escutado.
+    ///
+    /// A da corrida nasce com o executor dentro e o canal ainda fechado; aqui o
+    /// canal precisa ficar na mão de quem testa, porque é ele que faz o papel
+    /// da bomba lenta.
+    fn com_canal(
+        geracao: u64,
+    ) -> (
+        InstanciaNativa,
+        std::sync::mpsc::Receiver<crate::executor::ParaOFora>,
+        std::sync::Arc<crate::executor::Fila>,
+    ) {
+        let mut nova = instancia(geracao);
+        let (recebedor, fila) = nova.executor.escutar().expect("canal");
+        (nova, recebedor, fila)
+    }
+
+    /// Espera uma condição, com teto, **afirmando a condição e não o tempo**.
+    fn ate(prazo: std::time::Duration, o_que: &str, mut condicao: impl FnMut() -> bool) {
+        let limite = std::time::Instant::now() + prazo;
+        while std::time::Instant::now() < limite {
+            if condicao() {
+                return;
+            }
+            std::thread::yield_now();
+        }
+        panic!("passou o prazo sem {o_que}");
+    }
+
+    /// **Um produtor de erros de verdade, com a bomba e a janela paradas.**
+    ///
+    /// A revisão: «testar produtor de erros real com bomba/consumidor lentos e
+    /// entrega à janela suspensa, contando todos os pontos de retenção e
+    /// notificações». Aqui o MOD lança a cada resposta entregue — não é um
+    /// `ParaOFora::Falhou` fabricado pelo teste, é o motor traduzindo uma
+    /// exceção —, ninguém escoa o canal, e ninguém colhe.
+    ///
+    /// São **três** pontos de retenção, e a cota é uma só atravessando os três:
+    /// o que o motor recusou antes de mandar, o que está no canal esperando a
+    /// bomba, e o que está na instância esperando a janela.
+    #[test]
+    fn um_produtor_de_erros_real_para_nas_tres_cotas() {
+        use crate::executor::AVISOS_NA_FILA;
+
+        let (viva, recebedor, fila) = com_canal(7);
+        viva.executor
+            .iniciar(
+                "globalThis.aoResponder = () => { throw new Error('sempre'); };\
+                 seele.postar('pronto');",
+            )
+            .expect("código");
+
+        // O MOD lança em toda resposta. Entregar bem mais que a cota é o que
+        // faz a recusa acontecer no motor, antes de ocupar o canal.
+        ate(
+            std::time::Duration::from_secs(5),
+            "o MOD ficar de pé",
+            || viva.executor.entregar("{\"v\":1}").is_ok(),
+        );
+        for _ in 0..(AVISOS_NA_FILA * 8) {
+            // Recusa de entrada não é o que se mede aqui: o teto de entrada é
+            // outro, e ele se solta sozinho quando o motor consome.
+            let _ = viva.executor.entregar("{\"v\":1}");
+            std::thread::yield_now();
+        }
+
+        // **Primeiro ponto: o motor recusa.** Sem cota lá, um MOD que lança num
+        // laço enche o canal entre o motor e a bomba, que nenhum teto alcança.
+        ate(
+            std::time::Duration::from_secs(10),
+            "o motor recusar um aviso",
+            || fila.avisos_recusados() > 0,
+        );
+        assert_eq!(
+            fila.avisos_de_pe(),
+            AVISOS_NA_FILA,
+            "a cota de avisos parou num número que não é o teto"
+        );
+
+        // **Segundo ponto: o canal.** A bomba é lenta — é este laço — e cada
+        // fala que ela assenta carrega a mesma reserva para a instância.
+        let mods = std::sync::Mutex::new(ModsNativos::default());
+        let numero = mods.lock().expect("cadeado").guardar(viva);
+        let mut notificacoes = 0usize;
+        while let Ok(fala) = recebedor.recv_timeout(std::time::Duration::from_millis(50)) {
+            if let super::Assentada::Guardada { avisar: true } | super::Assentada::Fim { .. } =
+                super::assentar_fala(&mods, &|| true, &fila, numero, fala, "prova/mod")
+            {
+                notificacoes += 1;
+            }
+        }
+
+        // **A notificação é agregada.** A janela suspensa recebe **um** aviso
+        // sem carga, e não um por fala: a versão anterior emitia um evento por
+        // fala, inclusive pelas que ela mesma agregava ou descartava.
+        assert_eq!(
+            notificacoes, 1,
+            "a janela suspensa recebeu mais de um aviso para a mesma colheita"
+        );
+
+        // **Terceiro ponto: a instância.** Um MOD que lança num laço manda
+        // sempre o mesmo texto, e é por isso que a agregação é o que contém
+        // este caso: as repetições viram contagem, e cada uma **devolve** o
+        // lugar na cota, porque nenhuma entrada nova foi ocupada. A perda do
+        // mais velho é o outro caminho — avisos diferentes entre si —, e quem
+        // o cobre é `uma_chuva_de_erros_nao_bloqueia_mensagens_futuras`.
+        let mut vivos = mods.lock().expect("cadeado");
+        let dentro = vivos.achar_mut(numero).expect("instância");
+        assert_eq!(
+            dentro.avisos.len(),
+            1,
+            "o mesmo erro repetido ocupou mais de uma entrada"
+        );
+        let repetido = dentro.avisos.front().expect("o aviso agregado");
+        assert!(
+            repetido.vezes > 1,
+            "as repetições não foram agregadas: vezes = {}",
+            repetido.vezes
+        );
+        assert!(
+            dentro.avisos.len() <= super::AVISOS_POR_INSTANCIA,
+            "a lista de avisos da instância passou do teto dela"
+        );
+        assert_eq!(
+            fila.avisos_de_pe(),
+            1,
+            "a cota de avisos não acompanhou a agregação: o que está retido é \
+             uma entrada, e é uma que tem de estar reservada"
+        );
+
+        // E é a colheita que solta o que sobrou, e que rearma o aviso.
+        let colhidas = dentro.colher_falas(64);
+        assert!(!colhidas.is_empty());
+        assert_eq!(
+            fila.avisos_de_pe(),
+            0,
+            "a colheita não devolveu a cota de avisos"
+        );
+        assert!(
+            dentro.precisa_avisar(),
+            "a janela drenou e o aviso não rearmou"
+        );
+    }
+
+    /// **Um erro tardio no meio de mensagens ainda contabilizadas.**
+    ///
+    /// A revisão: «provar um erro tardio intercalado com mensagens ainda
+    /// contabilizadas, em vez de testar apenas contadores já zerados». Um teste
+    /// que drena tudo antes de conferir não distingue a contabilidade certa da
+    /// que devolve crédito da classe errada: com os dois contadores em zero,
+    /// tirar da cota de mensagens ou da de avisos dá no mesmo.
+    ///
+    /// Aqui o MOD fala, e **só então** lança. As mensagens continuam retidas
+    /// enquanto o erro chega, e cada classe tem de voltar pela cota dela.
+    #[test]
+    fn um_erro_tardio_nao_come_o_credito_das_mensagens() {
+        let (viva, recebedor, fila) = com_canal(7);
+        viva.executor
+            .iniciar(
+                "globalThis.aoResponder = (j) => {\
+                   if (JSON.parse(j).falhar) { throw new Error('tarde'); }\
+                   seele.postar('x'.repeat(512));\
+                 };\
+                 seele.postar('pronto');",
+            )
+            .expect("código");
+        ate(
+            std::time::Duration::from_secs(5),
+            "o MOD ficar de pé",
+            || viva.executor.entregar("{\"falhar\":false}").is_ok(),
+        );
+        for _ in 0..4 {
+            viva.executor
+                .entregar("{\"falhar\":false}")
+                .expect("entrega");
+        }
+        // O erro vem **depois**, com as mensagens ainda na fila e ninguém
+        // colhendo.
+        ate(
+            std::time::Duration::from_secs(5),
+            "as mensagens saírem do motor",
+            || fila.ocupacao().0 >= 6,
+        );
+        viva.executor
+            .entregar("{\"falhar\":true}")
+            .expect("entrega do erro");
+        ate(
+            std::time::Duration::from_secs(5),
+            "o erro sair do motor",
+            || fila.avisos_de_pe() == 1,
+        );
+
+        let (mensagens_antes, bytes_antes) = fila.ocupacao();
+        assert!(
+            mensagens_antes >= 6,
+            "as mensagens foram consumidas antes do erro chegar, e o teste \
+             voltaria a medir contadores zerados"
+        );
+
+        let mods = std::sync::Mutex::new(ModsNativos::default());
+        let numero = mods.lock().expect("cadeado").guardar(viva);
+        while let Ok(fala) = recebedor.recv_timeout(std::time::Duration::from_millis(50)) {
+            super::assentar_fala(&mods, &|| true, &fila, numero, fala, "prova/mod");
+        }
+
+        let mut vivos = mods.lock().expect("cadeado");
+        let dentro = vivos.achar_mut(numero).expect("instância");
+        assert_eq!(dentro.avisos.len(), 1, "o erro tardio não chegou inteiro");
+        assert!(
+            dentro.pendentes.len() >= 6,
+            "as mensagens sumiram na passagem do erro"
+        );
+        // **Nada foi solto na travessia.** Esta é a asserção que os contadores
+        // zerados não conseguiam fazer.
+        assert_eq!(
+            (fila.ocupacao(), fila.avisos_de_pe()),
+            ((mensagens_antes, bytes_antes), 1),
+            "assentar as falas mexeu na cota antes de a janela colher"
+        );
+
+        dentro.colher_falas(64);
+        assert_eq!(
+            (fila.ocupacao(), fila.avisos_de_pe()),
+            ((0, 0), 0),
+            "a colheita não devolveu cada classe pela cota dela"
+        );
+    }
+
+    /// **Uma montagem que não completa desfaz tudo.**
+    ///
+    /// Sem o desfazer, a instância ficava na tabela com o fonte dentro e sem
+    /// ninguém para escutá-la — e só uma ativação futura, que pode nunca vir, a
+    /// tiraria de lá.
+    #[test]
+    fn uma_montagem_que_falha_no_meio_desfaz_tudo() {
+        let mut mods = ModsNativos::default();
+        let mut viva = instancia(7);
+        produzir(&mut viva, 4, 128);
+        let numero = mods.guardar(viva);
+
+        // É o que o comando faz quando a bomba não sobe.
+        mods.encerrar(numero);
+        mods.descartar(numero);
+
+        assert!(
+            mods.vivos.is_empty() && mods.encerrando.is_empty(),
+            "a montagem desfeita continuou na supervisão"
+        );
     }
 
     /// **Colher um erro não devolve crédito que ninguém tomou.**

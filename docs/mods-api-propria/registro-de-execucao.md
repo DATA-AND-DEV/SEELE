@@ -693,3 +693,102 @@ pendentes**: drenando tudo de uma vez o contador satura em zero e o excesso fica
 invisível.
 
 **Windows e Linux: pendentes**, como antes.
+
+## Seção 9 — a reserva atômica e a cota de avisos até a janela
+
+### O fonte da reserva saiu da tabela ao lado
+
+`codigos_reservados` era um mapa em `Session`, preenchido **depois** de o
+cadeado das instâncias ser liberado. Entre as duas inserções cabia uma
+revogação: ela varria a instância e apagava um fonte que ainda não existia, e o
+comando o inseria depois, num mapa de uma sessão já encerrada.
+
+Agora o fonte mora **dentro** de `InstanciaNativa`, como `codigo:
+Option<String>`. A instância nasce inteira, `soltar` larga o fonte pelo mesmo
+ato que larga o resto, e a ativação o retira com `take`. A revisão pedia «uma
+prova com barreira entre registrar a instância e guardar o fonte»: **essa
+barreira não tem onde ser posta**, porque não são duas inserções. E a montagem
+que não completa — a bomba que não sobe — desfaz o que já entrou, em vez de
+deixar a instância esperando uma ativação que pode nunca vir.
+
+### A cota de avisos vale da produção até a janela
+
+Os avisos saíam do motor sem reservar nada. Um MOD que lança num laço enchia o
+canal entre o motor e a bomba, que nenhum teto de fila alcançava. Agora há uma
+cota própria, `AVISOS_NA_FILA = 16`, reservada por `avisar` na saída do motor e
+devolvida só no consumo ou no descarte — é a **mesma reserva** no canal e na
+instância, e por isso há um número só, `avisos_de_pe`.
+
+E a notificação virou **uma** por colheita. A versão anterior emitia um evento
+por fala, inclusive pelas que ela mesma agregava ou descartava; um evento sem
+corpo ainda ocupa memória enquanto a janela não o processa. `precisa_avisar`
+arma uma vez e só rearma quando as duas listas esvaziam.
+
+No descarte, cada classe volta pela cota dela: `devolver_credito` roteia
+mensagem para a fila de dados e aviso para a de avisos.
+
+### O que a medição corrigiu no meio do caminho
+
+**Uma corrida que nenhuma disputa alcança.** A primeira prova da reserva foi uma
+corrida por thread: registrar de um lado, revogar do outro. Ela passava — e
+passava também **com a ordem invertida de propósito**. A janela que a inversão
+abre fica entre soltar o cadeado e incrementar a geração, dura poucas
+instruções, e acordar de um mutex custa mais do que ela. Duzentas rodadas sem
+disputa: nenhuma falha. Trinta rodadas com a tabela povoada e quatro
+registradores empilhados no cadeado: nenhuma falha.
+
+Um guarda que não falha com o defeito presente não é um guarda. O arranjo antigo
+era correto — quem registrasse antes era varrido, quem registrasse depois via a
+geração morta —, mas correto de um jeito **que não dá para provar**. Então a
+forma mudou: `revogar_em` fecha a geração **dentro** do cadeado que varre. Não
+há mais ordem a inverter, registrar e revogar se excluem inteiros, e a
+propriedade virou observável: segurando o cadeado, a geração não muda. Esse
+guarda falha na primeira volta quando o incremento sai de dentro.
+
+**Um guarda textual que acusava a si mesmo.** A primeira versão conferia que
+`main.rs` não continha mais o nome da tabela antiga — e o próprio `assert`
+continha o nome. Partir o literal resolveria a colisão, mas o nome sobrevive de
+propósito nos comentários que explicam o defeito: um guarda que proíbe **falar**
+do erro é pior que nenhum. Ficou o comportamental, e a forma é conferida onde
+ela importa, em `frontend.rs`.
+
+**O produtor de erros real não enche a lista: ele agrega.** A prova pedida
+esperava `avisos_perdidos > 0`. Medindo, o número é zero — e está certo: um MOD
+que lança num laço manda sempre o mesmo texto, e a agregação transforma as
+repetições em contagem, devolvendo o lugar na cota a cada uma. A perda do mais
+velho é o **outro** caminho, o de avisos diferentes entre si, e já tinha guarda.
+A expectativa é que estava errada, não o produto.
+
+### As provas
+
+Treze testes nativos, sem janela nenhuma. Os cinco novos:
+
+- **Exclusão mútua**, determinística: enquanto um registro segura o cadeado, a
+  geração não sobe e a varredura não roda. Por reversão — o incremento de volta
+  para fora do cadeado —, falha na volta zero.
+- **Corrida com disputa**, 30 rodadas, tabela povoada, quatro registradores: não
+  sobra fonte nem instância viva de uma geração revogada. Vale como guarda de
+  regressão para o fonte voltar a morar fora da instância; **não** distingue a
+  ordem do incremento, e o registro acima diz por quê.
+- **Reserva sem ativação**: revogar deixa a supervisão sem fonte órfão, e a
+  instância continua supervisionada até confirmar.
+- **Produtor de erros real nas três cotas**: o MOD lança a cada resposta
+  entregue, ninguém escoa o canal, ninguém colhe. Mede os três pontos de
+  retenção — o que o motor recusou, o que está no canal, o que está na
+  instância — e conta **uma** notificação. Por reversão, tirando a cota do
+  motor: `avisos_recusados` fica em zero e o guarda estoura por prazo.
+- **Erro tardio entre mensagens ainda contabilizadas**: o MOD fala cinco vezes e
+  **só então** lança; as mensagens seguem retidas quando o erro chega. Assentar
+  não mexe em cota nenhuma; a colheita devolve cada classe pela sua. Por
+  reversão — a colheita soltando aviso pela cota das mensagens —, a de avisos
+  fica em um.
+
+A coordenação saiu dos comandos para `registrar_reserva`, `liberar_reserva` e
+`assentar_fala`, e é isso que deixa as provas exercitarem **o caminho real** em
+vez de uma reimplementação dele. `mod_nativo_reservar`, `mod_nativo_ativar` e
+`bombear` passaram a ser a casca que traz `AppHandle` e `State`.
+
+A bancada também dizia «as três corridas passam» com quatro provas na lista. O
+número passou a ser contado.
+
+**Windows e Linux: pendentes**, como antes.

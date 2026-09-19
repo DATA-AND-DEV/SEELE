@@ -11352,20 +11352,28 @@ fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
          da primeira fala: {reservar}"
     );
     assert!(
-        reservar.contains("vivos.guardar("),
-        "a reserva não guarda a instância: {reservar}"
+        reservar.contains("registrar_reserva("),
+        "a reserva não registra a instância: {reservar}"
     );
 
-    // A conferência de geração acontece **dentro** do cadeado que insere.
-    let trecho = reservar
-        .split_once(".lock()")
+    // A coordenação mora em `registrar_reserva` — extraída do comando para que
+    // a corrida contra a revogação possa ser provada com threads de verdade,
+    // sem `AppHandle`. É lá que a conferência de geração tem de estar
+    // **dentro** do cadeado que insere.
+    let registrar = rust
+        .split_once("fn registrar_reserva(")
+        .expect("`registrar_reserva`")
+        .1;
+    let registrar = registrar.split_once("\n/// ").map_or(registrar, |(a, _)| a);
+    let trecho = registrar
+        .split_once("mods.lock()")
         .expect("o cadeado da tabela")
         .1;
     let trecho = trecho
         .split_once("vivos.guardar(")
         .map_or(trecho, |(a, _)| a);
     assert!(
-        trecho.contains("session.geracao_vale(geracao)"),
+        trecho.contains("geracao_vale()"),
         "a geração voltou a ser conferida fora do cadeado, e entre a \
          conferência e a inserção cabe uma desmontagem inteira: {trecho}"
     );
@@ -11373,25 +11381,39 @@ fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
     // E a ativação confere a revogação de novo: entre as duas etapas a sessão
     // pode ter acabado.
     let ativar = rust
-        .split_once("fn mod_nativo_ativar(")
-        .expect("`mod_nativo_ativar`")
+        .split_once("fn liberar_reserva(")
+        .expect("`liberar_reserva`")
         .1;
     let ativar = ativar.split_once("\n/// ").map_or(ativar, |(a, _)| a);
     assert!(
-        ativar.contains("session.geracao_vale(geracao)") && ativar.contains(".iniciar(&codigo)"),
+        ativar.contains("geracao_vale()") && ativar.contains(".iniciar(&codigo)"),
         "a ativação deixou de conferir a revogação antes de liberar a \
          execução: {ativar}"
     );
 
-    // E a revogação nativa não espera a janela pedir.
+    // E a revogação nativa não espera a janela pedir — e fecha a geração
+    // **dentro** do cadeado. Fora dele, entre soltar o cadeado e incrementar
+    // abre-se uma janela por onde entra uma reserva viva numa sessão que
+    // acabou; é uma janela de poucas instruções, que nenhuma disputa por
+    // thread alcança, e por isso a forma é o que a guarda.
     let revogar = rust
-        .split_once("fn revogar(&self) -> u64 {")
-        .expect("`Session::revogar`")
+        .split_once("fn revogar_em(")
+        .expect("`revogar_em`")
         .1;
-    let revogar = revogar.split_once("\n    }").map_or(revogar, |(a, _)| a);
+    let revogar = revogar.split_once("\n/// ").map_or(revogar, |(a, _)| a);
     assert!(
         revogar.contains("revogar_geracao"),
         "a revogação nativa voltou a depender de a janela chamar o encerramento: {revogar}"
+    );
+    let sob_cadeado = revogar
+        .split_once("let Ok(mut vivos) = mods.lock()")
+        .expect("o cadeado da revogação")
+        .1;
+    assert!(
+        sob_cadeado.contains("geracao.fetch_add(")
+            && sob_cadeado.find("geracao.fetch_add(") < sob_cadeado.find("revogar_geracao"),
+        "a geração voltou a ser fechada fora do cadeado que varre as \
+         instâncias dela: {revogar}"
     );
 }
 

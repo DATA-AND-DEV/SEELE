@@ -84,11 +84,23 @@ pub(crate) const BYTES_NA_FILA: usize = 256 * 1024;
 /// que prende a thread do motor — e prender a thread do motor é prender o
 /// encerramento, que é justamente o que não pode acontecer. Cheia, ela recusa e
 /// conta; o MOD recebe `false` e fica sabendo, e quem hospeda lê o contador.
+/// Quantos avisos de diagnóstico cabem esperando, por instância.
+///
+/// **Cota própria, e pequena.** Um aviso nasce de uma falha, e uma falha não
+/// pode consumir a cota do que está funcionando — nem ficar de fora de cota
+/// nenhuma, que era o caso: `Falhou` e `Interrompido` saíam do motor sem
+/// reservar nada, e um MOD que lança num laço enchia o canal sozinho.
+pub(crate) const AVISOS_NA_FILA: usize = 16;
+
 #[derive(Debug, Default)]
 pub(crate) struct Fila {
     mensagens: AtomicUsize,
     bytes: AtomicUsize,
     recusadas: AtomicUsize,
+    /// Os avisos esperando, na cota deles.
+    avisos: AtomicUsize,
+    /// Quantos avisos não couberam.
+    avisos_recusados: AtomicUsize,
 }
 
 impl Fila {
@@ -106,6 +118,35 @@ impl Fila {
         self.mensagens.fetch_add(1, Ordering::AcqRel);
         self.bytes.fetch_add(quantos, Ordering::AcqRel);
         true
+    }
+
+    /// Tenta reservar lugar para um aviso, na cota dele.
+    ///
+    /// **Simétrico com [`Self::cabe`], e separado.** Cada classe reserva na sua
+    /// cota e é devolvida pela mesma regra — foi a assimetria que fazia colher
+    /// um erro devolver crédito que ninguém tinha tomado.
+    pub(crate) fn cabe_aviso(&self) -> bool {
+        if self.avisos.load(Ordering::Acquire) >= AVISOS_NA_FILA {
+            self.avisos_recusados.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
+        self.avisos.fetch_add(1, Ordering::AcqRel);
+        true
+    }
+
+    /// Um aviso saiu da fila.
+    pub(crate) fn tirar_aviso(&self) {
+        let _ = self
+            .avisos
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                Some(n.saturating_sub(1))
+            });
+    }
+
+    /// Quantos avisos não couberam.
+    #[must_use]
+    pub(crate) fn avisos_recusados(&self) -> usize {
+        self.avisos_recusados.load(Ordering::Relaxed)
     }
 
     /// Uma mensagem saiu da fila.
@@ -146,6 +187,16 @@ impl Fila {
             self.mensagens.load(Ordering::Acquire),
             self.bytes.load(Ordering::Acquire),
         )
+    }
+
+    /// Quantos avisos estão de pé na cota — **em qualquer ponto do caminho**.
+    ///
+    /// O crédito de um aviso é reservado quando o motor o manda e só sai quando
+    /// a janela o colhe ou o descarte o solta. Entre uma coisa e outra ele pode
+    /// estar no canal, esperando a bomba, ou já na instância, esperando a
+    /// janela: é a mesma reserva, e é por isso que há um número só.
+    pub(crate) fn avisos_de_pe(&self) -> usize {
+        self.avisos.load(Ordering::Acquire)
     }
 }
 
@@ -653,9 +704,9 @@ fn rodar(
                     };
                     bate.call::<_, ()>((id,))
                 });
-                relatar(manda, interrupcao, resultado);
+                relatar(manda, fila, interrupcao, resultado);
             }
-            escoar_jobs(&runtime, interrupcao, manda);
+            escoar_jobs(&runtime, interrupcao, manda, fila);
             // **Também aqui.** Sem esta linha, um callback que agenda outro
             // temporizador — ou que cancela o próprio intervalo — deixava o
             // pedido parado até chegar uma mensagem de fora. Num MOD que só
@@ -680,7 +731,7 @@ fn rodar(
                     ctx.eval::<(), _>(PRELUDIO.as_bytes())?;
                     ctx.eval::<(), _>(fonte.as_bytes())
                 });
-                relatar(manda, interrupcao, resultado);
+                relatar(manda, fila, interrupcao, resultado);
             }
             ParaODentro::Resposta(json) => {
                 // O lugar volta **ao tirar da fila**, que é quando ela deixa de
@@ -694,10 +745,10 @@ fn rodar(
                     };
                     ao_responder.call::<_, ()>((json,))
                 });
-                relatar(manda, interrupcao, resultado);
+                relatar(manda, fila, interrupcao, resultado);
             }
         }
-        escoar_jobs(&runtime, interrupcao, manda);
+        escoar_jobs(&runtime, interrupcao, manda, fila);
         // Os pedidos de temporizador que o MOD fez nesta volta.
         recolher_pedidos_de_relogio(&contexto, &mut relogios);
     }
@@ -951,34 +1002,54 @@ fn recolher_pedidos_de_relogio(
 /// microtarefa e ninguém ficava sabendo — nem a janela, nem quem hospeda, nem
 /// quem escreveu o MOD. É o defeito que o `CLAUDE.md` deste repositório nomeia
 /// como o mais caro daqui, cometido pelo próprio mecanismo de contenção.
-fn escoar_jobs(runtime: &Runtime, interrupcao: &Arc<Interrupcao>, manda: &Sender<ParaOFora>) {
+fn escoar_jobs(
+    runtime: &Runtime,
+    interrupcao: &Arc<Interrupcao>,
+    manda: &Sender<ParaOFora>,
+    fila: &Arc<Fila>,
+) {
     while runtime.is_job_pending() && !interrupcao.revogada() {
         if runtime.execute_pending_job().is_err() {
-            let _ = manda.send(ParaOFora::Interrompido);
+            avisar(manda, fila, ParaOFora::Interrompido);
             return;
         }
+    }
+}
+
+/// Manda um aviso, **se ele couber na cota dele**.
+///
+/// Um MOD que lança num laço manda o mesmo aviso sem parar. Sem cota, ele enche
+/// o canal entre o motor e a bomba — que nenhum teto de fila alcançava, porque
+/// os avisos saíam sem reservar nada.
+fn avisar(manda: &Sender<ParaOFora>, fila: &Arc<Fila>, aviso: ParaOFora) {
+    if !fila.cabe_aviso() {
+        return;
+    }
+    if manda.send(aviso).is_err() {
+        fila.tirar_aviso();
     }
 }
 
 /// Traduz o resultado de uma volta para o canal de saída.
 fn relatar(
     manda: &Sender<ParaOFora>,
+    fila: &Arc<Fila>,
     interrupcao: &Arc<Interrupcao>,
     resultado: rquickjs::Result<()>,
 ) {
     match resultado {
         Ok(()) => {}
         Err(_) if interrupcao.revogada() => {
-            let _ = manda.send(ParaOFora::Interrompido);
+            avisar(manda, fila, ParaOFora::Interrompido);
         }
         // Uma interrupção chega como erro do motor, como qualquer outra
         // exceção. Distinguir as duas importa: uma é o MOD com defeito, a
         // outra é o produto parando o MOD, e elas pedem frases diferentes.
         Err(rquickjs::Error::Exception) => {
-            let _ = manda.send(ParaOFora::Falhou("o MOD lançou".into()));
+            avisar(manda, fila, ParaOFora::Falhou("o MOD lançou".into()));
         }
         Err(erro) => {
-            let _ = manda.send(ParaOFora::Interrompido);
+            avisar(manda, fila, ParaOFora::Interrompido);
             let _ = erro;
         }
     }
