@@ -2761,6 +2761,37 @@
             </div>
           </div>
 
+          <!--
+            A manutenção local — plano de isolamento de 18/09.
+
+            «Gerenciar espaço do cache sem chamar isso de configuração de MOD»,
+            e por isso ela é um bloco à parte, com nome de disco e não de MOD.
+            O cache é endereçado pelo conteúdo: cada versão que passou por aqui
+            deixou uma pasta, e nada nunca a tirava. Isso não é defeito do
+            endereçamento — é o preço dele, e o preço precisava de uma tela.
+
+            O que **não** está aqui: um jeito de apagar o que um servidor exige.
+            Apagá-lo deixaria o servidor exigindo bytes que saíram do disco, e
+            quem entrasse leria «não está instalado aqui» sem que ninguém
+            tivesse desligado nada. Desligar é o bloco de cima, e é outro ato.
+          -->
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">ESPAÇO EM DISCO</h3>
+              <p class="nota">Os pacotes guardados nesta máquina</p>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <p id="cache-total" class="nota" role="status"></p>
+                <ul id="lista-cache" class="server-dispositivos mods-rolagem"></ul>
+                <p id="cache-erro" class="erro" role="alert" hidden></p>
+                <p class="nota">Apagar um pacote tira só os bytes que a janela
+                  carrega. O que um MOD guardou fica no servidor que o hospeda,
+                  e não sai daqui — nem quando você entrou como convidado.</p>
+              </div>
+            </div>
+          </div>
+
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">SERVIDORES A QUEM VOCÊ DISSE SIM</h3>

@@ -3,27 +3,34 @@
 // Roda no QuickJS do servidor, com `dados` como quintal persistido e
 // `aoPedir` / `aoAcontecer` como os dois pontos de entrada.
 //
-// **O canal vem do contexto, e não do pedido.** O primeiro argumento de
-// `aoPedir` é o contexto que o servidor monta — quem pediu, por qual canal, se
-// é da administração, se pode escrever —, e é ele quem diz a verdade sobre as
-// quatro coisas. O segundo é o que a janela mandou, que é texto de quem pediu.
+// **O contexto é o que o servidor sabe; o pedido é o que a janela diz.** O
+// primeiro argumento de `aoPedir` traz quem pediu, por qual canal, se é da
+// administração e se pode escrever — e é ele quem diz a verdade sobre as quatro
+// coisas. O segundo é texto de quem pediu, e é lá que mora a operação.
 //
-// A bateria **executa este arquivo de verdade**, no mesmo anfitrião que o
-// produto usa, e confere a resposta. Ver
+// **`channel` nulo quer dizer «nenhum canal».** Este MOD é de escopo de
+// servidor: o que ele conta não é de canal nenhum, e por isso ele não exige que
+// haja um aberto. Um MOD que só faz sentido dentro de um canal confere o
+// contrário — que `channel` **não** é nulo.
+//
+// A bateria executa este arquivo de verdade. Ver
 // `crates/seele-conformance/tests/mod_de_referencia.rs`.
 
 globalThis.aoPedir = (contexto, pedido) => {
   const quem = JSON.parse(contexto);
-  if (quem.channel !== "contar") {
-    // Um canal que este MOD não conhece é recusado pelo nome, e não devolvido
-    // vazio: quem escreveu a chamada precisa saber por que ela não respondeu.
-    return JSON.stringify({ erro: `canal desconhecido: ${quem.channel}` });
+  const o_que = JSON.parse(pedido);
+
+  if (o_que.op !== "contar") {
+    // Uma operação que este MOD não conhece é recusada pelo nome, e não
+    // devolvida vazia: quem escreveu a chamada precisa saber por que ela não
+    // respondeu.
+    return JSON.stringify({ erro: `operação desconhecida: ${o_que.op}` });
   }
-  JSON.parse(pedido);
+
   const vezes = Number(dados.vezes ?? "0") + 1;
   // O quintal guarda texto, e só é gravado se este pedido terminar bem.
   dados.vezes = String(vezes);
-  return JSON.stringify({ vezes });
+  return JSON.stringify({ vezes, canal: quem.channel });
 };
 
 globalThis.aoAcontecer = (momento) => {

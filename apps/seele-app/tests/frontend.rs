@@ -10888,6 +10888,61 @@ fn a_janela_nao_le_um_seele_mods_global_que_ela_nao_tem_mais() {
     );
 }
 
+/// **A manutenção do disco é um bloco à parte, e não configuração de MOD.**
+///
+/// Plano de isolamento de 18/09: «gerenciar espaço do cache sem chamar isso de
+/// configuração de MOD», e «remoção de cache referenciado por servidor deve ser
+/// impedida ou exigir desinstalação explícita naquele servidor».
+///
+/// O cache é endereçado pelo conteúdo, então cada versão que passou por aqui
+/// deixou uma pasta e nada nunca a tirava. Isso não é defeito do
+/// endereçamento: é o preço dele.
+#[test]
+fn a_manutencao_do_disco_e_um_bloco_proprio_e_nao_apaga_o_que_o_servidor_exige() {
+    let pagina = read("ui/index.html");
+    for peca in [
+        "ESPAÇO EM DISCO",
+        "lista-cache",
+        "cache-total",
+        "cache-erro",
+    ] {
+        assert!(
+            pagina.contains(peca),
+            "`{peca}` saiu da página: a manutenção local não tem onde aparecer"
+        );
+    }
+
+    let camada = without_comments(&read("ui/camada-mods.js"));
+    let linha = js_function(&camada, "function linhaDePacoteNoCache(");
+    // Um pacote em uso não ganha botão morto: ele ganha a frase que diz por quê.
+    let rotulo = linha
+        .find("EM USO POR ESTE SERVIDOR")
+        .expect("a linha deixou de dizer que o pacote está em uso");
+    let botao = linha
+        .find("APAGAR")
+        .expect("a linha deixou de saber apagar o que ninguém exige");
+    assert!(
+        rotulo < botao,
+        "o botão é montado antes da pergunta «este servidor o exige?», então \
+         apagar volta a ser oferecido para o que está em uso: {linha}"
+    );
+
+    // E a recusa não é só da tela. A tela desenha o que a lista disse **quando
+    // ela desenhou**; entre desenhar e apertar, outro operador pode ter ligado
+    // aquele pacote, e quem decide de verdade é o Rust.
+    let rust = read("src/main.rs");
+    let comando = rust
+        .split_once("async fn apagar_pacote_do_cache(")
+        .expect("o comando de apagar")
+        .1;
+    let comando = comando.split_once("\n}\n").map_or(comando, |(a, _)| a);
+    assert!(
+        comando.contains("mods_ligados(&session)") && comando.contains("exigido-por-este-servidor"),
+        "o backend apaga sem perguntar se o servidor exige aquele pacote, e a \
+         tela sozinha não é guarda: {comando}"
+    );
+}
+
 /// E o esquema não ficou registrado no Rust depois de sair da CSP.
 ///
 /// Os dois lados são uma regra só: um `register_uri_scheme_protocol("mod", …)`
@@ -11758,9 +11813,70 @@ fn quem_entrou_nao_recebe_interruptor_para_o_que_o_servidor_exige() {
     let base = without_comments(&read("ui/base.js"));
     let carregar = js_function(&base, "async function carregarMods(");
     assert!(
-        carregar.contains("modsExigidos.clear()") && carregar.contains("modsExigidos.add("),
+        carregar.contains("modsExigidos.clear()") && carregar.contains("modsExigidos.set("),
         "a lista de exigidos deixou de ser refeita a cada anúncio: um MOD que \
          o servidor soltou continuaria sendo chamado de obrigatório: {carregar}"
+    );
+}
+
+/// **O que o servidor exige e não está aqui aparece na lista.**
+///
+/// A gestão desenhava `mods_instalados`, e nada mais. O carregador anotava
+/// `sem-pacote` para o que o servidor exigia e faltava, e aquela anotação não
+/// tinha onde aparecer: a linha daquele MOD não existia.
+///
+/// Quem entrava num servidor que exige um MOD ausente via a lista sem ele e
+/// nenhuma frase — o produto sabia e não contava. Esta é a linha que faltava, e
+/// ela não traz interruptor: o conjunto foi acordado na porta.
+#[test]
+fn o_que_o_servidor_exige_e_nao_esta_aqui_tem_linha_na_gestao() {
+    let camada = without_comments(&read("ui/camada-mods.js"));
+    let desenhar = js_function(&camada, "async function desenharMods(");
+    // **Montada e desenhada.** Cobrar só a chamada a `linhaDeModQueFalta` é
+    // vacuoso: a primeira reversão deste guarda tirou as linhas do `repovoar` e
+    // deixou a montagem de pé, e ele passou — as linhas eram construídas e
+    // jogadas fora. O que prende é o `repovoar`.
+    assert!(
+        desenhar.contains("linhaDeModQueFalta("),
+        "a lista deixou de montar a linha do que falta: {desenhar}"
+    );
+    // Toda chamada a `repovoar`, e não a primeira: há duas — a da lista vazia e
+    // a da lista cheia —, e casar por posição é o erro que um guarda desta
+    // suíte já cometeu hoje.
+    let desenhada = desenhar.split("repovoar(lista, [").skip(1).any(|depois| {
+        depois
+            .split_once("]);")
+            .map_or(depois, |(a, _)| a)
+            .contains("...faltando")
+    });
+    assert!(
+        desenhada,
+        "as linhas do que falta são montadas e não entram na lista: {desenhar}"
+    );
+
+    let falta = js_function(&camada, "function linhaDeModQueFalta(");
+    assert!(
+        falta.contains("estadoDosMods.get(id)") && falta.contains("FASES_DO_MOD["),
+        "a linha do que falta deixou de dizer em que pé está: {falta}"
+    );
+    assert!(
+        falta.contains("EXIGIDO POR ESTE SERVIDOR"),
+        "a linha do que falta não diz que ele é exigido: {falta}"
+    );
+    assert!(
+        !falta.contains("botao-fantasma"),
+        "a linha do que falta ganhou um botão; não há o que ligar, e um botão \
+         morto é uma pergunta sem resposta: {falta}"
+    );
+
+    // E o hash exigido chega até ela: mandar instalar sem dizer **qual
+    // conteúdo** é mandar instalar de novo a mesma versão errada.
+    let base = without_comments(&read("ui/base.js"));
+    let carregar = js_function(&base, "async function carregarMods(");
+    assert!(
+        carregar.contains("modsExigidos.set(m.id, m.hash)"),
+        "a lista de exigidos voltou a guardar só o identificador, e a linha do \
+         que falta não tem como dizer qual conteúdo o servidor exige: {carregar}"
     );
 }
 

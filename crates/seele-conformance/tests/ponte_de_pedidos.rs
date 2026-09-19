@@ -76,13 +76,18 @@ async fn pedir(
     request: u32,
     body: serde_json::Value,
 ) -> Result<serde_json::Value> {
+    pedir_em(client, request, ChannelId(1), body).await
+}
+
+/// O mesmo, dizendo em qual canal — ou em nenhum, com zero.
+async fn pedir_em(
+    client: &mut Client,
+    request: u32,
+    canal: ChannelId,
+    body: serde_json::Value,
+) -> Result<serde_json::Value> {
     client
-        .mod_request(
-            request,
-            "prova/ponte".into(),
-            ChannelId(1),
-            body.to_string(),
-        )
+        .mod_request(request, "prova/ponte".into(), canal, body.to_string())
         .await?;
     tokio::time::timeout(Duration::from_secs(15), async {
         let mut pieces = std::collections::BTreeMap::new();
@@ -424,6 +429,115 @@ async fn a_resposta_grande_chega_inteira_em_partes_numeradas() -> Result<()> {
     assert!(
         enchimento.len() > 10 * 1024,
         "o enchimento coube numa parte só, e o teste não provou o corte"
+    );
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// **Um MOD de escopo de servidor lê sem haver canal aberto.**
+///
+/// O plano de 18/09 nomeia o defeito: «para MOD de escopo servidor, leitura não
+/// deveria exigir que exista um canal de texto selecionado; hoje a interface
+/// comum e a ponte associam pedidos a canal».
+///
+/// A ponte conferia que o canal do pedido existia, sempre. Um MOD que lê o tema
+/// do servidor, a ficha de alguém ou a configuração da instância não é sobre
+/// canal nenhum — e falhava com `unknown channel` enquanto a janela não tivesse
+/// um aberto: um motivo que não tem nada a ver com ele, e que quem escreveu o
+/// MOD não tem como consertar.
+///
+/// Zero passa a querer dizer **nenhum canal**. Ele nunca foi um canal de
+/// verdade: `ChannelId` é a chave primária do SQLite, que começa em 1.
+///
+/// O que este teste prende são as três metades:
+///
+/// 1. com zero, o pedido é atendido;
+/// 2. o MOD recebe `channel: null`, e não zero — comparar com um identificador
+///    que não existe seria pior do que não receber nada;
+/// 3. **um canal que não existe continua sendo recusado.** Sem isto, a mudança
+///    teria trocado «exige canal sempre» por «não confere canal nunca», e um
+///    pedido poderia nomear o canal de outra pessoa.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_mod_de_escopo_de_servidor_le_sem_canal_aberto() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (root, hash) = instalar("prova/ponte")?;
+    let daemon = Arc::new(
+        Daemon::bind(ServerConfig {
+            name: "Ponte".into(),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::Memory,
+            mods_dir: Some(seele_server::RaizesDosMods {
+                pacotes: root.clone(),
+                dados: root.join("mod-data"),
+            }),
+            ..ServerConfig::default()
+        })
+        .await?,
+    );
+    let set = {
+        let db = daemon.server().persistence.lock().await;
+        enable(
+            &db,
+            &EnabledMod {
+                id: "prova/ponte".into(),
+                version: "1.0.0".into(),
+                hash,
+                repo: "https://example.invalid/prova-da-ponte".into(),
+                reach: vec!["estado no servidor".into()],
+                server_half: true,
+            },
+        )?;
+        seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
+    };
+    let addr = daemon.local_addr()?;
+    let service = daemon.clone();
+    let serving = tokio::spawn(async move { service.run().await });
+
+    let chave = SigningKey::from_bytes(&[202; 32]);
+    let mut anfitriao = Client::connect(
+        addr,
+        "localhost",
+        &addr.to_string(),
+        "Anfitriao",
+        &chave,
+        Arc::new(MemoryPinStore::new()),
+        None,
+        Some(&set),
+    )
+    .await?;
+
+    let sem_canal = pedir_em(
+        &mut anfitriao,
+        1,
+        ChannelId(0),
+        serde_json::json!({"op":"quem"}),
+    )
+    .await?;
+    assert_eq!(
+        sem_canal["ok"],
+        serde_json::Value::Bool(true),
+        "um pedido de escopo de servidor foi recusado: {sem_canal}"
+    );
+    assert_eq!(
+        sem_canal["contexto"]["channel"],
+        serde_json::Value::Null,
+        "o MOD recebeu um canal onde não havia canal nenhum: {sem_canal}"
+    );
+
+    // E o canal inventado continua recusado: a porta não ficou aberta.
+    let inventado = pedir_em(
+        &mut anfitriao,
+        2,
+        ChannelId(4242),
+        serde_json::json!({"op":"quem"}),
+    )
+    .await?;
+    assert_eq!(
+        inventado["ok"],
+        serde_json::Value::Bool(false),
+        "um canal que não existe passou pela ponte: {inventado}"
     );
 
     serving.abort();

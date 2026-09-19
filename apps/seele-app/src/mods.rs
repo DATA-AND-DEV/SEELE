@@ -227,6 +227,47 @@ pub(crate) enum FalhaAoInstalarMod {
     NaoCopiei(String),
 }
 
+/// Tira um pacote do cache local, e **só** o pacote.
+///
+/// # Por que ela não toca em `mod-data`
+///
+/// Plano de isolamento de 18/09: «apagar cache de convidado não apaga dados
+/// remotos». O cache guarda os bytes que a janela carrega, e nada mais; o que
+/// um MOD guardou vive no banco do servidor que o hospeda, e o que ele escreveu
+/// em arquivo vive na raiz daquela instância. Apagar bytes que se baixa de novo
+/// não pode apagar o que ninguém tem como recuperar.
+///
+/// Por isso ela remove exatamente `mod-packages/<hash>` e nunca desce em outro
+/// lugar. [`seele_core::mods::caminho_do_pacote`] recusa um hash que não tenha
+/// forma de hash, e é lá que a travessia morre.
+///
+/// # Errors
+///
+/// [`FalhaAoApagarPacote`] quando o hash não tem forma de hash, quando não há
+/// pacote nenhum sob ele, ou quando o disco recusou.
+pub(crate) fn apagar_do_cache(config_dir: &Path, hash: &str) -> Result<(), FalhaAoApagarPacote> {
+    let Some(dir) = seele_ffi::mods::caminho_do_pacote(&config_dir.to_string_lossy(), hash) else {
+        return Err(FalhaAoApagarPacote::HashTorto);
+    };
+    if !dir.is_dir() {
+        return Err(FalhaAoApagarPacote::NaoEstaAqui);
+    }
+    std::fs::remove_dir_all(&dir).map_err(|erro| FalhaAoApagarPacote::NaoApaguei(erro.to_string()))
+}
+
+/// Por que um pacote não saiu do cache.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum FalhaAoApagarPacote {
+    /// O hash não tem forma de hash, então não nomeia pacote nenhum.
+    HashTorto,
+    /// Não há pacote sob aquele hash. Dito, e não engolido: apagar duas vezes
+    /// da mesma tela é apagar o que a outra aba já tinha apagado, e quem
+    /// aperta merece saber que não foi ele.
+    NaoEstaAqui,
+    /// O disco recusou, e o que ele disse.
+    NaoApaguei(String),
+}
+
 /// Instala um MOD a partir de uma pasta desta máquina.
 ///
 /// # O que ele confere antes de tocar no disco
@@ -662,6 +703,96 @@ mod instalar {
     /// máquina em uso sumiriam da lista — e quem usa leria isso como o produto
     /// ter perdido o que estava instalado, que é o pior jeito de mudar um
     /// layout.
+    /// **Apagar um pacote tira o pacote, e nada mais.**
+    ///
+    /// Plano de isolamento de 18/09: «apagar cache de convidado não apaga dados
+    /// remotos». O que um MOD guardou não vive no cache — vive no banco do
+    /// servidor e na raiz daquela instância —, e bytes que se baixa de novo não
+    /// podem levar junto o que ninguém tem como recuperar.
+    ///
+    /// O teste põe as duas coisas lado a lado no mesmo `config_dir` e confere
+    /// que só uma saiu.
+    #[test]
+    fn apagar_um_pacote_nao_encosta_no_que_um_mod_guardou() {
+        let raiz = pasta("apagar");
+        let config = raiz.join("config");
+        let origem = pacote(&raiz, "seele/exemplo", None);
+        let publicado = instalar_de(&config, &origem).expect("instalar");
+
+        // O que um MOD guardou, na raiz da instância — o vizinho de `mod-packages`.
+        let dados = config.join("mod-data").join("seele").join("exemplo");
+        std::fs::create_dir_all(&dados).unwrap();
+        std::fs::write(dados.join("retrato.png"), b"nao me apague").unwrap();
+
+        super::apagar_do_cache(&config, &publicado.hash).expect("apagar");
+
+        assert!(
+            !config
+                .join(seele_ffi::mods::PACOTES)
+                .join(&publicado.hash)
+                .exists(),
+            "o pacote continua no cache"
+        );
+        assert_eq!(
+            std::fs::read(dados.join("retrato.png")).expect("os dados do MOD"),
+            b"nao me apague",
+            "apagar o cache levou junto o que o MOD guardou"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **Um hash que não tem forma de hash não apaga nada.**
+    ///
+    /// O hash chega da janela. Sem esta trava, `../..` seria um caminho para
+    /// apagar o que alguém escolheu em vez de um pacote — e o teste prova isso
+    /// deixando um arquivo no caminho que a travessia alcançaria.
+    #[test]
+    fn um_hash_torto_nao_apaga_o_que_esta_fora_do_cache() {
+        let raiz = pasta("travessia");
+        let config = raiz.join("config");
+        // **O cache existe.** Sem ele, `mod-packages/..` não resolve e a recusa
+        // sairia por «não está aqui» — o teste passaria sem a trava, que é o
+        // guarda vacuoso que a reversão desta prova encontrou.
+        std::fs::create_dir_all(config.join(seele_ffi::mods::PACOTES)).unwrap();
+        std::fs::write(config.join("seele.db"), b"o banco").unwrap();
+
+        for torto in [
+            "..",
+            "../..",
+            "../seele.db",
+            "..%2F..",
+            "",
+            "ABCDEF",
+            &"g".repeat(64),
+            &"a".repeat(63),
+        ] {
+            assert_eq!(
+                super::apagar_do_cache(&config, torto),
+                Err(super::FalhaAoApagarPacote::HashTorto),
+                "`{torto}` não foi recusado pela forma"
+            );
+        }
+        assert!(
+            config.join("seele.db").is_file(),
+            "a travessia alcançou o que está fora do cache"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// E um pacote que não está aqui é **dito**, e não engolido: apagar duas
+    /// vezes da mesma tela é apagar o que a outra aba já apagou.
+    #[test]
+    fn apagar_o_que_nao_esta_aqui_e_dito() {
+        let raiz = pasta("ausente");
+        let config = raiz.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        assert_eq!(
+            super::apagar_do_cache(&config, &"a".repeat(64)),
+            Err(super::FalhaAoApagarPacote::NaoEstaAqui)
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
     #[test]
     fn um_pacote_do_layout_antigo_e_levado_para_o_cache() {
         let raiz = pasta("migracao");

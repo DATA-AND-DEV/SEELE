@@ -75,11 +75,26 @@ async fn executar_inner(
         .iter()
         .find(|m| m.id == id)
         .ok_or_else(|| anyhow::anyhow!("disabled"))?;
+    // **Zero quer dizer «nenhum canal», e é o pedido de escopo de servidor.**
+    //
+    // O plano de 18/09 escreve o defeito: «para MOD de escopo servidor, leitura
+    // não deveria exigir que exista um canal de texto selecionado; hoje a
+    // interface comum e a ponte associam pedidos a canal». Um MOD que lê a
+    // configuração do servidor — tema, perfis, ficha — não é sobre canal
+    // nenhum, e falhava com `unknown channel` quando a janela ainda não tinha
+    // um aberto: um motivo que não tem nada a ver com ele.
+    //
+    // Zero, e não um `Option` no fio: `ChannelId` é a chave primária do SQLite,
+    // que começa em 1, então zero nunca é um canal de verdade. Um campo novo na
+    // variante quebraria a janela de compatibilidade do protocolo sem
+    // necessidade — o mesmo byte já diz a coisa nova.
+    let com_canal = channel.0 != 0;
     anyhow::ensure!(
-        Channels::new(&db)
-            .channels()?
-            .iter()
-            .any(|c| c.id == channel),
+        !com_canal
+            || Channels::new(&db)
+                .channels()?
+                .iter()
+                .any(|c| c.id == channel),
         "unknown channel"
     );
     let admin = Permissions::new(&db)
@@ -97,7 +112,15 @@ async fn executar_inner(
     // dois servidores lia e escrevia nos mesmos arquivos.
     let dados = raizes.dados_de(id);
     let hash = active.hash.clone();
-    let context = serde_json::json!({"person":person.0.to_string(),"channel":channel.0,"admin":admin,"write":write}).to_string();
+    // `channel` é **nulo** quando não há canal, e não zero: um MOD que
+    // comparasse com zero estaria lendo um identificador que não existe, e
+    // `null` é a única forma de dizer «esta pergunta não é sobre um canal».
+    let contexto_do_canal = if com_canal {
+        serde_json::Value::from(channel.0)
+    } else {
+        serde_json::Value::Null
+    };
+    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"admin":admin,"write":write}).to_string();
     let id = id.to_owned();
     let payload = payload.to_owned();
     // The owned guard is held on the blocking worker, never running JS on Tokio.

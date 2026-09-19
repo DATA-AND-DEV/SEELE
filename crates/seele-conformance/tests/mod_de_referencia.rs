@@ -101,10 +101,12 @@ fn a_metade_de_servidor_do_vetor_responde_e_guarda() {
         .carregar("seele/referencia", &vetor("servidor/main.js"), &pasta)
         .expect("o vetor tem de compilar no anfitrião do produto");
 
-    // O contexto tem a forma que `mods/pedidos.rs` monta: é dele que sai o
-    // canal, e um vetor que lesse o canal do pedido passaria aqui e falharia
-    // no produto — que é exatamente o que este arquivo existe para impedir.
-    let contexto = r#"{"person":"7","channel":"contar","admin":false,"write":true}"#;
+    // O contexto tem a forma que `mods/pedidos.rs` monta, e `channel` vem
+    // **nulo** porque este vetor é de escopo de servidor: ele manda canal zero,
+    // e zero quer dizer «nenhum canal». Um vetor que lesse a operação do
+    // contexto, ou que exigisse um canal de verdade, passaria aqui e falharia
+    // no produto — que é o que este arquivo existe para impedir.
+    let contexto = r#"{"person":"7","channel":null,"admin":false,"write":true}"#;
     let mut quintal = BTreeMap::new();
     let mut vistos = Vec::new();
     for _ in 0..2 {
@@ -113,7 +115,7 @@ fn a_metade_de_servidor_do_vetor_responde_e_guarda() {
                 "seele/referencia",
                 seele_proto::ids::PersonId(7),
                 contexto,
-                r#"{"de":"carregadas"}"#,
+                r#"{"op":"contar"}"#,
                 &mut quintal,
             )
             .expect("o vetor tem de responder");
@@ -149,19 +151,19 @@ fn a_metade_de_servidor_do_vetor_responde_e_guarda() {
         .pedir(
             "seele/referencia",
             seele_proto::ids::PersonId(7),
-            r#"{"person":"7","channel":"inventado","admin":false,"write":true}"#,
-            "{}",
+            contexto,
+            r#"{"op":"inventada"}"#,
             &mut quintal,
         )
-        .expect("um canal desconhecido é resposta, e não pânico");
+        .expect("uma operação desconhecida é resposta, e não pânico");
     assert!(
-        recusa.contains("inventado"),
-        "a recusa não nomeia o canal que ela recusou: {recusa}"
+        recusa.contains("inventada"),
+        "a recusa não nomeia a operação que ela recusou: {recusa}"
     );
     assert_eq!(
         quintal.get("vezes").map(String::as_str),
         Some("2"),
-        "um canal recusado mexeu no quintal"
+        "uma operação recusada mexeu no quintal"
     );
 }
 

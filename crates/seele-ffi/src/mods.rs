@@ -64,6 +64,21 @@ pub struct ModInstalado {
 /// [`seele_core::mods::PACOTES`].
 pub const PACOTES: &str = seele_core::mods::PACOTES;
 
+/// O diretório de um pacote no cache, se o hash tem forma de hash.
+///
+/// A conferência de forma é o que impede a travessia: o hash chega da janela.
+/// Ver [`seele_core::mods::caminho_do_pacote`].
+#[must_use]
+pub fn caminho_do_pacote(pasta: &str, hash: &str) -> Option<std::path::PathBuf> {
+    seele_core::mods::caminho_do_pacote(std::path::Path::new(pasta), hash)
+}
+
+/// Quantos bytes um pacote ocupa no cache, ou zero quando ele não está lá.
+#[must_use]
+pub fn bytes_do_pacote(pasta: &str, hash: &str) -> u64 {
+    seele_core::mods::bytes_do_pacote(std::path::Path::new(pasta), hash)
+}
+
 /// Todo pacote guardado, com o conteúdo conferido contra o nome da pasta.
 #[must_use]
 pub fn listar_por_conteudo(pasta: &str) -> Vec<ModInstalado> {

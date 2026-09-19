@@ -104,11 +104,6 @@ pub fn list(config_dir: &Path) -> Vec<Found> {
     found
 }
 
-/// Reads one MOD directory.
-///
-/// # Errors
-///
-/// Returns [`Refused`] when the manifest is missing, unreadable, or invalid.
 /// Onde os pacotes moram, endereçados pelo conteúdo.
 ///
 /// Plano de isolamento de 18/09, P1 «uma atualização substitui o pacote de
@@ -170,6 +165,60 @@ pub fn listar_por_conteudo(config_dir: &Path) -> Vec<Found> {
     }
     found.sort_by(|left, right| name_of(left).cmp(name_of(right)));
     found
+}
+
+/// Quantos bytes um pacote ocupa no cache, ou zero quando ele não está lá.
+///
+/// **Existe por causa da manutenção local**, que o plano de 18/09 pede: o cache
+/// endereçado por conteúdo guarda um pacote por versão, e nada nunca o
+/// esvaziava. Sem um número ao lado de cada um, a tela ofereceria «apagar»
+/// sobre coisas que quem lê não tem como comparar.
+///
+/// Soma o que está dentro **sem seguir atalho**: um atalho apontando para fora
+/// somaria o disco de outra pessoa. O instalador já recusa um pacote que os
+/// tenha, e isto é a segunda tranca.
+#[must_use]
+pub fn bytes_do_pacote(config_dir: &Path, hash: &str) -> u64 {
+    fn somar(dir: &Path) -> u64 {
+        let Ok(itens) = std::fs::read_dir(dir) else {
+            return 0;
+        };
+        let mut total = 0;
+        for item in itens.flatten() {
+            let Ok(tipo) = item.file_type() else { continue };
+            if tipo.is_symlink() {
+                continue;
+            }
+            if tipo.is_dir() {
+                total += somar(&item.path());
+            } else if let Ok(meta) = item.metadata() {
+                total += meta.len();
+            }
+        }
+        total
+    }
+    let Some(dir) = caminho_do_pacote(config_dir, hash) else {
+        return 0;
+    };
+    somar(&dir)
+}
+
+/// O diretório de um pacote no cache, se o hash tem a forma de um hash.
+///
+/// **A conferência de forma é a que impede a travessia.** O hash chega da
+/// janela, e um `../..` ali seria um caminho para apagar o que alguém escolheu
+/// em vez de um pacote. Sessenta e quatro hexadecimais minúsculos não contêm
+/// barra, ponto, nem separador de nenhum sistema.
+#[must_use]
+pub fn caminho_do_pacote(config_dir: &Path, hash: &str) -> Option<std::path::PathBuf> {
+    if hash.len() != 64
+        || !hash
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return None;
+    }
+    Some(config_dir.join(PACOTES).join(hash))
 }
 
 /// Reads one MOD directory.

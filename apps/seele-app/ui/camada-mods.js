@@ -428,6 +428,42 @@ function linhaDeModInstalado(mod, hospedando) {
 }
 
 /**
+ * A linha de um MOD que este servidor exige e que não está nesta máquina.
+ *
+ * Sem interruptor de propósito, pela mesma razão escrita em
+ * `linhaDeModInstalado`: o conjunto foi acordado na porta, e quem entrou não
+ * decide sobre ele. O que esta linha faz é o que faltava — **dizer** que ele é
+ * exigido, dizer qual conteúdo, e dizer em que pé está.
+ *
+ * Ela aparece no alto da lista, antes do que está instalado: é o que está
+ * faltando, e é o que a pessoa veio resolver.
+ */
+function linhaDeModQueFalta(id, hash) {
+  const linha = elemento("li");
+  const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
+  const texto = elemento("span", "server-dispositivo-nome");
+  texto.append(elemento("span", "mods-id", id));
+
+  const estado = estadoDosMods.get(id);
+  const frase = FASES_DO_MOD[estado?.fase];
+  texto.append(
+    elemento(
+      "span",
+      "mods-recusado",
+      frase && estado.detalhe
+        ? `${frase} — ${estado.detalhe}`
+        : (frase ??
+          `o servidor exige o conteúdo ${String(hash).slice(0, 16)}…`),
+    ),
+  );
+
+  caixa.append(texto);
+  caixa.append(elemento("span", "mods-exigido", "EXIGIDO POR ESTE SERVIDOR"));
+  linha.append(caixa);
+  return linha;
+}
+
+/**
  * O que cada fase quer dizer para quem lê — A06.
  *
  * Identificador de um lado, frase do outro, como todo o resto desta casca: a
@@ -689,8 +725,19 @@ async function desenharMods() {
     }
   }
 
+  // **O que o servidor exige e não está aqui também é uma linha.**
+  //
+  // A lista era só `mods_instalados`, e o carregador anotava `sem-pacote` para
+  // o que faltava. A anotação não tinha onde aparecer: a linha daquele MOD não
+  // existia. Quem entrava num servidor que exige um MOD que esta máquina não
+  // tem via a lista sem ele e nada mais — o produto sabia e não contava, que é
+  // o defeito que o `CLAUDE.md` deste repositório nomeia como o mais caro.
+  const faltando = [...modsExigidos]
+    .filter(([id]) => !instalados.some((m) => m.id === id))
+    .map(([id, hash]) => linhaDeModQueFalta(id, hash));
+
   const lista = $("lista-mods");
-  if (instalados.length === 0) {
+  if (instalados.length === 0 && faltando.length === 0) {
     repovoar(lista, [
       elemento(
         "li",
@@ -699,14 +746,111 @@ async function desenharMods() {
       ),
     ]);
   } else {
-    repovoar(
-      lista,
-      instalados.map((mod) => linhaDeModInstalado(mod, hospedando)),
-    );
+    repovoar(lista, [
+      ...faltando,
+      ...instalados.map((mod) => linhaDeModInstalado(mod, hospedando)),
+    ]);
   }
 
   desenharRascunho(hospedando);
+  await desenharOCache();
   await desenharAceites();
+}
+
+// ------------------------------------------------------- a manutenção local
+//
+// Plano de isolamento de 18/09: «gerenciar espaço do cache sem chamar isso de
+// configuração de MOD». O cache é endereçado pelo conteúdo, então cada versão
+// que passou por aqui deixou uma pasta, e nada nunca a tirava.
+
+// O tamanho é escrito pelo `emBytes` de `frases.js`, e não por um daqui: são
+// duas telas mostrando a mesma grandeza, e duas escadas de unidade fariam o
+// mesmo arquivo ter dois tamanhos no mesmo produto.
+
+/** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
+async function desenharOCache() {
+  let pacotes = [];
+  const erro = $("cache-erro");
+  erro.hidden = true;
+  try {
+    pacotes = await invoke("pacotes_no_cache");
+  } catch (falha) {
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
+    return;
+  }
+
+  const total = pacotes.reduce((soma, p) => soma + Number(p.bytes ?? 0), 0);
+  $("cache-total").textContent = pacotes.length === 0
+    ? "Nenhum pacote guardado."
+    : `${pacotes.length} ${pacotes.length === 1 ? "pacote" : "pacotes"}, ${emBytes(total)} no total.`;
+
+  const lista = $("lista-cache");
+  if (pacotes.length === 0) {
+    repovoar(lista, []);
+    return;
+  }
+  repovoar(
+    lista,
+    // Do maior para o menor: quem abre esta seção veio por espaço, e o que
+    // ocupa mais é o que responde a pergunta que trouxe a pessoa aqui.
+    [...pacotes]
+      .sort((a, b) => Number(b.bytes ?? 0) - Number(a.bytes ?? 0))
+      .map(linhaDePacoteNoCache),
+  );
+}
+
+/** Uma linha da manutenção local. */
+function linhaDePacoteNoCache(pacote) {
+  const linha = elemento("li");
+  const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
+  const texto = elemento("span", "server-dispositivo-nome");
+  texto.append(elemento("span", "mods-id", pacote.id));
+  texto.append(
+    elemento(
+      "span",
+      "mods-versao",
+      `versão ${pacote.version} · ${emBytes(pacote.bytes)} · ${String(pacote.hash).slice(0, 12)}…`,
+    ),
+  );
+  caixa.append(texto);
+
+  // **Exigido não ganha botão morto, ganha frase.** Um botão desabilitado
+  // sugere que apagar seria possível noutro momento — e seria, depois de
+  // desligar o MOD naquele servidor, que é outro ato e mora no bloco de cima.
+  if (pacote.exigido_aqui) {
+    caixa.append(
+      elemento("span", "mods-exigido", "EM USO POR ESTE SERVIDOR"),
+    );
+    linha.append(caixa);
+    return linha;
+  }
+
+  const botao = elemento("button", "botao-fantasma");
+  botao.type = "button";
+  botao.textContent = "APAGAR";
+  botao.addEventListener("click", () => {
+    apagarUmPacote(pacote.hash).catch((falha) =>
+      console.warn("apagar pacote:", falha),
+    );
+  });
+  caixa.append(botao);
+  linha.append(caixa);
+  return linha;
+}
+
+/** Tira um pacote do disco e redesenha as duas listas. */
+async function apagarUmPacote(hash) {
+  const erro = $("cache-erro");
+  erro.hidden = true;
+  try {
+    await invoke("apagar_pacote_do_cache", { hash });
+  } catch (falha) {
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
+  }
+  // As duas: um pacote que sai do cache sai também da lista de instalados.
+  await desenharMods();
 }
 
 /** A lista de servidores a quem esta máquina já disse sim. */

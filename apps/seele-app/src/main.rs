@@ -2251,6 +2251,109 @@ async fn mods_instalados(
         .collect())
 }
 
+/// Um pacote guardado nesta máquina, como a manutenção local o desenha.
+#[derive(Debug, serde::Serialize)]
+struct PacoteNoCache {
+    /// `autor/nome`, ou o nome da pasta quando o pacote foi recusado.
+    id: String,
+    /// A versão que o autor declara, ou vazio.
+    version: String,
+    /// O hash do conteúdo. É o nome da pasta e é o que a tela mostra cortado.
+    hash: String,
+    /// Quantos bytes ele ocupa. É o número que faz a manutenção ser uma
+    /// decisão em vez de um palpite.
+    bytes: u64,
+    /// Se o servidor **desta janela** exige este pacote agora.
+    ///
+    /// Quando é verdadeiro, apagar é recusado. Ver [`apagar_pacote_do_cache`].
+    exigido_aqui: bool,
+}
+
+/// Todo pacote no cache local, com tamanho e com quem o exige.
+///
+/// # Por que existe, e por que não é «configuração de MOD»
+///
+/// Plano de isolamento de 18/09: «gerenciar espaço do cache sem chamar isso de
+/// configuração de MOD». O cache é endereçado por conteúdo, então cada versão
+/// que passou por aqui deixou uma pasta — e nada nunca a tirava. Isso não é um
+/// defeito do endereçamento: é o preço dele, e o preço precisava de uma tela.
+///
+/// A lista é do **disco**, e não do servidor: ela mostra o que ocupa lugar,
+/// inclusive o que nenhum servidor exige e inclusive o que veio de um servidor
+/// em que esta pessoa entrou como convidada.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando o banco do servidor hospedado não responde.
+#[tauri::command]
+async fn pacotes_no_cache(
+    app: AppHandle,
+    session: State<'_, Session>,
+) -> Result<Vec<PacoteNoCache>, FalhaNoMod> {
+    let ligados = mods_ligados(&session).await?;
+    let pasta = config_dir(&app);
+    Ok(seele_ffi::mods::listar_por_conteudo(&pasta)
+        .into_iter()
+        .map(|instalado| PacoteNoCache {
+            bytes: seele_ffi::mods::bytes_do_pacote(&pasta, &instalado.hash),
+            exigido_aqui: ligados
+                .iter()
+                .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash),
+            id: instalado.id,
+            version: instalado.version,
+            hash: instalado.hash,
+        })
+        .collect())
+}
+
+/// Tira um pacote do cache local.
+///
+/// # O que ele recusa, e por quê
+///
+/// **Um pacote que o servidor desta janela exige não sai.** Plano de
+/// isolamento de 18/09: «remoção de cache referenciado por servidor deve ser
+/// impedida ou exigir desinstalação explícita naquele servidor». Apagá-lo
+/// deixaria o servidor exigindo bytes que saíram do disco — e quem entrasse
+/// leria «o servidor exige este MOD e ele não está instalado aqui» sem que
+/// ninguém tivesse desligado nada.
+///
+/// O caminho para tirá-lo é o que já existe: desligar o MOD naquele servidor,
+/// salvar, e então apagar. São dois atos porque são duas decisões.
+///
+/// **E ele não toca no que um MOD guardou.** Ver [`mods::apagar_do_cache`]:
+/// bytes que se baixa de novo não podem levar junto o que ninguém tem como
+/// recuperar.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`] com `exigido-por-este-servidor` quando o pacote
+/// está ligado aqui, ou com o nome da falha de disco.
+#[tauri::command]
+async fn apagar_pacote_do_cache(
+    app: AppHandle,
+    session: State<'_, Session>,
+    hash: String,
+) -> Result<(), FalhaNoMod> {
+    // A pergunta é feita **agora**, e não com o que a tela sabia: entre
+    // desenhar a lista e apertar o botão, outro operador pode ter ligado este
+    // pacote.
+    let ligados = mods_ligados(&session).await?;
+    if ligados.iter().any(|(_, ligado)| *ligado == hash) {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "exigido-por-este-servidor".to_owned(),
+        });
+    }
+    mods::apagar_do_cache(std::path::Path::new(&config_dir(&app)), &hash).map_err(|falha| {
+        FalhaNoMod::Recusado {
+            motivo: match falha {
+                mods::FalhaAoApagarPacote::HashTorto => "hash-torto".to_owned(),
+                mods::FalhaAoApagarPacote::NaoEstaAqui => "nao-esta-aqui".to_owned(),
+                mods::FalhaAoApagarPacote::NaoApaguei(_) => "nao-apaguei".to_owned(),
+            },
+        }
+    })
+}
+
 /// Liga um MOD no servidor que este processo hospeda.
 async fn habilitar_mod(
     app: AppHandle,
@@ -4876,6 +4979,8 @@ fn main() {
             previa_de_link,
             aplicar_conjunto_de_mods,
             codigo_do_mod,
+            pacotes_no_cache,
+            apagar_pacote_do_cache,
             conjunto_exigido_agora,
             connect,
             hospedar,

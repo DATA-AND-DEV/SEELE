@@ -801,8 +801,13 @@ const estadoDosMods = new Map();
  *
  * Vazia fora de sessão, e por isso não guarda o que o último servidor exigia:
  * a exigência é de um destino, e não desta máquina.
+ *
+ * **Guarda o hash, e não só o identificador.** A gestão desenha uma linha para
+ * o que o servidor exige e não está aqui — e sem o hash aquela linha diria «o
+ * servidor exige este MOD» sem dizer *qual conteúdo*, que é a única coisa que
+ * quem for instalá-lo precisa conferir.
  */
-const modsExigidos = new Set();
+const modsExigidos = new Map();
 
 /** Anota a fase de um MOD e avisa quem desenha. */
 function anotarEstadoDoMod(id, fase, detalhe = "") {
@@ -851,7 +856,7 @@ async function carregarMods() {
     // sair daqui junto, senão a gestão continua chamando de obrigatório o que
     // o servidor já soltou.
     modsExigidos.clear();
-    for (const m of catalogo.mods) modsExigidos.add(m.id);
+    for (const m of catalogo.mods) modsExigidos.set(m.id, m.hash);
 
     const ausentes = catalogo.mods.filter(active => !instalados.some(m => m.id === active.id && m.hash === active.hash));
     for (const m of ausentes) {
@@ -859,10 +864,13 @@ async function carregarMods() {
       // diferente da exigida — e mandar «instale» quem já instalou é mandar
       // fazer de novo o que não resolve.
       const temOId = instalados.some(i => i.id === m.id);
+      // O conteúdo exigido vai nas **duas** frases. Sem ele, «não está
+      // instalado aqui» manda instalar sem dizer o quê: o catálogo pode ter
+      // mais de uma versão, e instalar a errada dá a mesma tela de novo.
       anotarEstadoDoMod(
         m.id,
         temOId ? "outra-versao" : "sem-pacote",
-        temOId ? `o servidor exige o conteúdo ${m.hash.slice(0, 16)}…` : "",
+        `o servidor exige o conteúdo ${m.hash.slice(0, 16)}…`,
       );
     }
     const diagnostico = ausentes.map(m => m.id).join(", ");
