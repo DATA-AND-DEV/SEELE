@@ -891,3 +891,92 @@ constante sozinha faria o aplicativo recusar todo MOD instalado hoje.
 arrastar, ouvir, medir sob voz — continua pendente pelo impedimento de
 acessibilidade do `osascript`, que é daquele método de automação e não do
 produto.
+
+## Seção 13 — o fechamento
+
+### Executor padrão
+
+O Worker de `blob:` era o caminho do produto e o QuickJS era a bancada que o
+mediria. A medição terminou faz tempo, e o Worker perdeu: ele herda a origem de
+quem o cria, e o que um MOD gravou em `indexedDB` sobreviveu ao encerramento do
+aplicativo. Guardá-lo como reserva é a reserva errada — se o nativo falhar,
+cair no outro é cair justamente no que não isola.
+
+Saíram a variável `SEELE_EXECUTOR`, o comando que perguntava qual usar, o
+prelúdio duplicado em `base.js` e o executor de Worker inteiro. Verificado no
+aplicativo sem variável nenhuma no ambiente: uma ativação nativa, mídia servida,
+cinco falas, zero descartes.
+
+Um guarda caiu junto, e merecia: ele exigia a string `mod://` em `base.js` e
+passava por causa de um **comentário** — o esquema não existe desde o ADR 0049.
+Um guarda que uma frase em prosa satisfaz guarda uma frase.
+
+### Funções contratadas
+
+As duas que estavam escritas como ausência viraram desenho, e a razão de cada
+uma continuava certa — a conclusão é que era errada.
+
+**Tipografia** é escolha entre as duas pilhas que o produto declara, não família
+livre: a escala daqui é medida, e uma família de fora move tamanho, entrelinha e
+contraste de uma vez. `tokens.css` ganhou `--seele-pilha-mono` e
+`--seele-pilha-sans`, pela ordem que o ADR 0014 cobra — design, ADR, cópia.
+
+**Escolher um arquivo** é ato de quem usa, mediado pelo produto. O MOD desenha
+um botão, o seletor é do sistema, e o que volta é um identificador com o tipo
+que os **bytes** provaram ser e o tamanho. Os bytes saem em pedaços de 64 KiB,
+cancelar é uma resposta, `soltar` devolve na hora, e a saída da sessão solta os
+dela de qualquer jeito — provado por reversão.
+
+Três coisas que a medição corrigiu no caminho:
+
+- **65536 não é múltiplo de três.** Base64 de janelas consecutivas com sobra
+  deixa `=` no meio: cada pedaço sozinho é válido, o que o MOD junta não é o
+  arquivo, e a imagem chega corrompida sem nada acusar. O guarda compara os
+  bytes que saíram com os que chegaram, e reprova com 65536;
+- **um guarda proibia o texto `inicio` em todo o frontend**, por causa dos
+  campos de uma busca numa tela. Ele passou a olhar aquela tela;
+- **o guarda de fontes pegou «Saira» onde o produto serve «Saira Condensed»**, e
+  passou a exigir as duas pilhas: a que ninguém escolheu hoje é a que cai em
+  silêncio amanhã.
+
+### Os três MODs
+
+A matriz está em `matriz-dos-tres-mods.md`, linha a linha, com o teste que roda
+cada comportamento. ESTILO 14 provas, PERFIS 28, MESA 37.
+
+Dois defeitos que só apareceram fazendo:
+
+- **os identificadores da MESA são texto** (`token-2`), e convertê-los para
+  número dava `NaN` — que não é igual a nada, nem a si mesmo. A peça deixava de
+  se reconhecer e não acompanhava o dedo, sem erro nenhum;
+- **a casca descartava o segundo desenho** quando dois eventos chegavam
+  seguidos. Escolher densidade e fonte no mesmo quadro deixava a tela mostrando
+  a escolha anterior até o relógio bater. É a mesma forma do aviso que chega
+  durante uma colheita, e a mesma correção.
+
+E uma prova que passava sem provar: a do arraste tinha **uma** peça, e qualquer
+adivinhação por posição acerta com uma. Com duas na mesma casa, a reversão
+reprova.
+
+Ficam quatro pendências concretas na MESA — magias e espaços, ações com fórmula,
+editar verbete existente, redimensionar cena. São tela, não API: cada uma tem
+operação no servidor e forma que a atende.
+
+### Versão integrada
+
+`MOD_API_VERSION` é 3, com `api/v3.json` conferido pelo `check-api`. O guarda
+que comparava as duas metades confundia «que API o gerador aceita» com «que API
+o catálogo publicado carrega»; agora são dois vetores, e o assinado fica
+intocado provando o que representa.
+
+Verificado num build real de API 3, sem alteração temporária: os três MODs
+ativados, 164 falas, zero falhas e zero descartes.
+
+A sequência de migração está em `migracao-para-api-3.md`, com o que quebra se a
+ordem for outra. O passo da chave é um só: regerar e assinar o catálogo.
+
+### O que continua separado
+
+Homologação nativa de interação — digitar, arrastar, ouvir, medir sob voz —,
+Windows, Linux e carga de voz. O impedimento da automação é do método
+(`osascript` sem acesso assistivo), e não do produto.
