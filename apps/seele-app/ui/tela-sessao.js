@@ -1466,6 +1466,17 @@ $("lista-mensagens").addEventListener("keydown", (evento) => {
  * seria justamente a que se perderia. O cabeçalho do grupo é o nome da sala com
  * a ocupação ao lado, que é o mesmo par que a coluna de salas escreve.
  */
+/**
+ * Repinta a lista com o último snapshot, sem esperar o próximo.
+ *
+ * É o que `base.js` chama quando um MOD marca ou some. Sem isto, uma marca
+ * apareceria no próximo retrato — o que é pouco, mas basta para parecer que
+ * apertar o botão do MOD não fez nada.
+ */
+function redesenharAsPessoas() {
+  if (desenhado) desenharPessoas(desenhado);
+}
+
 function desenharPessoas(snapshot) {
   const nossa = snapshot.voice_rooms.find((c) => c.occupied_by_us);
 
@@ -1480,6 +1491,9 @@ function desenharPessoas(snapshot) {
           linhaDoRoster(
             {
               nome: pessoa.nickname + (pessoa.is_self ? " (você)" : ""),
+              // O que os MODs de pé marcaram nesta pessoa. Eles entregam texto
+              // e cor; a linha inteira continua sendo desenhada aqui.
+              marcas: marcasDaPessoa(pessoa.id),
               ratio: pessoa.signal,
               faixa: pessoa.sync_band,
               falando: pessoa.speaking,
@@ -1691,6 +1705,22 @@ function linhaDoRoster(pessoa, temAudio) {
     );
   } else {
     numero.append(elemento("span", "pessoa-sync-valor", SEM_MEDIDA));
+  }
+
+  // **As marcas dos MODs entram na identidade, e não numa coluna nova.**
+  //
+  // Um MOD de perfis sabe o nome que a pessoa escolheu; mostrá-lo só dentro do
+  // painel dele é mostrá-lo longe de onde ele significa alguma coisa. Mas a
+  // lista é do produto: o que chega é texto curto e uma cor, e quem decide
+  // tamanho, posição e vizinho é esta função.
+  //
+  // A cor é do contorno, e nunca do texto: uma cor de MOD no texto atropelaria
+  // o contraste que esta tela mede. E o texto vem por `textContent` como todo
+  // o resto — `elemento` não interpreta marcação.
+  for (const marca of pessoa.marcas ?? []) {
+    const selo = elemento("span", "pessoa-marca", marca.texto);
+    if (marca.cor) selo.style.borderColor = marca.cor;
+    identidade.append(selo);
   }
 
   cabeca.append(identidade, numero);

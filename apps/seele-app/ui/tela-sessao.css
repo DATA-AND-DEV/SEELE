@@ -1543,6 +1543,28 @@ button.linha-nome:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
+/* O selo de um MOD ao lado do nome.
+
+   A cor que o MOD escolhe pinta o contorno, e nunca o texto: o texto é o do
+   produto, medido contra o fundo do produto, e uma cor de terceiro nele
+   desfaria o contraste sem que ninguém percebesse. Sem raio e sem sombra
+   (`docs/marca.md`), como todo o resto desta tela. */
+.pessoa-marca {
+  font-family: var(--seele-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  /* `--seele-osso`, e não o apagado: o apagado vale 4,11:1 e só passa em texto
+     grande, e este tem dez pixels. */
+  color: var(--seele-osso);
+  border: 1px solid var(--seele-linha-forte);
+  padding: 1px 4px;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A marca de bloco: a metade da faixa que sobrevive sem cor
    (`specs/06-clientes-gui.md`). Em face monoespaçada porque a Saira Condensed,
    que desenha os números ao lado dela, não tem `U+2588`. Vale no cartão e na

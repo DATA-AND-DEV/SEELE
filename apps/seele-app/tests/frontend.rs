@@ -10922,6 +10922,61 @@ fn um_pedido_de_mod_nunca_fica_sem_resposta() {
     );
 }
 
+/// **O que a marca proíbe é recusado pelo nome, e não por omissão.**
+///
+/// `--seele-raio` e `--seele-sombra` existem como token, e um MOD poderia
+/// escrevê-los. `docs/marca.md` os lista entre o que nunca aparece, e a palavra
+/// lá é «nunca» — é regra da identidade deste produto.
+///
+/// A recusa precisa **dizer isso**. Um pedido que não acontece e não explica
+/// vira, do outro lado, «isto ainda não existe», e aí alguém espera por uma
+/// implementação que não vem porque não deve vir.
+#[test]
+fn o_que_a_marca_proibe_e_recusado_com_a_razao() {
+    let base = without_comments(&read("ui/base.js"));
+    let recusados = base
+        .split_once("const RECUSADOS_POR_DESENHO = Object.freeze({")
+        .expect("`RECUSADOS_POR_DESENHO`")
+        .1
+        .split_once("});")
+        .expect("o fim da lista")
+        .0;
+
+    for nome in ["arredondamento", "brilho"] {
+        assert!(
+            recusados.contains(nome),
+            "`{nome}` saiu da lista do que a marca proíbe, e passa a ser recusado \
+             como «a API não conhece» — que é a frase de uma função que falta"
+        );
+    }
+    assert!(
+        recusados.matches("marca.md").count() == 2,
+        "a recusa deixou de apontar a regra que a justifica: {recusados}"
+    );
+
+    // E a conferência acontece **antes** da de nome desconhecido: depois dela,
+    // os dois cairiam na frase genérica e a razão sumiria.
+    let aplicar = js_function(&base, "function aplicarOTemaDoMod(");
+    let recusa = aplicar
+        .find("RECUSADOS_POR_DESENHO[nome]")
+        .expect("a recusa por desenho");
+    let generica = aplicar
+        .find("a API de tema não conhece")
+        .expect("a recusa genérica");
+    assert!(
+        recusa < generica,
+        "a recusa por desenho ficou depois da genérica, e a razão some: {aplicar}"
+    );
+
+    // A regra existe onde o comentário diz que existe.
+    let marca = read("../../docs/marca.md");
+    assert!(
+        marca.contains("Sem sombra, gradiente, contorno extra, raio"),
+        "`docs/marca.md` deixou de proibir sombra e raio, e a recusa acima \
+         passou a citar uma regra que não está lá"
+    );
+}
+
 /// **O que a região cria nasce com dono, teto e descarte.**
 ///
 /// A diretriz de 19/09: «cada recurso deve nascer com dono, limites e
@@ -11101,6 +11156,94 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
     assert!(
         adr.contains("`painel`, `apagado` e `densidade`"),
         "o ADR 0049 não registra o tamanho que a API de tema tem hoje"
+    );
+}
+
+/// **A marca de um MOD é entregue como dado e desenhada pelo produto.**
+///
+/// Esta é a única superfície de um MOD fora da região dele, e ela é estreita de
+/// propósito: o MOD entrega um texto curto e uma cor por pessoa, e quem escolhe
+/// posição, tamanho e vizinho é `linhaDoRoster`. Se um dia ele passar a
+/// entregar um nó, ou a cor passar a pintar o texto, a lista deixa de ser do
+/// produto — e o contraste que esta tela mede deixa de valer, sem que ninguém
+/// veja acontecer.
+///
+/// Os limites e o descarte são medidos rodando, em
+/// `bancada/marcas-na-lista.cjs`. O que este guarda prova é o outro lado: que o
+/// desenho continua aqui.
+#[test]
+fn a_marca_de_um_mod_e_dado_e_quem_desenha_e_o_produto() {
+    let base = without_comments(&read("ui/base.js"));
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let marcar = js_function(&base, "function marcarPessoasDoMod(");
+    let linha = js_function(&sessao, "function linhaDoRoster(");
+
+    // A cor pinta o contorno. No texto, ela atropelaria a medida de contraste
+    // desta tela — e o `style` é o único que a marca encosta.
+    assert!(
+        linha.contains("selo.style.borderColor = marca.cor"),
+        "a cor da marca deixou de pintar só o contorno: {linha}"
+    );
+    for fora in [
+        "style.color",
+        "innerHTML",
+        "insertAdjacentHTML",
+        "style.position",
+        "style.fontSize",
+    ] {
+        assert!(
+            !linha.contains(fora),
+            "a marca de um MOD alcançou `{fora}`, e o desenho da lista é do produto"
+        );
+    }
+    assert!(
+        linha.contains("elemento(\"span\", \"pessoa-marca\", marca.texto)"),
+        "o selo deixou de ser um `span` do produto com o texto do MOD: {linha}"
+    );
+
+    // O que chega é texto e cor, e nada mais: uma terceira chave aqui é uma
+    // decisão de desenho voltando para a mão do MOD.
+    let guardada = marcar
+        .split("guardadas.set(")
+        .nth(1)
+        .expect("`guardadas.set`")
+        .split_once('}')
+        .expect("o fim do objeto guardado")
+        .0;
+    assert_eq!(
+        guardada.trim(),
+        "String(pessoa), { texto, cor: cor ?? null",
+        "uma marca deixou de ser só texto e cor"
+    );
+
+    // O teto do texto e o da quantidade existem dos dois lados: a constante e o
+    // corte. Sem o corte, a constante é um número que ninguém aplica.
+    assert!(
+        marcar.contains(".slice(0, TEXTO_DA_MARCA)") && marcar.contains("> MARCAS_POR_MOD"),
+        "os limites da marca deixaram de ser aplicados: {marcar}"
+    );
+    assert!(
+        marcar.contains("COR_DO_TEMA.test(cor)"),
+        "a marca deixou de conferir a forma da cor: {marcar}"
+    );
+
+    // Sai o MOD, some a marca. Um selo de um MOD que não está mais de pé é uma
+    // informação que ninguém pode corrigir nem tirar.
+    let limpar = js_function(&base, "function limparARegiaoDoMod(");
+    assert!(
+        limpar.contains("marcasDosMods.delete(id)"),
+        "a marca sobreviveu ao MOD que a pôs: {limpar}"
+    );
+
+    // E a lista repinta: sem isto, uma marca só apareceria no próximo retrato,
+    // e apertar o botão do MOD pareceria não ter feito nada.
+    assert!(
+        marcar.contains("redesenharAsPessoas()"),
+        "marcar deixou de repintar a lista: {marcar}"
+    );
+    assert!(
+        sessao.contains("function redesenharAsPessoas()"),
+        "`tela-sessao.js` não define mais o gancho que `base.js` chama"
     );
 }
 

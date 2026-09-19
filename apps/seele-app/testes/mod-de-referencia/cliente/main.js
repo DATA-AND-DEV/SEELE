@@ -13,6 +13,7 @@
 //   SeeleMods.snapshot()                 — o estado que a janela já tem
 //   SeeleUI.regiao(conteudo)             — desenhar, declarando
 //   SeeleUI.tema(valores)                — pedir cor, dentro da sessão
+//   SeeleUI.marcas(marcas)               — marcar pessoas na lista do produto
 //   SeeleUI.aoEvento(fn)                 — receber o que a pessoa faz
 //   SeeleUI.pedaco(arquivo, inicio)      — ler um arquivo que alguém escolheu
 //   SeeleUI.soltar(arquivo)              — devolver esse arquivo agora
@@ -255,7 +256,19 @@ async function soltarOArquivo() {
 async function comecar() {
   // O tema é pedido uma vez, e o produto o tira sozinho quando este MOD sai.
   await tentar("tema", () => SeeleUI.tema({ acento: "#6BFFB6" }), null);
-  estado.sessao = Boolean(await tentar("sessão", () => SeeleMods.snapshot(), null));
+  const retrato = await tentar("sessão", () => SeeleMods.snapshot(), null);
+  estado.sessao = Boolean(retrato);
+
+  // **A marca é dado, e quem desenha é o produto.** Este vetor marca a primeira
+  // pessoa do retrato para exercitar a única superfície que um MOD alcança fora
+  // da região dele. Sem ninguém no retrato, ele manda o conjunto vazio — que é
+  // também como se tira uma marca.
+  const alguem = retrato?.voice_rooms?.flatMap((sala) => sala.people ?? [])?.[0];
+  await tentar(
+    "marcas",
+    () => SeeleUI.marcas(alguem ? { [alguem.id]: { texto: "REF", cor: "#6BFFB6" } } : {}),
+    null,
+  );
   const inicial = await aoServidor({ op: "contar" });
   estado.vezes = Number(inicial.vezes ?? 0);
   estado.gravado = String(inicial.apelido ?? "");

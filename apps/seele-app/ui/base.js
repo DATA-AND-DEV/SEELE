@@ -796,6 +796,65 @@ function donoDaRegiao(mod, instancia) {
   };
 }
 
+/**
+ * O que cada MOD marcou em cada pessoa, por `id` de MOD.
+ *
+ * # Por que existe uma superfície além da região
+ *
+ * A região é o lugar onde um MOD desenha, e continua sendo. Mas a lista de
+ * pessoas é uma superfície onde uma informação de MOD tem lugar **natural**: o
+ * nome que alguém escolheu num MOD de perfis é sobre aquela pessoa, e mostrá-lo
+ * só dentro de um painel ao lado é mostrá-lo longe de onde ele significa algo.
+ *
+ * O que impede isto de virar a página de volta na mão do MOD é a forma: ele
+ * **não desenha**. Ele entrega um texto curto e uma cor por pessoa, e o produto
+ * monta — no lugar dele, com a tipografia dele, com o espaçamento dele. Um MOD
+ * não escolhe posição, não escolhe tamanho, e não alcança nenhum outro nó.
+ */
+const marcasDosMods = new Map();
+
+/** Quantas pessoas um MOD pode marcar, e quanto texto cabe numa marca. */
+const MARCAS_POR_MOD = 128;
+const TEXTO_DA_MARCA = 24;
+
+/**
+ * Guarda o que um MOD marcou, e redesenha a lista.
+ *
+ * As recusas são as do tema, pela mesma razão: uma cor que não é `#rrggbb` e um
+ * texto sem fim são as duas formas de um terceiro estragar uma tela que não é
+ * dele.
+ */
+function marcarPessoasDoMod(id, marcas) {
+  const guardadas = new Map();
+  const entradas = Object.entries(marcas ?? {});
+  if (entradas.length > MARCAS_POR_MOD) {
+    throw new Error(`um MOD marca até ${MARCAS_POR_MOD} pessoas, e vieram ${entradas.length}`);
+  }
+  for (const [pessoa, marca] of entradas) {
+    const texto = String(marca?.texto ?? "").slice(0, TEXTO_DA_MARCA);
+    if (!texto) continue;
+    const cor = marca?.cor;
+    if (cor !== undefined && (typeof cor !== "string" || !COR_DO_TEMA.test(cor))) {
+      throw new Error(`a cor de uma marca precisa ser #rrggbb, e veio «${cor}»`);
+    }
+    guardadas.set(String(pessoa), { texto, cor: cor ?? null });
+  }
+  marcasDosMods.set(id, guardadas);
+  // A lista é redesenhada pelo dono dela: este arquivo guarda, e `tela-sessao`
+  // pinta no próximo retrato.
+  if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
+}
+
+/** O que os MODs de pé marcaram nesta pessoa, na ordem em que marcaram. */
+function marcasDaPessoa(id) {
+  const achadas = [];
+  for (const [, marcas] of marcasDosMods) {
+    const marca = marcas.get(String(id));
+    if (marca) achadas.push(marca);
+  }
+  return achadas;
+}
+
 /** Tira a região de uma instância da tela, inteira — e o tema junto. */
 function limparARegiaoDoMod(id, instancia) {
   const regiao = regioesDosMods.get(instancia);
@@ -808,8 +867,11 @@ function limparARegiaoDoMod(id, instancia) {
   // aparece sem ter o que separar.
   if (palco) palco.hidden = palco.childElementCount === 0;
   // O tema é por `id` de propósito: ele é sobre o nome que reservou o token, e
-  // um MOD recarregado continua sendo o mesmo nome.
+  // um MOD recarregado continua sendo o mesmo nome. As marcas também.
   if (temaDosMods.delete(id)) escreverOTemaDaSessao();
+  if (marcasDosMods.delete(id) && typeof redesenharAsPessoas === "function") {
+    redesenharAsPessoas();
+  }
 }
 
 // ------------------------------------------------------------ o tema de um MOD
@@ -836,6 +898,23 @@ const TEMA_DA_API = Object.freeze({
   // não entregar uma coisa, e é por isso que ela não vale.
   painel: "--seele-negro-painel",
   apagado: "--seele-rotulo-painel",
+});
+
+/**
+ * O que a API de tema recusa **por desenho**, e a razão de cada um.
+ *
+ * Os dois têm token no produto — `--seele-raio` e `--seele-sombra` — e um MOD
+ * poderia escrevê-los. A recusa não é falta de implementação: `docs/marca.md`
+ * lista «sombra, gradiente, contorno extra, raio» entre o que nunca aparece, e
+ * deixar um terceiro ligar qualquer um deles seria deixá-lo quebrar uma regra
+ * que este produto publica sobre a própria identidade.
+ *
+ * Dito pelo nome porque a alternativa é pior: um pedido que não acontece e não
+ * explica vira, do outro lado, «isto ainda não existe» — e aí alguém espera.
+ */
+const RECUSADOS_POR_DESENHO = Object.freeze({
+  arredondamento: "não existe neste produto: `docs/marca.md` proíbe raio, e a proibição é da marca",
+  brilho: "não existe neste produto: `docs/marca.md` proíbe sombra, e a proibição é da marca",
 });
 
 /**
@@ -908,6 +987,17 @@ function aplicarOTemaDoMod(id, valores) {
       }
       pedido.set(nome, valor);
       continue;
+    }
+    // **Recusado pelo nome, e com a razão.** Estes dois existem como token no
+    // produto e um MOD poderia escrevê-los — e é por isso que a recusa precisa
+    // ser explícita em vez de silenciosa. `docs/marca.md` diz «sem sombra,
+    // gradiente, contorno extra, raio», e diz «nunca»: é regra da identidade
+    // deste produto, e não um recurso que ninguém teve tempo de ligar.
+    //
+    // Um MOD que pede recebe a frase e pode mostrá-la. O que ele não pode é
+    // ficar sem resposta e concluir que falta implementar.
+    if (nome in RECUSADOS_POR_DESENHO) {
+      throw new Error(`«${nome}» ${RECUSADOS_POR_DESENHO[nome]}`);
     }
     if (!(nome in TEMA_DA_API)) {
       throw new Error(`a API de tema não conhece «${nome}»`);
@@ -1093,6 +1183,10 @@ async function atenderOMod(mod, instancia, m) {
         break;
       case "tema":
         aplicarOTemaDoMod(mod.id, m.valores);
+        responder(true, { valor: null });
+        break;
+      case "marcas":
+        marcarPessoasDoMod(mod.id, m.marcas);
         responder(true, { valor: null });
         break;
       case "pedaco": {

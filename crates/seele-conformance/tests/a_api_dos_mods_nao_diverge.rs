@@ -130,3 +130,92 @@ fn nenhum_mod_publicado_pede_mais_api_do_que_este_build_oferece() {
         }
     }
 }
+
+/// **Nenhum manifesto de teste crava a versão da API.**
+///
+/// Três vezes a mesma coisa, em três lugares diferentes: um `"api": 2` escrito
+/// à mão dentro de um manifesto de fixture. No dia em que a constante sobe, o
+/// manifesto deixa de ser aceito — e cada um reprova com a frase do **seu**
+/// teste, não com a do defeito:
+///
+/// - `ponte_de_pedidos` disse «bridge-refused», que fala da ponte;
+/// - `despacho` disse «o MOD continuou mudo aos eventos», que fala do
+///   despachante;
+/// - e o terceiro seria encontrado na subida seguinte, do mesmo jeito.
+///
+/// Nenhuma das três frases menciona a versão, que é a causa. Este guarda
+/// procura a forma — um manifesto de MOD com a API escrita — em vez de esperar
+/// o próximo.
+///
+/// Uma **entrada de catálogo** não é um manifesto: ela lista versões
+/// publicadas, e uma delas ser antiga é o caso normal. A diferença na forma é
+/// que um manifesto traz `"schema"`, e a entrada de catálogo traz `"versao"`.
+#[test]
+fn nenhum_manifesto_de_teste_crava_a_versao_da_api() {
+    let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("a raiz do repositório");
+
+    let mut cravados = Vec::new();
+    let mut vistos = 0_usize;
+    percorrer(&raiz.join("crates"), &mut |caminho, fonte| {
+        vistos += 1;
+        procurar(caminho, fonte, &mut cravados);
+    });
+    percorrer(&raiz.join("apps"), &mut |caminho, fonte| {
+        vistos += 1;
+        procurar(caminho, fonte, &mut cravados);
+    });
+
+    assert!(vistos > 50, "a varredura não achou fonte nenhuma: {vistos}");
+    assert!(
+        cravados.is_empty(),
+        "estes manifestos de teste escrevem a versão da API em vez de lê-la de \
+         `MOD_API_VERSION`, e vão reprovar na próxima subida com uma frase que \
+         fala de outra coisa: {cravados:?}"
+    );
+}
+
+/// Chama `visitar` para cada `.rs` sob um diretório.
+fn percorrer(pasta: &std::path::Path, visitar: &mut impl FnMut(&std::path::Path, &str)) {
+    let Ok(entradas) = std::fs::read_dir(pasta) else {
+        return;
+    };
+    for entrada in entradas.flatten() {
+        let caminho = entrada.path();
+        if caminho.is_dir() {
+            if caminho.file_name().is_some_and(|n| n == "target") {
+                continue;
+            }
+            percorrer(&caminho, visitar);
+        } else if caminho.extension().is_some_and(|e| e == "rs") {
+            if let Ok(fonte) = std::fs::read_to_string(&caminho) {
+                visitar(&caminho, &fonte);
+            }
+        }
+    }
+}
+
+/// Anota cada `"api": <dígito>` que esteja num manifesto de MOD.
+fn procurar(caminho: &std::path::Path, fonte: &str, achados: &mut Vec<String>) {
+    for (n, linha) in fonte.lines().enumerate() {
+        let Some(depois) = linha.split("\"api\"").nth(1) else {
+            continue;
+        };
+        let Some(valor) = depois.trim_start().strip_prefix(':') else {
+            continue;
+        };
+        if !valor.trim_start().starts_with(|c: char| c.is_ascii_digit()) {
+            continue;
+        }
+        // Um manifesto traz `"schema"`; uma entrada de catálogo traz `"versao"`.
+        // A janela é de dez linhas para cima, que é onde o começo do literal
+        // está em todos os casos que existem hoje.
+        let comeco = n.saturating_sub(10);
+        let perto: String = fonte.lines().skip(comeco).take(n - comeco + 1).collect();
+        if perto.contains("\"schema\"") {
+            achados.push(format!("{}:{}", caminho.display(), n + 1));
+        }
+    }
+}

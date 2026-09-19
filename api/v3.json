@@ -5,6 +5,7 @@
     "pedir": "ModRequest",
     "regiao": "desenharARegiaoDoMod",
     "tema": "aplicarOTemaDoMod",
+    "marcas": "marcarPessoasDoMod",
     "escolher-arquivo": "escolher_para_o_mod",
     "pedaco": "pedaco_do_escolhido",
     "soltar-arquivo": "soltar_escolhido",
@@ -49,6 +50,13 @@
     "traco",
     "midia"
   ],
+  "marcas": {
+    "o-que-e": "um texto curto e uma cor por pessoa; o produto desenha na lista dele",
+    "chave": "o `id` da pessoa no retrato",
+    "campos": ["texto", "cor"],
+    "limites": { "pessoas": 128, "texto": 24 },
+    "descarte": "sai com o MOD"
+  },
   "tema": [
     "fundo",
     "painel",
