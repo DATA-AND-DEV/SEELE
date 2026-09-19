@@ -249,8 +249,8 @@ function dono(b, midia) {
       falar: (dados) => ditos.push(dados),
       carregarMidia: (caminho) =>
         midia ? midia(caminho) : Promise.reject(new Error("sem mídia")),
-      carregarMidiaDoServidor: (canal, pedido) =>
-        midia ? midia({ canal, pedido }) : Promise.reject(new Error("sem mídia")),
+      carregarMidiaDoServidor: (canal, pedido, campo) =>
+        midia ? midia({ canal, pedido, campo }) : Promise.reject(new Error("sem mídia")),
     },
   };
 }

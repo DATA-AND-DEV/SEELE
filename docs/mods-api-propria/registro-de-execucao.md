@@ -792,3 +792,102 @@ A bancada também dizia «as três corridas passam» com quatro provas na lista.
 número passou a ser contado.
 
 **Windows e Linux: pendentes**, como antes.
+
+## Seção 12 — a colheita, a API completa, os três MODs e o guia
+
+### A intermitência tinha causa, e ela era a colheita
+
+A revisão reproduziu o que eu não tinha conseguido isolar, na camada JS e sem
+tocar no transporte: o Rust atende uma colheita vazia, a resposta ainda está a
+caminho do JavaScript, e nisso uma mensagem nova entra e produz o aviso dela. A
+janela recebia esse aviso com `colhendo = true` e o ignorava; a resposta vazia
+chegava, o coletor saía, e a mensagem ficava retida sem ninguém para buscá-la.
+
+Bate com o que o registro mostrava e eu não soube ler: a terceira fala chegava à
+bomba e a colheita seguinte levava zero.
+
+**Confirmado no aplicativo recompilado**: seis execuções de seis sobem a fatia
+inteira — cinco falas, mídia servida, zero descartes. Antes eram três de seis
+travando. Uma execução boa não prova nada numa falha intermitente; seis contra
+três de seis, provam.
+
+E com a fatia subindo de forma confiável, a medição que faltava fechou. As duas
+fases colhidas seguidas, mesma regra de processos, janelas de 30 s:
+
+| Fase | Footprint | CPU |
+| --- | --- | --- |
+| sem MOD | 246,7 MiB | 6,0% de um núcleo |
+| fatia montada | 267,9 MiB | 6,1% de um núcleo |
+
+**+21,2 MiB e +0,1 ponto.** A CPU quase não muda porque a fatia, depois de
+montar, não faz nada: sem temporizador, sem laço, acordando só por evento. É o
+que o desenho previa, e por isso mesmo não diz nada sobre custo **sob
+interação** — isso continua pendente pelo impedimento de automação.
+
+### A API cresceu onde um aviso a substituía
+
+O que os três MODs oficiais tinham virado depois da migração, textualmente:
+
+- ESTILO: «Edição de tema, tipografia, espaçamento, arredondamento e brilho
+  aguardam suporte do SEELE.»
+- PERFIS: «edição, imagens, efeitos e cartões na lista de pessoas aguardam
+  suporte do SEELE.»
+- MESA: «Criação, edição, rolagens, tabuleiro interativo, imagens e áudio
+  aguardam suporte da API do SEELE.»
+
+Três telas de leitura. A emenda de 19/09 do ADR 0049 decide o que entra, e a
+razão de cada coisa está lá. Entraram: `campo`, `escolha`, `botao`, `tela` com
+**figuras declaradas**, `midia` de duas origens, `SeeleUI.aoEvento`, e no tema
+`painel`, `apagado` e `densidade`.
+
+Duas decisões que custaram medição para ficarem certas:
+
+**O alvo do arraste é do produto.** Sem ele o MOD receberia um par de
+coordenadas e teria de refazer o acerto — pior, porque ele não sabe a ordem em
+que as figuras ficaram na tela. A primeira prova que escrevi passava com o alvo
+desligado, porque tinha **uma** peça: qualquer adivinhação por posição acerta.
+Com duas peças na mesma casa, a reversão reprova.
+
+**A continuação da mídia é opaca.** Uma imagem de perfil não cabe numa resposta
+só, e os dois MODs que paginam o fazem de jeitos diferentes. O produto junta o
+`proximo` ao pedido seguinte sem interpretá-lo; interpretar seria o produto
+conhecer a forma de um MOD.
+
+### Os três MODs
+
+ESTILO edita as seis cores e a densidade, grava e restaura, e devolve ao
+servidor o que ele não edita — zerá-lo seria apagar a escolha de outra pessoa.
+PERFIS lista por ID, abre a ficha, edita a própria, e mostra retrato e faixa
+vindos da metade de servidor. MESA desenha o tabuleiro com grade, paredes e
+peças, arrasta peça com confirmação do servidor, rola dados e passa turno.
+
+Suítes deles: 14, 25 e 30 testes. Três defeitos caíram no caminho, e um deles é
+instrutivo: os identificadores da MESA são texto (`token-2`), e convertê-los
+para número dava `NaN` — que não é igual a nada, nem a si mesmo. A peça deixava
+de se reconhecer e não acompanhava o dedo, **sem erro nenhum aparecer**.
+
+### O que a execução nativa dos três mostrou
+
+Com um build local em API 3 — a separação que a seção 12 autoriza —, os três
+pacotes subiram no mesmo servidor: três instâncias ativadas no executor nativo,
+111 falas, 49 pedidos ao servidor, **zero falhas, zero descartes e nenhuma
+recusa registrada pela janela**.
+
+O bump foi revertido em seguida. Ele não pode entrar sem a publicação: o produto
+exige que o manifesto declare **exatamente** a API oferecida, então subir a
+constante sozinha faria o aplicativo recusar todo MOD instalado hoje.
+
+### A sequência que falta, e o passo que é seu
+
+1. Regerar o catálogo no indexador com `api_oferecida: 3` e publicar os três
+   pacotes em 2.0.0. **Precisa da sua chave** — é o único passo que precisa.
+2. Copiar o catálogo novo e a assinatura para `apps/seele-app/testes/`.
+3. Subir `MOD_API_VERSION` para 3 neste repositório. O guarda
+   `o_indexador_e_este_build_oferecem_a_mesma_api_de_mods` fica verde quando o
+   passo 2 tiver sido feito, e vermelho enquanto não — que é o comportamento
+   certo dele.
+
+**Windows e Linux: pendentes**, como antes. E a interação nativa — digitar,
+arrastar, ouvir, medir sob voz — continua pendente pelo impedimento de
+acessibilidade do `osascript`, que é daquele método de automação e não do
+produto.
