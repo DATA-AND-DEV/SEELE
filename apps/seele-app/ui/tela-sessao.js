@@ -78,6 +78,22 @@ let alvoDoServer = null;
 function guardarAlvoDoServer(endereco) {
   alvoDoServer = endereco || null;
 }
+
+/**
+ * Em que endereço esta sessão está, ou `null`.
+ *
+ * Existe para `base.js`, que carrega **antes** desta tela e por isso não pode
+ * ler `alvoDoServer` direto: um `let` de um script que ainda não rodou está na
+ * zona morta, e lê-lo lança em vez de devolver indefinido. Uma função é
+ * içada quando este arquivo roda, e um `typeof` sobre ela é seguro até lá.
+ *
+ * É o endereço com que o aceite foi gravado, e é por isso que o carregador
+ * precisa dele: só o conjunto a que **este** destino disse sim pode ser
+ * buscado sem perguntar de novo.
+ */
+function alvoDaSessao() {
+  return alvoDoServer;
+}
 /**
  * Os servidores do histórico, como a trilha os lista.
  *

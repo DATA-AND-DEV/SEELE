@@ -544,3 +544,94 @@ async fn um_mod_de_escopo_de_servidor_le_sem_canal_aberto() -> Result<()> {
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+/// **O catálogo diz qual conjunto ele descreve.**
+///
+/// A janela precisa disso para uma coisa só, e ela é a regra inteira da
+/// preparação de entrada: buscar de volta o que já foi aceito e sumiu do disco,
+/// **e nada além disso**. Sem a identidade aqui, a janela veria quais MODs
+/// faltam e não teria com o que comparar — e buscá-los assim ampliaria um
+/// consentimento antigo para uma lista que ninguém leu.
+///
+/// A identidade é a mesma que o anúncio usa, e é contra ela que o aceite de
+/// quem entra é conferido. Duas identidades diferentes para o mesmo conjunto
+/// fariam a janela nunca buscar nada, calada.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_catalogo_diz_qual_conjunto_ele_descreve() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (root, hash) = instalar("prova/ponte")?;
+    let daemon = Arc::new(
+        Daemon::bind(ServerConfig {
+            name: "Ponte".into(),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::Memory,
+            mods_dir: Some(seele_server::RaizesDosMods {
+                pacotes: root.clone(),
+                dados: root.join("mod-data"),
+            }),
+            ..ServerConfig::default()
+        })
+        .await?,
+    );
+    let set = {
+        let db = daemon.server().persistence.lock().await;
+        enable(
+            &db,
+            &EnabledMod {
+                id: "prova/ponte".into(),
+                version: "1.0.0".into(),
+                hash: hash.clone(),
+                repo: "https://example.invalid/prova-da-ponte".into(),
+                reach: vec!["estado no servidor".into()],
+                server_half: true,
+            },
+        )?;
+        seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
+    };
+    let addr = daemon.local_addr()?;
+    let service = daemon.clone();
+    let serving = tokio::spawn(async move { service.run().await });
+
+    let chave = SigningKey::from_bytes(&[203; 32]);
+    let mut anfitriao = Client::connect(
+        addr,
+        "localhost",
+        &addr.to_string(),
+        "Anfitriao",
+        &chave,
+        Arc::new(MemoryPinStore::new()),
+        None,
+        Some(&set),
+    )
+    .await?;
+
+    // Identificador vazio é o catálogo do próprio servidor.
+    anfitriao
+        .mod_request(1, String::new(), ChannelId(0), "{}".into())
+        .await?;
+    let catalogo = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let ServerMessage::ModReply { payload, .. } = anfitriao.next_event().await? {
+                return Ok::<serde_json::Value, anyhow::Error>(serde_json::from_str(&payload)?);
+            }
+        }
+    })
+    .await??;
+
+    assert_eq!(
+        catalogo["conjunto"].as_str().unwrap_or_default(),
+        set,
+        "o catálogo descreve um conjunto e diz que é outro: {catalogo}"
+    );
+    // E o hash de cada MOD continua lá: é por ele que a janela sabe **o quê**
+    // buscar, e a identidade só diz se ela pode.
+    assert_eq!(
+        catalogo["mods"][0]["hash"].as_str().unwrap_or_default(),
+        hash,
+        "o catálogo deixou de dizer o conteúdo exigido: {catalogo}"
+    );
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

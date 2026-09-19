@@ -10943,6 +10943,69 @@ fn a_manutencao_do_disco_e_um_bloco_proprio_e_nao_apaga_o_que_o_servidor_exige()
     );
 }
 
+/// **O que já foi aceito e sumiu do disco é buscado de volta — e só ele.**
+///
+/// Matriz de aceite do plano de 18/09: «aceite salvo e cache removido → o fluxo
+/// obtém o hash exato antes de ficar pronto; falhas são visíveis».
+///
+/// Isso valia só no caminho que passa pela tela de aceite. Quem já tinha dito
+/// sim entrava direto, e se o pacote não estivesse mais no disco — apagado pela
+/// manutenção local, ou numa máquina que trocou — a sessão começava sem ele e
+/// ninguém dizia nada.
+///
+/// **A conferência de identidade é a regra inteira.** O aceite autoriza um
+/// conjunto exato, o que estava escrito na tela. Buscar qualquer coisa que o
+/// servidor anuncie depois ampliaria aquele consentimento para uma lista que
+/// ninguém leu — então só há busca quando a identidade anunciada agora é igual
+/// à gravada para este destino.
+#[test]
+fn o_conjunto_ja_aceito_volta_ao_disco_e_nenhum_outro() {
+    let base = without_comments(&read("ui/base.js"));
+    let buscar = js_function(&base, "async function buscarOQueFaltaSeJaFoiAceito(");
+
+    assert!(
+        buscar.contains("aceite_de_mods") && buscar.contains("aceito !== catalogo.conjunto"),
+        "a busca deixou de conferir que o conjunto anunciado é o mesmo a que \
+         esta pessoa disse sim; assim ela amplia um consentimento antigo para \
+         uma lista nova: {buscar}"
+    );
+    assert!(
+        buscar.contains("instalar_mod_do_catalogo"),
+        "a busca não busca nada: {buscar}"
+    );
+    // Uma tentativa por conjunto. O laço roda a cada quatro segundos, e sem
+    // isto um catálogo fora do ar vira uma batida a cada quatro segundos,
+    // para sempre, contra o servidor de outra pessoa.
+    assert!(
+        buscar.contains("conjuntoJaBuscado === catalogo.conjunto"),
+        "a busca voltou a ser por tique, e não por conjunto: {buscar}"
+    );
+    let encerrar = js_function(&base, "function encerrarOAmbienteDosMods(");
+    assert!(
+        encerrar.contains("conjuntoJaBuscado = \"\""),
+        "uma busca que falhou fica falhada para sempre: entrar de novo é o \
+         gesto que pede «tente outra vez»: {encerrar}"
+    );
+
+    // E o servidor manda a identidade junto do catálogo: sem ela a janela não
+    // tem com o que comparar, e a conferência acima seria sempre falsa.
+    let pedidos = read("../../crates/seele-server/src/mods/pedidos.rs");
+    assert!(
+        pedidos.contains("\"conjunto\": identidade"),
+        "a resposta do catálogo deixou de dizer qual conjunto ela descreve"
+    );
+
+    // As duas fases novas têm frase: uma fase sem frase não é desenhada, e o
+    // defeito volta a ser silencioso.
+    let camada = read("ui/camada-mods.js");
+    for fase in ["obtendo", "nao-obtive"] {
+        assert!(
+            camada.contains(&format!("\"{fase}\"")) || camada.contains(&format!("{fase}:")),
+            "a fase `{fase}` não tem frase no painel"
+        );
+    }
+}
+
 /// E o esquema não ficou registrado no Rust depois de sair da CSP.
 ///
 /// Os dois lados são uma regra só: um `register_uri_scheme_protocol("mod", …)`

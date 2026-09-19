@@ -478,6 +478,8 @@ const FASES_DO_MOD = {
   carregando: "buscando o código deste MOD…",
   carregado: "código carregado nesta janela",
   "nao-carregou": "o código não carregou — reconecte para tentar de novo",
+  obtendo: "buscando este MOD no catálogo…",
+  "nao-obtive": "não deu para buscar este MOD; reconecte para tentar de novo",
   "sem-pacote": "o servidor exige este MOD e ele não está instalado aqui",
   "outra-versao": "o que está instalado aqui não é o que o servidor exige",
   descarregado: "descarregado: o servidor deixou de exigi-lo",

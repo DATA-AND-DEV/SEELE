@@ -809,6 +809,62 @@ const estadoDosMods = new Map();
  */
 const modsExigidos = new Map();
 
+/**
+ * A identidade do conjunto que esta janela já tentou completar.
+ *
+ * **Uma tentativa por conjunto, e não uma por tique.** `carregarMods` roda a
+ * cada quatro segundos; sem isto, um catálogo fora do ar viraria uma busca a
+ * cada quatro segundos, para sempre, contra um servidor de outra pessoa.
+ *
+ * Zerada ao encerrar a sessão: entrar de novo é uma decisão nova de quem usa, e
+ * é o gesto que pede «tente outra vez».
+ */
+let conjuntoJaBuscado = "";
+
+/**
+ * Põe de volta no disco o que **este mesmo conjunto** já autorizou.
+ *
+ * # Por que a conferência de identidade é a regra inteira
+ *
+ * O aceite autoriza um conjunto exato — o que estava escrito na tela quando a
+ * pessoa disse sim. Buscar qualquer coisa que o servidor anuncie depois seria
+ * ampliar aquele consentimento para uma lista que ninguém leu.
+ *
+ * Então só há busca quando a identidade anunciada agora é **igual** à que está
+ * gravada para este destino. Diferente, não se busca nada: uma lista nova faz a
+ * entrada falhar com a pergunta de sempre, que é onde ela pertence.
+ */
+async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {
+  // `alvoDaSessao` mora em `tela-sessao.js`, que carrega depois deste arquivo.
+  // Na primeira chamada — a que roda no fim de `base.js` — ela ainda não
+  // existe, e não existir aqui quer dizer «não há sessão», que é a resposta
+  // certa de qualquer forma.
+  const alvo = typeof alvoDaSessao === "function" ? alvoDaSessao() : null;
+  if (!alvo || !catalogo.conjunto || conjuntoJaBuscado === catalogo.conjunto) return;
+
+  let aceito = null;
+  try {
+    aceito = await invoke("aceite_de_mods", { alvo });
+  } catch (falha) {
+    console.warn("aceite deste destino:", falha);
+    return;
+  }
+  if (aceito !== catalogo.conjunto) return;
+
+  conjuntoJaBuscado = catalogo.conjunto;
+  for (const m of ausentes) {
+    anotarEstadoDoMod(m.id, "obtendo");
+    try {
+      await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version });
+    } catch (falha) {
+      // **Visível, e não só no console.** A falha é de um MOD que o servidor
+      // exige: sem frase, a sessão continuaria sem ele e a pessoa descobriria
+      // pela cor que não mudou.
+      anotarEstadoDoMod(m.id, "nao-obtive", String(falha?.message ?? falha));
+    }
+  }
+}
+
 /** Anota a fase de um MOD e avisa quem desenha. */
 function anotarEstadoDoMod(id, fase, detalhe = "") {
   const antes = estadoDosMods.get(id);
@@ -873,6 +929,17 @@ async function carregarMods() {
         `o servidor exige o conteúdo ${m.hash.slice(0, 16)}…`,
       );
     }
+    // **O que já foi aceito e sumiu do disco é buscado de volta.**
+    //
+    // Matriz de aceite do plano de 18/09: «aceite salvo e cache removido → o
+    // fluxo obtém o hash exato antes de ficar pronto; falhas são visíveis».
+    //
+    // Até aqui isto valia só no caminho que passa pela tela de aceite. Quem já
+    // tinha dito sim entrava direto, e se o pacote não estivesse mais no disco
+    // — apagado pela manutenção local, ou numa máquina que trocou — a sessão
+    // começava sem ele e ninguém dizia nada.
+    await buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes);
+
     const diagnostico = ausentes.map(m => m.id).join(", ");
     ultimoErroDeMods = diagnostico;
     instalados = instalados.filter(m => catalogo.mods.some(active => active.id === m.id && active.hash === m.hash));
@@ -947,6 +1014,9 @@ function encerrarOAmbienteDosMods() {
   // deixaria a gestão dizendo «exigido por este servidor» por até quatro
   // segundos depois de a sessão ter terminado.
   modsExigidos.clear();
+  // Entrar de novo é uma decisão nova, e é o gesto que pede «tente outra vez»:
+  // uma busca que falhou não fica falhada para sempre.
+  conjuntoJaBuscado = "";
   globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
   for (const p of pedidosDeMod.values()) { clearTimeout(p.timer); p.reject(new Error("disconnected")); }
   pedidosDeMod.clear();

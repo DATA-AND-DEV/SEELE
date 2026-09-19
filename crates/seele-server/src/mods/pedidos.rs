@@ -69,7 +69,23 @@ async fn executar_inner(
         "cannot read"
     );
     if id.is_empty() {
-        return Ok(serde_json::json!({"ok":true,"mods":enabled.iter().map(|m| serde_json::json!({"id":m.id,"hash":m.hash,"version":m.version})).collect::<Vec<_>>()} ).to_string());
+        // **A identidade do conjunto vai junto.** Sem ela, a janela vê quais
+        // MODs faltam e não tem como saber se o que está anunciado agora é o
+        // mesmo a que esta pessoa disse sim — e buscar o que falta sem essa
+        // resposta seria ampliar um consentimento antigo para uma lista nova.
+        //
+        // Campo de JSON, e não variante nova: o corpo desta resposta é do
+        // produto, e um campo a mais nele não toca na janela de
+        // compatibilidade do protocolo.
+        let identidade = super::anuncio::conjunto_exigido(&db)
+            .map(|c| c.identidade)
+            .unwrap_or_default();
+        return Ok(serde_json::json!({
+            "ok": true,
+            "conjunto": identidade,
+            "mods": enabled.iter().map(|m| serde_json::json!({"id":m.id,"hash":m.hash,"version":m.version})).collect::<Vec<_>>(),
+        })
+        .to_string());
     }
     let active = enabled
         .iter()
