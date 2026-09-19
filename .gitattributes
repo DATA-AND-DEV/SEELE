@@ -30,6 +30,7 @@
 # Os vetores cruzados: catálogo e revogações de verdade, assinados de verdade
 # pelo indexador, conferidos por este build.
 apps/seele-app/testes/catalogo-do-indexador.json     -text
+apps/seele-app/testes/api-do-indexador.json          -text
 apps/seele-app/testes/revogacoes-do-indexador.json   -text
 
 # O vetor de hash que este repositório e o indexador têm de ler igual.

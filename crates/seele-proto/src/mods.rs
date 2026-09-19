@@ -43,7 +43,7 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 /// houvesse um MOD antigo carregado, a promessa «o que um MOD faz some quando
 /// você sai do servidor» continuaria falsa, e o produto prometeria duas coisas
 /// diferentes ao mesmo tempo.
-pub const MOD_API_VERSION: u32 = 2;
+pub const MOD_API_VERSION: u32 = 3;
 
 /// What a MOD declares about itself.
 ///

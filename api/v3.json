@@ -1,0 +1,63 @@
+{
+  "version": 3,
+  "extends": 2,
+  "actions": {
+    "pedir": "ModRequest",
+    "regiao": "desenharARegiaoDoMod",
+    "tema": "aplicarOTemaDoMod",
+    "escolher-arquivo": "escolher_para_o_mod",
+    "pedaco": "pedaco_do_escolhido",
+    "soltar-arquivo": "soltar_escolhido",
+    "midia-do-pacote": "midia_do_mod",
+    "midia-do-servidor": "midia_em_bytes"
+  },
+  "reads": {
+    "resposta": "ModReply",
+    "contexto.pessoa": "PersonId",
+    "contexto.canal": "ChannelId",
+    "retrato": "Snapshot"
+  },
+  "handlers": [
+    "aoPedir",
+    "aoResponder",
+    "aoEvento"
+  ],
+  "formas": [
+    "titulo",
+    "texto",
+    "linha",
+    "lista",
+    "item",
+    "campo",
+    "escolha",
+    "botao",
+    "arquivo",
+    "tela",
+    "midia"
+  ],
+  "figuras": [
+    "retangulo",
+    "circulo",
+    "texto",
+    "linha"
+  ],
+  "eventos": [
+    "campo",
+    "escolha",
+    "botao",
+    "arquivo",
+    "traco",
+    "midia"
+  ],
+  "tema": [
+    "fundo",
+    "painel",
+    "texto",
+    "apagado",
+    "acento",
+    "borda",
+    "densidade",
+    "fonte"
+  ],
+  "notes": "Ruptura com a API 2: um MOD deixa de rodar na janela do produto — sem document, sem window, sem o global do Tauri. Ele declara a região e o produto a monta; o que a pessoa faz volta por evento, sem número e sem resposta. Mídia vem do pacote declarado ou da metade de servidor do próprio MOD, e o tipo sai dos bytes, nunca do manifesto. Escolher um arquivo é ato de quem usa, mediado pelo produto: o MOD recebe identificador, tipo e tamanho, lê em pedaços e nunca o caminho. Cada recurso nasce com dono, teto e descarte, e a saída da sessão solta o que restou. Ver ADR 0049 e as emendas de 19/09/2026."
+}

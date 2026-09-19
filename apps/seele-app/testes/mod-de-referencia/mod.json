@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "seele/referencia",
   "version": "1.0.0",
-  "api": 2,
+  "api": 3,
   "repo": "https://github.com/DATA-AND-DEV/SEELE",
   "reach": [
     "regiao",

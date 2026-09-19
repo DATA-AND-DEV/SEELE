@@ -137,7 +137,10 @@ fn instalar(id: &str) -> Result<(std::path::PathBuf, String)> {
         "schema": 1,
         "id": id,
         "version": "1.0.0",
-        "api": 2,
+        // **Da constante, e não escrito.** Um número cravado aqui faz este teste
+        // reprovar com «bridge-refused» no dia em que a API sobe — uma recusa
+        // que fala do manifesto do teste e parece falar da ponte.
+        "api": seele_proto::mods::MOD_API_VERSION,
         "repo": "https://example.invalid/prova-da-ponte",
         "reach": ["estado no servidor"],
         "server": "servidor/main.js",

@@ -30,14 +30,30 @@
 use seele_proto::mods::MOD_API_VERSION;
 
 /// O catálogo que o indexador assinou, como ele chegou.
+///
+/// **Histórico e intocado.** Ele é o que está publicado, e é isso que ele prova:
+/// que este cliente entende o formato, e que nenhum MOD lá pede mais API do que
+/// este build oferece. Regerá-lo exige a chave de produção, e amarrar a versão
+/// em desenvolvimento a ele faria a única prova da versão nova ser um catálogo
+/// que só existe depois de ela ser publicada — a ordem ao contrário.
 const CATALOGO: &[u8] = include_bytes!("../../../apps/seele-app/testes/catalogo-do-indexador.json");
+
+/// Que API o **código** do indexador oferece hoje.
+///
+/// Uma cópia de `VERSAO_DA_API`, e não do catálogo publicado. Os dois números
+/// respondem perguntas diferentes: este diz o que o gerador aceita agora, e o
+/// do catálogo diz o que foi gerado da última vez. Amarrar a constante deste
+/// build ao segundo impediria qualquer versão nova de existir antes de ser
+/// publicada.
+const API_DO_INDEXADOR: &[u8] =
+    include_bytes!("../../../apps/seele-app/testes/api-do-indexador.json");
 
 #[test]
 fn o_indexador_e_este_build_oferecem_a_mesma_api_de_mods() {
     let cru: serde_json::Value =
         serde_json::from_slice(CATALOGO).expect("o vetor do indexador é JSON");
 
-    let oferecida = cru
+    let publicada = cru
         .get("api_oferecida")
         .and_then(serde_json::Value::as_u64)
         .expect(
@@ -45,11 +61,32 @@ fn o_indexador_e_este_build_oferecem_a_mesma_api_de_mods() {
              campo a divergência volta a ser invisível",
         );
 
+    let indexador: serde_json::Value =
+        serde_json::from_slice(API_DO_INDEXADOR).expect("o vetor da API do indexador é JSON");
+    let oferecida = indexador
+        .get("api_oferecida")
+        .and_then(serde_json::Value::as_u64)
+        .expect("o vetor da API do indexador não diz `api_oferecida`");
+
+    // **O que o gerador aceita hoje é o que este build oferece.** É a
+    // divergência que este arquivo existe para pegar: as duas suítes verdes
+    // enquanto os dois lados discordam.
     assert_eq!(
         u32::try_from(oferecida).expect("a API cabe num u32"),
         MOD_API_VERSION,
         "o indexador e este build discordam sobre a versão da API de MODs: \
-         regere o catálogo lá, ou acerte a constante de um dos dois lados"
+         acerte `VERSAO_DA_API` lá ou `MOD_API_VERSION` aqui, e copie \
+         `api-do-indexador.json` de novo"
+    );
+
+    // **E o catálogo publicado nunca vai à frente.** Ele pode ficar atrás — é o
+    // estado normal entre implementar uma versão e publicá-la —, mas um
+    // catálogo oferecendo mais do que este build entende é um cliente sendo
+    // oferecido MODs que ele não roda.
+    assert!(
+        u32::try_from(publicada).expect("a API cabe num u32") <= MOD_API_VERSION,
+        "o catálogo publicado oferece API {publicada} e este build entende \
+         {MOD_API_VERSION}: um cliente destes seria oferecido MODs que ele não roda"
     );
 }
 
