@@ -7,7 +7,7 @@ pode começar.
 | Etapa | Estado | Evidência |
 | --- | --- | --- |
 | E0 — inventário | **Feito** | §1 e §2 abaixo |
-| E1 — executor e autoridade | **Aberto.** O Worker de Blob não satisfaz o contrato; o próximo experimento é QuickJS nativo | §3 abaixo, `apps/seele-app/testes/sonda-de-fronteira/` |
+| E1 — executor e autoridade | **Protótipo QuickJS medido e aprovado na autoridade; falta custo e as outras plataformas** | §3 e §6 abaixo |
 | E2 — sessão e encerramento | **Infraestrutura pronta e independente do executor; aceite integrado pendente de E1** | §5 abaixo |
 | E3 — renderer e SDK mínimos | Pendente | — |
 | E4 — desenho e mídia | Pendente | — |
@@ -261,3 +261,93 @@ que vai ficar.
 **O aceite integrado de E2 depende de E1.** O que está pronto é a
 infraestrutura, e ela está pronta para ser reaproveitada — não para ser
 publicada como garantia.
+
+---
+
+## 6. E1 — o protótipo QuickJS
+
+`apps/seele-app/src/executor.rs`, atrás de `cfg(test)`. A diretriz proíbe dois
+executores públicos, então ele existe **para a bancada** e não como caminho de
+produção — sai de lá no dia em que a decisão de E1 for tomada.
+
+### A diferença que importa
+
+No navegador o ambiente existe, e a fronteira é tudo o que se consegue tirar
+dele. Aqui o contexto nasce sem ambiente, e a fronteira é tudo o que alguém
+escolheu pôr — uma função por vez, num arquivo. É por isso que **esta prova é
+um teste automático** e a da janela não era: não precisa de aplicativo, de
+servidor nem de clique.
+
+### A superfície inteira de um contexto de MOD
+
+Medida, e impressa pelo próprio teste:
+
+```
+AggregateError, Array, ArrayBuffer, AsyncDisposableStack, Atomics, BigInt,
+BigInt64Array, BigUint64Array, Boolean, DOMException, DataView, Date,
+DisposableStack, Error, EvalError, FinalizationRegistry, Float16Array,
+Float32Array, Float64Array, Function, Infinity, Int16Array, Int32Array,
+Int8Array, InternalError, Iterator, JSON, Map, Math, NaN, Number, Object,
+Promise, Proxy, RangeError, ReferenceError, Reflect, RegExp, Set,
+SharedArrayBuffer, String, SuppressedError, Symbol, SyntaxError, TypeError,
+URIError, Uint16Array, Uint32Array, Uint8Array, Uint8ClampedArray, WeakMap,
+WeakRef, WeakSet, atob, btoa, decodeURI, decodeURIComponent, encodeURI,
+encodeURIComponent, escape, eval, globalThis, isFinite, isNaN, parseFloat,
+parseInt, performance, queueMicrotask, seele, undefined, unescape
+```
+
+Nada de `indexedDB`, `caches`, `localStorage`, `BroadcastChannel`, `fetch`,
+`XMLHttpRequest`, `WebSocket`, `Worker`, `SharedWorker`, `importScripts`,
+`document`, `navigator`, `require`, `process`, `std`, `os` — nem dos dois
+globais do Tauri. **`seele` é a única porta**, e ela faz uma coisa: pôr texto
+num canal.
+
+Duas linhas merecem nota, porque elas estão lá e não foram escolhidas:
+`SharedArrayBuffer` existe, e neste desenho não há com quem compartilhar —
+não há workers no contexto; e `eval` existe, o que deixa o MOD avaliar o
+próprio texto sem ganhar autoridade nova.
+
+### O que foi provado, e por reversão
+
+| Propriedade | Prova | Reversão que a derruba |
+| --- | --- | --- |
+| nenhum ambiente alcançado | a sonda tenta 21 nomes e nenhum responde | ligar um `fetch` no contexto |
+| revogar para um laço infinito **em execução** | o MOD avisa `comecei`, e o encerramento confirma em menos de 5 s | arrancar a revogação do tratador: o executor não confirma em 10 s |
+| o prazo sozinho interrompe | sem teto de trabalho, com 50 ms | zerar a conferência de relógio |
+| o teto de trabalho sozinho interrompe | sem prazo, com mil consultas | — |
+| uma microtarefa não escapa do prazo | o laço dentro de uma `Promise` é interrompido, **e dito** | não rodar os jobs dentro da volta |
+| a volta completa de resposta | `iniciar` → `postar` → `entregar` → `aoResponder` → `postar` | — |
+| resposta depois da revogação não entra | a fila é conferida ao tirar dela | — |
+| a mensagem grande demais é recusada na porta | 13 KiB não passa, a seguinte passa | tirar o teto |
+
+**Os três mecanismos de parada foram separados** — revogação, prazo e teto de
+trabalho — e cada teste afrouxa os outros dois. Não foi assim na primeira
+versão: dois deles passavam com a revogação arrancada, porque o teto de
+trabalho os salvava. E um terceiro passava em 0,00 s porque o laço nunca
+chegava a rodar: `pedir_encerramento` marca o revogado antes de mandar a
+mensagem, e a thread via a marca ao tirar o código da fila. **Os três eram
+guardas vacuosos**, e foi a reversão que os encontrou.
+
+### Um defeito que a medição encontrou
+
+A interrupção de uma microtarefa era **silenciosa**: o MOD era parado no meio de
+uma `Promise` e ninguém ficava sabendo — nem a janela, nem quem hospeda, nem
+quem escreveu o MOD. É o defeito que o `CLAUDE.md` deste repositório nomeia como
+o mais caro daqui, cometido pelo próprio mecanismo de contenção. Agora ela é
+dita.
+
+### O que isto ainda não decide
+
+**Autoridade: aprovado.** É o que a E1 pergunta, e a resposta é limpa.
+
+**Custo: não medido.** Memória depois de aquecer, CPU ociosa e ativa, latência
+de interação e de saída, impacto na voz — nada disso foi medido, e o teto de
+8 MiB veio da metade de servidor como ponto de partida, não como decisão. A
+diretriz proíbe reaproveitá-lo como orçamento do cliente.
+
+**Plataformas: não medido.** Windows e Linux continuam pendentes, e a troca de
+executor não dispensa medir renderer, mídia e ponte neles.
+
+**A fatia vertical: não feita.** Entrada, alteração incremental, arraste,
+desenho e uma mídia gerenciada — é a condição que o §5 do contrato põe para
+escolher definitivamente, e ela é E3 e E4.

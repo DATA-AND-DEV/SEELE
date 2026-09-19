@@ -27,6 +27,22 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod catalogo;
+// **O protótipo de executor de MODs do cliente, e ele só existe na bancada.**
+//
+// Etapa E1: o Worker de `blob:` não satisfaz o contrato — a sonda releu, num
+// aplicativo reiniciado, uma marca que um MOD gravou em IndexedDB. Este módulo
+// mede se o QuickJS nativo satisfaz, e a medição é o uso dele.
+//
+// `cfg(test)` é a decisão, e não uma consequência de ninguém tê-lo ligado
+// ainda. A diretriz de 18/09 escreve as duas metades: «não desenvolver uma
+// biblioteca visual extensa antes da validação do executor» e «não implementar
+// e manter dois executores públicos por precaução». Um protótipo compilado no
+// binário mas alcançável por ninguém seria a segunda coisa fingindo não ser.
+//
+// Ele sai daqui no dia em que a decisão de E1 for tomada — e aí ele deixa de
+// ser protótipo.
+#[cfg(test)]
+mod executor;
 mod icone;
 mod mods;
 mod servidores;

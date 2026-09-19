@@ -4985,6 +4985,7 @@ dependencies = [
  "flate2",
  "image",
  "reqwest",
+ "rquickjs",
  "rustls",
  "seele-ffi",
  "seele-lancador",
