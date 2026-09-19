@@ -416,6 +416,17 @@ const pedidosDeMod = new Map();
 let proximoPedidoDeMod = 0;
 
 /**
+ * Quantos pedaços uma mídia do servidor pode pedir antes de o produto desistir.
+ *
+ * O teto por arquivo é um mega e cada resposta atravessa em partes de 10 KiB,
+ * então cento e vinte e oito voltas cobrem o maior arquivo que o produto
+ * aceita, com folga. Sem teto, um servidor que devolvesse `proximo` para sempre
+ * faria a janela pedir para sempre — e o teto do arquivo não alcançaria, porque
+ * ele só é conferido no fim.
+ */
+const PEDACOS_DE_MIDIA = 128;
+
+/**
  * Escreve no registro de quem hospeda.
  *
  * **A janela não tinha como.** Todo o caminho de um pedido de MOD é observável
@@ -803,16 +814,30 @@ function donoDaRegiao(mod, instancia) {
      * cabe numa declaração de região, e o MOD não precisa carregá-la na fila
      * dele para mostrá-la.
      */
-    carregarMidiaDoServidor: async (canal, pedido) => {
+    carregarMidiaDoServidor: async (canal, pedido, campo) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
-      const resposta = await pedirAoServidor(mod.id, canal, pedido);
-      if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
-      const base64 = resposta?.bytes;
-      if (typeof base64 !== "string" || !base64) {
-        // Dito pelo nome: um MOD cuja operação devolveu outra coisa precisa
-        // saber **o quê**, e não «a mídia não carregou».
-        throw new Error("a resposta do servidor não traz `bytes`");
+      // **A continuação é opaca.** Uma imagem grande não cabe numa resposta só,
+      // e o servidor do MOD diz como pedir o resto devolvendo um `proximo` que
+      // o produto **não interpreta**: ele apenas o junta ao pedido seguinte.
+      //
+      // Interpretá-lo seria o produto conhecer a forma de um MOD — e a forma
+      // muda por MOD. Esta foi escrita olhando dois deles pedirem paginação de
+      // jeitos diferentes, e é a única que serve para os dois sem preferir um.
+      let pedidoAtual = pedido;
+      let base64 = "";
+      for (let voltas = 0; voltas < PEDACOS_DE_MIDIA; voltas += 1) {
+        const resposta = await pedirAoServidor(mod.id, canal, pedidoAtual);
+        if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
+        const pedaco = resposta?.[campo];
+        if (typeof pedaco !== "string" || !pedaco) {
+          // Dito pelo nome: um MOD cuja operação devolveu outra coisa precisa
+          // saber **o quê**, e não «a mídia não carregou».
+          throw new Error(`a resposta do servidor não traz «${campo}»`);
+        }
+        base64 += pedaco;
+        if (!resposta.proximo || typeof resposta.proximo !== "object") break;
+        pedidoAtual = { ...pedido, ...resposta.proximo };
       }
       const midia = await invoke("midia_em_bytes", { geracao, base64 });
       if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");

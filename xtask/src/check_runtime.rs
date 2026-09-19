@@ -7,7 +7,10 @@
 //!   caminho correto de um que só parece correto;
 //! - `regiao-do-mod.cjs` põe `ui/mods-regiao.js` num DOM mínimo e mede o que um
 //!   guarda de texto não alcança: que atualizar não tira do documento quem tem
-//!   foco, e que sair **para o som** em vez de só tirar o nó da tela.
+//!   foco, e que sair **para o som** em vez de só tirar o nó da tela;
+//! - `continuacao-de-midia.cjs` extrai de `ui/base.js` o laço que busca uma
+//!   mídia grande do servidor de um MOD e o roda contra um servidor de mentira:
+//!   a ordem dos pedaços, o teto de voltas e a falha nomeada.
 //!
 //! # Por que aqui, e não em `cargo test`
 //!
@@ -30,7 +33,11 @@ pub(crate) fn run() -> ExitCode {
     // uma informação diferente de saber que uma quebrou, e é a que diz se a
     // mudança foi num lugar ou na fronteira entre os dois.
     let mut falhou = false;
-    for nome in ["ciclo-do-executor.cjs", "regiao-do-mod.cjs"] {
+    for nome in [
+        "ciclo-do-executor.cjs",
+        "regiao-do-mod.cjs",
+        "continuacao-de-midia.cjs",
+    ] {
         let bancada = raiz.join("apps/seele-app/bancada").join(nome);
         if !bancada.is_file() {
             eprintln!("check-runtime: a bancada sumiu de {}", bancada.display());

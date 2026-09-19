@@ -709,6 +709,11 @@ class RegiaoDeMod {
       ? this.dono.carregarMidiaDoServidor(
           Number(doServidor.canal) || 0,
           doServidor.pedido ?? {},
+          // Qual campo da resposta traz o base64. O nome é do MOD, não do
+          // produto: ditar um faria todo servidor existente renomear o dele.
+          typeof doServidor.campo === "string" && doServidor.campo
+            ? doServidor.campo
+            : "bytes",
         )
       : caminho
         ? this.dono.carregarMidia(caminho)
