@@ -942,7 +942,7 @@ Três coisas que a medição corrigiu no caminho:
 ### Os três MODs
 
 A matriz está em `matriz-dos-tres-mods.md`, linha a linha, com o teste que roda
-cada comportamento. ESTILO 14 provas, PERFIS 28, MESA 37.
+cada comportamento. Naquele momento: ESTILO 14 provas, PERFIS 28, MESA 37.
 
 Dois defeitos que só apareceram fazendo:
 
@@ -980,3 +980,80 @@ ordem for outra. O passo da chave é um só: regerar e assinar o catálogo.
 Homologação nativa de interação — digitar, arrastar, ouvir, medir sob voz —,
 Windows, Linux e carga de voz. O impedimento da automação é do método
 (`osascript` sem acesso assistivo), e não do produto.
+
+## Seção 13, continuação: os seis grupos que faltavam
+
+Fechados os seis. A matriz não tem mais linha pendente, e a contagem passou a
+ESTILO 14, PERFIS 31, MESA 41.
+
+**Quatro eram tela, na MESA**, e nenhum exigiu API nova: magias e espaços com
+`cast` e `rest`, ações com `action-save`/`action-use`/`action-remove`, verbete
+editado e publicado com `entry-save`, e cena ajustada com `scene-save`. O que
+faltava estava nomeado um a um justamente para que se pudesse fechá-los um a
+um — «gestão avançada» teria escondido a lista dentro de uma palavra.
+
+**Um era recusa, no ESTILO.** Arredondamento e brilho não eram pendência: a
+marca deste produto proíbe raio e sombra, e a palavra que ela usa é «nunca». A
+API de tema passou a recusá-los **pelo nome**, com a razão e a citação, antes da
+recusa genérica — quem pede descobre que a resposta é não, e por quê.
+
+A primeira tentativa de mostrar isso no MOD **aplicava um tema de mentira para
+ver o que passava**, e com isso poluía o tema aplicado no caminho. A versão que
+ficou fala dos dados de quem está ali: «guardado neste servidor e não desenhado
+aqui».
+
+### O sexto: a lista de pessoas, sem devolver a janela
+
+O que a API 2 chamava de «cartão na lista» era o MOD desenhando dentro de uma
+tela do produto, e isso continua fora — o ADR 0049 tirou o MOD da janela. O que
+entrou é o inverso: **`SeeleUI.marcas` entrega dado, e o produto desenha.**
+
+Um texto de até 24 caracteres e uma cor `#rrggbb` por pessoa, até 128 pessoas
+por MOD. A cor pinta o contorno e nunca o texto — no texto ela atropelaria o
+contraste que aquela tela mede. A marca sai junto com o MOD, porque um selo de
+um MOD que não está mais de pé é uma informação que ninguém pode corrigir nem
+tirar.
+
+O PERFIS usa isso para o **pronome**, e não para o nome exibido: a lista já
+escreve um nome.
+
+### A prova que media a peneira do outro lado
+
+A reversão que mais ensinou nesta rodada: tirei do PERFIS a linha que pula quem
+não escreveu pronome, e **a bateria continuou verde**. O teste olhava o que a
+lista guardou, e o produto já descarta texto vazio — um MOD que mandasse um selo
+vazio para cada pessoa passaria escondido atrás dessa peneira.
+
+O harness passou a guardar **o que o MOD pediu**, separado do que o produto
+aceitou. Com a separação, a mesma reversão reprova. É a forma exata de «existir
+não é funcionar» que o `CLAUDE.md` nomeia, num lugar onde ela não parecia estar.
+
+### O que a bateria pegou de mim
+
+Duas coisas, e as duas do jeito certo — reprovando:
+
+- **o vetor de referência.** Pôr `marcas` no prelúdio sem pô-la no vetor fez
+  `a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe` reprovar. O guarda
+  existe para isso: uma API que o vetor não exercita é uma API que o guia pode
+  prometer sem que nada a cobre;
+- **um teste intermitente**, `ligar_um_mod_com_o_servidor_de_pe`, que reprovou
+  uma vez na bateria do workspace inteiro e não se reproduziu em trinta e duas
+  corridas dirigidas — vinte isoladas e doze com os 510 do `--lib` juntos. O
+  orçamento de espera subiu de dois para oito segundos, com a medição escrita na
+  letra do teste. Ele **não** descarta a outra explicação: se reprovar com oito,
+  a lentidão deixa de servir e o que sobra é ordem, no despachante.
+
+### O guia, corrigido de verdade
+
+A seção do executor descrevia a API 3 pela metade: região só com `titulo`,
+`texto`, `linha`, `lista` e `item`; tema com quatro cores; «não há formulários
+nem mídia»; e um `fetch` que a própria seção seguinte do guia dizia não existir.
+
+Foi reescrita inteira — formas, eventos, figuras, mídia, arquivo escolhido,
+tema com seis cores mais densidade e fonte, marcas, e a tabela de limites com os
+dezoito valores da região.
+
+E uma correção minha: a primeira versão que escrevi inventou nomes de campo —
+`id` na figura, `de`/`para` na linha, fases `inicio`/`meio`/`fim`, `doPacote` na
+mídia. O código diz `chave`, `ate_x`/`ate_y`, `comecou`/`moveu`/`terminou` e
+`fonte`. O `[guia:design]`, que eu ia corrigir, estava certo e eu errado.

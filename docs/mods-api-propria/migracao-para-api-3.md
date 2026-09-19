@@ -28,7 +28,9 @@ por causa disso.
 | `api/v3.json` — o contrato | escrito, conferido por `cargo xtask check-api` |
 | Vetor `api-do-indexador.json` | no repositório, e o guarda compara com ele |
 | Executor | QuickJS, sem variável de ambiente e sem alternativa |
-| Os três MODs em 2.0.0, API 3 | escritos e com suíte verde (14, 28 e 37 provas) |
+| Os três MODs em 2.0.0, API 3 | escritos e com suíte verde (14, 31 e 41 provas) |
+| A matriz dos três MODs | sem pendência: os seis grupos fechados |
+| `SeeleUI.marcas` — a lista de pessoas | no prelúdio, no contrato e no vetor de referência |
 | Guia e exemplo | revisados e regerados |
 | Catálogo publicado | **ainda diz `api_oferecida: 2`** |
 
@@ -37,6 +39,25 @@ e publicá-la. O guarda que compara os dois já sabe disso: ele exige igualdade
 com o **código** do indexador e só exige `<=` do catálogo publicado — um
 catálogo à frente seria um cliente sendo oferecido MODs que ele não roda, e é
 esse o caso que ele pega.
+
+### O que fechou por último
+
+Os seis grupos que a matriz ainda marcava pendentes foram fechados, e nenhum
+exigiu API nova além de uma:
+
+- **MESA**, quatro grupos de tela: magias e espaços, ações com fórmula e usos,
+  edição e publicação de verbete, e ajuste de cena. Cada um já tinha operação no
+  servidor e forma que o atendia; o que faltava era desenhar.
+- **ESTILO**, arredondamento e brilho: fechados como **recusa nomeada**, porque
+  `docs/marca.md` proíbe raio e sombra com a palavra «nunca». A API devolve a
+  razão e a citação em vez de dizer que não conhece o nome.
+- **PERFIS**, a lista de pessoas: fechado com `SeeleUI.marcas`, a única
+  superfície nova desta rodada. Ela não devolve a janela ao MOD — ele entrega
+  texto e cor por pessoa, e quem desenha é o produto.
+
+`MOD_API_VERSION` continua **3**: `marcas` entrou na mesma versão que ainda não
+foi publicada, e por isso não há salto de versão a fazer. Se ela já estivesse no
+ar, esta linha diria 4.
 
 ## A ordem, e por que é esta
 
@@ -63,6 +84,12 @@ a conferência de quem o tem instalado.
 
 MESA, PERFIS e ESTILO, com `api: 3`. Eles já estão escritos e testados; o que
 falta é a assinatura e a entrada no catálogo.
+
+**O PERFIS 2.0.0 depende do passo 1.** Ele chama `SeeleUI.marcas`, que só existe
+no aplicativo com a API 3 — publicá-lo contra um aplicativo sem essa função o
+faria falhar na primeira volta do relógio. A ordem já o cobre: o aplicativo sai
+antes. O que este parágrafo acrescenta é que agora há uma razão concreta, e não
+só a regra geral.
 
 ### 4. Copiar o catálogo novo para os vetores deste repositório
 
