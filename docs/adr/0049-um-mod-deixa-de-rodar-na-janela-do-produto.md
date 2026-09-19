@@ -200,3 +200,78 @@ ser mais larga do que a medida.
 O resto do 0049 continua de pé: um MOD não roda na janela do produto, o desenho
 é declarado, e a ruptura com a API 2 é limpa. O que a medição move é **qual
 contexto** executa a lógica, e não se ele é separado da janela.
+
+## Emenda de 19/09/2026 — a gramática cresce onde um aviso a substituía
+
+O 0049 deixou a gramática da região pequena de propósito: «cada forma nova é uma
+decisão de API, em vez de um MOD descobrir que consegue». Esta emenda é a
+decisão, e ela é tomada olhando para uma coisa concreta — o que os três MODs
+oficiais passaram a **não conseguir fazer** depois da ruptura.
+
+O ESTILO, migrado para a API 3, tinha esta linha na tela de quem o instalou:
+
+> A API 3 oferece acento, fundo, texto e borda. Edição de tema, tipografia,
+> espaçamento, arredondamento e brilho aguardam suporte do SEELE.
+
+Um aviso de indisponibilidade no lugar de um comportamento é a forma mais barata
+de não entregar uma coisa. A MESA virou um painel que lista o tabuleiro em vez
+de mostrá-lo; o PERFIS, uma ficha que não se edita. Os três viraram telas de
+leitura, e nenhum deles avisou que isso era o que ia acontecer: eles fizeram o
+que a API permitia.
+
+### O que entra
+
+**Quatro formas**, todas declaradas e montadas pelo produto, como as cinco de
+antes:
+
+- `campo` e `escolha` — o que a pessoa escreve e o que ela seleciona. A escolha
+  só deixa sair um dos valores declarados, e é isso que faz uma paleta não
+  precisar de conferência do outro lado;
+- `botao` — o que ela aperta;
+- `tela` — onde se arrasta e se desenha. Ela aceita **figuras declaradas com
+  chave**, e o evento de arraste diz qual foi pega. Sem isso, arrastar uma peça
+  daria ao MOD um par de coordenadas e caberia a ele refazer o acerto que o
+  produto acabou de fazer para pintar — pior, porque ele não sabe a ordem em que
+  as figuras ficaram na tela;
+- `midia` — som e imagem, **do pacote** ou **da metade de servidor do MOD**. Não
+  há uma terceira origem, e a que falta é justamente a que faria a janela de
+  quem conversa buscar bytes na rede de um estranho.
+
+**Um caminho de volta**: `SeeleUI.aoEvento`. A janela fala com o MOD sem que ele
+tenha perguntado. Um pedido tem número e resposta; um evento não tem nem um nem
+outro, porque quem digita não espera o MOD confirmar que recebeu a tecla.
+
+**Dois tokens de tema e uma medida**: `painel`, `apagado` e `densidade`. Os dois
+primeiros existiam no produto e faltavam na API — o MOD guardava seis cores no
+servidor e conseguia aplicar quatro. A densidade é **escolha, e não número**:
+uma cor é contínua e o produto confere o contraste dela; um espaçamento não tem
+como ser conferido assim, e um MOD que pedisse `0px` deixaria a sessão ilegível
+sem violar regra nenhuma. Duas densidades, com os números do produto, dão a
+escolha sem dar a régua.
+
+### O que continua fora, e por quê
+
+**Tipografia.** O ESTILO guarda `mono` e `sans`, e eles continuam sem efeito. A
+escala de tipo deste produto é medida e afirmada em `tokens.css` — tamanho,
+entrelinha e contraste andam juntos —, e trocar a família por escolha de um MOD
+move todos os três de uma vez, sem nada que confira o resultado. É uma decisão
+de design que precisa da régua antes da API, e não o contrário.
+
+**Arquivo escolhido por quem usa.** A MESA carrega cenas e o PERFIS carrega
+retratos, e as duas coisas exigem que a pessoa escolha um arquivo do disco.
+Nenhum cliente do SEELE abre arquivo por conta de terceiro — o 0027 é explícito
+—, e dar a um MOD um seletor é dar a ele o primeiro passo de um caminho que o
+produto fecha em todos os outros lugares. Fica para um ADR próprio, com o
+desenho do seletor sendo do produto e o MOD recebendo bytes já escolhidos.
+
+Estas duas são **ausências declaradas**, e não avisos de indisponibilidade
+disfarçados: elas estão escritas aqui, com a razão, e não numa linha de texto na
+região de quem instalou o MOD.
+
+### O que não muda
+
+O MOD continua fora da janela. Ele **declara** e o produto monta, com
+`createElement` e `textContent`, nunca com marcação. Cada coisa que ele cria
+nasce com dono, teto e descarte. O tipo de uma mídia vem dos **bytes**, nunca do
+manifesto nem do caminho — a mesma regra do 0027, pela mesma razão: o manifesto
+é texto que um terceiro escolheu.

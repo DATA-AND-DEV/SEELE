@@ -794,6 +794,30 @@ function donoDaRegiao(mod, instancia) {
         anotarEstadoDoMod(mod.id, "carregado", `evento recusado: ${falha?.message ?? falha}`);
       });
     },
+    /**
+     * Mídia que a **metade de servidor deste MOD** guarda.
+     *
+     * A da região com `fonte` vem do pacote; esta vem do servidor — a cena de
+     * um tabuleiro, o retrato de um perfil. Quem pede é a janela, com o `id`
+     * deste MOD, e os bytes vão direto do servidor para o Rust: uma imagem não
+     * cabe numa declaração de região, e o MOD não precisa carregá-la na fila
+     * dele para mostrá-la.
+     */
+    carregarMidiaDoServidor: async (canal, pedido) => {
+      const geracao = geracaoDaSessao;
+      if (!meu()) throw new Error("disconnected");
+      const resposta = await pedirAoServidor(mod.id, canal, pedido);
+      if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
+      const base64 = resposta?.bytes;
+      if (typeof base64 !== "string" || !base64) {
+        // Dito pelo nome: um MOD cuja operação devolveu outra coisa precisa
+        // saber **o quê**, e não «a mídia não carregou».
+        throw new Error("a resposta do servidor não traz `bytes`");
+      }
+      const midia = await invoke("midia_em_bytes", { geracao, base64 });
+      if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
+      return midia;
+    },
     /** Um arquivo que o manifesto deste MOD declarou. */
     carregarMidia: async (caminho) => {
       const geracao = geracaoDaSessao;
@@ -845,6 +869,29 @@ const TEMA_DA_API = Object.freeze({
   texto: "--seele-osso",
   acento: "--seele-laranja-nerv",
   borda: "--seele-linha",
+  // **Painel e apagado entraram porque faltavam.** Um MOD de tema guardava os
+  // seis no servidor e só conseguia aplicar quatro, e o que ele mostrava na
+  // tela era um aviso de que os outros dois «aguardam suporte». Um aviso de
+  // indisponibilidade no lugar de um comportamento é a forma mais barata de
+  // não entregar uma coisa, e é por isso que ela não vale.
+  painel: "--seele-negro-painel",
+  apagado: "--seele-rotulo-painel",
+});
+
+/**
+ * As medidas que um MOD pode escolher, e os valores que cada escolha vale.
+ *
+ * **Escolha, e não número.** Uma cor é um valor contínuo e o produto confere o
+ * contraste dela; uma medida de espaçamento não tem como ser conferida assim —
+ * um MOD que pedisse `0px` deixaria a sessão ilegível sem violar regra nenhuma.
+ * Duas densidades, com os números do produto, é o que dá a escolha sem dar a
+ * régua.
+ */
+const MEDIDAS_DA_API = Object.freeze({
+  densidade: {
+    compacta: { "--seele-celula-x": "6px", "--seele-celula-y": "10px" },
+    confortavel: { "--seele-celula-x": "8px", "--seele-celula-y": "16px" },
+  },
 });
 
 const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
@@ -877,6 +924,16 @@ const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
 function aplicarOTemaDoMod(id, valores) {
   const pedido = new Map();
   for (const [nome, valor] of Object.entries(valores ?? {})) {
+    // **As medidas primeiro**, porque elas não são cor e a conferência de cor
+    // recusaria o nome delas antes de alguém olhar.
+    if (nome in MEDIDAS_DA_API) {
+      if (!(valor in MEDIDAS_DA_API[nome])) {
+        const conhecidas = Object.keys(MEDIDAS_DA_API[nome]).join(", ");
+        throw new Error(`«${nome}» só aceita ${conhecidas}, e veio «${valor}»`);
+      }
+      pedido.set(nome, valor);
+      continue;
+    }
     if (!(nome in TEMA_DA_API)) {
       throw new Error(`a API de tema não conhece «${nome}»`);
     }
@@ -917,6 +974,19 @@ function escreverOTemaDaSessao() {
     // escolher outro.
     if (valor) sessao.style.setProperty(token, valor);
     else sessao.style.removeProperty(token);
+  }
+  // As medidas saem pela mesma porta, e saem **juntas**: uma densidade é um
+  // conjunto de números que só faz sentido inteiro.
+  for (const [nome, escolhas] of Object.entries(MEDIDAS_DA_API)) {
+    const escolhida = emVigor.get(nome);
+    for (const [token, valor] of Object.entries(escolhas[escolhida] ?? {})) {
+      sessao.style.setProperty(token, valor);
+    }
+    if (!escolhida) {
+      for (const token of Object.keys(Object.values(escolhas)[0] ?? {})) {
+        sessao.style.removeProperty(token);
+      }
+    }
   }
 }
 

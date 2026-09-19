@@ -165,6 +165,23 @@ class Elemento {
   getContext() {
     return this.pincel;
   }
+  /** Um pincel de mentira que anota o que foi pintado, em ordem. */
+  darPincel() {
+    const pintado = [];
+    this.pincel = {
+      pintado,
+      save() {}, restore() {}, clearRect() {}, beginPath() {},
+      moveTo() {}, lineTo() {}, stroke() { pintado.push("traco"); },
+      arc() {}, fill() { pintado.push("circulo"); },
+      fillRect(...a) { pintado.push(["retangulo", ...a]); },
+      strokeRect(...a) { pintado.push(["retangulo-vazado", ...a]); },
+      fillText(texto) { pintado.push(["texto", texto]); },
+      measureText: (texto) => ({ width: String(texto).length * 7 }),
+      font: "", textBaseline: "", fillStyle: "", strokeStyle: "",
+      lineWidth: 0, lineCap: "", lineJoin: "",
+    };
+    return this.pincel;
+  }
   getBoundingClientRect() {
     return { left: 0, top: 0, width: this.width || 1, height: this.height || 1 };
   }
@@ -232,6 +249,8 @@ function dono(b, midia) {
       falar: (dados) => ditos.push(dados),
       carregarMidia: (caminho) =>
         midia ? midia(caminho) : Promise.reject(new Error("sem mídia")),
+      carregarMidiaDoServidor: (canal, pedido) =>
+        midia ? midia({ canal, pedido }) : Promise.reject(new Error("sem mídia")),
     },
   };
 }
@@ -372,6 +391,100 @@ async function oArrasteViraTracoAgregado() {
 }
 
 // ---------------------------------------------------------------------------
+// 2b. Um tabuleiro: figuras declaradas, e o arraste diz qual foi pega.
+// ---------------------------------------------------------------------------
+
+async function oArrastePegaAFiguraDeCima() {
+  const caso = "o arraste pega a figura de cima";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+
+  // Duas peças **sobrepostas**, e uma parede por baixo de tudo. A de cima é a
+  // última declarada, e é ela que o dedo tem de encontrar.
+  const tabuleiro = (ondeX) => [{
+    forma: "tela",
+    chave: "mapa",
+    largura: 200,
+    altura: 200,
+    figuras: [
+      { tipo: "linha", chave: "parede", x: 0, y: 0, ate_x: 200, ate_y: 200 },
+      { tipo: "retangulo", chave: "peca-de-baixo", x: 40, y: 40, largura: 40, altura: 40, cor: "#334455" },
+      { tipo: "circulo", chave: "peca-de-cima", x: ondeX, y: 60, raio: 15, cor: "#6bffb6" },
+      { tipo: "texto", chave: "nome", x: 10, y: 170, dentro: "GOBLIN", corpo: 12 },
+    ],
+  }];
+
+  regiao.aplicar(tabuleiro(60));
+  const tela = regiao.raiz.children[0];
+  tela.darPincel();
+  regiao.aplicar(tabuleiro(60));
+
+  confere(
+    caso,
+    tela.pincel.pintado.some((p) => p[0] === "retangulo") &&
+      tela.pincel.pintado.includes("circulo") &&
+      tela.pincel.pintado.some((p) => p[0] === "texto" && p[1] === "GOBLIN"),
+    `as figuras declaradas não foram pintadas: ${JSON.stringify(tela.pincel.pintado)}`,
+  );
+
+  // O dedo desce onde as duas peças se sobrepõem.
+  tela.disparar("pointerdown", { clientX: 60, clientY: 60, pointerId: 1 });
+  const comecou = d.ditos.at(-1);
+  confere(
+    caso,
+    comecou?.alvo === "peca-de-cima",
+    `pegou «${comecou?.alvo}» em vez da peça de cima`,
+  );
+
+  // E o alvo **viaja** nas três fases: o dedo sai de cima da peça e ela
+  // continua sendo a que está sendo arrastada.
+  tela.disparar("pointermove", { clientX: 150, clientY: 150, pointerId: 1 });
+  b.quadros.shift()?.();
+  const moveu = d.ditos.at(-1);
+  confere(
+    caso,
+    moveu?.fase === "moveu" && moveu?.alvo === "peca-de-cima",
+    `o alvo se perdeu no meio do arraste: ${JSON.stringify(moveu)}`,
+  );
+  tela.disparar("pointerup", { clientX: 150, clientY: 150, pointerId: 1 });
+  const terminou = d.ditos.at(-1);
+  confere(
+    caso,
+    terminou?.fase === "terminou" && terminou?.alvo === "peca-de-cima" && terminou?.x === 150,
+    `o fim do arraste não levou peça e destino: ${JSON.stringify(terminou)}`,
+  );
+
+  // O MOD move a peça redeclarando-a, e o acerto acompanha.
+  regiao.aplicar(tabuleiro(150));
+  tela.disparar("pointerdown", { clientX: 60, clientY: 60, pointerId: 2 });
+  confere(
+    caso,
+    d.ditos.at(-1)?.alvo === "peca-de-baixo",
+    `depois de a peça sair dali, o toque ainda a encontra: ${d.ditos.at(-1)?.alvo}`,
+  );
+
+  // Um toque no vazio responde «nada», e não some com o campo.
+  tela.disparar("pointerup", { clientX: 60, clientY: 60, pointerId: 2 });
+  tela.disparar("pointerdown", { clientX: 5, clientY: 5, pointerId: 3 });
+  const vazio = d.ditos.at(-1);
+  confere(
+    caso,
+    "alvo" in vazio && vazio.alvo === null,
+    `um toque no vazio não disse «nada»: ${JSON.stringify(vazio)}`,
+  );
+
+  // Uma parede não é pega: ela é grade, e pegá-la roubaria o toque das peças.
+  tela.disparar("pointerup", { clientX: 5, clientY: 5, pointerId: 3 });
+  tela.disparar("pointerdown", { clientX: 100, clientY: 100, pointerId: 4 });
+  confere(
+    caso,
+    d.ditos.at(-1)?.alvo === null,
+    `a linha foi pega, e ela é parede: ${d.ditos.at(-1)?.alvo}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 3. Sair durante o carregamento não monta mídia.
 // ---------------------------------------------------------------------------
 
@@ -405,6 +518,74 @@ async function sairDuranteOCarregamentoNaoMonta() {
   );
   confere(caso, regiao.contagem.midias === 0, `a conta de mídias ficou em ${regiao.contagem.midias}`);
   confere(caso, regiao.bytesDeMidia === 0, `sobraram ${regiao.bytesDeMidia} bytes contados`);
+}
+
+// ---------------------------------------------------------------------------
+// 3b. A mídia do servidor: outra origem, o mesmo dono e o mesmo descarte.
+// ---------------------------------------------------------------------------
+
+async function aMidiaDoServidorTemOMesmoDono() {
+  const caso = "a mídia do servidor";
+  const b = bancada();
+  const pedidos = [];
+  let soltar;
+  const carregando = new Promise((r) => { soltar = r; });
+  const d = dono(b, (o_que) => {
+    pedidos.push(o_que);
+    return carregando;
+  });
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+
+  regiao.aplicar([
+    {
+      forma: "midia",
+      chave: "cena",
+      doServidor: { canal: 7, pedido: { op: "scene-image", id: 3 } },
+    },
+  ]);
+  confere(
+    caso,
+    pedidos.length === 1 && pedidos[0].canal === 7 && pedidos[0].pedido?.op === "scene-image",
+    `o pedido não foi ao servidor com canal e operação: ${JSON.stringify(pedidos)}`,
+  );
+
+  // A pessoa sai **enquanto** os bytes vêm — o mesmo caso da mídia de pacote,
+  // e ele tem de valer para as duas origens.
+  regiao.soltar();
+  soltar({ uri: "data:image/png;base64,AA", papel: "imagem", bytes: 900 });
+  await volta();
+  await volta();
+  confere(
+    caso,
+    regiao.raiz.children[0]?.querySelector(".regiao-de-mod-tocador") == null,
+    "a mídia do servidor foi montada depois de a região ter sido solta",
+  );
+  confere(caso, regiao.bytesDeMidia === 0, `sobraram ${regiao.bytesDeMidia} bytes contados`);
+
+  // E, sem sair, ela monta e é descartada como a outra.
+  const b2 = bancada();
+  const d2 = dono(b2, () =>
+    Promise.resolve({ uri: "data:image/png;base64,AA", papel: "imagem", bytes: 900 }),
+  );
+  const regiao2 = new b2.RegiaoDeMod("a/b", d2.api, b2.raiz());
+  regiao2.aplicar([{ forma: "midia", chave: "cena", doServidor: { canal: 1, pedido: {} } }]);
+  await volta();
+  await volta();
+  const tocador = regiao2.raiz.children[0].querySelector(".regiao-de-mod-tocador");
+  confere(caso, tocador?.tagName === "IMG", `o papel «imagem» não virou <img>: ${tocador?.tagName}`);
+  confere(caso, regiao2.bytesDeMidia === 900, `os bytes não foram contados: ${regiao2.bytesDeMidia}`);
+  regiao2.soltar();
+  confere(caso, regiao2.bytesDeMidia === 0, "o descarte não devolveu os bytes da mídia do servidor");
+
+  // Sem nenhuma das duas origens, o estado é dito em vez de a mídia sumir.
+  const b3 = bancada();
+  const regiao3 = new b3.RegiaoDeMod("a/b", dono(b3).api, b3.raiz());
+  regiao3.aplicar([{ forma: "midia", chave: "nada" }]);
+  confere(
+    caso,
+    regiao3.raiz.children[0]?.dataset.estado === "sem-fonte",
+    `uma mídia sem origem não disse o estado dela: ${regiao3.raiz.children[0]?.dataset.estado}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -594,7 +775,9 @@ async function tudoChegaAInstanciaESoltarDuasVezesNaoDoi() {
   const provas = [
     oFocoSobreviveAAtualizacao,
     oArrasteViraTracoAgregado,
+    oArrastePegaAFiguraDeCima,
     sairDuranteOCarregamentoNaoMonta,
+    aMidiaDoServidorTemOMesmoDono,
     sairDuranteAReproducaoPara,
     tirarUmNoSoltaOQueEleSegurava,
     osTetosContemEARecusaEDita,

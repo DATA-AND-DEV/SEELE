@@ -43,6 +43,8 @@ const LIMITES_DA_REGIAO = Object.freeze({
   midias: 4,
   /** Traços numa tela. */
   tracos: 256,
+  /** Figuras declaradas numa tela. */
+  figuras: 256,
   /** Pontos num traço. */
   pontos: 512,
   /** Lado máximo de uma tela, em pixels de layout. */
@@ -51,6 +53,8 @@ const LIMITES_DA_REGIAO = Object.freeze({
   texto: 4096,
   /** Caracteres no valor de um campo. */
   valorDoCampo: 1024,
+  /** Opções numa escolha. */
+  opcoes: 64,
   /** Bytes de mídia somados nesta região. */
   bytesDeMidia: 4 * 1024 * 1024,
 });
@@ -63,13 +67,22 @@ const FORMAS_DA_REGIAO = Object.freeze({
   lista: "ul",
   item: "li",
   campo: "label",
+  escolha: "label",
   botao: "button",
   tela: "canvas",
   midia: "figure",
 });
 
+/** A cor de uma figura, na mesma forma que o tema aceita. */
+const COR_DA_FIGURA = /^#[0-9a-f]{6}$/i;
+
 /** As que criam recurso, e por isso passam por contador próprio. */
-const FORMAS_COM_TETO = Object.freeze({ campo: "campos", tela: "telas", midia: "midias" });
+const FORMAS_COM_TETO = Object.freeze({
+  campo: "campos",
+  escolha: "campos",
+  tela: "telas",
+  midia: "midias",
+});
 
 /**
  * As formas cujos filhos o MOD declara.
@@ -109,6 +122,8 @@ class RegiaoDeMod {
     this.bytesDeMidia = 0;
     /** Quantos nós a última montagem recusou, por teto. */
     this.recusados = 0;
+    /** Onde cada figura ficou em cada tela, para o toque saber o que pegou. */
+    this.acertoDaTela = new Map();
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
     this.solta = false;
   }
@@ -246,6 +261,7 @@ class RegiaoDeMod {
 
     switch (plano.forma) {
       case "campo": this.montarCampo(elem, plano); break;
+      case "escolha": this.montarEscolha(elem, plano); break;
       case "botao": this.montarBotao(elem, plano); break;
       case "tela": this.montarTela(elem, plano); break;
       case "midia": this.montarMidia(elem, plano); break;
@@ -259,6 +275,7 @@ class RegiaoDeMod {
   atualizar(elem, plano) {
     switch (plano.forma) {
       case "campo": this.atualizarCampo(elem, plano); break;
+      case "escolha": this.atualizarEscolha(elem, plano); break;
       case "botao": elem.disabled = plano.no.desligado === true; break;
       case "tela": this.pintarTela(elem, plano); break;
       case "midia": this.atualizarMidia(elem, plano); break;
@@ -316,6 +333,70 @@ class RegiaoDeMod {
     if (caixa.value !== valor) caixa.value = valor;
   }
 
+  // ------------------------------------------------------------ escolha
+
+  /**
+   * Uma escolha entre opções que o MOD declara.
+   *
+   * **Não é um campo com validação.** Um campo aceita qualquer texto e o MOD
+   * precisa conferir; aqui o produto só deixa sair um dos valores declarados, e
+   * é isso que faz uma paleta, uma fonte ou uma densidade não precisarem de
+   * conferência do outro lado.
+   */
+  montarEscolha(elem, plano) {
+    const rotulo = elemento("span", "regiao-de-mod-rotulo");
+    const caixa = elemento("select", "regiao-de-mod-escolha");
+    elem.append(rotulo, caixa);
+    const aoTrocar = () => {
+      this.dono.falar({
+        nome: "escolha",
+        chave: plano.no.chave ?? "",
+        valor: caixa.value,
+      });
+    };
+    caixa.addEventListener("change", aoTrocar);
+    this.guardar(elem, `escolha ${plano.chave}`, () => {
+      caixa.removeEventListener("change", aoTrocar);
+      this.contagem.campos -= 1;
+    });
+  }
+
+  /**
+   * As opções e a escolhida — e a escolhida **só quando a caixa não tem foco**.
+   *
+   * Pela mesma razão do campo: reescrever uma lista aberta a fecha, e quem
+   * estava percorrendo as opções com o teclado perde onde estava.
+   */
+  atualizarEscolha(elem, plano) {
+    const rotulo = elem.querySelector(".regiao-de-mod-rotulo");
+    const caixa = elem.querySelector(".regiao-de-mod-escolha");
+    if (!rotulo || !caixa) return;
+    const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
+    if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    if (document.activeElement === caixa) return;
+
+    const opcoes = (Array.isArray(plano.no.opcoes) ? plano.no.opcoes : [])
+      .slice(0, LIMITES_DA_REGIAO.opcoes)
+      .map((o) => ({
+        valor: String(o?.valor ?? "").slice(0, 64),
+        dentro: String(o?.dentro ?? o?.valor ?? "").slice(0, 120),
+      }));
+    // Refeitas só quando mudaram: refazer a lista a cada desenho fecharia a
+    // caixa aberta de quem está escolhendo, mesmo sem foco no elemento.
+    const assinatura = opcoes.map((o) => `${o.valor}\u0000${o.dentro}`).join("\u0001");
+    if (caixa.dataset.opcoes !== assinatura) {
+      caixa.dataset.opcoes = assinatura;
+      const nos = opcoes.map((o) => {
+        const item = elemento("option", "regiao-de-mod-opcao", o.dentro);
+        item.value = o.valor;
+        return item;
+      });
+      caixa.replaceChildren(...nos);
+    }
+    const valor = String(plano.no.valor ?? "");
+    if (caixa.value !== valor) caixa.value = valor;
+  }
+
   // ------------------------------------------------------------ botão
 
   montarBotao(elem, plano) {
@@ -343,16 +424,48 @@ class RegiaoDeMod {
     let arrastando = false;
     let pendente = null;
     let quadro = 0;
+    // Qual figura foi pega ao descer o dedo. Ela viaja nas três fases: quem
+    // arrasta uma peça precisa saber qual peça está arrastando enquanto o dedo
+    // já saiu de cima dela.
+    let pego = null;
 
-    const mandar = (fase, evento) => {
+    const ponto = (evento) => {
       const caixa = elem.getBoundingClientRect();
       // Nas coordenadas da tela declarada, e não nas da janela: o MOD não sabe
       // onde a região dele está, e não precisa saber.
-      const ponto = {
+      return {
         x: Math.round(((evento.clientX - caixa.left) / (caixa.width || 1)) * elem.width),
         y: Math.round(((evento.clientY - caixa.top) / (caixa.height || 1)) * elem.height),
       };
-      this.dono.falar({ nome: "traco", chave: plano.no.chave ?? "", fase, ...ponto });
+    };
+
+    /** A figura mais em cima sob este ponto, ou nada. */
+    const sob = ({ x, y }) => {
+      for (const area of this.acertoDaTela.get(elem) ?? []) {
+        if (
+          typeof area.chave === "string" &&
+          x >= area.x &&
+          x <= area.x + area.largura &&
+          y >= area.y &&
+          y <= area.y + area.altura
+        ) {
+          return area.chave;
+        }
+      }
+      return null;
+    };
+
+    const mandar = (fase, evento) => {
+      const onde = ponto(evento);
+      this.dono.falar({
+        nome: "traco",
+        chave: plano.no.chave ?? "",
+        fase,
+        ...onde,
+        // `null` quando o toque caiu no vazio, e não ausente: «não peguei
+        // nada» é uma resposta, e um campo que some é uma pergunta sem ela.
+        alvo: pego,
+      });
     };
 
     // **O movimento é agregado por quadro.** Um arraste produz centenas de
@@ -370,6 +483,10 @@ class RegiaoDeMod {
     const aoDescer = (evento) => {
       arrastando = true;
       elem.setPointerCapture?.(evento.pointerId);
+      // Decidido **aqui**, e não a cada movimento: o que se pega é o que estava
+      // debaixo do dedo quando ele desceu. Recalcular no meio do arraste faria
+      // a peça trocar de identidade ao passar por cima de outra.
+      pego = sob(ponto(evento));
       mandar("comecou", evento);
     };
     const aoMover = (evento) => {
@@ -382,6 +499,7 @@ class RegiaoDeMod {
       arrastando = false;
       pendente = null;
       mandar("terminou", evento);
+      pego = null;
     };
     elem.addEventListener("pointerdown", aoDescer);
     elem.addEventListener("pointermove", aoMover);
@@ -399,6 +517,10 @@ class RegiaoDeMod {
       quadro = 0;
       arrastando = false;
       pendente = null;
+      pego = null;
+      // A lista de acerto sai com a tela: ela descreve pixels que não existem
+      // mais, e guardá-la manteria a região viva pelo próprio mapa.
+      this.acertoDaTela.delete(elem);
       this.contagem.telas -= 1;
     });
   }
@@ -424,6 +546,11 @@ class RegiaoDeMod {
     pincel.lineWidth = 2;
     pincel.lineCap = "round";
     pincel.lineJoin = "round";
+    // **As figuras primeiro, os traços por cima.** Um tabuleiro é figura e o
+    // que se rabisca nele é traço; pintar na outra ordem esconderia o rabisco
+    // atrás da peça que veio depois.
+    this.pintarFiguras(pincel, elem, plano);
+
     const tracos = Array.isArray(plano.no.tracos) ? plano.no.tracos : [];
     for (const traco of tracos.slice(0, LIMITES_DA_REGIAO.tracos)) {
       const pontos = Array.isArray(traco) ? traco.slice(0, LIMITES_DA_REGIAO.pontos) : [];
@@ -439,6 +566,97 @@ class RegiaoDeMod {
       pincel.stroke();
     }
     if (tracos.length > LIMITES_DA_REGIAO.tracos) this.recusados += 1;
+  }
+
+  /**
+   * As figuras que o MOD declarou, pintadas e **guardadas para o acerto**.
+   *
+   * É o que separa uma tela de rabisco de um tabuleiro. Um traço é o gesto de
+   * quem desenha; uma figura é uma coisa que está lá — uma peça, uma parede,
+   * uma sala — e que pode ser **pega**. O MOD declara a figura com uma chave, o
+   * produto guarda onde ela ficou, e o evento de arraste diz qual foi pega.
+   *
+   * Sem isto, arrastar uma peça só dava ao MOD um par de coordenadas, e cabia a
+   * ele descobrir o que havia ali — refazendo o acerto que o produto acabou de
+   * fazer para pintar, e refazendo-o pior, porque ele não sabe a ordem em que
+   * as figuras ficaram na tela.
+   *
+   * A gramática é pequena pela mesma razão da outra: cada tipo novo é uma
+   * decisão de API em vez de um MOD descobrir que consegue.
+   */
+  pintarFiguras(pincel, elem, plano) {
+    const declaradas = Array.isArray(plano.no.figuras) ? plano.no.figuras : [];
+    const figuras = declaradas.slice(0, LIMITES_DA_REGIAO.figuras);
+    if (declaradas.length > figuras.length) this.recusados += 1;
+    // A lista de acerto é refeita a cada pintura: ela **é** o que está na tela,
+    // e uma lista velha faria o arraste pegar uma peça que já saiu.
+    const acerto = [];
+    const num = (valor, padrao = 0) => {
+      const n = Number(valor);
+      return Number.isFinite(n) ? n : padrao;
+    };
+    for (const figura of figuras) {
+      if (!figura || typeof figura !== "object") continue;
+      const x = num(figura.x);
+      const y = num(figura.y);
+      const largura = Math.max(0, num(figura.largura));
+      const altura = Math.max(0, num(figura.altura));
+      const cor = COR_DA_FIGURA.test(figura.cor ?? "") ? figura.cor : null;
+      pincel.save();
+      if (cor) {
+        pincel.fillStyle = cor;
+        pincel.strokeStyle = cor;
+      }
+      switch (figura.tipo) {
+        case "retangulo":
+          if (figura.preenchida === false) pincel.strokeRect(x, y, largura, altura);
+          else pincel.fillRect(x, y, largura, altura);
+          acerto.push({ chave: figura.chave, x, y, largura, altura });
+          break;
+        case "circulo": {
+          const raio = Math.max(0, num(figura.raio));
+          pincel.beginPath();
+          pincel.arc(x, y, raio, 0, Math.PI * 2);
+          if (figura.preenchida === false) pincel.stroke();
+          else pincel.fill();
+          acerto.push({ chave: figura.chave, x: x - raio, y: y - raio, largura: raio * 2, altura: raio * 2 });
+          break;
+        }
+        case "texto": {
+          const texto = String(figura.dentro ?? "").slice(0, 120);
+          if (!texto) break;
+          const corpo = Math.min(Math.max(num(figura.corpo, 12), 6), 64);
+          pincel.font = `${corpo}px ${getComputedStyle(elem).fontFamily || "monospace"}`;
+          pincel.textBaseline = "top";
+          pincel.fillText(texto, x, y);
+          acerto.push({
+            chave: figura.chave,
+            x,
+            y,
+            largura: pincel.measureText(texto).width,
+            altura: corpo,
+          });
+          break;
+        }
+        case "linha": {
+          pincel.beginPath();
+          pincel.moveTo(x, y);
+          pincel.lineTo(num(figura.ate_x, x), num(figura.ate_y, y));
+          pincel.stroke();
+          // Uma linha não é pega: ela é parede, régua, grade. Dar-lhe área de
+          // acerto faria uma grade roubar o toque de toda peça em cima dela.
+          break;
+        }
+        default:
+          // Um tipo que a API não conhece não vira retângulo por conveniência.
+          this.recusados += 1;
+          break;
+      }
+      pincel.restore();
+    }
+    // **A última declarada está por cima**, e é ela que o toque encontra
+    // primeiro: o acerto percorre ao contrário da pintura.
+    this.acertoDaTela.set(elem, acerto.reverse());
   }
 
   // ------------------------------------------------------------ mídia
@@ -481,10 +699,23 @@ class RegiaoDeMod {
       this.contagem.midias -= 1;
     });
     elem.dataset.estado = "carregando";
+    // **Duas origens, e só duas.** Do pacote, por um arquivo que o manifesto
+    // declara; ou do servidor deste MOD, por uma operação dele. Não há uma
+    // terceira, e a que faltaria — um endereço qualquer — é justamente a que
+    // faria a janela de quem conversa buscar bytes na rede de um estranho.
+    const doServidor = plano.no.doServidor;
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
-    if (!caminho) { elem.dataset.estado = "sem-fonte"; return; }
+    const vindo = doServidor
+      ? this.dono.carregarMidiaDoServidor(
+          Number(doServidor.canal) || 0,
+          doServidor.pedido ?? {},
+        )
+      : caminho
+        ? this.dono.carregarMidia(caminho)
+        : null;
+    if (!vindo) { elem.dataset.estado = "sem-fonte"; return; }
 
-    this.dono.carregarMidia(caminho).then((midia) => {
+    vindo.then((midia) => {
       // **As três perguntas, depois do `await`.** A região pode ter sido
       // solta, o nó pode ter saído da árvore, e a sessão pode ter acabado —
       // e montar mídia em qualquer um dos três casos é tocar som de uma

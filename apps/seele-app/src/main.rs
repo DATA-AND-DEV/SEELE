@@ -4117,6 +4117,69 @@ fn midia_do_mod(
     })
 }
 
+/// **Mídia que veio da metade de servidor de um MOD.**
+///
+/// A do pacote é [`midia_do_mod`]; esta é a que o MOD guarda no servidor — a
+/// cena de um tabuleiro, o retrato de um perfil. O caminho é diferente e a
+/// regra é a mesma: **o tipo vem dos bytes**. Aqui isso importa ainda mais,
+/// porque estes bytes vieram pela ponte de pedidos, e quem os pôs lá foi um
+/// terceiro — pode ter sido a pessoa que usa, pode ter sido outra.
+///
+/// Os bytes **não passam pela fila do MOD**. Quem pede é a janela, com o `id`
+/// deste MOD, e a resposta vai direto do servidor para cá: uma imagem não cabe
+/// numa declaração de região, e fazê-la caber seria alargar o teto de mensagem
+/// para todo mundo por causa de um caso.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando a geração já acabou, quando o texto não é base64,
+/// quando passa do teto, ou quando os bytes não são de um formato conhecido.
+#[tauri::command]
+fn midia_em_bytes(
+    session: State<'_, Session>,
+    geracao: u64,
+    base64: String,
+) -> Result<MidiaDoMod, FalhaNoMod> {
+    if !session.geracao_vale(geracao) {
+        session
+            .comandos_de_geracao_morta
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+    // Conferido **antes** de decodificar: o texto cresce um terço sobre os
+    // bytes, então o teto do texto é o teto dos bytes com folga, e recusar aqui
+    // é recusar sem alocar.
+    if base64.len() > seele_ffi::mods::TETO_DE_MIDIA * 2 {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "arquivo-grande-demais".to_owned(),
+        });
+    }
+    let bytes = seele_ffi::de_base64(&base64).ok_or(FalhaNoMod::Recusado {
+        motivo: "nao-e-base64".to_owned(),
+    })?;
+    if bytes.len() > seele_ffi::mods::TETO_DE_MIDIA {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "arquivo-grande-demais".to_owned(),
+        });
+    }
+    let lida = seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
+        motivo: "formato-desconhecido".to_owned(),
+    })?;
+    tracing::debug!(
+        geracao,
+        papel = lida.papel,
+        bytes = lida.bytes,
+        "mídia de MOD vinda do servidor"
+    );
+    Ok(MidiaDoMod {
+        uri: lida.uri,
+        papel: lida.papel,
+        bytes: lida.bytes,
+    })
+}
+
 /// A identidade do conjunto que este servidor exige agora.
 ///
 /// A tela de gestão a lê ao abrir e a guarda como **base** do rascunho. É ela
@@ -6453,6 +6516,7 @@ fn main() {
             aplicar_conjunto_de_mods,
             codigo_do_mod,
             midia_do_mod,
+            midia_em_bytes,
             registrar_da_janela,
             estado_da_sessao,
             executor_de_mods,

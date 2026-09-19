@@ -2097,6 +2097,19 @@ label.regiao-de-mod-parte {
   font-size: var(--seele-t-dado);
 }
 
+.regiao-de-mod-escolha {
+  min-height: 34px;
+  padding: 0 var(--seele-celula-x);
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+}
+
+.regiao-de-mod-opcao { font-family: var(--seele-mono); }
+
+.regiao-de-mod-escolha:focus-visible,
 .regiao-de-mod-caixa:focus-visible {
   outline: 2px solid var(--seele-laranja-nerv);
   outline-offset: 1px;

@@ -10985,9 +10985,27 @@ fn todo_recurso_da_regiao_nasce_registrado_e_com_teto() {
 fn a_atualizacao_da_regiao_e_incremental_e_nao_reescreve_quem_tem_foco() {
     let regiao = without_comments(&read("ui/mods-regiao.js"));
 
+    // **Uma exceção, e ela é mantida na forma exata.** A lista de opções de uma
+    // escolha é refeita de uma vez — mas só quando ela mudou, e as `<option>`
+    // não seguram foco nem cursor: quem tem foco é o `<select>`, que não é
+    // tocado. Refazer a árvore de nós, que é o que este guarda existe para
+    // proibir, continua proibido em todo o resto do arquivo.
+    assert_eq!(
+        regiao.matches("replaceChildren").count(),
+        1,
+        "a região refaz filhos fora da lista de opções de uma escolha, e \
+         refazer é perder o foco"
+    );
+    let escolha = js_function(&regiao, "\n  atualizarEscolha(elem, plano)");
     assert!(
-        !regiao.contains("replaceChildren"),
-        "a região voltou a refazer a árvore inteira, e refazer é perder o foco"
+        escolha.contains("replaceChildren")
+            && escolha.contains("caixa.dataset.opcoes !== assinatura"),
+        "a lista de opções voltou a ser refeita sem conferir se mudou, e \
+         refazê-la fecha a caixa de quem está escolhendo: {escolha}"
+    );
+    assert!(
+        escolha.contains("if (document.activeElement === caixa) return;"),
+        "a escolha de quem está com a caixa aberta voltou a ser reescrita: {escolha}"
     );
     let reconciliar = js_function(&regiao, "\n  reconciliar(pai, planos, fundura, orcamento)");
     assert!(
@@ -11065,9 +11083,18 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
         );
         quantos += 1;
     }
+    // Seis desde a emenda de 19/09 do ADR 0049: `painel` e `apagado` existiam no
+    // produto e faltavam na API, e um MOD de tema guardava seis cores no
+    // servidor conseguindo aplicar quatro — o que ele punha na tela era um
+    // aviso de que as outras duas «aguardam suporte».
     assert_eq!(
-        quantos, 4,
+        quantos, 6,
         "a API de tema mudou de tamanho sem ADR que a mude"
+    );
+    let adr = read("../../docs/adr/0049-um-mod-deixa-de-rodar-na-janela-do-produto.md");
+    assert!(
+        adr.contains("`painel`, `apagado` e `densidade`"),
+        "o ADR 0049 não registra o tamanho que a API de tema tem hoje"
     );
 }
 
