@@ -263,12 +263,27 @@ async function comecar() {
   // pessoa do retrato para exercitar a única superfície que um MOD alcança fora
   // da região dele. Sem ninguém no retrato, ele manda o conjunto vazio — que é
   // também como se tira uma marca.
-  const alguem = retrato?.voice_rooms?.flatMap((sala) => sala.people ?? [])?.[0];
-  await tentar(
-    "marcas",
-    () => SeeleUI.marcas(alguem ? { [alguem.id]: { texto: "REF", cor: "#6BFFB6" } } : {}),
-    null,
-  );
+  // Alguém numa sala de voz, ou a própria pessoa quando não há sala nenhuma.
+  //
+  // O `me` existe desde que a sessão existe, e as salas não: sem ele, uma
+  // homologação com uma pessoa só provaria apenas o conjunto vazio — que é o
+  // caso em que a API não desenha nada, e portanto o caso que menos prova.
+  const alguem =
+    retrato?.voice_rooms?.flatMap((sala) => sala.people ?? [])?.[0] ??
+    (retrato?.me == null ? null : { id: retrato.me });
+  let marcou;
+  try {
+    await SeeleUI.marcas(alguem ? { [alguem.id]: { texto: "REF", cor: "#6BFFB6" } } : {});
+    marcou = alguem ? `ok pessoa=${alguem.id}` : "ok vazio";
+  } catch (falha) {
+    marcou = `recusou: ${String(falha?.message ?? falha)}`;
+    estado.aviso = `marcas: ${marcou}`;
+  }
+  // **O que a janela viu vai para o quintal**, que é lido de fora sem
+  // automação de acessibilidade. É o que separa «a mensagem saiu» de «a marca
+  // foi aceita» numa homologação nativa.
+  await tentar("anotar marcas", () => aoServidor({ op: "anotar", chave: "marcas", valor: marcou }), null);
+
   const inicial = await aoServidor({ op: "contar" });
   estado.vezes = Number(inicial.vezes ?? 0);
   estado.gravado = String(inicial.apelido ?? "");

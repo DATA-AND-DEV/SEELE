@@ -1057,3 +1057,44 @@ E uma correção minha: a primeira versão que escrevi inventou nomes de campo �
 `id` na figura, `de`/`para` na linha, fases `inicio`/`meio`/`fim`, `doPacote` na
 mídia. O código diz `chave`, `ate_x`/`ate_y`, `comecou`/`moveu`/`terminou` e
 `fonte`. O `[guia:design]`, que eu ia corrigir, estava certo e eu errado.
+
+### A homologação nativa da marca
+
+Binário `target/debug/seele-app` deste checkout, `SEELE_HOME` de descarte,
+servidor hospedado pelo próprio aplicativo com `--hospedar`. O vetor
+`seele/referencia` publicado pelo conteúdo, com o hash conferido pelo **mesmo
+código** que o servidor usa — não adivinhado.
+
+```
+MOD ativado no executor nativo instancia=1 geracao=1
+mídia de MOD servida caminho=som/toque.wav papel="som" bytes=1644
+7 falas de MOD nativo
+mod_data: janela.marcas = ok pessoa=1
+```
+
+A última linha é a que esta rodada acrescentou, e ela existe por uma razão
+concreta: **«a mensagem saiu» não é «a marca foi aceita»**. Uma chamada recusada
+e uma aceita produzem a mesma linha de «fala de MOD nativo», porque as duas são
+uma mensagem que saiu — contar mensagens fazendo o papel de prova é a forma de
+homologar nada e achar que homologou.
+
+O vetor passou a anotar no quintal dele o que a metade de janela viu. O quintal
+persiste, é do MOD, e `sqlite3` o lê **sem automação de acessibilidade** — que é
+exatamente o que esta máquina não tem. O impedimento não sumiu; o que mudou é
+que ele deixou de cegar esta pergunta.
+
+E o vetor marca a própria pessoa quando não há sala de voz nenhuma: com uma
+pessoa só, `voice_rooms` é vazio, e uma homologação que só exercitasse o
+conjunto vazio provaria justamente o caso em que a API não desenha nada.
+
+Dois caminhos ficaram documentados por terem custado uma corrida cada: o
+servidor procura o pacote em `<home>/mods/mod-packages/<hash>`, e não no
+`<home>/mod-packages/` que a janela usa; e a entrada exige o aceite do conjunto,
+cuja identidade o `seele.log` escreve na recusa.
+
+**O que continua fora:** digitar, arrastar e apertar na janela de verdade. A
+automação de acessibilidade do macOS recusa este processo, e isso não mudou. A
+região, o foco, o arraste e o descarte são provados por
+`bancada/regiao-do-mod.cjs` e `bancada/marcas-na-lista.cjs`, contra o código de
+verdade num DOM mínimo. É prova mais fraca que a nativa, e está dita como mais
+fraca.

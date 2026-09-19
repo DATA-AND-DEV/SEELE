@@ -20,6 +20,23 @@ globalThis.aoPedir = (contexto, pedido) => {
   const quem = JSON.parse(contexto);
   const o_que = JSON.parse(pedido);
 
+  // **O que a metade de janela viu, guardado onde se pode ler.**
+  //
+  // A homologação nativa lê o `seele.log` e o `mod_data`, e nenhum dos dois
+  // alcança o que aconteceu **dentro** da janela: uma chamada recusada e uma
+  // aceita produzem a mesma linha de «fala de MOD nativo», porque as duas são
+  // uma mensagem que saiu. Sem isto, «a API foi exercitada» é uma contagem de
+  // mensagens fazendo o papel de prova.
+  //
+  // O quintal é o lugar certo: ele persiste, ele é do MOD, e `sqlite3` o lê
+  // sem automação de acessibilidade — que é justamente o que falta nesta
+  // máquina.
+  if (o_que.op === "anotar") {
+    dados[`janela.${String(o_que.chave ?? "?").slice(0, 32)}`] =
+      String(o_que.valor ?? "").slice(0, 200);
+    return JSON.stringify({ ok: true });
+  }
+
   if (o_que.op !== "contar" && o_que.op !== "gravar") {
     // Uma operação que este MOD não conhece é recusada pelo nome, e não
     // devolvida vazia: quem escreveu a chamada precisa saber por que ela não

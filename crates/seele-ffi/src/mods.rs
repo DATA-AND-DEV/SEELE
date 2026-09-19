@@ -379,3 +379,25 @@ mod tests_do_aceite {
         assert_eq!(aceite_de(&home, "casa:8383"), None);
     }
 }
+
+#[cfg(test)]
+mod hash_de_pasta {
+    /// Instrumento de homologação: imprime o hash de conteúdo de uma pasta.
+    ///
+    /// Não é um teste do produto — é a forma de descobrir, com o **mesmo
+    /// código** que o servidor usa, onde um pacote precisa ficar para ser
+    /// encontrado. Adivinhar o caminho é a maneira mais rápida de homologar
+    /// nada e achar que homologou.
+    #[test]
+    #[ignore = "instrumento: SEELE_PASTA=<pasta> cargo test -p seele-ffi hash_de_pasta -- --ignored --nocapture"]
+    fn imprime() {
+        let Ok(pasta) = std::env::var("SEELE_PASTA") else {
+            panic!("SEELE_PASTA não está definida");
+        };
+        let instalado = super::ler_pasta(&pasta).expect("ler a pasta");
+        println!(
+            "HASH={} ID={} VERSAO={}",
+            instalado.hash, instalado.id, instalado.version
+        );
+    }
+}
