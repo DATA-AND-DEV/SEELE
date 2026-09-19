@@ -1051,7 +1051,8 @@ nem mídia»; e um `fetch` que a própria seção seguinte do guia dizia não ex
 
 Foi reescrita inteira — formas, eventos, figuras, mídia, arquivo escolhido,
 tema com seis cores mais densidade e fonte, marcas, e a tabela de limites com os
-dezoito valores da região.
+dezesseis valores que existiam no código e em lugar nenhum que quem escreve um
+MOD leia.
 
 E uma correção minha: a primeira versão que escrevi inventou nomes de campo —
 `id` na figura, `de`/`para` na linha, fases `inicio`/`meio`/`fim`, `doPacote` na
