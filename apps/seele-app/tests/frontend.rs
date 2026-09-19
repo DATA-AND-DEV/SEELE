@@ -11181,7 +11181,7 @@ fn o_ciclo_de_vida_de_um_mod_nao_conhece_o_executor() {
          efeito ainda seria admitido: {ate_o_fim}"
     );
     let confirma = ate_o_fim
-        .find("await this.executor.encerrou()")
+        .find("await this.executor.encerrou(")
         .expect("o encerramento não espera o executor confirmar");
     let descarta = ate_o_fim
         .find("recurso.descartar()")
@@ -11224,8 +11224,15 @@ fn a_parada_confirmada_e_diferente_do_prazo_vencido() {
         "o prazo do encerramento voltou a resolver como sucesso: {nativo}"
     );
     assert!(
-        nativo.contains("parou.then(() => true)"),
+        nativo.contains("parada.then(() => true)"),
         "a confirmação de verdade deixou de ser distinguida do prazo: {nativo}"
+    );
+    // E a confirmação que chega **tarde** conclui: sem isto, uma instância que
+    // parou depois do prazo ficava em `encerrando` para sempre, com o ouvinte
+    // de pé e o diagnóstico acusando sobra de um MOD que já tinha parado.
+    assert!(
+        runtime.contains("concluirTardio()"),
+        "a confirmação tardia voltou a só resolver a promessa, sem concluir"
     );
 
     // E a instância só se diz `encerrada` com confirmação **e** sem recurso que
@@ -11285,6 +11292,18 @@ fn uma_instancia_nativa_e_identificada_pelo_numero_dela() {
         !nativo.contains("mod_nativo_encerrar\", { id }"),
         "encerrar voltou a ser por nome, e mata a execução seguinte do mesmo MOD"
     );
+    // **Sem recuo por nome durante a subida.** Era por ele que uma instância
+    // anterior do mesmo MOD falava na janela em que a nova esperava o número.
+    assert!(
+        nativo.contains("if (numero === null || payload.instancia !== numero) return;"),
+        "o recuo por nome voltou, e com ele a fala de uma instância antiga: {nativo}"
+    );
+    // E é a **colheita** que traz a mensagem: o aviso não carrega carga.
+    assert!(
+        nativo.contains("mod_nativo_colher"),
+        "a janela voltou a receber a carga pelo evento, e o crédito volta a ser \
+         devolvido antes de alguém ler: {nativo}"
+    );
 
     // E o Rust guarda a identidade inteira: nome, geração e pacote.
     let rust = read("src/main.rs");
@@ -11297,7 +11316,8 @@ fn uma_instancia_nativa_e_identificada_pelo_numero_dela() {
         "id: String",
         "geracao: u64",
         "hash: String",
-        "encerrando: bool",
+        "estado: EstadoNativo",
+        "pendentes: std::collections::VecDeque<FalaPendente>",
     ] {
         assert!(
             estrutura.contains(campo),
@@ -11318,26 +11338,26 @@ fn uma_instancia_nativa_e_identificada_pelo_numero_dela() {
 #[test]
 fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
     let rust = read("src/main.rs");
-    let iniciar = rust
-        .split_once("fn mod_nativo_iniciar(")
-        .expect("`mod_nativo_iniciar`")
+    // **Duas etapas**: reservar dá o número sem rodar nada, ativar libera a
+    // execução. É o que fecha a corrida de identidade sem perder as primeiras
+    // mensagens legítimas — entre as duas, não existe fala para ouvir.
+    let reservar = rust
+        .split_once("fn mod_nativo_reservar(")
+        .expect("`mod_nativo_reservar`")
         .1;
-    let iniciar = iniciar.split_once("\n/// ").map_or(iniciar, |(a, _)| a);
-
-    let guarda = iniciar
-        .find("vivos.guardar(")
-        .expect("a instância deixou de ser guardada");
-    let roda = iniciar
-        .find(".iniciar(&codigo)")
-        .expect("o código deixou de ser entregue");
+    let reservar = reservar.split_once("\n/// ").map_or(reservar, |(a, _)| a);
     assert!(
-        guarda < roda,
-        "o código volta a rodar antes de a instância existir, e as primeiras \
-         mensagens do MOD não têm destino: {iniciar}"
+        !reservar.contains(".iniciar(&codigo)"),
+        "a reserva voltou a rodar o código, e o número deixa de chegar antes \
+         da primeira fala: {reservar}"
+    );
+    assert!(
+        reservar.contains("vivos.guardar("),
+        "a reserva não guarda a instância: {reservar}"
     );
 
     // A conferência de geração acontece **dentro** do cadeado que insere.
-    let trecho = iniciar
+    let trecho = reservar
         .split_once(".lock()")
         .expect("o cadeado da tabela")
         .1;
@@ -11348,6 +11368,19 @@ fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
         trecho.contains("session.geracao_vale(geracao)"),
         "a geração voltou a ser conferida fora do cadeado, e entre a \
          conferência e a inserção cabe uma desmontagem inteira: {trecho}"
+    );
+
+    // E a ativação confere a revogação de novo: entre as duas etapas a sessão
+    // pode ter acabado.
+    let ativar = rust
+        .split_once("fn mod_nativo_ativar(")
+        .expect("`mod_nativo_ativar`")
+        .1;
+    let ativar = ativar.split_once("\n/// ").map_or(ativar, |(a, _)| a);
+    assert!(
+        ativar.contains("session.geracao_vale(geracao)") && ativar.contains(".iniciar(&codigo)"),
+        "a ativação deixou de conferir a revogação antes de liberar a \
+         execução: {ativar}"
     );
 
     // E a revogação nativa não espera a janela pedir.

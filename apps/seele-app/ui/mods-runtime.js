@@ -83,10 +83,11 @@ function executorDeWorker(preludio) {
       worker?.terminate();
       parou = true;
     },
-    encerrou() {
+    encerrou(_quandoConcluir) {
       // Aqui a confirmação é verdadeira de imediato: `terminate()` é síncrono,
       // e quando ele volta o contexto não roda mais. Dizer `true` é dizer o que
-      // aconteceu, e não um atalho.
+      // aconteceu, e não um atalho — e por isso não há conclusão tardia para
+      // avisar.
       return Promise.resolve(parou);
     },
   };
@@ -107,72 +108,96 @@ function executorDeWorker(preludio) {
  */
 function executorNativo(id, geracao, hash) {
   let ouvindo = null;
-  // **O número da instância**, que o lado nativo devolve ao iniciar. Ele é a
-  // identidade desta execução: `id` e `geracao` não bastam, porque recarregar
-  // um MOD é uma segunda execução dentro da mesma geração, e as duas falariam
-  // com a mesma voz.
-  let numero = null;
-  // Quantas mensagens estão esperando ser atendidas **aqui dentro**.
+  // **O número da instância, conhecido antes de o MOD poder falar.**
   //
-  // O teto da fila nativa mede o que ainda não saiu de lá; este mede o que já
-  // chegou e ainda não foi processado. A diretriz pede a diferença: «o limite
-  // dessa fila não demonstra contenção do que se acumula no transporte/eventos
-  // da janela».
-  let naFila = 0;
-  let recusadasAqui = 0;
+  // A revisão de `fd1de3a`: enquanto ele era `null`, o ouvinte casava pelo nome
+  // do MOD, e uma instância anterior do mesmo MOD falava naquela janela — a
+  // mensagem dela era aceita, a resposta se perdia, e o `parou` dela confirmava
+  // o encerramento da nova.
+  //
+  // Agora a subida tem duas etapas: `reservar` devolve o número **sem rodar
+  // nada**, e `ativar` libera a execução. Entre as duas não existe fala para
+  // ouvir, então ignorar o que chega antes do número não perde nada.
+  let numero = null;
+  let parada = null;
   let resolverAParada = null;
-  // Criada **antes** do ouvinte, e não dentro dele: a fala `parou` pode chegar
-  // entre o `listen` e a linha seguinte, e uma promessa que ainda não existe
-  // não tem como ser resolvida.
-  const parou = new Promise((resolve) => {
-    resolverAParada = resolve;
-  });
+  // O que fazer quando a parada for confirmada — inclusive **depois** do prazo.
+  let aoConcluir = null;
+  let colhendo = false;
+
+  /// Colhe até esvaziar. É a colheita que devolve o crédito do lado nativo.
+  const colher = async (aoReceber, aoFalhar) => {
+    if (colhendo || numero === null) return;
+    colhendo = true;
+    try {
+      for (;;) {
+        const falas = await invoke("mod_nativo_colher", {
+          geracao,
+          instancia: numero,
+          limite: 32,
+        });
+        if (!falas || falas.length === 0) return;
+        for (const fala of falas) {
+          if (fala.tipo === "mensagem") {
+            try {
+              await aoReceber(JSON.parse(fala.corpo));
+            } catch {
+              aoFalhar("o MOD mandou o que não é JSON");
+            }
+            continue;
+          }
+          // `falhou` e `interrompido` pedem frases diferentes: um é o MOD com
+          // defeito, o outro é o produto parando o MOD.
+          aoFalhar(fala.tipo === "interrompido" ? "interrompido pelo produto" : fala.corpo);
+        }
+      }
+    } catch {
+      // Sessão encerrada ou instância que sumiu: não há o que colher, e
+      // insistir seria bater numa porta que não existe mais.
+    } finally {
+      colhendo = false;
+    }
+  };
+
+  /// A parada foi confirmada — seja dentro do prazo ou muito depois dele.
+  const concluir = async () => {
+    resolverAParada?.();
+    (await ouvindo)?.();
+    ouvindo = null;
+    // **A confirmação tardia também conclui.** Ela era só resolvida: o ouvinte
+    // ficava, a supervisão não era atualizada, e uma segunda tentativa de
+    // encerrar devolvia falso para sempre.
+    const terminar = aoConcluir;
+    aoConcluir = null;
+    terminar?.();
+  };
+
   return {
     nome: "nativo",
     async iniciar(_codigo, aoReceber, aoFalhar) {
       // **O código não passa por aqui.** O lado nativo já o tem — ele o lê pelo
-      // mesmo `codigo_do_mod`, com a mesma conferência de hash. Mandá-lo de
-      // volta seria fazer o texto atravessar a ponte duas vezes para chegar
-      // onde já estava.
+      // mesmo `codigo_do_mod`, com a mesma conferência de hash.
+      parada = new Promise((resolve) => {
+        resolverAParada = resolve;
+      });
       ouvindo = await listen("seele://mod-nativo", ({ payload }) => {
         if (!payload || payload.geracao !== geracao) return;
-        // **Pelo número da instância**, e não pelo nome do MOD: duas execuções
-        // do mesmo MOD na mesma geração têm o mesmo nome e vozes diferentes.
-        // Antes de o número chegar, casa pelo nome — só a própria montagem
-        // pode falar nessa janela, e é ela quem está esperando o número.
-        if (numero === null ? payload.id !== id : payload.instancia !== numero) return;
-        if (payload.tipo === "mensagem") {
-          // **Teto do que espera atendimento aqui.** `atenderOMod` é assíncrono
-          // — ele vai ao servidor —, então as mensagens se acumulam deste lado
-          // enquanto ele volta. Sem teto, um MOD conversador enche a memória da
-          // janela depois de a fila nativa ter dado o lugar por livre.
-          if (naFila >= 64) {
-            recusadasAqui += 1;
-            return;
-          }
-          let m;
-          try {
-            m = JSON.parse(payload.corpo);
-          } catch {
-            aoFalhar("o MOD mandou o que não é JSON");
-            return;
-          }
-          naFila += 1;
-          Promise.resolve(aoReceber(m)).finally(() => {
-            naFila -= 1;
-          });
+        // **Sem recuo por nome.** Antes do número, nada é desta instância:
+        // entre reservar e ativar o MOD não rodou, então não há fala legítima
+        // para perder.
+        if (numero === null || payload.instancia !== numero) return;
+        if (payload.parou) {
+          // Colhe o que sobrou antes de concluir: o que o MOD disse antes de
+          // parar ainda precisa chegar.
+          colher(aoReceber, aoFalhar).finally(concluir);
           return;
         }
-        if (payload.tipo === "parou") {
-          resolverAParada?.();
-          return;
-        }
-        // `falhou` e `interrompido` chegam com motivos diferentes e pedem
-        // frases diferentes: um é o MOD com defeito, o outro é o produto
-        // parando o MOD.
-        aoFalhar(payload.tipo === "interrompido" ? "interrompido pelo produto" : payload.corpo);
+        colher(aoReceber, aoFalhar);
       });
-      numero = await invoke("mod_nativo_iniciar", { geracao, id, hash });
+
+      numero = await invoke("mod_nativo_reservar", { geracao, id, hash });
+      // Só agora o MOD pode falar, e o ouvinte já sabe com quem.
+      await invoke("mod_nativo_ativar", { geracao, instancia: numero });
     },
     entregar(mensagem) {
       if (numero === null) return;
@@ -184,34 +209,32 @@ function executorNativo(id, geracao, hash) {
     },
     pedirEncerramento() {
       // Pelo número: encerrar pelo nome mataria a execução seguinte do mesmo
-      // MOD, que é a corrida que a diretriz nomeia.
+      // MOD, que é a corrida que a revisão nomeia.
       if (numero === null) return;
       invoke("mod_nativo_encerrar", { instancia: numero }).catch(() => {});
     },
-    async encerrou() {
-      // **Confirmar não é esperar.** A primeira versão corria a promessa contra
-      // um prazo que resolvia com sucesso, e devolvia igual — a instância se
-      // dizia encerrada sem que ninguém tivesse parado nada.
-      //
-      // Agora o prazo devolve `false`, e quem chama sabe a diferença. A saída
-      // continua não travando: a espera tem teto, e o que se perde esperando é
-      // o que se ganharia sabendo.
+    /**
+     * Espera a confirmação, com prazo — e **avisa quando ela chega tarde**.
+     *
+     * `quandoConcluir` é chamado se a confirmação vier depois do prazo. É o que
+     * permite à instância fechar o estado e soltar o que faltava sem que
+     * ninguém precise perguntar de novo.
+     */
+    async encerrou(quandoConcluir) {
+      aoConcluir = quandoConcluir ?? null;
       const confirmou = await Promise.race([
-        parou.then(() => true),
+        parada.then(() => true),
         new Promise((resolve) => setTimeout(() => resolve(false), 2000)),
       ]);
-      // **O ouvinte fica** quando não houve confirmação: a fala `parou` pode
-      // chegar depois, e ela é a única coisa que ainda pode fechar o assunto.
-      // Removê-lo aqui apagaria a chance de saber.
       if (confirmou) {
-        (await ouvindo)?.();
-        ouvindo = null;
+        // `concluir` já rodou pelo ouvinte; aqui só se garante que rodou.
+        await concluir();
       }
       return confirmou;
     },
     /** O que ficou pendente deste lado — para a bancada. */
     pendencias() {
-      return { naFila, recusadas: recusadasAqui };
+      return { colhendo };
     },
   };
 }
@@ -241,6 +264,8 @@ class InstanciaDeMod {
     this.recursos = [];
     /** O que não saiu no descarte, por nome. Vazio é o desfecho normal. */
     this.naoSairam = [];
+    /** Há uma espera de confirmação em curso. */
+    this.aguardando = false;
   }
 
   /**
@@ -273,13 +298,31 @@ class InstanciaDeMod {
    * duas vezes.
    */
   encerrar() {
-    if (this.encerramento) return this.encerramento;
+    // **Uma tentativa que terminou sem confirmação não tranca as seguintes.**
+    //
+    // A promessa ficava guardada resolvida em `false`, e toda chamada posterior
+    // devolvia o mesmo `false` sem nunca mais olhar — inclusive depois de a
+    // confirmação ter chegado e a instância já estar encerrada.
+    //
+    // Três respostas, e elas são diferentes:
+    //
+    // - **já acabou**: devolve `true`, que é o que aconteceu;
+    // - **está esperando**: devolve a espera em curso, para duas chamadas não
+    //   virarem dois pedidos de parada;
+    // - **parou de esperar sem confirmar**: tenta de novo, porque a
+    //   confirmação pode ter chegado no meio-tempo.
+    if (this.estado === ESTADOS_DE_MOD.encerrada) return Promise.resolve(true);
+    if (this.aguardando && this.encerramento) return this.encerramento;
     this.estado = ESTADOS_DE_MOD.encerrando;
+    this.aguardando = true;
     this.encerramento = (async () => {
       let confirmou = false;
       try {
         this.executor.pedirEncerramento();
-        confirmou = (await this.executor.encerrou()) === true;
+        // O segundo argumento é o que fecha o caso quando a confirmação chega
+        // **depois** do prazo: sem ele, a instância ficava em `encerrando` para
+        // sempre mesmo tendo parado.
+        confirmou = (await this.executor.encerrou(() => this.concluirTardio())) === true;
       } catch (falha) {
         // Um executor que falha ao parar não impede o descarte: os recursos
         // são nossos, e deixá-los de pé porque ele não respondeu seria trocar
@@ -303,6 +346,7 @@ class InstanciaDeMod {
       // `encerrando`, que é a verdade: pedimos, revogamos, descartamos o que
       // era nosso, e o executor não disse que parou. Nenhum efeito é admitido
       // nos dois estados — o que muda é o que o produto **afirma**.
+      this.aguardando = false;
       this.estado =
         confirmou && this.naoSairam.length === 0
           ? ESTADOS_DE_MOD.encerrada
@@ -310,6 +354,31 @@ class InstanciaDeMod {
       return this.estado === ESTADOS_DE_MOD.encerrada;
     })();
     return this.encerramento;
+  }
+
+  /**
+   * A confirmação chegou **depois** do prazo: conclui o que ficou pendente.
+   *
+   * Sem isto, uma instância que parou tarde ficava em `encerrando` para sempre,
+   * com o ouvinte de pé e o diagnóstico acusando sobra — de um MOD que já tinha
+   * parado. O contrário do que o diagnóstico existe para dizer.
+   *
+   * **Não readmite efeito**: o estado só anda de `encerrando` para `encerrada`,
+   * e `admite` continua falso nos dois.
+   */
+  concluirTardio() {
+    if (this.estado !== ESTADOS_DE_MOD.encerrando) return;
+    // O que ainda estiver registrado sai agora — pode ter sido criado entre o
+    // pedido de parada e a confirmação.
+    for (const recurso of this.recursos.splice(0).reverse()) {
+      try {
+        recurso.descartar();
+      } catch (falha) {
+        console.warn(`MOD ${this.id}: ${recurso.porque} não saiu`, falha);
+        this.naoSairam.push(recurso.porque);
+      }
+    }
+    if (this.naoSairam.length === 0) this.estado = ESTADOS_DE_MOD.encerrada;
   }
 }
 

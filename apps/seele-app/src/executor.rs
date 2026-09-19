@@ -110,8 +110,23 @@ impl Fila {
 
     /// Uma mensagem saiu da fila.
     pub(crate) fn tirar(&self, quantos: usize) {
-        self.mensagens.fetch_sub(1, Ordering::AcqRel);
-        self.bytes.fetch_sub(quantos, Ordering::AcqRel);
+        self.tirar_varios(1, quantos);
+    }
+
+    /// Várias saíram de uma vez — é o que a colheita faz.
+    pub(crate) fn tirar_varios(&self, mensagens: usize, bytes: usize) {
+        // Saturante nos dois: um descompasso de contabilidade não pode virar
+        // um estouro que envolve o contador e faz a fila parecer vazia.
+        let _ = self
+            .mensagens
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                Some(n.saturating_sub(mensagens))
+            });
+        let _ = self
+            .bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                Some(n.saturating_sub(bytes))
+            });
     }
 
     /// Quantas mensagens o MOD tentou pôr e não couberam.

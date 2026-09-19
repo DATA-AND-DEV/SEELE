@@ -552,3 +552,78 @@ temporizadores dito a quem pediu, entrada saturando sem prender o encerramento,
 e o teto da fila valendo para quem não usa o prelúdio.
 
 **Windows e Linux: pendentes**, como antes.
+
+---
+
+## 8. As três pendências de `fd1de3a`
+
+### A identidade passou a ser conhecida antes de a execução começar
+
+A subida tinha uma etapa; agora tem duas. `mod_nativo_reservar` devolve o número
+**sem rodar nada**, e `mod_nativo_ativar` libera a execução — conferindo a
+revogação de novo, porque entre as duas a sessão pode ter acabado.
+
+Isso fecha a corrida sem perder mensagem: o recuo por nome saiu, e ignorar o que
+chega antes do número não custa nada, porque entre reservar e ativar **não
+existe fala para ouvir**. A reprodução mostrava o pior caso — a mensagem de uma
+instância antiga aceita, a resposta perdida porque `entregar` saía com o número
+ainda nulo, e o `parou` dela confirmando o encerramento da nova.
+
+### A confirmação tardia conclui a limpeza
+
+O prazo vencido devolvia falso e mantinha o ouvinte, e era só. Um `parou` que
+chegasse depois resolvia a promessa antiga e nada mais: o ouvinte ficava, a
+instância continuava em `encerrando`, e a promessa já concluída trancava novas
+tentativas.
+
+Agora o executor recebe um `quandoConcluir` e o chama quando a confirmação vier
+— cedo ou tarde. Ela solta o ouvinte, descarta o que ainda estiver registrado, e
+fecha o estado. **Sem readmitir efeito**: o estado só anda de `encerrando` para
+`encerrada`, e `admite` é falso nos dois.
+
+E `encerrar` passou a ter três respostas: já acabou devolve verdadeiro, está
+esperando devolve a espera em curso, e parou de esperar sem confirmar **tenta de
+novo**. Foi a bancada que achou esta última — a versão anterior devolvia o falso
+guardado mesmo depois de a instância já estar encerrada.
+
+As instâncias em encerramento saíram do mapa das ativas para um mapa próprio.
+«Ativa» voltou a querer dizer ativa, e uma que não confirma fica visível no
+diagnóstico em vez de sumir.
+
+### Emitir deixou de ser o critério; colher passou a ser
+
+A bomba não emite carga. Ela guarda a fala na instância, **com o crédito
+retido**, e emite um aviso sem corpo: «há o que colher». A janela chama
+`mod_nativo_colher`, e é a colheita que devolve o crédito.
+
+É a diferença que a revisão mediu: «no Tauri 2.11.5 presente no checkout,
+`webview::emit_js` chama `eval` […]; esse retorno não representa conclusão do
+handler JavaScript». Com a janela parada, o MOD bate no teto e nada cresce —
+nem do lado nativo, nem no transporte, porque o aviso não carrega bytes.
+
+O caminho de parada é **independente do crédito de dados**: `parou` não entra na
+fila de falas, não ocupa byte, e resolve a supervisão na hora. Uma instância que
+confirmou mas ainda tem fala a colher continua supervisionada — o que o MOD
+disse antes de parar ainda precisa chegar.
+
+### Onde as reproduções moram
+
+`apps/seele-app/bancada/ciclo-do-executor.cjs`, rodada por `cargo xtask
+check-runtime`. Ela carrega `ui/mods-runtime.js` de verdade num contexto de VM e
+controla a ordem dos eventos — que é a única coisa que separa um caminho correto
+de um que só parece correto.
+
+Fora de `cargo test` porque precisa de Node, e a bateria do produto não pode
+precisar: quem a roda é quem compila o SEELE, e o SEELE não usa Node para nada.
+Sem Node, `check-runtime` **reprova** em vez de passar — quem chamou pediu pela
+prova.
+
+E fora de `testes/` porque aquilo guarda **vetores**, cujos bytes são o contrato
+e por isso estão declarados `-text`. Um instrumento ali faria aquela regra dizer
+de si mesma o que não é verdade — o guarda de fim de linha apontou isso sozinho.
+
+As quatro corridas: fala antiga durante a subida, confirmação depois do prazo,
+segunda tentativa de encerrar, e colher em vez de receber. Cada uma reprova
+quando o conserto dela é revertido.
+
+**Windows e Linux: pendentes**, como antes.
