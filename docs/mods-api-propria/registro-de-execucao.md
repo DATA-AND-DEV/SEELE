@@ -351,3 +351,47 @@ executor não dispensa medir renderer, mídia e ponte neles.
 **A fatia vertical: não feita.** Entrada, alteração incremental, arraste,
 desenho e uma mídia gerenciada — é a condição que o §5 do contrato põe para
 escolher definitivamente, e ela é E3 e E4.
+
+### As filas têm teto, e a saturação não prende a saída
+
+Havia dois tetos e faltava o terceiro. O de 12 KiB é da **mensagem** — o do
+quadro de controle — e ele não contém o **acumulado**: um MOD num laço enchia a
+memória de quem usa uma mensagem por vez, todas dentro do limite individual.
+
+Agora a fila de saída tem teto de quantidade (64) e de bytes (256 KiB), e os
+dois existem porque as duas saturações são diferentes: sessenta e quatro
+mensagens de 12 KiB são 768 KiB, e um milhão de mensagens de dez bytes é uma
+inundação que a contagem pega e os bytes não.
+
+**Nada bloqueia.** Cheia, a fila recusa e conta; o MOD recebe `false` e fica
+sabendo. Uma fila que fizesse `postar` esperar prenderia a thread do motor — e
+prender a thread do motor é prender o encerramento, que é exatamente o que não
+pode acontecer. Provado: com a fila cheia e o MOD ainda escrevendo, o
+encerramento confirma em menos de cinco segundos.
+
+Ler devolve o lugar, então a saturação é um estado e não uma marca.
+
+### O custo básico, medido
+
+Binário de teste no macOS, `ps -o rss` e `ps -o cputime` sobre o processo
+inteiro, depois de aquecer:
+
+| | memória | sobre a base | subida | CPU ociosa | encerramento |
+| --- | --- | --- | --- | --- | --- |
+| sem instância | 12 608 KiB | — | — | — | — |
+| 1 instância | 13 056 KiB | +448 KiB | 742 µs | 0 centésimos em 1 s | 268 µs |
+| 3 instâncias | 13 600 KiB | +992 KiB (331 KiB cada) | 1,86 ms | 0 centésimos em 1 s | 624 µs |
+
+A primeira instância custa mais que as seguintes — 448 KiB contra ~272 KiB de
+margem —, que é o motor pagando a montagem uma vez só.
+
+**CPU ociosa é zero** na resolução que o sistema dá. Importa num produto de voz:
+um motor que rodasse um laço de espera disputaria com o áudio por não estar
+fazendo nada.
+
+**O que estes números não são:** um orçamento. São de um binário de teste, sem
+renderer, sem mídia e sem janela, numa máquina. A diretriz proíbe transformar
+medida em teto sem repetir a carga equivalente — e a comparação com a referência
+relatada no Windows continua por fazer.
+
+**Windows e Linux: pendentes.** Nada nesta seção foi medido fora do macOS.

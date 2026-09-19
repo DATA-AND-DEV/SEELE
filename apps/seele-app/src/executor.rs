@@ -62,6 +62,78 @@ pub(crate) const TETO_DE_MEMORIA: usize = 8 * 1024 * 1024;
 /// de trabalho; o prazo é o campo ao lado dele em [`Interrupcao`].
 pub(crate) const CONSULTAS_POR_VOLTA: usize = 200_000;
 
+/// Quantas mensagens do MOD cabem esperando a janela lê-las.
+///
+/// **Não é o mesmo teto da mensagem.** Uma mensagem tem 12 KiB, que é o do
+/// quadro de controle; este é o do **acumulado**, e sem ele um MOD num laço
+/// enche a memória de quem usa uma mensagem de cada vez, todas dentro do
+/// limite individual.
+pub(crate) const MENSAGENS_NA_FILA: usize = 64;
+
+/// Quantos bytes cabem na mesma fila.
+///
+/// Existe **ao lado** do teto de quantidade porque as duas saturações são
+/// diferentes: sessenta e quatro mensagens de 12 KiB são 768 KiB, e um milhão
+/// de mensagens de dez bytes é uma inundação que a contagem pegaria e os bytes
+/// não, e vice-versa. Quem enche primeiro fecha a porta.
+pub(crate) const BYTES_NA_FILA: usize = 256 * 1024;
+
+/// A fila de saída, medida.
+///
+/// **Nada aqui bloqueia.** Uma fila que faz quem escreve esperar seria uma fila
+/// que prende a thread do motor — e prender a thread do motor é prender o
+/// encerramento, que é justamente o que não pode acontecer. Cheia, ela recusa e
+/// conta; o MOD recebe `false` e fica sabendo, e quem hospeda lê o contador.
+#[derive(Debug, Default)]
+pub(crate) struct Fila {
+    mensagens: AtomicUsize,
+    bytes: AtomicUsize,
+    recusadas: AtomicUsize,
+}
+
+impl Fila {
+    /// Tenta reservar lugar para uma mensagem. `false` quer dizer «não coube».
+    fn cabe(&self, quantos: usize) -> bool {
+        // Conferido **antes** de somar, e somado só se couber: somar primeiro e
+        // devolver depois deixaria uma janela em que a fila se diz maior do que
+        // é, e duas mensagens simultâneas se recusariam por causa uma da outra.
+        if self.mensagens.load(Ordering::Acquire) >= MENSAGENS_NA_FILA
+            || self.bytes.load(Ordering::Acquire).saturating_add(quantos) > BYTES_NA_FILA
+        {
+            self.recusadas.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
+        self.mensagens.fetch_add(1, Ordering::AcqRel);
+        self.bytes.fetch_add(quantos, Ordering::AcqRel);
+        true
+    }
+
+    /// Uma mensagem saiu da fila.
+    fn tirar(&self, quantos: usize) {
+        self.mensagens.fetch_sub(1, Ordering::AcqRel);
+        self.bytes.fetch_sub(quantos, Ordering::AcqRel);
+    }
+
+    /// Quantas mensagens o MOD tentou pôr e não couberam.
+    ///
+    /// **Contado, e não engolido.** Uma mensagem que o produto descarta em
+    /// silêncio é o defeito que este repositório mais paga; aqui o MOD recebe
+    /// `false` na hora e quem hospeda lê o total depois.
+    #[must_use]
+    pub(crate) fn recusadas(&self) -> usize {
+        self.recusadas.load(Ordering::Relaxed)
+    }
+
+    /// Quanto está esperando ser lido, em mensagens e em bytes.
+    #[must_use]
+    pub(crate) fn ocupacao(&self) -> (usize, usize) {
+        (
+            self.mensagens.load(Ordering::Acquire),
+            self.bytes.load(Ordering::Acquire),
+        )
+    }
+}
+
 /// Os três tetos de uma volta de execução.
 ///
 /// **Separados para poderem ser medidos separadamente**, e a diretriz cobra
@@ -205,6 +277,7 @@ pub(crate) struct ExecutorQuickJs {
     para_dentro: Sender<ParaODentro>,
     para_fora: Receiver<ParaOFora>,
     interrupcao: Arc<Interrupcao>,
+    fila: Arc<Fila>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -219,15 +292,18 @@ impl ExecutorQuickJs {
         let (manda, para_fora) = std::sync::mpsc::channel::<ParaOFora>();
         let interrupcao = Arc::new(Interrupcao::nova(limites));
         let dela = Arc::clone(&interrupcao);
+        let fila = Arc::new(Fila::default());
+        let dele = Arc::clone(&fila);
 
         let thread = std::thread::Builder::new()
             .name("mod-quickjs".into())
-            .spawn(move || rodar(&recebe, &manda, &dela, limites))?;
+            .spawn(move || rodar(&recebe, &manda, &dela, &dele, limites))?;
 
         Ok(Self {
             para_dentro,
             para_fora,
             interrupcao,
+            fila,
             thread: Some(thread),
         })
     }
@@ -257,7 +333,20 @@ impl ExecutorQuickJs {
     /// O que o MOD postou, se já postou alguma coisa.
     #[must_use]
     pub(crate) fn receber(&self, prazo: Duration) -> Option<ParaOFora> {
-        self.para_fora.recv_timeout(prazo).ok()
+        let saiu = self.para_fora.recv_timeout(prazo).ok();
+        // A contabilidade é baixada **ao tirar**, e não ao entregar: é isto que
+        // faz a fila voltar a aceitar assim que alguém a lê. Só mensagem ocupa
+        // lugar; as outras variantes são avisos de tamanho fixo.
+        if let Some(ParaOFora::Mensagem(json)) = &saiu {
+            self.fila.tirar(json.len());
+        }
+        saiu
+    }
+
+    /// A fila de saída, para a bancada olhar.
+    #[must_use]
+    pub(crate) fn fila(&self) -> &Fila {
+        &self.fila
     }
 
     /// **Revoga agora e pede a parada.**
@@ -320,6 +409,7 @@ fn rodar(
     recebe: &Receiver<ParaODentro>,
     manda: &Sender<ParaOFora>,
     interrupcao: &Arc<Interrupcao>,
+    fila: &Arc<Fila>,
     limites: Limites,
 ) {
     let Ok(runtime) = Runtime::new() else {
@@ -342,18 +432,40 @@ fn rodar(
     // é uma jaula construída com cuidado: é o que um contexto de QuickJS **é**
     // antes de alguém acrescentar coisas a ele.
     let saida = manda.clone();
+    let contagem = Arc::clone(fila);
     let montou = contexto.with(|ctx| -> rquickjs::Result<()> {
         let seele = rquickjs::Object::new(ctx.clone())?;
         seele.set(
             "postar",
             Function::new(ctx.clone(), move |json: String| {
-                // O teto é o do quadro de controle, e ele existe aqui também:
-                // uma mensagem que não caberia no fio não pode encher a fila da
-                // janela no caminho até descobrir isso.
+                // **Dois tetos, e eles respondem coisas diferentes.**
+                //
+                // O primeiro é o do quadro de controle: uma mensagem que não
+                // caberia no fio não pode encher a fila da janela no caminho
+                // até descobrir isso.
                 if json.len() > 12 * 1024 {
                     return false;
                 }
-                saida.send(ParaOFora::Mensagem(json)).is_ok()
+                // O segundo é o do **acumulado**. Sem ele, um MOD num laço
+                // enche a memória de quem usa uma mensagem de cada vez, todas
+                // dentro do limite individual — e a fila cresceria até o
+                // processo cair, sem nada no caminho para dizer o que houve.
+                //
+                // Recusar, e não esperar: uma fila que faz esta função
+                // bloquear prende a thread do motor, e prender a thread do
+                // motor é prender o encerramento.
+                if !contagem.cabe(json.len()) {
+                    return false;
+                }
+                let quantos = json.len();
+                if saida.send(ParaOFora::Mensagem(json)).is_ok() {
+                    true
+                } else {
+                    // O outro lado sumiu: devolve o lugar em vez de deixá-lo
+                    // reservado para sempre.
+                    contagem.tirar(quantos);
+                    false
+                }
             })?,
         )?;
         ctx.globals().set("seele", seele)?;
@@ -725,6 +837,206 @@ mod testes {
             Some(ParaOFora::Parou) | None => {}
             Some(outro) => panic!("a resposta entrou depois da revogação: {outro:?}"),
         }
+    }
+
+    /// **A fila tem teto, e o MOD fica sabendo quando bate nele.**
+    ///
+    /// O teto de 12 KiB é da mensagem; este é do acumulado. Sem ele, um MOD num
+    /// laço enche a memória de quem usa uma mensagem de cada vez, todas dentro
+    /// do limite individual — e a fila cresce até o processo cair.
+    #[test]
+    fn a_fila_de_saida_para_de_crescer_e_o_mod_recebe_a_recusa() {
+        let executor = executor();
+        // Dez mil mensagens de um kibibyte: cento e poucos vezes o teto de
+        // bytes, e mais de cem vezes o de quantidade.
+        executor
+            .iniciar(
+                "let coube = 0;                  for (let i = 0; i < 10000; i++) { if (seele.postar('x'.repeat(1024))) coube++; }                  globalThis.__coube = coube;",
+            )
+            .expect("código");
+
+        // Sem ler nada da fila: é assim que a saturação acontece de verdade —
+        // o MOD escreve mais rápido do que a janela lê.
+        std::thread::sleep(Duration::from_millis(300));
+        let (mensagens, bytes) = executor.fila().ocupacao();
+        assert!(
+            mensagens <= MENSAGENS_NA_FILA,
+            "a fila passou do teto de quantidade: {mensagens}"
+        );
+        assert!(
+            bytes <= BYTES_NA_FILA,
+            "a fila passou do teto de bytes: {bytes}"
+        );
+        assert!(
+            executor.fila().recusadas() > 0,
+            "nada foi recusado, então o teto não valeu"
+        );
+    }
+
+    /// **E a fila cheia não prende o encerramento.**
+    ///
+    /// É a propriedade que separa uma fila com teto de uma fila que empurra o
+    /// problema para outro lugar. Se `postar` esperasse por espaço, a thread do
+    /// motor ficaria parada dentro de uma função nativa — e o tratador de
+    /// interrupção não alcança função nativa, que é justamente o que a diretriz
+    /// avisa.
+    #[test]
+    fn uma_fila_cheia_nao_prende_o_encerramento() {
+        let mut executor = executor();
+        executor
+            .iniciar("while (true) { seele.postar('x'.repeat(4096)); }")
+            .expect("código");
+        // A fila enche em milissegundos, e o laço continua tentando.
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            executor.fila().recusadas() > 0,
+            "a fila não chegou a encher, então o teste não mediu a saturação"
+        );
+
+        let levou = executor
+            .encerrou(Duration::from_secs(10))
+            .expect("a saturação prendeu o encerramento");
+        assert!(
+            levou < Duration::from_secs(5),
+            "a saída levou {levou:?} com a fila cheia"
+        );
+    }
+
+    /// E ler a fila devolve o lugar: a saturação é um estado, e não uma marca.
+    #[test]
+    fn ler_a_fila_devolve_o_lugar() {
+        let executor = executor();
+        executor
+            .iniciar("for (let i = 0; i < 200; i++) seele.postar('x'.repeat(1024));")
+            .expect("código");
+        std::thread::sleep(Duration::from_millis(200));
+        let (antes, _) = executor.fila().ocupacao();
+        assert!(antes > 0, "a fila ficou vazia, e o teste não mede nada");
+
+        let _ = executor.receber(Duration::from_secs(2));
+        let (depois, _) = executor.fila().ocupacao();
+        assert!(
+            depois < antes,
+            "ler não devolveu o lugar: {antes} antes, {depois} depois"
+        );
+    }
+
+    /// Quanta memória residente este processo está usando, em KiB.
+    ///
+    /// Lida do sistema operacional, e não estimada: `ps` responde o que o
+    /// gerente de tarefas responderia, que é a medida de que alguém reclama.
+    /// Zero quando não deu para ler — e zero aparece no relatório em vez de
+    /// virar um número inventado.
+    fn residente_kib() -> u64 {
+        campo_do_ps("rss=")
+            .and_then(|texto| texto.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// Quanto de CPU este processo já gastou, em centésimos de segundo.
+    ///
+    /// `ps` devolve `MM:SS.cc`. Centésimos porque é a resolução que ele dá — e
+    /// dizer «dois centésimos» é mais honesto que converter para microssegundos
+    /// um número que não os tem.
+    fn cpu_centesimos() -> u64 {
+        let Some(bruto) = campo_do_ps("cputime=") else {
+            return 0;
+        };
+        let bruto = bruto.trim();
+        let (minutos, resto) = bruto.split_once(":").unwrap_or(("0", bruto));
+        let (segundos, centesimos) = resto.split_once(".").unwrap_or((resto, "0"));
+        let m: u64 = minutos.trim().parse().unwrap_or(0);
+        let s: u64 = segundos.parse().unwrap_or(0);
+        let c: u64 = centesimos.parse().unwrap_or(0);
+        (m * 60 + s) * 100 + c
+    }
+
+    /// Um campo do `ps` sobre este processo, cru.
+    fn campo_do_ps(campo: &str) -> Option<String> {
+        std::process::Command::new("ps")
+            .args(["-o", campo, "-p"])
+            .arg(std::process::id().to_string())
+            .output()
+            .ok()
+            .and_then(|saida| String::from_utf8(saida.stdout).ok())
+    }
+
+    /// **O custo de zero, uma e três instâncias** — medida da bancada.
+    ///
+    /// Não é um teste de aceite: ele não reprova por número, porque um número
+    /// medido numa máquina não é um orçamento. Ele **imprime**, e o que decide
+    /// é quem lê — a diretriz proíbe inventar um teto em MB sem medir, e este é
+    /// o passo que dá o que medir.
+    ///
+    /// Rode com `--nocapture` para ver o relatório.
+    ///
+    /// O que ele mede, e o que ele não mede: memória residente do processo
+    /// inteiro, tempo de subida e tempo de encerramento. **Não** mede impacto
+    /// na voz nem latência de interação — isso precisa do aplicativo de
+    /// verdade, com renderer e mídia, e está registrado como pendente.
+    #[test]
+    fn o_custo_de_zero_uma_e_tres_instancias() {
+        // Um MOD que faz o que um MOD faz: guarda estado e responde.
+        const TRABALHO: &str = "globalThis.n = 0;              globalThis.aoResponder = () => { globalThis.n++; seele.postar('ok'); };              seele.postar('pronto');";
+
+        // Aquecido: a primeira alocação do processo não é o custo de ninguém.
+        {
+            let e = executor();
+            e.iniciar(TRABALHO).expect("código");
+            let _ = uma_mensagem(&e);
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        let base = residente_kib();
+
+        let mut relatorio = vec![format!("sem instância: {base} KiB")];
+        for quantas in [1_usize, 3] {
+            let subida = Instant::now();
+            let mut instancias = Vec::new();
+            for _ in 0..quantas {
+                let e = executor();
+                e.iniciar(TRABALHO).expect("código");
+                assert_eq!(uma_mensagem(&e), "pronto");
+                instancias.push(e);
+            }
+            let subiu_em = subida.elapsed();
+
+            // Uma volta de trabalho em cada, para nenhuma estar apenas parada.
+            for e in &instancias {
+                e.entregar("{}").expect("entregar");
+                assert_eq!(uma_mensagem(e), "ok");
+            }
+            let com = residente_kib();
+
+            // **CPU ociosa.** Instâncias paradas não podem custar: um motor que
+            // rodasse um laço de espera gastaria bateria por não estar fazendo
+            // nada, e num aplicativo de voz isso disputa com o áudio.
+            let cpu_antes = cpu_centesimos();
+            std::thread::sleep(Duration::from_secs(1));
+            let ociosa = cpu_centesimos().saturating_sub(cpu_antes);
+
+            let saida = Instant::now();
+            for e in &mut instancias {
+                e.encerrou(Duration::from_secs(5))
+                    .expect("a instância tem de confirmar a parada");
+            }
+            let saiu_em = saida.elapsed();
+            drop(instancias);
+
+            let sobre_a_base = i64::try_from(com).unwrap_or(0) - i64::try_from(base).unwrap_or(0);
+            let cada = (com as f64 - base as f64) / quantas as f64;
+            relatorio.push(format!(
+                "{quantas} instância(s): {com} KiB ({sobre_a_base:+} KiB sobre a base, {cada:.0} KiB cada) · subida {subiu_em:?} · CPU ociosa {ociosa} centésimos em 1 s · encerramento {saiu_em:?}"
+            ));
+        }
+
+        println!("---- custo do executor QuickJS ----");
+        for linha in &relatorio {
+            println!("{linha}");
+        }
+        println!(
+            "medido em {} · leitura de `ps -o rss`, processo inteiro",
+            std::env::consts::OS
+        );
     }
 
     /// E o descarte acontece na dona do runtime, sem matar thread à força.
