@@ -2045,9 +2045,43 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     }
 }
 
+/// **A janela também escreve no registro.**
+///
+/// Ela não tinha como. Todo o caminho de um pedido de MOD é observável no Rust
+/// — o executor, a bomba, a ponte, o servidor —, e o pedaço que roda na janela
+/// era um vão silencioso no meio dele. A medição de 19/09 parou exatamente ali:
+/// a fala sai do MOD, o `invoke` nunca acontece, e entre as duas coisas não
+/// havia nada escrito.
+///
+/// É a forma mais cara do defeito que o `CLAUDE.md` nomeia — o produto sabe e
+/// não conta — aplicada ao próprio diagnóstico.
+///
+/// `onde` é um identificador curto de uma lista que quem escreve a chamada
+/// escolhe; `o_que` é a frase. Nada disto vai para a tela: é registro, e o
+/// registro é de quem hospeda.
+#[tauri::command]
+fn registrar_da_janela(nivel: String, onde: String, o_que: String) {
+    // Cortado aqui, e não confiando em quem chama: uma frase sem teto vinda da
+    // janela é uma linha de registro sem teto no disco de quem hospeda.
+    let onde: String = onde.chars().take(64).collect();
+    let o_que: String = o_que.chars().take(512).collect();
+    match nivel.as_str() {
+        "aviso" => tracing::warn!(onde = %onde, "{o_que}"),
+        "erro" => tracing::error!(onde = %onde, "{o_que}"),
+        _ => tracing::debug!(onde = %onde, "{o_que}"),
+    }
+}
+
 #[tauri::command]
 fn snapshot(session: State<'_, Session>) -> Result<Snapshot, ConnectionError> {
-    Ok(session.connection()?.snapshot())
+    // **Dito na entrada e na saída.** Um comando que não volta é
+    // indistinguível, no registro, de um que nunca foi chamado — e era essa
+    // ambiguidade que sobrava depois de instrumentar o resto do caminho de um
+    // pedido de MOD, na medição de 19/09.
+    tracing::trace!("retrato pedido");
+    let retrato = session.connection()?.snapshot();
+    tracing::trace!("retrato pronto");
+    Ok(retrato)
 }
 
 /// O que a bancada precisa saber sobre a sessão de agora — etapa E2.
@@ -3448,12 +3482,28 @@ fn assentar_fala(
         // Ela não tem para onde ir: `colher` recusa a geração que saiu, e
         // guardá-la reteria bytes e a instância para sempre esperando uma
         // janela que não vai mais pedir.
+        // **Contada e dita.** A linha acima diz que a fala chegou; sem esta,
+        // «chegou» e «foi guardada» eram indistinguíveis no registro — e uma
+        // fala descartada aqui deixa o MOD esperando para sempre a resposta
+        // que ela carregava. Custou-me seis execuções descobrir isso.
+        tracing::warn!(
+            mod_id = %quem,
+            numero,
+            tipo,
+            "fala de MOD descartada: a geração dela não é mais a de pé"
+        );
         devolver_credito(fila, tipo, corpo.len());
         vivos.contar_descartada(numero);
         return Assentada::Guardada { avisar: false };
     }
     let Some(instancia) = vivos.achar_mut(numero) else {
-        // Sem instância não há onde guardar.
+        // Sem instância não há onde guardar — e sem esta linha, sem rastro.
+        tracing::warn!(
+            mod_id = %quem,
+            numero,
+            tipo,
+            "fala de MOD descartada: a instância não está mais na supervisão"
+        );
         devolver_credito(fila, tipo, corpo.len());
         return Assentada::Guardada { avisar: false };
     };
@@ -3565,6 +3615,17 @@ fn mod_nativo_colher(
         });
     }
     let colhidas = alvo.colher_falas(limite);
+    // **A colheita é dita, com quanto sobrou.** A bomba já dizia cada fala que
+    // guardava; sem o outro lado, «guardada» e «entregue» eram a mesma linha no
+    // registro — e é entre as duas que uma fala pode ficar parada esperando um
+    // aviso que não vem.
+    tracing::debug!(
+        instancia,
+        colhidas = colhidas.len(),
+        restam = alvo.pendentes.len(),
+        avisos = alvo.avisos.len(),
+        "falas colhidas pela janela"
+    );
 
     // Uma que já tinha parado e agora esvaziou sai da supervisão.
     if alvo.parou && alvo.pendentes.is_empty() && alvo.avisos.is_empty() {
@@ -3605,11 +3666,22 @@ fn mod_nativo_entregar(
             motivo: "instancia-nao-esta-ativa".to_owned(),
         });
     }
-    alvo.executor
-        .entregar(&json)
-        .map_err(|_| FalhaNoMod::Recusado {
+    // **Toda recusa é dita, com o tamanho junto.** Uma entrega recusada deixa
+    // quem perguntou esperando para sempre — `SeeleMods.request` é uma promessa
+    // e ela não rejeita sozinha —, e sem o número não dá para saber se foi a
+    // fila cheia ou a mensagem grande.
+    alvo.executor.entregar(&json).map_err(|motivo| {
+        tracing::warn!(
+            instancia,
+            geracao,
+            bytes = json.len(),
+            motivo,
+            "entrega a um MOD nativo recusada"
+        );
+        FalhaNoMod::Recusado {
             motivo: "executor-nao-aceitou".to_owned(),
-        })
+        }
+    })
 }
 
 /// Pede a parada de um MOD nativo, ou de todos os desta sessão.
@@ -6381,6 +6453,7 @@ fn main() {
             aplicar_conjunto_de_mods,
             codigo_do_mod,
             midia_do_mod,
+            registrar_da_janela,
             estado_da_sessao,
             executor_de_mods,
             mod_nativo_reservar,

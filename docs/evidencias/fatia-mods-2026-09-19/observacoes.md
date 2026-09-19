@@ -126,10 +126,46 @@ sessão andava no meio, o pedido saía sem resposta nenhuma — e
 admitir efeito; é o contrário dele. Está consertado, com guarda e reversão.
 
 **Mas não é o que prende o MOD aqui**, e a execução depois do conserto
-continua parando em duas falas. O que sobra, e que não isolei, é o
-`invoke("snapshot")` não se resolvendo. Não vou escrever palpite: o que está
-medido é que acontece, que é intermitente — três de seis execuções —, que o
-prazo de 15 s não cobre, e que o pedido não sai da janela.
+continua parando. Duas hipóteses foram medidas e **mortas**:
+
+- **não é o retrato demorando.** `snapshot` foi instrumentado na entrada e na
+  saída: ele responde em microssegundos, dezenas de vezes por minuto;
+- **não é entrega recusada.** `mod_nativo_entregar` passou a dizer toda recusa
+  com o tamanho junto, e nenhuma apareceu.
+
+O que ficou, e que é uma afirmação bem mais estreita do que a de antes:
+
+> O pedido do MOD sai do executor — a fala aparece no registro — e **nunca vira
+> `invoke("mod_request")`**. As consultas de catálogo da própria janela, que
+> passam pela **mesma função** `pedirAoServidor`, continuam saindo a cada quatro
+> segundos, antes e depois. Então a função é alcançável e a ponte está viva.
+
+Ou seja: entre `atenderOMod` receber a fala e `pedirAoServidor` chamar o
+`invoke`, alguma coisa desiste sem dizer. As saídas conhecidas dessa função —
+geração morta, oito pedidos em voo, carga grande demais — todas **lançam**, e um
+lançamento viraria resposta de recusa e uma quarta fala. Não há quarta fala.
+
+### O que foi feito a respeito
+
+A janela ganhou um caminho de registro — `registrar_da_janela` —, porque ela não
+tinha nenhum: todo o caminho de um pedido era observável no Rust, e o pedaço que
+roda na janela era um vão silencioso no meio dele. Com ele, cada porta de recusa
+de `pedirAoServidor` diz qual fechou, o `catch` de `atenderOMod` diz o que
+falhou, e o `return` de «esta instância já não é a carregada» deixou de ser mudo.
+
+A bomba também passou a dizer o **descarte**. A linha «fala de MOD nativo» sai
+antes da decisão, então «chegou» e «foi guardada» eram indistinguíveis; uma fala
+descartada ali deixa o MOD esperando para sempre a resposta que ela carregava, e
+não deixava rastro. Agora diz qual dos dois motivos foi.
+
+E a colheita diz quantas levou e quantas ficaram, que é o outro lado da mesma
+linha.
+
+**O defeito não reproduziu na execução seguinte**, que subiu inteira — mídia
+servida, região montada, cinco falas. Não o levei até a causa: o que fiz foi
+tirar o silêncio de todos os caminhos por onde ele pode passar. Da próxima vez
+que ele aparecer, o registro dirá onde. Isso é menos do que consertar, e está
+dito como menos.
 
 O registro está em `execucao-pedido-preso.log`.
 

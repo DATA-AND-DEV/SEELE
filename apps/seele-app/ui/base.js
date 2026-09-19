@@ -415,6 +415,27 @@ function ligarControlesDaJanela() {
 const pedidosDeMod = new Map();
 let proximoPedidoDeMod = 0;
 
+/**
+ * Escreve no registro de quem hospeda.
+ *
+ * **A janela não tinha como.** Todo o caminho de um pedido de MOD é observável
+ * no Rust — o executor, a bomba, a ponte, o servidor —, e o pedaço que roda
+ * aqui era um vão silencioso no meio dele. Um defeito que morasse nesse vão não
+ * deixava rastro nenhum, e foi exatamente onde uma medição parou.
+ *
+ * Não vai para a tela: quem lê isto é quem hospeda, e quem usa não tem o que
+ * fazer com a frase.
+ */
+function registrarNoAnfitriao(onde, o_que, nivel = "aviso") {
+  // Nunca lança e nunca espera: um registro que derruba o caminho que ele
+  // observa é pior que registro nenhum.
+  try {
+    invoke("registrar_da_janela", { nivel, onde, oQue: String(o_que) }).catch(() => {});
+  } catch {
+    /* sem ponte, sem registro — e o caminho segue */
+  }
+}
+
 // ------------------------------------------------------- a geração da sessão
 //
 // **Qual execução de sessão é esta** — etapa E2 do contrato de API própria.
@@ -481,13 +502,29 @@ async function pedirAoServidor(id, canal, valor) {
   // A geração é lida **antes** do `await` do `invoke` e conferida depois: entre
   // as duas coisas a sessão pode ter acabado.
   const geracao = geracaoDaSessao;
-  if (!daGeracaoDePe(geracao)) throw new Error("disconnected");
-  if (pedidosDeMod.size >= 8) throw new Error("too-many-requests");
+  // **Cada recusa é dita antes de ser lançada.** Um `throw` daqui vira, lá
+  // dentro, um `catch` do MOD ou uma promessa que ninguém pega — e em nenhum
+  // dos dois casos quem hospeda fica sabendo qual das três portas fechou.
+  if (!daGeracaoDePe(geracao)) {
+    registrarNoAnfitriao("pedido-de-mod", `${id}: geração ${geracao} não é a de pé`);
+    throw new Error("disconnected");
+  }
+  if (pedidosDeMod.size >= 8) {
+    registrarNoAnfitriao("pedido-de-mod", `${id}: oito pedidos em voo, este não cabe`);
+    throw new Error("too-many-requests");
+  }
   const request = ++proximoPedidoDeMod;
   const payload = JSON.stringify(valor);
-  if (new TextEncoder().encode(payload).length > 12 * 1024) throw new Error("request-too-large");
+  if (new TextEncoder().encode(payload).length > 12 * 1024) {
+    registrarNoAnfitriao("pedido-de-mod", `${id}: carga de ${payload.length} caracteres não cabe`);
+    throw new Error("request-too-large");
+  }
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pedidosDeMod.delete(request); reject(new Error("timeout")); }, 15000);
+    const timer = setTimeout(() => {
+      pedidosDeMod.delete(request);
+      registrarNoAnfitriao("pedido-de-mod", `${id}: pedido ${request} venceu o prazo sem resposta`);
+      reject(new Error("timeout"));
+    }, 15000);
     pedidosDeMod.set(request, { resolve, reject, timer, parts: [], geracao });
     invoke("mod_request", { geracao, request, id, channel: canal, payload }).catch(error => {
       clearTimeout(timer); pedidosDeMod.delete(request); reject(error);
@@ -975,7 +1012,18 @@ async function atenderOMod(mod, instancia, m) {
       });
     }
   };
-  if (!minhaInstancia()) return;
+  if (!minhaInstancia()) {
+    // **O último caminho calado, e ele é dito.** Aqui não há a quem responder:
+    // outra instância já tomou o lugar desta, e falar com esta seria falar com
+    // quem saiu. Mas o MOD que perguntou fica esperando para sempre, e quem
+    // hospeda tem direito de saber que isso aconteceu — era o único vão do
+    // caminho de um pedido que ainda não deixava rastro.
+    registrarNoAnfitriao(
+      "atender-mod",
+      `${mod.id}: «${m.tipo}» chegou de uma instância que já não é a carregada`,
+    );
+    return;
+  }
   if (!meu()) {
     responder(false, { erro: "sessao-encerrada" });
     return;
@@ -1009,7 +1057,9 @@ async function atenderOMod(mod, instancia, m) {
         responder(false, { erro: `a API de MODs não conhece «${m.tipo}»` });
     }
   } catch (falha) {
-    responder(false, { erro: String(falha?.message ?? falha) });
+    const motivo = String(falha?.message ?? falha);
+    registrarNoAnfitriao("atender-mod", `${mod.id}: «${m.tipo}» falhou — ${motivo}`);
+    responder(false, { erro: motivo });
   }
 }
 
