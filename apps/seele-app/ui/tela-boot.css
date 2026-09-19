@@ -368,7 +368,7 @@
   margin: 0;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
-  font-size: var(--seele-t-nota);
+  font-size: var(--seele-t-dado);
   letter-spacing: var(--seele-tracking-cartela);
   color: var(--seele-laranja-nerv);
 }

@@ -891,7 +891,7 @@
   margin-left: auto;
   padding: 4px 10px;
   font-family: var(--seele-display);
-  font-size: var(--seele-t-nota);
+  font-size: var(--seele-t-dado);
   letter-spacing: var(--seele-tracking-cartela);
   color: var(--seele-osso);
   background: transparent;
@@ -961,7 +961,7 @@ body[data-cinema="sim"]::after {
   z-index: 20;
   padding: 6px 14px;
   font-family: var(--seele-display);
-  font-size: var(--seele-t-nota);
+  font-size: var(--seele-t-dado);
   letter-spacing: var(--seele-tracking-cartela);
   color: var(--seele-osso);
   background: rgba(5, 4, 3, 0.85);

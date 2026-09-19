@@ -3940,6 +3940,89 @@ fn codigo_do_mod(
     })
 }
 
+/// Um arquivo de mídia de um MOD, pronto para a janela montar.
+#[derive(serde::Serialize)]
+struct MidiaDoMod {
+    /// O `data:` inteiro, **com o tipo que os bytes provaram ser**.
+    ///
+    /// Composto aqui, e não na janela. É a regra do ADR 0027 para anexos, pela
+    /// mesma razão: uma página que junta um tipo a bytes é uma página que pode
+    /// juntar a **alegação de quem mandou** a eles, e a alegação é texto que um
+    /// terceiro escolheu. O manifesto do MOD é exatamente esse texto.
+    uri: String,
+    /// `som` ou `imagem`, de uma lista fechada.
+    ///
+    /// A janela precisa saber qual elemento montar, e recebe a palavra em vez
+    /// de derivá-la do tipo: derivá-la seria uma segunda cópia da lista, e uma
+    /// segunda cópia é uma que pode discordar.
+    papel: &'static str,
+    /// Quantos bytes o arquivo tem, para a contabilidade de recursos da janela.
+    bytes: usize,
+}
+
+/// **Um arquivo que o MOD declarou, para a janela tocar ou mostrar.**
+///
+/// Quatro recusas, todas pelo nome:
+///
+/// - a sessão acabou — montar mídia de uma geração morta é admitir efeito dela;
+/// - o pacote é de outro MOD, achado pelo mesmo hash que a janela mandou;
+/// - o arquivo não está declarado no manifesto, ou tenta sair da pasta — as
+///   duas respondidas por `mods::serve` com a mesma resposta, de propósito;
+/// - os bytes não são de um formato que este produto decodifica, ou passam do
+///   teto.
+///
+/// O teto é por arquivo. O total por instância é da janela, que é quem sabe
+/// quantos já montou — ver `recursosDoMod` em `base.js`.
+#[tauri::command]
+fn midia_do_mod(
+    app: AppHandle,
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    hash: String,
+    caminho: String,
+) -> Result<MidiaDoMod, FalhaNoMod> {
+    if !session.geracao_vale(geracao) {
+        session
+            .comandos_de_geracao_morta
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+    let pacote = seele_ffi::mods::ler_por_hash(&config_dir(&app), &hash)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    if pacote.id != id {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "conteudo-de-outro-mod".to_owned(),
+        });
+    }
+    let bytes = mods::serve(
+        std::path::Path::new(&config_dir(&app)),
+        &format!("/{id}/{caminho}"),
+        &hash,
+    )
+    .ok_or(FalhaNoMod::Recusado {
+        motivo: "arquivo-nao-declarado".to_owned(),
+    })?;
+    // **O tamanho é separado do formato**, e não porque `ler_midia` precise:
+    // são recusas diferentes para quem está escrevendo o MOD, e «não toca»
+    // sem dizer qual das duas é a falha que este repositório mais paga.
+    if bytes.len() > seele_ffi::mods::TETO_DE_MIDIA {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "arquivo-grande-demais".to_owned(),
+        });
+    }
+    let lida = seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
+        motivo: "formato-desconhecido".to_owned(),
+    })?;
+    Ok(MidiaDoMod {
+        uri: lida.uri,
+        papel: lida.papel,
+        bytes: lida.bytes,
+    })
+}
+
 /// A identidade do conjunto que este servidor exige agora.
 ///
 /// A tela de gestão a lê ao abrir e a guarda como **base** do rascunho. É ela
@@ -6275,6 +6358,7 @@ fn main() {
             previa_de_link,
             aplicar_conjunto_de_mods,
             codigo_do_mod,
+            midia_do_mod,
             estado_da_sessao,
             executor_de_mods,
             mod_nativo_reservar,
@@ -6457,6 +6541,7 @@ mod a_tela_le_o_que_o_rust_manda {
                 version: "1.0.0".to_owned(),
                 hash: "0".repeat(64),
                 client: Some("cliente/main.js".to_owned()),
+                arquivos: vec!["som/toque.wav".to_owned()],
                 repo: "https://exemplo".to_owned(),
                 reach: vec!["dom".to_owned()],
                 server: true,

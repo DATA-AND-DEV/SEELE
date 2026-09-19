@@ -7,8 +7,13 @@
   "reach": [
     "regiao",
     "tema",
-    "pedido"
+    "pedido",
+    "evento",
+    "midia"
   ],
   "client": "cliente/main.js",
-  "server": "servidor/main.js"
+  "server": "servidor/main.js",
+  "arquivos": [
+    "som/toque.wav"
+  ]
 }

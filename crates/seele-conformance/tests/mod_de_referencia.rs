@@ -46,10 +46,17 @@ fn vetor(relativo: &str) -> String {
 }
 
 fn base_js() -> String {
+    arquivo_da_janela("base.js")
+}
+
+/// Um arquivo da janela do produto, pelo nome.
+fn arquivo_da_janela(nome: &str) -> String {
     std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/seele-app/ui/base.js"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/seele-app/ui")
+            .join(nome),
     )
-    .expect("ui/base.js")
+    .unwrap_or_else(|erro| panic!("ui/{nome} sumiu: {erro}"))
 }
 
 fn temporario(nome: &str) -> PathBuf {
@@ -197,29 +204,47 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
         );
     }
 
-    // E as quatro coisas que a API oferece são exercitadas, cada uma. Um vetor
-    // que deixasse de chamar uma delas deixaria aquela metade da API sem prova
-    // nenhuma, calado.
-    for exigido in [
-        ("SeeleMods", "request"),
-        ("SeeleMods", "snapshot"),
-        ("SeeleUI", "regiao"),
-        ("SeeleUI", "tema"),
-    ] {
+    // E cada coisa que a API oferece é exercitada. Um vetor que deixasse de
+    // chamar uma delas deixaria aquela metade da API sem prova nenhuma, calado.
+    //
+    // A lista sai do **prelúdio**, e não é escrita aqui: escrita, ela ficaria
+    // para trás no dia em que a API crescesse — e o guarda passaria a dizer
+    // «tudo exercitado» sobre uma lista velha. Foi o que ia acontecer quando
+    // `aoEvento` entrou.
+    let oferecidos: Vec<String> = preludio
+        .lines()
+        .filter_map(|linha| {
+            let corte = linha.trim().split_once(": (")?;
+            let nome = corte.0.trim();
+            nome.chars()
+                .all(|c| c.is_ascii_alphanumeric())
+                .then(|| nome.to_owned())
+        })
+        .collect();
+    assert!(
+        oferecidos.len() >= 5,
+        "o prelúdio passou a oferecer {} coisas, e a leitura desta lista \
+         provavelmente quebrou: {oferecidos:?}",
+        oferecidos.len()
+    );
+    let exercitados: Vec<String> = chamadas_de(&executado)
+        .into_iter()
+        .map(|(_, metodo)| metodo)
+        .collect();
+    for oferecido in &oferecidos {
         assert!(
-            chamadas_de(&executado).contains(&(exigido.0.to_owned(), exigido.1.to_owned())),
-            "o vetor deixou de exercitar `{}.{}`, e a API 3 tem quatro coisas",
-            exigido.0,
-            exigido.1
+            exercitados.contains(oferecido),
+            "o vetor deixou de exercitar `{oferecido}`, que o prelúdio oferece"
         );
     }
 
     // Toda `forma` que ele declara está na gramática que o produto monta.
-    let montar = base
-        .split_once("const FORMAS = {")
-        .expect("a gramática de `montarODeclarado`")
+    let regiao = arquivo_da_janela("mods-regiao.js");
+    let montar = regiao
+        .split_once("const FORMAS_DA_REGIAO = Object.freeze({")
+        .expect("a gramática da região")
         .1
-        .split_once("};")
+        .split_once("});")
         .expect("o fim da gramática")
         .0;
     let mut formas = 0;
@@ -307,6 +332,21 @@ fn chamadas_de(fonte: &str) -> Vec<(String, String)> {
     saida
 }
 
+/// Copia uma árvore inteira, criando as pastas do caminho.
+fn copiar_arvore(de: &Path, para: &Path) {
+    std::fs::create_dir_all(para).expect("criar destino");
+    for entrada in std::fs::read_dir(de).expect("ler origem") {
+        let entrada = entrada.expect("entrada");
+        let origem = entrada.path();
+        let destino = para.join(entrada.file_name());
+        if origem.is_dir() {
+            copiar_arvore(&origem, &destino);
+        } else {
+            std::fs::copy(&origem, &destino).expect("copiar");
+        }
+    }
+}
+
 /// **O pacote atravessa a ponte inteiro.**
 ///
 /// Instalado pelo caminho do produto — endereçado pelo conteúdo —, e lido de
@@ -317,11 +357,13 @@ fn o_vetor_atravessa_a_instalacao_e_volta_byte_a_byte() {
     let raiz = temporario("ponte");
     let lido = seele_ffi::mods::ler_pasta(RAIZ).expect("o vetor tem de ser um pacote válido");
     let destino = raiz.join(seele_ffi::mods::PACOTES).join(&lido.hash);
-    std::fs::create_dir_all(destino.join("cliente")).expect("cliente");
-    std::fs::create_dir_all(destino.join("servidor")).expect("servidor");
-    for arquivo in ["mod.json", "cliente/main.js", "servidor/main.js"] {
-        std::fs::copy(Path::new(RAIZ).join(arquivo), destino.join(arquivo)).expect("copiar");
-    }
+    // **A árvore inteira, e não uma lista escrita aqui.** A lista dizia três
+    // arquivos, e no dia em que o vetor passou a trazer um som ela continuou
+    // dizendo três: o pacote chegava do outro lado sem o som, o hash não batia,
+    // e a mensagem falava de conteúdo em vez de falar do que faltou. Um
+    // instalador que copia metade é exatamente o que este teste existe para
+    // pegar — e ele só pega se for o instalador a decidir o que copiar.
+    copiar_arvore(Path::new(RAIZ), &destino);
 
     let de_volta = seele_ffi::mods::ler_por_hash(&raiz.to_string_lossy(), &lido.hash)
         .expect("o pacote publicado tem de ser lido de volta");

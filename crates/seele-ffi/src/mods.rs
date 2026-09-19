@@ -22,6 +22,12 @@ use seele_core::mods::{hex, refusal_name, Found};
 /// divergência só apareceu no primeiro MOD de verdade.
 pub use seele_core::mods::MOD_API_VERSION;
 
+/// Ler um arquivo de mídia de um MOD — ver [`seele_core::mods::ler_midia`].
+///
+/// Reexportado e não reescrito: a casca não alcança `seele-core` (ADR 0002), e
+/// o `data:` precisa ser composto onde o tipo é decidido pelos bytes.
+pub use seele_core::mods::{ler_midia, MidiaDeMod, TETO_DE_MIDIA};
+
 /// Um MOD em disco, como a janela o desenha.
 ///
 /// Um MOD recusado chega com `refused` preenchido em vez de ficar de fora da
@@ -39,6 +45,13 @@ pub struct ModInstalado {
     pub hash: String,
     /// O caminho do script que a janela carrega, se há metade de cliente.
     pub client: Option<String>,
+    /// Os arquivos que este MOD traz para mostrar ou tocar.
+    ///
+    /// **Declarados no manifesto**, e é por esta lista que a leitura passa: um
+    /// arquivo na pasta que ninguém nomeou não é servido. Vai para a tela de
+    /// aceite pela mesma razão que [`Self::reach`] vai — quem instala lê o que
+    /// o pacote traz antes de dizer sim.
+    pub arquivos: Vec<String>,
     /// O repositório público que o manifesto declara. ADR 0045 o torna
     /// condição de publicação, e é o que uma pessoa abre para ler o que vai
     /// rodar na máquina dela.
@@ -105,6 +118,7 @@ pub fn ler_por_hash(pasta: &str, hash: &str) -> Result<ModInstalado, String> {
             version: instalado.manifest.version,
             hash: hash.to_owned(),
             client: instalado.manifest.client,
+            arquivos: instalado.manifest.arquivos,
             repo: instalado.manifest.repo,
             reach: instalado.manifest.reach,
             server: instalado.manifest.server.is_some(),
@@ -143,6 +157,7 @@ pub fn ler_um(pasta: &str, id: &str) -> Result<ModInstalado, String> {
             version: instalado.manifest.version,
             hash: hex(&instalado.hash),
             client: instalado.manifest.client,
+            arquivos: instalado.manifest.arquivos,
             repo: instalado.manifest.repo,
             reach: instalado.manifest.reach,
             server: instalado.manifest.server.is_some(),
@@ -172,6 +187,7 @@ pub fn ler_pasta(caminho: &str) -> Result<ModInstalado, String> {
             version: instalado.manifest.version,
             hash: hex(&instalado.hash),
             client: instalado.manifest.client,
+            arquivos: instalado.manifest.arquivos,
             repo: instalado.manifest.repo,
             reach: instalado.manifest.reach,
             server: instalado.manifest.server.is_some(),
@@ -204,6 +220,7 @@ fn achatar(found: Found) -> ModInstalado {
             version: instalado.manifest.version,
             hash: hex(&instalado.hash),
             client: instalado.manifest.client,
+            arquivos: instalado.manifest.arquivos,
             repo: instalado.manifest.repo,
             reach: instalado.manifest.reach,
             server: instalado.manifest.server.is_some(),
@@ -214,6 +231,7 @@ fn achatar(found: Found) -> ModInstalado {
             version: String::new(),
             hash: String::new(),
             client: None,
+            arquivos: Vec::new(),
             repo: String::new(),
             reach: Vec::new(),
             server: false,

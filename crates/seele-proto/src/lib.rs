@@ -28,6 +28,7 @@ pub mod encontro;
 pub mod ids;
 pub mod imagem;
 pub mod media;
+pub mod midia_de_mod;
 pub mod mods;
 pub mod screen;
 pub mod signal;

@@ -1,8 +1,13 @@
-//! Roda a bancada de corridas do ciclo de vida de um MOD.
+//! Roda as bancadas de JavaScript do produto.
 //!
-//! `apps/seele-app/bancada/ciclo-do-executor.cjs` carrega `ui/mods-runtime.js`
-//! de verdade e controla a **ordem dos eventos** — que é a única coisa que
-//! separa um caminho correto de um que só parece correto.
+//! Duas, e as duas carregam o arquivo de verdade em vez de uma cópia:
+//!
+//! - `ciclo-do-executor.cjs` põe `ui/mods-runtime.js` num contexto de VM e
+//!   controla a **ordem dos eventos** — que é a única coisa que separa um
+//!   caminho correto de um que só parece correto;
+//! - `regiao-do-mod.cjs` põe `ui/mods-regiao.js` num DOM mínimo e mede o que um
+//!   guarda de texto não alcança: que atualizar não tira do documento quem tem
+//!   foco, e que sair **para o som** em vez de só tirar o nó da tela.
 //!
 //! # Por que aqui, e não em `cargo test`
 //!
@@ -21,25 +26,34 @@ pub(crate) fn run() -> ExitCode {
         .parent()
         .map(std::path::Path::to_path_buf)
         .unwrap_or_default();
-    let bancada = raiz.join("apps/seele-app/bancada/ciclo-do-executor.cjs");
-    if !bancada.is_file() {
-        eprintln!("check-runtime: a bancada sumiu de {}", bancada.display());
+    // **Todas, e não até a primeira que reprova.** Saber que duas quebraram é
+    // uma informação diferente de saber que uma quebrou, e é a que diz se a
+    // mudança foi num lugar ou na fronteira entre os dois.
+    let mut falhou = false;
+    for nome in ["ciclo-do-executor.cjs", "regiao-do-mod.cjs"] {
+        let bancada = raiz.join("apps/seele-app/bancada").join(nome);
+        if !bancada.is_file() {
+            eprintln!("check-runtime: a bancada sumiu de {}", bancada.display());
+            return ExitCode::FAILURE;
+        }
+        match std::process::Command::new("node").arg(&bancada).status() {
+            Ok(estado) if estado.success() => {}
+            Ok(estado) => {
+                eprintln!("check-runtime: {nome} reprovou ({estado})");
+                falhou = true;
+            }
+            // **Nomeado, e não engolido.** Sem Node não dá para rodar, e dizer
+            // «passou» aqui seria a pior resposta possível: quem chamou acharia
+            // que as corridas foram provadas.
+            Err(erro) => {
+                eprintln!("check-runtime: não consegui rodar o `node`: {erro}");
+                eprintln!("  a bancada precisa dele, e o produto não — ver o topo de xtask/src/check_runtime.rs");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if falhou {
         return ExitCode::FAILURE;
     }
-
-    match std::process::Command::new("node").arg(&bancada).status() {
-        Ok(estado) if estado.success() => ExitCode::SUCCESS,
-        Ok(estado) => {
-            eprintln!("check-runtime: a bancada reprovou ({estado})");
-            ExitCode::FAILURE
-        }
-        // **Nomeado, e não engolido.** Sem Node não dá para rodar, e dizer
-        // «passou» aqui seria a pior resposta possível: quem chamou acharia que
-        // as corridas foram provadas.
-        Err(erro) => {
-            eprintln!("check-runtime: não consegui rodar o `node`: {erro}");
-            eprintln!("  a bancada precisa dele, e o produto não — ver o topo de xtask/src/check_runtime.rs");
-            ExitCode::FAILURE
-        }
-    }
+    ExitCode::SUCCESS
 }

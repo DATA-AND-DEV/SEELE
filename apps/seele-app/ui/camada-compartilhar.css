@@ -168,7 +168,7 @@
 .compartilhar-modulo-onde {
   margin: 0;
   font-family: var(--seele-mono);
-  font-size: var(--seele-t-nota);
+  font-size: var(--seele-t-dado);
   line-height: 1.5;
   color: var(--seele-osso);
   word-break: break-all;

@@ -72,7 +72,11 @@ function executorDeWorker(preludio) {
       worker.onerror = (erro) => aoFalhar(erro?.message ?? "");
     },
     entregar(mensagem) {
+      // `postMessage` não recusa: a fila é do agente, e ela não tem teto que
+      // este lado alcance. Devolver uma promessa resolvida mantém a forma do
+      // verbo igual à do executor nativo, que recusa.
       worker?.postMessage(mensagem);
+      return Promise.resolve();
     },
     pedirEncerramento() {
       // `terminate()` é síncrono do ponto de vista de quem chama, e o que ele
@@ -199,13 +203,20 @@ function executorNativo(id, geracao, hash) {
       // Só agora o MOD pode falar, e o ouvinte já sabe com quem.
       await invoke("mod_nativo_ativar", { geracao, instancia: numero });
     },
+    /**
+     * Manda uma mensagem para dentro, **devolvendo a recusa**.
+     *
+     * A fila do executor tem teto, e engolir a recusa aqui faria um evento
+     * perdido virar silêncio: quem digitou veria a tecla não chegar e não
+     * haveria onde ler por quê. Quem chama decide o que fazer com ela.
+     */
     entregar(mensagem) {
-      if (numero === null) return;
-      invoke("mod_nativo_entregar", {
+      if (numero === null) return Promise.reject(new Error("instancia-nao-reservada"));
+      return invoke("mod_nativo_entregar", {
         geracao,
         instancia: numero,
         json: JSON.stringify(mensagem),
-      }).catch(() => {});
+      });
     },
     pedirEncerramento() {
       // Pelo número: encerrar pelo nome mataria a execução seguinte do mesmo

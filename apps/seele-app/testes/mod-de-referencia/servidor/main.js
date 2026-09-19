@@ -20,7 +20,7 @@ globalThis.aoPedir = (contexto, pedido) => {
   const quem = JSON.parse(contexto);
   const o_que = JSON.parse(pedido);
 
-  if (o_que.op !== "contar") {
+  if (o_que.op !== "contar" && o_que.op !== "gravar") {
     // Uma operação que este MOD não conhece é recusada pelo nome, e não
     // devolvida vazia: quem escreveu a chamada precisa saber por que ela não
     // respondeu.
@@ -30,7 +30,23 @@ globalThis.aoPedir = (contexto, pedido) => {
   const vezes = Number(dados.vezes ?? "0") + 1;
   // O quintal guarda texto, e só é gravado se este pedido terminar bem.
   dados.vezes = String(vezes);
-  return JSON.stringify({ vezes, canal: quem.channel });
+
+  if (o_que.op === "gravar") {
+    // **A autorização é do servidor, e vem do contexto.** A janela manda o que
+    // a pessoa digitou; quem decide se ela pode gravar é esta linha, com o que
+    // o servidor sabe — e não um campo que a janela tenha mandado junto.
+    //
+    // Um MOD que confiasse no pedido estaria deixando quem escreve a chamada
+    // escolher a própria permissão.
+    if (!quem.write) {
+      return JSON.stringify({ erro: "sem permissão de escrita neste servidor" });
+    }
+    const apelido = String(o_que.apelido ?? "").slice(0, 64);
+    dados.apelido = apelido;
+    return JSON.stringify({ vezes, apelido, canal: quem.channel });
+  }
+
+  return JSON.stringify({ vezes, apelido: dados.apelido ?? "", canal: quem.channel });
 };
 
 globalThis.aoAcontecer = (momento) => {

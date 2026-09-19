@@ -778,9 +778,19 @@ const PRELUDIO: &str = r#"
   const pendentes = new Map();
   let proximo = 0;
 
+  let ouvinte = null;
+
   globalThis.aoResponder = (texto) => {
     let m;
     try { m = JSON.parse(texto); } catch { return; }
+    if (m.tipo === 'evento') {
+      if (!ouvinte) return;
+      // O erro do MOD fica com o MOD: um ouvinte que lança não pode impedir o
+      // próximo evento de chegar. A volta inteira falharia, e o anfitrião a
+      // relataria como `Falhou` — que é o MOD com defeito, não este.
+      try { ouvinte(m); } catch (erro) { seele.postar(JSON.stringify({ tipo: 'erro-no-evento', erro: String(erro) })); }
+      return;
+    }
     const espera = pendentes.get(m.n);
     if (!espera) return;
     pendentes.delete(m.n);
@@ -806,6 +816,16 @@ const PRELUDIO: &str = r#"
   globalThis.SeeleUI = Object.freeze({
     regiao: (conteudo) => pedir('regiao', { conteudo }),
     tema: (valores) => pedir('tema', { valores }),
+    // ---- os eventos ----
+    //
+    // **A janela fala com o MOD sem que ele tenha perguntado.** Um pedido tem
+    // número e resposta; um evento não tem nem um nem outro, porque quem
+    // digita não espera o MOD confirmar que recebeu a tecla.
+    //
+    // Um ouvinte só, e o último vence. Uma lista de ouvintes seria um MOD
+    // registrando dentro de um laço e a janela mantendo a lista viva; e
+    // «remover» exigiria devolver um cancelador que um MOD pode perder.
+    aoEvento: (fn) => { ouvinte = typeof fn === 'function' ? fn : null; },
   });
 
   // ---- tempo ----

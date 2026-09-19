@@ -516,9 +516,19 @@ const PRELUDIO_DO_MOD = `
   const pendentes = new Map();
   let proximo = 0;
 
+  let ouvinte = null;
+
   self.onmessage = (evento) => {
     const m = evento.data;
-    if (!m || m.tipo !== 'resposta') return;
+    if (!m) return;
+    if (m.tipo === 'evento') {
+      if (!ouvinte) return;
+      // O erro do MOD fica com o MOD: um ouvinte que lança não pode impedir o
+      // próximo evento de chegar.
+      try { ouvinte(m); } catch (erro) { console.error('SeeleUI.aoEvento', erro); }
+      return;
+    }
+    if (m.tipo !== 'resposta') return;
     const espera = pendentes.get(m.n);
     if (!espera) return;
     pendentes.delete(m.n);
@@ -546,6 +556,16 @@ const PRELUDIO_DO_MOD = `
     // inteira sai — e não sobra regra de CSS nem nó solto pela página.
     regiao: (conteudo) => pedir('regiao', { conteudo }),
     tema: (valores) => pedir('tema', { valores }),
+    // ---- os eventos ----
+    //
+    // **A janela fala com o MOD sem que ele tenha perguntado.** Um pedido tem
+    // número e resposta; um evento não tem nem um nem outro, porque quem
+    // digita não espera o MOD confirmar que recebeu a tecla.
+    //
+    // Um ouvinte só, e o último vence. Uma lista de ouvintes seria um MOD
+    // registrando dentro de um laço e a janela mantendo a lista viva; e
+    // «remover» exigiria devolver um cancelador que um MOD pode perder.
+    aoEvento: (fn) => { ouvinte = typeof fn === 'function' ? fn : null; },
   });
 })();
 `;
@@ -615,10 +635,6 @@ async function montarOMod(mod) {
   // geração viaja com ela: quem atende as mensagens precisa saber de que sessão
   // ela é, e não de quem tem o identificador agora.
   const instancia = new InstanciaDeMod(mod.id, mod.hash, geracao, executor);
-  // O executor é o primeiro recurso da lista, e sai por último — `encerrar`
-  // percorre ao contrário —, porque só faz sentido soltar o que ele desenhou
-  // depois de ele ter parado de desenhar.
-  instancia.registrar("a região", () => limparARegiaoDoMod(mod.id));
 
   // **Guardada e ativa antes de o executor subir**, e a ordem custou uma
   // medição para ser descoberta.
@@ -672,45 +688,106 @@ async function montarOMod(mod) {
  * A gramática é pequena de propósito. Cada forma nova é uma decisão de API, em
  * vez de um MOD descobrir que consegue.
  */
-function desenharARegiaoDoMod(id, conteudo) {
+/**
+ * As regiões de pé, por instância.
+ *
+ * **Por instância, e não por `id`.** Um MOD recarregado dentro da mesma sessão
+ * é outra instância, e o que a região anterior segurava — mídia carregando,
+ * ouvintes, quadros pendentes — não é dela. Guardar por `id` faria o
+ * recarregamento herdar recursos de quem já saiu.
+ */
+const regioesDosMods = new Map();
+
+/**
+ * Desenha o que um MOD declarou, reaproveitando o que já está na tela.
+ *
+ * O trabalho mora em `RegiaoDeMod`, em `mods-regiao.js`. Esta função é a
+ * amarração: onde a região vive, quem é o dono dela, e como ela fala de volta.
+ */
+function desenharARegiaoDoMod(mod, instancia, conteudo) {
   const palco = $("regioes-dos-mods");
   if (!palco) return;
-  let regiao = palco.querySelector(`[data-mod="${CSS.escape(id)}"]`);
+  let regiao = regioesDosMods.get(instancia);
   if (!regiao) {
-    regiao = elemento("section", "regiao-de-mod");
-    regiao.dataset.mod = id;
-    palco.append(regiao);
+    const raiz = elemento("section", "regiao-de-mod");
+    raiz.dataset.mod = mod.id;
+    palco.append(raiz);
+    regiao = new RegiaoDeMod(mod.id, donoDaRegiao(mod, instancia), raiz);
+    regioesDosMods.set(instancia, regiao);
+    // Registrada **na criação**, e não depois de o MOD desenhar: uma região
+    // criada e não registrada é uma região que a saída não encontra.
+    instancia.registrar(`${mod.id}: a região`, () => limparARegiaoDoMod(mod.id, instancia));
   }
   palco.hidden = false;
-  repovoar(regiao, montarODeclarado(conteudo));
+  const recusados = regiao.aplicar(conteudo);
+  // **Recusar em silêncio é o defeito que este repositório mais paga.** Um MOD
+  // cuja árvore não coube precisa saber disso onde ele a escreveu.
+  if (recusados > 0) {
+    throw new Error(`${recusados} nó(s) não couberam nos limites da região`);
+  }
 }
 
-/** Uma forma declarada vira nós, ou nada. Recursiva, e com teto de fundura. */
-function montarODeclarado(no, fundura = 0) {
-  // Sem teto, um MOD manda uma árvore de dez mil níveis e a janela estoura na
-  // recursão — dentro do produto, e não dentro do worker.
-  if (fundura > 8 || no === null || no === undefined) return [];
-  if (typeof no === "string") return [document.createTextNode(no)];
-  if (Array.isArray(no)) return no.flatMap((um) => montarODeclarado(um, fundura + 1));
-  if (typeof no !== "object") return [];
-
-  const FORMAS = { texto: "p", titulo: "h3", linha: "div", lista: "ul", item: "li" };
-  const etiqueta = FORMAS[no.forma];
-  // Uma forma que a API não conhece não vira `div` por conveniência: virar
-  // seria a gramática crescer sem ninguém decidir.
-  if (!etiqueta) return [];
-  const elem = elemento(etiqueta, "regiao-de-mod-parte");
-  elem.append(...montarODeclarado(no.dentro, fundura + 1));
-  return [elem];
+/**
+ * Quem a região chama, e o que ela tem direito de fazer.
+ *
+ * As três perguntas do §5 do contrato numa função só: esta instância ainda é a
+ * deste MOD, ela está ativa, e a geração dela é a de pé. Tudo o que a região
+ * faz para fora — falar com o MOD, pedir um arquivo — passa por aqui.
+ */
+function donoDaRegiao(mod, instancia) {
+  const meu = () =>
+    modsCarregados.get(mod.id) === instancia && instancia.admite(geracaoDaSessao);
+  return {
+    instancia,
+    geracao: instancia.geracao,
+    podeFalar: meu,
+    /**
+     * Um evento da janela para o MOD.
+     *
+     * **Sem resposta e sem espera.** Um evento não é um pedido: quem aperta
+     * uma tecla não fica esperando o MOD dizer que recebeu, e uma fila cheia
+     * não pode travar a digitação. O que a fila recusar é contado e dito uma
+     * vez, em vez de virar silêncio.
+     */
+    falar: (dados) => {
+      if (!meu()) return;
+      Promise.resolve(instancia.executor.entregar({ tipo: "evento", ...dados })).catch((falha) => {
+        // Já saiu? Então a recusa é o desfecho certo, e não um defeito.
+        if (!meu()) return;
+        anotarEstadoDoMod(mod.id, "carregado", `evento recusado: ${falha?.message ?? falha}`);
+      });
+    },
+    /** Um arquivo que o manifesto deste MOD declarou. */
+    carregarMidia: async (caminho) => {
+      const geracao = geracaoDaSessao;
+      if (!meu()) throw new Error("disconnected");
+      const midia = await invoke("midia_do_mod", {
+        geracao,
+        id: mod.id,
+        hash: mod.hash,
+        caminho,
+      });
+      // Depois do `await`: a sessão pode ter acabado enquanto os bytes vinham,
+      // e montá-los seria tocar som de uma sessão que já não existe.
+      if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
+      return midia;
+    },
+  };
 }
 
-/** Tira a região de um MOD da tela, inteira — e o tema junto. */
-function limparARegiaoDoMod(id) {
+/** Tira a região de uma instância da tela, inteira — e o tema junto. */
+function limparARegiaoDoMod(id, instancia) {
+  const regiao = regioesDosMods.get(instancia);
+  if (regiao) {
+    regioesDosMods.delete(instancia);
+    regiao.soltar();
+  }
   const palco = $("regioes-dos-mods");
-  palco?.querySelector(`[data-mod="${CSS.escape(id)}"]`)?.remove();
   // A faixa não existe vazia: uma régua de 1px em cima de nada é uma borda que
   // aparece sem ter o que separar.
   if (palco) palco.hidden = palco.childElementCount === 0;
+  // O tema é por `id` de propósito: ele é sobre o nome que reservou o token, e
+  // um MOD recarregado continua sendo o mesmo nome.
   if (temaDosMods.delete(id)) escreverOTemaDaSessao();
 }
 
@@ -892,7 +969,7 @@ async function atenderOMod(mod, instancia, m) {
         break;
       }
       case "regiao":
-        desenharARegiaoDoMod(mod.id, m.conteudo);
+        desenharARegiaoDoMod(mod, instancia, m.conteudo);
         responder(true, { valor: null });
         break;
       case "tema":

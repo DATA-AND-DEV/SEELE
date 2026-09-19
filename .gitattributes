@@ -48,6 +48,11 @@ crates/seele-lancador/testes/lista-de-revogacao-de-teste.json  -text
 # arquivo cujos bytes são conferidos não deve depender de um analisador ser
 # tolerante: no dia em que ele deixar de ser, uma chave malformada não recusa
 # um catálogo adulterado — recusa **todos** eles.
+# A mídia que um MOD traz. O `text=auto` já não tocaria num WAV, mas um vetor
+# que o Git precise **detectar** como binário é um vetor que depende de
+# heurística — e esta linha é a diferença entre depender dela e não depender.
+*.wav                                                -text
+
 *.minisig                                            -text
 *.pub                                                -text
 *.base64                                             -text

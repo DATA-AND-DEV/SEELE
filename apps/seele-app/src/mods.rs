@@ -68,11 +68,15 @@ pub(crate) fn serve(config_dir: &Path, url_path: &str, hash: &str) -> Option<Vec
     if pacote.id != id {
         return None;
     }
-    let declared = pacote.client?;
-    // Only what the manifest declares. Today that is the client script; when a
-    // MOD may ship more than one file, this list grows and this guard does not
-    // change shape.
-    if Path::new(&declared) != relative.as_path() {
+    // Only what the manifest declares. That is the client script **and** the
+    // files the manifest lists under `arquivos` — a MOD may ship more than one
+    // file now, so the list grew and this guard did not change shape.
+    let declarados = pacote
+        .client
+        .iter()
+        .chain(pacote.arquivos.iter())
+        .any(|declarado| Path::new(declarado) == relative.as_path());
+    if !declarados {
         return None;
     }
 

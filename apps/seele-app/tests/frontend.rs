@@ -292,6 +292,57 @@ fn argumentos_da_chamada(a_partir_do_parenteses: &str) -> Vec<String> {
     args
 }
 
+/// **Todo token que uma folha usa existe.**
+///
+/// `var(--seele-nao-existe)` não é erro em CSS: a propriedade some, e o
+/// elemento fica com o valor herdado. Escrevi `min-height:
+/// var(--seele-alvo-minimo)` num controle novo e o token não existia — a caixa
+/// ficava com a altura do texto, e nada avisava. É o mesmo defeito de campo que
+/// o guarda de classes existe para pegar, por uma porta que ele não olhava.
+///
+/// Um `var(--x, algo)` com reserva é outra coisa: ali a ausência tem resposta
+/// escrita, e por isso passa.
+#[test]
+fn todo_token_que_uma_folha_usa_esta_declarado() {
+    let folhas = styles() + &read("ui/tokens.css");
+    let mut declarados: BTreeSet<String> = BTreeSet::new();
+    for (posicao, _) in folhas.match_indices("--seele-") {
+        let resto = &folhas[posicao..];
+        let nome: String = resto
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-')
+            .collect();
+        // Declaração é `--nome:`; uso é `var(--nome`. O que vem antes do nome
+        // diz qual dos dois é.
+        if resto[nome.len()..].starts_with(':') {
+            declarados.insert(nome);
+        }
+    }
+
+    let mut sem_declaracao: Vec<String> = Vec::new();
+    for (posicao, _) in folhas.match_indices("var(--seele-") {
+        let resto = &folhas[posicao + "var(".len()..];
+        let nome: String = resto
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-')
+            .collect();
+        // Com reserva, a ausência já tem resposta escrita.
+        if resto[nome.len()..].trim_start().starts_with(',') {
+            continue;
+        }
+        if !declarados.contains(&nome) {
+            sem_declaracao.push(nome);
+        }
+    }
+    sem_declaracao.sort();
+    sem_declaracao.dedup();
+    assert!(
+        sem_declaracao.is_empty(),
+        "uma folha usa token que ninguém declara — a propriedade some e o \
+         elemento fica com o valor herdado, sem nada avisar: {sem_declaracao:?}"
+    );
+}
+
 #[test]
 fn toda_classe_que_o_script_aplica_tem_regra_de_css() {
     // **Nasceu de um defeito de campo, e o sintoma não parecia de código.**
@@ -324,6 +375,23 @@ fn toda_classe_que_o_script_aplica_tem_regra_de_css() {
     let script = without_comments(&scripts());
     let mut sem_regra: Vec<String> = Vec::new();
     let mut chamadas = 0_usize;
+
+    // **`className = "..."` também conta.** O guarda lia só `elemento(`, e um
+    // arquivo novo que montasse por `createElement` punha classe sem regra na
+    // tela sem ninguém notar — que é exatamente o defeito de campo descrito
+    // acima, de volta por uma porta que o guarda não olhava. Aconteceu com
+    // `mods-regiao.js` no dia em que ele nasceu.
+    for (posicao, _) in script.match_indices(".className = \"") {
+        let resto = &script[posicao + ".className = \"".len()..];
+        let Some(fim) = resto.find('"') else { continue };
+        chamadas += 1;
+        for token in resto[..fim].split_whitespace() {
+            if !regras.contains(token) {
+                sem_regra.push(token.to_owned());
+            }
+        }
+    }
+
     for (posicao, _) in script.match_indices("elemento(") {
         // Fatiado por **byte**, que é o que `match_indices` devolve. Indexar
         // um vetor de `char` com esse número trata acento como dois passos, e
@@ -690,13 +758,17 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
 
     let base = position(&sources, "base.js");
     for (at, source) in sources.iter().enumerate() {
-        // `mods-runtime.js` é a exceção, e ela é deliberada: ele declara a
-        // classe e o executor que `base.js` **constrói** — um `class` e um
-        // `const` estão na zona morta até o script deles rodar, e construí-los
-        // antes disso lançaria. Ele não chama nada de `base.js` ao carregar; as
-        // chamadas que ele faz acontecem dentro do encerramento de uma
+        // `mods-runtime.js` e `mods-regiao.js` são as exceções, e elas são
+        // deliberadas: os dois declaram classes que `base.js` **constrói** — um
+        // `class` está na zona morta até o script dele rodar, e construí-lo
+        // antes disso lançaria. Nenhum dos dois chama nada de `base.js` ao
+        // carregar; as chamadas que eles fazem acontecem dentro do ciclo de uma
         // instância, que é sempre depois de tudo estar de pé.
-        if !source.ends_with(".js") || source == "base.js" || source == "mods-runtime.js" {
+        if !source.ends_with(".js")
+            || source == "base.js"
+            || source == "mods-runtime.js"
+            || source == "mods-regiao.js"
+        {
             continue;
         }
         assert!(
@@ -10728,23 +10800,27 @@ fn the_csp_admits_mods_and_never_loosens_further() {
 /// `createTextNode`, `textContent`) e **não interpreta**.
 #[test]
 fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
-    let base = without_comments(&read("ui/base.js"));
-    let montar = js_function(&base, "function montarODeclarado(");
+    let regiao = without_comments(&read("ui/mods-regiao.js"));
+    let criar = js_function(&regiao, "\n  criar(plano)");
 
     // `elemento` é o construtor desta casa — `createElement` mais `textContent`
-    // — e é por ele que o produto monta. Texto vira nó de texto, e nunca uma
-    // atribuição de marcação.
-    for exigido in ["elemento(", "createTextNode"] {
-        assert!(
-            montar.contains(exigido),
-            "`montarODeclarado` deixou de usar `{exigido}`: {montar}"
-        );
-    }
+    // — e é por ele que o produto monta. É também por ele que o guarda de CSS
+    // enxerga as classes, e montar por fora dele põe classe sem regra na tela.
+    assert!(
+        criar.contains("elemento(FORMAS_DA_REGIAO[plano.forma]"),
+        "`criar` deixou de montar por `elemento`: {criar}"
+    );
+    let base = without_comments(&read("ui/base.js"));
     let construtor = js_function(&base, "function elemento(");
     assert!(
         construtor.contains("createElement") && construtor.contains("textContent"),
         "`elemento` deixou de ser `createElement` + `textContent`, e é por ele \
          que o que um MOD declara vira nó: {construtor}"
+    );
+    let reconciliar = js_function(&regiao, "\n  reconciliar(pai, planos, fundura, orcamento)");
+    assert!(
+        reconciliar.contains("createTextNode"),
+        "texto deixou de virar nó de texto: {reconciliar}"
     );
     for proibido in [
         "innerHTML",
@@ -10754,29 +10830,125 @@ fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
         "document.write",
     ] {
         assert!(
-            !montar.contains(proibido),
-            "`montarODeclarado` passou a interpretar marcação por `{proibido}`, \
-             e o conteúdo dela vem de um MOD: {montar}"
+            !regiao.contains(proibido),
+            "a região passou a interpretar marcação por `{proibido}`, e o \
+             conteúdo dela vem de um MOD"
         );
     }
 
     // Uma forma que a API não conhece não vira elemento por conveniência.
+    let planejar = js_function(&regiao, "\n  planejar(no, fundura, orcamento)");
     assert!(
-        montar.contains("if (!etiqueta) return [];"),
+        planejar.contains("if (!forma) return [];"),
         "uma forma desconhecida deixou de ser recusada; a gramática passa a \
-         crescer sem ninguém decidir: {montar}"
+         crescer sem ninguém decidir: {planejar}"
     );
 
     // E há teto de fundura: sem ele, uma árvore que o MOD manda estoura a pilha
-    // **da janela**, e não a dele.
+    // **da janela**, e não a dele. E teto de nós, que a fundura sozinha não
+    // alcança: uma árvore rasa e larguíssima cabe em oito níveis.
     assert!(
-        montar.contains("fundura >"),
+        planejar.contains("fundura > LIMITES_DA_REGIAO.fundura"),
         "o teto de fundura saiu: uma árvore funda mandada por um MOD derruba a \
-         janela do produto: {montar}"
+         janela do produto: {planejar}"
+    );
+    assert!(
+        planejar.contains("orcamento.nos <= 0"),
+        "o teto de nós saiu: uma árvore rasa e larguíssima cabe na fundura e \
+         custa layout do mesmo jeito: {planejar}"
     );
 }
 
-/// **O tema de um MOD não sai da sessão, e não passa por folha de estilo.**
+/// **O que a região cria nasce com dono, teto e descarte.**
+///
+/// A diretriz de 19/09: «cada recurso deve nascer com dono, limites e
+/// descarte». As três coisas são verificáveis na forma, e a que mais some numa
+/// refatoração é a terceira — um recurso novo entra com o que o cria e sem o
+/// que o solta, e ninguém percebe até alguém sair da sessão.
+#[test]
+fn todo_recurso_da_regiao_nasce_registrado_e_com_teto() {
+    let regiao = without_comments(&read("ui/mods-regiao.js"));
+
+    // Toda forma que cria recurso passa pelo contador, e o contador tem teto.
+    let criar = js_function(&regiao, "\n  criar(plano)");
+    assert!(
+        criar.contains("FORMAS_COM_TETO[plano.forma]")
+            && criar.contains(">= LIMITES_DA_REGIAO[classe]")
+            && criar.contains("return null"),
+        "a criação deixou de conferir o teto da forma: {criar}"
+    );
+
+    // E cada montagem que cria recurso o registra. `guardar` é a única porta:
+    // ela amarra ao elemento **e** à instância, e é isso que faz a saída
+    // encontrar o que a árvore já não alcança.
+    for montagem in [
+        "montarCampo(elem, plano)",
+        "montarBotao(elem, plano)",
+        "montarTela(elem, plano)",
+        "montarMidia(elem, plano)",
+    ] {
+        let corpo = js_function(&regiao, &format!("\n  {montagem}"));
+        assert!(
+            corpo.contains("this.guardar("),
+            "`{montagem}` cria recurso e não o registra, então a saída não o \
+             encontra: {corpo}"
+        );
+    }
+    let guardar = js_function(&regiao, "\n  guardar(elem, porque, descartar)");
+    assert!(
+        guardar.contains("this.recursos.set(elem,")
+            && guardar.contains("this.dono.instancia?.registrar("),
+        "`guardar` deixou de amarrar o descarte aos dois donos: o elemento, \
+         para sair com o nó, e a instância, para sair com a sessão: {guardar}"
+    );
+
+    // O descarte da mídia para o som **e** tira a fonte. Só remover o nó deixa
+    // os bytes decodificados presos, e um que ainda não começou pode começar.
+    let midia = js_function(&regiao, "\n  montarMidia(elem, plano)");
+    assert!(
+        midia.contains("tocador.pause?.()") && midia.contains(r#"tocador.removeAttribute("src")"#),
+        "o descarte da mídia deixou de parar e de tirar a fonte: {midia}"
+    );
+    // E o quadro pendente do arraste também é recurso.
+    let tela = js_function(&regiao, "\n  montarTela(elem, plano)");
+    assert!(
+        tela.contains("cancelAnimationFrame(quadro)"),
+        "o quadro pendente do arraste não é cancelado no descarte, e ele roda \
+         uma vez depois de a sessão ter acabado: {tela}"
+    );
+}
+
+/// **Atualizar não pode custar o foco de quem está digitando.**
+///
+/// A região montava com `replaceChildren`, e isso tira **todo** nó do documento
+/// e o devolve: um campo em edição perdia foco, cursor, seleção e o que um IME
+/// estivesse compondo, a cada atualização que o MOD mandasse. Um MOD que
+/// redesenha a cada tecla era, por construção, um MOD em que não se digita.
+#[test]
+fn a_atualizacao_da_regiao_e_incremental_e_nao_reescreve_quem_tem_foco() {
+    let regiao = without_comments(&read("ui/mods-regiao.js"));
+
+    assert!(
+        !regiao.contains("replaceChildren"),
+        "a região voltou a refazer a árvore inteira, e refazer é perder o foco"
+    );
+    let reconciliar = js_function(&regiao, "\n  reconciliar(pai, planos, fundura, orcamento)");
+    assert!(
+        reconciliar.contains("if (atual !== no) pai.insertBefore(no, atual);"),
+        "a reconciliação voltou a mover nós que já estavam no lugar, e mover é \
+         remover: {reconciliar}"
+    );
+    // O valor de uma caixa com foco não é reescrito. Reescrevê-lo move o cursor
+    // para o fim mesmo quando o texto é igual — e um MOD que ecoa o que grava
+    // tornaria a digitação impossível a partir da segunda letra.
+    let campo = js_function(&regiao, "\n  atualizarCampo(elem, plano)");
+    assert!(
+        campo.contains("if (document.activeElement === caixa) return;"),
+        "o valor de um campo em edição voltou a ser reescrito: {campo}"
+    );
+}
+
+/// **O tema de um MOD não sai da sessão, e não passa por folha de estilo.**/// **O tema de um MOD não sai da sessão, e não passa por folha de estilo.**
 ///
 /// ADR 0049. Escrito em `document.documentElement`, o tema ia para a tela de
 /// entrada, para o launcher e para a bateria, e só saía se o MOD cooperasse.
@@ -11396,10 +11568,7 @@ fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
     // abre-se uma janela por onde entra uma reserva viva numa sessão que
     // acabou; é uma janela de poucas instruções, que nenhuma disputa por
     // thread alcança, e por isso a forma é o que a guarda.
-    let revogar = rust
-        .split_once("fn revogar_em(")
-        .expect("`revogar_em`")
-        .1;
+    let revogar = rust.split_once("fn revogar_em(").expect("`revogar_em`").1;
     let revogar = revogar.split_once("\n/// ").map_or(revogar, |(a, _)| a);
     assert!(
         revogar.contains("revogar_geracao"),

@@ -280,6 +280,51 @@ fn identifier_of(root: &Path, dir: &Path) -> Option<String> {
     Some(format!("{author}/{name}"))
 }
 
+/// Um arquivo de mídia de um MOD, lido e pronto para uma janela montar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiaDeMod {
+    /// O `data:` inteiro, com o tipo que os bytes provaram ser.
+    pub uri: String,
+    /// `som` ou `imagem`, de uma lista fechada.
+    pub papel: &'static str,
+    /// Quantos bytes o arquivo tem.
+    pub bytes: usize,
+}
+
+/// **O teto por arquivo de mídia de um MOD.**
+pub use seele_proto::midia_de_mod::TETO_DE_ARQUIVO as TETO_DE_MIDIA;
+
+/// Lê um arquivo de mídia de MOD, ou diz que não.
+///
+/// **Aqui, e não na casca.** A composição do `data:` é a mesma decisão do ADR
+/// 0027 para anexos: uma casca que junta um tipo a bytes é uma casca que pode
+/// juntar a alegação de quem mandou a eles. O manifesto de um MOD é
+/// exatamente essa alegação, e por isso o tipo sai dos bytes e o `data:` sai
+/// daqui inteiro.
+///
+/// Nada para o que passa do teto e para o que não é um formato conhecido: são
+/// recusas diferentes para quem está escrevendo o MOD, e quem as separa é a
+/// casca, que já conhece o tamanho.
+#[must_use]
+pub fn ler_midia(bytes: &[u8]) -> Option<MidiaDeMod> {
+    if bytes.len() > TETO_DE_MIDIA {
+        return None;
+    }
+    let tipo = seele_proto::midia_de_mod::sniff(bytes)?;
+    // O mesmo codificador do `data:` de um anexo. Um segundo aqui seria um
+    // segundo alfabeto para o mesmo RFC.
+    let mut uri = String::with_capacity(bytes.len().div_ceil(3) * 4 + 32);
+    uri.push_str("data:");
+    uri.push_str(tipo.media_type());
+    uri.push_str(";base64,");
+    crate::preview::encode_base64_publico(bytes, &mut uri);
+    Some(MidiaDeMod {
+        uri,
+        papel: tipo.papel(),
+        bytes: bytes.len(),
+    })
+}
+
 /// The name of a refusal, from a closed list.
 ///
 /// Exists here and not in the shell for the reason above: the shell cannot name
@@ -294,6 +339,8 @@ pub fn refusal_name(why: &Refused) -> &'static str {
         Refused::ApiTooOld { .. } => "api-too-old",
         Refused::MalformedId => "malformed-id",
         Refused::Empty => "empty",
+        Refused::ArquivoInvalido { .. } => "arquivo-invalido",
+        Refused::ArquivosDemais { .. } => "arquivos-demais",
     }
 }
 

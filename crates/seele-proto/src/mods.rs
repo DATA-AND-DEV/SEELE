@@ -87,6 +87,17 @@ pub struct Manifest {
     /// Read but not executed until the runtime lands.
     #[serde(default)]
     pub server: Option<String>,
+    /// Os arquivos que este MOD traz para mostrar ou tocar, relativos à pasta.
+    ///
+    /// **Declarados, e não descobertos.** A regra de `serve` é «só o que o
+    /// manifesto declara», e a mídia entra por ela em vez de abrir a pasta: um
+    /// arquivo que ninguém nomeou não é lido, e o que o MOD é fica escrito num
+    /// lugar que quem revisa o pacote lê antes de instalar.
+    ///
+    /// O **tipo** de cada um vem dos bytes, nunca desta lista nem da extensão:
+    /// ver `midia_de_mod::sniff`.
+    #[serde(default)]
+    pub arquivos: Vec<String>,
 }
 
 /// Why a manifest was refused.
@@ -152,7 +163,35 @@ pub enum Refused {
     /// Neither half is declared, so the MOD does nothing.
     #[error("mod declares neither a client nor a server half")]
     Empty,
+
+    /// Um arquivo declarado não é um caminho dentro do pacote.
+    ///
+    /// **Recusado no manifesto, e não na leitura.** Um `..` que só fosse
+    /// recusado na hora de ler seria um pacote instalado que pede, a cada
+    /// sessão, um arquivo de fora — e a recusa apareceria como mídia que não
+    /// toca, em vez de como um MOD que não devia ter sido instalado.
+    #[error("mod declares file {posicao}, which is not a path inside the package")]
+    ArquivoInvalido {
+        /// Qual da lista, contando do zero.
+        posicao: usize,
+    },
+
+    /// A lista de arquivos passa do que o produto carrega.
+    #[error("mod declares {quantos} files, the ceiling is {teto}")]
+    ArquivosDemais {
+        /// Quantos o manifesto traz.
+        quantos: usize,
+        /// Quantos cabem.
+        teto: usize,
+    },
 }
+
+/// **Quantos arquivos um MOD pode declarar.**
+///
+/// Dezesseis. A mídia de um MOD é ilustração e efeito, e uma lista maior que
+/// isto é um acervo — que é outra coisa, com outro custo, e que pediria
+/// carregamento por demanda em vez de declaração no manifesto.
+pub const TETO_DE_ARQUIVOS: usize = 16;
 
 /// Reads a `mod.json`.
 ///
@@ -192,7 +231,81 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
     if manifest.client.is_none() && manifest.server.is_none() {
         return Err(Refused::Empty);
     }
+    if manifest.arquivos.len() > TETO_DE_ARQUIVOS {
+        return Err(Refused::ArquivosDemais {
+            quantos: manifest.arquivos.len(),
+            teto: TETO_DE_ARQUIVOS,
+        });
+    }
+    for (posicao, arquivo) in manifest.arquivos.iter().enumerate() {
+        // O mesmo caminho que a leitura usa, e conferido aqui: uma lista que
+        // passasse por esta porta e fosse recusada lá seria um pacote válido
+        // com mídia que nunca toca.
+        if inner_path(&arquivo.split('/').collect::<Vec<_>>()).is_none() {
+            return Err(Refused::ArquivoInvalido { posicao });
+        }
+    }
     Ok(manifest)
+}
+
+#[cfg(test)]
+mod testes_de_arquivos {
+    use super::*;
+
+    fn manifesto(arquivos: &str) -> String {
+        format!(
+            r#"{{"schema":1,"id":"a/b","version":"1","api":{MOD_API_VERSION},
+                "repo":"https://example.invalid/x","client":"c.js","arquivos":{arquivos}}}"#
+        )
+    }
+
+    #[test]
+    fn um_arquivo_que_sobe_de_pasta_e_recusado_no_manifesto() {
+        // Recusado aqui, e não na leitura: um pacote instalado que pede um
+        // arquivo de fora a cada sessão é um pacote que não devia ter entrado.
+        for fora in [r#"["../fora.wav"]"#, r#"["/etc/senha"]"#, r#"[""]"#] {
+            assert_eq!(
+                read_manifest(&manifesto(fora)),
+                Err(Refused::ArquivoInvalido { posicao: 0 }),
+                "aceitou «{fora}»"
+            );
+        }
+        // E diz **qual**: com quinze arquivos na lista, «um deles» não ajuda
+        // quem está consertando o pacote.
+        assert_eq!(
+            read_manifest(&manifesto(r#"["som/a.wav","../fora.wav"]"#)),
+            Err(Refused::ArquivoInvalido { posicao: 1 })
+        );
+    }
+
+    #[test]
+    fn a_lista_tem_teto_e_o_teto_diz_os_dois_numeros() {
+        let demais = format!(
+            "[{}]",
+            (0..=TETO_DE_ARQUIVOS)
+                .map(|n| format!("\"a{n}.wav\""))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert_eq!(
+            read_manifest(&manifesto(&demais)),
+            Err(Refused::ArquivosDemais {
+                quantos: TETO_DE_ARQUIVOS + 1,
+                teto: TETO_DE_ARQUIVOS,
+            })
+        );
+    }
+
+    #[test]
+    fn um_manifesto_sem_a_lista_continua_valendo() {
+        // O campo nasceu com `default`: um MOD publicado antes dele não
+        // declara arquivo nenhum, e não pode passar a ser recusado por isso.
+        let antigo = format!(
+            r#"{{"schema":1,"id":"a/b","version":"1","api":{MOD_API_VERSION},
+                "repo":"https://example.invalid/x","client":"c.js"}}"#
+        );
+        assert_eq!(read_manifest(&antigo).map(|m| m.arquivos), Ok(Vec::new()));
+    }
 }
 
 /// `author/name`, both halves non-empty, and nothing that could climb out of a
