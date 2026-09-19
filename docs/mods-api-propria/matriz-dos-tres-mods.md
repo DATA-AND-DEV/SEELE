@@ -8,7 +8,7 @@ recuperação de função. Onde há prova, ela é nomeada.
 A coluna «exercitado» aponta o teste que roda o comportamento, não um guarda que
 confere que a linha existe.
 
-## ESTILO — 14 provas
+## ESTILO — 15 provas
 
 | Comportamento | API 2 | Depois da migração | Agora | Exercitado por |
 | --- | --- | --- | --- | --- |
@@ -22,22 +22,24 @@ confere que a linha existe.
 | Recusa de contraste dita na tela | sim | **não** | sim | `a recusa do servidor vira frase` |
 | Só quem administra edita | sim | n/a | sim | `quem não administra vê o tema` |
 | Preservar o que este MOD não edita | n/a | n/a | sim | `quem administra edita e grava` |
-| Arredondamento e brilho | sim | não | **recusado por desenho**, com a razão dita | `o_que_a_marca_proibe_e_recusado_com_a_razao` |
+| Arredondamento e brilho | sim | não | sim, editados e aplicados | `arredondamento e brilho se escolhem, gravam e aplicam` |
 
-**Fechado como recusa, e não como pendência.** `docs/marca.md` proíbe «sombra,
-gradiente, contorno extra, raio» — a palavra que ele usa é «nunca». A API de tema
-recusa `arredondamento` e `brilho` **pelo nome**, com a razão e a citação da
-marca, antes da recusa genérica de «a API de tema não conhece»: quem pede
-descobre que a resposta é não, e por quê, em vez de descobrir que o nome não
-existe.
+**Implementados, e não recusados.** Uma versão anterior desta matriz os deu por
+fechados como «recusa por desenho», citando `docs/marca.md`. A citação estava
+errada: aquele documento diz de si mesmo que governa a imagem do produto e que
+**nada nele alcança a estética**, e a regra que eu citei é sobre o símbolo. Quem
+governa o recuo da interface é `specs/07-estetica.md`.
 
-O servidor continua guardando os dois, e o ESTILO continua devolvendo-os
-intactos. Quando há algo guardado, ele escreve uma linha sobre **os dados de
-quem está ali** — «guardado neste servidor e não desenhado aqui» — e não um
-aviso de indisponibilidade. Zerá-los seria apagar a escolha de outra pessoa por
-não saber mostrá-la.
+`--seele-raio` e `--seele-sombra` já existiam em `tokens.css`, valendo `0` e
+`none`, lidos por três folhas. O que faltava era alguém poder escrevê-los.
 
-## PERFIS — 31 provas
+O produto continua abrindo em canto reto e sem sombra — é a estética dele —, e
+`specs/07-estetica.md` passou a nomear a exceção: um tema de servidor levanta os
+dois, **só naquela sessão**, e eles saem com ela. `arredondamento` é inteiro de
+0 a 24; `brilho` é sim ou não, e a sombra que ele liga é montada pelo produto a
+partir de um token do produto. O ESTILO manda número e booleano, e nunca CSS.
+
+## PERFIS — 32 provas
 
 | Comportamento | API 2 | Depois da migração | Agora | Exercitado por |
 | --- | --- | --- | --- | --- |
@@ -51,28 +53,32 @@ não saber mostrá-la.
 | Remover retrato e faixa | sim | **não** | sim | `editar e gravar` (botões) |
 | Recusa do servidor dita na tela | sim | **não** | sim | `editar e gravar muda o perfil` |
 | Consulta em lotes de 32 | sim | sim | sim | `consulta pessoas em lotes` |
-| Marca na lista de pessoas do produto | sim | não | sim, como dado que o produto desenha | `o pronome de quem o escreveu aparece na lista` |
+| Cartão na lista de pessoas do produto | sim | não | sim, declarado e montado pelo renderer do produto | `o cartão de quem escreveu algo aparece na lista` |
 
-**Fechado sem reabrir a janela.** O que a API 2 chamava de «cartão» era o MOD
-desenhando dentro da lista do produto, e isso continua fora: o ADR 0049 tirou o
-MOD da janela e nada aqui o traz de volta. O que existe agora é o inverso — o MOD
-**entrega dado** e o produto desenha.
+**O cartão de verdade, e sem reabrir a janela.** Uma versão anterior fechou esta
+linha com uma **etiqueta** — um texto curto e uma cor. Era menos do que a API 2
+tinha, e chamar isso de cartão era a mesma troca de nome que esta matriz existe
+para não deixar passar.
 
-Uma marca é um texto de até 24 caracteres e uma cor `#rrggbb`, por `id` de
-pessoa, até 128 pessoas por MOD. Quem escolhe posição, tamanho, tipografia e
-vizinho é `linhaDoRoster`, em `tela-sessao.js`. A cor pinta **o contorno** e
-nunca o texto: no texto ela atropelaria o contraste que aquela tela mede. E a
-marca sai junto com o MOD — um selo de um MOD que não está mais de pé é uma
-informação que ninguém pode corrigir nem tirar.
+O que existe agora é o cartão: retrato, nome exibido, pronome e status, por
+pessoa. E ele não devolve a janela ao MOD, porque **o renderer é o mesmo** — a
+declaração é a da região, e quem a monta é `planejar`/`reconciliar` com
+`createElement` e `textContent`.
 
-O PERFIS usa isso para o **pronome**, e não para o nome exibido: a lista já
-escreve um nome, e dois nomes na mesma linha é a linha dizendo duas coisas. Quem
-não escreveu pronome não ganha selo nenhum.
+O que muda em relação à região são duas coisas. A **gramática é menor**: nada de
+`campo`, `escolha`, `botao`, `arquivo` ou `tela`, porque a linha do roster já tem
+um botão do produto e dividir foco e área de toque com um terceiro é
+indepurável. E os **tetos são próprios**: 64 pessoas, 24 nós por cartão, 4
+níveis, com contador e orçamento de mídia separados dos da região.
 
-Os limites, a recusa inteira e o descarte rodam em
-`apps/seele-app/bancada/marcas-na-lista.cjs`, contra o código de `base.js`. Que o
-desenho continua sendo do produto é guardado por
-`a_marca_de_um_mod_e_dado_e_quem_desenha_e_o_produto`.
+O retrato vem do servidor deste MOD, pela mesma origem da ficha — nunca de um
+endereço. O tamanho dele é da folha do produto. E o cartão sai com a região: é a
+mesma `soltar` que para o som.
+
+Os limites, a gramática, a reconciliação e o descarte rodam em
+`apps/seele-app/bancada/regiao-do-mod.cjs`, contra o código de verdade num DOM
+mínimo. Que o desenho continua sendo do produto é guardado por
+`o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto`.
 
 ## MESA — 41 provas
 
@@ -127,9 +133,11 @@ Tudo o que está marcado «sim · agora» roda contra o servidor de verdade de c
 MOD, no harness que executa as duas metades. Nenhuma linha desta tabela foi
 marcada por um aviso ter sumido da tela.
 
-**Nenhuma linha está pendente.** A única que não é «sim» é a recusa do ESTILO, e
-ela é uma decisão da marca escrita antes destes MODs existirem: aparece como
-recusa dita — com razão e citação — e não como função que não veio.
+**Nenhuma linha está pendente, e nenhuma está fechada por recusa ou por
+etiqueta.** As duas que estavam — arredondamento/brilho e o cartão — foram
+implementadas. A lição das duas é a mesma: fechar uma linha trocando o que ela
+pede por algo menor, e dar outro nome ao que sobrou, é a forma de a matriz
+deixar de medir o que ela existe para medir.
 
 O harness dos três MODs é um arquivo só, igual nos três repositórios, que se
 ramifica pelo `id` do manifesto. Ele passou a guardar **o que o MOD pediu** além

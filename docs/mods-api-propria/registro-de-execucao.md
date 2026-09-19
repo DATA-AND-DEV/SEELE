@@ -1099,3 +1099,70 @@ região, o foco, o arraste e o descarte são provados por
 `bancada/regiao-do-mod.cjs` e `bancada/marcas-na-lista.cjs`, contra o código de
 verdade num DOM mínimo. É prova mais fraca que a nativa, e está dita como mais
 fraca.
+
+## Os dois que eu havia fechado por menos
+
+Duas linhas da matriz foram reabertas e implementadas. As duas estavam fechadas
+por algo que não era a função pedida, e nos dois casos o erro tem o mesmo
+formato: **trocar o que a linha pede por algo menor e dar outro nome ao que
+sobrou.**
+
+### Arredondamento e brilho: a citação estava errada
+
+Eu os fechei como «recusa por desenho», citando `docs/marca.md`. Aquele
+documento diz de si mesmo, na terceira linha, que governa «a única imagem que o
+produto tem de si mesmo» e que **nada nele alcança a estética**. A regra que eu
+citei é sobre o símbolo. Quem governa o recuo da interface é
+`specs/07-estetica.md`, e eu não o tinha lido.
+
+E `--seele-raio` e `--seele-sombra` **já existiam** em `tokens.css`, valendo `0`
+e `none`, lidos por três folhas. O produto já tinha o lugar guardado; o que
+faltava era alguém poder escrevê-los.
+
+A exceção está escrita onde a regra está, com as três condições que a tornam
+admissível: inteiro de 0 a 24, sim-ou-não com a sombra montada pelo produto, e a
+marca nunca acompanhando. Abrir uma segunda exige emendar aquele parágrafo.
+
+### O cartão: a etiqueta não era o cartão
+
+A primeira entrega foi um texto curto e uma cor por pessoa. Era **menos do que a
+API 2 tinha**, e chamar aquilo de «cartão na lista» era exatamente a troca de
+nome que a matriz existe para não deixar passar.
+
+O cartão de verdade é declaração na **mesma gramática da região**, montada pelo
+**mesmo renderer**. Isso é o que o mantém sendo do produto — não uma promessa,
+mas `planejar`, `reconciliar`, `elemento`, `createElement`, `textContent`.
+
+Duas diferenças em relação à região, e as duas com razão:
+
+- **gramática menor** — sem `campo`, `escolha`, `botao`, `arquivo` e `tela`. A
+  linha do roster já tem um botão do produto, e dividir ordem de tabulação e
+  área de toque com um terceiro é indepurável. Uma forma recusada é **contada**,
+  e o número volta ao MOD;
+- **tetos próprios e menores** — 64 pessoas, 24 nós, 4 níveis, com contador e
+  orçamento de mídia separados. Os 512 nós da região valeriam por pessoa, e uma
+  lista de vinte viraria dez mil nós na lateral.
+
+### Duas coisas que as provas pegaram, e uma que elas não pegaram
+
+**Uma reversão passou**: tirar o descarte dos cartões de `soltar()` não reprovou
+nada. As duas asserções eram vazias — `cartaoDe` devolve `null` só por a região
+estar solta, e a raiz do cartão nunca fora pendurada em lugar nenhum. Com a raiz
+pendurada numa lista de mentira, como o produto faz, a mesma reversão reprova.
+
+**Um `cp` apagou um teste.** O harness dos três MODs é um arquivo só, copiado
+entre os repositórios; eu copiei a versão do PERFIS por cima da do ESTILO depois
+de ter acrescentado um teste lá. A contagem de `npm test` foi quem contou: seis
+blocos ESTILO e onze provas. Repor foi fácil; perceber é que não seria, se eu
+não tivesse olhado o número.
+
+**E o que só a corrida nativa pegou.** `darCartoesDoMod` exigia que a região já
+existisse, e o vetor de referência pede cartão antes de desenhar. O quintal dele
+registrou `recusou: este MOD não tem região de pé para dar cartão` — uma
+armadilha de ordem que a API não conta a ninguém, e que o PERFIS teria
+encontrado em produção, porque ele monta os cartões no mesmo ciclo em que pinta
+o painel. Os dois caminhos passam a criar a região pelo mesmo lugar, e criá-la
+para um cartão não abre faixa vazia nenhuma.
+
+Depois do conserto: `janela.cartoes = ok pessoa=1 recusados=0`, lido do quintal
+com `sqlite3`.

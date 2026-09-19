@@ -59,6 +59,52 @@ const LIMITES_DA_REGIAO = Object.freeze({
   bytesDeMidia: 4 * 1024 * 1024,
 });
 
+/**
+ * Os tetos de um cartão na lista de pessoas do produto.
+ *
+ * Separados dos da região, e por um motivo que não é organização: um cartão é
+ * desenhado **dentro de uma tela do produto**, ao lado do nome de uma pessoa,
+ * e há um por pessoa. Os mesmos 512 nós da região valeriam por cartão — uma
+ * lista de vinte pessoas viraria dez mil nós dentro da lateral que o produto
+ * usa para dizer quem está falando.
+ *
+ * O teto de nós é apertado de propósito: um cartão é um retrato, um nome e
+ * duas linhas. O que não couber em vinte e quatro nós é uma região, e a região
+ * já existe.
+ */
+const LIMITES_DO_CARTAO = Object.freeze({
+  /** Pessoas com cartão, por MOD. */
+  cartoes: 64,
+  /** Nós num cartão, somando todos os níveis. */
+  nos: 24,
+  /** Níveis de fundura dentro de um cartão. */
+  fundura: 4,
+  /** Mídias somadas em todos os cartões deste MOD. */
+  midias: 64,
+  /** Bytes de mídia somados em todos os cartões deste MOD. */
+  bytesDeMidia: 8 * 1024 * 1024,
+});
+
+/**
+ * As formas que um cartão aceita — e por que as outras ficam de fora.
+ *
+ * **Nada que receba foco ou clique.** A linha do roster já tem um botão: o
+ * nome, que abre a moderação. Um `botao` de MOD ao lado dele dividiria a ordem
+ * de tabulação e a área de toque de um controle do produto com um terceiro — e
+ * quem apertasse errado não teria como saber de quem era o botão que respondeu.
+ *
+ * `campo` e `escolha` ficam de fora pela mesma razão, e `tela` por outra: um
+ * canvas com arraste dentro de uma lista que rola é o arraste do MOD brigando
+ * com a rolagem de quem lê.
+ *
+ * O que sobra — texto, título, linha, lista, item e mídia — é o cartão que a
+ * API 2 tinha: um retrato, um nome escolhido, e o que a pessoa escreveu sobre
+ * si.
+ */
+const FORMAS_DO_CARTAO = Object.freeze(
+  new Set(["texto", "titulo", "linha", "lista", "item", "midia"]),
+);
+
 /** As formas que a API conhece, e a etiqueta que cada uma vira. */
 const FORMAS_DA_REGIAO = Object.freeze({
   texto: "p",
@@ -118,9 +164,13 @@ class RegiaoDeMod {
     /** O que cada elemento segura, para soltar quando ele sai. */
     this.recursos = new Map();
     /** Quantos de cada forma com teto estão de pé. */
-    this.contagem = { campos: 0, telas: 0, midias: 0 };
+    this.contagem = { campos: 0, telas: 0, midias: 0, midiasDeCartao: 0 };
     /** Bytes de mídia montados nesta região. */
     this.bytesDeMidia = 0;
+    /** Bytes de mídia montados nos cartões, contados à parte. */
+    this.bytesDeCartao = 0;
+    /** A raiz do cartão de cada pessoa, por `id` em texto. */
+    this.raizesDeCartao = new Map();
     /** Quantos nós a última montagem recusou, por teto. */
     this.recusados = 0;
     /** Onde cada figura ficou em cada tela, para o toque saber o que pegou. */
@@ -157,9 +207,12 @@ class RegiaoDeMod {
    * plano é um objeto pequeno, e um nó é layout. Recusar na montagem faria a
    * árvore de dez mil nós ser paga antes de ser negada.
    */
-  planejar(no, fundura, orcamento) {
-    if (fundura > LIMITES_DA_REGIAO.fundura || no === null || no === undefined) return [];
-    if (Array.isArray(no)) return no.flatMap((um) => this.planejar(um, fundura, orcamento));
+  planejar(no, fundura, orcamento, permitidas = null) {
+    const teto = permitidas ? LIMITES_DO_CARTAO.fundura : LIMITES_DA_REGIAO.fundura;
+    if (fundura > teto || no === null || no === undefined) return [];
+    if (Array.isArray(no)) {
+      return no.flatMap((um) => this.planejar(um, fundura, orcamento, permitidas));
+    }
     if (typeof no === "string") {
       if (orcamento.nos <= 0) { this.recusados += 1; return []; }
       orcamento.nos -= 1;
@@ -167,10 +220,18 @@ class RegiaoDeMod {
     }
     if (typeof no !== "object") return [];
 
-    const forma = FORMAS_DA_REGIAO[no.forma] ? no.forma : "";
+    let forma = FORMAS_DA_REGIAO[no.forma] ? no.forma : "";
     // Uma forma que a API não conhece não vira `div` por conveniência: virar
     // seria a gramática crescer sem ninguém decidir.
-    if (!forma) return [];
+    //
+    // E num cartão, uma forma que a **região** conhece mas o cartão não é
+    // recusada do mesmo jeito, e contada: o MOD precisa saber que pôs um botão
+    // onde botão não entra, em vez de vê-lo sumir.
+    if (forma && permitidas && !permitidas.has(forma)) forma = "";
+    if (!forma) {
+      if (permitidas) this.recusados += 1;
+      return [];
+    }
     if (orcamento.nos <= 0) { this.recusados += 1; return []; }
     orcamento.nos -= 1;
 
@@ -184,7 +245,12 @@ class RegiaoDeMod {
       forma,
       chave,
       no,
-      dentro: this.planejar(no.dentro, fundura + 1, orcamento),
+      // **De quem são os tetos deste nó.** Uma mídia de cartão não conta no
+      // orçamento da região, e o contrário também não: os dois desenham em
+      // telas diferentes, com números diferentes, e somá-los faria um retrato
+      // na lista tirar um som da região sem explicação nenhuma.
+      cartao: Boolean(permitidas),
+      dentro: this.planejar(no.dentro, fundura + 1, orcamento, permitidas),
     }];
   }
 
@@ -248,8 +314,14 @@ class RegiaoDeMod {
 
   /** Monta um nó novo, ou nada quando ele não cabe num teto. */
   criar(plano) {
-    const classe = FORMAS_COM_TETO[plano.forma];
-    if (classe && this.contagem[classe] >= LIMITES_DA_REGIAO[classe]) return null;
+    // Uma mídia de cartão tem contador e teto próprios: ver `plano.cartao`.
+    const classe = plano.cartao && plano.forma === "midia"
+      ? "midiasDeCartao"
+      : FORMAS_COM_TETO[plano.forma];
+    const limite = classe === "midiasDeCartao"
+      ? LIMITES_DO_CARTAO.midias
+      : LIMITES_DA_REGIAO[classe];
+    if (classe && this.contagem[classe] >= limite) return null;
 
     // Por `elemento`, que é o construtor desta casa — `createElement` mais
     // `textContent` — e é também por onde o guarda de CSS enxerga as classes
@@ -739,6 +811,12 @@ class RegiaoDeMod {
    *   monta nada: ela encontra a região já solta.
    */
   montarMidia(elem, plano) {
+    // De qual bolso esta mídia sai. Decidido **aqui**, e guardado na closure:
+    // decidi-lo depois do `await` exigiria um campo de instância, e um campo
+    // de instância estaria valendo a mídia errada quando duas carregam juntas.
+    const bolso = plano.cartao
+      ? { conta: "bytesDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia, quantas: "midiasDeCartao" }
+      : { conta: "bytesDeMidia", teto: LIMITES_DA_REGIAO.bytesDeMidia, quantas: "midias" };
     const estado = { elemento: null, cancelado: false, bytes: 0, ouvintes: [] };
     this.guardar(elem, `midia ${plano.chave}`, () => {
       estado.cancelado = true;
@@ -756,8 +834,8 @@ class RegiaoDeMod {
         tocador.removeAttribute("src");
         tocador.load?.();
       }
-      this.bytesDeMidia -= estado.bytes;
-      this.contagem.midias -= 1;
+      this[bolso.conta] -= estado.bytes;
+      this.contagem[bolso.quantas] -= 1;
     });
     elem.dataset.estado = "carregando";
     // **Duas origens, e só duas.** Do pacote, por um arquivo que o manifesto
@@ -787,7 +865,7 @@ class RegiaoDeMod {
       // e montar mídia em qualquer um dos três casos é tocar som de uma
       // sessão que já não existe.
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
-      if (this.bytesDeMidia + midia.bytes > LIMITES_DA_REGIAO.bytesDeMidia) {
+      if (this[bolso.conta] + midia.bytes > bolso.teto) {
         elem.dataset.estado = "cheia";
         this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada" });
         return;
@@ -800,7 +878,7 @@ class RegiaoDeMod {
       tocador.src = midia.uri;
       estado.elemento = tocador;
       estado.bytes = midia.bytes;
-      this.bytesDeMidia += midia.bytes;
+      this[bolso.conta] += midia.bytes;
       elem.dataset.estado = "pronta";
       elem.append(tocador);
       for (const [nome, aviso] of [["play", "tocando"], ["pause", "pausada"], ["ended", "terminou"], ["error", "falhou"]]) {
@@ -837,6 +915,87 @@ class RegiaoDeMod {
     } else if (!tocador.paused) {
       tocador.pause();
     }
+  }
+
+  // -------------------------------------------------------- os cartões
+
+  /**
+   * Os cartões que este MOD declara para a lista de pessoas do produto.
+   *
+   * # Por que isto não é o MOD desenhando na janela
+   *
+   * O ADR 0049 tirou o MOD da janela, e nada aqui o traz de volta. O que chega
+   * é **a mesma declaração da região** — as mesmas formas, o mesmo
+   * `planejar`, o mesmo `reconciliar`, o mesmo `elemento` — montada pelo mesmo
+   * renderer, com `createElement` e `textContent` e nunca com HTML de texto.
+   * O MOD não alcança nó nenhum, não escolhe onde o cartão entra na linha, e
+   * não recebe evento de dentro dele.
+   *
+   * O que muda em relação à região é o que ele **pode** declarar (ver
+   * `FORMAS_DO_CARTAO`) e quanto (ver `LIMITES_DO_CARTAO`). Um cartão é
+   * desenhado ao lado do nome de uma pessoa, numa lista que o produto usa para
+   * dizer quem está falando: um teto de região ali seria a lateral inteira.
+   *
+   * # O descarte
+   *
+   * A raiz de cada cartão é guardada aqui, e não só no documento. Quando um
+   * MOD para de declarar uma pessoa, a raiz dela sai e solta o que segurava —
+   * e quando a região inteira sai, `soltar` percorre estas raízes também.
+   * Sem isso, o retrato de um MOD que não está mais de pé continuaria na lista
+   * até alguém trocar de servidor.
+   *
+   * @param {object} cartoes `{ [id da pessoa]: declaração }`.
+   * @returns {number} quantos nós foram recusados por teto ou por forma.
+   */
+  declararCartoes(cartoes) {
+    if (this.solta) return 0;
+    this.recusados = 0;
+    const pedidos = Object.entries(cartoes ?? {});
+    if (pedidos.length > LIMITES_DO_CARTAO.cartoes) {
+      throw new Error(
+        `um MOD dá cartão a até ${LIMITES_DO_CARTAO.cartoes} pessoas, e vieram ${pedidos.length}`,
+      );
+    }
+
+    const vivos = new Set();
+    for (const [quem, declaracao] of pedidos) {
+      const pessoa = String(quem);
+      // Um cartão sem nada dentro não é um cartão: seria uma moldura vazia ao
+      // lado de um nome, que é o produto anunciando uma ausência que ninguém
+      // pediu para anunciar.
+      const orcamento = { nos: LIMITES_DO_CARTAO.nos };
+      const planos = this.planejar(declaracao, 0, orcamento, FORMAS_DO_CARTAO);
+      if (planos.length === 0) continue;
+      vivos.add(pessoa);
+
+      let raiz = this.raizesDeCartao.get(pessoa);
+      if (!raiz) {
+        raiz = elemento("div", "pessoa-cartao");
+        raiz.dataset.mod = this.id;
+        this.raizesDeCartao.set(pessoa, raiz);
+      }
+      this.reconciliar(raiz, planos, 0, orcamento);
+    }
+
+    for (const [pessoa, raiz] of Array.from(this.raizesDeCartao)) {
+      if (vivos.has(pessoa)) continue;
+      this.soltarCartao(pessoa, raiz);
+    }
+    return this.recusados;
+  }
+
+  /** Tira o cartão de uma pessoa e solta o que ele segurava. */
+  soltarCartao(pessoa, raiz) {
+    this.raizesDeCartao.delete(pessoa);
+    this.soltarSubarvore(raiz);
+    for (const filho of Array.from(raiz.children)) this.soltarSubarvore(filho);
+    raiz.remove();
+  }
+
+  /** A raiz do cartão desta pessoa, ou nada quando este MOD não deu um. */
+  cartaoDe(pessoa) {
+    if (this.solta) return null;
+    return this.raizesDeCartao.get(String(pessoa)) ?? null;
   }
 
   // ------------------------------------------------------- os recursos
@@ -883,6 +1042,12 @@ class RegiaoDeMod {
     if (this.solta) return;
     this.solta = true;
     for (const filho of Array.from(this.raiz.children)) this.soltarSubarvore(filho);
+    // **E os cartões**, que moram na lista do produto e não sob esta raiz. Um
+    // retrato de um MOD que saiu continuaria ao lado do nome de alguém até a
+    // próxima troca de servidor — e ninguém teria como tirá-lo.
+    for (const [pessoa, raiz] of Array.from(this.raizesDeCartao)) {
+      this.soltarCartao(pessoa, raiz);
+    }
     // O que não estava mais na árvore — porque o nó saiu antes — já foi solto
     // pelo mesmo caminho; o que restar aqui é o que a árvore não alcançava.
     for (const [, recurso] of this.recursos) {

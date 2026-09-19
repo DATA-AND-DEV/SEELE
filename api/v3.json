@@ -5,7 +5,7 @@
     "pedir": "ModRequest",
     "regiao": "desenharARegiaoDoMod",
     "tema": "aplicarOTemaDoMod",
-    "marcas": "marcarPessoasDoMod",
+    "cartoes": "darCartoesDoMod",
     "escolher-arquivo": "escolher_para_o_mod",
     "pedaco": "pedaco_do_escolhido",
     "soltar-arquivo": "soltar_escolhido",
@@ -50,14 +50,17 @@
     "traco",
     "midia"
   ],
-  "marcas": {
-    "o-que-e": "um texto curto e uma cor por pessoa; o produto desenha na lista dele",
+  "cartoes": {
+    "o-que-e": "uma declaração por pessoa, na mesma gramática da região, montada pelo renderer do produto na lista dele",
     "chave": "o `id` da pessoa no retrato",
-    "campos": ["texto", "cor"],
-    "limites": { "pessoas": 128, "texto": 24 },
-    "descarte": "sai com o MOD"
+    "formas": ["titulo", "texto", "linha", "lista", "item", "midia"],
+    "fora": ["campo", "escolha", "botao", "arquivo", "tela"],
+    "limites": { "pessoas": 64, "nos": 24, "fundura": 4, "midias": 64, "bytesDeMidia": 8388608 },
+    "descarte": "sai com a região do MOD"
   },
   "tema": [
+    "arredondamento",
+    "brilho",
     "fundo",
     "painel",
     "texto",

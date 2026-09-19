@@ -1,19 +1,18 @@
 //! Roda as bancadas de JavaScript do produto.
 //!
-//! Quatro, e as quatro carregam o arquivo de verdade em vez de uma cópia:
+//! Três, e as três carregam o arquivo de verdade em vez de uma cópia:
 //!
 //! - `ciclo-do-executor.cjs` põe `ui/mods-runtime.js` num contexto de VM e
 //!   controla a **ordem dos eventos** — que é a única coisa que separa um
 //!   caminho correto de um que só parece correto;
 //! - `regiao-do-mod.cjs` põe `ui/mods-regiao.js` num DOM mínimo e mede o que um
 //!   guarda de texto não alcança: que atualizar não tira do documento quem tem
-//!   foco, e que sair **para o som** em vez de só tirar o nó da tela;
+//!   foco, que sair **para o som** em vez de só tirar o nó da tela, e que um
+//!   cartão na lista de pessoas usa o mesmo renderer com gramática e tetos
+//!   próprios — e sai da lista quando o MOD sai;
 //! - `continuacao-de-midia.cjs` extrai de `ui/base.js` o laço que busca uma
 //!   mídia grande do servidor de um MOD e o roda contra um servidor de mentira:
-//!   a ordem dos pedaços, o teto de voltas e a falha nomeada;
-//! - `marcas-na-lista.cjs` recorta de `ui/base.js` a marca que um MOD põe numa
-//!   pessoa e mede os limites, a recusa inteira e o descarte — que um texto de
-//!   duzentos caracteres não chega à lista é comportamento, e não uma linha.
+//!   a ordem dos pedaços, o teto de voltas e a falha nomeada.
 //!
 //! # Por que aqui, e não em `cargo test`
 //!
@@ -40,7 +39,6 @@ pub(crate) fn run() -> ExitCode {
         "ciclo-do-executor.cjs",
         "regiao-do-mod.cjs",
         "continuacao-de-midia.cjs",
-        "marcas-na-lista.cjs",
     ] {
         let bancada = raiz.join("apps/seele-app/bancada").join(nome);
         if !bancada.is_file() {

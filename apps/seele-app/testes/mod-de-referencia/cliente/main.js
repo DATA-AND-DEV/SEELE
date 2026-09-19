@@ -13,7 +13,7 @@
 //   SeeleMods.snapshot()                 — o estado que a janela já tem
 //   SeeleUI.regiao(conteudo)             — desenhar, declarando
 //   SeeleUI.tema(valores)                — pedir cor, dentro da sessão
-//   SeeleUI.marcas(marcas)               — marcar pessoas na lista do produto
+//   SeeleUI.cartoes(cartoes)             — dar cartão a pessoas na lista
 //   SeeleUI.aoEvento(fn)                 — receber o que a pessoa faz
 //   SeeleUI.pedaco(arquivo, inicio)      — ler um arquivo que alguém escolheu
 //   SeeleUI.soltar(arquivo)              — devolver esse arquivo agora
@@ -259,10 +259,10 @@ async function comecar() {
   const retrato = await tentar("sessão", () => SeeleMods.snapshot(), null);
   estado.sessao = Boolean(retrato);
 
-  // **A marca é dado, e quem desenha é o produto.** Este vetor marca a primeira
-  // pessoa do retrato para exercitar a única superfície que um MOD alcança fora
-  // da região dele. Sem ninguém no retrato, ele manda o conjunto vazio — que é
-  // também como se tira uma marca.
+  // **O cartão é declaração, e quem desenha é o renderer do produto.** Este
+  // vetor dá cartão à primeira pessoa do retrato para exercitar a única
+  // superfície que um MOD alcança fora da região dele. Sem ninguém no retrato,
+  // ele manda o conjunto vazio — que é também como se tira um cartão.
   // Alguém numa sala de voz, ou a própria pessoa quando não há sala nenhuma.
   //
   // O `me` existe desde que a sessão existe, e as salas não: sem ele, uma
@@ -273,16 +273,25 @@ async function comecar() {
     (retrato?.me == null ? null : { id: retrato.me });
   let marcou;
   try {
-    await SeeleUI.marcas(alguem ? { [alguem.id]: { texto: "REF", cor: "#6BFFB6" } } : {});
-    marcou = alguem ? `ok pessoa=${alguem.id}` : "ok vazio";
+    const recusados = await SeeleUI.cartoes(
+      alguem
+        ? {
+            [alguem.id]: [
+              { forma: "titulo", dentro: "REFERÊNCIA" },
+              { forma: "texto", chave: "nota", dentro: "cartão do vetor" },
+            ],
+          }
+        : {},
+    );
+    marcou = alguem ? `ok pessoa=${alguem.id} recusados=${recusados}` : "ok vazio";
   } catch (falha) {
     marcou = `recusou: ${String(falha?.message ?? falha)}`;
-    estado.aviso = `marcas: ${marcou}`;
+    estado.aviso = `cartoes: ${marcou}`;
   }
   // **O que a janela viu vai para o quintal**, que é lido de fora sem
   // automação de acessibilidade. É o que separa «a mensagem saiu» de «a marca
   // foi aceita» numa homologação nativa.
-  await tentar("anotar marcas", () => aoServidor({ op: "anotar", chave: "marcas", valor: marcou }), null);
+  await tentar("anotar cartoes", () => aoServidor({ op: "anotar", chave: "cartoes", valor: marcou }), null);
 
   const inicial = await aoServidor({ op: "contar" });
   estado.vezes = Number(inicial.vezes ?? 0);

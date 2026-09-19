@@ -1491,9 +1491,10 @@ function desenharPessoas(snapshot) {
           linhaDoRoster(
             {
               nome: pessoa.nickname + (pessoa.is_self ? " (você)" : ""),
-              // O que os MODs de pé marcaram nesta pessoa. Eles entregam texto
-              // e cor; a linha inteira continua sendo desenhada aqui.
-              marcas: marcasDaPessoa(pessoa.id),
+              // Os cartões que os MODs de pé deram a esta pessoa. Eles
+              // declaram; quem monta é o renderer da região, e quem decide
+              // onde o cartão entra na linha é esta função.
+              cartoes: cartoesDaPessoa(pessoa.id),
               ratio: pessoa.signal,
               faixa: pessoa.sync_band,
               falando: pessoa.speaking,
@@ -1707,22 +1708,6 @@ function linhaDoRoster(pessoa, temAudio) {
     numero.append(elemento("span", "pessoa-sync-valor", SEM_MEDIDA));
   }
 
-  // **As marcas dos MODs entram na identidade, e não numa coluna nova.**
-  //
-  // Um MOD de perfis sabe o nome que a pessoa escolheu; mostrá-lo só dentro do
-  // painel dele é mostrá-lo longe de onde ele significa alguma coisa. Mas a
-  // lista é do produto: o que chega é texto curto e uma cor, e quem decide
-  // tamanho, posição e vizinho é esta função.
-  //
-  // A cor é do contorno, e nunca do texto: uma cor de MOD no texto atropelaria
-  // o contraste que esta tela mede. E o texto vem por `textContent` como todo
-  // o resto — `elemento` não interpreta marcação.
-  for (const marca of pessoa.marcas ?? []) {
-    const selo = elemento("span", "pessoa-marca", marca.texto);
-    if (marca.cor) selo.style.borderColor = marca.cor;
-    identidade.append(selo);
-  }
-
   cabeca.append(identidade, numero);
 
   const barra = elemento("span", "barra", medido ? blocos(pessoa.ratio, 20) : "");
@@ -1759,6 +1744,17 @@ function linhaDoRoster(pessoa, temAudio) {
 
   rodape.append(estados);
   item.append(cabeca, barra, rodape);
+
+  // **Os cartões dos MODs, depois do que o produto diz sobre esta pessoa.**
+  //
+  // Depois, e não no meio: o sinal, a barra e a pastilha são o que esta tela
+  // existe para dizer, e um cartão de terceiro entre eles empurraria a
+  // informação do produto para baixo da dobra numa lista cheia.
+  //
+  // O nó vem montado — é o mesmo elemento entre um retrato e o seguinte, e
+  // movê-lo preserva o que ele segura. Recriá-lo faria uma imagem piscar e um
+  // som recomeçar a cada quatro segundos.
+  for (const cartao of pessoa.cartoes ?? []) item.append(cartao);
 
   // Volume por pessoa (`specs/03-audio.md`).
   if (pessoa.volume !== null && temAudio) {

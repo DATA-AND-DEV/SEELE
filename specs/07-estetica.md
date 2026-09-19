@@ -96,6 +96,35 @@ que nada se perdesse. O ADR 0034 tirou as duas citações que restavam na marca,
 o resto saiu com elas. Um guarda em `crates/seele-tui/src/ui.rs` afirma que o
 katakana não volta à tela.
 
+## Canto reto e ausência de sombra
+
+O recuo do produto é **canto reto e sem sombra**: `--seele-raio` vale `0` e
+`--seele-sombra` vale `none` em `tokens.css`, e é assim que toda tela do SEELE
+abre. Não é falta de um recurso; é a escolha que dá o ar de terminal, e ela vale
+para a interface, para as camadas e para a TUI.
+
+**Uma exceção nomeada: o tema de servidor.** Quem administra um servidor pode
+levantar os dois pelo MOD de tema, e o efeito vale **só naquela sessão** — é
+escrito no contêiner da sessão e sai com ela, sem tocar em preferência nenhuma
+de quem usa. Fora da sessão, e em toda instalação que não entrou num servidor
+com esse tema, o recuo continua sendo o de cima.
+
+Três coisas tornam a exceção admissível, e as três são obrigatórias:
+
+1. **O arredondamento é inteiro entre 0 e 24**, conferido pelo produto. Um
+   número livre aceita `9999`, que transforma cada painel num comprimido.
+2. **O brilho é sim ou não**, e a sombra que ele liga é montada pelo produto a
+   partir de um token do produto. Aceitar a sombra escrita por um MOD faria a
+   API de tema virar a porta de entrada de qualquer `box-shadow`, inclusive um
+   que desenhe fora do painel e cubra a tela.
+3. **A marca nunca acompanha.** `docs/marca.md`, regra 1, continua valendo
+   inteira: o símbolo não ganha raio nem sombra em situação nenhuma, e um tema
+   de servidor não o alcança.
+
+Abrir uma segunda exceção — um raio que sobreviva à sessão, uma sombra de valor
+livre, um gradiente — exige emendar este parágrafo, e não um argumento de que
+«o token já existia».
+
 ## Movimento
 
 Só a sequência de boot é generosa. No resto, movimento é diagnóstico: a barra do

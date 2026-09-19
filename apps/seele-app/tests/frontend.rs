@@ -5883,6 +5883,32 @@ fn the_nat_punching_rung_names_its_cost_where_the_cost_is_paid() {
 /// Braces are counted rather than split on, because every one of these bodies
 /// contains nested blocks and object literals. Reading to the first `\n}` would
 /// stop at the first `if`.
+/// O corpo de um `Object.freeze({...})` ou `Object.freeze(new Set([...]))`.
+///
+/// Lê a tabela e não a linha: um guarda que procurasse o nome no arquivo
+/// inteiro passaria com o nome escrito num comentário, que é o jeito mais
+/// barato de um guarda deixar de medir.
+fn bloco_congelado(source: &str, abertura: &str) -> String {
+    let Some(at) = source.find(abertura) else {
+        panic!("`{abertura}` is gone from the file that had it");
+    };
+    let after = &source[at + abertura.len()..];
+    let mut depth = 1_i32;
+    for (index, character) in after.char_indices() {
+        match character {
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return after[..index].to_owned();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("`{abertura}` never closes");
+}
+
 fn js_function(source: &str, signature: &str) -> String {
     let source = without_comments(source);
     let Some(at) = source.find(signature) else {
@@ -10843,18 +10869,29 @@ fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
     }
 
     // Uma forma que a API não conhece não vira elemento por conveniência.
-    let planejar = js_function(&regiao, "\n  planejar(no, fundura, orcamento)");
+    let planejar = js_function(
+        &regiao,
+        "\n  planejar(no, fundura, orcamento, permitidas = null)",
+    );
     assert!(
-        planejar.contains("if (!forma) return [];"),
+        planejar.contains("if (!forma) {") && planejar.contains("return [];"),
         "uma forma desconhecida deixou de ser recusada; a gramática passa a \
          crescer sem ninguém decidir: {planejar}"
+    );
+    // E num cartão, a recusa é **contada**: uma forma que a região conhece e o
+    // cartão não é um `botao` que o MOD pôs e não vai aparecer, e ele precisa
+    // saber disso em vez de ver o nó sumir.
+    assert!(
+        planejar.contains("if (permitidas) this.recusados += 1;"),
+        "a forma recusada num cartão voltou a sumir calada: {planejar}"
     );
 
     // E há teto de fundura: sem ele, uma árvore que o MOD manda estoura a pilha
     // **da janela**, e não a dele. E teto de nós, que a fundura sozinha não
     // alcança: uma árvore rasa e larguíssima cabe em oito níveis.
     assert!(
-        planejar.contains("fundura > LIMITES_DA_REGIAO.fundura"),
+        planejar.contains("permitidas ? LIMITES_DO_CARTAO.fundura : LIMITES_DA_REGIAO.fundura")
+            && planejar.contains("fundura > teto"),
         "o teto de fundura saiu: uma árvore funda mandada por um MOD derruba a \
          janela do produto: {planejar}"
     );
@@ -10922,62 +10959,244 @@ fn um_pedido_de_mod_nunca_fica_sem_resposta() {
     );
 }
 
-/// **O que a marca proíbe é recusado pelo nome, e não por omissão.**
+/// **Arredondamento e brilho são aplicados, e o que os limita é número.**
 ///
-/// `--seele-raio` e `--seele-sombra` existem como token, e um MOD poderia
-/// escrevê-los. `docs/marca.md` os lista entre o que nunca aparece, e a palavra
-/// lá é «nunca» — é regra da identidade deste produto.
+/// Eles já existiam como token — `--seele-raio` e `--seele-sombra`, em
+/// `tokens.css`, valendo `0` e `none`, lidos por três folhas. O que faltava era
+/// alguém poder escrevê-los, e o produto já guardava o lugar.
 ///
-/// A recusa precisa **dizer isso**. Um pedido que não acontece e não explica
-/// vira, do outro lado, «isto ainda não existe», e aí alguém espera por uma
-/// implementação que não vem porque não deve vir.
+/// O que este guarda protege é a **forma** de escrevê-los, que é onde o risco
+/// mora. Um raio livre aceita `9999px`; uma sombra livre aceita qualquer
+/// `box-shadow`, inclusive um que desenhe fora do painel e cubra a tela. Por
+/// isso um é inteiro com intervalo, o outro é sim ou não, e a sombra é montada
+/// **pelo produto** a partir de um token do produto.
 #[test]
-fn o_que_a_marca_proibe_e_recusado_com_a_razao() {
+fn o_arredondamento_e_o_brilho_sao_numero_e_bandeira_e_nunca_texto() {
     let base = without_comments(&read("ui/base.js"));
-    let recusados = base
-        .split_once("const RECUSADOS_POR_DESENHO = Object.freeze({")
-        .expect("`RECUSADOS_POR_DESENHO`")
-        .1
-        .split_once("});")
-        .expect("o fim da lista")
-        .0;
 
-    for nome in ["arredondamento", "brilho"] {
+    // Os dois existem na API, e cada um na sua tabela.
+    let numeros = bloco_congelado(&base, "const NUMEROS_DA_API = Object.freeze({");
+    let bandeiras = bloco_congelado(&base, "const BANDEIRAS_DA_API = Object.freeze({");
+    assert!(
+        numeros.contains("arredondamento") && numeros.contains("--seele-raio"),
+        "`arredondamento` deixou de escrever `--seele-raio`: {numeros}"
+    );
+    assert!(
+        bandeiras.contains("brilho") && bandeiras.contains("--seele-sombra"),
+        "`brilho` deixou de escrever `--seele-sombra`: {bandeiras}"
+    );
+
+    // **O intervalo é o que separa escolher de escrever CSS.** Sem teto, um
+    // raio de 9999 vira um comprimido, e a API de tema vira uma porta.
+    assert!(
+        numeros.contains("minimo: 0") && numeros.contains("maximo: 24"),
+        "o intervalo do arredondamento sumiu, e um número livre entra: {numeros}"
+    );
+    let aplicar = js_function(&base, "function aplicarOTemaDoMod(");
+    assert!(
+        aplicar.contains("Number.isInteger(valor)")
+            && aplicar.contains("valor < regra.minimo")
+            && aplicar.contains("valor > regra.maximo"),
+        "o intervalo deixou de ser conferido na aplicação: {aplicar}"
+    );
+    assert!(
+        aplicar.contains("typeof valor !== \"boolean\""),
+        "a bandeira deixou de exigir booleano, e `\"false\"` passa a ser verdade: {aplicar}"
+    );
+
+    // **A sombra é do produto.** O que o MOD manda é `true`; o valor que chega
+    // na folha é montado aqui, com um token daqui.
+    assert!(
+        bandeiras.contains("var(--seele-laranja-nerv)"),
+        "o brilho deixou de ser feito de um token do produto: {bandeiras}"
+    );
+    assert!(
+        !bandeiras.contains("valor") && !bandeiras.contains("cor"),
+        "a bandeira passou a carregar valor de fora, e uma sombra livre entra: {bandeiras}"
+    );
+
+    // A unidade é escrita aqui, e não pelo MOD: o que atravessa a API é 8, e o
+    // que vai para a folha é `8px`. Uma unidade vinda de fora é uma string, e
+    // uma string é onde cabe o resto.
+    let escrever = js_function(&base, "function escreverOTemaDaSessao(");
+    assert!(
+        escrever.contains("`${valor}${regra.unidade}`"),
+        "a unidade deixou de ser escrita pelo produto: {escrever}"
+    );
+    assert!(
+        escrever.contains("regra.ligado") && escrever.contains("regra.desligado"),
+        "a bandeira deixou de escolher entre os dois valores do produto: {escrever}"
+    );
+
+    // E os tokens que os dois escrevem existem, e são lidos por alguma folha.
+    let tokens = read("ui/tokens.css");
+    for token in ["--seele-raio", "--seele-sombra"] {
         assert!(
-            recusados.contains(nome),
-            "`{nome}` saiu da lista do que a marca proíbe, e passa a ser recusado \
-             como «a API não conhece» — que é a frase de uma função que falta"
+            tokens.contains(&format!("{token}:")),
+            "`{token}` não está em `tokens.css`, e o tema escreveria no vazio"
         );
     }
-    assert!(
-        recusados.matches("marca.md").count() == 2,
-        "a recusa deixou de apontar a regra que a justifica: {recusados}"
-    );
+}
 
-    // E a conferência acontece **antes** da de nome desconhecido: depois dela,
-    // os dois cairiam na frase genérica e a razão sumiria.
-    let aplicar = js_function(&base, "function aplicarOTemaDoMod(");
-    let recusa = aplicar
-        .find("RECUSADOS_POR_DESENHO[nome]")
-        .expect("a recusa por desenho");
-    let generica = aplicar
-        .find("a API de tema não conhece")
-        .expect("a recusa genérica");
+/// **A estética diz que o recuo é canto reto — e diz quem pode levantá-lo.**
+///
+/// A regra do produto continua a mesma: sem raio e sem sombra, por padrão. O
+/// que mudou é que ela passou a ter uma exceção nomeada, e uma exceção que não
+/// está escrita é uma deriva esperando para ser descoberta por quem vier
+/// depois.
+#[test]
+fn a_excecao_do_tema_de_servidor_esta_escrita_na_estetica() {
+    let estetica = read("../../specs/07-estetica.md");
     assert!(
-        recusa < generica,
-        "a recusa por desenho ficou depois da genérica, e a razão some: {aplicar}"
+        estetica.contains("canto reto") && estetica.contains("sombra"),
+        "`specs/07-estetica.md` deixou de afirmar o canto reto e a ausência de sombra"
     );
-
-    // A regra existe onde o comentário diz que existe.
-    let marca = read("../../docs/marca.md");
     assert!(
-        marca.contains("Sem sombra, gradiente, contorno extra, raio"),
-        "`docs/marca.md` deixou de proibir sombra e raio, e a recusa acima \
-         passou a citar uma regra que não está lá"
+        estetica.contains("--seele-raio") && estetica.contains("--seele-sombra"),
+        "a exceção do tema de servidor não está escrita onde a regra está: um \
+         produto cujo padrão é canto reto e que aceita raio por tema precisa \
+         dizer as duas coisas no mesmo lugar"
     );
 }
 
-/// **O que a região cria nasce com dono, teto e descarte.**
+/// **O cartão de um MOD é desenhado pelo renderer do produto, e sai com ele.**
+///
+/// Esta é a única superfície de um MOD fora da região dele. O que a mantém
+/// sendo do produto não é uma promessa: é o renderer ser o mesmo —
+/// `planejar`, `reconciliar`, `elemento`, `createElement`, `textContent` — com
+/// uma gramática menor e tetos próprios.
+///
+/// Os limites, a recusa e o descarte rodam em `bancada/regiao-do-mod.cjs`, no
+/// DOM de mentira, contra este mesmo arquivo. O que este guarda prova é o que
+/// um teste de comportamento não alcança: que a lista continua sendo montada
+/// aqui, e que nada de fora escreve estilo nela.
+#[test]
+fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
+    let regiao = without_comments(&read("ui/mods-regiao.js"));
+    let base = without_comments(&read("ui/base.js"));
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+
+    // **O mesmo renderer.** Se `declararCartoes` parar de chamar `planejar` e
+    // `reconciliar`, o cartão passou a ser montado por outra coisa — e essa
+    // outra coisa é a que ninguém revisou.
+    let declarar = js_function(&regiao, "\n  declararCartoes(cartoes)");
+    assert!(
+        declarar.contains("this.planejar(declaracao, 0, orcamento, FORMAS_DO_CARTAO)")
+            && declarar.contains("this.reconciliar(raiz, planos, 0, orcamento)"),
+        "o cartão deixou de passar pelo renderer da região: {declarar}"
+    );
+    assert!(
+        declarar.contains("elemento(\"div\", \"pessoa-cartao\")"),
+        "a raiz do cartão deixou de nascer por `elemento`, que é o construtor \
+         desta casa e o que o guarda de CSS enxerga: {declarar}"
+    );
+
+    // **A gramática é menor, e as cinco que ficam de fora são as que recebem
+    // foco ou clique.** A linha do roster já tem um botão do produto.
+    let formas = bloco_congelado(&regiao, "const FORMAS_DO_CARTAO = Object.freeze(");
+    for fora in ["campo", "escolha", "botao", "arquivo", "tela"] {
+        assert!(
+            !formas.contains(&format!("\"{fora}\"")),
+            "`{fora}` entrou na gramática do cartão, e ele divide foco e área \
+             de toque com um controle do produto"
+        );
+    }
+    for dentro in ["texto", "titulo", "linha", "lista", "item", "midia"] {
+        assert!(
+            formas.contains(&format!("\"{dentro}\"")),
+            "`{dentro}` saiu da gramática do cartão: {formas}"
+        );
+    }
+
+    // Tetos próprios, e menores que os da região: um cartão é por pessoa.
+    let limites = bloco_congelado(&regiao, "const LIMITES_DO_CARTAO = Object.freeze({");
+    for teto in ["cartoes:", "nos:", "fundura:", "midias:", "bytesDeMidia:"] {
+        assert!(
+            limites.contains(teto),
+            "o teto `{teto}` sumiu dos limites do cartão: {limites}"
+        );
+    }
+
+    // **A montagem acontece ao declarar, e não ao desenhar a linha.** É aqui
+    // que o teto vira erro na mão de quem pediu; montar tarde recusaria
+    // calado, no meio de um retrato, e o MOD nunca saberia.
+    let dar = js_function(&base, "function darCartoesDoMod(");
+    assert!(
+        dar.contains("regiao.declararCartoes(cartoes)"),
+        "`darCartoesDoMod` deixou de montar no momento da declaração: {dar}"
+    );
+    assert!(
+        dar.contains("redesenharAsPessoas()"),
+        "declarar um cartão deixou de repintar a lista, e ele só apareceria no \
+         próximo retrato: {dar}"
+    );
+    // **A região é criada aqui se ainda não existe, e não exigida.**
+    //
+    // Exigir que o MOD desenhasse antes era uma armadilha de ordem que a API
+    // não conta a ninguém: um MOD que monta os cartões no mesmo ciclo em que
+    // pinta o painel — que é o caso do PERFIS — recebia «não tem região de pé»
+    // e não tinha como saber que bastava inverter duas linhas. Foi a corrida
+    // nativa que pegou, e não um teste.
+    assert!(
+        dar.contains("regiaoDoMod(mod, instancia)"),
+        "dar cartão voltou a exigir uma região que já exista: {dar}"
+    );
+    let desenhar = js_function(&base, "function desenharARegiaoDoMod(");
+    assert!(
+        desenhar.contains("regiaoDoMod(mod, instancia)"),
+        "os dois caminhos deixaram de criar a região pelo mesmo lugar, e um \
+         deles vai esquecer de registrá-la para a saída: {desenhar}"
+    );
+    // E criar a região para um cartão **não abre uma faixa vazia**: quem tira
+    // o palco de escondido é quem desenha.
+    let criar_regiao = js_function(&base, "function regiaoDoMod(mod, instancia)");
+    assert!(
+        !criar_regiao.contains("hidden = false"),
+        "criar a região passou a mostrar o palco, e um MOD que só dá cartão \
+         abre uma faixa vazia na tela: {criar_regiao}"
+    );
+
+    // **O descarte é o da região**, e alcança o que não está sob a raiz dela.
+    let soltar = js_function(&regiao, "\n  soltar()");
+    assert!(
+        soltar.contains("this.soltarCartao(pessoa, raiz)"),
+        "soltar a região deixou de tirar os cartões da lista do produto: {soltar}"
+    );
+    let limpar = js_function(&base, "function limparARegiaoDoMod(");
+    assert!(
+        limpar.contains("cartoesDosMods.delete(id)"),
+        "o MOD saiu e a lista continuou achando que ele tem cartões: {limpar}"
+    );
+
+    // **Quem desenha a linha é o produto.** O nó chega montado e é anexado; o
+    // MOD não escolhe posição, e nada de fora escreve estilo nele.
+    let linha = js_function(&sessao, "function linhaDoRoster(");
+    assert!(
+        linha.contains("for (const cartao of pessoa.cartoes ?? []) item.append(cartao);"),
+        "a linha deixou de anexar o cartão montado: {linha}"
+    );
+    for fora in [
+        "innerHTML",
+        "insertAdjacentHTML",
+        "style.position",
+        "style.height",
+    ] {
+        assert!(
+            !linha.contains(fora),
+            "a linha do roster passou a alcançar `{fora}` por causa do cartão"
+        );
+    }
+
+    // E o tamanho do cartão é da folha do produto, e não do MOD.
+    let css = read("ui/tela-sessao.css");
+    assert!(
+        css.contains(".pessoa-cartao") && css.contains("max-height"),
+        "o cartão perdeu o teto de altura, e uma lista de vinte pessoas deixa \
+         de ser uma lista de pessoas"
+    );
+}
+
+/// **O que a região cria nasce com dono, teto e descarte.**/// **O que a região cria nasce com dono, teto e descarte.**
 ///
 /// A diretriz de 19/09: «cada recurso deve nascer com dono, limites e
 /// descarte». As três coisas são verificáveis na forma, e a que mais some numa
@@ -10991,7 +11210,7 @@ fn todo_recurso_da_regiao_nasce_registrado_e_com_teto() {
     let criar = js_function(&regiao, "\n  criar(plano)");
     assert!(
         criar.contains("FORMAS_COM_TETO[plano.forma]")
-            && criar.contains(">= LIMITES_DA_REGIAO[classe]")
+            && criar.contains("this.contagem[classe] >= limite")
             && criar.contains("return null"),
         "a criação deixou de conferir o teto da forma: {criar}"
     );
@@ -11156,94 +11375,6 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
     assert!(
         adr.contains("`painel`, `apagado` e `densidade`"),
         "o ADR 0049 não registra o tamanho que a API de tema tem hoje"
-    );
-}
-
-/// **A marca de um MOD é entregue como dado e desenhada pelo produto.**
-///
-/// Esta é a única superfície de um MOD fora da região dele, e ela é estreita de
-/// propósito: o MOD entrega um texto curto e uma cor por pessoa, e quem escolhe
-/// posição, tamanho e vizinho é `linhaDoRoster`. Se um dia ele passar a
-/// entregar um nó, ou a cor passar a pintar o texto, a lista deixa de ser do
-/// produto — e o contraste que esta tela mede deixa de valer, sem que ninguém
-/// veja acontecer.
-///
-/// Os limites e o descarte são medidos rodando, em
-/// `bancada/marcas-na-lista.cjs`. O que este guarda prova é o outro lado: que o
-/// desenho continua aqui.
-#[test]
-fn a_marca_de_um_mod_e_dado_e_quem_desenha_e_o_produto() {
-    let base = without_comments(&read("ui/base.js"));
-    let sessao = without_comments(&read("ui/tela-sessao.js"));
-    let marcar = js_function(&base, "function marcarPessoasDoMod(");
-    let linha = js_function(&sessao, "function linhaDoRoster(");
-
-    // A cor pinta o contorno. No texto, ela atropelaria a medida de contraste
-    // desta tela — e o `style` é o único que a marca encosta.
-    assert!(
-        linha.contains("selo.style.borderColor = marca.cor"),
-        "a cor da marca deixou de pintar só o contorno: {linha}"
-    );
-    for fora in [
-        "style.color",
-        "innerHTML",
-        "insertAdjacentHTML",
-        "style.position",
-        "style.fontSize",
-    ] {
-        assert!(
-            !linha.contains(fora),
-            "a marca de um MOD alcançou `{fora}`, e o desenho da lista é do produto"
-        );
-    }
-    assert!(
-        linha.contains("elemento(\"span\", \"pessoa-marca\", marca.texto)"),
-        "o selo deixou de ser um `span` do produto com o texto do MOD: {linha}"
-    );
-
-    // O que chega é texto e cor, e nada mais: uma terceira chave aqui é uma
-    // decisão de desenho voltando para a mão do MOD.
-    let guardada = marcar
-        .split("guardadas.set(")
-        .nth(1)
-        .expect("`guardadas.set`")
-        .split_once('}')
-        .expect("o fim do objeto guardado")
-        .0;
-    assert_eq!(
-        guardada.trim(),
-        "String(pessoa), { texto, cor: cor ?? null",
-        "uma marca deixou de ser só texto e cor"
-    );
-
-    // O teto do texto e o da quantidade existem dos dois lados: a constante e o
-    // corte. Sem o corte, a constante é um número que ninguém aplica.
-    assert!(
-        marcar.contains(".slice(0, TEXTO_DA_MARCA)") && marcar.contains("> MARCAS_POR_MOD"),
-        "os limites da marca deixaram de ser aplicados: {marcar}"
-    );
-    assert!(
-        marcar.contains("COR_DO_TEMA.test(cor)"),
-        "a marca deixou de conferir a forma da cor: {marcar}"
-    );
-
-    // Sai o MOD, some a marca. Um selo de um MOD que não está mais de pé é uma
-    // informação que ninguém pode corrigir nem tirar.
-    let limpar = js_function(&base, "function limparARegiaoDoMod(");
-    assert!(
-        limpar.contains("marcasDosMods.delete(id)"),
-        "a marca sobreviveu ao MOD que a pôs: {limpar}"
-    );
-
-    // E a lista repinta: sem isto, uma marca só apareceria no próximo retrato,
-    // e apertar o botão do MOD pareceria não ter feito nada.
-    assert!(
-        marcar.contains("redesenharAsPessoas()"),
-        "marcar deixou de repintar a lista: {marcar}"
-    );
-    assert!(
-        sessao.contains("function redesenharAsPessoas()"),
-        "`tela-sessao.js` não define mais o gancho que `base.js` chama"
     );
 }
 

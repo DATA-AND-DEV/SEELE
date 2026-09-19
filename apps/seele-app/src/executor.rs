@@ -857,11 +857,11 @@ const PRELUDIO: &str = r#"
     regiao: (conteudo) => pedir('regiao', { conteudo }),
     tema: (valores) => pedir('tema', { valores }),
 
-    // **Uma marca por pessoa na lista do produto.** O MOD entrega texto curto e
-    // cor; quem desenha é o produto, no lugar dele. Ele não escolhe posição,
-    // tamanho nem vizinho — é a única superfície fora da região, e ela é
-    // estreita de propósito.
-    marcas: (marcas) => pedir('marcas', { marcas }),
+    // **Um cartão por pessoa na lista do produto.** A declaração é a mesma da
+    // região, montada pelo mesmo renderer, com uma gramática menor: nada que
+    // receba foco ou clique, porque a linha do roster já tem um botão do
+    // produto. É a única superfície fora da região, e ela sai com ela.
+    cartoes: (cartoes) => pedir('cartoes', { cartoes }),
     // ---- os eventos ----
     //
     // **A janela fala com o MOD sem que ele tenha perguntado.** Um pedido tem

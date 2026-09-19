@@ -1543,26 +1543,64 @@ button.linha-nome:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
-/* O selo de um MOD ao lado do nome.
+/* O cartão que um MOD dá a uma pessoa, na lista.
 
-   A cor que o MOD escolhe pinta o contorno, e nunca o texto: o texto é o do
-   produto, medido contra o fundo do produto, e uma cor de terceiro nele
-   desfaria o contraste sem que ninguém percebesse. Sem raio e sem sombra
-   (`docs/marca.md`), como todo o resto desta tela. */
-.pessoa-marca {
-  font-family: var(--seele-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  /* `--seele-osso`, e não o apagado: o apagado vale 4,11:1 e só passa em texto
-     grande, e este tem dez pixels. */
-  color: var(--seele-osso);
-  border: 1px solid var(--seele-linha-forte);
-  padding: 1px 4px;
-  flex: 0 1 auto;
+   **O MOD declara; esta folha desenha.** Nenhuma destas medidas vem de fora: o
+   MOD escolhe o que o cartão diz, e o produto escolhe quanto ele ocupa, com
+   que tipo, e onde ele encosta. Um cartão que pudesse escolher a própria
+   altura escolheria a altura da lista inteira.
+
+   O teto de altura existe pelo mesmo motivo que o teto de nós: uma lista de
+   pessoas com vinte cartões de cem pixels deixa de ser uma lista de pessoas. O
+   que não couber aqui é uma região, e a região já existe. */
+.pessoa-cartao {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--seele-linha);
+  max-height: 96px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+}
+
+/* O que o cartão desenha dentro: as mesmas partes da região, menores.
+   Os seletores são por classe do produto — `regiao-de-mod-parte` é o que
+   `criar` põe em todo nó —, e não por nada que o MOD nomeie. */
+.pessoa-cartao .regiao-de-mod-parte {
+  margin: 0;
+  font-size: inherit;
+  line-height: 1.35;
+}
+
+.pessoa-cartao h3.regiao-de-mod-parte {
+  font-family: var(--seele-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Um retrato no cartão é pequeno e fixo: o MOD manda os bytes, e o tamanho é
+   desta folha. Sem isto, uma imagem de mil pixels de lado entraria inteira na
+   lateral e empurraria todo mundo para fora da tela. */
+.pessoa-cartao .regiao-de-mod-tocador {
+  max-width: 40px;
+  max-height: 40px;
+  object-fit: cover;
+  display: block;
+}
+
+.pessoa-cartao figure.regiao-de-mod-parte {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.pessoa-cartao ul.regiao-de-mod-parte {
+  margin: 0;
+  padding-left: 14px;
 }
 
 /* A marca de bloco: a metade da faixa que sobrevive sem cor

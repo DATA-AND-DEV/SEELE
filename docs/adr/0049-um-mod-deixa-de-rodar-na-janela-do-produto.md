@@ -264,6 +264,69 @@ que o produto já usa e já mediu, e nenhuma família de fora entra.
 E ela é **recurso de sessão**, como as cores: escrita no contêiner da sessão,
 tirada quando a sessão acaba, sem tocar em preferência nenhuma de quem usa.
 
+### Arredondamento e brilho: emenda de 19/09
+
+`--seele-raio` e `--seele-sombra` já existiam em `tokens.css`, valendo `0` e
+`none`, e três folhas já os liam. O que faltava não era o token: era alguém
+poder escrevê-los.
+
+Uma versão anterior desta emenda os **recusou pelo nome**, citando
+`docs/marca.md`. A citação estava errada, e vale registrar por que: aquele
+documento diz de si mesmo, na terceira linha, que governa «a única imagem que o
+produto tem de si mesmo» e que **nada nele alcança a estética**. A regra 1 de lá
+é sobre o símbolo. Quem governa o recuo da interface é
+`specs/07-estetica.md` — e é lá que a exceção foi escrita, não aqui.
+
+A forma é o que importa:
+
+- **`arredondamento` é inteiro de 0 a 24**, conferido pelo produto, e é o
+  produto que escreve o `px`. Um raio livre aceita `9999`, que transforma cada
+  painel num comprimido, e aceita `calc(...)` com o que vier dentro;
+- **`brilho` é sim ou não**, e a sombra que ele liga é montada pelo produto a
+  partir de um token do produto. Aceitar a sombra escrita pelo MOD faria a API
+  de tema virar a porta de entrada de qualquer `box-shadow`, inclusive um que
+  desenhe fora do painel e cubra a tela;
+- os dois são **recurso de sessão**, como as cores e a tipografia, e o mesmo
+  desempate por nome vale: dois MODs pedindo arredondamentos diferentes é a
+  mesma pergunta sem resposta que dois pedindo o acento.
+
+### O cartão na lista de pessoas: emenda de 19/09
+
+Esta é a **única superfície de um MOD fora da região dele**, e a primeira coisa
+a dizer é o que ela não é: não é o MOD desenhando na janela. O que chega é a
+**mesma declaração da região**, montada pelo **mesmo renderer** — `planejar`,
+`reconciliar`, `elemento`, `createElement`, `textContent`. Nada de marcação,
+nada de estilo escrito por terceiro, nada de nó alcançável de fora.
+
+Ela existe porque a lista de pessoas é onde uma informação de MOD tem lugar
+natural: o retrato e o nome que alguém escolheu num MOD de perfis são sobre
+aquela pessoa, e mostrá-los só dentro de um painel ao lado é mostrá-los longe de
+onde significam alguma coisa.
+
+Três coisas a mantêm sendo do produto:
+
+- **a gramática é menor.** `FORMAS_DO_CARTAO` exclui `campo`, `escolha`,
+  `botao`, `arquivo` e `tela` — tudo o que recebe foco ou clique. A linha do
+  roster já tem um botão do produto (o nome, que abre a moderação), e dividir a
+  ordem de tabulação e a área de toque de um controle do produto com um
+  terceiro é o tipo de coisa que ninguém consegue depurar depois. Uma forma
+  recusada num cartão **é contada**, e o MOD recebe o número: ele precisa saber
+  que pôs um botão onde botão não entra, em vez de vê-lo sumir;
+- **os tetos são próprios, e menores.** 64 pessoas, 24 nós por cartão, 4 níveis
+  de fundura, e mídia com contador e orçamento de bytes separados dos da
+  região. Um cartão é por pessoa: os 512 nós da região valeriam vinte vezes
+  numa lista de vinte, e a lateral inteira viraria o painel de um MOD. O que
+  não couber em 24 nós é uma região, e a região já existe;
+- **o dono é a região.** O cartão nasce dentro da `RegiaoDeMod` daquela
+  instância e sai com ela — é a mesma `soltar` que para o som e solta os bytes,
+  e ela alcança as raízes que estão na lista do produto e não sob a raiz dela.
+  Um retrato de um MOD que não está mais de pé continuaria ao lado do nome de
+  alguém, e ninguém teria como tirá-lo.
+
+O tamanho, a tipografia, o espaçamento e a posição do cartão na linha são da
+folha do produto. O MOD escolhe o que o cartão diz; o produto escolhe quanto ele
+ocupa.
+
 ### Arquivo: escolha de quem usa, mediada pelo produto
 
 A MESA carrega cenas e o PERFIS carrega retratos, e as duas coisas exigem que

@@ -220,7 +220,7 @@ function bancada() {
   // propriedades do contexto, e por isso saem por esta linha em vez de por uma
   // leitura de `contexto.RegiaoDeMod`, que devolveria `undefined`.
   vm.runInContext(
-    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO };`,
+    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO };`,
     contexto,
     { filename: "mods-regiao.js" },
   );
@@ -229,6 +229,8 @@ function bancada() {
     quadros,
     RegiaoDeMod: contexto.api.RegiaoDeMod,
     LIMITES: contexto.api.LIMITES_DA_REGIAO,
+    CARTAO: contexto.api.LIMITES_DO_CARTAO,
+    FORMAS_DO_CARTAO: contexto.api.FORMAS_DO_CARTAO,
     raiz: () => doc.createElement("section"),
   };
 }
@@ -253,6 +255,197 @@ function dono(b, midia) {
         midia ? midia({ canal, pedido, campo }) : Promise.reject(new Error("sem mídia")),
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Os cartões: mesma gramática, tetos próprios, e saem com a região.
+// ---------------------------------------------------------------------------
+
+/** Acha o primeiro descendente com uma etiqueta, para não depender de posição. */
+function acharTag(no, tag) {
+  if (!no || !no.filhos) return null;
+  const alvo = String(tag).toUpperCase();
+  for (const filho of no.filhos) {
+    if (filho.tagName === alvo) return filho;
+    const dentro = acharTag(filho, tag);
+    if (dentro) return dentro;
+  }
+  return null;
+}
+
+/** O texto que um nó carrega, juntando os nós de texto de dentro dele. */
+function textoDe(no) {
+  if (!no) return "";
+  if (no.nodeType === TEXTO) return no.data;
+  return (no.filhos ?? []).map(textoDe).join("");
+}
+
+function contarNos(no) {
+  if (!no || !no.filhos) return 0;
+  return no.filhos.reduce((soma, filho) => soma + 1 + contarNos(filho), 0);
+}
+
+async function oCartaoUsaOMesmoRendererComGramaticaMenor() {
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+
+  const recusados = regiao.declararCartoes({
+    7: [
+      { forma: "titulo", dentro: "Lia" },
+      { forma: "texto", dentro: "ela/dela" },
+      // As três que um cartão não aceita. Elas não somem caladas: contam como
+      // recusa, porque o MOD precisa saber que pôs botão onde botão não entra.
+      { forma: "botao", chave: "b", dentro: "APERTE" },
+      { forma: "campo", chave: "c", rotulo: "R", valor: "v" },
+      { forma: "tela", chave: "t", largura: 10, altura: 10 },
+    ],
+  });
+
+  const cartao = regiao.cartaoDe(7);
+  confere("o cartão existe", Boolean(cartao), "não foi montado");
+  confere("o cartão é do produto", cartao?.className === "pessoa-cartao", String(cartao?.className));
+
+  // **Montado pelo renderer, e não por HTML.** As etiquetas são as que
+  // `FORMAS_DA_REGIAO` dita, e o texto entrou por `textContent`.
+  confere("o título virou h3", Boolean(acharTag(cartao, "h3")), "sem h3");
+  confere("o texto virou p", Boolean(acharTag(cartao, "p")), "sem p");
+  confere(
+    "o texto é o que o MOD disse",
+    textoDe(acharTag(cartao, "h3")) === "Lia",
+    textoDe(acharTag(cartao, "h3")),
+  );
+
+  for (const proibida of ["button", "label", "canvas"]) {
+    confere(
+      `o cartão não aceita ${proibida}`,
+      acharTag(cartao, proibida) === null,
+      `um ${proibida} entrou no cartão`,
+    );
+  }
+  confere("as três recusas foram contadas", recusados === 3, `contou ${recusados}`);
+
+  // E a gramática do cartão é um subconjunto declarado, e não uma lista solta.
+  for (const fora of ["campo", "escolha", "botao", "arquivo", "tela"]) {
+    confere(
+      `${fora} está fora da gramática do cartão`,
+      !b.FORMAS_DO_CARTAO.has(fora),
+      `${fora} está em FORMAS_DO_CARTAO`,
+    );
+  }
+}
+
+async function oCartaoSaiQuandoOModParaDeDeclararOuQuandoAReGiaoSai() {
+  const b = bancada();
+  const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: 1000 }));
+  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+
+  regiao.declararCartoes({
+    7: [{ forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } }],
+    9: [{ forma: "texto", dentro: "outro" }],
+  });
+  await volta();
+  await volta();
+
+  const soltos = () => d.registrados.filter((r) => r.porque.includes("midia")).length;
+  confere("o retrato foi registrado", soltos() === 1, `${soltos()} registros`);
+  confere("os bytes entraram na conta do cartão", regiao.bytesDeCartao === 1000, String(regiao.bytesDeCartao));
+  confere("e não na conta da região", regiao.bytesDeMidia === 0, String(regiao.bytesDeMidia));
+
+  // Parar de declarar uma pessoa tira o cartão dela e solta o que ele segurava.
+  regiao.declararCartoes({ 9: [{ forma: "texto", dentro: "outro" }] });
+  confere("o cartão de 7 saiu", regiao.cartaoDe(7) === null, "continuou lá");
+  confere("o de 9 ficou", regiao.cartaoDe(9) !== null, "sumiu junto");
+  confere("os bytes voltaram", regiao.bytesDeCartao === 0, String(regiao.bytesDeCartao));
+  confere("a contagem voltou", regiao.contagem.midiasDeCartao === 0, String(regiao.contagem.midiasDeCartao));
+
+  // E soltar a região tira o resto, **mesmo o que nunca esteve sob a raiz
+  // dela**. Um cartão mora na lista do produto, e não na região: pendurá-lo
+  // aqui é o que faz esta prova medir alguma coisa.
+  //
+  // A primeira versão disto media nada: `cartaoDe` devolve `null` assim que a
+  // região está solta, e a raiz nunca fora pendurada em lugar nenhum — as duas
+  // asserções passavam com o descarte **removido**. A reversão pegou.
+  regiao.declararCartoes({
+    9: [{ forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } }],
+  });
+  await volta();
+  await volta();
+  const lista = b.doc.createElement("li");
+  const noDoNove = regiao.cartaoDe(9);
+  lista.append(noDoNove);
+  confere("o cartão está na lista", noDoNove.pai === lista, "não foi pendurado");
+  confere("e segura o retrato", regiao.bytesDeCartao === 1000, String(regiao.bytesDeCartao));
+
+  regiao.soltar();
+  confere("o cartão saiu da lista do produto", noDoNove.pai === null, "continuou pendurado ao lado do nome");
+  confere("e a região esqueceu a raiz", regiao.raizesDeCartao.size === 0, `${regiao.raizesDeCartao.size} raiz(es)`);
+  confere("e o retrato foi solto", regiao.bytesDeCartao === 0, String(regiao.bytesDeCartao));
+}
+
+async function oRetratoDoCartaoEOMesmoNoEntreDoisRetratos() {
+  const b = bancada();
+  const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: 10 }));
+  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+
+  const declarar = (nome) =>
+    regiao.declararCartoes({
+      7: [
+        { forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } },
+        { forma: "texto", chave: "nome", dentro: nome },
+      ],
+    });
+
+  declarar("Lia");
+  await volta();
+  await volta();
+  const antes = acharTag(regiao.cartaoDe(7), "img");
+  confere("o retrato montou", Boolean(antes), "sem img");
+
+  // **O mesmo nó.** Um `<img>` recriado a cada quatro segundos pisca, e um
+  // `<audio>` recriado recomeça — é o motivo de a lista receber o nó montado
+  // em vez de uma cópia, e de a reconciliação valer aqui como vale na região.
+  declarar("Lia Nova");
+  const depois = acharTag(regiao.cartaoDe(7), "img");
+  confere("o retrato não foi recriado", antes === depois, "o nó da imagem trocou");
+  confere("e o texto mudou", textoDe(regiao.cartaoDe(7)).includes("Lia Nova"), textoDe(regiao.cartaoDe(7)));
+  confere("os bytes não dobraram", regiao.bytesDeCartao === 10, String(regiao.bytesDeCartao));
+}
+
+async function osTetosDoCartaoSaoDoCartaoENaoDaRegiao() {
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+
+  // Pessoas demais é recusa **inteira**, e com o teto escrito: o MOD pediu um
+  // conjunto, e um conjunto pela metade é pior que nenhum.
+  const demais = {};
+  for (let i = 0; i <= b.CARTAO.cartoes; i += 1) demais[i] = [{ forma: "texto", dentro: "a" }];
+  let recusou = "";
+  try {
+    regiao.declararCartoes(demais);
+  } catch (erro) {
+    recusou = String(erro.message);
+  }
+  confere("pessoas demais é recusa", recusou.includes(String(b.CARTAO.cartoes)), recusou || "aceitou");
+  confere("e nada ficou pela metade", regiao.cartaoDe(0) === null, "gravou parte do conjunto");
+
+  // O teto de nós é o do cartão, e não o da região: vinte e quatro, e não 512.
+  const muitos = [];
+  for (let i = 0; i < b.CARTAO.nos + 30; i += 1) muitos.push({ forma: "texto", dentro: `n${i}` });
+  const recusados = regiao.declararCartoes({ 3: muitos });
+  const quantos = contarNos(regiao.cartaoDe(3));
+  confere("o cartão parou no teto dele", quantos <= b.CARTAO.nos, `montou ${quantos}`);
+  confere("e a recusa foi contada", recusados > 0, "recusou calado");
+  confere(
+    "o teto do cartão é menor que o da região",
+    b.CARTAO.nos < b.LIMITES.nos,
+    `cartão ${b.CARTAO.nos} · região ${b.LIMITES.nos}`,
+  );
+
+  // Um cartão vazio não vira moldura vazia ao lado de um nome.
+  regiao.declararCartoes({ 5: [] });
+  confere("cartão vazio não entra", regiao.cartaoDe(5) === null, "montou uma moldura vazia");
 }
 
 // ---------------------------------------------------------------------------
@@ -783,6 +976,10 @@ async function tudoChegaAInstanciaESoltarDuasVezesNaoDoi() {
     osTetosContemEARecusaEDita,
     oQuadroPendenteNaoSobreviveASaida,
     tudoChegaAInstanciaESoltarDuasVezesNaoDoi,
+    oCartaoUsaOMesmoRendererComGramaticaMenor,
+    oCartaoSaiQuandoOModParaDeDeclararOuQuandoAReGiaoSai,
+    oRetratoDoCartaoEOMesmoNoEntreDoisRetratos,
+    osTetosDoCartaoSaoDoCartaoENaoDaRegiao,
   ];
   for (const prova of provas) {
     try {

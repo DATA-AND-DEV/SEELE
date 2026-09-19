@@ -652,9 +652,22 @@ const regioesDosMods = new Map();
  * O trabalho mora em `RegiaoDeMod`, em `mods-regiao.js`. Esta função é a
  * amarração: onde a região vive, quem é o dono dela, e como ela fala de volta.
  */
-function desenharARegiaoDoMod(mod, instancia, conteudo) {
+/**
+ * A região desta instância, criada na primeira vez que alguém precisa dela.
+ *
+ * **Os dois caminhos passam por aqui**, e não só o desenho. Um MOD que dá
+ * cartão antes de desenhar a própria região é um MOD comum — o PERFIS consulta
+ * os perfis e monta os cartões no mesmo ciclo em que pinta o painel, e a ordem
+ * entre as duas coisas é dele. Exigir que a região exista primeiro era uma
+ * armadilha de ordem que não aparece em lugar nenhum da API: o MOD recebia «não
+ * tem região de pé» e não tinha como saber que bastava inverter duas linhas.
+ *
+ * Encontrado na corrida nativa, e não em teste: o vetor de referência pede
+ * cartão antes de desenhar, e o quintal dele registrou a recusa.
+ */
+function regiaoDoMod(mod, instancia) {
   const palco = $("regioes-dos-mods");
-  if (!palco) return;
+  if (!palco) return null;
   let regiao = regioesDosMods.get(instancia);
   if (!regiao) {
     const raiz = elemento("section", "regiao-de-mod");
@@ -666,6 +679,13 @@ function desenharARegiaoDoMod(mod, instancia, conteudo) {
     // criada e não registrada é uma região que a saída não encontra.
     instancia.registrar(`${mod.id}: a região`, () => limparARegiaoDoMod(mod.id, instancia));
   }
+  return regiao;
+}
+
+function desenharARegiaoDoMod(mod, instancia, conteudo) {
+  const regiao = regiaoDoMod(mod, instancia);
+  if (!regiao) return;
+  const palco = $("regioes-dos-mods");
   palco.hidden = false;
   const recusados = regiao.aplicar(conteudo);
   // **Recusar em silêncio é o defeito que este repositório mais paga.** Um MOD
@@ -797,62 +817,72 @@ function donoDaRegiao(mod, instancia) {
 }
 
 /**
- * O que cada MOD marcou em cada pessoa, por `id` de MOD.
+ * O cartão que cada MOD dá a cada pessoa, desenhado na lista do produto.
  *
  * # Por que existe uma superfície além da região
  *
  * A região é o lugar onde um MOD desenha, e continua sendo. Mas a lista de
  * pessoas é uma superfície onde uma informação de MOD tem lugar **natural**: o
- * nome que alguém escolheu num MOD de perfis é sobre aquela pessoa, e mostrá-lo
- * só dentro de um painel ao lado é mostrá-lo longe de onde ele significa algo.
+ * retrato e o nome que alguém escolheu num MOD de perfis são sobre aquela
+ * pessoa, e mostrá-los só dentro de um painel ao lado é mostrá-los longe de
+ * onde significam alguma coisa.
  *
- * O que impede isto de virar a página de volta na mão do MOD é a forma: ele
- * **não desenha**. Ele entrega um texto curto e uma cor por pessoa, e o produto
- * monta — no lugar dele, com a tipografia dele, com o espaçamento dele. Um MOD
- * não escolhe posição, não escolhe tamanho, e não alcança nenhum outro nó.
+ * # O que impede isto de devolver a janela ao MOD
+ *
+ * **O renderer é o mesmo.** O que chega é a declaração da região — as mesmas
+ * formas, `planejar`, `reconciliar`, `elemento`, `createElement` e
+ * `textContent`. Nada de HTML de texto, nada de nó alcançável de fora, nada de
+ * estilo escrito por terceiro. O MOD não escolhe onde o cartão entra na linha,
+ * e nenhum evento de dentro dele volta para ele.
+ *
+ * **A gramática é menor.** Um cartão não aceita `botao`, `campo`, `escolha`,
+ * `arquivo` nem `tela`: ver `FORMAS_DO_CARTAO` em `mods-regiao.js`. A linha do
+ * roster já tem um botão do produto, e dividir foco e área de toque com um
+ * terceiro é o tipo de coisa que ninguém consegue depurar depois.
+ *
+ * **O dono é a região.** O cartão nasce dentro da `RegiaoDeMod` daquela
+ * instância, e sai com ela: é a mesma `soltar` que tira o som e os bytes.
  */
-const marcasDosMods = new Map();
 
-/** Quantas pessoas um MOD pode marcar, e quanto texto cabe numa marca. */
-const MARCAS_POR_MOD = 128;
-const TEXTO_DA_MARCA = 24;
+/** Os cartões declarados por MOD, por `id`. */
+const cartoesDosMods = new Map();
 
 /**
- * Guarda o que um MOD marcou, e redesenha a lista.
+ * Guarda o que um MOD declarou para a lista, e manda repintá-la.
  *
- * As recusas são as do tema, pela mesma razão: uma cor que não é `#rrggbb` e um
- * texto sem fim são as duas formas de um terceiro estragar uma tela que não é
- * dele.
+ * A montagem acontece **agora**, e não na hora de desenhar a linha: é aqui que
+ * o teto é conferido e a recusa vira erro na mão de quem pediu. Um cartão
+ * montado tarde recusaria calado, no meio de um retrato.
  */
-function marcarPessoasDoMod(id, marcas) {
-  const guardadas = new Map();
-  const entradas = Object.entries(marcas ?? {});
-  if (entradas.length > MARCAS_POR_MOD) {
-    throw new Error(`um MOD marca até ${MARCAS_POR_MOD} pessoas, e vieram ${entradas.length}`);
-  }
-  for (const [pessoa, marca] of entradas) {
-    const texto = String(marca?.texto ?? "").slice(0, TEXTO_DA_MARCA);
-    if (!texto) continue;
-    const cor = marca?.cor;
-    if (cor !== undefined && (typeof cor !== "string" || !COR_DO_TEMA.test(cor))) {
-      throw new Error(`a cor de uma marca precisa ser #rrggbb, e veio «${cor}»`);
-    }
-    guardadas.set(String(pessoa), { texto, cor: cor ?? null });
-  }
-  marcasDosMods.set(id, guardadas);
-  // A lista é redesenhada pelo dono dela: este arquivo guarda, e `tela-sessao`
-  // pinta no próximo retrato.
+function darCartoesDoMod(mod, instancia, cartoes) {
+  // A região é criada aqui se ainda não existe: ela é a dona do cartão — dela
+  // vêm o descarte, a geração e o caminho até a mídia — e exigir que o MOD
+  // desenhe antes seria uma ordem que a API não conta a ninguém.
+  //
+  // Criá-la **não a mostra**: o palco só deixa de estar escondido quando algo
+  // é desenhado nela. Um MOD que só dá cartão não abre uma faixa vazia.
+  const regiao = regiaoDoMod(mod, instancia);
+  if (!regiao) throw new Error("a tela da sessão não está montada");
+  const recusados = regiao.declararCartoes(cartoes);
+  cartoesDosMods.set(mod.id, regiao);
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
+  return recusados;
 }
 
-/** O que os MODs de pé marcaram nesta pessoa, na ordem em que marcaram. */
-function marcasDaPessoa(id) {
-  const achadas = [];
-  for (const [, marcas] of marcasDosMods) {
-    const marca = marcas.get(String(id));
-    if (marca) achadas.push(marca);
+/**
+ * Os cartões desta pessoa, na ordem em que os MODs os declararam.
+ *
+ * Devolve os **nós de verdade**, e não cópias: mover um nó já montado preserva
+ * o que ele segura — um `<audio>` recriado a cada retrato recomeçaria o som, e
+ * um `<img>` recriado piscaria a cada quatro segundos.
+ */
+function cartoesDaPessoa(id) {
+  const achados = [];
+  for (const [, regiao] of cartoesDosMods) {
+    const cartao = regiao.cartaoDe(id);
+    if (cartao) achados.push(cartao);
   }
-  return achadas;
+  return achados;
 }
 
 /** Tira a região de uma instância da tela, inteira — e o tema junto. */
@@ -869,7 +899,10 @@ function limparARegiaoDoMod(id, instancia) {
   // O tema é por `id` de propósito: ele é sobre o nome que reservou o token, e
   // um MOD recarregado continua sendo o mesmo nome. As marcas também.
   if (temaDosMods.delete(id)) escreverOTemaDaSessao();
-  if (marcasDosMods.delete(id) && typeof redesenharAsPessoas === "function") {
+  // Os cartões saem com a região, porque nascem dentro dela: `soltar` já
+  // tirou as raízes da lista e soltou o que elas seguravam. O que resta aqui é
+  // esquecer o MOD e mandar a lista se redesenhar sem ele.
+  if (cartoesDosMods.delete(id) && typeof redesenharAsPessoas === "function") {
     redesenharAsPessoas();
   }
 }
@@ -912,9 +945,40 @@ const TEMA_DA_API = Object.freeze({
  * Dito pelo nome porque a alternativa é pior: um pedido que não acontece e não
  * explica vira, do outro lado, «isto ainda não existe» — e aí alguém espera.
  */
-const RECUSADOS_POR_DESENHO = Object.freeze({
-  arredondamento: "não existe neste produto: `docs/marca.md` proíbe raio, e a proibição é da marca",
-  brilho: "não existe neste produto: `docs/marca.md` proíbe sombra, e a proibição é da marca",
+/**
+ * Os números do tema: nome da API, token, e o intervalo que o produto aceita.
+ *
+ * # Por que número limitado, e não medida livre
+ *
+ * `--seele-raio` e `--seele-sombra` já existiam em `tokens.css`, valendo `0` e
+ * `none`, e três folhas já os liam. O que faltava não era o token: era alguém
+ * poder escrevê-los.
+ *
+ * O intervalo é o que separa «escolher o arredondamento» de «escrever CSS na
+ * tela de quem conversa». Um `border-radius` livre aceita `9999px`, que
+ * transforma cada painel num comprimido, e aceita `calc(...)` com o que vier
+ * dentro. Vinte e quatro é o mesmo teto que o servidor do ESTILO já conferia
+ * do lado dele — os dois lados concordando é o que faz a recusa ser rara.
+ */
+const NUMEROS_DA_API = Object.freeze({
+  arredondamento: { token: "--seele-raio", minimo: 0, maximo: 24, unidade: "px" },
+});
+
+/**
+ * As bandeiras do tema: ligado ou desligado, e nada entre os dois.
+ *
+ * O brilho **não** é uma sombra que o MOD escreve. Ele é uma sombra que o
+ * produto escreve quando o MOD diz «sim», e ela é feita do acento da sessão —
+ * que é um token, e não um valor que veio de fora. Aceitar a string faria a
+ * API de tema virar a porta de entrada de qualquer `box-shadow`, inclusive um
+ * que desenhe fora do painel e cubra a tela.
+ */
+const BANDEIRAS_DA_API = Object.freeze({
+  brilho: {
+    token: "--seele-sombra",
+    ligado: "0 0 12px var(--seele-laranja-nerv)",
+    desligado: "none",
+  },
 });
 
 /**
@@ -988,16 +1052,28 @@ function aplicarOTemaDoMod(id, valores) {
       pedido.set(nome, valor);
       continue;
     }
-    // **Recusado pelo nome, e com a razão.** Estes dois existem como token no
-    // produto e um MOD poderia escrevê-los — e é por isso que a recusa precisa
-    // ser explícita em vez de silenciosa. `docs/marca.md` diz «sem sombra,
-    // gradiente, contorno extra, raio», e diz «nunca»: é regra da identidade
-    // deste produto, e não um recurso que ninguém teve tempo de ligar.
-    //
-    // Um MOD que pede recebe a frase e pode mostrá-la. O que ele não pode é
-    // ficar sem resposta e concluir que falta implementar.
-    if (nome in RECUSADOS_POR_DESENHO) {
-      throw new Error(`«${nome}» ${RECUSADOS_POR_DESENHO[nome]}`);
+    // **Os números, com o intervalo conferido aqui.** Fora dele é recusa com o
+    // intervalo escrito: quem pediu 40 precisa saber que o teto é 24, e não
+    // que «não deu».
+    if (nome in NUMEROS_DA_API) {
+      const regra = NUMEROS_DA_API[nome];
+      if (!Number.isInteger(valor) || valor < regra.minimo || valor > regra.maximo) {
+        throw new Error(
+          `«${nome}» é um inteiro de ${regra.minimo} a ${regra.maximo}, e veio «${valor}»`,
+        );
+      }
+      pedido.set(nome, valor);
+      continue;
+    }
+    // **As bandeiras, que são sim ou não.** Um `"sim"` em texto não passa: o
+    // valor é booleano, e aceitar as duas formas faria o produto adivinhar o
+    // que `"false"` quer dizer.
+    if (nome in BANDEIRAS_DA_API) {
+      if (typeof valor !== "boolean") {
+        throw new Error(`«${nome}» é sim ou não, e veio «${valor}»`);
+      }
+      pedido.set(nome, valor);
+      continue;
     }
     if (!(nome in TEMA_DA_API)) {
       throw new Error(`a API de tema não conhece «${nome}»`);
@@ -1011,6 +1087,18 @@ function aplicarOTemaDoMod(id, valores) {
       }
     }
     pedido.set(nome, valor);
+  }
+
+  // A disputa vale para número e bandeira também: dois MODs pedindo
+  // arredondamentos diferentes é a mesma pergunta sem resposta que dois MODs
+  // pedindo o acento, e escolher calado é escolher errado metade das vezes.
+  for (const nome of pedido.keys()) {
+    if (!(nome in NUMEROS_DA_API) && !(nome in BANDEIRAS_DA_API)) continue;
+    for (const [outro, seus] of temaDosMods) {
+      if (outro !== id && nome in seus) {
+        throw new Error(`«${nome}» já é do MOD «${outro}» nesta sessão`);
+      }
+    }
   }
 
   const antes = temaDosMods.get(id);
@@ -1039,6 +1127,19 @@ function escreverOTemaDaSessao() {
     // escolher outro.
     if (valor) sessao.style.setProperty(token, valor);
     else sessao.style.removeProperty(token);
+  }
+  // Os números viram medida com unidade **aqui**, e não no MOD: o que
+  // atravessa a API é 8, e o que vai para a folha é `8px`. Um MOD que
+  // mandasse a unidade mandaria uma string, e uma string é onde cabe o resto.
+  for (const [nome, regra] of Object.entries(NUMEROS_DA_API)) {
+    const valor = emVigor.get(nome);
+    if (valor === undefined) sessao.style.removeProperty(regra.token);
+    else sessao.style.setProperty(regra.token, `${valor}${regra.unidade}`);
+  }
+  for (const [nome, regra] of Object.entries(BANDEIRAS_DA_API)) {
+    const valor = emVigor.get(nome);
+    if (valor === undefined) sessao.style.removeProperty(regra.token);
+    else sessao.style.setProperty(regra.token, valor ? regra.ligado : regra.desligado);
   }
   // As medidas saem pela mesma porta, e saem **juntas**: uma densidade é um
   // conjunto de números que só faz sentido inteiro.
@@ -1185,9 +1286,8 @@ async function atenderOMod(mod, instancia, m) {
         aplicarOTemaDoMod(mod.id, m.valores);
         responder(true, { valor: null });
         break;
-      case "marcas":
-        marcarPessoasDoMod(mod.id, m.marcas);
-        responder(true, { valor: null });
+      case "cartoes":
+        responder(true, { valor: darCartoesDoMod(mod, instancia, m.cartoes) });
         break;
       case "pedaco": {
         const pedaco = await donoDaRegiao(mod, instancia).pedacoDoArquivo(m.arquivo, m.inicio);
