@@ -10876,10 +10876,11 @@ fn um_pedido_de_mod_nunca_fica_sem_resposta() {
     let base = without_comments(&read("ui/base.js"));
     let atender = js_function(&base, "async function atenderOMod(");
 
-    // O único `return` calado que sobra é o do caso em que **outra** instância
-    // já tomou o lugar desta: aí não há a quem responder.
+    // Quando outra instância tomou o lugar desta, o bloco registra e retorna.
+    // A instrumentação não muda a recusa; conferir o bloco permite o registro.
+    let substituida = js_function(&atender, "if (!minhaInstancia())");
     assert!(
-        atender.contains("if (!minhaInstancia()) return;"),
+        substituida.contains("return;"),
         "a porta de entrada deixou de distinguir «não é minha instância» de \
          «a sessão andou», e as duas calavam o MOD: {atender}"
     );

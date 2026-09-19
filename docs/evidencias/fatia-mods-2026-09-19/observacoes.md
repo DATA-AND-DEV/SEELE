@@ -54,27 +54,27 @@ dita como mais fraca.
 
 Sete amostras a cada cinco segundos, `footprint` para a memória da família de
 processos e `ps` para o tempo de CPU acumulado. Mesma máquina, mesmo binário,
-mesmo servidor; a única diferença é `enabled` na tabela `mods`.
+mesmo servidor; a única diferença entre as fases é `enabled` na tabela `mods`.
 
-| Fase | Footprint (mediana) | CPU somada na janela |
+A família é escolhida por regra, e não a olho: o processo do aplicativo e os
+auxiliares do WebKit **mais novos que ele**. Uma primeira tentativa pegou um
+auxiliar de outro aplicativo e devolveu 145 MiB contra 252 MiB da fase
+anterior — números que não comparavam nada. As duas fases abaixo foram colhidas
+seguidas, com a mesma regra e a mesma janela.
+
+| Fase | Footprint (mediana) | CPU na janela de 30 s |
 | --- | --- | --- |
-| sem MOD | 252,3 MiB | 1,32 s em 30,0 s = 4,4% de um núcleo |
-| fatia montada | — ver abaixo — | — ver abaixo — |
+| sem MOD | 246,7 MiB | 1,79 s = 6,0% de um núcleo |
+| fatia montada | 267,9 MiB | 1,84 s = 6,1% de um núcleo |
 
-A fase «fatia montada» foi colhida **duas vezes**. A primeira não vale: o
-processo de medição ficou suspenso entre amostras e a janela saiu com 1959 s em
-vez de 30 s, o que dilui a taxa de CPU até ela não querer dizer nada. O arquivo
-está preservado fora do registro para não ser lido por engano.
+**+21,2 MiB e +0,1 ponto de CPU** para um executor QuickJS de pé, uma região de
+nove nós montada e um som de 1644 bytes decodificado e parado.
 
-A segunda colheita não aconteceu: a execução seguinte esbarrou no defeito
-aberto descrito abaixo, e medir uma fatia que não terminou de subir mediria
-outra coisa. **Fica pendente**, e não estimada.
-
-O que se pode dizer com o que foi medido: com a fatia montada, o footprint
-mediano ficou em 259,9 MiB contra 252,3 MiB sem MOD — cerca de 7,6 MiB para um
-executor QuickJS, uma região com nove nós e um som de 1644 bytes decodificado.
-O número é de uma colheita cuja janela temporal não vale para CPU; para memória
-ele continua sendo sete amostras da mesma fase, e é assim que deve ser lido.
+A CPU praticamente não muda porque a fatia, depois de montar, **não faz nada**:
+não há temporizador, não há laço, e o MOD só acorda por evento. É o resultado
+que o desenho previa, e é também o motivo pelo qual ele não diz nada sobre
+custo **sob interação** — isso continua pendente, pelo impedimento de
+automação.
 
 ## Dois defeitos encontrados aqui, e não em teste
 
@@ -161,11 +161,31 @@ não deixava rastro. Agora diz qual dos dois motivos foi.
 E a colheita diz quantas levou e quantas ficaram, que é o outro lado da mesma
 linha.
 
-**O defeito não reproduziu na execução seguinte**, que subiu inteira — mídia
-servida, região montada, cinco falas. Não o levei até a causa: o que fiz foi
-tirar o silêncio de todos os caminhos por onde ele pode passar. Da próxima vez
-que ele aparecer, o registro dirá onde. Isso é menos do que consertar, e está
-dito como menos.
+**O defeito não reproduziu na execução seguinte**, e eu parei aí, tendo tirado
+o silêncio dos caminhos sem chegar à causa.
+
+### E a causa era a colheita — corrigido
+
+A revisão seguinte a reproduziu e a nomeou, na camada JS e sem tocar no
+transporte:
+
+1. o Rust atende uma colheita vazia, e a resposta ainda está a caminho do
+   JavaScript;
+2. uma mensagem nova entra e produz o aviso dela. A janela o recebe com
+   `colhendo = true`, e o ignorava;
+3. a resposta vazia antiga chega, o coletor sai, e a mensagem nova fica retida
+   sem nenhum aviso que a vá buscar.
+
+Bate com o que o registro mostrava: a terceira fala chegava à bomba e a
+colheita seguinte levava zero. Uma marca de «colher de novo» preserva o aviso
+recebido durante a espera, sem consulta concorrente e sem varredura ociosa. O
+caso entrou na bancada como `avisoDuranteColheitaVaziaNaoSePerde`; reverti a
+correção e ele reprova com as duas frases certas.
+
+**Confirmado no nativo**: com o aplicativo recompilado, **seis execuções de
+seis** subiram a fatia inteira — cinco falas, mídia servida, zero descartes.
+Antes, três de seis travavam. Uma execução boa não provaria nada numa falha
+intermitente; seis seguidas, contra três de seis, provam.
 
 O registro está em `execucao-pedido-preso.log`.
 

@@ -128,19 +128,28 @@ function executorNativo(id, geracao, hash) {
   // O que fazer quando a parada for confirmada — inclusive **depois** do prazo.
   let aoConcluir = null;
   let colhendo = false;
+  let colherDeNovo = false;
 
   /// Colhe até esvaziar. É a colheita que devolve o crédito do lado nativo.
   const colher = async (aoReceber, aoFalhar) => {
-    if (colhendo || numero === null) return;
+    if (numero === null) return;
+    // Um aviso pode chegar enquanto uma resposta vazia do Rust está em
+    // trânsito. Guardá-lo evita deixar a mensagem nova sem quem a busque.
+    colherDeNovo = true;
+    if (colhendo) return;
     colhendo = true;
     try {
       for (;;) {
+        colherDeNovo = false;
         const falas = await invoke("mod_nativo_colher", {
           geracao,
           instancia: numero,
           limite: 32,
         });
-        if (!falas || falas.length === 0) return;
+        if (!falas || falas.length === 0) {
+          if (colherDeNovo) continue;
+          return;
+        }
         for (const fala of falas) {
           if (fala.tipo === "mensagem") {
             try {

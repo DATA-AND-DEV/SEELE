@@ -2,211 +2,211 @@
   {
     "fase": "sem-mod",
     "indice": 0,
-    "unix": 1789827933.1796632,
+    "unix": 1789842542.908947,
     "processos": [
       {
-        "nome": "com.apple.WebKit.WebContent",
-        "pid": 59752,
-        "footprint_bytes": 104186768
+        "nome": "com.apple.WebKit.GPU",
+        "pid": 92276,
+        "footprint_bytes": 104579984
       },
       {
-        "nome": "com.apple.WebKit.GPU",
-        "pid": 59751,
-        "footprint_bytes": 103908216
+        "nome": "com.apple.WebKit.WebContent",
+        "pid": 92277,
+        "footprint_bytes": 99418952
       },
       {
         "nome": "seele-app",
-        "pid": 59749,
-        "footprint_bytes": 45319488
+        "pid": 92274,
+        "footprint_bytes": 46531832
       },
       {
         "nome": "com.apple.WebKit.Networking",
-        "pid": 59753,
-        "footprint_bytes": 5128744
+        "pid": 92278,
+        "footprint_bytes": 5046800
       }
     ],
-    "total_footprint_bytes": 258281072,
-    "ps": "59749 146176   0:03.23 ./target/release/seele-app\n59751  34592   0:01.04 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n59752  78992   0:02.44 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n59753  12544   0:00.08 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
+    "total_footprint_bytes": 255315424,
+    "ps": "92274 149104   0:00.88 ./target/release/seele-app\n92276  33696   0:00.31 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n92277  57856   0:00.76 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n92278  12416   0:00.03 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
     "returncode": 0
   },
   {
     "fase": "sem-mod",
     "indice": 1,
-    "unix": 1789827938.182646,
+    "unix": 1789842547.9160588,
     "processos": [
       {
         "nome": "com.apple.WebKit.GPU",
-        "pid": 59751,
-        "footprint_bytes": 103727992
+        "pid": 92276,
+        "footprint_bytes": 104596368
       },
       {
         "nome": "com.apple.WebKit.WebContent",
-        "pid": 59752,
-        "footprint_bytes": 93766544
+        "pid": 92277,
+        "footprint_bytes": 100565832
       },
       {
         "nome": "seele-app",
-        "pid": 59749,
-        "footprint_bytes": 45221184
+        "pid": 92274,
+        "footprint_bytes": 46531832
       },
       {
         "nome": "com.apple.WebKit.Networking",
-        "pid": 59753,
-        "footprint_bytes": 5128744
+        "pid": 92278,
+        "footprint_bytes": 5046800
       }
     ],
-    "total_footprint_bytes": 247582320,
-    "ps": "59749 145984   0:03.35 ./target/release/seele-app\n59751  34416   0:01.07 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n59752  79472   0:02.50 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n59753  12544   0:00.09 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
+    "total_footprint_bytes": 256478688,
+    "ps": "92274 149104   0:01.02 ./target/release/seele-app\n92276  33824   0:00.35 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n92277  59104   0:00.89 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n92278  12416   0:00.03 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
     "returncode": 0
   },
   {
     "fase": "sem-mod",
     "indice": 2,
-    "unix": 1789827943.187735,
+    "unix": 1789842552.925795,
     "processos": [
       {
         "nome": "com.apple.WebKit.GPU",
-        "pid": 59751,
-        "footprint_bytes": 103465848
+        "pid": 92276,
+        "footprint_bytes": 104612752
       },
       {
         "nome": "com.apple.WebKit.WebContent",
-        "pid": 59752,
-        "footprint_bytes": 98648976
+        "pid": 92277,
+        "footprint_bytes": 101614432
       },
       {
         "nome": "seele-app",
-        "pid": 59749,
-        "footprint_bytes": 44074304
+        "pid": 92274,
+        "footprint_bytes": 46531832
       },
       {
         "nome": "com.apple.WebKit.Networking",
-        "pid": 59753,
-        "footprint_bytes": 5145128
+        "pid": 92278,
+        "footprint_bytes": 5046800
       }
     ],
-    "total_footprint_bytes": 251072112,
-    "ps": "59749 141376   0:03.45 ./target/release/seele-app\n59751  34416   0:01.08 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n59752  80384   0:02.56 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n59753  12608   0:00.09 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
+    "total_footprint_bytes": 257543672,
+    "ps": "92274 149104   0:01.14 ./target/release/seele-app\n92276  33840   0:00.39 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n92277  60704   0:01.01 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n92278  12416   0:00.03 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
     "returncode": 0
   },
   {
     "fase": "sem-mod",
     "indice": 3,
-    "unix": 1789827948.1879418,
+    "unix": 1789842557.9352388,
     "processos": [
       {
-        "nome": "com.apple.WebKit.WebContent",
-        "pid": 59752,
-        "footprint_bytes": 111870864
+        "nome": "com.apple.WebKit.GPU",
+        "pid": 92276,
+        "footprint_bytes": 104629136
       },
       {
-        "nome": "com.apple.WebKit.GPU",
-        "pid": 59751,
-        "footprint_bytes": 103744376
+        "nome": "com.apple.WebKit.WebContent",
+        "pid": 92277,
+        "footprint_bytes": 102744928
       },
       {
         "nome": "seele-app",
-        "pid": 59749,
-        "footprint_bytes": 44057920
+        "pid": 92274,
+        "footprint_bytes": 46531832
       },
       {
         "nome": "com.apple.WebKit.Networking",
-        "pid": 59753,
-        "footprint_bytes": 5145128
+        "pid": 92278,
+        "footprint_bytes": 5046800
       }
     ],
-    "total_footprint_bytes": 264556144,
-    "ps": "59749 141376   0:03.57 ./target/release/seele-app\n59751  34432   0:01.12 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n59752  81584   0:02.64 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n59753  12608   0:00.09 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
+    "total_footprint_bytes": 258690552,
+    "ps": "92274 149104   0:01.27 ./target/release/seele-app\n92276  33856   0:00.44 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n92277  62592   0:01.14 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n92278  12416   0:00.03 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
     "returncode": 0
   },
   {
     "fase": "sem-mod",
     "indice": 4,
-    "unix": 1789827953.190681,
+    "unix": 1789842562.94341,
     "processos": [
       {
         "nome": "com.apple.WebKit.WebContent",
-        "pid": 59752,
-        "footprint_bytes": 112640912
+        "pid": 92277,
+        "footprint_bytes": 104760160
       },
       {
         "nome": "com.apple.WebKit.GPU",
-        "pid": 59751,
-        "footprint_bytes": 103711608
+        "pid": 92276,
+        "footprint_bytes": 104661904
       },
       {
         "nome": "seele-app",
-        "pid": 59749,
-        "footprint_bytes": 44074304
+        "pid": 92274,
+        "footprint_bytes": 46531832
       },
       {
         "nome": "com.apple.WebKit.Networking",
-        "pid": 59753,
-        "footprint_bytes": 5095976
+        "pid": 92278,
+        "footprint_bytes": 5046800
       }
     ],
-    "total_footprint_bytes": 265260656,
-    "ps": "59749 141360   0:03.69 ./target/release/seele-app\n59751  34768   0:01.15 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n59752  82624   0:02.75 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n59753  12560   0:00.09 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
+    "total_footprint_bytes": 260738552,
+    "ps": "92274 149104   0:01.41 ./target/release/seele-app\n92276  33888   0:00.48 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n92277  64624   0:01.27 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n92278  12416   0:00.03 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
     "returncode": 0
   },
   {
     "fase": "sem-mod",
     "indice": 5,
-    "unix": 1789827958.195436,
+    "unix": 1789842567.948396,
     "processos": [
       {
         "nome": "com.apple.WebKit.WebContent",
-        "pid": 59752,
-        "footprint_bytes": 113279888
+        "pid": 92277,
+        "footprint_bytes": 105333600
       },
       {
         "nome": "com.apple.WebKit.GPU",
-        "pid": 59751,
-        "footprint_bytes": 103711608
+        "pid": 92276,
+        "footprint_bytes": 104678288
       },
       {
         "nome": "seele-app",
-        "pid": 59749,
-        "footprint_bytes": 44041536
+        "pid": 92274,
+        "footprint_bytes": 46515448
       },
       {
         "nome": "com.apple.WebKit.Networking",
-        "pid": 59753,
-        "footprint_bytes": 5095976
+        "pid": 92278,
+        "footprint_bytes": 5046800
       }
     ],
-    "total_footprint_bytes": 265866864,
-    "ps": "59749 141328   0:03.79 ./target/release/seele-app\n59751  35024   0:01.18 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n59752  83248   0:02.82 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n59753  12560   0:00.09 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
+    "total_footprint_bytes": 261311992,
+    "ps": "92274 149104   0:01.54 ./target/release/seele-app\n92276  33904   0:00.52 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n92277  66112   0:01.38 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n92278  12416   0:00.03 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
     "returncode": 0
   },
   {
     "fase": "sem-mod",
     "indice": 6,
-    "unix": 1789827963.1985338,
+    "unix": 1789842572.9581409,
     "processos": [
       {
         "nome": "com.apple.WebKit.WebContent",
-        "pid": 59752,
-        "footprint_bytes": 114066320
+        "pid": 92277,
+        "footprint_bytes": 106447712
       },
       {
         "nome": "com.apple.WebKit.GPU",
-        "pid": 59751,
-        "footprint_bytes": 103711608
+        "pid": 92276,
+        "footprint_bytes": 104678288
       },
       {
         "nome": "seele-app",
-        "pid": 59749,
-        "footprint_bytes": 44041536
+        "pid": 92274,
+        "footprint_bytes": 46515448
       },
       {
         "nome": "com.apple.WebKit.Networking",
-        "pid": 59753,
-        "footprint_bytes": 5079592
+        "pid": 92278,
+        "footprint_bytes": 5046800
       }
     ],
-    "total_footprint_bytes": 266636912,
-    "ps": "59749 141328   0:03.89 ./target/release/seele-app\n59751  35328   0:01.21 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n59752  84032   0:02.92 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n59753  12544   0:00.09 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
+    "total_footprint_bytes": 262426104,
+    "ps": "92274 149088   0:01.67 ./target/release/seele-app\n92276  33920   0:00.57 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU\n92277  67264   0:01.50 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent\n92278  12416   0:00.03 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking\n",
     "returncode": 0
   }
 ]

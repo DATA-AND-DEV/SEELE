@@ -238,12 +238,48 @@ async function aJanelaColheEmVezDeReceber() {
   );
 }
 
+// A colheita vazia pode chegar depois do aviso de uma mensagem nova.
+// A ponte devolve a resposta antiga, enquanto o dado novo continua no Rust.
+async function avisoDuranteColheitaVaziaNaoSePerde() {
+  const caso = "aviso durante resposta vazia em trânsito";
+  const b = bancada();
+  b.responder("mod_nativo_reservar", () => 104);
+  let devolverVazio;
+  let colheitas = 0;
+  const pendentes = [];
+  b.responder("mod_nativo_colher", () => {
+    colheitas += 1;
+    if (colheitas === 1) return new Promise((resolve) => { devolverVazio = resolve; });
+    return pendentes.splice(0);
+  });
+  const vistas = [];
+  const e = b.api.executorNativo("autor/mod", 11, "hash");
+  await e.iniciar("", (m) => vistas.push(m), () => {});
+  const aviso = { geracao: 11, instancia: 104, parou: false };
+  b.evento(aviso);
+  await volta();
+  pendentes.push({ tipo: "mensagem", corpo: '{"n":2,"tipo":"snapshot"}' });
+  b.evento(aviso);
+  confere(caso, colheitas === 1, "o aviso abriu uma segunda colheita concorrente");
+  devolverVazio([]);
+  await volta();
+  await volta();
+  confere(caso, vistas.length === 1 && vistas[0].n === 2,
+    "a mensagem ficou retida depois de seu aviso chegar durante a colheita");
+  confere(caso, pendentes.length === 0, "sobrou mensagem sem novo aviso para buscá-la");
+  confere(caso, !e.pendencias().colhendo, "a colheita não terminou ao esvaziar");
+  const antes = colheitas;
+  await volta();
+  confere(caso, colheitas === antes, "a colheita passou a consultar em laço ocioso");
+}
+
 (async () => {
   const provas = [
     falaAntigaNaoEntraDuranteASubida,
     confirmacaoTardiaConclui,
     umaSegundaTentativaDeEncerrarValeDeNovo,
     aJanelaColheEmVezDeReceber,
+    avisoDuranteColheitaVaziaNaoSePerde,
   ];
   for (const prova of provas) {
     try {
