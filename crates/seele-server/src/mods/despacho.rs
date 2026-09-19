@@ -1025,11 +1025,17 @@ mod tests {
         // deixa — é daí que a recarga vai lê-lo.
         let obras = raiz.join("em-obras");
         std::fs::create_dir_all(obras.join("servidor")).expect("criar");
+        // **A API vem da constante.** Cravada, ela faz este teste reprovar no dia
+        // em que a versão sobe — e reprovar dizendo «o MOD continuou mudo aos
+        // eventos», que fala do despachante e é sobre o manifesto do fixture.
+        let api = seele_proto::mods::MOD_API_VERSION;
         std::fs::write(
             obras.join("mod.json"),
-            br#"{"schema":1,"id":"seele/tardio","version":"1.0.0","api":2,
+            format!(
+                r#"{{"schema":1,"id":"seele/tardio","version":"1.0.0","api":{api},
                 "repo":"https://example.invalid/t","reach":["estado no servidor"],
-                "server":"servidor/main.js"}"#,
+                "server":"servidor/main.js"}}"#
+            ),
         )
         .expect("manifesto");
         std::fs::write(
@@ -1086,8 +1092,22 @@ mod tests {
         }
 
         // Um evento depois disso tem de alcançá-lo.
+        //
+        // **Oito segundos, e não dois.** Este teste reprovou uma vez na bateria
+        // do workspace inteiro — `left: None`, o MOD mudo — e não se reproduziu
+        // depois: vinte corridas isoladas e doze com os quinhentos e dez do
+        // `--lib` juntos, todas verdes. O que difere entre as duas situações é
+        // quantos binários de teste disputam a máquina ao mesmo tempo, e o que
+        // este laço espera é uma máquina de JavaScript subir numa thread que
+        // pode não estar recebendo fatia nenhuma.
+        //
+        // O orçamento maior não custa nada quando passa — sai no primeiro
+        // acerto — e custa seis segundos a mais só quando já vai reprovar. O
+        // que ele **não** faz é descartar a outra explicação: se voltar a
+        // reprovar com oito segundos, a lentidão deixa de servir de resposta e
+        // o que sobra é ordem, no despachante.
         let mut viu = None;
-        for _ in 0..50 {
+        for _ in 0..200 {
             let _ = bus.send(crate::server::Event::PersonLeft {
                 voice_room: VoiceRoomId(1),
                 person: PersonId(7),
@@ -1107,7 +1127,7 @@ mod tests {
         assert_eq!(
             viu.as_deref(),
             Some("PersonLeft"),
-            "o MOD ligado com o servidor de pé continuou mudo aos eventos: o \
+            "o MOD ligado com o servidor de pé continuou mudo aos eventos por oito segundos: o \
              despachante ficou com o código do arranque"
         );
     }
