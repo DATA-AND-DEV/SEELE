@@ -543,111 +543,22 @@ async function pedirAoServidor(id, canal, valor) {
   });
 }
 /**
- * O que roda **dentro** do worker, antes do código do MOD — ADR 0049.
+ * Põe um MOD de pé no executor do produto.
  *
- * Um MOD deixa de rodar na janela do produto. O que ele tem aqui dentro é o
- * que este prelúdio dá: não há `document`, não há `window`, não há o global do
- * Tauri. Isso não é uma jaula construída com cuidado — é o que um `Worker`
- * **é**, e é por isso que a garantia é forte: `terminate()` mata temporizador,
- * ouvinte, promessa atrasada e áudio, sem depender de o MOD cooperar.
+ * O código vem pela ponte, e não por uma URL: a conferência de hash acontece
+ * onde ela já mora — no Rust — e o que chega aqui é texto que já passou por ela.
  *
- * Texto e não arquivo buscado: um `fetch` deste prelúdio exigiria alargar o
- * `connect-src` da CSP, e ele não precisa ser alargado para nada.
+ * **Um executor, e só um.** O Worker de `blob:` que o ADR 0049 usou como
+ * primeiro desenho foi reprovado por medição: ele herda a origem de quem o
+ * criou, e com ela `indexedDB` e `caches` do produto — o que um MOD gravou lá
+ * sobreviveu ao encerramento do aplicativo e reapareceu na entrada seguinte.
+ * `terminate()` mata o contexto e não toca no armazenamento da origem.
  *
- * **Deliberadamente pequeno.** Tudo o que um MOD alcança passa por uma
- * mensagem, e cada mensagem nova é uma decisão de API — escrita, revisada e
- * versionada — em vez de um MOD descobrir que consegue.
- */
-const PRELUDIO_DO_MOD = `
-'use strict';
-(() => {
-  const pendentes = new Map();
-  let proximo = 0;
-
-  let ouvinte = null;
-
-  self.onmessage = (evento) => {
-    const m = evento.data;
-    if (!m) return;
-    if (m.tipo === 'evento') {
-      if (!ouvinte) return;
-      // O erro do MOD fica com o MOD: um ouvinte que lança não pode impedir o
-      // próximo evento de chegar.
-      try { ouvinte(m); } catch (erro) { console.error('SeeleUI.aoEvento', erro); }
-      return;
-    }
-    if (m.tipo !== 'resposta') return;
-    const espera = pendentes.get(m.n);
-    if (!espera) return;
-    pendentes.delete(m.n);
-    if (m.ok) espera.resolve(m.valor);
-    else espera.reject(new Error(m.erro || 'recusado'));
-  };
-
-  const pedir = (tipo, carga) => new Promise((resolve, reject) => {
-    // O mesmo teto de pedidos em voo da ponte antiga: um MOD num laço não
-    // pode encher a fila da janela.
-    if (pendentes.size >= 8) { reject(new Error('too-many-requests')); return; }
-    const n = ++proximo;
-    pendentes.set(n, { resolve, reject });
-    self.postMessage({ tipo, n, ...carga });
-  });
-
-  self.SeeleMods = Object.freeze({
-    request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
-    snapshot: () => pedir('snapshot', {}),
-  });
-
-  self.SeeleUI = Object.freeze({
-    // O desenho é **declarado**, e não escrito: o MOD manda o que quer ver, e
-    // quem desenha é o produto, dentro da região dele. Ao desmontar, a região
-    // inteira sai — e não sobra regra de CSS nem nó solto pela página.
-    regiao: (conteudo) => pedir('regiao', { conteudo }),
-    tema: (valores) => pedir('tema', { valores }),
-    // ---- os eventos ----
-    //
-    // **A janela fala com o MOD sem que ele tenha perguntado.** Um pedido tem
-    // número e resposta; um evento não tem nem um nem outro, porque quem
-    // digita não espera o MOD confirmar que recebeu a tecla.
-    //
-    // Um ouvinte só, e o último vence. Uma lista de ouvintes seria um MOD
-    // registrando dentro de um laço e a janela mantendo a lista viva; e
-    // «remover» exigiria devolver um cancelador que um MOD pode perder.
-    aoEvento: (fn) => { ouvinte = typeof fn === 'function' ? fn : null; },
-  });
-})();
-`;
-
-/**
- * A bancada está pedindo o executor nativo?
- *
- * Perguntado ao Rust uma vez por janela e guardado: é uma variável de ambiente
- * do processo, e ela não muda enquanto ele roda. Perguntar a cada montagem
- * seria uma ida à ponte por MOD para uma resposta que já se sabe.
- */
-let executorPedido = null;
-async function executorDeBancada() {
-  if (executorPedido === null) {
-    try {
-      executorPedido = (await invoke("executor_de_mods")) === "nativo";
-    } catch {
-      executorPedido = false;
-    }
-  }
-  return executorPedido;
-}
-
-/**
- * Põe um MOD de pé num worker próprio.
- *
- * O código vem pela ponte, e não por uma URL: um `Worker` não aceita URL de
- * outra origem, e `mod://localhost` é outra origem. Pela ponte, a conferência
- * de hash acontece onde ela já mora — no Rust — e o que chega aqui é texto que
- * já passou por ela.
- *
- * **O `Blob` é a origem.** Um worker de `blob:` é de mesma origem, que é o que
- * o motor exige; e continua sem `document`, sem `window` e sem o global do
- * Tauri, que é o que o ADR 0049 exige.
+ * O QuickJS nativo não tem nada disso para herdar: o contexto não tem ambiente,
+ * e a ausência não é uma jaula construída com cuidado — é o que um contexto de
+ * QuickJS **é**. Ele deixou de ser configuração de bancada e passou a ser o
+ * caminho normal; manter o outro como reserva seria manter, como reserva,
+ * exatamente o que a medição reprovou.
  */
 async function montarOMod(mod) {
   // **A geração é lida antes do `await` e conferida depois** — etapa E2.
@@ -666,18 +577,7 @@ async function montarOMod(mod) {
   });
   if (!daGeracaoDePe(geracao) || !modsCarregados.has(mod.id)) return;
 
-  // **Qual executor**, escolhido aqui e em lugar nenhum além.
-  //
-  // O Worker de Blob é o do produto e é provisório: a sonda de fronteira mediu
-  // que ele deixa armazenamento de origem sobreviver à sessão, e por isso ele
-  // não vai ser o executor final.
-  //
-  // O de bancada é o QuickJS nativo, ligado por `SEELE_EXECUTOR=quickjs` — uma
-  // variável de ambiente, e não uma opção na tela: a diretriz proíbe manter
-  // dois executores **públicos**, e este não é oferecido a ninguém.
-  const executor = (await executorDeBancada())
-    ? executorNativo(mod.id, geracao, mod.hash)
-    : executorDeWorker(PRELUDIO_DO_MOD);
+  const executor = executorNativo(mod.id, geracao, mod.hash);
 
   // A instância é a dona de tudo o que este MOD criar — §4.2 do contrato. A
   // geração viaja com ela: quem atende as mensagens precisa saber de que sessão

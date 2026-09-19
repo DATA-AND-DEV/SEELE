@@ -3142,18 +3142,17 @@ async fn apagar_pacote_do_cache(
 // Etapa E1. Três comandos e um evento, e eles existem para medir o que só o
 // aplicativo de verdade mede: interação, descarte e impacto na voz.
 //
-// **Ligados por `SEELE_EXECUTOR=quickjs`.** Sem a variável eles recusam, e a
-// janela sobe MODs pelo Worker como sempre — a diretriz proíbe manter dois
-// executores públicos, e uma chave de ambiente que ninguém oferece na tela não
-// é um segundo executor público.
+// **São o caminho normal.** Eles nasceram atrás de `SEELE_EXECUTOR=quickjs`,
+// enquanto o Worker de `blob:` ainda era o executor do produto e este era a
+// bancada que o mediria. A medição terminou: o Worker herda a origem de quem o
+// cria, e o que um MOD gravou nela sobreviveu ao encerramento do aplicativo.
+//
+// Um executor reprovado guardado como reserva é a reserva errada — se o nativo
+// falhar, cair no outro é cair justamente no que não isola. A variável saiu, o
+// Worker saiu, e o que sobrou é um caminho só.
 
 /// O canal por onde as mensagens de um MOD nativo chegam à janela.
 const EVENTO_DO_EXECUTOR: &str = "seele://mod-nativo";
-
-/// Este build está com o executor nativo ligado?
-fn executor_nativo_ligado() -> bool {
-    std::env::var("SEELE_EXECUTOR").is_ok_and(|valor| valor.eq_ignore_ascii_case("quickjs"))
-}
 
 /// O que a janela recebe quando um MOD nativo fala.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -3172,24 +3171,6 @@ struct AvisoDoMod {
     /// mais: um evento que carregasse a mensagem acumularia bytes na janela
     /// antes de qualquer `callback` rodar, que é o que a revisão mediu.
     parou: bool,
-}
-
-/// Qual executor de MODs esta janela deve usar.
-///
-/// `"worker"` é o do produto; `"nativo"` é o da bancada, e ele só aparece com
-/// `SEELE_EXECUTOR=quickjs` no ambiente do processo.
-///
-/// **A janela recebe o papel, e não o motor.** Qual motor está por trás é
-/// decisão desta casca, e escrever o nome dele do outro lado faria a interface
-/// depender de uma escolha que não é dela — do mesmo jeito que ela não nomeia
-/// o transporte.
-#[tauri::command]
-fn executor_de_mods() -> &'static str {
-    if executor_nativo_ligado() {
-        "nativo"
-    } else {
-        "worker"
-    }
 }
 
 /// **Reserva a identidade de um MOD nativo, sem rodar nada** — etapa 1 de 2.
@@ -3218,11 +3199,6 @@ fn mod_nativo_reservar(
     id: String,
     hash: String,
 ) -> Result<u64, FalhaNoMod> {
-    if !executor_nativo_ligado() {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "executor-nativo-desligado".to_owned(),
-        });
-    }
     if !session.geracao_vale(geracao) {
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
@@ -6519,7 +6495,6 @@ fn main() {
             midia_em_bytes,
             registrar_da_janela,
             estado_da_sessao,
-            executor_de_mods,
             mod_nativo_reservar,
             mod_nativo_ativar,
             mod_nativo_colher,

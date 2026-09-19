@@ -47,65 +47,18 @@ const ESTADOS_DE_MOD = Object.freeze({
 });
 
 /**
- * O executor que existe hoje: um `Worker` de `blob:`.
+ * O executor dos MODs: o motor QuickJS, do outro lado da ponte.
  *
- * **Provisório, e escrito como provisório.** Ele exercita os caminhos que já
- * existem e não comprova isolamento nenhum — a sonda mediu o que ele deixa
- * aberto. Está aqui atrás do contrato para que a infraestrutura de E2 possa ser
- * construída e provada antes de E1 ser resolvida.
- */
-function executorDeWorker(preludio) {
-  let worker = null;
-  let parou = false;
-  return {
-    nome: "worker-blob",
-    // `async` para casar com o outro executor, e não porque ela espera algo:
-    // quem chama precisa poder `await` sem saber qual dos dois respondeu.
-    async iniciar(codigo, aoReceber, aoFalhar) {
-      const fonte = new Blob([preludio, "\n", codigo], { type: "text/javascript" });
-      const endereco = URL.createObjectURL(fonte);
-      worker = new Worker(endereco);
-      // Revogado assim que o worker o leu: o endereço não precisa sobreviver, e
-      // um que sobrevive é memória que ninguém sabe explicar.
-      URL.revokeObjectURL(endereco);
-      worker.onmessage = (evento) => aoReceber(evento.data);
-      worker.onerror = (erro) => aoFalhar(erro?.message ?? "");
-    },
-    entregar(mensagem) {
-      // `postMessage` não recusa: a fila é do agente, e ela não tem teto que
-      // este lado alcance. Devolver uma promessa resolvida mantém a forma do
-      // verbo igual à do executor nativo, que recusa.
-      worker?.postMessage(mensagem);
-      return Promise.resolve();
-    },
-    pedirEncerramento() {
-      // `terminate()` é síncrono do ponto de vista de quem chama, e o que ele
-      // promete é que o contexto não roda mais. Não é promessa sobre o que
-      // outro contexto criou em resposta a ele — a especificação do HTML é
-      // explícita, e é por isso que `encerrou()` existe em vez de este verbo
-      // devolver «pronto».
-      worker?.terminate();
-      parou = true;
-    },
-    encerrou(_quandoConcluir) {
-      // Aqui a confirmação é verdadeira de imediato: `terminate()` é síncrono,
-      // e quando ele volta o contexto não roda mais. Dizer `true` é dizer o que
-      // aconteceu, e não um atalho — e por isso não há conclusão tardia para
-      // avisar.
-      return Promise.resolve(parou);
-    },
-  };
-}
-
-/**
- * O executor de bancada: o motor nativo, do outro lado da ponte — etapa E1.
+ * **É o único.** O `Worker` de `blob:` que esteve aqui foi reprovado por
+ * medição — ele herda a origem de quem o criou, e o que um MOD gravou em
+ * `indexedDB` sobreviveu ao encerramento do aplicativo e reapareceu na entrada
+ * seguinte. `terminate()` mata o contexto e não toca no armazenamento da
+ * origem, então o isolamento que ele prometia nunca existiu.
  *
- * **Ligado por `SEELE_EXECUTOR=quickjs`**, e por nada na tela. A diretriz
- * proíbe manter dois executores públicos; uma variável de ambiente que ninguém
- * oferece a quem usa não é um segundo executor público, é uma bancada.
- *
- * Ele existe porque medir interação, descarte e impacto na voz exige o
- * aplicativo de verdade. Um protótipo que só roda em teste não mede nada disso.
+ * O contrato de quatro verbos continua, e não porque haja um segundo executor
+ * para trocar: ele é o que separa o ciclo de vida do motor. Trocar de motor um
+ * dia volta a ser um arquivo; sem ele, voltaria a ser a revogação, a corrida de
+ * saída e o descarte de novo, do zero.
  *
  * A forma é a mesma do outro, e é esse o ponto: quatro verbos, e quem chama não
  * sabe qual dos dois está do outro lado.

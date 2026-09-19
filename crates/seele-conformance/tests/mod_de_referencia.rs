@@ -182,12 +182,19 @@ fn a_metade_de_servidor_do_vetor_responde_e_guarda() {
 #[test]
 fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     let cliente = vetor("cliente/main.js");
-    let base = base_js();
-    let preludio = base
-        .split_once("const PRELUDIO_DO_MOD = `")
+    // **O prelúdio mora no executor**, e o executor é um só. Ele esteve
+    // duplicado em `base.js` enquanto o Worker de `blob:` ainda era o caminho
+    // do produto; o Worker foi reprovado por medição e saiu, e com ele a
+    // segunda cópia — que era a que podia divergir em silêncio.
+    let executor = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/seele-app/src/executor.rs"),
+    )
+    .expect("apps/seele-app/src/executor.rs");
+    let preludio = executor
+        .split_once("const PRELUDIO: &str = r#\"")
         .expect("o prelúdio dos MODs")
         .1
-        .split_once("`;")
+        .split_once("\"#;")
         .expect("o fim do prelúdio")
         .0;
 
@@ -259,6 +266,7 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     assert!(formas >= 4, "o vetor desenha pouco demais para provar algo");
 
     // E toda chave de tema é uma das quatro.
+    let base = base_js();
     let tema = base
         .split_once("const TEMA_DA_API = Object.freeze({")
         .expect("`TEMA_DA_API`")

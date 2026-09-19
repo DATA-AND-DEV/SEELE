@@ -11419,9 +11419,23 @@ fn o_ciclo_de_vida_de_um_mod_nao_conhece_o_executor() {
         "`base.js` voltou a construir um `Worker` direto, e o executor virou \
          dependência estrutural outra vez"
     );
+    // **E não há mais escolha para fazer.** O Worker de `blob:` foi reprovado
+    // por medição — ele herda a origem de quem o cria, e o que um MOD gravou
+    // nela sobreviveu ao encerramento do aplicativo. Guardá-lo como reserva
+    // seria guardar, como reserva, exatamente o que não isola.
     assert!(
-        base.contains("executorDeWorker(PRELUDIO_DO_MOD)"),
-        "a escolha do executor saiu de `base.js`, e agora ela não tem um lugar"
+        base.contains("executorNativo(mod.id, geracao, mod.hash)"),
+        "`base.js` deixou de pedir o executor pelo nome: {base}"
+    );
+    for sumido in ["executorDeWorker", "PRELUDIO_DO_MOD", "executor_de_mods"] {
+        assert!(
+            !base.contains(sumido),
+            "`{sumido}` voltou a `base.js`, e com ele o executor reprovado"
+        );
+    }
+    assert!(
+        !runtime.contains("executorDeWorker"),
+        "o executor de Worker voltou ao ciclo de vida"
     );
 
     // Os quatro estados, e a ordem que o §5 do contrato exige.
@@ -11789,9 +11803,19 @@ fn o_esquema_dos_mods_nao_ficou_registrado_sem_ninguem_para_usa_lo() {
 fn the_page_loads_mods_after_the_first_draw() {
     let base = read("ui/base.js");
     assert!(base.contains("mods_instalados"), "base.js não lista MODs");
+    // **O esquema `mod://` não existe mais** — o ADR 0049 o tirou junto com o
+    // MOD que rodava na janela. Este guarda exigia o nome dele e passava por
+    // causa de um comentário: um guarda que uma frase em prosa satisfaz guarda
+    // uma frase. O que ele quer dizer é que os bytes vêm pela ponte.
+    let montar = js_function(&without_comments(&base), "async function montarOMod(");
     assert!(
-        base.contains("mod://"),
-        "base.js não carrega nada sob mod://"
+        montar.contains("invoke(\"codigo_do_mod\""),
+        "os bytes de um MOD deixaram de vir pela ponte, onde a conferência de \
+         hash mora: {montar}"
+    );
+    assert!(
+        !without_comments(&base).contains("mod://"),
+        "`mod://` voltou a `base.js`, e o ADR 0049 tirou o esquema"
     );
 
     let primeiro_desenho = base.find("desenhar(await invoke(\"snapshot\"))");

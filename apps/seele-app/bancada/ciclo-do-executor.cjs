@@ -59,7 +59,7 @@ function bancada() {
     },
   });
   vm.runInContext(
-    `${fonte}\nglobalThis.api = { executorNativo, executorDeWorker, InstanciaDeMod, ESTADOS_DE_MOD, recursosDePe };`,
+    `${fonte}\nglobalThis.api = { executorNativo, InstanciaDeMod, ESTADOS_DE_MOD, recursosDePe };`,
     contexto,
   );
   return {
