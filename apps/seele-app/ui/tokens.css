@@ -75,7 +75,14 @@
 
   /* ---- tipografia ---- */
   --seele-display: "Saira Condensed", "Arial Narrow", sans-serif; /* cartelas, cabeçalhos */
-  --seele-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; /* todo dado */
+  --seele-mono: var(--seele-pilha-mono); /* todo dado */
+
+  /* As duas pilhas que existem, nomeadas para poderem ser escolhidas.
+     A API de tema deixa um MOD trocar `--seele-mono` entre elas, na sessão e
+     só nela: escolha, e não família livre — a escala de tipo daqui é medida, e
+     uma família qualquer move tamanho, entrelinha e contraste de uma vez. */
+  --seele-pilha-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --seele-pilha-sans: "Saira", "Helvetica Neue", Arial, sans-serif;
   --seele-jp: "Noto Sans JP", "Hiragino Kaku Gothic ProN", sans-serif; /* acento em kanji */
 
   --seele-cartela: 700;   /* peso de cartela */

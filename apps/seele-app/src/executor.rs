@@ -866,6 +866,18 @@ const PRELUDIO: &str = r#"
     // registrando dentro de um laço e a janela mantendo a lista viva; e
     // «remover» exigiria devolver um cancelador que um MOD pode perder.
     aoEvento: (fn) => { ouvinte = typeof fn === 'function' ? fn : null; },
+
+    // ---- o arquivo que alguém escolheu ----
+    //
+    // O MOD **não** abre o seletor: ele declara a forma `arquivo`, a pessoa
+    // aperta, e o evento traz o identificador. Daqui ele lê os bytes em
+    // pedaços e os manda para o servidor dele pelo protocolo que ele já tem.
+    //
+    // Sem esta função, um MOD teria o identificador e nada para fazer com ele.
+    // Com acesso ao disco, ele teria o caminho errado — e nenhum cliente do
+    // SEELE abre arquivo por conta de terceiro.
+    pedaco: (arquivo, inicio) => pedir('pedaco', { arquivo, inicio: Number(inicio) || 0 }),
+    soltar: (arquivo) => pedir('soltar-arquivo', { arquivo }),
   });
 
   // ---- tempo ----

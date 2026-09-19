@@ -14,6 +14,8 @@
 //   SeeleUI.regiao(conteudo)             — desenhar, declarando
 //   SeeleUI.tema(valores)                — pedir cor, dentro da sessão
 //   SeeleUI.aoEvento(fn)                 — receber o que a pessoa faz
+//   SeeleUI.pedaco(arquivo, inicio)      — ler um arquivo que alguém escolheu
+//   SeeleUI.soltar(arquivo)              — devolver esse arquivo agora
 //
 // Não há `document`, `window` nem o global do Tauri aqui dentro: um worker não
 // os tem, e é isso que faz `terminate()` ser garantia em vez de pedido.
@@ -50,6 +52,10 @@ const estado = {
   // Um traço em andamento, e os que já terminaram.
   riscando: null,
   tracos: [],
+  // O arquivo que alguém escolheu: o identificador, o que o produto provou
+  // sobre ele, e quanto já foi lido. Os bytes nunca estão aqui inteiros.
+  escolhido: null,
+  lidos: 0,
 };
 
 /** Pede ao servidor, e devolve o erro como texto em vez de deixá-lo subir. */
@@ -105,6 +111,19 @@ async function desenhar() {
       tocando: estado.tocando,
     },
     { forma: "botao", chave: "tocar", dentro: estado.tocando ? "PARAR" : "TOCAR" },
+    // A pessoa escolhe; o produto media. Este MOD recebe um número e lê os
+    // bytes em pedaços — ele não vê caminho, pasta nem nome de arquivo.
+    { forma: "arquivo", chave: "anexo", dentro: "ESCOLHER ARQUIVO" },
+    estado.escolhido
+      ? {
+          forma: "texto",
+          chave: "escolhido",
+          dentro: `escolhido: ${estado.escolhido.tipo} · ${estado.escolhido.bytes} bytes · lidos ${estado.lidos}`,
+        }
+      : null,
+    estado.escolhido
+      ? { forma: "botao", chave: "soltar", dentro: "SOLTAR ARQUIVO" }
+      : null,
   ]);
 }
 
@@ -149,6 +168,7 @@ SeeleUI.aoEvento((evento) => {
         estado.tocando = !estado.tocando;
         desenhar();
       }
+      if (evento.chave === "soltar") soltarOArquivo();
       break;
     case "traco":
       if (evento.fase === "comecou") estado.riscando = [{ x: evento.x, y: evento.y }];
@@ -160,6 +180,15 @@ SeeleUI.aoEvento((evento) => {
         estado.riscando = null;
       }
       desenhar();
+      break;
+    case "arquivo":
+      // **Cancelar é uma resposta**: `null` quer dizer que a pessoa fechou o
+      // seletor, e não que o produto ficou calado.
+      estado.escolhido = evento.arquivo ?? null;
+      estado.lidos = 0;
+      estado.aviso = evento.arquivo ? "" : (evento.porque ?? "nenhum arquivo escolhido");
+      if (estado.escolhido) lerUmPedaco();
+      else desenhar();
       break;
     case "midia":
       // O estado da mídia vem do produto, e não é presumido: um `tocando` que
@@ -194,6 +223,33 @@ async function tentar(o_que, passo, padrao) {
     estado.aviso = `${o_que}: ${String(falha?.message ?? falha)}`;
     return padrao;
   }
+}
+
+/**
+ * Lê um pedaço do que foi escolhido, e conta quanto já leu.
+ *
+ * Em pedaços porque o arquivo pode ter dez megabytes: um MOD que pedisse tudo
+ * de uma vez esbarraria no teto de mensagem, e o teto existe para que um MOD
+ * não encha a memória de quem está numa conversa.
+ */
+async function lerUmPedaco() {
+  const escolhido = estado.escolhido;
+  if (!escolhido) return;
+  const pedaco = await tentar("ler o arquivo", () => SeeleUI.pedaco(escolhido.id, estado.lidos), "");
+  // O base64 cresce um terço sobre os bytes: quatro caracteres por três bytes.
+  estado.lidos += Math.floor((pedaco.length / 4) * 3);
+  await desenhar();
+}
+
+/** Devolve o arquivo agora, sem esperar a saída da sessão. */
+async function soltarOArquivo() {
+  const escolhido = estado.escolhido;
+  if (!escolhido) return;
+  await tentar("soltar o arquivo", () => SeeleUI.soltar(escolhido.id), null);
+  estado.escolhido = null;
+  estado.lidos = 0;
+  estado.aviso = "arquivo devolvido";
+  await desenhar();
 }
 
 async function comecar() {

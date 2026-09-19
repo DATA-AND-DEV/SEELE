@@ -69,6 +69,7 @@ const FORMAS_DA_REGIAO = Object.freeze({
   campo: "label",
   escolha: "label",
   botao: "button",
+  arquivo: "button",
   tela: "canvas",
   midia: "figure",
 });
@@ -263,6 +264,7 @@ class RegiaoDeMod {
       case "campo": this.montarCampo(elem, plano); break;
       case "escolha": this.montarEscolha(elem, plano); break;
       case "botao": this.montarBotao(elem, plano); break;
+      case "arquivo": this.montarArquivo(elem, plano); break;
       case "tela": this.montarTela(elem, plano); break;
       case "midia": this.montarMidia(elem, plano); break;
       default: break;
@@ -277,6 +279,7 @@ class RegiaoDeMod {
       case "campo": this.atualizarCampo(elem, plano); break;
       case "escolha": this.atualizarEscolha(elem, plano); break;
       case "botao": elem.disabled = plano.no.desligado === true; break;
+      case "arquivo": this.atualizarArquivo(elem, plano); break;
       case "tela": this.pintarTela(elem, plano); break;
       case "midia": this.atualizarMidia(elem, plano); break;
       default: break;
@@ -408,6 +411,64 @@ class RegiaoDeMod {
     this.guardar(elem, `botao ${plano.chave}`, () => {
       elem.removeEventListener("click", aoApertar);
     });
+  }
+
+  // ------------------------------------------------------------ arquivo
+
+  /**
+   * **Escolher um arquivo é um ato de quem usa, e o produto é quem o media.**
+   *
+   * Um botão, e o seletor do sistema atrás dele. O MOD não lista pasta, não
+   * abre caminho e não recebe nome de arquivo: ele recebe um **identificador**
+   * e o que o produto provou sobre os bytes — o tipo, saído deles, e o tamanho.
+   *
+   * É a diferença entre mediar e entregar o disco. Sem o botão, um MOD que
+   * precisa de um retrato não tem caminho nenhum; com acesso ao disco, ele tem
+   * o caminho errado.
+   */
+  montarArquivo(elem, plano) {
+    elem.type = "button";
+    let escolhendo = false;
+    const aoApertar = () => {
+      // Um seletor de cada vez: dois diálogos abertos pelo mesmo botão é uma
+      // janela que quem usa não sabe qual fechar.
+      if (escolhendo) return;
+      escolhendo = true;
+      elem.disabled = true;
+      Promise.resolve(this.dono.escolherArquivo())
+        .then((escolhido) => {
+          // **Cancelar é uma resposta.** Quem fecha o seletor sem escolher faz
+          // o MOD receber `null`, e não um silêncio que o deixa esperando.
+          this.dono.falar({
+            nome: "arquivo",
+            chave: plano.no.chave ?? "",
+            arquivo: escolhido ?? null,
+          });
+        })
+        .catch((falha) => {
+          this.dono.falar({
+            nome: "arquivo",
+            chave: plano.no.chave ?? "",
+            arquivo: null,
+            porque: String(falha?.message ?? falha),
+          });
+        })
+        .finally(() => {
+          escolhendo = false;
+          elem.disabled = plano.no.desligado === true;
+        });
+    };
+    elem.addEventListener("click", aoApertar);
+    this.guardar(elem, `arquivo ${plano.chave}`, () => {
+      elem.removeEventListener("click", aoApertar);
+      // O seletor aberto não some daqui — ele é do sistema —, mas a escolha
+      // que voltar encontra a região solta e não fala com ninguém.
+      escolhendo = false;
+    });
+  }
+
+  atualizarArquivo(elem, plano) {
+    elem.disabled = plano.no.desligado === true;
   }
 
   // ------------------------------------------------------------ tela

@@ -743,6 +743,41 @@ function donoDaRegiao(mod, instancia) {
       if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
       return midia;
     },
+    /**
+     * Abre o seletor do sistema e devolve o que a pessoa escolheu.
+     *
+     * O caminho no disco **não atravessa**: o que volta é um identificador, o
+     * tipo que os bytes provaram ser e o tamanho. Os bytes ficam no Rust e
+     * saem em pedaços por `pedacoDoArquivo`.
+     */
+    escolherArquivo: async () => {
+      const geracao = geracaoDaSessao;
+      if (!meu()) throw new Error("disconnected");
+      const escolhido = await invoke("escolher_para_o_mod", { geracao, id: mod.id });
+      // Depois do `await`: a pessoa pode ter demorado a escolher, e entregar
+      // um arquivo a uma sessão que acabou é admitir efeito dela.
+      if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
+      return escolhido;
+    },
+    /** Um pedaço de um arquivo escolhido, em base64. */
+    pedacoDoArquivo: async (arquivo, inicio) => {
+      const geracao = geracaoDaSessao;
+      if (!meu()) throw new Error("disconnected");
+      const pedaco = await invoke("pedaco_do_escolhido", {
+        geracao,
+        id: mod.id,
+        arquivo,
+        inicio,
+      });
+      if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
+      return pedaco;
+    },
+    /** Solta um arquivo escolhido, a pedido de quem o pediu. */
+    soltarArquivo: (arquivo) => {
+      const geracao = geracaoDaSessao;
+      if (!meu()) return Promise.resolve();
+      return invoke("soltar_escolhido", { geracao, id: mod.id, arquivo }).catch(() => {});
+    },
     /** Um arquivo que o manifesto deste MOD declarou. */
     carregarMidia: async (caminho) => {
       const geracao = geracaoDaSessao;
@@ -816,6 +851,21 @@ const MEDIDAS_DA_API = Object.freeze({
   densidade: {
     compacta: { "--seele-celula-x": "6px", "--seele-celula-y": "10px" },
     confortavel: { "--seele-celula-x": "8px", "--seele-celula-y": "16px" },
+  },
+  // **A tipografia é recurso de sessão, e por isso ela cabe aqui.**
+  //
+  // O que a fazia ficar de fora era o medo certo: a escala de tipo do produto é
+  // medida — tamanho, entrelinha e contraste andam juntos —, e um MOD que
+  // escolhesse uma família qualquer moveria os três sem nada conferir o
+  // resultado.
+  //
+  // Escolha resolve isso, como resolveu a densidade: o MOD nomeia, o produto
+  // fornece a pilha, e as duas pilhas são as que o produto já usa e já mediu.
+  // Escrita no contêiner da sessão como as cores, ela **sai com a sessão** e
+  // não toca em preferência nenhuma de quem usa.
+  fonte: {
+    mono: { "--seele-mono": 'var(--seele-pilha-mono)' },
+    sans: { "--seele-mono": 'var(--seele-pilha-sans)' },
   },
 });
 
@@ -1043,6 +1093,19 @@ async function atenderOMod(mod, instancia, m) {
         break;
       case "tema":
         aplicarOTemaDoMod(mod.id, m.valores);
+        responder(true, { valor: null });
+        break;
+      case "pedaco": {
+        const pedaco = await donoDaRegiao(mod, instancia).pedacoDoArquivo(m.arquivo, m.inicio);
+        if (!meu()) {
+          responder(false, { erro: "sessao-encerrada" });
+          break;
+        }
+        responder(true, { valor: pedaco });
+        break;
+      }
+      case "soltar-arquivo":
+        await donoDaRegiao(mod, instancia).soltarArquivo(m.arquivo);
         responder(true, { valor: null });
         break;
       default:

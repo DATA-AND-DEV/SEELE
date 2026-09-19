@@ -249,24 +249,50 @@ como ser conferido assim, e um MOD que pedisse `0px` deixaria a sessão ilegíve
 sem violar regra nenhuma. Duas densidades, com os números do produto, dão a
 escolha sem dar a régua.
 
-### O que continua fora, e por quê
+### Tipografia: escolha, e recurso de sessão
 
-**Tipografia.** O ESTILO guarda `mono` e `sans`, e eles continuam sem efeito. A
+O ESTILO guarda `mono` e `sans`. O medo que os deixava de fora era certo: a
 escala de tipo deste produto é medida e afirmada em `tokens.css` — tamanho,
-entrelinha e contraste andam juntos —, e trocar a família por escolha de um MOD
-move todos os três de uma vez, sem nada que confira o resultado. É uma decisão
-de design que precisa da régua antes da API, e não o contrário.
+entrelinha e contraste andam juntos —, e uma família **livre** move os três de
+uma vez sem nada conferir o resultado.
 
-**Arquivo escolhido por quem usa.** A MESA carrega cenas e o PERFIS carrega
-retratos, e as duas coisas exigem que a pessoa escolha um arquivo do disco.
-Nenhum cliente do SEELE abre arquivo por conta de terceiro — o 0027 é explícito
-—, e dar a um MOD um seletor é dar a ele o primeiro passo de um caminho que o
-produto fecha em todos os outros lugares. Fica para um ADR próprio, com o
-desenho do seletor sendo do produto e o MOD recebendo bytes já escolhidos.
+O que resolve não é ausência, é a mesma forma que resolveu a densidade: **o MOD
+nomeia, o produto fornece**. `tokens.css` declara duas pilhas — `--seele-pilha-mono`
+e `--seele-pilha-sans` —, e `fonte` aceita um desses dois nomes. As duas são as
+que o produto já usa e já mediu, e nenhuma família de fora entra.
 
-Estas duas são **ausências declaradas**, e não avisos de indisponibilidade
-disfarçados: elas estão escritas aqui, com a razão, e não numa linha de texto na
-região de quem instalou o MOD.
+E ela é **recurso de sessão**, como as cores: escrita no contêiner da sessão,
+tirada quando a sessão acaba, sem tocar em preferência nenhuma de quem usa.
+
+### Arquivo: escolha de quem usa, mediada pelo produto
+
+A MESA carrega cenas e o PERFIS carrega retratos, e as duas coisas exigem que
+alguém escolha um arquivo. Nenhum cliente do SEELE abre arquivo por conta de
+terceiro — o 0027 é explícito —, e isso continua valendo: **o MOD não recebe o
+disco**.
+
+O que ele recebe é o que a pessoa escolheu, depois de o produto ter olhado:
+
+- a forma `arquivo` é um **botão**, e o seletor atrás dele é o do sistema,
+  aberto por este processo. Um MOD não abre seletor sozinho; ele desenha o
+  botão e espera alguém apertar;
+- o que volta pelo evento é um **identificador**, o tipo que os **bytes**
+  provaram ser, e o tamanho. O caminho no disco não atravessa, e o nome do
+  arquivo também não — ele é texto que outra pessoa escolheu;
+- os bytes ficam no produto e saem por `SeeleUI.pedaco(arquivo, inicio)`, em
+  pedaços de 64 KiB. Um MOD que só precisa do começo não paga pelo resto, e um
+  arquivo de dez megabytes não passa pela fila de mensagens de uma vez;
+- **cancelar é uma resposta**: fechar o seletor sem escolher entrega `null` ao
+  MOD, e não silêncio;
+- `SeeleUI.soltar(arquivo)` devolve a memória na hora, e a **saída da sessão
+  solta os dela de qualquer jeito**. Quatro arquivos de pé por sessão, dez
+  megabytes cada: um MOD que abre o seletor num laço esbarra no teto antes de
+  encher a memória de quem está numa conversa;
+- um identificador é de **quem o pediu**. Ele é pequeno e sequencial, e sem
+  essa conferência um MOD que adivinhasse um número leria o arquivo de outro.
+
+O número nunca se repete nesta janela. Reaproveitá-lo faria um pedido atrasado
+ler o arquivo que ocupou o lugar do dele — o arquivo errado, sem nada dizer.
 
 ### O que não muda
 

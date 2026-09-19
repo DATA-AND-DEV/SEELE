@@ -912,7 +912,13 @@ fn the_script_reads_the_field_names_a_match_actually_serialises() {
     // `Match` carries no `serde(rename)`, so the payload says `message`,
     // `start`, `end`. Portuguese names would destructure to `undefined`, slice
     // to nothing, and paint empty marks — with no error anywhere.
-    let script = scripts();
+    //
+    // **Scoped to the screen that draws matches**, and not to every script.
+    // The ban used to be on the bare substring `inicio` anywhere in the
+    // frontend, and it caught an offset parameter in the MODs' file API — a
+    // guard that is right about one screen and blind to which screen it is
+    // will keep stopping work it was never about.
+    let script = without_comments(&read("ui/tela-sessao.js"));
 
     for field in ["message", "start", "end"] {
         assert!(
@@ -920,7 +926,7 @@ fn the_script_reads_the_field_names_a_match_actually_serialises() {
             "the script never names `{field}`, which is what a Match serialises to"
         );
     }
-    for wrong in [".mensagem", "inicio", ".fim"] {
+    for wrong in [".mensagem", ".inicio", ".fim"] {
         assert!(
             !script.contains(wrong),
             "the script reads `{wrong}` off a Match, which serialises no such field"

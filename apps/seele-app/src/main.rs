@@ -117,12 +117,25 @@ struct Session {
     comandos_de_geracao_morta: Arc<std::sync::atomic::AtomicU64>,
     /// Os MODs de pé no executor nativo — experimento de bancada da etapa E1.
     ///
-    /// Vazio quando `SEELE_EXECUTOR` não pede QuickJS, que é o padrão. A chave
-    /// é o identificador do MOD, e a instância é dona do runtime dele.
+    /// A chave é o número da instância, e a instância é dona do runtime dela.
     ///
     /// **Aqui e não na janela** porque o runtime é nativo: quem o desmonta tem
     /// de ser quem o criou, e a janela pode desaparecer antes de pedir.
     mods_nativos: Mutex<ModsNativos>,
+
+    /// Os arquivos que **uma pessoa escolheu** para um MOD, por identificador.
+    ///
+    /// # Por que o MOD não recebe o arquivo
+    ///
+    /// Porque nenhum cliente do SEELE abre arquivo por conta de terceiro, e um
+    /// MOD é terceiro. O que ele recebe é um número e o que o produto **provou**
+    /// sobre os bytes — o tipo, saído deles, e o tamanho. Os bytes ficam aqui, e
+    /// saem em pedaços, sob pedido, com teto.
+    ///
+    /// É o que a diretriz de 19/09 chama de mediada, com identificador e
+    /// cancelamento: o caminho no disco nunca atravessa, e soltar é uma linha
+    /// que quem escreveu o MOD chama — ou que a saída da sessão chama por ele.
+    arquivos_escolhidos: Mutex<ArquivosEscolhidos>,
 
     connection: Mutex<Option<Arc<Connection>>>,
     /// O servidor que este app está hospedando, quando está.
@@ -296,7 +309,18 @@ impl Session {
     /// `await`s, e cada um deles é uma janela por onde um trabalho antigo
     /// entraria.
     fn revogar(&self) -> u64 {
-        revogar_em(&self.geracao, &self.mods_nativos)
+        let nova = revogar_em(&self.geracao, &self.mods_nativos);
+        // **E os arquivos que alguém escolheu saem junto.** Eles são dez
+        // megabytes cada, escolhidos para um MOD que já não está de pé, e
+        // guardá-los seria exatamente o que a sonda E1 mediu no Worker: uma
+        // coisa de uma sessão sobrevivendo à sessão.
+        if let Ok(mut guardados) = self.arquivos_escolhidos.lock() {
+            let soltos = guardados.soltar_geracao(nova.saturating_sub(1));
+            if soltos > 0 {
+                tracing::info!(soltos, "arquivos escolhidos soltos com a sessão");
+            }
+        }
+        nova
     }
 
     /// Esta geração ainda é a de pé?
@@ -2082,6 +2106,69 @@ fn snapshot(session: State<'_, Session>) -> Result<Snapshot, ConnectionError> {
     let retrato = session.connection()?.snapshot();
     tracing::trace!("retrato pronto");
     Ok(retrato)
+}
+
+/// **Quantos arquivos escolhidos uma sessão segura ao mesmo tempo.**
+///
+/// Quatro. Um MOD que abre o seletor num laço não pode encher a memória de quem
+/// está numa conversa, e quatro é mais do que qualquer fluxo real precisa: um
+/// retrato, uma faixa, uma cena e uma folga.
+const ARQUIVOS_DE_PE: usize = 4;
+
+/// **O maior arquivo que uma pessoa pode escolher para um MOD.**
+///
+/// Dez megabytes, que é o teto que os MODs oficiais já praticavam do lado do
+/// servidor. Ele não atravessa inteiro: sai em pedaços que o MOD pede.
+const TETO_DO_ESCOLHIDO: usize = 10 * 1024 * 1024;
+
+/// Quanto de um arquivo escolhido sai por pedido.
+///
+/// Sessenta e quatro kibibytes de bytes viram oitenta e seis de base64 — bem
+/// abaixo do teto de mensagem, e grande o bastante para dez megabytes saírem em
+/// cento e sessenta idas em vez de milhares.
+const PEDACO_DO_ESCOLHIDO: usize = 64 * 1024;
+
+/// Um arquivo que uma pessoa escolheu, guardado pelo produto.
+struct ArquivoEscolhidoDeMod {
+    /// De quem é. Um MOD não lê o arquivo que outro pediu.
+    de_quem: String,
+    /// Em que sessão foi escolhido: a saída leva todos os dela.
+    geracao: u64,
+    /// O que os bytes provaram ser. Dito à janela na escolha, e guardado para
+    /// o diagnóstico saber o que está de pé sem abrir os bytes.
+    #[allow(dead_code, reason = "lido pelo diagnóstico da sessão")]
+    tipo: &'static str,
+    /// Os bytes. Saem em pedaços, e nunca de uma vez.
+    bytes: Vec<u8>,
+}
+
+/// Os arquivos escolhidos desta janela, por identificador.
+#[derive(Default)]
+struct ArquivosEscolhidos {
+    /// O próximo identificador. Monotônico: um número nunca se repete, e por
+    /// isso um pedido atrasado nunca lê o arquivo que ocupou o lugar do dele.
+    proximo: u64,
+    guardados: std::collections::HashMap<u64, ArquivoEscolhidoDeMod>,
+}
+
+impl ArquivosEscolhidos {
+    /// Guarda um arquivo e devolve o número dele, ou nada se não couber.
+    fn guardar(&mut self, arquivo: ArquivoEscolhidoDeMod) -> Option<u64> {
+        if self.guardados.len() >= ARQUIVOS_DE_PE {
+            return None;
+        }
+        self.proximo = self.proximo.saturating_add(1);
+        let numero = self.proximo;
+        self.guardados.insert(numero, arquivo);
+        Some(numero)
+    }
+
+    /// Solta tudo o que era de uma geração — é o que a saída chama.
+    fn soltar_geracao(&mut self, geracao: u64) -> usize {
+        let antes = self.guardados.len();
+        self.guardados.retain(|_, a| a.geracao != geracao);
+        antes - self.guardados.len()
+    }
 }
 
 /// O que a bancada precisa saber sobre a sessão de agora — etapa E2.
@@ -4154,6 +4241,207 @@ fn midia_em_bytes(
         papel: lida.papel,
         bytes: lida.bytes,
     })
+}
+
+/// O que a janela recebe quando uma pessoa escolhe um arquivo para um MOD.
+#[derive(serde::Serialize)]
+struct EscolhidoParaOMod {
+    /// O número pelo qual o MOD pede os pedaços. Nunca se repete nesta janela.
+    id: u64,
+    /// O que os bytes provaram ser — `image/png`, `audio/wav`, e assim por
+    /// diante. **Nunca a extensão**: ela é texto que quem escolheu digitou.
+    tipo: &'static str,
+    /// `som` ou `imagem`.
+    papel: &'static str,
+    /// Quantos bytes tem. O MOD usa para saber quantos pedaços pedir.
+    bytes: usize,
+}
+
+/// **Uma pessoa escolhe um arquivo para um MOD, e o MOD recebe um número.**
+///
+/// O seletor é o do sistema, aberto por este processo. O caminho no disco
+/// **não atravessa**: o que volta é um identificador, o tipo que os bytes
+/// provaram ser e o tamanho. Os bytes ficam na sessão e saem em pedaços por
+/// [`pedaco_do_escolhido`].
+///
+/// É a diferença entre mediar e entregar o disco. Um MOD não lista pasta, não
+/// abre caminho e não recebe nome de arquivo — ele recebe o que a pessoa
+/// escolheu, depois de o produto ter olhado.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando a geração já acabou, quando já há arquivos demais de
+/// pé, quando o arquivo passa do teto, ou quando os bytes não são de um
+/// formato que este produto reconhece.
+#[tauri::command]
+async fn escolher_para_o_mod(
+    app: AppHandle,
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+) -> Result<Option<EscolhidoParaOMod>, FalhaNoMod> {
+    use tauri_plugin_dialog::DialogExt as _;
+
+    if !session.geracao_vale(geracao) {
+        session
+            .comandos_de_geracao_morta
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+
+    let (envia, mut recebe) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .set_title("Escolha um arquivo para este MOD")
+        .pick_file(move |escolha| {
+            let _ = envia.try_send(escolha);
+        });
+    // **Cancelar é uma resposta.** Quem fecha o seletor sem escolher recebe
+    // `None`, e o MOD sabe que foi cancelado em vez de esperar para sempre.
+    let Some(Some(escolha)) = recebe.recv().await else {
+        return Ok(None);
+    };
+    let Ok(caminho) = escolha.into_path() else {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "caminho-invalido".to_owned(),
+        });
+    };
+
+    // **Conferido antes de ler.** Um arquivo de gigabytes não vira erro depois
+    // de estar na memória: o tamanho é lido do sistema de arquivos primeiro.
+    let tamanho = std::fs::metadata(&caminho)
+        .map(|m| usize::try_from(m.len()).unwrap_or(usize::MAX))
+        .map_err(|_| FalhaNoMod::Recusado {
+            motivo: "arquivo-ilegivel".to_owned(),
+        })?;
+    if tamanho > TETO_DO_ESCOLHIDO {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "arquivo-grande-demais".to_owned(),
+        });
+    }
+    let bytes = std::fs::read(&caminho).map_err(|_| FalhaNoMod::Recusado {
+        motivo: "arquivo-ilegivel".to_owned(),
+    })?;
+
+    // **O tipo sai dos bytes**, como o da mídia do pacote. A extensão que a
+    // pessoa tem no disco é texto, e texto não escolhe decodificador.
+    let lida = seele_ffi::mods::ler_tipo(&bytes).ok_or(FalhaNoMod::Recusado {
+        motivo: "formato-desconhecido".to_owned(),
+    })?;
+
+    // Conferida **de novo** depois do `await` do seletor: a pessoa pode ter
+    // demorado a escolher, e a sessão pode ter acabado no meio.
+    if !session.geracao_vale(geracao) {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+    let mut guardados = session
+        .arquivos_escolhidos
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    let numero = guardados
+        .guardar(ArquivoEscolhidoDeMod {
+            de_quem: id.clone(),
+            geracao,
+            tipo: lida.media_type,
+            bytes,
+        })
+        .ok_or(FalhaNoMod::Recusado {
+            motivo: "arquivos-demais-de-pe".to_owned(),
+        })?;
+    tracing::info!(mod_id = %id, geracao, arquivo = numero, tipo = lida.media_type, bytes = tamanho, "arquivo escolhido para um MOD");
+    Ok(Some(EscolhidoParaOMod {
+        id: numero,
+        tipo: lida.media_type,
+        papel: lida.papel,
+        bytes: tamanho,
+    }))
+}
+
+/// **Um pedaço de um arquivo escolhido, em base64.**
+///
+/// Em pedaços porque o arquivo pode ter dez megabytes e a fila de mensagens de
+/// um MOD tem teto — e porque um MOD que só precisa do começo não deve pagar
+/// pelo resto.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando a geração já acabou, quando o número não é de um
+/// arquivo de pé, ou quando ele é de **outro** MOD.
+#[tauri::command]
+fn pedaco_do_escolhido(
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    arquivo: u64,
+    inicio: usize,
+) -> Result<String, FalhaNoMod> {
+    if !session.geracao_vale(geracao) {
+        session
+            .comandos_de_geracao_morta
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+    let guardados = session
+        .arquivos_escolhidos
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    let guardado = guardados
+        .guardados
+        .get(&arquivo)
+        .ok_or(FalhaNoMod::Recusado {
+            motivo: "arquivo-nao-esta-de-pe".to_owned(),
+        })?;
+    // **De quem pediu, e não de quem souber o número.** Sem esta linha, um MOD
+    // que adivinhasse um número leria o arquivo que outro pediu — e o número é
+    // pequeno e sequencial.
+    if guardado.de_quem != id || guardado.geracao != geracao {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "arquivo-de-outro-mod".to_owned(),
+        });
+    }
+    let fim = inicio
+        .saturating_add(PEDACO_DO_ESCOLHIDO)
+        .min(guardado.bytes.len());
+    let fatia = guardado.bytes.get(inicio..fim).unwrap_or_default();
+    Ok(seele_ffi::base64_de(fatia))
+}
+
+/// **Solta um arquivo escolhido**, agora, a pedido de quem o pediu.
+///
+/// O cancelamento explícito. A saída da sessão solta os dela de qualquer jeito,
+/// mas um MOD que já mandou o arquivo para o servidor dele não precisa esperar
+/// a saída para devolver dez megabytes de memória.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando a geração já acabou.
+#[tauri::command]
+fn soltar_escolhido(
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    arquivo: u64,
+) -> Result<(), FalhaNoMod> {
+    let mut guardados = session
+        .arquivos_escolhidos
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    // Soltar o que já não é de ninguém não é erro: a saída pode ter passado na
+    // frente, e quem chama não tem como saber disso sem uma corrida.
+    if guardados
+        .guardados
+        .get(&arquivo)
+        .is_some_and(|a| a.de_quem == id && a.geracao == geracao)
+    {
+        guardados.guardados.remove(&arquivo);
+    }
+    Ok(())
 }
 
 /// A identidade do conjunto que este servidor exige agora.
@@ -6493,6 +6781,9 @@ fn main() {
             codigo_do_mod,
             midia_do_mod,
             midia_em_bytes,
+            escolher_para_o_mod,
+            pedaco_do_escolhido,
+            soltar_escolhido,
             registrar_da_janela,
             estado_da_sessao,
             mod_nativo_reservar,
@@ -7577,6 +7868,65 @@ mod a_supervisao_dos_mods_nativos {
             (fila.ocupacao(), fila.avisos_de_pe()),
             ((0, 0), 0),
             "a colheita não devolveu cada classe pela cota dela"
+        );
+    }
+
+    /// **Um arquivo escolhido não sobrevive à sessão que o escolheu.**
+    ///
+    /// É a mesma promessa que a sonda E1 mediu e encontrou falsa no Worker de
+    /// `blob:` — o que um MOD guardou lá reapareceu depois de o aplicativo ser
+    /// reiniciado. Aqui os bytes são do produto, e a saída os solta.
+    ///
+    /// Dez megabytes por arquivo, quatro arquivos: uma sessão que sai sem
+    /// soltar deixa quarenta megabytes presos por um MOD que já não roda.
+    #[test]
+    fn a_saida_solta_os_arquivos_escolhidos_daquela_geracao() {
+        let mut guardados = super::ArquivosEscolhidos::default();
+        let de = |geracao: u64| super::ArquivoEscolhidoDeMod {
+            de_quem: "prova/mod".to_owned(),
+            geracao,
+            tipo: "image/png",
+            bytes: vec![0; 16],
+        };
+        assert!(guardados.guardar(de(7)).is_some());
+        assert!(guardados.guardar(de(7)).is_some());
+        assert!(guardados.guardar(de(8)).is_some());
+
+        assert_eq!(guardados.soltar_geracao(7), 2);
+        // E o da geração seguinte fica: soltar o que não é dela seria derrubar
+        // a sessão que acabou de começar.
+        assert_eq!(guardados.guardados.len(), 1);
+        assert!(guardados.guardados.values().all(|a| a.geracao == 8));
+    }
+
+    /// **E há teto: um MOD que abre o seletor num laço não enche a memória.**
+    #[test]
+    fn os_arquivos_de_pe_tem_teto_e_o_numero_nunca_se_repete() {
+        let mut guardados = super::ArquivosEscolhidos::default();
+        let de = || super::ArquivoEscolhidoDeMod {
+            de_quem: "prova/mod".to_owned(),
+            geracao: 1,
+            tipo: "image/png",
+            bytes: Vec::new(),
+        };
+        let numeros: Vec<u64> = (0..super::ARQUIVOS_DE_PE)
+            .map(|_| guardados.guardar(de()).expect("cabe"))
+            .collect();
+        assert!(
+            guardados.guardar(de()).is_none(),
+            "o teto de arquivos de pé não segurou"
+        );
+
+        // **Monotônico.** Soltar um e guardar outro não reaproveita o número:
+        // um pedido atrasado com o número velho leria o arquivo que ocupou o
+        // lugar dele, e seria o arquivo errado sem nada dizer.
+        guardados
+            .guardados
+            .remove(numeros.first().expect("o primeiro guardado"));
+        let novo = guardados.guardar(de()).expect("cabe depois de soltar");
+        assert!(
+            !numeros.contains(&novo),
+            "um número de arquivo foi reaproveitado: {novo} já tinha sido usado"
         );
     }
 

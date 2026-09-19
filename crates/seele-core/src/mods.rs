@@ -294,6 +294,34 @@ pub struct MidiaDeMod {
 /// **O teto por arquivo de mídia de um MOD.**
 pub use seele_proto::midia_de_mod::TETO_DE_ARQUIVO as TETO_DE_MIDIA;
 
+/// O que estes bytes são, **sem montar um `data:` deles**.
+///
+/// [`ler_midia`] serve para o que vai virar um elemento na hora: ela devolve o
+/// `data:` inteiro, e para isso codifica tudo em base64. Um arquivo que uma
+/// pessoa acabou de escolher pode ter dez megabytes e vai sair em pedaços —
+/// codificá-lo inteiro para descobrir que ele é um PNG seria pagar treze
+/// megabytes de texto por uma pergunta de oito bytes.
+///
+/// O teto não é conferido aqui: quem escolhe o arquivo tem o próprio, e ele é
+/// maior que o da mídia de pacote.
+#[must_use]
+pub fn ler_tipo(bytes: &[u8]) -> Option<TipoLido> {
+    let tipo = seele_proto::midia_de_mod::sniff(bytes)?;
+    Some(TipoLido {
+        media_type: tipo.media_type(),
+        papel: tipo.papel(),
+    })
+}
+
+/// O que os bytes provaram ser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TipoLido {
+    /// `image/png`, `audio/wav`, e assim por diante.
+    pub media_type: &'static str,
+    /// `som` ou `imagem`.
+    pub papel: &'static str,
+}
+
 /// Lê um arquivo de mídia de MOD, ou diz que não.
 ///
 /// **Aqui, e não na casca.** A composição do `data:` é a mesma decisão do ADR
