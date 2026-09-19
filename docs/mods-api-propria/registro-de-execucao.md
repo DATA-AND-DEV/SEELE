@@ -395,3 +395,65 @@ medida em teto sem repetir a carga equivalente — e a comparação com a refer�
 relatada no Windows continua por fazer.
 
 **Windows e Linux: pendentes.** Nada nesta seção foi medido fora do macOS.
+
+### O executor nativo, ligado no aplicativo de verdade
+
+`SEELE_EXECUTOR=quickjs` no ambiente do processo. Sem a variável, a janela sobe
+MODs pelo Worker como sempre; nada na tela oferece a troca. A diretriz proíbe
+**dois executores públicos**, e uma variável que ninguém oferece não é um.
+
+A escolha acontece numa linha, em `montarOMod`, que é o que o contrato de
+executor existe para permitir. A janela recebe o **papel** — `worker` ou
+`nativo` — e não o nome do motor: qual motor está por trás é decisão da casca,
+do mesmo jeito que ela não nomeia o transporte.
+
+### A mesma sonda, nos dois executores, no mesmo aplicativo
+
+| Caminho | Worker (WKWebView) | Nativo |
+| --- | --- | --- |
+| `indexedDB` | alcançou, **e a marca sobreviveu a reiniciar** | recusado |
+| `caches` | alcançou | recusado |
+| `BroadcastChannel` | alcançou | recusado |
+| `Worker` filho | alcançou | recusado |
+| `fetch ipc://localhost` | alcançou, HTTP 500 | recusado: não há `fetch` |
+| rede externa | recusado | recusado |
+| `document`, `window`, Tauri | recusado | recusado |
+
+E o MOD **funcionou**: pediu ao servidor pela API de sempre, e o servidor
+gravou. O caminho inteiro está de pé — janela, ponte, motor, fila, bomba,
+evento, atendimento, pedido, resposta, e de volta ao MOD.
+
+### Duas coisas que só o aplicativo de verdade mostrou
+
+**Uma corrida de registro.** A instância era guardada no mapa **depois** de o
+executor subir, e o MOD começa a falar no instante em que o código roda. As
+primeiras mensagens chegavam antes do registro, `meu()` respondia falso, e elas
+eram descartadas em silêncio. Com o Worker isso passava despercebido porque a
+ordem das microtarefas escondia a corrida; com o motor nativo, que é outra
+thread, o MOD ficava mudo e nada dizia por quê. Agora a instância é guardada e
+marcada `ativa` **antes** de o executor subir — nada pode produzir efeito antes
+disso, então não há janela aberta.
+
+**Não havia tempo.** `setTimeout` e `setInterval` são APIs de navegador, e o
+QuickJS não tem laço de eventos. A sonda travava num `clearTimeout` dentro de um
+`finally`, e o MOD morria calado. Agora o **anfitrião** tem a tabela de
+temporizadores, e o prelúdio é a fachada dela.
+
+Isso não é um contorno: é o que faz um temporizador ser um recurso com dono, que
+o §4.2 do contrato exige. Encerrar a instância apaga a tabela, e nenhum
+temporizador sobrevive porque o MOD esqueceu de cancelá-lo. Com teto de 256 e
+piso de 4 ms, que é o dos navegadores e existe pela mesma razão: um temporizador
+de zero em laço é espera ocupada, e espera ocupada disputa com o áudio.
+
+### O que falta de E1 e do item 3
+
+- **as primitivas da fatia**: entrada, atualização incremental, arraste/desenho
+  e mídia gerenciada. O executor está integrado; a fatia interativa não está
+  feita;
+- **medir interação, descarte e impacto na voz** — item 4, e ele depende da
+  fatia existir;
+- **Windows e Linux**, pendentes. Nada nesta seção saiu do macOS.
+
+E a cada binding novo, repetir a prova de autoridade: `setTimeout` foi o
+primeiro, e a sonda já o cobre por tabela — os nomes que ela tenta continuam
+todos recusados.

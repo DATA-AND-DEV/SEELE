@@ -551,6 +551,25 @@ const PRELUDIO_DO_MOD = `
 `;
 
 /**
+ * A bancada está pedindo o executor nativo?
+ *
+ * Perguntado ao Rust uma vez por janela e guardado: é uma variável de ambiente
+ * do processo, e ela não muda enquanto ele roda. Perguntar a cada montagem
+ * seria uma ida à ponte por MOD para uma resposta que já se sabe.
+ */
+let executorPedido = null;
+async function executorDeBancada() {
+  if (executorPedido === null) {
+    try {
+      executorPedido = (await invoke("executor_de_mods")) === "nativo";
+    } catch {
+      executorPedido = false;
+    }
+  }
+  return executorPedido;
+}
+
+/**
  * Põe um MOD de pé num worker próprio.
  *
  * O código vem pela ponte, e não por uma URL: um `Worker` não aceita URL de
@@ -579,12 +598,18 @@ async function montarOMod(mod) {
   });
   if (!daGeracaoDePe(geracao) || !modsCarregados.has(mod.id)) return;
 
-  // **Qual executor**, escolhido aqui e em lugar nenhum além. O Worker de Blob
-  // é o de hoje e é provisório: a sonda de fronteira mediu que ele deixa
-  // armazenamento de origem sobreviver à sessão, e por isso ele não vai ser o
-  // executor final. Trocá-lo é trocar esta linha — é para isso que
-  // `mods-runtime.js` existe.
-  const executor = executorDeWorker(PRELUDIO_DO_MOD);
+  // **Qual executor**, escolhido aqui e em lugar nenhum além.
+  //
+  // O Worker de Blob é o do produto e é provisório: a sonda de fronteira mediu
+  // que ele deixa armazenamento de origem sobreviver à sessão, e por isso ele
+  // não vai ser o executor final.
+  //
+  // O de bancada é o QuickJS nativo, ligado por `SEELE_EXECUTOR=quickjs` — uma
+  // variável de ambiente, e não uma opção na tela: a diretriz proíbe manter
+  // dois executores **públicos**, e este não é oferecido a ninguém.
+  const executor = (await executorDeBancada())
+    ? executorNativo(mod.id, geracao, mod.hash)
+    : executorDeWorker(PRELUDIO_DO_MOD);
 
   // A instância é a dona de tudo o que este MOD criar — §4.2 do contrato. A
   // geração viaja com ela: quem atende as mensagens precisa saber de que sessão
@@ -595,7 +620,23 @@ async function montarOMod(mod) {
   // depois de ele ter parado de desenhar.
   instancia.registrar("a região", () => limparARegiaoDoMod(mod.id));
 
-  executor.iniciar(
+  // **Guardada e ativa antes de o executor subir**, e a ordem custou uma
+  // medição para ser descoberta.
+  //
+  // O MOD começa a falar no instante em que o código dele roda. Guardando
+  // depois, as primeiras mensagens chegavam a `atenderOMod` antes de a
+  // instância estar no mapa — `meu()` respondia falso e elas eram descartadas
+  // em silêncio. Com o Worker isso passava despercebido porque a ordem das
+  // microtarefas escondia a corrida; com o executor nativo, que é outra
+  // thread, o MOD ficava mudo e nada dizia por quê.
+  //
+  // Ativa antes de rodar não abre janela nenhuma: nada pode produzir efeito
+  // antes de o executor começar, e `encerrar` alcança a instância de qualquer
+  // estado.
+  instancia.estado = ESTADOS_DE_MOD.ativa;
+  modsCarregados.set(mod.id, instancia);
+
+  await executor.iniciar(
     codigo,
     (mensagem) => atenderOMod(mod, instancia, mensagem),
     // **Um MOD que quebra não leva a janela junto** — ADR 0045, «falha
@@ -607,16 +648,13 @@ async function montarOMod(mod) {
     },
   );
 
-  // **Uma última conferência antes de guardar.** Entre iniciar o executor e
-  // chegar aqui não há `await`, mas guardar é o ato que torna a instância
-  // alcançável pelo encerramento; uma criada e não guardada é uma que nenhuma
-  // saída alcança.
+  // E se a sessão acabou durante a subida, a instância sai — já guardada, já
+  // alcançável, e por isso sem deixar runtime nenhum órfão.
   if (!daGeracaoDePe(geracao)) {
+    modsCarregados.delete(mod.id);
     instancia.encerrar().catch(() => {});
     return;
   }
-  instancia.estado = ESTADOS_DE_MOD.ativa;
-  modsCarregados.set(mod.id, instancia);
   // **`carregado` diz que os bytes executaram, e só isso.** Se o MOD estourou
   // dentro da própria inicialização, o worker subiu do mesmo jeito — quem sabe
   // disso é ele, e prometer o contrário seria inventar.

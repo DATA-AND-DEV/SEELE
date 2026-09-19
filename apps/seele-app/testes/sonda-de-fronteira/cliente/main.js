@@ -232,6 +232,11 @@ async function medir() {
  * produto o parou.
  */
 function baterSemParar() {
+  // **Só onde há temporizador.** O executor nativo não tem `setInterval` — é
+  // uma API de navegador, e o contexto do QuickJS não é um. A medição de E2
+  // que precisa de pedido em voo continua valendo no Worker; no nativo, ela
+  // espera o binding de tempo, que é decisão de API e não descuido.
+  if (typeof setInterval !== 'function') return;
   setInterval(() => {
     SeeleMods.request(EU, SEM_CANAL, { op: "registrar", achados: [] }).catch(() => {});
   }, 250);

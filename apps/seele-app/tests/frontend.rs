@@ -9531,8 +9531,18 @@ fn no_script_calls_a_function_that_no_script_declares() {
             // Distinguido de `if (...) {` pela lista de palavras de controle:
             // fora delas, um nome seguido de parênteses numa linha que abre
             // bloco é uma declaração.
+            //
+            // `async` e `static` vêm **antes** do nome, e o nome é o que
+            // declara. Sem esta linha, `async iniciar(…) {` não era
+            // reconhecido — e `iniciar` foi acusado de não existir no dia em
+            // que o segundo executor entrou.
             {
                 let cru = linha.trim();
+                let cru = cru
+                    .strip_prefix("async ")
+                    .or_else(|| cru.strip_prefix("static "))
+                    .unwrap_or(cru)
+                    .trim();
                 let primeira: String = cru
                     .chars()
                     .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')

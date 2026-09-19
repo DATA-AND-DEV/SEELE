@@ -59,7 +59,9 @@ function executorDeWorker(preludio) {
   let parou = null;
   return {
     nome: "worker-blob",
-    iniciar(codigo, aoReceber, aoFalhar) {
+    // `async` para casar com o outro executor, e não porque ela espera algo:
+    // quem chama precisa poder `await` sem saber qual dos dois respondeu.
+    async iniciar(codigo, aoReceber, aoFalhar) {
       const fonte = new Blob([preludio, "\n", codigo], { type: "text/javascript" });
       const endereco = URL.createObjectURL(fonte);
       worker = new Worker(endereco);
@@ -83,6 +85,78 @@ function executorDeWorker(preludio) {
     },
     encerrou() {
       return parou ?? Promise.resolve();
+    },
+  };
+}
+
+/**
+ * O executor de bancada: o motor nativo, do outro lado da ponte — etapa E1.
+ *
+ * **Ligado por `SEELE_EXECUTOR=quickjs`**, e por nada na tela. A diretriz
+ * proíbe manter dois executores públicos; uma variável de ambiente que ninguém
+ * oferece a quem usa não é um segundo executor público, é uma bancada.
+ *
+ * Ele existe porque medir interação, descarte e impacto na voz exige o
+ * aplicativo de verdade. Um protótipo que só roda em teste não mede nada disso.
+ *
+ * A forma é a mesma do outro, e é esse o ponto: quatro verbos, e quem chama não
+ * sabe qual dos dois está do outro lado.
+ */
+function executorNativo(id, geracao, hash) {
+  let ouvindo = null;
+  let resolverAParada = null;
+  // Criada **antes** do ouvinte, e não dentro dele: a fala `parou` pode chegar
+  // entre o `listen` e a linha seguinte, e uma promessa que ainda não existe
+  // não tem como ser resolvida.
+  const parou = new Promise((resolve) => {
+    resolverAParada = resolve;
+  });
+  return {
+    nome: "nativo",
+    async iniciar(_codigo, aoReceber, aoFalhar) {
+      // **O código não passa por aqui.** O lado nativo já o tem — ele o lê pelo
+      // mesmo `codigo_do_mod`, com a mesma conferência de hash. Mandá-lo de
+      // volta seria fazer o texto atravessar a ponte duas vezes para chegar
+      // onde já estava.
+      ouvindo = await listen("seele://mod-nativo", ({ payload }) => {
+        if (!payload || payload.id !== id || payload.geracao !== geracao) return;
+        if (payload.tipo === "mensagem") {
+          try {
+            aoReceber(JSON.parse(payload.corpo));
+          } catch {
+            aoFalhar("o MOD mandou o que não é JSON");
+          }
+          return;
+        }
+        if (payload.tipo === "parou") {
+          resolverAParada?.();
+          return;
+        }
+        // `falhou` e `interrompido` chegam com motivos diferentes e pedem
+        // frases diferentes: um é o MOD com defeito, o outro é o produto
+        // parando o MOD.
+        aoFalhar(payload.tipo === "interrompido" ? "interrompido pelo produto" : payload.corpo);
+      });
+      await invoke("mod_nativo_iniciar", { geracao, id, hash });
+    },
+    entregar(mensagem) {
+      invoke("mod_nativo_entregar", {
+        geracao,
+        id,
+        json: JSON.stringify(mensagem),
+      }).catch(() => {});
+    },
+    pedirEncerramento() {
+      invoke("mod_nativo_encerrar", { id }).catch(() => {});
+    },
+    async encerrou() {
+      // **A confirmação vem do lado nativo**, como a fala `parou`. Com prazo:
+      // um motor que não confirma não pode prender a saída da sessão, e o que
+      // se perde esperando é o que se ganharia sabendo — o contador da bancada
+      // diz o resto.
+      await Promise.race([parou, new Promise((resolve) => setTimeout(resolve, 2000))]);
+      (await ouvindo)?.();
+      ouvindo = null;
     },
   };
 }

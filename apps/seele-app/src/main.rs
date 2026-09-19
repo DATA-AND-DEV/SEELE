@@ -27,21 +27,21 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod catalogo;
-// **O protótipo de executor de MODs do cliente, e ele só existe na bancada.**
+// **O executor de MODs do cliente em QuickJS — experimento de bancada.**
 //
 // Etapa E1: o Worker de `blob:` não satisfaz o contrato — a sonda releu, num
-// aplicativo reiniciado, uma marca que um MOD gravou em IndexedDB. Este módulo
-// mede se o QuickJS nativo satisfaz, e a medição é o uso dele.
+// aplicativo reiniciado, uma marca que um MOD gravou em IndexedDB.
 //
-// `cfg(test)` é a decisão, e não uma consequência de ninguém tê-lo ligado
-// ainda. A diretriz de 18/09 escreve as duas metades: «não desenvolver uma
-// biblioteca visual extensa antes da validação do executor» e «não implementar
-// e manter dois executores públicos por precaução». Um protótipo compilado no
-// binário mas alcançável por ninguém seria a segunda coisa fingindo não ser.
+// Ele é compilado sempre e **ligado por `SEELE_EXECUTOR=quickjs`**, que é uma
+// chave de bancada e não uma opção do produto. A restrição da diretriz é «não
+// manter dois executores públicos por precaução», e esta não é pública: sem a
+// variável, o produto sobe MODs pelo Worker como sempre, e nada nesta janela
+// oferece a troca a quem usa.
 //
-// Ele sai daqui no dia em que a decisão de E1 for tomada — e aí ele deixa de
-// ser protótipo.
-#[cfg(test)]
+// A chave existe porque medir interação, descarte e impacto na voz exige o
+// aplicativo de verdade — e um protótipo que só roda em teste não mede nada
+// disso. Ela sai no dia em que a decisão de E1 for tomada, junto com o
+// executor que perder.
 mod executor;
 mod icone;
 mod mods;
@@ -115,6 +115,14 @@ struct Session {
     eventos_de_geracao_morta: Arc<std::sync::atomic::AtomicU64>,
     /// Quantos comandos foram recusados por virem de uma geração morta.
     comandos_de_geracao_morta: Arc<std::sync::atomic::AtomicU64>,
+    /// Os MODs de pé no executor nativo — experimento de bancada da etapa E1.
+    ///
+    /// Vazio quando `SEELE_EXECUTOR` não pede QuickJS, que é o padrão. A chave
+    /// é o identificador do MOD, e a instância é dona do runtime dele.
+    ///
+    /// **Aqui e não na janela** porque o runtime é nativo: quem o desmonta tem
+    /// de ser quem o criou, e a janela pode desaparecer antes de pedir.
+    mods_nativos: Mutex<std::collections::BTreeMap<String, executor::ExecutorQuickJs>>,
     connection: Mutex<Option<Arc<Connection>>>,
     /// O servidor que este app está hospedando, quando está.
     ///
@@ -1640,6 +1648,17 @@ struct EstadoDaSessao {
     eventos_descartados: u64,
     /// Quantos comandos foram recusados pelo mesmo motivo.
     comandos_recusados: u64,
+    /// Quantos MODs estão de pé no executor nativo. Zero fora da bancada.
+    mods_nativos: usize,
+    /// Quantas mensagens de MOD nativo esperam a janela lê-las, somando todos.
+    fila_de_mods: usize,
+    /// Quantas o executor recusou por fila cheia, somando todos.
+    ///
+    /// **Contado e mostrado** porque uma mensagem descartada em silêncio é o
+    /// defeito que este repositório mais paga. Se este número sobe, um MOD está
+    /// falando mais rápido do que a janela lê — e quem hospeda precisa saber
+    /// disso antes de alguém reclamar que a tela «trava às vezes».
+    mensagens_recusadas: usize,
 }
 
 /// Qual execução de sessão está de pé, e o que já foi recusado por não ser ela.
@@ -1652,10 +1671,19 @@ struct EstadoDaSessao {
 #[tauri::command]
 fn estado_da_sessao(session: State<'_, Session>) -> EstadoDaSessao {
     use std::sync::atomic::Ordering::Relaxed;
+    let (quantos, na_fila, recusadas) = session.mods_nativos.lock().map_or((0, 0, 0), |vivos| {
+        vivos.values().fold((0, 0, 0), |(q, f, r), executor| {
+            let (mensagens, _) = executor.fila().ocupacao();
+            (q + 1, f + mensagens, r + executor.fila().recusadas())
+        })
+    });
     EstadoDaSessao {
         geracao: session.geracao(),
         eventos_descartados: session.eventos_de_geracao_morta.load(Relaxed),
         comandos_recusados: session.comandos_de_geracao_morta.load(Relaxed),
+        mods_nativos: quantos,
+        fila_de_mods: na_fila,
+        mensagens_recusadas: recusadas,
     }
 }
 
@@ -2562,6 +2590,217 @@ async fn apagar_pacote_do_cache(
             },
         }
     })
+}
+
+// --------------------------------------------- o executor nativo, de bancada
+//
+// Etapa E1. Três comandos e um evento, e eles existem para medir o que só o
+// aplicativo de verdade mede: interação, descarte e impacto na voz.
+//
+// **Ligados por `SEELE_EXECUTOR=quickjs`.** Sem a variável eles recusam, e a
+// janela sobe MODs pelo Worker como sempre — a diretriz proíbe manter dois
+// executores públicos, e uma chave de ambiente que ninguém oferece na tela não
+// é um segundo executor público.
+
+/// O canal por onde as mensagens de um MOD nativo chegam à janela.
+const EVENTO_DO_EXECUTOR: &str = "seele://mod-nativo";
+
+/// Este build está com o executor nativo ligado?
+fn executor_nativo_ligado() -> bool {
+    std::env::var("SEELE_EXECUTOR").is_ok_and(|valor| valor.eq_ignore_ascii_case("quickjs"))
+}
+
+/// O que a janela recebe quando um MOD nativo fala.
+#[derive(Debug, Clone, serde::Serialize)]
+struct FalaDoMod {
+    /// De qual MOD.
+    id: String,
+    /// Em que sessão — a janela descarta o que não for a dela.
+    geracao: u64,
+    /// O que aconteceu: `mensagem`, `falhou`, `interrompido` ou `parou`.
+    tipo: String,
+    /// O corpo, quando há.
+    corpo: String,
+}
+
+/// Qual executor de MODs esta janela deve usar.
+///
+/// `"worker"` é o do produto; `"nativo"` é o da bancada, e ele só aparece com
+/// `SEELE_EXECUTOR=quickjs` no ambiente do processo.
+///
+/// **A janela recebe o papel, e não o motor.** Qual motor está por trás é
+/// decisão desta casca, e escrever o nome dele do outro lado faria a interface
+/// depender de uma escolha que não é dela — do mesmo jeito que ela não nomeia
+/// o transporte.
+#[tauri::command]
+fn executor_de_mods() -> &'static str {
+    if executor_nativo_ligado() {
+        "nativo"
+    } else {
+        "worker"
+    }
+}
+
+/// Sobe um MOD no executor nativo.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando o executor não está ligado, quando a geração já
+/// acabou, quando o pacote não é deste MOD, ou quando a thread não sobe.
+#[tauri::command]
+fn mod_nativo_iniciar(
+    app: AppHandle,
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    hash: String,
+) -> Result<(), FalhaNoMod> {
+    if !executor_nativo_ligado() {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "executor-nativo-desligado".to_owned(),
+        });
+    }
+    if !session.geracao_vale(geracao) {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+    // O mesmo caminho de sempre para chegar ao código: a conferência de hash e
+    // de identidade mora lá, e um segundo caminho seria uma segunda regra.
+    let codigo = codigo_do_mod(app.clone(), session.clone(), geracao, id.clone(), hash)?;
+
+    let executor = executor::ExecutorQuickJs::novo(executor::Limites::default()).map_err(|_| {
+        FalhaNoMod::Recusado {
+            motivo: "executor-nao-subiu".to_owned(),
+        }
+    })?;
+    executor
+        .iniciar(&codigo)
+        .map_err(|_| FalhaNoMod::Recusado {
+            motivo: "executor-nao-aceitou-o-codigo".to_owned(),
+        })?;
+
+    // Uma bomba por instância: ela bloqueia esperando o MOD falar, e emite. Sai
+    // sozinha quando o executor confirma a parada — e é por isso que `Parou`
+    // atravessa até aqui em vez de ser consumido lá dentro.
+    let mut executor = executor;
+    let Some((recebedor, fila)) = executor.escutar() else {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "executor-ja-escutado".to_owned(),
+        });
+    };
+    let janela = app.clone();
+    let quem = id.clone();
+    std::thread::Builder::new()
+        .name("mod-nativo-bomba".into())
+        .spawn(move || {
+            while let Ok(fala) = recebedor.recv() {
+                let (tipo, corpo) = match fala {
+                    executor::ParaOFora::Mensagem(json) => {
+                        // **Devolve o lugar na fila.** Quem escuta assume a
+                        // contabilidade: sem esta linha ela encheria uma vez e
+                        // não aceitaria mais nada, e o MOD ficaria mudo.
+                        fila.tirar(json.len());
+                        ("mensagem", json)
+                    }
+                    executor::ParaOFora::Falhou(motivo) => ("falhou", motivo),
+                    executor::ParaOFora::Interrompido => ("interrompido", String::new()),
+                    executor::ParaOFora::Parou => ("parou", String::new()),
+                };
+                let acabou = tipo == "parou";
+                // `debug`, e não `info`: é uma linha por mensagem de MOD, e um
+                // MOD conversador encheria o log de quem hospeda com o que ele
+                // já vê na tela.
+                tracing::debug!(mod_id = %quem, tipo, "fala de MOD nativo");
+                let _ = janela.emit(
+                    EVENTO_DO_EXECUTOR,
+                    FalaDoMod {
+                        id: quem.clone(),
+                        geracao,
+                        tipo: tipo.to_owned(),
+                        corpo,
+                    },
+                );
+                if acabou {
+                    return;
+                }
+            }
+        })
+        .map_err(|_| FalhaNoMod::Recusado {
+            motivo: "a-bomba-nao-subiu".to_owned(),
+        })?;
+
+    if let Ok(mut vivos) = session.mods_nativos.lock() {
+        // Substituir fecha o anterior: dois runtimes sob o mesmo nome seriam
+        // dois donos para um identificador, e o segundo esconderia o primeiro.
+        if let Some(velho) = vivos.insert(id.clone(), executor) {
+            velho.pedir_encerramento();
+        }
+    }
+    tracing::info!(mod_id = %id, geracao, "MOD de pé no executor nativo");
+    Ok(())
+}
+
+/// Entrega a um MOD nativo a resposta de um pedido que ele fez.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando a geração já acabou ou o MOD não está de pé.
+#[tauri::command]
+fn mod_nativo_entregar(
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    json: String,
+) -> Result<(), FalhaNoMod> {
+    if !session.geracao_vale(geracao) {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+    let vivos = session
+        .mods_nativos
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    vivos
+        .get(&id)
+        .ok_or(FalhaNoMod::Recusado {
+            motivo: "mod-nao-esta-de-pe".to_owned(),
+        })?
+        .entregar(&json)
+        .map_err(|_| FalhaNoMod::Recusado {
+            motivo: "executor-nao-aceitou".to_owned(),
+        })
+}
+
+/// Encerra um MOD nativo, ou todos os desta sessão.
+///
+/// **Revoga na hora e não espera.** A confirmação chega à janela como a fala
+/// `parou`, que é o que o contrato de executor chama de confirmação — esperar
+/// aqui prenderia o comando da janela pelo tempo que o motor levar.
+///
+/// # Errors
+///
+/// Nunca: encerrar o que já encerrou é o desfecho normal de quem apertou duas
+/// vezes.
+#[tauri::command]
+fn mod_nativo_encerrar(session: State<'_, Session>, id: Option<String>) -> Result<(), FalhaNoMod> {
+    let Ok(mut vivos) = session.mods_nativos.lock() else {
+        return Ok(());
+    };
+    match id {
+        Some(id) => {
+            if let Some(executor) = vivos.remove(&id) {
+                executor.pedir_encerramento();
+            }
+        }
+        None => {
+            for (_, executor) in std::mem::take(&mut *vivos) {
+                executor.pedir_encerramento();
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Liga um MOD no servidor que este processo hospeda.
@@ -5208,6 +5447,10 @@ fn main() {
             aplicar_conjunto_de_mods,
             codigo_do_mod,
             estado_da_sessao,
+            executor_de_mods,
+            mod_nativo_iniciar,
+            mod_nativo_entregar,
+            mod_nativo_encerrar,
             pacotes_no_cache,
             apagar_pacote_do_cache,
             conjunto_exigido_agora,

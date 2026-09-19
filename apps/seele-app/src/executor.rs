@@ -109,7 +109,7 @@ impl Fila {
     }
 
     /// Uma mensagem saiu da fila.
-    fn tirar(&self, quantos: usize) {
+    pub(crate) fn tirar(&self, quantos: usize) {
         self.mensagens.fetch_sub(1, Ordering::AcqRel);
         self.bytes.fetch_sub(quantos, Ordering::AcqRel);
     }
@@ -242,6 +242,35 @@ impl Interrupcao {
     }
 }
 
+/// Um temporizador que o MOD pediu, e que o anfitrião possui.
+///
+/// **Do anfitrião, e não do motor.** O QuickJS não tem laço de eventos: quem
+/// tem relógio aqui é a thread que roda o motor. Isso não é uma limitação a
+/// contornar — é o que faz um temporizador ser um **recurso com dono**, que o
+/// §4.2 do contrato exige: encerrar a instância apaga a tabela, e nenhum
+/// temporizador sobrevive porque o MOD esqueceu de cancelá-lo.
+#[derive(Debug, Clone, Copy)]
+struct Temporizador {
+    /// Quando ele vence.
+    quando: Instant,
+    /// De quanto em quanto, se ele repete.
+    repete: Option<Duration>,
+}
+
+/// Quantos temporizadores um MOD pode ter de pé.
+///
+/// Teto porque a tabela é memória do anfitrião: um MOD num laço criando
+/// temporizadores enche a memória de quem usa sem nunca passar pelo teto de
+/// heap do motor, que conta outra coisa.
+pub(crate) const TEMPORIZADORES_DE_PE: usize = 256;
+
+/// O menor intervalo que um temporizador pode pedir.
+///
+/// Quatro milissegundos é o piso que os navegadores usam, e ele existe pela
+/// mesma razão: um temporizador de zero em laço vira espera ocupada, e espera
+/// ocupada num produto de voz disputa com o áudio.
+pub(crate) const INTERVALO_MINIMO: Duration = Duration::from_millis(4);
+
 /// O que entra no executor.
 #[derive(Debug)]
 pub(crate) enum ParaODentro {
@@ -275,9 +304,16 @@ pub(crate) enum ParaOFora {
 /// uma thread Rust à força».
 pub(crate) struct ExecutorQuickJs {
     para_dentro: Sender<ParaODentro>,
-    para_fora: Receiver<ParaOFora>,
+    /// **Some quando alguém escuta.** Ver [`Self::escutar`]: um canal tem um
+    /// dono, e dois leitores dividiriam as mensagens em vez de vê-las.
+    para_fora: Option<Receiver<ParaOFora>>,
     interrupcao: Arc<Interrupcao>,
     fila: Arc<Fila>,
+    /// A thread do motor, para o `join` de quem esperou a confirmação.
+    ///
+    /// Lida só por [`Self::encerrou`], que é caminho de bancada: na janela
+    /// ninguém espera, e a thread sai sozinha ao ver o canal fechado.
+    #[cfg_attr(not(test), allow(dead_code))]
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -301,7 +337,7 @@ impl ExecutorQuickJs {
 
         Ok(Self {
             para_dentro,
-            para_fora,
+            para_fora: Some(para_fora),
             interrupcao,
             fila,
             thread: Some(thread),
@@ -331,9 +367,14 @@ impl ExecutorQuickJs {
     }
 
     /// O que o MOD postou, se já postou alguma coisa.
+    ///
+    /// **Só a bancada usa.** Na janela quem lê é a bomba de [`Self::escutar`],
+    /// que não dorme entre mensagens; este caminho existe para os testes, onde
+    /// esperar com prazo é mais simples que montar uma thread.
+    #[cfg_attr(not(test), allow(dead_code))]
     #[must_use]
     pub(crate) fn receber(&self, prazo: Duration) -> Option<ParaOFora> {
-        let saiu = self.para_fora.recv_timeout(prazo).ok();
+        let saiu = self.para_fora.as_ref()?.recv_timeout(prazo).ok();
         // A contabilidade é baixada **ao tirar**, e não ao entregar: é isto que
         // faz a fila voltar a aceitar assim que alguém a lê. Só mensagem ocupa
         // lugar; as outras variantes são avisos de tamanho fixo.
@@ -347,6 +388,24 @@ impl ExecutorQuickJs {
     #[must_use]
     pub(crate) fn fila(&self) -> &Fila {
         &self.fila
+    }
+
+    /// Entrega o canal de saída a quem vai escutá-lo, uma vez só.
+    ///
+    /// **Um canal tem um dono.** Depois disto, [`Self::receber`] devolve
+    /// `None` e [`Self::encerrou`] não tem como confirmar — quem escuta é que
+    /// vê o [`ParaOFora::Parou`], e é por lá que a confirmação chega.
+    ///
+    /// Existe para a integração na janela: a fala de um MOD precisa virar
+    /// evento assim que sai, e um laço de `receber` com prazo ou perderia
+    /// tempo dormindo ou gastaria CPU acordando.
+    ///
+    /// A contabilidade da fila passa a ser de quem escuta: sem devolver o
+    /// lugar, ela enche uma vez e não aceita mais nada.
+    pub(crate) fn escutar(&mut self) -> Option<(Receiver<ParaOFora>, Arc<Fila>)> {
+        self.para_fora
+            .take()
+            .map(|canal| (canal, Arc::clone(&self.fila)))
     }
 
     /// **Revoga agora e pede a parada.**
@@ -370,16 +429,22 @@ impl ExecutorQuickJs {
     /// Devolve o motivo quando a thread não confirmou dentro do prazo — o que é
     /// informação, e não um erro a esconder: um executor que não confirma é
     /// exatamente o que o contrato manda medir.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn encerrou(&mut self, prazo: Duration) -> Result<Duration, &'static str> {
         let relogio = Instant::now();
         self.pedir_encerramento();
+        // Quem escuta é quem vê a confirmação. Dizer isso em vez de esperar
+        // para sempre por uma mensagem que vai para outro lugar.
+        if self.para_fora.is_none() {
+            return Err("outro leitor tem o canal: a confirmação chega por lá");
+        }
         // A confirmação vem pelo canal, e não pelo `join`: `join` bloqueia sem
         // prazo, e uma thread presa numa função nativa prenderia a saída junto.
+        let Some(canal) = self.para_fora.as_ref() else {
+            return Err("sem canal de saída");
+        };
         let confirmou = loop {
-            match self
-                .para_fora
-                .recv_timeout(prazo.saturating_sub(relogio.elapsed()))
-            {
+            match canal.recv_timeout(prazo.saturating_sub(relogio.elapsed())) {
                 Ok(ParaOFora::Parou) => break true,
                 Ok(_) => {}
                 Err(_) => break false,
@@ -431,6 +496,11 @@ fn rodar(
     // canal. Não há aqui disco, rede, IPC nem armazenamento — e a ausência não
     // é uma jaula construída com cuidado: é o que um contexto de QuickJS **é**
     // antes de alguém acrescentar coisas a ele.
+    //
+    // O prelúdio que traduz esta ponte na API que um MOD conhece — `SeeleMods`
+    // e `SeeleUI` — é montado sobre ela em [`PRELUDIO`], em JavaScript, pela
+    // mesma razão que o do Worker: é código que roda dentro do contexto do MOD,
+    // e escrevê-lo em Rust não o tornaria mais nosso.
     let saida = manda.clone();
     let contagem = Arc::clone(fila);
     let montou = contexto.with(|ctx| -> rquickjs::Result<()> {
@@ -477,15 +547,55 @@ fn rodar(
         return;
     }
 
-    while let Ok(entrada) = recebe.recv() {
+    // A tabela de temporizadores, que é do anfitrião e morre com ele.
+    let mut relogios: std::collections::BTreeMap<u32, Temporizador> =
+        std::collections::BTreeMap::new();
+
+    loop {
+        // **Espera até o pedido seguinte ou até o temporizador mais próximo.**
+        // É isto que faz esta thread não gastar CPU parada: sem temporizador
+        // ela dorme no canal, e com um ela dorme até a hora dele.
+        let entrada = match proximo_vencimento(&relogios) {
+            Some(quando) => match recebe.recv_timeout(quando) {
+                Ok(entrada) => Some(entrada),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            },
+            None => match recebe.recv() {
+                Ok(entrada) => Some(entrada),
+                Err(_) => break,
+            },
+        };
         if interrupcao.revogada() {
             break;
         }
+        let Some(entrada) = entrada else {
+            // Venceu algum: dispara os que estão na hora, dentro de uma volta
+            // com prazo, como qualquer outra execução.
+            interrupcao.comecar();
+            let vencidos = recolher_vencidos(&mut relogios);
+            for id in vencidos {
+                let resultado = contexto.with(|ctx| -> rquickjs::Result<()> {
+                    let Ok(bate) = ctx.globals().get::<_, Function<'_>>("__seeleRelogio") else {
+                        return Ok(());
+                    };
+                    bate.call::<_, ()>((id,))
+                });
+                relatar(manda, interrupcao, resultado);
+            }
+            escoar_jobs(&runtime, interrupcao, manda);
+            continue;
+        };
         match entrada {
             ParaODentro::Encerrar => break,
             ParaODentro::Codigo(fonte) => {
                 interrupcao.comecar();
-                let resultado = contexto.with(|ctx| ctx.eval::<(), _>(fonte.as_bytes()));
+                // O prelúdio primeiro, e o código do MOD depois, na mesma
+                // volta: se o prelúdio não subir, o MOD não deve subir.
+                let resultado = contexto.with(|ctx| {
+                    ctx.eval::<(), _>(PRELUDIO.as_bytes())?;
+                    ctx.eval::<(), _>(fonte.as_bytes())
+                });
                 relatar(manda, interrupcao, resultado);
             }
             ParaODentro::Resposta(json) => {
@@ -500,27 +610,227 @@ fn rodar(
                 relatar(manda, interrupcao, resultado);
             }
         }
-        // Os jobs de Promise correm **dentro do mesmo prazo** da volta que os
-        // criou: sem isto, um MOD moveria trabalho para uma microtarefa e
-        // escaparia do teto pela porta de trás.
-        //
-        // **E a interrupção de um job é dita.** A primeira versão saía do laço
-        // em silêncio: o MOD era parado no meio de uma microtarefa e ninguém
-        // ficava sabendo — nem a janela, nem quem hospeda, nem quem escreveu o
-        // MOD. É o defeito que o `CLAUDE.md` deste repositório nomeia como o
-        // mais caro daqui, cometido pelo próprio mecanismo de contenção.
-        while runtime.is_job_pending() && !interrupcao.revogada() {
-            if runtime.execute_pending_job().is_err() {
-                let _ = manda.send(ParaOFora::Interrompido);
-                break;
-            }
-        }
+        escoar_jobs(&runtime, interrupcao, manda);
+        // Os pedidos de temporizador que o MOD fez nesta volta.
+        recolher_pedidos_de_relogio(&contexto, &mut relogios);
     }
 
     // O descarte acontece **aqui**, na dona do runtime, e não noutra thread.
     drop(contexto);
     drop(runtime);
     let _ = manda.send(ParaOFora::Parou);
+}
+
+/// O que roda **antes** do código do MOD, dentro do contexto dele.
+///
+/// A mesma API que o prelúdio do Worker oferece — `SeeleMods.request`,
+/// `SeeleMods.snapshot`, `SeeleUI.regiao`, `SeeleUI.tema` —, montada sobre a
+/// única ponte que existe aqui: `seele.postar`.
+///
+/// **Escrito em JavaScript, e não em Rust**, pela mesma razão do outro: é
+/// código que roda dentro do contexto do MOD, e um MOD pode redefinir o que
+/// quiser depois dele. O que garante a fronteira é o contexto não ter ambiente,
+/// e não este texto.
+///
+/// O teto de oito pedidos em voo é o mesmo, e existe aqui pela mesma razão que
+/// existe lá: o MOD recebe o erro onde ele o escreveu.
+const PRELUDIO: &str = r#"
+'use strict';
+(() => {
+  const pendentes = new Map();
+  let proximo = 0;
+
+  globalThis.aoResponder = (texto) => {
+    let m;
+    try { m = JSON.parse(texto); } catch { return; }
+    const espera = pendentes.get(m.n);
+    if (!espera) return;
+    pendentes.delete(m.n);
+    if (m.ok) espera.resolve(m.valor);
+    else espera.reject(new Error(m.erro || 'recusado'));
+  };
+
+  const pedir = (tipo, carga) => new Promise((resolve, reject) => {
+    if (pendentes.size >= 8) { reject(new Error('too-many-requests')); return; }
+    const n = ++proximo;
+    pendentes.set(n, { resolve, reject });
+    if (!seele.postar(JSON.stringify({ tipo, n, ...carga }))) {
+      pendentes.delete(n);
+      reject(new Error('fila-cheia'));
+    }
+  });
+
+  globalThis.SeeleMods = Object.freeze({
+    request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
+    snapshot: () => pedir('snapshot', {}),
+  });
+
+  globalThis.SeeleUI = Object.freeze({
+    regiao: (conteudo) => pedir('regiao', { conteudo }),
+    tema: (valores) => pedir('tema', { valores }),
+  });
+
+  // ---- tempo ----
+  //
+  // O QuickJS não tem laço de eventos, então `setTimeout` e `setInterval` não
+  // existem aqui. Quem tem relógio é a thread do anfitrião, e estas quatro
+  // funções são a fachada dela.
+  //
+  // **Os pedidos vão por um vetor, e não por chamada nativa.** Uma função
+  // nativa chamada de dentro do motor teria de travar a tabela enquanto o
+  // motor roda — e o motor pode estar a meio de uma interrupção. O anfitrião
+  // recolhe este vetor quando a volta termina.
+  const relogios = new Map();
+  let pedidosDeRelogio = [];
+  let proximoRelogio = 0;
+
+  const marcar = (fn, ms, repete) => {
+    if (typeof fn !== 'function') return 0;
+    const id = ++proximoRelogio;
+    relogios.set(id, { fn, repete });
+    pedidosDeRelogio.push({ id, ms: Number(ms) || 0, repete, cancelar: false });
+    return id;
+  };
+  const desmarcar = (id) => {
+    if (!relogios.delete(id)) return;
+    pedidosDeRelogio.push({ id, ms: 0, repete: false, cancelar: true });
+  };
+
+  globalThis.setTimeout = (fn, ms) => marcar(fn, ms, false);
+  globalThis.setInterval = (fn, ms) => marcar(fn, ms, true);
+  globalThis.clearTimeout = desmarcar;
+  globalThis.clearInterval = desmarcar;
+
+  // Chamado pelo anfitrião quando um temporizador vence.
+  globalThis.__seeleRelogio = (id) => {
+    const marca = relogios.get(id);
+    if (!marca) return;
+    if (!marca.repete) relogios.delete(id);
+    // **O erro do MOD fica com o MOD.** Um `setInterval` que lança não pode
+    // parar o anfitrião, e a repetição continua: quem decide parar é quem
+    // cancela, e não um erro de uma volta.
+    try { marca.fn(); } catch (erro) { seele.postar(JSON.stringify({ tipo: 'erro-no-relogio', erro: String(erro) })); }
+  };
+
+  // E o anfitrião recolhe o que se acumulou, esvaziando.
+  globalThis.__seelePedidosDeRelogio = () => {
+    const meus = pedidosDeRelogio;
+    pedidosDeRelogio = [];
+    return JSON.stringify(meus);
+  };
+})();
+"#;
+
+/// O que o MOD pediu de temporizador, como o prelúdio o escreve.
+#[derive(Debug, serde::Deserialize)]
+struct PedidoDeRelogio {
+    /// O número que o prelúdio deu a este temporizador.
+    id: u32,
+    /// De quanto em quanto, em milissegundos.
+    #[serde(default)]
+    ms: f64,
+    /// Repete, ou dispara uma vez só.
+    #[serde(default)]
+    repete: bool,
+    /// É um cancelamento, e não um pedido.
+    #[serde(default)]
+    cancelar: bool,
+}
+
+/// Quanto falta para o temporizador mais próximo, ou nada se não houver.
+fn proximo_vencimento(
+    relogios: &std::collections::BTreeMap<u32, Temporizador>,
+) -> Option<Duration> {
+    let agora = Instant::now();
+    relogios
+        .values()
+        .map(|t| t.quando.saturating_duration_since(agora))
+        .min()
+}
+
+/// Tira da tabela os que venceram, reagendando os que repetem.
+fn recolher_vencidos(relogios: &mut std::collections::BTreeMap<u32, Temporizador>) -> Vec<u32> {
+    let agora = Instant::now();
+    let vencidos: Vec<u32> = relogios
+        .iter()
+        .filter(|(_, t)| t.quando <= agora)
+        .map(|(id, _)| *id)
+        .collect();
+    for id in &vencidos {
+        let Some(t) = relogios.get_mut(id) else {
+            continue;
+        };
+        match t.repete {
+            // Reagendado a partir de **agora**, e não do vencimento: somando ao
+            // vencimento, um MOD que demora mais que o intervalo acumularia
+            // disparos atrasados e a thread nunca mais dormiria.
+            Some(intervalo) => t.quando = agora + intervalo,
+            None => {
+                relogios.remove(id);
+            }
+        }
+    }
+    vencidos
+}
+
+/// Lê o que o MOD pediu de temporizador nesta volta, e atualiza a tabela.
+///
+/// **Pelo estado, e não por callback nativo.** Uma função nativa chamada de
+/// dentro do motor teria de travar a tabela enquanto o motor roda, e o motor
+/// pode estar a meio de uma interrupção. O prelúdio anota os pedidos num
+/// vetor, e o anfitrião o recolhe quando a volta termina.
+fn recolher_pedidos_de_relogio(
+    contexto: &Context,
+    relogios: &mut std::collections::BTreeMap<u32, Temporizador>,
+) {
+    // Atravessa como texto JSON, e não como tupla: o binding sabe converter
+    // `String`, e escrever um `FromJs` para uma forma que só este arquivo usa
+    // seria código de conversão para não usar o conversor que já existe.
+    let pedidos = contexto.with(|ctx| {
+        ctx.globals()
+            .get::<_, Function<'_>>("__seelePedidosDeRelogio")
+            .and_then(|f| f.call::<_, String>(()))
+            .unwrap_or_default()
+    });
+    let pedidos: Vec<PedidoDeRelogio> = serde_json::from_str(&pedidos).unwrap_or_default();
+    for PedidoDeRelogio {
+        id,
+        ms,
+        repete,
+        cancelar,
+    } in pedidos
+    {
+        if cancelar {
+            relogios.remove(&id);
+            continue;
+        }
+        if relogios.len() >= TEMPORIZADORES_DE_PE {
+            continue;
+        }
+        let intervalo = Duration::from_secs_f64(ms.max(0.0) / 1000.0).max(INTERVALO_MINIMO);
+        relogios.insert(
+            id,
+            Temporizador {
+                quando: Instant::now() + intervalo,
+                repete: repete.then_some(intervalo),
+            },
+        );
+    }
+}
+
+/// Escoa as microtarefas da volta, e **diz** quando uma é interrompida.
+///
+/// A primeira versão saía do laço em silêncio: o MOD era parado no meio de uma
+/// microtarefa e ninguém ficava sabendo — nem a janela, nem quem hospeda, nem
+/// quem escreveu o MOD. É o defeito que o `CLAUDE.md` deste repositório nomeia
+/// como o mais caro daqui, cometido pelo próprio mecanismo de contenção.
+fn escoar_jobs(runtime: &Runtime, interrupcao: &Arc<Interrupcao>, manda: &Sender<ParaOFora>) {
+    while runtime.is_job_pending() && !interrupcao.revogada() {
+        if runtime.execute_pending_job().is_err() {
+            let _ = manda.send(ParaOFora::Interrompido);
+            return;
+        }
+    }
 }
 
 /// Traduz o resultado de uma volta para o canal de saída.
@@ -556,6 +866,7 @@ fn relatar(
 /// Escrita aqui e não num arquivo de MOD de propósito: ela é o instrumento
 /// desta medição, e um instrumento que mora junto do que ele mede não sai de
 /// sincronia com ele.
+#[cfg(test)]
 const SONDA: &str = r#"
 const achados = [];
 function tentar(nome, o_que) {
