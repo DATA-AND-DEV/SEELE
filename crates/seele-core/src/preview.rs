@@ -53,43 +53,17 @@
 //! - **BMP**, **ICO** and **TIFF** have signatures two bytes long or shorter —
 //!   `BM` is the start of plenty of text files — and nobody sends them.
 
-/// An image format this product is willing to draw inline.
+/// A tabela dos quatro formatos, que agora mora no crate do protocolo.
 ///
-/// A closed enumeration on purpose. The media type a window sees comes from
-/// here and from nowhere else, so there is no path by which a string chosen by
-/// a sender reaches the decoder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImageFormat {
-    /// A screenshot.
-    Png,
-    /// A photograph.
-    Jpeg,
-    /// The thing people paste.
-    Gif,
-    /// What a browser saves today.
-    Webp,
-}
-
-impl ImageFormat {
-    /// The whole list, in one place.
-    ///
-    /// Here so that a screen deciding whether to offer a preview asks this
-    /// crate instead of keeping a copy of the four. A second copy is a second
-    /// copy that can disagree, and the way it would disagree is a window
-    /// offering to draw something this module will then refuse.
-    pub const ALL: [Self; 4] = [Self::Png, Self::Jpeg, Self::Gif, Self::Webp];
-
-    /// The media type, written by this product.
-    #[must_use]
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::Png => "image/png",
-            Self::Jpeg => "image/jpeg",
-            Self::Gif => "image/gif",
-            Self::Webp => "image/webp",
-        }
-    }
-}
+/// **Ela desceu, e o julgamento ficou** — ADR 0048. O servidor passou a
+/// conferir os bytes de um volume de MOD com a mesma tabela, e não enxerga este
+/// crate: o ADR 0002 proíbe o daemon de ligar o cliente. A escolha era uma
+/// segunda cópia da assinatura do lado de lá, ou uma cópia só, no crate que os
+/// dois enxergam.
+///
+/// Reexportado daqui porque é daqui que este produto sempre perguntou, e mudar
+/// o caminho de quem pergunta não era o ponto da mudança.
+pub use seele_proto::imagem::{sniff, ImageFormat, SNIFF_LEN};
 
 /// How many bytes a window will pull down to look at a file.
 ///
@@ -112,35 +86,6 @@ impl ImageFormat {
 /// is four more parsers and is not built. The drawn size is capped in CSS; the
 /// decode is not.
 pub const PREVIEW_LIMIT: u64 = 4 * 1024 * 1024;
-
-/// How many leading bytes decide. The longest signature here is WebP's twelve.
-pub const SNIFF_LEN: usize = 12;
-
-/// What the first bytes of a file actually are.
-///
-/// `None` is not a failure: it is every file that is not one of the four, which
-/// is most files.
-#[must_use]
-pub fn sniff(bytes: &[u8]) -> Option<ImageFormat> {
-    // Eight bytes, and the last five of them exist to catch a transfer that
-    // mangled channel endings. Nothing else starts this way.
-    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
-        return Some(ImageFormat::Png);
-    }
-    // Start of Image, then the first marker.
-    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some(ImageFormat::Jpeg);
-    }
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        return Some(ImageFormat::Gif);
-    }
-    // A RIFF container whose form is WEBP. The four bytes between are the
-    // length, which says nothing about the format.
-    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        return Some(ImageFormat::Webp);
-    }
-    None
-}
 
 /// What a sender's declared type claims the file is.
 ///

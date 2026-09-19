@@ -64,6 +64,12 @@ pub enum StreamType {
     /// A screen transmission: §3.1, and [`crate::screen::ScreenHeader`] behind
     /// this byte.
     Screen,
+    /// Bytes going into a MOD's volume: ADR 0048, and
+    /// [`crate::volume::VolumeHeader`] behind this byte.
+    ///
+    /// The third kind the module documentation above says would break the old
+    /// arithmetic. It exists because it was written down first.
+    ModVolume,
 }
 
 /// Why a stream's first byte was refused.
@@ -100,6 +106,7 @@ impl StreamType {
             // Deliberately not starting at zero: see `RESERVED_TYPE`.
             Self::Attachment => 1,
             Self::Screen => 2,
+            Self::ModVolume => 3,
         }
     }
 
@@ -114,6 +121,7 @@ impl StreamType {
             RESERVED_TYPE => Err(StreamTypeError::Reserved),
             1 => Ok(Self::Attachment),
             2 => Ok(Self::Screen),
+            3 => Ok(Self::ModVolume),
             _ => Err(StreamTypeError::Unknown { code }),
         }
     }
@@ -156,7 +164,12 @@ mod tests {
         // while a peer of the other build reads a transfer as a screen.
         assert_eq!(StreamType::Attachment.byte(), 1);
         assert_eq!(StreamType::Screen.byte(), 2);
-        for stream_type in [StreamType::Attachment, StreamType::Screen] {
+        assert_eq!(StreamType::ModVolume.byte(), 3);
+        for stream_type in [
+            StreamType::Attachment,
+            StreamType::Screen,
+            StreamType::ModVolume,
+        ] {
             assert_eq!(StreamType::decode(stream_type.byte()), Ok(stream_type));
         }
     }
@@ -189,9 +202,10 @@ mod tests {
     #[test]
     fn an_unknown_type_is_refused_rather_than_guessed() {
         // §5.2 names the third kind of stream as the thing the old arithmetic
-        // could not survive. This is what meeting it looks like: a refusal that
-        // says the number, not a reader chosen at random.
-        for code in [3_u8, 4, 200, 255] {
+        // could not survive. It arrived — ADR 0048 gave MOD volume the byte 3 —
+        // and this is what meeting the *fourth* looks like: a refusal that says
+        // the number, not a reader chosen at random.
+        for code in [4_u8, 5, 200, 255] {
             assert_eq!(
                 StreamType::decode(code),
                 Err(StreamTypeError::Unknown { code }),

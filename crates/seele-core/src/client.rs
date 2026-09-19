@@ -647,6 +647,15 @@ impl Client {
                             return;
                         }
                     }
+                    // **Um fluxo de volume não entra por aqui.** ADR 0048: os
+                    // bytes vão da janela para o servidor, e o que volta no
+                    // outro sentido é o `volume.servir`, que ainda não existe.
+                    // Descartado e nomeado, em vez de calado: se ele começar a
+                    // chegar, quem lê o log fica sabendo antes de alguém
+                    // descobrir pela imagem que não aparece.
+                    Ok(seele_proto::stream::StreamType::ModVolume) => {
+                        tracing::debug!("um fluxo de volume de MOD chegou, e nada o consome ainda");
+                    }
                     Err(erro) => {
                         // Um tipo que este build não conhece é um fluxo de uma
                         // versão mais nova, e não um defeito: descartar um é
@@ -1945,6 +1954,76 @@ impl Transfers {
             Ok(None) => Ok(Sent::Delivered { bytes: sent }),
             Ok(Some(_)) => Ok(Sent::Stopped { bytes: sent }),
             Err(_) => Ok(Sent::Interrupted { bytes: sent }),
+        }
+    }
+
+    /// Envia bytes para o volume de um MOD, por um fluxo próprio — ADR 0048.
+    ///
+    /// # Por que um fluxo, e não a ponte de pedidos
+    ///
+    /// A ponte existe para «uma mensagem de texto e um `Ping` a cada cinco
+    /// segundos». Empurrar uma imagem por ela custava 2 331 pedidos para
+    /// 10 MiB, cada um atravessando o QuickJS, a vinte quadros por segundo. Por
+    /// fluxo, os mesmos 10 MiB passam dentro da rajada de bytes, na velocidade
+    /// do enlace, e **o QuickJS não vê byte nenhum**.
+    ///
+    /// # O que vai na frente, e o que não vai
+    ///
+    /// Dois nomes: de quem é a pasta, e qual autorização isto usa. Não vai
+    /// caminho — quem o escolhe é o MOD, e ele já está guardado na espera —,
+    /// não vai tamanho e não vai tipo. O porquê de cada ausência está em
+    /// [`seele_proto::volume`].
+    ///
+    /// # Errors
+    ///
+    /// Falha quando o fluxo não abre ou o cabeçalho não sai. Uma **recusa** não
+    /// é erro: ela volta pelo controle, como
+    /// `ServerMessage::VolumeRecusado`, com o motivo enumerado — que é onde
+    /// `specs/02-protocolo.md` guarda todo motivo.
+    pub async fn enviar_volume(
+        &self,
+        mod_id: &str,
+        token: &str,
+        bytes: &[u8],
+        mut progress: impl FnMut(u64, u64),
+    ) -> Result<Sent> {
+        use seele_proto::attachment::BLOCK_LEN;
+
+        let mut stream = self.connection.open_uni().await?;
+        // Abaixo do controle, como o anexo e pela mesma razão: mandar uma
+        // imagem não pode atrasar o `Pong` de ninguém nesta conexão.
+        stream.set_priority(TRANSFER_PRIORITY)?;
+        stream
+            .write_all(&[seele_proto::stream::StreamType::ModVolume.byte()])
+            .await?;
+        let header = seele_proto::volume::VolumeHeader {
+            mod_id: mod_id.to_owned(),
+            token: token.to_owned(),
+        };
+        if let Err(error) = frame::write(&mut stream, &header).await {
+            return Ok(interpret_any(&error, 0));
+        }
+
+        let total = bytes.len() as u64;
+        let mut enviados = 0_u64;
+        progress(0, total);
+        for bloco in bytes.chunks(BLOCK_LEN) {
+            if let Err(error) = stream.write_all(bloco).await {
+                return Ok(interpret(&error, enviados));
+            }
+            enviados = enviados.saturating_add(bloco.len() as u64);
+            progress(enviados, total);
+        }
+        if stream.finish().is_err() {
+            return Ok(Sent::Stopped { bytes: enviados });
+        }
+        // Espera o outro lado reconhecer o fim, pela razão escrita em
+        // `send_attachment`: sem isto, um `STOP_SENDING` que chega depois do
+        // último bloco seria lido como entrega.
+        match stream.stopped().await {
+            Ok(None) => Ok(Sent::Delivered { bytes: enviados }),
+            Ok(Some(_)) => Ok(Sent::Stopped { bytes: enviados }),
+            Err(_) => Ok(Sent::Interrupted { bytes: enviados }),
         }
     }
 

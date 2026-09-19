@@ -53,7 +53,7 @@ pub use types::{
     EndReason, EstadoDoAparelho, Event, FonteDeTela, LimitesDeTela, LinkState, LinkTrust, Message,
     Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
     PreviewRefusal, PreviewRules, Severity, SignalBand as Band, Snapshot, TelaEmCurso, Telemetry,
-    Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync,
+    Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -954,6 +954,12 @@ impl Shared {
                     Transfer::Unavailable {
                         attachment: attachment.get(),
                         reason: refusal_of(reason),
+                    }
+                }
+                seele_core::TransferNotice::VolumeRecusado { token, motivo } => {
+                    Transfer::VolumeRecusado {
+                        token,
+                        motivo: recusa_de_volume(motivo),
                     }
                 }
             })
@@ -3007,6 +3013,20 @@ fn refusal_of(reason: seele_core::AttachmentRefusal) -> AttachmentRefusal {
         seele_core::AttachmentRefusal::NotFound => AttachmentRefusal::NotFound,
         seele_core::AttachmentRefusal::Expired => AttachmentRefusal::Expired,
         seele_core::AttachmentRefusal::Malformed => AttachmentRefusal::Malformed,
+    }
+}
+
+/// O mesmo espelho, para a recusa de volume de um MOD — ADR 0048.
+///
+/// Exaustivo de propósito, como o de cima: uma variante nova no fio quebra a
+/// compilação aqui em vez de virar um `_ => Outra` que a tela desenha errado.
+fn recusa_de_volume(motivo: seele_core::VolumeRefusal) -> VolumeRefusal {
+    use seele_core::VolumeRefusal as Fio;
+    match motivo {
+        Fio::SemEspera => VolumeRefusal::SemEspera,
+        Fio::TipoRecusado => VolumeRefusal::TipoRecusado,
+        Fio::NaoGravei => VolumeRefusal::NaoGravei,
+        Fio::Incompleto => VolumeRefusal::Incompleto,
     }
 }
 

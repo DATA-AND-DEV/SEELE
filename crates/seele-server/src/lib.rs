@@ -516,6 +516,7 @@ impl Daemon {
             anexos,
             caminho_bps: config.caminho_bps,
             versao_do_anuncio: config.versao_do_anuncio,
+            esperas: Arc::new(std::sync::Mutex::new(mods::volume::Esperas::default())),
         });
 
         // Os MODs deste servidor, se houver pasta. ADR 0045.

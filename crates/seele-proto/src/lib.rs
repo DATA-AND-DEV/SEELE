@@ -26,6 +26,7 @@ pub mod attachment;
 pub mod control;
 pub mod encontro;
 pub mod ids;
+pub mod imagem;
 pub mod media;
 pub mod mods;
 pub mod screen;
@@ -34,6 +35,7 @@ pub mod stream;
 pub mod transport;
 pub mod uri;
 pub mod version;
+pub mod volume;
 
 pub use control::{ClientMessage, ControlError, ServerMessage};
 pub use ids::{ChannelId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};

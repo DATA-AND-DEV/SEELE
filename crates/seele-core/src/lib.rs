@@ -147,6 +147,11 @@ pub use seele_proto::control::{
 /// — quem hospeda tem de estar admitido antes de bater na própria porta — e a
 /// regra de dependência do ADR 0002 não deixa a casca ver `seele-proto`.
 pub use seele_proto::transport::key_fingerprint;
+/// A recusa de um fluxo de volume de MOD — ADR 0048.
+///
+/// Reexportada porque o `seele-ffi` a espelha para a casca e não enxerga
+/// `seele-proto`, pelo mesmo ADR 0002 que já traz os enumerados de anexo daqui.
+pub use seele_proto::volume::VolumeRefusal;
 
 pub use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,

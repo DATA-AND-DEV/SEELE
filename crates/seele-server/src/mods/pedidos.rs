@@ -139,6 +139,9 @@ async fn executar_inner(
     let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"admin":admin,"write":write}).to_string();
     let id = id.to_owned();
     let payload = payload.to_owned();
+    // A lista de esperas é do servidor, e não deste pedido: ela tem de
+    // sobreviver à resposta para o fluxo de volume encontrar o token.
+    let esperas = Arc::clone(&server.esperas);
     // The owned guard is held on the blocking worker, never running JS on Tokio.
     tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
         let manifest =
@@ -156,6 +159,10 @@ async fn executar_inner(
         let relative = seele_proto::mods::inner_path(&entry.split('/').collect::<Vec<_>>())
             .ok_or_else(|| anyhow::anyhow!("bad path"))?;
         let mut host = super::Anfitriao::novo()?;
+        // **Antes de `carregar`.** As ligações do QuickJS clonam este `Arc` ao
+        // serem montadas; compartilhar depois deixaria o MOD escrevendo numa
+        // lista que ninguém mais lê. Ver `Anfitriao::compartilhar_esperas`.
+        host.compartilhar_esperas(esperas);
         host.carregar(&id, &std::fs::read_to_string(root.join(relative))?, &dados)?;
         let mut data: BTreeMap<String, String> = mods::ler_quintal(&db, &id)?;
         let before = data.clone();

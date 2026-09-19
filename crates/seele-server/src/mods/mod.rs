@@ -455,6 +455,24 @@ impl Anfitriao {
         Arc::clone(&self.esperas)
     }
 
+    /// Usa a lista de esperas de outra pessoa em vez da própria.
+    ///
+    /// **É isto que faz uma autorização sobreviver ao pedido que a emitiu.**
+    /// `mods::pedidos` cria um `Anfitriao` por pedido e o descarta ao
+    /// responder; uma espera registrada dentro do `aoPedir` morreria junto, e o
+    /// fluxo que chegasse logo depois leria «não há espera com este token»
+    /// para um token que o MOD tinha acabado de emitir.
+    ///
+    /// A lista de verdade mora no [`crate::server::Server`], que é o objeto que
+    /// o QuickJS e o tratador do fluxo alcançam.
+    ///
+    /// Chamado **antes** de `carregar`: as ligações do QuickJS clonam o `Arc`
+    /// no momento em que são montadas, e trocá-lo depois deixaria um MOD já
+    /// carregado escrevendo na lista descartada.
+    pub fn compartilhar_esperas(&mut self, esperas: Arc<std::sync::Mutex<volume::Esperas>>) {
+        self.esperas = esperas;
+    }
+
     /// Copies the JS `dados` object back into the map, refusing an oversized
     /// yard rather than trimming it.
     fn recolher_quintal(

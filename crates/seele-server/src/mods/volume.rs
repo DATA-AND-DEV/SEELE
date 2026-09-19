@@ -31,6 +31,20 @@ use std::time::{Duration, Instant};
 
 use seele_proto::ids::PersonId;
 
+/// A pasta, dentro dos dados de um MOD, onde o volume mora.
+///
+/// **Nomeada à parte de propósito** — ADR 0048. Um arquivo de volume não é um
+/// arquivo de MOD comum: `arquivos::escrever` tem teto de 4 MiB por arquivo, e
+/// o volume não tem teto nenhum. Misturá-los apagaria aquele teto para todo o
+/// resto, que é o que protege o disco de quem hospeda hoje.
+pub const PASTA: &str = "volume";
+
+/// Quanto entra e sai do disco de uma vez.
+///
+/// O mesmo de `transfer.rs`, e pela mesma razão escrita lá: o servidor é
+/// dimensionado em 1 vCPU e 512 MB, e nada segura o arquivo inteiro.
+pub const BLOCO: usize = 64 * 1024;
+
 /// O maior prazo que uma espera pode pedir.
 ///
 /// Dez minutos é o que o envio em fragmentos já usava, e sobra: por fluxo, uma
@@ -340,4 +354,202 @@ mod testes {
             Err(NaoEsperou::TokenRepetido)
         );
     }
+}
+
+// ---------------------------------------------------------------- o recebimento
+
+/// O que um fluxo de volume deixou no disco.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chegou {
+    /// De qual MOD é a pasta.
+    pub mod_id: String,
+    /// Para quem a espera estava registrada.
+    pub pessoa: PersonId,
+    /// A autorização consumida. Vai de volta ao MOD no veredito.
+    pub token: String,
+    /// Onde o arquivo ficou, como o MOD o nomeou.
+    pub caminho: String,
+    /// Quantos bytes chegaram.
+    pub bytes: u64,
+    /// O SHA-256 do conteúdo, em hexadecimal minúsculo.
+    pub hash: String,
+    /// O tipo que os **bytes** dizem ser — nunca o que alguém declarou.
+    pub tipo: &'static str,
+}
+
+/// Recebe um fluxo de volume, do cabeçalho ao arquivo em disco.
+///
+/// # A ordem das conferências, e por que ela é esta
+///
+/// 1. **O cabeçalho cabe no fio.** Antes de qualquer alocação.
+/// 2. **A espera existe, é deste MOD, desta pessoa, e ainda vale.** Consumida
+///    aqui, e por isso um token vazado não vira escrita repetida.
+/// 3. **O caminho resolve dentro da pasta.** Pelo `dentro` de sempre, e sob
+///    [`PASTA`]: um caminho que sobe morre aqui, mesmo tendo vindo do MOD.
+/// 4. **Os bytes vão para um arquivo de obras**, em blocos, com o hash sendo
+///    somado no caminho. Nada segura o arquivo inteiro.
+/// 5. **O tipo é lido dos bytes** e conferido contra o que o MOD declarou
+///    aceitar. Só então o arquivo de obras vira o arquivo final.
+///
+/// O quinto passo é o que torna «sem teto» uma decisão e não um descuido do
+/// outro lado: o arquivo só aparece no lugar que o MOD nomeou depois de o
+/// produto ter olhado os bytes.
+///
+/// # Errors
+///
+/// Devolve [`seele_proto::volume::VolumeRefusal`] — uma recusa é algo que quem
+/// enviou está esperando ouvir, e não um erro de quem recebe.
+pub async fn receber(
+    esperas: &std::sync::Mutex<Esperas>,
+    raizes: Option<&crate::RaizesDosMods>,
+    pessoa: PersonId,
+    fluxo: &mut quinn::RecvStream,
+) -> Result<Chegou, (String, seele_proto::volume::VolumeRefusal)> {
+    use seele_proto::volume::VolumeRefusal;
+
+    let cabecalho: seele_proto::volume::VolumeHeader = crate::frame::read(fluxo)
+        .await
+        .map_err(|_| (String::new(), VolumeRefusal::Incompleto))?;
+    {
+        use seele_proto::control::Validate as _;
+        if cabecalho.validate().is_err() {
+            return Err((String::new(), VolumeRefusal::SemEspera));
+        }
+    }
+    let token = cabecalho.token.clone();
+    let errar = |motivo| (token.clone(), motivo);
+
+    let espera = {
+        let Ok(mut guarda) = esperas.lock() else {
+            return Err(errar(VolumeRefusal::NaoGravei));
+        };
+        guarda
+            .tomar(&cabecalho.token, &cabecalho.mod_id, pessoa, Instant::now())
+            .ok_or_else(|| errar(VolumeRefusal::SemEspera))?
+    };
+
+    // Sem raiz não há onde gravar: este servidor é o de memória, e a recusa é
+    // do disco e não do token — quem enviou precisa saber a diferença.
+    let Some(raizes) = raizes else {
+        return Err(errar(VolumeRefusal::NaoGravei));
+    };
+    // **Da instância, e não da máquina.** Ver `RaizesDosMods`: o mesmo MOD em
+    // dois servidores desta máquina grava em lugares diferentes.
+    let raiz = raizes.dados_de(&espera.mod_id).join(PASTA);
+    let Some(destino) = crate::mods::arquivos::dentro(&raiz, &espera.caminho) else {
+        return Err(errar(VolumeRefusal::SemEspera));
+    };
+    let Some(pai) = destino.parent() else {
+        return Err(errar(VolumeRefusal::NaoGravei));
+    };
+    if tokio::fs::create_dir_all(pai).await.is_err() {
+        return Err(errar(VolumeRefusal::NaoGravei));
+    }
+
+    // **Arquivo de obras, e não o destino.** Um fluxo que cai no meio deixaria
+    // meia imagem no lugar onde o MOD espera uma imagem inteira — e o MOD não
+    // tem como saber disso sem abrir os bytes, que é exatamente o que este
+    // caminho existe para ele não precisar fazer.
+    let obras = pai.join(format!(".em-obras-{}", cabecalho.token));
+    let resultado = escorrer(fluxo, &obras, &espera).await;
+    match resultado {
+        Ok(chegou) => {
+            if tokio::fs::rename(&obras, &destino).await.is_err() {
+                let _ = tokio::fs::remove_file(&obras).await;
+                return Err(errar(VolumeRefusal::NaoGravei));
+            }
+            Ok(Chegou {
+                mod_id: espera.mod_id,
+                pessoa: espera.pessoa,
+                token: cabecalho.token,
+                caminho: espera.caminho,
+                ..chegou
+            })
+        }
+        Err(motivo) => {
+            // O de obras sai em toda saída que não é a de cima. Deixá-lo seria
+            // lixo com nome de token na pasta de quem hospeda.
+            let _ = tokio::fs::remove_file(&obras).await;
+            Err(errar(motivo))
+        }
+    }
+}
+
+/// Os bytes, em blocos, com o hash somado no caminho.
+///
+/// Devolve um [`Chegou`] com os campos que só os bytes respondem; quem chama
+/// preenche o resto.
+async fn escorrer(
+    fluxo: &mut quinn::RecvStream,
+    obras: &std::path::Path,
+    espera: &Espera,
+) -> Result<Chegou, seele_proto::volume::VolumeRefusal> {
+    use seele_proto::attachment::ContentDigest;
+    use seele_proto::volume::VolumeRefusal;
+    use tokio::io::AsyncWriteExt;
+
+    let mut arquivo = tokio::fs::File::create(obras)
+        .await
+        .map_err(|_| VolumeRefusal::NaoGravei)?;
+    // O somador do anexo, e não um segundo: o hash de um arquivo neste produto
+    // é o mesmo hash, somado pelo mesmo código.
+    let mut soma = ContentDigest::new();
+    let mut bytes = 0_u64;
+    // Os primeiros bytes ficam guardados: é neles que o tipo é lido, e ler o
+    // tipo do arquivo depois de escrevê-lo seria ler de novo o que já passou.
+    let mut comeco: Vec<u8> = Vec::with_capacity(16);
+    let mut bloco = vec![0_u8; BLOCO];
+
+    loop {
+        let lido = fluxo
+            .read(&mut bloco)
+            .await
+            .map_err(|_| VolumeRefusal::Incompleto)?;
+        let Some(quantos) = lido else { break };
+        let pedaco = bloco.get(..quantos).unwrap_or_default();
+        if comeco.len() < seele_proto::imagem::SNIFF_LEN {
+            let falta = seele_proto::imagem::SNIFF_LEN - comeco.len();
+            comeco.extend_from_slice(pedaco.get(..falta).unwrap_or(pedaco));
+        }
+        soma.feed(pedaco);
+        bytes = bytes.saturating_add(quantos as u64);
+        arquivo
+            .write_all(pedaco)
+            .await
+            .map_err(|_| VolumeRefusal::NaoGravei)?;
+    }
+    arquivo
+        .flush()
+        .await
+        .map_err(|_| VolumeRefusal::NaoGravei)?;
+    drop(arquivo);
+
+    // **O tipo vem dos bytes**, com a mesma tabela de quatro formatos que a
+    // prévia de anexo usa — reúso, e não uma segunda cópia da regra. Decisão 2
+    // do ADR 0048: o MOD não tem como conferir o que ele não vê.
+    let formato = seele_proto::imagem::sniff(&comeco).ok_or(VolumeRefusal::TipoRecusado)?;
+    // O MOD declara os tipos como `png`, `jpeg`, `webp`, `gif` — o sufixo do
+    // tipo de mídia, que é como o `data:` da janela já os escrevia.
+    if !espera.tipos.iter().any(|t| t == formato.sufixo()) {
+        return Err(VolumeRefusal::TipoRecusado);
+    }
+
+    Ok(Chegou {
+        mod_id: String::new(),
+        pessoa: espera.pessoa,
+        token: String::new(),
+        caminho: String::new(),
+        bytes,
+        hash: hex(&soma.finish()),
+        tipo: formato.media_type(),
+    })
+}
+
+/// Hexadecimal minúsculo, como todo hash que uma pessoa compara a olho.
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut saida, byte| {
+        let _ = write!(saida, "{byte:02x}");
+        saida
+    })
 }

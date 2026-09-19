@@ -2177,6 +2177,25 @@ pub enum ServerMessage {
         /// servidor e gravados no banco dele.
         identidade: String,
     },
+
+    /// Um fluxo de volume de MOD não foi aceito, e por quê — ADR 0048.
+    ///
+    /// # Por que ela volta pelo controle
+    ///
+    /// Pela mesma razão que a recusa de anexo: o fluxo é unidirecional, e
+    /// quem envia não tem por onde ouvir dentro dele. Cortar o fluxo diria
+    /// «não», e não diria **qual** não — e as quatro razões pedem quatro
+    /// próximos passos diferentes de quem está esperando a imagem subir.
+    ///
+    /// O token vai junto porque uma janela pode ter mais de um fluxo no ar, e
+    /// uma recusa sem nome é uma recusa que a tela não sabe em qual barra de
+    /// progresso pôr.
+    VolumeRecusado {
+        /// A autorização que este fluxo tentou usar.
+        token: String,
+        /// Por quê, de uma lista fechada.
+        motivo: crate::volume::VolumeRefusal,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2733,6 +2752,11 @@ impl Validate for ServerMessage {
                     return Err(ControlError::FieldOutOfRange { field: "instancia" });
                 }
                 Ok(())
+            }
+            // O motivo é um enumerado de tamanho fixo; o que precisa de teto é
+            // o token, que o servidor está devolvendo como o recebeu.
+            Self::VolumeRecusado { token, .. } => {
+                check("volume_token", token.len(), crate::volume::MAX_TOKEN_LEN)
             }
         }
     }
@@ -4408,7 +4432,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            38,
+            39,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4423,6 +4447,12 @@ mod o_vocabulario_e_a_versao {
         // continua em N−1 e continua honesta: um par v6 não conhece a variante
         // nova e não a recebe — foi por isso que ela é variante, e não um campo
         // da `Session`, que teria desalinhado o quadro dele.
+        //
+        // **39 pela `VolumeRecusado`**, do ADR 0048, no mesmo dia e dentro da
+        // mesma versão 7: ela ainda não saiu para ninguém, então acrescentar
+        // uma variante a ela não deixa par nenhum para trás. Quem fala 6
+        // continua sem recebê-la, pela mesma porta de sempre —
+        // `entende_a_mensagem`.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
             7,

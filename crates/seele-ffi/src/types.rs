@@ -1362,6 +1362,18 @@ pub enum Transfer {
         /// The enumerated reason.
         reason: AttachmentRefusal,
     },
+    /// Bytes going into a MOD's volume were refused, and why — ADR 0048.
+    ///
+    /// Named by **token** and not by message: a volume transfer belongs to an
+    /// authorisation a MOD issued, not to a line on a Channel, and a window may
+    /// have more than one in the air. A refusal without the token is a refusal
+    /// no screen can place against a progress bar.
+    VolumeRecusado {
+        /// The authorisation the refused stream tried to use.
+        token: String,
+        /// The enumerated reason.
+        motivo: VolumeRefusal,
+    },
     /// The link fell in the middle. **Trying again starts from zero.**
     Fell {
         /// Which message.
@@ -1423,6 +1435,29 @@ pub enum AttachmentRefusal {
     Expired,
     /// The header was not a header.
     Malformed,
+}
+
+/// Why a stream of bytes into a MOD's volume was not taken — ADR 0048.
+///
+/// Espelhado aqui e não reexportado do fio, como todo enumerado que atravessa
+/// esta fronteira: a forma sobre a qual uma casca casa é promessa **deste**
+/// crate, e uma variante renomeada no fio deve quebrar a compilação aqui em vez
+/// de mudar calada o que uma tela escreve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum VolumeRefusal {
+    /// Não há autorização com aquele token — para aquele MOD, para aquela
+    /// pessoa, e dentro do prazo.
+    ///
+    /// **Uma recusa para os quatro casos**, e é de propósito: distinguir
+    /// «token errado» de «prazo vencido» contaria a quem tenta qual metade do
+    /// palpite acertou.
+    SemEspera,
+    /// Os bytes não são de um tipo que o MOD declarou aceitar.
+    TipoRecusado,
+    /// O disco de quem hospeda recusou a escrita.
+    NaoGravei,
+    /// O fluxo terminou no meio.
+    Incompleto,
 }
 
 /// A file hanging off a message, as a screen sees it.

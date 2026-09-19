@@ -123,7 +123,11 @@ pub struct Notice {
 /// message** and belong beside that message. ADR 0027 also wants the sentence
 /// for a fallen transfer to say that retrying starts from zero, which is a
 /// thing no alert has ever had to say.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// **Deixou de ser `Copy`** quando o volume entrou: o token é um `String`, e um
+// token de tamanho fixo seria o servidor decidindo o formato de um nome que
+// nasce dentro do MOD. O que se perde é uma cópia implícita; o que se ganha é
+// não ter mais um teto arbitrário no meio do caminho.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferNotice {
     /// A file this client was sending was not taken, and nothing was published.
     Refused {
@@ -139,6 +143,20 @@ pub enum TransferNotice {
         attachment: seele_proto::ids::AttachmentId,
         /// Why. The expected reason is `Expired`.
         reason: seele_proto::control::AttachmentRefusal,
+    },
+    /// Bytes this client was sending into a MOD's volume were not taken.
+    ///
+    /// ADR 0048. Here and not in a list of its own for the reason the variants
+    /// above share: what a screen does with all three is the same — it stops a
+    /// progress bar and writes a sentence. A second list would be a second
+    /// place to forget to drain.
+    VolumeRecusado {
+        /// The authorisation the refused stream tried to use. A window may have
+        /// more than one in the air, and a refusal without a name is a refusal
+        /// the screen cannot place.
+        token: String,
+        /// Why, from a closed list.
+        motivo: seele_proto::volume::VolumeRefusal,
     },
 }
 
@@ -1000,6 +1018,17 @@ impl Room {
                 self.transfers.push(TransferNotice::Refused {
                     client_message_id: *client_message_id,
                     reason: *reason,
+                });
+                changed.transfers = true;
+            }
+
+            // O mesmo para o volume de um MOD — ADR 0048. Os bytes têm fluxo
+            // próprio e nada deles chega aqui: o que chega é o motivo, que é a
+            // metade de que a tela precisa.
+            ServerMessage::VolumeRecusado { token, motivo } => {
+                self.transfers.push(TransferNotice::VolumeRecusado {
+                    token: token.clone(),
+                    motivo: *motivo,
                 });
                 changed.transfers = true;
             }

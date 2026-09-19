@@ -1347,6 +1347,19 @@ pub struct Server {
     /// `v0.10.5-1` não chega até este limiar: ele é recusado antes, no aperto de
     /// mão, com `PeerTooOld`, num servidor com MOD habilitado ou sem.
     pub versao_do_anuncio: u8,
+    /// As autorizações de escrita em volume de MOD que estão de pé — ADR 0048.
+    ///
+    /// **Aqui, e não no `Anfitriao`**, e a diferença é a que faz o caminho
+    /// existir. Um `Anfitriao` é criado por pedido em
+    /// [`crate::mods::pedidos`] e morre com ele: uma espera registrada dentro
+    /// do `aoPedir` que a autorizou seria esquecida antes de o primeiro byte
+    /// chegar, e o fluxo encontraria «não há espera com este token» para um
+    /// token que o MOD acabou de emitir.
+    ///
+    /// É compartilhada pela mesma razão que [`Self::telas`]: as duas pontas
+    /// estão longe uma da outra — quem registra é o QuickJS, quem confere é o
+    /// tratador do fluxo — e este é o objeto que as duas alcançam.
+    pub esperas: Arc<std::sync::Mutex<crate::mods::volume::Esperas>>,
 }
 
 /// Starts the batching writer.

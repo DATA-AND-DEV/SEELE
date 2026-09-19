@@ -1444,6 +1444,38 @@ async fn run_session(
                         });
                         continue;
                     }
+                    // **Volume de MOD — ADR 0048.** Uma tarefa por fluxo,
+                    // como a tela e como o anexo: quem manda uma imagem de
+                    // 10 MiB não pode fazer fila com quem manda um arquivo.
+                    Ok(seele_proto::stream::StreamType::ModVolume) => {
+                        let avisos = avisos.clone();
+                        tokio::spawn(async move {
+                            match crate::mods::volume::receber(
+                                &contexto.esperas,
+                                contexto.mods_dir.as_ref(),
+                                pessoa,
+                                &mut fluxo,
+                            )
+                            .await
+                            {
+                                Ok(chegou) => {
+                                    tracing::info!(
+                                        mod_id = %chegou.mod_id,
+                                        bytes = chegou.bytes,
+                                        tipo = chegou.tipo,
+                                        "volume de MOD recebido"
+                                    );
+                                }
+                                Err((token, motivo)) => {
+                                    tracing::info!(%pessoa, ?motivo, "volume de MOD recusado");
+                                    let _ = avisos
+                                        .send(ServerMessage::VolumeRecusado { token, motivo })
+                                        .await;
+                                }
+                            }
+                        });
+                        continue;
+                    }
                     Ok(seele_proto::stream::StreamType::Attachment) => {}
                     // Inclusive o zero, que é o valor que a leitura antiga
                     // produzia: recusá-lo faz um par velho falhar alto em vez
@@ -3992,6 +4024,9 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
         // do servidor entrou como variante em vez de campo da `Session`: um
         // campo não teria portão nenhum, porque a `Session` já sai para todos.
         ServerMessage::Instancia { .. } => versao >= 7,
+        // ADR 0048, na mesma versão 7 e pela mesma razão: ela nasceu antes
+        // de a 7 sair, então não há par nenhum esperando por ela.
+        ServerMessage::VolumeRecusado { .. } => versao >= 7,
         _ => true,
     }
 }
@@ -5549,6 +5584,7 @@ mod fim_de_tela_por_sessao {
         let (events, _) = broadcast::channel(64);
         let writes = spawn_writer(Arc::clone(&persistence), events.clone());
         Server {
+            esperas: Arc::new(std::sync::Mutex::new(Default::default())),
             persistence,
             events,
             writes,

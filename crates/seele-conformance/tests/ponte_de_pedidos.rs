@@ -60,6 +60,11 @@ globalThis.aoPedir = (contextoJSON, pedidoJSON) => {
   if (pedido.op === 'ler') {
     return JSON.stringify({ ok: true, valor: dados[pedido.chave] || null, contexto });
   }
+  if (pedido.op === 'esperar') {
+    // ADR 0048: o MOD autoriza uma escrita de volume, de dentro do `aoPedir`.
+    const ok = volume.esperar(pedido.token, pedido.caminho, pedido.tipos, 60);
+    return JSON.stringify({ ok, contexto });
+  }
   if (pedido.op === 'grande') {
     return JSON.stringify({ ok: true, enchimento: 'á🧙'.repeat(pedido.vezes), contexto });
   }
@@ -629,6 +634,361 @@ async fn o_catalogo_diz_qual_conjunto_ele_descreve() -> Result<()> {
         catalogo["mods"][0]["hash"].as_str().unwrap_or_default(),
         hash,
         "o catálogo deixou de dizer o conteúdo exigido: {catalogo}"
+    );
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// **Uma autorização de volume sobrevive ao pedido que a emitiu.**
+///
+/// ADR 0048. O MOD chama `volume.esperar` de dentro do `aoPedir`, e os bytes
+/// chegam depois, por um fluxo próprio. Entre as duas coisas há um abismo que
+/// este teste existe para medir: `mods::pedidos` cria um `Anfitriao` por pedido
+/// e o **descarta ao responder**.
+///
+/// Enquanto a lista de esperas morava no `Anfitriao`, ela era descartada junto.
+/// O teste de unidade daquela lista passava — ele registra e consome no mesmo
+/// objeto — e o produto não funcionava: o primeiro byte encontraria «não há
+/// espera com este token» para um token que o MOD tinha acabado de emitir.
+/// «Existir não é funcionar», e a diferença entre os dois é exatamente esta
+/// função.
+///
+/// O que ele prende, então, é o caminho inteiro: pedido pela ponte de verdade,
+/// espera registrada no servidor de verdade, e o fluxo de volume achando-a.
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_espera_de_volume_sobrevive_ao_pedido_que_a_emitiu() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (root, hash) = instalar("prova/ponte")?;
+    let daemon = Arc::new(
+        Daemon::bind(ServerConfig {
+            name: "Ponte".into(),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::Memory,
+            mods_dir: Some(seele_server::RaizesDosMods {
+                pacotes: root.clone(),
+                dados: root.join("mod-data"),
+            }),
+            ..ServerConfig::default()
+        })
+        .await?,
+    );
+    let set = {
+        let db = daemon.server().persistence.lock().await;
+        enable(
+            &db,
+            &EnabledMod {
+                id: "prova/ponte".into(),
+                version: "1.0.0".into(),
+                hash,
+                repo: "https://example.invalid/prova-da-ponte".into(),
+                reach: vec!["estado no servidor".into()],
+                server_half: true,
+            },
+        )?;
+        seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
+    };
+    let addr = daemon.local_addr()?;
+    let service = daemon.clone();
+    let serving = tokio::spawn(async move { service.run().await });
+
+    let chave = SigningKey::from_bytes(&[204; 32]);
+    let mut anfitriao = Client::connect(
+        addr,
+        "localhost",
+        &addr.to_string(),
+        "Anfitriao",
+        &chave,
+        Arc::new(MemoryPinStore::new()),
+        None,
+        Some(&set),
+    )
+    .await?;
+
+    let resposta = pedir(
+        &mut anfitriao,
+        1,
+        serde_json::json!({
+            "op": "esperar",
+            "token": "t-da-ponte",
+            "caminho": "retratos/um.png",
+            "tipos": ["png"],
+        }),
+    )
+    .await?;
+    assert_eq!(
+        resposta["ok"],
+        serde_json::Value::Bool(true),
+        "o MOD não conseguiu registrar a espera: {resposta}"
+    );
+
+    // **A prova.** O pedido já respondeu e o `Anfitriao` dele já morreu. Se a
+    // lista fosse dele, aqui haveria zero.
+    let quantas = daemon
+        .server()
+        .esperas
+        .lock()
+        .expect("as esperas do servidor")
+        .quantas();
+    assert_eq!(
+        quantas, 1,
+        "a espera morreu com o `Anfitriao` do pedido que a emitiu; nenhum byte \
+         de volume encontraria o token"
+    );
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// Um PNG mínimo, de verdade: assinatura, `IHDR` e `IEND`.
+///
+/// De verdade porque o servidor lê o tipo **dos bytes** — decisão 2 do ADR
+/// 0048 —, e um vetor que só tivesse a assinatura provaria a conferência do
+/// primeiro bloco e nada mais.
+fn png_minimo() -> Vec<u8> {
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    bytes.extend_from_slice(&[0, 0, 0, 13]);
+    bytes.extend_from_slice(b"IHDR");
+    bytes.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
+    bytes.extend_from_slice(&[0x1F, 0x15, 0xC4, 0x89]);
+    bytes.extend_from_slice(&[0, 0, 0, 0]);
+    bytes.extend_from_slice(b"IEND");
+    bytes.extend_from_slice(&[0xAE, 0x42, 0x60, 0x82]);
+    bytes
+}
+
+/// Sobe um servidor com o MOD de mentira ligado e entra nele.
+///
+/// Extraído porque os três testes de volume abaixo o repetiam inteiro, e um
+/// arranque copiado três vezes é três lugares para divergirem.
+async fn servidor_com_o_mod(
+    semente: u8,
+) -> Result<(
+    Arc<Daemon>,
+    std::path::PathBuf,
+    Client,
+    tokio::task::JoinHandle<()>,
+)> {
+    let (root, hash) = instalar("prova/ponte")?;
+    let daemon = Arc::new(
+        Daemon::bind(ServerConfig {
+            name: "Ponte".into(),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::Memory,
+            mods_dir: Some(seele_server::RaizesDosMods {
+                pacotes: root.clone(),
+                dados: root.join("mod-data"),
+            }),
+            ..ServerConfig::default()
+        })
+        .await?,
+    );
+    let set = {
+        let db = daemon.server().persistence.lock().await;
+        enable(
+            &db,
+            &EnabledMod {
+                id: "prova/ponte".into(),
+                version: "1.0.0".into(),
+                hash,
+                repo: "https://example.invalid/prova-da-ponte".into(),
+                reach: vec!["estado no servidor".into()],
+                server_half: true,
+            },
+        )?;
+        seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
+    };
+    let addr = daemon.local_addr()?;
+    let service = daemon.clone();
+    let serving = tokio::spawn(async move {
+        let _ = service.run().await;
+    });
+    let chave = SigningKey::from_bytes(&[semente; 32]);
+    let cliente = Client::connect(
+        addr,
+        "localhost",
+        &addr.to_string(),
+        "Anfitriao",
+        &chave,
+        Arc::new(MemoryPinStore::new()),
+        None,
+        Some(&set),
+    )
+    .await?;
+    Ok((daemon, root, cliente, serving))
+}
+
+/// Registra uma espera pelo MOD e devolve o token.
+async fn autorizar(cliente: &mut Client, pedido: u32, token: &str, tipos: &[&str]) -> Result<()> {
+    let resposta = pedir(
+        cliente,
+        pedido,
+        serde_json::json!({
+            "op": "esperar",
+            "token": token,
+            "caminho": "retratos/um.png",
+            "tipos": tipos,
+        }),
+    )
+    .await?;
+    anyhow::ensure!(
+        resposta["ok"] == serde_json::Value::Bool(true),
+        "{resposta}"
+    );
+    Ok(())
+}
+
+/// **Os bytes vão por um fluxo e chegam ao disco, inteiros — ADR 0048.**
+///
+/// O caminho inteiro numa função: o MOD autoriza pelo controle, a janela abre
+/// um fluxo próprio, o servidor casa o token com a espera, confere o tipo **nos
+/// bytes** e grava na pasta daquela instância.
+///
+/// O que ele prende, além de «funciona»: o arquivo fica **onde o MOD nomeou**,
+/// dentro de `volume/`, e não onde quem enviou pediu — o cabeçalho não carrega
+/// caminho, e é essa ausência que fecha a travessia por construção.
+#[tokio::test(flavor = "multi_thread")]
+async fn os_bytes_de_um_volume_chegam_ao_disco_pelo_fluxo() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (_daemon, root, mut cliente, serving) = servidor_com_o_mod(205).await?;
+    autorizar(&mut cliente, 1, "t-um", &["png"]).await?;
+
+    let bytes = png_minimo();
+    let enviado = cliente
+        .transfers()
+        .enviar_volume("prova/ponte", "t-um", &bytes, |_, _| {})
+        .await?;
+    assert!(
+        matches!(enviado, seele_core::client::Sent::Delivered { .. }),
+        "o fluxo de volume não foi entregue: {enviado:?}"
+    );
+
+    let destino = root
+        .join("mod-data")
+        .join("prova")
+        .join("ponte")
+        .join("volume")
+        .join("retratos")
+        .join("um.png");
+    // O fluxo termina do lado de cá antes de o servidor fechar o arquivo: uma
+    // espera curta, e não uma suposição sobre a ordem de duas tarefas.
+    for _ in 0..50 {
+        if destino.is_file() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        std::fs::read(&destino).ok(),
+        Some(bytes),
+        "o arquivo não chegou inteiro em {}",
+        destino.display()
+    );
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// **Um token que ninguém autorizou não escreve nada, e a recusa volta.**
+///
+/// É a propriedade que faz «autorizar» valer alguma coisa: sem ela, bastaria
+/// abrir um fluxo com qualquer token inventado para escrever na pasta de um
+/// MOD.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_token_que_ninguem_autorizou_nao_escreve_nada() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (_daemon, root, mut cliente, serving) = servidor_com_o_mod(206).await?;
+
+    let _ = cliente
+        .transfers()
+        .enviar_volume("prova/ponte", "inventado", &png_minimo(), |_, _| {})
+        .await?;
+
+    let volume = root
+        .join("mod-data")
+        .join("prova")
+        .join("ponte")
+        .join("volume");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !volume.exists(),
+        "um token inventado criou {} — a autorização virou formalidade",
+        volume.display()
+    );
+
+    // E a recusa chega pelo controle, com o token, para a tela saber qual
+    // barra de progresso parar.
+    let recusa = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let ServerMessage::VolumeRecusado { token, motivo } = cliente.next_event().await? {
+                return Ok::<_, anyhow::Error>((token, motivo));
+            }
+        }
+    })
+    .await??;
+    assert_eq!(recusa.0, "inventado");
+    assert_eq!(recusa.1, seele_proto::volume::VolumeRefusal::SemEspera);
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// **O tipo é lido dos bytes, e não do que alguém declara.**
+///
+/// Decisão 2 do ADR 0048: quem confere é o servidor, porque o MOD deixou de ver
+/// os bytes. O MOD autoriza só `png`; o que sobe é um GIF de verdade, com
+/// assinatura de GIF. Nada fica no disco.
+///
+/// **E não sobra arquivo de obras.** Um fluxo recusado que deixasse o temporário
+/// seria lixo com nome de token na pasta de quem hospeda, crescendo a cada
+/// tentativa.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_tipo_que_o_mod_nao_autorizou_nao_fica_no_disco() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (_daemon, root, mut cliente, serving) = servidor_com_o_mod(207).await?;
+    autorizar(&mut cliente, 1, "t-gif", &["png"]).await?;
+
+    let mut gif = b"GIF89a".to_vec();
+    gif.extend_from_slice(&[1, 0, 1, 0, 0, 0, 0, 0x3B]);
+    let _ = cliente
+        .transfers()
+        .enviar_volume("prova/ponte", "t-gif", &gif, |_, _| {})
+        .await?;
+
+    let recusa = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let ServerMessage::VolumeRecusado { token, motivo } = cliente.next_event().await? {
+                return Ok::<_, anyhow::Error>((token, motivo));
+            }
+        }
+    })
+    .await??;
+    assert_eq!(recusa.0, "t-gif");
+    assert_eq!(
+        recusa.1,
+        seele_proto::volume::VolumeRefusal::TipoRecusado,
+        "um GIF passou por um MOD que só autorizou PNG"
+    );
+
+    let pasta = root
+        .join("mod-data")
+        .join("prova")
+        .join("ponte")
+        .join("volume")
+        .join("retratos");
+    let sobrou: Vec<String> = std::fs::read_dir(&pasta)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        sobrou.is_empty(),
+        "sobrou arquivo depois de uma recusa: {sobrou:?}"
     );
 
     serving.abort();
