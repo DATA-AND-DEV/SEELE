@@ -14,6 +14,13 @@
 # Local audio measurement artifacts (M1) — produced by a rig, never committed.
 /measurements/
 *.wav
+# **Exceto a mídia de um vetor de MOD.** `*.wav` é sobre gravação de bancada —
+# arquivo grande, produzido por uma máquina, que não é fonte. O som que o MOD
+# de referência traz é o contrário das três coisas: ele é o vetor, e sem ele o
+# pacote não fecha o hash. Ficou de fora no dia em que nasceu, e a bateria
+# passou mesmo assim porque ela lê a cópia de trabalho — um clone limpo é que
+# teria reprovado.
+!apps/seele-app/testes/**/*.wav
 
 # cargo-fuzz: corpus and crash artifacts are local findings, not source.
 /fuzz/target/

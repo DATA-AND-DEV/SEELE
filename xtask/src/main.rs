@@ -9,6 +9,7 @@ mod check_api;
 mod check_deps;
 mod check_runtime;
 mod check_versao;
+mod check_vetores;
 
 fn main() -> ExitCode {
     let command = std::env::args().nth(1);
@@ -17,6 +18,7 @@ fn main() -> ExitCode {
         Some("check-deps") => check_deps::run(),
         Some("check-runtime") => check_runtime::run(),
         Some("check-versao") => check_versao::run(),
+        Some("check-vetores") => check_vetores::run(),
         Some(other) => {
             eprintln!("xtask: unknown command `{other}`");
             usage();
@@ -36,5 +38,6 @@ fn usage() {
     eprintln!("  check-api    enforce the MOD API façade from `api/` (ADR 0045)");
     eprintln!("  check-deps   enforce the dependency rule from specs/01-arquitetura.md");
     eprintln!("  check-runtime prova as corridas do ciclo de vida de um MOD (precisa de Node)");
+    eprintln!("  check-vetores confere que todo vetor está versionado (precisa de Git)");
     eprintln!("  check-versao prova que a versão do produto alcança tudo o que a carrega");
 }
