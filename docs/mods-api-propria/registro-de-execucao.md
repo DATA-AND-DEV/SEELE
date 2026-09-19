@@ -8,7 +8,7 @@ pode começar.
 | --- | --- | --- |
 | E0 — inventário | **Feito** | §1 e §2 abaixo |
 | E1 — executor e autoridade | **Aberto.** O Worker de Blob não satisfaz o contrato; o próximo experimento é QuickJS nativo | §3 abaixo, `apps/seele-app/testes/sonda-de-fronteira/` |
-| E2 — sessão e encerramento | **Feito no código; uma prova pendente de automação** | §5 abaixo |
+| E2 — sessão e encerramento | **Infraestrutura pronta e independente do executor; aceite integrado pendente de E1** | §5 abaixo |
 | E3 — renderer e SDK mínimos | Pendente | — |
 | E4 — desenho e mídia | Pendente | — |
 | E5 — funções completas | Pendente | — |
@@ -211,3 +211,53 @@ A→B, montagem atrasada — precisa de um gesto na janela, e por isso de automa
 de interface que esta bancada ainda não tem. O código está escrito e guardado
 por reversão; o que falta é a observação, e ela está nomeada aqui em vez de
 marcada como verde.
+
+### O contrato de executor
+
+A diretriz de 18/09 mudou a forma desta etapa: «manter a implementação atrás de
+um contrato interno de executor: iniciar, entregar evento, solicitar
+encerramento e confirmar encerramento».
+
+`apps/seele-app/ui/mods-runtime.js` é esse lugar. Nele moram os quatro estados,
+a instância, o registro de recursos e o ciclo de encerramento; `base.js` deixou
+de construir `Worker` e passa a pedir **um executor**. Trocar qual é uma linha.
+
+| Peça | O que ela garante |
+| --- | --- |
+| `ESTADOS_DE_MOD` | `criando`, `ativa`, `encerrando`, `encerrada`, e a revogação não volta atrás |
+| `InstanciaDeMod.admite` | efeito só em `ativa` e só na geração de pé — `encerrando` já recusa |
+| `InstanciaDeMod.registrar` | quem cria um recurso anota o descarte ali mesmo, sem pedir isso a quem escreve o MOD |
+| `InstanciaDeMod.encerrar` | `encerrando` **antes** de qualquer espera; pede ao executor; espera a confirmação; só então descarta e marca `encerrada` |
+| `executorDeWorker` | o executor de hoje, e o único lugar que fala `Worker` |
+| `recursosDePe` | o que ainda está de pé, por instância, desenhado na bancada |
+
+A ordem dentro de `encerrar` é prendida por reversão: mover o `encerrando` para
+depois do pedido de parada, ou o `encerrada` para antes do descarte, reprova.
+
+### O que foi demonstrado, e com qual executor
+
+**Demonstrado, e vale para qualquer executor:** a ordem do encerramento, a
+revogação monotônica, a conferência antes do efeito, a correlação de pedido e
+resposta por geração, e a recusa no Rust do que vem de geração morta. São
+propriedades do ciclo, e o ciclo não conhece o executor.
+
+**Demonstrado só com o Worker de Blob, e a repetir:** que um MOD de verdade sobe,
+desenha, pede ao servidor e é descarregado. A sonda de fronteira rodou no
+aplicativo nativo pelo contrato novo e produziu os quinze achados. Isso exercita
+os caminhos; **não comprova isolamento**, e o executor que os exercitou não é o
+que vai ficar.
+
+### O que precisa ser repetido com o executor escolhido
+
+1. Toda a matriz de corrida da E2 — saída local, expulsão, fim remoto, troca
+   A→B, reentrada no mesmo servidor, carregamento e resposta atrasados;
+2. a confirmação de encerramento: com o Worker ela é imediata, e um motor
+   nativo pode levar tempo — é exatamente por isso que `encerrou()` é uma
+   promessa e não um retorno;
+3. os contadores de recursos depois de dezenas de ciclos de entrar e sair;
+4. o custo: memória, CPU ociosa e ativa, latência de interação e de saída, e o
+   impacto na voz.
+
+**O aceite integrado de E2 depende de E1.** O que está pronto é a
+infraestrutura, e ela está pronta para ser reaproveitada — não para ser
+publicada como garantia.

@@ -690,7 +690,13 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
 
     let base = position(&sources, "base.js");
     for (at, source) in sources.iter().enumerate() {
-        if !source.ends_with(".js") || source == "base.js" {
+        // `mods-runtime.js` é a exceção, e ela é deliberada: ele declara a
+        // classe e o executor que `base.js` **constrói** — um `class` e um
+        // `const` estão na zona morta até o script deles rodar, e construí-los
+        // antes disso lançaria. Ele não chama nada de `base.js` ao carregar; as
+        // chamadas que ele faz acontecem dentro do encerramento de uma
+        // instância, que é sempre depois de tudo estar de pé.
+        if !source.ends_with(".js") || source == "base.js" || source == "mods-runtime.js" {
             continue;
         }
         assert!(
@@ -9517,6 +9523,32 @@ fn no_script_calls_a_function_that_no_script_declares() {
                     }
                 }
             }
+            // **Método**, de classe ou de objeto: `nome(args) {`, sem a
+            // palavra `function` na frente. A primeira versão deste guarda não
+            // os conhecia, e acusou `admite`, `encerrar` e `constructor` de não
+            // existirem no dia em que a primeira classe entrou na interface.
+            //
+            // Distinguido de `if (...) {` pela lista de palavras de controle:
+            // fora delas, um nome seguido de parênteses numa linha que abre
+            // bloco é uma declaração.
+            {
+                let cru = linha.trim();
+                let primeira: String = cru
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                let controle = matches!(
+                    primeira.as_str(),
+                    "if" | "for" | "while" | "switch" | "catch" | "return" | "function" | "do"
+                );
+                if !primeira.is_empty()
+                    && !controle
+                    && cru.ends_with('{')
+                    && cru[primeira.len()..].trim_start().starts_with('(')
+                {
+                    declarados.insert(primeira);
+                }
+            }
             // Parâmetros e desestruturação: tudo entre parênteses ou chaves
             // conta como nome que existe. Grosseiro, e é a troca aceita — o
             // guarda procura o nome que não existe em lugar nenhum.
@@ -11030,14 +11062,20 @@ fn a_geracao_da_sessao_prende_todo_trabalho_atrasado() {
          atrasada sobe um worker em cima da sessão seguinte: {montar}"
     );
     assert!(
-        montar.contains("worker.geracao = geracao"),
-        "o worker não carrega a geração dele, e quem atende as mensagens não \
-         tem como saber de que sessão ele é: {montar}"
+        montar.contains("new InstanciaDeMod(mod.id, mod.hash, geracao"),
+        "a instância não nasce com a geração dela, e quem atende as mensagens \
+         não tem como saber de que sessão ela é: {montar}"
     );
 
     // O atendimento confere **antes** do efeito, e não só antes da resposta.
     let atender = js_function(&base, "async function atenderOMod(");
     let antes_do_switch = atender.split_once("switch (m.tipo)").map_or("", |(a, _)| a);
+    assert!(
+        antes_do_switch.contains("instancia.admite(geracaoDaSessao)"),
+        "o atendimento deixou de perguntar se a instância admite efeito: entre \
+         o pedido de parada e a confirmação ela fica em `encerrando`, e nesse \
+         intervalo nada pode ser admitido: {atender}"
+    );
     assert!(
         antes_do_switch.contains("if (!meu()) return;"),
         "a conferência de instância voltou para depois do efeito: uma mensagem \
@@ -11068,6 +11106,88 @@ fn a_geracao_da_sessao_prende_todo_trabalho_atrasado() {
         primeira, "geracaoDaSessao = 0;",
         "o encerramento deixou de revogar na primeira linha; entre ela e a \
          última há mensagens em voo: {encerrar}"
+    );
+}
+
+/// **O ciclo de vida não sabe o que executa o código de um MOD** — etapa E2.
+///
+/// A diretriz de 18/09: «manter a implementação atrás de um contrato interno de
+/// executor: iniciar, entregar evento, solicitar encerramento e confirmar
+/// encerramento».
+///
+/// O Worker de Blob **não vai ser o executor** — a sonda releu, num aplicativo
+/// reiniciado, uma marca que um MOD tinha gravado em IndexedDB. Se o ciclo de
+/// vida estivesse escrito em cima dele, trocá-lo seria reescrever revogação,
+/// corrida de saída e descarte junto, e a parte difícil voltaria ao começo.
+///
+/// Este guarda é o que mantém a separação: o ciclo mora num arquivo, o
+/// executor de hoje mora noutro, e `base.js` não pode voltar a falar `Worker`.
+#[test]
+fn o_ciclo_de_vida_de_um_mod_nao_conhece_o_executor() {
+    let runtime = without_comments(&read("ui/mods-runtime.js"));
+    let base = without_comments(&read("ui/base.js"));
+
+    // Os quatro verbos do contrato existem, e o executor de hoje os implementa.
+    for verbo in ["iniciar(", "entregar(", "pedirEncerramento(", "encerrou("] {
+        assert!(
+            runtime.contains(verbo),
+            "o contrato de executor perdeu `{verbo}`: {runtime}"
+        );
+    }
+
+    // **`base.js` não constrói mais um `Worker`.** Ele pede um executor, e
+    // trocar qual é uma linha só — que é a razão de tudo isto existir.
+    assert!(
+        !base.contains("new Worker("),
+        "`base.js` voltou a construir um `Worker` direto, e o executor virou \
+         dependência estrutural outra vez"
+    );
+    assert!(
+        base.contains("executorDeWorker(PRELUDIO_DO_MOD)"),
+        "a escolha do executor saiu de `base.js`, e agora ela não tem um lugar"
+    );
+
+    // Os quatro estados, e a ordem que o §5 do contrato exige.
+    for estado in ["criando", "ativa", "encerrando", "encerrada"] {
+        assert!(
+            runtime.contains(&format!("{estado}:")),
+            "o estado `{estado}` saiu da instância"
+        );
+    }
+    let encerrar = runtime
+        .split_once("encerrar() {")
+        .expect("`InstanciaDeMod.encerrar`")
+        .1;
+    let ate_o_fim = encerrar.split_once("\n  }").map_or(encerrar, |(a, _)| a);
+    let marca = ate_o_fim
+        .find("ESTADOS_DE_MOD.encerrando")
+        .expect("o encerramento não marca `encerrando`");
+    let pede = ate_o_fim
+        .find("pedirEncerramento()")
+        .expect("o encerramento não pede ao executor que pare");
+    assert!(
+        marca < pede,
+        "a instância pede a parada antes de sair de `ativa`; nesse intervalo um \
+         efeito ainda seria admitido: {ate_o_fim}"
+    );
+    let confirma = ate_o_fim
+        .find("await this.executor.encerrou()")
+        .expect("o encerramento não espera o executor confirmar");
+    let descarta = ate_o_fim
+        .find("recurso.descartar()")
+        .expect("o encerramento não descarta os recursos");
+    assert!(
+        confirma < descarta,
+        "os recursos são descartados antes de o executor confirmar que parou — \
+         e ele ainda pode estar usando: {ate_o_fim}"
+    );
+    let marca_fim = ate_o_fim
+        .rfind("ESTADOS_DE_MOD.encerrada")
+        .expect("o encerramento nunca chega a `encerrada`");
+    assert!(
+        descarta < marca_fim,
+        "a instância se diz `encerrada` antes de descartar; «até confirmar o \
+         descarte dos recursos, não anunciar que tudo foi limpo»: {ate_o_fim}"
     );
 }
 
@@ -12197,14 +12317,21 @@ fn os_interruptores_de_mod_editam_um_rascunho_e_salvar_aplica_de_uma_vez() {
 fn sair_do_servidor_encerra_o_ambiente_dos_mods_antes_de_trocar_de_tela() {
     let base = without_comments(&read("ui/base.js"));
     let encerrar = js_function(&base, "function encerrarOAmbienteDosMods(");
-    for exigido in [
-        "worker.terminate()",
-        "limparARegiaoDoMod(",
-        "modsCarregados.clear()",
-    ] {
+    for exigido in ["instancia?.encerrar()", "modsCarregados.clear()"] {
         assert!(
             encerrar.contains(exigido),
             "o encerramento deixou de fazer `{exigido}`: {encerrar}"
+        );
+    }
+    // **Pelo ciclo, e não à mão.** O encerramento não pode voltar a mandar no
+    // executor nem a limpar recurso por conta própria: quem sabe o que uma
+    // instância criou é ela, e uma limpeza escrita aqui é uma lista que
+    // envelhece sozinha a cada recurso novo. Ver `InstanciaDeMod.encerrar`.
+    for proibido in ["terminate()", "limparARegiaoDoMod("] {
+        assert!(
+            !encerrar.contains(proibido),
+            "o encerramento voltou a fazer `{proibido}` na mão, por fora do \
+             ciclo da instância: {encerrar}"
         );
     }
     assert!(

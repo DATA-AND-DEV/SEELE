@@ -579,36 +579,44 @@ async function montarOMod(mod) {
   });
   if (!daGeracaoDePe(geracao) || !modsCarregados.has(mod.id)) return;
 
-  const fonte = new Blob([PRELUDIO_DO_MOD, "\n", codigo], {
-    type: "text/javascript",
-  });
-  const endereco = URL.createObjectURL(fonte);
-  const worker = new Worker(endereco);
-  // Revogado assim que o worker o leu: o endereço não precisa sobreviver, e um
-  // que sobrevive é memória que ninguém sabe explicar.
-  URL.revokeObjectURL(endereco);
+  // **Qual executor**, escolhido aqui e em lugar nenhum além. O Worker de Blob
+  // é o de hoje e é provisório: a sonda de fronteira mediu que ele deixa
+  // armazenamento de origem sobreviver à sessão, e por isso ele não vai ser o
+  // executor final. Trocá-lo é trocar esta linha — é para isso que
+  // `mods-runtime.js` existe.
+  const executor = executorDeWorker(PRELUDIO_DO_MOD);
 
-  // A geração viaja **com o worker**: quem atende as mensagens dele precisa
-  // saber de que sessão ele é, e não de quem tem o identificador agora.
-  worker.geracao = geracao;
-  worker.onmessage = (evento) => atenderOMod(mod, worker, evento.data);
-  // **Um MOD que quebra não leva a janela junto** — ADR 0045, «falha isolada».
-  // Num worker isso deixou de depender de cuidado: o erro fica lá dentro.
-  worker.onerror = (erro) => {
-    if (!daGeracaoDePe(worker.geracao)) return;
-    console.error(`MOD ${mod.id}: erro`, erro.message);
-    anotarEstadoDoMod(mod.id, "nao-carregou", erro.message ?? "");
-  };
+  // A instância é a dona de tudo o que este MOD criar — §4.2 do contrato. A
+  // geração viaja com ela: quem atende as mensagens precisa saber de que sessão
+  // ela é, e não de quem tem o identificador agora.
+  const instancia = new InstanciaDeMod(mod.id, mod.hash, geracao, executor);
+  // O executor é o primeiro recurso da lista, e sai por último — `encerrar`
+  // percorre ao contrário —, porque só faz sentido soltar o que ele desenhou
+  // depois de ele ter parado de desenhar.
+  instancia.registrar("a região", () => limparARegiaoDoMod(mod.id));
 
-  // **Uma última conferência antes de guardar.** Entre criar o worker e chegar
-  // aqui não há `await`, mas guardar é o ato que o torna alcançável por
-  // `encerrarOAmbienteDosMods`; um worker criado e não guardado seria um worker
-  // que nenhuma saída alcança.
+  executor.iniciar(
+    codigo,
+    (mensagem) => atenderOMod(mod, instancia, mensagem),
+    // **Um MOD que quebra não leva a janela junto** — ADR 0045, «falha
+    // isolada». Fora do contexto da janela isso deixou de depender de cuidado.
+    (erro) => {
+      if (!instancia.admite(geracaoDaSessao)) return;
+      console.error(`MOD ${mod.id}: erro`, erro);
+      anotarEstadoDoMod(mod.id, "nao-carregou", erro ?? "");
+    },
+  );
+
+  // **Uma última conferência antes de guardar.** Entre iniciar o executor e
+  // chegar aqui não há `await`, mas guardar é o ato que torna a instância
+  // alcançável pelo encerramento; uma criada e não guardada é uma que nenhuma
+  // saída alcança.
   if (!daGeracaoDePe(geracao)) {
-    worker.terminate();
+    instancia.encerrar().catch(() => {});
     return;
   }
-  modsCarregados.set(mod.id, worker);
+  instancia.estado = ESTADOS_DE_MOD.ativa;
+  modsCarregados.set(mod.id, instancia);
   // **`carregado` diz que os bytes executaram, e só isso.** Se o MOD estourou
   // dentro da própria inicialização, o worker subiu do mesmo jeito — quem sabe
   // disso é ele, e prometer o contrário seria inventar.
@@ -801,7 +809,7 @@ function contrasteEntre(a, b) {
 }
 
 /** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
-async function atenderOMod(mod, worker, m) {
+async function atenderOMod(mod, instancia, m) {
   if (!m || typeof m.n !== "number") return;
 
   // **A conferência vem antes do efeito, e não só antes da resposta** — etapa
@@ -818,14 +826,19 @@ async function atenderOMod(mod, worker, m) {
   // Duas perguntas, e as duas precisam ser feitas: este worker ainda é o deste
   // MOD (ele pode ter sido trocado por um recarregamento), e a sessão dele
   // ainda é a de pé (ela pode ter acabado).
-  const meu = () => modsCarregados.get(mod.id) === worker && daGeracaoDePe(worker.geracao);
+  //
+  // `admite` responde as duas de uma vez: a instância está em `ativa` — e não
+  // em `encerrando`, que é onde ela fica entre o pedido de parada e a
+  // confirmação — e a geração dela é a de pé.
+  const meu = () =>
+    modsCarregados.get(mod.id) === instancia && instancia.admite(geracaoDaSessao);
   if (!meu()) return;
 
   const responder = (ok, carga) => {
     // Perguntada **de novo** aqui, e não herdada de cima: entre a conferência
     // de entrada e esta linha há `await`s, e a sessão pode ter acabado no meio
-    // deles. Mandar para um worker encerrado é falar com quem já saiu.
-    if (meu()) worker.postMessage({ tipo: "resposta", n: m.n, ok, ...carga });
+    // deles. Mandar para uma instância encerrada é falar com quem já saiu.
+    if (meu()) instancia.executor.entregar({ tipo: "resposta", n: m.n, ok, ...carga });
   };
   try {
     switch (m.tipo) {
@@ -976,10 +989,12 @@ async function carregarMods() {
       estadoDosMods.delete("");
       globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
     }
-    for (const [id, worker] of modsCarregados) {
+    for (const [id, instancia] of modsCarregados) {
       if (!catalogo.mods.some(m => m.id === id)) {
-        if (worker) worker.terminate();
-        limparARegiaoDoMod(id);
+        // Pelo ciclo único: `encerrar` põe a instância em `encerrando` antes de
+        // qualquer espera, pede ao executor que pare, espera ele confirmar, e
+        // só então descarta os recursos dela — a região entre eles.
+        instancia?.encerrar().catch(() => {});
         modsCarregados.delete(id);
         anotarEstadoDoMod(id, "descarregado");
       }
@@ -1095,16 +1110,20 @@ function encerrarOAmbienteDosMods() {
   // quem sai não precisa saber se o outro lado também vai avisar.
   geracaoDaSessao = 0;
 
-  for (const [id, worker] of modsCarregados) {
-    // **`terminate()` é a garantia, e não um pedido** — ADR 0049.
+  for (const [, instancia] of modsCarregados) {
+    // **Parar é do produto, e não um pedido ao MOD** — ADR 0049.
     //
-    // Antes isto disparava `seele-mod-unload` e o MOD desmontava a si mesmo.
-    // Um MOD que não implementasse o evento deixava temporizador, ouvinte,
-    // regra de CSS e áudio de pé — e isso não era defeito dele: era o que
-    // «rodar na página» significava. Agora o contexto morre, e com ele tudo o
-    // que ele alocou.
-    if (worker) worker.terminate();
-    limparARegiaoDoMod(id);
+    // Antes isto disparava `seele-mod-unload` e o MOD desmontava a si mesmo. Um
+    // MOD que não implementasse o evento deixava temporizador, ouvinte, regra
+    // de CSS e áudio de pé — e isso não era defeito dele: era o que «rodar na
+    // página» significava.
+    //
+    // O ciclo é um só e é o da instância: `encerrando` antes de qualquer
+    // espera, o executor parando, a confirmação, e então os recursos. **A
+    // promessa não é esperada aqui**, e é deliberado: sair da sessão não pode
+    // ficar preso num executor que demora a confirmar. Quem precisa saber se
+    // acabou de verdade olha o estado da instância, que é o que a bancada faz.
+    instancia?.encerrar().catch(() => {});
   }
   modsCarregados.clear();
   // A exigência é de um destino, e o destino acabou. Esperar o tique seguinte

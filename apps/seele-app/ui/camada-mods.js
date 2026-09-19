@@ -824,9 +824,16 @@ async function desenharOsContadoresDaSessao() {
   try {
     const estado = await invoke("estado_da_sessao");
     const onde = estado.geracao === 0 ? "fora de sessão" : `sessão nº ${estado.geracao}`;
+    // **E o que ainda está de pé do lado da janela.** Os dois números de cima
+    // são do Rust e contam o que foi recusado; este é da interface e conta o
+    // que **existe** — uma instância `encerrada` com recurso na lista é a forma
+    // que «sobrou alguma coisa» tem quando ela acontece.
+    const abertos = recursosDePe(modsCarregados);
+    const sobra = abertos.length === 0 ? "" : ` · recursos de pé: ${abertos.join(", ")}`;
     linha.textContent =
       `${onde} · ${estado.eventos_descartados} eventos e ` +
-      `${estado.comandos_recusados} comandos recusados por serem de uma sessão encerrada`;
+      `${estado.comandos_recusados} comandos recusados por serem de uma sessão encerrada` +
+      sobra;
   } catch (falha) {
     linha.textContent = "";
     console.warn("contadores da sessão:", falha);
