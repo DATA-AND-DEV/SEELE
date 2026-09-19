@@ -627,3 +627,69 @@ segunda tentativa de encerrar, e colher em vez de receber. Cada uma reprova
 quando o conserto dela é revertido.
 
 **Windows e Linux: pendentes**, como antes.
+
+---
+
+## 9. Os três pontos nativos de `8adebb8`
+
+### Sair com fala na fila deixava dados retidos para sempre
+
+`confirmar_parada` mantinha a instância enquanto houvesse pendentes, e
+`mod_nativo_colher` recusa a geração que saiu. Não havia caminho: os bytes e a
+instância ficavam retidos depois do `Parou`, esperando uma colheita impossível.
+
+Agora a revogação **descarta nativamente** o que não foi consumido e acerta os
+créditos, sem a janela — ela pode ter fechado, e o que ela faria não é entregar:
+efeito de uma sessão encerrada não se entrega, se joga fora. A bomba também
+descarta o que chega depois da revogação, contando cada fala para o descarte não
+ser silencioso.
+
+E `codigos_reservados` entrou no mesmo grupo: a tabela só perdia uma entrada na
+ativação, então reservar e sair sem ativar conservava o fonte do MOD na memória
+desta janela para sempre.
+
+### Uma parada espontânea não mudava o estado nativo
+
+`confirmar_parada` escrevia `parou = true` só na tabela de encerramento; para a
+de vivas ela conferia `i.parou` sem nunca tê-lo escrito. Uma instância cujo
+motor caísse sozinho não era removida nem marcada, e continuava descrita como
+ativa.
+
+Agora o tratamento é um só para os dois estados: a viva é marcada, movida e
+resolvida pelo mesmo critério — sai da supervisão quando não há mais nada dela
+para colher.
+
+### Erro e mensagem não podiam dividir a mesma conta
+
+A bomba punha `Falhou` e `Interrompido` na mesma fila das mensagens. Eles são
+mandados pelo executor **sem reservar crédito**, e a colheita subtraía
+quantidade e bytes de todas as falas — colher um erro devolvia crédito que
+ninguém tomou, e repetir erros contornava o teto.
+
+Agora são duas listas. Mensagem reserva e devolve; aviso fica fora da
+contabilidade, com teto próprio de 16, agregação do que se repete e um contador
+do que não coube. O caminho de parada continua separado dos dois: não entra em
+fila nenhuma, não ocupa byte, e resolve a supervisão na hora.
+
+### As provas
+
+Oito testes nativos, **sem janela nenhuma**: nem `AppHandle`, nem evento, nem
+colheita da interface. Produzir, impedir a colheita, revogar, confirmar a
+parada, e conferir tabelas, bytes e créditos zerados. Reserva sem ativação
+entrando no descarte. Parada espontânea com e sem fala pendente. Erro sem
+mensagem alguma, erros intercalados com mensagens, e dez mil erros com a janela
+parada — os contadores ficam entre zero e o teto, e uma mensagem nova ainda
+cabe.
+
+Por reversão: a revogação deixando de soltar, a parada espontânea deixando de
+marcar, o erro voltando para a fila de dados, o teto de avisos saindo, e a
+colheita voltando a devolver crédito de tudo.
+
+**Duas lições de medição** nestes testes. O erro na fila de dados só aparece
+chamando o caminho de verdade — a primeira versão chamava `anotar_aviso` direto
+e passava com o defeito de volta; por isso a rota saiu da bomba para um método
+que dá para medir. E a conta errada só aparece **com mensagens ainda
+pendentes**: drenando tudo de uma vez o contador satura em zero e o excesso fica
+invisível.
+
+**Windows e Linux: pendentes**, como antes.

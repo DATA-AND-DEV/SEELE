@@ -93,7 +93,7 @@ pub(crate) struct Fila {
 
 impl Fila {
     /// Tenta reservar lugar para uma mensagem. `false` quer dizer «não coube».
-    fn cabe(&self, quantos: usize) -> bool {
+    pub(crate) fn cabe(&self, quantos: usize) -> bool {
         // Conferido **antes** de somar, e somado só se couber: somar primeiro e
         // devolver depois deixaria uma janela em que a fila se diz maior do que
         // é, e duas mensagens simultâneas se recusariam por causa uma da outra.
