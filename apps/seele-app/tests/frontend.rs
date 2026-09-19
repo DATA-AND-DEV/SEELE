@@ -11006,6 +11006,159 @@ fn o_conjunto_ja_aceito_volta_ao_disco_e_nenhum_outro() {
     }
 }
 
+/// **Nada da sessão anterior é admitido na seguinte** — etapa E2.
+///
+/// O contrato de API própria, §5: «revogar a geração: a partir desse ponto,
+/// nenhum novo efeito daquela instância é admitido, mesmo que mensagens já
+/// estejam na fila».
+///
+/// A conferência que existia era `modsCarregados.has(id)`, e o roteiro da etapa
+/// nomeia por que ela não basta: «presença de um ID no Map não identifica uma
+/// geração». Sair e entrar de novo no **mesmo** servidor repõe o mesmo
+/// identificador no mesmo mapa, e a montagem atrasada da visita anterior
+/// encontrava a chave dela lá.
+#[test]
+fn a_geracao_da_sessao_prende_todo_trabalho_atrasado() {
+    let base = without_comments(&read("ui/base.js"));
+
+    // A montagem confere a geração, e não só a presença no mapa.
+    let montar = js_function(&base, "async function montarOMod(");
+    assert!(
+        montar.contains("const geracao = geracaoDaSessao")
+            && montar.contains("daGeracaoDePe(geracao)"),
+        "a montagem de um MOD voltou a se identificar pelo `id`; uma montagem \
+         atrasada sobe um worker em cima da sessão seguinte: {montar}"
+    );
+    assert!(
+        montar.contains("worker.geracao = geracao"),
+        "o worker não carrega a geração dele, e quem atende as mensagens não \
+         tem como saber de que sessão ele é: {montar}"
+    );
+
+    // O atendimento confere **antes** do efeito, e não só antes da resposta.
+    let atender = js_function(&base, "async function atenderOMod(");
+    let antes_do_switch = atender.split_once("switch (m.tipo)").map_or("", |(a, _)| a);
+    assert!(
+        antes_do_switch.contains("if (!meu()) return;"),
+        "a conferência de instância voltou para depois do efeito: uma mensagem \
+         que chegue durante a saída desenha, pede e escreve tema antes de \
+         descobrir que não tinha com quem falar: {atender}"
+    );
+
+    // O pedido carrega a geração nas duas pontas: no que sobe e no que volta.
+    let pedir = js_function(&base, "async function pedirAoServidor(");
+    assert!(
+        pedir.contains("geracao,") && pedir.contains("daGeracaoDePe(geracao)"),
+        "o pedido ao servidor deixou de carregar a geração: {pedir}"
+    );
+    assert!(
+        base.contains("if (!daGeracaoDePe(pending.geracao)) return;"),
+        "uma resposta atrasada volta a ser entregue a quem ocupou o número do \
+         pedido na sessão seguinte"
+    );
+
+    // E o encerramento revoga antes de desmontar.
+    let encerrar = js_function(&base, "function encerrarOAmbienteDosMods(");
+    let primeira = encerrar
+        .lines()
+        .map(str::trim)
+        .find(|linha| !linha.is_empty() && *linha != "{")
+        .unwrap_or_default();
+    assert_eq!(
+        primeira, "geracaoDaSessao = 0;",
+        "o encerramento deixou de revogar na primeira linha; entre ela e a \
+         última há mensagens em voo: {encerrar}"
+    );
+}
+
+/// **A saída local revoga antes de esperar o `disconnect`.**
+///
+/// `disconnect` é um `await` sobre a ponte: ele derruba a hospedagem e espera a
+/// porta voltar. Enquanto ele corria, a sessão ainda era a de pé para esta
+/// janela — e uma mensagem de worker que chegasse ali desenhava, pedia ao
+/// servidor e escrevia tema, tudo depois de a pessoa ter apertado sair.
+#[test]
+fn sair_revoga_antes_de_esperar_a_ponte() {
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let ejetar = js_function(&sessao, "async function ejetar(");
+    let encerrar = ejetar
+        .find("encerrarOAmbienteDosMods()")
+        .expect("a saída local deixou de encerrar o ambiente dos MODs");
+    let desconectar = ejetar
+        .find("invoke(\"disconnect\")")
+        .expect("a saída local deixou de desconectar");
+    assert!(
+        encerrar < desconectar,
+        "a saída local voltou a esperar a ponte antes de revogar, e a janela \
+         continua admitindo efeito durante a espera: {ejetar}"
+    );
+}
+
+/// **O Rust recusa o que vem de uma sessão que já acabou, e conta.**
+///
+/// A metade nativa da mesma regra. A janela confere o que nunca chega ao Rust —
+/// um `await` que volta, um desenho — e o Rust confere o que chega: um comando
+/// despachado antes da saída pode aterrissar depois dela.
+///
+/// O contador existe porque o contrato o pede: «sem essa observabilidade, "não
+/// sobrou nada" vira inspeção visual insuficiente». Recusar em silêncio é o
+/// certo a fazer com o comando e o errado a fazer com a informação.
+#[test]
+fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
+    let rust = read("src/main.rs");
+
+    assert!(
+        rust.contains("fn revogar(&self) -> u64"),
+        "a sessão deixou de ter como revogar a geração"
+    );
+    // Revogar é a **primeira** coisa que a desmontagem faz.
+    let desmontar = rust
+        .split_once("fn desmontar_o_cliente(")
+        .expect("`desmontar_o_cliente`")
+        .1;
+    let desmontar = desmontar.split_once("\n}\n").map_or(desmontar, |(a, _)| a);
+    let revoga = desmontar
+        .find("session.revogar()")
+        .expect("a desmontagem deixou de revogar");
+    let toma = desmontar
+        .find(".and_then(|mut slot| slot.take())")
+        .expect("a desmontagem deixou de tirar a conexão do slot");
+    assert!(
+        revoga < toma,
+        "a desmontagem voltou a destruir a conexão antes de revogar, e entre \
+         as duas coisas há efeito sendo admitido: {desmontar}"
+    );
+
+    // Os dois comandos que um MOD alcança conferem a geração.
+    for (comando, marca) in [
+        ("fn mod_request(", "session.confere_geracao(geracao)?"),
+        ("fn codigo_do_mod(", "session.geracao_vale(geracao)"),
+    ] {
+        let corpo = rust.split_once(comando).expect(comando).1;
+        let corpo = corpo.split_once("\n}\n").map_or(corpo, |(a, _)| a);
+        assert!(
+            corpo.contains(marca),
+            "`{comando}` deixou de conferir a geração de quem chamou"
+        );
+    }
+
+    // E a ponte de eventos não fala em nome de uma sessão morta.
+    let ponte = rust
+        .split_once("impl EventListener for Bridge")
+        .expect("a ponte de eventos")
+        .1;
+    let ponte = ponte.split_once("\n}\n").map_or(ponte, |(a, _)| a);
+    assert!(
+        ponte.contains("self.geracao != self.de_pe.load"),
+        "a ponte voltou a emitir todo evento para a janela, inclusive os de uma \
+         conexão que já caiu: {ponte}"
+    );
+    assert!(
+        ponte.contains("descartados"),
+        "a ponte descarta em silêncio e não conta: {ponte}"
+    );
+}
+
 /// E o esquema não ficou registrado no Rust depois de sair da CSP.
 ///
 /// Os dois lados são uma regra só: um `register_uri_scheme_protocol("mod", …)`

@@ -414,11 +414,47 @@ function ligarControlesDaJanela() {
  */
 const pedidosDeMod = new Map();
 let proximoPedidoDeMod = 0;
+
+// ------------------------------------------------------- a geração da sessão
+//
+// **Qual execução de sessão é esta** — etapa E2 do contrato de API própria.
+//
+// O Rust é o dono do número: ele sobe a cada tentativa de conexão e a cada
+// desmontagem, e nunca desce. A janela guarda uma cópia e a devolve em todo
+// comando de MOD, e o Rust recusa a que não for a de pé.
+//
+// # Por que a janela precisa dela, se o Rust já confere
+//
+// Porque a maior parte do trabalho que sobra de uma sessão nunca chega ao Rust:
+// é um `await` que volta, um worker que termina de subir, um desenho que ia
+// para uma região. O número é o que permite a cada um desses perguntar «isto
+// ainda é da minha sessão?» antes de tocar em qualquer coisa — que é o que o
+// §5 do contrato chama de admitir efeito.
+//
+// Zero é «nenhuma sessão», e nada é admitido em nome dele.
+let geracaoDaSessao = 0;
+
+/** A janela soube de uma sessão nova. */
+function entrarNaGeracao(numero) {
+  geracaoDaSessao = Number(numero) || 0;
+}
+
+/** Esta geração ainda é a de pé? */
+function daGeracaoDePe(numero) {
+  return numero !== 0 && numero === geracaoDaSessao;
+}
+
 const ouvirMod = listen("seele://event", ({ payload }) => {
   const reply = payload?.ModReply;
   if (!reply) return;
   const pending = pedidosDeMod.get(reply.request);
   if (!pending || reply.total > 128 || reply.part >= reply.total) return;
+  // **O número do pedido não basta para identificar o pedido.** Ele é um
+  // contador desta janela, e ele não reinicia — mas a fila é esvaziada a cada
+  // saída, e uma resposta atrasada da sessão anterior pode chegar depois de a
+  // seguinte ter começado a numerar. Sem esta linha, ela seria entregue a quem
+  // ocupou o número.
+  if (!daGeracaoDePe(pending.geracao)) return;
   pending.parts[reply.part] = reply.payload;
   if (pending.parts.filter(v => v !== undefined).length === reply.total) {
     clearTimeout(pending.timer); pedidosDeMod.delete(reply.request);
@@ -442,14 +478,18 @@ const ouvirMod = listen("seele://event", ({ payload }) => {
  */
 async function pedirAoServidor(id, canal, valor) {
   await ouvirMod;
+  // A geração é lida **antes** do `await` do `invoke` e conferida depois: entre
+  // as duas coisas a sessão pode ter acabado.
+  const geracao = geracaoDaSessao;
+  if (!daGeracaoDePe(geracao)) throw new Error("disconnected");
   if (pedidosDeMod.size >= 8) throw new Error("too-many-requests");
   const request = ++proximoPedidoDeMod;
   const payload = JSON.stringify(valor);
   if (new TextEncoder().encode(payload).length > 12 * 1024) throw new Error("request-too-large");
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { pedidosDeMod.delete(request); reject(new Error("timeout")); }, 15000);
-    pedidosDeMod.set(request, { resolve, reject, timer, parts: [] });
-    invoke("mod_request", { request, id, channel: canal, payload }).catch(error => {
+    pedidosDeMod.set(request, { resolve, reject, timer, parts: [], geracao });
+    invoke("mod_request", { geracao, request, id, channel: canal, payload }).catch(error => {
       clearTimeout(timer); pedidosDeMod.delete(request); reject(error);
     });
   });
@@ -523,10 +563,21 @@ const PRELUDIO_DO_MOD = `
  * Tauri, que é o que o ADR 0049 exige.
  */
 async function montarOMod(mod) {
-  const codigo = await invoke("codigo_do_mod", { id: mod.id, hash: mod.hash });
-  // Se o MOD foi descarregado enquanto o código vinha, não monte: a sessão
-  // pode ter acabado no meio do `await`.
-  if (!modsCarregados.has(mod.id)) return;
+  // **A geração é lida antes do `await` e conferida depois** — etapa E2.
+  //
+  // Antes, a conferência era `modsCarregados.has(mod.id)`, e o roteiro nomeia
+  // por que ela não basta: «presença de um ID no Map não identifica uma
+  // geração». Sair e entrar de novo no mesmo servidor repõe o mesmo
+  // identificador no mesmo mapa — e a montagem atrasada da visita anterior
+  // encontrava a chave dela lá, achava que ainda era a sua, e subia um worker
+  // em cima da sessão nova.
+  const geracao = geracaoDaSessao;
+  const codigo = await invoke("codigo_do_mod", {
+    geracao,
+    id: mod.id,
+    hash: mod.hash,
+  });
+  if (!daGeracaoDePe(geracao) || !modsCarregados.has(mod.id)) return;
 
   const fonte = new Blob([PRELUDIO_DO_MOD, "\n", codigo], {
     type: "text/javascript",
@@ -537,14 +588,26 @@ async function montarOMod(mod) {
   // que sobrevive é memória que ninguém sabe explicar.
   URL.revokeObjectURL(endereco);
 
+  // A geração viaja **com o worker**: quem atende as mensagens dele precisa
+  // saber de que sessão ele é, e não de quem tem o identificador agora.
+  worker.geracao = geracao;
   worker.onmessage = (evento) => atenderOMod(mod, worker, evento.data);
   // **Um MOD que quebra não leva a janela junto** — ADR 0045, «falha isolada».
   // Num worker isso deixou de depender de cuidado: o erro fica lá dentro.
   worker.onerror = (erro) => {
+    if (!daGeracaoDePe(worker.geracao)) return;
     console.error(`MOD ${mod.id}: erro`, erro.message);
     anotarEstadoDoMod(mod.id, "nao-carregou", erro.message ?? "");
   };
 
+  // **Uma última conferência antes de guardar.** Entre criar o worker e chegar
+  // aqui não há `await`, mas guardar é o ato que o torna alcançável por
+  // `encerrarOAmbienteDosMods`; um worker criado e não guardado seria um worker
+  // que nenhuma saída alcança.
+  if (!daGeracaoDePe(geracao)) {
+    worker.terminate();
+    return;
+  }
   modsCarregados.set(mod.id, worker);
   // **`carregado` diz que os bytes executaram, e só isso.** Se o MOD estourou
   // dentro da própria inicialização, o worker subiu do mesmo jeito — quem sabe
@@ -740,20 +803,43 @@ function contrasteEntre(a, b) {
 /** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
 async function atenderOMod(mod, worker, m) {
   if (!m || typeof m.n !== "number") return;
+
+  // **A conferência vem antes do efeito, e não só antes da resposta** — etapa
+  // E2, e o roteiro aponta a linha: «checar a instância antes de `pedido`,
+  // `snapshot`, `regiao` ou `tema`; hoje a checagem de worker atual está em
+  // `responder`».
+  //
+  // A diferença é a que separa recusar de desfazer. Conferindo só na resposta,
+  // uma mensagem que chegasse durante a saída **desenhava a região**, **pedia
+  // ao servidor** ou **escrevia o tema** — e só então descobria que não tinha
+  // com quem falar. O efeito já tinha acontecido; o que se economizava era o
+  // `postMessage`.
+  //
+  // Duas perguntas, e as duas precisam ser feitas: este worker ainda é o deste
+  // MOD (ele pode ter sido trocado por um recarregamento), e a sessão dele
+  // ainda é a de pé (ela pode ter acabado).
+  const meu = () => modsCarregados.get(mod.id) === worker && daGeracaoDePe(worker.geracao);
+  if (!meu()) return;
+
   const responder = (ok, carga) => {
-    // Só responde se este worker ainda é o deste MOD: um que foi descarregado
-    // no meio não pode receber resposta, e mandar para ele seria falar com
-    // quem já saiu.
-    if (modsCarregados.get(mod.id) === worker) worker.postMessage({ tipo: "resposta", n: m.n, ok, ...carga });
+    // Perguntada **de novo** aqui, e não herdada de cima: entre a conferência
+    // de entrada e esta linha há `await`s, e a sessão pode ter acabado no meio
+    // deles. Mandar para um worker encerrado é falar com quem já saiu.
+    if (meu()) worker.postMessage({ tipo: "resposta", n: m.n, ok, ...carga });
   };
   try {
     switch (m.tipo) {
       case "pedido":
         responder(true, { valor: await pedirAoServidor(mod.id, m.canal, m.valor) });
         break;
-      case "snapshot":
-        responder(true, { valor: await invoke("snapshot") });
+      case "snapshot": {
+        const valor = await invoke("snapshot");
+        // Depois do `await`: a sessão pode ter acabado enquanto o retrato vinha,
+        // e entregá-lo daria ao MOD o estado de uma sessão que já não é a dele.
+        if (!meu()) return;
+        responder(true, { valor });
         break;
+      }
       case "regiao":
         desenharARegiaoDoMod(mod.id, m.conteudo);
         responder(true, { valor: null });
@@ -998,6 +1084,17 @@ setInterval(carregarMods, 4000);
  * se o outro lado também vai avisar.
  */
 function encerrarOAmbienteDosMods() {
+  // **Revogar primeiro** — §5 do contrato, passo 1. A janela deixa de admitir
+  // efeito em nome desta sessão **antes** de começar a desmontar: entre a
+  // primeira linha e a última há mensagens de worker em voo, `await`s voltando
+  // e um laço de quatro segundos que pode acordar no meio. Zerar aqui fecha
+  // todos de uma vez, porque `daGeracaoDePe` passa a responder falso para tudo
+  // o que a sessão anterior deixou pelo caminho.
+  //
+  // Idempotente: chamar de novo com zero não faz nada, e é o desfecho certo —
+  // quem sai não precisa saber se o outro lado também vai avisar.
+  geracaoDaSessao = 0;
+
   for (const [id, worker] of modsCarregados) {
     // **`terminate()` é a garantia, e não um pedido** — ADR 0049.
     //
@@ -1018,6 +1115,10 @@ function encerrarOAmbienteDosMods() {
   // uma busca que falhou não fica falhada para sempre.
   conjuntoJaBuscado = "";
   globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
+  // Passo 2 do §5: cancelar o que estava em curso e recusar o que chegar tarde.
+  // O `clear` é o que garante o segundo — uma resposta que chegue depois não
+  // acha mais o pedido, e a conferência de geração no ouvinte a recusaria de
+  // qualquer forma.
   for (const p of pedidosDeMod.values()) { clearTimeout(p.timer); p.reject(new Error("disconnected")); }
   pedidosDeMod.clear();
 }

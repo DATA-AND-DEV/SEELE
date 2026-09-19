@@ -69,6 +69,36 @@ struct Session {
     /// o launcher valer também para as publicadas antes dele. Ela abre; quem
     /// aperta o botão é a pessoa.
     abertura: Abertura,
+    /// **Qual execução de sessão é esta.** Etapa E2 do contrato de API própria.
+    ///
+    /// Sobe a cada tentativa de conexão e a cada desmontagem, e nunca desce.
+    /// Serve para uma coisa só, e ela é a espinha de todo o resto: dizer se um
+    /// trabalho que está terminando agora pertence à sessão que está de pé
+    /// agora.
+    ///
+    /// # Por que um número, e não «tem conexão?»
+    ///
+    /// Porque as duas perguntas têm respostas diferentes no momento que
+    /// importa. Entrar de novo no **mesmo** servidor, depois de sair, deixa o
+    /// slot de conexão cheio outra vez — e um pedido da visita anterior que
+    /// chegasse atrasado encontraria uma conexão viva e seria atendido, contra
+    /// a sessão errada. O contrato escreve isso: «entrar de novo no mesmo
+    /// servidor cria uma geração nova».
+    ///
+    /// **Zero é «nenhuma sessão»**, e é onde ela começa. Zero também é o que
+    /// uma casca manda quando não sabe de que sessão fala, e as duas coisas
+    /// querem dizer a mesma: nada é admitido em nome dela. A primeira tentativa
+    /// de conexão a leva a 1.
+    geracao: Arc<std::sync::atomic::AtomicU64>,
+    /// Quantos eventos foram descartados por pertencerem a uma geração morta.
+    ///
+    /// Contador de diagnóstico — o contrato pede «contadores por instância e
+    /// geração, acessíveis na bancada». Ele existe para que «não sobrou nada»
+    /// deixe de ser inspeção visual: se ele sobe depois de uma saída, alguma
+    /// coisa da sessão anterior ainda estava falando.
+    eventos_de_geracao_morta: Arc<std::sync::atomic::AtomicU64>,
+    /// Quantos comandos foram recusados por virem de uma geração morta.
+    comandos_de_geracao_morta: Arc<std::sync::atomic::AtomicU64>,
     connection: Mutex<Option<Arc<Connection>>>,
     /// O servidor que este app está hospedando, quando está.
     ///
@@ -227,6 +257,48 @@ fn abertura(session: State<'_, Session>) -> Abertura {
 }
 
 impl Session {
+    /// Qual execução de sessão está de pé agora.
+    fn geracao(&self) -> u64 {
+        self.geracao.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Fecha a execução atual e abre a seguinte, devolvendo a nova.
+    ///
+    /// **Monotônica, e chamada antes dos efeitos.** O §5 do contrato: «a partir
+    /// desse ponto, nenhum novo efeito daquela instância é admitido, mesmo que
+    /// mensagens já estejam na fila». Por isso ela é a **primeira** linha de
+    /// quem desmonta, e não a última: entre revogar e destruir a conexão há
+    /// `await`s, e cada um deles é uma janela por onde um trabalho antigo
+    /// entraria.
+    fn revogar(&self) -> u64 {
+        self.geracao
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            .saturating_add(1)
+    }
+
+    /// Esta geração ainda é a de pé?
+    ///
+    /// Zero é «a casca não sabe», e responde falso: uma casca que não sabe de
+    /// que sessão ela fala não pode ter um efeito admitido em nome de nenhuma.
+    fn geracao_vale(&self, geracao: u64) -> bool {
+        geracao != 0 && geracao == self.geracao()
+    }
+
+    /// Recusa um comando que vem de uma sessão que já acabou, e conta.
+    fn confere_geracao(&self, geracao: u64) -> Result<(), ConnectionError> {
+        if self.geracao_vale(geracao) {
+            return Ok(());
+        }
+        self.comandos_de_geracao_morta
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        tracing::debug!(
+            geracao,
+            atual = self.geracao(),
+            "comando recusado: a sessão dele já acabou"
+        );
+        Err(ConnectionError::NotConnected)
+    }
+
     /// The live handle, or the reason there is none.
     fn connection(&self) -> Result<Arc<Connection>, ConnectionError> {
         self.connection
@@ -237,16 +309,60 @@ impl Session {
     }
 }
 
-/// Carries FFI events onto the webview.
+/// Carries FFI events onto the webview — **da geração que a criou**.
+///
+/// # O que ela deixou de fazer
+///
+/// Ela emitia para a janela e pronto, sem saber de qual sessão o evento vinha.
+/// Uma conexão que cai devagar continua entregando eventos enquanto as tarefas
+/// dela terminam, e a janela já pode estar dentro de outro servidor — o evento
+/// do anterior chegava como se fosse do atual. O roteiro da etapa E2 nomeia
+/// exatamente isto: «vincular eventos à conexão/geração que criou o listener».
+///
+/// Agora cada ponte carrega o número da execução em que nasceu e compara com o
+/// que está de pé. O que não bate é **contado** antes de ser descartado: um
+/// contador que sobe depois de uma saída é a prova de que alguma coisa da
+/// sessão anterior continuava falando, e sem ele isso seria invisível.
 struct Bridge {
     app: AppHandle,
+    /// A execução em que esta ponte nasceu.
+    geracao: u64,
+    /// O número que está de pé agora, compartilhado com a `Session`.
+    de_pe: Arc<std::sync::atomic::AtomicU64>,
+    /// Onde contar o que foi descartado, compartilhado com a `Session`.
+    descartados: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl EventListener for Bridge {
     fn on_event(&self, event: Event) {
+        if self.geracao != self.de_pe.load(std::sync::atomic::Ordering::Acquire) {
+            self.descartados
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+        // **O fim revoga aqui, e não quando a janela pedir.**
+        //
+        // `Ended` chega quando a sessão acaba do outro lado: a sala terminou, o
+        // enlace caiu, o conjunto de MODs mudou, alguém foi expulso. A
+        // desmontagem nativa só acontecia depois, quando a pessoa apertasse um
+        // botão na tela de fim — e entre uma coisa e outra a geração continuava
+        // valendo do lado do Rust. Um comando que chegasse ali passava.
+        //
+        // O §5 do contrato manda o contrário: «saída local, expulsão,
+        // encerramento remoto, troca de servidor, alteração do conjunto de MODs
+        // e falha definitiva de conexão passam pelo mesmo encerramento».
+        //
+        // Emitido **antes** de revogar, de propósito: é este evento que faz a
+        // tela de fim aparecer, e revogar primeiro o descartaria na linha de
+        // cima — a sessão acabaria sem ninguém ficar sabendo.
+        let acabou = matches!(event, Event::Ended { .. });
         // A failed emit means the window is gone, which is not worth a log channel
         // per event during shutdown.
         let _ = self.app.emit(EVENT_CHANNEL, &event);
+        if acabou {
+            let morta = self.de_pe.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            tracing::debug!(geracao = morta, "sessão revogada pelo fim que chegou");
+        }
     }
 }
 
@@ -289,6 +405,12 @@ struct Entrada {
     /// acabou de confiar. Um pin que se estabelece invisível é um pin que
     /// ninguém sabe que devia conferir.
     veredito: seele_ffi::Trust,
+    /// Qual execução de sessão esta entrada abriu — etapa E2.
+    ///
+    /// A janela guarda este número e o devolve em todo comando de MOD. É o que
+    /// faz um trabalho que termina depois da saída ser recusado aqui, em vez de
+    /// ser atendido contra a sessão seguinte.
+    geracao: u64,
 }
 
 #[tauri::command]
@@ -303,6 +425,20 @@ async fn connect(
     if session.connection().is_ok() {
         return Err(ConnectionError::AlreadyConnected.into());
     }
+
+    // **A geração nasce com a tentativa, e não com o sucesso.** O roteiro da
+    // etapa E2 é explícito: «capturar a geração desde a tentativa de conexão».
+    //
+    // A razão é a ponte logo abaixo: ela entra por `connect_watching`, **antes**
+    // de haver conexão, porque as etapas da chegada acontecem durante aquela
+    // linha e um ouvinte inscrito depois chegaria tarde. Se o número só
+    // existisse no fim, essa ponte não teria contra o que comparar durante a
+    // parte da conexão em que mais coisa acontece.
+    //
+    // E uma tentativa que falha também gasta um número, de propósito: ela pode
+    // ter deixado tarefas pelo caminho, e as respostas delas não podem ser
+    // admitidas pela tentativa seguinte.
+    let geracao = session.revogar();
 
     // O convite guardado vale para o servidor dele e para nenhum outro. Quem cola
     // um link e depois troca o endereço no campo deixaria para trás uma
@@ -497,7 +633,12 @@ async fn connect(
     // `Bridge` não depende do connection para nada: ele carrega o `AppHandle` e
     // reemite. Por isso um segundo, criado aqui, não é duplicação de estado —
     // é o mesmo destino, ligado mais cedo.
-    let ponte = Arc::new(Bridge { app: app.clone() }) as Arc<dyn EventListener>;
+    let ponte = Arc::new(Bridge {
+        app: app.clone(),
+        geracao,
+        de_pe: Arc::clone(&session.geracao),
+        descartados: Arc::clone(&session.eventos_de_geracao_morta),
+    }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
     let (connection, veredito) =
         tauri::async_runtime::spawn_blocking(move || Connection::connect_watching(config, atento))
@@ -659,7 +800,11 @@ async fn connect(
         }
     }
 
-    Ok(Entrada { snapshot, veredito })
+    Ok(Entrada {
+        snapshot,
+        veredito,
+        geracao,
+    })
 }
 
 /// Este endereço é a própria máquina?
@@ -1395,7 +1540,22 @@ async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Resul
 }
 
 /// A metade que as duas saídas fazem igual: desmontar a sessão de cliente.
+///
+/// **Revoga antes de desmontar** — §5 do contrato de API própria, passo 1: «a
+/// partir desse ponto, nenhum novo efeito daquela instância é admitido, mesmo
+/// que mensagens já estejam na fila».
+///
+/// A ordem não é estética. Entre tirar a conexão do slot e ela de fato morrer
+/// há tarefas terminando, eventos em voo e comandos da janela a caminho; cada
+/// um deles é uma janela por onde um trabalho da sessão que acabou entraria na
+/// seguinte. Revogar primeiro fecha todas de uma vez, e o custo é uma linha.
+///
+/// Idempotente: desmontar o que já está desmontado gasta um número de geração e
+/// não faz mais nada, que é o desfecho certo para quem apertou duas vezes.
 fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
+    let morta = session.revogar();
+    tracing::debug!(geracao = morta, "sessão revogada antes de desmontar");
+
     let connection = session
         .connection
         .lock()
@@ -1455,6 +1615,34 @@ fn snapshot(session: State<'_, Session>) -> Result<Snapshot, ConnectionError> {
     Ok(session.connection()?.snapshot())
 }
 
+/// O que a bancada precisa saber sobre a sessão de agora — etapa E2.
+#[derive(Debug, serde::Serialize)]
+struct EstadoDaSessao {
+    /// A execução de pé. Zero quer dizer «nenhuma».
+    geracao: u64,
+    /// Quantos eventos foram descartados por virem de uma geração morta.
+    eventos_descartados: u64,
+    /// Quantos comandos foram recusados pelo mesmo motivo.
+    comandos_recusados: u64,
+}
+
+/// Qual execução de sessão está de pé, e o que já foi recusado por não ser ela.
+///
+/// **Os contadores não são enfeite.** O contrato pede «contadores de
+/// diagnóstico por instância e geração, acessíveis na bancada», e a razão está
+/// escrita ao lado deles: sem um número, «não sobrou nada» é inspeção visual, e
+/// inspeção visual não vê o evento que chegou dois segundos depois de a tela
+/// ter trocado.
+#[tauri::command]
+fn estado_da_sessao(session: State<'_, Session>) -> EstadoDaSessao {
+    use std::sync::atomic::Ordering::Relaxed;
+    EstadoDaSessao {
+        geracao: session.geracao(),
+        eventos_descartados: session.eventos_de_geracao_morta.load(Relaxed),
+        comandos_recusados: session.comandos_de_geracao_morta.load(Relaxed),
+    }
+}
+
 /// A conversa da Linha aberta.
 ///
 /// Fora do `snapshot` de propósito. Aquele é lido a cada quadro de interface, e
@@ -1497,11 +1685,17 @@ fn send_message(
 #[tauri::command]
 fn mod_request(
     session: State<'_, Session>,
+    geracao: u64,
     request: u32,
     id: String,
     channel: u32,
     payload: String,
 ) -> Result<(), ConnectionError> {
+    // **Antes do efeito, e não depois.** Um pedido que a janela despachou antes
+    // de sair pode chegar aqui depois; atendê-lo mandaria tráfego de um MOD da
+    // sessão anterior para o servidor da seguinte, com o número de correlação
+    // dela — e a resposta voltaria para um pedido que outro MOD agora ocupa.
+    session.confere_geracao(geracao)?;
     session
         .connection()?
         .mod_request(request, id, channel, payload)
@@ -2617,7 +2811,25 @@ async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
 /// que o nome da pasta promete, ou quando o manifesto não declara metade de
 /// cliente.
 #[tauri::command]
-fn codigo_do_mod(app: AppHandle, id: String, hash: String) -> Result<String, FalhaNoMod> {
+fn codigo_do_mod(
+    app: AppHandle,
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    hash: String,
+) -> Result<String, FalhaNoMod> {
+    // O código de um MOD é o começo de uma montagem, e uma montagem pertence a
+    // uma sessão. Entregá-lo para uma geração morta seria pôr um worker de pé
+    // depois de a sessão dele ter acabado — a corrida que o roteiro da E2 chama
+    // de «montagem atrasada».
+    if !session.geracao_vale(geracao) {
+        session
+            .comandos_de_geracao_morta
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
     let pacote = seele_ffi::mods::ler_por_hash(&config_dir(&app), &hash)
         .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
     // **O hash tem de ser deste MOD.** Sem isto, uma janela que pedisse o
@@ -4979,6 +5191,7 @@ fn main() {
             previa_de_link,
             aplicar_conjunto_de_mods,
             codigo_do_mod,
+            estado_da_sessao,
             pacotes_no_cache,
             apagar_pacote_do_cache,
             conjunto_exigido_agora,

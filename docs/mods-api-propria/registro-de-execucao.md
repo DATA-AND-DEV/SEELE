@@ -7,8 +7,8 @@ pode começar.
 | Etapa | Estado | Evidência |
 | --- | --- | --- |
 | E0 — inventário | **Feito** | §1 e §2 abaixo |
-| E1 — executor e autoridade | **Medido; decisão pendente** | §3 abaixo, `apps/seele-app/testes/sonda-de-fronteira/` |
-| E2 — sessão e encerramento | Pendente | — |
+| E1 — executor e autoridade | **Aberto.** O Worker de Blob não satisfaz o contrato; o próximo experimento é QuickJS nativo | §3 abaixo, `apps/seele-app/testes/sonda-de-fronteira/` |
+| E2 — sessão e encerramento | **Feito no código; uma prova pendente de automação** | §5 abaixo |
 | E3 — renderer e SDK mínimos | Pendente | — |
 | E4 — desenho e mídia | Pendente | — |
 | E5 — funções completas | Pendente | — |
@@ -64,71 +64,87 @@ objeto global do Tauri não prova isolamento de armazenamento, rede, IPC ou
 canais entre contextos», e «o código de teste deve tentar acessar diretamente os
 caminhos alternativos».
 
-### O que está fechado
+### Como ler a tabela
 
-| Caminho | Resultado |
-| --- | --- |
-| `document`, `window`, `__TAURI__`, `__TAURI_INTERNALS__` | não existem |
-| `localStorage` | não existe (workers não o têm) |
-| `SharedWorker` | não existe |
-| `fetch` para origem externa | recusado pela CSP (`TypeError`) |
-| `Worker` filho depois do `terminate()` do pai | **morreu junto** |
+A diretriz de 18/09 corrigiu a classificação, e a correção vale mais que os
+resultados: **um instrumento que devolve «recusado» para ausência, recusa,
+falha e prazo esgotado não distingue quatro coisas diferentes.** As colunas
+abaixo separam o que foi observado do que aquilo permite concluir.
 
-A última linha merece o detalhe, porque o ADR 0049 promete que «`terminate()` é
-garantia e não pedido». O filho gravava a hora a cada meio segundo. O MOD foi
-desligado às `1789785276`; a última batida do filho foi `1789785278,373` — 2,4
-segundos depois, que é a latência de anúncio, desconexão e desmontagem. A
-medição seguinte, dezoito segundos mais tarde, leu **a mesma** última batida. O
-filho não sobreviveu ao pai.
+| Caminho | Observado | O que isso sustenta | O que falta para virar aceite |
+| --- | --- | --- | --- |
+| `document`, `window`, `__TAURI__`, `__TAURI_INTERNALS__`, `localStorage` | `undefined` | o ambiente de janela não está lá | nada; é ausência de símbolo |
+| `SharedWorker` | `undefined` | idem | nada |
+| `indexedDB` | abriu, gravou, e **releu a marca depois de reiniciar** | armazenamento de origem sobrevive à sessão | esperar o `oncomplete` da transação, e não só o `onsuccess` do pedido |
+| `caches` | `caches.open` devolveu | a API existe | **não é prova de persistência**: falta gravar, ler e reler depois de reiniciar |
+| `BroadcastChannel` | abriu, postou, fechou | a API existe | **não é prova de conversa**: faltam duas instâncias e um nonce recebido e confirmado |
+| `fetch ipc://localhost/<cmd>` | HTTP 500 | **a rota é alcançável** | execução não demonstrada: falta um comando inofensivo instrumentado, com controle positivo fora do MOD |
+| `fetch` externo | `TypeError` | alguma coisa recusou | **não distingue CSP de DNS, rede ou CORS**: falta destino controlado e controle positivo |
+| `Worker` filho | ver abaixo | nada, ainda | ver abaixo |
 
-### O que está aberto
+### O que a sonda de hoje não consegue dizer
 
-| Caminho | Resultado | O que isso significa |
-| --- | --- | --- |
-| `indexedDB` | **alcançou, e o que ele gravou sobreviveu** | ver abaixo |
-| `caches` | alcançou, abriu | mesmo armazenamento de origem |
-| `BroadcastChannel` | alcançou, abriu e postou | dois MODs conversam por fora da API |
-| `fetch ipc://localhost/<cmd>` | **alcançou** — HTTP 500 | ver abaixo |
+Três frases que estiveram neste documento e saíram:
 
-**O armazenamento sobrevive à saída.** O MOD gravou uma marca, o aplicativo foi
-encerrado, reaberto, e a entrada seguinte no mesmo servidor **achou a marca de
-antes**. A promessa «o que um MOD faz some quando você sai» é **falsa hoje para
-armazenamento**, e nenhum `terminate()` conserta isso: ele mata o contexto e não
-toca no armazenamento da origem. Um worker de `blob:` herda a origem de quem o
-criou, e a origem é a do produto.
+- **«a rede externa é bloqueada pela CSP.»** O destino era `example.invalid`, que
+  não resolve. `TypeError` é o que se vê quando a CSP recusa e também quando o
+  DNS falha. A observação boa é «não saiu»; a causa não foi medida.
+- **«dois MODs conversam por `BroadcastChannel`.»** A sonda abriu **um**
+  endpoint e postou nele. Disponibilidade da API não é comunicação entre
+  instâncias.
+- **«`caches` persiste.»** Ela só chamou `open`. Quem persistiu, medido, foi o
+  IndexedDB.
 
-**O IPC do Tauri é alcançável.** O caminho existe e a CSP o permite — este
-`connect-src` tem `ipc:` porque é assim que a própria janela invoca. O que
-recusou foi o `Tauri-Invoke-Key`: o Tauri 2.11 sorteia dezesseis bytes por
-execução, injeta-os como constante no escopo do script da janela e os confere no
-Rust (`webview/mod.rs:1748`, HTTP 500 quando não batem). Um worker não alcança
-aquele escopo, então hoje ele não passa.
+E sobre o IPC: HTTP 500 diz que a requisição chegou ao Tauri e foi recusada.
+**Não diz que a chave é quebrável**, e a chave morar na janela que constrói o
+worker não demonstra vazamento nenhum. O que está medido é que a rota existe e
+que a autorização depende de outro mecanismo — o que já é motivo para não
+apoiar a fronteira nela, mas por exigência de contrato e não por uma falha
+observada.
 
-Mas a fronteira é **o segredo**, e não a ausência de `document`. Isso é
-exatamente o que o §3.1 do contrato manda não assumir, e a diferença importa: o
-segredo vive na mesma janela que monta a fonte do worker, e qualquer código que
-um dia interpolasse um valor ali o entregaria.
+### O que ficou por medir, e por que ele não conta ainda
 
-### O que isto decide, e o que não decide
+**O `Worker` filho.** Uma primeira leitura desta seção dizia que ele morre com o
+pai, e a conclusão não se sustenta por três razões, não uma:
 
-**Não decide o executor.** O Worker passou nos testes de ambiente de janela e
-reprovou nos de armazenamento e de canal entre contextos. As duas saídas do
-contrato continuam abertas:
+1. **o processo do aplicativo foi reiniciado entre as duas leituras**, e a morte
+   do processo explica o mesmo resultado;
+2. os 2,4 segundos são contados do **desligamento do MOD no banco**, e não de um
+   `terminate()` com hora registrada — e a bancada descobriu depois que mexer no
+   banco por fora **não encerra sessão nenhuma**: o sinal que acorda o anúncio é
+   um `watch` dentro do processo. O que se observou naquele intervalo foi o MOD
+   continuando a bater com o servidor recusando cada pedido, por `disabled`;
+3. a leitura acontece **depois** de a execução nova criar um filho que escreve na
+   mesma chave, então o valor lido pode ser dela.
 
-- **manter o Worker e fechar os três buracos.** `indexedDB`, `caches` e
-  `BroadcastChannel` não se apagam de dentro do worker por `delete` — o §3.1
-  proíbe aceitar isso como barreira, e está certo: o código do MOD roda depois
-  do prelúdio e pode guardar as referências antes. Fechar de verdade exige
-  origem própria para o executor, o que um `blob:` não dá;
-- **trocar por QuickJS no cliente**, que é a alternativa que o contrato nomeia:
-  sem ambiente de navegador, não há armazenamento de origem nem canal entre
-  contextos para fechar. O custo é que o renderer e a API visual passam a ser a
-  **única** superfície, e é preciso medir o que um interpretador em JS custa no
-  laço de interface.
+Para medir de verdade: registrar a hora da revogação e a do término, marcar cada
+execução com a geração dela, e **ler a marca da execução antiga antes de iniciar
+a nova** — distinguindo execução tardia de transação que só fez o commit
+depois.
 
-**Pendente de medida:** Windows (WebView2) e Linux (WebKitGTK). A sonda está
-escrita e o roteiro para rodá-la é o desta seção; o resultado pode diferir,
-porque os três motores não compartilham implementação de armazenamento.
+A especificação do HTML manda que encerrar um worker encerre os que ele possui.
+É o que se espera, e é o que falta observar. **A pendência é de automação da
+janela, e não de código.**
+
+### O que isto decide
+
+**O Worker de Blob não vai ser o executor.** A marca de IndexedDB relida depois
+de reiniciar basta para isso: ela é persistência fora do controle da sessão, e a
+garantia de isolamento não pode ser publicada com ela de pé. As outras
+observações desta seção são fracas demais para pesar na decisão, e a decisão não
+precisou delas.
+
+**O próximo experimento é QuickJS nativo no cliente**, mantendo a WebView
+existente e o renderer confiável — uma WebView por MOD continua fora. Origem
+isolada para Worker fica como alternativa se o protótipo reprovar nos requisitos
+medidos; ela também precisaria demonstrar separação entre instâncias e
+servidores, ausência de IPC privilegiado e política de armazenamento, porque uma
+origem só diferente da janela continua sendo **compartilhada entre os MODs**.
+
+**E1 não está resolvido.** A orientação escolhe o experimento seguinte; ela não
+aprova executor nenhum antes das provas. Enquanto isso, o Worker atual serve
+para exercitar os caminhos que já existem — e não para comprovar o isolamento
+final.
 
 ### Como repetir
 
@@ -149,3 +165,49 @@ contexto destrói o MOD. Temporizadores, ouvintes, áudio e promessas morrem com
 ele». A medição sustenta isso para **execução** e para **descendentes**, e não
 para **armazenamento**. A frase precisa da ressalva antes de virar promessa
 publicada, e o guia de migração precisa dizer o mesmo.
+
+---
+
+## 5. E2 — a geração da sessão
+
+### O que passou a existir
+
+Um número, e ele é a espinha de tudo. `Session.geracao` sobe a cada tentativa de
+conexão e a cada desmontagem, nunca desce, e zero quer dizer «nenhuma sessão».
+A janela guarda uma cópia e a devolve em todo comando de MOD.
+
+| Onde | O que passou a conferir |
+| --- | --- |
+| `Bridge::on_event` | evento de geração morta é **contado** e descartado, em vez de emitido para a janela |
+| `desmontar_o_cliente` | **revoga na primeira linha**, antes de tirar a conexão do slot |
+| `Bridge::on_event`, no `Ended` | revoga assim que a sessão acaba do outro lado, sem esperar a janela pedir |
+| `mod_request`, `codigo_do_mod` | recusam a geração que não é a de pé, e contam |
+| `montarOMod` | lê a geração antes do `await` e confere depois — «presença de um ID no Map não identifica uma geração» |
+| `atenderOMod` | confere **antes** do efeito, e não só antes da resposta |
+| `pedirAoServidor` e o ouvinte de `ModReply` | pedido e resposta carregam a geração; um número reaproveitado na sessão seguinte não recebe resposta antiga |
+| `encerrarOAmbienteDosMods` | revoga na primeira linha |
+| `ejetar` | encerra **antes** de esperar o `disconnect`, que é um `await` sobre a ponte |
+| `estado_da_sessao` | geração e os dois contadores, desenhados no bloco de manutenção |
+
+### O que foi provado, e como
+
+Por reversão, na bateria: cinco consertos revertidos, cinco guardas falhando com
+a frase certa — a conferência voltando para depois do efeito, a resposta
+atrasada sendo entregue pelo número, o encerramento deixando de revogar na
+primeira linha, a saída local voltando a esperar a ponte, e a desmontagem
+voltando a destruir a conexão antes de revogar.
+
+Na bancada nativa, uma descoberta que só o app de verdade dá: **desligar um MOD
+direto no banco não encerra sessão nenhuma.** O sinal que acorda o anúncio é um
+`watch` dentro do processo, e o que se observou foi o MOD continuando a bater
+com o servidor recusando cada pedido, por `disabled`. Isso invalidou a primeira
+tentativa de medir o encerramento por fora — e é a razão de a prova do §3 sobre
+o worker filho ter sido retirada.
+
+### O que falta para E3
+
+A prova de corrida no aplicativo nativo — saída local com pedido em voo, troca
+A→B, montagem atrasada — precisa de um gesto na janela, e por isso de automação
+de interface que esta bancada ainda não tem. O código está escrito e guardado
+por reversão; o que falta é a observação, e ela está nomeada aqui em vez de
+marcada como verde.

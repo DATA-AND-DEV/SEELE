@@ -2785,6 +2785,19 @@
                 <p id="cache-total" class="nota" role="status"></p>
                 <ul id="lista-cache" class="server-dispositivos mods-rolagem"></ul>
                 <p id="cache-erro" class="erro" role="alert" hidden></p>
+                <!--
+                  Os contadores da sessão — etapa E2 do contrato de API própria.
+
+                  «Contadores de diagnóstico por instância e geração, acessíveis
+                  na bancada», e a razão está escrita lá: sem um número, «não
+                  sobrou nada» é inspeção visual, e inspeção visual não vê o
+                  evento que chegou dois segundos depois de a tela ter trocado.
+
+                  Aqui, no bloco de manutenção, porque é onde se olha quando se
+                  desconfia da máquina — e não junto dos MODs, porque o número
+                  não é de nenhum MOD: é da janela.
+                -->
+                <p id="sessao-contadores" class="nota" role="status"></p>
                 <p class="nota">Apagar um pacote tira só os bytes que a janela
                   carrega. O que um MOD guardou fica no servidor que o hospeda,
                   e não sai daqui — nem quando você entrou como convidado.</p>

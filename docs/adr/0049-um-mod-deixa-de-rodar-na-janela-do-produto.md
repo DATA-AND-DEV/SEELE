@@ -161,9 +161,22 @@ aplicativo nativo — `apps/seele-app/testes/sonda-de-fronteira/`, resultados em
 [`mods-api-propria/registro-de-execucao.md`](../mods-api-propria/registro-de-execucao.md)
 — mediu o que essa frase alcança.
 
-**Ela vale para execução e para descendentes.** Um `Worker` filho criado pelo
-MOD parou 2,4 segundos depois de a sessão encerrar, e não voltou a bater nos
-dezoito segundos seguintes. `terminate()` alcança o que o MOD criou.
+**Ela vale para a execução do próprio MOD.** O worker morre com a sessão, e com
+ele o que rodava lá dentro.
+
+**Para descendentes, não está medido.** A primeira leitura desta emenda dizia
+que estava: um `Worker` filho parou 2,4 segundos depois de a sessão encerrar e
+não voltou a bater. A medição não sustenta a conclusão — o processo do
+aplicativo foi reiniciado entre as duas leituras, e a morte do processo explica
+o mesmo resultado. Separar as duas coisas exige encerrar a sessão **sem**
+encerrar o processo, e isso, na bancada de hoje, precisa de um clique na
+janela.
+
+A especificação do HTML manda que encerrar um worker encerre os workers que ele
+possui, e é o que se espera; o que falta é a observação no motor. Está escrito
+como pendência em
+[`mods-api-propria/registro-de-execucao.md`](../mods-api-propria/registro-de-execucao.md),
+e não como garantia.
 
 **Ela não vale para armazenamento.** Um worker de `blob:` herda a origem de quem
 o criou, e com ela `indexedDB` e `caches` do produto. O que o MOD gravou lá
@@ -173,9 +186,17 @@ o criou, e com ela `indexedDB` e `caches` do produto. O que o MOD gravou lá
 **E `BroadcastChannel` também é da origem**, então dois MODs podem conversar sem
 passar pela API, e com a janela se alguém escutar.
 
-Nenhuma das três se fecha de dentro do prelúdio: o código do MOD roda depois
-dele e pode guardar as referências antes de qualquer `delete`. Fechar exige ou
-uma origem própria para o executor, ou um executor sem ambiente de navegador.
-A decisão está em aberto e é de quem responde pelo projeto; o que este ADR
-precisa registrar, desde já, é que a promessa publicada não pode ser mais larga
-do que a medida.
+Apagar esses nomes de dentro do prelúdio não é fronteira: o contrato de API
+própria exige uma barreira **verificável**, e um `delete` no começo do arquivo
+não é verificável — seja qual for o argumento sobre ordem de execução.
+
+**A consequência para este ADR: o Worker de Blob não vai ser o executor.** A
+marca relida depois de reiniciar basta para isso. O próximo experimento é
+QuickJS nativo no cliente, mantendo esta janela e um renderer confiável; origem
+isolada para Worker fica como alternativa se ele reprovar. A escolha não está
+feita, e o que este ADR registra desde já é que a promessa publicada não pode
+ser mais larga do que a medida.
+
+O resto do 0049 continua de pé: um MOD não roda na janela do produto, o desenho
+é declarado, e a ruptura com a API 2 é limpa. O que a medição move é **qual
+contexto** executa a lógica, e não se ele é separado da janela.

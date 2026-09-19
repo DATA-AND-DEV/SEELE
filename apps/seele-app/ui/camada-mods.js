@@ -782,6 +782,8 @@ async function desenharOCache() {
     return;
   }
 
+  await desenharOsContadoresDaSessao();
+
   const total = pacotes.reduce((soma, p) => soma + Number(p.bytes ?? 0), 0);
   $("cache-total").textContent = pacotes.length === 0
     ? "Nenhum pacote guardado."
@@ -800,6 +802,35 @@ async function desenharOCache() {
       .sort((a, b) => Number(b.bytes ?? 0) - Number(a.bytes ?? 0))
       .map(linhaDePacoteNoCache),
   );
+}
+
+/**
+ * Os contadores da sessão — etapa E2.
+ *
+ * Dois números e uma geração. O que eles respondem é a pergunta que uma tela
+ * não responde: **sobrou alguma coisa da sessão anterior?** Um evento
+ * descartado ou um comando recusado depois de uma saída quer dizer que algo da
+ * execução passada continuou falando — e sem o contador isso é invisível,
+ * porque o produto já os está recusando em silêncio, que é o certo a fazer com
+ * eles e o errado a fazer com a informação.
+ *
+ * Zeros aparecem, e é de propósito: um contador que só se mostra quando é
+ * diferente de zero é um contador que ninguém sabe que existe até o dia em que
+ * precisa dele.
+ */
+async function desenharOsContadoresDaSessao() {
+  const linha = $("sessao-contadores");
+  if (!linha) return;
+  try {
+    const estado = await invoke("estado_da_sessao");
+    const onde = estado.geracao === 0 ? "fora de sessão" : `sessão nº ${estado.geracao}`;
+    linha.textContent =
+      `${onde} · ${estado.eventos_descartados} eventos e ` +
+      `${estado.comandos_recusados} comandos recusados por serem de uma sessão encerrada`;
+  } catch (falha) {
+    linha.textContent = "";
+    console.warn("contadores da sessão:", falha);
+  }
 }
 
 /** Uma linha da manutenção local. */

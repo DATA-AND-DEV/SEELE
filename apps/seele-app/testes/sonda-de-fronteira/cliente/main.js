@@ -215,7 +215,30 @@ async function medir() {
   return achados;
 }
 
+/**
+ * Bate no servidor sem parar — para a etapa E2.
+ *
+ * A pergunta da E2 não se responde parado: «nenhum efeito antigo admitido»
+ * precisa que **haja** efeito antigo tentando entrar. Um MOD que pede uma vez
+ * no início nunca tem um pedido em voo no instante da saída, e a corrida que
+ * importa nunca acontece.
+ *
+ * Então este laço pede a cada 250 ms, para sempre. Quando a sessão encerrar,
+ * haverá pedido no ar — e o que o produto fizer com ele é o que o registro e o
+ * log mostram.
+ *
+ * Ele também é o MOD que não coopera: não há aqui nenhum `seele-mod-unload`,
+ * nenhum `clearInterval`, nenhuma despedida. Se o laço parar, foi porque o
+ * produto o parou.
+ */
+function baterSemParar() {
+  setInterval(() => {
+    SeeleMods.request(EU, SEM_CANAL, { op: "registrar", achados: [] }).catch(() => {});
+  }, 250);
+}
+
 async function comecar() {
+  baterSemParar();
   const achados = await medir();
   // Vai para a metade de servidor, que grava. O registro tem de sobreviver à
   // janela: quem lê o resultado lê o banco, e não um console que ninguém vê.

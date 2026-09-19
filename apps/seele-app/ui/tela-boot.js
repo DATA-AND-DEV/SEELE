@@ -188,7 +188,7 @@ async function conectar(alvo, apelido, token) {
     // A entrada traz duas coisas: a tela, e o que a chave deste servidor acabou
     // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
     // um ouvinte inscrito depois chegaria sempre tarde.
-    const { snapshot, veredito } = await invoke("connect", {
+    const { snapshot, veredito, geracao } = await invoke("connect", {
       server: alvo,
       nickname: apelido,
       // Sempre com áudio. A caixa de «entrar com áudio» saiu com a tela antiga,
@@ -209,6 +209,11 @@ async function conectar(alvo, apelido, token) {
     // lugar junto com ele. Enquanto isso não acontece, a sessão continua
     // desenhada com o que o `connect` já devolveu — quem chegar nela não espera
     // o primeiro tique do laço de snapshot.
+    // **Antes de desenhar qualquer coisa** — etapa E2. Daqui em diante todo
+    // trabalho desta janela carrega este número e é recusado se ele não for
+    // mais o de pé. Desenhar primeiro deixaria um instante em que a tela é da
+    // sessão nova e a geração ainda é a de ninguém.
+    entrarNaGeracao(geracao);
     desenhar(snapshot);
     entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor);
   } catch (falha) {

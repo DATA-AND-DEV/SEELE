@@ -2842,12 +2842,26 @@ async function sairDoServidorParaAEntrada() {
 
 /** Ejeta e volta para a tela de entrada, sem fechar o programa. */
 async function ejetar() {
-  await invoke("disconnect");
-  // **Antes de mostrar qualquer tela fora do servidor.** `disconnect` manda
-  // `Shutdown`, e o laço para sem emitir `Ended` — que é o evento em que o
-  // descarregamento dos MODs estava pendurado. Sem esta linha, quem sai leva o
-  // tema do servidor para a entrada e para o launcher, e só fechar o app o tira.
+  // **Encerrar vem primeiro, e o `disconnect` depois** — etapa E2, §5 do
+  // contrato de API própria: «revogar a geração: a partir desse ponto, nenhum
+  // novo efeito daquela instância é admitido, mesmo que mensagens já estejam na
+  // fila».
+  //
+  // A ordem estava invertida, e o custo era uma janela aberta. `disconnect` é
+  // um `await` sobre a ponte: ele derruba a hospedagem, espera a porta voltar,
+  // e leva o tempo que levar. Durante ele a sessão ainda era a de pé para esta
+  // janela — então uma mensagem de worker que chegasse ali desenhava, pedia ao
+  // servidor e escrevia tema, tudo depois de a pessoa ter apertado sair.
+  //
+  // Encerrando antes, a janela para de admitir efeito no instante do gesto, e o
+  // `disconnect` passa a ser só a metade nativa da mesma saída.
+  //
+  // **`disconnect` continua sendo esperado**, e não disparado e esquecido: ele
+  // é quem derruba o servidor hospedado, e mostrar a tela de entrada antes de
+  // ele terminar deixaria o botão de hospedar oferecendo uma porta que ainda
+  // não voltou.
   encerrarOAmbienteDosMods();
+  await invoke("disconnect");
   $("tela-sessao").hidden = true;
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
