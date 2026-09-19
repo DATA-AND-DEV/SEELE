@@ -153,3 +153,29 @@ e isso aparece aqui, antes de o Codex começar.
 - **o que fazer com quem já instalou um MOD de terceiro.** O catálogo é
   append-only e as versões antigas continuam no ar; um build novo passa a
   recusá-las por API, com a frase que o indexador já tem. Não há revogação aqui.
+
+## Emenda de 18/09/2026 — o que a medição sustenta, e o que não
+
+A consequência 1 diz «destruir o contexto destrói o MOD». Uma sonda rodada no
+aplicativo nativo — `apps/seele-app/testes/sonda-de-fronteira/`, resultados em
+[`mods-api-propria/registro-de-execucao.md`](../mods-api-propria/registro-de-execucao.md)
+— mediu o que essa frase alcança.
+
+**Ela vale para execução e para descendentes.** Um `Worker` filho criado pelo
+MOD parou 2,4 segundos depois de a sessão encerrar, e não voltou a bater nos
+dezoito segundos seguintes. `terminate()` alcança o que o MOD criou.
+
+**Ela não vale para armazenamento.** Um worker de `blob:` herda a origem de quem
+o criou, e com ela `indexedDB` e `caches` do produto. O que o MOD gravou lá
+**sobreviveu** ao encerramento do aplicativo e reapareceu na entrada seguinte.
+`terminate()` mata o contexto e não toca no armazenamento da origem.
+
+**E `BroadcastChannel` também é da origem**, então dois MODs podem conversar sem
+passar pela API, e com a janela se alguém escutar.
+
+Nenhuma das três se fecha de dentro do prelúdio: o código do MOD roda depois
+dele e pode guardar as referências antes de qualquer `delete`. Fechar exige ou
+uma origem própria para o executor, ou um executor sem ambiente de navegador.
+A decisão está em aberto e é de quem responde pelo projeto; o que este ADR
+precisa registrar, desde já, é que a promessa publicada não pode ser mais larga
+do que a medida.

@@ -51,6 +51,15 @@ atrasada e áudio sem depender de o MOD cooperar.
 O que **continua** existindo lá dentro é o JavaScript inteiro: `setTimeout`,
 `Promise`, `JSON`, `TextEncoder`, `structuredClone`.
 
+E continua existindo, **medido no aplicativo nativo**, mais do que se supunha:
+`indexedDB`, `caches` e `BroadcastChannel`, na origem do produto. Isso não é
+convite. O que um MOD gravar em `indexedDB` **não some quando você sai** — ele
+sobreviveu ao encerramento do aplicativo numa medição de 18/09 —, e a promessa
+de limpeza deste documento não o cobre. Guarde estado no servidor, pelo
+`aoPedir` e pelo `dados`, que é onde ele pertence e onde as permissões valem.
+Um caminho para fechar os três está em discussão; enquanto não fecha, um MOD que
+depender deles está dependendo do que o produto pretende tirar.
+
 `fetch` existe como função, mas um worker de `blob:` herda a política de
 conteúdo da janela que o criou, e a desta janela só admite o canal interno do
 Tauri. Trate rede como coisa da sua metade de servidor, que é onde ela sempre
