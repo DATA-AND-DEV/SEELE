@@ -122,7 +122,7 @@ struct Session {
     ///
     /// **Aqui e não na janela** porque o runtime é nativo: quem o desmonta tem
     /// de ser quem o criou, e a janela pode desaparecer antes de pedir.
-    mods_nativos: Mutex<std::collections::BTreeMap<String, executor::ExecutorQuickJs>>,
+    mods_nativos: Mutex<ModsNativos>,
     connection: Mutex<Option<Arc<Connection>>>,
     /// O servidor que este app está hospedando, quando está.
     ///
@@ -295,9 +295,17 @@ impl Session {
     /// `await`s, e cada um deles é uma janela por onde um trabalho antigo
     /// entraria.
     fn revogar(&self) -> u64 {
-        self.geracao
-            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
-            .saturating_add(1)
+        let morta = self
+            .geracao
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        // **A revogação nativa encerra os executores dela**, sem esperar a
+        // janela pedir. A diretriz é explícita, e a razão é que a janela pode
+        // não pedir: ela pode estar travada, pode ter fechado, ou pode ter
+        // perdido o número da instância. O dono do runtime é este lado.
+        if let Ok(mut vivos) = self.mods_nativos.lock() {
+            vivos.revogar_geracao(morta);
+        }
+        morta.saturating_add(1)
     }
 
     /// Esta geração ainda é a de pé?
@@ -330,6 +338,68 @@ impl Session {
             .map_err(|_| ConnectionError::NotConnected)?
             .clone()
             .ok_or(ConnectionError::NotConnected)
+    }
+}
+
+/// Os MODs de pé no executor nativo, com identidade completa.
+///
+/// # Por que a chave não é o identificador do MOD
+///
+/// Ela era, e a diretriz nomeia o buraco: «um pedido antigo pode atingir a nova
+/// instância com o mesmo nome». Sair de um servidor e entrar noutro que exige o
+/// **mesmo MOD** repõe o mesmo texto; um encerramento a caminho, disparado pela
+/// saída anterior, chegava e matava a instância nova.
+///
+/// A chave é um número que nasce uma vez e nunca se repete nesta janela. O
+/// identificador do MOD, a geração e o hash do pacote viajam **com** ele, e
+/// juntos são a identidade que o §3 do contrato pede: «endereço IP e ID textual
+/// do MOD, sozinhos, não identificam uma execução».
+#[derive(Default)]
+struct ModsNativos {
+    /// O número da instância seguinte. Nunca volta.
+    proxima: u64,
+    /// Os de pé, por número de instância.
+    vivos: std::collections::BTreeMap<u64, InstanciaNativa>,
+}
+
+/// Um MOD de pé no executor nativo.
+struct InstanciaNativa {
+    /// `autor/nome`.
+    id: String,
+    /// Em que execução de sessão ela nasceu.
+    geracao: u64,
+    /// O conteúdo exato que subiu.
+    hash: String,
+    /// Se ela já pediu para parar e ainda não confirmou.
+    ///
+    /// **Ela continua na tabela enquanto isso.** Tirá-la ao pedir faria o
+    /// contador dizer zero com o motor ainda parando, que é a diferença entre
+    /// «encerrou» e «mandei encerrar» — e a diretriz cobra essa diferença.
+    encerrando: bool,
+    /// O executor.
+    executor: executor::ExecutorQuickJs,
+}
+
+impl ModsNativos {
+    /// Guarda uma instância e devolve o número dela.
+    fn guardar(&mut self, instancia: InstanciaNativa) -> u64 {
+        self.proxima = self.proxima.saturating_add(1);
+        let numero = self.proxima;
+        self.vivos.insert(numero, instancia);
+        numero
+    }
+
+    /// Pede a parada de tudo o que pertence a uma geração.
+    ///
+    /// **Pedido, e não remoção.** Quem sai da tabela é quem confirmou, e quem
+    /// confirma é a bomba ao ver o `Parou`.
+    fn revogar_geracao(&mut self, geracao: u64) {
+        for instancia in self.vivos.values_mut() {
+            if instancia.geracao == geracao && !instancia.encerrando {
+                instancia.encerrando = true;
+                instancia.executor.pedir_encerramento();
+            }
+        }
     }
 }
 
@@ -385,6 +455,14 @@ impl EventListener for Bridge {
         let _ = self.app.emit(EVENT_CHANNEL, &event);
         if acabou {
             let morta = self.de_pe.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            // E os executores nativos daquela geração param junto, pela mesma
+            // razão de `Session::revogar`: o dono do runtime é este lado, e a
+            // janela pode não pedir — ela pode estar travada ou já ter fechado.
+            if let Some(sessao) = self.app.try_state::<Session>() {
+                if let Ok(mut vivos) = sessao.mods_nativos.lock() {
+                    vivos.revogar_geracao(morta);
+                }
+            }
             tracing::debug!(geracao = morta, "sessão revogada pelo fim que chegou");
         }
     }
@@ -1648,17 +1726,43 @@ struct EstadoDaSessao {
     eventos_descartados: u64,
     /// Quantos comandos foram recusados pelo mesmo motivo.
     comandos_recusados: u64,
-    /// Quantos MODs estão de pé no executor nativo. Zero fora da bancada.
-    mods_nativos: usize,
-    /// Quantas mensagens de MOD nativo esperam a janela lê-las, somando todos.
-    fila_de_mods: usize,
-    /// Quantas o executor recusou por fila cheia, somando todos.
+    /// Os MODs de pé no executor nativo, um por um. Vazio fora da bancada.
+    ///
+    /// **Um por um, e não só a contagem.** A identidade de uma instância é o
+    /// que o §3 do contrato pede — nome, geração, pacote e número —, e um total
+    /// não responde «qual delas não está saindo».
+    mods_nativos: Vec<InstanciaNaTela>,
+}
+
+/// Uma instância nativa, como a bancada a lê.
+#[derive(Debug, serde::Serialize)]
+struct InstanciaNaTela {
+    /// O número desta execução. Nunca se repete nesta janela.
+    instancia: u64,
+    /// `autor/nome`.
+    id: String,
+    /// Em que execução de sessão ela nasceu.
+    geracao: u64,
+    /// O conteúdo exato que subiu, cortado — é o que se compara a olho.
+    hash: String,
+    /// Já pediu para parar e ainda não confirmou.
+    ///
+    /// **É o estado que a revisão de `6cc58c1` trouxe.** Antes a instância saía
+    /// da tabela ao pedir, e o diagnóstico dizia zero com o motor ainda
+    /// parando.
+    encerrando: bool,
+    /// Quantas mensagens dela esperam a janela lê-las.
+    saida_na_fila: usize,
+    /// Quantas ela quis mandar e não couberam.
     ///
     /// **Contado e mostrado** porque uma mensagem descartada em silêncio é o
     /// defeito que este repositório mais paga. Se este número sobe, um MOD está
-    /// falando mais rápido do que a janela lê — e quem hospeda precisa saber
-    /// disso antes de alguém reclamar que a tela «trava às vezes».
-    mensagens_recusadas: usize,
+    /// falando mais rápido do que a janela lê.
+    saida_recusadas: usize,
+    /// Quantas respostas esperam o motor atendê-las.
+    entrada_na_fila: usize,
+    /// Quantas respostas não couberam na entrada.
+    entrada_recusadas: usize,
 }
 
 /// Qual execução de sessão está de pé, e o que já foi recusado por não ser ela.
@@ -1671,19 +1775,35 @@ struct EstadoDaSessao {
 #[tauri::command]
 fn estado_da_sessao(session: State<'_, Session>) -> EstadoDaSessao {
     use std::sync::atomic::Ordering::Relaxed;
-    let (quantos, na_fila, recusadas) = session.mods_nativos.lock().map_or((0, 0, 0), |vivos| {
-        vivos.values().fold((0, 0, 0), |(q, f, r), executor| {
-            let (mensagens, _) = executor.fila().ocupacao();
-            (q + 1, f + mensagens, r + executor.fila().recusadas())
-        })
-    });
+    let nativos = session.mods_nativos.lock().map_or_else(
+        |_| Vec::new(),
+        |vivos| {
+            vivos
+                .vivos
+                .iter()
+                .map(|(numero, instancia)| {
+                    let (saida, _) = instancia.executor.fila().ocupacao();
+                    let (entrada, _) = instancia.executor.entrada().ocupacao();
+                    InstanciaNaTela {
+                        instancia: *numero,
+                        id: instancia.id.clone(),
+                        geracao: instancia.geracao,
+                        hash: instancia.hash.chars().take(12).collect(),
+                        encerrando: instancia.encerrando,
+                        saida_na_fila: saida,
+                        saida_recusadas: instancia.executor.fila().recusadas(),
+                        entrada_na_fila: entrada,
+                        entrada_recusadas: instancia.executor.entrada().recusadas(),
+                    }
+                })
+                .collect()
+        },
+    );
     EstadoDaSessao {
         geracao: session.geracao(),
         eventos_descartados: session.eventos_de_geracao_morta.load(Relaxed),
         comandos_recusados: session.comandos_de_geracao_morta.load(Relaxed),
-        mods_nativos: quantos,
-        fila_de_mods: na_fila,
-        mensagens_recusadas: recusadas,
+        mods_nativos: nativos,
     }
 }
 
@@ -2615,6 +2735,12 @@ fn executor_nativo_ligado() -> bool {
 struct FalaDoMod {
     /// De qual MOD.
     id: String,
+    /// **Qual execução deste MOD.** Nunca se repete nesta janela.
+    ///
+    /// Sem ela, duas montagens do mesmo MOD dentro da mesma geração —
+    /// recarregar um MOD é isso — falariam com a mesma voz, e a janela
+    /// entregaria a resposta de uma à outra.
+    instancia: u64,
     /// Em que sessão — a janela descarta o que não for a dela.
     geracao: u64,
     /// O que aconteceu: `mensagem`, `falhou`, `interrompido` ou `parou`.
@@ -2654,7 +2780,7 @@ fn mod_nativo_iniciar(
     geracao: u64,
     id: String,
     hash: String,
-) -> Result<(), FalhaNoMod> {
+) -> Result<u64, FalhaNoMod> {
     if !executor_nativo_ligado() {
         return Err(FalhaNoMod::Recusado {
             motivo: "executor-nativo-desligado".to_owned(),
@@ -2667,28 +2793,61 @@ fn mod_nativo_iniciar(
     }
     // O mesmo caminho de sempre para chegar ao código: a conferência de hash e
     // de identidade mora lá, e um segundo caminho seria uma segunda regra.
-    let codigo = codigo_do_mod(app.clone(), session.clone(), geracao, id.clone(), hash)?;
+    let codigo = codigo_do_mod(
+        app.clone(),
+        session.clone(),
+        geracao,
+        id.clone(),
+        hash.clone(),
+    )?;
 
-    let executor = executor::ExecutorQuickJs::novo(executor::Limites::default()).map_err(|_| {
-        FalhaNoMod::Recusado {
-            motivo: "executor-nao-subiu".to_owned(),
-        }
-    })?;
-    executor
-        .iniciar(&codigo)
-        .map_err(|_| FalhaNoMod::Recusado {
-            motivo: "executor-nao-aceitou-o-codigo".to_owned(),
+    let mut executor =
+        executor::ExecutorQuickJs::novo(executor::Limites::default()).map_err(|_| {
+            FalhaNoMod::Recusado {
+                motivo: "executor-nao-subiu".to_owned(),
+            }
         })?;
-
-    // Uma bomba por instância: ela bloqueia esperando o MOD falar, e emite. Sai
-    // sozinha quando o executor confirma a parada — e é por isso que `Parou`
-    // atravessa até aqui em vez de ser consumido lá dentro.
-    let mut executor = executor;
     let Some((recebedor, fila)) = executor.escutar() else {
         return Err(FalhaNoMod::Recusado {
             motivo: "executor-ja-escutado".to_owned(),
         });
     };
+
+    // **Registrar e admitir antes de liberar a execução**, com a conferência de
+    // geração **dentro** do mesmo cadeado.
+    //
+    // A diretriz nomeia as duas coisas que a ordem antiga deixava abertas: «a
+    // bomba pode emitir uma mensagem antes de existir um destino registrado
+    // para a resposta», e uma inserção podia acontecer **depois** da saída, com
+    // o executor ficando órfão na tabela de uma sessão que já acabou.
+    //
+    // Conferir a geração fora do cadeado não bastaria: entre a conferência e a
+    // inserção cabe uma desmontagem inteira.
+    let numero = {
+        let mut vivos = session
+            .mods_nativos
+            .lock()
+            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+        if !session.geracao_vale(geracao) {
+            // Sai sem entrar: o executor é descartado aqui e a thread dele
+            // termina ao ver o canal fechado.
+            executor.pedir_encerramento();
+            return Err(FalhaNoMod::Recusado {
+                motivo: "sessao-encerrada".to_owned(),
+            });
+        }
+        vivos.guardar(InstanciaNativa {
+            id: id.clone(),
+            geracao,
+            hash,
+            encerrando: false,
+            executor,
+        })
+    };
+
+    // Uma bomba por instância: ela bloqueia esperando o MOD falar, e emite. Sai
+    // sozinha quando o executor confirma a parada — e é ela quem tira a
+    // instância da tabela, porque **confirmar é o que tira**.
     let janela = app.clone();
     let quem = id.clone();
     std::thread::Builder::new()
@@ -2697,17 +2856,21 @@ fn mod_nativo_iniciar(
             while let Ok(fala) = recebedor.recv() {
                 let (tipo, corpo) = match fala {
                     executor::ParaOFora::Mensagem(json) => {
-                        // **Devolve o lugar na fila.** Quem escuta assume a
-                        // contabilidade: sem esta linha ela encheria uma vez e
-                        // não aceitaria mais nada, e o MOD ficaria mudo.
-                        fila.tirar(json.len());
+                        // **Devolve o lugar na fila depois de emitir**, e não
+                        // antes: enquanto o evento não saiu, ele ainda ocupa.
+                        // Ver o comentário do `emit` abaixo.
                         ("mensagem", json)
                     }
                     executor::ParaOFora::Falhou(motivo) => ("falhou", motivo),
                     executor::ParaOFora::Interrompido => ("interrompido", String::new()),
                     executor::ParaOFora::Parou => ("parou", String::new()),
+                    executor::ParaOFora::Diagnostico { relogios } => {
+                        tracing::debug!(mod_id = %quem, relogios, "diagnóstico de MOD nativo");
+                        continue;
+                    }
                 };
                 let acabou = tipo == "parou";
+                let quantos = corpo.len();
                 // `debug`, e não `info`: é uma linha por mensagem de MOD, e um
                 // MOD conversador encheria o log de quem hospeda com o que ele
                 // já vê na tela.
@@ -2716,12 +2879,24 @@ fn mod_nativo_iniciar(
                     EVENTO_DO_EXECUTOR,
                     FalaDoMod {
                         id: quem.clone(),
+                        instancia: numero,
                         geracao,
                         tipo: tipo.to_owned(),
                         corpo,
                     },
                 );
+                if tipo == "mensagem" {
+                    fila.tirar(quantos);
+                }
                 if acabou {
+                    // **A confirmação é o que tira da tabela.** Até aqui a
+                    // instância aparece no diagnóstico como `encerrando`, que é
+                    // a verdade: alguém mandou parar e ela não tinha parado.
+                    if let Some(sessao) = janela.try_state::<Session>() {
+                        if let Ok(mut vivos) = sessao.mods_nativos.lock() {
+                            vivos.vivos.remove(&numero);
+                        }
+                    }
                     return;
                 }
             }
@@ -2730,15 +2905,29 @@ fn mod_nativo_iniciar(
             motivo: "a-bomba-nao-subiu".to_owned(),
         })?;
 
-    if let Ok(mut vivos) = session.mods_nativos.lock() {
-        // Substituir fecha o anterior: dois runtimes sob o mesmo nome seriam
-        // dois donos para um identificador, e o segundo esconderia o primeiro.
-        if let Some(velho) = vivos.insert(id.clone(), executor) {
-            velho.pedir_encerramento();
-        }
+    // **Só agora o código roda.** Registrada, admitida e com destino para as
+    // respostas: é a ordem que fecha a corrida da primeira mensagem.
+    {
+        let vivos = session
+            .mods_nativos
+            .lock()
+            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+        let Some(instancia) = vivos.vivos.get(&numero) else {
+            // Encerrada entre uma coisa e outra: não há o que liberar.
+            return Err(FalhaNoMod::Recusado {
+                motivo: "sessao-encerrada".to_owned(),
+            });
+        };
+        instancia
+            .executor
+            .iniciar(&codigo)
+            .map_err(|_| FalhaNoMod::Recusado {
+                motivo: "executor-nao-aceitou-o-codigo".to_owned(),
+            })?;
     }
-    tracing::info!(mod_id = %id, geracao, "MOD de pé no executor nativo");
-    Ok(())
+
+    tracing::info!(mod_id = %id, geracao, instancia = numero, "MOD de pé no executor nativo");
+    Ok(numero)
 }
 
 /// Entrega a um MOD nativo a resposta de um pedido que ele fez.
@@ -2750,7 +2939,7 @@ fn mod_nativo_iniciar(
 fn mod_nativo_entregar(
     session: State<'_, Session>,
     geracao: u64,
-    id: String,
+    instancia: u64,
     json: String,
 ) -> Result<(), FalhaNoMod> {
     if !session.geracao_vale(geracao) {
@@ -2762,41 +2951,60 @@ fn mod_nativo_entregar(
         .mods_nativos
         .lock()
         .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
-    vivos
-        .get(&id)
-        .ok_or(FalhaNoMod::Recusado {
-            motivo: "mod-nao-esta-de-pe".to_owned(),
-        })?
+    // **Pelo número da instância, e não pelo nome do MOD.** Com o nome, uma
+    // resposta atrasada de uma execução anterior alimentava a execução nova que
+    // tivesse herdado o nome — e o MOD novo receberia a resposta de um pedido
+    // que ele nunca fez.
+    let alvo = vivos.vivos.get(&instancia).ok_or(FalhaNoMod::Recusado {
+        motivo: "instancia-nao-esta-de-pe".to_owned(),
+    })?;
+    // E nem para uma que já pediu para parar: ela está em `encerrando`, e
+    // admitir efeito ali é o que o §5 do contrato proíbe.
+    if alvo.encerrando || alvo.geracao != geracao {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "instancia-encerrando".to_owned(),
+        });
+    }
+    alvo.executor
         .entregar(&json)
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "executor-nao-aceitou".to_owned(),
         })
 }
 
-/// Encerra um MOD nativo, ou todos os desta sessão.
+/// Pede a parada de um MOD nativo, ou de todos os desta sessão.
 ///
-/// **Revoga na hora e não espera.** A confirmação chega à janela como a fala
-/// `parou`, que é o que o contrato de executor chama de confirmação — esperar
-/// aqui prenderia o comando da janela pelo tempo que o motor levar.
+/// **Pede, e não remove.** Quem sai da tabela é quem confirmou, e quem confirma
+/// é a bomba ao ver o `Parou`. Removendo aqui, o diagnóstico diria zero com o
+/// motor ainda parando — que é a diferença entre «encerrou» e «mandei
+/// encerrar», e a diretriz cobra essa diferença.
+///
+/// Não espera: a confirmação chega à janela como a fala `parou`, e prender o
+/// comando pelo tempo que o motor levar prenderia a saída da sessão junto.
 ///
 /// # Errors
 ///
-/// Nunca: encerrar o que já encerrou é o desfecho normal de quem apertou duas
-/// vezes.
+/// Nunca: pedir a parada do que já está parando é o desfecho normal de quem
+/// apertou duas vezes.
 #[tauri::command]
-fn mod_nativo_encerrar(session: State<'_, Session>, id: Option<String>) -> Result<(), FalhaNoMod> {
+fn mod_nativo_encerrar(
+    session: State<'_, Session>,
+    instancia: Option<u64>,
+) -> Result<(), FalhaNoMod> {
     let Ok(mut vivos) = session.mods_nativos.lock() else {
         return Ok(());
     };
-    match id {
-        Some(id) => {
-            if let Some(executor) = vivos.remove(&id) {
-                executor.pedir_encerramento();
+    match instancia {
+        Some(numero) => {
+            if let Some(alvo) = vivos.vivos.get_mut(&numero) {
+                alvo.encerrando = true;
+                alvo.executor.pedir_encerramento();
             }
         }
         None => {
-            for (_, executor) in std::mem::take(&mut *vivos) {
-                executor.pedir_encerramento();
+            for alvo in vivos.vivos.values_mut() {
+                alvo.encerrando = true;
+                alvo.executor.pedir_encerramento();
             }
         }
     }

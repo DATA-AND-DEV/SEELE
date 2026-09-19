@@ -11201,6 +11201,167 @@ fn o_ciclo_de_vida_de_um_mod_nao_conhece_o_executor() {
     );
 }
 
+/// **Confirmar a parada não é esperar um prazo** — revisão de `6cc58c1`.
+///
+/// A primeira integração corria a promessa de confirmação contra um timeout que
+/// **resolvia com sucesso**: a instância se dizia `encerrada` sem que ninguém
+/// tivesse parado nada, o ouvinte era removido, e o contador mostrava zero com
+/// o motor ainda parando.
+///
+/// Revogar continua imediato — nenhum efeito é admitido nem em `encerrando` nem
+/// em `encerrada`. O que muda é o que o produto **afirma**.
+#[test]
+fn a_parada_confirmada_e_diferente_do_prazo_vencido() {
+    let runtime = without_comments(&read("ui/mods-runtime.js"));
+
+    // O prazo devolve `false`, e não resolve como se tivesse confirmado.
+    let nativo = runtime
+        .split_once("function executorNativo(")
+        .expect("o executor nativo")
+        .1;
+    assert!(
+        nativo.contains("resolve(false)"),
+        "o prazo do encerramento voltou a resolver como sucesso: {nativo}"
+    );
+    assert!(
+        nativo.contains("parou.then(() => true)"),
+        "a confirmação de verdade deixou de ser distinguida do prazo: {nativo}"
+    );
+
+    // E a instância só se diz `encerrada` com confirmação **e** sem recurso que
+    // tenha falhado ao sair.
+    let encerrar = runtime
+        .split_once("encerrar() {")
+        .expect("`InstanciaDeMod.encerrar`")
+        .1;
+    let encerrar = encerrar.split_once("\n  }").map_or(encerrar, |(a, _)| a);
+    assert!(
+        encerrar.contains("confirmou && this.naoSairam.length === 0"),
+        "a instância voltou a se dizer `encerrada` sem confirmação: {encerrar}"
+    );
+    assert!(
+        encerrar.contains("this.naoSairam.push"),
+        "um recurso que falha ao sair volta a não deixar rastro: {encerrar}"
+    );
+
+    // E o diagnóstico conta as três coisas, não só a primeira.
+    let contagem = js_function(&runtime, "function recursosDePe(");
+    for exigido in ["naoSairam.length", "ESTADOS_DE_MOD.encerrando"] {
+        assert!(
+            contagem.contains(exigido),
+            "o diagnóstico deixou de ver `{exigido}`, e um encerramento sem \
+             confirmação volta a aparecer como limpo: {contagem}"
+        );
+    }
+}
+
+/// **Uma instância nativa tem identidade própria, e ela não é o nome do MOD.**
+///
+/// Revisão de `6cc58c1`: «um pedido antigo pode atingir a nova instância com o
+/// mesmo nome». Sair de um servidor e entrar noutro que exige o **mesmo MOD**
+/// repõe o mesmo texto, e um encerramento a caminho matava a execução nova.
+///
+/// Recarregar um MOD é o mesmo problema dentro de uma geração só: duas
+/// execuções, o mesmo nome, e nada para distingui-las.
+#[test]
+fn uma_instancia_nativa_e_identificada_pelo_numero_dela() {
+    let runtime = without_comments(&read("ui/mods-runtime.js"));
+    let nativo = runtime
+        .split_once("function executorNativo(")
+        .expect("o executor nativo")
+        .1;
+
+    assert!(
+        nativo.contains("payload.instancia !== numero"),
+        "o ouvinte voltou a casar as falas pelo nome do MOD: {nativo}"
+    );
+    for verbo in ["instancia: numero", "instancia: numero"] {
+        assert!(
+            nativo.contains(verbo),
+            "um verbo do executor nativo voltou a falar por nome: {nativo}"
+        );
+    }
+    assert!(
+        !nativo.contains("mod_nativo_encerrar\", { id }"),
+        "encerrar voltou a ser por nome, e mata a execução seguinte do mesmo MOD"
+    );
+
+    // E o Rust guarda a identidade inteira: nome, geração e pacote.
+    let rust = read("src/main.rs");
+    let estrutura = rust
+        .split_once("struct InstanciaNativa {")
+        .expect("`InstanciaNativa`")
+        .1;
+    let estrutura = estrutura.split_once("\n}").map_or(estrutura, |(a, _)| a);
+    for campo in [
+        "id: String",
+        "geracao: u64",
+        "hash: String",
+        "encerrando: bool",
+    ] {
+        assert!(
+            estrutura.contains(campo),
+            "a identidade da instância nativa perdeu `{campo}`: {estrutura}"
+        );
+    }
+}
+
+/// **Registrar vem antes de liberar a execução, e dentro do mesmo cadeado.**
+///
+/// Revisão de `6cc58c1`, duas metades. «A bomba pode emitir uma mensagem antes
+/// de existir um destino registrado para a resposta» — e uma inserção podia
+/// acontecer **depois** da saída, deixando um executor órfão na tabela de uma
+/// sessão que já acabou.
+///
+/// Conferir a geração fora do cadeado não bastaria: entre a conferência e a
+/// inserção cabe uma desmontagem inteira.
+#[test]
+fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
+    let rust = read("src/main.rs");
+    let iniciar = rust
+        .split_once("fn mod_nativo_iniciar(")
+        .expect("`mod_nativo_iniciar`")
+        .1;
+    let iniciar = iniciar.split_once("\n/// ").map_or(iniciar, |(a, _)| a);
+
+    let guarda = iniciar
+        .find("vivos.guardar(")
+        .expect("a instância deixou de ser guardada");
+    let roda = iniciar
+        .find(".iniciar(&codigo)")
+        .expect("o código deixou de ser entregue");
+    assert!(
+        guarda < roda,
+        "o código volta a rodar antes de a instância existir, e as primeiras \
+         mensagens do MOD não têm destino: {iniciar}"
+    );
+
+    // A conferência de geração acontece **dentro** do cadeado que insere.
+    let trecho = iniciar
+        .split_once(".lock()")
+        .expect("o cadeado da tabela")
+        .1;
+    let trecho = trecho
+        .split_once("vivos.guardar(")
+        .map_or(trecho, |(a, _)| a);
+    assert!(
+        trecho.contains("session.geracao_vale(geracao)"),
+        "a geração voltou a ser conferida fora do cadeado, e entre a \
+         conferência e a inserção cabe uma desmontagem inteira: {trecho}"
+    );
+
+    // E a revogação nativa não espera a janela pedir.
+    let revogar = rust
+        .split_once("fn revogar(&self) -> u64 {")
+        .expect("`Session::revogar`")
+        .1;
+    let revogar = revogar.split_once("\n    }").map_or(revogar, |(a, _)| a);
+    assert!(
+        revogar.contains("revogar_geracao"),
+        "a revogação nativa voltou a depender de a janela chamar o encerramento: {revogar}"
+    );
+}
+
 /// **A saída local revoga antes de esperar o `disconnect`.**
 ///
 /// `disconnect` é um `await` sobre a ponte: ele derruba a hospedagem e espera a

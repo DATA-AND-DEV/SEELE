@@ -56,7 +56,7 @@ const ESTADOS_DE_MOD = Object.freeze({
  */
 function executorDeWorker(preludio) {
   let worker = null;
-  let parou = null;
+  let parou = false;
   return {
     nome: "worker-blob",
     // `async` para casar com o outro executor, e não porque ela espera algo:
@@ -81,10 +81,13 @@ function executorDeWorker(preludio) {
       // explícita, e é por isso que `encerrou()` existe em vez de este verbo
       // devolver «pronto».
       worker?.terminate();
-      parou = Promise.resolve();
+      parou = true;
     },
     encerrou() {
-      return parou ?? Promise.resolve();
+      // Aqui a confirmação é verdadeira de imediato: `terminate()` é síncrono,
+      // e quando ele volta o contexto não roda mais. Dizer `true` é dizer o que
+      // aconteceu, e não um atalho.
+      return Promise.resolve(parou);
     },
   };
 }
@@ -104,6 +107,19 @@ function executorDeWorker(preludio) {
  */
 function executorNativo(id, geracao, hash) {
   let ouvindo = null;
+  // **O número da instância**, que o lado nativo devolve ao iniciar. Ele é a
+  // identidade desta execução: `id` e `geracao` não bastam, porque recarregar
+  // um MOD é uma segunda execução dentro da mesma geração, e as duas falariam
+  // com a mesma voz.
+  let numero = null;
+  // Quantas mensagens estão esperando ser atendidas **aqui dentro**.
+  //
+  // O teto da fila nativa mede o que ainda não saiu de lá; este mede o que já
+  // chegou e ainda não foi processado. A diretriz pede a diferença: «o limite
+  // dessa fila não demonstra contenção do que se acumula no transporte/eventos
+  // da janela».
+  let naFila = 0;
+  let recusadasAqui = 0;
   let resolverAParada = null;
   // Criada **antes** do ouvinte, e não dentro dele: a fala `parou` pode chegar
   // entre o `listen` e a linha seguinte, e uma promessa que ainda não existe
@@ -119,13 +135,32 @@ function executorNativo(id, geracao, hash) {
       // volta seria fazer o texto atravessar a ponte duas vezes para chegar
       // onde já estava.
       ouvindo = await listen("seele://mod-nativo", ({ payload }) => {
-        if (!payload || payload.id !== id || payload.geracao !== geracao) return;
+        if (!payload || payload.geracao !== geracao) return;
+        // **Pelo número da instância**, e não pelo nome do MOD: duas execuções
+        // do mesmo MOD na mesma geração têm o mesmo nome e vozes diferentes.
+        // Antes de o número chegar, casa pelo nome — só a própria montagem
+        // pode falar nessa janela, e é ela quem está esperando o número.
+        if (numero === null ? payload.id !== id : payload.instancia !== numero) return;
         if (payload.tipo === "mensagem") {
+          // **Teto do que espera atendimento aqui.** `atenderOMod` é assíncrono
+          // — ele vai ao servidor —, então as mensagens se acumulam deste lado
+          // enquanto ele volta. Sem teto, um MOD conversador enche a memória da
+          // janela depois de a fila nativa ter dado o lugar por livre.
+          if (naFila >= 64) {
+            recusadasAqui += 1;
+            return;
+          }
+          let m;
           try {
-            aoReceber(JSON.parse(payload.corpo));
+            m = JSON.parse(payload.corpo);
           } catch {
             aoFalhar("o MOD mandou o que não é JSON");
+            return;
           }
+          naFila += 1;
+          Promise.resolve(aoReceber(m)).finally(() => {
+            naFila -= 1;
+          });
           return;
         }
         if (payload.tipo === "parou") {
@@ -137,26 +172,46 @@ function executorNativo(id, geracao, hash) {
         // parando o MOD.
         aoFalhar(payload.tipo === "interrompido" ? "interrompido pelo produto" : payload.corpo);
       });
-      await invoke("mod_nativo_iniciar", { geracao, id, hash });
+      numero = await invoke("mod_nativo_iniciar", { geracao, id, hash });
     },
     entregar(mensagem) {
+      if (numero === null) return;
       invoke("mod_nativo_entregar", {
         geracao,
-        id,
+        instancia: numero,
         json: JSON.stringify(mensagem),
       }).catch(() => {});
     },
     pedirEncerramento() {
-      invoke("mod_nativo_encerrar", { id }).catch(() => {});
+      // Pelo número: encerrar pelo nome mataria a execução seguinte do mesmo
+      // MOD, que é a corrida que a diretriz nomeia.
+      if (numero === null) return;
+      invoke("mod_nativo_encerrar", { instancia: numero }).catch(() => {});
     },
     async encerrou() {
-      // **A confirmação vem do lado nativo**, como a fala `parou`. Com prazo:
-      // um motor que não confirma não pode prender a saída da sessão, e o que
-      // se perde esperando é o que se ganharia sabendo — o contador da bancada
-      // diz o resto.
-      await Promise.race([parou, new Promise((resolve) => setTimeout(resolve, 2000))]);
-      (await ouvindo)?.();
-      ouvindo = null;
+      // **Confirmar não é esperar.** A primeira versão corria a promessa contra
+      // um prazo que resolvia com sucesso, e devolvia igual — a instância se
+      // dizia encerrada sem que ninguém tivesse parado nada.
+      //
+      // Agora o prazo devolve `false`, e quem chama sabe a diferença. A saída
+      // continua não travando: a espera tem teto, e o que se perde esperando é
+      // o que se ganharia sabendo.
+      const confirmou = await Promise.race([
+        parou.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 2000)),
+      ]);
+      // **O ouvinte fica** quando não houve confirmação: a fala `parou` pode
+      // chegar depois, e ela é a única coisa que ainda pode fechar o assunto.
+      // Removê-lo aqui apagaria a chance de saber.
+      if (confirmou) {
+        (await ouvindo)?.();
+        ouvindo = null;
+      }
+      return confirmou;
+    },
+    /** O que ficou pendente deste lado — para a bancada. */
+    pendencias() {
+      return { naFila, recusadas: recusadasAqui };
     },
   };
 }
@@ -184,6 +239,8 @@ class InstanciaDeMod {
     this.estado = ESTADOS_DE_MOD.criando;
     /** Os descartadores, na ordem em que foram registrados. */
     this.recursos = [];
+    /** O que não saiu no descarte, por nome. Vazio é o desfecho normal. */
+    this.naoSairam = [];
   }
 
   /**
@@ -219,23 +276,38 @@ class InstanciaDeMod {
     if (this.encerramento) return this.encerramento;
     this.estado = ESTADOS_DE_MOD.encerrando;
     this.encerramento = (async () => {
+      let confirmou = false;
       try {
         this.executor.pedirEncerramento();
-        await this.executor.encerrou();
+        confirmou = (await this.executor.encerrou()) === true;
       } catch (falha) {
         // Um executor que falha ao parar não impede o descarte: os recursos
         // são nossos, e deixá-los de pé porque ele não respondeu seria trocar
         // um problema por dois.
         console.warn(`MOD ${this.id}: o executor não confirmou o encerramento`, falha);
       }
+
+      // Os recursos saem de qualquer jeito, e **o que não sair fica anotado**.
+      // Uma limpeza que falha e não deixa rastro é pior que uma que não
+      // acontece: a segunda pelo menos aparece no contador.
       for (const recurso of this.recursos.splice(0).reverse()) {
         try {
           recurso.descartar();
         } catch (falha) {
           console.warn(`MOD ${this.id}: ${recurso.porque} não saiu`, falha);
+          this.naoSairam.push(recurso.porque);
         }
       }
-      this.estado = ESTADOS_DE_MOD.encerrada;
+
+      // **`encerrada` só com confirmação.** Sem ela a instância fica em
+      // `encerrando`, que é a verdade: pedimos, revogamos, descartamos o que
+      // era nosso, e o executor não disse que parou. Nenhum efeito é admitido
+      // nos dois estados — o que muda é o que o produto **afirma**.
+      this.estado =
+        confirmou && this.naoSairam.length === 0
+          ? ESTADOS_DE_MOD.encerrada
+          : ESTADOS_DE_MOD.encerrando;
+      return this.estado === ESTADOS_DE_MOD.encerrada;
     })();
     return this.encerramento;
   }
@@ -251,8 +323,19 @@ class InstanciaDeMod {
 function recursosDePe(instancias) {
   const abertos = [];
   for (const instancia of instancias.values()) {
-    if (!instancia || instancia.recursos.length === 0) continue;
-    abertos.push(`${instancia.id}:${instancia.estado}:${instancia.recursos.length}`);
+    if (!instancia) continue;
+    // **Três coisas contam como «de pé»**: recurso ainda registrado, recurso
+    // que não saiu, e instância que pediu para parar e não foi confirmada.
+    // Contar só a primeira faria um encerramento sem confirmação aparecer como
+    // limpo — que é justamente o que não pode.
+    const pendentes = instancia.recursos.length;
+    const falhos = instancia.naoSairam.length;
+    const semConfirmar = instancia.estado === ESTADOS_DE_MOD.encerrando;
+    if (pendentes === 0 && falhos === 0 && !semConfirmar) continue;
+    abertos.push(
+      `${instancia.id}:${instancia.estado}:${pendentes}` +
+        (falhos > 0 ? ` (${falhos} não saíram: ${instancia.naoSairam.join(", ")})` : ""),
+    );
   }
   return abertos;
 }

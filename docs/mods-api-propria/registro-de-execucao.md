@@ -457,3 +457,98 @@ de zero em laço é espera ocupada, e espera ocupada disputa com o áudio.
 E a cada binding novo, repetir a prova de autoridade: `setTimeout` foi o
 primeiro, e a sonda já o cobre por tabela — os nomes que ela tenta continuam
 todos recusados.
+
+---
+
+## 7. A revisão de `6cc58c1`, corrigida
+
+Cinco correções de ciclo de vida que a integração acrescentou. Nenhuma é mudança
+de arquitetura: o contrato de executor, a geração e o registro de recursos
+ficaram onde estavam.
+
+### Confirmar parada não era esperar dois segundos
+
+`executorNativo.encerrou` corria a promessa contra um prazo que **resolvia com
+sucesso**: a instância se dizia `encerrada` sem que ninguém tivesse parado nada,
+o ouvinte era removido, e o contador mostrava zero com o motor ainda parando.
+
+Agora o prazo devolve `false`. A instância só chega a `encerrada` com
+confirmação **e** sem recurso que tenha falhado ao sair; sem isso ela fica em
+`encerrando`, que é a verdade — pedimos, revogamos, descartamos o que era
+nosso, e o executor não disse que parou. Nenhum efeito é admitido nos dois
+estados; o que muda é o que o produto **afirma**.
+
+O que não sai fica anotado em `naoSairam`, e o diagnóstico conta as três coisas:
+recurso pendente, recurso que falhou, e instância sem confirmação. Do lado
+nativo, quem tira da tabela é a bomba ao ver o `Parou` — `mod_nativo_encerrar`
+**pede** e não remove.
+
+### A instância nativa não tinha identidade
+
+A tabela era indexada pelo texto do MOD. Sair de um servidor e entrar noutro que
+exige o mesmo MOD repõe o mesmo nome, e um encerramento a caminho matava a
+execução nova; recarregar um MOD tem o mesmo problema dentro de uma geração só.
+
+Agora a chave é um número que nasce uma vez e nunca se repete, e nome, geração e
+hash do pacote viajam com ele — nos eventos, na entrega e no encerramento. O
+§3 do contrato: «endereço IP e ID textual do MOD, sozinhos, não identificam uma
+execução».
+
+**Registrar vem antes de liberar a execução**, com a conferência de geração
+dentro do mesmo cadeado: fora dele, entre conferir e inserir cabe uma
+desmontagem inteira. E a revogação nativa encerra os executores dela sozinha, em
+`Session::revogar` e na ponte de eventos — a janela pode não pedir, porque pode
+estar travada ou já ter fechado.
+
+### O limite não acompanhava os dados
+
+`para_dentro` não tinha teto: `entregar` copiava e enfileirava sem limite. Agora
+a entrada tem a mesma contabilidade da saída, e recusa **dizendo** — quem chamou
+decide o que fazer, em vez de a fila decidir por ele.
+
+E a bomba devolvia o lugar da saída **antes** de emitir. Agora devolve depois, e
+a janela ganhou o teto que faltava: `atenderOMod` é assíncrono, então as
+mensagens se acumulam do lado de cá enquanto ele volta ao servidor. Sem ele, um
+MOD conversador enchia a memória da janela depois de a fila nativa ter dado o
+lugar por livre.
+
+O teto de oito pedidos do prelúdio não conta: ele é código do MOD, e o autor
+pode chamar `seele.postar` direto. Há teste para isso.
+
+### O ciclo dos temporizadores tinha um `continue`
+
+No ramo dos vencidos, os pedidos novos não eram recolhidos. Um callback que
+agendava outro timeout, ou que cancelava o próprio intervalo, ficava esperando
+uma mensagem de fora — que num MOD só de relógio pode nunca chegar. O timeout
+encadeado nunca disparava; o intervalo cancelado continuava batendo.
+
+Os atrasos passaram a ser validados: `1e300` é finito, passa por qualquer
+conferência de «é número», e `Duration::from_secs_f64` entra em pânico com ele —
+derrubar a thread do motor é derrubar o MOD de quem está na sessão por causa de
+um argumento. Aparado entre 4 ms e um dia, com `checked_add` no relógio.
+
+E o teto de 256 chega a quem pediu: a fachada guardava o callback de um
+temporizador que o anfitrião tinha ignorado, então `setTimeout` devolvia um
+número e ele nunca disparava. Agora devolve zero.
+
+### O alcance das medidas
+
+Uma leitura de `ps` que falha passou a ser **medição inválida**, e não zero:
+converter em zero faria o relatório dizer «este processo não usa memória».
+
+E o relatório diz o que ele é: binário de teste, sem bomba, sem WebView e sem
+mídia, uma coleta. Zero centésimos de CPU é «nada observável nesta resolução», e
+não consumo nulo. **A coleta integrada continua por fazer**, e ela é o item 4.
+
+### As provas
+
+Por reversão: o prazo voltando a resolver como sucesso, o ouvinte voltando a
+casar pelo nome, e o código voltando a rodar antes do registro — três guardas
+falhando com a frase certa.
+
+Por execução: timeout que agenda timeout andando sozinho, intervalo que se
+cancela sumindo da tabela do anfitrião, atraso absurdo sem pânico, teto de
+temporizadores dito a quem pediu, entrada saturando sem prender o encerramento,
+e o teto da fila valendo para quem não usa o prelúdio.
+
+**Windows e Linux: pendentes**, como antes.

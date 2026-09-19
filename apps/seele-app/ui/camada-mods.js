@@ -830,10 +830,25 @@ async function desenharOsContadoresDaSessao() {
     // que «sobrou alguma coisa» tem quando ela acontece.
     const abertos = recursosDePe(modsCarregados);
     const sobra = abertos.length === 0 ? "" : ` · recursos de pé: ${abertos.join(", ")}`;
+    // **Uma linha por instância nativa, com a identidade inteira.** Um total
+    // não responde «qual delas não está saindo», que é a pergunta de quem abre
+    // esta seção depois de desconfiar da máquina.
+    const nativos = (estado.mods_nativos ?? [])
+      .map(
+        (m) =>
+          `#${m.instancia} ${m.id} (sessão ${m.geracao}, ${m.hash}…)` +
+          (m.encerrando ? " ENCERRANDO" : "") +
+          ` · fila ${m.entrada_na_fila}↓/${m.saida_na_fila}↑` +
+          (m.saida_recusadas + m.entrada_recusadas > 0
+            ? ` · recusadas ${m.entrada_recusadas}↓/${m.saida_recusadas}↑`
+            : ""),
+      )
+      .join(" | ");
     linha.textContent =
       `${onde} · ${estado.eventos_descartados} eventos e ` +
       `${estado.comandos_recusados} comandos recusados por serem de uma sessão encerrada` +
-      sobra;
+      sobra +
+      (nativos ? ` · nativos: ${nativos}` : "");
   } catch (falha) {
     linha.textContent = "";
     console.warn("contadores da sessão:", falha);

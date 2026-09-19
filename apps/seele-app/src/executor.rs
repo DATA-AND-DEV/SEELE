@@ -280,6 +280,13 @@ pub(crate) enum ParaODentro {
     Resposta(String),
     /// Pare.
     Encerrar,
+    /// Conte o que você tem de pé.
+    ///
+    /// Existe porque «a tabela ficou vazia» não se observa de fora: ela é do
+    /// anfitrião, e o MOD não a enxerga. Sem isto, provar que um intervalo
+    /// cancelado saiu da tabela seria provar pela ausência de batidas — o que
+    /// também acontece quando o motor morre.
+    Diagnostico,
 }
 
 /// O que sai do executor.
@@ -294,6 +301,11 @@ pub(crate) enum ParaOFora {
     /// O executor parou. **É esta a confirmação** que `encerrou()` espera no
     /// contrato da interface: revogar é imediato e nosso, parar é dele.
     Parou,
+    /// O que o anfitrião tem de pé por este MOD.
+    Diagnostico {
+        /// Quantos temporizadores estão na tabela.
+        relogios: usize,
+    },
 }
 
 /// Um MOD de pé, com heap e contexto próprios.
@@ -304,6 +316,13 @@ pub(crate) enum ParaOFora {
 /// uma thread Rust à força».
 pub(crate) struct ExecutorQuickJs {
     para_dentro: Sender<ParaODentro>,
+    /// A fila de **entrada**, medida do mesmo jeito que a de saída.
+    ///
+    /// Ela não tinha teto, e a diretriz nomeia o buraco: `entregar` copiava e
+    /// enfileirava o JSON sem limite. Um MOD que pede mais rápido do que o
+    /// motor atende — ou uma janela que responde em rajada — fazia a memória
+    /// crescer do lado de cá, onde nenhum teto de heap do motor conta.
+    entrada: Arc<Fila>,
     /// **Some quando alguém escuta.** Ver [`Self::escutar`]: um canal tem um
     /// dono, e dois leitores dividiriam as mensagens em vez de vê-las.
     para_fora: Option<Receiver<ParaOFora>>,
@@ -330,16 +349,19 @@ impl ExecutorQuickJs {
         let dela = Arc::clone(&interrupcao);
         let fila = Arc::new(Fila::default());
         let dele = Arc::clone(&fila);
+        let entrada = Arc::new(Fila::default());
+        let dela_entrada = Arc::clone(&entrada);
 
         let thread = std::thread::Builder::new()
             .name("mod-quickjs".into())
-            .spawn(move || rodar(&recebe, &manda, &dela, &dele, limites))?;
+            .spawn(move || rodar(&recebe, &manda, &dela, &dele, &dela_entrada, limites))?;
 
         Ok(Self {
             para_dentro,
             para_fora: Some(para_fora),
             interrupcao,
             fila,
+            entrada,
             thread: Some(thread),
         })
     }
@@ -360,10 +382,41 @@ impl ExecutorQuickJs {
     /// # Errors
     ///
     /// Falha quando a thread já morreu.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn diagnostico(&self) -> Result<(), &'static str> {
+        self.para_dentro
+            .send(ParaODentro::Diagnostico)
+            .map_err(|_| "o executor não está de pé")
+    }
+
+    /// Entrega uma resposta a um pedido que o MOD fez.
+    ///
+    /// # Errors
+    ///
+    /// Falha quando a thread já morreu.
     pub(crate) fn entregar(&self, json: &str) -> Result<(), &'static str> {
+        // **O mesmo teto da saída, na entrada.** Sem ele, quem responde rápido
+        // demais enche a memória de quem usa, e o motor nem chega a ver as
+        // mensagens que já estão na fila.
+        //
+        // Recusado e dito: quem chamou recebe o motivo e decide — segurar,
+        // descartar, ou avisar. Enfileirar sem teto decide por ele.
+        if !self.entrada.cabe(json.len()) {
+            return Err("a fila de entrada do executor está cheia");
+        }
+        let quantos = json.len();
         self.para_dentro
             .send(ParaODentro::Resposta(json.to_owned()))
-            .map_err(|_| "o executor não está de pé")
+            .map_err(|_| {
+                self.entrada.tirar(quantos);
+                "o executor não está de pé"
+            })
+    }
+
+    /// A fila de entrada, para a bancada olhar.
+    #[must_use]
+    pub(crate) fn entrada(&self) -> &Fila {
+        &self.entrada
     }
 
     /// O que o MOD postou, se já postou alguma coisa.
@@ -475,6 +528,10 @@ fn rodar(
     manda: &Sender<ParaOFora>,
     interrupcao: &Arc<Interrupcao>,
     fila: &Arc<Fila>,
+    // Nomeada assim, e não `entrada`: o laço abaixo já chama de `entrada` a
+    // mensagem que chegou, e dois nomes iguais para coisas diferentes na mesma
+    // função é como um erro entra sem ninguém ver.
+    fila_de_entrada: &Arc<Fila>,
     limites: Limites,
 ) {
     let Ok(runtime) = Runtime::new() else {
@@ -584,10 +641,22 @@ fn rodar(
                 relatar(manda, interrupcao, resultado);
             }
             escoar_jobs(&runtime, interrupcao, manda);
+            // **Também aqui.** Sem esta linha, um callback que agenda outro
+            // temporizador — ou que cancela o próprio intervalo — deixava o
+            // pedido parado até chegar uma mensagem de fora. Num MOD que só
+            // usa relógio, «uma mensagem de fora» pode nunca chegar: o timeout
+            // encadeado nunca disparava e o intervalo cancelado continuava
+            // batendo. O `continue` escondia os dois.
+            recolher_pedidos_de_relogio(&contexto, &mut relogios);
             continue;
         };
         match entrada {
             ParaODentro::Encerrar => break,
+            ParaODentro::Diagnostico => {
+                let _ = manda.send(ParaOFora::Diagnostico {
+                    relogios: relogios.len(),
+                });
+            }
             ParaODentro::Codigo(fonte) => {
                 interrupcao.comecar();
                 // O prelúdio primeiro, e o código do MOD depois, na mesma
@@ -599,6 +668,9 @@ fn rodar(
                 relatar(manda, interrupcao, resultado);
             }
             ParaODentro::Resposta(json) => {
+                // O lugar volta **ao tirar da fila**, que é quando ela deixa de
+                // ocupar memória — e é o que a faz voltar a aceitar.
+                fila_de_entrada.tirar(json.len());
                 interrupcao.comecar();
                 let resultado = contexto.with(|ctx| -> rquickjs::Result<()> {
                     let Ok(ao_responder) = ctx.globals().get::<_, Function<'_>>("aoResponder")
@@ -684,8 +756,14 @@ const PRELUDIO: &str = r#"
   let pedidosDeRelogio = [];
   let proximoRelogio = 0;
 
+  // **O mesmo teto do anfitrião, aqui também.** Sem isto, a fachada guardava o
+  // callback de um temporizador que o anfitrião tinha ignorado: `setTimeout`
+  // devolvia um número, o MOD acreditava que estava agendado, e ele nunca
+  // disparava. Zero é o «não deu», e é o que um MOD confere.
+  const TETO = 256;
   const marcar = (fn, ms, repete) => {
     if (typeof fn !== 'function') return 0;
+    if (relogios.size >= TETO) return 0;
     const id = ++proximoRelogio;
     relogios.set(id, { fn, repete });
     pedidosDeRelogio.push({ id, ms: Number(ms) || 0, repete, cancelar: false });
@@ -735,6 +813,25 @@ struct PedidoDeRelogio {
     /// É um cancelamento, e não um pedido.
     #[serde(default)]
     cancelar: bool,
+}
+
+/// O maior atraso que um temporizador pode pedir.
+///
+/// Vinte e quatro horas. Acima disso o pedido é **aparado** para cá em vez de
+/// recusado: quem escreve um número enorme quer «nunca», e um dia é o mais
+/// perto de nunca que faz sentido guardar numa tabela que morre com a sessão.
+pub(crate) const ATRASO_MAXIMO: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// O atraso que o MOD pediu, em milissegundos, virado num `Duration` seguro.
+///
+/// Devolve nada para o que não é número — `NaN` reprova as duas comparações — e
+/// apara o resto entre [`INTERVALO_MINIMO`] e [`ATRASO_MAXIMO`].
+fn intervalo_valido(ms: f64) -> Option<Duration> {
+    if !ms.is_finite() {
+        return None;
+    }
+    let segundos = (ms.max(0.0) / 1000.0).min(ATRASO_MAXIMO.as_secs_f64());
+    Some(Duration::from_secs_f64(segundos).clamp(INTERVALO_MINIMO, ATRASO_MAXIMO))
 }
 
 /// Quanto falta para o temporizador mais próximo, ou nada se não houver.
@@ -807,11 +904,26 @@ fn recolher_pedidos_de_relogio(
         if relogios.len() >= TEMPORIZADORES_DE_PE {
             continue;
         }
-        let intervalo = Duration::from_secs_f64(ms.max(0.0) / 1000.0).max(INTERVALO_MINIMO);
+        // **O número vem do MOD, e `Duration::from_secs_f64` entra em pânico
+        // fora do intervalo representável.** `1e300` é finito, passa por
+        // qualquer conferência de «é número», e derruba a thread do motor — que
+        // é derrubar o MOD de quem está na sessão por causa de um argumento.
+        //
+        // Aparado, e não recusado: quem escreve `setTimeout(f, 1e300)` quer
+        // «nunca», e o teto é o mais perto de nunca que dá para representar sem
+        // mentir. Um `NaN` também cai aqui, pela comparação que ele reprova.
+        let Some(intervalo) = intervalo_valido(ms) else {
+            continue;
+        };
+        // E somar ao relógio também é verificado: `Instant + Duration` entra em
+        // pânico no estouro, e o teto acima o torna improvável — não impossível.
+        let Some(quando) = Instant::now().checked_add(intervalo) else {
+            continue;
+        };
         relogios.insert(
             id,
             Temporizador {
-                quando: Instant::now() + intervalo,
+                quando,
                 repete: repete.then_some(intervalo),
             },
         );
@@ -1238,10 +1350,13 @@ mod testes {
     /// gerente de tarefas responderia, que é a medida de que alguém reclama.
     /// Zero quando não deu para ler — e zero aparece no relatório em vez de
     /// virar um número inventado.
-    fn residente_kib() -> u64 {
-        campo_do_ps("rss=")
-            .and_then(|texto| texto.trim().parse().ok())
-            .unwrap_or(0)
+    /// **`None` é medição inválida, e não zero.**
+    ///
+    /// Converter uma leitura que falhou em zero faria o relatório dizer «este
+    /// processo não usa memória», que é a coisa mais errada que ele poderia
+    /// dizer — e ninguém saberia que o `ps` não respondeu.
+    fn residente_kib() -> Option<u64> {
+        campo_do_ps("rss=").and_then(|texto| texto.trim().parse().ok())
     }
 
     /// Quanto de CPU este processo já gastou, em centésimos de segundo.
@@ -1249,17 +1364,15 @@ mod testes {
     /// `ps` devolve `MM:SS.cc`. Centésimos porque é a resolução que ele dá — e
     /// dizer «dois centésimos» é mais honesto que converter para microssegundos
     /// um número que não os tem.
-    fn cpu_centesimos() -> u64 {
-        let Some(bruto) = campo_do_ps("cputime=") else {
-            return 0;
-        };
-        let bruto = bruto.trim();
-        let (minutos, resto) = bruto.split_once(":").unwrap_or(("0", bruto));
-        let (segundos, centesimos) = resto.split_once(".").unwrap_or((resto, "0"));
-        let m: u64 = minutos.trim().parse().unwrap_or(0);
-        let s: u64 = segundos.parse().unwrap_or(0);
-        let c: u64 = centesimos.parse().unwrap_or(0);
-        (m * 60 + s) * 100 + c
+    fn cpu_centesimos() -> Option<u64> {
+        let bruto = campo_do_ps("cputime=")?;
+        let bruto = bruto.trim().to_owned();
+        let (minutos, resto) = bruto.split_once(':').unwrap_or(("0", &bruto));
+        let (segundos, centesimos) = resto.split_once('.').unwrap_or((resto, "0"));
+        let m: u64 = minutos.trim().parse().ok()?;
+        let s: u64 = segundos.parse().ok()?;
+        let c: u64 = centesimos.parse().ok()?;
+        Some((m * 60 + s) * 100 + c)
     }
 
     /// Um campo do `ps` sobre este processo, cru.
@@ -1299,7 +1412,10 @@ mod testes {
         std::thread::sleep(Duration::from_millis(200));
         let base = residente_kib();
 
-        let mut relatorio = vec![format!("sem instância: {base} KiB")];
+        let mut relatorio = vec![match base {
+            Some(kib) => format!("sem instância: {kib} KiB"),
+            None => "sem instância: MEDIÇÃO INVÁLIDA (o `ps` não respondeu)".to_owned(),
+        }];
         for quantas in [1_usize, 3] {
             let subida = Instant::now();
             let mut instancias = Vec::new();
@@ -1323,7 +1439,16 @@ mod testes {
             // nada, e num aplicativo de voz isso disputa com o áudio.
             let cpu_antes = cpu_centesimos();
             std::thread::sleep(Duration::from_secs(1));
-            let ociosa = cpu_centesimos().saturating_sub(cpu_antes);
+            let ociosa = match (cpu_antes, cpu_centesimos()) {
+                // **Zero aqui é «nada observável nesta resolução»**, e não
+                // «consumo nulo». O `ps` dá centésimos de segundo; o que cabe
+                // abaixo disso não aparece, e afirmar que não existe seria
+                // afirmar mais do que a medida diz.
+                (Some(antes), Some(depois)) => {
+                    format!("{} centésimos em 1 s", depois.saturating_sub(antes))
+                }
+                _ => "MEDIÇÃO INVÁLIDA".to_owned(),
+            };
 
             let saida = Instant::now();
             for e in &mut instancias {
@@ -1333,10 +1458,16 @@ mod testes {
             let saiu_em = saida.elapsed();
             drop(instancias);
 
-            let sobre_a_base = i64::try_from(com).unwrap_or(0) - i64::try_from(base).unwrap_or(0);
-            let cada = (com as f64 - base as f64) / quantas as f64;
+            let memoria = match (base, com) {
+                (Some(base), Some(com)) => {
+                    let sobre = i64::try_from(com).unwrap_or(0) - i64::try_from(base).unwrap_or(0);
+                    let cada = (com as f64 - base as f64) / quantas as f64;
+                    format!("{com} KiB ({sobre:+} KiB sobre a base, {cada:.0} KiB cada)")
+                }
+                _ => "MEDIÇÃO INVÁLIDA".to_owned(),
+            };
             relatorio.push(format!(
-                "{quantas} instância(s): {com} KiB ({sobre_a_base:+} KiB sobre a base, {cada:.0} KiB cada) · subida {subiu_em:?} · CPU ociosa {ociosa} centésimos em 1 s · encerramento {saiu_em:?}"
+                "{quantas} instância(s): {memoria} · subida {subiu_em:?} · CPU ociosa {ociosa} · encerramento {saiu_em:?}"
             ));
         }
 
@@ -1345,9 +1476,224 @@ mod testes {
             println!("{linha}");
         }
         println!(
-            "medido em {} · leitura de `ps -o rss`, processo inteiro",
+            "medido em {} · `ps -o rss` e `-o cputime`, processo inteiro, uma coleta",
             std::env::consts::OS
         );
+        println!(
+            "**alcance**: binário de teste, sem bomba, sem WebView e sem mídia. \
+             Não é o custo do produto, e não substitui a coleta integrada."
+        );
+    }
+
+    /// Quantos temporizadores o anfitrião tem de pé por este MOD.
+    fn relogios_de_pe(executor: &ExecutorQuickJs) -> usize {
+        executor.diagnostico().expect("pedir diagnóstico");
+        loop {
+            match executor.receber(Duration::from_secs(2)) {
+                Some(ParaOFora::Diagnostico { relogios }) => return relogios,
+                Some(_) => {}
+                None => panic!("o executor não respondeu ao diagnóstico"),
+            }
+        }
+    }
+
+    /// **Um timeout que agenda outro timeout dispara** — sem tráfego de fora.
+    ///
+    /// O ramo dos vencidos tinha um `continue` antes de recolher os pedidos, e
+    /// o pedido do segundo timeout ficava parado até chegar uma mensagem
+    /// externa. Num MOD que só usa relógio, ela pode nunca chegar.
+    ///
+    /// Este teste não manda nada depois de iniciar: se a corrente andar, foi
+    /// porque a volta dos vencidos recolheu o pedido seguinte.
+    #[test]
+    fn um_timeout_que_agenda_outro_anda_sozinho() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "let n = 0;                  const passo = () => { n++; seele.postar(String(n)); if (n < 3) setTimeout(passo, 5); };                  setTimeout(passo, 5);",
+            )
+            .expect("código");
+        for esperado in ["1", "2", "3"] {
+            assert_eq!(
+                uma_mensagem(&executor),
+                esperado,
+                "a corrente de temporizadores parou"
+            );
+        }
+    }
+
+    /// **Um intervalo que se cancela para, e some da tabela do anfitrião.**
+    ///
+    /// Pelo mesmo `continue`: o cancelamento era anotado dentro do callback e
+    /// ficava sem coleta, então o intervalo continuava batendo depois de o MOD
+    /// tê-lo cancelado.
+    #[test]
+    fn um_intervalo_que_se_cancela_para_de_bater() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "let n = 0;                  const id = setInterval(() => {                    n++; seele.postar(String(n));                    if (n === 2) clearInterval(id);                  }, 5);",
+            )
+            .expect("código");
+        assert_eq!(uma_mensagem(&executor), "1");
+        assert_eq!(uma_mensagem(&executor), "2");
+        // Se o cancelamento não tivesse sido recolhido, viria «3» em 5 ms.
+        assert!(
+            executor.receber(Duration::from_millis(400)).is_none(),
+            "o intervalo continuou batendo depois de se cancelar"
+        );
+        // **E a tabela do anfitrião ficou vazia.** Sem esta linha, o teste
+        // passaria também se o motor tivesse morrido: as duas coisas param de
+        // mandar mensagem.
+        assert_eq!(
+            relogios_de_pe(&executor),
+            0,
+            "o intervalo cancelado continuou na tabela do anfitrião"
+        );
+    }
+
+    /// **Um atraso absurdo não derruba a thread do motor.**
+    ///
+    /// `1e300` é finito, passa por qualquer conferência de «é número», e
+    /// `Duration::from_secs_f64` entra em pânico com ele. Derrubar a thread por
+    /// causa de um argumento é derrubar o MOD de quem está na sessão.
+    #[test]
+    fn um_atraso_absurdo_nao_derruba_o_motor() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "setTimeout(() => seele.postar('absurdo'), 1e300);                  setTimeout(() => seele.postar('nan'), NaN);                  setTimeout(() => seele.postar('negativo'), -1);                  setTimeout(() => seele.postar('vivo'), 5);",
+            )
+            .expect("código");
+        // `NaN` e `-1` viram zero na fachada, como num navegador, e zero vira o
+        // piso de 4 ms — então os três curtos disparam. O de `1e300` é aparado
+        // para um dia, e não chega.
+        let mut chegaram = Vec::new();
+        while let Some(ParaOFora::Mensagem(json)) = executor.receber(Duration::from_millis(400)) {
+            chegaram.push(json);
+        }
+        chegaram.sort();
+        assert_eq!(chegaram, vec!["nan", "negativo", "vivo"]);
+        assert_eq!(
+            relogios_de_pe(&executor),
+            1,
+            "o temporizador de um dia devia continuar na tabela, e só ele"
+        );
+    }
+
+    /// E os atrasos aparados continuam dentro do que dá para representar.
+    #[test]
+    fn os_atrasos_sao_aparados_em_vez_de_estourar() {
+        for (pedido, esperado) in [
+            (0.0, Some(INTERVALO_MINIMO)),
+            (-5.0, Some(INTERVALO_MINIMO)),
+            (1.0, Some(INTERVALO_MINIMO)),
+            (100.0, Some(Duration::from_millis(100))),
+            (1e300, Some(ATRASO_MAXIMO)),
+            (f64::INFINITY, None),
+            (f64::NAN, None),
+        ] {
+            assert_eq!(intervalo_valido(pedido), esperado, "pedido de {pedido}");
+        }
+    }
+
+    /// **O teto de temporizadores é dito a quem chamou.**
+    ///
+    /// A fachada guardava o callback de um temporizador que o anfitrião tinha
+    /// ignorado: `setTimeout` devolvia um número, o MOD acreditava que estava
+    /// agendado, e ele nunca disparava.
+    #[test]
+    fn o_teto_de_temporizadores_chega_a_quem_pediu() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "let ultimo = 1;                  for (let i = 0; i < 300; i++) ultimo = setTimeout(() => {}, 60000);                  seele.postar(JSON.stringify({ ultimo }));",
+            )
+            .expect("código");
+        let resposta: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("JSON");
+        assert_eq!(
+            resposta.get("ultimo").and_then(serde_json::Value::as_u64),
+            Some(0),
+            "o tricentésimo `setTimeout` devolveu um número, e ele nunca vai disparar"
+        );
+    }
+
+    /// **A fila de entrada também tem teto, e ela não tinha.**
+    ///
+    /// `entregar` copiava e enfileirava o JSON sem limite. Uma janela que
+    /// responde em rajada — ou um MOD que pede mais rápido do que o motor
+    /// atende — fazia a memória crescer deste lado, onde nenhum teto de heap do
+    /// motor conta.
+    #[test]
+    fn a_fila_de_entrada_para_de_crescer_e_diz_a_quem_entrega() {
+        let executor = executor();
+        // O MOD nem precisa existir: o que se mede é a fila antes do motor.
+        // Um laço grande o bastante para passar dos dois tetos.
+        let mut recusou = false;
+        for _ in 0..10_000 {
+            let corpo = format!(r#"{{"n":1,"ok":true,"enchimento":"{}"}}"#, "x".repeat(1024));
+            if executor.entregar(&corpo).is_err() {
+                recusou = true;
+                break;
+            }
+        }
+        assert!(
+            recusou,
+            "a fila de entrada aceitou dez mil respostas de um kibibyte sem recusar nenhuma"
+        );
+        let (mensagens, bytes) = executor.entrada().ocupacao();
+        assert!(
+            mensagens <= MENSAGENS_NA_FILA && bytes <= BYTES_NA_FILA,
+            "a fila de entrada passou do teto: {mensagens} mensagens, {bytes} bytes"
+        );
+    }
+
+    /// **Saturar a entrada não impede revogar nem confirmar a parada.**
+    ///
+    /// É a mesma propriedade que já vale para a saída, e a diretriz pede as
+    /// duas: «preservar revogação e confirmação de parada quando houver
+    /// saturação».
+    #[test]
+    fn a_entrada_cheia_nao_prende_o_encerramento() {
+        let mut executor = so_com(SEM_TETO_DE_TRABALHO, SEM_PRAZO);
+        // O MOD entra num laço para o motor não drenar a fila de entrada.
+        executor
+            .iniciar("seele.postar('comecei'); while (true) {}")
+            .expect("código");
+        assert_eq!(uma_mensagem(&executor), "comecei");
+        while executor.entregar(r#"{"n":1,"ok":true}"#).is_ok() {}
+
+        let levou = executor
+            .encerrou(Duration::from_secs(10))
+            .expect("a saturação da entrada prendeu o encerramento");
+        assert!(
+            levou < Duration::from_secs(5),
+            "a saída levou {levou:?} com a entrada cheia e o MOD em laço"
+        );
+    }
+
+    /// **Um MOD que chama `seele.postar` direto também esbarra no teto.**
+    ///
+    /// A diretriz avisa: «não confiar no limite de oito pedidos do prelúdio: o
+    /// autor pode chamar `seele.postar` diretamente». O teto de oito é uma
+    /// conveniência do prelúdio, que é código do MOD; o que contém de verdade é
+    /// a fila, que é nossa.
+    #[test]
+    fn o_teto_da_fila_nao_depende_do_preludio() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "let coube = 0;                  for (let i = 0; i < 5000; i++) { if (seele.postar('x'.repeat(2048))) coube++; }                  globalThis.__coube = coube;",
+            )
+            .expect("código");
+        std::thread::sleep(Duration::from_millis(300));
+        let (mensagens, bytes) = executor.fila().ocupacao();
+        assert!(
+            mensagens <= MENSAGENS_NA_FILA && bytes <= BYTES_NA_FILA,
+            "o teto foi ultrapassado por quem não usa o prelúdio: {mensagens}, {bytes}"
+        );
+        assert!(executor.fila().recusadas() > 0);
     }
 
     /// E o descarte acontece na dona do runtime, sem matar thread à força.
