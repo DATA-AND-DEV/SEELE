@@ -175,10 +175,31 @@ SeeleUI.aoEvento((evento) => {
   }
 });
 
+/**
+ * Um passo da subida que **não derruba a subida**.
+ *
+ * A razão está escrita numa medição: a versão anterior fazia
+ * `estado.sessao = Boolean(await SeeleMods.snapshot())` direto, e quando o MOD
+ * subia antes de a sessão estar de pé o `snapshot` rejeitava. A função `async`
+ * morria ali, na segunda linha, e o MOD nunca desenhava — sem uma palavra.
+ *
+ * O produto passou a **dizer** a rejeição sem tratamento, que era o outro lado
+ * do mesmo defeito. Este lado é o do MOD: cada passo da subida responde por si,
+ * e o que falha vira aviso na tela em vez de um MOD que não aparece.
+ */
+async function tentar(o_que, passo, padrao) {
+  try {
+    return await passo();
+  } catch (falha) {
+    estado.aviso = `${o_que}: ${String(falha?.message ?? falha)}`;
+    return padrao;
+  }
+}
+
 async function comecar() {
   // O tema é pedido uma vez, e o produto o tira sozinho quando este MOD sai.
-  await SeeleUI.tema({ acento: "#6BFFB6" });
-  estado.sessao = Boolean(await SeeleMods.snapshot());
+  await tentar("tema", () => SeeleUI.tema({ acento: "#6BFFB6" }), null);
+  estado.sessao = Boolean(await tentar("sessão", () => SeeleMods.snapshot(), null));
   const inicial = await aoServidor({ op: "contar" });
   estado.vezes = Number(inicial.vezes ?? 0);
   estado.gravado = String(inicial.apelido ?? "");
@@ -186,4 +207,9 @@ async function comecar() {
   await desenhar();
 }
 
-comecar();
+// **A subida inteira também responde por si.** Um `catch` aqui é a diferença
+// entre um MOD que explica o que deu errado e um que some.
+comecar().catch((falha) => {
+  estado.aviso = `não subiu: ${String(falha?.message ?? falha)}`;
+  desenhar().catch(() => {});
+});

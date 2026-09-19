@@ -609,6 +609,46 @@ fn rodar(
     let dela = Arc::clone(interrupcao);
     runtime.set_interrupt_handler(Some(Box::new(move || dela.deve_parar())));
 
+    // **Uma promessa que rejeita sem ninguém pegando é dita.**
+    //
+    // Sem isto ela morre calada: o motor descarta a rejeição e o MOD para onde
+    // estava, sem uma palavra para a janela, para o registro nem para quem o
+    // escreveu. Medi no aplicativo nativo antes de escrever a linha — o MOD de
+    // referência chamava `SeeleMods.snapshot()` numa função `async` sem
+    // `catch`, e quando a sessão ainda não tinha subido ele sumia na segunda
+    // linha. No registro apareceu como duas mensagens e silêncio, e levei três
+    // execuções para separar isso de um travamento.
+    //
+    // `is_handled` é a segunda chamada, quando alguém prende um `catch`
+    // depois: essa não é falha, e avisar nela seria ensinar a ignorar o aviso.
+    //
+    // Passa pela mesma cota dos outros avisos, e por isso um MOD que rejeita
+    // num laço não enche o canal — a cota é o que separa «dito» de «gritado».
+    let manda_rejeicao = manda.clone();
+    let fila_de_rejeicao = Arc::clone(fila);
+    runtime.set_host_promise_rejection_tracker(Some(Box::new(
+        move |ctx, _promessa, motivo, ja_tratada| {
+            if ja_tratada {
+                return;
+            }
+            let texto = motivo
+                .as_exception()
+                .and_then(rquickjs::Exception::message)
+                .or_else(|| {
+                    ctx.json_stringify(motivo.clone())
+                        .ok()
+                        .flatten()
+                        .and_then(|s| s.to_string().ok())
+                })
+                .unwrap_or_else(|| "sem motivo".to_owned());
+            avisar(
+                &manda_rejeicao,
+                &fila_de_rejeicao,
+                ParaOFora::Falhou(format!("promessa rejeitada sem tratamento: {texto}")),
+            );
+        },
+    )));
+
     let Ok(contexto) = Context::full(&runtime) else {
         let _ = manda.send(ParaOFora::Falhou("o contexto não subiu".into()));
         let _ = manda.send(ParaOFora::Parou);
@@ -1800,6 +1840,50 @@ mod testes {
             "o teto foi ultrapassado por quem não usa o prelúdio: {mensagens}, {bytes}"
         );
         assert!(executor.fila().recusadas() > 0);
+    }
+
+    /// **Uma promessa que rejeita sem ninguém pegando é dita.**
+    ///
+    /// Medido no aplicativo nativo antes de ser escrito aqui: o MOD de
+    /// referência chamava `SeeleMods.snapshot()` numa função `async` sem
+    /// `catch`, e quando a sessão ainda não tinha subido o `snapshot` rejeitava
+    /// — o MOD morria ali, na segunda linha, **sem uma palavra**. No registro
+    /// aparecia como duas falas e silêncio; na tela, como um MOD que não
+    /// desenha. Levei três execuções para separar isso de um travamento.
+    ///
+    /// É o defeito que o `CLAUDE.md` deste repositório nomeia como o mais caro:
+    /// o produto sabe e não conta. O motor **sabe** — QuickJS rastreia a
+    /// rejeição sem tratamento —, e quem escreveu o MOD é quem precisa saber.
+    #[test]
+    fn uma_promessa_rejeitada_sem_tratamento_nao_morre_calada() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "globalThis.aoResponder = () => {};\
+                 (async () => { throw new Error('ninguém me pega'); })();",
+            )
+            .expect("código");
+
+        let prazo = std::time::Instant::now();
+        let mut dito = None;
+        while prazo.elapsed() < Duration::from_secs(3) {
+            match executor.receber(Duration::from_millis(100)) {
+                Some(ParaOFora::Falhou(motivo)) => {
+                    dito = Some(motivo);
+                    break;
+                }
+                Some(_) => {}
+                None => {}
+            }
+        }
+        let motivo = dito.expect(
+            "um MOD cuja promessa rejeitou sem tratamento sumiu sem dizer nada — \
+             é exatamente assim que ele desaparece na máquina de quem o instalou",
+        );
+        assert!(
+            motivo.contains("ninguém me pega"),
+            "o aviso não leva o que o MOD disse: {motivo}"
+        );
     }
 
     /// E o descarte acontece na dona do runtime, sem matar thread à força.

@@ -4016,6 +4016,18 @@ fn midia_do_mod(
     let lida = seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
         motivo: "formato-desconhecido".to_owned(),
     })?;
+    // **Dito, como o código do MOD é dito.** Um arquivo que sai do pacote de um
+    // terceiro e vira som na máquina de quem está numa conversa é um evento que
+    // quem hospeda tem direito de ler no registro — e é o que permite medir o
+    // caminho da mídia sem a janela contar nada.
+    tracing::info!(
+        mod_id = %id,
+        geracao,
+        caminho = %caminho,
+        papel = lida.papel,
+        bytes = lida.bytes,
+        "mídia de MOD servida"
+    );
     Ok(MidiaDoMod {
         uri: lida.uri,
         papel: lida.papel,
