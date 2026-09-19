@@ -2123,10 +2123,16 @@ const TETO_DO_ESCOLHIDO: usize = 10 * 1024 * 1024;
 
 /// Quanto de um arquivo escolhido sai por pedido.
 ///
-/// Sessenta e quatro kibibytes de bytes viram oitenta e seis de base64 — bem
-/// abaixo do teto de mensagem, e grande o bastante para dez megabytes saírem em
-/// cento e sessenta idas em vez de milhares.
-const PEDACO_DO_ESCOLHIDO: usize = 64 * 1024;
+/// **Múltiplo de três**, e é o que importa aqui. O base64 codifica três bytes
+/// em quatro caracteres; uma janela que não fecha um grupo de três sai com
+/// `=` no meio, e dois pedaços consecutivos concatenados deixam de ser o
+/// arquivo. `65536` não é múltiplo de três — `65535` é —, e a diferença entre
+/// os dois é uma imagem que chega corrompida sem nada acusar.
+///
+/// Sessenta e quatro kibibytes viram oitenta e sete mil caracteres: bem abaixo
+/// do teto de mensagem, e grande o bastante para dez megabytes saírem em cento
+/// e sessenta idas em vez de milhares.
+const PEDACO_DO_ESCOLHIDO: usize = 65535;
 
 /// Um arquivo que uma pessoa escolheu, guardado pelo produto.
 struct ArquivoEscolhidoDeMod {
@@ -7897,6 +7903,45 @@ mod a_supervisao_dos_mods_nativos {
         // a sessão que acabou de começar.
         assert_eq!(guardados.guardados.len(), 1);
         assert!(guardados.guardados.values().all(|a| a.geracao == 8));
+    }
+
+    /// **Dois pedaços seguidos, concatenados, são o arquivo.**
+    ///
+    /// O base64 codifica três bytes em quatro caracteres. Uma janela que não
+    /// fecha um grupo de três sai com `=` no meio, e o que o MOD junta deixa de
+    /// ser o arquivo — uma imagem que chega corrompida sem nada acusar, porque
+    /// cada pedaço, sozinho, é base64 válido.
+    ///
+    /// `65536` não é múltiplo de três. `65535` é.
+    #[test]
+    fn os_pedacos_de_um_arquivo_escolhido_se_juntam_de_volta() {
+        assert_eq!(
+            super::PEDACO_DO_ESCOLHIDO % 3,
+            0,
+            "o pedaço deixou de fechar grupos de três, e dois seguidos não se juntam"
+        );
+        // Dois pedaços e meio, para o último ser o único com enchimento.
+        let bytes: Vec<u8> = (0..super::PEDACO_DO_ESCOLHIDO * 2 + 7)
+            .map(|i| u8::try_from(i % 251).unwrap_or(0))
+            .collect();
+        let inteiro = seele_ffi::base64_de(&bytes);
+        let mut juntado = String::new();
+        let mut inicio = 0;
+        while inicio < bytes.len() {
+            let fim = inicio
+                .saturating_add(super::PEDACO_DO_ESCOLHIDO)
+                .min(bytes.len());
+            juntado.push_str(&seele_ffi::base64_de(
+                bytes.get(inicio..fim).expect("a fatia"),
+            ));
+            inicio = fim;
+        }
+        assert_eq!(juntado, inteiro, "os pedaços não se juntam no arquivo");
+        // E só o último tem enchimento: um `=` no meio é o defeito com nome.
+        assert!(
+            !juntado[..juntado.len() - 4].contains('='),
+            "sobrou enchimento no meio do que foi juntado"
+        );
     }
 
     /// **E há teto: um MOD que abre o seletor num laço não enche a memória.**

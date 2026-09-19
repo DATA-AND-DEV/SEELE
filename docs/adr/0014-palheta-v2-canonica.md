@@ -167,3 +167,31 @@ caminho que não resolve é pior que nome nenhum: ele manda alguém procurar.
 
 Quem precisar dos comps os encontra no histórico do git, no commit anterior a
 este. Eles não foram perdidos; deixaram de ser árvore viva.
+
+
+## Adendo — 2026-09-19 · duas pilhas de tipo, nomeadas
+
+`--seele-mono` deixou de carregar a pilha e passou a apontar para uma:
+`var(--seele-pilha-mono)`. A pilha que ele tinha está intacta, com o mesmo
+primeiro nome e os mesmos recuos — o que mudou é que agora ela tem nome, e
+existe uma segunda ao lado, `--seele-pilha-sans`.
+
+### Por que dois nomes em vez de um valor
+
+Porque um MOD de tema precisa poder trocar a família **dentro da sessão**, e a
+alternativa que estava sobre a mesa era deixá-lo escrever uma família qualquer.
+Isso quebraria o que este ADR congela: a escala daqui é medida — tamanho,
+entrelinha e contraste andam juntos —, e uma família de fora move os três de uma
+vez sem nada conferir o resultado.
+
+Com dois nomes, a escolha existe e a régua continua sendo do produto. As duas
+pilhas são as que ele já serve: `@font-face` entrega «IBM Plex Mono» e «Saira
+Condensed», e o guarda de `tests/fontes.rs` passou a exigir as duas — a que
+ninguém escolheu hoje é a que cai em silêncio amanhã. Ele pegou a primeira
+tentativa, que pedia «Saira» e não «Saira Condensed».
+
+### O que não mudou
+
+Nenhum valor de cor, espaçamento, peso ou tamanho. O arquivo continua sendo
+cópia byte a byte de `design/seele-tokens.css`, e a ordem continua sendo:
+mudar o design primeiro, este ADR em seguida, e só então copiar.

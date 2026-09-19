@@ -93,7 +93,16 @@ fn every_face_the_tokens_name_is_actually_served() {
         "ui/fontes.css declares no @font-face at all"
     );
 
-    for variable in ["seele-display", "seele-mono", "seele-jp"] {
+    // **As duas pilhas, e não só a que está em uso.** `--seele-mono` virou uma
+    // indireção para que um MOD de tema possa escolher entre elas dentro da
+    // sessão. As duas são escolhíveis, então as duas precisam ser servidas: a
+    // que ninguém escolheu hoje é a que cai em silêncio amanhã.
+    for variable in [
+        "seele-display",
+        "seele-pilha-mono",
+        "seele-pilha-sans",
+        "seele-jp",
+    ] {
         let family = first_family(&tokens, variable);
         assert!(
             served.contains(&family),
