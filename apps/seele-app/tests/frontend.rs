@@ -10859,6 +10859,62 @@ fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
     );
 }
 
+/// **Todo pedido de MOD recebe resposta, inclusive a recusa.**
+///
+/// `SeeleMods.request` é uma promessa, e uma promessa não rejeita sozinha: um
+/// pedido que a janela decide não atender e não responde deixa o MOD esperando
+/// para sempre — vivo, mudo, e sem nada no registro.
+///
+/// Medido no aplicativo nativo em 19/09, em três de seis execuções: o MOD
+/// parava na segunda linha e ninguém sabia por quê. O caminho era o `return`
+/// calado depois do `await` do retrato, quando a sessão tinha andado no meio.
+///
+/// Recusar **não é admitir efeito** — é o contrário dele, e é o que devolve o
+/// controle a quem escreveu o MOD.
+#[test]
+fn um_pedido_de_mod_nunca_fica_sem_resposta() {
+    let base = without_comments(&read("ui/base.js"));
+    let atender = js_function(&base, "async function atenderOMod(");
+
+    // O único `return` calado que sobra é o do caso em que **outra** instância
+    // já tomou o lugar desta: aí não há a quem responder.
+    assert!(
+        atender.contains("if (!minhaInstancia()) return;"),
+        "a porta de entrada deixou de distinguir «não é minha instância» de \
+         «a sessão andou», e as duas calavam o MOD: {atender}"
+    );
+    assert!(
+        !atender.contains("if (!meu()) return;"),
+        "voltou um `return` calado quando a sessão andou, e é exatamente ele \
+         que prende o MOD esperando para sempre: {atender}"
+    );
+
+    // E a recusa sai pelo mesmo `responder`, para não haver dois caminhos.
+    let recusa = atender
+        .split_once("const responder = (ok, carga) => {")
+        .expect("`responder`")
+        .1;
+    assert!(
+        recusa.contains("ok: false") && recusa.contains("sessao-encerrada"),
+        "`responder` deixou de recusar quando não pode entregar o valor, e \
+         calar deixa o MOD preso: {recusa}"
+    );
+
+    // O retrato é o caso que custou a medição: depois do `await`, ele não pode
+    // sair sem resposta nenhuma.
+    let depois = atender
+        .split_once("case \"snapshot\"")
+        .expect("o caso do retrato")
+        .1
+        .split_once("break;")
+        .expect("o fim do caso")
+        .0;
+    assert!(
+        depois.contains("responder(") && !depois.contains("return;"),
+        "o caso do retrato voltou a sair sem responder: {depois}"
+    );
+}
+
 /// **O que a região cria nasce com dono, teto e descarte.**
 ///
 /// A diretriz de 19/09: «cada recurso deve nascer com dono, limites e
@@ -11258,11 +11314,22 @@ fn a_geracao_da_sessao_prende_todo_trabalho_atrasado() {
          o pedido de parada e a confirmação ela fica em `encerrando`, e nesse \
          intervalo nada pode ser admitido: {atender}"
     );
+    // E sair **antes** do `switch`, não depois: uma mensagem que chegue durante
+    // a saída não pode desenhar, pedir nem escrever tema para só então
+    // descobrir que não tinha com quem falar.
+    //
+    // A saída deixou de ser um `return` calado — ela recusa, e o porquê está em
+    // `um_pedido_de_mod_nunca_fica_sem_resposta` —, mas continua sendo uma
+    // saída, e é isso que esta linha guarda.
+    // Lido até o fim do trecho, e não até a primeira `}`: a recusa carrega um
+    // literal de objeto, e a chave dele fecharia a leitura antes do `return`.
+    let depois_da_recusa = antes_do_switch
+        .split_once("if (!meu()) {")
+        .map_or("", |(_, resto)| resto);
     assert!(
-        antes_do_switch.contains("if (!meu()) return;"),
-        "a conferência de instância voltou para depois do efeito: uma mensagem \
-         que chegue durante a saída desenha, pede e escreve tema antes de \
-         descobrir que não tinha com quem falar: {atender}"
+        !depois_da_recusa.is_empty() && depois_da_recusa.contains("return;"),
+        "a conferência de instância voltou para depois do efeito, ou deixou de \
+         sair antes do `switch`: {atender}"
     );
 
     // O pedido carrega a geração nas duas pontas: no que sobe e no que volta.

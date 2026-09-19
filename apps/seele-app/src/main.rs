@@ -2241,9 +2241,19 @@ fn mod_request(
     // sessão anterior para o servidor da seguinte, com o número de correlação
     // dela — e a resposta voltaria para um pedido que outro MOD agora ocupa.
     session.confere_geracao(geracao)?;
-    session
+    // **Dito na entrada e no desfecho.** Um pedido de MOD que some entre a
+    // janela e o servidor é indistinguível, no registro, de um MOD que nunca
+    // pediu — e foi exatamente essa ambiguidade que me custou três execuções
+    // na medição de 19/09. Com estas duas linhas a pergunta «ele chegou?» tem
+    // resposta sem ninguém instrumentar nada.
+    tracing::debug!(mod_id = %id, geracao, request, channel, "pedido de MOD a caminho do servidor");
+    let saiu = session
         .connection()?
-        .mod_request(request, id, channel, payload)
+        .mod_request(request, id.clone(), channel, payload);
+    if let Err(erro) = &saiu {
+        tracing::warn!(mod_id = %id, request, %erro, "pedido de MOD recusado na saída");
+    }
+    saiu
 }
 
 // ---------------------------------------------------------------- anexos

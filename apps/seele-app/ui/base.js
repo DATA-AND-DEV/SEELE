@@ -945,16 +945,41 @@ async function atenderOMod(mod, instancia, m) {
   // `admite` responde as duas de uma vez: a instância está em `ativa` — e não
   // em `encerrando`, que é onde ela fica entre o pedido de parada e a
   // confirmação — e a geração dela é a de pé.
-  const meu = () =>
-    modsCarregados.get(mod.id) === instancia && instancia.admite(geracaoDaSessao);
-  if (!meu()) return;
+  const minhaInstancia = () => modsCarregados.get(mod.id) === instancia;
+  const meu = () => minhaInstancia() && instancia.admite(geracaoDaSessao);
 
   const responder = (ok, carga) => {
     // Perguntada **de novo** aqui, e não herdada de cima: entre a conferência
     // de entrada e esta linha há `await`s, e a sessão pode ter acabado no meio
-    // deles. Mandar para uma instância encerrada é falar com quem já saiu.
-    if (meu()) instancia.executor.entregar({ tipo: "resposta", n: m.n, ok, ...carga });
+    // deles. Mandar o **valor** para uma instância encerrada é falar com quem
+    // já saiu.
+    if (meu()) {
+      instancia.executor.entregar({ tipo: "resposta", n: m.n, ok, ...carga });
+      return;
+    }
+    // **Mas calar não é a alternativa.** Um pedido sem resposta deixa o MOD
+    // esperando para sempre: `SeeleMods.request` é uma promessa, e ela não
+    // rejeita sozinha. Medi isto no aplicativo nativo — o MOD parava na
+    // segunda linha, vivo, mudo, sem nada no registro, e em três de seis
+    // execuções. Recusar **não é admitir efeito**: é o contrário dele, e é a
+    // única coisa que devolve o controle a quem escreveu o MOD.
+    //
+    // Só para a instância que ainda é a deste MOD: se outra já tomou o lugar,
+    // esta não tem a quem responder.
+    if (minhaInstancia()) {
+      instancia.executor.entregar({
+        tipo: "resposta",
+        n: m.n,
+        ok: false,
+        erro: "sessao-encerrada",
+      });
+    }
   };
+  if (!minhaInstancia()) return;
+  if (!meu()) {
+    responder(false, { erro: "sessao-encerrada" });
+    return;
+  }
   try {
     switch (m.tipo) {
       case "pedido":
@@ -962,9 +987,10 @@ async function atenderOMod(mod, instancia, m) {
         break;
       case "snapshot": {
         const valor = await invoke("snapshot");
-        // Depois do `await`: a sessão pode ter acabado enquanto o retrato vinha,
-        // e entregá-lo daria ao MOD o estado de uma sessão que já não é a dele.
-        if (!meu()) return;
+        // Depois do `await`: a sessão pode ter acabado enquanto o retrato
+        // vinha, e entregá-lo daria ao MOD o estado de uma sessão que já não é
+        // a dele. `responder` recusa nesse caso — **e recusa é obrigatório**:
+        // era este `return` calado que prendia o MOD para sempre.
         responder(true, { valor });
         break;
       }

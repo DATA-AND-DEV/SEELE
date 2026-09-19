@@ -1,7 +1,18 @@
-2026-09-19T14:31:11.206788Z  INFO seele_app: onde o módulo de vídeo é procurado pasta=/private/tmp/claude-501/-Users-dev-alexandre-SEELE/015ec174-1fd5-4af9-81a4-59c96ff8a6bf/scratchpad/casa-fatia
-2026-09-19T14:31:11.206835Z  INFO seele_app: janela pronta millis=163
-2026-09-19T14:31:15.307885Z  INFO seele_app: MOD reservado no executor nativo mod_id=seele/referencia geracao=1 instancia=1
-2026-09-19T14:31:15.308489Z  INFO seele_app: MOD ativado no executor nativo instancia=1 geracao=1
-2026-09-19T14:31:15.309131Z DEBUG seele_app: fala de MOD nativo mod_id=seele/referencia tipo="mensagem"
-2026-09-19T14:31:15.310774Z DEBUG seele_app: fala de MOD nativo mod_id=seele/referencia tipo="mensagem"
-2026-09-19T14:31:15.313340Z DEBUG seele_app: fala de MOD nativo mod_id=seele/referencia tipo="mensagem"
+2026-09-19T14:42:19.286426Z  INFO seele_app: onde o módulo de vídeo é procurado pasta=/private/tmp/claude-501/-Users-dev-alexandre-SEELE/015ec174-1fd5-4af9-81a4-59c96ff8a6bf/scratchpad/casa-fatia
+2026-09-19T14:42:19.286472Z  INFO seele_app: janela pronta millis=191
+2026-09-19T14:42:23.443518Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=1 channel=0
+2026-09-19T14:42:23.451462Z  INFO seele_app: MOD reservado no executor nativo mod_id=seele/referencia geracao=1 instancia=1
+2026-09-19T14:42:23.451955Z  INFO seele_app: MOD ativado no executor nativo instancia=1 geracao=1
+2026-09-19T14:42:23.452585Z DEBUG seele_app: fala de MOD nativo mod_id=seele/referencia tipo="mensagem"
+2026-09-19T14:42:23.454516Z DEBUG seele_app: fala de MOD nativo mod_id=seele/referencia tipo="mensagem"
+2026-09-19T14:42:27.441437Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=2 channel=0
+2026-09-19T14:42:31.441052Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=3 channel=0
+2026-09-19T14:42:35.443098Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=4 channel=0
+2026-09-19T14:42:39.450447Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=5 channel=0
+2026-09-19T14:42:43.447735Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=6 channel=0
+2026-09-19T14:42:47.453000Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=7 channel=0
+2026-09-19T14:42:51.457477Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=8 channel=0
+2026-09-19T14:42:55.460523Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=9 channel=0
+2026-09-19T14:42:59.464180Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=10 channel=0
+2026-09-19T14:43:03.469155Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=11 channel=0
+2026-09-19T14:43:07.473743Z DEBUG seele_app: pedido de MOD a caminho do servidor mod_id= geracao=1 request=12 channel=0

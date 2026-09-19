@@ -106,9 +106,32 @@ teria produzido.
 Não é o defeito acima: com o rastreador ligado, nenhum `Falhou` foi emitido.
 O MOD está genuinamente esperando.
 
-O registro desta execução está em `execucao-pedido-preso.log`. Não investiguei
-até a causa, e não vou escrever um palpite aqui: o que está medido é que
-acontece, que é intermitente, e que o prazo não cobre.
+### O que a instrumentação seguinte mostrou
+
+`mod_request` passou a dizer, no Rust, todo pedido que sai da janela. Com ela:
+
+- o pedido do MOD **nunca chega ao Rust**. Os únicos que aparecem têm `mod_id`
+  vazio, e esses são o catálogo que a própria janela consulta — e eles
+  continuam fluindo depois do travamento, então a ponte não está parada;
+- o MOD para em **duas** falas, não três: ele não chega a pedir ao servidor.
+  A segunda fala é `SeeleMods.snapshot()`, e é a resposta dela que não volta;
+- com o rastreador de rejeições ligado, **nenhum `Falhou` é emitido**: não é
+  uma promessa rejeitada em silêncio. O MOD está genuinamente esperando;
+- só uma instância é ativada, então não é outra instância tendo tomado o lugar.
+
+Isso fechou um caminho de silêncio que era real e que este defeito revelou:
+`atenderOMod` tinha um `return` calado depois do `await` do retrato. Quando a
+sessão andava no meio, o pedido saía sem resposta nenhuma — e
+`SeeleMods.request` é uma promessa, que não rejeita sozinha. Recusar não é
+admitir efeito; é o contrário dele. Está consertado, com guarda e reversão.
+
+**Mas não é o que prende o MOD aqui**, e a execução depois do conserto
+continua parando em duas falas. O que sobra, e que não isolei, é o
+`invoke("snapshot")` não se resolvendo. Não vou escrever palpite: o que está
+medido é que acontece, que é intermitente — três de seis execuções —, que o
+prazo de 15 s não cobre, e que o pedido não sai da janela.
+
+O registro está em `execucao-pedido-preso.log`.
 
 **Isto bloqueia a medição da fatia ativa**, e provavelmente bloqueia a entrega:
 um MOD que espera para sempre por uma resposta que não vem é uma falha de
