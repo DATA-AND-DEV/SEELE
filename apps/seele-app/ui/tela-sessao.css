@@ -1993,6 +1993,76 @@ button.linha-nome:hover { text-decoration: underline; }
 /* A nota ocupa a largura inteira, embaixo dos dois campos. */
 .criar .nota { grid-column: 1 / -1; }
 
+/* ---------- o que um MOD desenha, e onde — ADR 0049 ----------
+
+   ---- o tema não está aqui, e isto é o registro de onde ele está ----
+
+   Um MOD pede um tema, e o produto redefine quatro tokens — fundo, texto,
+   acento e borda — **dentro de `#tela-sessao`**. Isso não é uma regra desta
+   folha: `aplicarOTemaDoMod`, em `base.js`, escreve a propriedade no elemento
+   pela CSSOM.
+
+   Duas razões, e nenhuma é gosto. A CSP desta janela é `style-src 'self'`, que
+   recusa um `<style>` montado em tempo de execução. E o valor vem de código de
+   terceiro: como propriedade ele é um valor, e como texto de regra ele seria
+   uma porta para escrever CSS arbitrário na página.
+
+   Escopado na sessão, e não na raiz: a tela de entrada, o launcher e a bateria
+   ficam com a cor do produto enquanto um MOD estiver de pé, e tirar a
+   propriedade faz a sessão voltar sozinha — não há aqui, nem lá, uma cor
+   padrão posta por cima da que `tokens.css` define.
+
+   **O contraste medido em `tokens.css` é o do produto.** Um MOD que troque
+   estes quatro troca também as razões que aquelas linhas afirmam; por isso
+   `aplicarOTemaDoMod` recusa um tema cujo texto não alcance 4,5:1 sobre o
+   fundo que ficaria em vigor, e recusa pelo nome.
+
+/* ---- a faixa ----
+
+   Vazia ela não existe: `hidden` é tirado por `desenharARegiaoDoMod` e reposto
+   por `limparARegiaoDoMod` quando sai a última região. Uma faixa de altura zero
+   com borda em cima seria uma régua que aparece sem nada do outro lado. */
+.regioes-dos-mods {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 1px;
+  max-height: 240px;
+  overflow-y: auto;
+  border-top: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+.regiao-de-mod {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+  border-right: 1px solid var(--seele-linha);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+}
+
+.regiao-de-mod:last-child { border-right: none; }
+
+/* Tudo o que um MOD declara sai por esta classe, e por isso ela é a única
+   régua de espaçamento lá dentro: a gramática de `montarODeclarado` não tem
+   como pedir margem, e não ter como é o ponto. */
+.regiao-de-mod-parte {
+  margin: 0 0 var(--seele-celula-x);
+  overflow-wrap: anywhere;
+}
+
+.regiao-de-mod h3.regiao-de-mod-parte {
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+.regiao-de-mod ul.regiao-de-mod-parte { padding-left: var(--seele-celula-x); }
+
 /* ---------- o que aperta primeiro, quando a janela aperta ----------
 
    As quatro colunas somam 656px de largura fixa antes de a conversa receber um

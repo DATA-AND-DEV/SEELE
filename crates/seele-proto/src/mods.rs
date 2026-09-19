@@ -31,6 +31,18 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 /// the schema changes when the *manifest* gains a field, the API when what a
 /// MOD can *call* changes. ADR 0045 freezes each API version in its own file,
 /// never edited once shipped.
+/// **3 desde 18/09/2026, e é uma ruptura** — ADR 0049.
+///
+/// Um MOD deixa de rodar na janela do produto: a lógica vai para um `Worker`
+/// sem DOM, e o desenho passa a ser declarado por uma API de regiões e tema. O
+/// que a API 2 permitia — alcançar `document`, o global do Tauri e tudo o mais
+/// que a página tem — deixa de existir, e não há caminho de compatibilidade: um
+/// MOD de API 2 não roda aqui.
+///
+/// A decisão de não ter caminho de compatibilidade está no ADR: enquanto
+/// houvesse um MOD antigo carregado, a promessa «o que um MOD faz some quando
+/// você sai do servidor» continuaria falsa, e o produto prometeria duas coisas
+/// diferentes ao mesmo tempo.
 pub const MOD_API_VERSION: u32 = 2;
 
 /// What a MOD declares about itself.
@@ -114,6 +126,25 @@ pub enum Refused {
         ours: u32,
     },
 
+    /// The MOD targets an API this build no longer offers.
+    ///
+    /// **Existe porque o ADR 0049 é uma ruptura, e não um alargamento.** Antes
+    /// dele, uma API mais velha era o caso normal de todo MOD antigo: o que a
+    /// API 1 oferecia a API 2 continuava oferecendo. A API 3 tirou coisa —
+    /// `document`, o global do Tauri, a página inteira —, e um MOD escrito
+    /// contra a 2 não é um MOD que pede menos: é um MOD que pede o que não
+    /// existe mais.
+    ///
+    /// Carregá-lo assim mesmo o faria falhar na primeira linha, e a pessoa que
+    /// o instalou leria «não carregou» sem saber que o motivo era a versão.
+    #[error("mod targets API {wanted}, this build offers {ours} and no older")]
+    ApiTooOld {
+        /// API the MOD asks for.
+        wanted: u32,
+        /// API this build offers, and the only one it offers.
+        ours: u32,
+    },
+
     /// The identifier is not `author/name`.
     #[error("mod id is not `author/name`")]
     MalformedId,
@@ -141,8 +172,16 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
             ours: MANIFEST_SCHEMA,
         });
     }
+    // **Igual, e não «até».** Ver [`Refused::ApiTooOld`]: a API 3 tirou coisa, e
+    // «serve uma API mais velha» deixou de ser verdade no dia em que ela tirou.
     if manifest.api > MOD_API_VERSION {
         return Err(Refused::ApiTooNew {
+            wanted: manifest.api,
+            ours: MOD_API_VERSION,
+        });
+    }
+    if manifest.api < MOD_API_VERSION {
+        return Err(Refused::ApiTooOld {
             wanted: manifest.api,
             ours: MOD_API_VERSION,
         });

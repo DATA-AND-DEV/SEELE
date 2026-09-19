@@ -1097,28 +1097,6 @@ fn abrir_no_navegador(url: String) -> Result<(), String> {
         .map_err(|erro| format!("não consegui abrir o navegador: {erro}"))
 }
 
-fn por_cento_desfeito(cru: &str) -> String {
-    let bytes = cru.as_bytes();
-    let mut saida = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let Some(&b) = bytes.get(i) else { break };
-        if b == b'%' {
-            let par = cru
-                .get(i + 1..i + 3)
-                .and_then(|h| u8::from_str_radix(h, 16).ok());
-            if let Some(byte) = par {
-                saida.push(byte);
-                i += 3;
-                continue;
-            }
-        }
-        saida.push(b);
-        i += 1;
-    }
-    String::from_utf8(saida).unwrap_or_else(|_| cru.to_owned())
-}
-
 /// Se a regra de firewall desta máquina **não** cobre o executável que está
 /// rodando, e por quê.
 ///
@@ -2511,6 +2489,58 @@ async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
     }
 }
 
+/// O código do cliente de um MOD, conferido, para a janela pôr num `Worker`.
+///
+/// # Por que passa por aqui, e não pelo `mod://`
+///
+/// ADR 0049. Um `Worker` não aceita URL de outra origem, e `mod://localhost` é
+/// outra origem que `tauri://localhost`. As saídas eram alargar `connect-src`
+/// para a janela buscar o texto por `fetch`, ou pedi-lo pela ponte que já
+/// existe.
+///
+/// A segunda não custa nada e é melhor: a conferência de hash **já mora** deste
+/// lado, e o texto vira um `Blob` de mesma origem na janela. A CSP ganha
+/// `worker-src blob:` e mais nada.
+///
+/// E o `mod://` saiu junto. Ele existia para a janela carregar o código de um
+/// MOD como `<script>`, e isso deixou de acontecer: um esquema registrado sem
+/// ninguém do outro lado é alcance de disco que um terceiro escolhe, oferecido
+/// à página de graça. A conferência de caminho e de manifesto que ele carregava
+/// continua, em `mods::serve`, que é quem este comando chama.
+///
+/// # Errors
+///
+/// [`FalhaNoMod`] quando o pacote não está no disco, quando os bytes não são os
+/// que o nome da pasta promete, ou quando o manifesto não declara metade de
+/// cliente.
+#[tauri::command]
+fn codigo_do_mod(app: AppHandle, id: String, hash: String) -> Result<String, FalhaNoMod> {
+    let pacote = seele_ffi::mods::ler_por_hash(&config_dir(&app), &hash)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    // **O hash tem de ser deste MOD.** Sem isto, uma janela que pedisse o
+    // código de um MOD sob o nome de outro receberia o primeiro — e o nome é o
+    // que a janela usa para decidir de quem é a região.
+    if pacote.id != id {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "conteudo-de-outro-mod".to_owned(),
+        });
+    }
+    let Some(cliente) = pacote.client else {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sem-metade-de-cliente".to_owned(),
+        });
+    };
+    let caminho = format!("/{id}/{cliente}");
+    let bytes = mods::serve(std::path::Path::new(&config_dir(&app)), &caminho, &hash).ok_or(
+        FalhaNoMod::Recusado {
+            motivo: "cliente-nao-servido".to_owned(),
+        },
+    )?;
+    String::from_utf8(bytes).map_err(|_| FalhaNoMod::Recusado {
+        motivo: "cliente-nao-e-utf8".to_owned(),
+    })
+}
+
 /// A identidade do conjunto que este servidor exige agora.
 ///
 /// A tela de gestão a lê ao abrir e a guarda como **base** do rascunho. É ela
@@ -2927,17 +2957,6 @@ async fn mods_ligados(session: &State<'_, Session>) -> Result<Vec<(String, Strin
 /// mesma razão que `persistence_hospedada` escreve: segurar um
 /// `std::sync::MutexGuard` atravessando um ponto de espera trava os dois
 /// cadeados de uma vez e nem compila do lado do Tauri.
-/// A única resposta que `mod://` dá ao que não aprovou.
-///
-/// Sem corpo e sem motivo: um esquema que distingue «não existe» de «não
-/// declarado» é um esquema que responde perguntas sobre o disco de quem o roda.
-fn recusa_do_mod() -> tauri::http::Response<Vec<u8>> {
-    tauri::http::Response::builder()
-        .status(404)
-        .body(Vec::new())
-        .unwrap_or_default()
-}
-
 fn persistence_do_mod(
     session: &State<'_, Session>,
 ) -> Result<seele_server::hospedagem::PersistenceCompartilhada, FalhaNoMod> {
@@ -4757,52 +4776,6 @@ fn main() {
         // quem abre um diálogo neste app é um comando desta casca, com o título
         // escrito aqui, e não uma linha de JavaScript.
         .plugin(tauri_plugin_dialog::init())
-        // ADR 0045. O único esquema além de `self` que a CSP admite, e ele só
-        // devolve o que `mods::serve` aprovou: um arquivo que o manifesto do
-        // MOD declarou, e nada que suba de diretório. A conferência é ali, e
-        // não aqui, para caber num teste sem subir uma janela.
-        .register_uri_scheme_protocol("mod", |ctx, request| {
-            // **Decodificado antes de qualquer coisa.** A página monta a URL com
-            // o `convertFileSrc` do Tauri — A07 da auditoria —, e ele passa o
-            // caminho inteiro por `encodeURIComponent`: `autor/nome/cliente.js`
-            // chega como `autor%2Fnome%2Fcliente.js`. Sem desfazer isso, a
-            // conferência de hash e a leitura procurariam um arquivo com esse
-            // nome literal e recusariam tudo.
-            //
-            // A decodificação vem **antes** da conferência de propósito: se ela
-            // viesse depois, o hash seria conferido sobre um texto e o arquivo
-            // lido por outro, que é a forma clássica de uma checagem valer para
-            // uma coisa e a leitura acontecer sobre outra.
-            let caminho = por_cento_desfeito(request.uri().path());
-            let pasta = config_dir(ctx.app_handle());
-            let expected = request
-                .uri()
-                .query()
-                .and_then(|q| q.split('&').find_map(|part| part.strip_prefix("hash=")));
-            if !mods::hash_confere(std::path::Path::new(&pasta), &caminho, expected) {
-                return recusa_do_mod();
-            }
-            // `expected` é `Some` aqui: `hash_confere` devolve falso sem ele.
-            let Some(hash) = expected else {
-                return recusa_do_mod();
-            };
-            match mods::serve(std::path::Path::new(&pasta), &caminho, hash) {
-                Some(corpo) => tauri::http::Response::builder()
-                    .header("Content-Type", "text/javascript; charset=utf-8")
-                    // **A06.** O script é `type="module"`, e `mod://localhost`
-                    // é origem diferente de `tauri://localhost`: um módulo entre
-                    // origens é recusado pelo motor sem este cabeçalho, e a
-                    // recusa chega como um `error` sem mensagem nenhuma.
-                    //
-                    // Não é afrouxamento: este esquema só é alcançável de dentro
-                    // desta janela, e o que ele serve já passou pela conferência
-                    // de hash e de caminho logo acima.
-                    .header("Access-Control-Allow-Origin", "*")
-                    .body(corpo)
-                    .unwrap_or_else(|_| recusa_do_mod()),
-                None => recusa_do_mod(),
-            }
-        })
         .manage(Session {
             // Lida aqui e não dentro do `Default`: um `Default` que lê o
             // ambiente é um `Default` que se comporta diferente em teste e em
@@ -4902,6 +4875,7 @@ fn main() {
             abrir_no_navegador,
             previa_de_link,
             aplicar_conjunto_de_mods,
+            codigo_do_mod,
             conjunto_exigido_agora,
             connect,
             hospedar,
@@ -5207,9 +5181,16 @@ mod a_tela_le_os_limites_que_o_rust_manda {
     }
 }
 
+/// O que sai desta janela por um link, e o que não sai.
+///
+/// Chamava-se `o_caminho_do_mod_chega_inteiro` enquanto guardava também os
+/// testes de `por_cento_desfeito`. O ADR 0049 tirou o `mod://` do produto e
+/// aqueles testes saíram com ele; o nome ficou descrevendo o que não está mais
+/// aqui, e um módulo cujo nome mente é onde o próximo teste entra no lugar
+/// errado.
 #[cfg(test)]
-mod o_caminho_do_mod_chega_inteiro {
-    use super::{endereco_que_pode_sair, por_cento_desfeito};
+mod o_que_sai_desta_janela_por_um_link {
+    use super::endereco_que_pode_sair;
 
     /// **A busca de uma imagem de link tem três travas, e elas têm de estar lá.**
     ///
@@ -5330,51 +5311,5 @@ mod o_caminho_do_mod_chega_inteiro {
                 "deixou sair `{torto:?}`"
             );
         }
-    }
-
-    /// **A07 da auditoria.** A página monta a URL com `convertFileSrc`, que
-    /// passa o caminho por `encodeURIComponent` — as barras de `autor/nome`
-    /// viram `%2F`. Sem desfazer, o `serve` procuraria um arquivo com esse nome
-    /// literal e recusaria todo MOD.
-    #[test]
-    fn as_barras_de_um_id_com_autor_voltam_a_ser_barras() {
-        assert_eq!(
-            por_cento_desfeito("/seele%2Fmesa%2Fcliente%2Fmain.js"),
-            "/seele/mesa/cliente/main.js"
-        );
-    }
-
-    #[test]
-    fn um_caminho_sem_nada_escapado_passa_igual() {
-        assert_eq!(
-            por_cento_desfeito("/seele/mesa/cliente/main.js"),
-            "/seele/mesa/cliente/main.js"
-        );
-    }
-
-    /// Acento existe em nome de arquivo, e `encodeURIComponent` o manda em
-    /// UTF-8 escapado byte a byte.
-    #[test]
-    fn um_nome_com_acento_volta_em_utf8() {
-        assert_eq!(por_cento_desfeito("/a%C3%A7%C3%A3o.js"), "/ação.js");
-    }
-
-    /// Um `%` que não abre um par fica como está. Quem decide se o caminho
-    /// serve é a conferência de hash e o `serve`, e os dois recusam o que não
-    /// conhecem — inventar um byte aqui seria decidir por eles.
-    #[test]
-    fn um_porcento_solto_nao_vira_lixo_nem_entra_em_panico() {
-        assert_eq!(por_cento_desfeito("/100%"), "/100%");
-        assert_eq!(por_cento_desfeito("/100%zz.js"), "/100%zz.js");
-        assert_eq!(por_cento_desfeito("%"), "%");
-    }
-
-    /// E a travessia continua sendo recusada **depois**, por quem já a recusava:
-    /// desfazer o escape não pode virar um jeito de escrever `..` sem que o
-    /// `serve` o veja. O que este teste fixa é que o texto chega inteiro até
-    /// lá, e não que ele seja aceito.
-    #[test]
-    fn a_travessia_escapada_chega_visivel_para_quem_a_recusa() {
-        assert_eq!(por_cento_desfeito("/..%2F..%2Fetc"), "/../../etc");
     }
 }

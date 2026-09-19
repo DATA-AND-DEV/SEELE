@@ -7264,17 +7264,24 @@ fn the_content_security_policy_did_not_move_to_make_room_for_a_picture() {
         "images are drawn from somewhere other than this bundle and `data:`: \
          {csp}"
     );
-    for afrouxado in [
-        "blob:",
-        "unsafe-inline",
-        "unsafe-eval",
-        "img-src *",
-        "https:",
-    ] {
+    for afrouxado in ["unsafe-inline", "unsafe-eval", "img-src *", "https:"] {
         assert!(
             !csp.contains(afrouxado),
             "the policy gained `{afrouxado}`, and no picture is worth that: \
              {csp}"
+        );
+    }
+
+    // `blob:` era proibido em toda a política, e a frase era sobre imagem. O
+    // ADR 0049 o admite numa diretiva só — `worker-src` —, porque é assim que
+    // um `Worker` de mesma origem se constrói, e só ali. Numa imagem ou num
+    // script ele continua valendo a mesma recusa de antes: seria um caminho
+    // para bytes que ninguém conferiu virarem conteúdo da página.
+    for diretiva in csp.split(';').map(str::trim) {
+        assert!(
+            !diretiva.contains("blob:") || diretiva.starts_with("worker-src"),
+            "`blob:` entrou em `{diretiva}`, e fora de `worker-src` ele é um \
+             caminho para conteúdo que ninguém conferiu: {csp}"
         );
     }
 }
@@ -9437,6 +9444,8 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "URL",
         "URLSearchParams",
         "Blob",
+        // ADR 0049: um MOD roda num `Worker`, e não na janela.
+        "Worker",
         "File",
         "FileReader",
         "Image",
@@ -10625,10 +10634,20 @@ fn the_shell_reaches_mods_through_the_ffi_and_not_past_it() {
     );
 }
 
-/// A CSP admite `mod:` e nada mais que isso.
+/// A CSP admite um `Worker`, e o esquema dos MODs saiu dela — ADR 0049.
 ///
-/// O ADR 0045 escreveu como critério e não como coincidência: se aplicar um
-/// MOD exigisse `unsafe-inline` ou `unsafe-eval`, o desenho estaria errado.
+/// O ADR 0045 abriu `mod:` porque o código de um MOD era um `<script>` da
+/// página, e `script-src 'self'` recusa script que não venha do pacote. O ADR
+/// 0049 tirou o MOD da página: o código vai para um worker, pela ponte, e a
+/// janela deixou de ter de onde carregá-lo como script.
+///
+/// **Uma porta sem ninguém do outro lado continua sendo uma porta.** Este
+/// guarda é o que impede o esquema de voltar a ser admitido «porque já estava
+/// lá»: se `mod:` voltar à CSP sem que nada o use, ele é alcance de disco que
+/// um terceiro escolhe, oferecido à página de graça.
+///
+/// E o critério do 0045 continua valendo palavra por palavra: se rodar um MOD
+/// exigisse `unsafe-inline` ou `unsafe-eval`, o desenho estaria errado.
 #[test]
 fn the_csp_admits_mods_and_never_loosens_further() {
     let conf = read("tauri.conf.json");
@@ -10638,14 +10657,249 @@ fn the_csp_admits_mods_and_never_loosens_further() {
         .expect("a CSP sumiu do tauri.conf.json");
 
     assert!(
-        csp.contains("script-src 'self' mod:"),
-        "`mod:` saiu do script-src"
+        csp.contains("worker-src blob:"),
+        "sem `worker-src blob:` nenhum MOD sobe: o worker é construído de um \
+         `Blob`, e a política o recusa antes da primeira linha dele"
+    );
+    for forma in ["mod:", "mod.localhost"] {
+        assert!(
+            !csp.contains(forma),
+            "`{forma}` voltou à CSP, e nada na janela o usa desde o ADR 0049"
+        );
+    }
+    assert!(
+        csp.contains("script-src 'self'") && !csp.contains("script-src 'self' "),
+        "o `script-src` deixou de ser só o pacote: {csp}"
     );
     assert!(!csp.contains("unsafe-inline"), "a CSP ganhou unsafe-inline");
     assert!(!csp.contains("unsafe-eval"), "a CSP ganhou unsafe-eval");
+}
+
+/// **O que um MOD desenha é montado pelo produto, e nunca interpretado.**
+///
+/// ADR 0049. A região é o único lugar da página onde um MOD aparece, e o
+/// conteúdo dela vem de código de terceiro. Montá-lo como marcação — `innerHTML`
+/// e família — seria devolver ao MOD a página inteira por outro caminho, que é
+/// exatamente o que tirá-lo da janela existiu para acabar.
+///
+/// Os dois lados da mesma regra: o produto **monta** (`createElement`,
+/// `createTextNode`, `textContent`) e **não interpreta**.
+#[test]
+fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
+    let base = without_comments(&read("ui/base.js"));
+    let montar = js_function(&base, "function montarODeclarado(");
+
+    // `elemento` é o construtor desta casa — `createElement` mais `textContent`
+    // — e é por ele que o produto monta. Texto vira nó de texto, e nunca uma
+    // atribuição de marcação.
+    for exigido in ["elemento(", "createTextNode"] {
+        assert!(
+            montar.contains(exigido),
+            "`montarODeclarado` deixou de usar `{exigido}`: {montar}"
+        );
+    }
+    let construtor = js_function(&base, "function elemento(");
     assert!(
-        !csp.contains("style-src 'self' mod:"),
-        "folha de terceiro entrou pela CSP sem ADR que a autorize"
+        construtor.contains("createElement") && construtor.contains("textContent"),
+        "`elemento` deixou de ser `createElement` + `textContent`, e é por ele \
+         que o que um MOD declara vira nó: {construtor}"
+    );
+    for proibido in [
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "createContextualFragment",
+        "document.write",
+    ] {
+        assert!(
+            !montar.contains(proibido),
+            "`montarODeclarado` passou a interpretar marcação por `{proibido}`, \
+             e o conteúdo dela vem de um MOD: {montar}"
+        );
+    }
+
+    // Uma forma que a API não conhece não vira elemento por conveniência.
+    assert!(
+        montar.contains("if (!etiqueta) return [];"),
+        "uma forma desconhecida deixou de ser recusada; a gramática passa a \
+         crescer sem ninguém decidir: {montar}"
+    );
+
+    // E há teto de fundura: sem ele, uma árvore que o MOD manda estoura a pilha
+    // **da janela**, e não a dele.
+    assert!(
+        montar.contains("fundura >"),
+        "o teto de fundura saiu: uma árvore funda mandada por um MOD derruba a \
+         janela do produto: {montar}"
+    );
+}
+
+/// **O tema de um MOD não sai da sessão, e não passa por folha de estilo.**
+///
+/// ADR 0049. Escrito em `document.documentElement`, o tema ia para a tela de
+/// entrada, para o launcher e para a bateria, e só saía se o MOD cooperasse.
+///
+/// Escrito como texto de CSS, ele seria pior: o valor vem de terceiro, e um
+/// valor que vira texto de regra é CSS arbitrário na página. Por isso a escrita
+/// é pela CSSOM, propriedade a propriedade — e a CSP desta janela recusaria um
+/// `<style>` montado aqui de qualquer forma.
+#[test]
+fn o_tema_de_um_mod_fica_dentro_da_sessao() {
+    let base = without_comments(&read("ui/base.js"));
+    let aplicar = js_function(&base, "function aplicarOTemaDoMod(");
+    let escrever = js_function(&base, "function escreverOTemaDaSessao(");
+
+    assert!(
+        escrever.contains("$(\"tela-sessao\")"),
+        "o tema deixou de ser escrito no contêiner da sessão: {escrever}"
+    );
+    assert!(
+        escrever.contains("setProperty") && escrever.contains("removeProperty"),
+        "o tema deixou de ser escrito e apagado pela CSSOM: {escrever}"
+    );
+    for fora in [
+        "documentElement",
+        "document.body",
+        "createElement(\"style\")",
+    ] {
+        assert!(
+            !escrever.contains(fora) && !aplicar.contains(fora),
+            "o tema de um MOD voltou a alcançar `{fora}`, e dali ele não sai \
+             quando a sessão sai"
+        );
+    }
+
+    // Só cor, e só `#rrggbb`: um valor livre numa propriedade de cor é a porta
+    // por onde um MOD escreveria o que quisesse.
+    assert!(
+        aplicar.contains("COR_DO_TEMA.test(valor)"),
+        "o tema deixou de conferir a forma da cor: {aplicar}"
+    );
+
+    // Os quatro nomes da API são os quatro que `escreverOTemaDaSessao` escreve,
+    // e eles são tokens que `tokens.css` define. Um nome a mais aqui sem um
+    // token do outro lado é uma propriedade que ninguém lê.
+    let tema = base
+        .split_once("const TEMA_DA_API = Object.freeze({")
+        .expect("`TEMA_DA_API`")
+        .1;
+    let tema = tema.split_once("});").expect("o fim de `TEMA_DA_API`").0;
+    let tokens = read("ui/tokens.css");
+    let mut quantos = 0;
+    for token in tema.split("\"--seele-").skip(1) {
+        let nome = token.split('"').next().unwrap_or_default();
+        assert!(
+            tokens.contains(&format!("--seele-{nome}:")),
+            "`TEMA_DA_API` redefine `--seele-{nome}`, que `tokens.css` não define"
+        );
+        quantos += 1;
+    }
+    assert_eq!(
+        quantos, 4,
+        "a API de tema mudou de tamanho sem ADR que a mude"
+    );
+}
+
+/// **Dois MODs não disputam o mesmo token em silêncio, e o ilegível é recusado.**
+///
+/// As duas recusas são da mesma família, e é a família que este repositório
+/// paga caro quando falta: o produto sabe e não conta.
+///
+/// Se dois MODs pedem o acento, o produto não tem como saber qual deles quem
+/// usa quis — escolher calado é escolher errado metade das vezes. E se o texto
+/// não alcança o fundo, quem paga é quem está lendo a conversa, que não pediu
+/// tema nenhum.
+#[test]
+fn o_tema_recusa_pelo_nome_em_vez_de_escolher_sozinho() {
+    let base = without_comments(&read("ui/base.js"));
+    let aplicar = js_function(&base, "function aplicarOTemaDoMod(");
+    let mede = js_function(&base, "function oTextoAlcancaOFundo(");
+
+    assert!(
+        aplicar.contains("já é do MOD"),
+        "o segundo MOD a pedir um token volta a sobrescrever o primeiro sem \
+         dizer nada: {aplicar}"
+    );
+    assert!(
+        aplicar.contains("throw new Error(legivel)"),
+        "um tema ilegível deixou de ser recusado: {aplicar}"
+    );
+    assert!(
+        mede.contains("4.5"),
+        "a medida de contraste saiu, ou deixou de ser 4,5:1 — que é o que \
+         `tokens.css` afirma linha a linha: {mede}"
+    );
+    // Lido da raiz: é o único lugar onde a cor do produto continua sendo a do
+    // produto com um tema de pé. Medir na sessão mediria o próprio tema.
+    assert!(
+        mede.contains("getComputedStyle(document.documentElement)"),
+        "a cor do produto passou a ser lida de onde o tema já escreveu: {mede}"
+    );
+}
+
+/// E a faixa não fica de pé vazia, nem some com região de outro MOD dentro.
+#[test]
+fn a_faixa_das_regioes_aparece_com_a_primeira_e_sai_com_a_ultima() {
+    let base = without_comments(&read("ui/base.js"));
+    let desenhar = js_function(&base, "function desenharARegiaoDoMod(");
+    let limpar = js_function(&base, "function limparARegiaoDoMod(");
+
+    assert!(
+        desenhar.contains("palco.hidden = false"),
+        "a faixa não é revelada quando a primeira região entra: {desenhar}"
+    );
+    assert!(
+        limpar.contains("palco.childElementCount === 0"),
+        "a faixa some sem olhar se ainda há região de outro MOD dentro, ou \
+         fica de pé vazia — uma régua de 1px em cima de nada: {limpar}"
+    );
+    assert!(
+        limpar.contains("temaDosMods.delete(id)"),
+        "descarregar um MOD deixa o tema dele de pé: {limpar}"
+    );
+}
+
+/// **A janela não tem mais um `SeeleMods` global, e ninguém o lê.**
+///
+/// ADR 0049. `globalThis.SeeleMods` era a API que um MOD via por rodar na
+/// página; com o MOD dentro de um worker, ele deixou de existir aqui.
+///
+/// Este guarda existe porque a falta dele custou um defeito nesta mesma
+/// mudança: o próprio produto lia `globalThis.SeeleMods.request` para buscar o
+/// catálogo do servidor, e a leitura sobreviveu à remoção do objeto. Nada
+/// reprovou — a chamada não é a de uma função declarada, é um acesso a
+/// propriedade de algo que virou `undefined` — e o defeito só apareceria ao
+/// ligar um MOD: a lista inteira ficaria parada, sem frase nenhuma.
+#[test]
+fn a_janela_nao_le_um_seele_mods_global_que_ela_nao_tem_mais() {
+    // Sem comentários: os comentários **explicam** o objeto que saiu, e um
+    // guarda que não distingue os dois acusa a própria explicação.
+    let sobraram: Vec<&str> = ["ui/base.js", "ui/camada-mods.js", "ui/tela-sessao.js"]
+        .into_iter()
+        .filter(|arquivo| {
+            let fonte = without_comments(&read(arquivo));
+            fonte.contains("globalThis.SeeleMods") || fonte.contains("globalThis.SeeleUI")
+        })
+        .collect();
+    assert!(
+        sobraram.is_empty(),
+        "estes arquivos leem um global que o ADR 0049 tirou da janela, e o que \
+         eles alcançam é `undefined`: {sobraram:?}"
+    );
+}
+
+/// E o esquema não ficou registrado no Rust depois de sair da CSP.
+///
+/// Os dois lados são uma regra só: um `register_uri_scheme_protocol("mod", …)`
+/// sem `mod:` na política é código que a página não alcança hoje e alcança no
+/// dia em que alguém puser a diretiva de volta «para destravar um MOD».
+#[test]
+fn o_esquema_dos_mods_nao_ficou_registrado_sem_ninguem_para_usa_lo() {
+    let rust = read("src/main.rs");
+    assert!(
+        !rust.contains("register_uri_scheme_protocol(\"mod\""),
+        "o esquema `mod://` continua registrado, e desde o ADR 0049 não há \
+         nada na janela que o chame"
     );
 }
 
@@ -11044,9 +11298,12 @@ fn reconectar_desmonta_a_sessao_sem_fechar_o_servidor() {
 /// «falhou». Num aplicativo empacotado o console não é lugar nenhum: quem usa
 /// via o MOD na lista, nenhum botão dele na tela, e nenhum próximo passo.
 ///
-/// E a URL era `mod://localhost/...` escrita à mão. Essa é a forma do macOS e
-/// do Linux; no Windows e no Android o mesmo protocolo é servido como
-/// `http://mod.localhost/...`, que a CSP nem sequer permitia.
+/// E a URL era `mod://localhost/...` escrita à mão — a forma do macOS e do
+/// Linux, servida no Windows e no Android como `http://mod.localhost/...`. **O
+/// ADR 0049 tirou a URL do meio**: o código do MOD vem pela ponte, por
+/// `codigo_do_mod`, e o que a janela monta é um `Blob`. As duas formas do
+/// esquema deixaram de existir, e com elas o defeito de nascença de escolher
+/// uma das duas à mão.
 ///
 /// **O que este guarda não prova:** que o Mesa abre. Isso é um teste de fumaça
 /// no binário nativo de cada sistema, e a auditoria o pede em separado. O que
@@ -11058,27 +11315,25 @@ fn o_carregador_de_mods_diz_na_tela_e_monta_a_url_pelo_tauri() {
     // antiga, e um guarda que não distingue os dois acusa a própria explicação.
     let base = without_comments(&read("ui/base.js"));
     let painel = read("ui/camada-mods.js");
-    let config = read("tauri.conf.json");
 
-    // A URL vem do conversor, e não de texto montado aqui.
+    // O código vem pela ponte, com o hash junto: é lá que a conferência mora, e
+    // é o que faz a janela não ter URL de MOD nenhuma para montar.
     assert!(
-        base.contains("convertFileSrc"),
-        "a URL do MOD é escrita à mão, e a forma de `mod://localhost` não abre \
-         no Windows nem no Android"
+        base.contains("invoke(\"codigo_do_mod\""),
+        "a janela deixou de pedir o código do MOD pela ponte"
     );
-    assert!(
-        !base.contains("`mod://localhost/"),
-        "sobrou uma URL de MOD montada à mão; ela só vale em dois dos sistemas"
-    );
-
-    // E a CSP permite as duas formas do mesmo protocolo.
-    for forma in ["mod:", "http://mod.localhost"] {
+    for sumido in ["convertFileSrc", "mod://localhost/", "mod.localhost"] {
         assert!(
-            config.contains(forma),
-            "a CSP não permite `{forma}`, então o script do MOD é bloqueado \
-             antes de qualquer código dele rodar"
+            !base.contains(sumido),
+            "`{sumido}` voltou a `base.js`: desde o ADR 0049 o código de um MOD \
+             não entra na janela por URL nenhuma"
         );
     }
+    // E ele não volta a ser um `<script>` da página por outro caminho.
+    assert!(
+        !base.contains("createElement(\"script\")"),
+        "alguém voltou a injetar o MOD como script da página"
+    );
 
     // Toda fase que o carregador anota tem frase no painel: uma fase sem frase
     // não é desenhada, e o defeito volta a ser silencioso.
@@ -11594,19 +11849,37 @@ fn os_interruptores_de_mod_editam_um_rascunho_e_salvar_aplica_de_uma_vez() {
 /// e o laço da FFI responde `return false`.
 ///
 /// O efeito era o que se via, e foi relatado assim: a cor verde do servidor
-/// ficava na entrada e no launcher depois de sair. O ESTILO escreve os tokens
-/// em `document.documentElement`, e o `restore` dele só roda no descarte
+/// ficava na entrada e no launcher depois de sair. O ESTILO escrevia os tokens
+/// em `document.documentElement`, e o `restore` dele só rodava no descarte
 /// cooperativo — que nunca era pedido.
 ///
-/// Este guarda prende as duas metades: existe **um** encerramento, e a saída
-/// local o chama **antes** de mostrar qualquer tela fora do servidor.
+/// **O ADR 0049 trocou o pedido pela garantia.** O encerramento não dispara
+/// mais `seele-mod-unload` e não espera que o MOD desmonte a si mesmo: ele
+/// chama `terminate()`, e o contexto morre com temporizador, ouvinte, áudio e
+/// promessa dentro. A região sai junto, e o tema que ela tinha sai com ela.
+///
+/// Este guarda prende as três metades: existe **um** encerramento, ele mata o
+/// contexto em vez de pedir, e a saída local o chama **antes** de mostrar
+/// qualquer tela fora do servidor.
 #[test]
 fn sair_do_servidor_encerra_o_ambiente_dos_mods_antes_de_trocar_de_tela() {
     let base = without_comments(&read("ui/base.js"));
     let encerrar = js_function(&base, "function encerrarOAmbienteDosMods(");
+    for exigido in [
+        "worker.terminate()",
+        "limparARegiaoDoMod(",
+        "modsCarregados.clear()",
+    ] {
+        assert!(
+            encerrar.contains(exigido),
+            "o encerramento deixou de fazer `{exigido}`: {encerrar}"
+        );
+    }
     assert!(
-        encerrar.contains("seele-mod-unload") && encerrar.contains("modsCarregados.clear()"),
-        "o encerramento deixou de descarregar os MODs: {encerrar}"
+        !encerrar.contains("seele-mod-unload"),
+        "o encerramento voltou a **pedir** que o MOD se desmonte; um MOD que \
+         não atenda deixa tudo de pé, e foi isso que o ADR 0049 tirou: \
+         {encerrar}"
     );
 
     // E o ouvinte de `Ended` passa a ser um chamador, e não o dono: se ele

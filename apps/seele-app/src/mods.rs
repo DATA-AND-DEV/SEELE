@@ -1,49 +1,43 @@
-//! Serving a MOD's own files to the window, under `mod://`.
+//! Reading a MOD's own files, for the bridge that hands them to a worker.
 //!
-//! ADR 0045. `script-src 'self'` refuses any script not compiled into the
-//! binary, and loosening it to `unsafe-eval` would open the widest door in the
-//! building to solve the narrowest problem. So the files stay on disk and a
-//! scheme of our own serves them, with the CSP widened by exactly one scheme.
+//! ADR 0045 put these files behind a scheme of our own, `mod://`, because
+//! `script-src 'self'` refuses any script not compiled into the binary.
+//! **ADR 0049 took the scheme away**: a MOD no longer runs in the product's
+//! window, so there is nothing in the page that loads a MOD's bytes as script,
+//! and a scheme that served them would be a door with nobody on the other side.
 //!
-//! # What replaces what the CSP stops guaranteeing
-//!
-//! Two guards, and neither is politeness:
+//! What is left is the reading, and it now answers one caller — `codigo_do_mod`,
+//! which hands the text to a worker built from a `blob:`. The two guards that
+//! made the scheme safe are the reason this module still exists, and neither is
+//! politeness:
 //!
 //! - **only what the manifest declares.** A file sitting in the directory that
-//!   `mod.json` never names is not served. A MOD is what it declared it was.
+//!   `mod.json` never names is not read. A MOD is what it declared it was.
 //! - **nothing climbs out.** The path is rebuilt from components, so a `..`
-//!   anywhere is refused rather than resolved. Without this, `mod://` would be
+//!   anywhere is refused rather than resolved. Without this, reading would be
 //!   arbitrary disk reads from a path a third party chooses.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use std::path::Path;
 
-/// Checks the immutable package against the hash announced by the server.
-pub(crate) fn hash_confere(config_dir: &Path, url_path: &str, expected: Option<&str>) -> bool {
-    let mut parts = url_path.trim_start_matches('/').split('/');
-    let (Some(author), Some(name), Some(expected)) = (parts.next(), parts.next(), expected) else {
-        return false;
-    };
-    if seele_ffi::mods::caminho_interno(&[author, name]).is_none() {
-        return false;
-    }
-    // **Resolvido pelo hash que a URL pede**, e não pelo identificador.
-    //
-    // Por identificador havia um pacote por MOD, e servir «o que estiver
-    // naquela pasta» funcionava porque só havia um. Com o cache por conteúdo há
-    // vários, e outro servidor desta máquina pode ter instalado outro depois —
-    // servir por identificador entregaria à janela bytes que **este** servidor
-    // não exige.
-    //
-    // A conferência de identidade fica: os bytes têm de dizer que são deste
-    // MOD. Sem ela, uma URL com o hash de um MOD e o nome de outro serviria o
-    // conteúdo do primeiro sob o caminho do segundo.
-    seele_ffi::mods::ler_por_hash(&config_dir.to_string_lossy(), expected)
-        .is_ok_and(|m| m.id == format!("{author}/{name}"))
+/// O manifesto que os testes deste módulo usam, com a API vinda da constante.
+///
+/// Escrita à mão ela era `1`, e passou a recusar no dia em que o ADR 0049 fez a
+/// API ser uma só. Nenhum destes testes é sobre a versão: eles são sobre ler o
+/// que o manifesto declara, copiar árvore, publicar por conteúdo e não deixar
+/// estufa — e um `1` cravado os faria reprovar por um motivo que não é o deles.
+#[cfg(test)]
+fn manifesto_de_teste(id: &str) -> String {
+    let api = seele_ffi::mods::MOD_API_VERSION;
+    format!(
+        r#"{{"schema":1,"id":"{id}","version":"1.0.0","api":{api},
+            "repo":"https://example.invalid/x","reach":["dom"],
+            "client":"cliente/main.js"}}"#
+    )
 }
 
-/// Serves one path under `mod://`, or nothing.
+/// Reads one path inside a MOD's package, or nothing.
 ///
 /// `url_path` is the path component of the URL, e.g.
 /// `/seele/exemplo/cliente/main.js` — author, name, then the file inside the
@@ -100,15 +94,7 @@ mod tests {
         let dir = raiz.join("em-obras");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("cliente")).expect("criar diretório");
-        std::fs::write(
-            dir.join("mod.json"),
-            format!(
-                r#"{{"schema":1,"id":"{id}","version":"1.0.0","api":1,
-                    "repo":"https://example.invalid/x","reach":["dom"],
-                    "client":"cliente/main.js"}}"#
-            ),
-        )
-        .expect("manifesto");
+        std::fs::write(dir.join("mod.json"), manifesto_de_teste(id)).expect("manifesto");
         std::fs::write(dir.join("cliente/main.js"), "globalThis.MOD_RODOU = true;")
             .expect("script");
         // Publicado pelo conteúdo, como o instalador faz: o nome da pasta é o
@@ -187,12 +173,8 @@ mod tests {
         assert_ne!(um, outro);
 
         assert!(
-            hash_confere(&raiz, "/seele/exemplo/cliente/main.js", Some(&um)),
+            serve(&raiz, "/seele/exemplo/cliente/main.js", &um).is_some(),
             "o caminho certo com o hash certo tem de passar"
-        );
-        assert!(
-            !hash_confere(&raiz, "/seele/outro/cliente/main.js", Some(&um)),
-            "o hash de um MOD passou sob o nome de outro"
         );
         assert_eq!(
             serve(&raiz, "/seele/outro/cliente/main.js", &um),
@@ -452,7 +434,7 @@ fn copiar_arvore(de: &Path, para: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod instalar {
-    use super::{instalar_de, FalhaAoInstalarMod};
+    use super::{instalar_de, manifesto_de_teste, FalhaAoInstalarMod};
 
     fn pasta(nome: &str) -> std::path::PathBuf {
         let caminho = std::env::temp_dir().join(format!(
@@ -472,15 +454,7 @@ mod instalar {
     fn pacote(raiz: &std::path::Path, id: &str, extra: Option<&str>) -> std::path::PathBuf {
         let origem = raiz.join("origem");
         std::fs::create_dir_all(origem.join("cliente")).unwrap();
-        std::fs::write(
-            origem.join("mod.json"),
-            format!(
-                r#"{{"schema":1,"id":"{id}","version":"1.0.0","api":1,
-                    "repo":"https://example.invalid/m","reach":["dom"],
-                    "client":"cliente/main.js"}}"#
-            ),
-        )
-        .unwrap();
+        std::fs::write(origem.join("mod.json"), manifesto_de_teste(id)).unwrap();
         std::fs::write(origem.join("cliente/main.js"), b"globalThis.x = 1;").unwrap();
         if let Some(conteudo) = extra {
             std::fs::write(origem.join("extra.txt"), conteudo).unwrap();
@@ -696,9 +670,7 @@ mod instalar {
         std::fs::create_dir_all(antigo.join("cliente")).unwrap();
         std::fs::write(
             antigo.join("mod.json"),
-            br#"{"schema":1,"id":"seele/exemplo","version":"1.0.0","api":1,
-                "repo":"https://example.invalid/x","reach":["dom"],
-                "client":"cliente/main.js"}"#,
+            manifesto_de_teste("seele/exemplo").as_bytes(),
         )
         .unwrap();
         std::fs::write(antigo.join("cliente/main.js"), b"globalThis.x = 1;").unwrap();
@@ -734,9 +706,7 @@ mod instalar {
         std::fs::create_dir_all(antigo.join("cliente")).unwrap();
         std::fs::write(
             antigo.join("mod.json"),
-            br#"{"schema":1,"id":"seele/exemplo","version":"1.0.0","api":1,
-                "repo":"https://example.invalid/x","reach":["dom"],
-                "client":"cliente/main.js"}"#,
+            manifesto_de_teste("seele/exemplo").as_bytes(),
         )
         .unwrap();
         std::fs::write(antigo.join("cliente/main.js"), b"globalThis.x = 1;").unwrap();

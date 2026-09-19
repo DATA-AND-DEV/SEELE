@@ -13,6 +13,15 @@
 
 use seele_core::mods::{hex, refusal_name, Found};
 
+/// A API de MODs que este build oferece — a **única** que ele oferece.
+///
+/// Reexportada porque a casca não alcança `seele-proto` nem `seele-core`
+/// (ADR 0002 e 0039), e a alternativa é ela escrever o número à mão. O que uma segunda cópia deste
+/// número custa já está registrado em
+/// `crates/seele-conformance/tests/a_api_dos_mods_nao_diverge.rs`: a primeira
+/// divergência só apareceu no primeiro MOD de verdade.
+pub use seele_core::mods::MOD_API_VERSION;
+
 /// Um MOD em disco, como a janela o desenha.
 ///
 /// Um MOD recusado chega com `refused` preenchido em vez de ficar de fora da

@@ -33,7 +33,7 @@ use seele_proto::mods::read_manifest;
 // past it would put protocol knowledge in a Tauri command». Quem consome MOD
 // precisa destes dois tipos, então esta camada, que é a fronteira, os
 // republica. É a mesma disciplina, não uma brecha nela.
-pub use seele_proto::mods::{inner_path, Manifest, ModAnunciado, Refused};
+pub use seele_proto::mods::{inner_path, Manifest, ModAnunciado, Refused, MOD_API_VERSION};
 
 /// A MOD that read cleanly.
 #[derive(Debug, Clone)]
@@ -242,6 +242,7 @@ pub fn refusal_name(why: &Refused) -> &'static str {
         Refused::Malformed { .. } => "malformed",
         Refused::SchemaTooNew { .. } => "schema-too-new",
         Refused::ApiTooNew { .. } => "api-too-new",
+        Refused::ApiTooOld { .. } => "api-too-old",
         Refused::MalformedId => "malformed-id",
         Refused::Empty => "empty",
     }
@@ -282,9 +283,15 @@ mod tests {
         dir
     }
 
+    /// A API vem da constante, e não escrita à mão.
+    ///
+    /// Escrita à mão ela era `1`, e passou a recusar no dia em que o ADR 0049
+    /// fez a API ser uma só — estes testes são sobre ler pasta, conferir hash e
+    /// nomear recusa, e nenhum deles é sobre a versão.
     fn manifesto(id: &str) -> String {
+        let api = seele_proto::mods::MOD_API_VERSION;
         format!(
-            r#"{{"schema":1,"id":"{id}","version":"1.0.0","api":1,
+            r#"{{"schema":1,"id":"{id}","version":"1.0.0","api":{api},
                 "repo":"https://example.invalid/x","reach":["dom"],
                 "client":"cliente/main.js"}}"#
         )

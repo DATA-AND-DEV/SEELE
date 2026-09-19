@@ -426,23 +426,353 @@ const ouvirMod = listen("seele://event", ({ payload }) => {
     catch { pending.reject(new Error("invalid-response")); }
   }
 });
-globalThis.SeeleMods = Object.freeze({
-  async request(id, channel, value) {
-    await ouvirMod;
-    if (pedidosDeMod.size >= 8) throw new Error("too-many-requests");
-    const request = ++proximoPedidoDeMod;
-    const payload = JSON.stringify(value);
-    if (new TextEncoder().encode(payload).length > 12 * 1024) throw new Error("request-too-large");
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pedidosDeMod.delete(request); reject(new Error("timeout")); }, 15000);
-      pedidosDeMod.set(request, { resolve, reject, timer, parts: [] });
-      invoke("mod_request", { request, id, channel, payload }).catch(error => {
-        clearTimeout(timer); pedidosDeMod.delete(request); reject(error);
-      });
+/**
+ * Leva um pedido de MOD ao servidor e devolve a resposta.
+ *
+ * **Deixou de ser um global** — ADR 0049. Enquanto o MOD rodava na página,
+ * `globalThis.SeeleMods` era a API dele; congelar o objeto congelava aquele
+ * objeto, e não os caminhos por onde se chega ao mesmo lugar. Agora o MOD está
+ * num worker e não alcança nada daqui: ele **pede**, e quem decide o que
+ * responder é esta função.
+ *
+ * O teto de oito pedidos em voo e o de 12 KiB continuam, e agora existem em
+ * dois lugares de propósito: o prelúdio recusa cedo, para o MOD receber o erro
+ * onde ele o escreveu, e aqui recusa de novo, porque um prelúdio é código que
+ * roda dentro do worker e um worker é de quem escreveu o MOD.
+ */
+async function pedirAoServidor(id, canal, valor) {
+  await ouvirMod;
+  if (pedidosDeMod.size >= 8) throw new Error("too-many-requests");
+  const request = ++proximoPedidoDeMod;
+  const payload = JSON.stringify(valor);
+  if (new TextEncoder().encode(payload).length > 12 * 1024) throw new Error("request-too-large");
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pedidosDeMod.delete(request); reject(new Error("timeout")); }, 15000);
+    pedidosDeMod.set(request, { resolve, reject, timer, parts: [] });
+    invoke("mod_request", { request, id, channel: canal, payload }).catch(error => {
+      clearTimeout(timer); pedidosDeMod.delete(request); reject(error);
     });
-  },
-  snapshot: () => invoke("snapshot"),
+  });
+}
+/**
+ * O que roda **dentro** do worker, antes do código do MOD — ADR 0049.
+ *
+ * Um MOD deixa de rodar na janela do produto. O que ele tem aqui dentro é o
+ * que este prelúdio dá: não há `document`, não há `window`, não há o global do
+ * Tauri. Isso não é uma jaula construída com cuidado — é o que um `Worker`
+ * **é**, e é por isso que a garantia é forte: `terminate()` mata temporizador,
+ * ouvinte, promessa atrasada e áudio, sem depender de o MOD cooperar.
+ *
+ * Texto e não arquivo buscado: um `fetch` deste prelúdio exigiria alargar o
+ * `connect-src` da CSP, e ele não precisa ser alargado para nada.
+ *
+ * **Deliberadamente pequeno.** Tudo o que um MOD alcança passa por uma
+ * mensagem, e cada mensagem nova é uma decisão de API — escrita, revisada e
+ * versionada — em vez de um MOD descobrir que consegue.
+ */
+const PRELUDIO_DO_MOD = `
+'use strict';
+(() => {
+  const pendentes = new Map();
+  let proximo = 0;
+
+  self.onmessage = (evento) => {
+    const m = evento.data;
+    if (!m || m.tipo !== 'resposta') return;
+    const espera = pendentes.get(m.n);
+    if (!espera) return;
+    pendentes.delete(m.n);
+    if (m.ok) espera.resolve(m.valor);
+    else espera.reject(new Error(m.erro || 'recusado'));
+  };
+
+  const pedir = (tipo, carga) => new Promise((resolve, reject) => {
+    // O mesmo teto de pedidos em voo da ponte antiga: um MOD num laço não
+    // pode encher a fila da janela.
+    if (pendentes.size >= 8) { reject(new Error('too-many-requests')); return; }
+    const n = ++proximo;
+    pendentes.set(n, { resolve, reject });
+    self.postMessage({ tipo, n, ...carga });
+  });
+
+  self.SeeleMods = Object.freeze({
+    request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
+    snapshot: () => pedir('snapshot', {}),
+  });
+
+  self.SeeleUI = Object.freeze({
+    // O desenho é **declarado**, e não escrito: o MOD manda o que quer ver, e
+    // quem desenha é o produto, dentro da região dele. Ao desmontar, a região
+    // inteira sai — e não sobra regra de CSS nem nó solto pela página.
+    regiao: (conteudo) => pedir('regiao', { conteudo }),
+    tema: (valores) => pedir('tema', { valores }),
+  });
+})();
+`;
+
+/**
+ * Põe um MOD de pé num worker próprio.
+ *
+ * O código vem pela ponte, e não por uma URL: um `Worker` não aceita URL de
+ * outra origem, e `mod://localhost` é outra origem. Pela ponte, a conferência
+ * de hash acontece onde ela já mora — no Rust — e o que chega aqui é texto que
+ * já passou por ela.
+ *
+ * **O `Blob` é a origem.** Um worker de `blob:` é de mesma origem, que é o que
+ * o motor exige; e continua sem `document`, sem `window` e sem o global do
+ * Tauri, que é o que o ADR 0049 exige.
+ */
+async function montarOMod(mod) {
+  const codigo = await invoke("codigo_do_mod", { id: mod.id, hash: mod.hash });
+  // Se o MOD foi descarregado enquanto o código vinha, não monte: a sessão
+  // pode ter acabado no meio do `await`.
+  if (!modsCarregados.has(mod.id)) return;
+
+  const fonte = new Blob([PRELUDIO_DO_MOD, "\n", codigo], {
+    type: "text/javascript",
+  });
+  const endereco = URL.createObjectURL(fonte);
+  const worker = new Worker(endereco);
+  // Revogado assim que o worker o leu: o endereço não precisa sobreviver, e um
+  // que sobrevive é memória que ninguém sabe explicar.
+  URL.revokeObjectURL(endereco);
+
+  worker.onmessage = (evento) => atenderOMod(mod, worker, evento.data);
+  // **Um MOD que quebra não leva a janela junto** — ADR 0045, «falha isolada».
+  // Num worker isso deixou de depender de cuidado: o erro fica lá dentro.
+  worker.onerror = (erro) => {
+    console.error(`MOD ${mod.id}: erro`, erro.message);
+    anotarEstadoDoMod(mod.id, "nao-carregou", erro.message ?? "");
+  };
+
+  modsCarregados.set(mod.id, worker);
+  // **`carregado` diz que os bytes executaram, e só isso.** Se o MOD estourou
+  // dentro da própria inicialização, o worker subiu do mesmo jeito — quem sabe
+  // disso é ele, e prometer o contrário seria inventar.
+  anotarEstadoDoMod(mod.id, "carregado");
+}
+
+/**
+ * A região de um MOD: onde ele desenha, e o único lugar onde ele desenha.
+ *
+ * ADR 0049. O MOD **declara** o que quer ver e o produto monta — com
+ * `textContent` e `createElement`, nunca com HTML de texto: o conteúdo vem de
+ * código de terceiro, e montá-lo como marcação seria dar a ele a página
+ * inteira por outro caminho.
+ *
+ * A gramática é pequena de propósito. Cada forma nova é uma decisão de API, em
+ * vez de um MOD descobrir que consegue.
+ */
+function desenharARegiaoDoMod(id, conteudo) {
+  const palco = $("regioes-dos-mods");
+  if (!palco) return;
+  let regiao = palco.querySelector(`[data-mod="${CSS.escape(id)}"]`);
+  if (!regiao) {
+    regiao = elemento("section", "regiao-de-mod");
+    regiao.dataset.mod = id;
+    palco.append(regiao);
+  }
+  palco.hidden = false;
+  repovoar(regiao, montarODeclarado(conteudo));
+}
+
+/** Uma forma declarada vira nós, ou nada. Recursiva, e com teto de fundura. */
+function montarODeclarado(no, fundura = 0) {
+  // Sem teto, um MOD manda uma árvore de dez mil níveis e a janela estoura na
+  // recursão — dentro do produto, e não dentro do worker.
+  if (fundura > 8 || no === null || no === undefined) return [];
+  if (typeof no === "string") return [document.createTextNode(no)];
+  if (Array.isArray(no)) return no.flatMap((um) => montarODeclarado(um, fundura + 1));
+  if (typeof no !== "object") return [];
+
+  const FORMAS = { texto: "p", titulo: "h3", linha: "div", lista: "ul", item: "li" };
+  const etiqueta = FORMAS[no.forma];
+  // Uma forma que a API não conhece não vira `div` por conveniência: virar
+  // seria a gramática crescer sem ninguém decidir.
+  if (!etiqueta) return [];
+  const elem = elemento(etiqueta, "regiao-de-mod-parte");
+  elem.append(...montarODeclarado(no.dentro, fundura + 1));
+  return [elem];
+}
+
+/** Tira a região de um MOD da tela, inteira — e o tema junto. */
+function limparARegiaoDoMod(id) {
+  const palco = $("regioes-dos-mods");
+  palco?.querySelector(`[data-mod="${CSS.escape(id)}"]`)?.remove();
+  // A faixa não existe vazia: uma régua de 1px em cima de nada é uma borda que
+  // aparece sem ter o que separar.
+  if (palco) palco.hidden = palco.childElementCount === 0;
+  if (temaDosMods.delete(id)) escreverOTemaDaSessao();
+}
+
+// ------------------------------------------------------------ o tema de um MOD
+
+/**
+ * O que cada MOD pediu, por `id`, na ordem em que pediu.
+ *
+ * Guardado em vez de escrito e esquecido porque a pergunta «este token já é de
+ * alguém?» só tem resposta com isto aqui — e é ela que faz o segundo MOD ser
+ * **recusado pelo nome** em vez de apagar o primeiro em silêncio.
+ */
+const temaDosMods = new Map();
+
+/** Os quatro que a API conhece, e o nome do token que cada um redefine. */
+const TEMA_DA_API = Object.freeze({
+  fundo: "--seele-negro-absoluto",
+  texto: "--seele-osso",
+  acento: "--seele-laranja-nerv",
+  borda: "--seele-linha",
 });
+
+const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
+
+/**
+ * O tema que um MOD pede, aplicado **ao contêiner da sessão** — ADR 0049.
+ *
+ * O ESTILO escrevia os tokens em `document.documentElement`, e por isso a cor
+ * dele ia para a tela de entrada, para o launcher e para a bateria. Não havia
+ * onde escrevê-la que não fosse global, porque a sessão não tinha contêiner
+ * próprio. Agora tem, e o tema é uma camada sobre ele: desmontar tira a camada
+ * e a cor do produto reaparece, sem que ninguém fixe uma por cima.
+ *
+ * **Propriedade a propriedade, e não uma folha de estilo.** A CSP desta janela
+ * é `style-src 'self'`, que recusa um `<style>` montado aqui dentro; a CSSOM
+ * não passa por ela. O caminho pela CSP também seria o caminho por onde um
+ * valor de terceiro entraria num arquivo de CSS, que é injeção — aqui ele
+ * entra como valor de uma propriedade e nunca como texto de regra.
+ *
+ * Três recusas, todas pelo nome:
+ *
+ * - um valor que não é `#rrggbb`;
+ * - um token que **outro MOD já pediu** — o produto não tem como saber qual dos
+ *   dois quem usa quis, e escolher em silêncio é escolher errado metade das
+ *   vezes;
+ * - um par texto/fundo abaixo de 4,5:1. `tokens.css` mede e afirma o contraste
+ *   de cada cor do produto; um tema que o derruba transforma aquelas linhas em
+ *   promessa vencida, e quem paga é quem está lendo a conversa.
+ */
+function aplicarOTemaDoMod(id, valores) {
+  const pedido = new Map();
+  for (const [nome, valor] of Object.entries(valores ?? {})) {
+    if (!(nome in TEMA_DA_API)) {
+      throw new Error(`a API de tema não conhece «${nome}»`);
+    }
+    if (typeof valor !== "string" || !COR_DO_TEMA.test(valor)) {
+      throw new Error(`«${nome}» precisa ser uma cor #rrggbb, e veio «${valor}»`);
+    }
+    for (const [outro, seus] of temaDosMods) {
+      if (outro !== id && nome in seus) {
+        throw new Error(`«${nome}» já é do MOD «${outro}» nesta sessão`);
+      }
+    }
+    pedido.set(nome, valor);
+  }
+
+  const antes = temaDosMods.get(id);
+  temaDosMods.set(id, Object.fromEntries(pedido));
+  const legivel = oTextoAlcancaOFundo();
+  if (legivel !== true) {
+    if (antes) temaDosMods.set(id, antes);
+    else temaDosMods.delete(id);
+    throw new Error(legivel);
+  }
+  escreverOTemaDaSessao();
+}
+
+/** Escreve no contêiner da sessão o que os MODs de pé pediram, e só isso. */
+function escreverOTemaDaSessao() {
+  const sessao = $("tela-sessao");
+  if (!sessao) return;
+  const emVigor = new Map();
+  for (const seus of temaDosMods.values()) {
+    for (const [nome, valor] of Object.entries(seus)) emVigor.set(nome, valor);
+  }
+  for (const [nome, token] of Object.entries(TEMA_DA_API)) {
+    const valor = emVigor.get(nome);
+    // Removida, e não reposta com a cor do produto: o recuo já está escrito em
+    // `tela-sessao.css`, e repor aqui fixaria um valor por cima de quem, um dia,
+    // escolher outro.
+    if (valor) sessao.style.setProperty(token, valor);
+    else sessao.style.removeProperty(token);
+  }
+}
+
+/**
+ * O par texto/fundo que ficaria em vigor alcança 4,5:1?
+ *
+ * Devolve `true`, ou a frase da recusa. O que o MOD não pediu é lido **da
+ * raiz** do documento, e não da sessão: a raiz é o único lugar onde a cor do
+ * produto continua sendo a cor do produto com um tema de pé, e ler dali evita
+ * uma segunda cópia da palheta aqui dentro, que envelheceria sozinha.
+ */
+function oTextoAlcancaOFundo() {
+  const emVigor = {};
+  for (const seus of temaDosMods.values()) Object.assign(emVigor, seus);
+  if (!("texto" in emVigor) && !("fundo" in emVigor)) return true;
+
+  const medido = getComputedStyle(document.documentElement);
+  const daRaiz = (token) => medido.getPropertyValue(token).trim();
+  const texto = emVigor.texto ?? daRaiz(TEMA_DA_API.texto);
+  const fundo = emVigor.fundo ?? daRaiz(TEMA_DA_API.fundo);
+  // Uma folha que não carregou não vira recusa: sem cor medida não há medida, e
+  // inventar uma seria recusar um tema por um motivo que não aconteceu.
+  if (!COR_DO_TEMA.test(texto) || !COR_DO_TEMA.test(fundo)) return true;
+
+  const razao = contrasteEntre(texto, fundo);
+  if (razao >= 4.5) return true;
+  return `o texto «${texto}» sobre o fundo «${fundo}» dá ${razao.toFixed(2)}:1, `
+    + "e a conversa precisa de 4,5:1 para ser lida";
+}
+
+/** WCAG 2.1: a razão de contraste entre duas cores `#rrggbb`. */
+function contrasteEntre(a, b) {
+  const luz = (cor) => {
+    const canais = [1, 3, 5].map((i) => {
+      const c = parseInt(cor.slice(i, i + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * canais[0] + 0.7152 * canais[1] + 0.0722 * canais[2];
+  };
+  const [claro, escuro] = [luz(a), luz(b)].sort((x, y) => y - x);
+  return (claro + 0.05) / (escuro + 0.05);
+}
+
+/** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
+async function atenderOMod(mod, worker, m) {
+  if (!m || typeof m.n !== "number") return;
+  const responder = (ok, carga) => {
+    // Só responde se este worker ainda é o deste MOD: um que foi descarregado
+    // no meio não pode receber resposta, e mandar para ele seria falar com
+    // quem já saiu.
+    if (modsCarregados.get(mod.id) === worker) worker.postMessage({ tipo: "resposta", n: m.n, ok, ...carga });
+  };
+  try {
+    switch (m.tipo) {
+      case "pedido":
+        responder(true, { valor: await pedirAoServidor(mod.id, m.canal, m.valor) });
+        break;
+      case "snapshot":
+        responder(true, { valor: await invoke("snapshot") });
+        break;
+      case "regiao":
+        desenharARegiaoDoMod(mod.id, m.conteudo);
+        responder(true, { valor: null });
+        break;
+      case "tema":
+        aplicarOTemaDoMod(mod.id, m.valores);
+        responder(true, { valor: null });
+        break;
+      default:
+        // **Recusado e nomeado.** Uma mensagem que a API não conhece não pode
+        // ser ignorada: quem escreveu o MOD ficaria esperando para sempre uma
+        // resposta que nunca vem, sem saber por quê.
+        responder(false, { erro: `a API de MODs não conhece «${m.tipo}»` });
+    }
+  } catch (falha) {
+    responder(false, { erro: String(falha?.message ?? falha) });
+  }
+}
+
 const modsCarregados = new Map();
 let conferindoMods = false;
 let ultimoErroDeMods = "";
@@ -488,17 +818,22 @@ async function carregarMods() {
   try {
     await invoke("snapshot");
     instalados = await invoke("mods_instalados");
-    const catalogo = await globalThis.SeeleMods.request("", 0, {});
+    // Pelo caminho de dentro, e não pela API dos MODs: o `id` vazio é o
+    // catálogo do próprio servidor, e não um MOD pedindo alguma coisa. Enquanto
+    // isto passava por `globalThis.SeeleMods`, o produto dependia do objeto que
+    // ele expunha aos MODs — e o ADR 0049 o tirou da janela.
+    const catalogo = await pedirAoServidor("", 0, {});
     if (!catalogo.ok) throw new Error("catalogue-refused");
     // O catálogo respondeu: a notícia de que ele não respondia deixou de valer.
     if (estadoDosMods.has("")) {
       estadoDosMods.delete("");
       globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
     }
-    for (const [id, node] of modsCarregados) {
-      if (!catalogo.mods.some(m => m.id === id && m.hash === node.dataset.hash)) {
-        globalThis.dispatchEvent(new CustomEvent("seele-mod-unload", { detail: id }));
-        node.remove(); modsCarregados.delete(id);
+    for (const [id, worker] of modsCarregados) {
+      if (!catalogo.mods.some(m => m.id === id)) {
+        if (worker) worker.terminate();
+        limparARegiaoDoMod(id);
+        modsCarregados.delete(id);
         anotarEstadoDoMod(id, "descarregado");
       }
     }
@@ -554,35 +889,15 @@ async function carregarMods() {
 
   for (const mod of instalados) {
     if (!mod.client || modsCarregados.has(mod.id)) continue;
-
-    const script = document.createElement("script");
-    script.type = "module";
-    // **A URL sai do conversor do Tauri, e não de texto montado aqui** — A07.
-    //
-    // `mod://localhost/...` é a forma do macOS e do Linux. No Windows e no
-    // Android o mesmo protocolo é servido como `http://mod.localhost/...`, e
-    // uma URL escrita à mão não abre lá. `convertFileSrc` é quem sabe a forma
-    // de cada plataforma, e ele escapa o caminho — o manipulador do lado Rust
-    // desfaz o escape antes de conferir o hash.
-    const caminho = `${mod.id}/${mod.client}`;
-    const base = window.__TAURI__.core.convertFileSrc(caminho, "mod");
-    script.src = `${base}?hash=${mod.hash}&load=${Date.now()}`;
-    script.dataset.hash = mod.hash;
+    // Marcado **antes** do `await`: o laço roda a cada quatro segundos, e sem
+    // isto dois tiques sobrepostos criariam dois workers do mesmo MOD.
+    modsCarregados.set(mod.id, null);
     anotarEstadoDoMod(mod.id, "carregando");
-    // Um MOD que quebra não leva a janela junto — ADR 0045, «falha isolada».
-    // Sem isto, um erro de sintaxe num MOD de terceiro é uma tela preta que
-    // ninguém sabe explicar.
-    script.addEventListener("error", () => {
-      console.error(`MOD ${mod.id}: não carregou`);
+    montarOMod(mod).catch((falha) => {
+      console.error(`MOD ${mod.id}: não carregou`, falha);
       anotarEstadoDoMod(mod.id, "nao-carregou");
-      modsCarregados.delete(mod.id); script.remove();
+      modsCarregados.delete(mod.id);
     });
-    // **`load` diz que os bytes executaram, e só isso.** Se o MOD estourou
-    // dentro da própria inicialização, o `load` acontece do mesmo jeito — quem
-    // sabe disso é ele, e prometer o contrário seria inventar.
-    script.addEventListener("load", () => anotarEstadoDoMod(mod.id, "carregado"));
-    modsCarregados.set(mod.id, script);
-    document.head.appendChild(script);
   }
   conferindoMods = false;
 }
@@ -608,8 +923,16 @@ setInterval(carregarMods, 4000);
  * se o outro lado também vai avisar.
  */
 function encerrarOAmbienteDosMods() {
-  for (const [id, node] of modsCarregados) {
-    globalThis.dispatchEvent(new CustomEvent("seele-mod-unload", { detail: id })); node.remove();
+  for (const [id, worker] of modsCarregados) {
+    // **`terminate()` é a garantia, e não um pedido** — ADR 0049.
+    //
+    // Antes isto disparava `seele-mod-unload` e o MOD desmontava a si mesmo.
+    // Um MOD que não implementasse o evento deixava temporizador, ouvinte,
+    // regra de CSS e áudio de pé — e isso não era defeito dele: era o que
+    // «rodar na página» significava. Agora o contexto morre, e com ele tudo o
+    // que ele alocou.
+    if (worker) worker.terminate();
+    limparARegiaoDoMod(id);
   }
   modsCarregados.clear();
   // A exigência é de um destino, e o destino acabou. Esperar o tique seguinte
