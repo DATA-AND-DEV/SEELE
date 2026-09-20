@@ -6,8 +6,14 @@ gráfico e as duas ferramentas de terminal.
 | sistema | baixe |
 |---|---|
 | **Windows** | `SEELE_<versão>_x64-instalador.exe` |
-| **macOS** | `SEELE_<versão>_universal.dmg` — Intel e Apple Silicon |
-| **Linux** | `SEELE_<versão>_amd64.deb` — Debian, Ubuntu e derivados |
+| **macOS (Apple Silicon)** | `SEELE_<versão>_aarch64.dmg` |
+
+**Linux e Mac Intel ainda não têm pacote**, e esta linha existe para dizer isso
+em vez de deixar descobrir. Quem procurava um `.deb` ou um `.dmg` universal
+nesta página estava procurando um arquivo que nunca foi construído — a tabela
+os prometia desde a v0.11.0.
+
+Quem está nesses dois sistemas compila do código, e o README diz como.
 
 Dentro de cada um vão três programas: **`SEELE`**, o cliente gráfico, que tem um
 botão **HOSPEDAR AQUI** e com o qual você nunca precisa abrir um terminal;
