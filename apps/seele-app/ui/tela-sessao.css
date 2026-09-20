@@ -1175,6 +1175,39 @@ button.linha-nome:hover { text-decoration: underline; }
    Não há `ENVIAR` para ele contrastar desde a 0.9.0 — Enter envia —, então o
    par que ele formava com um botão sólido deixou de existir, e com ele a razão
    de a palavra estar escrita. */
+/* O botão ENVIAR — U17.
+
+   Pequeno e secundário de propósito: a tecla continua sendo o caminho rápido,
+   e o botão é o que torna o caminho **visível**. Quem nunca leu a ajuda nem o
+   `placeholder` — que some na primeira letra digitada — ficava com uma barra em
+   que nada parecia mandar, e para quem navega por toque não há tecla nenhuma. */
+.compor-enviar {
+  flex: 0 0 auto;
+  align-self: end;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--seele-linha-forte);
+  background: none;
+  color: var(--seele-osso);
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  cursor: pointer;
+}
+
+.compor-enviar:hover { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
+.compor-enviar:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+
+/* O campo cresce com o que se escreve, até o teto que `cresceOCampo` aplica.
+   `resize: none` porque a alça do navegador competiria com esse crescimento —
+   duas coisas mexendo na mesma altura, e a última a mexer ganhando. */
+#campo-mensagem {
+  resize: none;
+  overflow-y: auto;
+  max-height: 160px;
+  line-height: 1.45;
+}
+
 .compor-anexar {
   width: 44px;
   height: 44px;

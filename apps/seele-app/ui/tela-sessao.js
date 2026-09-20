@@ -2153,6 +2153,7 @@ async function enviar(evento) {
   // as duas coisas eram uma.
   if (anexoPendente) {
     campo.value = "";
+    cresceOCampo();
     await subirAnexo(corpo);
     return;
   }
@@ -2161,10 +2162,12 @@ async function enviar(evento) {
   // Limpa antes de esperar a resposta: um campo que só esvazia depois do ida e
   // volta parece travado numa rede ruim, que é justo quando não pode parecer.
   campo.value = "";
+  cresceOCampo();
   try {
     await invoke("send_message", { channel: linhaAberta, body: corpo });
   } catch (falha) {
     campo.value = corpo;
+    cresceOCampo();
     console.warn("send_message:", falha);
   }
 }
@@ -3389,6 +3392,26 @@ $("campo-mensagem").addEventListener("keydown", (evento) => {
   enviar(evento);
 });
 
+/**
+ * O campo cresce com o que se escreve, até um teto.
+ *
+ * U17 pediu «suporte declarado a texto multilinha», e um `<textarea rows="1">`
+ * que não cresce é multilinha só no papel: quem escreve três linhas vê uma e
+ * rola dentro de uma caixa de trinta pixels.
+ *
+ * O teto existe porque a barra dividiria a tela com a conversa: um campo que
+ * cresce sem limite empurra para fora justamente o que se está respondendo.
+ * `scrollHeight` depois de zerar a altura é a medida do conteúdo — sem zerar,
+ * ela nunca diminui.
+ */
+function cresceOCampo() {
+  const campo = $("campo-mensagem");
+  campo.style.height = "auto";
+  campo.style.height = `${Math.min(campo.scrollHeight, 160)}px`;
+}
+
+$("campo-mensagem").addEventListener("input", cresceOCampo);
+
 // Arrastar é o segundo jeito de escolher um arquivo, e não é mais o único: o
 // botão ARQUIVO abre o seletor do sistema. Este ouvinte continua porque quem
 // arrasta espera que arrastar funcione — não porque não haja alternativa.
@@ -3493,9 +3516,41 @@ $("nova-linha").addEventListener("click", () => {
     rotulo: "NOME DO CANAL",
     exemplo: "nome do canal",
     acao: "CRIAR",
-    aoConfirmar: (nome) => invoke("criar_linha", { name: nome }),
+    aoConfirmar: (nome) => criarEAbrirCanal(nome),
   });
 });
+
+/**
+ * Cria um canal e **abre o canal criado** — U16.
+ *
+ * «Criar canal funciona, mas mantém a conversa no canal anterior sem uma ação
+ * clara para abrir o novo.» Quem acaba de nomear um canal está prestes a
+ * escrever nele: deixar a conversa onde estava faz o ato parecer não ter
+ * acontecido, e a lista de canais é onde se descobre que ele existe — num item
+ * a mais, no meio de vários.
+ *
+ * **A decisão de contexto fica explícita**, que é a outra metade do que a
+ * auditoria pediu: o canal novo é aberto porque criar é pedir para usar, e não
+ * porque o produto adivinhou. Quem não queria mudar de canal volta pelo item
+ * anterior, que continua lá.
+ *
+ * O `id` do canal criado não vem da resposta — `criar_linha` não o devolve —,
+ * então ele é procurado no retrato seguinte pelo nome. Não achar é um desfecho
+ * possível e silencioso: o canal foi criado, e a conversa fica onde estava.
+ */
+async function criarEAbrirCanal(nome) {
+  await invoke("criar_linha", { name: nome });
+  const retrato = await invoke("snapshot");
+  // O último com este nome: se já havia um homônimo, o novo é o que acabou de
+  // entrar na lista.
+  const criado = [...(retrato.channels ?? [])].reverse().find((c) => c.name === nome);
+  if (!criado) return;
+  linhaAberta = criado.id;
+  await invoke("open_channel", { channel: linhaAberta });
+  fecharChamada();
+  // Foco no campo: quem criou o canal veio escrever nele.
+  $("campo-mensagem").focus();
+}
 // O `×` da caixa de alerta, e o único fechamento dela: o `RECONHECER` de baixo
 // saiu, porque duas portas para o mesmo ato numa caixa de 720px é a pessoa
 // procurando qual das duas é a certa. O `id` não mudou junto com a forma — é o

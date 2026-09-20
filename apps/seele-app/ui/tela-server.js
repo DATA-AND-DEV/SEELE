@@ -289,11 +289,21 @@ function marcarUmaLista(chave, lista, aberto) {
  */
 function desenharNivel(snapshot) {
   const medidor = $("server-nivel");
+  const nota = $("server-nivel-nota");
   if (!snapshot || !snapshot.audio_available) {
     medidor.dataset.vivo = "nao";
     medidor.textContent = "— SEM SESSÃO DE ÁUDIO";
+    // **A frase de baixo sai do mesmo estado que a de cima** — U08. Ela era
+    // fixa, e dizia «Fale normalmente: os blocos sobem com a sua voz» debaixo
+    // de um medidor que acabara de dizer que não há sessão de áudio.
+    if (nota) {
+      nota.textContent = "O medidor mede a voz que está indo para uma sala. "
+        + "Aqui fora não há nenhuma: escolha os aparelhos agora e entre numa "
+        + "sala de voz para ver o nível.";
+    }
     return;
   }
+  if (nota) nota.textContent = "Fale normalmente: os blocos sobem com a sua voz.";
 
   const nivel = Math.max(0, Math.min(1, snapshot.telemetry.input_level));
   const cheios = Math.round(nivel * BLOCOS_DO_MEDIDOR);

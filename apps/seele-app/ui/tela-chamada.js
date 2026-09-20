@@ -148,8 +148,21 @@ function desenharPalco(snapshot, voice_room) {
     // desenhado, mandar apertar um botão que não existe é pior ainda.
     nota.hidden = !voice_room;
     nota.textContent = temControleDeTela()
-      ? "Use COMPARTILHAR, aqui em cima, para mostrar um monitor ou uma janela sua."
+      // **A orientação aponta para onde o botão está** — U28.
+      //
+      // «O estado vazio diz "Use COMPARTILHAR, aqui em cima", mas o botão está
+      // na base da coluna esquerda.» A frase foi escrita quando o botão ficava
+      // no cabeçalho, e ficou quando ele mudou de lugar: uma instrução que
+      // aponta para o canto errado é pior que nenhuma, porque quem a segue
+      // conclui que o botão não existe.
+      //
+      // O botão de verdade fica ao lado desta frase agora — ver `palco-vazio`
+      // em `index.html` —, e por isso ela deixa de descrever um caminho.
+      ? "Nada está sendo transmitido nesta sala."
       : "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
+    // O botão fica ao lado da frase, e só onde ele tem o que fazer: numa sala,
+    // e com o controle de tela disponível nesta máquina.
+    $("palco-compartilhar").hidden = !voice_room || !temControleDeTela();
     $("palco-parada").hidden = true;
     $("palco-numeros").hidden = true;
     $("palco-aperto").hidden = true;
@@ -727,9 +740,18 @@ function desenharORodapeDoOperador(voice_room) {
   }
 }
 
-$("operador-vista").addEventListener("click", () => {
-  abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
-});
+// **Duas portas, um comando** — U28.
+//
+// O botão do rodapé e o que fica ao lado do estado vazio da chamada chamam a
+// mesma função. Não é um segundo caminho: é o mesmo, no lugar onde a pessoa
+// está olhando quando precisa dele. Dois comandos com o mesmo rótulo é que
+// seria um problema — duas maneiras de fazer a mesma coisa, discordando no dia
+// em que uma delas mudar.
+for (const porta of ["operador-vista", "palco-compartilhar"]) {
+  $(porta).addEventListener("click", () => {
+    abrirCompartilhar().catch((falha) => console.warn("compartilhar:", falha));
+  });
+}
 
 /**
  * Sair — da sala, ou do servidor, conforme onde se está.

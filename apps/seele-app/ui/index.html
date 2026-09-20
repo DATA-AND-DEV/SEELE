@@ -1380,7 +1380,22 @@
               com o `palco-quem` que a chamada mantém.
             -->
             <p id="palco-falha" class="chamada-palco-falha" role="status" hidden></p>
-            <p id="palco-nota" class="nota">Use COMPARTILHAR, aqui em cima, para mostrar um monitor ou uma janela sua.</p>
+            <!--
+              **A acao fica junto do estado vazio** - U28.
+
+              A nota dizia «Use COMPARTILHAR, aqui em cima», e o botao esta na
+              base da coluna esquerda desde que saiu do cabecalho. Uma instrucao
+              que aponta para o canto errado e pior que nenhuma: quem a segue
+              conclui que o botao nao existe.
+
+              A auditoria pediu «botao proximo do estado vazio», e este e o
+              mesmo comando do rodape - `operador-vista` -, acionado daqui por
+              `tela-chamada.js`. Nao e um segundo caminho: e o mesmo, onde a
+              pessoa esta olhando quando precisa dele.
+            -->
+            <p id="palco-nota" class="nota"></p>
+            <button id="palco-compartilhar" class="botao" type="button" hidden
+                    title="mostrar um monitor ou uma janela sua para quem está na sala">COMPARTILHAR ESTA TELA</button>
             <!--
               O motivo de uma transmissão parada chega por extenso do outro lado
               (`TelaEmCurso::parada`), e é a única frase desta janela escrita
@@ -1529,9 +1544,19 @@
           -->
           <span class="compor-caixa">
             <span class="prompt" aria-hidden="true">&gt;</span>
-            <input id="campo-mensagem" name="mensagem"
-                   placeholder="transmitir no canal — Enter envia, Ctrl+V cola uma imagem"
-                   maxlength="4000" autocomplete="off">
+            <!--
+              **Textarea, e não input** — U17 pede «suporte declarado a texto
+              multilinha», e um `<input>` não tem como tê-lo: ele descarta a
+              quebra de linha antes de qualquer script ver.
+
+              `rows="1"` porque a barra tem uma altura só quando há uma linha
+              só; `cresceOCampo`, em `tela-sessao.js`, a estica até um teto
+              quando há mais. Um campo que cresce sem teto empurra a conversa
+              para fora da tela.
+            -->
+            <textarea id="campo-mensagem" name="mensagem" rows="1"
+                      placeholder="transmitir no canal — Enter envia, Shift+Enter quebra o parágrafo"
+                      maxlength="4000" autocomplete="off"></textarea>
           </span>
           <!--
             Abre o seletor de arquivos do sistema. Antes ele não abria: o ADR 0027
@@ -1548,20 +1573,32 @@
                   title="escolher um arquivo; Ctrl+V e arrastar também anexam"
                   data-glifo="anexo"></button>
           <!--
-            **Não há botão ENVIAR**, e a comp da 0.9.0 escreve isso na marcação:
-            «compor: Enter envia, sem botão de enviar». Ele era a segunda maneira
-            de fazer o que a tecla já faz, ocupando o lugar mais valioso da barra.
+            **O botão ENVIAR voltou** — U17.
 
-            O que o substitui é o `placeholder`, que diz as duas coisas no lugar
-            em que se está olhando quando se precisa saber.
+            A comp da 0.9.0 escreve «compor: Enter envia, sem botão de enviar», e
+            o argumento era que ele é a segunda maneira de fazer o que a tecla já
+            faz, ocupando o lugar mais valioso da barra.
 
-            Sem um botão `type="submit"`, o envio implícito do navegador passaria
-            a depender só da regra do «exatamente um campo de texto» — e o campo
-            seguinte que alguém acrescentasse aqui apagaria o Enter sem tocar em
-            nada visível. Por isso o ouvinte explícito entrou **antes**, em
-            `fc18fb2`, e o `a_nota_que_promete_o_enter_tem_quem_a_cumpra` prende
-            a promessa ao código que a cumpre.
+            A auditoria de 20/09/2026 mediu o custo do outro lado: «Enviar texto
+            exige Enter; não há botão de enviar, como a própria ajuda confirma.»
+            Uma tecla não é descobrível — quem nunca leu a ajuda nem o
+            `placeholder` fica com uma barra em que nada parece mandar —, e para
+            quem navega por toque não há tecla nenhuma. O `placeholder` some
+            assim que se digita a primeira letra, que é justamente quando a
+            dúvida aparece.
+
+            Ele é pequeno e secundário de propósito: a tecla continua sendo o
+            caminho rápido, e o botão é o que torna o caminho visível.
+
+            `type="submit"` também conserta uma fragilidade antiga: sem ele, o
+            envio implícito dependia da regra do «exatamente um campo de texto»,
+            e o campo seguinte que alguém acrescentasse aqui a apagaria sem
+            tocar em nada visível. O ouvinte de Enter continua explícito, e o
+            `a_nota_que_promete_o_enter_tem_quem_a_cumpra` prende a promessa ao
+            código que a cumpre.
           -->
+          <button id="botao-enviar" class="compor-enviar" type="submit"
+                  aria-label="Enviar a mensagem">ENVIAR</button>
         </form>
       </div>
     </section>
@@ -2181,7 +2218,7 @@
           <button id="secao-audio" class="server-secao" type="button"
                   data-painel="painel-audio"
                   data-titulo="MICROFONE E SOM"
-                  data-sub="Escolha os aparelhos e ouça antes de entrar numa sala de voz">
+                  data-sub="Escolha o microfone e a saída desta máquina">
             <span class="server-secao-icone" data-glifo="audio"></span>
             <span class="server-secao-texto">
               <!-- `MICROFONE E SOM` é o nome que a comp da 0.9.0 dá, e é o
@@ -2510,7 +2547,23 @@
                   atrás dele — o nível só existe com áudio de pé.
                 -->
                 <p id="server-nivel" class="server-medidor" role="status">—</p>
-                <p class="nota">Fale normalmente: os blocos sobem com a sua voz.</p>
+                <!--
+                  **A instrução acompanha a disponibilidade** — U08.
+
+                  Ela dizia «Fale normalmente: os blocos sobem com a sua voz»
+                  logo abaixo de um medidor que, fora de sessão, escreve «SEM
+                  SESSÃO DE ÁUDIO». Duas frases contraditórias uma embaixo da
+                  outra, e o título prometia ouvir antes de entrar.
+
+                  A auditoria deu duas saídas: um teste local de microfone
+                  independente de servidor, ou uma instrução coerente. A
+                  primeira exige captura de áudio fora de sessão, que este build
+                  não tem — e prometê-la num texto seria repetir o defeito num
+                  lugar diferente. A segunda é esta: o texto é escrito por
+                  `desenharNivel`, do mesmo estado que decide o medidor, e por
+                  isso as duas frases não podem voltar a discordar.
+                -->
+                <p id="server-nivel-nota" class="nota"></p>
               </div>
 
               <!--
