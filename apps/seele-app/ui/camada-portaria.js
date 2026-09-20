@@ -109,11 +109,28 @@ function cartao(pedido, botoes) {
   const impressao = elemento("p", "portaria-impressao", agrupar(pedido.impressao));
   impressao.title = pedido.impressao;
 
+  // **Um apelido vazio não vira aspas vazias** — U14.
+  //
+  // «Portaria lista uma identidade admitida como hash e "diz chamar-se «»".»
+  // Quem bate sem escolher apelido produzia `«»`, e duas aspas coladas não são
+  // um nome: são o produto anunciando uma ausência como se fosse um dado.
+  //
+  // A ordem de cima continua sendo a decisão do ADR 0030 — a impressão digital
+  // é o que se confere, e o apelido é afirmação de quem bateu —, e por isso a
+  // ausência dele é dita e não escondida.
+  const escolhido = String(pedido.apelido ?? "").trim();
   const apelido = elemento("p", "portaria-apelido");
-  apelido.append(
-    elemento("span", "portaria-diz", "diz chamar-se"),
-    elemento("span", "portaria-nome", `«${pedido.apelido}»`),
-  );
+  if (escolhido) {
+    apelido.append(
+      elemento("span", "portaria-diz", "diz chamar-se"),
+      elemento("span", "portaria-nome", `«${escolhido}»`),
+    );
+  } else {
+    apelido.append(
+      elemento("span", "portaria-diz", "sem apelido:"),
+      elemento("span", "portaria-nome ausente", "quem bateu não escolheu um"),
+    );
+  }
 
   const contexto = elemento("p", "portaria-contexto", comoChegou(pedido));
   const batida = elemento(

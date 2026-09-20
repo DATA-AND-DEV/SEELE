@@ -2466,8 +2466,22 @@
         <!-- ---------------------------------------------------------- ÁUDIO -->
         <section id="painel-porta" class="server-painel-secao"
                  aria-labelledby="secao-porta" hidden>
-          <p class="nota">O link de convite deste servidor. Ele aparece uma vez
-            quando a rede sobe, e mora aqui depois disso.</p>
+          <!--
+            **Duas perguntas, dois blocos** - U13.
+
+            «Link/convite, situacao de NAT e "PORTA · FECHADA" ficam proximos,
+            mas descrevem mecanismos diferentes.» E descrevem mesmo: «ate onde
+            este link chega» e «quem passa por ele» sao decisoes de camadas
+            diferentes, e um link que alcanca o mundo inteiro atras de uma porta
+            fechada nao e contraditorio - e o estado normal de quem ainda nao
+            abriu a portaria.
+
+            Junta-las numa coluna so fazia a segunda parecer consequencia da
+            primeira. Separadas, cada uma responde o que ela responde.
+          -->
+          <h3 class="server-bloco-nome">CONEXÃO EXTERNA</h3>
+          <p class="nota">O link de convite deste servidor e até onde ele chega.
+            Ele aparece uma vez quando a rede sobe, e mora aqui depois disso.</p>
           <div class="porta-linha">
             <input id="porta-link-config" class="convite-link" readonly spellcheck="false">
             <button id="porta-copiar-config" class="botao-fantasma" type="button">copiar</button>
@@ -2504,6 +2518,10 @@
             neste lugar — dois botões para o mesmo diálogo, e só um deles
             dizia alguma coisa.
           -->
+          <h3 class="server-bloco-nome">QUEM PODE ENTRAR</h3>
+          <p class="nota">Senha, convites de uso único e a portaria — quem bate
+            e quem passa. É outra decisão que a de cima: um link que alcança o
+            mundo atrás de uma porta fechada não é contradição nenhuma.</p>
           <button id="portaria-abrir" class="botao-fantasma" type="button">porta</button>
         </section>
 
@@ -2911,11 +2929,26 @@
             <div class="server-bloco-corpo">
               <div class="server-par">
                 <span class="rotulo">APELIDO EM USO</span>
-                <span id="server-apelido" class="server-par-valor ausente">——</span>
+                <span id="server-apelido" class="server-par-valor ausente"></span>
               </div>
-              <p class="server-frase">Neste servidor os apelidos são presos a chaves.
-                O seu ficou reservado para a sua chave no dia em que você entrou
-                pela primeira vez, e ninguém mais consegue usá-lo.</p>
+              <!--
+                **A frase deixa de dizer «neste servidor» fora de um** - U09.
+
+                «Identidade fora de servidor mostra apelido `——` e fala em
+                "neste servidor".» Nao ha «este servidor» na tela de entrada, e
+                a frase falava de um que nao existe - junto de um travessao que
+                fazia parecer que algo tinha falhado.
+
+                A identidade **do dispositivo** e a chave, e ela vale sempre; o
+                apelido e reservado **por servidor**, e so ha um quando se esta
+                dentro de um. Separar as duas e o que a auditoria pediu, e e o
+                que estas duas frases passam a fazer.
+
+                Escrita por `desenharIdentidade`, do mesmo estado que decide o
+                valor acima: duas frases sobre a mesma coisa, vindas de lugares
+                diferentes, e a que discorda.
+              -->
+              <p id="server-identidade-frase" class="server-frase"></p>
               <p class="server-frase">A chave mora nesta máquina, num arquivo só
                 seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> servidor
                 que você já visitou, e não há como recuperá-lo sem um operador de

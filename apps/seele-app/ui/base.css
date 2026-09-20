@@ -212,9 +212,26 @@ input:focus {
   border-color: var(--seele-laranja-nerv);
 }
 
+/* **Uma ação principal tem peso de ação principal** — U04.
+ *
+ * «Botões visualmente pouco diferenciados […] As ações principais parecem
+ * controles auxiliares.» O campo sólido já separava primário de secundário; o
+ * que faltava era **altura**: um botão de 8px de padding num texto de 10px dá
+ * cerca de 30px de alvo, e um alvo de 30px é o que faz alguém errar o clique
+ * numa lista de controles vizinhos.
+ *
+ * 40px medidos, e não declarados: a WCAG 2.2 pede 24×24 em AA e 44×44 em AAA.
+ * Quarenta fica acima do primeiro e abaixo do segundo, e é o que cabe na
+ * densidade desta casca sem empurrar as colunas. A auditoria pediu medida e
+ * não conformidade — este comentário é a medida.
+ *
+ * `peso` forte pela mesma razão: o contraste de forma entre primário e
+ * secundário é o campo sólido; o de leitura é o peso. */
 .botao {
   font: inherit;
+  font-weight: 700;
   letter-spacing: var(--seele-tracking-rotulo);
+  min-height: 40px;
   padding: 8px 16px;
   color: var(--seele-negro-absoluto);
   background: var(--seele-laranja-nerv);
@@ -250,14 +267,22 @@ input:focus {
 .botao:disabled { opacity: 0.5; cursor: default; }
 .botao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
+/* O secundário: mesmo alvo, peso menor.
+ *
+ * U04 pede variantes distinguíveis, e a distinção aqui é a que já existia —
+ * contorno contra campo sólido. O que muda é o alvo: 2px de padding num texto
+ * de 11px davam cerca de 20px de altura, abaixo do mínimo de 24 que a WCAG 2.2
+ * fixa em AA. Trinta e dois medidos, com o corpo de dado no lugar do 11px solto
+ * que não vinha de token nenhum. */
 .botao-fantasma {
   margin-left: auto;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--seele-t-dado);
+  min-height: 32px;
   color: inherit;
   background: none;
   border: 1px solid currentColor;
-  padding: 2px 8px;
+  padding: 4px 10px;
   cursor: pointer;
 }
 

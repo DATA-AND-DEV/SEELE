@@ -314,7 +314,23 @@ function mostrarAlcance(
   const frase = fraseDeErro(alcance);
   const soPerto = alcance === "SoRedeLocal" || alcance === "RedeLocalOuVpn";
 
-  onde.textContent = frase;
+  // **O resumo num nó próprio, e não num texto solto ao lado dos detalhes** —
+  // U13.
+  //
+  // «O resumo concatena frases ("outro.o roteador…").» Visualmente as partes
+  // estavam separadas — os detalhes são `display: block` —, mas o `<p>` tinha
+  // um nó de texto e três `<span>` irmãos, e o nome acessível de um elemento é
+  // a concatenação do texto dele. Quem lê por leitor de tela ouvia as quatro
+  // frases coladas, sem pausa entre a última palavra de uma e a primeira da
+  // seguinte.
+  //
+  // Com o resumo num `<span>` de bloco como os outros, cada parte é um nó, e a
+  // árvore de acessibilidade tem a mesma divisão que a tela.
+  onde.replaceChildren();
+  const resumo = document.createElement("span");
+  resumo.className = "convite-alcance-resumo";
+  resumo.textContent = frase;
+  onde.append(resumo);
   onde.classList.toggle("convite-alcance-curto", soPerto);
   onde.classList.toggle("convite-alcance-longe", !soPerto);
 

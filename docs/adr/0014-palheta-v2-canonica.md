@@ -195,3 +195,48 @@ tentativa, que pedia «Saira» e não «Saira Condensed».
 Nenhum valor de cor, espaçamento, peso ou tamanho. O arquivo continua sendo
 cópia byte a byte de `design/seele-tokens.css`, e a ordem continua sendo:
 mudar o design primeiro, este ADR em seguida, e só então copiar.
+
+
+## Adendo — 2026-09-20 · o rótulo sobe de 10px para 12px
+
+`--seele-t-rotulo` passa de 10px para 12px, e `--seele-t-micro` de 9px para
+10px. Nenhuma cor, peso, espaçamento ou borda muda.
+
+### Por que
+
+A auditoria de UX/UI de 20/09/2026, achado U04: «Rótulos muito pequenos, botões
+visualmente pouco diferenciados e campos sem hierarquia de tarefa. As ações
+principais parecem controles auxiliares.»
+
+O rótulo é a medida mais usada desta interface — ele nomeia todo controle, toda
+seção, toda pastilha e todo par de dados. A 10px em caixa alta com 0,22em de
+tracking ele é pequeno duas vezes: a caixa alta tira a altura de x que ajuda a
+ler, e o tracking separa as letras que formam a palavra. Foi a combinação, e não
+o número sozinho, que a auditoria encontrou.
+
+O micro acompanha pela proporção: ele é a régua ao lado do rótulo, e uma régua
+menor do que aquilo que ela mede não ajuda ninguém.
+
+### O que este número **não** é
+
+Não é uma alegação de conformidade. A WCAG não fixa tamanho mínimo de texto — o
+que ela fixa é contraste e alvo —, e a própria auditoria é explícita: «Medir
+contraste e alvos; não declarar conformidade sem medida.»
+
+Doze é o tamanho em que este rótulo, nesta face e com este tracking, deixa de
+pedir aproximação numa janela a distância de braço. Quem quiser afirmar mais que
+isso precisa medir com pessoas, e a auditoria também diz isso — «não aprovar
+apenas por opinião estética».
+
+### O que o contraste ganhou de graça, e o que ele não perdeu
+
+`--seele-rotulo-painel` foi escolhido em `#908574` porque «a escala põe rótulo
+em 9–10px, que não é texto grande». A 12px ele continua não sendo texto grande —
+o corte da WCAG é 18pt, ou 14pt em negrito —, então a cor não é afrouxada junto.
+Os 5,52:1 medidos continuam sendo o piso, e continuam acima de AA sob a
+varredura.
+
+### A ordem
+
+A mesma de sempre, e ela foi seguida: `design/seele-tokens.css` primeiro, este
+ADR em seguida, e só então a cópia byte a byte para `apps/seele-app/ui/`.

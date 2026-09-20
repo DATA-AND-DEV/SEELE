@@ -1581,14 +1581,56 @@ button.linha-nome:hover { text-decoration: underline; }
 
 .pessoa-identidade { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 
+/* **O nome é a coisa maior da linha** — U15.
+ *
+ * «A identidade domina pouco a faixa de pessoas; um sinal 100 e "TRANSMITINDO"
+ * dominam inclusive fora de sala de voz.» A medida estava aqui: o número do
+ * sinal era 26px e peso 900, e isto era o corpo de dado. A linha dizia a
+ * medida e sussurrava de quem ela era.
+ *
+ * O número desceu para o diagnóstico recolhível, e o nome passou a ter o
+ * tamanho de quem é o assunto da lista. */
 .pessoa-nome {
-  font-size: var(--seele-t-dado);
-  letter-spacing: 0.06em;
+  font-size: var(--seele-t-corpo);
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--seele-osso);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* O diagnóstico, recolhido — U15.
+ *
+ * Recolher não é tirar: quem precisa do número continua a um toque dele, e o
+ * resumo já o carrega. `specs/06-clientes-gui.md` não perde nada — o estado
+ * continua em palavra, dentro. */
+.pessoa-diagnostico { margin-top: 4px; }
+
+.pessoa-diagnostico-resumo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.12em;
+  color: var(--seele-osso-apagado);
+}
+
+.pessoa-diagnostico-resumo::-webkit-details-marker { display: none; }
+
+.pessoa-diagnostico-resumo:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
+
+/* O rótulo do resumo: pequeno e apagado, porque ele nomeia o que está dentro e
+   não o que a linha diz. O valor ao lado é o que sobrevive ao recolhimento. */
+.pessoa-diagnostico-rotulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pessoa-diagnostico-valor { font-variant-numeric: tabular-nums; }
 
 /* O cartão que um MOD dá a uma pessoa, na lista.
 
@@ -1662,10 +1704,12 @@ button.linha-nome:hover { text-decoration: underline; }
 
 .pessoa-sync { display: flex; align-items: baseline; gap: 6px; flex: 0 0 auto; }
 
+/* O número, dentro do diagnóstico. De 26px para o corpo de dado: ele deixou de
+   competir com o nome porque deixou de estar ao lado dele. */
 .pessoa-sync-valor {
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 26px;
+  font-weight: 700;
+  font-size: var(--seele-t-dado);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -1860,6 +1904,11 @@ button.linha-nome:hover { text-decoration: underline; }
 
    O laranja já é a cor deste bloco, então chamar atenção com ele não introduz
    vocabulário novo: é o mesmo bloco falando mais alto. */
+/* O resumo, num nó próprio — U13. Ver `mostrarAlcance` em `tela-boot.js`: o
+   nome acessível de um elemento concatena o texto dos filhos, e um nó de texto
+   solto ao lado de três `<span>` era lido como uma frase só. */
+.convite-alcance-resumo { display: block; }
+
 .convite-alcance-curto { color: var(--seele-laranja-nerv); }
 .convite-alcance-longe { color: var(--seele-fosforo); }
 

@@ -357,8 +357,33 @@ function desenharModos(snapshot, gravado) {
 function desenharIdentidade(snapshot) {
   const alvo = $("server-apelido");
   const apelido = snapshot?.nickname ?? "";
-  alvo.textContent = apelido === "" ? "——" : apelido;
-  alvo.classList.toggle("ausente", apelido === "");
+  // **Fora de servidor, o travessão não responde nada** — U09.
+  //
+  // «Identidade fora de servidor mostra apelido `——` e fala em "neste
+  // servidor".» O travessão é o que este produto escreve onde não mediu, e ele
+  // está certo dentro de uma sessão: ali há um apelido, e ele pode estar em
+  // branco. Fora dela não há **pergunta**: nenhum servidor reservou nada, e um
+  // travessão faz parecer que algo falhou.
+  //
+  // Um estado vazio contextual é o que a auditoria pediu, e ele é uma frase e
+  // não um símbolo.
+  const foraDeSessao = !snapshot;
+  alvo.textContent = foraDeSessao
+    ? "você ainda não entrou num servidor"
+    : (apelido === "" ? "sem apelido reservado aqui" : apelido);
+  alvo.classList.toggle("ausente", foraDeSessao || apelido === "");
+
+  // A frase acompanha o estado, em vez de falar de um servidor que pode não
+  // existir. A chave é do dispositivo e vale sempre; o apelido é por servidor.
+  const frase = $("server-identidade-frase");
+  if (!frase) return;
+  frase.textContent = foraDeSessao
+    ? "A sua chave é desta máquina e vale em todo servidor. O apelido é de "
+      + "cada servidor: ele fica reservado para a sua chave no dia em que você "
+      + "entra num deles pela primeira vez."
+    : "Neste servidor os apelidos são presos a chaves. O seu ficou reservado "
+      + "para a sua chave no dia em que você entrou pela primeira vez, e "
+      + "ninguém mais consegue usá-lo.";
 }
 
 // --------------------------------------------------------------------- ações

@@ -1495,6 +1495,10 @@ function desenharPessoas(snapshot) {
               // desenhado não serve para nada disso: um MOD pode tê-lo trocado.
               id: pessoa.id,
               nome: pessoa.nickname + (pessoa.is_self ? " (você)" : ""),
+              // Esta ramificação é a de quem está **numa sala**: é dela que
+              // sai a diferença entre «o microfone está aberto» e «a voz está
+              // indo para alguém». Ver `estado` em `linhaNativaDoRoster`.
+              emSala: true,
               // Os cartões que os MODs de pé deram a esta pessoa. Eles
               // declaram; quem monta é o renderer da região, e quem decide
               // onde o cartão entra na linha é esta função.
@@ -1529,6 +1533,9 @@ function desenharPessoas(snapshot) {
           {
             id: snapshot.me,
             nome: `${snapshot.nickname} (você)`,
+            // Fora de sala: o microfone pode estar captando, e não há para
+            // onde transmitir.
+            emSala: false,
             // **E o cartão, aqui também.** Esta ramificação e a do saguão eram
             // as duas que não passavam `cartoes` ao renderer: um MOD que
             // escrevesse o nome de perfil de alguém via aquele nome sumir no
@@ -1582,6 +1589,7 @@ function desenharPessoas(snapshot) {
             {
               id: pessoa.id,
               nome: pessoa.nickname,
+              emSala: false,
               // O mesmo cartão da sala: quem está no saguão continua sendo a
               // mesma pessoa, e o MOD que a apresenta não muda de opinião
               // porque ela não sentou em sala nenhuma.
@@ -1834,7 +1842,9 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
     numero.append(elemento("span", "pessoa-sync-valor", SEM_MEDIDA));
   }
 
-  cabeca.append(identidade, numero);
+  // O número desce para o diagnóstico recolhível — ver abaixo. O cabeçalho
+  // fica com a identidade sozinha, que é o que U15 pediu como hierarquia.
+  cabeca.append(identidade);
 
   const barra = elemento("span", "barra", medido ? blocos(pessoa.ratio, 20) : "");
   barra.setAttribute("aria-hidden", "true");
@@ -1850,10 +1860,18 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   // quem sai some de `voice_room.people`, e manter a lápide exigiria ou um campo de
   // estado no `Person`, ou esta casca lembrando de quem estava ali, que é
   // exatamente o estado derivado que o topo de `base.js` proíbe.
+  // **Capturar não é transmitir** — U15: «diferenciar microfone capturando de
+  // voz enviada à sala».
+  //
+  // `speaking` diz que o microfone desta pessoa está captando. Dentro de uma
+  // sala isso é voz indo para quem está lá, e `TRANSMITINDO` é exato. Fora de
+  // sala não há para onde transmitir — a auditoria viu `TRANSMITINDO` numa
+  // linha de quem não estava em sala nenhuma —, e a palavra passa a dizer o que
+  // de fato se sabe: o microfone está aberto.
   const estado = pessoa.atField
     ? "MUDO"
     : pessoa.falando
-      ? "TRANSMITINDO"
+      ? (pessoa.emSala ? "TRANSMITINDO" : "MICROFONE ABERTO")
       : "EM ESCUTA";
   const pastilha = elemento("span", "pastilha", estado);
   pastilha.dataset.estado = pessoa.atField ? "at" : pessoa.falando ? "fala" : "escuta";
@@ -1869,7 +1887,35 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   }
 
   rodape.append(estados);
-  item.append(cabeca, barra, rodape);
+
+  // **A identidade primeiro; o diagnóstico recolhe** — U15.
+  //
+  // «A identidade domina pouco a faixa de pessoas; um sinal 100 e
+  // "TRANSMITINDO" dominam inclusive fora de sala de voz.» A medida estava na
+  // folha: o número do sinal era 26px e peso 900, e o nome da pessoa era o
+  // corpo de dado, pequeno. A linha dizia a medida e sussurrava de quem ela era.
+  //
+  // O sinal, a barra e as pastilhas descem para um `<details>`. Recolher não é
+  // tirar: quem precisa do número continua a um toque dele, e `specs/06` não
+  // perde nada — o estado continua em palavra, dentro.
+  //
+  // **Aberto quando há o que dizer.** Mudo, isolado ou fora da faixa nominal
+  // não são repouso: são exatamente os casos em que alguém abriria. Deixá-los
+  // recolhidos seria esconder o que a lista existe para mostrar.
+  const interessante = pessoa.atField || pessoa.isolado
+    || (medido && pessoa.faixa !== "Nominal");
+  const diagnostico = elemento("details", "pessoa-diagnostico");
+  if (interessante) diagnostico.open = true;
+  const resumo = elemento("summary", "pessoa-diagnostico-resumo");
+  resumo.append(
+    elemento("span", "pessoa-diagnostico-rotulo", "SINAL E ESTADO"),
+    // O valor no resumo: recolhido, a linha continua dizendo o essencial sem
+    // que seja preciso abrir para saber se vale a pena abrir.
+    elemento("span", "pessoa-diagnostico-valor", medido ? String(pessoa.ratio) : SEM_MEDIDA),
+  );
+  diagnostico.append(resumo, numero, barra, rodape);
+
+  item.append(cabeca, diagnostico);
 
   // **Os cartões dos MODs, depois do que o produto diz sobre esta pessoa.**
   //

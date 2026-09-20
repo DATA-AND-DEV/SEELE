@@ -94,8 +94,23 @@
   --seele-t-secao: 18px;
   --seele-t-corpo: 14px;
   --seele-t-dado: 13px;
-  --seele-t-rotulo: 10px;   /* uppercase, tracking largo */
-  --seele-t-micro: 9px;     /* réguas e coordenadas */
+  /* **Dez virou doze, e nove virou dez** — U04 da auditoria de 20/09/2026:
+     «Rótulos muito pequenos […] As ações principais parecem controles
+     auxiliares.»
+
+     O rótulo é a medida mais usada desta interface: ele nomeia todo controle,
+     toda seção e toda pastilha. A 10px, em caixa alta e com 0,22em de tracking,
+     ele é pequeno duas vezes — a caixa alta tira a altura de x que ajuda a ler,
+     e o tracking separa as letras que a formam.
+
+     Doze não é um número de conformidade e não é apresentado como um: a WCAG
+     não fixa tamanho de texto, e a auditoria é explícita — «Medir contraste e
+     alvos; não declarar conformidade sem medida». É o tamanho em que este
+     rótulo, nesta face e com este tracking, deixa de pedir aproximação. O
+     micro acompanha porque ele é a régua ao lado, e uma régua menor que o que
+     ela mede não ajuda ninguém. */
+  --seele-t-rotulo: 12px;   /* uppercase, tracking largo */
+  --seele-t-micro: 10px;    /* réguas e coordenadas */
 
   /* ---- espaçamento: múltiplos de célula ---- */
   --seele-celula-x: 8px;
