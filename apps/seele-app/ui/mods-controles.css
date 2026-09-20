@@ -217,10 +217,13 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
   min-width: 0;
 }
 
+/* Um separador separa **seções**, e por isso a folga dele é a de seção. Com
+   8px de cada lado ele encostava nas duas coisas que estava separando, e um
+   fio a oito pixels de distância separa menos que o espaço sozinho. */
 .regiao-de-mod-parte[data-forma="separador"] {
   border: none;
   border-top: 1px solid var(--seele-linha);
-  margin: var(--seele-celula-x) 0;
+  margin: 4px 0;
 }
 
 .regiao-de-mod-parte[data-forma="espaco"] { flex: 1 1 auto; min-height: 4px; }
@@ -232,7 +235,10 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--seele-celula-x);
+  /* Doze, e não oito: oito é a distância de um rótulo para o campo dele — de
+     dentro de um objeto — e usá-la também entre dois objetos vizinhos fazia
+     tudo parecer uma coisa só. */
+  gap: 12px;
   min-width: 0;
 }
 
@@ -254,7 +260,7 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
 .regiao-de-mod-parte[data-forma="acoes"] {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--seele-celula-x);
+  gap: 12px;
   align-items: center;
 }
 
@@ -433,6 +439,7 @@ form.regiao-de-mod-parte[data-erro]::before {
 /* --------------------------------------------------- abas */
 
 .regiao-de-mod-tiras {
+  margin-bottom: 4px;
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
@@ -469,9 +476,23 @@ form.regiao-de-mod-parte[data-erro]::before {
 
 .regiao-de-mod-tira:disabled { opacity: 0.4; cursor: default; }
 
-.regiao-de-mod-palco { min-width: 0; min-height: 0; }
+/* O palco das abas e o painel de cada uma empilham com a régua de campo. Sem
+   isto o conteúdo de uma aba saía colado — a margem de cada parte é zerada
+   dentro de uma superfície, e aqui não havia nada no lugar dela. */
+.regiao-de-mod-palco {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mod-respiro, 16px);
+}
 
-section.regiao-de-mod-parte[data-forma="aba"] { min-width: 0; }
+section.regiao-de-mod-parte[data-forma="aba"] {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mod-respiro, 16px);
+}
 section.regiao-de-mod-parte:focus-visible { outline: 2px solid var(--seele-laranja-nerv); }
 
 /* --------------------------------------------------- retrato */

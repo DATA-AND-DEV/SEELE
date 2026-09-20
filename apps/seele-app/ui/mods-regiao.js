@@ -706,6 +706,24 @@ class RegiaoDeMod {
       case "retrato": this.atualizarRetrato(elem, plano); break;
       case "link": this.atualizarLink(elem, plano); break;
       case "grade": break;
+      // **`fixas` precisa chegar ao DOM.**
+      //
+      // `SuperficieDeMod.recolherAcoesFixas` procura
+      // `[data-forma="acoes"][data-fixas="sim"]` para mover o bloco ao rodapé
+      // fixo do diálogo — §3 do plano: «salvar/cancelar não podem sumir no fim
+      // de uma rolagem longa». O atributo nunca era escrito: o seletor não
+      // casava com nada, o rodapé ficava vazio e escondido, e os botões
+      // continuavam no fim do corpo, rolando junto com ele.
+      //
+      // Ninguém viu enquanto os editores couberam na tela sem rolar. Quando o
+      // espaçamento cresceu, GRAVAR saiu por baixo da dobra — e foi aí que a
+      // funcionalidade que existia no CSS e na documentação apareceu como
+      // ausente no produto.
+      case "acoes": {
+        const fixas = plano.no.fixas === true ? "sim" : "nao";
+        if (elem.dataset.fixas !== fixas) elem.dataset.fixas = fixas;
+        break;
+      }
       default: break;
     }
   }

@@ -38,12 +38,28 @@
    * casa para o interior de uma camada. Dezesseis quando a superfície aperta —
    * consulta **do contêiner**, porque um painel de 300 px numa janela de 1400
    * precisa da primeira resposta. */
-  --mod-margem: 20px;
+  /* **Três medidas, e elas não são a mesma.** A versão anterior tinha duas, e
+   * a segunda servia ao mesmo tempo para «entre dois campos» e «entre duas
+   * seções da tela» — com o mesmo valor, nada separava um grupo do seguinte, e
+   * a tela lia apertada mesmo com cada peça no lugar.
+   *
+   * A régua é de quatro em quatro, como a do produto:
+   *
+   *   8  entre um rótulo e o campo dele  (o par é um só objeto)
+   *  16  entre dois campos de um grupo   (`--mod-respiro`)
+   *  28  entre duas seções da superfície (`--mod-secao`)
+   *  24  da borda da janela ao conteúdo  (`--mod-margem`)
+   *
+   * O salto de 16 para 28 é o que faz um grupo **ser** um grupo: enquanto a
+   * distância entre grupos era a mesma que entre campos, agrupar não produzia
+   * nenhuma leitura. */
+  --mod-margem: 24px;
   --mod-respiro: 16px;
+  --mod-secao: 28px;
 }
 
 @container superficie-de-mod (max-width: 520px) {
-  .superficie-de-mod { --mod-margem: 16px; --mod-respiro: 12px; }
+  .superficie-de-mod { --mod-margem: 18px; --mod-respiro: 14px; --mod-secao: 22px; }
 }
 
 /* O cabeçalho de qualquer superfície: a mesma tipografia de cartela que a
@@ -149,9 +165,8 @@
   display: flex;
   align-items: center;
   gap: var(--mod-respiro);
-  padding: var(--seele-celula-y) var(--mod-margem);
+  padding: 16px var(--mod-margem);
   border-bottom: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
   /* Persistente: a auditoria (U33) mediu que «voltar» ficava no fim de uma
      coluna que também rola, e competia com a navegação longa. */
   position: sticky;
@@ -166,11 +181,11 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--mod-respiro);
+  gap: var(--mod-secao);
   /* **A rolagem é da superfície.** U02: a rolagem pertencia ao contêiner dos
      três MODs, e rolar o PERFIS deslocava o ESTILO e sumia com a MESA. */
   overflow: auto;
-  padding: var(--seele-celula-y) var(--mod-margem);
+  padding: var(--mod-secao) var(--mod-margem);
 }
 
 /* --------------------------------------------------------------- o painel */
@@ -193,7 +208,7 @@
   display: flex;
   align-items: center;
   gap: var(--mod-respiro);
-  padding: var(--seele-celula-x) var(--mod-margem);
+  padding: 14px var(--mod-margem);
   border-bottom: 1px solid var(--seele-linha);
 }
 
@@ -204,9 +219,9 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--mod-respiro);
+  gap: var(--mod-secao);
   overflow: auto;
-  padding: var(--seele-celula-y) var(--mod-margem);
+  padding: var(--mod-secao) var(--mod-margem);
 }
 
 .painel-de-mod[hidden] { display: none; }
@@ -276,7 +291,7 @@
   display: flex;
   align-items: center;
   gap: var(--mod-respiro);
-  padding: var(--seele-celula-y) var(--mod-margem);
+  padding: 16px var(--mod-margem);
   border-bottom: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
   flex: 0 0 auto;
@@ -289,9 +304,9 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--mod-respiro);
+  gap: var(--mod-secao);
   overflow: auto;
-  padding: var(--seele-celula-y) var(--mod-margem);
+  padding: var(--mod-secao) var(--mod-margem);
   background: var(--seele-negro-absoluto);
 }
 
@@ -303,7 +318,7 @@
   display: flex;
   gap: var(--mod-respiro);
   justify-content: flex-end;
-  padding: var(--seele-celula-x) var(--mod-margem);
+  padding: 16px var(--mod-margem);
   border-top: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
 }
