@@ -24,12 +24,75 @@
   font-size: var(--seele-t-corpo, 13px);
   min-width: 0;
   min-height: 0;
+
+  /* **A margem interna de uma superfície, num lugar só.**
+   *
+   * Ela era `var(--seele-celula-y) var(--seele-celula-x)` — 16px em cima e
+   * **8px dos lados**. Oito pixels é a régua de um espaço entre controles, e
+   * não a de uma margem de janela: o conteúdo encostava na borda, e o reteste
+   * de `c4fe3ea` leu isso como «compartilhar cores do SEELE sem reproduzir sua
+   * tipografia, hierarquia, espaçamento e composição não produz integração
+   * visual».
+   *
+   * Vinte é o que `camada-moderar.css` usa no corpo dela, e é a régua desta
+   * casa para o interior de uma camada. Dezesseis quando a superfície aperta —
+   * consulta **do contêiner**, porque um painel de 300 px numa janela de 1400
+   * precisa da primeira resposta. */
+  --mod-margem: 20px;
+  --mod-respiro: 16px;
+}
+
+@container superficie-de-mod (max-width: 520px) {
+  .superficie-de-mod { --mod-margem: 16px; --mod-respiro: 12px; }
+}
+
+/* O cabeçalho de qualquer superfície: a mesma tipografia de cartela que a
+   moderação e a configuração usam. O título de uma janela deste produto é
+   Saira Condensed em caixa alta, e não o mono do corpo — era a diferença mais
+   visível entre a casca antiga dos MODs e a casca do SEELE. */
+.superficie-de-mod-titulo {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela, 900);
+  line-height: 1.05;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+/* De quem é a janela. Discreto, e sempre presente: uma tela de MOD
+   indistinguível das do SEELE é o que tornaria uma tela de confiança
+   falsificável. */
+.superficie-de-mod-origem {
+  flex: 0 0 auto;
+  align-self: center;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro, 10px);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+  white-space: nowrap;
 }
 
 /* Tudo o que o renderer monta dentro de uma superfície passa por esta classe.
    Ela é a régua de espaçamento padrão — e só a padrão: um nó com `estilo`
    próprio a sobrescreve, que é o ponto inteiro da API nova. */
 .superficie-de-mod .regiao-de-mod-parte { margin: 0; }
+
+/* **O corpo respira sozinho.**
+ *
+ * A margem de cada parte é zerada acima — ela é da faixa, não de uma janela —,
+ * e o que sobrava era zero espaço entre o que o MOD declara no primeiro nível.
+ * Um editor com título, formulário e ações saía com as três coisas coladas,
+ * e a saída era o autor pôr `intervalo` em tudo.
+ *
+ * «A biblioteca padrão deve produzir uma interface coerente e bem acabada sem
+ * exigir que cada autor reconstrua tudo»: o corpo é uma coluna com a régua da
+ * superfície, e quem quiser outra coisa declara `pilha` ou `grade` com o
+ * `intervalo` dele. */
 
 /* ------------------------------------------------------------- os palcos */
 
@@ -85,8 +148,8 @@
 .pagina-de-mod-cabecalho {
   display: flex;
   align-items: center;
-  gap: var(--seele-celula-x);
-  padding: var(--seele-celula-y) var(--seele-celula-x);
+  gap: var(--mod-respiro);
+  padding: var(--seele-celula-y) var(--mod-margem);
   border-bottom: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
   /* Persistente: a auditoria (U33) mediu que «voltar» ficava no fim de uma
@@ -96,31 +159,18 @@
   z-index: 2;
 }
 
-.pagina-de-mod-titulo {
-  margin: 0;
-  font-size: var(--seele-t-titulo, 15px);
-  letter-spacing: 0.04em;
-  color: var(--seele-osso);
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pagina-de-mod-origem {
-  font-size: var(--seele-t-dado, 11px);
-  color: var(--seele-osso-apagado);
-  white-space: nowrap;
-}
+.pagina-de-mod-titulo { font-size: 22px; }
 
 .pagina-de-mod-corpo {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mod-respiro);
   /* **A rolagem é da superfície.** U02: a rolagem pertencia ao contêiner dos
      três MODs, e rolar o PERFIS deslocava o ESTILO e sumia com a MESA. */
   overflow: auto;
-  padding: var(--seele-celula-y) var(--seele-celula-x);
+  padding: var(--seele-celula-y) var(--mod-margem);
 }
 
 /* --------------------------------------------------------------- o painel */
@@ -142,29 +192,21 @@
 .painel-de-mod-cabecalho {
   display: flex;
   align-items: center;
-  gap: var(--seele-celula-x);
-  padding: var(--seele-celula-y) var(--seele-celula-x);
+  gap: var(--mod-respiro);
+  padding: var(--seele-celula-x) var(--mod-margem);
   border-bottom: 1px solid var(--seele-linha);
 }
 
-.painel-de-mod-titulo {
-  margin: 0;
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: var(--seele-t-dado, 11px);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--seele-osso-apagado);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.painel-de-mod-titulo { font-size: 15px; }
 
 .painel-de-mod-corpo {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mod-respiro);
   overflow: auto;
-  padding: var(--seele-celula-y) var(--seele-celula-x);
+  padding: var(--seele-celula-y) var(--mod-margem);
 }
 
 .painel-de-mod[hidden] { display: none; }
@@ -227,28 +269,30 @@
   box-shadow: 0 24px 64px rgb(0 0 0 / 60%);
 }
 
+/* O cabeçalho fica **grudado no topo** da rolagem do corpo, como o da casca
+   antiga fazia: numa janela de perfil com prévia longa, o nome da janela e a
+   saída não podem sair de vista. */
 .dialogo-de-mod-cabecalho {
   display: flex;
   align-items: center;
-  gap: var(--seele-celula-x);
-  padding: var(--seele-celula-y) var(--seele-celula-x);
-  border-bottom: 1px solid var(--seele-linha);
+  gap: var(--mod-respiro);
+  padding: var(--seele-celula-y) var(--mod-margem);
+  border-bottom: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
   flex: 0 0 auto;
 }
 
-.dialogo-de-mod-titulo {
-  margin: 0;
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: var(--seele-t-titulo, 15px);
-  color: var(--seele-osso);
-}
+.dialogo-de-mod-titulo { font-size: 26px; }
 
 .dialogo-de-mod-corpo {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mod-respiro);
   overflow: auto;
-  padding: var(--seele-celula-y) var(--seele-celula-x);
+  padding: var(--seele-celula-y) var(--mod-margem);
+  background: var(--seele-negro-absoluto);
 }
 
 /* O rodapé é fixo por contrato: §3 do plano pede «rodapé fixo» para modais,
@@ -257,10 +301,10 @@
 .dialogo-de-mod-rodape {
   flex: 0 0 auto;
   display: flex;
-  gap: var(--seele-celula-x);
+  gap: var(--mod-respiro);
   justify-content: flex-end;
-  padding: var(--seele-celula-y) var(--seele-celula-x);
-  border-top: 1px solid var(--seele-linha);
+  padding: var(--seele-celula-x) var(--mod-margem);
+  border-top: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
 }
 

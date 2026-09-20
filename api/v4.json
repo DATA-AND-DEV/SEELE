@@ -148,6 +148,11 @@
       "transição e animação"
     ],
     "estados": ["base", "sobre", "foco", "ativo", "desligado", "invalido", "escolhido"],
+    "layout": {
+      "direcao": "declarar uma direção liga o contêiner: ela escreve `display:flex` junto com `flex-direction`",
+      "base": "o tamanho de partida numa linha; `base: 0` com `larguraMinima` é o par que divide e ainda quebra",
+      "classes": "compiladas numa folha construída e adotada pelo documento — um `<style>` por script não aplica nada sob a CSP desta janela"
+    },
     "consultas": "de contêiner, e não de janela: um painel arrastado para 300px continua numa janela de 1400",
     "animacoes": ["nenhuma", "pulso", "aurora", "brilho", "flutuar"],
     "fora": [

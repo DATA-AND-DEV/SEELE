@@ -900,8 +900,35 @@ const PRELUDIO: &str = r#"
 
   // Bytes, e não caracteres: o teto do anfitrião conta UTF-8, e um nome com
   // acento ocupa dois. Medir em `length` diria que cabe o que não cabe.
+  //
+  // **Contado aqui, sem `TextEncoder`.** A primeira versão o usava e recuava
+  // para `texto.length` quando ele não existisse — e ele nunca existe: este
+  // contexto é QuickJS sem ambiente, e `TextEncoder` é do navegador. O recuo
+  // era a regra, e `length` mede unidades UTF-16. O reteste de `c4fe3ea` mediu
+  // no motor real: sete mil «é» passaram pela conferência com 7.000 e chegaram
+  // ao Rust com 14.066 bytes, que os recusou como `fila-cheia` de novo.
+  //
+  // A tabela do UTF-8, e ela é curta: até U+007F um byte, até U+07FF dois, um
+  // par substituto vale um ponto de código acima de U+FFFF e ocupa quatro, e o
+  // resto ocupa três.
+  //
+  // Um substituto solto conta três. Ele não chega aqui: o que se mede é a
+  // saída de `JSON.stringify`, que escapa substitutos soltos como `\udXXX` —
+  // seis caracteres ASCII. Se um motor não os escapar, três é o que uma
+  // codificação permissiva escreveria, e a conferência do Rust continua atrás.
   const tamanhoEmBytes = (texto) => {
-    try { return new TextEncoder().encode(texto).length; } catch { return texto.length; }
+    let bytes = 0;
+    for (let i = 0; i < texto.length; i += 1) {
+      const c = texto.charCodeAt(i);
+      if (c < 0x80) { bytes += 1; continue; }
+      if (c < 0x800) { bytes += 2; continue; }
+      if (c >= 0xD800 && c <= 0xDBFF && i + 1 < texto.length) {
+        const baixo = texto.charCodeAt(i + 1);
+        if (baixo >= 0xDC00 && baixo <= 0xDFFF) { bytes += 4; i += 1; continue; }
+      }
+      bytes += 3;
+    }
+    return bytes;
   };
 
   const pedir = (tipo, carga) => new Promise((resolve, reject) => {
@@ -1517,6 +1544,67 @@ mod testes {
             .iniciar("seele.postar('x'.repeat(13 * 1024)); seele.postar('coube');")
             .expect("código");
         assert_eq!(uma_mensagem(&executor), "coube");
+    }
+
+    /// **O prelúdio conta bytes UTF-8, e ele não tem `TextEncoder`.**
+    ///
+    /// O reteste nativo de `c4fe3ea` mediu o defeito no motor real: a contagem
+    /// usava `new TextEncoder()` e recuava para `texto.length` quando ele não
+    /// existisse — e ele nunca existe aqui. Sete mil «é» passavam pela
+    /// conferência do prelúdio com «7.000» e chegavam ao Rust com 14.066
+    /// bytes, que os recusava como `fila-cheia`. A contenção funcionava; o
+    /// diagnóstico mentia, e mandava procurar saturação onde havia tamanho.
+    ///
+    /// Aqui o MOD pede uma região com texto acentuado e conta o que a recusa
+    /// diz. `mensagem-grande` com o tamanho certo é o aceite; `fila-cheia` é o
+    /// defeito de volta.
+    #[test]
+    fn o_preludio_conta_utf8_sem_textencoder() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "seele.postar(JSON.stringify({ tem: typeof TextEncoder }));\
+                 SeeleUI.regiao([{ forma: 'texto', dentro: 'é'.repeat(7000) }])\
+                   .then(() => seele.postar('aceitou'),\
+                         (erro) => seele.postar(String(erro.message)));",
+            )
+            .expect("código");
+
+        // Primeiro a prova de que o atalho do navegador não existe mesmo.
+        let ambiente: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("JSON");
+        assert_eq!(
+            ambiente.get("tem").and_then(serde_json::Value::as_str),
+            Some("undefined"),
+            "`TextEncoder` passou a existir no contexto do MOD; se isso for \
+             deliberado, a contagem do prelúdio pode voltar a usá-lo"
+        );
+
+        // A recusa pode chegar pela mensagem que o MOD posta no `catch` ou pelo
+        // relato de promessa rejeitada — o motor avisa antes de a microtarefa
+        // do `then` rodar. O que se mede é o **texto**, e ele é o mesmo.
+        let recusa = match executor.receber(Duration::from_secs(5)) {
+            Some(ParaOFora::Mensagem(json)) => json,
+            Some(ParaOFora::Falhou(texto)) => texto,
+            Some(outro) => panic!("veio {outro:?}"),
+            None => panic!("o executor não respondeu"),
+        };
+        assert!(
+            recusa.contains("mensagem-grande"),
+            "a recusa não diz que a mensagem não coube: {recusa}"
+        );
+        // Dois bytes por «é», mais a casca do JSON. O número exato não importa;
+        // o que importa é que ele **não** é 7.000 — que é o que `length` diria.
+        assert!(
+            recusa.contains("14"),
+            "o tamanho relatado não é o de UTF-8: sete mil «é» ocupam mais de \
+             catorze mil bytes, e `length` diria sete mil: {recusa}"
+        );
+        assert!(
+            !recusa.contains("fila-cheia"),
+            "uma mensagem grande demais voltou a ser relatada como fila \
+             saturada: {recusa}"
+        );
     }
 
     /// **A volta completa: o MOD pergunta, o produto responde, o MOD continua.**

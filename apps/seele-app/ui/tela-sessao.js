@@ -1814,7 +1814,7 @@ function linhaDoRoster(pessoa, temAudio) {
   // quem precisa alcançar o editor. A ação principal do provedor vira um botão
   // do produto na linha nativa, com o nome da pessoa no rótulo acessível.
   if (cartao === null && substituicao?.acaoPrincipal) {
-    item.append(aPortaDoProvedor(pessoa, substituicao));
+    item.append(aPortaDoProvedor(pessoa, substituicao, true));
   }
 
   // **`pessoa.cartao` no modo `adicionar`** — o MOD acrescenta um bloco à
@@ -1857,9 +1857,21 @@ function preferidoDeApresentacao() {
  * leitor de tela ouvia vinte vezes a mesma coisa e não sabia em quem estava.
  * O nome vem primeiro e é do produto; o que o MOD declarou entra depois dele.
  */
-function aPortaDoProvedor(pessoa, contribuicao) {
+function aPortaDoProvedor(pessoa, contribuicao, comRotulo = false) {
   const porta = elemento("button", "pessoa-apresentada-porta");
   porta.type = "button";
+  // **Um rótulo que se vê**, quando o botão não embrulha nada.
+  //
+  // O reteste de `c4fe3ea`: «existe botão acessível para abrir o PERFIS, mas
+  // sem texto/ícone visível». `aria-label` serve a quem ouve a tela; quem
+  // olha via um retângulo vazio ao lado do nome. Na linha apresentada o botão
+  // embrulha o cartão do MOD e o cartão **é** o rótulo; na linha nativa de
+  // quem não tem conteúdo não há cartão, e aí o rótulo precisa existir.
+  if (comRotulo) {
+    porta.classList.add("pessoa-apresentada-porta-vazia");
+    porta.append(elemento("span", "pessoa-apresentada-porta-rotulo",
+      contribuicao.rotulo || "PERFIL"));
+  }
   porta.dataset.acaoDeMod = contribuicao.acaoPrincipal;
   porta.dataset.modDaAcao = contribuicao.mod;
   porta.dataset.pessoaDaAcao = String(pessoa.id);

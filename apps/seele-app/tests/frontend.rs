@@ -9655,6 +9655,9 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "cancelAnimationFrame",
         "queueMicrotask",
         "structuredClone",
+        // Folha construída, para as classes de um MOD: a CSP deste produto é
+        // `style-src 'self'`, e um `<style>` criado por script não aplica nada.
+        "CSSStyleSheet",
         "btoa",
         "atob",
         "Object",
@@ -13795,9 +13798,66 @@ fn uma_apresentacao_sem_conteudo_nao_apaga_a_identidade_nativa() {
         "a escolha entre apresentada e nativa voltou a ser «existe provedor» em \
          vez de «o provedor desenhou alguma coisa»: {escolha}"
     );
+    // O terceiro argumento é o rótulo visível: sem ele o caminho existe para
+    // quem ouve a tela e é um retângulo vazio para quem olha.
     assert!(
-        escolha.contains("aPortaDoProvedor(pessoa, substituicao)"),
-        "a linha nativa de quem não tem conteúdo ficou sem o caminho até o MOD: \
-         quem não tem perfil é quem precisa abrir o editor: {escolha}"
+        escolha.contains("aPortaDoProvedor(pessoa, substituicao, true)"),
+        "a linha nativa de quem não tem conteúdo ficou sem o caminho **visível** \
+         até o MOD: quem não tem perfil é quem precisa abrir o editor, e \
+         `aria-label` sozinho não desenha rótulo nenhum: {escolha}"
     );
+}
+
+/// Nenhum script cria um `<style>`, porque a CSP desta janela o descarta.
+///
+/// # O defeito que este guarda fecha
+///
+/// `style-src 'self'` sem `'unsafe-inline'` é a política que `tauri.conf.json`
+/// declara. Um `<style>` criado por script entra na árvore, recebe texto, e
+/// **não aplica regra nenhuma**: `sheet` fica `null` e o navegador escreve no
+/// console «Applying inline style violates the following Content Security
+/// Policy directive».
+///
+/// Era assim que as classes de um MOD eram servidas. Elas existiam na
+/// declaração, o teste do laboratório as conferia como texto, e o desenho
+/// nunca acontecia — inclusive as consultas de contêiner, que é como um editor
+/// empilha quando a janela aperta. O reteste de `c4fe3ea` leu o resultado como
+/// «a composição desperdiça altura», sem poder ver a causa.
+///
+/// O caminho que funciona é uma `CSSStyleSheet` construída em
+/// `document.adoptedStyleSheets`: ela não é estilo *inline*, não passa por
+/// `style-src`, e o conteúdo continua sendo montado de partes validadas.
+///
+/// **`element.style.setProperty` continua valendo.** Medido: sob
+/// `style-src 'self'`, o CSSOM por propriedade aplica; o `<style>` é que não.
+#[test]
+fn nenhum_script_cria_um_style_que_a_csp_desta_janela_descarta() {
+    let conf = read("tauri.conf.json");
+    let csp = conf
+        .split_once("\"csp\"")
+        .expect("a janela declara uma CSP")
+        .1;
+    let csp = csp.split_once('\n').map_or(csp, |(a, _)| a);
+    assert!(
+        csp.contains("style-src"),
+        "a CSP deixou de falar de `style-src`: {csp}"
+    );
+    // Com `'unsafe-inline'` um `<style>` voltaria a valer, e este guarda sai.
+    if csp.contains("style-src 'self' 'unsafe-inline'") {
+        return;
+    }
+
+    for nome in ui_files("js") {
+        let fonte = read(&format!("ui/{nome}"));
+        for agulha in ["createElement(\"style\")", "createElement('style')"] {
+            assert!(
+                !fonte.contains(agulha),
+                "`{nome}` cria um `<style>` por script, e a CSP desta janela \
+                 (`style-src 'self'`) descarta o conteúdo dele sem aplicar \
+                 regra nenhuma. Use uma `CSSStyleSheet` construída em \
+                 `document.adoptedStyleSheets` — ver `declararClasses` em \
+                 `mods-regiao.js`"
+            );
+        }
+    }
 }

@@ -265,7 +265,27 @@ function estiloDeMod(estilo, conta = null) {
       case "transformar": por("text-transform", palavraDoEstilo("transformar", valor)); break;
 
       // ---- layout ----
-      case "direcao": por("flex-direction", palavraDoEstilo("direcao", valor)); break;
+
+      // **Declarar uma direção é pedir uma linha (ou uma coluna).**
+      //
+      // `direcao` escrevia só `flex-direction`, que não faz nada num elemento
+      // que não é contêiner flex. `caixa` não é: a folha lhe dá `min-width: 0`
+      // e nada mais. Então `caixa([a, b], { direcao: 'linha' })` — que é como
+      // os três MODs oficiais pedem campos e prévia lado a lado — empilhava,
+      // e a intenção declarada não produzia a composição.
+      //
+      // A validação nativa de 20/09/2026 e o reteste de `c4fe3ea` mediram o
+      // efeito nos dois: «amostras e controles que pedem `direcao: 'linha'`
+      // continuam empilhados», «a composição desperdiça altura».
+      //
+      // `display: flex` sai junto. É o que a palavra quer dizer, e escrevê-lo
+      // aqui vale mais do que documentar que `direcao` só serve em `pilha`:
+      // uma API cuja forma correta depende de saber qual primitiva já é flex
+      // é uma API que ensina pelo erro.
+      case "direcao":
+        por("display", "flex");
+        por("flex-direction", palavraDoEstilo("direcao", valor));
+        break;
       case "alinhar": por("align-items", palavraDoEstilo("alinhar", valor)); break;
       case "distribuir": por("justify-content", palavraDoEstilo("distribuir", valor)); break;
       case "quebra": por("flex-wrap", palavraDoEstilo("quebra", valor)); break;
@@ -279,6 +299,16 @@ function estiloDeMod(estilo, conta = null) {
         por("flex-shrink", n === null ? null : String(n));
         break;
       }
+
+      // **O tamanho de partida numa linha.** Sem ele, `crescer: 1` em duas
+      // caixas de uma linha que quebra não as divide: cada uma parte do
+      // tamanho do próprio conteúdo, o par não cabe, e a linha vira duas —
+      // que foi o que o editor do PERFIS e as amostras do ESTILO fizeram.
+      //
+      // `base: 0` com `larguraMinima` é o par que divide e ainda quebra:
+      // enquanto as duas mínimas couberem, elas dividem o que sobra; quando
+      // não couberem, a linha quebra sozinha, sem depender de consulta nenhuma.
+      case "base": por("flex-basis", medidaDeMod(valor)); break;
       case "intervalo": {
         const n = numeroNoIntervalo(valor, LIMITES_DO_ESTILO.espaco);
         por("gap", n === null ? null : `${n}px`);

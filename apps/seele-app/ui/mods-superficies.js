@@ -293,14 +293,23 @@ class SuperficieDeMod {
     const prefixo = this.tipo === "pagina" ? "pagina-de-mod"
       : this.tipo === "painel" ? "painel-de-mod" : "dialogo-de-mod";
     const cabeca = elemento("header", `${prefixo}-cabecalho`);
-    const titulo = elemento(this.tipo === "painel" ? "h3" : "h2", `${prefixo}-titulo`, nome);
+    // **Duas classes, e a primeira é a que dá a tipografia.** O título de uma
+    // superfície é cartela — Saira Condensed em caixa alta, como o da
+    // moderação e o da configuração —, e o que muda entre página, painel e
+    // diálogo é só o corpo da fonte. Escrever a tipografia três vezes foi o que
+    // deixou a casca dos MODs parecendo de outro produto.
+    const titulo = elemento(
+      this.tipo === "painel" ? "h3" : "h2",
+      `superficie-de-mod-titulo ${prefixo}-titulo`,
+      nome,
+    );
     cabeca.append(titulo);
     this.tituloNo = titulo;
 
     // **De quem é esta tela.** Um MOD pode desenhar o que quiser aqui dentro,
     // inclusive algo que se pareça com o produto. Quem está olhando tem direito
     // de saber de quem é a janela, e essa linha é do produto.
-    const origem = elemento("span", `${prefixo}-origem`, this.id);
+    const origem = elemento("span", `superficie-de-mod-origem ${prefixo}-origem`, this.id);
     cabeca.append(origem);
 
     // A saída. Montada aqui, e não pelo MOD: ver o cabeçalho deste arquivo.

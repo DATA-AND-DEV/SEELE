@@ -61,36 +61,53 @@
    também as que a régua precisa alcançar: uma caixa sem altura mínima é uma
    caixa em que não se acerta o toque, e um MOD não tem como pedir uma. */
 
+/* Um campo é rótulo em cima, controle embaixo — a mesma forma de
+   `.server-campo`, e com a mesma folga. Dois pixels entre o rótulo e a caixa
+   os colava num bloco só; oito é o que a configuração usa e o que a casca
+   antiga dos MODs usava (`label{display:grid;gap:8px}`). */
+/* **Uma marca é uma linha, e não uma coluna.**
+ *
+ * Um campo empilha rótulo e controle; uma caixa de seleção não: o quadrado e o
+ * que ele diz são a mesma linha, sempre foram, e empilhá-los punha o nome da
+ * opção **embaixo** do quadradinho — que foi o que a prévia do ESTILO virou.
+ * A casca antiga escrevia `.sm-check{display:flex;align-items:center;gap:8px}`
+ * pela mesma razão. */
+label.regiao-de-mod-parte[data-forma="marca"],
+label.regiao-de-mod-parte[data-forma="interruptor"] {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--seele-celula-x);
+}
+
 .regiao-de-mod-campo,
 label.regiao-de-mod-parte {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
+  min-width: 0;
 }
 
+/* Dez pixels, como `.rotulo` do produto. Doze fazia o rótulo competir com o
+   valor que ele nomeia. */
 .regiao-de-mod-rotulo {
   font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
+  font-size: var(--seele-t-micro, 10px);
   letter-spacing: var(--seele-tracking-rotulo);
   text-transform: uppercase;
   color: var(--seele-rotulo-painel);
 }
 
-.regiao-de-mod-caixa {
-  /* 34px é a altura dos controles desta casa — a mesma de `.nomear-confirmar`.
-     Um número e não um token porque não há token: escrever um aqui criaria uma
-     régua nova a partir de um MOD, que é o contrário da ordem certa. */
-  min-height: 34px;
-  padding: 0 var(--seele-celula-x);
-  border: 1px solid var(--seele-linha);
-  background: var(--seele-negro-absoluto);
-  color: var(--seele-osso);
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
-}
-
+/* 36px é a altura dos controles desta casa. `width: 100%` porque um campo
+   dentro de um formulário preenche a coluna dele — é o que `base.css` faz com
+   `input[type="text"]`, e o que a casca antiga fazia com
+   `input:not([type=checkbox]){width:100%}`. Sem isso, um campo de nome numa
+   janela de 900 px ficava com a largura padrão do navegador e a linha inteira
+   parecia mal dividida. */
+.regiao-de-mod-caixa,
 .regiao-de-mod-escolha {
-  min-height: 34px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
   padding: 0 var(--seele-celula-x);
   border: 1px solid var(--seele-linha);
   background: var(--seele-negro-absoluto);
@@ -107,9 +124,12 @@ label.regiao-de-mod-parte {
   outline-offset: 1px;
 }
 
+/* 36px, e não 34: `.botao` do produto tem 40 e a WCAG 2.2 pede 24 em AA. A
+   diferença que se via era outra — o botão de um MOD ao lado de um botão do
+   SEELE, dois pixels mais baixo e com outro respiro lateral. */
 button.regiao-de-mod-parte {
-  min-height: 34px;
-  padding: 0 var(--seele-celula-x);
+  min-height: 36px;
+  padding: 0 var(--seele-celula-y);
   border: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
   color: var(--seele-osso);
@@ -156,10 +176,29 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
 
 /* --------------------------------------------------- composição */
 
+/* **A régua é a da superfície, e não uma régua dos MODs.**
+ *
+ * `--mod-respiro` vem de `.superficie-de-mod` — 16px, 12px quando a superfície
+ * aperta. Antes era `--seele-celula-x`, 8px fixo: o mesmo espaço entre um
+ * rótulo e o campo dele e entre duas seções de um editor. O reteste de
+ * `c4fe3ea` chamou isso pelo nome — «espaçamento e composição» — e é o que
+ * separa uma tela desenhada de uma lista de controles.
+ *
+ * O `16px` de reserva é para a região da faixa, que não tem superfície em
+ * volta e onde `--mod-respiro` não está definido. */
 .regiao-de-mod-parte[data-forma="pilha"] {
   display: flex;
   flex-direction: column;
-  gap: var(--seele-celula-x);
+  gap: var(--mod-respiro, 16px);
+  min-width: 0;
+}
+
+/* Um formulário empilha campos com a mesma folga de uma pilha: era a soma de
+   `margin-bottom` de cada parte, que numa superfície é zero. */
+.regiao-de-mod-parte[data-forma="formulario"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mod-respiro, 16px);
   min-width: 0;
 }
 
@@ -167,7 +206,7 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
 
 .regiao-de-mod-parte[data-forma="grade"] {
   display: grid;
-  gap: var(--seele-celula-x);
+  gap: var(--mod-respiro, 16px);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   min-width: 0;
 }
@@ -192,8 +231,21 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
 .regiao-de-mod-parte[data-forma="linha"] {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--seele-celula-x);
+  min-width: 0;
+}
+
+/* **Um campo numa linha ocupa o que sobra.**
+ *
+ * Desde que os controles passaram a ter `width: 100%`, um campo ao lado de um
+ * botão — «1d20» e «ROLAR» no tabuleiro da MESA — media o próprio conteúdo e
+ * o `<input>` transbordava por cima do vizinho. Crescendo, o campo fica com o
+ * espaço que o botão não usa, e os dois encostam pelo `gap`. */
+.regiao-de-mod-parte[data-forma="linha"] > label.regiao-de-mod-parte,
+.regiao-de-mod-parte[data-forma="linha"] > .regiao-de-mod-campo,
+.regiao-de-mod-parte[data-forma="acoes"] > label.regiao-de-mod-parte {
+  flex: 1 1 8rem;
   min-width: 0;
 }
 
@@ -212,10 +264,21 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
    ações principais parecem controles auxiliares.» A diferença é peso e borda,
    e não só cor — informação que só a cor carrega é o que
    `specs/06-clientes-gui.md` recusa. */
+/* Sólida, como `.botao` do produto: a regra de inversão do v2 é que cartela é
+   bloco sólido com texto no negro absoluto, e a ação principal de um MOD é
+   cartela. Contorno laranja é o que `.botao-secundario` faz, e usá-lo aqui
+   apagava a diferença entre «publicar» e «descartar». */
 button.regiao-de-mod-parte[data-variante="primaria"] {
   border-color: var(--seele-laranja-nerv);
-  color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-nerv);
+  color: var(--seele-negro-absoluto);
   font-weight: 700;
+}
+
+button.regiao-de-mod-parte[data-variante="primaria"]:disabled {
+  background: none;
+  color: var(--seele-osso-apagado);
+  border-color: var(--seele-linha);
 }
 
 button.regiao-de-mod-parte[data-variante="perigo"] {
@@ -260,8 +323,8 @@ button.regiao-de-mod-parte[data-forma="link"] {
 
 .regiao-de-mod-area {
   width: 100%;
-  min-height: 60px;
-  padding: 4px 6px;
+  min-height: 96px;
+  padding: 8px;
   border: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-absoluto);
   color: var(--seele-osso);
@@ -301,17 +364,36 @@ button.regiao-de-mod-parte[data-forma="link"] {
   border-radius: 999px;
 }
 
+/* A amostra e o hexadecimal são um controle só, lado a lado. */
+.regiao-de-mod-cor-linha {
+  display: flex;
+  align-items: stretch;
+  gap: var(--seele-celula-x);
+  min-width: 0;
+}
+
+/* Quarenta e oito por trinta e seis: a amostra precisa ser **amostra**, e um
+   quadrado de 32×24 ao lado de uma caixa de 36 de altura era um detalhe, não
+   uma cor. A casca antiga usava `input[type=color]{height:40px}` pela mesma
+   razão. */
 .regiao-de-mod-cor {
   flex: 0 0 auto;
-  width: 32px;
-  height: 24px;
-  padding: 0;
+  width: 48px;
+  height: auto;
+  min-height: 36px;
+  padding: 2px;
   border: 1px solid var(--seele-linha-forte);
-  background: none;
+  background: var(--seele-negro-absoluto);
   cursor: pointer;
 }
 
-.regiao-de-mod-hexa { max-width: 11ch; font-variant-numeric: tabular-nums; }
+.regiao-de-mod-hexa {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 12ch;
+  font-variant-numeric: tabular-nums;
+  text-transform: lowercase;
+}
 
 /* Um controle inválido é dito por borda **e** por texto: a mensagem sai de
    `data-mensagem-de-erro`, escrita pelo renderer a partir do que o MOD mandou.
@@ -503,6 +585,34 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   outline-offset: 2px;
 }
 
+
+/* O caminho até o MOD numa linha **sem** cartão: quem não preencheu o perfil é
+   quem mais precisa alcançar o editor, e um botão sem nada dentro não é um
+   caminho — é um retângulo. */
+.pessoa-apresentada-porta-vazia {
+  align-self: flex-start;
+  min-height: 24px;
+  padding: 1px 8px;
+  border: 1px solid var(--seele-linha-forte);
+  background: none;
+  cursor: pointer;
+}
+
+.pessoa-apresentada-porta-vazia:hover {
+  border-color: var(--seele-laranja-nerv);
+}
+
+.pessoa-apresentada-porta-rotulo {
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-micro);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-osso-apagado);
+}
+
+.pessoa-apresentada-porta-vazia:hover .pessoa-apresentada-porta-rotulo {
+  color: var(--seele-laranja-nerv);
+}
 
 /* ------------------------------------- os pontos de contribuição
 

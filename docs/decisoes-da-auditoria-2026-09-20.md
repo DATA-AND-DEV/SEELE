@@ -10,7 +10,12 @@ Data: 20/09/2026. Escrito **ao final do desenvolvimento**, como o pedido exigia.
 > que a bancada não alcançava.
 >
 > A validação nativa do checkout `d96d71a` percorreu as jornadas na janela e
-> encontrou mais seis.
+> encontrou mais seis. O reteste de `c4fe3ea` confirmou os consertos e
+> **recusou a aparência** dos três MODs oficiais; o que essa volta mudou está
+> em [aparencia-dos-mods-2026-09-20.md](aparencia-dos-mods-2026-09-20.md),
+> inclusive a causa que estava embaixo das outras — as classes de um MOD nunca
+> desenharam nada neste produto, porque a CSP descarta um `<style>` criado por
+> script.
 >
 > A seção 12 registra os seis primeiros, a 13 é a matriz **implementado /
 > parcial / pendente**, a 15 registra os três seguintes — inclusive uma

@@ -538,9 +538,18 @@ function desenharContextoDaSessao() {
     return;
   }
   const sala = retrato.voice_rooms?.find((c) => c.occupied_by_us);
+  // **A mesma distinção da linha do operador.** O reteste de `c4fe3ea`: aqui
+  // ainda dizia «microfone aberto» com o modo em TECLA, porque esta linha só
+  // olhava `muted`. São três coisas — o aparelho, como ele abre, e se está
+  // indo ao ar —, e «aberto» sem ressalva só é verdade no terceiro modo.
+  const comoAbre = {
+    PushToTalk: "microfone abre na tecla",
+    VoiceActivated: "microfone abre por voz",
+    Open: "microfone aberto",
+  }[retrato.voice_mode] ?? "microfone aberto";
   const partes = [
     sala ? `Na sala ${sala.name}` : "Fora de sala",
-    retrato.muted ? "microfone mudo" : "microfone aberto",
+    retrato.muted ? "microfone mudo" : comoAbre,
     "a conversa continua atrás desta tela",
   ];
   faixa.textContent = partes.join(" · ");

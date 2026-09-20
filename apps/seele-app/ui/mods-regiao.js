@@ -434,9 +434,32 @@ class RegiaoDeMod {
   /**
    * As classes que esta raiz oferece aos nós dela.
    *
-   * Compiladas uma vez por declaração e guardadas num `<style>` do produto,
-   * preso à raiz. Recompilar a cada desenho faria o navegador reanalisar a
-   * folha a cada tecla digitada num campo.
+   * Compiladas uma vez por declaração e guardadas numa folha **construída**,
+   * adotada pelo documento. Recompilar a cada desenho faria o navegador
+   * reanalisar a folha a cada tecla digitada num campo.
+   *
+   * # Por que não é mais um `<style>`
+   *
+   * Porque um `<style>` criado por script **não aplica nada neste produto**. A
+   * CSP do `tauri.conf.json` é `style-src 'self'`, sem `'unsafe-inline'`: o
+   * elemento entra na árvore, `sheet` fica `null`, e o navegador escreve no
+   * console «Applying inline style violates the following Content Security
+   * Policy directive». Nenhuma regra jamais chegou à tela.
+   *
+   * O efeito era invisível de uma forma cara: as classes existiam na
+   * declaração, o teste do laboratório as conferia como texto, e o que não
+   * acontecia era o **desenho**. As consultas de contêiner — que é como um
+   * editor empilha quando a janela aperta — nunca rodaram, e o reteste de
+   * `c4fe3ea` leu o resultado como «a composição desperdiça altura».
+   *
+   * Uma `CSSStyleSheet` construída não é estilo *inline*: ela não passa por
+   * `style-src`, porque não há texto no documento para a política olhar. O
+   * conteúdo continua sendo montado por `folhaDeClassesDeMod`, de partes que
+   * o validador conferiu — a fronteira é a mesma, e ela nunca foi a CSP.
+   *
+   * O escopo também não muda: as regras começam por `[data-escopo-de-mod=…]`,
+   * que é um atributo desta raiz. Adotar no documento não as deixa alcançar
+   * nada além dela.
    */
   declararClasses(classes) {
     if (this.solta || !this.raiz) return 0;
@@ -445,22 +468,37 @@ class RegiaoDeMod {
     if (texto === this.textoDaFolha) return conta.recusados;
     this.textoDaFolha = texto;
     if (!texto) {
-      this.folha?.remove();
-      this.folha = null;
+      this.soltarAFolha();
       return conta.recusados;
     }
     if (!this.folha) {
-      this.folha = document.createElement("style");
+      try {
+        this.folha = new CSSStyleSheet();
+      } catch (falha) {
+        // Dito, e não engolido: sem folha construível as classes do MOD não
+        // desenham, e ele precisa saber por quê em vez de ver nada acontecer.
+        console.warn(`MOD ${this.id}: este motor não constrói folhas de estilo`, falha);
+        return conta.recusados;
+      }
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, this.folha];
       // Registrada como recurso: uma folha que sobrevive à saída pinta a
       // sessão seguinte com as cores da anterior.
-      this.dono.instancia?.registrar(`${this.id}: a folha de ${this.escopo}`, () => {
-        this.folha?.remove();
-        this.folha = null;
-      });
-      this.raiz.prepend(this.folha);
+      this.dono.instancia?.registrar(
+        `${this.id}: a folha de ${this.escopo}`,
+        () => this.soltarAFolha(),
+      );
     }
-    this.folha.textContent = texto;
+    this.folha.replaceSync(texto);
     return conta.recusados;
+  }
+
+  /** Tira a folha do documento. Idempotente. */
+  soltarAFolha() {
+    if (!this.folha) return;
+    const minha = this.folha;
+    this.folha = null;
+    this.textoDaFolha = "";
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((f) => f !== minha);
   }
 
   /**
@@ -1139,7 +1177,14 @@ class RegiaoDeMod {
     hexa.maxLength = 9;
     hexa.spellcheck = false;
     hexa.setAttribute("aria-label", "Valor hexadecimal");
-    elem.append(rotulo, seletor, hexa);
+    // **A amostra e o hexadecimal na mesma linha.** O nó de um campo é uma
+    // coluna — rótulo em cima, controle embaixo —, e os dois soltos ali viravam
+    // três linhas: o nome da cor, um quadradinho e uma caixa de texto, cada um
+    // no seu andar. Eles são **um** controle, e U23 pediu os dois juntos
+    // («seletor e amostra»).
+    const dupla = elemento("div", "regiao-de-mod-cor-linha");
+    dupla.append(seletor, hexa);
+    elem.append(rotulo, dupla);
 
     const dizer = (valor) => {
       this.dono.falar({ nome: "cor", chave: plano.no.chave ?? "", valor });
@@ -2057,6 +2102,9 @@ class RegiaoDeMod {
       }
     }
     this.recursos.clear();
+    // **E a folha adotada.** Ela não está sob a raiz desde que deixou de ser
+    // um `<style>` — tirar o nó já não a tira do documento.
+    this.soltarAFolha();
     this.raiz.remove();
   }
 }

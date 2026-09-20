@@ -237,3 +237,10 @@ As configurações já usam área ampla e grupos por contexto. A observação na
 também pede reduzir o texto fixo da navegação, recolher explicações secundárias
 e corrigir a posição de rolagem ao trocar de seção. A melhora estrutural não
 encerra o trabalho de densidade e hierarquia visual.
+
+O [reteste da candidata c4fe3ea](validacao-nativa-api4-c4fe3ea.md) confirmou a
+abertura do ESTILO, a retirada da faixa fixa, a identidade nativa no perfil
+vazio e o compositor corrigido. Encontrou uma contagem UTF-8 incorreta no novo
+diagnóstico do prelúdio e pequenos acabamentos de composição. A captura
+nativa foi interrompida pelo ScreenCaptureKit; o registro distingue os passos
+observados dos que ainda precisam ser repetidos.
