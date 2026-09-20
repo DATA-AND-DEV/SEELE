@@ -144,6 +144,18 @@ function abrirSecao(id) {
       desenharMalha().catch((falha) => console.warn("malha:", falha));
     }
   }
+  // **A seção nova começa no começo dela.**
+  //
+  // A validação nativa de 20/09/2026: «ao trocar da gestão de MODs para
+  // Microfone e som, a área abriu com o começo do conteúdo acima da região
+  // visível; rolar para cima recuperou os títulos». A rolagem é do painel
+  // inteiro, e ele não é recriado ao trocar de seção — então a posição da
+  // seção anterior fica, e a nova nasce no meio de si mesma.
+  //
+  // Herdar a rolagem tem sentido quando se volta ao mesmo lugar; entre duas
+  // seções diferentes ela é uma posição sem contexto nenhum.
+  const painel = document.querySelector(".server-painel");
+  if (painel) painel.scrollTop = 0;
 }
 
 // ------------------------------------------------------------------- desenho

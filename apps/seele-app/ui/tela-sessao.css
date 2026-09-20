@@ -1141,13 +1141,28 @@ button.linha-nome:hover { text-decoration: underline; }
 
 .compor .prompt { color: var(--seele-laranja-nerv); font-size: var(--seele-t-corpo); flex: 0 0 auto; }
 
-.compor input {
+/* O campo de escrever.
+
+   **`input` e `textarea`.** Ele virou `<textarea>` quando o Shift+Enter passou
+   a quebrar parágrafo, e esta regra continuou selecionando só `input`: o campo
+   ficou com a aparência padrão do WebKit — fundo branco, largura de umas
+   poucas dezenas de pixels — dentro de uma moldura escura larga. A validação
+   nativa de 20/09/2026 encontrou assim.
+
+   `font: inherit` e não só `font-size`: um `textarea` não herda a família nem o
+   peso do documento, e sem ele o que se digita sai numa fonte que não é a
+   deste produto. */
+.compor input,
+.compor textarea {
   flex: 1;
   min-width: 0;
+  width: 100%;
   border: none;
   background: none;
-  padding: 8px 0;
+  color: inherit;
+  font: inherit;
   font-size: var(--seele-t-corpo);
+  padding: 8px 0;
 }
 
 /* A moldura em volta do `>` e do campo, para o botão sólido ao lado ter contra
@@ -1166,6 +1181,13 @@ button.linha-nome:hover { text-decoration: underline; }
 }
 
 .compor-caixa:focus-within { border-color: var(--seele-laranja-nerv); }
+
+/* O campo cresce; a moldura acompanha. Com o `<textarea>` de várias linhas, o
+   `align-items: center` de `.compor-caixa` empurraria o `>` para o meio da
+   altura e o botão de anexar junto. Eles ficam no alto, alinhados com a
+   primeira linha do que se escreve. */
+.compor-caixa:has(textarea) { align-items: flex-start; padding-top: 0; padding-bottom: 0; }
+.compor-caixa:has(textarea) .prompt { padding-top: 12px; }
 
 /* O `ENVIAR` saiu na 0.9.0 — ver `index.html`. A instrução que ele carregava
    mora agora no `placeholder`, que é onde se olha quando se precisa dela. */

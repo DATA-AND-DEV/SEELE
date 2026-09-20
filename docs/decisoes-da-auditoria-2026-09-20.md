@@ -9,9 +9,13 @@ Data: 20/09/2026. Escrito **ao final do desenvolvimento**, como o pedido exigia.
 > seguinte, do checkout `26ad0c2`, encontrou três caminhos do mesmo contrato
 > que a bancada não alcançava.
 >
+> A validação nativa do checkout `d96d71a` percorreu as jornadas na janela e
+> encontrou mais seis.
+>
 > A seção 12 registra os seis primeiros, a 13 é a matriz **implementado /
-> parcial / pendente**, e a 15 registra os três seguintes — inclusive uma
-> afirmação da seção 12 que estava errada.
+> parcial / pendente**, a 15 registra os três seguintes — inclusive uma
+> afirmação da seção 12 que estava errada — e a 16 registra os da validação
+> nativa.
 >
 > A conclusão da revisão continua valendo para o que ainda não aconteceu: nada
 > aqui foi observado no aplicativo nativo com as três atividades juntas.
@@ -515,8 +519,10 @@ o que falta está escrito. «Pendente» quer dizer que não foi feito.
 | Capacidades por versão, conferidas no anfitrião | Implementado | `podePedir` antes do `switch`; bancada R2 |
 | Superfícies: `dialogo`, `pagina`, `painel`, `aviso` | Implementado | `npm run test:ui` nos três MODs; bancada R6 |
 | Ciclo de vida: criar/ocultar/mostrar/fechar/descartar | Implementado | Bancada R6, transições idempotentes e recusa depois de descartada |
-| Foco contido, inércia e retorno ao acionador | Parcial | A atribuição de inércia é medida na bancada, no `index.html` real. **Que o Tab pare na borda e que o foco volte de verdade é navegador, e continua não observado** |
-| Confirmação de descarte alcançável e por cima | Parcial | O `z-index` e o acordar/readormecer são medidos; a sobreposição real não |
+| Foco contido, inércia e retorno ao acionador | Parcial | A atribuição de inércia é medida na bancada, no `index.html` real, com reabertura e ordem inversa. **Tab e Shift+Tab em todas as combinações continuam não observados**, e a validação nativa anotou um Escape que não fechou o editor com rascunho — sem causa demonstrada |
+| Confirmação de descarte alcançável e por cima | Implementado | Observada no aplicativo nativo: por cima do modal do MOD e interativa nos dois desfechos |
+| A superfície cabe no transporte | Implementado | Medida em bytes a cada `npm test` dos três pacotes (`cabeNaPonte`); mensagem grande é recusada pelo nome, e não como fila cheia |
+| A atividade começa por um gesto | Implementado | Nenhum dos três pinta a faixa permanente na API 4; medido no laboratório dos três |
 | Contribuições: 10 pontos aplicados | Implementado | `todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique` e o vetor de referência registra nos dez |
 | Modo `substituir` consultado em todo ponto que o anuncia | Implementado | `todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao` |
 | Modo `decorar` | **Pendente** | Recusado pelo nome. Falta **escrever o contrato**: quais propriedades, em quais pontos, sobre quais nós. Cor, tipografia, fundo e borda não exigem oferecer deslocamento nem opacidade sobre um controle nativo |
@@ -538,7 +544,7 @@ o que falta está escrito. «Pendente» quer dizer que não foi feito.
 | Reorganização das configurações | Implementado | Camada ampla com cabeçalho e agrupamento |
 | Painel rápido de áudio | **Pendente, por decisão** | Registrado na seção 9; a revisão observa, com razão, que registrar a decisão não equivale a entregar a recomendação |
 | Cinco riscos «a reproduzir» | Parcial | Dois reproduzidos e consertados com guarda provado; três continuam sem reprodução |
-| Oito jornadas de aceite | **Pendente** | Ver a seção 14 |
+| As jornadas de aceite | Parcial | Percorridas no aplicativo nativo com os três pacotes (validação de `d96d71a`): criar campanha e cena, rolar dados, gravar perfil, cancelar e confirmar descarte, sair. Seis defeitos encontrados e consertados na seção 16. **Continuam pendentes** segundo participante, ficha de terceiro, retrato/faixa, arraste de peças, mídia, Tab em todas as combinações, memória sob carga, Windows e Linux |
 
 ### O guia e o laboratório
 
@@ -695,3 +701,130 @@ redação; e a afirmação sobre o caminho legado do cartão estava errada.
 por aqui. A sessão que escreveu isto não alcança a janela de um aplicativo do
 macOS; a revisão informa que a sessão dela alcança. Os dez passos continuam na
 seção 14.
+
+---
+
+## 16. A validação nativa: seis defeitos que só a janela mostrava
+
+A [validação nativa](validacao-nativa-api4-d96d71a.md) do checkout `d96d71a`
+percorreu as jornadas no macOS, com os três pacotes instalados pela interface.
+Criar campanha e cena, rolar dados, gravar perfil, cancelar e confirmar
+descarte e sair do servidor funcionaram. Seis defeitos concretos não.
+
+**O que esta rodada corrige sobre o que a seção 14 dizia:** ela listava dez
+passos de teclado como pendentes e eles foram percorridos. O que ficou aberto
+está no fim daquele relatório, e não é o que estava aqui.
+
+### N1 — o ESTILO não cabia no transporte
+
+14.164 bytes num `superficie-montar`; o teto por mensagem é 12.288. Duas
+metades.
+
+**No produto:** `postar` devolve `false` nos dois casos — mensagem grande e
+fila cheia —, e o prelúdio traduzia qualquer `false` para `fila-cheia`. A
+frase na tela falava de saturação, que não era o que estava acontecendo, e
+mandava procurar no lugar errado. O anfitrião passa a entregar o teto ao
+prelúdio (`__seeleTetoDaMensagem`, como as capacidades), que mede **antes** de
+postar e recusa com `mensagem-grande`, o tamanho, o teto e o tipo. A
+conferência em Rust continua: o prelúdio roda dentro do contexto do MOD.
+
+E a gestão deixou de dizer «o código não carregou» sobre um MOD que carregou:
+`aoFalhar` separa a subida da volta, e a frase nova não manda reconectar para
+resolver o que reconectar não resolve.
+
+**No pacote:** as três abas eram montadas de uma vez. O renderer do produto
+**já** desenha só o painel escolhido — mandar o conteúdo das outras duas era
+pagar a ponte por algo que nem seria montado. Agora só a aba aberta atravessa:
+4.853 bytes.
+
+**E a medida virou guarda**, em `test/cliente-api3.test.cjs` dos três pacotes.
+Foi ela que encontrou um segundo caso que a rodada nativa não viu: o diretório
+do PERFIS com setenta pessoas dava **52.862 bytes**. Ele não apareceu na
+validação porque o servidor de teste tinha uma pessoa. O diretório passou a
+paginar, com o total e a faixa escritos na tela.
+
+### N2 — a faixa permanente dos três
+
+`iniciar`, na casca compartilhada, chamava `desenhar` — e portanto `ui.regiao`
+— a cada volta do relógio, ligado ou não. Com os três instalados, a sessão
+perdia cerca de 230 px de altura permanentemente, sem nenhuma atividade
+aberta.
+
+**Decisão:** num pacote de API 4, a casca não pinta a região. A atividade mora
+numa superfície que abre por um gesto; o recado curto — «não foi possível
+atualizar» — vira **aviso**, que sai sozinho. Num pacote de API 3 a região
+continua exatamente como era: ela é o único lugar onde aquele MOD existe, e a
+degradação não pode ser um caminho pior.
+
+O que **não** mudou é que a falha é dita. Trocar uma faixa que incomoda por um
+erro que ninguém vê seria o defeito que este repositório mais paga.
+
+O aceite virou teste nos três laboratórios: com o MOD ligado e nada aberto, a
+faixa mede zero.
+
+### N3 — o PERFIS substituía sem ter conteúdo
+
+O PERFIS registra a apresentação de todo mundo ao subir e devolve nada para
+quem ainda não preencheu o perfil. A linha ficava com um alvo de clique vazio e
+um `DETALHES` recolhido no lugar do nome: o produto apagando a identidade
+nativa em troca de nada.
+
+**Decisão, e ela é do produto:** o **conteúdo** decide, não a existência de um
+provedor. `linhaDoRoster` pede o cartão antes de escolher o desenho. Uma
+substituição sem conteúdo desenha a linha nativa — e **mantém o caminho até o
+MOD**, porque quem não tem perfil é exatamente quem precisa abrir o editor.
+
+O nome acessível passou a nomear a pessoa sempre. Ele era
+`nomeAcessivel || pessoa.nome`, e um provedor com um rótulo genérico dava a
+vinte linhas o mesmo nome — quem navega por leitor de tela ouvia vinte vezes a
+mesma coisa sem saber em quem estava.
+
+### N4 — a escolha nativa não alcançava o caminho legado
+
+`SeeleUI.cartoes` é o outro caminho do mesmo provedor para o mesmo ponto.
+«Usar apresentação do SEELE» devolvia o nome nativo e deixava o cartão do MOD
+pendurado abaixo dele.
+
+**Decisão:** a preferência é do **ponto**, e vale nos dois caminhos. Nativo
+explícito: nenhum cartão de MOD. Um provedor escolhido: só os dele. Automático:
+todos. Preservar a compatibilidade da API 3 é executar o caminho antigo, não
+ignorar o que a pessoa escolheu.
+
+### N5 — criar campanha deixava o diálogo aberto e vazio
+
+O sucesso limpava o rascunho e redesenhava. O que ficava na tela era um
+formulário com o nome apagado e o botão desligado — a aparência exata de uma
+criação que **não** aconteceu.
+
+Agora a criação da campanha descarta o diálogo e abre a mesa, com um aviso. Só
+ela: cena, ficha e peça acontecem dentro de uma tela que continua sendo usada
+para a seguinte.
+
+### N6 — o compositor virou um controle do navegador
+
+`index.html` trocou o `<input>` por `<textarea>` quando Shift+Enter passou a
+quebrar parágrafo, e a folha continuou selecionando `.compor input`. O campo
+saiu com a aparência padrão do WebKit — fundo branco, largura de umas poucas
+dezenas de pixels — dentro de uma moldura escura larga.
+
+O guarda de classes não pegava porque **não há classe**: o seletor é por
+etiqueta, e trocar a etiqueta é trocar o seletor sem tocar na folha. O guarda
+novo lê a etiqueta de `#campo-mensagem` na própria página e exige regra para
+ela, com fonte, cor e largura.
+
+### As configurações
+
+Saíram do menu a frase de introdução — os quatro cabeçalhos de grupo já dizem
+o mesmo, cada um com a ressalva certa — e as cinco notas por seção, que
+repetiam o `data-sub` que o painel já mostra ao abrir. A régua dos grupos e das
+seções apertou, sem tirar alvo de toque. Na área de áudio, as duas instruções
+sobre a mesma decisão viraram uma frase, e o espaçamento entre blocos caiu de
+24 para 16.
+
+Trocar de seção passa a rolar o painel para o topo: a rolagem é do painel
+inteiro e ele não é recriado, então a seção nova nascia no meio de si mesma.
+
+E o operador deixou de dizer «microfone aberto» com o modo em TECLA. São três
+coisas — o aparelho, como ele abre, e se está indo ao ar —, e a frase dizia as
+duas primeiras ao mesmo tempo. «Aberto» sem ressalva passou a querer dizer só o
+caso em que ele está aberto o tempo todo.

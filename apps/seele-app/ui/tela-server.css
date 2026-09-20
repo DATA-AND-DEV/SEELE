@@ -146,8 +146,8 @@
    havia uma —, porque agora as quatro levam a painéis diferentes. */
 .server-secao {
   width: 100%;
-  min-height: 56px;
-  padding: 8px 16px;
+  min-height: 48px;
+  padding: 6px 16px;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -204,9 +204,15 @@
    Cabeçalho e nota, e não só cabeçalho: «este dispositivo» e «este servidor»
    são a mesma forma de palavra com consequências opostas, e a nota é onde a
    diferença cabe sem virar um parágrafo dentro de cada seção. */
+/* Os grupos, com a régua apertada depois da validação nativa de 20/09/2026.
+
+   Quatro grupos com título, nota e seções de 56px faziam `ESTE SERVIDOR` cair
+   perto do fim da tela e `APLICATIVO` exigir rolagem, numa janela de 768px de
+   altura. O que saiu foi espaço e repetição — as seções continuam com alvo de
+   toque de 48px, que é o piso, e os títulos de grupo continuam todos lá. */
 .server-grupo {
   margin: 0;
-  padding: 16px 16px 2px;
+  padding: 12px 16px 2px;
   font-family: var(--seele-display);
   font-size: var(--seele-t-rotulo);
   font-weight: var(--seele-cartela);
@@ -214,7 +220,7 @@
   color: var(--seele-laranja-nerv);
 }
 
-.server-grupo-nota { padding: 0 16px 8px; }
+.server-grupo-nota { padding: 0 16px 6px; font-size: var(--seele-t-micro); }
 
 /* A porta de saída, no cabeçalho persistente — U33.
 
@@ -332,10 +338,15 @@
 
 /* O painel de uma seção. Quatro deles, um só visível — `hidden` em `base.css`
    é `display: none !important`, então esconder não deixa a grade com buracos. */
+/* 24px entre blocos virou 16px, e 16px dentro deles virou 12px, depois da
+   validação nativa de 20/09/2026: «na área de áudio há grandes espaços». Um
+   painel que exige rolagem para ver dois blocos é um painel em que a segunda
+   decisão não existe até alguém procurá-la. A régua continua sendo múltipla de
+   quatro, e os alvos de toque não mudaram. */
 .server-painel-secao {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 /* ---------- um bloco ---------- */
@@ -365,10 +376,10 @@
 }
 
 .server-bloco-corpo {
-  padding: 16px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .server-campo {

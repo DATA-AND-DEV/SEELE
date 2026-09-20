@@ -239,6 +239,14 @@ class InstanciaDeMod {
     this.naoSairam = [];
     /** Há uma espera de confirmação em curso. */
     this.aguardando = false;
+    /**
+     * O código já subiu?
+     *
+     * Separa «não carregou» de «carregou e uma volta falhou». As duas chegam
+     * pelo mesmo `aoFalhar`, e a gestão dizia a primeira frase nos dois casos
+     * — mandando reconectar para resolver o que reconectar não resolve.
+     */
+    this.subiu = false;
   }
 
   /**

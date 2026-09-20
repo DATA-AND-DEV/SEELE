@@ -1,11 +1,12 @@
 # Notas da versão — v0.13.0
 
 > **Esta página é o texto para o corpo do release, e o release ainda não
-> existe.** A v0.13.0 é um **candidato em validação**: a API 4 está implementada
-> e medida por bancada, e **nenhum fluxo foi observado no aplicativo nativo com
-> os três MODs juntos**. O que falta para publicar — e os dez passos de teclado
-> que faltam — está na seção 14 de
-> `docs/decisoes-da-auditoria-2026-09-20.md`.
+> existe.** A v0.13.0 é um **candidato em validação**. As jornadas principais
+> foram percorridas no aplicativo nativo com os três MODs — criar campanha e
+> cena, rolar dados, gravar perfil, confirmar descarte, sair —, e a rodada
+> encontrou seis defeitos, todos consertados na seção 16 de
+> `docs/decisoes-da-auditoria-2026-09-20.md`. O que **não** foi percorrido
+> está listado lá e no fim desta página.
 >
 > A tag e a publicação são passo manual de quem opera. O passo a passo é o mesmo
 > da v0.12.0, em `docs/mods-api-propria/runbook-publicacao-v0.12.0.md`, com os
@@ -265,19 +266,17 @@ não é um método que falha com um código, é um `TypeError` na linha que o ch
 Dito aqui porque a auditoria pede que seja dito, e porque a seção «o que
 funcionou» de qualquer entrega vale menos sem ela.
 
-- **As jornadas não foram percorridas no aplicativo nativo.** Elas foram
-  percorridas no laboratório dos três MODs, num navegador de verdade, com o
-  renderer do produto e o código de servidor real de cada pacote — e as do
-  produto (inércia, confirmação, ciclo de vida da superfície, isolamento,
-  descarte) foram medidas contra o `index.html` e o roteador reais. Nenhuma
-  delas é o aplicativo com as três atividades juntas.
+- **Parte das jornadas foi percorrida no aplicativo nativo, e parte não.**
+  Funcionaram na janela, com os três MODs instalados: criar campanha e cena,
+  rolar dados, gravar perfil, cancelar e confirmar o descarte de alterações, e
+  sair do servidor com a interface dos MODs saindo junto.
 
-  **E «precisa de duas máquinas» não vale para a maioria delas.** Criar
-  campanha, editar perfil, confirmar descarte, repetir abertura e fechamento e
-  conferir a saída precisam de um cliente só. Os dez passos que faltam estão na
-  seção 14 de `docs/decisoes-da-auditoria-2026-09-20.md`. O que continua
-  exigindo dois é sincronização entre participantes, autorização de outra
-  pessoa e qualidade de voz.
+  **Continuam sem observação:** segundo participante e autorizações entre
+  pessoas, ficha de terceiro, upload e recorte de retrato e faixa, arraste de
+  peças, mídia, Tab e Shift+Tab em todas as combinações, memória e CPU sob
+  carga, Windows e Linux. Um Escape no editor com rascunho não fechou a janela
+  numa tentativa; o botão FECHAR abriu a confirmação normalmente. Isso pede uma
+  verificação de teclado própria, e nenhuma causa foi demonstrada.
 - **`decorar` não existe nesta versão.** O plano previa três modos de
   contribuição; a 4 entrega dois. Registrar `decorar` é recusado com a razão,
   em vez de aceito sem efeito.

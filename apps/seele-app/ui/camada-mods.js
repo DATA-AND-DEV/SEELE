@@ -508,6 +508,10 @@ const FASES_DO_MOD = {
   carregando: "buscando o código deste MOD…",
   carregado: "código carregado nesta janela",
   "nao-carregou": "o código não carregou — reconecte para tentar de novo",
+  // **Carregou, e uma volta dele falhou.** Reconectar não conserta isto: o
+  // código subiu. Quem precisa agir é quem escreveu o MOD, e a frase manda
+  // olhar onde a razão está escrita — o erro vem ao lado desta linha.
+  "falhou-rodando": "o código carregou e uma volta dele falhou; veja a razão ao lado",
   obtendo: "buscando este MOD no catálogo…",
   "nao-obtive": "não deu para buscar este MOD; reconecte para tentar de novo",
   "sem-pacote": "o servidor exige este MOD e ele não está instalado aqui",

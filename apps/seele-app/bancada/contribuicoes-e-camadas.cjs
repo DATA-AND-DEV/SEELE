@@ -692,6 +692,49 @@ contexto.cartoesDosMods = new Map();
   contexto.cartoesDosMods.clear();
 }
 
+// ------------- N4 · a escolha de apresentação alcança o caminho legado
+
+{
+  // `SeeleUI.cartoes` é o caminho da API 3 para o mesmo ponto que
+  // `pessoa.cartao/substituir`. A preferência alcançava só a substituição:
+  // escolher «usar apresentação do SEELE» devolvia o nome nativo **e deixava o
+  // cartão do MOD logo abaixo**. A validação nativa de 20/09/2026 observou.
+  const base = ler("base.js");
+  const inicio = base.indexOf("function cartoesDaPessoa(");
+  const fim = base.indexOf("\n}", inicio) + 2;
+  confere("N4 · o recorte", inicio >= 0, "`cartoesDaPessoa` mudou de forma e o recorte não a achou");
+  vm.runInContext(base.slice(inicio, fim), contexto);
+
+  const doA = new No("div", "");
+  const doB = new No("div", "");
+  contexto.cartoesDosMods.clear();
+  contexto.cartoesDosMods.set("mod/a", { cartaoDe: () => doA });
+  contexto.cartoesDosMods.set("mod/b", { cartaoDe: () => doB });
+
+  let escolhido = "";
+  contexto.modPreferidoPara = () => escolhido;
+
+  confere(
+    "N4 · automático",
+    contexto.cartoesDaPessoa(12).length === 2,
+    "sem escolha, os cartões dos dois MODs deixaram de aparecer",
+  );
+
+  escolhido = contexto.NATIVO;
+  confere(
+    "N4 · nativo",
+    contexto.cartoesDaPessoa(12).length === 0,
+    "«usar apresentação do SEELE» deixou o cartão do MOD pendurado abaixo do nativo",
+  );
+
+  escolhido = "mod/b";
+  const so = contexto.cartoesDaPessoa(12);
+  confere("N4 · provedor", so.length === 1 && so[0] === doB, "escolher um provedor não tirou o cartão do outro");
+
+  escolhido = "";
+  contexto.cartoesDosMods.clear();
+}
+
 // ------------------------------------- R3 · os pontos aceitam o que aplicam
 
 {

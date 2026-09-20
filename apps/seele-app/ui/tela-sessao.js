@@ -864,18 +864,31 @@ function desenharOperador(snapshot) {
 
   // A linha que substituiu o botão de falar: o que o microfone e o som estão
   // fazendo, nas palavras da comp — «microfone aberto · ouvindo».
+  //
+  // **Três coisas diferentes, e a frase dizia duas delas ao mesmo tempo.** A
+  // validação nativa de 20/09/2026: «o cabeçalho dizia "microfone aberto"
+  // enquanto o modo selecionado era TECLA». Eram dois itens da mesma lista —
+  // «microfone aberto» e «abre com a tecla» —, e o primeiro afirmava sobre
+  // **agora** o que só é verdade enquanto a tecla está apertada.
+  //
+  // As três, na ordem em que quem lê precisa delas:
+  //
+  // 1. **o aparelho**: mudo ou não. É a única que a pessoa muda com um clique;
+  // 2. **como ele abre**: na tecla, por voz, ou sempre. «Aberto» sem ressalva
+  //    passou a querer dizer só o terceiro caso, que é o único em que ele
+  //    está aberto o tempo todo;
+  // 3. **se está indo ao ar agora**, que é o que `speaking` mede.
+  const comoAbre = {
+    PushToTalk: "microfone abre na tecla",
+    VoiceActivated: "microfone abre por voz",
+    Open: "microfone aberto",
+  }[snapshot.voice_mode] ?? "microfone aberto";
   $("voz-estado").textContent = [
-    snapshot.muted ? "microfone mudo" : "microfone aberto",
+    snapshot.muted ? "microfone mudo" : comoAbre,
     // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
     // «ninguém está falando comigo», e não «o som da tela também está calado».
     snapshot.total_isolation ? "não está ouvindo nada, nem a tela" : "ouvindo",
     snapshot.speaking ? "no ar" : null,
-    // O modo entra na frase porque ele saiu da tela como botão: a comp escreve
-    // exatamente isto em `vozEstado`, e é assim que o operador continua dizendo
-    // como o microfone abre sem repetir o seletor da configuração.
-    { PushToTalk: "abre com a tecla", VoiceActivated: "abre por voz", Open: "sempre aberto" }[
-      snapshot.voice_mode
-    ] ?? null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -1780,9 +1793,29 @@ function linhaDoRoster(pessoa, temAudio) {
       String(pessoa.id),
       preferidoDeApresentacao(),
     ).escolhida;
-  const item = substituicao
-    ? linhaSubstituida(pessoa, temAudio, substituicao)
+  // **Uma substituição sem conteúdo não substitui nada.**
+  //
+  // A validação nativa de 20/09/2026: o PERFIS registra a apresentação de
+  // todo mundo assim que sobe, e devolve `null` para quem ainda não tem perfil
+  // preenchido. A linha ficava com um alvo de clique vazio e um `DETALHES`
+  // recolhido no lugar do nome — o produto apagando a identidade nativa em
+  // troca de nada.
+  //
+  // O cartão é pedido **antes** de escolher o desenho, e não dentro dele:
+  // «tem conteúdo» é a pergunta que decide. Montá-lo aqui não custa uma
+  // segunda montagem — `montarContribuicao` guarda o nó por destino, e
+  // `linhaSubstituida` recebe o mesmo.
+  const cartao = substituicao ? cartaoDeContribuicao(substituicao, pessoa.id) : null;
+  const item = cartao
+    ? linhaSubstituida(pessoa, temAudio, substituicao, cartao)
     : linhaNativaDoRoster(pessoa, temAudio);
+
+  // **Mas o acesso ao MOD não some junto.** Quem não tem perfil é exatamente
+  // quem precisa alcançar o editor. A ação principal do provedor vira um botão
+  // do produto na linha nativa, com o nome da pessoa no rótulo acessível.
+  if (cartao === null && substituicao?.acaoPrincipal) {
+    item.append(aPortaDoProvedor(pessoa, substituicao));
+  }
 
   // **`pessoa.cartao` no modo `adicionar`** — o MOD acrescenta um bloco à
   // linha sem tomar o desenho dela. Aqui e não dentro de cada ramo porque o
@@ -1815,29 +1848,37 @@ function preferidoDeApresentacao() {
  * dentro de `<ul>` é o que faz um leitor de tela anunciar «3 de 12», e um MOD
  * que devolvesse a raiz poderia devolver qualquer etiqueta.
  */
-function linhaSubstituida(pessoa, temAudio, contribuicao) {
+/**
+ * O alvo de clique do produto que leva ao MOD, com o nome da pessoa.
+ *
+ * **O nome acessível identifica a pessoa, sempre.** Ele era
+ * `nomeAcessivel || pessoa.nome`, e um provedor que declarasse algo genérico —
+ * «abrir o perfil» — fazia vinte linhas terem o mesmo rótulo. Quem navega por
+ * leitor de tela ouvia vinte vezes a mesma coisa e não sabia em quem estava.
+ * O nome vem primeiro e é do produto; o que o MOD declarou entra depois dele.
+ */
+function aPortaDoProvedor(pessoa, contribuicao) {
+  const porta = elemento("button", "pessoa-apresentada-porta");
+  porta.type = "button";
+  porta.dataset.acaoDeMod = contribuicao.acaoPrincipal;
+  porta.dataset.modDaAcao = contribuicao.mod;
+  porta.dataset.pessoaDaAcao = String(pessoa.id);
+  const oQueEleFaz = contribuicao.nomeAcessivel || "abrir";
+  porta.setAttribute("aria-label", `${pessoa.nome} — ${oQueEleFaz} em ${contribuicao.mod}`);
+  return porta;
+}
+
+function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   const item = elemento("li", pessoa.falando ? "pessoa falando" : "pessoa");
   item.dataset.apresentadaPor = contribuicao.mod;
 
-  // O conteúdo do MOD, montado pelo renderer dele, dentro de um alvo de clique
-  // do produto quando há ação principal declarada.
-  const cartao = cartaoDeContribuicao(contribuicao, pessoa.id);
+  // O conteúdo do MOD dentro de um alvo de clique do produto, quando há ação
+  // principal declarada.
   if (contribuicao.acaoPrincipal) {
-    const porta = elemento("button", "pessoa-apresentada-porta");
-    porta.type = "button";
-    porta.dataset.acaoDeMod = contribuicao.acaoPrincipal;
-    porta.dataset.modDaAcao = contribuicao.mod;
-    porta.dataset.pessoaDaAcao = String(pessoa.id);
-    // **O nome acessível é do produto.** Um leitor de tela lendo só o que o
-    // MOD desenhou anunciaria um retrato e um apelido escolhido, sem dizer de
-    // quem é a linha nem que ela abre alguma coisa.
-    porta.setAttribute(
-      "aria-label",
-      `${contribuicao.nomeAcessivel || pessoa.nome} — abrir em ${contribuicao.mod}`,
-    );
-    if (cartao) porta.append(cartao);
+    const porta = aPortaDoProvedor(pessoa, contribuicao);
+    porta.append(cartao);
     item.append(porta);
-  } else if (cartao) {
+  } else {
     item.append(cartao);
   }
 

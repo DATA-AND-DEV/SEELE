@@ -11365,10 +11365,28 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
     // sumir. Sem estas asserções, «apresentar» viraria «esconder», e o caminho
     // até a moderação de alguém dependeria do que um terceiro desenhou.
     let substituida = js_function(&sessao, "function linhaSubstituida(");
+    // O alvo de clique é montado por `aPortaDoProvedor`, que a linha
+    // substituída e a linha nativa compartilham: desde a validação nativa de
+    // 20/09/2026, uma pessoa **sem** conteúdo declarado fica com a
+    // apresentação nativa e continua tendo como alcançar o editor do MOD. A
+    // garantia é a mesma e mora num lugar só.
+    let porta = js_function(&sessao, "function aPortaDoProvedor(");
     assert!(
-        substituida.contains("porta.dataset.pessoaDaAcao = String(pessoa.id)"),
+        porta.contains("porta.dataset.pessoaDaAcao = String(pessoa.id)"),
         "o alvo de clique de uma apresentação deixou de carregar o ID real, e \
-         passou a depender do que o MOD desenhou: {substituida}"
+         passou a depender do que o MOD desenhou: {porta}"
+    );
+    // **E o nome acessível diz de quem é a linha.** Um provedor com um
+    // `nomeAcessivel` genérico dava o mesmo rótulo a vinte linhas, e quem
+    // navega por leitor de tela ouvia vinte vezes a mesma coisa.
+    assert!(
+        porta.contains("${pessoa.nome} —"),
+        "o nome acessível do alvo de clique deixou de identificar a pessoa: {porta}"
+    );
+    assert!(
+        substituida.contains("aPortaDoProvedor(pessoa, contribuicao)"),
+        "a linha apresentada por um MOD passou a montar o próprio alvo de \
+         clique, e a garantia do ID real deixou de ter um lugar só: {substituida}"
     );
     assert!(
         substituida.contains("linhaNativaDoRoster(pessoa, temAudio, true)"),
@@ -11376,10 +11394,8 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
          de recolher: {substituida}"
     );
     assert!(
-        substituida.contains("porta.setAttribute(")
-            && substituida.contains("aria-label"),
-        "a linha apresentada por um MOD ficou sem nome acessível do produto: \
-         {substituida}"
+        porta.contains("porta.setAttribute(") && porta.contains("aria-label"),
+        "a linha apresentada por um MOD ficou sem nome acessível do produto: {porta}"
     );
     for fora in [
         "innerHTML",
@@ -13689,5 +13705,99 @@ fn decorar_nao_volta_a_tabela_sem_quem_o_aplique() {
         "`decorar` voltou à tabela e nenhuma tela o aplica: é o registro que \
          aceita sem produzir efeito, que é exatamente o R3 da revisão de \
          20/09/2026"
+    );
+}
+
+/// O campo de escrever é desenhado pela folha, seja qual for a etiqueta dele.
+///
+/// # O defeito que este guarda fecha
+///
+/// A validação nativa de 20/09/2026, N6: «o compositor virou um textarea
+/// branco e estreito». `index.html` trocou o `<input>` por `<textarea>` quando
+/// Shift+Enter passou a quebrar parágrafo, e a regra de `tela-sessao.css`
+/// continuou selecionando `.compor input`. O campo passou a usar a aparência
+/// padrão do WebKit — fundo branco, largura de umas poucas dezenas de pixels —
+/// dentro de uma moldura escura larga, e nada reprovou.
+///
+/// O guarda de classes não pegava porque **não há classe**: o seletor é por
+/// etiqueta, e trocar a etiqueta é trocar o seletor sem tocar na folha.
+#[test]
+fn o_campo_de_escrever_tem_regra_para_a_etiqueta_que_ele_usa() {
+    let pagina = read("ui/index.html");
+    let folha = read("ui/tela-sessao.css");
+
+    // A etiqueta de `#campo-mensagem`, lida da página e não escrita aqui.
+    let antes = pagina
+        .split_once("id=\"campo-mensagem\"")
+        .expect("a página tem o campo de escrever")
+        .0;
+    let etiqueta: String = antes
+        .rsplit('<')
+        .next()
+        .expect("a etiqueta abre antes do id")
+        .chars()
+        .take_while(char::is_ascii_alphabetic)
+        .collect();
+    assert!(
+        !etiqueta.is_empty(),
+        "não deu para ler a etiqueta de `#campo-mensagem` na página"
+    );
+
+    assert!(
+        folha.contains(&format!(".compor {etiqueta}")),
+        "`#campo-mensagem` é um `<{etiqueta}>` e a folha não tem regra \
+         `.compor {etiqueta}`: o campo sai com a aparência padrão do navegador \
+         — fundo branco e largura de controle — dentro da moldura do compositor"
+    );
+
+    // E a regra dele carrega o que faz um controle deixar de parecer do
+    // navegador: a fonte do documento, a cor do texto e a largura.
+    let regra = folha
+        .split_once(&format!(".compor {etiqueta}"))
+        .expect("a regra existe")
+        .1
+        .split_once('}')
+        .expect("a regra fecha")
+        .0;
+    for propriedade in ["font", "color", "flex"] {
+        assert!(
+            regra.contains(propriedade),
+            "a regra do campo de escrever não define `{propriedade}`, e um \
+             `<{etiqueta}>` não herda isso do documento: {regra}"
+        );
+    }
+}
+
+/// Uma apresentação sem conteúdo não apaga a identidade nativa.
+///
+/// # O defeito que este guarda fecha
+///
+/// A validação nativa de 20/09/2026, N3: o PERFIS registra a apresentação de
+/// todo mundo ao subir e devolve nada para quem ainda não preencheu o perfil.
+/// A linha ficava com um alvo de clique vazio e um `DETALHES` recolhido no
+/// lugar do nome — o produto apagando a identidade nativa em troca de nada.
+///
+/// A regra é: **o conteúdo decide**. Ter um provedor escolhido não basta; ele
+/// precisa ter desenhado alguma coisa. E o acesso ao MOD não sai junto, porque
+/// quem não tem perfil é exatamente quem precisa alcançar o editor.
+#[test]
+fn uma_apresentacao_sem_conteudo_nao_apaga_a_identidade_nativa() {
+    let sessao = read("ui/tela-sessao.js");
+    let escolha = body_of(&sessao, "function linhaDoRoster(");
+
+    assert!(
+        escolha.contains("cartaoDeContribuicao(substituicao, pessoa.id)"),
+        "a linha deixou de perguntar se a apresentação tem conteúdo antes de \
+         escolher o desenho: {escolha}"
+    );
+    assert!(
+        escolha.contains("cartao\n    ? linhaSubstituida") || escolha.contains("cartao ? linhaSubstituida"),
+        "a escolha entre apresentada e nativa voltou a ser «existe provedor» em \
+         vez de «o provedor desenhou alguma coisa»: {escolha}"
+    );
+    assert!(
+        escolha.contains("aPortaDoProvedor(pessoa, substituicao)"),
+        "a linha nativa de quem não tem conteúdo ficou sem o caminho até o MOD: \
+         quem não tem perfil é quem precisa abrir o editor: {escolha}"
     );
 }

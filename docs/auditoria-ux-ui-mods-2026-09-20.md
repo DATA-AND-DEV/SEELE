@@ -221,3 +221,19 @@ Não usar contagem de suítes verdes como substituto da execução desses fluxos
 - [ESTILO — cliente-fonte](../../SEELE-MOD-ESTILO/ferramentas/estilo.js)
 
 Os links para repositórios irmãos são relativos à disposição local usada nesta auditoria. A hospedagem QA foi encerrada pela interface; sua configuração e os dados de teste são preservados para reprodução. Nenhum pacote ou release foi publicado por esta auditoria.
+
+## Retorno ao aplicativo: candidata `d96d71a`
+
+A [validação nativa dos três candidatos API 4](validacao-nativa-api4-d96d71a.md)
+registra o que mudou desde esta auditoria. Criar campanha, cena, rolar dados,
+gravar perfil e confirmar descarte funcionaram no macOS. O ESTILO não abriu seu
+editor: a montagem tem 14.164 bytes para uma ponte com teto de 12.288. A faixa
+permanente continua nos três MODs. Há ainda regressões no perfil vazio, na
+preferência pela apresentação nativa, no término da criação de campanha e no
+compositor do chat. O documento separa reprodução, causa verificada, correção
+esperada e aceites ainda não executados.
+
+As configurações já usam área ampla e grupos por contexto. A observação nativa
+também pede reduzir o texto fixo da navegação, recolher explicações secundárias
+e corrigir a posição de rolagem ao trocar de seção. A melhora estrutural não
+encerra o trabalho de densidade e hierarquia visual.

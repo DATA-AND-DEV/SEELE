@@ -2229,8 +2229,14 @@
           desta máquina, e essa é a leitura que evita alguém procurar aqui o que
           é do servidor.
         -->
-        <p class="nota">Deste dispositivo, dos MODs e — para quem pode mudá-lo —
-          deste servidor.</p>
+        <!--
+          A frase de introdução saiu na validação nativa de 20/09/2026. Ela
+          dizia «Deste dispositivo, dos MODs e — para quem pode mudá-lo — deste
+          servidor», que é exatamente o que os quatro cabeçalhos de grupo
+          abaixo dizem, cada um no seu lugar e com a ressalva certa. Repetida
+          no topo, ela empurrava `ESTE SERVIDOR` para o fim da tela e
+          `APLICATIVO` para fora dela.
+        -->
       </div>
 
       <!--
@@ -2289,7 +2295,6 @@
             <span class="server-secao-icone" data-glifo="teclado"></span>
             <span class="server-secao-texto">
               <span class="server-secao-nome">ATALHOS</span>
-              <span class="nota">Teclas de acesso</span>
             </span>
           </button>
         </li>
@@ -2323,7 +2328,6 @@
             <span class="server-secao-icone" data-glifo="chave"></span>
             <span class="server-secao-texto">
               <span class="server-secao-nome">IDENTIDADE</span>
-              <span class="nota">Sua chave</span>
             </span>
           </button>
         </li>
@@ -2350,7 +2354,6 @@
             <span class="server-secao-icone" data-glifo="chave"></span>
             <span class="server-secao-texto">
               <span class="server-secao-nome">MODS</span>
-              <span class="nota">Instalados e aceites</span>
             </span>
           </button>
         </li>
@@ -2383,7 +2386,6 @@
             <span class="server-secao-icone" data-glifo="aparencia"></span>
             <span class="server-secao-texto">
               <span class="server-secao-nome">SERVIDOR</span>
-              <span class="nota">Nome e imagem</span>
             </span>
           </button>
         </li>
@@ -2405,7 +2407,6 @@
             <span class="server-secao-icone" data-glifo="chave"></span>
             <span class="server-secao-texto">
               <span class="server-secao-nome">VERSÕES</span>
-              <span class="nota">Lado a lado</span>
             </span>
           </button>
         </li>
@@ -2586,7 +2587,14 @@
                   escrito enquanto o elemento ainda estava escondido.
                 -->
                 <p id="server-erro" class="erro" role="alert" hidden></p>
-                <p class="nota">A troca vale agora e fica guardada nesta máquina.</p>
+                <!--
+                  A linha «A troca vale agora e fica guardada nesta máquina»
+                  saiu daqui e entrou na de baixo. A validação nativa de
+                  20/09/2026 anotou «duas instruções separadas para a mesma
+                  decisão de dispositivo»: eram dois parágrafos, com um `<ul>`
+                  entre eles, dizendo as duas metades de um fato só — o que
+                  acontece ao escolher. Juntas, elas são uma frase.
+                -->
                 <!--
                   O achado B da auditoria de áudio, dito em vez de consertado, e
                   a decisão está escrita em
@@ -2619,8 +2627,9 @@
                   a consequência. O parágrafo que a explica — igual para os dois
                   lados — está uma vez só, no fim do painel.
                 -->
-                <p id="nota-fixa-entrada" class="nota">Escolher pelo nome <b>fixa
-                  ele</b>: o SEELE deixa de acompanhar o padrão da máquina.</p>
+                <p id="nota-fixa-entrada" class="nota">A troca vale agora e fica
+                  guardada nesta máquina. Escolher pelo nome <b>fixa ele</b>: o
+                  SEELE deixa de acompanhar o padrão.</p>
               </div>
 
               <div class="server-campo">

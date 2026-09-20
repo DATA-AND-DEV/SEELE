@@ -54,6 +54,20 @@ use rquickjs::{Context, Function, Runtime};
 /// não é a de um handler de pedido.
 pub(crate) const TETO_DE_MEMORIA: usize = 8 * 1024 * 1024;
 
+/// Quanto cabe numa mensagem que o MOD manda para a janela.
+///
+/// O mesmo número do quadro de controle. Ele é **nomeado** desde a validação
+/// nativa de 20/09/2026, e a razão está no defeito que ela encontrou: o ESTILO
+/// mandava 14.164 bytes num `superficie-montar`, o `postar` devolvia `false`, e
+/// o prelúdio traduzia qualquer `false` para `fila-cheia`. A página nascia
+/// vazia e a frase na tela falava de saturação — que não era o que estava
+/// acontecendo, e mandava procurar no lugar errado.
+///
+/// Agora o prelúdio o recebe e mede antes de postar, para poder dizer o que de
+/// fato aconteceu. A conferência daqui continua: o prelúdio roda **dentro** do
+/// contexto do MOD, e um MOD pode redefinir o que quiser depois dele.
+pub(crate) const TETO_DA_MENSAGEM: usize = 12 * 1024;
+
 /// Quantas consultas do motor cabem numa volta de execução.
 ///
 /// **Isto não é um prazo**, e é a armadilha que a diretriz nomeia: «só contar
@@ -700,7 +714,7 @@ fn rodar(
                 // O primeiro é o do quadro de controle: uma mensagem que não
                 // caberia no fio não pode encher a fila da janela no caminho
                 // até descobrir isso.
-                if json.len() > 12 * 1024 {
+                if json.len() > TETO_DA_MENSAGEM {
                     return false;
                 }
                 // O segundo é o do **acumulado**. Sem ele, um MOD num laço
@@ -803,6 +817,12 @@ fn rodar(
                         lista.set(onde, *nome)?;
                     }
                     ctx.globals().set("__seeleCapacidades", lista)?;
+                    // O teto por mensagem, pelo mesmo caminho e pela mesma
+                    // razão: o prelúdio precisa dele para separar «não coube»
+                    // de «a fila encheu», e interpolá-lo no texto faria o
+                    // prelúdio deixar de ser uma constante.
+                    ctx.globals()
+                        .set("__seeleTetoDaMensagem", TETO_DA_MENSAGEM as u32)?;
                     ctx.eval::<(), _>(PRELUDIO.as_bytes())?;
                     ctx.eval::<(), _>(fonte.as_bytes())
                 });
@@ -873,11 +893,35 @@ const PRELUDIO: &str = r#"
     else espera.reject(new Error(m.erro || 'recusado'));
   };
 
+  // Quanto cabe numa mensagem, dito pelo anfitrião. Lido e apagado como as
+  // capacidades, e pela mesma razão.
+  const tetoDaMensagem = Number(globalThis.__seeleTetoDaMensagem) || 12288;
+  delete globalThis.__seeleTetoDaMensagem;
+
+  // Bytes, e não caracteres: o teto do anfitrião conta UTF-8, e um nome com
+  // acento ocupa dois. Medir em `length` diria que cabe o que não cabe.
+  const tamanhoEmBytes = (texto) => {
+    try { return new TextEncoder().encode(texto).length; } catch { return texto.length; }
+  };
+
   const pedir = (tipo, carga) => new Promise((resolve, reject) => {
     if (pendentes.size >= 8) { reject(new Error('too-many-requests')); return; }
+    const texto = JSON.stringify({ tipo, n: proximo + 1, ...carga });
+    // **«Não coube» é diferente de «a fila encheu».** As duas faziam `postar`
+    // devolver `false`, e a única frase que existia era `fila-cheia`: um MOD
+    // com uma declaração grande demais era mandado procurar saturação. Medido
+    // aqui, o erro diz o tamanho, o teto e o tipo da mensagem — que é o que
+    // leva a quem escreveu direto ao que ele precisa dividir.
+    const bytes = tamanhoEmBytes(texto);
+    if (bytes > tetoDaMensagem) {
+      reject(new Error('mensagem-grande: ' + tipo + ' tem ' + bytes
+        + ' bytes e o teto por mensagem é ' + tetoDaMensagem
+        + '; mande menos de uma vez, ou monte só a parte que aparece'));
+      return;
+    }
     const n = ++proximo;
     pendentes.set(n, { resolve, reject });
-    if (!seele.postar(JSON.stringify({ tipo, n, ...carga }))) {
+    if (!seele.postar(texto)) {
       pendentes.delete(n);
       reject(new Error('fila-cheia'));
     }

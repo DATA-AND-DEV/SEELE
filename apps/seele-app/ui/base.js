@@ -608,7 +608,16 @@ async function montarOMod(mod) {
     (erro) => {
       if (!instancia.admite(geracaoDaSessao)) return;
       console.error(`MOD ${mod.id}: erro`, erro);
-      anotarEstadoDoMod(mod.id, "nao-carregou", erro ?? "");
+      // **Falhar ao subir é diferente de falhar rodando.** A validação nativa
+      // de 20/09/2026 encontrou a gestão dizendo «o código não carregou» sobre
+      // um MOD que tinha carregado, desenhado a região dele e só então
+      // recusado uma mensagem grande demais. A frase mandava reconectar para
+      // resolver um problema que reconectar não resolve.
+      anotarEstadoDoMod(
+        mod.id,
+        instancia.subiu ? "falhou-rodando" : "nao-carregou",
+        erro ?? "",
+      );
     },
   );
 
@@ -622,6 +631,8 @@ async function montarOMod(mod) {
   // **`carregado` diz que os bytes executaram, e só isso.** Se o MOD estourou
   // dentro da própria inicialização, o worker subiu do mesmo jeito — quem sabe
   // disso é ele, e prometer o contrário seria inventar.
+  // A partir daqui, uma falha é de uma volta e não da subida — ver `aoFalhar`.
+  instancia.subiu = true;
   anotarEstadoDoMod(mod.id, "carregado");
 }
 
@@ -924,8 +935,27 @@ function darCartoesDoMod(mod, instancia, cartoes) {
  * um `<img>` recriado piscaria a cada quatro segundos.
  */
 function cartoesDaPessoa(id) {
+  // **A escolha de apresentação vale aqui também.**
+  //
+  // A validação nativa de 20/09/2026: «usar apresentação do SEELE» devolvia o
+  // nome e o diagnóstico nativos **e mantinha o cartão do MOD logo abaixo**. A
+  // preferência alcançava a substituição — `escolherSubstituicao` — e não
+  // alcançava `SeeleUI.cartoes`, que é o outro caminho do mesmo provedor para
+  // o mesmo ponto.
+  //
+  // Preservar a compatibilidade da API 3 é executar o caminho antigo, não
+  // ignorar o que a pessoa escolheu. A regra é uma só, e ela é do ponto:
+  //
+  // - nativo explícito: nenhum cartão de MOD entra;
+  // - um provedor escolhido: só os dele;
+  // - automático: todos, como sempre.
+  const escolha = typeof modPreferidoPara === "function"
+    ? modPreferidoPara("pessoa.cartao")
+    : "";
+  if (escolha === NATIVO) return [];
   const achados = [];
-  for (const [, regiao] of cartoesDosMods) {
+  for (const [quem, regiao] of cartoesDosMods) {
+    if (escolha && quem !== escolha) continue;
     const cartao = regiao.cartaoDe(id);
     if (cartao) achados.push(cartao);
   }
