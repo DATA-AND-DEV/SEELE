@@ -81,6 +81,7 @@ o ganho é de estética.
 | [0047](0047-o-link-que-volta-a-funcionar-amanha.md) | O link que volta a funcionar amanhã: permanência, multiconexão e chamada privada | **rascunho** | — (pedido do dono; confere o `0022` e o `0031` contra o código) |
 | [0048](0048-mods-ganham-o-caminho-de-volume-que-os-anexos-ja-tem.md) | MODs ganham o caminho de volume que os anexos já têm | **aceito** | — (relato de campo: imagem de 1 MB levando 28 s; estende o `0027` aos MODs do `0045`) |
 | [0049](0049-um-mod-deixa-de-rodar-na-janela-do-produto.md) | Um MOD deixa de rodar na janela do produto | **aceito** | — (revisa o `0045`; etapa 5 do plano de isolamento, e depende de protótipo em macOS e Windows) |
+| [0052](0052-um-mod-ganha-superficies-proprias-e-pontos-de-integracao.md) | Um MOD ganha superfícies próprias e pontos de integração | **aceito** | — (auditoria de UX/UI de 20/09/2026, U01–U03 e U27; estende o `0049` sem mexer no executor) |
 
 ## O que ainda não tem ADR
 

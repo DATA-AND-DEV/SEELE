@@ -106,7 +106,24 @@ pub(crate) fn run() -> ExitCode {
     }
 }
 
-/// Concatenates every `.rs` under `dir`.
+/// Concatenates every source file under `dir` that the façade can point into.
+///
+/// # Por que `.js` também, desde a API 4
+///
+/// Metade da superfície que um MOD enxerga é montada na janela: o renderer, o
+/// host de superfícies e o registro de contribuições são JavaScript. Enquanto
+/// esta função colhia só `.rs`, os nomes daquela metade **passavam por
+/// acidente** — `desenharARegiaoDoMod` resolvia porque ele aparece citado num
+/// guarda de `tests/frontend.rs`, e não porque a função existe.
+///
+/// Um guarda que passa por acidente é um guarda que deixa de passar quando o
+/// acidente sai, e reprova sem que nada de verdade tenha mudado. Pior: ele não
+/// pega o que existe para pegar — renomear `SuperficieDeMod.montar` não
+/// produziria linha vermelha nenhuma.
+///
+/// Só `apps/seele-app/ui/` entra: é onde a janela do produto mora, e varrer
+/// `node_modules` de um repositório vizinho seria fazer a fachada resolver
+/// contra código que não é nosso.
 fn colher(dir: &std::path::Path, destino: &mut String) {
     let Ok(entradas) = std::fs::read_dir(dir) else {
         return;
@@ -114,11 +131,15 @@ fn colher(dir: &std::path::Path, destino: &mut String) {
     for entrada in entradas.flatten() {
         let caminho = entrada.path();
         if caminho.is_dir() {
-            if caminho.file_name().and_then(|n| n.to_str()) == Some("target") {
+            let nome = caminho.file_name().and_then(|n| n.to_str());
+            if nome == Some("target") || nome == Some("node_modules") {
                 continue;
             }
             colher(&caminho, destino);
-        } else if caminho.extension().and_then(|e| e.to_str()) == Some("rs") {
+        } else if matches!(
+            caminho.extension().and_then(|e| e.to_str()),
+            Some("rs" | "js")
+        ) {
             if let Ok(texto) = std::fs::read_to_string(&caminho) {
                 destino.push_str(&texto);
                 destino.push('\n');

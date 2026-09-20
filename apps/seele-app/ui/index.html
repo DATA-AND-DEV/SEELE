@@ -2575,7 +2575,28 @@
                   padrão trocaria um defeito de informação por um de
                   comportamento; a frase é a saída barata e honesta.
                 -->
-                <p id="nota-fixa-entrada" class="nota">Escolher um aparelho pelo nome fixa ele: se o sistema trocar de padrão depois, o SEELE fica no que você escolheu. <b>PADRÃO DA MÁQUINA</b> é a opção que acompanha a troca.</p>
+                <!--
+                  **Curta aqui, inteira uma vez lá embaixo** — U30.
+
+                  «Em Áudio, a explicação longa sobre acompanhar o dispositivo
+                  padrão se repete para entrada e saída», e a regra da auditoria
+                  é «controle e estado primeiro; ajuda curta; detalhes sob
+                  demanda».
+
+                  O que **não** pode sair daqui é o aviso. Ele é o conserto
+                  inteiro do achado B da auditoria de áudio, cuja frase era
+                  «quem usa a tela de configuração fica pior do que quem não
+                  usa»: no macOS, um aparelho escolhido pelo nome abre por um
+                  AudioUnit fixo e perde o reencaminhamento que o CoreAudio faz
+                  sozinho no padrão. Recolhê-lo seria esconder exatamente a
+                  informação que faz a escolha ser informada.
+
+                  Então ele encurta e fica: uma linha ao lado de cada lista, com
+                  a consequência. O parágrafo que a explica — igual para os dois
+                  lados — está uma vez só, no fim do painel.
+                -->
+                <p id="nota-fixa-entrada" class="nota">Escolher pelo nome <b>fixa
+                  ele</b>: o SEELE deixa de acompanhar o padrão da máquina.</p>
               </div>
 
               <div class="server-campo">
@@ -2681,7 +2702,16 @@
                 <ul id="lista-saidas" class="server-dispositivos"></ul>
                 <p class="nota">Trocar vale na hora, sem sair da conversa.</p>
                 <!-- O mesmo aviso da entrada; ver o comentário lá em cima. -->
-                <p id="nota-fixa-saida" class="nota">Escolher um aparelho pelo nome fixa ele: se o sistema trocar de padrão depois, o SEELE fica no que você escolheu. <b>PADRÃO DA MÁQUINA</b> é a opção que acompanha a troca.</p>
+                <p id="nota-fixa-saida" class="nota">Escolher pelo nome <b>fixa
+                  ele</b>: o SEELE deixa de acompanhar o padrão da máquina.</p>
+                <details class="server-detalhes">
+                  <summary>E quando o sistema troca de aparelho padrão?</summary>
+                  <p class="nota">Se o sistema trocar de padrão depois, o SEELE
+                    fica no que você escolheu. <b>PADRÃO DA MÁQUINA</b> é a opção
+                    que acompanha a troca. Vale igual para o microfone e para a
+                    saída — e é por isso que esta explicação está aqui uma vez, e
+                    não duas.</p>
+                </details>
               </div>
             </div>
           </div>

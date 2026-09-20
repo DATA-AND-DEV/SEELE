@@ -1,0 +1,189 @@
+{
+  "version": 4,
+  "extends": 3,
+  "actions": {
+    "pedir": "ModRequest",
+    "regiao": "desenharARegiaoDoMod",
+    "tema": "aplicarOTemaDoMod",
+    "cartoes": "darCartoesDoMod",
+    "escolher-arquivo": "escolher_para_o_mod",
+    "pedaco": "pedaco_do_escolhido",
+    "soltar-arquivo": "soltar_escolhido",
+    "midia-do-pacote": "midia_do_mod",
+    "midia-do-servidor": "midia_em_bytes",
+    "superficie-criar": "SuperficiesDoMod::criar",
+    "superficie-montar": "SuperficieDeMod::montar",
+    "superficie-classes": "SuperficieDeMod::declararClasses",
+    "superficie-mostrar": "SuperficieDeMod::mostrar",
+    "superficie-ocultar": "SuperficieDeMod::ocultar",
+    "superficie-suja": "SuperficieDeMod::marcarSuja",
+    "superficie-titulo": "SuperficiesDoMod::de",
+    "superficie-fechar": "SuperficiesDoMod::fechar",
+    "superficie-descartar": "SuperficiesDoMod::descartar",
+    "contribuir": "RegistroDeContribuicoes::registrar",
+    "revogar-contribuicao": "RegistroDeContribuicoes::revogar",
+    "abrir-endereco": "abrir_no_navegador"
+  },
+  "reads": {
+    "resposta": "ModReply",
+    "contexto.pessoa": "PersonId",
+    "contexto.canal": "ChannelId",
+    "retrato": "Snapshot",
+    "capacidades": "capacidades_da_api"
+  },
+  "handlers": [
+    "aoPedir",
+    "aoResponder",
+    "aoEvento"
+  ],
+  "formas": [
+    "titulo",
+    "texto",
+    "linha",
+    "lista",
+    "item",
+    "campo",
+    "escolha",
+    "botao",
+    "arquivo",
+    "tela",
+    "midia",
+    "caixa",
+    "pilha",
+    "grade",
+    "rolagem",
+    "separador",
+    "espaco",
+    "formulario",
+    "acoes",
+    "abas",
+    "aba",
+    "textoLongo",
+    "numero",
+    "deslizante",
+    "marca",
+    "interruptor",
+    "cor",
+    "retrato",
+    "distintivo",
+    "link"
+  ],
+  "figuras": [
+    "retangulo",
+    "circulo",
+    "texto",
+    "linha"
+  ],
+  "eventos": [
+    "campo",
+    "escolha",
+    "botao",
+    "arquivo",
+    "traco",
+    "midia",
+    "numero",
+    "marca",
+    "cor",
+    "aba",
+    "submeter",
+    "acao",
+    "link",
+    "tela",
+    "fechar",
+    "fechar-pedido"
+  ],
+  "superficies": {
+    "o-que-e": "uma janela do produto que o MOD declara e o produto monta: página na área da sessão, painel ajustável, diálogo com foco contido, ou aviso de vida curta",
+    "tipos": ["pagina", "painel", "dialogo", "aviso"],
+    "garantias-do-produto": [
+      "a saída é montada pelo produto, com o texto do produto, ligada a um comando do produto",
+      "o cabeçalho diz de qual MOD é a superfície",
+      "um modal torna o resto da aplicação inerte, e não só escuro",
+      "o foco entra na abertura, fica contido, e volta ao acionador ao fechar",
+      "o tamanho pedido é contido na área útil: um valor grande não torna o fechamento inalcançável",
+      "alterações não gravadas produzem a decisão de descartar, e o MOD não veta a saída"
+    ],
+    "limites": { "superficies": 12, "avisos": 4, "nos": 4096, "fundura": 16, "campos": 128, "midias": 24, "bytesDeMidia": 25165824 },
+    "descarte": "sai com a instância do MOD, e a saída da sessão descarta sem perguntar"
+  },
+  "contribuicoes": {
+    "o-que-e": "um registro de pontos semânticos da interface do SEELE, por ID e por modo — nunca um seletor de CSS, um nó do documento ou HTML de texto",
+    "pontos": [
+      "pessoa.identidade",
+      "pessoa.cartao",
+      "pessoa.detalhes",
+      "pessoa.acoes",
+      "canal.item",
+      "canal.cabecalho",
+      "compositor.ferramentas",
+      "sala.acoes",
+      "servidor.navegacao",
+      "servidor.aparencia"
+    ],
+    "modos": ["adicionar", "substituir", "decorar"],
+    "garantias-do-produto": [
+      "trocar o que se desenha não troca a identidade: o comando continua ligado ao ID real",
+      "o diagnóstico nativo recolhe em vez de sumir",
+      "duas substituições do mesmo ponto se resolvem por prioridade declarada e escolha visível, nunca por quem respondeu por último",
+      "ao revogar, a apresentação nativa é recalculada do estado atual — nunca restaurada de um innerHTML guardado",
+      "«usar apresentação padrão» existe no controle nativo de MODs"
+    ],
+    "teto": 128,
+    "descarte": "sai com a instância do MOD"
+  },
+  "estilos": {
+    "o-que-e": "propriedades declaradas por categoria, validadas uma a uma e montadas de partes conferidas — nunca texto de CSS",
+    "categorias": [
+      "cor e transparência",
+      "preenchimento e gradiente",
+      "borda e raio",
+      "sombra",
+      "tipografia",
+      "layout",
+      "transformação",
+      "recorte",
+      "transição e animação"
+    ],
+    "estados": ["base", "sobre", "foco", "ativo", "desligado", "invalido", "escolhido"],
+    "consultas": "de contêiner, e não de janela: um painel arrastado para 300px continua numa janela de 1400",
+    "animacoes": ["nenhuma", "pulso", "aurora", "brilho", "flutuar"],
+    "fora": [
+      "url(...)",
+      "@import",
+      "HTML ativo",
+      "seletor que alcance fora da superfície",
+      "keyframes declarados pelo MOD",
+      "família de tipo livre"
+    ]
+  },
+  "cartoes": {
+    "o-que-e": "uma declaração por pessoa, na mesma gramática da região, montada pelo renderer do produto na lista dele",
+    "chave": "o `id` da pessoa no retrato",
+    "formas": ["titulo", "texto", "linha", "lista", "item", "midia", "caixa", "pilha", "grade", "separador", "espaco", "retrato", "distintivo"],
+    "fora": ["campo", "escolha", "botao", "arquivo", "tela", "formulario", "abas", "textoLongo", "numero", "deslizante", "marca", "interruptor", "cor", "link"],
+    "limites": { "pessoas": 64, "nos": 64, "fundura": 6, "midias": 64, "bytesDeMidia": 8388608 },
+    "descarte": "sai com a região do MOD"
+  },
+  "tema": [
+    "arredondamento",
+    "brilho",
+    "fundo",
+    "painel",
+    "texto",
+    "apagado",
+    "acento",
+    "borda",
+    "densidade",
+    "fonte"
+  ],
+  "compatibilidade": {
+    "aceitas": [4, 3],
+    "porque": "a API 4 não tira nada da 3: ela acrescenta superfícies, contribuições, composição e estilos sobre o mesmo executor, a mesma ponte e o mesmo renderer. A conferência de manifesto deixou de ser igualdade e passou a ser um conjunto, porque subir a constante sozinha recusaria todo pacote publicado no mesmo instante.",
+    "capacidades-por-versao": {
+      "4": ["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes"],
+      "3": ["regiao", "tema", "cartoes", "arquivo"]
+    },
+    "nao-volta": "a API 2 executava na janela do produto, e o ADR 0049 explica por que não há caminho de volta disso"
+  },
+  "notes": "A API 4 responde os três P1 da auditoria de UX/UI de 20/09/2026 — U01, U02 e U03 —, que são a mesma frase por três ângulos: todos os MODs disputam uma faixa de 240px, a rolagem pertence ao contêiner dos três, e não há caminho para abrir uma experiência ampla. O que faltava não era espaço: era ciclo de vida. Uma superfície tem título, foco, rota, estado de alteração e uma saída que o produto garante; uma região não tem nenhum dos cinco. As contribuições respondem U27: um MOD deixa de acrescentar uma linha embaixo do nome de alguém e passa a apresentar a identidade, com o comando continuando ligado ao ID real. Os estilos respondem U04 com a fronteira dita pelo que ela é — alcance, e não gosto: gradiente, sombra, tipografia, layout, transformação e animação entram, montados de partes conferidas e nunca copiados de um texto. Ver ADR 0052."
+}

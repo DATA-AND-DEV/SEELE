@@ -125,6 +125,49 @@ Abrir uma segunda exceção — um raio que sobreviva à sessão, uma sombra de 
 livre, um gradiente — exige emendar este parágrafo, e não um argumento de que
 «o token já existia».
 
+### Emenda de 20/09/2026 — o que um MOD desenha **dentro do que é dele**
+
+A regra acima é sobre **as telas do SEELE**: a conversa, as camadas, a
+configuração, a TUI. Ela continua inteira, e nada aqui a afrouxa.
+
+O que a auditoria de UX/UI de 20/09/2026 encontrou foi outra coisa, e o achado
+U04 a nomeia: a mesma regra estava sendo lida como se valesse também para o que
+um MOD desenha na superfície **dele**, e o resultado era «não limitar o visual
+de um perfil a seis cores e dois enums». Um MOD de perfis que queira um cartão
+com faixa, retrato sobreposto e cor própria não está mexendo na estética do
+SEELE — ele está desenhando o conteúdo que ele existe para desenhar.
+
+**A fronteira é alcance, e não gosto.** Um estilo de MOD:
+
+1. **não alcança fora da superfície dele.** As regras são compiladas numa folha
+   presa àquela raiz, com um escopo que o produto escreve. Uma classe `cartao`
+   de um MOD não encontra `.roster-linha`, não encontra a portaria e não
+   encontra a superfície de outro MOD;
+2. **não é texto de CSS.** Toda propriedade é declarada por nome, validada por
+   categoria e montada de partes conferidas — `sombra: { x, y, desfoque, cor }`,
+   e nunca `box-shadow: <texto>`. Não existe, e não deve passar a existir, uma
+   função que receba CSS e tente limpá-lo: limpeza por substituição de texto é
+   uma corrida contra o analisador do navegador, e quem o escreve não sabe que
+   ela existe;
+3. **não busca bytes na rede.** `url(...)`, `@import` e família de tipo livre
+   ficam de fora. Recursos visuais entram por identificador, do pacote declarado
+   ou da metade de servidor do próprio MOD;
+4. **não sobrevive à saída.** A folha é um recurso com dono, e ela sai com a
+   superfície.
+
+As telas de confiança do produto continuam fora de alcance por construção: um
+MOD não contribui para a entrada, para a portaria, para a confirmação de
+descarte nem para o aceite de conjunto. Personalização estética pode substituir
+a faixa de sinal; não pode falsificar autorização, bloquear saída ou encobrir
+uma confirmação.
+
+**A marca continua sem exceção nenhuma.** A regra 1 de `docs/marca.md` vale
+igual: o símbolo não ganha raio, sombra, gradiente nem animação, e nenhuma
+superfície de MOD o alcança.
+
+O contrato está em `api/v4.json`, e a validação em
+`apps/seele-app/ui/mods-estilos.js`. Ver ADR 0052.
+
 ## Movimento
 
 Só a sequência de boot é generosa. No resto, movimento é diagnóstico: a barra do

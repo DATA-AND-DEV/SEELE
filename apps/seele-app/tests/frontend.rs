@@ -12364,15 +12364,29 @@ fn as_listas_de_aparelho_avisam_que_escolher_pelo_nome_fixa() {
              escolher pelo nome desliga o reencaminhamento automático"
         );
     }
+    // **Duas vezes o aviso, uma vez a explicação** — U30 da auditoria de
+    // 20/09/2026: «Em Áudio, a explicação longa sobre acompanhar o dispositivo
+    // padrão se repete para entrada e saída.»
+    //
+    // O que não podia sair era o **aviso**, que é o conserto do achado B acima.
+    // Ele encurtou e continua ao lado das duas listas; o parágrafo que o
+    // explica ficou uma vez, recolhido, no fim do painel. Recolher o aviso
+    // junto teria escondido a informação que faz a escolha ser informada.
     assert_eq!(
-        page.matches("fixa ele").count(),
+        page.matches("fixa\n                  ele").count()
+            + page.matches("fixa ele").count(),
         2,
-        "a frase que explica a fixação existe em número diferente de duas: as \
-         duas listas — entrada e saída — têm o mesmo comportamento e precisam \
-         do mesmo aviso"
+        "o aviso de fixação existe em número diferente de dois: as duas listas \
+         — entrada e saída — têm o mesmo comportamento e precisam do mesmo aviso"
+    );
+    assert_eq!(
+        page.matches("<b>PADRÃO DA MÁQUINA</b> é a opção").count(),
+        1,
+        "a explicação longa voltou a existir duas vezes, ou sumiu: ela vale \
+         igual para os dois lados e mora uma vez, recolhida"
     );
     assert!(
-        page.contains("<b>PADRÃO DA MÁQUINA</b> é a opção que acompanha a troca."),
+        page.contains("<b>PADRÃO DA MÁQUINA</b> é a opção"),
         "a nota deixou de nomear a opção que acompanha a troca. Dizer que \
          escolher fixa, sem dizer qual é a alternativa, é meio aviso: a pessoa \
          fica sabendo que perdeu algo e não como recuperá-lo"

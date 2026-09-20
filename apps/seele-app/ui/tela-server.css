@@ -854,3 +854,25 @@
   font-size: 13px;
   letter-spacing: 0.1em;
 }
+
+
+/* Os detalhes sob demanda — U30.
+
+   «Explicações longas misturam orientação, funcionamento interno e histórico
+   entre os controles.» A regra que a auditoria dá é «controle e estado
+   primeiro; ajuda curta; detalhes sob demanda», e este é o lugar do terceiro.
+
+   Sem `::marker` próprio: o triângulo do navegador é o único desenho desta
+   janela que já diz «isto abre». */
+.server-detalhes > summary {
+  cursor: pointer;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+  padding: 4px 0;
+}
+
+.server-detalhes > summary:hover { color: var(--seele-laranja-nerv); }
+.server-detalhes > summary:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
