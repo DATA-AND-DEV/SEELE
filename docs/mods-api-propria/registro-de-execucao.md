@@ -1093,6 +1093,23 @@ servidor procura o pacote em `<home>/mods/mod-packages/<hash>`, e não no
 `<home>/mod-packages/` que a janela usa; e a entrada exige o aceite do conjunto,
 cuja identidade o `seele.log` escreve na recusa.
 
+> **Emenda de 20/09 — a primeira dessas duas frases descrevia um defeito, e eu a
+> escrevi como se fosse um detalhe de montagem.**
+>
+> A janela instala em `<config>/mod-packages/<hash>` e o servidor procurava em
+> `<config>/mods/mod-packages/<hash>`. Não são dois caminhos a aprender: são
+> **duas metades do produto discordando**, e o efeito é todo pedido a todo MOD
+> morrendo com «o sistema não pode encontrar o caminho especificado».
+>
+> Eu tropecei nisto aqui, contornei copiando o pacote para os dois lugares, e
+> anotei o contorno. A conta certa era a que o `CLAUDE.md` manda fazer:
+> «existir não é funcionar». Apareceu em produção, na v0.12.0, no Windows de
+> quem opera — e teria aparecido em qualquer sistema, porque o defeito não é de
+> plataforma.
+>
+> Consertado em `raizes_dos_mods`, com o guarda que o comentário de `pacote_de`
+> já prometia e que não existia.
+
 **O que continua fora:** digitar, arrastar e apertar na janela de verdade. A
 automação de acessibilidade do macOS recusa este processo, e isso não mudou. A
 região, o foco, o arraste e o descarte são provados por

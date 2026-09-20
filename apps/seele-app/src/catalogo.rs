@@ -564,8 +564,37 @@ mod o_catalogo {
             .first()
             .expect("um MOD no catálogo sem versão nenhuma não é instalável");
         let ultima = mesa.versoes.last().expect("a lista não está vazia");
-        assert_eq!(primeira.versao, "1.2.0");
-        assert_eq!(ultima.versao, "1.2.1");
+
+        // **A propriedade, e não os números.** A versão aqui era `1.2.0` e
+        // `1.2.1` cravadas; o vetor foi trocado quando a API 3 saiu, e o teste
+        // reprovou dizendo `2.0.0 != 1.2.1` — que fala do vetor e não de nada
+        // que este build faça errado.
+        //
+        // Cravar o número faz o teste reprovar toda vez que o indexador
+        // publica, e um teste que reprova por motivo certo na hora errada é um
+        // teste que ensina a ignorá-lo. O que importa é que a lista esteja em
+        // ordem crescente, porque a tela **lê a última para oferecer**.
+        let numero = |v: &str| -> Vec<u32> {
+            v.split(['.', '-'])
+                .map(|p| p.parse::<u32>().unwrap_or(0))
+                .collect()
+        };
+        assert!(
+            numero(&primeira.versao) < numero(&ultima.versao),
+            "o catálogo deixou de publicar da mais antiga para a mais nova: \
+             {} vem antes de {}",
+            primeira.versao,
+            ultima.versao
+        );
+        for (antes, depois) in mesa.versoes.iter().zip(mesa.versoes.iter().skip(1)) {
+            assert!(
+                numero(&antes.versao) < numero(&depois.versao),
+                "as versões saíram de ordem entre {} e {}, e a tela oferece a \
+                 última da lista",
+                antes.versao,
+                depois.versao
+            );
+        }
         assert_ne!(
             primeira.hash, ultima.hash,
             "duas versões com o mesmo conteúdo são uma publicação errada"

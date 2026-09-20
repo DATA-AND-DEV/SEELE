@@ -292,13 +292,29 @@ pub(crate) fn renomear(config: &str, id: &str, nome: &str) {
 /// esta separação conserta.
 pub(crate) fn raizes_dos_mods(config: &str, id: Option<&str>) -> seele_server::RaizesDosMods {
     let base = Path::new(config);
-    let pacotes = base.join("mods");
+    // **A raiz dos pacotes é a raiz da configuração, e não `mods/`.**
+    //
+    // `pacote_de` já junta `mod-packages`, e a janela instala em
+    // `<config>/mod-packages/<hash>` — é o que `caminho_do_pacote` do
+    // `seele-core` diz e o que `instalar_de` escreve. Pôr `mods/` aqui punha
+    // um nível a mais só do lado do servidor: a janela gravava num lugar e o
+    // servidor procurava noutro, e todo pedido a um MOD morria com «o sistema
+    // não pode encontrar o caminho especificado».
+    //
+    // Encontrado em produção, na v0.12.0, e não em teste — porque o teste de
+    // conformidade monta `RaizesDosMods { pacotes: root, .. }` com a raiz da
+    // configuração, que é o certo, e nunca passou pelo caminho que o produto
+    // usa. As duas suítes ficaram verdes discordando.
+    let pacotes = base.to_path_buf();
+    // O layout de até a v0.11.x, que só a migração abaixo ainda lê: ali o
+    // pacote morava em `mods/<autor>/<nome>/`, com os dados dentro dele.
+    let legado = base.join("mods");
     let dados = match id {
         Some(id) => base.join("servidores").join(id).join("mod-data"),
         None => base.join("mod-data-legado"),
     };
     if id.is_none() {
-        mudar_os_dados_do_legado(&pacotes, &dados);
+        mudar_os_dados_do_legado(&legado, &dados);
     }
     seele_server::RaizesDosMods { pacotes, dados }
 }
@@ -652,6 +668,64 @@ mod os_servidores_guardados {
         assert!(
             de_novo.dados_de("seele/perfis").join("a.txt").is_file(),
             "o que veio do legado sumiu na segunda chamada"
+        );
+    }
+
+    /// **A janela instala onde o servidor procura.**
+    ///
+    /// As duas metades calculam o caminho do pacote por contas diferentes: a
+    /// janela por `seele_core::mods::caminho_do_pacote`, o servidor por
+    /// `RaizesDosMods::pacote_de`. Enquanto elas derem o mesmo resultado, um
+    /// MOD instalado é um MOD que o servidor encontra.
+    ///
+    /// **Elas discordaram na v0.12.0**, e o efeito foi todo pedido a todo MOD
+    /// morrendo com «o sistema não pode encontrar o caminho especificado». O
+    /// comentário de `pacote_de` dizia que «o guarda abaixo prende as duas
+    /// juntas» — e não havia guarda nenhum. Um comentário que promete uma
+    /// prova que não existe é pior que nenhum: ele faz a próxima pessoa não
+    /// procurar.
+    ///
+    /// O teste de conformidade não pegava porque ele monta `RaizesDosMods`
+    /// à mão, com a raiz certa, e nunca passa por `raizes_dos_mods` — que é a
+    /// função que o produto usa.
+    #[test]
+    fn a_janela_instala_exatamente_onde_o_servidor_procura() {
+        let config =
+            std::env::temp_dir().join(format!("seele-caminho-do-pacote-{}", std::process::id()));
+        let hash = "a".repeat(64);
+
+        let da_janela = seele_ffi::mods::caminho_do_pacote(&config.to_string_lossy(), &hash)
+            .expect("o hash tem forma de hash");
+        let do_servidor = raizes_dos_mods(&config.to_string_lossy(), None).pacote_de(&hash);
+
+        assert_eq!(
+            da_janela, do_servidor,
+            "a janela instala num lugar e o servidor procura noutro; todo \
+             pedido a um MOD vai morrer sem dizer por quê"
+        );
+
+        // E o lugar é o que o `seele-core` chama de cache por conteúdo: a raiz
+        // da configuração, mais `mod-packages`, mais o hash. Nem um nível a
+        // mais nem a menos — foi um nível a mais que custou a v0.12.0.
+        assert_eq!(
+            do_servidor,
+            config.join(seele_ffi::mods::PACOTES).join(&hash),
+            "o caminho do pacote deixou de ser `<config>/mod-packages/<hash>`"
+        );
+
+        // A mesma conta vale para um servidor nomeado: só os **dados** são por
+        // instância, e o pacote é da máquina, porque ele é imutável e
+        // endereçado pelo conteúdo.
+        let nomeado = raizes_dos_mods(&config.to_string_lossy(), Some("um-servidor"));
+        assert_eq!(
+            nomeado.pacote_de(&hash),
+            do_servidor,
+            "o pacote passou a depender de qual servidor pergunta"
+        );
+        assert_ne!(
+            nomeado.dados_de("seele/perfis"),
+            raizes_dos_mods(&config.to_string_lossy(), None).dados_de("seele/perfis"),
+            "os dados deixaram de ser por instância"
         );
     }
 }
