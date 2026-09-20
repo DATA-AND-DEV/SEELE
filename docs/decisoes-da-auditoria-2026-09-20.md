@@ -276,7 +276,7 @@ aprovados» o que não foi executado.
 | **Teste local de microfone fora de sessão** | Ver seção 8, U08. Exige captura de áudio sem `Connection`, que este build não tem. |
 | **Zoom textual, leitor de tela completo, latência e memória sob carga** | A auditoria já os listava como não executados, e continuam. |
 | **Shadow DOM para as superfícies** | Ver seção 5. Em aberto, e não recusado — falta o protótipo que meça o custo nas plataformas. |
-| **Riscos «a reproduzir» do §«Riscos a reproduzir»** | Dois foram fechados por construção — rascunho preso à entidade (PERFIS, MESA) e liberação de upload. Os outros — árvore de ficha acima dos tetos, reconciliação sob atualização frequente, validação de mídia real — continuam sem reprodução, e a auditoria manda não apresentá-los como medidos. |
+| **Três dos cinco riscos «a reproduzir»** | Árvore de ficha acima dos tetos (32 campos, 512 nós, 12 KiB), reconciliação das linhas nativas sob atualização frequente, e validação de mídia real (formatos, orientação, recorte, bytes retidos). Continuam sem reprodução, e a auditoria manda não apresentá-los como medidos. Os outros dois estão fechados — ver seção 10. |
 
 ---
 
@@ -294,6 +294,22 @@ Foi feito para quatro, e o resultado está registrado:
 | PERFIS: o rascunho sobrevive a fechar | falha com «fechar a ficha apagou o que tinha sido escrito e não gravado» |
 | `check-api` enxergando a janela | renomear `declararClasses` em todos os arquivos reprova, nomeando o símbolo |
 
+| PERFIS: o arquivo volta quando o envio falha | falha com «o envio falhou e o arquivo ficou preso no produto até a saída da sessão» |
+| MESA: a edição não atravessa a troca de canal | falha com «o nome de cena de uma mesa apareceu noutro canal» |
+
+Os dois últimos são **dois dos cinco riscos que a auditoria mandou reproduzir**,
+e são os dois que tinham conserto acionável:
+
+- *«MESA chama `soltar` apenas depois do laço bem-sucedido. Verificar liberação
+  em `finally`.»* Vale igual para o PERFIS, e os dois foram consertados;
+- *«Rascunhos e respostas em voo atravessando mudança de canal […] Prender
+  abertura/edição à entidade e ao canal de origem.»* O PERFIS já ganhou isso com
+  U26; a MESA ganhou aqui.
+
+O segundo caso precisou de uma segunda escrita para medir alguma coisa: com o
+canal de destino vazio, ele passava sem tocar no que existe para pegar. Está
+registrado no commit.
+
 Os demais guardas acrescentados nesta volta — compatibilidade de API, escopo da
 configuração, substituição de cartão, mapa como fundo, trilha do pacote, aviso
 de fixação — não passaram por essa prova. Eles são afirmações sobre o estado
@@ -306,8 +322,8 @@ não fazer.
 
 | Verificação | Evidência |
 |---|---|
-| Suíte do SEELE | 100 + 22 + 2 + 5 + 231 + 9 + 4 + 3 casos, verdes |
-| Suítes dos três MODs | MESA 45, PERFIS 36, ESTILO 21 — verdes |
+| Suíte do SEELE | 20 suítes, todas verdes; `cargo clippy --all-targets` sem aviso; `cargo build --release` limpo |
+| Suítes dos três MODs | MESA 46, PERFIS 37, ESTILO 21 — verdes |
 | Suíte do indexador | 200 casos, verdes |
 | Renderer real num navegador real | `npm run test:ui` nos três: renderer do produto, prelúdio de `executor.rs`, superfícies, saída e reconexão |
 | Cliente no QuickJS real | os três sobem sob 8 MiB, sem `document`, `window`, `fetch`, `require` nem `process`, e falam com o servidor deles |
