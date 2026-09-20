@@ -242,13 +242,49 @@ class InstanciaDeMod {
   }
 
   /**
-   * Anota um recurso e como desfazê-lo.
+   * Anota um recurso e como desfazê-lo, e devolve **como esquecê-lo**.
    *
    * `porque` é para o diagnóstico: uma lista de funções anônimas não diz o que
    * ficou de pé quando alguma coisa fica.
+   *
+   * # Por que ela devolve alguma coisa
+   *
+   * Porque havia recursos que **saem antes da instância**, e nada os tirava
+   * daqui. A revisão de 20/09/2026 mediu o caso: mil ciclos de
+   * registrar/revogar uma contribuição terminavam com zero contribuições vivas
+   * e **mil descartadores retidos**, cada um segurando o conteúdo que a
+   * contribuição declarava, até a sessão acabar.
+   *
+   * A cota de 128 contribuições simultâneas não protegia disso: ela conta o
+   * que está de pé, e o que estava vazando era o histórico.
+   *
+   * O descartador devolvido é idempotente e tira a entrada da lista. Chamá-lo
+   * duas vezes não descarta duas vezes; chamá-lo depois do encerramento não
+   * faz nada.
+   *
+   * @param {string} porque O nome do recurso, para o diagnóstico.
+   * @param {Function} descartar O que desfaz.
+   * @returns {Function} Descarta e esquece. Idempotente.
    */
   registrar(porque, descartar) {
-    this.recursos.push({ porque, descartar });
+    let saiu = false;
+    const entrada = { porque, descartar };
+    this.recursos.push(entrada);
+    return () => {
+      if (saiu) return;
+      saiu = true;
+      // Tirado **antes** de descartar: um descarte que lança não pode deixar a
+      // entrada retida, ou o conserto do vazamento teria um caminho de erro
+      // que o reabre.
+      const onde = this.recursos.indexOf(entrada);
+      if (onde >= 0) this.recursos.splice(onde, 1);
+      try {
+        descartar();
+      } catch (falha) {
+        console.warn(`MOD ${this.id}: ${porque} não saiu`, falha);
+        this.naoSairam.push(porque);
+      }
+    };
   }
 
   /** Um efeito é admitido? Só em `ativa`, e só na geração de pé. */

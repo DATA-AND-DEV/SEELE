@@ -204,10 +204,16 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     // funcionar» que o `CLAUDE.md` deste repositório nomeia.
     let executado = sem_comentarios(&cliente);
     for (objeto, metodo) in chamadas_de(&executado) {
+        // **Um membro, ou um espaço de nomes.** A API 4 agrupou o que ela
+        // acrescentou — `SeeleUI.superficies.criar`, `SeeleUI.contribuicoes.
+        // registrar` —, e os grupos entram no objeto por abreviação
+        // (`{ superficies }`), sem `superficies:` em lugar nenhum. Procurar só
+        // por `nome:` reprovava o vetor por chamar uma coisa que existe.
+        let existe = preludio.contains(&format!("{metodo}:"))
+            || preludio.contains(&format!("const {metodo} = comCapacidade("));
         assert!(
-            preludio.contains(&format!("{metodo}:")),
-            "o vetor chama `{objeto}.{metodo}`, e o prelúdio de `ui/base.js` \
-             não o expõe"
+            existe,
+            "o vetor chama `{objeto}.{metodo}`, e o prelúdio do executor não o expõe"
         );
     }
 
@@ -234,13 +240,20 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
          provavelmente quebrou: {oferecidos:?}",
         oferecidos.len()
     );
-    let exercitados: Vec<String> = chamadas_de(&executado)
-        .into_iter()
-        .map(|(_, metodo)| metodo)
-        .collect();
+    // **Chamado em qualquer receptor, e não só em `SeeleUI`.** A API 4 devolve
+    // punhos: `superficies.criar` responde um objeto local, e `montar`,
+    // `mostrar`, `fechar` e `descartar` são chamados nele. Procurar só por
+    // `SeeleUI.montar(` diria que o vetor deixou de exercitar `montar` num
+    // arquivo que o exercita em quatro linhas.
+    //
+    // O que isto não distingue é um `.fechar(` em algum outro objeto do vetor.
+    // A outra metade deste teste é que fecha essa porta: cada chamada em
+    // `SeeleMods`/`SeeleUI` precisa existir no prelúdio, e um vetor que
+    // inventasse um receptor para enganar a contagem não estaria exercitando
+    // coisa nenhuma — o que a homologação nativa mostra na primeira volta.
     for oferecido in &oferecidos {
         assert!(
-            exercitados.contains(oferecido),
+            executado.contains(&format!(".{oferecido}(")),
             "o vetor deixou de exercitar `{oferecido}`, que o prelúdio oferece"
         );
     }

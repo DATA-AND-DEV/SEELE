@@ -998,6 +998,125 @@ contribuicoesDosMods.aoMudar(() => {
 });
 
 /**
+ * Monta o `conteudo` de uma contribuição, e devolve o nó.
+ *
+ * # Por que ela existe
+ *
+ * R3 da revisão de 20/09/2026: dos dez pontos anunciados, dois tinham
+ * aplicação visual, e o caminho que existia consultava `SeeleUI.cartoes` —
+ * legado, e por pessoa. O contrato genérico diz que uma contribuição carrega
+ * `conteudo`, e nada o montava.
+ *
+ * # Como ela monta
+ *
+ * Pelo renderer de sempre, com o **perfil do cartão**: as mesmas formas, os
+ * mesmos tetos, a mesma recusa contada. Um ponto de contribuição é conteúdo ao
+ * lado de um controle do produto, e o orçamento de uma superfície ali seria a
+ * coluna inteira.
+ *
+ * O nó é guardado na contribuição e reaproveitado: refazê-lo a cada desenho
+ * recriaria a mídia e tiraria o foco, que é o defeito que a reconciliação do
+ * renderer existe para não ter.
+ *
+ * @param {object} contribuicao Do registro.
+ * @returns {Element|null} O nó montado, ou nada quando não há o que montar.
+ */
+function montarContribuicao(contribuicao) {
+  if (!contribuicao?.conteudo) return null;
+  if (contribuicao.montada?.isConnected === false && contribuicao.renderer) {
+    // O nó saiu da árvore num redesenho: ele continua válido e volta.
+    return contribuicao.montada;
+  }
+  if (contribuicao.montada) return contribuicao.montada;
+
+  const instancia = contribuicao.instancia;
+  if (!instancia || !instancia.admite(geracaoDaSessao)) return null;
+  const mod = { id: contribuicao.mod };
+  const raiz = elemento("div", "contribuicao-de-mod");
+  raiz.dataset.mod = contribuicao.mod;
+  raiz.dataset.ponto = contribuicao.ponto;
+
+  const renderer = new RegiaoDeMod(
+    contribuicao.mod,
+    donoDaRegiao(mod, instancia),
+    raiz,
+    PERFIS_DE_RENDER.cartao,
+  );
+  contribuicao.renderer = renderer;
+  contribuicao.montada = raiz;
+  // **Registrada como recurso, e esquecida ao revogar.** O descartador volta
+  // para a contribuição: sem isso, revogar deixaria o renderer retido na
+  // instância — o mesmo vazamento que R4 fechou do outro lado.
+  contribuicao.soltarMontagem = instancia.registrar(
+    `${contribuicao.mod}: o conteúdo de ${contribuicao.ponto}`,
+    () => {
+      renderer.soltar();
+      contribuicao.montada = null;
+      contribuicao.renderer = null;
+    },
+  );
+
+  try {
+    const recusados = renderer.aplicar(contribuicao.conteudo);
+    if (recusados > 0) {
+      // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
+      // não coube onde ele a pôs.
+      donoDaRegiao(mod, instancia).falar({
+        nome: "contribuicao",
+        ponto: contribuicao.ponto,
+        recusados,
+      });
+    }
+  } catch (falha) {
+    console.warn(`MOD ${contribuicao.mod}: ${contribuicao.ponto} não montou`, falha);
+    return null;
+  }
+  return raiz;
+}
+
+/**
+ * Os nós de todas as contribuições de um ponto, na ordem de prioridade.
+ *
+ * O caminho único para os oito pontos que passaram a ser aplicados. Quem
+ * desenha decide **onde** eles entram; esta função decide o que eles são.
+ */
+function conteudoDasContribuicoes(ponto, alvo = "") {
+  const nos = [];
+  for (const contribuicao of contribuicoesDosMods.para(ponto, alvo)) {
+    if (contribuicao.modo !== "adicionar") continue;
+    const no = montarContribuicao(contribuicao);
+    if (no) nos.push(no);
+  }
+  return nos;
+}
+
+/**
+ * As ações que os MODs acrescentaram a um ponto, como botões do produto.
+ *
+ * **O botão é do produto, e o rótulo é do MOD.** É a mesma divisão do cartão
+ * substituído: o MOD diz o que oferecer, e quem monta o alvo de clique, o nome
+ * acessível e o vínculo ao ID real é esta função.
+ */
+function acoesDasContribuicoes(ponto, alvo = "", contexto = {}) {
+  const botoes = [];
+  for (const contribuicao of contribuicoesDosMods.para(ponto, alvo)) {
+    if (!contribuicao.acaoPrincipal) continue;
+    const botao = elemento("button", "acao-de-mod", contribuicao.rotulo || contribuicao.mod);
+    botao.type = "button";
+    botao.dataset.acaoDeMod = contribuicao.acaoPrincipal;
+    botao.dataset.modDaAcao = contribuicao.mod;
+    if (contexto.pessoa !== undefined) botao.dataset.pessoaDaAcao = String(contexto.pessoa);
+    if (contexto.canal !== undefined) botao.dataset.canalDaAcao = String(contexto.canal);
+    botao.setAttribute(
+      "aria-label",
+      `${contribuicao.nomeAcessivel || contribuicao.rotulo || "ação"} — de ${contribuicao.mod}`,
+    );
+    botoes.push(botao);
+  }
+  return botoes;
+}
+
+/**
  * Um clique numa apresentação de MOD, a caminho do MOD que a desenhou.
  *
  * **Ouvinte único, e na lista.** Uma faixa com vinte pessoas teria vinte
@@ -1192,6 +1311,44 @@ const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
  *   promessa vencida, e quem paga é quem está lendo a conversa.
  */
 function aplicarOTemaDoMod(id, valores) {
+  // **`servidor.aparencia`, e a escolha de quem usa** — R3 da revisão de
+  // 20/09/2026.
+  //
+  // O tema sempre foi aplicado por `SeeleUI.tema`, e a disputa entre dois MODs
+  // era resolvida por posse de token: o primeiro a pedir `acento` ficava com
+  // ele, e o segundo recebia uma recusa. Isso funciona, mas não é o que o
+  // ponto de contribuição prometia — e o ponto era aceito sem produzir efeito
+  // nenhum.
+  //
+  // Agora os dois se encontram: um MOD que registra `servidor.aparencia`
+  // declara que **ele** apresenta a aparência desta sessão, e a escolha de
+  // quem usa vale aqui como vale no cartão. Quem foi preterido, ou quem pede
+  // tema estando o nativo escolhido, recebe a recusa pelo nome em vez de
+  // pintar a tela de alguém que escolheu outra coisa.
+  const escolha = typeof contribuicoesDosMods === "object"
+    ? contribuicoesDosMods.escolherSubstituicao(
+      "servidor.aparencia",
+      "",
+      typeof modPreferidoPara === "function" ? modPreferidoPara("servidor.aparencia") : "",
+    )
+    : null;
+  // Só quando alguém registrou o ponto: sem registro nenhum, o caminho é o de
+  // sempre — a posse de token —, e um MOD de API 3 continua aplicando tema.
+  if (escolha?.escolhida || escolha?.nativa) {
+    if (escolha.nativa) {
+      throw new Error(
+        "a aparência deste servidor está no desenho do SEELE por escolha de quem "
+        + "usa esta máquina; mude em CONFIGURAÇÕES › MODS › QUEM DESENHA O QUE",
+      );
+    }
+    if (escolha.escolhida.mod !== id) {
+      throw new Error(
+        `a aparência desta sessão é apresentada por «${escolha.escolhida.mod}»; `
+        + "quem administra escolhe o provedor na gestão de MODs",
+      );
+    }
+  }
+
   const pedido = new Map();
   for (const [nome, valor] of Object.entries(valores ?? {})) {
     // **As medidas primeiro**, porque elas não são cor e a conferência de cor
@@ -1348,6 +1505,70 @@ function contrasteEntre(a, b) {
   return (claro + 0.05) / (escuro + 0.05);
 }
 
+/**
+ * O que cada versão da API pode pedir ao anfitrião.
+ *
+ * Espelho de `seele_proto::mods::capacidades_da_api`, e conferido contra ele
+ * por `a_casca_confere_as_mesmas_capacidades_que_o_nucleo` em
+ * `tests/frontend.rs`.
+ *
+ * # Por que ela existe aqui, e não só no prelúdio
+ *
+ * O prelúdio monta `SeeleUI` sem os métodos que a versão do pacote não tem, e
+ * isso é bom para quem escreve MOD: o erro acontece na linha que chama, com
+ * pilha. **Não é uma fronteira.**
+ *
+ * A revisão de 20/09/2026 reproduziu o contorno: `seele.postar` continua lá, e
+ * um pacote de API 3 que emita a mensagem `contribuir` diretamente era aceito.
+ * O prelúdio é código que roda **dentro** do contexto do MOD — o comentário
+ * dele já diz isso: «um MOD pode redefinir o que quiser depois dele».
+ *
+ * A conferência que vale é esta, no anfitrião, contra a versão que o manifesto
+ * declarou e que o hash provou. Nunca contra um campo que o MOD envie: um MOD
+ * não nomeia a própria versão.
+ */
+const CAPACIDADES_POR_API = Object.freeze({
+  4: Object.freeze([
+    "regiao", "tema", "cartoes", "arquivo",
+    "superficies", "contribuicoes", "estilos", "classes",
+  ]),
+  3: Object.freeze(["regiao", "tema", "cartoes", "arquivo"]),
+});
+
+/** Que capacidade cada mensagem exige. Ausente quer dizer «toda versão». */
+const CAPACIDADE_DA_MENSAGEM = Object.freeze({
+  regiao: "regiao",
+  tema: "tema",
+  cartoes: "cartoes",
+  pedaco: "arquivo",
+  "soltar-arquivo": "arquivo",
+  "superficie-criar": "superficies",
+  "superficie-montar": "superficies",
+  "superficie-classes": "superficies",
+  "superficie-mostrar": "superficies",
+  "superficie-ocultar": "superficies",
+  "superficie-suja": "superficies",
+  "superficie-titulo": "superficies",
+  "superficie-fechar": "superficies",
+  "superficie-descartar": "superficies",
+  contribuir: "contribuicoes",
+  "revogar-contribuicao": "contribuicoes",
+});
+
+/**
+ * Este pacote pode pedir isto?
+ *
+ * `api` vem de `mods_instalados`, que o lê do manifesto do pacote cujo hash
+ * esta janela conferiu. Um número que não está na tabela não tem capacidade
+ * nenhuma — é o caso de um manifesto que não pôde ser lido.
+ */
+function podePedir(mod, tipo) {
+  const exigida = CAPACIDADE_DA_MENSAGEM[tipo];
+  if (!exigida) return true;
+  const tem = CAPACIDADES_POR_API[Number(mod?.api)] ?? [];
+  return tem.includes(exigida);
+}
+
 /** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
 async function atenderOMod(mod, instancia, m) {
   if (!m || typeof m.n !== "number") return;
@@ -1414,6 +1635,22 @@ async function atenderOMod(mod, instancia, m) {
   }
   if (!meu()) {
     responder(false, { erro: "sessao-encerrada" });
+    return;
+  }
+  // **A capacidade é conferida aqui, antes do efeito.**
+  //
+  // O prelúdio omite o método, e isso é bom para quem escreve MOD — o erro
+  // acontece na linha que chama. Não é uma fronteira: `seele.postar` continua
+  // lá, e a revisão de 20/09/2026 reproduziu um pacote de API 3 emitindo
+  // `contribuir` direto e sendo atendido.
+  //
+  // Contra `mod.api`, que é o que o manifesto do pacote conferido declarou, e
+  // nunca contra um campo da mensagem.
+  if (!podePedir(mod, m.tipo)) {
+    responder(false, {
+      erro: `«${m.tipo}» não existe na API ${mod?.api ?? "?"}, que é a que este `
+        + "pacote declara",
+    });
     return;
   }
   try {
@@ -1522,7 +1759,12 @@ async function atenderOMod(mod, instancia, m) {
         });
         break;
       case "revogar-contribuicao":
-        responder(true, { valor: contribuicoesDosMods.revogar(m.handle) });
+        // **Com o dono**, que vem daqui e não do corpo da mensagem: os handles
+        // são sequenciais, e sem esta conferência um MOD revogava a
+        // contribuição de outro. A revisão de 20/09/2026 reproduziu.
+        responder(true, {
+          valor: contribuicoesDosMods.revogar(m.handle, { id: mod.id, instancia }),
+        });
         break;
       default:
         // **Recusado e nomeado.** Uma mensagem que a API não conhece não pode

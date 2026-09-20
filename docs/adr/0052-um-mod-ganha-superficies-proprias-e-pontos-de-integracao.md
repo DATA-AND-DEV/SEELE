@@ -96,6 +96,33 @@ Três garantias, e elas são o contrato inteiro:
   atual, e não restaurada de um `innerHTML` guardado. A pessoa pode ter mudado
   de sala enquanto o MOD estava aberto.
 
+**Emenda de 20/09/2026 — os modos são dois, e não três.** O plano previa
+`adicionar`, `substituir` e `decorar`. A revisão do checkout `7ca66cc`
+encontrou `decorar` anunciado em dois pontos, aceito por `registrar` e aplicado
+em lugar nenhum.
+
+Ele não foi ligado, e a razão não é esforço. `decorar` altera a apresentação de
+um nó **do produto**, e o vocabulário de estilo que um MOD já tem — validado,
+seguro dentro da raiz dele — deixa de ser seguro do lado de fora: `opacidade: 0`
+num nó do MOD é uma escolha estética; no nome que abre a moderação, é encobrir
+uma confirmação de confiança. O mesmo vale para `escalar` e `mover`. Um
+`decorar` honesto precisa do seu próprio subconjunto de estilo, provado contra
+o encobrimento, e esse subconjunto não existe.
+
+**Decisão:** `decorar` fica **fora da API 4**, é recusado pelo nome com a razão
+junto — em vez de recusado por uma frase genérica que mandaria o autor procurar
+um erro de ponto que ele não cometeu —, e a suspensão está escrita em
+`api/v4.json`, no guia e no erro que o MOD recebe. Um guarda
+(`decorar_nao_volta_a_tabela_sem_quem_o_aplique`) impede que ele volte à tabela
+sem quem o aplique.
+
+**Emenda de 20/09/2026 — o dono de uma contribuição.** Uma quarta garantia, que
+faltava: **isolamento**. `revogar` exige o par `(identificador, instância,
+geração)` de quem pediu, vindo do roteador e nunca do corpo da mensagem. Os
+handles são sequenciais, e sem essa conferência um MOD revogava a contribuição
+de outro pela API pública — que é precisamente o que o isolamento por servidor
+existe para não ter.
+
 ### 3. Estilos
 
 Propriedades declaradas por categoria, validadas uma a uma e montadas de partes
@@ -160,8 +187,14 @@ base. Nada aqui deve ser lido como «o custo cabe».
 - **Nada sobre publicar.** Os pacotes 4 dos três MODs oficiais existem neste
   repositório e nos repositórios irmãos; publicá-los exige a chave, e a ordem
   está no runbook: aplicativo compatível primeiro, pacotes depois.
-- **Nada sobre homologação.** As oito jornadas de aceite do plano terminam em
-  observação nativa, com dois participantes e dados existentes. Contagem de
-  suítes verdes não as substitui, e este documento não as declara feitas.
+- **Nada sobre homologação.** As jornadas de aceite do plano terminam em
+  observação nativa. Contagem de suítes verdes não as substitui, e este
+  documento não as declara feitas.
+
+  A revisão de 20/09/2026 corrige uma frase que estava aqui: dizer que elas
+  «exigem dois participantes» é verdade para algumas e falso para a maioria.
+  Criar campanha, editar perfil, confirmar descarte, abrir e fechar superfícies
+  e conferir a saída precisam de um cliente só. O que exige dois é
+  sincronização, autorização de outra pessoa e qualidade de voz.
 - **Nada sobre Windows e Linux.** A auditoria não os percorreu, e esta entrega
   tampouco.

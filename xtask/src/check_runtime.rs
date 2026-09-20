@@ -12,7 +12,14 @@
 //!   próprios — e sai da lista quando o MOD sai;
 //! - `continuacao-de-midia.cjs` extrai de `ui/base.js` o laço que busca uma
 //!   mídia grande do servidor de um MOD e o roda contra um servidor de mentira:
-//!   a ordem dos pedaços, o teto de voltas e a falha nomeada.
+//!   a ordem dos pedaços, o teto de voltas e a falha nomeada;
+//! - `contribuicoes-e-camadas.cjs` monta a árvore do **`index.html` de
+//!   verdade** e roda o roteador real contra ela. É a inversão das reproduções
+//!   da revisão de 20/09/2026: um modal que não adormece o próprio ancestral,
+//!   uma superfície que volta ao documento ao ser mostrada, três estados de
+//!   apresentação em vez de dois, mil ciclos que não retêm nada, e um MOD que
+//!   não revoga o que é de outro nem alcança mensagem de versão que ele não
+//!   declara.
 //!
 //! # Por que aqui, e não em `cargo test`
 //!
@@ -39,6 +46,7 @@ pub(crate) fn run() -> ExitCode {
         "ciclo-do-executor.cjs",
         "regiao-do-mod.cjs",
         "continuacao-de-midia.cjs",
+        "contribuicoes-e-camadas.cjs",
     ] {
         let bancada = raiz.join("apps/seele-app/bancada").join(nome);
         if !bancada.is_file() {

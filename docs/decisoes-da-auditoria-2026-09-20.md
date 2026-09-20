@@ -2,6 +2,17 @@
 
 Data: 20/09/2026. Escrito **ao final do desenvolvimento**, como o pedido exigia.
 
+> **Esta entrega é um candidato em validação, e não uma API concluída.** A
+> [revisão do checkout `7ca66cc`](revisao-entrega-api4-2026-09-20.md) encontrou
+> seis defeitos reproduzidos além do que este arquivo declarava pendente, e
+> recusou — com razão — a frase «todos os 33 achados concluídos». A seção 12
+> registra o que foi feito com cada um e o que continua aberto; a seção 13 é a
+> matriz **implementado / parcial / pendente** que a revisão pediu no lugar de
+> um total de nomes novos.
+>
+> A conclusão da revisão continua valendo para o que ainda não aconteceu: nada
+> aqui foi observado no aplicativo nativo com as três atividades juntas.
+
 Este arquivo registra o que foi decidido enquanto a
 [auditoria de UX/UI](auditoria-ux-ui-mods-2026-09-20.md) e o
 [plano da API de criação de interfaces](plano-api-mods-criacao-de-interfaces.md)
@@ -331,3 +342,259 @@ não fazer.
 
 **O que nenhuma dessas linhas prova:** que uma pessoa consegue usar o que foi
 construído. Isso são as oito jornadas, e elas estão na seção 9.
+
+---
+
+## 12. A revisão do checkout `7ca66cc`: o que cada defeito virou
+
+A [revisão](revisao-entrega-api4-2026-09-20.md) trouxe seis defeitos
+reproduzidos com os métodos reais, mais o guia. Ela também trouxe a frase que
+resume por que eles passaram: **o laboratório usa uma estrutura diferente e não
+captura o problema.**
+
+Essa é a forma de «existir não é funcionar» que este repositório paga mais caro,
+e ela apareceu três vezes nesta volta, no mesmo lugar: o palco das camadas
+estava direto no `<body>` do laboratório e dentro de `section#tela-sessao` no
+produto; o `registrar` de mentira devolvia o tamanho do vetor onde o do produto
+devolve um descartador; e a revogação do laboratório não passava o dono, então
+ele aceitava o que o SEELE recusa. **As três foram consertadas no laboratório
+antes do conserto do produto**, porque um laboratório mais permissivo que o
+produto ensina a escrever o que o produto recusa.
+
+### R1 — o modal tornava inerte o próprio ancestral
+
+`prenderFoco` percorria os filhos de `document.body` e excetuava apenas
+`palcos.camadas`. No `index.html`, esse palco é filho de `section#tela-sessao`,
+então a seção inteira — com o diálogo dentro dela — ficava inerte.
+
+**Conserto:** `inertarFora(dentro)` sobe o ramo ativo até o documento,
+adormecendo **os irmãos de cada nível** e nunca um ancestral. Ele também
+preserva o estado anterior: um nó que já era inerte não entra na lista e não é
+despertado no fim, o que faz dois modais em qualquer ordem se desfazerem sem um
+acordar o que o outro adormeceu.
+
+**A confirmação do produto precisou das duas coisas que a revisão pediu.**
+Acima — `z-index` da `.camada-moderar` foi de 30 para 80, passando os diálogos
+de MOD (60) e os avisos (70) — e **interativa**: `confirmarDescarte` acorda
+`#moderar` enquanto a pergunta está de pé e o devolve ao estado anterior nos
+dois desfechos, por um `readormecer` que `abrirConfirmacao` passou a aceitar
+como quinto argumento.
+
+### R2 — a revogação não conferia o dono, e a API 3 alcançava a 4
+
+Duas metades, e as duas no roteador.
+
+`revogar(handle, dono)` agora exige que os três coincidam: identificador,
+instância e geração. Os três, e não só o identificador — um MOD recarregado
+dentro da mesma sessão é outra instância, e a contribuição da anterior não é
+dele. O `dono` vem do roteador, nunca de um campo da mensagem: um MOD não
+nomeia a própria versão nem a própria identidade.
+
+A segunda metade é `podePedir(mod, tipo)`, conferido **antes** do `switch`, com
+a tabela `CAPACIDADES_POR_API`. O prelúdio omitir o método nunca foi a
+fronteira: ele roda dentro do contexto do MOD, e `seele.postar` continua lá. A
+recusa nomeia a razão — «não existe na API 3, que é a que este pacote declara» —
+em vez de dizer que a mensagem é desconhecida.
+
+### R3 — oito pontos aceitos e não aplicados
+
+O mais caro dos seis, e o que exigiu decisão de escopo.
+
+**Oito foram ligados** a componentes reais: `pessoa.identidade` e
+`pessoa.cartao` (modo `adicionar`) na linha do roster, `pessoa.detalhes` no
+recolhível do perfil, `pessoa.acoes` no rodapé do cartão, `canal.item` no botão
+do canal, `canal.cabecalho` e `compositor.ferramentas` na barra e no
+compositor, `sala.acoes` no cabeçalho do grupo de sala, e `servidor.aparencia`
+passou a decidir se o tema de um MOD se aplica. O caminho é único —
+`montarContribuicao` monta o `conteudo` declarado pelo renderer de sempre, com
+o perfil do cartão — e não mais `SeeleUI.cartoes` legado.
+
+**E um modo foi retirado.** `decorar` estava na tabela de dois pontos e não
+tinha aplicação nenhuma. Ele não foi ligado, e a razão não é esforço: as
+propriedades que um MOD já pode declarar dentro da própria raiz —
+`opacidade: 0`, `escalar: 0.1`, `mover: -512` — são escolhas estéticas sobre o
+desenho **dele**, e as mesmas, aplicadas a um nó do produto, somem com o nome
+que abre a moderação. O cabeçalho de `mods-estilos.js` diz que personalização
+estética «não pode encobrir uma confirmação de confiança», e um `decorar`
+honesto precisa do seu próprio subconjunto de estilo, provado contra o
+encobrimento.
+
+**Decisão:** suspender `decorar` na API 4, **recusá-lo pelo nome** com a razão
+junto, e dizê-lo em `api/v4.json`, no guia e no erro que o MOD recebe. A
+alternativa — mantê-lo na tabela até o subconjunto existir — é exatamente a
+falha silenciosa que a revisão encontrou.
+
+A revisão avisa: «O objetivo solicitado continua sendo completar a integração,
+não apenas retirar nomes da documentação.» Oito pontos foram completados; um
+modo foi retirado, com a razão escrita e um guarda que impede que ele volte à
+tabela sem quem o aplique.
+
+### R4 — mil ciclos, mil descartadores retidos
+
+`InstanciaDeMod.registrar` passou a **devolver como esquecer**: um descartador
+idempotente que tira a entrada da lista de recursos e chama o descarte. A
+contribuição guarda esse retorno em `esquecer`, e `revogar` passa por ele em vez
+de chamar `tirar` direto — chamar `tirar` é o que deixava o descartador para
+trás.
+
+A medida da revisão repetida na bancada nova: mil ciclos terminam com zero
+contribuições vivas **e zero descartadores retidos**, e revogar o mesmo punho
+duas vezes não desconta duas vezes.
+
+### R5 — «usar apresentação padrão» voltava ao automático
+
+Havia dois estados onde precisavam existir três. Agora: `""` é automático (a
+prioridade decide), um `id` é aquele provedor, e `:nativo` — um valor
+reservado, que não colide com nenhum `autor/nome` — é o nativo explícito.
+`escolherSubstituicao` devolve `{ escolhida, preteridas, nativa, ausente }`, e
+a gestão desenha os três estados e os três botões.
+
+`ausente` é o quarto desfecho e não é o terceiro: um provedor escolhido que saiu
+desenha o nativo **e diz que o escolhido não está de pé**, em vez de cair no
+automático em silêncio — que é justamente o que a pessoa acabou de recusar.
+
+A chave da preferência passou a ter destino (`chaveDaPreferencia(ponto)` sobre o
+par `alvo\0ponto`), como o registro de decisões já dizia e o código não fazia.
+
+### R6 — visibilidade e fechamento tinham contratos incompatíveis
+
+`mostrar` chamava `aplicarVisibilidade` e devolvia sucesso com o nó fora do
+documento. Agora ele chama `abrir`, que é idempotente. `ocultar` passou a soltar
+o foco e o estado inerte — uma superfície invisível com a aplicação inerte atrás
+dela é uma janela travada sem nada na tela para explicar. E uma superfície
+descartada **recusa** em vez de responder sucesso.
+
+`get montada` foi acrescentado porque a diferença entre «fechada» e «oculta» não
+tinha como ser perguntada, nem pelo produto nem por um teste.
+
+### R7 — o guia continuava ensinando a API 3
+
+Aqui a revisão está certa sobre um fato desconfortável: o commit `21553ab` do
+indexador se chama «O guia passa a descrever a API 4» e mudou **quatro linhas**,
+todas de etiqueta. A mensagem dele descreve três seções novas que não existiam
+no diff. O guia-fonte continuava inteiro na API 3.
+
+O que foi feito nesta volta, em `docs/guia-criacao-mods.md` do indexador:
+
+- a afirmação de igualdade exata de versão (linha 310) saiu, e no lugar entrou
+  a conferência **por conjunto**, com a matriz dos cinco números;
+- a seção «Aceitar a API 3 não dá à API 3 o que a 4 tem», com o `TypeError` que
+  um pacote de API 3 recebe e a recusa do anfitrião à mensagem direta;
+- um capítulo novo — `referencia/api4` — com superfícies (os quatro tipos e o
+  ciclo de vida inteiro), contribuições (os dez pontos, os modos de cada um, as
+  três garantias e a suspensão de `decorar`), estilos (categorias, estados,
+  consultas de contêiner e a fronteira dita pelo que ela é), a migração da 3
+  para a 4 e os limites da seção;
+- a tabela de funções passou a dizer **em que API** cada membro existe;
+- o manifesto passou a dizer que um MOD só de servidor não ganha nada
+  declarando 4.
+
+**E um defeito do gerador foi encontrado no caminho:** o slug de capítulo era
+`[a-z-]+`, sem dígito, e um `## [referencia:api4]` que a expressão não reconhece
+**não reprova** — ele cai no corpo do capítulo anterior e sai como parágrafo. A
+seção inteira seria publicada presente no HTML e ausente do sumário e da busca.
+`chapters()` passou a aceitar dígito e a **reprovar** quando um `##` não vira
+capítulo.
+
+---
+
+## 13. Matriz do escopo acordado
+
+«Implementado» quer dizer: existe, tem quem o aplique, e há guarda ou bancada
+que reprova se ele sair. «Parcial» quer dizer que existe e não está completo, e
+o que falta está escrito. «Pendente» quer dizer que não foi feito.
+
+### A API 4
+
+| Item | Estado | O que sustenta, ou o que falta |
+|---|---|---|
+| Conjunto de APIs aceitas (4 e 3) | Implementado | `a_api_dos_mods_nao_diverge`, `check-api`, e o indexador publica o conjunto |
+| Capacidades por versão, conferidas no anfitrião | Implementado | `podePedir` antes do `switch`; bancada R2 |
+| Superfícies: `dialogo`, `pagina`, `painel`, `aviso` | Implementado | `npm run test:ui` nos três MODs; bancada R6 |
+| Ciclo de vida: criar/ocultar/mostrar/fechar/descartar | Implementado | Bancada R6, transições idempotentes e recusa depois de descartada |
+| Foco contido, inércia e retorno ao acionador | Parcial | A atribuição de inércia é medida na bancada, no `index.html` real. **Que o Tab pare na borda e que o foco volte de verdade é navegador, e continua não observado** |
+| Confirmação de descarte alcançável e por cima | Parcial | O `z-index` e o acordar/readormecer são medidos; a sobreposição real não |
+| Contribuições: 10 pontos aplicados | Implementado | `todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique` e o vetor de referência registra nos dez |
+| Modo `substituir` consultado em todo ponto que o anuncia | Implementado | `todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao` |
+| Modo `decorar` | **Pendente, e declarado** | Recusado pelo nome; falta o subconjunto de estilo provado contra o encobrimento |
+| Isolamento entre MODs na revogação | Implementado | Bancada R2, com os dois lados: B não revoga de A, e A revoga de A |
+| Descarte sem retenção | Implementado | Bancada R4: mil ciclos, zero retidos |
+| Três estados de apresentação | Implementado | Bancada R5, incluindo a distinção entre nativo e provedor ausente |
+| Estilos declarados e validados | Implementado | `mods-estilos.js`; ADR 0052 e a emenda de `specs/07` |
+| Classes com estados e consultas de contêiner | Implementado | Por superfície; uma região não tem folha própria, e o guia diz isso |
+| Composição e contratos de estado do §12 do plano | **Pendente** | Nada foi feito; não estava na auditoria, e a revisão o nomeia como redução de escopo |
+| Fontes e keyframes livres | **Pendente, por decisão** | Presets em vez de `@keyframes`; fontes de rede não entram (ADR 0052) |
+
+### A auditoria de UX/UI
+
+| Item | Estado | Observação |
+|---|---|---|
+| U01–U33 | Implementado em código | Cada um tem commit e, na maioria, guarda. **Nenhum foi observado por uma pessoa usando o produto** |
+| Os cinco defeitos funcionais | Implementado | Com guarda; dois deles provados revertendo o conserto |
+| Reorganização das configurações | Implementado | Camada ampla com cabeçalho e agrupamento |
+| Painel rápido de áudio | **Pendente, por decisão** | Registrado na seção 9; a revisão observa, com razão, que registrar a decisão não equivale a entregar a recomendação |
+| Cinco riscos «a reproduzir» | Parcial | Dois reproduzidos e consertados com guarda provado; três continuam sem reprodução |
+| Oito jornadas de aceite | **Pendente** | Ver a seção 14 |
+
+### O guia e o laboratório
+
+| Item | Estado | Observação |
+|---|---|---|
+| Guia-fonte na API 4 | Implementado | Capítulo novo, matriz de versões, migração |
+| Site gerado | Implementado | 25 capítulos; o gerador passou a reprovar um `##` que não vira capítulo |
+| Um exemplo por ponto de integração | Parcial | O vetor de referência registra nos dez e o guia aponta para ele; **o guia não traz dez trechos, traz um por forma de ponto** |
+| Laboratório com a estrutura do produto | Implementado | Palcos dentro de `#tela-sessao`; instância de mentira devolvendo descartador; revogação com dono |
+| `api/v4.json` | Implementado | Modos por ponto, e a suspensão de `decorar` escrita em `fora` |
+
+---
+
+## 14. O que **ainda** não foi observado, e o que é preciso para observar
+
+A revisão recusou a justificativa de «precisa de duas máquinas» para adiar
+**todas** as jornadas, e ela está certa: criar campanha, editar perfil, navegar,
+confirmar descarte, repetir abertura/fechamento e verificar saída precisam de um
+cliente só.
+
+O que foi feito com esse recado nesta volta:
+
+- **as jornadas de cada MOD** foram percorridas no laboratório dos três, num
+  navegador de verdade, com o renderer do produto, o prelúdio de
+  `executor.rs` e o código de servidor real de cada pacote: desenho, controles,
+  dados autorizados, superfície com a saída do produto, **saída soltando tudo**
+  e reconexão. Os três passam, e foi essa bateria que encontrou o `esquecer`
+  que o laboratório não devolvia;
+- **as jornadas do produto** — a inércia com a hierarquia do `index.html`, a
+  confirmação alcançável, o ciclo de vida da superfície, os três estados de
+  apresentação, o isolamento e o descarte — foram medidas na bancada
+  `contribuicoes-e-camadas.cjs`, contra o HTML real e o roteador real;
+- **o aplicativo nativo foi construído e subiu**: `cargo build -p seele-app`
+  limpo, o binário abre e fica de pé sem uma linha em `stderr`, e encerra.
+
+**O que continua sem observação, e é preciso ser honesto sobre por quê:** não
+consigo operar a janela do aplicativo a partir daqui — não há como apertar um
+botão, digitar num campo ou ler o que a tela mostra. Isso não é a limitação de
+«duas máquinas», que era falsa; é a de que nenhuma das ferramentas desta sessão
+alcança a janela de um aplicativo nativo do macOS.
+
+Então o que falta é uma sessão de teclado, com um cliente só, e estes passos:
+
+1. subir o aplicativo, criar um servidor local e entrar nele;
+2. instalar os três pacotes candidatos e aceitar o conjunto;
+3. **MESA**: criar campanha, criar ficha, abrir a ficha de outra pessoa e
+   confirmar que o que é privado não aparece;
+4. **PERFIS**: editar o perfil, gravar, fechar com alteração não gravada e
+   conferir que a pergunta do produto aparece **por cima** e responde;
+5. **ESTILO**: prévia e publicação do tema; conferir que `servidor.aparencia`
+   com «usar apresentação padrão» devolve o tema do SEELE;
+6. abrir uma superfície, dar Tab e Shift+Tab até a borda e conferir que o foco
+   não sai dela; Escape; conferir que o foco volta ao que a abriu;
+7. abrir dois modais — o de um MOD e a confirmação por cima — e fechá-los **em
+   ordem trocada**;
+8. revogar uma contribuição pela gestão e conferir que a apresentação nativa
+   volta;
+9. sair do servidor e conferir que nada de MOD sobrou na tela;
+10. medir memória sem MOD, com três ativos, com uma UI aberta e depois de ciclos
+    de saída.
+
+Os passos 1–9 são de um cliente. O que continua exigindo dois é sincronização
+entre participantes, autorização de outra pessoa e qualidade de voz — e só isso.

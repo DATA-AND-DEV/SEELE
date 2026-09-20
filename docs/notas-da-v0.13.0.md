@@ -1,10 +1,15 @@
 # Notas da versão — v0.13.0
 
-> **Esta página é o texto para o corpo do release.** Ela fica no repositório
-> porque a v0.13.0 ainda **não foi publicada**: a tag e a publicação são passo
-> manual de quem opera. O passo a passo é o mesmo da v0.12.0, em
-> `docs/mods-api-propria/runbook-publicacao-v0.12.0.md`, com os números desta
-> versão trocados.
+> **Esta página é o texto para o corpo do release, e o release ainda não
+> existe.** A v0.13.0 é um **candidato em validação**: a API 4 está implementada
+> e medida por bancada, e **nenhum fluxo foi observado no aplicativo nativo com
+> os três MODs juntos**. O que falta para publicar — e os dez passos de teclado
+> que faltam — está na seção 14 de
+> `docs/decisoes-da-auditoria-2026-09-20.md`.
+>
+> A tag e a publicação são passo manual de quem opera. O passo a passo é o mesmo
+> da v0.12.0, em `docs/mods-api-propria/runbook-publicacao-v0.12.0.md`, com os
+> números desta versão trocados.
 
 _As mudanças de `v0.12.1` (commit `655a137`, publicada em 20/09/2026) até aqui.
 O número de commits sai do `git log` na hora de marcar a tag; se este texto for
@@ -236,7 +241,8 @@ O que a 4 acrescenta:
 - **`SeeleUI.superficies`** — página, painel, diálogo e aviso, com `montar`,
   `classes`, `suja`, `fechar` e `descartar`;
 - **`SeeleUI.contribuicoes`** — dez pontos semânticos na interface do SEELE,
-  com handle revogável;
+  com handle revogável, nos modos `adicionar` e `substituir`. Um MOD revoga o
+  que ele registrou, e a saída da sessão limpa o resto;
 - **dezenove formas novas** — caixa, pilha, grade, rolagem, formulário, abas,
   texto longo, número, deslizante, marca, interruptor, cor, retrato, distintivo
   e link, entre outras;
@@ -259,9 +265,22 @@ não é um método que falha com um código, é um `TypeError` na linha que o ch
 Dito aqui porque a auditoria pede que seja dito, e porque a seção «o que
 funcionou» de qualquer entrega vale menos sem ela.
 
-- **As oito jornadas de aceite não foram percorridas.** Elas exigem dois
-  participantes, dados existentes e servidor novo, e uma delas exige duas
-  máquinas. Contagem de suítes verdes não as substitui.
+- **As jornadas não foram percorridas no aplicativo nativo.** Elas foram
+  percorridas no laboratório dos três MODs, num navegador de verdade, com o
+  renderer do produto e o código de servidor real de cada pacote — e as do
+  produto (inércia, confirmação, ciclo de vida da superfície, isolamento,
+  descarte) foram medidas contra o `index.html` e o roteador reais. Nenhuma
+  delas é o aplicativo com as três atividades juntas.
+
+  **E «precisa de duas máquinas» não vale para a maioria delas.** Criar
+  campanha, editar perfil, confirmar descarte, repetir abertura e fechamento e
+  conferir a saída precisam de um cliente só. Os dez passos que faltam estão na
+  seção 14 de `docs/decisoes-da-auditoria-2026-09-20.md`. O que continua
+  exigindo dois é sincronização entre participantes, autorização de outra
+  pessoa e qualidade de voz.
+- **`decorar` não existe nesta versão.** O plano previa três modos de
+  contribuição; a 4 entrega dois. Registrar `decorar` é recusado com a razão,
+  em vez de aceito sem efeito.
 - **O custo não foi medido sob carga.** Sem MOD, com três ativos, com um editor
   aberto, com a MESA em arraste, com voz. Nada aqui deve ser lido como «o custo
   cabe».

@@ -26,7 +26,13 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const raiz = path.resolve(__dirname, "..");
-const fonte = fs.readFileSync(path.join(raiz, "ui/mods-regiao.js"), "utf8");
+// **Os dois arquivos, na ordem da página.** A região chama `classesDeMod` e
+// `folhaDeClassesDeMod`, que moram em `mods-estilos.js` desde a API 4 — e a
+// janela os carrega antes por isso mesmo (ver a ordem dos `<script>` no
+// `index.html`). Carregar só a região aqui fazia esta bancada reprovar com
+// «classesDeMod is not defined», que fala da bancada e não do produto.
+const fonte = `${fs.readFileSync(path.join(raiz, "ui/mods-estilos.js"), "utf8")}\n`
+  + fs.readFileSync(path.join(raiz, "ui/mods-regiao.js"), "utf8");
 
 const falhas = [];
 function confere(caso, condicao, detalhe) {

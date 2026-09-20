@@ -175,6 +175,21 @@
    torna o fundo inerte é `inert` no elemento, posto por `mods-superficies.js`.
    Escurecer sem tornar inerte é a armadilha clássica — parece modal e responde
    a Tab. */
+/* **Abaixo das camadas de confiança do produto, e acima do resto.**
+ *
+ * Sessenta põe uma superfície de MOD acima de tudo o que a sessão desenha — a
+ * ajuda (40), o compartilhamento (30), a configuração (24) — e a revisão de
+ * 20/09/2026 mostrou o que faltava do outro lado: «A confirmação nativa também
+ * precisa ficar interativa e acima da camada do MOD.»
+ *
+ * A moderação é onde mora a confirmação de descarte que o produto faz quando
+ * um MOD tenta fechar com alterações pendentes, e ela estava em 30 — **atrás**
+ * disto. A pessoa via a pergunta do produto por baixo do diálogo que a
+ * originou.
+ *
+ * `camada-moderar.css` subiu para 80, acima também da fila de avisos (70). A
+ * regra é a que o §6 do plano escreve: personalização estética não pode
+ * «encobrir uma confirmação de confiança do produto». */
 .camada-de-mod {
   position: fixed;
   inset: 0;

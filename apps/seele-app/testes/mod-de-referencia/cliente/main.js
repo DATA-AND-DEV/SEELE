@@ -17,6 +17,17 @@
 //   SeeleUI.aoEvento(fn)                 — receber o que a pessoa faz
 //   SeeleUI.pedaco(arquivo, inicio)      — ler um arquivo que alguém escolheu
 //   SeeleUI.soltar(arquivo)              — devolver esse arquivo agora
+//   SeeleUI.capacidades()                — o que **esta** API oferece
+//
+// E o que a API 4 acrescentou, atrás da capacidade que a declara:
+//
+//   SeeleUI.superficies.criar(descricao) — uma janela, página, painel ou aviso
+//   punho.titulo / classes / montar      — o nome, a folha e o conteúdo dela
+//   punho.mostrar / ocultar / suja       — visibilidade e alterações não gravadas
+//   punho.fechar / descartar             — tirar do palco, e acabar com ela
+//   SeeleUI.superficies.avisar(texto)    — a superfície de vida curta
+//   SeeleUI.contribuicoes.registrar(p)   — entrar num ponto da interface do SEELE
+//   SeeleUI.contribuicoes.revogar(h)     — e sair dele
 //
 // Não há `document`, `window` nem o global do Tauri aqui dentro: um worker não
 // os tem, e é isso que faz `terminate()` ser garantia em vez de pedido.
@@ -57,6 +68,10 @@ const estado = {
   // sobre ele, e quanto já foi lido. Os bytes nunca estão aqui inteiros.
   escolhido: null,
   lidos: 0,
+  // O que a API 4 abriu, e que na API 3 fica vazio: o punho da janela deste
+  // MOD e os punhos das contribuições que ele registrou.
+  janela: null,
+  contribuicoes: [],
 };
 
 /** Pede ao servidor, e devolve o erro como texto em vez de deixá-lo subir. */
@@ -191,6 +206,31 @@ SeeleUI.aoEvento((evento) => {
       if (estado.escolhido) lerUmPedaco();
       else desenhar();
       break;
+    case "fechar-pedido":
+      // **O produto avisa, e não obedece.** Com alterações não gravadas, a
+      // primeira tentativa de fechar vira este evento **e** a confirmação do
+      // produto. Um MOD que ignorasse o evento não prende ninguém na janela.
+      estado.aviso = `a janela pediu para fechar (${evento.porque})`;
+      desenhar();
+      break;
+    case "fechar":
+      // Ela já saiu do palco quando isto chega. O punho continua válido: é
+      // `mostrar` que a traz de volta, e `descartar` que acaba com ela.
+      estado.aviso = evento.descartou ? "janela fechada, alterações descartadas" : "janela fechada";
+      desenhar();
+      break;
+    case "contribuicao":
+      // **Recusa contada, e não silêncio.** Uma declaração que não coube no
+      // orçamento do ponto chega aqui em vez de simplesmente não aparecer.
+      estado.aviso = `contribuição em ${evento.ponto}: ${evento.recusados} nó(s) recusados`;
+      desenhar();
+      break;
+    case "acao":
+      // O botão é do produto e o rótulo é deste MOD; o que volta é o ID real
+      // que o produto escreveu nele, e nunca o texto que nós desenhamos.
+      estado.aviso = `ação ${evento.acao} · pessoa=${evento.pessoa || "-"} canal=${evento.canal || "-"}`;
+      desenhar();
+      break;
     case "midia":
       // O estado da mídia vem do produto, e não é presumido: um `tocando` que
       // o navegador recusou é um botão mentindo sobre o que está acontecendo.
@@ -253,6 +293,140 @@ async function soltarOArquivo() {
   await desenhar();
 }
 
+// ------------------------------------------------- o que a API 4 acrescentou
+
+/**
+ * Os dez pontos onde um MOD entra na interface do **SEELE**, com o modo de
+ * cada um.
+ *
+ * A lista está aqui inteira de propósito. A revisão de 20/09/2026 encontrou
+ * oito pontos que aceitavam registro e não produziam efeito nenhum, e o que
+ * torna isso visível é um vetor que os registra todos: o que não for aplicado
+ * aparece como um ponto sem nada na tela, numa homologação nativa, em vez de
+ * aparecer numa revisão meses depois.
+ *
+ * `alvo` é preenchido na hora, com um ID de verdade do retrato — um ponto por
+ * alvo sem alvo nenhum vale para todos, e «todos» não é o que se quer provar.
+ */
+const PONTOS_DO_VETOR = [
+  { ponto: "pessoa.identidade", modo: "adicionar", porPessoa: true, rotulo: "" },
+  { ponto: "pessoa.cartao", modo: "adicionar", porPessoa: true, rotulo: "" },
+  { ponto: "pessoa.detalhes", modo: "adicionar", porPessoa: true, rotulo: "" },
+  { ponto: "pessoa.acoes", modo: "adicionar", porPessoa: true, rotulo: "VER" },
+  { ponto: "canal.item", modo: "adicionar", porCanal: true, rotulo: "" },
+  { ponto: "canal.cabecalho", modo: "adicionar", porCanal: true, rotulo: "FICHA" },
+  { ponto: "compositor.ferramentas", modo: "adicionar", rotulo: "DADOS" },
+  { ponto: "sala.acoes", modo: "adicionar", porSala: true, rotulo: "MESA" },
+  { ponto: "servidor.navegacao", modo: "adicionar", rotulo: "REFERÊNCIA" },
+  { ponto: "servidor.aparencia", modo: "substituir", rotulo: "" },
+];
+
+/**
+ * Uma janela do produto, com o ciclo de vida inteiro exercitado.
+ *
+ * **O produto monta a casca.** O cabeçalho com o título, a origem — o `id`
+ * deste MOD, escrito pelo SEELE —, o botão de sair, o foco contido e o retorno
+ * dele ao acionador são do produto. O que este arquivo declara é só o miolo,
+ * pela mesma gramática da região.
+ */
+async function exercitarASuperficie() {
+  const janela = await tentar("criar a janela", () => SeeleUI.superficies.criar({
+    id: "referencia-janela",
+    tipo: "dialogo",
+    titulo: "Referência",
+    tamanho: { largura: 480 },
+    // Com alterações não gravadas, fechar vira uma pergunta **do produto** —
+    // e a resposta da pessoa vence. Um MOD não veta a saída da sessão.
+    fecharComAlteracoes: "confirmar",
+    focoInicial: "nota",
+  }), null);
+  if (!janela) return;
+  estado.janela = janela;
+
+  // O nome acessível pode mudar depois de aberta: é o que um editor faz ao
+  // abrir um documento diferente na mesma janela.
+  await tentar("titulo", () => janela.titulo("Referência · vetor"), null);
+
+  // **Classes, e não texto de CSS.** Cada propriedade é validada uma a uma e o
+  // seletor é escrito pelo produto, prefixado com a identidade desta
+  // superfície: duas superfícies com a classe `aviso` não se alcançam, e
+  // nenhuma das duas alcança nada do SEELE.
+  await tentar("classes", () => janela.classes({
+    aviso: {
+      base: { cor: "#6BFFB6", corpo: 12, peso: "forte" },
+      // Estado é seletor, e seletor é regra: sem isto, um MOD precisaria de um
+      // evento por movimento do mouse para mudar uma cor.
+      sobre: { cor: "#FFFFFF" },
+      // A consulta é do **contêiner**, e não da janela: um painel que alguém
+      // arrastou para 300 px continua numa janela de 1400.
+      consultas: [{ ateLargura: 360, estilo: { corpo: 11 } }],
+    },
+  }), null);
+
+  await tentar("montar", () => janela.montar([
+    { forma: "titulo", chave: "ti", dentro: "O QUE ESTA JANELA PROVA" },
+    { forma: "texto", chave: "nota", classe: "aviso", dentro: "a casca é do produto; o miolo é do MOD" },
+    { forma: "campo", chave: "rascunho", rotulo: "ANOTAÇÃO", valor: "" },
+    { forma: "acoes", chave: "fixas", fixas: true, dentro: [
+      { forma: "botao", chave: "gravar-janela", dentro: "GRAVAR" },
+    ] },
+  ]), null);
+
+  // Mostrar e ocultar são o par que a revisão encontrou quebrado: `ocultar`
+  // mantém a janela montada, e `mostrar` a traz de volta ao documento mesmo
+  // depois de `fechar`.
+  await tentar("mostrar", () => janela.mostrar(), null);
+  await tentar("suja", () => janela.suja(true), null);
+  await tentar("ocultar", () => janela.ocultar(), null);
+  await tentar("mostrar de novo", () => janela.mostrar(), null);
+
+  // E o aviso: uma superfície de vida curta, que não exige montar nada.
+  await tentar("avisar", () => SeeleUI.superficies.avisar("o vetor subiu", "normal"), null);
+}
+
+/** Registra o vetor em todos os pontos, e solta um deles para provar a volta. */
+async function exercitarAsContribuicoes(retrato) {
+  const pessoa = retrato?.presentes?.[0]?.id ?? retrato?.me ?? null;
+  const canal = retrato?.open_channel ?? retrato?.channels?.[0]?.id ?? null;
+  const sala = retrato?.voice_rooms?.[0]?.id ?? null;
+
+  for (const alvo of PONTOS_DO_VETOR) {
+    const destino = alvo.porPessoa ? pessoa : alvo.porCanal ? canal : alvo.porSala ? sala : null;
+    // Um ponto por alvo sem alvo não é registrado: ele valeria para **todos**,
+    // e o que se quer provar é o alvo certo.
+    if ((alvo.porPessoa || alvo.porCanal || alvo.porSala) && destino === null) continue;
+    const handle = await tentar(`contribuir em ${alvo.ponto}`, () => SeeleUI.contribuicoes.registrar({
+      ponto: alvo.ponto,
+      modo: alvo.modo,
+      alvo: destino,
+      prioridade: 0,
+      rotulo: alvo.rotulo,
+      nomeAcessivel: alvo.rotulo ? `${alvo.rotulo} no vetor de referência` : "",
+      acaoPrincipal: alvo.rotulo ? "abrir" : "",
+      conteudo: [{ forma: "texto", chave: "c", dentro: "·ref" }],
+    }), null);
+    if (handle) estado.contribuicoes.push({ ponto: alvo.ponto, handle: handle.handle ?? handle });
+  }
+
+  // **E a volta.** Revogar precisa devolver a apresentação nativa — recalculada
+  // do estado de agora, e não restaurada de um desenho guardado.
+  const ultima = estado.contribuicoes.pop();
+  if (ultima) {
+    await tentar("revogar", () => SeeleUI.contribuicoes.revogar(ultima.handle), null);
+  }
+}
+
+/** Fecha e acaba com a janela, que é o que a saída faria sozinha. */
+async function encerrarASuperficie() {
+  const janela = estado.janela;
+  if (!janela) return;
+  // Sem alterações não gravadas: com elas, `fechar` vira a pergunta do produto.
+  await tentar("limpar o suja", () => janela.suja(false), null);
+  await tentar("fechar", () => janela.fechar("pedido-do-mod"), null);
+  await tentar("descartar", () => janela.descartar(), null);
+  estado.janela = null;
+}
+
 async function comecar() {
   // O tema é pedido uma vez, e o produto o tira sozinho quando este MOD sai.
   await tentar("tema", () => SeeleUI.tema({ acento: "#6BFFB6" }), null);
@@ -292,6 +466,20 @@ async function comecar() {
   // automação de acessibilidade. É o que separa «a mensagem saiu» de «a marca
   // foi aceita» numa homologação nativa.
   await tentar("anotar cartoes", () => aoServidor({ op: "anotar", chave: "cartoes", valor: marcou }), null);
+
+  // **O que esta API oferece, perguntado em vez de presumido.** Um pacote que
+  // declare 3 não tem `SeeleUI.superficies` — ele é `undefined`, e chamá-lo é
+  // um `TypeError` na primeira linha. Perguntar é o que faz o mesmo arquivo
+  // rodar nas duas versões.
+  const tem = new Set(SeeleUI.capacidades());
+  if (tem.has("superficies")) await exercitarASuperficie();
+  if (tem.has("contribuicoes")) await exercitarAsContribuicoes(retrato);
+  if (tem.has("superficies")) await encerrarASuperficie();
+  await tentar(
+    "anotar capacidades",
+    () => aoServidor({ op: "anotar", chave: "capacidades", valor: [...tem].join(",") }),
+    null,
+  );
 
   const inicial = await aoServidor({ op: "contar" });
   estado.vezes = Number(inicial.vezes ?? 0);

@@ -725,6 +725,10 @@ function desenharCanais(snapshot) {
     const cerquilha = elemento("span", "linha-cerquilha", "#");
     cerquilha.setAttribute("aria-hidden", "true");
     botao.append(cerquilha, elemento("span", "linha-rotulo", linha.name));
+    // **`canal.item`** — ícone, distintivo, contagem ou decoração que um MOD
+    // põe ao lado do nome do canal. Dentro do botão, porque é dele que a linha
+    // fala; o clique continua sendo o do produto — abrir o canal.
+    botao.append(...conteudoDasContribuicoes("canal.item", String(linha.id)));
 
     // A contagem de pendências do comp não entra. `Channel` é `{id, name, open}` —
     // não há contagem de não-lidas nem marca d'água de leitura em lugar nenhum
@@ -911,6 +915,42 @@ function desenharLinha(snapshot) {
   if (pode) {
     nome.title = `renomear #${aberta.name}`;
     nome.setAttribute("aria-label", `Renomear o canal ${aberta.name}`);
+  }
+
+  // **`canal.cabecalho`** — o que um MOD acrescenta à barra do canal aberto.
+  //
+  // Repovoado e não reconstruído: os nós vêm montados do registro, e movê-los
+  // preserva o que eles seguram. Sem canal aberto não há alvo, e a faixa fica
+  // vazia — uma contribuição de canal sem canal é uma afirmação sobre nada.
+  const noCabecalho = $("canal-cabecalho-mods");
+  if (noCabecalho) {
+    repovoar(
+      noCabecalho,
+      aberta
+        ? [
+          ...conteudoDasContribuicoes("canal.cabecalho", String(aberta.id)),
+          ...acoesDasContribuicoes("canal.cabecalho", String(aberta.id), { canal: aberta.id }),
+        ]
+        : [],
+    );
+    ligarAcoesDeApresentacao(noCabecalho);
+  }
+
+  // **`compositor.ferramentas`** — botões que entregam conteúdo a quem escreve.
+  //
+  // Elas não enviam nada: o §6 do plano é explícito em «botões, comandos e
+  // seletores que entregam conteúdo para revisão/envio do usuário». O que o
+  // MOD recebe é o clique; o que ele faz com ele é pôr texto no campo pelo
+  // caminho dele, e quem aperta ENVIAR continua sendo a pessoa.
+  const ferramentas = $("compositor-ferramentas");
+  if (ferramentas) {
+    repovoar(
+      ferramentas,
+      aberta
+        ? acoesDasContribuicoes("compositor.ferramentas", "", { canal: aberta.id })
+        : [],
+    );
+    ligarAcoesDeApresentacao(ferramentas);
   }
 }
 
@@ -1517,6 +1557,7 @@ function desenharPessoas(snapshot) {
             snapshot.audio_available,
           ),
         ),
+        voice_room.id,
       ),
     );
 
@@ -1628,7 +1669,7 @@ function desenharPessoas(snapshot) {
 }
 
 /** Um grupo da faixa: o nome de uma sala e os cartões de quem está nela. */
-function grupoDeSala(nome, ocupacao, nossa, cartoes) {
+function grupoDeSala(nome, ocupacao, nossa, cartoes, sala = null) {
   const grupo = elemento("li", "roster-grupo");
   if (nossa) grupo.dataset.nossa = "sim";
 
@@ -1638,6 +1679,19 @@ function grupoDeSala(nome, ocupacao, nossa, cartoes) {
   // Que se está nesta sala, em palavra e não só na marca da borda: a borda é
   // cor, e `specs/06-clientes-gui.md` não aceita informação que só a cor carregue.
   if (nossa) cabeca.append(elemento("span", "roster-sala-aqui", "você está aqui"));
+
+  // **`sala.acoes`** — ferramentas ligadas a uma sala de voz, no cabeçalho do
+  // grupo dela. Só para salas de verdade: `FORA DE SALA` e o saguão são
+  // agrupamentos que esta tela inventa, e não salas que alguém possa alcançar.
+  if (sala !== null) {
+    cabeca.append(...conteudoDasContribuicoes("sala.acoes", String(sala)));
+    const acoesDaSala = acoesDasContribuicoes("sala.acoes", String(sala), { canal: sala });
+    if (acoesDaSala.length) {
+      const caixa = elemento("span", "faixa-de-acoes-de-mod");
+      caixa.append(...acoesDaSala);
+      cabeca.append(caixa);
+    }
+  }
 
   const lista = elemento("ul", "roster-pessoas");
   lista.append(...cartoes);
@@ -1726,8 +1780,21 @@ function linhaDoRoster(pessoa, temAudio) {
       String(pessoa.id),
       preferidoDeApresentacao(),
     ).escolhida;
-  if (substituicao) return linhaSubstituida(pessoa, temAudio, substituicao);
-  return linhaNativaDoRoster(pessoa, temAudio);
+  const item = substituicao
+    ? linhaSubstituida(pessoa, temAudio, substituicao)
+    : linhaNativaDoRoster(pessoa, temAudio);
+
+  // **`pessoa.cartao` no modo `adicionar`** — o MOD acrescenta um bloco à
+  // linha sem tomar o desenho dela. Aqui e não dentro de cada ramo porque o
+  // acréscimo vale nos dois: um MOD que substituiu a apresentação não é dono
+  // do ponto, e um segundo MOD que só acrescenta continua tendo onde entrar.
+  //
+  // Por último, pelo mesmo motivo escrito em `linhaNativaDoRoster`: o que o
+  // produto diz sobre a pessoa vem antes do que um terceiro acrescenta.
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    item.append(...conteudoDasContribuicoes("pessoa.cartao", String(pessoa.id)));
+  }
+  return item;
 }
 
 /**
@@ -1780,6 +1847,10 @@ function linhaSubstituida(pessoa, temAudio, contribuicao) {
   const detalhes = elemento("details", "pessoa-nativo");
   const resumo = elemento("summary", "pessoa-nativo-resumo", pessoa.nome);
   detalhes.append(resumo, linhaNativaDoRoster(pessoa, temAudio, true));
+  // **`pessoa.detalhes`** — seções que o MOD acrescenta ao perfil detalhado.
+  // Dentro do mesmo `<details>` da identidade verificável: quem abre para ver
+  // quem a pessoa é encontra as duas coisas no mesmo gesto.
+  detalhes.append(...conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id)));
   item.append(detalhes);
   return item;
 }
@@ -1844,6 +1915,12 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
 
   // O número desce para o diagnóstico recolhível — ver abaixo. O cabeçalho
   // fica com a identidade sozinha, que é o que U15 pediu como hierarquia.
+  // **`pessoa.identidade`** — o MOD acrescenta ou decora a identidade sem
+  // assumir o cartão inteiro. Ao lado do nome, dentro do mesmo nó, porque é
+  // disso que o ponto fala: pronome, distintivo, cor, marca de papel.
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    identidade.append(...conteudoDasContribuicoes("pessoa.identidade", String(pessoa.id)));
+  }
   cabeca.append(identidade);
 
   const barra = elemento("span", "barra", medido ? blocos(pessoa.ratio, 20) : "");
@@ -1887,6 +1964,18 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   }
 
   rodape.append(estados);
+
+  // **`pessoa.acoes`** — ações contextuais que o MOD oferece sobre esta
+  // pessoa. Os botões são do produto e carregam o ID real; o MOD diz o rótulo
+  // e recebe o `id` de volta no evento.
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    const acoes = acoesDasContribuicoes("pessoa.acoes", String(pessoa.id), { pessoa: pessoa.id });
+    if (acoes.length) {
+      const caixa = elemento("span", "faixa-de-acoes-de-mod");
+      caixa.append(...acoes);
+      rodape.append(caixa);
+    }
+  }
 
   // **A identidade primeiro; o diagnóstico recolhe** — U15.
   //

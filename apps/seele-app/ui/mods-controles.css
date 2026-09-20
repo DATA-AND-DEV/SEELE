@@ -502,3 +502,78 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   outline: 2px solid var(--seele-laranja-nerv);
   outline-offset: 2px;
 }
+
+
+/* ------------------------------------- os pontos de contribuição
+
+   O que um MOD acrescenta **dentro** de um componente do SEELE. Poucas regras
+   de propósito: a composição é da declaração do MOD, e o que o produto garante
+   aqui é o encaixe — que o conteúdo caiba na linha em que ele entrou, e que o
+   alvo de clique seja alcançável.
+
+   Nenhuma medida vem de fora. Um contribuinte que pudesse escolher a própria
+   altura escolheria a altura da coluna inteira. */
+
+/* A raiz de uma contribuição montada. `contents` é deliberado: ela existe para
+   o renderer ter um dono e para o descarte ter um alvo, e não para desenhar
+   uma caixa a mais entre o conteúdo do MOD e a linha do produto. */
+.contribuicao-de-mod {
+  display: contents;
+}
+
+/* Dentro de uma linha — um cartão de pessoa, a barra do canal —, o conteúdo
+   herda a régua do lugar em que entrou, e não a da região. */
+.contribuicao-de-mod > .regiao-de-mod-parte {
+  margin: 0;
+  font-size: var(--seele-t-dado);
+}
+
+/* A ação que um MOD oferece: botão do produto, rótulo do MOD.
+
+   Discreto de propósito. Ele divide a linha com os controles do SEELE — o nome
+   que abre a moderação, a lupa da busca, o ENVIAR —, e um contribuinte com o
+   peso de uma ação primária competiria com o que a tela existe para fazer. */
+.acao-de-mod {
+  min-height: 24px;
+  padding: 1px 8px;
+  border: 1px solid var(--seele-linha-forte);
+  background: none;
+  color: var(--seele-osso-apagado);
+  font: inherit;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.acao-de-mod:hover {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+}
+
+.acao-de-mod:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
+
+/* A faixa que junta as ações de todos os MODs num mesmo lugar — no rodapé de
+   um cartão de pessoa, no cabeçalho de um grupo de sala. Ela existe para que
+   dois MODs contribuindo no mesmo ponto fiquem lado a lado em vez de cada um
+   quebrar a linha do componente por conta própria. */
+.faixa-de-acoes-de-mod {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* A faixa do cabeçalho do canal e a do compositor. Vazias não ocupam largura
+   nenhuma: um `<span>` sem conteúdo entre o nome do canal e a lupa empurraria
+   a lupa por nada. */
+.canal-cabecalho-mods,
+.compositor-ferramentas {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}

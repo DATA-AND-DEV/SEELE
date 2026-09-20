@@ -41,20 +41,39 @@
  *
  * - `adicionar` convive com o nativo e com outros MODs, em grupo previsível;
  * - `substituir` toma o lugar do nativo, e por isso é exclusivo: dois MODs
- *   pedindo o mesmo ponto precisam de uma decisão, e ela é tomada aqui;
- * - `decorar` altera atributos de apresentação de um nó do produto sem trocar
- *   o conteúdo dele — é o que permite pôr uma cor num canal sem assumir o
- *   desenho do item inteiro.
+ *   pedindo o mesmo ponto precisam de uma decisão, e ela é tomada aqui.
+ *
+ * # `decorar` não está nesta versão, e por quê
+ *
+ * O plano da API previu um terceiro modo: alterar a apresentação de um nó **do
+ * produto** sem trocar o conteúdo dele — pôr uma cor num canal sem assumir o
+ * desenho do item. A tabela o listou em dois pontos, e `registrar` o aceitou.
+ * Nada o aplicava: uma contribuição `decorar` entrava no registro, devolvia
+ * handle e não mudava pixel nenhum.
+ *
+ * Implementá-lo agora esbarra numa fronteira que não é de esforço. As classes
+ * validadas de `mods-estilos.js` alcançam o que está **dentro** de uma raiz do
+ * MOD, e lá `opacidade: 0`, `escalar: 0.1` e `mover: -512` são escolhas
+ * estéticas sobre o desenho do próprio MOD. Nas mesmas propriedades, aplicadas
+ * a um nó do produto, cada uma delas some com o nome que abre a moderação —
+ * e o cabeçalho deste arquivo diz que personalização estética «não pode
+ * encobrir uma confirmação de confiança».
+ *
+ * Um `decorar` honesto precisa do seu próprio subconjunto de estilo, provado
+ * contra o encobrimento. Até ele existir, o modo é **recusado pelo nome**, com
+ * a razão junto. A alternativa — mantê-lo na tabela — é a falha silenciosa que
+ * a revisão de 20/09/2026 encontrou, e que este repositório paga mais caro que
+ * qualquer recusa.
  *
  * `perfil` diz com que orçamento a declaração é montada. Um cartão custa por
  * pessoa; uma página custa uma vez.
  */
 const PONTOS_DE_CONTRIBUICAO = Object.freeze({
-  "pessoa.identidade": { modos: ["substituir", "decorar"], perfil: "cartao", porAlvo: true },
+  "pessoa.identidade": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "pessoa.cartao": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
   "pessoa.detalhes": { modos: ["adicionar"], perfil: "superficie", porAlvo: true },
   "pessoa.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
-  "canal.item": { modos: ["decorar", "adicionar"], perfil: "cartao", porAlvo: true },
+  "canal.item": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "canal.cabecalho": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "compositor.ferramentas": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "sala.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
@@ -64,6 +83,19 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
 
 /** Quantas contribuições um MOD registra ao mesmo tempo. */
 const TETO_DE_CONTRIBUICOES = 128;
+
+/**
+ * A escolha que quer dizer «o SEELE desenha, e nenhum MOD».
+ *
+ * Um valor reservado e não a ausência de valor, e essa é a correção de R5: a
+ * ausência já queria dizer outra coisa — «decida por prioridade». Duas
+ * intenções diferentes precisam de dois valores diferentes, e uma delas não
+ * pode ser «vazio».
+ *
+ * Um `id` de MOD é `autor/nome` e nunca começa por `:`, então este valor não
+ * colide com nenhum.
+ */
+const NATIVO = ":nativo";
 
 /**
  * O registro vivo de contribuições desta janela.
@@ -109,6 +141,18 @@ class RegistroDeContribuicoes {
     }
     const modo = String(pedido?.modo ?? "adicionar");
     if (!regra.modos.includes(modo)) {
+      // **A suspensão é dita pelo nome dela.** Um MOD que peça `decorar` num
+      // ponto que hoje só aceita `adicionar` leria «aceita adicionar, e veio
+      // decorar» e concluiria que errou o ponto. Ele não errou: o modo existe
+      // no plano, e não existe nesta versão.
+      if (modo === "decorar") {
+        throw new Error(
+          "«decorar» não está na API 4: ele mudaria a apresentação de um nó do "
+          + "SEELE, e o subconjunto de estilo que impede um MOD de encobrir o "
+          + `nome que abre a moderação ainda não existe. Em «${ponto}», use `
+          + "«adicionar» — o conteúdo entra ao lado do nativo, sem cobri-lo",
+        );
+      }
       throw new Error(`«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);
     }
     const quantas = this.porMod.get(mod.id) ?? 0;
@@ -155,18 +199,76 @@ class RegistroDeContribuicoes {
 
     // **Registrada como recurso na criação.** Uma contribuição que a saída não
     // encontra é uma faixa de perfil que sobrevive à troca de servidor.
-    instancia?.registrar(`${mod.id}: contribuição ${ponto}`, () => {
-      this.revogar(contribuicao.handle);
-    });
+    //
+    // O descartador devolvido é guardado na própria contribuição: sem ele, a
+    // revogação tirava a contribuição do registro e **deixava o descartador**
+    // na instância, segurando o conteúdo declarado até a sessão acabar. A
+    // revisão de 20/09/2026 mediu mil ciclos de registrar/revogar terminando
+    // com zero contribuições vivas e mil descartadores retidos.
+    contribuicao.esquecer = instancia?.registrar(
+      `${mod.id}: contribuição ${ponto}`,
+      () => this.tirar(contribuicao),
+    );
     this.avisar();
     return { handle: contribuicao.handle };
   }
 
-  /** Tira uma contribuição, e avisa quem desenha. Idempotente. */
-  revogar(handle) {
+  /**
+   * Tira uma contribuição **de quem a registrou**.
+   *
+   * # Por que o dono é conferido aqui
+   *
+   * A revisão de 20/09/2026 passou ao roteador uma contribuição de A como
+   * pedido de B, e ela foi removida com sucesso. Os handles são sequenciais:
+   * `c1`, `c2`, `c3`. Adivinhar o de outro MOD não exige nada.
+   *
+   * Não é fuga do QuickJS nem acesso ao sistema — é interferência entre MODs
+   * pela API do produto, que é precisamente o que o isolamento por servidor
+   * existe para não ter.
+   *
+   * `dono` é o par `(id, instancia)` de quem pediu, vindo do roteador e não do
+   * corpo da mensagem. Um MOD não nomeia a si mesmo num campo.
+   *
+   * @param {string} handle O que `registrar` devolveu.
+   * @param {object|null} dono `{ id, instancia }`, ou `null` para a limpeza
+   *   interna do produto — ver `revogarDoMod` e `limpar`.
+   * @returns {boolean} Se havia o que tirar.
+   */
+  revogar(handle, dono = null) {
     const contribuicao = this.porHandle.get(handle);
     if (!contribuicao) return false;
-    this.porHandle.delete(handle);
+    if (dono) {
+      // **Três perguntas, e as três precisam ser feitas.** O identificador
+      // sozinho não basta: um MOD recarregado dentro da mesma sessão é outra
+      // instância, e a contribuição da anterior não é dele.
+      const meu = contribuicao.mod === dono.id
+        && contribuicao.instancia === dono.instancia
+        && contribuicao.geracao === (dono.instancia?.geracao ?? -1);
+      if (!meu) {
+        throw new Error(
+          `a contribuição «${handle}» não é de ${dono.id}: um MOD revoga o que `
+          + "ele registrou, e a saída da sessão limpa o resto",
+        );
+      }
+    }
+    // Pelo descartador que a instância devolveu: é ele que tira a entrada da
+    // lista de recursos **e** chama `tirar`. Chamar `tirar` direto deixaria o
+    // descartador retido, que é o defeito que este par existe para fechar.
+    if (contribuicao.esquecer) contribuicao.esquecer();
+    else this.tirar(contribuicao);
+    return true;
+  }
+
+  /**
+   * Tira a contribuição das tabelas. **Não** mexe na lista de recursos.
+   *
+   * Separada de `revogar` porque ela é o que o descartador faz, e o descartador
+   * é chamado de dois lugares: da revogação pedida pelo MOD, e do encerramento
+   * da instância. Uma função que fizesse as duas coisas se chamaria de si
+   * mesma por um dos dois caminhos.
+   */
+  tirar(contribuicao) {
+    if (!this.porHandle.delete(contribuicao.handle)) return;
     const porAlvo = this.porPonto.get(contribuicao.ponto);
     const lista = porAlvo?.get(contribuicao.alvo);
     if (lista) {
@@ -178,19 +280,40 @@ class RegistroDeContribuicoes {
     const quantas = this.porMod.get(contribuicao.mod) ?? 0;
     if (quantas <= 1) this.porMod.delete(contribuicao.mod);
     else this.porMod.set(contribuicao.mod, quantas - 1);
+    // **O conteúdo sai junto.** Ele é o que a closure do descartador segurava,
+    // e zerá-lo aqui é o que faz uma referência esquecida no meio do caminho
+    // não segurar uma árvore inteira.
+    contribuicao.conteudo = null;
+    contribuicao.classes = null;
+    contribuicao.esquecer = null;
     this.avisar();
-    return true;
   }
 
-  /** Tira tudo o que um MOD tem de pé. Usado ao descarregá-lo. */
+  /**
+   * Tira tudo o que um MOD tem de pé.
+   *
+   * Limpeza **interna** do produto: ela roda ao descarregar um MOD, e por isso
+   * não confere dono — o dono é o produto. É a operação privilegiada que a
+   * revisão pediu para separar da pública.
+   */
   revogarDoMod(id) {
     for (const [handle, contribuicao] of Array.from(this.porHandle)) {
       if (contribuicao.mod === id) this.revogar(handle);
     }
   }
 
-  /** Tira tudo. A saída da sessão passa por aqui. */
+  /**
+   * Tira tudo. A saída da sessão passa por aqui.
+   *
+   * Pelos descartadores, e não limpando as tabelas: limpar as tabelas deixava
+   * os descartadores na instância, retendo o conteúdo de cada contribuição até
+   * ela ser encerrada.
+   */
   limpar() {
+    for (const contribuicao of Array.from(this.porHandle.values())) {
+      if (contribuicao.esquecer) contribuicao.esquecer();
+      else this.tirar(contribuicao);
+    }
     this.porPonto.clear();
     this.porHandle.clear();
     this.porMod.clear();
@@ -234,12 +357,40 @@ class RegistroDeContribuicoes {
    */
   escolherSubstituicao(ponto, alvo = "", preferido = "") {
     const candidatas = this.para(ponto, alvo).filter((c) => c.modo === "substituir");
-    if (!candidatas.length) return { escolhida: null, preteridas: [] };
+    if (!candidatas.length) return { escolhida: null, preteridas: [], nativa: false };
+
+    // **Três estados, e eles não se confundem** — R5 da revisão de 20/09/2026.
+    //
+    // «"Usar apresentação padrão" volta à seleção automática de MODs, não ao
+    // cartão nativo.» Havia dois estados onde precisava haver três: com
+    // preferência, escolhe aquele MOD; sem preferência, escolhe o primeiro
+    // candidato. «Nenhum» não existia — apagar a preferência voltava para o
+    // automático, que é justamente o que a pessoa acabou de recusar.
+    //
+    // Agora:
+    //
+    // - `""` — **automático**: a prioridade decide, e é o padrão de quem nunca
+    //   escolheu nada;
+    // - `NATIVO` — **nativo explícito**: nenhuma substituição se aplica, e o
+    //   produto desenha o que ele desenharia sem MOD nenhum;
+    // - um `id` — **aquele provedor**, se ele estiver de pé.
+    if (preferido === NATIVO) {
+      return { escolhida: null, preteridas: candidatas, nativa: true };
+    }
+
+    // Um provedor escolhido que não está mais de pé — o MOD foi desligado, ou
+    // esta sessão é de outro servidor — **não** cai no automático em silêncio:
+    // a escolha continua registrada, e quem a fez decide de novo se quiser. O
+    // que o produto faz enquanto isso é o nativo, que é a escolha conservadora.
     const doPreferido = preferido
       ? candidatas.find((c) => c.mod === preferido)
       : null;
+    if (preferido && !doPreferido) {
+      return { escolhida: null, preteridas: candidatas, nativa: true, ausente: preferido };
+    }
     const escolhida = doPreferido ?? candidatas[0];
     return {
+      nativa: false,
       escolhida,
       preteridas: candidatas.filter((c) => c !== escolhida),
     };
@@ -286,15 +437,28 @@ class RegistroDeContribuicoes {
       if (!regra) continue;
       const todas = [...porAlvo.values()].flat();
       const mods = [...new Set(todas.map((c) => c.mod))];
+      const escolha = preferidos.get(ponto) ?? "";
       const disputa = regra.modos.includes("substituir")
-        ? this.escolherSubstituicao(ponto, "", preferidos.get(ponto) ?? "")
-        : { escolhida: null, preteridas: [] };
+        ? this.escolherSubstituicao(ponto, "", escolha)
+        : { escolhida: null, preteridas: [], nativa: false };
       linhas.push({
         ponto,
         mods,
         quantas: todas.length,
         escolhido: disputa.escolhida?.mod ?? "",
         preteridos: [...new Set(disputa.preteridas.map((c) => c.mod))],
+        // **Os três estados, para a gestão poder desenhá-los** — R5.
+        //
+        // `escolhido` vazio significava duas coisas: «ninguém substitui» e
+        // «a substituição está desligada». A tela dizia a mesma frase para as
+        // duas, e o botão de voltar ao padrão não tinha como dizer se já
+        // estava no padrão.
+        nativa: disputa.nativa === true,
+        automatica: escolha === "",
+        // O provedor escolhido que não está mais de pé. A escolha continua
+        // registrada — desligar um MOD não é desescolhê-lo —, e a tela precisa
+        // poder dizer isso em vez de mostrar «automático».
+        ausente: disputa.ausente ?? "",
       });
     }
     return linhas.sort((a, b) => a.ponto.localeCompare(b.ponto));

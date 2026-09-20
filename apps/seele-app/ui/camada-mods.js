@@ -551,7 +551,26 @@ const FASES_DO_MOD = {
  */
 const PREFERENCIA_DE_APRESENTACAO = "seele.mods.apresentacao";
 
-/** O mapa de preferências desta máquina, `{ ponto: id do MOD }`. */
+/**
+ * A chave de uma preferência: **destino e ponto**.
+ *
+ * O registro de decisões descrevia isto como «por destino» e a chave era
+ * global por ponto — a revisão de 20/09/2026 apontou a divergência. Ela
+ * importa: escolher o PERFIS para apresentar pessoas num servidor não é
+ * escolhê-lo em todos, porque nem todos têm o PERFIS instalado, e um deles
+ * pode ter outro MOD no lugar.
+ *
+ * `alvoDaSessao()` mora em `tela-sessao.js` e é o identificador do destino.
+ * Fora de sessão não há destino, e aí a chave é a global — o que preserva o
+ * que já estava gravado e dá um lugar para a escolha de quem abre a gestão da
+ * tela de entrada.
+ */
+function chaveDaPreferencia(ponto) {
+  const alvo = typeof alvoDaSessao === "function" ? alvoDaSessao() : null;
+  return `${alvo || "-"}\u0000${String(ponto)}`;
+}
+
+/** O mapa de preferências desta máquina, `{ destino + ponto: escolha }`. */
 function preferenciasDeApresentacao() {
   try {
     const lido = JSON.parse(localStorage.getItem(PREFERENCIA_DE_APRESENTACAO) ?? "{}");
@@ -569,24 +588,39 @@ function preferenciasDeApresentacao() {
  * Chamada de `tela-sessao.js` a cada linha do roster, então ela é lida do
  * cache e não do armazenamento: `localStorage.getItem` é síncrono e bloqueia o
  * quadro, e uma faixa com vinte pessoas o chamaria vinte vezes por retrato.
+ *
+ * Devolve `""` (automático), `":nativo"` (o SEELE desenha) ou o `id` de um MOD.
+ * Os três são estados diferentes; ver `escolherSubstituicao`.
  */
 let preferenciasLidas = null;
 function modPreferidoPara(ponto) {
   preferenciasLidas ??= preferenciasDeApresentacao();
-  const escolhido = preferenciasLidas[String(ponto)];
+  const escolhido = preferenciasLidas[chaveDaPreferencia(ponto)];
   return typeof escolhido === "string" ? escolhido : "";
 }
 
+/** O cache é por destino: trocar de servidor o invalida. */
+function esquecerPreferenciasLidas() {
+  preferenciasLidas = null;
+}
+
 /**
- * Escolhe quem apresenta um ponto, ou volta ao padrão com `id` vazio.
+ * Escolhe quem apresenta um ponto: um MOD, o nativo, ou o automático.
  *
- * «Usar apresentação padrão» é o §6 pelo nome, e é o que garante que uma
- * personalização estética nunca seja um caminho sem volta.
+ * **Três valores, e não dois** — R5 da revisão de 20/09/2026. «"Usar
+ * apresentação padrão" volta à seleção automática de MODs, não ao cartão
+ * nativo.» Apagar a preferência devolvia à prioridade, que é justamente o que
+ * a pessoa acabou de recusar.
+ *
+ * @param {string} ponto O ponto de contribuição.
+ * @param {string} id O `id` de um MOD, `":nativo"` para o desenho do SEELE, ou
+ *   `""` para voltar ao automático.
  */
 function escolherApresentacao(ponto, id) {
   preferenciasLidas = { ...preferenciasDeApresentacao() };
-  if (id) preferenciasLidas[String(ponto)] = String(id);
-  else delete preferenciasLidas[String(ponto)];
+  const chave = chaveDaPreferencia(ponto);
+  if (id) preferenciasLidas[chave] = String(id);
+  else delete preferenciasLidas[chave];
   try {
     localStorage.setItem(PREFERENCIA_DE_APRESENTACAO, JSON.stringify(preferenciasLidas));
   } catch (falha) {
@@ -621,19 +655,26 @@ function desenharApresentacoes() {
   repovoar(lista, linhas.map((linha) => {
     const item = elemento("li", "server-dispositivo mods-linha-gestao");
     const texto = elemento("div", "mods-linha-texto");
+    // **O estado, em palavra, e os três são diferentes** — R5.
+    //
+    // «Apresentado por ninguém» dizia duas coisas ao mesmo tempo: «ninguém
+    // substitui este ponto» e «você desligou a substituição». A pessoa que
+    // apertou «usar apresentação padrão» não tinha como saber se tinha
+    // funcionado.
+    const estado = linha.ausente
+      ? `você escolheu ${linha.ausente}, e ele não está de pé agora — o SEELE desenha`
+      : linha.nativa
+        ? "o SEELE desenha; nenhum MOD substitui este lugar"
+        : linha.escolhido
+          ? `apresentado por ${linha.escolhido}${linha.automatica ? " (escolha automática)" : ""}`
+          : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`;
     texto.append(
       elemento("span", "mods-id", NOMES_DOS_PONTOS[linha.ponto] ?? linha.ponto),
-      elemento(
-        "span",
-        "mods-versao",
-        linha.escolhido
-          ? `apresentado por ${linha.escolhido}`
-          : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`,
-      ),
+      elemento("span", "mods-versao", estado),
     );
     // **A disputa é dita, e não resolvida em silêncio.** Um MOD preterido que
     // some sem explicação é a pessoa achando que o MOD não funciona.
-    if (linha.preteridos.length) {
+    if (linha.preteridos.length && !linha.nativa) {
       texto.append(elemento(
         "p",
         "nota",
@@ -651,16 +692,36 @@ function desenharApresentacoes() {
       usar.addEventListener("click", () => escolherApresentacao(linha.ponto, candidato));
       botoes.append(usar);
     }
-    if (linha.escolhido) {
-      const padrao = elemento("button", "botao-fantasma", "USAR APRESENTAÇÃO PADRÃO");
+    // **Voltar ao nativo é uma escolha, e não a ausência de uma.** Ela some
+    // quando já se está nele — um botão que não muda nada é uma pergunta sem
+    // resposta.
+    if (!linha.nativa) {
+      const padrao = elemento("button", "botao-fantasma", "USAR APRESENTAÇÃO DO SEELE");
       padrao.type = "button";
-      padrao.addEventListener("click", () => escolherApresentacao(linha.ponto, ""));
+      padrao.addEventListener("click", () => escolherApresentacao(linha.ponto, APRESENTACAO_NATIVA));
       botoes.append(padrao);
+    }
+    // E desfazer a escolha, voltando ao automático. Só aparece quando há uma:
+    // «voltar ao automático» estando no automático não faz nada.
+    if (!linha.automatica) {
+      const auto = elemento("button", "botao-fantasma", "DECIDIR AUTOMATICAMENTE");
+      auto.type = "button";
+      auto.addEventListener("click", () => escolherApresentacao(linha.ponto, ""));
+      botoes.append(auto);
     }
     item.append(botoes);
     return item;
   }));
 }
+
+/**
+ * O valor que quer dizer «o SEELE desenha, e nenhum MOD».
+ *
+ * Espelho de `NATIVO` em `mods-contribuicoes.js`. As duas cópias existem
+ * porque a casca não importa módulos, e `a_apresentacao_nativa_tem_um_valor_so`
+ * em `tests/frontend.rs` confere que elas não divergem.
+ */
+const APRESENTACAO_NATIVA = ":nativo";
 
 /** Os pontos ditos em palavra de quem usa, e não no identificador da API. */
 const NOMES_DOS_PONTOS = Object.freeze({

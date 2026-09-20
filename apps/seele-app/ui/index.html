@@ -1488,6 +1488,16 @@
         <div class="linha-barra">
           <span class="linha-barra-cerquilha" aria-hidden="true">#</span>
           <span id="linha-nome" class="linha-nome">—</span>
+          <!--
+            `canal.cabecalho` - ADR 0052. O que um MOD acrescenta a barra do
+            canal aberto: um estado da mesa, um aviso do tema, uma contagem.
+
+            Entre o nome e o espaco que empurra a lupa, porque e ali que ele
+            acompanha o assunto da barra. Preenchido por
+            `desenharCabecalhoDoCanal` em `tela-sessao.js`; vazio nao ocupa
+            largura nenhuma.
+          -->
+          <span id="canal-cabecalho-mods" class="canal-cabecalho-mods"></span>
           <span class="espaco"></span>
           <!--
             A lupa, 34×34 e sem palavra ao lado — os valores e a forma da comp da
@@ -1625,6 +1635,20 @@
             `a_nota_que_promete_o_enter_tem_quem_a_cumpra` prende a promessa ao
             código que a cumpre.
           -->
+          <!--
+            `compositor.ferramentas` - ADR 0052. Botoes e seletores que um MOD
+            oferece a quem esta escrevendo: um dado da mesa, um emote, um
+            atalho para uma ficha.
+
+            **Antes do ENVIAR**, e nao depois: o ENVIAR e a acao principal da
+            barra e fica no fim dela. Uma ferramenta de MOD depois do botao
+            primario seria um controle de terceiro no lugar mais valioso.
+
+            O que entra aqui sao botoes do produto com rotulo do MOD - ver
+            `acoesDasContribuicoes` em `base.js`. A ferramenta entrega conteudo
+            para revisao de quem escreve; ela nao envia nada.
+          -->
+          <span id="compositor-ferramentas" class="compositor-ferramentas"></span>
           <button id="botao-enviar" class="compor-enviar" type="submit"
                   aria-label="Enviar a mensagem">ENVIAR</button>
         </form>

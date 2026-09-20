@@ -30,6 +30,56 @@
 // falsificar autorização, bloquear saída ou encobrir uma confirmação de
 // confiança do produto.»
 
+/**
+ * Torna inerte tudo **menos o ramo que contém** um nó, e devolve o que mudou.
+ *
+ * # O defeito que esta função existe para não ter
+ *
+ * A versão anterior percorria os filhos de `document.body` e excetuava apenas
+ * `palco-de-camadas`. No `index.html` do aplicativo esse palco é filho de
+ * `section#tela-sessao` — a ancestralidade é `html > body > section#tela-sessao
+ * > div#palco-de-camadas` —, então o laço marcava `tela-sessao` como inerte e
+ * **o diálogo descendia dela**. `inert` é herdado: o modal inteiro ficava sem
+ * foco e sem clique, exatamente o contrário do que ele queria fazer.
+ *
+ * A revisão de 20/09/2026 reproduziu isso com o método real. O laboratório não
+ * pegava porque ele põe o palco diretamente no `body`: os mesmos arquivos de
+ * renderer, numa hierarquia diferente, não exercitam a integração.
+ *
+ * # Como ela funciona
+ *
+ * Sobe do nó até o `body` e, em cada nível, torna inertes **os irmãos** —
+ * nunca o ancestral. O ramo que leva até a camada fica intocado, e tudo o que
+ * está fora dele para de responder.
+ *
+ * # O estado anterior é preservado
+ *
+ * Um nó que já era inerte antes não entra na lista, e por isso não é
+ * despertado no fim. Dois modais abertos em ordem — o de um MOD e a
+ * confirmação de descarte do produto por cima — se desfazem em qualquer ordem
+ * sem um acordar o que o outro adormeceu.
+ *
+ * @param {Element} dentro O nó que continua alcançável.
+ * @returns {Element[]} O que **esta** chamada tornou inerte.
+ */
+function inertarFora(dentro) {
+  const mudados = [];
+  if (!dentro) return mudados;
+  let ramo = dentro;
+  while (ramo && ramo.parentNode && ramo.parentNode !== document) {
+    const pai = ramo.parentNode;
+    for (const irmao of Array.from(pai.children ?? [])) {
+      // O ramo ativo nunca: tornar o próprio ancestral inerte é tornar o
+      // diálogo inerte, porque `inert` desce.
+      if (irmao === ramo || irmao.inert) continue;
+      irmao.inert = true;
+      mudados.push(irmao);
+    }
+    ramo = pai;
+  }
+  return mudados;
+}
+
 /** Os tipos de superfície, e o que cada um exige do host. */
 const TIPOS_DE_SUPERFICIE = Object.freeze({
   pagina: { host: "palco-de-paginas", foco: false, camada: false },
@@ -194,11 +244,7 @@ class SuperficieDeMod {
     // O resto da aplicação fica inerte de verdade — `inert`, e não só escuro.
     // Escurecer sem tornar inerte é a armadilha clássica: parece modal e
     // responde a Tab.
-    for (const irmao of Array.from(document.body.children)) {
-      if (irmao === this.palcos.camadas || irmao.inert) continue;
-      irmao.inert = true;
-      this.inertes.push(irmao);
-    }
+    this.inertes = inertarFora(this.camada);
 
     this.aoTeclar = (evento) => {
       if (evento.key === "Escape") {
@@ -305,13 +351,43 @@ class SuperficieDeMod {
     this.raiz.dataset.suspensa = escondida ? "sim" : "nao";
   }
 
+  /**
+   * Mostra — e **remonta**, quando ela tinha sido fechada.
+   *
+   * # O contrato que estava quebrado
+   *
+   * R6 da revisão de 20/09/2026: «`fechar` remove o nó do palco; `mostrar` só
+   * altera flags/hidden e não o reinsere. A sequência real de métodos termina
+   * com superfície dita visível, ainda fora do documento.»
+   *
+   * O MOD recebia sucesso e a janela não aparecia. Reabrir por `criar` com o
+   * mesmo `id` funcionava — ele chama `abrir` —, mas isso não torna o método
+   * público correto: um MOD que guarde o punho e chame `mostrar` estava num
+   * caminho que sempre mentiu.
+   *
+   * `abrir` é idempotente: ele só reinsere quando o nó não está no palco, e
+   * reprende o foco só quando há foco a prender.
+   */
   mostrar() {
+    if (this.solta) throw new Error(`a superfície «${this.chave}» foi descartada`);
     this.visivel = true;
-    this.aplicarVisibilidade();
+    this.abrir();
   }
 
+  /**
+   * Oculta — e **solta o que um modal prendeu**.
+   *
+   * A outra metade de R6: «`ocultar` de um modal não libera o foco nem o
+   * estado inerte da aplicação.» Uma superfície invisível com a aplicação
+   * inerte atrás dela é uma janela travada sem nada na tela para explicar.
+   *
+   * Ela continua montada, e por isso `mostrar` a traz de volta sem recriar
+   * nada — é a diferença entre ocultar e fechar.
+   */
   ocultar() {
+    if (this.solta) return;
     this.visivel = false;
+    this.soltarFoco();
     this.aplicarVisibilidade();
   }
 
@@ -367,14 +443,37 @@ class SuperficieDeMod {
       this.fechar();
       return;
     }
+    // **A camada do produto precisa estar alcançável.** Ela é um irmão do ramo
+    // que `inertarFora` adormeceu, e um diálogo inerte é uma pergunta que não
+    // se pode responder. A revisão de 20/09/2026 pediu as duas coisas: acima
+    // (ver o `z-index` em `camada-moderar.css`) e interativa.
+    //
+    // Acordada só enquanto a pergunta está de pé, e devolvida ao estado
+    // anterior nos dois desfechos. `#moderar` é o elemento porque é ele que a
+    // moderação mostra; acordar o pai inteiro devolveria a aplicação toda.
+    const confirmacao = document.getElementById("moderar");
+    const dormia = Boolean(confirmacao && this.inertes.includes(confirmacao));
+    if (dormia) confirmacao.inert = false;
+    const readormecer = () => {
+      if (dormia && confirmacao && !this.solta) confirmacao.inert = true;
+    };
+
     abrirConfirmacao("FECHAR SEM GRAVAR?", consequencia, "DESCARTAR E FECHAR", () => {
+      readormecer();
       if (this.solta) return;
       this.dono.falar({ nome: "fechar", superficie: this.chave, porque, descartou: true });
       this.fechar();
-    });
+    }, readormecer);
   }
 
-  /** Tira do palco, devolve o foco, e mantém o renderer para reabrir. */
+  /**
+   * Tira do palco, devolve o foco, e mantém o renderer para reabrir.
+   *
+   * O nó sai do documento e a superfície continua existindo: o conteúdo
+   * montado, as classes e o que estava escrito nos campos permanecem, e
+   * `mostrar` os traz de volta. `descartar` é o outro verbo — esse acaba com
+   * ela.
+   */
   fechar() {
     if (this.solta) return;
     this.visivel = false;
@@ -382,6 +481,13 @@ class SuperficieDeMod {
     const no = this.tipo === "dialogo" ? this.camada : this.raiz;
     no.remove();
     this.aoPalcoMudar?.();
+  }
+
+  /** Ela está no documento agora? É o que separa fechada de oculta. */
+  get montada() {
+    if (this.solta) return false;
+    const no = this.tipo === "dialogo" ? this.camada : this.raiz;
+    return Boolean(no?.parentNode);
   }
 
   /** Solta o que o modal prendeu, e devolve o foco a quem o tinha. */

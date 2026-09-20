@@ -40,6 +40,16 @@
 
 /** O ato armado, esperando confirmação. `null` quando não há nenhum. */
 let atoArmado = null;
+/**
+ * O que avisar quando a caixa fechar, **seja qual for o desfecho**.
+ *
+ * Uma superfície de MOD acorda esta camada enquanto pergunta — ela é irmã do
+ * ramo que o modal adormeceu — e precisa readormecê-la nos dois desfechos.
+ * `executar` só cobre um deles: quem cancela não roda o ato.
+ *
+ * Nulo é o caso comum: quem não precisa não passa nada.
+ */
+let aoFecharACaixa = null;
 
 /**
  * Para onde o foco volta quando a caixa fecha.
@@ -415,16 +425,25 @@ async function abrirModeracao(alvo) {
  * É o caminho da mensagem: quem foi clicado já é o objeto, e uma lista de
  * pessoas no meio do caminho seria uma pergunta já respondida.
  */
-function abrirConfirmacao(titulo, consequencia, rotulo, executar) {
+function abrirConfirmacao(titulo, consequencia, rotulo, executar, aoFechar = null) {
   focoAntesDeModerar = document.activeElement;
   alvoPreferido = null;
   caixaComEscolha = false;
+  // **Quem abriu pode precisar saber que a caixa fechou**, e não só que o ato
+  // rodou. Uma superfície de MOD acorda esta camada enquanto pergunta — ela é
+  // irmã do ramo que o modal adormeceu — e precisa readormecê-la nos **dois**
+  // desfechos: confirmou e cancelou. Sem isto, cancelar deixava a camada de
+  // moderação alcançável por trás de um modal que continuava aberto.
+  //
+  // Opcional, e nulo é o caso comum: quem não precisa não passa nada.
+  aoFecharACaixa = typeof aoFechar === "function" ? aoFechar : null;
   $("moderar-titulo").textContent = titulo;
   $("moderar-erro").hidden = true;
   $("moderar").hidden = false;
   armarAto(rotulo, consequencia, executar);
   anunciar(consequencia);
 }
+
 
 /**
  * A caixa aberta dizendo por que **não** vai perguntar nada.
@@ -457,6 +476,17 @@ function abrirRecusa(titulo, frase) {
 /** Fecha e devolve o teclado a quem abriu. */
 function fecharModeracao() {
   $("moderar").hidden = true;
+  // **Antes de devolver o foco**: quem avisar pode precisar readormecer esta
+  // camada, e devolver o foco a um nó inerte não devolve nada.
+  const avisar = aoFecharACaixa;
+  aoFecharACaixa = null;
+  if (avisar) {
+    try {
+      avisar();
+    } catch (falha) {
+      console.warn("aviso de fechamento da confirmação:", falha);
+    }
+  }
   atoArmado = null;
   alvoPreferido = null;
   caixaComEscolha = false;
@@ -486,6 +516,10 @@ function fecharModeracao() {
 function abandonarModeracao() {
   $("moderar").hidden = true;
   atoArmado = null;
+  // O aviso de fechamento é esquecido, e não chamado: quem o registrou está
+  // sendo descartado junto — a sessão acabou. Chamá-lo faria uma superfície
+  // que já saiu tentar readormecer uma camada que já sumiu.
+  aoFecharACaixa = null;
   alvoPreferido = null;
   caixaComEscolha = false;
   focoAntesDeModerar = null;

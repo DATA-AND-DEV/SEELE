@@ -1,15 +1,17 @@
 {
   "schema": 1,
   "id": "seele/referencia",
-  "version": "1.0.0",
-  "api": 3,
+  "version": "2.0.0",
+  "api": 4,
   "repo": "https://github.com/DATA-AND-DEV/SEELE",
   "reach": [
     "regiao",
     "tema",
     "pedido",
     "evento",
-    "midia"
+    "midia",
+    "superficie",
+    "contribuicao"
   ],
   "client": "cliente/main.js",
   "server": "servidor/main.js",

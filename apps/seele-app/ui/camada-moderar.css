@@ -37,10 +37,21 @@
    não `opacity` no próprio contêiner — aquilo desbotaria a caixa junto com o
    fundo, e é a caixa que precisa ser lida. */
 
+/* **Oitenta, e acima de tudo o que um MOD pode desenhar.**
+ *
+ * Ela estava em 30, e uma superfície de MOD está em 60. Esta camada é onde
+ * mora a confirmação que o produto faz quando um MOD tenta fechar um diálogo
+ * com alterações pendentes: em 30, a pergunta aparecia **atrás** do diálogo
+ * que a originou, e quem a lesse não teria como respondê-la. A revisão de
+ * 20/09/2026 apontou o caso.
+ *
+ * A regra que 80 escreve é a do §6 do plano da API 4: personalização estética
+ * não pode «encobrir uma confirmação de confiança do produto». Toda camada de
+ * MOD — diálogos em 60, avisos em 70 — fica abaixo desta. */
 .camada-moderar {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: 80;
   display: flex;
   align-items: center;
   justify-content: center;

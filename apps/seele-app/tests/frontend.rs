@@ -13520,3 +13520,164 @@ fn a_gestao_de_mods_nomeia_o_servidor_em_que_esta_mexendo() {
         "o lugar onde o alvo é escrito saiu da página"
     );
 }
+
+/// Todo ponto de contribuição anunciado tem quem o aplique na interface.
+///
+/// # O defeito que este guarda fecha
+///
+/// A revisão de 20/09/2026, R3: «dos dez pontos anunciados, encontrei aplicação
+/// visual para apenas dois. Os outros aceitam registro sem produzir o efeito
+/// prometido». Um MOD registrava, recebia punho, e nada acontecia — a falha
+/// silenciosa que o topo do `CLAUDE.md` chama de a mais cara deste repositório.
+///
+/// # Por que um guarda de texto basta aqui
+///
+/// Ele não prova que o nó aparece na tela: isso é a bancada e a observação
+/// nativa. Ele prova o que **faltava**, que é mais simples e mais fácil de
+/// regredir: um nome na tabela sem nenhum consumidor do outro lado. Um ponto
+/// novo acrescentado à tabela e esquecido na interface reprova aqui, no commit
+/// em que ele é acrescentado, e não numa revisão meses depois.
+///
+/// `mods-contribuicoes.js` é o registro e `camada-mods.js` é a gestão: nenhum
+/// dos dois conta como aplicação. Aplicar é o que a tela faz com o que o
+/// registro guarda.
+#[test]
+fn todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique() {
+    let registro = read("ui/mods-contribuicoes.js");
+    let tabela = registro
+        .split_once("const PONTOS_DE_CONTRIBUICAO = Object.freeze({")
+        .expect("a tabela de pontos de contribuição")
+        .1;
+    let tabela = tabela.split_once("});").expect("a tabela fecha").0;
+
+    let pontos: Vec<String> = tabela
+        .lines()
+        .filter_map(|linha| {
+            let linha = linha.trim();
+            let nome = linha.strip_prefix('"')?;
+            let (nome, _) = nome.split_once('"')?;
+            Some(nome.to_owned())
+        })
+        .collect();
+    assert!(
+        pontos.len() >= 10,
+        "a tabela de pontos encolheu para {}: se um ponto saiu de verdade, este \
+         número acompanha — e se a leitura quebrou, ela precisa ser consertada \
+         antes de o guarda voltar a dizer alguma coisa",
+        pontos.len()
+    );
+
+    // Os arquivos onde aplicar acontece: a tela e o roteador. O registro e a
+    // gestão ficam de fora de propósito — ver o comentário acima.
+    let aplicadores: String = ui_files("js")
+        .into_iter()
+        .filter(|nome| nome != "mods-contribuicoes.js" && nome != "camada-mods.js")
+        .map(|nome| read(&format!("ui/{nome}")))
+        .collect();
+
+    let orfaos: Vec<&String> = pontos
+        .iter()
+        .filter(|ponto| !aplicadores.contains(&format!("\"{ponto}\"")))
+        .collect();
+    assert!(
+        orfaos.is_empty(),
+        "estes pontos são anunciados pela API de MODs e nenhuma tela os aplica — \
+         um MOD registra, recebe punho, e nada acontece: {orfaos:?}"
+    );
+}
+
+/// Nenhum modo aceito pela tabela deixa de ter aplicação.
+///
+/// A outra metade de R3, e a que sobrou depois de ligar os oito pontos: um
+/// ponto pode ter consumidor para `adicionar` e anunciar `substituir` sem
+/// ninguém consultar a substituição. `escolherSubstituicao` é o único caminho
+/// por onde uma substituição chega à tela, então todo ponto que a anuncia
+/// precisa aparecer ao lado de uma chamada dela.
+#[test]
+fn todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao() {
+    let registro = read("ui/mods-contribuicoes.js");
+    let tabela = registro
+        .split_once("const PONTOS_DE_CONTRIBUICAO = Object.freeze({")
+        .expect("a tabela de pontos de contribuição")
+        .1;
+    let tabela = tabela.split_once("});").expect("a tabela fecha").0;
+
+    let substituiveis: Vec<String> = tabela
+        .lines()
+        .filter(|linha| linha.contains("\"substituir\""))
+        .filter_map(|linha| {
+            let nome = linha.trim().strip_prefix('"')?;
+            let (nome, _) = nome.split_once('"')?;
+            Some(nome.to_owned())
+        })
+        .collect();
+    assert!(
+        !substituiveis.is_empty(),
+        "nenhum ponto aceita `substituir`: se a decisão foi essa, ela precisa \
+         estar escrita — e este guarda sai junto"
+    );
+
+    let telas: String = ui_files("js")
+        .into_iter()
+        .filter(|nome| nome != "mods-contribuicoes.js")
+        .map(|nome| read(&format!("ui/{nome}")))
+        .collect();
+
+    for ponto in &substituiveis {
+        let citado = telas
+            .match_indices(&format!("\"{ponto}\""))
+            .any(|(onde, _)| {
+                // A chamada e o nome do ponto na mesma vizinhança: a consulta é
+                // escrita em várias linhas, com o alvo e o preferido entre elas.
+                let inicio = onde.saturating_sub(400);
+                let fim = (onde + 400).min(telas.len());
+                telas[inicio..fim].contains("escolherSubstituicao")
+            });
+        assert!(
+            citado,
+            "«{ponto}» anuncia o modo `substituir` e nenhuma tela chama \
+             `escolherSubstituicao` para ele: um MOD substitui, recebe punho, e \
+             o produto continua desenhando o nativo"
+        );
+    }
+}
+
+/// `decorar` não volta à tabela sem alguém que o aplique.
+///
+/// Ele saiu por uma razão que está escrita no topo de `mods-contribuicoes.js`:
+/// as propriedades validadas que um MOD já pode usar dentro da própria raiz —
+/// `opacidade`, `escalar`, `mover` — somem com o nome que abre a moderação
+/// quando aplicadas a um nó do produto. Repô-lo exige o subconjunto que impede
+/// isso, e repô-lo sem ele é reabrir R3 pelo mesmo caminho.
+#[test]
+fn decorar_nao_volta_a_tabela_sem_quem_o_aplique() {
+    let registro = read("ui/mods-contribuicoes.js");
+    let tabela = registro
+        .split_once("const PONTOS_DE_CONTRIBUICAO = Object.freeze({")
+        .expect("a tabela de pontos de contribuição")
+        .1;
+    let tabela = tabela.split_once("});").expect("a tabela fecha").0;
+
+    if !tabela.contains("\"decorar\"") {
+        // O estado de hoje: suspenso, e recusado pelo nome.
+        assert!(
+            registro.contains("«decorar» não está na API 4"),
+            "`decorar` saiu da tabela e a recusa deixou de dizer o nome dele: um \
+             MOD que o peça lê «aceita adicionar, e veio decorar» e conclui que \
+             errou o ponto, que não foi o que ele fez"
+        );
+        return;
+    }
+
+    let telas: String = ui_files("js")
+        .into_iter()
+        .filter(|nome| nome != "mods-contribuicoes.js")
+        .map(|nome| read(&format!("ui/{nome}")))
+        .collect();
+    assert!(
+        telas.contains("\"decorar\""),
+        "`decorar` voltou à tabela e nenhuma tela o aplica: é o registro que \
+         aceita sem produzir efeito, que é exatamente o R3 da revisão de \
+         20/09/2026"
+    );
+}
