@@ -85,6 +85,36 @@ Quem escreve um MOD continua livre no corpo — `estilo` e `classes` existem par
 isso. O que ele deixou de precisar é reconstruir a aparência do SEELE para
 parecer do SEELE.
 
+## 3b. A composição: o objeto em tamanho real
+
+A volta anterior consertou a mecânica — as classes passaram a desenhar, a linha
+passou a ser linha, a casca ganhou a régua do produto — e **a composição
+continuou errada**. As três telas punham os controles como herói e o que se
+está editando como uma caixinha num canto, com metade da coluna vazia ao lado.
+
+O trabalho de cada uma é o objeto, e não o formulário:
+
+| Tela | O que se edita | Onde ele estava |
+|---|---|---|
+| PERFIS | o cartão com que você aparece | caixa de 90px ao lado de um formulário de 700 |
+| ESTILO | a aparência da conversa | caixa numa coluna estreita à direita |
+| MESA | a mesa | abaixo do formulário de administração |
+
+**Conceito:** o objeto abre a janela, com a largura inteira e no tamanho em que
+vai existir; os controles vêm abaixo, servindo-o.
+
+E **três níveis de tipo, só três**: a cartela do título (Saira 26/22, do
+produto), o título de grupo (Saira 13), o rótulo de campo (mono 10 apagado).
+Antes tudo era o terceiro nível — cada campo com um rótulo do mesmo peso — e a
+tela lia como uma lista de coisas iguais. Isso é o contrário da hierarquia de
+comando que `specs/07` chama de regra de ouro.
+
+O que saiu, porque era repetição e não informação: o rótulo «PRÉVIA» sobre a
+prévia (a linha «Assim você aparece» já diz); a amostra da conversa repetida
+dentro das abas do ESTILO; o nome da campanha escrito no corpo da MESA além da
+cartela. E o que entrou onde faltava direção: a mesa vazia deixou de avisar
+«nenhuma cena» e passou a dizer o próximo passo a quem mestra.
+
 ## 4. Os três
 
 ### PERFIS
@@ -136,6 +166,11 @@ Conferido nesta rodada, em 1240px e em 460px:
 | Cor | Amostra pequena acima do hexadecimal, em três andares | Amostra e hexadecimal na mesma linha |
 | Prévia do ESTILO | Quadradinho com o rótulo **embaixo** dele | Interruptor e texto na mesma linha |
 | Dados da MESA | Botão ROLAR por cima do campo | Campo e botão lado a lado, em 420px |
+| Prévia do PERFIS | Caixa de 90px numa coluna 60% vazia | Cartão em tamanho real no topo, com a biografia |
+| Amostra do ESTILO | Caixa numa coluna estreita, repetida em duas abas | Uma só, largura inteira, no topo |
+| Cores do ESTILO | Seis campos numa coluna; a sexta exigia rolar | Seis em duas colunas, no mesmo olhar |
+| Título da MESA | Escrito duas vezes, em duas tipografias | Uma vez, na cartela da janela |
+| Mesa vazia | «Nenhuma cena em cima da mesa.» | O próximo passo, para quem mestra e para quem joga |
 
 ## 6. O diagnóstico UTF-8
 
