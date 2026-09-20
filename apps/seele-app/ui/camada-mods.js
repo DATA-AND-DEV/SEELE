@@ -497,6 +497,155 @@ const FASES_DO_MOD = {
 // o SALVAR, que aplica tudo num ato — `aplicar_conjunto_de_mods`, que escreve
 // numa transação e acorda o anúncio uma vez só.
 
+// ------------------------------------------- a apresentação, quando há disputa
+
+/**
+ * Quem apresenta cada ponto da interface, quando mais de um MOD o substitui.
+ *
+ * # Por que esta escolha existe e é visível
+ *
+ * A API 4 permite a um MOD **substituir** a apresentação de uma pessoa, de um
+ * canal ou da aparência do servidor. Dois MODs que peçam o mesmo ponto são uma
+ * disputa, e o §6 do plano diz como ela não pode ser resolvida: «Nada de
+ * "última resposta assíncrona vence".»
+ *
+ * Sem escolha registrada, a prioridade declarada decide — determinística e
+ * estável. Com escolha, ela ganha: uma pessoa decidiu, e um número não.
+ *
+ * # Por que ela mora nesta máquina
+ *
+ * Porque a alternativa seria o servidor decidir a apresentação de quem entra
+ * nele, e isso é uma decisão sobre a tela de outra pessoa. `localStorage` e
+ * não o servidor, por destino: um MOD preferido aqui não vale no próximo
+ * servidor, porque não é o mesmo conjunto de MODs.
+ */
+const PREFERENCIA_DE_APRESENTACAO = "seele.mods.apresentacao";
+
+/** O mapa de preferências desta máquina, `{ ponto: id do MOD }`. */
+function preferenciasDeApresentacao() {
+  try {
+    const lido = JSON.parse(localStorage.getItem(PREFERENCIA_DE_APRESENTACAO) ?? "{}");
+    return lido && typeof lido === "object" && !Array.isArray(lido) ? lido : {};
+  } catch {
+    // Armazenamento bloqueado, cheio ou com lixo dentro. Sem preferência é um
+    // estado correto — a prioridade decide —, e não um erro a mostrar.
+    return {};
+  }
+}
+
+/**
+ * Qual MOD apresenta este ponto, por escolha de quem usa esta máquina.
+ *
+ * Chamada de `tela-sessao.js` a cada linha do roster, então ela é lida do
+ * cache e não do armazenamento: `localStorage.getItem` é síncrono e bloqueia o
+ * quadro, e uma faixa com vinte pessoas o chamaria vinte vezes por retrato.
+ */
+let preferenciasLidas = null;
+function modPreferidoPara(ponto) {
+  preferenciasLidas ??= preferenciasDeApresentacao();
+  const escolhido = preferenciasLidas[String(ponto)];
+  return typeof escolhido === "string" ? escolhido : "";
+}
+
+/**
+ * Escolhe quem apresenta um ponto, ou volta ao padrão com `id` vazio.
+ *
+ * «Usar apresentação padrão» é o §6 pelo nome, e é o que garante que uma
+ * personalização estética nunca seja um caminho sem volta.
+ */
+function escolherApresentacao(ponto, id) {
+  preferenciasLidas = { ...preferenciasDeApresentacao() };
+  if (id) preferenciasLidas[String(ponto)] = String(id);
+  else delete preferenciasLidas[String(ponto)];
+  try {
+    localStorage.setItem(PREFERENCIA_DE_APRESENTACAO, JSON.stringify(preferenciasLidas));
+  } catch (falha) {
+    // Dito, e não engolido: a escolha vale nesta sessão e não sobrevive ao
+    // fechamento, e quem escolheu tem direito de saber disso.
+    console.warn("preferência de apresentação não foi guardada:", falha);
+  }
+  // O registro redesenha o que depende dela; ver `contribuicoesDosMods.avisar`.
+  if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
+  desenharApresentacoes();
+}
+
+/**
+ * A seção que mostra quem apresenta o quê — e as disputas.
+ *
+ * Sem ela, «Usar apresentação padrão» seria um botão para um problema que a
+ * pessoa não tem como ver. O §6 pede os dois juntos: a escolha **e** a
+ * visibilidade da disputa.
+ */
+function desenharApresentacoes() {
+  const lista = $("lista-apresentacoes");
+  const secao = $("mods-apresentacao");
+  if (!lista || !secao) return;
+  const preferidos = new Map(Object.entries(preferenciasDeApresentacao()));
+  const linhas = contribuicoesDosMods.resumo(preferidos);
+  secao.hidden = linhas.length === 0;
+  if (!linhas.length) {
+    lista.replaceChildren();
+    return;
+  }
+
+  repovoar(lista, linhas.map((linha) => {
+    const item = elemento("li", "server-dispositivo mods-linha-gestao");
+    const texto = elemento("div", "mods-linha-texto");
+    texto.append(
+      elemento("span", "mods-id", NOMES_DOS_PONTOS[linha.ponto] ?? linha.ponto),
+      elemento(
+        "span",
+        "mods-versao",
+        linha.escolhido
+          ? `apresentado por ${linha.escolhido}`
+          : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`,
+      ),
+    );
+    // **A disputa é dita, e não resolvida em silêncio.** Um MOD preterido que
+    // some sem explicação é a pessoa achando que o MOD não funciona.
+    if (linha.preteridos.length) {
+      texto.append(elemento(
+        "p",
+        "nota",
+        `Também pediram este lugar e não o receberam: ${linha.preteridos.join(", ")}. `
+        + "Escolha abaixo qual deve desenhar.",
+      ));
+    }
+    item.append(texto);
+
+    const botoes = elemento("div", "mods-linha-botoes");
+    for (const candidato of linha.mods) {
+      if (candidato === linha.escolhido) continue;
+      const usar = elemento("button", "botao-fantasma", `USAR ${candidato}`);
+      usar.type = "button";
+      usar.addEventListener("click", () => escolherApresentacao(linha.ponto, candidato));
+      botoes.append(usar);
+    }
+    if (linha.escolhido) {
+      const padrao = elemento("button", "botao-fantasma", "USAR APRESENTAÇÃO PADRÃO");
+      padrao.type = "button";
+      padrao.addEventListener("click", () => escolherApresentacao(linha.ponto, ""));
+      botoes.append(padrao);
+    }
+    item.append(botoes);
+    return item;
+  }));
+}
+
+/** Os pontos ditos em palavra de quem usa, e não no identificador da API. */
+const NOMES_DOS_PONTOS = Object.freeze({
+  "pessoa.identidade": "Como as pessoas aparecem",
+  "pessoa.cartao": "O cartão de cada pessoa",
+  "pessoa.detalhes": "O perfil detalhado de uma pessoa",
+  "pessoa.acoes": "Ações sobre uma pessoa",
+  "canal.item": "Como os canais aparecem na lista",
+  "canal.cabecalho": "O cabeçalho de um canal",
+  "compositor.ferramentas": "Ferramentas ao escrever",
+  "sala.acoes": "Ações dentro de uma sala de voz",
+  "servidor.navegacao": "Entradas na navegação",
+  "servidor.aparencia": "A aparência da sessão",
+});
+
 /**
  * O que estaria ligado se esta tela fosse salva agora, por `id\u0000hash`.
  *
@@ -755,6 +904,7 @@ async function desenharMods() {
   }
 
   desenharRascunho(hospedando);
+  desenharApresentacoes();
   await desenharOCache();
   await desenharAceites();
 }

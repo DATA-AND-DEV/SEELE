@@ -2876,10 +2876,10 @@ fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
     // outright would satisfy this and quietly take the honest gaps with it.
     let script = scripts();
     let canais = body_of(&script, "function desenharCanais");
-    let pessoa = body_of(&script, "function linhaDoRoster");
+    let pessoa = body_of(&script, "function linhaNativaDoRoster");
     let media = body_of(&script, "function desenharMedia");
 
-    for (name, body) in [("desenharCanais", &canais), ("linhaDoRoster", &pessoa)] {
+    for (name, body) in [("desenharCanais", &canais), ("linhaNativaDoRoster", &pessoa)] {
         assert!(
             !body.contains("naoMedido"),
             "`{name}` draws an unmeasured value once per row, which is the noise \
@@ -11254,10 +11254,35 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
 
     // **Quem desenha a linha é o produto.** O nó chega montado e é anexado; o
     // MOD não escolhe posição, e nada de fora escreve estilo nele.
-    let linha = js_function(&sessao, "function linhaDoRoster(");
+    let linha = js_function(&sessao, "function linhaNativaDoRoster(");
     assert!(
         linha.contains("for (const cartao of pessoa.cartoes ?? []) item.append(cartao);"),
         "a linha deixou de anexar o cartão montado: {linha}"
+    );
+
+    // **E a substituição não desfaz nenhuma das três garantias.**
+    //
+    // Um MOD pode apresentar a identidade de alguém (U27), e a linha
+    // substituída continua sendo montada pelo produto: a raiz é `<li>`, o alvo
+    // de clique carrega o `id` real, e o diagnóstico nativo recolhe em vez de
+    // sumir. Sem estas asserções, «apresentar» viraria «esconder», e o caminho
+    // até a moderação de alguém dependeria do que um terceiro desenhou.
+    let substituida = js_function(&sessao, "function linhaSubstituida(");
+    assert!(
+        substituida.contains("porta.dataset.pessoaDaAcao = String(pessoa.id)"),
+        "o alvo de clique de uma apresentação deixou de carregar o ID real, e \
+         passou a depender do que o MOD desenhou: {substituida}"
+    );
+    assert!(
+        substituida.contains("linhaNativaDoRoster(pessoa, temAudio, true)"),
+        "o diagnóstico nativo sumiu de uma linha apresentada por um MOD, em vez \
+         de recolher: {substituida}"
+    );
+    assert!(
+        substituida.contains("porta.setAttribute(")
+            && substituida.contains("aria-label"),
+        "a linha apresentada por um MOD ficou sem nome acessível do produto: \
+         {substituida}"
     );
     for fora in [
         "innerHTML",

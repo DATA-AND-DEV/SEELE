@@ -224,6 +224,26 @@
 
 .mods-linha-gestao > .botao-fantasma { flex: 0 0 auto; }
 
+/* A mesma linha de gestão com o texto e as ações separados, para quando há mais
+ * de um botão — é o caso de «quem desenha o que», onde a escolha entre dois
+ * MODs e o retorno ao padrão convivem. O texto não é um botão ali, então ele
+ * não pode usar `.server-dispositivo-nome`, que é. */
+.mods-linha-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.mods-linha-botoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 /* Vermelho, que o `07-estetica.md` reserva para erro. Um MOD que não serve
  * **aparece na lista** em vez de ser escondido: quem copiou a pasta precisa
  * saber que o produto a viu e a descartou, e por quê. Escondê-lo seria o

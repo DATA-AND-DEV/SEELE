@@ -1105,6 +1105,28 @@
         </div>
         <ul id="lista-linhas" class="canais"></ul>
 
+        <!--
+          As entradas que os MODs deste servidor registram - ADR 0052.
+
+          **U03 pelo nome**: «Nao ha caminho de MOD para abrir uma experiencia
+          ampla, modal proprio ou painel ajustavel. Os MODs aparecem todos ao
+          conectar, sem escolha da atividade.» Uma entrada aqui e a escolha da
+          atividade: ela tem nome, ela abre quando a pessoa aperta, e ela nao
+          ocupa altura nenhuma enquanto ninguem a abre.
+
+          Na coluna de navegacao e nao na faixa, porque e disso que ela e: o
+          lugar onde se escolhe para onde ir neste servidor. O titulo diz de
+          quem sao as entradas, para ninguem confundi-las com os canais que o
+          servidor tem.
+
+          Escondida enquanto vazia; quem a preenche e `redesenharAsEntradasDeMod`
+          em `tela-sessao.js`.
+        -->
+        <div id="cabeca-mods-navegacao" class="canais-cabeca" hidden>
+          <h2 class="painel-titulo"><span>DOS MODS</span></h2>
+        </div>
+        <ul id="lista-mods-navegacao" class="canais" hidden></ul>
+
       </div>
 
       <!--
@@ -2787,6 +2809,32 @@
                   </div>
                 </div>
                 <p id="mods-gestao-erro" class="erro" role="alert" hidden></p>
+
+                <!--
+                  Quem apresenta o que, quando mais de um MOD pede o mesmo lugar
+                  - ADR 0052, section 6 do plano da API 4.
+
+                  Escondida enquanto nenhum MOD substitui nada, que e o caso
+                  comum. Ela aparece junto com a disputa, e nao antes dela: uma
+                  secao permanente sobre um problema que quase nunca existe e
+                  ruido em cima de uma pagina que a auditoria ja achou longa
+                  demais (U12).
+
+                  Ela diz a disputa **e** oferece a escolha. So a escolha seria
+                  um botao para um problema que ninguem consegue ver; so a
+                  disputa seria contar um problema sem dar a saida.
+                -->
+                <section id="mods-apresentacao" class="server-bloco" hidden>
+                  <div class="server-bloco-topo">
+                    <h3 class="server-bloco-nome">QUEM DESENHA O QUE</h3>
+                    <p class="nota">Um MOD pode apresentar pessoas, canais e a
+                      aparencia desta sessao. Quando mais de um pede o mesmo
+                      lugar, a escolha e sua - e voltar ao desenho do SEELE
+                      tambem e.</p>
+                  </div>
+                  <ul id="lista-apresentacoes" class="server-dispositivos"></ul>
+                </section>
+
                 <button id="mods-instalar" class="botao" type="button">INSTALAR MOD DE UMA PASTA</button>
                 <p class="nota">Um MOD é uma pasta com <code>mod.json</code> dentro.
                   Instalar copia os arquivos para esta máquina e <b>não liga</b> o

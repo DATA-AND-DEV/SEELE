@@ -997,6 +997,35 @@ contribuicoesDosMods.aoMudar(() => {
   if (typeof redesenharAsEntradasDeMod === "function") redesenharAsEntradasDeMod();
 });
 
+/**
+ * Um clique numa apresentação de MOD, a caminho do MOD que a desenhou.
+ *
+ * **Ouvinte único, e na lista.** Uma faixa com vinte pessoas teria vinte
+ * ouvintes criados e jogados fora a cada retrato — e um retrato acontece a cada
+ * quatro segundos.
+ *
+ * O que atravessa é o `id` da pessoa que o **produto** escreveu no botão, e não
+ * nada que o MOD tenha desenhado: é a diferença entre apresentar uma identidade
+ * e afirmar uma.
+ */
+function ligarAcoesDeApresentacao(lista) {
+  if (!lista || lista.dataset.acoesDeMod === "sim") return;
+  lista.dataset.acoesDeMod = "sim";
+  lista.addEventListener("click", (evento) => {
+    const alvo = evento.target.closest?.("[data-acao-de-mod]");
+    if (!alvo) return;
+    const instancia = modsCarregados.get(alvo.dataset.modDaAcao);
+    if (!instancia) return;
+    const mod = { id: alvo.dataset.modDaAcao };
+    donoDaRegiao(mod, instancia).falar({
+      nome: "acao",
+      acao: alvo.dataset.acaoDeMod,
+      pessoa: alvo.dataset.pessoaDaAcao ?? "",
+      canal: alvo.dataset.canalDaAcao ?? "",
+    });
+  });
+}
+
 /** Tira a região de uma instância da tela, inteira — e o tema junto. */
 function limparARegiaoDoMod(id, instancia) {
   const regiao = regioesDosMods.get(instancia);

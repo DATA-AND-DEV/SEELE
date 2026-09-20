@@ -299,7 +299,7 @@
   overflow-wrap: anywhere;
 }
 
-.aviso-de-mod[data-tom="erro"] { border-left-color: var(--seele-vermelho, #d13b2a); }
+.aviso-de-mod[data-tom="erro"] { border-left-color: var(--seele-vermelho-alerta); }
 
 /* ----------------------------------------------------- as animações do MOD */
 

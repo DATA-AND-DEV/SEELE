@@ -1490,6 +1490,10 @@ function desenharPessoas(snapshot) {
         voice_room.people.map((pessoa) =>
           linhaDoRoster(
             {
+              // **O `id` vem junto.** Ele é o que liga a linha à pessoa real —
+              // a contribuição que a apresenta, a ação que ela abre — e o nome
+              // desenhado não serve para nada disso: um MOD pode tê-lo trocado.
+              id: pessoa.id,
               nome: pessoa.nickname + (pessoa.is_self ? " (você)" : ""),
               // Os cartões que os MODs de pé deram a esta pessoa. Eles
               // declaram; quem monta é o renderer da região, e quem decide
@@ -1523,6 +1527,7 @@ function desenharPessoas(snapshot) {
       grupoDeSala("FORA DE SALA", null, false, [
         linhaDoRoster(
           {
+            id: snapshot.me,
             nome: `${snapshot.nickname} (você)`,
             // **E o cartão, aqui também.** Esta ramificação e a do saguão eram
             // as duas que não passavam `cartoes` ao renderer: um MOD que
@@ -1575,6 +1580,7 @@ function desenharPessoas(snapshot) {
         noSaguao.map((pessoa) =>
           linhaDoRoster(
             {
+              id: pessoa.id,
               nome: pessoa.nickname,
               // O mesmo cartão da sala: quem está no saguão continua sendo a
               // mesma pessoa, e o MOD que a apresenta não muda de opinião
@@ -1599,6 +1605,8 @@ function desenharPessoas(snapshot) {
   }
 
   repovoar($("lista-roster"), grupos);
+  // Uma vez, e na lista: ver `ligarAcoesDeApresentacao` em `base.js`.
+  ligarAcoesDeApresentacao($("lista-roster"));
 
   // Duas contagens, e a de fora existe porque a de dentro sozinha mentia por
   // omissão: `12 EM SALAS DE VOZ` ao lado de `PESSOAS` era lido como a
@@ -1676,7 +1684,105 @@ function desenharMedia(voice_room) {
  * (`specs/06-clientes-gui.md`), e é essa a propriedade que a mudança de coluna
  * tinha de preservar inteira — ela veio junto, sem uma linha de diferença.
  */
+/**
+ * A linha de uma pessoa na faixa — nativa, ou a que um MOD desenhou no lugar.
+ *
+ * # Por que a substituição existe
+ *
+ * U27 da auditoria de 20/09/2026: «Cartões na API são conteúdo adicional, sem
+ * interação, sem composição de banner e sem substituição dos campos nativos.
+ * Isso é inferior ao PERFIS anterior.» Um MOD de perfis podia escrever uma
+ * linha **embaixo** do nome, e o nome continuava sendo o apelido do servidor.
+ *
+ * # O que a substituição não move
+ *
+ * Três coisas, e elas são o contrato inteiro:
+ *
+ * - **a identidade real.** O clique continua indo ao `id` da pessoa, e não ao
+ *   texto que o MOD desenhou. §6 do plano: «o host liga as ações ao ID real,
+ *   nunca ao texto desenhado»;
+ * - **o diagnóstico nativo.** Sinal, barra e estado do microfone continuam
+ *   alcançáveis: eles descem para um `<details>` do produto em vez de sumirem.
+ *   U15 pediu hierarquia, e não apagamento;
+ * - **a moderação.** Se esta sessão tem verbo sobre esta pessoa, o caminho
+ *   até ele continua montado pelo produto, com o nome acessível do produto.
+ *
+ * Personalização estética pode substituir a faixa de sinal; não pode
+ * falsificar autorização nem encobrir uma confirmação de confiança.
+ */
 function linhaDoRoster(pessoa, temAudio) {
+  const substituicao = pessoa.id === undefined || pessoa.id === null
+    ? null
+    : contribuicoesDosMods.escolherSubstituicao(
+      "pessoa.cartao",
+      String(pessoa.id),
+      preferidoDeApresentacao(),
+    ).escolhida;
+  if (substituicao) return linhaSubstituida(pessoa, temAudio, substituicao);
+  return linhaNativaDoRoster(pessoa, temAudio);
+}
+
+/**
+ * Quem o servidor escolheu para apresentar as pessoas, quando há disputa.
+ *
+ * Lido de `camada-mods.js`, que é onde a decisão pertence: a gestão mostra a
+ * disputa e a pessoa que administra escolhe. Sem escolha, a prioridade decide
+ * — determinística, e nunca «a última resposta assíncrona vence».
+ */
+function preferidoDeApresentacao() {
+  return typeof modPreferidoPara === "function" ? modPreferidoPara("pessoa.cartao") : "";
+}
+
+/**
+ * A linha desenhada por um MOD, com o que o produto mantém por cima dela.
+ *
+ * A raiz é do produto e o conteúdo é do MOD. Isso importa para a lista: `<li>`
+ * dentro de `<ul>` é o que faz um leitor de tela anunciar «3 de 12», e um MOD
+ * que devolvesse a raiz poderia devolver qualquer etiqueta.
+ */
+function linhaSubstituida(pessoa, temAudio, contribuicao) {
+  const item = elemento("li", pessoa.falando ? "pessoa falando" : "pessoa");
+  item.dataset.apresentadaPor = contribuicao.mod;
+
+  // O conteúdo do MOD, montado pelo renderer dele, dentro de um alvo de clique
+  // do produto quando há ação principal declarada.
+  const cartao = cartaoDeContribuicao(contribuicao, pessoa.id);
+  if (contribuicao.acaoPrincipal) {
+    const porta = elemento("button", "pessoa-apresentada-porta");
+    porta.type = "button";
+    porta.dataset.acaoDeMod = contribuicao.acaoPrincipal;
+    porta.dataset.modDaAcao = contribuicao.mod;
+    porta.dataset.pessoaDaAcao = String(pessoa.id);
+    // **O nome acessível é do produto.** Um leitor de tela lendo só o que o
+    // MOD desenhou anunciaria um retrato e um apelido escolhido, sem dizer de
+    // quem é a linha nem que ela abre alguma coisa.
+    porta.setAttribute(
+      "aria-label",
+      `${contribuicao.nomeAcessivel || pessoa.nome} — abrir em ${contribuicao.mod}`,
+    );
+    if (cartao) porta.append(cartao);
+    item.append(porta);
+  } else if (cartao) {
+    item.append(cartao);
+  }
+
+  // **O diagnóstico nativo não some: ele recolhe.** U15 pediu que sinal e
+  // detalhes fossem recolhíveis «mantendo acesso ao diagnóstico nativo», e
+  // recolher é diferente de tirar.
+  const detalhes = elemento("details", "pessoa-nativo");
+  const resumo = elemento("summary", "pessoa-nativo-resumo", pessoa.nome);
+  detalhes.append(resumo, linhaNativaDoRoster(pessoa, temAudio, true));
+  item.append(detalhes);
+  return item;
+}
+
+/** O conteúdo que um MOD declarou para esta pessoa, já montado. */
+function cartaoDeContribuicao(contribuicao, id) {
+  const regiao = cartoesDosMods.get(contribuicao.mod);
+  return regiao ? regiao.cartaoDe(id) : null;
+}
+
+function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   // `ratio: null` é «ninguém mediu isto», e não zero.
   //
   // Quem está conectado e fora de toda sala não tem sinal medido: não há voz
@@ -1685,7 +1791,13 @@ function linhaDoRoster(pessoa, temAudio) {
   // produto escreve onde não mediu, em toda outra tela.
   const medido = pessoa.ratio !== null && pessoa.ratio !== undefined;
 
-  const item = elemento("li", pessoa.falando ? "pessoa falando" : "pessoa");
+  // `<div>` quando ela é o detalhe recolhido de uma apresentação de MOD: um
+  // `<li>` dentro de um `<details>` dentro de outro `<li>` é uma lista que o
+  // leitor de tela conta errado.
+  const item = elemento(
+    comoDetalhe ? "div" : "li",
+    pessoa.falando ? "pessoa falando" : "pessoa",
+  );
   if (medido) item.dataset.faixa = pessoa.faixa;
   else item.dataset.semMedida = "sim";
 
@@ -1768,7 +1880,11 @@ function linhaDoRoster(pessoa, temAudio) {
   // O nó vem montado — é o mesmo elemento entre um retrato e o seguinte, e
   // movê-lo preserva o que ele segura. Recriá-lo faria uma imagem piscar e um
   // som recomeçar a cada quatro segundos.
-  for (const cartao of pessoa.cartoes ?? []) item.append(cartao);
+  // Não dentro do detalhe recolhido: o cartão já foi desenhado por cima, e o
+  // mesmo nó não pode estar em dois lugares — movê-lo para cá o tiraria de lá.
+  if (!comoDetalhe) {
+    for (const cartao of pessoa.cartoes ?? []) item.append(cartao);
+  }
 
   // Volume por pessoa (`specs/03-audio.md`).
   if (pessoa.volume !== null && temAudio) {
@@ -1785,6 +1901,72 @@ function linhaDoRoster(pessoa, temAudio) {
   }
 
   return item;
+}
+
+// ------------------------------------------------- a navegação dos MODs
+
+/**
+ * As entradas que os MODs registraram, na coluna de navegação.
+ *
+ * # O achado que ela responde
+ *
+ * U03: «Não há caminho de MOD para abrir uma experiência ampla, modal próprio
+ * ou painel ajustável. Os MODs aparecem todos ao conectar, sem escolha da
+ * atividade.»
+ *
+ * As duas metades importam. A primeira é a superfície, que
+ * `mods-superficies.js` resolve. A segunda é esta: antes, os três MODs
+ * desenhavam ao conectar porque **não havia o gesto de abrir um**. Uma faixa
+ * com três regiões é o produto decidindo, por omissão, que as três atividades
+ * estão acontecendo o tempo todo.
+ *
+ * Uma entrada não ocupa altura nenhuma enquanto ninguém a abre, e é isso que
+ * devolve o centro da janela à conversa.
+ *
+ * # Por que ela é redesenhada inteira
+ *
+ * Porque ela é pequena — poucas entradas, sem foco preservado dentro delas
+ * além do botão — e porque `avisar` já coalesce as mudanças numa por quadro.
+ * A reconciliação incremental existe onde há foco e cursor para perder.
+ */
+function redesenharAsEntradasDeMod() {
+  const lista = $("lista-mods-navegacao");
+  const cabeca = $("cabeca-mods-navegacao");
+  if (!lista || !cabeca) return;
+
+  const entradas = contribuicoesDosMods.para("servidor.navegacao");
+  const vazia = entradas.length === 0;
+  lista.hidden = vazia;
+  cabeca.hidden = vazia;
+  if (vazia) {
+    lista.replaceChildren();
+    return;
+  }
+
+  repovoar(lista, entradas.map((contribuicao) => {
+    const item = elemento("li", null);
+    // A mesma classe `linha` dos canais: uma entrada de MOD é navegação, e
+    // navegação neste produto se parece com navegação. Um desenho próprio a
+    // faria parecer outra coisa — e «outra coisa» é o que ninguém sabe apertar.
+    const botao = elemento("button", "linha entrada-de-mod");
+    botao.type = "button";
+    botao.dataset.acaoDeMod = contribuicao.acaoPrincipal || "abrir";
+    botao.dataset.modDaAcao = contribuicao.mod;
+    // **O rótulo é do MOD; a origem é do produto.** Uma entrada que diga
+    // «Configurações» sem dizer de quem ela é seria indistinguível das do
+    // SEELE, e é aí que uma tela de confiança vira falsificável.
+    botao.append(
+      elemento("span", "linha-rotulo", contribuicao.rotulo || contribuicao.mod),
+      elemento("span", "entrada-de-mod-origem", contribuicao.mod),
+    );
+    botao.setAttribute(
+      "aria-label",
+      `${contribuicao.rotulo || contribuicao.mod} — de ${contribuicao.mod}`,
+    );
+    item.append(botao);
+    return item;
+  }));
+  ligarAcoesDeApresentacao(lista);
 }
 
 // ---------------------------------------------------------------- telemetria

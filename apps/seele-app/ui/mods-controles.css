@@ -219,8 +219,8 @@ button.regiao-de-mod-parte[data-variante="primaria"] {
 }
 
 button.regiao-de-mod-parte[data-variante="perigo"] {
-  border-color: var(--seele-vermelho, #d13b2a);
-  color: var(--seele-vermelho, #d13b2a);
+  border-color: var(--seele-vermelho-alerta);
+  color: var(--seele-vermelho-alerta);
 }
 
 button.regiao-de-mod-parte[data-variante="discreta"] {
@@ -318,14 +318,14 @@ button.regiao-de-mod-parte[data-forma="link"] {
    U04 pede medir contraste e alvo; a mensagem existe para quem não vê a cor. */
 label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-caixa,
 label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-area {
-  border-color: var(--seele-vermelho, #d13b2a);
+  border-color: var(--seele-vermelho-alerta);
 }
 
 label.regiao-de-mod-parte[data-mensagem-de-erro]::after {
   content: attr(data-mensagem-de-erro);
   display: block;
   margin-top: 2px;
-  color: var(--seele-vermelho, #d13b2a);
+  color: var(--seele-vermelho-alerta);
   font-size: var(--seele-t-dado);
 }
 
@@ -342,8 +342,8 @@ form.regiao-de-mod-parte[data-erro]::before {
   content: attr(data-erro);
   display: block;
   padding: var(--seele-celula-y) var(--seele-celula-x);
-  border-left: 3px solid var(--seele-vermelho, #d13b2a);
-  background: color-mix(in srgb, var(--seele-vermelho, #d13b2a) 12%, transparent);
+  border-left: 3px solid var(--seele-vermelho-alerta);
+  background: color-mix(in srgb, var(--seele-vermelho-alerta) 12%, transparent);
   color: var(--seele-osso);
   font-size: var(--seele-t-dado);
 }
@@ -436,4 +436,69 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
   white-space: nowrap;
+}
+
+
+/* ------------------------------------- na interface do SEELE
+
+   O que uma contribuição desenha **dentro** de uma tela do produto. Poucas
+   regras de propósito: quanto mais este arquivo descrever a linha do roster ou
+   o item de canal, mais ele repete o que `tela-sessao.css` já diz — e duas
+   folhas descrevendo a mesma coisa é a régua que discorda. */
+
+/* A entrada de navegação de um MOD: o mesmo desenho de um canal, mais a origem.
+   Navegação neste produto se parece com navegação; um desenho próprio a faria
+   parecer outra coisa, e «outra coisa» é o que ninguém sabe apertar. */
+.entrada-de-mod { display: flex; align-items: baseline; gap: 8px; }
+
+.entrada-de-mod-origem {
+  margin-left: auto;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+/* A linha de uma pessoa apresentada por um MOD.
+
+   O botão é do produto e o conteúdo é do MOD: ele não recebe padding nem
+   borda, porque a composição inteira é da declaração. O que ele garante é área
+   de toque e foco visível — as duas coisas que um MOD não tem como pedir. */
+.pessoa-apresentada-porta {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  min-height: 34px;
+}
+
+.pessoa-apresentada-porta:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: -2px;
+}
+
+/* **O diagnóstico nativo recolhe, e não some.** U15 pediu hierarquia — nome e
+   presença primeiro, sinal e detalhes recolhíveis —, e recolher é diferente de
+   tirar: quem precisa do sinal continua a um toque dele. */
+.pessoa-nativo { margin-top: 6px; }
+
+.pessoa-nativo-resumo {
+  cursor: pointer;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+  list-style: none;
+}
+
+.pessoa-nativo-resumo::before { content: "DETALHES · "; }
+.pessoa-nativo-resumo::-webkit-details-marker { display: none; }
+.pessoa-nativo-resumo:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
 }
