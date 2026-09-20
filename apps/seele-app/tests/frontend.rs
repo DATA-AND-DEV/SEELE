@@ -3337,6 +3337,76 @@ fn every_glyph_the_page_asks_for_is_one_glifos_js_can_draw() {
     }
 }
 
+/// **A configuração se chama configuração, e as seções têm escopo** — U06 e U31.
+///
+/// «Configurações se chamam "TERMINAL SERVER", embora misturem preferências
+/// locais e administração de um servidor.» O nome vinha da comp e descrevia
+/// metade do que a tela faz — e a outra metade é justamente a que alguém não
+/// encontraria procurando por ela.
+///
+/// E as seções ficavam numa lista plana. Trocar o microfone vale nesta
+/// máquina; renomear o servidor vale para todo mundo que entra nele. A
+/// diferença decide se alguém hesita antes de mexer, e uma lista plana a apaga.
+#[test]
+fn a_configuracao_diz_o_nome_dela_e_o_escopo_de_cada_grupo() {
+    let pagina = read("ui/index.html");
+    let tela = screen_markup(&pagina, "tela-server", "tela-fim");
+
+    assert!(
+        tela.contains(">CONFIGURAÇÕES<"),
+        "a tela de configuração voltou a se chamar outra coisa"
+    );
+    assert!(
+        !tela.contains(">TERMINAL SERVER<"),
+        "«TERMINAL SERVER» voltou ao título: ele descreve metade do que a tela \
+         faz, e a outra metade é a que ninguém encontraria procurando por ela"
+    );
+
+    // Os quatro grupos, com nome e com a nota que diz o escopo. O nome sozinho
+    // não basta: «este dispositivo» e «este servidor» são a mesma forma de
+    // palavra com consequências opostas.
+    for grupo in ["ESTE DISPOSITIVO", "MODS", "ESTE SERVIDOR", "APLICATIVO"] {
+        assert!(
+            tela.contains(&format!(">{grupo}<")),
+            "o grupo `{grupo}` sumiu da coluna da configuração"
+        );
+    }
+    assert!(
+        tela.contains("Valem nesta máquina, e não no servidor."),
+        "o grupo do dispositivo deixou de dizer que o escopo dele é a máquina"
+    );
+    assert!(
+        tela.contains("Valem para todo mundo que entra nele."),
+        "o grupo do servidor deixou de dizer que o escopo dele é todo mundo"
+    );
+
+    // **Cada `<ul>` é nomeado pelo grupo dele.** Sem isso, quem usa leitor de
+    // tela ouve nove seções seguidas e não ouve nenhuma das divisões que a
+    // pessoa vidente lê nos cabeçalhos.
+    for chave in ["dispositivo", "mods", "servidor", "aplicativo"] {
+        assert!(
+            tela.contains(&format!("aria-labelledby=\"server-grupo-{chave}\"")),
+            "a lista do grupo `{chave}` não é anunciada pelo nome do grupo"
+        );
+    }
+
+    // **E a saída está no cabeçalho, e não no fim da coluna que rola** — U33.
+    let (antes_do_corpo, _) = tela
+        .split_once("class=\"server-corpo\"")
+        .expect("o corpo da configuração");
+    assert!(
+        !antes_do_corpo.contains("id=\"server-fechar\""),
+        "VOLTAR voltou para a coluna de navegação, que rola: numa janela baixa \
+         ele sai da tela, e sair da configuração passa a depender de rolar até \
+         o fim de uma lista de nove seções"
+    );
+    assert!(
+        tela.contains("id=\"server-contexto\""),
+        "a faixa de contexto sumiu: uma tela que cobre a janela inteira precisa \
+         dizer que a voz continua atrás dela"
+    );
+}
+
 #[test]
 fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_opens() {
     // The four sections are buttons in markup and the heading strings travel
@@ -3373,85 +3443,60 @@ fn every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_ope
         sections.push(id);
     }
 
+    // **A ordem passou a ser a dos grupos, e não a da comp** — U31 da
+    // auditoria de 20/09/2026: «Microfone, Aparência, Identidade, MODs,
+    // Versões, Malha e Atualização no mesmo nível, sem distinguir frequência e
+    // escopo.» Sete seções numa lista plana fazem cada uma parecer o mesmo tipo
+    // de coisa, e elas não são: trocar o microfone vale nesta máquina,
+    // renomear o servidor vale para todo mundo que entra nele.
+    //
+    // Os quatro grupos são os que a auditoria nomeia. O que cada um contém
+    // continua sendo uma decisão registrada — as razões de cada seção estar
+    // onde está seguem escritas ao lado dela em `index.html` —, e o que esta
+    // lista guarda é que nenhuma se perdeu no caminho.
     assert_eq!(
         sections,
         [
-            // A PORTA abre o trilho, como na comp — e só existe para quem
-            // hospeda, do mesmo jeito que a de SERVIDOR.
-            "secao-porta",
+            // ---- ESTE DISPOSITIVO: vale nesta máquina ----
+            //
+            // Áudio abre porque é a razão de esta tela ser camada e não tela:
+            // trocar de microfone no meio de uma conversa é o caso de uso.
             "secao-audio",
             "secao-atalhos",
-            // **APARÊNCIA voltou na 0.9.0**, e o registro de por que ela
-            // tinha saído fica, porque ele é a regra que a volta teve de
-            // respeitar.
-            //
-            // Ela saiu por ter exatamente um controle — a chave de legendas
-            // simples — que deixou de existir. O que sobrou era «uma seção de
-            // configuração sem nada a configurar, que promete um ajuste que não
-            // existe», e a regra desta tela é **omitir o que não se tem em vez
-            // de desenhá-lo morto**.
-            //
-            // A comp da 0.9.0 a desenha de novo, e continua sem controle
-            // nenhum — mas o que ela põe ali não é um ajuste apagado: é **onde
-            // o contraste mora**, que é o sistema operacional. Isso a seção
-            // tem, e quem procura contraste aqui e não acha nada conclui que o
-            // produto não o oferece.
-            //
-            // A regra foi respeitada tirando a promessa: os dois cartões da
-            // comp são botões com `aria-pressed`, e aqui são itens de lista com
-            // o estado escrito por extenso. Um botão desabilitado promete um
-            // ajuste; uma linha que diz `DESLIGADO NO SISTEMA` informa.
+            // **APARÊNCIA voltou na 0.9.0**, e o registro de por que ela tinha
+            // saído fica, porque ele é a regra que a volta teve de respeitar:
+            // omitir o que não se tem em vez de desenhá-lo morto. Ela tem o que
+            // dizer — onde o contraste mora —, e por isso existe.
             "secao-aparencia",
             "secao-identidade",
-            // MODS, de 2026-09-17, e ela chega **depois** de IDENTIDADE pelo
-            // mesmo critério que pôs ATUALIZAÇÃO ali: o que se ajusta nesta
-            // tela é desta máquina, e quais MODs estão no disco dela — e a
-            // quem ela já disse sim — é tão local quanto qual SEELE está
-            // instalado.
+            // ---- MODS: o que está no disco, e a quem se disse sim ----
             //
-            // Ela não é escondida para quem não hospeda, como A PORTA é:
-            // metade dela, os aceites, vale justamente para quem só entra nos
-            // servidores dos outros.
+            // Grupo próprio e não dentro de «este dispositivo», embora seja
+            // desta máquina: U12 mede que a gestão de MODs sozinha «junta
+            // ativação, catálogo, cache, consentimentos e contadores numa
+            // página longa». Uma coisa desse tamanho não é um item de lista.
             "secao-mods",
-            // VERSÕES, vizinha de MODS e não de ATUALIZAÇÃO — e a vizinhança é
-            // o argumento. Uma versão guardada ao lado existe **por causa** de
-            // um MOD feito para ela; ATUALIZAÇÃO é a outra coisa, trocar a
-            // versão em uso por uma mais nova, substituindo.
-            "secao-versoes",
-            // The fourth is not the comp's — it predates the update button
-            // existing at all (ADR 0026). It lands here because what this screen
-            // adjusts is *this machine*, and which SEELE is installed on it is
-            // the most machine-local fact there is; and after the three above
-            // because it is the one section nobody opens on a normal day.
-            // MALHA, de 2026-09-17, e ela está aqui pelo mesmo critério das
-            // duas acima: o que se decide nela é quanto da internet **deste
-            // computador** vai para servir outras pessoas, e se o endereço
-            // **desta máquina** pode ser entregue a quem for servi-la. As duas
-            // perguntas são da máquina, e não do servidor em que se está.
+            // ---- ESTE SERVIDOR: vale para todo mundo que entra nele ----
             //
-            // Ela nasceu tarde porque o núcleo chegou primeiro: o caminho
-            // entre pares estava inteiro no protocolo, no núcleo e no servidor,
-            // e não havia onde consentir. `emprestando` era sempre falso em
-            // produção, e o `enlace.rs` dizia isso por escrito.
+            // As duas só aparecem para quem tem a permissão, e por isso o grupo
+            // inteiro costuma estar ausente — que é melhor que um buraco no meio
+            // de uma lista plana, como era antes.
+            "secao-porta",
+            "secao-servidor",
+            // ---- APLICATIVO: o SEELE em si ----
+            //
+            // VERSÕES continua vizinha de MODS na leitura — uma versão guardada
+            // ao lado existe **por causa** de um MOD feito para ela —, mas o
+            // grupo dela é o do aplicativo: o que se escolhe é qual SEELE roda.
+            "secao-versoes",
+            // MALHA: quanto da internet **deste computador** vai para servir
+            // outras pessoas. A auditoria pediu que ela deixasse de se chamar
+            // pelo nome da arquitetura (ver `data-titulo`), e o nome do grupo é
+            // o que a põe onde alguém a procuraria.
             "secao-malha",
             "secao-atualizacao",
-            // And the fifth is the one that is not about this machine at all:
-            // the server's own name and picture, for whoever is allowed to
-            // change them. It arrived after this list was first written down,
-            // and the sentence this screen's own subtitle used to carry —
-            // "ajustes deste computador, e não deste servidor" — was rewritten
-            // rather than quietly outlived. That is the decision that moved, and
-            // it moved because the alternative was a second screen also called
-            // configuration, reachable only from inside a session.
-            //
-            // Last, and the position is the argument: this section is *usually
-            // absent*. It is drawn only for a session that carries
-            // `may_customise_server`, so for everybody else the column ends at
-            // the update section rather than showing a gap in its middle.
-            "secao-servidor",
         ],
-        "the settings screen is three of the four sections of the v3 comp, then \
-         the update one, then the server one, in this order"
+        "a configuração perdeu uma seção ou trocou a ordem dos grupos"
     );
 }
 

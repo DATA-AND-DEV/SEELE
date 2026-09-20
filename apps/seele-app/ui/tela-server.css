@@ -1,7 +1,22 @@
 /* A camada que põe a configuração por cima, e não no lugar.
-   Valores da comp da 0.9.0: véu de 0,78 sobre o negro absoluto, e a caixa
-   centrada com folga de 32px em toda volta — abaixo disso, numa janela
-   estreita, ela encosta nas bordas e deixa de parecer um diálogo. */
+
+   ---- por que ela deixou de ser um diálogo de 840 × 620 ----
+
+   U29 da auditoria de 20/09/2026 mediu o que sobrava: «o modal tem largura
+   máxima de 840 px e altura `min(620px, calc(100vh - 96px))`; a grade reserva
+   216 px à navegação. No limite máximo, sobram aproximadamente 574 px internos
+   para conteúdo». Dentro desses 574 px moravam a gestão de MODs inteira — com
+   catálogo, cache, consentimentos e contadores —, a administração do servidor e
+   a documentação de cada controle.
+
+   A razão de ser camada e não tela continua valendo e está escrita em
+   `index.html`: trocar de microfone no meio de uma conversa é o caso de uso, e
+   uma tela que substitui a sessão esconde o que se está tentando consertar. O
+   que mudou foi o **tamanho**: ela ocupa a área útil da janela, com a folga que
+   a mantém legível, em vez de uma caixa que cabia numa tela de 2015.
+
+   A voz e a conexão continuam de pé atrás dela — é a mesma camada, com o mesmo
+   `z-index` —, e a faixa de contexto no cabeçalho diz isso em palavra. */
 .camada-server {
   position: fixed;
   inset: 0;
@@ -9,7 +24,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px;
+  padding: clamp(12px, 3vh, 32px) clamp(12px, 3vw, 48px);
 }
 
 .camada-server::before {
@@ -38,8 +53,13 @@
 .camada-server > .server {
   position: relative;
   width: 100%;
-  max-width: 840px;
-  height: min(620px, calc(100vh - 96px));
+  /* **A área útil, e não 840 px.** Um teto ainda existe — uma coluna de texto
+     de 1600 px é ilegível, e o §«Formato recomendado» da auditoria pede
+     «coluna de leitura confortável» em vez de parágrafos esticados pela
+     largura inteira. O que ele não faz mais é caber numa caixa de 574 px de
+     conteúdo com a gestão de MODs inteira dentro. */
+  max-width: min(1400px, 100%);
+  height: min(920px, calc(100vh - 24px));
   background: var(--seele-negro-painel);
   border: 1px solid var(--seele-linha-forte);
   overflow: hidden;
@@ -179,14 +199,32 @@
   letter-spacing: 0.1em;
 }
 
-/* A porta de saída, colada no rodapé da coluna. `margin-top: auto` e não um
-   espaçador vazio: um `<div>` só para empurrar é um elemento que um leitor de
-   tela percorre sem nada a dizer. */
+/* Os grupos da coluna — U31.
+
+   Cabeçalho e nota, e não só cabeçalho: «este dispositivo» e «este servidor»
+   são a mesma forma de palavra com consequências opostas, e a nota é onde a
+   diferença cabe sem virar um parágrafo dentro de cada seção. */
+.server-grupo {
+  margin: 0;
+  padding: 16px 16px 2px;
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-laranja-nerv);
+}
+
+.server-grupo-nota { padding: 0 16px 8px; }
+
+/* A porta de saída, no cabeçalho persistente — U33.
+
+   Ela ficava colada no rodapé de uma coluna que rola, depois de nove seções:
+   numa janela baixa saía da tela, e sair da configuração passava a depender de
+   rolar até o fim de uma lista. */
 .server-voltar {
-  margin-top: auto;
-  width: 100%;
-  min-height: 48px;
-  padding: 16px;
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 8px 12px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -196,8 +234,7 @@
   text-align: left;
   color: var(--seele-osso-apagado);
   background: none;
-  border: none;
-  border-top: 1px solid var(--seele-linha);
+  border: 1px solid var(--seele-linha);
   cursor: pointer;
 }
 
@@ -213,13 +250,46 @@
   flex-direction: column;
 }
 
+/* O cabeçalho persistente: voltar, categoria atual e contexto — U33.
+
+   `sticky` e não `fixed`: ele pertence ao corpo que rola, e uma barra fixa
+   sobre uma camada que já é fixa é um segundo sistema de coordenadas para
+   alguém manter em dia. O fundo é opaco porque o conteúdo passa por baixo. */
 .server-faixa {
-  padding: 16px 24px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--seele-linha);
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 16px;
   flex-shrink: 0;
+  background: var(--seele-negro-painel);
+  flex-wrap: wrap;
+}
+
+.server-faixa-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+/* A faixa de contexto: onde você está enquanto mexe aqui.
+
+   Alinhada à direita e em corpo pequeno de propósito — ela responde uma
+   pergunta que a pessoa tem («minha voz continua indo?») sem competir com a
+   categoria aberta, que é o que ela veio ler. */
+.server-contexto {
+  margin: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 /* Onde o comp punha SALVAR, DESCARTAR e «alterações não salvas», esta faixa tem

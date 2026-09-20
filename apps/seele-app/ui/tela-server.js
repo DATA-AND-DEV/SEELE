@@ -399,9 +399,52 @@ async function abrirServer(origem) {
   // escolheu da última vez, e reabrir a tela não é tentar de novo.
   $("server-servidor-erro").hidden = true;
   $("server-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
+  desenharContextoDaSessao();
   await desenharDispositivos();
   await atualizarServer();
   abrirTela("tela-server");
+}
+
+/**
+ * A faixa de contexto do cabeçalho: onde você está enquanto mexe aqui.
+ *
+ * # Por que ela existe
+ *
+ * A configuração passou a ocupar a área útil da janela (U29), e uma tela que
+ * cobre tudo parece ter substituído a sessão. A pergunta que ela cria é
+ * concreta — «minha voz continua indo?» —, e é ela que faz alguém fechar a
+ * configuração antes de terminar o que veio fazer.
+ *
+ * O §«Formato recomendado» da auditoria pede exatamente isto: «Voz e conexão
+ * continuam ativas; uma faixa compacta informa sala, microfone e como retornar
+ * à conversa.»
+ *
+ * # De onde sai o que ela diz
+ *
+ * Do mesmo retrato que a sessão desenha, e não de um estado paralelo: dois
+ * lugares contando a mesma coisa é onde um deles fica para trás. Fora de
+ * sessão ela some — não há contexto nenhum para dizer, e uma frase vazia seria
+ * ruído no cabeçalho.
+ */
+function desenharContextoDaSessao() {
+  const faixa = $("server-contexto");
+  if (!faixa) return;
+  // `desenhado` mora em `tela-sessao.js` e é o último retrato colhido. Fora de
+  // sessão ele é nulo, que é a resposta certa.
+  const retrato = typeof desenhado === "object" ? desenhado : null;
+  if (!retrato) {
+    faixa.hidden = true;
+    faixa.textContent = "";
+    return;
+  }
+  const sala = retrato.voice_rooms?.find((c) => c.occupied_by_us);
+  const partes = [
+    sala ? `Na sala ${sala.name}` : "Fora de sala",
+    retrato.muted ? "microfone mudo" : "microfone aberto",
+    "a conversa continua atrás desta tela",
+  ];
+  faixa.textContent = partes.join(" · ");
+  faixa.hidden = false;
 }
 
 /** Fecha e devolve para a tela que a abriu. */

@@ -2124,7 +2124,14 @@
 
     <nav class="server-coluna" aria-label="seções da configuração">
       <div class="server-marca">
-        <h1 class="server-marca-titulo">TERMINAL SERVER</h1>
+        <!--
+          «TERMINAL SERVER» saiu. U06 da auditoria de 20/09/2026: «Configuracoes
+          se chamam "TERMINAL SERVER", embora misturem preferencias locais e
+          administracao de um servidor.» O nome vinha da comp e descrevia uma
+          metade do que a tela faz - e a outra metade e justamente a que alguem
+          nao encontraria procurando por ela.
+        -->
+        <h1 class="server-marca-titulo">CONFIGURAÇÕES</h1>
         <!--
           A frase era «Ajustes deste computador, e não deste servidor», e a
           segunda metade deixou de ser verdade no dia em que a última seção
@@ -2133,7 +2140,8 @@
           desta máquina, e essa é a leitura que evita alguém procurar aqui o que
           é do servidor.
         -->
-        <p class="nota">Ajustes deste computador.</p>
+        <p class="nota">Deste dispositivo, dos MODs e — para quem pode mudá-lo —
+          deste servidor.</p>
       </div>
 
       <!--
@@ -2147,25 +2155,29 @@
         tabela paralela em JavaScript: o texto do cabeçalho fica ao lado do
         botão que o abre, e não há duas listas para alguém manter em dia.
       -->
-      <ul class="server-secoes">
-        <li id="secao-porta-item" hidden>
-          <!--
-            A PORTA só existe para quem hospeda, como o bloco do convite na
-            tela de entrada: a porta do servidor é estado da máquina que o
-            hospeda, e quem entrou no servidor de outra pessoa não tem porta
-            nenhuma para configurar.
-          -->
-          <button id="secao-porta" class="server-secao" type="button"
-                  data-painel="painel-porta"
-                  data-titulo="A PORTA"
-                  data-sub="O link deste servidor e quem pode atravessá-lo">
-            <span class="server-secao-icone" data-glifo="chave"></span>
-            <span class="server-secao-texto">
-              <span class="server-secao-nome">A PORTA</span>
-            </span>
-          </button>
-        </li>
-        <li>
+      <!--
+        As seções agrupadas por **escopo** — U31.
+
+        «Microfone, Aparência, Identidade, MODs, Versões, Malha e Atualização no
+        mesmo nível, sem distinguir frequência e escopo.» Sete seções numa lista
+        plana fazem cada uma parecer o mesmo tipo de coisa, e elas não são:
+        trocar o microfone vale nesta máquina, renomear o servidor vale para
+        todo mundo que entra nele, e a diferença decide se alguém hesita antes
+        de mexer.
+
+        Os quatro grupos são os da auditoria: este dispositivo, MODs, este
+        servidor e o aplicativo. Cada `<ul>` tem o próprio `aria-labelledby`, e
+        quem usa leitor de tela ouve o grupo antes das seções dele — a mesma
+        informação que a pessoa vidente lê no cabeçalho.
+
+        `A PORTA` e `SERVIDOR` já nasciam escondidas para quem não hospeda, e
+        continuam: o grupo inteiro fica vazio nesse caso, e um cabeçalho de
+        grupo sem nada embaixo é o que `desenharGruposDaConfiguracao` esconde.
+      -->
+      <p class="server-grupo" id="server-grupo-dispositivo">ESTE DISPOSITIVO</p>
+      <p class="server-grupo-nota nota">Valem nesta máquina, e não no servidor.</p>
+      <ul class="server-secoes" aria-labelledby="server-grupo-dispositivo">
+<li>
           <button id="secao-audio" class="server-secao" type="button"
                   data-painel="painel-audio"
                   data-titulo="MICROFONE E SOM"
@@ -2180,7 +2192,7 @@
             </span>
           </button>
         </li>
-        <li>
+<li>
           <button id="secao-atalhos" class="server-secao" type="button"
                   data-painel="painel-atalhos"
                   data-titulo="ATALHOS"
@@ -2192,14 +2204,7 @@
             </span>
           </button>
         </li>
-        <!--
-          APARÊNCIA saiu, e a ausência é a mesma regra que já governa esta tela:
-          omitir o que não existe em vez de desenhá-lo vazio. Ela tinha uma chave
-          só — LEGENDAS SIMPLES —, e aquela camada de texto deixou de ser um modo
-          para virar parte do controle que ela explica. Uma seção de configuração
-          com nada dentro promete um ajuste que não há.
-        -->
-        <li>
+<li>
           <!--
             APARÊNCIA, da comp da 0.9.0. **Informativa e não um controle**, e é
             assim que a comp a desenha: dois cartões que dizem o que o tema é e
@@ -2221,7 +2226,7 @@
             </span>
           </button>
         </li>
-        <li>
+<li>
           <button id="secao-identidade" class="server-secao" type="button"
                   data-painel="painel-identidade"
                   data-titulo="IDENTIDADE"
@@ -2233,7 +2238,11 @@
             </span>
           </button>
         </li>
-        <li>
+      </ul>
+      <p class="server-grupo" id="server-grupo-mods">MODS</p>
+      <p class="server-grupo-nota nota">O que está instalado aqui e a quem você já disse sim.</p>
+      <ul class="server-secoes" aria-labelledby="server-grupo-mods">
+<li>
           <!--
             MODS — ADR 0045. Aqui, e não na sessão, pelo mesmo argumento que põe
             o microfone nesta tela: o que se ajusta aqui é **desta máquina**.
@@ -2256,7 +2265,44 @@
             </span>
           </button>
         </li>
-        <li>
+      </ul>
+      <p class="server-grupo" id="server-grupo-servidor">ESTE SERVIDOR</p>
+      <p class="server-grupo-nota nota">Valem para todo mundo que entra nele. Só para quem administra.</p>
+      <ul class="server-secoes" aria-labelledby="server-grupo-servidor">
+<li id="secao-porta-item" hidden>
+          <!--
+            A PORTA só existe para quem hospeda, como o bloco do convite na
+            tela de entrada: a porta do servidor é estado da máquina que o
+            hospeda, e quem entrou no servidor de outra pessoa não tem porta
+            nenhuma para configurar.
+          -->
+          <button id="secao-porta" class="server-secao" type="button"
+                  data-painel="painel-porta"
+                  data-titulo="A PORTA"
+                  data-sub="O link deste servidor e quem pode atravessá-lo">
+            <span class="server-secao-icone" data-glifo="chave"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">A PORTA</span>
+            </span>
+          </button>
+        </li>
+<li id="secao-servidor-item" hidden>
+          <button id="secao-servidor" class="server-secao" type="button"
+                  data-painel="painel-servidor"
+                  data-titulo="ESTE SERVIDOR"
+                  data-sub="O nome e a imagem que todo mundo vê ao entrar aqui">
+            <span class="server-secao-icone" data-glifo="aparencia"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">SERVIDOR</span>
+              <span class="nota">Nome e imagem</span>
+            </span>
+          </button>
+        </li>
+      </ul>
+      <p class="server-grupo" id="server-grupo-aplicativo">APLICATIVO</p>
+      <p class="server-grupo-nota nota">O SEELE em si: versão, conexão e atualização.</p>
+      <ul class="server-secoes" aria-labelledby="server-grupo-aplicativo">
+<li>
           <!--
             VERSÕES — ADR 0046. Vizinha de MODS e não de ATUALIZAÇÃO, e a
             vizinhança é o argumento: uma versão guardada ao lado existe **por
@@ -2274,14 +2320,7 @@
             </span>
           </button>
         </li>
-        <!--
-          **A malha, e por que ela é desta tela.** O que se decide aqui é
-          quanto da internet **deste computador** vai para servir outras
-          pessoas, e se o endereço **desta máquina** pode ser entregue a quem
-          for servi-la. As duas são da máquina, como o microfone e a versão —
-          não do servidor em que se está.
-        -->
-        <li>
+<li>
           <button id="secao-malha" class="server-secao" type="button"
                   data-painel="painel-malha"
                   data-titulo="CAMINHO ENTRE PARES"
@@ -2293,18 +2332,7 @@
             </span>
           </button>
         </li>
-        <!--
-          A quinta, e a única que o comp v3 não desenha: ele foi feito antes de
-          existir um botão de atualizar. Ela é desta tela e não de outra pelo
-          mesmo argumento que põe o microfone aqui — o que se ajusta aqui é
-          **deste computador**, e qual SEELE está instalado nele é a coisa mais
-          desta máquina que existe.
-
-          E aqui, e não na sessão, por uma segunda razão: instalar fecha a
-          janela. Esta tela é alcançável da entrada, sem sessão nenhuma aberta,
-          que é de onde atualizar não custa a conversa de ninguém.
-        -->
-        <li>
+<li>
           <button id="secao-atualizacao" class="server-secao" type="button"
                   data-painel="painel-atualizacao"
                   data-titulo="VERSÃO E ATUALIZAÇÃO"
@@ -2316,59 +2344,56 @@
             </span>
           </button>
         </li>
-        <!--
-          A sexta, e a única que não é desta máquina: o nome e a imagem do
-          servidor. Ela cai aqui porque é aqui que se ajusta o que não é
-          conversa — a alternativa era uma tela nova alcançável só de dentro da
-          sessão, e o produto passaria a ter dois lugares chamados configuração.
-
-          Última, e a posição é a decisão: esta seção **quase nunca está aí**.
-          Ela aparece só para quem tem a permissão, então uma pessoa comum abre
-          esta tela e vê cinco seções, não um buraco no meio da coluna.
-
-          Esconder não é o que impede: quem pedir sem a permissão recebe uma
-          recusa do servidor, e é lá que a `specs/08-seguranca.md` põe a
-          segurança. Isto é não oferecer o que não ia funcionar — o mesmo que a
-          coluna de canais já faz com os dois formulários de criar.
-
-          O `hidden` está na marcação, e não é detalhe: antes do primeiro
-          snapshot esta janela não sabe que permissões tem, e uma seção nascida
-          visível prometeria por um quadro o que ela talvez não possa cumprir.
-        -->
-        <li id="secao-servidor-item" hidden>
-          <button id="secao-servidor" class="server-secao" type="button"
-                  data-painel="painel-servidor"
-                  data-titulo="ESTE SERVIDOR"
-                  data-sub="O nome e a imagem que todo mundo vê ao entrar aqui">
-            <span class="server-secao-icone" data-glifo="aparencia"></span>
-            <span class="server-secao-texto">
-              <span class="server-secao-nome">SERVIDOR</span>
-              <span class="nota">Nome e imagem</span>
-            </span>
-          </button>
-        </li>
       </ul>
-
-      <!--
-        O comp escreve `VOLTAR AO SERVIDOR`, e daqui isso só é verdade metade das
-        vezes: esta tela também é aberta da entrada, onde não há Server nenhum
-        para voltar. O texto é escrito ao abrir, pela tela que abriu.
-      -->
-      <button id="server-fechar" class="server-voltar" type="button">
-        <span data-glifo="recuar"></span>
-        <span id="server-voltar-texto">VOLTAR</span>
-      </button>
     </nav>
 
     <div class="server-corpo">
+      <!--
+        O cabecalho persistente - U33.
+
+        «Voltar fica no fim da coluna que tambem rola; navegacao longa compete
+        com a saida.» O botao ficava depois de nove secoes, num `<nav>` com
+        `overflow-y: auto`: numa janela baixa ele saia da tela, e a saida da
+        configuracao passava a depender de rolar ate o fim de uma lista.
+
+        Ele sobe para ca, onde ja moravam o titulo e o subtitulo da secao
+        aberta, e o conjunto fica grudado no alto do corpo: `position: sticky`
+        em `.server-faixa`. A auditoria pediu os tres juntos - «voltar,
+        categoria atual e contexto» -, e o terceiro e a faixa de sessao ao lado.
+      -->
       <header class="server-faixa">
         <!--
-          Título e subtítulo da seção aberta, escritos do `data-titulo` e do
-          `data-sub` do botão. Vazios na marcação de propósito: preenchê-los aqui
-          seria uma terceira cópia das mesmas duas frases.
+          O comp escreve `VOLTAR AO SERVIDOR`, e daqui isso so e verdade metade
+          das vezes: esta tela tambem e aberta da entrada, onde nao ha servidor
+          nenhum para voltar. O texto e escrito ao abrir, pela tela que abriu.
         -->
-        <h2 id="server-titulo" class="server-titulo"></h2>
-        <p id="server-subtitulo" class="nota"></p>
+        <button id="server-fechar" class="server-voltar" type="button">
+          <span data-glifo="recuar"></span>
+          <span id="server-voltar-texto">VOLTAR</span>
+        </button>
+        <div class="server-faixa-texto">
+          <!--
+            Titulo e subtitulo da secao aberta, escritos do `data-titulo` e do
+            `data-sub` do botao. Vazios na marcacao de proposito: preenche-los
+            aqui seria uma terceira copia das mesmas duas frases.
+          -->
+          <h2 id="server-titulo" class="server-titulo"></h2>
+          <p id="server-subtitulo" class="nota"></p>
+        </div>
+        <!--
+          O contexto: onde voce esta enquanto mexe aqui.
+
+          «Voz e conexao continuam ativas; uma faixa compacta informa sala,
+          microfone e como retornar a conversa.» Sem ela, uma tela que cobre a
+          janela inteira parece ter substituido a sessao - e a duvida sobre
+          «minha voz continua indo?» e exatamente a que faz alguem fechar a
+          configuracao antes de terminar o que veio fazer.
+
+          Escrita por `desenharContextoDaSessao`, em `tela-server.js`, a partir
+          do mesmo retrato que a sessao usa. Escondida fora de sessao: nao ha
+          contexto nenhum para dizer.
+        -->
+        <p id="server-contexto" class="server-contexto" hidden></p>
       </header>
 
       <div class="server-painel">

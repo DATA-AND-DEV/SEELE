@@ -1469,6 +1469,19 @@ class RegiaoDeMod {
    * caminho — `drawImage` de um elemento desta janela lê pixels dela.
    */
   montarTela(elem, plano) {
+    // **O fundo da cena, carregado uma vez e guardado com a tela.**
+    //
+    // A auditoria de 20/09/2026 anotou o defeito exato: «O mapa é montado como
+    // mídia separada do canvas, em vez de fundo sob as peças.» Um `<img>` ao
+    // lado de um `<canvas>` é um mapa que não tem relação nenhuma com onde as
+    // peças estão — zoom, deslocamento e coordenadas ficam em dois planos que
+    // ninguém alinha.
+    //
+    // O MOD não desenha a imagem: ele nomeia a origem — o pacote dele ou o
+    // servidor dele —, e quem a busca, reconhece e pinta é o produto, na mesma
+    // tela e antes de tudo.
+    const fundo = { imagem: null, pedido: "", cancelado: false };
+    elem.__fundoDaTela = fundo;
     let arrastando = false;
     let pendente = null;
     let quadro = 0;
@@ -1569,7 +1582,68 @@ class RegiaoDeMod {
       // A lista de acerto sai com a tela: ela descreve pixels que não existem
       // mais, e guardá-la manteria a região viva pelo próprio mapa.
       this.acertoDaTela.delete(elem);
+      // O fundo sai com a tela: uma imagem decodificada presa a um canvas que
+      // já não existe é memória que ninguém mais alcança para soltar.
+      fundo.cancelado = true;
+      fundo.imagem = null;
+      delete elem.__fundoDaTela;
       this.contagem.telas -= 1;
+    });
+  }
+
+  /**
+   * Busca o fundo desta tela, **uma vez por origem**.
+   *
+   * A chave é a declaração inteira: um MOD que redesenhe a cada quadro pede o
+   * mesmo mapa a cada quadro, e sem esta comparação seriam sessenta idas ao
+   * servidor por segundo. Trocar de cena troca a chave, e aí sim há busca.
+   */
+  buscarFundoDaTela(elem, plano) {
+    const fundo = elem.__fundoDaTela;
+    if (!fundo || fundo.cancelado) return;
+    const declarado = plano.no.fundo;
+    const chave = declarado ? JSON.stringify(declarado) : "";
+    if (chave === fundo.pedido) return;
+    fundo.pedido = chave;
+    fundo.imagem = null;
+    if (!declarado) return;
+
+    const vindo = declarado.doServidor
+      ? this.dono.carregarMidiaDoServidor(
+          Number(declarado.doServidor.canal) || 0,
+          declarado.doServidor.pedido ?? {},
+          typeof declarado.doServidor.campo === "string" && declarado.doServidor.campo
+            ? declarado.doServidor.campo
+            : "bytes",
+        )
+      : typeof declarado.fonte === "string" && declarado.fonte
+        ? this.dono.carregarMidia(declarado.fonte)
+        : null;
+    if (!vindo) return;
+
+    vindo.then((midia) => {
+      // As três perguntas de sempre, depois do `await`: a tela pode ter saído,
+      // a região pode estar solta, e a sessão pode ter acabado.
+      if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
+      if (fundo.pedido !== chave) return;
+      if (midia.papel !== "imagem") return;
+      const img = new Image();
+      img.onload = () => {
+        if (fundo.cancelado || fundo.pedido !== chave) return;
+        fundo.imagem = img;
+        // Repinta **agora**: a imagem chegou depois do desenho que a pediu, e
+        // esperar o próximo deixaria o mapa aparecendo quatro segundos tarde.
+        this.pintarTela(elem, plano);
+      };
+      img.src = midia.uri;
+    }).catch((falha) => {
+      if (fundo.cancelado || this.solta) return;
+      this.dono.falar({
+        nome: "tela",
+        chave: plano.no.chave ?? "",
+        estado: "fundo-falhou",
+        porque: String(falha?.message ?? falha),
+      });
     });
   }
 
@@ -1589,6 +1663,16 @@ class RegiaoDeMod {
     const pincel = elem.getContext?.("2d");
     if (!pincel) return;
     pincel.clearRect(0, 0, elem.width, elem.height);
+
+    // **O fundo primeiro, e dentro da mesma tela.** Ver `montarTela`.
+    this.buscarFundoDaTela(elem, plano);
+    const fundo = elem.__fundoDaTela;
+    if (fundo?.imagem) {
+      // Esticado para a tela declarada: as coordenadas das figuras são as da
+      // cena, e um mapa desenhado noutra escala poria a peça fora da sala.
+      pincel.drawImage(fundo.imagem, 0, 0, elem.width, elem.height);
+    }
+
     const estilo = getComputedStyle(elem);
     pincel.strokeStyle = estilo.getPropertyValue("color") || "#ffffff";
     pincel.lineWidth = 2;
