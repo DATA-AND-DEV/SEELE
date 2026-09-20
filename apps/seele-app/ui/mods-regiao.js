@@ -141,8 +141,69 @@ const FORMAS_COM_TETO = Object.freeze({
  * o que focar — foi a bancada da região que pegou, na primeira execução.
  */
 const FORMAS_COM_FILHOS = Object.freeze(
-  new Set(["texto", "titulo", "linha", "lista", "item", "botao"]),
+  new Set(["texto", "titulo", "linha", "lista", "item", "botao", "arquivo"]),
 );
+
+/**
+ * Os papéis que um `arquivo` pode pedir, e o que cada um filtra no seletor.
+ *
+ * **O filtro é orientação, não fronteira.** A extensão é texto que quem
+ * escolheu digitou; o papel de verdade sai dos bytes, do lado do Rust, e é ele
+ * que decide se o arquivo é aceito. O que estas listas fazem é não mostrar
+ * quarenta JSONs a quem foi pedir um retrato — que foi o que a auditoria de
+ * 20/09/2026 observou no seletor de avatar do PERFIS.
+ */
+const PAPEIS_DE_ARQUIVO = Object.freeze({
+  imagem: Object.freeze(["png", "jpg", "jpeg", "webp", "gif"]),
+  som: Object.freeze(["wav", "mp3", "ogg", "flac", "m4a"]),
+});
+
+/**
+ * Os papéis que este `arquivo` pede, dentro dos que a API conhece.
+ *
+ * Sem declaração, os dois: é o comportamento que os pacotes já publicados têm,
+ * e mudá-lo silenciosamente faria um MOD da API 3 parar de conseguir escolher.
+ */
+function papeisDeArquivo(no) {
+  const pedidos = Array.isArray(no?.tipos) ? no.tipos : [];
+  const validos = pedidos
+    .map((t) => String(t))
+    .filter((t) => Object.hasOwn(PAPEIS_DE_ARQUIVO, t));
+  return validos.length ? [...new Set(validos)] : [];
+}
+
+/** O teto de bytes que este `arquivo` declara, dentro do que o produto aceita. */
+function tetoDeArquivo(no) {
+  const n = Number(no?.limiteDeBytes);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(Math.round(n), LIMITES_DA_REGIAO.bytesDeMidia);
+}
+
+/** O texto de um rótulo declarado por `rotulo` ou por `dentro`, quando é texto. */
+function textoDoRotulo(no) {
+  if (typeof no?.rotulo === "string" && no.rotulo) return no.rotulo.slice(0, 120);
+  if (typeof no?.dentro === "string") return no.dentro.slice(0, 120);
+  return "";
+}
+
+/**
+ * O que o produto precisa saber antes de abrir o seletor do sistema.
+ *
+ * Três coisas, e as três são de quem escolhe: **para quê** (o título do
+ * diálogo deixa de ser «Escolha um arquivo para este MOD» e passa a dizer o que
+ * o MOD vai fazer com ele), **de que tipo** (o filtro de extensões, que é
+ * orientação — a prova continua sendo os bytes) e **até quanto** (recusar antes
+ * de ler, e não depois de a memória já ter pago).
+ */
+function pedidoDeArquivo(no) {
+  const papeis = papeisDeArquivo(no);
+  return {
+    finalidade: typeof no?.finalidade === "string" ? no.finalidade.slice(0, 200) : "",
+    papeis,
+    extensoes: papeis.flatMap((p) => [...PAPEIS_DE_ARQUIVO[p]]),
+    limiteDeBytes: tetoDeArquivo(no),
+  };
+}
 
 /**
  * Uma região montada, com os recursos dela.
@@ -507,7 +568,8 @@ class RegiaoDeMod {
       if (escolhendo) return;
       escolhendo = true;
       elem.disabled = true;
-      Promise.resolve(this.dono.escolherArquivo())
+      elem.dataset.escolhendo = "sim";
+      Promise.resolve(this.dono.escolherArquivo(pedidoDeArquivo(plano.no)))
         .then((escolhido) => {
           // **Cancelar é uma resposta.** Quem fecha o seletor sem escolher faz
           // o MOD receber `null`, e não um silêncio que o deixa esperando.
@@ -515,6 +577,13 @@ class RegiaoDeMod {
             nome: "arquivo",
             chave: plano.no.chave ?? "",
             arquivo: escolhido ?? null,
+            // «Não escolhi» e «não deu» são respostas diferentes, e antes elas
+            // chegavam iguais: as duas como `arquivo: null`. Um MOD que quisesse
+            // dizer «o formato não serve» não tinha como distinguir do silêncio
+            // de quem fechou o seletor — e a auditoria pediu cancelamento
+            // «neutro e silencioso quando apropriado», que só é possível quando
+            // o MOD sabe que foi cancelamento.
+            resultado: escolhido ? "escolhido" : "cancelado",
           });
         })
         .catch((falha) => {
@@ -522,11 +591,13 @@ class RegiaoDeMod {
             nome: "arquivo",
             chave: plano.no.chave ?? "",
             arquivo: null,
+            resultado: "falhou",
             porque: String(falha?.message ?? falha),
           });
         })
         .finally(() => {
           escolhendo = false;
+          delete elem.dataset.escolhendo;
           elem.disabled = plano.no.desligado === true;
         });
     };
@@ -539,8 +610,46 @@ class RegiaoDeMod {
     });
   }
 
+  /**
+   * O rótulo, a finalidade e o estado — e **por que isto faltava**.
+   *
+   * `arquivo` não estava em `FORMAS_COM_FILHOS`, e nem `montarArquivo` nem
+   * `atualizarArquivo` escreviam texto: um `<button>` vazio, sem nome
+   * acessível, saía na tela. O PERFIS declarava `ENVIAR RETRATO` e
+   * `ENVIAR FAIXA` e a auditoria de 20/09/2026 encontrou dois botões em
+   * branco, um deles abrindo um seletor genérico que não dizia para quê.
+   *
+   * Não era um pacote que esqueceu o texto: era o renderer que não tinha
+   * caminho nenhum para escrevê-lo. Agora `dentro` reconcilia como no `botao`,
+   * e `finalidade` vira o nome acessível completo — que é o que um leitor de
+   * tela lê antes de o diálogo do sistema abrir.
+   */
   atualizarArquivo(elem, plano) {
     elem.disabled = plano.no.desligado === true;
+    const finalidade = typeof plano.no.finalidade === "string"
+      ? plano.no.finalidade.slice(0, 200)
+      : "";
+    const rotulo = textoDoRotulo(plano.no);
+    // O nome acessível é o rótulo mais a finalidade quando ela existe: «ENVIAR
+    // RETRATO» sozinho não diz que o arquivo vai virar o avatar do perfil.
+    const nome = finalidade ? `${rotulo} — ${finalidade}` : rotulo;
+    if (nome) {
+      if (elem.getAttribute("aria-label") !== nome) elem.setAttribute("aria-label", nome);
+      if (elem.getAttribute("title") !== nome) elem.setAttribute("title", nome);
+    } else {
+      elem.removeAttribute("aria-label");
+      elem.removeAttribute("title");
+    }
+    // Os tipos e o teto ficam legíveis na própria tela, e não só no diálogo do
+    // sistema: quem decide se tem o arquivo decide **antes** de abrir o seletor.
+    const papeis = papeisDeArquivo(plano.no);
+    const teto = tetoDeArquivo(plano.no);
+    const exigencia = [
+      papeis.length ? papeis.map((p) => (p === "som" ? "som" : "imagem")).join(" ou ") : "",
+      teto ? `até ${Math.round(teto / 1024)} KB` : "",
+    ].filter(Boolean).join(" · ");
+    if (exigencia) elem.dataset.exigencia = exigencia;
+    else delete elem.dataset.exigencia;
   }
 
   // ------------------------------------------------------------ tela

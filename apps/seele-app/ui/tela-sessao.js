@@ -1524,6 +1524,16 @@ function desenharPessoas(snapshot) {
         linhaDoRoster(
           {
             nome: `${snapshot.nickname} (você)`,
+            // **E o cartão, aqui também.** Esta ramificação e a do saguão eram
+            // as duas que não passavam `cartoes` ao renderer: um MOD que
+            // escrevesse o nome de perfil de alguém via aquele nome sumir no
+            // instante em que a pessoa saía da sala de voz — inclusive o dela
+            // mesma. A auditoria de 20/09/2026 observou exatamente isso: o nome
+            // `PERFIL QA` aparecia dentro da sala e desaparecia ao sair.
+            //
+            // Um cartão é sobre **a pessoa**, e não sobre onde ela está
+            // sentada. As três ramificações usam o mesmo modelo de apresentação.
+            cartoes: cartoesDaPessoa(snapshot.me),
             ratio: snapshot.telemetry.signal,
             faixa: snapshot.telemetry.sync_band,
             falando: snapshot.speaking,
@@ -1566,6 +1576,10 @@ function desenharPessoas(snapshot) {
           linhaDoRoster(
             {
               nome: pessoa.nickname,
+              // O mesmo cartão da sala: quem está no saguão continua sendo a
+              // mesma pessoa, e o MOD que a apresenta não muda de opinião
+              // porque ela não sentou em sala nenhuma.
+              cartoes: cartoesDaPessoa(pessoa.id),
               // Sem medida: o sinal de quem não está numa sala não é medido por
               // ninguém — não há voz atravessando para medir. Travessão é o que
               // este produto escreve onde não mediu, e inventar zero aqui seria

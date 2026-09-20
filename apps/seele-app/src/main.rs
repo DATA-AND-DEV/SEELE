@@ -4280,11 +4280,16 @@ struct EscolhidoParaOMod {
 /// pé, quando o arquivo passa do teto, ou quando os bytes não são de um
 /// formato que este produto reconhece.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn escolher_para_o_mod(
     app: AppHandle,
     session: State<'_, Session>,
     geracao: u64,
     id: String,
+    finalidade: Option<String>,
+    papeis: Option<Vec<String>>,
+    extensoes: Option<Vec<String>>,
+    limite_de_bytes: Option<usize>,
 ) -> Result<Option<EscolhidoParaOMod>, FalhaNoMod> {
     use tauri_plugin_dialog::DialogExt as _;
 
@@ -4297,11 +4302,50 @@ async fn escolher_para_o_mod(
         });
     }
 
+    // **O título diz para quê.** Antes dizia «Escolha um arquivo para este
+    // MOD», que não responde a pergunta de quem está olhando o Finder: *este
+    // arquivo vai virar o quê?* A auditoria de 20/09/2026 abriu o seletor de
+    // avatar do PERFIS e não teve como saber que era o avatar.
+    //
+    // O texto vem do MOD, então ele é cortado e limpo de quebras de linha: um
+    // título de diálogo do sistema não é onde se escreve um parágrafo.
+    let proposito: String = finalidade
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect();
+    let titulo = if proposito.trim().is_empty() {
+        "Escolha um arquivo para este MOD".to_owned()
+    } else {
+        proposito.trim().to_owned()
+    };
+
+    // **O filtro é orientação, e não a fronteira.** A prova do tipo continua
+    // saindo dos bytes, mais abaixo; o que ele evita é oferecer quarenta JSONs
+    // a quem foi buscar um retrato. Extensões que o produto não conhece são
+    // descartadas: um MOD não escolhe o que o seletor da máquina de outra
+    // pessoa aceita.
+    const EXTENSOES_CONHECIDAS: &[&str] = &[
+        "png", "jpg", "jpeg", "webp", "gif", "wav", "mp3", "ogg", "flac", "m4a",
+    ];
+    let aceitas: Vec<&str> = extensoes
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|e| {
+            EXTENSOES_CONHECIDAS
+                .iter()
+                .find(|c| c.eq_ignore_ascii_case(e))
+                .copied()
+        })
+        .collect();
+
     let (envia, mut recebe) = tauri::async_runtime::channel(1);
-    app.dialog()
-        .file()
-        .set_title("Escolha um arquivo para este MOD")
-        .pick_file(move |escolha| {
+    let mut dialogo = app.dialog().file().set_title(&titulo);
+    if !aceitas.is_empty() {
+        dialogo = dialogo.add_filter("Aceitos por este MOD", &aceitas);
+    }
+    dialogo.pick_file(move |escolha| {
             let _ = envia.try_send(escolha);
         });
     // **Cancelar é uma resposta.** Quem fecha o seletor sem escolher recebe
@@ -4322,7 +4366,12 @@ async fn escolher_para_o_mod(
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "arquivo-ilegivel".to_owned(),
         })?;
-    if tamanho > TETO_DO_ESCOLHIDO {
+    // O teto do produto vale sempre; o que o MOD declarou só o aperta. Um MOD
+    // não amplia o que esta máquina aceita ler.
+    let teto = limite_de_bytes
+        .filter(|n| *n > 0)
+        .map_or(TETO_DO_ESCOLHIDO, |n| n.min(TETO_DO_ESCOLHIDO));
+    if tamanho > teto {
         return Err(FalhaNoMod::Recusado {
             motivo: "arquivo-grande-demais".to_owned(),
         });
@@ -4336,6 +4385,17 @@ async fn escolher_para_o_mod(
     let lida = seele_ffi::mods::ler_tipo(&bytes).ok_or(FalhaNoMod::Recusado {
         motivo: "formato-desconhecido".to_owned(),
     })?;
+
+    // **E o papel provado é conferido contra o que o MOD pediu.** Sem isto, um
+    // MOD que precisa de retrato recebia um som e só descobria ao tentar usá-lo
+    // — quando descobria. O erro tem nome próprio para a região poder dizê-lo.
+    if let Some(pedidos) = papeis.as_ref().filter(|p| !p.is_empty()) {
+        if !pedidos.iter().any(|p| p == lida.papel) {
+            return Err(FalhaNoMod::Recusado {
+                motivo: format!("papel-nao-serve:{}", lida.papel),
+            });
+        }
+    }
 
     // Conferida **de novo** depois do `await` do seletor: a pessoa pode ter
     // demorado a escolher, e a sessão pode ter acabado no meio.

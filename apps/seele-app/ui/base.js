@@ -770,10 +770,27 @@ function donoDaRegiao(mod, instancia) {
      * tipo que os bytes provaram ser e o tamanho. Os bytes ficam no Rust e
      * saem em pedaços por `pedacoDoArquivo`.
      */
-    escolherArquivo: async () => {
+    /**
+     * O seletor do sistema, com o que o MOD declarou sobre o que ele quer.
+     *
+     * **`pedido` não é uma fronteira**, e o nome dele diz isso: o título e o
+     * filtro de extensões orientam quem escolhe, e o teto recusa antes de ler.
+     * O que prova o tipo continuam sendo os bytes, do lado do Rust. Quem olhou
+     * a auditoria de 20/09/2026 viu um seletor de avatar que dizia «Escolha um
+     * arquivo para este MOD» e listava JSONs como escolhíveis; isto é o
+     * conserto dessa parte.
+     */
+    escolherArquivo: async (pedido = {}) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
-      const escolhido = await invoke("escolher_para_o_mod", { geracao, id: mod.id });
+      const escolhido = await invoke("escolher_para_o_mod", {
+        geracao,
+        id: mod.id,
+        finalidade: typeof pedido.finalidade === "string" ? pedido.finalidade : "",
+        papeis: Array.isArray(pedido.papeis) ? pedido.papeis : [],
+        extensoes: Array.isArray(pedido.extensoes) ? pedido.extensoes : [],
+        limiteDeBytes: Number(pedido.limiteDeBytes) || 0,
+      });
       // Depois do `await`: a pessoa pode ter demorado a escolher, e entregar
       // um arquivo a uma sessão que acabou é admitir efeito dela.
       if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
