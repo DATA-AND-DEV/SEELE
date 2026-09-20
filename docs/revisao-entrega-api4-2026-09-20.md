@@ -1,5 +1,7 @@
 # Revisão da entrega API 4 — checkout 7ca66cc
 
+Atualização: a revisão do checkout **26ad0c2** está na seção final deste documento; ela reconhece os consertos e delimita os problemas ainda reproduzidos.
+
 Data: 20/09/2026. Revisão do relato de conclusão da v0.13.0, do código e dos registros locais. **Conclusão: há implementação substancial, mas este checkout ainda não está pronto para publicação estável.** A ausência de homologação não é o único motivo: há defeitos reproduzidos e capacidades declaradas sem integração.
 
 A consulta ao release público nesta revisão ainda retornou v0.12.1, commit de origem `655a137`. Nenhuma publicação foi feita. Esta revisão não reexecutou as suítes alegadas no relato e não testou o candidato no aplicativo nativo; distingue inspeção e reproduções isoladas abaixo.
@@ -112,4 +114,66 @@ Também há redução de escopo não completamente inventariada: o plano propunh
 **Não é correto usar “precisa de duas máquinas” para adiar todas as jornadas.** Criar campanha, editar perfil, navegar, confirmar descarte, repetir abertura/fechamento e verificar saída já podem ser feitos com um cliente. Os trechos de sincronização, autorização de outro participante e qualidade de voz ficam identificados separadamente.
 
 Não executar outra bateria genérica só para obter um número maior de testes. A condição de término é corrigir os defeitos reproduzidos e observar os fluxos prometidos no produto integrado, com resultados e pendências proporcionais ao escopo da release.
+
+## Retorno da revisão — checkout 26ad0c2
+
+Revisão em 20/09/2026 após o relato de correção. A bancada `node apps/seele-app/bancada/contribuicoes-e-camadas.cjs` foi executada e passou. Conferidos no código: verificação de dono na revogação, gate de API no host, estado nativo explícito e retorno descartável no registro de recursos. O guia e a matriz de pendências também avançaram.
+
+**O fechamento integral de R1–R6 ainda não é sustentado.** A revisão complementar encontrou três grupos específicos abaixo. Não é pedido de nova bateria genérica: são caminhos do contrato já existente que ficaram fora da bancada.
+
+### 1. P1 — reabertura e sobreposição de modais ainda quebram a inércia
+
+`abrir()` chama `prenderFoco()` em toda chamada. Este substitui `this.inertes` pelo retorno de `inertarFora`, que ignora elementos já inertes. A segunda chamada, portanto, esquece o que a primeira precisa restaurar e adiciona outro listener de teclado. Ao fechar, sobra fundo inerte e um listener.
+
+Há um caminho público que faz isso sem código incomum de MOD: `SuperficiesDoMod.criar`, ao reaproveitar uma superfície (linhas 554–555), chama `mostrar()` **e** `abrir()`; o primeiro agora já chama o segundo.
+
+A outra afirmação — dois modais fecháveis em qualquer ordem — também não se sustenta. Se A adormece o fundo e B abre depois, B ignora os elementos já inertes. Fechar A acorda o fundo mesmo com B aberto. Preservar o booleano anterior não equivale a coordenar donos simultâneos.
+
+Reprodução com classes reais e árvore da bancada:
+- prender foco duas vezes e soltar: fundo ainda inerte; um listener retido;
+- abrir A, abrir B e soltar A: fundo liberado com B ainda aberto.
+
+**Condição de saída:** coordenar a pilha/conjunto de camadas ativas e recalcular quais ramos permanecem inertes, preservando o estado externo original. Reabrir a mesma superfície deve ser idempotente. Exercitar ordem normal e inversa, confirmação nativa e reuso pelo método público `criar`, depois observar foco/clique no app.
+
+### 2. P1 — o descarte foi corrigido para contribuição sem desenho, não para todos os recursos
+
+Em `base.js:1050`, `montarContribuicao` registra `soltarMontagem`. Em `mods-contribuicoes.js`, `tirar` não o chama. A revogação libera o registro lógico, mas deixa o renderer e seu descartador retidos. A bancada de mil ciclos não monta o conteúdo e por isso passa sem exercitar esse caminho.
+
+Em `mods-superficies.js:135`, o construtor registra o descarte e ignora a função devolvida. `descartar()` continua sem remover esse registro da instância. Repetir criação e descarte acumula referências durante a sessão, embora o nó saia da tela.
+
+Resultados com registro/métodos reais e renderer simulado:
+- contribuição montada e revogada: um recurso retido; `renderer.soltar` não chamado;
+- mil superfícies criadas/descartadas: mil recursos retidos.
+
+**Condição de saída:** desligar e esquecer cada montagem quando sua contribuição/superfície acaba, de forma idempotente e sem recursão. Usar o retorno do registro nos consumidores, não apenas criá-lo. Medir ciclos com conteúdo efetivamente montado e conferir mídia/eventos na homologação. Estes números são contagens de referências, não medição de RAM.
+
+### 3. P1 — substituição genérica de cartão ainda depende do caminho legado
+
+O registro das contribuições passou a ter consumidores novos, o que corrige parte importante de R3. Contudo, `cartaoDeContribuicao` em `tela-sessao.js:1859` ainda ignora `contribuicao.conteudo`: procura exclusivamente `cartoesDosMods.get(contribuicao.mod).cartaoDe(id)`.
+
+Um autor que siga o contrato genérico e registre `pessoa.cartao/substituir` com conteúdo, sem enviar também `SeeleUI.cartoes`, não tem seu cartão desenhado por esse caminho. O MOD oficial usa o legado e pode funcionar sem revelar a falha. A frase do registro de decisões “não mais SeeleUI.cartoes legado” não corresponde a essa função.
+
+**Condição de saída:** aplicar o conteúdo genérico também na substituição, definindo compatibilidade do legado. Conteúdo geral precisa de uma montagem por destino visível: devolver o mesmo nó DOM para duas pessoas apenas o move da primeira para a segunda. Exercitar dois cartões simultâneos, revogação e retorno ao nativo.
+
+### Evidência complementar e limites
+
+[Script da revisão de 26ad0c2](evidencias/revisao-api4-26ad0c2.cjs):
+
+```sh
+node docs/evidencias/revisao-api4-26ad0c2.cjs
+```
+
+A execução reutiliza a árvore HTML e as classes da bancada do produto. Simula a casca/renderer nos casos de retenção; não é observação nativa de foco, mídia ou custo. As asserções registram os defeitos e devem ser convertidas em comportamento correto na correção.
+
+### Liberdade de criação e escopo
+
+Recusar `decorar` explicitamente é melhor do que aceitar e não desenhar. Isso não torna a capacidade entregue, nem demonstra que decorar seja incompatível com segurança. Não é preciso oferecer deslocamento ou opacidade ao controle nativo para permitir cor, tipografia, fundo, borda e outras propriedades validadas em pontos determinados.
+
+O plano já separa conteúdo criativo e controles de confiança. Implementar um contrato específico para decoração é a continuação do requisito; sua ausência deve permanecer pendente. Fontes empacotadas/gerenciadas também não equivalem a fontes arbitrárias de rede. Evitar justificar a retirada de ambas como se fossem o mesmo acesso.
+
+### Próxima ação delimitada
+
+Corrigir os três grupos acima e executar seus fluxos no candidato nativo, com os três pacotes correspondentes. Preservar os consertos confirmados; não recomeçar executor, transporte ou toda a revisão.
+
+A ausência de ferramenta de janela na sessão do Claude é uma limitação legítima daquela sessão. Esta tarefa do Codex dispõe de automação nativa; a validação pode ser feita aqui. Rodar um binário sem stderr continua sendo somente smoke. A release permanece **candidata**, com custo e demais pendências explicitamente separados.
 

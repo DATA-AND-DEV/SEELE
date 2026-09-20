@@ -998,7 +998,7 @@ contribuicoesDosMods.aoMudar(() => {
 });
 
 /**
- * Monta o `conteudo` de uma contribuição, e devolve o nó.
+ * Monta o `conteudo` de uma contribuição **para um destino**, e devolve o nó.
  *
  * # Por que ela existe
  *
@@ -1007,6 +1007,17 @@ contribuicoesDosMods.aoMudar(() => {
  * legado, e por pessoa. O contrato genérico diz que uma contribuição carrega
  * `conteudo`, e nada o montava.
  *
+ * # Por que uma montagem **por destino**
+ *
+ * Porque uma contribuição sem `alvo` vale para todo mundo. `pessoa.cartao` sem
+ * alvo é como um MOD apresenta sessenta e quatro pessoas sem registrar sessenta
+ * e quatro vezes — e um nó só, devolvido para as duas primeiras, não aparece
+ * nas duas: `append` **move**, e a segunda linha rouba o nó da primeira.
+ *
+ * A revisão de 26ad0c2 nomeia o caso: «conteúdo geral precisa de uma montagem
+ * por destino visível». O destino é a chave do mapa, e cada um tem o seu
+ * renderer, o seu nó e o seu descartador.
+ *
  * # Como ela monta
  *
  * Pelo renderer de sempre, com o **perfil do cartão**: as mesmas formas, os
@@ -1014,20 +1025,23 @@ contribuicoesDosMods.aoMudar(() => {
  * lado de um controle do produto, e o orçamento de uma superfície ali seria a
  * coluna inteira.
  *
- * O nó é guardado na contribuição e reaproveitado: refazê-lo a cada desenho
+ * O nó é guardado e reaproveitado entre desenhos: refazê-lo a cada retrato
  * recriaria a mídia e tiraria o foco, que é o defeito que a reconciliação do
  * renderer existe para não ter.
  *
  * @param {object} contribuicao Do registro.
+ * @param {string|number} destino Para quem, ou `""` num ponto sem alvo.
  * @returns {Element|null} O nó montado, ou nada quando não há o que montar.
  */
-function montarContribuicao(contribuicao) {
+function montarContribuicao(contribuicao, destino = "") {
   if (!contribuicao?.conteudo) return null;
-  if (contribuicao.montada?.isConnected === false && contribuicao.renderer) {
-    // O nó saiu da árvore num redesenho: ele continua válido e volta.
-    return contribuicao.montada;
-  }
-  if (contribuicao.montada) return contribuicao.montada;
+  const chave = String(destino ?? "");
+  const montadas = contribuicao.montadas ?? new Map();
+  contribuicao.montadas = montadas;
+  const pronta = montadas.get(chave);
+  // Um nó que saiu da árvore num redesenho continua válido e volta: quem o
+  // tirou foi o `replaceChildren` de quem desenha, e não um descarte.
+  if (pronta) return pronta.raiz;
 
   const instancia = contribuicao.instancia;
   if (!instancia || !instancia.admite(geracaoDaSessao)) return null;
@@ -1035,6 +1049,7 @@ function montarContribuicao(contribuicao) {
   const raiz = elemento("div", "contribuicao-de-mod");
   raiz.dataset.mod = contribuicao.mod;
   raiz.dataset.ponto = contribuicao.ponto;
+  if (chave) raiz.dataset.destino = chave;
 
   const renderer = new RegiaoDeMod(
     contribuicao.mod,
@@ -1042,19 +1057,27 @@ function montarContribuicao(contribuicao) {
     raiz,
     PERFIS_DE_RENDER.cartao,
   );
-  contribuicao.renderer = renderer;
-  contribuicao.montada = raiz;
   // **Registrada como recurso, e esquecida ao revogar.** O descartador volta
   // para a contribuição: sem isso, revogar deixaria o renderer retido na
-  // instância — o mesmo vazamento que R4 fechou do outro lado.
-  contribuicao.soltarMontagem = instancia.registrar(
-    `${contribuicao.mod}: o conteúdo de ${contribuicao.ponto}`,
+  // instância — o mesmo vazamento que R4 fechou do outro lado, e que a revisão
+  // de 26ad0c2 encontrou ainda aberto neste caminho.
+  const soltar = instancia.registrar(
+    `${contribuicao.mod}: o conteúdo de ${contribuicao.ponto}`
+    + `${chave ? ` para ${chave}` : ""}`,
     () => {
+      montadas.delete(chave);
       renderer.soltar();
-      contribuicao.montada = null;
-      contribuicao.renderer = null;
+      raiz.remove();
     },
   );
+  montadas.set(chave, { raiz, renderer, soltar });
+
+  // Uma função só para o registro chamar: ele conhece a contribuição, e não o
+  // mapa de destinos nem o renderer de cada um.
+  contribuicao.soltarMontagem = () => {
+    for (const montagem of Array.from(montadas.values())) montagem.soltar();
+    montadas.clear();
+  };
 
   try {
     const recusados = renderer.aplicar(contribuicao.conteudo);
@@ -1064,11 +1087,13 @@ function montarContribuicao(contribuicao) {
       donoDaRegiao(mod, instancia).falar({
         nome: "contribuicao",
         ponto: contribuicao.ponto,
+        destino: chave,
         recusados,
       });
     }
   } catch (falha) {
     console.warn(`MOD ${contribuicao.mod}: ${contribuicao.ponto} não montou`, falha);
+    soltar();
     return null;
   }
   return raiz;
@@ -1077,14 +1102,17 @@ function montarContribuicao(contribuicao) {
 /**
  * Os nós de todas as contribuições de um ponto, na ordem de prioridade.
  *
- * O caminho único para os oito pontos que passaram a ser aplicados. Quem
- * desenha decide **onde** eles entram; esta função decide o que eles são.
+ * O caminho único para os pontos que passaram a ser aplicados. Quem desenha
+ * decide **onde** eles entram; esta função decide o que eles são.
+ *
+ * `alvo` atravessa como destino da montagem: é ele que separa o nó da pessoa 12
+ * do nó da pessoa 13 quando a contribuição vale para as duas.
  */
 function conteudoDasContribuicoes(ponto, alvo = "") {
   const nos = [];
   for (const contribuicao of contribuicoesDosMods.para(ponto, alvo)) {
     if (contribuicao.modo !== "adicionar") continue;
-    const no = montarContribuicao(contribuicao);
+    const no = montarContribuicao(contribuicao, alvo);
     if (no) nos.push(no);
   }
   return nos;

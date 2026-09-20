@@ -194,15 +194,27 @@ const { R, S, I, PONTOS, NATIVO } = contexto;
 
 // ------------------------------------------------------- R1 · o ramo do modal
 
-{
-  const dialogo = {
+/** Um diálogo de mentira com uma camada de verdade no palco das camadas. */
+function dialogoDeTeste() {
+  const camada = new No("div", "");
+  camadas.append(camada);
+  return {
     palcos: { camadas },
-    camada: camadas,
-    inertes: [],
-    raiz: { addEventListener() {}, removeEventListener() {} },
+    camada,
+    raiz: new No("div", ""),
     focarPrimeiro() {},
     solta: false,
   };
+}
+
+/** Apaga toda inércia da árvore, para um caso começar do zero. */
+function acordarTudo(no) {
+  no.inert = false;
+  for (const filho of no.filhos) acordarTudo(filho);
+}
+
+{
+  const dialogo = dialogoDeTeste();
   S.prototype.prenderFoco.call(dialogo);
 
   // **O ancestral do diálogo continua acordado.** A reprodução da revisão
@@ -210,6 +222,7 @@ const { R, S, I, PONTOS, NATIVO } = contexto;
   // que tornava o próprio modal inalcançável: `inert` desce.
   confere("R1 · o ramo ativo", sessao.inert !== true, "`#tela-sessao` foi marcada inerte, e o diálogo está dentro dela");
   confere("R1 · o ramo ativo", camadas.inert !== true, "o próprio palco das camadas foi marcado inerte");
+  confere("R1 · o ramo ativo", dialogo.camada.inert !== true, "a camada do diálogo foi marcada inerte");
   let acima = camadas.parentNode;
   while (acima && acima !== documentoRaiz) {
     confere("R1 · o ramo ativo", acima.inert !== true, `o ancestral <${acima.tagName.toLowerCase()}${acima.id ? `#${acima.id}` : ""}> ficou inerte`);
@@ -234,36 +247,96 @@ const { R, S, I, PONTOS, NATIVO } = contexto;
   );
   confere("R1 · o resto dorme", moderar.inert === true, "`#moderar` ficou acordado com um modal de MOD aberto");
 
-  // **E o despertar devolve exatamente quem esta chamada adormeceu.**
-  const dormiram = dialogo.inertes.slice();
   S.prototype.soltarFoco.call(dialogo);
   confere(
     "R1 · o despertar",
-    dormiram.every((n) => n.inert === false),
-    "alguém continuou inerte depois de soltar o foco: "
-    + dormiram.filter((n) => n.inert !== false).map((n) => n.id || n.tagName).join(", "),
+    irmaosNaSessao.every((n) => n.inert === false) && irmaosNoCorpo.every((n) => n.inert === false),
+    "alguém continuou inerte depois de soltar o foco",
   );
-  confere("R1 · o despertar", dialogo.inertes.length === 0, "a lista de adormecidos não foi esvaziada");
+  dialogo.camada.remove();
+  acordarTudo(documento.body);
+}
+
+// ------------------------------- R1c · reabrir a mesma superfície é idempotente
+
+{
+  // **O caminho público:** `criar` com o mesmo `id` reaproveita a superfície e
+  // chama `mostrar`, que desde o conserto de R6 chama `abrir`, que chama
+  // `prenderFoco`. Uma segunda passagem por ali não pode deixar rastro.
+  //
+  // Antes: a segunda chamada não adormecia ninguém — já estava tudo inerte — e
+  // **substituía** a lista de adormecidos pela lista vazia. Fechar depois disso
+  // devolvia nada, e a aplicação ficava inerte sem nada na tela para explicar.
+  const dialogo = dialogoDeTeste();
+  const fundo = sessao.children.find((n) => n !== camadas);
+
+  S.prototype.prenderFoco.call(dialogo);
+  confere("R1c · reabrir", fundo.inert === true, "a primeira abertura não adormeceu o fundo");
+  S.prototype.prenderFoco.call(dialogo);
+  S.prototype.prenderFoco.call(dialogo);
+  confere("R1c · reabrir", fundo.inert === true, "reabrir acordou o fundo com o modal ainda aberto");
+  confere(
+    "R1c · reabrir",
+    dialogo.raiz.ouvintes === 1,
+    `reabrir registrou ${dialogo.raiz.ouvintes} ouvintes de teclado; um é o certo`,
+  );
+
+  S.prototype.soltarFoco.call(dialogo);
+  confere(
+    "R1c · reabrir",
+    fundo.inert === false,
+    "fechar depois de reabrir deixou o fundo inerte: a aplicação fica travada sem nada na tela para explicar",
+  );
+  confere("R1c · reabrir", dialogo.raiz.ouvintes === 0, "sobrou ouvinte de teclado depois de fechar");
+  dialogo.camada.remove();
+  acordarTudo(documento.body);
+}
+
+// ------------------------------- R1d · dois modais, fechados fora de ordem
+
+{
+  const fundo = sessao.children.find((n) => n !== camadas);
+  const a = dialogoDeTeste();
+  const b = dialogoDeTeste();
+
+  S.prototype.prenderFoco.call(a);
+  S.prototype.prenderFoco.call(b);
+  confere("R1d · dois modais", fundo.inert === true, "com dois modais abertos o fundo estava acordado");
+  // B é o topo: a camada de A fica atrás dela, e atrás quer dizer inerte.
+  confere("R1d · dois modais", a.camada.inert === true, "a camada de baixo continuou alcançável por trás da de cima");
+  confere("R1d · dois modais", b.camada.inert !== true, "a camada do topo foi marcada inerte");
+
+  // **A fecha primeiro.** É o caso normal, não o exótico: o MOD de A respondeu
+  // ao `fechar-pedido` enquanto a confirmação de B estava de pé.
+  S.prototype.soltarFoco.call(a);
+  confere(
+    "R1d · fora de ordem",
+    fundo.inert === true,
+    "fechar o modal de baixo liberou o fundo com o de cima ainda aberto",
+  );
+  confere("R1d · fora de ordem", b.camada.inert !== true, "o modal que continua aberto ficou inerte");
+
+  S.prototype.soltarFoco.call(b);
+  confere("R1d · fora de ordem", fundo.inert === false, "fechar os dois não devolveu o fundo");
+  confere("R1d · fora de ordem", a.camada.inert === false, "a camada de baixo ficou inerte depois de tudo fechado");
+  a.camada.remove();
+  b.camada.remove();
+  acordarTudo(documento.body);
 }
 
 // ------------------------------- R1b · a confirmação do produto fica alcançável
 
 {
   const falas = [];
-  const dialogo = {
-    palcos: { camadas },
-    camada: camadas,
-    inertes: [],
-    raiz: { addEventListener() {}, removeEventListener() {} },
-    focarPrimeiro() {},
-    solta: false,
+  const dialogo = dialogoDeTeste();
+  Object.assign(dialogo, {
     id: "mod/x",
     titulo: "Perfil",
     chave: "mod/x:perfil",
     dono: { falar: (e) => falas.push(e) },
     fechar() { this.fechou = true; },
     fechou: false,
-  };
+  });
   S.prototype.prenderFoco.call(dialogo);
   confere("R1b", moderar.inert === true, "`#moderar` precisava estar dormindo antes da pergunta");
 
@@ -277,6 +350,17 @@ const { R, S, I, PONTOS, NATIVO } = contexto;
   // **Acordada enquanto a pergunta está de pé.** Uma pergunta inerte é uma
   // janela que não fecha: o diálogo do MOD não sai, e a caixa não responde.
   confere("R1b", moderar.inert === false, "a confirmação do produto ficou inerte atrás do modal do MOD");
+
+  // **E outra camada subindo no meio não adormece a pergunta.** Um MOD pode
+  // criar uma superfície enquanto alguém lê a confirmação; o recálculo devolve
+  // tudo o que é nosso, e sem o pedido explícito a pergunta voltaria a dormir
+  // com ela na tela.
+  const intrusa = dialogoDeTeste();
+  S.prototype.prenderFoco.call(intrusa);
+  confere("R1b", moderar.inert === false, "uma camada nova adormeceu a confirmação que estava aberta");
+  S.prototype.soltarFoco.call(intrusa);
+  intrusa.camada.remove();
+  confere("R1b", moderar.inert === false, "a camada intrusa saindo adormeceu a confirmação que estava aberta");
 
   // Cancelar devolve o estado anterior: a pergunta saiu, o modal do MOD
   // continua de pé, e a moderação volta a dormir.
@@ -292,6 +376,8 @@ const { R, S, I, PONTOS, NATIVO } = contexto;
     "o MOD não foi avisado de que a janela dele fechou descartando",
   );
   S.prototype.soltarFoco.call(dialogo);
+  dialogo.camada.remove();
+  acordarTudo(documento.body);
   delete contexto.abrirConfirmacao;
 }
 
@@ -435,6 +521,177 @@ const { R, S, I, PONTOS, NATIVO } = contexto;
   confere("R4", dono.recursos.length === 0, "revogar duas vezes deixou descartador para trás");
 }
 
+// ------------------------- R4b · o descarte de quem **montou** alguma coisa
+
+/**
+ * O renderer de mentira, e por que ele basta aqui.
+ *
+ * O que se mede nesta seção é **registro de recursos**: quem sai, quando, e o
+ * que sobra na instância. O desenho de verdade é medido em `regiao-do-mod.cjs`
+ * e no laboratório dos três MODs, num navegador.
+ *
+ * O que ele conta é quantas vezes `soltar` foi chamado — que é a pergunta que
+ * a revisão de 26ad0c2 fez e que a medida anterior não respondia, porque mil
+ * ciclos de uma contribuição **sem conteúdo** nunca passam por aqui.
+ */
+let soltouRenderer = 0;
+contexto.RegiaoDeMod = class {
+  constructor(id, dono, raiz) { this.id = id; this.dono = dono; this.raiz = raiz; }
+  aplicar() { return 0; }
+  soltar() { soltouRenderer += 1; }
+};
+contexto.PERFIS_DE_RENDER = { cartao: {}, superficie: {} };
+contexto.elemento = (tag) => new No(tag, "");
+contexto.donoDaRegiao = (mod, instancia) => ({ instancia, falar() {} });
+contexto.cartoesDosMods = new Map();
+
+{
+  const base = ler("base.js");
+  const inicio = base.indexOf("function montarContribuicao(");
+  const fim = base.indexOf("/**\n * As ações que os MODs acrescentaram", inicio);
+  confere("R4b · o recorte", inicio >= 0 && fim > inicio, "`montarContribuicao` mudou de forma e o recorte não a achou");
+  vm.runInContext(base.slice(inicio, fim), contexto);
+
+  const tela = ler("tela-sessao.js");
+  const deCartao = tela.indexOf("function cartaoDeContribuicao(");
+  const fimDoCartao = tela.indexOf("\n}", deCartao) + 2;
+  confere("R4b · o recorte", deCartao >= 0, "`cartaoDeContribuicao` mudou de forma e o recorte não a achou");
+  vm.runInContext(tela.slice(deCartao, fimDoCartao), contexto);
+
+  const registro = new R();
+  const dono = new I("mod/a", "a", 7, {});
+  dono.estado = contexto.ESTADOS_DE_MOD.ativa;
+
+  // **Uma contribuição montada, revogada.** Antes: o registro lógico saía e o
+  // renderer, o nó e o descartador ficavam retidos até a sessão acabar.
+  const { handle } = registro.registrar({ id: "mod/a" }, dono, {
+    ponto: "pessoa.cartao", modo: "adicionar", alvo: "12",
+    conteudo: [{ forma: "texto", chave: "c", dentro: "oi" }],
+  });
+  const contribuicao = registro.porHandle.get(handle);
+  const no = contexto.montarContribuicao(contribuicao, "12");
+  confere("R4b · montar", Boolean(no), "a contribuição com conteúdo não montou nada");
+  confere("R4b · montar", dono.recursos.length === 2, `a montagem não se registrou: ${dono.recursos.length} recurso(s)`);
+
+  const antes = soltouRenderer;
+  registro.revogar(handle, { id: "mod/a", instancia: dono });
+  confere("R4b · revogar", soltouRenderer === antes + 1, "revogar não soltou o renderer da montagem");
+  confere("R4b · revogar", dono.recursos.length === 0, `revogar deixou ${dono.recursos.length} recurso(s) retido(s)`);
+
+  // E mil ciclos **com conteúdo montado** estabilizam.
+  const antesDoLaco = dono.recursos.length;
+  for (let n = 0; n < 1000; n += 1) {
+    const feito = registro.registrar({ id: "mod/a" }, dono, {
+      ponto: "canal.item", modo: "adicionar", alvo: "1",
+      conteudo: [{ forma: "texto", chave: "c", dentro: `n${n}` }],
+    });
+    contexto.montarContribuicao(registro.porHandle.get(feito.handle), "1");
+    registro.revogar(feito.handle, { id: "mod/a", instancia: dono });
+  }
+  confere(
+    "R4b · mil com desenho",
+    dono.recursos.length === antesDoLaco,
+    `mil ciclos com conteúdo montado deixaram ${dono.recursos.length} recurso(s) retido(s)`,
+  );
+  confere("R4b · mil com desenho", registro.porHandle.size === 0, "sobraram contribuições vivas");
+}
+
+// --------------------- R4c · mil superfícies criadas e descartadas
+
+{
+  // A casca e o renderer são de mentira; `constructor` e `descartar` são os do
+  // produto. O construtor registrava o descarte na instância e **jogava fora**
+  // o retorno, então descartar tirava a janela da tela e deixava a entrada.
+  const cascaReal = S.prototype.montarCasca;
+  S.prototype.montarCasca = function montarCascaDeTeste() {
+    this.raiz = new No("div", "");
+    this.corpo = new No("div", "");
+  };
+  const instancia = new I("mod/s", "s", 7, {});
+  instancia.estado = contexto.ESTADOS_DE_MOD.ativa;
+  for (let n = 0; n < 1000; n += 1) {
+    const superficie = new S("mod/s", { instancia }, { id: String(n), tipo: "pagina" }, {});
+    superficie.descartar();
+  }
+  confere(
+    "R4c",
+    instancia.recursos.length === 0,
+    `mil superfícies criadas e descartadas deixaram ${instancia.recursos.length} registro(s) retido(s)`,
+  );
+
+  // E descartar duas vezes não descarta duas vezes nem entra em recursão.
+  const so = new S("mod/s", { instancia }, { id: "uma", tipo: "pagina" }, {});
+  so.descartar();
+  so.descartar();
+  confere("R4c", instancia.recursos.length === 0, "descartar duas vezes deixou recurso para trás");
+  S.prototype.montarCasca = cascaReal;
+}
+
+// ------------- R3b · a substituição desenha o conteúdo da própria contribuição
+
+{
+  const registro = new R();
+  const dono = new I("mod/a", "a", 7, {});
+  dono.estado = contexto.ESTADOS_DE_MOD.ativa;
+
+  // **Sem `SeeleUI.cartoes`.** É o ponto: um autor que siga o contrato
+  // genérico registra `pessoa.cartao/substituir` com `conteudo` e mais nada.
+  // `cartoesDosMods` fica vazio de propósito — era ele, e só ele, que o
+  // caminho antigo consultava.
+  contexto.cartoesDosMods.clear();
+  const { handle } = registro.registrar({ id: "mod/a" }, dono, {
+    ponto: "pessoa.cartao", modo: "substituir",
+    conteudo: [{ forma: "texto", chave: "c", dentro: "cartão do MOD" }],
+  });
+  const contribuicao = registro.porHandle.get(handle);
+
+  const cartao = contexto.cartaoDeContribuicao(contribuicao, 12);
+  confere(
+    "R3b · o contrato genérico",
+    Boolean(cartao),
+    "um MOD que registrou `pessoa.cartao/substituir` com conteúdo não teve cartão desenhado: "
+    + "o caminho ainda depende de `SeeleUI.cartoes`",
+  );
+
+  // **Uma montagem por destino.** Um nó só, devolvido para duas pessoas, não
+  // aparece nas duas: `append` move, e a segunda linha rouba o nó da primeira.
+  const outro = contexto.cartaoDeContribuicao(contribuicao, 13);
+  confere("R3b · por destino", Boolean(outro), "a segunda pessoa não recebeu cartão");
+  confere(
+    "R3b · por destino",
+    cartao !== outro,
+    "as duas pessoas receberam o mesmo nó: ele só se move de uma linha para a outra",
+  );
+  // E o mesmo destino, pedido de novo, devolve o mesmo nó — senão a mídia
+  // recomeça e o foco sai a cada retrato.
+  confere(
+    "R3b · por destino",
+    contexto.cartaoDeContribuicao(contribuicao, 12) === cartao,
+    "pedir o mesmo destino duas vezes montou um nó novo",
+  );
+
+  // E revogar solta as duas montagens.
+  const antes = soltouRenderer;
+  registro.revogar(handle, { id: "mod/a", instancia: dono });
+  confere(
+    "R3b · a volta",
+    soltouRenderer === antes + 2,
+    `revogar soltou ${soltouRenderer - antes} montagem(ns) das duas que existiam`,
+  );
+  confere("R3b · a volta", dono.recursos.length === 0, "revogar deixou montagem retida na instância");
+
+  // **O legado continua valendo**, porque um pacote de API 3 é executado.
+  const legado = new No("div", "");
+  contexto.cartoesDosMods.set("mod/a", { cartaoDe: (id) => (String(id) === "12" ? legado : null) });
+  const semConteudo = { mod: "mod/a", instancia: dono, ponto: "pessoa.cartao", conteudo: null };
+  confere(
+    "R3b · o legado",
+    contexto.cartaoDeContribuicao(semConteudo, 12) === legado,
+    "uma contribuição sem conteúdo deixou de cair em `SeeleUI.cartoes`, que é o caminho da API 3",
+  );
+  contexto.cartoesDosMods.clear();
+}
+
 // ------------------------------------- R3 · os pontos aceitam o que aplicam
 
 {
@@ -562,7 +819,9 @@ function terminar() {
     return;
   }
   console.log(
-    "contribuicoes-e-camadas: R1–R6 medidos no index.html real "
-    + `(#palco-de-camadas dentro de #${camadas.parentNode.id}) e no roteador real.`,
+    "contribuicoes-e-camadas: R1–R6 e a revisão de 26ad0c2 (reabertura, ordem "
+    + "inversa, descarte com desenho, mil superfícies, cartão genérico por "
+    + `destino) medidos no index.html real (#palco-de-camadas dentro de #${camadas.parentNode.id}) `
+    + "e no roteador real.",
   );
 }

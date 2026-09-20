@@ -262,22 +262,37 @@ class InstanciaDeMod {
    * duas vezes não descarta duas vezes; chamá-lo depois do encerramento não
    * faz nada.
    *
+   * # `soltar.esquecer()`: sair da lista sem pedir o descarte de volta
+   *
+   * Quem **já está** no meio do próprio descarte precisa das duas metades
+   * separadas. Uma superfície que se descarta chamaria o descartador dela, que
+   * chamaria `descartar()` de novo — e pararia na guarda de idempotência da
+   * superfície. Funcionaria, e seria uma recursão que só não é infinita por
+   * causa da ordem de duas linhas em outro arquivo.
+   *
+   * `esquecer` tira a entrada e devolve se havia o que tirar. É o que os
+   * donos que se descartam sozinhos chamam.
+   *
    * @param {string} porque O nome do recurso, para o diagnóstico.
    * @param {Function} descartar O que desfaz.
-   * @returns {Function} Descarta e esquece. Idempotente.
+   * @returns {Function} Descarta e esquece. Idempotente, com `.esquecer()`.
    */
   registrar(porque, descartar) {
     let saiu = false;
     const entrada = { porque, descartar };
     this.recursos.push(entrada);
-    return () => {
-      if (saiu) return;
+    // Tirar **antes** de descartar: um descarte que lança não pode deixar a
+    // entrada retida, ou o conserto do vazamento teria um caminho de erro que
+    // o reabre.
+    const esquecer = () => {
+      if (saiu) return false;
       saiu = true;
-      // Tirado **antes** de descartar: um descarte que lança não pode deixar a
-      // entrada retida, ou o conserto do vazamento teria um caminho de erro
-      // que o reabre.
       const onde = this.recursos.indexOf(entrada);
       if (onde >= 0) this.recursos.splice(onde, 1);
+      return true;
+    };
+    const soltar = () => {
+      if (!esquecer()) return;
       try {
         descartar();
       } catch (falha) {
@@ -285,6 +300,8 @@ class InstanciaDeMod {
         this.naoSairam.push(porque);
       }
     };
+    soltar.esquecer = esquecer;
+    return soltar;
   }
 
   /** Um efeito é admitido? Só em `ativa`, e só na geração de pé. */

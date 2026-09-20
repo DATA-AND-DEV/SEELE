@@ -122,7 +122,7 @@
     },
     "modos": ["adicionar", "substituir"],
     "fora": [
-      "«decorar»: mudar a apresentação de um nó do SEELE exige um subconjunto de estilo que impeça encobrir o nome que abre a moderação, e ele não existe nesta versão. Registrar «decorar» é recusado pelo nome, com a razão junto"
+      "«decorar»: pendente. Mudar a apresentação de um nó do SEELE exige um segundo conjunto de propriedades — cor, tipografia, fundo e borda em pontos determinados, sem deslocamento nem opacidade sobre um controle nativo —, e esse contrato ainda não foi escrito. Registrar «decorar» é recusado pelo nome, com a razão junto"
     ],
     "garantias-do-produto": [
       "trocar o que se desenha não troca a identidade: o comando continua ligado ao ID real",

@@ -101,20 +101,30 @@ Três garantias, e elas são o contrato inteiro:
 encontrou `decorar` anunciado em dois pontos, aceito por `registrar` e aplicado
 em lugar nenhum.
 
-Ele não foi ligado, e a razão não é esforço. `decorar` altera a apresentação de
-um nó **do produto**, e o vocabulário de estilo que um MOD já tem — validado,
-seguro dentro da raiz dele — deixa de ser seguro do lado de fora: `opacidade: 0`
-num nó do MOD é uma escolha estética; no nome que abre a moderação, é encobrir
-uma confirmação de confiança. O mesmo vale para `escalar` e `mover`. Um
-`decorar` honesto precisa do seu próprio subconjunto de estilo, provado contra
-o encobrimento, e esse subconjunto não existe.
+Ele não foi ligado porque **o contrato que ele precisa não foi escrito**, e a
+revisão de 26ad0c2 corrigiu a forma como isto estava dito aqui. A versão
+anterior desta emenda argumentava a partir de `opacidade`, `escalar` e `mover`,
+como se decorar fosse incompatível com segurança. Não é.
 
-**Decisão:** `decorar` fica **fora da API 4**, é recusado pelo nome com a razão
-junto — em vez de recusado por uma frase genérica que mandaria o autor procurar
-um erro de ponto que ele não cometeu —, e a suspensão está escrita em
-`api/v4.json`, no guia e no erro que o MOD recebe. Um guarda
-(`decorar_nao_volta_a_tabela_sem_quem_o_aplique`) impede que ele volte à tabela
-sem quem o aplique.
+O que é verdade é mais estreito: o vocabulário de estilo que existe hoje é um
+só, pensado para o que um MOD desenha **dentro da raiz dele**, onde sumir com
+o próprio conteúdo é uma escolha estética. Aplicado a um nó do produto, esse
+mesmo vocabulário inclui propriedades que encobrem um controle nativo.
+
+Isso argumenta por um **segundo conjunto**, e não contra a capacidade. Cor,
+tipografia, fundo e borda em pontos determinados não exigem oferecer
+deslocamento nem opacidade sobre o nome que abre a moderação. O plano já separa
+conteúdo criativo de controles de confiança, e é essa separação que falta
+escrever como contrato: quais propriedades, em quais pontos, sobre quais nós.
+
+**Decisão:** `decorar` fica **fora da API 4** enquanto esse contrato não
+existir, e é recusado pelo nome com a razão junto — em vez de recusado por uma
+frase genérica que mandaria o autor procurar um erro de ponto que ele não
+cometeu. **A capacidade continua pendente**, e pendente quer dizer que ela é a
+continuação do requisito, não que ela foi descartada. A suspensão está escrita
+em `api/v4.json`, no guia e no erro que o MOD recebe, e um guarda
+(`decorar_nao_volta_a_tabela_sem_quem_o_aplique`) impede que o nome volte à
+tabela antes de alguém o aplicar.
 
 **Emenda de 20/09/2026 — o dono de uma contribuição.** Uma quarta garantia, que
 faltava: **isolamento**. `revogar` exige o par `(identificador, instância,

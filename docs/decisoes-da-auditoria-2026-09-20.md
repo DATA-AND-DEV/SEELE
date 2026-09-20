@@ -3,12 +3,15 @@
 Data: 20/09/2026. Escrito **ao final do desenvolvimento**, como o pedido exigia.
 
 > **Esta entrega é um candidato em validação, e não uma API concluída.** A
-> [revisão do checkout `7ca66cc`](revisao-entrega-api4-2026-09-20.md) encontrou
+> [revisão](revisao-entrega-api4-2026-09-20.md) do checkout `7ca66cc` encontrou
 > seis defeitos reproduzidos além do que este arquivo declarava pendente, e
-> recusou — com razão — a frase «todos os 33 achados concluídos». A seção 12
-> registra o que foi feito com cada um e o que continua aberto; a seção 13 é a
-> matriz **implementado / parcial / pendente** que a revisão pediu no lugar de
-> um total de nomes novos.
+> recusou — com razão — a frase «todos os 33 achados concluídos». A revisão
+> seguinte, do checkout `26ad0c2`, encontrou três caminhos do mesmo contrato
+> que a bancada não alcançava.
+>
+> A seção 12 registra os seis primeiros, a 13 é a matriz **implementado /
+> parcial / pendente**, e a 15 registra os três seguintes — inclusive uma
+> afirmação da seção 12 que estava errada.
 >
 > A conclusão da revisão continua valendo para o que ainda não aconteceu: nada
 > aqui foi observado no aplicativo nativo com as três atividades juntas.
@@ -516,14 +519,15 @@ o que falta está escrito. «Pendente» quer dizer que não foi feito.
 | Confirmação de descarte alcançável e por cima | Parcial | O `z-index` e o acordar/readormecer são medidos; a sobreposição real não |
 | Contribuições: 10 pontos aplicados | Implementado | `todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique` e o vetor de referência registra nos dez |
 | Modo `substituir` consultado em todo ponto que o anuncia | Implementado | `todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao` |
-| Modo `decorar` | **Pendente, e declarado** | Recusado pelo nome; falta o subconjunto de estilo provado contra o encobrimento |
+| Modo `decorar` | **Pendente** | Recusado pelo nome. Falta **escrever o contrato**: quais propriedades, em quais pontos, sobre quais nós. Cor, tipografia, fundo e borda não exigem oferecer deslocamento nem opacidade sobre um controle nativo |
 | Isolamento entre MODs na revogação | Implementado | Bancada R2, com os dois lados: B não revoga de A, e A revoga de A |
 | Descarte sem retenção | Implementado | Bancada R4: mil ciclos, zero retidos |
 | Três estados de apresentação | Implementado | Bancada R5, incluindo a distinção entre nativo e provedor ausente |
 | Estilos declarados e validados | Implementado | `mods-estilos.js`; ADR 0052 e a emenda de `specs/07` |
 | Classes com estados e consultas de contêiner | Implementado | Por superfície; uma região não tem folha própria, e o guia diz isso |
 | Composição e contratos de estado do §12 do plano | **Pendente** | Nada foi feito; não estava na auditoria, e a revisão o nomeia como redução de escopo |
-| Fontes e keyframes livres | **Pendente, por decisão** | Presets em vez de `@keyframes`; fontes de rede não entram (ADR 0052) |
+| Keyframes livres | **Pendente, por decisão** | Presets em vez de `@keyframes`: um keyframe declarado por um MOD é texto que vira regra, e a lista do que uma regra aceita não é nossa |
+| Fontes | **Pendente** | O que foi decidido é que **fonte arbitrária de rede** não entra — é busca de bytes de terceiro na janela de quem conversa. Fonte **empacotada no MOD** ou escolhida de um conjunto gerenciado pelo produto é outra coisa, e não foi decidida nem implementada. Tratar as duas como o mesmo acesso foi um erro de redação desta linha |
 
 ### A auditoria de UX/UI
 
@@ -598,3 +602,96 @@ Então o que falta é uma sessão de teclado, com um cliente só, e estes passos
 
 Os passos 1–9 são de um cliente. O que continua exigindo dois é sincronização
 entre participantes, autorização de outra pessoa e qualidade de voz — e só isso.
+
+---
+
+## 15. A segunda revisão (checkout `26ad0c2`): três caminhos que ficaram fora
+
+A revisão reconheceu os consertos e encontrou três caminhos do mesmo contrato
+que a bancada não alcançava. Os três eram atingíveis por API pública, e os três
+estão fechados.
+
+### 1. A inércia era de cada diálogo, e precisava ser da pilha
+
+Dois sintomas, uma causa. `prenderFoco` guardava a própria lista de
+adormecidos, e `inertarFora` pula quem já está inerte:
+
+- **reabrir** passava por lá de novo — `criar` com o mesmo `id` chama
+  `mostrar`, que desde o conserto de R6 chama `abrir` — e a segunda chamada
+  não adormecia ninguém, **substituindo** a lista pela vazia. Fechar não
+  devolvia nada, e a aplicação ficava inerte sem nada na tela para explicar.
+  Havia ainda um `abrir()` redundante em `SuperficiesDoMod.criar`, logo depois
+  do `mostrar()`, que era o caminho público mais curto até isso;
+- **dois diálogos**: B não reivindicava o que A já tinha adormecido, então
+  fechar A acordava o fundo com B ainda aberto.
+
+Preservar o booleano anterior de cada nó — o que a volta passada fez — resolve
+um nó que **já era** inerte antes de nós. Não resolve dois donos simultâneos
+querendo o mesmo nó adormecido, porque esse é um problema de propriedade.
+
+**Decisão:** uma pilha de camadas em `mods-superficies.js`. A inércia é do
+**topo**, e só dele; a cada entrada e a cada saída, o que nós adormecemos é
+devolvido inteiro e recalculado. Entrar é idempotente e traz a camada para a
+frente; sair funciona do meio da pilha, que é o fechamento fora de ordem.
+
+A confirmação do produto não entra na pilha — ela é da moderação, não de um MOD
+—, e por isso ganhou um conjunto explícito de «acordados por pedido», que o
+recálculo respeita. Sem ele, bastava um MOD abrir outra superfície enquanto
+alguém lia a pergunta para a pergunta adormecer com ela na tela.
+
+### 2. O descarte estava consertado para quem não desenhava
+
+Duas metades, e as duas com a mesma forma: **criar o descartador e não usar o
+retorno**.
+
+`montarContribuicao` registrava `soltarMontagem` e `tirar` nunca o chamava:
+revogar soltava o registro lógico e deixava o renderer, o nó e o descartador
+retidos. A medida anterior não pegava porque mil ciclos de uma contribuição
+**sem conteúdo montado** não passam por esse caminho — a revisão nomeia isso
+exatamente.
+
+O construtor de `SuperficieDeMod` ignorava o retorno de `registrar`: mil
+superfícies criadas e descartadas deixavam mil entradas na instância.
+
+**Decisão:** `InstanciaDeMod.registrar` passou a devolver um descartador com
+`.esquecer()` ao lado. Quem já está no meio do próprio descarte chama
+`esquecer` — sair da lista sem pedir o descarte de volta. A alternativa era
+chamar o descartador e parar na guarda de idempotência do outro lado: funciona,
+e é uma recursão que só não é infinita por causa da ordem de duas linhas em
+outro arquivo.
+
+A bancada passou a medir **com desenho montado**, e a de superfícies passou a
+existir. Os dois casos reprovam com os números da reprodução quando o conserto
+é revertido.
+
+### 3. A substituição de cartão ainda dependia do legado
+
+`cartaoDeContribuicao` procurava só `cartoesDosMods.get(mod).cartaoDe(id)`. Um
+autor que seguisse o guia — registrar `pessoa.cartao/substituir` com `conteudo`
+— via a linha nativa continuar no lugar, sem recusa e sem explicação. O MOD
+oficial usa `SeeleUI.cartoes` e por isso o caminho funcionava sem revelar a
+falha. A frase «não mais `SeeleUI.cartoes` legado» da seção 12 estava errada, e
+fica corrigida aqui.
+
+**Decisão:** o conteúdo genérico primeiro; `SeeleUI.cartoes` como alternativa,
+porque um pacote de API 3 é executado e é assim que ele desenha.
+
+E **uma montagem por destino**. Uma contribuição sem `alvo` vale para todo
+mundo, e um nó só, devolvido para duas pessoas, não aparece nas duas: `append`
+move, e a segunda linha rouba o nó da primeira. `montarContribuicao` passou a
+receber o destino e a guardar um nó, um renderer e um descartador por destino —
+o mesmo defeito existia em `conteudoDasContribuicoes` para toda contribuição
+geral, e saiu junto.
+
+### O que isto mudou no que este arquivo afirma
+
+A seção 13 continua valendo, com três linhas corrigidas: `decorar` é
+**pendente** porque o contrato dele não foi escrito — não porque decorar seja
+incompatível com segurança; fontes empacotadas ou gerenciadas não são o mesmo
+acesso que fonte arbitrária de rede, e tratá-las como uma coisa só foi erro de
+redação; e a afirmação sobre o caminho legado do cartão estava errada.
+
+**A validação nativa continua sendo a condição de término**, e ela não passou
+por aqui. A sessão que escreveu isto não alcança a janela de um aplicativo do
+macOS; a revisão informa que a sessão dela alcança. Os dez passos continuam na
+seção 14.

@@ -1855,8 +1855,31 @@ function linhaSubstituida(pessoa, temAudio, contribuicao) {
   return item;
 }
 
-/** O conteúdo que um MOD declarou para esta pessoa, já montado. */
+/**
+ * O conteúdo que um MOD declarou para esta pessoa, já montado.
+ *
+ * **Dois caminhos, e o genérico vem primeiro.**
+ *
+ * O `conteudo` da própria contribuição é o contrato que o guia ensina: quem
+ * registra `pessoa.cartao/substituir` com uma declaração espera que ela seja
+ * desenhada, e nada mais. Esta função procurava **só** `SeeleUI.cartoes` — a
+ * chamada separada, da API 3 —, então um MOD que seguisse o contrato genérico
+ * via a linha nativa continuar no lugar, sem recusa e sem explicação. O MOD
+ * oficial usava o legado, e por isso o caminho funcionava sem revelar a falha.
+ * É o que a revisão de 26ad0c2 encontrou.
+ *
+ * `SeeleUI.cartoes` continua valendo, e não por gentileza: ele é o caminho de
+ * um pacote de API 3, que esta versão executa. Ele é a alternativa, e não a
+ * primeira escolha — um MOD que mande os dois está dizendo a mesma coisa duas
+ * vezes, e o que vale é o que ele declarou na contribuição.
+ *
+ * O destino atravessa porque a montagem é por destino: uma contribuição sem
+ * `alvo` vale para todo mundo, e um nó só percorreria a lista movendo-se de
+ * uma linha para a seguinte.
+ */
 function cartaoDeContribuicao(contribuicao, id) {
+  const generico = montarContribuicao(contribuicao, String(id));
+  if (generico) return generico;
   const regiao = cartoesDosMods.get(contribuicao.mod);
   return regiao ? regiao.cartaoDe(id) : null;
 }

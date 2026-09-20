@@ -80,6 +80,109 @@ function inertarFora(dentro) {
   return mudados;
 }
 
+/**
+ * As camadas modais de pé, da mais antiga à mais recente.
+ *
+ * # Por que uma pilha, e não um campo por superfície
+ *
+ * Cada superfície guardava a própria lista de adormecidos, e `inertarFora`
+ * pula quem já está inerte. Duas consequências, as duas reproduzidas na
+ * revisão de 26ad0c2:
+ *
+ * - **reabrir a mesma superfície** chamava `prenderFoco` de novo; a segunda
+ *   chamada não adormecia ninguém — já estava tudo inerte — e **substituía** a
+ *   lista pela vazia. Fechar depois disso não acordava nada, e a aplicação
+ *   ficava inerte sem nada na tela para explicar;
+ * - **dois diálogos** A e B: B não reivindicava o que A já tinha adormecido,
+ *   então fechar A acordava o fundo com B ainda aberto.
+ *
+ * Preservar o booleano anterior de cada nó — o que a versão passada fazia —
+ * resolve o caso de um nó que já era inerte **antes de nós**. Ele não resolve
+ * dois donos simultâneos querendo o mesmo nó adormecido, porque esse é um
+ * problema de propriedade e não de estado.
+ *
+ * # Como ela decide
+ *
+ * A inércia é do **topo**, e só dele. A cada entrada e a cada saída, o que nós
+ * adormecemos é devolvido inteiro e recalculado para a camada de cima. Um nó
+ * que já era inerte antes nunca entra na lista — `inertarFora` o pula —, então
+ * devolver «tudo o que é nosso» nunca acorda o que não é.
+ */
+const pilhaDeCamadas = [];
+
+/** O que **nós** adormecemos agora, para devolver exatamente isso. */
+let adormecidosPelaPilha = [];
+
+/**
+ * Nós do produto que precisam ficar acordados apesar da pilha.
+ *
+ * Hoje é um só: a confirmação de descarte, enquanto a pergunta está de pé. Ela
+ * não é uma camada de MOD — quem a desenha é a moderação —, então ela não entra
+ * na pilha; e uma pergunta inerte é uma janela que não fecha.
+ *
+ * Sem este conjunto, bastava um MOD abrir outra superfície enquanto a pergunta
+ * estava aberta: o recálculo devolvia tudo o que era nosso e adormecia a
+ * pergunta junto, no meio de alguém lendo-a.
+ */
+const acordadosPorPedido = new Set();
+
+/** Devolve o mundo e o adormece de novo para a camada do topo. */
+function recalcularAInercia() {
+  for (const no of adormecidosPelaPilha) no.inert = false;
+  adormecidosPelaPilha = [];
+  const topo = pilhaDeCamadas[pilhaDeCamadas.length - 1];
+  if (!topo) return;
+  adormecidosPelaPilha = inertarFora(topo);
+  // Anotados como nossos — para serem devolvidos no fim — e mantidos
+  // acordados enquanto alguém tiver pedido isso.
+  for (const no of adormecidosPelaPilha) {
+    if (acordadosPorPedido.has(no)) no.inert = false;
+  }
+}
+
+/**
+ * Põe uma camada no topo. Idempotente: a mesma camada não entra duas vezes.
+ *
+ * Reabrir uma superfície que já estava aberta a traz para a frente, que é o
+ * que «mostre aquela» quer dizer.
+ */
+function empilharCamada(no) {
+  if (!no) return;
+  const onde = pilhaDeCamadas.indexOf(no);
+  if (onde >= 0) pilhaDeCamadas.splice(onde, 1);
+  pilhaDeCamadas.push(no);
+  recalcularAInercia();
+}
+
+/** Tira uma camada de onde ela estiver — inclusive do meio da pilha. */
+function desempilharCamada(no) {
+  const onde = pilhaDeCamadas.indexOf(no);
+  if (onde < 0) return;
+  pilhaDeCamadas.splice(onde, 1);
+  recalcularAInercia();
+}
+
+/**
+ * Acorda um nó do produto que a pilha adormeceu, e devolve como readormecê-lo.
+ *
+ * A confirmação de descarte é o caso: ela é um irmão do ramo adormecido, e uma
+ * pergunta inerte é uma janela que não fecha. Ela não entra na pilha porque
+ * ela não é uma camada de MOD — quem a desenha é a moderação do produto.
+ *
+ * O readormecer confere a pilha de novo em vez de confiar no que era verdade
+ * quando a pergunta abriu: entre abrir e responder, outra camada pode ter
+ * entrado ou saído.
+ */
+function acordarDaPilha(no) {
+  if (!no || !adormecidosPelaPilha.includes(no)) return () => {};
+  acordadosPorPedido.add(no);
+  no.inert = false;
+  return () => {
+    acordadosPorPedido.delete(no);
+    if (adormecidosPelaPilha.includes(no)) no.inert = true;
+  };
+}
+
 /** Os tipos de superfície, e o que cada um exige do host. */
 const TIPOS_DE_SUPERFICIE = Object.freeze({
   pagina: { host: "palco-de-paginas", foco: false, camada: false },
@@ -125,14 +228,21 @@ class SuperficieDeMod {
     this.solta = false;
     /** Quem tinha o foco quando esta superfície abriu, para devolvê-lo. */
     this.focoAnterior = null;
-    /** O que ficou inerte por causa de um modal, para deixar de ficar. */
-    this.inertes = [];
 
     this.montarCasca(descricao);
     this.renderer = new RegiaoDeMod(id, dono, this.corpo, PERFIS_DE_RENDER.superficie);
     // Registrada **na criação**: uma superfície criada e não registrada é uma
     // janela que a saída não encontra.
-    dono.instancia?.registrar(`${id}: a superfície ${this.chave}`, () => this.descartar());
+    //
+    // E o retorno é **guardado**. Ele era descartado, e por isso `descartar`
+    // tirava a janela da tela e deixava o registro na instância: mil ciclos de
+    // criar/descartar terminavam com mil entradas retidas, medidas na revisão
+    // de 26ad0c2. Criar o descartador e não usá-lo é a mesma metade de conserto
+    // que R4 fechou do lado das contribuições.
+    this.esquecerNaInstancia = dono.instancia?.registrar(
+      `${id}: a superfície ${this.chave}`,
+      () => this.descartar(),
+    ) ?? null;
   }
 
   /**
@@ -239,12 +349,22 @@ class SuperficieDeMod {
    * de `pedirFechamento`: o MOD não pode vetar indefinidamente a saída.
    */
   prenderFoco() {
-    this.focoAnterior = document.activeElement;
+    // **Idempotente.** `abrir` chama isto em toda chamada, e `mostrar` chama
+    // `abrir`: reabrir uma superfície passava por aqui de novo. Guardar o foco
+    // anterior outra vez guardaria um nó de dentro do próprio diálogo, e pôr
+    // um segundo ouvinte deixaria um retido no fim.
+    if (!this.aoTeclar) this.focoAnterior = document.activeElement;
 
     // O resto da aplicação fica inerte de verdade — `inert`, e não só escuro.
     // Escurecer sem tornar inerte é a armadilha clássica: parece modal e
-    // responde a Tab.
-    this.inertes = inertarFora(this.camada);
+    // responde a Tab. Quem decide **quais** ramos é a pilha, porque a inércia
+    // é do topo e não de cada diálogo.
+    empilharCamada(this.camada);
+
+    if (this.aoTeclar) {
+      this.focarPrimeiro();
+      return;
+    }
 
     this.aoTeclar = (evento) => {
       if (evento.key === "Escape") {
@@ -452,11 +572,7 @@ class SuperficieDeMod {
     // anterior nos dois desfechos. `#moderar` é o elemento porque é ele que a
     // moderação mostra; acordar o pai inteiro devolveria a aplicação toda.
     const confirmacao = document.getElementById("moderar");
-    const dormia = Boolean(confirmacao && this.inertes.includes(confirmacao));
-    if (dormia) confirmacao.inert = false;
-    const readormecer = () => {
-      if (dormia && confirmacao && !this.solta) confirmacao.inert = true;
-    };
+    const readormecer = acordarDaPilha(confirmacao);
 
     abrirConfirmacao("FECHAR SEM GRAVAR?", consequencia, "DESCARTAR E FECHAR", () => {
       readormecer();
@@ -492,8 +608,10 @@ class SuperficieDeMod {
 
   /** Solta o que o modal prendeu, e devolve o foco a quem o tinha. */
   soltarFoco() {
-    for (const irmao of this.inertes) irmao.inert = false;
-    this.inertes.length = 0;
+    // **Sai de onde estiver.** Fechar fora de ordem é o caso normal: A abre, B
+    // abre por cima, e A fecha primeiro porque o MOD dela respondeu. A pilha
+    // tira A do meio e recalcula para B, que continua aberta.
+    desempilharCamada(this.camada);
     if (this.aoTeclar) {
       this.raiz.removeEventListener("keydown", this.aoTeclar);
       this.aoTeclar = null;
@@ -518,6 +636,13 @@ class SuperficieDeMod {
   descartar() {
     if (this.solta) return;
     this.solta = true;
+    // **Esquecida, e não descartada de novo.** Quem está descartando somos
+    // nós; pedir o descarte de volta daria uma volta que pararia na guarda
+    // acima, e uma recursão que só não é infinita por causa da ordem destas
+    // duas linhas é uma que a próxima edição quebra.
+    const esquecer = this.esquecerNaInstancia;
+    this.esquecerNaInstancia = null;
+    esquecer?.esquecer();
     this.soltarFoco();
     this.botaoDeSaida?.removeEventListener("click", this.aoSair);
     this.renderer.soltar();
@@ -551,8 +676,12 @@ class SuperficiesDoMod {
       // **Reabrir não recria.** Um MOD que chame `criar` de novo com o mesmo
       // `id` está dizendo «mostre aquela»; recriar jogaria fora o que estava
       // escrito nos campos dela.
+      //
+      // Só `mostrar`. Ele passou a chamar `abrir` — é o conserto de R6 —, e o
+      // `abrir` que estava aqui virou uma segunda passagem por `prenderFoco`:
+      // o caminho público mais curto até o defeito de inércia que a revisão de
+      // 26ad0c2 reproduziu.
       existente.mostrar();
-      existente.abrir();
       return { superficie: chave, reaproveitada: true };
     }
     if (this.porChave.size >= TETO_DE_SUPERFICIES) {

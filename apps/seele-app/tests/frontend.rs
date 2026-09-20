@@ -9764,15 +9764,25 @@ fn no_script_calls_a_function_that_no_script_declares() {
             // fora delas, um nome seguido de parênteses numa linha que abre
             // bloco é uma declaração.
             //
-            // `async` e `static` vêm **antes** do nome, e o nome é o que
-            // declara. Sem esta linha, `async iniciar(…) {` não era
-            // reconhecido — e `iniciar` foi acusado de não existir no dia em
-            // que o segundo executor entrou.
+            // `async`, `static`, `get` e `set` vêm **antes** do nome, e o
+            // nome é o que declara. Sem esta linha, `async iniciar(…) {` não
+            // era reconhecido — e `iniciar` foi acusado de não existir no dia
+            // em que o segundo executor entrou.
+            //
+            // `get` e `set` entraram depois, e por um acidente que vale
+            // contar: `get montada() {` passava porque **outro** arquivo tinha
+            // um `contribuicao.montada?.…` dentro de um `if (…)`, e tudo o que
+            // está entre parênteses conta como nome que existe. No dia em que
+            // aquela linha saiu por outro motivo, o acessor foi acusado de não
+            // existir. Ele existia desde o começo; o que não existia era a
+            // regra que o reconhecia.
             {
                 let cru = linha.trim();
                 let cru = cru
                     .strip_prefix("async ")
                     .or_else(|| cru.strip_prefix("static "))
+                    .or_else(|| cru.strip_prefix("get "))
+                    .or_else(|| cru.strip_prefix("set "))
                     .unwrap_or(cru)
                     .trim();
                 let primeira: String = cru

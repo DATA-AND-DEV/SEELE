@@ -51,18 +51,23 @@
  * Nada o aplicava: uma contribuição `decorar` entrava no registro, devolvia
  * handle e não mudava pixel nenhum.
  *
- * Implementá-lo agora esbarra numa fronteira que não é de esforço. As classes
- * validadas de `mods-estilos.js` alcançam o que está **dentro** de uma raiz do
- * MOD, e lá `opacidade: 0`, `escalar: 0.1` e `mover: -512` são escolhas
- * estéticas sobre o desenho do próprio MOD. Nas mesmas propriedades, aplicadas
- * a um nó do produto, cada uma delas some com o nome que abre a moderação —
- * e o cabeçalho deste arquivo diz que personalização estética «não pode
- * encobrir uma confirmação de confiança».
+ * O que falta é o **contrato**, e não o esforço. As classes validadas de
+ * `mods-estilos.js` são um conjunto só, pensado para o que está **dentro** de
+ * uma raiz do MOD: lá, `opacidade: 0` é uma escolha estética sobre o desenho
+ * dele. Esse mesmo conjunto, aplicado a um nó do produto, inclui propriedades
+ * que somem com o nome que abre a moderação — e o cabeçalho de `mods-estilos`
+ * diz que personalização estética «não pode encobrir uma confirmação de
+ * confiança».
  *
- * Um `decorar` honesto precisa do seu próprio subconjunto de estilo, provado
- * contra o encobrimento. Até ele existir, o modo é **recusado pelo nome**, com
- * a razão junto. A alternativa — mantê-lo na tabela — é a falha silenciosa que
- * a revisão de 20/09/2026 encontrou, e que este repositório paga mais caro que
+ * Isso argumenta por um **segundo conjunto**, e não contra a capacidade: cor,
+ * tipografia, fundo e borda em pontos determinados não exigem oferecer
+ * deslocamento nem opacidade sobre um controle nativo. Escrever quais
+ * propriedades, em quais pontos e sobre quais nós é a continuação do
+ * requisito, e **continua pendente**.
+ *
+ * Até esse contrato existir, o modo é **recusado pelo nome**, com a razão
+ * junto. A alternativa — mantê-lo na tabela — é a falha silenciosa que a
+ * revisão de 20/09/2026 encontrou, e que este repositório paga mais caro que
  * qualquer recusa.
  *
  * `perfil` diz com que orçamento a declaração é montada. Um cartão custa por
@@ -280,12 +285,33 @@ class RegistroDeContribuicoes {
     const quantas = this.porMod.get(contribuicao.mod) ?? 0;
     if (quantas <= 1) this.porMod.delete(contribuicao.mod);
     else this.porMod.set(contribuicao.mod, quantas - 1);
+    // **E o que foi montado a partir dela sai junto.**
+    //
+    // Quem monta é a janela — `montarContribuicao` em `base.js` —, e ela deixa
+    // aqui uma função para desligar cada destino. Sem esta chamada, revogar
+    // tirava o registro lógico e deixava o renderer, o nó e o descartador de
+    // cada montagem retidos na instância até a sessão acabar.
+    //
+    // A revisão de 26ad0c2 encontrou exatamente isso, e explica por que a
+    // medida anterior não pegou: mil ciclos de uma contribuição **sem
+    // conteúdo montado** não passam por este caminho.
+    //
+    // Idempotente pelos dois lados: cada descartador de montagem tem a própria
+    // guarda, e o campo é zerado aqui.
+    const soltarMontagem = contribuicao.soltarMontagem;
+    contribuicao.soltarMontagem = null;
+    try {
+      soltarMontagem?.();
+    } catch (falha) {
+      console.warn(`MOD ${contribuicao.mod}: o conteúdo de ${contribuicao.ponto} não saiu`, falha);
+    }
     // **O conteúdo sai junto.** Ele é o que a closure do descartador segurava,
     // e zerá-lo aqui é o que faz uma referência esquecida no meio do caminho
     // não segurar uma árvore inteira.
     contribuicao.conteudo = null;
     contribuicao.classes = null;
     contribuicao.esquecer = null;
+    contribuicao.montadas = null;
     this.avisar();
   }
 
