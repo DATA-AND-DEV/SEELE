@@ -1,0 +1,349 @@
+/* As superfícies de um MOD: página, painel, diálogo, popover e notificação.
+   ADR 0052.
+
+   O que este arquivo faz é **dar o palco**: onde a superfície mora, como ela
+   se comporta no espaço que resta, e o que o produto garante lá dentro (foco,
+   saída, rolagem, tamanho mínimo). O que o MOD desenha dentro dela sai de
+   `mods-estilos.js`, e nenhuma regra daqui tenta descrevê-lo.
+
+   A razão de separar é a que a auditoria de 20/09/2026 encontrou: a faixa de
+   240 px era o palco **e** a moldura, e por isso «editar perfil, escolher tema
+   e jogar» eram a mesma caixa estreita. Palco e conteúdo separados é o que
+   permite a mesma API servir a um diálogo de 400 px e a uma mesa de jogo. */
+
+/* ------------------------------------------------------------ o palco geral */
+
+/* O contêiner de consulta de todas as superfícies: é ele que faz
+   `@container superficie-de-mod` responder pela largura **da superfície**, e
+   não pela da janela. Um painel arrastado para 300 px numa janela de 1400
+   precisa da primeira resposta. */
+.superficie-de-mod {
+  container: superficie-de-mod / inline-size;
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-corpo, 13px);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Tudo o que o renderer monta dentro de uma superfície passa por esta classe.
+   Ela é a régua de espaçamento padrão — e só a padrão: um nó com `estilo`
+   próprio a sobrescreve, que é o ponto inteiro da API nova. */
+.superficie-de-mod .regiao-de-mod-parte { margin: 0; }
+
+/* ------------------------------------------------------------- os palcos */
+
+/* **Na mesma célula da conversa, e não numa coluna nova.** Uma página de MOD
+   substitui a conversa enquanto está aberta; a coluna de salas, a faixa de
+   pessoas, a voz e a saída continuam de pé.
+
+   `grid-area` e não uma quinta coluna: a grade de `.paineis` é declarada uma a
+   uma, e um quinto filho cairia numa segunda linha — que é a mesma armadilha
+   que fez a faixa dos MODs nascer fora de `<main>`. */
+.palco-de-paginas {
+  grid-area: linha;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* Por cima da conversa e não ao lado dela: as duas ocupam a mesma célula, e
+     a que está aberta é a que se vê. */
+  z-index: 1;
+  background: var(--seele-negro-absoluto);
+}
+
+.palco-de-paginas[hidden] { display: none; }
+
+/* A coluna dos painéis: ela **acrescenta** uma coluna, e some quando não há
+   nenhum. `.paineis` a declara em `tela-sessao.css`. */
+.palco-de-paineis {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.palco-de-paineis[hidden] { display: none; }
+
+/* As camadas cobrem a aplicação inteira: irmãs de `<main>`, e não filhas. */
+.palco-de-camadas[hidden] { display: none; }
+
+.avisos-de-mod[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- a página */
+
+/* Ocupa a área principal da sessão, no lugar da conversa — e **não** no lugar
+   da voz, da lista de pessoas ou da saída. A auditoria foi explícita: «A página
+   de um MOD não deve obrigar a desconectar a voz.» */
+.pagina-de-mod {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--seele-negro-absoluto);
+}
+
+.pagina-de-mod-cabecalho {
+  display: flex;
+  align-items: center;
+  gap: var(--seele-celula-x);
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+  border-bottom: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+  /* Persistente: a auditoria (U33) mediu que «voltar» ficava no fim de uma
+     coluna que também rola, e competia com a navegação longa. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.pagina-de-mod-titulo {
+  margin: 0;
+  font-size: var(--seele-t-titulo, 15px);
+  letter-spacing: 0.04em;
+  color: var(--seele-osso);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pagina-de-mod-origem {
+  font-size: var(--seele-t-dado, 11px);
+  color: var(--seele-osso-apagado);
+  white-space: nowrap;
+}
+
+.pagina-de-mod-corpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* **A rolagem é da superfície.** U02: a rolagem pertencia ao contêiner dos
+     três MODs, e rolar o PERFIS deslocava o ESTILO e sumia com a MESA. */
+  overflow: auto;
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+}
+
+/* --------------------------------------------------------------- o painel */
+
+.painel-de-mod {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+.painel-de-mod[data-lado="esquerda"] {
+  border-left: none;
+  border-right: 1px solid var(--seele-linha-forte);
+}
+
+.painel-de-mod-cabecalho {
+  display: flex;
+  align-items: center;
+  gap: var(--seele-celula-x);
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+.painel-de-mod-titulo {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--seele-t-dado, 11px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--seele-osso-apagado);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.painel-de-mod-corpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+}
+
+.painel-de-mod[hidden] { display: none; }
+
+/* -------------------------------------------------------------- o diálogo */
+
+/* A camada que escurece o que está atrás. Ela **não** é o fundo inerte: o que
+   torna o fundo inerte é `inert` no elemento, posto por `mods-superficies.js`.
+   Escurecer sem tornar inerte é a armadilha clássica — parece modal e responde
+   a Tab. */
+.camada-de-mod {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(24px, env(safe-area-inset-top)) 16px;
+  background: color-mix(in srgb, var(--seele-negro-absoluto) 78%, transparent);
+}
+
+.camada-de-mod[data-modal="nao"] {
+  /* Um diálogo não modal não come os cliques do que está atrás: só a caixa
+     dele recebe ponteiro. */
+  pointer-events: none;
+  background: none;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 24px;
+}
+
+.dialogo-de-mod {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* **O host mantém as dimensões dentro da área útil.** §3 do plano: «um valor
+     grande não torna o fechamento inalcançável». Um MOD pode pedir 2000 px de
+     largura; ele recebe o que couber. */
+  max-width: min(var(--largura-pedida, 560px), calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  width: 100%;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha-forte);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 60%);
+}
+
+.dialogo-de-mod-cabecalho {
+  display: flex;
+  align-items: center;
+  gap: var(--seele-celula-x);
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+
+.dialogo-de-mod-titulo {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--seele-t-titulo, 15px);
+  color: var(--seele-osso);
+}
+
+.dialogo-de-mod-corpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+}
+
+/* O rodapé é fixo por contrato: §3 do plano pede «rodapé fixo» para modais,
+   e a razão é que salvar/cancelar não podem sumir no fim de uma rolagem
+   longa — que foi o que a auditoria descreveu em U33 sobre as configurações. */
+.dialogo-de-mod-rodape {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--seele-celula-x);
+  justify-content: flex-end;
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+/* ------------------------------------------------------- a saída, sempre */
+
+/* Um botão do produto, e não do MOD: é o que garante que fechar continue
+   alcançável mesmo quando a superfície do MOD está em erro, vazia ou saturada.
+   §6: «O host sempre pode fechar superfícies, restaurar a navegação, mostrar
+   permissões reais e sair do servidor.» */
+.superficie-de-mod-sair {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 1px solid var(--seele-linha-forte);
+  background: transparent;
+  color: var(--seele-osso);
+  font: inherit;
+  font-size: var(--seele-t-dado, 11px);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.superficie-de-mod-sair:hover { border-color: var(--seele-laranja-nerv); }
+.superficie-de-mod-sair:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------- a notificação */
+
+.avisos-de-mod {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.aviso-de-mod {
+  pointer-events: auto;
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+  border: 1px solid var(--seele-linha-forte);
+  border-left: 3px solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-painel);
+  color: var(--seele-osso);
+  font-size: var(--seele-t-dado, 11px);
+  overflow-wrap: anywhere;
+}
+
+.aviso-de-mod[data-tom="erro"] { border-left-color: var(--seele-vermelho, #d13b2a); }
+
+/* ----------------------------------------------------- as animações do MOD */
+
+/* Quatro presets, e nenhum keyframe declarado por um MOD: ver a razão em
+   `mods-estilos.js`. Os nomes são os que `ANIMACOES_DO_MOD` mapeia. */
+
+@keyframes seele-mod-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes seele-mod-aurora {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes seele-mod-brilho {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.35); }
+}
+
+@keyframes seele-mod-flutuar {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -4px; }
+}
+
+/* A aurora precisa de um fundo maior que a caixa para ter para onde correr. */
+[style*="seele-mod-aurora"] { background-size: 220% 220%; }
+
+/* **Quem pediu menos movimento recebe menos movimento**, e o MOD não tem como
+   passar por cima: esta regra é do produto e vem depois da folha da superfície.
+   §8 do plano: «Pausar quando invisível, respeitar redução de movimento,
+   oferecer versão estática.» */
+@media (prefers-reduced-motion: reduce) {
+  .superficie-de-mod *,
+  .pessoa-cartao * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* E quando a superfície não está visível, o desenho dela para. Um painel
+   recolhido com uma animação de dois segundos continua compondo quadros. */
+.superficie-de-mod[hidden] *,
+[data-suspensa="sim"] * {
+  animation-play-state: paused !important;
+}

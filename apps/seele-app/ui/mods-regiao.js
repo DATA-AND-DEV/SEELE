@@ -75,10 +75,27 @@ const LIMITES_DA_REGIAO = Object.freeze({
 const LIMITES_DO_CARTAO = Object.freeze({
   /** Pessoas com cartão, por MOD. */
   cartoes: 64,
-  /** Nós num cartão, somando todos os níveis. */
-  nos: 24,
+  /**
+   * Nós num cartão, somando todos os níveis.
+   *
+   * **Vinte e quatro viraram sessenta e quatro**, e a mudança tem causa. O
+   * número antigo saiu de «um cartão é um retrato, um nome e duas linhas» —
+   * uma descrição correta de um cartão que **acrescenta** conteúdo a uma linha
+   * do produto. U27 disse que isso é insuficiente: «Cartões na API são
+   * conteúdo adicional, sem interação, sem composição de banner e sem
+   * substituição dos campos nativos. Isso é inferior ao PERFIS anterior.»
+   *
+   * Um cartão que **substitui** a identidade precisa de faixa, retrato
+   * sobreposto, nome, pronomes, status e uma linha de distintivos. Isso é uma
+   * caixa com quatro filhos e duas subcaixas — vinte e quatro nós não chegam
+   * lá, e o pacote descobria isso como uma recusa sem explicação.
+   *
+   * Sessenta e quatro continua sendo um teto: uma lista de vinte pessoas dá
+   * 1280 nós na lateral, que é o mesmo custo que uma região e meia da API 3.
+   */
+  nos: 64,
   /** Níveis de fundura dentro de um cartão. */
-  fundura: 4,
+  fundura: 6,
   /** Mídias somadas em todos os cartões deste MOD. */
   midias: 64,
   /** Bytes de mídia somados em todos os cartões deste MOD. */
@@ -86,27 +103,109 @@ const LIMITES_DO_CARTAO = Object.freeze({
 });
 
 /**
- * As formas que um cartão aceita — e por que as outras ficam de fora.
+ * Os perfis de renderização: quem desenha onde, com que teto e que formas.
  *
- * **Nada que receba foco ou clique.** A linha do roster já tem um botão: o
- * nome, que abre a moderação. Um `botao` de MOD ao lado dele dividiria a ordem
- * de tabulação e a área de toque de um controle do produto com um terceiro — e
- * quem apertasse errado não teria como saber de quem era o botão que respondeu.
+ * Três lugares, três orçamentos, e a diferença entre eles não é organização:
  *
- * `campo` e `escolha` ficam de fora pela mesma razão, e `tela` por outra: um
- * canvas com arraste dentro de uma lista que rola é o arraste do MOD brigando
- * com a rolagem de quem lê.
- *
- * O que sobra — texto, título, linha, lista, item e mídia — é o cartão que a
- * API 2 tinha: um retrato, um nome escolhido, e o que a pessoa escreveu sobre
- * si.
+ * - a **região** é a faixa da API 3, e continua existindo para os pacotes que
+ *   já estão publicados. Ela não cresceu: crescer a faixa era exatamente o que
+ *   o §15 do plano diz não confundir com uma API de aplicações;
+ * - o **cartão** é desenhado ao lado do nome de uma pessoa, e há um por pessoa.
+ *   Ele cresceu de 24 para 64 nós porque U27 pediu que ele pudesse
+ *   **substituir** a identidade — faixa, retrato sobreposto, nome, pronomes,
+ *   status —, e 24 nós não desenham isso. Ganhou também um ponto de clique,
+ *   pelo mesmo motivo, e o cuidado de antes vira regra em `montarCartao`;
+ * - a **superfície** é uma página, um painel ou um diálogo, e é a única que
+ *   tem a área de uma aplicação. O teto dela é o que uma ficha de RPG e um
+ *   tabuleiro exigem — e continua sendo teto.
  */
-const FORMAS_DO_CARTAO = Object.freeze(
-  new Set(["texto", "titulo", "linha", "lista", "item", "midia"]),
-);
+const PERFIS_DE_RENDER = Object.freeze({
+  regiao: Object.freeze({
+    nome: "regiao",
+    nos: 512, fundura: 8, campos: 32, telas: 4, midias: 4,
+    bytesDeMidia: 4 * 1024 * 1024,
+    formas: null,
+  }),
+  cartao: Object.freeze({
+    nome: "cartao",
+    // Os números vêm de `LIMITES_DO_CARTAO`, que os explica um a um. Repeti-los
+    // aqui seria criar a segunda cópia que discorda no dia em que uma mudar.
+    nos: LIMITES_DO_CARTAO.nos,
+    fundura: LIMITES_DO_CARTAO.fundura,
+    campos: 0,
+    telas: 0,
+    midias: LIMITES_DO_CARTAO.midias,
+    bytesDeMidia: LIMITES_DO_CARTAO.bytesDeMidia,
+    formas: Object.freeze(new Set([
+      "texto", "titulo", "linha", "lista", "item", "midia",
+      "caixa", "pilha", "grade", "separador", "espaco",
+      "retrato", "distintivo",
+    ])),
+  }),
+  superficie: Object.freeze({
+    nome: "superficie",
+    nos: 4096, fundura: 16, campos: 128, telas: 4, midias: 24,
+    bytesDeMidia: 24 * 1024 * 1024,
+    formas: null,
+  }),
+});
 
-/** As formas que a API conhece, e a etiqueta que cada uma vira. */
+/**
+ * As formas que um cartão aceita — e por que as outras continuam de fora.
+ *
+ * A lista está em `PERFIS_DE_RENDER.cartao.formas`, e cresceu com a API 4:
+ * `caixa`, `pilha`, `grade`, `separador`, `espaco`, `retrato` e `distintivo`
+ * entraram. Não é um afrouxamento — é a diferença entre acrescentar uma linha
+ * embaixo do nome e **desenhar a identidade**, que é o que U27 pediu.
+ *
+ * **O que continua de fora é tudo que receba foco.** A razão de antes não
+ * mudou: a linha do roster já tem um botão do produto — o nome, que abre a
+ * moderação —, e um `botao` de MOD ao lado dele dividiria a ordem de tabulação
+ * e a área de toque de um controle do produto com um terceiro. `campo`,
+ * `escolha`, `textoLongo`, `numero`, `deslizante`, `marca`, `interruptor`,
+ * `cor`, `link`, `arquivo`, `formulario` e `abas` ficam fora por isso.
+ *
+ * `tela` fica de fora por outra: um canvas com arraste dentro de uma lista que
+ * rola é o arraste do MOD brigando com a rolagem de quem lê.
+ *
+ * **Clicar o cartão inteiro é outra coisa, e ela existe.** A substituição de
+ * `pessoa.cartao` declara uma ação principal, e quem monta o alvo de clique é
+ * o produto — um botão só, com o nome acessível que ele escreve, indo para o
+ * comando que ele controla. Ver `mods-contribuicoes.js`.
+ */
+const FORMAS_DO_CARTAO = Object.freeze(PERFIS_DE_RENDER.cartao.formas);
+
+/**
+ * As formas que a API conhece, e a etiqueta que cada uma vira.
+ *
+ * # O que a API 4 acrescentou, e por quê
+ *
+ * A lista da API 3 tinha onze formas e descrevia bem um **formulário**: texto,
+ * título, lista, campo, escolha, botão. A auditoria de 20/09/2026 mostrou o
+ * custo disso — «editar perfil/tema e jogar exige rolar um rodapé» —, e o
+ * diagnóstico dela não foi que faltava espaço: foi que faltava **composição**.
+ * Uma linha de perfil com retrato sobreposto a uma faixa não é um formulário
+ * mais largo; é uma caixa dentro de outra, com posição, recorte e camada.
+ *
+ * As formas novas são de três tipos:
+ *
+ * - **composição** (`caixa`, `pilha`, `grade`, `rolagem`, `separador`,
+ *   `espaco`): o que permite montar componentes próprios em vez de pedir um
+ *   componente novo ao SEELE a cada combinação visual;
+ * - **controle** (`textoLongo`, `numero`, `deslizante`, `marca`,
+ *   `interruptor`, `cor`, `abas`, `formulario`, `acoes`): o que o §5 do plano
+ *   chama de capacidade mínima, e que a auditoria nomeou uma a uma — biografia
+ *   multilinha (U20), seletor de cor com amostra (U23), abas na gestão (U12);
+ * - **apresentação de pessoa** (`retrato`, `distintivo`, `link`): o que U27
+ *   pediu para o PERFIS poder **substituir** a identidade em vez de escrever
+ *   uma linha embaixo dela.
+ *
+ * Toda forma nova é uma decisão de API registrada aqui. Uma forma que não está
+ * nesta tabela continua sendo recusada e contada — não vira `div` por
+ * conveniência.
+ */
 const FORMAS_DA_REGIAO = Object.freeze({
+  // ---- API 3 ----
   texto: "p",
   titulo: "h3",
   linha: "div",
@@ -118,7 +217,30 @@ const FORMAS_DA_REGIAO = Object.freeze({
   arquivo: "button",
   tela: "canvas",
   midia: "figure",
+  // ---- composição (API 4) ----
+  caixa: "div",
+  pilha: "div",
+  grade: "div",
+  rolagem: "div",
+  separador: "hr",
+  espaco: "div",
+  // ---- controle (API 4) ----
+  formulario: "form",
+  acoes: "div",
+  abas: "div",
+  aba: "section",
+  textoLongo: "label",
+  numero: "label",
+  deslizante: "label",
+  marca: "label",
+  interruptor: "label",
+  cor: "label",
+  // ---- apresentação (API 4) ----
+  retrato: "span",
+  distintivo: "span",
+  link: "button",
 });
+
 
 /** A cor de uma figura, na mesma forma que o tema aceita. */
 const COR_DA_FIGURA = /^#[0-9a-f]{6}$/i;
@@ -129,6 +251,15 @@ const FORMAS_COM_TETO = Object.freeze({
   escolha: "campos",
   tela: "telas",
   midia: "midias",
+  // Os controles da API 4 contam no mesmo bolso dos campos: são todos caixas
+  // de edição com estado, e o teto existe para o custo delas, não para o nome.
+  textoLongo: "campos",
+  numero: "campos",
+  deslizante: "campos",
+  marca: "campos",
+  interruptor: "campos",
+  cor: "campos",
+  retrato: "midias",
 });
 
 /**
@@ -141,7 +272,24 @@ const FORMAS_COM_TETO = Object.freeze({
  * o que focar — foi a bancada da região que pegou, na primeira execução.
  */
 const FORMAS_COM_FILHOS = Object.freeze(
-  new Set(["texto", "titulo", "linha", "lista", "item", "botao", "arquivo"]),
+  new Set([
+    "texto", "titulo", "linha", "lista", "item", "botao", "arquivo",
+    // As formas de composição existem **para** ter filhos: são elas que fazem
+    // um MOD montar um componente próprio em vez de pedir um ao SEELE.
+    "caixa", "pilha", "grade", "rolagem", "formulario", "acoes", "aba",
+    "distintivo", "link",
+  ]),
+);
+
+/**
+ * As formas que o renderer trata como caixa de composição e nada mais.
+ *
+ * Elas não guardam recurso, não escutam evento e não têm conteúdo próprio: o
+ * que aparece nelas é o que o MOD declarou dentro. A distinção existe para
+ * `criar` não precisar de um `case` vazio para cada uma.
+ */
+const FORMAS_DE_CAIXA = Object.freeze(
+  new Set(["caixa", "pilha", "grade", "rolagem", "acoes", "espaco", "separador", "distintivo"]),
 );
 
 /**
@@ -213,15 +361,32 @@ function pedidoDeArquivo(no) {
  * pertence à instância de agora.
  */
 class RegiaoDeMod {
+  /** O contador que dá escopo único a cada raiz montada nesta janela. */
+  static serieDeEscopo = 0;
+
   /**
    * @param {string} id `autor/nome`.
    * @param {object} dono `{ instancia, geracao, podeFalar, falar, carregarMidia }`.
    * @param {Element} raiz O elemento onde esta região desenha.
    */
-  constructor(id, dono, raiz) {
+  constructor(id, dono, raiz, perfil = PERFIS_DE_RENDER.regiao) {
     this.id = id;
     this.dono = dono;
     this.raiz = raiz;
+    /** Qual orçamento e quais formas valem aqui — ver `PERFIS_DE_RENDER`. */
+    this.perfil = perfil;
+    /**
+     * O escopo desta raiz, para as classes do MOD alcançarem **só ela**.
+     *
+     * Um número por raiz, e não o `id` do MOD: duas superfícies do mesmo MOD
+     * com a classe `cartao` precisam de folhas separadas, senão a página
+     * reescreveria o diálogo ao trocar uma cor.
+     */
+    this.escopo = `mod-${(RegiaoDeMod.serieDeEscopo += 1)}`;
+    if (raiz) raiz.dataset.escopoDeMod = this.escopo;
+    /** A folha de classes desta raiz, montada sob demanda. */
+    this.folha = null;
+    this.textoDaFolha = "";
     /** O que cada elemento segura, para soltar quando ele sai. */
     this.recursos = new Map();
     /** Quantos de cada forma com teto estão de pé. */
@@ -256,9 +421,46 @@ class RegiaoDeMod {
   aplicar(conteudo) {
     if (this.solta) return 0;
     this.recusados = 0;
-    const orcamento = { nos: LIMITES_DA_REGIAO.nos };
-    this.reconciliar(this.raiz, this.planejar(conteudo, 0, orcamento), 0, orcamento);
+    const orcamento = { nos: this.perfil.nos };
+    this.reconciliar(
+      this.raiz,
+      this.planejar(conteudo, 0, orcamento, this.perfil.formas),
+      0,
+      orcamento,
+    );
     return this.recusados;
+  }
+
+  /**
+   * As classes que esta raiz oferece aos nós dela.
+   *
+   * Compiladas uma vez por declaração e guardadas num `<style>` do produto,
+   * preso à raiz. Recompilar a cada desenho faria o navegador reanalisar a
+   * folha a cada tecla digitada num campo.
+   */
+  declararClasses(classes) {
+    if (this.solta || !this.raiz) return 0;
+    const conta = { recusados: 0 };
+    const texto = folhaDeClassesDeMod(this.escopo, classes, conta);
+    if (texto === this.textoDaFolha) return conta.recusados;
+    this.textoDaFolha = texto;
+    if (!texto) {
+      this.folha?.remove();
+      this.folha = null;
+      return conta.recusados;
+    }
+    if (!this.folha) {
+      this.folha = document.createElement("style");
+      // Registrada como recurso: uma folha que sobrevive à saída pinta a
+      // sessão seguinte com as cores da anterior.
+      this.dono.instancia?.registrar(`${this.id}: a folha de ${this.escopo}`, () => {
+        this.folha?.remove();
+        this.folha = null;
+      });
+      this.raiz.prepend(this.folha);
+    }
+    this.folha.textContent = texto;
+    return conta.recusados;
   }
 
   /**
@@ -269,7 +471,7 @@ class RegiaoDeMod {
    * árvore de dez mil nós ser paga antes de ser negada.
    */
   planejar(no, fundura, orcamento, permitidas = null) {
-    const teto = permitidas ? LIMITES_DO_CARTAO.fundura : LIMITES_DA_REGIAO.fundura;
+    const teto = this.perfil.fundura;
     if (fundura > teto || no === null || no === undefined) return [];
     if (Array.isArray(no)) {
       return no.flatMap((um) => this.planejar(um, fundura, orcamento, permitidas));
@@ -376,12 +578,12 @@ class RegiaoDeMod {
   /** Monta um nó novo, ou nada quando ele não cabe num teto. */
   criar(plano) {
     // Uma mídia de cartão tem contador e teto próprios: ver `plano.cartao`.
-    const classe = plano.cartao && plano.forma === "midia"
+    const classe = plano.cartao && (plano.forma === "midia" || plano.forma === "retrato")
       ? "midiasDeCartao"
       : FORMAS_COM_TETO[plano.forma];
     const limite = classe === "midiasDeCartao"
       ? LIMITES_DO_CARTAO.midias
-      : LIMITES_DA_REGIAO[classe];
+      : this.perfil[classe];
     if (classe && this.contagem[classe] >= limite) return null;
 
     // Por `elemento`, que é o construtor desta casa — `createElement` mais
@@ -391,6 +593,11 @@ class RegiaoDeMod {
     const elem = elemento(FORMAS_DA_REGIAO[plano.forma], "regiao-de-mod-parte");
     elem.dataset.chave = plano.chave;
     elem.dataset.forma = plano.forma;
+    // A chave que o MOD deu, guardada à parte da chave de reconciliação: é ela
+    // que `valoresDoFormulario` lê para montar o envio.
+    if (typeof plano.no.chave === "string" && plano.no.chave) {
+      elem.dataset.chaveDoMod = plano.no.chave.slice(0, 120);
+    }
     if (classe) this.contagem[classe] += 1;
 
     switch (plano.forma) {
@@ -400,6 +607,17 @@ class RegiaoDeMod {
       case "arquivo": this.montarArquivo(elem, plano); break;
       case "tela": this.montarTela(elem, plano); break;
       case "midia": this.montarMidia(elem, plano); break;
+      // ---- API 4 ----
+      case "formulario": this.montarFormulario(elem, plano); break;
+      case "abas": this.montarAbas(elem, plano); break;
+      case "textoLongo": this.montarTextoLongo(elem, plano); break;
+      case "numero": this.montarNumero(elem, plano); break;
+      case "deslizante": this.montarDeslizante(elem, plano); break;
+      case "marca":
+      case "interruptor": this.montarMarca(elem, plano); break;
+      case "cor": this.montarCor(elem, plano); break;
+      case "retrato": this.montarRetrato(elem, plano); break;
+      case "link": this.montarLink(elem, plano); break;
       default: break;
     }
     this.atualizar(elem, plano);
@@ -408,15 +626,93 @@ class RegiaoDeMod {
 
   /** Reescreve o que mudou num nó que já existe. */
   atualizar(elem, plano) {
+    // **Estilo e classe primeiro, e para toda forma.** Eles são a parte da API
+    // 4 que não é uma forma nova: um `texto` com `estilo` é a diferença entre
+    // «o MOD escreve o nome» e «o MOD apresenta a identidade» — que foi o que
+    // U27 disse faltar.
+    //
+    // O que o validador não reconhecer é contado como recusa, pela regra de
+    // sempre: um MOD que escreveu `corDeFundo` em vez de `fundo` descobre onde
+    // escreveu, em vez de ver a cor não aparecer e não saber por quê.
+    if (plano.no.estilo) {
+      const conta = { recusados: 0 };
+      aplicarEstiloDeMod(elem, plano.no.estilo, conta);
+      this.recusados += conta.recusados;
+    } else if (elem.dataset.estiloDeMod) {
+      // O estilo saiu da declaração: o que ele escreveu sai da tela junto.
+      aplicarEstiloDeMod(elem, null);
+    }
+    this.vestirClasses(elem, plano.no.classe);
+    const rotuloAcessivel = typeof plano.no.nomeAcessivel === "string"
+      ? plano.no.nomeAcessivel.slice(0, 200)
+      : "";
+    if (rotuloAcessivel) elem.setAttribute("aria-label", rotuloAcessivel);
+
     switch (plano.forma) {
       case "campo": this.atualizarCampo(elem, plano); break;
       case "escolha": this.atualizarEscolha(elem, plano); break;
-      case "botao": elem.disabled = plano.no.desligado === true; break;
+      case "botao": this.atualizarBotao(elem, plano); break;
       case "arquivo": this.atualizarArquivo(elem, plano); break;
       case "tela": this.pintarTela(elem, plano); break;
       case "midia": this.atualizarMidia(elem, plano); break;
+      // ---- API 4 ----
+      case "formulario": this.atualizarFormulario(elem, plano); break;
+      case "abas": this.atualizarAbas(elem, plano); break;
+      case "aba": this.atualizarAba(elem, plano); break;
+      case "textoLongo": this.atualizarTextoLongo(elem, plano); break;
+      case "numero": this.atualizarNumero(elem, plano); break;
+      case "deslizante": this.atualizarDeslizante(elem, plano); break;
+      case "marca":
+      case "interruptor": this.atualizarMarca(elem, plano); break;
+      case "cor": this.atualizarCor(elem, plano); break;
+      case "retrato": this.atualizarRetrato(elem, plano); break;
+      case "link": this.atualizarLink(elem, plano); break;
+      case "grade": break;
       default: break;
     }
+  }
+
+  /**
+   * As classes do MOD num nó, sem tocar nas do produto.
+   *
+   * `classList` e não `className`: a classe do produto — `regiao-de-mod-parte`
+   * — é a régua de espaçamento e o que o guarda de CSS enxerga. Trocar a lista
+   * inteira a apagaria, e foi assim que uma lista perdeu o padding dela uma vez.
+   */
+  vestirClasses(elem, declarado) {
+    const querem = classesDeMod(declarado);
+    const tinham = elem.dataset.classesDeMod ? elem.dataset.classesDeMod.split(" ") : [];
+    for (const antiga of tinham) {
+      if (antiga && !querem.includes(antiga)) elem.classList.remove(antiga);
+    }
+    for (const nova of querem) elem.classList.add(nova);
+    if (querem.length) elem.dataset.classesDeMod = querem.join(" ");
+    else delete elem.dataset.classesDeMod;
+  }
+
+  /** O botão, com a variante que o MOD pediu e o estado de ação em curso. */
+  atualizarBotao(elem, plano) {
+    elem.disabled = plano.no.desligado === true || plano.no.emProgresso === true;
+    const variantes = ["primaria", "secundaria", "perigo", "discreta"];
+    const variante = variantes.includes(plano.no.variante) ? plano.no.variante : "secundaria";
+    if (elem.dataset.variante !== variante) elem.dataset.variante = variante;
+    // **«Em progresso» é um estado da ação, e não um botão desligado.** §7 do
+    // plano: «Botão em progresso impede duplicata conforme regra da operação;
+    // mantém feedback visual imediato.» Sem o atributo, um clique duplo vira
+    // duas campanhas e a pessoa não vê nada acontecer entre os dois.
+    if (plano.no.emProgresso === true) {
+      elem.dataset.progresso = "sim";
+      elem.setAttribute("aria-busy", "true");
+    } else {
+      delete elem.dataset.progresso;
+      elem.removeAttribute("aria-busy");
+    }
+    // Por que está indisponível, quando o MOD souber dizer.
+    const porque = typeof plano.no.porqueIndisponivel === "string"
+      ? plano.no.porqueIndisponivel.slice(0, 200)
+      : "";
+    if (porque && elem.disabled) elem.title = porque;
+    else if (elem.title && elem.dataset.forma === "botao") elem.removeAttribute("title");
   }
 
   // ------------------------------------------------------------ campo
@@ -650,6 +946,516 @@ class RegiaoDeMod {
     ].filter(Boolean).join(" · ");
     if (exigencia) elem.dataset.exigencia = exigencia;
     else delete elem.dataset.exigencia;
+  }
+
+  // ------------------------------------------- os controles da API 4
+  //
+  // Todos seguem a mesma forma dos da API 3, e por um motivo que não é
+  // simetria: o que fazia um campo ser utilizável era **não reescrever o
+  // valor enquanto a caixa tem foco**. Um MOD que ecoa o que recebe — que é o
+  // que um MOD que grava no servidor faz — tornaria a digitação impossível a
+  // partir da segunda letra. A regra vale igual para textarea, número,
+  // deslizante e cor.
+
+  /**
+   * Uma caixa de texto de várias linhas.
+   *
+   * U20 pediu esta forma pelo nome: «"Sobre mim" é input de uma linha» e
+   * «biografia multilinha e prévia». Não era uma escolha do PERFIS — a API 3
+   * não tinha como declarar outra coisa.
+   */
+  montarTextoLongo(elem, plano) {
+    const rotulo = elemento("span", "regiao-de-mod-rotulo");
+    const caixa = elemento("textarea", "regiao-de-mod-area");
+    caixa.rows = 4;
+    caixa.maxLength = LIMITES_DA_REGIAO.valorDoCampo * 8;
+    elem.append(rotulo, caixa);
+    const aoDigitar = () => {
+      this.dono.falar({
+        nome: "campo",
+        chave: plano.no.chave ?? "",
+        valor: caixa.value.slice(0, caixa.maxLength),
+      });
+    };
+    caixa.addEventListener("input", aoDigitar);
+    this.guardar(elem, `textoLongo ${plano.chave}`, () => {
+      caixa.removeEventListener("input", aoDigitar);
+      this.contagem.campos -= 1;
+    });
+  }
+
+  atualizarTextoLongo(elem, plano) {
+    const rotulo = elem.querySelector(".regiao-de-mod-rotulo");
+    const caixa = elem.querySelector(".regiao-de-mod-area");
+    if (!rotulo || !caixa) return;
+    const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
+    if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    const linhas = Math.min(Math.max(Number(plano.no.linhas) || 4, 2), 24);
+    if (caixa.rows !== linhas) caixa.rows = linhas;
+    const sugestao = typeof plano.no.sugestao === "string"
+      ? plano.no.sugestao.slice(0, 120)
+      : "";
+    if (caixa.placeholder !== sugestao) caixa.placeholder = sugestao;
+    this.marcarValidade(elem, caixa, plano);
+    if (document.activeElement === caixa) return;
+    const valor = typeof plano.no.valor === "string"
+      ? plano.no.valor.slice(0, caixa.maxLength)
+      : "";
+    if (caixa.value !== valor) caixa.value = valor;
+  }
+
+  /** Um número, com os limites que o MOD declarou e o produto confere. */
+  montarNumero(elem, plano) {
+    const rotulo = elemento("span", "regiao-de-mod-rotulo");
+    const caixa = elemento("input", "regiao-de-mod-caixa");
+    caixa.type = "number";
+    elem.append(rotulo, caixa);
+    const aoDigitar = () => {
+      // **Vazio é vazio, e não zero.** Um campo apagado no meio da edição não
+      // pode virar `0` a caminho do MOD: o MOD gravaria zero.
+      const bruto = caixa.value;
+      this.dono.falar({
+        nome: "numero",
+        chave: plano.no.chave ?? "",
+        valor: bruto === "" ? null : Number(bruto),
+        texto: bruto,
+      });
+    };
+    caixa.addEventListener("input", aoDigitar);
+    this.guardar(elem, `numero ${plano.chave}`, () => {
+      caixa.removeEventListener("input", aoDigitar);
+      this.contagem.campos -= 1;
+    });
+  }
+
+  atualizarNumero(elem, plano) {
+    const rotulo = elem.querySelector(".regiao-de-mod-rotulo");
+    const caixa = elem.querySelector(".regiao-de-mod-caixa");
+    if (!rotulo || !caixa) return;
+    const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
+    if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    for (const [atributo, chave] of [["min", "minimo"], ["max", "maximo"], ["step", "passo"]]) {
+      const n = Number(plano.no[chave]);
+      if (Number.isFinite(n)) caixa.setAttribute(atributo, String(n));
+      else caixa.removeAttribute(atributo);
+    }
+    this.marcarValidade(elem, caixa, plano);
+    if (document.activeElement === caixa) return;
+    const valor = plano.no.valor === null || plano.no.valor === undefined
+      ? ""
+      : String(plano.no.valor);
+    if (caixa.value !== valor) caixa.value = valor;
+  }
+
+  /** Um deslizante, com o valor legível ao lado — que é o que o torna usável. */
+  montarDeslizante(elem, plano) {
+    const rotulo = elemento("span", "regiao-de-mod-rotulo");
+    const caixa = elemento("input", "regiao-de-mod-deslizante");
+    caixa.type = "range";
+    const lido = elemento("output", "regiao-de-mod-valor");
+    elem.append(rotulo, caixa, lido);
+    const aoMexer = () => {
+      lido.textContent = caixa.value;
+      this.dono.falar({
+        nome: "numero",
+        chave: plano.no.chave ?? "",
+        valor: Number(caixa.value),
+      });
+    };
+    caixa.addEventListener("input", aoMexer);
+    this.guardar(elem, `deslizante ${plano.chave}`, () => {
+      caixa.removeEventListener("input", aoMexer);
+      this.contagem.campos -= 1;
+    });
+  }
+
+  atualizarDeslizante(elem, plano) {
+    const rotulo = elem.querySelector(".regiao-de-mod-rotulo");
+    const caixa = elem.querySelector(".regiao-de-mod-deslizante");
+    const lido = elem.querySelector(".regiao-de-mod-valor");
+    if (!rotulo || !caixa) return;
+    const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
+    if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    caixa.min = String(Number(plano.no.minimo) || 0);
+    caixa.max = String(Number(plano.no.maximo) || 100);
+    caixa.step = String(Number(plano.no.passo) || 1);
+    if (document.activeElement !== caixa) {
+      const valor = String(Number(plano.no.valor) || 0);
+      if (caixa.value !== valor) caixa.value = valor;
+    }
+    if (lido && lido.textContent !== caixa.value) lido.textContent = caixa.value;
+  }
+
+  /** Uma marca — caixa de seleção ou interruptor, na mesma mecânica. */
+  montarMarca(elem, plano) {
+    const caixa = elemento("input", "regiao-de-mod-marca");
+    caixa.type = "checkbox";
+    const rotulo = elemento("span", "regiao-de-mod-rotulo");
+    elem.append(caixa, rotulo);
+    const aoTrocar = () => {
+      this.dono.falar({
+        nome: "marca",
+        chave: plano.no.chave ?? "",
+        valor: caixa.checked,
+      });
+    };
+    caixa.addEventListener("change", aoTrocar);
+    this.guardar(elem, `marca ${plano.chave}`, () => {
+      caixa.removeEventListener("change", aoTrocar);
+      this.contagem.campos -= 1;
+    });
+  }
+
+  atualizarMarca(elem, plano) {
+    const caixa = elem.querySelector(".regiao-de-mod-marca");
+    const rotulo = elem.querySelector(".regiao-de-mod-rotulo");
+    if (!caixa || !rotulo) return;
+    const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
+    if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    caixa.disabled = plano.no.desligado === true;
+    // `switch` é papel, e não etiqueta: um interruptor e uma caixa de seleção
+    // são o mesmo controle com leituras diferentes para quem usa leitor de tela.
+    if (plano.forma === "interruptor") caixa.setAttribute("role", "switch");
+    else caixa.removeAttribute("role");
+    if (document.activeElement === caixa) return;
+    const ligado = plano.no.valor === true;
+    if (caixa.checked !== ligado) caixa.checked = ligado;
+  }
+
+  /**
+   * Uma cor: seletor visual **e** hexadecimal, lado a lado.
+   *
+   * U23 descreveu o problema exato: «ESTILO usa inputs de hexadecimal em vez
+   * de seletor e amostra; a cor muda após gravar, sem prévia reversível». O
+   * seletor resolve a escolha, o campo hexadecimal resolve colar um valor
+   * conhecido, e a amostra resolve ver o resultado antes de gravar.
+   */
+  montarCor(elem, plano) {
+    const rotulo = elemento("span", "regiao-de-mod-rotulo");
+    const seletor = elemento("input", "regiao-de-mod-cor");
+    seletor.type = "color";
+    const hexa = elemento("input", "regiao-de-mod-caixa regiao-de-mod-hexa");
+    hexa.type = "text";
+    hexa.maxLength = 9;
+    hexa.spellcheck = false;
+    hexa.setAttribute("aria-label", "Valor hexadecimal");
+    elem.append(rotulo, seletor, hexa);
+
+    const dizer = (valor) => {
+      this.dono.falar({ nome: "cor", chave: plano.no.chave ?? "", valor });
+    };
+    const aoEscolher = () => {
+      hexa.value = seletor.value;
+      dizer(seletor.value);
+    };
+    const aoDigitar = () => {
+      const escrito = hexa.value.trim();
+      // Um hexadecimal incompleto — `#f2` no meio da digitação — não vira
+      // pedido: ele viraria uma cor recusada a cada tecla.
+      if (/^#[0-9a-f]{6}$/i.test(escrito)) {
+        seletor.value = escrito;
+        elem.dataset.invalido = "nao";
+        dizer(escrito);
+      } else {
+        elem.dataset.invalido = escrito ? "sim" : "nao";
+      }
+    };
+    seletor.addEventListener("input", aoEscolher);
+    hexa.addEventListener("input", aoDigitar);
+    this.guardar(elem, `cor ${plano.chave}`, () => {
+      seletor.removeEventListener("input", aoEscolher);
+      hexa.removeEventListener("input", aoDigitar);
+      this.contagem.campos -= 1;
+    });
+  }
+
+  atualizarCor(elem, plano) {
+    const rotulo = elem.querySelector(".regiao-de-mod-rotulo");
+    const seletor = elem.querySelector(".regiao-de-mod-cor");
+    const hexa = elem.querySelector(".regiao-de-mod-hexa");
+    if (!rotulo || !seletor || !hexa) return;
+    const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
+    if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    const valor = typeof plano.no.valor === "string" && /^#[0-9a-f]{6}$/i.test(plano.no.valor)
+      ? plano.no.valor
+      : "#000000";
+    if (document.activeElement !== seletor && seletor.value !== valor) seletor.value = valor;
+    if (document.activeElement !== hexa && hexa.value !== valor) hexa.value = valor;
+  }
+
+  /**
+   * O retrato de uma pessoa: imagem quando há, inicial quando não há.
+   *
+   * Forma própria e não `midia` porque a composição é diferente: um avatar tem
+   * recorte, proporção fixa e um estado de ausência que não é um erro. Um
+   * `<figure>` com `<img>` quebrada não é a mesma coisa que uma inicial num
+   * círculo, e U27 pediu a segunda.
+   */
+  montarRetrato(elem, plano) {
+    const marca = elemento("span", "regiao-de-mod-retrato-inicial");
+    elem.append(marca);
+    const estado = { elemento: null, cancelado: false, bytes: 0 };
+    this.guardar(elem, `retrato ${plano.chave}`, () => {
+      estado.cancelado = true;
+      const img = estado.elemento;
+      if (img) { img.removeAttribute("src"); img.remove(); }
+      const bolso = plano.cartao ? "bytesDeCartao" : "bytesDeMidia";
+      this[bolso] -= estado.bytes;
+      this.contagem[plano.cartao ? "midiasDeCartao" : "midias"] -= 1;
+    });
+    elem.dataset.estadoDoRetrato = "inicial";
+    const doServidor = plano.no.doServidor;
+    const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
+    const vindo = doServidor
+      ? this.dono.carregarMidiaDoServidor(
+          Number(doServidor.canal) || 0,
+          doServidor.pedido ?? {},
+          typeof doServidor.campo === "string" && doServidor.campo ? doServidor.campo : "bytes",
+        )
+      : caminho
+        ? this.dono.carregarMidia(caminho)
+        : null;
+    if (!vindo) return;
+    vindo.then((midia) => {
+      if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
+      if (midia.papel !== "imagem") return;
+      const bolso = plano.cartao
+        ? { conta: "bytesDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia }
+        : { conta: "bytesDeMidia", teto: this.perfil.bytesDeMidia };
+      if (this[bolso.conta] + midia.bytes > bolso.teto) {
+        elem.dataset.estadoDoRetrato = "cheia";
+        return;
+      }
+      const img = elemento("img", "regiao-de-mod-retrato-imagem");
+      img.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
+      img.src = midia.uri;
+      estado.elemento = img;
+      estado.bytes = midia.bytes;
+      this[bolso.conta] += midia.bytes;
+      elem.append(img);
+      elem.dataset.estadoDoRetrato = "imagem";
+    }).catch(() => {
+      if (estado.cancelado || this.solta) return;
+      // Falhar num retrato **não** é um erro que a pessoa precise ler: a
+      // inicial continua lá e responde a mesma pergunta.
+      elem.dataset.estadoDoRetrato = "inicial";
+    });
+  }
+
+  atualizarRetrato(elem, plano) {
+    const marca = elem.querySelector(".regiao-de-mod-retrato-inicial");
+    if (marca) {
+      const inicial = String(plano.no.inicial ?? "?").trim().charAt(0).toUpperCase() || "?";
+      if (marca.textContent !== inicial) marca.textContent = inicial;
+    }
+    const formas = ["circulo", "quadrado", "arredondado"];
+    const forma = formas.includes(plano.no.formato) ? plano.no.formato : "circulo";
+    if (elem.dataset.formato !== forma) elem.dataset.formato = forma;
+    const img = elem.querySelector(".regiao-de-mod-retrato-imagem");
+    if (img) {
+      const alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
+      if (img.alt !== alt) img.alt = alt;
+    }
+  }
+
+  /**
+   * Um link **mediado**: o MOD nomeia um endereço, e o produto o abre fora.
+   *
+   * `<button>` e não `<a href>`: um `href` numa janela de aplicativo é uma
+   * navegação de verdade, e uma navegação leva a página da conversa embora. O
+   * que o produto faz é o que já faz com link de mensagem — abrir no navegador
+   * do sistema, depois de a pessoa ter clicado.
+   */
+  montarLink(elem, plano) {
+    elem.type = "button";
+    const aoApertar = () => {
+      const url = typeof plano.no.endereco === "string" ? plano.no.endereco : "";
+      this.dono.abrirEndereco(url, plano.no.chave ?? "");
+    };
+    elem.addEventListener("click", aoApertar);
+    this.guardar(elem, `link ${plano.chave}`, () => {
+      elem.removeEventListener("click", aoApertar);
+    });
+  }
+
+  atualizarLink(elem, plano) {
+    const url = typeof plano.no.endereco === "string" ? plano.no.endereco : "";
+    // **O endereço fica visível.** Um botão que diz «clique aqui» e leva a
+    // outro lugar é a forma mais antiga de enganar alguém, e o MOD não é quem
+    // decide se quem lê merece saber para onde vai.
+    if (elem.title !== url) elem.title = url;
+    elem.disabled = plano.no.desligado === true || !url;
+  }
+
+  // ------------------------------------------------------- formulário
+
+  /**
+   * Um formulário: valores locais, envio, e o `Enter` que não recarrega nada.
+   *
+   * `<form>` de verdade e não uma `div` com botões, por três coisas que só o
+   * elemento dá: `Enter` num campo envia, leitores de tela anunciam o grupo, e
+   * o navegador associa rótulos e erros. O `submit` é interceptado — numa
+   * WebView, deixá-lo seguir recarrega a aplicação inteira.
+   */
+  montarFormulario(elem, plano) {
+    const aoEnviar = (evento) => {
+      evento.preventDefault();
+      this.dono.falar({
+        nome: "submeter",
+        chave: plano.no.chave ?? "",
+        valores: this.valoresDoFormulario(elem),
+      });
+    };
+    elem.addEventListener("submit", aoEnviar);
+    this.guardar(elem, `formulario ${plano.chave}`, () => {
+      elem.removeEventListener("submit", aoEnviar);
+    });
+  }
+
+  atualizarFormulario(elem, plano) {
+    const erro = typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 400) : "";
+    if (elem.dataset.erro !== erro) {
+      if (erro) elem.dataset.erro = erro;
+      else delete elem.dataset.erro;
+    }
+  }
+
+  /**
+   * O que está escrito no formulário **agora**, por chave.
+   *
+   * Lido do DOM e não do último estado que o MOD mandou, e a diferença importa:
+   * o §5 do plano diz que «a entrada ecoa localmente no host» — o que a pessoa
+   * digitou está aqui antes de o MOD ter recebido a última tecla.
+   */
+  valoresDoFormulario(raiz) {
+    const valores = {};
+    const campos = raiz.querySelectorAll(
+      "[data-forma=\"campo\"],[data-forma=\"escolha\"],[data-forma=\"textoLongo\"],"
+      + "[data-forma=\"numero\"],[data-forma=\"deslizante\"],[data-forma=\"marca\"],"
+      + "[data-forma=\"interruptor\"],[data-forma=\"cor\"]",
+    );
+    for (const campo of campos) {
+      const chave = campo.dataset.chaveDoMod;
+      if (!chave) continue;
+      const caixa = campo.querySelector("input,select,textarea");
+      if (!caixa) continue;
+      if (caixa.type === "checkbox") valores[chave] = caixa.checked;
+      else if (caixa.type === "number" || caixa.type === "range") {
+        valores[chave] = caixa.value === "" ? null : Number(caixa.value);
+      } else valores[chave] = caixa.value;
+    }
+    return valores;
+  }
+
+  /** Marca um controle como inválido, para a folha de classes poder pintá-lo. */
+  marcarValidade(elem, caixa, plano) {
+    const erro = typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "";
+    if (erro) {
+      elem.dataset.invalido = "sim";
+      caixa.setAttribute("aria-invalid", "true");
+      if (elem.dataset.mensagemDeErro !== erro) elem.dataset.mensagemDeErro = erro;
+    } else {
+      delete elem.dataset.invalido;
+      delete elem.dataset.mensagemDeErro;
+      caixa.removeAttribute("aria-invalid");
+    }
+  }
+
+  // ------------------------------------------------------------- abas
+
+  /**
+   * Abas com teclado, e **ativação manual**.
+   *
+   * O APG da WAI-ARIA descreve as duas: automática (a seta já troca o painel)
+   * e manual (a seta move o foco, Enter troca). A escolha aqui é manual porque
+   * o painel de um MOD pode custar caro para montar — uma ficha inteira, um
+   * tabuleiro — e percorrer cinco abas com a seta montaria os cinco.
+   *
+   * Só o painel ativo é montado, pela mesma razão. O §5 do plano é explícito:
+   * «Abas não podem montar todos os conteúdos pesados antecipadamente só para
+   * navegar por setas.»
+   */
+  montarAbas(elem, plano) {
+    const tiras = elemento("div", "regiao-de-mod-tiras");
+    tiras.setAttribute("role", "tablist");
+    const palco = elemento("div", "regiao-de-mod-palco");
+    elem.append(tiras, palco);
+    const aoTeclar = (evento) => {
+      const botoes = Array.from(tiras.querySelectorAll("[role=\"tab\"]"));
+      const atual = botoes.indexOf(document.activeElement);
+      if (atual < 0) return;
+      const passo = evento.key === "ArrowRight" ? 1
+        : evento.key === "ArrowLeft" ? -1
+          : evento.key === "Home" ? -atual
+            : evento.key === "End" ? botoes.length - 1 - atual
+              : 0;
+      if (!passo) return;
+      evento.preventDefault();
+      const destino = (atual + passo + botoes.length) % botoes.length;
+      botoes[destino]?.focus();
+    };
+    tiras.addEventListener("keydown", aoTeclar);
+    this.guardar(elem, `abas ${plano.chave}`, () => {
+      tiras.removeEventListener("keydown", aoTeclar);
+    });
+  }
+
+  atualizarAbas(elem, plano) {
+    const tiras = elem.querySelector(".regiao-de-mod-tiras");
+    const palco = elem.querySelector(".regiao-de-mod-palco");
+    if (!tiras || !palco) return;
+    const abas = plano.dentro.filter((p) => p.forma === "aba");
+    const escolhida = String(plano.no.valor ?? abas[0]?.no?.chave ?? "");
+
+    // As tiras são refeitas só quando a lista mudou: refazê-las a cada desenho
+    // tiraria o foco de quem está percorrendo com as setas.
+    const assinatura = abas
+      .map((a) => `${a.no.chave}\u0000${a.no.rotulo ?? ""}\u0000${a.no.desligado === true}`)
+      .join("\u0001");
+    if (tiras.dataset.abas !== assinatura) {
+      tiras.dataset.abas = assinatura;
+      const botoes = abas.map((aba) => {
+        const botao = elemento("button", "regiao-de-mod-tira", String(aba.no.rotulo ?? aba.no.chave ?? ""));
+        botao.type = "button";
+        botao.setAttribute("role", "tab");
+        botao.dataset.aba = String(aba.no.chave ?? "");
+        botao.disabled = aba.no.desligado === true;
+        return botao;
+      });
+      tiras.replaceChildren(...botoes);
+      // Um ouvinte na tira, e não um por botão: refazer a lista jogaria fora
+      // um ouvinte por aba a cada desenho.
+      if (!tiras.dataset.ouvindo) {
+        tiras.dataset.ouvindo = "sim";
+        const aoApertar = (evento) => {
+          const alvo = evento.target.closest?.("[data-aba]");
+          if (!alvo || alvo.disabled) return;
+          this.dono.falar({ nome: "aba", chave: plano.no.chave ?? "", valor: alvo.dataset.aba });
+        };
+        tiras.addEventListener("click", aoApertar);
+        this.guardar(tiras, `tiras ${plano.chave}`, () => {
+          tiras.removeEventListener("click", aoApertar);
+        });
+      }
+    }
+    for (const botao of tiras.children) {
+      const ativa = botao.dataset.aba === escolhida;
+      botao.setAttribute("aria-selected", ativa ? "true" : "false");
+      // Uma parada de tabulação para o grupo inteiro, como o APG pede: Tab
+      // entra nas abas e sai delas, e as setas percorrem por dentro.
+      botao.tabIndex = ativa ? 0 : -1;
+    }
+
+    // **Só o painel escolhido é montado.** Ver a razão em `montarAbas`.
+    const ativa = abas.find((a) => String(a.no.chave ?? "") === escolhida) ?? abas[0];
+    this.reconciliar(palco, ativa ? [ativa] : [], 0, { nos: this.perfil.nos });
+  }
+
+  atualizarAba(elem, plano) {
+    elem.setAttribute("role", "tabpanel");
+    elem.tabIndex = 0;
+    const rotulo = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
+    if (rotulo) elem.setAttribute("aria-label", rotulo);
   }
 
   // ------------------------------------------------------------ tela
@@ -1073,7 +1879,7 @@ class RegiaoDeMod {
       // lado de um nome, que é o produto anunciando uma ausência que ninguém
       // pediu para anunciar.
       const orcamento = { nos: LIMITES_DO_CARTAO.nos };
-      const planos = this.planejar(declaracao, 0, orcamento, FORMAS_DO_CARTAO);
+      const planos = this.planejar(declaracao, 0, orcamento, PERFIS_DE_RENDER.cartao.formas);
       if (planos.length === 0) continue;
       vivos.add(pessoa);
 

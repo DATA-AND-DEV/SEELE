@@ -40,6 +40,15 @@
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
 <link rel="stylesheet" href="camada-mods.css">
+<!--
+  As superficies e os controles que um MOD desenha - ADR 0052. Depois de
+  tela-sessao.css porque o palco de paginas e paineis mora dentro da grade
+  dela, e antes de acessibilidade.css como todo o resto: a reducao de
+  movimento do produto tem de vir por ultimo para valer sobre o que um MOD
+  pedir.
+-->
+<link rel="stylesheet" href="mods-superficies.css">
+<link rel="stylesheet" href="mods-controles.css">
 <link rel="stylesheet" href="camada-servidores.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="camada-compartilhar.css">
@@ -1591,7 +1600,57 @@
       -->
       <ul id="lista-roster" class="roster"></ul>
     </section>
+
+    <!--
+      O palco das paginas de MOD - ADR 0052.
+
+      **Dentro de `.paineis`, e na mesma celula da conversa.** Uma pagina de MOD
+      substitui a conversa enquanto esta aberta, e nao a empurra para o lado: a
+      auditoria de 20/09/2026 mediu que a conversa ficava vazia no centro
+      enquanto editar perfil e jogar exigiam rolar um rodape de 240px, e mover a
+      conversa de lugar teria trocado um problema de espaco por outro de
+      orientacao.
+
+      A coluna de salas, a faixa de pessoas, a voz e a saida continuam de pe: «A
+      pagina de um MOD nao deve obrigar a desconectar a voz.»
+
+      Escondido enquanto vazio, e quem o mostra e o esconde e
+      `arrumarPalcos` em `mods-superficies.js`. Nao ha marcacao de exemplo aqui
+      porque tudo o que entra vem de uma mensagem de um MOD e e montado com
+      `createElement`.
+    -->
+    <div id="palco-de-paginas" class="palco-de-paginas" hidden></div>
+
+    <!--
+      O palco dos paineis de MOD: a coluna auxiliar que um MOD pode pedir para
+      um inspetor, uma ordem de iniciativa ou uma ferramenta que acompanha a
+      conversa em vez de substitui-la.
+
+      Depois da faixa de pessoas na ordem do documento, e por isso a ultima
+      coluna da grade. Um painel nao rouba o lugar de nenhuma das colunas do
+      produto: ele acrescenta uma, e ela some quando nao ha nenhum.
+    -->
+    <div id="palco-de-paineis" class="palco-de-paineis" hidden></div>
   </main>
+
+  <!--
+    O palco das camadas de MOD: dialogos, modais e o que se sobrepoe.
+
+    Irmao de `<main>` e nao filho, pela mesma razao que a faixa: uma camada
+    cobre a aplicacao inteira, e uma quinta coluna da grade nao cobre nada.
+
+    Quando um modal abre, `prenderFoco` poe `inert` em todos os irmaos deste
+    no - inclusive `<main>` e a faixa -, e o tira ao fechar. Escurecer sem
+    tornar inerte e a armadilha classica: parece modal e responde a Tab.
+  -->
+  <div id="palco-de-camadas" class="palco-de-camadas" hidden></div>
+
+  <!--
+    A fila de avisos de MOD. Limitada em `SuperficiesDoMod.enfileirarAviso`: um
+    MOD em laco de erro produziria um aviso por volta, e a tela de quem conversa
+    viraria a tela dele.
+  -->
+  <div id="avisos-de-mod" class="avisos-de-mod" hidden></div>
 
   <!--
     As regiões dos MODs — ADR 0049.
@@ -3617,7 +3676,18 @@
   A gramática da região e os recursos que montá-la cria. Antes de base.js pela
   mesma razão que o ciclo de vida: declara a classe que base.js constrói.
 -->
+<!--
+  O estilo declarado que um MOD pode pedir, e o que o produto deixa virar
+  pintura. Antes do renderer: e ele quem chama aplicarEstiloDeMod.
+-->
+<script src="mods-estilos.js"></script>
 <script src="mods-regiao.js"></script>
+<!--
+  As superficies e o registro de contribuicoes. Depois do renderer porque as
+  duas o constroem, e antes de base.js, que e quem responde as mensagens.
+-->
+<script src="mods-superficies.js"></script>
+<script src="mods-contribuicoes.js"></script>
 <script src="base.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>

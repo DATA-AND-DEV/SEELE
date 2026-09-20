@@ -215,14 +215,28 @@
   overflow-wrap: anywhere;
 }
 
-/* ---------- as quatro colunas ---------- */
+/* ---------- as colunas, e a célula que é disputada ----------
+
+   Quatro colunas do produto e uma quinta que só existe quando um MOD pede um
+   painel. Elas são **nomeadas** desde a API 4, e a razão é a célula do meio:
+   uma página de MOD ocupa a mesma que a conversa, por cima dela, e é isso que
+   permite «abrir a mesa» sem empurrar a conversa de lugar nem desconectar a
+   voz. Com colunas numeradas, um quinto filho cairia numa segunda linha —
+   a mesma armadilha que fez a faixa dos MODs nascer fora de `<main>`. */
 
 .paineis {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 60px 268px minmax(0, 1fr) 328px;
+  grid-template-columns: 60px 268px minmax(0, 1fr) 328px auto;
+  grid-template-areas: "trilha canais linha pessoas painelmod";
   min-height: 0;
 }
+
+.paineis > .trilha { grid-area: trilha; }
+.paineis > .painel-canais { grid-area: canais; }
+.paineis > .painel-linha { grid-area: linha; }
+.paineis > .painel-pessoas { grid-area: pessoas; }
+.paineis > .palco-de-paineis { grid-area: painelmod; }
 
 /* ---------- coluna 1: a trilha de servidores ----------
    60px de largura no v3, contra os 56px do v2, e o mesmo botão de 56px de
@@ -2092,134 +2106,12 @@ button.linha-nome:hover { text-decoration: underline; }
   background: var(--seele-negro-painel);
 }
 
-.regiao-de-mod {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: var(--seele-celula-y) var(--seele-celula-x);
-  border-right: 1px solid var(--seele-linha);
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
-  color: var(--seele-osso);
-}
 
-.regiao-de-mod:last-child { border-right: none; }
-
-/* Tudo o que um MOD declara sai por esta classe, e por isso ela é a única
-   régua de espaçamento lá dentro: a gramática de `montarODeclarado` não tem
-   como pedir margem, e não ter como é o ponto. */
-.regiao-de-mod-parte {
-  margin: 0 0 var(--seele-celula-x);
-  overflow-wrap: anywhere;
-}
-
-.regiao-de-mod h3.regiao-de-mod-parte {
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
-  font-weight: var(--seele-cartela);
-  letter-spacing: var(--seele-tracking-rotulo);
-  text-transform: uppercase;
-  color: var(--seele-rotulo-painel);
-}
-
-.regiao-de-mod ul.regiao-de-mod-parte { padding-left: var(--seele-celula-x); }
-
-/* ---------- o que um MOD declara e a pessoa opera ----------
-
-   Campo, botão, tela e mídia são as formas que criam recurso, e por isso são
-   também as que a régua precisa alcançar: uma caixa sem altura mínima é uma
-   caixa em que não se acerta o toque, e um MOD não tem como pedir uma. */
-
-.regiao-de-mod-campo,
-label.regiao-de-mod-parte {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.regiao-de-mod-rotulo {
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: var(--seele-tracking-rotulo);
-  text-transform: uppercase;
-  color: var(--seele-rotulo-painel);
-}
-
-.regiao-de-mod-caixa {
-  /* 34px é a altura dos controles desta casa — a mesma de `.nomear-confirmar`.
-     Um número e não um token porque não há token: escrever um aqui criaria uma
-     régua nova a partir de um MOD, que é o contrário da ordem certa. */
-  min-height: 34px;
-  padding: 0 var(--seele-celula-x);
-  border: 1px solid var(--seele-linha);
-  background: var(--seele-negro-absoluto);
-  color: var(--seele-osso);
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
-}
-
-.regiao-de-mod-escolha {
-  min-height: 34px;
-  padding: 0 var(--seele-celula-x);
-  border: 1px solid var(--seele-linha);
-  background: var(--seele-negro-absoluto);
-  color: var(--seele-osso);
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
-}
-
-.regiao-de-mod-opcao { font-family: var(--seele-mono); }
-
-.regiao-de-mod-escolha:focus-visible,
-.regiao-de-mod-caixa:focus-visible {
-  outline: 2px solid var(--seele-laranja-nerv);
-  outline-offset: 1px;
-}
-
-button.regiao-de-mod-parte {
-  min-height: 34px;
-  padding: 0 var(--seele-celula-x);
-  border: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
-  color: var(--seele-osso);
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: var(--seele-tracking-rotulo);
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-button.regiao-de-mod-parte:disabled { opacity: 0.5; cursor: default; }
-
-canvas.regiao-de-mod-parte {
-  max-width: 100%;
-  border: 1px solid var(--seele-linha);
-  background: var(--seele-negro-absoluto);
-  /* Sem isto, arrastar no canvas rola a página no toque, e o traço sai
-     picado — o gesto é do desenho, e o navegador precisa saber disso. */
-  touch-action: none;
-}
-
-figure.regiao-de-mod-parte { margin: 0 0 var(--seele-celula-x); }
-
-/* O estado do carregamento é dito, e não deduzido de a mídia não aparecer:
-   «o produto sabe e não conta» é o defeito mais caro deste repositório. */
-figure.regiao-de-mod-parte::before {
-  content: attr(data-estado);
-  display: block;
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: var(--seele-tracking-rotulo);
-  text-transform: uppercase;
-  color: var(--seele-rotulo-painel);
-}
-
-figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
-
-.regiao-de-mod-tocador {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
+/* O que um MOD declara dentro da faixa, da lista de pessoas ou de uma
+   superfície é desenhado por `mods-controles.css`. Ele mora lá e não aqui
+   porque a mesma gramática é montada nos três lugares, e uma régua repetida em
+   duas folhas é a régua que discorda no dia em que só uma delas muda — que foi
+   exatamente o que o guarda de classes duplicadas pegou. */
 
 /* ---------- o que aperta primeiro, quando a janela aperta ----------
 
@@ -2256,7 +2148,10 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
 .linha-canais { display: none; }
 
 @media (max-width: 1240px) {
-  .paineis { grid-template-columns: 60px 268px minmax(0, 1fr); }
+  .paineis {
+    grid-template-columns: 60px 268px minmax(0, 1fr) auto;
+    grid-template-areas: "trilha canais linha painelmod";
+  }
   .painel-pessoas { display: none; }
   /* A conversa passa a ser a última coluna, e a divisória dela seria uma linha
      colada na borda da janela. */
@@ -2272,7 +2167,19 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
   .paineis {
     position: relative;
     grid-template-columns: 60px minmax(0, 1fr);
+    /* A gaveta de canais sai do fluxo (`position: absolute` logo abaixo), e o
+       painel de MOD não cabe como coluna nesta largura: ele se empilha sobre a
+       conversa, como a página. */
+    grid-template-areas: "trilha linha";
   }
+
+  .paineis > .painel-canais,
+  .paineis > .palco-de-paineis { grid-area: linha; }
+
+  /* Numa janela estreita, um painel de MOD ocupa a largura toda em vez de
+     espremer a conversa a nada. U04 pede escala legível, e 200px de painel ao
+     lado de 300px de conversa não é nenhuma das duas coisas. */
+  .palco-de-paineis > .painel-de-mod { flex: 1 1 auto; border-left: none; }
 
   /* Fechada, ela não existe: `display: none` e não uma coluna empurrada para
      fora da tela. Fora da tela ela continua no caminho do teclado, e tabular

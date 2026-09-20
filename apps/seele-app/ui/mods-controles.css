@@ -1,0 +1,439 @@
+/* Os controles que a API 4 acrescentou, e a aparência padrão deles.
+   ADR 0052.
+
+   **Padrão, e não moldura.** Tudo aqui é sobrescrevível por `estilo` e por
+   classe do MOD — é o ponto inteiro do §4 do plano: «A biblioteca padrão
+   acelera projetos simples, mas não é um catálogo fechado de aparências.»
+
+   O que este arquivo garante e um MOD não desfaz está noutro lugar: alvo de
+   toque, foco visível e redução de movimento moram em `acessibilidade.css` e
+   em `mods-superficies.css`, que carregam depois. */
+
+/* ---- a região dentro da faixa ----
+
+   A faixa em si — onde ela mora na tela, quanto ela ocupa, quando ela some —
+   continua em `tela-sessao.css`, porque é layout de sessão. O que está aqui é
+   a caixa de **uma** região dentro dela. */
+.regiao-de-mod {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+  border-right: 1px solid var(--seele-linha);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+}
+
+.regiao-de-mod:last-child { border-right: none; }
+
+/* ------------------------------------- o que a API 3 já desenhava
+
+   Vindo de `tela-sessao.css` inteiro, e não copiado: a mesma gramática é
+   montada na faixa, na lista de pessoas e numa superfície, e duas folhas
+   descrevendo a mesma classe é a régua que discorda no dia em que só uma muda.
+   O guarda de classes duplicadas de `tests/frontend.rs` pegou exatamente isso.
+
+   Os seletores que começam com `.regiao-de-mod ` continuam presos à faixa: eles
+   descrevem o aperto dela, e não a gramática. */
+
+/* Tudo o que um MOD declara sai por esta classe, e por isso ela é a única
+   régua de espaçamento lá dentro: a gramática de `montarODeclarado` não tem
+   como pedir margem, e não ter como é o ponto. */
+.regiao-de-mod-parte {
+  margin: 0 0 var(--seele-celula-x);
+  overflow-wrap: anywhere;
+}
+
+.regiao-de-mod h3.regiao-de-mod-parte {
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+.regiao-de-mod ul.regiao-de-mod-parte { padding-left: var(--seele-celula-x); }
+
+/* ---------- o que um MOD declara e a pessoa opera ----------
+
+   Campo, botão, tela e mídia são as formas que criam recurso, e por isso são
+   também as que a régua precisa alcançar: uma caixa sem altura mínima é uma
+   caixa em que não se acerta o toque, e um MOD não tem como pedir uma. */
+
+.regiao-de-mod-campo,
+label.regiao-de-mod-parte {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.regiao-de-mod-rotulo {
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+.regiao-de-mod-caixa {
+  /* 34px é a altura dos controles desta casa — a mesma de `.nomear-confirmar`.
+     Um número e não um token porque não há token: escrever um aqui criaria uma
+     régua nova a partir de um MOD, que é o contrário da ordem certa. */
+  min-height: 34px;
+  padding: 0 var(--seele-celula-x);
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+}
+
+.regiao-de-mod-escolha {
+  min-height: 34px;
+  padding: 0 var(--seele-celula-x);
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+}
+
+.regiao-de-mod-opcao { font-family: var(--seele-mono); }
+
+.regiao-de-mod-escolha:focus-visible,
+.regiao-de-mod-caixa:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 1px;
+}
+
+button.regiao-de-mod-parte {
+  min-height: 34px;
+  padding: 0 var(--seele-celula-x);
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+  color: var(--seele-osso);
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+button.regiao-de-mod-parte:disabled { opacity: 0.5; cursor: default; }
+
+canvas.regiao-de-mod-parte {
+  max-width: 100%;
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+  /* Sem isto, arrastar no canvas rola a página no toque, e o traço sai
+     picado — o gesto é do desenho, e o navegador precisa saber disso. */
+  touch-action: none;
+}
+
+figure.regiao-de-mod-parte { margin: 0 0 var(--seele-celula-x); }
+
+/* O estado do carregamento é dito, e não deduzido de a mídia não aparecer:
+   «o produto sabe e não conta» é o defeito mais caro deste repositório. */
+figure.regiao-de-mod-parte::before {
+  content: attr(data-estado);
+  display: block;
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
+
+.regiao-de-mod-tocador {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+
+/* --------------------------------------------------- composição */
+
+.regiao-de-mod-parte[data-forma="pilha"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-celula-x);
+  min-width: 0;
+}
+
+.regiao-de-mod-parte[data-forma="caixa"] { min-width: 0; }
+
+.regiao-de-mod-parte[data-forma="grade"] {
+  display: grid;
+  gap: var(--seele-celula-x);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.regiao-de-mod-parte[data-forma="rolagem"] {
+  overflow: auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.regiao-de-mod-parte[data-forma="separador"] {
+  border: none;
+  border-top: 1px solid var(--seele-linha);
+  margin: var(--seele-celula-x) 0;
+}
+
+.regiao-de-mod-parte[data-forma="espaco"] { flex: 1 1 auto; min-height: 4px; }
+
+/* `linha` recebeu layout de verdade: a auditoria notou que ela virava `div`
+   sem contrato («`linha` deve de fato ter layout horizontal configurável;
+   converter tudo em `div` sem contrato de layout não basta»). */
+.regiao-de-mod-parte[data-forma="linha"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--seele-celula-x);
+  min-width: 0;
+}
+
+/* --------------------------------------------------- ações e botões */
+
+.regiao-de-mod-parte[data-forma="acoes"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--seele-celula-x);
+  align-items: center;
+}
+
+.regiao-de-mod-parte[data-forma="acoes"][data-fixas="sim"] { width: 100%; justify-content: flex-end; }
+
+/* As variantes que U04 pediu: «botões visualmente pouco diferenciados […] As
+   ações principais parecem controles auxiliares.» A diferença é peso e borda,
+   e não só cor — informação que só a cor carrega é o que
+   `specs/06-clientes-gui.md` recusa. */
+button.regiao-de-mod-parte[data-variante="primaria"] {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+  font-weight: 700;
+}
+
+button.regiao-de-mod-parte[data-variante="perigo"] {
+  border-color: var(--seele-vermelho, #d13b2a);
+  color: var(--seele-vermelho, #d13b2a);
+}
+
+button.regiao-de-mod-parte[data-variante="discreta"] {
+  border-color: transparent;
+  color: var(--seele-osso-apagado);
+}
+
+button.regiao-de-mod-parte[data-variante="discreta"]:hover {
+  border-color: var(--seele-linha);
+  color: var(--seele-osso);
+}
+
+/* Em progresso é um estado, e ele é dito de duas maneiras: a opacidade e as
+   reticências. Só a opacidade seria informação que só a cor carrega. */
+button.regiao-de-mod-parte[data-progresso="sim"] { opacity: 0.7; cursor: progress; }
+button.regiao-de-mod-parte[data-progresso="sim"]::after { content: "…"; }
+
+/* O que um `arquivo` exige, legível antes de o seletor do sistema abrir. */
+button.regiao-de-mod-parte[data-forma="arquivo"][data-exigencia]::after {
+  content: " (" attr(data-exigencia) ")";
+  color: var(--seele-osso-apagado);
+  font-size: var(--seele-t-dado);
+}
+
+button.regiao-de-mod-parte[data-forma="arquivo"][data-escolhendo="sim"] { cursor: progress; }
+
+button.regiao-de-mod-parte[data-forma="link"] {
+  border: none;
+  padding: 0;
+  color: var(--seele-laranja-nerv);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  min-height: 0;
+}
+
+/* --------------------------------------------------- campos */
+
+.regiao-de-mod-area {
+  width: 100%;
+  min-height: 60px;
+  padding: 4px 6px;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  font: inherit;
+  resize: vertical;
+}
+
+.regiao-de-mod-area:focus-visible,
+.regiao-de-mod-deslizante:focus-visible,
+.regiao-de-mod-marca:focus-visible,
+.regiao-de-mod-cor:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
+
+.regiao-de-mod-deslizante { flex: 1 1 auto; min-width: 80px; accent-color: var(--seele-laranja-nerv); }
+
+.regiao-de-mod-valor {
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-osso-apagado);
+}
+
+.regiao-de-mod-marca {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--seele-laranja-nerv);
+}
+
+/* Um interruptor é a mesma caixa com outra leitura, e o desenho acompanha:
+   `role="switch"` é o que o leitor de tela anuncia, e a pista é a cor de
+   fundo mais a posição — nunca só a cor. */
+.regiao-de-mod-marca[role="switch"] {
+  width: 32px;
+  border-radius: 999px;
+}
+
+.regiao-de-mod-cor {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--seele-linha-forte);
+  background: none;
+  cursor: pointer;
+}
+
+.regiao-de-mod-hexa { max-width: 11ch; font-variant-numeric: tabular-nums; }
+
+/* Um controle inválido é dito por borda **e** por texto: a mensagem sai de
+   `data-mensagem-de-erro`, escrita pelo renderer a partir do que o MOD mandou.
+   U04 pede medir contraste e alvo; a mensagem existe para quem não vê a cor. */
+label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-caixa,
+label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-area {
+  border-color: var(--seele-vermelho, #d13b2a);
+}
+
+label.regiao-de-mod-parte[data-mensagem-de-erro]::after {
+  content: attr(data-mensagem-de-erro);
+  display: block;
+  margin-top: 2px;
+  color: var(--seele-vermelho, #d13b2a);
+  font-size: var(--seele-t-dado);
+}
+
+/* --------------------------------------------------- formulário */
+
+form.regiao-de-mod-parte {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-celula-x);
+  min-width: 0;
+}
+
+form.regiao-de-mod-parte[data-erro]::before {
+  content: attr(data-erro);
+  display: block;
+  padding: var(--seele-celula-y) var(--seele-celula-x);
+  border-left: 3px solid var(--seele-vermelho, #d13b2a);
+  background: color-mix(in srgb, var(--seele-vermelho, #d13b2a) 12%, transparent);
+  color: var(--seele-osso);
+  font-size: var(--seele-t-dado);
+}
+
+/* --------------------------------------------------- abas */
+
+.regiao-de-mod-tiras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--seele-linha);
+  margin-bottom: var(--seele-celula-x);
+}
+
+.regiao-de-mod-tira {
+  min-height: 30px;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: none;
+  color: var(--seele-osso-apagado);
+  font: inherit;
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+/* Selecionada por três coisas ao mesmo tempo — cor, borda e peso —, porque
+   `aria-selected` não é visível e cor sozinha não basta. */
+.regiao-de-mod-tira[aria-selected="true"] {
+  border-color: var(--seele-linha-forte);
+  color: var(--seele-osso);
+  font-weight: 700;
+  background: var(--seele-negro-painel);
+}
+
+.regiao-de-mod-tira:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: -2px;
+}
+
+.regiao-de-mod-tira:disabled { opacity: 0.4; cursor: default; }
+
+.regiao-de-mod-palco { min-width: 0; min-height: 0; }
+
+section.regiao-de-mod-parte[data-forma="aba"] { min-width: 0; }
+section.regiao-de-mod-parte:focus-visible { outline: 2px solid var(--seele-laranja-nerv); }
+
+/* --------------------------------------------------- retrato */
+
+span.regiao-de-mod-parte[data-forma="retrato"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso-apagado);
+  font-size: var(--seele-t-dado);
+  text-transform: uppercase;
+}
+
+span.regiao-de-mod-parte[data-formato="circulo"] { border-radius: 999px; }
+span.regiao-de-mod-parte[data-formato="arredondado"] { border-radius: 6px; }
+span.regiao-de-mod-parte[data-formato="quadrado"] { border-radius: 0; }
+
+.regiao-de-mod-retrato-inicial { pointer-events: none; }
+
+/* A imagem cobre a inicial quando chega; a inicial continua lá embaixo, e é
+   por isso que um retrato que falha não vira um quadrado vazio. */
+.regiao-de-mod-retrato-imagem {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+span.regiao-de-mod-parte[data-forma="distintivo"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: 999px;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+  white-space: nowrap;
+}

@@ -758,16 +758,22 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
 
     let base = position(&sources, "base.js");
     for (at, source) in sources.iter().enumerate() {
-        // `mods-runtime.js` e `mods-regiao.js` são as exceções, e elas são
-        // deliberadas: os dois declaram classes que `base.js` **constrói** — um
-        // `class` está na zona morta até o script dele rodar, e construí-lo
-        // antes disso lançaria. Nenhum dos dois chama nada de `base.js` ao
+        // Os arquivos de MOD são as exceções, e elas são deliberadas: eles
+        // declaram as classes e as funções que `base.js` **constrói e chama** —
+        // um `class` está na zona morta até o script dele rodar, e construí-lo
+        // antes disso lançaria. Nenhum deles chama nada de `base.js` ao
         // carregar; as chamadas que eles fazem acontecem dentro do ciclo de uma
         // instância, que é sempre depois de tudo estar de pé.
+        //
+        // Entre eles a ordem também importa, e está logo abaixo: o renderer usa
+        // `aplicarEstiloDeMod`, e as superfícies constroem `RegiaoDeMod`.
         if !source.ends_with(".js")
             || source == "base.js"
             || source == "mods-runtime.js"
+            || source == "mods-estilos.js"
             || source == "mods-regiao.js"
+            || source == "mods-superficies.js"
+            || source == "mods-contribuicoes.js"
         {
             continue;
         }
@@ -775,6 +781,32 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
             at > base,
             "{source} is loaded before base.js, whose helpers it calls the moment \
              it registers a listener"
+        );
+    }
+
+    // **A ordem entre os arquivos de MOD é ordem de verdade**, e não arrumação.
+    //
+    // `mods-regiao.js` chama `aplicarEstiloDeMod` e `classesDeMod`, que são
+    // declaradas em `mods-estilos.js`; `mods-superficies.js` **constrói**
+    // `RegiaoDeMod` e lê `PERFIS_DE_RENDER`, que estão em `mods-regiao.js`. Uma
+    // `class` está na zona morta até o script dela rodar, e uma `const` de topo
+    // também: inverter qualquer um destes pares lança na primeira superfície
+    // que alguém abrir, e não no carregamento — que é onde ninguém procuraria.
+    for (antes, depois, porque) in [
+        (
+            "mods-estilos.js",
+            "mods-regiao.js",
+            "o renderer chama `aplicarEstiloDeMod` e `classesDeMod`",
+        ),
+        (
+            "mods-regiao.js",
+            "mods-superficies.js",
+            "uma superfície constrói `RegiaoDeMod` com `PERFIS_DE_RENDER`",
+        ),
+    ] {
+        assert!(
+            position(&sources, antes) < position(&sources, depois),
+            "{depois} é carregado antes de {antes}, e {porque}"
         );
     }
 }
@@ -5909,6 +5941,15 @@ fn bloco_congelado(source: &str, abertura: &str) -> String {
     panic!("`{abertura}` never closes");
 }
 
+/// O corpo de uma `const` de objeto, pelo nome dela.
+///
+/// Igual a [`js_function`] e pelo mesmo motivo: uma tabela de tetos revisada
+/// por `contains` no arquivo inteiro é uma asserção que o comentário ao lado
+/// satisfaz. Recortando o objeto, o que ela lê é o objeto.
+fn js_const(source: &str, name: &str) -> String {
+    js_function(source, &format!("const {name} = Object.freeze("))
+}
+
 fn js_function(source: &str, signature: &str) -> String {
     let source = without_comments(source);
     let Some(at) = source.find(signature) else {
@@ -10889,12 +10930,33 @@ fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
     // E há teto de fundura: sem ele, uma árvore que o MOD manda estoura a pilha
     // **da janela**, e não a dele. E teto de nós, que a fundura sozinha não
     // alcança: uma árvore rasa e larguíssima cabe em oito níveis.
+    // O teto vem do perfil — região, cartão ou superfície —, e é por isso que
+    // a asserção olha `this.perfil.fundura` e não mais um ternário: os três
+    // lugares têm orçamentos diferentes, e `PERFIS_DE_RENDER` é onde cada um
+    // deles está escrito com a razão dele.
     assert!(
-        planejar.contains("permitidas ? LIMITES_DO_CARTAO.fundura : LIMITES_DA_REGIAO.fundura")
-            && planejar.contains("fundura > teto"),
+        planejar.contains("this.perfil.fundura") && planejar.contains("fundura > teto"),
         "o teto de fundura saiu: uma árvore funda mandada por um MOD derruba a \
          janela do produto: {planejar}"
     );
+    // E os três perfis continuam tendo teto: um perfil sem número é um teto
+    // que não existe, e ele não apareceria em lugar nenhum além de uma janela
+    // que trava.
+    let perfis = js_const(&regiao, "PERFIS_DE_RENDER");
+    for perfil in ["regiao:", "cartao:", "superficie:"] {
+        assert!(
+            perfis.contains(perfil),
+            "`PERFIS_DE_RENDER` perdeu o perfil `{perfil}`, e quem renderiza \
+             com ele fica sem teto nenhum: {perfis}"
+        );
+    }
+    for teto in ["nos", "fundura", "campos", "midias", "bytesDeMidia"] {
+        assert_eq!(
+            perfis.matches(&format!("{teto}:")).count(),
+            3,
+            "o teto `{teto}` não está nos três perfis de renderização: {perfis}"
+        );
+    }
     assert!(
         planejar.contains("orcamento.nos <= 0"),
         "o teto de nós saiu: uma árvore rasa e larguíssima cabe na fundura e \
@@ -11081,7 +11143,8 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
     // outra coisa é a que ninguém revisou.
     let declarar = js_function(&regiao, "\n  declararCartoes(cartoes)");
     assert!(
-        declarar.contains("this.planejar(declaracao, 0, orcamento, FORMAS_DO_CARTAO)")
+        declarar
+            .contains("this.planejar(declaracao, 0, orcamento, PERFIS_DE_RENDER.cartao.formas)")
             && declarar.contains("this.reconciliar(raiz, planos, 0, orcamento)"),
         "o cartão deixou de passar pelo renderer da região: {declarar}"
     );
@@ -11091,17 +11154,38 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
          desta casa e o que o guarda de CSS enxerga: {declarar}"
     );
 
-    // **A gramática é menor, e as cinco que ficam de fora são as que recebem
-    // foco ou clique.** A linha do roster já tem um botão do produto.
-    let formas = bloco_congelado(&regiao, "const FORMAS_DO_CARTAO = Object.freeze(");
-    for fora in ["campo", "escolha", "botao", "arquivo", "tela"] {
+    // **A gramática é menor, e o que fica de fora é tudo que recebe foco.**
+    //
+    // A lista cresceu com a API 4 — composição e apresentação de pessoa
+    // entraram, porque U27 pediu que o cartão pudesse **substituir** a
+    // identidade e não só acrescentar uma linha embaixo dela. O que não mudou
+    // é a razão de a lista existir: a linha do roster já tem um botão do
+    // produto, e um controle de MOD ao lado dele divide foco e área de toque
+    // com ele.
+    //
+    // `formulario` e `abas` entram na lista proibida porque os dois contêm
+    // controles; `link` porque é botão.
+    let perfis = js_const(&regiao, "PERFIS_DE_RENDER");
+    let formas = perfis
+        .split_once("cartao:")
+        .expect("o perfil do cartão")
+        .1
+        .split_once("superficie:")
+        .map_or_else(|| perfis.clone(), |(antes, _)| antes.to_owned());
+    for fora in [
+        "campo", "escolha", "botao", "arquivo", "tela", "formulario", "abas",
+        "textoLongo", "numero", "deslizante", "marca", "interruptor", "cor", "link",
+    ] {
         assert!(
             !formas.contains(&format!("\"{fora}\"")),
             "`{fora}` entrou na gramática do cartão, e ele divide foco e área \
-             de toque com um controle do produto"
+             de toque com um controle do produto: {formas}"
         );
     }
-    for dentro in ["texto", "titulo", "linha", "lista", "item", "midia"] {
+    for dentro in [
+        "texto", "titulo", "linha", "lista", "item", "midia",
+        "caixa", "pilha", "grade", "retrato", "distintivo",
+    ] {
         assert!(
             formas.contains(&format!("\"{dentro}\"")),
             "`{dentro}` saiu da gramática do cartão: {formas}"
@@ -11265,16 +11349,31 @@ fn todo_recurso_da_regiao_nasce_registrado_e_com_teto() {
 fn a_atualizacao_da_regiao_e_incremental_e_nao_reescreve_quem_tem_foco() {
     let regiao = without_comments(&read("ui/mods-regiao.js"));
 
-    // **Uma exceção, e ela é mantida na forma exata.** A lista de opções de uma
-    // escolha é refeita de uma vez — mas só quando ela mudou, e as `<option>`
-    // não seguram foco nem cursor: quem tem foco é o `<select>`, que não é
-    // tocado. Refazer a árvore de nós, que é o que este guarda existe para
-    // proibir, continua proibido em todo o resto do arquivo.
+    // **Duas exceções, e as duas são mantidas na forma exata.**
+    //
+    // A lista de opções de uma escolha é refeita de uma vez — mas só quando ela
+    // mudou, e as `<option>` não seguram foco nem cursor: quem tem foco é o
+    // `<select>`, que não é tocado.
+    //
+    // A tira de abas segue a mesma regra e pelo mesmo desenho: refeita só
+    // quando a lista de abas mudou (`tiras.dataset.abas !== assinatura`), e o
+    // que recebe foco ali são os botões da própria tira — refazê-los a cada
+    // desenho tiraria o foco de quem percorre as abas com as setas, que é
+    // exatamente o que o padrão APG manda preservar.
+    //
+    // Refazer a árvore de nós, que é o que este guarda existe para proibir,
+    // continua proibido em todo o resto do arquivo.
     assert_eq!(
         regiao.matches("replaceChildren").count(),
-        1,
-        "a região refaz filhos fora da lista de opções de uma escolha, e \
+        2,
+        "a região refaz filhos fora da lista de opções e da tira de abas, e \
          refazer é perder o foco"
+    );
+    let abas = js_function(&regiao, "\n  atualizarAbas(elem, plano)");
+    assert!(
+        abas.contains("tiras.dataset.abas !== assinatura"),
+        "a tira de abas voltou a ser refeita sem conferir se mudou, e refazê-la \
+         tira o foco de quem percorre com as setas: {abas}"
     );
     let escolha = js_function(&regiao, "\n  atualizarEscolha(elem, plano)");
     assert!(
@@ -11947,9 +12046,18 @@ fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
         .1;
     let ativar = ativar.split_once("\n/// ").map_or(ativar, |(a, _)| a);
     assert!(
-        ativar.contains("geracao_vale()") && ativar.contains(".iniciar(&codigo)"),
+        ativar.contains("geracao_vale()") && ativar.contains(".iniciar_com_api(&codigo, api)"),
         "a ativação deixou de conferir a revogação antes de liberar a \
          execução: {ativar}"
+    );
+    // **E a API que sobe é a que o pacote declarou**, e não a deste build.
+    // Aceitar a API 3 não é dar à API 3 o que a 4 tem: o prelúdio monta
+    // `SeeleUI` a partir deste número, e trocá-lo por `MOD_API_VERSION` daria
+    // superfícies e contribuições a um pacote que não as declarou.
+    assert!(
+        ativar.contains("alvo.api_declarada"),
+        "a ativação passou a subir o MOD com uma API que não é a do manifesto \
+         dele: {ativar}"
     );
 
     // E a revogação nativa não espera a janela pedir — e fecha a geração

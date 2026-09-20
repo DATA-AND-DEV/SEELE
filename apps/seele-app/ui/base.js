@@ -780,6 +780,36 @@ function donoDaRegiao(mod, instancia) {
      * arquivo para este MOD» e listava JSONs como escolhíveis; isto é o
      * conserto dessa parte.
      */
+    /**
+     * Abre um endereço que o MOD nomeou, **fora desta janela**.
+     *
+     * O mesmo caminho do link de uma mensagem: `abrir_no_navegador`, que é o
+     * navegador do sistema. Não é navegação desta WebView — navegar aqui
+     * levaria a conversa embora —, e não é `fetch`: o MOD não busca bytes na
+     * rede de ninguém pela janela de quem está conversando.
+     *
+     * Só `http` e `https`. Um `file:`, um `javascript:` ou um esquema de
+     * aplicativo qualquer entregariam a esta máquina uma ação que ninguém
+     * reviu, e o MOD saberia disso pelo evento em vez de descobrir no silêncio.
+     */
+    abrirEndereco: (url, chave) => {
+      let destino = null;
+      try {
+        destino = new URL(String(url ?? ""));
+      } catch {
+        destino = null;
+      }
+      // Pelo `falar` deste mesmo dono, e não por um caminho paralelo: ele é
+      // quem confere a instância e a geração antes de entregar o evento.
+      const dizer = (extra) => donoDaRegiao(mod, instancia).falar({ nome: "link", chave, ...extra });
+      if (!destino || (destino.protocol !== "http:" && destino.protocol !== "https:")) {
+        dizer({ aberto: false, porque: "endereco-nao-serve" });
+        return;
+      }
+      invoke("abrir_no_navegador", { url: destino.href })
+        .then(() => dizer({ aberto: true }))
+        .catch((falha) => dizer({ aberto: false, porque: String(falha?.message ?? falha) }));
+    },
     escolherArquivo: async (pedido = {}) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
@@ -902,6 +932,71 @@ function cartoesDaPessoa(id) {
   return achados;
 }
 
+// ------------------------------------------ as superfícies e as contribuições
+
+/**
+ * As superfícies de cada instância de MOD — ADR 0052.
+ *
+ * Por instância e não por `id`, pela mesma razão que a região: um MOD
+ * recarregado dentro da mesma sessão não herda as janelas da instância
+ * anterior. Uma página aberta pela instância de antes, montada de novo pela de
+ * agora, seria a instância nova recebendo eventos de uma janela que ela não
+ * abriu.
+ */
+const superficiesDosMods = new Map();
+
+/** O registro de contribuições desta janela, um só. */
+const contribuicoesDosMods = new RegistroDeContribuicoes();
+
+/** Onde cada tipo de superfície mora na página. */
+function palcosDeSuperficie() {
+  return {
+    paginas: $("palco-de-paginas"),
+    paineis: $("palco-de-paineis"),
+    camadas: $("palco-de-camadas"),
+    avisos: $("avisos-de-mod"),
+  };
+}
+
+/** As superfícies desta instância, criando o conjunto na primeira. */
+function superficiesDoMod(mod, instancia) {
+  let conjunto = superficiesDosMods.get(instancia);
+  if (!conjunto) {
+    conjunto = new SuperficiesDoMod(mod.id, donoDaRegiao(mod, instancia), palcosDeSuperficie());
+    superficiesDosMods.set(instancia, conjunto);
+    // Registrado **na criação**, como a região: um conjunto criado e não
+    // registrado é um modal que a saída não fecha.
+    instancia.registrar(`${mod.id}: as superfícies`, () => {
+      superficiesDosMods.delete(instancia);
+      conjunto.soltarTudo();
+    });
+  }
+  return conjunto;
+}
+
+/**
+ * Uma superfície pelo nome, ou o erro que diz qual foi pedida.
+ *
+ * Recusar com o nome é a regra do arquivo inteiro: um MOD que peça para montar
+ * numa superfície que ele fechou precisa ler isso, e não ver a montagem sumir.
+ */
+function superficieDoMod(mod, instancia, chave) {
+  const superficie = superficiesDoMod(mod, instancia).de(chave);
+  if (!superficie) throw new Error(`a superfície «${chave}» não está de pé`);
+  return superficie;
+}
+
+/**
+ * Quem desenha o que a contribuição muda, quando o registro muda.
+ *
+ * A lista de pessoas e a coluna de canais se redesenham; o resto da aplicação
+ * não é tocado. Coalescido em `avisar`, uma vez por quadro.
+ */
+contribuicoesDosMods.aoMudar(() => {
+  if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
+  if (typeof redesenharAsEntradasDeMod === "function") redesenharAsEntradasDeMod();
+});
+
 /** Tira a região de uma instância da tela, inteira — e o tema junto. */
 function limparARegiaoDoMod(id, instancia) {
   const regiao = regioesDosMods.get(instancia);
@@ -922,6 +1017,17 @@ function limparARegiaoDoMod(id, instancia) {
   if (cartoesDosMods.delete(id) && typeof redesenharAsPessoas === "function") {
     redesenharAsPessoas();
   }
+  // **E as superfícies e as contribuições.** Elas não moram sob a raiz da
+  // região — uma página ocupa a área da sessão, um cartão substituído mora na
+  // linha do roster —, então `soltar` não as alcança. Sem estas duas linhas,
+  // um modal de um MOD descarregado continuaria aberto sobre a conversa, e a
+  // apresentação que ele substituiu não voltaria ao padrão.
+  const superficies = superficiesDosMods.get(instancia);
+  if (superficies) {
+    superficiesDosMods.delete(instancia);
+    superficies.soltarTudo();
+  }
+  contribuicoesDosMods.revogarDoMod(id);
 }
 
 // ------------------------------------------------------------ o tema de um MOD
@@ -1318,6 +1424,76 @@ async function atenderOMod(mod, instancia, m) {
       case "soltar-arquivo":
         await donoDaRegiao(mod, instancia).soltarArquivo(m.arquivo);
         responder(true, { valor: null });
+        break;
+
+      // ---- as superfícies (API 4) ----
+      //
+      // Todas síncronas: montar uma superfície é layout, e layout acontece
+      // agora. O que é assíncrono aqui é o que vai à rede ou ao disco, e
+      // nenhuma destas vai.
+      case "superficie-criar":
+        responder(true, {
+          valor: superficiesDoMod(mod, instancia).criar(m.descricao),
+        });
+        break;
+      case "superficie-montar": {
+        const recusados = superficieDoMod(mod, instancia, m.superficie).montar(m.arvore);
+        // **Recusar em silêncio é o defeito que este repositório mais paga.**
+        // A mesma regra da região, e pelo mesmo motivo: um MOD cuja árvore não
+        // coube precisa saber disso onde ele a escreveu.
+        if (recusados > 0) {
+          throw new Error(`${recusados} nó(s) não couberam nos limites da superfície`);
+        }
+        responder(true, { valor: null });
+        break;
+      }
+      case "superficie-classes": {
+        const recusados = superficieDoMod(mod, instancia, m.superficie)
+          .declararClasses(m.classes);
+        if (recusados > 0) {
+          throw new Error(`${recusados} propriedade(s) de estilo não foram reconhecidas`);
+        }
+        responder(true, { valor: null });
+        break;
+      }
+      case "superficie-mostrar":
+        superficieDoMod(mod, instancia, m.superficie).mostrar();
+        superficiesDoMod(mod, instancia).arrumarPalcos();
+        responder(true, { valor: null });
+        break;
+      case "superficie-ocultar":
+        superficieDoMod(mod, instancia, m.superficie).ocultar();
+        superficiesDoMod(mod, instancia).arrumarPalcos();
+        responder(true, { valor: null });
+        break;
+      case "superficie-suja":
+        superficieDoMod(mod, instancia, m.superficie).marcarSuja(m.suja);
+        responder(true, { valor: null });
+        break;
+      case "superficie-titulo": {
+        const superficie = superficieDoMod(mod, instancia, m.superficie);
+        superficie.titulo = String(m.titulo ?? "").slice(0, 120);
+        if (superficie.tituloNo) superficie.tituloNo.textContent = superficie.titulo;
+        responder(true, { valor: null });
+        break;
+      }
+      case "superficie-fechar":
+        superficiesDoMod(mod, instancia).fechar(m.superficie, m.motivo);
+        responder(true, { valor: null });
+        break;
+      case "superficie-descartar":
+        superficiesDoMod(mod, instancia).descartar(m.superficie);
+        responder(true, { valor: null });
+        break;
+
+      // ---- as contribuições (API 4) ----
+      case "contribuir":
+        responder(true, {
+          valor: contribuicoesDosMods.registrar(mod, instancia, m.pedido),
+        });
+        break;
+      case "revogar-contribuicao":
+        responder(true, { valor: contribuicoesDosMods.revogar(m.handle) });
         break;
       default:
         // **Recusado e nomeado.** Uma mensagem que a API não conhece não pode

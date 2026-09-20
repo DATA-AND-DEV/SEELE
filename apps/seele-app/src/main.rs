@@ -441,6 +441,11 @@ struct InstanciaNativa {
     geracao: u64,
     /// O conteúdo exato que subiu.
     hash: String,
+    /// A API que o manifesto deste pacote declara.
+    ///
+    /// Guardada com a instância e não relida na ativação: quem decide o que
+    /// este MOD pode chamar tem de ser a mesma leitura que provou o hash dele.
+    api_declarada: u32,
     /// Em que ponto do ciclo ela está.
     estado: EstadoNativo,
     /// O executor.
@@ -3300,7 +3305,7 @@ fn mod_nativo_reservar(
     // O mesmo caminho de sempre para chegar ao código: a conferência de hash e
     // de identidade mora lá, e um segundo caminho seria uma segunda regra. Lido
     // agora para que a ativação não possa falhar por causa do disco.
-    let codigo = codigo_do_mod(
+    let (codigo, api_declarada) = codigo_do_mod(
         app.clone(),
         session.clone(),
         geracao,
@@ -3343,6 +3348,7 @@ fn mod_nativo_reservar(
             avisos_perdidos: 0,
             parou: false,
             codigo: Some(codigo),
+            api_declarada,
             avisado: false,
         },
     )?;
@@ -3490,8 +3496,9 @@ fn liberar_reserva(
     let codigo = alvo.codigo.take().ok_or(FalhaNoMod::Recusado {
         motivo: "nada-reservado".to_owned(),
     })?;
+    let api = alvo.api_declarada;
     alvo.executor
-        .iniciar(&codigo)
+        .iniciar_com_api(&codigo, api)
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "executor-nao-aceitou-o-codigo".to_owned(),
         })?;
@@ -4052,7 +4059,7 @@ fn codigo_do_mod(
     geracao: u64,
     id: String,
     hash: String,
-) -> Result<String, FalhaNoMod> {
+) -> Result<(String, u32), FalhaNoMod> {
     // O código de um MOD é o começo de uma montagem, e uma montagem pertence a
     // uma sessão. Entregá-lo para uma geração morta seria pôr um worker de pé
     // depois de a sessão dele ter acabado — a corrida que o roteiro da E2 chama
@@ -4086,9 +4093,15 @@ fn codigo_do_mod(
             motivo: "cliente-nao-servido".to_owned(),
         },
     )?;
-    String::from_utf8(bytes).map_err(|_| FalhaNoMod::Recusado {
+    // **A API declarada sai daqui junto com o fonte**, e não de uma segunda
+    // leitura do manifesto: duas leituras são duas oportunidades de discordar,
+    // e a que decide o que o MOD pode chamar tem de ser a mesma que provou o
+    // hash dele.
+    let api = pacote.api;
+    let fonte = String::from_utf8(bytes).map_err(|_| FalhaNoMod::Recusado {
         motivo: "cliente-nao-e-utf8".to_owned(),
-    })
+    })?;
+    Ok((fonte, api))
 }
 
 /// Um arquivo de mídia de um MOD, pronto para a janela montar.
@@ -7030,6 +7043,7 @@ mod a_tela_le_o_que_o_rust_manda {
             instalado: ModInstalado {
                 id: "autor/nome".to_owned(),
                 version: "1.0.0".to_owned(),
+                api: seele_ffi::mods::MOD_API_VERSION,
                 hash: "0".repeat(64),
                 client: Some("cliente/main.js".to_owned()),
                 arquivos: vec!["som/toque.wav".to_owned()],
@@ -7319,6 +7333,7 @@ mod a_supervisao_dos_mods_nativos {
             id: "prova/mod".to_owned(),
             geracao,
             hash: "a".repeat(64),
+            api_declarada: seele_ffi::mods::MOD_API_VERSION,
             estado: EstadoNativo::Ativa,
             executor: ExecutorQuickJs::novo(Limites::default()).expect("motor"),
             pendentes: std::collections::VecDeque::new(),

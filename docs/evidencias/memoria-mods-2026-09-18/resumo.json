@@ -1,0 +1,114 @@
+[
+  {
+    "phase": "apos-sair",
+    "n": 7,
+    "footprint_MiB": {
+      "median": 238.58199310302734,
+      "min": 238.56636810302734,
+      "max": 238.61326599121094
+    },
+    "process_medians_MiB": {
+      "com.apple.WebKit.GPU": 98.48554229736328,
+      "com.apple.WebKit.WebContent": 96.37593841552734,
+      "seele-app": 39.173133850097656,
+      "com.apple.WebKit.Networking": 4.7973785400390625
+    },
+    "mean_cpu_percent_of_one_core": 2.2976491249486397
+  },
+  {
+    "phase": "mesa-tabuleiro-aberto",
+    "n": 7,
+    "footprint_MiB": {
+      "median": 287.12891387939453,
+      "min": 287.03516387939453,
+      "max": 302.37891387939453
+    },
+    "process_medians_MiB": {
+      "com.apple.WebKit.WebContent": 140.71968841552734,
+      "com.apple.WebKit.GPU": 102.39183807373047,
+      "seele-app": 39.548133850097656,
+      "com.apple.WebKit.Networking": 4.7973785400390625
+    },
+    "mean_cpu_percent_of_one_core": 10.890875592986639
+  },
+  {
+    "phase": "sem-mods-1",
+    "n": 7,
+    "footprint_MiB": {
+      "median": 220.37852478027344,
+      "min": 220.22227478027344,
+      "max": 220.56602478027344
+    },
+    "process_medians_MiB": {
+      "com.apple.WebKit.GPU": 98.15716552734375,
+      "com.apple.WebKit.WebContent": 80.48524475097656,
+      "seele-app": 37.12623596191406,
+      "com.apple.WebKit.Networking": 4.8286285400390625
+    },
+    "mean_cpu_percent_of_one_core": 10.224167351545825
+  },
+  {
+    "phase": "sem-mods-reinicio",
+    "n": 7,
+    "footprint_MiB": {
+      "median": 228.56597900390625,
+      "min": 224.03472900390625,
+      "max": 232.53472900390625
+    },
+    "process_medians_MiB": {
+      "com.apple.WebKit.GPU": 100.09466552734375,
+      "com.apple.WebKit.WebContent": 88.12582397460938,
+      "seele-app": 35.845008850097656,
+      "com.apple.WebKit.Networking": 4.766105651855469
+    },
+    "mean_cpu_percent_of_one_core": 9.527098389481093
+  },
+  {
+    "phase": "tres-mods-reinicio",
+    "n": 7,
+    "footprint_MiB": {
+      "median": 239.78463745117188,
+      "min": 232.20651245117188,
+      "max": 259.6752624511719
+    },
+    "process_medians_MiB": {
+      "com.apple.WebKit.GPU": 99.95401763916016,
+      "com.apple.WebKit.WebContent": 99.32894897460938,
+      "seele-app": 36.016815185546875,
+      "com.apple.WebKit.Networking": 4.734855651855469
+    },
+    "mean_cpu_percent_of_one_core": 10.82463218829882
+  },
+  {
+    "phase": "tres-mods-repouso-1",
+    "n": 7,
+    "footprint_MiB": {
+      "median": 253.91000366210938,
+      "min": 246.14437866210938,
+      "max": 263.9568786621094
+    },
+    "process_medians_MiB": {
+      "com.apple.WebKit.WebContent": 112.00089263916016,
+      "com.apple.WebKit.GPU": 100.0323715209961,
+      "seele-app": 37.32936096191406,
+      "com.apple.WebKit.Networking": 4.7973785400390625
+    },
+    "mean_cpu_percent_of_one_core": 10.825055802709509
+  },
+  {
+    "phase": "tres-mods-repouso-2",
+    "n": 7,
+    "footprint_MiB": {
+      "median": 264.6912536621094,
+      "min": 259.3631286621094,
+      "max": 283.0975036621094
+    },
+    "process_medians_MiB": {
+      "com.apple.WebKit.WebContent": 122.76651763916016,
+      "com.apple.WebKit.GPU": 100.0323715209961,
+      "seele-app": 37.34498596191406,
+      "com.apple.WebKit.Networking": 4.7973785400390625
+    },
+    "mean_cpu_percent_of_one_core": 10.790771394712932
+  }
+]

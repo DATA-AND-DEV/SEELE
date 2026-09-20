@@ -33,7 +33,10 @@ use seele_proto::mods::read_manifest;
 // past it would put protocol knowledge in a Tauri command». Quem consome MOD
 // precisa destes dois tipos, então esta camada, que é a fronteira, os
 // republica. É a mesma disciplina, não uma brecha nela.
-pub use seele_proto::mods::{inner_path, Manifest, ModAnunciado, Refused, MOD_API_VERSION};
+pub use seele_proto::mods::{
+    capacidades_da_api, inner_path, Manifest, ModAnunciado, Refused, APIS_ACEITAS,
+    MOD_API_MINIMA, MOD_API_VERSION,
+};
 
 /// A MOD that read cleanly.
 #[derive(Debug, Clone)]

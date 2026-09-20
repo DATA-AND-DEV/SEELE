@@ -20,7 +20,9 @@ use seele_core::mods::{hex, refusal_name, Found};
 /// número custa já está registrado em
 /// `crates/seele-conformance/tests/a_api_dos_mods_nao_diverge.rs`: a primeira
 /// divergência só apareceu no primeiro MOD de verdade.
-pub use seele_core::mods::MOD_API_VERSION;
+pub use seele_core::mods::{
+    capacidades_da_api, APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION,
+};
 
 /// Ler um arquivo de mídia de um MOD — ver [`seele_core::mods::ler_midia`].
 ///
@@ -40,6 +42,16 @@ pub struct ModInstalado {
     pub id: String,
     /// A versão que o autor declara, ou vazio quando o manifesto não foi lido.
     pub version: String,
+    /// **A API que este pacote declara**, e não a que este build oferece.
+    ///
+    /// Desde a API 4 o produto executa um conjunto de versões, e não uma só
+    /// (ver `seele_proto::mods::APIS_ACEITAS`). O que um pacote pode chamar
+    /// passa a depender do que **ele** declarou: um pacote de API 3 recebe
+    /// `SeeleUI` sem superfícies nem contribuições, e é este campo que o
+    /// prelúdio lê para montá-lo.
+    ///
+    /// Zero quando o manifesto não foi lido — e zero não dá capacidade nenhuma.
+    pub api: u32,
     /// O hash do conteúdo em hexadecimal, ou vazio. É o que uma pessoa compara
     /// a olho com o que o indexador publica.
     pub hash: String,
@@ -116,6 +128,7 @@ pub fn ler_por_hash(pasta: &str, hash: &str) -> Result<ModInstalado, String> {
         Ok(instalado) if seele_core::mods::hex(&instalado.hash) == hash => Ok(ModInstalado {
             id: instalado.manifest.id,
             version: instalado.manifest.version,
+            api: instalado.manifest.api,
             hash: hash.to_owned(),
             client: instalado.manifest.client,
             arquivos: instalado.manifest.arquivos,
@@ -155,6 +168,7 @@ pub fn ler_um(pasta: &str, id: &str) -> Result<ModInstalado, String> {
         Ok(instalado) => Ok(ModInstalado {
             id: instalado.manifest.id,
             version: instalado.manifest.version,
+            api: instalado.manifest.api,
             hash: hex(&instalado.hash),
             client: instalado.manifest.client,
             arquivos: instalado.manifest.arquivos,
@@ -185,6 +199,7 @@ pub fn ler_pasta(caminho: &str) -> Result<ModInstalado, String> {
         Ok(instalado) => Ok(ModInstalado {
             id: instalado.manifest.id,
             version: instalado.manifest.version,
+            api: instalado.manifest.api,
             hash: hex(&instalado.hash),
             client: instalado.manifest.client,
             arquivos: instalado.manifest.arquivos,
@@ -218,6 +233,7 @@ fn achatar(found: Found) -> ModInstalado {
         Found::Ok(instalado) => ModInstalado {
             id: instalado.manifest.id,
             version: instalado.manifest.version,
+            api: instalado.manifest.api,
             hash: hex(&instalado.hash),
             client: instalado.manifest.client,
             arquivos: instalado.manifest.arquivos,
@@ -229,6 +245,9 @@ fn achatar(found: Found) -> ModInstalado {
         Found::Refused { id, why } => ModInstalado {
             id,
             version: String::new(),
+            // Zero, e não a versão deste build: o manifesto não foi lido, e
+            // zero não dá capacidade nenhuma.
+            api: 0,
             hash: String::new(),
             client: None,
             arquivos: Vec::new(),

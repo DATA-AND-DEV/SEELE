@@ -341,7 +341,13 @@ pub(crate) const INTERVALO_MINIMO: Duration = Duration::from_millis(4);
 #[derive(Debug)]
 pub(crate) enum ParaODentro {
     /// O código do MOD, uma vez.
-    Codigo(String),
+    /// O fonte do MOD e a API que o manifesto dele declarou.
+    Codigo {
+        /// O que o pacote traz.
+        fonte: String,
+        /// O número do manifesto — ver `capacidades_da_api`.
+        api: u32,
+    },
     /// Uma resposta a um pedido que o MOD fez.
     Resposta(String),
     /// Pare.
@@ -437,9 +443,27 @@ impl ExecutorQuickJs {
     /// # Errors
     ///
     /// Falha quando a thread já morreu.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn iniciar(&self, codigo: &str) -> Result<(), &'static str> {
+        self.iniciar_com_api(codigo, seele_ffi::mods::MOD_API_VERSION)
+    }
+
+    /// Entrega o código do MOD, dizendo **que API ele declarou**.
+    ///
+    /// A versão não é decoração: o prelúdio monta `SeeleUI` a partir dela, e um
+    /// pacote de API 3 recebe um `SeeleUI` sem `superficies` e sem
+    /// `contribuicoes`. Aceitar a API 3 não é dar à API 3 o que a 4 tem — ver
+    /// `seele_ffi::mods::capacidades_da_api`.
+    ///
+    /// # Errors
+    ///
+    /// Falha quando a thread já morreu.
+    pub(crate) fn iniciar_com_api(&self, codigo: &str, api: u32) -> Result<(), &'static str> {
         self.para_dentro
-            .send(ParaODentro::Codigo(codigo.to_owned()))
+            .send(ParaODentro::Codigo {
+                fonte: codigo.to_owned(),
+                api,
+            })
             .map_err(|_| "o executor não está de pé")
     }
 
@@ -763,11 +787,22 @@ fn rodar(
                     relogios: relogios.len(),
                 });
             }
-            ParaODentro::Codigo(fonte) => {
+            ParaODentro::Codigo { fonte, api } => {
                 interrupcao.comecar();
                 // O prelúdio primeiro, e o código do MOD depois, na mesma
                 // volta: se o prelúdio não subir, o MOD não deve subir.
+                //
+                // **As capacidades entram antes do prelúdio**, como um vetor
+                // que ele lê e apaga. Passá-las por interpolação de texto faria
+                // o prelúdio deixar de ser uma constante — e uma constante é
+                // exatamente o que dá para revisar uma vez e confiar sempre.
+                let capacidades = seele_ffi::mods::capacidades_da_api(api);
                 let resultado = contexto.with(|ctx| {
+                    let lista = rquickjs::Array::new(ctx.clone())?;
+                    for (onde, nome) in capacidades.iter().enumerate() {
+                        lista.set(onde, *nome)?;
+                    }
+                    ctx.globals().set("__seeleCapacidades", lista)?;
                     ctx.eval::<(), _>(PRELUDIO.as_bytes())?;
                     ctx.eval::<(), _>(fonte.as_bytes())
                 });
@@ -853,9 +888,71 @@ const PRELUDIO: &str = r#"
     snapshot: () => pedir('snapshot', {}),
   });
 
+  // ---- as capacidades desta execução ----
+  //
+  // **O que o pacote declarou, e não o que este build oferece.** O anfitrião
+  // põe a lista em `__seeleCapacidades` antes de avaliar este texto, a partir
+  // de `capacidades_da_api(manifesto.api)`.
+  //
+  // O vetor é lido e **apagado**: um MOD que o encontrasse depois poderia
+  // reescrevê-lo, e o próximo a lê-lo leria o que o MOD escreveu. Apagar aqui
+  // não é a fronteira — a fronteira é o anfitrião conferir cada mensagem —, é
+  // não deixar uma pergunta com duas respostas.
+  const capacidades = new Set(Array.isArray(globalThis.__seeleCapacidades)
+    ? globalThis.__seeleCapacidades
+    : []);
+  delete globalThis.__seeleCapacidades;
+
+  /**
+   * Monta um objeto só com o que esta API tem.
+   *
+   * **Ausente, e não recusado em tempo de execução.** Um `superficies` que
+   * existisse e sempre falhasse faria um MOD de API 3 descobrir o problema
+   * dentro de um `catch`, com uma mensagem, em produção. Um método que não
+   * existe é um `TypeError` na primeira linha que o chama, com pilha, onde
+   * quem escreveu o MOD consegue ver.
+   */
+  const comCapacidade = (nome, membros) => (capacidades.has(nome) ? membros : null);
+
+  const superficies = comCapacidade('superficies', Object.freeze({
+    // Devolve um punho local: os métodos serializam pedidos, e nada aqui é um
+    // nó do documento. §3 do plano.
+    criar: async (descricao) => {
+      const id = String(descricao && descricao.id || '');
+      await pedir('superficie-criar', { descricao });
+      return Object.freeze({
+        id,
+        montar: (arvore) => pedir('superficie-montar', { superficie: id, arvore }),
+        classes: (mapa) => pedir('superficie-classes', { superficie: id, classes: mapa }),
+        mostrar: () => pedir('superficie-mostrar', { superficie: id }),
+        ocultar: () => pedir('superficie-ocultar', { superficie: id }),
+        suja: (valor) => pedir('superficie-suja', { superficie: id, suja: valor !== false }),
+        titulo: (texto) => pedir('superficie-titulo', { superficie: id, titulo: texto }),
+        fechar: (motivo) => pedir('superficie-fechar', { superficie: id, motivo }),
+        descartar: () => pedir('superficie-descartar', { superficie: id }),
+      });
+    },
+    // Um aviso é uma superfície de vida curta, e por isso tem atalho: um MOD
+    // que precise dizer «gravado» não deve ter de montar uma janela.
+    avisar: (texto, tom) => pedir('superficie-criar', {
+      descricao: { id: 'aviso-' + (++proximo), tipo: 'aviso', titulo: String(texto ?? ''), tom },
+    }),
+  }));
+
+  const contribuicoes = comCapacidade('contribuicoes', Object.freeze({
+    registrar: (pedido) => pedir('contribuir', { pedido }),
+    revogar: (handle) => pedir('revogar-contribuicao', { handle }),
+  }));
+
   globalThis.SeeleUI = Object.freeze({
     regiao: (conteudo) => pedir('regiao', { conteudo }),
     tema: (valores) => pedir('tema', { valores }),
+    ...(superficies ? { superficies } : {}),
+    ...(contribuicoes ? { contribuicoes } : {}),
+    // A lista, legível pelo próprio MOD: um pacote que queira degradar em vez
+    // de falhar precisa poder perguntar, e perguntar a `SeeleUI.superficies`
+    // já é a resposta — mas um nome explícito evita o truque.
+    capacidades: () => [...capacidades],
 
     // **Um cartão por pessoa na lista do produto.** A declaração é a mesma da
     // região, montada pelo mesmo renderer, com uma gramática menor: nada que

@@ -1,0 +1,69 @@
+{
+  "version": "0.11.2",
+  "release_commit": "e90bcc16751cad0861c73c3f57bfaa78c5b3e434",
+  "binary": "/Applications/SEELE.app/Contents/MacOS/seele-app",
+  "binary_sha256": "9686a1dee58cb0d99fd86e54eb406f3e73b4504da42598ad7c841c0919070a36",
+  "hardware": "Mac17,9\n25769803776\nApple M5 Pro\n",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0\nBuildVersion:\t\t26A428\n",
+  "pids": {
+    "app": 98491,
+    "gpu": 98493,
+    "webcontent": 98494,
+    "networking": 98495
+  },
+  "mods": [
+    {
+      "schema": 1,
+      "id": "seele/mesa",
+      "version": "1.2.1",
+      "api": 2,
+      "repo": "https://github.com/DATA-AND-DEV/MESA",
+      "reach": [
+        "dom",
+        "estado da campanha no servidor",
+        "arquivos de mapas e cenas"
+      ],
+      "client": "cliente/main.js",
+      "server": "servidor/main.js"
+    },
+    {
+      "schema": 1,
+      "id": "seele/estilo",
+      "version": "1.0.1",
+      "api": 2,
+      "repo": "https://github.com/DATA-AND-DEV/ESTILO",
+      "reach": [
+        "dom",
+        "tema do servidor"
+      ],
+      "client": "cliente/main.js",
+      "server": "servidor/main.js"
+    },
+    {
+      "schema": 1,
+      "id": "seele/perfis",
+      "version": "1.2.2",
+      "api": 2,
+      "repo": "https://github.com/DATA-AND-DEV/PERFIS",
+      "reach": [
+        "dom",
+        "perfis por servidor",
+        "imagens e banners animados"
+      ],
+      "client": "cliente/main.js",
+      "server": "servidor/main.js"
+    }
+  ],
+  "pids_segunda_rodada": {
+    "app": 99104,
+    "gpu": 99106,
+    "webcontent": 99107,
+    "networking": 99108
+  },
+  "pids_terceira_rodada": {
+    "app": 99269,
+    "gpu": 99271,
+    "webcontent": 99272,
+    "networking": 99273
+  }
+}

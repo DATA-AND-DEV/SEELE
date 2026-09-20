@@ -43,7 +43,58 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 /// houvesse um MOD antigo carregado, a promessa «o que um MOD faz some quando
 /// você sai do servidor» continuaria falsa, e o produto prometeria duas coisas
 /// diferentes ao mesmo tempo.
-pub const MOD_API_VERSION: u32 = 3;
+pub const MOD_API_VERSION: u32 = 4;
+
+/// **As versões que este build executa**, da mais nova para a mais velha.
+///
+/// # Por que um conjunto, e não um número
+///
+/// Até a API 3 a conferência era igualdade: `manifest.api == MOD_API_VERSION`,
+/// com `ApiTooOld` para tudo abaixo. Isso era correto *naquela* ruptura — a
+/// API 3 **tirou** capacidades, e «serve uma API mais velha» tinha deixado de
+/// ser verdade.
+///
+/// A API 4 não tira nada. Ela acrescenta superfícies, contribuições,
+/// composição e estilos sobre o mesmo executor, a mesma ponte e o mesmo
+/// renderer. Um pacote de API 3 continua sendo exatamente o que ele era: uma
+/// região, um tema e cartões.
+///
+/// Manter a igualdade aqui significaria que subir a constante para 4
+/// **quebraria todo pacote publicado no mesmo instante** — e o §13 do plano
+/// aponta essa armadilha pelo nome. Um conjunto é o que permite publicar o
+/// aplicativo compatível antes de publicar os pacotes novos, que é a única
+/// ordem em que ninguém fica sem MOD.
+///
+/// # O que um conjunto **não** concede
+///
+/// Aceitar a 3 não é dar à 3 o que a 4 tem. As capacidades são por versão, e
+/// quem as aplica é o prelúdio do executor: um pacote que declara `api: 3`
+/// recebe `SeeleUI` sem `superficies` e sem `contribuicoes`, e chamar o que
+/// não está lá falha no MOD, onde quem o escreveu consegue ver.
+///
+/// A API 2 não volta. Ela executava na janela, e o ADR 0049 explica por que
+/// não há caminho de volta disso.
+pub const APIS_ACEITAS: &[u32] = &[4, 3];
+
+/// A API mais velha que este build ainda executa.
+pub const MOD_API_MINIMA: u32 = 3;
+
+/// O que um pacote de cada versão pode chamar.
+///
+/// Devolvido ao carregar, e é o que o prelúdio usa para montar `SeeleUI`. Uma
+/// capacidade que não está aqui **não existe** para aquele pacote: não é um
+/// erro em tempo de execução escondido, é um método ausente.
+#[must_use]
+pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
+    match api {
+        4 => &[
+            "regiao", "tema", "cartoes", "arquivo",
+            "superficies", "contribuicoes", "estilos", "classes",
+        ],
+        3 => &["regiao", "tema", "cartoes", "arquivo"],
+        _ => &[],
+    }
+}
 
 /// What a MOD declares about itself.
 ///
@@ -211,18 +262,19 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
             ours: MANIFEST_SCHEMA,
         });
     }
-    // **Igual, e não «até».** Ver [`Refused::ApiTooOld`]: a API 3 tirou coisa, e
-    // «serve uma API mais velha» deixou de ser verdade no dia em que ela tirou.
+    // **Um conjunto, e não uma igualdade** — ver [`APIS_ACEITAS`]. A API 3
+    // continua executando porque a 4 não tirou nada dela; a 2 não, porque ela
+    // rodava na janela.
     if manifest.api > MOD_API_VERSION {
         return Err(Refused::ApiTooNew {
             wanted: manifest.api,
             ours: MOD_API_VERSION,
         });
     }
-    if manifest.api < MOD_API_VERSION {
+    if !APIS_ACEITAS.contains(&manifest.api) {
         return Err(Refused::ApiTooOld {
             wanted: manifest.api,
-            ours: MOD_API_VERSION,
+            ours: MOD_API_MINIMA,
         });
     }
     if !is_well_formed_id(&manifest.id) {
@@ -660,6 +712,64 @@ mod tests {
                 ours: MOD_API_VERSION,
             })
         );
+    }
+
+    /// **O pacote da API 3 continua executando na 4**, e este caso é o guarda.
+    ///
+    /// A conferência era igualdade, e subir a constante para 4 teria recusado
+    /// todo pacote publicado no mesmo instante — os três MODs oficiais, na
+    /// máquina de quem já os tinha instalado. O §13 do plano aponta essa
+    /// armadilha pelo nome; este teste é o que impede alguém de reintroduzi-la
+    /// voltando a comparar por igual.
+    #[test]
+    fn um_pacote_da_api_anterior_continua_carregando() {
+        for aceita in APIS_ACEITAS {
+            let texto = manifesto_minimo().replace(
+                &format!("\"api\": {MOD_API_VERSION}"),
+                &format!("\"api\": {aceita}"),
+            );
+            let lido = read_manifest(&texto)
+                .unwrap_or_else(|erro| panic!("a API {aceita} devia carregar, e deu {erro:?}"));
+            assert_eq!(lido.api, *aceita);
+        }
+    }
+
+    /// E a API 2 não volta: ela executava na janela, e o ADR 0049 diz por que
+    /// não há caminho de volta disso.
+    #[test]
+    fn a_api_que_rodava_na_janela_nao_volta() {
+        let texto = manifesto_minimo().replace(
+            &format!("\"api\": {MOD_API_VERSION}"),
+            "\"api\": 2",
+        );
+        assert_eq!(
+            read_manifest(&texto),
+            Err(Refused::ApiTooOld {
+                wanted: 2,
+                ours: MOD_API_MINIMA,
+            })
+        );
+    }
+
+    /// Aceitar uma versão não é dar a ela o que a versão nova tem.
+    #[test]
+    fn cada_versao_tem_as_capacidades_dela() {
+        let quatro = capacidades_da_api(4);
+        let tres = capacidades_da_api(3);
+        assert!(quatro.contains(&"superficies"));
+        assert!(quatro.contains(&"contribuicoes"));
+        assert!(
+            !tres.contains(&"superficies"),
+            "a API 3 recebeu por acidente uma capacidade da 4",
+        );
+        // O que a 3 tinha, a 4 continua tendo: a 4 não tirou nada.
+        for capacidade in tres {
+            assert!(
+                quatro.contains(capacidade),
+                "a API 4 perdeu «{capacidade}», que a 3 tinha",
+            );
+        }
+        assert!(capacidades_da_api(2).is_empty());
     }
 
     #[test]
