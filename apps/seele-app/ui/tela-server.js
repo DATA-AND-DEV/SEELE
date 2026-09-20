@@ -416,6 +416,59 @@ async function abrirServer(origem) {
 }
 
 /**
+ * A tecla de colar, na forma desta plataforma — U18.
+ *
+ * A tabela dizia `CTRL+V` em toda máquina, e no Mac a tecla é Cmd: quem lê a
+ * tabela e tenta Ctrl+V não cola nada, e conclui que a função não existe.
+ *
+ * Esta é a única linha da tabela que não nomeia uma tecla que um script nosso
+ * escuta — quem a entrega é o sistema, já traduzida, pelo evento `paste` —, e é
+ * justamente por isso que o texto tem de mudar por plataforma: nós não
+ * escolhemos a combinação, então não podemos escrever uma só.
+ *
+ * `navigator.platform` está obsoleto e continua sendo o que a WebView responde;
+ * `userAgentData.platform` é o caminho novo e não existe em toda WebView. Os
+ * dois, nessa ordem, e o padrão é Ctrl — errar para o lado do que a maioria das
+ * máquinas usa.
+ */
+function desenharTeclaDeColar() {
+  const tecla = $("atalho-colar");
+  if (!tecla) return;
+  const plataforma = String(
+    navigator.userAgentData?.platform ?? navigator.platform ?? "",
+  ).toLowerCase();
+  const ehMac = plataforma.includes("mac");
+  const texto = ehMac ? "CMD+V" : "CTRL+V";
+  if (tecla.textContent !== texto) tecla.textContent = texto;
+}
+
+desenharTeclaDeColar();
+
+/**
+ * O botão que leva à acessibilidade do sistema — U07.
+ *
+ * Ligado uma vez, e escondido onde não há destino único a abrir: no Linux cada
+ * ambiente põe a acessibilidade num lugar, e um botão que às vezes não faz nada
+ * é um botão que ensina a não confiar nos outros.
+ */
+invoke("ha_ajustes_de_acessibilidade")
+  .then((tem) => {
+    const botao = $("aparencia-ajustes");
+    if (!botao) return;
+    botao.hidden = !tem;
+    if (!tem) return;
+    botao.addEventListener("click", () => {
+      // Sem `catch` que mostre erro: um botão de conveniência que não abriu não
+      // é motivo para uma segunda mensagem em cima da primeira. Do lado do
+      // Rust ele também é silencioso, e pelo mesmo motivo.
+      invoke("abrir_ajustes_de_acessibilidade").catch((falha) => {
+        console.warn("ajustes de acessibilidade:", falha);
+      });
+    });
+  })
+  .catch((falha) => console.warn("ajustes de acessibilidade:", falha));
+
+/**
  * A faixa de contexto do cabeçalho: onde você está enquanto mexe aqui.
  *
  * # Por que ela existe

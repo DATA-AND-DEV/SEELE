@@ -79,6 +79,31 @@ fn o_indexador_e_este_build_oferecem_a_mesma_api_de_mods() {
          `api-do-indexador.json` de novo"
     );
 
+    // **E o conjunto que cada lado executa também.**
+    //
+    // Desde a API 4 a conferência dos dois lados deixou de ser igualdade: a 4
+    // não tirou nada da 3, então o indexador publica pacotes de ambas e o
+    // cliente executa ambos. Dois conjuntos diferentes é o indexador
+    // publicando um pacote que o cliente não roda — ou recusando um que ele
+    // rodaria —, e nenhum dos dois aparece numa suíte que só compara tetos.
+    let aceitas: Vec<u32> = indexador
+        .get("apis_aceitas")
+        .and_then(serde_json::Value::as_array)
+        .expect(
+            "o vetor da API do indexador não diz `apis_aceitas`; sem ele a \
+             divergência de conjunto volta a ser invisível",
+        )
+        .iter()
+        .filter_map(serde_json::Value::as_u64)
+        .filter_map(|n| u32::try_from(n).ok())
+        .collect();
+    assert_eq!(
+        aceitas,
+        seele_proto::mods::APIS_ACEITAS,
+        "o indexador e este build executam conjuntos diferentes de APIs: um \
+         publicaria pacotes que o outro não roda"
+    );
+
     // **E o catálogo publicado nunca vai à frente.** Ele pode ficar atrás — é o
     // estado normal entre implementar uma versão e publicá-la —, mas um
     // catálogo oferecendo mais do que este build entende é um cliente sendo

@@ -244,6 +244,49 @@ pub enum Refused {
 /// carregamento por demanda em vez de declaração no manifesto.
 pub const TETO_DE_ARQUIVOS: usize = 16;
 
+/// O que um manifesto **diz de si**, mesmo quando ele é recusado.
+///
+/// # Por que isto existe
+///
+/// U10 da auditoria de 20/09/2026: «MODs antigos aparecem como hashes
+/// compridos, `api-too-old`, versão vazia e 0 B. O usuário perde a identidade
+/// do pacote justamente quando precisa atualizá-lo.»
+///
+/// A recusa era total: um manifesto que não passava não devolvia nada, e a tela
+/// ficava com o nome da pasta — um hash de 64 caracteres — e um código de erro.
+/// Quem precisava decidir se apagava ou atualizava aquele pacote não tinha o
+/// nome dele nem a versão.
+///
+/// A recusa continua total **para executar**: nada aqui faz um pacote de API 2
+/// rodar. O que ela deixa de ser é total para **descrever**, e são duas
+/// perguntas diferentes.
+///
+/// Só os três campos que uma pessoa usa para reconhecer um pacote, e nenhum que
+/// o produto vá obedecer: nem `client`, nem `arquivos`, nem `reach`. Um
+/// manifesto recusado não autoriza nada, e ler dele um caminho de arquivo seria
+/// justamente autorizar.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct ComoEleSeChama {
+    /// `autor/nome`, como o manifesto o escreve.
+    #[serde(default)]
+    pub id: String,
+    /// A versão que o autor declara.
+    #[serde(default)]
+    pub version: String,
+    /// A API que ele pede. Zero quando o campo falta ou não é número.
+    #[serde(default)]
+    pub api: u32,
+}
+
+/// Lê só o que um manifesto diz de si, sem validar nada.
+///
+/// **Nunca falha**: um JSON quebrado devolve os campos vazios, que é a mesma
+/// resposta honesta de antes — só que sem levar junto o que dava para ler.
+#[must_use]
+pub fn como_ele_se_chama(text: &str) -> ComoEleSeChama {
+    serde_json::from_str(text).unwrap_or_default()
+}
+
 /// Reads a `mod.json`.
 ///
 /// # Errors

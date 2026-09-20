@@ -242,12 +242,19 @@ fn achatar(found: Found) -> ModInstalado {
             server: instalado.manifest.server.is_some(),
             refused: None,
         },
-        Found::Refused { id, why } => ModInstalado {
-            id,
-            version: String::new(),
-            // Zero, e não a versão deste build: o manifesto não foi lido, e
-            // zero não dá capacidade nenhuma.
-            api: 0,
+        // **O que ele diz ser, quando dá para ler** — U10.
+        //
+        // A recusa continua total para executar: nada aqui faz um pacote
+        // incompatível rodar, e `refused` continua preenchido. O que ela deixa
+        // de ser é total para **descrever**: quem vai decidir entre apagar e
+        // atualizar precisa do nome e da versão, e o nome da pasta é um hash.
+        Found::Refused { id, why, diz_ser } => ModInstalado {
+            id: if diz_ser.id.is_empty() { id } else { diz_ser.id },
+            version: diz_ser.version,
+            // A API que ele **pede**, e não a que este build oferece. É o
+            // número que diz se atualizar o aplicativo resolve, ou se é o
+            // pacote que precisa de uma versão nova.
+            api: diz_ser.api,
             hash: String::new(),
             client: None,
             arquivos: Vec::new(),

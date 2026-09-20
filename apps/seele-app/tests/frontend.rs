@@ -3347,6 +3347,48 @@ fn every_glyph_the_page_asks_for_is_one_glifos_js_can_draw() {
 /// E as seções ficavam numa lista plana. Trocar o microfone vale nesta
 /// máquina; renomear o servidor vale para todo mundo que entra nele. A
 /// diferença decide se alguém hesita antes de mexer, e uma lista plana a apaga.
+/// **Os dois números da API não podem discordar** — U10.
+///
+/// A gestão de MODs passou a dizer, para um pacote que este build não executa,
+/// se quem está para trás é o aplicativo ou o pacote. Essa frase é montada na
+/// casca, a partir de um número escrito lá — e um número escrito duas vezes é
+/// um número que discorda no dia em que só uma das cópias sobe.
+///
+/// A consequência seria específica e cara: a tela mandaria alguém atualizar o
+/// aplicativo que já está atualizado, ou procurar uma versão nova de um pacote
+/// que já é a mais nova.
+#[test]
+fn a_api_da_casca_bate_com_a_do_nucleo() {
+    let rust = read("../../crates/seele-proto/src/mods.rs");
+    let casca = without_comments(&read("ui/camada-mods.js"));
+
+    let oferecida = rust
+        .split_once("pub const MOD_API_VERSION: u32 = ")
+        .and_then(|(_, resto)| resto.split_once(';'))
+        .map(|(numero, _)| numero.trim().to_owned())
+        .expect("`MOD_API_VERSION` sumiu de seele-proto");
+    assert!(
+        casca.contains(&format!("const API_DESTE_APLICATIVO = {oferecida};")),
+        "a casca diz uma API e o núcleo diz {oferecida}: a gestão de MODs \
+         mandaria alguém atualizar o que já está atualizado"
+    );
+
+    // E o conjunto aceito, na mesma ordem em que o Rust o escreve.
+    let aceitas = rust
+        .split_once("pub const APIS_ACEITAS: &[u32] = &[")
+        .and_then(|(_, resto)| resto.split_once(']'))
+        .map(|(lista, _)| lista.replace(char::is_whitespace, ""))
+        .expect("`APIS_ACEITAS` sumiu de seele-proto");
+    let esperado = format!(
+        "const APIS_QUE_ESTE_APLICATIVO_ACEITA = [{}];",
+        aceitas.trim_end_matches(',')
+    );
+    assert!(
+        casca.contains(&esperado),
+        "a casca lista outras APIs aceitas que o núcleo: esperava `{esperado}`"
+    );
+}
+
 #[test]
 fn a_configuracao_diz_o_nome_dela_e_o_escopo_de_cada_grupo() {
     let pagina = read("ui/index.html");

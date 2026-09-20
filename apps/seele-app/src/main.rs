@@ -3148,6 +3148,15 @@ struct PacoteNoCache {
     ///
     /// Quando é verdadeiro, apagar é recusado. Ver [`apagar_pacote_do_cache`].
     exigido_aqui: bool,
+    /// A API que este pacote pede, ou zero quando o manifesto não abriu.
+    ///
+    /// **É o número que diz o caminho de saída** — U10. Um pacote que este
+    /// build não roda é uma de duas coisas: velho demais, e então é o pacote
+    /// que precisa de uma versão nova; ou novo demais, e então é o aplicativo.
+    /// Sem ele, a tela dizia `api-too-old` e parava aí.
+    api: u32,
+    /// Por que este pacote não serve, quando não serve.
+    recusado: Option<String>,
 }
 
 /// Todo pacote no cache local, com tamanho e com quem o exige.
@@ -3180,6 +3189,8 @@ async fn pacotes_no_cache(
             exigido_aqui: ligados
                 .iter()
                 .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash),
+            api: instalado.api,
+            recusado: instalado.refused,
             id: instalado.id,
             version: instalado.version,
             hash: instalado.hash,
@@ -5549,6 +5560,52 @@ fn abrir_ajustes_do_microfone(app: AppHandle) {
     }
 }
 
+/// Abre a página de acessibilidade do sistema, onde o contraste mora.
+///
+/// # Por que abrir os Ajustes é o máximo que dá para fazer, aqui também
+///
+/// U07 da auditoria de 20/09/2026: «Aparência explica uma correção histórica de
+/// contraste e `prefers-contrast`, mas não oferece um controle direto
+/// equivalente.» A seção dizia onde o contraste mora — o sistema operacional —
+/// e parava ali.
+///
+/// A alternativa de ter um interruptor próprio foi recusada quando a seção
+/// nasceu, e a razão continua boa: uma chave no app competindo com a do sistema
+/// é a receita para as duas discordarem, e `acessibilidade.css` já segue
+/// `prefers-contrast`. O que faltava era **levar até lá**, que é exatamente o
+/// que `abrir_ajustes_do_microfone` faz para a permissão do microfone.
+///
+/// Sem barulho quando falha, pela mesma razão: um botão de conveniência que não
+/// abriu não é motivo para uma segunda mensagem em cima da primeira. No Linux
+/// não há um destino único — cada ambiente põe a acessibilidade num lugar —, e
+/// por isso lá não há botão: a janela o esconde, em vez de desenhá-lo morto.
+#[tauri::command]
+fn abrir_ajustes_de_acessibilidade(app: AppHandle) {
+    let _ = app;
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", "ms-settings:easeofaccess-highcontrast"])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.universalaccess?Seeing_Display")
+            .spawn();
+    }
+}
+
+/// Se esta plataforma tem uma página de acessibilidade para abrir.
+///
+/// A janela esconde o botão quando não tem: «omitir o que não se tem em vez de
+/// desenhá-lo morto» é a regra desta tela, escrita no guarda
+/// `every_section_of_the_settings_screen_carries_the_panel_and_the_heading_it_opens`.
+#[tauri::command]
+const fn ha_ajustes_de_acessibilidade() -> bool {
+    cfg!(any(windows, target_os = "macos"))
+}
+
 /// Fecha o aviso que está na tela, de verdade.
 ///
 /// A janela escondia a caixa por conta própria, e o redesenho — que roda duas
@@ -6944,6 +7001,8 @@ fn main() {
             dispensar_aviso,
             permissao_de_microfone,
             abrir_ajustes_do_microfone,
+            abrir_ajustes_de_acessibilidade,
+            ha_ajustes_de_acessibilidade,
             lembrar_aparencia_do_servidor,
             tela_cheia,
             microfones,

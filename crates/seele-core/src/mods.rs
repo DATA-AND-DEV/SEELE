@@ -34,8 +34,8 @@ use seele_proto::mods::read_manifest;
 // precisa destes dois tipos, então esta camada, que é a fronteira, os
 // republica. É a mesma disciplina, não uma brecha nela.
 pub use seele_proto::mods::{
-    capacidades_da_api, inner_path, Manifest, ModAnunciado, Refused, APIS_ACEITAS,
-    MOD_API_MINIMA, MOD_API_VERSION,
+    capacidades_da_api, como_ele_se_chama, inner_path, ComoEleSeChama, Manifest, ModAnunciado,
+    Refused, APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION,
 };
 
 /// A MOD that read cleanly.
@@ -65,6 +65,21 @@ pub enum Found {
         id: String,
         /// Why.
         why: Refused,
+        /// **O que o manifesto diz de si, quando dá para ler** — U10.
+        ///
+        /// A auditoria de 20/09/2026 mediu o custo de não ter isto: «MODs
+        /// antigos aparecem como hashes compridos, `api-too-old`, versão vazia
+        /// e 0 B. O usuário perde a identidade do pacote justamente quando
+        /// precisa atualizá-lo.»
+        ///
+        /// Recusar para **executar** e recusar para **descrever** são duas
+        /// coisas, e só a primeira é obrigatória. Um pacote que este build não
+        /// roda continua sendo um pacote que alguém precisa reconhecer para
+        /// decidir se o apaga ou o atualiza.
+        ///
+        /// Vazio quando nem o JSON abriu. Ver [`ComoEleSeChama`] para o que
+        /// ele deliberadamente **não** carrega.
+        diz_ser: ComoEleSeChama,
     },
 }
 
@@ -98,8 +113,13 @@ pub fn list(config_dir: &Path) -> Vec<Found> {
                 Ok(_) => found.push(Found::Refused {
                     id,
                     why: Refused::MalformedId,
+                    diz_ser: o_que_ele_diz_ser(&dir),
                 }),
-                Err(why) => found.push(Found::Refused { id, why }),
+                Err(why) => found.push(Found::Refused {
+                    id,
+                    why,
+                    diz_ser: o_que_ele_diz_ser(&dir),
+                }),
             }
         }
     }
@@ -162,8 +182,13 @@ pub fn listar_por_conteudo(config_dir: &Path) -> Vec<Found> {
             Ok(installed) => found.push(Found::Refused {
                 id: installed.manifest.id,
                 why: Refused::MalformedId,
+                diz_ser: o_que_ele_diz_ser(&dir),
             }),
-            Err(why) => found.push(Found::Refused { id: nome, why }),
+            Err(why) => found.push(Found::Refused {
+                id: nome,
+                why,
+                diz_ser: o_que_ele_diz_ser(&dir),
+            }),
         }
     }
     found.sort_by(|left, right| name_of(left).cmp(name_of(right)));
@@ -244,6 +269,17 @@ pub fn read_one(dir: &Path) -> Result<Installed, Refused> {
         hash,
         dir: dir.to_path_buf(),
     })
+}
+
+/// O que o manifesto desta pasta diz de si, sem validar nada — U10.
+///
+/// Nunca falha: uma pasta sem `mod.json`, ou com um JSON quebrado, devolve os
+/// campos vazios — que é a mesma resposta honesta de antes, só que sem levar
+/// junto o que dava para ler.
+fn o_que_ele_diz_ser(dir: &Path) -> ComoEleSeChama {
+    std::fs::read_to_string(dir.join("mod.json"))
+        .map(|texto| como_ele_se_chama(&texto))
+        .unwrap_or_default()
 }
 
 /// Every file under `dir`, with paths relative to `root`, in whatever order the

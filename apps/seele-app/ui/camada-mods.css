@@ -340,3 +340,63 @@
   border-color: var(--seele-laranja-nerv);
   color: var(--seele-laranja-nerv);
 }
+
+
+/* O estado de um MOD, em palavra e não em cor — U11.
+
+   Quatro perguntas diferentes que duas palavras respondiam: instalado,
+   selecionado, ativo, em execução. `specs/06-clientes-gui.md` recusa informação
+   que só a cor carregue, e é por isso que o que está pendente diz «falta
+   SALVAR» em vez de ficar laranja e esperar que alguém saiba o que isso é. */
+.mods-estado {
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  color: var(--seele-osso-apagado);
+}
+
+
+/* As abas da gestão — U12.
+
+   O mesmo desenho das abas que o renderer dos MODs monta (`mods-controles.css`),
+   e de propósito: duas maneiras de desenhar a mesma coisa no mesmo produto é
+   duas coisas para aprender. As classes são outras porque as folhas caem num
+   espaço de nomes só e `no_two_screens_claim_the_same_class_name` reprova. */
+.mods-tiras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--seele-linha);
+  margin-bottom: var(--seele-celula-y);
+}
+
+.mods-aba {
+  min-height: 34px;
+  padding: 2px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: none;
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  cursor: pointer;
+}
+
+/* Escolhida por três coisas ao mesmo tempo — cor, borda e peso — porque
+   `aria-selected` não é visível e cor sozinha não basta
+   (`specs/06-clientes-gui.md`). */
+.mods-aba[aria-selected="true"] {
+  border-color: var(--seele-linha-forte);
+  color: var(--seele-osso);
+  font-weight: var(--seele-cartela);
+  background: var(--seele-negro-painel);
+}
+
+.mods-aba:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: -2px;
+}
+
+.mods-painel[hidden] { display: none; }
+.mods-painel:focus-visible { outline: 2px solid var(--seele-laranja-nerv); }

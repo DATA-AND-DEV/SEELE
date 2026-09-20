@@ -274,60 +274,88 @@
       </span>
     </div>
 
+
     <!--
-      A leitura de boot. **Ela é verdade, e não cenário.**
+      O propósito, antes de qualquer detalhe — U05.
 
-      Cada linha diz uma coisa que o produto de fato faz: a porta que o `seeled`
-      abre, o transporte, e a chave que fixa a identidade do servidor (ADR 0003
-      e 0004). Um terminal falso que rolasse texto inventado seria a única parte
-      desta janela que mente, e o `07-estetica.md` proíbe decoração que se
-      pareça com dado.
+      «A tela de entrada expõe comando `seeled`, QUIC/TLS/UDP e chave antes da
+      pessoa escolher entrar ou hospedar.» A leitura de boot é verdade e não
+      cenário, e continua sendo; o problema não era ela mentir, era ela ser a
+      primeira coisa que alguém lê. Três linhas de porta, transporte e curva
+      elíptica antes de «entrar» e «hospedar» pedem uma decifração para chegar
+      a uma decisão que não depende dela.
 
-      `aria-hidden` no cursor: ele pisca e não diz nada, e um leitor de tela
-      anunciando um quadrado a cada meio segundo é ruído.
+      A ordem inverte: o que o programa faz, as duas ações, e só então — dentro
+      de uma explicação que se abre — o que ele é por dentro.
     -->
-    <div class="boot-leitura" role="status">
-      <span class="boot-linha">$ seeled 0.0.0.0:8383</span>
-      <!--
-        **As três linhas são as da comp, palavra por palavra**, e a do meio
-        nomeia o transporte.
-
-        `the_frontend_never_names_a_protocol_concept` recusava `quic` em
-        qualquer lugar da casca, e a regra que ele guarda é boa: a
-        `06-clientes-gui.md` não quer que alguém precise decifrar um rótulo para
-        resolver um problema. Ela foi escrita sobre **controles** — o que se lê
-        para agir.
-
-        Isto não é um controle. É a transcrição de um terminal, e o que ela faz
-        é dizer que o programa é o que diz ser: a porta que ele abriu, o
-        transporte que ele usa, a chave que fixa a identidade. Ninguém precisa
-        entender `quic/tls1.3` para apertar CONECTAR, e quem entende ganha a
-        confirmação de que não é enfeite. O guarda passou a cobrar a regra onde
-        ela vale — o texto de controle — e a abrir exceção para esta caixa, que
-        é a única transcrição da janela.
-      -->
-      <!--
-        **Era «porta udp aberta», e a tela não mede isso** — A12 da auditoria de
-        17/09. A frase aparecia sem hospedar, sem escuta e sem sonda: ela não
-        estava errada por acaso, estava afirmando um estado que nada nesta
-        janela apurou. Quem mede o alcance é `mostrarAlcance`, depois de
-        `hospedar` responder, e é lá que ele é dito.
-
-        O que sobra aqui é o que o produto **é**, que é o que esta caixa sempre
-        quis dizer: o transporte que ele usa.
-      -->
-      <span class="boot-linha">quic/tls1.3 · sobre udp</span>
-      <span class="boot-linha">ed25519 · impressão digital fixada na primeira visita</span>
-      <span class="boot-linha boot-linha-pronto">
-        <span>pronto.</span>
-        <span class="boot-cursor" aria-hidden="true"></span>
-      </span>
-    </div>
+    <p class="boot-proposito">Voz, vídeo e texto entre pessoas, sem servidor de
+      ninguém no meio. Entre no servidor de alguém, ou ponha o seu no ar a
+      partir desta máquina.</p>
 
     <div class="boot-saidas">
       <button id="botao-conectar" type="button" class="botao">CONECTAR</button>
       <button id="botao-hospedar" type="button" class="botao botao-secundario">HOSPEDAR AQUI</button>
     </div>
+
+    <!--
+      Os detalhes técnicos, recolhidos.
+
+      Fechado por padrão: quem veio conversar não precisa deles, e quem quer
+      conferir que o programa é o que diz ser os encontra num gesto. O
+      `<details>` é o mesmo padrão que o nome público já usa logo abaixo.
+    -->
+    <details class="boot-detalhes">
+      <summary>O que este programa é, por dentro</summary>
+      <!--
+        A leitura de boot. **Ela é verdade, e não cenário.**
+
+        Cada linha diz uma coisa que o produto de fato faz: a porta que o `seeled`
+        abre, o transporte, e a chave que fixa a identidade do servidor (ADR 0003
+        e 0004). Um terminal falso que rolasse texto inventado seria a única parte
+        desta janela que mente, e o `07-estetica.md` proíbe decoração que se
+        pareça com dado.
+
+        `aria-hidden` no cursor: ele pisca e não diz nada, e um leitor de tela
+        anunciando um quadrado a cada meio segundo é ruído.
+      -->
+      <div class="boot-leitura" role="status">
+        <span class="boot-linha">$ seeled 0.0.0.0:8383</span>
+        <!--
+          **As três linhas são as da comp, palavra por palavra**, e a do meio
+          nomeia o transporte.
+
+          `the_frontend_never_names_a_protocol_concept` recusava `quic` em
+          qualquer lugar da casca, e a regra que ele guarda é boa: a
+          `06-clientes-gui.md` não quer que alguém precise decifrar um rótulo para
+          resolver um problema. Ela foi escrita sobre **controles** — o que se lê
+          para agir.
+
+          Isto não é um controle. É a transcrição de um terminal, e o que ela faz
+          é dizer que o programa é o que diz ser: a porta que ele abriu, o
+          transporte que ele usa, a chave que fixa a identidade. Ninguém precisa
+          entender `quic/tls1.3` para apertar CONECTAR, e quem entende ganha a
+          confirmação de que não é enfeite. O guarda passou a cobrar a regra onde
+          ela vale — o texto de controle — e a abrir exceção para esta caixa, que
+          é a única transcrição da janela.
+        -->
+        <!--
+          **Era «porta udp aberta», e a tela não mede isso** — A12 da auditoria de
+          17/09. A frase aparecia sem hospedar, sem escuta e sem sonda: ela não
+          estava errada por acaso, estava afirmando um estado que nada nesta
+          janela apurou. Quem mede o alcance é `mostrarAlcance`, depois de
+          `hospedar` responder, e é lá que ele é dito.
+
+          O que sobra aqui é o que o produto **é**, que é o que esta caixa sempre
+          quis dizer: o transporte que ele usa.
+        -->
+        <span class="boot-linha">quic/tls1.3 · sobre udp</span>
+        <span class="boot-linha">ed25519 · impressão digital fixada na primeira visita</span>
+        <span class="boot-linha boot-linha-pronto">
+          <span>pronto.</span>
+          <span class="boot-cursor" aria-hidden="true"></span>
+        </span>
+      </div>
+    </details>
 
     <!--
       **Fechado por padrão, e não um campo a mais nesta tela.** Quem aperta
@@ -1570,7 +1598,7 @@
           -->
           <button id="botao-anexar" class="compor-anexar" type="button"
                   aria-label="Escolher um arquivo"
-                  title="escolher um arquivo; Ctrl+V e arrastar também anexam"
+                  title="escolher um arquivo; colar e arrastar também anexam"
                   data-glifo="anexo"></button>
           <!--
             **O botão ENVIAR voltou** — U17.
@@ -2666,6 +2694,23 @@
                 nota geral dizia o contrário, e quem lia as duas tinha de mexer
                 numa preferência para descobrir qual valia.
               -->
+              <!--
+                **A tabela diz a tecla desta plataforma** — U18.
+
+                «Atalhos dizem "como no terminal" e exibem Ctrl+V no macOS.» O
+                `CTRL+V` estava escrito na marcação, e no Mac a tecla é Cmd —
+                quem lê a tabela e tenta Ctrl+V não cola nada, e conclui que a
+                função não existe.
+
+                A linha de cima registra por que esta é a única da tabela que
+                não nomeia uma tecla que um script nosso escuta: quem a entrega
+                é o sistema, já traduzida, pelo evento `paste`. É exatamente
+                isso que faz o texto **ter de** mudar por plataforma: nós não
+                escolhemos a combinação, então não podemos escrever uma só.
+
+                Quem o reescreve é `desenharTeclaDeColar`, em `tela-server.js`,
+                a partir da plataforma que a janela conhece.
+              -->
               <p class="nota">Só a tecla de falar é trocável; as outras são fixas.</p>
             </div>
             <ul class="server-atalhos">
@@ -2699,8 +2744,15 @@
               <li class="server-atalho">
                 <span class="server-atalho-texto">
                   <span class="server-atalho-acao">Buscar no canal aberto</span>
-                  <span class="server-atalho-desc">põe o cursor na busca, como no
-                    terminal</span>
+                  <!--
+                    **«Como no terminal» saiu** — U18.
+                    Ela explicava a tecla por analogia a uma ferramenta que quem
+                    usa este app pode nunca ter aberto. Uma descrição que exige
+                    conhecer outro programa não descreve nada para quem não o
+                    conhece; a que fica diz o que a tecla faz e onde.
+                  -->
+                  <span class="server-atalho-desc">põe o cursor na busca do
+                    canal aberto, quando você não está escrevendo</span>
                 </span>
                 <kbd class="server-atalho-tecla" data-tecla="/">/</kbd>
               </li>
@@ -2718,9 +2770,15 @@
                     O que o Enter faz na busca continua escrito onde a busca
                     está, que é onde alguém com a busca aberta procura.
                   -->
-                  <span class="server-atalho-desc">o campo de compor não tem
-                    botão de enviar; com a busca aberta, anda para a próxima
-                    ocorrência</span>
+                  <!--
+                    **O botão de enviar voltou** — U17 —, e esta descrição
+                    dizia que ele não existia. Uma tabela de atalhos que afirma
+                    a ausência de um controle que está na tela é a tabela que
+                    treina a não acreditar nela.
+                  -->
+                  <span class="server-atalho-desc">o mesmo que o botão ENVIAR;
+                    Shift+Enter quebra o parágrafo. Com a busca aberta, anda
+                    para a próxima ocorrência</span>
                 </span>
                 <kbd class="server-atalho-tecla" data-tecla="Enter">ENTER</kbd>
               </li>
@@ -2745,7 +2803,7 @@
                   escutando aquele evento. Uma exceção que não é conferida é uma
                   linha que pode passar a mentir sozinha.
                 -->
-                <kbd class="server-atalho-tecla" data-evento="paste">CTRL+V</kbd>
+                <kbd id="atalho-colar" class="server-atalho-tecla" data-evento="paste">CTRL+V</kbd>
               </li>
               <li class="server-atalho">
                 <span class="server-atalho-texto">
@@ -2775,9 +2833,22 @@
         -->
         <section id="painel-aparencia" class="server-painel-secao"
                  aria-labelledby="secao-aparencia" hidden>
-          <p class="nota">O tema desta versão subiu o contraste dos rótulos e
-            das bordas: o cinza secundário media 4,11:1 sobre o painel e
-            reprovava AA em texto pequeno.</p>
+          <!--
+            **O controle primeiro, o histórico fora do fluxo** — U07 e U30.
+
+            A seção abria com «O tema desta versão subiu o contraste dos rótulos
+            e das bordas: o cinza secundário media 4,11:1 sobre o painel e
+            reprovava AA em texto pequeno». Isso é a nota de uma versão, não uma
+            configuração: quem abre APARÊNCIA quer saber o que dá para mudar, e
+            a primeira coisa que lia era uma medição de um problema já
+            consertado.
+
+            U30 diz a regra: «Controle e estado primeiro; ajuda curta; detalhes
+            sob demanda e histórico fora do fluxo.» O histórico foi para as
+            notas da versão, que é onde ele responde a pergunta de alguém.
+          -->
+          <p class="nota">O SEELE tem um tema só, e o contraste dele segue a
+            acessibilidade do sistema. O que dá para mudar aqui está abaixo.</p>
           <ul class="aparencia-lista">
             <!--
               **Não são botões, e a diferença importa.**
@@ -2806,11 +2877,28 @@
             </li>
             <li class="aparencia-cartao" data-valendo="nao">
               <span class="aparencia-nome">MAIS CONTRASTE</span>
-              <span class="nota">segue <code>prefers-contrast</code> do sistema; ligue nas
-                preferências de acessibilidade dele e esta janela acompanha</span>
+              <span class="nota">segue o que você escolheu na acessibilidade do
+                sistema; ligue lá e esta janela acompanha na hora</span>
               <span class="aparencia-estado">DESLIGADO NO SISTEMA</span>
             </li>
           </ul>
+          <!--
+            **A ação que faltava** — U07: «não oferece um controle direto
+            equivalente. → […] explicar a configuração do sistema em linguagem
+            de uso, com ação para acessá-la quando disponível».
+
+            Não é uma chave própria: uma chave no app competindo com a do
+            sistema é a receita para as duas discordarem, e `acessibilidade.css`
+            já segue `prefers-contrast`. É o caminho até onde a decisão mora —
+            o mesmo que a permissão do microfone já oferece.
+
+            Escondido onde não há destino único a abrir; quem decide é
+            `ha_ajustes_de_acessibilidade`, do lado do Rust. «Omitir o que não
+            se tem em vez de desenhá-lo morto» é a regra desta tela.
+          -->
+          <button id="aparencia-ajustes" class="botao-fantasma" type="button" hidden>
+            ABRIR A ACESSIBILIDADE DO SISTEMA
+          </button>
         </section>
 
         <section id="painel-identidade" class="server-painel-secao"
@@ -2848,6 +2936,45 @@
         -->
         <section id="painel-mods" class="server-painel-secao"
                  aria-labelledby="secao-mods" hidden>
+          <!--
+            **Quatro atividades, quatro abas** - U12 e U32.
+
+            «Gestão de MODs junta ativação, catálogo, cache, consentimentos e
+            contadores técnicos numa página longa.» Eram cinco blocos empilhados
+            numa coluna que rola, e a auditoria mediu a consequência em U32:
+            «Pacotes repetidos em instalados, catálogo e disco; hashes e
+            contadores interrompem a gestão cotidiana.» O mesmo pacote aparecia
+            três vezes na mesma rolagem, e a atividade de todo dia — achar um
+            MOD instalado e ligá-lo — passava pelas outras duas.
+
+            As abas são as que a auditoria nomeia: lista principal, descoberta,
+            armazenamento e permissões. Ativação manual, e só o painel aberto
+            montado: é o mesmo padrão APG que o renderer dos MODs usa, e pela
+            mesma razão — o catálogo vai à rede, e percorrer as abas com a seta
+            não pode disparar uma busca por tecla.
+          -->
+          <div class="mods-tiras" role="tablist" aria-label="atividades da gestão de MODs">
+            <button id="mods-aba-instalados" class="mods-aba" type="button" role="tab"
+                    data-aba="instalados" aria-controls="mods-painel-instalados"
+                    aria-selected="true"
+                    tabindex="0">INSTALADOS</button>
+            <button id="mods-aba-catalogo" class="mods-aba" type="button" role="tab"
+                    data-aba="catalogo" aria-controls="mods-painel-catalogo"
+                    aria-selected="false"
+                    tabindex="-1">CATÁLOGO</button>
+            <button id="mods-aba-armazenamento" class="mods-aba" type="button" role="tab"
+                    data-aba="armazenamento" aria-controls="mods-painel-armazenamento"
+                    aria-selected="false"
+                    tabindex="-1">ARMAZENAMENTO</button>
+            <button id="mods-aba-permissoes" class="mods-aba" type="button" role="tab"
+                    data-aba="permissoes" aria-controls="mods-painel-permissoes"
+                    aria-selected="false"
+                    tabindex="-1">PERMISSÕES</button>
+          </div>
+
+          <div id="mods-painel-instalados" class="mods-painel" role="tabpanel"
+               aria-labelledby="mods-aba-instalados" tabindex="0">
+            <p class="nota">O que está no disco e o que este servidor exige.</p>
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">MODS DESTA MÁQUINA</h3>
@@ -2928,6 +3055,10 @@
             produto que fala com a rede por ter sido aberto é um produto que
             conta a alguém que ele foi aberto.
           -->
+          </div>
+          <div id="mods-painel-catalogo" class="mods-painel" role="tabpanel"
+               aria-labelledby="mods-aba-catalogo" tabindex="0" hidden>
+            <p class="nota">O que este servidor oferece para instalar.</p>
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">CATÁLOGO</h3>
@@ -2960,6 +3091,10 @@
             quem entrasse leria «não está instalado aqui» sem que ninguém
             tivesse desligado nada. Desligar é o bloco de cima, e é outro ato.
           -->
+          </div>
+          <div id="mods-painel-armazenamento" class="mods-painel" role="tabpanel"
+               aria-labelledby="mods-aba-armazenamento" tabindex="0" hidden>
+            <p class="nota">Quanto espaço os pacotes ocupam aqui.</p>
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">ESPAÇO EM DISCO</h3>
@@ -2989,7 +3124,10 @@
               </div>
             </div>
           </div>
-
+          </div>
+          <div id="mods-painel-permissoes" class="mods-painel" role="tabpanel"
+               aria-labelledby="mods-aba-permissoes" tabindex="0" hidden>
+            <p class="nota">A quem esta máquina já disse sim.</p>
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">SERVIDORES A QUEM VOCÊ DISSE SIM</h3>
@@ -3003,6 +3141,7 @@
                   consentimento que não se retira não é consentimento.</p>
               </div>
             </div>
+          </div>
           </div>
         </section>
 

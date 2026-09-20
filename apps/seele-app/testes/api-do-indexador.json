@@ -1,6 +1,10 @@
 {
-  "api_oferecida": 3,
+  "api_oferecida": 4,
   "de": "SEELE-MODS-INDEXER/ferramentas/manifesto.py",
   "simbolo": "VERSAO_DA_API",
-  "porque": "O gerador e o cliente moram em repositorios diferentes. Este arquivo e a copia do numero que o gerador oferece, para as duas suites nao ficarem verdes enquanto discordam. Nao e assinado e nao e o catalogo publicado: o catalogo assinado continua ao lado, e continua provando o que ele representa."
+  "porque": "O gerador e o cliente moram em repositorios diferentes. Este arquivo e a copia do numero que o gerador oferece, para as duas suites nao ficarem verdes enquanto discordam. Desde a API 4 ele traz tambem o conjunto que o gerador executa: a 4 nao tirou nada da 3, entao a conferencia dos dois lados deixou de ser igualdade. Nao e assinado e nao e o catalogo publicado: o catalogo assinado continua ao lado, e continua provando o que ele representa.",
+  "apis_aceitas": [
+    4,
+    3
+  ]
 }

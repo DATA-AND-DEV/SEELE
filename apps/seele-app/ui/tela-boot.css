@@ -448,6 +448,34 @@
 /* A leitura de boot: monoespaçada, sobre o negro absoluto e dentro de um
    filete. Ela não pisca nem rola — ver a nota no `index.html` sobre por que ela
    é verdade e não cenário. */
+/* O propósito, antes de qualquer detalhe — U05.
+
+   Ele abre a coluna porque é a resposta à única pergunta que alguém que nunca
+   viu este programa tem: o que isto faz. A leitura de boot, que respondia «o
+   que isto é por dentro», desceu para um `<details>`. */
+.boot-proposito {
+  margin: 0;
+  max-width: 46ch;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.6;
+  color: var(--seele-osso);
+}
+
+/* Os detalhes técnicos, recolhidos. Sem `::marker` próprio: o triângulo do
+   navegador é o único desenho desta janela que já diz «isto abre». */
+.boot-detalhes > summary {
+  cursor: pointer;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+  padding: 4px 0;
+}
+
+.boot-detalhes > summary:hover { color: var(--seele-laranja-nerv); }
+.boot-detalhes > summary:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
+
 .boot-leitura {
   margin: 0 0 32px;
   display: flex;

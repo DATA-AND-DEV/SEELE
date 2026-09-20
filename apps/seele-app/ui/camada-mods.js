@@ -341,6 +341,36 @@ function linhaDeModInstalado(mod, hospedando) {
   texto.append(
     elemento("span", "mods-versao", `versão ${mod.version}`),
   );
+
+  // **O estado, em quatro palavras que não se confundem** — U11.
+  //
+  // «Após ativar os MODs, permanece uma mensagem "instalado, e desligado".» A
+  // frase era escrita uma vez, ao instalar, e ficava na tela enquanto a pessoa
+  // ligava o MOD ao lado dela. A auditoria pediu «mensagens derivadas do estado
+  // atual, distinguir instalado/selecionado/ativo/em execução».
+  //
+  // As quatro são quatro perguntas diferentes, e antes duas palavras
+  // respondiam as quatro:
+  //
+  // - **instalado**: os bytes estão nesta máquina;
+  // - **selecionado**: o rascunho desta tela o inclui, e o SALVAR ainda não foi;
+  // - **ativo**: o servidor o exige agora;
+  // - **em execução**: o código dele subiu nesta janela — e isso é `fase`,
+  //   logo abaixo, porque só o carregador sabe.
+  //
+  // Derivado a cada desenho, e não guardado: um estado guardado é o que fica
+  // para trás quando o de verdade muda.
+  const chave = chaveDoPacote(mod);
+  const selecionado = rascunho.has(chave);
+  const ativo = conjuntoNoServidor.has(chave);
+  texto.append(elemento(
+    "span",
+    "mods-estado",
+    ativo && selecionado ? "ATIVO NESTE SERVIDOR"
+      : selecionado ? "SELECIONADO · falta SALVAR"
+        : ativo ? "SERÁ DESLIGADO · falta SALVAR"
+          : "INSTALADO E DESLIGADO",
+  ));
   // **O que aconteceu com ele, por fase** — A06 da auditoria.
   //
   // A gestão dizia instalado e ligado, e nada mais. Tudo o que podia dar errado
@@ -905,6 +935,15 @@ async function desenharMods() {
 
   desenharRascunho(hospedando);
   desenharApresentacoes();
+  // **A frase da última instalação não sobrevive ao redesenho** — U11.
+  //
+  // Ela dizia «instalado, e desligado» e ficava na tela enquanto a pessoa
+  // ligava o MOD logo abaixo dela: uma afirmação verdadeira no instante em que
+  // foi escrita e falsa dois cliques depois. A linha de cada MOD passou a dizer
+  // o estado dele, derivado do que é verdade agora, e esta frase volta a ser o
+  // que ela é — o resultado de um ato, que dura até a tela se redesenhar.
+  if (catalogoJaRedesenhou) $("catalogo-estado").textContent = "";
+  catalogoJaRedesenhou = true;
   await desenharOCache();
   await desenharAceites();
 }
@@ -918,6 +957,17 @@ async function desenharMods() {
 // O tamanho é escrito pelo `emBytes` de `frases.js`, e não por um daqui: são
 // duas telas mostrando a mesma grandeza, e duas escadas de unidade fariam o
 // mesmo arquivo ter dois tamanhos no mesmo produto.
+
+/**
+ * A API que este aplicativo oferece, e as que ele executa.
+ *
+ * Escritas aqui e conferidas contra o Rust por `a_api_da_casca_bate_com_a_do_nucleo`
+ * em `tests/frontend.rs`: duas cópias de um número são duas cópias que
+ * discordam no dia em que só uma sobe, e esta é usada para dizer a alguém se o
+ * problema está no aplicativo ou no pacote.
+ */
+const API_DESTE_APLICATIVO = 4;
+const APIS_QUE_ESTE_APLICATIVO_ACEITA = [4,3];
 
 /** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
 async function desenharOCache() {
@@ -1010,14 +1060,38 @@ function linhaDePacoteNoCache(pacote) {
   const linha = elemento("li");
   const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
   const texto = elemento("span", "server-dispositivo-nome");
+  // **O nome, e não o hash** — U10. «MODs antigos aparecem como hashes
+  // compridos, `api-too-old`, versão vazia e 0 B. O usuário perde a identidade
+  // do pacote justamente quando precisa atualizá-lo.» O identificador vem do
+  // manifesto mesmo quando o manifesto foi recusado; só quando nem o JSON abriu
+  // é que sobra o nome da pasta, e aí ele é o que há.
   texto.append(elemento("span", "mods-id", pacote.id));
-  texto.append(
-    elemento(
-      "span",
-      "mods-versao",
-      `versão ${pacote.version} · ${emBytes(pacote.bytes)} · ${String(pacote.hash).slice(0, 12)}…`,
-    ),
-  );
+  const medidas = [
+    pacote.version ? `versão ${pacote.version}` : "versão não declarada",
+    emBytes(pacote.bytes),
+    `${String(pacote.hash).slice(0, 12)}…`,
+  ];
+  texto.append(elemento("span", "mods-versao", medidas.join(" · ")));
+
+  // **A incompatibilidade explicada, com o caminho de saída** — U10.
+  //
+  // `api-too-old` era tudo o que a tela dizia, e é um código de erro: ele não
+  // responde a pergunta que quem lê tem, que é «e agora?». A resposta depende
+  // de qual dos dois lados está para trás, e é o número da API que a decide.
+  if (pacote.recusado) {
+    const nossa = API_DESTE_APLICATIVO;
+    const dele = Number(pacote.api) || 0;
+    const explicacao = dele === 0
+      ? "o manifesto deste pacote não pôde ser lido; ele não roda e não dá "
+        + "para saber de que versão ele é"
+      : dele > nossa
+        ? `este pacote foi feito para a API ${dele}, e este SEELE oferece a `
+          + `${nossa}. Atualize o aplicativo em CONFIGURAÇÕES › ATUALIZAÇÃO.`
+        : `este pacote foi feito para a API ${dele}, que este SEELE já não `
+          + `executa (ele aceita ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}). `
+          + "Procure uma versão nova dele no catálogo do servidor.";
+    texto.append(elemento("span", "mods-recusado", explicacao));
+  }
   caixa.append(texto);
 
   // **Exigido não ganha botão morto, ganha frase.** Um botão desabilitado
@@ -1170,6 +1244,13 @@ $("mods-instalar").addEventListener("click", () => {
 
 /** O que o catálogo devolveu na última busca, para instalar sem buscar de novo. */
 let catalogoEmMaos = null;
+/**
+ * A tela já se redesenhou desde a última instalação?
+ *
+ * O resultado de uma instalação é dito e dura **um** desenho: o seguinte já
+ * tem, na linha do próprio MOD, o estado que é verdade agora.
+ */
+let catalogoJaRedesenhou = false;
 
 /** O nível de avaliação, escrito como a pessoa lê. */
 const NIVEIS = {
@@ -1320,6 +1401,7 @@ async function instalarDoCatalogo(id, versao) {
     return;
   }
   estado.textContent = resultado;
+  catalogoJaRedesenhou = false;
   await desenharMods();
 
   // **A11: o resultado da instalação não é apagado pelo estado da consulta.**
@@ -1358,3 +1440,59 @@ globalThis.addEventListener("seele-mods-estado", () => {
   if ($("tela-server").hidden) return;
   desenharMods().catch((falha) => console.warn("mods:", falha));
 });
+
+
+// ------------------------------------------------- as abas da gestão de MODs
+
+/**
+ * Quatro atividades, quatro abas — U12 e U32.
+ *
+ * «Gestão de MODs junta ativação, catálogo, cache, consentimentos e contadores
+ * técnicos numa página longa», e a consequência: «Pacotes repetidos em
+ * instalados, catálogo e disco». O mesmo pacote aparecia três vezes na mesma
+ * rolagem, e achar um MOD instalado para ligá-lo passava pelas outras duas.
+ *
+ * **Ativação manual**, como o renderer dos MODs faz e pela mesma razão: o
+ * catálogo vai à rede, e percorrer as abas com a seta não pode disparar uma
+ * busca por tecla. Seguindo o padrão de abas da WAI-ARIA APG.
+ */
+function ligarAsAbasDeMods() {
+  const tiras = document.querySelector(".mods-tiras");
+  if (!tiras || tiras.dataset.ligada === "sim") return;
+  tiras.dataset.ligada = "sim";
+
+  const botoes = () => Array.from(tiras.querySelectorAll("[role=\"tab\"]"));
+
+  const abrir = (chave) => {
+    for (const botao of botoes()) {
+      const ativa = botao.dataset.aba === chave;
+      botao.setAttribute("aria-selected", ativa ? "true" : "false");
+      // Uma parada de tabulação para o grupo, como o APG pede: Tab entra e sai
+      // das abas, e as setas percorrem por dentro.
+      botao.tabIndex = ativa ? 0 : -1;
+      const painel = $(`mods-painel-${botao.dataset.aba}`);
+      if (painel) painel.hidden = !ativa;
+    }
+  };
+
+  tiras.addEventListener("click", (evento) => {
+    const alvo = evento.target.closest?.("[data-aba]");
+    if (alvo) abrir(alvo.dataset.aba);
+  });
+
+  tiras.addEventListener("keydown", (evento) => {
+    const lista = botoes();
+    const atual = lista.indexOf(document.activeElement);
+    if (atual < 0) return;
+    const passo = evento.key === "ArrowRight" ? 1
+      : evento.key === "ArrowLeft" ? -1
+        : evento.key === "Home" ? -atual
+          : evento.key === "End" ? lista.length - 1 - atual
+            : 0;
+    if (!passo) return;
+    evento.preventDefault();
+    lista[(atual + passo + lista.length) % lista.length]?.focus();
+  });
+}
+
+ligarAsAbasDeMods();
