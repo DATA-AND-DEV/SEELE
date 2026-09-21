@@ -58,19 +58,52 @@ quadros e teto de banda — e a decisão estava certa: eram quatro perguntas ant
 de mostrar a tela. O que ela não previu é que **nenhuma** escolha também é uma
 resposta errada, porque 1080p fixo não serve a toda casa.
 
-Agora a caixa pergunta uma coisa só: **540p, 720p ou 1080p** — e a troca vale
-**durante a transmissão**, sem parar e recomeçar.
+Agora a caixa pergunta duas: **540p, 720p ou 1080p**, e **30 ou 60 quadros** —
+e as duas trocas valem **durante a transmissão**, sem parar e recomeçar. A caixa
+nasce em 720p a 60.
 
-A resolução é teto, não promessa: a escada continua adaptativa e desce sozinha
+`Cadencia` tem 8 e 15 quadros também, e eles ficam fora da lista: existem como
+piso automático, para onde a rede desce pela regra «a resolução segura, o quadro
+cede». Oferecer 8 a quem escolhe é pedir que a pessoa escolha
+«propositalmente travado».
+
+### A escolha deixou de valer só no fim
+
+Ela era **só teto**, e por isso não valia quase nada: a escada decidia o degrau
+e a escolha só podia baixá-lo. Escolher 1080p numa sessão nova entregava 540p, e
+a escada levava oito janelas de um segundo — mais, na prática — para chegar ao
+degrau pedido.
+
+Quem prendia era a perna de quem hospeda. O servidor não põe hipótese no fio, por
+desenho: sem medida nem subida declarada, o `HostUplink` vai zero, o cliente lê
+zero como ausência, e vale o padrão conservador de 2 Mbps — que dão teto de
+1200 kbps, que compram 540p.
+
+Agora, **e só quando não há número real**, esse padrão sai da resolução
+escolhida. Havendo `HostUplink` maior que zero — medido ou declarado —, ele
+manda, para mais **e** para menos: repetir um palpite por cima de uma medida
+seria insistir no que a máquina já desmentiu. O fio não mudou; o cliente supõe
+por conta própria, e ninguém promete banda que não conferiu.
+
+A resolução continua sendo teto: a escada continua adaptativa e desce sozinha
 quando o cano não compra o que foi pedido. `prioridade` continua `nitidez`, que
 foi a correção cara da volta passada e não se mexeu aqui.
 
-**O arranque passou a olhar a resolução escolhida.** Antes, a sonda começava de
-um palpite único; agora ela parte de 3, 5 ou 8 Mbps conforme 540p, 720p ou
-1080p. Com a reserva de voz de 40%, os tetos locais iniciais correspondem a 1,8,
-3 e 4,8 Mbps, antes das restrições do servidor e dos espectadores. **Uma medida
-lembrada daquele servidor prevalece sobre o palpite** — o palpite só vale quando
-não há nada medido.
+### E o piso de 1080p estava curto
+
+Os números de que a sonda parte eram 3, 5 e 8 Mbps, escritos à mão — e o de
+1080p **não comprava 1080p**: 8 Mbps dão teto de 4,8 e o limiar são 6,24. Quem
+escolhesse 1080p continuaria em 720p, sem erro nenhum a mostrar.
+
+Eles passam a derivar do próprio limiar, e viram 2,6, 4,65 e 10,4 Mbps. Os três
+compram o degrau que prometem por construção, e no dia em que um limiar mudar o
+piso o acompanha. É a armadilha que `TETO_ESTIMADO_PARA_1080P_BPS` escreve sobre
+si mesma no arquivo ao lado: *«duas constantes arredondadas em separado
+divergem; uma derivada da outra não pode.»*
+
+**Por isso o padrão da caixa passou a ser 720p.** Com o piso, o padrão deixou de
+ser preferência e virou suposição sobre a casa de quem hospeda: a 1080p ele
+suporia 10,4 Mbps de todo mundo que nunca abrisse a caixa.
 
 **Do lado do servidor, a hipótese continua em 2 Mbps** — e essa frase custou
 uma bateria reprovada para ficar de pé.
@@ -228,8 +261,9 @@ e lê imagens **em partes**, mantendo a leitura do formato antigo.
 
 | | |
 |---|---|
-| `cargo test -p seele-app --test frontend` | 237 |
+| `cargo test -p seele-app --test frontend` | 238 |
 | `cargo test -p seele-app --bin seele-app` | 108 |
+| `cargo test -p seele-core --lib` | 340 |
 | `cargo test -p seele-core --lib preview::` | 10 |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | limpo |
 | `cargo xtask` check-api, check-deps, check-versao, check-vetores | passam |
@@ -265,6 +299,13 @@ oferecer prévia.
   outro modelo é mexer no que `Session` guarda, não na casca.
 - **Uploads de MOD continuam pelo controle**, em fragmentos base64. Arquivos
   grandes custam muitas viagens.
+- **A subida declarada não está na interface.** `config.caminho_bps` já
+  atravessa o fio e já vence o piso da escolha; falta só o campo numa tela. É a
+  resposta certa para quem sabe quanto tem, e não entrou aqui porque esta volta
+  existe justamente para não perguntar Mbps a quem não sabe.
+- **O portão de admissão do servidor não foi separado da sonda.** Ele admite
+  seis cópias com a hipótese de 2 Mbps; separar os dois números fica para quando
+  alguém medir que ele atrapalha.
 - **O CI do `main` está vermelho** em `test (linux)`, `test (windows)` e
   `clippy (windows)`, e estava vermelho também no commit de onde a v0.13.0 saiu.
   O clippy do workspace passa localmente no macOS, com a linha exata do CI.
