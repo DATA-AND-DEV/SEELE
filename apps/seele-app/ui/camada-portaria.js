@@ -87,21 +87,9 @@ function comoChegou(pedido) {
 /**
  * O cartão de um pedido.
  *
- * A ordem dos elementos **é** a decisão de desenho, e está no ADR 0030. A
- * impressão digital vem primeiro e por extenso porque é a identidade: é o que
- * se confere por outro canal, e é a única coisa aqui que outra pessoa não pode
- * escolher. O apelido vem abaixo, entre aspas e apresentado como afirmação —
- * *diz chamar-se* —, nunca como título do cartão. Título é do que a pessoa é, e
- * quem bateu ainda não é nada neste Server.
- *
- * É o mesmo corte que as `NOTAS-DE-RELEASE` fazem entre «o arquivo chegou
- * inteiro» e «este arquivo é bom»: uma coisa é o que se verificou, outra é o
- * juízo sobre ela.
- *
- * O ADR 0017 já impede pedir um apelido que é de outra chave. O que ele não
- * impede, e nenhum código impede, é o parecido — `Rafae1` ao lado de `Rafael`.
- * Contra isso não há verificação, só o hábito de ler a linha de cima; e é por
- * isso que a linha de cima é a de cima.
+ * O apelido permite localizar o pedido, mas continua sendo uma afirmação
+ * («diz chamar-se»). A impressão digital completa está no bloco de conferência
+ * e na confirmação da admissão; nunca é substituída pelo nome como identidade.
  */
 function cartao(pedido, botoes) {
   const linha = elemento("li", "portaria-cartao");
@@ -115,7 +103,7 @@ function cartao(pedido, botoes) {
   // Quem bate sem escolher apelido produzia `«»`, e duas aspas coladas não são
   // um nome: são o produto anunciando uma ausência como se fosse um dado.
   //
-  // A ordem de cima continua sendo a decisão do ADR 0030 — a impressão digital
+  // A distinção do ADR 0030 continua valendo — a impressão digital
   // é o que se confere, e o apelido é afirmação de quem bateu —, e por isso a
   // ausência dele é dita e não escondida.
   const escolhido = String(pedido.apelido ?? "").trim();
@@ -143,7 +131,9 @@ function cartao(pedido, botoes) {
 
   const acoes = elemento("div", "portaria-acoes");
   acoes.append(...botoes);
-  linha.append(impressao, apelido, contexto, batida, acoes);
+  const identidade = elemento("details", "portaria-identidade");
+  identidade.append(elemento("summary", "", "Conferir impressão digital"), impressao);
+  linha.append(apelido, contexto, batida, identidade, acoes);
   return linha;
 }
 
@@ -796,9 +786,9 @@ $("porta-copiar").addEventListener("click", () => {
   copiarLink($("porta-link"), $("porta-copiar"));
 });
 
-$("porta-configuracoes").addEventListener("click", () => {
+$("porta-configuracoes").addEventListener("click", async () => {
   fecharPorta();
-  abrirServer("tela-boot");
+  await abrirServer($("tela-sessao").hidden ? "tela-boot" : "tela-sessao");
   abrirSecao("secao-porta");
 });
 

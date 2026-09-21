@@ -402,7 +402,7 @@ function mostrarAlcance(
     if (!motivo) continue;
     const detalhe = document.createElement("span");
     detalhe.className = "convite-alcance-detalhe";
-    detalhe.textContent = motivo;
+    detalhe.textContent = "\n" + motivo;
     onde.append(detalhe);
   }
 
@@ -624,6 +624,7 @@ async function abrirHospedagem() {
     console.warn("servidores:", falha);
   }
   if (guardados.length === 0) {
+    prepararVeioDaLista = false;
     await abrirPreparar();
     return;
   }
@@ -689,7 +690,10 @@ $("servidores-voltar").addEventListener("click", () => {
   voltarParaTela("tela-boot");
 });
 
+let prepararVeioDaLista = false;
+
 $("servidores-novo").addEventListener("click", () => {
+  prepararVeioDaLista = true;
   $("tela-servidores").hidden = true;
   abrirPreparar().catch((falha) => console.warn("preparar:", falha));
 });
@@ -840,8 +844,9 @@ async function abrirPreparar() {
 /** Volta para a tela de entrada sem hospedar nada. */
 function fecharPreparar() {
   $("tela-preparar").hidden = true;
-  $("tela-boot").hidden = false;
-  voltarParaTela("tela-boot");
+  const destino = prepararVeioDaLista ? "tela-servidores" : "tela-boot";
+  $(destino).hidden = false;
+  voltarParaTela(destino);
 }
 
 /** Desenha a prévia da imagem escolhida, ou a ausência dela. */

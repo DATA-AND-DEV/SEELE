@@ -149,6 +149,7 @@ async function desenharPrevia(apelido) {
   } catch (falha) {
     console.warn("meu_retrato:", falha);
   }
+  $("perfil-tirar").disabled = !imagem;
   onde.replaceChildren();
   if (imagem) {
     const figura = document.createElement("img");

@@ -244,3 +244,57 @@ vazio e o compositor corrigido. Encontrou uma contagem UTF-8 incorreta no novo
 diagnóstico do prelúdio e pequenos acabamentos de composição. A captura
 nativa foi interrompida pelo ScreenCaptureKit; o registro distingue os passos
 observados dos que ainda precisam ser repetidos.
+
+## Implementação visual pelo Codex sobre `08b3788`
+
+Os [ajustes visuais e a validação dos três MODs](ajustes-visuais-mods-2026-09-20.md)
+registram geometria quadrada, comandos do MESA por aba e correções de digitação,
+rodapé, teclado e confirmação fora da sessão. Os fluxos principais foram
+percorridos na janela macOS com dados isolados. A cópia visual usou áudio
+desligado após um bloqueio medido na abertura do CoreAudio; isso não equivale
+à homologação de voz. Código de produção e release normal conservam áudio.
+
+## Auditoria visual ampliada de todas as telas
+
+A [validação visual ampliada](validacao-visual-completa-2026-09-20.md) cobre
+entrada, hospedagem, todas as seções de Configurações, conversa, chamada,
+diálogos e os três MODs em duas casas QA. Registra 17 achados, inclusive
+páginas de MODs empilhadas, chamada escondida por página aberta, cartão longo
+cortado e resultado de dados distante da ação. A matriz distingue capturas
+nativas, navegação por acessibilidade e telas ainda pendentes após o bloqueio
+da sessão macOS. Não representa aprovação visual global.
+
+## As jornadas que faltavam, e o estado de cada uma
+
+O [registro das jornadas pendentes](jornadas-pendentes-2026-09-20.md) fecha as
+cinco linhas que a matriz da validação ampliada deixou em branco. Elas foram
+vistas numa bancada nova — `apps/seele-app/bancada/telas.cjs`, que serve `ui/`
+como está e simula a ponte do Tauri —, e **isso não é o aplicativo**: não há
+Rust, áudio nem rede do outro lado. Ela responde «esta tela, com este estado,
+cabe e é alcançável?», que é o que aquelas linhas pediam.
+
+| Item | Estado | Onde |
+|---|---|---|
+| Anexos: prévia, envio, recebimento, expirado | **Aprovado** | Bancada, 1280 e 900 |
+| Moderação: expulsar, banir, e o que cada um faz | **Aprovado** | Bancada, 1280 |
+| Fim/reconexão: queda, contagem, fim de sessão | **Aprovado** | Bancada, 1280 |
+| Janela pequena: os dois pontos de quebra | **Aprovado** | Bancada, 1240 / 1100 / 900 |
+| Faixa de pessoas sem porta abaixo de 1240 | **Corrigido** | Porta `PESSOAS`, espelho da de `CANAIS` |
+| V12 — a portaria pedia a chave antes da pessoa | **Corrigido** | «Quem está batendo» passou a abrir a camada |
+| `FORÇAR RECONEXÃO` prometia o que não cumpre | **Corrigido** | Diz o que sabe: o core já está tentando |
+| V02 — texto secundário fraco nas camadas | **Corrigido** | `--seele-rotulo-claro`, 6,82:1, pela ordem do ADR 0014 |
+| Saída da moderação abaixo da dobra em janela baixa | **Corrigido** | FECHAR grudado no pé da caixa |
+| Metade da instrução do compositor cortada | **Corrigido** | O `placeholder` cabe numa linha; a tecla fica na ajuda |
+| Miniaturas no compartilhamento | **Melhoria futura** | Nome e tipo continuam; imagem não é prometida |
+| Cancelar a conexão de verdade | **Melhoria futura** | Não existe verbo; a interface deixou de sugerir que existe |
+| Abertura de áudio sem prazo | **Melhoria futura** | `device::open` pode bloquear; caminho de tempo real, não mexido sem captura real |
+| Voz, mídia sonora e custo sob carga | **Pendente** | Exige o aplicativo normal e uma pessoa ouvindo |
+| Windows e Linux | **Pendente** | O código compila para os três; nenhum fluxo observado fora do macOS |
+
+Sobre o áudio da cópia QA: o empacotamento normal declara
+`NSMicrophoneUsageDescription` e o direito `com.apple.security.device.audio-input`,
+conferidos no bundle montado. A cópia QA foi montada com outro
+`CFBundleIdentifier` e reassinada *ad hoc* — para o macOS, um aplicativo novo,
+sem o registro de permissão do original. É a explicação mais simples para a
+ausência de captura, e não implica defeito no produto. **Não equivale a
+homologar voz.**

@@ -18,6 +18,11 @@
    não pela da janela. Um painel arrastado para 300 px numa janela de 1400
    precisa da primeira resposta. */
 .superficie-de-mod {
+  /* A camada cobre a sessão: não há varredura por cima nem faixa que desça, e
+     o rótulo miúdo sobe para o token da condição limpa — ver
+     `--seele-rotulo-claro` em `tokens.css`, com a medida escrita. */
+  --seele-osso-apagado: var(--seele-rotulo-claro);
+  --seele-rotulo-painel: var(--seele-rotulo-claro);
   container: superficie-de-mod / inline-size;
   color: var(--seele-osso);
   font-family: var(--seele-mono);

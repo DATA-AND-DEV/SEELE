@@ -339,7 +339,7 @@ function linhaDeModInstalado(mod, hospedando) {
   }
 
   texto.append(
-    elemento("span", "mods-versao", `versão ${mod.version}`),
+    elemento("span", "mods-versao", `versão ${mod.version} · revisão ${String(mod.hash || "").slice(0, 8)}`),
   );
 
   // **O estado, em quatro palavras que não se confundem** — U11.
@@ -378,7 +378,7 @@ function linhaDeModInstalado(mod, hospedando) {
   // script que não carregou — morria no console, e num aplicativo empacotado o
   // console não é lugar nenhum. Quem usava via o MOD na lista e nenhum botão
   // dele na tela, sem próximo passo.
-  const estado = estadoDosMods.get(mod.id);
+  const estado = modsExigidos.get(mod.id) === mod.hash ? estadoDosMods.get(mod.id) : null;
   if (estado) {
     const frase = FASES_DO_MOD[estado.fase];
     if (frase) {
@@ -884,6 +884,33 @@ async function salvarAlteracoes() {
 }
 
 /** Desenha as duas listas desta seção. */
+/** Mantém uma revisão por MOD à vista, sem esconder as alternativas. */
+function linhasDasRevisoes(instalados, hospedando) {
+  const abertos = new Set([...$("lista-mods").querySelectorAll("details[open][data-mod]")]
+    .map((no) => no.dataset.mod));
+  const grupos = new Map();
+  for (const mod of instalados) {
+    if (!grupos.has(mod.id)) grupos.set(mod.id, []);
+    grupos.get(mod.id).push(mod);
+  }
+  return [...grupos].flatMap(([id, revisoes]) => {
+    const prioridade = (mod) => rascunho.has(chaveDoPacote(mod)) ? 2 : mod.enabled ? 1 : 0;
+    revisoes.sort((a, b) => prioridade(b) - prioridade(a));
+    const principal = linhaDeModInstalado(revisoes[0], hospedando);
+    if (revisoes.length === 1) return [principal];
+    const item = elemento("li", "mods-revisoes");
+    const detalhes = elemento("details", "");
+    detalhes.dataset.mod = id;
+    detalhes.open = abertos.has(id);
+    const titulo = elemento("summary", "", `Outras revisões de ${revisoes[0].name || id} (${revisoes.length - 1})`);
+    const lista = elemento("ul", "mods-revisoes-lista");
+    lista.append(...revisoes.slice(1).map((mod) => linhaDeModInstalado(mod, hospedando)));
+    detalhes.append(titulo, lista);
+    item.append(detalhes);
+    return [principal, item];
+  });
+}
+
 async function desenharMods() {
   let instalados = [];
   try {
@@ -994,7 +1021,7 @@ async function desenharMods() {
   } else {
     repovoar(lista, [
       ...faltando,
-      ...instalados.map((mod) => linhaDeModInstalado(mod, hospedando)),
+      ...linhasDasRevisoes(instalados, hospedando),
     ]);
   }
 
@@ -1348,9 +1375,11 @@ function linhaDoCatalogo(mod, instalados) {
   texto.append(
     elemento("span", "mods-versao", `versão ${ultima.versao} · ${NIVEIS[ultima.nivel] ?? ultima.nivel}`),
   );
+  const alcances = elemento("div", "mods-alcances");
   for (const alcance of ultima.alcanca ?? []) {
-    texto.append(elemento("span", "mods-etiqueta", alcance));
+    alcances.append(elemento("span", "mods-etiqueta", alcance));
   }
+  texto.append(alcances);
   caixa.append(texto);
 
   // **A09 da auditoria: instalado não é a mesma coisa que igual.**
@@ -1359,7 +1388,8 @@ function linhaDoCatalogo(mod, instalados) {
   // Quem tinha uma versão diferente da que o servidor exige via JÁ INSTALADO e
   // nenhum caminho: instalar de novo era recusado, e o conserto virava apagar
   // pasta à mão.
-  const instalado = instalados.find((i) => i.id === mod.id);
+  const instalado = instalados.find(i => i.id === mod.id && i.hash === ultima.hash)
+    ?? instalados.find(i => i.id === mod.id);
   const mesmoConteudo = instalado?.hash === ultima.hash;
   if (instalado && mesmoConteudo) {
     caixa.append(elemento("span", "server-dispositivo-marca", "JÁ INSTALADO"));
@@ -1375,7 +1405,11 @@ function linhaDoCatalogo(mod, instalados) {
     }
     const botao = elemento("button", "botao-fantasma");
     botao.type = "button";
-    botao.textContent = instalado ? "ATUALIZAR" : "INSTALAR";
+    // Nomear a versão de destino evita chamar downgrade de atualização,
+    // inclusive quando versões locais não obedecem à mesma ordenação.
+    botao.textContent = instalado
+      ? (instalado.version === ultima.versao ? "REINSTALAR" : `INSTALAR ${ultima.versao}`)
+      : "INSTALAR";
     botao.addEventListener("click", () => {
       // **Desabilitado enquanto baixa** — A11. Sem isto, dois cliques começam
       // duas instalações sobre o mesmo destino.

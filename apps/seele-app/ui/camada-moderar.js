@@ -351,6 +351,7 @@ function armarAto(rotulo, consequencia, executar) {
   // deste arquivo sem ato, e o botão que ela esconde tem que voltar para a
   // próxima que tiver um. Aqui porque é por onde os atos passam — todos.
   $("moderar-confirmar").hidden = false;
+  $("moderar-fechar").hidden = true;
   $("moderar-cancelar").focus();
 }
 
@@ -362,6 +363,7 @@ function desarmarAto() {
     return;
   }
   $("moderar-confirmacao").hidden = true;
+  $("moderar-fechar").hidden = false;
   $("moderar-erro").hidden = true;
   $("moderar-escolha").hidden = false;
   if ($("moderar-vazio").hidden) $("moderar-quem").focus();
@@ -404,10 +406,12 @@ async function abrirModeracao(alvo) {
 
   focoAntesDeModerar = document.activeElement;
   alvoPreferido = alvo ?? null;
+  $("moderar-fechar").hidden = false;
   caixaComEscolha = true;
   atoArmado = null;
   $("moderar-titulo").textContent = "MODERAÇÃO";
   $("moderar-confirmacao").hidden = true;
+  $("moderar-fechar").hidden = false;
   $("moderar-escolha").hidden = false;
   $("moderar-erro").hidden = true;
   $("moderar-motivo").value = "";
@@ -467,6 +471,7 @@ function abrirRecusa(titulo, frase) {
   $("moderar-confirmacao").hidden = false;
   $("moderar-consequencia").textContent = frase;
   $("moderar-confirmar").hidden = true;
+  $("moderar-fechar").hidden = false;
   $("moderar-erro").hidden = true;
   $("moderar").hidden = false;
   $("moderar-cancelar").focus();
@@ -491,6 +496,7 @@ function fecharModeracao() {
   alvoPreferido = null;
   caixaComEscolha = false;
   $("moderar-confirmacao").hidden = true;
+  $("moderar-fechar").hidden = false;
   $("moderar-escolha").hidden = false;
   $("moderar-erro").hidden = true;
   // A mesma conferência de `voltarParaTela`: o botão que abriu esta caixa pode
@@ -524,6 +530,7 @@ function abandonarModeracao() {
   caixaComEscolha = false;
   focoAntesDeModerar = null;
   $("moderar-confirmacao").hidden = true;
+  $("moderar-fechar").hidden = false;
   $("moderar-escolha").hidden = false;
   $("moderar-erro").hidden = true;
 }

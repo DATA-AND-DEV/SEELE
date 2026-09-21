@@ -449,6 +449,9 @@ async function abrirServer(origem) {
   desenharContextoDaSessao();
   await desenharDispositivos();
   await atualizarServer();
+  // A seção lembrada precisa reler a sessão: ela pode ter aberto antes de hospedar.
+  const selecionada = document.querySelector('.server-secao[aria-current="true"]');
+  if (selecionada && !selecionada.hidden) abrirSecao(selecionada.id);
   abrirTela("tela-server");
 }
 
@@ -647,6 +650,10 @@ async function atualizarServer() {
   desenharModos(snapshot, gravado);
   desenharIdentidade(snapshot);
   desenharServidor(snapshot);
+  const grupoServidor = document.querySelector('[aria-labelledby="server-grupo-servidor"]');
+  const temDestino = Array.from(grupoServidor?.children ?? []).some(item => !item.hidden);
+  if (grupoServidor) grupoServidor.hidden = !temDestino;
+  $("server-grupo-servidor").hidden = !temDestino;
   await sincronizarIcone(snapshot);
 }
 

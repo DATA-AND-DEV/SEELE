@@ -4370,8 +4370,8 @@ async fn escolher_para_o_mod(
         dialogo = dialogo.add_filter("Aceitos por este MOD", &aceitas);
     }
     dialogo.pick_file(move |escolha| {
-            let _ = envia.try_send(escolha);
-        });
+        let _ = envia.try_send(escolha);
+    });
     // **Cancelar é uma resposta.** Quem fecha o seletor sem escolher recebe
     // `None`, e o MOD sabe que foi cancelado em vez de esperar para sempre.
     let Some(Some(escolha)) = recebe.recv().await else {

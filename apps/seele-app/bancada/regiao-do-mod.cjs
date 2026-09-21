@@ -40,6 +40,27 @@ function confere(caso, condicao, detalhe) {
 }
 const volta = () => new Promise((r) => setImmediate(r));
 
+// O resumo limpa suas propriedades ao sair; valores inválidos são recusados.
+{
+  const ctx = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(raiz, "ui/mods-estilos.js"), "utf8"), ctx);
+  const propriedades = new Map();
+  const no = { dataset: {}, style: {
+    setProperty: (chave, valor) => propriedades.set(chave, valor),
+    removeProperty: chave => propriedades.delete(chave),
+  } };
+  ctx.aplicarEstiloDeMod(no, { linhasMaximas: 2, direcao: "linha" });
+  confere("resumo", propriedades.get("display") === "-webkit-box"
+    && propriedades.get("-webkit-line-clamp") === "2", "o layout anulou o resumo");
+  ctx.aplicarEstiloDeMod(no, { cor: "#ffffff" });
+  confere("resumo removido", !propriedades.has("-webkit-line-clamp") && !propriedades.has("overflow"), "o recorte continuou após remover o estilo");
+  for (const linhas of [0, -1, 21, 1.5, "2", Infinity]) {
+    const conta = { recusados: 0 };
+    const pares = ctx.estiloDeMod({ linhasMaximas: linhas }, conta);
+    confere("resumo inválido", conta.recusados === 1 && pares.length === 0, "valor inválido não foi recusado");
+  }
+}
+
 // --------------------------------------------------------------- o DOM falso
 
 const TEXTO = 3;
@@ -69,6 +90,7 @@ class Elemento {
     this.filhos = [];
     this.pai = null;
     this.dataset = {};
+    this.atributos = new Map();
     this.className = "";
     this.style = {};
     this.ouvintes = new Map();
@@ -165,7 +187,10 @@ class Elemento {
   load() {
     this.carregou = (this.carregou ?? 0) + 1;
   }
+  setAttribute(nome, valor) { this.atributos.set(nome, String(valor)); }
+  getAttribute(nome) { return this.atributos.get(nome) ?? null; }
   removeAttribute(nome) {
+    this.atributos.delete(nome);
     if (nome === "src") this.src = undefined;
   }
   getContext() {
@@ -970,9 +995,80 @@ async function tudoChegaAInstanciaESoltarDuasVezesNaoDoi() {
   );
 }
 
+function aPreviaNaoTrocaOsAncestraisDoCampo() {
+  const b = bancada();
+  const r = new b.RegiaoDeMod("teste/perfil", dono(b).api, b.raiz());
+  const arvore = (preenchida) => [
+    { forma: "pilha", dentro: preenchida
+      ? [{ forma: "caixa", dentro: "Perfil" }, { forma: "distintivo", dentro: "Status" }]
+      : [] },
+    { forma: "formulario", chave: "perfil", dentro: [
+      { forma: "caixa", dentro: [
+        { forma: "campo", chave: "status", rotulo: "STATUS", valor: "Te" },
+      ] },
+    ] },
+  ];
+  r.aplicar(arvore(false));
+  const campo = acharTag(r.raiz, "input");
+  b.doc.activeElement = campo;
+  r.aplicar(arvore(true));
+  confere("prévia e digitação", acharTag(r.raiz, "input") === campo
+    && b.doc.activeElement === campo, "a prévia recriou o campo ou um ancestral");
+  r.soltar();
+}
+
+function oErroDoCampoAcompanhaAEdicaoSemRoubarFoco() {
+  const b = bancada(); const r = new b.RegiaoDeMod("teste/erro", dono(b).api, b.raiz());
+  const no = { forma: "campo", chave: "status", valor: "rascunho" };
+  r.aplicar([no]); const campo = acharTag(r.raiz, "input");
+  b.doc.activeElement = campo;
+  r.aplicar([{ ...no, valor: "não sobrescrever", erro: "Status: use até 60 caracteres." }]);
+  confere("erro no campo", campo.getAttribute("aria-invalid") === "true"
+    && campo.value === "rascunho" && b.doc.activeElement === campo,
+    "o erro não apareceu com foco ou sobrescreveu a edição");
+  r.aplicar([no]);
+  confere("erro no campo", !campo.getAttribute("aria-invalid"), "corrigir conservou a marca de inválido");
+  r.soltar();
+}
+
+function oRodapeEReconciliadoSemMoverOBotao() {
+  const b = bancada();
+  const d = dono(b);
+  const r = new b.RegiaoDeMod("teste/rodape", d.api, b.raiz());
+  r.rodape = b.raiz();
+  const acoes = { forma: "acoes", fixas: true, dentro: [
+    { forma: "botao", chave: "gravar", dentro: "GRAVAR" },
+  ] };
+  r.aplicar([acoes]);
+  const botao = acharTag(r.rodape, "button");
+  confere("rodapé montado", Boolean(botao) && r.raiz.children.length === 0,
+    "as ações não foram destinadas ao rodapé");
+  b.doc.activeElement = botao;
+  for (let n = 0; n < 100; n += 1) {
+    r.aplicar([{ forma: "texto", dentro: "atualização " + n }, acoes]);
+  }
+  confere("rodapé estável", acharTag(r.rodape, "button") === botao
+    && b.doc.activeElement === botao, "o botão foi trocado ou perdeu o foco");
+  confere("recursos do rodapé", r.recursos.size === 1,
+    `${r.recursos.size} recursos para um botão`);
+  botao?.disparar("click");
+  confere("clique no rodapé", d.ditos.length === 1, "o clique não chegou exatamente uma vez");
+  r.aplicar([]);
+  confere("retirar rodapé", r.recursos.size === 0 && r.rodape.hidden
+    && r.rodape.children.length === 0 && botao.ouvintesDePe() === 0,
+    "retirar as ações reteve nós ou ouvintes");
+  r.aplicar([acoes]);
+  r.soltar();
+  confere("sair com rodapé", r.recursos.size === 0 && r.rodape.children.length === 0,
+    "encerrar não soltou o rodapé");
+}
+
 (async () => {
   const provas = [
     oFocoSobreviveAAtualizacao,
+    aPreviaNaoTrocaOsAncestraisDoCampo,
+    oRodapeEReconciliadoSemMoverOBotao,
+    oErroDoCampoAcompanhaAEdicaoSemRoubarFoco,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     sairDuranteOCarregamentoNaoMonta,
@@ -995,7 +1091,7 @@ async function tudoChegaAInstanciaESoltarDuasVezesNaoDoi() {
     }
   }
   if (falhas.length === 0) {
-    console.log(`região do MOD: as ${provas.length} provas passam`);
+    console.log(`região do MOD: as ${provas.length} provas e a validação de resumo por linhas passam`);
     process.exit(0);
   }
   for (const falha of falhas) console.error(`FALHOU — ${falha}`);

@@ -627,6 +627,7 @@ function fraseDoEstado(pessoa) {
  * demais.
  */
 async function abrirChamada() {
+  mostrarDestinoNativo();
   $("vista-conversa").hidden = true;
   $("vista-chamada").hidden = false;
   // Antes do desenho, porque é ela que decide se o botão de compartilhar
@@ -644,6 +645,7 @@ async function abrirChamada() {
  * outro chama `leave_voice_room`, e a nota de cada um diz qual é qual.
  */
 function fecharChamada() {
+  mostrarDestinoNativo();
   $("vista-chamada").hidden = true;
   $("vista-conversa").hidden = false;
   // O registro não foi redesenhado enquanto esteve escondido —

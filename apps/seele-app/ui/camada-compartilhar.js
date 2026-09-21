@@ -270,6 +270,9 @@ function desenharPermissaoDeTela(permissao) {
  * erro. As três embaixo de uma lista vazia são indistinguíveis.
  */
 function desenharFontesDeTela(fontes, permissao, listou) {
+  fontes = fontes.filter(fonte => fonte.largura > 0 && fonte.altura > 0
+    && !/^(WindowManager|StatusIndicator|Control Center|Notification Center)$/i.test(fonte.nome));
+  fontes.sort((a, b) => Number(b.monitor) - Number(a.monitor) || a.nome.localeCompare(b.nome));
   const lista = $("compartilhar-fontes");
   const vazio = $("compartilhar-sem-fonte");
 

@@ -210,14 +210,16 @@
 
 .moderar-botoes {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 /* CANCELAR primeiro e em contorno, CONFIRMAR depois e sólido. A ordem é a que
    põe a saída antes da porta: quem tabula chega ao que não faz nada primeiro, e
    é onde `armarAto` também põe o foco. */
 .moderar-cancelar {
-  flex: 1;
+  flex: 0 1 auto;
   font: inherit;
   font-family: var(--seele-display);
   font-weight: var(--seele-cartela);
@@ -234,7 +236,7 @@
 .moderar-cancelar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
 
 .moderar-confirmar {
-  flex: 1;
+  flex: 0 1 auto;
   font-family: var(--seele-display);
   font-weight: 900;
   font-size: 16px;
@@ -243,14 +245,26 @@
   border: 0;
 }
 
+/* **A saída não sai de vista.** A caixa rola — `max-height` mais
+   `overflow-y` acima —, e numa janela de 620px de altura a moderação inteira
+   não cabe: FECHAR nascia abaixo da dobra, e sair dependia de rolar até o fim
+   de uma lista de atos irreversíveis. A validação de janela pequena de
+   20/09/2026 encontrou assim.
+
+   `sticky` e não um rodapé fora do rolo: a caixa é um elemento só, e parti-la
+   em corpo e rodapé mudaria a marcação de uma camada que já está certa. O
+   fundo sólido é o que impede o texto de passar por baixo dele. */
 .moderar-fechar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   width: 100%;
   font: inherit;
   font-size: 11px;
   letter-spacing: var(--seele-tracking-rotulo);
   padding: 8px;
   color: var(--seele-osso-apagado);
-  background: none;
+  background: var(--seele-negro-painel);
   border: 0;
   border-top: var(--seele-b) solid var(--seele-linha);
   cursor: pointer;

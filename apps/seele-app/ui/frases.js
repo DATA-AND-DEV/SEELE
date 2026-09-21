@@ -72,8 +72,8 @@ const MOTIVOS = {
   // mesmo instante, e o que ficou de pé é o pedido, do outro lado. Uma frase
   // que dissesse «aguarde» descreveria uma barra girando que não existe.
   AdmissionPending:
-    "QUEM HOSPEDA AINDA NÃO DECIDIU SOBRE VOCÊ.\n" +
-    "O pedido ficou guardado e não vence: tente entrar de novo mais tarde.",
+    "AGUARDANDO APROVAÇÃO DE QUEM HOSPEDA.\n" +
+    "Seu pedido está guardado no servidor.",
   // «Não foi a senha nem o convite» fica porque muda o que a pessoa faz: sem
   // ela, a primeira reação é conferir os dois, e não há nada errado com eles.
   AdmissionDenied:
@@ -599,8 +599,8 @@ const FRASES = {
     // própria casa até alguém dizer que sim nos Ajustes.
     SemResposta:
         "OS PACOTES SAÍRAM E NADA VOLTOU\n" +
-        "Quem hospeda precisa da porta 8383 UDP aberta. E o Mac de quem entra " +
-        "pede permissão de rede local, em Ajustes.",
+        "Confira o endereço e a porta UDP de quem hospeda. No Mac, confira também " +
+        "a permissão de rede local em Ajustes.",
     IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
     NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
     UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",

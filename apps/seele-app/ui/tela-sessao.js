@@ -837,10 +837,16 @@ function desenharOperador(snapshot) {
   // inteiro, não. E o `aria-label` diz a mesma coisa em palavra, para quem não
   // vê nenhum dos dois.
   const mudo = $("botao-mudo");
-  const mudoRotulo = snapshot.muted ? "MICROFONE FECHADO" : "MICROFONE ABERTO";
+  const comoAbre = {
+    PushToTalk: "microfone abre na tecla",
+    VoiceActivated: "microfone abre por voz",
+    Open: "microfone aberto",
+  }[snapshot.voice_mode] ?? "microfone disponível";
+  const estadoDoMicrofone = snapshot.muted ? "microfone mudo" : comoAbre;
+  const mudoRotulo = (estadoDoMicrofone + (!snapshot.muted && snapshot.speaking ? " · no ar" : "")).toUpperCase();
   mudo.replaceChildren(glifoComEstado("microfone", snapshot.muted, mudoRotulo));
   mudo.setAttribute("aria-label", mudoRotulo);
-  mudo.title = snapshot.muted ? "abrir o microfone" : "silenciar o microfone";
+  mudo.title = `${estadoDoMicrofone} · ${snapshot.muted ? "reativar" : "silenciar"}`;
   mudo.dataset.ativo = snapshot.muted ? "sim" : "nao";
 
   const surdo = $("botao-surdo");
@@ -878,17 +884,12 @@ function desenharOperador(snapshot) {
   //    passou a querer dizer só o terceiro caso, que é o único em que ele
   //    está aberto o tempo todo;
   // 3. **se está indo ao ar agora**, que é o que `speaking` mede.
-  const comoAbre = {
-    PushToTalk: "microfone abre na tecla",
-    VoiceActivated: "microfone abre por voz",
-    Open: "microfone aberto",
-  }[snapshot.voice_mode] ?? "microfone aberto";
   $("voz-estado").textContent = [
-    snapshot.muted ? "microfone mudo" : comoAbre,
+    estadoDoMicrofone,
     // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
     // «ninguém está falando comigo», e não «o som da tela também está calado».
     snapshot.total_isolation ? "não está ouvindo nada, nem a tela" : "ouvindo",
-    snapshot.speaking ? "no ar" : null,
+    !snapshot.muted && snapshot.speaking ? "no ar" : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -3540,6 +3541,48 @@ function alternarCanais(abrir) {
 }
 
 botaoDeCanais.addEventListener("click", () => alternarCanais());
+
+/**
+ * A porta da gaveta de pessoas.
+ *
+ * Ela nasce pelo mesmo motivo que a de canais e morre pelo mesmo: existe
+ * porque a folha recolhe a faixa de pessoas abaixo de 1240px, e a folha a
+ * esconde acima disso.
+ *
+ * **Por que ela faltava.** A ordem de recolher está escrita acima e continua
+ * certa: a faixa não é onde se trabalha. O que estava errado era a segunda
+ * metade da frase — «o que ela mostra não sai da tela com ela». A coluna de
+ * salas lista quem está **em sala**; ela não lista quem está no servidor fora
+ * delas, e não mostra o sinal por pessoa, que `specs/07` chama de elemento
+ * assinatura deste produto. Nas duas, a faixa era o único lugar.
+ */
+const botaoDePessoas = elemento("button", "linha-pessoas", "PESSOAS");
+botaoDePessoas.type = "button";
+botaoDePessoas.setAttribute("aria-expanded", "false");
+botaoDePessoas.title = "quem está aqui, e o sinal de cada um";
+document.querySelector(".linha-barra")?.append(botaoDePessoas);
+
+/** Abre ou fecha a gaveta de pessoas. Espelho de `alternarCanais`. */
+function alternarPessoas(abrir) {
+  const tela = $("tela-sessao");
+  const aberta = tela.dataset.pessoas === "abertas";
+  const querAbrir = abrir ?? !aberta;
+  if (querAbrir === aberta) return;
+  if (querAbrir) {
+    tela.dataset.pessoas = "abertas";
+    botaoDePessoas.setAttribute("aria-expanded", "true");
+    $("lista-roster").querySelector("button")?.focus();
+    return;
+  }
+  const perdido = document
+    .querySelector(".painel-pessoas")
+    ?.contains(document.activeElement);
+  delete tela.dataset.pessoas;
+  botaoDePessoas.setAttribute("aria-expanded", "false");
+  if (perdido) botaoDePessoas.focus();
+}
+
+botaoDePessoas.addEventListener("click", () => alternarPessoas());
 
 // Tocar na conversa fecha a gaveta, porque tocar na conversa é o que se faz
 // depois de escolher onde falar. `pointerdown` e não `click`: com o clique, o

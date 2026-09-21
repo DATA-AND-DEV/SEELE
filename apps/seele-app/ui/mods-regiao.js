@@ -373,6 +373,8 @@ class RegiaoDeMod {
     this.id = id;
     this.dono = dono;
     this.raiz = raiz;
+    /** Segundo destino do mesmo renderer, para ações fixas de um diálogo. */
+    this.rodape = null;
     /** Qual orçamento e quais formas valem aqui — ver `PERFIS_DE_RENDER`. */
     this.perfil = perfil;
     /**
@@ -422,12 +424,38 @@ class RegiaoDeMod {
     if (this.solta) return 0;
     this.recusados = 0;
     const orcamento = { nos: this.perfil.nos };
-    this.reconciliar(
-      this.raiz,
-      this.planejar(conteudo, 0, orcamento, this.perfil.formas),
-      0,
-      orcamento,
-    );
+    const planos = this.planejar(conteudo, 0, orcamento, this.perfil.formas);
+    const fixas = [];
+    if (this.rodape) {
+      // Separar os planos antes de montar mantém o nó no destino entre
+      // atualizações. Mover o DOM depois deixava o botão fora da árvore que
+      // o reconciliador consultava: ele criava outro e perdia foco e recursos.
+      const separar = (lista) => {
+        for (let i = 0; i < lista.length; i += 1) {
+          const plano = lista[i];
+          if (plano.forma === "acoes" && plano.no.fixas === true) {
+            if (!plano.no.chave) plano.chave = "acoes-fixas";
+            fixas.push(...lista.splice(i, 1));
+            return true;
+          }
+          if (plano.forma === "abas") {
+            const abas = plano.dentro.filter((p) => p.forma === "aba");
+            const escolhida = String(plano.no.valor ?? abas[0]?.no.chave ?? "");
+            const ativa = abas.find((p) => String(p.no.chave ?? "") === escolhida) ?? abas[0];
+            if (ativa && separar(ativa.dentro)) return true;
+          } else if (FORMAS_COM_FILHOS.has(plano.forma) && separar(plano.dentro)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      separar(planos);
+    }
+    this.reconciliar(this.raiz, planos, 0, orcamento);
+    if (this.rodape) {
+      this.reconciliar(this.rodape, fixas, 0, orcamento);
+      this.rodape.hidden = fixas.length === 0;
+    }
     return this.recusados;
   }
 
@@ -508,11 +536,13 @@ class RegiaoDeMod {
    * plano é um objeto pequeno, e um nó é layout. Recusar na montagem faria a
    * árvore de dez mil nós ser paga antes de ser negada.
    */
-  planejar(no, fundura, orcamento, permitidas = null) {
+  planejar(no, fundura, orcamento, permitidas = null, posicao = "0") {
     const teto = this.perfil.fundura;
     if (fundura > teto || no === null || no === undefined) return [];
     if (Array.isArray(no)) {
-      return no.flatMap((um) => this.planejar(um, fundura, orcamento, permitidas));
+      return no.flatMap((um, indice) => this.planejar(
+        um, fundura, orcamento, permitidas, `${posicao}.${indice}`,
+      ));
     }
     if (typeof no === "string") {
       if (orcamento.nos <= 0) { this.recusados += 1; return []; }
@@ -541,7 +571,7 @@ class RegiaoDeMod {
     // o reaproveitamento quando reordena.
     const chave = typeof no.chave === "string" && no.chave
       ? `k:${no.chave}`
-      : `p:${forma}:${orcamento.nos}`;
+      : `p:${forma}:${posicao}`;
     return [{
       forma,
       chave,
@@ -708,17 +738,7 @@ class RegiaoDeMod {
       case "grade": break;
       // **`fixas` precisa chegar ao DOM.**
       //
-      // `SuperficieDeMod.recolherAcoesFixas` procura
-      // `[data-forma="acoes"][data-fixas="sim"]` para mover o bloco ao rodapé
-      // fixo do diálogo — §3 do plano: «salvar/cancelar não podem sumir no fim
-      // de uma rolagem longa». O atributo nunca era escrito: o seletor não
-      // casava com nada, o rodapé ficava vazio e escondido, e os botões
-      // continuavam no fim do corpo, rolando junto com ele.
-      //
-      // Ninguém viu enquanto os editores couberam na tela sem rolar. Quando o
-      // espaçamento cresceu, GRAVAR saiu por baixo da dobra — e foi aí que a
-      // funcionalidade que existia no CSS e na documentação apareceu como
-      // ausente no produto.
+      // Marcador semântico; o destino é resolvido em aplicar, antes do DOM.
       case "acoes": {
         const fixas = plano.no.fixas === true ? "sim" : "nao";
         if (elem.dataset.fixas !== fixas) elem.dataset.fixas = fixas;
@@ -814,6 +834,7 @@ class RegiaoDeMod {
     if (!rotulo || !caixa) return;
     const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
     if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    this.marcarValidade(elem, caixa, plano);
     if (document.activeElement === caixa) return;
     const valor = typeof plano.no.valor === "string"
       ? plano.no.valor.slice(0, LIMITES_DA_REGIAO.valorDoCampo)
@@ -2104,6 +2125,13 @@ class RegiaoDeMod {
     if (this.solta) return;
     this.solta = true;
     for (const filho of Array.from(this.raiz.children)) this.soltarSubarvore(filho);
+    if (this.rodape) {
+      for (const filho of Array.from(this.rodape.children)) {
+        this.soltarSubarvore(filho);
+        filho.remove();
+      }
+      this.rodape.hidden = true;
+    }
     // **E os cartões**, que moram na lista do produto e não sob esta raiz. Um
     // retrato de um MOD que saiu continuaria ao lado do nome de alguém até a
     // próxima troca de servidor — e ninguém teria como tirá-lo.

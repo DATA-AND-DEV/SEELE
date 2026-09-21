@@ -2247,16 +2247,65 @@ button.linha-nome:hover { text-decoration: underline; }
    aberta, e 900px é onde ela desce disso outra vez sem ela. Não há um terceiro
    ponto porque não há uma quarta coluna para tirar. */
 
-/* A porta da gaveta não existe fora da largura em que a gaveta existe. Este é
-   o estado normal dela, e o `@media` de baixo é a exceção. */
-.linha-canais { display: none; }
+/* As portas das gavetas não existem fora da largura em que as gavetas existem.
+   Este é o estado normal delas, e os `@media` de baixo são a exceção. */
+.linha-canais,
+.linha-pessoas { display: none; }
 
 @media (max-width: 1240px) {
+  /* `relative` porque a gaveta de pessoas se posiciona contra esta caixa. */
   .paineis {
+    position: relative;
     grid-template-columns: 60px 268px minmax(0, 1fr) auto;
     grid-template-areas: "trilha canais linha painelmod";
   }
+
+  /* **A faixa de pessoas recolhe, e ganha uma porta.**
+   *
+   * A ordem de recolher está escrita acima e continua valendo. O que faltava
+   * era a porta: fechada sem controle nenhum, a faixa sumia e com ela as duas
+   * coisas que só ela mostra — quem está no servidor **fora** das salas, e o
+   * sinal por pessoa, que `specs/07` chama de elemento assinatura do produto.
+   *
+   * A coluna de salas lista quem está em cada sala, e é por isso que a faixa
+   * pode recolher primeiro; ela não lista quem não está em sala nenhuma, e não
+   * mostra sinal. A validação de janela pequena de 20/09/2026 encontrou as duas
+   * ausências sem caminho de volta. */
   .painel-pessoas { display: none; }
+
+  #tela-sessao[data-pessoas="abertas"] .painel-pessoas {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: min(320px, 100%);
+    z-index: 3;
+    /* A borda forte é o que separa a gaveta do que ela cobre. Sem sombra:
+       nenhuma superfície deste produto tem uma. */
+    border-left: 1px solid var(--seele-linha-forte);
+  }
+
+  .linha-pessoas {
+    display: flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0 12px;
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--seele-osso-apagado);
+    background: none;
+    border: 1px solid var(--seele-linha-forte);
+    cursor: pointer;
+  }
+
+  .linha-pessoas:hover,
+  .linha-pessoas[aria-expanded="true"] {
+    color: var(--seele-laranja-nerv);
+    border-color: var(--seele-laranja-nerv);
+  }
   /* A conversa passa a ser a última coluna, e a divisória dela seria uma linha
      colada na borda da janela. */
   .painel-linha { border-right: none; }

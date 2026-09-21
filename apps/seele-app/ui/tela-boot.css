@@ -403,7 +403,7 @@
    40px até a leitura vem daqui e não de um `gap` do cartão — a comp dá um
    afastamento diferente a cada junta, e um `gap` só os igualaria todos. */
 .boot-marca {
-  margin: 0 0 40px;
+  margin: 0 0 28px;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -454,7 +454,7 @@
    viu este programa tem: o que isto faz. A leitura de boot, que respondia «o
    que isto é por dentro», desceu para um `<details>`. */
 .boot-proposito {
-  margin: 0;
+  margin: 0 0 24px;
   max-width: 46ch;
   font-size: var(--seele-t-corpo);
   line-height: 1.6;

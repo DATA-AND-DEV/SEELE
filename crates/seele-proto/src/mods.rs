@@ -88,8 +88,14 @@ pub const MOD_API_MINIMA: u32 = 3;
 pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
     match api {
         4 => &[
-            "regiao", "tema", "cartoes", "arquivo",
-            "superficies", "contribuicoes", "estilos", "classes",
+            "regiao",
+            "tema",
+            "cartoes",
+            "arquivo",
+            "superficies",
+            "contribuicoes",
+            "estilos",
+            "classes",
         ],
         3 => &["regiao", "tema", "cartoes", "arquivo"],
         _ => &[],
@@ -781,10 +787,8 @@ mod tests {
     /// não há caminho de volta disso.
     #[test]
     fn a_api_que_rodava_na_janela_nao_volta() {
-        let texto = manifesto_minimo().replace(
-            &format!("\"api\": {MOD_API_VERSION}"),
-            "\"api\": 2",
-        );
+        let texto =
+            manifesto_minimo().replace(&format!("\"api\": {MOD_API_VERSION}"), "\"api\": 2");
         assert_eq!(
             read_manifest(&texto),
             Err(Refused::ApiTooOld {

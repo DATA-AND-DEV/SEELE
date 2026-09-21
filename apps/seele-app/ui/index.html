@@ -520,7 +520,7 @@
            pela recusa já foi até a pasta das fotos à toa. -->
       <p id="preparar-icone-regra" class="server-frase"></p>
       <div class="server-icone-botoes">
-        <button id="preparar-icone-escolher" class="botao" type="button">ESCOLHER IMAGEM</button>
+        <button id="preparar-icone-escolher" class="botao-fantasma" type="button">ESCOLHER IMAGEM</button>
         <button id="preparar-icone-tirar" class="botao-fantasma" type="button" hidden>TIRAR</button>
       </div>
     </div>
@@ -783,141 +783,14 @@
         -->
         <button id="bateria-forcar" class="bateria-forcar" type="button" disabled
                 title="o SEELE já está tentando sozinho, agora; não há como pedir que ele tente mais depressa">
-          FORÇAR RECONEXÃO
+          O SEELE já está tentando sozinho. Não há como pedir que ele tente
+          mais depressa.
         </button>
       </div>
     </div>
   </div>
 
-  <!--
-    A moderação — os quatro verbos da `specs/04-servidor-seele.md`.
 
-    Camada, e não tela, pela razão que vale para o alerta e para a bateria: a
-    `specs/07` não deixa esta janela trocar a conversa por outra coisa, e
-    moderar é uma decisão que se toma **olhando** para a sala. Uma tela cheia
-    apagaria quem está falando no instante em que se decide o que fazer com
-    alguém.
-
-    ---- por que uma caixa, e não três botões na linha da pessoa ----
-
-    Expulsar e banir são irreversíveis para quem sofre, e banir não tem desfazer
-    em lugar nenhum deste produto: `unban` não é verbo do protocolo. Isso decide
-    a forma — é preciso uma superfície larga o bastante para escrever a
-    consequência, com o nome de quem vai sofrê-la dentro da frase, antes de o
-    ato sair. «Tem certeza?» não é confirmação; dizer o que vai acontecer é.
-
-    ---- as duas listas são `select`, e não `ul` ----
-
-    Nada nelas é lista de leitura: são escolhas, e uma escolha é o que um
-    `select` é. Ele também resolve de graça o que o guarda
-    `every_list_the_server_fills_lives_inside_something_that_scrolls` cobra de
-    toda lista que o servidor preenche — um servidor com quarenta pessoas não estica
-    esta caixa para fora da janela, porque quem rola é o próprio controle.
-
-    ---- nenhuma cor de alarme aqui ----
-
-    `tokens.css` marca o vermelho «EXCLUSIVO alerta e queda». Moderar é sério e
-    não é queda de enlace: gastar o vermelho aqui é ensinar a lê-lo como
-    «alguma coisa importante» no dia em que ele quiser dizer que a sessão está
-    sendo segurada na memória. O acento é o laranja institucional.
-  -->
-  <div id="moderar" class="camada-moderar" role="dialog" aria-modal="true"
-       aria-labelledby="moderar-titulo" hidden>
-    <div class="moderar-caixa">
-      <div class="moderar-cabeca">
-        <!--
-          O kanji de acento (`指揮`) saiu com o resto do japonês decorativo:
-          `MODERAÇÃO` ao lado já dizia tudo o que ele dizia.
-        -->
-        <h2 id="moderar-titulo" class="moderar-titulo">MODERAÇÃO</h2>
-      </div>
-
-      <div id="moderar-escolha" class="moderar-corpo">
-        <span class="nota">O que você escolher aqui acontece na hora, sem avisar a pessoa.</span>
-
-        <!--
-          Nenhuma sala de voz com gente dentro além de você. Não é falha nem
-          permissão que falta, e por isso não é erro: é um servidor vazio. Os três verbos
-          somem inteiros em vez de ficarem apagados — não há o que explicar
-          sobre um controle cujo objeto não existe.
-        -->
-        <p id="moderar-vazio" class="moderar-vazio" hidden>
-          Não há mais ninguém em sala nenhuma deste servidor.
-        </p>
-
-        <div id="moderar-sobre" class="moderar-sobre">
-          <label class="moderar-campo">
-            <span class="rotulo">QUEM</span>
-            <select id="moderar-quem" class="moderar-select"></select>
-          </label>
-
-          <div id="moderar-acao-expulsar" class="moderar-acao">
-            <button id="moderar-expulsar" class="moderar-verbo" type="button">EXPULSAR</button>
-            <span class="nota">Encerra a sessão da pessoa agora. Ela pode entrar
-              de novo em seguida — expulsar não barra a volta.</span>
-          </div>
-
-          <div id="moderar-acao-banir" class="moderar-acao">
-            <label class="moderar-campo">
-              <span class="rotulo">ATÉ QUANDO</span>
-              <!--
-                O prazo existe aqui por um motivo e não por completude: um
-                banimento com prazo é o único que se desfaz sozinho. Não há
-                verbo de `unban` no protocolo, então «para sempre» quer dizer
-                mesmo para sempre, do lado de fora deste produto.
-              -->
-              <select id="moderar-ate" class="moderar-select">
-                <option value="">para sempre</option>
-                <option value="1">1 dia</option>
-                <option value="7">7 dias</option>
-                <option value="30">30 dias</option>
-              </select>
-            </label>
-            <label class="moderar-campo">
-              <span class="rotulo">MOTIVO</span>
-              <input id="moderar-motivo" name="motivo" maxlength="200"
-                     spellcheck="false" autocomplete="off"
-                     placeholder="opcional, e só para o seu registro">
-            </label>
-            <button id="moderar-banir" class="moderar-verbo" type="button">BANIR</button>
-            <span class="nota">Encerra a sessão e barra a volta. O motivo fica
-              com quem hospeda e nunca chega a quem foi banido.</span>
-          </div>
-
-          <div id="moderar-acao-mover" class="moderar-acao">
-            <label class="moderar-campo">
-              <span class="rotulo">MOVER PARA</span>
-              <select id="moderar-para" class="moderar-select"></select>
-            </label>
-            <button id="moderar-mover" class="moderar-verbo" type="button">MOVER</button>
-            <span class="nota">Tira a pessoa da sala de voz em que ela está e a
-              põe na escolhida. Ela continua na sessão.</span>
-          </div>
-        </div>
-      </div>
-
-      <!--
-        A confirmação, e ela é a frase — não a pergunta. O texto é escrito pelo
-        próprio ato, com o nome de quem sofre dentro, e o botão repete o verbo
-        em vez de dizer «OK»: um botão chamado OK ao lado de um parágrafo é um
-        botão que se aperta sem ler o parágrafo.
-      -->
-      <div id="moderar-confirmacao" class="moderar-confirmacao" hidden>
-        <p id="moderar-consequencia" class="moderar-consequencia"></p>
-        <!--
-          Revelado antes de escrito: `role="alert"` não anuncia o que foi
-          escrito enquanto o elemento ainda estava escondido.
-        -->
-        <p id="moderar-erro" class="erro" role="alert" hidden></p>
-        <div class="moderar-botoes">
-          <button id="moderar-cancelar" class="moderar-cancelar" type="button">CANCELAR</button>
-          <button id="moderar-confirmar" class="botao moderar-confirmar" type="button">CONFIRMAR</button>
-        </div>
-      </div>
-
-      <button id="moderar-fechar" class="moderar-fechar" type="button">FECHAR</button>
-    </div>
-  </div>
 
   <!--
     A portaria — ADR 0030.
@@ -956,6 +829,35 @@
         -->
         <p id="portaria-alarme" class="portaria-alarme" role="alert" hidden></p>
 
+        <!--
+          **Quem está batendo vem primeiro** — V12 da validação de 20/09/2026:
+          «a portaria prioriza a chave antes da pessoa».
+
+          Esta camada abre por duas razões, e só uma delas é frequente: alguém
+          bateu. A outra — trocar a senha, gerar um convite, ligar a portaria —
+          é administração, e acontece uma vez por servidor. Com as três camadas
+          no topo, a decisão que a pessoa veio tomar ficava em quarto lugar, e
+          numa janela baixa ela nascia abaixo da dobra.
+
+          A ordem inverteu; o conteúdo é o mesmo, e cada bloco continua dizendo
+          o estado dele em palavras.
+        -->
+        <!--
+          A fila e o histórico dividem **um** contêiner que rola, e não um cada.
+          `every_list_the_server_fills_lives_inside_something_that_scrolls`: nada
+          limita quantas pessoas batem, e uma lista que passa da borda do painel
+          é uma lista cujas últimas linhas deixam de existir.
+        -->
+        <div class="portaria-rolagem">
+          <h3 class="portaria-secao">QUEM ESTÁ BATENDO</h3>
+          <p id="portaria-fila-vazia" class="nota" hidden>Ninguém esperando.</p>
+          <ul id="portaria-fila" class="portaria-lista"></ul>
+
+          <h3 class="portaria-secao">JÁ DECIDIDOS</h3>
+          <p id="portaria-decididos-vazio" class="nota" hidden>Nada decidido ainda.</p>
+          <ul id="portaria-decididos" class="portaria-lista"></ul>
+        </div>
+
         <!-- As três camadas, sempre as três, e sempre em palavras. -->
         <div class="portaria-camadas">
           <div class="portaria-camada">
@@ -985,21 +887,6 @@
 
         <p id="portaria-erro" class="erro" role="alert" hidden></p>
 
-        <!--
-          A fila e o histórico dividem **um** contêiner que rola, e não um cada.
-          `every_list_the_server_fills_lives_inside_something_that_scrolls`: nada
-          limita quantas pessoas batem, e uma lista que passa da borda do painel
-          é uma lista cujas últimas linhas deixam de existir.
-        -->
-        <div class="portaria-rolagem">
-          <h3 class="portaria-secao">QUEM ESTÁ BATENDO</h3>
-          <p id="portaria-fila-vazia" class="nota" hidden>Ninguém esperando.</p>
-          <ul id="portaria-fila" class="portaria-lista"></ul>
-
-          <h3 class="portaria-secao">JÁ DECIDIDOS</h3>
-          <p id="portaria-decididos-vazio" class="nota" hidden>Nada decidido ainda.</p>
-          <ul id="portaria-decididos" class="portaria-lista"></ul>
-        </div>
       </div>
     </div>
   </div>
@@ -1330,7 +1217,7 @@
                  aria-labelledby="palco-titulo">
           <div class="chamada-palco-cabeca">
             <h2 id="palco-titulo" class="chamada-titulo">
-              <span>TELA COMPARTILHADA</span><span class="chamada-codigo">D·05</span>
+              <span>TELA COMPARTILHADA</span>
             </h2>
             <!--
               A razão, ao lado da medida, e ela é literal do §5.1 da spec:
@@ -1592,8 +1479,22 @@
               quando há mais. Um campo que cresce sem teto empurra a conversa
               para fora da tela.
             -->
+            <!--
+              **A instrução cabe numa linha, ou ela não é lida.**
+
+              Ela dizia «transmitir no canal — Enter envia, Shift+Enter quebra
+              o parágrafo». Num `rows="1"` a segunda linha do `placeholder` é
+              cortada pela altura do campo, e na largura padrão — com a faixa
+              de pessoas aberta — o texto quebrava sempre: metade da instrução
+              existia e ninguém nunca a viu.
+
+              `Shift+Enter` continua escrito onde uma tecla se procura: na
+              tabela de atalhos da configuração e na ajuda. O que fica aqui é a
+              metade que precisa ser lida **enquanto se digita**, e é a que o
+              guarda `a_nota_que_promete_o_enter_tem_quem_a_cumpra` prende.
+            -->
             <textarea id="campo-mensagem" name="mensagem" rows="1"
-                      placeholder="transmitir no canal — Enter envia, Shift+Enter quebra o parágrafo"
+                      placeholder="transmitir no canal — Enter envia"
                       maxlength="4000" autocomplete="off"></textarea>
           </span>
           <!--
@@ -2035,26 +1936,8 @@
         <div id="auth-espera" class="auth-espera">
           <p id="auth-espera-frase" class="auth-espera-frase"></p>
           <ul class="auth-espera-fatos">
-            <li>
-              O pedido não vence, e não se perde. Feche o SEELE e volte amanhã:
-              ele continua guardado no servidor, com a sua impressão digital.
-            </li>
-            <li>
-              Nada fica esperando do lado do servidor: a conexão caiu no mesmo
-              instante em que o pedido ficou de pé. Quem tenta de novo é esta
-              tela, enquanto ela estiver aberta — com o SEELE fechado, ninguém
-              vai te puxar de volta quando a decisão sair.
-            </li>
-            <li>
-              Tentar de novo é como você descobre que foi admitido, e é o que
-              esta tela faz por você. Uma tentativa por vez, no intervalo abaixo:
-              bater mais rápido é o que o servidor conta e freia, e aí você fica
-              de fora por tempo, por ter insistido.
-            </li>
-            <li>
-              Se quem hospeda estiver por perto, avisar por outro canal é mais
-              rápido do que qualquer botão desta tela.
-            </li>
+            <li>Esta tela verifica a aprovação automaticamente enquanto estiver aberta.</li>
+            <li>Seu pedido fica guardado. Você pode voltar mais tarde ou avisar quem hospeda por outro canal.</li>
           </ul>
 
           <!--
@@ -2089,8 +1972,8 @@
     </div>
 
     <!-- ---------------- B·02 ---------------- -->
-    <div class="auth-aperto">
-      <h2 class="coordenada">B·02 / APERTO DE MÃO</h2>
+    <details class="auth-aperto">
+      <summary class="coordenada">Detalhes da conexão</summary>
       <!--
         O comp traz oito linhas com carimbo de tempo, e §16 diz que nenhuma
         delas tem stream por trás. O que sobra e é verdade são os fatos que esta
@@ -2100,7 +1983,7 @@
         inventário classifica como **L**, e não um tempo que veio do servidor.
       -->
       <ol id="auth-registro" class="registro-linhas"></ol>
-    </div>
+    </details>
 
     <!-- ---------------- C·02 ---------------- -->
     <div class="auth-server">
@@ -2270,7 +2153,6 @@
         grupo sem nada embaixo é o que `desenharGruposDaConfiguracao` esconde.
       -->
       <p class="server-grupo" id="server-grupo-dispositivo">ESTE DISPOSITIVO</p>
-      <p class="server-grupo-nota nota">Valem nesta máquina, e não no servidor.</p>
       <ul class="server-secoes" aria-labelledby="server-grupo-dispositivo">
 <li>
           <button id="secao-audio" class="server-secao" type="button"
@@ -2333,7 +2215,6 @@
         </li>
       </ul>
       <p class="server-grupo" id="server-grupo-mods">MODS</p>
-      <p class="server-grupo-nota nota">O que está instalado aqui e a quem você já disse sim.</p>
       <ul class="server-secoes" aria-labelledby="server-grupo-mods">
 <li>
           <!--
@@ -2359,7 +2240,6 @@
         </li>
       </ul>
       <p class="server-grupo" id="server-grupo-servidor">ESTE SERVIDOR</p>
-      <p class="server-grupo-nota nota">Valem para todo mundo que entra nele. Só para quem administra.</p>
       <ul class="server-secoes" aria-labelledby="server-grupo-servidor">
 <li id="secao-porta-item" hidden>
           <!--
@@ -2391,7 +2271,6 @@
         </li>
       </ul>
       <p class="server-grupo" id="server-grupo-aplicativo">APLICATIVO</p>
-      <p class="server-grupo-nota nota">O SEELE em si: versão, conexão e atualização.</p>
       <ul class="server-secoes" aria-labelledby="server-grupo-aplicativo">
 <li>
           <!--
@@ -3396,17 +3275,13 @@
 
                 <div class="server-atualizacao-aviso">
                   <h4 class="rotulo">ANTES DE INSTALAR</h4>
-                  <p>O SEELE <strong>fecha e abre de novo</strong>. É assim nos
-                    três sistemas: no Windows o instalador não roda com o
-                    programa aberto, e nos outros dois a janela que ficasse de pé
-                    continuaria rodando o programa velho.</p>
-                  <p>Uma sessão aberta cai junto. E se este computador estiver
-                    <strong>hospedando um servidor nesta janela</strong>, ele cai
-                    também: todo mundo que estiver dentro sai na hora, sem aviso
-                    prévio nenhum da sua parte.</p>
-                  <p>Falhar no meio não deixa meia instalação: o pacote é
-                    conferido inteiro antes de qualquer arquivo ser tocado, e
-                    qualquer erro daqui devolve este SEELE inteiro e utilizável.</p>
+                  <p>O SEELE <strong>fecha e abre de novo</strong> para instalar a atualização.
+                    Sua sessão será encerrada. Se você estiver <strong>hospedando um servidor</strong>,
+                    todas as pessoas conectadas também sairão. Avise o grupo antes de continuar.</p>
+                  <details><summary>Como a instalação é conferida</summary>
+                    <p>O pacote é conferido antes da instalação. Se a preparação falhar,
+                      esta versão continua disponível.</p>
+                  </details>
                 </div>
 
                 <button id="atualizacao-instalar" class="botao" type="button">
@@ -3720,8 +3595,7 @@
         <span id="perfil-previa" class="perfil-previa" role="img"></span>
         <div class="perfil-imagem-texto">
           <span class="rotulo">IMAGEM</span>
-          <p class="nota">PNG, no máximo 8 KiB e 256 px. O limite está aqui
-            antes de você escolher o arquivo.</p>
+          <p class="nota">PNG · até 8 KiB · 256 px.</p>
           <div class="perfil-imagem-acoes">
             <button id="perfil-escolher" class="botao-fantasma" type="button">ESCOLHER</button>
             <button id="perfil-tirar" class="botao-fantasma" type="button">TIRAR</button>
@@ -3907,7 +3781,7 @@
 
       <!--
         O módulo de vídeo, quando ele falta.
-        
+
         Fica **acima** da lista de telas de propósito: sem ele nada do que está
         embaixo funciona, e uma pessoa que escolhe um monitor primeiro e só
         depois descobre que falta um arquivo fez uma escolha à toa.
@@ -3918,10 +3792,8 @@
       <div id="compartilhar-modulo" class="compartilhar-modulo" hidden>
         <p class="compartilhar-modulo-diz">FALTA O MÓDULO DE VÍDEO.</p>
         <p class="nota">
-          O codec que comprime a imagem não vem dentro do SEELE: a licença dele
-          não deixa. É preciso buscá-lo no site do Cisco, uma vez só — depois
-          ele fica nesta máquina e não é baixado de novo, nem quando o SEELE
-          atualizar.
+          Baixe o módulo de vídeo do Cisco para compartilhar. O download é
+          feito uma vez; o módulo permanece nesta máquina nas próximas atualizações.
         </p>
         <p id="compartilhar-modulo-onde" class="compartilhar-modulo-onde"></p>
         <button id="compartilhar-baixar" class="botao" type="button">BAIXAR O MÓDULO</button>
@@ -4032,6 +3904,140 @@
   O ciclo de vida dos MODs, separado de propósito: o executor de hoje é
   provisório, e o ADR e a sonda dizem por quê. Antes de base.js, que o usa.
 -->
+  <!--
+    A moderação — os quatro verbos da `specs/04-servidor-seele.md`.
+
+    Camada, e não tela, pela razão que vale para o alerta e para a bateria: a
+    `specs/07` não deixa esta janela trocar a conversa por outra coisa, e
+    moderar é uma decisão que se toma **olhando** para a sala. Uma tela cheia
+    apagaria quem está falando no instante em que se decide o que fazer com
+    alguém.
+
+    ---- por que uma caixa, e não três botões na linha da pessoa ----
+
+    Expulsar e banir são irreversíveis para quem sofre, e banir não tem desfazer
+    em lugar nenhum deste produto: `unban` não é verbo do protocolo. Isso decide
+    a forma — é preciso uma superfície larga o bastante para escrever a
+    consequência, com o nome de quem vai sofrê-la dentro da frase, antes de o
+    ato sair. «Tem certeza?» não é confirmação; dizer o que vai acontecer é.
+
+    ---- as duas listas são `select`, e não `ul` ----
+
+    Nada nelas é lista de leitura: são escolhas, e uma escolha é o que um
+    `select` é. Ele também resolve de graça o que o guarda
+    `every_list_the_server_fills_lives_inside_something_that_scrolls` cobra de
+    toda lista que o servidor preenche — um servidor com quarenta pessoas não estica
+    esta caixa para fora da janela, porque quem rola é o próprio controle.
+
+    ---- nenhuma cor de alarme aqui ----
+
+    `tokens.css` marca o vermelho «EXCLUSIVO alerta e queda». Moderar é sério e
+    não é queda de enlace: gastar o vermelho aqui é ensinar a lê-lo como
+    «alguma coisa importante» no dia em que ele quiser dizer que a sessão está
+    sendo segurada na memória. O acento é o laranja institucional.
+  -->
+
+
+<!-- Confirmações também são abertas nas configurações, sem sessão visível.
+     A camada é global para não herdar hidden da conversa. -->
+<div id="moderar" class="camada-moderar" role="dialog" aria-modal="true"
+       aria-labelledby="moderar-titulo" hidden>
+    <div class="moderar-caixa">
+      <div class="moderar-cabeca">
+        <!--
+          O kanji de acento (`指揮`) saiu com o resto do japonês decorativo:
+          `MODERAÇÃO` ao lado já dizia tudo o que ele dizia.
+        -->
+        <h2 id="moderar-titulo" class="moderar-titulo">MODERAÇÃO</h2>
+      </div>
+
+      <div id="moderar-escolha" class="moderar-corpo">
+        <span class="nota">O que você escolher aqui acontece na hora, sem avisar a pessoa.</span>
+
+        <!--
+          Nenhuma sala de voz com gente dentro além de você. Não é falha nem
+          permissão que falta, e por isso não é erro: é um servidor vazio. Os três verbos
+          somem inteiros em vez de ficarem apagados — não há o que explicar
+          sobre um controle cujo objeto não existe.
+        -->
+        <p id="moderar-vazio" class="moderar-vazio" hidden>
+          Não há mais ninguém em sala nenhuma deste servidor.
+        </p>
+
+        <div id="moderar-sobre" class="moderar-sobre">
+          <label class="moderar-campo">
+            <span class="rotulo">QUEM</span>
+            <select id="moderar-quem" class="moderar-select"></select>
+          </label>
+
+          <div id="moderar-acao-expulsar" class="moderar-acao">
+            <button id="moderar-expulsar" class="moderar-verbo" type="button">EXPULSAR</button>
+            <span class="nota">Encerra a sessão da pessoa agora. Ela pode entrar
+              de novo em seguida — expulsar não barra a volta.</span>
+          </div>
+
+          <div id="moderar-acao-banir" class="moderar-acao">
+            <label class="moderar-campo">
+              <span class="rotulo">ATÉ QUANDO</span>
+              <!--
+                O prazo existe aqui por um motivo e não por completude: um
+                banimento com prazo é o único que se desfaz sozinho. Não há
+                verbo de `unban` no protocolo, então «para sempre» quer dizer
+                mesmo para sempre, do lado de fora deste produto.
+              -->
+              <select id="moderar-ate" class="moderar-select">
+                <option value="">para sempre</option>
+                <option value="1">1 dia</option>
+                <option value="7">7 dias</option>
+                <option value="30">30 dias</option>
+              </select>
+            </label>
+            <label class="moderar-campo">
+              <span class="rotulo">MOTIVO</span>
+              <input id="moderar-motivo" name="motivo" maxlength="200"
+                     spellcheck="false" autocomplete="off"
+                     placeholder="opcional, e só para o seu registro">
+            </label>
+            <button id="moderar-banir" class="moderar-verbo" type="button">BANIR</button>
+            <span class="nota">Encerra a sessão e barra a volta. O motivo fica
+              com quem hospeda e nunca chega a quem foi banido.</span>
+          </div>
+
+          <div id="moderar-acao-mover" class="moderar-acao">
+            <label class="moderar-campo">
+              <span class="rotulo">MOVER PARA</span>
+              <select id="moderar-para" class="moderar-select"></select>
+            </label>
+            <button id="moderar-mover" class="moderar-verbo" type="button">MOVER</button>
+            <span class="nota">Tira a pessoa da sala de voz em que ela está e a
+              põe na escolhida. Ela continua na sessão.</span>
+          </div>
+        </div>
+      </div>
+
+      <!--
+        A confirmação, e ela é a frase — não a pergunta. O texto é escrito pelo
+        próprio ato, com o nome de quem sofre dentro, e o botão repete o verbo
+        em vez de dizer «OK»: um botão chamado OK ao lado de um parágrafo é um
+        botão que se aperta sem ler o parágrafo.
+      -->
+      <div id="moderar-confirmacao" class="moderar-confirmacao" hidden>
+        <p id="moderar-consequencia" class="moderar-consequencia"></p>
+        <!--
+          Revelado antes de escrito: `role="alert"` não anuncia o que foi
+          escrito enquanto o elemento ainda estava escondido.
+        -->
+        <p id="moderar-erro" class="erro" role="alert" hidden></p>
+        <div class="moderar-botoes">
+          <button id="moderar-cancelar" class="moderar-cancelar" type="button">CANCELAR</button>
+          <button id="moderar-confirmar" class="botao moderar-confirmar" type="button">CONFIRMAR</button>
+        </div>
+      </div>
+
+      <button id="moderar-fechar" class="moderar-fechar" type="button">FECHAR</button>
+    </div>
+  </div>
+
 <script src="mods-runtime.js"></script>
 <!--
   A gramática da região e os recursos que montá-la cria. Antes de base.js pela

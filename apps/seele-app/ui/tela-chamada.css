@@ -545,7 +545,7 @@
 .chamada-cartao-valor {
   font-family: var(--seele-display);
   font-weight: 900;
-  font-size: 26px;
+  font-size: 18px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -832,7 +832,7 @@
   margin: 0;
   font-family: var(--seele-display);
   font-weight: 900;
-  font-size: 26px;
+  font-size: 18px;
   line-height: 1.1;
   letter-spacing: 0.04em;
   color: var(--seele-laranja-nerv);

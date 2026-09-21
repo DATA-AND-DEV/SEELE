@@ -56,6 +56,23 @@
      abaixo de AA nas duas condições em que a tela de fato é vista. */
   --seele-rotulo-painel:  #908574;   /* ansi 102 · rótulo miúdo 9–10px · 5,52:1 AA */
 
+  /* O mesmo papel, uma camada acima — V02 da validação visual de 20/09/2026:
+     «texto secundário pequeno e fraco».
+
+     Numa camada que cobre a sessão — a configuração, uma superfície de MOD —
+     não há varredura por cima nem faixa que desça: as duas condições que
+     empurraram `rotulo-painel` de 4,5:1 para 5,52:1 não valem ali. O que vale é
+     a outra ponta da mesma medida: 5,52:1 é o piso de onde a cor **precisa**
+     estar, e num fundo limpo ela pode subir sem custo nenhum.
+
+     Medido: 6,99:1 sobre `negro-absoluto` e 6,82:1 sobre `negro-painel`.
+
+     Um nome novo e não um valor mais claro no de cima: subir `rotulo-painel`
+     mudaria também o rótulo sob a varredura, que é justamente onde o número
+     foi escolhido. Dois papéis parecidos em duas condições diferentes são dois
+     tokens. */
+  --seele-rotulo-claro:   #A29583;   /* ansi 144 · rótulo miúdo em camada · 6,82:1 AA */
+
   /* Preenchimento de bloco em carga — o polígono MAGI que ainda não acendeu.
      `#2B0F05`, e não `laranja-fraco #331704`: o comp v2 escureceu este valor
      (inventário do comp, §11.5) e os dois convivem no mesmo desenho. */

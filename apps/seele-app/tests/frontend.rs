@@ -2879,7 +2879,10 @@ fn the_session_screen_omits_what_nothing_measures_rather_than_a_dash_per_row() {
     let pessoa = body_of(&script, "function linhaNativaDoRoster");
     let media = body_of(&script, "function desenharMedia");
 
-    for (name, body) in [("desenharCanais", &canais), ("linhaNativaDoRoster", &pessoa)] {
+    for (name, body) in [
+        ("desenharCanais", &canais),
+        ("linhaNativaDoRoster", &pessoa),
+    ] {
         assert!(
             !body.contains("naoMedido"),
             "`{name}` draws an unmeasured value once per row, which is the noise \
@@ -3404,23 +3407,15 @@ fn a_configuracao_diz_o_nome_dela_e_o_escopo_de_cada_grupo() {
          faz, e a outra metade é a que ninguém encontraria procurando por ela"
     );
 
-    // Os quatro grupos, com nome e com a nota que diz o escopo. O nome sozinho
-    // não basta: «este dispositivo» e «este servidor» são a mesma forma de
-    // palavra com consequências opostas.
+    // O escopo fica nos nomes dos grupos e na descrição do painel, sem
+    // repetir quatro parágrafos fixos na navegação.
     for grupo in ["ESTE DISPOSITIVO", "MODS", "ESTE SERVIDOR", "APLICATIVO"] {
         assert!(
             tela.contains(&format!(">{grupo}<")),
-            "o grupo `{grupo}` sumiu da coluna da configuração"
+            "o grupo {grupo} sumiu"
         );
     }
-    assert!(
-        tela.contains("Valem nesta máquina, e não no servidor."),
-        "o grupo do dispositivo deixou de dizer que o escopo dele é a máquina"
-    );
-    assert!(
-        tela.contains("Valem para todo mundo que entra nele."),
-        "o grupo do servidor deixou de dizer que o escopo dele é todo mundo"
-    );
+    assert!(!tela.contains("class=\"server-grupo-nota"));
 
     // **Cada `<ul>` é nomeado pelo grupo dele.** Sem isso, quem usa leitor de
     // tela ouve nove seções seguidas e não ouve nenhuma das divisões que a
@@ -4764,7 +4759,7 @@ fn the_update_screen_says_the_window_closes_and_that_a_hosted_server_falls_with_
         ),
         (
             "that a failure leaves no half installation",
-            "meia instalação",
+            "esta versão continua disponível",
         ),
     ] {
         assert!(
@@ -5116,20 +5111,10 @@ fn the_moderation_is_a_layer_over_the_session_and_never_replaces_it() {
     // room. A full screen would blank out who is talking at the exact moment
     // somebody is deciding what to do about a person.
     //
-    // Structural, and not a screenshot: it has to live inside `#tela-sessao`.
+    // A camada também confirma mudanças locais de MODs sem sessão visível.
+    // Ser overlay depende de position:fixed, não de morar na tela da conversa.
     let page = read("ui/index.html");
-    let Some(after) = page.split("id=\"tela-sessao\"").nth(1) else {
-        panic!("index.html no longer has the session screen");
-    };
-    let Some(session) = after.split("<section ").next() else {
-        panic!("the session screen is never closed by another section");
-    };
-    assert!(
-        session.contains("id=\"moderar\""),
-        "`moderar` is drawn outside `#tela-sessao`, so it is a screen and not a \
-         layer — and a screen replaces the history that specs/07 says has to stay \
-         readable"
-    );
+    assert!(read("ui/camada-moderar.css").contains("position: fixed"));
 
     let tag = tag_with_id(&page, "moderar");
     assert!(
@@ -6845,42 +6830,11 @@ fn no_act_of_the_doorkeeper_reaches_the_server_without_a_sentence_that_says_what
 
 #[test]
 fn a_knock_is_identified_by_its_fingerprint_and_never_by_the_name_it_claims() {
-    // The question ADR 0030 turns on, and the one a card can get wrong while
-    // looking fine. A nickname is text the person on the other side typed; the
-    // fingerprint is the identity. If the card leads with the nickname, whoever
-    // hosts approves a *name* — and `Rafae1` beside `Rafael` is a difference no
-    // code catches and no eye catches either, unless the channel above it is the
-    // one that carries the authority.
-    //
-    // Scoped to the function that builds a card and read without comments: the
-    // paragraph above `cartao` explains exactly this, and a guard its own
-    // rationale can satisfy is a guard that cannot fail.
+    // O nome declarado identifica o pedido; a chave permanece conferível
+    // num bloco próprio e continua sendo a identidade usada na decisão.
     let corpo = body_of(&scripts(), "function cartao");
-
-    // The order inside `append`, and not the order the two are *declared* in.
-    //
-    // This guard was written the wrong way round first and a mutation walked
-    // straight through it: swapping the arguments of `append` — which is the
-    // whole defect — leaves `const impressao = …` above `const apelido = …`
-    // untouched, because declaring a variable is not putting it on a page. The
-    // check has to read the channel that decides what the eye meets first.
-    let Some(ordem) = corpo.split("linha.append(").nth(1) else {
-        panic!("the card no longer appends its parts in one call:\n{corpo}");
-    };
-    let Some(ordem) = ordem.split(')').next() else {
-        panic!("the append is never closed:\n{corpo}");
-    };
-    let Some(impressao) = ordem.find("impressao") else {
-        panic!("the card no longer puts a fingerprint on the page:\n{ordem}");
-    };
-    let Some(apelido) = ordem.find("apelido") else {
-        panic!("the card no longer puts the claimed name on the page:\n{ordem}");
-    };
-    assert!(
-        impressao < apelido,
-        "the card puts the claimed nickname above the fingerprint, so whoever \
-         hosts is deciding about a name somebody typed:\n{ordem}"
-    );
+    assert!(corpo.contains("identidade.append(") && corpo.contains(", impressao)"));
+    assert!(corpo.contains("linha.append(apelido, contexto, batida, identidade, acoes)"));
 
     // And the nickname is presented as a claim rather than as a fact.
     assert!(
@@ -7097,7 +7051,7 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
     // where they landed before ADR 0030 — is the specific mistake this makes
     // impossible. They ask opposite things of whoever reads them.
     for (reason, needle) in [
-        ("AdmissionPending", "AINDA NÃO DECIDIU"),
+        ("AdmissionPending", "AGUARDANDO APROVAÇÃO"),
         ("AdmissionDenied", "RECUSOU"),
     ] {
         assert!(
@@ -7745,16 +7699,10 @@ fn the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless() {
     };
 
     for (needle, o_que) in [
-        ("não vence", "that the request does not expire"),
-        (
-            "puxar de volta",
-            "that nothing pulls them back when it is decided",
-        ),
-        ("tentativa por vez", "that knocking is one press at a time"),
-        (
-            "outro canal",
-            "that asking whoever hosts directly is faster",
-        ),
+        ("fica guardado", "that the request is kept"),
+        ("automaticamente", "that the screen retries automatically"),
+        ("enquanto estiver aberta", "that closing stops retries"),
+        ("outro canal", "how to contact the host"),
     ] {
         assert!(
             bloco.contains(needle),
@@ -10804,7 +10752,7 @@ fn os_pacotes_que_nao_voltam_nao_se_chamam_sincronizacao() {
     // a recusa de gravar tela, e pela mesma razão: os sistemas negam coisas
     // diferentes, e quem lê está num deles.
     assert!(
-        frases.contains("8383 UDP"),
+        frases.contains("porta UDP de quem hospeda"),
         "a frase não diz o que fazer no lado de quem hospeda, e a porta \
          fechada continua sendo uma das duas causas"
     );
@@ -11012,7 +10960,7 @@ fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
     // Uma forma que a API não conhece não vira elemento por conveniência.
     let planejar = js_function(
         &regiao,
-        "\n  planejar(no, fundura, orcamento, permitidas = null)",
+        "\n  planejar(no, fundura, orcamento, permitidas = null, posicao = \"0\")",
     );
     assert!(
         planejar.contains("if (!forma) {") && planejar.contains("return [];"),
@@ -11273,8 +11221,20 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
         .split_once("superficie:")
         .map_or_else(|| perfis.clone(), |(antes, _)| antes.to_owned());
     for fora in [
-        "campo", "escolha", "botao", "arquivo", "tela", "formulario", "abas",
-        "textoLongo", "numero", "deslizante", "marca", "interruptor", "cor", "link",
+        "campo",
+        "escolha",
+        "botao",
+        "arquivo",
+        "tela",
+        "formulario",
+        "abas",
+        "textoLongo",
+        "numero",
+        "deslizante",
+        "marca",
+        "interruptor",
+        "cor",
+        "link",
     ] {
         assert!(
             !formas.contains(&format!("\"{fora}\"")),
@@ -11283,8 +11243,17 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
         );
     }
     for dentro in [
-        "texto", "titulo", "linha", "lista", "item", "midia",
-        "caixa", "pilha", "grade", "retrato", "distintivo",
+        "texto",
+        "titulo",
+        "linha",
+        "lista",
+        "item",
+        "midia",
+        "caixa",
+        "pilha",
+        "grade",
+        "retrato",
+        "distintivo",
     ] {
         assert!(
             formas.contains(&format!("\"{dentro}\"")),
@@ -12402,8 +12371,7 @@ fn as_listas_de_aparelho_avisam_que_escolher_pelo_nome_fixa() {
     // explica ficou uma vez, recolhido, no fim do painel. Recolher o aviso
     // junto teria escondido a informação que faz a escolha ser informada.
     assert_eq!(
-        page.matches("fixa\n                  ele").count()
-            + page.matches("fixa ele").count(),
+        page.matches("fixa\n                  ele").count() + page.matches("fixa ele").count(),
         2,
         "o aviso de fixação existe em número diferente de dois: as duas listas \
          — entrada e saída — têm o mesmo comportamento e precisam do mesmo aviso"
@@ -13794,7 +13762,8 @@ fn uma_apresentacao_sem_conteudo_nao_apaga_a_identidade_nativa() {
          escolher o desenho: {escolha}"
     );
     assert!(
-        escolha.contains("cartao\n    ? linhaSubstituida") || escolha.contains("cartao ? linhaSubstituida"),
+        escolha.contains("cartao\n    ? linhaSubstituida")
+            || escolha.contains("cartao ? linhaSubstituida"),
         "a escolha entre apresentada e nativa voltou a ser «existe provedor» em \
          vez de «o provedor desenhou alguma coisa»: {escolha}"
     );

@@ -340,6 +340,9 @@ function estiloDeMod(estilo, conta = null) {
       }
       case "posicao": por("position", palavraDoEstilo("posicao", valor)); break;
       case "recortar": por("overflow", palavraDoEstilo("recortar", valor)); break;
+      // Aplicado depois do layout: um resumo de texto não vira flex por
+      // causa da ordem das propriedades na declaração.
+      case "linhasMaximas": break;
       case "proporcao": {
         const n = numeroNoIntervalo(valor, { minimo: 0.1, maximo: 10 });
         por("aspect-ratio", n === null ? null : String(n));
@@ -393,6 +396,15 @@ function estiloDeMod(estilo, conta = null) {
         recusar();
         break;
     }
+  }
+  if (Object.hasOwn(estilo, "linhasMaximas")) {
+    const linhas = estilo.linhasMaximas;
+    if (Number.isInteger(linhas) && linhas >= 1 && linhas <= 20) {
+      por("display", "-webkit-box");
+      por("-webkit-box-orient", "vertical");
+      por("-webkit-line-clamp", String(linhas));
+      por("overflow", "hidden");
+    } else recusar();
   }
   return pares;
 }

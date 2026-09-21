@@ -140,7 +140,10 @@ function procurar(no, tag) {
   return null;
 }
 
+const teclados = new Set();
 const documento = {
+  addEventListener: (nome, fn) => { if (nome === "keydown") teclados.add(fn); },
+  removeEventListener: (nome, fn) => { if (nome === "keydown") teclados.delete(fn); },
   activeElement: null,
   body: procurar(documentoRaiz, "BODY"),
   getElementById: (id) => porId.get(id) ?? null,
@@ -157,6 +160,8 @@ const moderar = porId.get("moderar");
 confere("a página", Boolean(camadas), "`#palco-de-camadas` sumiu do index.html");
 confere("a página", Boolean(sessao), "`#tela-sessao` sumiu do index.html");
 confere("a página", Boolean(moderar), "`#moderar` sumiu do index.html");
+confere("confirmação sem sessão", moderar?.parentNode === documento.body,
+  "a confirmação está sob uma tela que pode estar escondida nas configurações");
 
 /**
  * **A estrutura que fez R1 passar despercebido.**
@@ -277,8 +282,8 @@ function acordarTudo(no) {
   confere("R1c · reabrir", fundo.inert === true, "reabrir acordou o fundo com o modal ainda aberto");
   confere(
     "R1c · reabrir",
-    dialogo.raiz.ouvintes === 1,
-    `reabrir registrou ${dialogo.raiz.ouvintes} ouvintes de teclado; um é o certo`,
+    teclados.size === 1,
+    `reabrir registrou ${teclados.size} ouvintes de teclado; um é o certo`,
   );
 
   S.prototype.soltarFoco.call(dialogo);
@@ -287,8 +292,33 @@ function acordarTudo(no) {
     fundo.inert === false,
     "fechar depois de reabrir deixou o fundo inerte: a aplicação fica travada sem nada na tela para explicar",
   );
-  confere("R1c · reabrir", dialogo.raiz.ouvintes === 0, "sobrou ouvinte de teclado depois de fechar");
+  confere("R1c · reabrir", teclados.size === 0, "sobrou ouvinte de teclado depois de fechar");
   dialogo.camada.remove();
+  acordarTudo(documento.body);
+}
+
+// Escape chega ao documento quando um clique no WebKit não foca o botão.
+{
+  const a = dialogoDeTeste();
+  const b = dialogoDeTeste();
+  const fechados = [];
+  a.pedirFechamento = () => fechados.push("a");
+  b.pedirFechamento = () => fechados.push("b");
+  S.prototype.prenderFoco.call(a);
+  S.prototype.prenderFoco.call(b);
+  documento.activeElement = documento.body;
+  const escape = () => {
+    const evento = { key: "Escape", defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; } };
+    for (const ouvir of teclados) ouvir(evento);
+  };
+  escape();
+  confere("Escape sem foco", fechados.join() === "b", "Escape não chegou somente ao modal do topo");
+  S.prototype.soltarFoco.call(a);
+  S.prototype.soltarFoco.call(b);
+  a.camada.remove();
+  b.camada.remove();
+  confere("Escape sem foco", teclados.size === 0, "a saída reteve o teclado global");
   acordarTudo(documento.body);
 }
 
@@ -358,6 +388,11 @@ function acordarTudo(no) {
   const intrusa = dialogoDeTeste();
   S.prototype.prenderFoco.call(intrusa);
   confere("R1b", moderar.inert === false, "uma camada nova adormeceu a confirmação que estava aberta");
+  let fechouPorTras = false;
+  intrusa.pedirFechamento = () => { fechouPorTras = true; };
+  const tecla = { key: "Escape", preventDefault() {} };
+  for (const ouvir of teclados) ouvir(tecla);
+  confere("Escape na confirmação", !fechouPorTras, "Escape fechou um MOD atrás da confirmação do produto");
   S.prototype.soltarFoco.call(intrusa);
   intrusa.camada.remove();
   confere("R1b", moderar.inert === false, "a camada intrusa saindo adormeceu a confirmação que estava aberta");
@@ -767,6 +802,45 @@ contexto.cartoesDosMods = new Map();
   }
 }
 
+// V14: duas instâncias compartilham o destino central e conservam o rascunho.
+{
+  const montar = S.prototype.montarCasca;
+  const focar = S.prototype.focarPrimeiro;
+  S.prototype.montarCasca = function () { this.raiz = new No("section"); this.corpo = new No("div"); };
+  S.prototype.focarPrimeiro = function () {};
+  const palco = porId.get("palco-de-paginas");
+  palco.querySelector = () => palco.children.find(no => !no.hidden) ?? null;
+  const donoA = new I("pagina/a", "a", 7, {});
+  const donoB = new I("pagina/b", "b", 7, {});
+  const a = new S("pagina/a", { instancia: donoA }, { id: "perfil", tipo: "pagina" }, { paginas: palco });
+  const b = new S("pagina/b", { instancia: donoB }, { id: "mesa", tipo: "pagina" }, { paginas: palco });
+  for (const pagina of [a, b]) pagina.aoPalcoMudar = () => { palco.hidden = !palco.querySelector(); };
+  a.corpo.rascunho = "não gravado";
+  a.abrir(); b.abrir();
+  confere("V14 · duas páginas", a.raiz.hidden && !b.raiz.hidden, "as páginas de MODs distintos se empilharam");
+  a.mostrar();
+  confere("V14 · reabrir", b.raiz.hidden && a.corpo.rascunho === "não gravado", "trocar página perdeu o rascunho ou deixou a anterior visível");
+  contexto.$ = id => porId.get(id);
+  contexto.atualizar = async () => {};
+  contexto.conferirPermissaoDeTela = async () => {};
+  contexto.atualizarChamada = async () => {};
+  const chamada = ler("tela-chamada.js");
+  for (const nome of ["abrirChamada", "fecharChamada"]) {
+    const inicio = chamada.indexOf(`function ${nome}(`);
+    const fim = chamada.indexOf("\n}", inicio) + 2;
+    vm.runInContext((nome === "abrirChamada" ? "async " : "") + chamada.slice(inicio, fim), contexto);
+    a.mostrar();
+    contexto[nome]();
+    confere(`V14 · ${nome}`, palco.hidden && a.raiz.hidden, "o destino nativo continuou coberto");
+  }
+  b.mostrar(); b.descartar();
+  confere("V14 · descarte", palco.hidden && a.raiz.hidden, "descartar ressuscitou uma página antiga");
+  a.descartar();
+  confere("V14 · limpeza", palco.children.length === 0 && donoA.recursos.length === 0 && donoB.recursos.length === 0, "as páginas retiveram nó ou dono");
+  S.prototype.montarCasca = montar;
+  S.prototype.focarPrimeiro = focar;
+}
+
 // ---------------------------------------------- R2 · o roteador, de verdade
 
 {
@@ -865,6 +939,6 @@ function terminar() {
     "contribuicoes-e-camadas: R1–R6 e a revisão de 26ad0c2 (reabertura, ordem "
     + "inversa, descarte com desenho, mil superfícies, cartão genérico por "
     + `destino) medidos no index.html real (#palco-de-camadas dentro de #${camadas.parentNode.id}) `
-    + "e no roteador real.",
+    + "e no roteador real; V14 mede a troca de páginas e a volta à navegação nativa.",
   );
 }

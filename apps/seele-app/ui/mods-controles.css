@@ -116,6 +116,22 @@ label.regiao-de-mod-parte {
   font-size: var(--seele-t-dado);
 }
 
+/* O menu continua nativo ao abrir; o campo fechado segue a régua do app.
+   WebKit ignora parte da geometria enquanto desenha o menu com aparência automática. */
+select.regiao-de-mod-escolha {
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 0;
+  height: 36px;
+  padding-right: 32px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--seele-rotulo-claro) 50%),
+    linear-gradient(135deg, var(--seele-rotulo-claro) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
 .regiao-de-mod-opcao { font-family: var(--seele-mono); }
 
 .regiao-de-mod-escolha:focus-visible,
@@ -366,8 +382,25 @@ button.regiao-de-mod-parte[data-forma="link"] {
    `role="switch"` é o que o leitor de tela anuncia, e a pista é a cor de
    fundo mais a posição — nunca só a cor. */
 .regiao-de-mod-marca[role="switch"] {
+  appearance: none;
   width: 32px;
-  border-radius: 999px;
+  height: 18px;
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: 0;
+  background: linear-gradient(var(--seele-osso-apagado), var(--seele-osso-apagado))
+    left 3px center / 10px 10px no-repeat var(--seele-negro-painel);
+  cursor: pointer;
+}
+
+.regiao-de-mod-marca[role="switch"]:checked {
+  border-color: var(--seele-laranja-nerv);
+  background: linear-gradient(var(--seele-laranja-nerv), var(--seele-laranja-nerv))
+    right 3px center / 10px 10px no-repeat var(--seele-negro-painel);
+}
+
+.regiao-de-mod-marca[role="switch"]:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* A amostra e o hexadecimal são um controle só, lado a lado. */
@@ -535,7 +568,7 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   gap: 4px;
   padding: 1px 6px;
   border: 1px solid var(--seele-linha-forte);
-  border-radius: 999px;
+  border-radius: 0;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
   white-space: nowrap;
@@ -552,16 +585,16 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
 /* A entrada de navegação de um MOD: o mesmo desenho de um canal, mais a origem.
    Navegação neste produto se parece com navegação; um desenho próprio a faria
    parecer outra coisa, e «outra coisa» é o que ninguém sabe apertar. */
-.entrada-de-mod { display: flex; align-items: baseline; gap: 8px; }
+.entrada-de-mod { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding-top: 10px; padding-bottom: 10px; }
 
 .entrada-de-mod-origem {
-  margin-left: auto;
+  margin-left: 0;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 45%;
+  max-width: 100%;
 }
 
 /* A linha de uma pessoa apresentada por um MOD.
@@ -580,6 +613,12 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   text-align: inherit;
   cursor: pointer;
   min-height: 34px;
+}
+
+/* O resumo é declarado pelo MOD (linhasMaximas), nunca cortado no meio
+   pelo host. O renderer limita a árvore; a lista conserva sua rolagem. */
+.pessoa-apresentada-porta .pessoa-cartao {
+  max-height: none;
 }
 
 .pessoa-apresentada-porta:focus-visible {

@@ -365,3 +365,6 @@
   gap: 8px;
   justify-content: flex-end;
 }
+
+.portaria-identidade { color: var(--seele-osso); font-size: 12px; }
+.portaria-identidade summary { cursor: pointer; padding: 8px 0; }

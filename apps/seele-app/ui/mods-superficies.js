@@ -191,6 +191,15 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
   aviso: { host: "avisos-de-mod", foco: false, camada: false },
 });
 
+// O destino central pertence ao host, mesmo quando as páginas têm donos distintos.
+// WeakMap não prolonga a vida do palco; fechar/descartar solta a página ativa.
+const paginaAtivaPorPalco = new WeakMap();
+
+function mostrarDestinoNativo() {
+  const palco = document.getElementById("palco-de-paginas");
+  paginaAtivaPorPalco.get(palco)?.ocultar();
+}
+
 /** Quantas superfícies um MOD mantém de pé ao mesmo tempo. */
 const TETO_DE_SUPERFICIES = 12;
 /** Quantos avisos cabem na fila antes de os mais velhos saírem. */
@@ -231,6 +240,8 @@ class SuperficieDeMod {
 
     this.montarCasca(descricao);
     this.renderer = new RegiaoDeMod(id, dono, this.corpo, PERFIS_DE_RENDER.superficie);
+    this.renderer.rodape = this.rodape ?? null;
+    if (this.rodape) this.rodape.dataset.escopoDeMod = this.renderer.escopo;
     // Registrada **na criação**: uma superfície criada e não registrada é uma
     // janela que a saída não encontra.
     //
@@ -343,8 +354,14 @@ class SuperficieDeMod {
     if (!alvo) return;
     const no = this.tipo === "dialogo" ? this.camada : this.raiz;
     if (no.parentNode !== alvo) alvo.append(no);
+    if (this.tipo === "pagina" && this.visivel) {
+      const anterior = paginaAtivaPorPalco.get(alvo);
+      if (anterior && anterior !== this) anterior.ocultar();
+      paginaAtivaPorPalco.set(alvo, this);
+    }
     alvo.hidden = false;
     this.aplicarVisibilidade();
+    this.aoPalcoMudar?.();
 
     if (this.tipo === "dialogo" && this.modal) this.prenderFoco();
     else if (this.tipo === "pagina") this.focarPrimeiro();
@@ -376,6 +393,8 @@ class SuperficieDeMod {
     }
 
     this.aoTeclar = (evento) => {
+      if (evento.defaultPrevented || pilhaDeCamadas.at(-1) !== this.camada
+        || acordadosPorPedido.size) return;
       if (evento.key === "Escape") {
         evento.preventDefault();
         this.pedirFechamento("escape");
@@ -386,7 +405,10 @@ class SuperficieDeMod {
       if (!focaveis.length) return;
       const primeiro = focaveis[0];
       const ultimo = focaveis[focaveis.length - 1];
-      if (evento.shiftKey && document.activeElement === primeiro) {
+      if (!this.raiz.contains(document.activeElement)) {
+        evento.preventDefault();
+        (evento.shiftKey ? ultimo : primeiro).focus();
+      } else if (evento.shiftKey && document.activeElement === primeiro) {
         evento.preventDefault();
         ultimo.focus();
       } else if (!evento.shiftKey && document.activeElement === ultimo) {
@@ -394,7 +416,9 @@ class SuperficieDeMod {
         primeiro.focus();
       }
     };
-    this.raiz.addEventListener("keydown", this.aoTeclar);
+    // No WebKit, clicar num botão pode deixar o foco no documento. O teclado
+    // pertence à camada do topo, mesmo sem um descendente focado.
+    document.addEventListener("keydown", this.aoTeclar);
     this.focarPrimeiro();
   }
 
@@ -424,41 +448,20 @@ class SuperficieDeMod {
     // `requestAnimationFrame` porque o nó acabou de entrar no documento e ainda
     // pode não ter layout — e sem layout `focus()` não faz nada.
     requestAnimationFrame(() => {
-      if (!this.solta) destino?.focus?.();
+      if (!this.solta && this.visivel && this.montada) destino?.focus?.();
     });
   }
 
   /** O que o MOD declarou, montado aqui dentro. */
   montar(conteudo) {
     if (this.solta) return 0;
-    let recusados = this.renderer.aplicar(conteudo);
-    // O rodapé fixo do diálogo: o que o MOD pôr em `acoes` com `fixas: true`
-    // sobe para cá, porque salvar/cancelar não podem sumir numa rolagem longa.
-    if (this.rodape) recusados += this.recolherAcoesFixas();
+    const tinhaFoco = this.raiz.contains?.(document.activeElement);
+    const recusados = this.renderer.aplicar(conteudo);
+    // Salvar pode desabilitar o botão focado. O navegador então deixa o foco
+    // no documento; devolver à superfície mantém Tab e Escape operantes.
+    if (tinhaFoco && (!this.raiz.contains(document.activeElement)
+      || document.activeElement?.disabled)) this.focarPrimeiro();
     return recusados;
-  }
-
-  /**
-   * Move para o rodapé as ações que o MOD declarou como fixas.
-   *
-   * Move o **nó já montado**, em vez de montá-lo duas vezes: montar de novo
-   * criaria um segundo botão com os mesmos ouvintes, e o clique chegaria ao
-   * MOD duas vezes.
-   */
-  recolherAcoesFixas() {
-    const fixas = this.corpo.querySelector("[data-forma=\"acoes\"][data-fixas=\"sim\"]");
-    if (!fixas) {
-      if (!this.rodape.hidden) {
-        this.rodape.replaceChildren();
-        this.rodape.hidden = true;
-      }
-      return 0;
-    }
-    if (fixas.parentNode !== this.rodape) {
-      this.rodape.replaceChildren(fixas);
-      this.rodape.hidden = false;
-    }
-    return 0;
   }
 
   /** As classes que esta superfície oferece aos nós dela. */
@@ -516,8 +519,10 @@ class SuperficieDeMod {
   ocultar() {
     if (this.solta) return;
     this.visivel = false;
+    this.liberarDestino();
     this.soltarFoco();
     this.aplicarVisibilidade();
+    this.aoPalcoMudar?.();
   }
 
   /**
@@ -602,10 +607,18 @@ class SuperficieDeMod {
   fechar() {
     if (this.solta) return;
     this.visivel = false;
+    this.liberarDestino();
     this.soltarFoco();
     const no = this.tipo === "dialogo" ? this.camada : this.raiz;
     no.remove();
     this.aoPalcoMudar?.();
+  }
+
+  liberarDestino() {
+    const palco = this.palcos.paginas;
+    if (palco && paginaAtivaPorPalco.get(palco) === this) {
+      paginaAtivaPorPalco.delete(palco);
+    }
   }
 
   /** Ela está no documento agora? É o que separa fechada de oculta. */
@@ -622,7 +635,7 @@ class SuperficieDeMod {
     // tira A do meio e recalcula para B, que continua aberta.
     desempilharCamada(this.camada);
     if (this.aoTeclar) {
-      this.raiz.removeEventListener("keydown", this.aoTeclar);
+      document.removeEventListener("keydown", this.aoTeclar);
       this.aoTeclar = null;
     }
     // **O foco volta ao acionador, ou a um destino válido.** Devolvê-lo a um
@@ -645,6 +658,7 @@ class SuperficieDeMod {
   descartar() {
     if (this.solta) return;
     this.solta = true;
+    this.liberarDestino();
     // **Esquecida, e não descartada de novo.** Quem está descartando somos
     // nós; pedir o descarte de volta daria uma volta que pararia na guarda
     // acima, e uma recursão que só não é infinita por causa da ordem destas

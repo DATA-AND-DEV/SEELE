@@ -30,22 +30,24 @@
 .nomear-caixa {
   position: relative;
   width: 100%;
-  max-width: 420px;
+  max-width: 480px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-linha-forte);
 }
 
 .nomear-cabeca {
-  padding: 8px 16px;
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso);
 }
 
 .nomear-titulo {
   margin: 0;
   font-family: var(--seele-display);
   font-weight: 900;
-  font-size: 15px;
+  font-size: 24px;
   letter-spacing: 0.08em;
 }
 
@@ -59,7 +61,7 @@
 .nomear-campo {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .nomear-campo input { width: 100%; }
@@ -75,7 +77,7 @@
 
 .nomear-acoes {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   justify-content: flex-end;
 }
 
@@ -149,7 +151,7 @@
 .perfil-imagem-texto {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 

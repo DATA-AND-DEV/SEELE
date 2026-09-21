@@ -18,6 +18,11 @@
    A voz e a conexão continuam de pé atrás dela — é a mesma camada, com o mesmo
    `z-index` —, e a faixa de contexto no cabeçalho diz isso em palavra. */
 .camada-server {
+  /* A camada cobre a sessão: não há varredura por cima nem faixa que desça, e
+     o rótulo miúdo sobe para o token da condição limpa — ver
+     `--seele-rotulo-claro` em `tokens.css`, com a medida escrita. */
+  --seele-osso-apagado: var(--seele-rotulo-claro);
+  --seele-rotulo-painel: var(--seele-rotulo-claro);
   position: fixed;
   inset: 0;
   z-index: 24;
@@ -201,9 +206,8 @@
 
 /* Os grupos da coluna — U31.
 
-   Cabeçalho e nota, e não só cabeçalho: «este dispositivo» e «este servidor»
-   são a mesma forma de palavra com consequências opostas, e a nota é onde a
-   diferença cabe sem virar um parágrafo dentro de cada seção. */
+   Os cabeçalhos separam dispositivo, MODs, servidor e aplicativo. A explicação
+   de cada escolha fica no painel correspondente, sem repetir notas na navegação. */
 /* Os grupos, com a régua apertada depois da validação nativa de 20/09/2026.
 
    Quatro grupos com título, nota e seções de 56px faziam `ESTE SERVIDOR` cair
@@ -220,7 +224,7 @@
   color: var(--seele-laranja-nerv);
 }
 
-.server-grupo-nota { padding: 0 16px 6px; font-size: var(--seele-t-micro); }
+
 
 /* A porta de saída, no cabeçalho persistente — U33.
 
@@ -238,9 +242,9 @@
   font-size: 12px;
   letter-spacing: 0.1em;
   text-align: left;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha);
+  color: var(--seele-osso);
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha-forte);
   cursor: pointer;
 }
 
@@ -509,7 +513,7 @@
 }
 
 .server-modo-desc {
-  font-size: var(--seele-t-micro);
+  font-size: 12px;
   line-height: 1.35;
   color: var(--seele-osso-apagado);
 }
@@ -554,7 +558,7 @@
 .server-atalho-acao { font-size: var(--seele-t-dado); }
 
 .server-atalho-desc {
-  font-size: var(--seele-t-micro);
+  font-size: 12px;
   line-height: 1.35;
   color: var(--seele-osso-apagado);
 }

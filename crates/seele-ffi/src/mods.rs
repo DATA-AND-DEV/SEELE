@@ -20,9 +20,7 @@ use seele_core::mods::{hex, refusal_name, Found};
 /// número custa já está registrado em
 /// `crates/seele-conformance/tests/a_api_dos_mods_nao_diverge.rs`: a primeira
 /// divergência só apareceu no primeiro MOD de verdade.
-pub use seele_core::mods::{
-    capacidades_da_api, APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION,
-};
+pub use seele_core::mods::{capacidades_da_api, APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION};
 
 /// Ler um arquivo de mídia de um MOD — ver [`seele_core::mods::ler_midia`].
 ///
@@ -249,7 +247,11 @@ fn achatar(found: Found) -> ModInstalado {
         // de ser é total para **descrever**: quem vai decidir entre apagar e
         // atualizar precisa do nome e da versão, e o nome da pasta é um hash.
         Found::Refused { id, why, diz_ser } => ModInstalado {
-            id: if diz_ser.id.is_empty() { id } else { diz_ser.id },
+            id: if diz_ser.id.is_empty() {
+                id
+            } else {
+                diz_ser.id
+            },
             version: diz_ser.version,
             // A API que ele **pede**, e não a que este build oferece. É o
             // número que diz se atualizar o aplicativo resolve, ou se é o
