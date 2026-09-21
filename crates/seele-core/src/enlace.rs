@@ -4337,7 +4337,7 @@ impl Motor {
             origem,
         } = *pedido;
         let arranjo = crate::bomba::Arranjo {
-            teto: self.teto_de_video(limites.banda_bps),
+            teto: self.teto_de_video(Some(&limites)),
             faixa: self.faixa,
             escolha_de_resolucao: limites.resolucao,
             cadencia: limites.cadencia,
@@ -4372,13 +4372,35 @@ impl Motor {
     /// assumido para sempre. Enquanto a sonda não mediu nada, ela devolve
     /// exatamente aquela suposição, então a primeira transmissão de uma sessão
     /// abre com o mesmo teto de antes.
-    fn teto_de_video(&self, escolha_bps: Option<u32>) -> crate::tela::TetoDeVideo {
+    fn teto_de_video(
+        &self,
+        limites: Option<&crate::video::LimitesDeTela>,
+    ) -> crate::tela::TetoDeVideo {
         let mut teto = crate::tela::TetoDeVideo::com_caminho(self.caminho.estimativa());
-        if let Some(medido) = self.caminho_de_quem_hospeda_bps {
-            teto = teto.com_caminho_de_quem_hospeda(medido);
+        // **A escolha é piso enquanto ninguém mediu, e teto sempre.**
+        //
+        // `caminho_de_quem_hospeda_bps` é `Some` só quando o `HostUplink` veio
+        // maior que zero — medido ou declarado, porque `caminho_no_fio` não põe
+        // hipótese no fio. Havendo número real, ele manda, para mais **e** para
+        // menos: repetir o palpite por cima de uma medida seria insistir no que
+        // a máquina já desmentiu.
+        //
+        // Não havendo, o padrão deixa de ser `CAMINHO_DA_PROVA_BPS` e passa a
+        // sair da resolução escolhida. Sem isto a primeira transmissão de uma
+        // sessão abre em 540p qualquer que seja a escolha — o teto fica em
+        // 1200 kbps porque **esta** perna o prende —, e a escolha só começa a
+        // valer oito janelas depois, quando a escada alcança o degrau.
+        //
+        // Fora de uma transmissão não há escolha, e aí a suposição volta: não
+        // há resolução pedida de que derivar coisa nenhuma.
+        let hospeda = self
+            .caminho_de_quem_hospeda_bps
+            .or_else(|| limites.map(crate::video::LimitesDeTela::caminho_inicial_bps));
+        if let Some(bps) = hospeda {
+            teto = teto.com_caminho_de_quem_hospeda(bps);
         }
         teto.com_espectadores(self.espectadores)
-            .com_escolha(escolha_bps)
+            .com_escolha(limites.and_then(|limites| limites.banda_bps))
     }
 
     /// Uma leitura do transporte para a sonda, e a ordem para a bomba quando a
@@ -4398,7 +4420,7 @@ impl Motor {
         };
         let amostra = crate::caminho::Amostra {
             transporte: cliente.amostra_do_transporte(),
-            teto: self.teto_de_video(viva.limites.banda_bps).teto(self.faixa),
+            teto: self.teto_de_video(Some(&viva.limites)).teto(self.faixa),
             faixa: self.faixa,
         };
         if self.caminho.observar(Instant::now(), &amostra).is_some() {
@@ -4422,7 +4444,7 @@ impl Motor {
         let Some(viva) = self.tela_viva.as_ref() else {
             return;
         };
-        let teto = self.teto_de_video(viva.limites.banda_bps);
+        let teto = self.teto_de_video(Some(&viva.limites));
         let _ = viva.bomba.teto(teto, self.faixa);
     }
 
@@ -6228,6 +6250,95 @@ mod tests {
         assert_eq!(
             motor.teto_de_video(None).teto(SignalBand::Nominal),
             crate::tela::Teto::Bps(1_200_000)
+        );
+    }
+
+    /// **Sem `HostUplink`, a perna do hospedeiro sai da escolha.**
+    ///
+    /// É o pedido inteiro: escolher 1080p e não esperar a escada subir de
+    /// 2 Mbps em oito janelas.
+    #[test]
+    fn sem_host_uplink_a_perna_do_hospedeiro_sai_da_escolha() {
+        use crate::tela::Teto;
+        use crate::video::LimitesDeTela;
+        use seele_video::codec::Resolucao;
+
+        let mut motor = motor_de_teste();
+        // A perna de quem compartilha sai da frente, para o teto revelar a do
+        // hospedeiro sozinha. Em produção ela também parte da escolha — o
+        // `Comando::CompartilharTela` semeia a sonda com o mesmo número —, e aí
+        // as duas dão o mesmo valor; aqui ela é posta alta de propósito para
+        // que este teste falhe pelo motivo que ele nomeia.
+        motor.caminho = crate::caminho::Sonda::partindo_de(100_000_000);
+        motor.caminho_de_quem_hospeda_bps = None;
+        let limites = LimitesDeTela {
+            resolucao: Resolucao::P1080,
+            ..LimitesDeTela::default()
+        };
+
+        let teto = motor
+            .teto_de_video(Some(&limites))
+            .teto(SignalBand::Nominal);
+
+        // 10 400 000 de piso × 60% = 6 240 000, o limiar de 1080p em cheio.
+        assert_eq!(
+            teto,
+            Teto::Bps(6_240_000),
+            "escolher 1080p sem medida nenhuma do hospedeiro tinha de abrir no \
+             teto que 1080p custa; abriu em {teto:?} — a escolha só passaria a \
+             valer oito janelas depois, que é o que este piso existe para não \
+             fazer"
+        );
+    }
+
+    /// **Uma medida baixa desmente a escolha, e vence.**
+    ///
+    /// Repetir o palpite por cima de um número que a máquina já mediu seria
+    /// insistir no que ela sabe estar errado. O lado alto está coberto pelo
+    /// teste acima, onde o piso manda porque não há medida nenhuma.
+    #[test]
+    fn a_medida_baixa_do_hospedeiro_vence_o_piso_da_escolha() {
+        use crate::tela::Teto;
+        use crate::video::LimitesDeTela;
+        use seele_video::codec::Resolucao;
+
+        let mut motor = motor_de_teste();
+        motor.caminho = crate::caminho::Sonda::partindo_de(100_000_000);
+        // Um mega medido: muito abaixo dos 10,4 que 1080p pediria de palpite.
+        motor.caminho_de_quem_hospeda_bps = Some(1_000_000);
+        let limites = LimitesDeTela {
+            resolucao: Resolucao::P1080,
+            ..LimitesDeTela::default()
+        };
+
+        let teto = motor
+            .teto_de_video(Some(&limites))
+            .teto(SignalBand::Nominal);
+
+        assert_eq!(
+            teto,
+            Teto::Bps(600_000),
+            "com 1 Mbps medidos do hospedeiro o teto saiu {teto:?}: o piso da \
+             escolha passou por cima de uma medida de verdade, e o produto \
+             voltou a prometer banda que ninguém conferiu"
+        );
+    }
+
+    /// **Fora de uma transmissão não há escolha**, e o padrão segue a suposição.
+    #[test]
+    fn sem_transmissao_o_padrao_do_hospedeiro_segue_a_suposicao() {
+        use crate::tela::Teto;
+
+        let mut motor = motor_de_teste();
+        motor.caminho_de_quem_hospeda_bps = None;
+
+        let teto = motor.teto_de_video(None).teto(SignalBand::Nominal);
+
+        assert_eq!(
+            teto,
+            Teto::Bps(1_200_000),
+            "sem escolha nenhuma o teto deixou de ser o de CAMINHO_DA_PROVA_BPS: \
+             {teto:?}"
         );
     }
 
