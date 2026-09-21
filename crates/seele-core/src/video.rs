@@ -742,14 +742,27 @@ pub struct LimitesDeTela {
 }
 
 impl LimitesDeTela {
-    /// Palpite inicial de caminho por resolução; a sonda o corrige pela rede.
+    /// De que caminho a sonda parte quando esta resolução foi escolhida.
+    ///
+    /// **Derivado do limiar, e não escrito à mão.** Os três números eram
+    /// 3, 5 e 8 Mbps, e o de 1080p ficava 2,4 Mbps abaixo do que o próprio
+    /// degrau custa: 8 Mbps dão teto de 4,8 e o limiar são 6,24. Quem escolhia
+    /// 1080p continuava em 720p — a opção inteira, decorativa, e sem erro
+    /// nenhum a mostrar.
+    ///
+    /// É a armadilha que [`crate::tela::TETO_ESTIMADO_PARA_1080P_BPS`] já
+    /// escreve sobre si mesma: *«duas constantes arredondadas em separado
+    /// divergem; uma derivada da outra não pode»*. Aqui a divergência era entre
+    /// o piso e o limiar que ele existe para alcançar.
+    ///
+    /// A conta é o inverso de `fracao_do`: se o vídeo leva
+    /// [`crate::tela::FRACAO_DO_CAMINHO`] por cento do caminho, o caminho que
+    /// compra um limiar é o limiar dividido por essa fração.
     #[must_use]
     pub const fn caminho_inicial_bps(&self) -> u32 {
-        match self.resolucao {
-            Resolucao::P540 => 3_000_000,
-            Resolucao::P720 => 5_000_000,
-            Resolucao::P1080 => 8_000_000,
-        }
+        let limiar =
+            crate::tela::bits_por_quadro(self.resolucao) * crate::tela::CADENCIA_DE_REFERENCIA;
+        ((limiar as u64 * 100) / crate::tela::FRACAO_DO_CAMINHO as u64) as u32
     }
 }
 
@@ -1317,6 +1330,34 @@ mod tests {
 
     use super::*;
     use crate::tela::{CAMINHO_DA_PROVA_BPS, PISO_DE_BANDA_BPS};
+
+    /// **Cada piso compra a resolução que promete.**
+    ///
+    /// O piso existe para pular a escada, e um piso que não alcança o próprio
+    /// degrau não pula nada: quem escolhe 1080p continua em 720p, em silêncio.
+    /// Foi o que os 8 000 000 escritos à mão faziam — 4,8 Mbps de teto contra
+    /// um limiar de 6,24.
+    ///
+    /// Irmão de `cada_limiar_compra_a_resolucao_que_promete`, que guarda a
+    /// outra ponta da mesma tabela.
+    #[test]
+    fn cada_piso_inicial_compra_a_resolucao_que_promete() {
+        for resolucao in [Resolucao::P540, Resolucao::P720, Resolucao::P1080] {
+            let limites = LimitesDeTela {
+                resolucao,
+                ..LimitesDeTela::default()
+            };
+            let piso = limites.caminho_inicial_bps();
+            let teto = (u64::from(piso) * u64::from(crate::tela::FRACAO_DO_CAMINHO) / 100) as u32;
+            assert_eq!(
+                crate::tela::resolucao_para(teto, crate::tela::Prioridade::Nitidez),
+                resolucao,
+                "o piso de {resolucao:?} são {piso} bps, que dão teto de {teto} e \
+                 compram outro degrau: quem escolher {resolucao:?} continua no \
+                 degrau de baixo, que é o pedido inteiro não atendido"
+            );
+        }
+    }
 
     /// A cola arma codificador **só** pela costura.
     ///
