@@ -296,6 +296,12 @@ fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
 /// O que a casca manda fazer.
 #[derive(Debug)]
 enum Comando {
+    ImagemDeMod {
+        pedido: seele_proto::volume::PedidoDeImagem,
+        bytes: Vec<u8>,
+        resposta: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
+    },
+
     ModRequest {
         request: u32,
         id: String,
@@ -1516,6 +1522,21 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn abrir_linha(&self, linha: ChannelId) -> Result<(), Fechado> {
         self.mandar(Comando::AbrirLinha(linha)).await
+    }
+
+    /// Encaminha uma transferência sem ocupar o laço de controle.
+    pub async fn imagem_de_mod(
+        &self,
+        pedido: seele_proto::volume::PedidoDeImagem,
+        bytes: Vec<u8>,
+        resposta: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::ImagemDeMod {
+            pedido,
+            bytes,
+            resposta,
+        })
+        .await
     }
 
     /// Queues a MOD request; fails if the connection task is closed.
@@ -2833,6 +2854,26 @@ impl Motor {
             Comando::SairDaVoiceRoom => cliente.leave_voice_room().await,
             Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
             Comando::Dizer { linha, corpo, id } => cliente.send_message(linha, &corpo, id).await,
+            Comando::ImagemDeMod {
+                pedido,
+                bytes,
+                resposta,
+            } => {
+                let transferencias = cliente.transfers();
+                tokio::spawn(async move {
+                    let resultado = tokio::time::timeout(
+                        std::time::Duration::from_secs(60),
+                        transferencias.imagem_de_mod(pedido, &bytes),
+                    )
+                    .await;
+                    let resultado = match resultado {
+                        Ok(r) => r.map_err(|e| e.to_string()),
+                        Err(_) => Err("Prazo da transferência esgotado. Confira a conexão e a versão do servidor.".to_owned()),
+                    };
+                    let _ = resposta.send(resultado);
+                });
+                Ok(())
+            }
             Comando::ModRequest {
                 request,
                 id,

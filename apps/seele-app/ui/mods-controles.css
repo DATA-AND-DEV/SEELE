@@ -629,16 +629,23 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
 /* **O diagnóstico nativo recolhe, e não some.** U15 pediu hierarquia — nome e
    presença primeiro, sinal e detalhes recolhíveis —, e recolher é diferente de
    tirar: quem precisa do sinal continua a um toque dele. */
-.pessoa-nativo { margin-top: 6px; }
+.pessoa-apresentada { position: relative; padding-right: 24px; }
+.pessoa-nativo { margin: 0; }
+.pessoa-nativo[open] { margin-top: 6px; }
 
 .pessoa-nativo-resumo {
+  position: absolute;
+  top: 8px;
+  right: 2px;
+  width: 22px;
+  text-align: center;
   cursor: pointer;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso-apagado);
   list-style: none;
 }
 
-.pessoa-nativo-resumo::before { content: "DETALHES · "; }
+
 .pessoa-nativo-resumo::-webkit-details-marker { display: none; }
 .pessoa-nativo-resumo:focus-visible {
   outline: 2px solid var(--seele-laranja-nerv);

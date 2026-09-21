@@ -1909,6 +1909,7 @@ function aPortaDoProvedor(pessoa, contribuicao, comRotulo = false) {
 function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   const item = elemento("li", pessoa.falando ? "pessoa falando" : "pessoa");
   item.dataset.apresentadaPor = contribuicao.mod;
+  item.classList.add("pessoa-apresentada");
 
   // O conteúdo do MOD dentro de um alvo de clique do produto, quando há ação
   // principal declarada.
@@ -1924,7 +1925,9 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   // detalhes fossem recolhíveis «mantendo acesso ao diagnóstico nativo», e
   // recolher é diferente de tirar.
   const detalhes = elemento("details", "pessoa-nativo");
-  const resumo = elemento("summary", "pessoa-nativo-resumo", pessoa.nome);
+  const resumo = elemento("summary", "pessoa-nativo-resumo", "⋯");
+  resumo.setAttribute("aria-label", `Detalhes de ${pessoa.nome}`);
+  resumo.title = `Detalhes de ${pessoa.nome}`;
   detalhes.append(resumo, linhaNativaDoRoster(pessoa, temAudio, true));
   // **`pessoa.detalhes`** — seções que o MOD acrescenta ao perfil detalhado.
   // Dentro do mesmo `<details>` da identidade verificável: quem abre para ver

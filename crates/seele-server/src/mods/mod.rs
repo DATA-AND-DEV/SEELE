@@ -289,6 +289,30 @@ impl Anfitriao {
                         },
                     )?,
                 )?;
+                let p = pasta.join(volume::PASTA);
+                volume_js.set(
+                    "tamanho",
+                    Function::new(ctx.clone(), move |nome: String| {
+                        arquivos::dentro(&p, &nome)
+                            .and_then(|p| std::fs::metadata(p).ok())
+                            .filter(|m| m.is_file())
+                            .map(|m| m.len() as f64)
+                    })?,
+                )?;
+                let p = pasta.join(volume::PASTA);
+                volume_js.set(
+                    "apagar",
+                    Function::new(ctx.clone(), move |nome: String| arquivos::apagar(&p, &nome))?,
+                )?;
+                let p = pasta.join(volume::PASTA);
+                volume_js.set(
+                    "servir",
+                    Function::new(ctx.clone(), move |nome: String| {
+                        arquivos::dentro(&p, &nome)
+                            .filter(|p| p.is_file())
+                            .map(|_| nome)
+                    })?,
+                )?;
                 ctx.globals().set("volume", volume_js)?;
 
                 // O bloco `world` do `api/v1.json`: rede, relógio e registro.

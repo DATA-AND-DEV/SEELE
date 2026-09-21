@@ -1093,8 +1093,30 @@ function oRodapeEReconciliadoSemMoverOBotao() {
     "encerrar não soltou o rodapé");
 }
 
+async function fundoTrocaSoltaECancela() {
+  const b = bancada(); const pendentes = [];
+  const d = dono(b, pedido => new Promise(resolve => pendentes.push({ pedido, resolve })));
+  const r = new b.RegiaoDeMod("teste/fundo", d.api, b.raiz());
+  const arvore = path => [{ forma: "caixa", chave: "pessoa", fundoDeMidia: { doServidor: { pedido: { path } } }, dentro: "Lia" }];
+  r.aplicar(arvore("antiga"));
+  const antigo = r.raiz.children[0];
+  r.aplicar(arvore("nova"));
+  const novo = r.raiz.children[0];
+  pendentes[0].resolve({ papel: "imagem", uri: "data:image/png;base64,ANTIGA", bytes: 5 });
+  pendentes[1].resolve({ papel: "imagem", uri: "data:image/png;base64,NOVA", bytes: 7 });
+  await volta();
+  confere("fundo atualizado", antigo !== novo && novo.style.backgroundImage.includes("NOVA") && !antigo.style.backgroundImage, "a foto antiga venceu a atualização");
+  confere("bytes do fundo", r.bytesDeMidia === 7, "contabilidade da mídia incorreta");
+  r.aplicar(arvore("pendente"));
+  r.soltar();
+  pendentes[2].resolve({ papel: "imagem", uri: "data:image/png;base64,TARDE", bytes: 9 });
+  await volta();
+  confere("fundo descartado", r.bytesDeMidia === 0 && r.recursos.size === 0, "sair reteve bytes ou recurso");
+}
+
 (async () => {
   const provas = [
+    fundoTrocaSoltaECancela,
     oFocoSobreviveAAtualizacao,
     aPreviaNaoTrocaOsAncestraisDoCampo,
     oRodapeEReconciliadoSemMoverOBotao,

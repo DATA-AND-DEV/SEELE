@@ -43,7 +43,7 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 /// houvesse um MOD antigo carregado, a promessa «o que um MOD faz some quando
 /// você sai do servidor» continuaria falsa, e o produto prometeria duas coisas
 /// diferentes ao mesmo tempo.
-pub const MOD_API_VERSION: u32 = 4;
+pub const MOD_API_VERSION: u32 = 5;
 
 /// **As versões que este build executa**, da mais nova para a mais velha.
 ///
@@ -74,7 +74,7 @@ pub const MOD_API_VERSION: u32 = 4;
 ///
 /// A API 2 não volta. Ela executava na janela, e o ADR 0049 explica por que
 /// não há caminho de volta disso.
-pub const APIS_ACEITAS: &[u32] = &[4, 3];
+pub const APIS_ACEITAS: &[u32] = &[5, 4, 3];
 
 /// A API mais velha que este build ainda executa.
 pub const MOD_API_MINIMA: u32 = 3;
@@ -87,6 +87,17 @@ pub const MOD_API_MINIMA: u32 = 3;
 #[must_use]
 pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
     match api {
+        5 => &[
+            "regiao",
+            "tema",
+            "cartoes",
+            "arquivo",
+            "superficies",
+            "contribuicoes",
+            "estilos",
+            "classes",
+            "volume",
+        ],
         4 => &[
             "regiao",
             "tema",
@@ -801,7 +812,13 @@ mod tests {
     /// Aceitar uma versão não é dar a ela o que a versão nova tem.
     #[test]
     fn cada_versao_tem_as_capacidades_dela() {
+        let cinco = capacidades_da_api(5);
         let quatro = capacidades_da_api(4);
+        assert!(cinco.contains(&"volume"));
+        assert!(!quatro.contains(&"volume"));
+        for capacidade in quatro {
+            assert!(cinco.contains(capacidade));
+        }
         let tres = capacidades_da_api(3);
         assert!(quatro.contains(&"superficies"));
         assert!(quatro.contains(&"contribuicoes"));

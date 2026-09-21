@@ -221,3 +221,42 @@ lugar dele fica a visibilidade, que é decisão e não acidente.
 diferentes não se ordenam entre si, como o 0027 já registra para anexos, e voz
 continua competindo pelo mesmo gargalo de subida por ser datagrama. Não há boa
 resposta para isso num enlace doméstico, e este documento não vai fingir que há.
+
+
+## Implementação de imagens — 21/09/2026
+
+A API 5 conecta o seletor nativo ao transporte: `SeeleUI.enviar(arquivo, token)`
+envia o handle escolhido pelo usuário, sem entregar os bytes ao QuickJS. O MOD
+primeiro autoriza com `volume.esperar` e, após a confirmação, consulta
+`volume.tamanho` para publicar os metadados. `volume.servir` e `volume.apagar`
+resolvem somente caminhos dentro do volume deste MOD nesta instância do servidor.
+O contrato completo está em `api/v5.json`; os contratos publicados 3 e 4 não mudam.
+
+Para imagens, cada transferência usa um fluxo **bidirecional** próprio depois do
+handshake autenticado. Isso acrescenta a confirmação de gravação no próprio fluxo
+e correlaciona cada leitura à sua requisição, inclusive leituras simultâneas. O
+fluxo unidirecional de volume existente continua disponível. Cabeçalhos pequenos
+são validados; o tamanho anunciado é conferido durante a escrita e no EOF. Os
+bytes são gravados em blocos de 64 KiB. O receptor confere a assinatura da imagem
+antes de promover o temporário. Erro, desconexão e cancelamento limpam o temporário.
+
+A leitura envia o pedido habitual ao servidor do MOD, com a identidade da sessão,
+e só serve o caminho que ele autorizar. Não há endereço HTTP nem caminho de disco
+fornecido pelo cliente. Quatro transferências são atendidas por sessão de cada vez;
+as demais aguardam a vaga no transporte, sem descartar a quinta foto de uma lista.
+O prazo é de 60 segundos e o limite por imagem é 10 MiB, independente da decisão
+anterior sobre a ausência de cota total de disco.
+
+O PERFIS 3.2.0 exige API 5 para impedir que um cliente antigo abra uma interface
+que não consegue enviar ou ler os novos arquivos. Cliente e servidor devem ser
+atualizados antes do pacote. Não se altera o catálogo assinado antes da publicação.
+Cada substituição recebe caminho novo, usado também na identidade da mídia pelo
+renderer; respostas antigas não recolocam a foto anterior.
+
+Validação reproduzível: `cargo test -p seele-server --test imagens_de_mod -- --nocapture`
+exercita QUIC, autenticação, runtime QuickJS e disco reais: duas substituições de
+10 MiB, leituras simultâneas, oito leitores para quatro vagas, token de outra pessoa,
+reuso, referência antiga e truncamento. O cliente desse teste fala o protocolo
+nativamente; não é uma medição da interface Windows nem de conexão pela internet.
+`npm run test:ui` no PERFIS cobre foto, banner, substituição, rascunho e cartão
+compacto com o renderer do produto no Chromium e transporte simulado.

@@ -1076,8 +1076,8 @@ async function desenharMods() {
  * discordam no dia em que só uma sobe, e esta é usada para dizer a alguém se o
  * problema está no aplicativo ou no pacote.
  */
-const API_DESTE_APLICATIVO = 4;
-const APIS_QUE_ESTE_APLICATIVO_ACEITA = [4,3];
+const API_DESTE_APLICATIVO = 5;
+const APIS_QUE_ESTE_APLICATIVO_ACEITA = [5,4,3];
 
 /** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
 async function desenharOCache() {
@@ -1369,6 +1369,41 @@ const NIVEIS = {
   "com-notas": "PUBLICADO COM NOTAS",
 };
 
+/**
+ * As versões da API de MOD que este build aceita. Vem do Rust.
+ *
+ * Vazio até a resposta chegar, e vazio quer dizer «não sei» — ver
+ * `ultimaQueEsteBuildEntende`, que nesse caso não filtra nada em vez de
+ * esconder tudo.
+ */
+let apisDeModAceitas = [];
+
+/**
+ * A última versão publicada que **este** build sabe executar.
+ *
+ * **Era a última da lista, e isso quebrava no dia seguinte a toda subida de
+ * API.** O catálogo lista tudo o que já foi publicado; a última entrada pode
+ * pedir uma API que este build não tem. Oferecê-la faz quem ainda não atualizou
+ * apertar instalar e receber uma recusa — e não lhe dá caminho de volta para a
+ * versão que funciona para ele, que está publicada logo acima, na mesma lista.
+ *
+ * O runbook da v0.12.0 escreveu este conserto e o deixou por fazer. Ele voltou
+ * na subida para a API 5.
+ *
+ * **Sem a lista, não filtra.** Se a resposta do Rust não chegou, `apisDeModAceitas`
+ * está vazia, e aí o comportamento é o de antes: a última da lista. Filtrar por
+ * uma lista vazia esconderia o catálogo inteiro, que é pior do que oferecer uma
+ * versão que o produto recusa com uma frase.
+ */
+function ultimaQueEsteBuildEntende(versoes) {
+  const lista = versoes ?? [];
+  if (apisDeModAceitas.length === 0) return lista[lista.length - 1];
+  for (let i = lista.length - 1; i >= 0; i--) {
+    if (apisDeModAceitas.includes(lista[i].api)) return lista[i];
+  }
+  return undefined;
+}
+
 /** Desenha uma linha do catálogo. */
 function linhaDoCatalogo(mod, instalados) {
   const linha = elemento("li");
@@ -1383,7 +1418,7 @@ function linhaDoCatalogo(mod, instalados) {
   // avaliação mais recente e serve para listar; quem carimba um número de
   // versão é o `nivel` de dentro daquela versão, porque o veredito ao lado de
   // um hash tem de ser o veredito daqueles bytes.
-  const ultima = (mod.versoes ?? [])[(mod.versoes ?? []).length - 1];
+  const ultima = ultimaQueEsteBuildEntende(mod.versoes);
   if (!ultima) {
     texto.append(elemento("span", "mods-recusado", "sem versão publicada"));
     caixa.append(texto);
@@ -1613,3 +1648,11 @@ function ligarAsAbasDeMods() {
 }
 
 ligarAsAbasDeMods();
+
+// A lista de APIs que este build aceita, para `ultimaQueEsteBuildEntende`.
+// Pedida uma vez, na carga: ela não muda enquanto o aplicativo roda.
+invoke("apis_de_mod_aceitas")
+  .then((apis) => {
+    apisDeModAceitas = apis;
+  })
+  .catch((falha) => console.warn("apis_de_mod_aceitas:", falha));

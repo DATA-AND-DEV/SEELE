@@ -173,3 +173,70 @@ mod testes {
         );
     }
 }
+
+/// Requisição de imagem em um fluxo bidirecional autenticado. Não usa o controle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PedidoDeImagem {
+    /// A espera foi autorizada pelo MOD; o tamanho limita e detecta truncamento.
+    Enviar {
+        /// Autorização de uso único emitida pelo MOD.
+        cabecalho: VolumeHeader,
+        /// Tamanho conferido durante a escrita e no EOF.
+        bytes: u64,
+    },
+    /// O MOD autoriza a leitura pelo seu pedido habitual, antes de servir bytes.
+    Ler {
+        /// MOD habilitado que decide o acesso.
+        mod_id: String,
+        /// Canal do pedido; zero para escopo de servidor.
+        channel: crate::ids::ChannelId,
+        /// Pedido pequeno de autorização, sem bytes de mídia.
+        payload: String,
+    },
+}
+
+impl crate::control::Validate for PedidoDeImagem {
+    fn validate(&self) -> Result<(), crate::control::ControlError> {
+        match self {
+            Self::Enviar { cabecalho, bytes } => {
+                cabecalho.validate()?;
+                if *bytes == 0 || *bytes > crate::midia_de_mod::TETO_DE_ARQUIVO as u64 {
+                    return Err(crate::control::ControlError::FieldOutOfRange {
+                        field: "volume_bytes",
+                    });
+                }
+            }
+            Self::Ler {
+                mod_id, payload, ..
+            } => {
+                if mod_id.is_empty() || mod_id.len() > MAX_MOD_ID_LEN || payload.len() > 12 * 1024 {
+                    return Err(crate::control::ControlError::FieldOutOfRange {
+                        field: "volume_request",
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// O recebimento só é confirmado depois de gravar; a leitura anuncia o tamanho.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RespostaDeImagem {
+    /// Motivo da recusa, quando houver.
+    pub erro: Option<String>,
+    /// Bytes que seguem o cabeçalho; zero na confirmação de envio.
+    pub bytes: u64,
+}
+impl crate::control::Validate for RespostaDeImagem {
+    fn validate(&self) -> Result<(), crate::control::ControlError> {
+        if self.bytes > crate::midia_de_mod::TETO_DE_ARQUIVO as u64
+            || self.erro.as_ref().is_some_and(|e| e.len() > 1024)
+        {
+            return Err(crate::control::ControlError::FieldOutOfRange {
+                field: "volume_reply",
+            });
+        }
+        Ok(())
+    }
+}

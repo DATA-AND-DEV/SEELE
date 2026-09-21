@@ -508,6 +508,12 @@ pub trait EventListener: Send + Sync {
 
 /// A command on its way to the driver thread.
 enum Command {
+    ImagemDeMod {
+        pedido: seele_core::PedidoDeImagem,
+        bytes: Vec<u8>,
+        resposta: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
+    },
+
     ModRequest {
         request: u32,
         id: String,
@@ -3971,6 +3977,15 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
+        Command::ImagemDeMod {
+            pedido,
+            bytes,
+            resposta,
+        } => {
+            if client.imagem_de_mod(pedido, bytes, resposta).await.is_err() {
+                return false;
+            }
+        }
         Command::ModRequest {
             request,
             id,
@@ -7135,4 +7150,59 @@ mod a_voz_quando_o_enlace_volta {
 #[must_use]
 pub const fn pares_que_esta_versao_atende() -> u8 {
     seele_core::enlace::PARES_QUE_ESTA_VERSAO_ATENDE
+}
+
+// Ponte nativa de imagens; bytes nunca passam pelo executor JavaScript do MOD.
+impl Connection {
+    async fn imagem_de_mod(
+        &self,
+        pedido: seele_core::PedidoDeImagem,
+        bytes: Vec<u8>,
+    ) -> Result<Vec<u8>, String> {
+        let (resposta, recebe) = tokio::sync::oneshot::channel();
+        self.command(Command::ImagemDeMod {
+            pedido,
+            bytes,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada".to_owned())?;
+        recebe.await.map_err(|_| "sessao-encerrada".to_owned())?
+    }
+}
+
+impl Connection {
+    /// Envia a imagem escolhida pela UI e aguarda a gravação no servidor.
+    pub async fn enviar_imagem_mod(
+        &self,
+        id: String,
+        token: String,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        self.imagem_de_mod(
+            seele_core::PedidoDeImagem::Enviar {
+                cabecalho: seele_core::VolumeHeader { mod_id: id, token },
+                bytes: bytes.len() as u64,
+            },
+            bytes,
+        )
+        .await
+        .map(|_| ())
+    }
+    /// Lê a imagem somente após o MOD autorizar o pedido nesta sessão.
+    pub async fn ler_imagem_mod(
+        &self,
+        id: String,
+        channel: u32,
+        payload: String,
+    ) -> Result<Vec<u8>, String> {
+        self.imagem_de_mod(
+            seele_core::PedidoDeImagem::Ler {
+                mod_id: id,
+                channel: ChannelId(channel),
+                payload,
+            },
+            Vec::new(),
+        )
+        .await
+    }
 }

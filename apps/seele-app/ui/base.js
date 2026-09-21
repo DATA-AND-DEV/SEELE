@@ -766,6 +766,11 @@ function donoDaRegiao(mod, instancia) {
     carregarMidiaDoServidor: async (canal, pedido, campo) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
+      if (pedido?.transporte === "volume") {
+        const midia = await invoke("ler_imagem_mod", { geracao, id: mod.id, channel: canal, payload: JSON.stringify(pedido) });
+        if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
+        return midia;
+      }
       // **A continuação é opaca.** Uma imagem grande não cabe numa resposta só,
       // e o servidor do MOD diz como pedir o resto devolvendo um `proximo` que
       // o produto **não interpreta**: ele apenas o junta ao pedido seguinte.
@@ -1608,6 +1613,7 @@ function contrasteEntre(a, b) {
  * não nomeia a própria versão.
  */
 const CAPACIDADES_POR_API = Object.freeze({
+  5: Object.freeze(["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"]),
   4: Object.freeze([
     "regiao", "tema", "cartoes", "arquivo",
     "superficies", "contribuicoes", "estilos", "classes",
@@ -1621,6 +1627,7 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   tema: "tema",
   cartoes: "cartoes",
   pedaco: "arquivo",
+  "enviar-imagem": "volume",
   "soltar-arquivo": "arquivo",
   "superficie-criar": "superficies",
   "superficie-montar": "superficies",
@@ -1758,6 +1765,10 @@ async function atenderOMod(mod, instancia, m) {
       case "cartoes":
         responder(true, { valor: darCartoesDoMod(mod, instancia, m.cartoes) });
         break;
+      case "enviar-imagem":
+        await invoke("enviar_imagem_mod", { geracao: geracaoDaSessao, id: mod.id, arquivo: m.arquivo, token: m.token });
+        responder(true, { valor: null });
+        break;
       case "pedaco": {
         const pedaco = await donoDaRegiao(mod, instancia).pedacoDoArquivo(m.arquivo, m.inicio);
         if (!meu()) {
@@ -1853,7 +1864,7 @@ async function atenderOMod(mod, instancia, m) {
         responder(false, { erro: `a API de MODs não conhece «${m.tipo}»` });
     }
   } catch (falha) {
-    const motivo = String(falha?.message ?? falha);
+    const motivo = typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha);
     registrarNoAnfitriao("atender-mod", `${mod.id}: «${m.tipo}» falhou — ${motivo}`);
     responder(false, { erro: motivo });
   }

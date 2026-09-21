@@ -4330,6 +4330,23 @@ fn atributos_de(etiqueta: &str) -> Vec<(String, String)> {
     saida
 }
 
+/// As versões da API de MOD que este build aceita executar.
+///
+/// **Para a tela de MODs escolher qual versão de um MOD oferecer.** O catálogo
+/// lista todas as versões publicadas, e a última delas pode pedir uma API que
+/// este build não tem — é o que acontece no dia seguinte a toda subida de API.
+/// Oferecer a última da lista faz quem ainda não atualizou apertar instalar e
+/// receber uma recusa, **sem caminho de volta** para a versão que funciona para
+/// ele, publicada logo acima na mesma lista.
+///
+/// Lida daqui e não escrita na janela pelo mesmo motivo de [`regras_de_previa`]
+/// e de [`dominios_de_gif`]: uma segunda cópia discorda no dia em que
+/// `APIS_ACEITAS` mudar, e discordaria oferecendo o que o produto recusa.
+#[tauri::command]
+fn apis_de_mod_aceitas() -> Vec<u32> {
+    seele_ffi::mods::APIS_ACEITAS.to_vec()
+}
+
 /// Os domínios cuja página esta janela resolve, para o lado de lá decidir a
 /// quem perguntar.
 ///
@@ -4594,6 +4611,84 @@ fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
     let lida = seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
         motivo: "formato-desconhecido".to_owned(),
     })?;
+    Ok(MidiaDoMod {
+        uri: lida.uri,
+        papel: lida.papel,
+        bytes: lida.bytes,
+    })
+}
+
+/// Os bytes escolhidos seguem direto da memória nativa para um fluxo autenticado.
+#[tauri::command]
+async fn enviar_imagem_mod(
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    arquivo: u64,
+    token: String,
+) -> Result<(), FalhaNoMod> {
+    let recusa = |motivo: &str| FalhaNoMod::Recusado {
+        motivo: motivo.to_owned(),
+    };
+    if !session.geracao_vale(geracao) {
+        return Err(recusa("sessao-encerrada"));
+    }
+    let bytes = {
+        let mut guardados = session
+            .arquivos_escolhidos
+            .lock()
+            .map_err(|_| recusa("banco-indisponivel"))?;
+        let escolhido = guardados
+            .guardados
+            .get(&arquivo)
+            .ok_or_else(|| recusa("arquivo-nao-esta-de-pe"))?;
+        if escolhido.de_quem != id || escolhido.geracao != geracao {
+            return Err(recusa("arquivo-de-outro-mod"));
+        }
+        guardados
+            .guardados
+            .remove(&arquivo)
+            .ok_or_else(|| recusa("arquivo-nao-esta-de-pe"))?
+            .bytes
+    };
+    let conexao = session
+        .connection()
+        .map_err(|_| recusa("sessao-encerrada"))?;
+    conexao
+        .enviar_imagem_mod(id, token, bytes)
+        .await
+        .map_err(|m| recusa(&m))?;
+    if !session.geracao_vale(geracao) {
+        return Err(recusa("sessao-encerrada"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn ler_imagem_mod(
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    channel: u32,
+    payload: String,
+) -> Result<MidiaDoMod, FalhaNoMod> {
+    let recusa = |motivo: &str| FalhaNoMod::Recusado {
+        motivo: motivo.to_owned(),
+    };
+    if !session.geracao_vale(geracao) {
+        return Err(recusa("sessao-encerrada"));
+    }
+    let conexao = session
+        .connection()
+        .map_err(|_| recusa("sessao-encerrada"))?;
+    let bytes = conexao
+        .ler_imagem_mod(id, channel, payload)
+        .await
+        .map_err(|m| recusa(&m))?;
+    if !session.geracao_vale(geracao) {
+        return Err(recusa("sessao-encerrada"));
+    }
+    let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| recusa("formato-desconhecido"))?;
     Ok(MidiaDoMod {
         uri: lida.uri,
         papel: lida.papel,
@@ -7237,10 +7332,13 @@ fn main() {
             abrir_no_navegador,
             previa_de_link,
             dominios_de_gif,
+            apis_de_mod_aceitas,
             aplicar_conjunto_de_mods,
             codigo_do_mod,
             midia_do_mod,
             midia_em_bytes,
+            enviar_imagem_mod,
+            ler_imagem_mod,
             escolher_para_o_mod,
             pedaco_do_escolhido,
             soltar_escolhido,

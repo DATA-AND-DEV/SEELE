@@ -1050,6 +1050,7 @@ const PRELUDIO: &str = r#"
     // Sem esta função, um MOD teria o identificador e nada para fazer com ele.
     // Com acesso ao disco, ele teria o caminho errado — e nenhum cliente do
     // SEELE abre arquivo por conta de terceiro.
+    ...(capacidades.has('volume') ? { enviar: (arquivo, token) => pedir('enviar-imagem', { arquivo, token }) } : {}),
     pedaco: (arquivo, inicio) => pedir('pedaco', { arquivo, inicio: Number(inicio) || 0 }),
     soltar: (arquivo) => pedir('soltar-arquivo', { arquivo }),
   });

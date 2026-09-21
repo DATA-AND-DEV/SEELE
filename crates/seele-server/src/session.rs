@@ -1539,6 +1539,45 @@ async fn run_session(
         })
     };
     let _recebedora = AbortaAoSair(recebedora);
+    let _imagens = {
+        let contexto = Arc::clone(server);
+        let conexao = connection.clone();
+        let pessoa = session.person;
+        AbortaAoSair(tokio::spawn(async move {
+            let vagas = Arc::new(tokio::sync::Semaphore::new(4));
+            while let Ok((mut envio, mut entrada)) = conexao.accept_bi().await {
+                // A lista de pessoas pode pedir dezenas de fotos de uma vez.
+                // QUIC contém a fila; aguardamos vaga em vez de recusar a quinta.
+                let Ok(vaga) = Arc::clone(&vagas).acquire_owned().await else {
+                    break;
+                };
+                let contexto = Arc::clone(&contexto);
+                tokio::spawn(async move {
+                    let _vaga = vaga;
+                    let _ = envio.set_priority(-10);
+                    match tokio::time::timeout(
+                        Duration::from_secs(60),
+                        crate::mods::volume::atender_imagem(
+                            &contexto,
+                            pessoa,
+                            &mut envio,
+                            &mut entrada,
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(erro)) => {
+                            tracing::warn!(%pessoa, %erro, "fluxo da imagem de MOD interrompido")
+                        }
+                        Err(erro) => {
+                            tracing::warn!(%pessoa, %erro, "prazo da imagem de MOD esgotado")
+                        }
+                    }
+                });
+            }
+        }))
+    };
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     let mut events = server.events.subscribe();

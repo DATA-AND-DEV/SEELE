@@ -1,0 +1,337 @@
+{
+  "version": 5,
+  "extends": 4,
+  "actions": {
+    "pedir": "ModRequest",
+    "regiao": "desenharARegiaoDoMod",
+    "tema": "aplicarOTemaDoMod",
+    "cartoes": "darCartoesDoMod",
+    "escolher-arquivo": "escolher_para_o_mod",
+    "pedaco": "pedaco_do_escolhido",
+    "soltar-arquivo": "soltar_escolhido",
+    "midia-do-pacote": "midia_do_mod",
+    "midia-do-servidor": "midia_em_bytes",
+    "superficie-criar": "SuperficiesDoMod::criar",
+    "superficie-montar": "SuperficieDeMod::montar",
+    "superficie-classes": "SuperficieDeMod::declararClasses",
+    "superficie-mostrar": "SuperficieDeMod::mostrar",
+    "superficie-ocultar": "SuperficieDeMod::ocultar",
+    "superficie-suja": "SuperficieDeMod::marcarSuja",
+    "superficie-titulo": "SuperficiesDoMod::de",
+    "superficie-fechar": "SuperficiesDoMod::fechar",
+    "superficie-descartar": "SuperficiesDoMod::descartar",
+    "contribuir": "RegistroDeContribuicoes::registrar",
+    "revogar-contribuicao": "RegistroDeContribuicoes::revogar",
+    "abrir-endereco": "abrir_no_navegador",
+    "enviar-imagem": "enviar_imagem_mod",
+    "ler-imagem": "ler_imagem_mod"
+  },
+  "reads": {
+    "resposta": "ModReply",
+    "contexto.pessoa": "PersonId",
+    "contexto.canal": "ChannelId",
+    "retrato": "Snapshot",
+    "capacidades": "capacidades_da_api"
+  },
+  "handlers": [
+    "aoPedir",
+    "aoResponder",
+    "aoEvento"
+  ],
+  "formas": [
+    "titulo",
+    "texto",
+    "linha",
+    "lista",
+    "item",
+    "campo",
+    "escolha",
+    "botao",
+    "arquivo",
+    "tela",
+    "midia",
+    "caixa",
+    "pilha",
+    "grade",
+    "rolagem",
+    "separador",
+    "espaco",
+    "formulario",
+    "acoes",
+    "abas",
+    "aba",
+    "textoLongo",
+    "numero",
+    "deslizante",
+    "marca",
+    "interruptor",
+    "cor",
+    "retrato",
+    "distintivo",
+    "link"
+  ],
+  "figuras": [
+    "retangulo",
+    "circulo",
+    "texto",
+    "linha"
+  ],
+  "eventos": [
+    "campo",
+    "escolha",
+    "botao",
+    "arquivo",
+    "traco",
+    "midia",
+    "numero",
+    "marca",
+    "cor",
+    "aba",
+    "submeter",
+    "acao",
+    "link",
+    "tela",
+    "fechar",
+    "fechar-pedido"
+  ],
+  "superficies": {
+    "o-que-e": "uma janela do produto que o MOD declara e o produto monta: página na área da sessão, painel ajustável, diálogo com foco contido, ou aviso de vida curta",
+    "tipos": [
+      "pagina",
+      "painel",
+      "dialogo",
+      "aviso"
+    ],
+    "garantias-do-produto": [
+      "a saída é montada pelo produto, com o texto do produto, ligada a um comando do produto",
+      "o cabeçalho diz de qual MOD é a superfície",
+      "um modal torna o resto da aplicação inerte, e não só escuro",
+      "o foco entra na abertura, fica contido, e volta ao acionador ao fechar",
+      "o tamanho pedido é contido na área útil: um valor grande não torna o fechamento inalcançável",
+      "alterações não gravadas produzem a decisão de descartar, e o MOD não veta a saída"
+    ],
+    "limites": {
+      "superficies": 12,
+      "avisos": 4,
+      "nos": 4096,
+      "fundura": 16,
+      "campos": 128,
+      "midias": 24,
+      "bytesDeMidia": 25165824
+    },
+    "pagina-imersiva": "imersiva: true ocupa a sessão, prende o foco e mantém VOLTAR e Escape",
+    "avisos-duracao-ms": {
+      "normal": 3500,
+      "erro": 10000
+    },
+    "descarte": "sai com a instância do MOD, e a saída da sessão descarta sem perguntar"
+  },
+  "contribuicoes": {
+    "o-que-e": "um registro de pontos semânticos da interface do SEELE, por ID e por modo — nunca um seletor de CSS, um nó do documento ou HTML de texto",
+    "pontos": {
+      "pessoa.identidade": [
+        "adicionar"
+      ],
+      "pessoa.cartao": [
+        "substituir",
+        "adicionar"
+      ],
+      "pessoa.detalhes": [
+        "adicionar"
+      ],
+      "pessoa.acoes": [
+        "adicionar"
+      ],
+      "canal.item": [
+        "adicionar"
+      ],
+      "canal.cabecalho": [
+        "adicionar"
+      ],
+      "compositor.ferramentas": [
+        "adicionar"
+      ],
+      "sala.acoes": [
+        "adicionar"
+      ],
+      "servidor.navegacao": [
+        "adicionar"
+      ],
+      "servidor.aparencia": [
+        "substituir"
+      ]
+    },
+    "modos": [
+      "adicionar",
+      "substituir"
+    ],
+    "fora": [
+      "«decorar»: pendente. Mudar a apresentação de um nó do SEELE exige um segundo conjunto de propriedades — cor, tipografia, fundo e borda em pontos determinados, sem deslocamento nem opacidade sobre um controle nativo —, e esse contrato ainda não foi escrito. Registrar «decorar» é recusado pelo nome, com a razão junto"
+    ],
+    "garantias-do-produto": [
+      "trocar o que se desenha não troca a identidade: o comando continua ligado ao ID real",
+      "o diagnóstico nativo recolhe em vez de sumir",
+      "duas substituições do mesmo ponto se resolvem por prioridade declarada e escolha visível, nunca por quem respondeu por último",
+      "ao revogar, a apresentação nativa é recalculada do estado atual — nunca restaurada de um innerHTML guardado",
+      "«usar apresentação padrão» existe no controle nativo de MODs"
+    ],
+    "teto": 128,
+    "listarNaBarra": "booleano opcional em servidor.navegacao; padrão true. false oculta a entrada, sem alterar permissões",
+    "pagina-imersiva": "imersiva: true ocupa a sessão, prende o foco e mantém VOLTAR e Escape",
+    "avisos-duracao-ms": {
+      "normal": 3500,
+      "erro": 10000
+    },
+    "descarte": "sai com a instância do MOD"
+  },
+  "estilos": {
+    "o-que-e": "propriedades declaradas por categoria, validadas uma a uma e montadas de partes conferidas — nunca texto de CSS",
+    "categorias": [
+      "cor e transparência",
+      "preenchimento e gradiente",
+      "borda e raio",
+      "sombra",
+      "tipografia",
+      "layout",
+      "transformação",
+      "recorte",
+      "transição e animação"
+    ],
+    "estados": [
+      "base",
+      "sobre",
+      "foco",
+      "ativo",
+      "desligado",
+      "invalido",
+      "escolhido"
+    ],
+    "layout": {
+      "direcao": "declarar uma direção liga o contêiner: ela escreve `display:flex` junto com `flex-direction`",
+      "linhasMaximas": "inteiro de 1 a 20; resumo de texto com reticências; conserva o texto e limita sua apresentação. Usar em caixa de texto sem controles, oferecendo acesso ao conteúdo completo",
+      "base": "o tamanho de partida numa linha; `base: 0` com `larguraMinima` é o par que divide e ainda quebra",
+      "classes": "compiladas numa folha construída e adotada pelo documento — um `<style>` por script não aplica nada sob a CSP desta janela"
+    },
+    "consultas": "de contêiner, e não de janela: um painel arrastado para 300px continua numa janela de 1400",
+    "animacoes": [
+      "nenhuma",
+      "pulso",
+      "aurora",
+      "brilho",
+      "flutuar"
+    ],
+    "fora": [
+      "url(...)",
+      "@import",
+      "HTML ativo",
+      "seletor que alcance fora da superfície",
+      "keyframes declarados pelo MOD",
+      "família de tipo livre"
+    ]
+  },
+  "cartoes": {
+    "o-que-e": "uma declaração por pessoa, na mesma gramática da região, montada pelo renderer do produto na lista dele",
+    "chave": "o `id` da pessoa no retrato",
+    "formas": [
+      "titulo",
+      "texto",
+      "linha",
+      "lista",
+      "item",
+      "midia",
+      "caixa",
+      "pilha",
+      "grade",
+      "separador",
+      "espaco",
+      "retrato",
+      "distintivo"
+    ],
+    "fora": [
+      "campo",
+      "escolha",
+      "botao",
+      "arquivo",
+      "tela",
+      "formulario",
+      "abas",
+      "textoLongo",
+      "numero",
+      "deslizante",
+      "marca",
+      "interruptor",
+      "cor",
+      "link"
+    ],
+    "limites": {
+      "pessoas": 64,
+      "nos": 64,
+      "fundura": 6,
+      "midias": 64,
+      "bytesDeMidia": 20971520
+    },
+    "descarte": "sai com a região do MOD"
+  },
+  "tema": [
+    "arredondamento",
+    "brilho",
+    "fundo",
+    "painel",
+    "texto",
+    "apagado",
+    "acento",
+    "borda",
+    "densidade",
+    "fonte"
+  ],
+  "compatibilidade": {
+    "aceitas": [
+      5,
+      4,
+      3
+    ],
+    "porque": "A API 5 acrescenta transporte binário de imagens e fundoDeMidia. Clientes antigos recusam o pacote que exige 5 antes de abrir uma interface sem suporte. As APIs 3 e 4 continuam aceitas.",
+    "capacidades-por-versao": {
+      "4": [
+        "regiao",
+        "tema",
+        "cartoes",
+        "arquivo",
+        "superficies",
+        "contribuicoes",
+        "estilos",
+        "classes"
+      ],
+      "3": [
+        "regiao",
+        "tema",
+        "cartoes",
+        "arquivo"
+      ],
+      "5": [
+        "regiao",
+        "tema",
+        "cartoes",
+        "arquivo",
+        "superficies",
+        "contribuicoes",
+        "estilos",
+        "classes",
+        "volume"
+      ]
+    },
+    "nao-volta": "a API 2 executava na janela do produto, e o ADR 0049 explica por que não há caminho de volta disso"
+  },
+  "notes": "ADR 0048: envio e leitura em fluxos QUIC bidirecionais próprios; metadados no controle, bytes fora de QuickJS. Imagens existentes no transporte legado continuam legíveis.",
+  "volume": {
+    "cliente": "SeeleUI.enviar(arquivo, token): Promise<void>; arquivo escolhido pelo usuário, até 10 MiB; resolve depois da gravação. Handle consumido, soltar é idempotente.",
+    "servidor": [
+      "volume.esperar(token, caminho, tipos, prazo)",
+      "volume.tamanho(caminho): number | null",
+      "volume.servir(caminho): string | null",
+      "volume.apagar(caminho): boolean"
+    ],
+    "leitura": "doServidor.pedido.transporte = volume; o pedido completo vai ao MOD na sessão autenticada; ele responde {ok:true, volume:caminho}; bytes seguem no próprio fluxo bidirecional.",
+    "fundoDeMidia": "Propriedade de caixa: {doServidor:{canal,pedido,campo}} ou {fonte}. Imagem cover centralizada, sombreada para legibilidade; mesmos tetos e descarte de mídia."
+  }
+}

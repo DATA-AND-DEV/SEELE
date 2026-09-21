@@ -296,7 +296,7 @@ const FORMAS_DE_CAIXA = Object.freeze(
 function fonteDaMidia(plano) {
   return plano.forma === "midia" || plano.forma === "retrato"
     ? JSON.stringify([plano.no.fonte ?? null, plano.no.doServidor ?? null])
-    : undefined;
+    : plano.no.fundoDeMidia ? JSON.stringify(plano.no.fundoDeMidia) : undefined;
 }
 
 /**
@@ -685,6 +685,7 @@ class RegiaoDeMod {
     }
     if (classe) this.contagem[classe] += 1;
 
+    if (plano.forma === "caixa" && plano.no.fundoDeMidia) this.montarFundoDeMidia(elem, plano);
     switch (plano.forma) {
       case "campo": this.montarCampo(elem, plano); break;
       case "escolha": this.montarEscolha(elem, plano); break;
@@ -1292,6 +1293,33 @@ class RegiaoDeMod {
    * `<figure>` com `<img>` quebrada não é a mesma coisa que uma inicial num
    * círculo, e U27 pediu a segunda.
    */
+  montarFundoDeMidia(elem, plano) {
+    const bolso = plano.cartao
+      ? { conta: "bytesDeCartao", quantas: "midiasDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia, limite: LIMITES_DO_CARTAO.midias }
+      : { conta: "bytesDeMidia", quantas: "midias", teto: this.perfil.bytesDeMidia, limite: this.perfil.midias };
+    if (this.contagem[bolso.quantas] >= bolso.limite) { this.recusados += 1; return; }
+    this.contagem[bolso.quantas] += 1;
+    let cancelado = false, bytes = 0;
+    this.guardar(elem, `fundo ${plano.chave}`, () => {
+      cancelado = true; this[bolso.conta] -= bytes; this.contagem[bolso.quantas] -= 1;
+      elem.style.backgroundImage = "";
+    });
+    const fonte = plano.no.fundoDeMidia;
+    const vindo = fonte.doServidor
+      ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
+      : this.dono.carregarMidia(fonte.fonte);
+    vindo.then(midia => {
+      if (cancelado || this.solta || !this.dono.podeFalar()) return;
+      if (midia.papel !== "imagem" || this[bolso.conta] + midia.bytes > bolso.teto) return;
+      bytes = midia.bytes; this[bolso.conta] += bytes;
+      elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
+      elem.style.backgroundSize = "cover";
+      elem.style.backgroundPosition = "center";
+    }).catch(falha => {
+      if (!cancelado && !this.solta) this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque: String(falha?.message ?? falha) });
+    });
+  }
+
   montarRetrato(elem, plano) {
     const marca = elemento("span", "regiao-de-mod-retrato-inicial");
     elem.append(marca);

@@ -410,6 +410,19 @@ pub async fn receber(
     let cabecalho: seele_proto::volume::VolumeHeader = crate::frame::read(fluxo)
         .await
         .map_err(|_| (String::new(), VolumeRefusal::Incompleto))?;
+    receber_imagem(esperas, raizes, pessoa, fluxo, cabecalho, None).await
+}
+
+/// Recebe o corpo com autorização consumível e tamanho opcional conferido.
+pub async fn receber_imagem(
+    esperas: &std::sync::Mutex<Esperas>,
+    raizes: Option<&crate::RaizesDosMods>,
+    pessoa: PersonId,
+    fluxo: &mut quinn::RecvStream,
+    cabecalho: seele_proto::volume::VolumeHeader,
+    tamanho: Option<u64>,
+) -> Result<Chegou, (String, seele_proto::volume::VolumeRefusal)> {
+    use seele_proto::volume::VolumeRefusal;
     {
         use seele_proto::control::Validate as _;
         if cabecalho.validate().is_err() {
@@ -450,8 +463,11 @@ pub async fn receber(
     // meia imagem no lugar onde o MOD espera uma imagem inteira — e o MOD não
     // tem como saber disso sem abrir os bytes, que é exatamente o que este
     // caminho existe para ele não precisar fazer.
-    let obras = pai.join(format!(".em-obras-{}", cabecalho.token));
-    let resultado = escorrer(fluxo, &obras, &espera).await;
+    let mut soma_token = seele_proto::attachment::ContentDigest::new();
+    soma_token.feed(cabecalho.token.as_bytes());
+    let obras = pai.join(format!(".em-obras-{}", hex(&soma_token.finish())));
+    let _limpeza = LimparObras(obras.clone());
+    let resultado = escorrer(fluxo, &obras, &espera, tamanho).await;
     match resultado {
         Ok(chegou) => {
             if tokio::fs::rename(&obras, &destino).await.is_err() {
@@ -475,6 +491,14 @@ pub async fn receber(
     }
 }
 
+// Também executa quando o timeout cancela a future no meio da escrita.
+struct LimparObras(std::path::PathBuf);
+impl Drop for LimparObras {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Os bytes, em blocos, com o hash somado no caminho.
 ///
 /// Devolve um [`Chegou`] com os campos que só os bytes respondem; quem chama
@@ -483,6 +507,7 @@ async fn escorrer(
     fluxo: &mut quinn::RecvStream,
     obras: &std::path::Path,
     espera: &Espera,
+    tamanho: Option<u64>,
 ) -> Result<Chegou, seele_proto::volume::VolumeRefusal> {
     use seele_proto::attachment::ContentDigest;
     use seele_proto::volume::VolumeRefusal;
@@ -513,6 +538,9 @@ async fn escorrer(
         }
         soma.feed(pedaco);
         bytes = bytes.saturating_add(quantos as u64);
+        if tamanho.is_some_and(|total| bytes > total) {
+            return Err(VolumeRefusal::Incompleto);
+        }
         arquivo
             .write_all(pedaco)
             .await
@@ -524,6 +552,9 @@ async fn escorrer(
         .map_err(|_| VolumeRefusal::NaoGravei)?;
     drop(arquivo);
 
+    if tamanho.is_some_and(|total| bytes != total) {
+        return Err(VolumeRefusal::Incompleto);
+    }
     // **O tipo vem dos bytes**, com a mesma tabela de quatro formatos que a
     // prévia de anexo usa — reúso, e não uma segunda cópia da regra. Decisão 2
     // do ADR 0048: o MOD não tem como conferir o que ele não vê.
@@ -552,4 +583,62 @@ fn hex(bytes: &[u8]) -> String {
         let _ = write!(saida, "{byte:02x}");
         saida
     })
+}
+
+/// Cada imagem usa seu próprio fluxo de ida e resposta, inclusive duas leituras simultâneas.
+pub async fn atender_imagem(
+    server: &std::sync::Arc<crate::server::Server>,
+    pessoa: PersonId,
+    envio: &mut quinn::SendStream,
+    entrada: &mut quinn::RecvStream,
+) -> anyhow::Result<()> {
+    use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem};
+    let pedido: PedidoDeImagem = crate::frame::read(entrada).await?;
+    let inicio = Instant::now();
+    let resultado: anyhow::Result<Option<tokio::fs::File>> = async {
+        match pedido {
+            PedidoDeImagem::Enviar { cabecalho, bytes } => {
+                let chegou = receber_imagem(&server.esperas, server.mods_dir.as_ref(), pessoa, entrada, cabecalho, Some(bytes)).await
+                    .map_err(|(_, motivo)| anyhow::anyhow!("imagem recusada: {motivo:?}"))?;
+                tracing::info!(mod_id = %chegou.mod_id, bytes = chegou.bytes, em_ms = inicio.elapsed().as_millis(), "imagem de MOD gravada por fluxo");
+                Ok(None)
+            }
+            PedidoDeImagem::Ler { mod_id, channel, payload } => {
+                let resposta = crate::mods::pedidos::executar(server, pessoa, channel, &mod_id, &payload).await;
+                let valor: serde_json::Value = serde_json::from_str(&resposta)?;
+                anyhow::ensure!(valor.get("ok").and_then(serde_json::Value::as_bool) == Some(true), "leitura recusada pelo MOD");
+                let caminho = valor.get("volume").and_then(serde_json::Value::as_str).ok_or_else(|| anyhow::anyhow!("resposta sem volume"))?;
+                let raiz = server.mods_dir.as_ref().ok_or_else(|| anyhow::anyhow!("sem diretório de MODs"))?.dados_de(&mod_id).join(PASTA);
+                let alvo = crate::mods::arquivos::dentro(&raiz, caminho).ok_or_else(|| anyhow::anyhow!("caminho de volume inválido"))?;
+                let arquivo = tokio::fs::File::open(alvo).await?;
+                anyhow::ensure!(arquivo.metadata().await?.len() <= seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64, "imagem excede 10 MiB");
+                Ok(Some(arquivo))
+            }
+        }
+    }.await;
+    match resultado {
+        Ok(arquivo) => {
+            let bytes = match &arquivo {
+                Some(f) => f.metadata().await?.len(),
+                None => 0,
+            };
+            crate::frame::write(envio, &RespostaDeImagem { erro: None, bytes }).await?;
+            if let Some(mut arquivo) = arquivo {
+                tokio::io::copy(&mut arquivo, envio).await?;
+            }
+        }
+        Err(erro) => {
+            tracing::warn!(%pessoa, %erro, "transferência de imagem de MOD recusada");
+            crate::frame::write(
+                envio,
+                &RespostaDeImagem {
+                    erro: Some(erro.to_string().chars().take(512).collect()),
+                    bytes: 0,
+                },
+            )
+            .await?;
+        }
+    }
+    envio.finish()?;
+    Ok(())
 }

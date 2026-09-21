@@ -1811,6 +1811,43 @@ pub struct Transfers {
 }
 
 impl Transfers {
+    /// Imagens de MOD por fluxo próprio; a resposta pertence ao mesmo fluxo.
+    pub async fn imagem_de_mod(
+        &self,
+        pedido: seele_proto::volume::PedidoDeImagem,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>> {
+        use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem};
+        let inicio = std::time::Instant::now();
+        let (mut envio, mut entrada) = self.connection.open_bi().await?;
+        envio.set_priority(TRANSFER_PRIORITY)?;
+        frame::write(&mut envio, &pedido).await?;
+        if let PedidoDeImagem::Enviar { bytes: total, .. } = &pedido {
+            anyhow::ensure!(*total == bytes.len() as u64, "tamanho de imagem mudou");
+            for bloco in bytes.chunks(seele_proto::attachment::BLOCK_LEN) {
+                envio.write_all(bloco).await?;
+            }
+        }
+        envio.finish()?;
+        let resposta: RespostaDeImagem = frame::read(&mut entrada).await?;
+        anyhow::ensure!(
+            resposta.erro.is_none(),
+            "{}",
+            resposta.erro.unwrap_or_default()
+        );
+        let lidos = entrada
+            .read_to_end(seele_proto::midia_de_mod::TETO_DE_ARQUIVO)
+            .await?;
+        anyhow::ensure!(lidos.len() as u64 == resposta.bytes, "imagem incompleta");
+        tracing::info!(
+            enviados = bytes.len(),
+            recebidos = lidos.len(),
+            em_ms = inicio.elapsed().as_millis(),
+            "imagem de MOD transferida por fluxo"
+        );
+        Ok(lidos)
+    }
+
     /// O próximo fluxo de anexo da fila do roteador, dentro do prazo.
     ///
     /// **A fila é uma só e as tarefas de anexo são várias.** Duas transferências

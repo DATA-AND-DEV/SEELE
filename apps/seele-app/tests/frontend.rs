@@ -10068,6 +10068,44 @@ fn the_variant_names_the_shell_sends_are_the_ones_the_wire_uses() {
     );
 }
 
+/// **O catálogo oferece a última versão que ESTE build entende.**
+///
+/// Ela era `versoes[versoes.length - 1]`, a última da lista, sem olhar `api`.
+/// O efeito aparece no dia em que a API sobe: quem ainda não atualizou vê a
+/// versão nova oferecida, aperta instalar, e o produto recusa — **sem caminho
+/// de volta para a versão que funcionava para ele**, que continua publicada
+/// logo acima na mesma lista.
+///
+/// O runbook da v0.12.0 registrou isso como custo aceito e escreveu o conserto
+/// na mesma página: *«a tela de MODs escolher a última versão cuja `api` este
+/// build entende, em vez da última da lista»*. Ele custou uma subida de API
+/// para ser feito.
+///
+/// A lista de APIs vem do Rust, por `apis_de_mod_aceitas`, e não escrita aqui:
+/// uma segunda cópia discorda no dia em que `APIS_ACEITAS` mudar, e discordaria
+/// oferecendo o que o produto recusa.
+#[test]
+fn o_catalogo_oferece_a_ultima_versao_que_este_build_entende() {
+    let fonte = without_comments(&scripts());
+
+    let linha = js_function(&fonte, "function linhaDoCatalogo(");
+    assert!(
+        !linha.contains("versoes.length - 1]"),
+        "a linha do catálogo voltou a pegar a última da lista sem olhar `api`: \
+         quem não atualizou vê a versão nova e falha ao instalar: {linha}"
+    );
+    assert!(
+        linha.contains("ultimaQueEsteBuildEntende"),
+        "a linha do catálogo deixou de escolher pela API aceita: {linha}"
+    );
+
+    let escolha = js_function(&fonte, "function ultimaQueEsteBuildEntende(");
+    assert!(
+        escolha.contains("apisDeModAceitas"),
+        "a escolha deixou de usar a lista de APIs que o Rust manda: {escolha}"
+    );
+}
+
 /// **Os quadros saem do seletor, e não de um número fixo.**
 ///
 /// Eles eram `60` escrito dentro da função, de quando a caixa não perguntava

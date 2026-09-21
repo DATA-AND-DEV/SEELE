@@ -170,3 +170,5 @@ pub use seele_proto::signal::{Signal, SignalBand, SyncInputs};
 pub use seele_proto::transport::DEFAULT_PORT;
 pub use seele_proto::uri;
 pub use seele_proto::PROTOCOL_VERSION;
+
+pub use seele_proto::volume::{PedidoDeImagem, VolumeHeader};
