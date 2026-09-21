@@ -443,6 +443,36 @@ async function oRetratoDoCartaoEOMesmoNoEntreDoisRetratos() {
   confere("os bytes não dobraram", regiao.bytesDeCartao === 10, String(regiao.bytesDeCartao));
 }
 
+async function aImagemAcompanhaAMudancaDaFonte() {
+  for (const forma of ["retrato", "midia"]) {
+    const b = bancada();
+    const pendentes = [];
+    const d = dono(b, () => new Promise(resolve => pendentes.push(resolve)));
+    const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+    const declarar = versao => regiao.aplicar([{
+      forma, chave: "foto", inicial: "A",
+      ...(versao ? { doServidor: { canal: 1, pedido: { op: "asset", path: versao }, campo: "image" } } : {}),
+    }]);
+    declarar(null);
+    declarar("primeira");
+    confere(forma + " ganha fonte", pendentes.length === 1, "a seleção não iniciou leitura");
+    if (pendentes.length !== 1) continue;
+    declarar("segunda");
+    confere(forma + " troca fonte", pendentes.length === 2, "a troca não iniciou leitura");
+    if (pendentes.length !== 2) continue;
+    pendentes[0]({ uri: "velha:", papel: "imagem", bytes: 10 });
+    pendentes[1]({ uri: "nova:", papel: "imagem", bytes: 20 });
+    await volta(); await volta();
+    const imagem = acharTag(regiao.raiz, "img");
+    confere(forma + " ignora atrasada", imagem?.src === "nova:" && regiao.bytesDeMidia === 20, "montou resposta antiga ou contou duas vezes");
+    declarar("segunda");
+    confere(forma + " conserva a fonte", acharTag(regiao.raiz, "img") === imagem && pendentes.length === 2, "recarregou sem mudança");
+    declarar(null);
+    confere(forma + " remove fonte", !acharTag(regiao.raiz, "img") && regiao.bytesDeMidia === 0, "imagem removida continua visível");
+    regiao.soltar();
+  }
+}
+
 async function osTetosDoCartaoSaoDoCartaoENaoDaRegiao() {
   const b = bancada();
   const d = dono(b);
@@ -1082,6 +1112,7 @@ function oRodapeEReconciliadoSemMoverOBotao() {
     oCartaoSaiQuandoOModParaDeDeclararOuQuandoAReGiaoSai,
     oRetratoDoCartaoEOMesmoNoEntreDoisRetratos,
     osTetosDoCartaoSaoDoCartaoENaoDaRegiao,
+    aImagemAcompanhaAMudancaDaFonte,
   ];
   for (const prova of provas) {
     try {

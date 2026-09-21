@@ -4547,6 +4547,20 @@ fn midia_em_bytes(
             motivo: "sessao-encerrada".to_owned(),
         });
     }
+    let midia = ler_midia_do_servidor(&base64).map_err(|falha| {
+        tracing::warn!(geracao, erro = ?falha, "mídia de MOD recusada ao exibir");
+        falha
+    })?;
+    tracing::debug!(
+        geracao,
+        papel = midia.papel,
+        bytes = midia.bytes,
+        "mídia de MOD vinda do servidor"
+    );
+    Ok(midia)
+}
+
+fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
     // Conferido **antes** de decodificar: o texto cresce um terço sobre os
     // bytes, então o teto do texto é o teto dos bytes com folga, e recusar aqui
     // é recusar sem alocar.
@@ -4555,7 +4569,21 @@ fn midia_em_bytes(
             motivo: "arquivo-grande-demais".to_owned(),
         });
     }
-    let bytes = seele_ffi::de_base64(&base64).ok_or(FalhaNoMod::Recusado {
+    // O cabeçalho delimita o conteúdo; o tipo é provado pelos bytes abaixo.
+    let conteudo = if let Some(uri) = base64.strip_prefix("data:") {
+        let (cabecalho, conteudo) = uri.split_once(',').ok_or(FalhaNoMod::Recusado {
+            motivo: "nao-e-base64".to_owned(),
+        })?;
+        if cabecalho.len() > 128 || !cabecalho.ends_with(";base64") {
+            return Err(FalhaNoMod::Recusado {
+                motivo: "nao-e-base64".to_owned(),
+            });
+        }
+        conteudo
+    } else {
+        base64
+    };
+    let bytes = seele_ffi::de_base64(conteudo).ok_or(FalhaNoMod::Recusado {
         motivo: "nao-e-base64".to_owned(),
     })?;
     if bytes.len() > seele_ffi::mods::TETO_DE_MIDIA {
@@ -4566,12 +4594,6 @@ fn midia_em_bytes(
     let lida = seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
         motivo: "formato-desconhecido".to_owned(),
     })?;
-    tracing::debug!(
-        geracao,
-        papel = lida.papel,
-        bytes = lida.bytes,
-        "mídia de MOD vinda do servidor"
-    );
     Ok(MidiaDoMod {
         uri: lida.uri,
         papel: lida.papel,
@@ -8428,6 +8450,57 @@ mod a_supervisao_dos_mods_nativos {
             ((0, 0), 0),
             "a colheita não devolveu cada classe pela cota dela"
         );
+    }
+
+    #[test]
+    fn imagem_do_perfis_em_data_uri_chega_ao_decodificador() {
+        for (mime, bytes) in [
+            ("image/png", b"\x89PNG\r\n\x1a\n".as_slice()),
+            ("image/jpeg", b"\xff\xd8\xff\xe0".as_slice()),
+            ("image/webp", b"RIFF\0\0\0\0WEBP".as_slice()),
+        ] {
+            let base64 = seele_ffi::base64_de(bytes);
+            for entrada in [base64.clone(), format!("data:{mime};base64,{base64}")] {
+                let midia = super::ler_midia_do_servidor(&entrada).expect("imagem aceita");
+                assert_eq!(midia.bytes, bytes.len());
+                assert_eq!(midia.uri, format!("data:{mime};base64,{base64}"));
+            }
+        }
+    }
+
+    #[test]
+    fn midia_do_servidor_confere_bytes_e_limite_mesmo_com_cabecalho() {
+        let png = b"\x89PNG\r\n\x1a\n";
+        let alegada = format!("data:image/jpeg;base64,{}", seele_ffi::base64_de(png));
+        assert!(super::ler_midia_do_servidor(&alegada)
+            .unwrap()
+            .uri
+            .starts_with("data:image/png;"));
+        for invalida in [
+            "data:image/png,abc",
+            "data:image/png;base64",
+            "data:image/png;base64,%%%",
+            "https://example.com/a.png",
+        ] {
+            assert!(super::ler_midia_do_servidor(invalida).is_err());
+        }
+        let mut bytes = vec![0; seele_ffi::mods::TETO_DE_MIDIA];
+        // `get_mut` e não um fatiamento: `indexing_slicing` é `warn` no
+        // workspace e o CI roda `-D warnings`. O `expect` mantém o teste
+        // honesto — se o teto de mídia um dia não couber uma assinatura de
+        // PNG, isto tem de gritar, não passar de lado.
+        bytes
+            .get_mut(..png.len())
+            .expect("o teto de mídia cabe uma assinatura de PNG")
+            .copy_from_slice(png);
+        let uri = format!("data:image/png;base64,{}", seele_ffi::base64_de(&bytes));
+        assert_eq!(
+            super::ler_midia_do_servidor(&uri).unwrap().bytes,
+            bytes.len()
+        );
+        bytes.push(0);
+        let uri = format!("data:image/png;base64,{}", seele_ffi::base64_de(&bytes));
+        assert!(super::ler_midia_do_servidor(&uri).is_err());
     }
 
     /// **Um arquivo escolhido não sobrevive à sessão que o escolheu.**

@@ -292,6 +292,13 @@ const FORMAS_DE_CAIXA = Object.freeze(
   new Set(["caixa", "pilha", "grade", "rolagem", "acoes", "espaco", "separador", "distintivo"]),
 );
 
+/** A fonte identifica o recurso; repintar texto não deve reiniciar uma imagem. */
+function fonteDaMidia(plano) {
+  return plano.forma === "midia" || plano.forma === "retrato"
+    ? JSON.stringify([plano.no.fonte ?? null, plano.no.doServidor ?? null])
+    : undefined;
+}
+
 /**
  * Os papéis que um `arquivo` pode pedir, e o que cada um filtra no seletor.
  *
@@ -391,6 +398,7 @@ class RegiaoDeMod {
     this.textoDaFolha = "";
     /** O que cada elemento segura, para soltar quando ele sai. */
     this.recursos = new Map();
+    this.fontesDeMidia = new WeakMap();
     /** Quantos de cada forma com teto estão de pé. */
     this.contagem = { campos: 0, telas: 0, midias: 0, midiasDeCartao: 0 };
     /** Bytes de mídia montados nesta região. */
@@ -615,11 +623,19 @@ class RegiaoDeMod {
         }
       } else {
         const velho = porChave.get(plano.chave);
-        if (velho && velho.dataset.forma === plano.forma) {
+        if (velho && velho.dataset.forma === plano.forma
+          && this.fontesDeMidia.get(velho) === fonteDaMidia(plano)) {
           porChave.delete(plano.chave);
           no = velho;
           this.atualizar(no, plano);
         } else {
+          // Solta o carregamento anterior antes de abrir o novo, inclusive
+          // quando a imagem ainda estava em voo ou ocupava o último lugar.
+          if (velho) {
+            porChave.delete(plano.chave);
+            this.soltarSubarvore(velho);
+            velho.remove();
+          }
           no = this.criar(plano);
           if (!no) { this.recusados += 1; continue; }
         }
@@ -661,6 +677,7 @@ class RegiaoDeMod {
     const elem = elemento(FORMAS_DA_REGIAO[plano.forma], "regiao-de-mod-parte");
     elem.dataset.chave = plano.chave;
     elem.dataset.forma = plano.forma;
+    this.fontesDeMidia.set(elem, fonteDaMidia(plano));
     // A chave que o MOD deu, guardada à parte da chave de reconciliação: é ela
     // que `valoresDoFormulario` lê para montar o envio.
     if (typeof plano.no.chave === "string" && plano.no.chave) {
