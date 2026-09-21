@@ -85,17 +85,10 @@ pub const PISO_DE_BANDA_BPS: u32 = 200_000;
 /// **Hipótese, e escrita como hipótese.** O §8 pergunta 2 continua aberta —
 /// ninguém mede quanto cabe num caminho que não está sendo enchido — e o
 /// produto não tem resposta. Assume-se o cano sobre o qual as duas provas
-/// rodaram, 2000 kbps de subida, que é a única suposição com número atrás.
-///
-/// É o número que o §5.1 chama de *«caminho de quem hospeda»*, e é a perna que
-/// o produto até agora **não media**: o teto saía do caminho de quem
-/// compartilha, e com o servidor encaminhando é a subida do servidor que estoura
-/// primeiro.
-///
-/// Só a admissão deste lado sai daqui. **No fio ele não vai** — ver
-/// [`caminho_no_fio`], e a diferença entre os dois é o assunto inteiro destas
-/// vinte linhas.
-pub const CAMINHO_DO_SERVER_BPS: u32 = 2_000_000;
+/// rodaram. O arranque agora supõe 8 Mbps para permitir os perfis de resolução
+/// escolhidos no cliente; é hipótese, não medição. A primeira janela congestionada
+/// reduz a estimativa e a reserva de voz continua em vigor.
+pub const CAMINHO_DO_SERVER_BPS: u32 = 8_000_000;
 
 /// Com que subida o portão de admissão nasce.
 ///

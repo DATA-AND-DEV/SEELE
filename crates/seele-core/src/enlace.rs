@@ -2973,6 +2973,15 @@ impl Motor {
             // este comando, e guardar depois abriria uma janela em que o
             // `ScreenShareStarted` chega e não encontra a escolha da pessoa.
             Comando::CompartilharTela { fonte, limites } => {
+                if self
+                    .caminho_medido
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    == 0
+                    && self.caminho.estimativa() == crate::tela::CAMINHO_DA_PROVA_BPS
+                {
+                    self.caminho =
+                        crate::caminho::Sonda::partindo_de(limites.caminho_inicial_bps());
+                }
                 self.tela_pedida = Some((fonte, limites));
                 cliente.start_screen_share().await
             }
@@ -4436,6 +4445,10 @@ impl Motor {
             Comando::LembrarCaminho(bps) => {
                 tracing::info!(bps, "a sonda começa do caminho lembrado deste servidor");
                 self.caminho = crate::caminho::Sonda::partindo_de(*bps);
+                self.caminho_medido.store(
+                    self.caminho.estimativa(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
             }
             Comando::EntrarNaVoiceRoom(voice_room, _password) => {
                 self.voice_room = Some(*voice_room)

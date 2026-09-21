@@ -55,7 +55,7 @@
     "chave": "o `id` da pessoa no retrato",
     "formas": ["titulo", "texto", "linha", "lista", "item", "midia"],
     "fora": ["campo", "escolha", "botao", "arquivo", "tela"],
-    "limites": { "pessoas": 64, "nos": 24, "fundura": 4, "midias": 64, "bytesDeMidia": 8388608 },
+    "limites": { "pessoas": 64, "nos": 24, "fundura": 4, "midias": 64, "bytesDeMidia": 20971520 },
     "descarte": "sai com a região do MOD"
   },
   "tema": [

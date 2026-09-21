@@ -177,7 +177,17 @@ function respostas(extra = {}) {
     estado_da_porta: { aberta: true, senha: false, pedidos: [] },
     // A forma é a de `PreviewRules` no Rust; uma inventada faz a conversa
     // inteira sumir com um `TypeError` dentro do desenho do anexo.
-    regras_de_previa: { limit: 8 * 1024 * 1024, types: ["image/png", "image/jpeg", "image/webp"] },
+    //
+    // **Os quatro tipos, e o teto de verdade.** Esta lista tinha três — faltava
+    // `image/gif` — e o teto era o dobro do que o produto aplica. Uma bancada
+    // que simula menos do que o produto aceita é uma bancada que não vê o
+    // caminho quebrar: nenhuma cena daqui teria mostrado um anexo de GIF
+    // deixando de oferecer prévia. Os quatro saem de `ImageFormat::ALL`, o teto
+    // é o `PREVIEW_LIMIT` de `preview.rs`.
+    regras_de_previa: {
+      limit: 4 * 1024 * 1024,
+      types: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+    },
     pasta_de_downloads: "/tmp",
     telemetria_da_malha: null,
     ...extra,
@@ -373,7 +383,9 @@ async function principal() {
   servidor.close();
 }
 
-principal().catch((erro) => {
+module.exports = { servir, respostas, retrato };
+
+if (require.main === module) principal().catch((erro) => {
   console.error(erro);
   process.exitCode = 1;
 });

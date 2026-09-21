@@ -182,6 +182,8 @@ confere(
 const contexto = vm.createContext({
   console,
   queueMicrotask: () => {},
+  setTimeout: () => 1,
+  clearTimeout: () => {},
   requestAnimationFrame: (f) => f(),
   document: documento,
   geracaoDaSessao: 7,

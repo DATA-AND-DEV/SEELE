@@ -171,6 +171,59 @@ pub(crate) fn criar(config: &str, nome: &str, versao: &str) -> Servidor {
     novo
 }
 
+/// Apaga uma instância parada e seus dados, preservando a identidade da máquina.
+pub(crate) fn apagar(config: &str, id: &str) -> Result<(), String> {
+    use seele_server::persistence::{Location, Persistence};
+    let mut lista = listar(config);
+    let servidor = lista
+        .iter()
+        .find(|s| s.id == id)
+        .ok_or("Servidor não encontrado.")?;
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+    {
+        return Err("Identificador de servidor inválido.".into());
+    }
+    let base = Path::new(config);
+    let pasta = base.join("servidores").join(id);
+    if std::fs::symlink_metadata(&pasta).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err("A pasta do servidor é um link.".into());
+    }
+    if let Some(caminho) = &servidor.caminho {
+        if caminho != &format!("servidores/{id}/seele.db") {
+            return Err("O servidor usa uma pasta externa; remova-o manualmente.".into());
+        }
+    } else {
+        // O banco legado também era a origem da chave TLS das outras instâncias.
+        let antigo = base.join("seele.db");
+        if antigo.exists() {
+            let de =
+                Persistence::open(&Location::File(antigo.clone())).map_err(|e| e.to_string())?;
+            let para = Persistence::open(&Location::File(base.join("identidade-servidor.db")))
+                .map_err(|e| e.to_string())?;
+            seele_server::tls::herdar_identidade(&de, &para).map_err(|e| e.to_string())?;
+        }
+        for nome in ["seele.db", "seele.db-wal", "seele.db-shm"] {
+            let alvo = base.join(nome);
+            if alvo.exists() {
+                std::fs::remove_file(alvo).map_err(|e| e.to_string())?;
+            }
+        }
+        let dados = base.join("mod-data-legado");
+        if dados.exists() {
+            std::fs::remove_dir_all(dados).map_err(|e| e.to_string())?;
+        }
+    }
+    if pasta.exists() {
+        std::fs::remove_dir_all(pasta).map_err(|e| e.to_string())?;
+    }
+    lista.retain(|s| s.id != id);
+    let texto = serde_json::to_string_pretty(&lista).map_err(|e| e.to_string())?;
+    std::fs::write(registro(config), texto).map_err(|e| e.to_string())
+}
+
 /// O banco daquele servidor, com a pasta dele já criada.
 ///
 /// Um id que não está no registro devolve o banco de sempre. É o desfecho
@@ -224,7 +277,12 @@ pub(crate) fn banco(config: &str, id: Option<&str>) -> PathBuf {
 fn uma_chave_por_maquina(config: &str, banco: &Path) {
     use seele_server::persistence::{Location, Persistence};
 
-    let legado = Path::new(config).join("seele.db");
+    let identidade = Path::new(config).join("identidade-servidor.db");
+    let legado = if identidade.exists() {
+        identidade
+    } else {
+        Path::new(config).join("seele.db")
+    };
     if banco == legado || !legado.exists() {
         return;
     }
@@ -371,6 +429,58 @@ fn mudar_os_dados_do_legado(pacotes: &Path, dados: &Path) {
 #[cfg(test)]
 mod os_servidores_guardados {
     use super::{banco, criar, listar, marcar_uso, raizes_dos_mods, renomear};
+
+    #[test]
+    fn apagar_isola_os_dados_e_preserva_os_pacotes() {
+        let dir = pasta();
+        let config = texto(&dir);
+        let a = criar(&config, "A", "teste");
+        let b = criar(&config, "B", "teste");
+        for id in [&a.id, &b.id] {
+            let dados = raizes_dos_mods(&config, Some(id)).dados_de("seele/perfis");
+            std::fs::create_dir_all(&dados).unwrap();
+            std::fs::write(dados.join("foto"), b"foto").unwrap();
+        }
+        let cache = dir.path().join("mod-packages");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("pacote"), b"pacote").unwrap();
+        super::apagar(&config, &a.id).unwrap();
+        // Uma leitura só, e sem indexar: `indexing_slicing` é `warn` no
+        // workspace e o CI roda `-D warnings`, então um `[0]` aqui derruba o
+        // clippy dos três sistemas.
+        let restou = listar(&config);
+        assert_eq!(restou.len(), 1);
+        assert_eq!(restou.first().map(|s| s.id.as_str()), Some(b.id.as_str()));
+        assert!(!dir.path().join("servidores").join(a.id).exists());
+        assert!(raizes_dos_mods(&config, Some(&b.id))
+            .dados_de("seele/perfis")
+            .join("foto")
+            .exists());
+        assert!(cache.join("pacote").exists());
+        assert!(super::apagar(&config, "../B").is_err());
+    }
+
+    #[test]
+    fn apagar_legado_nao_o_readota_nem_apaga_identidade() {
+        use seele_server::persistence::{Location, Persistence};
+        let dir = pasta();
+        let config = texto(&dir);
+        let db = Persistence::open(&Location::File(dir.path().join("seele.db"))).unwrap();
+        seele_server::tls::Identity::load_or_create(&db, vec!["localhost".to_owned()]).unwrap();
+        let identidade = seele_server::tls::identidade_guardada(&db).unwrap();
+        drop(db);
+        assert_eq!(listar(&config).len(), 1);
+        super::apagar(&config, "principal").unwrap();
+        assert!(listar(&config).is_empty());
+        assert!(!dir.path().join("seele.db").exists());
+        assert!(dir.path().join("identidade-servidor.db").exists());
+        let novo = criar(&config, "Novo", "teste");
+        let db = Persistence::open(&Location::File(banco(&config, Some(&novo.id)))).unwrap();
+        assert_eq!(
+            seele_server::tls::identidade_guardada(&db).unwrap(),
+            identidade
+        );
+    }
 
     /// Uma pasta de configuração vazia, só para este teste.
     fn pasta() -> tempfile::TempDir {

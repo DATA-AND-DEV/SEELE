@@ -104,6 +104,8 @@
       "alterações não gravadas produzem a decisão de descartar, e o MOD não veta a saída"
     ],
     "limites": { "superficies": 12, "avisos": 4, "nos": 4096, "fundura": 16, "campos": 128, "midias": 24, "bytesDeMidia": 25165824 },
+    "pagina-imersiva": "imersiva: true ocupa a sessão, prende o foco e mantém VOLTAR e Escape",
+    "avisos-duracao-ms": { "normal": 3500, "erro": 10000 },
     "descarte": "sai com a instância do MOD, e a saída da sessão descarta sem perguntar"
   },
   "contribuicoes": {
@@ -132,6 +134,9 @@
       "«usar apresentação padrão» existe no controle nativo de MODs"
     ],
     "teto": 128,
+    "listarNaBarra": "booleano opcional em servidor.navegacao; padrão true. false oculta a entrada, sem alterar permissões",
+    "pagina-imersiva": "imersiva: true ocupa a sessão, prende o foco e mantém VOLTAR e Escape",
+    "avisos-duracao-ms": { "normal": 3500, "erro": 10000 },
     "descarte": "sai com a instância do MOD"
   },
   "estilos": {
@@ -170,7 +175,7 @@
     "chave": "o `id` da pessoa no retrato",
     "formas": ["titulo", "texto", "linha", "lista", "item", "midia", "caixa", "pilha", "grade", "separador", "espaco", "retrato", "distintivo"],
     "fora": ["campo", "escolha", "botao", "arquivo", "tela", "formulario", "abas", "textoLongo", "numero", "deslizante", "marca", "interruptor", "cor", "link"],
-    "limites": { "pessoas": 64, "nos": 64, "fundura": 6, "midias": 64, "bytesDeMidia": 8388608 },
+    "limites": { "pessoas": 64, "nos": 64, "fundura": 6, "midias": 64, "bytesDeMidia": 20971520 },
     "descarte": "sai com a região do MOD"
   },
   "tema": [

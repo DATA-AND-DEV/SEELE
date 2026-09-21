@@ -424,7 +424,8 @@ let proximoPedidoDeMod = 0;
  * faria a janela pedir para sempre — e o teto do arquivo não alcançaria, porque
  * ele só é conferido no fim.
  */
-const PEDACOS_DE_MIDIA = 128;
+const PEDACOS_DE_MIDIA = 256;
+const TETO_DE_MIDIA_BASE64 = 4 * Math.ceil(10 * 1024 * 1024 / 3) + 128;
 
 /**
  * Escreve no registro de quem hospeda.
@@ -508,8 +509,25 @@ const ouvirMod = listen("seele://event", ({ payload }) => {
  * onde ele o escreveu, e aqui recusa de novo, porque um prelúdio é código que
  * roda dentro do worker e um worker é de quem escreveu o MOD.
  */
+let filaDePedidosDeMod = Promise.resolve();
+let pedidosDeModNaFila = 0;
+
+async function aguardarVezDePedidoDeMod(geracao) {
+  if (pedidosDeModNaFila >= 128) throw new Error("too-many-requests");
+  pedidosDeModNaFila += 1;
+  const vez = filaDePedidosDeMod.then(async () => {
+    if (!daGeracaoDePe(geracao)) throw new Error("disconnected");
+    await new Promise(resolve => setTimeout(resolve, 125));
+  });
+  filaDePedidosDeMod = vez.catch(() => {});
+  try { await vez; } finally { pedidosDeModNaFila -= 1; }
+}
+
 async function pedirAoServidor(id, canal, valor) {
+  const geracaoDoPedido = geracaoDaSessao;
   await ouvirMod;
+  await aguardarVezDePedidoDeMod(geracaoDoPedido);
+  if (!daGeracaoDePe(geracaoDoPedido)) throw new Error("disconnected");
   // A geração é lida **antes** do `await` do `invoke` e conferida depois: entre
   // as duas coisas a sessão pode ter acabado.
   const geracao = geracaoDaSessao;
@@ -766,8 +784,12 @@ function donoDaRegiao(mod, instancia) {
           // saber **o quê**, e não «a mídia não carregou».
           throw new Error(`a resposta do servidor não traz «${campo}»`);
         }
+        if (base64.length + pedaco.length > TETO_DE_MIDIA_BASE64) {
+          throw new Error("A imagem excede 10 MB.");
+        }
         base64 += pedaco;
         if (!resposta.proximo || typeof resposta.proximo !== "object") break;
+        if (voltas === PEDACOS_DE_MIDIA - 1) throw new Error("Envio de imagem incompleto.");
         pedidoAtual = { ...pedido, ...resposta.proximo };
       }
       const midia = await invoke("midia_em_bytes", { geracao, base64 });

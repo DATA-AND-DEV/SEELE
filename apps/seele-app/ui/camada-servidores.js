@@ -96,7 +96,7 @@ async function desenharServidores() {
 
       // O esquecer, **fora** do botão que entra: um `<button>` dentro de outro
       // não é marcação válida, e o alvo de cada gesto tem de ser só o seu.
-      const esquecer = elemento("button", "servidor-esquecer", "×");
+      const esquecer = elemento("button", "servidor-esquecer", "REMOVER");
       esquecer.type = "button";
       esquecer.dataset.esquecer = conhecido.alvo;
       esquecer.title = `esquecer ${nome}`;

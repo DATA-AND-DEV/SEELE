@@ -2347,7 +2347,7 @@
             aqui seria uma terceira copia das mesmas duas frases.
           -->
           <h2 id="server-titulo" class="server-titulo"></h2>
-          <p id="server-subtitulo" class="nota"></p>
+          <p id="server-subtitulo" class="nota" hidden></p>
         </div>
         <!--
           O contexto: onde voce esta enquanto mexe aqui.
@@ -2454,7 +2454,7 @@
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">MICROFONE</h3>
-              <p class="nota">O que os outros ouvem de você</p>
+
             </div>
             <div class="server-bloco-corpo">
 
@@ -2601,7 +2601,7 @@
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">SAÍDA DE SOM</h3>
-              <p class="nota">Por onde você ouve os outros</p>
+
             </div>
             <div class="server-bloco-corpo">
               <div class="server-campo">
@@ -2612,7 +2612,7 @@
                   aparelhos que talvez não existam nesta máquina.
                 -->
                 <ul id="lista-saidas" class="server-dispositivos"></ul>
-                <p class="nota">Trocar vale na hora, sem sair da conversa.</p>
+
                 <!-- O mesmo aviso da entrada; ver o comentário lá em cima. -->
                 <p id="nota-fixa-saida" class="nota">Escolher pelo nome <b>fixa
                   ele</b>: o SEELE deixa de acompanhar o padrão da máquina.</p>
@@ -2671,7 +2671,7 @@
                 Quem o reescreve é `desenharTeclaDeColar`, em `tela-server.js`,
                 a partir da plataforma que a janela conhece.
               -->
-              <p class="nota">Só a tecla de falar é trocável; as outras são fixas.</p>
+
             </div>
             <ul class="server-atalhos">
               <li class="server-atalho">
@@ -2866,7 +2866,7 @@
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">SUA IDENTIDADE</h3>
-              <p class="nota">A chave que prova quem você é nos servidores</p>
+
             </div>
             <div class="server-bloco-corpo">
               <div class="server-par">
@@ -2949,11 +2949,11 @@
 
           <div id="mods-painel-instalados" class="mods-painel" role="tabpanel"
                aria-labelledby="mods-aba-instalados" tabindex="0">
-            <p class="nota">O que está no disco e o que este servidor exige.</p>
+
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">MODS DESTA MÁQUINA</h3>
-              <p class="nota">O que está no disco, e o que este servidor exige</p>
+
             </div>
             <div class="server-bloco-corpo">
               <div class="server-campo">
@@ -2964,9 +2964,7 @@
                 -->
                 <p id="mods-alvo-do-servidor" class="nota" hidden></p>
                 <ul id="lista-mods" class="server-dispositivos mods-rolagem"></ul>
-                <p id="mods-sem-hospedar" class="nota" hidden>Ligar e desligar MOD
-                  é do servidor que <b>esta janela</b> hospeda. Sem hospedar, a
-                  lista mostra o que está instalado e mais nada.</p>
+                <p id="mods-sem-hospedar" class="nota" hidden>Somente quem hospeda pode alterar os MODs.</p>
                 <!--
                   **O rascunho, e o ato único que o aplica.**
 
@@ -3007,19 +3005,13 @@
                 <section id="mods-apresentacao" class="server-bloco" hidden>
                   <div class="server-bloco-topo">
                     <h3 class="server-bloco-nome">QUEM DESENHA O QUE</h3>
-                    <p class="nota">Um MOD pode apresentar pessoas, canais e a
-                      aparencia desta sessao. Quando mais de um pede o mesmo
-                      lugar, a escolha e sua - e voltar ao desenho do SEELE
-                      tambem e.</p>
+
                   </div>
                   <ul id="lista-apresentacoes" class="server-dispositivos"></ul>
                 </section>
 
                 <button id="mods-instalar" class="botao" type="button">INSTALAR MOD DE UMA PASTA</button>
-                <p class="nota">Um MOD é uma pasta com <code>mod.json</code> dentro.
-                  Instalar copia os arquivos para esta máquina e <b>não liga</b> o
-                  MOD: ligar é outra decisão, e é o que permite examinar antes de
-                  deixar rodar.</p>
+
               </div>
             </div>
           </div>
@@ -3033,21 +3025,18 @@
           </div>
           <div id="mods-painel-catalogo" class="mods-painel" role="tabpanel"
                aria-labelledby="mods-aba-catalogo" tabindex="0" hidden>
-            <p class="nota">O que este servidor oferece para instalar.</p>
+
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">CATÁLOGO</h3>
-              <p class="nota">MODs avaliados, em mods.seele.app.br</p>
+
             </div>
             <div class="server-bloco-corpo">
               <div class="server-campo">
                 <button id="catalogo-buscar" class="botao" type="button">BUSCAR NO CATÁLOGO</button>
                 <p id="catalogo-estado" class="nota" role="status"></p>
                 <ul id="lista-catalogo" class="server-dispositivos mods-rolagem"></ul>
-                <p class="nota">O catálogo é conferido contra a chave que veio
-                  dentro deste SEELE, e os arquivos de cada MOD contra o hash que
-                  o catálogo declara. Um MOD que não passa nas duas conferências
-                  não chega ao disco.</p>
+
               </div>
             </div>
           </div>
@@ -3813,35 +3802,14 @@
         </div>
       </div>
 
-      <!--
-        **Os quatro controles de limite saíram**, e a escolha que eles pediam
-        virou uma decisão do produto.
-
-        Eram: o que proteger quando a banda aperta — nitidez ou movimento —, a
-        altura máxima, os quadros por segundo e o teto de banda. Quatro
-        perguntas antes de mostrar a tela, e o relato de campo é o veredito:
-        «pro usuário comum, escolher entre nitidez e movimento é bem chato,
-        assim como teto de banda».
-
-        O que fica no lugar, e por quê:
-
-        - **Movimento**, e não nitidez. A `specs/07` escreve «a resolução
-          segura, o quadro cede», e ela foi escrita pensando em texto: um
-          documento continua legível a 8 quadros e vira borrão se a resolução
-          baixar. Para o que se mostra aqui — um jogo, uma janela em que se
-          mexe — a regra é o contrário: a 8 quadros um jogo não fica pior, fica
-          inutilizável. Quem compartilha um documento perde nitidez só quando a
-          conexão aperta, e vê o que está saindo escrito ao lado do palco.
-        - **720p e 30 quadros**, que eram o padrão que quase ninguém trocava.
-        - **Sem teto de banda escolhido a mão.** Ele nunca foi a única defesa:
-          o servidor mede a própria subida e derruba o teto sozinho quando a
-          sala cresce (`teto_do_hospedeiro`). O controle era um segundo teto,
-          por cima de um que já funciona, para quem soubesse estimar quantos
-          bits por segundo cabem na própria casa.
-
-        Nada disso some do protocolo: `LimitesDeTela` continua atravessando
-        inteiro, e voltar a oferecer a escolha é desenhar a caixa de novo.
-      -->
+      <div class="compartilhar-escolha">
+        <label class="rotulo" for="compartilhar-resolucao">RESOLUÇÃO</label>
+        <select id="compartilhar-resolucao" class="compartilhar-select">
+          <option value="540">540p</option>
+          <option value="720">720p</option>
+          <option value="1080" selected>1080p</option>
+        </select>
+      </div>
       <p id="compartilhar-erro" class="erro" hidden></p>
 
       <div class="compartilhar-botoes">

@@ -120,6 +120,7 @@ const VOLTA = {
  * das duas.
  */
 function abrirSecao(id) {
+  if (id === "secao-mods" && $("secao-mods").hidden) id = "secao-audio";
   for (const botao of document.querySelectorAll(".server-secao")) {
     const atual = botao.id === id;
     botao.setAttribute("aria-current", atual ? "true" : "false");
@@ -553,7 +554,7 @@ function desenharContextoDaSessao() {
   const partes = [
     sala ? `Na sala ${sala.name}` : "Fora de sala",
     retrato.muted ? "microfone mudo" : comoAbre,
-    "a conversa continua atrás desta tela",
+
   ];
   faixa.textContent = partes.join(" · ");
   faixa.hidden = false;
@@ -644,6 +645,12 @@ async function atualizarServer() {
       console.warn("modo_de_voz_escolhido:", falha);
     }
   }
+
+  const temSessao = Boolean(snapshot) && telaDeOrigem === "tela-sessao";
+  $("secao-mods").hidden = !temSessao;
+  $("server-grupo-mods").hidden = !temSessao;
+  document.querySelector('[aria-labelledby="server-grupo-mods"]').hidden = !temSessao;
+  if (!temSessao && !$("painel-mods").hidden) abrirSecao("secao-audio");
 
   desenharNivel(snapshot);
   marcarLinhas(snapshot);

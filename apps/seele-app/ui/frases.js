@@ -388,6 +388,16 @@ const NOMES_RECUSADOS = {
 function fraseDeErro(erro, apelido) {
   if (typeof erro === "string") return FRASES[erro] ?? erro;
   if (erro && typeof erro === "object") {
+    if (erro.Recusado?.motivo) {
+      const motivo = erro.Recusado.motivo;
+      return {
+        "arquivo-grande-demais": "Escolha uma imagem de até 10 MB.",
+        "midia-grande-demais": "A imagem excede 10 MB.",
+        "arquivo-ilegivel": "Não foi possível ler o arquivo escolhido.",
+        "formato-desconhecido": "Use uma imagem PNG, JPEG, WebP ou GIF.",
+        "exigido-por-este-servidor": "Desligue o MOD e salve antes de apagar.",
+      }[motivo] ?? motivo;
+    }
     if (erro.PinChanged) {
       return (
         "A CHAVE DO SERVIDOR MUDOU.\n" +

@@ -669,6 +669,22 @@ function desenharServidoresGuardados(guardados) {
         hospedarGuardado(s.id).catch((falha) => console.warn("hospedar:", falha));
       });
       caixa.append(botao);
+      const apagar = elemento("button", "botao-fantasma", "APAGAR SERVIDOR");
+      apagar.type = "button";
+      apagar.addEventListener("click", () => abrirConfirmacao(
+        "APAGAR SERVIDOR?",
+        `Apagar ${s.nome || s.id}, suas conversas e os dados dos MODs? Esta ação não pode ser desfeita.`,
+        "APAGAR SERVIDOR", async () => {
+          try {
+            await invoke("apagar_servidor", { id: s.id });
+            desenharServidoresGuardados(await invoke("servidores_guardados"));
+          } catch (falha) {
+            $("hospedar-erro").textContent = typeof falha === "string" ? falha : fraseDeErro(falha);
+            $("hospedar-erro").hidden = false;
+          }
+        },
+      ));
+      caixa.append(apagar);
       linha.append(caixa);
       return linha;
     }),

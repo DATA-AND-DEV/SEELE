@@ -56,7 +56,7 @@ const LIMITES_DA_REGIAO = Object.freeze({
   /** Opções numa escolha. */
   opcoes: 64,
   /** Bytes de mídia somados nesta região. */
-  bytesDeMidia: 4 * 1024 * 1024,
+  bytesDeMidia: 10 * 1024 * 1024,
 });
 
 /**
@@ -99,7 +99,7 @@ const LIMITES_DO_CARTAO = Object.freeze({
   /** Mídias somadas em todos os cartões deste MOD. */
   midias: 64,
   /** Bytes de mídia somados em todos os cartões deste MOD. */
-  bytesDeMidia: 8 * 1024 * 1024,
+  bytesDeMidia: 20 * 1024 * 1024,
 });
 
 /**
@@ -123,7 +123,7 @@ const PERFIS_DE_RENDER = Object.freeze({
   regiao: Object.freeze({
     nome: "regiao",
     nos: 512, fundura: 8, campos: 32, telas: 4, midias: 4,
-    bytesDeMidia: 4 * 1024 * 1024,
+    bytesDeMidia: 10 * 1024 * 1024,
     formas: null,
   }),
   cartao: Object.freeze({
@@ -965,7 +965,7 @@ class RegiaoDeMod {
             chave: plano.no.chave ?? "",
             arquivo: null,
             resultado: "falhou",
-            porque: String(falha?.message ?? falha),
+            porque: typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha),
           });
         })
         .finally(() => {
@@ -1019,7 +1019,7 @@ class RegiaoDeMod {
     const teto = tetoDeArquivo(plano.no);
     const exigencia = [
       papeis.length ? papeis.map((p) => (p === "som" ? "som" : "imagem")).join(" ou ") : "",
-      teto ? `até ${Math.round(teto / 1024)} KB` : "",
+      teto ? (teto >= 1024 * 1024 ? `até ${Math.round(teto / 1024 / 1024)} MB` : `até ${Math.round(teto / 1024)} KB`) : "",
     ].filter(Boolean).join(" · ");
     if (exigencia) elem.dataset.exigencia = exigencia;
     else delete elem.dataset.exigencia;

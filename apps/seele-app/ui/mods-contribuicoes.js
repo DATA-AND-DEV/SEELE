@@ -188,6 +188,7 @@ class RegistroDeContribuicoes {
         : "",
       rotulo: typeof pedido?.rotulo === "string" ? pedido.rotulo.slice(0, 120) : "",
       icone: typeof pedido?.icone === "string" ? pedido.icone.slice(0, 40) : "",
+      listarNaBarra: pedido?.listarNaBarra !== false,
       ordem: this.serie,
     };
 

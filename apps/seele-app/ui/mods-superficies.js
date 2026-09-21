@@ -223,6 +223,7 @@ class SuperficieDeMod {
     this.palcos = palcos;
     this.chave = String(descricao?.id ?? "").slice(0, 64) || "sem-id";
     this.tipo = Object.hasOwn(TIPOS_DE_SUPERFICIE, descricao?.tipo) ? descricao.tipo : "dialogo";
+    this.imersiva = this.tipo === "pagina" && descricao?.imersiva === true;
     this.modal = this.tipo === "dialogo" ? descricao?.modal !== false : false;
     this.titulo = String(descricao?.titulo ?? "").slice(0, 120);
     this.descricaoCurta = String(descricao?.descricao ?? "").slice(0, 300);
@@ -280,6 +281,7 @@ class SuperficieDeMod {
     } else if (this.tipo === "pagina") {
       this.raiz = elemento("section", "superficie-de-mod pagina-de-mod");
       this.raiz.setAttribute("role", "region");
+      this.raiz.dataset.imersiva = this.imersiva ? "sim" : "nao";
     } else if (this.tipo === "painel") {
       this.raiz = elemento("aside", "superficie-de-mod painel-de-mod");
       this.raiz.dataset.lado = this.lado;
@@ -298,6 +300,7 @@ class SuperficieDeMod {
 
     if (this.tipo === "aviso") {
       this.corpo = this.raiz;
+      this.raiz.textContent = this.titulo;
       return;
     }
 
@@ -363,7 +366,7 @@ class SuperficieDeMod {
     this.aplicarVisibilidade();
     this.aoPalcoMudar?.();
 
-    if (this.tipo === "dialogo" && this.modal) this.prenderFoco();
+    if ((this.tipo === "dialogo" && this.modal) || this.imersiva) this.prenderFoco();
     else if (this.tipo === "pagina") this.focarPrimeiro();
   }
 
@@ -385,7 +388,7 @@ class SuperficieDeMod {
     // Escurecer sem tornar inerte é a armadilha clássica: parece modal e
     // responde a Tab. Quem decide **quais** ramos é a pilha, porque a inércia
     // é do topo e não de cada diálogo.
-    empilharCamada(this.camada);
+    empilharCamada(this.camada ?? this.raiz);
 
     if (this.aoTeclar) {
       this.focarPrimeiro();
@@ -393,7 +396,7 @@ class SuperficieDeMod {
     }
 
     this.aoTeclar = (evento) => {
-      if (evento.defaultPrevented || pilhaDeCamadas.at(-1) !== this.camada
+      if (evento.defaultPrevented || pilhaDeCamadas.at(-1) !== (this.camada ?? this.raiz)
         || acordadosPorPedido.size) return;
       if (evento.key === "Escape") {
         evento.preventDefault();
@@ -633,7 +636,7 @@ class SuperficieDeMod {
     // **Sai de onde estiver.** Fechar fora de ordem é o caso normal: A abre, B
     // abre por cima, e A fecha primeiro porque o MOD dela respondeu. A pilha
     // tira A do meio e recalcula para B, que continua aberta.
-    desempilharCamada(this.camada);
+    desempilharCamada(this.camada ?? this.raiz);
     if (this.aoTeclar) {
       document.removeEventListener("keydown", this.aoTeclar);
       this.aoTeclar = null;
@@ -658,6 +661,7 @@ class SuperficieDeMod {
   descartar() {
     if (this.solta) return;
     this.solta = true;
+    clearTimeout(this.expiracao);
     this.liberarDestino();
     // **Esquecida, e não descartada de novo.** Quem está descartando somos
     // nós; pedir o descarte de volta daria uma volta que pararia na guarda
@@ -728,8 +732,10 @@ class SuperficiesDoMod {
    */
   enfileirarAviso(superficie) {
     this.avisos.push(superficie);
+    superficie.expiracao = setTimeout(() => this.descartar(superficie.chave),
+      superficie.raiz.dataset.tom === "erro" ? 10000 : 3500);
     while (this.avisos.length > TETO_DE_AVISOS) {
-      this.avisos.shift()?.descartar();
+      this.descartar(this.avisos[0].chave);
     }
   }
 

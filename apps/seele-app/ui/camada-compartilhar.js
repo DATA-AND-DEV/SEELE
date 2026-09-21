@@ -399,69 +399,26 @@ function mostrarErroDeTela(falha) {
   erroDeTela = fraseDeErro(falha);
 }
 
-/**
- * Os três tetos, como o Rust os recebe.
- *
- * **Constantes, e não escolhas.** Quatro controles pediam à pessoa o que
- * proteger quando a banda aperta, a altura, os quadros e o teto de banda —
- * quatro perguntas antes de mostrar a tela. A caixa hoje pergunta uma coisa só:
- * qual monitor. Ver a nota no `index.html` sobre o que cada valor substitui.
- *
- * `Movimento` e não `Nitidez`: a `specs/07` manda a resolução segurar e o
- * quadro ceder, e essa regra foi escrita para texto. Para o que se mostra numa
- * chamada — um jogo, uma janela em que se mexe — ela está invertida: a 8
- * quadros um jogo não fica pior, fica inutilizável.
- *
- * Nomes de campo em `snake_case` porque é assim que `LimitesDeTela` atravessa —
- * o mesmo acordo de `muted` e `sync_band` no snapshot. Banda vazia é `null` e
- * não zero: zero seria um teto de zero bit por segundo, que é o contrário de
- * «sem teto meu». O do servidor continua valendo, e ele é medido.
- */
+/** A resolução é teto; a adaptação à rede continua automática. */
 function limitesEscolhidos() {
   return {
     banda_bps: null,
-    // **O máximo, e não o provável.** Estes dois eram 720 e 30 — o padrão dos
-    // controles que saíram, copiado sem pensar no que ele significava depois de
-    // deixar de ser escolha. Eles são **tetos**: a escada de `resolucao_para`
-    // decide o que o cano de fato compra, e pedir menos do que o cano compra é
-    // jogar banda fora.
-    //
-    // Foi o que aconteceu em campo: com a escada consertada a imagem ficou
-    // estável e boa, e ainda assim «não ia pra 60fps» — porque eu tinha
-    // escrito 30 aqui. O limite não era a rede, era esta linha.
-    //
-    // Pedir 1080p60 não obriga ninguém a mandar 1080p60: numa casa apertada a
-    // escada desce para 720p ou 540p sozinha, que é exatamente o trabalho dela.
-    // O que ela não sabe fazer é subir acima do que se pediu.
-    altura_maxima: 1080,
+    altura_maxima: Number($("compartilhar-resolucao").value) || 1080,
     quadros_maximos: 60,
-    // **Nitidez, e a escolha do contrário custou a qualidade da imagem.**
-    //
-    // Quando o controle de nitidez-ou-movimento saiu da caixa, a constante que
-    // ficou no lugar dele foi `movimento` — e ninguém decidiu isso, foi o valor
-    // que estava selecionado. O efeito é grande e não é óbvio: os limiares de
-    // `movimento` são o **dobro** dos de nitidez, porque a mesma resolução em
-    // movimento custa cerca do dobro por quadro.
-    //
-    // Medido em campo, com o log do teto: uma casa entregando 1,58 Mbps dá
-    // **1080p** por nitidez e **540p** por movimento. A escada subiu certinho —
-    // 1,20 → 1,34 → 1,43 → 1,58 Mbps em 25 segundos — e a resolução não saiu de
-    // 540p porque faltavam 220 kbps para o limiar dobrado de 720p. O relato foi
-    // «muito pixelada», e era esta linha.
-    //
-    // Nitidez é o padrão certo para uma tela: quem compartilha mostra texto,
-    // código, navegador — e texto a 540p não se lê. Quem transmite jogo perde
-    // fluidez, e é a troca menos ruim: uma imagem legível a menos quadros ainda
-    // serve, uma imagem ilegível não serve para nada.
-    //
-    // **Minúsculo**, que é como o `Prioridade` do Rust atravessa: ele carrega
-    // `#[serde(rename_all = "lowercase")]`. Ao trocar o controle por uma
-    // constante eu escrevi o nome da variante — `Movimento` — em vez do nome do
-    // fio, e a ponte recusou com «unknown variant», parando o compartilhamento
-    // de uma vez. `frontend.rs` prende isso lendo o enum do Rust.
     prioridade: "nitidez",
   };
 }
+
+$("compartilhar-resolucao").addEventListener("change", async () => {
+  erroDeTela = null;
+  try {
+    const snapshot = await invoke("snapshot");
+    if (snapshot?.tela?.e_minha) {
+      await invoke("ajustar_limites_da_tela", { limites: limitesEscolhidos() });
+    }
+  } catch (falha) { mostrarErroDeTela(falha); }
+  await desenharCompartilhar();
+});
 
 // ---------------------------------------------------------------- navegação
 
@@ -469,6 +426,12 @@ function limitesEscolhidos() {
 async function abrirCompartilhar() {
   focoAntesDeCompartilhar = document.activeElement;
   erroDeTela = null;
+  try {
+    const snapshot = await invoke("snapshot");
+    if (snapshot?.tela?.e_minha && snapshot.tela.pedido) {
+      $("compartilhar-resolucao").value = String(snapshot.tela.pedido.altura_maxima);
+    }
+  } catch (_) { /* O desenho abaixo mostra falhas da sessão. */ }
   await desenharCompartilhar();
   $("compartilhar").hidden = false;
   // O foco na caixa e não na lista: quem abriu ainda vai ler o que a permissão
@@ -476,7 +439,7 @@ async function abrirCompartilhar() {
   // título que diz o que é isto.
   $("compartilhar").focus();
   anunciar(
-    "Compartilhar a tela. Escolha um monitor ou uma janela, e os três tetos. Escape fecha.",
+    "Compartilhar a tela. Escolha um monitor ou uma janela e a resolução. Escape fecha.",
   );
 }
 

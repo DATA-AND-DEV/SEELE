@@ -26,7 +26,8 @@ function rodar({ respostas, campo = "bytes" }) {
     daGeracaoDePe: () => true,
     meu: () => true,
     mod: { id: "a/b" },
-    PEDACOS_DE_MIDIA: 128,
+    PEDACOS_DE_MIDIA: 256,
+    TETO_DE_MIDIA_BASE64: 4 * Math.ceil(10 * 1024 * 1024 / 3) + 128,
     pedirAoServidor: async (_id, _canal, pedido) => {
       pedidos.push(JSON.parse(JSON.stringify(pedido)));
       return respostas(pedidos.length - 1);
@@ -71,8 +72,9 @@ function rodar({ respostas, campo = "bytes" }) {
       campo: "image",
       respostas: () => ({ image: "A", proximo: { offset: 1 } }),
     });
-    await resultado;
-    confere(caso, pedidos.length === 128, `pediu ${pedidos.length} vezes em vez de parar em 128`);
+    let recusou = false;
+    try { await resultado; } catch (e) { recusou = /incompleto/.test(e.message); }
+    confere(caso, recusou && pedidos.length === 256, `não recusou a continuação sem fim: ${pedidos.length}`);
   }
 
   // Um campo que não veio é dito pelo nome.

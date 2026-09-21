@@ -138,6 +138,14 @@
 
 .palco-de-paginas[hidden] { display: none; }
 
+/* A página imersiva ocupa a sessão e mantém a saída do produto visível. */
+.palco-de-paginas:has(> [data-imersiva="sim"]:not([hidden])) {
+  position: fixed;
+  inset: var(--seele-barra-janela, 32px) 0 0;
+  z-index: 30;
+}
+
+
 /* A coluna dos painéis: ela **acrescenta** uma coluna, e some quando não há
    nenhum. `.paineis` a declara em `tela-sessao.css`. */
 .palco-de-paineis {

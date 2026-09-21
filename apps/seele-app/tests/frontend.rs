@@ -13428,9 +13428,32 @@ fn so_um_link_de_imagem_e_buscado_e_so_uma_vez() {
 
     let parece = js_function(&fonte, "function pareceImagem(");
     assert!(
-        parece.contains("new URL(url).pathname"),
-        "a extensão passou a ser procurada na URL inteira, e não no caminho: \
+        parece.contains("EXTENSAO_DE_IMAGEM.test(endereco.pathname)"),
+        "a extensão passou a ser procurada fora do caminho do endereço: \
          `?x=.gif` na consulta faria qualquer página parecer imagem: {parece}"
+    );
+    assert!(
+        !parece.contains("EXTENSAO_DE_IMAGEM.test(url)"),
+        "a extensão voltou a ser procurada na URL crua: {parece}"
+    );
+    // **A exceção dos domínios de GIF é fechada, e vem do Rust.** Uma lista
+    // escrita aqui divergiria da que resolve a página do outro lado; e um
+    // `return true` no lugar dela entregaria o IP de quem lê a todo domínio
+    // colado na conversa, que é o que a função inteira existe para impedir.
+    assert!(
+        parece.contains("deUmDominioDeGif(endereco.hostname)"),
+        "a exceção dos domínios de GIF saiu, e uma página de Tenor volta a ser \
+         só um link: {parece}"
+    );
+    let de_um_dominio = js_function(&fonte, "function deUmDominioDeGif(");
+    assert!(
+        de_um_dominio.contains("dominiosDeGif.some"),
+        "a lista de domínios deixou de ser a do Rust: {de_um_dominio}"
+    );
+    assert!(
+        de_um_dominio.contains("`.${dominio}`"),
+        "a comparação de domínio perdeu o ponto, e `naotenor.com` passa a se \
+         passar por `tenor.com`: {de_um_dominio}"
     );
 
     let buscar = js_function(&fonte, "function buscarAPreviaDoLink(");

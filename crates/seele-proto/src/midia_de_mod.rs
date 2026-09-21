@@ -54,11 +54,9 @@ impl TipoDeMidia {
 
 /// **O maior arquivo que um MOD pode trazer**, por arquivo.
 ///
-/// Um mega. O caminho até a janela é um `data:` em base64, que cresce um terço
-/// e atravessa a ponte inteiro na memória das duas pontas; e a mídia de um MOD
-/// é ilustração e efeito, não acervo. Um teto maior seria um MOD segurando
-/// dezenas de megabytes na janela de quem está numa conversa.
-pub const TETO_DE_ARQUIVO: usize = 1024 * 1024;
+/// Dez MiB, o mesmo teto da seleção de imagens. A interface também limita
+/// a soma de mídias simultâneas por superfície.
+pub const TETO_DE_ARQUIVO: usize = 10 * 1024 * 1024;
 
 /// O que estes bytes são, ou nada.
 ///

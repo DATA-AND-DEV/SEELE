@@ -1387,6 +1387,19 @@ fn servidores_guardados(app: AppHandle) -> Vec<servidores::Servidor> {
     servidores::listar(&config_dir(&app))
 }
 
+/// Apaga somente com a hospedagem parada nesta janela.
+#[tauri::command]
+fn apagar_servidor(app: AppHandle, session: State<'_, Session>, id: String) -> Result<(), String> {
+    let hospedagem = session
+        .hospedagem
+        .lock()
+        .map_err(|_| "Hospedagem indisponível.")?;
+    if hospedagem.is_some() {
+        return Err("Encerre a hospedagem antes de apagar um servidor.".into());
+    }
+    servidores::apagar(&config_dir(&app), &id)
+}
+
 /// Guarda um servidor novo e devolve o que foi guardado.
 ///
 /// **Não o levanta.** Criar e hospedar são dois passos porque a tela de
@@ -3235,7 +3248,31 @@ async fn apagar_pacote_do_cache(
             motivo: "exigido-por-este-servidor".to_owned(),
         });
     }
-    mods::apagar_do_cache(std::path::Path::new(&config_dir(&app)), &hash).map_err(|falha| {
+    let config = config_dir(&app);
+    for servidor in servidores::listar(&config) {
+        let banco = servidor.caminho.as_ref().map_or_else(
+            || std::path::Path::new(&config).join("seele.db"),
+            |p| std::path::Path::new(&config).join(p),
+        );
+        if !banco.exists() {
+            continue;
+        }
+        let db = seele_server::persistence::Persistence::open(
+            &seele_server::persistence::Location::File(banco),
+        )
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+        let usados = seele_server::persistence::mods::enabled(&db)
+            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+        if usados.iter().any(|m| m.hash == hash) {
+            return Err(FalhaNoMod::Recusado {
+                motivo: format!(
+                    "Desligue este MOD no servidor {} antes de apagar.",
+                    servidor.nome
+                ),
+            });
+        }
+    }
+    mods::apagar_do_cache(std::path::Path::new(&config), &hash).map_err(|falha| {
         FalhaNoMod::Recusado {
             motivo: match falha {
                 mods::FalhaAoApagarPacote::HashTorto => "hash-torto".to_owned(),
@@ -3931,6 +3968,32 @@ async fn aplicar_mod(
 #[cfg(test)]
 const FONTE_DESTE_ARQUIVO: &str = include_str!("main.rs");
 
+/// Este arquivo sem as linhas de comentário, para os guardas de texto-fonte.
+///
+/// Sem isto, um guarda passa porque a coisa que ele procura está **escrita num
+/// comentário** — que é o defeito mais constrangedor que um guarda de
+/// texto-fonte pode ter: ele confere a si mesmo.
+#[cfg(test)]
+fn fonte_sem_comentarios() -> String {
+    FONTE_DESTE_ARQUIVO
+        .lines()
+        .filter(|linha| !linha.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// O corpo de uma função, do cabeçalho até a chave que a fecha na coluna zero.
+#[cfg(test)]
+fn corpo_de<'a>(fonte: &'a str, cabecalho: &str) -> &'a str {
+    let depois = fonte
+        .split_once(cabecalho)
+        .unwrap_or_else(|| panic!("`{cabecalho}` não está mais neste arquivo"))
+        .1;
+    depois
+        .split_once("\n}\n")
+        .map_or(depois, |(corpo, _)| corpo)
+}
+
 /// Por que um link de imagem não virou imagem.
 ///
 /// Enum e não frase, como as vizinhas: a fronteira erro→texto é do frontend.
@@ -3972,14 +4035,93 @@ enum FalhaNaPrevia {
 /// [`FalhaNaPrevia`], uma variante por motivo.
 #[tauri::command]
 async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
-    let alvo = endereco_que_pode_sair(&url).map_err(FalhaNaPrevia::NaoEAberto)?;
+    let cliente = cliente_da_previa()?;
+    let (alegado, bytes) = buscar_com_teto(&cliente, &url).await?;
 
-    let cliente = reqwest::Client::builder()
+    // A mesma conferência do anexo, e não uma segunda cópia dela: o tipo
+    // alegado tem de bater com o que os bytes dizem ser. Um endereço que
+    // promete `image/gif` e entrega HTML é recusado aqui.
+    if let seele_ffi::preview::Verdict::Draw(formato) =
+        seele_ffi::preview::judge(&alegado, &bytes)
+    {
+        return Ok(seele_ffi::preview::data_uri(formato, &bytes));
+    }
+
+    // **A página de um site de GIF, resolvida até a mídia que ela declara.**
+    //
+    // Só aqui, e só depois de os bytes já terem dito que não são imagem: o
+    // endereço nunca decide isto sozinho. Quem manda um GIF manda
+    // `tenor.com/view/…`, que é uma página HTML; sem este passo o produto
+    // deixava o link cru na conversa e a pessoa lia isso como defeito.
+    if e_de_um_dominio_de_gif(&url) && alegado.starts_with("text/html") {
+        let html = String::from_utf8_lossy(&bytes);
+        let midia = midia_declarada_pela_pagina(&html).ok_or(FalhaNaPrevia::NaoEImagem)?;
+        // **A mídia tem de morar no mesmo punhado de domínios.** Sem isto, uma
+        // página desta lista — ou um redirecionamento para ela — escolheria
+        // qualquer endereço do mundo para esta janela buscar, e a lista
+        // fechada não teria fechado nada.
+        if !e_de_um_dominio_de_gif(&midia) {
+            return Err(FalhaNaPrevia::NaoEImagem);
+        }
+        let (alegado, bytes) = buscar_com_teto(&cliente, &midia).await?;
+        return match seele_ffi::preview::judge(&alegado, &bytes) {
+            seele_ffi::preview::Verdict::Draw(formato) => {
+                Ok(seele_ffi::preview::data_uri(formato, &bytes))
+            }
+            _ => Err(FalhaNaPrevia::NaoEImagem),
+        };
+    }
+
+    Err(FalhaNaPrevia::NaoEImagem)
+}
+
+/// Os domínios cuja **página** é resolvida até a mídia que ela declara.
+///
+/// # Por que uma lista fechada, e não «resolver qualquer página»
+///
+/// Desenhar um link é buscá-lo, e buscar é aparecer. O guarda de
+/// `pareceImagem` existe para que o IP de quem lê a conversa não vá para todo
+/// domínio que outra pessoa cole ali — inclusive um posto na conversa só para
+/// colher endereços de quem a lê. Resolver qualquer página desfaria esse
+/// guarda inteiro, e não é o que este produto está disposto a trocar por um
+/// GIF.
+///
+/// O que a lista troca é menor e está dito: quem cola um link destes três
+/// entrega a esses três — que já sabem quem pediu o GIF, porque é deles que ele
+/// vem. Nenhum domínio novo passa a ser buscado.
+///
+/// **Domínio registrável, e a comparação é por sufixo de ponto.** `tenor.com`
+/// alcança `www.tenor.com` e `media.tenor.com`; e o ponto é o que impede
+/// `naotenor.com` de se passar por um deles — um `ends_with("tenor.com")` sem
+/// o ponto aceita qualquer domínio que termine nessas letras, e aí quem cola
+/// o link escolhe o endereço que esta janela busca.
+const DOMINIOS_DE_GIF: &[&str] = &["tenor.com", "giphy.com", "imgur.com"];
+
+/// Se este endereço mora num dos [`DOMINIOS_DE_GIF`].
+fn e_de_um_dominio_de_gif(url: &str) -> bool {
+    let Ok(endereco) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = endereco.host_str() else {
+        return false;
+    };
+    let host = host.to_ascii_lowercase();
+    DOMINIOS_DE_GIF
+        .iter()
+        .any(|dominio| host == *dominio || host.ends_with(&format!(".{dominio}")))
+}
+
+/// O cliente das buscas da prévia: um tempo, uma regra de salto, para as duas.
+///
+/// Extraído porque a resolução de uma página faz uma segunda busca, e duas
+/// construções seriam duas chances de uma delas perder a regra de salto.
+fn cliente_da_previa() -> Result<reqwest::Client, FalhaNaPrevia> {
+    reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         // **Sem redirecionamento seguido às cegas.** Um `https://` que
-        // responde `302 file:///…` ou `302 http://192.168.0.1/…` usaria esta
-        // janela para alcançar o que ela recusaria de frente. Cada salto é
-        // conferido pela mesma regra da primeira chamada.
+        // responde `302 file:///…` usaria esta janela para alcançar o que ela
+        // recusaria de frente. Cada salto é conferido pela mesma regra da
+        // primeira chamada.
         .redirect(reqwest::redirect::Policy::custom(|tentativa| {
             if tentativa.previous().len() >= 3 {
                 return tentativa.stop();
@@ -3990,8 +4132,19 @@ async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
             }
         }))
         .build()
-        .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?;
+        .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))
+}
 
+/// Busca um endereço e devolve o tipo alegado e os bytes, sob o teto.
+///
+/// # Errors
+///
+/// [`FalhaNaPrevia`], uma variante por motivo.
+async fn buscar_com_teto(
+    cliente: &reqwest::Client,
+    url: &str,
+) -> Result<(String, Vec<u8>), FalhaNaPrevia> {
+    let alvo = endereco_que_pode_sair(url).map_err(FalhaNaPrevia::NaoEAberto)?;
     let resposta = cliente
         .get(alvo)
         .send()
@@ -4000,7 +4153,7 @@ async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
         .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?;
 
     // O tipo que o outro lado alega. Ele **não** decide nada sozinho: quem
-    // decide são os bytes, logo abaixo.
+    // decide são os bytes, em `judge`.
     let alegado = resposta
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -4015,6 +4168,10 @@ async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
     // **O teto é aplicado enquanto chega, e não depois.** Confiar no
     // `Content-Length` seria confiar em quem está do outro lado; juntar tudo
     // para medir seria deixá-lo escolher quanta memória esta janela gasta.
+    //
+    // O mesmo teto vale para o HTML de uma página de GIF: ela também é bytes
+    // que outra pessoa serve, e um teto separado para ela seria um segundo
+    // número para a mesma pergunta.
     let mut bytes: Vec<u8> = Vec::new();
     let mut corpo = resposta;
     while let Some(pedaco) = corpo
@@ -4027,16 +4184,166 @@ async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
         }
         bytes.extend_from_slice(&pedaco);
     }
+    Ok((alegado, bytes))
+}
 
-    // A mesma conferência do anexo, e não uma segunda cópia dela: o tipo
-    // alegado tem de bater com o que os bytes dizem ser. Um endereço que
-    // promete `image/gif` e entrega HTML é recusado aqui.
-    match seele_ffi::preview::judge(&alegado, &bytes) {
-        seele_ffi::preview::Verdict::Draw(formato) => {
-            Ok(seele_ffi::preview::data_uri(formato, &bytes))
+/// O endereço da mídia que uma página declara para quem a compartilha.
+///
+/// `og:image` é o que Tenor, Giphy e Imgur escrevem para que a prévia apareça
+/// em qualquer lugar onde o link seja colado. Ler isso é usar o que a página
+/// publicou para este fim exato, e não raspar o HTML atrás de um `<img>`:
+/// aquele é o endereço que o site escolheu mostrar, e ele não muda quando o
+/// desenho da página muda.
+///
+/// `twitter:image` entra como recuo porque parte das páginas antigas do Imgur
+/// só trazem esse.
+///
+/// **Não resolve endereço relativo.** Um `og:image` relativo teria de ser
+/// juntado à base da página, e os três escrevem absoluto; devolver o relativo
+/// faria a conferência de domínio recusá-lo, que é o desfecho certo para o que
+/// este código não entende.
+fn midia_declarada_pela_pagina(html: &str) -> Option<String> {
+    for etiqueta in etiquetas_meta(html) {
+        let atributos = atributos_de(etiqueta);
+        let acha = |nome: &str| {
+            atributos
+                .iter()
+                .find(|(chave, _)| chave == nome)
+                .map(|(_, valor)| valor.clone())
+        };
+        let Some(qual) = acha("property").or_else(|| acha("name")) else {
+            continue;
+        };
+        if !matches!(
+            qual.trim().to_ascii_lowercase().as_str(),
+            "og:image" | "og:image:secure_url" | "twitter:image"
+        ) {
+            continue;
         }
-        _ => Err(FalhaNaPrevia::NaoEImagem),
+        let Some(conteudo) = acha("content") else {
+            continue;
+        };
+        // `&amp;` e mais nada: um endereço de mídia carrega parâmetros de
+        // consulta, e é essa a entidade que um gerador de HTML escreve neles.
+        let conteudo = conteudo.replace("&amp;", "&");
+        let conteudo = conteudo.trim();
+        if !conteudo.is_empty() {
+            return Some(conteudo.to_owned());
+        }
     }
+    None
+}
+
+/// Os trechos entre `<meta` e o `>` que o fecha.
+///
+/// A procura é na cópia em minúsculas e o corte é no original: `<META` e
+/// `<meta` são a mesma etiqueta, e `to_ascii_lowercase` não muda o tamanho em
+/// bytes de nada — então um deslocamento achado numa vale na outra.
+fn etiquetas_meta(html: &str) -> Vec<&str> {
+    let minusculo = html.to_ascii_lowercase();
+    minusculo
+        .match_indices("<meta")
+        .filter_map(|(inicio, _)| {
+            let resto = html.get(inicio + "<meta".len()..)?;
+            resto.get(..resto.find('>')?)
+        })
+        .collect()
+}
+
+/// Os pares `nome="valor"` de uma etiqueta, com o nome em minúsculas.
+///
+/// Escrito à mão e não com um analisador de HTML: a árvore deste app diz «nada
+/// além disto» sobre dependências, e o que se lê aqui são atributos de uma
+/// etiqueta que não aninha nada. O que ele **não** faz — entidades além de
+/// `&amp;`, atributo sem valor com significado, HTML malformado — só o faz
+/// devolver menos, e devolver menos é a página não ter prévia.
+fn atributos_de(etiqueta: &str) -> Vec<(String, String)> {
+    /// Onde o varredor está dentro da etiqueta.
+    enum Onde {
+        /// Juntando letras de um nome.
+        Nome,
+        /// O nome acabou num espaço, e o `=` ainda pode vir.
+        AntesDoIgual,
+        /// O `=` veio; o valor começa no próximo que não for espaço.
+        AntesDoValor,
+        /// Dentro do valor. `Some` são as aspas que o fecham; `None`, o espaço.
+        Valor(Option<char>),
+    }
+
+    let mut saida: Vec<(String, String)> = Vec::new();
+    let mut nome = String::new();
+    let mut valor = String::new();
+    let mut onde = Onde::Nome;
+
+    // Por caractere e não por índice: um `&str` não se fatia em qualquer byte,
+    // e um valor de atributo com acento faria o corte cair no meio de um.
+    for c in etiqueta.chars() {
+        match onde {
+            Onde::Nome => {
+                if c == '=' {
+                    onde = Onde::AntesDoValor;
+                } else if c.is_whitespace() {
+                    if !nome.is_empty() {
+                        onde = Onde::AntesDoIgual;
+                    }
+                } else if c == '/' {
+                    nome.clear();
+                } else {
+                    nome.push(c);
+                }
+            }
+            Onde::AntesDoIgual => {
+                if c == '=' {
+                    onde = Onde::AntesDoValor;
+                } else if !c.is_whitespace() {
+                    // Atributo sem valor. Nenhum dos que interessam é assim, e
+                    // o que começou aqui é o nome do próximo.
+                    nome.clear();
+                    nome.push(c);
+                    onde = Onde::Nome;
+                }
+            }
+            Onde::AntesDoValor => {
+                if c == '"' || c == '\'' {
+                    onde = Onde::Valor(Some(c));
+                } else if !c.is_whitespace() {
+                    valor.push(c);
+                    onde = Onde::Valor(None);
+                }
+            }
+            Onde::Valor(fecha) => {
+                let acabou = fecha.map_or_else(|| c.is_whitespace(), |aspa| c == aspa);
+                if acabou {
+                    saida.push((nome.to_ascii_lowercase(), std::mem::take(&mut valor)));
+                    nome.clear();
+                    onde = Onde::Nome;
+                } else {
+                    valor.push(c);
+                }
+            }
+        }
+    }
+    // Um valor sem aspas encostado no fim da etiqueta ainda é um valor. Um
+    // valor com aspas que nunca fecham é etiqueta quebrada, e cai fora.
+    if matches!(onde, Onde::Valor(None)) {
+        saida.push((nome.to_ascii_lowercase(), valor));
+    }
+    saida
+}
+
+/// Os domínios cuja página esta janela resolve, para o lado de lá decidir a
+/// quem perguntar.
+///
+/// Lido daqui e não escrito na janela pelo mesmo motivo de
+/// [`regras_de_previa`]: duas cópias de uma lista discordam algum dia, e esta
+/// discordaria oferecendo buscar um domínio que o Rust depois recusa — ou,
+/// pior, deixando de buscar um que ele aceitaria.
+#[tauri::command]
+fn dominios_de_gif() -> Vec<String> {
+    DOMINIOS_DE_GIF
+        .iter()
+        .map(|dominio| (*dominio).to_owned())
+        .collect()
 }
 
 /// O código do cliente de um MOD, conferido, para a janela pôr num `Worker`.
@@ -5441,19 +5748,14 @@ fn assistir(session: State<'_, Session>, tela: u32, quero: bool) -> Result<(), C
     session.connection()?.assistir(tela, quero)
 }
 
-// `ajustar_limites_da_tela` saiu daqui.
-//
-// Ela mudava os tetos no meio da transmissão sem cortá-la — comando próprio e
-// não um `compartilhar_tela` de novo, porque recomeçar piscaria a imagem de
-// todo mundo por causa de um controle mexido por uma pessoa só.
-//
-// Os controles saíram: a caixa de compartilhar pergunta qual monitor e mais
-// nada, e os tetos são constantes. Sem controle não há o que ajustar, e um
-// comando registrado que ninguém chama é superfície de ponte sem dono —
-// `no_command_is_registered_and_never_called` recusa, com razão.
-//
-// O método continua em `seele-ffi`, onde o terminal o alcança. Voltar a oferecer
-// a escolha é desenhar a caixa e registrar o comando de novo.
+/// Altera a resolução sem interromper a captura.
+#[tauri::command]
+fn ajustar_limites_da_tela(
+    session: State<'_, Session>,
+    limites: seele_ffi::LimitesDeTela,
+) -> Result<(), ConnectionError> {
+    session.connection()?.ajustar_limites_da_tela(limites)
+}
 
 /// Põe a janela em tela cheia, ou a tira de lá.
 ///
@@ -6913,6 +7215,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             abrir_no_navegador,
             previa_de_link,
+            dominios_de_gif,
             aplicar_conjunto_de_mods,
             codigo_do_mod,
             midia_do_mod,
@@ -6937,6 +7240,7 @@ fn main() {
             versoes_instaladas,
             servidores_guardados,
             criar_servidor,
+            apagar_servidor,
             abrir_versao,
             abertura,
             instalar_mod,
@@ -6995,6 +7299,7 @@ fn main() {
             permissao_de_tela,
             pedir_permissao_de_tela,
             compartilhar_tela,
+            ajustar_limites_da_tela,
             parar_de_compartilhar,
             pedir_quadro_chave,
             assistir,
@@ -7247,7 +7552,108 @@ mod a_tela_le_os_limites_que_o_rust_manda {
 /// errado.
 #[cfg(test)]
 mod o_que_sai_desta_janela_por_um_link {
-    use super::endereco_que_pode_sair;
+    use super::{
+        e_de_um_dominio_de_gif, endereco_que_pode_sair, midia_declarada_pela_pagina,
+        DOMINIOS_DE_GIF,
+    };
+
+    /// **A lista de domínios é fechada, e o sufixo é conferido com o ponto.**
+    ///
+    /// O defeito que este teste existe para impedir é de uma linha: um
+    /// `ends_with("tenor.com")` sem ponto deixa `tenor.com.exemplo.br` passar,
+    /// e aí quem cola um link escolhe o domínio que esta janela busca — que é
+    /// exatamente o que a lista fechada existe para não permitir.
+    #[test]
+    fn so_os_dominios_da_lista_tem_a_pagina_resolvida() {
+        for bom in [
+            "https://tenor.com/view/gato-dancando-gif-12345",
+            "https://www.tenor.com/view/x-gif-1",
+            "https://media.tenor.com/abc/dancando.gif",
+            "https://GIPHY.com/gifs/algo",
+            "https://i.imgur.com/abc.gif",
+        ] {
+            assert!(e_de_um_dominio_de_gif(bom), "recusou `{bom}`");
+        }
+        for hostil in [
+            // O sufixo sem o ponto: o caso que a comparação ingênua deixa passar.
+            "https://tenor.com.exemplo.br/colher-ip",
+            "https://naotenor.com/x",
+            "https://exemplo.br/tenor.com/x",
+            "https://exemplo.br/?a=tenor.com",
+            "https://192.168.0.1/roteador",
+            "nao e um endereco",
+        ] {
+            assert!(!e_de_um_dominio_de_gif(hostil), "aceitou `{hostil}`");
+        }
+    }
+
+    /// **O que a página declara é lido de `og:image`, em qualquer ordem.**
+    ///
+    /// A ordem dos atributos é de quem escreve o HTML, e um leitor que exigisse
+    /// `property` antes de `content` funcionaria num dos três sites e não nos
+    /// outros — a forma de defeito que só aparece em produção, num site só.
+    #[test]
+    fn a_midia_declarada_e_lida_venha_em_que_ordem_vier() {
+        let casos = [
+            r#"<meta property="og:image" content="https://media.tenor.com/a.gif">"#,
+            r#"<meta content="https://media.tenor.com/a.gif" property="og:image"/>"#,
+            r#"<meta   property = 'og:image'   content = 'https://media.tenor.com/a.gif' >"#,
+            r#"<META PROPERTY="OG:IMAGE" CONTENT="https://media.tenor.com/a.gif">"#,
+            r#"<meta name="twitter:image" content="https://media.tenor.com/a.gif">"#,
+            r#"<meta property="og:image:secure_url" content="https://media.tenor.com/a.gif">"#,
+        ];
+        for html in casos {
+            assert_eq!(
+                midia_declarada_pela_pagina(html).as_deref(),
+                Some("https://media.tenor.com/a.gif"),
+                "não leu: {html}"
+            );
+        }
+    }
+
+    /// `&amp;` volta a ser `&`: um endereço de mídia carrega consulta.
+    #[test]
+    fn a_entidade_do_e_comercial_volta_ao_endereco() {
+        let html = r#"<meta property="og:image" content="https://media.tenor.com/a.gif?w=1&amp;h=2">"#;
+        assert_eq!(
+            midia_declarada_pela_pagina(html).as_deref(),
+            Some("https://media.tenor.com/a.gif?w=1&h=2")
+        );
+    }
+
+    /// **Uma página sem declaração não vira imagem nenhuma.**
+    ///
+    /// E o que ela traz de parecido não conta: um `<img>` no corpo é desenho da
+    /// página, não o que ela publicou para quem compartilha o link.
+    #[test]
+    fn uma_pagina_sem_declaracao_nao_da_midia() {
+        for html in [
+            "<html><body><img src=\"https://media.tenor.com/a.gif\"></body></html>",
+            r#"<meta name="description" content="um gato dançando">"#,
+            r#"<meta property="og:title" content="og:image">"#,
+            r#"<meta property="og:image" content="">"#,
+            r#"<meta property="og:image">"#,
+            "",
+        ] {
+            assert_eq!(midia_declarada_pela_pagina(html), None, "leu de: {html}");
+        }
+    }
+
+    /// A lista existe e é pequena: ela é uma troca de privacidade, e uma troca
+    /// que cresce sem ninguém olhar deixa de ser uma troca.
+    #[test]
+    fn a_lista_de_dominios_e_curta_e_nomeada() {
+        assert!(
+            DOMINIOS_DE_GIF.len() <= 5,
+            "a lista cresceu sem quem a defendesse: {DOMINIOS_DE_GIF:?}"
+        );
+        for dominio in DOMINIOS_DE_GIF {
+            assert!(
+                dominio.contains('.') && !dominio.starts_with('.'),
+                "`{dominio}` não é um domínio registrável"
+            );
+        }
+    }
 
     /// **A busca de uma imagem de link tem três travas, e elas têm de estar lá.**
     ///
@@ -7264,43 +7670,56 @@ mod o_que_sai_desta_janela_por_um_link {
     ///
     /// Guarda de texto-fonte porque as três só se exercitam contra um servidor
     /// de verdade, e um teste que levantasse um seria um teste que sai à rede.
+    ///
+    /// **As travas moram em `buscar_com_teto`**, e não no comando, desde que a
+    /// prévia passou a fazer duas buscas — a página e a mídia que ela declara.
+    /// Isso é o ponto: uma segunda busca escrita à mão, ao lado, é uma segunda
+    /// busca sem as três travas, e este teste é o que obriga as duas a
+    /// passarem pela mesma porta.
     #[test]
     fn a_busca_de_imagem_de_link_confere_esquema_teto_e_bytes() {
-        let fonte = super::FONTE_DESTE_ARQUIVO;
-        let sem_comentario: String = fonte
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .filter(|linha| !linha.trim_start().starts_with("///"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let corpo = sem_comentario
-            .split_once("async fn previa_de_link(")
-            .expect("o comando da prévia de link")
-            .1;
-        let ate_o_fim = corpo
-            .split_once("\n#[tauri::command]")
-            .map_or(corpo, |(antes, _)| antes);
+        let sem_comentario = super::fonte_sem_comentarios();
+        let busca = super::corpo_de(&sem_comentario, "async fn buscar_com_teto(");
 
         assert!(
-            ate_o_fim.contains("endereco_que_pode_sair(&url)"),
-            "a prévia deixou de conferir o esquema: um `file://` colado na \
-             conversa faria esta janela ler o disco de quem lê: {ate_o_fim}"
+            busca.contains("endereco_que_pode_sair(url)"),
+            "a busca deixou de conferir o esquema: um `file://` colado na \
+             conversa faria esta janela ler o disco de quem lê: {busca}"
         );
         assert!(
-            ate_o_fim.contains("PREVIEW_LIMIT") && ate_o_fim.contains(".chunk()"),
+            busca.contains("PREVIEW_LIMIT") && busca.contains(".chunk()"),
             "o teto deixou de ser aplicado enquanto os bytes chegam: quem \
-             responde escolhe quanta memória esta janela gasta: {ate_o_fim}"
+             responde escolhe quanta memória esta janela gasta: {busca}"
+        );
+
+        let comando = super::corpo_de(&sem_comentario, "async fn previa_de_link(");
+        assert!(
+            comando.matches("judge(&alegado, &bytes)").count() == 2,
+            "uma das duas buscas deixou de conferir os bytes contra o tipo \
+             alegado: um endereço que promete imagem e entrega outra coisa \
+             passa: {comando}"
+        );
+        // **A segunda busca é a que a página escolhe**, e é por isso que ela
+        // tem uma trava a mais: sem a conferência de domínio, uma página desta
+        // lista apontaria esta janela para qualquer endereço do mundo, e a
+        // lista fechada não teria fechado nada.
+        assert!(
+            comando.contains("if !e_de_um_dominio_de_gif(&midia)"),
+            "a mídia declarada por uma página deixou de ser conferida contra a \
+             lista de domínios: {comando}"
         );
         assert!(
-            ate_o_fim.contains("judge(&alegado, &bytes)"),
-            "os bytes deixaram de ser conferidos contra o tipo alegado: um \
-             endereço que promete imagem e entrega outra coisa passa: {ate_o_fim}"
+            comando.contains("alegado.starts_with(\"text/html\")"),
+            "a resolução de página deixou de exigir que a resposta fosse HTML: \
+             {comando}"
         );
+
+        let cliente = super::corpo_de(&sem_comentario, "fn cliente_da_previa(");
         assert!(
-            ate_o_fim.contains("redirect(reqwest::redirect::Policy::custom"),
+            cliente.contains("redirect(reqwest::redirect::Policy::custom"),
             "os redirecionamentos voltaram a ser seguidos às cegas: um `https` \
              que responde `302` para outro esquema usaria esta janela para \
-             alcançar o que ela recusaria de frente: {ate_o_fim}"
+             alcançar o que ela recusaria de frente: {cliente}"
         );
     }
 

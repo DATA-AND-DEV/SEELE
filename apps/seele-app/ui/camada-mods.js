@@ -360,6 +360,24 @@ function linhaDeModInstalado(mod, hospedando) {
   //
   // Derivado a cada desenho, e não guardado: um estado guardado é o que fica
   // para trás quando o de verdade muda.
+  const remover = elemento("button", "botao-fantasma", "APAGAR MOD");
+  remover.type = "button";
+  remover.disabled = mod.enabled || modsExigidos.get(mod.id) === mod.hash;
+  remover.title = remover.disabled ? "Desligue o MOD e salve antes de apagar." : "Apagar o pacote desta máquina";
+  remover.addEventListener("click", () => abrirConfirmacao(
+    "APAGAR MOD?", `Apagar ${mod.id} desta máquina? Os dados dos servidores serão preservados.`,
+    "APAGAR MOD", async () => {
+      try {
+        await invoke("apagar_pacote_do_cache", { hash: mod.hash });
+        rascunho.delete(chaveDoPacote(mod));
+        await desenharMods();
+      } catch (falha) {
+        $("mods-gestao-erro").textContent = fraseDeErro(falha);
+        $("mods-gestao-erro").hidden = false;
+      }
+    },
+  ));
+  caixa.append(remover);
   const chave = chaveDoPacote(mod);
   const selecionado = rascunho.has(chave);
   const ativo = conjuntoNoServidor.has(chave);

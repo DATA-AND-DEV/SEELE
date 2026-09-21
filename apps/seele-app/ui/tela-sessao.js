@@ -1429,15 +1429,40 @@ const previasDeLink = new Map();
  * conversa só para colher endereços de quem a lê.
  *
  * Pelo caminho terminar em extensão de imagem, o que atravessa é o link
- * **direto** de mídia, que é o que se cola quando se quer mostrar um GIF. Uma
- * página que fala de um GIF continua sendo só um link clicável — e é o
- * comportamento certo: ela não é uma imagem.
+ * **direto** de mídia. Uma página qualquer que fale de um GIF continua sendo só
+ * um link clicável — e é o comportamento certo: ela não é uma imagem.
+ *
+ * **A exceção é um punhado de domínios, e ela tem nome.** Quem manda um GIF
+ * manda `tenor.com/view/…`, que é uma página; exigir o link direto era exigir
+ * que a pessoa soubesse a diferença, e o produto parecia não mostrar GIF
+ * nenhum. Esses domínios saem de `dominios_de_gif`, no Rust, que é também quem
+ * resolve a página até a mídia — e a troca que isso faz está escrita lá.
+ *
+ * O que **não** muda: nenhum domínio que alguém cole na conversa passa a ser
+ * buscado. A lista é fechada e vem dentro do produto.
  */
 const EXTENSAO_DE_IMAGEM = /\.(gif|png|jpe?g|webp)$/i;
 
+/**
+ * Os domínios de GIF, do Rust. Vazio até a resposta chegar, e vazio é o
+ * comportamento de antes — nenhuma página buscada.
+ */
+let dominiosDeGif = [];
+
+function deUmDominioDeGif(host) {
+  const nome = host.toLowerCase();
+  // O ponto é o que impede `naotenor.com` de se passar por `tenor.com`: sem
+  // ele, todo domínio que termine nessas letras entra na lista fechada.
+  return dominiosDeGif.some((dominio) => nome === dominio || nome.endsWith(`.${dominio}`));
+}
+
 function pareceImagem(url) {
   try {
-    return EXTENSAO_DE_IMAGEM.test(new URL(url).pathname);
+    const endereco = new URL(url);
+    // A extensão é procurada **no caminho**, e não na URL inteira: `?x=.gif`
+    // na consulta faria qualquer página parecer imagem.
+    if (EXTENSAO_DE_IMAGEM.test(endereco.pathname)) return true;
+    return deUmDominioDeGif(endereco.hostname);
   } catch {
     return false;
   }
@@ -2146,7 +2171,8 @@ function redesenharAsEntradasDeMod() {
   const cabeca = $("cabeca-mods-navegacao");
   if (!lista || !cabeca) return;
 
-  const entradas = contribuicoesDosMods.para("servidor.navegacao");
+  const entradas = contribuicoesDosMods.para("servidor.navegacao")
+    .filter(entrada => entrada.listarNaBarra !== false);
   const vazia = entradas.length === 0;
   lista.hidden = vazia;
   cabeca.hidden = vazia;
@@ -3721,6 +3747,11 @@ invoke("regras_de_previa")
     regrasDePrevia = regras;
   })
   .catch((falha) => console.warn("regras_de_previa:", falha));
+invoke("dominios_de_gif")
+  .then((dominios) => {
+    dominiosDeGif = dominios;
+  })
+  .catch((falha) => console.warn("dominios_de_gif:", falha));
 // Duas listas, um manipulador: as salas de voz e as Linhas ganharam cabeçalhos
 // próprios (`B·03` e `B·04`) e deixaram de caber numa lista só.
 $("lista-voice_rooms").addEventListener("click", alternarCanal);

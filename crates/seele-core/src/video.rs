@@ -741,6 +741,18 @@ pub struct LimitesDeTela {
     pub prioridade: Prioridade,
 }
 
+impl LimitesDeTela {
+    /// Palpite inicial de caminho por resolução; a sonda o corrige pela rede.
+    #[must_use]
+    pub const fn caminho_inicial_bps(&self) -> u32 {
+        match self.resolucao {
+            Resolucao::P540 => 3_000_000,
+            Resolucao::P720 => 5_000_000,
+            Resolucao::P1080 => 8_000_000,
+        }
+    }
+}
+
 impl Default for LimitesDeTela {
     /// O que a lista fechada do §5 tem como padrão: 720p a 30, sem teto de
     /// banda próprio.

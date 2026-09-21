@@ -109,10 +109,12 @@
    o que não tem volta, e esquecer um servidor não tem — mas mostrá-lo aceso em
    toda linha faria a lista inteira parecer um alerta. */
 .servidor-esquecer {
-  width: 34px;
+  width: auto;
+  min-width: 70px;
+  padding-inline: 8px;
   flex: 0 0 auto;
   font: inherit;
-  font-size: 13px;
+  font-size: 10px;
   color: var(--seele-osso-apagado);
   background: none;
   border: 1px solid var(--seele-linha-forte);
