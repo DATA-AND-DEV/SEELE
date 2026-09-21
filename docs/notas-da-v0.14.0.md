@@ -202,6 +202,34 @@ foi conferida revertendo o guarda que ela protege e vendo-a falhar.
 
 ---
 
+## A voz deixa de ser cortada no modo por ativação
+
+O relato foi direto: no modo por voz, *«corta muito a voz»*.
+
+O portão abria a **−34 dBFS**, e quem fala baixo — ou está a um braço de
+distância do microfone — ficava abaixo disso e simplesmente não era
+transmitido. Sem nada na tela dizendo por quê, que é a pior forma que um
+defeito toma aqui: o produto sabia e não contava.
+
+Ele passa a abrir a **−42 dBFS**, com os mesmos 6 dB de histerese de sempre
+entre abrir e fechar. São oito decibéis de alcance.
+
+**Por que não mais do que isso.** O pedido inicial foram −60 dBFS, que é o
+padrão em portões que rodam **depois** de supressão de ruído, onde o piso da
+sala já foi removido. Este portão não tem esse luxo: ele é a única defesa. O
+ruído de sala que o próprio módulo modela está entre −48 e −43 dBFS, e um
+limiar de −60 fica 17 dB **abaixo** disso — o ventilador segura o canal aberto
+o dia inteiro, que é o modo aberto com outro nome. A medida está no teste
+`room_tone_does_not_open_the_gate`, e ele reprova a −60.
+
+**A supressão de ruído é o que compra o resto, e ela não está aqui.** O
+[ADR 0007](adr/0007-sem-dsp-externo-em-v1.md) a deixou fora da v1 junto com
+ganho automático e cancelamento de eco — as três moram na mesma biblioteca C++
+e são uma decisão só. Com ela, o portão pode descer muito mais. Fica para a
+v0.15.0, com emenda ao ADR.
+
+---
+
 ## A gestão de MODs saiu de onde não devia estar
 
 - Ela aparece **apenas nas configurações de uma sessão conectada**. Uma seção

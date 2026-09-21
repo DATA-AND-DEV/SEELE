@@ -23,15 +23,41 @@
 
 /// How loud a frame must be, in RMS, before voice activation opens.
 ///
-/// About −34 dBFS. Above room tone and laptop fan, below a quiet speaking voice.
-const OPEN_RMS: f32 = 0.02;
+/// About −42 dBFS.
+///
+/// # It was −34, and field use said that was too high
+///
+/// The report was plain: voice activation *«corta muito a voz»*. At −34 dBFS a
+/// quiet speaker, or anyone a arm's length from the microphone, sat below the
+/// threshold and was simply never transmitted — with nothing on screen to say
+/// why, which is the worst shape a defect can take here.
+///
+/// **Why −42 and not lower.** The first ask was −60 dBFS, which is the default
+/// in gates that run *after* noise suppression, where the room floor has
+/// already been removed. This gate has no such luxury — it is the only defence
+/// — and [`room_tone_does_not_open_the_gate`] models room tone at −48 to
+/// −43 dBFS. A −60 dBFS threshold sits 17 dB *below* that: the fan holds the
+/// channel open all day, which is `GateMode::Open` wearing another name. The
+/// measurement is in that test, and it fails at −60.
+///
+/// So −42: eight decibels of reach gained, and still above the loudest room
+/// tone this module claims to know about. Noise suppression is what buys the
+/// rest, and ADR 0007 has it out of v1 — the seam in this module's header is
+/// still the seam.
+///
+/// [`room_tone_does_not_open_the_gate`]: self
+const OPEN_RMS: f32 = 0.008;
 
 /// How quiet it must fall before the gate closes again.
 ///
-/// About −40 dBFS. Deliberately lower than [`OPEN_RMS`]: with a single
+/// About −48 dBFS. Deliberately lower than [`OPEN_RMS`]: with a single
 /// threshold, a voice hovering around it chatters the gate open and shut several
 /// times a second, which is far more distracting than either state.
-const CLOSE_RMS: f32 = 0.01;
+///
+/// It keeps the same 6 dB of hysteresis it always had — the two moved together,
+/// because the distance between them is the part that stops the chatter, not
+/// either number on its own.
+const CLOSE_RMS: f32 = 0.004;
 
 /// How long the gate stays open after the level drops, in milliseconds.
 ///
@@ -367,6 +393,24 @@ mod tests {
         }
         let metrics = gate.metrics();
         assert_eq!(metrics.frames_open + metrics.frames_closed, 100);
+    }
+
+    #[test]
+    fn a_quiet_voice_opens_the_gate() {
+        // The field report that moved the thresholds: voice activation was
+        // clipping speech. At the old -34 dBFS a quiet speaker sitting at
+        // -40 dBFS never opened the gate at all — they were simply inaudible,
+        // with nothing on screen to say why.
+        //
+        // -40 dBFS is above the room tone this module models (-48 to -43) and
+        // below the old opening threshold, which is exactly the band that was
+        // being thrown away.
+        let mut gate = voice_gate();
+        assert!(
+            gate.update(&frame_at(0.01)),
+            "a voice at -40 dBFS did not open the gate: the opening threshold is \
+             back above a quiet speaker, and voice activation clips them again"
+        );
     }
 
     #[test]
