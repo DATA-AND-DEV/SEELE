@@ -85,10 +85,43 @@ pub const PISO_DE_BANDA_BPS: u32 = 200_000;
 /// **Hipótese, e escrita como hipótese.** O §8 pergunta 2 continua aberta —
 /// ninguém mede quanto cabe num caminho que não está sendo enchido — e o
 /// produto não tem resposta. Assume-se o cano sobre o qual as duas provas
-/// rodaram. O arranque agora supõe 8 Mbps para permitir os perfis de resolução
-/// escolhidos no cliente; é hipótese, não medição. A primeira janela congestionada
-/// reduz a estimativa e a reserva de voz continua em vigor.
-pub const CAMINHO_DO_SERVER_BPS: u32 = 8_000_000;
+/// rodaram, 2000 kbps de subida, que é a única suposição com número atrás.
+///
+/// É o número que o §5.1 chama de *«caminho de quem hospeda»*, e é a perna que
+/// o produto até agora **não media**: o teto saía do caminho de quem
+/// compartilha, e com o servidor encaminhando é a subida do servidor que estoura
+/// primeiro.
+///
+/// Só a admissão deste lado sai daqui. **No fio ele não vai** — ver
+/// [`caminho_no_fio`], e a diferença entre os dois é o assunto inteiro destas
+/// vinte linhas.
+///
+/// # Ele já foi 8 Mbps por um release, e voltou
+///
+/// A v0.14.0 o subiu para 8 Mbps «para permitir os perfis de resolução
+/// escolhidos no cliente». **Não permitiu, e cegou a medida.** As duas metades,
+/// medidas:
+///
+/// Este número é o ponto de partida de [`SondaDaSubida`], e num servidor sem
+/// ninguém compartilhando tela `permitido_bps` é zero — então `cheia` é falso e
+/// a **única** porta para uma medida é o piso demonstrado, que exige
+/// `entregue_bps > antes`. Uma sala de quatro pessoas conversando entrega
+/// 6 a 7,2 Mbps (medido em `tests/subida_no_arranque.rs`). Contra 2 Mbps ela
+/// ultrapassa e o servidor aprende o cano; contra 8 Mbps não ultrapassa, `mediu`
+/// nunca vira verdadeiro, e este servidor fica na hipótese para sempre — sem
+/// nada para o portão de admissão, sem nada para o fio, e sem nada para o disco
+/// lembrar no arranque seguinte.
+///
+/// E o que a subida comprava não era 1080p. O teto é
+/// [`FRACAO_DO_CAMINHO`] disto, e o limiar de 1080p do cliente são 6 240 000 bps
+/// — que pedem **10,4 Mbps** de caminho. A 8 Mbps o teto é 4 800 000, que compra
+/// 720p; a 2 Mbps ele compra 540p no primeiro segundo e 720p assim que a
+/// primeira janela mede. Trocou-se a medida por um degrau nos primeiros
+/// segundos, e a escada daria o mesmo degrau sozinha.
+///
+/// Quem quiser mexer neste número de novo: `a_hipotese_deixa_o_piso_demonstrado
+/// _disparar` é o guarda, e ele diz o que quebra.
+pub const CAMINHO_DO_SERVER_BPS: u32 = 2_000_000;
 
 /// Com que subida o portão de admissão nasce.
 ///
@@ -1246,6 +1279,49 @@ mod tests {
             CAMINHO_DO_SERVER_BPS,
             "o cano reclamou e a estimativa subiu assim mesmo: o teto do vídeo \
              passa a cobrir bits que a voz está usando"
+        );
+    }
+
+    /// **A hipótese tem de ser baixa o bastante para uma sala normal prová-la.**
+    ///
+    /// Num servidor sem ninguém compartilhando tela, `permitido_bps` é zero,
+    /// `cheia` é falso, e a **única** porta para uma medida é o piso
+    /// demonstrado — que exige `entregue_bps > antes`. Se
+    /// [`CAMINHO_DO_SERVER_BPS`] nascer acima do que uma conversa comum empurra,
+    /// essa porta não abre nunca: `mediu` fica falso, o fio não recebe medida
+    /// nenhuma, o portão de admissão fica na suposição e o disco não tem o que
+    /// lembrar para o arranque seguinte.
+    ///
+    /// **Aconteceu.** A v0.14.0 subiu a hipótese de 2 para 8 Mbps, e os dois
+    /// testes de `tests/subida_no_arranque.rs` reprovaram com «o servidor
+    /// continua sem medida nenhuma». Aqueles dois levam sete segundos e sobem
+    /// quatro conexões QUIC de verdade; este roda em microssegundos e diz a
+    /// mesma coisa, que é o que ele existe para fazer — o guarda que faltava
+    /// entre mexer na constante e descobrir pela bateria.
+    ///
+    /// Os 6 Mbps são a ponta de baixo do que aqueles testes mediram numa sala de
+    /// quatro pessoas conversando: 5 971 788 e 7 243 691 bps.
+    #[test]
+    fn a_hipotese_deixa_o_piso_demonstrado_disparar() {
+        const CONVERSA_DE_QUATRO_BPS: u32 = 6_000_000;
+
+        let mut sonda = SondaDaSubida::nova();
+        let inicio = Instant::now();
+        // Sem tela: `permitido` é zero, e é esse o caso que importa.
+        sonda.observar(inicio, &leitura(0, 0, 0));
+        let andou = sonda.observar(
+            inicio + Duration::from_secs(1),
+            &leitura(bytes_em_um_segundo(CONVERSA_DE_QUATRO_BPS), 0, 0),
+        );
+
+        assert!(
+            andou.is_some(),
+            "uma sala de quatro conversando empurrou {CONVERSA_DE_QUATRO_BPS} bps \
+             por este cano e a estimativa não se moveu de {} bps: a hipótese \
+             nasceu acima do que uma conversa demonstra, o piso demonstrado não \
+             dispara, e este servidor nunca sai da suposição — nem para o fio, \
+             nem para o portão, nem para o disco",
+            CAMINHO_DO_SERVER_BPS
         );
     }
 

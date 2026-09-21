@@ -72,9 +72,28 @@ um palpite único; agora ela parte de 3, 5 ou 8 Mbps conforme 540p, 720p ou
 lembrada daquele servidor prevalece sobre o palpite** — o palpite só vale quando
 não há nada medido.
 
-Do lado do servidor, o arranque não medido subiu de 2 para 8 Mbps. Continua
-sendo **hipótese escrita como hipótese**: a primeira janela congestionada reduz
-a estimativa, e a reserva de voz continua em vigor.
+**Do lado do servidor, a hipótese continua em 2 Mbps** — e essa frase custou
+uma bateria reprovada para ficar de pé.
+
+Ela chegou a subir para 8 Mbps nesta mesma onda, pelo motivo certo: com 2 Mbps
+o teto inicial compra 540p, e a resolução escolhida nasceria cortada. Só que a
+subida cegou a medida. Num servidor sem ninguém compartilhando tela,
+`permitido_bps` é zero e a **única** porta para uma medida é o piso
+demonstrado, que exige entregar mais do que a hipótese. Uma sala de quatro
+conversando entrega 6 a 7,2 Mbps: contra 2 Mbps ela ultrapassa e o servidor
+aprende o cano; contra 8 Mbps, não — e aí nada chega ao portão de admissão, ao
+fio, nem ao disco para o arranque seguinte lembrar.
+
+E o degrau que a subida comprava não era o prometido. O teto é 60% do caminho,
+e o limiar de 1080p são 6.240.000 bps, que pedem **10,4 Mbps** de caminho. A
+8 Mbps o teto compra 720p; a 2 Mbps ele compra 540p no primeiro segundo e 720p
+assim que a primeira janela mede. Era um degrau temporário, pago com a medida
+permanente — e a escada dá o mesmo degrau sozinha.
+
+Quem encontrou foram `tests/subida_no_arranque.rs`, que sobem quatro conexões
+QUIC de verdade e levam sete segundos. O guarda que faltava entre mexer na
+constante e esperar a bateria agora existe em unidade,
+`a_hipotese_deixa_o_piso_demonstrado_disparar`, e roda em microssegundos.
 
 ---
 
