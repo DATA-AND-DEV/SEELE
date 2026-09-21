@@ -4041,8 +4041,7 @@ async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
     // A mesma conferência do anexo, e não uma segunda cópia dela: o tipo
     // alegado tem de bater com o que os bytes dizem ser. Um endereço que
     // promete `image/gif` e entrega HTML é recusado aqui.
-    if let seele_ffi::preview::Verdict::Draw(formato) =
-        seele_ffi::preview::judge(&alegado, &bytes)
+    if let seele_ffi::preview::Verdict::Draw(formato) = seele_ffi::preview::judge(&alegado, &bytes)
     {
         return Ok(seele_ffi::preview::data_uri(formato, &bytes));
     }
@@ -7614,7 +7613,8 @@ mod o_que_sai_desta_janela_por_um_link {
     /// `&amp;` volta a ser `&`: um endereço de mídia carrega consulta.
     #[test]
     fn a_entidade_do_e_comercial_volta_ao_endereco() {
-        let html = r#"<meta property="og:image" content="https://media.tenor.com/a.gif?w=1&amp;h=2">"#;
+        let html =
+            r#"<meta property="og:image" content="https://media.tenor.com/a.gif?w=1&amp;h=2">"#;
         assert_eq!(
             midia_declarada_pela_pagina(html).as_deref(),
             Some("https://media.tenor.com/a.gif?w=1&h=2")
