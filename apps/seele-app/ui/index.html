@@ -3806,8 +3806,27 @@
         <label class="rotulo" for="compartilhar-resolucao">RESOLUÇÃO</label>
         <select id="compartilhar-resolucao" class="compartilhar-select">
           <option value="540">540p</option>
-          <option value="720">720p</option>
-          <option value="1080" selected>1080p</option>
+          <option value="720" selected>720p</option>
+          <option value="1080">1080p</option>
+        </select>
+      </div>
+      <!--
+        **Os quadros, e por que a lista tem dois itens e não quatro.**
+
+        `Cadencia` tem `Q8` e `Q15` também, e eles ficam de fora: existem como
+        piso automático, para onde a rede desce pela regra do §2 — «a resolução
+        segura, o quadro cede». Oferecer 8 a quem está escolhendo é pedir que a
+        pessoa escolha «propositalmente travado», que não é uma escolha que
+        alguém faz de propósito.
+
+        A escolha é teto, como a de resolução: pedir 60 não obriga ninguém a
+        mandar 60, e `cadencia_para` baixa quando os bits não pagam.
+      -->
+      <div class="compartilhar-escolha">
+        <label class="rotulo" for="compartilhar-quadros">QUADROS</label>
+        <select id="compartilhar-quadros" class="compartilhar-select">
+          <option value="30">30 por segundo</option>
+          <option value="60" selected>60 por segundo</option>
         </select>
       </div>
       <p id="compartilhar-erro" class="erro" hidden></p>

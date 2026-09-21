@@ -10068,6 +10068,26 @@ fn the_variant_names_the_shell_sends_are_the_ones_the_wire_uses() {
     );
 }
 
+/// **Os quadros saem do seletor, e não de um número fixo.**
+///
+/// Eles eram `60` escrito dentro da função, de quando a caixa não perguntava
+/// nada. O espelho do guarda de `prioridade`, logo acima: uma escolha que a
+/// caixa oferece e a ponte ignora é pior do que uma escolha que não existe — a
+/// pessoa mexe, nada muda, e não há erro nenhum a mostrar.
+#[test]
+fn os_quadros_escolhidos_saem_do_seletor() {
+    let limites = js_function(&scripts(), "function limitesEscolhidos(");
+    assert!(
+        limites.contains("compartilhar-quadros"),
+        "`limitesEscolhidos` não lê o seletor de quadros: {limites}"
+    );
+    assert!(
+        !limites.contains("quadros_maximos: 60"),
+        "`quadros_maximos` voltou a ser um número fixo, e o seletor virou \
+         enfeite: {limites}"
+    );
+}
+
 /// As três superfícies que desenham uma pessoa vestem o retrato dela.
 ///
 /// A comp da 0.9.0 desenha um avatar em três lugares — o bloco do operador, a

@@ -29,12 +29,31 @@ const { chromium } = require(process.env.PLAYWRIGHT ?? '/Users/dev-alexandre/SEE
     assert.equal(await page.locator('#painel-mods').isVisible(), false, 'o painel lembrado vazou na tela inicial');
     await page.evaluate(r => { fecharServer(); window.testTable.snapshot = r; }, retrato());
     await page.evaluate(() => abrirCompartilhar());
+    // **A caixa nasce em 720p.** Com o piso, o padrão deixou de ser preferência
+    // e virou suposição sobre a casa de quem hospeda: a 1080p ele suporia
+    // 10,4 Mbps de todo mundo que nunca abrisse esta caixa.
+    assert.equal(
+      await page.evaluate(() => document.getElementById('compartilhar-resolucao').value),
+      '720',
+      'a caixa deixou de nascer em 720p, e o padrão voltou a supor 10,4 Mbps de quem nunca a abriu',
+    );
+    // Os quadros são escolha, e não mais o 60 escrito na função.
+    await page.selectOption('#compartilhar-quadros', '30');
+    assert.equal(
+      await page.evaluate(() => limitesEscolhidos().quadros_maximos), 30,
+      'o seletor de quadros virou enfeite: a pessoa mexe e a ponte manda outra coisa',
+    );
+    await page.selectOption('#compartilhar-quadros', '60');
+    assert.equal(await page.evaluate(() => limitesEscolhidos().quadros_maximos), 60);
     await page.selectOption('#compartilhar-resolucao', '720');
     assert.equal(await page.evaluate(() => limitesEscolhidos().altura_maxima), 720);
     await page.screenshot({ path: '/tmp/seele-compartilhar-v013.png' });
     await page.evaluate(() => { window.testTable.snapshot.tela = { e_minha: true }; });
     await page.selectOption('#compartilhar-resolucao', '1080');
     await page.waitForFunction(() => testCalls.some(c => c.cmd === 'ajustar_limites_da_tela' && c.args.limites.altura_maxima === 1080));
+    // O mesmo para os quadros: a troca atravessa com a transmissão no ar.
+    await page.selectOption('#compartilhar-quadros', '30');
+    await page.waitForFunction(() => testCalls.some(c => c.cmd === 'ajustar_limites_da_tela' && c.args.limites.quadros_maximos === 30));
     await page.evaluate(() => {
       fecharCompartilhar();
       const dono = { falar() {}, instancia: { registrar: () => ({ esquecer() {} }) } };

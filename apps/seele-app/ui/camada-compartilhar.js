@@ -403,13 +403,19 @@ function mostrarErroDeTela(falha) {
 function limitesEscolhidos() {
   return {
     banda_bps: null,
-    altura_maxima: Number($("compartilhar-resolucao").value) || 1080,
-    quadros_maximos: 60,
+    altura_maxima: Number($("compartilhar-resolucao").value) || 720,
+    quadros_maximos: Number($("compartilhar-quadros").value) || 60,
     prioridade: "nitidez",
   };
 }
 
-$("compartilhar-resolucao").addEventListener("change", async () => {
+/**
+ * A troca vale **durante** a transmissão, e os dois seletores entram por aqui.
+ *
+ * Nomeada e não anônima porque agora são dois: um ouvinte escrito duas vezes é
+ * a segunda cópia que diverge no dia em que um dos dois ganhar um passo.
+ */
+async function aplicarEscolhaDeQualidade() {
   erroDeTela = null;
   try {
     const snapshot = await invoke("snapshot");
@@ -418,7 +424,10 @@ $("compartilhar-resolucao").addEventListener("change", async () => {
     }
   } catch (falha) { mostrarErroDeTela(falha); }
   await desenharCompartilhar();
-});
+}
+
+$("compartilhar-resolucao").addEventListener("change", aplicarEscolhaDeQualidade);
+$("compartilhar-quadros").addEventListener("change", aplicarEscolhaDeQualidade);
 
 // ---------------------------------------------------------------- navegação
 
@@ -429,7 +438,12 @@ async function abrirCompartilhar() {
   try {
     const snapshot = await invoke("snapshot");
     if (snapshot?.tela?.e_minha && snapshot.tela.pedido) {
+      // **Os dois, e não só a resolução.** Reabrir a caixa durante uma
+      // transmissão a 30 quadros e ler «60 por segundo» seria a tela mentindo
+      // sobre o que está saindo — e a próxima troca de resolução mandaria os
+      // 60 junto, sem ninguém ter pedido.
       $("compartilhar-resolucao").value = String(snapshot.tela.pedido.altura_maxima);
+      $("compartilhar-quadros").value = String(snapshot.tela.pedido.quadros_maximos);
     }
   } catch (_) { /* O desenho abaixo mostra falhas da sessão. */ }
   await desenharCompartilhar();
