@@ -425,6 +425,12 @@ das entregas acima:
 3. Empurre-a: `git push origin v0.11.0`. É a tag que dispara o
    `release.yml`, e é dela que sai o número — `v0.11.0` vira `0.11.0` nos três
    instaladores.
+
+   > **Isto valia na v0.11.0 e deixou de valer depois dela.** O gatilho por tag
+   > saiu do `release.yml` em 22/09/2026, a pedido de quem publica: o workflow
+   > agora roda **só** pela aba Actions, e o número da versão vai no campo
+   > `versao` do formulário. O passo acima fica como registro do que foi feito
+   > naquele dia, e não como instrução para o próximo.
 4. Gere a lista de commits para o corpo do release:
    `git log --oneline v0.10.5-1..v0.11.0 --no-merges`.
 5. Cole o texto desta página no corpo, e **não apague o aviso do topo sobre a

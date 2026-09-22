@@ -190,6 +190,29 @@ A linha das forças intermediárias é a que responde a pergunta que a auditoria
 por último: o limiar acompanha o ruído **de cada força**, e não só o da força
 máxima.
 
+## Como publicar, depois desta branch
+
+Os dois workflows passaram a rodar **só pela aba Actions** — `on:
+workflow_dispatch` nos dois, e nada mais. Foi pedido por quem opera a
+publicação, e as duas formas automáticas que saíram eram estas:
+
+- **a CI em todo push e todo PR.** O que se perde está dito no cabeçalho do
+  `ci.yml`: um push não é conferido por ninguém até alguém pedir. O que **não**
+  se perde é o portão da publicação, que é outro arquivo;
+- **o release na tag `v*`.** `git push --tags` empurra tudo o que está local,
+  inclusive uma tag antiga criada para marcar um ponto e nunca destinada a
+  lançar. Agora a publicação é: **Actions → Release → Run workflow**, com o
+  número em `versao`.
+
+**O portão do R07 continua inteiro**: `empacotar` depende de `validar` verde nos
+três sistemas sobre o mesmo SHA, e a saída de emergência continua sendo um campo
+que diz o que faz e aparece no registro do run. Quer dizer que publicar ainda
+roda a verificação — o que deixou de acontecer sozinho é ela rodar **antes** de
+alguém pedir.
+
+Devolver qualquer um dos dois gatilhos é devolver duas linhas, e as duas estão
+escritas nos comentários dos próprios arquivos.
+
 ## Decisões que ganharam ADR
 
 - **0053 — Uma prévia não é um clique.** Separa a política de prévia automática da

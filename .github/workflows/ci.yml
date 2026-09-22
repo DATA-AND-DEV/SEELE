@@ -1,18 +1,31 @@
 name: CI
 
-# Runs on every push and every pull request. This is the workflow release.yml
-# never was: `release.yml` only ever builds installers on a tag, and neither
-# it nor anything else in this repository has ever run `cargo fmt`, `cargo
-# clippy`, or `cargo test` automatically. In particular, no CI job has ever
-# compiled this workspace for Windows outside of cutting an actual release —
-# which means every `#[cfg(windows)]` block in `seele-audio` (device.rs) and
-# all of `laco_por_processo.rs` (`#![cfg(windows)]` for the whole file) has
-# never been type-checked, linted, or exercised by anything automatic. That
-# blind spot is exactly where the reported "switching headphones/microphone on
-# Windows" bug lives (docs/pendencias.md #31).
+# **Só pela aba Actions**, e isto é uma escolha de quem opera, não um esquecimento.
+#
+# Ela roda o que este repositório nunca rodou automaticamente: `cargo fmt`,
+# `cargo clippy` e `cargo test` nos três sistemas. Em particular, nenhum job
+# jamais compilou este workspace para Windows fora de cortar um lançamento — o
+# que quer dizer que todo bloco `#[cfg(windows)]` de `seele-audio` (device.rs) e
+# todo o `laco_por_processo.rs` (`#![cfg(windows)]` no arquivo inteiro) nunca foi
+# checado, lintado nem exercitado por nada automático. É exatamente onde vive o
+# defeito relatado de «trocar de fone/microfone no Windows»
+# (docs/pendencias.md #31).
+#
+# # O que custa ser manual
+#
+# Um push não é conferido por ninguém até alguém pedir. O portão que **não** se
+# mexeu é o do `release.yml`: publicar continua exigindo `validar` verde nos três
+# sistemas sobre o mesmo SHA, que é o R07 da revisão da v15. Quer dizer que o
+# esquecimento aqui não chega ao que é publicado — ele chega ao tempo que se leva
+# para descobrir, e isso está dito porque é o preço real.
+#
+# Voltar ao automático é devolver as duas linhas:
+#
+#     on:
+#       push:
+#       pull_request:
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

@@ -1,13 +1,24 @@
 name: Release
 
-# Dispara ao empurrar uma tag `v*`, ou manualmente pela aba Actions.
+# **Só pela aba Actions.** A publicação é um ato de quem opera, e este workflow
+# não começa sozinho — nem por tag.
 #
-# O manual existe para que dê para provar o pipeline sem cortar uma versão —
-# um workflow de release que só roda quando alguém já decidiu lançar é um
-# workflow que estreia no pior momento possível.
+# O gatilho por tag `v*` saiu a pedido de quem publica. Ele tinha um jeito de
+# surpreender que a forma manual não tem: `git push --tags` empurra tudo o que
+# está local, inclusive uma tag antiga que alguém criou para marcar um ponto e
+# nunca quis lançar.
+#
+# O job `versao` continua sabendo ler `GITHUB_REF_TYPE = tag`, e isso é de
+# propósito: devolver o gatilho é devolver as duas linhas abaixo, e o resto do
+# workflow já está pronto para ele.
+#
+#     push:
+#       tags: ["v*"]
+#
+# **O portão não mudou.** `empacotar` depende de `validar` nos três sistemas
+# sobre o mesmo SHA — R07 da revisão da v15 —, e a saída de emergência continua
+# sendo um campo que diz o que faz e aparece no registro do run.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       versao:
