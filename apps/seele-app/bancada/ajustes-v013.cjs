@@ -1,7 +1,8 @@
 // Navegador com HTML/CSS reais; a ponte nativa é simulada.
 const assert = require('node:assert/strict');
 const { servir, respostas, retrato } = require('./telas.cjs');
-const { chromium } = require(process.env.PLAYWRIGHT ?? '/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright');
+const { chromium: abrirChromium } = require('./playwright.cjs');
+const chromium = abrirChromium();
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));

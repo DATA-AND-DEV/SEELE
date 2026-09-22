@@ -652,6 +652,7 @@ function escolherApresentacao(ponto, id) {
   }
   // O registro redesenha o que depende dela; ver `contribuicoesDosMods.avisar`.
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
+  if (typeof redesenharAvatares === "function") redesenharAvatares();
   desenharApresentacoes();
 }
 
@@ -749,6 +750,7 @@ const APRESENTACAO_NATIVA = ":nativo";
 const NOMES_DOS_PONTOS = Object.freeze({
   "pessoa.identidade": "Como as pessoas aparecem",
   "pessoa.cartao": "O cartão de cada pessoa",
+  "pessoa.avatar": "As imagens de cada pessoa no servidor",
   "pessoa.detalhes": "O perfil detalhado de uma pessoa",
   "pessoa.acoes": "Ações sobre uma pessoa",
   "canal.item": "Como os canais aparecem na lista",

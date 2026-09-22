@@ -22,7 +22,7 @@ use seele_proto::control::{ChannelInfo, PersonProfile, PersonState, VoiceRoomInf
 use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
-use crate::persistence::messages::{Messages, PendingMessage, StoredMessage};
+use crate::persistence::messages::{Gravacao, Messages, PendingMessage, StoredMessage};
 use crate::persistence::Persistence;
 
 /// How long the writer waits before committing what it has.
@@ -59,6 +59,37 @@ pub enum Event {
         id: MessageId,
         /// New body.
         body: String,
+    },
+    /// **Esta** mensagem não foi gravada, e por quê.
+    ///
+    /// Vai para o barramento como as outras, e a sessão de quem escreveu é a
+    /// única que a repassa — quem recebe a recusa é o autor. Ver
+    /// `session::translate`.
+    ///
+    /// Existe porque o escritor é assíncrono: quem enfileira já respondeu ao
+    /// cliente «enfileirado», e a gravação acontece até 200 ms depois, longe
+    /// daquela conexão. Sem um evento, uma gravação que falha não tem caminho de
+    /// volta até a pessoa que escreveu — e era o que acontecia (R04, R05).
+    MessageRejected {
+        /// O canal a que ela se destinava.
+        channel: seele_proto::ids::ChannelId,
+        /// Quem escreveu, e o filtro da difusão.
+        author: seele_proto::ids::PersonId,
+        /// A chave que quem escreveu escolheu.
+        client_message_id: Option<seele_proto::ids::ClientMessageId>,
+        /// Por quê, de uma lista fechada.
+        reason: seele_proto::control::MessageRefusal,
+    },
+    /// A retenção apagou histórico. R15.
+    ///
+    /// Vai para todo mundo sem filtro de canal: a limpeza é por idade e
+    /// atravessa os canais, e uma casca que tem a última página na tela está
+    /// mostrando mensagens que já não existem. Sem este aviso, a próxima busca de
+    /// histórico as perderia sem explicação — que é o defeito desta casa, o
+    /// produto sabendo e não contando.
+    HistoricoApagado {
+        /// Quantas linhas saíram.
+        apagadas: usize,
     },
     /// A message was removed.
     MessageRemoved {
@@ -1360,6 +1391,60 @@ pub struct Server {
     /// estão longe uma da outra — quem registra é o QuickJS, quem confere é o
     /// tratador do fluxo — e este é o objeto que as duas alcançam.
     pub esperas: Arc<std::sync::Mutex<crate::mods::volume::Esperas>>,
+    /// Um cadeado por MOD, que é o que serializa os pedidos **daquele** MOD.
+    ///
+    /// # Por que ele existe, e o que ele substitui
+    ///
+    /// R11 da revisão da v15: um pedido de MOD tomava o mutex do banco e o
+    /// levava ao trabalhador — e o segurava enquanto relia os arquivos do
+    /// pacote, recalculava o hash, criava o runtime e executava o pedido,
+    /// inclusive as chamadas nativas que o MOD faz. Ler histórico e escrever
+    /// texto esperavam por isso.
+    ///
+    /// Mas soltar aquele mutex sem mais nada perderia a garantia que ele dava
+    /// **de graça**: o quintal do MOD é lido, mexido pelo JavaScript e gravado
+    /// de volta, e dois pedidos do mesmo MOD sobrepostos escreveriam um sobre o
+    /// outro — perda de atualização. O review é explícito em não trocar uma
+    /// coisa pela outra.
+    ///
+    /// Este cadeado é a garantia de volta, no escopo certo: **por MOD**, e não
+    /// pelo banco inteiro. Dois pedidos do mesmo MOD esperam um pelo outro; dois
+    /// MODs diferentes correm juntos; e quem quer ler histórico não espera por
+    /// nenhum dos dois.
+    ///
+    /// `tokio::sync::Mutex` porque quem o segura atravessa um `await` — o
+    /// `spawn_blocking` do executor.
+    pub mods_em_curso:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    /// Os pacotes de MOD cujo hash já foi conferido, por hash.
+    ///
+    /// # Por que um cache, e por que por hash
+    ///
+    /// R11. A conferência relê **todos** os arquivos do pacote e recalcula o
+    /// hash do conteúdo, a cada pedido. É I/O e CPU no caminho de uma resposta
+    /// que a janela espera, repetido para responder sempre a mesma coisa.
+    ///
+    /// Por hash porque o hash **é** a pergunta: «este pacote é o que o servidor
+    /// exige?». Uma entrada no cache diz que o pacote daquele hash foi conferido
+    /// e qual é o arquivo de entrada dele. Se o pacote mudar em disco, o hash
+    /// que o servidor exige não casa com ele, e a entrada antiga não é
+    /// alcançada — a chave não pode ficar velha, porque ela é o conteúdo.
+    pub pacotes_conferidos:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, PacoteConferido>>>,
+}
+
+/// Um pacote de MOD cujo hash já foi conferido.
+///
+/// Guardado por [`Server::pacotes_conferidos`] — ver o doc daquele campo para
+/// por que a chave é o hash.
+#[derive(Debug, Clone)]
+pub struct PacoteConferido {
+    /// A metade de servidor, como ela está em disco.
+    ///
+    /// O **conteúdo** e não o caminho: é ele que o runtime carrega, e guardá-lo
+    /// é o que tira a leitura do caminho de cada pedido. Cabe em memória pela
+    /// mesma razão que o teto do pacote existe.
+    pub fonte: String,
 }
 
 /// Starts the batching writer.
@@ -1416,18 +1501,47 @@ async fn flush(
         match messages.append_batch(&batch) {
             Ok(stored) => stored,
             Err(error) => {
-                // Losing the batch is bad; losing it silently is worse. The
-                // clients will not see their messages appear, which is the
-                // honest outcome of a write that failed.
+                // **Falha do lote inteiro**, que agora quer dizer só uma coisa:
+                // a transação não abriu ou não fechou. Um registro inválido
+                // dentro dela já não chega aqui — ele volta como
+                // `Gravacao::Falhou` e as outras mensagens seguem gravadas, que
+                // é o conserto do R04.
+                //
+                // Perder o lote é ruim; perdê-lo em silêncio é pior, e era o
+                // que acontecia: quem escreveu não via a mensagem aparecer e não
+                // recebia nada dizendo por quê. Agora cada remetente é avisado.
                 tracing::error!(%error, count = batch.len(), "message batch failed");
+                for message in &batch {
+                    let _ = events.send(Event::MessageRejected {
+                        channel: message.channel,
+                        author: message.author,
+                        client_message_id: message.client_message_id,
+                        reason: seele_proto::control::MessageRefusal::StorageFailed,
+                    });
+                }
                 return;
             }
         }
     };
 
     // Committed, therefore durable, therefore safe to announce.
-    for message in stored {
-        let _ = events.send(Event::MessagePosted(message));
+    for gravacao in stored {
+        let _ = match gravacao {
+            Gravacao::Feita(message) => events.send(Event::MessagePosted(message)),
+            // A recusa vai pelo mesmo barramento das outras, e a sessão de quem
+            // escreveu é a única que a repassa — ver `session::translate`.
+            Gravacao::Falhou {
+                channel,
+                author,
+                client_message_id,
+                motivo,
+            } => events.send(Event::MessageRejected {
+                channel,
+                author,
+                client_message_id,
+                reason: motivo,
+            }),
+        };
     }
 }
 

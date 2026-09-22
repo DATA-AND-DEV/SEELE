@@ -1,0 +1,4 @@
+CONFIRMED PTT: release while composer focused leaves talking=true {"falando":true,"calls":[{"cmd":"set_talking","args":{"talking":true}}]}
+CONFIRMED COMPOSER: failed previous send overwrote newer draft: first message
+CONFIRMED PREVIEW SELECTION (no network request): [{"url":"https://tracking.invalid/visitor.png","automatic":true},{"url":"http://127.0.0.1:9999/private.png","automatic":true}]
+SCROLL OBSERVATION: {"before":400,"after":400,"count":201}

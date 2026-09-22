@@ -215,6 +215,7 @@ async function desenharCompartilhar() {
     mostrarErroDeTela(falha);
   }
   desenharFontesDeTela(fontes, permissao, listou);
+  await desenharSomDaCaptura();
 
   let snapshot = null;
   try {
@@ -325,18 +326,29 @@ function desenharFontesDeTela(fontes, permissao, listou) {
 }
 
 /**
- * Os dois botões do rodapé, e a recusa dita **antes** do aperto.
+ * Os dois botões do rodapé.
  *
- * Cabe uma transmissão por sala de voz. Com outra pessoa transmitindo,
- * `compartilhar_tela` recusaria com `ScreenShareTaken` — e fazer alguém apertar
- * para descobrir isso é esconder do lado de fora o que já se sabe do lado de
- * dentro. O botão sai desabilitado com a frase escrita, que é a mesma frase da
- * recusa.
+ * # «Cabe uma por vez» não era verdade
+ *
+ * Esta função desabilitava `COMPARTILHAR` sempre que a transmissão em curso
+ * fosse de outra pessoa, com a frase «cabe uma por vez». **O servidor nunca
+ * disse isso**: ele guarda várias transmissões por sala, e a admissão depende da
+ * capacidade de banda — não de um limite fixo de uma pessoa. R18 da revisão da
+ * v15, confirmado nos dois lados.
+ *
+ * O que o servidor de fato recusa é a **segunda abertura da mesma pessoa**, e é
+ * essa recusa que continua de pé aqui, como `TROCAR`.
+ *
+ * A recusa de capacidade continua existindo e continua sendo do servidor: ela
+ * chega como `ScreenShareOverHostUplink`, com a explicação, em vez de um botão
+ * apagado que afirma um limite que não existe.
  */
 function desenharBotoesDeTela(snapshot) {
-  const tela = snapshot ? snapshot.tela : null;
-  const minha = Boolean(tela && tela.e_minha);
-  const deOutro = Boolean(tela) && !minha;
+  // **A minha**, por identidade, e não «a da sala»: `snapshot.tela` é a que esta
+  // pessoa está assistindo, que pode ser a de outra pessoa enquanto a própria
+  // também está no ar. ADR 0054.
+  const tela = snapshot ? snapshot.minha_transmissao : null;
+  const minha = Boolean(tela);
 
   // **O mesmo botão, e ele vira `TROCAR` enquanto a transmissão é sua.**
   //
@@ -372,23 +384,24 @@ function desenharBotoesDeTela(snapshot) {
   comecar.dataset.modo = minha ? "trocar" : "comecar";
   comecar.hidden = false;
   comecar.textContent = minha ? "TROCAR" : "COMPARTILHAR";
-  comecar.disabled = !snapshot || deOutro || fonteArmada === null || mesmaFonte;
-  comecar.title = deOutro
-    ? FRASES.ScreenShareTaken
-    : mesmaFonte
-      ? "é esta que já está no ar; escolha outra para trocar"
-      : fonteArmada === null
-        ? "escolha um monitor ou uma janela na lista acima"
-        : minha
-          ? "a transmissão de agora para, e a nova começa no lugar dela"
-          : "";
+  comecar.disabled = !snapshot || fonteArmada === null || mesmaFonte;
+  comecar.title = mesmaFonte
+    ? "é esta que já está no ar; escolha outra para trocar"
+    : fonteArmada === null
+      ? "escolha um monitor ou uma janela na lista acima"
+      : minha
+        ? "a transmissão de agora para, e a nova começa no lugar dela"
+        : "";
 
   $("compartilhar-parar").hidden = !minha;
 
   // A recusa de estar ocupada não espera aperto nenhum: ela já é verdade, e
   // uma falha guardada de um aperto anterior vem antes dela porque é a que
   // responde ao que a pessoa acabou de fazer.
-  const dito = erroDeTela ?? (deOutro ? FRASES.ScreenShareTaken : null);
+  // **Só a falha de um aperto de verdade.** A frase «cabe uma por vez» saía
+  // aqui sem ninguém ter apertado nada, afirmando um limite que o servidor não
+  // tem. A recusa por capacidade continua chegando dele, com a explicação dela.
+  const dito = erroDeTela;
   const erro = $("compartilhar-erro");
   erro.hidden = dito === null;
   erro.textContent = dito ?? "";
@@ -406,7 +419,57 @@ function limitesEscolhidos() {
     altura_maxima: Number($("compartilhar-resolucao").value) || 720,
     quadros_maximos: Number($("compartilhar-quadros").value) || 60,
     prioridade: "nitidez",
+    // R21, o controle de quem envia. Marcado por padrão; desmarcá-lo é a saída
+    // que o produto oferece a quem está num sistema onde a captura leva o áudio
+    // do SEELE junto — ver `desenharSomDaCaptura`.
+    com_som: $("compartilhar-som").checked,
   };
+}
+
+/**
+ * O que esta máquina faz com o próprio áudio ao capturar, dito antes do aperto.
+ *
+ * # Por que ela existe
+ *
+ * R21: «participantes se escutam quando alguém transmite a tela inteira». Onde o
+ * sistema exclui o áudio deste processo, a frase diz isso e o assunto acaba.
+ * Onde ele **não** exclui, a frase diz isso também — e é a metade que não podia
+ * faltar: o review é explícito em «se não houver exclusão confiável, explicar a
+ * limitação e oferecer compartilhar uma janela/aplicativo ou transmitir sem
+ * áudio, sem afirmar que o eco foi resolvido».
+ *
+ * Lida uma vez: é propriedade da máquina e do sistema, e não muda dentro de uma
+ * sessão.
+ */
+async function desenharSomDaCaptura() {
+  const aviso = $("compartilhar-som-aviso");
+  if (!aviso) return;
+  let dito = null;
+  try {
+    dito = await invoke("exclusao_do_som_da_captura");
+  } catch (falha) {
+    console.warn("exclusão do som da captura:", falha);
+  }
+  if (dito === "Excluido") {
+    aviso.dataset.exclusao = "sim";
+    aviso.textContent =
+      "A conversa do SEELE fica fora do que é capturado: quem assiste não " +
+      "recebe a própria voz de volta, e você continua ouvindo todo mundo.";
+    return;
+  }
+  if (dito === "NaoExcluido") {
+    aviso.dataset.exclusao = "nao";
+    aviso.textContent =
+      "Neste sistema a captura leva o som da saída inteira — a conversa do " +
+      "SEELE junto. Quem estiver falando vai se ouvir de volta. Duas saídas: " +
+      "compartilhe uma janela em vez do monitor, ou desmarque INCLUIR SOM.";
+    return;
+  }
+  // `SemCaptura`, ou a pergunta falhou. Nos dois casos não há o que prometer, e
+  // dizer qualquer coisa sobre eco seria falar de uma captura que não existe.
+  aviso.dataset.exclusao = "nao-se-sabe";
+  aviso.textContent = "";
+  aviso.hidden = true;
 }
 
 /**
@@ -419,7 +482,7 @@ async function aplicarEscolhaDeQualidade() {
   erroDeTela = null;
   try {
     const snapshot = await invoke("snapshot");
-    if (snapshot?.tela?.e_minha) {
+    if (snapshot?.minha_transmissao) {
       await invoke("ajustar_limites_da_tela", { limites: limitesEscolhidos() });
     }
   } catch (falha) { mostrarErroDeTela(falha); }
@@ -437,13 +500,17 @@ async function abrirCompartilhar() {
   erroDeTela = null;
   try {
     const snapshot = await invoke("snapshot");
-    if (snapshot?.tela?.e_minha && snapshot.tela.pedido) {
+    // **`minha_transmissao`, e não `tela`.** A segunda é a que esta pessoa está
+    // assistindo, que pode ser de outra pessoa enquanto a própria está no ar —
+    // e aí a caixa restauraria os limites de um pedido que não é este. ADR 0054.
+    const pedido = snapshot?.minha_transmissao?.pedido;
+    if (pedido) {
       // **Os dois, e não só a resolução.** Reabrir a caixa durante uma
       // transmissão a 30 quadros e ler «60 por segundo» seria a tela mentindo
       // sobre o que está saindo — e a próxima troca de resolução mandaria os
       // 60 junto, sem ninguém ter pedido.
-      $("compartilhar-resolucao").value = String(snapshot.tela.pedido.altura_maxima);
-      $("compartilhar-quadros").value = String(snapshot.tela.pedido.quadros_maximos);
+      $("compartilhar-resolucao").value = String(pedido.altura_maxima);
+      $("compartilhar-quadros").value = String(pedido.quadros_maximos);
     }
   } catch (_) { /* O desenho abaixo mostra falhas da sessão. */ }
   await desenharCompartilhar();

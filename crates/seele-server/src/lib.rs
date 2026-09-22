@@ -32,6 +32,7 @@ use seele_proto::ids::VoiceRoomId;
 
 pub mod admissao;
 pub mod alcance;
+pub mod autorizacao;
 pub mod frame;
 pub mod hospedagem;
 pub mod mods;
@@ -235,6 +236,28 @@ pub struct ServerConfig {
     /// Não há como configurar isto de fora: [`ServerConfig`] não é
     /// desserializada de arquivo nenhum.
     pub versao_do_anuncio: u8,
+    /// O que «mensagem confirmada» promete sobreviver. R14.
+    ///
+    /// O padrão é [`crate::persistence::Durabilidade::Normal`] — sobrevive à
+    /// queda do processo, e não a uma queda de energia. Ver o doc daquele enum
+    /// para a escolha e o que cada lado custa.
+    pub durabilidade: crate::persistence::Durabilidade,
+    /// Quantos dias de histórico este servidor guarda, se ele limita. R15.
+    ///
+    /// `None` é ilimitado, que é o padrão que `specs/04-servidor-seele.md`
+    /// escreve. Um número liga a limpeza periódica — ver
+    /// [`spawn_retencao`].
+    ///
+    /// # Por que ela é opcional, e por que ela precisa existir
+    ///
+    /// `Messages::prune` existia e **nada em produção a chamava**: a busca por
+    /// chamadas encontrava só teste. Um servidor auto-hospedado crescia para
+    /// sempre e a única saída era editar o banco à mão. R15 da revisão da v15.
+    ///
+    /// Opcional porque apagar conversa é decisão de quem hospeda, e o padrão do
+    /// produto é guardar. Ligá-la é uma escolha com consequência, e a
+    /// consequência é irreversível.
+    pub retencao_em_dias: Option<u32>,
 }
 
 impl Default for ServerConfig {
@@ -263,8 +286,82 @@ impl Default for ServerConfig {
             anexos: None,
             caminho_bps: None,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
+            durabilidade: crate::persistence::Durabilidade::default(),
+            // Ilimitado, que é o padrão da spec. Ver o campo.
+            retencao_em_dias: None,
         }
     }
+}
+
+/// Quantas horas entre duas limpezas de retenção.
+///
+/// Seis, e não uma: a janela é medida em dias, então o instante da limpeza não
+/// precisa de precisão nenhuma — e uma passada de hora em hora seria seis vezes
+/// mais I/O para apagar as mesmas linhas.
+const INTERVALO_DA_RETENCAO: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+
+/// Liga a limpeza periódica do histórico. R15.
+///
+/// # Por que ela é uma tarefa, e não um passo do arranque
+///
+/// Porque um servidor fica de pé por semanas. Uma limpeza só no arranque
+/// atenderia quem reinicia todo dia e ninguém mais — e quem hospeda em casa, que
+/// é para quem este produto é, é justamente quem não reinicia.
+///
+/// A primeira passada acontece **ao ligar**, antes do primeiro intervalo: quem
+/// acabou de escolher uma janela de retenção espera que ela valha para o que já
+/// está lá, e não daqui a seis horas.
+///
+/// # O que ela apaga, e o que ela não
+///
+/// Mensagens mais velhas que a janela, por [`persistence::messages::Messages::prune`].
+/// **Não** apaga anexos nem dados de MOD: os blobs têm o teto e a expiração
+/// deles (ADR 0027), e o volume de MOD deliberadamente não tem quota (ADR 0048).
+/// Uma limpeza que decidisse sobre os três seria uma limpeza escolhendo por quem
+/// hospeda em duas coisas que ele já decidiu.
+fn spawn_retencao(
+    persistence: Arc<tokio::sync::Mutex<persistence::Persistence>>,
+    dias: u32,
+    events: tokio::sync::broadcast::Sender<server::Event>,
+) {
+    // Zero é «ilimitado» para o `prune`, e chegar aqui com zero seria uma tarefa
+    // acordando de seis em seis horas para não fazer nada.
+    if dias == 0 {
+        tracing::warn!("retenção de zero dia é ilimitada; a limpeza não foi ligada");
+        return;
+    }
+    tokio::spawn(async move {
+        let mut relogio = tokio::time::interval(INTERVALO_DA_RETENCAO);
+        relogio.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            relogio.tick().await;
+            let apagadas = {
+                let mut guarda = persistence.lock().await;
+                let messages = persistence::messages::Messages::new(&mut guarda);
+                match messages.prune(dias) {
+                    Ok(quantas) => quantas,
+                    Err(erro) => {
+                        // **Dito, e não engolido.** Uma retenção que falha em
+                        // silêncio é um disco que enche com quem hospeda achando
+                        // que a limpeza está funcionando.
+                        tracing::error!(%erro, dias, "a limpeza de histórico falhou");
+                        continue;
+                    }
+                }
+            };
+            if apagadas > 0 {
+                tracing::info!(
+                    apagadas,
+                    dias,
+                    "histórico além da janela de retenção apagado"
+                );
+                // A sala fica sabendo: uma casca que tem a última página na tela
+                // está mostrando mensagens que já não existem. Sem este aviso, a
+                // próxima busca de histórico as perderia sem explicação.
+                let _ = events.send(server::Event::HistoricoApagado { apagadas });
+            }
+        }
+    });
 }
 
 /// Where the blobs go, given where the database is.
@@ -398,7 +495,17 @@ impl Daemon {
         // PERSISTENCE first: the handshake needs accounts before it can answer
         // anybody, and migrations run at boot (specs/04-servidor-seele.md).
         // A identidade TLS também mora nele, então ele vem antes dela.
-        let mut persistence = persistence::Persistence::open(&config.database)?;
+        // **Com a durabilidade escolhida**, e não com um padrão escondido num
+        // pragma. Ver `persistence::Durabilidade`: o que «confirmada» promete é
+        // decisão de quem hospeda, e a frase que descreve a promessa mora no
+        // mesmo lugar que a escolha.
+        let mut persistence =
+            persistence::Persistence::abrir_com(&config.database, config.durabilidade)?;
+        tracing::info!(
+            durabilidade = config.durabilidade.pragma(),
+            "{}",
+            config.durabilidade.promessa()
+        );
         seed(&mut persistence, &config)?;
 
         // Lida do banco, não gerada a cada vez. Sem isto, reiniciar o servidor
@@ -496,6 +603,13 @@ impl Daemon {
 
         let (events, _) = tokio::sync::broadcast::channel(1024);
         let writes = server::spawn_writer(Arc::clone(&persistence), events.clone());
+        // **A retenção, quando quem hospeda a escolheu.** R15: `Messages::prune`
+        // existia e nada em produção a chamava, então um servidor
+        // auto-hospedado crescia para sempre e a única saída era editar o banco
+        // à mão.
+        if let Some(dias) = config.retencao_em_dias {
+            spawn_retencao(Arc::clone(&persistence), dias, events.clone());
+        }
         let server = Arc::new(server::Server {
             mods_dir: config.mods_dir.clone(),
             persistence,
@@ -517,6 +631,8 @@ impl Daemon {
             caminho_bps: config.caminho_bps,
             versao_do_anuncio: config.versao_do_anuncio,
             esperas: Arc::new(std::sync::Mutex::new(mods::volume::Esperas::default())),
+            mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         });
 
         // Os MODs deste servidor, se houver pasta. ADR 0045.

@@ -298,58 +298,67 @@
   color: var(--seele-laranja-nerv);
 }
 
-/* ---------- o que sai, ao lado do que foi pedido ---------- */
+/* ---------- a barra compacta do palco ----------
 
-.chamada-palco-numeros {
-  margin: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+   R20 e ADR 0054. No lugar da grade de três métricas — `RESOLUÇÃO`, `QUADROS`,
+   `BANDA` — que nunca teve o que mostrar: os três números vinham zerados com
+   `medida: false`, sempre, e as três caixas escreviam «ainda não há medida»
+   numa área própria por cima do vídeo.
+
+   Uma fileira e não uma grade: o que sobrou são controles, e controles se leem
+   da esquerda para a direita numa linha. Ela recolhe para duas linhas em janela
+   estreita em vez de rolar — uma área rolável dentro do palco é o que o review
+   pede para tirar. */
+.chamada-palco-controles {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
   border-top: var(--seele-b) solid var(--seele-linha);
   flex: 0 0 auto;
 }
 
-.chamada-palco-linha {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 16px;
-  border-right: var(--seele-b) solid var(--seele-linha);
-  min-width: 0;
-}
-
-.chamada-palco-linha .rotulo {
+.chamada-palco-acao {
+  background: transparent;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+  font: inherit;
   font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.18em;
+  letter-spacing: 0.14em;
+  padding: 4px 10px;
+  cursor: pointer;
 }
 
-.chamada-palco-par {
-  margin: 0;
+.chamada-palco-acao:hover,
+.chamada-palco-acao:focus-visible {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+}
+
+/* Silenciado é um estado, e ele é lido pelo `aria-pressed` antes de ser lido
+   pela cor: a cor é a informação que some primeiro. */
+.chamada-palco-acao[aria-pressed="true"] {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-laranja-fraco);
+}
+
+.chamada-palco-volume {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
   min-width: 0;
 }
 
-/* O que está saindo agora é o valor grande; o pedido fica ao lado, menor. Os
-   dois têm de ser lidos juntos, e o que a pessoa precisa saber primeiro é o que
-   está acontecendo — não o que ela pediu, que ela já sabe. */
-.chamada-palco-agora {
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-secao);
-  font-variant-numeric: tabular-nums;
-  color: var(--seele-fosforo);
+.chamada-palco-volume input[type="range"] {
+  width: 120px;
+  accent-color: var(--seele-laranja-nerv);
 }
 
-.chamada-palco-pedido {
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
-  font-variant-numeric: tabular-nums;
-  color: var(--seele-rotulo-painel);
-}
-
-/* Quando aperta, a tela diz que apertou. Ocupa a largura inteira embaixo dos
-   três pares, porque explica os três de uma vez. */
+/* Quando aperta, a tela diz que apertou. Ocupa a largura inteira embaixo da
+   barra de controles. Escondido enquanto não houver medida — ver a nota no
+   `index.html`. */
 .chamada-palco-aperto {
   margin: 0;
   padding: 8px 16px 12px;

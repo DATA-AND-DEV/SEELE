@@ -190,6 +190,15 @@ pub enum NoticeReason {
         /// A subida que esta máquina mediu para si. Nunca zero.
         medido_bps: u32,
     },
+
+    /// A retenção deste servidor apagou histórico. R15.
+    ///
+    /// A casca escreve a frase e, se tiver a última página na tela, volta a
+    /// buscá-la: as mensagens que ela está mostrando podem já não existir.
+    RetencaoApagouHistorico {
+        /// Quantas linhas saíram.
+        apagadas: u64,
+    },
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -209,6 +218,9 @@ impl From<seele_core::AlertReason> for NoticeReason {
                 precisa_bps,
                 medido_bps,
             },
+            seele_core::AlertReason::RetencaoApagouHistorico { apagadas } => {
+                Self::RetencaoApagouHistorico { apagadas }
+            }
             seele_core::AlertReason::RateLimited => Self::RateLimited,
             seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
             seele_core::AlertReason::VoiceRoomDeleted => Self::VoiceRoomDeleted,
@@ -559,6 +571,17 @@ pub struct Channel {
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Message {
     /// Server-assigned identifier. Ordered; the clock is not.
+    ///
+    /// **Zero numa pendente**, e zero não é identificador de nada: uma mensagem
+    /// que esta máquina escreveu e o servidor ainda não confirmou não existe lá,
+    /// então não há id que a enderece. Quem a endereça é
+    /// [`Self::client_message_id`].
+    ///
+    /// Quem usa este campo para pedir algo ao servidor tem de conferir
+    /// [`Self::estado`] antes — ou, melhor, deixar o guarda de
+    /// `Connection::remove_message` conferir. O primeiro caller a pisar nisto foi
+    /// um teste de conformidade, que pegou `messages()[0].id` numa lista cuja
+    /// primeira linha era uma pendente.
     pub id: u64,
     /// Which Channel.
     pub channel: u32,
@@ -582,6 +605,201 @@ pub struct Message {
     pub edited: bool,
     /// The file hanging off it, if any. ADR 0027.
     pub attachment: Option<Attachment>,
+    /// Em que pé está o **envio** desta mensagem.
+    ///
+    /// `Confirmada` para tudo que veio do servidor, que é o caso de toda
+    /// mensagem que não foi escrita nesta máquina agora. Os outros três estados
+    /// são de mensagens que esta máquina compôs e o servidor ainda não gravou.
+    ///
+    /// # Por que ele está aqui
+    ///
+    /// Porque «mandei» e «está gravada» eram indistinguíveis para quem escreve.
+    /// O compositor limpava o campo antes de qualquer resposta e a FFI
+    /// confirmava só o enfileiramento local; uma queda, uma recusa de permissão
+    /// ou um limite de taxa faziam o texto desaparecer sem rastro. R05 da
+    /// revisão da v15.
+    pub estado: EstadoDoEnvio,
+    /// A chave desta máquina, quando ela é o que identifica a mensagem.
+    ///
+    /// Presente nas que ainda não foram gravadas — é por ela que a casca pede
+    /// para tentar de novo ou desistir. `None` numa mensagem confirmada: ali
+    /// quem identifica é o `id` do servidor.
+    ///
+    /// **Texto, e não número, e a razão é aritmética.** A chave é um `u64` cuja
+    /// metade alta é sorteada (ver `next_client_message_id`), então ela passa de
+    /// 2^53 com folga — e 2^53 é onde o `Number` do JavaScript deixa de contar
+    /// inteiros um por um. Atravessar como número entregaria à janela uma chave
+    /// **arredondada**, que não casaria com nenhuma pendente: o botão de tentar
+    /// de novo não acharia a mensagem, ou acharia outra.
+    pub client_message_id: Option<String>,
+}
+
+/// Em que pé está o envio de uma mensagem.
+///
+/// Quatro variantes, e a distinção entre as três últimas é o que decide o que
+/// oferecer a quem escreveu: `Recusada` não passa se repetida, `SemResposta`
+/// provavelmente passa, e `Enviando` ainda não é notícia nenhuma.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum EstadoDoEnvio {
+    /// O servidor gravou. Todo o histórico está aqui.
+    Confirmada,
+    /// Entregue ao enlace, sem resposta ainda.
+    Enviando,
+    /// O servidor recusou, e disse por quê.
+    Recusada(MotivoDaRecusa),
+    /// O enlace caiu antes de qualquer resposta.
+    ///
+    /// Pode ter sido gravada: repetir com a mesma chave é seguro, porque o
+    /// servidor é idempotente por ela.
+    SemResposta,
+}
+
+/// Por que o servidor não gravou uma mensagem.
+///
+/// Um espelho de [`seele_core::MessageRefusal`] para a casca, pela mesma
+/// razão que todos os outros espelhos deste arquivo existem: uma casca não vê
+/// `seele-proto` (ADR 0002).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum MotivoDaRecusa {
+    /// Sem permissão de escrita, ou sem o papel mínimo do canal.
+    PermissionDenied,
+    /// O canal não existe mais, ou nunca existiu.
+    NoSuchChannel,
+    /// O corpo passa do teto do contrato, **em bytes**.
+    TooLong {
+        /// O maior corpo que o servidor aceita, em bytes.
+        limit: u32,
+    },
+    /// O armazenamento do servidor não aceitou a gravação.
+    StorageFailed,
+}
+
+impl From<seele_core::MessageRefusal> for MotivoDaRecusa {
+    fn from(motivo: seele_core::MessageRefusal) -> Self {
+        match motivo {
+            seele_core::MessageRefusal::PermissionDenied => Self::PermissionDenied,
+            seele_core::MessageRefusal::NoSuchChannel => Self::NoSuchChannel,
+            seele_core::MessageRefusal::TooLong { limit } => Self::TooLong { limit },
+            seele_core::MessageRefusal::StorageFailed => Self::StorageFailed,
+        }
+    }
+}
+
+impl From<seele_core::EstadoDoEnvio> for EstadoDoEnvio {
+    fn from(estado: seele_core::EstadoDoEnvio) -> Self {
+        match estado {
+            seele_core::EstadoDoEnvio::Enviando => Self::Enviando,
+            seele_core::EstadoDoEnvio::Falhou(motivo) => Self::Recusada(motivo.into()),
+            seele_core::EstadoDoEnvio::SemResposta => Self::SemResposta,
+        }
+    }
+}
+
+/// O volume e o mudo do som de uma transmissão, como a casca os desenha.
+///
+/// ADR 0054 e R17. Dois campos e não um, porque calar e baixar são decisões
+/// diferentes: voltar do mudo tem de devolver o volume que a pessoa escolheu, e
+/// um mudo que zerasse o volume apagaria a escolha.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct SomDaTela {
+    /// `1.0` é o volume de origem, `0.0` é silêncio. Teto de `4.0`.
+    pub volume: f32,
+    /// Se está calado, sem mexer no volume.
+    pub calada: bool,
+}
+
+/// O que esta máquina faz com o **próprio** áudio ao capturar uma tela.
+///
+/// R21 e ADR 0054. Um espelho de [`seele_core::ExclusaoDoSom`] para a casca, pela
+/// razão de todos os espelhos deste arquivo: uma casca não vê `seele-video`.
+///
+/// **Três respostas, e a terceira não é uma falha.** Uma máquina que não
+/// compartilha tela não tem áudio capturado, então a pergunta não se aplica —
+/// responder «excluído» ali faria a tela prometer a quem não transmite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum ExclusaoDoSom {
+    /// O sistema tira o áudio deste processo do que a captura leva.
+    ///
+    /// Quem compartilha continua ouvindo todo mundo; quem assiste não recebe a
+    /// própria voz de volta.
+    Excluido,
+    /// A captura leva a saída inteira, o SEELE incluído.
+    ///
+    /// A tela diz isso e oferece as duas saídas: compartilhar uma janela, ou
+    /// transmitir sem áudio.
+    NaoExcluido,
+    /// Esta máquina não compartilha tela.
+    SemCaptura,
+}
+
+impl From<seele_core::ExclusaoDoSom> for ExclusaoDoSom {
+    fn from(dito: seele_core::ExclusaoDoSom) -> Self {
+        match dito {
+            seele_core::ExclusaoDoSom::Excluido => Self::Excluido,
+            seele_core::ExclusaoDoSom::NaoExcluido => Self::NaoExcluido,
+            seele_core::ExclusaoDoSom::SemCaptura => Self::SemCaptura,
+        }
+    }
+}
+
+/// Os controles de qualidade de voz desta sessão. F01 e F02.
+///
+/// # Por que a faixa atravessa junto
+///
+/// Porque o controle de sensibilidade é uma régua, e uma régua sem extremos não
+/// é uma régua. Os dois números vêm de `seele_audio::gate::FAIXA_DE_ABERTURA_DBFS`
+/// e não são escritos na janela: dois pares de extremos são dois pares esperando
+/// para discordar, e o sintoma da discordância é um controle que parece funcionar
+/// e cujo fim não é o fim.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct ControlesDaVoz {
+    /// Quanto da supressão de ruído está sendo aplicado. `0.0` é desligada.
+    pub supressao: f32,
+    /// A sensibilidade de abertura que está valendo, em dBFS.
+    pub abertura_dbfs: f32,
+    /// Se a sensibilidade acima foi escolhida, ou é o padrão do produto.
+    ///
+    /// A interface diz «padrão» em vez de um número que ninguém escolheu — e o
+    /// controle pode voltar ao padrão em vez de ficar preso no valor que o padrão
+    /// tinha quando alguém o tocou.
+    pub abertura_escolhida: bool,
+    /// O extremo sensível da faixa, em dBFS.
+    pub abertura_minima_dbfs: f32,
+    /// O extremo surdo da faixa, em dBFS.
+    pub abertura_maxima_dbfs: f32,
+}
+
+/// O que um teste de microfone tem a contar enquanto roda. F01.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct EstadoDoTesteDeMicrofone {
+    /// O nível do microfone **depois** da supressão, em dBFS.
+    ///
+    /// Depois, e não antes: é o nível que o portão vê, e é sobre ele que a
+    /// sensibilidade é escolhida.
+    pub nivel_dbfs: f32,
+    /// Se a transmissão estaria aberta agora.
+    pub aberto: bool,
+    /// Quantas vezes o portão abriu desde que o teste começou.
+    ///
+    /// Com a sala vazia ele tem de ficar parado: é o número que responde «o
+    /// ventilador está abrindo a transmissão?» sem ninguém precisar ouvir.
+    pub aberturas: u64,
+    /// Quantos quadros anteriores a uma abertura saíram junto com ela.
+    pub quadros_retidos: u64,
+    /// Onde o corte **está**, em dBFS. F01, A03.
+    ///
+    /// No padrão, o limiar acompanha o ruído medido e a régua mostra o alvo: são
+    /// dois números, e o que decide é este. A marca no medidor é desenhada daqui, e
+    /// não da régua — uma marca no alvo enquanto o corte está 10 dB acima engana
+    /// justamente quem abriu o teste para descobrir por que não abre.
+    pub corte_dbfs: f32,
+    /// Se o monitor — ouvir o próprio microfone — está ligado.
+    pub monitorando: bool,
+    /// O que deu errado durante o teste, se deu.
+    ///
+    /// Um aparelho que sumiu no meio. Sem esta frase o sintoma seria um medidor
+    /// parado, indistinguível de silêncio.
+    pub falha: Option<String>,
 }
 
 /// One microphone this machine is offering.
@@ -824,6 +1042,26 @@ pub struct LimitesDeTela {
     /// pediu.
     #[serde(default)]
     pub prioridade: Prioridade,
+    /// Se o som da fonte vai junto com a imagem.
+    ///
+    /// R21 e ADR 0054: é o controle **de quem envia**, e é a saída que o produto
+    /// oferece a quem está num sistema onde a captura leva o áudio do SEELE junto
+    /// — em vez de afirmar que o eco foi resolvido.
+    ///
+    /// Ausente no JSON é `true`, que é o que se espera de um vídeo compartilhado.
+    /// Uma casca antiga que não conheça este campo continua pedindo o que sempre
+    /// pediu.
+    #[serde(default = "com_som_por_padrao")]
+    pub com_som: bool,
+}
+
+/// O padrão de [`LimitesDeTela::com_som`].
+///
+/// Uma função porque `serde` não aceita `default = "true"` num `bool`, e o padrão
+/// de `bool` é `false` — que aqui seria entregar vídeo mudo a quem não escolheu
+/// nada.
+const fn com_som_por_padrao() -> bool {
+    true
 }
 
 /// O que cede primeiro quando o orçamento aperta.
@@ -849,31 +1087,46 @@ pub enum Prioridade {
 /// A transmissão de tela desta sala de voz, quando há uma.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TelaEmCurso {
+    // ---- o que saiu daqui, e por quê ----
+    //
+    // `altura`, `quadros`, `kbps` e `medida` eram quatro campos que **nada nesta
+    // ponte media**: os três primeiros saíam zerados e o quarto saía `false`,
+    // sempre. A tela reservava três caixas para eles e escrevia «ainda não há
+    // medida desta transmissão» em todas as três, para sempre.
+    //
+    // O review da v15 (R20) mediu o custo disso na tela e a decisão é a dele:
+    // retirar o espaço vazio enquanto não há medição. Quando houver medida de
+    // verdade — ligada ao codificador de quem transmite, e por `ScreenId` — ela
+    // volta como campos que dizem o que mediram e para qual tela. Um campo que
+    // promete um número e entrega zero é pior que um campo ausente: ele faz a
+    // interface reservar lugar para uma resposta que não existe.
+    /// **Qual** transmissão é esta, como o servidor a batizou.
+    ///
+    /// # Por que ela passou a estar aqui
+    ///
+    /// Porque nada dizia de qual tela o painel falava. `tela_de` pegava a
+    /// **primeira** transmissão encontrada no mapa da sala, sem relacioná-la com
+    /// a que o espectador escolheu nem com a própria — então numa sala com duas
+    /// pessoas transmitindo, autoria, controles e metadados podiam estar falando
+    /// de uma tela enquanto a imagem era de outra. R18 da revisão da v15 e ADR
+    /// 0054: no compartilhamento, tudo é por identidade.
+    pub tela: u32,
     /// Quem está compartilhando.
     pub de: u64,
     /// Se é esta pessoa.
     pub e_minha: bool,
-    /// A altura que está saindo **agora** — não a que foi pedida.
+    /// Quantas pessoas estão **recebendo** esta transmissão.
     ///
-    /// Zero enquanto [`Self::medida`] for `false`. A tela mostra este número ao
-    /// lado do que foi pedido (§5): receber menos do que se escolheu não é
-    /// defeito, esconder que aconteceu é.
-    pub altura: u32,
-    /// Os quadros por segundo que estão saindo agora. Zero enquanto
-    /// [`Self::medida`] for `false`.
-    pub quadros: u32,
-    /// Os kbps que estão saindo agora. Zero enquanto [`Self::medida`] for
-    /// `false`.
-    pub kbps: u32,
-    /// Quantas pessoas estão na sala de voz além de quem compartilha.
+    /// # O número passou a ser o do servidor
     ///
-    /// Contadas no roster **desta** máquina, que é a única contagem que existe
-    /// aqui. É a razão que a tela escreve ao lado da resolução — `720p · 6
-    /// pessoas assistindo`, §5.1 — e **não** é, hoje, o N pelo qual o servidor
-    /// dividiu o teto: esse número é calculado em `VoiceRoom::reconferir_o_teto` e
-    /// nenhum quadro de controle o carrega de volta ao cliente. Os dois
-    /// coincidem sempre que o roster estiver em dia, e divergem no intervalo
-    /// entre alguém entrar e o `PersonJoined` chegar.
+    /// Era contado no roster desta máquina — «quem está na sala menos quem
+    /// compartilha» —, e isso incluía quem escolheu não assistir. O servidor
+    /// conta assinaturas de verdade e as manda no `ScreenViewers`; é o mesmo N
+    /// pelo qual ele divide o teto no §5.1, e usar outro aqui era ter duas
+    /// contagens para a mesma pergunta, discordando.
+    ///
+    /// Zero até o primeiro `ScreenViewers` chegar. Zero é a resposta honesta: uma
+    /// transmissão que começou agora não tem ninguém assistindo ainda.
     pub espectadores: u32,
     /// `Some` quando a transmissão está parada, com o nome estável do motivo.
     ///
@@ -883,17 +1136,6 @@ pub struct TelaEmCurso {
     /// frase pronta em português atravessando aqui seria a única sentença que a
     /// casca não escreve — e a que o guarda de vocabulário da interface não vê.
     pub parada: Option<String>,
-    /// Se [`Self::altura`], [`Self::quadros`] e [`Self::kbps`] foram medidos.
-    ///
-    /// **Não estava no contrato de 22/08.** Está aqui porque os três são `u32`
-    /// e hoje ninguém os mede: nada nesta ponte alcança o codificador de quem
-    /// compartilha, e do lado de quem assiste nada abre a recepção. Sem este
-    /// campo os três sairiam zerados e a tela escreveria `0p · 0 quadros`, que
-    /// é a mentira confiante — o mesmo defeito do jitter que o servidor manda como
-    /// `0.0` porque não tem como medi-lo.
-    ///
-    /// `false` significa **não sei**, e a casca não escreve nada.
-    pub medida: bool,
     /// O que foi **pedido** para esta transmissão, quando ela é desta pessoa.
     ///
     /// O outro lado do §5: *a tela não promete a escolha*, e mostra o que está
@@ -1124,13 +1366,30 @@ pub struct Snapshot {
     ///
     /// **Convenience, never enforcement**, like the five above it.
     pub may_delete_rooms: bool,
-    /// A transmissão de tela desta sala de voz, quando há uma.
+    /// A transmissão que esta sessão está **assistindo**, quando há uma.
     ///
-    /// `None` quando ninguém está compartilhando **na sala onde esta pessoa
-    /// está**. Uma transmissão noutra sala não aparece aqui: o servidor só a
-    /// anuncia a quem está lá dentro, e desenhá-la fora seria a casca contando
-    /// algo que a sessão não viu.
+    /// `None` quando ninguém está compartilhando na sala onde esta pessoa está,
+    /// ou quando ela escolheu não assistir nenhuma. Uma transmissão noutra sala
+    /// não aparece aqui: o servidor só a anuncia a quem está lá dentro, e
+    /// desenhá-la fora seria a casca contando algo que a sessão não viu.
+    ///
+    /// # Era «a da sala», e aí não era de ninguém
+    ///
+    /// `tela_de` pegava a primeira transmissão que encontrasse no mapa da sala,
+    /// sem relacioná-la com a escolhida por quem assiste nem com a própria. Numa
+    /// sala com dois transmissores, autoria, controles e metadados podiam estar
+    /// falando de uma tela enquanto a imagem era de outra — e a interface não
+    /// tinha como saber. ADR 0054 e R18.
+    ///
+    /// **Assistida e própria são coisas diferentes**, e por isso são dois
+    /// campos: quem transmite e assiste a tela de outra pessoa ao mesmo tempo é
+    /// o caso normal, não o raro.
     pub tela: Option<TelaEmCurso>,
+    /// A transmissão que **esta** pessoa está mandando, quando há uma.
+    ///
+    /// É a única que carrega [`TelaEmCurso::pedido`], porque o teto é escolha de
+    /// quem transmite e não viaja no fio.
+    pub minha_transmissao: Option<TelaEmCurso>,
     /// Tudo o que está sendo transmitido na sala em que esta pessoa está.
     ///
     /// **A lista existe porque a sala passou a caber mais de uma.** Com uma só,
@@ -1160,6 +1419,16 @@ pub struct TransmissaoNaSala {
     pub de: u64,
     /// Se é esta pessoa — quem transmite não assiste a si mesmo pelo servidor.
     pub e_minha: bool,
+    /// Se **esta** é a transmissão que esta sessão escolheu assistir.
+    ///
+    /// ADR 0054. Vem do lado que sobrevive à janela, e não de uma variável de
+    /// JavaScript: uma recarga no meio de uma sessão perdia a escolha, e aí a
+    /// fileira de botões não sabia mais qual estava marcado.
+    pub assistida: bool,
+    /// Quantas pessoas estão recebendo esta transmissão, como o servidor conta.
+    ///
+    /// Zero até o primeiro `ScreenViewers`. Ver [`TelaEmCurso::espectadores`].
+    pub espectadores: u32,
 }
 
 /// What the shell subscribes to.
@@ -1661,6 +1930,17 @@ pub enum ConnectionError {
     PlaybackDeviceGone,
     /// The named person is not in this voice room.
     UnknownPerson,
+    /// Esta mensagem não existe no servidor.
+    ///
+    /// Hoje isto quer dizer uma coisa só: alguém endereçou uma **pendente** —
+    /// uma mensagem que esta máquina escreveu e o servidor ainda não confirmou.
+    /// `Message::id` vale zero nessas, e zero não é identificador de nada.
+    ///
+    /// Variante própria e não [`Self::NotConnected`]: a sessão está boa, e a
+    /// frase «a conexão caiu» mandaria a pessoa olhar a rede por causa de um
+    /// clique numa linha que ainda está subindo. Quem quer largar uma pendente
+    /// usa `Connection::descartar_mensagem`.
+    UnknownMessage,
     /// No voice room or Channel by that name or number.
     UnknownChannel,
     /// The control stream broke.
@@ -1995,46 +2275,66 @@ mod tests {
         assert_eq!(sem_teto.banda_bps, None);
     }
 
+    /// **A transmissão atravessa pelo nome, e diz de qual tela ela fala.**
+    ///
+    /// # O que saiu deste teste no R20
+    ///
+    /// Ele exigia `altura`, `quadros`, `kbps` e `medida`, e a asserção que mais
+    /// valia era `"medida":false` — «a ponte diz ter medido o que não mediu».
+    /// Estava certa, e era uma regra sobre quatro campos que **nunca** tiveram
+    /// valor: os três números saíam zerados e o quarto saía `false`, sempre.
+    ///
+    /// Os quatro saíram da ponte, e a regra que eles serviam continua valendo
+    /// noutro lugar: um campo de medida só volta quando houver medida, ligado a
+    /// um `ScreenId`. Ver a nota no corpo de [`TelaEmCurso`].
+    ///
+    /// O que entrou no lugar é `tela`, e é o que o R18 pedia: sem ela, nada no
+    /// painel dizia de qual transmissão ele falava.
     #[test]
-    fn a_tela_em_curso_atravessa_pelo_nome_e_diz_o_que_nao_sabe() {
+    fn a_tela_em_curso_atravessa_pelo_nome_e_diz_de_qual_tela_fala() {
         let tela = TelaEmCurso {
+            tela: 9,
             de: 3,
             e_minha: false,
-            altura: 0,
-            quadros: 0,
-            kbps: 0,
             espectadores: 6,
             parada: None,
-            medida: false,
             pedido: Some(LimitesDeTela {
                 banda_bps: Some(1_200_000),
                 altura_maxima: 1080,
                 quadros_maximos: 30,
                 prioridade: Prioridade::Nitidez,
+                com_som: true,
             }),
         };
         let json = serde_json::to_string(&tela).expect("uma estrutura simples sempre serializa");
 
         for nome in [
+            "\"tela\"",
             "\"de\"",
             "\"e_minha\"",
-            "\"altura\"",
-            "\"quadros\"",
-            "\"kbps\"",
             "\"espectadores\"",
             "\"parada\"",
-            "\"medida\"",
             "\"pedido\"",
         ] {
             assert!(json.contains(nome), "{nome} não atravessa: {json}");
         }
 
-        // O campo que impede a casca de escrever `0p · 0 quadros` sobre uma
-        // transmissão que ninguém mediu. Ver o doc de `TelaEmCurso::medida`.
+        // **A identidade da transmissão, e é a metade que faltava.** `tela_de`
+        // pegava a primeira do mapa da sala, então autoria, controles e
+        // metadados podiam falar de uma tela enquanto a imagem era de outra.
         assert!(
-            json.contains("\"medida\":false"),
-            "a ponte diz ter medido o que não mediu: {json}"
+            json.contains("\"tela\":9"),
+            "a transmissão atravessa sem dizer qual ela é: {json}"
         );
+        // E nenhum campo de medida voltou sem medida por trás dele.
+        for inventado in ["\"altura\"", "\"quadros\"", "\"kbps\"", "\"medida\""] {
+            assert!(
+                !json.contains(inventado),
+                "{inventado} voltou à ponte: se há medida agora, ela tem de dizer \
+                 o que mediu e de qual tela — e este teste tem de passar a \
+                 exigir isso em vez de proibir o campo: {json}"
+            );
+        }
 
         // E o pedido atravessa com os **mesmos três nomes** com que a casca o
         // escreveu ao mandá-lo (`LimitesDeTela`, logo acima). Renomear um deles
@@ -2058,14 +2358,11 @@ mod tests {
         // pôr lado a lado passariam a ser o mesmo número, sempre iguais, sempre
         // dizendo que o teto nunca apertou.
         let alheia = TelaEmCurso {
+            tela: 9,
             de: 3,
             e_minha: false,
-            altura: 0,
-            quadros: 0,
-            kbps: 0,
             espectadores: 6,
             parada: None,
-            medida: false,
             pedido: None,
         };
         let json = serde_json::to_string(&alheia).expect("uma estrutura simples sempre serializa");

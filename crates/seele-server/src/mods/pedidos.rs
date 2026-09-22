@@ -60,14 +60,25 @@ async fn executar_inner(
     id: &str,
     payload: &str,
 ) -> anyhow::Result<String> {
-    let mut db = Arc::clone(&server.persistence).lock_owned().await;
-    let enabled = mods::enabled(&db)?;
-    anyhow::ensure!(
-        Permissions::new(&db)
+    // **O banco é lido e soltado.** Não levado ao trabalhador.
+    //
+    // R11 da revisão da v15: o guarda dono era tomado aqui e mantido enquanto o
+    // trabalhador relia os arquivos do pacote, recalculava o hash, criava o
+    // runtime e executava o pedido — inclusive as chamadas nativas que o MOD faz,
+    // que têm prazo próprio de dois segundos. Ler histórico e escrever texto
+    // esperavam por tudo isso.
+    //
+    // O que o guarda longo dava de graça — a atomicidade do quintal do MOD —
+    // volta pelo cadeado por MOD, mais abaixo. Ver `Server::mods_em_curso`.
+    let (enabled, pode_ler) = {
+        let db = server.persistence.lock().await;
+        let enabled = mods::enabled(&db)?;
+        let pode_ler = Permissions::new(&db)
             .may(person, Permission::ReadChannel)
-            .unwrap_or(false),
-        "cannot read"
-    );
+            .unwrap_or(false);
+        (enabled, pode_ler)
+    };
+    anyhow::ensure!(pode_ler, "cannot read");
     if id.is_empty() {
         // **A identidade do conjunto vai junto.** Sem ela, a janela vê quais
         // MODs faltam e não tem como saber se o que está anunciado agora é o
@@ -77,9 +88,12 @@ async fn executar_inner(
         // Campo de JSON, e não variante nova: o corpo desta resposta é do
         // produto, e um campo a mais nele não toca na janela de
         // compatibilidade do protocolo.
-        let identidade = super::anuncio::conjunto_exigido(&db)
-            .map(|c| c.identidade)
-            .unwrap_or_default();
+        let identidade = {
+            let db = server.persistence.lock().await;
+            super::anuncio::conjunto_exigido(&db)
+                .map(|c| c.identidade)
+                .unwrap_or_default()
+        };
         return Ok(serde_json::json!({
             "ok": true,
             "conjunto": identidade,
@@ -105,20 +119,26 @@ async fn executar_inner(
     // variante quebraria a janela de compatibilidade do protocolo sem
     // necessidade — o mesmo byte já diz a coisa nova.
     let com_canal = channel.0 != 0;
-    anyhow::ensure!(
-        !com_canal
+    // As três perguntas restantes ao banco, numa tomada curta e só de leitura.
+    let (canal_existe, admin, write) = {
+        let db = server.persistence.lock().await;
+        let canal_existe = !com_canal
             || Channels::new(&db)
                 .channels()?
                 .iter()
-                .any(|c| c.id == channel),
-        "unknown channel"
-    );
-    let admin = Permissions::new(&db)
-        .may(person, Permission::AdministerServer)
-        .unwrap_or(false);
-    let write = Permissions::new(&db)
-        .may(person, Permission::WriteChannel)
-        .unwrap_or(false);
+                .any(|c| c.id == channel);
+        let permissions = Permissions::new(&db);
+        (
+            canal_existe,
+            permissions
+                .may(person, Permission::AdministerServer)
+                .unwrap_or(false),
+            permissions
+                .may(person, Permission::WriteChannel)
+                .unwrap_or(false),
+        )
+    };
+    anyhow::ensure!(canal_existe, "unknown channel");
     let raizes = server
         .mods_dir
         .as_ref()
@@ -142,37 +162,111 @@ async fn executar_inner(
     // A lista de esperas é do servidor, e não deste pedido: ela tem de
     // sobreviver à resposta para o fluxo de volume encontrar o token.
     let esperas = Arc::clone(&server.esperas);
-    // The owned guard is held on the blocking worker, never running JS on Tokio.
-    tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-        let manifest =
-            seele_proto::mods::read_manifest(&std::fs::read_to_string(root.join("mod.json"))?)?;
-        anyhow::ensure!(manifest.id == id, "wrong id");
-        let mut files = Vec::new();
-        package(&root, &root, &mut files)?;
-        anyhow::ensure!(
-            seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut files)) == hash,
-            "package changed"
-        );
-        let entry = manifest
-            .server
-            .ok_or_else(|| anyhow::anyhow!("no server half"))?;
-        let relative = seele_proto::mods::inner_path(&entry.split('/').collect::<Vec<_>>())
-            .ok_or_else(|| anyhow::anyhow!("bad path"))?;
-        let mut host = super::Anfitriao::novo()?;
-        // **Antes de `carregar`.** As ligações do QuickJS clonam este `Arc` ao
-        // serem montadas; compartilhar depois deixaria o MOD escrevendo numa
-        // lista que ninguém mais lê. Ver `Anfitriao::compartilhar_esperas`.
-        host.compartilhar_esperas(esperas);
-        host.carregar(&id, &std::fs::read_to_string(root.join(relative))?, &dados)?;
-        let mut data: BTreeMap<String, String> = mods::ler_quintal(&db, &id)?;
-        let before = data.clone();
-        let response = host.pedir(&id, person, &context, &payload, &mut data)?;
-        if data != before {
-            mods::gravar_quintal(&mut db, &id, &data)?;
+
+    // **O cadeado deste MOD**, e é ele que substitui a atomicidade que o guarda
+    // longo dava. Ver `Server::mods_em_curso`: dois pedidos do mesmo MOD esperam
+    // um pelo outro — porque o quintal é lido, mexido pelo JavaScript e gravado
+    // de volta, e sobrepor isso perde atualização —, e dois MODs diferentes
+    // correm juntos.
+    let cadeado = {
+        let mut em_curso = server
+            .mods_em_curso
+            .lock()
+            .map_err(|_| anyhow::anyhow!("a tabela de cadeados de MOD foi envenenada"))?;
+        Arc::clone(
+            em_curso
+                .entry(id.clone())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+        )
+    };
+    let _vez = cadeado.lock().await;
+
+    // **O pacote é conferido uma vez por hash**, e não a cada pedido: a
+    // conferência relê todos os arquivos e recalcula o hash do conteúdo, e a
+    // resposta é sempre a mesma enquanto o hash for o mesmo. Ver
+    // `Server::pacotes_conferidos`.
+    let conferidos = Arc::clone(&server.pacotes_conferidos);
+    let fonte = {
+        let guardado = conferidos
+            .lock()
+            .map_err(|_| anyhow::anyhow!("o cache de pacotes de MOD foi envenenado"))?
+            .get(&hash)
+            .cloned();
+        match guardado {
+            Some(pacote) => pacote.fonte,
+            None => {
+                let hash_para_conferir = hash.clone();
+                let id_do_pacote = id.clone();
+                let raiz = root.clone();
+                // Fora do Tokio: são leituras de disco e um SHA-256 sobre o
+                // pacote inteiro.
+                let fonte = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+                    let manifest = seele_proto::mods::read_manifest(&std::fs::read_to_string(
+                        raiz.join("mod.json"),
+                    )?)?;
+                    anyhow::ensure!(manifest.id == id_do_pacote, "wrong id");
+                    let mut files = Vec::new();
+                    package(&raiz, &raiz, &mut files)?;
+                    anyhow::ensure!(
+                        seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut files))
+                            == hash_para_conferir,
+                        "package changed"
+                    );
+                    let entry = manifest
+                        .server
+                        .ok_or_else(|| anyhow::anyhow!("no server half"))?;
+                    let relative =
+                        seele_proto::mods::inner_path(&entry.split('/').collect::<Vec<_>>())
+                            .ok_or_else(|| anyhow::anyhow!("bad path"))?;
+                    Ok(std::fs::read_to_string(raiz.join(relative))?)
+                })
+                .await??;
+                conferidos
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("o cache de pacotes de MOD foi envenenado"))?
+                    .insert(
+                        hash.clone(),
+                        crate::server::PacoteConferido {
+                            fonte: fonte.clone(),
+                        },
+                    );
+                fonte
+            }
         }
-        Ok(response)
-    })
-    .await?
+    };
+
+    // O quintal é lido numa tomada curta, **antes** de o JavaScript rodar.
+    let mut data: BTreeMap<String, String> = {
+        let db = server.persistence.lock().await;
+        mods::ler_quintal(&db, &id)?
+    };
+    let before = data.clone();
+    let id_do_pedido = id.clone();
+    // O JavaScript nunca roda no Tokio, e agora também não roda com o banco na
+    // mão.
+    let (response, data) = tokio::task::spawn_blocking(
+        move || -> anyhow::Result<(String, BTreeMap<String, String>)> {
+            let mut host = super::Anfitriao::novo()?;
+            // **Antes de `carregar`.** As ligações do QuickJS clonam este `Arc` ao
+            // serem montadas; compartilhar depois deixaria o MOD escrevendo numa
+            // lista que ninguém mais lê. Ver `Anfitriao::compartilhar_esperas`.
+            host.compartilhar_esperas(esperas);
+            host.carregar(&id_do_pedido, &fonte, &dados)?;
+            let response = host.pedir(&id_do_pedido, person, &context, &payload, &mut data)?;
+            Ok((response, data))
+        },
+    )
+    .await??;
+
+    // E gravado noutra tomada curta. O cadeado deste MOD ainda está na mão, e é
+    // ele que garante que ninguém leu o quintal entre a leitura acima e esta
+    // gravação — que é a perda de atualização que soltar o mutex introduziria se
+    // ele não existisse.
+    if data != before {
+        let mut db = server.persistence.lock().await;
+        mods::gravar_quintal(&mut db, &id, &data)?;
+    }
+    Ok(response)
 }
 
 /// Splits only at character boundaries, keeping each wire frame under its ceiling.

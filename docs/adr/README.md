@@ -82,6 +82,9 @@ o ganho é de estética.
 | [0048](0048-mods-ganham-o-caminho-de-volume-que-os-anexos-ja-tem.md) | MODs ganham o caminho de volume que os anexos já têm | **aceito** | — (relato de campo: imagem de 1 MB levando 28 s; estende o `0027` aos MODs do `0045`) |
 | [0049](0049-um-mod-deixa-de-rodar-na-janela-do-produto.md) | Um MOD deixa de rodar na janela do produto | **aceito** | — (revisa o `0045`; etapa 5 do plano de isolamento, e depende de protótipo em macOS e Windows) |
 | [0052](0052-um-mod-ganha-superficies-proprias-e-pontos-de-integracao.md) | Um MOD ganha superfícies próprias e pontos de integração | **aceito** | — (auditoria de UX/UI de 20/09/2026, U01–U03 e U27; estende o `0049` sem mexer no executor) |
+| [0053](0053-uma-previa-nao-e-um-clique.md) | Uma prévia não é um clique | **aceito** | — (revisão da v15, R06: separa a política de prévia automática da de abrir link, e põe o consentimento por domínio nas mãos de quem lê) |
+| [0054](0054-uma-transmissao-tem-identidade.md) | Uma transmissão tem identidade | **aceito** | — (revisão da v15, R16–R21: tudo de compartilhamento passa a ser por `ScreenId`) |
+| [0055](0055-o-filtro-e-o-que-torna-o-limiar-baixo-defensavel.md) | O filtro é o que torna o limiar baixo defensável | **aceito** | — (`features-v15.md` F01 e F02: supressão de ruído em Rust puro, e o limiar que passou a medir a sala em vez de supor o ruído dela — revisado pela auditoria de 22/09/2026) |
 
 ## O que ainda não tem ADR
 

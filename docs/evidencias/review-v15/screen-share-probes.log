@@ -1,0 +1,3 @@
+CONFIRMED MULTIPLE SHARES: another publisher disables start {"disabled":true,"title":"ALGUÉM JÁ ESTÁ COMPARTILHANDO A TELA NESTA SALA.\nCabe uma por vez: dá para começar assim que a pessoa parar."}
+CONFIRMED CINEMA: stopping viewing leaves fullscreen layout hiding navigation {"noCinema":true,"telaEmCurso":null,"telaQuerida":null,"hiddenSiblings":66}
+CONFIRMED STOP RACE: pending switch subscribes after stop choice {"telaQuerida":null,"calls":[{"cmd":"assistir","args":{"tela":7,"quero":false}},{"cmd":"assistir","args":{"tela":8,"quero":true}}]}

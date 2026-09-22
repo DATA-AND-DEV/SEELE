@@ -275,11 +275,23 @@ pub async fn receive(
         // channels cost one `fsync`, and a transfer that has just spent seconds on
         // the wire is not that. What it needs and the queue cannot give is the
         // row identifier, now, to hang the attachment off.
-        let mut stored = Messages::new(&mut guard)
+        // Uma mensagem, uma resposta, e ela pode ser uma recusa: o lote passou a
+        // responder por registro — ver [`Gravacao`]. Aqui o lote é de um, então
+        // a recusa é o resultado inteiro, e ela **precisa** subir como erro:
+        // guardar os bytes de um anexo pendurado numa mensagem que não existe
+        // seria ocupar disco por um arquivo que ninguém alcança.
+        let mut stored = match Messages::new(&mut guard)
             .append_batch(std::slice::from_ref(&pending))?
             .into_iter()
             .next()
-            .context("the write batch answered with nothing")?;
+            .context("the write batch answered with nothing")?
+        {
+            crate::persistence::messages::Gravacao::Feita(stored) => stored,
+            crate::persistence::messages::Gravacao::Falhou { motivo, .. } => {
+                vault.store.abandon(&mut ledger, reservation);
+                anyhow::bail!("a mensagem do anexo não foi gravada: {motivo:?}");
+            }
+        };
 
         // A retry that had in fact succeeded. `append_batch` deduplicates by
         // `(author, client_message_id)`, so what came back is the original row

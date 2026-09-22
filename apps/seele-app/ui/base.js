@@ -1046,13 +1046,61 @@ function superficieDoMod(mod, instancia, chave) {
 /**
  * Quem desenha o que a contribuição muda, quando o registro muda.
  *
- * A lista de pessoas e a coluna de canais se redesenham; o resto da aplicação
- * não é tocado. Coalescido em `avisar`, uma vez por quadro.
+ * A lista de pessoas, a coluna de canais e os avatares se atualizam.
+ * Coalescido em `avisar`, uma vez por quadro.
  */
 contribuicoesDosMods.aoMudar(() => {
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   if (typeof redesenharAsEntradasDeMod === "function") redesenharAsEntradasDeMod();
+  if (typeof redesenharAvatares === "function") redesenharAvatares();
 });
+
+/**
+ * Avatar de servidor compartilhado por todas as aparições da mesma pessoa.
+ * A origem vem do MOD; os bytes passam pela ponte de mídia do produto.
+ * Uma contribuição carrega uma vez e perde o cache junto com a instância.
+ */
+function avatarContribuido(pessoaId) {
+  const preferido = typeof modPreferidoPara === "function"
+    ? modPreferidoPara("pessoa.avatar") || modPreferidoPara("pessoa.cartao")
+    : "";
+  const contribuicao = contribuicoesDosMods.escolherSubstituicao(
+    "pessoa.avatar", String(pessoaId), preferido,
+  ).escolhida;
+  if (!contribuicao) return null;
+  const dono = donoDaRegiao({ id: contribuicao.mod }, contribuicao.instancia);
+  if (!dono.podeFalar()) return null;
+  if (contribuicao.retrato) return contribuicao.retrato.uri;
+  const estado = { uri: null, bytes: 0, cancelado: false };
+  contribuicao.retrato = estado;
+  contribuicao.soltarMontagem = () => {
+    estado.cancelado = true;
+    estado.uri = null;
+    estado.bytes = 0;
+    contribuicao.retrato = null;
+  };
+  const fonte = contribuicao.conteudo.doServidor;
+  dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes")
+    .then((midia) => {
+      if (estado.cancelado || !dono.podeFalar()) return;
+      let ocupados = 0;
+      for (const outra of contribuicoesDosMods.porHandle.values()) {
+        if (outra.instancia === contribuicao.instancia) ocupados += outra.retrato?.bytes ?? 0;
+      }
+      if (midia.papel !== "imagem" || !Number.isFinite(midia.bytes) || midia.bytes < 0
+        || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
+        throw new Error("o avatar não é imagem ou excede o limite de mídia");
+      }
+      estado.uri = midia.uri;
+      estado.bytes = midia.bytes;
+      redesenharAvatares();
+    })
+    .catch((falha) => {
+      if (estado.cancelado || !dono.podeFalar()) return;
+      dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque: String(falha?.message ?? falha) });
+    });
+  return null;
+}
 
 /**
  * Monta o `conteudo` de uma contribuição **para um destino**, e devolve o nó.

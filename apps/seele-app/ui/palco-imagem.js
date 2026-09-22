@@ -483,6 +483,14 @@ function botaoDeCinema(temImagem) {
   }
 }
 
+// A barra compacta do palco pede para parar de assistir, e quem sabe parar é
+// este arquivo — é ele que guarda a intenção e o decodificador. Um evento e não
+// uma chamada direta porque os dois scripts não se importam: `tela-chamada.js`
+// desenha, este conduz.
+window.addEventListener("seele:parar-de-assistir", () => {
+  pararDeVer().catch((falha) => console.warn("parar de assistir:", falha));
+});
+
 $("palco-cheia").addEventListener("click", () => {
   trocarCinema(!noCinema).catch((falha) => console.warn("cinema:", falha));
 });
@@ -674,23 +682,69 @@ function desenharTransmissoes(snapshot) {
 }
 
 /**
+ * Quantas vezes a intenção mudou nesta janela.
+ *
+ * # O que ela conserta
+ *
+ * R16 da revisão da v15: «"não ver" precisa cancelar também as operações
+ * pendentes».
+ *
+ * `pararDeVer` guardava a recusa e fechava a imagem; `trocarDeTransmissao`
+ * esperava o cancelamento da anterior e **depois** pedia a nova, sem revalidar a
+ * intenção. Reproduzido: assistir A → pedir B → clicar «não ver» enquanto o
+ * cancelamento de A estava pendente → concluir esse cancelamento. A escolha
+ * ficava `null` e a janela mandava `assistir(B, true)` **depois** do clique.
+ *
+ * Toda operação assíncrona daqui guarda esta geração antes do primeiro `await` e
+ * a confere depois de cada um. Uma que não bate é obsoleta, e obsoleta quer
+ * dizer descartada — não «aplicada mesmo assim porque já chegou até aqui».
+ */
+let geracaoDaIntencao = 0;
+
+/** Anda a geração e devolve a nova. Todo gesto que muda a intenção passa aqui. */
+function novaIntencao() {
+  geracaoDaIntencao += 1;
+  return geracaoDaIntencao;
+}
+
+/**
  * Larga a transmissão que está no palco, e não pega outra.
  *
- * A escolha fica **guardada nesta janela**, e é o que faz o botão significar o
- * que ele diz. Sem isso, a próxima transmissão a começar sozinha na sala seria
- * empurrada de volta pelo servidor — que liga todo mundo na primeira, e é o
- * comportamento certo para quem não disse nada. Quem disse, disse.
+ * A escolha fica **guardada no Rust** desde o ADR 0054 — `assistir` a grava
+ * antes de o pedido sair —, e é o que faz o botão significar o que ele diz. Sem
+ * isso, a próxima transmissão a começar sozinha na sala seria empurrada de volta
+ * pelo servidor, que liga todo mundo na primeira; é o comportamento certo para
+ * quem não disse nada. Quem disse, disse.
  *
- * Guardada e não gravada em disco: é uma escolha sobre esta sala e este
- * momento, e reabrir o aplicativo é começar de novo.
+ * A cópia local continua aqui porque ela é lida **entre** um pedido e a
+ * resposta dele, quando o Rust ainda não sabe; as duas andam juntas e a do Rust
+ * é a que sobrevive à janela.
+ *
+ * # Três coisas param, e não uma
+ *
+ * A imagem, a assinatura e **o cinema**. A terceira era o R19: `pararDeVer`
+ * fechava a imagem e não saía da tela cheia, e `botaoDeCinema` só sai quando não
+ * há transmissão no palco — mas o desenho continuava passando `true`, porque a
+ * outra pessoa continuava transmitindo. O resultado era navegação escondida por
+ * CSS com nada na frente dela.
  */
 async function pararDeVer() {
+  const intencao = novaIntencao();
   telaQuerida = null;
   const antiga = telaEmCurso;
   fecharImagemDaTela();
+  // **Sai do cinema antes de esperar qualquer coisa.** Se ficasse depois do
+  // `await`, uma recusa lenta deixaria a navegação escondida durante a espera —
+  // que é o sintoma relatado, só que mais curto.
+  if (noCinema) {
+    await trocarCinema(false);
+  }
   if (antiga !== null) {
     await invoke("assistir", { tela: antiga, quero: false });
   }
+  // A conferência depois do `await`: se alguém escolheu uma transmissão
+  // enquanto o cancelamento corria, esta função não tem mais nada a dizer.
+  if (intencao !== geracaoDaIntencao) return;
 }
 
 /**
@@ -720,6 +774,7 @@ async function trocarDeTransmissao(tela) {
   // **reiniciava a espera pelo quadro-chave**, que é o que fazia o botão parecer
   // morto quanto mais se insistia nele.
   if (tela === telaQuerida) return;
+  const intencao = novaIntencao();
   telaQuerida = tela;
   const antiga = telaEmCurso;
   // A imagem some agora, e não quando a nova chegar: deixar a antiga desenhada
@@ -729,6 +784,13 @@ async function trocarDeTransmissao(tela) {
     await invoke("assistir", { tela: antiga, quero: false }).catch((falha) =>
       console.warn("parar de assistir:", falha),
     );
+  }
+  // **A intenção é revalidada depois de cada espera.** Era aqui que o R16
+  // mordia: o cancelamento da anterior é assíncrono, e um clique em «não ver»
+  // durante ele deixava sair o pedido abaixo mesmo assim — um pedido obsoleto
+  // reativando a assinatura que alguém acabou de recusar.
+  if (intencao !== geracaoDaIntencao) {
+    return;
   }
   await invoke("assistir", { tela, quero: true });
 }

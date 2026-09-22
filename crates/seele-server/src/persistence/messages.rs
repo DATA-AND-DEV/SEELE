@@ -108,6 +108,84 @@ pub struct StoredMessage {
     pub attachment: Option<AttachmentInfo>,
 }
 
+/// O que aconteceu com **cada** mensagem de um lote.
+///
+/// # Por que o lote deixou de ter um resultado só
+///
+/// Porque ele tinha, e o resultado era «tudo ou nada». Uma transação única com
+/// um destino inválido dentro falhava inteira na chave estrangeira, e o escritor
+/// — que já havia tirado o lote da fila — registrava o erro e voltava: as
+/// mensagens válidas de todas as outras pessoas do mesmo intervalo de 200 ms
+/// desapareciam sem que ninguém fosse avisado (R04 da revisão da v15).
+///
+/// Um cliente com defeito, um canal removido durante o envio, ou uma pessoa
+/// autenticada mandando um número de canal inventado bastavam.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Gravacao {
+    /// Gravada, e **esta** é a que pode ser confirmada a quem escreveu.
+    Feita(StoredMessage),
+    /// Não gravada, e o suficiente para dizer a quem escreveu qual delas foi.
+    Falhou {
+        /// O canal a que ela se destinava.
+        channel: ChannelId,
+        /// Quem escreveu, para que o aviso chegue só a essa pessoa.
+        author: PersonId,
+        /// A chave que quem escreveu escolheu, e por onde a casca a encontra.
+        ///
+        /// `None` é uma mensagem sem chave de idempotência. Ela não pode ser
+        /// identificada de volta, e é por isso que o cliente deste produto
+        /// sempre manda uma — ver `ClientMessage::SendMessage`.
+        client_message_id: Option<ClientMessageId>,
+        /// Por quê, no vocabulário que vai para o fio.
+        motivo: seele_proto::control::MessageRefusal,
+    },
+}
+
+impl Gravacao {
+    /// A linha gravada, ou `None` se esta mensagem foi recusada.
+    ///
+    /// Existe para quem só quer as que passaram — a difusão, o histórico que
+    /// volta, e os testes. Quem precisa dizer a alguém que a mensagem dele não
+    /// entrou tem de casar a variante, e é o certo: o motivo é a metade que não
+    /// pode ser descartada por conveniência.
+    #[must_use]
+    pub const fn gravada(&self) -> Option<&StoredMessage> {
+        match self {
+            Self::Feita(stored) => Some(stored),
+            Self::Falhou { .. } => None,
+        }
+    }
+}
+
+/// Uma recusa montada a partir da mensagem que não entrou.
+fn recusa(message: &PendingMessage, motivo: seele_proto::control::MessageRefusal) -> Gravacao {
+    Gravacao::Falhou {
+        channel: message.channel,
+        author: message.author,
+        client_message_id: message.client_message_id,
+        motivo,
+    }
+}
+
+/// Por que uma gravação falhou, no vocabulário do fio.
+///
+/// **A distinção é a que decide se tentar de novo faz sentido.** Uma violação de
+/// chave estrangeira é um destino que não existe, e repeti-la é bater na mesma
+/// porta para sempre; qualquer outra falha do armazenamento pode passar no
+/// próximo lote. O review pede exatamente isso: «distinguir falha transitória de
+/// armazenamento de entrada inválida. Não repetir indefinidamente uma entrada
+/// inválida.»
+fn motivo_da_falha(erro: &rusqlite::Error) -> seele_proto::control::MessageRefusal {
+    use rusqlite::ffi::ErrorCode;
+
+    if let rusqlite::Error::SqliteFailure(falha, _) = erro {
+        if falha.code == ErrorCode::ConstraintViolation {
+            return seele_proto::control::MessageRefusal::NoSuchChannel;
+        }
+    }
+    seele_proto::control::MessageRefusal::StorageFailed
+}
+
 /// Why a message operation was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum MessageRefusal {
@@ -119,12 +197,15 @@ pub enum MessageRefusal {
     NotTheAuthor,
 }
 
-/// What the idempotency lookup reads back: `(id, body, created_at, edited_at,
-/// replies_to)`.
+/// What the idempotency lookup reads back: `(id, channel_id, body, created_at,
+/// edited_at, replies_to)`.
 ///
 /// Named rather than written inline because the tuple is what an existing row
 /// *is* here, and the answer to a retry is built out of it field by field.
-type StoredRow = (i64, String, i64, Option<i64>, Option<i64>);
+///
+/// **O canal entrou nesta tupla no conserto do R09.** Ele faltava, e a ausência
+/// dele era o defeito: o resultado da repetição saía com o canal do pedido novo.
+type StoredRow = (i64, i64, String, i64, Option<i64>, Option<i64>);
 
 /// Message storage, over PERSISTENCE.
 pub struct Messages<'a> {
@@ -152,13 +233,13 @@ impl<'a> Messages<'a> {
     /// # Errors
     ///
     /// Fails if the transaction cannot commit.
-    pub fn append_batch(&mut self, pending: &[PendingMessage]) -> Result<Vec<StoredMessage>> {
+    pub fn append_batch(&mut self, pending: &[PendingMessage]) -> Result<Vec<Gravacao>> {
         if pending.is_empty() {
             return Ok(Vec::new());
         }
 
         let now = now_seconds();
-        let transaction = self
+        let mut transaction = self
             .persistence
             .connection_mut()
             .transaction()
@@ -189,7 +270,8 @@ impl<'a> Messages<'a> {
             if let Some(key) = message.client_message_id {
                 let existing: Option<StoredRow> = transaction
                     .query_row(
-                        "SELECT id, body, created_at, edited_at, replies_to FROM messages
+                        "SELECT id, channel_id, body, created_at, edited_at, replies_to
+                         FROM messages
                          WHERE author_id = ?1 AND client_message_id = ?2",
                         params![message.author.get() as i64, key.get() as i64],
                         |row| {
@@ -199,14 +281,29 @@ impl<'a> Messages<'a> {
                                 row.get(2)?,
                                 row.get(3)?,
                                 row.get(4)?,
+                                row.get(5)?,
                             ))
                         },
                     )
                     .optional()?;
-                if let Some((id, body, created_at, edited_at, replies_to)) = existing {
-                    stored.push(StoredMessage {
+                if let Some((id, channel, body, created_at, edited_at, replies_to)) = existing {
+                    stored.push(Gravacao::Feita(StoredMessage {
                         id: MessageId(id as u64),
-                        channel: message.channel,
+                        // **O canal da linha original, e não o do pedido.**
+                        //
+                        // Este campo lia `message.channel`, o canal que acabou
+                        // de chegar, junto com o id e o corpo da linha antiga. O
+                        // resultado: repetir a chave de idempotência apontando
+                        // para outro canal devolvia a mensagem original
+                        // carimbada com o canal novo, e o escritor difundia isso
+                        // — a mensagem aparecia num canal cujo histórico está
+                        // vazio, e uma busca depois não a encontrava ali. R09 da
+                        // revisão da v15, reproduzido.
+                        //
+                        // Devolver a linha inteira como ela está é a regra deste
+                        // caminho, e o comentário acima já a enunciava para o
+                        // corpo. O canal era a exceção que ninguém tinha visto.
+                        channel: ChannelId(channel as u32),
                         author: message.author,
                         author_nickname: message.author_nickname.clone(),
                         body,
@@ -223,12 +320,37 @@ impl<'a> Messages<'a> {
                         // file is what stops a second one being written for the
                         // same message.
                         attachment: None,
-                    });
+                    }));
                     continue;
                 }
             }
 
-            transaction.execute(
+            // **Um ponto de retorno por mensagem.**
+            //
+            // Sem ele, a `execute` abaixo que falha aborta a transação inteira e
+            // leva consigo o que já estava dentro dela — as mensagens válidas de
+            // outras pessoas, gravadas com sucesso momentos antes no mesmo laço.
+            // Era o R04: a falha de uma entrada era a perda do lote.
+            //
+            // `SAVEPOINT` e não uma transação por mensagem: a promessa de um
+            // `fsync` por lote é o que `specs/04-servidor-seele.md` pede, e uma
+            // transação por mensagem a desfaz. O ponto de retorno custa nada em
+            // disco — ele só marca onde desfazer dentro da transação que já
+            // existe.
+            let mut ponto = match transaction.savepoint() {
+                Ok(ponto) => ponto,
+                Err(erro) => {
+                    // Não dá para isolar esta, então ela não é tentada. As
+                    // anteriores continuam de pé.
+                    tracing::error!(%erro, "não deu para abrir o ponto de retorno do lote");
+                    stored.push(recusa(
+                        message,
+                        seele_proto::control::MessageRefusal::StorageFailed,
+                    ));
+                    continue;
+                }
+            };
+            let escrita = ponto.execute(
                 "INSERT INTO messages
                    (channel_id, author_id, body, created_at, replies_to, client_message_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -240,9 +362,35 @@ impl<'a> Messages<'a> {
                     message.replies_to.map(|id| id.get() as i64),
                     message.client_message_id.map(|id| id.get() as i64),
                 ],
-            )?;
-            stored.push(StoredMessage {
-                id: MessageId(transaction.last_insert_rowid() as u64),
+            );
+            let id = match escrita {
+                Ok(_) => ponto.last_insert_rowid(),
+                Err(erro) => {
+                    let motivo = motivo_da_falha(&erro);
+                    tracing::warn!(
+                        %erro, ?motivo, author = %message.author, channel = %message.channel,
+                        "uma mensagem do lote não foi gravada; as outras seguem"
+                    );
+                    // Desfaz **só** esta. `rollback` num savepoint volta ao
+                    // ponto e deixa a transação aberta, que é a diferença
+                    // inteira em relação ao comportamento de antes.
+                    if let Err(erro) = ponto.rollback() {
+                        tracing::error!(%erro, "não deu para desfazer só esta mensagem");
+                    }
+                    stored.push(recusa(message, motivo));
+                    continue;
+                }
+            };
+            if let Err(erro) = ponto.commit() {
+                tracing::warn!(%erro, "não deu para fechar o ponto de retorno desta mensagem");
+                stored.push(recusa(
+                    message,
+                    seele_proto::control::MessageRefusal::StorageFailed,
+                ));
+                continue;
+            }
+            stored.push(Gravacao::Feita(StoredMessage {
+                id: MessageId(id as u64),
                 channel: message.channel,
                 author: message.author,
                 author_nickname: message.author_nickname.clone(),
@@ -254,7 +402,7 @@ impl<'a> Messages<'a> {
                 // Nothing yet: the row for a file is written after the bytes
                 // have landed, by the transfer that brought them.
                 attachment: None,
-            });
+            }));
         }
 
         transaction.commit().context("could not commit the batch")?;
@@ -478,6 +626,14 @@ mod tests {
         persistence
     }
 
+    /// As linhas que o lote gravou, para os testes que só falam delas.
+    ///
+    /// Quem prova a recusa casa a variante — ver
+    /// `uma_entrada_invalida_nao_leva_as_validas`.
+    fn gravadas(lote: Vec<Gravacao>) -> Vec<StoredMessage> {
+        lote.iter().filter_map(|g| g.gravada().cloned()).collect()
+    }
+
     fn pending(body: &str) -> PendingMessage {
         PendingMessage {
             channel: ChannelId(1),
@@ -498,8 +654,123 @@ mod tests {
             .unwrap();
 
         assert_eq!(stored.len(), 3);
+        let stored = gravadas(stored);
+        assert_eq!(stored.len(), 3, "uma mensagem válida do lote foi recusada");
         let ids: Vec<u64> = stored.iter().map(|m| m.id.get()).collect();
         assert_eq!(ids, vec![1, 2, 3], "ids must be assigned in order");
+    }
+
+    #[test]
+    fn uma_entrada_invalida_nao_leva_as_validas() {
+        // **R04, e o oráculo é o inverso do da sonda da revisão.** Lá «passou»
+        // queria dizer «as duas se perderam». Aqui passa quando a válida fica.
+        //
+        // A prova de que o guarda é o savepoint e não a validação do
+        // `session.rs`: este caminho é o do escritor, e ele não confere canal
+        // nenhum. Tirar o savepoint faz este teste reprovar.
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
+
+        let lote = messages
+            .append_batch(&[
+                pending("da marcela, para um canal que existe"),
+                PendingMessage {
+                    channel: ChannelId(404),
+                    author: PersonId(2),
+                    ..pending("do rafael, para um canal que não existe")
+                },
+                PendingMessage {
+                    author: PersonId(2),
+                    ..pending("do rafael, para um canal que existe")
+                },
+            ])
+            .unwrap();
+
+        assert_eq!(lote.len(), 3, "o lote deixou de responder por registro");
+        let corpos: Vec<&str> = lote
+            .iter()
+            .filter_map(|g| g.gravada().map(|linha| linha.body.as_str()))
+            .collect();
+        assert_eq!(
+            corpos,
+            vec![
+                "da marcela, para um canal que existe",
+                "do rafael, para um canal que existe",
+            ],
+            "uma entrada inválida levou embora as mensagens válidas de outras              pessoas do mesmo lote"
+        );
+
+        // E a recusa é identificada: quem escreveu tem de poder encontrar
+        // **qual** mensagem dele não entrou.
+        let Some(Gravacao::Falhou {
+            channel,
+            author,
+            motivo,
+            ..
+        }) = lote.get(1)
+        else {
+            panic!("a entrada inválida foi dada como gravada");
+        };
+        assert_eq!(*channel, ChannelId(404));
+        assert_eq!(*author, PersonId(2));
+        assert_eq!(
+            *motivo,
+            seele_proto::control::MessageRefusal::NoSuchChannel,
+            "um destino que não existe foi classificado como falha transitória:              o cliente vai repetir para sempre uma entrada que nunca passa"
+        );
+
+        // O disco concorda com a resposta. Sem esta metade, um `stored` montado
+        // certo sobre uma transação desfeita passaria.
+        let page = messages.history(ChannelId(1), None, 50).unwrap();
+        assert_eq!(page.len(), 2);
+    }
+
+    #[test]
+    fn a_chave_repetida_devolve_o_canal_da_linha_original() {
+        // **R09**, reproduzido no review: gravar no canal 1 e repetir a chave
+        // apontando para o canal 2 devolvia a linha original carimbada com o
+        // canal 2. O escritor difunde esse resultado, então a mensagem apareceria
+        // num canal cujo histórico não a tem.
+        let mut persistence = store();
+        let mut messages = Messages::new(&mut persistence);
+        let key = Some(ClientMessageId(11));
+
+        let primeira = gravadas(
+            messages
+                .append_batch(&[PendingMessage {
+                    channel: ChannelId(1),
+                    client_message_id: key,
+                    ..pending("no canal um")
+                }])
+                .unwrap(),
+        );
+        let original = primeira.first().expect("gravou").clone();
+
+        let repetida = gravadas(
+            messages
+                .append_batch(&[PendingMessage {
+                    channel: ChannelId(2),
+                    client_message_id: key,
+                    ..pending("no canal dois")
+                }])
+                .unwrap(),
+        );
+        let resposta = repetida.first().expect("a repetição respondeu");
+
+        assert_eq!(
+            resposta.id, original.id,
+            "a repetição gravou uma segunda vez"
+        );
+        assert_eq!(
+            resposta.channel,
+            ChannelId(1),
+            "a resposta saiu com o canal do pedido novo: a difusão poria a              mensagem num canal cujo histórico está vazio"
+        );
+        assert_eq!(resposta.body, "no canal um");
+        assert!(
+            messages.history(ChannelId(2), None, 50).unwrap().is_empty(),
+            "a repetição gravou algo no canal dois"
+        );
     }
 
     #[test]
@@ -526,6 +797,8 @@ mod tests {
             .unwrap();
         let second = messages.append_batch(&[with_key]).unwrap();
 
+        let first = gravadas(first);
+        let second = gravadas(second);
         assert_eq!(first.first().map(|m| m.id), second.first().map(|m| m.id));
         assert_eq!(messages.history(ChannelId(1), None, 50).unwrap().len(), 1);
     }
@@ -551,12 +824,14 @@ mod tests {
         let mut messages = Messages::new(&mut persistence);
         let key = Some(ClientMessageId(7));
 
-        let first = messages
-            .append_batch(&[PendingMessage {
-                client_message_id: key,
-                ..pending("padrão azul confirmado")
-            }])
-            .unwrap();
+        let first = gravadas(
+            messages
+                .append_batch(&[PendingMessage {
+                    client_message_id: key,
+                    ..pending("padrão azul confirmado")
+                }])
+                .unwrap(),
+        );
 
         // Edited before the collision, and this is what makes the check bite.
         // `created_at` cannot tell the two sources apart here — both writes land
@@ -572,12 +847,14 @@ mod tests {
             )
             .unwrap();
 
-        let again = messages
-            .append_batch(&[PendingMessage {
-                client_message_id: key,
-                ..pending("ISTO É DE OUTRA SESSÃO")
-            }])
-            .unwrap();
+        let again = gravadas(
+            messages
+                .append_batch(&[PendingMessage {
+                    client_message_id: key,
+                    ..pending("ISTO É DE OUTRA SESSÃO")
+                }])
+                .unwrap(),
+        );
 
         let stored = again.first().expect("the retry answers with something");
         assert_eq!(
@@ -732,7 +1009,7 @@ mod tests {
         // visible as removal.
         let mut persistence = store();
         let mut messages = Messages::new(&mut persistence);
-        let stored = messages.append_batch(&[pending("original")]).unwrap();
+        let stored = gravadas(messages.append_batch(&[pending("original")]).unwrap());
         let id = stored.first().map(|m| m.id).unwrap();
 
         assert!(messages.edit(id, PersonId(2), "sequestrado").is_err());
@@ -747,9 +1024,11 @@ mod tests {
         // specs/02-protocolo.md has replies.
         let mut persistence = store();
         let mut messages = Messages::new(&mut persistence);
-        let stored = messages
-            .append_batch(&[pending("apagar"), pending("fica")])
-            .unwrap();
+        let stored = gravadas(
+            messages
+                .append_batch(&[pending("apagar"), pending("fica")])
+                .unwrap(),
+        );
         let id = stored.first().map(|m| m.id).unwrap();
 
         messages.remove(id).unwrap();
@@ -768,7 +1047,7 @@ mod tests {
     fn removing_twice_is_refused_rather_than_silently_fine() {
         let mut persistence = store();
         let mut messages = Messages::new(&mut persistence);
-        let stored = messages.append_batch(&[pending("um")]).unwrap();
+        let stored = gravadas(messages.append_batch(&[pending("um")]).unwrap());
         let id = stored.first().map(|m| m.id).unwrap();
 
         messages.remove(id).unwrap();
@@ -779,15 +1058,17 @@ mod tests {
     fn a_reply_keeps_pointing_at_its_parent() {
         let mut persistence = store();
         let mut messages = Messages::new(&mut persistence);
-        let parent = messages.append_batch(&[pending("pergunta")]).unwrap();
+        let parent = gravadas(messages.append_batch(&[pending("pergunta")]).unwrap());
         let parent_id = parent.first().map(|m| m.id).unwrap();
 
-        let reply = messages
-            .append_batch(&[PendingMessage {
-                replies_to: Some(parent_id),
-                ..pending("resposta")
-            }])
-            .unwrap();
+        let reply = gravadas(
+            messages
+                .append_batch(&[PendingMessage {
+                    replies_to: Some(parent_id),
+                    ..pending("resposta")
+                }])
+                .unwrap(),
+        );
 
         assert_eq!(reply.first().and_then(|m| m.replies_to), Some(parent_id));
     }
@@ -800,9 +1081,11 @@ mod tests {
         use crate::persistence::attachments::Attachments;
 
         let mut persistence = store();
-        let stored = Messages::new(&mut persistence)
-            .append_batch(&[pending("com foto"), pending("sem nada")])
-            .unwrap();
+        let stored = gravadas(
+            Messages::new(&mut persistence)
+                .append_batch(&[pending("com foto"), pending("sem nada")])
+                .unwrap(),
+        );
         let com_foto = stored[0].id;
         Attachments::new(&persistence)
             .record(com_foto, &"a".repeat(64), "foto.png", "image/png", 2_048)
@@ -837,9 +1120,11 @@ mod tests {
         use crate::persistence::attachments::Attachments;
 
         let mut persistence = store();
-        let stored = Messages::new(&mut persistence)
-            .append_batch(&[pending("olha isto")])
-            .unwrap();
+        let stored = gravadas(
+            Messages::new(&mut persistence)
+                .append_batch(&[pending("olha isto")])
+                .unwrap(),
+        );
         let id = stored[0].id;
         let anexo = Attachments::new(&persistence)
             .record(id, &"b".repeat(64), "recibo.pdf", "application/pdf", 900)

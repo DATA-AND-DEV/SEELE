@@ -739,6 +739,14 @@ pub struct LimitesDeTela {
     /// máximo isto»; este diz o que sacrificar quando o máximo não couber. Ver
     /// [`crate::tela::Prioridade`].
     pub prioridade: Prioridade,
+    /// Se o som da fonte vai junto com a imagem.
+    ///
+    /// R21: é o controle **de quem envia**, «incluir áudio». Ver
+    /// [`crate::bomba::Arranjo::com_som`] para os três controles que precisam
+    /// existir e por que este é um deles.
+    ///
+    /// `true` é o padrão: som é o que se espera de um vídeo compartilhado.
+    pub com_som: bool,
 }
 
 impl LimitesDeTela {
@@ -777,6 +785,11 @@ impl Default for LimitesDeTela {
             // O padrão é o do §2: texto. Compartilhar tela ainda é, na
             // maioria das vezes, mostrar uma tela.
             prioridade: Prioridade::Nitidez,
+            // Com som, que é o que se espera de um vídeo compartilhado. A
+            // limitação de quem está num sistema sem exclusão do próprio áudio
+            // fica **escrita na tela** — ver `bomba::Arranjo::com_som` —, e não
+            // resolvida por um padrão que entrega vídeo mudo em silêncio.
+            com_som: true,
         }
     }
 }

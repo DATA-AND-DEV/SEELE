@@ -17,6 +17,20 @@ on:
         # o instalador do Windows não representa um pré-lançamento por extenso.
         # Ver a conferência no job `versao`.
         default: "0.0.0"
+      # A saída de emergência, e ela é **visível** de propósito.
+      #
+      # R07 da revisão da v15: a publicação passa a depender das verificações
+      # sobre o **mesmo SHA** que vai ser publicado. Um portão sem saída obriga
+      # alguém a apagá-lo no primeiro dia ruim, e um portão apagado não volta.
+      #
+      # Esta saída existe, exige um clique num campo que diz o que ela faz, e
+      # aparece no registro do run. A alternativa que este repositório tinha era
+      # pior e silenciosa: portão nenhum.
+      sem_validar:
+        description: "Publicar SEM rodar as verificações neste SHA (diga por que no corpo do release)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -79,9 +93,105 @@ jobs:
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "versão ${numero}, tag ${tag} — cabe no MSI"
 
+  # As mesmas verificações da CI, **sobre o SHA que vai ser publicado**.
+  #
+  # # Por que este job existe
+  #
+  # Porque a publicação não dependia de nenhuma. `empacotar` dependia só de
+  # `versao` — a conferência do formato do número — e `publicar` dependia de
+  # `empacotar`. Nada no caminho perguntava se os testes passavam.
+  #
+  # O custo disso está medido na revisão da v15 (R07): a `v0.14.2` saiu de um
+  # commit cuja execução de CI estava reprovada, e o commit seguinte também. Não
+  # é hipótese: são duas execuções nomeadas.
+  #
+  # # Por que aqui, e não «olhar a CI antes de marcar a tag»
+  #
+  # Porque a CI roda no push, e a tag pode apontar para outro commit — ou para o
+  # mesmo commit numa árvore que mudou depois. A pergunta que importa é «este
+  # SHA passa», e o único lugar onde ela é feita sobre o SHA certo é dentro do
+  # workflow que o publica.
+  #
+  # # O que ele não é
+  #
+  # Não é homologação nativa. Ele prova o que uma máquina sem som, sem câmera e
+  # sem segunda máquina consegue provar: formatação, regras do repositório,
+  # clippy e os testes nos três sistemas suportados. A chamada entre duas
+  # máquinas, a instalação e a atualização continuam sendo evidência de gente, e
+  # o corpo do release é onde elas são registradas.
+  validar:
+    name: validar (${{ matrix.nome }})
+    if: ${{ !inputs.sem_validar }}
+    strategy:
+      # Um sistema reprovando não deve esconder o resultado dos outros dois.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            nome: linux
+          - os: windows-2022
+            nome: windows
+          # **macOS entra aqui, e é a lacuna que o R07 nomeia.** A matriz da CI
+          # tinha dois sistemas e o produto anuncia três; o Mac só era compilado
+          # quando alguém já havia decidido lançar, no job de empacotar, onde um
+          # teste reprovado não impedia nada.
+          - os: macos-15
+            nome: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependências de sistema (Linux)
+        if: matrix.nome == 'linux'
+        uses: ./.github/actions/deps-linux
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-validar-${{ matrix.nome }}
+
+      # Uma vez só, no Linux: formatação e regras leem arquivos e não dependem
+      # de sistema. Rodá-las três vezes seria a mesma resposta três vezes.
+      - name: Formatação
+        if: matrix.nome == 'linux'
+        run: cargo fmt --all -- --check
+      - name: Regras do repositório
+        if: matrix.nome == 'linux'
+        run: |
+          cargo xtask check-api
+          cargo xtask check-deps
+          cargo xtask check-versao
+          cargo xtask check-vetores
+
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      # **O teste de áudio local é pulado, e o motivo está escrito.**
+      #
+      # `laco::testes::a_saida_desta_maquina_abre_como_entrada` abre a saída da
+      # máquina como entrada, e um runner sem placa de som não tem o que abrir:
+      # ele não reprova, ele **não termina** — a revisão da v15 registra a
+      # execução interrompida depois do aviso de 60 s. Um teste que pendura o
+      # portão inteiro transforma o portão em obstáculo, e aí ele é removido.
+      #
+      # Pulado por nome, e não por categoria: a lista fica curta e visível, e
+      # qualquer outro teste que precise de hardware vai ter de ser nomeado aqui
+      # — o que é a conversa certa a ter, em vez de um filtro largo que engole os
+      # próximos em silêncio.
+      - name: Testes
+        run: cargo test --workspace -- --skip a_saida_desta_maquina_abre_como_entrada
+
   empacotar:
     name: ${{ matrix.nome }}
-    needs: versao
+    needs: [versao, validar]
+    # **`skipped` passa, `failure` não.** No GitHub Actions um `needs` pulado
+    # pula o dependente junto, e `validar` é pulado quando alguém escolhe a saída
+    # de emergência — sem esta condição, escolher a saída não publicaria nada.
+    #
+    # Escrita por extenso em vez de um `always()` solto: `always()` publicaria
+    # também depois de uma reprovação, que é exatamente o que este portão existe
+    # para impedir.
+    if: >-
+      needs.versao.result == 'success' &&
+      (needs.validar.result == 'success' || needs.validar.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       # Um sistema quebrado não deve esconder o resultado dos outros dois.

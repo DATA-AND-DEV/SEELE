@@ -164,6 +164,15 @@ struct Session {
     /// A busca corrente. O cursor é estado de sessão, e é o que impede a regra
     /// de dar-a-volta de ser reescrita em JavaScript.
     busca: Mutex<Option<seele_ffi::search::Search>>,
+    /// O teste de microfone em curso, se há um. F01.
+    ///
+    /// **Aqui e não numa sessão de voz**, pela razão que
+    /// `seele_ffi::TesteDeMicrofone` escreve: testar o microfone é algo que se faz
+    /// antes de conectar pelo menos tanto quanto durante, e pendurá-lo numa sessão
+    /// poria o controle atrás da porta que ele existe para abrir.
+    ///
+    /// `None` fecha o teste: o `Drop` da alça manda parar a thread e espera.
+    teste_de_microfone: Mutex<Option<seele_ffi::TesteDeMicrofone>>,
     /// O endereço com que esta sessão entrou, como a lista de visitados o
     /// conhece.
     ///
@@ -2363,13 +2372,52 @@ fn open_channel(session: State<'_, Session>, channel: u32) -> Result<(), Connect
     session.connection()?.open_channel(channel)
 }
 
+/// Manda uma mensagem, e devolve a chave por onde acompanhá-la.
+///
+/// A chave é o que faz a janela poder desenhar «enviando», trocar para
+/// «recusada» quando a recusa volta, e tentar de novo com a **mesma** chave —
+/// que é o que impede um reenvio de publicar duas vezes. Vazia quer dizer «não
+/// havia nada para mandar».
+///
+/// Texto e não número: a chave passa de 2^53 e o `Number` do JavaScript a
+/// arredondaria — ver `seele_ffi::Message::client_message_id`.
 #[tauri::command]
 fn send_message(
     session: State<'_, Session>,
     channel: u32,
     body: String,
-) -> Result<(), ConnectionError> {
+) -> Result<String, ConnectionError> {
     session.connection()?.send_message(channel, body)
+}
+
+/// Manda de novo uma mensagem que não foi gravada, com a mesma chave.
+#[tauri::command]
+fn reenviar_mensagem(
+    session: State<'_, Session>,
+    client_message_id: String,
+) -> Result<bool, ConnectionError> {
+    session.connection()?.reenviar_mensagem(&client_message_id)
+}
+
+/// Desiste de uma mensagem que não foi gravada, e devolve o texto dela.
+///
+/// O texto volta para que a janela possa pô-lo de novo no compositor: desistir
+/// não pode querer dizer perder o que se escreveu.
+#[tauri::command]
+fn descartar_mensagem(
+    session: State<'_, Session>,
+    client_message_id: String,
+) -> Result<Option<String>, ConnectionError> {
+    Ok(session.connection()?.descartar_mensagem(&client_message_id))
+}
+
+/// O maior corpo que o servidor aceita, **em bytes**.
+///
+/// A janela contava caracteres e o contrato conta bytes; um acento a mais
+/// derrubava a sessão. Ver `seele_ffi::Connection::limite_da_mensagem`.
+#[tauri::command]
+const fn limite_da_mensagem() -> usize {
+    seele_ffi::Connection::limite_da_mensagem()
 }
 
 #[tauri::command]
@@ -4007,6 +4055,21 @@ enum FalhaNaPrevia {
     GrandeDemais,
     /// Respondeu, e o que veio não é imagem — ou não é a imagem que disse ser.
     NaoEImagem,
+    /// O destino é desta máquina, desta rede, ou de um endereço reservado.
+    ///
+    /// ADR 0053. Separada de [`Self::NaoEAberto`] porque não é o esquema que
+    /// está errado: `http://127.0.0.1:9999/private.png` é um endereço `http`
+    /// perfeitamente válido, e é exatamente o que esta janela não pode ser
+    /// mandada buscar por alguém que escreveu uma mensagem.
+    DestinoPrivado(String),
+    /// A pessoa ainda não disse que este domínio pode ser buscado.
+    ///
+    /// ADR 0053. Não é falha: é a política de prévia automática esperando uma
+    /// decisão. A janela desenha o link com um botão em vez da imagem.
+    SemConsentimento {
+        /// O domínio sobre o qual a pergunta é feita.
+        dominio: String,
+    },
 }
 
 /// Busca um link de imagem e devolve um `data:` que a janela pode desenhar.
@@ -4034,9 +4097,25 @@ enum FalhaNaPrevia {
 ///
 /// [`FalhaNaPrevia`], uma variante por motivo.
 #[tauri::command]
-async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
-    let cliente = cliente_da_previa()?;
-    let (alegado, bytes) = buscar_com_teto(&cliente, &url).await?;
+async fn previa_de_link(app: AppHandle, url: String) -> Result<String, FalhaNaPrevia> {
+    // **A política de prévia automática vem antes de qualquer byte sair.**
+    //
+    // ADR 0053. Antes disto, ler uma mensagem já era uma requisição: bastava o
+    // caminho terminar em `.png` e esta janela buscava o endereço de quem
+    // escreveu — entregando a ele o endereço de origem de quem lê e a hora. Um
+    // link posto na conversa só para colher endereços funcionava.
+    //
+    // Agora o domínio tem de estar consentido. Enquanto não estiver, a janela
+    // desenha o link com um botão de «mostrar imagem» — e é o clique que
+    // consente, uma vez, para aquele domínio.
+    let destino = endereco_de_previa(&url)?;
+    let dominio = dominio_de(destino)
+        .ok_or_else(|| FalhaNaPrevia::NaoEAberto("endereço sem host".to_owned()))?;
+    if !previa_consentida(&app, &dominio) {
+        return Err(FalhaNaPrevia::SemConsentimento { dominio });
+    }
+
+    let (alegado, bytes) = buscar_com_teto(&url).await?;
 
     // A mesma conferência do anexo, e não uma segunda cópia dela: o tipo
     // alegado tem de bater com o que os bytes dizem ser. Um endereço que
@@ -4062,7 +4141,7 @@ async fn previa_de_link(url: String) -> Result<String, FalhaNaPrevia> {
         if !e_de_um_dominio_de_gif(&midia) {
             return Err(FalhaNaPrevia::NaoEImagem);
         }
-        let (alegado, bytes) = buscar_com_teto(&cliente, &midia).await?;
+        let (alegado, bytes) = buscar_com_teto(&midia).await?;
         return match seele_ffi::preview::judge(&alegado, &bytes) {
             seele_ffi::preview::Verdict::Draw(formato) => {
                 Ok(seele_ffi::preview::data_uri(formato, &bytes))
@@ -4110,26 +4189,213 @@ fn e_de_um_dominio_de_gif(url: &str) -> bool {
         .any(|dominio| host == *dominio || host.ends_with(&format!(".{dominio}")))
 }
 
-/// O cliente das buscas da prévia: um tempo, uma regra de salto, para as duas.
+/// Quantos saltos uma busca de prévia segue antes de desistir.
+const SALTOS_DA_PREVIA: usize = 3;
+
+/// O host de um endereço, em minúsculas, para a pergunta do consentimento.
+fn dominio_de(url: &str) -> Option<String> {
+    reqwest::Url::parse(url)
+        .ok()?
+        .host_str()
+        .map(str::to_ascii_lowercase)
+}
+
+/// Se a prévia automática deste domínio já foi liberada por quem usa. ADR 0053.
 ///
-/// Extraído porque a resolução de uma página faz uma segunda busca, e duas
-/// construções seriam duas chances de uma delas perder a regra de salto.
-fn cliente_da_previa() -> Result<reqwest::Client, FalhaNaPrevia> {
+/// Preferências que não abrem respondem «não», e é o lado certo: sem poder ler a
+/// escolha, buscar seria decidir por alguém que não foi consultado. Um domínio de
+/// GIF **também** passa por aqui — a lista fechada de
+/// [`DOMINIOS_DE_GIF`] diz quais páginas são resolvidas até a mídia, e não que
+/// buscá-las dispensa consentimento.
+fn previa_consentida(app: &AppHandle, dominio: &str) -> bool {
+    preferencias(app).is_some_and(|ajustes| ajustes.previa_consentida(dominio))
+}
+
+/// Se este endereço IP é de um lugar que uma prévia **não** pode alcançar.
+///
+/// ADR 0053. A lista é do que é reservado, e não do que é «interno»: loopback,
+/// privado, link-local, `0.0.0.0/8`, compartilhado entre operadoras, multicast e
+/// o resto do que não é internet pública. Em IPv6 o mesmo, mais os endereços
+/// mapeados de IPv4 — sem eles, `http://[::ffff:127.0.0.1]/` atravessaria.
+///
+/// # Por que ela existe
+///
+/// Porque desenhar um link é buscá-lo, e quem escreve a mensagem escolhia o
+/// destino. `http://127.0.0.1:9999/private.png` numa conversa fazia esta janela
+/// bater na porta de um serviço da própria máquina de quem lê — e
+/// `http://192.168.0.1/` na do roteador da casa dele. Não demonstrei extração de
+/// conteúdo; a requisição sozinha já é o que não pode acontecer.
+fn e_endereco_reservado(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_multicast()
+                || v4.is_unspecified()
+                // `0.0.0.0/8`, que em várias pilhas é «esta máquina».
+                || a == 0
+                // `100.64.0.0/10`, compartilhado entre operadoras.
+                || (a == 100 && (64..128).contains(&b))
+                // `192.0.0.0/24`, atribuições de protocolo do IETF.
+                || (v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0)
+                // `198.18.0.0/15`, bancada de testes.
+                || (a == 198 && (18..20).contains(&b))
+                // `240.0.0.0/4` em diante, reservado.
+                || a >= 240
+        }
+        IpAddr::V6(v6) => {
+            // Um IPv4 mapeado é um IPv4, e tem de passar pela régua dele: sem
+            // isto, `::ffff:127.0.0.1` é um IPv6 «qualquer» e atravessa.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return e_endereco_reservado(IpAddr::V4(v4));
+            }
+            let primeiro = v6.segments()[0];
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                // `fc00::/7`, endereços locais únicos.
+                || (primeiro & 0xfe00) == 0xfc00
+                // `fe80::/10`, link-local.
+                || (primeiro & 0xffc0) == 0xfe80
+                // `2001:db8::/32`, documentação.
+                || (primeiro == 0x2001 && v6.segments()[1] == 0x0db8)
+        }
+    }
+}
+
+/// O endereço que esta janela pode **buscar sozinha**, ou o motivo de não poder.
+///
+/// # Por que ela não é [`endereco_que_pode_sair`]
+///
+/// ADR 0053: são duas políticas para duas coisas diferentes, e tratá-las como
+/// uma foi o defeito. Abrir um link é uma pessoa **clicando** e o navegador do
+/// sistema indo — ali `http://192.168.0.1` é legítimo, é o roteador da casa
+/// dela, e recusá-lo seria o produto decidindo onde ela pode navegar. Buscar uma
+/// prévia é esta janela indo **sozinha**, por causa de um texto que outra pessoa
+/// escreveu, sem ninguém clicar em nada.
+///
+/// O que esta acrescenta à outra: o destino não pode ser um endereço reservado,
+/// e não pode ser um nome que só existe nesta rede.
+fn endereco_de_previa(bruto: &str) -> Result<&str, FalhaNaPrevia> {
+    let url = endereco_que_pode_sair(bruto).map_err(FalhaNaPrevia::NaoEAberto)?;
+    let endereco =
+        reqwest::Url::parse(url).map_err(|erro| FalhaNaPrevia::NaoEAberto(erro.to_string()))?;
+    let Some(host) = endereco.host_str() else {
+        return Err(FalhaNaPrevia::NaoEAberto("endereço sem host".to_owned()));
+    };
+    if !host_de_previa(host) {
+        return Err(FalhaNaPrevia::DestinoPrivado(host.to_ascii_lowercase()));
+    }
+    Ok(url)
+}
+
+/// Se este host, **como está escrito**, pode ser buscado por uma prévia.
+///
+/// Duas perguntas numa função porque as duas são sobre o texto do host e não
+/// sobre a resolução dele:
+///
+///   - um endereço literal não pode ser reservado — `http://127.0.0.1/x.png` e
+///     `http://[::ffff:127.0.0.1]/x.png` são os dois casos, e o segundo é o que
+///     uma régua só de IPv4 deixa passar;
+///   - um nome não pode ser dos que por definição não são da internet pública.
+///     Conferido aqui **além** da conferência sobre os endereços resolvidos,
+///     porque um resolvedor local pode devolver um endereço público para
+///     `algo.local` e a conferência de baixo o aceitaria.
+fn host_de_previa(host: &str) -> bool {
+    // Um IPv6 numa URL vem entre colchetes, e `parse` não os quer.
+    let literal = host
+        .strip_prefix('[')
+        .and_then(|resto| resto.strip_suffix(']'));
+    if let Ok(ip) = literal.unwrap_or(host).parse::<std::net::IpAddr>() {
+        return !e_endereco_reservado(ip);
+    }
+    let nome = host.to_ascii_lowercase();
+    // O ponto final de um nome absoluto não muda o nome: `localhost.` é
+    // `localhost`, e sem isto ele atravessaria.
+    let nome = nome.strip_suffix('.').unwrap_or(&nome);
+    !(nome == "localhost"
+        || nome.ends_with(".localhost")
+        || nome.ends_with(".local")
+        || nome.ends_with(".internal")
+        || nome.ends_with(".home.arpa"))
+}
+
+/// Os endereços deste nome, se **todos** eles são da internet pública.
+///
+/// # Por que todos, e não «algum»
+///
+/// Porque a escolha não é nossa. Um nome que resolve para um endereço público e
+/// um privado deixaria a pilha do sistema escolher qual usar, e metade das
+/// tentativas bateria na rede de quem lê. «Todos» é a única resposta que não
+/// depende de sorte.
+///
+/// O resultado é usado para **fixar** o endereço no cliente — ver
+/// [`cliente_da_previa`]. É isso que fecha a troca de resolução: sem fixar, o
+/// nome é resolvido uma vez para conferir e outra vez para conectar, e nada
+/// obriga as duas respostas a serem a mesma.
+async fn enderecos_publicos_de(
+    host: &str,
+    porta: u16,
+) -> Result<Vec<std::net::SocketAddr>, FalhaNaPrevia> {
+    // Um endereço literal não precisa de resolvedor, e passar por ele seria
+    // dar-lhe a chance de responder outra coisa.
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        if e_endereco_reservado(ip) {
+            return Err(FalhaNaPrevia::DestinoPrivado(ip.to_string()));
+        }
+        return Ok(vec![std::net::SocketAddr::new(ip, porta)]);
+    }
+
+    let resolvidos: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, porta))
+        .await
+        .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?
+        .collect();
+    if resolvidos.is_empty() {
+        return Err(FalhaNaPrevia::NaoRespondeu(format!(
+            "o nome {host} não resolveu para endereço nenhum"
+        )));
+    }
+    if let Some(reservado) = resolvidos
+        .iter()
+        .find(|alvo| e_endereco_reservado(alvo.ip()))
+    {
+        return Err(FalhaNaPrevia::DestinoPrivado(format!(
+            "{host} resolve para {}",
+            reservado.ip()
+        )));
+    }
+    Ok(resolvidos)
+}
+
+/// O cliente de **um** salto da busca de prévia, com o endereço fixado.
+///
+/// # Por que um cliente por salto, e por que fixado
+///
+/// A regra de salto de antes conferia cada redirecionamento pela política de
+/// abertura de link — que aceita `http://127.0.0.1`. Um `302` para a rede local
+/// atravessava, e a validação não era refeita sobre a resolução do nome.
+///
+/// Agora cada salto é uma ida separada: o endereço é validado, o nome é
+/// resolvido, os endereços são conferidos, e o cliente é construído fixado
+/// **naqueles** endereços. Um resolvedor que responda outra coisa entre a
+/// conferência e a conexão não tem onde entrar, porque não há segunda resolução.
+///
+/// `Policy::none()` porque o laço em [`buscar_com_teto`] é quem segue os saltos:
+/// uma política interna seguiria com este cliente, fixado no host errado.
+fn cliente_da_previa(
+    host: &str,
+    enderecos: &[std::net::SocketAddr],
+) -> Result<reqwest::Client, FalhaNaPrevia> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        // **Sem redirecionamento seguido às cegas.** Um `https://` que
-        // responde `302 file:///…` usaria esta janela para alcançar o que ela
-        // recusaria de frente. Cada salto é conferido pela mesma regra da
-        // primeira chamada.
-        .redirect(reqwest::redirect::Policy::custom(|tentativa| {
-            if tentativa.previous().len() >= 3 {
-                return tentativa.stop();
-            }
-            match endereco_que_pode_sair(tentativa.url().as_str()) {
-                Ok(_) => tentativa.follow(),
-                Err(_) => tentativa.stop(),
-            }
-        }))
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(host, enderecos)
         .build()
         .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))
 }
@@ -4139,17 +4405,57 @@ fn cliente_da_previa() -> Result<reqwest::Client, FalhaNaPrevia> {
 /// # Errors
 ///
 /// [`FalhaNaPrevia`], uma variante por motivo.
-async fn buscar_com_teto(
-    cliente: &reqwest::Client,
-    url: &str,
-) -> Result<(String, Vec<u8>), FalhaNaPrevia> {
-    let alvo = endereco_que_pode_sair(url).map_err(FalhaNaPrevia::NaoEAberto)?;
-    let resposta = cliente
-        .get(alvo)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?;
+async fn buscar_com_teto(url: &str) -> Result<(String, Vec<u8>), FalhaNaPrevia> {
+    // **Cada salto é uma ida completa: valida, resolve, confere, fixa, busca.**
+    //
+    // O laço substitui a política de redirecionamento do cliente, e a troca é o
+    // conserto: aquela política conferia o salto pela régua de *abrir um link*,
+    // que aceita a rede local, e não refazia nada sobre a resolução do nome. Um
+    // `302` para `http://192.168.0.1/` atravessava.
+    let mut alvo = reqwest::Url::parse(url.trim())
+        .map_err(|erro| FalhaNaPrevia::NaoEAberto(erro.to_string()))?;
+    let mut saltos = 0usize;
+    let resposta = loop {
+        let texto = alvo.to_string();
+        endereco_de_previa(&texto)?;
+        let host = alvo
+            .host_str()
+            .ok_or_else(|| FalhaNaPrevia::NaoEAberto("endereço sem host".to_owned()))?
+            .to_owned();
+        let porta = alvo.port_or_known_default().unwrap_or(443);
+        let enderecos = enderecos_publicos_de(host.trim_matches(['[', ']']), porta).await?;
+        let cliente = cliente_da_previa(&host, &enderecos)?;
+
+        let resposta = cliente
+            .get(alvo.clone())
+            .send()
+            .await
+            .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?;
+
+        if !resposta.status().is_redirection() {
+            break resposta
+                .error_for_status()
+                .map_err(|erro| FalhaNaPrevia::NaoRespondeu(erro.to_string()))?;
+        }
+        saltos += 1;
+        if saltos > SALTOS_DA_PREVIA {
+            return Err(FalhaNaPrevia::NaoRespondeu(
+                "o endereço redireciona sem parar".to_owned(),
+            ));
+        }
+        let destino = resposta
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|valor| valor.to_str().ok())
+            .ok_or_else(|| {
+                FalhaNaPrevia::NaoRespondeu("redirecionamento sem destino".to_owned())
+            })?;
+        // Resolvido contra o endereço atual, porque um `Location` pode ser
+        // relativo. A volta do laço o valida de novo, inteiro.
+        alvo = alvo
+            .join(destino)
+            .map_err(|erro| FalhaNaPrevia::NaoEAberto(erro.to_string()))?;
+    };
 
     // O tipo que o outro lado alega. Ele **não** decide nada sozinho: quem
     // decide são os bytes, em `judge`.
@@ -5724,6 +6030,235 @@ fn modo_de_voz_escolhido(app: AppHandle) -> Option<VoiceMode> {
         .map(VoiceMode::from)
 }
 
+// ------------------------------------------------- qualidade de voz (F01, F02)
+//
+// Três superfícies, e elas são três porque respondem a perguntas diferentes:
+//
+//   - **os controles**, que valem para a sessão e ficam gravados;
+//   - **o teste**, que roda sem sessão nenhuma e mede o mesmo caminho;
+//   - **a leitura**, que a tela pede enquanto o controle é arrastado.
+
+/// Liga, desliga ou dosa a supressão de ruído do microfone. F02.
+///
+/// Vale já e fica gravada: um interruptor que volta sozinho a cada abertura não é
+/// um controle. `None` grava «o padrão do produto» em vez de um número.
+///
+/// # Errors
+///
+/// Falha se as preferências não puderem ser gravadas.
+#[tauri::command]
+fn ajustar_reducao_de_ruido(
+    app: AppHandle,
+    session: State<'_, Session>,
+    forca: Option<f32>,
+) -> Result<(), String> {
+    // A sessão primeiro, para o efeito ser imediato; o disco depois. A ordem
+    // importa quando o disco falha: a pessoa ouve a mudança e lê que ela não
+    // ficou gravada, que é melhor que não ouvir nada e ler o mesmo.
+    let aplicada = forca.unwrap_or(1.0);
+    if let Ok(conexao) = session.connection() {
+        conexao.set_supressao_de_ruido(aplicada);
+    }
+    // E o teste em curso, se há um: a pessoa pode estar calibrando agora.
+    if let Ok(teste) = session.teste_de_microfone.lock() {
+        if let Some(teste) = teste.as_ref() {
+            teste.set_supressao(aplicada);
+        }
+    }
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err("não consegui abrir as preferências".to_owned());
+    };
+    ajustes
+        .set_supressao_de_ruido(forca)
+        .map_err(|erro| format!("não consegui gravar a escolha: {erro}"))
+}
+
+/// A sensibilidade da ativação por voz, em dBFS. `None` volta ao padrão. F01.
+///
+/// O padrão depende de a redução de ruído estar ligada: o alvo de −60 dBFS é do
+/// caminho **com** filtro, e sem ele o portão volta a ser a única defesa contra o
+/// ventilador.
+///
+/// # Errors
+///
+/// Falha se as preferências não puderem ser gravadas.
+#[tauri::command]
+fn ajustar_sensibilidade_da_voz(
+    app: AppHandle,
+    session: State<'_, Session>,
+    dbfs: Option<f32>,
+) -> Result<(), String> {
+    if let Ok(conexao) = session.connection() {
+        conexao.set_abertura_da_voz_dbfs(dbfs);
+    }
+    if let Ok(teste) = session.teste_de_microfone.lock() {
+        if let Some(teste) = teste.as_ref() {
+            teste.set_abertura_dbfs(dbfs);
+        }
+    }
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err("não consegui abrir as preferências".to_owned());
+    };
+    ajustes
+        .set_abertura_da_voz_dbfs(dbfs)
+        .map_err(|erro| format!("não consegui gravar a escolha: {erro}"))
+}
+
+/// Os controles de voz que estão valendo. F01 e F02.
+///
+/// Fora de sessão a resposta vem do disco: a tela de configuração abre sem
+/// servidor nenhum, e mostrar os controles vazios ali faria a pessoa achar que
+/// não há o que ajustar.
+#[tauri::command]
+fn controles_da_voz(app: AppHandle, session: State<'_, Session>) -> seele_ffi::ControlesDaVoz {
+    if let Ok(conexao) = session.connection() {
+        if let Some(controles) = conexao.controles_da_voz() {
+            return controles;
+        }
+    }
+    let ajustes = preferencias(&app);
+    let supressao = ajustes
+        .as_ref()
+        .and_then(seele_ffi::preferences::Preferences::supressao_de_ruido)
+        .unwrap_or(1.0);
+    let escolhida = ajustes
+        .as_ref()
+        .and_then(seele_ffi::preferences::Preferences::abertura_da_voz_dbfs);
+    seele_ffi::ControlesDaVoz {
+        supressao,
+        // O mesmo padrão da sessão, e pela mesma regra: −60 dBFS é do caminho
+        // com filtro. Duas cópias desta decisão discordariam no dia em que uma
+        // mudasse, então ela vem dos nomes do núcleo.
+        abertura_dbfs: escolhida.unwrap_or(if supressao > 0.0 {
+            seele_ffi::ABERTURA_COM_SUPRESSAO_DBFS
+        } else {
+            seele_ffi::ABERTURA_SEM_SUPRESSAO_DBFS
+        }),
+        abertura_escolhida: escolhida.is_some(),
+        abertura_minima_dbfs: seele_ffi::ABERTURA_MINIMA_DBFS,
+        abertura_maxima_dbfs: seele_ffi::ABERTURA_MAXIMA_DBFS,
+    }
+}
+
+/// Abre o teste de microfone. F01.
+///
+/// Idempotente: pedir de novo com um teste aberto fecha o anterior e abre outro,
+/// que é o que trocar de aparelho no meio do teste precisa fazer.
+///
+/// # Errors
+///
+/// Falha quando não há microfone ou o aparelho escolhido sumiu.
+#[tauri::command]
+fn abrir_teste_de_microfone(app: AppHandle, session: State<'_, Session>) -> Result<(), String> {
+    let ajustes = preferencias(&app);
+    let supressao = ajustes
+        .as_ref()
+        .and_then(seele_ffi::preferences::Preferences::supressao_de_ruido)
+        .unwrap_or(1.0);
+    let abertura = ajustes
+        .as_ref()
+        .and_then(seele_ffi::preferences::Preferences::abertura_da_voz_dbfs);
+    let captura = ajustes
+        .as_ref()
+        .and_then(|p| p.capture().map(str::to_owned));
+    let saida = ajustes
+        .as_ref()
+        .and_then(|p| p.playback().map(str::to_owned));
+
+    let aberto = seele_ffi::TesteDeMicrofone::abrir(captura, saida, supressao, abertura)
+        // O motivo vai por extenso: o enum do núcleo é o vocabulário da ponte, e
+        // a frase de tela é escrita em `frases.js` a partir dele.
+        .map_err(|erro| format!("{erro:?}"))?;
+    let Ok(mut slot) = session.teste_de_microfone.lock() else {
+        return Err("o teste de microfone não pôde ser guardado".to_owned());
+    };
+    // O anterior é largado **antes** de o novo entrar: o `Drop` dele para a
+    // thread, e dois testes ao mesmo tempo seriam dois microfones abertos.
+    *slot = Some(aberto);
+    Ok(())
+}
+
+/// Fecha o teste de microfone. Idempotente.
+#[tauri::command]
+fn fechar_teste_de_microfone(session: State<'_, Session>) {
+    if let Ok(mut slot) = session.teste_de_microfone.lock() {
+        *slot = None;
+    }
+}
+
+/// O que o teste de microfone tem a contar agora. F01.
+///
+/// `None` quando não há teste aberto — a tela desenha o estado parado em vez de
+/// números de uma medição que não está acontecendo.
+#[tauri::command]
+fn estado_do_teste_de_microfone(
+    session: State<'_, Session>,
+) -> Option<seele_ffi::EstadoDoTesteDeMicrofone> {
+    session
+        .teste_de_microfone
+        .lock()
+        .ok()?
+        .as_ref()
+        .map(seele_ffi::TesteDeMicrofone::estado)
+}
+
+/// Liga ou desliga ouvir o próprio microfone durante o teste. F01.
+///
+/// Começa desligado: tocar o microfone no alto-falante realimenta, e o nível
+/// responde a maior parte da pergunta sem som nenhum.
+#[tauri::command]
+fn monitorar_o_microfone(session: State<'_, Session>, ligado: bool) {
+    if let Ok(teste) = session.teste_de_microfone.lock() {
+        if let Some(teste) = teste.as_ref() {
+            teste.set_monitorar(ligado);
+        }
+    }
+}
+
+/// Libera a prévia automática de um domínio. ADR 0053.
+///
+/// Chamada pelo botão «mostrar imagem» que a janela desenha no lugar da prévia.
+/// **É o clique que consente**, e ele consente para o domínio, uma vez — não
+/// para um endereço, e não para todos.
+///
+/// # Errors
+///
+/// Falha se as preferências não puderem ser gravadas.
+#[tauri::command]
+fn consentir_previa(app: AppHandle, dominio: String) -> Result<(), String> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err("não consegui abrir as preferências".to_owned());
+    };
+    ajustes
+        .consentir_previa(&dominio)
+        .map_err(|erro| format!("não consegui gravar a escolha: {erro}"))
+}
+
+/// Retira a liberação de um domínio. ADR 0053.
+///
+/// # Errors
+///
+/// Falha se as preferências não puderem ser gravadas.
+#[tauri::command]
+fn esquecer_previa(app: AppHandle, dominio: String) -> Result<(), String> {
+    let Some(mut ajustes) = preferencias(&app) else {
+        return Err("não consegui abrir as preferências".to_owned());
+    };
+    ajustes
+        .esquecer_previa(&dominio)
+        .map_err(|erro| format!("não consegui gravar a escolha: {erro}"))
+}
+
+/// Os domínios cuja prévia automática está liberada. ADR 0053.
+///
+/// A tela de configuração os lista para que uma escolha feita num clique possa
+/// ser desfeita num clique: um consentimento que não se enxerga é um
+/// consentimento que ninguém revoga.
+#[tauri::command]
+fn previas_consentidas(app: AppHandle) -> Vec<String> {
+    preferencias(&app).map_or_else(Vec::new, |ajustes| ajustes.previas_consentidas().to_vec())
+}
+
 /// Qual tecla abre o microfone em push-to-talk, ou `None` para a barra de espaço.
 ///
 /// O valor é um `KeyboardEvent.code` e **atravessa opaco**: este lado nunca
@@ -5862,6 +6397,39 @@ fn pedir_quadro_chave(session: State<'_, Session>, tela: u32) -> Result<(), Conn
 #[tauri::command]
 fn assistir(session: State<'_, Session>, tela: u32, quero: bool) -> Result<(), ConnectionError> {
     session.connection()?.assistir(tela, quero)
+}
+
+/// O volume do som da transmissão que se está assistindo.
+///
+/// R21, o controle **de quem assiste**: silenciar o conteúdo compartilhado sem
+/// calar as pessoas. Independente do volume dos participantes e do isolamento
+/// total — este último continua calando tudo, que é o que ele diz que faz.
+#[tauri::command]
+fn ajustar_volume_da_tela(session: State<'_, Session>, volume: f32) -> Result<(), ConnectionError> {
+    session.connection()?.ajustar_volume_da_tela(volume)
+}
+
+/// Cala ou devolve o som da transmissão, sem mexer no volume dela.
+#[tauri::command]
+fn calar_a_tela(session: State<'_, Session>, calada: bool) -> Result<(), ConnectionError> {
+    session.connection()?.calar_a_tela(calada)
+}
+
+/// O volume e o mudo do som da transmissão, como a tela os desenha.
+#[tauri::command]
+fn som_da_tela(
+    session: State<'_, Session>,
+) -> Result<Option<seele_ffi::SomDaTela>, ConnectionError> {
+    Ok(session.connection()?.som_da_tela())
+}
+
+/// O que esta máquina faz com o **próprio** áudio ao capturar uma tela.
+///
+/// R21. Não depende de sessão: é propriedade desta máquina e deste sistema, e a
+/// pergunta é feita quando alguém está escolhendo o que compartilhar.
+#[tauri::command]
+fn exclusao_do_som_da_captura() -> seele_ffi::ExclusaoDoSom {
+    seele_ffi::Connection::exclusao_do_som_da_captura()
 }
 
 /// Altera a resolução sem interromper a captura.
@@ -7148,11 +7716,64 @@ fn arquivo_de_log() -> Option<std::fs::File> {
         std::path::PathBuf::from(".")
     };
     std::fs::create_dir_all(&pasta).ok()?;
+    let arquivo = pasta.join("seele.log");
+    girar_o_log(&arquivo);
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(pasta.join("seele.log"))
+        .open(arquivo)
         .ok()
+}
+
+/// O maior tamanho que o rastro alcança antes de virar `seele.log.1`.
+///
+/// Oito mebibytes: cabem dias de sessão com `RUST_LOG=debug` e é pequeno o
+/// bastante para alguém anexar o arquivo numa conversa de suporte sem pensar
+/// duas vezes.
+const TETO_DO_LOG: u64 = 8 * 1024 * 1024;
+
+/// Troca o rastro por um novo quando o atual passa do teto. R15.
+///
+/// # Por que ele precisa girar
+///
+/// Porque ele abria em `append` e mais nada: o arquivo crescia enquanto o
+/// aplicativo fosse usado, para sempre. Num servidor hospedado dentro do app,
+/// que fica de pé por semanas, isso é o disco de quem hospeda enchendo sem
+/// ninguém pedir — R15 da revisão da v15 nomeia esta linha.
+///
+/// # Duas gerações, e não dez
+///
+/// `seele.log` e `seele.log.1`, e a mais velha é substituída. Duas porque a
+/// pergunta que o rastro responde é «o que aconteceu agora» e, quando a sessão
+/// acabou de reiniciar, «o que aconteceu antes de reiniciar» — a segunda é o
+/// motivo de haver uma anterior. Dez gerações seriam dez vezes o teto em disco
+/// para responder uma pergunta que ninguém faz.
+///
+/// # Na abertura, e não por relógio
+///
+/// Girar no meio de um processo pediria trocar o destino do `tracing` com ele
+/// rodando, que é maquinaria para um ganho pequeno: o rastro passa do teto
+/// depois de dias, e o aplicativo é reaberto muito mais que isso. O custo desta
+/// escolha, dito: uma sessão que fique aberta tempo bastante passa do teto e só
+/// gira na próxima abertura.
+///
+/// Toda falha é engolida de propósito — `let _` e `ok()`. Não conseguir girar não
+/// pode impedir o log de abrir: log grande é um problema, log nenhum é pior, e
+/// era o que uma interrogação aqui causaria.
+fn girar_o_log(arquivo: &std::path::Path) {
+    let Ok(dados) = std::fs::metadata(arquivo) else {
+        // Não existe ainda, que é o caso da primeira abertura.
+        return;
+    };
+    if dados.len() < TETO_DO_LOG {
+        return;
+    }
+    let anterior = arquivo.with_extension("log.1");
+    // O `rename` substitui a geração anterior no Unix e falha no Windows quando
+    // o destino existe, então ele sai antes. Ver `identity::gravar_privado`, que
+    // tem a mesma nota pela mesma razão.
+    let _ = std::fs::remove_file(&anterior);
+    let _ = std::fs::rename(arquivo, &anterior);
 }
 
 fn main() {
@@ -7377,6 +7998,19 @@ fn main() {
             leave_voice_room,
             open_channel,
             send_message,
+            ajustar_reducao_de_ruido,
+            ajustar_sensibilidade_da_voz,
+            controles_da_voz,
+            abrir_teste_de_microfone,
+            fechar_teste_de_microfone,
+            estado_do_teste_de_microfone,
+            monitorar_o_microfone,
+            consentir_previa,
+            esquecer_previa,
+            previas_consentidas,
+            reenviar_mensagem,
+            descartar_mensagem,
+            limite_da_mensagem,
             criar_voice_room,
             criar_linha,
             renomear_voice_room,
@@ -7422,6 +8056,10 @@ fn main() {
             parar_de_compartilhar,
             pedir_quadro_chave,
             assistir,
+            ajustar_volume_da_tela,
+            calar_a_tela,
+            som_da_tela,
+            exclusao_do_som_da_captura,
             dispensar_aviso,
             permissao_de_microfone,
             abrir_ajustes_do_microfone,
@@ -7672,8 +8310,8 @@ mod a_tela_le_os_limites_que_o_rust_manda {
 #[cfg(test)]
 mod o_que_sai_desta_janela_por_um_link {
     use super::{
-        e_de_um_dominio_de_gif, endereco_que_pode_sair, midia_declarada_pela_pagina,
-        DOMINIOS_DE_GIF,
+        e_de_um_dominio_de_gif, endereco_de_previa, endereco_que_pode_sair,
+        midia_declarada_pela_pagina, FalhaNaPrevia, DOMINIOS_DE_GIF,
     };
 
     /// **A lista de domínios é fechada, e o sufixo é conferido com o ponto.**
@@ -7802,9 +8440,11 @@ mod o_que_sai_desta_janela_por_um_link {
         let busca = super::corpo_de(&sem_comentario, "async fn buscar_com_teto(");
 
         assert!(
-            busca.contains("endereco_que_pode_sair(url)"),
-            "a busca deixou de conferir o esquema: um `file://` colado na \
-             conversa faria esta janela ler o disco de quem lê: {busca}"
+            busca.contains("endereco_de_previa(&texto)?"),
+            "a busca deixou de conferir o destino: um `file://` colado na \
+             conversa faria esta janela ler o disco de quem lê, e um \
+             `http://127.0.0.1` a faria bater num serviço da máquina dela: \
+             {busca}"
         );
         assert!(
             busca.contains("PREVIEW_LIMIT") && busca.contains(".chunk()"),
@@ -7834,12 +8474,18 @@ mod o_que_sai_desta_janela_por_um_link {
              {comando}"
         );
 
+        // **Nenhum redirecionamento é seguido por baixo.** Antes do ADR 0053 o
+        // cliente os seguia com uma política própria, e essa política conferia
+        // o salto pela régua de *abrir um link* — que aceita a rede local. Agora
+        // quem os segue é o laço de `buscar_com_teto`, que revalida e resolve
+        // cada um; a metade que fica aqui é a proibição de o cliente fazer isso
+        // sozinho, porque ele está fixado no endereço do salto anterior.
         let cliente = super::corpo_de(&sem_comentario, "fn cliente_da_previa(");
         assert!(
-            cliente.contains("redirect(reqwest::redirect::Policy::custom"),
-            "os redirecionamentos voltaram a ser seguidos às cegas: um `https` \
-             que responde `302` para outro esquema usaria esta janela para \
-             alcançar o que ela recusaria de frente: {cliente}"
+            cliente.contains("redirect(reqwest::redirect::Policy::none())"),
+            "o cliente voltou a seguir redirecionamento por conta própria: um \
+             `302` para a rede local atravessa sem passar pela validação do \
+             laço, e com o endereço fixado no host errado: {cliente}"
         );
     }
 
@@ -7907,6 +8553,137 @@ mod o_que_sai_desta_janela_por_um_link {
                 "deixou sair `{torto:?}`"
             );
         }
+    }
+
+    /// **Uma prévia não alcança esta máquina, esta rede, nem nada reservado.**
+    ///
+    /// ADR 0053 e R06. A revisão da v15 verificou que a janela classificava
+    /// `http://127.0.0.1:9999/private.png` como prévia automática, e que a
+    /// cadeia nativa faria a busca. Conferir os bytes depois da resposta não
+    /// evita a requisição — e é a requisição que é o problema.
+    #[test]
+    fn uma_previa_nao_alcanca_a_maquina_nem_a_rede_de_quem_le() {
+        for privado in [
+            // A reprodução literal do review.
+            "http://127.0.0.1:9999/private.png",
+            "http://localhost/x.png",
+            "http://LOCALHOST./x.png",
+            "http://algo.local/x.png",
+            "http://nas.internal/x.png",
+            // O roteador da casa, e as três faixas privadas.
+            "http://192.168.0.1/x.png",
+            "http://10.0.0.5/x.png",
+            "http://172.16.3.9/x.png",
+            // `0.0.0.0/8`, que em várias pilhas é «esta máquina».
+            "http://0.0.0.0/x.png",
+            // Metadados de nuvem, que é link-local.
+            "http://169.254.169.254/latest/meta-data",
+            // Compartilhado entre operadoras.
+            "http://100.100.1.1/x.png",
+            // IPv6: loopback, local único, link-local…
+            "http://[::1]/x.png",
+            "http://[fd00::1]/x.png",
+            "http://[fe80::1]/x.png",
+            // …e o mapeado, que é o que uma régua só de IPv4 deixa passar.
+            "http://[::ffff:127.0.0.1]/x.png",
+        ] {
+            assert!(
+                matches!(
+                    endereco_de_previa(privado),
+                    Err(FalhaNaPrevia::DestinoPrivado(_))
+                ),
+                "a prévia alcançaria `{privado}`"
+            );
+            // **E a política de abrir um link continua aceitando.** As duas são
+            // políticas diferentes de propósito: `http://192.168.0.1` clicado
+            // por uma pessoa é o roteador da casa dela, e recusá-lo seria o
+            // produto decidindo onde ela pode navegar.
+            assert!(
+                endereco_que_pode_sair(privado).is_ok(),
+                "abrir um link parou de aceitar `{privado}`: as duas políticas \
+                 voltaram a ser uma, que é o defeito que o ADR 0053 separou"
+            );
+        }
+    }
+
+    /// E a internet pública continua passando, senão o guarda acima é uma porta
+    /// fechada para todo mundo — que passaria no teste de cima sem fazer nada.
+    #[test]
+    fn uma_previa_alcanca_a_internet_publica() {
+        for publico in [
+            "https://exemplo.br/foto.png",
+            "https://media.tenor.com/algo.gif",
+            "http://8.8.8.8/x.png",
+            "http://[2606:4700::1]/x.png",
+        ] {
+            assert!(
+                endereco_de_previa(publico).is_ok(),
+                "recusou `{publico}`, que é internet pública"
+            );
+        }
+    }
+
+    /// **Cada salto é revalidado, e o endereço resolvido é fixado.**
+    ///
+    /// Guarda de texto-fonte pelo mesmo motivo dos vizinhos: exercitar isto
+    /// pediria um servidor que redireciona, e um teste que levantasse um seria
+    /// um teste que sai à rede.
+    ///
+    /// As três metades que o R06 pede — «restrição de destinos privados/loopback/
+    /// link-local e nova validação em cada redirecionamento e resolução»:
+    #[test]
+    fn cada_salto_da_previa_e_validado_resolvido_e_fixado() {
+        let sem_comentario = super::fonte_sem_comentarios();
+        let busca = super::corpo_de(&sem_comentario, "async fn buscar_com_teto(");
+
+        assert!(
+            busca.contains("endereco_de_previa(&texto)?")
+                && busca.contains("enderecos_publicos_de("),
+            "um salto deixou de ser validado e resolvido de novo: um `302` para \
+             a rede local atravessa: {busca}"
+        );
+        assert!(
+            busca.contains("reqwest::header::LOCATION"),
+            "o laço deixou de seguir os saltos à mão, e quem os seguir por \
+             baixo os seguirá sem passar por esta validação: {busca}"
+        );
+
+        let cliente = super::corpo_de(&sem_comentario, "fn cliente_da_previa(");
+        assert!(
+            cliente.contains("resolve_to_addrs(host, enderecos)"),
+            "o endereço deixou de ser fixado: o nome é resolvido uma vez para \
+             conferir e outra para conectar, e nada obriga as duas respostas a \
+             serem a mesma: {cliente}"
+        );
+        assert!(
+            cliente.contains("Policy::none()"),
+            "o cliente voltou a seguir redirecionamento por conta própria, com \
+             o endereço fixado no host errado: {cliente}"
+        );
+    }
+
+    /// **Nenhuma prévia sai antes do consentimento do domínio.**
+    ///
+    /// A ordem importa: a pergunta vem **antes** de `buscar_com_teto`. Um
+    /// consentimento conferido depois seria um consentimento pedido depois de a
+    /// requisição já ter aparecido no servidor de outra pessoa.
+    #[test]
+    fn a_previa_pergunta_antes_de_buscar() {
+        let sem_comentario = super::fonte_sem_comentarios();
+        let comando = super::corpo_de(&sem_comentario, "async fn previa_de_link(");
+
+        let pergunta = comando
+            .find("previa_consentida(")
+            .expect("o comando deixou de conferir o consentimento");
+        let busca = comando
+            .find("buscar_com_teto(")
+            .expect("o comando deixou de buscar");
+        assert!(
+            pergunta < busca,
+            "o consentimento é conferido depois da busca: a requisição já \
+             apareceu no servidor de quem escreveu a mensagem quando alguém \
+             for perguntado: {comando}"
+        );
     }
 }
 

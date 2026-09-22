@@ -1,0 +1,7 @@
+FIRST_OUTPUT samples=480 encoder_expected=960
+FIRST_OUTPUT_CODEC Err(WrongFrameSize { got: 480, expected: 960 })
+MODE_RESET opening_frames=1 retained=0
+MODE_RESET first_quiet_frame_open=false
+NOISE_ONLY after_warmup_open=200/200 mean_output_dbfs=-58.03
+SILENT_START noise_remaining_ratio=1.0001
+RETAINED_FRAMES timestamps=[2880, 2880, 2880] decisions=[Play(0), Play(1), Play(2), Play(3)] resyncs=2

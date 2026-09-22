@@ -14,6 +14,19 @@ cpal = "0.18.1"
 seele-proto = { path = "../seele-proto" }
 rtrb = "0.3.5"
 rubato = "4.0.0"
+# A FFT da supressão de ruído — F02 de `docs/features-v15.md`.
+#
+# **Zero crate novo na árvore**: o `rubato` logo acima já traz o `realfft` e o
+# `rustfft` que ele usa, e é o mesmo par. Declarado direto porque
+# `supressao.rs` o nomeia, e depender por acidente de uma dependência
+# transitiva é depender de uma escolha de outra pessoa.
+#
+# Rust puro, e é o que permite a supressão existir nesta v1: o ADR 0007 tira DSP
+# em C do escopo e o ADR 0015 registra a mesma decisão para o `webrtc-vad`. Uma
+# porta de RNNoise seria mais eficaz contra ruído não estacionário e traria um
+# modelo, uma licença e um arquivo a empacotar — a troca está escrita no
+# cabeçalho de `supressao.rs`.
+realfft = "3.5.0"
 # `source-build` em toda plataforma: compila o libopus do código-fonte em vez
 # de baixar o pré-compilado do crate. Não é preferência, é que o pré-compilado
 # não serve para nós em três frentes, todas verificadas:

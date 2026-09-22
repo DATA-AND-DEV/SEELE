@@ -660,6 +660,39 @@ impl CapturaDaTela {
             // um driver no meio. Estava escrito `false` desde que este arquivo
             // nasceu, e a transmissão saía muda.
             .with_captures_audio(true)
+            // **E o áudio deste processo fica fora do que é capturado.**
+            //
+            // R21 da revisão da v15: «participantes se escutam quando alguém
+            // transmite a tela inteira». O caminho é o que este `true` acima
+            // abre — o compositor entrega o som da saída inteira, e a conversa
+            // que o SEELE está tocando está nela. Sem esta linha, quem
+            // compartilha um monitor devolve à sala a voz da própria sala, com
+            // o atraso de ida e volta, que é exatamente a descrição do relato.
+            //
+            // **A exclusão é do processo, e não do dispositivo.** É o que
+            // preserva a metade que importa: quem compartilha **continua
+            // ouvindo todo mundo**. Silenciar os participantes no fone de quem
+            // transmite seria outro recurso e uma perda de funcionalidade — o
+            // review é explícito em que essa não é a solução.
+            //
+            // Cancelamento de eco de microfone também não substitui isto: o
+            // retorno não passa pelo microfone, ele é capturado direto da saída.
+            //
+            // **O que esta linha não garante, dito por extenso.**
+            //
+            // `excludesCurrentProcessAudio` é do macOS 13. O
+            // `tauri.conf.json` declara `minimumSystemVersion: 11.0`, e a
+            // ScreenCaptureKit em si pede 12.3 — então há uma faixa, 12.3 a
+            // 12.x, em que a captura funciona e **esta propriedade não existe**.
+            // Nela a exclusão não acontece, e o produto não pode afirmar que
+            // acontece: quem responde essa pergunta à pessoa é
+            // `seele_video::exclusao_do_som_deste_processo`, e é ela que a tela
+            // lê antes de prometer qualquer coisa.
+            //
+            // Não medi acusticamente em nenhuma das duas faixas nesta rodada. O
+            // que está provado é o acoplamento — a propriedade é pedida, e o
+            // relatório de capacidade diz em que versão ela vale.
+            .with_excludes_current_process_audio(true)
             // O conteúdo é encaixado, não esticado, e o que sobra é preto — a
             // mesma cor do quadro preto do codec, para que a tarja não custe
             // bits nem chame atenção.

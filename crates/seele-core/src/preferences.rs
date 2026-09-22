@@ -74,6 +74,12 @@ const PARES_QUE_ATENDE: &str = "pares_que_atende";
 const ASSISTE_POR_PAR: &str = "assiste_por_par";
 /// A maior subida que a sonda já mediu **nesta máquina**, em bits por segundo.
 const CAMINHO_DA_MAQUINA: &str = "caminho_da_maquina_bps";
+/// Os domínios cuja prévia automática esta pessoa liberou. ADR 0053.
+const PREVIAS_CONSENTIDAS: &str = "previas_consentidas";
+/// Quanto da supressão de ruído do microfone, em milésimos. F02.
+const SUPRESSAO_DE_RUIDO: &str = "supressao_de_ruido";
+/// A sensibilidade da ativação por voz, em milésimos de dBFS. F01.
+const ABERTURA_DA_VOZ: &str = "abertura_da_voz_dbfs_milesimos";
 
 /// The local settings, on disk.
 #[derive(Debug, Clone, Default)]
@@ -113,6 +119,35 @@ pub struct Preferences {
     /// este número é um **ponto de partida**, e o da lista de conhecidos, quando
     /// existe, tem precedência.
     caminho_da_maquina_bps: Option<u32>,
+    /// Os domínios cuja prévia automática esta pessoa liberou. ADR 0053.
+    ///
+    /// # Por que ela é uma lista de sim, e não de não
+    ///
+    /// Porque o padrão é não buscar. Antes do ADR 0053 bastava o caminho de um
+    /// link terminar em extensão de imagem para esta janela ir buscá-lo: ler uma
+    /// mensagem era fazer uma requisição ao servidor de quem a escreveu, que
+    /// aprendia dali o endereço de origem de quem lê e a hora. Uma lista de
+    /// proibidos erraria no dia em que alguém colasse um domínio que não está
+    /// nela — e erraria para o lado de deixar passar.
+    ///
+    /// Vazia é o estado de toda instalação nova, e nela nenhuma prévia é
+    /// buscada sozinha. O que a janela oferece no lugar é um botão.
+    previas_consentidas: Vec<String>,
+    /// Quanto da supressão de ruído do microfone, em milésimos. F02.
+    ///
+    /// `None` é o padrão do produto — ligada. Gravada porque F02 pede um controle
+    /// com opção de desligar, e um interruptor que volta sozinho a cada abertura
+    /// não é um controle.
+    supressao_de_ruido: Option<u32>,
+    /// A sensibilidade da ativação por voz, em milésimos de dBFS. F01.
+    ///
+    /// `None` é o padrão, que depende de a supressão estar ligada — ver
+    /// `seele_core::voice`. F01 pede que «o ajuste persista após reiniciar», e é
+    /// este campo.
+    ///
+    /// Negativa: dBFS é relativa ao máximo. Milésimos porque a interface oferece
+    /// meio decibel de passo.
+    abertura_da_voz_dbfs_milesimos: Option<i32>,
 }
 
 impl Preferences {
@@ -138,6 +173,9 @@ impl Preferences {
             pares_que_atende: None,
             assiste_por_par: None,
             caminho_da_maquina_bps: None,
+            previas_consentidas: Vec::new(),
+            supressao_de_ruido: None,
+            abertura_da_voz_dbfs_milesimos: None,
         };
         if let Ok(text) = std::fs::read_to_string(&settings.path) {
             for line in text.lines() {
@@ -168,6 +206,26 @@ impl Preferences {
                     CAMINHO_DA_MAQUINA => {
                         settings.caminho_da_maquina_bps =
                             value.as_deref().and_then(|v| v.parse().ok())
+                    }
+                    // Separados por espaço, que é o que o formato de linha
+                    // permite — o `\t` separa nome de valor.
+                    SUPRESSAO_DE_RUIDO => {
+                        settings.supressao_de_ruido = value.as_deref().and_then(|v| v.parse().ok())
+                    }
+                    ABERTURA_DA_VOZ => {
+                        settings.abertura_da_voz_dbfs_milesimos =
+                            value.as_deref().and_then(|v| v.parse().ok())
+                    }
+                    PREVIAS_CONSENTIDAS => {
+                        settings.previas_consentidas = value
+                            .as_deref()
+                            .map(|lista| {
+                                lista
+                                    .split_whitespace()
+                                    .map(str::to_ascii_lowercase)
+                                    .collect()
+                            })
+                            .unwrap_or_default()
                     }
                     ASSISTE_POR_PAR => {
                         settings.assiste_por_par = match value.as_deref() {
@@ -369,6 +427,129 @@ impl Preferences {
         self.write()
     }
 
+    /// Quanto da supressão de ruído do microfone, de zero a um. F02.
+    ///
+    /// `None` é «não escolhido», e quem lê aplica o padrão do produto. Não é
+    /// zero: zero é uma escolha — «desligada» — e confundir as duas faria uma
+    /// instalação nova nascer sem filtro.
+    #[must_use]
+    pub fn supressao_de_ruido(&self) -> Option<f32> {
+        self.supressao_de_ruido.map(|milesimos| {
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "mil milésimos cabem exatos num f32"
+            )]
+            let forca = milesimos as f32 / 1000.0;
+            forca
+        })
+    }
+
+    /// Escreve quanto da supressão de ruído aplicar. `None` volta ao padrão.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be written.
+    pub fn set_supressao_de_ruido(&mut self, forca: Option<f32>) -> Result<()> {
+        self.supressao_de_ruido = forca.map(|valor| {
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "o valor é fixado entre 0 e 1 antes da conversão"
+            )]
+            let milesimos = (valor.clamp(0.0, 1.0) * 1000.0) as u32;
+            milesimos
+        });
+        self.write()
+    }
+
+    /// A sensibilidade da ativação por voz, em dBFS. F01.
+    ///
+    /// `None` é o padrão do produto, que depende de a supressão estar ligada.
+    #[must_use]
+    pub fn abertura_da_voz_dbfs(&self) -> Option<f32> {
+        self.abertura_da_voz_dbfs_milesimos.map(|milesimos| {
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "a faixa é de −72 a −24 dBFS; em milésimos cabe exata num f32"
+            )]
+            let dbfs = milesimos as f32 / 1000.0;
+            dbfs
+        })
+    }
+
+    /// Escreve a sensibilidade da ativação por voz. `None` volta ao padrão.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be written.
+    pub fn set_abertura_da_voz_dbfs(&mut self, dbfs: Option<f32>) -> Result<()> {
+        self.abertura_da_voz_dbfs_milesimos = dbfs.map(|valor| {
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "a faixa é de −72 a −24 dBFS; em milésimos cabe folgado num i32"
+            )]
+            let milesimos = (valor * 1000.0) as i32;
+            milesimos
+        });
+        self.write()
+    }
+
+    /// Se a prévia automática deste domínio já foi liberada. ADR 0053.
+    ///
+    /// A comparação é por **sufixo de ponto**, como a dos domínios de GIF:
+    /// liberar `exemplo.com` alcança `cdn.exemplo.com`, e o ponto é o que impede
+    /// `naoexemplo.com` de se passar por ele. Sem o ponto, qualquer domínio que
+    /// termine nessas letras entraria — e quem escolhe o domínio é quem escreveu
+    /// a mensagem.
+    #[must_use]
+    pub fn previa_consentida(&self, dominio: &str) -> bool {
+        let alvo = dominio.to_ascii_lowercase();
+        self.previas_consentidas
+            .iter()
+            .any(|liberado| alvo == *liberado || alvo.ends_with(&format!(".{liberado}")))
+    }
+
+    /// Libera a prévia automática deste domínio. ADR 0053.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be written.
+    pub fn consentir_previa(&mut self, dominio: &str) -> Result<()> {
+        let alvo = sanitise(dominio).to_ascii_lowercase();
+        // Espaço é o separador da linha, então um «domínio» com espaço dentro
+        // viraria dois ao ser lido de volta. Um host legítimo não tem nenhum.
+        if alvo.is_empty() || alvo.split_whitespace().count() != 1 {
+            return Ok(());
+        }
+        if self.previa_consentida(&alvo) {
+            return Ok(());
+        }
+        self.previas_consentidas.push(alvo);
+        self.write()
+    }
+
+    /// Retira a liberação deste domínio, se ela existir. ADR 0053.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be written.
+    pub fn esquecer_previa(&mut self, dominio: &str) -> Result<()> {
+        let alvo = dominio.to_ascii_lowercase();
+        let antes = self.previas_consentidas.len();
+        self.previas_consentidas
+            .retain(|liberado| *liberado != alvo);
+        if self.previas_consentidas.len() == antes {
+            return Ok(());
+        }
+        self.write()
+    }
+
+    /// Os domínios liberados, para a tela que os lista e os revoga.
+    #[must_use]
+    pub fn previas_consentidas(&self) -> &[String] {
+        &self.previas_consentidas
+    }
+
     fn write(&self) -> Result<()> {
         // Every setting, not only the one that just changed: this rewrites the
         // whole file, so a line left out here is a line deleted from disk. That
@@ -380,6 +561,10 @@ impl Preferences {
             .assiste_por_par
             .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
         let caminho = self.caminho_da_maquina_bps.map(|bps| bps.to_string());
+        let previas =
+            (!self.previas_consentidas.is_empty()).then(|| self.previas_consentidas.join(" "));
+        let supressao = self.supressao_de_ruido.map(|m| m.to_string());
+        let abertura = self.abertura_da_voz_dbfs_milesimos.map(|m| m.to_string());
         for (name, value) in [
             (CAPTURE, &self.capture),
             (PLAYBACK, &self.playback),
@@ -389,6 +574,9 @@ impl Preferences {
             (PARES_QUE_ATENDE, &pares),
             (ASSISTE_POR_PAR, &assiste),
             (CAMINHO_DA_MAQUINA, &caminho),
+            (PREVIAS_CONSENTIDAS, &previas),
+            (SUPRESSAO_DE_RUIDO, &supressao),
+            (ABERTURA_DA_VOZ, &abertura),
         ] {
             let Some(value) = value else {
                 continue;
@@ -411,24 +599,20 @@ fn sanitise(value: &str) -> String {
         .collect()
 }
 
-/// The same restricted mode the identity and the visited list are written with.
-#[cfg(unix)]
+/// A mesma gravação restrita e **atômica** da identidade e da lista de visitados.
+///
+/// # Por que ela passou a ser a de lá
+///
+/// Havia duas cópias desta função — esta e a de [`crate::identity`] — e elas
+/// divergiram: a de lá ganhou `sync_all` e esta não, e nenhuma das duas era
+/// atômica. R13 da revisão da v15 consertou a de lá; deixar esta como estava
+/// seria consertar metade de um defeito que aparece nos dois arquivos.
+///
+/// O estrago aqui é menor que o dos pins e não é nulo: este arquivo é reescrito
+/// **inteiro** a cada mudança — ver [`Preferences::write`] —, então uma escrita
+/// interrompida não perde uma preferência, perde todas.
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(bytes)
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    std::fs::write(path, bytes)
+    crate::identity::gravar_privado(path, bytes)
 }
 
 #[cfg(test)]

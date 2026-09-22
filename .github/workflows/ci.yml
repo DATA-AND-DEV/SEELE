@@ -62,6 +62,13 @@ jobs:
             name: linux
           - os: windows-2022
             name: windows
+          # **macOS, e é a lacuna que o R07 nomeia.** Esta matriz tinha dois
+          # sistemas e o produto anuncia três: o Mac só era compilado quando
+          # alguém já havia decidido lançar, no `release.yml`, onde nada
+          # reprovava. Todo o `captura/macos.rs` e o caminho de
+          # `SCStream` nunca foram vistos por nada automático.
+          - os: macos-15
+            name: macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +100,10 @@ jobs:
             name: linux
           - os: windows-2022
             name: windows
+          # Pelo mesmo motivo da matriz de clippy acima: três sistemas
+          # anunciados, três sistemas testados.
+          - os: macos-15
+            name: macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -183,4 +194,53 @@ jobs:
         # regression, the cost and that the permit acts; the reversal cycle is
         # what proves it holds under the load that caused the failure. Both
         # live in docs/evidencias/pendencia-29/arquivo-entregue/.
-        run: cargo test --workspace
+        #
+        # **E o teste de áudio local é pulado.**
+        #
+        # `laco::testes::a_saida_desta_maquina_abre_como_entrada` abre a saída
+        # desta máquina como entrada, e um runner sem placa de som não tem o que
+        # abrir: ele não reprova, ele **não termina**. A revisão da v15 registra
+        # a execução interrompida depois do aviso de 60 s — e uma suíte que
+        # pendura é uma suíte que alguém passa a ignorar.
+        #
+        # Por nome e não por categoria: a lista fica curta e visível, e o próximo
+        # teste que precise de hardware terá de ser nomeado aqui — que é a
+        # conversa certa a ter, em vez de um filtro largo engolindo os seguintes
+        # em silêncio.
+        run: cargo test --workspace -- --skip a_saida_desta_maquina_abre_como_entrada
+
+  # As bancadas de navegador, que nada automático rodava.
+  #
+  # # Por que elas precisam de um job
+  #
+  # R07 da revisão da v15: «o CI não executa as bancadas de navegador». Elas
+  # exercitam o HTML e os scripts de verdade, num Chromium de verdade — é onde os
+  # defeitos de interface desta revisão foram reproduzidos —, e viviam só na
+  # memória de quem lembrasse de digitar o comando.
+  #
+  # E havia a segunda metade, pior: cada bancada resolvia o Playwright com um
+  # caminho absoluto para `node_modules` de **outro repositório na máquina de uma
+  # pessoa**. Num checkout limpo todas morriam com `MODULE_NOT_FOUND`. O recuo
+  # saiu — ver `bancada/playwright.cjs` — e é este job que prova que ele saiu.
+  bancadas:
+    name: bancadas de navegador
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # `--no-save` porque este repositório não tem `package.json` e não vai
+      # ganhar um por causa disto: a dependência é de teste, de um job, e
+      # declarar um manifesto npm na raiz de um workspace Rust convida a uma
+      # segunda árvore de dependências que ninguém pediu.
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      # Cada bancada por nome, e não um laço sobre a pasta. Uma bancada nova tem
+      # de ser acrescentada aqui de propósito: um laço que rodasse tudo passaria
+      # a reprovar a CI no dia em que alguém guardasse um rascunho ali, e a
+      # resposta a isso seria tirar o laço.
+      - run: node apps/seele-app/bancada/compartilhar-por-identidade.cjs
+      - run: node apps/seele-app/bancada/conversa-com-estado.cjs
+      - run: node apps/seele-app/bancada/qualidade-da-voz.cjs
+      - run: node apps/seele-app/bancada/avatares-do-mod.cjs

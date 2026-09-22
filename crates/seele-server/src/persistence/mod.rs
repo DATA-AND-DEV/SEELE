@@ -115,6 +115,67 @@ pub struct Persistence {
     mods_mudaram: tokio::sync::watch::Sender<u64>,
 }
 
+/// O que «mensagem confirmada» promete sobreviver.
+///
+/// # Por que isto é uma escolha, e por que ela tem de estar escrita
+///
+/// R14 da revisão da v15. O código dizia «committed, therefore durable,
+/// therefore safe to announce» e configurava `synchronous = NORMAL` — e em
+/// WAL/NORMAL uma transação confirmada **pode ser revertida** depois de uma queda
+/// de energia ou do sistema operacional. É o comportamento documentado pelo
+/// SQLite, e é diferente de cair só o processo.
+///
+/// `specs/04-servidor-seele.md` pede «reinício não perde mensagem confirmada ao
+/// cliente», e «reinício» não distingue as duas coisas. Então a distinção passa a
+/// ser de quem hospeda, com o custo dito:
+///
+/// - [`Self::Normal`] sobrevive à queda **do processo**. É o padrão, e é a
+///   mesma troca que o agrupamento de escritas já faz: há uma janela de até 200 ms
+///   em que a mensagem foi aceita e não está no disco. Uma queda de energia pode
+///   levar as últimas transações;
+/// - [`Self::Completa`] sobrevive também a **reinício abrupto da máquina**, ao
+///   custo de um `fsync` por lote em vez de um por ponto de verificação.
+///
+/// **Não se mede o custo aqui.** O que este enum entrega é a escolha e a frase
+/// honesta; a medida do `fsync` por lote depende do disco de quem hospeda e é
+/// evidência de operação, não de teste de unidade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Durabilidade {
+    /// Sobrevive à queda do processo. `synchronous = NORMAL`. O padrão.
+    #[default]
+    Normal,
+    /// Sobrevive também a reinício abrupto da máquina. `synchronous = FULL`.
+    Completa,
+}
+
+impl Durabilidade {
+    /// O valor do `PRAGMA synchronous` que esta escolha quer dizer.
+    #[must_use]
+    pub const fn pragma(self) -> &'static str {
+        match self {
+            Self::Normal => "NORMAL",
+            Self::Completa => "FULL",
+        }
+    }
+
+    /// A frase que quem hospeda lê sobre o que está prometido.
+    ///
+    /// Aqui e não na casca porque a promessa é desta camada: uma casca que a
+    /// escrevesse por conta própria seria uma segunda descrição da mesma
+    /// garantia, esperando para discordar.
+    #[must_use]
+    pub const fn promessa(self) -> &'static str {
+        match self {
+            Self::Normal => {
+                "uma mensagem confirmada sobrevive ao aplicativo fechar ou travar;                  uma queda de energia pode levar os últimos segundos"
+            }
+            Self::Completa => {
+                "uma mensagem confirmada sobrevive também a desligar a máquina na                  tomada, ao custo de uma gravação forçada por lote"
+            }
+        }
+    }
+}
+
 impl Persistence {
     /// Opens the database and brings the schema up to date.
     ///
@@ -123,6 +184,16 @@ impl Persistence {
     /// Fails if the file cannot be opened, the pragmas cannot be set, or a
     /// migration fails.
     pub fn open(location: &Location) -> Result<Self> {
+        Self::abrir_com(location, Durabilidade::default())
+    }
+
+    /// O mesmo, dizendo o que «confirmada» promete. R14.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be opened, the pragmas cannot be set, or a
+    /// migration fails.
+    pub fn abrir_com(location: &Location, durabilidade: Durabilidade) -> Result<Self> {
         let connection = match location {
             Location::File(path) => Connection::open(path)
                 .with_context(|| format!("could not open {}", path.display()))?,
@@ -131,13 +202,8 @@ impl Persistence {
 
         // WAL, per specs/04. Readers do not block the writer, and a crash leaves
         // a recoverable log rather than a truncated file.
-        //
-        // `synchronous = NORMAL` is the WAL-appropriate setting: it fsyncs at
-        // checkpoints rather than at every commit. A power cut can lose the last
-        // transactions, which is the trade specs/04 already makes by batching
-        // writes at all.
         connection.pragma_update(None, "journal_mode", "WAL")?;
-        connection.pragma_update(None, "synchronous", "NORMAL")?;
+        connection.pragma_update(None, "synchronous", durabilidade.pragma())?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         // Without this a second writer fails instantly instead of waiting.
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -321,6 +387,49 @@ mod tests {
 
     fn memory() -> Persistence {
         Persistence::open(&Location::Memory).expect("in-memory database")
+    }
+
+    /// **A escolha de durabilidade chega ao pragma.** R14.
+    ///
+    /// Um enum que não mexesse no `PRAGMA synchronous` seria um interruptor
+    /// decorativo, e a frase de [`Durabilidade::promessa`] passaria a prometer o
+    /// que o banco não faz — que é pior que não ter a escolha.
+    #[test]
+    fn a_escolha_de_durabilidade_chega_ao_banco() {
+        for (escolha, esperado) in [
+            // `1` é NORMAL e `2` é FULL, como o SQLite os devolve.
+            (Durabilidade::Normal, 1_i64),
+            (Durabilidade::Completa, 2_i64),
+        ] {
+            let banco = Persistence::abrir_com(&Location::Memory, escolha).expect("abrir");
+            let lido: i64 = banco
+                .connection()
+                .query_row("PRAGMA synchronous", [], |row| row.get(0))
+                .expect("ler o pragma");
+            assert_eq!(
+                lido, esperado,
+                "a escolha {escolha:?} não chegou ao banco: a promessa de \
+                 `Durabilidade::promessa` passa a descrever outra coisa"
+            );
+        }
+    }
+
+    /// E o padrão é o que sobrevive à queda do **processo**, não da energia.
+    ///
+    /// Preso por escrito porque é a frase que o produto diz a quem hospeda. Se
+    /// alguém trocar o padrão, é aqui que a conversa acontece.
+    #[test]
+    fn o_padrao_sobrevive_ao_processo_e_nao_a_tomada() {
+        assert_eq!(Durabilidade::default(), Durabilidade::Normal);
+        assert_eq!(Durabilidade::Normal.pragma(), "NORMAL");
+        assert!(
+            Durabilidade::Normal.promessa().contains("energia"),
+            "a promessa do padrão deixou de dizer o que ele **não** cobre"
+        );
+        assert!(
+            Durabilidade::Completa.promessa().contains("tomada"),
+            "a promessa do modo completo deixou de dizer o que ele cobre a mais"
+        );
     }
 
     #[test]

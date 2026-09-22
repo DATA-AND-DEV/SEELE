@@ -41,6 +41,7 @@ pub mod playout;
 pub mod resample;
 pub mod rt;
 pub mod supervisor;
+pub mod supressao;
 pub mod telemetry;
 
 /// Sample rate used everywhere inside the pipeline, in hertz.

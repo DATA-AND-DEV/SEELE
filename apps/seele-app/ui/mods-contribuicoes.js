@@ -75,6 +75,7 @@
  */
 const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "pessoa.identidade": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
+  "pessoa.avatar": { modos: ["substituir"], perfil: null, porAlvo: true },
   "pessoa.cartao": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
   "pessoa.detalhes": { modos: ["adicionar"], perfil: "superficie", porAlvo: true },
   "pessoa.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
@@ -159,6 +160,15 @@ class RegistroDeContribuicoes {
         );
       }
       throw new Error(`«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);
+    }
+    // Um avatar é só uma origem de imagem, nunca uma árvore sobre os controles.
+    if (ponto === "pessoa.avatar" && (
+      pedido?.alvo === undefined || pedido?.alvo === null || String(pedido.alvo) === ""
+      || !pedido?.conteudo?.doServidor
+      || typeof pedido.conteudo.doServidor !== "object"
+      || Array.isArray(pedido.conteudo.doServidor)
+    )) {
+      throw new Error("pessoa.avatar exige alvo e conteudo.doServidor");
     }
     const quantas = this.porMod.get(mod.id) ?? 0;
     if (quantas >= TETO_DE_CONTRIBUICOES) {

@@ -1,0 +1,18 @@
+   Compiling seele-conformance v0.0.0 (/Users/dev-alexandre/SEELE/crates/seele-conformance)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.66s
+     Running tests/review_v15_probe.rs (target/debug/deps/review_v15_probe-8c9d62800413b6c1)
+
+running 5 tests
+CONFIRMED: invalid channel causes valid peer message in same batch to roll back
+test invalid_channel_rolls_back_other_peoples_messages ... ok
+CONFIRMED: duplicate id returns original body/id with new channel, absent from its history
+test idempotent_retry_uses_new_channel_in_broadcast ... ok
+CONFIRMED: revoked WriteChannel still permits a message in existing session
+test revoked_write_permission_stays_live_until_reconnect ... ok
+CONFIRMED: a session without ReadChannel received history
+test history_is_delivered_without_read_permission ... ok
+CONFIRMED: channel 1 message was added to state while channel 2 is open
+test old_channel_messages_enter_current_channel_state ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+

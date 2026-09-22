@@ -86,6 +86,15 @@ reqwest = { version = "0.13", default-features = false, features = [
 # Só para nomear o provedor de criptografia acima. Zero na árvore: o
 # `tauri-plugin-updater` já o traz, nesta versão.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Só `net` e `rt`, e **zero crate novo na árvore**: o `tauri` e o
+# `seele-server` já trazem o tokio inteiro, e este binário roda dentro do
+# runtime dele. Declarado direto porque a política de prévia do ADR 0053 precisa
+# resolver um nome **antes** de buscá-lo — ver `enderecos_publicos_de`.
+#
+# Resolver pelo `std::net::ToSocketAddrs` seria uma chamada bloqueante dentro de
+# um comando `async`, isto é, um trabalhador do runtime parado pelo tempo que o
+# resolvedor de DNS de outra pessoa quiser levar.
+tokio = { version = "1.53.1", features = ["net", "rt"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }

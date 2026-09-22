@@ -107,7 +107,21 @@ use thiserror::Error;
 /// **junto** do resto da sessão. Numa mensagem separada haveria um instante
 /// em que a sessão existe sem se saber de quem ela é — e é justamente nesse
 /// instante que o aceite de MODs e a escolha de raiz precisam decidir.
-pub const PROTOCOL_VERSION: u8 = 7;
+///
+/// **8 desde 21/09/2026**: uma mensagem de texto recusada volta identificada
+/// — `ServerMessage::MessageRejected`, com o `client_message_id` de quem
+/// escreveu e um [`crate::control::MessageRefusal`].
+///
+/// Variante nova, e o portão de `session::entende_a_mensagem` a cala para quem
+/// não a conhece: o postcard não é autodescritivo, e uma variante desconhecida
+/// não é ignorada — ela desloca a leitura do fluxo de controle daquele par para
+/// sempre.
+///
+/// Por que uma mensagem à parte e não um campo em algo existente: ela não é
+/// resposta a nenhum quadro que o servidor já mande. O envio é assíncrono por
+/// desenho — enfileira, agrupa, grava, difunde —, então a recusa chega depois,
+/// sozinha, e precisa dizer de qual mensagem fala.
+pub const PROTOCOL_VERSION: u8 = 8;
 
 /// How many past versions a peer accepts, beyond the current one.
 ///
@@ -261,17 +275,24 @@ mod tests {
         // um par v6 desalinhar o quadro, e aí prometer N−1 seria mentira — a
         // janela teria de cair para zero e toda máquina precisaria atualizar no
         // mesmo dia. Variante nova, um par v6 não a recebe e continua entrando.
-        assert_eq!(PROTOCOL_VERSION, 7);
-        assert_eq!(oldest_supported_version(), 6);
-        assert!(negotiate(5).is_err(), "a v5 saiu da janela N−1");
-        assert!(negotiate(6).is_ok());
+        //
+        // **E continua honesta na subida para 8, pelo mesmo motivo.** A recusa
+        // identificada de uma mensagem — `MessageRejected` — é variante nova, e
+        // `session::entende_a_mensagem` a cala para um par v7. Um par v7
+        // continua entrando, conversando e escrevendo; o que ele não recebe é a
+        // notícia de que uma mensagem dele foi recusada, que é exatamente o que
+        // ele não recebia antes desta versão.
+        assert_eq!(PROTOCOL_VERSION, 8);
+        assert_eq!(oldest_supported_version(), 7);
+        assert!(negotiate(6).is_err(), "a v6 saiu da janela N−1");
+        assert!(negotiate(7).is_ok());
         assert!(
-            negotiate(4).is_err(),
-            "a v4 foi aceita: a janela voltou a prometer o que o carimbo não \
+            negotiate(5).is_err(),
+            "a v5 foi aceita: a janela voltou a prometer o que o carimbo não \
              entrega"
         );
-        assert!(negotiate(7).is_ok());
-        assert!(negotiate(8).is_err(), "um cliente do futuro foi aceito");
+        assert!(negotiate(8).is_ok());
+        assert!(negotiate(9).is_err(), "um cliente do futuro foi aceito");
     }
 
     /// A prova de que a subida é **uma só** para as duas entregas.
@@ -283,8 +304,8 @@ mod tests {
     /// anúncio, que esperava por ela, passou a alcançar.
     #[test]
     fn a_api_de_pedidos_preserva_o_limiar_do_anuncio_original() {
-        assert_eq!(PROTOCOL_VERSION, 7);
-        assert_eq!(oldest_supported_version(), 6);
+        assert_eq!(PROTOCOL_VERSION, 8);
+        assert_eq!(oldest_supported_version(), 7);
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
             5,

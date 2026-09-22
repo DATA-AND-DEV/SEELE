@@ -781,7 +781,10 @@ contexto.cartoesDosMods = new Map();
     for (const modo of regra.modos) {
       let erro = null;
       try {
-        registro.registrar({ id: "mod/a" }, dono, { ponto, modo, alvo: "1" });
+        registro.registrar({ id: "mod/a" }, dono, {
+          ponto, modo, alvo: "1",
+          ...(ponto === "pessoa.avatar" ? { conteudo: { doServidor: { canal: 1, pedido: {} } } } : {}),
+        });
       } catch (falha) {
         erro = falha;
       }

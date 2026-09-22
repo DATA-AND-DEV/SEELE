@@ -215,6 +215,51 @@ pub enum AttachmentRefusal {
     Malformed,
 }
 
+/// Por que uma mensagem de texto não foi gravada.
+///
+/// # Por que ela precisa existir
+///
+/// Porque sem ela «não foi gravada» não tinha como chegar a quem escreveu. O
+/// `Alert`/`PermissionDenied` da recusa global não diz **qual** mensagem, e a
+/// confirmação de que uma mensagem existe é o `MessageReceived` que volta com o
+/// `client_message_id` dela — então a ausência de confirmação era a única
+/// notícia do fracasso, e ausência não é notícia: o texto tinha sumido do campo
+/// antes de qualquer resposta (R05 da revisão da v15).
+///
+/// Uma variante por motivo, como em [`AttachmentRefusal`], e pela mesma razão:
+/// `PermissionDenied` volta ao pedir de novo daqui a um instante e
+/// [`Self::NoSuchChannel`] nunca volta. Uma frase única deixaria a casca
+/// tentando de novo para sempre o que jamais vai passar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MessageRefusal {
+    /// Sem [`Permission::WriteChannel`], ou sem o papel mínimo deste canal.
+    ///
+    /// Lida no instante do envio e não no aperto de mão: uma sessão viva cuja
+    /// escrita foi revogada escreve até reconectar, e isso era o R08.
+    PermissionDenied,
+    /// O canal não está no banco deste servidor.
+    ///
+    /// Apagado enquanto a mensagem viajava, ou nunca existente. Conferido
+    /// **antes** de enfileirar: é o destino inválido de uma pessoa que fazia o
+    /// lote inteiro de outras falhar na chave estrangeira (R04).
+    NoSuchChannel,
+    /// O corpo passa de [`MAX_BODY_LEN`] **bytes**.
+    ///
+    /// Carrega o teto porque «longo demais» sem número manda alguém cortar no
+    /// escuro — e o descompasso que isto conserta era exatamente de unidade: a
+    /// janela contava caracteres e o contrato conta bytes, então 3.000 letras
+    /// `á` caíam de um teto que a tela dizia caber.
+    TooLong {
+        /// O maior corpo que este servidor aceita, em bytes.
+        limit: u32,
+    },
+    /// O armazenamento não aceitou a gravação.
+    ///
+    /// Transitória por natureza — disco cheio, banco travado. Distinta das de
+    /// cima porque esta é a única em que tentar de novo é a coisa certa a fazer.
+    StorageFailed,
+}
+
 /// Length of an Ed25519 public key, in bytes. ADR 0004.
 pub const PUBLIC_KEY_LEN: usize = 32;
 
@@ -808,6 +853,31 @@ pub enum AlertReason {
         /// Nunca zero: sem medida não há aviso, porque «não sei» não vira
         /// número inventado.
         medido_bps: u32,
+    },
+
+    /// A retenção deste servidor apagou histórico. R15, protocolo 8.
+    ///
+    /// # Por que ela precisa chegar a quem está com a tela aberta
+    ///
+    /// Porque a limpeza apaga por idade, do servidor, sem ninguém pedir. Uma
+    /// casca com a última página na tela continua mostrando mensagens que já não
+    /// existem, e a próxima busca de histórico as perde sem uma palavra — que é o
+    /// defeito desta casa, o produto sabendo e não contando.
+    ///
+    /// Vai para todo mundo e sem filtro de canal: a janela é por idade e
+    /// atravessa os canais.
+    ///
+    /// Acrescentada depois de `VoiceRoomOverHostUplink`, pela razão que
+    /// [`Self::RateLimited`] dá — um ordinal novo no fim não desloca os que já
+    /// existem. E calada para um par v7 pelo portão de
+    /// `session::entende_a_mensagem`: ele não conhece este ordinal, e o postcard
+    /// não ignora o que não conhece.
+    RetencaoApagouHistorico {
+        /// Quantas linhas saíram.
+        ///
+        /// Um número e não uma frase, como todo motivo desta lista: a casca
+        /// escreve a sentença, para poder traduzi-la (ADR 0012).
+        apagadas: u64,
     },
 }
 
@@ -2196,6 +2266,24 @@ pub enum ServerMessage {
         /// Por quê, de uma lista fechada.
         motivo: crate::volume::VolumeRefusal,
     },
+    /// **Esta** mensagem não foi gravada, e por quê.
+    ///
+    /// A v8, e ela é a metade que faltava do envio de texto. A confirmação já
+    /// existia — o `MessageReceived` volta com o `client_message_id` de quem
+    /// escreveu — e a recusa não tinha como voltar identificada: um
+    /// `Alert`/`PermissionDenied` não diz de qual mensagem fala, e uma falha de
+    /// gravação não dizia nada a ninguém.
+    ///
+    /// Vai só para quem mandou. É por isso que ela não carrega autor: quem a
+    /// recebe é o autor.
+    MessageRejected {
+        /// O canal a que a mensagem se destinava.
+        channel: ChannelId,
+        /// A chave que quem escreveu escolheu, e por onde a casca a encontra.
+        client_message_id: ClientMessageId,
+        /// Por quê, de uma lista fechada.
+        reason: MessageRefusal,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2758,6 +2846,11 @@ impl Validate for ServerMessage {
             Self::VolumeRecusado { token, .. } => {
                 check("volume_token", token.len(), crate::volume::MAX_TOKEN_LEN)
             }
+            // Três campos e nenhum de tamanho variável: dois identificadores e
+            // um enumerado. Não há o que conferir, e escrever isto em vez de
+            // cair num `_ =>` é o que faz o compilador cobrar a próxima
+            // variante.
+            Self::MessageRejected { .. } => Ok(()),
         }
     }
 }
@@ -4432,7 +4525,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            39,
+            40,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4453,9 +4546,17 @@ mod o_vocabulario_e_a_versao {
         // uma variante a ela não deixa par nenhum para trás. Quem fala 6
         // continua sem recebê-la, pela mesma porta de sempre —
         // `entende_a_mensagem`.
+        //
+        // **40 pela `MessageRejected`**, em 21/09/2026, e com ela a versão subiu
+        // para 8: um par v7 **existe** — é a v0.14.x publicada —, então ela não
+        // pôde pegar carona numa versão que ninguém tem. Variante e não campo,
+        // pela mesma razão da `Instancia`: um campo novo numa variante existente
+        // desalinharia o quadro de um par v7 para sempre, e a janela N−1
+        // deixaria de ser honesta. A lista do cliente não mudou — a recusa é
+        // resposta, e quem responde é o servidor.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            7,
+            8,
             "a versão do protocolo mudou; confira se os ordinais acima, a janela \
              de compatibilidade e `mods::VERSAO_DO_ANUNCIO` continuam contando a \
              mesma história"

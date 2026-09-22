@@ -115,22 +115,25 @@ function desenharChamada(snapshot) {
  *   1. **quem** está compartilhando, que é o consentimento da §4 da spec de
  *      22/08 aparecendo em algum lugar — no Windows a captura do sistema não
  *      pergunta nada a ninguém, e esta linha é o único aviso que existe;
- *   2. **o que está saindo agora, ao lado do que foi pedido** (§5). Escolher
- *      1080p e receber 720p não é defeito; esconder que aconteceu, é;
- *   3. **a razão**, `720p · 6 pessoas assistindo` (§5.1). O gatilho da
- *      resolução é o teto e não a contagem de gente — resolução não controla
- *      tráfego —, mas quem lê quer previsibilidade, e a contagem é a metade do
- *      pedido que estava certa.
+ *   2. **quantas pessoas recebem**, como o servidor conta — `ScreenViewers`, o
+ *      mesmo N pelo qual ele divide o teto no §5.1;
+ *   3. **os controles desta transmissão**: o som dela, separado do das pessoas,
+ *      e parar de assistir.
  *
- * O que **não** mora aqui é a imagem. O contrato entre a ponte e esta casca
- * carrega os números da transmissão e nenhum quadro, então esta janela não tem
- * por onde desenhar a tela de outra pessoa — e a nota do palco diz isso em vez
- * de deixar uma moldura preta parecendo uma transmissão travada.
+ * # O que saiu daqui no R20
  *
- * `nomeDaResolucao` vem de `camada-compartilhar.js`. O que foi **pedido** já não
- * vem de lá: `tela.pedido` atravessa no próprio `Snapshot`, ao lado do que está
- * saindo, porque uma memória guardada nesta janela morria com ela — e uma
- * recarga no meio de uma transmissão apagava metade da comparação do §5.
+ * O item 2 era «o que está saindo agora, ao lado do que foi pedido» (§5), e a
+ * coluna da esquerda nunca teve número: nada nesta ponte mede resolução, quadros
+ * ou banda. Três caixas escreviam «ainda não há medida» sobre o vídeo, para
+ * sempre. Elas voltam quando houver medida de verdade, ligadas à transmissão
+ * certa — ver a nota em `TelaEmCurso`.
+ *
+ * A contagem também mudou de fonte: era o roster desta máquina menos quem
+ * compartilha, e incluía quem escolheu não assistir.
+ *
+ * **`snapshot.tela` é a que esta pessoa está assistindo**, e `minha_transmissao`
+ * é a que ela está mandando. As duas podem existir ao mesmo tempo, e antes do
+ * ADR 0054 havia um campo só, preenchido com a primeira transmissão da sala.
  */
 function desenharPalco(snapshot, voice_room) {
   const palco = $("palco");
@@ -164,7 +167,7 @@ function desenharPalco(snapshot, voice_room) {
     // e com o controle de tela disponível nesta máquina.
     $("palco-compartilhar").hidden = !voice_room || !temControleDeTela();
     $("palco-parada").hidden = true;
-    $("palco-numeros").hidden = true;
+    $("palco-controles").hidden = true;
     $("palco-aperto").hidden = true;
     botaoDeCinema(false);
     return;
@@ -182,13 +185,14 @@ function desenharPalco(snapshot, voice_room) {
       ? `${dono.nickname} ESTÁ COMPARTILHANDO A TELA`
       : "ALGUÉM DESTA SALA ESTÁ COMPARTILHANDO A TELA";
 
-  // `720p · 6 pessoas assistindo` quando há a medida, e só a contagem quando
-  // não há: `0p` é o que a ponte manda enquanto ninguém mede o que está saindo,
-  // e escrevê-lo seria a mentira confiante que `TelaEmCurso::medida` existe
-  // para não produzir.
-  $("palco-razao").textContent = tela.medida
-    ? `${nomeDaResolucao(tela.altura)} · ${assistindo(tela.espectadores)}`
-    : assistindo(tela.espectadores);
+  // Só a contagem, e ela é a do **servidor**: `ScreenViewers` conta assinaturas
+  // de verdade. A resolução saiu daqui junto com as três caixas de métrica — ela
+  // nunca foi medida, e `0p` era o que a ponte mandava. Ver R20.
+  //
+  // A contagem que estava aqui era o roster desta máquina menos quem
+  // compartilha, e incluía quem escolheu não assistir: duas contagens para a
+  // mesma pergunta, discordando. Ver `TelaEmCurso::espectadores`.
+  $("palco-razao").textContent = assistindo(tela.espectadores);
 
   // As duas frases diziam que a imagem não aparecia aqui, e diziam a verdade
   // até a imagem passar a aparecer. A de quem transmite ainda tem o que
@@ -208,73 +212,63 @@ function desenharPalco(snapshot, voice_room) {
   parada.hidden = !tela.parada;
   parada.textContent = tela.parada ? (PARADAS[tela.parada] ?? "A TELA PAROU") : "";
 
-  desenharNumerosDoPalco(tela);
+  desenharControlesDoPalco(tela);
+  desenharSomDoPalco().catch((falha) => console.warn("som do palco:", falha));
   botaoDeCinema(true);
 }
 
 /**
- * O que está saindo agora, ao lado do que foi pedido.
+ * A barra compacta do palco: o som desta transmissão, e parar de assistir.
  *
- * A coluna do pedido **some** para quem só assiste, e não vira travessão: o
- * teto é a escolha de outra pessoa e não atravessa em lugar nenhum, então não é
- * um buraco na resposta a uma pergunta que esta tela fez — é uma pergunta que
- * ela não tem por que fazer. Para quem compartilha ela fica, inclusive vazia,
- * porque aí a pergunta é legítima e a falta tem motivo escrito.
+ * # O que saiu daqui, e por quê
+ *
+ * `desenharNumerosDoPalco` escrevia três caixas — resolução, quadros, banda —
+ * com o que está saindo ao lado do que foi pedido. **A coluna da esquerda nunca
+ * teve número**: `medida` chegava `false` em toda transmissão, porque nada nesta
+ * ponte alcança o codificador de quem transmite nem a recepção de quem assiste.
+ * As três diziam «ainda não há medida desta transmissão», para sempre, numa área
+ * própria sobre o vídeo. R20 da revisão da v15, e a decisão é a dela: tirar o
+ * espaço vazio enquanto não há medição.
+ *
+ * O que fica é o que se sabe e o que se controla.
  */
-function desenharNumerosDoPalco(tela) {
-  $("palco-numeros").hidden = false;
+function desenharControlesDoPalco(tela) {
+  const controles = $("palco-controles");
+  if (!controles) return;
+  // Quem transmite não assiste a si mesmo pelo servidor: não há som chegando
+  // para silenciar nem assinatura para largar. A barra some, e o palco vira só
+  // o espelho do que está saindo.
+  controles.hidden = Boolean(tela.e_minha);
+}
 
-  // `medida` é o que separa «está saindo a 720p» de «ninguém mediu o que está
-  // saindo». Os três são `u32` e vêm zerados enquanto ninguém os mede; escrever
-  // `0p` ali seria dizer que a transmissão está em zero pixel de altura.
-  if (tela.medida) {
-    medido($("palco-altura"), nomeDaResolucao(tela.altura));
-    medido($("palco-quadros"), `${tela.quadros}/s`);
-    medido($("palco-banda"), `${tela.kbps} kbps`);
-  } else {
-    const motivo = "ainda não há medida desta transmissão";
-    naoMedido($("palco-altura"), motivo);
-    naoMedido($("palco-quadros"), motivo);
-    naoMedido($("palco-banda"), motivo);
+/**
+ * O volume e o mudo desta transmissão, lidos do Rust.
+ *
+ * Lidos e não guardados aqui: a escolha vive do lado que sobrevive à janela, e
+ * duas cópias da mesma escolha são duas cópias que discordam depois de uma
+ * recarga. Ver o ADR 0054.
+ */
+async function desenharSomDoPalco() {
+  const mudo = $("palco-mudo");
+  const volume = $("palco-volume");
+  if (!mudo || !volume) return;
+  let som = null;
+  try {
+    som = await invoke("som_da_tela");
+  } catch (falha) {
+    if (falha !== "NotConnected") console.warn("som da tela:", falha);
   }
-
-  for (const lado of document.querySelectorAll(".chamada-palco-pedido")) {
-    lado.hidden = !tela.e_minha;
+  if (!som) return;
+  mudo.setAttribute("aria-pressed", som.calada ? "true" : "false");
+  mudo.textContent = som.calada ? "OUVIR" : "SILENCIAR";
+  mudo.title = som.calada
+    ? "voltar a ouvir esta transmissão; as pessoas continuam como estão"
+    : "calar só esta transmissão; você continua ouvindo as pessoas";
+  // O controle só é reescrito quando não está sendo arrastado: escrever nele a
+  // cada volta de telemetria tiraria o polegar do dedo de quem o move.
+  if (document.activeElement !== volume) {
+    volume.value = String(Math.round(som.volume * 100));
   }
-
-  // `tela.pedido` já vem `null` para quem só assiste — o teto é escolha de quem
-  // compartilha e não viaja no fio —, então não há o que ramificar aqui.
-  const pedido = tela.pedido ?? null;
-  if (tela.e_minha && !pedido) {
-    const motivo = "esta sessão não escolheu os limites desta transmissão";
-    naoMedido($("palco-altura-pedida"), motivo);
-    naoMedido($("palco-quadros-pedidos"), motivo);
-    naoMedido($("palco-banda-pedida"), motivo);
-  } else if (pedido) {
-    medido($("palco-altura-pedida"), nomeDaResolucao(pedido.altura_maxima));
-    medido($("palco-quadros-pedidos"), `${pedido.quadros_maximos}/s`);
-    medido(
-      $("palco-banda-pedida"),
-      pedido.banda_bps === null ? "sem teto seu" : `${Math.round(pedido.banda_bps / 1000)} kbps`,
-    );
-  }
-
-  // E quando aperta, a tela diz que apertou e por quê (§5.1). Sem esta linha o
-  // que sobra são dois números diferentes lado a lado e nenhuma explicação de
-  // qual é o certo — que é o produto sabendo algo que quem está na frente dele
-  // não sabe.
-  const aperto = $("palco-aperto");
-  const abaixo =
-    tela.medida &&
-    pedido !== null &&
-    (tela.altura < pedido.altura_maxima ||
-      tela.quadros < pedido.quadros_maximos ||
-      (pedido.banda_bps !== null && tela.kbps * 1000 < pedido.banda_bps));
-  aperto.hidden = !abaixo;
-  aperto.textContent = abaixo
-    ? "Está saindo menos do que você pediu: a conexão não dá conta de mandar " +
-      "mais para todo mundo que está assistindo."
-    : "";
 }
 
 /** `6 pessoas assistindo`, e as duas contagens que não pluralizam assim. */
@@ -881,3 +875,44 @@ listen("seele://event", (evento) => {
 setInterval(() => {
   if (!$("vista-chamada").hidden) atualizarChamada();
 }, 500);
+
+// ---------------------------------------------------- os controles do palco
+//
+// R17 e R20. Registrados uma vez, no carregamento: o palco é redesenhado duas
+// vezes por segundo, e um ouvinte por desenho seria um ouvinte jogado fora a
+// cada volta.
+
+$("palco-mudo").addEventListener("click", async () => {
+  const botao = $("palco-mudo");
+  const calada = botao.getAttribute("aria-pressed") !== "true";
+  try {
+    await invoke("calar_a_tela", { calada });
+  } catch (falha) {
+    console.warn("calar a tela:", falha);
+  }
+  await desenharSomDoPalco();
+});
+
+// `input` e não `change`: o volume é um controle contínuo, e esperar a soltura
+// faria a pessoa arrastar no escuro.
+$("palco-volume").addEventListener("input", (evento) => {
+  const volume = Number(evento.target.value) / 100;
+  invoke("ajustar_volume_da_tela", { volume }).catch((falha) =>
+    console.warn("volume da tela:", falha),
+  );
+  // Mexer no volume desfaz o mudo: é o gesto dizendo «quero ouvir isto». Sem
+  // isto, arrastar o volume com o som calado não faria nada e a pessoa leria
+  // o controle como quebrado.
+  if (volume > 0 && $("palco-mudo").getAttribute("aria-pressed") === "true") {
+    invoke("calar_a_tela", { calada: false })
+      .then(desenharSomDoPalco)
+      .catch((falha) => console.warn("calar a tela:", falha));
+  }
+});
+
+// **«Parar de assistir», e o nome é a decisão.** Encerra vídeo e áudio daquela
+// transmissão; a conversa de voz continua. Quem chama é `palco-imagem.js`, que
+// é quem guarda a intenção — ver `pararDeVer`.
+$("palco-parar-de-assistir").addEventListener("click", () => {
+  window.dispatchEvent(new CustomEvent("seele:parar-de-assistir"));
+});

@@ -633,6 +633,133 @@
   overflow-wrap: anywhere;
 }
 
+/* ---------- os controles de qualidade de voz (F01, F02) ----------
+
+   Um marcador, uma régua e um medidor. Zero border-radius e zero sombra, como o
+   resto: o que distingue estados aqui é cor **e** texto, nunca cor sozinha. */
+.server-marcar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+}
+
+.server-regua {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.server-regua input[type="range"] {
+  flex: 1 1 160px;
+  min-width: 120px;
+  accent-color: var(--seele-laranja-nerv);
+}
+
+.server-regua-valor {
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-fosforo);
+  flex: 0 0 auto;
+}
+
+/* O medidor: uma barra do nível e uma marca de onde a transmissão abre.
+
+   A marca é o ponto. Um medidor sem ela é uma barra que se mexe; o que a pessoa
+   está ajustando é **onde** ela corta, e sem a marca ela ajusta no escuro. */
+.server-nivel-da-voz {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.server-nivel-barra {
+  position: relative;
+  height: 14px;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  background: var(--seele-negro-absoluto);
+  overflow: hidden;
+}
+
+.server-nivel-preenchido {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--seele-osso-apagado);
+  transition: width 60ms linear;
+}
+
+/* Transmitindo é laranja, e a frase ao lado diz a palavra: quem não distingue as
+   duas cores lê `TRANSMITINDO` do mesmo jeito.
+
+   O estado mora **na própria barra** e não no contêiner, e a razão é um guarda:
+   `no_class_is_drawn_by_two_stylesheets_without_being_a_declared_refinement`
+   conta `.server-nivel-da-voz` como definida duas vezes se ela aparecer também num
+   seletor de descendente. O guarda está certo — o que vale na tela é a soma das
+   regras — e a forma certa é o estado ficar no elemento que ele pinta. */
+.server-nivel-preenchido[data-aberto="sim"] {
+  background: var(--seele-laranja-nerv);
+}
+
+.server-nivel-corte {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--seele-fosforo);
+}
+
+/* ---------- uma lista de itens com uma ação cada ----------
+
+   ADR 0053, e usada pelos domínios de prévia liberados. Cada linha é um item e
+   um botão de desfazer: o valor à esquerda, a ação à direita, como no
+   `.server-par`. Zero marcador de lista — o item é um dado, não um argumento. */
+.server-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.server-lista-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+.server-lista-valor {
+  font-size: var(--seele-t-dado);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.server-lista-acao {
+  background: transparent;
+  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.server-lista-acao:hover,
+.server-lista-acao:focus-visible {
+  border-color: var(--seele-laranja-nerv);
+  color: var(--seele-laranja-nerv);
+}
+
 /* ---------- o que ainda não tem comando atrás ----------
    Um controle desabilitado aqui é a exceção, não a convenção: esta tela omite o
    que não existe em vez de desenhá-lo morto. O que sobra desabilitado é o que

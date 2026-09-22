@@ -4998,6 +4998,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-updater",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -5010,6 +5011,7 @@ dependencies = [
  "audioadapter-buffers",
  "cpal",
  "criterion",
+ "realfft",
  "rtrb",
  "rubato",
  "seele-proto",

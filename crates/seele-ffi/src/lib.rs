@@ -50,10 +50,12 @@ use seele_core::{
 
 pub use types::{
     Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight, ConnectionError,
-    EndReason, EstadoDoAparelho, Event, FonteDeTela, LimitesDeTela, LinkState, LinkTrust, Message,
+    ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio, EstadoDoTesteDeMicrofone, Event,
+    ExclusaoDoSom, FonteDeTela, LimitesDeTela, LinkState, LinkTrust, Message, MotivoDaRecusa,
     Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
-    PreviewRefusal, PreviewRules, Severity, SignalBand as Band, Snapshot, TelaEmCurso, Telemetry,
-    Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
+    PreviewRefusal, PreviewRules, Severity, SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso,
+    Telemetry, Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync,
+    VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -101,6 +103,99 @@ pub fn capture_devices() -> Vec<CaptureDevice> {
             default: found.default,
         })
         .collect()
+}
+
+/// A sensibilidade padrão da ativação por voz **com** redução de ruído, em dBFS.
+///
+/// F01, e o número vem do núcleo: uma cópia escrita aqui seria uma segunda
+/// decisão sobre a mesma régua, esperando para discordar.
+pub const ABERTURA_COM_SUPRESSAO_DBFS: f32 = seele_core::ABERTURA_COM_SUPRESSAO_DBFS;
+
+/// A sensibilidade padrão da ativação por voz **sem** redução de ruído, em dBFS.
+///
+/// Ver [`ABERTURA_COM_SUPRESSAO_DBFS`]: os dois padrões existem porque o alvo de
+/// −60 dBFS de F01 é do caminho com filtro.
+pub const ABERTURA_SEM_SUPRESSAO_DBFS: f32 = seele_core::ABERTURA_SEM_SUPRESSAO_DBFS;
+
+/// O extremo sensível da faixa de sensibilidade, em dBFS.
+pub const ABERTURA_MINIMA_DBFS: f32 = *seele_core::FAIXA_DE_ABERTURA_DBFS.start();
+
+/// O extremo surdo da faixa de sensibilidade, em dBFS.
+pub const ABERTURA_MAXIMA_DBFS: f32 = *seele_core::FAIXA_DE_ABERTURA_DBFS.end();
+
+/// Um teste de microfone em curso, sem sessão nenhuma. F01.
+///
+/// # Por que ele é livre, como a lista de aparelhos
+///
+/// Pela mesma razão que [`capture_devices`]: testar o microfone é algo que se faz
+/// **antes** de conectar pelo menos tanto quanto durante. Pendurá-lo numa sessão
+/// viva poria o controle atrás da porta que ele existe para abrir — a pessoa teria
+/// de entrar em algum lugar para descobrir que o microfone estava mudo.
+///
+/// Largar esta alça encerra o teste.
+#[derive(Debug)]
+pub struct TesteDeMicrofone {
+    dentro: seele_core::teste_de_microfone::TesteDeMicrofone,
+}
+
+impl TesteDeMicrofone {
+    /// Abre o microfone e começa a medir.
+    ///
+    /// `captura` e `saida` são ids de [`capture_devices`] e [`playback_devices`];
+    /// `None` é o aparelho padrão da máquina. `supressao` e `abertura_dbfs` são os
+    /// mesmos controles da conversa — o teste tem de medir a régua que vale lá.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NoAudioDevice`] quando não há microfone ou o aparelho
+    /// escolhido sumiu.
+    pub fn abrir(
+        captura: Option<String>,
+        saida: Option<String>,
+        supressao: f32,
+        abertura_dbfs: Option<f32>,
+    ) -> Result<Self, ConnectionError> {
+        let escolha = seele_core::DeviceChoice {
+            capture: captura,
+            playback: saida,
+        };
+        seele_core::teste_de_microfone::TesteDeMicrofone::abrir(&escolha, supressao, abertura_dbfs)
+            .map(|dentro| Self { dentro })
+            .map_err(|erro| {
+                tracing::warn!(%erro, "o teste de microfone não abriu");
+                ConnectionError::NoAudioDevice
+            })
+    }
+
+    /// O que o teste tem a contar agora.
+    #[must_use]
+    pub fn estado(&self) -> EstadoDoTesteDeMicrofone {
+        let dentro = self.dentro.estado();
+        EstadoDoTesteDeMicrofone {
+            nivel_dbfs: dentro.nivel_dbfs,
+            aberto: dentro.aberto,
+            aberturas: dentro.aberturas,
+            quadros_retidos: dentro.quadros_retidos,
+            corte_dbfs: dentro.corte_dbfs,
+            monitorando: self.dentro.monitorando(),
+            falha: self.dentro.falha(),
+        }
+    }
+
+    /// Liga ou desliga ouvir o próprio microfone. Começa desligado.
+    pub fn set_monitorar(&self, ligado: bool) {
+        self.dentro.set_monitorar(ligado);
+    }
+
+    /// Troca a força da supressão sem reabrir o aparelho. F02.
+    pub fn set_supressao(&self, forca: f32) {
+        self.dentro.set_supressao(forca);
+    }
+
+    /// Troca a sensibilidade sem reabrir o aparelho. F01.
+    pub fn set_abertura_dbfs(&self, dbfs: Option<f32>) {
+        self.dentro.set_abertura_dbfs(dbfs);
+    }
 }
 
 /// Every place this machine will play sound, right now.
@@ -528,6 +623,13 @@ enum Command {
     Send {
         channel: ChannelId,
         body: String,
+        /// A chave escolhida por quem pediu o envio.
+        ///
+        /// Escolhida **antes** do comando e carregada nele, e não sorteada no
+        /// laço: é ela que liga a pendente desenhada na tela à confirmação que
+        /// volta, e um número sorteado aqui dentro seria um número que a casca
+        /// não tem como esperar. Ver [`Connection::send_message`].
+        id: ClientMessageId,
     },
     SetMuted(bool),
     SetTotalIsolation(bool),
@@ -656,6 +758,40 @@ enum Command {
         assiste_por_par: bool,
     },
     Shutdown,
+}
+
+/// Qual transmissão esta sessão escolheu assistir. ADR 0054.
+///
+/// # Três estados, e são três de propósito
+///
+/// A ausência de escolha e a escolha de não ver **não são a mesma coisa**, e
+/// tratá-las como uma custou um defeito de campo: «cliquei pra não ver, ele fecha
+/// e depois abre novamente sozinho».
+///
+/// - [`Self::NinguemEscolheu`] — o servidor decide, e ele liga todo mundo na
+///   primeira transmissão da sala. É o certo para quem não disse nada: ninguém
+///   quer clicar para ver a única coisa que está acontecendo.
+/// - [`Self::Nenhuma`] — escolheu **não** ver. Vale contra o religar do servidor.
+/// - [`Self::Esta`] — escolheu esta, e a imagem pode ainda não ter chegado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EscolhaDeTela {
+    /// Ninguém escolheu. O religar automático do servidor vale.
+    NinguemEscolheu,
+    /// Escolheu não assistir nenhuma.
+    Nenhuma,
+    /// Escolheu esta.
+    Esta(seele_core::ScreenId),
+}
+
+impl EscolhaDeTela {
+    /// O `ScreenId` escolhido, se houver um.
+    #[must_use]
+    pub const fn tela(self) -> Option<seele_core::ScreenId> {
+        match self {
+            Self::Esta(tela) => Some(tela),
+            Self::NinguemEscolheu | Self::Nenhuma => None,
+        }
+    }
 }
 
 /// State the driver thread writes and the shell reads.
@@ -798,6 +934,20 @@ struct Shared {
     /// casca já escrevia do lado dela: guardá-lo faria o painel da próxima
     /// comparar o que está saindo agora com um teto de outra vez.
     limites_da_tela: Mutex<Option<LimitesDeTela>>,
+    /// Qual transmissão esta sessão escolheu assistir, e em que estado a escolha
+    /// está. ADR 0054.
+    ///
+    /// # Por que ela mora aqui, e não na janela
+    ///
+    /// Porque a janela é descartável e a sessão não. A escolha vivia numa
+    /// variável de JavaScript (`telaQuerida`), então uma recarga no meio de uma
+    /// sessão a perdia — e com ela a marca do botão, o controle de som daquela
+    /// tela e a resposta a «qual delas é esta». Deste lado ela sobrevive à
+    /// janela, e é deste lado que o servidor pergunta.
+    ///
+    /// Os três estados são os mesmos que a janela já distinguia, e continuam
+    /// sendo três de propósito — ver [`EscolhaDeTela`].
+    tela_escolhida: Mutex<EscolhaDeTela>,
     /// A última lista de fontes que [`Connection::fontes_de_tela`] devolveu.
     ///
     /// **Existe porque o número que a casca devolve é o índice desta lista**, e
@@ -863,6 +1013,48 @@ impl Shared {
     /// ninguém consegue mais afirmar.
     fn pedido_da_tela(&self) -> Option<LimitesDeTela> {
         self.limites_da_tela.lock().ok().and_then(|g| *g)
+    }
+
+    /// Qual transmissão esta sessão escolheu assistir. ADR 0054.
+    ///
+    /// Um cadeado envenenado responde [`EscolhaDeTela::NinguemEscolheu`], que é o
+    /// comportamento de antes de haver escolha: o servidor decide.
+    fn tela_escolhida(&self) -> EscolhaDeTela {
+        self.tela_escolhida
+            .lock()
+            .map_or(EscolhaDeTela::NinguemEscolheu, |escolha| *escolha)
+    }
+
+    /// Guarda a escolha, e devolve se ela mudou.
+    fn gravar_tela_escolhida(&self, escolha: EscolhaDeTela) -> bool {
+        let Ok(mut guardada) = self.tela_escolhida.lock() else {
+            return false;
+        };
+        if *guardada == escolha {
+            return false;
+        }
+        *guardada = escolha;
+        true
+    }
+
+    /// Esquece a escolha quando a transmissão escolhida saiu do ar. ADR 0054.
+    ///
+    /// **Volta a `NinguemEscolheu`, e não a `Nenhuma`.** A diferença é o defeito
+    /// que a distinção entre os dois estados existe para evitar: `Nenhuma` é uma
+    /// recusa que vale contra o religar do servidor, e herdá-la de uma
+    /// transmissão que acabou faria a próxima a começar ser recusada por uma
+    /// decisão que ninguém tomou sobre ela.
+    fn esquecer_tela_que_saiu(&self) {
+        let Some(escolhida) = self.tela_escolhida().tela() else {
+            return;
+        };
+        let ainda_existe = self
+            .room
+            .lock()
+            .is_ok_and(|room| room.telas.contains_key(&escolhida));
+        if !ainda_existe {
+            let _ = self.gravar_tela_escolhida(EscolhaDeTela::NinguemEscolheu);
+        }
     }
 
     /// O estado do enlace como a casca o vê.
@@ -1132,6 +1324,7 @@ impl Connection {
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
+            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             fontes_de_tela: Mutex::new(Vec::new()),
         });
 
@@ -1327,19 +1520,144 @@ impl Connection {
         }
     }
 
+    /// O maior corpo que o servidor aceita, **em bytes**.
+    ///
+    /// # Por que a casca precisa deste número
+    ///
+    /// Porque ela tinha o próprio, e o dela contava outra coisa. O campo da
+    /// janela aceitava 4.000 **unidades de texto** e o contrato limita 4.096
+    /// **bytes**: 3.000 letras `á` caem dentro do primeiro e ocupam 6.000 do
+    /// segundo. E a recusa não era uma recusa — o quadro falhava ao ser
+    /// codificado, `dizer` devolvia erro, e o laço da sessão tratava isso como
+    /// «o enlace morreu» e **encerrava a sessão**. Um acento a mais derrubava a
+    /// conexão sem uma palavra na tela.
+    #[must_use]
+    pub const fn limite_da_mensagem() -> usize {
+        seele_core::MAX_BODY_LEN
+    }
+
     /// Says something in o canal.
+    ///
+    /// # O que mudou, e é a metade que faltava
+    ///
+    /// A chave da mensagem é escolhida **aqui**, antes de qualquer coisa sair, e
+    /// a mensagem é anotada como pendente antes de ser entregue ao enlace. Com
+    /// isso: o texto existe em algum lugar que não é o campo da janela, a casca
+    /// pode desenhá-lo como «enviando», a confirmação o encontra pela chave, e
+    /// tentar de novo usa a **mesma** chave — que é o que faz o servidor
+    /// reconhecer a repetição em vez de publicar duas vezes.
+    ///
+    /// Devolve a chave, para quem quiser acompanhar aquela mensagem.
     ///
     /// # Errors
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
-    pub fn send_message(&self, channel: u32, body: String) -> Result<(), ConnectionError> {
-        if body.trim().is_empty() {
-            return Ok(());
+    pub fn send_message(&self, channel: u32, body: String) -> Result<String, ConnectionError> {
+        let corpo = body.trim().to_owned();
+        if corpo.is_empty() {
+            return Ok(String::new());
         }
+        let id = ClientMessageId(next_client_message_id());
+        let channel = ChannelId(channel);
+        self.anotar_pendente(channel, id, corpo.clone());
+
+        // **O teto é conferido aqui**, e não descoberto quando o quadro se
+        // recusa a ser codificado. Ver [`Self::limite_da_mensagem`]: o caminho
+        // antigo encerrava a sessão.
+        if corpo.len() > seele_core::MAX_BODY_LEN {
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "o teto é 4 KiB e cabe folgado num u32"
+            )]
+            let limite = seele_core::MAX_BODY_LEN as u32;
+            self.recusar_pendente(id, seele_core::MessageRefusal::TooLong { limit: limite });
+            return Ok(id.get().to_string());
+        }
+
         self.command(Command::Send {
-            channel: ChannelId(channel),
-            body,
-        })
+            channel,
+            body: corpo,
+            id,
+        })?;
+        Ok(id.get().to_string())
+    }
+
+    /// Manda de novo uma mensagem que não foi gravada, com a **mesma** chave.
+    ///
+    /// A mesma chave é o ponto: o servidor é idempotente por ela, então repetir
+    /// uma mensagem que na verdade havia sido gravada devolve a original em vez
+    /// de publicar uma segunda. É por isso que tentar de novo é seguro mesmo
+    /// depois de uma queda — o estado [`EstadoDoEnvio::SemResposta`] existe para
+    /// dizer exatamente esse caso.
+    ///
+    /// `false` quando não há pendente com essa chave: ela já foi confirmada ou
+    /// descartada, e mandar de novo seria publicar de novo.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn reenviar_mensagem(&self, client_message_id: &str) -> Result<bool, ConnectionError> {
+        let Ok(chave) = client_message_id.parse::<u64>() else {
+            // Uma chave que não é número não é de nenhuma pendente. `false` é a
+            // mesma resposta de «essa já foi confirmada», e é a honesta.
+            return Ok(false);
+        };
+        let id = ClientMessageId(chave);
+        let Some((channel, corpo)) = self.shared.room.lock().ok().and_then(|room| {
+            room.pendentes
+                .iter()
+                .find(|pendente| pendente.client_message_id == id)
+                .map(|pendente| (pendente.channel, pendente.body.clone()))
+        }) else {
+            return Ok(false);
+        };
+        self.anotar_pendente(channel, id, corpo.clone());
+        self.command(Command::Send {
+            channel,
+            body: corpo,
+            id,
+        })?;
+        Ok(true)
+    }
+
+    /// Desiste de uma mensagem que não foi gravada, e devolve o texto dela.
+    ///
+    /// Devolve o corpo para que a casca possa pô-lo de volta no compositor: uma
+    /// desistência que apagasse o texto seria o R05 de novo, por outra porta.
+    #[must_use]
+    pub fn descartar_mensagem(&self, client_message_id: &str) -> Option<String> {
+        let chave = client_message_id.parse::<u64>().ok()?;
+        let corpo = self
+            .shared
+            .room
+            .lock()
+            .ok()?
+            .descartar_envio(ClientMessageId(chave));
+        if corpo.is_some() {
+            self.shared.messages_changed();
+        }
+        corpo
+    }
+
+    /// Anota uma pendente e acorda quem desenha.
+    fn anotar_pendente(&self, channel: ChannelId, id: ClientMessageId, body: String) {
+        if let Ok(mut room) = self.shared.room.lock() {
+            room.anotar_envio(channel, id, body, agora_em_segundos());
+        }
+        self.shared.messages_changed();
+    }
+
+    /// Marca uma pendente como recusada e acorda quem desenha.
+    fn recusar_pendente(&self, id: ClientMessageId, motivo: seele_core::MessageRefusal) {
+        let mexeu = self
+            .shared
+            .room
+            .lock()
+            .map(|mut room| room.recusar_envio(id, motivo))
+            .unwrap_or(false);
+        if mexeu {
+            self.shared.messages_changed();
+        }
     }
 
     /// Requests an enabled MOD action. Responses arrive as `Event::ModReply`.
@@ -1637,10 +1955,32 @@ impl Connection {
     /// An author removing their own needs no permission, which is why a shell
     /// drawing this control on one's own message may draw it for anybody.
     ///
+    /// # Uma pendente não tem o que remover
+    ///
+    /// Zero não é um identificador de mensagem: é o que
+    /// [`Message::id`] vale numa mensagem que esta máquina escreveu e o servidor
+    /// ainda não confirmou. Ela não existe lá, então não há o que tirar de canal
+    /// nenhum — e mandar o pedido faria o servidor responder «não há tal
+    /// mensagem», que é verdade e é a frase errada para quem clicou num texto que
+    /// está na tela.
+    ///
+    /// Quem quer largar uma pendente usa [`Self::descartar_mensagem`], que
+    /// endereça pela chave desta máquina.
+    ///
+    /// **Este guarda nasceu de uma reprovação.** Sem ele,
+    /// `conformance::moderacao` pegava `messages()[0].id` numa lista onde a
+    /// primeira linha era uma pendente, pedia a remoção do zero, e recebia «não
+    /// há tal mensagem» no lugar da recusa de permissão que o teste mede — o
+    /// primeiro caller a pisar nisto foi um teste, e o próximo seria uma tela.
+    ///
     /// # Errors
     ///
-    /// [`ConnectionError::NotConnected`] once the session is over.
+    /// [`ConnectionError::NotConnected`] once the session is over, or
+    /// [`ConnectionError::UnknownMessage`] for a message the server never saw.
     pub fn remove_message(&self, message: u64) -> Result<(), ConnectionError> {
+        if message == 0 {
+            return Err(ConnectionError::UnknownMessage);
+        }
         self.command(Command::RemoveMessage {
             message: MessageId(message),
         })
@@ -1832,10 +2172,106 @@ impl Connection {
     /// # Errors
     ///
     /// [`ConnectionError::NotConnected`] sem sessão.
+    /// **A escolha é gravada antes de o pedido sair**, e é o que a torna a
+    /// autoridade sobre o que aparece. ADR 0054.
+    ///
+    /// Antes ela morava numa variável da janela, e a janela não sobrevive a uma
+    /// recarga. Deste lado ela sobrevive, e é deste lado que
+    /// [`Snapshot::tela`] e [`TransmissaoNaSala::assistida`] a leem — então a
+    /// autoria, os controles e os metadados param de poder apontar para outra
+    /// tela.
     pub fn assistir(&self, tela: u32, quero: bool) -> Result<(), ConnectionError> {
-        self.command(Command::Assistir {
-            tela: seele_core::ScreenId(tela),
-            quero,
+        let tela = seele_core::ScreenId(tela);
+        let escolha = if quero {
+            EscolhaDeTela::Esta(tela)
+        } else if self.shared.tela_escolhida().tela() == Some(tela)
+            || self.shared.tela_escolhida() == EscolhaDeTela::NinguemEscolheu
+        {
+            // **Recusar a que se estava assistindo é escolher não assistir.**
+            // Recusar **outra** não mexe na escolha: é o que acontece quando o
+            // servidor empurra uma transmissão que esta pessoa não pediu, e
+            // devolvê-la não pode desfazer a escolha dela.
+            EscolhaDeTela::Nenhuma
+        } else {
+            self.shared.tela_escolhida()
+        };
+        if self.shared.gravar_tela_escolhida(escolha) {
+            self.shared.notify(&Event::ScreenChanged);
+        }
+        self.command(Command::Assistir { tela, quero })
+    }
+
+    /// Qual transmissão esta sessão escolheu assistir, e em que estado. ADR 0054.
+    ///
+    /// A casca a lê para desenhar a fileira de botões sem guardar a escolha
+    /// dela própria — duas cópias da mesma escolha são duas cópias que
+    /// discordam depois de uma recarga.
+    #[must_use]
+    pub fn tela_escolhida(&self) -> Option<u32> {
+        self.shared.tela_escolhida().tela().map(|tela| tela.0)
+    }
+
+    /// O volume do som da transmissão. `1.0` é o de origem, `0.0` é calado.
+    ///
+    /// **Independente do volume das pessoas**, que é o pedido inteiro do R17:
+    /// silenciar o conteúdo compartilhado tem de preservar a conversa. O
+    /// isolamento total continua calando a mistura inteira, porque é isso que
+    /// ele diz que faz.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] sem voz aberta.
+    pub fn ajustar_volume_da_tela(&self, volume: f32) -> Result<(), ConnectionError> {
+        let voice = self
+            .shared
+            .voice
+            .lock()
+            .map_err(|_| ConnectionError::NotConnected)?;
+        let voice = voice.as_ref().ok_or(ConnectionError::NotConnected)?;
+        voice.set_volume_da_tela(volume);
+        Ok(())
+    }
+
+    /// Cala ou devolve o som da transmissão, sem mexer no volume dela.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] sem voz aberta.
+    pub fn calar_a_tela(&self, calada: bool) -> Result<(), ConnectionError> {
+        let voice = self
+            .shared
+            .voice
+            .lock()
+            .map_err(|_| ConnectionError::NotConnected)?;
+        let voice = voice.as_ref().ok_or(ConnectionError::NotConnected)?;
+        voice.set_tela_calada(calada);
+        Ok(())
+    }
+
+    /// O que esta máquina faz com o **próprio** áudio ao capturar uma tela.
+    ///
+    /// R21 e ADR 0054. Três respostas, e uma delas é «a saída inteira entra» —
+    /// que a tela tem de dizer, junto com as duas saídas que existem:
+    /// compartilhar uma janela em vez do monitor, ou transmitir sem áudio.
+    ///
+    /// Estática e não por sessão: é uma propriedade desta máquina e deste
+    /// sistema, e vale antes de haver sessão — que é quando a pessoa está
+    /// escolhendo o que compartilhar.
+    #[must_use]
+    pub fn exclusao_do_som_da_captura() -> ExclusaoDoSom {
+        seele_core::exclusao_medida_no_sistema().into()
+    }
+
+    /// O volume e o mudo do som da transmissão, como a casca os desenha.
+    ///
+    /// `None` sem voz aberta, que é a mesma resposta de «não há o que ajustar».
+    #[must_use]
+    pub fn som_da_tela(&self) -> Option<SomDaTela> {
+        let voice = self.shared.voice.lock().ok()?;
+        let voice = voice.as_ref()?;
+        Some(SomDaTela {
+            volume: voice.volume_da_tela(),
+            calada: voice.tela_calada(),
         })
     }
 
@@ -1979,6 +2415,48 @@ impl Connection {
                 voice.set_mode(mode.into());
             }
         }
+    }
+
+    /// Liga, desliga ou dosa a supressão de ruído do microfone. F02.
+    ///
+    /// `1.0` é ela inteira, `0.0` a desliga. A escolha vale para esta sessão e
+    /// **não** é gravada aqui: gravar é da casca, que é quem tem onde. Ver
+    /// `seele_core::preferences::Preferences::set_supressao_de_ruido`.
+    pub fn set_supressao_de_ruido(&self, forca: f32) {
+        if let Ok(voice) = self.shared.voice.lock() {
+            if let Some(voice) = voice.as_ref() {
+                voice.set_supressao(forca);
+            }
+        }
+    }
+
+    /// A sensibilidade da ativação por voz, em dBFS. `None` volta ao padrão. F01.
+    ///
+    /// O padrão depende de a supressão estar ligada — o alvo de −60 dBFS é do
+    /// caminho **com** supressão. Ver `seele_core::voice`.
+    pub fn set_abertura_da_voz_dbfs(&self, dbfs: Option<f32>) {
+        if let Ok(voice) = self.shared.voice.lock() {
+            if let Some(voice) = voice.as_ref() {
+                voice.set_abertura_dbfs(dbfs);
+            }
+        }
+    }
+
+    /// Os controles de voz desta sessão, como a casca os desenha. F01 e F02.
+    ///
+    /// `None` sem voz aberta, que é a mesma resposta de «não há o que ajustar».
+    #[must_use]
+    pub fn controles_da_voz(&self) -> Option<ControlesDaVoz> {
+        let voice = self.shared.voice.lock().ok()?;
+        let voice = voice.as_ref()?;
+        let (abertura_dbfs, escolhida) = voice.abertura_dbfs();
+        Some(ControlesDaVoz {
+            supressao: voice.supressao(),
+            abertura_dbfs,
+            abertura_escolhida: escolhida,
+            abertura_minima_dbfs: *seele_core::FAIXA_DE_ABERTURA_DBFS.start(),
+            abertura_maxima_dbfs: *seele_core::FAIXA_DE_ABERTURA_DBFS.end(),
+        })
     }
 
     /// Sets one talker's volume, as a percentage. 100 is unchanged.
@@ -2254,11 +2732,87 @@ impl Connection {
     ///
     /// "Cheap" is now true. It used to carry the whole conversation, which made
     /// the cost grow with the session — see [`Snapshot::messages_revision`].
+    ///
+    /// # E «barato» passou a ser verdade de verdade
+    ///
+    /// Tirar as mensagens do JSON não tirou a cópia: esta função fazia
+    /// `room.clone()`, `Room` carrega a conversa e deriva `Clone`, então o custo
+    /// continuava crescendo com o histórico a cada redesenho — quatro vezes por
+    /// segundo. Era o R12 da revisão da v15.
+    ///
+    /// Agora os campos são lidos **sob o cadeado**, e o cadeado é soltado antes
+    /// de qualquer outra coisa. O que a documentação acima promete continua de
+    /// pé: o que sai daqui é uma cópia dos campos que a casca desenha, e nenhuma
+    /// casca fica com um empréstimo do estado vivo.
+    ///
+    /// A ordem também é a que evita um travamento: nada que tome outro cadeado
+    /// — `audio_state` toma o da voz — é chamado enquanto este está na mão.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
-        let room = match self.shared.room.lock() {
-            Ok(room) => room.clone(),
-            Err(_) => Room::new(),
+        struct Foto {
+            instancia_me: Option<seele_core::PersonId>,
+            nickname: Option<String>,
+            server: String,
+            voice_rooms: Vec<VoiceRoom>,
+            presentes: Vec<Person>,
+            channels: Vec<Channel>,
+            loss_fraction: f32,
+            notice: Option<Notice>,
+            permissions: Vec<seele_core::Permission>,
+            tela: Option<TelaEmCurso>,
+            minha_transmissao: Option<TelaEmCurso>,
+            transmissoes: Vec<TransmissaoNaSala>,
+            ended: Option<EndReason>,
+        }
+
+        let foto = match self.shared.room.lock() {
+            Ok(room) => Foto {
+                instancia_me: room.me,
+                nickname: room
+                    .me
+                    .and_then(|me| room.people.get(&me))
+                    .map(|person| person.nickname.clone()),
+                server: room.server.clone(),
+                voice_rooms: voice_rooms_of(&room),
+                presentes: presentes_de(&room),
+                channels: lines_of(&room),
+                loss_fraction: room.telemetry.as_ref().map_or(0.0, |t| t.loss_fraction),
+                notice: room.notice.as_ref().map(|notice| Notice {
+                    severity: notice.severity.into(),
+                    reason: notice.reason.into(),
+                    operator_text: notice.operator_text.clone(),
+                }),
+                permissions: room.permissions.clone(),
+                tela: self
+                    .shared
+                    .tela_escolhida()
+                    .tela()
+                    .and_then(|tela| tela_por_id(&room, tela, self.shared.pedido_da_tela())),
+                minha_transmissao: minha_tela_de(&room, self.shared.pedido_da_tela()),
+                transmissoes: transmissoes_de(&room, self.shared.tela_escolhida().tela()),
+                ended: room.ended.map(|end| end.reason.into()),
+            },
+            // Um cadeado envenenado é uma sessão que já não tem estado. A foto
+            // vazia é a resposta honesta, e é a mesma que o `Room::new()` de
+            // antes dava.
+            Err(_) => {
+                let room = Room::new();
+                Foto {
+                    instancia_me: None,
+                    nickname: None,
+                    server: String::new(),
+                    voice_rooms: voice_rooms_of(&room),
+                    presentes: presentes_de(&room),
+                    channels: lines_of(&room),
+                    loss_fraction: 0.0,
+                    notice: None,
+                    permissions: Vec::new(),
+                    tela: None,
+                    minha_transmissao: None,
+                    transmissoes: Vec::new(),
+                    ended: None,
+                }
+            }
         };
         // **O nome vem do roster quando o roster nos conhece.**
         //
@@ -2274,17 +2828,13 @@ impl Connection {
         // esta conexão a si mesma — entre o `connect` e o `Welcome` não há
         // roster, e um nome vazio ali seria a janela dizendo que ninguém está
         // usando ela.
-        let nickname = room
-            .me
-            .and_then(|me| room.people.get(&me))
-            .map(|person| person.nickname.clone())
-            .unwrap_or_else(|| {
-                self.shared
-                    .nickname
-                    .lock()
-                    .map(|name| name.clone())
-                    .unwrap_or_default()
-            });
+        let nickname = foto.nickname.clone().unwrap_or_else(|| {
+            self.shared
+                .nickname
+                .lock()
+                .map(|name| name.clone())
+                .unwrap_or_default()
+        });
 
         let audio = self.audio_state();
 
@@ -2299,14 +2849,14 @@ impl Connection {
             caminho: self.shared.caminho(),
             link: self.shared.enlace(),
             link_state: link_state_from_byte(self.shared.link_state.load(Ordering::Relaxed)),
-            server: room.server.clone(),
+            server: foto.server.clone(),
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
             person_icons_revision: self.shared.person_icons_revision.load(Ordering::Relaxed),
-            me: room.me.map(|person| person.0),
+            me: foto.instancia_me.map(|person| person.0),
             nickname,
-            voice_rooms: voice_rooms_of(&room),
-            presentes: presentes_de(&room),
-            channels: lines_of(&room),
+            voice_rooms: foto.voice_rooms,
+            presentes: foto.presentes,
+            channels: foto.channels,
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
@@ -2315,7 +2865,7 @@ impl Connection {
                 // porque o servidor não tem como medir jitter. Ver
                 // [`Shared::jitter_de_chegada_micros`].
                 jitter_ms: self.shared.jitter_de_chegada_ms(),
-                loss_fraction: room.telemetry.as_ref().map_or(0.0, |t| t.loss_fraction),
+                loss_fraction: foto.loss_fraction,
                 bitrate_bps: audio.bitrate_bps,
                 signal,
                 sync_band: SignalBand::of(signal).into(),
@@ -2323,11 +2873,7 @@ impl Connection {
                 local_fault: audio.local_fault,
                 frames_refused: audio.frames_refused,
             },
-            notice: room.notice.as_ref().map(|notice| Notice {
-                severity: notice.severity.into(),
-                reason: notice.reason.into(),
-                operator_text: notice.operator_text.clone(),
-            }),
+            notice: foto.notice,
             muted: audio.muted,
             total_isolation: audio.total_isolation,
             speaking: audio.speaking,
@@ -2337,26 +2883,27 @@ impl Connection {
             playback: audio.playback,
             aparelho: audio.aparelho,
             trocas_de_aparelho: audio.trocas_de_aparelho,
-            may_manage_voice_rooms: room
+            may_manage_voice_rooms: foto
                 .permissions
                 .contains(&seele_core::Permission::ManageVoiceRooms),
-            may_kick: room.permissions.contains(&seele_core::Permission::Kick),
-            may_ban: room.permissions.contains(&seele_core::Permission::Ban),
-            may_remove_message: room
+            may_kick: foto.permissions.contains(&seele_core::Permission::Kick),
+            may_ban: foto.permissions.contains(&seele_core::Permission::Ban),
+            may_remove_message: foto
                 .permissions
                 .contains(&seele_core::Permission::RemoveMessage),
-            may_move_person: room
+            may_move_person: foto
                 .permissions
                 .contains(&seele_core::Permission::MovePerson),
-            may_customise_server: room
+            may_customise_server: foto
                 .permissions
                 .contains(&seele_core::Permission::AdministerServer),
-            may_delete_rooms: room
+            may_delete_rooms: foto
                 .permissions
                 .contains(&seele_core::Permission::AdministerServer),
-            tela: tela_de(&room, self.shared.pedido_da_tela()),
-            transmissoes: transmissoes_de(&room),
-            ended: room.ended.map(|end| end.reason.into()),
+            tela: foto.tela,
+            minha_transmissao: foto.minha_transmissao,
+            transmissoes: foto.transmissoes,
+            ended: foto.ended,
         }
     }
 
@@ -2598,8 +3145,25 @@ fn lines_of(room: &Room) -> Vec<Channel> {
         .collect()
 }
 
+/// A conversa do **canal aberto**, confirmadas e pendentes, na ordem de leitura.
+///
+/// # A projeção explícita que o R02 pede
+///
+/// Antes disto a FFI devolvia a lista inteira do core, e a lista inteira do core
+/// era uma só para todos os canais: quem desenhava recebia mensagens de dois
+/// canais sem nada que as separasse, e as desenhava todas sob o título de um. A
+/// fronteira é aqui — a casca pede a conversa que está aberta, e é isso que ela
+/// recebe.
+///
+/// As pendentes vão **depois** das confirmadas. Elas são sempre as mais novas: o
+/// servidor ordena por id, e uma mensagem sem id ainda não tem lugar nessa
+/// ordem. Ver [`seele_core::Pendente`].
 fn messages_of(room: &Room) -> Vec<Message> {
-    room.messages
+    let Some(aberto) = room.current_channel else {
+        return Vec::new();
+    };
+    let mut lista: Vec<Message> = room
+        .mensagens_do_canal(aberto)
         .iter()
         .map(|message| Message {
             id: message.id.0,
@@ -2610,6 +3174,8 @@ fn messages_of(room: &Room) -> Vec<Message> {
             body: message.body.clone(),
             own: message.own,
             edited: message.edited,
+            estado: EstadoDoEnvio::Confirmada,
+            client_message_id: None,
             attachment: message.attachment.as_ref().map(|anexo| Attachment {
                 id: anexo.id.get(),
                 file_name: anexo.file_name.clone(),
@@ -2623,7 +3189,35 @@ fn messages_of(room: &Room) -> Vec<Message> {
                 expired: anexo.state == seele_core::AttachmentState::Expired,
             }),
         })
-        .collect()
+        .collect();
+
+    // As pendentes desta máquina, nas mesmas linhas da conversa. Nas mesmas
+    // linhas de propósito: uma área separada para «o que ainda não foi» tiraria
+    // a mensagem do lugar onde ela vai ficar, e quem escreveu perderia de vista
+    // onde ela entra.
+    //
+    // `id` zero e autor próprio: elas não têm id de servidor porque ainda não
+    // existem para ele, e quem as identifica é a `client_message_id`. A casca
+    // desenha por `estado`, nunca por `id`.
+    let eu = room.me.map_or(0, |pessoa| pessoa.0);
+    let meu_nome = room
+        .me
+        .and_then(|pessoa| room.people.get(&pessoa))
+        .map_or_else(String::new, |pessoa| pessoa.nickname.clone());
+    lista.extend(room.pendentes_do_canal(aberto).map(|pendente| Message {
+        id: 0,
+        channel: pendente.channel.0,
+        author: eu,
+        author_nickname: meu_nome.clone(),
+        at_seconds: pendente.at_seconds,
+        body: pendente.body.clone(),
+        own: true,
+        edited: false,
+        estado: pendente.estado.into(),
+        client_message_id: Some(pendente.client_message_id.get().to_string()),
+        attachment: None,
+    }));
+    lista
 }
 
 /// A resposta do núcleo, no vocabulário que atravessa a ponte.
@@ -2665,6 +3259,7 @@ fn limites_do_nucleo(limites: LimitesDeTela) -> seele_core::LimitesDeTela {
         resolucao,
         cadencia,
         prioridade,
+        com_som: limites.com_som,
     }
 }
 
@@ -2937,7 +3532,7 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
 /// Ordenada pelo nome da transmissão, que é crescente: sem ordem, um mapa
 /// devolveria as linhas em ordem diferente a cada desenho, e a lista piscaria
 /// de lugar duas vezes por segundo.
-fn transmissoes_de(room: &Room) -> Vec<TransmissaoNaSala> {
+fn transmissoes_de(room: &Room, assistida: Option<seele_core::ScreenId>) -> Vec<TransmissaoNaSala> {
     let Some(voice_room) = room.current_voice_room else {
         return Vec::new();
     };
@@ -2949,40 +3544,39 @@ fn transmissoes_de(room: &Room) -> Vec<TransmissaoNaSala> {
             tela: tela.screen.0,
             de: tela.person.0,
             e_minha: room.me == Some(tela.person),
+            assistida: assistida == Some(tela.screen),
+            espectadores: tela.espectadores,
         })
         .collect();
     lista.sort_by_key(|transmissao| transmissao.tela);
     lista
 }
 
-fn tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
+/// A transmissão de um `ScreenId`, se ela está acontecendo na sala desta pessoa.
+///
+/// **Por identidade, sempre.** A versão anterior pegava a primeira transmissão
+/// que encontrasse no mapa da sala — ver o doc de [`Snapshot::tela`] para o que
+/// isso custava. ADR 0054.
+fn tela_por_id(
+    room: &Room,
+    tela: seele_core::ScreenId,
+    pedido: Option<LimitesDeTela>,
+) -> Option<TelaEmCurso> {
     let voice_room = room.current_voice_room?;
-    // **A da minha sala**, e não «a da sala» — o mapa passou a ser por
-    // transmissão, e uma sala pode ter mais de uma. Enquanto a casca desenha um
-    // palco só, a escolhida é a primeira; quando ela souber escolher, é ela que
-    // diz qual.
-    let tela = room
+    let encontrada = room
         .telas
         .values()
-        .find(|tela| tela.voice_room == voice_room)?;
-    // Quem compartilha não assiste a si mesmo. É o mesmo N do §5.1, contado do
-    // lado de cá — ver o doc de `TelaEmCurso::espectadores` para o que ele não é.
-    let espectadores = room
-        .roster(voice_room)
-        .filter(|person| person.id != tela.person)
-        .count();
-    let e_minha = room.me == Some(tela.person);
+        .find(|candidata| candidata.screen == tela && candidata.voice_room == voice_room)?;
+    let e_minha = room.me == Some(encontrada.person);
     Some(TelaEmCurso {
-        de: tela.person.0,
+        tela: encontrada.screen.0,
+        de: encontrada.person.0,
         e_minha,
-        altura: 0,
-        quadros: 0,
-        kbps: 0,
-        // Saturado, e não truncado: uma sala com mais de quatro bilhões de
-        // pessoas merece um número errado no fim da escala, e não um pequeno.
-        espectadores: u32::try_from(espectadores).unwrap_or(u32::MAX),
+        // **O número do servidor**, que conta assinaturas de verdade. O de antes
+        // era o roster desta máquina menos quem compartilha, e incluía quem
+        // escolheu não assistir — duas contagens para a mesma pergunta.
+        espectadores: encontrada.espectadores,
         parada: None,
-        medida: false,
         // Só para quem compartilha, e a conferência é o campo inteiro: o teto é
         // escolha de quem transmite e não viaja no fio, então o que esta
         // máquina guardou só descreve a **própria** transmissão. Mostrá-lo ao
@@ -2990,6 +3584,17 @@ fn tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
         // um terceiro pediu na vez passada.
         pedido: if e_minha { pedido } else { None },
     })
+}
+
+/// A transmissão que **esta** pessoa está mandando, se há uma.
+fn minha_tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
+    let voice_room = room.current_voice_room?;
+    let eu = room.me?;
+    let minha = room
+        .telas
+        .values()
+        .find(|tela| tela.person == eu && tela.voice_room == voice_room)?;
+    tela_por_id(room, minha.screen, pedido)
 }
 
 /// Se o painel da tela precisa ser redesenhado.
@@ -3418,19 +4023,26 @@ async fn drive(
                     // que é onde o codec já mora e onde o isolamento total
                     // decide se alguma coisa toca. Mandá-lo à casca seria pedir
                     // a ela que decodificasse Opus para depois devolvê-lo.
-                    seele_core::enlace::Aviso::TelaSom { bytes, .. } => {
+                    seele_core::enlace::Aviso::TelaSom { tela, bytes } => {
+                        // **O identificador segue junto até a mistura.** Ele era
+                        // descartado aqui — `{ bytes, .. }` —, e por isso a fila
+                        // não sabia de quem ela era: qualquer `TelaFechou`
+                        // limpava a fila, então alguém parando de transmitir
+                        // calava o som de outra transmissão. R17 e ADR 0054.
                         if let Ok(voice) = shared.voice.lock() {
                             if let Some(voice) = voice.as_ref() {
-                                voice.som_da_tela(bytes);
+                                voice.som_da_tela(tela, bytes);
                             }
                         }
                     }
                     seele_core::enlace::Aviso::TelaFechou { tela } => {
                         // A transmissão acabou: o que sobrou na fila é som de
-                        // uma tela que já não está na frente de ninguém.
+                        // uma tela que já não está na frente de ninguém — **se a
+                        // fila for daquela tela.** Ver
+                        // `Voice::esquecer_o_som_da_tela`.
                         if let Ok(voice) = shared.voice.lock() {
                             if let Some(voice) = voice.as_ref() {
-                                voice.esquecer_o_som_da_tela();
+                                voice.esquecer_o_som_da_tela(tela);
                             }
                         }
                         shared.notify(&Event::ScreenClosed { screen: tela.0 });
@@ -3440,6 +4052,25 @@ async fn drive(
                     seele_core::enlace::Aviso::Estado { estado, restante } => {
                         shared.gravar_enlace(estado, restante);
                         shared.notify(&Event::TelemetryChanged);
+                        // **O que esta máquina escreveu e ainda esperava passa a
+                        // «sem resposta».** O enlace caiu no meio, então o
+                        // servidor pode ter gravado e a confirmação ter se
+                        // perdido — é por isso que o estado não é «falhou».
+                        //
+                        // Sem esta linha, uma mensagem escrita no instante da
+                        // queda ficaria «enviando» para sempre, o que é o mesmo
+                        // defeito do R05 com outra cara: a interface parada num
+                        // estado que nunca sai dele.
+                        if matches!(estado, seele_core::Link::InternalBattery { .. }) {
+                            let mexeu = shared
+                                .room
+                                .lock()
+                                .map(|mut room| room.envios_sem_resposta())
+                                .unwrap_or(false);
+                            if mexeu {
+                                shared.messages_changed();
+                            }
+                        }
                     }
                     seele_core::enlace::Aviso::Reconectado { media, sessao } => {
                         shared.gravar_enlace(seele_core::Link::Online, None);
@@ -3703,19 +4334,32 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
     // Lido do `Room` de novo, e depois da dobra: o que decide entre «acendeu» e
     // «não acendeu» quando só o roster andou é se há transmissão **agora**.
     if changed.telas || changed.roster {
-        let tela = shared
+        // **A própria**, por identidade, e não «a da sala». Ver o ADR 0054: a
+        // pergunta desta linha é sobre a transmissão desta pessoa, e pegar a
+        // primeira da sala respondia com a de outra.
+        let minha = shared
             .room
             .lock()
             .ok()
-            .and_then(|room| tela_de(&room, None));
+            .and_then(|room| minha_tela_de(&room, None));
+        let ha_transmissao = shared
+            .room
+            .lock()
+            .ok()
+            .is_some_and(|room| !transmissoes_de(&room, None).is_empty());
         // O que foi pedido morre com a transmissão. Sem esta linha, a próxima
         // vez que esta pessoa compartilhasse mostraria o que está saindo agora
         // ao lado de um teto que ela escolheu noutra ocasião — dois números
         // lado a lado, o da direita mentindo, e nada na tela dizendo qual.
-        if !tela.as_ref().is_some_and(|tela| tela.e_minha) {
+        if minha.is_none() {
             shared.gravar_pedido_da_tela(None);
         }
-        if a_tela_mudou(changed, tela.is_some()) {
+        // **E a escolha de assistir é esquecida quando a tela escolhida sai do
+        // ar.** ADR 0054: sem isto, a escolha ficaria apontando para uma
+        // transmissão que já não existe, e a próxima a começar com o mesmo
+        // `ScreenId` seria recusada por uma decisão sobre outra tela.
+        shared.esquecer_tela_que_saiu();
+        if a_tela_mudou(changed, ha_transmissao) {
             shared.notify(&Event::ScreenChanged);
         }
     }
@@ -3965,10 +4609,14 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             // anterior sob o nome da nova.
             shared.messages_changed();
         }
-        Command::Send { channel, body } => {
+        Command::Send { channel, body, id } => {
             // specs/02-protocolo.md: idempotent by client_msg_id, so a resend
             // after a lost acknowledgement does not post twice.
-            let id = ClientMessageId(next_client_message_id());
+            //
+            // A chave vem no comando — ver [`Command::Send`]. E o corpo já veio
+            // conferido contra o teto de bytes, que é o que impede este `dizer`
+            // de falhar na codificação e derrubar a sessão inteira por causa de
+            // um acento.
             if client
                 .dizer(channel, body.trim().to_owned(), id)
                 .await
@@ -4212,7 +4860,9 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
 /// The type the sender claimed for one attachment, out of the local history.
 fn declared_type_of(shared: &Shared, attachment: seele_core::AttachmentId) -> Option<String> {
     let room = shared.room.lock().ok()?;
-    room.messages.iter().find_map(|message| {
+    // Em todos os canais, e não só no aberto: um arquivo pode ter sido pedido
+    // num canal e o download terminar depois de a pessoa trocar de canal.
+    room.mensagens.values().flatten().find_map(|message| {
         message
             .attachment
             .as_ref()
@@ -4273,6 +4923,21 @@ fn preview_of(
 /// Process-wide rather than per-`Connection`: two handles in one process sending the
 /// same number would collide in the server's idempotency check, and the second
 /// message would be silently dropped as a resend of the first.
+/// O relógio local, em segundos desde a época.
+///
+/// Só para uma pendente: ela é a única coisa nesta ponte cujo instante não vem
+/// do servidor, porque o servidor ainda não sabe que ela existe. Uma mensagem
+/// confirmada carrega o relógio de quem a aceitou, e é o certo — dois clientes
+/// com relógios diferentes concordariam sobre a ordem e discordariam sobre a
+/// hora.
+fn agora_em_segundos() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |desde| {
+            i64::try_from(desde.as_secs()).unwrap_or(i64::MAX)
+        })
+}
+
 fn next_client_message_id() -> u64 {
     // Drawn at process start, not counted from one — and the difference is a
     // defect, not tidiness.
@@ -4837,6 +5502,7 @@ mod tests {
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
+            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             fontes_de_tela: Mutex::new(Vec::new()),
         })
     }
@@ -5910,6 +6576,7 @@ mod tests {
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
+            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             fontes_de_tela: Mutex::new(Vec::new()),
         });
         let counter = Arc::new(Counter(std::sync::atomic::AtomicUsize::new(0)));
@@ -5929,7 +6596,7 @@ mod tests {
     /// Devolve o `Room` para o teste acrescentar gente: é a contagem de
     /// espectadores que os testes abaixo mexem, e ela é o N do §5.1.
     /// Um `Shared` vazio, para exercer o `fold` sem uma conexão.
-    fn compartilhado_de_teste() -> Arc<Shared> {
+    pub(super) fn compartilhado_de_teste() -> Arc<Shared> {
         Arc::new(Shared {
             caminho_medido: std::sync::atomic::AtomicU32::new(0),
             link_battery: AtomicBool::new(false),
@@ -5951,6 +6618,7 @@ mod tests {
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
+            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             fontes_de_tela: Mutex::new(Vec::new()),
         })
     }
@@ -6061,53 +6729,110 @@ mod tests {
         });
     }
 
+    /// **A contagem de quem assiste é a do servidor, e não a do roster daqui.**
+    ///
+    /// # O que mudou no R20
+    ///
+    /// Era «quem está na sala menos quem compartilha», contado neste lado. Isso
+    /// **inclui quem escolheu não assistir** — e desde que a escolha existe, isso
+    /// é gente de verdade. Duas contagens para a mesma pergunta, discordando, e o
+    /// servidor já mandava a certa: `ScreenViewers` conta assinaturas, e é o mesmo
+    /// N pelo qual ele divide o teto no §5.1.
     #[test]
-    fn a_tela_conta_quem_compartilha_e_quem_assiste() {
-        use seele_core::PersonId;
+    fn a_tela_conta_quem_o_servidor_disse_que_assiste() {
+        use seele_core::{PersonId, ScreenId, ServerMessage};
 
         let mut room = sala_com_tela(PersonId(3));
         sentar(&mut room, 3);
         sentar(&mut room, 4);
 
-        let tela = tela_de(&room, None).expect("a transmissão foi anunciada nesta sala");
+        let tela = tela_por_id(&room, ScreenId(9), None).expect("a transmissão foi anunciada");
+        assert_eq!(tela.tela, 9, "a transmissão não diz qual ela é");
         assert_eq!(tela.de, 3);
         assert!(
             !tela.e_minha,
             "quem compartilha é a pessoa 3, e nós somos a 7"
         );
-        // Três na sala — nós, o 3 e o 4 —, e quem compartilha não assiste a si
-        // mesmo. Quem assiste são dois, e é esse N que divide o teto (§5.1).
+        // **Zero até o servidor contar.** Zero é a resposta honesta: uma
+        // transmissão que começou agora não tem ninguém assistindo ainda, e
+        // deduzir do roster era contar quem recusou.
         assert_eq!(
-            tela.espectadores, 2,
-            "quem compartilha entrou na própria contagem, e o teto seria dividido por gente demais"
+            tela.espectadores, 0,
+            "a contagem voltou a ser deduzida do roster desta máquina, e ela \
+             inclui quem escolheu não assistir"
         );
 
-        sentar(&mut room, 5);
+        room.apply(&ServerMessage::ScreenViewers {
+            tela: ScreenId(9),
+            quantos: 2,
+        });
         assert_eq!(
-            tela_de(&room, None)
+            tela_por_id(&room, ScreenId(9), None)
                 .expect("a transmissão continua")
                 .espectadores,
-            3,
-            "entrou mais uma pessoa e a contagem não andou"
+            2,
+            "o `ScreenViewers` do servidor não chegou à ponte"
+        );
+    }
+
+    /// E uma transmissão que não é a pedida não é devolvida no lugar dela.
+    ///
+    /// R18: `tela_de` pegava a **primeira** do mapa da sala, então numa sala com
+    /// dois transmissores o painel podia falar de uma e a imagem ser de outra.
+    #[test]
+    fn a_tela_e_procurada_por_identidade() {
+        use seele_core::{PersonId, ScreenId, ServerMessage};
+
+        let mut room = sala_com_tela(PersonId(3));
+        room.apply(&ServerMessage::ScreenShareStarted {
+            voice_room: VoiceRoomId(1),
+            person: PersonId(4),
+            screen: ScreenId(11),
+        });
+
+        assert_eq!(
+            tela_por_id(&room, ScreenId(11), None)
+                .expect("a segunda transmissão existe")
+                .de,
+            4,
+            "a busca por identidade devolveu outra transmissão"
+        );
+        assert_eq!(
+            tela_por_id(&room, ScreenId(9), None)
+                .expect("a primeira continua")
+                .de,
+            3
+        );
+        assert!(
+            tela_por_id(&room, ScreenId(99), None).is_none(),
+            "uma transmissão que não existe foi respondida com outra"
         );
     }
 
     #[test]
     fn a_tela_de_quem_compartilha_se_reconhece() {
-        use seele_core::PersonId;
+        use seele_core::{PersonId, ScreenId};
 
         // O pessoa 7 é quem esta sessão é — `sala_com_tela` o diz na `Session`.
         let room = sala_com_tela(PersonId(7));
-        let tela = tela_de(&room, None).expect("a transmissão foi anunciada");
+        let tela = tela_por_id(&room, ScreenId(9), None).expect("a transmissão foi anunciada");
         assert!(
             tela.e_minha,
             "sem isto a casca desenha o painel de quem assiste para quem compartilha"
+        );
+        // E `minha_tela_de` a encontra sem que ninguém diga o `ScreenId`: é a
+        // pergunta «qual é a minha», e ela é por identidade também — pela da
+        // pessoa. ADR 0054.
+        assert_eq!(
+            minha_tela_de(&room, None).map(|minha| minha.tela),
+            Some(9),
+            "a própria transmissão não é encontrada por identidade"
         );
     }
 
     #[test]
     fn nao_ha_tela_quando_ninguem_compartilha() {
-        use seele_core::{PersonId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
+        use seele_core::{PersonId, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomInfo};
 
         let mut room = Room::new();
         room.apply(&ServerMessage::Session {
@@ -6127,33 +6852,37 @@ mod tests {
             permissions: Vec::new(),
         });
         room.enter_voice_room(VoiceRoomId(1));
-        assert!(tela_de(&room, None).is_none());
+        assert!(tela_por_id(&room, ScreenId(9), None).is_none());
+        assert!(minha_tela_de(&room, None).is_none());
     }
 
+    /// **A ponte não finge saber o que está saindo, e já não reserva lugar.**
+    ///
+    /// # O que este teste era, e por que ele mudou
+    ///
+    /// Ele prendia `medida == false` e os três zeros — «alguém passou a medir o
+    /// que sai: então preencha os três números e mude este teste». A regra estava
+    /// certa e os quatro campos nunca tiveram valor: a tela reservava três caixas
+    /// e escrevia «ainda não há medida» nas três, para sempre.
+    ///
+    /// No R20 os quatro saíram da ponte, e a regra continua: nenhum campo de
+    /// medida existe enquanto não houver medida. O que este teste prende agora é
+    /// a **ausência** deles, e a mensagem diz o que fazer no dia em que houver.
     #[test]
     fn a_tela_nao_finge_saber_o_que_esta_saindo() {
-        // O §5 obriga a interface a mostrar o que está saindo **agora** ao lado
-        // do que foi pedido. Nada nesta ponte mede o que está saindo: quem
-        // compartilha não tem codificador daqui e quem assiste não tem recepção
-        // aberta. Então os três números saem zerados e `medida` diz que são
-        // zero por ignorância, e não por medida.
-        //
-        // Este teste existe para que preenchê-los com o que foi pedido — ou com
-        // o degrau que o teto compraria — custe uma linha vermelha. Era o defeito
-        // exato do jitter, que a tela lia do relatório do servidor como `0.0` porque
-        // o servidor não tem como medir uma grandeza do receptor.
-        use seele_core::PersonId;
+        use seele_core::{PersonId, ScreenId};
 
-        let tela = tela_de(&sala_com_tela(PersonId(3)), None).expect("a transmissão foi anunciada");
-        assert!(
-            !tela.medida,
-            "alguém passou a medir o que sai: então preencha os três números e mude este teste"
-        );
-        assert_eq!((tela.altura, tela.quadros, tela.kbps), (0, 0, 0));
+        let tela = tela_por_id(&sala_com_tela(PersonId(3)), ScreenId(9), None)
+            .expect("a transmissão foi anunciada");
         assert_eq!(
             tela.parada, None,
             "parar com motivo é decisão do teto, e nenhum teto roda deste lado"
         );
+        // O guarda contra o campo que volta sem medida atrás dele mora em
+        // `types::a_tela_em_curso_atravessa_pelo_nome_e_diz_de_qual_tela_fala`,
+        // que é onde a forma do JSON é conferida. Aqui fica o que esta função
+        // devolve, e ela devolve só o que se sabe.
+        assert_eq!(tela.espectadores, 0, "a contagem foi inventada deste lado");
     }
 
     /// Um pedido qualquer, com os três controles do §5 preenchidos.
@@ -6163,12 +6892,13 @@ mod tests {
             altura_maxima: 1080,
             quadros_maximos: 30,
             prioridade: crate::types::Prioridade::Nitidez,
+            com_som: true,
         }
     }
 
     #[test]
     fn o_pedido_so_aparece_ao_lado_da_propria_tela() {
-        use seele_core::PersonId;
+        use seele_core::{PersonId, ScreenId};
 
         // O §5 manda pôr o que está saindo ao lado do que foi pedido. O que foi
         // pedido é escolha de quem transmite e **não viaja**: o `ScreenHeader`
@@ -6176,7 +6906,7 @@ mod tests {
         // preencher a coluna da própria transmissão — e preenchê-la com a
         // escolha desta máquina ao lado da tela de outra pessoa seria mostrar o
         // teto de uma transmissão como se fosse o de outra.
-        let minha = tela_de(&sala_com_tela(PersonId(7)), Some(limites()))
+        let minha = tela_por_id(&sala_com_tela(PersonId(7)), ScreenId(9), Some(limites()))
             .expect("a transmissão foi anunciada");
         assert!(minha.e_minha);
         assert_eq!(
@@ -6185,7 +6915,7 @@ mod tests {
             "quem compartilha perdeu a metade da comparação que o §5 obriga"
         );
 
-        let alheia = tela_de(&sala_com_tela(PersonId(3)), Some(limites()))
+        let alheia = tela_por_id(&sala_com_tela(PersonId(3)), ScreenId(9), Some(limites()))
             .expect("a transmissão foi anunciada");
         assert!(!alheia.e_minha);
         assert_eq!(
@@ -6615,6 +7345,42 @@ mod previa {
 
 /// O log que responde «qual dos quatro deu o quê».
 #[cfg(test)]
+mod uma_pendente_nao_e_uma_mensagem_do_servidor {
+    use super::*;
+
+    /// **Uma pendente não pode ser endereçada como mensagem do servidor.**
+    ///
+    /// R05 abriu a porta e este guarda a fecha: `Message::id` vale zero numa
+    /// mensagem que o servidor ainda não confirmou, e zero não endereça nada.
+    ///
+    /// O primeiro caller a pisar nisto foi `conformance::moderacao`, que pegava
+    /// `messages()[0].id` e recebia «não há tal mensagem» no lugar da recusa de
+    /// permissão que ele mede. O próximo seria uma tela, e ali o sintoma seria
+    /// clicar em «remover» numa linha visível e nada acontecer.
+    #[test]
+    fn remover_uma_pendente_e_recusado_antes_de_sair() {
+        // Um `Connection` com o canal de comandos vivo: o teste não roda laço
+        // nenhum, e o que ele mede é a recusa acontecer **antes** de o comando
+        // sair. O receptor fica na mão para o canal não fechar.
+        let (manda, _recebe) = tokio::sync::mpsc::unbounded_channel();
+        let conexao = Connection {
+            commands: manda,
+            shared: super::tests::compartilhado_de_teste(),
+        };
+        assert_eq!(
+            conexao.remove_message(0),
+            Err(ConnectionError::UnknownMessage),
+            "o pedido de remover o zero saiu para o servidor: ele responde «não \
+             há tal mensagem», que é verdade e é a frase errada para quem clicou \
+             num texto que está na tela"
+        );
+        // E um id de verdade continua saindo: um guarda que barrasse tudo passaria
+        // no teste acima e desligaria a remoção inteira.
+        assert!(conexao.remove_message(7).is_ok());
+    }
+}
+
+#[cfg(test)]
 mod trilha_no_log {
     use super::*;
 
@@ -6682,6 +7448,7 @@ mod trilha_no_log {
                 altura_maxima: altura,
                 quadros_maximos: quadros,
                 prioridade: crate::types::Prioridade::Nitidez,
+                com_som: true,
             })
         };
 

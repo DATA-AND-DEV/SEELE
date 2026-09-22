@@ -182,6 +182,36 @@
   gap: 8px;
 }
 
+/* ---------- INCLUIR SOM, e o que a captura leva junto ----------
+
+   R21. O controle e a frase são um bloco: a escolha só é uma escolha quando se
+   sabe o que ela evita, e nesta máquina o que ela evita depende do sistema. */
+.compartilhar-escolha-som {
+  gap: 6px;
+}
+
+.compartilhar-som-rotulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.compartilhar-som-aviso {
+  margin: 0;
+  font-size: var(--seele-t-dado);
+  line-height: 1.5;
+  max-width: 60ch;
+}
+
+/* Onde o sistema exclui o próprio áudio, a frase é uma confirmação e fica
+   discreta. Onde não exclui, ela é uma limitação e precisa ser lida antes do
+   aperto — laranja, que é o acento de «isto pede sua atenção», e não vermelho:
+   nada está errado, o sistema é que é assim. */
+.compartilhar-som-aviso[data-exclusao="sim"] { color: var(--seele-osso-apagado); }
+.compartilhar-som-aviso[data-exclusao="nao"] { color: var(--seele-laranja-nerv); }
+.compartilhar-som-aviso[data-exclusao="nao-se-sabe"] { display: none; }
+
 .compartilhar-vazio {
   margin: 0;
   font-size: var(--seele-t-corpo);

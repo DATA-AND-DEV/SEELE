@@ -817,11 +817,11 @@ function desenharOperador(snapshot) {
   $("operador-nome").textContent = snapshot.nickname;
   // O próprio retrato, no quadrado que já mostrava a inicial. `snapshot.me` é
   // quem esta janela é para o servidor; sem ele não há a quem pedir a imagem.
-  vestirAvatar($("operador-inicial"), snapshot.me);
   // A inicial ao lado do nome, como a comp a desenha — e é a mesma que a prévia
   // do perfil mostra para quem não pôs imagem, para que as duas contem a mesma
   // coisa sobre a mesma pessoa.
   $("operador-inicial").textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
+  vestirAvatar($("operador-inicial"), snapshot.me);
 
   // O botão diz em que estado o microfone está, e não o que apertá-lo vai
   // fazer. Um botão escrito com o verbo é um botão que ninguém sabe ler quando
@@ -1231,9 +1231,98 @@ function itemDeMensagem(mensagem, indice, segue) {
   // por isso que este bloco continua aparecendo depois de os bytes irem
   // embora — com o nome, o tamanho, e a frase que diz o que houve.
   if (mensagem.attachment) conteudo.append(blocoDeAnexo(mensagem.attachment));
+  // E o estado do envio, quando ele não é «gravada». Uma mensagem confirmada
+  // não ganha selo nenhum: um selo em toda linha seria ruído por cima da
+  // conversa inteira para dizer o que é verdade sobre quase tudo.
+  const selo = seloDoEnvio(mensagem);
+  if (selo) conteudo.append(selo);
 
   item.append(conteudo);
   return item;
+}
+
+/** A frase de cada recusa, por motivo. */
+const RECUSAS_DE_MENSAGEM = {
+  PermissionDenied: "não pode escrever neste canal",
+  NoSuchChannel: "este canal não existe mais",
+  StorageFailed: "o servidor não conseguiu gravar",
+};
+
+/**
+ * Como a recusa se apresenta, com o número quando ela tem um.
+ *
+ * `TooLong` chega como objeto porque carrega o teto — e o teto é a metade que
+ * importa: «longo demais» sem número manda alguém cortar no escuro, e foi
+ * justamente um descompasso de unidade que trouxe este defeito (a janela contava
+ * caracteres, o contrato conta bytes).
+ */
+function fraseDaRecusa(motivo) {
+  if (typeof motivo === "string") return RECUSAS_DE_MENSAGEM[motivo] ?? "não foi gravada";
+  if (motivo && typeof motivo === "object" && motivo.TooLong) {
+    return `passa de ${motivo.TooLong.limit} bytes`;
+  }
+  return "não foi gravada";
+}
+
+/**
+ * O selo de uma mensagem que esta máquina escreveu e o servidor não confirmou.
+ *
+ * `null` para tudo que está gravado, que é a conversa inteira menos o punhado de
+ * linhas entre um clique e uma resposta.
+ *
+ * # Por que ele existe
+ *
+ * Porque «mandei» e «está gravada» eram a mesma coisa na tela. O campo esvaziava
+ * antes de qualquer resposta e a única notícia de que a mensagem existia era ela
+ * aparecer — então uma queda, uma recusa de permissão ou um limite de taxa
+ * faziam o texto desaparecer sem rastro. R05 da revisão da v15.
+ */
+function seloDoEnvio(mensagem) {
+  const estado = mensagem.estado;
+  if (!estado || estado === "Confirmada") return null;
+
+  const selo = elemento("span", "envio");
+  const chave = mensagem.client_message_id;
+
+  if (estado === "Enviando") {
+    selo.dataset.envio = "enviando";
+    selo.append(elemento("span", "envio-frase", "enviando…"));
+    return selo;
+  }
+
+  // As duas que pedem decisão de quem escreveu: recusada e sem resposta. As
+  // duas ganham os mesmos dois botões, e a frase é o que as separa — porque o
+  // que se faz com elas é o mesmo, e o que se sabe sobre elas não é.
+  if (estado === "SemResposta") {
+    selo.dataset.envio = "sem-resposta";
+    selo.append(
+      elemento(
+        "span",
+        "envio-frase",
+        "o enlace caiu antes da resposta — pode ter sido gravada",
+      ),
+    );
+  } else {
+    selo.dataset.envio = "falhou";
+    const motivo = typeof estado === "object" ? estado.Recusada : null;
+    selo.append(elemento("span", "envio-frase", `não foi gravada: ${fraseDaRecusa(motivo)}`));
+  }
+
+  if (chave) {
+    const tentar = elemento("button", "envio-acao", "TENTAR DE NOVO");
+    tentar.type = "button";
+    tentar.dataset.pendente = chave;
+    tentar.dataset.acao = "reenviar";
+    const desistir = elemento("button", "envio-acao", "DESISTIR");
+    desistir.type = "button";
+    desistir.dataset.pendente = chave;
+    desistir.dataset.acao = "descartar";
+    // «Desistir» devolve o texto ao compositor — ver `agirNaPendente`. O nome
+    // diz o que a pessoa está decidindo, e não o que o programa faz com a lista.
+    desistir.title = "devolve o texto ao campo de escrever";
+    selo.append(tentar, desistir);
+  }
+  return selo;
 }
 
 /**
@@ -1390,18 +1479,27 @@ function comLinks(texto) {
     link.setAttribute("title", `${url} — abre no navegador`);
     pedacos.push(link);
 
-    // E, quando o endereço é de imagem, a imagem embaixo dele. O link fica:
-    // quem quiser a origem continua podendo abri-la, e uma imagem que não
-    // carregou não deixa a mensagem sem nada.
+    // E, quando o endereço é de imagem, a imagem embaixo dele — **se o domínio
+    // dele estiver liberado**. O link fica nos dois casos: quem quiser a origem
+    // continua podendo abri-la.
+    //
+    // **A busca não parte mais daqui sozinha.** Desenhar era buscar, e buscar é
+    // aparecer: quem escreve a mensagem escolhia o endereço, então ler uma
+    // conversa entregava o endereço de origem de quem lê a qualquer servidor
+    // colado ali — inclusive a um posto na conversa só para colher isso. ADR
+    // 0053. O que parte daqui agora é a pergunta ao que já se sabe; quem manda
+    // buscar é o clique em «mostrar imagem».
     if (pareceImagem(url)) {
       const pronta = previasDeLink.get(url);
-      if (pronta === undefined) buscarAPreviaDoLink(url);
+      if (pronta === undefined) considerarAPrevia(url);
       if (typeof pronta === "string") {
         const img = elemento("img", "previa-de-link");
         img.src = pronta;
         img.alt = "";
         img.setAttribute("title", url);
         pedacos.push(img);
+      } else if (pronta && typeof pronta === "object" && pronta.dominio) {
+        pedacos.push(convitePrevia(url, pronta.dominio));
       }
     }
     cursor = comeco + url.length;
@@ -1468,8 +1566,14 @@ function pareceImagem(url) {
   }
 }
 
-/** Pede a imagem deste endereço, uma vez, e redesenha quando ela chega. */
-function buscarAPreviaDoLink(url) {
+/**
+ * Pede a imagem deste endereço, uma vez, e redesenha quando ela chega.
+ *
+ * O Rust responde `SemConsentimento` quando o domínio não está liberado, e **não
+ * faz requisição nenhuma nesse caso** — ver `previa_de_link`. O que se guarda
+ * então é o domínio, que é o que o convite abaixo precisa nomear.
+ */
+function considerarAPrevia(url) {
   if (previasDeLink.has(url)) return;
   previasDeLink.set(url, null);
   invoke("previa_de_link", { url })
@@ -1481,9 +1585,58 @@ function buscarAPreviaDoLink(url) {
       // Guardado como «não deu» e não apagado: sem isto a conversa tentaria de
       // novo a cada desenho, e um endereço que não responde viraria uma batida
       // constante na porta de alguém.
-      previasDeLink.set(url, false);
-      console.warn("prévia de link:", falha);
+      const dominioPendente = falha?.SemConsentimento?.dominio;
+      previasDeLink.set(url, dominioPendente ? { dominio: dominioPendente } : false);
+      if (!dominioPendente) console.warn("prévia de link:", falha);
+      desenharMensagens();
     });
+}
+
+/**
+ * O botão que ocupa o lugar de uma prévia ainda não consentida.
+ *
+ * # Por que um botão, e não a imagem
+ *
+ * Porque a requisição é a coisa que precisa de permissão, e não o pixel. Quem
+ * controla o endereço aprende, só de ser buscado, o endereço de origem de quem
+ * está lendo a conversa e a hora em que ele a leu. Um botão põe essa troca nas
+ * mãos de quem lê, e o nome do domínio está nele justamente para que a escolha
+ * seja sobre alguém, e não sobre «uma imagem».
+ *
+ * Consentir vale para o **domínio**, uma vez, e fica gravado — e a configuração
+ * lista o que foi liberado, para poder desfazer.
+ */
+function convitePrevia(url, dominio) {
+  const convite = elemento("span", "previa-convite");
+  convite.append(elemento("span", "previa-convite-frase", `imagem de ${dominio}`));
+  const botao = elemento("button", "previa-convite-acao", "MOSTRAR IMAGEM");
+  botao.type = "button";
+  botao.dataset.previa = url;
+  botao.dataset.dominio = dominio;
+  botao.title =
+    `buscar em ${dominio} entrega a esse servidor o endereço desta máquina e a hora`;
+  convite.append(botao);
+  return convite;
+}
+
+/**
+ * Libera o domínio e busca a imagem. Ouvinte único na lista, como os vizinhos.
+ */
+async function mostrarAPrevia(evento) {
+  const botao = evento.target.closest?.("[data-previa]");
+  if (!botao) return;
+  evento.preventDefault();
+  const { previa: url, dominio } = botao.dataset;
+  try {
+    await invoke("consentir_previa", { dominio });
+  } catch (falha) {
+    console.warn("consentir prévia:", falha);
+    return;
+  }
+  // Esquecido antes de pedir de novo: `considerarAPrevia` não refaz o que já
+  // está no mapa, e o que está lá é a recusa por falta de consentimento.
+  previasDeLink.delete(url);
+  considerarAPrevia(url);
 }
 
 /**
@@ -1506,6 +1659,8 @@ function abrirLinkDaMensagem(evento) {
   });
 }
 
+$("lista-mensagens").addEventListener("click", agirNaPendente);
+$("lista-mensagens").addEventListener("click", mostrarAPrevia);
 $("lista-mensagens").addEventListener("click", abrirLinkDaMensagem);
 $("lista-mensagens").addEventListener("keydown", (evento) => {
   if (evento.key !== "Enter" && evento.key !== " ") return;
@@ -2338,7 +2493,34 @@ function desenharAviso(snapshot) {
   const aviso = snapshot.notice;
   banner.hidden = false;
   banner.dataset.severidade = aviso.severity;
-  $("banner-texto").textContent = aviso.operator_text ?? AVISOS[aviso.reason] ?? "AVISO";
+  // **O motivo pode chegar como objeto**, quando ele carrega números: a regra
+  // dos motivos enumerados é que a frase é daqui e os valores são do fio (ADR
+  // 0012), e é este `nomeDoAviso` que separa as duas coisas.
+  $("banner-texto").textContent =
+    aviso.operator_text ?? fraseDoAviso(aviso.reason) ?? "AVISO";
+}
+
+/**
+ * A frase de um aviso, com os números que ele carrega.
+ *
+ * Um motivo enumerado pode ser um texto — `"PermissionDenied"` — ou um objeto de
+ * uma chave, quando ele leva valores: `{ RetencaoApagouHistorico: { apagadas } }`.
+ * Esta função é a fronteira entre as duas formas, e ela existe porque a linha que
+ * a chamava fazia `AVISOS[aviso.reason]` direto — o que dá `undefined` para todo
+ * motivo com campo, e a tela escrevia «AVISO» sem dizer nada.
+ */
+function fraseDoAviso(motivo) {
+  if (typeof motivo === "string") return AVISOS[motivo] ?? null;
+  if (!motivo || typeof motivo !== "object") return null;
+  const [nome] = Object.keys(motivo);
+  const frase = AVISOS[nome];
+  if (!frase) return null;
+  // A retenção diz quantas. O número vem do fio; a frase é daqui.
+  if (nome === "RetencaoApagouHistorico") {
+    const quantas = Number(motivo[nome]?.apagadas ?? 0);
+    return `${frase} — ${quantas} ${quantas === 1 ? "MENSAGEM" : "MENSAGENS"}`;
+  }
+  return frase;
 }
 
 /**
@@ -2381,6 +2563,85 @@ function desenharEnlace(link) {
 
 // --------------------------------------------------------------------- ações
 
+/**
+ * O rascunho de cada canal, por id.
+ *
+ * # Por que ele existe
+ *
+ * Porque trocar de canal apagava o que estava escrito, e porque a falha de um
+ * envio anterior **sobrescrevia** o rascunho novo: o caminho antigo devolvia o
+ * corpo ao campo com `campo.value = corpo`, então escrever algo enquanto o
+ * primeiro envio ainda esperava e ver o primeiro falhar trocava o novo pelo
+ * velho. Reproduzido na revisão da v15 (R05).
+ *
+ * Só em memória, por sessão. Persistir rascunho é uma decisão sobre onde gravar
+ * o que alguém escreveu e ainda não mandou, e ela não foi tomada.
+ */
+const rascunhos = new Map();
+
+/** Guarda o que está escrito no campo, para o canal aberto. */
+function guardarRascunho() {
+  if (linhaAberta === null) return;
+  const campo = $("campo-mensagem");
+  if (campo.value === "") rascunhos.delete(linhaAberta);
+  else rascunhos.set(linhaAberta, campo.value);
+}
+
+/** Põe no campo o rascunho do canal aberto, ou o esvazia. */
+function restaurarRascunho() {
+  const campo = $("campo-mensagem");
+  campo.value = linhaAberta === null ? "" : (rascunhos.get(linhaAberta) ?? "");
+  cresceOCampo();
+  medirOCorpo();
+}
+
+/**
+ * O teto do corpo em **bytes**, vindo do Rust. `null` até chegar.
+ *
+ * O campo tinha `maxlength="4000"`, que conta unidades de texto, e o contrato
+ * limita 4.096 **bytes**: 3.000 letras `á` cabiam no campo e ocupavam 6.000
+ * bytes. O que acontecia então não era uma recusa — o quadro falhava ao ser
+ * codificado e a **sessão inteira caía**, sem uma palavra na tela.
+ */
+let limiteDaMensagem = null;
+
+invoke("limite_da_mensagem")
+  .then((limite) => {
+    limiteDaMensagem = limite;
+    medirOCorpo();
+  })
+  .catch((falha) => console.warn("limite da mensagem:", falha));
+
+/** Quantos bytes UTF-8 este texto ocupa. */
+function bytesDe(texto) {
+  return new TextEncoder().encode(texto).length;
+}
+
+/**
+ * Acende o aviso de tamanho **antes** de a pessoa tentar mandar.
+ *
+ * Contado em bytes, que é a unidade do contrato. Enquanto o limite não chegou do
+ * Rust nada é dito: avisar a partir de um palpite seria pior que não avisar.
+ */
+function medirOCorpo() {
+  const campo = $("campo-mensagem");
+  const aviso = $("campo-mensagem-tamanho");
+  if (!aviso) return;
+  if (limiteDaMensagem === null) {
+    aviso.hidden = true;
+    return;
+  }
+  const bytes = bytesDe(campo.value.trim());
+  const passou = bytes > limiteDaMensagem;
+  aviso.hidden = !passou;
+  if (passou) {
+    aviso.textContent = `${bytes} de ${limiteDaMensagem} bytes — corte o texto`;
+  }
+  // O botão continua clicável de propósito: a recusa aparece junto da mensagem,
+  // com o número, em vez de um botão morto que não diz por que não funciona.
+  campo.dataset.grande = passou ? "sim" : "nao";
+}
+
 async function enviar(evento) {
   evento.preventDefault();
   const campo = $("campo-mensagem");
@@ -2394,23 +2655,73 @@ async function enviar(evento) {
   // as duas coisas eram uma.
   if (anexoPendente) {
     campo.value = "";
+    rascunhos.delete(linhaAberta);
     cresceOCampo();
+    medirOCorpo();
     await subirAnexo(corpo);
     return;
   }
   if (!corpo) return;
 
-  // Limpa antes de esperar a resposta: um campo que só esvazia depois do ida e
-  // volta parece travado numa rede ruim, que é justo quando não pode parecer.
+  // **O campo esvazia porque a mensagem passou a existir noutro lugar.**
+  //
+  // Ele esvaziava antes de qualquer resposta, e a mensagem não existia em lugar
+  // nenhum: o `invoke` confirmava apenas o enfileiramento local, e uma queda
+  // entre o clique e o commit fazia o texto desaparecer. Agora o Rust anota a
+  // mensagem como pendente **antes** de ela sair, com uma chave própria, e a
+  // conversa a desenha como «enviando» — então esvaziar o campo não perde nada,
+  // e o campo continua esvaziando na hora, que é o que uma rede ruim precisa.
   campo.value = "";
+  rascunhos.delete(linhaAberta);
   cresceOCampo();
+  medirOCorpo();
   try {
     await invoke("send_message", { channel: linhaAberta, body: corpo });
   } catch (falha) {
-    campo.value = corpo;
-    cresceOCampo();
+    // **O rascunho não é sobrescrito.** Este `catch` devolvia `campo.value =
+    // corpo`, e era ele que trocava o que a pessoa estava escrevendo agora pelo
+    // texto de um envio anterior que falhou. A mensagem já está na conversa como
+    // pendente; a recusa aparece nela, ao lado dela, com o botão de tentar de
+    // novo — e é lá que se decide o que fazer com ela.
     console.warn("send_message:", falha);
   }
+  // A pendente acabou de nascer: redesenhar agora é o que a põe na tela sem
+  // esperar o próximo tique.
+  await atualizar();
+}
+
+/**
+ * Tenta de novo, ou desiste, de uma mensagem que não foi gravada.
+ *
+ * Ouvinte único na lista, como o dos links: a conversa é redesenhada inteira
+ * quando muda, e um ouvinte por botão seria um ouvinte jogado fora a cada
+ * desenho.
+ */
+async function agirNaPendente(evento) {
+  const botao = evento.target.closest?.("[data-pendente]");
+  if (!botao) return;
+  evento.preventDefault();
+  const chave = botao.dataset.pendente;
+  try {
+    if (botao.dataset.acao === "descartar") {
+      // O texto volta ao compositor: desistir de mandar não pode querer dizer
+      // perder o que se escreveu.
+      const corpo = await invoke("descartar_mensagem", { clientMessageId: chave });
+      if (typeof corpo === "string" && corpo !== "") {
+        const campo = $("campo-mensagem");
+        campo.value = campo.value === "" ? corpo : `${campo.value}\n${corpo}`;
+        guardarRascunho();
+        cresceOCampo();
+        medirOCorpo();
+        campo.focus();
+      }
+    } else {
+      await invoke("reenviar_mensagem", { clientMessageId: chave });
+    }
+  } catch (falha) {
+    console.warn("pendente:", falha);
+  }
+  await atualizar();
 }
 
 // ------------------------------------------------------------------ anexos
@@ -3039,7 +3350,11 @@ async function alternarCanal(evento) {
         entrou = true;
       }
     } else if (item.dataset.linha) {
+      // O que está escrito fica **com o canal em que foi escrito**, e o do canal
+      // novo volta ao campo. Sem isto, escolher outro canal apagava o texto.
+      guardarRascunho();
       linhaAberta = Number(item.dataset.linha);
+      restaurarRascunho();
       await invoke("open_channel", { channel: linhaAberta });
       // **Escolher um canal é pedir para lê-lo.** Com o alternador
       // `CONVERSA`/`CHAMADA` fora do rodapé, este é o caminho de volta da grade
@@ -3114,6 +3429,14 @@ async function recarregarTeclaDeFalar() {
 }
 
 recarregarTeclaDeFalar();
+
+/**
+ * Qual tecla abriu o microfone, ou `null` se ele não está segurado.
+ *
+ * Existe porque a soltura tinha de casar com a pressão, e não com a preferência
+ * lida do disco — ver o `keyup` no fim deste arquivo.
+ */
+let teclaQueAbriuAFala = null;
 
 function segurarFala(segurando) {
   if (falando === segurando) return;
@@ -3693,7 +4016,15 @@ function cresceOCampo() {
   campo.style.height = `${Math.min(campo.scrollHeight, 160)}px`;
 }
 
-$("campo-mensagem").addEventListener("input", cresceOCampo);
+$("campo-mensagem").addEventListener("input", () => {
+  cresceOCampo();
+  // O rascunho é guardado a cada tecla, por canal: trocar de canal com algo
+  // escrito apagava o que estava escrito. Ver `rascunhos`.
+  guardarRascunho();
+  // E o tamanho é medido em bytes, que é a unidade do contrato — ver
+  // `medirOCorpo`. Um acento a mais derrubava a sessão inteira.
+  medirOCorpo();
+});
 
 // Arrastar é o segundo jeito de escolher um arquivo, e não é mais o único: o
 // botão ARQUIVO abre o seletor do sistema. Este ouvinte continua porque quem
@@ -3959,14 +4290,41 @@ window.addEventListener("keydown", (evento) => {
   }
   if (evento.code === teclaDeFalar && !digitando() && !evento.repeat) {
     evento.preventDefault();
+    teclaQueAbriuAFala = evento.code;
     segurarFala(true);
   }
 });
 window.addEventListener("keyup", (evento) => {
-  if (evento.code === teclaDeFalar && !digitando()) segurarFala(false);
+  // **Soltar a tecla que abriu o microfone sempre o fecha.**
+  //
+  // Esta linha era `evento.code === teclaDeFalar && !digitando()`, e as duas
+  // condições estavam erradas por motivos diferentes:
+  //
+  //   - `!digitando()` — segurar Espaço fora do campo, clicar no compositor e
+  //     soltar Espaço deixava o microfone aberto para sempre. Reproduzido em
+  //     Chromium: saía `set_talking(true)` sem o `false` correspondente. A
+  //     regra que impede **começar** a falar enquanto se digita não pode
+  //     impedir **parar**;
+  //   - `=== teclaDeFalar` — trocar a tecla na configuração enquanto ela está
+  //     segurada faz a soltura não casar com nada, e o microfone fica aberto
+  //     pelo mesmo caminho.
+  //
+  // Guardar qual tecla abriu resolve os dois: quem fecha é a soltura **daquela**
+  // tecla, aconteça o que acontecer no meio.
+  if (teclaQueAbriuAFala !== null && evento.code === teclaQueAbriuAFala) {
+    teclaQueAbriuAFala = null;
+    segurarFala(false);
+  }
 });
 // Uma janela que perde o foco com o microfone aberto é um microfone esquecido.
-window.addEventListener("blur", () => segurarFala(false));
+//
+// A tecla guardada é esquecida junto: sem isso, soltá-la depois de a janela
+// voltar cairia num `keyup` que já não tem par, e uma segunda pressão não teria
+// como abrir de novo.
+window.addEventListener("blur", () => {
+  teclaQueAbriuAFala = null;
+  segurarFala(false);
+});
 
 // O core diz o que mudou; isto só redesenha. Um snapshot por evento é barato e
 // evita que a tela e o estado discordem.
@@ -4098,7 +4456,21 @@ async function sincronizarRetratos(snapshot) {
  * queria ser.
  */
 function vestirAvatar(quadrado, pessoaId) {
-  const uri = pessoaId === null || pessoaId === undefined ? null : retratos.get(pessoaId);
+  quadrado.dataset.pessoaDoAvatar = pessoaId == null ? "" : String(pessoaId);
+  quadrado.dataset.iniciaisDoAvatar = quadrado.textContent;
+  return aplicarAvatar(quadrado);
+}
+
+/** Atualiza só as imagens: a chegada da mídia não remonta a chamada. */
+function redesenharAvatares() {
+  document.querySelectorAll("[data-pessoa-do-avatar]").forEach(aplicarAvatar);
+}
+
+function aplicarAvatar(quadrado) {
+  const id = quadrado.dataset.pessoaDoAvatar;
+  const uri = id === "" ? null
+    : (typeof avatarContribuido === "function" ? avatarContribuido(id) : null)
+      || retratos.get(Number(id)) || retratos.get(id);
   if (uri) {
     quadrado.style.backgroundImage = `url(${uri})`;
     quadrado.dataset.comRetrato = "sim";
@@ -4106,6 +4478,7 @@ function vestirAvatar(quadrado, pessoaId) {
   } else {
     quadrado.style.removeProperty("background-image");
     delete quadrado.dataset.comRetrato;
+    quadrado.textContent = quadrado.dataset.iniciaisDoAvatar ?? "";
   }
   return quadrado;
 }

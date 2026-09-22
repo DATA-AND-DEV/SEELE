@@ -43,6 +43,7 @@ pub mod search;
 pub mod som_que_segue;
 pub mod state;
 pub mod tela;
+pub mod teste_de_microfone;
 pub mod tofu;
 pub mod video;
 pub mod voice;
@@ -68,7 +69,8 @@ pub use preview::{
     check_server_icon, IconRefusal, ImageFormat, Verdict as PreviewVerdict, PREVIEW_LIMIT,
 };
 pub use state::{
-    Changed, ChavePedida, Ended, Message, Notice, Person, Room, Tela, TransferNotice, VoiceRoomSync,
+    Changed, ChavePedida, Ended, EstadoDoEnvio, Message, Notice, Pendente, Person, Room, Tela,
+    TransferNotice, VoiceRoomSync,
 };
 pub use tela::{
     menor_resolucao, resolucao_estimada_para, Envio, ErroDeTela, MotivoDeDescarte, MotivoDeParada,
@@ -89,6 +91,9 @@ pub use video::{
 };
 
 pub use seele_audio::device::{consentimento_do_microfone, ConsentimentoDoMicrofone};
+pub use seele_audio::gate::{
+    ABERTURA_COM_SUPRESSAO_DBFS, ABERTURA_SEM_SUPRESSAO_DBFS, FAIXA_DE_ABERTURA_DBFS,
+};
 /// O módulo do Cisco e os degraus que a pessoa escolhe.
 ///
 /// Reexportados porque [`PedidoDeTela`] pede os três e o ADR 0002 não deixa uma
@@ -100,6 +105,12 @@ pub use seele_video::modulo::{
     instalar_em as instalar_modulo_de_video, procurar_em as procurar_modulo_de_video,
     publicado_para_este_sistema as modulo_de_video_publicado, ModuloPublicado,
 };
+/// O que esta máquina faz com o próprio áudio ao capturar uma tela — R21.
+///
+/// Reexportado porque a resposta é da plataforma e a pergunta é da tela: o ADR
+/// 0002 não deixa a casca ver `seele-video`, e é a casca que tem de explicar a
+/// limitação antes de alguém escolher compartilhar um monitor.
+pub use seele_video::{exclusao_do_som_deste_processo, exclusao_medida_no_sistema, ExclusaoDoSom};
 pub use seele_video::{BibliotecaDeVideo, ErroDeVideo};
 pub use voice::{
     capture_devices, playback_devices, seguir_o_aparelho, Acompanhamento, AparelhosAbertos,
@@ -131,6 +142,10 @@ pub use seele_proto::control::{
     // `key_fingerprint` logo abaixo.
     ConsentimentoDePar,
     DisconnectReason,
+    // Reexportado porque a casca desenha por que uma mensagem não foi gravada,
+    // e é o vocabulário fechado do fio que diz o motivo. Mesmo caso do
+    // `AttachmentRefusal` acima.
+    MessageRefusal,
     Permission,
     PersonProfile,
     PersonState,
@@ -153,6 +168,7 @@ pub use seele_proto::transport::key_fingerprint;
 /// `seele-proto`, pelo mesmo ADR 0002 que já traz os enumerados de anexo daqui.
 pub use seele_proto::volume::VolumeRefusal;
 
+pub use seele_proto::control::MAX_BODY_LEN;
 pub use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc, VoiceRoomId,

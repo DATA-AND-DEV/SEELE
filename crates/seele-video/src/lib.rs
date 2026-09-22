@@ -48,7 +48,11 @@ pub mod captura;
 pub mod codec;
 pub mod erro;
 pub mod modulo;
+pub mod som_capturado;
 pub mod vui;
 
 pub use erro::ErroDeVideo;
 pub use modulo::BibliotecaDeVideo;
+pub use som_capturado::{
+    exclusao_do_som_deste_processo, exclusao_medida_no_sistema, ExclusaoDoSom,
+};

@@ -465,7 +465,7 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
     // mensagem que o servidor nunca recebeu. Com a tarefa leitora dedicada, o
     // caminho todo (lote, transação, difusão) leva centenas de milissegundos.
     let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline && room.messages.is_empty() {
+    while Instant::now() < deadline && room.mensagens_ativas().is_empty() {
         match tokio::time::timeout(Duration::from_millis(500), terminal.next_event()).await {
             Ok(Ok(message)) => {
                 room.apply(&message);
@@ -478,7 +478,11 @@ async fn a_session_started_in_the_terminal_resumes_in_the_desktop() -> Result<()
             Err(_) => {}
         }
     }
-    assert_eq!(room.messages.len(), 1, "a mensagem não foi confirmada");
+    assert_eq!(
+        room.mensagens_ativas().len(),
+        1,
+        "a mensagem não foi confirmada"
+    );
     terminal.disconnect();
     drop(terminal);
 
@@ -766,8 +770,13 @@ async fn a_revisao_das_mensagens_anda_quando_alguem_fala() -> Result<()> {
 
     // **Esperar o canal abrir de verdade antes de medir.** `open_channel`
     // enfileira um comando; ler a revisão logo depois pegaria a batida daquela
-    // abertura — `Room::open_channel` limpa a lista e a bate, com razão — em vez
-    // da que este teste procura.
+    // abertura — o comando bate a revisão para a casca reprojetar a conversa do
+    // canal novo — em vez da que este teste procura.
+    //
+    // A limpeza da lista que esta nota citava saiu no conserto do R02: as
+    // mensagens ficam guardadas por canal, e trocar de canal é trocar de
+    // projeção, não esvaziar nada. A batida da revisão continua, e é ela que
+    // este `espere_ate` contorna.
     let abriu = espere_ate(|| {
         listener
             .snapshot()

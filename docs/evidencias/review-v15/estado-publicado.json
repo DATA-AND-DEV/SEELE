@@ -1,0 +1,33 @@
+{
+  "checked_date": "2026-09-21",
+  "head": "53402904a35f59d0c44086f360938dd969eef20b",
+  "release": {
+    "tag": "v0.14.2",
+    "source_commit": "0018e7169efceaad73e3e5b193d716c659dd1b81",
+    "published_at": "2026-09-21T21:45:45Z",
+    "url": "https://github.com/DATA-AND-DEV/SEELE-RELEASES/releases/tag/v0.14.2",
+    "packages": [
+      "Windows x64",
+      "macOS Apple Silicon"
+    ],
+    "no_packages_declared": [
+      "Linux",
+      "Mac Intel"
+    ]
+  },
+  "ci": {
+    "url": "https://github.com/DATA-AND-DEV/SEELE/actions/runs/35659543590",
+    "conclusion": "failure",
+    "failed_jobs": [
+      "clippy (windows)",
+      "test (windows)",
+      "test (linux)"
+    ],
+    "passed_jobs": [
+      "regras do repositório",
+      "fmt",
+      "clippy (linux)"
+    ],
+    "complete_job_logs": "HTTP 403 from public API; causes not diagnosed"
+  }
+}

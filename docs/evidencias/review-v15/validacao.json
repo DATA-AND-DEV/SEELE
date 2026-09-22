@@ -1,0 +1,17 @@
+{
+  "commit": "53402904a35f59d0c44086f360938dd969eef20b",
+  "command": "cargo test --workspace -- --skip a_saida_desta_maquina_abre_como_entrada",
+  "exit_code": 0,
+  "test_result_sections": 85,
+  "passed": 2314,
+  "failed": 0,
+  "ignored": 5,
+  "filtered_out": 1,
+  "probe_test_included_in_workspace_run": false,
+  "checks": {
+    "check-api": "check-api: toda a superfície de MOD ainda aponta para algo (5 versão(ões)).",
+    "check-deps": "check-deps: dependency rule holds across 12 workspace crates.",
+    "check-versao": "check-versao: a versão alcança as 3 entregas, e nenhum dos 4 lugares que a anunciam lê o Cargo.toml.",
+    "check-vetores": "check-vetores: os 13 vetores estão versionados"
+  }
+}

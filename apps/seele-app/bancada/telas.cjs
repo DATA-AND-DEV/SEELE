@@ -302,8 +302,7 @@ async function principal() {
     process.exit(1);
   }
 
-  const { chromium } = require(process.env.PLAYWRIGHT
-    ?? "/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright");
+  const chromium = require("./playwright.cjs").chromium();
   const servidor = servir();
   await new Promise((ok) => servidor.listen(0, "127.0.0.1", ok));
   const url = `http://127.0.0.1:${servidor.address().port}/`;

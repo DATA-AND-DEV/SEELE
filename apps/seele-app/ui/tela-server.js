@@ -136,6 +136,22 @@ function abrirSecao(id) {
     if (atual && botao.dataset.painel === "painel-mods") {
       desenharMods().catch((falha) => console.warn("mods:", falha));
     }
+    // Os domínios de prévia liberados pelo mesmo motivo das listas de MODS: a
+    // escolha vive em disco e pode ter sido feita por outra janela desta máquina.
+    // Os controles de voz pelo mesmo motivo das listas de MODS: a escolha vive
+    // em disco e pode ter sido feita por outra janela desta máquina.
+    if (atual && botao.dataset.painel === "painel-audio") {
+      desenharQualidadeDaVoz().catch((falha) => console.warn("voz:", falha));
+    }
+    // **E sair da seção de áudio para o teste.** Um microfone aberto por uma tela
+    // que ninguém está olhando é um microfone esquecido — a mesma regra do
+    // push-to-talk que perde o foco.
+    if (!atual && botao.dataset.painel === "painel-audio") {
+      pararOTesteDeMicrofone().catch((falha) => console.warn("teste:", falha));
+    }
+    if (atual && botao.dataset.painel === "painel-identidade") {
+      desenharPreviasConsentidas().catch((falha) => console.warn("prévias:", falha));
+    }
     if (atual && botao.dataset.painel === "painel-versoes") {
       desenharPainelDeVersoes().catch((falha) => console.warn("versões:", falha));
     }
@@ -399,6 +415,271 @@ function desenharIdentidade(snapshot) {
       + "ninguém mais consegue usá-lo.";
 }
 
+/**
+ * Os domínios cuja prévia automática foi liberada, e o botão que desfaz cada um.
+ *
+ * ADR 0053. A lista existe para poder ser desfeita: um consentimento dado num
+ * clique e invisível depois é um consentimento que ninguém revoga — e aí «por
+ * domínio, uma vez» vira «para sempre, sem lembrar de quem».
+ *
+ * Lida do disco a cada abertura desta seção, e não guardada: outra janela desta
+ * máquina pode ter liberado um domínio no meio.
+ */
+async function desenharPreviasConsentidas() {
+  const lista = $("server-previas");
+  const vazio = $("server-previas-vazio");
+  if (!lista) return;
+  let dominios = [];
+  try {
+    dominios = await invoke("previas_consentidas");
+  } catch (falha) {
+    console.warn("prévias consentidas:", falha);
+  }
+  vazio.hidden = dominios.length > 0;
+  const itens = dominios.map((dominio) => {
+    const item = elemento("li", "server-lista-item");
+    item.append(elemento("span", "server-lista-valor", dominio));
+    const botao = elemento("button", "server-lista-acao", "ESQUECER");
+    botao.type = "button";
+    botao.dataset.esquecerPrevia = dominio;
+    botao.title = `imagens de ${dominio} voltam a pedir permissão antes de serem buscadas`;
+    item.append(botao);
+    return item;
+  });
+  repovoar(lista, itens);
+}
+
+// O clique de desfazer, por delegação: a lista é reconstruída a cada abertura, e
+// um ouvinte por botão seria um ouvinte jogado fora a cada desenho.
+$("server-previas")?.addEventListener("click", async (evento) => {
+  const botao = evento.target.closest?.("[data-esquecer-previa]");
+  if (!botao) return;
+  try {
+    await invoke("esquecer_previa", { dominio: botao.dataset.esquecerPrevia });
+  } catch (falha) {
+    console.warn("esquecer prévia:", falha);
+  }
+  await desenharPreviasConsentidas();
+});
+
+// ------------------------------------------------- qualidade de voz (F01, F02)
+//
+// Três controles e um teste, e eles moram juntos porque respondem à mesma
+// pergunta: **o que sai deste microfone?**
+
+/** Os controles de voz que estão valendo, ou `null` se não deu para ler. */
+let controlesDaVoz = null;
+
+/** O relógio que lê o teste de microfone enquanto ele roda, ou `null`. */
+let relogioDoTeste = null;
+
+/**
+ * O corte que o portão está usando de verdade, em dBFS, ou `null` sem medida.
+ *
+ * **Dois números, e o que decide é este.** No padrão, o limiar acompanha o ruído
+ * medido — a régua mostra o alvo, e o portão corta acima dele enquanto houver
+ * ruído. Desenhar a marca na régua enganaria exatamente quem abriu o teste para
+ * descobrir por que o microfone não abre: a barra passaria de uma marca que não
+ * decide nada. Ver `EstadoDoTesteDeMicrofone::corte_dbfs`.
+ *
+ * `null` fora do teste, porque fora dele não há medida — e ali a régua é a melhor
+ * resposta que existe.
+ */
+let corteMedidoDbfs = null;
+
+/**
+ * Lê os controles do Rust e desenha os três.
+ *
+ * Lidos e não guardados aqui: o padrão da sensibilidade depende de a redução de
+ * ruído estar ligada, e essa regra é do núcleo. Uma cópia dela em JavaScript
+ * seria uma segunda decisão sobre a mesma régua, esperando para discordar.
+ */
+async function desenharQualidadeDaVoz() {
+  try {
+    controlesDaVoz = await invoke("controles_da_voz");
+  } catch (falha) {
+    console.warn("controles da voz:", falha);
+    return;
+  }
+  const filtro = $("server-reducao-de-ruido");
+  if (filtro) filtro.checked = controlesDaVoz.supressao > 0;
+
+  const regua = $("server-sensibilidade");
+  const valor = $("server-sensibilidade-valor");
+  if (regua) {
+    // Os extremos vêm do Rust — ver `ControlesDaVoz`.
+    regua.min = String(controlesDaVoz.abertura_minima_dbfs);
+    regua.max = String(controlesDaVoz.abertura_maxima_dbfs);
+    if (document.activeElement !== regua) {
+      regua.value = String(controlesDaVoz.abertura_dbfs);
+    }
+  }
+  if (valor) {
+    // O número, e se ele é escolha ou padrão. «Padrão» por extenso porque um
+    // número que ninguém escolheu, mostrado como escolha, faz a pessoa achar que
+    // já mexeu nisso.
+    valor.textContent = controlesDaVoz.abertura_escolhida
+      ? `${controlesDaVoz.abertura_dbfs.toFixed(1)} dBFS`
+      : `${controlesDaVoz.abertura_dbfs.toFixed(1)} dBFS · padrão`;
+  }
+  const padrao = $("server-sensibilidade-padrao");
+  if (padrao) padrao.hidden = !controlesDaVoz.abertura_escolhida;
+  desenharCorteDoMedidor();
+}
+
+/**
+ * Onde o corte da transmissão cai na barra do medidor.
+ *
+ * A barra vai do extremo sensível ao extremo surdo da mesma faixa do controle, e
+ * a marca do corte é a sensibilidade escolhida. Sem ela um medidor é só uma
+ * barra que se mexe: o que a pessoa está ajustando é **onde** ela corta.
+ */
+function desenharCorteDoMedidor() {
+  const corte = $("server-nivel-corte");
+  if (!corte || !controlesDaVoz) return;
+  // O medido quando há medida; a régua quando não há. Ver `corteMedidoDbfs`.
+  const onde = corteMedidoDbfs ?? controlesDaVoz.abertura_dbfs;
+  corte.style.left = `${porcentoNaBarra(onde)}%`;
+}
+
+/** Onde um nível em dBFS cai na barra, de 0 a 100. */
+function porcentoNaBarra(dbfs) {
+  if (!controlesDaVoz) return 0;
+  const { abertura_minima_dbfs: piso, abertura_maxima_dbfs: teto } = controlesDaVoz;
+  const faixa = teto - piso;
+  if (faixa <= 0) return 0;
+  return Math.max(0, Math.min(100, ((dbfs - piso) / faixa) * 100));
+}
+
+$("server-reducao-de-ruido")?.addEventListener("change", async (evento) => {
+  try {
+    await invoke("ajustar_reducao_de_ruido", { forca: evento.target.checked ? 1 : 0 });
+  } catch (falha) {
+    console.warn("redução de ruído:", falha);
+  }
+  await desenharQualidadeDaVoz();
+});
+
+// `input` e não `change`: a sensibilidade é contínua, e o teste ao lado existe
+// para a pessoa ouvir a diferença enquanto arrasta. Esperar a soltura faria o
+// controle parecer emperrado.
+$("server-sensibilidade")?.addEventListener("input", async (evento) => {
+  const dbfs = Number(evento.target.value);
+  try {
+    await invoke("ajustar_sensibilidade_da_voz", { dbfs });
+  } catch (falha) {
+    console.warn("sensibilidade da voz:", falha);
+  }
+  await desenharQualidadeDaVoz();
+});
+
+$("server-sensibilidade-padrao")?.addEventListener("click", async () => {
+  try {
+    // `null` é «volte ao padrão», e não um número: o padrão depende da redução de
+    // ruído, e gravar o valor que ele tinha agora o congelaria.
+    await invoke("ajustar_sensibilidade_da_voz", { dbfs: null });
+  } catch (falha) {
+    console.warn("sensibilidade da voz:", falha);
+  }
+  await desenharQualidadeDaVoz();
+});
+
+$("server-testar-microfone")?.addEventListener("click", async () => {
+  if (relogioDoTeste !== null) {
+    await pararOTesteDeMicrofone();
+    return;
+  }
+  try {
+    await invoke("abrir_teste_de_microfone");
+  } catch (falha) {
+    $("server-nivel-frase").textContent = fraseDeErro(falha);
+    $("server-nivel-da-voz").hidden = false;
+    return;
+  }
+  $("server-testar-microfone").textContent = "PARAR O TESTE";
+  $("server-ouvir-microfone").hidden = false;
+  $("server-nivel-da-voz").hidden = false;
+  // Dez vezes por segundo: o medidor tem de acompanhar a fala, e um quadro de
+  // áudio são 20 ms — ler mais depressa que isso leria o mesmo número duas vezes.
+  relogioDoTeste = setInterval(() => {
+    lerOTesteDeMicrofone().catch((falha) => console.warn("teste de microfone:", falha));
+  }, 100);
+});
+
+$("server-ouvir-microfone")?.addEventListener("click", async () => {
+  const botao = $("server-ouvir-microfone");
+  const ligado = botao.getAttribute("aria-pressed") !== "true";
+  try {
+    await invoke("monitorar_o_microfone", { ligado });
+  } catch (falha) {
+    console.warn("monitorar o microfone:", falha);
+  }
+  botao.setAttribute("aria-pressed", ligado ? "true" : "false");
+  botao.textContent = ligado ? "PARAR DE OUVIR" : "OUVIR-ME";
+});
+
+/** Lê o teste e desenha o medidor. */
+async function lerOTesteDeMicrofone() {
+  const estado = await invoke("estado_do_teste_de_microfone");
+  if (!estado) {
+    await pararOTesteDeMicrofone();
+    return;
+  }
+  if (estado.falha) {
+    $("server-nivel-frase").textContent = estado.falha;
+    await pararOTesteDeMicrofone();
+    return;
+  }
+  // A marca do corte segue a medida enquanto o teste roda.
+  corteMedidoDbfs = estado.corte_dbfs;
+  desenharCorteDoMedidor();
+  $("server-nivel-preenchido").style.width = `${porcentoNaBarra(estado.nivel_dbfs)}%`;
+  // O estado na própria barra, e não no contêiner — ver a nota na folha de
+  // estilo sobre o guarda das classes desenhadas por duas regras.
+  $("server-nivel-preenchido").dataset.aberto = estado.aberto ? "sim" : "nao";
+  // **As três coisas que a pessoa está tentando descobrir**, numa frase: o nível,
+  // se está transmitindo agora, e quantas vezes abriu. A terceira é a que responde
+  // «o ventilador está abrindo isto?» sem ninguém precisar ouvir — com a sala em
+  // silêncio, ela tem de ficar parada.
+  //
+  // **E o corte, quando ele não é o da régua.** O limiar sobe com o ruído da
+  // sala, e sem esta frase a pessoa arrasta a régua até o fim sensível e o
+  // microfone continua sem abrir, sem nada na tela explicando por quê. É o
+  // «o produto sabe e não conta» na forma em que ele custa mais.
+  const subiu = controlesDaVoz && estado.corte_dbfs > controlesDaVoz.abertura_dbfs + 0.5;
+  $("server-nivel-frase").textContent =
+    `${estado.nivel_dbfs.toFixed(1)} dBFS · ` +
+    `${estado.aberto ? "TRANSMITINDO" : "em silêncio"} · ` +
+    `${estado.aberturas} abertura${estado.aberturas === 1 ? "" : "s"}` +
+    (subiu ? ` · corte em ${estado.corte_dbfs.toFixed(1)} dBFS pelo ruído da sala` : "");
+}
+
+/** Fecha o teste e devolve os botões ao estado parado. */
+async function pararOTesteDeMicrofone() {
+  if (relogioDoTeste !== null) {
+    clearInterval(relogioDoTeste);
+    relogioDoTeste = null;
+  }
+  try {
+    await invoke("fechar_teste_de_microfone");
+  } catch (falha) {
+    console.warn("fechar teste de microfone:", falha);
+  }
+  const botao = $("server-testar-microfone");
+  if (botao) botao.textContent = "COMEÇAR O TESTE";
+  const ouvir = $("server-ouvir-microfone");
+  if (ouvir) {
+    ouvir.hidden = true;
+    ouvir.setAttribute("aria-pressed", "false");
+    ouvir.textContent = "OUVIR-ME";
+  }
+  const medidor = $("server-nivel-da-voz");
+  if (medidor) medidor.hidden = true;
+  // Sem teste não há medida, e a marca volta para a régua.
+  corteMedidoDbfs = null;
+  desenharCorteDoMedidor();
+}
+
 // --------------------------------------------------------------------- ações
 
 /** Escolhe um microfone, ou volta para o padrão da máquina com `null`. */
@@ -592,6 +873,10 @@ function fecharServer() {
 /** O fechamento propriamente dito, depois de a pergunta acima ter passado. */
 function fecharServerMesmo() {
   guardarFoco("tela-server");
+  // **O teste de microfone morre com a tela.** Um microfone aberto por uma tela
+  // que ninguém está olhando é um microfone esquecido — a mesma regra do
+  // push-to-talk que perde o foco.
+  pararOTesteDeMicrofone().catch((falha) => console.warn("teste de microfone:", falha));
   $("tela-server").hidden = true;
   const volta = telaDeOrigem ?? "tela-boot";
   telaDeOrigem = null;

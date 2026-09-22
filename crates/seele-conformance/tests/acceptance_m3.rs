@@ -280,17 +280,34 @@ async fn a_person_without_write_permission_is_refused() -> Result<()> {
         .send_message(LINE, "não deveria passar", ClientMessageId(1))
         .await?;
 
+    // **A recusa passou a dizer de qual mensagem ela fala.**
+    //
+    // Era um `Alert`/`PermissionDenied`, que é verdadeiro e anônimo: quem
+    // escreveu não sabia qual das mensagens dele não passou, e a interface
+    // apagava o texto do campo antes de qualquer resposta. Agora volta um
+    // `MessageRejected` com a chave que esta sessão escolheu — protocolo 8, R05.
     let event = wait_for(&mut observer, |event| {
-        matches!(
-            event,
-            ServerMessage::Alert {
-                reason: seele_proto::control::AlertReason::PermissionDenied,
-                ..
-            }
-        )
+        matches!(event, ServerMessage::MessageRejected { .. })
     })
     .await?;
-    assert!(matches!(event, ServerMessage::Alert { .. }));
+    let ServerMessage::MessageRejected {
+        channel,
+        client_message_id,
+        reason,
+    } = event
+    else {
+        panic!("a recusa não foi identificada");
+    };
+    assert_eq!(channel, LINE);
+    assert_eq!(
+        client_message_id,
+        ClientMessageId(1),
+        "a recusa voltou com outra chave: quem escreveu não acha a mensagem dele"
+    );
+    assert_eq!(
+        reason,
+        seele_proto::control::MessageRefusal::PermissionDenied
+    );
 
     server.shutdown();
     Ok(())

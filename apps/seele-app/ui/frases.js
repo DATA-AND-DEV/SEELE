@@ -158,6 +158,16 @@ const AVISOS = {
   ChannelDeleted: "O CANAL DE TEXTO QUE VOCÊ LIA FOI APAGADO, COM TUDO QUE HAVIA NELE",
   LastVoiceRoom:
     "ESTA É A ÚNICA SALA DE VOZ DO SERVIDOR, E ELA FICA.\nFaça outra sala antes de apagar esta.",
+
+  // ---- a retenção apagou histórico ----
+  //
+  // R15. Quem hospeda escolheu uma janela de retenção, e o servidor a aplicou:
+  // não é defeito e não é recusa, é uma decisão do servidor acontecendo.
+  //
+  // A frase diz **que foi a retenção**, e não só «mensagens foram apagadas»: a
+  // segunda faria quem lê procurar quem apagou. Não diz o número aqui porque o
+  // número vem no campo — ver `desenharAviso`, que o insere.
+  RetencaoApagouHistorico: "A RETENÇÃO DESTE SERVIDOR APAGOU HISTÓRICO ANTIGO",
 };
 
 /**

@@ -28,7 +28,9 @@
 use std::collections::HashMap;
 
 use seele_proto::control::{AlertReason, ChannelInfo, Permission, PersonState, VoiceRoomInfo};
-use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, Ssrc, VoiceRoomId};
+use seele_proto::ids::{
+    ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, Ssrc, VoiceRoomId,
+};
 use seele_proto::signal::SignalBand;
 use seele_proto::ServerMessage;
 
@@ -103,6 +105,60 @@ pub struct Message {
     /// message that had a picture and now draws as an empty channel would leave
     /// nobody able to tell that there had ever been one.
     pub attachment: Option<seele_proto::control::AttachmentInfo>,
+}
+
+/// Uma mensagem que **esta** máquina compôs e o servidor ainda não confirmou.
+///
+/// # Por que ela existe
+///
+/// Porque «enfileirado» não é «gravado», e a interface tratava os dois como a
+/// mesma coisa. O compositor limpava o campo antes do `invoke`, a FFI confirmava
+/// apenas o enfileiramento local, e a única notícia de que uma mensagem existia
+/// era ela aparecer na lista. Uma queda entre o clique e o commit fazia o texto
+/// desaparecer sem rastro — R05 da revisão da v15.
+///
+/// Guardada **fora** da lista de [`Message`] de propósito. Uma pendente não tem
+/// id de servidor, e é o id de servidor que ordena a conversa; enfiá-la na mesma
+/// lista obrigaria `Message::id` a virar `Option`, e aí toda comparação por id
+/// no repositório passaria a ter um caso a mais que quase ninguém trataria.
+/// Pendente é sempre a mais nova, então ela desenha depois — ver
+/// [`Room::pendentes_do_canal`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pendente {
+    /// Em qual canal ela foi escrita.
+    pub channel: ChannelId,
+    /// A chave que esta máquina escolheu, e por onde a confirmação a encontra.
+    pub client_message_id: ClientMessageId,
+    /// O texto, preservado aqui e não no campo da janela.
+    pub body: String,
+    /// Quando **esta** máquina a compôs, em segundos desde a época.
+    ///
+    /// O relógio local, e não o do servidor: o do servidor só existe depois de
+    /// a mensagem ser aceita, que é justamente o que ainda não aconteceu.
+    pub at_seconds: i64,
+    /// Em que pé ela está.
+    pub estado: EstadoDoEnvio,
+}
+
+/// Em que pé está uma mensagem que esta máquina escreveu.
+///
+/// Três estados e não dois: «enviando» e «falhou» são diferentes para quem
+/// espera, e «falhou por falta de permissão» é diferente de «falhou porque o
+/// disco não respondeu» — a primeira nunca passa se tentada de novo, e a segunda
+/// provavelmente passa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoDoEnvio {
+    /// Entregue ao enlace e ainda sem resposta.
+    Enviando,
+    /// O servidor recusou, e disse por quê.
+    Falhou(seele_proto::control::MessageRefusal),
+    /// O enlace caiu antes de qualquer resposta.
+    ///
+    /// Distinta de [`Self::Falhou`] porque o servidor não disse nada: pode ter
+    /// gravado e a confirmação ter se perdido. Tentar de novo é seguro — a chave
+    /// de idempotência é a mesma — e é por isso que ela é uma variante e não um
+    /// `Falhou(StorageFailed)` inventado.
+    SemResposta,
 }
 
 /// Something the interface should surface, already carrying its severity.
@@ -269,8 +325,40 @@ pub struct Room {
     /// anunciada duas vezes é uma linha, porque a varredura de abertura e a
     /// difusão podem se sobrepor por um instante.
     pub presentes: Vec<PersonId>,
-    /// What has been said, oldest first.
-    pub messages: Vec<Message>,
+    /// What has been said, **por canal**, oldest first within each.
+    ///
+    /// # Por que um mapa, e não uma lista
+    ///
+    /// Porque era uma lista, e a lista misturava conversas. O core limpava-a ao
+    /// trocar de canal e acrescentava **qualquer** `MessageReceived` a ela; o
+    /// servidor acumula as assinaturas, então uma mensagem nova do canal que
+    /// ficou para trás entrava na lista que a janela desenha sob o título do
+    /// canal aberto. Reproduzido: visitante abre o canal 1, abre o canal 2,
+    /// recebe texto do canal 1 e o lê como se fosse do 2. R02 da revisão da v15.
+    ///
+    /// «Uma assinatura ativa só, fechando a anterior» também resolveria o
+    /// sintoma, e foi recusado: não lidas por canal e notificações precisam do
+    /// que chega nos canais que não estão abertos, e aquela escolha jogaria isso
+    /// fora para sempre.
+    ///
+    /// Ausência é lista vazia, e é o certo: um canal de que nunca se pediu
+    /// histórico não é um canal sem mensagens, é um canal sobre o qual não se
+    /// sabe nada — e as duas coisas desenham igual, nada.
+    pub mensagens: HashMap<ChannelId, Vec<Message>>,
+    /// Até qual mensagem cada canal foi lido.
+    ///
+    /// Só desta sessão, e de propósito: uma marca persistida é um arquivo a mais
+    /// com um ciclo de vida próprio, e a jornada de não lidas ainda não foi
+    /// desenhada. O que existe aqui é o suficiente para a projeção por canal
+    /// responder «quantas chegaram enquanto eu estava noutro canal», que é a
+    /// pergunta que o R02 deixa possível pela primeira vez.
+    pub lidas_ate: HashMap<ChannelId, MessageId>,
+    /// O que **esta** máquina escreveu e o servidor ainda não confirmou.
+    ///
+    /// Uma lista só, e não um mapa por canal: são poucas — o que cabe entre um
+    /// clique e uma resposta —, e quem desenha filtra por canal. Ver
+    /// [`Pendente`] e [`Room::pendentes_do_canal`].
+    pub pendentes: Vec<Pendente>,
     /// Connection quality as the server reports it.
     pub telemetry: Option<seele_proto::control::Telemetry>,
     /// Quanto da **nossa** voz não está chegando ao servidor, se ele já disse.
@@ -603,13 +691,159 @@ impl Room {
 
     /// Records that the client is now reading the channel.
     ///
-    /// Clears the messages, because a new Channel is a new conversation and keeping
-    /// the old one under a new heading misattributes every channel of it.
+    /// **Não limpa mais nada.** Limpava, e a limpeza era o meio-conserto de um
+    /// defeito cuja outra metade ficou de pé: a lista era única, então trocar de
+    /// canal tinha de esvaziá-la — e o que chegasse depois, de qualquer canal,
+    /// voltava a se misturar. Com as mensagens guardadas por canal, trocar de
+    /// canal é trocar de projeção, e a conversa que ficou para trás continua
+    /// onde estava, para as não lidas e para quando se voltar a ela.
     pub fn open_channel(&mut self, channel: ChannelId) {
-        if self.current_channel != Some(channel) {
-            self.messages.clear();
-        }
         self.current_channel = Some(channel);
+    }
+
+    /// As mensagens de um canal, mais antigas primeiro.
+    ///
+    /// Fatia vazia para um canal de que nunca se ouviu falar — ver
+    /// [`Self::mensagens`].
+    #[must_use]
+    pub fn mensagens_do_canal(&self, channel: ChannelId) -> &[Message] {
+        self.mensagens
+            .get(&channel)
+            .map_or(&[] as &[Message], Vec::as_slice)
+    }
+
+    /// As mensagens do canal aberto.
+    ///
+    /// **A projeção explícita que o R02 pede.** Quem desenha pede esta, e não a
+    /// coleção inteira: era a ausência desta fronteira que deixava a janela
+    /// receber uma lista com mensagens de dois canais e nenhuma maneira de saber.
+    #[must_use]
+    pub fn mensagens_ativas(&self) -> &[Message] {
+        self.current_channel.map_or(&[] as &[Message], |channel| {
+            self.mensagens_do_canal(channel)
+        })
+    }
+
+    /// As pendentes de um canal, na ordem em que foram escritas.
+    pub fn pendentes_do_canal(&self, channel: ChannelId) -> impl Iterator<Item = &Pendente> {
+        self.pendentes
+            .iter()
+            .filter(move |pendente| pendente.channel == channel)
+    }
+
+    /// Quantas mensagens deste canal chegaram sem ele estar aberto.
+    ///
+    /// Aqui porque é o mapa por canal que torna a pergunta respondível — antes
+    /// dele, o que chegava num canal fechado era misturado ou jogado fora. A
+    /// contagem é de mensagens de outras pessoas: as próprias não são novidade
+    /// para quem as escreveu.
+    #[must_use]
+    pub fn nao_lidas(&self, channel: ChannelId) -> usize {
+        if self.current_channel == Some(channel) {
+            return 0;
+        }
+        let desde = self
+            .lidas_ate
+            .get(&channel)
+            .copied()
+            .unwrap_or(MessageId(0));
+        self.mensagens_do_canal(channel)
+            .iter()
+            .filter(|mensagem| !mensagem.own && mensagem.id > desde)
+            .count()
+    }
+
+    /// Anota que esta máquina entregou uma mensagem ao enlace.
+    ///
+    /// Chamada **antes** de o texto sair, e é o que torna o campo da janela
+    /// dispensável: a mensagem existe em algum lugar a partir daqui, com uma
+    /// chave própria, e some só quando o servidor a confirma ou quem escreveu
+    /// desiste dela. Ver [`Pendente`].
+    pub fn anotar_envio(
+        &mut self,
+        channel: ChannelId,
+        client_message_id: ClientMessageId,
+        body: String,
+        at_seconds: i64,
+    ) {
+        // Reenvio da mesma chave: o estado volta a «enviando» em vez de entrar
+        // uma segunda linha. Duas linhas para uma mensagem seria a interface
+        // dizendo que tentar de novo duplicou o texto.
+        if let Some(existente) = self
+            .pendentes
+            .iter_mut()
+            .find(|pendente| pendente.client_message_id == client_message_id)
+        {
+            existente.estado = EstadoDoEnvio::Enviando;
+            existente.channel = channel;
+            existente.body = body;
+            return;
+        }
+        self.pendentes.push(Pendente {
+            channel,
+            client_message_id,
+            body,
+            at_seconds,
+            estado: EstadoDoEnvio::Enviando,
+        });
+    }
+
+    /// Marca uma pendente como recusada pelo servidor.
+    ///
+    /// Devolve `true` quando havia uma pendente com essa chave. `false` é o caso
+    /// honesto de uma recusa que chega depois de quem escreveu desistir dela.
+    pub fn recusar_envio(
+        &mut self,
+        client_message_id: ClientMessageId,
+        motivo: seele_proto::control::MessageRefusal,
+    ) -> bool {
+        let Some(pendente) = self
+            .pendentes
+            .iter_mut()
+            .find(|pendente| pendente.client_message_id == client_message_id)
+        else {
+            return false;
+        };
+        pendente.estado = EstadoDoEnvio::Falhou(motivo);
+        true
+    }
+
+    /// Larga uma pendente porque quem a escreveu desistiu dela.
+    ///
+    /// Devolve o corpo, para quem quiser devolvê-lo ao compositor. Desistir é
+    /// uma decisão de quem escreveu, e o produto não a toma sozinho — uma
+    /// pendente que se apagasse por conta própria seria o texto desaparecendo de
+    /// novo, por outra porta.
+    pub fn descartar_envio(&mut self, client_message_id: ClientMessageId) -> Option<String> {
+        let posicao = self
+            .pendentes
+            .iter()
+            .position(|pendente| pendente.client_message_id == client_message_id)?;
+        Some(self.pendentes.remove(posicao).body)
+    }
+
+    /// Marca toda pendente que ainda esperava como sem resposta.
+    ///
+    /// Chamada quando o enlace cai. O servidor pode ter gravado antes de o
+    /// caminho fechar, e é por isso que o estado não é «falhou»: repetir com a
+    /// mesma chave é seguro, e afirmar que falhou seria afirmar o que ninguém
+    /// sabe. Ver [`EstadoDoEnvio::SemResposta`].
+    pub fn envios_sem_resposta(&mut self) -> bool {
+        let mut mexeu = false;
+        for pendente in &mut self.pendentes {
+            if pendente.estado == EstadoDoEnvio::Enviando {
+                pendente.estado = EstadoDoEnvio::SemResposta;
+                mexeu = true;
+            }
+        }
+        mexeu
+    }
+
+    /// Anota até onde este canal foi lido.
+    pub fn marcar_lido(&mut self, channel: ChannelId) {
+        if let Some(ultima) = self.mensagens_do_canal(channel).last().map(|m| m.id) {
+            self.lidas_ate.insert(channel, ultima);
+        }
     }
 
     /// The people seated in a voice room, in arrival order.
@@ -908,14 +1142,34 @@ impl Room {
                 body,
                 replies_to,
                 attachment,
+                client_message_id,
                 ..
             } => {
+                // **A mensagem vai para a lista do canal dela**, e não para uma
+                // lista só. Ver [`Self::mensagens`]: era daqui que a mistura
+                // saía — este braço acrescentava qualquer `MessageReceived` à
+                // lista que a janela desenhava sob o título do canal aberto.
                 // Idempotent by server id: a history fetch that overlaps what is
                 // already on screen must not double every channel in the overlap.
-                if self.messages.iter().any(|known| known.id == *id) {
+                if self
+                    .mensagens
+                    .get(channel)
+                    .is_some_and(|lista| lista.iter().any(|known| known.id == *id))
+                {
                     return changed;
                 }
-                self.messages.push(Message {
+                let propria = Some(*author) == self.me;
+                // **Confirmada**: se esta máquina estava esperando por ela, a
+                // pendente sai daqui. É a única confirmação que existe — o
+                // servidor não manda um «gravei», ele manda a mensagem.
+                if propria {
+                    if let Some(chave) = client_message_id {
+                        self.pendentes
+                            .retain(|pendente| pendente.client_message_id != *chave);
+                    }
+                }
+                let lista = self.mensagens.entry(*channel).or_default();
+                lista.push(Message {
                     id: *id,
                     channel: *channel,
                     author: *author,
@@ -940,7 +1194,7 @@ impl Room {
                     at_seconds: *at_seconds,
                     body: body.clone(),
                     replies_to: *replies_to,
-                    own: Some(*author) == self.me,
+                    own: propria,
                     edited: false,
                     attachment: attachment.clone(),
                 });
@@ -948,22 +1202,46 @@ impl Room {
                 // after live messages have landed would otherwise sit at the
                 // bottom. Sorting by the server's own ordering is the only
                 // ordering every client agrees on.
-                self.messages.sort_by_key(|message| message.id);
+                lista.sort_by_key(|message| message.id);
                 changed.messages = true;
             }
 
-            ServerMessage::MessageEdited { id, body, .. } => {
-                if let Some(message) = self.messages.iter_mut().find(|known| known.id == *id) {
+            // **No canal que o quadro nomeia.** Antes o id bastava, porque
+            // havia uma lista só; com a projeção por canal, procurar em todas
+            // seria voltar a tratar a coleção como se fosse uma — e o canal vem
+            // no fio justamente para não ser preciso adivinhar.
+            ServerMessage::MessageEdited { channel, id, body } => {
+                if let Some(message) = self
+                    .mensagens
+                    .get_mut(channel)
+                    .and_then(|lista| lista.iter_mut().find(|known| known.id == *id))
+                {
                     message.body.clone_from(body);
                     message.edited = true;
                     changed.messages = true;
                 }
             }
 
-            ServerMessage::MessageRemoved { id, .. } => {
-                let before = self.messages.len();
-                self.messages.retain(|message| message.id != *id);
-                changed.messages = self.messages.len() != before;
+            ServerMessage::MessageRemoved { channel, id } => {
+                if let Some(lista) = self.mensagens.get_mut(channel) {
+                    let before = lista.len();
+                    lista.retain(|message| message.id != *id);
+                    changed.messages = lista.len() != before;
+                }
+            }
+
+            // **Esta** mensagem não foi gravada, e quem a escreveu fica sabendo.
+            //
+            // O quadro só chega a quem escreveu — o servidor o filtra por autor
+            // —, então não há o que conferir aqui. A pendente troca de estado e
+            // continua na tela: quem escreveu decide entre tentar de novo e
+            // desistir, e o texto não desaparece em nenhum dos dois caminhos.
+            ServerMessage::MessageRejected {
+                client_message_id,
+                reason,
+                ..
+            } => {
+                changed.messages = self.recusar_envio(*client_message_id, *reason);
             }
 
             ServerMessage::Telemetry(telemetry) => {
@@ -1039,7 +1317,7 @@ impl Room {
                 // the page again. The row on the server already says this; the
                 // page this client is holding was drawn before it did.
                 if *reason == seele_proto::control::AttachmentRefusal::Expired {
-                    for message in &mut self.messages {
+                    for message in self.mensagens.values_mut().flatten() {
                         if let Some(carried) = &mut message.attachment {
                             if carried.id == *attachment {
                                 carried.state = seele_proto::control::AttachmentState::Expired;
@@ -1217,9 +1495,17 @@ impl Room {
                 let before = self.channels.len();
                 self.channels.retain(|known| known.id != *channel);
                 changed.channels = self.channels.len() != before;
+                // A conversa do canal apagado sai **sempre**, e não só quando
+                // ele era o canal aberto: com as mensagens guardadas por canal,
+                // deixá-las ali seria guardar para sempre a última página de um
+                // canal que já não existe — e ela voltaria a aparecer se alguém
+                // criasse outro canal com o mesmo número.
+                changed.messages = self.mensagens.remove(channel).is_some();
+                self.lidas_ate.remove(channel);
+                self.pendentes
+                    .retain(|pendente| pendente.channel != *channel);
                 if self.current_channel == Some(*channel) {
                     self.current_channel = None;
-                    self.messages.clear();
                     changed.messages = true;
                 }
             }
@@ -1526,7 +1812,7 @@ mod tests {
 
         assert_eq!(room.current_roster().count(), 1, "only us should be left");
         assert_eq!(room.name_of(PersonId(3)), "marcela");
-        assert_eq!(room.messages[0].author_nickname, "marcela");
+        assert_eq!(room.mensagens_ativas()[0].author_nickname, "marcela");
     }
 
     #[test]
@@ -1554,14 +1840,15 @@ mod tests {
             "o roster tem o nome novo"
         );
         assert_eq!(
-            room.messages[0].author_nickname, "marcela",
+            room.mensagens_ativas()[0].author_nickname,
+            "marcela",
             "o que já foi dito passou a citar um nome que não existia quando foi dito"
         );
 
         // E o que ela disser **depois** sai com o nome novo, porque é o
         // servidor que carimba cada mensagem ao publicá-la.
         room.apply(&dito_por(2, 3, "marcela lima", "de novo"));
-        assert_eq!(room.messages[1].author_nickname, "marcela lima");
+        assert_eq!(room.mensagens_ativas()[1].author_nickname, "marcela lima");
     }
 
     #[test]
@@ -1576,7 +1863,7 @@ mod tests {
 
         assert!(first.messages);
         assert!(!second.messages, "a duplicate was reported as a change");
-        assert_eq!(room.messages.len(), 1);
+        assert_eq!(room.mensagens_ativas().len(), 1);
     }
 
     #[test]
@@ -1588,7 +1875,11 @@ mod tests {
         room.apply(&said(2, 7, "antigo"));
         room.apply(&said(5, 7, "meio"));
 
-        let bodies: Vec<&str> = room.messages.iter().map(|m| m.body.as_str()).collect();
+        let bodies: Vec<&str> = room
+            .mensagens_ativas()
+            .iter()
+            .map(|m| m.body.as_str())
+            .collect();
         assert_eq!(bodies, ["antigo", "meio", "recente"]);
     }
 
@@ -1603,9 +1894,13 @@ mod tests {
         });
 
         assert!(changed.messages);
-        assert_eq!(room.messages.len(), 1, "the edit appended a second channel");
-        assert_eq!(room.messages[0].body, "sync voltou");
-        assert!(room.messages[0].edited);
+        assert_eq!(
+            room.mensagens_ativas().len(),
+            1,
+            "the edit appended a second channel"
+        );
+        assert_eq!(room.mensagens_ativas()[0].body, "sync voltou");
+        assert!(room.mensagens_ativas()[0].edited);
     }
 
     #[test]
@@ -1618,7 +1913,7 @@ mod tests {
         });
 
         assert!(!changed.messages);
-        assert!(room.messages.is_empty());
+        assert!(room.mensagens_ativas().is_empty());
     }
 
     #[test]
@@ -1631,7 +1926,7 @@ mod tests {
         });
 
         assert!(changed.messages);
-        assert!(room.messages.is_empty());
+        assert!(room.mensagens_ativas().is_empty());
     }
 
     #[test]
@@ -1641,8 +1936,8 @@ mod tests {
         room.apply(&said(1, 3, "deles"));
         room.apply(&said(2, 7, "nosso"));
 
-        assert!(!room.messages[0].own);
-        assert!(room.messages[1].own);
+        assert!(!room.mensagens_ativas()[0].own);
+        assert!(room.mensagens_ativas()[1].own);
     }
 
     #[test]
@@ -1651,7 +1946,7 @@ mod tests {
         // moment the app opened has lost what makes it history.
         let mut room = room();
         room.apply(&said(1, 7, "olá"));
-        assert_eq!(room.messages[0].at_seconds, 1_700_000_000 - 1);
+        assert_eq!(room.mensagens_ativas()[0].at_seconds, 1_700_000_000 - 1);
     }
 
     #[test]
@@ -1663,7 +1958,11 @@ mod tests {
         room.apply(&said(1, 7, "primeiro"));
         room.apply(&said(2, 7, "segundo"));
 
-        let bodies: Vec<&str> = room.messages.iter().map(|m| m.body.as_str()).collect();
+        let bodies: Vec<&str> = room
+            .mensagens_ativas()
+            .iter()
+            .map(|m| m.body.as_str())
+            .collect();
         assert_eq!(bodies, ["primeiro", "segundo", "terceiro"]);
     }
 
@@ -1672,8 +1971,8 @@ mod tests {
         let mut room = room();
         room.apply(&said(1, 99, "olá"));
 
-        assert_eq!(room.messages.len(), 1);
-        assert_eq!(room.messages[0].author_nickname, "pessoa 99");
+        assert_eq!(room.mensagens_ativas().len(), 1);
+        assert_eq!(room.mensagens_ativas()[0].author_nickname, "pessoa 99");
     }
 
     #[test]
@@ -1705,13 +2004,139 @@ mod tests {
     }
 
     #[test]
-    fn changing_the_line_clears_what_belonged_to_the_old_one() {
+    fn trocar_de_canal_nao_mostra_a_conversa_do_outro() {
+        // **O que este teste provava, e o que ele prova agora.**
+        //
+        // Provava que trocar de canal esvaziava a lista — o meio-conserto de um
+        // defeito cuja outra metade ficava de pé: a lista era única, então o que
+        // chegasse depois, de qualquer canal, voltava a se misturar.
+        //
+        // Agora prova as duas metades: o canal novo não mostra nada do antigo, e
+        // o antigo **continua lá**. A segunda linha é a que o R02 comprou, e é
+        // dela que as não lidas por canal vivem.
         let mut room = room();
         room.apply(&said(1, 7, "na linha 1"));
         room.open_channel(ChannelId(2));
 
-        assert!(room.messages.is_empty());
+        assert!(room.mensagens_ativas().is_empty());
         assert_eq!(room.current_channel, Some(ChannelId(2)));
+        assert_eq!(
+            room.mensagens_do_canal(CHANNEL).len(),
+            1,
+            "a conversa do canal anterior foi jogada fora ao trocar de canal"
+        );
+    }
+
+    #[test]
+    fn uma_mensagem_de_outro_canal_nao_entra_na_conversa_aberta() {
+        // **R02, reproduzido no review e com o oráculo invertido.** A sonda
+        // abria o canal 1, abria o canal 2, recebia texto do canal 1 e via essa
+        // mensagem na lista que a janela desenha sob o título do canal 2.
+        //
+        // Reverter o mapa por canal — voltar a uma lista só — faz este teste
+        // reprovar na primeira asserção.
+        let mut room = room();
+        room.open_channel(ChannelId(2));
+        // Autor 3, e não 7: a pessoa desta sessão é a 7 — ver `session()` — e a
+        // própria mensagem não é novidade para quem a escreveu.
+        let changed = room.apply(&dito_no_canal(9, 3, CHANNEL, "isto é do canal 1"));
+
+        assert!(
+            room.mensagens_ativas().is_empty(),
+            "uma mensagem do canal 1 apareceu sob o título do canal 2"
+        );
+        assert_eq!(room.current_channel, Some(ChannelId(2)));
+        assert_eq!(
+            room.mensagens_do_canal(CHANNEL)
+                .iter()
+                .map(|m| m.body.as_str())
+                .collect::<Vec<_>>(),
+            vec!["isto é do canal 1"],
+            "a mensagem não foi guardada no canal dela"
+        );
+        assert!(
+            changed.messages,
+            "a casca não foi avisada: uma não lida existiria sem ninguém saber"
+        );
+        assert_eq!(
+            room.nao_lidas(CHANNEL),
+            1,
+            "a contagem de não lidas não viu a mensagem do canal fechado"
+        );
+        assert_eq!(
+            room.nao_lidas(ChannelId(2)),
+            0,
+            "o canal aberto tem não lidas"
+        );
+    }
+
+    #[test]
+    fn a_propria_mensagem_nao_conta_como_nao_lida() {
+        // Uma não lida é notícia de outra pessoa. A própria já estava na tela de
+        // quem a escreveu no instante em que ela foi escrita — contá-la faria o
+        // canal aparecer com novidade por causa de alguém que acabou de sair
+        // dele.
+        let mut room = room();
+        room.open_channel(ChannelId(2));
+        // A pessoa desta sessão é a 7 — ver `session()`.
+        room.apply(&dito_no_canal(9, 7, CHANNEL, "escrevi eu"));
+        assert_eq!(
+            room.nao_lidas(CHANNEL),
+            0,
+            "a mensagem que esta máquina escreveu contou como não lida"
+        );
+        room.apply(&dito_no_canal(10, 3, CHANNEL, "escreveu outra pessoa"));
+        assert_eq!(room.nao_lidas(CHANNEL), 1);
+    }
+
+    #[test]
+    fn marcar_lido_zera_a_contagem_e_a_seguinte_volta_a_contar() {
+        let mut room = room();
+        room.open_channel(ChannelId(2));
+        room.apply(&dito_no_canal(9, 3, CHANNEL, "uma"));
+        room.apply(&dito_no_canal(10, 3, CHANNEL, "duas"));
+        assert_eq!(room.nao_lidas(CHANNEL), 2);
+
+        room.marcar_lido(CHANNEL);
+        assert_eq!(room.nao_lidas(CHANNEL), 0);
+
+        room.apply(&dito_no_canal(11, 3, CHANNEL, "três"));
+        assert_eq!(room.nao_lidas(CHANNEL), 1);
+    }
+
+    #[test]
+    fn o_canal_aberto_nunca_tem_nao_lidas() {
+        let mut room = room();
+        room.apply(&dito_no_canal(9, 3, CHANNEL, "chegou"));
+        assert_eq!(room.nao_lidas(CHANNEL), 0);
+    }
+
+    /// Uma mensagem dita num canal escolhido.
+    fn dito_no_canal(id: u64, author: u64, channel: ChannelId, body: &str) -> ServerMessage {
+        let ServerMessage::MessageReceived {
+            id: message_id,
+            author: pessoa,
+            at_seconds,
+            author_nickname,
+            replies_to,
+            client_message_id,
+            attachment,
+            ..
+        } = dito_por(id, author, &format!("pessoa {author}"), body)
+        else {
+            unreachable!("dito_por devolve MessageReceived")
+        };
+        ServerMessage::MessageReceived {
+            channel,
+            id: message_id,
+            author: pessoa,
+            at_seconds,
+            author_nickname,
+            body: body.to_owned(),
+            replies_to,
+            client_message_id,
+            attachment,
+        }
     }
 
     #[test]
@@ -1722,7 +2147,7 @@ mod tests {
         room.apply(&said(1, 7, "ainda aqui"));
         room.open_channel(CHANNEL);
 
-        assert_eq!(room.messages.len(), 1);
+        assert_eq!(room.mensagens_ativas().len(), 1);
     }
 
     #[test]
@@ -2224,7 +2649,7 @@ mod tests {
         // is the one thing a verb that promises destruction may not do.
         let mut room = room();
         room.apply(&said(1, 3, "isto some junto"));
-        assert_eq!(room.messages.len(), 1);
+        assert_eq!(room.mensagens_ativas().len(), 1);
 
         let changed = room.apply(&ServerMessage::ChannelDeleted { channel: CHANNEL });
 
@@ -2233,7 +2658,7 @@ mod tests {
         assert!(room.channels.is_empty());
         assert_eq!(room.current_channel, None);
         assert!(
-            room.messages.is_empty(),
+            room.mensagens_ativas().is_empty(),
             "a destroyed Channel left its conversation on screen"
         );
     }
@@ -2273,7 +2698,10 @@ mod tests {
 
         assert!(!changed.any(), "weighing o canal changed the room");
         assert_eq!(room.channels, before.channels);
-        assert_eq!(room.messages.len(), before.messages.len());
+        assert_eq!(
+            room.mensagens_ativas().len(),
+            before.mensagens_ativas().len()
+        );
     }
 
     // ---- moved by somebody else's hand ----

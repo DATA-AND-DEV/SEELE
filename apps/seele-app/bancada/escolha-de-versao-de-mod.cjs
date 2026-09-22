@@ -36,7 +36,7 @@ const CATALOGO = [{
 }];
 
 (async () => {
-  const { chromium } = require(process.env.PLAYWRIGHT ?? "/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright");
+  const chromium = require("./playwright.cjs").chromium();
   const s = servir(); await new Promise(ok => s.listen(0, "127.0.0.1", ok));
   const nav = await chromium.launch({ headless: true });
   const aba = await nav.newPage({ viewport: { width: 1280, height: 860 } });

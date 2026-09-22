@@ -3945,7 +3945,18 @@ fn the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead()
          the session three times"
     );
 
-    for absent in ["RUÍDO", "TEMA", "GANHO", "VOLUME", "GERAR", "COPIAR"] {
+    // **`RUÍDO` saiu desta lista em 22/09/2026, e é o motivo certo de sair.**
+    //
+    // A regra é «omitir o que o produto não faz», e não «nunca escrever esta
+    // palavra». F02 de `docs/features-v15.md` entregou a redução de ruído:
+    // `seele_audio::supressao` mede o chiado de banda larga caindo 12,8 dB, o
+    // caminho de voz a aplica antes do portão, e o controle desta tela liga, desliga
+    // e é gravado. A palavra passou a ter o que carregar.
+    //
+    // As outras cinco ficam. Se uma delas ganhar verbo, o conserto é o mesmo
+    // desta linha — tirá-la daqui, dizendo onde o verbo está — e nunca apagar a
+    // asserção.
+    for absent in ["TEMA", "GANHO", "VOLUME", "GERAR", "COPIAR"] {
         assert!(
             !names(&server, absent),
             "the settings screen draws `{absent}`, which nothing in this product \
@@ -3953,6 +3964,20 @@ fn the_settings_screen_omits_what_the_product_lacks_instead_of_drawing_it_dead()
              two of these would take an ADR back."
         );
     }
+
+    // E a outra metade, que é o que impede esta lista de encurtar por
+    // conveniência: a palavra que saiu **tem** de estar desenhada, e o comando
+    // atrás dela tem de existir.
+    assert!(
+        names(&server, "RUÍDO"),
+        "a redução de ruído saiu da tela: F02 entregou o filtro, e um filtro sem \
+         controle é um filtro que quase ninguém tem"
+    );
+    let comandos = read("src/main.rs");
+    assert!(
+        comandos.contains("fn ajustar_reducao_de_ruido"),
+        "a tela oferece REDUÇÃO DE RUÍDO e o comando atrás dela não existe mais"
+    );
 }
 
 #[test]
@@ -5838,16 +5863,40 @@ fn o_palco_le_o_que_foi_pedido_do_snapshot_e_nao_da_memoria_da_janela() {
     // saindo, e o palco escrevia travessão sobre uma transmissão que estava
     // acontecendo. Agora ela atravessa em `Snapshot::tela.pedido`, guardada do
     // lado que sobrevive à janela.
-    let numeros = body_of(&scripts(), "function desenharNumerosDoPalco");
+    //
+    // # Onde a metade do pedido é lida hoje
+    //
+    // No **R20** as três caixas de métrica saíram do palco: a coluna da esquerda
+    // — o que está saindo agora — nunca teve número, porque nada nesta ponte
+    // mede resolução, quadros ou banda. Uma comparação com um lado vazio não é
+    // uma comparação, e o que ela produzia era «ainda não há medida» três vezes
+    // sobre o vídeo, para sempre.
+    //
+    // O que o §5 obriga continua obrigando, e este teste continua sendo o que o
+    // prende: o pedido **atravessa no `Snapshot`** e é lido de lá, e não de uma
+    // variável desta janela. Quem o lê hoje é a caixa de compartilhar, ao
+    // reabrir durante uma transmissão. No dia em que houver medida de verdade,
+    // é este campo que a outra metade encontra pronto.
+    let compartilhar = body_of(&scripts(), "async function abrirCompartilhar");
     assert!(
-        numeros.contains("tela.pedido"),
-        "o palco não lê o que foi pedido do `Snapshot`, então a comparação que o \
-         §5 obriga depende de esta janela ter estado aberta na hora da escolha:\n{numeros}"
+        compartilhar.contains("snapshot?.minha_transmissao?.pedido"),
+        "a casca não lê o que foi pedido do `Snapshot`, então a metade do §5 que \
+         sobrevive à janela depende de esta janela ter estado aberta na hora da \
+         escolha:\n{compartilhar}"
     );
     assert!(
         !scripts().contains("limitesPedidos"),
         "a casca voltou a guardar em JavaScript o que ela mandou, e essa cópia \
          morre com a janela"
+    );
+    // **E é o pedido da transmissão desta pessoa, e não o da que ela assiste.**
+    // ADR 0054: `snapshot.tela` é a assistida, e restaurar os limites dela seria
+    // pôr no seletor o teto que outra pessoa escolheu.
+    assert!(
+        !compartilhar.contains("snapshot?.tela?.pedido"),
+        "a caixa voltou a restaurar os limites da transmissão **assistida**: \
+         numa sala com dois transmissores, o seletor passa a mostrar o teto de \
+         outra pessoa:\n{compartilhar}"
     );
 
     // E o campo existe do outro lado da ponte. Sem esta metade o `?? null` do
@@ -13473,6 +13522,20 @@ fn sair_do_servidor_encerra_o_ambiente_dos_mods_antes_de_trocar_de_tela() {
 ///
 /// E a busca acontece **uma vez por endereço**: a conversa redesenha a cada
 /// tique, e sem o registro cada desenho seria outra batida na porta de alguém.
+///
+/// # O que mudou no ADR 0053, e por que este teste continua
+///
+/// A frase «isso é o preço da funcionalidade e foi aceito de olhos abertos»
+/// estava errada numa metade: ninguém tinha aceito nada. O preço era cobrado
+/// **de quem lê**, sem que essa pessoa fosse consultada — bastava alguém colar um
+/// link de imagem para que a janela dela aparecesse no servidor de quem colou.
+///
+/// Agora a busca depende de consentimento por domínio, e quem desenha só
+/// pergunta o que já se sabe: ver `considerarAPrevia` e o guarda
+/// `nenhuma_previa_sai_sem_consentimento`. As asserções abaixo continuam sendo o
+/// que elas sempre foram — o segundo guarda, o de qual endereço chega a ser
+/// candidato —, e é por isso que elas ficam: com o consentimento dado, é este
+/// filtro que ainda decide que uma página qualquer não é uma imagem.
 #[test]
 fn so_um_link_de_imagem_e_buscado_e_so_uma_vez() {
     let fonte = without_comments(&read("ui/tela-sessao.js"));
@@ -13514,21 +13577,71 @@ fn so_um_link_de_imagem_e_buscado_e_so_uma_vez() {
          passar por `tenor.com`: {de_um_dominio}"
     );
 
-    let buscar = js_function(&fonte, "function buscarAPreviaDoLink(");
+    let buscar = js_function(&fonte, "function considerarAPrevia(");
     assert!(
         buscar.contains("if (previasDeLink.has(url)) return;"),
         "a busca deixou de ser uma vez por endereço: a conversa redesenha a \
          cada tique, e cada desenho vira outra batida na porta: {buscar}"
     );
     assert!(
-        buscar.contains("previasDeLink.set(url, false)"),
+        buscar.contains("dominioPendente ? { dominio: dominioPendente } : false"),
         "o que não deu deixou de ser guardado: um endereço que não responde \
-         vira uma batida constante: {buscar}"
+         vira uma batida constante. `false` é «não deu» e o objeto é «falta \
+         consentimento» — as duas são respostas guardadas, e é a distinção \
+         entre elas que decide se o convite do ADR 0053 aparece: {buscar}"
     );
     assert!(
         buscar.contains("previa_de_link"),
         "a busca deixou de passar pelo comando que confere esquema, tamanho e \
          bytes: {buscar}"
+    );
+}
+
+/// **Nenhuma prévia sai sem consentimento, e o consentimento se desfaz.**
+///
+/// ADR 0053 e R06 da revisão da v15. Três metades, e nenhuma vale sem as outras:
+///
+///   1. quem desenha não manda buscar — o que ele faz é perguntar o que já se
+///      sabe, e desenhar um botão quando a resposta é «falta consentimento»;
+///   2. o botão nomeia o **domínio**. Um «mostrar imagem» sem o nome de quem vai
+///      receber a visita é um consentimento que ninguém consegue dar de verdade;
+///   3. o que foi liberado aparece numa tela e pode ser retirado. Um
+///      consentimento que não se enxerga é um consentimento que ninguém revoga.
+#[test]
+fn nenhuma_previa_sai_sem_consentimento() {
+    let fonte = without_comments(&read("ui/tela-sessao.js"));
+
+    let com_links = js_function(&fonte, "function comLinks(");
+    assert!(
+        !com_links.contains("previa_de_link"),
+        "quem desenha voltou a chamar a busca direto: desenhar é buscar, e aí          ler uma mensagem entrega o endereço desta máquina a quem a escreveu:          {com_links}"
+    );
+    assert!(
+        com_links.contains("convitePrevia("),
+        "o convite saiu do desenho: a prévia não consentida passa a não ter o          que ocupar o lugar dela, e a pessoa não tem como pedir a imagem:          {com_links}"
+    );
+
+    let convite = js_function(&fonte, "function convitePrevia(");
+    assert!(
+        convite.contains("dominio"),
+        "o convite deixou de nomear o domínio: a escolha passa a ser sobre          «uma imagem» em vez de sobre entregar o endereço desta máquina a          alguém: {convite}"
+    );
+
+    let mostrar = js_function(&fonte, "async function mostrarAPrevia(");
+    assert!(
+        mostrar.contains("consentir_previa"),
+        "o botão deixou de gravar a escolha: a pergunta volta a cada desenho,          que é a forma mais rápida de ensinar alguém a clicar sem ler:          {mostrar}"
+    );
+
+    // A terceira metade, na tela que lista o que foi liberado.
+    let configuracao = without_comments(&read("ui/tela-server.js"));
+    assert!(
+        configuracao.contains("previas_consentidas"),
+        "a configuração não lista mais os domínios liberados: um consentimento          que não se enxerga é um consentimento que ninguém revoga"
+    );
+    assert!(
+        configuracao.contains("esquecer_previa"),
+        "a configuração não desfaz mais um consentimento"
     );
 }
 

@@ -275,6 +275,25 @@ pub struct Arranjo {
     /// O que cede primeiro quando o orçamento aperta. Ver
     /// [`seele_core::tela::Prioridade`](crate::tela::Prioridade).
     pub prioridade: crate::tela::Prioridade,
+    /// Se o som da fonte vai junto com a imagem.
+    ///
+    /// # Por que ele é uma escolha, e de quem
+    ///
+    /// R21 da revisão da v15. Três controles distintos precisam existir, e este é
+    /// o **de quem envia**: «incluir áudio». Os outros dois são o volume de quem
+    /// assiste — `Voice::set_volume_da_tela` — e a exclusão do áudio do SEELE na
+    /// captura, que é comportamento padrão onde o sistema a suporta e **não
+    /// existe** onde ele não suporta (ver
+    /// `seele_video::exclusao_do_som_deste_processo`).
+    ///
+    /// É esta escolha que dá uma saída a quem está num sistema sem exclusão: em
+    /// vez de o produto afirmar que o eco foi resolvido, ele diz que naquela
+    /// máquina a saída inteira entra, e oferece transmitir sem áudio.
+    ///
+    /// `true` é o padrão de quem não escolheu, porque o som é o que se espera de
+    /// um vídeo compartilhado — e é por isso que a limitação precisa estar
+    /// **escrita na tela**, e não só disponível num interruptor.
+    pub com_som: bool,
 }
 
 /// A alça de uma bomba viva.
@@ -383,7 +402,17 @@ where
     let laco = Laco {
         // Um codificador por transmissão, com o teto de voz. `None` é uma
         // máquina cujo Opus não abriu: a imagem continua indo, muda.
-        som: seele_audio::codec::VoiceEncoder::with_defaults().ok(),
+        //
+        // **E `None` também quando quem envia escolheu não incluir áudio.** Não é
+        // só não codificar: `escoar_som` desiste na primeira linha quando não há
+        // codificador, então a captura de som nem é lida — que é o que «sem
+        // áudio» tem de querer dizer numa máquina onde a captura leva a conversa
+        // inteira. Ver `Arranjo::com_som`.
+        som: if arranjo.com_som {
+            seele_audio::codec::VoiceEncoder::with_defaults().ok()
+        } else {
+            None
+        },
         conta_do_som: (0, 0),
         sobra: VecDeque::new(),
         biblioteca,
@@ -1533,6 +1562,10 @@ mod tests {
             faixa,
             escolha_de_resolucao: escolha,
             cadencia: Cadencia::Q30,
+            // Com som, que é o padrão de quem não escolheu. Os testes deste
+            // módulo são sobre o teto de vídeo; o caminho do som tem os dele em
+            // `escoar_som`.
+            com_som: true,
         }
     }
 

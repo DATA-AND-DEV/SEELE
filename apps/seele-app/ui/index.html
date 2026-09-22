@@ -1329,34 +1329,62 @@
             — o teto é a escolha de outra pessoa e não atravessa em lugar nenhum.
             Quem assiste lê só a coluna da esquerda, que é o que se sabe.
           -->
-          <dl id="palco-numeros" class="chamada-palco-numeros" hidden>
-            <div class="chamada-palco-linha">
-              <dt class="rotulo">RESOLUÇÃO</dt>
-              <dd class="chamada-palco-par">
-                <span id="palco-altura" class="chamada-palco-agora"></span>
-                <span class="chamada-palco-pedido">pedido: <span id="palco-altura-pedida"></span></span>
-              </dd>
-            </div>
-            <div class="chamada-palco-linha">
-              <dt class="rotulo">QUADROS</dt>
-              <dd class="chamada-palco-par">
-                <span id="palco-quadros" class="chamada-palco-agora"></span>
-                <span class="chamada-palco-pedido">pedido: <span id="palco-quadros-pedidos"></span></span>
-              </dd>
-            </div>
-            <div class="chamada-palco-linha">
-              <dt class="rotulo">BANDA</dt>
-              <dd class="chamada-palco-par">
-                <span id="palco-banda" class="chamada-palco-agora"></span>
-                <span class="chamada-palco-pedido">pedido: <span id="palco-banda-pedida"></span></span>
-              </dd>
-            </div>
-          </dl>
+          <!--
+            **A barra compacta do palco — R20 e ADR 0054.**
+
+            No lugar de três caixas de métrica que nunca foram medidas.
+
+            O que estava aqui: `RESOLUÇÃO`, `QUADROS` e `BANDA`, cada uma com a
+            coluna do que foi pedido ao lado. Os três números vinham zerados com
+            `medida: false`, **sempre** — nada nesta ponte alcança o codificador
+            de quem transmite nem a recepção de quem assiste —, então as três
+            caixas escreviam «ainda não há medida desta transmissão», para
+            sempre, numa área rolável própria por cima do vídeo.
+
+            A decisão é a do review: retirar o espaço vazio enquanto não há
+            medição, e priorizar a imagem. Quando houver medida de verdade, ela
+            volta ligada à transmissão certa e dizendo o que mediu.
+
+            O que fica é o que se sabe e o que se controla: quem transmite,
+            quantas pessoas recebem, o som **desta** transmissão, e parar de
+            assistir.
+          -->
+          <div id="palco-controles" class="chamada-palco-controles" hidden>
+            <!--
+              O som da transmissão, separado do das pessoas — R17.
+
+              «Não há controle independente para silenciar o conteúdo
+              compartilhado preservando a voz.» Agora há, e ele é desta
+              transmissão: trocar de tela não carrega o volume da anterior, e
+              outra pessoa parando de transmitir não cala esta.
+            -->
+            <button id="palco-mudo" class="chamada-palco-acao" type="button"
+                    aria-pressed="false">SILENCIAR</button>
+            <label class="chamada-palco-volume">
+              <span class="rotulo">VOLUME</span>
+              <input id="palco-volume" type="range" min="0" max="200" step="5" value="100"
+                     aria-label="volume do som desta transmissão">
+            </label>
+            <!--
+              **«Parar de assistir», e o nome é a decisão.** O review pede o nome
+              por extenso: encerra vídeo e áudio **daquela** transmissão, e a
+              conversa de voz continua. «Ocultar vídeo e continuar ouvindo» seria
+              outra ação, e por isso é outro botão — o de silenciar, ao lado.
+            -->
+            <button id="palco-parar-de-assistir" class="chamada-palco-acao" type="button">
+              PARAR DE ASSISTIR
+            </button>
+          </div>
 
           <!--
-            Quando aperta, a tela diz que apertou. Um compartilhamento que cai de
-            resolução porque entrou a quinta pessoa e não explica é o produto
-            sabendo algo que quem está na frente dele não sabe (§5.1).
+            Quando aperta, a tela diz que apertou (§5.1).
+
+            **Fica escondido enquanto não houver medida.** A comparação que o
+            acendia era entre o que está saindo e o que foi pedido, e o primeiro
+            nunca foi medido — então ela nunca foi verdadeira e este parágrafo
+            nunca apareceu. Ele fica, e não sai: no dia em que houver medida é
+            esta linha que volta a morder, e o §5.1 continua obrigando a
+            explicação. Ver a nota sobre os campos removidos em `TelaEmCurso`.
           -->
           <p id="palco-aperto" class="chamada-palco-aperto" hidden></p>
         </section>
@@ -1493,9 +1521,29 @@
               metade que precisa ser lida **enquanto se digita**, e é a que o
               guarda `a_nota_que_promete_o_enter_tem_quem_a_cumpra` prende.
             -->
+            <!--
+              **O `maxlength` saiu, e a saída é o conserto.**
+
+              Ele dizia 4000, e contava unidades de texto. O contrato do fio
+              limita 4.096 **bytes**: 3.000 letras `á` passavam por este campo e
+              ocupavam 6.000 bytes. O que acontecia então não era uma recusa — o
+              quadro falhava ao ser codificado e a sessão inteira caía, sem uma
+              palavra na tela.
+
+              Quem conta agora é `medirOCorpo`, em bytes, com o teto lido do
+              Rust (`limite_da_mensagem`), e o aviso abaixo diz o número. Um
+              `maxlength` a mais aqui seria um segundo teto contando outra coisa
+              — que é exatamente o defeito que acabou de sair.
+            -->
             <textarea id="campo-mensagem" name="mensagem" rows="1"
                       placeholder="transmitir no canal — Enter envia"
-                      maxlength="4000" autocomplete="off"></textarea>
+                      autocomplete="off"></textarea>
+            <!--
+              O aviso de tamanho. `role="status"` porque ele aparece enquanto se
+              digita, e quem usa leitor de tela precisa saber que o texto passou
+              do teto antes de tentar mandá-lo.
+            -->
+            <span id="campo-mensagem-tamanho" class="campo-tamanho" role="status" hidden></span>
           </span>
           <!--
             Abre o seletor de arquivos do sistema. Antes ele não abria: o ADR 0027
@@ -2578,6 +2626,108 @@
                 </div>
               </div>
 
+              <!--
+                **REDUÇÃO DE RUÍDO** — F02 de `docs/features-v15.md`.
+
+                O pedido foi «um filtro de voz a la Discord». O que está aqui é
+                supressão de ruído com preservação da fala: ventilador e
+                ar-condicionado caem, a voz fica. Digitação é transiente e sobra
+                atenuada, não removida — dito porque descobrir isso sozinho custa
+                confiança no controle.
+
+                Com opção de desligar, que o documento pede por escrito. Ligada é
+                o padrão, e é ela que faz a sensibilidade abaixo caber.
+
+                Do disco e não da sessão, ao contrário dos três modos acima: o
+                filtro roda nesta máquina, antes de qualquer servidor, e a escolha
+                tem de valer na próxima abertura.
+              -->
+              <div class="server-campo">
+                <h4 class="rotulo">REDUÇÃO DE RUÍDO</h4>
+                <!--
+                  `server-marcar` e não `server-chave`: aquele nome é reservado por
+                  `the_captions_mode_does_not_come_back_by_accident`, que proíbe a
+                  volta do modo de legendas simples. O guarda está certo em ser
+                  literal, e quem desvia é esta linha.
+                -->
+                <label class="server-marcar" for="server-reducao-de-ruido">
+                  <input id="server-reducao-de-ruido" type="checkbox" checked>
+                  <span>reduzir ruído de fundo do microfone</span>
+                </label>
+                <p class="server-frase">Ventilador e ar-condicionado caem sem levar
+                  a voz junto. Digitação é um estalo curto: ela fica mais baixa, e
+                  não some. Desligar devolve o microfone como ele é.</p>
+              </div>
+
+              <!--
+                **SENSIBILIDADE DA VOZ** — F01.
+
+                O pedido foi −60 dBFS, e ele só cabe com o filtro acima ligado: sem
+                ele, um limiar tão baixo mantém o canal aberto no ventilador o dia
+                inteiro. O padrão segue a redução de ruído, e o controle existe
+                porque um único número não serve a todo microfone — é o que o
+                documento pede ao manter «ajuste manual de sensibilidade».
+
+                **No padrão, este número é um alvo e não o corte.** O corte é o
+                ruído medido da sala mais nove decibéis, e desce até aqui quando a
+                sala fica quieta — a auditoria de 22/09/2026 mediu o que o número
+                fixo custava: canal aberto em 200 de 200 quadros de ventilador. Um
+                valor escolhido nesta régua, ao contrário, fica onde foi posto. O
+                medidor do teste abaixo mostra onde o corte está de verdade.
+
+                O valor é escrito ao lado, e o extremo da régua vem do Rust: dois
+                pares de extremos seriam dois pares esperando para discordar.
+              -->
+              <div class="server-campo" id="server-campo-sensibilidade">
+                <h4 class="rotulo">SENSIBILIDADE DA VOZ</h4>
+                <div class="server-regua">
+                  <input id="server-sensibilidade" type="range" step="0.5"
+                         aria-describedby="server-sensibilidade-valor">
+                  <span id="server-sensibilidade-valor" class="server-regua-valor"></span>
+                  <button id="server-sensibilidade-padrao" class="server-lista-acao"
+                          type="button">USAR O PADRÃO</button>
+                </div>
+                <p class="server-frase">Mais sensível abre com fala baixa e também
+                  com mais ruído. No padrão este número é o mais sensível que o
+                  SEELE chega: o corte acompanha o ruído da sala e o teste abaixo
+                  mostra onde ele está. Escolher um valor aqui o deixa fixo. Só vale
+                  no modo <strong>VOZ</strong>: na tecla e no aberto quem decide é
+                  você.</p>
+              </div>
+
+              <!--
+                **TESTAR O MICROFONE** — F01.
+
+                «Permitir testar e ouvir o resultado antes de entrar numa
+                conversa.» O teste passa pelo **mesmo caminho** de uma conversa —
+                redução de ruído, portão, ganho —, porque é o que os outros
+                ouviriam; um teste do microfone cru responderia outra pergunta.
+
+                Ouvir a si mesmo realimenta, então isso é um segundo botão e ele
+                começa desligado. O nível e a marca de abertura respondem a maior
+                parte da pergunta sem som nenhum.
+              -->
+              <div class="server-campo">
+                <h4 class="rotulo">TESTAR O MICROFONE</h4>
+                <div class="server-regua">
+                  <button id="server-testar-microfone" class="server-lista-acao" type="button">
+                    COMEÇAR O TESTE
+                  </button>
+                  <button id="server-ouvir-microfone" class="server-lista-acao" type="button"
+                          aria-pressed="false" hidden>OUVIR-ME</button>
+                </div>
+                <div id="server-nivel-da-voz" class="server-nivel-da-voz" hidden>
+                  <div class="server-nivel-barra">
+                    <span id="server-nivel-preenchido" class="server-nivel-preenchido"></span>
+                    <span id="server-nivel-corte" class="server-nivel-corte"></span>
+                  </div>
+                  <p id="server-nivel-frase" class="server-frase" role="status"></p>
+                </div>
+                <p class="server-frase">Fale normalmente e veja onde a transmissão
+                  abre. <strong>OUVIR-ME</strong> toca o que sairia daqui — de fone,
+                  ou o alto-falante volta para o microfone.</p>
+              </div>
+
             </div>
           </div>
 
@@ -2895,6 +3045,34 @@
                 seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> servidor
                 que você já visitou, e não há como recuperá-lo sem um operador de
                 cada um deles.</p>
+            </div>
+          </div>
+
+          <!--
+            ADR 0053: os domínios cuja prévia automática você liberou.
+
+            Aqui, e não numa seção própria, porque a pergunta é a mesma da caixa
+            acima: **o que esta máquina conta sobre você**. Buscar uma imagem
+            entrega a quem a serve o endereço de origem desta máquina e a hora —
+            e quem escolhe o endereço numa conversa é quem escreveu a mensagem.
+
+            A lista existe para poder ser desfeita. Um consentimento dado num
+            clique e invisível depois é um consentimento que ninguém revoga, e
+            aí «por domínio, uma vez» vira «para sempre, sem lembrar de quem».
+          -->
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">IMAGENS DE LINK</h3>
+            </div>
+            <div class="server-bloco-corpo">
+              <p class="server-frase">Uma imagem colada numa conversa só é
+                buscada depois de você liberar o domínio dela. Buscar entrega a
+                esse servidor o endereço desta máquina e a hora — é por isso que
+                a escolha é por domínio, e é sua.</p>
+              <ul id="server-previas" class="server-lista"></ul>
+              <p id="server-previas-vazio" class="server-frase" hidden>Nenhum
+                domínio liberado. As imagens aparecem com um botão, e nada é
+                buscado até você clicar nele.</p>
             </div>
           </div>
         </section>
@@ -3828,6 +4006,32 @@
           <option value="30">30 por segundo</option>
           <option value="60" selected>60 por segundo</option>
         </select>
+      </div>
+      <!--
+        **INCLUIR SOM, e o que esta máquina faz com o áudio do próprio SEELE.**
+
+        R21 da revisão da v15: «participantes se escutam quando alguém transmite
+        a tela inteira». O caminho é o som da saída, e a conversa está nela.
+
+        Três controles precisam existir, e este é o de **quem envia**. Os outros
+        dois: o volume de quem assiste, no palco, e a exclusão do áudio do SEELE
+        na captura — padrão onde o sistema a suporta, e inexistente onde ele não
+        suporta.
+
+        A frase abaixo do controle diz qual dos dois casos é esta máquina, e é
+        escrita por `desenharSomDaCaptura`. Ela existe porque a alternativa era
+        o produto afirmar que o eco estava resolvido em toda parte, e ele não
+        está: a exclusão por processo do Windows pede uma API que o `cpal` não
+        expõe, e a do macOS é do 13 para cima.
+
+        Marcado por padrão: som é o que se espera de um vídeo compartilhado.
+      -->
+      <div class="compartilhar-escolha compartilhar-escolha-som">
+        <label class="compartilhar-som-rotulo" for="compartilhar-som">
+          <input id="compartilhar-som" type="checkbox" checked>
+          <span class="rotulo">INCLUIR SOM</span>
+        </label>
+        <p id="compartilhar-som-aviso" class="compartilhar-som-aviso"></p>
       </div>
       <p id="compartilhar-erro" class="erro" hidden></p>
 

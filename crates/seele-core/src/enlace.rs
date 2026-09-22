@@ -4383,6 +4383,7 @@ impl Motor {
             escolha_de_resolucao: limites.resolucao,
             cadencia: limites.cadencia,
             prioridade: limites.prioridade,
+            com_som: limites.com_som,
         };
 
         // `|| {}` é a resposta que este crate consegue dar ao §2, e a bomba diz

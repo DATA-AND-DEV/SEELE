@@ -237,12 +237,31 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
     anfitriao.enter_voice_room(VOICE_ROOM, None)?;
     anfitriao.open_channel(LINE)?;
     anfitriao.send_message(LINE, "verificando harmônicos".into())?;
+    // **Uma mensagem confirmada**, e não uma que só existe aqui.
+    //
+    // Era `!messages().is_empty()`, e a lista passou a carregar também as
+    // pendentes — o que esta máquina escreveu e o servidor ainda não gravou. Uma
+    // pendente tem `id` zero, porque não existe id de algo que o servidor não
+    // conhece, e `remove_message(0)` não endereça mensagem nenhuma: o servidor
+    // respondia «não há tal mensagem» no lugar da recusa de permissão que este
+    // teste mede.
+    //
+    // Ver `seele_ffi::Message::id`. O caller errado aqui era este teste, e o
+    // próximo seria uma tela — por isso o guarda também entrou na ponte.
     assert!(
-        ate(&anfitriao, |connection| !connection.messages().is_empty()),
-        "a mensagem do anfitrião não chegou; não há o que tentar apagar"
+        ate(&anfitriao, |connection| connection
+            .messages()
+            .iter()
+            .any(|mensagem| mensagem.id != 0)),
+        "a mensagem do anfitrião não foi gravada; não há o que tentar apagar"
     );
     let alvo = anfitriao.snapshot().me.expect("o anfitrião tem identidade");
-    let mensagem = anfitriao.messages()[0].id;
+    let mensagem = anfitriao
+        .messages()
+        .into_iter()
+        .find(|mensagem| mensagem.id != 0)
+        .expect("a asserção acima garante que há uma gravada")
+        .id;
 
     let intruso = entrar(endereco, "intruso-recusa").await?;
     let pode = intruso.snapshot();

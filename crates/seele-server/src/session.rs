@@ -35,8 +35,8 @@ use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
-    MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role, ServerMessage,
-    Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
+    MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role,
+    ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
 };
 use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use seele_proto::screen::SCREEN_HEADER_LEN;
@@ -2031,18 +2031,82 @@ async fn run_session(
                         desassentar(server, voice_rooms, session, Saida::Sala(sala)).await;
                     }
                     ClientMessage::JoinChannel { channel } => {
+                        // **Assinar é ser servido, então assinar é conferido.**
+                        //
+                        // Este braço aceitava qualquer número. A conferência de
+                        // verdade é a da difusão, que é lida a cada evento; esta
+                        // aqui é o que torna a recusa *visível* — sem ela, quem
+                        // não pode ler um canal o abre, não recebe nada e lê
+                        // isso como o produto travado. O defeito desta casa é o
+                        // produto saber e não contar.
+                        if !pode_ler_canal(server, session.person, channel).await {
+                            recusar(&mut send, session.person, "JoinChannel").await?;
+                            continue;
+                        }
                         if !channels.contains(&channel) {
                             channels.push(channel);
                         }
                     }
                     ClientMessage::SendMessage { channel, body, replies_to, client_message_id } => {
                         // specs/08-seguranca.md: verified here, always.
-                        if !session.may_write {
-                            frame::write(&mut send, &ServerMessage::Alert {
-                                severity: AlertSeverity::Warning,
-                                reason: AlertReason::PermissionDenied,
-                                operator_text: None,
-                            }).await?;
+                        //
+                        // **Agora, e por canal.** `session.may_write` era o
+                        // valor do aperto de mão, calculado uma vez e
+                        // consultado para sempre: revogar a escrita de quem já
+                        // estava conectado não fazia nada até a pessoa
+                        // reconectar (R08). Ele continua existindo, para o que
+                        // a casca desenha, e deixou de ser a autoridade aqui.
+                        //
+                        // **E o canal é conferido antes de enfileirar** (R04).
+                        // O lote do escritor é uma transação só; um destino
+                        // inexistente cai na chave estrangeira e, antes do
+                        // conserto do `append_batch`, levava consigo as
+                        // mensagens válidas de todas as outras pessoas do
+                        // mesmo lote. Conferir aqui é não deixar o caso chegar
+                        // lá — e a recusa volta identificada, com a chave que
+                        // esta pessoa escolheu, em vez de um alerta que não
+                        // diz de qual mensagem fala.
+                        let recusa = {
+                            let guarda = server.persistence.lock().await;
+                            if !crate::autorizacao::canal_existe(&guarda, channel)
+                                .unwrap_or(false)
+                            {
+                                Some(MessageRefusal::NoSuchChannel)
+                            } else if !crate::autorizacao::pode_no_canal(
+                                &guarda,
+                                session.person,
+                                channel,
+                                crate::autorizacao::Acesso::Escrita,
+                            )
+                            .unwrap_or(false)
+                            {
+                                Some(MessageRefusal::PermissionDenied)
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some(reason) = recusa {
+                            tracing::warn!(
+                                person = %session.person, %channel, ?reason,
+                                "mensagem recusada antes de entrar no lote"
+                            );
+                            let aviso = ServerMessage::MessageRejected {
+                                channel,
+                                client_message_id,
+                                reason,
+                            };
+                            if entende_a_mensagem(&aviso, session.protocol_version) {
+                                frame::write(&mut send, &aviso).await?;
+                            } else {
+                                // Um par que não conhece a variante recebe o
+                                // que ele conhece. Sem isto, calar a variante
+                                // nova seria calar a recusa inteira para ele.
+                                frame::write(&mut send, &ServerMessage::Alert {
+                                    severity: AlertSeverity::Warning,
+                                    reason: AlertReason::PermissionDenied,
+                                    operator_text: None,
+                                }).await?;
+                            }
                             continue;
                         }
                         // Queued, not confirmed. The broadcast after the commit
@@ -2057,6 +2121,14 @@ async fn run_session(
                         }).await?;
                     }
                     ClientMessage::FetchHistory { channel, cursor, limit } => {
+                        // R01, o caminho pelo qual o defeito foi reproduzido:
+                        // este braço atendia direto, sem perguntar nada a
+                        // PERMISSIONS. Uma conta autenticada cujo papel havia
+                        // sido tirado recebia a conversa inteira.
+                        if !pode_ler_canal(server, session.person, channel).await {
+                            recusar(&mut send, session.person, "FetchHistory").await?;
+                            continue;
+                        }
                         let page = {
                             let mut guard = server.persistence.lock().await;
                             let messages = Messages::new(&mut guard);
@@ -2577,7 +2649,29 @@ async fn run_session(
                         // message somebody may read is part of that message,
                         // and `Permission::AttachFile` is about putting bytes
                         // on somebody's disk rather than about looking at them.
-                        if !pode(server, session.person, Permission::ReadChannel).await {
+                        //
+                        // **Do canal de onde o arquivo pendura**, e não a
+                        // permissão global sozinha. Um anexo é parte de uma
+                        // mensagem, a mensagem é de um canal, e conferir só a
+                        // permissão geral entregava o arquivo de um canal que
+                        // esta pessoa não pode ler — a metade do R01 que sobra
+                        // depois de consertar o histórico.
+                        //
+                        // Anexo que não existe e anexo de canal fechado dão a
+                        // **mesma** resposta, `NotFound`, e é deliberado: a
+                        // variante já diz as duas coisas por escrito, e separar
+                        // as respostas deixaria alguém enumerar o que existe
+                        // num canal que ele não pode abrir.
+                        let canal_do_arquivo = {
+                            let guarda = server.persistence.lock().await;
+                            crate::autorizacao::canal_do_anexo(&guarda, attachment)
+                                .unwrap_or(None)
+                        };
+                        let liberado = match canal_do_arquivo {
+                            Some(canal) => pode_ler_canal(server, session.person, canal).await,
+                            None => false,
+                        };
+                        if !liberado {
                             frame::write(&mut send, &ServerMessage::AttachmentUnavailable {
                                 attachment,
                                 reason: AttachmentRefusal::NotFound,
@@ -3400,6 +3494,28 @@ async fn run_session(
                     _ => {}
                 }
 
+                // **A autorização de leitura é conferida aqui, agora, para o
+                // canal deste evento.**
+                //
+                // Antes deste conserto o guarda da difusão era `channels
+                // .contains(...)` e nada mais — a lista dos canais que *esta
+                // conexão pediu*. Como `JoinChannel` também não conferia nada,
+                // o guarda testava a intenção de quem pedia em vez da permissão
+                // de quem pediu: assinar era ser servido. Ver R01.
+                //
+                // Lida a cada evento, e não guardada da assinatura, porque é a
+                // outra metade do R08: papel revogado tem de morder a sessão
+                // que já está de pé. Uma leitura por destinatário por mensagem,
+                // num servidor que a `specs/04-servidor-seele.md` dimensiona em
+                // cinquenta pessoas, e as mensagens são de ritmo humano — não é
+                // o caminho de quadro de áudio.
+                if let Some(canal) = canal_do_evento(&event) {
+                    if !channels.contains(&canal)
+                        || !pode_ler_canal(server, session.person, canal).await
+                    {
+                        continue;
+                    }
+                }
                 if let Some(message) = translate(&event, &channels, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
                         frame::write(&mut send, &message).await?;
@@ -3959,6 +4075,33 @@ async fn pode(server: &Server, person: PersonId, permission: Permission) -> bool
         .unwrap_or(false)
 }
 
+/// Se esta pessoa pode **ler este canal**, agora.
+///
+/// A mesma pergunta de [`pode`], num canal, e por [`crate::autorizacao`] — que é
+/// onde ela está respondida uma vez em vez de quatro. Falha de banco lê como
+/// negação, pela mesma razão de lá.
+async fn pode_ler_canal(server: &Server, person: PersonId, channel: ChannelId) -> bool {
+    let guard = server.persistence.lock().await;
+    crate::autorizacao::pode_no_canal(&guard, person, channel, crate::autorizacao::Acesso::Leitura)
+        .unwrap_or(false)
+}
+
+/// O canal a que este evento pertence, se ele pertence a um.
+///
+/// Existe porque [`translate`] é síncrona e não pode perguntar nada ao banco: a
+/// autorização é consultada antes dela, e esta função é o que diz sobre qual
+/// canal perguntar. Um evento sem canal — telemetria, roster, tela — devolve
+/// `None` e não passa pelo guarda, porque não há canal sobre o qual perguntar.
+const fn canal_do_evento(event: &Event) -> Option<ChannelId> {
+    match event {
+        Event::MessagePosted(message) => Some(message.channel),
+        Event::MessageEdited { channel, .. } | Event::MessageRemoved { channel, .. } => {
+            Some(*channel)
+        }
+        _ => None,
+    }
+}
+
 /// Whether this person may aim a moderation verb at that one.
 ///
 /// Two questions, and both have to be yes.
@@ -4066,6 +4209,23 @@ fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
         // ADR 0048, na mesma versão 7 e pela mesma razão: ela nasceu antes
         // de a 7 sair, então não há par nenhum esperando por ela.
         ServerMessage::VolumeRecusado { .. } => versao >= 7,
+        // A v8, e é ela que morde hoje: a recusa identificada de uma mensagem
+        // de texto. Um par v7 não conhece a variante, e o postcard não a
+        // ignora — ele desloca a leitura do fluxo de controle dele para sempre.
+        //
+        // O que o par v7 perde por este portão é exatamente o que ele já não
+        // tinha antes desta versão: a notícia de que uma mensagem dele foi
+        // recusada. Ele continua entrando, lendo e escrevendo.
+        ServerMessage::MessageRejected { .. } => versao >= 8,
+        // **Um motivo de alerta da v8, dentro de um quadro que é antigo.** O
+        // `Alert` existe desde a v1; o que um par v7 não conhece é este ordinal
+        // do `AlertReason`, e um ordinal desconhecido desloca a leitura do fluxo
+        // dele igual a uma variante desconhecida. O portão é por motivo, e não
+        // pelo quadro, porque é o motivo que é novo.
+        ServerMessage::Alert {
+            reason: AlertReason::RetencaoApagouHistorico { .. },
+            ..
+        } => versao >= 8,
         _ => true,
     }
 }
@@ -4602,6 +4762,39 @@ fn translate(
                     attachment: message.attachment.clone(),
                 })
         }
+        // A retenção apagou histórico: todo mundo, sem filtro de canal, porque a
+        // janela é por idade e atravessa os canais. Ver
+        // `AlertReason::RetencaoApagouHistorico`.
+        Event::HistoricoApagado { apagadas } => Some(ServerMessage::Alert {
+            severity: AlertSeverity::Info,
+            reason: AlertReason::RetencaoApagouHistorico {
+                apagadas: *apagadas as u64,
+            },
+            operator_text: None,
+        }),
+
+        // **Só para quem escreveu.** Uma recusa é uma resposta a uma pessoa, e
+        // não notícia da sala: difundi-la contaria a todo mundo que alguém
+        // tentou escrever num canal que não podia.
+        //
+        // **Não passa pelo guarda de leitura de canal**, de propósito, e a razão
+        // é a que faz este evento existir: uma das recusas possíveis é
+        // justamente «você não pode escrever aqui», e num canal fechado o guarda
+        // de leitura calaria a notícia. Quem tentou tem de saber que não passou.
+        Event::MessageRejected {
+            channel,
+            author,
+            client_message_id,
+            reason,
+        } if *author == self_person => {
+            client_message_id.map(|client_message_id| ServerMessage::MessageRejected {
+                channel: *channel,
+                client_message_id,
+                reason: *reason,
+            })
+        }
+        Event::MessageRejected { .. } => None,
+
         Event::MessageEdited { channel, id, body } => {
             channels
                 .contains(channel)
@@ -4976,7 +5169,7 @@ mod versao_no_fio {
     }
 
     #[test]
-    fn a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v7() {
+    fn a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v8() {
         // **Este teste existe para reprovar quando a janela anda**, e já
         // reprovou duas vezes fazendo exatamente isso. O registro das duas fica
         // porque é ele que explica por que os números abaixo são o que são.
@@ -4992,16 +5185,26 @@ mod versao_no_fio {
         // passou a ser o quarto vácuo. Ele fica pelo mesmo motivo dos outros
         // três.
         //
-        // O portão que **morde hoje** é o da v7: a identidade do servidor não
-        // sai para o par da janela anterior. É a razão de o nome deste teste ter
-        // mudado junto com a versão, pela segunda vez.
-        assert_eq!(seele_proto::version::oldest_supported_version(), 6);
+        // Com a **v8 o piso é 7**, e o portão da identidade do servidor — `>= 7`
+        // — passou a ser o quinto vácuo. Ele fica pelo mesmo motivo dos outros
+        // quatro.
+        //
+        // O portão que **morde hoje** é o da v8: a recusa identificada de uma
+        // mensagem de texto não sai para o par da janela anterior. É a razão de
+        // o nome deste teste ter mudado junto com a versão, pela terceira vez.
+        assert_eq!(seele_proto::version::oldest_supported_version(), 7);
 
         for (mensagem, nome) in [
             (ServerMessage::UplinkLoss { fraction: 0.0 }, "UplinkLoss"),
             (sirva(), "SirvaTelaPara"),
             (assista(), "AssistaTelaPor"),
             (resposta_de_mod(), "ModReply"),
+            (
+                ServerMessage::Instancia {
+                    identidade: String::new(),
+                },
+                "Instancia",
+            ),
         ] {
             assert!(
                 entende_a_mensagem(&mensagem, seele_proto::version::oldest_supported_version()),
@@ -5010,16 +5213,42 @@ mod versao_no_fio {
         }
 
         assert!(
-            !entende_a_mensagem(
-                &ServerMessage::Instancia {
-                    identidade: String::new()
-                },
-                seele_proto::version::oldest_supported_version()
-            ),
-            "a identidade do servidor saiu para a v6, que não sabe \
-             decodificá-la: o postcard não é autodescritivo e o fluxo de \
-             controle dela fica deslocado para sempre"
+            !entende_a_mensagem(&recusa_de_mensagem(), 7),
+            "a recusa de mensagem saiu para a v7, que não sabe decodificá-la: \
+             o postcard não é autodescritivo e o fluxo de controle dela fica \
+             deslocado para sempre"
         );
+    }
+
+    /// Uma recusa de mensagem de texto, para os portões da v8.
+    fn recusa_de_mensagem() -> ServerMessage {
+        ServerMessage::MessageRejected {
+            channel: ChannelId(1),
+            client_message_id: seele_proto::ids::ClientMessageId(1),
+            reason: seele_proto::control::MessageRefusal::NoSuchChannel,
+        }
+    }
+
+    #[test]
+    fn a_recusa_de_mensagem_sai_para_um_cliente_da_versao_de_hoje() {
+        // A outra metade do portão da v8, como o `ModReply` tem a dele: sem
+        // esta linha, um guarda que barrasse todo mundo passaria no teste
+        // acima e a recusa nunca chegaria a ninguém — que é o defeito de
+        // origem, o produto sabendo e não contando.
+        assert!(entende_a_mensagem(
+            &recusa_de_mensagem(),
+            seele_proto::version::PROTOCOL_VERSION
+        ));
+    }
+
+    #[test]
+    fn a_recusa_de_mensagem_nao_sai_para_ninguem_abaixo_da_v8() {
+        for versao in 0..8 {
+            assert!(
+                !entende_a_mensagem(&recusa_de_mensagem(), versao),
+                "MessageRejected saiu para um cliente v{versao}"
+            );
+        }
     }
 
     #[test]
@@ -5624,6 +5853,8 @@ mod fim_de_tela_por_sessao {
         let writes = spawn_writer(Arc::clone(&persistence), events.clone());
         Server {
             esperas: Arc::new(std::sync::Mutex::new(Default::default())),
+            mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             persistence,
             events,
             writes,

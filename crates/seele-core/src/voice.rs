@@ -36,7 +36,7 @@ use seele_audio::resample::RateConverter;
 use seele_audio::supervisor::{AvisoDeAparelho, CicloDoAparelho, DeviceState, Reabertura};
 use seele_audio::telemetry::{AudioTelemetry, FalhaLocal, LocalTelemetry, SourceTelemetry};
 use seele_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
-use seele_proto::ids::Ssrc;
+use seele_proto::ids::{ScreenId, Ssrc};
 use seele_proto::MediaHeader;
 
 use crate::client::MediaChannel;
@@ -170,6 +170,61 @@ struct Controls {
     /// quem está atrasado meio segundo já perdeu a sincronia com a imagem, e
     /// insistir nele afasta o som cada vez mais.
     som_da_tela: Mutex<std::collections::VecDeque<Vec<u8>>>,
+    /// De qual transmissão são os pacotes que estão na fila acima.
+    ///
+    /// # Por que a fila precisa saber de quem ela é
+    ///
+    /// Porque ela não sabia, e qualquer `TelaFechou` a limpava — inclusive o de
+    /// uma transmissão que esta pessoa **não** estava ouvindo. Com duas pessoas
+    /// compartilhando, alguém parando de transmitir calava o som da outra. R17 da
+    /// revisão da v15.
+    ///
+    /// E porque a troca de tela precisa ser limpa: os pacotes da anterior que
+    /// ainda estão na fila são som de uma imagem que já saiu da frente, e tocá-los
+    /// faria a troca soar como sobreposição.
+    ///
+    /// Zero quer dizer «nenhuma»: `ScreenId` é atribuído pelo servidor e começa
+    /// em 1 — ver `voice_room::proxima_tela`.
+    tela_do_som: AtomicU32,
+    /// O volume do som da transmissão, separado do das pessoas.
+    ///
+    /// # Por que ele existe
+    ///
+    /// Porque não havia como silenciar o conteúdo compartilhado preservando a
+    /// conversa: o isolamento total cala a mistura inteira, e ganho por
+    /// interlocutor não alcança uma tela — uma tela não é um falante. Quem
+    /// assistia a um vídeo e queria ouvir as pessoas não tinha o que fazer. R17.
+    ///
+    /// Guardado em milésimos num átomo, e não em `f32`, pela razão de
+    /// [`Self::relogio_seq`]: não há átomo de `f32`, e um cadeado por volta do laço
+    /// de áudio seria contenção por nada. `1000` é o volume de origem.
+    volume_da_tela: AtomicU32,
+    /// Se o som da transmissão está calado, sem mexer no volume dele.
+    ///
+    /// Separado do volume de propósito, como o mudo do microfone é separado do
+    /// ganho: calar e voltar tem de devolver o volume que a pessoa escolheu, e não
+    /// zero — um mudo que zerasse o volume seria um mudo que apaga a escolha.
+    tela_calada: AtomicBool,
+    /// Quanto da supressão de ruído do microfone é aplicado. F02.
+    ///
+    /// Milésimos num átomo, pela razão de [`Self::relogio_seq`]. Zero desliga, e
+    /// desligado o sinal não passa pela FFT — ver `seele_audio::supressao`.
+    ///
+    /// O padrão é [`SUPRESSAO_PADRAO`]: ligada. É o que faz a sensibilidade de F01
+    /// caber, e é o pedido de F02 — quem não quiser desliga, e a escolha fica
+    /// gravada.
+    supressao: AtomicU32,
+    /// A sensibilidade de abertura da ativação por voz, em milésimos de dBFS. F01.
+    ///
+    /// **Negativa**, então `i32` e não `u32`: dBFS é relativa ao máximo, e tudo
+    /// abaixo do máximo é negativo. Milésimos porque a interface oferece meio
+    /// decibel de passo.
+    ///
+    /// Zero quer dizer «o padrão», que depende de a supressão estar ligada — ver
+    /// [`configuracao_do_portao`]. Não é «0 dBFS», que seria um portão que nunca
+    /// abre: zero é o valor de um átomo que ninguém escreveu, e tratá-lo como
+    /// escolha faria toda sessão nova começar surda.
+    abertura_dbfs_milesimos: std::sync::atomic::AtomicI32,
     /// Quadros que a Voice produziu e o transporte recusou.
     ///
     /// Terceira categoria, e ela faltava. `Telemetry` já distingue perda de
@@ -536,7 +591,7 @@ pub struct DeviceChoice {
 
 impl DeviceChoice {
     /// The same choice, as the audio layer asks for it.
-    fn wanted(&self) -> device::Wanted<'_> {
+    pub(crate) fn wanted(&self) -> device::Wanted<'_> {
         device::Wanted {
             capture: self.capture.as_deref(),
             playback: self.playback.as_deref(),
@@ -614,6 +669,143 @@ fn open_preferring(chosen: &DeviceChoice) -> Result<AudioIo, device::DeviceError
 /// caminho de mistura.
 pub const SSRC_DA_TELA: u32 = u32::MAX;
 
+/// O volume de origem do som da transmissão, em milésimos.
+///
+/// Mil e não zero: quem começa a assistir ouve o que está sendo compartilhado. Um
+/// padrão calado faria o produto entregar vídeo mudo e esperar que a pessoa
+/// descobrisse sozinha onde o som estava.
+const VOLUME_DE_ORIGEM: u32 = 1_000;
+
+/// Quanto da supressão de ruído é aplicado por padrão, em milésimos.
+///
+/// Mil: ligada, inteira. F02 pede o controle com opção de desligar, e não pede o
+/// padrão desligado — um filtro que só funciona depois de alguém achar o
+/// interruptor é um filtro que quase ninguém tem.
+///
+/// E ligada é o que faz a sensibilidade de F01 caber: o padrão de −60 dBFS só é
+/// defensável com o piso da sala removido. Ver
+/// `seele_audio::gate::ABERTURA_COM_SUPRESSAO_DBFS`.
+const SUPRESSAO_PADRAO: u32 = 1_000;
+
+/// A configuração do portão que os controles de agora descrevem. F01.
+///
+/// Zero em `abertura_dbfs_milesimos` quer dizer «o padrão», e o padrão depende de
+/// a supressão estar ligada. É a decisão central de F01: −60 dBFS só é defensável
+/// com o piso da sala removido, e sem supressão o portão volta a ser a única
+/// defesa contra o ventilador — o argumento que `gate::OPEN_RMS` registra.
+///
+/// # O padrão é um alvo, e a escolha é um número
+///
+/// O padrão vai por [`GateConfig::automatico`]: −60 dBFS passa a ser o **mais
+/// sensível que o portão chega**, e o limiar de verdade é o ruído medido mais
+/// `gate::MARGEM_SOBRE_O_RUIDO_DB`. A auditoria de 22/09/2026 (A03) mediu por que:
+/// como número fixo, −60 dBFS abriu em 200 de 200 quadros de ruído sem fala
+/// nenhuma, porque o residual **depois** da supressão fica em torno de −59 dBFS —
+/// perto de zero decibel de folga.
+///
+/// Um valor escolhido à mão vai por [`GateConfig::de_dbfs`], que é fixo: F01 pede
+/// o ajuste manual, e um ajuste que o produto corrige por cima não é ajuste.
+fn configuracao_do_portao(controls: &Controls) -> GateConfig {
+    let escolhido = controls.abertura_dbfs_milesimos.load(Ordering::Relaxed);
+    let dbfs = if escolhido == 0 {
+        if controls.supressao.load(Ordering::Relaxed) > 0 {
+            seele_audio::gate::ABERTURA_COM_SUPRESSAO_DBFS
+        } else {
+            seele_audio::gate::ABERTURA_SEM_SUPRESSAO_DBFS
+        }
+    } else {
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "milésimos de decibel cabem exatos num f32 nesta faixa"
+        )]
+        let convertido = escolhido as f32 / 1000.0;
+        // **Fixo**, porque foi escolhido. Ver o doc.
+        return GateConfig::de_dbfs(convertido);
+    };
+    GateConfig::automatico(dbfs)
+}
+
+/// O carimbo de tempo de um quadro numa entrega de vários. F01.
+///
+/// `carimbo` é o do quadro de **agora**, `quantos` é o tamanho da entrega e
+/// `indice` a posição dentro dela. O último quadro fica com `carimbo`; cada um
+/// antes dele recua um quadro de amostras.
+///
+/// # Por que não bastava carimbar todos igual
+///
+/// Porque um carimbo é *quando aquele áudio aconteceu*, e os quadros retidos da
+/// primeira sílaba aconteceram **antes**. Carimbados todos com o mesmo instante,
+/// quem recebe vê três quadros no mesmo tempo: o `playout` trata carimbo repetido
+/// como um salto do relógio e ressincroniza, e uma ressincronização no primeiro
+/// quadro de cada fala é exatamente onde ela mais se ouve — é o começo da palavra
+/// que F01 foi recuperar.
+///
+/// Auditoria de 22/09/2026, A05. Recuar é a conta certa e não uma aproximação: o
+/// quadro retido *é* de 20 ms antes.
+///
+/// `wrapping_sub` porque o carimbo é um contador de 32 bits que dá a volta, e uma
+/// volta no meio de uma abertura não é um erro — é a mesma aritmética que o resto
+/// deste laço usa para andar para a frente.
+fn carimbo_do_quadro(carimbo: u32, quantos: usize, indice: usize) -> u32 {
+    let atras = quantos.saturating_sub(indice + 1);
+    let amostras = u32::try_from(atras.saturating_mul(FRAME_SAMPLES)).unwrap_or(0);
+    carimbo.wrapping_sub(amostras)
+}
+
+/// Põe um pacote de som de tela na fila, trocando de tela se for outra. R17.
+///
+/// **Função livre sobre os controles**, e não um corpo de método, para ser
+/// exercitável sem placa de som: abrir uma `Voice` pede um dispositivo de áudio, e
+/// o que este código decide — de quem é a fila — não tem nada a ver com hardware.
+/// Ver `o_som_de_uma_tela_nao_e_limpo_por_outra`.
+fn enfileirar_som_da_tela(controls: &Controls, tela: ScreenId, pacote: Vec<u8>) {
+    /// Meio segundo a 20 ms por pacote.
+    const TETO: usize = 25;
+
+    let mut fila = controls
+        .som_da_tela
+        .lock()
+        .unwrap_or_else(|envenenado| envenenado.into_inner());
+    // **Trocou de transmissão: a fila da anterior vai fora.** Os pacotes que
+    // sobraram são som de uma imagem que já não está na frente de ninguém, e
+    // tocá-los faria a troca soar como sobreposição.
+    let anterior = controls.tela_do_som.swap(tela.0, Ordering::Relaxed);
+    if anterior != tela.0 {
+        fila.clear();
+    }
+    while fila.len() >= TETO {
+        fila.pop_front();
+    }
+    fila.push_back(pacote);
+}
+
+/// Esquece o som **daquela** transmissão, se é dela que a fila é. R17.
+///
+/// Devolve se havia o que esquecer. Função livre pela razão de
+/// [`enfileirar_som_da_tela`].
+fn esquecer_o_som_de(controls: &Controls, tela: ScreenId) -> bool {
+    if controls.tela_do_som.load(Ordering::Relaxed) != tela.0 {
+        return false;
+    }
+    controls.tela_do_som.store(0, Ordering::Relaxed);
+    controls
+        .som_da_tela
+        .lock()
+        .unwrap_or_else(|envenenado| envenenado.into_inner())
+        .clear();
+    true
+}
+
+/// Quanto da supressão os controles de agora pedem, de zero a um. F02.
+fn forca_da_supressao(controls: &Controls) -> f32 {
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "mil milésimos cabem exatos num f32"
+    )]
+    let forca = controls.supressao.load(Ordering::Relaxed) as f32 / 1000.0;
+    forca
+}
+
 /// A running voice path.
 ///
 /// Dropping it stops the audio.
@@ -682,6 +874,11 @@ impl Controls {
             anel_cheio: std::sync::atomic::AtomicU64::new(0),
             gains: Mutex::new(HashMap::new()),
             som_da_tela: Mutex::new(std::collections::VecDeque::new()),
+            tela_do_som: AtomicU32::new(0),
+            volume_da_tela: AtomicU32::new(VOLUME_DE_ORIGEM),
+            tela_calada: AtomicBool::new(false),
+            supressao: AtomicU32::new(SUPRESSAO_PADRAO),
+            abertura_dbfs_milesimos: std::sync::atomic::AtomicI32::new(0),
         }
     }
 }
@@ -1096,28 +1293,130 @@ impl Voice {
     /// lugar. A decodificação acontece na thread de áudio, junto com a da voz:
     /// é lá que o codec já mora, e é lá que o isolamento total decide se alguma
     /// coisa toca.
-    pub fn som_da_tela(&self, pacote: Vec<u8>) {
-        /// Meio segundo a 20 ms por pacote.
-        const TETO: usize = 25;
-
-        let mut fila = self
-            .controls
-            .som_da_tela
-            .lock()
-            .unwrap_or_else(|envenenado| envenenado.into_inner());
-        while fila.len() >= TETO {
-            fila.pop_front();
-        }
-        fila.push_back(pacote);
+    pub fn som_da_tela(&self, tela: ScreenId, pacote: Vec<u8>) {
+        enfileirar_som_da_tela(&self.controls, tela, pacote);
     }
 
     /// Esquece o som da tela. Chamado quando a transmissão acaba.
-    pub fn esquecer_o_som_da_tela(&self) {
+    pub fn esquecer_o_som_da_tela(&self, tela: ScreenId) -> bool {
+        esquecer_o_som_de(&self.controls, tela)
+    }
+
+    /// O volume do som da transmissão. `1.0` é o de origem, `0.0` é calado.
+    ///
+    /// Independente do volume das pessoas e do isolamento total: silenciar o
+    /// conteúdo compartilhado tem de preservar a conversa, que é o pedido do R17.
+    /// O teto é o mesmo de [`Self::set_gain`] — quatro vezes —, porque é a mesma
+    /// mistura.
+    pub fn set_volume_da_tela(&self, volume: f32) {
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "o valor é fixado entre 0 e 4 antes da conversão"
+        )]
+        let milesimos = (volume.clamp(0.0, 4.0) * 1000.0) as u32;
         self.controls
-            .som_da_tela
-            .lock()
-            .unwrap_or_else(|envenenado| envenenado.into_inner())
-            .clear();
+            .volume_da_tela
+            .store(milesimos, Ordering::Relaxed);
+    }
+
+    /// O volume do som da transmissão, como a casca o mostra.
+    #[must_use]
+    pub fn volume_da_tela(&self) -> f32 {
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "quatro mil milésimos cabem exatos num f32"
+        )]
+        let volume = self.controls.volume_da_tela.load(Ordering::Relaxed) as f32 / 1000.0;
+        volume
+    }
+
+    /// Cala ou devolve o som da transmissão, **sem mexer no volume**.
+    ///
+    /// Separado do volume como o mudo do microfone é separado do ganho: voltar tem
+    /// de devolver o volume que a pessoa escolheu, e um mudo que zerasse o volume
+    /// apagaria a escolha.
+    pub fn set_tela_calada(&self, calada: bool) {
+        self.controls.tela_calada.store(calada, Ordering::Relaxed);
+    }
+
+    /// Se o som da transmissão está calado.
+    #[must_use]
+    pub fn tela_calada(&self) -> bool {
+        self.controls.tela_calada.load(Ordering::Relaxed)
+    }
+
+    /// Liga, desliga ou dosa a supressão de ruído do microfone. F02.
+    ///
+    /// `1.0` é ela inteira, `0.0` a desliga. Valores no meio existem porque um
+    /// filtro agressivo demais é um filtro que alguém desliga: quem achar a voz
+    /// «de rádio» abaixa em vez de abrir mão do resto.
+    ///
+    /// **Não perde o piso aprendido.** Desligar e religar no meio de uma conversa
+    /// custaria 100 ms de aprendizado de novo, e a primeira frase depois de religar
+    /// sairia cortada — F02, critério 4.
+    pub fn set_supressao(&self, forca: f32) {
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "o valor é fixado entre 0 e 1 antes da conversão"
+        )]
+        let milesimos = (forca.clamp(0.0, 1.0) * 1000.0) as u32;
+        self.controls.supressao.store(milesimos, Ordering::Relaxed);
+    }
+
+    /// Quanto da supressão de ruído está sendo aplicado.
+    #[must_use]
+    pub fn supressao(&self) -> f32 {
+        forca_da_supressao(&self.controls)
+    }
+
+    /// A sensibilidade de abertura da ativação por voz, em dBFS. F01.
+    ///
+    /// `None` volta ao padrão, que depende de a supressão estar ligada — ver
+    /// [`configuracao_do_portao`]. É a decisão de F01 por inteiro: o alvo de
+    /// −60 dBFS é do caminho **com** supressão, e sem ela o limiar antigo continua
+    /// sendo a única defesa contra o ventilador.
+    ///
+    /// **Não fecha o microfone.** Arrastar o controle durante uma frase não pode
+    /// interromper a frase, ou a calibração só acontece entre frases — que é
+    /// quando não há o que ouvir.
+    pub fn set_abertura_dbfs(&self, dbfs: Option<f32>) {
+        let milesimos = match dbfs {
+            None => 0,
+            Some(valor) => {
+                let fixado = valor.clamp(
+                    *seele_audio::gate::FAIXA_DE_ABERTURA_DBFS.start(),
+                    *seele_audio::gate::FAIXA_DE_ABERTURA_DBFS.end(),
+                );
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "a faixa é de −72 a −24 dBFS; em milésimos cabe folgado num i32"
+                )]
+                let convertido = (fixado * 1000.0) as i32;
+                convertido
+            }
+        };
+        self.controls
+            .abertura_dbfs_milesimos
+            .store(milesimos, Ordering::Relaxed);
+    }
+
+    /// A sensibilidade que está valendo, em dBFS, e se ela foi escolhida.
+    ///
+    /// O segundo campo existe para a interface poder dizer «padrão» em vez de um
+    /// número que a pessoa não escolheu — e para o controle poder voltar ao padrão
+    /// em vez de ficar preso no valor que o padrão tinha quando ela o tocou.
+    #[must_use]
+    pub fn abertura_dbfs(&self) -> (f32, bool) {
+        let escolhido = self
+            .controls
+            .abertura_dbfs_milesimos
+            .load(Ordering::Relaxed);
+        (
+            configuracao_do_portao(&self.controls).abertura_dbfs(),
+            escolhido != 0,
+        )
     }
 
     /// Whether the speakers are muted.
@@ -1526,7 +1825,15 @@ async fn pipeline(
     let mut acompanhamento = Acompanhamento::novo();
     let mut abridor = ReabrirAparelhos { escolha: &escolha };
 
-    let mut gate = VoiceGate::new(GateConfig::default(), GateMode::PushToTalk);
+    let mut gate = VoiceGate::new(configuracao_do_portao(&controls), GateMode::PushToTalk);
+    // A supressão de ruído do microfone. F02.
+    //
+    // Uma por caminho de voz, como o ganho, e pelo mesmo motivo: ela guarda o piso
+    // aprendido entre quadros. Ver `seele_audio::supressao`.
+    let mut supressao = seele_audio::supressao::Supressao::nova(forca_da_supressao(&controls));
+    let mut limpo: Vec<f32> = Vec::new();
+    let mut a_transmitir: Vec<Vec<f32>> = Vec::new();
+    let mut supressao_avisada = false;
     let mut mixer = Mixer::new();
     let mut sources: Vec<Source> = Vec::new();
     // O decodificador do som da tela, à parte dos das pessoas.
@@ -1644,6 +1951,16 @@ async fn pipeline(
         // ---- capture, encode, send ----
         gate.set_mode(VoiceMode::from_byte(controls.mode.load(Ordering::Relaxed)).to_gate());
         gate.set_key_held(controls.key_held.load(Ordering::Relaxed));
+        // **A régua e a força são relidas a cada volta**, e as duas trocam sem
+        // fechar o microfone: arrastar o controle de sensibilidade durante uma frase
+        // não pode interromper a frase, e ligar ou desligar o filtro não pode custar
+        // o piso aprendido. F01 e F02, critério 4.
+        //
+        // Fora do laço de quadros de propósito: a volta é de 20 ms, e as duas
+        // leituras são átomos — comparar antes de escrever seria dois ramos para
+        // evitar duas escritas que custam nada.
+        gate.ajustar(configuracao_do_portao(&controls));
+        supressao.ajustar(forca_da_supressao(&controls));
 
         // Rebuilds the encoder when it actually changes, and only then — see
         // `VoiceEncoder::set_bitrate` on why a no-op must stay a no-op.
@@ -1660,11 +1977,49 @@ async fn pipeline(
 
         let muted = controls.muted.load(Ordering::Relaxed);
         while pending.len() >= FRAME_SAMPLES {
-            let frame: Vec<f32> = pending.drain(..FRAME_SAMPLES).collect();
+            let bruto: Vec<f32> = pending.drain(..FRAME_SAMPLES).collect();
+
+            // **A supressão, antes de qualquer decisão sobre o quadro.** F02, e a
+            // ordem inteira é `captura → supressão → portão → ganho → codec`:
+            //
+            // - antes do **portão**, porque é ela que torna a sensibilidade de F01
+            //   defensável — com o piso da sala removido, o mesmo limiar ouve fala
+            //   baixa em vez de ouvir a sala;
+            // - antes do **ganho**, porque o ganho amplifica o que recebe. Depois
+            //   dela ele amplifica voz; antes, amplificaria o ventilador junto.
+            //
+            // Desligada, `processar` devolve o que entrou, sem FFT e sem atraso.
+            // Ligada, ela retém meio quadro no começo — por isso pode devolver menos
+            // do que recebeu, e o laço trata a saída como fluxo.
+            supressao.processar(&bruto, &mut limpo);
+            if limpo.is_empty() {
+                // Ainda dentro do atraso de um salto. O relógio anda mesmo assim:
+                // ele conta amostras que passaram, e elas passaram.
+                timestamp =
+                    timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+                controls.relogio_carimbo.store(timestamp, Ordering::Relaxed);
+                continue;
+            }
+            if !supressao_avisada && supressao.forca() > 0.0 {
+                supressao_avisada = true;
+                tracing::info!(
+                    forca = supressao.forca(),
+                    atraso_amostras = seele_audio::supressao::Supressao::atraso_em_amostras(),
+                    "a supressão de ruído do microfone está tratando o sinal"
+                );
+            }
+            let frame: Vec<f32> = std::mem::take(&mut limpo);
+
             // The gate still runs while muted, so the level meter keeps moving
             // and somebody talking into a muted microphone can see that they
             // are. Not showing that is how people give whole speeches to nobody.
-            let open = gate.update(&frame);
+            //
+            // **E ele entrega mais de um quadro na abertura**, que é a retenção da
+            // primeira sílaba de F01: o ataque de uma consoante surda está abaixo do
+            // limiar, e quando o nível sobe o bastante para abrir ele já passou. Ver
+            // `VoiceGate::quadros_a_transmitir`.
+            gate.quadros_a_transmitir(&frame, &mut a_transmitir);
+            let open = !a_transmitir.is_empty();
             let speaking = open && !muted;
             controls.speaking.store(speaking, Ordering::Relaxed);
 
@@ -1677,61 +2032,68 @@ async fn pipeline(
                 continue;
             }
 
-            // **O ganho, aqui e não antes do portão.** Multiplicar antes faria
-            // ruído de sala virar fala, e cada abertura à toa do portão é banda
-            // gasta e voz de alguém sendo cortada para dar lugar a um
-            // ventilador. Ver `seele_audio::ganho`.
-            let mut frame = frame;
-            ganho.aplicar(&mut frame);
-            // **Uma linha, quando o ganho assenta**, e ela existe porque a
-            // primeira resposta de campo a este recurso foi «não notei muita
-            // diferença» — que pode significar «o microfone já estava bom» ou
-            // «não funcionou», e as duas pedem trabalhos opostos.
-            //
-            // Meio segundo de fala é o bastante para a subida sair do zero, e
-            // uma vez por sessão porque a condição, quando é verdade, é verdade
-            // cinquenta vezes por segundo.
-            quadros_com_ganho += 1;
-            if !ganho_avisado && quadros_com_ganho >= 25 {
-                ganho_avisado = true;
-                tracing::info!(
-                    vezes = ganho.atual(),
-                    "o ganho automático do microfone assentou"
-                );
-            }
+            // Os quadros retidos e o que abriu, em ordem.
+            let quantos = a_transmitir.len();
+            for (indice, mut frame) in std::mem::take(&mut a_transmitir).into_iter().enumerate() {
+                // **Cada quadro com o instante em que ele aconteceu.** Os retidos
+                // são de antes deste; ver `carimbo_do_quadro`.
+                let carimbo = carimbo_do_quadro(timestamp, quantos, indice);
+                // **O ganho, aqui e não antes do portão.** Multiplicar antes faria
+                // ruído de sala virar fala, e cada abertura à toa do portão é banda
+                // gasta e voz de alguém sendo cortada para dar lugar a um
+                // ventilador. Ver `seele_audio::ganho`.
+                ganho.aplicar(&mut frame);
+                // **Uma linha, quando o ganho assenta**, e ela existe porque a
+                // primeira resposta de campo a este recurso foi «não notei muita
+                // diferença» — que pode significar «o microfone já estava bom» ou
+                // «não funcionou», e as duas pedem trabalhos opostos.
+                //
+                // Meio segundo de fala é o bastante para a subida sair do zero, e
+                // uma vez por sessão porque a condição, quando é verdade, é verdade
+                // cinquenta vezes por segundo.
+                quadros_com_ganho += 1;
+                if !ganho_avisado && quadros_com_ganho >= 25 {
+                    ganho_avisado = true;
+                    tracing::info!(
+                        vezes = ganho.atual(),
+                        "o ganho automático do microfone assentou"
+                    );
+                }
 
-            // Encoded from `f32` directly: the pipeline is `f32` end to end,
-            // and the conversion to `i16` that used to be here was a rounding
-            // step that existed only because the call site did not know
-            // `encode_f32` was available.
-            let Ok(payload) = encoder.encode(&frame) else {
-                continue;
-            };
-            // Empty is DTX deciding this frame is silence, not a failure. The
-            // timestamp already advanced, which is what lets the receiver tell
-            // silence from loss — M1.9.
-            if payload.is_empty() {
-                continue;
-            }
-            seq = seq.wrapping_add(1);
-            controls
-                .relogio_seq
-                .store(u32::from(seq), Ordering::Relaxed);
-            let header = MediaHeader {
-                version: seele_proto::PROTOCOL_VERSION,
-                // The server refuses anything but the ssrc it assigned — G2.
-                ssrc: ssrc.get(),
-                seq,
-                timestamp,
-            };
-            if let Ok(len) = header.encode_datagram(&payload, &mut datagram) {
-                if let Some(bytes) = datagram.get(..len) {
-                    if media.send(bytes.to_vec()).is_err() {
-                        // Contado e não registrado em log: isto acontece por
-                        // quadro, cinquenta vezes por segundo, e um log por
-                        // quadro afogaria o arquivo no exato momento em que
-                        // alguém precisa lê-lo.
-                        controls.recusados.fetch_add(1, Ordering::Relaxed);
+                // Encoded from `f32` directly: the pipeline is `f32` end to end,
+                // and the conversion to `i16` that used to be here was a rounding
+                // step that existed only because the call site did not know
+                // `encode_f32` was available.
+                let Ok(payload) = encoder.encode(&frame) else {
+                    continue;
+                };
+                // Empty is DTX deciding this frame is silence, not a failure. The
+                // timestamp already advanced, which is what lets the receiver tell
+                // silence from loss — M1.9.
+                if payload.is_empty() {
+                    continue;
+                }
+                seq = seq.wrapping_add(1);
+                controls
+                    .relogio_seq
+                    .store(u32::from(seq), Ordering::Relaxed);
+                let header = MediaHeader {
+                    version: seele_proto::PROTOCOL_VERSION,
+                    // The server refuses anything but the ssrc it assigned — G2.
+                    ssrc: ssrc.get(),
+                    seq,
+                    // **O deste quadro**, e não o do laço: ver `carimbo_do_quadro`.
+                    timestamp: carimbo,
+                };
+                if let Ok(len) = header.encode_datagram(&payload, &mut datagram) {
+                    if let Some(bytes) = datagram.get(..len) {
+                        if media.send(bytes.to_vec()).is_err() {
+                            // Contado e não registrado em log: isto acontece por
+                            // quadro, cinquenta vezes por segundo, e um log por
+                            // quadro afogaria o arquivo no exato momento em que
+                            // alguém precisa lê-lo.
+                            controls.recusados.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
                 }
             }
@@ -1760,6 +2122,27 @@ async fn pipeline(
                     mixer.set_gain(*talker, *gain);
                 }
             }
+            // **O som da transmissão tem o ganho dele**, aplicado aqui pelo mesmo
+            // caminho dos falantes e não por um segundo caminho de mistura. Ver
+            // `Controls::volume_da_tela`: era o que faltava para silenciar o
+            // conteúdo compartilhado preservando a conversa (R17), e o comentário
+            // ao lado do `SSRC_DA_TELA` já dizia que este dia ia chegar.
+            //
+            // O mudo vence o volume, e não o apaga: voltar do mudo devolve o volume
+            // que a pessoa escolheu.
+            mixer.set_gain(
+                SSRC_DA_TELA,
+                if controls.tela_calada.load(Ordering::Relaxed) {
+                    0.0
+                } else {
+                    #[allow(
+                        clippy::cast_precision_loss,
+                        reason = "quatro mil milésimos cabem exatos num f32"
+                    )]
+                    let volume = controls.volume_da_tela.load(Ordering::Relaxed) as f32 / 1000.0;
+                    volume
+                },
+            );
 
             // O compasso, uma vez por volta e **antes** de empurrar: o que
             // interessa é o fundo do vale, que é onde o dispositivo fica sem
@@ -2033,31 +2416,281 @@ mod tests {
         );
     }
 
-    /// O ganho do microfone corre **depois** do portão de voz.
+    /// A ordem do caminho do microfone: **supressão → portão → ganho → codec**.
     ///
-    /// A ordem é a coisa toda, e ela some numa refatoração sem que nada quebre:
-    /// ganho antes do portão faz ruído de sala passar do limiar e virar fala. O
-    /// §3 paga caro por um portão que abre à toa — cada abertura é banda gasta e
-    /// é a voz de alguém sendo cortada para dar lugar a um ventilador —, e o
-    /// sintoma seria «o SEELE está transmitindo o meu ar-condicionado», que
-    /// ninguém liga a um ganho posto no lugar errado.
+    /// A ordem é a coisa toda, e ela some numa refatoração sem que nada quebre.
+    /// Cada fronteira tem um sintoma próprio:
+    ///
+    /// - **ganho antes do portão** faz ruído de sala passar do limiar e virar
+    ///   fala. O §3 paga caro por um portão que abre à toa — cada abertura é banda
+    ///   gasta e é a voz de alguém sendo cortada para dar lugar a um ventilador —,
+    ///   e o sintoma seria «o SEELE está transmitindo o meu ar-condicionado», que
+    ///   ninguém liga a um ganho posto no lugar errado;
+    /// - **supressão depois do portão** desfaz F01 inteiro. A sensibilidade de
+    ///   −60 dBFS só é defensável com o piso da sala já removido; com a supressão
+    ///   depois, o portão continua medindo a sala e o padrão novo mantém o canal
+    ///   aberto o dia inteiro — pior que antes de F01.
     ///
     /// Ler o fonte porque não há tipo que expresse «esta linha vem depois
     /// daquela». É o mesmo recurso da costura do codec, pela mesma razão.
     #[test]
-    fn o_ganho_do_microfone_corre_depois_do_portao() {
+    fn o_caminho_do_microfone_esta_na_ordem_de_f01_e_f02() {
         let fonte = include_str!("voice.rs");
+        let supressao = fonte
+            .find("supressao.processar(&bruto, &mut limpo)")
+            .expect("a supressão de ruído sumiu do laço de captura");
         let portao = fonte
-            .find("gate.update(&frame)")
+            .find("gate.quadros_a_transmitir(&frame, &mut a_transmitir)")
             .expect("o portão de voz sumiu do laço de captura");
         let ganho = fonte
             .find("ganho.aplicar(&mut frame)")
             .expect("o ganho do microfone sumiu do laço de captura");
+        let codec = fonte
+            .find("encoder.encode(&frame)")
+            .expect("a codificação sumiu do laço de captura");
+
+        assert!(
+            supressao < portao,
+            "a supressão passou a correr depois do portão.\n\
+             Nessa ordem o portão volta a medir a sala, e a sensibilidade de \
+             −60 dBFS de F01 mantém o canal aberto o dia inteiro."
+        );
         assert!(
             portao < ganho,
             "o ganho passou a correr antes do portão de voz.\n\
              Nessa ordem o portão mede o sinal já amplificado, ruído de sala \
              passa a abrir a transmissão, e a banda vai embora em ventilador."
+        );
+        assert!(
+            ganho < codec,
+            "o ganho passou a correr depois da codificação, onde ele não alcança \
+             mais o que sai."
+        );
+    }
+
+    /// **Os quadros retidos não chegam todos no mesmo instante.** F01, A05.
+    ///
+    /// Um carimbo é *quando aquele áudio aconteceu*. Os quadros que a retenção da
+    /// primeira sílaba entrega aconteceram antes do quadro que abriu o portão, e
+    /// carimbá-los todos igual põe três quadros no mesmo instante — o `playout` de
+    /// quem recebe lê isso como salto de relógio e ressincroniza, no primeiro
+    /// quadro da fala, que é onde mais se ouve.
+    #[test]
+    fn os_quadros_retidos_recuam_um_quadro_cada_um() {
+        let agora = 96_000;
+        // Uma entrega de três: dois retidos e o que abriu.
+        let carimbos: Vec<u32> = (0..3).map(|i| carimbo_do_quadro(agora, 3, i)).collect();
+        assert_eq!(
+            carimbos,
+            vec![
+                agora - 2 * FRAME_SAMPLES as u32,
+                agora - FRAME_SAMPLES as u32,
+                agora
+            ],
+            "os quadros retidos não estão recuando: carimbos iguais viram \
+             ressincronização no começo de cada fala"
+        );
+        // O caso comum — um quadro só — continua carimbado com o instante de agora.
+        assert_eq!(carimbo_do_quadro(agora, 1, 0), agora);
+        // E a volta do contador de 32 bits não é um erro: ela acontece a cada 24
+        // horas de conversa, e no meio de uma abertura como em qualquer outro lugar.
+        assert_eq!(
+            carimbo_do_quadro(10, 2, 0),
+            10u32.wrapping_sub(FRAME_SAMPLES as u32),
+            "a volta do contador virou um carimbo saturado, que é um quadro \
+             no futuro"
+        );
+    }
+
+    /// **E o relógio de quem recebe aceita esses carimbos sem ressincronizar.**
+    ///
+    /// A conta certa é uma coisa; o efeito dela no outro lado é outra, e é o efeito
+    /// que a auditoria mediu — «o jitter buffer real reproduziu os pacotes, porém
+    /// precisou de **duas ressincronizações**». Este teste passa os três carimbos
+    /// pelo buffer de verdade e exige zero.
+    ///
+    /// O segundo caso é o controle negativo, e ele é o defeito: com carimbos iguais
+    /// o `plan_gap` do buffer cai no ramo «total == 0» e ressincroniza. Sem ele, um
+    /// dia em que `carimbo_do_quadro` voltasse a devolver o mesmo número para todos
+    /// teria um teste verde por baixo.
+    #[test]
+    fn o_relogio_de_quem_recebe_aceita_os_quadros_retidos() {
+        fn atravessa(carimbos: &[u32]) -> (usize, u64) {
+            use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
+            let mut buffer: JitterBuffer<usize> = JitterBuffer::new(JitterConfig::default());
+            for (indice, carimbo) in carimbos.iter().enumerate() {
+                #[allow(clippy::cast_possible_truncation, reason = "três pacotes num teste")]
+                let seq = indice as u16 + 1;
+                #[allow(clippy::cast_precision_loss, reason = "três pacotes num teste")]
+                let chegada = indice as f64 * 20.0;
+                buffer.push(seq, *carimbo, chegada, indice);
+            }
+            let mut tocados = 0;
+            for _ in 0..(carimbos.len() * 4) {
+                if matches!(buffer.tick(), Decision::Play(_)) {
+                    tocados += 1;
+                }
+            }
+            (tocados, buffer.metrics().resyncs)
+        }
+
+        let agora = 96_000;
+        let quadro = FRAME_SAMPLES as u32;
+        let (tocados, ressincronizacoes) = atravessa(&[
+            carimbo_do_quadro(agora, 3, 0),
+            carimbo_do_quadro(agora, 3, 1),
+            carimbo_do_quadro(agora, 3, 2),
+        ]);
+        assert_eq!(
+            ressincronizacoes, 0,
+            "o relógio de quem recebe ressincronizou na abertura de uma fala, que é \
+             onde ela mais se ouve"
+        );
+        assert_eq!(tocados, 3, "os três quadros da abertura não tocaram");
+
+        // O controle negativo: é o que a auditoria mediu.
+        let (_, com_carimbos_iguais) = atravessa(&[agora, agora, agora]);
+        assert!(
+            com_carimbos_iguais > 0,
+            "carimbos iguais passaram pelo buffer sem ressincronizar: então este \
+             teste não está medindo o defeito que ele diz medir"
+        );
+        // E os carimbos de verdade são espaçados por um quadro de amostras.
+        assert_eq!(
+            carimbo_do_quadro(agora, 3, 2) - carimbo_do_quadro(agora, 3, 1),
+            quadro
+        );
+    }
+
+    /// **E o cabeçalho usa o carimbo do quadro, e não o do laço.**
+    ///
+    /// A conta certa numa função que ninguém chama é o «existir não é funcionar» do
+    /// `CLAUDE.md`: o teste acima passa com `carimbo_do_quadro` guardada na gaveta.
+    /// Ler o fonte é o que prende as duas pontas, e é o mesmo recurso da ordem do
+    /// caminho, pela mesma razão — não há tipo que expresse «este campo vem
+    /// daquela função».
+    #[test]
+    fn o_cabecalho_carimba_cada_quadro_com_o_instante_dele() {
+        let fonte = include_str!("voice.rs");
+        assert!(
+            fonte.contains("let carimbo = carimbo_do_quadro(timestamp, quantos, indice);"),
+            "o laço de captura deixou de calcular o carimbo por quadro"
+        );
+        assert!(
+            fonte.contains("timestamp: carimbo,"),
+            "o cabeçalho voltou a carimbar todo quadro com o instante do laço: os \
+             retidos da primeira sílaba passam a chegar no mesmo tempo do quadro \
+             que abriu"
+        );
+    }
+
+    /// **A régua do portão sai dos controles, e o padrão depende da supressão.**
+    ///
+    /// F01, e é a decisão inteira dela: −60 dBFS é do caminho **com** supressão.
+    /// Sem ela o limiar antigo continua valendo, porque ali o portão é a única
+    /// defesa contra o ventilador — o argumento que `gate::OPEN_RMS` registra.
+    #[test]
+    fn o_padrao_da_sensibilidade_segue_a_supressao() {
+        let controls = Controls::novos();
+        // Ligada é o padrão — ver `SUPRESSAO_PADRAO`.
+        let com = configuracao_do_portao(&controls).abertura_dbfs();
+        assert!(
+            (com - seele_audio::gate::ABERTURA_COM_SUPRESSAO_DBFS).abs() < 0.01,
+            "com supressão o padrão deixou de ser o alvo de F01: {com} dBFS"
+        );
+
+        controls.supressao.store(0, Ordering::Relaxed);
+        let sem = configuracao_do_portao(&controls).abertura_dbfs();
+        assert!(
+            (sem - seele_audio::gate::ABERTURA_SEM_SUPRESSAO_DBFS).abs() < 0.01,
+            "sem supressão o padrão desceu junto, e o portão volta a ser a única \
+             defesa contra o ventilador com a régua de quem tem filtro: {sem} dBFS"
+        );
+
+        // E uma escolha explícita vence os dois padrões.
+        controls
+            .abertura_dbfs_milesimos
+            .store(-50_000, Ordering::Relaxed);
+        let escolhido = configuracao_do_portao(&controls).abertura_dbfs();
+        assert!(
+            (escolhido - (-50.0)).abs() < 0.01,
+            "a escolha manual foi ignorada: {escolhido} dBFS"
+        );
+    }
+
+    /// **A fila do som da tela só é limpa pela tela dela.** R17.
+    ///
+    /// Qualquer `TelaFechou` a limpava, então com duas pessoas compartilhando
+    /// alguém parando de transmitir calava o som da outra — e o sintoma é o pior
+    /// desta casa: o som simplesmente para, sem nada dizendo por quê.
+    #[test]
+    fn o_som_de_uma_tela_nao_e_limpo_por_outra() {
+        let controls = Controls::novos();
+        let quantos = || controls.som_da_tela.lock().expect("fila").len();
+
+        enfileirar_som_da_tela(&controls, ScreenId(7), vec![1, 2, 3]);
+        assert_eq!(quantos(), 1);
+
+        // **Outra transmissão fechou.** A fila não é dela, e não é tocada.
+        assert!(
+            !esquecer_o_som_de(&controls, ScreenId(8)),
+            "esquecer respondeu que havia o que esquecer numa tela que não é a da fila"
+        );
+        assert_eq!(
+            quantos(),
+            1,
+            "a fila foi limpa por uma transmissão que não é a dela: com duas \
+             pessoas compartilhando, uma parando calaria o som da outra"
+        );
+
+        // E a dela, sim.
+        assert!(esquecer_o_som_de(&controls, ScreenId(7)));
+        assert_eq!(quantos(), 0);
+    }
+
+    /// **Trocar de transmissão limpa a fila da anterior.** R17.
+    ///
+    /// Os pacotes que sobraram são som de uma imagem que já saiu da frente, e
+    /// tocá-los faria a troca soar como sobreposição.
+    #[test]
+    fn trocar_de_tela_larga_o_som_da_anterior() {
+        let controls = Controls::novos();
+        for _ in 0..5 {
+            enfileirar_som_da_tela(&controls, ScreenId(7), vec![1]);
+        }
+        assert_eq!(controls.som_da_tela.lock().expect("fila").len(), 5);
+
+        enfileirar_som_da_tela(&controls, ScreenId(8), vec![2]);
+        assert_eq!(
+            controls.som_da_tela.lock().expect("fila").len(),
+            1,
+            "o som da transmissão anterior continuou na fila, e vai tocar por cima \
+             da nova"
+        );
+        assert_eq!(controls.tela_do_som.load(Ordering::Relaxed), 8);
+    }
+
+    /// **Volume e mudo são separados.** R17.
+    ///
+    /// Voltar do mudo devolve o volume que a pessoa escolheu. Um mudo que zerasse
+    /// o volume apagaria a escolha, e a pessoa teria de reajustar a cada vez.
+    #[test]
+    fn o_mudo_da_tela_nao_apaga_o_volume() {
+        let controls = Controls::novos();
+        assert_eq!(
+            controls.volume_da_tela.load(Ordering::Relaxed),
+            VOLUME_DE_ORIGEM,
+            "quem começa a assistir tem de ouvir: um padrão calado entrega vídeo \
+             mudo e espera que a pessoa descubra onde o som estava"
+        );
+
+        controls.volume_da_tela.store(300, Ordering::Relaxed);
+        controls.tela_calada.store(true, Ordering::Relaxed);
+        controls.tela_calada.store(false, Ordering::Relaxed);
+        assert_eq!(
+            controls.volume_da_tela.load(Ordering::Relaxed),
+            300,
+            "calar e voltar apagou o volume escolhido"
         );
     }
 

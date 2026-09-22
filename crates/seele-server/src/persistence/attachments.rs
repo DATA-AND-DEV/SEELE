@@ -889,7 +889,10 @@ mod tests {
                 client_message_id: None,
             }])
             .unwrap();
-        stored[0].id
+        *stored[0]
+            .gravada()
+            .map(|linha| &linha.id)
+            .expect("a mensagem do teste foi gravada")
     }
 
     /// Puts a file of `size` bytes through the whole path: reserve, write, keep.
