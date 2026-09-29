@@ -352,7 +352,7 @@ pub async fn onde_mora(
 }
 
 async fn perguntar(ponto: &str, marca: &seele_proto::encontro::Marca) -> Option<SocketAddr> {
-    let destino: SocketAddr = tokio::net::lookup_host(ponto).await.ok()?.next()?;
+    let destino = resolver_ponto(ponto).await?;
     let socket = tokio::net::UdpSocket::bind(match destino {
         SocketAddr::V4(_) => "0.0.0.0:0",
         SocketAddr::V6(_) => "[::]:0",
@@ -385,6 +385,58 @@ async fn perguntar(ponto: &str, marca: &seele_proto::encontro::Marca) -> Option<
             return Some(endereco);
         }
     }
+}
+
+/// Onde o ponto de encontro atende, a partir do texto que o link carrega.
+///
+/// **Com a porta padrão quando ela falta**, pela mesma regra de
+/// [`Bilhete::ponto`] ([`seele_proto::uri::separar_ponto`]). O texto ia cru
+/// para `lookup_host`, que recusa nome sem porta, e como o link sai sem porta
+/// (`enc=encontro.seele.app.br/…`) a pergunta ao quarto nunca saiu.
+///
+/// **IPv4 primeiro**, e a ordem do DNS não decide isto: a pergunta sai para um
+/// endereço só, e numa máquina sem rota IPv6 o AAAA na frente engole o pacote
+/// em silêncio. O anfitrião aprendeu isso em campo (`resolver`, no
+/// `seele-server`).
+///
+/// **Diz por que não achou.** O defeito passou sem ser visto porque o `.ok()?`
+/// engolia o erro: o produto sabia por que a pergunta não saía e não contava.
+/// Cada `None` daqui deixa a causa no `seele.log` (que só grava `info`), e quem
+/// lê o log distingue um texto que não é endereço de um nome que não resolve.
+async fn resolver_ponto(ponto: &str) -> Option<SocketAddr> {
+    let alvo = match seele_proto::uri::separar_ponto(ponto) {
+        Ok(alvo) => alvo,
+        Err(erro) => {
+            tracing::info!(
+                ponto,
+                %erro,
+                "o ponto de encontro do link não é um endereço: a pergunta ao quarto não saiu"
+            );
+            return None;
+        }
+    };
+    let mut achados: Vec<SocketAddr> =
+        match tokio::net::lookup_host((alvo.maquina, alvo.porta)).await {
+            Ok(achados) => achados.collect(),
+            Err(erro) => {
+                tracing::info!(
+                    ponto,
+                    %erro,
+                    "o ponto de encontro do link não resolveu: a pergunta ao quarto não saiu"
+                );
+                return None;
+            }
+        };
+    achados.sort_by_key(|achado| u8::from(achado.is_ipv6()));
+    let primeiro = achados.first().copied();
+    if primeiro.is_none() {
+        tracing::info!(
+            ponto,
+            "o nome do ponto de encontro resolveu para nenhum endereço: a pergunta ao quarto \
+             não saiu"
+        );
+    }
+    primeiro
 }
 
 #[cfg(test)]
@@ -422,6 +474,128 @@ mod testes {
         // Sem a família certa, o primeiro — falhar ali é melhor que não tentar.
         assert_eq!(escolher_ponto(&[seis], anfitriao_v4), Some(seis));
         assert_eq!(escolher_ponto(&[], anfitriao_v4), None);
+    }
+
+    #[tokio::test]
+    async fn o_ponto_escrito_sem_porta_e_procurado_na_porta_do_ponto_de_encontro() {
+        // O defeito de campo: o link carrega `enc=encontro.seele.app.br/…`, sem
+        // porta, e este texto ia cru para `lookup_host`, que recusa nome sem
+        // porta. A pergunta ao quarto nunca saiu, e nada dizia isso.
+        assert_eq!(
+            resolver_ponto("127.0.0.1").await,
+            Some(SocketAddr::from(([127, 0, 0, 1], encontro::PORTA_PADRAO))),
+            "um ponto sem porta não foi procurado na porta do ponto de encontro"
+        );
+        assert_eq!(
+            resolver_ponto("[::1]").await,
+            Some(SocketAddr::from((
+                std::net::Ipv6Addr::LOCALHOST,
+                encontro::PORTA_PADRAO
+            ))),
+            "um IPv6 entre colchetes sem porta não foi procurado na porta do ponto de encontro"
+        );
+        assert_eq!(
+            resolver_ponto("127.0.0.1:9000").await,
+            Some(SocketAddr::from(([127, 0, 0, 1], 9000))),
+            "a porta escrita deixou de mandar"
+        );
+        assert_eq!(
+            resolver_ponto("tem espaço").await,
+            None,
+            "um texto que não é endereço virou pergunta"
+        );
+    }
+
+    /// Um [`tracing::Subscriber`] mínimo que guarda cada evento de `INFO` para
+    /// cima como uma linha `nível: mensagem campo=valor …`.
+    ///
+    /// O `seele.log` só grava `info`, então é este nível que decide se quem lê
+    /// o log fica sabendo. O de `par.rs` filtra em `WARN` e mora dentro do
+    /// módulo de testes de lá, e `tracing-subscriber` não é dependência de
+    /// teste deste crate: acrescentá-la só para isto seria uma dependência nova
+    /// por duas asserções.
+    #[derive(Default)]
+    struct CapturaDeInfo {
+        linhas: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl tracing::Subscriber for CapturaDeInfo {
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            *metadata.level() <= tracing::Level::INFO
+        }
+
+        fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Campos(String);
+            impl tracing::field::Visit for Campos {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    valor: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" {
+                        self.0.push_str(&format!(" {valor:?}"));
+                    } else {
+                        self.0.push_str(&format!(" {}={valor:?}", field.name()));
+                    }
+                }
+            }
+            let mut campos = Campos(String::new());
+            event.record(&mut campos);
+            if let Ok(mut linhas) = self.linhas.lock() {
+                linhas.push(format!("{}:{}", event.metadata().level(), campos.0));
+            }
+        }
+
+        fn enter(&self, _span: &tracing::span::Id) {}
+
+        fn exit(&self, _span: &tracing::span::Id) {}
+    }
+
+    #[tokio::test]
+    async fn um_ponto_que_nao_se_procura_diz_no_rastro_por_que_nao() {
+        // «O produto sabe e não conta»: o `.ok()?` calado que havia aqui deixou a
+        // pergunta ao quarto sem sair, e o `seele.log` sem uma linha sobre isso.
+        // `#[tokio::test]` de thread única, de propósito: `set_default` fixa o
+        // `Subscriber` só na thread corrente, e a resolução acontece nela.
+        let captura = Arc::new(CapturaDeInfo::default());
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+
+        assert_eq!(
+            resolver_ponto("tem espaço").await,
+            None,
+            "um texto que não é endereço virou pergunta: este teste não mede nada"
+        );
+        assert_eq!(
+            resolver_ponto("nao-existe-mesmo.invalid").await,
+            None,
+            "um nome que não existe resolveu: este teste não mede nada"
+        );
+
+        let linhas = captura.linhas.lock().unwrap();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("não é um endereço")
+                && linha.contains("tem espaço")
+                && linha.contains("EnderecoInvalido")),
+            "um ponto que não é endereço deixou de dizer no rastro (`info`, o único nível que o \
+             seele.log grava) qual era o texto e qual foi a causa: a pergunta ao quarto não sai \
+             e ninguém fica sabendo por quê. Rastro: {linhas:?}"
+        );
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("não resolveu")
+                && linha.contains("nao-existe-mesmo.invalid")),
+            "um ponto que não resolve deixou de dizer no rastro (`info`) qual era o nome: a \
+             pergunta ao quarto não sai e ninguém fica sabendo por quê. Rastro: {linhas:?}"
+        );
     }
 
     fn bilhete(ponto: &str) -> Bilhete {

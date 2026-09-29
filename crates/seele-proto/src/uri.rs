@@ -287,13 +287,16 @@ impl Bilhete {
     /// O ponto de encontro, separado em máquina e porta.
     ///
     /// A porta padrão aqui **não** é a do servidor: um ponto de encontro atende na
-    /// [`crate::encontro::PORTA_PADRAO`].
+    /// [`crate::encontro::PORTA_PADRAO`]. A regra é a de [`separar_ponto`], a
+    /// mesma de quem tem só o texto do ponto: este método a delega, e não a repete.
     ///
     /// # Errors
     ///
-    /// Não falha para um bilhete que veio de [`Bilhete::ler`].
+    /// Não falha para um bilhete que veio de [`Bilhete::novo`] ou de
+    /// [`Bilhete::ler`]. `ponto` é campo público, e um bilhete montado à mão com
+    /// um texto que não é endereço recebe o mesmo [`ErroDeUri`] de [`separar_ponto`].
     pub fn ponto(&self) -> Result<Alvo<'_>, ErroDeUri> {
-        separar_com(&self.ponto, crate::encontro::PORTA_PADRAO)
+        separar_ponto(&self.ponto)
     }
 
     /// Onde o anfitrião espera o aviso.
@@ -520,6 +523,23 @@ pub struct Alvo<'a> {
 /// cru. [`ErroDeUri::EnderecoInvalido`] para o resto.
 pub fn separar(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
     separar_com(alvo, PORTA_PADRAO)
+}
+
+/// Separa o endereço de um **ponto de encontro** em máquina e porta.
+///
+/// É a regra de [`Bilhete::ponto`] para quem tem só o texto do ponto: um ponto
+/// escrito sem porta atende na [`crate::encontro::PORTA_PADRAO`], e não na do
+/// servidor. Ela existe porque o texto viaja sozinho (a lista de conhecidos o
+/// guarda, e a consulta ao quarto o recebe assim). Quem o recebia passava o
+/// texto cru a `lookup_host`, que recusa nome sem porta, e a pergunta ao
+/// quarto nunca saiu (análise de 22/09/2026, §2.1).
+///
+/// # Errors
+///
+/// O mesmo [`ErroDeUri`] de um alvo torto: este texto acaba num `send_to`.
+pub fn separar_ponto(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
+    validar_alvo(alvo)?;
+    separar_com(alvo, crate::encontro::PORTA_PADRAO)
 }
 
 /// O mesmo, dizendo qual é a porta de quem não escreveu uma.
@@ -858,6 +878,77 @@ mod tests {
             ponto.porta, PORTA_PADRAO,
             "o ponto herdou a porta do servidor"
         );
+    }
+
+    #[test]
+    fn o_ponto_de_encontro_solto_ganha_a_porta_dele_e_nao_a_do_servidor() {
+        // O texto do ponto viaja sozinho, na lista de conhecidos e na consulta
+        // ao quarto, e a regra da porta tem de ir com ele. Sem ela, quem o
+        // recebia o passava cru a `lookup_host`, e nome sem porta é recusado:
+        // a pergunta ao quarto nunca saiu.
+        assert_eq!(
+            separar_ponto("encontro.seele.app.br"),
+            Ok(Alvo {
+                maquina: "encontro.seele.app.br",
+                porta: crate::encontro::PORTA_PADRAO,
+            }),
+            "um ponto sem porta não ficou na porta do ponto de encontro"
+        );
+        assert_eq!(
+            separar_ponto("[2001:db8::1]"),
+            Ok(Alvo {
+                maquina: "2001:db8::1",
+                porta: crate::encontro::PORTA_PADRAO,
+            }),
+            "um IPv6 entre colchetes, sem porta, não ficou na porta do ponto de encontro"
+        );
+        assert_eq!(
+            separar_ponto("encontro.exemplo:9000").map(|alvo| alvo.porta),
+            Ok(9000),
+            "a porta escrita deixou de mandar"
+        );
+        assert_eq!(
+            separar_ponto("2001:db8::1"),
+            Err(ErroDeUri::EnderecoIpv6SemColchetes),
+            "um IPv6 cru, sem colchetes, virou ponto: a última metade dele passaria por porta"
+        );
+        assert!(
+            separar_ponto("tem espaço").is_err(),
+            "um texto que não é endereço virou ponto"
+        );
+
+        // E é a mesma regra do bilhete, e não uma cópia dela.
+        let bilhete = Bilhete::novo("encontro.seele.app.br", "198.51.100.7:41234").expect("bom");
+        assert_eq!(
+            bilhete.ponto(),
+            separar_ponto("encontro.seele.app.br"),
+            "o bilhete e o texto solto separam o mesmo ponto de maneiras diferentes"
+        );
+    }
+
+    #[test]
+    fn o_ponto_do_bilhete_delega_a_regra_e_nao_guarda_uma_copia_dela() {
+        // `ponto` é campo público: um bilhete montado sem passar por `novo` ou
+        // `ler` pode trazer um texto que não é endereço. A cópia da regra que
+        // `Bilhete::ponto` tinha (`separar_com` cru) devolvia `Ok` para ele, e só
+        // a regra única, que valida antes de separar, devolve `Err`. É o que
+        // distingue «delega» de «repete»: com um ponto bom as duas dão o mesmo.
+        for torto in ["tem espaço", "com/barra", "acentuação.exemplo"] {
+            let bilhete = Bilhete {
+                ponto: torto.to_owned(),
+                aviso: "198.51.100.7:41234".to_owned(),
+            };
+            assert!(
+                separar_ponto(torto).is_err(),
+                "{torto:?} virou ponto no texto solto: este teste não mede nada"
+            );
+            assert_eq!(
+                bilhete.ponto(),
+                separar_ponto(torto),
+                "`Bilhete::ponto` deixou de delegar a `separar_ponto` e voltou a ter a própria \
+                 cópia da regra: {torto:?} passa por ponto num caminho e não no outro"
+            );
+        }
     }
 
     #[test]
