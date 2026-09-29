@@ -787,8 +787,15 @@ async fn atender(
     de_quem_chega: Marca,
     marca_do_server: Option<Marca>,
 ) {
+    // **O primeiro tique sai na hora, e é de propósito.** O `interval` do
+    // tokio completa o primeiro `tick` imediatamente, e esta função o
+    // consumia antes do laço. Isso empurrava o primeiro `MORO` para quinze
+    // segundos depois da subida, e nesse meio tempo o quarto não sabia onde
+    // este servidor mora: quem voltava pela trilha logo depois de o anfitrião
+    // reabrir perguntava a um quarto vazio (análise de 22/09/2026, §2.1).
+    // Registrar na subida custa os mesmos três datagramas que o reavivamento
+    // já manda.
     let mut relogio = tokio::time::interval(REAVIVAR);
-    relogio.tick().await;
     let mut balde = [0_u8; encontro::TAMANHO];
     let mut furos: Vec<tokio::time::Instant> = Vec::new();
 
@@ -1503,10 +1510,12 @@ mod testes {
         // continua passando, porque ele nunca roda `atender`. Este aqui roda.
         //
         // O `ponto` é `192.0.2.1` — TEST-NET-1, RFC 5737, reservado para
-        // documentação e que não existe em rede nenhuma. `atender` nunca manda
-        // nada para lá dentro da janela deste teste: ele só compara. O intruso
-        // manda do loopback, os IPs não batem, e tudo fica só nesta máquina —
-        // sem depender de segunda interface de rede nenhuma.
+        // documentação e que não existe em rede nenhuma. O registro da subida
+        // sai para lá (o primeiro `MORO` sai na hora, e não quinze segundos
+        // depois), e de lá nada volta: para o que este teste mede, o ponto só
+        // serve de comparação. O intruso manda do loopback, os IPs não batem,
+        // e tudo fica só nesta máquina — sem depender de segunda interface de
+        // rede nenhuma.
         let ponto = SocketAddr::from(([192, 0, 2, 1], encontro::PORTA_PADRAO));
         let (tarefa, avisos_endereco, alvo, alvo_endereco, marca) =
             subir_atender_de_teste(ponto).await;
@@ -1638,5 +1647,132 @@ mod testes {
                 assert_ne!(frase, outra, "duas falhas dizem a mesma coisa");
             }
         }
+    }
+
+    /// O que o ponto de encontro de teste anotou: cada pedido, e de onde veio.
+    type Caderno = Arc<std::sync::Mutex<Vec<(encontro::Pedido, SocketAddr)>>>;
+
+    /// Um ponto de encontro de teste que anota cada pedido e a origem dele.
+    ///
+    /// Com `eco`, ele também responde como um ponto de verdade: `ONDE` e `MORO`
+    /// voltam para quem perguntou, e `LEVE` vai para o destino. A diferença é
+    /// que o `AQUI` aponta para `eco`, e não para o endereço que o ponto viu.
+    /// É isso que torna observável um furo contra si mesmo: se a resposta
+    /// passar no filtro de `atender`, o `FURO` chega a `eco` e o teste o vê.
+    /// Um ponto de verdade poria ali o endereço da própria escuta, e o furo não
+    /// deixaria rastro fora deste processo.
+    async fn ponto_que_anota(eco: Option<SocketAddr>) -> (SocketAddr, Caderno) {
+        let Ok(socket) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir o ponto de encontro de teste");
+        };
+        let Ok(onde) = socket.local_addr() else {
+            panic!("o ponto de encontro de teste não tem endereço local");
+        };
+        let caderno: Caderno = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let anotador = Arc::clone(&caderno);
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let Some(pedido) = balde.get(..lidos).and_then(encontro::analisar) else {
+                    continue;
+                };
+                let resposta = match (&pedido, eco) {
+                    (
+                        encontro::Pedido::Onde { marca } | encontro::Pedido::Moro { marca },
+                        Some(para_onde),
+                    ) => Some((encontro::aqui(marca, para_onde), de)),
+                    (encontro::Pedido::Leve { destino, marca }, Some(para_onde)) => {
+                        Some((encontro::aqui(marca, para_onde), *destino))
+                    }
+                    _ => None,
+                };
+                if let Ok(mut lista) = anotador.lock() {
+                    lista.push((pedido, de));
+                }
+                if let Some((datagrama, para)) = resposta {
+                    let _ = socket.send_to(&datagrama, para).await;
+                }
+            }
+        });
+        (onde, caderno)
+    }
+
+    /// Espera até `prazo` que o caderno tenha um pedido que `procura` aceite.
+    async fn esperar_no_caderno(
+        caderno: &Caderno,
+        prazo: Duration,
+        procura: impl Fn(&encontro::Pedido, SocketAddr) -> bool,
+    ) -> bool {
+        let ate = tokio::time::Instant::now() + prazo;
+        loop {
+            let achou = caderno
+                .lock()
+                .is_ok_and(|lista| lista.iter().any(|(pedido, de)| procura(pedido, *de)));
+            if achou {
+                return true;
+            }
+            if tokio::time::Instant::now() >= ate {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn o_primeiro_registro_no_quarto_sai_na_subida() {
+        // O defeito: `atender` consumia o primeiro tique do relógio antes do
+        // laço, e o primeiro `MORO` saía quinze segundos depois da subida.
+        // Quem voltava pela trilha logo depois de o anfitrião reabrir
+        // perguntava a um quarto que ainda não sabia de nada.
+        let (ponto, caderno) = ponto_que_anota(None).await;
+        let Ok(avisos) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir a escuta de avisos de teste");
+        };
+        let Ok(avisos_endereco) = avisos.local_addr() else {
+            panic!("a escuta de avisos de teste não tem endereço local");
+        };
+        let Ok(server) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o socket do servidor de teste");
+        };
+        let Ok(server_endereco) = server.local_addr() else {
+            panic!("o socket do servidor de teste não tem endereço local");
+        };
+        let (Some(minha), Some(de_quem_chega), Some(do_server)) = (
+            Marca::nova("anfitriao"),
+            Marca::nova("3cbcfb0212da738f"),
+            Marca::nova("3cbcfb0212da738fs"),
+        ) else {
+            panic!("marca de teste inválida");
+        };
+
+        let tarefa = tokio::spawn(atender(
+            avisos,
+            Arc::new(server),
+            ponto,
+            avisos_endereco,
+            minha,
+            de_quem_chega,
+            Some(do_server),
+        ));
+        let da_escuta = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
+            matches!(pedido, encontro::Pedido::Moro { .. }) && de == avisos_endereco
+        })
+        .await;
+        let do_servidor = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
+            matches!(pedido, encontro::Pedido::Moro { .. }) && de == server_endereco
+        })
+        .await;
+        tarefa.abort();
+
+        assert!(
+            da_escuta,
+            "a escuta de avisos não se registrou no quarto no primeiro segundo: quem voltar \
+             pela trilha agora pergunta a um quarto vazio por até quinze segundos"
+        );
+        assert!(
+            do_servidor,
+            "o socket do servidor não se registrou no quarto no primeiro segundo: quem voltar \
+             pela trilha agora não acha para onde conectar por até quinze segundos"
+        );
     }
 }
