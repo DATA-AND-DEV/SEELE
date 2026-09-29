@@ -83,10 +83,14 @@
 //! um endereço que o próprio ponto observou. Não há caminho por onde um byte
 //! escolhido por quem manda chegue a quem recebe.
 //!
-//! **Não decide para onde ninguém conecta.** Quem recebe o convite nunca lê
-//! resposta nenhuma daqui: os endereços que ele tenta saem do `seele://`, e a
-//! impressão digital que ele confere também. Um ponto de encontro hostil
-//! consegue não responder, e nada além disso.
+//! **Não decide em quem se confia.** Quem recebe o convite lê a resposta do
+//! quarto (o `AQUI` que responde a um `QUEM`), e o endereço que ela traz entra
+//! na lista de candidatos, na frente dos guardados. Um ponto de encontro
+//! hostil, ou quem ocupou a marca, consegue mandar essa conexão para o
+//! endereço errado. O que ele não escolhe é a impressão digital, que sai do
+//! `seele://` e é conferida no aperto de mão (ADR 0003): um endereço errado
+//! falha ali, e não vira conexão com o impostor. Só que a conferência protege
+//! apenas quando há impressão digital contra a qual conferir.
 //!
 //! # Amplificação, e por que os pedidos são gordos
 //!

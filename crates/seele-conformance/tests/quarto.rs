@@ -18,8 +18,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use seele_core::encontro::{onde_mora, Marca};
-use seele_proto::encontro::{moro, Vizinhanca, TAMANHO};
+use seele_core::encontro::{onde_mora, onde_mora_hoje, Marca, Marcas, OndeMora, PRAZO_DO_QUARTO};
+use seele_proto::encontro::{analisar, moro, Pedido, Vizinhanca, TAMANHO};
 
 mod vaga;
 
@@ -227,5 +227,157 @@ fn resolver_o_nome_acontece_dentro_do_prazo_e_nao_antes_dele() {
         "resolver o nome voltou para fora do prazo. Numa rede sem internet isso \
          são segundos de espera cobrados de uma conexão de LAN que nunca \
          precisaria de ponto de encontro nenhum:\n{corpo}"
+    );
+}
+
+/// A impressão digital dos testes da consulta. As marcas saem dela pelo mesmo
+/// caminho que o app usa, e não escritas à mão: é esse caminho que se testa.
+const IMPRESSAO: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+
+fn marcas_de_teste() -> Marcas {
+    Marcas::do_servidor(IMPRESSAO).expect("uma impressão digital dá marcas")
+}
+
+#[tokio::test]
+async fn o_quarto_devolve_o_servidor_e_a_escuta_e_nao_espera_o_prazo() {
+    let _vaga = vaga::minha();
+    let onde_fica = subir_o_ponto();
+    let marcas = marcas_de_teste();
+    let mut balde = [0_u8; TAMANHO];
+
+    let servidor = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    servidor
+        .send_to(&moro(&marcas.servidor), onde_fica)
+        .await
+        .unwrap();
+    servidor.recv_from(&mut balde).await.unwrap();
+    let escuta = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    escuta
+        .send_to(&moro(&marcas.escuta), onde_fica)
+        .await
+        .unwrap();
+    escuta.recv_from(&mut balde).await.unwrap();
+
+    let comecou = std::time::Instant::now();
+    let achado = onde_mora_hoje(&onde_fica.to_string(), &marcas, PRAZO_DO_QUARTO).await;
+
+    assert_eq!(
+        achado,
+        OndeMora::Achado {
+            servidor: Some(servidor.local_addr().unwrap()),
+            escuta: Some(escuta.local_addr().unwrap()),
+        },
+        "o quarto tinha os dois endereços e a consulta não voltou com os dois"
+    );
+    assert!(
+        comecou.elapsed() < std::time::Duration::from_millis(400),
+        "as duas respostas chegaram e a consulta ainda esperou {:?}: quem paga é a conexão \
+         que vem depois, inclusive a de quem está na mesma casa",
+        comecou.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn um_ponto_no_ar_sem_morador_diz_que_ninguem_mora_ali() {
+    let _vaga = vaga::minha();
+    let onde_fica = subir_o_ponto();
+
+    let comecou = std::time::Instant::now();
+    let achado = onde_mora_hoje(&onde_fica.to_string(), &marcas_de_teste(), PRAZO_DO_QUARTO).await;
+
+    assert_eq!(
+        achado,
+        OndeMora::NinguemMora,
+        "o ponto respondeu ao ONDE e a consulta não soube dizer que ele está no ar: «o ponto \
+         caiu» e «o anfitrião não está» voltaram a ser o mesmo silêncio"
+    );
+    assert!(
+        comecou.elapsed() < std::time::Duration::from_millis(1000),
+        "o ponto provou que está no ar na primeira volta e a consulta ainda esperou {:?}",
+        comecou.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn sem_resposta_a_pergunta_sai_tres_vezes() {
+    let _vaga = vaga::minha();
+    let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let onde_fica = mudo.local_addr().unwrap().to_string();
+    let marcas = marcas_de_teste();
+    let do_servidor = marcas.servidor.clone();
+
+    let consulta =
+        tokio::spawn(async move { onde_mora_hoje(&onde_fica, &marcas, PRAZO_DO_QUARTO).await });
+
+    let mut quantas = 0_u32;
+    let mut balde = [0_u8; TAMANHO];
+    let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO + std::time::Duration::from_millis(300);
+    while let Ok(Ok((lidos, _))) = tokio::time::timeout_at(ate, mudo.recv_from(&mut balde)).await {
+        if balde.get(..lidos).and_then(analisar)
+            == Some(Pedido::Quem {
+                marca: do_servidor.clone(),
+            })
+        {
+            quantas += 1;
+        }
+    }
+    let achado = consulta.await.unwrap();
+
+    assert_eq!(
+        quantas, 3,
+        "a pergunta pelo servidor saiu {quantas} vez(es) a um ponto que não respondeu: um \
+         datagrama perdido volta a custar a consulta inteira"
+    );
+    assert_eq!(
+        achado,
+        OndeMora::PontoMudo,
+        "um ponto que não respondeu nem ao ONDE virou outra coisa"
+    );
+}
+
+#[tokio::test]
+async fn um_anfitriao_que_so_registrou_o_servidor_volta_sem_a_escuta_e_sem_esperar_o_prazo() {
+    let _vaga = vaga::minha();
+    // O anfitrião 0.15.0 registra a escuta como `anfitriao`, e a marca que a
+    // consulta pergunta por ela nunca está no quarto. O ponto responde à do
+    // servidor e cala à outra: a consulta tem de devolver o que achou, e não
+    // ficar esperando uma resposta que não vem.
+    let onde_fica = subir_o_ponto();
+    let marcas = marcas_de_teste();
+    let mut balde = [0_u8; TAMANHO];
+
+    let servidor = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    servidor
+        .send_to(&moro(&marcas.servidor), onde_fica)
+        .await
+        .unwrap();
+    servidor.recv_from(&mut balde).await.unwrap();
+
+    let comecou = std::time::Instant::now();
+    let achado = onde_mora_hoje(&onde_fica.to_string(), &marcas, PRAZO_DO_QUARTO).await;
+
+    assert_eq!(
+        achado,
+        OndeMora::Achado {
+            servidor: Some(servidor.local_addr().unwrap()),
+            escuta: None,
+        },
+        "o quarto só tinha o servidor e a consulta não voltou com ele e sem a escuta"
+    );
+    assert_eq!(
+        achado.servidor(),
+        Some(servidor.local_addr().unwrap()),
+        "`servidor()` não devolve o endereço que o `Achado` carrega"
+    );
+    assert_eq!(
+        achado.escuta(),
+        None,
+        "`escuta()` inventou um endereço que o `Achado` não tem"
+    );
+    assert!(
+        comecou.elapsed() < std::time::Duration::from_millis(1000),
+        "o ponto respondeu e a consulta ainda esperou {:?} pela escuta de um anfitrião que nunca \
+         a registrou com esta marca: é o custo de toda conexão a um anfitrião 0.15.0",
+        comecou.elapsed()
     );
 }

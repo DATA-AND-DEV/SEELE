@@ -17,24 +17,31 @@
 //! o pacote: quem conecta em seguida tem de conectar por ele. É o mesmo motivo
 //! pelo qual o outro lado precisou de um espelho do socket do servidor.
 //!
-//! # O que este lado nunca faz
+//! # O que este lado lê do ponto de encontro, e o que não lê
 //!
-//! **Não lê resposta nenhuma do ponto de encontro.** Nem precisa: os endereços
-//! que serão tentados vieram todos do `seele://`, e a impressão digital contra a
-//! qual o servidor é conferido também. Um ponto de encontro hostil consegue não
-//! avisar o anfitrião — e é só. Ele não tem por onde mandar ninguém para outro
-//! lugar, porque ninguém deste lado escuta o que ele diz.
+//! **A batida não lê resposta nenhuma.** O `LEVE` é de mão única: os endereços
+//! que serão tentados vieram do `seele://`, e a impressão digital contra a qual
+//! o servidor é conferido também.
+//!
+//! **A consulta ao quarto lê**, e é o único caminho por onde um ponto de
+//! encontro põe um endereço na lista de candidatos ([`onde_mora_hoje`]). Um
+//! ponto hostil, ou quem ocupou a marca no quarto, consegue mandar quem volta
+//! para o endereço errado. O que impede isso de virar conexão com um impostor é
+//! a impressão digital conferida no aperto de mão, e ela só protege quando
+//! existe: quem volta pela lista precisa levar a impressão guardada (análise de
+//! 22/09/2026, §3.1, S3).
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-// `Marca` reexportada: quem chama `onde_mora` de fora precisa montar uma, e
-// fazê-la vir daqui poupa a camada de cima de nomear `seele-proto` — que o ADR
-// 0002 não deixa a casca alcançar de qualquer jeito.
-pub use seele_proto::encontro::Marca;
 use seele_proto::encontro::{self};
 use seele_proto::uri::Bilhete;
+
+// `Marca` e `Marcas` reexportadas: quem chama `onde_mora_hoje` de fora precisa
+// das marcas prontas, e fazê-las vir daqui poupa a camada de cima de nomear
+// `seele-proto`, que o ADR 0002 não deixa a casca alcançar de qualquer jeito.
+pub use seele_proto::encontro::{Marca, Marcas};
 
 /// Quanto tempo se gasta batendo antes de desistir e conectar assim mesmo.
 ///
@@ -94,9 +101,10 @@ impl Batida {
         bilhete: &Bilhete,
         impressao_digital: Option<&str>,
     ) -> Option<Self> {
-        let marca = impressao_digital
-            .and_then(|impressao| impressao.get(..16))
-            .and_then(Marca::nova)?;
+        // A marca do aviso sai da mesma função com que o anfitrião a confere
+        // ([`Marcas::do_servidor`]): duas derivações da mesma regra são duas
+        // regras para discordarem no dia em que uma mudar.
+        let marca = impressao_digital.and_then(Marcas::do_servidor)?.aviso;
         let aviso = bilhete.aviso().ok()?;
         let ponto = tokio::time::timeout(PRAZO, resolver(bilhete))
             .await
@@ -439,6 +447,266 @@ async fn resolver_ponto(ponto: &str) -> Option<SocketAddr> {
     primeiro
 }
 
+/// Quanto se espera o quarto dizer onde um anfitrião mora.
+///
+/// Um segundo e meio, e é o teto, não o custo comum. As `ENVIOS_AO_QUARTO`
+/// voltas cabem nele. A consulta volta assim que as duas marcas respondem, ou
+/// uma volta depois de o ponto responder qualquer coisa (ver
+/// [`onde_mora_hoje`]). O prazo inteiro só é pago quando o ponto cala, e aí o
+/// que sobra são os endereços guardados.
+pub const PRAZO_DO_QUARTO: Duration = Duration::from_millis(1500);
+
+/// Quantas voltas de pergunta saem enquanto o ponto não responde.
+///
+/// Três, e não uma. Era uma, e um datagrama perdido custava a consulta
+/// inteira em silêncio.
+const ENVIOS_AO_QUARTO: u32 = 3;
+
+/// O intervalo entre uma volta e a seguinte.
+const INTERVALO_DOS_ENVIOS: Duration = Duration::from_millis(500);
+
+/// A marca do `ONDE` que corre junto das duas `QUEM`.
+///
+/// Oito caracteres, com letras fora do hexadecimal. Tem menos de dezesseis, e
+/// por isso nenhuma marca de servidor (`fp16`, `fp16e`, `fp16s`) nem de código
+/// (`p` e quinze símbolos, mais o sufixo) é igual a ela: a resposta dela nunca
+/// se confunde com a de um morador.
+const MARCA_DA_CONSULTA: &str = "consulta";
+
+/// O que o quarto disse sobre onde um anfitrião mora hoje.
+///
+/// É um tipo, e não `(Option, Option)`, porque «não achei» tem causas que
+/// apontam para lugares diferentes. O ponto estar fora do ar é problema de
+/// rede, ou de quem opera o ponto. O ponto estar no ar e ninguém morar lá é o
+/// anfitrião desligado, ou uma versão que registra outras marcas. Enquanto as
+/// duas eram o mesmo `None`, quem investigava não tinha por onde começar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OndeMora {
+    /// O ponto respondeu por pelo menos uma das marcas.
+    ///
+    /// Uma das duas pode faltar: um anfitrião 0.15.0 registra o servidor, e
+    /// não registra a escuta com a marca que se pergunta.
+    Achado {
+        /// Onde o socket do servidor mora: para onde se conecta.
+        servidor: Option<SocketAddr>,
+        /// Onde a escuta de avisos mora: para onde vai o `LEVE`.
+        escuta: Option<SocketAddr>,
+    },
+    /// O ponto respondeu e calou para as duas marcas.
+    ///
+    /// Ele está no ar, e ninguém mora lá. Ou o anfitrião está fora do ar há
+    /// mais que o prazo do quarto, ou o ponto é anterior ao quarto e não
+    /// conhece `QUEM`.
+    NinguemMora,
+    /// O ponto não respondeu a nada dentro do prazo.
+    PontoMudo,
+    /// O texto do ponto não é um endereço, ou o nome não resolveu no prazo.
+    PontoNaoResolve,
+    /// Quem chamou não tinha como formar as marcas, e nenhuma pergunta saiu.
+    ///
+    /// [`onde_mora_hoje`] nunca devolve isto, porque recebe as marcas prontas.
+    /// Quem devolve é quem as monta a partir de uma impressão digital que não
+    /// forma marca.
+    SemMarca,
+}
+
+impl OndeMora {
+    /// O endereço do servidor, se o quarto o deu.
+    #[must_use]
+    pub fn servidor(&self) -> Option<SocketAddr> {
+        match self {
+            Self::Achado { servidor, .. } => *servidor,
+            Self::NinguemMora | Self::PontoMudo | Self::PontoNaoResolve | Self::SemMarca => None,
+        }
+    }
+
+    /// O endereço da escuta de avisos, se o quarto o deu.
+    #[must_use]
+    pub fn escuta(&self) -> Option<SocketAddr> {
+        match self {
+            Self::Achado { escuta, .. } => *escuta,
+            Self::NinguemMora | Self::PontoMudo | Self::PontoNaoResolve | Self::SemMarca => None,
+        }
+    }
+}
+
+/// Onde um anfitrião mora **agora**: o socket do servidor e a escuta de avisos.
+///
+/// # Por que ela existe
+///
+/// Todo endereço de um anfitrião atrás de NAT é perecível: o mapeamento nasce
+/// quando um pacote sai, e o roteador dá outro na abertura seguinte. O que não
+/// envelhece é a identidade, e é dela que saem as [`Marcas`]. O anfitrião
+/// registra o endereço de hoje sob elas, na subida e a cada quinze segundos,
+/// e esta função pergunta.
+///
+/// # Como pergunta
+///
+/// Três perguntas por volta, num socket só: `QUEM` pelo servidor, `QUEM` pela
+/// escuta, e um `ONDE` cuja única função é o ponto provar que está no ar. É
+/// ele que separa «o ponto não respondeu» de «o ponto respondeu e ninguém mora
+/// lá». Enquanto nada responder, saem até três voltas, uma a cada meio
+/// segundo.
+///
+/// A consulta volta assim que as duas marcas respondem, ou **uma volta depois
+/// de o ponto responder qualquer coisa**. Quem não respondeu naquela volta
+/// teve um intervalo inteiro para isso, e repetir a pergunta a um ponto que
+/// está no ar só atrasa a conexão.
+///
+/// # O que se faz com a resposta
+///
+/// Ela entra na lista de candidatos, na frente dos guardados. Não substitui a
+/// conferência da identidade de quem atender naquele endereço.
+///
+/// O resultado vai para o log, com o ponto e o que ele disse. É o dado que
+/// faltava quando a pergunta nunca saía e nada dizia isso. Cada caminho que
+/// acaba sem resposta deixa também a sua causa, em `info` (o único nível que o
+/// `seele.log` grava): o prazo que venceu, o envio que o sistema recusou, a
+/// leitura que falhou.
+pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> OndeMora {
+    // **O prazo cobre a consulta inteira, e resolver o nome é parte dela.**
+    // Numa rede sem internet (duas máquinas na mesma casa, o caso que menos
+    // precisa de ponto de encontro), resolver o nome não falha rápido: espera
+    // um servidor de DNS que não vai responder. Isto roda antes de qualquer
+    // tentativa de conexão, e uma pergunta acessória que atrasa a principal é
+    // pior que não perguntar.
+    let ate = tokio::time::Instant::now() + prazo;
+    let resposta = match tokio::time::timeout_at(ate, resolver_ponto(ponto)).await {
+        Ok(Some(destino)) => consultar(destino, marcas, ate).await,
+        // `resolver_ponto` já deixou no log por que não achou.
+        Ok(None) => OndeMora::PontoNaoResolve,
+        Err(_) => {
+            tracing::info!(
+                ponto,
+                ?prazo,
+                "quarto: o nome do ponto de encontro não resolveu dentro do prazo"
+            );
+            OndeMora::PontoNaoResolve
+        }
+    };
+    tracing::info!(%ponto, ?resposta, "quarto: onde o anfitrião mora hoje");
+    resposta
+}
+
+/// As três perguntas, repetidas até alguém responder ou o prazo vencer.
+///
+/// Um socket só para as três: as respostas se separam pela marca, e é o `ONDE`
+/// saindo pelo mesmo caminho que as `QUEM` que prova que aquele caminho
+/// funciona.
+async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Instant) -> OndeMora {
+    let Some(sonda) = Marca::nova(MARCA_DA_CONSULTA) else {
+        // Inalcançável: a constante é uma marca válida, e
+        // `a_marca_da_consulta_e_valida_e_nao_colide_com_marca_de_morador` o prova.
+        return OndeMora::PontoMudo;
+    };
+    let local = if destino.is_ipv4() {
+        SocketAddr::from(([0, 0, 0, 0], 0))
+    } else {
+        SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0))
+    };
+    let socket = match tokio::net::UdpSocket::bind(local).await {
+        Ok(socket) => socket,
+        Err(erro) => {
+            tracing::info!(%erro, %destino, "quarto: não abriu socket para perguntar");
+            return OndeMora::PontoMudo;
+        }
+    };
+    let pedidos = [
+        encontro::quem(&marcas.servidor),
+        encontro::quem(&marcas.escuta),
+        encontro::onde(&sonda),
+    ];
+
+    let mut servidor = None;
+    let mut escuta = None;
+    let mut no_ar = false;
+    let mut estourou = false;
+    let mut enviados = 0_u32;
+    let mut proxima_volta = tokio::time::Instant::now();
+    let mut balde = [0_u8; encontro::TAMANHO];
+
+    while servidor.is_none() || escuta.is_none() {
+        let agora = tokio::time::Instant::now();
+        if agora >= ate {
+            estourou = true;
+            break;
+        }
+        if agora >= proxima_volta && enviados < ENVIOS_AO_QUARTO {
+            // O ponto já respondeu numa volta anterior: quem não respondeu
+            // naquela volta teve um intervalo inteiro para responder.
+            if no_ar {
+                break;
+            }
+            // Uma linha por volta, e não por pergunta: um envio que o sistema
+            // recusa costuma recusar as três, e a causa é a mesma.
+            let mut recusa = None;
+            for pedido in &pedidos {
+                if let Err(erro) = socket.send_to(pedido, destino).await {
+                    recusa.get_or_insert(erro);
+                }
+            }
+            if let Some(erro) = recusa {
+                tracing::info!(
+                    %erro,
+                    %destino,
+                    volta = enviados + 1,
+                    "quarto: a pergunta não saiu"
+                );
+            }
+            enviados += 1;
+            proxima_volta += INTERVALO_DOS_ENVIOS;
+        }
+        let acordar = if enviados < ENVIOS_AO_QUARTO {
+            proxima_volta.min(ate)
+        } else {
+            ate
+        };
+        let (lidos, origem) =
+            match tokio::time::timeout_at(acordar, socket.recv_from(&mut balde)).await {
+                Ok(Ok(recebido)) => recebido,
+                // Hora da próxima volta, ou do fim: o topo do laço decide.
+                Err(_) => continue,
+                // O Windows entrega aqui o «porta fechada» de um envio anterior.
+                Ok(Err(erro)) if erro.kind() == std::io::ErrorKind::ConnectionReset => continue,
+                Ok(Err(erro)) => {
+                    tracing::info!(%erro, %destino, "quarto: a leitura falhou");
+                    break;
+                }
+            };
+        // Só do ponto a que se perguntou. Um `AQUI` que chega de outro lugar é
+        // ruído da internet, ou alguém tentando escolher para onde esta máquina
+        // vai conectar.
+        if origem.ip() != destino.ip() {
+            continue;
+        }
+        let Some((marca, endereco)) = balde.get(..lidos).and_then(encontro::ler_aqui) else {
+            continue;
+        };
+        no_ar = true;
+        if marca == marcas.servidor {
+            servidor = Some(endereco);
+        } else if marca == marcas.escuta {
+            escuta = Some(endereco);
+        }
+    }
+
+    if estourou {
+        tracing::info!(
+            %destino,
+            enviados,
+            no_ar,
+            ?servidor,
+            ?escuta,
+            "quarto: o prazo da consulta venceu antes de as duas marcas responderem"
+        );
+    }
+    match (servidor, escuta) {
+        (None, None) if no_ar => OndeMora::NinguemMora,
+        (None, None) => OndeMora::PontoMudo,
+        (servidor, escuta) => OndeMora::Achado { servidor, escuta },
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -595,6 +863,144 @@ mod testes {
                 && linha.contains("nao-existe-mesmo.invalid")),
             "um ponto que não resolve deixou de dizer no rastro (`info`) qual era o nome: a \
              pergunta ao quarto não sai e ninguém fica sabendo por quê. Rastro: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn a_marca_da_consulta_e_valida_e_nao_colide_com_marca_de_morador() {
+        // O `ONDE` da consulta só prova que o ponto está no ar se a resposta
+        // dele não puder ser confundida com a de um morador. Uma marca de
+        // servidor tem 16 ou 17 caracteres, e os 16 primeiros são
+        // hexadecimais. Uma de código começa com `p` e tem 16 ou 17.
+        assert!(
+            Marca::nova(MARCA_DA_CONSULTA).is_some(),
+            "a marca do ONDE não é uma marca: a consulta nunca saberia que o ponto está no ar"
+        );
+        assert!(
+            MARCA_DA_CONSULTA.len() < 16,
+            "a marca do ONDE tem o tamanho de uma marca de morador"
+        );
+        assert!(
+            MARCA_DA_CONSULTA.chars().any(|c| !c.is_ascii_hexdigit()),
+            "a marca do ONDE é hexadecimal pura e pode colidir com o começo de uma impressão digital"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_consulta_que_estoura_o_prazo_diz_no_rastro_o_que_perguntou_e_o_que_ouviu() {
+        // «O produto sabe e não conta»: um ponto que não responde acabava em
+        // `PontoMudo` sem uma linha sobre quanto se esperou, e o `seele.log`
+        // (que só grava `info`) ficava mudo junto com ele. Este teste fixa a
+        // `Subscriber` só na thread corrente, e a consulta corre nela.
+        let captura = Arc::new(CapturaDeInfo::default());
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+        let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let onde_fica = mudo.local_addr().unwrap().to_string();
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+
+        let achado = onde_mora_hoje(&onde_fica, &marcas, Duration::from_millis(150)).await;
+
+        assert_eq!(
+            achado,
+            OndeMora::PontoMudo,
+            "um ponto que não respondeu virou outra coisa: este teste não mede nada"
+        );
+        let linhas = captura.linhas.lock().unwrap();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("prazo")
+                && linha.contains(&onde_fica)),
+            "o prazo da consulta venceu sem dizer no rastro (`info`, o único nível que o \
+             seele.log grava) a que ponto se perguntou: quem lê o log não distingue um ponto \
+             fora do ar de uma pergunta que nunca saiu. Rastro: {linhas:?}"
+        );
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("onde o anfitrião mora hoje")
+                && linha.contains("PontoMudo")
+                && linha.contains(&onde_fica)),
+            "o resultado da consulta deixou de ir para o rastro (`info`): «o ponto calou» e «o \
+             anfitrião não está» voltam a não deixar dado nenhum. Rastro: {linhas:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn um_nome_que_nao_resolve_no_prazo_diz_no_rastro_que_foi_o_prazo() {
+        // O outro estouro: o do nome. Sem internet, resolver não falha rápido, e
+        // o prazo vence antes de a pergunta existir. Sem isto o rastro trazia só
+        // `PontoNaoResolve`, o mesmo de um texto que não é endereço, e quem lê
+        // não distinguia um DNS mudo de um link malformado.
+        //
+        // Prazo zero, e um nome que só a resolução de verdade responde: a
+        // primeira sondagem do `lookup_host` fica pendente, e o prazo, já
+        // vencido, ganha. Um endereço em números resolveria sem esperar.
+        let captura = Arc::new(CapturaDeInfo::default());
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+
+        let achado = onde_mora_hoje("nao-existe-mesmo.invalid:8384", &marcas, Duration::ZERO).await;
+
+        assert_eq!(
+            achado,
+            OndeMora::PontoNaoResolve,
+            "um nome que não resolveu no prazo virou outra coisa: este teste não mede nada"
+        );
+        let linhas = captura.linhas.lock().unwrap();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("dentro do prazo")
+                && linha.contains("nao-existe-mesmo.invalid")),
+            "o prazo que venceu na resolução do nome deixou de dizer no rastro (`info`, o único \
+             nível que o seele.log grava) que foi o prazo: um DNS mudo e um link malformado \
+             voltam a parecer a mesma coisa. Rastro: {linhas:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn uma_pergunta_que_nao_sai_diz_no_rastro_por_que_nao_saiu() {
+        // O envio recusado pelo kernel era engolido num `debug!`: a consulta
+        // esperava o prazo inteiro por uma resposta a uma pergunta que nunca
+        // saiu, e o log não tinha uma palavra sobre isso.
+        //
+        // O destino é **descoberto**, como em `destino_recusado`: `0.0.0.0:0` é
+        // recusado pelo macOS e pelo Windows (medidos) e, pela porta zero, pelo
+        // Linux (não medido). Se esta máquina o aceitar, quem falha é o teste,
+        // dizendo isso, e não a consulta acusada de engolir um erro que nunca
+        // houve.
+        let destino = SocketAddr::from(([0, 0, 0, 0], 0));
+        let sonda = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        assert!(
+            sonda.send_to(&[0_u8; encontro::TAMANHO], destino).is_err(),
+            "esta máquina aceitou um envio a {destino}: sem uma recusa, este teste não tem um \
+             envio falho para observar. Não é a consulta que está errada, é o mecanismo daqui \
+             que não vale neste sistema"
+        );
+        let captura = Arc::new(CapturaDeInfo::default());
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+
+        let ate = tokio::time::Instant::now() + Duration::from_millis(150);
+        let achado = consultar(destino, &marcas, ate).await;
+
+        assert_eq!(
+            achado,
+            OndeMora::PontoMudo,
+            "uma pergunta que nunca saiu virou outra coisa: este teste não mede nada"
+        );
+        let linhas = captura.linhas.lock().unwrap();
+        assert!(
+            linhas
+                .iter()
+                .any(|linha| linha.starts_with("INFO") && linha.contains("não saiu")),
+            "o envio recusado ao quarto deixou de dizer no rastro (`info`, o único nível que o \
+             seele.log grava) por que a pergunta não saiu: a consulta espera o prazo inteiro e \
+             ninguém fica sabendo o motivo. Rastro: {linhas:?}"
         );
     }
 
