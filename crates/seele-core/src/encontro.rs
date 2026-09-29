@@ -366,10 +366,10 @@ async fn resolver_ponto(ponto: &str) -> Option<SocketAddr> {
 /// Quanto se espera o quarto dizer onde um anfitrião mora.
 ///
 /// Um segundo e meio, e é o teto, não o custo comum. As `ENVIOS_AO_QUARTO`
-/// voltas cabem nele. A consulta volta assim que as duas marcas respondem, ou
-/// uma volta depois de o ponto responder qualquer coisa (ver
-/// [`onde_mora_hoje`]). O prazo inteiro só é pago quando o ponto cala, e aí o
-/// que sobra são os endereços guardados.
+/// voltas cabem nele. Quanto cada consulta paga de fato está em
+/// [`onde_mora_hoje`], caso a caso. O prazo inteiro é pago quando o ponto cala
+/// nas três voltas, ou quando o nome dele não resolve a tempo, e aí o que sobra
+/// são os endereços guardados.
 pub const PRAZO_DO_QUARTO: Duration = Duration::from_millis(1500);
 
 /// Quantas voltas de pergunta saem enquanto o ponto não responde.
@@ -380,6 +380,27 @@ const ENVIOS_AO_QUARTO: u32 = 3;
 
 /// O intervalo entre uma volta e a seguinte.
 const INTERVALO_DOS_ENVIOS: Duration = Duration::from_millis(500);
+
+/// O piso da espera pela marca que falta, depois da primeira resposta.
+///
+/// Num caminho curto o dobro da ida e volta são microssegundos, e isso não daria
+/// ao ponto tempo nem de responder à segunda pergunta de uma rajada que saiu
+/// junto com a primeira.
+const FOLGA_MINIMA: Duration = Duration::from_millis(100);
+
+/// Até quando se espera pela marca que falta, depois de o ponto responder.
+///
+/// A primeira resposta, mais o dobro da ida e volta que o `ONDE` da volta
+/// mediu, nunca menos que [`FOLGA_MINIMA`]. As três perguntas saem juntas, e o
+/// ponto responde a cada uma assim que ela chega: uma resposta que ainda não
+/// veio depois de duas idas e voltas é uma pergunta que ele calou. Quem chama
+/// não espera além da volta seguinte de qualquer jeito.
+fn teto_depois_da_resposta(
+    primeira: tokio::time::Instant,
+    ida_e_volta: Duration,
+) -> tokio::time::Instant {
+    primeira + ida_e_volta.saturating_mul(2).max(FOLGA_MINIMA)
+}
 
 /// A marca do `ONDE` que corre junto das duas `QUEM`.
 ///
@@ -470,10 +491,26 @@ impl OndeMora {
 /// lá». Enquanto nada responder, saem até três voltas, uma a cada meio
 /// segundo.
 ///
-/// A consulta volta assim que as duas marcas respondem, ou **uma volta depois
-/// de o ponto responder qualquer coisa**. Quem não respondeu naquela volta
-/// teve um intervalo inteiro para isso, e repetir a pergunta a um ponto que
-/// está no ar só atrasa a conexão.
+/// # Quanto ela custa
+///
+/// Cada espera é paga num caso só, e nenhuma passa do `prazo`:
+///
+/// - **as duas marcas respondem**: volta na hora em que a segunda chega, uma
+///   ida e volta até o ponto;
+/// - **o ponto responde e uma marca cala** (um anfitrião 0.15.0, que não
+///   registra a escuta com esta marca; um anfitrião fora do ar, que não
+///   registra nada e volta como [`OndeMora::NinguemMora`]): volta na primeira
+///   resposta mais o dobro da ida e volta medida pelo `ONDE`, nunca menos de
+///   100 ms, e nunca depois da hora em que a volta seguinte sairia (meio
+///   segundo depois do envio). Se o `ONDE` daquela volta se perdeu, não há ida
+///   e volta medida, e a espera vai até essa hora. A pergunta não se repete a
+///   um ponto que está no ar;
+/// - **o ponto só responde numa volta repetida**: cada volta perdida custa meio
+///   segundo, e a que respondeu custa o de cima;
+/// - **nenhuma pergunta sai** (sem rota, o sistema recusa as três) **ou a
+///   leitura falha**: volta na hora, como [`OndeMora::PontoMudo`];
+/// - **o ponto cala nas três voltas, ou o nome não resolve a tempo**: o prazo
+///   inteiro. Resolver o nome conta dentro dele.
 ///
 /// # O que se faz com a resposta
 ///
@@ -515,6 +552,17 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
 /// Um socket só para as três: as respostas se separam pela marca, e é o `ONDE`
 /// saindo pelo mesmo caminho que as `QUEM` que prova que aquele caminho
 /// funciona.
+///
+/// Sai do laço, e com isso decide quanto a conexão espera (a lista caso a caso
+/// está em [`onde_mora_hoje`]):
+///
+/// - quando as duas marcas responderam;
+/// - quando o ponto respondeu e venceu o [`teto_depois_da_resposta`], medido
+///   pela ida e volta do `ONDE`;
+/// - na hora da volta seguinte, com o ponto no ar e o teto ainda por vencer
+///   (o `ONDE` se perdeu, ou a ida e volta é longa);
+/// - na hora, quando nenhuma pergunta da volta saiu ou a leitura falhou;
+/// - no prazo, quando nada respondeu.
 async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Instant) -> OndeMora {
     let Some(sonda) = Marca::nova(MARCA_DA_CONSULTA) else {
         // Inalcançável: a constante é uma marca válida, e
@@ -545,6 +593,12 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
     let mut estourou = false;
     let mut enviados = 0_u32;
     let mut proxima_volta = tokio::time::Instant::now();
+    // Quando a volta corrente saiu, quando chegou a primeira resposta, e quanto
+    // o `ONDE` levou para voltar: é deles que sai o teto da espera pela marca
+    // que falta ([`teto_depois_da_resposta`]).
+    let mut saiu_em = proxima_volta;
+    let mut primeira_resposta = None;
+    let mut ida_e_volta = None;
     let mut balde = [0_u8; encontro::TAMANHO];
 
     while servidor.is_none() || escuta.is_none() {
@@ -553,9 +607,22 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
             estourou = true;
             break;
         }
+        let teto = primeira_resposta
+            .zip(ida_e_volta)
+            .map(|(primeira, rtt)| teto_depois_da_resposta(primeira, rtt));
+        // **O ponto respondeu e o teto venceu.** Quem ainda não respondeu não
+        // está no quarto: um anfitrião 0.15.0 nunca registra a escuta com esta
+        // marca, e um fora do ar não registra nada. Esperar a volta seguinte
+        // era meio segundo cobrado de toda conexão a eles.
+        if teto.is_some_and(|teto| agora >= teto) {
+            break;
+        }
         if agora >= proxima_volta && enviados < ENVIOS_AO_QUARTO {
-            // O ponto já respondeu numa volta anterior: quem não respondeu
-            // naquela volta teve um intervalo inteiro para responder.
+            // O ponto já respondeu, e o teto não venceu antes desta hora: ou o
+            // `ONDE` daquela volta se perdeu e não há ida e volta medida, ou ela
+            // é tão longa que o teto passa da volta seguinte. Quem não
+            // respondeu teve um intervalo inteiro para isso, e repetir a
+            // pergunta a um ponto que está no ar só atrasa a conexão.
             if no_ar {
                 break;
             }
@@ -563,6 +630,7 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
             // recusa costuma recusar as três, e a causa é a mesma.
             let mut saidas = 0_u32;
             let mut recusa = None;
+            saiu_em = agora;
             for pedido in &pedidos {
                 match socket.send_to(pedido, destino).await {
                     Ok(_) => saidas += 1,
@@ -597,6 +665,7 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
         } else {
             ate
         };
+        let acordar = teto.map_or(acordar, |teto| teto.min(acordar));
         let (lidos, origem) =
             match tokio::time::timeout_at(acordar, socket.recv_from(&mut balde)).await {
                 Ok(Ok(recebido)) => recebido,
@@ -619,7 +688,11 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
             continue;
         };
         no_ar = true;
-        if marca == marcas.servidor {
+        let chegou = tokio::time::Instant::now();
+        primeira_resposta.get_or_insert(chegou);
+        if marca == sonda {
+            ida_e_volta.get_or_insert(chegou.saturating_duration_since(saiu_em));
+        } else if marca == marcas.servidor {
             servidor = Some(endereco);
         } else if marca == marcas.escuta {
             escuta = Some(endereco);

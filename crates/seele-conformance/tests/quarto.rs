@@ -407,10 +407,14 @@ async fn um_anfitriao_que_so_registrou_o_servidor_volta_sem_a_escuta_e_sem_esper
         None,
         "`escuta()` inventou um endereço que o `Achado` não tem"
     );
+    // 300 ms, e não o intervalo entre as voltas (500 ms): no laço local o RTT
+    // é de microssegundos, e a espera depois da primeira resposta é o piso de
+    // 100 ms. Quem passa daqui voltou a esperar a volta seguinte inteira.
     assert!(
-        comecou.elapsed() < std::time::Duration::from_millis(1000),
+        comecou.elapsed() < std::time::Duration::from_millis(300),
         "o ponto respondeu e a consulta ainda esperou {:?} pela escuta de um anfitrião que nunca \
-         a registrou com esta marca: é o custo de toda conexão a um anfitrião 0.15.0",
+         a registrou com esta marca: é o custo de toda conexão a um anfitrião 0.15.0, e de todo \
+         anfitrião fora do ar",
         comecou.elapsed()
     );
 }
