@@ -181,6 +181,65 @@ impl std::fmt::Display for Marca {
     }
 }
 
+/// As três marcas de um anfitrião no quarto.
+///
+/// # Por que três, e por que diferentes
+///
+/// O quarto guarda **um endereço por marca**. Um anfitrião tem dois sockets
+/// atrás do mesmo IP público, em portas diferentes: o do servidor, para onde
+/// quem chega conecta, e a escuta de avisos, para onde vai o `LEVE`. Daí saem
+/// [`Marcas::servidor`] e [`Marcas::escuta`]. A terceira, [`Marcas::aviso`],
+/// não mora no quarto: é a que o `LEVE` de quem chega traz, e a que o
+/// anfitrião confere antes de furar.
+///
+/// **A escuta nunca tem a marca do aviso**, e é isso que filtra o eco. O
+/// `MORO` da escuta é respondido com um `AQUI` que volta para a própria
+/// escuta, com a marca do `MORO`. Com a marca do aviso, esse `AQUI` passaria
+/// no filtro do anfitrião, e o anfitrião furaria o caminho para si mesmo a
+/// cada reavivamento.
+///
+/// # Um lugar só
+///
+/// Quem hospeda registra com estas marcas, quem bate traz a do aviso, e quem
+/// procura pergunta pelas outras duas. Enquanto cada lado as derivava por
+/// conta própria, os dois divergiram: o anfitrião registrava a escuta como
+/// `anfitriao`, o cliente perguntava pela impressão digital, e a resposta
+/// nunca veio (análise de 22/09/2026, §2.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Marcas {
+    /// A que o `LEVE` de quem chega traz, e a que o anfitrião confere antes de
+    /// furar.
+    pub aviso: Marca,
+    /// Sob a qual a escuta de avisos se registra no quarto.
+    pub escuta: Marca,
+    /// Sob a qual o socket do servidor se registra no quarto.
+    pub servidor: Marca,
+}
+
+impl Marcas {
+    /// As marcas de um servidor guardado, tiradas da impressão digital.
+    ///
+    /// Partem dos dezesseis primeiros caracteres, que o `seele://` carrega em
+    /// `fp=`. O aviso são esses dezesseis; a escuta, eles e um `e`; o servidor,
+    /// eles e um `s`.
+    ///
+    /// **O aviso e o servidor são os da v0.15.0 e não mudam.** Um cliente que
+    /// não atualizou continua batendo com `LEVE <fp16>` e perguntando
+    /// `QUEM <fp16>s`, e trocar qualquer um dos dois o deixaria falando sozinho.
+    ///
+    /// Devolve `None` para um texto que não forma marca: curto demais, ou com
+    /// algo que não é letra nem número.
+    #[must_use]
+    pub fn do_servidor(impressao_digital: &str) -> Option<Self> {
+        let prefixo = impressao_digital.get(..16)?;
+        Some(Self {
+            aviso: Marca::nova(prefixo)?,
+            escuta: Marca::nova(&format!("{prefixo}e"))?,
+            servidor: Marca::nova(&format!("{prefixo}s"))?,
+        })
+    }
+}
+
 /// O que se pede a um ponto de encontro.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pedido {
@@ -723,5 +782,80 @@ mod testes {
     #[test]
     fn a_porta_padrao_fica_ao_lado_da_do_server() {
         assert_eq!(PORTA_PADRAO, 8384);
+    }
+
+    const IMPRESSAO: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
+
+    #[test]
+    fn as_marcas_de_um_servidor_saem_da_impressao_digital() {
+        // O aviso e o servidor são os que a v0.15.0 já usa: `LEVE <fp16>` de
+        // quem chega e `MORO`/`QUEM <fp16>s` do socket do servidor. Mudar um
+        // dos dois deixa falando sozinho todo cliente que não atualizou. A
+        // escuta é a única nova.
+        let marcas =
+            Marcas::do_servidor(IMPRESSAO).expect("uma impressão digital sempre dá marcas");
+        assert_eq!(
+            marcas.aviso.texto(),
+            "3cbcfb0212da738f",
+            "a marca do aviso mudou: todo cliente 0.15.0 passa a bater com uma marca que o anfitrião ignora"
+        );
+        assert_eq!(
+            marcas.servidor.texto(),
+            "3cbcfb0212da738fs",
+            "a marca do servidor mudou: todo cliente 0.15.0 pergunta por uma marca que ninguém registra"
+        );
+        assert_eq!(
+            marcas.escuta.texto(),
+            "3cbcfb0212da738fe",
+            "a marca da escuta mudou: quem procura o anfitrião pergunta por uma marca que a escuta não registra"
+        );
+    }
+
+    #[test]
+    fn a_escuta_nunca_tem_a_marca_do_aviso() {
+        // É o que filtra o eco. O `MORO` da escuta é respondido para a própria
+        // escuta, com a marca do `MORO`. Com a marca do aviso, a resposta passa
+        // no filtro de `atender` e vira um furo do anfitrião contra si mesmo.
+        for impressao in [
+            IMPRESSAO,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        ] {
+            let marcas =
+                Marcas::do_servidor(impressao).expect("uma impressão digital sempre dá marcas");
+            assert_ne!(
+                marcas.escuta, marcas.aviso,
+                "a escuta se registra com a marca do aviso: o AQUI que responde ao próprio MORO \
+                 passa no filtro e vira um furo contra si mesmo"
+            );
+            assert_ne!(
+                marcas.servidor, marcas.aviso,
+                "o servidor se registra com a marca do aviso"
+            );
+            assert_ne!(
+                marcas.servidor, marcas.escuta,
+                "servidor e escuta com a mesma marca: o quarto guarda um endereço por marca, e um \
+                 apaga o outro"
+            );
+        }
+    }
+
+    #[test]
+    fn um_texto_que_nao_e_impressao_digital_nao_da_marca_nenhuma() {
+        assert_eq!(
+            Marcas::do_servidor("curto"),
+            None,
+            "uma impressão digital curta demais deu marcas: um fp truncado bateria com uma marca que nenhum servidor tem"
+        );
+        assert_eq!(
+            Marcas::do_servidor(""),
+            None,
+            "um texto vazio deu marcas: sem impressão digital não há marca que quem procura saiba perguntar"
+        );
+        assert_eq!(
+            Marcas::do_servidor("3cbcfb02 2da738f89c156de86eb280a"),
+            None,
+            "um espaço virou marca: a marca é o único campo que volta na resposta do ponto"
+        );
     }
 }
