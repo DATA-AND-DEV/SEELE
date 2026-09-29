@@ -681,7 +681,7 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
         // Só do ponto a que se perguntou. Um `AQUI` que chega de outro lugar é
         // ruído da internet, ou alguém tentando escolher para onde esta máquina
         // vai conectar.
-        if origem.ip() != destino.ip() {
+        if !aceita_origem(origem, destino) {
             continue;
         }
         let Some((marca, endereco)) = balde.get(..lidos).and_then(encontro::ler_aqui) else {
@@ -714,6 +714,20 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
         (None, None) => OndeMora::PontoMudo,
         (servidor, escuta) => OndeMora::Achado { servidor, escuta },
     }
+}
+
+/// Se uma resposta à consulta veio do ponto a que se perguntou.
+///
+/// É a única barreira entre um `AQUI` de terceiro e a lista de candidatos: o
+/// que o quarto responde entra na frente da escada, e um `AQUI` forjado que
+/// passasse daqui escolheria para onde esta máquina conecta. Quem protege a
+/// conexão depois disso é a impressão digital conferida no aperto de mão.
+///
+/// **Compara o IP, não a porta**, pelo motivo de `aviso_e_do_ponto`, no
+/// anfitrião: quem consegue forjar um endereço de origem forja a porta junto, e
+/// recusar outra porta só quebraria um ponto atrás de um balanceador.
+fn aceita_origem(origem: SocketAddr, destino: SocketAddr) -> bool {
+    origem.ip() == destino.ip()
 }
 
 #[cfg(test)]
@@ -872,6 +886,33 @@ mod testes {
                 && linha.contains("nao-existe-mesmo.invalid")),
             "um ponto que não resolve deixou de dizer no rastro (`info`) qual era o nome: a \
              pergunta ao quarto não sai e ninguém fica sabendo por quê. Rastro: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn a_consulta_so_aceita_resposta_do_ip_a_que_perguntou() {
+        // A única barreira entre um `AQUI` de terceiro e a lista de candidatos:
+        // o que o quarto responde entra na frente da escada, e um `AQUI` forjado
+        // que passasse daqui escolheria para onde esta máquina conecta.
+        let ponto = SocketAddr::from(([216, 128, 168, 216], encontro::PORTA_PADRAO));
+        let terceiro = SocketAddr::from(([203, 0, 113, 9], encontro::PORTA_PADRAO));
+        assert!(
+            !aceita_origem(terceiro, ponto),
+            "um AQUI que veio de outro IP que não o do ponto foi aceito: qualquer um na internet \
+             escolhe para onde esta máquina conecta"
+        );
+        assert!(
+            aceita_origem(ponto, ponto),
+            "a resposta do próprio ponto foi recusada: a consulta nunca acharia ninguém"
+        );
+        // Compara o IP e não a porta, como o anfitrião faz em `aviso_e_do_ponto`:
+        // quem forja a origem forja a porta junto, e recusar outra porta só
+        // quebraria um ponto atrás de um balanceador.
+        let outra_porta = SocketAddr::from(([216, 128, 168, 216], 50_000));
+        assert!(
+            aceita_origem(outra_porta, ponto),
+            "a resposta do IP do ponto por outra porta foi recusada: um ponto atrás de um \
+             balanceador deixaria de ser ouvido"
         );
     }
 
