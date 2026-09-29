@@ -1466,6 +1466,38 @@ fn the_comparison_stays_in_rust_and_only_its_verdict_crosses() {
 }
 
 #[test]
+fn a_lista_guarda_a_impressao_que_a_conexao_aceitou() {
+    // O `connect` gravava na lista de conhecidos a impressão do link qualquer
+    // que fosse o veredito. Com um link que discorda do pin (`InviteDisagrees`,
+    // que entra e avisa, ADR 0003), a lista ficava com a chave de outro
+    // servidor. A volta pela lista confere pela guardada, e o servidor
+    // verdadeiro era recusado em todo endereço sem pin: a porta nova do NAT, o
+    // endereço que o quarto devolve.
+    //
+    // A regra é `seele_ffi::impressao_a_guardar`, provada lá e, com servidor
+    // de verdade, em `crates/seele-conformance/tests/volta_pela_trilha.rs`. O
+    // que só se vê aqui é o comando usá-la. Os espaços saem da comparação para
+    // o guarda não depender de onde o `rustfmt` quebra a linha.
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    assert!(
+        connect.contains(
+            "letimpressao_aceita=seele_ffi::impressao_a_guardar(&veredito,esperada.as_deref()"
+        ),
+        "`connect` não decide mais pela regra da FFI o que vai para a lista, e a \
+         impressão de um link que discordava do pin volta a envenenar a volta pela lista"
+    );
+    assert!(
+        connect.contains("bilhete_texto.as_deref(),impressao_aceita.as_deref()"),
+        "a lista recebe outra impressão que não a que a conexão aceitou: um link que \
+         discorda do pin deixa na lista a chave de outro servidor"
+    );
+}
+
+#[test]
 fn leaving_forgets_the_invite_that_let_us_in() {
     // Inert while nothing was checked, and not inert any more: the fingerprint
     // that `connect` checks against comes from this slot. Left behind, the next

@@ -79,7 +79,13 @@ pub struct Conhecido {
     /// Pelo mesmo motivo dos caminhos: sem ele, voltar a um servidor atrás de
     /// NAT perde o degrau que o fez funcionar da primeira vez.
     pub bilhete: Option<String>,
-    /// A impressão digital do servidor, como o `seele://` a trouxe.
+    /// A impressão digital do servidor: a que uma conexão conferida **aceitou**.
+    ///
+    /// Quase sempre é a que o `seele://` trouxe. Difere quando o link discorda
+    /// do pin: a conexão fica de pé com a chave fixada (ADR 0003), e é ela que
+    /// se guarda. Guardar a do link fazia a volta pela lista, que confere por
+    /// esta impressão, recusar o servidor verdadeiro em todo endereço sem pin.
+    /// Quem decide é a casca (`seele_ffi::impressao_a_guardar`).
     ///
     /// **É a única coisa desta linha que não envelhece.** Endereço, caminhos e
     /// bilhete são todos endereço, e endereço atrás de NAT morre quando o

@@ -1262,11 +1262,19 @@ async fn connect(
                     viva.lembrar_o_caminho(lembrado);
                 }
             }
+            // **A impressão que a conexão aceitou, e não a do link.** Até a
+            // 0.15.0 ia para cá a do link desta sessão, qualquer que tivesse
+            // sido o veredito. Com um link que discorda do pin, a conexão fica
+            // de pé com a chave fixada (ADR 0003), e a lista ficava com a de
+            // outro servidor. A guardada é a que a volta pela lista confere, e
+            // com ela o servidor verdadeiro seria recusado em todo endereço sem
+            // pin. `None` deixa a guardada como estava.
+            let impressao_aceita = seele_ffi::impressao_a_guardar(&veredito, esperada.as_deref());
             if let Err(erro) = lista.anotar_caminhos(
                 &alvo,
                 &caminhos,
                 bilhete_texto.as_deref(),
-                esperada.as_deref(),
+                impressao_aceita.as_deref(),
             ) {
                 tracing::debug!(%erro, "não guardei os outros caminhos deste servidor");
             }

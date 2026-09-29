@@ -21,6 +21,11 @@
 //! em `apps/seele-app/tests/frontend.rs`
 //! (`a_volta_pela_lista_confere_pela_impressao_guardada`).
 //!
+//! O que a lista **guarda** depois de entrar segue a mesma divisão. A regra é
+//! `seele_ffi::impressao_a_guardar`, e o último teste deste arquivo a exercita
+//! com um servidor de verdade que fecha e volta noutra porta. O uso pelo
+//! comando é guardado em `a_lista_guarda_a_impressao_que_a_conexao_aceitou`.
+//!
 //! # Por que `[::ffff:127.0.0.1]`
 //!
 //! Pelo mesmo motivo de `estados.rs` e `furo.rs`. `enlace::e_publico` pergunta
@@ -28,8 +33,10 @@
 //! `LEVE` sai por ela, mas o pacote ainda chega a um socket desta máquina.
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use seele_ffi::conhecidos::Conhecidos;
 use seele_ffi::uri::Bilhete;
@@ -260,4 +267,192 @@ async fn o_impostor_no_endereco_novo_e_recusado_pela_impressao_guardada() {
 
     verdadeiro.shutdown();
     impostor.shutdown();
+}
+
+/// A impressão de um link que aponta para outro servidor: a forma certa, e
+/// dona nenhuma.
+const DE_OUTRO_SERVIDOR: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// Sobe um servidor com banco em arquivo, numa porta que o sistema escolhe.
+///
+/// Em arquivo, e não em memória: o servidor que sobe de novo com o mesmo banco
+/// é o **mesmo** servidor, com a mesma chave, noutra porta. É o anfitrião que
+/// fechou e abriu atrás de um NAT que lhe deu outro mapeamento.
+async fn server_com_banco(banco: &Path) -> Option<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
+        name: "Casa".into(),
+        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+        database: Location::File(banco.to_path_buf()),
+        ..ServerConfig::default()
+    };
+    let servidor = Arc::new(Daemon::bind(config).await.ok()?);
+    let endereco = servidor.local_addr().ok()?;
+    let aceitando = Arc::clone(&servidor);
+    tokio::spawn(async move {
+        let _ = aceitando.run().await;
+    });
+    Some((endereco, servidor))
+}
+
+/// A configuração de uma visita por um link colado nesta sessão.
+fn config_do_link(casa: &Path, alvo: String, do_link: &str) -> ConnectConfig {
+    // A regra do app, com o link desta sessão e nada guardado.
+    let esperada = seele_ffi::impressao_a_conferir(Some(do_link), None);
+    config(casa, alvo, Vec::new(), esperada, None)
+}
+
+/// Grava a lista como o `connect` do app grava depois de entrar.
+///
+/// `registrar`, e depois `anotar_caminhos` com a impressão que
+/// `seele_ffi::impressao_a_guardar` decide a partir do veredito e do link
+/// desta sessão.
+fn anotar_como_o_app(casa: &Path, alvo: &str, veredito: &Trust, do_link: Option<&str>) {
+    let Ok(mut lista) = Conhecidos::abrir(casa.join("conhecidos")) else {
+        panic!("a lista de conhecidos não abriu");
+    };
+    let aceita = seele_ffi::impressao_a_guardar(veredito, do_link);
+    if lista.registrar(alvo, "pessoa", None).is_err() {
+        panic!("a lista de conhecidos não registrou a visita");
+    }
+    if lista
+        .anotar_caminhos(alvo, &[], None, aceita.as_deref())
+        .is_err()
+    {
+        panic!("a lista de conhecidos não anotou a impressão");
+    }
+}
+
+/// Espera o servidor terminar de fechar, para o banco e o socket ficarem livres
+/// para o que sobe em seguida.
+///
+/// **Só depois de `shutdown`.** `wait_idle` volta quando o endpoint não tem
+/// conexão nenhuma, e `Connection::disconnect` não a faz voltar logo: medido,
+/// 20,0 s (o `IDLE_TIMEOUT`) depois de cada visita, duas vezes seguidas. O
+/// `shutdown` fecha o que estiver de pé e o `wait_idle` volta em dezenas de
+/// milissegundos, como em `bateria_interna.rs`.
+async fn esperar_o_servidor_fechar(servidor: &Daemon) {
+    if tokio::time::timeout(Duration::from_secs(10), servidor.wait_idle())
+        .await
+        .is_err()
+    {
+        panic!("o servidor continuou de pé dez segundos depois de `shutdown`");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn um_link_de_outro_servidor_nao_envenena_a_volta_pela_lista() {
+    let _vaga = vaga::minha();
+    // O defeito: o `connect` do app gravava na lista a impressão do link
+    // qualquer que fosse o veredito. Um link de outro servidor, colado para um
+    // endereço já fixado, entra e avisa (ADR 0003), e a lista ficava com a
+    // chave do outro. A volta pela lista confere pela guardada, e o servidor
+    // verdadeiro era recusado no primeiro endereço sem pin: a porta nova do
+    // NAT, ou o endereço que o quarto devolve.
+    let Ok(pasta) = tempfile::tempdir() else {
+        panic!("sem diretório temporário não há banco");
+    };
+    let banco = pasta.path().join("seele.db");
+    let Some((ontem, servidor)) = server_com_banco(&banco).await else {
+        panic!("o servidor de teste não subiu");
+    };
+    let Ok(casa) = tempfile::tempdir() else {
+        panic!("sem diretório temporário não há lista nem identidade");
+    };
+    let real = servidor.fingerprint().to_owned();
+    let alvo = ontem.to_string();
+
+    // A primeira visita, pelo link certo: a chave fica fixada neste endereço.
+    let (connection, veredito) =
+        match conectar(config_do_link(casa.path(), alvo.clone(), &real)).await {
+            Ok(entrada) => entrada,
+            Err(erro) => panic!("a primeira visita, pelo link certo, não entrou: {erro:?}"),
+        };
+    assert_eq!(
+        veredito,
+        Trust::FirstContactVerified {
+            fingerprint: real.clone()
+        },
+        "a primeira visita não conferiu a impressão, e o resto do teste perde o assunto"
+    );
+    anotar_como_o_app(casa.path(), &alvo, &veredito, Some(&real));
+    connection.disconnect();
+
+    // Um link de outro servidor, para o mesmo endereço. O pin confere e o link
+    // discorda: a conexão fica de pé e avisa.
+    let (connection, veredito) =
+        match conectar(config_do_link(casa.path(), alvo.clone(), DE_OUTRO_SERVIDOR)).await {
+            Ok(entrada) => entrada,
+            Err(erro) => panic!(
+                "o link que discorda do pin derrubou a conexão com um servidor já \
+                 conhecido, contra o ADR 0003: {erro:?}"
+            ),
+        };
+    assert_eq!(
+        veredito,
+        Trust::InviteDisagrees {
+            expected: DE_OUTRO_SERVIDOR.to_owned(),
+            offered: real.clone(),
+        },
+        "o link que discorda do pin não deu `InviteDisagrees`, e o teste não mede o \
+         que diz medir"
+    );
+    anotar_como_o_app(casa.path(), &alvo, &veredito, Some(DE_OUTRO_SERVIDOR));
+    connection.disconnect();
+
+    // O servidor fecha e abre de novo com o mesmo banco: a mesma chave, noutra
+    // porta.
+    servidor.shutdown();
+    esperar_o_servidor_fechar(&servidor).await;
+    drop(servidor);
+    let Some((hoje, de_novo)) = server_com_banco(&banco).await else {
+        panic!("o servidor não subiu de novo com o mesmo banco");
+    };
+    assert_eq!(
+        de_novo.fingerprint(),
+        real,
+        "o banco em arquivo não guardou a chave, e o servidor de hoje é outro"
+    );
+    assert_ne!(
+        hoje.port(),
+        ontem.port(),
+        "o sistema devolveu a mesma porta, e ela tem pin: este teste precisa de um \
+         endereço sem pin para dizer alguma coisa. Rode de novo"
+    );
+
+    // A volta pela lista: sem link nesta sessão, com a impressão relida do
+    // disco, e o endereço de hoje na frente, onde o `connect` do app põe a
+    // resposta do quarto.
+    let Some(guardada) = Conhecidos::abrir(casa.path().join("conhecidos"))
+        .ok()
+        .and_then(|lista| {
+            lista
+                .buscar(&alvo)
+                .and_then(|conhecido| conhecido.impressao.clone())
+        })
+    else {
+        panic!("a lista de conhecidos perdeu a impressão das duas visitas");
+    };
+    let configuracao = config(
+        casa.path(),
+        alvo,
+        vec![hoje.to_string()],
+        seele_ffi::impressao_a_conferir(None, Some(&guardada)),
+        None,
+    );
+    let (connection, confianca) = match conectar(configuracao).await {
+        Ok(entrada) => entrada,
+        Err(erro) => panic!(
+            "a volta pela lista recusou o servidor verdadeiro no endereço novo ({erro:?}): \
+             a lista guardou a impressão do link que discordava do pin, e não a que a \
+             conexão aceitou"
+        ),
+    };
+    assert_eq!(
+        confianca,
+        Trust::FirstContactVerified { fingerprint: real },
+        "a volta pela lista entrou no endereço novo sem conferir pela impressão guardada"
+    );
+
+    connection.disconnect();
+    de_novo.shutdown();
 }
