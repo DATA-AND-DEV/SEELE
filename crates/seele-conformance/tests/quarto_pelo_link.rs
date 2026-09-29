@@ -30,17 +30,36 @@
 //!
 //! # A exceção declarada: quando um teste daqui pula
 //!
-//! Um teste que **precisa do degrau 4** pula, e pula **escrevendo `PULADO` no
-//! stderr** com o motivo, sem passar em silêncio. O degrau 4 só é tentado numa
-//! máquina sem IPv4 global (`alcance.rs`, `tem_ipv4_global`): numa VPS o degrau 1
-//! já resolveu tudo, o convite nunca leva `enc=`, e não há encontro a largar.
-//! Também não há degrau 4 quando o ponto não responde. Nesses dois casos o teste
-//! não mede nada, e fingir que passou seria pior que dizer que não mediu.
+//! Um teste que **precisa do degrau 4** pula **num caso só**, e pula
+//! **escrevendo `PULADO` no stderr**, sem passar em silêncio: quando o convite
+//! não leva `enc=` **e** a escada não guardou recusa nenhuma
+//! (`Alcance::encontro_recusado()` é `None`). Quer dizer que o degrau 4 nem foi
+//! tentado, e ele só é tentado numa máquina sem IPv4 global (`alcance.rs`,
+//! `tem_ipv4_global`): numa VPS o degrau 1 já resolveu tudo, e não há encontro a
+//! largar. Nesse caso o teste não mede nada, e fingir que passou seria pior que
+//! dizer que não mediu.
+//!
+//! Quando a recusa **existe** (`Some(motivo)`), o degrau foi tentado, com o ponto
+//! local no ar, e não deu. Isso é **falha**, com o motivo na mensagem, e não
+//! pulo: se pulasse, uma regressão em `abrir` faria o guarda calar justamente
+//! nas máquinas em que ele mede.
 //!
 //! O que isso custa é dito aqui, e não escondido: **numa máquina com IPv4 global
 //! estes testes não provam o guarda**. Quem roda a prova por reversão precisa de
 //! uma máquina sem IPv4 global, e confere que a linha `PULADO` **não** saiu (o
 //! `--nocapture` mostra). Um verde com `PULADO` é um verde que não conta.
+//!
+//! E um resto que este arquivo não separa: `None` é também o que a escada guarda
+//! quando o degrau 4 abre e ela o larga, por o endereço do furo não virar
+//! candidato da escuta (`Escada::subir`, «o furo de NAT não virou candidato»).
+//! Esse caso pula como o da VPS, e só o registro do servidor o distingue.
+//!
+//! # A variável `$SEELE_ENCONTRO`
+//!
+//! É do processo, e o `libtest` roda os outros testes deste binário nele. Quem a
+//! troca a troca **por um [`AmbienteDoEncontro`]**, criado logo depois da vaga e
+//! antes de qualquer troca: o `Drop` a devolve, inclusive em pânico, e antes de a
+//! vaga ser devolvida (as variáveis locais caem na ordem inversa).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -85,54 +104,120 @@ fn ponto_na_porta_padrao() -> (SocketAddr, Arc<seele_encontro::Quarto>) {
         .clone()
 }
 
-/// Devolve `$SEELE_ENCONTRO` ao que era.
-fn restaurar(antes: Option<String>) {
-    match antes {
-        Some(valor) => std::env::set_var(seele_server::alcance::encontro::VARIAVEL, valor),
-        None => std::env::remove_var(seele_server::alcance::encontro::VARIAVEL),
+/// Guarda `$SEELE_ENCONTRO` e a devolve ao que era quando o teste acaba,
+/// **inclusive em pânico**.
+///
+/// A variável é do processo, e o `libtest` roda os outros testes deste binário
+/// nele: um teste que a troca e entra em pânico antes de devolvê-la deixaria o
+/// ponto de encontro trocado para todo teste que vier depois. É o padrão de
+/// `vaga::Vaga`: quem devolve é o `Drop`, e nenhum caminho precisa lembrar de
+/// chamar nada à mão.
+///
+/// Crie-o logo depois de `let _vaga = vaga::minha();` e **antes** de qualquer
+/// troca. As variáveis locais caem na ordem inversa, então a variável volta
+/// antes de a vaga ser devolvida, e o próximo teste da fila a encontra como ela
+/// era. Trocar a variável só se faz por ele ([`AmbienteDoEncontro::pedir`]).
+#[must_use = "a variável só volta quando o guarda cai; soltá-lo na hora a devolve cedo demais"]
+struct AmbienteDoEncontro {
+    /// O que `$SEELE_ENCONTRO` era antes: `None` é «não estava definida».
+    antes: Option<std::ffi::OsString>,
+}
+
+impl AmbienteDoEncontro {
+    /// Guarda o valor de agora, sem trocar nada.
+    fn guardar() -> Self {
+        Self {
+            antes: std::env::var_os(seele_server::alcance::encontro::VARIAVEL),
+        }
     }
+
+    /// Troca `$SEELE_ENCONTRO` por `valor`, até este guarda cair.
+    fn pedir(&self, valor: &str) {
+        std::env::set_var(seele_server::alcance::encontro::VARIAVEL, valor);
+    }
+}
+
+impl Drop for AmbienteDoEncontro {
+    fn drop(&mut self) {
+        match self.antes.take() {
+            Some(valor) => std::env::set_var(seele_server::alcance::encontro::VARIAVEL, valor),
+            None => std::env::remove_var(seele_server::alcance::encontro::VARIAVEL),
+        }
+    }
+}
+
+#[test]
+fn o_ambiente_do_encontro_volta_mesmo_quando_o_teste_entra_em_panico() {
+    let _vaga = vaga::minha();
+    // Uma reserva por fora: se o guarda de dentro estiver quebrado, é ela que
+    // devolve a variável, e a falha deste teste não contamina os outros.
+    let _reserva = AmbienteDoEncontro::guardar();
+    let antes = std::env::var_os(seele_server::alcance::encontro::VARIAVEL);
+
+    let resultado = std::panic::catch_unwind(|| {
+        let ambiente = AmbienteDoEncontro::guardar();
+        ambiente.pedir("valor-que-o-panico-nao-pode-deixar-para-tras");
+        panic!("pânico provocado de propósito, com a variável já trocada");
+    });
+
+    assert!(
+        resultado.is_err(),
+        "o pânico provocado não aconteceu: este teste não mede nada"
+    );
+    assert_eq!(
+        std::env::var_os(seele_server::alcance::encontro::VARIAVEL),
+        antes,
+        "um teste que entrou em pânico com `$SEELE_ENCONTRO` trocada deixou a troca para trás: \
+         todo teste seguinte deste binário fala com o ponto de encontro errado"
+    );
 }
 
 #[tokio::test]
 async fn largar_uma_hospedagem_sem_encerrar_devolve_a_porta() {
     let _vaga = vaga::minha();
+    let ambiente = AmbienteDoEncontro::guardar();
     // O defeito: `Encontro` não tinha `Drop`. Uma `Hospedagem` descartada sem
     // `encerrar`, que é o que fechar a janela faz, largava o `JoinHandle` do
     // degrau 4, e a tarefa seguia viva segurando uma cópia do socket do
     // servidor. Hospedar de novo na mesma porta falhava com «endereço já em
     // uso» até o app fechar.
     let (ponto, _) = ponto_na_porta_padrao();
-    let variavel = seele_server::alcance::encontro::VARIAVEL;
-    let antes = std::env::var(variavel).ok();
 
     // O ponto sem porta, como `PONTO_PADRAO` é escrito.
-    std::env::set_var(variavel, ponto.ip().to_string());
+    ambiente.pedir(&ponto.ip().to_string());
     let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
         .await
         .expect("a primeira hospedagem sobe");
     // Daqui em diante nenhum `iniciar` fala com ponto de encontro nenhum: o
     // que se mede é a porta, e nenhum pacote precisa sair desta máquina.
-    std::env::set_var(variavel, "nao");
+    ambiente.pedir("nao");
 
     let endereco = primeira.endereco();
     if !primeira.convite().contains("enc=") {
         // O degrau 4 só é tentado sem IPv4 global (`alcance.rs`,
-        // `tem_ipv4_global`). Numa VPS ele não abre, e sem ele não há tarefa a
-        // vazar. O motivo que a escada guardou vai na linha, para o `PULADO` não
-        // ser um silêncio com outro nome.
-        let motivo = primeira
+        // `tem_ipv4_global`). Numa VPS ele nem é tentado, e sem ele não há
+        // tarefa a vazar: `encontro_recusado()` é `None`, e isso é PULO. Se foi
+        // tentado, com o ponto local no ar, e a escada guardou por que não deu,
+        // isso é FALHA: pular aí faria uma regressão em `abrir` calar o guarda
+        // justamente nas máquinas em que ele mede.
+        let recusa = primeira
             .alcance()
             .and_then(seele_server::alcance::Alcance::encontro_recusado)
-            .unwrap_or("nenhum motivo registrado: o degrau 4 nem foi tentado")
-            .to_owned();
+            .map(str::to_owned);
         primeira.encerrar().await;
-        restaurar(antes);
-        let _ = writeln!(
-            std::io::stderr(),
-            "PULADO: largar_uma_hospedagem_sem_encerrar_devolve_a_porta: o degrau 4 não abriu \
-             nesta máquina (IPv4 global?), e sem ele este teste não mede nada. Motivo: {motivo}"
+        let Some(motivo) = recusa else {
+            let _ = writeln!(
+                std::io::stderr(),
+                "PULADO: largar_uma_hospedagem_sem_encerrar_devolve_a_porta: o degrau 4 nem foi \
+                 tentado nesta máquina (IPv4 global?), e sem ele este teste não mede nada"
+            );
+            return;
+        };
+        panic!(
+            "o degrau 4 foi tentado contra o ponto local em {ponto} e a escada o recusou: \
+             {motivo}. Sem ele o convite não leva `enc=` e o guarda não mede nada, e pular aqui \
+             esconderia uma regressão em `abrir`"
         );
-        return;
     }
 
     // Largar, e não encerrar.
@@ -165,7 +250,6 @@ async fn largar_uma_hospedagem_sem_encerrar_devolve_a_porta() {
             Err(_) => break None,
         }
     };
-    restaurar(antes);
 
     let Some(segunda) = segunda else {
         panic!(

@@ -962,22 +962,7 @@ mod testes {
         let buraco = SocketAddr::from(([192, 0, 2, 1], PORTA_PADRAO));
 
         // E o que responde é um ponto de encontro de verdade, no laço local.
-        let servico = tokio::net::UdpSocket::bind("127.0.0.1:0")
-            .await
-            .unwrap_or_else(|erro| panic!("o ponto de encontro de teste tem de abrir: {erro}"));
-        let onde_atende = servico
-            .local_addr()
-            .unwrap_or_else(|erro| panic!("ele tem endereço: {erro}"));
-        tokio::spawn(async move {
-            let mut balde = [0_u8; encontro::TAMANHO];
-            while let Ok((lidos, de)) = servico.recv_from(&mut balde).await {
-                if let Some(resposta) = balde.get(..lidos).and_then(|bytes| {
-                    encontro::responder_em(bytes, de, encontro::Vizinhanca::TambemAqui)
-                }) {
-                    let _ = servico.send_to(&resposta.datagrama, resposta.destino).await;
-                }
-            }
-        });
+        let onde_atende = ponto_que_responde().await;
 
         let marca =
             Marca::nova("anfitriao").unwrap_or_else(|| panic!("«anfitriao» é uma marca válida"));
