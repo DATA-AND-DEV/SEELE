@@ -64,12 +64,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use seele_core::encontro::{onde_mora_hoje, Marcas, OndeMora, PRAZO_DO_QUARTO};
 use seele_proto::encontro::{moro, Vizinhanca, PORTA_PADRAO, TAMANHO};
+use seele_server::alcance::encontro::Convocacao;
 use seele_server::hospedagem::Hospedagem;
 use seele_server::persistence::Location;
 
@@ -306,5 +307,99 @@ async fn um_ponto_escrito_sem_porta_e_procurado_na_porta_padrao() {
         "o ponto escrito sem porta, que é como o `enc=` sai desde a v0.10.2, não foi \
          procurado na porta do ponto de encontro: a pergunta ao quarto nunca sai, e a lista \
          de servidores fica sem o endereço de hoje"
+    );
+}
+
+/// A impressão digital do anfitrião de ponta a ponta.
+///
+/// As marcas saem dela dos dois lados: `Convocacao::para_servidor` no
+/// anfitrião, e `seele_ffi::onde_mora_hoje` no cliente. O que se testa é que os
+/// dois lados, cada um pelo seu caminho, chegam às mesmas.
+const IMPRESSAO_DO_ANFITRIAO: &str =
+    "5e1e0a0b0c0d0e0f00112233445566778899aabbccddeeff0011223344556677";
+
+#[tokio::test]
+async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
+    let _vaga = vaga::minha();
+    let (ponto, quarto) = ponto_na_porta_padrao();
+
+    // O servidor como o de produção abre: `[::]`, com pilha dupla quando a
+    // máquina deixa.
+    let (socket, _) =
+        seele_server::alcance::abrir_escuta(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)))
+            .expect("a escuta do servidor abre");
+    let socket = Arc::new(socket);
+
+    // O ponto como `PONTO_PADRAO` é escrito: um nome sem porta.
+    let sem_porta = ponto.ip().to_string();
+    assert!(
+        !sem_porta.contains(':'),
+        "o ponto deste teste ganhou porta ({sem_porta}), e o teste deixou de medir o caminho \
+         do link"
+    );
+
+    let antes = quarto.quantos();
+    let convocacao = Convocacao::para_servidor(
+        Arc::clone(&socket),
+        IMPRESSAO_DO_ANFITRIAO,
+        sem_porta.clone(),
+    )
+    .expect("uma impressão digital dá uma convocação");
+    let aberto = seele_server::alcance::encontro::abrir(&convocacao)
+        .await
+        .expect("o degrau 4 abre contra o ponto deste teste");
+    let bilhete = aberto.bilhete();
+    let aviso = bilhete.aviso().expect("o aviso do bilhete é um endereço");
+
+    // O anfitrião registra as duas marcas na subida. A consulta que vem logo
+    // depois não pode chegar ao ponto antes delas, ou este teste mede a ordem
+    // do escalonador e não o produto. Sem o registro na subida, esta espera
+    // vence em um segundo e a asserção de baixo falha.
+    let ate = tokio::time::Instant::now() + Duration::from_secs(1);
+    while quarto.quantos() < antes + 2 && tokio::time::Instant::now() < ate {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Duas formas do mesmo ponto teriam de chegar:
+    // - a que o bilhete deste anfitrião escreve no link;
+    // - a que todo link emitido até a v0.15.0 carrega, e que a lista de
+    //   conhecidos guardou: o nome cru, sem porta.
+    //
+    // Hoje as duas são a mesma: `Encontro::bilhete` escreve o ponto como ele
+    // entrou na convocação, sem porta, e a porta escrita no `enc=` (Task 9 do
+    // plano) não entrou. A segunda forma só é percorrida quando o bilhete
+    // deixar de coincidir com ela, e não roda duas vezes o mesmo caso.
+    let mut formas = vec![bilhete.ponto.clone()];
+    if bilhete.ponto != sem_porta {
+        formas.push(sem_porta.clone());
+    }
+    for ponto_do_link in formas {
+        let achado = seele_ffi::onde_mora_hoje(&ponto_do_link, IMPRESSAO_DO_ANFITRIAO).await;
+        assert_eq!(
+            achado,
+            OndeMora::Achado {
+                servidor: Some(aberto.publico()),
+                escuta: Some(aviso),
+            },
+            "o link com o ponto «{ponto_do_link}» não levou aos dois endereços de hoje. Um \
+             `PontoNaoResolve` é o ponto sem porta indo cru ao DNS; `escuta: None` é a escuta \
+             registrada com outra marca; `NinguemMora` é o registro que não saiu na subida"
+        );
+    }
+
+    // E largar, e não fechar: é o que acontece com o encontro quando uma
+    // `Hospedagem` é descartada sem `encerrar`. A tarefa do degrau 4 tem de
+    // soltar o socket do servidor, ou a porta fica presa até o app fechar.
+    drop(convocacao);
+    drop(aberto);
+    let ate = tokio::time::Instant::now() + Duration::from_secs(1);
+    while Arc::strong_count(&socket) > 1 && tokio::time::Instant::now() < ate {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        Arc::strong_count(&socket),
+        1,
+        "largar o encontro deixou a tarefa do degrau 4 viva segurando o socket do servidor: a \
+         porta fica presa, e hospedar de novo nela falha"
     );
 }
