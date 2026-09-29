@@ -151,9 +151,10 @@ impl Drop for AmbienteDoEncontro {
 #[test]
 fn o_ambiente_do_encontro_volta_mesmo_quando_o_teste_entra_em_panico() {
     let _vaga = vaga::minha();
-    // Uma reserva por fora: se o guarda de dentro estiver quebrado, é ela que
-    // devolve a variável, e a falha deste teste não contamina os outros.
-    let _reserva = AmbienteDoEncontro::guardar();
+    // Sem reserva por fora: uma segunda `AmbienteDoEncontro` teria o mesmo
+    // `Drop`, e quebraria junto com o guarda que este teste prova. Se ele
+    // quebrar, os testes seguintes deste binário podem herdar a variável
+    // trocada, e é a falha deste que diz por quê.
     let antes = std::env::var_os(seele_server::alcance::encontro::VARIAVEL);
 
     let resultado = std::panic::catch_unwind(|| {
@@ -210,8 +211,9 @@ async fn largar_uma_hospedagem_sem_encerrar_devolve_a_porta() {
         let Some(motivo) = recusa else {
             let _ = writeln!(
                 std::io::stderr(),
-                "PULADO: largar_uma_hospedagem_sem_encerrar_devolve_a_porta: o degrau 4 nem foi \
-                 tentado nesta máquina (IPv4 global?), e sem ele este teste não mede nada"
+                "PULADO: largar_uma_hospedagem_sem_encerrar_devolve_a_porta: o convite saiu sem \
+                 `enc=` e a escada não guardou recusa nenhuma (IPv4 global, ou o degrau 4 abriu e \
+                 a escada o largou), e sem ele este teste não mede nada"
             );
             return;
         };
@@ -334,8 +336,8 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
     let sem_porta = ponto.ip().to_string();
     assert!(
         !sem_porta.contains(':'),
-        "o ponto deste teste ganhou porta ({sem_porta}), e o teste deixou de medir o caminho \
-         do link"
+        "o ponto deste teste virou IPv6 ({sem_porta}), e um nome sem porta deixou de ser o que \
+         ele mede"
     );
 
     let antes = quarto.quantos();
@@ -365,9 +367,8 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
     // - a que todo link emitido até a v0.15.0 carrega, e que a lista de
     //   conhecidos guardou: o nome cru, sem porta.
     //
-    // Hoje as duas são a mesma: `Encontro::bilhete` escreve o ponto como ele
-    // entrou na convocação, sem porta, e a porta escrita no `enc=` (Task 9 do
-    // plano) não entrou. A segunda forma só é percorrida quando o bilhete
+    // Hoje as duas são a mesma: o `Bilhete` escreve o ponto como ele entrou na
+    // convocação, sem porta. A segunda forma só é percorrida quando o bilhete
     // deixar de coincidir com ela, e não roda duas vezes o mesmo caso.
     let mut formas = vec![bilhete.ponto.clone()];
     if bilhete.ponto != sem_porta {

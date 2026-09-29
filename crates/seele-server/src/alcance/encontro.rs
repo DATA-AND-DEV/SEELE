@@ -348,6 +348,11 @@ impl Convocacao {
     ///
     /// Lê `$SEELE_ENCONTRO`: um endereço troca o ponto de encontro, e `nao` ou
     /// vazio desligam o degrau.
+    ///
+    /// Também é `None` quando a impressão digital não forma marca, pelo mesmo
+    /// motivo de [`Self::para_servidor`]: sem marca não há como separar aviso de
+    /// ruído. Esse caso deixa um `warn` no log dizendo por que o degrau 4 ficou
+    /// de fora.
     #[must_use]
     pub fn do_ambiente(socket: Arc<std::net::UdpSocket>, impressao_digital: &str) -> Option<Self> {
         let escolhido = std::env::var(VARIAVEL).unwrap_or_else(|_| PONTO_PADRAO.to_owned());
@@ -1579,8 +1584,8 @@ mod testes {
         // sai para lá (o primeiro `MORO` sai na hora, e não quinze segundos
         // depois), e de lá nada volta: para o que este teste mede, o ponto só
         // serve de comparação. O intruso manda do loopback, os IPs não batem,
-        // e tudo fica só nesta máquina — sem depender de segunda interface de
-        // rede nenhuma.
+        // e o que o teste mede fica só nesta máquina — sem depender de segunda
+        // interface de rede nenhuma.
         let ponto = SocketAddr::from(([192, 0, 2, 1], encontro::PORTA_PADRAO));
         let (tarefa, avisos_endereco, alvo, alvo_endereco, marca) =
             subir_atender_de_teste(ponto).await;
