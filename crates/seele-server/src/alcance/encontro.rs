@@ -697,7 +697,11 @@ async fn perguntar_pelo_server(
 ) -> Option<SocketAddr> {
     let pedido = encontro::leve(para, esperada);
     loop {
-        mandar_pelo_server(server, &pedido, ponto);
+        // Em `debug`, como sempre foi: um pedido que não sai aqui vence o prazo,
+        // e a escada guarda a recusa do degrau inteiro.
+        if let Err(motivo) = mandar_pelo_server(server, &pedido, ponto) {
+            tracing::debug!(%motivo, %ponto, "o pedido não saiu pelo socket do servidor");
+        }
         if let Ok(Some(endereco)) =
             tokio::time::timeout(REPETICAO, esperar_aqui(avisos, |marca| marca == esperada)).await
         {
@@ -714,17 +718,21 @@ async fn perguntar_pelo_server(
 ///
 /// O destino é escrito na família **deste** socket antes de sair. Ver
 /// [`na_familia_de`], que existe por causa de um degrau 4 que nunca aconteceu.
-fn mandar_pelo_server(server: &std::net::UdpSocket, datagrama: &[u8], destino: SocketAddr) {
-    let destino = match na_familia_de(server, destino) {
-        Ok(escrito) => escrito,
-        Err(motivo) => {
-            tracing::debug!(%motivo, %destino, "este socket não alcança esta família");
-            return;
-        }
-    };
-    if let Err(erro) = server.send_to(datagrama, destino) {
-        tracing::debug!(%erro, %destino, "não saiu pelo socket do servidor");
-    }
+///
+/// Devolve por que não saiu, e o peso da falha fica com quem chama: o registro
+/// no quarto a diz no log quando ela começa e quando acaba
+/// ([`RegistroNoQuarto`]); o pedido da subida e o furo a deixam em `debug`.
+fn mandar_pelo_server(
+    server: &std::net::UdpSocket,
+    datagrama: &[u8],
+    destino: SocketAddr,
+) -> Result<(), String> {
+    let destino = na_familia_de(server, destino)
+        .map_err(|motivo| format!("este socket não alcança esta família: {motivo}"))?;
+    server
+        .send_to(datagrama, destino)
+        .map(|_| ())
+        .map_err(|erro| format!("não saiu pelo socket do servidor rumo a {destino}: {erro}"))
 }
 
 /// O mesmo destino, escrito na família em que um socket sabe falar.
@@ -807,6 +815,7 @@ async fn atender(
     let mut relogio = tokio::time::interval(REAVIVAR);
     let mut balde = [0_u8; encontro::TAMANHO];
     let mut furos: Vec<tokio::time::Instant> = Vec::new();
+    let mut registro = RegistroNoQuarto::default();
 
     loop {
         tokio::select! {
@@ -828,9 +837,8 @@ async fn atender(
                 // próprio socket do servidor, onde quem lê é o QUIC, e o QUIC a
                 // descarta como já descarta todo `FURO` que chega ali. Ver o
                 // cabeçalho de `encontro::furo`.
-                let _ = avisos.send_to(&encontro::moro(&marcas.escuta), ponto).await;
-                mandar_pelo_server(&server, &encontro::leve(aviso, &marcas.escuta), ponto);
-                mandar_pelo_server(&server, &encontro::moro(&marcas.servidor), ponto);
+                let saiu = registrar(&avisos, &server, ponto, aviso, &marcas).await;
+                registro.anotar(ponto, saiu);
             }
             recebido = avisos.recv_from(&mut balde) => {
                 let Ok((lidos, origem)) = recebido else { continue };
@@ -855,6 +863,66 @@ async fn atender(
                 tracing::info!(%endereco, "degrau 4: alguém com o link está chegando; furando");
                 furar(&server, endereco, &marcas.aviso).await;
             }
+        }
+    }
+}
+
+/// Os três datagramas de cada tique de [`atender`]: o registro das duas marcas
+/// no quarto e o reavivamento dos dois caminhos.
+///
+/// Os três saem sempre, mesmo que um falhe: são sockets diferentes, e um que não
+/// sai não diz nada sobre o outro. Devolve o primeiro motivo de falha, e quem
+/// decide se ele vai para o log é [`RegistroNoQuarto`].
+async fn registrar(
+    avisos: &tokio::net::UdpSocket,
+    server: &std::net::UdpSocket,
+    ponto: SocketAddr,
+    aviso: SocketAddr,
+    marcas: &Marcas,
+) -> Result<(), String> {
+    let escuta = avisos
+        .send_to(&encontro::moro(&marcas.escuta), ponto)
+        .await
+        .map(|_| ())
+        .map_err(|erro| format!("o MORO da escuta de avisos não saiu: {erro}"));
+    let leve = mandar_pelo_server(server, &encontro::leve(aviso, &marcas.escuta), ponto);
+    let servidor = mandar_pelo_server(server, &encontro::moro(&marcas.servidor), ponto);
+    escuta.and(leve).and(servidor)
+}
+
+/// Se o registro no quarto está saindo, para o log dizer só quando isso muda.
+///
+/// O registro sai a cada [`REAVIVAR`], e uma falha que dura inundaria o
+/// `seele.log` com a mesma linha a cada quinze segundos. Por isso uma linha em
+/// `info` na primeira falha depois de um registro bom, e uma na volta: quem lê o
+/// log sabe desde quando este anfitrião sumiu do quarto, e quando voltou.
+///
+/// Começa como se o último registro tivesse saído, porque [`atender`] só sobe
+/// depois de [`abrir`] ter falado com o ponto por estes mesmos sockets. A
+/// primeira falha depois da subida já é uma transição.
+#[derive(Debug, Default)]
+struct RegistroNoQuarto {
+    falhando: bool,
+}
+
+impl RegistroNoQuarto {
+    /// Anota o resultado de um tique, e diz no log se ele mudou o estado.
+    fn anotar(&mut self, ponto: SocketAddr, saiu: Result<(), String>) {
+        match saiu {
+            Err(motivo) if !self.falhando => {
+                self.falhando = true;
+                tracing::info!(
+                    %ponto,
+                    %motivo,
+                    "encontro: o registro no quarto deixou de sair; quem volta pela impressão \
+                     digital não acha este anfitrião até ele voltar"
+                );
+            }
+            Ok(()) if self.falhando => {
+                self.falhando = false;
+                tracing::info!(%ponto, "encontro: o registro no quarto voltou a sair");
+            }
+            Ok(()) | Err(_) => {}
         }
     }
 }
@@ -899,7 +967,9 @@ fn cabe_mais_um_furo(furos: &mut Vec<tokio::time::Instant>) -> bool {
 async fn furar(server: &std::net::UdpSocket, destino: SocketAddr, marca: &Marca) {
     let pacote = encontro::furo(marca);
     for _ in 0..PACOTES_DO_FURO {
-        mandar_pelo_server(server, &pacote, destino);
+        if let Err(motivo) = mandar_pelo_server(server, &pacote, destino) {
+            tracing::debug!(%motivo, %destino, "o furo não saiu pelo socket do servidor");
+        }
         tokio::time::sleep(INTERVALO_DO_FURO).await;
     }
 }
@@ -932,7 +1002,11 @@ mod testes {
         };
         let (servico, onde) = ponto;
 
-        mandar_pelo_server(&server, b"ONDE", onde);
+        let saiu = mandar_pelo_server(&server, b"ONDE", onde);
+        assert!(
+            saiu.is_ok(),
+            "o socket de pilha dupla não mandou ao ponto IPv4: {saiu:?}"
+        );
 
         let mut balde = [0_u8; 8];
         match servico.recv_from(&mut balde) {
@@ -1916,6 +1990,163 @@ mod testes {
             1,
             "largar o Encontro sem `fechar` deixou a tarefa viva segurando o socket do servidor: a \
              porta fica presa, e hospedar de novo nela falha com «endereço já em uso»"
+        );
+    }
+
+    /// Um `Write` que guarda o que o `tracing` escreve, para o teste ler depois.
+    #[derive(Clone, Default)]
+    struct Rastro(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Rastro {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("o rastro trancou")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Rastro {
+        fn linhas_com(&self, trecho: &str) -> usize {
+            self.texto()
+                .lines()
+                .filter(|linha| linha.contains(trecho))
+                .count()
+        }
+
+        fn texto(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().expect("o rastro trancou")).into_owned()
+        }
+
+        /// Um rastro que guarda o que sai em `info` para cima nesta thread, até o
+        /// guarda cair. É o nível do `seele.log`: uma linha em `debug` não conta.
+        ///
+        /// Só nesta thread: `set_default` fixa o `Subscriber` na thread corrente,
+        /// e é nela que um `#[tokio::test]` de thread única roda tudo, inclusive
+        /// as tarefas que ele sobe.
+        fn de_info() -> (Self, tracing::subscriber::DefaultGuard) {
+            let rastro = Self::default();
+            let escritor = rastro.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(move || escritor.clone())
+                .with_max_level(tracing::Level::INFO)
+                .with_ansi(false)
+                .without_time()
+                .finish();
+            (rastro, tracing::subscriber::set_default(subscriber))
+        }
+    }
+
+    /// Um ponto que nenhum dos dois sockets de [`AnfitriaoDeTeste`] alcança: é
+    /// IPv6, e eles são IPv4. O sistema recusa o envio aqui mesmo, e nenhum
+    /// pacote sai desta máquina.
+    fn ponto_que_o_sistema_recusa() -> SocketAddr {
+        SocketAddr::from((Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1), PORTA_PADRAO))
+    }
+
+    #[tokio::test]
+    async fn o_registro_que_deixa_de_sair_diz_no_log_uma_vez_e_diz_quando_volta() {
+        // «O produto sabe e não conta»: o `MORO` da escuta ia com `let _ =`, e o
+        // que sai pelo socket do servidor ia para um `debug!` que o `seele.log`
+        // não grava. Um anfitrião que sumia do quarto sumia calado, e a pergunta
+        // chegava dias depois, de quem não conseguia voltar pela lista.
+        //
+        // Nenhum pacote sai desta máquina: o ponto «mudo» é um que o sistema
+        // recusa aqui mesmo, e o «bom» é um socket no laço local, que só recebe.
+        let (rastro, _guarda) = Rastro::de_info();
+        let anfitriao = AnfitriaoDeTeste::abrir().await;
+        let marcas = marcas_da_impressao();
+        let mudo = ponto_que_o_sistema_recusa();
+        let Ok(ponto_bom) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o ponto de teste");
+        };
+        let Ok(bom) = ponto_bom.local_addr() else {
+            panic!("o ponto de teste não tem endereço local");
+        };
+        let mut registro = RegistroNoQuarto::default();
+
+        for _ in 0..3 {
+            let saiu = registrar(
+                &anfitriao.avisos,
+                &anfitriao.server,
+                mudo,
+                anfitriao.avisos_endereco,
+                &marcas,
+            )
+            .await;
+            assert!(
+                saiu.is_err(),
+                "o registro num ponto que o sistema recusa voltou como se tivesse saído: ou \
+                 `registrar` engoliu a recusa (o defeito), ou este sistema aceitou mandar a um \
+                 IPv6 por um socket IPv4 e o teste não tem falha para observar"
+            );
+            registro.anotar(mudo, saiu);
+        }
+        assert_eq!(
+            rastro.linhas_com("deixou de sair"),
+            1,
+            "três registros seguidos não saíram, e o log (`info`, o nível que o seele.log grava) \
+             não disse isso exatamente uma vez: ou o anfitrião some do quarto calado, ou a mesma \
+             linha se repete a cada quinze segundos. Rastro: {}",
+            rastro.texto()
+        );
+        assert!(
+            rastro.texto().contains("2001:db8::1"),
+            "a linha da falha não diz a que ponto se registrava. Rastro: {}",
+            rastro.texto()
+        );
+
+        for _ in 0..2 {
+            let saiu = registrar(
+                &anfitriao.avisos,
+                &anfitriao.server,
+                bom,
+                anfitriao.avisos_endereco,
+                &marcas,
+            )
+            .await;
+            assert!(
+                saiu.is_ok(),
+                "o registro no ponto do laço local não saiu: {saiu:?}"
+            );
+            registro.anotar(bom, saiu);
+        }
+        assert_eq!(
+            rastro.linhas_com("voltou a sair"),
+            1,
+            "o registro voltou a sair, e o log não disse isso exatamente uma vez: quem lê não \
+             sabe quando o anfitrião voltou ao quarto. Rastro: {}",
+            rastro.texto()
+        );
+    }
+
+    #[tokio::test]
+    async fn atender_diz_no_log_quando_o_registro_da_subida_nao_sai() {
+        // O teste de cima prova `registrar` e `RegistroNoQuarto` isolados, e um
+        // par correto que `atender` não chamasse deixaria aquele teste verde e o
+        // anfitrião sumindo do quarto calado do mesmo jeito. Este sobe o
+        // `atender` de verdade: o primeiro tique sai na subida.
+        let (rastro, _guarda) = Rastro::de_info();
+        let tarefa = AnfitriaoDeTeste::abrir()
+            .await
+            .subir(ponto_que_o_sistema_recusa(), marcas_da_impressao());
+
+        let ate = tokio::time::Instant::now() + Duration::from_secs(1);
+        while rastro.linhas_com("deixou de sair") == 0 && tokio::time::Instant::now() < ate {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tarefa.abort();
+        assert_eq!(
+            rastro.linhas_com("deixou de sair"),
+            1,
+            "o primeiro registro no quarto não saiu e `atender` não disse isso no log (`info`, o \
+             nível que o seele.log grava): o anfitrião some do quarto calado. Rastro: {}",
+            rastro.texto()
         );
     }
 }
