@@ -498,7 +498,13 @@ pub enum OndeMora {
     /// mais que o prazo do quarto, ou o ponto é anterior ao quarto e não
     /// conhece `QUEM`.
     NinguemMora,
-    /// O ponto não respondeu a nada dentro do prazo.
+    /// O ponto não respondeu a nada dentro do prazo, **ou a pergunta nem saiu**.
+    ///
+    /// Os dois casos voltam iguais, e o segundo não é culpa do ponto: uma falha
+    /// local (sem rota, um socket que o sistema não abriu ou recusou) também
+    /// acaba aqui, e a consulta volta na hora em vez de esperar o prazo. Quem lê
+    /// isto como «o ponto caiu» erra o diagnóstico. A causa de cada um está no
+    /// log (`info`), e é lá que se distingue.
     PontoMudo,
     /// O texto do ponto não é um endereço, ou o nome não resolveu no prazo.
     PontoNaoResolve,
@@ -639,10 +645,14 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
             }
             // Uma linha por volta, e não por pergunta: um envio que o sistema
             // recusa costuma recusar as três, e a causa é a mesma.
+            let mut saidas = 0_u32;
             let mut recusa = None;
             for pedido in &pedidos {
-                if let Err(erro) = socket.send_to(pedido, destino).await {
-                    recusa.get_or_insert(erro);
+                match socket.send_to(pedido, destino).await {
+                    Ok(_) => saidas += 1,
+                    Err(erro) => {
+                        recusa.get_or_insert(erro);
+                    }
                 }
             }
             if let Some(erro) = recusa {
@@ -650,8 +660,18 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
                     %erro,
                     %destino,
                     volta = enviados + 1,
+                    saidas,
                     "quarto: a pergunta não saiu"
                 );
+            }
+            // **Nenhuma pergunta saiu: não há o que esperar.** Sem rota
+            // (`ENETUNREACH`, `EHOSTUNREACH`) o sistema recusa as três na hora, e
+            // repetir a volta e dormir até o prazo só faria a conexão pagar
+            // 1,5 s por uma resposta que não tem como vir. Volta como `PontoMudo`
+            // (o `no_ar` é falso: nada foi perguntado), e o `info` acima diz a
+            // causa. A `perguntar` antiga também saía aqui, na hora.
+            if saidas == 0 {
+                break;
             }
             enviados += 1;
             proxima_volta += INTERVALO_DOS_ENVIOS;
@@ -961,10 +981,16 @@ mod testes {
     }
 
     #[tokio::test]
-    async fn uma_pergunta_que_nao_sai_diz_no_rastro_por_que_nao_saiu() {
+    async fn uma_pergunta_que_nao_sai_volta_na_hora_e_diz_no_rastro_por_que_nao_saiu() {
         // O envio recusado pelo kernel era engolido num `debug!`: a consulta
         // esperava o prazo inteiro por uma resposta a uma pergunta que nunca
         // saiu, e o log não tinha uma palavra sobre isso.
+        //
+        // **E esperava mesmo.** Sem rota (`ENETUNREACH`, `EHOSTUNREACH`) nenhuma
+        // das três perguntas sai, e não há resposta a aguardar: repetir a volta
+        // e dormir até o prazo custava 1,5 s a toda conexão, antes de qualquer
+        // tentativa. Uma pergunta acessória que atrasa a principal é pior que
+        // não perguntar, então a consulta volta na hora.
         //
         // O destino é **descoberto**, como em `destino_recusado`: `0.0.0.0:0` é
         // recusado pelo macOS e pelo Windows (medidos) e, pela porta zero, pelo
@@ -985,13 +1011,21 @@ mod testes {
             panic!("a impressão digital de teste tem de formar marcas");
         };
 
-        let ate = tokio::time::Instant::now() + Duration::from_millis(150);
+        // O prazo de produção, e não um curto: é ele que a consulta pagaria.
+        let comecou = std::time::Instant::now();
+        let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
         let achado = consultar(destino, &marcas, ate).await;
+        let levou = comecou.elapsed();
 
         assert_eq!(
             achado,
             OndeMora::PontoMudo,
             "uma pergunta que nunca saiu virou outra coisa: este teste não mede nada"
+        );
+        assert!(
+            levou < Duration::from_millis(500),
+            "nenhuma pergunta saiu e a consulta ainda esperou {levou:?}: sem rota, quem paga é a \
+             conexão que vem depois, com {PRAZO_DO_QUARTO:?} a mais antes de qualquer tentativa"
         );
         let linhas = captura.linhas.lock().unwrap();
         assert!(
