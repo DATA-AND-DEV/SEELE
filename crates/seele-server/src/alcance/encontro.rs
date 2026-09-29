@@ -416,6 +416,20 @@ impl Encontro {
     }
 }
 
+impl Drop for Encontro {
+    /// Para de reavivar e de atender avisos, mesmo sem [`Encontro::fechar`].
+    ///
+    /// Largar um `Encontro` é o que acontece quando uma `Hospedagem` é
+    /// descartada sem `encerrar`, e o `JoinHandle` largado **não** para a
+    /// tarefa. Ela seguia viva para sempre, segurando uma cópia do socket do
+    /// servidor: a porta ficava presa, e hospedar de novo nela falhava com
+    /// «endereço já em uso». É o mesmo cuidado que `PortaAberta` e
+    /// `BuracoAberto` já têm com as tarefas de renovação deles.
+    fn drop(&mut self) {
+        self.tarefa.abort();
+    }
+}
+
 /// Sobe o degrau 4, ou diz por que não deu.
 ///
 /// Nunca demora mais que [`PRAZO`], e essa é a promessa que importa: com o ponto
@@ -1851,6 +1865,72 @@ mod testes {
             "a resposta ao próprio registro passou no filtro de `atender` e virou FURO: a marca \
              da escuta é a do aviso, e o anfitrião fura o caminho para si mesmo a cada \
              reavivamento"
+        );
+    }
+
+    /// Um ponto de encontro de teste que responde como o de verdade, no laço
+    /// local.
+    async fn ponto_que_responde() -> SocketAddr {
+        let Ok(servico) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("o ponto de encontro de teste tem de abrir");
+        };
+        let Ok(onde) = servico.local_addr() else {
+            panic!("o ponto de encontro de teste não tem endereço local");
+        };
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO];
+            while let Ok((lidos, de)) = servico.recv_from(&mut balde).await {
+                if let Some(resposta) = balde.get(..lidos).and_then(|bytes| {
+                    encontro::responder_em(bytes, de, encontro::Vizinhanca::TambemAqui)
+                }) {
+                    let _ = servico.send_to(&resposta.datagrama, resposta.destino).await;
+                }
+            }
+        });
+        onde
+    }
+
+    #[tokio::test]
+    async fn largar_o_encontro_solta_o_socket_do_servidor() {
+        // Largar um `Encontro` é o que acontece quando uma `Hospedagem` é
+        // descartada sem `encerrar`. Sem `Drop`, o `JoinHandle` largado deixava
+        // `atender` viva para sempre, com uma cópia do socket do servidor: a
+        // porta ficava presa.
+        let ponto = ponto_que_responde().await;
+        let Ok(server) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o socket do servidor de teste");
+        };
+        let server = Arc::new(server);
+        let Some(convocacao) =
+            Convocacao::para_servidor(Arc::clone(&server), IMPRESSAO, ponto.to_string())
+        else {
+            panic!("a impressão digital de teste não forma convocação");
+        };
+        let aberto = abrir(&convocacao).await;
+        drop(convocacao);
+        let degrau = match aberto {
+            Ok(degrau) => degrau,
+            Err(falha) => panic!("o ponto de teste responde, e o degrau 4 tinha de abrir: {falha}"),
+        };
+        assert_eq!(
+            Arc::strong_count(&server),
+            2,
+            "a tarefa do degrau 4 devia segurar uma cópia do socket do servidor; sem ela este \
+             teste não mede nada"
+        );
+
+        drop(degrau);
+        // `abort` é pedido, não cumprido na hora: a tarefa some na próxima volta
+        // do escalonador.
+        let ate = tokio::time::Instant::now() + Duration::from_secs(1);
+        while Arc::strong_count(&server) > 1 && tokio::time::Instant::now() < ate {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            Arc::strong_count(&server),
+            1,
+            "largar o Encontro sem `fechar` deixou a tarefa viva segurando o socket do servidor: a \
+             porta fica presa, e hospedar de novo nela falha com «endereço já em uso»"
         );
     }
 }
