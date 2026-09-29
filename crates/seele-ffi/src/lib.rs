@@ -286,7 +286,8 @@ pub struct ConnectConfig {
     /// A impressão digital que o convite prometeu, quando veio de um link.
     ///
     /// Na volta pela lista de servidores, sem link nesta sessão, é a que a
-    /// lista guardou do link de antes — a regra é [`impressao_a_conferir`]. É
+    /// lista guardou do link de antes — a regra é [`impressao_a_conferir`] (a
+    /// partir da Tarefa 5, quando o `connect` do app passa a usá-la). É
     /// conferida dentro do TLS, antes do `Hello`.
     pub expected_fingerprint: Option<String>,
     /// O bilhete de encontro do link, quando ele trouxe um.
@@ -7875,9 +7876,10 @@ mod a_consulta_ao_quarto {
 /// O link desta sessão vence a guardada. Ele é o que a pessoa acabou de colar
 /// para este endereço, e a guardada é o que um link anterior prometeu. Se os
 /// dois discordam, conferir pela velha recusaria o servidor que a pessoa acabou
-/// de pedir. A mesma impressão forma a marca da pergunta ao quarto, pela mesma
-/// razão: perguntar onde mora uma chave e conferir outra faria o quarto apontar
-/// para o servidor que a conferência recusaria logo em seguida.
+/// de pedir. A mesma impressão forma a marca da pergunta ao quarto (a partir da
+/// Tarefa 5, quando o `connect` do app passa a usá-la), pela mesma razão:
+/// perguntar onde mora uma chave e conferir outra faria o quarto apontar para o
+/// servidor que a conferência recusaria logo em seguida.
 #[must_use]
 pub fn impressao_a_conferir(do_link: Option<&str>, guardada: Option<&str>) -> Option<String> {
     do_link.or(guardada).map(str::to_owned)
