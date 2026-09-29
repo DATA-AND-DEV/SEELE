@@ -22,6 +22,19 @@
 //! than producing a warning somebody can click past. A warning that can be
 //! dismissed protects nobody, and `specs/08-seguranca.md` calls the alert
 //! blocking for exactly that reason.
+//!
+//! # A impressão esperada
+//!
+//! Quando quem conecta espera uma chave — a impressão de um link, colado agora
+//! ou guardado na lista de servidores —, o verificador a confere **no primeiro
+//! contato, dentro do aperto de mão**. A chave que não confere falha o TLS e não
+//! é fixada, e nada desta máquina chega a quem atendeu: o `Hello`, que leva o
+//! convite, nem chega a sair. Até a 0.15.0 essa conferência acontecia depois do
+//! `Hello` (o S2b da análise de 22/09). Com pin estabelecido, a regra é a de
+//! sempre — ver [`TofuVerifier::decide`].
+//!
+//! O verificador já sabe recusar; a impressão só chega a ele na conexão de
+//! verdade a partir da Tarefa 2 do Plano 1B. Até lá o `Client` passa `None`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -57,6 +70,23 @@ pub enum PinDecision {
         /// What was pinned before.
         pinned: String,
         /// What the server offered now.
+        offered: String,
+    },
+    /// Nada estava fixado, e a chave não é a que a impressão esperada promete.
+    ///
+    /// **Recusada dentro do TLS, e nada foi fixado.** O aperto de mão falha
+    /// aqui, antes de qualquer `Hello`: o convite, a senha e o apelido nunca
+    /// saem para quem atendeu. Até a 0.15.0 este caso era um `FirstContact` que
+    /// fixava a chave, mandava o `Hello` e só depois era recusado — o S2b da
+    /// análise de 22/09, que a corrida de candidatos do ADR 0037 repetia em
+    /// todo candidato que fechasse o TLS.
+    ///
+    /// Só existe no primeiro contato. Com pin estabelecido quem decide é o pin;
+    /// ver [`TofuVerifier::decide`].
+    InviteRefused {
+        /// O que a impressão esperada prometia.
+        expected: String,
+        /// O que o servidor apresentou.
         offered: String,
     },
 }
@@ -104,6 +134,16 @@ pub enum Verdict {
     },
 }
 
+/// Se a impressão que se esperava é a que o servidor ofereceu.
+///
+/// **A única comparação de impressões deste módulo.** [`verdict`] e
+/// [`TofuVerifier::decide`] perguntam a mesma coisa — uma ao fim do aperto de
+/// mão, a outra dentro dele — e duas escritas dela divergiriam no primeiro
+/// link com a impressão em maiúsculas. Não diferencia maiúsculas de minúsculas.
+fn confere(esperada: &str, ofertada: &str) -> bool {
+    esperada.eq_ignore_ascii_case(ofertada)
+}
+
 /// Turns what the TOFU verifier saw into what to do about it.
 ///
 /// Pure on purpose: the refusal's side effect — removing the pin the verifier
@@ -111,8 +151,7 @@ pub enum Verdict {
 /// it is.
 #[must_use]
 pub fn verdict(decision: &PinDecision, expected: Option<&str>) -> Verdict {
-    let agrees =
-        |offered: &str| expected.is_none_or(|expected| expected.eq_ignore_ascii_case(offered));
+    let agrees = |offered: &str| expected.is_none_or(|expected| confere(expected, offered));
 
     match decision {
         PinDecision::FirstContact { fingerprint } if agrees(fingerprint) => {
@@ -140,6 +179,15 @@ pub fn verdict(decision: &PinDecision, expected: Option<&str>) -> Verdict {
         // error rather than a verdict.
         PinDecision::Changed { pinned, offered } => Verdict::InviteRefused {
             expected: pinned.clone(),
+            offered: offered.clone(),
+        },
+        // Também não chega aqui: o verificador recusa no TLS, antes do `Hello`,
+        // e a falha sobe como `ConnectError::InviteMismatch` (a partir da
+        // Tarefa 2 do Plano 1B). O braço existe para o `match` continuar
+        // exaustivo e dizer o mesmo que a recusa disse, se alguém um dia o
+        // alcançar.
+        PinDecision::InviteRefused { expected, offered } => Verdict::InviteRefused {
+            expected: expected.clone(),
             offered: offered.clone(),
         },
     }
@@ -201,9 +249,18 @@ impl PinStore for MemoryPinStore {
 #[derive(Debug)]
 pub struct TofuVerifier {
     store: Arc<dyn PinStore>,
-    /// The last decision, so the shell can report what happened.
     /// What this connection's pin is filed under. See [`TofuVerifier::new`].
     pin_key: String,
+    /// A impressão que quem conecta espera, quando espera alguma.
+    ///
+    /// Só decide o primeiro contato — ver [`TofuVerifier::decide`].
+    esperada: Option<String>,
+    /// The last decision, so the shell can report what happened.
+    ///
+    /// É também por onde o motivo de uma recusa chega a quem conectou: o
+    /// `rustls` só leva texto adiante, e `client::classify_connection_error`
+    /// lê a decisão daqui para devolver um erro com nome (para
+    /// [`PinDecision::InviteRefused`], a partir da Tarefa 2 do Plano 1B).
     last: Mutex<Option<PinDecision>>,
     provider: Arc<rustls::crypto::CryptoProvider>,
 }
@@ -223,11 +280,18 @@ impl TofuVerifier {
     ///
     /// The key should be the target as the person typed it, port included: two
     /// servers on one host at different ports are two servers.
+    ///
+    /// `esperada` é a impressão que quem conecta espera encontrar — a do link
+    /// colado agora, ou a que a lista de servidores guardou dele —, e `None`
+    /// para um endereço digitado à mão, em que não há o que conferir. O
+    /// `Client` só a repassa a partir da Tarefa 2 do Plano 1B; até lá passa
+    /// sempre `None`.
     #[must_use]
-    pub fn new(store: Arc<dyn PinStore>, pin_key: String) -> Self {
+    pub fn new(store: Arc<dyn PinStore>, pin_key: String, esperada: Option<String>) -> Self {
         Self {
             store,
             pin_key,
+            esperada,
             last: Mutex::new(None),
             provider: Arc::new(rustls::crypto::ring::default_provider()),
         }
@@ -243,10 +307,39 @@ impl TofuVerifier {
     ///
     /// Split out so the rule can be tested directly: the rustls trait needs a
     /// full handshake to exercise, and this is where the actual policy lives.
+    ///
+    /// # A impressão esperada, e onde ela **não** manda
+    ///
+    /// Sem pin, ela decide **antes de fixar**: a chave que não confere vira
+    /// [`PinDecision::InviteRefused`] e não é fixada. É isso que permite ao TLS
+    /// recusar antes do `Hello`.
+    ///
+    /// Com pin, ela não muda nada aqui. Um servidor já fixado cuja chave o link
+    /// desmente continua `Matches`, e o veredito vira
+    /// [`Verdict::InviteDisagrees`]: a conexão segue e avisa. É a decisão do
+    /// ADR 0003 — o pin é a prova de continuidade, e quem discorda dele é o
+    /// link —, e a tabela de [`verdict`] já a escrevia antes de a impressão
+    /// chegar ao TLS. Recusar ali trancaria alguém para fora de um servidor que
+    /// ele usa porque um amigo mandou um link velho; mudar isso pede ADR, não
+    /// conserto. Uma chave **trocada** continua `Changed`, recusada com ou sem
+    /// link.
+    ///
+    /// A comparação não diferencia maiúsculas de minúsculas, como a de
+    /// [`verdict`]: é a mesma função, `confere`, nos dois lugares.
     pub fn decide(&self, host: &str, certificate: &[u8]) -> PinDecision {
         let offered = seele_proto::transport::certificate_fingerprint(certificate);
         match self.store.pinned(host) {
             None => {
+                if let Some(expected) = self
+                    .esperada
+                    .as_deref()
+                    .filter(|expected| !confere(expected, &offered))
+                {
+                    return PinDecision::InviteRefused {
+                        expected: expected.to_owned(),
+                        offered,
+                    };
+                }
                 self.store.pin(host, offered.clone());
                 PinDecision::FirstContact {
                     fingerprint: offered,
@@ -283,6 +376,13 @@ impl ServerCertVerifier for TofuVerifier {
             // blocking, and a warning a user can dismiss is not one.
             PinDecision::Changed { .. } => Err(TlsError::General(
                 "the server's certificate has changed since it was pinned".into(),
+            )),
+            // O aperto de mão falha **aqui**, antes do `Hello`: o convite, a
+            // senha e o apelido não saem para quem atendeu. O porquê já está em
+            // `last`, gravado acima, para `client::classify_connection_error`
+            // devolver com nome (a partir da Tarefa 2 do Plano 1B).
+            PinDecision::InviteRefused { .. } => Err(TlsError::General(
+                "o certificado não é o que a impressão esperada promete".into(),
             )),
         }
     }
@@ -327,7 +427,11 @@ mod tests {
     use super::*;
 
     fn verifier() -> TofuVerifier {
-        TofuVerifier::new(Arc::new(MemoryPinStore::new()), "seele.exemplo".to_owned())
+        TofuVerifier::new(
+            Arc::new(MemoryPinStore::new()),
+            "seele.exemplo".to_owned(),
+            None,
+        )
     }
 
     #[test]
@@ -532,5 +636,162 @@ mod tests {
         let store = MemoryPinStore::new();
         store.unpin("nunca visto");
         assert_eq!(store.pinned("nunca visto"), None);
+    }
+
+    /// Um verificador que espera `esperada`, e a loja que ele usa, para o
+    /// teste ler o que ficou fixado.
+    fn esperando(esperada: &str) -> (Arc<MemoryPinStore>, TofuVerifier) {
+        let loja = Arc::new(MemoryPinStore::new());
+        let verificador = TofuVerifier::new(
+            Arc::clone(&loja) as Arc<dyn PinStore>,
+            "seele.exemplo".to_owned(),
+            Some(esperada.to_owned()),
+        );
+        (loja, verificador)
+    }
+
+    #[test]
+    fn um_primeiro_contato_que_a_esperada_confirma_e_fixado() {
+        let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
+        let (loja, verificador) = esperando(&um);
+
+        assert_eq!(
+            verificador.decide("server.example", b"certificate-one"),
+            PinDecision::FirstContact {
+                fingerprint: um.clone()
+            },
+            "a impressão esperada conferia e o primeiro contato não seguiu"
+        );
+        assert_eq!(
+            loja.pinned("server.example"),
+            Some(um),
+            "conferir não substitui fixar: o TOFU do ADR 0003 continua valendo"
+        );
+    }
+
+    #[test]
+    fn um_primeiro_contato_que_a_esperada_desmente_e_recusado_sem_fixar() {
+        // O S2b da análise de 22/09. O verificador fixava toda chave no
+        // primeiro contato, e a conferência contra o link só acontecia depois do
+        // `Hello`, com o convite já entregue a quem atendeu.
+        let (loja, verificador) = esperando(B);
+        let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
+
+        assert_eq!(
+            verificador.decide("server.example", b"certificate-one"),
+            PinDecision::InviteRefused {
+                expected: B.into(),
+                offered: um
+            },
+            "o certificado que a impressão esperada desmente passou como primeiro contato"
+        );
+        assert_eq!(
+            loja.pinned("server.example"),
+            None,
+            "a chave recusada ficou fixada, e a visita seguinte sem link entraria \
+             calada no servidor que acabou de ser recusado"
+        );
+    }
+
+    #[test]
+    fn a_recusa_da_esperada_falha_o_aperto_de_mao_e_deixa_o_porque() {
+        // `decide` sozinho não prova que o TLS para. Quem o `rustls` chama no
+        // meio do aperto de mão é `verify_server_cert`, e um `Ok` dele manda o
+        // `Hello` logo em seguida. Aqui ele é chamado direto, sem sessão TLS
+        // nenhuma: só lê o certificado.
+        let (_, verificador) = esperando(B);
+        let certificado = CertificateDer::from(b"certificate-one".to_vec());
+        let nome = ServerName::try_from("localhost").expect("nome TLS de teste");
+
+        let resposta = verificador.verify_server_cert(
+            &certificado,
+            &[],
+            &nome,
+            &[],
+            UnixTime::since_unix_epoch(std::time::Duration::ZERO),
+        );
+
+        assert!(
+            resposta.is_err(),
+            "o TLS aceitou o certificado que a impressão esperada recusa: o \
+             `Hello` sairia com o convite dentro"
+        );
+        assert!(
+            matches!(
+                verificador.last_decision(),
+                Some(PinDecision::InviteRefused { .. })
+            ),
+            "o TLS recusou sem deixar o porquê, e quem conecta só teria \
+             `TlsRefused` genérico para mostrar"
+        );
+    }
+
+    #[test]
+    fn um_servidor_ja_fixado_com_link_velho_passa_no_tls_e_so_avisa() {
+        // A decisão que este verificador **não** muda (ADR 0003). Com pin, quem
+        // prova o servidor é o pin, e quem discorda dele é o link. Recusar aqui
+        // trancaria alguém para fora de um servidor que ele usa porque um amigo
+        // mandou um convite velho. A tabela de `verdict` já escreve essa regra
+        // em `a_matching_pin_the_invite_contradicts_warns_and_does_not_refuse`.
+        let loja = Arc::new(MemoryPinStore::new());
+        let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
+        loja.pin("server.example", um.clone());
+        let verificador = TofuVerifier::new(
+            Arc::clone(&loja) as Arc<dyn PinStore>,
+            "seele.exemplo".to_owned(),
+            Some(B.to_owned()),
+        );
+
+        let decisao = verificador.decide("server.example", b"certificate-one");
+        assert_eq!(
+            decisao,
+            PinDecision::Matches {
+                fingerprint: um.clone()
+            },
+            "um servidor já fixado passou a ser recusado por causa do link"
+        );
+        assert_eq!(
+            verdict(&decisao, Some(B)),
+            Verdict::InviteDisagrees {
+                expected: B.into(),
+                offered: um
+            },
+            "o servidor já fixado que o link desmente deixou de só avisar"
+        );
+    }
+
+    #[test]
+    fn a_esperada_ignora_caixa_como_o_veredito_ignora() {
+        // `verdict` compara sem diferenciar maiúsculas de minúsculas. Se o
+        // verificador diferenciasse, um link com a impressão em maiúsculas seria
+        // recusado no TLS e aceito no veredito: duas regras para a mesma
+        // pergunta.
+        let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
+        let (_, verificador) = esperando(&um.to_uppercase());
+
+        assert!(
+            matches!(
+                verificador.decide("server.example", b"certificate-one"),
+                PinDecision::FirstContact { .. }
+            ),
+            "a mesma impressão em maiúsculas foi recusada no TLS"
+        );
+    }
+
+    #[test]
+    fn a_recusa_no_tls_tem_o_veredito_da_recusa_de_depois() {
+        let decisao = PinDecision::InviteRefused {
+            expected: B.into(),
+            offered: A.into(),
+        };
+        assert_eq!(
+            verdict(&decisao, Some(B)),
+            Verdict::InviteRefused {
+                expected: B.into(),
+                offered: A.into()
+            },
+            "a recusa do TLS deixou de virar a recusa do veredito: quem lê o \
+             veredito trataria como conhecido um servidor que o link desmente"
+        );
     }
 }

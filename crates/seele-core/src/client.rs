@@ -518,7 +518,7 @@ impl Client {
     ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let verifier = Arc::new(TofuVerifier::new(pins, pin_key.to_owned()));
+        let verifier = Arc::new(TofuVerifier::new(pins, pin_key.to_owned(), None));
         let mut tls = rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::clone(&verifier) as Arc<_>)
