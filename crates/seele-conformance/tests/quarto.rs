@@ -18,7 +18,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use seele_core::encontro::{onde_mora, onde_mora_hoje, Marca, Marcas, OndeMora, PRAZO_DO_QUARTO};
+use seele_core::encontro::{onde_mora_hoje, Marcas, OndeMora, PRAZO_DO_QUARTO};
 use seele_proto::encontro::{analisar, moro, Pedido, Vizinhanca, TAMANHO};
 
 mod vaga;
@@ -42,13 +42,16 @@ fn subir_o_ponto() -> SocketAddr {
 async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
     let _vaga = vaga::minha();
     let onde_fica = subir_o_ponto();
-    let marca = Marca::nova("abcdef0123456789").expect("é uma marca");
+    let marcas = marcas_de_teste();
     let mut balde = [0_u8; TAMANHO];
 
     // A primeira abertura do servidor.
     let ontem = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let porta_de_ontem = ontem.local_addr().unwrap();
-    ontem.send_to(&moro(&marca), onde_fica).await.unwrap();
+    ontem
+        .send_to(&moro(&marcas.servidor), onde_fica)
+        .await
+        .unwrap();
     ontem.recv_from(&mut balde).await.unwrap();
 
     // Ele fecha, e volta noutra porta — que é o que o NAT faz.
@@ -59,45 +62,71 @@ async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
         porta_de_ontem, porta_de_hoje,
         "o teste precisa de duas portas diferentes para dizer alguma coisa"
     );
-    hoje.send_to(&moro(&marca), onde_fica).await.unwrap();
+    hoje.send_to(&moro(&marcas.servidor), onde_fica)
+        .await
+        .unwrap();
     hoje.recv_from(&mut balde).await.unwrap();
 
     // E quem guardou só a impressão digital pergunta.
-    let achado = onde_mora(
+    let achado = onde_mora_hoje(
         &onde_fica.to_string(),
-        &marca,
+        &marcas,
         std::time::Duration::from_secs(2),
     )
     .await;
 
+    // Só o servidor se registrou: é o que um anfitrião 0.15.0 faz, e a consulta
+    // tem de devolver o que achou, com a escuta ausente e dita ausente.
     assert_eq!(
         achado,
+        OndeMora::Achado {
+            servidor: Some(porta_de_hoje),
+            escuta: None,
+        },
+        "só o servidor estava no quarto (o anfitrião 0.15.0) e a consulta não voltou com ele e \
+         sem a escuta: ou ficou com a porta de ontem, ou inventou uma escuta"
+    );
+    assert_eq!(
+        achado.servidor(),
         Some(porta_de_hoje),
-        "quem perguntou recebeu a porta de ontem, ou não recebeu nada — e é \
-         exatamente por isso que a lista de servidores ficava inútil"
+        "quem perguntou recebeu a porta de ontem, ou não recebeu nada, e é exatamente por \
+         isso que a lista de servidores ficava inútil"
+    );
+    assert_eq!(
+        achado.escuta(),
+        None,
+        "`escuta()` inventou um endereço para um anfitrião que só registrou o servidor: o app \
+         trocaria o aviso do bilhete por um endereço que ninguém escuta"
     );
 }
 
 #[tokio::test]
 async fn um_ponto_que_nao_conhece_a_pergunta_apenas_cala() {
     let _vaga = vaga::minha();
-    // O caso de campo mais provável durante a migração: o serviço no ar é o de
-    // antes desta mudança. Ele não responde a `QUEM`, e o que tem de acontecer é
-    // a espera vencer e a conexão seguir com os endereços guardados — nunca uma
-    // falha que derrube a tentativa.
+    // Um ponto que não responde a nada: fora do ar, ou um firewall no meio. O
+    // que tem de acontecer é a espera vencer e a conexão seguir com os
+    // endereços guardados, nunca uma falha que derrube a tentativa.
+    //
+    // O ponto anterior ao quarto, que responde `ONDE` e cala `QUEM`, é outro
+    // caso, e a consulta sabe dizer que é outro: ver
+    // `um_ponto_no_ar_sem_morador_diz_que_ninguem_mora_ali`.
     let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let onde_fica = mudo.local_addr().unwrap();
-    let marca = Marca::nova("abcdef0123456789").expect("é uma marca");
 
     let comecou = std::time::Instant::now();
-    let achado = onde_mora(
+    let achado = onde_mora_hoje(
         &onde_fica.to_string(),
-        &marca,
+        &marcas_de_teste(),
         std::time::Duration::from_millis(200),
     )
     .await;
 
-    assert_eq!(achado, None, "não havia resposta a inventar");
+    assert_eq!(
+        achado,
+        OndeMora::PontoMudo,
+        "um ponto que não respondeu nem ao ONDE não é um quarto vazio, e não havia resposta a \
+         inventar"
+    );
     assert!(
         comecou.elapsed() < std::time::Duration::from_secs(2),
         "a espera não pode passar do prazo pedido: quem paga é toda conexão, \
@@ -117,12 +146,14 @@ async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele()
     // O que a regra de «quem escreveu primeiro fica» compra é que o impostor não
     // consiga nem isso enquanto o dono estiver no ar.
     let onde_fica = subir_o_ponto();
-    let marca = Marca::nova("abcdef0123456789").expect("é uma marca");
+    let marcas = marcas_de_teste();
     let mut balde = [0_u8; TAMANHO];
 
     let dono = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let do_dono = dono.local_addr().unwrap();
-    dono.send_to(&moro(&marca), onde_fica).await.unwrap();
+    dono.send_to(&moro(&marcas.servidor), onde_fica)
+        .await
+        .unwrap();
     dono.recv_from(&mut balde).await.unwrap();
 
     // No mesmo IP, então este teste não consegue distinguir o impostor pelo IP —
@@ -131,21 +162,23 @@ async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele()
     // é que o **dono** consegue se mudar, que é o outro lado da mesma regra.
     let mudou = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let novo = mudou.local_addr().unwrap();
-    mudou.send_to(&moro(&marca), onde_fica).await.unwrap();
+    mudou
+        .send_to(&moro(&marcas.servidor), onde_fica)
+        .await
+        .unwrap();
     mudou.recv_from(&mut balde).await.unwrap();
 
-    let achado = onde_mora(
+    let achado = onde_mora_hoje(
         &onde_fica.to_string(),
-        &marca,
+        &marcas,
         std::time::Duration::from_secs(2),
     )
     .await;
     assert_eq!(
-        achado,
+        achado.servidor(),
         Some(novo),
-        "o dono mudou de porta no mesmo IP e o quarto ficou com a antiga: é o \
-         remapeamento de NAT, e é o caso que este mecanismo existe para cobrir \
-         (o de {do_dono})"
+        "o dono mudou de porta no mesmo IP e o quarto ficou com a antiga: é o remapeamento de \
+         NAT, e é o caso que este mecanismo existe para cobrir (o de {do_dono})"
     );
 }
 
@@ -172,17 +205,20 @@ async fn um_nome_que_nao_resolve_nao_atrasa_quem_esta_na_lan() {
     // Então este teste prende a forma — o prazo existe e é obedecido no caminho
     // que dá para exercitar — e a asserção de estrutura logo abaixo prende o
     // resto: que resolver o nome esteja **dentro** dele.
-    let marca = Marca::nova("abcdef0123456789").expect("é uma marca");
-
     let comecou = std::time::Instant::now();
-    let achado = onde_mora(
+    let achado = onde_mora_hoje(
         "nao-existe-em-lugar-nenhum.invalid:8384",
-        &marca,
+        &marcas_de_teste(),
         std::time::Duration::from_millis(300),
     )
     .await;
 
-    assert_eq!(achado, None, "não havia resposta a inventar");
+    assert_eq!(
+        achado,
+        OndeMora::PontoNaoResolve,
+        "um nome que não resolve virou outra resposta: quem lê o log procura o defeito no ponto \
+         e não no nome"
+    );
     assert!(
         comecou.elapsed() < std::time::Duration::from_secs(2),
         "a pergunta passou do prazo: quem paga é a conexão que vem depois dela, \
@@ -194,22 +230,20 @@ async fn um_nome_que_nao_resolve_nao_atrasa_quem_esta_na_lan() {
 #[test]
 fn resolver_o_nome_acontece_dentro_do_prazo_e_nao_antes_dele() {
     // O par do teste acima, e ele existe porque aquele não alcança o caso que
-    // importa: um resolvedor que não responde. O que se pode afirmar sem um
-    // servidor de DNS de mentira é a **forma** da função — se `lookup_host` está
-    // dentro do que o `timeout` embrulha, nenhum resolvedor do mundo consegue
-    // atrasar uma conexão de rede local além do prazo.
+    // importa: um resolvedor que não responde. Sem um servidor de DNS de
+    // mentira, o que se pode afirmar é a **forma** da função: se resolver o
+    // ponto está dentro do prazo, nenhum resolvedor do mundo atrasa uma
+    // conexão de rede local além dele.
     let fonte = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../seele-core/src/encontro.rs"),
     )
     .expect("o módulo do encontro tem que ser legível");
 
-    // **Sem os comentários.** O corpo desta função explica, em prosa, que
-    // `lookup_host` ficava de fora do prazo — e a primeira versão deste guarda
-    // casou com essa frase e acusou o código de ter o defeito que o comentário
-    // descreve. É a segunda vez que uma âncora deste repositório encontra o
-    // próprio comentário; da primeira foi a da bateria, no `publicar.sh`.
+    // **Sem os comentários.** A primeira versão deste guarda casou com a prosa
+    // que explica o defeito e acusou o código de ter o defeito que o comentário
+    // descreve.
     let corpo: String = fonte
-        .split("pub async fn onde_mora(")
+        .split("pub async fn onde_mora_hoje(")
         .nth(1)
         .and_then(|resto| resto.split("\nasync fn ").next())
         .unwrap_or_default()
@@ -219,14 +253,13 @@ fn resolver_o_nome_acontece_dentro_do_prazo_e_nao_antes_dele() {
         .join("\n");
 
     assert!(
-        corpo.contains("timeout(prazo"),
-        "`onde_mora` deixou de embrulhar a pergunta num prazo:\n{corpo}"
+        corpo.contains("timeout_at(ate, resolver_ponto(ponto))"),
+        "`onde_mora_hoje` deixou de resolver o ponto dentro do prazo:\n{corpo}"
     );
     assert!(
         !corpo.contains("lookup_host"),
-        "resolver o nome voltou para fora do prazo. Numa rede sem internet isso \
-         são segundos de espera cobrados de uma conexão de LAN que nunca \
-         precisaria de ponto de encontro nenhum:\n{corpo}"
+        "resolver o nome voltou para fora do prazo. Numa rede sem internet isso são segundos de \
+         espera cobrados de uma conexão de LAN que nunca precisaria de ponto de encontro:\n{corpo}"
     );
 }
 

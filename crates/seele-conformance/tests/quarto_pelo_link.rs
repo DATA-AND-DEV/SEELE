@@ -68,7 +68,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use seele_core::encontro::{onde_mora, Marca};
+use seele_core::encontro::{onde_mora_hoje, Marcas, OndeMora, PRAZO_DO_QUARTO};
 use seele_proto::encontro::{moro, Vizinhanca, PORTA_PADRAO, TAMANHO};
 use seele_server::hospedagem::Hospedagem;
 use seele_server::persistence::Location;
@@ -269,27 +269,40 @@ async fn largar_uma_hospedagem_sem_encerrar_devolve_a_porta() {
     segunda.encerrar().await;
 }
 
+/// A impressão digital do teste da consulta sem porta.
+const IMPRESSAO_DA_CONSULTA: &str =
+    "0f0e0d0c0b0a09080706050403020100ffeeddccbbaa99887766554433221100";
+
 #[tokio::test]
 async fn um_ponto_escrito_sem_porta_e_procurado_na_porta_padrao() {
     let _vaga = vaga::minha();
     let (ponto, _) = ponto_na_porta_padrao();
-    let marca = Marca::nova("0f0e0d0c0b0a0908s").expect("é uma marca");
+    let marcas =
+        Marcas::do_servidor(IMPRESSAO_DA_CONSULTA).expect("uma impressão digital dá marcas");
     let mut balde = [0_u8; TAMANHO];
 
-    // Alguém mora no quarto. A resposta ao `MORO` sai depois do registro, então
-    // esperar por ela é esperar o registro.
-    let morador = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let endereco_do_morador = morador.local_addr().unwrap();
-    morador.send_to(&moro(&marca), ponto).await.unwrap();
-    morador.recv_from(&mut balde).await.unwrap();
+    // Os dois moram no quarto. A resposta ao `MORO` sai depois do registro,
+    // então esperar por ela é esperar o registro.
+    let servidor = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    servidor
+        .send_to(&moro(&marcas.servidor), ponto)
+        .await
+        .unwrap();
+    servidor.recv_from(&mut balde).await.unwrap();
+    let escuta = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    escuta.send_to(&moro(&marcas.escuta), ponto).await.unwrap();
+    escuta.recv_from(&mut balde).await.unwrap();
 
     // O ponto como o link o carrega: sem porta.
     let sem_porta = ponto.ip().to_string();
-    let achado = onde_mora(&sem_porta, &marca, Duration::from_secs(2)).await;
+    let achado = onde_mora_hoje(&sem_porta, &marcas, PRAZO_DO_QUARTO).await;
 
     assert_eq!(
         achado,
-        Some(endereco_do_morador),
+        OndeMora::Achado {
+            servidor: Some(servidor.local_addr().unwrap()),
+            escuta: Some(escuta.local_addr().unwrap()),
+        },
         "o ponto escrito sem porta, que é como o `enc=` sai desde a v0.10.2, não foi \
          procurado na porta do ponto de encontro: a pergunta ao quarto nunca sai, e a lista \
          de servidores fica sem o endereço de hoje"

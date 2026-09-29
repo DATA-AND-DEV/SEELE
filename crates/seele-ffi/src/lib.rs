@@ -7770,49 +7770,81 @@ mod conferir_a_troca {
     }
 }
 
-/// Quanto se espera o ponto de encontro dizer onde um servidor mora.
-///
-/// Curto: isto acontece **antes** de qualquer tentativa de conexão, e o que se
-/// paga aqui atrasa até quem está na mesma casa e nunca precisou de ponto de
-/// encontro nenhum. Um ponto que não respondeu em meio segundo ou está fora do
-/// ar ou não conhece o verbo `QUEM`, e nos dois casos os endereços guardados
-/// continuam valendo.
-const PRAZO_DO_QUARTO: std::time::Duration = std::time::Duration::from_millis(500);
+// O que o quarto disse sobre onde um servidor mora hoje, reexportado para a
+// casca ler a resposta sem nomear o `seele-core`, que o ADR 0002 não a deixa
+// alcançar.
+pub use seele_core::encontro::OndeMora;
 
 /// Onde este servidor mora hoje: o socket dele, e a escuta de avisos dele.
 ///
 /// # Por que a casca chama isto e não monta as marcas
 ///
-/// A marca é vocabulário de fio (ADR 0002): dezesseis dígitos da impressão
-/// digital para o socket de avisos, e os mesmos com um `s` no fim para o socket
-/// do servidor. A casca não tem o que fazer com essa regra — ela tem uma
-/// impressão digital e um ponto de encontro, e o que ela quer são dois
-/// endereços.
+/// A marca é vocabulário de fio (ADR 0002). A casca tem uma impressão digital
+/// e um ponto de encontro, e o que ela quer são dois endereços. As marcas saem
+/// de [`seele_core::encontro::Marcas::do_servidor`], a **mesma** função com que
+/// o anfitrião se registra (`Convocacao::para_servidor`, no `seele-server`).
+/// Quando cada lado derivava as suas, os dois divergiram, e a escuta nunca foi
+/// achada.
 ///
-/// As duas perguntas em paralelo, porque são dois datagramas independentes para
-/// o mesmo lugar e fazê-las em série dobraria o prazo que todo mundo paga.
+/// # O que volta
 ///
-/// Devolve `(o do servidor, o da escuta de avisos)`, e cada um é `None` quando o
-/// ponto não respondeu por aquela marca.
-pub async fn onde_mora_hoje(
-    ponto: &str,
-    impressao: &str,
-) -> (Option<std::net::SocketAddr>, Option<std::net::SocketAddr>) {
-    use seele_core::encontro::{onde_mora, Marca};
-
-    let Some(prefixo) = impressao.get(..16) else {
-        return (None, None);
+/// Um [`OndeMora`], e não um par de `Option`: «o ponto não respondeu» e «o
+/// ponto respondeu e ninguém mora lá» apontam para lugares diferentes, e a
+/// consulta registra no log qual foi. A casca lê [`OndeMora::servidor`] e
+/// [`OndeMora::escuta`], e cada um é `None` quando o quarto não o deu.
+pub async fn onde_mora_hoje(ponto: &str, impressao: &str) -> OndeMora {
+    let Some(marcas) = seele_core::encontro::Marcas::do_servidor(impressao) else {
+        tracing::info!(
+            "quarto: a impressão digital guardada não forma marca; nenhuma pergunta saiu"
+        );
+        return OndeMora::SemMarca;
     };
-    let (Some(do_aviso), Some(do_server)) =
-        (Marca::nova(prefixo), Marca::nova(&format!("{prefixo}s")))
-    else {
-        return (None, None);
-    };
+    seele_core::encontro::onde_mora_hoje(ponto, &marcas, seele_core::encontro::PRAZO_DO_QUARTO)
+        .await
+}
 
-    tokio::join!(
-        onde_mora(ponto, &do_server, PRAZO_DO_QUARTO),
-        onde_mora(ponto, &do_aviso, PRAZO_DO_QUARTO),
-    )
+#[cfg(test)]
+mod a_consulta_ao_quarto {
+    //! A porta da casca para o quarto: `onde_mora_hoje` com uma impressão
+    //! digital, e não com marcas.
+
+    use super::{onde_mora_hoje, OndeMora};
+
+    #[tokio::test]
+    async fn uma_impressao_que_nao_forma_marca_nao_manda_pergunta_nenhuma() {
+        // O ponto é um socket local **mudo**, e é ele quem prova que nada saiu:
+        // se alguma pergunta partisse, ela pararia no `recv_from` dele. Só a
+        // variante e a duração não bastam: uma consulta que perguntasse e
+        // desistisse depressa passaria nas duas.
+        let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let ponto = mudo.local_addr().unwrap().to_string();
+
+        let comecou = std::time::Instant::now();
+        let achado = onde_mora_hoje(&ponto, "curta").await;
+        let levou = comecou.elapsed();
+        assert_eq!(
+            achado,
+            OndeMora::SemMarca,
+            "uma impressão digital que não forma marca virou outra resposta: quem ler o log vai \
+             procurar defeito de rede onde não há"
+        );
+        assert!(
+            levou < std::time::Duration::from_millis(200),
+            "sem marca não há pergunta, e mesmo assim a consulta esperou {levou:?}"
+        );
+
+        let mut balde = [0_u8; 64];
+        let chegou = tokio::time::timeout(
+            std::time::Duration::from_millis(300),
+            mudo.recv_from(&mut balde),
+        )
+        .await;
+        assert!(
+            chegou.is_err(),
+            "a consulta devolveu `SemMarca` mas mandou um datagrama ao ponto assim mesmo: sem \
+             marca não há o que perguntar, e o que sai é tráfego sem resposta possível"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -1008,8 +1008,8 @@ async fn connect(
         &bilhete,
     ) {
         (Some(impressao), Some(bilhete_guardado)) => {
-            let (fresco_do_server, fresco_do_aviso) =
-                seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
+            let no_quarto = seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
+            let (fresco_do_server, fresco_do_aviso) = (no_quarto.servidor(), no_quarto.escuta());
             if let Some(endereco) = fresco_do_server {
                 let texto = endereco.to_string();
                 if !alternativos.contains(&texto) {
