@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
-use seele_core::{Link, MemoryPinStore};
+use seele_core::{Link, MemoryPinStore, PinStore, Verdict};
 use seele_proto::control::{DisconnectReason, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_server::persistence::Location;
@@ -490,5 +490,81 @@ async fn as_tentativas_aparecem_enquanto_a_bateria_corre() -> Result<()> {
         subiu.is_some(),
         "o contador de tentativas ficou em zero durante toda a bateria"
     );
+    Ok(())
+}
+
+/// **A volta da bateria confere a impressão esperada, e não só a entrada.**
+///
+/// `Motor::tentar` chama `Client::connect_por` sem passar por `conferir`, e até
+/// a 0.15.0 chamava sem a impressão também: sempre que o pin daquele endereço
+/// faltava na volta, a reconexão fixava às cegas a chave de quem atendesse.
+/// Com a impressão chegando ao verificador, esse primeiro contato é recusado no
+/// aperto de mão, e a bateria acaba em vez de entrar no impostor.
+///
+/// O pin é apagado à mão entre a queda e a volta porque é o único caso em que a
+/// impressão pesa na reconexão: com o pin de pé, quem decide é ele, e uma chave
+/// trocada já vira `PinChanged`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_volta_da_bateria_recusa_no_tls_o_impostor_que_a_impressao_desmente() -> Result<()> {
+    let _vaga = vaga::minha();
+    // Banco em memória nos dois: cada um nasce com uma identidade própria, e é
+    // isso que faz do segundo um impostor na mesma porta.
+    let (endereco, servidor) = server(0, Location::Memory).await?;
+    let porta = endereco.port();
+    let real = servidor.fingerprint().to_owned();
+    let chave_do_pin = endereco.to_string();
+    let loja = Arc::new(MemoryPinStore::new());
+
+    let mut alvo = destino(endereco);
+    alvo.impressao_esperada = Some(real.clone());
+    let mut enlace = Enlace::conectar(
+        alvo,
+        ed25519_dalek::SigningKey::from_bytes(&[47; 32]),
+        Arc::clone(&loja) as Arc<dyn PinStore>,
+    )
+    .await?;
+    assert_eq!(
+        enlace.veredito(),
+        &Verdict::FirstContactVerified {
+            fingerprint: real.clone()
+        },
+        "a entrada não conferiu a impressão, e a volta medida abaixo perde o assunto"
+    );
+
+    // O pin some entre a queda e a volta.
+    loja.unpin(&chave_do_pin);
+
+    // ---- o servidor cai, e quem sobe na mesma porta é outro
+    servidor.shutdown();
+    servidor.wait_idle().await;
+    drop(servidor);
+    let (_, impostor) = server(porta, Location::Memory).await?;
+    let ofertada = impostor.fingerprint().to_owned();
+
+    // O prazo cobre a detecção da queda e mais de uma tentativa da bateria: uma
+    // tentativa que saia antes de o impostor subir espera o aperto de mão
+    // inteiro antes de desistir, como diz o teste de cima.
+    let fim = esperar(&mut enlace, Duration::from_secs(60), |aviso| {
+        matches!(aviso, Aviso::Encerrado(_) | Aviso::Reconectado { .. })
+    })
+    .await;
+    let motivo = match fim {
+        Some(Aviso::Encerrado(Motivo::Recusado(motivo))) => motivo,
+        outro => panic!(
+            "a bateria não recusou o servidor que a impressão desmente: a volta \
+             entrou nele às cegas, ou nem terminou — {outro:?}"
+        ),
+    };
+    assert!(
+        motivo.contains("InviteMismatch") && motivo.contains(&real) && motivo.contains(&ofertada),
+        "a volta acabou recusada por outro motivo: {motivo}"
+    );
+    assert_eq!(
+        loja.pinned(&chave_do_pin),
+        None,
+        "a volta recusada fixou a chave do impostor"
+    );
+
+    impostor.shutdown();
     Ok(())
 }

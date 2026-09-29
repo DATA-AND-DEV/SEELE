@@ -113,6 +113,13 @@ pub enum ConnectError {
     /// Deliberately distinct from [`ConnectError::PinChanged`]: there a known
     /// server's key changed, which is the ADR 0003 alarm. Here nothing was ever
     /// known, and the party that disagrees is the link.
+    ///
+    /// **Recusada dentro do TLS, antes do `Hello`**: o verificador a decide no
+    /// aperto de mão (`crate::tofu::PinDecision::InviteRefused`), e o `Hello`
+    /// nem chega a sair. O convite ou a senha, o apelido e a chave de
+    /// identidade ficam nesta máquina; sai só o `ClientHello` do próprio TLS. A
+    /// conferência depois do aperto de mão, em `crate::enlace`, continua como
+    /// segunda linha.
     InviteMismatch {
         /// What the link promised.
         expected: String,
@@ -478,6 +485,9 @@ impl Client {
             server,
             server_name,
             pin_key,
+            // Este caminho não confere impressão nenhuma: quem tem uma entra
+            // por `crate::enlace::Enlace`, que a leva até o TLS.
+            None,
             nickname,
             signing_key,
             pins,
@@ -498,18 +508,28 @@ impl Client {
     /// encontro — uma por candidato, porque um `Endpoint` fecha o socket que
     /// adotou e a porta furada tem de sobreviver ao laço inteiro.
     ///
+    /// `impressao_esperada` é conferida **dentro do TLS**: um primeiro contato
+    /// que não confere falha o aperto de mão antes do `Hello`, e volta como
+    /// [`ConnectError::InviteMismatch`]. Ver [`crate::tofu::TofuVerifier::decide`]
+    /// para o que ela decide com pin e sem pin. Fica logo depois de `pin_key`
+    /// porque os vizinhos são `&str`: trocá-la de lugar com eles não compila,
+    /// e trocá-la com `join_secret` ou `aceito`, que também são `Option<&str>`,
+    /// compilaria calado.
+    ///
     /// # Errors
     ///
     /// O mesmo de [`Client::connect`].
     #[expect(
         clippy::too_many_arguments,
-        reason = "um argumento a mais que o `connect` público, que já os tinha"
+        reason = "dois argumentos a mais que o `connect` público — o socket e a \
+                  impressão esperada —, que já passava do limite"
     )]
     pub(crate) async fn connect_por(
         endpoint: &quinn::Endpoint,
         server: SocketAddr,
         server_name: &str,
         pin_key: &str,
+        impressao_esperada: Option<&str>,
         nickname: &str,
         signing_key: &SigningKey,
         pins: Arc<dyn PinStore>,
@@ -518,7 +538,11 @@ impl Client {
     ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let verifier = Arc::new(TofuVerifier::new(pins, pin_key.to_owned(), None));
+        let verifier = Arc::new(TofuVerifier::new(
+            pins,
+            pin_key.to_owned(),
+            impressao_esperada.map(str::to_owned),
+        ));
         let mut tls = rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::clone(&verifier) as Arc<_>)
@@ -1504,12 +1528,19 @@ const EJECTED: &[u8] = b"ejected";
 
 /// The client refused the server: the invite named a different key.
 ///
-/// `seele_core::enlace::Enlace::conectar` drops the connection when
-/// `tofu::verdict` returns `InviteRefused`, and this is what the server sees.
-/// The string matters more than it looks: `docs/pendencias.md` #12 accepted
-/// that the explicit drop has no automatic guard precisely because this reason
-/// is the one remaining observable difference between dropping the connection
-/// and letting it die on its own.
+/// **Segunda linha, e não o caminho de sempre.** Desde que a impressão esperada
+/// é conferida dentro do TLS, a recusa acontece no aperto de mão
+/// (`crate::tofu::PinDecision::InviteRefused`): quem atendeu vê um TLS que
+/// falhou, com a frase neutra de `crate::tofu`, e este motivo **não chega a
+/// ele**. Só chegaria pela conferência de depois do aperto de mão: o
+/// `seele_core::enlace::Enlace::conectar` derruba a conexão com ele quando
+/// `tofu::verdict` devolve `InviteRefused`, e isso exige um verificador que
+/// tenha deixado passar um primeiro contato que a impressão desmente.
+///
+/// A string continua importando, para essa segunda linha: `docs/pendencias.md`
+/// #12 aceitou que a queda explícita não tem guarda automático justamente
+/// porque este motivo é a única diferença observável que sobra entre derrubar a
+/// conexão e deixá-la morrer sozinha.
 pub const INVITE_REFUSED: &[u8] = b"invite refused";
 
 /// The local socket a client sends from.
@@ -1581,27 +1612,97 @@ pub(crate) fn local_endpoint(
 /// TLS rejection like any other, and the difference between "this server is not
 /// who it was" and "this server's certificate is unacceptable" is the whole of
 /// ADR 0003.
+///
+/// A recusa pela impressão esperada é o mesmo caso com outro nome: o
+/// verificador falhou o aperto de mão de propósito, e o motivo está na decisão
+/// que ele deixou. O `match` não tem braço `_` pela razão que
+/// `enlace::alguem_respondeu` escreve: uma decisão nova não compila até alguém
+/// dizer o que ela vira aqui.
 fn classify_connection_error(
     error: &quinn::ConnectionError,
     pin: Option<PinDecision>,
 ) -> ConnectError {
-    if let Some(PinDecision::Changed { pinned, offered }) = pin {
-        return ConnectError::PinChanged { pinned, offered };
+    match pin {
+        Some(PinDecision::Changed { pinned, offered }) => {
+            ConnectError::PinChanged { pinned, offered }
+        }
+        // **Antes do `Hello`, e com nome.** Sem este braço a recusa sairia
+        // `TlsRefused`, a FFI a traduziria por `Refused { Incompatible }`, e a
+        // tela mandaria atualizar o SEELE nas duas máquinas, sobre um servidor
+        // que não é o do link.
+        Some(PinDecision::InviteRefused { expected, offered }) => {
+            ConnectError::InviteMismatch { expected, offered }
+        }
+        Some(PinDecision::FirstContact { .. } | PinDecision::Matches { .. }) | None => {
+            match error {
+                // **A conexão expirou, e não o aperto de mão.** Ver `SemResposta`:
+                // este erro chega antes de haver aperto de mão nenhum, e chamá-lo
+                // de «sincronização» manda quem lê procurar no servidor um
+                // problema que está no caminho até ele.
+                quinn::ConnectionError::TimedOut => ConnectError::SemResposta,
+                quinn::ConnectionError::TransportError(_) => {
+                    tracing::warn!(%error, "TLS refused the connection");
+                    ConnectError::TlsRefused
+                }
+                other => {
+                    tracing::warn!(error = %other, "could not establish the QUIC connection");
+                    ConnectError::Unreachable
+                }
+            }
+        }
     }
-    match error {
-        // **A conexão expirou, e não o aperto de mão.** Ver `SemResposta`: este
-        // erro chega antes de haver aperto de mão nenhum, e chamá-lo de
-        // «sincronização» manda quem lê procurar no servidor um problema que
-        // está no caminho até ele.
-        quinn::ConnectionError::TimedOut => ConnectError::SemResposta,
-        quinn::ConnectionError::TransportError(_) => {
-            tracing::warn!(%error, "TLS refused the connection");
-            ConnectError::TlsRefused
+}
+
+#[cfg(test)]
+mod a_recusa_do_tls_chega_com_nome {
+    use super::{classify_connection_error, ConnectError};
+    use crate::tofu::PinDecision;
+
+    #[test]
+    fn a_impressao_que_nao_confere_vira_invite_mismatch_e_nao_tls_refused() {
+        // O `quinn` só sabe que o aperto de mão falhou; o motivo está na decisão
+        // que o verificador deixou. Lida de outro jeito, a recusa sairia
+        // `TlsRefused`, a FFI a traduziria por `Refused { Incompatible }`, e a
+        // tela mandaria atualizar o SEELE nas duas máquinas, sobre um servidor
+        // que não é o do link.
+        let decisao = PinDecision::InviteRefused {
+            expected: "bbbb2222".into(),
+            offered: "aaaa1111".into(),
+        };
+        for erro in [
+            quinn::ConnectionError::TimedOut,
+            quinn::ConnectionError::LocallyClosed,
+        ] {
+            assert_eq!(
+                classify_connection_error(&erro, Some(decisao.clone())),
+                ConnectError::InviteMismatch {
+                    expected: "bbbb2222".into(),
+                    offered: "aaaa1111".into(),
+                },
+                "a recusa pela impressão chegou como a falha genérica de {erro:?}, \
+                 e a casca acusaria a rede ou a versão"
+            );
         }
-        other => {
-            tracing::warn!(error = %other, "could not establish the QUIC connection");
-            ConnectError::Unreachable
-        }
+    }
+
+    #[test]
+    fn sem_recusa_do_verificador_a_classificacao_e_a_de_sempre() {
+        assert_eq!(
+            classify_connection_error(&quinn::ConnectionError::TimedOut, None),
+            ConnectError::SemResposta,
+            "uma conexão que expirou deixou de ser «sem resposta» e a casca \
+             mandaria conferir a versão de quem só não foi alcançado"
+        );
+        assert_eq!(
+            classify_connection_error(
+                &quinn::ConnectionError::TimedOut,
+                Some(PinDecision::FirstContact {
+                    fingerprint: "aaaa1111".into()
+                })
+            ),
+            ConnectError::SemResposta,
+            "um primeiro contato aceito deu nome a uma falha que veio depois dele"
+        );
     }
 }
 

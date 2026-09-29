@@ -3,13 +3,13 @@
 //! O ADR 0006 inventou o link para transformar o primeiro contato de cego em
 //! verificado. A política que decide isso é uma tabela pura, testada em
 //! `seele-core`; o que **nenhum** teste alcançava era a fiação: o `Destino`
-//! carregando a impressão do convite até a conferência, a recusa derrubando a
-//! conexão, e a recusa desfazendo o pin que o TLS já tinha escrito. Cada uma
-//! dessas três pode sumir sem que a suíte de unidade note, porque nenhuma delas
-//! é uma decisão sobre valores — são efeitos que só existem com um servidor do
-//! outro lado.
+//! carregando a impressão do convite até o verificador TLS, a recusa
+//! acontecendo antes de o `Hello` sair, e a recusa sem deixar pin nem sessão
+//! para trás. Cada uma dessas pode sumir sem que a suíte de unidade note,
+//! porque nenhuma delas é uma decisão sobre valores — são efeitos que só
+//! existem com um servidor do outro lado.
 //!
-//! # As três coisas que este arquivo segura
+//! # O que este arquivo segura
 //!
 //! **A impressão chega.** Se a chamada passasse `None` no lugar de
 //! `destino.impressao_esperada`, todo primeiro contato voltaria a ser cego e a
@@ -17,17 +17,22 @@
 //! impressão real do servidor e exige `FirstContactVerified` — que é o único
 //! veredito que não existe sem a fiação.
 //!
-//! **A recusa não deixa sessão de pé.** A recusa acontece depois do aperto de
-//! mão, com uma sessão já servindo do lado do servidor; deixá-la lá daria conexão
-//! viva a quem acabou de ser rejeitado. O segundo teste espera o endpoint do
-//! servidor ficar ocioso, com prazo. Ele afirma o resultado, não o mecanismo —
-//! ver a nota no corpo do teste sobre o que essa asserção não distingue.
+//! **A recusa acontece dentro do TLS, antes do `Hello`.** Até a 0.15.0 ela
+//! vinha depois do aperto de mão inteiro. Àquela altura o `Hello` já tinha
+//! levado o convite, a chave e o apelido, a portaria já tinha anotado a batida,
+//! e o convite de uso único já tinha sido gasto por quem atendeu no lugar do
+//! servidor. É o S2b da análise de 22/09. Os dois últimos testes observam **o
+//! servidor**: o convite ainda entra, e a portaria não tem pedido. Eles olham
+//! para lá porque o erro que o cliente devolve é `InviteMismatch` antes e
+//! depois do conserto.
 //!
-//! **A recusa desfaz o pin.** É a metade que faltaria sem ninguém notar: o
-//! verificador fixa dentro do retorno de chamada do TLS, bem antes de haver
-//! veredito. Recusar sem desfixar deixaria a visita seguinte — sem link para
-//! conferir — ver `Matches` e entrar no servidor recusado sem hesitar. O
-//! segundo teste reconecta **sem** link e exige primeiro contato de novo.
+//! **A recusa não deixa sessão de pé, nem pin.** O verificador não fixa uma
+//! chave que a impressão esperada recusa. A conferência de `Enlace::conectar`
+//! continua como segunda linha e desfaz o pin se algum dia a primeira falhar.
+//! O segundo teste reconecta **sem** link e exige primeiro contato de novo.
+//!
+//! A mesma conferência na volta da bateria interna, quando o pin sumiu entre a
+//! queda e a volta, é guardada em `bateria_interna.rs`.
 //!
 //! # O que este arquivo **não** afirma
 //!
@@ -47,8 +52,8 @@ use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{ConnectError, MemoryPinStore, PinStore, Verdict};
 use seele_proto::control::ServerMessage;
 use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
-use seele_server::persistence::Location;
-use seele_server::{Daemon, ServerConfig};
+use seele_server::persistence::{Location, Persistence};
+use seele_server::{admissao, portaria, Daemon, ServerConfig};
 
 mod vaga;
 
@@ -213,7 +218,7 @@ async fn a_impressao_que_o_convite_promete_verifica_o_primeiro_contato() -> Resu
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Result<()> {
+async fn o_convite_que_nao_confere_nao_deixa_conexao_nem_pin() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
     let real = servidor.fingerprint().to_owned();
@@ -222,7 +227,7 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
 
     let erro = conectar(endereco, 46, "marcela", Some(NAO_E_DE_NINGUEM), &loja)
         .await
-        .expect_err("um convite que não confere tinha que derrubar a conexão");
+        .expect_err("um convite que não confere tinha que ser recusado");
 
     // Quem prometeu é o link, quem ofereceu é o servidor. Trocar os dois faria
     // a casca acusar o lado errado.
@@ -243,26 +248,21 @@ async fn a_impressao_que_nao_confere_derruba_a_conexao_e_desfaz_o_pin() -> Resul
         "a recusa deixou fixada a chave do servidor que ela acabou de recusar"
     );
 
-    // Metade dois: a conexão caiu **do lado do servidor** também. A recusa vem
-    // depois do aperto de mão, com a sessão já de pé lá, e o cliente mantém
-    // keepalive a cada 5 s — uma conexão esquecida aqui não expira sozinha, o
-    // ADR 0003 não a protege mais, e o servidor serviria uma sessão a quem foi
-    // recusado. `wait_idle` só volta quando o endpoint não tem mais conexão
-    // nenhuma, e o prazo é folga de loopback: na prática ela some em dezenas de
-    // milissegundos.
+    // Metade dois: não sobrou conexão do lado do servidor. Desde que a
+    // impressão é conferida dentro do TLS, o aperto de mão falha antes do
+    // `Hello` e não chega a haver sessão lá. A queda explícita que este trecho
+    // guardava, o `cliente.close(INVITE_REFUSED)` de `Enlace::conectar`, ficou
+    // como segunda linha e já não roda para esta recusa: quem a conferência de
+    // depois do aperto de mão derrubaria é um servidor que o verificador deixou
+    // passar, e o verificador não deixa. O que se guarda aqui é o **resultado**,
+    // qualquer que seja o caminho: `wait_idle` só volta quando o endpoint não
+    // tem conexão nenhuma, e o prazo é folga de loopback.
     //
-    // O que esta asserção **não** distingue, e vale dito para ninguém confiar
-    // demais nela: apagar o `cliente.close(INVITE_REFUSED)` de
-    // `Enlace::conectar` não a deixa vermelha. Medido — 84 ms com a queda
-    // explícita, 87 ms sem ela. Soltar o `Client` acaba fechando a conexão pelo
-    // caminho longo (a tarefa leitora só se descobre sozinha quando o servidor
-    // fala de novo), então o que se guarda aqui é o **resultado** — não sobra
-    // sessão —, e não qual das duas coisas o produziu. A queda explícita
-    // continua sendo a certa: ela não depende de o servidor dizer alguma coisa,
-    // e agora carrega no `CONNECTION_CLOSE` o motivo certo — `invite refused` e
-    // não `ejected`, que é a diferença que o log do operador guarda. Essa
-    // diferença continua sem teste: nada em `seele-server` expõe o motivo de
-    // fechamento a quem escreve um teste daqui.
+    // O que esta asserção não distingue, e vale dito: ela passava igual quando
+    // a recusa vinha depois do aperto de mão, com ou sem a queda explícita.
+    // Isso foi medido na época: 84 ms com ela e 87 sem. Quem distingue «a
+    // recusa foi antes do `Hello`» são os dois últimos testes deste arquivo, que
+    // olham o convite e a portaria do lado do servidor.
     tokio::time::timeout(Duration::from_secs(10), servidor.wait_idle())
         .await
         .expect("a conexão recusada continuou de pé no servidor");
@@ -349,6 +349,175 @@ async fn um_link_velho_contra_um_server_ja_conhecido_avisa_e_nao_derruba() -> Re
     );
 
     drop(segundo);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// Sobe um servidor com banco em arquivo.
+///
+/// Os três testes de cima usam banco em memória porque só olham o cliente. Os
+/// dois de baixo olham **o servidor** — o convite que ele guarda, a fila da
+/// portaria —, e para isso o teste precisa abrir o mesmo banco por fora, como
+/// `acceptance_seguranca.rs` faz.
+async fn server_com_banco(banco: &std::path::Path) -> Result<(SocketAddr, Arc<Daemon>)> {
+    let config = ServerConfig {
+        name: "Casa".into(),
+        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+        database: Location::File(banco.to_path_buf()),
+        ..ServerConfig::default()
+    };
+    let servidor = Arc::new(Daemon::bind(config).await?);
+    let endereco = servidor.local_addr()?;
+    let aceitando = Arc::clone(&servidor);
+    tokio::spawn(async move {
+        let _ = aceitando.run().await;
+    });
+    Ok((endereco, servidor))
+}
+
+/// Conecta levando o convite de uso único do ADR 0021.
+///
+/// O `destino` de cima deixa o segredo em `None`, porque os três primeiros
+/// testes medem a conferência num servidor aberto. Aqui o que se mede é o que
+/// acontece com o segredo.
+async fn conectar_com_convite(
+    endereco: SocketAddr,
+    semente: u8,
+    apelido: &str,
+    convite: &str,
+    impressao_esperada: &str,
+    pins: &Arc<MemoryPinStore>,
+) -> Result<Enlace, ConnectError> {
+    let mut alvo = destino(endereco, apelido, Some(impressao_esperada));
+    alvo.segredo = Some(convite.to_owned());
+    Enlace::conectar(
+        alvo,
+        ed25519_dalek::SigningKey::from_bytes(&[semente; 32]),
+        Arc::clone(pins) as Arc<dyn PinStore>,
+    )
+    .await
+}
+
+/// **O convite não sai quando a impressão não confere.**
+///
+/// O S2b da análise de 22/09. A conferência acontecia depois do aperto de mão
+/// inteiro, e o `Hello` leva o convite: quem atendesse no lugar do servidor
+/// recebia o token, a chave e o apelido, e o servidor **gastava** o convite de
+/// uso único antes de o cliente recusar. A pessoa ficava com um link morto,
+/// num servidor em que nunca entrou.
+///
+/// Quem se observa aqui é o servidor. O erro que o cliente devolve é
+/// `InviteMismatch` antes e depois do conserto, porque a conferência depois do
+/// aperto de mão continua como segunda linha. Só o que sobrou do lado de lá
+/// distingue os dois casos: o mesmo convite, levado por **outra** chave, ainda
+/// tem de entrar. Antes do conserto ele volta `CredentialRejected`, porque o
+/// convite foi gasto pelo `Hello` que não devia ter saído.
+///
+/// **A segunda conexão usa outro apelido, e é de propósito.** O ADR 0017
+/// prende o apelido à chave que o usou primeiro, e o `Hello` de antes do
+/// conserto prendia `marcela` à chave da primeira tentativa. Com o mesmo
+/// apelido, o vermelho teria duas causas possíveis (o convite gasto ou o
+/// apelido preso), e o teste não diria qual. Com outro, só o convite explica a
+/// recusa.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_impressao_que_nao_confere_nao_gasta_o_convite() -> Result<()> {
+    let _vaga = vaga::minha();
+    let pasta = tempfile::tempdir()?;
+    let banco = pasta.path().join("seele.db");
+    let convite = {
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        admissao::criar_convite(&mut persistence, "para a marcela")?
+    };
+    let (endereco, servidor) = server_com_banco(&banco).await?;
+    let real = servidor.fingerprint().to_owned();
+    let loja = Arc::new(MemoryPinStore::new());
+
+    let erro = conectar_com_convite(endereco, 46, "marcela", &convite, NAO_E_DE_NINGUEM, &loja)
+        .await
+        .expect_err("a impressão não confere; não havia o que aceitar");
+    assert_eq!(
+        erro,
+        ConnectError::InviteMismatch {
+            expected: NAO_E_DE_NINGUEM.to_owned(),
+            offered: real.clone(),
+        },
+        "a recusa pela impressão chegou com outro nome, e a casca acusaria a \
+         rede ou a versão em vez do link"
+    );
+    assert_eq!(
+        loja.pinned(&endereco.to_string()),
+        None,
+        "a chave recusada ficou fixada"
+    );
+
+    // Nenhuma conexão de pé lá. Sozinha, esta linha não distingue antes de
+    // depois (ver a nota do teste da recusa, acima), e é por isso que o que
+    // vem a seguir existe.
+    tokio::time::timeout(Duration::from_secs(10), servidor.wait_idle())
+        .await
+        .expect("a conexão recusada continuou de pé no servidor");
+
+    // Outra chave e **outro apelido**: a única coisa em comum com a tentativa
+    // de cima é o convite, e é só ele que este teste mede.
+    let entrou = conectar_com_convite(endereco, 47, "joana", &convite, &real, &loja)
+        .await
+        .expect(
+            "o convite foi gasto por um servidor que o cliente recusou: o `Hello` \
+             saiu antes da conferência",
+        );
+    assert_eq!(
+        entrou.veredito(),
+        &Verdict::FirstContactVerified { fingerprint: real },
+        "o convite entrou sem a impressão conferida"
+    );
+
+    drop(entrou);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **E nem bate à porta.**
+///
+/// Com a portaria do ADR 0030 ligada, um `Hello` com convite válido vira um
+/// pedido na fila de quem hospeda, com o apelido e a observação do convite. A
+/// pessoa que hospeda passaria a ver, e poderia aprovar, uma batida que o
+/// próprio cliente recusou.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_impressao_que_nao_confere_nao_deixa_pedido_na_portaria() -> Result<()> {
+    let _vaga = vaga::minha();
+    let pasta = tempfile::tempdir()?;
+    let banco = pasta.path().join("seele.db");
+    let convite = {
+        let mut persistence = Persistence::open(&Location::File(banco.clone()))?;
+        portaria::ligar(&mut persistence, true)?;
+        admissao::criar_convite(&mut persistence, "para a marcela")?
+    };
+    let (endereco, servidor) = server_com_banco(&banco).await?;
+    let real = servidor.fingerprint().to_owned();
+    let loja = Arc::new(MemoryPinStore::new());
+
+    let erro = conectar_com_convite(endereco, 46, "marcela", &convite, NAO_E_DE_NINGUEM, &loja)
+        .await
+        .expect_err("a impressão não confere; não havia o que aceitar");
+    // Antes do conserto isto era `Refused { AdmissionPending }`: o servidor
+    // respondia ao `Hello` antes de a conferência rodar, e a recusa pela
+    // impressão nunca chegava a acontecer.
+    assert_eq!(
+        erro,
+        ConnectError::InviteMismatch {
+            expected: NAO_E_DE_NINGUEM.to_owned(),
+            offered: real,
+        },
+        "o servidor respondeu ao `Hello` de quem o cliente devia ter recusado"
+    );
+
+    let persistence = Persistence::open(&Location::File(banco.clone()))?;
+    let fila = portaria::pedidos(&persistence)?;
+    assert!(
+        fila.is_empty(),
+        "a portaria recebeu uma batida de quem o cliente recusou: {fila:?}"
+    );
+
     servidor.shutdown();
     Ok(())
 }

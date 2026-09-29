@@ -75,6 +75,13 @@ pub struct Destino {
     ///
     /// `None` para quem digitou o endereço à mão — aí não há o que conferir, e
     /// o primeiro contato segue sendo cego, como sempre foi.
+    ///
+    /// **Conferida dentro do TLS**, antes do `Hello`: um primeiro contato que
+    /// não confere falha o aperto de mão e não leva convite, senha nem apelido
+    /// a quem atendeu (`crate::tofu::TofuVerifier::decide`). Um servidor já
+    /// fixado passa e é avisado (`Verdict::InviteDisagrees`), que é a decisão
+    /// do ADR 0003 escrita no verificador. Vale na entrada e na volta da
+    /// bateria interna.
     pub impressao_esperada: Option<String>,
     /// A identidade do conjunto de MODs que esta máquina já aceitou para este
     /// servidor. ADR 0045.
@@ -1172,13 +1179,18 @@ impl Enlace {
         // A limpeza de pin órfão dos perdedores, **depois** do vencedor e
         // pulando a chave dele.
         //
-        // `desfazer_pin_orfao` promete «só apaga o que este aperto escreveu», e
+        // `desfazer_pin_orfao` só sabe «ninguém tinha fixado antes da corrida», e
         // isso é exato em série e falso aqui: dois candidatos podem compartilhar
         // `chave_do_pin` — ela é `host:porta` do nome do convite, e alternativos
         // do mesmo nome colidem. Sem esta condição, limpar um perdedor
         // encontraria `fixado_antes == None` e `pinned() == Some`, e apagaria o
         // pin que o vencedor acabou de escrever: a confiança de primeiro contato
         // do ADR 0003 desfeita em silêncio.
+        //
+        // Um perdedor que falhou por conta própria já se limpou em
+        // `conectar_por`, e só do que ele mesmo escreveu. Esta volta existe para
+        // o que aquela não alcança: o candidato cujo prazo estourou, derrubado
+        // no meio do aperto de mão sem chance de se limpar.
         let chave_do_vencedor = corrida
             .vencedor
             .as_ref()
@@ -1258,18 +1270,26 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
-        // Antes de o TLS ter chance de escrever qualquer coisa. Ver
-        // [`desfazer_pin_orfao`].
-        let fixado_antes = pins.pinned(&destino.chave_do_pin);
+        // O TLS escreve o pin de dentro do aperto de mão, e os vizinhos desta
+        // tentativa escrevem na mesma chave quando são alternativos do mesmo
+        // nome de convite. Por isso o que este aperto escreveu é **anotado**, e
+        // não deduzido de olhar a loja antes e depois. Ver
+        // [`desfazer_o_pin_deste_aperto`].
+        let deste_aperto = Arc::new(PinsDesteAperto::nova(Arc::clone(&pins)));
 
         let resultado = Client::connect_por(
             endpoint,
             destino.servidor,
             &destino.nome_tls,
             &destino.chave_do_pin,
+            // Conferida **dentro do TLS**, antes do `Hello`: um primeiro
+            // contato que não confere nem chega a mandar o convite. É o mesmo
+            // caminho para todo candidato da corrida do ADR 0037, porque todos
+            // passam por aqui.
+            destino.impressao_esperada.as_deref(),
             &destino.apelido,
             &chave,
-            Arc::clone(&pins),
+            Arc::clone(&deste_aperto) as Arc<dyn PinStore>,
             destino.segredo.as_deref(),
             destino.aceito.as_deref(),
         )
@@ -1278,10 +1298,14 @@ impl Enlace {
         let mut cliente = match resultado {
             Ok(cliente) => cliente,
             Err(erro) => {
-                desfazer_pin_orfao(
+                // Só desfaz o que este aperto escreveu. A recusa pela impressão
+                // (`InviteMismatch`), a chave trocada (`PinChanged`) e qualquer
+                // falha que veio antes de um primeiro contato aceito não
+                // escreveram nada, e um pin que exista agora é de um vizinho.
+                desfazer_o_pin_deste_aperto(
                     pins.as_ref(),
                     &destino.chave_do_pin,
-                    fixado_antes.as_deref(),
+                    deste_aperto.o_que_escreveu().as_deref(),
                 );
                 return Err(erro);
             }
@@ -1291,22 +1315,32 @@ impl Enlace {
         let veredito = match conferir(&destino, &pin, pins.as_ref()) {
             Ok(veredito) => veredito,
             Err(erro) => {
+                // **Segunda linha.** Este braço já não roda para a impressão
+                // que o convite desmente: o verificador a recusa dentro do TLS,
+                // antes do `Hello`, e a falha sobe como `InviteMismatch` pelo
+                // braço de cima. Só chegaria aqui um servidor que o verificador
+                // deixasse passar e o `verdict` recusasse, e os dois leem a
+                // mesma comparação (`tofu::confere`). Fica porque uma defesa que
+                // some quando a primeira funciona é uma defesa que ninguém
+                // verificou que ainda existe.
+                //
                 // Derrubar, não só relatar. E explicitamente, não por `Drop`.
                 //
                 // Soltar o `Client` **acaba** fechando a conexão — medido em
-                // ~85 ms contra um servidor de verdade, com e sem esta linha —, mas
-                // pelo caminho longo: `Client::connect` deixa uma tarefa de
-                // leitura dona do `RecvStream`, e ela só descobre que ninguém
-                // escuta quando o servidor manda o quadro seguinte. Contra um
-                // servidor que fala (telemetria a cada segundo) isso é rápido;
-                // contra um que emudeceu, é o tempo ocioso do QUIC inteiro,
-                // com uma sessão de pé do lado de quem acabou de ser recusado.
+                // ~85 ms contra um servidor de verdade, com e sem esta linha,
+                // no tempo em que este caminho era o único —, mas pelo caminho
+                // longo: `Client::connect` deixa uma tarefa de leitura dona do
+                // `RecvStream`, e ela só descobre que ninguém escuta quando o
+                // servidor manda o quadro seguinte. Contra um servidor que fala
+                // (telemetria a cada segundo) isso é rápido; contra um que
+                // emudeceu, é o tempo ocioso do QUIC inteiro, com uma sessão de
+                // pé do lado de quem acabou de ser recusado.
                 //
-                // Ou seja: a conclusão não mudou, o motivo sim. Fechar aqui não
-                // depende de o servidor dizer nada. A medição, e o que ela
-                // implica para quem tenta testar esta linha, está em
-                // `crates/seele-conformance/tests/convite.rs` — apagá-la não
-                // deixa nenhum teste vermelho, e isso está dito lá por escrito.
+                // Fechar aqui não depende de o servidor dizer nada. Nenhum teste
+                // alcança esta linha: com o verificador recusando no TLS, não há
+                // como um servidor de verdade fazê-la rodar, e apagá-la não deixa
+                // nada vermelho — o que valia dizer já valia antes, em
+                // `crates/seele-conformance/tests/convite.rs`.
                 //
                 // E fecha **dizendo o que foi**: o motivo viaja no
                 // `CONNECTION_CLOSE` e é o que fica no log do servidor. Fechar
@@ -2728,6 +2762,12 @@ impl Motor {
                     self.destino.servidor,
                     &self.destino.nome_tls,
                     &self.destino.chave_do_pin,
+                    // A mesma conferência da entrada, e aqui ela é a única:
+                    // esta volta não passa por `conferir`. O pin normalmente já
+                    // existe e decide sozinho; ela pesa quando o pin sumiu entre
+                    // a queda e a volta, e sem ela a reconexão fixaria às cegas
+                    // quem atendesse. Guardado em `bateria_interna.rs`.
+                    self.destino.impressao_esperada.as_deref(),
                     &self.destino.apelido,
                     &self.chave,
                     Arc::clone(&self.pins),
@@ -4635,21 +4675,85 @@ fn conferir(
 ///
 /// # Por que apagar aqui é seguro
 ///
-/// `InviteRefused` nasce de duas decisões, e só uma delas chega aqui. De
+/// `InviteRefused` nasce de três decisões, e só a primeira chegaria aqui. De
 /// `PinDecision::FirstContact` — nada estava fixado antes, então o `unpin`
 /// remove exatamente o que este aperto de mão acabou de escrever. De
-/// `PinDecision::Changed` também, e **essa** apagaria um pin antigo e legítimo,
-/// que é o oposto do ADR 0003; ela não chega porque o verificador reprova a
-/// chave trocada no TLS e a falha sobe como [`ConnectError::PinChanged`], sem
-/// nunca virar veredito. Se algum dia `Changed` passar a chegar até aqui, esta
+/// `PinDecision::InviteRefused` o `unpin` não acharia nada: o verificador
+/// recusa essa chave sem fixá-la, e ela sobe como erro, sem virar veredito. De
+/// `PinDecision::Changed`, e **essa** apagaria um pin antigo e legítimo, que é
+/// o oposto do ADR 0003; ela não chega porque o verificador reprova a chave
+/// trocada no TLS e a falha sobe como [`ConnectError::PinChanged`], sem nunca
+/// virar veredito. Se algum dia `Changed` passar a chegar até aqui, esta
 /// função precisa distinguir as duas antes de apagar nada.
+///
+/// # Segunda linha, desde que a impressão é conferida no TLS
+///
+/// O verificador recebe a impressão esperada e recusa dentro do aperto de mão,
+/// sem fixar nada e antes do `Hello`, o primeiro contato que não confere
+/// (`PinDecision::InviteRefused`, que sobe como [`ConnectError::InviteMismatch`]).
+/// Pelo caminho de produção, então, um `FirstContact` que desmente o convite não
+/// chega mais aqui. Este braço fica como segunda linha: se o verificador algum
+/// dia deixar de recusar, a conexão ainda cai e o pin ainda é desfeito. Tarde,
+/// depois do `Hello`, mas cai.
+///
+/// **E ele desfaz sem perguntar de quem é o pin.** Quando era o único caminho,
+/// isso era exato. Numa corrida de candidatos com a mesma chave de pino, um pin
+/// que estivesse ali poderia ser de um vizinho. A limpeza de primeira linha,
+/// em `Enlace::conectar_por`, só desfaz o que o próprio aperto anotou
+/// ([`desfazer_o_pin_deste_aperto`]); se este braço um dia voltar a ser o
+/// caminho da recusa, ele precisa da mesma cautela.
 fn aplicar_veredito(veredito: &Verdict, pins: &dyn PinStore, chave_do_pin: &str) {
     if matches!(veredito, Verdict::InviteRefused { .. }) {
         pins.unpin(chave_do_pin);
     }
 }
 
-/// Desfaz o pin que sobrou de um aperto de mão que não terminou.
+/// A loja de pins como **um** aperto de mão a vê: repassa tudo à loja de
+/// verdade e anota o que ele escreveu.
+///
+/// Existe porque «o que este aperto escreveu» não se deduz olhando a loja antes
+/// e depois. Candidatos da mesma corrida (ADR 0037) compartilham `chave_do_pin`
+/// quando são alternativos do mesmo nome de convite, e um pin que apareceu entre
+/// a leitura de antes e a de depois pode ser de um deles. Quem desfaz um pin
+/// tem de desfazer só o que sabe que foi seu.
+#[derive(Debug)]
+struct PinsDesteAperto {
+    loja: Arc<dyn PinStore>,
+    escrito: std::sync::Mutex<Option<String>>,
+}
+
+impl PinsDesteAperto {
+    fn nova(loja: Arc<dyn PinStore>) -> Self {
+        Self {
+            loja,
+            escrito: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// A impressão que este aperto fixou, se fixou alguma.
+    fn o_que_escreveu(&self) -> Option<String> {
+        self.escrito.lock().ok().and_then(|escrito| escrito.clone())
+    }
+}
+
+impl PinStore for PinsDesteAperto {
+    fn pinned(&self, host: &str) -> Option<String> {
+        self.loja.pinned(host)
+    }
+
+    fn pin(&self, host: &str, fingerprint: String) {
+        if let Ok(mut escrito) = self.escrito.lock() {
+            *escrito = Some(fingerprint.clone());
+        }
+        self.loja.pin(host, fingerprint);
+    }
+
+    fn unpin(&self, host: &str) {
+        self.loja.unpin(host);
+    }
+}
+
+/// Desfaz o pin que **este** aperto de mão escreveu e que sobrou dele.
 ///
 /// O `TofuVerifier` fixa a chave dentro do TLS, e o aperto de mão continua
 /// depois disso — abrir o fluxo de controle, o prazo, a credencial, a resposta.
@@ -4662,7 +4766,40 @@ fn aplicar_veredito(veredito: &Verdict, pins: &dyn PinStore, chave_do_pin: &str)
 /// desfazer nada e sem erro. Uma falha de aperto de mão convertia a conferência
 /// de *recusar* para *avisar*, para sempre, naquele endereço.
 ///
-/// Só apaga o que este aperto escreveu: se já havia pin antes, ele fica.
+/// # Só o que este aperto escreveu, e só se ainda estiver lá
+///
+/// `escrito` é o que [`PinsDesteAperto`] anotou. Sem nada anotado, não há o que
+/// desfazer: a recusa pela impressão (`InviteMismatch`), a chave trocada
+/// (`PinChanged`) e a falha antes do TLS terminar não escrevem, e um pin que
+/// exista na hora é de outro. Com algo anotado, o pin só cai se a loja ainda
+/// guardar aquele valor: um vizinho que tenha fixado outra coisa depois fica
+/// com o que é dele.
+///
+/// **O que ela não distingue:** um vizinho que tenha fixado a **mesma**
+/// impressão, que é o mesmo servidor por dois endereços do convite, ambos sem
+/// pin e ambos com o TLS terminado antes de o primeiro vencer. O pin é igual
+/// para os dois, e cai junto com o do perdedor. Fechar isso pede saber quem
+/// venceu, que é o que a limpeza de depois da corrida,
+/// [`desfazer_pin_orfao`], sabe e esta não.
+fn desfazer_o_pin_deste_aperto(pins: &dyn PinStore, chave_do_pin: &str, escrito: Option<&str>) {
+    let Some(escrito) = escrito else {
+        return;
+    };
+    if pins.pinned(chave_do_pin).as_deref() == Some(escrito) {
+        pins.unpin(chave_do_pin);
+    }
+}
+
+/// Desfaz o pin que sobrou de um aperto de mão que não terminou, quando não se
+/// sabe o que ele escreveu.
+///
+/// É a limpeza de **depois da corrida** (ver `Enlace::tentar_entre`), para o
+/// candidato cujo prazo estourou: a tentativa foi derrubada no meio, levou
+/// consigo a anotação de [`PinsDesteAperto`], e o que resta é comparar a loja com
+/// a fotografia de antes da corrida. Um aperto que falhou por conta própria já
+/// se limpou em `Enlace::conectar_por`, com [`desfazer_o_pin_deste_aperto`].
+///
+/// Só apaga o que **ninguém** tinha fixado antes: se já havia pin, ele fica.
 fn desfazer_pin_orfao(pins: &dyn PinStore, chave_do_pin: &str, fixado_antes: Option<&str>) {
     if fixado_antes.is_none() && pins.pinned(chave_do_pin).is_some() {
         pins.unpin(chave_do_pin);
@@ -5531,6 +5668,93 @@ mod tests {
     }
 
     #[test]
+    fn o_pin_que_este_aperto_escreveu_e_desfeito_quando_ele_falha() {
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        desfazer_o_pin_deste_aperto(&loja, "casa", Some("aaaa1111"));
+
+        assert_eq!(
+            loja.pinned("casa"),
+            None,
+            "o pin que o aperto que falhou escreveu ficou na loja, e a visita seguinte, \
+             sem link, entraria calada no servidor recusado"
+        );
+    }
+
+    #[test]
+    fn o_que_um_aperto_nao_escreveu_nao_e_dele_para_desfazer() {
+        // A recusa pela impressão, a chave trocada e a falha antes do TLS
+        // terminar não escrevem nada. Um pin que exista na hora é de um vizinho
+        // da corrida, e desfazê-lo é a confiança de primeiro contato do
+        // ADR 0003 sumindo calada.
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        desfazer_o_pin_deste_aperto(&loja, "casa", None);
+
+        assert_eq!(
+            loja.pinned("casa"),
+            Some("aaaa1111".into()),
+            "um aperto que não escreveu nada apagou o pin de outro"
+        );
+    }
+
+    #[test]
+    fn um_pin_que_o_vizinho_trocou_depois_fica_com_o_vizinho() {
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "bbbb2222".into());
+
+        desfazer_o_pin_deste_aperto(&loja, "casa", Some("aaaa1111"));
+
+        assert_eq!(
+            loja.pinned("casa"),
+            Some("bbbb2222".into()),
+            "o aperto que falhou apagou um pin que já não era o que ele tinha escrito"
+        );
+    }
+
+    #[test]
+    fn a_loja_do_aperto_repassa_tudo_e_anota_so_o_que_ele_escreve() {
+        let de_verdade = Arc::new(crate::tofu::MemoryPinStore::new());
+        de_verdade.pin("velha", "cccc3333".into());
+        let deste_aperto = PinsDesteAperto::nova(Arc::clone(&de_verdade) as Arc<dyn PinStore>);
+
+        assert_eq!(
+            deste_aperto.pinned("velha"),
+            Some("cccc3333".into()),
+            "a loja do aperto não repassou a leitura: o verificador veria um pin \
+             que não existe, ou nenhum que existe"
+        );
+        assert_eq!(
+            deste_aperto.o_que_escreveu(),
+            None,
+            "a loja do aperto anotou como escrito um pin que já estava lá"
+        );
+
+        deste_aperto.pin("casa", "aaaa1111".into());
+
+        assert_eq!(
+            de_verdade.pinned("casa"),
+            Some("aaaa1111".into()),
+            "a loja do aperto não repassou a escrita: o pin fixado no TLS se perdia"
+        );
+        assert_eq!(
+            deste_aperto.o_que_escreveu(),
+            Some("aaaa1111".into()),
+            "a loja do aperto não anotou o que o TLS escreveu, e a limpeza não \
+             teria o que desfazer"
+        );
+
+        deste_aperto.unpin("casa");
+        assert_eq!(
+            de_verdade.pinned("casa"),
+            None,
+            "a loja do aperto não repassou o desfazer"
+        );
+    }
+
+    #[test]
     fn o_que_a_reconexao_restaura_e_o_que_a_pessoa_escolheu() {
         let mut motor = motor_de_teste();
 
@@ -5653,6 +5877,269 @@ mod tests {
             }
         });
         Some((onde, quantos))
+    }
+
+    /// Uma ponta QUIC de teste com certificado próprio, e a impressão dele.
+    ///
+    /// Só faz o aperto de mão do TLS: o que acontece com a conexão depois é
+    /// de quem chama.
+    fn ponta_com_certificado_proprio() -> (quinn::Endpoint, SocketAddr, String) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let certificado =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificado");
+        let impressao = seele_proto::transport::certificate_fingerprint(certificado.cert.der());
+        let cadeia = vec![rustls::pki_types::CertificateDer::from(
+            certificado.cert.der().to_vec(),
+        )];
+        let chave =
+            rustls::pki_types::PrivatePkcs8KeyDer::from(certificado.signing_key.serialize_der());
+
+        let mut tls_servidor = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cadeia, chave.into())
+            .expect("config do servidor");
+        tls_servidor.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+        let servidor_config = quinn::ServerConfig::with_crypto(Arc::new(
+            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
+        ));
+
+        let escuta =
+            quinn::Endpoint::server(servidor_config, SocketAddr::from(([127, 0, 0, 1], 0)))
+                .expect("escutar");
+        let endereco = escuta.local_addr().expect("endereço");
+        (escuta, endereco, impressao)
+    }
+
+    /// Uma loja de pins que finge o vizinho de uma corrida.
+    ///
+    /// Desarmada, é uma loja comum. Armada, a **primeira** leitura devolve o que
+    /// havia e, logo depois de olhar, grava `vizinho` na chave: o instante entre
+    /// o verificador de um candidato decidir e ele desistir, em que o outro
+    /// candidato fixa a chave dele. Existe porque esse instante dura
+    /// microssegundos, e um teste que dependesse de o pegar por acaso não
+    /// provaria nada.
+    #[derive(Debug)]
+    struct LojaComVizinho {
+        dentro: crate::tofu::MemoryPinStore,
+        armada: std::sync::atomic::AtomicBool,
+        vizinho: std::sync::Mutex<Option<(String, String)>>,
+    }
+
+    impl LojaComVizinho {
+        fn nova(chave: &str, impressao_do_vizinho: &str) -> Self {
+            Self {
+                dentro: crate::tofu::MemoryPinStore::new(),
+                armada: std::sync::atomic::AtomicBool::new(false),
+                vizinho: std::sync::Mutex::new(Some((
+                    chave.to_owned(),
+                    impressao_do_vizinho.to_owned(),
+                ))),
+            }
+        }
+
+        fn armar(&self) {
+            self.armada.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    impl PinStore for LojaComVizinho {
+        fn pinned(&self, host: &str) -> Option<String> {
+            let visto = self.dentro.pinned(host);
+            if self.armada.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                if let Some((chave, impressao)) = self.vizinho.lock().expect("vizinho").take() {
+                    self.dentro.pin(&chave, impressao);
+                }
+            }
+            visto
+        }
+
+        fn pin(&self, host: &str, fingerprint: String) {
+            self.dentro.pin(host, fingerprint);
+        }
+
+        fn unpin(&self, host: &str) {
+            self.dentro.unpin(host);
+        }
+    }
+
+    /// Destino de teste: `nome_tls` de sempre, a chave de pino que o teste
+    /// escolhe, e a impressão esperada que ele quiser.
+    fn destino_na_chave(onde: SocketAddr, chave: &str, esperada: Option<&str>) -> Destino {
+        Destino {
+            servidor: onde,
+            nome_tls: "localhost".into(),
+            chave_do_pin: chave.to_owned(),
+            apelido: "pessoa".into(),
+            segredo: None,
+            impressao_esperada: esperada.map(str::to_owned),
+            aceito: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_recusa_pela_impressao_nao_apaga_o_pin_que_o_vizinho_fixa_logo_depois() {
+        // O pino órfão que a corrida do ADR 0037 não protegia. Dois candidatos
+        // de um convite com a mesma chave de pino (`chave_do_pin` é `host:porta`
+        // do nome, e alternativos do mesmo nome colidem): o verdadeiro fixa a
+        // chave dele, e o outro (um impostor, ou a porta velha de um NAT) é
+        // recusado pela impressão. O verificador do impostor olhou e não viu pin
+        // nenhum; o vizinho fixa; o impostor desiste. A limpeza de
+        // `conectar_por` achava `nada antes, algo agora` e apagava o pin que o
+        // vizinho acabou de escrever — sem o guarda do vencedor que a limpeza de
+        // depois da corrida tem, e sem dizer nada.
+        let (ponta_b, onde_b, impressao_b) = ponta_com_certificado_proprio();
+        let impressao_de_a = "a".repeat(64);
+        let chave = "casa:8383";
+        let loja = Arc::new(LojaComVizinho::nova(chave, &impressao_de_a));
+
+        // O impostor segura o TLS dele até o teste armar a loja, para que a
+        // leitura do verificador seja a que dispara o vizinho.
+        let (chegou_tx, chegou) = tokio::sync::oneshot::channel::<()>();
+        let (abrir, portao) = tokio::sync::oneshot::channel::<()>();
+        let segura_b = tokio::spawn(async move {
+            let Some(entrada) = ponta_b.accept().await else {
+                return;
+            };
+            let _ = chegou_tx.send(());
+            let _ = portao.await;
+            let _ = entrada.await;
+        });
+
+        let endpoint = crate::client::local_endpoint(None).expect("ponta local");
+        let b = Enlace::conectar_por(
+            &endpoint,
+            None,
+            destino_na_chave(onde_b, chave, Some(&impressao_de_a)),
+            SigningKey::from_bytes(&[8; 32]),
+            Arc::clone(&loja) as Arc<dyn PinStore>,
+        );
+        let armar_e_abrir = async {
+            let _ = chegou.await;
+            loja.armar();
+            let _ = abrir.send(());
+        };
+        let (resultado, ()) = tokio::time::timeout(Duration::from_secs(20), async {
+            tokio::join!(b, armar_e_abrir)
+        })
+        .await
+        .expect("a tentativa recusada não terminou");
+        segura_b.abort();
+
+        let Err(erro) = resultado else {
+            panic!("a tentativa que a impressão desmente entrou");
+        };
+        assert_eq!(
+            erro,
+            ConnectError::InviteMismatch {
+                expected: impressao_de_a.clone(),
+                offered: impressao_b
+            },
+            "o candidato que a impressão desmente não foi recusado por ela, e o \
+             teste mediu outra coisa"
+        );
+        assert_eq!(
+            loja.pinned(chave),
+            Some(impressao_de_a),
+            "a recusa do impostor apagou o pin que o candidato verdadeiro tinha \
+             acabado de fixar: a confiança de primeiro contato foi desfeita calada"
+        );
+    }
+
+    #[tokio::test]
+    async fn um_candidato_de_outra_chave_nao_apaga_o_pin_que_o_vizinho_fixou() {
+        // O mesmo desenho com servidores de verdade, e a ordem que sobra quando
+        // o verdadeiro é o primeiro a fixar: o outro candidato encontra o pin do
+        // vizinho, vê outra chave e falha com `PinChanged`. Também não escreveu
+        // nada, e também não pode desfazer o que era do vizinho — era assim que
+        // o pin do candidato verdadeiro sumia mesmo antes de a impressão chegar
+        // ao TLS.
+        //
+        // **A**, o verdadeiro, termina o TLS, fixa a chave dele e nunca
+        // responde ao `Hello`: fica de pé no meio do aperto de mão. **B** tem
+        // outro certificado, e o teste o segura no meio do TLS até **A** ter
+        // fixado, sem depender de relógio:
+        //
+        // 1. **B** começa, e não vê pin nenhum;
+        // 2. **A** fixa a chave dele;
+        // 3. **B** falha, sem ter escrito nada.
+        let (ponta_a, onde_a, impressao_a) = ponta_com_certificado_proprio();
+        let (ponta_b, onde_b, impressao_b) = ponta_com_certificado_proprio();
+        let chave = "casa:8383";
+        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
+
+        let segura_a = tokio::spawn(async move {
+            let Some(entrada) = ponta_a.accept().await else {
+                return;
+            };
+            let Ok(conexao) = entrada.await else {
+                return;
+            };
+            std::future::pending::<()>().await;
+            drop(conexao);
+        });
+        let (abrir, portao) = tokio::sync::oneshot::channel::<()>();
+        let segura_b = tokio::spawn(async move {
+            let Some(entrada) = ponta_b.accept().await else {
+                return;
+            };
+            let _ = portao.await;
+            let _ = entrada.await;
+        });
+
+        let endpoint = crate::client::local_endpoint(None).expect("ponta local");
+        let a = Enlace::conectar_por(
+            &endpoint,
+            None,
+            destino_na_chave(onde_a, chave, Some(&impressao_a)),
+            SigningKey::from_bytes(&[7; 32]),
+            Arc::clone(&loja) as Arc<dyn PinStore>,
+        );
+        let b = Enlace::conectar_por(
+            &endpoint,
+            None,
+            destino_na_chave(onde_b, chave, None),
+            SigningKey::from_bytes(&[8; 32]),
+            Arc::clone(&loja) as Arc<dyn PinStore>,
+        );
+        let quando_a_fixar = async {
+            while loja.pinned(chave).as_deref() != Some(impressao_a.as_str()) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            let _ = abrir.send(());
+        };
+        let resultado_de_b = tokio::time::timeout(Duration::from_secs(20), async {
+            tokio::select! {
+                biased;
+                _ = a => panic!(
+                    "a tentativa que devia ficar parada no `Hello` terminou: o \
+                     servidor de teste respondeu, ou o aperto de mão falhou"
+                ),
+                resultado = async { tokio::join!(b, quando_a_fixar).0 } => resultado,
+            }
+        })
+        .await
+        .expect("a disputa entre as duas tentativas não terminou");
+        segura_a.abort();
+        segura_b.abort();
+
+        let Err(erro) = resultado_de_b else {
+            panic!("a tentativa de outra chave entrou");
+        };
+        assert_eq!(
+            erro,
+            ConnectError::PinChanged {
+                pinned: impressao_a.clone(),
+                offered: impressao_b
+            },
+            "o candidato de outra chave não falhou como chave trocada, e o teste \
+             mediu outra coisa"
+        );
+        assert_eq!(
+            loja.pinned(chave),
+            Some(impressao_a),
+            "um candidato que falhou sem escrever nada apagou o pin do vizinho"
+        );
     }
 
     #[tokio::test]
