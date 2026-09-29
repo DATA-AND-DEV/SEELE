@@ -396,6 +396,39 @@ impl Conhecidos {
     }
 }
 
+/// Quantos caminhos a lista guarda por servidor, além do endereço da entrada.
+///
+/// O mesmo teto de um convite: [`seele_proto::uri::LIMITE_DE_ALVOS`] contando
+/// o principal, e o principal aqui é o `alvo` da entrada. Cada caminho a mais é
+/// uma tentativa a mais antes de a falha aparecer.
+const CAMINHOS_POR_SERVIDOR: usize = seele_proto::uri::LIMITE_DE_ALVOS - 1;
+
+/// Os caminhos que a lista guarda, a partir da escada que esta conexão tentou.
+///
+/// É o que [`Conhecidos::anotar_caminhos`] recebe depois de uma conexão. Duas
+/// regras, e as duas existem pelo mesmo defeito: com um NAT que troca de porta a
+/// cada abertura do anfitrião, a lista ganhava um endereço morto por
+/// reabertura, todos entravam na corrida, e a falha ficava mais lenta a cada
+/// semana.
+///
+/// - **O endereço que veio do quarto não entra.** Ele é o de hoje, e na próxima
+///   conexão é perguntado de novo: guardá-lo só serviria para ele virar o morto
+///   da reabertura seguinte. `do_quarto` é o endereço que a consulta pôs na
+///   frente da escada, e só quando foi ela que o pôs: um que já estava na
+///   escada veio do link ou da lista, e continua.
+/// - **Cabem [`CAMINHOS_POR_SERVIDOR`]**, os primeiros da escada, na ordem em
+///   que foram tentados. Uma lista gravada antes desta regra encolhe na
+///   primeira conexão que der certo.
+#[must_use]
+pub fn caminhos_a_guardar(tentados: &[String], do_quarto: Option<&str>) -> Vec<String> {
+    tentados
+        .iter()
+        .filter(|caminho| Some(caminho.as_str()) != do_quarto)
+        .take(CAMINHOS_POR_SERVIDOR)
+        .cloned()
+        .collect()
+}
+
 fn analisar_linha(linha: &str) -> Option<Conhecido> {
     let mut campos = linha.split('\t');
     let alvo = campos.next()?.trim();
@@ -861,6 +894,53 @@ mod a_escada_do_convite {
         assert_eq!(
             guardado.impressao, None,
             "campo que não existe na linha é ausência, e não texto vazio"
+        );
+    }
+
+    #[test]
+    fn o_endereco_do_quarto_nao_vai_para_a_lista_e_a_lista_tem_teto() {
+        // O defeito: o endereço que o quarto dá entra na frente da escada, e a
+        // escada inteira ia para a lista. Com um NAT que troca de porta a cada
+        // abertura do anfitrião, cada volta gravava mais um, e na seguinte ele
+        // já era um morto: `[X_k … X_1, originais]`, todos na corrida, cada um
+        // com a sua defasagem.
+        let originais: Vec<String> = [
+            "192.168.0.7:8383",
+            "[2804:388::7]:8383",
+            "187.255.97.152:9455",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        let mut guardados = originais.clone();
+        for reabertura in 1..=5_u16 {
+            // O anfitrião reabriu, e o quarto diz a porta de hoje, que o app
+            // põe na frente da escada.
+            let de_hoje = format!("187.255.97.152:{}", 40_000 + reabertura);
+            let mut tentados = guardados.clone();
+            tentados.insert(0, de_hoje.clone());
+            guardados = caminhos_a_guardar(&tentados, Some(&de_hoje));
+        }
+        assert_eq!(
+            guardados, originais,
+            "o endereço que o quarto deu foi gravado na lista: a cada reabertura do anfitrião \
+             ela ganha um endereço morto, todos entram na corrida, e a falha fica mais lenta a \
+             cada semana"
+        );
+
+        // O teto: uma lista gravada antes deste conserto, ou por qualquer outro
+        // caminho, não cresce sem fim.
+        let muitos: Vec<String> = (0..10_u16)
+            .map(|porta| format!("187.255.97.152:{}", 41_000 + porta))
+            .collect();
+        let guardado = caminhos_a_guardar(&muitos, None);
+        let cabem = seele_proto::uri::LIMITE_DE_ALVOS - 1;
+        assert_eq!(
+            guardado,
+            muitos.iter().take(cabem).cloned().collect::<Vec<_>>(),
+            "a lista gravou {} caminhos para um servidor, e não os {cabem} primeiros da \
+             escada: sem teto, cada caminho a mais é uma tentativa a mais antes de a falha \
+             aparecer",
+            guardado.len()
         );
     }
 }

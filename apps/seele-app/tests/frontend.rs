@@ -14024,3 +14024,32 @@ fn nenhum_script_cria_um_style_que_a_csp_desta_janela_descarta() {
         }
     }
 }
+
+#[test]
+fn o_endereco_que_o_quarto_deu_nao_vai_para_a_lista_de_conhecidos() {
+    // O quarto põe o endereço de hoje na frente da escada, e a escada inteira
+    // ia para a lista. Com um NAT que troca de porta a cada abertura do
+    // anfitrião, a lista ganhava um endereço morto por reabertura, e todos
+    // entravam na corrida. A regra do que se grava é
+    // `seele_ffi::conhecidos::caminhos_a_guardar`, provada lá. O que só se vê
+    // aqui é o `connect` usá-la, porque `connect` é um comando Tauri e não roda
+    // sem casca. Os espaços saem da comparação para o guarda não depender de
+    // onde o `rustfmt` quebra a linha.
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    assert!(
+        connect.contains("do_quarto=fresco_do_server"),
+        "`connect` deixou de lembrar qual endereço veio do quarto, e a lista não tem mais como \
+         deixá-lo de fora"
+    );
+    assert!(
+        connect.contains(
+            "letcaminhos=seele_ffi::conhecidos::caminhos_a_guardar(&alternativos,do_quarto.as_deref());"
+        ),
+        "`connect` grava a escada crua na lista de conhecidos: o endereço que o quarto deu vai \
+         junto, e a lista ganha um endereço morto a cada reabertura do anfitrião"
+    );
+}

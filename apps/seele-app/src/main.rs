@@ -1000,9 +1000,9 @@ async fn connect(
     // pedido de furo. Nenhuma das duas se deriva da outra.
     //
     // As respostas entram **na frente** dos endereços guardados, e não no lugar
-    // deles: um ponto de encontro que não responda — inclusive um antigo, que
-    // não conhece o verbo — deixa tudo como estava, e o guardado ainda serve a
-    // quem está na mesma casa.
+    // deles: um ponto que não responda (ou um antigo, sem o verbo) deixa tudo
+    // como estava, e o guardado ainda serve a quem está na mesma casa.
+    let mut do_quarto: Option<String> = None;
     let bilhete = match (
         impressao_guardada.as_deref().or(esperada.as_deref()),
         &bilhete,
@@ -1010,11 +1010,11 @@ async fn connect(
         (Some(impressao), Some(bilhete_guardado)) => {
             let no_quarto = seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
             let (fresco_do_server, fresco_do_aviso) = (no_quarto.servidor(), no_quarto.escuta());
-            if let Some(endereco) = fresco_do_server {
-                let texto = endereco.to_string();
-                if !alternativos.contains(&texto) {
-                    alternativos.insert(0, texto);
-                }
+            do_quarto = fresco_do_server
+                .map(|endereco| endereco.to_string())
+                .filter(|texto| !alternativos.contains(texto));
+            if let Some(texto) = &do_quarto {
+                alternativos.insert(0, texto.clone());
             }
             match fresco_do_aviso {
                 Some(endereco) => seele_ffi::uri::Bilhete::novo(
@@ -1062,9 +1062,9 @@ async fn connect(
     let alvo = server.clone();
     let apelido = nickname.clone();
     let casa = home.clone();
-    // A escada, para a mesma lista: é este `connect` que a conhece, e é a única
-    // vez que este processo a vê.
-    let caminhos = alternativos.clone();
+    // A escada, para a mesma lista, sem o endereço que o quarto pôs na frente:
+    // ele é perguntado de novo a cada conexão (ver `caminhos_a_guardar`).
+    let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, do_quarto.as_deref());
     let bilhete_texto = bilhete.as_ref().map(ToString::to_string);
     let config = ConnectConfig {
         server,
