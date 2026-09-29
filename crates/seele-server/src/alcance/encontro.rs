@@ -46,7 +46,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use seele_proto::encontro::{self, Marca};
+use seele_proto::encontro::{self, Marca, Marcas};
 use seele_proto::uri::Bilhete;
 
 /// O ponto de encontro do projeto, quando ninguém disser outro.
@@ -232,11 +232,6 @@ pub enum FalhaNoEncontro {
     SemRespostaAoLeve,
     /// A escuta de avisos não abriu nesta máquina.
     SemEscutaDeAvisos(String),
-    /// O socket do servidor não pôde ser usado para falar com o ponto de encontro.
-    ///
-    /// Sem ele não há furo possível: o pacote tem de sair da porta em que o QUIC
-    /// atende, ou o roteador abre caminho para o socket errado.
-    SemSocketDoServer,
 }
 
 impl std::fmt::Display for FalhaNoEncontro {
@@ -303,11 +298,6 @@ impl std::fmt::Display for FalhaNoEncontro {
                 "esta máquina não conseguiu abrir uma porta para receber o aviso \
                  de quem está entrando: {erro}"
             ),
-            Self::SemSocketDoServer => write!(
-                f,
-                "não deu para falar com o serviço pela mesma porta em que este \
-                 servidor atende"
-            ),
         }
     }
 }
@@ -316,23 +306,47 @@ impl std::error::Error for FalhaNoEncontro {}
 
 /// O que o degrau 4 precisa saber para tentar.
 ///
-/// Existe para o degrau ser **fácil de não usar**: um `None` na
-/// [`super::Escada::subir`] e nenhum pacote sai desta máquina para ninguém.
+/// Existe para o degrau ser **fácil de não usar**: um `None` em
+/// [`super::Escada::subir`], e nenhum pacote sai desta máquina para ninguém.
 pub struct Convocacao {
     /// O socket em que o servidor atende, clonado.
     ///
     /// Tem de ser este e não outro: ver o cabeçalho do módulo.
     pub socket: Arc<std::net::UdpSocket>,
-    /// A impressão digital do servidor, de onde sai a marca que os avisos trazem.
-    pub impressao_digital: String,
+    /// As três marcas deste anfitrião no quarto, **prontas**.
+    ///
+    /// Elas vêm feitas, e não derivadas aqui dentro, porque quem as deriva
+    /// muda com o que se hospeda. Um servidor guardado as tira da impressão
+    /// digital ([`Marcas::do_servidor`]); a sala pessoal vai tirá-las do
+    /// código. O degrau 4 não precisa saber qual dos dois é, e o cliente
+    /// pergunta pelas mesmas porque usa a mesma função.
+    pub marcas: Marcas,
     /// O endereço do ponto de encontro, como texto.
     pub ponto: String,
 }
 
 impl Convocacao {
+    /// A convocação de um servidor guardado, com as marcas tiradas da
+    /// impressão digital.
+    ///
+    /// Devolve `None` quando a impressão digital não forma marca: sem marca não
+    /// há como separar aviso de ruído, e o degrau não é tentado.
+    #[must_use]
+    pub fn para_servidor(
+        socket: Arc<std::net::UdpSocket>,
+        impressao_digital: &str,
+        ponto: impl Into<String>,
+    ) -> Option<Self> {
+        Some(Self {
+            socket,
+            marcas: Marcas::do_servidor(impressao_digital)?,
+            ponto: ponto.into(),
+        })
+    }
+
     /// O que o ambiente pediu, ou `None` se pediu para não haver degrau 4.
     ///
-    /// Lê `$SEELE_ENCONTRO`: um endereço troca o ponto de encontro, `nao` ou
+    /// Lê `$SEELE_ENCONTRO`: um endereço troca o ponto de encontro, e `nao` ou
     /// vazio desligam o degrau.
     #[must_use]
     pub fn do_ambiente(socket: Arc<std::net::UdpSocket>, impressao_digital: &str) -> Option<Self> {
@@ -341,38 +355,18 @@ impl Convocacao {
         if escolhido.is_empty() || escolhido.eq_ignore_ascii_case("nao") {
             return None;
         }
-        Some(Self {
-            socket,
-            impressao_digital: impressao_digital.to_owned(),
-            ponto: escolhido.to_owned(),
-        })
+        let convocacao = Self::para_servidor(socket, impressao_digital, escolhido);
+        if convocacao.is_none() {
+            // Inalcançável com a impressão de um `Daemon`, que é sempre um
+            // SHA-256 em hexadecimal. Se um dia deixar de ser, o degrau 4 some,
+            // e esta linha é o que diz por quê: antes, `abrir` devolvia uma
+            // falha que a escada registrava; agora a convocação nem nasce.
+            tracing::warn!(
+                "a impressão digital deste servidor não forma marca; o degrau 4 fica de fora"
+            );
+        }
+        convocacao
     }
-}
-
-/// A marca que um aviso legítimo traz: os primeiros dígitos da impressão
-/// digital do servidor.
-///
-/// Ela está no `seele://` e em nenhum outro lugar, então um aviso com esta marca
-/// veio de alguém com o link na mão. Não é autenticação — quem tem o link, tem —
-/// e não precisa ser: o que ela faz é impedir que um varredor de portas faça
-/// este servidor mandar pacotes para onde ele quiser.
-fn marca_do_convite(impressao_digital: &str) -> Option<Marca> {
-    Marca::nova(impressao_digital.get(..16)?)
-}
-
-/// A marca sob a qual o **socket do servidor** se registra no quarto.
-///
-/// É [`marca_do_convite`] com um `s` no fim, e as duas existem porque o quarto
-/// guarda **um endereço por marca** e quem chega precisa de dois: o do servidor,
-/// para conectar, e o da escuta de avisos, para pedir o furo. Um endereço só não
-/// serve — os dois sockets moram atrás do mesmo IP público e em portas
-/// diferentes, e não há como derivar uma da outra.
-///
-/// O sufixo e não uma marca solta porque quem procura tem só a impressão digital
-/// na mão, e ela é o que o `seele://` carrega. Derivar as duas do mesmo lugar é o
-/// que faz a lista de servidores conhecidos precisar guardar uma coisa só.
-fn marca_do_server(impressao_digital: &str) -> Option<Marca> {
-    Marca::nova(&format!("{}s", impressao_digital.get(..16)?))
 }
 
 /// Um encontro aberto: o que o convite precisa dizer, e a tarefa que o mantém.
@@ -437,14 +431,14 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
     // com cara de um. Quem apertou HOSPEDAR espera [`PRAZO`], ponto.
     let ate = tokio::time::Instant::now() + PRAZO;
 
-    let Some(marca_de_quem_chega) = marca_do_convite(&convocacao.impressao_digital) else {
-        // Uma impressão digital que não tem 16 dígitos hexadecimais não é uma
-        // impressão digital, e sem marca não há como separar aviso de ruído.
-        return Err(FalhaNoEncontro::SemSocketDoServer);
-    };
+    // As marcas vêm prontas na convocação ([`Marcas`]). As duas perguntas da
+    // subida saem com a marca da **escuta**: a resposta delas volta para a
+    // escuta de avisos, e uma resposta repetida que chegue depois de
+    // `atender` começar só não vira furo porque a marca da escuta nunca é a
+    // do aviso.
+    let marcas = &convocacao.marcas;
 
     let candidatos = resolver(&convocacao.ponto, ate).await?;
-    let minha_marca = Marca::nova("anfitriao").ok_or(FalhaNoEncontro::SemSocketDoServer)?;
 
     // Um de cada vez, até um responder, e **cada um com a sua fatia do prazo**.
     //
@@ -481,7 +475,12 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
         let fatia = agora + sobra / u32::try_from(quantos).unwrap_or(1);
         let resposta = tokio::time::timeout_at(
             fatia,
-            perguntar(&escuta, alvo, &encontro::onde(&minha_marca), &minha_marca),
+            perguntar(
+                &escuta,
+                alvo,
+                &encontro::onde(&marcas.escuta),
+                &marcas.escuta,
+            ),
         )
         .await;
         match resposta {
@@ -507,7 +506,7 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
     // deste socket não dá para ler — quem lê é o quinn.
     let publico = tokio::time::timeout_at(
         ate,
-        perguntar_pelo_server(&convocacao.socket, &avisos, ponto, aviso, &minha_marca),
+        perguntar_pelo_server(&convocacao.socket, &avisos, ponto, aviso, &marcas.escuta),
     )
     .await
     .map_err(|_| FalhaNoEncontro::SemRespostaAoLeve)?
@@ -520,9 +519,7 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
         Arc::clone(&convocacao.socket),
         ponto,
         aviso,
-        minha_marca,
-        marca_de_quem_chega,
-        marca_do_server(&convocacao.impressao_digital),
+        marcas.clone(),
     ));
 
     Ok(Encontro {
@@ -770,7 +767,7 @@ async fn esperar_aqui(
     }
 }
 
-/// O laço que mantém o degrau 4 de pé enquanto o servidor estiver.
+/// O laço que mantém o degrau 4 de pé enquanto o servidor estiver no ar.
 ///
 /// Duas coisas ao mesmo tempo, e as duas precisam do mesmo socket de leitura:
 ///
@@ -783,9 +780,7 @@ async fn atender(
     server: Arc<std::net::UdpSocket>,
     ponto: SocketAddr,
     aviso: SocketAddr,
-    minha_marca: Marca,
-    de_quem_chega: Marca,
-    marca_do_server: Option<Marca>,
+    marcas: Marcas,
 ) {
     // **O primeiro tique sai na hora, e é de propósito.** O `interval` do
     // tokio completa o primeiro `tick` imediatamente, e esta função o
@@ -802,29 +797,26 @@ async fn atender(
     loop {
         tokio::select! {
             _ = relogio.tick() => {
-                // Os dois caminhos, porque são dois mapeamentos: o da escuta de
-                // avisos e o do socket do servidor.
-                // **`MORO` e não `ONDE`, e é o quarto.**
+                // Os dois caminhos, porque são dois mapeamentos de NAT: o da
+                // escuta de avisos e o do socket do servidor. `MORO`, e não
+                // `ONDE`, registra os dois no quarto de graça, no pacote que já
+                // ia sair.
                 //
-                // Os dois pacotes já saíam a cada quinze segundos para manter os
-                // dois mapeamentos de NAT vivos — o da escuta de avisos e o do
-                // socket do servidor. Trocar o verbo do primeiro registra o
-                // endereço no quarto **de graça**, no pacote que já ia sair, e é
-                // isso que faz a lista de servidores conhecidos voltar a servir
-                // a quem está atrás de NAT: o endereço morria no fechar, e agora
-                // quem tem a impressão digital pergunta onde ele está hoje.
+                // **A escuta com a marca dela, e nunca com a do aviso.** A
+                // resposta a este `MORO` volta para cá com a marca dele, e o
+                // filtro lá embaixo só deixa passar a do aviso. Até a v0.15.0
+                // a marca era fixa (`anfitriao`), igual para todo anfitrião do
+                // mundo, e quem procurava a escuta pela impressão digital nunca
+                // a achava.
                 //
-                // O terceiro pacote é o que faltava: o socket do **servidor**
-                // também precisa se registrar, porque é para ele que quem chega
-                // conecta. A resposta dele volta para o próprio socket do
-                // servidor, onde quem lê é o QUIC — que a descarta, como já
-                // descarta todo `FURO` que chega ali. Ver o cabeçalho de
-                // `encontro::furo`.
-                let _ = avisos.send_to(&encontro::moro(&minha_marca), ponto).await;
-                mandar_pelo_server(&server, &encontro::leve(aviso, &minha_marca), ponto);
-                if let Some(marca) = &marca_do_server {
-                    mandar_pelo_server(&server, &encontro::moro(marca), ponto);
-                }
+                // O socket do **servidor** também se registra, porque é para
+                // ele que quem chega conecta. A resposta dele volta para o
+                // próprio socket do servidor, onde quem lê é o QUIC, e o QUIC a
+                // descarta como já descarta todo `FURO` que chega ali. Ver o
+                // cabeçalho de `encontro::furo`.
+                let _ = avisos.send_to(&encontro::moro(&marcas.escuta), ponto).await;
+                mandar_pelo_server(&server, &encontro::leve(aviso, &marcas.escuta), ponto);
+                mandar_pelo_server(&server, &encontro::moro(&marcas.servidor), ponto);
             }
             recebido = avisos.recv_from(&mut balde) => {
                 let Ok((lidos, origem)) = recebido else { continue };
@@ -836,9 +828,10 @@ async fn atender(
                 else {
                     continue;
                 };
-                if marca != de_quem_chega {
-                    // Ou é a resposta do nosso próprio reavivamento, ou é ruído
-                    // da internet. Nenhum dos dois vira furo.
+                if marca != marcas.aviso {
+                    // Ou é a resposta do nosso próprio registro, que vem com a
+                    // marca da escuta ou do servidor e nunca com a do aviso, ou
+                    // é ruído da internet. Nenhum dos dois vira furo.
                     continue;
                 }
                 if !cabe_mais_um_furo(&mut furos) {
@@ -846,7 +839,7 @@ async fn atender(
                     continue;
                 }
                 tracing::info!(%endereco, "degrau 4: alguém com o link está chegando; furando");
-                furar(&server, endereco, &de_quem_chega).await;
+                furar(&server, endereco, &marcas.aviso).await;
             }
         }
     }
@@ -1192,18 +1185,24 @@ mod testes {
     use super::*;
 
     #[test]
-    fn a_marca_do_convite_sai_da_impressao_digital_e_nada_mais() {
+    fn a_marca_do_aviso_sai_da_impressao_digital_e_nada_mais() {
         // Ela é o que separa "alguém com o link" de "a internet batendo na
         // porta". Se saísse de outro lugar, qualquer um a adivinharia.
-        let fp = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
-        let marca = marca_do_convite(fp).expect("uma impressão digital sempre dá uma marca");
-        assert_eq!(marca.texto(), "3cbcfb0212da738f");
-        assert!(
-            fp.starts_with(marca.texto()),
-            "a marca não é o começo da impressão digital"
+        let socket = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").expect("socket"));
+        let convocacao = Convocacao::para_servidor(Arc::clone(&socket), IMPRESSAO, PONTO_PADRAO)
+            .expect("uma impressão digital sempre dá uma convocação");
+        assert_eq!(
+            convocacao.marcas.aviso.texto(),
+            "3cbcfb0212da738f",
+            "a marca do aviso não é o começo da impressão digital: o LEVE de quem tem o link \
+             deixa de passar no filtro do anfitrião, e ninguém fura para ninguém"
         );
-        // E um texto que não é uma impressão digital não vira marca nenhuma.
-        assert!(marca_do_convite("curto").is_none());
+        // E um texto que não é uma impressão digital não vira convocação nenhuma.
+        assert!(
+            Convocacao::para_servidor(socket, "curto", PONTO_PADRAO).is_none(),
+            "uma impressão digital curta demais deu convocação: o degrau 4 subiria com marcas \
+             que nenhum cliente sabe perguntar"
+        );
     }
 
     #[test]
@@ -1225,6 +1224,11 @@ mod testes {
         assert!(Convocacao::do_ambiente(Arc::clone(&socket), fp).is_none());
 
         std::env::set_var(VARIAVEL, "meu.ponto:9000");
+        assert!(
+            Convocacao::do_ambiente(Arc::clone(&socket), "curto").is_none(),
+            "uma impressão digital que não forma marca deu convocação pelo ambiente: o degrau 4 \
+             subiria sem marcas"
+        );
         let minha = Convocacao::do_ambiente(Arc::clone(&socket), fp).expect("trocável");
         assert_eq!(
             minha.ponto, "meu.ponto:9000",
@@ -1251,12 +1255,8 @@ mod testes {
         // lugar nenhum, que é a forma mais próxima de "fora do ar" que cabe num
         // teste sem rede.
         let socket = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").expect("socket"));
-        let convocacao = Convocacao {
-            socket,
-            impressao_digital: "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9"
-                .to_owned(),
-            ponto: "192.0.2.1:8384".to_owned(),
-        };
+        let convocacao = Convocacao::para_servidor(socket, IMPRESSAO, "192.0.2.1:8384")
+            .expect("uma impressão digital dá uma convocação");
 
         let comeco = std::time::Instant::now();
         let Err(falha) = abrir(&convocacao).await else {
@@ -1461,16 +1461,8 @@ mod testes {
         SocketAddr,
         Marca,
     ) {
-        let Ok(avisos) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
-            panic!("não deu para abrir a escuta de avisos de teste");
-        };
-        let Ok(avisos_endereco) = avisos.local_addr() else {
-            panic!("a escuta de avisos de teste não tem endereço local");
-        };
-
-        let Ok(server) = std::net::UdpSocket::bind("127.0.0.1:0") else {
-            panic!("não deu para abrir o socket do servidor de teste");
-        };
+        let anfitriao = AnfitriaoDeTeste::abrir().await;
+        let avisos_endereco = anfitriao.avisos_endereco;
 
         let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
             panic!("não deu para abrir o alvo do furo de teste");
@@ -1479,26 +1471,26 @@ mod testes {
             panic!("o alvo do furo de teste não tem endereço local");
         };
 
-        let Some(minha_marca) = Marca::nova("anfitriao") else {
+        // As marcas de um anfitrião qualquer: `visitante` é o que um `AQUI`
+        // legítimo traz, e as outras duas são as do registro no quarto. O
+        // registro da subida vai para `ponto`, que nestes testes não responde
+        // e não é o `alvo` que eles contam.
+        let (Some(aviso), Some(escuta), Some(servidor)) = (
+            Marca::nova("visitante"),
+            Marca::nova("visitantee"),
+            Marca::nova("visitantes"),
+        ) else {
             panic!("marca de teste inválida");
         };
-        let Some(de_quem_chega) = Marca::nova("visitante") else {
-            panic!("marca de teste inválida");
+        let marcas = Marcas {
+            aviso,
+            escuta,
+            servidor,
         };
 
-        let tarefa = tokio::spawn(atender(
-            avisos,
-            Arc::new(server),
-            ponto,
-            avisos_endereco,
-            minha_marca,
-            de_quem_chega.clone(),
-            // Sem quarto neste teste: ele mede o furo, e o registro do quarto é
-            // um pacote a mais que não muda o que ele afirma.
-            None,
-        ));
+        let tarefa = anfitriao.subir(ponto, marcas.clone());
 
-        (tarefa, avisos_endereco, alvo, alvo_endereco, de_quem_chega)
+        (tarefa, avisos_endereco, alvo, alvo_endereco, marcas.aviso)
     }
 
     #[tokio::test]
@@ -1636,7 +1628,6 @@ mod testes {
             FalhaNoEncontro::SemRespostaAoOnde,
             FalhaNoEncontro::SemRespostaAoLeve,
             FalhaNoEncontro::SemEscutaDeAvisos("endereço em uso".to_owned()),
-            FalhaNoEncontro::SemSocketDoServer,
         ];
         let frases: Vec<String> = falhas.iter().map(ToString::to_string).collect();
         for frase in &frases {
@@ -1718,61 +1709,148 @@ mod testes {
         }
     }
 
+    /// A impressão digital destes testes. As marcas saem dela pelo caminho de
+    /// produção, [`Marcas::do_servidor`], e não escritas à mão.
+    const IMPRESSAO: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
+
+    /// As marcas de [`IMPRESSAO`], pelo caminho de produção.
+    fn marcas_da_impressao() -> Marcas {
+        let Some(marcas) = Marcas::do_servidor(IMPRESSAO) else {
+            panic!("a impressão digital de teste não forma marcas");
+        };
+        marcas
+    }
+
+    /// Os dois sockets de um anfitrião de teste, abertos no laço local: a escuta
+    /// de avisos e o socket do servidor, cada um com o endereço dele.
+    struct AnfitriaoDeTeste {
+        avisos: tokio::net::UdpSocket,
+        avisos_endereco: SocketAddr,
+        server: std::net::UdpSocket,
+        server_endereco: SocketAddr,
+    }
+
+    impl AnfitriaoDeTeste {
+        async fn abrir() -> Self {
+            let Ok(avisos) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+                panic!("não deu para abrir a escuta de avisos de teste");
+            };
+            let Ok(avisos_endereco) = avisos.local_addr() else {
+                panic!("a escuta de avisos de teste não tem endereço local");
+            };
+            let Ok(server) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+                panic!("não deu para abrir o socket do servidor de teste");
+            };
+            let Ok(server_endereco) = server.local_addr() else {
+                panic!("o socket do servidor de teste não tem endereço local");
+            };
+            Self {
+                avisos,
+                avisos_endereco,
+                server,
+                server_endereco,
+            }
+        }
+
+        /// Sobe o `atender` com estes sockets contra `ponto`. A tarefa volta
+        /// para o teste poder abortá-la ao fim.
+        fn subir(self, ponto: SocketAddr, marcas: Marcas) -> tokio::task::JoinHandle<()> {
+            tokio::spawn(atender(
+                self.avisos,
+                Arc::new(self.server),
+                ponto,
+                self.avisos_endereco,
+                marcas,
+            ))
+        }
+    }
+
     #[tokio::test]
     async fn o_primeiro_registro_no_quarto_sai_na_subida() {
         // O defeito: `atender` consumia o primeiro tique do relógio antes do
         // laço, e o primeiro `MORO` saía quinze segundos depois da subida.
-        // Quem voltava pela trilha logo depois de o anfitrião reabrir
-        // perguntava a um quarto que ainda não sabia de nada.
+        //
+        // E cada socket com a sua marca: a escuta com a da escuta, o servidor
+        // com a do servidor. A escuta registrada como `anfitriao`, uma marca
+        // igual para todo anfitrião do mundo, era o segundo defeito do link:
+        // quem procura pergunta pela marca da impressão digital, e ninguém a
+        // registrava.
         let (ponto, caderno) = ponto_que_anota(None).await;
-        let Ok(avisos) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
-            panic!("não deu para abrir a escuta de avisos de teste");
-        };
-        let Ok(avisos_endereco) = avisos.local_addr() else {
-            panic!("a escuta de avisos de teste não tem endereço local");
-        };
-        let Ok(server) = std::net::UdpSocket::bind("127.0.0.1:0") else {
-            panic!("não deu para abrir o socket do servidor de teste");
-        };
-        let Ok(server_endereco) = server.local_addr() else {
-            panic!("o socket do servidor de teste não tem endereço local");
-        };
-        let (Some(minha), Some(de_quem_chega), Some(do_server)) = (
-            Marca::nova("anfitriao"),
-            Marca::nova("3cbcfb0212da738f"),
-            Marca::nova("3cbcfb0212da738fs"),
-        ) else {
-            panic!("marca de teste inválida");
-        };
+        let anfitriao = AnfitriaoDeTeste::abrir().await;
+        let (avisos_endereco, server_endereco) =
+            (anfitriao.avisos_endereco, anfitriao.server_endereco);
+        let marcas = marcas_da_impressao();
 
-        let tarefa = tokio::spawn(atender(
-            avisos,
-            Arc::new(server),
-            ponto,
-            avisos_endereco,
-            minha,
-            de_quem_chega,
-            Some(do_server),
-        ));
+        let tarefa = anfitriao.subir(ponto, marcas.clone());
         let da_escuta = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
-            matches!(pedido, encontro::Pedido::Moro { .. }) && de == avisos_endereco
+            matches!(pedido, encontro::Pedido::Moro { marca } if *marca == marcas.escuta)
+                && de == avisos_endereco
         })
         .await;
         let do_servidor = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
-            matches!(pedido, encontro::Pedido::Moro { .. }) && de == server_endereco
+            matches!(pedido, encontro::Pedido::Moro { marca } if *marca == marcas.servidor)
+                && de == server_endereco
         })
         .await;
         tarefa.abort();
 
         assert!(
             da_escuta,
-            "a escuta de avisos não se registrou no quarto no primeiro segundo: quem voltar \
-             pela trilha agora pergunta a um quarto vazio por até quinze segundos"
+            "a escuta de avisos não se registrou no quarto com a marca dela ({}) no primeiro \
+             segundo: quem perguntar pela escuta não a acha, e o LEVE cai num endereço de ontem",
+            marcas.escuta
         );
         assert!(
             do_servidor,
-            "o socket do servidor não se registrou no quarto no primeiro segundo: quem voltar \
-             pela trilha agora não acha para onde conectar por até quinze segundos"
+            "o socket do servidor não se registrou no quarto com a marca dele ({}) no primeiro \
+             segundo: quem voltar pela trilha não acha para onde conectar",
+            marcas.servidor
+        );
+    }
+
+    #[tokio::test]
+    async fn o_eco_do_proprio_registro_nao_vira_furo_contra_si_mesmo() {
+        // O `MORO` da escuta é respondido para a própria escuta, com a marca do
+        // `MORO`. Se essa marca fosse a do aviso, que é a que `atender` confere
+        // antes de furar, o anfitrião furaria o caminho para si mesmo a cada
+        // reavivamento: um pacote a mais por tique, e uma entrada gasta na
+        // janela de furos que é de quem está chegando.
+        //
+        // O ponto deste teste responde a tudo com um `AQUI` que aponta para
+        // `alvo`, e não para quem perguntou. É o que deixa ver um furo que, com
+        // um ponto de verdade, iria para a própria escuta sem deixar rastro.
+        let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir o alvo do furo de teste");
+        };
+        let Ok(alvo_endereco) = alvo.local_addr() else {
+            panic!("o alvo do furo de teste não tem endereço local");
+        };
+        let (ponto, caderno) = ponto_que_anota(Some(alvo_endereco)).await;
+        let anfitriao = AnfitriaoDeTeste::abrir().await;
+        let avisos_endereco = anfitriao.avisos_endereco;
+
+        let tarefa = anfitriao.subir(ponto, marcas_da_impressao());
+
+        // O eco saiu: o ponto recebeu o registro da escuta e já respondeu.
+        let ecoou = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
+            matches!(pedido, encontro::Pedido::Moro { .. }) && de == avisos_endereco
+        })
+        .await;
+        let mut balde = [0_u8; encontro::TAMANHO];
+        let furo =
+            tokio::time::timeout(Duration::from_millis(600), alvo.recv_from(&mut balde)).await;
+        tarefa.abort();
+
+        assert!(
+            ecoou,
+            "a escuta não se registrou no quarto, e sem registro não há eco para medir: este \
+             teste não diria nada"
+        );
+        assert!(
+            furo.is_err(),
+            "a resposta ao próprio registro passou no filtro de `atender` e virou FURO: a marca \
+             da escuta é a do aviso, e o anfitrião fura o caminho para si mesmo a cada \
+             reavivamento"
         );
     }
 }
