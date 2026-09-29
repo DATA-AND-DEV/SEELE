@@ -284,6 +284,10 @@ pub struct ConnectConfig {
     /// `None` num servidor aberto, que é o padrão.
     pub join_secret: Option<String>,
     /// A impressão digital que o convite prometeu, quando veio de um link.
+    ///
+    /// Na volta pela lista de servidores, sem link nesta sessão, é a que a
+    /// lista guardou do link de antes — a regra é [`impressao_a_conferir`]. É
+    /// conferida dentro do TLS, antes do `Hello`.
     pub expected_fingerprint: Option<String>,
     /// O bilhete de encontro do link, quando ele trouxe um.
     ///
@@ -7843,6 +7847,83 @@ mod a_consulta_ao_quarto {
             chegou.is_err(),
             "a consulta devolveu `SemMarca` mas mandou um datagrama ao ponto assim mesmo: sem \
              marca não há o que perguntar, e o que sai é tráfego sem resposta possível"
+        );
+    }
+}
+
+/// A impressão contra a qual uma conexão confere o certificado do servidor.
+///
+/// # Por que não é só a do link
+///
+/// Era só a do link, e isso eram dois defeitos com uma causa (§2.1 e §3.1 da
+/// análise de 22/09). Quem volta a um servidor pela lista de conhecidos não tem
+/// link nesta sessão: ele foi lido uma vez, num processo que já fechou. A
+/// pessoa entrava então sem impressão esperada nenhuma:
+///
+/// - o endereço novo que o quarto devolvia era fixado **às cegas**, com a faixa
+///   PRIMEIRO CONTATO. A marca do quarto está em todo link, e no quarto fica
+///   quem escreveu primeiro. Bastava o anfitrião ficar fora mais de 60 s para
+///   um impostor ser fixado e gravado na lista (o S3);
+/// - `Batida::preparar` tira a marca do `LEVE` da impressão e, sem ela,
+///   devolvia `None`: quem estava atrás de NAT não era alcançado na volta, nem
+///   na reconexão (o terceiro defeito do link).
+///
+/// A impressão guardada existia, e só servia para formar a marca da pergunta.
+///
+/// # A ordem
+///
+/// O link desta sessão vence a guardada. Ele é o que a pessoa acabou de colar
+/// para este endereço, e a guardada é o que um link anterior prometeu. Se os
+/// dois discordam, conferir pela velha recusaria o servidor que a pessoa acabou
+/// de pedir. A mesma impressão forma a marca da pergunta ao quarto, pela mesma
+/// razão: perguntar onde mora uma chave e conferir outra faria o quarto apontar
+/// para o servidor que a conferência recusaria logo em seguida.
+#[must_use]
+pub fn impressao_a_conferir(do_link: Option<&str>, guardada: Option<&str>) -> Option<String> {
+    do_link.or(guardada).map(str::to_owned)
+}
+
+#[cfg(test)]
+mod a_volta_pela_trilha_confere {
+    use super::impressao_a_conferir;
+
+    #[test]
+    fn sem_link_nesta_sessao_confere_pela_guardada() {
+        assert_eq!(
+            impressao_a_conferir(None, Some("aaaa1111")),
+            Some("aaaa1111".to_owned()),
+            "quem volta pela lista entra num endereço novo sem conferir nada — o \
+             PRIMEIRO CONTATO cego do S3 — e sem `LEVE`"
+        );
+    }
+
+    #[test]
+    fn o_link_desta_sessao_vence_a_guardada() {
+        assert_eq!(
+            impressao_a_conferir(Some("bbbb2222"), Some("aaaa1111")),
+            Some("bbbb2222".to_owned()),
+            "um link colado agora é a intenção mais nova de quem conecta; conferir \
+             pela guardada recusaria o servidor que a pessoa acabou de pedir"
+        );
+    }
+
+    #[test]
+    fn so_o_link_e_o_caminho_de_sempre() {
+        assert_eq!(
+            impressao_a_conferir(Some("bbbb2222"), None),
+            Some("bbbb2222".to_owned()),
+            "sem nada guardado, o link desta sessão deixou de ser conferido: quem cola um \
+             link num endereço novo entra às cegas"
+        );
+    }
+
+    #[test]
+    fn sem_nenhuma_das_duas_nao_ha_o_que_conferir() {
+        assert_eq!(
+            impressao_a_conferir(None, None),
+            None,
+            "sem link e sem guardada apareceu uma impressão do nada: a conexão \
+             recusaria o servidor por uma promessa que ninguém fez"
         );
     }
 }
