@@ -17,14 +17,15 @@
 //! ele toma mora em `seele_ffi::impressao_a_conferir`, e é ela que estes testes
 //! chamam. A impressão vem de uma lista de conhecidos de verdade, em disco, e
 //! a configuração vai para a mesma `Connection::connect` que o app chama. Que
-//! o comando use a função é guardado por texto, e esse guarda vem na Tarefa 5,
-//! em `apps/seele-app/tests/frontend.rs`
+//! o comando use a função, para a conferência e para a pergunta ao quarto, é
+//! guardado por texto-fonte em `apps/seele-app/tests/frontend.rs`
 //! (`a_volta_pela_lista_confere_pela_impressao_guardada`).
 //!
 //! O que a lista **guarda** depois de entrar segue a mesma divisão. A regra é
 //! `seele_ffi::impressao_a_guardar`, e o último teste deste arquivo a exercita
 //! com um servidor de verdade que fecha e volta noutra porta. O uso pelo
-//! comando é guardado em `a_lista_guarda_a_impressao_que_a_conexao_aceitou`.
+//! comando, com a impressão que a conexão conferiu, é guardado em
+//! `a_lista_guarda_a_impressao_que_a_conexao_aceitou`.
 //!
 //! # Por que `[::ffff:127.0.0.1]`
 //!
@@ -304,13 +305,14 @@ fn config_do_link(casa: &Path, alvo: String, do_link: &str) -> ConnectConfig {
 /// Grava a lista como o `connect` do app grava depois de entrar.
 ///
 /// `registrar`, e depois `anotar_caminhos` com a impressão que
-/// `seele_ffi::impressao_a_guardar` decide a partir do veredito e do link
-/// desta sessão.
-fn anotar_como_o_app(casa: &Path, alvo: &str, veredito: &Trust, do_link: Option<&str>) {
+/// `seele_ffi::impressao_a_guardar` decide a partir do veredito e da impressão
+/// que a visita conferiu. Nestas visitas ela é a do link colado nesta sessão,
+/// porque não há guardada a conferir antes.
+fn anotar_como_o_app(casa: &Path, alvo: &str, veredito: &Trust, conferida: Option<&str>) {
     let Ok(mut lista) = Conhecidos::abrir(casa.join("conhecidos")) else {
         panic!("a lista de conhecidos não abriu");
     };
-    let aceita = seele_ffi::impressao_a_guardar(veredito, do_link);
+    let aceita = seele_ffi::impressao_a_guardar(veredito, conferida);
     if lista.registrar(alvo, "pessoa", None).is_err() {
         panic!("a lista de conhecidos não registrou a visita");
     }

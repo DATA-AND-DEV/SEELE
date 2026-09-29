@@ -985,6 +985,24 @@ async fn connect(
         .unwrap_or_default()
     };
 
+    // **A impressão que esta conexão confere, e a que o quarto pergunta.**
+    //
+    // Até a 0.15.0 a conexão só conferia a impressão de um link colado nesta
+    // sessão. Quem voltava pela lista não tinha link nenhum e entrava no
+    // endereço que o quarto devolvia sem conferir nada. Era PRIMEIRO CONTATO
+    // cego: um impostor que ocupasse a marca era aceito e gravado na lista (o
+    // S3 da análise de 22/09). E o `LEVE` não saía, porque a marca dele sai da
+    // impressão (o terceiro defeito do link). A guardada existia e só servia
+    // para a pergunta ao quarto.
+    //
+    // Uma impressão só para as duas coisas, e a regra é da FFI. Perguntar ao
+    // quarto onde mora uma chave e conferir outra faria o quarto apontar para o
+    // servidor que a conferência recusaria em seguida. A pergunta usava a
+    // guardada primeiro; agora o link desta sessão vence, pelo motivo escrito
+    // em `impressao_a_conferir`.
+    let conferida =
+        seele_ffi::impressao_a_conferir(esperada.as_deref(), impressao_guardada.as_deref());
+
     // **O quarto: onde este servidor mora hoje.**
     //
     // Tudo o que a lista guarda é endereço, e endereço atrás de NAT é perecível
@@ -1003,10 +1021,7 @@ async fn connect(
     // deles: um ponto que não responda (ou um antigo, sem o verbo) deixa tudo
     // como estava, e o guardado ainda serve a quem está na mesma casa.
     let mut do_quarto: Option<String> = None;
-    let bilhete = match (
-        impressao_guardada.as_deref().or(esperada.as_deref()),
-        &bilhete,
-    ) {
+    let bilhete = match (conferida.as_deref(), &bilhete) {
         (Some(impressao), Some(bilhete_guardado)) => {
             let no_quarto = seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
             let (fresco_do_server, fresco_do_aviso) = (no_quarto.servidor(), no_quarto.escuta());
@@ -1073,10 +1088,12 @@ async fn connect(
         home,
         audio,
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
-        // Clonada: a lista de conhecidos a guarda depois de a conexão dar
-        // certo, e é ela que faz a marca do quarto na visita seguinte. Uma
-        // impressão digital tem 64 bytes.
-        expected_fingerprint: esperada.clone(),
+        // A decidida acima, e não só a do link: quem volta pela lista também
+        // confere, dentro do TLS e antes do `Hello`. Clonada: a lista de
+        // conhecidos lá embaixo decide, por ela e pelo veredito, o que se guarda
+        // (`impressao_a_guardar`), e é o guardado que faz a marca do quarto na
+        // visita seguinte. Uma impressão digital tem 64 bytes.
+        expected_fingerprint: conferida.clone(),
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
@@ -1269,7 +1286,11 @@ async fn connect(
             // outro servidor. A guardada é a que a volta pela lista confere, e
             // com ela o servidor verdadeiro seria recusado em todo endereço sem
             // pin. `None` deixa a guardada como estava.
-            let impressao_aceita = seele_ffi::impressao_a_guardar(&veredito, esperada.as_deref());
+            //
+            // Pela `conferida`, a mesma que foi ao TLS e ao quarto, e não pela
+            // `esperada`: numa volta pela lista quem prometeu a chave foi a
+            // guardada, e é ela que `Known` confirma.
+            let impressao_aceita = seele_ffi::impressao_a_guardar(&veredito, conferida.as_deref());
             if let Err(erro) = lista.anotar_caminhos(
                 &alvo,
                 &caminhos,

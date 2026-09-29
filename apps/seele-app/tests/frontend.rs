@@ -1476,8 +1476,10 @@ fn a_lista_guarda_a_impressao_que_a_conexao_aceitou() {
     //
     // A regra é `seele_ffi::impressao_a_guardar`, provada lá e, com servidor
     // de verdade, em `crates/seele-conformance/tests/volta_pela_trilha.rs`. O
-    // que só se vê aqui é o comando usá-la. Os espaços saem da comparação para
-    // o guarda não depender de onde o `rustfmt` quebra a linha.
+    // que só se vê aqui é o comando usá-la, e com a impressão que a conexão
+    // **conferiu** (`conferida`: a do link desta sessão ou a da lista), a mesma
+    // que foi ao TLS e ao quarto, e não só a do link. Os espaços saem da
+    // comparação para o guarda não depender de onde o `rustfmt` quebra a linha.
     let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
         .chars()
         .filter(|c| !c.is_whitespace())
@@ -1485,15 +1487,55 @@ fn a_lista_guarda_a_impressao_que_a_conexao_aceitou() {
 
     assert!(
         connect.contains(
-            "letimpressao_aceita=seele_ffi::impressao_a_guardar(&veredito,esperada.as_deref()"
+            "letimpressao_aceita=seele_ffi::impressao_a_guardar(&veredito,conferida.as_deref()"
         ),
-        "`connect` não decide mais pela regra da FFI o que vai para a lista, e a \
-         impressão de um link que discordava do pin volta a envenenar a volta pela lista"
+        "`connect` não decide mais pela regra da FFI o que vai para a lista, ou a \
+         decide por outra impressão que não a que a conexão conferiu: a impressão de \
+         um link que discordava do pin volta a envenenar a volta pela lista"
     );
     assert!(
         connect.contains("bilhete_texto.as_deref(),impressao_aceita.as_deref()"),
         "a lista recebe outra impressão que não a que a conexão aceitou: um link que \
          discorda do pin deixa na lista a chave de outro servidor"
+    );
+}
+
+#[test]
+fn a_volta_pela_lista_confere_pela_impressao_guardada() {
+    // O terceiro defeito do link (§2.1 da análise de 22/09) e o S3 (§3.1). A
+    // impressão esperada só vinha de um link colado nesta sessão. Quem voltava
+    // pela lista entrava no endereço que o quarto devolveu sem conferir nada:
+    // PRIMEIRO CONTATO cego, com um impostor aceito e gravado. E o `LEVE` nem
+    // saía, porque `Batida::preparar` tira a marca da impressão. A guardada
+    // existia e só formava a marca da pergunta ao quarto.
+    //
+    // A regra é `seele_ffi::impressao_a_conferir`, provada lá e, com servidor
+    // de verdade, em `crates/seele-conformance/tests/volta_pela_trilha.rs`. O
+    // que só se vê aqui é o comando usá-la, porque `connect` é um comando
+    // Tauri e não roda sem casca. Os espaços saem da comparação para o guarda
+    // não depender de onde o `rustfmt` quebra a linha.
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    assert!(
+        connect.contains(
+            "letconferida=seele_ffi::impressao_a_conferir(esperada.as_deref(),impressao_guardada.as_deref()"
+        ),
+        "`connect` não decide mais a impressão pela regra da FFI, e a volta pela \
+         lista volta a entrar cega num endereço novo"
+    );
+    assert!(
+        connect.contains("expected_fingerprint:conferida"),
+        "o `ConnectConfig` não recebe a impressão decidida: a guardada volta a \
+         servir só de marca para o quarto, e a conexão entra sem conferir"
+    );
+    assert!(
+        connect.contains("match(conferida.as_deref(),&bilhete)"),
+        "a pergunta ao quarto e a conferência usam impressões diferentes: o \
+         quarto apontaria para o servidor de uma chave e o TLS recusaria o de \
+         outra"
     );
 }
 

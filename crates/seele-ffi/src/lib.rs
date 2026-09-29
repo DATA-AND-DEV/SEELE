@@ -286,9 +286,9 @@ pub struct ConnectConfig {
     /// A impressão digital que o convite prometeu, quando veio de um link.
     ///
     /// Na volta pela lista de servidores, sem link nesta sessão, é a que a
-    /// lista guardou do link de antes — a regra é [`impressao_a_conferir`] (a
-    /// partir da Tarefa 5, quando o `connect` do app passa a usá-la). É
-    /// conferida dentro do TLS, antes do `Hello`.
+    /// lista guardou do link de antes — a regra é [`impressao_a_conferir`], e é
+    /// o `connect` do app que a usa. É conferida dentro do TLS, antes do
+    /// `Hello`.
     pub expected_fingerprint: Option<String>,
     /// O bilhete de encontro do link, quando ele trouxe um.
     ///
@@ -7876,10 +7876,10 @@ mod a_consulta_ao_quarto {
 /// O link desta sessão vence a guardada. Ele é o que a pessoa acabou de colar
 /// para este endereço, e a guardada é o que um link anterior prometeu. Se os
 /// dois discordam, conferir pela velha recusaria o servidor que a pessoa acabou
-/// de pedir. A mesma impressão forma a marca da pergunta ao quarto (a partir da
-/// Tarefa 5, quando o `connect` do app passa a usá-la), pela mesma razão:
-/// perguntar onde mora uma chave e conferir outra faria o quarto apontar para o
-/// servidor que a conferência recusaria logo em seguida.
+/// de pedir. A mesma impressão forma a marca da pergunta ao quarto (o `connect`
+/// do app a usa nas duas coisas), pela mesma razão: perguntar onde mora uma
+/// chave e conferir outra faria o quarto apontar para o servidor que a
+/// conferência recusaria logo em seguida.
 #[must_use]
 pub fn impressao_a_conferir(do_link: Option<&str>, guardada: Option<&str>) -> Option<String> {
     do_link.or(guardada).map(str::to_owned)
@@ -7950,21 +7950,26 @@ mod a_volta_pela_trilha_confere {
 /// - [`Trust::FirstContactVerified`]: a conferida no aperto de mão, pelo link
 ///   desta sessão ou pela guardada;
 /// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada;
-/// - [`Trust::Known`]: o link desta sessão, quando há um, porque é ele
+/// - [`Trust::Known`]: a impressão que se conferiu, venha do link desta sessão
+///   ou da lista ([`impressao_a_conferir`]), quando há uma, porque é ela
 ///   concordar com o pin que faz o veredito ser `Known`.
+///
+/// O segundo argumento é essa impressão **conferida**, a mesma que foi ao TLS
+/// e ao quarto, e não só a do link: numa volta pela lista não há link, e quem
+/// prometeu a chave foi a guardada.
 ///
 /// `None` quando não há nada conferido a guardar, e `None` deixa a lista como
 /// estava (`Conhecidos::anotar_caminhos` não apaga a impressão). É o caso de
-/// [`Trust::Known`] sem link; de [`Trust::FirstContact`], em que a chave foi
-/// fixada às cegas e ninguém a prometeu; e de [`Trust::InviteRefused`], que não
-/// atravessa.
+/// [`Trust::Known`] sem impressão conferida; de [`Trust::FirstContact`], em que
+/// a chave foi fixada às cegas e ninguém a prometeu; e de
+/// [`Trust::InviteRefused`], que não atravessa.
 #[must_use]
-pub fn impressao_a_guardar(veredito: &Trust, do_link: Option<&str>) -> Option<String> {
+pub fn impressao_a_guardar(veredito: &Trust, conferida: Option<&str>) -> Option<String> {
     match veredito {
         Trust::FirstContactVerified { fingerprint } => Some(fingerprint.clone()),
         // **A ofertada, e não a esperada.** A conexão ficou de pé com ela.
         Trust::InviteDisagrees { offered, .. } => Some(offered.clone()),
-        Trust::Known => do_link.map(str::to_owned),
+        Trust::Known => conferida.map(str::to_owned),
         // Fixada às cegas: guardá-la faria a volta por outro endereço conferir
         // contra uma chave que ninguém prometeu. Fica como na 0.15.0, em que
         // este caso nunca tinha link.
@@ -8018,7 +8023,7 @@ mod a_lista_guarda_a_impressao_aceita {
         assert_eq!(
             impressao_a_guardar(&Trust::Known, Some(DO_SERVIDOR)),
             Some(DO_SERVIDOR.to_owned()),
-            "um link que concorda com o pin não foi para a lista"
+            "a impressão conferida que concorda com o pin não foi para a lista"
         );
     }
 
@@ -8027,7 +8032,7 @@ mod a_lista_guarda_a_impressao_aceita {
         assert_eq!(
             impressao_a_guardar(&Trust::Known, None),
             None,
-            "a volta sem link inventou uma impressão para a lista"
+            "a volta sem impressão conferida inventou uma impressão para a lista"
         );
         assert_eq!(
             impressao_a_guardar(
