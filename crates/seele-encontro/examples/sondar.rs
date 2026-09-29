@@ -1,6 +1,9 @@
 //! Pergunta a um ponto de encontro se ele está vivo, e o que ele vê de você.
 //!
 //!     cargo run -p seele-encontro --example sondar -- 203.0.113.7:8384
+//!     cargo run -p seele-encontro --example sondar -- encontro.seele.app.br
+//!
+//! Sem porta, a do ponto de encontro (8384), como o link escreve o ponto.
 //!
 //! Existe porque `docs/ponto-de-encontro.md` manda subir o seu e não oferecia
 //! nenhuma forma de conferir. `systemctl status` diz que o processo está de pé,
@@ -39,10 +42,11 @@ use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
 
 use seele_proto::encontro::{ler_aqui, moro, onde, quem, Marca, TAMANHO};
+use seele_proto::uri::separar_ponto;
 
 fn main() -> std::process::ExitCode {
     let Some(alvo) = std::env::args().nth(1) else {
-        eprintln!("uso: sondar <endereço:porta>");
+        eprintln!("uso: sondar <endereço[:porta]>   (sem porta, a do ponto de encontro)");
         eprintln!();
         eprintln!("exemplo: cargo run -p seele-encontro --example sondar -- 203.0.113.7:8384");
         return std::process::ExitCode::FAILURE;
@@ -52,10 +56,10 @@ fn main() -> std::process::ExitCode {
     // encontro que atende IPv4 e não IPv6 apresenta mal justamente os pares que
     // mais precisam dele, e a resolução sozinha esconderia isso escolhendo uma
     // e calando sobre a outra.
-    let enderecos: Vec<SocketAddr> = match alvo.to_socket_addrs() {
-        Ok(achados) => achados.collect(),
-        Err(erro) => {
-            eprintln!("não consegui resolver «{alvo}»: {erro}");
+    let enderecos = match enderecos_do_ponto(&alvo) {
+        Ok(achados) => achados,
+        Err(motivo) => {
+            eprintln!("{motivo}");
             return std::process::ExitCode::FAILURE;
         }
     };
@@ -107,6 +111,23 @@ fn main() -> std::process::ExitCode {
         println!("  4. a porta, se você a trocou com `--porta`");
         std::process::ExitCode::FAILURE
     }
+}
+
+/// Os endereços do ponto de encontro, a partir do texto que se passou.
+///
+/// **Com a porta padrão quando ela falta**, pela regra de
+/// [`seele_proto::uri::separar_ponto`], a mesma com que o cliente pergunta ao
+/// quarto. O texto ia cru para `to_socket_addrs`, que recusa nome sem porta, e o
+/// link escreve o ponto sem porta (`enc=encontro.seele.app.br/…`): esta
+/// ferramenta, que é a da medida de campo, recusava exatamente o ponto que o
+/// link carrega.
+fn enderecos_do_ponto(alvo: &str) -> Result<Vec<SocketAddr>, String> {
+    let ponto =
+        separar_ponto(alvo).map_err(|erro| format!("«{alvo}» não é um endereço: {erro}"))?;
+    (ponto.maquina, ponto.porta)
+        .to_socket_addrs()
+        .map(Iterator::collect)
+        .map_err(|erro| format!("não consegui resolver «{alvo}»: {erro}"))
 }
 
 /// O que uma sondagem completa aprendeu: o degrau 3 (`ONDE`) e o quarto.
@@ -241,6 +262,38 @@ mod testes {
             }
         });
         endereco
+    }
+
+    #[test]
+    fn o_ponto_escrito_sem_porta_e_sondado_na_porta_do_ponto_de_encontro() {
+        // O link escreve o ponto sem porta (`enc=encontro.seele.app.br/…`), e o
+        // texto ia cru para `to_socket_addrs`, que recusa nome sem porta. Era o
+        // defeito 1 do quarto, repetido na ferramenta que mede o portão G1: ela
+        // recusava exatamente o ponto que o link carrega.
+        let porta = seele_proto::encontro::PORTA_PADRAO;
+        assert_eq!(
+            enderecos_do_ponto("127.0.0.1"),
+            Ok(vec![SocketAddr::from(([127, 0, 0, 1], porta))]),
+            "o ponto escrito sem porta, como o link o escreve, não foi sondado na porta do ponto \
+             de encontro"
+        );
+        assert_eq!(
+            enderecos_do_ponto("[::1]"),
+            Ok(vec![SocketAddr::from((
+                std::net::Ipv6Addr::LOCALHOST,
+                porta
+            ))]),
+            "um IPv6 entre colchetes sem porta não foi sondado na porta do ponto de encontro"
+        );
+        assert_eq!(
+            enderecos_do_ponto("127.0.0.1:9000"),
+            Ok(vec![SocketAddr::from(([127, 0, 0, 1], 9000))]),
+            "a porta escrita deixou de mandar"
+        );
+        assert!(
+            enderecos_do_ponto("tem espaço").is_err(),
+            "um texto que não é endereço virou sondagem"
+        );
     }
 
     #[test]
