@@ -352,6 +352,97 @@ pub(crate) const TEMPORIZADORES_DE_PE: usize = 256;
 /// ocupada num produto de voz disputa com o áudio.
 pub(crate) const INTERVALO_MINIMO: Duration = Duration::from_millis(4);
 
+/// Quantas linhas de `console` um MOD escreve de uma vez, antes de o balde secar.
+///
+/// Trinta e duas: o que um MOD escreve ao subir, contando o que deu errado,
+/// cabe inteiro. O que passa disso numa volta é um laço, e um laço no
+/// `console` é uma linha no `seele.log` por volta — num arquivo que só gira na
+/// abertura do app.
+pub(crate) const RAJADA_DO_CONSOLE: u32 = 32;
+
+/// Quantas linhas por segundo o balde devolve depois de secar.
+///
+/// Quatro: um MOD que reclama a cada evento continua sendo ouvido, e um que
+/// reclama a cada quadro escreve no pior caso quatro linhas por segundo, cada
+/// uma cortada em 512 caracteres **do jeito que ficam no registro** — o corte
+/// pelo tamanho escapado ([`cortar_linha_do_console`]) mantém esse teto
+/// qualquer que seja o texto.
+///
+/// Em bytes por hora, o número é **calculado, e não medido** no aplicativo; o
+/// tamanho de uma linha foi medido com o formatador do `seele.log`, num teste.
+/// Uma linha de ASCII cortada tem perto de 620 bytes, e quatro por segundo são
+/// perto de nove megabytes por hora. Um caractere que se imprime passa sem
+/// escape e pode ter até quatro bytes: uma linha só deles tem perto de 2,2 KB,
+/// e a conta chega a cerca de trinta megabytes por hora — o pior caso, e um
+/// teto, onde antes não havia nenhum.
+pub(crate) const LINHAS_DE_CONSOLE_POR_SEGUNDO: u32 = 4;
+
+/// Uma ficha do balde, em milionésimos.
+///
+/// A recarga é microssegundos vezes linhas por segundo, e nesta unidade ela é
+/// uma multiplicação de inteiros: nenhuma fração se perde entre duas chamadas
+/// próximas.
+const FICHA: u64 = 1_000_000;
+
+/// **O balde de fichas do `console` de uma instância.**
+///
+/// Cheio, ele deixa passar [`RAJADA_DO_CONSOLE`] linhas de uma vez; seco, uma a
+/// cada `1 / LINHAS_DE_CONSOLE_POR_SEGUNDO` segundo. O que ele segura **é
+/// contado**, e a primeira linha que passa depois leva a conta: o `seele.log`
+/// diz que houve mais do que ele mostra, em vez de mostrar pouco como se fosse
+/// tudo.
+///
+/// Mora dentro da função nativa, na thread do motor, e o relógio é passado por
+/// quem chama — é o que deixa o teste medi-lo sem dormir. Ele também é o que
+/// limita o canal entre o motor e a bomba para esta variante: a linha de
+/// console não reserva cota de fila, e a vazão dela é o teto.
+#[derive(Debug)]
+pub(crate) struct BaldeDoConsole {
+    /// As fichas, em milionésimos de ficha.
+    fichas: u64,
+    /// Até onde a recarga já foi contada.
+    contado_ate: Instant,
+    /// Quantas linhas foram seguradas desde a última que passou.
+    suprimidas: u32,
+}
+
+impl BaldeDoConsole {
+    /// Um balde cheio.
+    #[must_use]
+    pub(crate) fn novo(agora: Instant) -> Self {
+        Self {
+            fichas: u64::from(RAJADA_DO_CONSOLE) * FICHA,
+            contado_ate: agora,
+            suprimidas: 0,
+        }
+    }
+
+    /// Uma linha quer passar.
+    ///
+    /// `Some(n)` é «passa», com quantas foram seguradas antes dela; `None` é
+    /// «segurada», e ela entra na conta da próxima.
+    pub(crate) fn admitir(&mut self, agora: Instant) -> Option<u32> {
+        let passou = agora.saturating_duration_since(self.contado_ate);
+        let micros = u64::try_from(passou.as_micros()).unwrap_or(u64::MAX);
+        // O relógio anda só o que foi contado: o resto abaixo de um
+        // microssegundo fica para a próxima chamada, e um laço apertado não
+        // perde a recarga inteira por arredondamento.
+        self.contado_ate = self
+            .contado_ate
+            .checked_add(Duration::from_micros(micros))
+            .unwrap_or(agora);
+        let cheio = u64::from(RAJADA_DO_CONSOLE) * FICHA;
+        let recarga = micros.saturating_mul(u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
+        self.fichas = self.fichas.saturating_add(recarga).min(cheio);
+        if self.fichas < FICHA {
+            self.suprimidas = self.suprimidas.saturating_add(1);
+            return None;
+        }
+        self.fichas -= FICHA;
+        Some(std::mem::take(&mut self.suprimidas))
+    }
+}
+
 /// O nível de uma linha que o MOD escreveu com `console`.
 ///
 /// Cinco métodos, quatro níveis: `log` e `info` são a mesma coisa para quem lê
@@ -375,8 +466,10 @@ impl NivelDoConsole {
     /// O nível pelo nome do método que o prelúdio passa.
     ///
     /// Um nome desconhecido é informação: um MOD que chama `seele.console`
-    /// direto, com lixo no primeiro argumento, continua sendo ouvido — e não é
-    /// promovido a erro por isso.
+    /// direto, com um texto qualquer no primeiro argumento, continua sendo
+    /// ouvido — e não é promovido a erro por isso. Um primeiro argumento que
+    /// não é texto nem chega aqui: a conversão do `rquickjs` lança no MOD antes
+    /// (ver a ponte em [`rodar`]).
     fn do_metodo(metodo: &str) -> Self {
         match metodo {
             "debug" => Self::Depuracao,
@@ -401,19 +494,49 @@ impl NivelDoConsole {
 /// Uma pilha de erro cortada em 512 caracteres ainda diz o nome, a mensagem e
 /// os primeiros quadros.
 ///
-/// Por caracteres, e não por bytes: `chars().take` respeita a fronteira de um
-/// caractere por construção, e cortar por bytes pediria achá-la à mão.
+/// **Pelo tamanho que a linha tem no registro**, e não pelo número de
+/// caracteres. A bomba a escreve em `?` (`texto = ?texto`), e o `Debug` de um
+/// `str` escapa todo caractere que não se imprime: um `\u{200b}` são oito
+/// caracteres no arquivo. Cortada por caracteres, uma linha deles ocupava oito
+/// vezes o teto — e o teto de vazão do `console`
+/// ([`LINHAS_DE_CONSOLE_POR_SEGUNDO`]) é contado sobre este. Para ASCII e para
+/// `é`, que não se escapam, o corte continua nos 512 caracteres.
+///
+/// Caractere a caractere, e não por bytes: parar antes do caractere que não
+/// cabe respeita a fronteira dele por construção, e cortar por bytes pediria
+/// achá-la à mão. O aviso do corte conta os caracteres que o MOD escreveu.
 fn cortar_linha_do_console(texto: String) -> String {
-    let total = texto.chars().count();
-    if total <= crate::TETO_DA_FRASE_NO_REGISTRO {
+    let no_registro: usize = texto.chars().map(tamanho_no_registro).sum();
+    if no_registro <= crate::TETO_DA_FRASE_NO_REGISTRO {
         return texto;
     }
+    let mut ocupado = 0_usize;
     let mut cortado: String = texto
         .chars()
-        .take(crate::TETO_DA_FRASE_NO_REGISTRO)
+        .take_while(|&c| {
+            ocupado = ocupado.saturating_add(tamanho_no_registro(c));
+            ocupado <= crate::TETO_DA_FRASE_NO_REGISTRO
+        })
         .collect();
+    let total = texto.chars().count();
     let _ = write!(cortado, " […cortado: {total} caracteres]");
     cortado
+}
+
+/// Quantos caracteres `c` ocupa no `Debug` de um `str`, que é como a linha de
+/// `console` vai ao registro.
+///
+/// É o `escape_debug` do caractere, com uma exceção — a única, conferida
+/// caractere a caractere em todo o Unicode contra o `Debug` de um `str` de um
+/// caractere só: o `Debug` de um `char` escapa o apóstrofo, e o de um `str`
+/// não. Contá-lo como dois cortaria uma mensagem de erro de JavaScript — que
+/// cita nomes entre apóstrofos — antes do teto, sem razão.
+fn tamanho_no_registro(c: char) -> usize {
+    if c == '\'' {
+        1
+    } else {
+        c.escape_debug().count()
+    }
 }
 
 /// O que entra no executor.
@@ -467,6 +590,8 @@ pub(crate) enum ParaOFora {
         nivel: NivelDoConsole,
         /// O texto, já cortado por [`cortar_linha_do_console`].
         texto: String,
+        /// Quantas linhas o balde segurou antes desta. Zero é o normal.
+        suprimidas: u32,
     },
 }
 
@@ -610,7 +735,10 @@ impl ExecutorQuickJs {
         let saiu = self.para_fora.as_ref()?.recv_timeout(prazo).ok();
         // A contabilidade é baixada **ao tirar**, e não ao entregar: é isto que
         // faz a fila voltar a aceitar assim que alguém a lê. Só mensagem ocupa
-        // lugar; as outras variantes são avisos de tamanho fixo.
+        // lugar; as outras variantes são avisos de tamanho fixo, menos
+        // `Console`, que não reserva lugar nenhum: é registro, e não fala para
+        // a janela. Cada linha vem cortada no teto de uma frase do registro, e
+        // quem limita quantas vêm é o `BaldeDoConsole` da função nativa.
         if let Some(ParaOFora::Mensagem(json)) = &saiu {
             self.fila.tirar(json.len());
         }
@@ -782,6 +910,7 @@ fn rodar(
     let saida = manda.clone();
     let contagem = Arc::clone(fila);
     let linhas = manda.clone();
+    let balde_do_console = std::cell::RefCell::new(BaldeDoConsole::novo(Instant::now()));
     let montou = contexto.with(|ctx| -> rquickjs::Result<()> {
         let seele = rquickjs::Object::new(ctx.clone())?;
         seele.set(
@@ -819,16 +948,30 @@ fn rodar(
         )?;
         // **O `console` do MOD, que não existia.** O prelúdio monta
         // `console.log/info/warn/error/debug` sobre esta função (e os outros
-        // métodos do navegador sobre esses); ela corta a linha e a põe no
-        // canal, e a bomba a escreve no `seele.log` com o id do MOD. Não
-        // devolve nada e não lança: um registro que derruba o caminho que ele
-        // observa é pior que registro nenhum.
+        // métodos do navegador sobre esses); ela passa a linha pelo balde, a
+        // corta e a põe no canal, e a bomba a escreve no `seele.log` com o id
+        // do MOD. Não devolve nada e, **com duas strings, não lança**. Com
+        // outra coisa, a conversão do `rquickjs` lança no MOD antes de chegar
+        // aqui — quem garante que o `console` do MOD nunca lança é o do
+        // prelúdio, que sempre passa duas strings e chama esta dentro de um
+        // `try`: um registro que derruba o caminho que ele observa é pior que
+        // registro nenhum.
         seele.set(
             "console",
             Function::new(ctx.clone(), move |metodo: String, texto: String| {
+                // Um `RefCell` e não um cadeado: a função só roda na thread do
+                // motor, e um `try_borrow` que falhasse seria uma reentrada que
+                // não existe — calar é a resposta segura se um dia existir.
+                let Ok(mut balde) = balde_do_console.try_borrow_mut() else {
+                    return;
+                };
+                let Some(suprimidas) = balde.admitir(Instant::now()) else {
+                    return;
+                };
                 let _ = linhas.send(ParaOFora::Console {
                     nivel: NivelDoConsole::do_metodo(&metodo),
                     texto: cortar_linha_do_console(texto),
+                    suprimidas,
                 });
             })?,
         )?;
@@ -1071,21 +1214,30 @@ const PRELUDIO: &str = r#"
     if (v instanceof Map || v instanceof Set) return [...v];
     return v;
   };
+  // **Cada parte se protege sozinha.** Uma que não vira texto — um objeto
+  // cíclico sem protótipo não vira JSON nem `String`, um `name` com getter
+  // que lança — sai como um recuo que diz isso. Sem ele, o erro subia até o
+  // `catch` de `escrever` e levava a linha inteira, com o contexto que o autor
+  // escreveu antes da parte que falhou.
   const emTexto = (valor) => {
-    if (typeof valor === 'string') return valor;
-    if (valor instanceof Error) {
-      return String(valor.name) + ': ' + String(valor.message)
-        + (valor.stack ? '\n' + String(valor.stack) : '');
-    }
-    if (valor === undefined) return 'undefined';
-    if (typeof valor === 'function') return '[função ' + (valor.name || 'anônima') + ']';
-    if (typeof valor === 'bigint' || typeof valor === 'symbol') return String(valor);
-    if (typeof valor === 'number') return String(valor);
     try {
-      const json = JSON.stringify(valor, semMentir);
-      return json === undefined ? String(valor) : json;
+      if (typeof valor === 'string') return valor;
+      if (valor instanceof Error) {
+        return String(valor.name) + ': ' + String(valor.message)
+          + (valor.stack ? '\n' + String(valor.stack) : '');
+      }
+      if (valor === undefined) return 'undefined';
+      if (typeof valor === 'function') return '[função ' + (valor.name || 'anônima') + ']';
+      if (typeof valor === 'bigint' || typeof valor === 'symbol') return String(valor);
+      if (typeof valor === 'number') return String(valor);
+      try {
+        const json = JSON.stringify(valor, semMentir);
+        return json === undefined ? String(valor) : json;
+      } catch {
+        return String(valor);
+      }
     } catch {
-      return String(valor);
+      return '[valor que não virou texto]';
     }
   };
   const escrever = (metodo) => (...partes) => {
@@ -1648,6 +1800,34 @@ mod testes {
         );
     }
 
+    /// **Uma parte que não vira texto não derruba a linha inteira.**
+    ///
+    /// Um objeto cíclico de protótipo nulo não vira JSON (é cíclico) nem texto
+    /// (não tem `toString`): o `JSON.stringify` lança, o `String` do recuo
+    /// também lança, e o `catch` de `escrever` engolia a linha toda — com o
+    /// contexto que o autor escreveu antes do objeto. A parte que não vira
+    /// texto sai como um recuo que diz isso, e o resto da linha chega.
+    #[test]
+    fn uma_parte_que_nao_vira_texto_nao_derruba_a_linha_do_console() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "const c = Object.create(null); c.eu = c;\
+                 console.warn('contexto importante:', c);\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        assert_eq!(
+            linhas_de_console_ate(&executor, "fim"),
+            vec![(
+                NivelDoConsole::Aviso,
+                "contexto importante: [valor que não virou texto]".to_owned()
+            )],
+            "uma parte que não virou texto derrubou a linha inteira do console, e o contexto que \
+             o autor escreveu antes dela sumiu calado"
+        );
+    }
+
     /// **Cada método tem o seu nível**, e um `Error` chega com nome e mensagem.
     #[test]
     fn cada_metodo_do_console_escreve_no_seu_nivel() {
@@ -1768,6 +1948,159 @@ mod testes {
         assert_eq!(
             aviso, "1001 caracteres]",
             "o corte não diz quanto a linha tinha"
+        );
+    }
+
+    /// **A linha é cortada pelo tamanho que ela tem no registro**, e não pelo
+    /// número de caracteres.
+    ///
+    /// O `seele.log` recebe o texto em `?` (`texto = ?texto`), e o `Debug` de
+    /// um `str` escapa todo caractere que não se imprime: um `\u{200b}` são
+    /// oito caracteres no arquivo. Cortada em 512 caracteres, uma linha deles
+    /// ocupava 4096 no registro — oito vezes o teto que o corte promete, e o
+    /// teto de vazão do `console` é contado sobre ele.
+    ///
+    /// O apóstrofo é o caso contrário: o `Debug` de um `char` o escapa, e o de
+    /// um `str` não. Contado como escapado, uma linha deles cortaria na
+    /// metade do que cabe.
+    #[test]
+    fn uma_linha_de_console_e_cortada_pelo_tamanho_que_tem_no_registro() {
+        let executor = executor();
+        executor
+            .iniciar(
+                r"console.log('\u{200b}'.repeat(600));
+                  console.log(`'`.repeat(600));
+                  seele.postar('fim');",
+            )
+            .expect("código");
+        let linhas = linhas_de_console_ate(&executor, "fim");
+        let [(_, invisiveis), (_, apostrofos)] = linhas.as_slice() else {
+            panic!("esperava duas linhas de console, vieram {linhas:?}");
+        };
+        // Quantos caracteres o texto ocupa no registro: o `Debug` dele, que é
+        // o que `texto = ?texto` escreve, sem as duas aspas.
+        let no_registro = |texto: &str| format!("{texto:?}").chars().count() - 2;
+        let teto = crate::TETO_DA_FRASE_NO_REGISTRO;
+        for (texto, caractere) in [(invisiveis, '\u{200b}'), (apostrofos, '\'')] {
+            let (corpo, aviso) = texto.split_once(" […cortado: ").unwrap_or_else(|| {
+                panic!("a linha de {caractere:?} chegou sem dizer que foi cortada: {texto:?}")
+            });
+            assert_eq!(
+                aviso, "600 caracteres]",
+                "o corte da linha de {caractere:?} não diz quanto ela tinha"
+            );
+            assert!(
+                !corpo.is_empty() && corpo.chars().all(|c| c == caractere),
+                "o corte trocou ou partiu caracteres da linha de {caractere:?}: {corpo:?}"
+            );
+            let sufixo = format!(" […cortado: {aviso}");
+            assert!(
+                no_registro(texto) <= teto + sufixo.chars().count(),
+                "a linha de {caractere:?} cortada ocupa {} caracteres no registro, e o teto é \
+                 {teto} mais o aviso do corte: o teto de vazão do console, contado sobre ele, \
+                 deixa de valer",
+                no_registro(texto)
+            );
+            assert!(
+                no_registro(&format!("{corpo}{caractere}")) > teto,
+                "o corte da linha de {caractere:?} tirou mais do que precisava: cabia mais um, e \
+                 o registro perde o que o MOD escreveu sem razão ({} de {teto})",
+                no_registro(corpo)
+            );
+        }
+    }
+
+    /// **O balde segura a rajada, devolve no ritmo e conta o que segurou.**
+    ///
+    /// Com o relógio passado por quem chama: o teste mede o balde sem dormir.
+    #[test]
+    fn o_balde_do_console_segura_a_rajada_e_conta_o_que_segurou() {
+        let inicio = Instant::now();
+        let mut balde = BaldeDoConsole::novo(inicio);
+        for n in 0..RAJADA_DO_CONSOLE {
+            assert_eq!(
+                balde.admitir(inicio),
+                Some(0),
+                "a linha {n} da rajada foi segurada"
+            );
+        }
+        assert_eq!(balde.admitir(inicio), None, "o balde passou da rajada");
+        assert_eq!(balde.admitir(inicio), None, "o balde passou da rajada");
+        // Uma ficha a cada `1 / LINHAS_DE_CONSOLE_POR_SEGUNDO` segundo.
+        let depois =
+            inicio + Duration::from_millis(1000 / u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
+        assert_eq!(
+            balde.admitir(depois),
+            Some(2),
+            "a linha que passa depois do aperto não disse quantas ficaram para trás"
+        );
+        assert_eq!(balde.admitir(depois), None, "uma ficha virou duas");
+        // Uma hora parado enche o balde — e a conta recomeça depois de dita:
+        // a próxima linha diz só a que ficou para trás desde a última.
+        let muito_depois = depois + Duration::from_secs(3600);
+        assert_eq!(
+            balde.admitir(muito_depois),
+            Some(1),
+            "a conta não recomeçou depois de dita: a linha seguinte repetiria as que já tinham \
+             sido contadas, e o registro as somaria duas vezes"
+        );
+        // E encher não passa da rajada: um MOD parado não ganha crédito para
+        // inundar o registro.
+        let passaram = 1
+            + (1..RAJADA_DO_CONSOLE * 2)
+                .filter(|_| balde.admitir(muito_depois).is_some())
+                .count();
+        assert_eq!(
+            passaram, RAJADA_DO_CONSOLE as usize,
+            "o balde encheu além da rajada, e um MOD parado ganharia crédito para inundar o registro"
+        );
+    }
+
+    /// **Um MOD em laço no `console` não passa da rajada, e nada some sem ser
+    /// contado.**
+    ///
+    /// Mil linhas de uma vez: passam as da rajada, e a primeira linha que passa
+    /// depois diz quantas ficaram para trás. A soma das duas coisas é mil — é
+    /// essa conta que prova que o balde segura **e** conta.
+    #[test]
+    fn um_mod_em_laco_no_console_nao_passa_da_rajada_e_conta_o_resto() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "for (let i = 0; i < 1000; i++) console.log('linha ' + i);\
+                 setTimeout(() => console.warn('depois'), 400);",
+            )
+            .expect("código");
+        let mut passaram_do_laco = 0_usize;
+        let mut contadas = 0_usize;
+        let prazo = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(
+                Instant::now() < prazo,
+                "a linha de depois do laço não chegou"
+            );
+            match executor.receber(Duration::from_secs(5)) {
+                Some(ParaOFora::Console {
+                    texto, suprimidas, ..
+                }) => {
+                    contadas += suprimidas as usize;
+                    if texto == "depois" {
+                        break;
+                    }
+                    passaram_do_laco += 1;
+                }
+                outro => panic!("veio {outro:?} no meio das linhas de console"),
+            }
+        }
+        let rajada = RAJADA_DO_CONSOLE as usize;
+        assert!(
+            (rajada..=rajada + 2).contains(&passaram_do_laco),
+            "passaram {passaram_do_laco} linhas de um laço de mil, e a rajada é {rajada}: o balde não segurou"
+        );
+        assert_eq!(
+            passaram_do_laco + contadas,
+            1000,
+            "linhas sumiram sem ser contadas: {passaram_do_laco} passaram e {contadas} foram contadas"
         );
     }
 

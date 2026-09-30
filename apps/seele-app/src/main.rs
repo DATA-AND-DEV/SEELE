@@ -3809,11 +3809,15 @@ fn assentar_fala(
             tracing::debug!(mod_id = %quem, relogios, "diagnóstico de MOD nativo");
             return Assentada::Nada;
         }
-        executor::ParaOFora::Console { nivel, texto } => {
+        executor::ParaOFora::Console {
+            nivel,
+            texto,
+            suprimidas,
+        } => {
             // **Registro, e não fala.** Não entra em fila da janela, não
             // reserva crédito e não toma o cadeado da supervisão: a linha vai
             // para o `seele.log` e acabou.
-            registrar_console_do_mod(quem, nivel, &texto);
+            registrar_console_do_mod(quem, nivel, &texto, suprimidas);
             return Assentada::Nada;
         }
     };
@@ -3881,13 +3885,31 @@ fn assentar_fala(
 /// **O texto vai em `?`, e não solto na frase.** Ele é de um terceiro, e uma
 /// quebra de linha nele escreveria no registro uma segunda linha com a cara de
 /// uma linha do produto. Em `?` ela sai escapada, entre aspas.
-fn registrar_console_do_mod(quem: &str, nivel: executor::NivelDoConsole, texto: &str) {
+///
+/// `suprimidas` é quantas linhas o balde do executor segurou antes desta. Só
+/// aparece quando não é zero: é o registro dizendo que houve mais do que ele
+/// mostra.
+fn registrar_console_do_mod(
+    quem: &str,
+    nivel: executor::NivelDoConsole,
+    texto: &str,
+    suprimidas: u32,
+) {
     use executor::NivelDoConsole as Nivel;
+    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     match nivel {
-        Nivel::Depuracao => tracing::debug!(mod_id = %quem, texto = ?texto, "console do MOD"),
-        Nivel::Informacao => tracing::info!(mod_id = %quem, texto = ?texto, "console do MOD"),
-        Nivel::Aviso => tracing::warn!(mod_id = %quem, texto = ?texto, "console do MOD"),
-        Nivel::Erro => tracing::error!(mod_id = %quem, texto = ?texto, "console do MOD"),
+        Nivel::Depuracao => {
+            tracing::debug!(mod_id = %quem, texto = ?texto, suprimidas, "console do MOD");
+        }
+        Nivel::Informacao => {
+            tracing::info!(mod_id = %quem, texto = ?texto, suprimidas, "console do MOD");
+        }
+        Nivel::Aviso => {
+            tracing::warn!(mod_id = %quem, texto = ?texto, suprimidas, "console do MOD");
+        }
+        Nivel::Erro => {
+            tracing::error!(mod_id = %quem, texto = ?texto, suprimidas, "console do MOD");
+        }
     }
 }
 
@@ -9966,6 +9988,15 @@ mod o_console_do_mod_chega_ao_registro {
     /// Assenta uma linha de console como a bomba assentaria, e devolve o que
     /// sobrou, o rastro, e a fila para conferir que nada foi reservado.
     fn assentar(nivel: NivelDoConsole, texto: &str) -> (Assentada, String, std::sync::Arc<Fila>) {
+        assentar_contando(nivel, texto, 0)
+    }
+
+    /// O mesmo, com quantas linhas o balde segurou antes desta.
+    fn assentar_contando(
+        nivel: NivelDoConsole,
+        texto: &str,
+        suprimidas: u32,
+    ) -> (Assentada, String, std::sync::Arc<Fila>) {
         let mods = std::sync::Mutex::new(ModsNativos::default());
         let fila = std::sync::Arc::new(Fila::default());
         let (assentada, rastro) = capturar(|| {
@@ -9977,11 +10008,40 @@ mod o_console_do_mod_chega_ao_registro {
                 ParaOFora::Console {
                     nivel,
                     texto: texto.to_owned(),
+                    suprimidas,
                 },
                 "seele/perfis",
             )
         });
         (assentada, rastro, fila)
+    }
+
+    /// Nos quatro níveis: um MOD em laço escreve com `log` tanto quanto com
+    /// `error`, e um braço que esquecesse a conta a perderia só no nível dele.
+    #[test]
+    fn a_linha_depois_do_aperto_diz_quantas_ficaram_para_tras() {
+        for (nivel, marca) in [
+            (NivelDoConsole::Depuracao, "DEBUG"),
+            (NivelDoConsole::Informacao, "INFO"),
+            (NivelDoConsole::Aviso, "WARN"),
+            (NivelDoConsole::Erro, "ERROR"),
+        ] {
+            let (_, rastro, _) = assentar_contando(nivel, "de novo", 7);
+            let linha = rastro
+                .lines()
+                .find(|linha| linha.contains("console do MOD"))
+                .unwrap_or_else(|| panic!("a linha {nivel:?} não chegou ao registro: {rastro}"));
+            assert!(
+                linha.contains(marca) && linha.contains("suprimidas=7"),
+                "o registro não diz que houve mais do que ele mostra, e quem lê toma o pouco por \
+                 tudo ({nivel:?}): {linha}"
+            );
+        }
+        let (_, sozinha, _) = assentar(NivelDoConsole::Aviso, "sozinha");
+        assert!(
+            !sozinha.contains("suprimidas"),
+            "uma linha sem aperto ganhou um `suprimidas=0` que só faz barulho: {sozinha}"
+        );
     }
 
     #[test]
