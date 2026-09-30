@@ -250,6 +250,9 @@ notas da 1.0.
   antes do `Hello`, o que conserta o S2b. Na volta pela trilha, a esperada
   passa a ser a impressão guardada, o que conserta o terceiro defeito do link e
   o S3.
+  A recusa dentro do TLS vale no **primeiro contato**. Com pino já gravado
+  para aquele endereço, a regra do ADR 0003 continua: o link que discorda
+  avisa (`InviteDisagrees`) e a conexão segue.
 
 ---
 
