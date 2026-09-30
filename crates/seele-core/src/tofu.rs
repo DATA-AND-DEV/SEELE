@@ -377,8 +377,9 @@ impl TofuVerifier {
     /// - num alvo de escopo local — o endereço da rede de casa do anfitrião,
     ///   que é o primeiro de um link quando ele tem uma —, um servidor da rede
     ///   em que a pessoa está pode atender no mesmo `IP:porta`, já fixado. Ali
-    ///   um pin que confere com a esperada discordando é colisão, e não link
-    ///   velho: um servidor que trocou de chave dá `Changed`.
+    ///   um pin que confere com a esperada discordando é, no caso comum,
+    ///   colisão: um servidor que trocou de chave dá `Changed`, e não
+    ///   `Matches`.
     ///
     /// Nos dois, a impressão prometida vale mais que o pin: a que não confere
     /// vira [`PinDecision::InviteRefused`], dentro do TLS e antes do `Hello`, e

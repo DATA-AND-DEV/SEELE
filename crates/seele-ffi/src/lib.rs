@@ -5166,8 +5166,8 @@ mod tests {
         // link deixa na lista. Para quem visita pela internet, esse endereço se
         // repete de uma casa para outra: na rede em que a pessoa está, outro
         // servidor pode atender nele, já fixado nesta máquina. Ali, um pin que
-        // confere com a esperada discordando é colisão, porque um servidor que
-        // trocou de chave dá `Changed`.
+        // confere com a esperada discordando é, no caso comum, colisão, porque
+        // um servidor que trocou de chave dá `Changed`.
         for alvo in [
             "192.168.0.20:8383",
             "10.0.0.5",

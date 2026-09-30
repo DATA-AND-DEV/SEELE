@@ -45,15 +45,18 @@ uma casa para outra: na rede em que a pessoa está, outro servidor pode atender
 nele, já fixado. Num alvo de escopo local (privado, link-local, CGNAT, ULA), a
 regra é a do candidato que ninguém escolheu, e a impressão prometida vale mais
 que o pino. O porquê: numa LAN, um pino que confere com a esperada discordando
-é colisão, e não link velho, porque um servidor que trocou de chave dá
-`Changed`. Deixá-lo passar mandava o `Hello` a outro servidor e deixava o
-servidor do amigo inalcançável daquela casa.
+é, no caso comum, colisão, porque um servidor que trocou de chave dá `Changed`,
+e não um pino que confere. Deixá-lo passar mandava o `Hello` a outro servidor e
+deixava o servidor do amigo inalcançável daquela casa.
 
 A decisão é pelo endereço resolvido, e não pelo texto: um nome como
 `casa.local` que resolve para a rede de casa é um alvo de escopo local. O
 loopback conta como público, porque é esta máquina em qualquer rede. O preço é
 que, num alvo de LAN, um link ou uma entrada da lista que discorda da chave
-fixada ali é recusado, em vez de entrar com aviso.
+fixada ali é recusado, em vez de entrar com aviso, também quando não é
+colisão: a entrada que a 0.15.0 gravou com a impressão de outro servidor, que
+num alvo público se cura na primeira volta, e um link de antes de o servidor
+trocar de chave, quando esta máquina já fixou a nova.
 
 A regra de onde o pino prova o servidor fica num lugar só, `build_destino`, em
 `crates/seele-ffi/src/lib.rs` (o campo `seele_core::enlace::Destino::o_pino_prova_o_servidor`),

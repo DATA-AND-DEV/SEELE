@@ -110,8 +110,11 @@ pub struct Destino {
     ///   lista. Para quem visita pela internet, esse endereço se repete de uma
     ///   casa para outra, e na rede em que a pessoa está outro servidor pode
     ///   atender nele, já fixado. Ali, um pin que confere com a esperada
-    ///   discordando é colisão, e não link velho: um servidor que trocou de
-    ///   chave dá `Changed`.
+    ///   discordando é, no caso comum, colisão: um servidor que trocou de
+    ///   chave dá `Changed`, e não `Matches`. Os outros casos (uma entrada que
+    ///   a 0.15.0 gravou com a impressão de outro servidor, um link de antes de
+    ///   o servidor trocar de chave, quando esta máquina já fixou a nova) são
+    ///   recusados também, e esse é o preço da regra.
     ///
     /// O loopback conta como público: é esta máquina em qualquer rede. Um nome
     /// decide pelo endereço a que resolveu, e não pelo texto: `casa.local` que
