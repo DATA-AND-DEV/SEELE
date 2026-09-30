@@ -150,9 +150,11 @@ fn confere(esperada: &str, ofertada: &str) -> bool {
 
 /// Turns what the TOFU verifier saw into what to do about it.
 ///
-/// Pure on purpose: the refusal's side effect — removing the pin the verifier
-/// already wrote — belongs to the caller, so this can be tested as the table
-/// it is.
+/// Pure on purpose: what to do to the pin store on a refusal belongs to the
+/// caller, so this can be tested as the table it is. The verifier now refuses a
+/// first contact the invite contradicts inside the TLS handshake, before
+/// pinning anything, so `InviteRefused` no longer reaches here from a real
+/// connection; the caller's cleanup stays as a second line.
 #[must_use]
 pub fn verdict(decision: &PinDecision, expected: Option<&str>) -> Verdict {
     let agrees = |offered: &str| expected.is_none_or(|expected| confere(expected, offered));
@@ -206,10 +208,14 @@ pub trait PinStore: Send + Sync + std::fmt::Debug {
     fn pin(&self, host: &str, fingerprint: String);
     /// Forgets the fingerprint pinned for a host.
     ///
-    /// Exists because refusing a connection is not enough on its own: the
-    /// verifier pins before anyone can judge, so a refusal that left the pin
-    /// behind would let the very next visit — without a link to check against
-    /// — walk into the server that was just rejected.
+    /// Exists because the verifier pins during the TLS handshake, and the
+    /// connection can still fail after that (the control stream, the deadline,
+    /// the credential, the reply). A pin left behind by a handshake that did not
+    /// finish would turn the next visit into a match and let it in without
+    /// hesitation. A refusal by fingerprint no longer needs this: it happens
+    /// inside the handshake, before anything is pinned. What callers undo is
+    /// what their own handshake wrote, and, after a race of candidates, the pin
+    /// nobody had before it when a candidate's deadline ran out mid-handshake.
     fn unpin(&self, host: &str);
 }
 

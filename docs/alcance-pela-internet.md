@@ -284,20 +284,30 @@ e um serviço no meio aprende alguma coisa. O que ele aprende é isto:
 | que o seu endereço falou com o endereço de outra pessoa, e quando | o que foi dito, em texto ou em voz |
 | o endereço público das duas máquinas | quem são vocês, que Server é, quais salas existem |
 | que houve uma tentativa de conexão | se ela deu certo |
+| que uma marca está no ar, e em que endereço, até 60 segundos depois do último aviso do anfitrião: é o que o quarto guarda | de quem é a marca: ela é meia impressão digital, não um nome |
 
 O conteúdo continua ponta a ponta: o TLS 1.3 e a impressão digital do ADR 0003
 são conferidos entre as duas máquinas, e o ponto de encontro não tem por onde ler
-nem por onde se passar por ninguém. Quem chega lê uma resposta dele, o endereço
-de hoje guardado no quarto, mas a impressão esperada, a do link ou a da lista de
-conhecidos, é conferida dentro do TLS antes de qualquer `Hello`: uma resposta
-falsa custa não entrar, e o convite, a senha e o apelido não chegam a quem
-atendeu com a chave errada.
+nem por onde se passar por ninguém. Quem chega com o bilhete do ponto de
+encontro **e** com uma impressão a conferir lê uma resposta dele: o endereço de
+hoje que o anfitrião registrou no quarto, a tabela em memória que o
+[`ponto-de-encontro.md`](ponto-de-encontro.md) descreve. Essa resposta não decide
+em quem se confia: a impressão esperada, a do link ou a da lista de conhecidos,
+é conferida dentro do TLS antes de qualquer `Hello`. Se a chave não confere, o
+convite, a senha e o apelido não chegam a quem atendeu com a chave errada, e uma
+resposta falsa custa não entrar. Isso vale onde o endereço ainda não tem chave
+fixada. Onde tem, vale a regra do ADR 0003: se o servidor dali ainda tem a chave
+fixada, o TLS passa, o `Hello` já sai para ele e só depois a tela avisa que a
+impressão esperada discorda; se a chave dele mudou, a conexão é recusada.
 
 Três coisas fazem parte da decisão, e não são promessas soltas:
 
-- **Ele não guarda nada.** Não há banco nem arquivo: a decisão dele é uma função
-  que recebe um datagrama e devolve outro. Por padrão ele nem imprime quem falou
-  com quem.
+- **Ele guarda pouco, e só em memória.** Não há banco nem arquivo. A resposta a
+  `ONDE` e a `LEVE` continua sendo uma função que recebe um datagrama e devolve
+  outro. O que ele guarda é o quarto: um mapa de marca (meia impressão digital do
+  servidor) para o endereço em que o anfitrião disse morar, com prazo de 60
+  segundos desde o último aviso e teto de 4096 marcas. Nada disso vai a disco, e
+  reiniciar o ponto o esvazia. Por padrão ele nem imprime quem falou com quem.
 - **Ele é opcional.** `SEELE_ENCONTRO=nao` na máquina que hospeda desliga o
   degrau 4, e nenhum pacote sai dali para ponto de encontro nenhum. Tudo o que
   funcionava continua igual.

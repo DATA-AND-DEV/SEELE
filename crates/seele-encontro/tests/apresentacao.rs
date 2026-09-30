@@ -114,9 +114,9 @@ fn o_aviso_chega_ao_anfitriao_com_o_endereco_para_onde_furar() {
         "o aviso chegou sem o endereço para onde furar, que é a única coisa que ele carrega"
     );
 
-    // E nada volta para quem bateu: o visitante não precisa de resposta
-    // nenhuma, e é por isso que um ponto de encontro hostil não tem como
-    // mandá-lo para lugar nenhum.
+    // E nada volta para quem bateu: o `LEVE` é de mão única, e quem entra não
+    // espera resposta a ele. A resposta que quem entra lê é a do quarto, a um
+    // `QUEM`, e não passa por aqui.
     assert!(
         nada_chega(&visitante),
         "o ponto de encontro respondeu a quem só pediu para avisar outro"

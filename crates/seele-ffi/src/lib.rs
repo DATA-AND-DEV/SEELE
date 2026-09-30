@@ -397,7 +397,8 @@ pub struct ConnectStep {
 /// «Tentei quatro candidatos, o primeiro deu prazo esgotado em 4 s, o quarto
 /// recusou» é o dado que faltou quando o teste de campo das duas casas falhou e
 /// ninguém soube dizer por quê. Custa zero em privacidade: todo endereço da
-/// trilha já estava no convite de quem a lê.
+/// trilha já estava com quem a lê, no convite, na lista de conhecidos ou na
+/// resposta do quarto sobre o mesmo servidor.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ConnectFailure {
     /// Por que não deu, do jeito de sempre.
@@ -7877,13 +7878,16 @@ mod a_consulta_ao_quarto {
 /// # A ordem
 ///
 /// O link desta sessão vence a guardada. Ele é o que a pessoa acabou de colar
-/// para este endereço, e a guardada é a impressão que uma conexão anterior
-/// **aceitou** ([`impressao_a_guardar`]). Se os dois discordam, conferir pela
-/// velha recusaria o servidor que a pessoa acabou de pedir. A mesma impressão
-/// forma a marca da pergunta ao quarto (o `connect` do app a usa nas duas
-/// coisas), pela mesma razão: perguntar onde mora uma chave e conferir outra
-/// faria o quarto apontar para o servidor que a conferência recusaria logo em
-/// seguida.
+/// para este endereço, e a guardada é, quase sempre, a impressão que uma conexão
+/// anterior **aceitou** ([`impressao_a_guardar`]). Não é assim numa lista gravada
+/// pela 0.15.0: ela guardava a impressão do link daquela vez qualquer que
+/// tivesse sido o veredito, inclusive quando o link discordava do pino e a
+/// conexão ficou com a chave fixada. Um link colado de novo corrige essa entrada.
+/// Se o link e a guardada discordam, conferir pela velha recusaria o servidor
+/// que a pessoa acabou de pedir. A mesma impressão forma a marca da pergunta ao
+/// quarto (o `connect` do app a usa nas duas coisas), pela mesma razão:
+/// perguntar onde mora uma chave e conferir outra faria o quarto apontar para o
+/// servidor que a conferência recusaria logo em seguida.
 #[must_use]
 pub fn impressao_a_conferir(do_link: Option<&str>, guardada: Option<&str>) -> Option<String> {
     do_link.or(guardada).map(str::to_owned)

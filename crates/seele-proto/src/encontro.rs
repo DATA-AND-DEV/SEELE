@@ -67,8 +67,10 @@
 //!    de mão, antes de qualquer `Hello`: um endereço errado vindo do quarto
 //!    falha ali, e o convite, a senha e o apelido não chegam a quem atendeu com
 //!    a chave errada. O prejuízo é não entrar. Isso vale onde o endereço ainda
-//!    não tem chave fixada; onde tem, a regra do ADR 0003 continua, e a conexão
-//!    fica com a chave fixada, com aviso.
+//!    não tem chave fixada. Onde tem, vale a regra do ADR 0003: se o servidor
+//!    dali ainda tem a chave fixada, o TLS passa, o `Hello` já sai para ele e só
+//!    depois a tela avisa que a impressão esperada discorda; se a chave dele
+//!    mudou, a conexão é recusada.
 //! 2. **Quem escreveu primeiro fica**, enquanto o prazo não vencer. O anfitrião
 //!    reavive o dele a cada quinze segundos, então o lugar só está livre quando
 //!    ele está fora do ar — e aí o que se toma é o lugar de quem não está lá.
@@ -87,14 +89,16 @@
 //! um endereço que o próprio ponto observou. Não há caminho por onde um byte
 //! escolhido por quem manda chegue a quem recebe.
 //!
-//! **Não decide em quem se confia.** Quem recebe o convite lê a resposta do
-//! quarto (o `AQUI` que responde a um `QUEM`), e o endereço que ela traz entra
-//! na lista de candidatos, na frente dos guardados. Um ponto de encontro
-//! hostil, ou quem ocupou a marca, consegue mandar essa conexão para o
-//! endereço errado. O que ele não escolhe é a impressão digital, que sai do
-//! `seele://` ou da lista de conhecidos e é conferida dentro do TLS, antes de
-//! qualquer `Hello` (ADR 0003): um endereço errado falha ali, e não vira
-//! conexão com o impostor. Só que a conferência protege apenas quando há
+//! **Não decide em quem se confia.** Quem chega com o bilhete do ponto de
+//! encontro e com uma impressão a conferir lê a resposta do quarto (o `AQUI`
+//! que responde a um `QUEM`), e o endereço que ela traz entra na lista de
+//! candidatos, na frente dos guardados. Um ponto de encontro hostil, ou quem
+//! ocupou a marca, consegue mandar essa conexão para o endereço errado. O que
+//! ele não escolhe é a impressão digital, que sai do `seele://` ou da lista de
+//! conhecidos e é conferida dentro do TLS, antes de qualquer `Hello` (ADR
+//! 0003): num endereço ainda sem chave fixada, um servidor com a chave errada
+//! falha ali e não vira conexão com o impostor. Onde já há chave fixada vale o
+//! pino, como o item 1 acima escreve. E a conferência protege apenas quando há
 //! impressão digital contra a qual conferir.
 //!
 //! # Amplificação, e por que os pedidos são gordos

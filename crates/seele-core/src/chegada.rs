@@ -17,7 +17,10 @@
 //! «tentei quatro candidatos, qual deu o quê» tenha resposta.
 //!
 //! A trilha **não acrescenta conhecimento**: todo endereço dentro dela já
-//! estava no convite de quem a lê, o que mantém o custo de privacidade em zero.
+//! estava com quem a lê, que o recebeu do que digitou, do convite, da lista de
+//! conhecidos ou da resposta do quarto sobre o mesmo servidor. O custo de
+//! privacidade continua em zero: nenhum deles é novo para quem vê a trilha, e o
+//! endereço que o quarto devolve é do próprio servidor que a pessoa pediu.
 //!
 //! # Três estados que não existem aqui
 //!
@@ -25,16 +28,20 @@
 //! dele não descrevem nada que aconteça neste lado:
 //!
 //! - `DISCOVERING` e `CANDIDATES_FOUND` — quem entra não descobre candidato
-//!   nenhum. Eles chegam prontos no `seele://`, já ordenados e já truncados; a
-//!   descoberta é do outro lado e aconteceu antes deste processo existir.
+//!   nenhum. Eles chegam prontos: do `seele://`, já ordenados e já truncados, da
+//!   lista de conhecidos, ou da resposta do quarto sobre o mesmo servidor, que
+//!   entra na frente (`crate::encontro::onde_mora_hoje`). A descoberta é do
+//!   outro lado e aconteceu antes deste processo existir; ler uma resposta
+//!   pronta não é descobrir.
 //! - `NAT_TRAVERSAL_FAILED` e `DISCOVERY_FAILED` — o que se observa é «todos os
 //!   candidatos falharam». Atribuir isso ao furo é chute, e quem responde por
 //!   quê é o diagnóstico do `connection --rede`, que mede em vez de supor.
 //!
 //! O quarto, `PATH_ESTABLISHED`, era inafirmável enquanto nada deste lado
 //! aprendesse que o furo abriu. Deixou de ser: quem entra **pode ler** o
-//! datagrama `FURO`, porque ele vem do anfitrião e não do ponto de encontro — a
-//! invariante do ADR 0022 é sobre o ponto de encontro. Ele virou
+//! datagrama `FURO`, que vem do anfitrião. Ler o `FURO` não decide em quem se
+//! confia: ele só antecipa o **instante** da tentativa, não escolhe para onde
+//! conectar, e a conferência do aperto de mão continua a mesma. Ele virou
 //! [`Etapa::CaminhoAberto`], com o que está escrito lá.
 //!
 //! # Uso único

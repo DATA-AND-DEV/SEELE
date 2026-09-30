@@ -119,8 +119,9 @@ async fn a_trilha_sobrevive_a_uma_chegada_que_falhou() {
     // recusou» é o dado que faltou quando o teste das duas casas falhou e
     // ninguém soube dizer por quê.
     //
-    // Custa zero em privacidade: todo endereço da trilha já estava no convite de
-    // quem a lê.
+    // Custa zero em privacidade: todo endereço da trilha já estava com quem a
+    // lê, no convite, na lista de conhecidos ou na resposta do quarto sobre o
+    // mesmo servidor.
     let chegada = Chegada::nova(destinos_mortos_de_teste(), None);
     let resultado = chegada.chegar(chave_de_teste(), pins_de_teste()).await;
     assert!(resultado.is_err(), "endereços mortos não conectam");

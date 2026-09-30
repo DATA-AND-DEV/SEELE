@@ -2234,13 +2234,21 @@ não confere **recusa**. Ao fechar esta entrada a recusa vinha depois do aperto 
 mão e desfazia o pin que o TLS já tinha escrito; desde o Plano 1B ela acontece
 **dentro do TLS, antes do `Hello`**: o verificador não fixa a chave que a
 impressão esperada desmente, e o convite, a senha e o apelido não chegam a quem
-atendeu com a chave errada. O aperto não grava pino, então a visita seguinte, sem
-link para conferir, não entra calada no servidor recusado; a limpeza que sobrou
-só desfaz o pino que o próprio aperto escreveu. Contra um servidor já fixado, um
-convite que discorda **avisa** e não derruba: o TOFU já provou que é o servidor
-de ontem, e trancar alguém para fora por causa de um link velho seria o erro
-oposto. As duas cascas leem o mesmo veredito; o `connection` não compara mais
-nada por conta própria.
+atendeu com a chave errada. A recusa não grava pino. Sem pino e sem link, a visita
+seguinte a esse endereço volta a ser PRIMEIRO CONTATO, dito como tal na tela
+(«CHAVE FIXADA… Ninguém confirmou»), e entra se a pessoa digitar o endereço: é o
+TOFU do ADR 0003, e não uma entrada calada num servidor já recusado. Duas
+limpezas de pino sobraram para o aperto que falha por outro motivo, depois de
+fixar: `desfazer_o_pin_deste_aperto` desfaz só o pino que o próprio aperto
+escreveu, e `desfazer_pin_orfao`, depois da corrida de candidatos, apaga o pino
+que ninguém tinha antes dela quando o prazo de um candidato estourou no meio do
+aperto, sem saber quem o escreveu (a chave do vencedor fica). `aplicar_veredito`,
+que desfaz o pino sem perguntar de quem é, ficou como segunda linha e não é
+alcançável em produção: o verificador recusa no TLS o que o `verdict` recusaria.
+Contra um servidor já fixado, um convite que discorda **avisa** e não derruba: o
+TOFU já provou que é o servidor de ontem, e trancar alguém para fora por causa
+de um link velho seria o erro oposto. As duas cascas leem o mesmo veredito; o
+`connection` não compara mais nada por conta própria.
 
 **A segunda ponta, do mesmo fio, também fechou.** O `Session::convite` morre
 com a sessão que ele abriu e é descartado quando o endereço no campo não é o do

@@ -46,18 +46,21 @@ não passa por ali, porque a conversa nunca passou. Por padrão o serviço nem
 e avisa na saída o que passou a registrar, e mesmo com ele ligado o quarto não é
 impresso.
 
-**Ele não decide em quem se confia.** Quem chega a um servidor com o bilhete do
-ponto de encontro na mão, o do link ou o que a lista de conhecidos guardou,
-pergunta ao quarto onde o servidor mora hoje, e lê a resposta: o endereço que
-ela traz entra na frente dos guardados. Um ponto de encontro hostil, ou quem
-ocupou a marca, consegue mandar essa conexão para o endereço errado, ou não
-avisar o anfitrião. O que ele não escolhe é a impressão digital: a esperada, a
-do link ou a da lista, é conferida dentro do aperto de mão TLS, antes de
-qualquer `Hello`. Se a chave não confere, o aperto falha ali, e o convite, a
-senha e o apelido não chegam a quem atendeu com a chave errada. O prejuízo é
-não entrar. Isso vale onde o endereço ainda não tem chave fixada; onde tem,
-vale a regra do ADR 0003, e a conexão fica com a chave fixada, com aviso na
-tela. É o teto do que ele consegue.
+**Ele não decide em quem se confia.** Quem chega com o bilhete do ponto de
+encontro (o do link, ou o que a lista de conhecidos guardou) **e** com uma
+impressão digital a conferir (a do link, ou a da lista) pergunta ao quarto onde
+o servidor mora hoje, e lê a resposta: o endereço que ela traz entra na frente
+dos guardados. Faltando uma das duas, não há pergunta. Um ponto de encontro
+hostil, ou quem ocupou a marca, consegue mandar essa conexão para o endereço
+errado, ou não avisar o anfitrião. O que ele não escolhe é a impressão digital:
+a esperada, a do link ou a da lista, é conferida dentro do aperto de mão TLS,
+antes de qualquer `Hello`. Se a chave não confere, o aperto falha ali, e o
+convite, a senha e o apelido não chegam a quem atendeu com a chave errada. O
+prejuízo é não entrar. Isso vale onde o endereço ainda não tem chave fixada.
+Onde tem, vale a regra do ADR 0003: se o servidor dali ainda tem a chave fixada,
+o TLS passa, o `Hello` já sai para ele e só depois a tela avisa que a impressão
+esperada discorda; se a chave dele mudou, a conexão é recusada. É o teto do que
+ele consegue.
 
 **O link fica com o seu endereço público dentro.** O bilhete (`enc=`) carrega o
 endereço do ponto de encontro e o endereço público da sua escuta de avisos —
