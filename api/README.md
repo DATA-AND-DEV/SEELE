@@ -64,11 +64,17 @@ publicar em vez de antes de existir.
 - **`reads`** — o que um MOD lê do domínio.
 - **`moments`** — quando ele é chamado. São eventos do `ServerMessage`, com os
   nomes que o fio já usa: um relatório de defeito que diz `MessageReceived`
-  acha o mesmo nome no protocolo, sem intermediário. Da API 6 em diante,
-  `moments` e `eventos` são escritos por inteiro em cada versão e não se herdam
-  nem se somam pelo `extends`: o que a versão lista é tudo o que ela promete. O
-  `cargo xtask check-api` reprova a versão que não os escreve e a que lista um
-  nome sem despachante.
+  acha o mesmo nome no protocolo, sem intermediário. **Da v1 à v5, só 5 dos 21
+  momentos são entregues.** A v1 lista 21, a v2 à v5 os herdam pelo `extends`,
+  e `momento_de` (`crates/seele-server/src/mods/despacho.rs`), o único
+  despachante de momentos do servidor, entrega só `PersonJoined`, `PersonLeft`,
+  `MessageReceived`, `MessageEdited` e `MessageRemoved`. Os outros 16 nunca
+  foram entregues: um MOD que espera por `ChannelCreated` espera para sempre,
+  sem erro. A v1 não se edita, e por isso a v6 lista só o que é entregue: da
+  API 6 em diante, `moments` e `eventos` são escritos por inteiro em cada versão
+  e não se herdam nem se somam pelo `extends`, e o que a versão lista é tudo o
+  que ela promete. O `cargo xtask check-api` reprova a versão que não os escreve
+  e a que lista um nome sem despachante.
 - **`actions`** — o que ele manda o servidor fazer. São verbos do
   `ClientMessage`, e passam pelas **mesmas permissões** que a janela atravessa:
   não há caminho paralelo, então não há semântica paralela para divergir.
