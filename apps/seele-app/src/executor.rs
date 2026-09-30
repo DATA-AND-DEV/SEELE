@@ -36,6 +36,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -351,6 +352,70 @@ pub(crate) const TEMPORIZADORES_DE_PE: usize = 256;
 /// ocupada num produto de voz disputa com o áudio.
 pub(crate) const INTERVALO_MINIMO: Duration = Duration::from_millis(4);
 
+/// O nível de uma linha que o MOD escreveu com `console`.
+///
+/// Cinco métodos, quatro níveis: `log` e `info` são a mesma coisa para quem lê
+/// o registro, e separá-los aqui inventaria uma distinção que o autor do MOD
+/// não fez de propósito. Os outros métodos do navegador que escrevem (`dir`,
+/// `table`, `trace` e o `assert` que falha) o prelúdio monta sobre estes cinco.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NivelDoConsole {
+    /// `console.debug` (e `trace`) — o filtro padrão do `seele.log` não o
+    /// escreve, como não escreve o DEBUG do próprio produto.
+    Depuracao,
+    /// `console.log` e `console.info` (e `dir` e `table`).
+    Informacao,
+    /// `console.warn`.
+    Aviso,
+    /// `console.error` (e o `assert` cuja condição é falsa).
+    Erro,
+}
+
+impl NivelDoConsole {
+    /// O nível pelo nome do método que o prelúdio passa.
+    ///
+    /// Um nome desconhecido é informação: um MOD que chama `seele.console`
+    /// direto, com lixo no primeiro argumento, continua sendo ouvido — e não é
+    /// promovido a erro por isso.
+    fn do_metodo(metodo: &str) -> Self {
+        match metodo {
+            "debug" => Self::Depuracao,
+            "warn" => Self::Aviso,
+            "error" => Self::Erro,
+            _ => Self::Informacao,
+        }
+    }
+}
+
+/// Corta uma linha de `console` no teto de uma frase do registro, e diz que
+/// cortou.
+///
+/// **O teto é o da janela**: [`crate::TETO_DA_FRASE_NO_REGISTRO`], os 512
+/// caracteres que `registrar_da_janela` já aplicava ao que a janela escreve.
+/// As duas portas põem no mesmo `seele.log` texto que um terceiro escolheu, e
+/// uma não pode ser mais larga que a outra.
+///
+/// **Não é o [`TETO_DA_MENSAGEM`]**, que foi o primeiro candidato: doze
+/// kibibytes por linha, num MOD que escreve em laço, são megabytes por minuto
+/// num arquivo que só gira na abertura do app (`TETO_DO_LOG`, em `main.rs`).
+/// Uma pilha de erro cortada em 512 caracteres ainda diz o nome, a mensagem e
+/// os primeiros quadros.
+///
+/// Por caracteres, e não por bytes: `chars().take` respeita a fronteira de um
+/// caractere por construção, e cortar por bytes pediria achá-la à mão.
+fn cortar_linha_do_console(texto: String) -> String {
+    let total = texto.chars().count();
+    if total <= crate::TETO_DA_FRASE_NO_REGISTRO {
+        return texto;
+    }
+    let mut cortado: String = texto
+        .chars()
+        .take(crate::TETO_DA_FRASE_NO_REGISTRO)
+        .collect();
+    let _ = write!(cortado, " […cortado: {total} caracteres]");
+    cortado
+}
+
 /// O que entra no executor.
 #[derive(Debug)]
 pub(crate) enum ParaODentro {
@@ -391,6 +456,17 @@ pub(crate) enum ParaOFora {
     Diagnostico {
         /// Quantos temporizadores estão na tabela.
         relogios: usize,
+    },
+    /// Uma linha que o MOD escreveu com `console`.
+    ///
+    /// **Não é fala para a janela**: é registro. Quem a escreve no `seele.log`
+    /// é a bomba, que sabe de quem é o MOD; o executor não sabe, e não precisa
+    /// saber para pôr a linha no canal.
+    Console {
+        /// O nível, do método que o MOD chamou.
+        nivel: NivelDoConsole,
+        /// O texto, já cortado por [`cortar_linha_do_console`].
+        texto: String,
     },
 }
 
@@ -693,8 +769,9 @@ fn rodar(
         return;
     };
 
-    // **A única ponte para fora.** Uma função, e o que ela faz é pôr texto num
-    // canal. Não há aqui disco, rede, IPC nem armazenamento — e a ausência não
+    // **A única ponte para fora.** Duas funções, e o que as duas fazem é pôr
+    // texto num canal: `postar` fala com a janela, `console` fala com o
+    // registro. Não há aqui disco, rede, IPC nem armazenamento — e a ausência não
     // é uma jaula construída com cuidado: é o que um contexto de QuickJS **é**
     // antes de alguém acrescentar coisas a ele.
     //
@@ -704,6 +781,7 @@ fn rodar(
     // e escrevê-lo em Rust não o tornaria mais nosso.
     let saida = manda.clone();
     let contagem = Arc::clone(fila);
+    let linhas = manda.clone();
     let montou = contexto.with(|ctx| -> rquickjs::Result<()> {
         let seele = rquickjs::Object::new(ctx.clone())?;
         seele.set(
@@ -737,6 +815,21 @@ fn rodar(
                     contagem.tirar(quantos);
                     false
                 }
+            })?,
+        )?;
+        // **O `console` do MOD, que não existia.** O prelúdio monta
+        // `console.log/info/warn/error/debug` sobre esta função (e os outros
+        // métodos do navegador sobre esses); ela corta a linha e a põe no
+        // canal, e a bomba a escreve no `seele.log` com o id do MOD. Não
+        // devolve nada e não lança: um registro que derruba o caminho que ele
+        // observa é pior que registro nenhum.
+        seele.set(
+            "console",
+            Function::new(ctx.clone(), move |metodo: String, texto: String| {
+                let _ = linhas.send(ParaOFora::Console {
+                    nivel: NivelDoConsole::do_metodo(&metodo),
+                    texto: cortar_linha_do_console(texto),
+                });
             })?,
         )?;
         ctx.globals().set("seele", seele)?;
@@ -858,7 +951,8 @@ fn rodar(
 ///
 /// A mesma API que o prelúdio do Worker oferece — `SeeleMods.request`,
 /// `SeeleMods.snapshot`, `SeeleUI.regiao`, `SeeleUI.tema` —, montada sobre a
-/// única ponte que existe aqui: `seele.postar`.
+/// ponte que existe aqui: `seele.postar`. O `console` do MOD é montado sobre a
+/// outra função da ponte, `seele.console`, que só escreve no registro.
 ///
 /// **Escrito em JavaScript, e não em Rust**, pela mesma razão do outro: é
 /// código que roda dentro do contexto do MOD, e um MOD pode redefinir o que
@@ -953,6 +1047,62 @@ const PRELUDIO: &str = r#"
       reject(new Error('fila-cheia'));
     }
   });
+
+  // ---- o console ----
+  //
+  // **Um `console` que escreve no registro de quem hospeda.** Ele não
+  // existia: o `console.warn` que o autor escreve justamente no caminho de
+  // erro virava `ReferenceError`, e a falha que ele queria contar virava
+  // outra, que não contava nada.
+  //
+  // O texto é montado aqui e cortado do outro lado: um MOD pode redefinir
+  // tudo isto, e o que contém de verdade é `seele.console`. Nunca lança — um
+  // `console` que derruba o caminho que ele observa é pior que nenhum.
+  const emTexto = (valor) => {
+    if (typeof valor === 'string') return valor;
+    if (valor instanceof Error) {
+      return String(valor.name) + ': ' + String(valor.message)
+        + (valor.stack ? '\n' + String(valor.stack) : '');
+    }
+    if (valor === undefined) return 'undefined';
+    if (typeof valor === 'function') return '[função ' + (valor.name || 'anônima') + ']';
+    if (typeof valor === 'bigint' || typeof valor === 'symbol') return String(valor);
+    try {
+      const json = JSON.stringify(valor);
+      return json === undefined ? String(valor) : json;
+    } catch {
+      return String(valor);
+    }
+  };
+  const escrever = (metodo) => (...partes) => {
+    try { seele.console(metodo, partes.map(emTexto).join(' ')); } catch { /* o registro é de quem hospeda */ }
+  };
+  const assertFalhou = escrever('error');
+  globalThis.console = {
+    log: escrever('log'),
+    info: escrever('info'),
+    warn: escrever('warn'),
+    error: escrever('error'),
+    debug: escrever('debug'),
+    // **Os outros métodos do navegador**, que quem escreve MOD traz de lá.
+    // Sem eles, `console.table(…)` seria o mesmo defeito um passo adiante: um
+    // `TypeError` que a volta inteira relata como «o MOD lançou». Os que
+    // escrevem vão ao nível mais próximo; os que organizam a saída não têm o
+    // que organizar num registro de linhas, e não fazem nada.
+    dir: escrever('info'),
+    table: escrever('info'),
+    trace: escrever('debug'),
+    assert: (ok, ...partes) => { if (!ok) assertFalhou('Assertion failed:', ...partes); },
+    group: () => {},
+    groupCollapsed: () => {},
+    groupEnd: () => {},
+    time: () => {},
+    timeEnd: () => {},
+    timeLog: () => {},
+    count: () => {},
+    countReset: () => {},
+    clear: () => {},
+  };
 
   globalThis.SeeleMods = Object.freeze({
     request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
@@ -1306,7 +1456,7 @@ fn relatar(
 ///
 /// Ela tenta, um por um, os caminhos que a sonda da janela **alcançou**, e
 /// alguns que ela nem tinha como tentar. O resultado sai por `seele.postar`,
-/// que é a única porta.
+/// que é uma das duas portas.
 ///
 /// Escrita aqui e não num arquivo de MOD de propósito: ela é o instrumento
 /// desta medição, e um instrumento que mora junto do que ele mede não sai de
@@ -1387,6 +1537,186 @@ mod testes {
             Some(outro) => panic!("veio {outro:?} em vez de mensagem"),
             None => panic!("o executor não respondeu"),
         }
+    }
+
+    /// As linhas de `console` que chegam antes da mensagem `fim`, em ordem.
+    fn linhas_de_console_ate(
+        executor: &ExecutorQuickJs,
+        fim: &str,
+    ) -> Vec<(NivelDoConsole, String)> {
+        let mut linhas = Vec::new();
+        loop {
+            match executor.receber(Duration::from_secs(5)) {
+                Some(ParaOFora::Console { nivel, texto, .. }) => linhas.push((nivel, texto)),
+                Some(ParaOFora::Mensagem(json)) if json == fim => return linhas,
+                outro => panic!("esperava linhas de console e depois «{fim}», e veio {outro:?}"),
+            }
+        }
+    }
+
+    /// **Um MOD que chama `console.warn` não lança, e a linha sai do motor.**
+    ///
+    /// O executor nativo não definia `console`, e o `console.warn` que o autor
+    /// escreve justamente no caminho de erro virava `ReferenceError` — a falha
+    /// que ele queria contar virava outra, e a volta inteira saía como «o MOD
+    /// lançou». Se o `console` sair do prelúdio, este teste reprova com o nome
+    /// do erro na mensagem.
+    #[test]
+    fn um_mod_que_chama_console_warn_nao_lanca_e_a_linha_sai() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "try {\
+                   console.warn('avatar recusado:', { bytes: 12 }, 3, undefined, null);\
+                   seele.postar('fim');\
+                 } catch (erro) {\
+                   seele.postar('lançou ' + erro.name + ': ' + erro.message);\
+                 }",
+            )
+            .expect("código");
+        let mut linhas = Vec::new();
+        let depois = loop {
+            match executor.receber(Duration::from_secs(5)) {
+                Some(ParaOFora::Console { nivel, texto, .. }) => linhas.push((nivel, texto)),
+                Some(ParaOFora::Mensagem(json)) => break json,
+                outro => panic!("veio {outro:?} em vez da linha de console e da mensagem"),
+            }
+        };
+        assert_eq!(
+            depois, "fim",
+            "o `console` do MOD lançou em vez de escrever: {depois}"
+        );
+        assert_eq!(
+            linhas,
+            vec![(
+                NivelDoConsole::Aviso,
+                "avatar recusado: {\"bytes\":12} 3 undefined null".to_owned()
+            )],
+            "a linha do console não chegou como o MOD a escreveu"
+        );
+    }
+
+    /// **Cada método tem o seu nível**, e um `Error` chega com nome e mensagem.
+    #[test]
+    fn cada_metodo_do_console_escreve_no_seu_nivel() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "console.debug('d'); console.log('l'); console.info('i');\
+                 console.warn('w'); console.error(new Error('quebrou'));\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        let linhas = linhas_de_console_ate(&executor, "fim");
+        let niveis: Vec<NivelDoConsole> = linhas.iter().map(|(nivel, _)| *nivel).collect();
+        assert_eq!(
+            niveis,
+            vec![
+                NivelDoConsole::Depuracao,
+                NivelDoConsole::Informacao,
+                NivelDoConsole::Informacao,
+                NivelDoConsole::Aviso,
+                NivelDoConsole::Erro,
+            ],
+            "um método do console caiu no nível de outro, e o filtro do seele.log o trataria errado"
+        );
+        let erro = &linhas.last().expect("a linha do erro").1;
+        assert!(
+            erro.starts_with("Error: quebrou"),
+            "um `Error` passado ao console perdeu o nome e a mensagem: {erro}"
+        );
+    }
+
+    /// **Os outros métodos do `console` do navegador também existem**, e
+    /// nenhum lança.
+    ///
+    /// Quem escreve MOD vem do navegador, e lá `table`, `group` e `assert`
+    /// existem. Um `console` só com os cinco que os MODs publicados usam
+    /// adiaria o mesmo defeito de um passo: `console.table(…)` viraria
+    /// `TypeError`, e a volta inteira sairia de novo como «o MOD lançou».
+    ///
+    /// Os que escrevem escrevem no nível mais próximo (`dir` e `table` em
+    /// informação, `trace` em depuração, `assert` em erro e só quando a
+    /// condição é falsa). Os que organizam a saída — `group*`, `time*`,
+    /// `count*` e `clear` — não têm o que organizar num registro de linhas, e
+    /// não fazem nada.
+    #[test]
+    fn os_outros_metodos_do_console_do_navegador_existem_e_nao_lancam() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "try {\
+                   console.table({}); console.dir({ a: 1 }); console.trace('t');\
+                   console.group(); console.groupCollapsed('g'); console.groupEnd();\
+                   console.time(); console.timeLog(); console.timeEnd();\
+                   console.count(); console.countReset(); console.clear();\
+                   console.assert(true, 'não sai'); console.assert(false, 'x');\
+                   seele.postar('fim');\
+                 } catch (erro) {\
+                   seele.postar('lançou ' + erro.name + ': ' + erro.message);\
+                 }",
+            )
+            .expect("código");
+        let mut linhas = Vec::new();
+        let depois = loop {
+            match executor.receber(Duration::from_secs(5)) {
+                Some(ParaOFora::Console { nivel, texto, .. }) => linhas.push((nivel, texto)),
+                Some(ParaOFora::Mensagem(json)) => break json,
+                outro => panic!("veio {outro:?} em vez das linhas de console e da mensagem"),
+            }
+        };
+        assert_eq!(
+            depois, "fim",
+            "um método do `console` do navegador faltou, e o MOD que o chamou lançou: {depois}"
+        );
+        assert_eq!(
+            linhas,
+            vec![
+                (NivelDoConsole::Informacao, "{}".to_owned()),
+                (NivelDoConsole::Informacao, "{\"a\":1}".to_owned()),
+                (NivelDoConsole::Depuracao, "t".to_owned()),
+                (NivelDoConsole::Erro, "Assertion failed: x".to_owned()),
+            ],
+            "um método do console do navegador escreveu no nível errado, escreveu o que não \
+             devia (um `assert` verdadeiro, um `group`) ou não escreveu o que devia"
+        );
+    }
+
+    /// **Uma linha grande demais é cortada no teto de uma frase do registro.**
+    ///
+    /// O mesmo teto da janela, [`crate::TETO_DA_FRASE_NO_REGISTRO`]: as duas
+    /// portas escrevem no mesmo `seele.log`, e a linha cortada diz que foi.
+    #[test]
+    fn uma_linha_de_console_grande_demais_e_cortada_e_diz_que_foi() {
+        let executor = executor();
+        executor
+            .iniciar("console.log('a' + 'é'.repeat(1000)); seele.postar('fim');")
+            .expect("código");
+        let linhas = linhas_de_console_ate(&executor, "fim");
+        let [(nivel, texto)] = linhas.as_slice() else {
+            panic!("esperava uma linha de console, vieram {linhas:?}");
+        };
+        assert_eq!(
+            *nivel,
+            NivelDoConsole::Informacao,
+            "o `console.log` caiu noutro nível"
+        );
+        let (corpo, aviso) = texto
+            .split_once(" […cortado: ")
+            .unwrap_or_else(|| panic!("a linha grande chegou sem dizer que foi cortada: {texto}"));
+        assert_eq!(
+            corpo.chars().count(),
+            crate::TETO_DA_FRASE_NO_REGISTRO,
+            "a linha passou do teto de uma frase do registro"
+        );
+        assert!(
+            corpo.starts_with('a') && corpo.chars().skip(1).all(|c| c == 'é'),
+            "o corte trocou ou partiu caracteres: {corpo}"
+        );
+        assert_eq!(
+            aviso, "1001 caracteres]",
+            "o corte não diz quanto a linha tinha"
+        );
     }
 
     /// **A fronteira do QuickJS, medida** — etapa E1.

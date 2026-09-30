@@ -2262,6 +2262,14 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     }
 }
 
+/// **O maior pedaço de texto de terceiro que uma linha do `seele.log` leva.**
+///
+/// Quinhentos e doze caracteres, o número que `registrar_da_janela` já usava
+/// escrito à mão. Nomeado quando o `console` dos MODs passou a escrever no
+/// mesmo arquivo: as duas portas põem lá texto que um terceiro escolheu, e o
+/// teto de uma não pode divergir do da outra por esquecimento.
+const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
+
 /// **A janela também escreve no registro.**
 ///
 /// Ela não tinha como. Todo o caminho de um pedido de MOD é observável no Rust
@@ -2281,7 +2289,7 @@ fn registrar_da_janela(nivel: String, onde: String, o_que: String) {
     // Cortado aqui, e não confiando em quem chama: uma frase sem teto vinda da
     // janela é uma linha de registro sem teto no disco de quem hospeda.
     let onde: String = onde.chars().take(64).collect();
-    let o_que: String = o_que.chars().take(512).collect();
+    let o_que: String = o_que.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
     match nivel.as_str() {
         "aviso" => tracing::warn!(onde = %onde, "{o_que}"),
         "erro" => tracing::error!(onde = %onde, "{o_que}"),
@@ -3801,6 +3809,13 @@ fn assentar_fala(
             tracing::debug!(mod_id = %quem, relogios, "diagnóstico de MOD nativo");
             return Assentada::Nada;
         }
+        executor::ParaOFora::Console { nivel, texto } => {
+            // **Registro, e não fala.** Não entra em fila da janela, não
+            // reserva crédito e não toma o cadeado da supervisão: a linha vai
+            // para o `seele.log` e acabou.
+            registrar_console_do_mod(quem, nivel, &texto);
+            return Assentada::Nada;
+        }
     };
     tracing::debug!(mod_id = %quem, tipo, "fala de MOD nativo");
 
@@ -3851,6 +3866,28 @@ fn assentar_fala(
     // evento sem corpo ainda ocupa memória enquanto a janela não o processa.
     Assentada::Guardada {
         avisar: instancia.precisa_avisar(),
+    }
+}
+
+/// **O que um MOD escreveu com `console`, no `seele.log`.**
+///
+/// Com o id do MOD num campo próprio e o nível que ele escolheu: `warn` é
+/// WARN, `error` é ERROR, `log` e `info` são INFO, e `debug` é DEBUG — que o
+/// filtro padrão não escreve, como não escreve o DEBUG do próprio produto.
+///
+/// Em 23/09, descobrir que o avatar do PERFIS carregava levou uma hora de
+/// medição e um reinício com `RUST_LOG=debug`.
+///
+/// **O texto vai em `?`, e não solto na frase.** Ele é de um terceiro, e uma
+/// quebra de linha nele escreveria no registro uma segunda linha com a cara de
+/// uma linha do produto. Em `?` ela sai escapada, entre aspas.
+fn registrar_console_do_mod(quem: &str, nivel: executor::NivelDoConsole, texto: &str) {
+    use executor::NivelDoConsole as Nivel;
+    match nivel {
+        Nivel::Depuracao => tracing::debug!(mod_id = %quem, texto = ?texto, "console do MOD"),
+        Nivel::Informacao => tracing::info!(mod_id = %quem, texto = ?texto, "console do MOD"),
+        Nivel::Aviso => tracing::warn!(mod_id = %quem, texto = ?texto, "console do MOD"),
+        Nivel::Erro => tracing::error!(mod_id = %quem, texto = ?texto, "console do MOD"),
     }
 }
 
@@ -9858,5 +9895,162 @@ mod a_janela_sabe_de_onde_veio_a_impressao {
                  a frase da lista nunca aparece ali"
             );
         }
+    }
+}
+
+/// **O rastro de um teste, capturado.**
+///
+/// Os guardas de diagnóstico desta casca perguntam «o `seele.log` diz isto?»,
+/// e a resposta honesta é ler o que o `tracing` escreveu — com o formatador
+/// que `main` arma, sem hora e sem cor.
+///
+/// **Vale para a thread corrente, e só para ela**: `with_default` é por thread.
+/// O que roda noutra — a thread do motor, a bomba — não aparece aqui, e por
+/// isso os testes chamam na própria thread a função que escreve (hoje,
+/// `assentar_fala`; as tarefas seguintes acrescentam as delas).
+#[cfg(test)]
+mod rastro_de_teste {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    /// Onde o formatador escreve, dividido com quem lê depois.
+    #[derive(Clone, Default)]
+    struct Captura(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captura {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("o rastro capturado")
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Roda `o_que` com um rastro só dele, e devolve o resultado e o texto.
+    ///
+    /// Todos os níveis, do TRACE para cima: um guarda que confere que algo
+    /// **não** saiu como WARN precisa ver que saiu como DEBUG.
+    pub(crate) fn capturar<T>(o_que: impl FnOnce() -> T) -> (T, String) {
+        let captura = Captura::default();
+        let escreve = captura.clone();
+        let assinante = tracing_subscriber::fmt()
+            .with_writer(move || escreve.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .without_time()
+            .with_ansi(false)
+            .finish();
+        let resultado = tracing::subscriber::with_default(assinante, o_que);
+        let bytes = captura.0.lock().expect("o rastro capturado").clone();
+        (
+            resultado,
+            String::from_utf8(bytes).expect("o rastro é UTF-8"),
+        )
+    }
+}
+
+/// **O `console` de um MOD chega ao `seele.log`, com o id e o nível.**
+///
+/// Pelo caminho real: a mesma `assentar_fala` que a bomba chama para cada fala
+/// do executor, chamada na thread do teste para o rastro ser capturável.
+#[cfg(test)]
+mod o_console_do_mod_chega_ao_registro {
+    use super::{assentar_fala, Assentada, ModsNativos};
+    use crate::executor::{Fila, NivelDoConsole, ParaOFora};
+    use crate::rastro_de_teste::capturar;
+
+    /// Assenta uma linha de console como a bomba assentaria, e devolve o que
+    /// sobrou, o rastro, e a fila para conferir que nada foi reservado.
+    fn assentar(nivel: NivelDoConsole, texto: &str) -> (Assentada, String, std::sync::Arc<Fila>) {
+        let mods = std::sync::Mutex::new(ModsNativos::default());
+        let fila = std::sync::Arc::new(Fila::default());
+        let (assentada, rastro) = capturar(|| {
+            assentar_fala(
+                &mods,
+                &|| true,
+                &fila,
+                1,
+                ParaOFora::Console {
+                    nivel,
+                    texto: texto.to_owned(),
+                },
+                "seele/perfis",
+            )
+        });
+        (assentada, rastro, fila)
+    }
+
+    #[test]
+    fn um_console_warn_sai_como_warn_com_o_id_do_mod() {
+        let (assentada, rastro, fila) =
+            assentar(NivelDoConsole::Aviso, "avatar recusado: 12 bytes");
+        assert_eq!(
+            assentada,
+            Assentada::Nada,
+            "uma linha de console virou fala para a janela, e ocuparia a cota dela"
+        );
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("console do MOD"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "o console do MOD não chegou ao registro — é o `console.warn` do caminho \
+                     de erro sumindo em silêncio: {rastro}"
+                )
+            });
+        for pedaco in [
+            "WARN",
+            "mod_id=seele/perfis",
+            "texto=\"avatar recusado: 12 bytes\"",
+        ] {
+            assert!(
+                linha.contains(pedaco),
+                "a linha do console não traz `{pedaco}`, e é por ele que quem lê o registro \
+                 acha o MOD e o que ele disse: {linha}"
+            );
+        }
+        assert_eq!(
+            (fila.ocupacao(), fila.avisos_de_pe()),
+            ((0, 0), 0),
+            "a linha de console tomou crédito da fila da janela"
+        );
+    }
+
+    #[test]
+    fn cada_nivel_do_console_vira_o_mesmo_nivel_no_registro() {
+        for (nivel, marca) in [
+            (NivelDoConsole::Depuracao, "DEBUG"),
+            (NivelDoConsole::Informacao, "INFO"),
+            (NivelDoConsole::Aviso, "WARN"),
+            (NivelDoConsole::Erro, "ERROR"),
+        ] {
+            let (_, rastro, _) = assentar(nivel, "linha");
+            let linha = rastro
+                .lines()
+                .find(|linha| linha.contains("console do MOD"))
+                .unwrap_or_else(|| panic!("{nivel:?} não chegou ao registro: {rastro}"));
+            assert!(
+                linha.contains(marca),
+                "`{nivel:?}` saiu com outro nível, e o filtro do seele.log o trataria como \
+                 outra coisa: {linha}"
+            );
+        }
+    }
+
+    #[test]
+    fn uma_quebra_de_linha_do_mod_nao_forja_outra_linha_no_registro() {
+        let (_, rastro, _) = assentar(
+            NivelDoConsole::Aviso,
+            "primeira\n WARN seele_app: linha que o produto não escreveu",
+        );
+        assert_eq!(
+            rastro.lines().count(),
+            1,
+            "um MOD escreveu uma segunda linha no seele.log, com a cara de uma linha do produto: {rastro}"
+        );
     }
 }
