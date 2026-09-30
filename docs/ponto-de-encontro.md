@@ -12,7 +12,9 @@ Se você só quer entender por que "não conecta", o documento é o outro:
 Ele diz a quem manda um pacote qual é o endereço de onde aquele pacote veio — ou
 conta isso a um terceiro endereço, quando quem manda pede.
 
-É só isso. Não há mais nada.
+E guarda, em memória e por um minuto, o endereço em que cada anfitrião disse
+morar, para dizê-lo a quem perguntar por ele: é **o quarto**, descrito abaixo.
+Não há mais nada.
 
 Nenhuma máquina atrás de NAT sabe o próprio endereço público: o roteador
 reescreve isso na saída e o interior nunca vê o resultado. Alguém de fora precisa
@@ -28,7 +30,8 @@ passam por ele**, e o TLS 1.3 e o TOFU do ADR 0003 continuam ponta a ponta.
 custo que o ADR 0022 nomeia em voz alta, e não há como ter o degrau 4 sem ele.
 
 **Nada do que é dito.** Ele não vê conteúdo nem chave; não teria o que fazer com
-eles se visse, porque o que passa por ali são três linhas de texto com endereços.
+eles se visse, porque o que passa por ali são linhas curtas de texto com marcas
+e endereços.
 
 **Quase nada guardado.** Não há banco nem arquivo. A resposta a `ONDE` e a `LEVE`
 continua sendo uma função que recebe um datagrama e devolve outro
@@ -37,16 +40,20 @@ passam por **o quarto**, que existe desde 2026-09-03: um mapa de
 `marca → endereço`, em memória, com prazo de 60 segundos e teto de 4096 marcas
 (ADR 0022, «O quarto, e por que a recusa foi revista»). O `MORO` escreve nele, e
 a resposta a `QUEM` sai dele; a função sem estado, sozinha, cala o `QUEM` e
-responde o `MORO` como um `ONDE`. O quarto esvazia sozinho — nada sobrevive a um
-reinício — e não vai a disco em nenhum momento.
+responde o `MORO` como um `ONDE`. Os 60 segundos são a validade de uma entrada,
+contados do último `MORO`, e não o tempo que ela leva para sumir: vencida, ela
+deixa de responder ao `QUEM`, e continua na memória até o quarto encher (aí o
+que venceu é varrido), um `MORO` novo da mesma marca a substituir, ou o ponto
+reiniciar. Nada sobrevive a um reinício, e nada vai a disco em nenhum momento.
 
 O que o operador do ponto de encontro consegue **ler** por causa do quarto: que
-uma marca está no ar, e em que endereço. Nada além disso — a marca é meia
-impressão digital, não um nome nem um endereço de e-mail, e quem falou com quem
-não passa por ali, porque a conversa nunca passou. Por padrão o serviço nem
-**imprime** isto — `--barulhento` liga a impressão para investigar um problema,
-e avisa na saída o que passou a registrar, e mesmo com ele ligado o quarto não é
-impresso.
+uma marca está no ar, ou esteve até a última varredura, e em que endereço. Nada
+além disso — a marca são os 16 primeiros dos 64 caracteres da impressão digital
+do servidor (e uma letra), não um nome nem um endereço de e-mail, e quem falou
+com quem não passa por ali, porque a conversa nunca passou. Por padrão o serviço
+nem **imprime** isto — `--barulhento` liga a impressão para investigar um
+problema, e avisa na saída o que passou a registrar, e mesmo com ele ligado o
+quarto não é impresso.
 
 **Ele não decide em quem se confia.** Quem chega com o bilhete do ponto de
 encontro (o do link, ou o que a lista de conhecidos guardou) **e** com uma
@@ -58,11 +65,12 @@ errado, ou não avisar o anfitrião. O que ele não escolhe é a impressão digi
 a esperada, a do link ou a da lista, é conferida dentro do aperto de mão TLS,
 antes de qualquer `Hello`. Se a chave não confere, o aperto falha ali, e o
 convite, a senha e o apelido não chegam a quem atendeu com a chave errada. O
-prejuízo é não entrar. Isso vale onde o endereço ainda não tem chave fixada.
-Onde tem, vale a regra do ADR 0003: se o servidor dali ainda tem a chave fixada,
-o TLS passa, o `Hello` já sai para ele e só depois a tela avisa que a impressão
-esperada discorda; se a chave dele mudou, a conexão é recusada. É o teto do que
-ele consegue.
+prejuízo é não entrar. Isso vale também onde esta máquina já fixou uma chave
+naquele endereço: o endereço que o quarto devolve, quando entra na corrida, é
+um candidato que a pessoa não escolheu, e ali um pino que confere não passa por
+cima da impressão esperada (o adendo de 2026-09-29 ao ADR 0003). Se a chave
+fixada ali mudou, a conexão é recusada do mesmo jeito. É o teto do que ele
+consegue.
 
 **O link fica com o seu endereço público dentro.** O bilhete (`enc=`) carrega o
 endereço do ponto de encontro e o endereço público da sua escuta de avisos —
@@ -136,7 +144,9 @@ WantedBy=multi-user.target
 de escrita em lugar nenhum — não há o que persistir.
 
 Reiniciá-lo no meio de uma apresentação custa a repetição de um datagrama de 96
-bytes. Não há estado para perder porque não há estado.
+bytes, e esvazia o quarto, que é o único estado dele. Cada anfitrião volta ao
+quarto no reavivamento seguinte, a cada quinze segundos; até lá, quem pergunta
+por ele não o acha no quarto e tenta os endereços que já tinha.
 
 ### Conferir que ele está mesmo no ar
 
@@ -175,8 +185,10 @@ tempo — é o que separa este produto do que ele existe para não ser.
 
 ## Se você for mexer no código
 
-O protocolo — três linhas de texto e uma função sem estado — está em
-`crates/seele-proto/src/encontro.rs`. O serviço, em `crates/seele-encontro/`. O
+O protocolo — quatro verbos que chegam ao ponto (`ONDE`, `LEVE`, `MORO` e
+`QUEM`), a resposta `AQUI`, e uma função sem estado que decide o `ONDE` e o
+`LEVE` — está em `crates/seele-proto/src/encontro.rs`. O quarto, que guarda o
+`MORO` e responde ao `QUEM`, e o serviço estão em `crates/seele-encontro/`. O
 lado de quem hospeda, em `crates/seele-server/src/alcance/encontro.rs`; o de quem
 entra, em `crates/seele-core/src/encontro.rs`. O bilhete que viaja no link é o
 `enc=` de `crates/seele-proto/src/uri.rs`.

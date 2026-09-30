@@ -20,7 +20,9 @@
 //! estava com quem a lê, que o recebeu do que digitou, do convite, da lista de
 //! conhecidos ou da resposta do quarto sobre o mesmo servidor. O custo de
 //! privacidade continua em zero: nenhum deles é novo para quem vê a trilha, e o
-//! endereço que o quarto devolve é do próprio servidor que a pessoa pediu.
+//! endereço que o quarto devolve é o que ele **diz ser** do servidor que a
+//! pessoa pediu. Um ponto hostil, ou quem ocupou a marca, pode apontar para
+//! outro; quem decide se é o servidor é a impressão, conferida dentro do TLS.
 //!
 //! # Três estados que não existem aqui
 //!

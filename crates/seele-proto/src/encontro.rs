@@ -53,8 +53,10 @@
 //!
 //! **Que uma marca está no ar, e em que endereço.** É metadado vivo, e é
 //! exatamente o que o ADR não queria que existisse. O que ele **não** entrega
-//! continua não entregando: quem falou com quem não passa por aqui, e a marca é
-//! meia impressão digital — um número, não um nome.
+//! continua não entregando: quem falou com quem não passa por aqui, e a marca
+//! são os 16 primeiros dos 64 caracteres da impressão digital do servidor (com
+//! uma letra no fim, nas duas marcas que moram no quarto; ver [`Marcas`]) — um
+//! número, não um nome.
 //!
 //! ## Por que ninguém rouba o lugar de ninguém
 //!
@@ -66,11 +68,13 @@
 //!    esperada vem do link ou da lista de conhecidos, e é conferida no aperto
 //!    de mão, antes de qualquer `Hello`: um endereço errado vindo do quarto
 //!    falha ali, e o convite, a senha e o apelido não chegam a quem atendeu com
-//!    a chave errada. O prejuízo é não entrar. Isso vale onde o endereço ainda
-//!    não tem chave fixada. Onde tem, vale a regra do ADR 0003: se o servidor
-//!    dali ainda tem a chave fixada, o TLS passa, o `Hello` já sai para ele e só
-//!    depois a tela avisa que a impressão esperada discorda; se a chave dele
-//!    mudou, a conexão é recusada.
+//!    a chave errada. O prejuízo é não entrar. Isso vale também onde esta
+//!    máquina já fixou uma chave naquele endereço: o endereço que o quarto
+//!    devolve entra como um candidato que a pessoa não escolheu (quando é o
+//!    próprio endereço escolhido, não entra de novo), e ali um pino que
+//!    confere não passa por cima da impressão esperada (o adendo de
+//!    2026-09-29 ao ADR 0003). Se a chave fixada ali mudou, a conexão é
+//!    recusada do mesmo jeito.
 //! 2. **Quem escreveu primeiro fica**, enquanto o prazo não vencer. O anfitrião
 //!    reavive o dele a cada quinze segundos, então o lugar só está livre quando
 //!    ele está fora do ar — e aí o que se toma é o lugar de quem não está lá.
@@ -96,10 +100,10 @@
 //! ocupou a marca, consegue mandar essa conexão para o endereço errado. O que
 //! ele não escolhe é a impressão digital, que sai do `seele://` ou da lista de
 //! conhecidos e é conferida dentro do TLS, antes de qualquer `Hello` (ADR
-//! 0003): num endereço ainda sem chave fixada, um servidor com a chave errada
-//! falha ali e não vira conexão com o impostor. Onde já há chave fixada vale o
-//! pino, como o item 1 acima escreve. E a conferência protege apenas quando há
-//! impressão digital contra a qual conferir.
+//! 0003): um servidor com a chave errada falha ali e não vira conexão com o
+//! impostor, também num endereço que esta máquina já fixou com a chave de
+//! outro, como o item 1 acima escreve. E a conferência protege apenas quando
+//! há impressão digital contra a qual conferir.
 //!
 //! # Amplificação, e por que os pedidos são gordos
 //!
@@ -141,8 +145,9 @@ const ENCHIMENTO: u8 = b'.';
 
 /// Quantos caracteres uma marca pode ter.
 ///
-/// 32 cabe uma impressão digital pela metade, que é o uso previsto — ver
-/// [`Marca`].
+/// 32 é a metade dos 64 caracteres de uma impressão digital, com folga para o
+/// uso previsto: os 16 primeiros, e uma letra no fim das marcas que moram no
+/// quarto — ver [`Marca`] e [`Marcas`].
 pub const LIMITE_DA_MARCA: usize = 32;
 
 /// A etiqueta que volta na resposta, e o único campo que quem pede escolhe.
@@ -155,12 +160,14 @@ pub const LIMITE_DA_MARCA: usize = 32;
 /// # Para que ela serve de verdade
 ///
 /// Para o anfitrião saber quem bateu. Ele conhece a marca que ele mesmo mandou,
-/// e conhece a que quem tem o convite vai usar — os primeiros dígitos da
-/// impressão digital dele, que está no `seele://` e em nenhum outro lugar. Uma
+/// e conhece a que quem teve o convite vai usar — os primeiros dígitos da
+/// impressão digital dele. Quem entra os tira do `seele://`, ou da lista de
+/// conhecidos, que guardou a impressão de um link; e quem opera o ponto de
+/// encontro os lê no começo das marcas que o anfitrião registra no quarto. Uma
 /// marca que não é nenhuma das duas é ruído da internet, e não vira furo de NAT
 /// nenhum.
 ///
-/// Não é autenticação e não tenta ser: quem tem o link, tem. É o que impede um
+/// Não é autenticação e não tenta ser: quem teve o link, tem. É o que impede um
 /// varredor de portas de fazer um servidor mandar pacotes para onde ele quiser.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marca(String);
@@ -362,9 +369,12 @@ fn encher(mut linha: String) -> Vec<u8> {
 /// A decisão inteira de um ponto de encontro, sem estado e sem rede.
 ///
 /// Recebe o datagrama e de onde ele veio; devolve o que mandar e para quem, ou
-/// `None` para calar. É uma função livre porque o ponto de encontro **é** uma
-/// função livre: o processo que a chama não guarda nada entre um datagrama e o
-/// outro, e não é possível fazê-lo guardar sem mudar esta assinatura.
+/// `None` para calar. É uma função livre porque a decisão sobre `ONDE` e `LEVE`
+/// é: o que ela responde depende só do datagrama e de onde ele veio, e não é
+/// possível fazê-la guardar nada entre um datagrama e o outro sem mudar esta
+/// assinatura. O processo que a chama guarda uma coisa, o quarto
+/// (`seele_encontro::Quarto`), por onde passam `MORO` e `QUEM`; ele fica fora
+/// daqui, e o custo dele está escrito no cabeçalho deste módulo.
 ///
 /// # Quando ela cala, e por quê
 ///

@@ -426,14 +426,19 @@ pub enum Trust {
     },
     /// The pin matches and nothing contradicts it. Nothing to say.
     Known,
-    /// First contact, and the invite named a different key. Refused.
+    /// A impressão esperada (a do link, ou a da lista) nomeava outra chave, e
+    /// nenhum pino prova o servidor. Recusado.
+    ///
+    /// Nasce no primeiro contato, e também sobre um pino que confere onde ele
+    /// não prova o servidor: um candidato que a pessoa não escolheu, ou um alvo
+    /// de escopo local (`seele_core::tofu::TofuVerifier::decide`).
     ///
     /// O verificador TLS do núcleo recusa este caso dentro do aperto de mão,
-    /// antes do `Hello`, então ele nunca atravessa como `Trust`: chega como
-    /// [`ConnectionError::InviteMismatch`]. O braço existe para o `match`
-    /// continuar exaustivo.
+    /// antes do `Hello`, então ele nunca atravessa como `Trust`: pode chegar
+    /// como [`ConnectionError::InviteMismatch`] (ver [`Self::InviteDisagrees`]
+    /// para quando chega). O braço existe para o `match` continuar exaustivo.
     InviteRefused {
-        /// What the link promised.
+        /// O que a impressão esperada prometia: a do link, ou a da lista.
         expected: String,
         /// What the server offered.
         offered: String,
@@ -446,8 +451,10 @@ pub enum Trust {
     /// (`seele_core::tofu::TofuVerifier::decide`). Ali o pino é a prova de
     /// continuidade do ADR 0003: é o mesmo servidor de antes, e quem está
     /// errado é quem prometeu a outra chave. Num candidato que ninguém
-    /// escolheu, ou num alvo de escopo local, o mesmo caso chega como
-    /// [`ConnectionError::InviteMismatch`].
+    /// escolheu, ou num alvo de escopo local, o mesmo caso é recusado dentro do
+    /// TLS e pode chegar como [`ConnectionError::InviteMismatch`]: chega quando
+    /// nenhum candidato entra e ela é a falha que a corrida mostra; nos outros
+    /// casos, a recusa fica no `seele.log`.
     ///
     /// A casca diz quem prometeu: o `connect` do app sabe se a impressão veio
     /// do link ou da lista, e a frase de um não serve para o outro.
@@ -1905,15 +1912,18 @@ pub enum ConnectionError {
         /// What was offered now.
         offered: String,
     },
-    /// The invite named one key and the server offered another.
+    /// A impressão esperada (a do link colado nesta sessão, ou a que a lista de
+    /// servidores guardou) nomeava uma chave, e quem atendeu ofereceu outra.
     ///
-    /// ADR 0006, and deliberately not [`ConnectionError::PinChanged`]: nothing was
-    /// ever pinned here, or what was pinned does not vouch for the server — it
-    /// belongs to an address the person did not choose (a candidate from the
-    /// invite, the list or the rendezvous room), or to a target of local scope
-    /// (a LAN address, the same from one home to the next) —, so the shell's
-    /// key-change alarm would name the wrong culprit. What failed is the link,
-    /// not the server's continuity.
+    /// ADR 0006, e de propósito não [`ConnectionError::PinChanged`]: nada estava
+    /// fixado aqui, ou o que estava não prova o servidor — é de um endereço que
+    /// a pessoa não escolheu (um candidato do convite, da lista ou do quarto do
+    /// ponto de encontro), ou de um alvo de escopo local (um endereço de LAN, o
+    /// mesmo de uma casa para outra) —, e o alarme de chave trocada da casca
+    /// acusaria o culpado errado. O que falhou é a promessa, do link ou da
+    /// lista, e não a continuidade do servidor. A casca diz de quem era a
+    /// promessa: o `connect` do app sabe se a impressão veio do link ou da
+    /// lista.
     ///
     /// **Recusada dentro do TLS, antes do `Hello`**: o convite, a senha e o
     /// apelido (e, com eles, a chave e a assinatura da identidade) não chegaram
@@ -1928,7 +1938,7 @@ pub enum ConnectionError {
     /// senha e o apelido ao servidor verdadeiro. Por isso a frase diz que eles
     /// não chegaram «a ele», e não diz «nada», «nenhum» nem «desta máquina».
     InviteMismatch {
-        /// What the link promised.
+        /// O que a impressão esperada prometia: a do link, ou a da lista.
         expected: String,
         /// What the server offered.
         offered: String,

@@ -71,10 +71,13 @@ pub struct Destino {
     pub apelido: String,
     /// Convite de uso único ou senha do servidor.
     pub segredo: Option<String>,
-    /// A impressão digital que o convite prometeu, quando veio de um link.
+    /// A impressão digital que se espera: a do link colado nesta sessão, ou a
+    /// que a lista de servidores guardou para a entrada (quem escolhe entre as
+    /// duas é a casca; `seele_ffi::impressao_a_conferir`).
     ///
-    /// `None` para quem digitou o endereço à mão — aí não há o que conferir, e
-    /// o primeiro contato segue sendo cego, como sempre foi.
+    /// `None` quando não há nenhuma das duas — quem digitou à mão um endereço
+    /// que a lista não conhece: aí não há o que conferir, e o primeiro contato
+    /// segue sendo cego, como sempre foi.
     ///
     /// **Conferida dentro do TLS**, antes do `Hello`: um primeiro contato que
     /// não confere falha o aperto de mão e não leva convite, senha nem apelido
@@ -4703,10 +4706,13 @@ fn matar(viva: Option<TelaViva>) {
 /// Os cinco desfechos são exercidos por teste, sem servidor do outro lado — e os
 /// dois de `PinDecision::Matches` importam tanto quanto os de primeiro contato:
 /// é neles que mora a política de **não** derrubar. Um link velho contra um
-/// servidor já conhecido avisa e segue, porque o TOFU já provou que é o mesmo
-/// servidor de ontem; recusar ali trancaria a pessoa para fora de um servidor que
-/// ela usa. Enquanto `Matches` não tinha teste, alargar esta função para
-/// recusar também nesse caso passava a suíte inteira.
+/// servidor já conhecido, num alvo de escopo público, avisa e segue, porque o
+/// TOFU já provou que é o mesmo servidor de ontem; recusar ali trancaria a
+/// pessoa para fora de um servidor que ela usa. (Onde o pino não prova o
+/// servidor, o verificador já recusou o mesmo caso dentro do TLS, e ele nem
+/// chega aqui; ver [`Destino::o_pino_prova_o_servidor`].) Enquanto `Matches`
+/// não tinha teste, alargar esta função para recusar também nesse caso
+/// passava a suíte inteira.
 fn conferir(
     destino: &Destino,
     pin: &PinDecision,
@@ -4830,12 +4836,17 @@ impl PinStore for PinsDesteAperto {
 /// certificado de um servidor (o certificado é público) sem ter a chave dele: o
 /// verificador aceita o certificado e fixa, e o TLS cai na assinatura.
 ///
-/// O que isso estragava: o link promete `B`, o servidor daquele endereço
-/// oferece `A` e falha o aperto de mão. `A` fica fixado. Na tentativa seguinte,
-/// com o mesmo link, a decisão é `Matches { A }` e o veredito vira
-/// `InviteDisagrees` em vez de `InviteRefused` — a conexão é **permitida**, sem
-/// desfazer nada e sem erro. Uma falha de aperto de mão convertia a conferência
-/// de *recusar* para *avisar*, para sempre, naquele endereço.
+/// O que isso estragava: um aperto aceita a chave `A` num primeiro contato (sem
+/// impressão esperada, por exemplo), fixa, e falha depois. `A` fica fixado sem
+/// que conexão nenhuma tenha subido com ela. Na tentativa seguinte, com um link
+/// que promete `B`, a decisão é `Matches { A }`, e num alvo de escopo público (o
+/// único lugar em que o pino prova o servidor) o veredito vira
+/// `InviteDisagrees` em vez da recusa — a conexão é **permitida**, sem desfazer
+/// nada e sem erro. Uma falha de aperto de mão convertia a conferência de
+/// *recusar* para *avisar*, para sempre, naquele endereço. Onde o pino não
+/// prova o servidor, a esperada que não confere é recusada mesmo com ele, e o
+/// estrago que sobra é o de qualquer endereço: uma volta sem impressão esperada
+/// trata `A` como já conhecida.
 ///
 /// # Só o que este aperto escreveu, e só se ainda estiver lá
 ///
@@ -4847,12 +4858,16 @@ impl PinStore for PinsDesteAperto {
 /// loja ainda guardar aquele valor: um vizinho que tenha fixado outra coisa
 /// depois fica com o que é dele.
 ///
-/// **O que ela não distingue:** um vizinho que tenha fixado a **mesma**
-/// impressão, que é o mesmo servidor por dois endereços do convite, ambos sem
-/// pin e ambos com o TLS terminado antes de o primeiro vencer. O pin é igual
-/// para os dois, e cai junto com o do perdedor. Fechar isso pede saber quem
-/// venceu, que é o que a limpeza de depois da corrida,
-/// [`desfazer_pin_orfao`], sabe e esta não.
+/// **O que ela não distingue:** um vizinho da mesma chave de pino que só
+/// confirmou o pin que este aperto escreveu. É o mesmo servidor por dois
+/// endereços do convite com o mesmo nome, nenhum com pin antes da corrida: o
+/// verificador deste aperto aceita a chave primeiro e a fixa; o do vizinho
+/// aceita depois, vê o pin que este escreveu e o confirma (`Matches`), sem
+/// escrever nada. A condição é os dois verificadores aceitarem, e não o TLS
+/// terminar. Se este aperto falhar depois disso e o vizinho vencer, o pin ainda
+/// é o que este anotou, e cai: o vencedor fica sem o pin do servidor em que
+/// acabou de entrar. Fechar isso pede saber quem venceu, que é o que a limpeza
+/// de depois da corrida, [`desfazer_pin_orfao`], sabe e esta não.
 ///
 /// # Quando apaga, diz
 ///
@@ -4862,9 +4877,16 @@ impl PinStore for PinsDesteAperto {
 ///
 /// A frase diz só o que vale em toda saída: o aperto falhou depois de o
 /// verificador aceitar a chave, no resto do TLS ou depois dele. Em qual dos
-/// dois, quem diz é `falha`. Com `TlsRefused`, foi o próprio TLS que caiu, como
-/// no impostor de cima, e ali dizer que o TLS terminou faria quem investiga
-/// achar que quem atendeu provou ter a chave.
+/// dois, quem diz é `falha`, e quase todo erro aponta um só: `TlsRefused` e
+/// `SemResposta` saem do próprio TLS (`client::classify_connection_error`);
+/// `HandshakeTimeout`, `Refused`, `ProtocolViolation` e `ModsNaoAceitos`, do
+/// aperto do protocolo, depois dele. `Unreachable` pode ser dos dois: a
+/// conexão que caiu no meio do TLS, ou o fluxo de controle e um quadro do
+/// aperto do protocolo que não passaram depois dele; ali, o `warn!` de
+/// `crate::client` que vem antes desta linha no `seele.log` diz qual. Com
+/// `TlsRefused`, foi o próprio TLS que caiu, como no impostor de cima, e ali
+/// dizer que o TLS terminou faria quem investiga achar que quem atendeu provou
+/// ter a chave.
 fn desfazer_o_pin_deste_aperto(
     pins: &dyn PinStore,
     chave_do_pin: &str,
@@ -5810,12 +5832,14 @@ mod tests {
 
     #[test]
     fn um_aperto_de_mao_que_falhou_nao_deixa_o_pin_que_o_tls_escreveu() {
-        // O verificador fixa dentro do retorno de chamada do TLS, e o aperto de
-        // mão ainda tem saídas de erro depois disso: o resto do próprio TLS e as
-        // do aperto do protocolo (ver `desfazer_o_pin_deste_aperto`). O pin que
-        // sobrasse de uma delas faria a visita seguinte ver `Matches`, e aí um
-        // convite que **não** confere viraria `InviteDisagrees` — de recusar
-        // para avisar, sem ninguém decidir isso.
+        // `desfazer_pin_orfao`, a limpeza de depois da corrida: o candidato cujo
+        // prazo estourou foi derrubado no meio do aperto de mão, depois de o
+        // verificador aceitar a chave e fixá-la, e não teve chance de se limpar
+        // (a limpeza do próprio aperto, `desfazer_o_pin_deste_aperto`, vai com
+        // ele). Sem nada fixado antes da corrida (`None`), o pin que está lá é
+        // órfão e cai. O que sobrasse faria a visita seguinte ver `Matches`, e aí,
+        // num alvo de escopo público, um convite que **não** confere viraria
+        // `InviteDisagrees` — de recusar para avisar, sem ninguém decidir isso.
         let loja = crate::tofu::MemoryPinStore::new();
         loja.pin("casa", "aaaa1111".into());
 

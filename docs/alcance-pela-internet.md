@@ -284,7 +284,7 @@ e um serviço no meio aprende alguma coisa. O que ele aprende é isto:
 | que o seu endereço falou com o endereço de outra pessoa, e quando | o que foi dito, em texto ou em voz |
 | o endereço público das duas máquinas | quem são vocês, que Server é, quais salas existem |
 | que houve uma tentativa de conexão | se ela deu certo |
-| que uma marca está no ar, e em que endereço, até 60 segundos depois do último aviso do anfitrião: é o que o quarto guarda | de quem é a marca: ela é meia impressão digital, não um nome |
+| que uma marca está no ar, ou esteve até a última varredura, e em que endereço: é o que o quarto guarda. A entrada vale 60 segundos desde o último aviso do anfitrião; vencida, deixa de responder, e só sai da memória quando o quarto enche, quando um aviso novo da mesma marca a substitui, ou quando o ponto reinicia | de quem é a marca: ela é feita dos 16 primeiros dos 64 caracteres da impressão digital do servidor, e não de um nome |
 
 O conteúdo continua ponta a ponta: o TLS 1.3 e a impressão digital do ADR 0003
 são conferidos entre as duas máquinas, e o ponto de encontro não tem por onde ler
@@ -295,19 +295,23 @@ hoje que o anfitrião registrou no quarto, a tabela em memória que o
 em quem se confia: a impressão esperada, a do link ou a da lista de conhecidos,
 é conferida dentro do TLS antes de qualquer `Hello`. Se a chave não confere, o
 convite, a senha e o apelido não chegam a quem atendeu com a chave errada, e uma
-resposta falsa custa não entrar. Isso vale onde o endereço ainda não tem chave
-fixada. Onde tem, vale a regra do ADR 0003: se o servidor dali ainda tem a chave
-fixada, o TLS passa, o `Hello` já sai para ele e só depois a tela avisa que a
-impressão esperada discorda; se a chave dele mudou, a conexão é recusada.
+resposta falsa custa não entrar. Isso vale também onde esta máquina já fixou
+uma chave naquele endereço: o endereço que o quarto devolve, quando entra na
+corrida, é um candidato que a pessoa não escolheu, e ali um pino que confere não
+passa por cima da impressão esperada (o adendo de 2026-09-29 ao ADR 0003). Se a
+chave fixada ali mudou, a conexão é recusada do mesmo jeito.
 
 Três coisas fazem parte da decisão, e não são promessas soltas:
 
 - **Ele guarda pouco, e só em memória.** Não há banco nem arquivo. A resposta a
   `ONDE` e a `LEVE` continua sendo uma função que recebe um datagrama e devolve
-  outro. O que ele guarda é o quarto: um mapa de marca (meia impressão digital do
-  servidor) para o endereço em que o anfitrião disse morar, com prazo de 60
-  segundos desde o último aviso e teto de 4096 marcas. Nada disso vai a disco, e
-  reiniciar o ponto o esvazia. Por padrão ele nem imprime quem falou com quem.
+  outro. O que ele guarda é o quarto: um mapa de marca (os 16 primeiros dos 64
+  caracteres da impressão digital do servidor, e uma letra) para o endereço em
+  que o anfitrião disse morar, com teto de 4096 marcas. Uma entrada vale 60
+  segundos desde o último aviso; vencida, deixa de responder, e fica na memória
+  até o quarto encher (a varredura), um aviso novo da mesma marca a substituir,
+  ou o ponto reiniciar. Nada disso vai a disco, e reiniciar o ponto o esvazia.
+  Por padrão ele nem imprime quem falou com quem.
 - **Ele é opcional.** `SEELE_ENCONTRO=nao` na máquina que hospeda desliga o
   degrau 4, e nenhum pacote sai dali para ponto de encontro nenhum. Tudo o que
   funcionava continua igual.

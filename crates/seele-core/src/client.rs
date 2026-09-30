@@ -117,15 +117,16 @@ pub enum ConnectError {
     },
     /// The server said something that is not a handshake.
     ProtocolViolation,
-    /// The invite promised another identity, and no pin could break the tie.
+    /// A impressão esperada (a do link, ou a da lista) prometia outra
+    /// identidade, e nenhum pino desempata.
     ///
-    /// Deliberately distinct from [`ConnectError::PinChanged`]: there a known
-    /// server's key changed, which is the ADR 0003 alarm. Here no pin vouches
-    /// for the server — nothing was pinned, or it is a candidate nobody chose
-    /// or a target of local scope (a LAN address, the same from one home to
-    /// the next), where a matching pin may be another server's
-    /// ([`crate::tofu::TofuVerifier::decide`]) —, and the party that disagrees
-    /// is the link.
+    /// De propósito distinta de [`ConnectError::PinChanged`]: lá a chave de um
+    /// servidor conhecido mudou, que é o alarme do ADR 0003. Aqui nenhum pino
+    /// prova o servidor — nada estava fixado, ou é um candidato que ninguém
+    /// escolheu ou um alvo de escopo local (um endereço de LAN, o mesmo de uma
+    /// casa para outra), onde um pino que confere pode ser de outro servidor
+    /// ([`crate::tofu::TofuVerifier::decide`]) —, e quem discorda é quem
+    /// prometeu a impressão, o link ou a lista.
     ///
     /// **Recusada dentro do TLS, antes do `Hello`**: o verificador a decide no
     /// aperto de mão (`crate::tofu::PinDecision::InviteRefused`), e o `Hello`
@@ -136,7 +137,7 @@ pub enum ConnectError {
     /// conferência depois do aperto de mão, em `crate::enlace`, continua como
     /// segunda linha.
     InviteMismatch {
-        /// What the link promised.
+        /// O que a impressão esperada prometia: a do link, ou a da lista.
         expected: String,
         /// What the server offered.
         offered: String,

@@ -229,6 +229,14 @@ impl Convite {
 ///
 /// # Por que duas metades e não um identificador
 ///
+/// **Revisto em 03/09/2026:** o ponto de encontro passou a guardar o quarto,
+/// um mapa `marca → endereço` em memória, com prazo, que o `MORO` do anfitrião
+/// escreve e o `QUEM` lê; ver o cabeçalho de
+/// [`crate::encontro`] e o ADR 0022, «O quarto, e por que a recusa foi
+/// revista». O parágrafo abaixo fica como foi escrito, porque é ele que explica
+/// as duas metades do bilhete; onde diz que o ponto é sem estado e que o
+/// serviço no meio não precisa lembrar de nada, isso deixou de valer.
+///
 /// A alternativa óbvia era um número opaco — um "quarto" — que o ponto de
 /// encontro traduzisse para o endereço do anfitrião. Isso obrigaria o ponto de
 /// encontro a **guardar** essa tradução, e o ADR 0022 aceita este degrau com a

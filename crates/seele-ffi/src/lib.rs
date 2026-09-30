@@ -397,8 +397,8 @@ pub struct ConnectStep {
 /// «Tentei quatro candidatos, o primeiro deu prazo esgotado em 4 s, o quarto
 /// recusou» é o dado que faltou quando o teste de campo das duas casas falhou e
 /// ninguém soube dizer por quê. Custa zero em privacidade: todo endereço da
-/// trilha já estava com quem a lê, no convite, na lista de conhecidos ou na
-/// resposta do quarto sobre o mesmo servidor.
+/// trilha já estava com quem a lê, no que digitou, no convite, na lista de
+/// conhecidos ou na resposta do quarto sobre o mesmo servidor.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ConnectFailure {
     /// Por que não deu, do jeito de sempre.

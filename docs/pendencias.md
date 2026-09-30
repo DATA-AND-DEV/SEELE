@@ -2227,28 +2227,44 @@ que não tinha como reprovar. Duas cascas, dois comportamentos, nenhum dos dois
 o que o ADR 0006 desenhou.
 
 **O que ficou no lugar.** Uma decisão só, em `seele-core`, com cinco desfechos
-nomeados (`tofu::Verdict`). A impressão do link atravessa a ponte
+nomeados (`tofu::Verdict`). A impressão esperada atravessa a ponte
 (`ConnectConfig::expected_fingerprint` → `Destino::impressao_esperada`) e a
-comparação acontece antes de haver sessão. No primeiro contato, um convite que
-não confere **recusa**. Ao fechar esta entrada a recusa vinha depois do aperto de
-mão e desfazia o pin que o TLS já tinha escrito; desde o Plano 1B ela acontece
-**dentro do TLS, antes do `Hello`**: o verificador não fixa a chave que a
-impressão esperada desmente, e o convite, a senha e o apelido não chegam a quem
-atendeu com a chave errada. A recusa não grava pino. Sem pino e sem link, a visita
-seguinte a esse endereço volta a ser PRIMEIRO CONTATO, dito como tal na tela
-(«CHAVE FIXADA… Ninguém confirmou»), e entra se a pessoa digitar o endereço: é o
-TOFU do ADR 0003, e não uma entrada calada num servidor já recusado. Duas
-limpezas de pino sobraram para o aperto que falha por outro motivo, depois de
-fixar: `desfazer_o_pin_deste_aperto` desfaz só o pino que o próprio aperto
-escreveu, e `desfazer_pin_orfao`, depois da corrida de candidatos, apaga o pino
-que ninguém tinha antes dela quando o prazo de um candidato estourou no meio do
-aperto, sem saber quem o escreveu (a chave do vencedor fica). `aplicar_veredito`,
-que desfaz o pino sem perguntar de quem é, ficou como segunda linha e não é
-alcançável em produção: o verificador recusa no TLS o que o `verdict` recusaria.
-Contra um servidor já fixado, um convite que discorda **avisa** e não derruba: o
-TOFU já provou que é o servidor de ontem, e trancar alguém para fora por causa
-de um link velho seria o erro oposto. As duas cascas leem o mesmo veredito; o
-`connection` não compara mais nada por conta própria.
+comparação acontece antes de haver sessão. Ela é a do link e, desde o Plano 1B,
+na volta pela lista de servidores sem link, a que a lista guardou. No primeiro
+contato, um convite que não confere **recusa**. Ao fechar esta entrada a recusa
+vinha depois do aperto de mão e desfazia o pin que o TLS já tinha escrito; desde
+o Plano 1B ela acontece **dentro do TLS, antes do `Hello`**: o verificador não
+fixa a chave que a impressão esperada desmente, e o convite, a senha e o apelido
+não chegam a quem atendeu com a chave errada. A recusa não grava pino. Sem pino,
+sem link e sem impressão guardada na lista para esse endereço, a visita seguinte
+volta a ser PRIMEIRO CONTATO, dito como tal na tela («CHAVE FIXADA… Ninguém
+confirmou»), e entra se a pessoa digitar o endereço: é o TOFU do ADR 0003, e não
+uma entrada calada num servidor já recusado. Com impressão guardada, a visita
+seguinte confere por ela e é recusada de novo. Duas limpezas de pino sobraram
+para o aperto que falha por outro motivo, depois de fixar:
+`desfazer_o_pin_deste_aperto` desfaz só o pino que o próprio aperto escreveu, e
+`desfazer_pin_orfao`, depois da corrida de candidatos, apaga o pino que ninguém
+tinha antes dela quando o prazo de um candidato estourou no meio do aperto, sem
+saber quem o escreveu (a chave do vencedor fica). As duas dizem no `seele.log`
+qual pino apagaram e por quê. `aplicar_veredito`, que desfaz o pino sem
+perguntar de quem é, ficou como segunda linha e não é alcançável em produção: o
+verificador recusa no TLS o que o `verdict` recusaria.
+
+Contra um servidor já fixado no endereço que a pessoa escolheu (o do link, o
+digitado ou o da entrada da lista), quando esse endereço é de escopo público,
+uma impressão que discorda **avisa** e não derruba: o TOFU já provou que é o
+servidor de ontem, e trancar alguém para fora por causa de um link velho seria o
+erro oposto. Onde o pino não prova o servidor, a impressão esperada vale mais
+que ele, e a que não confere é recusada dentro do TLS, como no primeiro contato
+(adendo de 2026-09-29 ao ADR 0003): num candidato que ninguém escolheu (um
+alternativo, a resposta do quarto), em que o pino pode ser de outro servidor
+fixado ali; e num alvo de escopo local (um endereço de LAN, o mesmo de uma casa
+para outra), em que um pino que confere com a esperada discordando é, no caso
+comum, colisão. A lista guarda a chave que a conexão aceitou: num aviso, a do
+pino, com ou sem link. É assim que uma lista gravada pela 0.15.0 com a impressão
+de outro servidor se cura na primeira volta por um alvo público; num alvo de
+LAN a volta é recusada, e o remédio é colar o link de novo. As duas cascas leem
+o mesmo veredito; o `connection` não compara mais nada por conta própria.
 
 **A segunda ponta, do mesmo fio, também fechou.** O `Session::convite` morre
 com a sessão que ele abriu e é descartado quando o endereço no campo não é o do
@@ -2259,7 +2275,10 @@ dia em que a conferência passou a existir.
 prova os três desfechos contra um servidor de verdade — a impressão certa
 verificando, a errada recusando antes do `Hello` e sem fixar nada, e o link
 velho avisando sobre uma sessão que continua falando. Cada um foi visto ficar
-vermelho com a política desligada antes de ser dado por bom.
+vermelho com a política desligada antes de ser dado por bom. O candidato que
+ninguém escolheu tem a prova em `crates/seele-conformance/tests/volta_pela_trilha.rs`,
+também do lado do servidor: fixado com a chave dele e com a esperada de outro,
+ele fica sem conexão de pé, com o convite inteiro e a portaria vazia.
 
 **O que sobrou, e é de outra entrada.** A faixa de veredito da janela nunca foi
 desenhada para um humano — é a mesma ausência da pendência 13, e é lá que ela

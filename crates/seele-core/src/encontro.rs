@@ -25,13 +25,14 @@
 //! **A consulta ao quarto lê**, e é o único caminho por onde um ponto de
 //! encontro põe um endereço na lista de candidatos ([`onde_mora_hoje`]). Um
 //! ponto hostil, ou quem ocupou a marca no quarto, consegue mandar quem chega
-//! para o endereço errado. Num endereço ainda sem chave fixada, o que impede isso
-//! de virar conexão com um impostor é a impressão digital, conferida dentro do
-//! TLS antes de qualquer `Hello`, e ela só protege quando existe: a esperada vem
-//! do link desta sessão ou, na volta pela lista, da impressão que a lista
-//! guardou (análise de 22/09/2026, §3.1, S3). Num endereço que já tem
-//! chave fixada vale o pino (ADR 0003): o TLS passa se o servidor dali ainda a
-//! oferece, e a esperada só avisa, depois do `Hello`.
+//! para o endereço errado. O que impede isso de virar conexão com um impostor é
+//! a impressão digital, conferida dentro do TLS antes de qualquer `Hello`, e ela
+//! só protege quando existe: a esperada vem do link desta sessão ou, na volta
+//! pela lista, da impressão que a lista guardou (análise de 22/09/2026, §3.1,
+//! S3). Vale também num endereço que esta máquina já fixou com a chave de outro
+//! servidor: o endereço do quarto, quando entra na corrida, é um candidato que
+//! a pessoa não escolheu, e ali o pino que confere não passa por cima da
+//! esperada (o adendo de 2026-09-29 ao ADR 0003, `crate::tofu::TofuVerifier`).
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;

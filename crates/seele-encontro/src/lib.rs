@@ -23,10 +23,13 @@
 //! Aprende **metadado**: que endereço falou com que endereço, e quando. É o
 //! custo que o ADR 0022 nomeia em voz alta, e é real.
 //!
-//! Guarda **uma coisa**: o quarto, um mapa de marca (meia impressão digital do
-//! servidor) para o endereço em que o anfitrião disse morar. Fica em memória,
-//! com prazo de 60 segundos desde o último `MORO` e teto de 4096 marcas. Nada
-//! vai a disco, e reiniciar o processo o esvazia.
+//! Guarda **uma coisa**: o quarto, um mapa de marca (os 16 primeiros dos 64
+//! caracteres da impressão digital do servidor, e uma letra) para o endereço em
+//! que o anfitrião disse morar. Fica em memória, com teto de 4096 marcas. Uma
+//! entrada vale 60 segundos desde o último `MORO`: vencida, deixa de responder
+//! ao `QUEM`, e continua na memória até o quarto encher (a varredura), um
+//! `MORO` novo da mesma marca a substituir, ou o processo reiniciar. Nada vai a
+//! disco, e reiniciar o processo o esvazia.
 //!
 //! Por padrão nem imprime: o registro de quem falou com quem é justamente a
 //! coisa que este projeto não quer que exista, e um log ligado por padrão seria
@@ -92,8 +95,9 @@ const MARCAS_NO_QUARTO: usize = 4096;
 ///
 /// **A única memória deste processo, e o ADR 0022 a recusava.** A revisão de
 /// 03/09/2026 está escrita no cabeçalho de `seele_proto::encontro`, com o que
-/// ela custa. O resumo do que vive aqui: um mapa de meia impressão digital para
-/// um endereço, em RAM, com prazo. Nunca em disco. Nunca no `--barulhento`.
+/// ela custa. O resumo do que vive aqui: um mapa dos 16 primeiros caracteres da
+/// impressão digital (e uma letra) para um endereço, em RAM, com prazo. Nunca em
+/// disco. Nunca no `--barulhento`.
 ///
 /// `Mutex` e não `RwLock`: as duas famílias são duas linhas de execução e cada
 /// datagrama toca o mapa uma vez, então não há leitura concorrente longa a
@@ -261,7 +265,8 @@ impl Ponto {
         self.socket.local_addr()
     }
 
-    /// Recebe um datagrama, responde se for o caso, e esquece.
+    /// Recebe um datagrama e responde, se for o caso. O `MORO` fica no quarto; o
+    /// resto não é guardado.
     ///
     /// # Errors
     ///

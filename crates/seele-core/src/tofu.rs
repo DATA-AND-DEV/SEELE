@@ -129,9 +129,17 @@ pub enum Verdict {
     },
     /// The pin matches and nothing contradicts it. Nothing to say.
     Known,
-    /// First contact, and the invite named a different key. Refused.
+    /// A impressão esperada (a do link, ou a da lista) nomeava outra chave, e
+    /// nenhum pino prova o servidor. Recusado.
+    ///
+    /// Nasce no primeiro contato, e também sobre um pino que confere onde ele
+    /// não prova o servidor (um candidato que a pessoa não escolheu, ou um alvo
+    /// de escopo local; ver [`TofuVerifier::decide`]). Pelo caminho de
+    /// produção o verificador recusa os dois dentro do TLS, antes do `Hello`, e
+    /// eles sobem como `ConnectError::InviteMismatch` sem virar veredito; ver
+    /// [`verdict`].
     InviteRefused {
-        /// What the link promised.
+        /// O que a impressão esperada prometia: a do link, ou a da lista.
         expected: String,
         /// What the server offered.
         offered: String,
@@ -487,8 +495,8 @@ impl TofuVerifier {
 /// máquina, que só quem a usa lê: [`TofuVerifier::decide`] escreve um `warn!`
 /// por recusa, com a chave de pino, as duas impressões e o porquê (inclusive
 /// quando havia um pino que conferia e a esperada decidiu), e a corrida de
-/// candidatos (`crate::enlace`) escreve outro para cada candidato recusado, com
-/// o endereço, haja vencedor ou não.
+/// candidatos (`crate::enlace`) escreve outro para cada candidato recusado cuja
+/// falha ela recolheu, com o endereço, haja vencedor ou não.
 const RECUSA_NO_TLS: &str = "certificado não aceito";
 
 impl ServerCertVerifier for TofuVerifier {

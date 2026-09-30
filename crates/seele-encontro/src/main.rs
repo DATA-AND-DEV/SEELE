@@ -104,5 +104,8 @@ fn ajuda() {
     eprintln!("  --rede-local    também apresentar endereços de rede local (só para experimentar)");
     eprintln!("  --barulhento    imprimir quem falou com quem (é metadado; desligue depois)");
     eprintln!();
-    eprintln!("Ele não guarda nada e não vê nada do que é dito: o TLS é ponta a ponta.");
+    eprintln!(
+        "Ele guarda só o quarto (onde cada anfitrião disse morar, em memória, nunca em disco)"
+    );
+    eprintln!("e não vê nada do que é dito: o TLS é ponta a ponta.");
 }
