@@ -1238,14 +1238,14 @@ impl Enlace {
             .as_ref()
             .and_then(|(posicao, _)| chaves.get(*posicao))
             .map(|(chave, _)| chave.clone());
-        for (posicao, _) in &corrida.falhas {
+        for (posicao, falha) in &corrida.falhas {
             let Some((chave_perdida, antes)) = chaves.get(*posicao) else {
                 continue;
             };
             if chave_do_vencedor.as_deref() == Some(chave_perdida.as_str()) {
                 continue;
             }
-            desfazer_pin_orfao(pins.as_ref(), chave_perdida, antes.as_deref());
+            desfazer_pin_orfao(pins.as_ref(), chave_perdida, antes.as_deref(), falha);
         }
 
         // **Quem ganhou, dito por extenso.** O log tinha uma linha por candidato
@@ -1364,6 +1364,7 @@ impl Enlace {
                     pins.as_ref(),
                     &destino.chave_do_pin,
                     deste_aperto.o_que_escreveu().as_deref(),
+                    &erro,
                 );
                 return Err(erro);
             }
@@ -4847,12 +4848,30 @@ impl PinStore for PinsDesteAperto {
 /// para os dois, e cai junto com o do perdedor. Fechar isso pede saber quem
 /// venceu, que é o que a limpeza de depois da corrida,
 /// [`desfazer_pin_orfao`], sabe e esta não.
-fn desfazer_o_pin_deste_aperto(pins: &dyn PinStore, chave_do_pin: &str, escrito: Option<&str>) {
+///
+/// # Quando apaga, diz
+///
+/// Uma linha `info!` com a chave do pino, a impressão apagada e a falha do
+/// aperto (`falha`). «Por que meu pino sumiu» não tinha resposta no
+/// `seele.log`. Quando não apaga nada, não escreve nada.
+fn desfazer_o_pin_deste_aperto(
+    pins: &dyn PinStore,
+    chave_do_pin: &str,
+    escrito: Option<&str>,
+    falha: &ConnectError,
+) {
     let Some(escrito) = escrito else {
         return;
     };
     if pins.pinned(chave_do_pin).as_deref() == Some(escrito) {
         pins.unpin(chave_do_pin);
+        tracing::info!(
+            chave = %chave_do_pin,
+            impressao = %escrito,
+            erro = %falha,
+            "desfiz o pin que este aperto de mão fixou: o aperto falhou depois do TLS, e \
+             o pin deixado faria a visita seguinte entrar sem conferir"
+        );
     }
 }
 
@@ -4866,9 +4885,26 @@ fn desfazer_o_pin_deste_aperto(pins: &dyn PinStore, chave_do_pin: &str, escrito:
 /// se limpou em `Enlace::conectar_por`, com [`desfazer_o_pin_deste_aperto`].
 ///
 /// Só apaga o que **ninguém** tinha fixado antes: se já havia pin, ele fica.
-fn desfazer_pin_orfao(pins: &dyn PinStore, chave_do_pin: &str, fixado_antes: Option<&str>) {
-    if fixado_antes.is_none() && pins.pinned(chave_do_pin).is_some() {
+/// Quando apaga, diz no log (`info!`) a chave, a impressão apagada e a falha do
+/// candidato (`falha`), como [`desfazer_o_pin_deste_aperto`].
+fn desfazer_pin_orfao(
+    pins: &dyn PinStore,
+    chave_do_pin: &str,
+    fixado_antes: Option<&str>,
+    falha: &ConnectError,
+) {
+    if fixado_antes.is_some() {
+        return;
+    }
+    if let Some(orfao) = pins.pinned(chave_do_pin) {
         pins.unpin(chave_do_pin);
+        tracing::info!(
+            chave = %chave_do_pin,
+            impressao = %orfao,
+            erro = %falha,
+            "desfiz um pin órfão depois da corrida: ninguém o tinha fixado antes dela, e o \
+             candidato que perdeu não terminou o aperto de mão"
+        );
     }
 }
 
@@ -5770,7 +5806,7 @@ mod tests {
         let loja = crate::tofu::MemoryPinStore::new();
         loja.pin("casa", "aaaa1111".into());
 
-        desfazer_pin_orfao(&loja, "casa", None);
+        desfazer_pin_orfao(&loja, "casa", None, &ConnectError::SemResposta);
 
         assert_eq!(loja.pinned("casa"), None);
     }
@@ -5782,7 +5818,7 @@ mod tests {
         let loja = crate::tofu::MemoryPinStore::new();
         loja.pin("casa", "aaaa1111".into());
 
-        desfazer_pin_orfao(&loja, "casa", Some("aaaa1111"));
+        desfazer_pin_orfao(&loja, "casa", Some("aaaa1111"), &ConnectError::SemResposta);
 
         assert_eq!(loja.pinned("casa"), Some("aaaa1111".into()));
     }
@@ -5792,7 +5828,7 @@ mod tests {
         let loja = crate::tofu::MemoryPinStore::new();
         loja.pin("casa", "aaaa1111".into());
 
-        desfazer_o_pin_deste_aperto(&loja, "casa", Some("aaaa1111"));
+        desfazer_o_pin_deste_aperto(&loja, "casa", Some("aaaa1111"), &ConnectError::SemResposta);
 
         assert_eq!(
             loja.pinned("casa"),
@@ -5804,14 +5840,14 @@ mod tests {
 
     #[test]
     fn o_que_um_aperto_nao_escreveu_nao_e_dele_para_desfazer() {
-        // A recusa pela impressão, a chave trocada e a falha antes do TLS
-        // terminar não escrevem nada. Um pin que exista na hora é de um vizinho
-        // da corrida, e desfazê-lo é a confiança de primeiro contato do
-        // ADR 0003 sumindo calada.
+        // A recusa pela impressão, a chave trocada e toda falha de um aperto
+        // que não chegou a aceitar um primeiro contato não escrevem nada. Um
+        // pin que exista na hora é de um vizinho da corrida, e desfazê-lo é a
+        // confiança de primeiro contato do ADR 0003 sumindo calada.
         let loja = crate::tofu::MemoryPinStore::new();
         loja.pin("casa", "aaaa1111".into());
 
-        desfazer_o_pin_deste_aperto(&loja, "casa", None);
+        desfazer_o_pin_deste_aperto(&loja, "casa", None, &ConnectError::SemResposta);
 
         assert_eq!(
             loja.pinned("casa"),
@@ -5825,12 +5861,84 @@ mod tests {
         let loja = crate::tofu::MemoryPinStore::new();
         loja.pin("casa", "bbbb2222".into());
 
-        desfazer_o_pin_deste_aperto(&loja, "casa", Some("aaaa1111"));
+        desfazer_o_pin_deste_aperto(&loja, "casa", Some("aaaa1111"), &ConnectError::SemResposta);
 
         assert_eq!(
             loja.pinned("casa"),
             Some("bbbb2222".into()),
             "o aperto que falhou apagou um pin que já não era o que ele tinha escrito"
+        );
+    }
+
+    #[test]
+    fn o_pin_que_um_aperto_desfaz_vai_ao_log_com_a_chave_e_o_motivo() {
+        // «Por que meu pino sumiu» não tinha resposta: as duas limpezas apagavam
+        // calado. `info`, que é o nível que o `seele.log` grava.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        desfazer_o_pin_deste_aperto(
+            &loja,
+            "casa",
+            Some("aaaa1111"),
+            &ConnectError::HandshakeTimeout,
+        );
+
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("casa")
+                && linha.contains("aaaa1111")
+                && linha.contains("HandshakeTimeout")),
+            "o pin que o aperto que falhou tinha fixado foi apagado sem dizer no log qual \
+             chave, qual impressão e por quê. Rastro: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn o_pin_orfao_desfeito_depois_da_corrida_vai_ao_log_com_a_chave_e_o_motivo() {
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        desfazer_pin_orfao(&loja, "casa", None, &ConnectError::SemResposta);
+
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("casa")
+                && linha.contains("aaaa1111")
+                && linha.contains("SemResposta")),
+            "o pin órfão de um candidato que perdeu a corrida foi apagado sem dizer no log \
+             qual chave, qual impressão e por quê. Rastro: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn a_limpeza_que_nao_apaga_nada_nao_escreve_nada() {
+        // A linha é de quando um pino some. Uma por candidato que não apagou nada
+        // enterraria as que importam.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let loja = crate::tofu::MemoryPinStore::new();
+        loja.pin("casa", "aaaa1111".into());
+
+        desfazer_o_pin_deste_aperto(&loja, "casa", None, &ConnectError::SemResposta);
+        desfazer_o_pin_deste_aperto(&loja, "casa", Some("bbbb2222"), &ConnectError::SemResposta);
+        desfazer_pin_orfao(&loja, "casa", Some("aaaa1111"), &ConnectError::SemResposta);
+
+        assert_eq!(
+            loja.pinned("casa"),
+            Some("aaaa1111".into()),
+            "uma limpeza que não devia apagar nada apagou, e o teste mediu outra coisa"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.is_empty(),
+            "uma limpeza que não apagou pino nenhum escreveu no log: {linhas:?}"
         );
     }
 
