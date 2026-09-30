@@ -367,7 +367,7 @@ impl TofuVerifier {
     /// o mesmo de uma casa para outra. Ali a impressão prometida vale mais que
     /// o pin: a que não confere vira [`PinDecision::InviteRefused`], dentro do
     /// TLS e antes do `Hello`, e nada é fixado nem desfeito. Sem esperada, o
-    /// pin decide como sempre.
+    /// pin decide como sempre. É o adendo de 2026-09-29 ao ADR 0003.
     ///
     /// Uma chave **trocada** continua `Changed`, recusada com ou sem link, no
     /// alvo e fora dele.
