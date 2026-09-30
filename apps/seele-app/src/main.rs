@@ -5073,10 +5073,9 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
 /// ([`ler_imagem_mod`]).
 ///
 /// **Texto de terceiro não entra solto numa linha do registro**, e são três
-/// campos com ele. `origem` vai em `?`, cortada em
-/// [`TETO_DA_FRASE_NO_REGISTRO`] caracteres antes do escape: é o caminho que a
-/// janela pede em `midia_do_mod` e em `som_do_mod`, e as aspas impedem a linha
-/// forjada, mas não a linha sem fim. O `mod_id` chega da janela
+/// campos com ele. `origem` é o caminho que a janela pede em `midia_do_mod` e
+/// em `som_do_mod`, e passa por [`caminho_no_registro`]: as aspas impedem a
+/// linha forjada, e o teto, a linha sem fim. O `mod_id` chega da janela
 /// (`midia_em_bytes`, `ler_imagem_mod`) e passa por [`id_no_registro`], a
 /// mesma função de [`registrar_da_janela`]. O `motivo` passa por
 /// [`motivo_no_registro`]: em `ler_imagem_mod` ele é o texto que o servidor
@@ -5085,19 +5084,19 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
 fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaNoMod {
     let motivo = motivo_de(&falha);
     let mod_id = id_no_registro(mod_id);
-    let origem: String = origem.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
+    let origem = caminho_no_registro(origem);
     let no_registro = motivo_no_registro(motivo);
     if motivo == "sessao-encerrada" {
         tracing::debug!(
             mod_id = %mod_id,
-            origem = ?origem,
+            origem = %origem,
             motivo = %no_registro,
             "mídia de MOD não servida: a sessão acabou"
         );
     } else {
         tracing::warn!(
             mod_id = %mod_id,
-            origem = ?origem,
+            origem = %origem,
             motivo = %no_registro,
             "mídia de MOD recusada"
         );
@@ -5135,6 +5134,26 @@ fn motivo_no_registro(motivo: &str) -> String {
     } else {
         format!("{cortado:?}")
     }
+}
+
+/// **O caminho de uma mídia de MOD como uma linha do `seele.log` o leva**:
+/// cortado em [`TETO_DA_FRASE_NO_REGISTRO`] caracteres antes do escape, e entre
+/// aspas, com escape.
+///
+/// O caminho é texto de terceiro nas duas pontas. Na recusa, é o que a janela
+/// pede ([`recusa_de_midia_dita`], campo `origem`). No som servido, é o nome que
+/// o MOD escolheu no manifesto ([`som_servido_dito`], campo `caminho`), e o
+/// manifesto só confere que cada pedaço é um nome (`inner_path`): uma quebra de
+/// linha passa. O formatador do registro não escapa quebra de linha em `%`, e
+/// um `\n` no caminho escreveria no `seele.log` uma segunda linha com a cara do
+/// produto.
+///
+/// Uma função só para as duas, para que o teto e o escape não divirjam: as
+/// aspas impedem a linha forjada, e o teto, a linha sem fim. O escape pode
+/// fazer o texto crescer até dez vezes, como em [`motivo_no_registro`].
+fn caminho_no_registro(caminho: &str) -> String {
+    let cortado: String = caminho.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
+    format!("{cortado:?}")
 }
 
 /// **Os bytes de um arquivo que o manifesto deste MOD declara**, conferidos.
@@ -5298,14 +5317,26 @@ fn som_do_mod(
         });
     }
     let bytes = som_declarado_do_mod(&config_dir(&app), &id, &hash, &caminho)?;
+    som_servido_dito(&id, geracao, &caminho, bytes.len());
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// **Diz no registro que o som de um MOD saiu**, e qual.
+///
+/// Fora do comando para que um teste leia a linha sem `AppHandle`. O caminho é
+/// o nome que o MOD escolheu no manifesto e passa por [`caminho_no_registro`]:
+/// escrito cru, um nome com quebra de linha escreveria, a cada som servido, uma
+/// linha com a cara do produto. O `mod_id` vai em `%` como está: aqui ele já é
+/// o do manifesto ([`bytes_declarados_do_mod`] recusa o hash de outro MOD), e o
+/// manifesto só passa com `autor/nome` em minúsculas, dígitos e hífen.
+fn som_servido_dito(mod_id: &str, geracao: u64, caminho: &str, bytes: usize) {
     tracing::info!(
-        mod_id = %id,
+        mod_id = %mod_id,
         geracao,
-        caminho = %caminho,
-        bytes = bytes.len(),
+        caminho = %caminho_no_registro(caminho),
+        bytes,
         "som de MOD servido em bytes"
     );
-    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// Os bytes de um som declarado, **ou a recusa dita no registro**.
@@ -10803,8 +10834,8 @@ mod a_midia_recusada_e_dita_no_registro {
 
     /// **A origem também tem teto.** É o caminho que a janela pede em
     /// `midia_do_mod` e em `som_do_mod`: texto que chega pela ponte, e que ia
-    /// inteiro para a linha. As aspas do `?` impedem a linha forjada, e não a
-    /// linha sem fim.
+    /// inteiro para a linha. As aspas impedem a linha forjada, e não a linha
+    /// sem fim.
     #[test]
     fn uma_origem_enorme_sai_cortada_no_teto_de_frase() {
         let (_, rastro) = capturar(|| {
@@ -10916,9 +10947,83 @@ mod a_midia_recusada_e_dita_no_registro {
 /// **O som de um MOD sai em bytes, conferido como a imagem é conferida.**
 #[cfg(test)]
 mod o_som_do_mod_sai_em_bytes {
-    use super::{motivo_de, som_declarado_do_mod};
+    use super::{motivo_de, som_declarado_do_mod, som_servido_dito, TETO_DA_FRASE_NO_REGISTRO};
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, WAV};
     use crate::rastro_de_teste::capturar;
+
+    /// **O nome do som servido não escreve uma segunda linha no registro.**
+    ///
+    /// Quando o som sai, o caminho já passou pelo manifesto, e o manifesto só
+    /// confere que cada pedaço dele é um nome (`inner_path`): uma quebra de
+    /// linha passa. Escrito cru, um MOD que declarasse
+    /// `som/a\nWARN seele_app: forjada.wav` escreveria, a cada som servido, uma
+    /// linha com a cara do produto. O caminho vem aqui em texto, e não num
+    /// pacote no disco, porque um nome de arquivo com `\n` não existe no
+    /// Windows.
+    #[test]
+    fn um_caminho_com_quebra_de_linha_nao_forja_linha_no_som_servido() {
+        let ((), rastro) =
+            capturar(|| som_servido_dito(ID, 7, "som/a\nWARN seele_app: forjada.wav", 16));
+        assert_eq!(
+            rastro.lines().count(),
+            1,
+            "o nome que o MOD declarou escreveu uma segunda linha no seele.log, com a cara do \
+             produto: {rastro}"
+        );
+        assert!(
+            rastro.contains("INFO")
+                && rastro.contains("som de MOD servido em bytes")
+                && rastro.contains("mod_id=prova/midia")
+                && rastro.contains(r#"caminho="som/a\nWARN seele_app: forjada.wav""#),
+            "a linha do som servido perdeu o id, a frase ou o caminho entre aspas, e quem lê o \
+             registro já não acha o que o Rust serviu: {rastro}"
+        );
+    }
+
+    /// **O nome do som servido tem o teto das outras portas de texto de
+    /// terceiro.** As aspas impedem a linha forjada, e não a linha sem fim.
+    #[test]
+    fn um_caminho_enorme_sai_cortado_no_teto_de_frase_no_som_servido() {
+        let ((), rastro) = capturar(|| {
+            som_servido_dito(ID, 7, &"s".repeat(TETO_DA_FRASE_NO_REGISTRO * 4), 16);
+        });
+        assert!(
+            rastro.contains(&format!(
+                "caminho=\"{}\"",
+                "s".repeat(TETO_DA_FRASE_NO_REGISTRO)
+            )),
+            "o nome que o MOD declarou entrou no registro sem o teto das outras portas de \
+             texto de terceiro: {} caracteres numa linha",
+            rastro.chars().count()
+        );
+    }
+
+    /// **O comando diz o som que serviu pela função que os testes acima
+    /// medem.** Uma linha escrita à mão dentro de `som_do_mod` deixaria esses
+    /// testes verdes e o caminho cru no registro de novo.
+    #[test]
+    fn o_comando_do_som_diz_o_que_serviu_pela_funcao_medida() {
+        let fonte = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
+        )
+        .expect("main.rs legível")
+        .replace("\r\n", "\n");
+        let corpo = fonte
+            .split("fn som_do_mod(")
+            .nth(1)
+            .and_then(|resto| resto.split("\n}\n").next())
+            .unwrap_or_else(|| panic!("`som_do_mod` sumiu de main.rs"));
+        let codigo: Vec<&str> = corpo
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect();
+        let codigo = codigo.join("\n");
+        assert!(
+            codigo.contains("som_servido_dito(") && !codigo.contains("tracing::"),
+            "`som_do_mod` escreve o som servido por fora de `som_servido_dito`, e o caminho que \
+             o MOD declarou pode voltar cru ao registro"
+        );
+    }
 
     #[test]
     fn um_som_declarado_sai_com_os_bytes_exatos() {
