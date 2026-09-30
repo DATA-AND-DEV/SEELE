@@ -3,6 +3,12 @@
 **Data:** 2026-08-20
 **Estado:** aprovado, aguardando plano
 
+**Revisto em 03/09/2026:** quem entra passou a ler o quarto; ver o [ADR
+0022](../../adr/0022-alcancar-um-dogma-pela-internet.md), «O quarto, e por que a
+recusa foi revista», e [`docs/ponto-de-encontro.md`](../../ponto-de-encontro.md).
+O corpo abaixo fica como foi escrito, e onde diz que quem entra nunca lê
+resposta do ponto de encontro, isso deixou de valer.
+
 Primeiro dos dois ciclos que a conversa de hoje abriu. O outro —
 compartilhamento de tela — é subsistema separado, com spec e plano próprios, e
 depende deste: sem caminho direto confiável ele não tem onde rodar.
