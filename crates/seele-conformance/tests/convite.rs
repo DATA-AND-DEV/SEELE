@@ -22,9 +22,13 @@
 //! levado o convite, a chave e o apelido, a portaria já tinha anotado a batida,
 //! e o convite de uso único já tinha sido gasto por quem atendeu no lugar do
 //! servidor. É o S2b da análise de 22/09. Os dois últimos testes observam **o
-//! servidor**: o convite ainda entra, e a portaria não tem pedido. Eles olham
-//! para lá porque o erro que o cliente devolve é `InviteMismatch` antes e
-//! depois do conserto.
+//! servidor**: o convite ainda entra, e a portaria não tem pedido. No primeiro,
+//! só lá se vê a diferença: o erro que o cliente devolve é `InviteMismatch`
+//! antes e depois do conserto, porque a conferência depois do aperto de mão
+//! continua como segunda linha. No segundo, antes do conserto o cliente nem
+//! chegava à recusa (o servidor respondia ao `Hello` com
+//! `Refused { AdmissionPending }`), e a fila vazia é a prova de que a batida
+//! não chegou.
 //!
 //! **A recusa não deixa sessão de pé, nem pin.** O verificador não fixa uma
 //! chave que a impressão esperada recusa. A conferência de `Enlace::conectar`

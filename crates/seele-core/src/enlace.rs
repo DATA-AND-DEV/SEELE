@@ -1259,8 +1259,18 @@ impl Enlace {
         // em que as tentativas **começaram**, e elas correm em paralelo: a
         // última a começar não é a que venceu. Aqui a corrida já terminou e
         // sabe o nome de quem chegou.
+        //
+        // **E quem perdeu, antes de quem ganhou.** As falhas dos perdedores
+        // eram descartadas sem uma linha quando alguém vencia, e entre elas
+        // está o evento que a conferência da impressão existe para barrar: um
+        // servidor com a chave errada num endereço da corrida (o que o quarto
+        // devolveu, por exemplo). Ver [`registrar_a_falha_do_candidato`].
         if let Some((posicao, enlace)) = corrida.vencedor {
             let onde = todos.get(posicao).map(|destino| destino.servidor);
+            for (perdedor, falha) in &corrida.falhas {
+                let de_quem = todos.get(*perdedor).map(|destino| destino.servidor);
+                registrar_a_falha_do_candidato(de_quem, falha, onde);
+            }
             tracing::info!(?onde, "este é o endereço que deu");
             // Só o vencedor declara, e só agora que se sabe quem venceu — ver
             // o doc de `Enlace::declarar_identidade_de_par` para o porquê de
@@ -1271,7 +1281,7 @@ impl Enlace {
 
         for (posicao, falha) in corrida.falhas {
             let onde = todos.get(posicao).map(|destino| destino.servidor);
-            tracing::info!(?onde, erro = %falha, "este endereço do convite não deu");
+            registrar_a_falha_do_candidato(onde, &falha, None);
             a_mostrar.anotar(falha);
         }
 
@@ -4825,10 +4835,11 @@ impl PinStore for PinsDesteAperto {
 ///
 /// `escrito` é o que [`PinsDesteAperto`] anotou. Sem nada anotado, não há o que
 /// desfazer: a recusa pela impressão (`InviteMismatch`), a chave trocada
-/// (`PinChanged`) e a falha antes do TLS terminar não escrevem, e um pin que
-/// exista na hora é de outro. Com algo anotado, o pin só cai se a loja ainda
-/// guardar aquele valor: um vizinho que tenha fixado outra coisa depois fica
-/// com o que é dele.
+/// (`PinChanged`) e toda falha de um aperto que não chegou a aceitar um
+/// primeiro contato não escrevem (o verificador só fixa num `FirstContact`), e
+/// um pin que exista na hora é de outro. Com algo anotado, o pin só cai se a
+/// loja ainda guardar aquele valor: um vizinho que tenha fixado outra coisa
+/// depois fica com o que é dele.
 ///
 /// **O que ela não distingue:** um vizinho que tenha fixado a **mesma**
 /// impressão, que é o mesmo servidor por dois endereços do convite, ambos sem
@@ -4858,6 +4869,50 @@ fn desfazer_o_pin_deste_aperto(pins: &dyn PinStore, chave_do_pin: &str, escrito:
 fn desfazer_pin_orfao(pins: &dyn PinStore, chave_do_pin: &str, fixado_antes: Option<&str>) {
     if fixado_antes.is_none() && pins.pinned(chave_do_pin).is_some() {
         pins.unpin(chave_do_pin);
+    }
+}
+
+/// Diz no log por que um candidato da corrida não entrou.
+///
+/// Com vencedor ou sem. As falhas dos perdedores eram descartadas sem uma linha
+/// quando outro candidato entrava, e entre elas está o evento que a
+/// conferência da impressão existe para barrar: um servidor com a chave errada
+/// num endereço da corrida, como o que o quarto devolveu.
+///
+/// - A impressão que não confere (`InviteMismatch`) e a chave fixada que mudou
+///   (`PinChanged`) vão em `warn!`, com o endereço e as duas impressões:
+///   impressão não é segredo, e sem as duas ninguém confere nada.
+/// - As outras falhas vão em `info!`, que é o nível que o `seele.log` grava.
+///
+/// `entrou` é o endereço que venceu, quando algum venceu: a linha diz que a
+/// recusa aconteceu e que a conversa subiu por outro lado.
+///
+/// O verificador também registra as duas recusas (`crate::tofu::TofuVerifier::decide`),
+/// sob a chave de pino e com o porquê; esta linha é a da corrida, com o
+/// endereço e o desfecho.
+fn registrar_a_falha_do_candidato(
+    onde: Option<SocketAddr>,
+    falha: &ConnectError,
+    entrou: Option<SocketAddr>,
+) {
+    match falha {
+        ConnectError::InviteMismatch { expected, offered } => tracing::warn!(
+            ?onde,
+            esperada = %expected,
+            ofertada = %offered,
+            ?entrou,
+            "este candidato não é o servidor que a impressão esperada promete: recusado \
+             dentro do TLS, antes do `Hello`"
+        ),
+        ConnectError::PinChanged { pinned, offered } => tracing::warn!(
+            ?onde,
+            fixada = %pinned,
+            ofertada = %offered,
+            ?entrou,
+            "a chave fixada deste candidato mudou: recusado dentro do TLS, antes do `Hello` \
+             (ADR 0003)"
+        ),
+        outra => tracing::info!(?onde, erro = %outra, ?entrou, "este endereço do convite não deu"),
     }
 }
 
@@ -6568,6 +6623,168 @@ mod tests {
             1,
             "a volta que reconectou não passou por um aperto de mão do protocolo com o \
              servidor de teste, e o teste mediu outra coisa"
+        );
+    }
+
+    /// Uma ponta com certificado próprio que aceita todo aperto de mão do TLS e
+    /// não fala nada depois: o bastante para o verificador de quem conecta ver
+    /// a chave dela e decidir.
+    fn ponta_que_so_mostra_a_chave() -> (SocketAddr, String) {
+        let (escuta, endereco, impressao) = ponta_com_certificado_proprio();
+        tokio::spawn(async move {
+            while let Some(entrada) = escuta.accept().await {
+                let _ = entrada.await;
+            }
+        });
+        (endereco, impressao)
+    }
+
+    #[tokio::test]
+    async fn a_recusa_de_um_candidato_perdedor_vai_ao_log_mesmo_quando_outro_entra() {
+        // O evento que o Plano 1B existe para barrar é um impostor num endereço
+        // da corrida (o do quarto, por exemplo) com a chave errada. Quando outro
+        // candidato vencia, as falhas da corrida eram descartadas sem uma linha,
+        // e esse evento não deixava rastro no `seele.log`.
+        //
+        // Quatro candidatos, e o vencedor por último, para os três perdedores
+        // terminarem antes dele (a corrida dispara um a cada 250 ms, e cada
+        // perdedor falha em milissegundos):
+        // - um que a impressão esperada desmente (`InviteMismatch`);
+        // - um cuja chave fixada mudou (`PinChanged`);
+        // - um que nem sai (um nome TLS que o `quinn` recusa: `Unreachable`);
+        // - o verdadeiro.
+        //
+        // A chave de pino de cada um não é o texto do endereço, de propósito: o
+        // verificador também registra as duas recusas, sob a chave de pino, e
+        // um guarda que casasse com a linha dele não provaria nada sobre a
+        // corrida.
+        //
+        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
+        // thread, e a corrida inteira roda nela.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let (onde_do_impostor, impressao_do_impostor) = ponta_que_so_mostra_a_chave();
+        let (onde_do_trocado, impressao_do_trocado) = ponta_que_so_mostra_a_chave();
+        let (onde_do_verdadeiro, impressao_do_verdadeiro, _) = servidor_que_conta_os_hellos();
+        let fixada_antes = "f".repeat(64);
+        let onde_de_quem_nao_sai: SocketAddr = "127.0.0.1:9".parse().expect("endereço");
+
+        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
+        loja.pin("chave-do-trocado", fixada_antes.clone());
+        let mut quem_nao_sai =
+            destino_na_chave(onde_de_quem_nao_sai, "chave-de-quem-nao-sai", None);
+        quem_nao_sai.nome_tls = "nome inválido com espaço".into();
+        let destinos = vec![
+            destino_na_chave(
+                onde_do_impostor,
+                "chave-do-impostor",
+                Some(&impressao_do_verdadeiro),
+            ),
+            destino_na_chave(onde_do_trocado, "chave-do-trocado", None),
+            quem_nao_sai,
+            destino_na_chave(
+                onde_do_verdadeiro,
+                "chave-do-verdadeiro",
+                Some(&impressao_do_verdadeiro),
+            ),
+        ];
+
+        let entrou = tokio::time::timeout(
+            Duration::from_secs(20),
+            Enlace::conectar_entre_com_bilhete(
+                destinos,
+                None,
+                SigningKey::from_bytes(&[9; 32]),
+                Arc::clone(&loja) as Arc<dyn PinStore>,
+            ),
+        )
+        .await
+        .expect("a corrida não terminou");
+        assert!(
+            entrou.is_ok(),
+            "o candidato verdadeiro não venceu a corrida ({:?}), e o teste mediu outra coisa",
+            entrou.err()
+        );
+
+        let linhas = rastro.linhas();
+        let do_impostor = onde_do_impostor.to_string();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains(&do_impostor)
+                && linha.contains(&impressao_do_verdadeiro)
+                && linha.contains(&impressao_do_impostor)),
+            "a recusa pela impressão de um candidato perdedor sumiu do log quando outro entrou: \
+             quem lê o `seele.log` não fica sabendo que um servidor com a chave errada atendeu \
+             em {do_impostor}. Rastro: {linhas:?}"
+        );
+        let do_trocado = onde_do_trocado.to_string();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains(&do_trocado)
+                && linha.contains(&fixada_antes)
+                && linha.contains(&impressao_do_trocado)),
+            "a chave trocada de um candidato perdedor sumiu do log quando outro entrou: o \
+             alarme do ADR 0003 em {do_trocado} não deixou rastro. Rastro: {linhas:?}"
+        );
+        let de_quem_nao_sai = onde_de_quem_nao_sai.to_string();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains(&de_quem_nao_sai)
+                && linha.contains("Unreachable")),
+            "a falha comum de um candidato perdedor sumiu do log quando outro entrou, ou deixou \
+             de ir em `info`, como no caminho sem vencedor. Rastro: {linhas:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sem_vencedor_a_recusa_de_um_candidato_vai_ao_log_do_mesmo_jeito() {
+        // O caminho sem vencedor já registrava cada falha, em `info`. A recusa
+        // pela impressão sobe para `warn`, com o endereço e as duas impressões,
+        // pela mesma regra do caminho com vencedor: as duas voltas escrevem a
+        // falha de um candidato pela mesma função, e um guarda só no caminho
+        // com vencedor deixaria este mudar calado.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let (onde_do_impostor, impressao_do_impostor) = ponta_que_so_mostra_a_chave();
+        let esperada = "e".repeat(64);
+        let mut quem_nao_sai = destino_na_chave(
+            "127.0.0.1:9".parse().expect("endereço"),
+            "chave-de-quem-nao-sai",
+            None,
+        );
+        quem_nao_sai.nome_tls = "nome inválido com espaço".into();
+        let destinos = vec![
+            destino_na_chave(onde_do_impostor, "chave-do-impostor", Some(&esperada)),
+            quem_nao_sai,
+        ];
+
+        let resultado = tokio::time::timeout(
+            Duration::from_secs(20),
+            Enlace::conectar_entre_com_bilhete(
+                destinos,
+                None,
+                SigningKey::from_bytes(&[9; 32]),
+                Arc::new(crate::tofu::MemoryPinStore::new()) as Arc<dyn PinStore>,
+            ),
+        )
+        .await
+        .expect("a corrida não terminou");
+        assert!(
+            resultado.is_err(),
+            "um candidato entrou numa corrida sem servidor verdadeiro, e o teste mediu outra coisa"
+        );
+
+        let linhas = rastro.linhas();
+        let do_impostor = onde_do_impostor.to_string();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains(&do_impostor)
+                && linha.contains(&esperada)
+                && linha.contains(&impressao_do_impostor)),
+            "sem vencedor, a recusa pela impressão de um candidato não foi ao log em `warn` com \
+             o endereço e as duas impressões. Rastro: {linhas:?}"
         );
     }
 

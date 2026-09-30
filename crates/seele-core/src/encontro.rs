@@ -799,66 +799,13 @@ mod testes {
         );
     }
 
-    /// Um [`tracing::Subscriber`] mínimo que guarda cada evento de `INFO` para
-    /// cima como uma linha `nível: mensagem campo=valor …`.
-    ///
-    /// O `seele.log` só grava `info`, então é este nível que decide se quem lê
-    /// o log fica sabendo. O de `par.rs` filtra em `WARN` e mora dentro do
-    /// módulo de testes de lá, e `tracing-subscriber` não é dependência de
-    /// teste deste crate: acrescentá-la só para isto seria uma dependência nova
-    /// por duas asserções.
-    #[derive(Default)]
-    struct CapturaDeInfo {
-        linhas: std::sync::Mutex<Vec<String>>,
-    }
-
-    impl tracing::Subscriber for CapturaDeInfo {
-        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-            *metadata.level() <= tracing::Level::INFO
-        }
-
-        fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            tracing::span::Id::from_u64(1)
-        }
-
-        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
-
-        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
-
-        fn event(&self, event: &tracing::Event<'_>) {
-            struct Campos(String);
-            impl tracing::field::Visit for Campos {
-                fn record_debug(
-                    &mut self,
-                    field: &tracing::field::Field,
-                    valor: &dyn std::fmt::Debug,
-                ) {
-                    if field.name() == "message" {
-                        self.0.push_str(&format!(" {valor:?}"));
-                    } else {
-                        self.0.push_str(&format!(" {}={valor:?}", field.name()));
-                    }
-                }
-            }
-            let mut campos = Campos(String::new());
-            event.record(&mut campos);
-            if let Ok(mut linhas) = self.linhas.lock() {
-                linhas.push(format!("{}:{}", event.metadata().level(), campos.0));
-            }
-        }
-
-        fn enter(&self, _span: &tracing::span::Id) {}
-
-        fn exit(&self, _span: &tracing::span::Id) {}
-    }
-
     #[tokio::test]
     async fn um_ponto_que_nao_se_procura_diz_no_rastro_por_que_nao() {
         // «O produto sabe e não conta»: o `.ok()?` calado que havia aqui deixou a
         // pergunta ao quarto sem sair, e o `seele.log` sem uma linha sobre isso.
         // `#[tokio::test]` de thread única, de propósito: `set_default` fixa o
         // `Subscriber` só na thread corrente, e a resolução acontece nela.
-        let captura = Arc::new(CapturaDeInfo::default());
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
         let _guarda = tracing::subscriber::set_default(captura.clone());
 
         assert_eq!(
@@ -872,7 +819,7 @@ mod testes {
             "um nome que não existe resolveu: este teste não mede nada"
         );
 
-        let linhas = captura.linhas.lock().unwrap();
+        let linhas = captura.linhas();
         assert!(
             linhas.iter().any(|linha| linha.starts_with("INFO")
                 && linha.contains("não é um endereço")
@@ -944,7 +891,7 @@ mod testes {
         // `PontoMudo` sem uma linha sobre quanto se esperou, e o `seele.log`
         // (que só grava `info`) ficava mudo junto com ele. Este teste fixa a
         // `Subscriber` só na thread corrente, e a consulta corre nela.
-        let captura = Arc::new(CapturaDeInfo::default());
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
         let _guarda = tracing::subscriber::set_default(captura.clone());
         let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let onde_fica = mudo.local_addr().unwrap().to_string();
@@ -959,7 +906,7 @@ mod testes {
             OndeMora::PontoMudo,
             "um ponto que não respondeu virou outra coisa: este teste não mede nada"
         );
-        let linhas = captura.linhas.lock().unwrap();
+        let linhas = captura.linhas();
         assert!(
             linhas.iter().any(|linha| linha.starts_with("INFO")
                 && linha.contains("prazo")
@@ -988,7 +935,7 @@ mod testes {
         // Prazo zero, e um nome que só a resolução de verdade responde: a
         // primeira sondagem do `lookup_host` fica pendente, e o prazo, já
         // vencido, ganha. Um endereço em números resolveria sem esperar.
-        let captura = Arc::new(CapturaDeInfo::default());
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
         let _guarda = tracing::subscriber::set_default(captura.clone());
         let Some(marcas) = Marcas::do_servidor(FP) else {
             panic!("a impressão digital de teste tem de formar marcas");
@@ -1001,7 +948,7 @@ mod testes {
             OndeMora::PontoNaoResolve,
             "um nome que não resolveu no prazo virou outra coisa: este teste não mede nada"
         );
-        let linhas = captura.linhas.lock().unwrap();
+        let linhas = captura.linhas();
         assert!(
             linhas.iter().any(|linha| linha.starts_with("INFO")
                 && linha.contains("dentro do prazo")
@@ -1037,7 +984,7 @@ mod testes {
              envio falho para observar. Não é a consulta que está errada, é o mecanismo daqui \
              que não vale neste sistema"
         );
-        let captura = Arc::new(CapturaDeInfo::default());
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
         let _guarda = tracing::subscriber::set_default(captura.clone());
         let Some(marcas) = Marcas::do_servidor(FP) else {
             panic!("a impressão digital de teste tem de formar marcas");
@@ -1059,7 +1006,7 @@ mod testes {
             "nenhuma pergunta saiu e a consulta ainda esperou {levou:?}: sem rota, quem paga é a \
              conexão que vem depois, com {PRAZO_DO_QUARTO:?} a mais antes de qualquer tentativa"
         );
-        let linhas = captura.linhas.lock().unwrap();
+        let linhas = captura.linhas();
         assert!(
             linhas
                 .iter()

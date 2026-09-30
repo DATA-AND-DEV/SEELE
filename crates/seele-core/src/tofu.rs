@@ -401,6 +401,14 @@ impl TofuVerifier {
         match self.store.pinned(host) {
             None => {
                 if let Some(expected) = self.desmente(&offered) {
+                    tracing::warn!(
+                        chave = %host,
+                        esperada = %expected,
+                        ofertada = %offered,
+                        "a impressão esperada não confere com a chave de quem atendeu, no \
+                         primeiro contato: recusado dentro do TLS, antes do `Hello`, e nada \
+                         foi fixado"
+                    );
                     return PinDecision::InviteRefused {
                         expected: expected.to_owned(),
                         offered,
@@ -414,6 +422,21 @@ impl TofuVerifier {
             Some(pinned) if pinned == offered => {
                 if !self.o_pino_prova_o_servidor {
                     if let Some(expected) = self.desmente(&offered) {
+                        // **Dito à parte, e não como um primeiro contato.**
+                        // Esta máquina já conhecia esta chave neste endereço;
+                        // quem lê o log precisa saber que a recusa passou por
+                        // cima de um pino, porque é a pista de uma colisão na
+                        // LAN ou de um quarto que aponta para outro servidor.
+                        tracing::warn!(
+                            chave = %host,
+                            esperada = %expected,
+                            ofertada = %offered,
+                            "havia um pino que conferia com a chave de quem atendeu, e a \
+                             impressão esperada decidiu: o pino deste destino não prova o \
+                             servidor (um candidato que a pessoa não escolheu, ou um alvo de \
+                             escopo local). Recusado dentro do TLS, antes do `Hello`; o pino \
+                             fica como estava"
+                        );
                         return PinDecision::InviteRefused {
                             expected: expected.to_owned(),
                             offered,
@@ -424,7 +447,16 @@ impl TofuVerifier {
                     fingerprint: offered,
                 }
             }
-            Some(pinned) => PinDecision::Changed { pinned, offered },
+            Some(pinned) => {
+                tracing::warn!(
+                    chave = %host,
+                    fixada = %pinned,
+                    ofertada = %offered,
+                    "a chave fixada deste endereço mudou: recusado dentro do TLS, antes do \
+                     `Hello` (ADR 0003)"
+                );
+                PinDecision::Changed { pinned, offered }
+            }
         }
     }
 
@@ -444,8 +476,12 @@ impl TofuVerifier {
 /// em `read_handshake`. Uma frase por caso ensinaria a quem atende se esta
 /// máquina tinha um link na mão ou uma chave fixada dele, e essa é justamente a
 /// informação que um impostor quer para saber o que forjar. O que distingue a
-/// chave trocada da impressão que não confere fica em `last` e no log daqui,
-/// que só quem usa esta máquina lê.
+/// chave trocada da impressão que não confere fica em `last` e no log desta
+/// máquina, que só quem a usa lê: [`TofuVerifier::decide`] escreve um `warn!`
+/// por recusa, com a chave de pino, as duas impressões e o porquê (inclusive
+/// quando havia um pino que conferia e a esperada decidiu), e a corrida de
+/// candidatos (`crate::enlace`) escreve outro para cada candidato recusado, com
+/// o endereço, haja vencedor ou não.
 const RECUSA_NO_TLS: &str = "certificado não aceito";
 
 impl ServerCertVerifier for TofuVerifier {
@@ -1038,7 +1074,9 @@ mod tests {
         // `crypto/rustls.rs`). Se as duas recusas dissessem coisas diferentes,
         // um servidor qualquer (ou um impostor) aprenderia, só de ser recusado,
         // se esta máquina tinha um link na mão ou uma chave fixada dele. A
-        // distinção fica na decisão que o verificador guarda e no log daqui.
+        // distinção fica na decisão que o verificador guarda e no log desta
+        // máquina (`a_recusa_no_primeiro_contato_vai_ao_log_sem_dizer_que_havia_pino`
+        // e `a_chave_trocada_vai_ao_log_com_as_duas_impressoes`, abaixo).
         let (_, com_link) = esperando(B);
         let por_link = a_frase_que_vai_ao_fio(&com_link);
 
@@ -1089,6 +1127,84 @@ mod tests {
             },
             "a recusa do TLS deixou de virar a recusa do veredito: quem lê o \
              veredito trataria como conhecido um servidor que o link desmente"
+        );
+    }
+
+    /// As linhas de `WARN` para cima que `decide` deixa no rastro.
+    fn o_que_decide_diz(verificador: &TofuVerifier, certificado: &[u8]) -> Vec<String> {
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        verificador.decide("server.example", certificado);
+        rastro.linhas()
+    }
+
+    #[test]
+    fn a_recusa_por_cima_de_um_pino_que_conferia_diz_isso_no_log() {
+        // Num candidato que a pessoa não escolheu, ou num alvo de LAN, a
+        // esperada que não confere recusa mesmo com um pino que confere. O
+        // log dizia disso o mesmo que diz de um primeiro contato recusado, e
+        // quem o lê não saberia que esta máquina já conhecia aquela chave
+        // naquele endereço: é a pista de uma colisão na LAN, ou de um quarto
+        // que aponta para outro servidor.
+        let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
+        let (_, verificador) = candidato_fixado(false, &um, Some(B));
+
+        let linhas = o_que_decide_diz(&verificador, b"certificate-one");
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("havia um pino que conferia")
+                && linha.contains("não prova o servidor")
+                && linha.contains("server.example")
+                && linha.contains(B)
+                && linha.contains(&um)),
+            "a recusa por cima de um pino que conferia não diz no log que havia o pino, nem \
+             que a esperada decidiu porque o pino deste destino não prova o servidor, nem o \
+             endereço e as duas impressões: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn a_recusa_no_primeiro_contato_vai_ao_log_sem_dizer_que_havia_pino() {
+        // A outra metade da distinção: sem pino, o log diz a recusa, e não
+        // inventa um pino que não havia.
+        let (_, verificador) = esperando(B);
+        let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
+
+        let linhas = o_que_decide_diz(&verificador, b"certificate-one");
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("primeiro contato")
+                && linha.contains("server.example")
+                && linha.contains(B)
+                && linha.contains(&um)),
+            "a recusa pela impressão no primeiro contato não foi ao log com o endereço e as \
+             duas impressões: {linhas:?}"
+        );
+        assert!(
+            !linhas
+                .iter()
+                .any(|linha| linha.contains("pino que conferia")),
+            "a recusa no primeiro contato diz no log que havia um pino que conferia, e não \
+             havia pino nenhum: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn a_chave_trocada_vai_ao_log_com_as_duas_impressoes() {
+        // O alarme do ADR 0003. A frase que vai ao fio é a mesma da recusa pela
+        // impressão (`RECUSA_NO_TLS`); o que as distingue nesta máquina é o log.
+        let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
+        let dois = seele_proto::transport::certificate_fingerprint(b"certificate-two");
+        let (_, verificador) = candidato_fixado(true, &um, None);
+
+        let linhas = o_que_decide_diz(&verificador, b"certificate-two");
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("mudou")
+                && linha.contains("server.example")
+                && linha.contains(&um)
+                && linha.contains(&dois)),
+            "a chave trocada não foi ao log com o endereço, a fixada e a ofertada: {linhas:?}"
         );
     }
 }

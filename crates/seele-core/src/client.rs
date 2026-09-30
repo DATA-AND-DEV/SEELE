@@ -1761,54 +1761,6 @@ mod a_decisao_que_falta_nao_vira_matches {
     use super::{decisao_do_aperto, ConnectError};
     use crate::tofu::PinDecision;
 
-    /// Guarda os `WARN` (e mais graves) como `nível: mensagem`.
-    ///
-    /// O terceiro `Subscriber` escrito à mão deste crate: os de `encontro.rs` e
-    /// `par.rs` moram nos módulos de teste de lá, e `tracing-subscriber` não é
-    /// dependência de teste daqui.
-    #[derive(Default)]
-    struct CapturaDeAvisos {
-        linhas: std::sync::Mutex<Vec<String>>,
-    }
-
-    impl tracing::Subscriber for CapturaDeAvisos {
-        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-            *metadata.level() <= tracing::Level::WARN
-        }
-
-        fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            tracing::span::Id::from_u64(1)
-        }
-
-        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
-
-        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
-
-        fn event(&self, event: &tracing::Event<'_>) {
-            struct Mensagem(String);
-            impl tracing::field::Visit for Mensagem {
-                fn record_debug(
-                    &mut self,
-                    field: &tracing::field::Field,
-                    valor: &dyn std::fmt::Debug,
-                ) {
-                    if field.name() == "message" {
-                        self.0 = format!("{valor:?}");
-                    }
-                }
-            }
-            let mut mensagem = Mensagem(String::new());
-            event.record(&mut mensagem);
-            if let Ok(mut linhas) = self.linhas.lock() {
-                linhas.push(format!("{}: {}", event.metadata().level(), mensagem.0));
-            }
-        }
-
-        fn enter(&self, _span: &tracing::span::Id) {}
-
-        fn exit(&self, _span: &tracing::span::Id) {}
-    }
-
     #[test]
     fn um_aperto_de_mao_sem_decisao_do_verificador_falha_e_diz_por_que() {
         // `connect_por` fazia `unwrap_or(Matches { fingerprint: "" })`. Um TLS
@@ -1816,7 +1768,7 @@ mod a_decisao_que_falta_nao_vira_matches {
         // `Hello` saía para um servidor que ninguém conferiu, e com impressão
         // esperada o veredito virava `InviteDisagrees { offered: "" }`, que a
         // lista de conhecidos gravaria.
-        let captura = std::sync::Arc::new(CapturaDeAvisos::default());
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
         let _guarda = tracing::subscriber::set_default(captura.clone());
 
         assert_eq!(
@@ -1825,7 +1777,7 @@ mod a_decisao_que_falta_nao_vira_matches {
             "o aperto de mão sem decisão do verificador seguiu como se o pin conferisse: o \
              `Hello` sairia para um servidor que ninguém conferiu"
         );
-        let linhas = captura.linhas.lock().expect("a captura não envenena");
+        let linhas = captura.linhas();
         assert!(
             linhas
                 .iter()

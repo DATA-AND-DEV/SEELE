@@ -2271,63 +2271,6 @@ mod testes {
         drop(b);
     }
 
-    /// Um [`tracing::Subscriber`] mínimo que só guarda a linha de cada evento,
-    /// formatada como `nível: mensagem`.
-    ///
-    /// Existe porque nenhum teste deste crate até aqui precisou inspecionar
-    /// rastro — `seele-core` não tem `tracing-subscriber` nas dependências de
-    /// teste, e acrescentá-la só para isto seria uma dependência nova por um
-    /// `assert` só. `tracing-core` já expõe o necessário: implementar o
-    /// `Subscriber` à mão é código repetitivo, mas é código que já está na
-    /// árvore.
-    #[derive(Default)]
-    struct CapturaDeRastro {
-        eventos: std::sync::Mutex<Vec<String>>,
-    }
-
-    impl tracing::Subscriber for CapturaDeRastro {
-        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-            // Só o que um `WARN` (ou mais grave) precisaria — não o `INFO` de
-            // rotina e não o `TRACE` do `quinn`. Sem este filtro, o teste que
-            // falha por causa deste `Subscriber` despeja umas 180 linhas de
-            // handshake do `quinn` na mensagem do `assert!`, e quem depura
-            // tem de procurar a ausência de um `WARN` no meio delas.
-            *metadata.level() <= tracing::Level::WARN
-        }
-
-        fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            tracing::span::Id::from_u64(1)
-        }
-
-        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
-
-        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
-
-        fn event(&self, event: &tracing::Event<'_>) {
-            struct Mensagem(String);
-            impl tracing::field::Visit for Mensagem {
-                fn record_debug(
-                    &mut self,
-                    field: &tracing::field::Field,
-                    valor: &dyn std::fmt::Debug,
-                ) {
-                    if field.name() == "message" {
-                        self.0 = format!("{valor:?}");
-                    }
-                }
-            }
-            let mut mensagem = Mensagem(String::new());
-            event.record(&mut mensagem);
-            if let Ok(mut eventos) = self.eventos.lock() {
-                eventos.push(format!("{}: {}", event.metadata().level(), mensagem.0));
-            }
-        }
-
-        fn enter(&self, _span: &tracing::span::Id) {}
-
-        fn exit(&self, _span: &tracing::span::Id) {}
-    }
-
     #[tokio::test]
     async fn repassar_avisa_quando_o_canal_fecha_sem_a_chave_chegar() {
         // **Guarda do achado Important 4 do fix round 1.** `repassar` era a
@@ -2345,7 +2288,10 @@ mod testes {
         // `duas_pontas_ligadas` — nessa mesma `thread`. Numa `multi_thread` a
         // tarefa spawnada podia cair noutra `thread` e o rastro dela sumir
         // para este `Subscriber`; aqui não há essa aposta.
-        let captura = std::sync::Arc::new(CapturaDeRastro::default());
+        // Só `WARN` para cima: sem o filtro, o teste que falha despeja as
+        // linhas do aperto de mão do `quinn` na mensagem da asserção, e quem
+        // depura tem de procurar a ausência de um `WARN` no meio delas.
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
         let _guarda = tracing::subscriber::set_default(captura.clone());
 
         let (a, b, ligado) = duas_pontas_ligadas().await;
@@ -2362,7 +2308,7 @@ mod testes {
         drop(a);
         drop(b);
 
-        let eventos = captura.eventos.lock().unwrap();
+        let eventos = captura.linhas();
         assert!(
             eventos
                 .iter()

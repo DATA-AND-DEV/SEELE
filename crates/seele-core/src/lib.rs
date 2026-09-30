@@ -39,6 +39,8 @@ pub mod mods;
 pub mod par;
 pub mod preferences;
 pub mod preview;
+#[cfg(test)]
+mod rastro_de_teste;
 pub mod search;
 pub mod som_que_segue;
 pub mod state;
