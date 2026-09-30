@@ -33,7 +33,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use seele_core::enlace::{Destino, Enlace};
+use seele_core::enlace::{e_privado, Destino, Enlace};
 use seele_core::{ConnectError, MemoryPinStore, PinStore};
 
 mod vaga;
@@ -105,10 +105,19 @@ fn primeira_chegada(caderno: &Arc<Mutex<Vec<(Instant, SocketAddr)>>>) -> Option<
 }
 
 /// Um candidato do convite, com a impressão digital que o degrau 4 exige.
-fn destino_com_nome(alvo: &str, nome_tls: &str, o_pino_prova_o_servidor: bool) -> Destino {
+///
+/// `e_o_alvo` diz se ele é o primeiro destino, o endereço que a pessoa
+/// escolheu. Se o pino dele prova o servidor sai como em produção
+/// (`build_destino`, na FFI): o alvo, e só quando o endereço dele não é de
+/// escopo local. Aqui o valor não pesa, porque a loja de pins começa vazia e ele
+/// só decide com um pino já fixado; ele sai como em produção para o fixture não
+/// dizer que um alvo privado, como o `10.255.255.1` destes testes, prova o
+/// servidor.
+fn destino_com_nome(alvo: &str, nome_tls: &str, e_o_alvo: bool) -> Destino {
     let Ok(servidor) = alvo.parse::<SocketAddr>() else {
         panic!("o alvo de teste `{alvo}` não é um endereço");
     };
+    let o_pino_prova_o_servidor = e_o_alvo && !e_privado(servidor.ip());
     Destino {
         servidor,
         nome_tls: nome_tls.to_owned(),
