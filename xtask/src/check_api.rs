@@ -22,10 +22,12 @@
 //!
 //! # E, a partir da API 6, quem despacha
 //!
-//! A mesma pergunta, na mesma direção, feita ao bloco `moments`: **todo
-//! momento que este arquivo promete ainda tem quem o despache?** A v1 prometeu
-//! 21 momentos e `momento_de` entrega 5, e nenhum guarda percebeu. Ver
-//! [`PRIMEIRA_API_COBRADA`] para por que a cobrança começa na 6.
+//! A mesma pergunta, na mesma direção, feita aos blocos `moments` e
+//! `eventos`: **todo momento e todo evento que este arquivo promete ainda têm
+//! quem os despache?** Os momentos, `momento_de` no servidor; os eventos, o
+//! `falar` da janela. A v1 prometeu 21 momentos e `momento_de` entrega 5, e
+//! nenhum guarda percebeu. Ver [`PRIMEIRA_API_COBRADA`] para por que a
+//! cobrança começa na 6.
 
 use std::collections::BTreeSet;
 use std::process::ExitCode;
@@ -81,7 +83,7 @@ struct Promessa<'a> {
     bloco: &'a str,
     /// Quem despacha, dito na violação: é o que a pessoa vai abrir para
     /// consertar.
-    despachante: &'a str,
+    despachante: String,
     /// O que esse despachante de fato entrega.
     entregues: &'a BTreeSet<String>,
 }
@@ -150,6 +152,38 @@ fn momentos_despachados(despacho: &str) -> Option<BTreeSet<String>> {
     Some(nomes)
 }
 
+/// Onde a janela entrega eventos a um MOD.
+const JANELA: &str = "apps/seele-app/ui";
+
+/// Os eventos que a janela entrega a um MOD: o `nome` de cada
+/// `falar({ nome: "…" })` em [`JANELA`].
+///
+/// `falar` é o caminho, e o `base.js` diz por quê: é o dono da região quem
+/// confere a instância e a geração antes de entregar o evento. Um evento
+/// entregue de outro jeito — `falar(evento)` com o objeto montado antes,
+/// digamos — não é achado aqui, e a promessa dele reprova. É o lado certo de
+/// errar: quem abriu o caminho novo descobre aqui, e não quem escreveu o MOD.
+///
+/// Só a janela entra, e não os testes: um nome citado num guarda de
+/// `tests/frontend.rs` resolveria por acidente, que é o defeito que [`colher`]
+/// conta sobre os `.js`.
+///
+/// E pelo mesmo motivo textual do cabeçalho, um `falar({ nome: "…" })` citado
+/// num comentário da janela também conta como despachado. Um exemplo em
+/// comentário não escreve essa forma literal.
+fn eventos_despachados(janela: &str) -> BTreeSet<String> {
+    janela
+        .split("falar({")
+        .skip(1)
+        .filter_map(|chamada| {
+            let resto = chamada.trim_start().strip_prefix("nome:")?;
+            let resto = resto.trim_start().strip_prefix('"')?;
+            let (nome, _) = resto.split_once('"')?;
+            Some(nome.to_owned())
+        })
+        .collect()
+}
+
 /// O que uma versão promete num bloco e ninguém despacha.
 ///
 /// A mesma direção de [`evaluate`]: do arquivo para o código. Um nome que o
@@ -203,9 +237,14 @@ fn sem_despachante(
 ///
 /// Fora do [`run`] para que a ligação dele com [`sem_despachante`] tenha teste:
 /// sem ela, os testes da regra continuariam verdes e o `check-api` aprovaria
-/// uma v6 sem conferir nada. E o `run` conta as cobradas pelo `Some` daqui, da
-/// mesma decisão que cobra, e não por uma conta à parte: o resumo não pode
-/// dizer que cobrou uma versão que não cobrou.
+/// uma v6 sem conferir nada. E o `run` conta as cobradas pelo `Some` daqui, e
+/// não por uma conta à parte: o resumo conta as versões pela mesma fronteira
+/// que decide a cobrança.
+///
+/// O `Some` é só essa decisão sobre a versão, e não diz quais blocos foram
+/// conferidos: com `promessas` vazia, ele sai `Some` sem conferir nada. Quem
+/// garante que a fatia do `run` traz os dois blocos é [`promessas_cobradas`],
+/// com o teste dela.
 fn cobrar(
     caminho: &std::path::Path,
     descritor: &serde_json::Value,
@@ -223,10 +262,48 @@ fn cobrar(
     )
 }
 
+/// A promessa de `moments`, contra o que `momento_de` entrega.
+///
+/// O `run` e os testes montam a promessa por aqui, e por isso a frase que a
+/// pessoa lê quando o `check-api` reprova é a que os testes conferem: a forma
+/// que [`momentos_despachados`] procura, e onde.
+fn promessa_de_momentos(entregues: &BTreeSet<String>) -> Promessa<'_> {
+    Promessa {
+        bloco: "moments",
+        despachante: format!("nenhum braço `=> (\"Nome\", carga)` de `momento_de` ({DESPACHO})"),
+        entregues,
+    }
+}
+
+/// A promessa de `eventos`, contra o que a janela entrega pelo `falar`. A
+/// frase, pelo mesmo motivo de [`promessa_de_momentos`]: a forma que
+/// [`eventos_despachados`] procura, e onde.
+fn promessa_de_eventos(entregues: &BTreeSet<String>) -> Promessa<'_> {
+    Promessa {
+        bloco: "eventos",
+        despachante: format!("nenhum `falar({{ nome: … }})` da janela ({JANELA})"),
+        entregues,
+    }
+}
+
+/// O que o [`run`] cobra de cada versão a partir da [`PRIMEIRA_API_COBRADA`]:
+/// os momentos contra `momento_de`, e os eventos contra a janela.
+///
+/// Numa função, e não escrita no `run`, para que um teste confira que as duas
+/// estão aqui, cada uma com o próprio despachante. Uma fatia sem uma delas —
+/// ou vazia — faria o [`cobrar`] dar a versão por cobrada sem conferir aquele
+/// bloco.
+fn promessas_cobradas<'a>(
+    momentos: &'a BTreeSet<String>,
+    eventos: &'a BTreeSet<String>,
+) -> [Promessa<'a>; 2] {
+    [promessa_de_momentos(momentos), promessa_de_eventos(eventos)]
+}
+
 /// Reads `api/*.json` and every crate source, and reports orphans.
 ///
 /// E, a partir da API 6, cobra de cada versão que o que ela promete em
-/// `moments` tenha quem despache (ver [`PRIMEIRA_API_COBRADA`]).
+/// `moments` e em `eventos` tenha quem despache (ver [`PRIMEIRA_API_COBRADA`]).
 pub(crate) fn run() -> ExitCode {
     let raiz = match std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
         Some(caminho) => caminho.to_path_buf(),
@@ -260,13 +337,21 @@ pub(crate) fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let quem_despacha_momentos =
-        format!("nenhum braço `=> (\"Nome\", carga)` de `momento_de` ({DESPACHO})");
-    let promessa_de_momentos = Promessa {
-        bloco: "moments",
-        despachante: &quem_despacha_momentos,
-        entregues: &momentos,
-    };
+
+    // Quem entrega os eventos: a janela, pelo `falar` do dono da região. Lida
+    // mesmo sem API 6 para cobrar, pelo mesmo motivo dos momentos.
+    let mut janela = String::new();
+    colher(&raiz.join(JANELA), &mut janela);
+    let eventos = eventos_despachados(&janela);
+    if eventos.is_empty() {
+        eprintln!(
+            "check-api: não achei nenhum `falar({{ nome: \"…\" }})` em {JANELA}. Se a janela \
+             passou a entregar eventos de outro jeito, conserte `eventos_despachados` aqui: \
+             sem ele a promessa de eventos da API 6 não tem contra o que ser conferida."
+        );
+        return ExitCode::FAILURE;
+    }
+    let promessas = promessas_cobradas(&momentos, &eventos);
 
     let mut houve = false;
     let Ok(entradas) = std::fs::read_dir(raiz.join("api")) else {
@@ -309,7 +394,7 @@ pub(crate) fn run() -> ExitCode {
             houve = true;
         }
 
-        if let Some(violacoes) = cobrar(&caminho, &json, &[&promessa_de_momentos]) {
+        if let Some(violacoes) = cobrar(&caminho, &json, &promessas.each_ref()) {
             cobradas += 1;
             for violacao in violacoes {
                 eprintln!("check-api: {} — {violacao}", caminho.display());
@@ -323,9 +408,10 @@ pub(crate) fn run() -> ExitCode {
     } else {
         println!(
             "check-api: toda a superfície de MOD ainda aponta para algo ({versoes} \
-             versão(ões)); `momento_de` despacha {} momento(s), cobrados em {cobradas} \
-             versão(ões) a partir da {PRIMEIRA_API_COBRADA}.",
-            momentos.len()
+             versão(ões)); `momento_de` despacha {} momento(s) e a janela, {} evento(s), \
+             cobrados em {cobradas} versão(ões) a partir da {PRIMEIRA_API_COBRADA}.",
+            momentos.len(),
+            eventos.len()
         );
         ExitCode::SUCCESS
     }
@@ -437,14 +523,6 @@ fn vizinha(x: u8) -> (&'static str, u8) {
 
     fn momentos_de_fixture() -> BTreeSet<String> {
         momentos_despachados(DESPACHO_DE_FIXTURE).unwrap_or_default()
-    }
-
-    fn promessa_de_momentos(entregues: &BTreeSet<String>) -> Promessa<'_> {
-        Promessa {
-            bloco: "moments",
-            despachante: "`momento_de`",
-            entregues,
-        }
     }
 
     #[test]
@@ -651,5 +729,264 @@ fn vizinha(x: u8) -> (&'static str, u8) {
              nome: o `check-api` e o guarda de congelamento discordariam sobre o que é uma \
              versão. Veio {cobranca:?}"
         );
+    }
+
+    /// As três formas que a janela usa hoje para entregar um evento — numa
+    /// linha, quebrada, e de dentro de uma arrow function —, um `falar` com
+    /// objeto montado antes, que não conta, e um `falar({` que não começa por
+    /// `nome` seguido de um `nome` de outro objeto, que não pode contar.
+    const JANELA_DE_FIXTURE: &str = r#"
+this.dono.falar({ nome: "botao", chave: plano.no.chave ?? "" });
+this.dono.falar({
+  nome: "fechar-pedido",
+  superficie: this.chave,
+});
+const dizer = (extra) => donoDaRegiao(mod, instancia).falar({ nome: "link", chave, ...extra });
+dono.falar(eventoMontadoAntes);
+dono.falar({ ...eventoMontadoAntes, chave });
+const PERFIS = { regiao: { nome: "regiao" } };
+"#;
+
+    #[test]
+    fn o_extrator_de_eventos_acha_as_tres_formas_e_so_elas() {
+        assert_eq!(
+            eventos_despachados(JANELA_DE_FIXTURE),
+            BTreeSet::from([
+                "botao".to_owned(),
+                "fechar-pedido".to_owned(),
+                "link".to_owned(),
+            ]),
+            "o extrator de eventos perdeu uma das formas de `falar`, ou contou um `nome` que \
+             não é evento"
+        );
+    }
+
+    /// O extrator contra a janela de verdade, cobrindo as quatro formas que
+    /// existem nela hoje: numa linha (`botao`), quebrada (`campo`,
+    /// `fechar-pedido`), dentro de uma arrow function (`link`) e chamada direto
+    /// sobre `donoDaRegiao(…)` (`acao`).
+    ///
+    /// Os nomes conferidos são os 16 `eventos` de `api/v5.json`. O `check-api`
+    /// não cobra a v5, que está congelada. Mas a janela entrega hoje os 16
+    /// eventos dela, e a v5 continua aceita: este teste guarda que continue,
+    /// cobrando do lado que ainda pode mudar.
+    #[test]
+    fn o_extrator_acha_os_eventos_da_janela_de_verdade() {
+        let Ok(v5) = serde_json::from_str::<serde_json::Value>(include_str!("../../api/v5.json"))
+        else {
+            panic!("api/v5.json deixou de ser JSON");
+        };
+        let prometidos: Vec<&str> = v5
+            .get("eventos")
+            .and_then(serde_json::Value::as_array)
+            .map_or_else(Vec::new, |lista| {
+                lista.iter().filter_map(serde_json::Value::as_str).collect()
+            });
+        assert_eq!(
+            prometidos.len(),
+            16,
+            "o teste não leu os 16 eventos de `api/v5.json` — leu {prometidos:?} —, e sem eles \
+             o laço abaixo passaria sem conferir nada"
+        );
+        let janela = [
+            include_str!("../../apps/seele-app/ui/base.js"),
+            include_str!("../../apps/seele-app/ui/mods-regiao.js"),
+            include_str!("../../apps/seele-app/ui/mods-superficies.js"),
+        ]
+        .join("\n");
+        let eventos = eventos_despachados(&janela);
+        for nome in prometidos {
+            assert!(
+                eventos.contains(nome),
+                "o extrator não achou o evento `{nome}` na janela de verdade: ou a forma de \
+                 `falar` mudou (conserte `eventos_despachados`), ou a janela deixou de \
+                 entregar um evento que a v5 promete"
+            );
+        }
+    }
+
+    #[test]
+    fn a_api_6_que_promete_um_evento_sem_despachante_reprova() {
+        let entregues = eventos_despachados(JANELA_DE_FIXTURE);
+        let v6 = serde_json::json!({
+            "version": 6,
+            "moments": [],
+            "eventos": ["botao", "arrastar"],
+        });
+        let violacoes = sem_despachante(6, &v6, &promessa_de_eventos(&entregues));
+        assert_eq!(
+            violacoes.len(),
+            1,
+            "esperava uma violação, vieram {violacoes:?}"
+        );
+        assert!(
+            violacoes
+                .first()
+                .is_some_and(|v| v.contains("arrastar") && v.contains("falar")),
+            "a violação não diz qual evento ficou sem despachante nem por onde despachá-lo: \
+             {violacoes:?}"
+        );
+    }
+
+    #[test]
+    fn a_api_6_que_so_promete_eventos_despachados_passa() {
+        let entregues = eventos_despachados(JANELA_DE_FIXTURE);
+        let v6 = serde_json::json!({ "version": 6, "moments": [], "eventos": ["botao", "link"] });
+        let violacoes = sem_despachante(6, &v6, &promessa_de_eventos(&entregues));
+        assert!(
+            violacoes.is_empty(),
+            "uma v6 que só promete eventos entregues reprovou: {violacoes:?}"
+        );
+    }
+
+    #[test]
+    fn a_api_6_que_nao_lista_os_eventos_reprova() {
+        let entregues = eventos_despachados(JANELA_DE_FIXTURE);
+        let v6 = serde_json::json!({ "version": 6, "extends": 5, "moments": [] });
+        let violacoes = sem_despachante(6, &v6, &promessa_de_eventos(&entregues));
+        assert_eq!(
+            violacoes.len(),
+            1,
+            "esperava uma violação, vieram {violacoes:?}"
+        );
+        assert!(
+            violacoes
+                .first()
+                .is_some_and(|v| v.contains("`eventos`") && v.contains("extends")),
+            "uma v6 sem `eventos` passou, e o que ela promete ficaria implícito: {violacoes:?}"
+        );
+    }
+
+    /// A v5 de verdade, contra uma janela que não entrega nada: congelada, ela
+    /// não é cobrada; cobrada como 6, reprova nos 16.
+    ///
+    /// Versões escritas por extenso, pelo mesmo motivo de
+    /// `as_apis_congeladas_nao_sao_cobradas`.
+    #[test]
+    fn a_v5_congelada_nao_tem_os_eventos_cobrados() {
+        let Ok(v5) = serde_json::from_str::<serde_json::Value>(include_str!("../../api/v5.json"))
+        else {
+            panic!("api/v5.json deixou de ser JSON");
+        };
+        let nenhum = BTreeSet::new();
+        let promessa = promessa_de_eventos(&nenhum);
+        for versao in 1..=5 {
+            assert!(
+                sem_despachante(versao, &v5, &promessa).is_empty(),
+                "a API {versao} está congelada e teve os eventos cobrados: a promessa dela não \
+                 se edita"
+            );
+        }
+        assert_eq!(
+            sem_despachante(6, &v5, &promessa).len(),
+            16,
+            "os 16 eventos da v5 cobrados como API 6, contra uma janela que não entrega nada, \
+             deviam reprovar todos"
+        );
+    }
+
+    /// A fatia que o `run` passa ao [`cobrar`] traz os dois blocos, cada um
+    /// contra o próprio despachante. Sem a promessa de eventos — ou com a fatia
+    /// vazia —, o `cobrar` daria a v6 por cobrada e aprovaria um evento que
+    /// ninguém entrega; com os conjuntos trocados, reprovaria um que é
+    /// entregue.
+    #[test]
+    fn o_run_cobra_os_momentos_e_os_eventos() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let v6 = serde_json::json!({
+            "version": 6,
+            "moments": ["PersonJoined", "ScreenShareStarted"],
+            "eventos": ["botao", "arrastar"],
+        });
+        let violacoes = cobrar(
+            std::path::Path::new("api/v6.json"),
+            &v6,
+            &promessas_cobradas(&momentos, &eventos).each_ref(),
+        )
+        .unwrap_or_default();
+        assert_eq!(
+            violacoes.len(),
+            2,
+            "esperava uma violação por bloco — `ScreenShareStarted` em `moments` e `arrastar` \
+             em `eventos` —, vieram {violacoes:?}"
+        );
+        for (nome, bloco) in [
+            ("ScreenShareStarted", "`moments`"),
+            ("arrastar", "`eventos`"),
+        ] {
+            assert!(
+                violacoes
+                    .iter()
+                    .any(|v| v.contains(nome) && v.contains(bloco)),
+                "o `run` não cobra {bloco}: `{nome}`, sem despachante, passou. Vieram \
+                 {violacoes:?}"
+            );
+        }
+    }
+
+    /// A frase que a pessoa lê quando o `check-api` reprova é a de produção: o
+    /// `run` e este teste montam as promessas pela mesma
+    /// [`promessas_cobradas`]. Ela diz a forma que cada extrator procura e
+    /// onde, que é o que se abre para consertar.
+    #[test]
+    fn a_violacao_diz_a_forma_e_o_lugar_que_o_extrator_procura() {
+        let nenhum = BTreeSet::new();
+        let v6 = serde_json::json!({
+            "version": 6,
+            "moments": ["PersonJoined"],
+            "eventos": ["botao"],
+        });
+        let violacoes = cobrar(
+            std::path::Path::new("api/v6.json"),
+            &v6,
+            &promessas_cobradas(&nenhum, &nenhum).each_ref(),
+        )
+        .unwrap_or_default();
+        for frase in [
+            "não é despachado por nenhum braço `=> (\"Nome\", carga)` de `momento_de` \
+             (crates/seele-server/src/mods/despacho.rs)",
+            "não é despachado por nenhum `falar({ nome: … })` da janela (apps/seele-app/ui)",
+        ] {
+            assert!(
+                violacoes.iter().any(|v| v.contains(frase)),
+                "a violação que o `check-api` imprime não diz a forma e o lugar do \
+                 despachante, «{frase}»: vieram {violacoes:?}"
+            );
+        }
+    }
+
+    /// Um item que não é texto não é pulado calado, em nenhum dos dois blocos:
+    /// é uma promessa que ninguém sabe ler, e reprova dizendo o que achou.
+    #[test]
+    fn um_item_que_nao_e_nome_reprova() {
+        let nenhum = BTreeSet::new();
+        let casos = [
+            (
+                serde_json::json!({ "version": 6, "moments": [1] }),
+                promessa_de_momentos(&nenhum),
+            ),
+            (
+                serde_json::json!({ "version": 6, "eventos": [1] }),
+                promessa_de_eventos(&nenhum),
+            ),
+        ];
+        for (v6, promessa) in &casos {
+            let violacoes = sem_despachante(6, v6, promessa);
+            assert_eq!(
+                violacoes.len(),
+                1,
+                "esperava uma violação em `{}`, vieram {violacoes:?}",
+                promessa.bloco
+            );
+            assert!(
+                violacoes
+                    .first()
+                    .is_some_and(|v| v.contains("não é um nome") && v.contains("`1`")),
+                "um item de `{}` que não é nome passou calado, ou a violação não diz o que \
+                 achou: {violacoes:?}",
+                promessa.bloco
+            );
+        }
     }
 }
