@@ -6,10 +6,12 @@
 //!
 //! # O que ele é
 //!
-//! Um laço que recebe um datagrama, chama [`seele_proto::encontro::responder`],
-//! manda o que ela disser e esquece tudo. Não tem banco, não tem tabela, não
-//! tem arquivo, não tem sessão; reiniciá-lo no meio de uma apresentação custa
-//! uma repetição de 96 bytes.
+//! Um laço que recebe um datagrama e responde. A decisão sobre `ONDE` e `LEVE`
+//! é [`seele_proto::encontro::responder`], uma função sem estado: o que sai
+//! depende só do que entrou. `MORO` e `QUEM` são as duas linhas que passam pelo
+//! quarto, o único estado deste processo (a seção abaixo diz o que ele guarda).
+//! Não tem banco, não tem arquivo, não tem sessão; reiniciá-lo no meio de uma
+//! apresentação custa uma repetição de 96 bytes, e esvazia o quarto.
 //!
 //! É de propósito que ele seja assim tão pequeno. O ADR 0022 aceita este degrau
 //! com a condição de o ponto de encontro ser **trocável** — quem hospeda aponta
@@ -21,11 +23,15 @@
 //! Aprende **metadado**: que endereço falou com que endereço, e quando. É o
 //! custo que o ADR 0022 nomeia em voz alta, e é real.
 //!
-//! Guarda **nada**. Por padrão nem imprime: o registro de quem falou com quem é
-//! justamente a coisa que este projeto não quer que exista, e um log ligado por
-//! padrão seria criá-la por conveniência de quem depura. `--barulhento` existe
-//! para quem estiver investigando um problema, e diz na cara o que passa a
-//! escrever.
+//! Guarda **uma coisa**: o quarto, um mapa de marca (meia impressão digital do
+//! servidor) para o endereço em que o anfitrião disse morar. Fica em memória,
+//! com prazo de 60 segundos desde o último `MORO` e teto de 4096 marcas. Nada
+//! vai a disco, e reiniciar o processo o esvazia.
+//!
+//! Por padrão nem imprime: o registro de quem falou com quem é justamente a
+//! coisa que este projeto não quer que exista, e um log ligado por padrão seria
+//! criá-la por conveniência de quem depura. `--barulhento` existe para quem
+//! estiver investigando um problema, e diz na cara o que passa a escrever.
 //!
 //! # Duas famílias, dois sockets
 //!

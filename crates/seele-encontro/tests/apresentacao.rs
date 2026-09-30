@@ -101,9 +101,10 @@ fn o_aviso_chega_ao_anfitriao_com_o_endereco_para_onde_furar() {
     let campainha = anfitriao.local_addr().unwrap();
     let de_onde = visitante.local_addr().unwrap();
 
-    // Os primeiros dígitos da impressão digital do servidor: está no `seele://` e
-    // em nenhum outro lugar, e é assim que o anfitrião sabe que quem bateu tem
-    // o link dele.
+    // Os primeiros dígitos da impressão digital do servidor: quem tem o
+    // `seele://` os tem, e quem volta pela lista de conhecidos também, porque a
+    // lista guardou a impressão de um link. É assim que o anfitrião sabe que
+    // quem bateu teve o link dele.
     let fp = marca("3cbcfb0212da738f");
     visitante.send_to(&leve(campainha, &fp), ponto).unwrap();
 

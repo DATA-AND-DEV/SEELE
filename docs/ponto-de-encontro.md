@@ -30,13 +30,15 @@ custo que o ADR 0022 nomeia em voz alta, e não há como ter o degrau 4 sem ele.
 **Nada do que é dito.** Ele não vê conteúdo nem chave; não teria o que fazer com
 eles se visse, porque o que passa por ali são três linhas de texto com endereços.
 
-**Quase nada guardado.** Não há banco nem arquivo, e a resposta a `ONDE`, `MORO`
-e `QUEM` continua sendo uma função que recebe um datagrama e devolve outro
-(`seele_proto::encontro::responder`, sem `self` e sem estado). Mas desde
-2026-09-03 existe **o quarto**: um mapa de `marca → endereço`, em memória, com
-prazo de 60 segundos e teto de 4096 marcas (ADR 0022, «O quarto, e por que a
-recusa foi revista»). Ele esvazia sozinho — nada sobrevive a um reinício — e não
-vai a disco em nenhum momento.
+**Quase nada guardado.** Não há banco nem arquivo. A resposta a `ONDE` e a `LEVE`
+continua sendo uma função que recebe um datagrama e devolve outro
+(`seele_proto::encontro::responder`, sem `self` e sem estado). `MORO` e `QUEM`
+passam por **o quarto**, que existe desde 2026-09-03: um mapa de
+`marca → endereço`, em memória, com prazo de 60 segundos e teto de 4096 marcas
+(ADR 0022, «O quarto, e por que a recusa foi revista»). O `MORO` escreve nele, e
+a resposta a `QUEM` sai dele; a função sem estado, sozinha, cala o `QUEM` e
+responde o `MORO` como um `ONDE`. O quarto esvazia sozinho — nada sobrevive a um
+reinício — e não vai a disco em nenhum momento.
 
 O que o operador do ponto de encontro consegue **ler** por causa do quarto: que
 uma marca está no ar, e em que endereço. Nada além disso — a marca é meia
