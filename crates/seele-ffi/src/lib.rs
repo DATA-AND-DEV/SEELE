@@ -8166,6 +8166,78 @@ mod a_lista_guarda_a_impressao_aceita {
     }
 }
 
+/// Se `endereco` já é um candidato desta conexão: o alvo ou um dos
+/// alternativos.
+///
+/// É a pergunta que o `connect` do app faz antes de pôr na frente da corrida o
+/// endereço que o quarto devolveu. Ela só olhava os alternativos, e não o
+/// alvo: quando o quarto devolvia o próprio endereço da entrada, a corrida
+/// tinha dois candidatos com a mesma chave de pino, e o mesmo servidor
+/// recebia dois apertos de mão e dois `Hello`. É o caso em que um candidato
+/// perdedor pode desfazer o pin que o vencedor acabou de fixar
+/// (`seele_core::enlace`, `desfazer_o_pin_deste_aperto`), e ele deixava de
+/// precisar de dois endereços no convite para acontecer.
+///
+/// A comparação é pela chave de pino ([`chave_do_servidor`]) dos dois lados,
+/// e não pelo texto: é ela que diz se dois candidatos são o mesmo endereço, e
+/// `192.168.50.30` e `192.168.50.30:8383` são. Um `endereco` sem chave nunca
+/// seria candidato (a conexão descarta o alternativo que não resolve), e
+/// devolve `false`.
+#[must_use]
+pub fn ja_esta_na_corrida(endereco: &str, alvo: &str, alternativos: &[String]) -> bool {
+    let Some(chave) = chave_do_servidor(endereco) else {
+        return false;
+    };
+    std::iter::once(alvo)
+        .chain(alternativos.iter().map(String::as_str))
+        .any(|candidato| chave_do_servidor(candidato).as_deref() == Some(chave.as_str()))
+}
+
+#[cfg(test)]
+mod a_resposta_do_quarto_nao_repete_um_candidato {
+    use super::ja_esta_na_corrida;
+
+    #[test]
+    fn o_proprio_alvo_ja_esta_na_corrida() {
+        assert!(
+            ja_esta_na_corrida("187.255.97.152:9368", "187.255.97.152:9368", &[]),
+            "o endereço que o quarto devolveu é o próprio alvo e entrou de novo na corrida: \
+             dois candidatos com a mesma chave de pino, e dois `Hello` para o mesmo servidor"
+        );
+    }
+
+    #[test]
+    fn a_comparacao_e_pela_chave_de_pino_e_nao_pelo_texto() {
+        assert!(
+            ja_esta_na_corrida("192.168.50.30:8383", "192.168.50.30", &[]),
+            "o alvo escrito sem a porta padrão não foi reconhecido no endereço que o quarto \
+             devolveu: a chave de pino dos dois é a mesma"
+        );
+        assert!(
+            ja_esta_na_corrida(
+                "[2001:db8::1]:8383",
+                "casa.exemplo:8383",
+                &["[2001:db8::1]".to_owned()]
+            ),
+            "um alternativo escrito sem a porta padrão não foi reconhecido no endereço que o \
+             quarto devolveu: a chave de pino dos dois é a mesma"
+        );
+    }
+
+    #[test]
+    fn um_endereco_novo_entra_na_corrida() {
+        assert!(
+            !ja_esta_na_corrida(
+                "187.255.97.152:9400",
+                "187.255.97.152:9368",
+                &["192.168.50.30:8383".to_owned()]
+            ),
+            "a porta nova que o NAT deu ao servidor foi tratada como candidato repetido, e a \
+             resposta do quarto não entra na corrida"
+        );
+    }
+}
+
 #[cfg(test)]
 mod a_voz_quando_o_enlace_volta {
     //! O braço da reconexão, exercitado pelo que ele **faz**.

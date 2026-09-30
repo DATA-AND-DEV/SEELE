@@ -14206,3 +14206,28 @@ fn o_endereco_que_o_quarto_deu_nao_vai_para_a_lista_de_conhecidos() {
          junto, e a lista ganha um endereço morto a cada reabertura do anfitrião"
     );
 }
+
+#[test]
+fn a_resposta_do_quarto_nao_repete_um_candidato() {
+    // O quarto põe o endereço de hoje na frente da corrida, e só ficava de fora
+    // o que já estava entre os alternativos, e não o próprio alvo. Quando o
+    // quarto devolvia o endereço da entrada, o mesmo servidor recebia dois
+    // apertos de mão e dois `Hello`. A regra é `seele_ffi::ja_esta_na_corrida`,
+    // provada lá: pela chave de pino, contra o alvo e contra os alternativos. O
+    // que só se vê aqui é o `connect` usá-la, e dando-lhe o alvo. Os espaços
+    // saem da comparação para o guarda não depender de onde o `rustfmt` quebra
+    // a linha.
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    assert!(
+        connect.contains(
+            ".filter(|texto|!seele_ffi::ja_esta_na_corrida(texto,&server,&alternativos))"
+        ),
+        "`connect` deixou de perguntar à regra da FFI se a resposta do quarto já está na \
+         corrida, ou não lhe dá o alvo: quando o quarto devolve o próprio endereço da entrada, \
+         o mesmo servidor recebe dois apertos de mão e dois `Hello`"
+    );
+}

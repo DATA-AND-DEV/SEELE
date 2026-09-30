@@ -1025,9 +1025,12 @@ async fn connect(
         (Some(impressao), Some(bilhete_guardado)) => {
             let no_quarto = seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
             let (fresco_do_server, fresco_do_aviso) = (no_quarto.servidor(), no_quarto.escuta());
+            // Uma resposta que já é candidata, o alvo ou um alternativo, não
+            // entra de novo: seriam dois apertos de mão e dois `Hello` para o
+            // mesmo servidor. A regra compara pela chave de pino.
             do_quarto = fresco_do_server
                 .map(|endereco| endereco.to_string())
-                .filter(|texto| !alternativos.contains(texto));
+                .filter(|texto| !seele_ffi::ja_esta_na_corrida(texto, &server, &alternativos));
             if let Some(texto) = &do_quarto {
                 alternativos.insert(0, texto.clone());
             }
