@@ -22,9 +22,10 @@
 //! (`a_volta_pela_lista_confere_pela_impressao_guardada`).
 //!
 //! O que a lista **guarda** depois de entrar segue a mesma divisão. A regra é
-//! `seele_ffi::impressao_a_guardar`, e o último teste deste arquivo a exercita
-//! com um servidor de verdade que fecha e volta noutra porta. O uso pelo
-//! comando, com a impressão que a conexão conferiu, é guardado em
+//! `seele_ffi::impressao_a_guardar`, e os dois últimos testes deste arquivo a
+//! exercitam com servidores de verdade: um que fecha e volta noutra porta, e um
+//! candidato de outro servidor, já fixado, que entra na corrida. O uso pelo
+//! comando, com o link desta sessão e a guardada como entradas, é guardado em
 //! `a_lista_guarda_a_impressao_que_a_conexao_aceitou`.
 //!
 //! # Por que `[::ffff:127.0.0.1]`
@@ -113,6 +114,7 @@ fn mapeado(porta: u16) -> String {
 fn lembrar_de_ontem(
     casa: &std::path::Path,
     ontem: &str,
+    caminhos: &[String],
     bilhete: Option<&Bilhete>,
     impressao: &str,
 ) -> Option<String> {
@@ -121,7 +123,7 @@ fn lembrar_de_ontem(
     lista.registrar(ontem, "pessoa", None).ok()?;
     let bilhete = bilhete.map(ToString::to_string);
     lista
-        .anotar_caminhos(ontem, &[], bilhete.as_deref(), Some(impressao))
+        .anotar_caminhos(ontem, caminhos, bilhete.as_deref(), Some(impressao))
         .ok()?;
     let relida = Conhecidos::abrir(caminho).ok()?;
     relida.buscar(ontem)?.impressao.clone()
@@ -183,7 +185,7 @@ async fn quem_volta_pela_lista_a_um_servidor_que_mudou_de_porta_confere_e_avisa(
     // Ontem ele morava numa porta onde hoje não há ninguém: é o servidor que
     // fechou e abriu de novo atrás de um NAT que lhe deu outra porta.
     let ontem = mapeado(endereco_morto().port());
-    let Some(guardada) = lembrar_de_ontem(casa.path(), &ontem, Some(&bilhete), &real) else {
+    let Some(guardada) = lembrar_de_ontem(casa.path(), &ontem, &[], Some(&bilhete), &real) else {
         panic!("a lista de conhecidos não devolveu a impressão da primeira visita");
     };
 
@@ -237,7 +239,7 @@ async fn o_impostor_no_endereco_novo_e_recusado_pela_impressao_guardada() {
     };
     let real = verdadeiro.fingerprint().to_owned();
     let ontem = mapeado(endereco_morto().port());
-    let Some(guardada) = lembrar_de_ontem(casa.path(), &ontem, None, &real) else {
+    let Some(guardada) = lembrar_de_ontem(casa.path(), &ontem, &[], None, &real) else {
         panic!("a lista de conhecidos não devolveu a impressão da primeira visita");
     };
 
@@ -305,14 +307,19 @@ fn config_do_link(casa: &Path, alvo: String, do_link: &str) -> ConnectConfig {
 /// Grava a lista como o `connect` do app grava depois de entrar.
 ///
 /// `registrar`, e depois `anotar_caminhos` com a impressão que
-/// `seele_ffi::impressao_a_guardar` decide a partir do veredito e da impressão
-/// que a visita conferiu. Nestas visitas ela é a do link colado nesta sessão,
-/// porque não há guardada a conferir antes.
-fn anotar_como_o_app(casa: &Path, alvo: &str, veredito: &Trust, conferida: Option<&str>) {
+/// `seele_ffi::impressao_a_guardar` decide a partir do veredito, do link desta
+/// sessão e da impressão guardada, as mesmas entradas que o app lhe dá.
+fn anotar_como_o_app(
+    casa: &Path,
+    alvo: &str,
+    veredito: &Trust,
+    do_link: Option<&str>,
+    guardada: Option<&str>,
+) {
     let Ok(mut lista) = Conhecidos::abrir(casa.join("conhecidos")) else {
         panic!("a lista de conhecidos não abriu");
     };
-    let aceita = seele_ffi::impressao_a_guardar(veredito, conferida);
+    let aceita = seele_ffi::impressao_a_guardar(veredito, do_link, guardada);
     if lista.registrar(alvo, "pessoa", None).is_err() {
         panic!("a lista de conhecidos não registrou a visita");
     }
@@ -376,7 +383,7 @@ async fn um_link_de_outro_servidor_nao_envenena_a_volta_pela_lista() {
         },
         "a primeira visita não conferiu a impressão, e o resto do teste perde o assunto"
     );
-    anotar_como_o_app(casa.path(), &alvo, &veredito, Some(&real));
+    anotar_como_o_app(casa.path(), &alvo, &veredito, Some(&real), None);
     connection.disconnect();
 
     // Um link de outro servidor, para o mesmo endereço. O pin confere e o link
@@ -398,7 +405,7 @@ async fn um_link_de_outro_servidor_nao_envenena_a_volta_pela_lista() {
         "o link que discorda do pin não deu `InviteDisagrees`, e o teste não mede o \
          que diz medir"
     );
-    anotar_como_o_app(casa.path(), &alvo, &veredito, Some(DE_OUTRO_SERVIDOR));
+    anotar_como_o_app(casa.path(), &alvo, &veredito, Some(DE_OUTRO_SERVIDOR), None);
     connection.disconnect();
 
     // O servidor fecha e abre de novo com o mesmo banco: a mesma chave, noutra
@@ -457,4 +464,104 @@ async fn um_link_de_outro_servidor_nao_envenena_a_volta_pela_lista() {
 
     connection.disconnect();
     de_novo.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn um_candidato_que_a_pessoa_nao_escolheu_nao_toma_a_entrada_da_lista() {
+    let _vaga = vaga::minha();
+    // A tomada calada. O pino é por endereço de candidato, e o candidato que
+    // vence a corrida nem sempre é o que a pessoa clicou: entram na corrida a
+    // resposta do quarto e os caminhos da lista, e um endereço de LAN
+    // (`192.168.x.y:8383`) é o mesmo de uma casa para outra. Se ali houver um
+    // servidor Y **já fixado** nesta máquina, o pino confere, o TLS passa
+    // qualquer que seja a impressão esperada (ADR 0003), e o veredito é
+    // `InviteDisagrees` com a chave de Y. Guardar a ofertada, que é o que vale
+    // quando é o link que discorda do pino do endereço, gravaria a chave de Y na
+    // entrada de X. A volta seguinte confere por ela, e a tomada seria
+    // permanente e sem uma linha de aviso.
+    let Some((de_y, y)) = server_de_teste().await else {
+        panic!("o servidor Y não subiu");
+    };
+    let Ok(casa) = tempfile::tempdir() else {
+        panic!("sem diretório temporário não há lista nem identidade");
+    };
+    let do_y = y.fingerprint().to_owned();
+    let no_y = de_y.to_string();
+    // A chave do servidor X, dono da entrada. Nenhum servidor a atende: o que
+    // este teste mede é o que a lista guarda, e não a entrada em X.
+    let do_x = "ab".repeat(32);
+
+    // Y fica fixado neste endereço por uma visita de antes.
+    let (visita, veredito) = match conectar(config_do_link(casa.path(), no_y.clone(), &do_y)).await
+    {
+        Ok(entrada) => entrada,
+        Err(erro) => panic!("a visita que fixa Y não entrou: {erro:?}"),
+    };
+    assert_eq!(
+        veredito,
+        Trust::FirstContactVerified {
+            fingerprint: do_y.clone()
+        },
+        "a visita que fixa Y não conferiu, e o resto do teste perde o assunto"
+    );
+    visita.disconnect();
+
+    // A entrada de X: o endereço de ontem morreu, e o endereço de Y está entre
+    // os caminhos que a lista guardou.
+    let ontem = mapeado(endereco_morto().port());
+    let Some(guardada) = lembrar_de_ontem(
+        casa.path(),
+        &ontem,
+        std::slice::from_ref(&no_y),
+        None,
+        &do_x,
+    ) else {
+        panic!("a lista de conhecidos não devolveu a impressão da primeira visita");
+    };
+
+    // A volta pela lista, sem link: só a guardada, com o endereço de Y na
+    // corrida como o `connect` do app o põe (os caminhos da lista).
+    let configuracao = config(
+        casa.path(),
+        ontem.clone(),
+        vec![no_y],
+        seele_ffi::impressao_a_conferir(None, Some(&guardada)),
+        None,
+    );
+    let (connection, veredito) = match conectar(configuracao).await {
+        Ok(entrada) => entrada,
+        Err(erro) => panic!(
+            "a volta pela lista não entrou no endereço de Y, que o pino aceita ({erro:?}): \
+             o teste não mede o que diz medir"
+        ),
+    };
+    assert_eq!(
+        veredito,
+        Trust::InviteDisagrees {
+            expected: do_x.clone(),
+            offered: do_y,
+        },
+        "o pino de Y não deu `InviteDisagrees` contra a guardada de X, e o teste não mede o \
+         que diz medir"
+    );
+    anotar_como_o_app(casa.path(), &ontem, &veredito, None, Some(&guardada));
+    connection.disconnect();
+
+    let Some(depois) = Conhecidos::abrir(casa.path().join("conhecidos"))
+        .ok()
+        .and_then(|lista| {
+            lista
+                .buscar(&ontem)
+                .and_then(|conhecido| conhecido.impressao.clone())
+        })
+    else {
+        panic!("a lista de conhecidos perdeu a impressão de X");
+    };
+    assert_eq!(
+        depois, do_x,
+        "a volta que entrou num candidato de outro servidor gravou a chave dele na entrada de X: \
+         a próxima volta confere por ela, e a tomada é permanente e calada"
+    );
+
+    y.shutdown();
 }

@@ -1089,11 +1089,11 @@ async fn connect(
         audio,
         join_secret: join_secret.filter(|s| !s.trim().is_empty()),
         // A decidida acima, e não só a do link: quem volta pela lista também
-        // confere, dentro do TLS e antes do `Hello`. Clonada: a lista de
-        // conhecidos lá embaixo decide, por ela e pelo veredito, o que se guarda
-        // (`impressao_a_guardar`), e é o guardado que faz a marca do quarto na
-        // visita seguinte. Uma impressão digital tem 64 bytes.
-        expected_fingerprint: conferida.clone(),
+        // confere, dentro do TLS e antes do `Hello`. `esperada` e
+        // `impressao_guardada` continuam vivas para a lista de conhecidos lá
+        // embaixo, onde elas e o veredito decidem o que se guarda
+        // (`impressao_a_guardar`).
+        expected_fingerprint: conferida,
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
@@ -1287,10 +1287,16 @@ async fn connect(
             // com ela o servidor verdadeiro seria recusado em todo endereço sem
             // pin. `None` deixa a guardada como estava.
             //
-            // Pela `conferida`, a mesma que foi ao TLS e ao quarto, e não pela
-            // `esperada`: numa volta pela lista quem prometeu a chave foi a
-            // guardada, e é ela que `Known` confirma.
-            let impressao_aceita = seele_ffi::impressao_a_guardar(&veredito, conferida.as_deref());
+            // Com o link desta sessão **e** a guardada, e não com a `conferida`
+            // já escolhida: a regra precisa saber de onde ela veio. Numa volta
+            // pela lista, um `InviteDisagrees` pode ser de um candidato que a
+            // pessoa não escolheu (o quarto, um caminho da lista), e a ofertada
+            // não é da entrada: a lista fica como estava.
+            let impressao_aceita = seele_ffi::impressao_a_guardar(
+                &veredito,
+                esperada.as_deref(),
+                impressao_guardada.as_deref(),
+            );
             if let Err(erro) = lista.anotar_caminhos(
                 &alvo,
                 &caminhos,

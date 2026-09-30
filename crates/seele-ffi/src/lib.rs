@@ -283,12 +283,15 @@ pub struct ConnectConfig {
     ///
     /// `None` num servidor aberto, que é o padrão.
     pub join_secret: Option<String>,
-    /// A impressão digital que o convite prometeu, quando veio de um link.
-    ///
-    /// Na volta pela lista de servidores, sem link nesta sessão, é a que a
-    /// lista guardou do link de antes — a regra é [`impressao_a_conferir`], e é
-    /// o `connect` do app que a usa. É conferida dentro do TLS, antes do
+    /// A impressão digital que esta conexão confere, dentro do TLS e antes do
     /// `Hello`.
+    ///
+    /// É a do link, quando a pessoa colou um nesta sessão. Na volta pela lista
+    /// de servidores, sem link, é a que a lista guardou: a impressão que uma
+    /// conexão anterior **aceitou** ([`impressao_a_guardar`]), que quase
+    /// sempre é a do link daquela vez, mas não é a do link quando ele
+    /// discordava do pin. Quem decide qual das duas vale é
+    /// [`impressao_a_conferir`], e o `connect` do app a usa.
     pub expected_fingerprint: Option<String>,
     /// O bilhete de encontro do link, quando ele trouxe um.
     ///
@@ -7932,6 +7935,10 @@ mod a_volta_pela_trilha_confere {
 
 /// A impressão que a lista de servidores guarda depois de uma conexão.
 ///
+/// Recebe as mesmas duas entradas de [`impressao_a_conferir`], o link desta
+/// sessão e a guardada, e não a impressão já escolhida: para decidir o que
+/// guardar é preciso saber **de onde** veio a que se conferiu.
+///
 /// # Por que não é a do link
 ///
 /// Era a do link desta sessão, qualquer que fosse o veredito. Com um link que
@@ -7949,27 +7956,53 @@ mod a_volta_pela_trilha_confere {
 ///
 /// - [`Trust::FirstContactVerified`]: a conferida no aperto de mão, pelo link
 ///   desta sessão ou pela guardada;
-/// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada;
+/// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada, **quando há link
+///   nesta sessão**. Sem link, nada (ver abaixo);
 /// - [`Trust::Known`]: a impressão que se conferiu, venha do link desta sessão
 ///   ou da lista ([`impressao_a_conferir`]), quando há uma, porque é ela
 ///   concordar com o pin que faz o veredito ser `Known`.
 ///
-/// O segundo argumento é essa impressão **conferida**, a mesma que foi ao TLS
-/// e ao quarto, e não só a do link: numa volta pela lista não há link, e quem
-/// prometeu a chave foi a guardada.
-///
 /// `None` quando não há nada conferido a guardar, e `None` deixa a lista como
 /// estava (`Conhecidos::anotar_caminhos` não apaga a impressão). É o caso de
 /// [`Trust::Known`] sem impressão conferida; de [`Trust::FirstContact`], em que
-/// a chave foi fixada às cegas e ninguém a prometeu; e de
-/// [`Trust::InviteRefused`], que não atravessa.
+/// a chave foi fixada às cegas e ninguém a prometeu; de
+/// [`Trust::InviteRefused`], que não atravessa; e de [`Trust::InviteDisagrees`]
+/// numa volta pela lista.
+///
+/// # Por que `InviteDisagrees` sem link não grava
+///
+/// O pin é por endereço **de candidato**, e o candidato que vence a corrida nem
+/// sempre é o que a pessoa clicou: entram a resposta do quarto e os caminhos
+/// da lista, e um endereço de LAN é o mesmo de uma casa para outra. Com um
+/// servidor Y já fixado num desses endereços, o pin confere, o TLS passa
+/// qualquer que seja a esperada, e o veredito é `InviteDisagrees` com a chave
+/// de Y. Numa volta pela lista quem discorda é a guardada, e a ofertada é a de
+/// um servidor que pode não ser o da entrada: gravá-la faria a próxima volta
+/// conferir por Y, e a tomada seria permanente e sem aviso. A lista fica como
+/// estava.
+///
+/// # O que ainda fica em aberto
+///
+/// Com link, a pessoa acabou de pedir este servidor, e é o caso do ADR 0003 que
+/// o parágrafo «Por que não é a do link» descreve. Mesmo ali o candidato que
+/// venceu pode não ser o endereço da entrada, e a ofertada seria a de outro
+/// servidor. Fechar isso pede saber qual endereço venceu a corrida, e a FFI não
+/// o expõe: a `Connection` não guarda a posição do vencedor, e a trilha da
+/// chegada não a diz (os candidatos começam em paralelo).
 #[must_use]
-pub fn impressao_a_guardar(veredito: &Trust, conferida: Option<&str>) -> Option<String> {
+pub fn impressao_a_guardar(
+    veredito: &Trust,
+    do_link: Option<&str>,
+    guardada: Option<&str>,
+) -> Option<String> {
     match veredito {
         Trust::FirstContactVerified { fingerprint } => Some(fingerprint.clone()),
-        // **A ofertada, e não a esperada.** A conexão ficou de pé com ela.
-        Trust::InviteDisagrees { offered, .. } => Some(offered.clone()),
-        Trust::Known => conferida.map(str::to_owned),
+        // **A ofertada, e não a esperada, e só com link.** A conexão ficou de
+        // pé com ela. Sem link a esperada é a guardada, e o candidato pode não
+        // ser o endereço da entrada: ver «Por que `InviteDisagrees` sem link
+        // não grava».
+        Trust::InviteDisagrees { offered, .. } => do_link.map(|_| offered.clone()),
+        Trust::Known => impressao_a_conferir(do_link, guardada),
         // Fixada às cegas: guardá-la faria a volta por outro endereço conferir
         // contra uma chave que ninguém prometeu. Fica como na 0.15.0, em que
         // este caso nunca tinha link.
@@ -7996,11 +8029,30 @@ mod a_lista_guarda_a_impressao_aceita {
             offered: DO_SERVIDOR.into(),
         };
         assert_eq!(
-            impressao_a_guardar(&veredito, Some(DE_OUTRO)),
+            impressao_a_guardar(&veredito, Some(DE_OUTRO), None),
             Some(DO_SERVIDOR.to_owned()),
             "a lista guardou a impressão do link que discordava do pin: a volta pela \
              lista passa a esperar a chave de outro servidor e recusa o verdadeiro em \
              todo endereço sem pin"
+        );
+    }
+
+    #[test]
+    fn a_volta_pela_lista_que_discorda_do_pin_deixa_a_lista_como_estava() {
+        // Sem link, quem discorda do pin é a guardada, e o endereço que venceu
+        // pode ser um candidato que a pessoa não escolheu (a resposta do quarto,
+        // um caminho da lista). A ofertada é a chave de quem estiver fixado ali,
+        // e pode não ser a do servidor da entrada.
+        let veredito = Trust::InviteDisagrees {
+            expected: DO_SERVIDOR.into(),
+            offered: DE_OUTRO.into(),
+        };
+        assert_eq!(
+            impressao_a_guardar(&veredito, None, Some(DO_SERVIDOR)),
+            None,
+            "a volta pela lista que entrou num candidato fixado com outra chave gravou a \
+             chave dele na entrada: a próxima volta confere por ela, e a tomada da entrada \
+             é permanente e calada"
         );
     }
 
@@ -8010,27 +8062,34 @@ mod a_lista_guarda_a_impressao_aceita {
             fingerprint: DO_SERVIDOR.into(),
         };
         assert_eq!(
-            impressao_a_guardar(&conferido, Some(DO_SERVIDOR)),
+            impressao_a_guardar(&conferido, Some(DO_SERVIDOR), None),
             Some(DO_SERVIDOR.to_owned()),
             "o primeiro contato conferido pelo link não foi para a lista"
         );
+        // O que o app passa numa volta pela lista: sem link, com a guardada.
         assert_eq!(
-            impressao_a_guardar(&conferido, None),
+            impressao_a_guardar(&conferido, None, Some(DO_SERVIDOR)),
             Some(DO_SERVIDOR.to_owned()),
             "o primeiro contato conferido pela guardada, num endereço novo, não foi \
              para a lista"
         );
         assert_eq!(
-            impressao_a_guardar(&Trust::Known, Some(DO_SERVIDOR)),
+            impressao_a_guardar(&Trust::Known, Some(DO_SERVIDOR), None),
             Some(DO_SERVIDOR.to_owned()),
-            "a impressão conferida que concorda com o pin não foi para a lista"
+            "a impressão do link que concorda com o pin não foi para a lista"
+        );
+        assert_eq!(
+            impressao_a_guardar(&Trust::Known, None, Some(DO_SERVIDOR)),
+            Some(DO_SERVIDOR.to_owned()),
+            "a guardada que concorda com o pin, numa volta pela lista, deixou de ser \
+             regravada, e a lista fica com uma impressão que ninguém confirmou hoje"
         );
     }
 
     #[test]
     fn o_que_ninguem_conferiu_deixa_a_lista_como_estava() {
         assert_eq!(
-            impressao_a_guardar(&Trust::Known, None),
+            impressao_a_guardar(&Trust::Known, None, None),
             None,
             "a volta sem impressão conferida inventou uma impressão para a lista"
         );
@@ -8039,6 +8098,7 @@ mod a_lista_guarda_a_impressao_aceita {
                 &Trust::FirstContact {
                     fingerprint: DO_SERVIDOR.into()
                 },
+                None,
                 None
             ),
             None,
@@ -8052,7 +8112,8 @@ mod a_lista_guarda_a_impressao_aceita {
                     expected: DE_OUTRO.into(),
                     offered: DO_SERVIDOR.into()
                 },
-                Some(DE_OUTRO)
+                Some(DE_OUTRO),
+                None
             ),
             None,
             "uma recusa deixou impressão na lista"

@@ -1476,9 +1476,11 @@ fn a_lista_guarda_a_impressao_que_a_conexao_aceitou() {
     //
     // A regra é `seele_ffi::impressao_a_guardar`, provada lá e, com servidor
     // de verdade, em `crates/seele-conformance/tests/volta_pela_trilha.rs`. O
-    // que só se vê aqui é o comando usá-la, e com a impressão que a conexão
-    // **conferiu** (`conferida`: a do link desta sessão ou a da lista), a mesma
-    // que foi ao TLS e ao quarto, e não só a do link. Os espaços saem da
+    // que só se vê aqui é o comando usá-la, e dando-lhe o link desta sessão e a
+    // guardada **separados**, nesta ordem: a regra precisa saber se houve link,
+    // porque só com ele um `InviteDisagrees` grava a ofertada (numa volta pela
+    // lista o candidato vencedor pode não ser o da entrada). Passar a
+    // `conferida` já escolhida apagaria essa diferença. Os espaços saem da
     // comparação para o guarda não depender de onde o `rustfmt` quebra a linha.
     let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
         .chars()
@@ -1487,11 +1489,12 @@ fn a_lista_guarda_a_impressao_que_a_conexao_aceitou() {
 
     assert!(
         connect.contains(
-            "letimpressao_aceita=seele_ffi::impressao_a_guardar(&veredito,conferida.as_deref()"
+            "letimpressao_aceita=seele_ffi::impressao_a_guardar(&veredito,esperada.as_deref(),impressao_guardada.as_deref()"
         ),
-        "`connect` não decide mais pela regra da FFI o que vai para a lista, ou a \
-         decide por outra impressão que não a que a conexão conferiu: a impressão de \
-         um link que discordava do pin volta a envenenar a volta pela lista"
+        "`connect` não decide pela regra da FFI o que vai para a lista, ou não lhe dá o \
+         link desta sessão e a guardada separados: sem saber se houve link, a regra grava \
+         a chave de outro servidor na entrada quando uma volta pela lista entra num \
+         candidato fixado com outra chave"
     );
     assert!(
         connect.contains("bilhete_texto.as_deref(),impressao_aceita.as_deref()"),
