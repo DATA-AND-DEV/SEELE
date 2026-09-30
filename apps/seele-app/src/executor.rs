@@ -1058,6 +1058,19 @@ const PRELUDIO: &str = r#"
   // O texto é montado aqui e cortado do outro lado: um MOD pode redefinir
   // tudo isto, e o que contém de verdade é `seele.console`. Nunca lança — um
   // `console` que derruba o caminho que ele observa é pior que nenhum.
+  //
+  // **O que o JSON não sabe dizer, dito de outro jeito.** Sozinho, ele diz
+  // `null` para `NaN` e `±Infinity`, `{}` para `Map` e `Set`, some com o
+  // `undefined` de um objeto (e o diz `null` numa lista) e lança num `bigint`
+  // aninhado. `NaN` é o valor típico de um defeito de conta: um registro que
+  // o diz `null` manda o autor procurar o que não existe. Aninhado, o valor
+  // sai como texto, entre aspas; `Map` e `Set` saem como a lista do que têm.
+  const semMentir = (_chave, v) => {
+    if (typeof v === 'number' && !Number.isFinite(v)) return String(v);
+    if (typeof v === 'bigint' || v === undefined) return String(v);
+    if (v instanceof Map || v instanceof Set) return [...v];
+    return v;
+  };
   const emTexto = (valor) => {
     if (typeof valor === 'string') return valor;
     if (valor instanceof Error) {
@@ -1067,8 +1080,9 @@ const PRELUDIO: &str = r#"
     if (valor === undefined) return 'undefined';
     if (typeof valor === 'function') return '[função ' + (valor.name || 'anônima') + ']';
     if (typeof valor === 'bigint' || typeof valor === 'symbol') return String(valor);
+    if (typeof valor === 'number') return String(valor);
     try {
-      const json = JSON.stringify(valor);
+      const json = JSON.stringify(valor, semMentir);
       return json === undefined ? String(valor) : json;
     } catch {
       return String(valor);
@@ -1593,6 +1607,44 @@ mod testes {
                 "avatar recusado: {\"bytes\":12} 3 undefined null".to_owned()
             )],
             "a linha do console não chegou como o MOD a escreveu"
+        );
+    }
+
+    /// **Um `NaN` chega como `NaN`, e um `Map` chega com o que tem.**
+    ///
+    /// O `JSON.stringify` diz `null` para `NaN` e `±Infinity`, `{}` para `Map`
+    /// e `Set`, e lança num `bigint` aninhado. `NaN` é justamente o valor de
+    /// um defeito de conta ou de layout: o registro que o diz `null` manda o
+    /// autor procurar um valor que ele não tem — pior que o silêncio. Aninhado,
+    /// o que o JSON não sabe dizer sai como texto, entre aspas.
+    #[test]
+    fn um_nan_ou_um_map_chega_como_e_e_nao_como_null_ou_vazio() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "console.warn('largura:', NaN, Infinity, -Infinity);\
+                 console.warn({ largura: NaN, altura: -Infinity, dentro: [NaN] });\
+                 console.warn(new Map([['a', 1]]), new Set([1, 2]));\
+                 console.warn({ mapa: new Map([[1, 2]]), conjunto: new Set(['x']) });\
+                 console.warn({ grande: 10n, faltou: undefined }, [undefined]);\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        let textos: Vec<String> = linhas_de_console_ate(&executor, "fim")
+            .into_iter()
+            .map(|(_, texto)| texto)
+            .collect();
+        assert_eq!(
+            textos,
+            vec![
+                "largura: NaN Infinity -Infinity",
+                "{\"largura\":\"NaN\",\"altura\":\"-Infinity\",\"dentro\":[\"NaN\"]}",
+                "[[\"a\",1]] [1,2]",
+                "{\"mapa\":[[1,2]],\"conjunto\":[\"x\"]}",
+                "{\"grande\":\"10\",\"faltou\":\"undefined\"} [\"undefined\"]",
+            ],
+            "o console disse um valor que o MOD não tem (`NaN` como `null`, um `Map` como `{{}}`), \
+             e o registro manda o autor procurar o que não existe"
         );
     }
 
