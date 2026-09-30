@@ -597,9 +597,7 @@ impl Client {
             .map_err(|error| classify_connection_error(&error, verifier.last_decision()))?;
 
         // PATTERN: ORANGE — connected, not verified.
-        let pin = verifier.last_decision().unwrap_or(PinDecision::Matches {
-            fingerprint: String::new(),
-        });
+        let pin = decisao_do_aperto(verifier.last_decision())?;
 
         let (mut send, mut recv) = connection.open_bi().await.map_err(|error| {
             tracing::warn!(%error, "could not open the control stream");
@@ -1623,6 +1621,30 @@ pub(crate) fn local_endpoint(
     }
 }
 
+/// A decisão do verificador, depois de um aperto de mão que terminou.
+///
+/// **A que falta não vira `Matches`.** Era `unwrap_or(Matches { fingerprint:
+/// "" })`: um TLS que terminasse sem o verificador rodar passava como pin que
+/// confere, o `Hello` saía para um servidor que ninguém conferiu, e com
+/// impressão esperada o veredito virava `InviteDisagrees { offered: "" }`, que
+/// a lista de conhecidos gravaria. Agora é [`ConnectError::TlsRefused`], dito
+/// no log, e antes do `Hello`: `connect_por` volta com o erro antes de abrir o
+/// fluxo de controle, e a conexão cai quando a única alça dela é solta.
+///
+/// Não há como um aperto de mão de verdade chegar aqui sem decisão:
+/// `connect_por` monta um `ClientConfig` novo a cada conexão, sem sessão para
+/// retomar, e o `rustls` chama `verify_server_cert` em todo aperto de mão
+/// completo. Por isso a regra é uma função à parte, e o teste é dela.
+fn decisao_do_aperto(decisao: Option<PinDecision>) -> Result<PinDecision, ConnectError> {
+    decisao.ok_or_else(|| {
+        tracing::warn!(
+            "o TLS terminou sem decisão do verificador de pin: o certificado não foi \
+             conferido contra pin nem impressão, e a conexão não segue (o `Hello` não sai)"
+        );
+        ConnectError::TlsRefused
+    })
+}
+
 /// Decides what a failed QUIC connection actually was.
 ///
 /// The pin decision is consulted first: a certificate that changed produces a
@@ -1720,6 +1742,139 @@ mod a_recusa_do_tls_chega_com_nome {
             ConnectError::SemResposta,
             "um primeiro contato aceito deu nome a uma falha que veio depois dele"
         );
+    }
+}
+
+#[cfg(test)]
+mod a_decisao_que_falta_nao_vira_matches {
+    use super::{decisao_do_aperto, ConnectError};
+    use crate::tofu::PinDecision;
+
+    /// Guarda os `WARN` (e mais graves) como `nível: mensagem`.
+    ///
+    /// O terceiro `Subscriber` escrito à mão deste crate: os de `encontro.rs` e
+    /// `par.rs` moram nos módulos de teste de lá, e `tracing-subscriber` não é
+    /// dependência de teste daqui.
+    #[derive(Default)]
+    struct CapturaDeAvisos {
+        linhas: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl tracing::Subscriber for CapturaDeAvisos {
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            *metadata.level() <= tracing::Level::WARN
+        }
+
+        fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Mensagem(String);
+            impl tracing::field::Visit for Mensagem {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    valor: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" {
+                        self.0 = format!("{valor:?}");
+                    }
+                }
+            }
+            let mut mensagem = Mensagem(String::new());
+            event.record(&mut mensagem);
+            if let Ok(mut linhas) = self.linhas.lock() {
+                linhas.push(format!("{}: {}", event.metadata().level(), mensagem.0));
+            }
+        }
+
+        fn enter(&self, _span: &tracing::span::Id) {}
+
+        fn exit(&self, _span: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn um_aperto_de_mao_sem_decisao_do_verificador_falha_e_diz_por_que() {
+        // `connect_por` fazia `unwrap_or(Matches { fingerprint: "" })`. Um TLS
+        // que terminasse sem o verificador rodar passava por pin que confere: o
+        // `Hello` saía para um servidor que ninguém conferiu, e com impressão
+        // esperada o veredito virava `InviteDisagrees { offered: "" }`, que a
+        // lista de conhecidos gravaria.
+        let captura = std::sync::Arc::new(CapturaDeAvisos::default());
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+
+        assert_eq!(
+            decisao_do_aperto(None),
+            Err(ConnectError::TlsRefused),
+            "o aperto de mão sem decisão do verificador seguiu como se o pin conferisse: o \
+             `Hello` sairia para um servidor que ninguém conferiu"
+        );
+        let linhas = captura.linhas.lock().expect("a captura não envenena");
+        assert!(
+            linhas
+                .iter()
+                .any(|linha| linha.starts_with("WARN")
+                    && linha.contains("sem decisão do verificador")),
+            "a falha saiu calada: o `seele.log` não diz que o TLS terminou sem decisão do \
+             verificador, e quem lê só vê um certificado recusado. Linhas: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn connect_por_pergunta_a_regra_antes_de_abrir_o_fluxo_de_controle() {
+        // A regra de cima só vale se `connect_por` a usar, e antes do fluxo de
+        // controle, que é por onde o `Hello` sai. Nenhum aperto de mão de
+        // verdade termina sem decisão, então quem prende a fiação é o texto.
+        // As agulhas são montadas, e não escritas: este é o arquivo que o teste
+        // lê, e um literal inteiro aqui casaria consigo mesmo.
+        let fonte = include_str!("client.rs");
+        let inicio = fonte
+            .find(&format!("{} fn connect_por(", "pub(crate) async"))
+            .expect("`connect_por` sumiu de `client.rs`");
+        let depois = fonte.get(inicio..).expect("o começo de `connect_por`");
+        let fim = depois
+            .find(&format!("connection.{}()", "open_bi"))
+            .expect("`connect_por` deixou de abrir o fluxo de controle");
+        let antes_do_hello = depois
+            .get(..fim)
+            .expect("o trecho antes do fluxo de controle");
+
+        assert!(
+            antes_do_hello.contains(&format!(
+                "{}(verifier.last_decision())?",
+                "decisao_do_aperto"
+            )),
+            "`connect_por` deixou de pedir a decisão do verificador por `decisao_do_aperto` \
+             antes de abrir o fluxo de controle: um aperto de mão sem decisão mandaria o \
+             `Hello` a um servidor que ninguém conferiu"
+        );
+        assert!(
+            !fonte.contains(&format!("unwrap_or({}::Matches", "PinDecision")),
+            "a decisão que falta voltou a virar `Matches` por padrão em `client.rs`"
+        );
+    }
+
+    #[test]
+    fn a_decisao_que_o_verificador_deixou_passa_como_veio() {
+        for decisao in [
+            PinDecision::FirstContact {
+                fingerprint: "aaaa1111".into(),
+            },
+            PinDecision::Matches {
+                fingerprint: "aaaa1111".into(),
+            },
+        ] {
+            assert_eq!(
+                decisao_do_aperto(Some(decisao.clone())),
+                Ok(decisao.clone()),
+                "a decisão {decisao:?} do verificador não chegou ao veredito como veio"
+            );
+        }
     }
 }
 
