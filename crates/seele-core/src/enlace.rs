@@ -2814,7 +2814,8 @@ impl Motor {
                     // quem atendesse. Guardado em `bateria_interna.rs`.
                     self.destino.impressao_esperada.as_deref(),
                     // A volta é ao endereço que venceu, e o pino dele prova o
-                    // servidor, ou não, como na entrada.
+                    // servidor, ou não, como na entrada. Guardado nos dois
+                    // sentidos em `a_volta_da_bateria_onde_o_pino_…`.
                     self.destino.o_pino_prova_o_servidor,
                     &self.destino.apelido,
                     &self.chave,
@@ -6404,6 +6405,167 @@ mod tests {
         // A intenção continua guardada: a próxima tentativa da bateria tenta
         // de novo a mesma sala, e não esquece o que a pessoa escolheu.
         assert_eq!(motor.voice_room, Some(VoiceRoomId(9)));
+    }
+
+    /// Uma ponta com certificado próprio que atende o aperto de mão do protocolo
+    /// inteiro e fica de pé, contando os `Hello` que chegaram até ela.
+    ///
+    /// Devolve o endereço, a impressão do certificado e a contagem. É o lado do
+    /// servidor que os testes da volta da bateria olham: um `Hello` que chega
+    /// aqui levou o apelido e a assinatura de quem reconectava.
+    fn servidor_que_conta_os_hellos() -> (SocketAddr, String, Arc<std::sync::atomic::AtomicU32>) {
+        let (escuta, endereco, impressao) = ponta_com_certificado_proprio();
+        let hellos = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let contando = Arc::clone(&hellos);
+        tokio::spawn(async move {
+            // As conexões ficam guardadas aqui, de pé, até o teste acabar: a
+            // reconexão tem de encontrar a sessão viva depois do `Session`.
+            let mut de_pe = Vec::new();
+            while let Some(entrada) = escuta.accept().await {
+                let Ok(conexao) = entrada.await else {
+                    continue;
+                };
+                let Ok((mut envio, mut recebe)) = conexao.accept_bi().await else {
+                    continue;
+                };
+                if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
+                    .await
+                    .is_err()
+                {
+                    continue;
+                }
+                contando.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if crate::frame::write(
+                    &mut envio,
+                    &seele_proto::control::ServerMessage::Challenge { nonce: vec![0; 32] },
+                )
+                .await
+                .is_err()
+                {
+                    continue;
+                }
+                // `Response`, ignorado: não há assinatura a conferir aqui.
+                if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
+                    .await
+                    .is_err()
+                {
+                    continue;
+                }
+                let _ = crate::frame::write(
+                    &mut envio,
+                    &seele_proto::control::ServerMessage::Session {
+                        id: seele_proto::ids::SessionId(1),
+                        person: PersonId(1),
+                        ssrc: seele_proto::ids::Ssrc(1),
+                        server: "servidor de teste".into(),
+                        voice_rooms: vec![],
+                        channels: vec![],
+                        roles: vec![],
+                        permissions: vec![],
+                    },
+                )
+                .await;
+                de_pe.push((conexao, envio, recebe));
+            }
+        });
+        (endereco, impressao, hellos)
+    }
+
+    /// Um motor que volta pela bateria a `endereco`, com a chave de quem atende
+    /// ali já fixada e uma impressão esperada que a desmente.
+    fn motor_que_volta_a(
+        endereco: SocketAddr,
+        fixada: &str,
+        o_pino_prova_o_servidor: bool,
+    ) -> (Motor, Arc<crate::tofu::MemoryPinStore>) {
+        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
+        loja.pin(&endereco.to_string(), fixada.to_owned());
+        let mut motor = motor_de_teste();
+        motor.pins = Arc::clone(&loja) as Arc<dyn PinStore>;
+        motor.destino.servidor = endereco;
+        motor.destino.nome_tls = "localhost".into();
+        motor.destino.chave_do_pin = endereco.to_string();
+        motor.destino.impressao_esperada = Some("ab".repeat(32));
+        motor.destino.o_pino_prova_o_servidor = o_pino_prova_o_servidor;
+        (motor, loja)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_volta_da_bateria_onde_o_pino_nao_prova_o_servidor_e_recusada_antes_do_hello() {
+        // `Motor::tentar` não passa por `conferir`: a conferência da volta é só
+        // a do verificador, e ele só sabe se o pino prova o servidor pelo que
+        // `tentar` lhe passa do destino. Aqui o destino é o de um candidato que
+        // a pessoa não escolheu, ou de um alvo de LAN: quem atende está fixado
+        // com a chave dele, e a esperada é de outro servidor. A volta tem de ser
+        // recusada dentro do TLS, como a entrada foi.
+        let (endereco, impressao, hellos) = servidor_que_conta_os_hellos();
+        let (mut motor, loja) = motor_que_volta_a(endereco, &impressao, false);
+        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
+        motor.avisos = avisos;
+
+        motor.tentar().await;
+
+        assert_eq!(
+            hellos.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "a volta da bateria mandou o `Hello` a quem o pino não prova: o apelido e a \
+             assinatura saíram para um servidor que a impressão esperada desmente"
+        );
+        assert!(
+            motor.cliente.is_none(),
+            "a volta da bateria se deu por reconectada num endereço cujo pino não prova o \
+             servidor, com a impressão esperada discordando"
+        );
+        let mut recusada = false;
+        while let Ok(aviso) = avisos_rx.try_recv() {
+            if let Aviso::Encerrado(Motivo::Recusado(texto)) = &aviso {
+                recusada |= texto.contains("InviteMismatch");
+            }
+        }
+        assert!(
+            recusada,
+            "a volta recusada pela impressão não encerrou a sessão como recusa: a bateria \
+             insistiria contra um servidor que não é o do link"
+        );
+        assert_eq!(
+            loja.pinned(&endereco.to_string()),
+            Some(impressao),
+            "a recusa da volta mexeu no pino daquele endereço, que continua sendo a prova de \
+             quem atende ali"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_volta_da_bateria_onde_o_pino_prova_o_servidor_reconecta_com_a_esperada_divergente() {
+        // A metade que a recusa de cima não pode levar junto (ADR 0003). No alvo
+        // de escopo público, ou no loopback, o pino prova o servidor: a volta
+        // passa com a esperada discordando, como a entrada passou e avisou.
+        let (endereco, impressao, hellos) = servidor_que_conta_os_hellos();
+        let (mut motor, _) = motor_que_volta_a(endereco, &impressao, true);
+        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
+        motor.avisos = avisos;
+
+        motor.tentar().await;
+
+        assert!(
+            motor.cliente.is_some(),
+            "a volta da bateria ao alvo cujo pino prova o servidor foi recusada pela impressão \
+             esperada: quem entrou avisado seria derrubado na primeira queda de rede"
+        );
+        let mut reconectou = false;
+        while let Ok(aviso) = avisos_rx.try_recv() {
+            reconectou |= matches!(aviso, Aviso::Reconectado { .. });
+        }
+        assert!(
+            reconectou,
+            "o motor voltou sem anunciar a reconexão à casca"
+        );
+        assert_eq!(
+            hellos.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a volta que reconectou não passou por um aperto de mão do protocolo com o \
+             servidor de teste, e o teste mediu outra coisa"
+        );
     }
 
     #[test]
