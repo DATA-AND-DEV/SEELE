@@ -78,11 +78,28 @@ pub struct Destino {
     ///
     /// **Conferida dentro do TLS**, antes do `Hello`: um primeiro contato que
     /// não confere falha o aperto de mão e não leva convite, senha nem apelido
-    /// a quem atendeu (`crate::tofu::TofuVerifier::decide`). Um servidor já
-    /// fixado passa e é avisado (`Verdict::InviteDisagrees`), que é a decisão
-    /// do ADR 0003 escrita no verificador. Vale na entrada e na volta da
-    /// bateria interna.
+    /// a quem atendeu (`crate::tofu::TofuVerifier::decide`). No alvo, um
+    /// servidor já fixado passa e é avisado (`Verdict::InviteDisagrees`), que
+    /// é a decisão do ADR 0003 escrita no verificador; fora dele, é recusado
+    /// como o primeiro contato (ver [`Destino::e_o_alvo`]). Vale na entrada e
+    /// na volta da bateria interna.
     pub impressao_esperada: Option<String>,
+    /// Se este destino é o **alvo**: o endereço que a pessoa escolheu — o do
+    /// link, o digitado, ou o da entrada da lista.
+    ///
+    /// `false` para todo candidato que entrou na corrida por outro caminho: um
+    /// alternativo do convite ou da lista, ou o endereço que o quarto devolveu.
+    ///
+    /// Existe porque o pin é por endereço de candidato, e prova só *este
+    /// endereço*. No alvo, a continuidade dele é o que o ADR 0003 protege, e um
+    /// pin que confere passa mesmo com a impressão esperada discordando. Num
+    /// candidato que ninguém escolheu, o pin pode ser de outro servidor que
+    /// esta máquina já fixou ali (o quarto apontou para ele, ou um endereço de
+    /// LAN que é o mesmo de uma casa para outra), e a impressão esperada vale
+    /// mais que ele: a que não confere recusa dentro do TLS, antes do `Hello`.
+    /// Chega ao verificador na entrada e na volta da bateria interna, como a
+    /// impressão esperada.
+    pub e_o_alvo: bool,
     /// A identidade do conjunto de MODs que esta máquina já aceitou para este
     /// servidor. ADR 0045.
     ///
@@ -1287,6 +1304,9 @@ impl Enlace {
             // caminho para todo candidato da corrida do ADR 0037, porque todos
             // passam por aqui.
             destino.impressao_esperada.as_deref(),
+            // E se este candidato é o endereço que a pessoa escolheu: fora
+            // dele, um pin que confere não passa por cima da impressão.
+            destino.e_o_alvo,
             &destino.apelido,
             &chave,
             Arc::clone(&deste_aperto) as Arc<dyn PinStore>,
@@ -1301,7 +1321,9 @@ impl Enlace {
                 // Só desfaz o que este aperto escreveu. A recusa pela impressão
                 // (`InviteMismatch`), a chave trocada (`PinChanged`) e qualquer
                 // falha que veio antes de um primeiro contato aceito não
-                // escreveram nada, e um pin que exista agora é de um vizinho.
+                // escreveram nada, e um pin que exista agora é de antes deste
+                // aperto (o de um candidato fixado que não é o alvo) ou de um
+                // vizinho.
                 desfazer_o_pin_deste_aperto(
                     pins.as_ref(),
                     &destino.chave_do_pin,
@@ -2768,6 +2790,9 @@ impl Motor {
                     // a queda e a volta, e sem ela a reconexão fixaria às cegas
                     // quem atendesse. Guardado em `bateria_interna.rs`.
                     self.destino.impressao_esperada.as_deref(),
+                    // A volta é ao endereço que venceu, e ele continua sendo o
+                    // alvo, ou não, como era na entrada.
+                    self.destino.e_o_alvo,
                     &self.destino.apelido,
                     &self.chave,
                     Arc::clone(&self.pins),
@@ -4678,13 +4703,15 @@ fn conferir(
 /// `InviteRefused` nasce de três decisões, e só a primeira chegaria aqui. De
 /// `PinDecision::FirstContact` — nada estava fixado antes, então o `unpin`
 /// remove exatamente o que este aperto de mão acabou de escrever. De
-/// `PinDecision::InviteRefused` o `unpin` não acharia nada: o verificador
-/// recusa essa chave sem fixá-la, e ela sobe como erro, sem virar veredito. De
+/// `PinDecision::InviteRefused` ela não chega: o verificador recusa essa chave
+/// sem fixá-la, e ela sobe como erro, sem virar veredito. De
 /// `PinDecision::Changed`, e **essa** apagaria um pin antigo e legítimo, que é
 /// o oposto do ADR 0003; ela não chega porque o verificador reprova a chave
 /// trocada no TLS e a falha sobe como [`ConnectError::PinChanged`], sem nunca
-/// virar veredito. Se algum dia `Changed` passar a chegar até aqui, esta
-/// função precisa distinguir as duas antes de apagar nada.
+/// virar veredito. A recusa de um candidato fixado que não é o alvo
+/// (`PinDecision::InviteRefused` com pin) apagaria do mesmo jeito o pin antigo
+/// daquele endereço. Se algum dia uma dessas duas passar a chegar até aqui,
+/// esta função precisa distinguir de onde veio a recusa antes de apagar nada.
 ///
 /// # Segunda linha, desde que a impressão é conferida no TLS
 ///
@@ -5522,6 +5549,7 @@ mod tests {
             apelido: "pessoa".into(),
             segredo: None,
             impressao_esperada: impressao_esperada.map(str::to_owned),
+            e_o_alvo: true,
             aceito: None,
         }
     }
@@ -5813,7 +5841,7 @@ mod tests {
             "45.33.32.156:41234",
         )
         .expect("bilhete de teste");
-        let destino = |servidor: SocketAddr| Destino {
+        let destino = |servidor: SocketAddr, e_o_alvo: bool| Destino {
             servidor,
             nome_tls: "localhost".into(),
             chave_do_pin: servidor.to_string(),
@@ -5824,6 +5852,7 @@ mod tests {
             impressao_esperada: Some(
                 "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
             ),
+            e_o_alvo,
             aceito: None,
         };
         let refletido: SocketAddr = "203.0.113.7:8383".parse().expect("endereço");
@@ -5832,7 +5861,10 @@ mod tests {
         // que interessa acontece nos primeiros segundos, e a tarefa é
         // abandonada no fim.
         let tentativa = tokio::spawn(Enlace::conectar_entre_com_bilhete(
-            vec![destino(refletido), destino(onde_o_server_atende)],
+            vec![
+                destino(refletido, true),
+                destino(onde_o_server_atende, false),
+            ],
             Some(bilhete),
             SigningKey::from_bytes(&[7; 32]),
             Arc::new(crate::tofu::MemoryPinStore::new()),
@@ -5973,6 +6005,7 @@ mod tests {
             apelido: "pessoa".into(),
             segredo: None,
             impressao_esperada: esperada.map(str::to_owned),
+            e_o_alvo: true,
             aceito: None,
         }
     }
@@ -6883,6 +6916,7 @@ mod tests {
                 apelido: "pessoa".into(),
                 segredo: None,
                 impressao_esperada: None,
+                e_o_alvo: true,
                 aceito: None,
             },
             chave: SigningKey::from_bytes(&[7; 32]),

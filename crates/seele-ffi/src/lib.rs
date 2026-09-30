@@ -3795,6 +3795,15 @@ fn build_destino(
         apelido: config.nickname.clone(),
         segredo: config.join_secret.clone(),
         impressao_esperada: config.expected_fingerprint.clone(),
+        // **O alvo é o candidato cuja chave de pino é a do destino.** A chave
+        // do aceite é a do endereço que a pessoa escolheu (o do link, o
+        // digitado, o da entrada da lista), e `drive` a passa igual a todos os
+        // candidatos; a chave de pino é a de cada um. Só o primeiro destino de
+        // `drive` tem as duas iguais, e um alternativo que as tenha é o mesmo
+        // `host:porta` escrito de novo. O pin prova *este endereço*, e fora do
+        // alvo ele não passa por cima da impressão esperada: ver
+        // `seele_core::enlace::Destino::e_o_alvo`.
+        e_o_alvo: pin_key == chave_do_aceite,
         // Lido de disco aqui, e não pedido à casca: o `home` é o mesmo caminho
         // de onde saem a identidade e os pins (ADR 0017), e quem sabe persistir
         // é o núcleo. Uma casca que tivesse de carregar o aceite junto seria uma
@@ -5087,6 +5096,40 @@ mod tests {
         };
         let destino = build_destino(&without, address, &name, &pin, &pin);
         assert_eq!(destino.impressao_esperada, None);
+    }
+
+    #[test]
+    fn so_o_candidato_com_a_chave_do_destino_e_o_alvo() {
+        // O alvo decide se um pin que confere passa por cima de uma impressão
+        // que não confere (`seele_core::tofu::TofuVerifier::decide`). `drive`
+        // dá a todos os candidatos a chave do destino como chave do aceite, e a
+        // cada um a própria chave de pino: só o endereço que a pessoa escolheu
+        // tem as duas iguais.
+        let (address, name, pin) = resolve("127.0.0.1:8383").expect("resolve");
+        let config = ConnectConfig {
+            server: "127.0.0.1:8383".into(),
+            alternate_servers: vec!["127.0.0.2:9368".into()],
+            nickname: "rafael".into(),
+            home: "/tmp/does-not-matter".into(),
+            join_secret: None,
+            expected_fingerprint: Some("aaaa1111".into()),
+            bilhete: None,
+            audio: false,
+            capture_device: None,
+            playback_device: None,
+        };
+        assert!(
+            build_destino(&config, address, &name, &pin, &pin).e_o_alvo,
+            "o endereço que a pessoa escolheu deixou de ser o alvo: um link velho contra \
+             um servidor já fixado passaria a ser recusado, contra o ADR 0003"
+        );
+
+        let (outro, nome_do_outro, pin_do_outro) = resolve("127.0.0.2:9368").expect("resolve");
+        assert!(
+            !build_destino(&config, outro, &nome_do_outro, &pin_do_outro, &pin).e_o_alvo,
+            "um alternativo virou alvo: o pin de outro servidor naquele endereço passaria \
+             por cima da impressão esperada, e o `Hello` sairia para ele"
+        );
     }
 
     /// **O aceite acompanha o servidor, e não o caminho até ele.**

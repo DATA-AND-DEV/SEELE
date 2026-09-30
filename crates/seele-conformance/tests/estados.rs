@@ -64,7 +64,7 @@ fn endereco_morto() -> SocketAddr {
 /// Dois candidatos que ninguém atende — um convite cujo servidor não existe.
 fn destinos_mortos_de_teste() -> Vec<Destino> {
     (0..2)
-        .map(|_| {
+        .map(|posicao| {
             let servidor = endereco_morto();
             Destino {
                 servidor,
@@ -73,6 +73,7 @@ fn destinos_mortos_de_teste() -> Vec<Destino> {
                 apelido: "pessoa".into(),
                 segredo: None,
                 impressao_esperada: None,
+                e_o_alvo: posicao == 0,
                 aceito: None,
             }
         })

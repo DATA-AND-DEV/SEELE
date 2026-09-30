@@ -111,8 +111,11 @@ pub enum ConnectError {
     /// The invite promised another identity, and no pin could break the tie.
     ///
     /// Deliberately distinct from [`ConnectError::PinChanged`]: there a known
-    /// server's key changed, which is the ADR 0003 alarm. Here nothing was ever
-    /// known, and the party that disagrees is the link.
+    /// server's key changed, which is the ADR 0003 alarm. Here no pin vouches
+    /// for this address — nothing was pinned, or it is a candidate nobody
+    /// chose, where a matching pin may be another server's
+    /// ([`crate::tofu::TofuVerifier::decide`]) —, and the party that disagrees
+    /// is the link.
     ///
     /// **Recusada dentro do TLS, antes do `Hello`**: o verificador a decide no
     /// aperto de mão (`crate::tofu::PinDecision::InviteRefused`), e o `Hello`
@@ -488,6 +491,8 @@ impl Client {
             // Este caminho não confere impressão nenhuma: quem tem uma entra
             // por `crate::enlace::Enlace`, que a leva até o TLS.
             None,
+            // O único endereço que este caminho conhece é o de quem o chamou.
+            true,
             nickname,
             signing_key,
             pins,
@@ -516,13 +521,20 @@ impl Client {
     /// e trocá-la com `join_secret` ou `aceito`, que também são `Option<&str>`,
     /// compilaria calado.
     ///
+    /// `e_o_alvo` diz se `pin_key` é o endereço que a pessoa escolheu, e vai ao
+    /// verificador junto com a esperada: fora do alvo, um pin que confere não
+    /// passa por cima de uma esperada que não confere
+    /// ([`crate::tofu::TofuVerifier::new`]). É o único `bool` da lista, e
+    /// trocá-lo de lugar com qualquer vizinho não compila.
+    ///
     /// # Errors
     ///
     /// O mesmo de [`Client::connect`].
     #[expect(
         clippy::too_many_arguments,
-        reason = "dois argumentos a mais que o `connect` público — o socket e a \
-                  impressão esperada —, que já passava do limite"
+        reason = "três argumentos a mais que o `connect` público — o socket, a \
+                  impressão esperada e se o endereço é o alvo —, que já passava do \
+                  limite"
     )]
     pub(crate) async fn connect_por(
         endpoint: &quinn::Endpoint,
@@ -530,6 +542,7 @@ impl Client {
         server_name: &str,
         pin_key: &str,
         impressao_esperada: Option<&str>,
+        e_o_alvo: bool,
         nickname: &str,
         signing_key: &SigningKey,
         pins: Arc<dyn PinStore>,
@@ -542,6 +555,7 @@ impl Client {
             pins,
             pin_key.to_owned(),
             impressao_esperada.map(str::to_owned),
+            e_o_alvo,
         ));
         let mut tls = rustls::ClientConfig::builder()
             .dangerous()

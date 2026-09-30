@@ -111,6 +111,7 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
         apelido: apelido.to_owned(),
         segredo: None,
         impressao_esperada: None,
+        e_o_alvo: true,
         // Nenhum MOD neste teste: o que se mede é sessão, não conjunto.
         aceito: None,
     }

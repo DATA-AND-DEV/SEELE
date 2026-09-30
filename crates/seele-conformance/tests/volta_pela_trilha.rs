@@ -22,11 +22,16 @@
 //! (`a_volta_pela_lista_confere_pela_impressao_guardada`).
 //!
 //! O que a lista **guarda** depois de entrar segue a mesma divisão. A regra é
-//! `seele_ffi::impressao_a_guardar`, e os dois últimos testes deste arquivo a
-//! exercitam com servidores de verdade: um que fecha e volta noutra porta, e um
-//! candidato de outro servidor, já fixado, que entra na corrida. O uso pelo
-//! comando, com o link desta sessão e a guardada como entradas, é guardado em
+//! `seele_ffi::impressao_a_guardar`, exercitada aqui com um servidor de verdade
+//! que fecha e volta noutra porta. O uso pelo comando, com o link desta sessão
+//! e a guardada como entradas, é guardado em
 //! `a_lista_guarda_a_impressao_que_a_conexao_aceitou`.
+//!
+//! Os dois últimos testes põem na corrida um candidato de **outro** servidor,
+//! já fixado nesta máquina num dos caminhos da lista. Fora do alvo, a
+//! impressão guardada vale mais que o pino, e ele é recusado dentro do TLS: o
+//! que se observa é o lado dele, sem conexão, com o convite inteiro e sem
+//! batida na portaria.
 //!
 //! # Por que `[::ffff:127.0.0.1]`
 //!
@@ -40,11 +45,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use seele_core::{FilePinStore, PinStore};
 use seele_ffi::conhecidos::Conhecidos;
 use seele_ffi::uri::Bilhete;
 use seele_ffi::{ConnectConfig, Connection, ConnectionError, Trust};
-use seele_server::persistence::Location;
-use seele_server::{Daemon, ServerConfig};
+use seele_server::persistence::{Location, Persistence};
+use seele_server::{admissao, Daemon, ServerConfig};
 
 mod vaga;
 
@@ -466,101 +472,223 @@ async fn um_link_de_outro_servidor_nao_envenena_a_volta_pela_lista() {
     de_novo.shutdown();
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn um_candidato_que_a_pessoa_nao_escolheu_nao_toma_a_entrada_da_lista() {
-    let _vaga = vaga::minha();
-    // A tomada calada. O pino é por endereço de candidato, e o candidato que
-    // vence a corrida nem sempre é o que a pessoa clicou: entram na corrida a
-    // resposta do quarto e os caminhos da lista, e um endereço de LAN
-    // (`192.168.x.y:8383`) é o mesmo de uma casa para outra. Se ali houver um
-    // servidor Y **já fixado** nesta máquina, o pino confere, o TLS passa
-    // qualquer que seja a impressão esperada (ADR 0003), e o veredito é
-    // `InviteDisagrees` com a chave de Y. Guardar a ofertada, que é o que vale
-    // quando é o link que discorda do pino do endereço, gravaria a chave de Y na
-    // entrada de X. A volta seguinte confere por ela, e a tomada seria
-    // permanente e sem uma linha de aviso.
-    let Some((de_y, y)) = server_de_teste().await else {
-        panic!("o servidor Y não subiu");
-    };
-    let Ok(casa) = tempfile::tempdir() else {
-        panic!("sem diretório temporário não há lista nem identidade");
-    };
-    let do_y = y.fingerprint().to_owned();
-    let no_y = de_y.to_string();
-    // A chave do servidor X, dono da entrada. Nenhum servidor a atende: o que
-    // este teste mede é o que a lista guarda, e não a entrada em X.
-    let do_x = "ab".repeat(32);
-
-    // Y fica fixado neste endereço por uma visita de antes.
-    let (visita, veredito) = match conectar(config_do_link(casa.path(), no_y.clone(), &do_y)).await
-    {
-        Ok(entrada) => entrada,
-        Err(erro) => panic!("a visita que fixa Y não entrou: {erro:?}"),
-    };
-    assert_eq!(
-        veredito,
-        Trust::FirstContactVerified {
-            fingerprint: do_y.clone()
-        },
-        "a visita que fixa Y não conferiu, e o resto do teste perde o assunto"
-    );
-    visita.disconnect();
-
-    // A entrada de X: o endereço de ontem morreu, e o endereço de Y está entre
-    // os caminhos que a lista guardou.
-    let ontem = mapeado(endereco_morto().port());
-    let Some(guardada) = lembrar_de_ontem(
-        casa.path(),
-        &ontem,
-        std::slice::from_ref(&no_y),
-        None,
-        &do_x,
-    ) else {
-        panic!("a lista de conhecidos não devolveu a impressão da primeira visita");
-    };
-
-    // A volta pela lista, sem link: só a guardada, com o endereço de Y na
-    // corrida como o `connect` do app o põe (os caminhos da lista).
-    let configuracao = config(
-        casa.path(),
-        ontem.clone(),
-        vec![no_y],
-        seele_ffi::impressao_a_conferir(None, Some(&guardada)),
-        None,
-    );
-    let (connection, veredito) = match conectar(configuracao).await {
-        Ok(entrada) => entrada,
-        Err(erro) => panic!(
-            "a volta pela lista não entrou no endereço de Y, que o pino aceita ({erro:?}): \
-             o teste não mede o que diz medir"
-        ),
-    };
-    assert_eq!(
-        veredito,
-        Trust::InviteDisagrees {
-            expected: do_x.clone(),
-            offered: do_y,
-        },
-        "o pino de Y não deu `InviteDisagrees` contra a guardada de X, e o teste não mede o \
-         que diz medir"
-    );
-    anotar_como_o_app(casa.path(), &ontem, &veredito, None, Some(&guardada));
-    connection.disconnect();
-
-    let Some(depois) = Conhecidos::abrir(casa.path().join("conhecidos"))
+/// A impressão que a lista de conhecidos guarda para `alvo`, relida do disco.
+fn impressao_na_lista(casa: &Path, alvo: &str) -> Option<String> {
+    Conhecidos::abrir(casa.join("conhecidos"))
         .ok()
         .and_then(|lista| {
             lista
-                .buscar(&ontem)
+                .buscar(alvo)
                 .and_then(|conhecido| conhecido.impressao.clone())
         })
-    else {
-        panic!("a lista de conhecidos perdeu a impressão de X");
+}
+
+/// Sobe Y com um convite de uso único, e com a portaria ligada se `portaria`.
+///
+/// Com um convite emitido o servidor fica fechado (ADR 0021): só entra quem
+/// traz um, e quem entra o gasta. Com a portaria (ADR 0030), um `Hello` com
+/// convite válido vira um pedido na fila de quem hospeda. As duas coisas ficam
+/// no banco de Y, e é por elas que se vê, do lado dele, se o `Hello` chegou.
+async fn y_com_convite(banco: &Path, portaria: bool) -> (SocketAddr, Arc<Daemon>, String) {
+    let convite = {
+        let Ok(mut persistence) = Persistence::open(&Location::File(banco.to_path_buf())) else {
+            panic!("o banco de Y não abriu");
+        };
+        if portaria && seele_server::portaria::ligar(&mut persistence, true).is_err() {
+            panic!("a portaria de Y não ligou");
+        }
+        let Ok(convite) = admissao::criar_convite(&mut persistence, "para quem volta") else {
+            panic!("o convite de Y não foi criado");
+        };
+        convite
     };
+    let Some((onde, y)) = server_com_banco(banco).await else {
+        panic!("o servidor Y não subiu");
+    };
+    (onde, y, convite)
+}
+
+/// O que a volta pela lista de X deixou: onde mora a lista, qual é a entrada,
+/// e o que a conexão devolveu.
+struct VoltaPelaLista {
+    casa: tempfile::TempDir,
+    ontem: String,
+    /// Viva até o fim do teste: uma conexão que tivesse entrado em Y fica de pé
+    /// enquanto este valor existir, e é isso que `wait_idle` do lado de Y mede.
+    resultado: Result<(Arc<Connection>, Trust), ConnectionError>,
+}
+
+/// A volta pela lista de X, com Y já fixado num dos caminhos da entrada e o
+/// convite de Y na mão.
+///
+/// O pino de Y é escrito na mesma loja que `Connection::connect` abre, sob a
+/// chave que ela usa, e não por uma visita a Y: o que se observa é se o
+/// `Hello` desta volta chega a Y, e uma visita de antes teria mandado um.
+async fn voltar_pela_lista_com_y_fixado(
+    no_y: &str,
+    do_y: &str,
+    do_x: &str,
+    convite: &str,
+) -> VoltaPelaLista {
+    let Ok(casa) = tempfile::tempdir() else {
+        panic!("sem diretório temporário não há lista nem identidade");
+    };
+    let Some(chave_de_y) = seele_ffi::chave_do_servidor(no_y) else {
+        panic!("o endereço de Y não deu chave de pino");
+    };
+    let Ok(pins) = FilePinStore::open(casa.path().join("pins")) else {
+        panic!("a loja de pins desta máquina não abriu");
+    };
+    pins.pin(&chave_de_y, do_y.to_owned());
+    if let Some(falha) = pins.falha_de_gravacao() {
+        panic!("o pino de Y não foi gravado, e o teste não mede o que diz medir: {falha}");
+    }
+    drop(pins);
+
+    // A entrada de X: o endereço de ontem morreu, e o de Y está entre os
+    // caminhos que a lista guardou.
+    let ontem = mapeado(endereco_morto().port());
+    let Some(guardada) = lembrar_de_ontem(casa.path(), &ontem, &[no_y.to_owned()], None, do_x)
+    else {
+        panic!("a lista de conhecidos não devolveu a impressão da primeira visita");
+    };
+
+    // Sem link: só a guardada, com o endereço de Y na corrida como o `connect`
+    // do app o põe (os caminhos da lista), e o convite que a pessoa tem.
+    let mut configuracao = config(
+        casa.path(),
+        ontem.clone(),
+        vec![no_y.to_owned()],
+        seele_ffi::impressao_a_conferir(None, Some(&guardada)),
+        None,
+    );
+    configuracao.join_secret = Some(convite.to_owned());
+    let resultado = conectar(configuracao).await;
+
+    // Como o `connect` do app: a lista só é anotada depois de entrar.
+    if let Ok((_, veredito)) = &resultado {
+        anotar_como_o_app(casa.path(), &ontem, veredito, None, Some(&guardada));
+    }
+    VoltaPelaLista {
+        casa,
+        ontem,
+        resultado,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn um_candidato_que_a_pessoa_nao_escolheu_nao_toma_a_entrada_da_lista() {
+    let _vaga = vaga::minha();
+    // O pino é por endereço de candidato, e o candidato nem sempre é o
+    // endereço que a pessoa escolheu: entram na corrida a resposta do quarto e
+    // os caminhos da lista, e um endereço de LAN (`192.168.x.y:8383`) é o mesmo
+    // de uma casa para outra. Se ali houver um servidor Y **já fixado** nesta
+    // máquina, o pino confere com a chave de Y. Deixá-lo passar mandava a Y o
+    // `Hello` (o convite, o apelido e a assinatura) e dava `InviteDisagrees`,
+    // com a chave de Y a um passo da entrada de X na lista.
+    //
+    // Fora do alvo, a impressão prometida vale mais que o pino: Y é recusado
+    // dentro do TLS, antes do `Hello`. Isso se vê do lado de Y, como em
+    // `convite.rs`: nenhuma conexão de pé e o convite ainda inteiro. A batida
+    // na portaria fica com o teste de baixo.
+    let Ok(pasta) = tempfile::tempdir() else {
+        panic!("sem diretório temporário não há banco");
+    };
+    let (de_y, y, convite) = y_com_convite(&pasta.path().join("seele.db"), false).await;
+    let do_y = y.fingerprint().to_owned();
+    let no_y = de_y.to_string();
+    // A chave do servidor X, dono da entrada. Nenhum servidor a atende: o que
+    // se mede é o que acontece com Y e com a lista.
+    let do_x = "ab".repeat(32);
+
+    let volta = voltar_pela_lista_com_y_fixado(&no_y, &do_y, &do_x, &convite).await;
+
+    // Do lado de Y. Uma volta que tivesse entrado nele estaria de pé agora, viva
+    // em `volta`, e `wait_idle` não voltaria.
+    if tokio::time::timeout(Duration::from_secs(10), y.wait_idle())
+        .await
+        .is_err()
+    {
+        panic!(
+            "Y ficou com uma conexão de pé depois da volta pela lista de X: o `Hello` saiu \
+             para um candidato que a pessoa não escolheu, fixado com a chave de outro servidor"
+        );
+    }
+    // E o convite de Y continua inteiro: outra pessoa, com outra chave e outro
+    // apelido, ainda entra com ele. O ADR 0017 prende o apelido à chave, e com
+    // outro nenhum dos dois explica uma recusa, só o convite.
+    let Ok(outra_casa) = tempfile::tempdir() else {
+        panic!("sem diretório temporário não há outra identidade");
+    };
+    let mut com_o_convite = config_do_link(outra_casa.path(), no_y.clone(), &do_y);
+    com_o_convite.nickname = "joana".into();
+    com_o_convite.join_secret = Some(convite.clone());
+    match conectar(com_o_convite).await {
+        Ok((entrou, _)) => entrou.disconnect(),
+        Err(erro) => panic!(
+            "o convite de Y foi gasto ({erro:?}): o `Hello` da volta pela lista de X saiu \
+             com ele para um candidato que a pessoa não escolheu"
+        ),
+    }
+
+    // Do lado de quem voltou: a recusa com nome, com a guardada de X como a
+    // prometida e a chave de Y como a ofertada.
     assert_eq!(
-        depois, do_x,
-        "a volta que entrou num candidato de outro servidor gravou a chave dele na entrada de X: \
-         a próxima volta confere por ela, e a tomada é permanente e calada"
+        volta.resultado.as_ref().err(),
+        Some(&ConnectionError::InviteMismatch {
+            expected: do_x.clone(),
+            offered: do_y,
+        }),
+        "a volta pela lista não foi recusada pela impressão guardada no candidato de Y, ou \
+         foi recusada com outro nome"
+    );
+    // E a lista continua com X: nada entrou, e nada foi anotado.
+    assert_eq!(
+        impressao_na_lista(volta.casa.path(), &volta.ontem),
+        Some(do_x),
+        "a volta que passou por um candidato de outro servidor gravou a chave dele na entrada \
+         de X: a próxima volta confere por ela, e a tomada é permanente e calada"
+    );
+
+    y.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn um_candidato_que_a_pessoa_nao_escolheu_nao_bate_na_portaria_dele() {
+    let _vaga = vaga::minha();
+    // O mesmo candidato de outro servidor, agora com a portaria do ADR 0030
+    // ligada em Y. Um `Hello` com convite válido vira um pedido na fila de quem
+    // hospeda Y, com o apelido de quem voltava pela lista de X: quem hospeda Y
+    // passaria a ver, e poderia aprovar, uma batida que ninguém quis dar.
+    let Ok(pasta) = tempfile::tempdir() else {
+        panic!("sem diretório temporário não há banco");
+    };
+    let banco = pasta.path().join("seele.db");
+    let (de_y, y, convite) = y_com_convite(&banco, true).await;
+    let do_y = y.fingerprint().to_owned();
+    let do_x = "ab".repeat(32);
+
+    let volta = voltar_pela_lista_com_y_fixado(&de_y.to_string(), &do_y, &do_x, &convite).await;
+
+    let Ok(persistence) = Persistence::open(&Location::File(banco.clone())) else {
+        panic!("o banco de Y não abriu por fora");
+    };
+    let Ok(fila) = seele_server::portaria::pedidos(&persistence) else {
+        panic!("a fila da portaria de Y não se lê");
+    };
+    assert!(
+        fila.is_empty(),
+        "a portaria de Y recebeu a batida de quem voltava pela lista de X: o `Hello` saiu \
+         para um candidato que a pessoa não escolheu: {fila:?}"
+    );
+    assert_eq!(
+        volta.resultado.as_ref().err(),
+        Some(&ConnectionError::InviteMismatch {
+            expected: do_x,
+            offered: do_y,
+        }),
+        "a volta pela lista não foi recusada pela impressão guardada no candidato de Y, ou \
+         foi recusada com outro nome"
     );
 
     y.shutdown();

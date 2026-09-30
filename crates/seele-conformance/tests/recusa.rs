@@ -101,6 +101,7 @@ async fn uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada() -> Result<()> {
         apelido: "marcela".into(),
         segredo: None,
         impressao_esperada: None,
+        e_o_alvo: true,
         aceito: None,
     };
 

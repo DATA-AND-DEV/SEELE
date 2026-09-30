@@ -78,6 +78,7 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
         apelido: apelido.to_owned(),
         segredo: None,
         impressao_esperada: None,
+        e_o_alvo: true,
         aceito: None,
     }
 }
