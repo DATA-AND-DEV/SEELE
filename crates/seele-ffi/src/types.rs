@@ -428,8 +428,10 @@ pub enum Trust {
     Known,
     /// First contact, and the invite named a different key. Refused.
     ///
-    /// The core drops the connection when this happens, so in practice this
-    /// arm never crosses the boundary — it exists to keep the match exhaustive.
+    /// O verificador TLS do núcleo recusa este caso dentro do aperto de mão,
+    /// antes do `Hello`, então ele nunca atravessa como `Trust`: chega como
+    /// [`ConnectionError::InviteMismatch`]. O braço existe para o `match`
+    /// continuar exaustivo.
     InviteRefused {
         /// What the link promised.
         expected: String,
@@ -1899,6 +1901,13 @@ pub enum ConnectionError {
     /// ADR 0006, and deliberately not [`ConnectionError::PinChanged`]: nothing was
     /// ever pinned here, so the shell's key-change alarm would name the wrong
     /// culprit. What failed is the link, not the server's continuity.
+    ///
+    /// **Recusada dentro do TLS, antes do `Hello`**: o convite, a senha e o
+    /// apelido (e, com eles, a chave e a assinatura da identidade) não chegaram
+    /// a quem atendeu. O que sai é o `ClientHello` do TLS, com o nome, o ALPN e
+    /// a chave efêmera. É por isso que a frase da casca pode
+    /// dizer que o convite, a senha e o apelido não saíram, e diz — e é por isso
+    /// que ela não pode dizer que nada saiu.
     InviteMismatch {
         /// What the link promised.
         expected: String,

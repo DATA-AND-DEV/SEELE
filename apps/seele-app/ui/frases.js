@@ -418,14 +418,24 @@ function fraseDeErro(erro, apelido) {
     }
     // O convite prometeu uma chave e o servidor ofertou outra. Não é troca de
     // chave — nada estava fixado aqui — então a frase acusa o link, e não a
-    // continuidade do servidor. A conexão já caiu quando isto chega: o core
-    // derruba e desfaz o pin, e é por isso que este caso é `#boot-erro` e não
-    // o veredito laranja da sessão.
+    // continuidade do servidor.
+    //
+    // **A recusa é dentro do TLS, antes do `Hello`** (S2b da análise de 22/09):
+    // o verificador do núcleo confere a impressão no aperto de mão, e o convite,
+    // a senha e o apelido não chegam a quem atendeu. A frase diz isso porque
+    // muda o que a pessoa faz: esta tentativa não gastou o convite de uso
+    // único, e não há por que pedir outro por causa dela. Diz só isso, e não
+    // «nada saiu desta máquina»: o `ClientHello` do TLS (nome, ALPN, chave
+    // efêmera) sai antes de haver o que conferir. Vale também para quem volta
+    // pela lista de servidores, que confere pela impressão que a lista guardou
+    // (S3). É `#boot-erro`, e não o veredito laranja da sessão, porque não há
+    // sessão nenhuma.
     if (erro.InviteMismatch) {
       return (
         "ESTE NÃO É O SERVIDOR DO CONVITE.\n" +
         `esperada: ${erro.InviteMismatch.expected}\n` +
         `ofertada: ${erro.InviteMismatch.offered}\n` +
+        "O convite, a senha e o apelido não saíram desta máquina.\n" +
         "Confirme o link com quem o mandou."
       );
     }

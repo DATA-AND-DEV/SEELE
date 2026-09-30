@@ -1390,6 +1390,62 @@ fn the_refused_invite_reaches_the_screen_with_both_fingerprints() {
 }
 
 #[test]
+fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_sairam() {
+    // Desde que a impressão é conferida dentro do TLS (S2b da análise de
+    // 22/09), a recusa acontece antes do `Hello`. O convite, a senha e o
+    // apelido não saem mais para quem atendeu no lugar do servidor, e
+    // `crates/seele-conformance/tests/convite.rs` prova isso do lado do
+    // servidor: o convite continua entrando e a portaria continua sem pedido.
+    // O produto sabia e não contava, e quem lia a recusa ia achar que tinha
+    // queimado o convite de uso único e pedir outro.
+    //
+    // **A frase diz só o que é verdade.** Do aperto de mão TLS sai o
+    // `ClientHello` (o nome do servidor, o ALPN e a chave efêmera), então
+    // «nada saiu desta máquina» seria falso. O que não saiu é o que o `Hello`
+    // carrega: o convite, a senha e o apelido (e, com eles, a chave e a
+    // assinatura da identidade). Por isso a frase enumera os três e não
+    // promete o todo, e o guarda abaixo recusa a promessa maior.
+    //
+    // E a frase é **desta** recusa. Se ela chegasse como `TlsRefused`, a FFI a
+    // traduziria por `Refused { Incompatible }`, e a tela mandaria atualizar o
+    // SEELE nas duas máquinas, que é a pior pista para um servidor que não é o
+    // do link. Que ela chegue com nome é guardado no núcleo
+    // (`client::a_recusa_do_tls_chega_com_nome`); aqui se guarda o que a tela
+    // faz com o nome.
+    let corpo = body_of(&scripts(), "function fraseDeErro(erro, apelido)");
+    let Some(ramo) = corpo
+        .split("if (erro.InviteMismatch)")
+        .nth(1)
+        .and_then(|resto| resto.split("\n    }\n").next())
+    else {
+        panic!(
+            "`fraseDeErro` não trata mais `InviteMismatch`, e a recusa cai na \
+             frase genérica do fim"
+        );
+    };
+
+    assert!(
+        ramo.contains("ESTE NÃO É O SERVIDOR DO CONVITE"),
+        "a recusa pela impressão perdeu a frase própria:\n{ramo}"
+    );
+    assert!(
+        ramo.contains("O convite, a senha e o apelido não saíram desta máquina"),
+        "a frase não diz que o convite, a senha e o apelido não saíram, e quem \
+         lê vai pedir outro convite sem precisar:\n{ramo}"
+    );
+    let minusculas = ramo.to_lowercase();
+    assert!(
+        !minusculas.contains("nada saiu") && !minusculas.contains("nada seu chegou"),
+        "a frase promete que nada saiu desta máquina, e o `ClientHello` do TLS \
+         sai: ela só pode dizer o que o `Hello` deixou de levar:\n{ramo}"
+    );
+    assert!(
+        !ramo.contains("MOTIVOS") && !ramo.contains("INCOMPAT"),
+        "a recusa pela impressão foi dobrada na frase de versão incompatível:\n{ramo}"
+    );
+}
+
+#[test]
 fn the_informative_verdicts_do_not_spend_the_alarm_reserved_for_a_key_change() {
     // `specs/08-seguranca.md` reserves the impossible-to-ignore treatment for a
     // key that changed, and `tokens.css:19` marks the red "EXCLUSIVO alerta e
