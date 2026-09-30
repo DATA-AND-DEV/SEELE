@@ -524,7 +524,9 @@ mod tests {
     /// `rustfmt` e outro numa linha só. A função vizinha devolve outro nome do
     /// mesmo jeito, e ele não pode contar — quem não está no corpo de
     /// `momento_de` não é despachado por ela. Nem o braço comentado, que está no
-    /// corpo e não despacha nada.
+    /// corpo e não despacha nada. Nem os dois braços cujo texto não tem a
+    /// grafia de um momento, um em minúscula e outro com espaço: um texto
+    /// qualquer depois de `=> (` não é o nome de um momento do fio.
     const DESPACHO_DE_FIXTURE: &str = r##"
 pub fn momento_de(evento: &crate::server::Event) -> Option<(&'static str, String)> {
     use crate::server::Event;
@@ -536,6 +538,8 @@ pub fn momento_de(evento: &crate::server::Event) -> Option<(&'static str, String
         ),
         Event::PersonGone { person } => ("PersonGone", format!(r#"{{"pessoa":{}}}"#, person.0)),
         // Event::ServerRenamed { .. } => ("ServerRenamed", String::new()),
+        Event::Minusculo => ("minusculo", String::new()),
+        Event::ComEspaco => ("Pessoa entrou", String::new()),
         _ => return None,
     };
     Some((nome, carga))
@@ -565,6 +569,12 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             "`v06.json` foi lido como a API 6, e o guarda de congelamento não o aceita: \
              os dois guardas discordariam sobre qual arquivo é qual versão"
         );
+        assert_eq!(
+            versao_do_arquivo(Path::new("api/v+6.json")),
+            None,
+            "`v+6.json` foi lido como a API 6, e o guarda de congelamento não o aceita: \
+             os dois guardas discordariam sobre qual arquivo é qual versão"
+        );
     }
 
     #[test]
@@ -572,8 +582,8 @@ fn vizinha(x: u8) -> (&'static str, u8) {
         assert_eq!(
             momentos_de_fixture(),
             BTreeSet::from(["PersonGone".to_owned(), "PersonJoined".to_owned()]),
-            "o extrator leu além de `momento_de` ou contou um braço comentado, ou perdeu um \
-             braço dela — o quebrado ou o de uma linha só"
+            "o extrator leu além de `momento_de`, contou um braço comentado ou um texto sem a \
+             grafia de um momento, ou perdeu um braço dela — o quebrado ou o de uma linha só"
         );
     }
 
@@ -828,7 +838,9 @@ fn vizinha(x: u8) -> (&'static str, u8) {
     /// As três formas que a janela usa hoje para entregar um evento — numa
     /// linha, quebrada, e de dentro de uma arrow function —, um `falar` com
     /// objeto montado antes, que não conta, e um `falar({` que não começa por
-    /// `nome` seguido de um `nome` de outro objeto, que não pode contar.
+    /// `nome` seguido de um `nome` de outro objeto, que não pode contar. Nem
+    /// conta o `falar({` cujo primeiro campo é outro, com o `nome` mais
+    /// adiante: o valor do primeiro campo não é o nome de evento nenhum.
     const JANELA_DE_FIXTURE: &str = r#"
 this.dono.falar({ nome: "botao", chave: plano.no.chave ?? "" });
 this.dono.falar({
@@ -836,6 +848,7 @@ this.dono.falar({
   superficie: this.chave,
 });
 const dizer = (extra) => donoDaRegiao(mod, instancia).falar({ nome: "link", chave, ...extra });
+dono.falar({ chave: "nao-e-evento", nome: "x" });
 dono.falar(eventoMontadoAntes);
 dono.falar({ ...eventoMontadoAntes, chave });
 const PERFIS = { regiao: { nome: "regiao" } };
