@@ -10,6 +10,25 @@ versão promete é publicar a seguinte, e nunca editar esta — a v3 e a v4,
 editadas antes de o guarda existir, ficaram congeladas como estão, com a
 história no comentário da lista.
 
+## Publicar a versão seguinte
+
+O guarda trata como publicada toda versão até `MOD_API_VERSION`
+(`crates/seele-proto/src/mods.rs`), e não só as que já saíram numa release: é
+esse número que diz o que o build oferece. Por isso a ordem dos passos importa.
+
+1. `api/vN.json` e a linha dela em `api/congeladas.sha256` entram no mesmo
+   commit. Uma `vN.json` fora da lista reprova, e a reprovação dá a linha.
+2. Enquanto `MOD_API_VERSION` for menor que N, a vN está em construção: a linha
+   acompanha cada edição, e a reprovação dá a linha nova.
+3. O `cargo xtask check-api` cobra `moments` e `eventos` desde que o arquivo
+   existe, e não desde que a versão sai: a vN que não os escreve, ou que
+   promete um nome sem despachante, reprova ainda em construção.
+4. `MOD_API_VERSION` e `APIS_ACEITAS` sobem por último, quando a vN está pronta
+   para sair, porque daí em diante ela está congelada, mesmo antes da release.
+   Uma edição depois disso reprova como edição de versão publicada, e a mudança
+   vai para a versão N+1. Subir antes faz de cada ajuste que a vN ainda pedir
+   uma versão nova.
+
 ## Por que congelado
 
 O [ADR 0045](../docs/adr/0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md)
