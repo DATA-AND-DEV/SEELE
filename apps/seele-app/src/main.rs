@@ -5050,26 +5050,63 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
 /// conexão devolve quando cai no meio de uma leitura por volume
 /// ([`ler_imagem_mod`]).
 ///
-/// `origem` vai em `?`: é o caminho que o MOD declarou, e texto de terceiro
-/// não entra solto numa linha do registro.
+/// **Texto de terceiro não entra solto numa linha do registro**, e são três
+/// campos com ele. `origem` vai em `?`: é o caminho que o MOD declarou. O
+/// `mod_id` chega da janela (`midia_em_bytes`, `ler_imagem_mod`) e sai sem
+/// caractere de controle e cortado, como em [`registrar_da_janela`]. O
+/// `motivo` passa por [`motivo_no_registro`]: em `ler_imagem_mod` ele é o
+/// texto que o servidor mandou. A recusa que volta à janela sai intacta —
+/// quem se protege é a linha, e não a resposta.
 fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaNoMod {
     let motivo = motivo_de(&falha);
+    let mod_id: String = mod_id
+        .chars()
+        .take(128)
+        .filter(|c| !c.is_control())
+        .collect();
+    let no_registro = motivo_no_registro(motivo);
     if motivo == "sessao-encerrada" {
         tracing::debug!(
             mod_id = %mod_id,
             origem = ?origem,
-            motivo = %motivo,
+            motivo = %no_registro,
             "mídia de MOD não servida: a sessão acabou"
         );
     } else {
         tracing::warn!(
             mod_id = %mod_id,
             origem = ?origem,
-            motivo = %motivo,
+            motivo = %no_registro,
             "mídia de MOD recusada"
         );
     }
     falha
+}
+
+/// **O motivo de uma recusa como uma linha do `seele.log` o leva.**
+///
+/// Um nome de lista fechada (`arquivo-nao-declarado`) sai como está: é
+/// `motivo=arquivo-nao-declarado` que quem lê o registro procura, e é a mesma
+/// palavra que a janela recebe. Qualquer outra coisa é texto de terceiro — o
+/// `erro` que o servidor põe na resposta de imagem, a razão com que a conexão
+/// fechou, que `ler_imagem_mod` repassa como veio — e sai entre aspas, com
+/// escape, cortada no mesmo teto das outras portas de texto de terceiro.
+///
+/// O escape é o que importa: o formatador do registro escapa ANSI em `%`, mas
+/// não quebra de linha, e um `\n` no meio do motivo escreveria no `seele.log`
+/// uma segunda linha com a cara do produto. As aspas fazem o resto:
+/// `motivo=Prazo da transferência esgotado.` não se lê como chave=valor.
+fn motivo_no_registro(motivo: &str) -> String {
+    let cortado: String = motivo.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
+    let nome = !cortado.is_empty()
+        && cortado
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if nome {
+        cortado
+    } else {
+        format!("{cortado:?}")
+    }
 }
 
 /// **Os bytes de um arquivo que o manifesto deste MOD declara**, conferidos.
@@ -10436,7 +10473,8 @@ mod pacote_de_teste {
 #[cfg(test)]
 mod a_midia_recusada_e_dita_no_registro {
     use super::{
-        midia_declarada_do_mod, midia_do_servidor_dita, motivo_de, recusa_de_midia_dita, FalhaNoMod,
+        midia_declarada_do_mod, midia_do_servidor_dita, motivo_de, recusa_de_midia_dita,
+        FalhaNoMod, TETO_DA_FRASE_NO_REGISTRO,
     };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO};
     use crate::rastro_de_teste::capturar;
@@ -10564,6 +10602,90 @@ mod a_midia_recusada_e_dita_no_registro {
                 "motivo=nao-e-base64",
                 "origem=\"servidor\"",
             ],
+        );
+    }
+
+    /// Uma recusa de imagem por volume, com o motivo que o servidor mandou.
+    ///
+    /// É o caminho de `ler_imagem_mod`: o `Err` da conexão é o texto do par
+    /// remoto (o `erro` da `RespostaDeImagem`, a razão com que a conexão
+    /// fechou, o prazo esgotado), e vai à recusa como veio.
+    fn recusa_do_servidor(motivo: &str) -> (FalhaNoMod, String) {
+        capturar(|| {
+            recusa_de_midia_dita(
+                ID,
+                "volume",
+                FalhaNoMod::Recusado {
+                    motivo: motivo.to_owned(),
+                },
+            )
+        })
+    }
+
+    #[test]
+    fn o_texto_do_servidor_no_motivo_nao_forja_linha() {
+        let forjado = "x\n2026-09-30T00:00:00.000000Z  WARN seele_app: linha forjada pelo servidor";
+        let (falha, rastro) = recusa_do_servidor(forjado);
+        assert_eq!(
+            motivo_de(&falha),
+            forjado,
+            "a recusa que volta à janela foi mexida: quem se protege é a linha do registro, \
+             e a janela continua recebendo o que o servidor disse"
+        );
+        assert_eq!(
+            rastro.lines().count(),
+            1,
+            "texto do servidor no motivo escreveu no seele.log mais de uma linha, e a \
+             segunda tem a cara do produto: {rastro}"
+        );
+        assert!(
+            rastro.contains("linha forjada pelo servidor"),
+            "o que o servidor disse sumiu do registro, e era o dado da recusa: {rastro}"
+        );
+    }
+
+    #[test]
+    fn o_id_que_a_janela_manda_nao_forja_linha() {
+        let (_, rastro) = capturar(|| {
+            recusa_de_midia_dita(
+                "prova/midia\n2026-09-30T00:00:00.000000Z  WARN seele_app: linha forjada pela janela",
+                "servidor",
+                FalhaNoMod::Recusado {
+                    motivo: "nao-e-base64".to_owned(),
+                },
+            )
+        });
+        assert_eq!(
+            rastro.lines().count(),
+            1,
+            "o id do MOD que a janela manda escreveu no seele.log mais de uma linha, e a \
+             segunda tem a cara do produto: {rastro}"
+        );
+    }
+
+    #[test]
+    fn o_motivo_em_texto_livre_sai_entre_aspas() {
+        let prazo = "Prazo da transferência esgotado. Confira a conexão e a versão do servidor.";
+        let (_, rastro) = recusa_do_servidor(prazo);
+        let linha =
+            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
+        traz(
+            linha,
+            &["WARN", "mod_id=prova/midia", &format!("motivo=\"{prazo}\"")],
+        );
+    }
+
+    #[test]
+    fn o_motivo_do_servidor_tem_teto() {
+        let (_, rastro) = recusa_do_servidor(&"a".repeat(TETO_DA_FRASE_NO_REGISTRO * 4));
+        let linha =
+            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
+        assert!(
+            linha.contains(&"a".repeat(TETO_DA_FRASE_NO_REGISTRO))
+                && !linha.contains(&"a".repeat(TETO_DA_FRASE_NO_REGISTRO + 1)),
+            "o motivo que o servidor manda entrou no registro sem o teto das outras portas \
+             de texto de terceiro: {} caracteres numa linha",
+            linha.chars().count()
         );
     }
 
