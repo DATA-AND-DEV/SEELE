@@ -11719,6 +11719,57 @@ fn um_pedido_de_mod_nunca_fica_sem_resposta() {
     );
 }
 
+/// **Toda recusa que a janela registra de um MOD leva o id dele em campo
+/// próprio.**
+///
+/// O quarto argumento de `registrarNoAnfitriao` é o que `registrar_da_janela`
+/// escreve como `mod_id=`, a mesma grafia das linhas do Rust: é ele que faz uma
+/// busca só achar no `seele.log` o que a janela e o Rust disseram do mesmo MOD.
+/// O id no meio da frase é texto, e não campo.
+///
+/// A bancada `contribuicoes-e-camadas.cjs` exercita o `catch` de `atenderOMod`
+/// de verdade; as quatro recusas de `pedirAoServidor` e a da instância que já
+/// não é a carregada não passam por ela, e voltar a tirar o id de uma delas não
+/// reprovaria nada. É o que este guarda prende. O nível fica livre: o que se
+/// exige é o id **na quarta posição** — um id que escorregasse para a terceira
+/// viraria o nível, e a linha sairia como DEBUG e sem `mod_id`.
+#[test]
+fn toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio() {
+    let base = without_comments(&read("ui/base.js"));
+    for (assinatura, id) in [
+        ("async function pedirAoServidor(", "id"),
+        ("async function atenderOMod(", "mod.id"),
+    ] {
+        let corpo = js_function(&base, assinatura);
+        let chamadas: Vec<Vec<String>> = corpo
+            .match_indices("registrarNoAnfitriao(")
+            .map(|(posicao, _)| {
+                argumentos_da_chamada(&corpo[posicao + "registrarNoAnfitriao".len()..])
+                    .iter()
+                    .map(|argumento| argumento.trim().to_owned())
+                    .collect()
+            })
+            .collect();
+        assert!(
+            !chamadas.is_empty(),
+            "`{assinatura}` deixou de chamar `registrarNoAnfitriao`, ou o recorte não \
+             o achou — e este guarda passaria por não olhar nada: {corpo}"
+        );
+        let sem_id: Vec<&Vec<String>> = chamadas
+            .iter()
+            .filter(|argumentos| argumentos.get(3).map(String::as_str) != Some(id))
+            .collect();
+        assert!(
+            sem_id.is_empty(),
+            "`{assinatura}` registra recusa de MOD sem `{id}` como quarto argumento: a \
+             linha sai sem `mod_id=`, e uma busca por ele no seele.log não acha o que a \
+             janela disse deste MOD. {} de {} chamada(s): {sem_id:?}",
+            sem_id.len(),
+            chamadas.len()
+        );
+    }
+}
+
 /// **Arredondamento e brilho são aplicados, e o que os limita é número.**
 ///
 /// Eles já existiam como token — `--seele-raio` e `--seele-sombra`, em

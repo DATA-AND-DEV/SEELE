@@ -2284,16 +2284,46 @@ const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
 /// `onde` é um identificador curto de uma lista que quem escreve a chamada
 /// escolhe; `o_que` é a frase. Nada disto vai para a tela: é registro, e o
 /// registro é de quem hospeda.
+///
+/// `mod_id` é o MOD de quem a frase fala, quando é de um. Vai num campo
+/// próprio, e não só no meio da frase: é ele que faz `mod_id=autor/nome` achar
+/// no registro, numa busca só, o que a janela e o Rust disseram sobre o mesmo
+/// MOD.
 #[tauri::command]
-fn registrar_da_janela(nivel: String, onde: String, o_que: String) {
+fn registrar_da_janela(nivel: String, onde: String, o_que: String, mod_id: Option<String>) {
     // Cortado aqui, e não confiando em quem chama: uma frase sem teto vinda da
     // janela é uma linha de registro sem teto no disco de quem hospeda.
-    let onde: String = onde.chars().take(64).collect();
-    let o_que: String = o_que.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
+    //
+    // **Sem caractere de controle**, nem aqui nem nos outros dois campos: os
+    // três chegam pela mesma ponte, e uma quebra de linha em qualquer um
+    // escreveria no `seele.log` uma segunda linha com a cara do produto.
+    let onde: String = onde.chars().take(64).filter(|c| !c.is_control()).collect();
+    // A frase carrega texto que um MOD escolheu — o nome de um ponto, a
+    // mensagem de um erro —, e por isso é a que mais precisa do filtro.
+    let o_que: String = o_que
+        .chars()
+        .take(TETO_DA_FRASE_NO_REGISTRO)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    // Vazio é ninguém: o id vazio é o do catálogo do próprio servidor
+    // (`carregarMods`), e um `mod_id=` sem nome seria achado por uma busca e não
+    // seria de MOD nenhum.
+    let mod_id: Option<String> = mod_id
+        .map(|id| {
+            id.chars()
+                .take(128)
+                .filter(|c| !c.is_control())
+                .collect::<String>()
+        })
+        .filter(|id| !id.is_empty());
+    // Em `display`, e não como texto cru: `mod_id=autor/nome`, sem aspas, é a
+    // mesma grafia que as linhas do Rust escrevem com `%`. Ausente, o campo
+    // não sai.
+    let mod_id = mod_id.as_deref().map(tracing::field::display);
     match nivel.as_str() {
-        "aviso" => tracing::warn!(onde = %onde, "{o_que}"),
-        "erro" => tracing::error!(onde = %onde, "{o_que}"),
-        _ => tracing::debug!(onde = %onde, "{o_que}"),
+        "aviso" => tracing::warn!(onde = %onde, mod_id, "{o_que}"),
+        "erro" => tracing::error!(onde = %onde, mod_id, "{o_que}"),
+        _ => tracing::debug!(onde = %onde, mod_id, "{o_que}"),
     }
 }
 
@@ -10112,5 +10142,128 @@ mod o_console_do_mod_chega_ao_registro {
             1,
             "um MOD escreveu uma segunda linha no seele.log, com a cara de uma linha do produto: {rastro}"
         );
+    }
+}
+
+/// **O que a janela escreve no registro, com o id do MOD em campo próprio.**
+///
+/// O comando é chamado direto: é uma função como outra qualquer, e o que se
+/// mede é a linha que ela deixa no `seele.log`.
+#[cfg(test)]
+mod o_registro_da_janela {
+    use crate::rastro_de_teste::capturar;
+
+    #[test]
+    fn o_aviso_da_janela_sai_como_warn_com_o_id_do_mod_em_campo_proprio() {
+        let ((), rastro) = capturar(|| {
+            super::registrar_da_janela(
+                "aviso".to_owned(),
+                "atender-mod".to_owned(),
+                "seele/perfis: «contribuir» falhou — a API de MODs não conhece o ponto «x»"
+                    .to_owned(),
+                Some("seele/perfis".to_owned()),
+            );
+        });
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("«contribuir» falhou"))
+            .unwrap_or_else(|| panic!("a recusa da janela não chegou ao registro: {rastro}"));
+        for pedaco in ["WARN", "mod_id=seele/perfis", "onde=atender-mod"] {
+            assert!(
+                linha.contains(pedaco),
+                "a linha da janela não traz `{pedaco}`, e `mod_id=` é o que junta numa busca \
+                 o que a janela e o Rust disseram do mesmo MOD: {linha}"
+            );
+        }
+    }
+
+    #[test]
+    fn sem_id_a_linha_da_janela_continua_saindo() {
+        let ((), rastro) = capturar(|| {
+            super::registrar_da_janela(
+                "aviso".to_owned(),
+                "geral".to_owned(),
+                "sem MOD".to_owned(),
+                None,
+            );
+        });
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("sem MOD"))
+            .unwrap_or_else(|| panic!("uma linha sem MOD deixou de sair: {rastro}"));
+        assert!(
+            linha.contains("WARN") && !linha.contains("mod_id"),
+            "uma linha sem MOD ganhou um `mod_id` que não é de ninguém: {linha}"
+        );
+    }
+
+    /// **O id vazio é o catálogo, e não um MOD.** `carregarMods` pede o
+    /// catálogo do servidor por `pedirAoServidor("", …)`, e as recusas de
+    /// `pedirAoServidor` passam o id adiante como está. Um `mod_id=` sem nome
+    /// é um campo que uma busca por `mod_id=` acha e que não é de MOD nenhum.
+    #[test]
+    fn o_id_vazio_do_catalogo_nao_vira_um_mod_id_sem_nome() {
+        let ((), rastro) = capturar(|| {
+            super::registrar_da_janela(
+                "aviso".to_owned(),
+                "pedido-de-mod".to_owned(),
+                ": oito pedidos em voo, este não cabe".to_owned(),
+                Some(String::new()),
+            );
+        });
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("oito pedidos em voo"))
+            .unwrap_or_else(|| panic!("a recusa do catálogo deixou de sair: {rastro}"));
+        assert!(
+            linha.contains("WARN") && !linha.contains("mod_id"),
+            "o pedido do catálogo, que não é de MOD nenhum, saiu com um `mod_id` sem \
+             nome — e uma busca por `mod_id=` o acha: {linha}"
+        );
+    }
+
+    #[test]
+    fn uma_quebra_de_linha_da_janela_nao_forja_outra_linha_no_registro() {
+        let ((), rastro) = capturar(|| {
+            super::registrar_da_janela(
+                "aviso".to_owned(),
+                "recusa-de-mod".to_owned(),
+                "a/b: ponto «x\nWARN seele_app: forjada»".to_owned(),
+                Some("a/b".to_owned()),
+            );
+        });
+        assert_eq!(
+            rastro.lines().count(),
+            1,
+            "texto de MOD atravessou a janela e escreveu uma segunda linha no seele.log: {rastro}"
+        );
+    }
+
+    /// **Os dois campos também, e não só a frase.** `onde` é, hoje, um literal
+    /// do produto, e o id vem de um manifesto já conferido; mas os dois chegam
+    /// pela mesma ponte que a frase, e o registro não pode depender de quem
+    /// chama ser bem-comportado. Um caso por campo, para que tirar o filtro de
+    /// um deles reprove sozinho.
+    #[test]
+    fn uma_quebra_de_linha_em_onde_ou_no_id_nao_forja_outra_linha_no_registro() {
+        for (campo, onde, mod_id) in [
+            ("onde", "atender-mod\nWARN seele_app: forjada", "a/b"),
+            ("mod_id", "atender-mod", "a/b\nWARN seele_app: forjada"),
+        ] {
+            let ((), rastro) = capturar(|| {
+                super::registrar_da_janela(
+                    "aviso".to_owned(),
+                    onde.to_owned(),
+                    "a/b: uma frase de verdade".to_owned(),
+                    Some(mod_id.to_owned()),
+                );
+            });
+            assert_eq!(
+                rastro.lines().count(),
+                1,
+                "uma quebra de linha em `{campo}` escreveu uma segunda linha no seele.log, \
+                 com a cara de uma linha do produto: {rastro}"
+            );
+        }
     }
 }

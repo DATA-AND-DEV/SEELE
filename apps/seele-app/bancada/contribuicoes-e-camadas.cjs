@@ -926,6 +926,61 @@ contexto.cartoesDosMods = new Map();
     confere("R2 · o dono", registro.porHandle.has(handle) === false, "a revogação do dono não tirou a contribuição");
     confere("R2 · o dono", a.recursos.length === 0, "a revogação do dono deixou o descartador retido na instância");
 
+    // **As recusas do roteador chegam ao registro com o id do MOD em campo
+    // próprio.** Elas sempre foram ditas ao MOD e já saíam como aviso; o que
+    // faltava era o `modId`, que o `registrar_da_janela` escreve como
+    // `mod_id=` — o mesmo campo das linhas do Rust. Duas portas, o mesmo
+    // `catch` de `atenderOMod`: a contribuição recusada e a região com nós
+    // demais, esta pelo `desenharARegiaoDoMod` de verdade.
+    {
+      const anotadasDoRoteador = [];
+      const registrarDeAntes = contexto.registrarNoAnfitriao;
+      const regiaoDeAntes = contexto.regiaoDoMod;
+      const inicioDaRegiao = base.indexOf("function desenharARegiaoDoMod(");
+      const fimDaRegiao = base.indexOf("\n}\n", inicioDaRegiao) + 3;
+      confere("R2 · o recorte da região", inicioDaRegiao >= 0,
+        "`desenharARegiaoDoMod` mudou de forma e o recorte não a achou");
+      vm.runInContext(base.slice(inicioDaRegiao, fimDaRegiao), contexto);
+      // Uma região que recusa três nós: é o que o renderer devolve quando a
+      // árvore passa do teto, e é o número que `desenharARegiaoDoMod` lança.
+      contexto.regiaoDoMod = () => ({ aplicar: () => 3 });
+      contexto.registrarNoAnfitriao = (...argumentos) => anotadasDoRoteador.push(argumentos);
+      let contribuicaoRespondida;
+      let regiaoRespondida;
+      try {
+        await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+          tipo: "contribuir", n: 5,
+          pedido: { ponto: "nao.existe", rotulo: "x" },
+        });
+        contribuicaoRespondida = respostas.at(-1);
+        await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+          tipo: "regiao", n: 6,
+          conteudo: [{ forma: "texto", chave: "t", dentro: "x" }],
+        });
+        regiaoRespondida = respostas.at(-1);
+      } finally {
+        contexto.registrarNoAnfitriao = registrarDeAntes;
+        contexto.regiaoDoMod = regiaoDeAntes;
+      }
+      const dita = (...pedacos) => anotadasDoRoteador.some(([onde, texto, nivel, modId]) =>
+        onde === "atender-mod" && nivel === "aviso" && modId === "mod/b"
+        && pedacos.every((pedaco) => String(texto).includes(pedaco)));
+      confere("R2 · a recusa no registro", contribuicaoRespondida?.ok === false,
+        "um ponto que não existe foi aceito");
+      confere(
+        "R2 · a recusa no registro",
+        dita("nao.existe"),
+        `a contribuição recusada não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
+      );
+      confere("R2 · a região no registro", regiaoRespondida?.ok === false,
+        "uma região com nós demais foi respondida como aceita");
+      confere(
+        "R2 · a região no registro",
+        dita("«regiao»", "3 nó(s)"),
+        `a região com nós demais não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
+      );
+    }
+
     terminar();
   })().catch((erro) => {
     falhas.push(`R2: o roteador lançou — ${erro?.stack || erro}`);

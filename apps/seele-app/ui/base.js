@@ -438,11 +438,15 @@ const TETO_DE_MIDIA_BASE64 = 4 * Math.ceil(10 * 1024 * 1024 / 3) + 128;
  * Não vai para a tela: quem lê isto é quem hospeda, e quem usa não tem o que
  * fazer com a frase.
  */
-function registrarNoAnfitriao(onde, o_que, nivel = "aviso") {
+function registrarNoAnfitriao(onde, o_que, nivel = "aviso", modId = null) {
   // Nunca lança e nunca espera: um registro que derruba o caminho que ele
   // observa é pior que registro nenhum.
+  //
+  // `modId` é o MOD de quem a frase fala, quando é de um: o Rust o escreve
+  // como `mod_id=`, o mesmo campo das linhas dele, e uma busca só acha as duas
+  // metades.
   try {
-    invoke("registrar_da_janela", { nivel, onde, oQue: String(o_que) }).catch(() => {});
+    invoke("registrar_da_janela", { nivel, onde, oQue: String(o_que), modId }).catch(() => {});
   } catch {
     /* sem ponte, sem registro — e o caminho segue */
   }
@@ -535,23 +539,23 @@ async function pedirAoServidor(id, canal, valor) {
   // dentro, um `catch` do MOD ou uma promessa que ninguém pega — e em nenhum
   // dos dois casos quem hospeda fica sabendo qual das três portas fechou.
   if (!daGeracaoDePe(geracao)) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: geração ${geracao} não é a de pé`);
+    registrarNoAnfitriao("pedido-de-mod", `${id}: geração ${geracao} não é a de pé`, "aviso", id);
     throw new Error("disconnected");
   }
   if (pedidosDeMod.size >= 8) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: oito pedidos em voo, este não cabe`);
+    registrarNoAnfitriao("pedido-de-mod", `${id}: oito pedidos em voo, este não cabe`, "aviso", id);
     throw new Error("too-many-requests");
   }
   const request = ++proximoPedidoDeMod;
   const payload = JSON.stringify(valor);
   if (new TextEncoder().encode(payload).length > 12 * 1024) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: carga de ${payload.length} caracteres não cabe`);
+    registrarNoAnfitriao("pedido-de-mod", `${id}: carga de ${payload.length} caracteres não cabe`, "aviso", id);
     throw new Error("request-too-large");
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pedidosDeMod.delete(request);
-      registrarNoAnfitriao("pedido-de-mod", `${id}: pedido ${request} venceu o prazo sem resposta`);
+      registrarNoAnfitriao("pedido-de-mod", `${id}: pedido ${request} venceu o prazo sem resposta`, "aviso", id);
       reject(new Error("timeout"));
     }, 15000);
     pedidosDeMod.set(request, { resolve, reject, timer, parts: [], geracao });
@@ -1765,6 +1769,8 @@ async function atenderOMod(mod, instancia, m) {
     registrarNoAnfitriao(
       "atender-mod",
       `${mod.id}: «${m.tipo}» chegou de uma instância que já não é a carregada`,
+      "aviso",
+      mod.id,
     );
     return;
   }
@@ -1913,7 +1919,7 @@ async function atenderOMod(mod, instancia, m) {
     }
   } catch (falha) {
     const motivo = typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha);
-    registrarNoAnfitriao("atender-mod", `${mod.id}: «${m.tipo}» falhou — ${motivo}`);
+    registrarNoAnfitriao("atender-mod", `${mod.id}: «${m.tipo}» falhou — ${motivo}`, "aviso", mod.id);
     responder(false, { erro: motivo });
   }
 }
