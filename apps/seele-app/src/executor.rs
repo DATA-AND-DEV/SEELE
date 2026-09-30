@@ -390,12 +390,15 @@ const FICHA: u64 = 1_000_000;
 /// cada `1 / LINHAS_DE_CONSOLE_POR_SEGUNDO` segundo. O que ele segura **é
 /// contado**, e a primeira linha que passa depois leva a conta: o `seele.log`
 /// diz que houve mais do que ele mostra, em vez de mostrar pouco como se fosse
-/// tudo.
+/// tudo. Quando nenhuma passa, o produto diz a conta ele mesmo — ao fim da
+/// primeira volta do motor que tiver ficha, ou quando a instância para (ver
+/// [`dizer_as_seguradas`]).
 ///
-/// Mora dentro da função nativa, na thread do motor, e o relógio é passado por
-/// quem chama — é o que deixa o teste medi-lo sem dormir. Ele também é o que
-/// limita o canal entre o motor e a bomba para esta variante: a linha de
-/// console não reserva cota de fila, e a vazão dela é o teto.
+/// Mora na thread do motor, dividido entre a função nativa e o laço de
+/// [`rodar`], e o relógio é passado por quem chama — é o que deixa o teste
+/// medi-lo sem dormir. Ele também é o que limita o canal entre o motor e a
+/// bomba para esta variante: a linha de console não reserva cota de fila, e a
+/// vazão dela é o teto.
 #[derive(Debug)]
 pub(crate) struct BaldeDoConsole {
     /// As fichas, em milionésimos de ficha.
@@ -422,6 +425,39 @@ impl BaldeDoConsole {
     /// `Some(n)` é «passa», com quantas foram seguradas antes dela; `None` é
     /// «segurada», e ela entra na conta da próxima.
     pub(crate) fn admitir(&mut self, agora: Instant) -> Option<u32> {
+        if !self.gastar_ficha(agora) {
+            self.suprimidas = self.suprimidas.saturating_add(1);
+            return None;
+        }
+        Some(std::mem::take(&mut self.suprimidas))
+    }
+
+    /// **A conta que nenhuma linha levou, ao fim de uma volta do motor — se
+    /// houver ficha.**
+    ///
+    /// A linha que diz a conta é uma linha no `seele.log` como qualquer outra,
+    /// e por isso gasta ficha: sem ela, um MOD que escreve um pouco a cada
+    /// volta ganharia uma linha do produto por volta, e o teto de vazão
+    /// deixaria de valer. Sem ficha, ou sem nada segurado, devolve `None` e
+    /// não mexe em nada — a conta espera a próxima volta ou [`Self::pendentes`].
+    pub(crate) fn pendentes_se_couber(&mut self, agora: Instant) -> Option<u32> {
+        if self.suprimidas == 0 || !self.gastar_ficha(agora) {
+            return None;
+        }
+        Some(std::mem::take(&mut self.suprimidas))
+    }
+
+    /// **A conta que nenhuma linha levou, quando a instância para — com ficha
+    /// ou sem.**
+    ///
+    /// É a última linha da instância, uma vez só: não há vazão a proteger, e
+    /// guardá-la para uma ficha que não vai chegar era perdê-la.
+    pub(crate) fn pendentes(&mut self) -> Option<u32> {
+        (self.suprimidas > 0).then(|| std::mem::take(&mut self.suprimidas))
+    }
+
+    /// Conta a recarga até `agora` e tira uma ficha, se houver.
+    fn gastar_ficha(&mut self, agora: Instant) -> bool {
         let passou = agora.saturating_duration_since(self.contado_ate);
         let micros = u64::try_from(passou.as_micros()).unwrap_or(u64::MAX);
         // O relógio anda só o que foi contado: o resto abaixo de um
@@ -435,12 +471,51 @@ impl BaldeDoConsole {
         let recarga = micros.saturating_mul(u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
         self.fichas = self.fichas.saturating_add(recarga).min(cheio);
         if self.fichas < FICHA {
-            self.suprimidas = self.suprimidas.saturating_add(1);
-            return None;
+            return false;
         }
         self.fichas -= FICHA;
-        Some(std::mem::take(&mut self.suprimidas))
+        true
     }
+}
+
+/// O `texto` da linha em que o produto diz a conta do balde, quando nenhuma
+/// linha do MOD passou depois para levá-la.
+///
+/// Entre colchetes, como o aviso do corte e o recuo de `emTexto`: é o produto
+/// falando dentro do `texto` de uma linha de console, e não o MOD. A conta vai
+/// no campo `suprimidas`, como em qualquer outra linha.
+const CONTA_DO_BALDE: &str =
+    "[linhas de console seguradas pelo teto, sem outra linha depois que as contasse]";
+
+/// **Diz a conta que o balde guardou e nenhuma linha levou.**
+///
+/// `tirar` é a regra da hora: [`BaldeDoConsole::pendentes_se_couber`] ao fim de
+/// cada volta do motor, e [`BaldeDoConsole::pendentes`] quando a instância
+/// para. Sem isto, um MOD que escreve uma rajada e se cala — ou é parado —
+/// deixava a conta no balde, e ela caía com o contexto: o `seele.log` mostrava
+/// as linhas da rajada como se fossem tudo.
+///
+/// Um MOD que não tem volta nenhuma depois da rajada — nem temporizador, nem
+/// resposta — tem a conta dita quando para.
+fn dizer_as_seguradas(
+    balde: &std::cell::RefCell<BaldeDoConsole>,
+    manda: &Sender<ParaOFora>,
+    tirar: impl FnOnce(&mut BaldeDoConsole) -> Option<u32>,
+) {
+    // Entre duas voltas nenhum JavaScript roda, e a ponte não tem o balde
+    // emprestado; um empréstimo que falhasse deixa a conta onde está, para a
+    // próxima chamada.
+    let Ok(mut balde) = balde.try_borrow_mut() else {
+        return;
+    };
+    let Some(suprimidas) = tirar(&mut balde) else {
+        return;
+    };
+    let _ = manda.send(ParaOFora::Console {
+        nivel: NivelDoConsole::Aviso,
+        texto: CONTA_DO_BALDE.to_owned(),
+        suprimidas,
+    });
 }
 
 /// O nível de uma linha que o MOD escreveu com `console`.
@@ -580,7 +655,9 @@ pub(crate) enum ParaOFora {
         /// Quantos temporizadores estão na tabela.
         relogios: usize,
     },
-    /// Uma linha que o MOD escreveu com `console`.
+    /// Uma linha que o MOD escreveu com `console` — ou a linha em que o
+    /// produto diz, por ele, a conta que o balde guardou e nenhuma linha levou
+    /// ([`CONTA_DO_BALDE`], em aviso).
     ///
     /// **Não é fala para a janela**: é registro. Quem a escreve no `seele.log`
     /// é a bomba, que sabe de quem é o MOD; o executor não sabe, e não precisa
@@ -588,7 +665,8 @@ pub(crate) enum ParaOFora {
     Console {
         /// O nível, do método que o MOD chamou.
         nivel: NivelDoConsole,
-        /// O texto, já cortado por [`cortar_linha_do_console`].
+        /// O texto, já cortado por [`cortar_linha_do_console`], ou
+        /// [`CONTA_DO_BALDE`].
         texto: String,
         /// Quantas linhas o balde segurou antes desta. Zero é o normal.
         suprimidas: u32,
@@ -738,7 +816,7 @@ impl ExecutorQuickJs {
         // lugar; as outras variantes são avisos de tamanho fixo, menos
         // `Console`, que não reserva lugar nenhum: é registro, e não fala para
         // a janela. Cada linha vem cortada no teto de uma frase do registro, e
-        // quem limita quantas vêm é o `BaldeDoConsole` da função nativa.
+        // quem limita quantas vêm é o `BaldeDoConsole` da instância.
         if let Some(ParaOFora::Mensagem(json)) = &saiu {
             self.fila.tirar(json.len());
         }
@@ -910,7 +988,14 @@ fn rodar(
     let saida = manda.clone();
     let contagem = Arc::clone(fila);
     let linhas = manda.clone();
-    let balde_do_console = std::cell::RefCell::new(BaldeDoConsole::novo(Instant::now()));
+    // **Dois donos, uma thread.** A ponte gasta ficha a cada linha; o laço
+    // abaixo tira do balde, ao fim de cada volta e na parada, a conta que
+    // nenhuma linha levou (ver [`dizer_as_seguradas`]). Um `Rc` e não um `Arc`:
+    // os dois moram na thread do motor.
+    let balde_do_console = std::rc::Rc::new(std::cell::RefCell::new(BaldeDoConsole::novo(
+        Instant::now(),
+    )));
+    let balde_da_ponte = std::rc::Rc::clone(&balde_do_console);
     let montou = contexto.with(|ctx| -> rquickjs::Result<()> {
         let seele = rquickjs::Object::new(ctx.clone())?;
         seele.set(
@@ -962,7 +1047,7 @@ fn rodar(
                 // Um `RefCell` e não um cadeado: a função só roda na thread do
                 // motor, e um `try_borrow` que falhasse seria uma reentrada que
                 // não existe — calar é a resposta segura se um dia existir.
-                let Ok(mut balde) = balde_do_console.try_borrow_mut() else {
+                let Ok(mut balde) = balde_da_ponte.try_borrow_mut() else {
                     return;
                 };
                 let Some(suprimidas) = balde.admitir(Instant::now()) else {
@@ -1028,6 +1113,11 @@ fn rodar(
             // encadeado nunca disparava e o intervalo cancelado continuava
             // batendo. O `continue` escondia os dois.
             recolher_pedidos_de_relogio(&contexto, &mut relogios);
+            // E a conta do console, pela mesma razão: este fim de volta é o
+            // único que um MOD só de relógio tem.
+            dizer_as_seguradas(&balde_do_console, manda, |balde| {
+                balde.pendentes_se_couber(Instant::now())
+            });
             continue;
         };
         match entrada {
@@ -1082,7 +1172,16 @@ fn rodar(
         escoar_jobs(&runtime, interrupcao, manda, fila);
         // Os pedidos de temporizador que o MOD fez nesta volta.
         recolher_pedidos_de_relogio(&contexto, &mut relogios);
+        // A conta do console que nenhuma linha levou, se houver ficha.
+        dizer_as_seguradas(&balde_do_console, manda, |balde| {
+            balde.pendentes_se_couber(Instant::now())
+        });
     }
+
+    // **A conta do console antes da confirmação de parada**, com ficha ou sem:
+    // depois do `Parou` a bomba não lê mais nada, e a conta cairia com o
+    // contexto.
+    dizer_as_seguradas(&balde_do_console, manda, BaldeDoConsole::pendentes);
 
     // O descarte acontece **aqui**, na dona do runtime, e não noutra thread.
     drop(contexto);
@@ -2102,6 +2201,211 @@ mod testes {
             1000,
             "linhas sumiram sem ser contadas: {passaram_do_laco} passaram e {contadas} foram contadas"
         );
+    }
+
+    /// **A conta que nenhuma linha levou sai do balde por conta própria**: ao
+    /// fim de uma volta, só com ficha; no fim da instância, sempre.
+    #[test]
+    fn o_balde_devolve_a_conta_que_nenhuma_linha_levou() {
+        let inicio = Instant::now();
+        let mut balde = BaldeDoConsole::novo(inicio);
+        assert_eq!(
+            balde.pendentes_se_couber(inicio),
+            None,
+            "um balde que não segurou nada inventou uma conta ao fim da volta"
+        );
+        assert_eq!(
+            balde.pendentes(),
+            None,
+            "um balde que não segurou nada inventou uma conta no fim"
+        );
+        let passaram = (0..RAJADA_DO_CONSOLE + 3)
+            .filter(|_| balde.admitir(inicio).is_some())
+            .count();
+        assert_eq!(
+            passaram, RAJADA_DO_CONSOLE as usize,
+            "uma volta sem nada a contar gastou ficha, e o MOD perdeu uma linha da rajada para nada"
+        );
+        assert_eq!(
+            balde.pendentes_se_couber(inicio),
+            None,
+            "a conta saiu sem ficha: uma linha a mais por volta passaria do teto de vazão"
+        );
+        let depois =
+            inicio + Duration::from_millis(1000 / u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
+        assert_eq!(
+            balde.pendentes_se_couber(depois),
+            Some(3),
+            "com ficha ao fim da volta, a conta das seguradas não saiu, ou a volta sem ficha a \
+             perdeu"
+        );
+        assert_eq!(
+            balde.admitir(depois),
+            None,
+            "a conta dita ao fim da volta não gastou a ficha, e o teto de vazão deixa de valer"
+        );
+        assert_eq!(
+            balde.pendentes(),
+            Some(1),
+            "no fim da instância, sem ficha, a conta do que ficou para trás não saiu"
+        );
+        assert_eq!(
+            balde.pendentes(),
+            None,
+            "a conta do fim não recomeçou depois de dita, e o registro a somaria duas vezes"
+        );
+    }
+
+    /// Mil linhas de `console` de uma vez, e nada depois delas.
+    const RAJADA_DE_MIL: &str = "for (let i = 0; i < 1000; i++) console.log('linha ' + i);";
+
+    /// O que as linhas de console de um teste dizem, somado.
+    #[derive(Default)]
+    struct Soma {
+        /// As linhas do MOD que passaram.
+        passaram: usize,
+        /// As que o balde segurou e alguma linha contou.
+        contadas: usize,
+        /// O nível da linha de conta do produto ([`CONTA_DO_BALDE`]), quando veio.
+        conta: Option<NivelDoConsole>,
+    }
+
+    impl Soma {
+        /// Soma as linhas de console até a fala que `fim` reconhece, inclusive.
+        ///
+        /// Qualquer outra fala no meio reprova: aqui só se fala pelo `console`.
+        fn ate(&mut self, executor: &ExecutorQuickJs, fim: fn(&ParaOFora) -> bool, porque: &str) {
+            loop {
+                let Some(fala) = executor.receber(Duration::from_secs(5)) else {
+                    panic!("{porque}: nada mais chegou em cinco segundos");
+                };
+                let acabou = fim(&fala);
+                match fala {
+                    ParaOFora::Console {
+                        nivel,
+                        texto,
+                        suprimidas,
+                    } => {
+                        self.contadas += suprimidas as usize;
+                        if texto == CONTA_DO_BALDE {
+                            self.conta = Some(nivel);
+                        } else {
+                            self.passaram += 1;
+                        }
+                    }
+                    outra if !acabou => panic!("veio {outra:?} no meio das linhas de console"),
+                    _ => {}
+                }
+                if acabou {
+                    return;
+                }
+            }
+        }
+
+        /// Confere que nada sumiu sem ser contado, e que quem contou foi o
+        /// produto, em aviso.
+        fn conferir(&self, onde: &str) {
+            let rajada = RAJADA_DO_CONSOLE as usize;
+            assert!(
+                (rajada..=rajada + 2).contains(&self.passaram),
+                "passaram {} linhas de um laço de mil, e a rajada é {rajada}: o balde não segurou \
+                 ({onde})",
+                self.passaram
+            );
+            assert_eq!(
+                self.conta,
+                Some(NivelDoConsole::Aviso),
+                "a conta do que o balde segurou não saiu em aviso ({onde}), e o `seele.log` mostra \
+                 {} linhas como se fossem tudo",
+                self.passaram
+            );
+            assert_eq!(
+                self.passaram + self.contadas,
+                1000,
+                "linhas sumiram sem ser contadas ({onde}): {} passaram e {} foram contadas",
+                self.passaram,
+                self.contadas
+            );
+        }
+    }
+
+    /// **Uma rajada no `console` seguida de silêncio tem a conta dita quando
+    /// a instância para.**
+    ///
+    /// O teste de laço acima só fecha a soma porque uma linha passa depois e
+    /// leva a conta. Sem ela, a conta ficava no balde e caía com o contexto: o
+    /// `seele.log` mostrava 32 linhas, e quem lê concluía que eram 32 itens.
+    #[test]
+    fn uma_rajada_no_console_seguida_de_silencio_tem_a_conta_dita_ao_parar() {
+        let executor = executor();
+        executor.iniciar(RAJADA_DE_MIL).expect("código");
+        // O diagnóstico entra na fila atrás do código: quando ele volta, a volta
+        // do laço acabou, e o encerramento não o interrompe no meio.
+        executor.diagnostico().expect("o executor de pé");
+        let mut soma = Soma::default();
+        soma.ate(
+            &executor,
+            |fala| matches!(fala, ParaOFora::Diagnostico { .. }),
+            "a volta do laço não acabou",
+        );
+        executor.pedir_encerramento();
+        soma.ate(
+            &executor,
+            |fala| matches!(fala, ParaOFora::Parou),
+            "o executor não confirmou a parada",
+        );
+        soma.conferir("rajada e silêncio, até parar");
+    }
+
+    /// **A conta não espera o fim: sai na primeira volta que tiver ficha**,
+    /// seja ela de um temporizador ou de uma resposta.
+    ///
+    /// São os dois fins de volta do laço do motor — o do temporizador termina
+    /// num `continue` —, e cada um tem de dizer a conta. Nenhuma das duas
+    /// voltas escreve nada: quem escreve a linha é o produto.
+    #[test]
+    fn a_conta_das_seguradas_sai_na_primeira_volta_com_ficha() {
+        // A volta de um temporizador, 400 ms depois: uma ficha e meia.
+        let pelo_relogio = executor();
+        pelo_relogio
+            .iniciar(&format!("{RAJADA_DE_MIL} setTimeout(() => {{}}, 400);"))
+            .expect("código");
+        let mut soma = Soma::default();
+        soma.ate(
+            &pelo_relogio,
+            |fala| matches!(fala, ParaOFora::Console { texto, .. } if texto == CONTA_DO_BALDE),
+            "a conta das seguradas não saiu na volta do temporizador, que tinha ficha",
+        );
+        soma.conferir("na volta do temporizador");
+
+        // A volta de uma resposta, depois de a rajada acabar e o balde ter
+        // ficha de novo.
+        let pela_resposta = executor();
+        pela_resposta
+            .iniciar(&format!(
+                "globalThis.aoResponder = () => {{}}; {RAJADA_DE_MIL}"
+            ))
+            .expect("código");
+        pela_resposta.diagnostico().expect("o executor de pé");
+        let mut soma = Soma::default();
+        soma.ate(
+            &pela_resposta,
+            |fala| matches!(fala, ParaOFora::Diagnostico { .. }),
+            "a volta do laço não acabou",
+        );
+        // Numa máquina parada por um quarto de segundo, a conta já pode ter
+        // saído no fim da volta do diagnóstico — que é o mesmo fim de volta que
+        // o de uma resposta.
+        if soma.conta.is_none() {
+            std::thread::sleep(Duration::from_millis(400));
+            pela_resposta.entregar("{}").expect("entregar");
+            soma.ate(
+                &pela_resposta,
+                |fala| matches!(fala, ParaOFora::Console { texto, .. } if texto == CONTA_DO_BALDE),
+                "a conta das seguradas não saiu na volta da resposta, que tinha ficha",
+            );
+        }
+        soma.conferir("na volta da resposta");
     }
 
     /// **A fronteira do QuickJS, medida** — etapa E1.
