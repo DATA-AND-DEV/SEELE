@@ -66,6 +66,15 @@ pub enum ConnectError {
     /// Nothing answered, or the network refused to carry it.
     Unreachable,
     /// TLS refused the certificate for a reason other than the pin.
+    ///
+    /// **E um segundo motivo, que não é recusa de ninguém:** o TLS terminou sem
+    /// decisão do verificador de pin (`decisao_do_aperto`). O certificado não
+    /// foi conferido contra pin nem impressão, e a conexão não segue; o
+    /// `seele.log` diz qual dos dois foi, num `warn!`. A FFI traduz esta
+    /// variante por `Refused { Incompatible }`, e nesse segundo caso a tela
+    /// mostraria a frase de versão incompatível, que manda atualizar o SEELE
+    /// nas duas máquinas: imprecisa ali, e o caminho não é alcançável com o
+    /// `rustls` de hoje, que chama o verificador em todo aperto de mão completo.
     TlsRefused,
     /// The pinned key is not the key offered. ADR 0003.
     PinChanged {
@@ -121,7 +130,9 @@ pub enum ConnectError {
     /// **Recusada dentro do TLS, antes do `Hello`**: o verificador a decide no
     /// aperto de mão (`crate::tofu::PinDecision::InviteRefused`), e o `Hello`
     /// nem chega a sair. O convite ou a senha, o apelido e a chave de
-    /// identidade ficam nesta máquina; sai só o `ClientHello` do próprio TLS. A
+    /// identidade não chegam a quem atendeu com a chave errada; para ele sai só
+    /// o `ClientHello` do próprio TLS. O escopo é esse candidato: numa corrida,
+    /// outro candidato pode ter entregado o `Hello` ao servidor verdadeiro. A
     /// conferência depois do aperto de mão, em `crate::enlace`, continua como
     /// segunda linha.
     InviteMismatch {

@@ -29,9 +29,11 @@
 //! ou guardado na lista de servidores —, o verificador a confere **no primeiro
 //! contato, dentro do aperto de mão**. A chave que não confere falha o TLS e não
 //! é fixada, e o `Hello` não chega a sair: o convite ou a senha, o apelido e a
-//! chave de identidade ficam nesta máquina. O que sai é o `ClientHello` do
-//! próprio TLS, que não leva nada disso. Até a 0.15.0 essa conferência
-//! acontecia depois do `Hello` (o S2b da análise de 22/09). Com pin
+//! chave de identidade não chegam a quem atendeu com a chave errada. O que sai
+//! para ele é o `ClientHello` do próprio TLS, que não leva nada disso. O escopo
+//! é esse candidato, e não a máquina: numa corrida de candidatos, outro deles
+//! pode ter entregado o `Hello` ao servidor verdadeiro. Até a 0.15.0 essa
+//! conferência acontecia depois do `Hello` (o S2b da análise de 22/09). Com pin
 //! estabelecido onde ele prova o servidor (o endereço que a pessoa escolheu,
 //! quando é de escopo público), a regra é a de sempre; num candidato que
 //! ninguém escolheu, ou num alvo de escopo local, o pin não passa por cima da
