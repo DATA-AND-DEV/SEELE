@@ -19,16 +19,16 @@
 //!
 //! # O que este lado lê do ponto de encontro, e o que não lê
 //!
-//! **A batida não lê resposta nenhuma.** O `LEVE` é de mão única: os endereços
-//! que serão tentados vieram do `seele://`, e a impressão digital contra a qual
-//! o servidor é conferido também.
+//! **A batida não lê resposta nenhuma.** O `LEVE` é de mão única, e quem entra
+//! não espera resposta a ele.
 //!
 //! **A consulta ao quarto lê**, e é o único caminho por onde um ponto de
 //! encontro põe um endereço na lista de candidatos ([`onde_mora_hoje`]). Um
-//! ponto hostil, ou quem ocupou a marca no quarto, consegue mandar quem volta
+//! ponto hostil, ou quem ocupou a marca no quarto, consegue mandar quem chega
 //! para o endereço errado. O que impede isso de virar conexão com um impostor é
-//! a impressão digital conferida no aperto de mão, e ela só protege quando
-//! existe: quem volta pela lista precisa levar a impressão guardada (análise de
+//! a impressão digital, conferida dentro do TLS antes de qualquer `Hello`, e ela
+//! só protege quando existe: a esperada vem do link desta sessão ou, na volta
+//! pela lista, da impressão que uma conexão anterior aceitou (análise de
 //! 22/09/2026, §3.1, S3).
 
 use std::net::{IpAddr, SocketAddr};

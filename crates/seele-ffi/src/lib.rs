@@ -7877,12 +7877,13 @@ mod a_consulta_ao_quarto {
 /// # A ordem
 ///
 /// O link desta sessão vence a guardada. Ele é o que a pessoa acabou de colar
-/// para este endereço, e a guardada é o que um link anterior prometeu. Se os
-/// dois discordam, conferir pela velha recusaria o servidor que a pessoa acabou
-/// de pedir. A mesma impressão forma a marca da pergunta ao quarto (o `connect`
-/// do app a usa nas duas coisas), pela mesma razão: perguntar onde mora uma
-/// chave e conferir outra faria o quarto apontar para o servidor que a
-/// conferência recusaria logo em seguida.
+/// para este endereço, e a guardada é a impressão que uma conexão anterior
+/// **aceitou** ([`impressao_a_guardar`]). Se os dois discordam, conferir pela
+/// velha recusaria o servidor que a pessoa acabou de pedir. A mesma impressão
+/// forma a marca da pergunta ao quarto (o `connect` do app a usa nas duas
+/// coisas), pela mesma razão: perguntar onde mora uma chave e conferir outra
+/// faria o quarto apontar para o servidor que a conferência recusaria logo em
+/// seguida.
 #[must_use]
 pub fn impressao_a_conferir(do_link: Option<&str>, guardada: Option<&str>) -> Option<String> {
     do_link.or(guardada).map(str::to_owned)

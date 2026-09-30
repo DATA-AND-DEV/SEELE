@@ -62,9 +62,13 @@
 //! para o endereço errado. Duas coisas contêm isso, e nenhuma delas é
 //! autenticação — este serviço não tem chave nenhuma para conferir:
 //!
-//! 1. **Quem chega confere a impressão digital de qualquer jeito** (ADR 0003).
-//!    Um endereço errado falha no aperto de mão; não vira conexão com o
-//!    impostor. O prejuízo é não entrar, e não entrar no lugar errado.
+//! 1. **Quem chega confere a impressão digital dentro do TLS** (ADR 0003). A
+//!    esperada vem do link ou da lista de conhecidos, e é conferida no aperto
+//!    de mão, antes de qualquer `Hello`: um endereço errado vindo do quarto
+//!    falha ali, e o convite, a senha e o apelido não chegam a quem atendeu com
+//!    a chave errada. O prejuízo é não entrar. Isso vale onde o endereço ainda
+//!    não tem chave fixada; onde tem, a regra do ADR 0003 continua, e a conexão
+//!    fica com a chave fixada, com aviso.
 //! 2. **Quem escreveu primeiro fica**, enquanto o prazo não vencer. O anfitrião
 //!    reavive o dele a cada quinze segundos, então o lugar só está livre quando
 //!    ele está fora do ar — e aí o que se toma é o lugar de quem não está lá.
@@ -88,9 +92,10 @@
 //! na lista de candidatos, na frente dos guardados. Um ponto de encontro
 //! hostil, ou quem ocupou a marca, consegue mandar essa conexão para o
 //! endereço errado. O que ele não escolhe é a impressão digital, que sai do
-//! `seele://` e é conferida no aperto de mão (ADR 0003): um endereço errado
-//! falha ali, e não vira conexão com o impostor. Só que a conferência protege
-//! apenas quando há impressão digital contra a qual conferir.
+//! `seele://` ou da lista de conhecidos e é conferida dentro do TLS, antes de
+//! qualquer `Hello` (ADR 0003): um endereço errado falha ali, e não vira
+//! conexão com o impostor. Só que a conferência protege apenas quando há
+//! impressão digital contra a qual conferir.
 //!
 //! # Amplificação, e por que os pedidos são gordos
 //!

@@ -415,9 +415,10 @@ async fn server_de_teste() -> Option<(SocketAddr, Arc<Daemon>)> {
 
 /// Um ponto de encontro que só conta quantos avisos chegaram.
 ///
-/// Ninguém responde: quem entra **nunca lê resposta do ponto de encontro** — é
-/// a invariante do ADR 0022 —, então um contador é tudo que este lado precisa
-/// para provar que o datagrama saiu.
+/// Ninguém responde: o `LEVE` é de mão única, e quem entra não espera resposta
+/// a ele. Um contador é tudo que este lado precisa para provar que o datagrama
+/// saiu. A resposta que quem entra lê é a do quarto, a um `QUEM`, e não passa
+/// por aqui.
 async fn ponto_que_conta() -> Option<(SocketAddr, Arc<AtomicUsize>)> {
     let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok()?;
     let onde = socket.local_addr().ok()?;
