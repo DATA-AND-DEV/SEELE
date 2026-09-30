@@ -230,25 +230,26 @@ fn sem_despachante(
 }
 
 /// A cobrança de um arquivo de `api/`: `None` se ele não é cobrado, e as
-/// violações de todas as `promessas` se é — vazias quando ele cumpre.
+/// violações das duas `promessas` se é — vazias quando ele cumpre.
 ///
 /// Não é cobrado o arquivo cujo nome não é uma versão ([`versao_do_arquivo`]),
 /// nem a versão abaixo de [`PRIMEIRA_API_COBRADA`].
 ///
 /// Fora do [`run`] para que a ligação dele com [`sem_despachante`] tenha teste:
 /// sem ela, os testes da regra continuariam verdes e o `check-api` aprovaria
-/// uma v6 sem conferir nada. E o `run` conta as cobradas pelo `Some` daqui, e
-/// não por uma conta à parte: o resumo conta as versões pela mesma fronteira
-/// que decide a cobrança.
+/// uma v6 sem conferir nada. E o resumo conta as cobradas pelo `Some` daqui, e
+/// não por uma conta à parte: ele conta as versões pela mesma fronteira que
+/// decide a cobrança.
 ///
 /// O `Some` é só essa decisão sobre a versão, e não diz quais blocos foram
-/// conferidos: com `promessas` vazia, ele sai `Some` sem conferir nada. Quem
-/// garante que a fatia do `run` traz os dois blocos é [`promessas_cobradas`],
-/// com o teste dela.
+/// conferidos. As `promessas` são duas pelo tipo, e uma fatia vazia ou
+/// parcial não compila; que sejam os momentos e os eventos, cada um contra o
+/// próprio despachante, é o que [`promessas_cobradas`] monta, e o teste dela
+/// confere.
 fn cobrar(
     caminho: &std::path::Path,
     descritor: &serde_json::Value,
-    promessas: &[&Promessa<'_>],
+    promessas: &[Promessa<'_>; 2],
 ) -> Option<Vec<Violation>> {
     let versao = versao_do_arquivo(caminho)?;
     if versao < PRIMEIRA_API_COBRADA {
@@ -290,14 +291,48 @@ fn promessa_de_eventos(entregues: &BTreeSet<String>) -> Promessa<'_> {
 /// os momentos contra `momento_de`, e os eventos contra a janela.
 ///
 /// Numa função, e não escrita no `run`, para que um teste confira que as duas
-/// estão aqui, cada uma com o próprio despachante. Uma fatia sem uma delas —
-/// ou vazia — faria o [`cobrar`] dar a versão por cobrada sem conferir aquele
-/// bloco.
+/// estão aqui, cada uma com o próprio despachante. O tipo só garante que são
+/// duas: um par com as duas do mesmo bloco faria o [`cobrar`] dar a versão por
+/// cobrada sem conferir o outro.
 fn promessas_cobradas<'a>(
     momentos: &'a BTreeSet<String>,
     eventos: &'a BTreeSet<String>,
 ) -> [Promessa<'a>; 2] {
     [promessa_de_momentos(momentos), promessa_de_eventos(eventos)]
+}
+
+/// Tudo o que o `check-api` confere num arquivo de `api/`: os nomes que
+/// apontam para o interior ([`evaluate`], contra a `fonte`) e, se a versão é
+/// cobrada, as `promessas` ([`cobrar`]). Devolve as violações das duas
+/// conferências numa lista só, e se o arquivo foi cobrado.
+///
+/// Fora do [`run`] para que a volta das violações tenha teste. Quando o
+/// processamento morava no `run`, cada conferência marcava a reprovação por
+/// conta própria, e apagar a marca da cobrança deixava o `check-api` imprimir
+/// a violação e sair com 0, com os testes, o clippy e o próprio `check-api`
+/// verdes. Aqui as duas voltam na mesma lista, e o `run` decide a saída por
+/// ela, num lugar só.
+fn conferir_arquivo(
+    caminho: &std::path::Path,
+    json: &serde_json::Value,
+    fonte: &str,
+    promessas: &[Promessa<'_>; 2],
+) -> (Vec<Violation>, bool) {
+    let mut mapa: Vec<(&str, &str)> = Vec::new();
+    for bloco in ["reads", "actions", "own", "world"] {
+        if let Some(obj) = json.get(bloco).and_then(serde_json::Value::as_object) {
+            for (nome, interior) in obj {
+                if let Some(interior) = interior.as_str() {
+                    mapa.push((nome.as_str(), interior));
+                }
+            }
+        }
+    }
+    let mut violacoes = evaluate(&mapa, fonte);
+    let cobranca = cobrar(caminho, json, promessas);
+    let cobrada = cobranca.is_some();
+    violacoes.extend(cobranca.unwrap_or_default());
+    (violacoes, cobrada)
 }
 
 /// Reads `api/*.json` and every crate source, and reports orphans.
@@ -375,32 +410,12 @@ pub(crate) fn run() -> ExitCode {
             return ExitCode::FAILURE;
         };
 
-        let mut mapa: Vec<(String, String)> = Vec::new();
-        for bloco in ["reads", "actions", "own", "world"] {
-            if let Some(obj) = json.get(bloco).and_then(serde_json::Value::as_object) {
-                for (nome, interior) in obj {
-                    if let Some(interior) = interior.as_str() {
-                        mapa.push((nome.clone(), interior.to_owned()));
-                    }
-                }
-            }
-        }
-        let emprestado: Vec<(&str, &str)> = mapa
-            .iter()
-            .map(|(nome, interior)| (nome.as_str(), interior.as_str()))
-            .collect();
-        for violacao in evaluate(&emprestado, &fonte) {
+        let (violacoes, cobrada) = conferir_arquivo(&caminho, &json, &fonte, &promessas);
+        cobradas += usize::from(cobrada);
+        for violacao in &violacoes {
             eprintln!("check-api: {} — {violacao}", caminho.display());
-            houve = true;
         }
-
-        if let Some(violacoes) = cobrar(&caminho, &json, &promessas.each_ref()) {
-            cobradas += 1;
-            for violacao in violacoes {
-                eprintln!("check-api: {} — {violacao}", caminho.display());
-                houve = true;
-            }
-        }
+        houve |= !violacoes.is_empty();
     }
 
     if houve {
@@ -665,22 +680,27 @@ fn vizinha(x: u8) -> (&'static str, u8) {
         );
     }
 
-    /// Uma v6 no disco, com um momento que ninguém despacha: o descritor dos
-    /// três testes de [`cobrar`] abaixo, que só mudam o nome do arquivo.
+    /// Uma v6 no disco, com um momento que ninguém despacha e a lista de
+    /// eventos vazia: o descritor dos três testes de [`cobrar`] abaixo, que só
+    /// mudam o nome do arquivo.
     fn descritor_com_um_momento_sem_despachante() -> serde_json::Value {
-        serde_json::json!({ "version": 6, "moments": ["PersonJoined", "ScreenShareStarted"] })
+        serde_json::json!({
+            "version": 6,
+            "moments": ["PersonJoined", "ScreenShareStarted"],
+            "eventos": [],
+        })
     }
 
-    /// A ligação do `run` com a cobrança. Sem ela, os testes de
-    /// [`sem_despachante`] continuam verdes e o `check-api` aprova uma v6 com
-    /// um momento sem despachante — e o resumo ainda conta a v6 como cobrada.
+    /// A ligação de [`cobrar`] com [`sem_despachante`]. Sem ela, os testes da
+    /// regra continuam verdes e a v6 sai dada por cobrada sem que o momento sem
+    /// despachante reprove.
     #[test]
     fn a_api_6_no_disco_e_cobrada() {
         let entregues = momentos_de_fixture();
         let Some(violacoes) = cobrar(
             std::path::Path::new("api/v6.json"),
             &descritor_com_um_momento_sem_despachante(),
-            &[&promessa_de_momentos(&entregues)],
+            &promessas_cobradas(&entregues, &BTreeSet::new()),
         ) else {
             panic!(
                 "`api/v6.json` não foi cobrada: o `check-api` aprovaria a promessa dela sem \
@@ -704,7 +724,7 @@ fn vizinha(x: u8) -> (&'static str, u8) {
         let cobranca = cobrar(
             std::path::Path::new("api/v5.json"),
             &descritor_com_um_momento_sem_despachante(),
-            &[&promessa_de_momentos(&entregues)],
+            &promessas_cobradas(&entregues, &BTreeSet::new()),
         );
         assert!(
             cobranca.is_none(),
@@ -721,13 +741,75 @@ fn vizinha(x: u8) -> (&'static str, u8) {
         let cobranca = cobrar(
             std::path::Path::new("api/rascunho.json"),
             &descritor_com_um_momento_sem_despachante(),
-            &[&promessa_de_momentos(&entregues)],
+            &promessas_cobradas(&entregues, &BTreeSet::new()),
         );
         assert!(
             cobranca.is_none(),
             "`api/rascunho.json` foi cobrado como se fosse uma versão, sem número nenhum no \
              nome: o `check-api` e o guarda de congelamento discordariam sobre o que é uma \
              versão. Veio {cobranca:?}"
+        );
+    }
+
+    /// O arquivo inteiro, como o `run` o confere: uma v6 que promete um evento
+    /// sem despachante volta com a violação e dada por cobrada. É da lista
+    /// devolvida aqui que o `run` tira a reprovação; uma violação que ficasse
+    /// fora dela seria impressa, ou nem isso, e o `check-api` sairia com 0.
+    #[test]
+    fn uma_api_6_que_falha_volta_com_a_violacao_e_cobrada() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let v6 = serde_json::json!({
+            "version": 6,
+            "moments": ["PersonJoined"],
+            "eventos": ["botao", "arrastar"],
+        });
+        let (violacoes, cobrada) = conferir_arquivo(
+            std::path::Path::new("api/v6.json"),
+            &v6,
+            "",
+            &promessas_cobradas(&momentos, &eventos),
+        );
+        assert!(
+            cobrada,
+            "`api/v6.json` não foi dada por cobrada: o resumo do `check-api` contaria uma \
+             versão a menos"
+        );
+        assert!(
+            violacoes.len() == 1 && violacoes.first().is_some_and(|v| v.contains("arrastar")),
+            "a v6 promete `arrastar`, que ninguém despacha, e a violação não voltou ao `run`: \
+             o `check-api` sairia com 0. Vieram {violacoes:?}"
+        );
+    }
+
+    /// A outra metade do arquivo: um nome de uma versão congelada que aponta
+    /// para o que sumiu volta como violação, e a versão não é dada por cobrada.
+    #[test]
+    fn um_nome_orfao_numa_api_congelada_volta_com_a_violacao_e_sem_cobranca() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let v5 = serde_json::json!({
+            "version": 5,
+            "reads": { "pessoa.apelido": "Person::nick" },
+        });
+        let (violacoes, cobrada) = conferir_arquivo(
+            std::path::Path::new("api/v5.json"),
+            &v5,
+            "pub struct Person { pub apelido: String }",
+            &promessas_cobradas(&momentos, &eventos),
+        );
+        assert!(
+            !cobrada,
+            "`api/v5.json` está congelada e foi dada por cobrada: o resumo contaria uma \
+             cobrança que não houve"
+        );
+        assert!(
+            violacoes.len() == 1
+                && violacoes
+                    .first()
+                    .is_some_and(|v| v.contains("pessoa.apelido") && v.contains("Person::nick")),
+            "`pessoa.apelido` aponta para `Person::nick`, que sumiu, e a violação não voltou ao \
+             `run`: o `check-api` sairia com 0. Vieram {violacoes:?}"
         );
     }
 
@@ -885,13 +967,17 @@ const PERFIS = { regiao: { nome: "regiao" } };
         );
     }
 
-    /// A fatia que o `run` passa ao [`cobrar`] traz os dois blocos, cada um
-    /// contra o próprio despachante. Sem a promessa de eventos — ou com a fatia
-    /// vazia —, o `cobrar` daria a v6 por cobrada e aprovaria um evento que
-    /// ninguém entrega; com os conjuntos trocados, reprovaria um que é
+    /// As duas promessas que [`promessas_cobradas`] monta conferem os dois
+    /// blocos, cada um contra o próprio despachante. Com duas promessas do
+    /// mesmo bloco, o [`cobrar`] daria a v6 por cobrada e aprovaria um evento
+    /// que ninguém entrega; com os conjuntos trocados, reprovaria um que é
     /// entregue.
+    ///
+    /// O teste não vê o `run`. Que é este par que ele passa ao
+    /// [`conferir_arquivo`], e não outro, está no código dele: o tipo
+    /// `[Promessa; 2]` só garante que são duas.
     #[test]
-    fn o_run_cobra_os_momentos_e_os_eventos() {
+    fn as_promessas_cobradas_conferem_os_momentos_e_os_eventos() {
         let momentos = momentos_de_fixture();
         let eventos = eventos_despachados(JANELA_DE_FIXTURE);
         let v6 = serde_json::json!({
@@ -902,7 +988,7 @@ const PERFIS = { regiao: { nome: "regiao" } };
         let violacoes = cobrar(
             std::path::Path::new("api/v6.json"),
             &v6,
-            &promessas_cobradas(&momentos, &eventos).each_ref(),
+            &promessas_cobradas(&momentos, &eventos),
         )
         .unwrap_or_default();
         assert_eq!(
@@ -919,8 +1005,8 @@ const PERFIS = { regiao: { nome: "regiao" } };
                 violacoes
                     .iter()
                     .any(|v| v.contains(nome) && v.contains(bloco)),
-                "o `run` não cobra {bloco}: `{nome}`, sem despachante, passou. Vieram \
-                 {violacoes:?}"
+                "as promessas cobradas não conferem {bloco}: `{nome}`, sem despachante, passou. \
+                 Vieram {violacoes:?}"
             );
         }
     }
@@ -940,7 +1026,7 @@ const PERFIS = { regiao: { nome: "regiao" } };
         let violacoes = cobrar(
             std::path::Path::new("api/v6.json"),
             &v6,
-            &promessas_cobradas(&nenhum, &nenhum).each_ref(),
+            &promessas_cobradas(&nenhum, &nenhum),
         )
         .unwrap_or_default();
         for frase in [
