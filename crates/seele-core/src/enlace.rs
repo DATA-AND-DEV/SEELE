@@ -78,37 +78,50 @@ pub struct Destino {
     ///
     /// **Conferida dentro do TLS**, antes do `Hello`: um primeiro contato que
     /// não confere falha o aperto de mão e não leva convite, senha nem apelido
-    /// a quem atendeu (`crate::tofu::TofuVerifier::decide`). No alvo, um
-    /// servidor já fixado passa e é avisado (`Verdict::InviteDisagrees`), que
-    /// é a decisão do ADR 0003 escrita no verificador; fora dele, é recusado
-    /// como o primeiro contato (ver [`Destino::e_o_alvo`]). Vale na entrada e
-    /// na volta da bateria interna.
+    /// a quem atendeu (`crate::tofu::TofuVerifier::decide`). Onde o pino
+    /// prova o servidor, um servidor já fixado passa e é avisado
+    /// (`Verdict::InviteDisagrees`), que é a decisão do ADR 0003 escrita no
+    /// verificador; onde não prova, é recusado como o primeiro contato (ver
+    /// [`Destino::o_pino_prova_o_servidor`]). Vale na entrada e na volta da
+    /// bateria interna.
     pub impressao_esperada: Option<String>,
-    /// Se este destino é o **alvo**: o endereço que a pessoa escolheu — o do
-    /// link, o digitado, ou o da entrada da lista.
+    /// Se o pino deste destino prova o servidor.
     ///
-    /// `false` para todo candidato que entrou na corrida por outro caminho: um
-    /// alternativo do convite ou da lista, ou o endereço que o quarto devolveu.
+    /// O pin é por endereço de candidato, e prova só *este endereço*: este
+    /// `IP:porta` já apresentou esta chave. Ele prova **o servidor**, a
+    /// continuidade que o ADR 0003 protege, num lugar só: no **alvo** (o
+    /// endereço que a pessoa escolheu: o do link, o digitado, ou o da entrada
+    /// da lista) cujo endereço resolvido é de escopo público. Ali um pin que
+    /// confere passa mesmo com a impressão esperada discordando, e o veredito
+    /// avisa (`Verdict::InviteDisagrees`).
     ///
-    /// Existe porque o pin é por endereço de candidato, e prova só *este
-    /// endereço*. No alvo, a continuidade dele é o que o ADR 0003 protege, e um
-    /// pin que confere passa mesmo com a impressão esperada discordando. Num
-    /// candidato que ninguém escolheu, o pin pode ser de outro servidor que
-    /// esta máquina já fixou ali (o quarto apontou para ele, ou um alternativo
-    /// de LAN que é o mesmo de uma casa para outra), e a impressão esperada
-    /// vale mais que ele: a que não confere recusa dentro do TLS, antes do
-    /// `Hello`. Chega ao verificador na entrada e na volta da bateria interna,
-    /// como a impressão esperada.
+    /// `false` nos outros dois casos, e neles a impressão esperada vale mais
+    /// que o pin: a que não confere recusa dentro do TLS, antes do `Hello`, e
+    /// nada é fixado nem desfeito.
     ///
-    /// **O endereço de LAN de um link é o alvo**, e não um alternativo: é o
-    /// primeiro endereço do link quando o anfitrião tem rede de casa
-    /// (`seele_proto::uri`), e é a chave da entrada que o link gera na lista.
-    /// Para quem visita pela internet, ele se repete de uma casa para outra, e
-    /// a colisão nele não é coberta aqui: um pin que confere passa, e o `Hello`
-    /// vai para quem atende ali. O que a FFI faz nesse caso, numa volta sem
-    /// link, é não deixar a lista tomar a chave de quem atendeu
-    /// (`seele_ffi::impressao_a_guardar`).
-    pub e_o_alvo: bool,
+    /// - **Um candidato que ninguém escolheu**: um alternativo do convite ou da
+    ///   lista, ou o endereço que o quarto devolveu. O pin pode ser de outro
+    ///   servidor que esta máquina já fixou ali: o quarto apontou para ele, ou
+    ///   um alternativo de LAN é o mesmo de uma casa para outra.
+    /// - **Um alvo de escopo local**: privado, link-local, CGNAT ou ULA
+    ///   ([`e_privado`]). É o caso comum, e não a borda: o primeiro endereço de
+    ///   um link é o da rede de casa do anfitrião, quando ele tem uma
+    ///   (`seele_proto::uri`), e é a chave da entrada que o link deixa na
+    ///   lista. Para quem visita pela internet, esse endereço se repete de uma
+    ///   casa para outra, e na rede em que a pessoa está outro servidor pode
+    ///   atender nele, já fixado. Ali, um pin que confere com a esperada
+    ///   discordando é colisão, e não link velho: um servidor que trocou de
+    ///   chave dá `Changed`.
+    ///
+    /// O loopback conta como público: é esta máquina em qualquer rede. Um nome
+    /// decide pelo endereço a que resolveu, e não pelo texto: `casa.local` que
+    /// resolve para a rede de casa é de escopo local.
+    ///
+    /// **Quem calcula é a FFI (`seele_ffi`, em `build_destino`), e só ela**: o
+    /// alvo e o endereço resolvido estão ali, e a regra fica num ponto só. Chega
+    /// ao verificador na entrada e na volta da bateria interna, como a
+    /// impressão esperada. É o adendo de 2026-09-29 ao ADR 0003.
+    pub o_pino_prova_o_servidor: bool,
     /// A identidade do conjunto de MODs que esta máquina já aceitou para este
     /// servidor. ADR 0045.
     ///
@@ -1313,9 +1326,10 @@ impl Enlace {
             // caminho para todo candidato da corrida do ADR 0037, porque todos
             // passam por aqui.
             destino.impressao_esperada.as_deref(),
-            // E se este candidato é o endereço que a pessoa escolheu: fora
-            // dele, um pin que confere não passa por cima da impressão.
-            destino.e_o_alvo,
+            // E se o pino deste candidato prova o servidor: onde não prova (fora
+            // do alvo, ou num alvo de escopo local), um pin que confere não
+            // passa por cima da impressão.
+            destino.o_pino_prova_o_servidor,
             &destino.apelido,
             &chave,
             Arc::clone(&deste_aperto) as Arc<dyn PinStore>,
@@ -1331,8 +1345,8 @@ impl Enlace {
                 // (`InviteMismatch`), a chave trocada (`PinChanged`) e qualquer
                 // falha que veio antes de um primeiro contato aceito não
                 // escreveram nada, e um pin que exista agora é de antes deste
-                // aperto (o de um candidato fixado que não é o alvo) ou de um
-                // vizinho.
+                // aperto (o de um candidato fixado cujo pino não prova o
+                // servidor) ou de um vizinho.
                 desfazer_o_pin_deste_aperto(
                     pins.as_ref(),
                     &destino.chave_do_pin,
@@ -2799,9 +2813,9 @@ impl Motor {
                     // a queda e a volta, e sem ela a reconexão fixaria às cegas
                     // quem atendesse. Guardado em `bateria_interna.rs`.
                     self.destino.impressao_esperada.as_deref(),
-                    // A volta é ao endereço que venceu, e ele continua sendo o
-                    // alvo, ou não, como era na entrada.
-                    self.destino.e_o_alvo,
+                    // A volta é ao endereço que venceu, e o pino dele prova o
+                    // servidor, ou não, como na entrada.
+                    self.destino.o_pino_prova_o_servidor,
                     &self.destino.apelido,
                     &self.chave,
                     Arc::clone(&self.pins),
@@ -4717,10 +4731,11 @@ fn conferir(
 /// `PinDecision::Changed`, e **essa** apagaria um pin antigo e legítimo, que é
 /// o oposto do ADR 0003; ela não chega porque o verificador reprova a chave
 /// trocada no TLS e a falha sobe como [`ConnectError::PinChanged`], sem nunca
-/// virar veredito. A recusa de um candidato fixado que não é o alvo
-/// (`PinDecision::InviteRefused` com pin) apagaria do mesmo jeito o pin antigo
-/// daquele endereço. Se algum dia uma dessas duas passar a chegar até aqui,
-/// esta função precisa distinguir de onde veio a recusa antes de apagar nada.
+/// virar veredito. A recusa de um candidato fixado cujo pino não prova o
+/// servidor (`PinDecision::InviteRefused` com pin) apagaria do mesmo jeito o
+/// pin antigo daquele endereço. Se algum dia uma dessas duas passar a chegar
+/// até aqui, esta função precisa distinguir de onde veio a recusa antes de
+/// apagar nada.
 ///
 /// # Segunda linha, desde que a impressão é conferida no TLS
 ///
@@ -4987,12 +5002,13 @@ async fn restabelecer(
 /// perguntas que se fazem com isto aqui (precisa de furo? merece prazo curto?)
 /// têm resposta própria para ele.
 ///
-/// Pública por causa de uma terceira pergunta, que a FFI faz sobre o alvo de
-/// uma entrada da lista de servidores: o pino dele prova o servidor da entrada
-/// (`seele_ffi::impressao_a_guardar`)? Num endereço privado, não: ele é o mesmo
-/// de uma casa para outra, e quem atende nele depende da rede em que a pessoa
-/// está. O loopback fica de fora ali também, e não pesa: o `connect` do app não
-/// põe na lista o endereço que o botão HOSPEDAR escreve.
+/// Pública por causa de uma terceira pergunta, que a FFI faz sobre o endereço
+/// resolvido do alvo ao montar o destino: o pino dele prova o servidor
+/// ([`Destino::o_pino_prova_o_servidor`])? Num endereço privado, não: ele é o
+/// mesmo de uma casa para outra, e quem atende nele depende da rede em que a
+/// pessoa está. O loopback fica de fora ali também, e de propósito: ele é esta
+/// máquina em qualquer rede, e o pino dele prova o servidor como o de um
+/// endereço público.
 ///
 /// # Por que `to_canonical` na entrada
 ///
@@ -5566,7 +5582,7 @@ mod tests {
             apelido: "pessoa".into(),
             segredo: None,
             impressao_esperada: impressao_esperada.map(str::to_owned),
-            e_o_alvo: true,
+            o_pino_prova_o_servidor: true,
             aceito: None,
         }
     }
@@ -5858,7 +5874,7 @@ mod tests {
             "45.33.32.156:41234",
         )
         .expect("bilhete de teste");
-        let destino = |servidor: SocketAddr, e_o_alvo: bool| Destino {
+        let destino = |servidor: SocketAddr, o_pino_prova_o_servidor: bool| Destino {
             servidor,
             nome_tls: "localhost".into(),
             chave_do_pin: servidor.to_string(),
@@ -5869,7 +5885,7 @@ mod tests {
             impressao_esperada: Some(
                 "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
             ),
-            e_o_alvo,
+            o_pino_prova_o_servidor,
             aceito: None,
         };
         let refletido: SocketAddr = "203.0.113.7:8383".parse().expect("endereço");
@@ -6022,7 +6038,7 @@ mod tests {
             apelido: "pessoa".into(),
             segredo: None,
             impressao_esperada: esperada.map(str::to_owned),
-            e_o_alvo: true,
+            o_pino_prova_o_servidor: true,
             aceito: None,
         }
     }
@@ -6933,7 +6949,7 @@ mod tests {
                 apelido: "pessoa".into(),
                 segredo: None,
                 impressao_esperada: None,
-                e_o_alvo: true,
+                o_pino_prova_o_servidor: true,
                 aceito: None,
             },
             chave: SigningKey::from_bytes(&[7; 32]),

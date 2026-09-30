@@ -104,7 +104,7 @@ fn destino(endereco: SocketAddr, apelido: &str, impressao_esperada: Option<&str>
         apelido: apelido.to_owned(),
         segredo: None,
         impressao_esperada: impressao_esperada.map(str::to_owned),
-        e_o_alvo: true,
+        o_pino_prova_o_servidor: true,
         aceito: None,
     }
 }

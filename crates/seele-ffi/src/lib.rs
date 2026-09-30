@@ -3795,15 +3795,24 @@ fn build_destino(
         apelido: config.nickname.clone(),
         segredo: config.join_secret.clone(),
         impressao_esperada: config.expected_fingerprint.clone(),
-        // **O alvo é o candidato cuja chave de pino é a do destino.** A chave
-        // do aceite é a do endereço que a pessoa escolheu (o do link, o
-        // digitado, o da entrada da lista), e `drive` a passa igual a todos os
+        // **O pino deste destino prova o servidor só no alvo, e só num alvo de
+        // escopo público.** A regra mora aqui, e em nenhum outro lugar: ver
+        // `seele_core::enlace::Destino::o_pino_prova_o_servidor`.
+        //
+        // O alvo é o candidato cuja chave de pino é a do destino. A chave do
+        // aceite é a do endereço que a pessoa escolheu (o do link, o digitado,
+        // o da entrada da lista), e `drive` a passa igual a todos os
         // candidatos; a chave de pino é a de cada um. Só o primeiro destino de
         // `drive` tem as duas iguais, e um alternativo que as tenha é o mesmo
-        // `host:porta` escrito de novo. O pin prova *este endereço*, e fora do
-        // alvo ele não passa por cima da impressão esperada: ver
-        // `seele_core::enlace::Destino::e_o_alvo`.
-        e_o_alvo: pin_key == chave_do_aceite,
+        // `host:porta` escrito de novo.
+        //
+        // O escopo é o do endereço **resolvido**, e não o do texto: um nome como
+        // `casa.local` decide pelo endereço a que chegou. Um endereço de escopo
+        // local (privado, link-local, CGNAT, ULA) é o mesmo de uma casa para
+        // outra, e o pin dele prova só quem atende ali na rede em que a pessoa
+        // está. O loopback conta como público: é esta máquina em qualquer rede.
+        o_pino_prova_o_servidor: pin_key == chave_do_aceite
+            && !seele_core::enlace::e_privado(address.ip()),
         // Lido de disco aqui, e não pedido à casca: o `home` é o mesmo caminho
         // de onde saem a identidade e os pins (ADR 0017), e quem sabe persistir
         // é o núcleo. Uma casca que tivesse de carregar o aceite junto seria uma
@@ -5098,38 +5107,229 @@ mod tests {
         assert_eq!(destino.impressao_esperada, None);
     }
 
-    #[test]
-    fn so_o_candidato_com_a_chave_do_destino_e_o_alvo() {
-        // O alvo decide se um pin que confere passa por cima de uma impressão
-        // que não confere (`seele_core::tofu::TofuVerifier::decide`). `drive`
-        // dá a todos os candidatos a chave do destino como chave do aceite, e a
-        // cada um a própria chave de pino: só o endereço que a pessoa escolheu
-        // tem as duas iguais.
-        let (address, name, pin) = resolve("127.0.0.1:8383").expect("resolve");
-        let config = ConnectConfig {
-            server: "127.0.0.1:8383".into(),
-            alternate_servers: vec!["127.0.0.2:9368".into()],
+    /// A configuração de uma conexão por link, com a impressão que ele promete.
+    fn config_com_esperada(alvo: &str) -> ConnectConfig {
+        ConnectConfig {
+            server: alvo.into(),
+            alternate_servers: Vec::new(),
             nickname: "rafael".into(),
             home: "/tmp/does-not-matter".into(),
             join_secret: None,
-            expected_fingerprint: Some("aaaa1111".into()),
+            expected_fingerprint: Some(ESPERADA_DO_LINK.into()),
             bilhete: None,
             audio: false,
             capture_device: None,
             playback_device: None,
-        };
+        }
+    }
+
+    /// O que o link promete nos testes do pino que prova o servidor.
+    const ESPERADA_DO_LINK: &str = "aaaa1111";
+
+    /// O destino que `drive` monta para o alvo: o primeiro, com a chave do
+    /// aceite igual à própria chave de pino.
+    fn destino_do_alvo(alvo: &str) -> seele_core::enlace::Destino {
+        let (address, name, pin) = resolve(alvo).expect("um endereço literal resolve sem rede");
+        build_destino(&config_com_esperada(alvo), address, &name, &pin, &pin)
+    }
+
+    #[test]
+    fn um_alternativo_nao_tem_o_pino_que_prova_o_servidor() {
+        // `drive` dá a todos os candidatos a chave do destino como chave do
+        // aceite, e a cada um a própria chave de pino: só o endereço que a
+        // pessoa escolheu tem as duas iguais. Num alternativo, o pin pode ser de
+        // outro servidor que esta máquina já fixou ali
+        // (`seele_core::tofu::TofuVerifier::decide`). Os dois endereços daqui
+        // são de escopo público, para a diferença ser só a de ser o alvo.
+        let config = config_com_esperada("203.0.113.7:8383");
+        let (address, name, pin) = resolve("203.0.113.7:8383").expect("resolve");
         assert!(
-            build_destino(&config, address, &name, &pin, &pin).e_o_alvo,
-            "o endereço que a pessoa escolheu deixou de ser o alvo: um link velho contra \
+            build_destino(&config, address, &name, &pin, &pin).o_pino_prova_o_servidor,
+            "o alvo público deixou de ter o pino que prova o servidor: um link velho contra \
              um servidor já fixado passaria a ser recusado, contra o ADR 0003"
         );
 
-        let (outro, nome_do_outro, pin_do_outro) = resolve("127.0.0.2:9368").expect("resolve");
+        let (outro, nome_do_outro, pin_do_outro) = resolve("203.0.113.9:9368").expect("resolve");
         assert!(
-            !build_destino(&config, outro, &nome_do_outro, &pin_do_outro, &pin).e_o_alvo,
-            "um alternativo virou alvo: o pin de outro servidor naquele endereço passaria \
-             por cima da impressão esperada, e o `Hello` sairia para ele"
+            !build_destino(&config, outro, &nome_do_outro, &pin_do_outro, &pin)
+                .o_pino_prova_o_servidor,
+            "um alternativo ficou com o pino que prova o servidor: o pin de outro servidor \
+             naquele endereço passaria por cima da impressão esperada, e o `Hello` sairia \
+             para ele"
         );
+    }
+
+    #[test]
+    fn um_alvo_de_escopo_local_nao_tem_o_pino_que_prova_o_servidor() {
+        // O alvo de um link de quem hospeda em casa é o endereço da rede local
+        // do anfitrião (`seele_proto::uri`), e é também a chave da entrada que o
+        // link deixa na lista. Para quem visita pela internet, esse endereço se
+        // repete de uma casa para outra: na rede em que a pessoa está, outro
+        // servidor pode atender nele, já fixado nesta máquina. Ali, um pin que
+        // confere com a esperada discordando é colisão, porque um servidor que
+        // trocou de chave dá `Changed`.
+        for alvo in [
+            "192.168.0.20:8383",
+            "10.0.0.5",
+            "172.16.3.4:9000",
+            "169.254.1.1:8383",
+            "100.64.1.2:8383",
+            "[fd00::5]:8383",
+            "[fe80::1]:8383",
+            "[::ffff:192.168.0.20]:8383",
+        ] {
+            assert!(
+                !destino_do_alvo(alvo).o_pino_prova_o_servidor,
+                "o alvo de escopo local {alvo} ficou com o pino que prova o servidor: o \
+                 servidor que atende nesse endereço na rede desta pessoa passaria pelo pino \
+                 dele, e o `Hello` sairia para ele com o convite, o apelido e a assinatura"
+            );
+        }
+    }
+
+    #[test]
+    fn um_alvo_publico_ou_de_loopback_tem_o_pino_que_prova_o_servidor() {
+        // O guarda de não ir longe demais. Um endereço público é o mesmo em
+        // qualquer rede, e o loopback é esta máquina em qualquer rede: nos dois,
+        // o pin do alvo prova a continuidade do servidor, e vale o ADR 0003.
+        for alvo in [
+            "203.0.113.7:8383",
+            "[2001:db8::7]:8383",
+            "127.0.0.1:8383",
+            "[::1]:8383",
+        ] {
+            assert!(
+                destino_do_alvo(alvo).o_pino_prova_o_servidor,
+                "o alvo {alvo} perdeu o pino que prova o servidor: um link velho contra um \
+                 servidor já fixado ali passaria a ser recusado, contra o ADR 0003"
+            );
+        }
+    }
+
+    #[test]
+    fn um_nome_decide_pelo_endereco_resolvido() {
+        // A decisão é sobre o endereço resolvido, o `SocketAddr` do destino, e
+        // não sobre o texto: `casa.local` que resolve para a rede de casa é um
+        // alvo de escopo local como `192.168.0.20`.
+        let config = config_com_esperada("casa.local:8383");
+        let na_rede_de_casa: SocketAddr = "192.168.0.20:8383".parse().expect("endereço");
+        assert!(
+            !build_destino(
+                &config,
+                na_rede_de_casa,
+                "casa.local",
+                "casa.local:8383",
+                "casa.local:8383"
+            )
+            .o_pino_prova_o_servidor,
+            "um nome que resolve para a rede de casa ficou com o pino que prova o servidor: \
+             o escopo não saiu do endereço resolvido, e o nome passou por público"
+        );
+        let publico: SocketAddr = "203.0.113.7:8383".parse().expect("endereço");
+        assert!(
+            build_destino(
+                &config,
+                publico,
+                "seele.exemplo.org",
+                "seele.exemplo.org:8383",
+                "seele.exemplo.org:8383"
+            )
+            .o_pino_prova_o_servidor,
+            "um nome que resolve para um endereço público perdeu o pino que prova o servidor"
+        );
+    }
+
+    /// O que o verificador decide com o destino que `drive` monta para `alvo`,
+    /// quando esta máquina já fixou naquele endereço a chave de quem atende e o
+    /// link promete outra. Devolve a decisão, a loja e a chave fixada.
+    fn a_volta_ao_alvo_ja_fixado(
+        alvo: &str,
+    ) -> (
+        seele_core::PinDecision,
+        Arc<seele_core::MemoryPinStore>,
+        String,
+    ) {
+        use seele_core::tofu::TofuVerifier;
+        use seele_core::{MemoryPinStore, PinDecision, PinStore};
+
+        const DE_QUEM_ATENDE: &[u8] = b"o certificado de quem atende no alvo";
+        let destino = destino_do_alvo(alvo);
+        let loja = Arc::new(MemoryPinStore::new());
+
+        // A visita de antes, sem link: a chave de quem atende ali fica fixada.
+        let visita = TofuVerifier::new(
+            Arc::clone(&loja) as Arc<dyn PinStore>,
+            destino.chave_do_pin.clone(),
+            None,
+            true,
+        );
+        let PinDecision::FirstContact {
+            fingerprint: fixada,
+        } = visita.decide(&destino.chave_do_pin, DE_QUEM_ATENDE)
+        else {
+            panic!("a visita de antes não fixou a chave de quem atende em {alvo}");
+        };
+
+        let verificador = TofuVerifier::new(
+            Arc::clone(&loja) as Arc<dyn PinStore>,
+            destino.chave_do_pin.clone(),
+            destino.impressao_esperada.clone(),
+            destino.o_pino_prova_o_servidor,
+        );
+        let decisao = verificador.decide(&destino.chave_do_pin, DE_QUEM_ATENDE);
+        (decisao, loja, fixada)
+    }
+
+    #[test]
+    fn num_alvo_de_lan_o_pino_que_confere_nao_passa_por_cima_da_esperada() {
+        // O que a regra de cima compra, visto no verificador. Na rede desta
+        // pessoa, o servidor da casa dela atende no `192.168.0.20:8383` que o
+        // link de um amigo tem como alvo, e esta máquina já o fixou ali. O pin
+        // confere, e a esperada do link é a do amigo: é colisão, e o `Hello` não
+        // pode sair para quem atendeu.
+        use seele_core::{PinDecision, PinStore};
+
+        for alvo in ["192.168.0.20:8383", "[fd00::5]:8383"] {
+            let (decisao, loja, fixada) = a_volta_ao_alvo_ja_fixado(alvo);
+            assert_eq!(
+                decisao,
+                PinDecision::InviteRefused {
+                    expected: ESPERADA_DO_LINK.into(),
+                    offered: fixada.clone(),
+                },
+                "no alvo de LAN {alvo}, o pino de quem atende passou por cima da impressão \
+                 que o link promete: o `Hello` sairia para o servidor da rede desta pessoa \
+                 com o convite, o apelido e a assinatura, e o do amigo ficaria inalcançável \
+                 daqui"
+            );
+            let chave = chave_do_servidor(alvo).expect("chave");
+            assert_eq!(
+                loja.pinned(&chave),
+                Some(fixada),
+                "a recusa no alvo de LAN {alvo} mexeu no pino dali: ele continua sendo a \
+                 prova de quem atende nesse endereço, e a recusa não fixa nem desfaz nada"
+            );
+        }
+    }
+
+    #[test]
+    fn num_alvo_publico_ou_de_loopback_o_pino_que_confere_passa_e_so_avisa() {
+        // A metade que a recusa de cima não pode levar junto (ADR 0003): onde o
+        // pino prova o servidor, quem discorda dele é o link.
+        use seele_core::PinDecision;
+
+        for alvo in ["203.0.113.7:8383", "127.0.0.1:8383"] {
+            let (decisao, _, fixada) = a_volta_ao_alvo_ja_fixado(alvo);
+            assert_eq!(
+                decisao,
+                PinDecision::Matches {
+                    fingerprint: fixada
+                },
+                "o alvo {alvo}, já fixado, passou a ser recusado pela impressão do link: um \
+                 link velho trancaria a pessoa para fora do servidor que ela usa, contra o \
+                 ADR 0003"
+            );
+        }
     }
 
     /// **O aceite acompanha o servidor, e não o caminho até ele.**
@@ -7926,8 +8126,9 @@ mod a_consulta_ao_quarto {
 /// pela 0.15.0: ela guardava a impressão do link daquela vez qualquer que
 /// tivesse sido o veredito, inclusive quando o link discordava do pino e a
 /// conexão ficou com a chave fixada. Um link colado de novo corrige essa entrada,
-/// e a primeira volta pelo alvo já fixado também, quando ele não é um endereço
-/// de LAN ([`impressao_a_guardar`]).
+/// e a primeira volta pelo alvo já fixado também, quando ele é de escopo público
+/// ([`impressao_a_guardar`]). Num alvo de LAN, essa volta é recusada dentro do
+/// TLS, e o remédio é colar o link de novo.
 /// Se o link e a guardada discordam, conferir pela velha recusaria o servidor
 /// que a pessoa acabou de pedir. A mesma impressão forma a marca da pergunta ao
 /// quarto (o `connect` do app a usa nas duas coisas), pela mesma razão:
@@ -7988,8 +8189,7 @@ mod a_volta_pela_trilha_confere {
 /// Recebe as mesmas duas entradas de [`impressao_a_conferir`], o link desta
 /// sessão e a guardada: num [`Trust::Known`], o que vai para a lista é a
 /// impressão que se conferiu, e ela sai de [`impressao_a_conferir`] com as
-/// mesmas duas, na mesma ordem. E recebe o alvo, que é a chave da entrada: ver
-/// «Sem link, o alvo de LAN não grava».
+/// mesmas duas, na mesma ordem.
 ///
 /// # Por que não é a do link
 ///
@@ -8008,85 +8208,50 @@ mod a_volta_pela_trilha_confere {
 ///
 /// - [`Trust::FirstContactVerified`]: a conferida no aperto de mão, pelo link
 ///   desta sessão ou pela guardada;
-/// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada no alvo, com link
-///   nesta sessão ou, sem link, quando o alvo não é um endereço de escopo
-///   local. Sem link, quem discorda do pin é a guardada, e é assim que uma
-///   lista gravada pela 0.15.0 (com a impressão de um link que discordava do
-///   pin) se cura na primeira volta por um alvo público ou por um nome;
+/// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada num alvo de escopo
+///   público, com ou sem link nesta sessão. Sem link, quem discorda do pin é a
+///   guardada, e é assim que uma lista gravada pela 0.15.0 (com a impressão de
+///   um link que discordava do pin) se cura na primeira volta por um alvo
+///   público;
 /// - [`Trust::Known`]: a impressão que se conferiu, venha do link desta sessão
 ///   ou da lista ([`impressao_a_conferir`]), quando há uma, porque é ela
 ///   concordar com o pin que faz o veredito ser `Known`.
 ///
-/// `None` quando não há nada conferido a guardar, ou quando o que se conferiu
-/// não prova o servidor da entrada, e `None` deixa a lista como estava
-/// (`Conhecidos::anotar_caminhos` não apaga a impressão). É o caso de
+/// `None` quando não há nada conferido a guardar, e `None` deixa a lista como
+/// estava (`Conhecidos::anotar_caminhos` não apaga a impressão). É o caso de
 /// [`Trust::Known`] sem impressão conferida; de [`Trust::FirstContact`], em que
-/// a chave foi fixada às cegas e ninguém a prometeu; de
-/// [`Trust::InviteRefused`], que não atravessa; e de
-/// [`Trust::InviteDisagrees`] sem link num alvo de escopo local.
+/// a chave foi fixada às cegas e ninguém a prometeu; e de
+/// [`Trust::InviteRefused`], que não atravessa.
 ///
 /// # A invariante de que isso depende
 ///
-/// **`InviteDisagrees` só vem do alvo — ver `TofuVerifier`**
-/// (`seele_core::tofu::TofuVerifier::decide`). O pin é por endereço de
-/// candidato e prova só aquele endereço. Num candidato que ninguém escolheu (a
-/// resposta do quarto, um caminho da lista), o pin pode ser de outro servidor,
-/// e ali o verificador recusa dentro do TLS a esperada que não confere: o caso
-/// chega como [`ConnectionError::InviteMismatch`], e nunca aqui. Se
-/// `InviteDisagrees` voltasse a nascer fora do alvo, gravar a ofertada poria na
-/// entrada a chave de outro servidor, e a volta seguinte conferiria por ela,
-/// calada.
-///
-/// # Sem link, o alvo de LAN não grava
-///
-/// A invariante não basta, porque o alvo nem sempre é o mesmo endereço em toda
-/// rede. O de um link, e o da entrada que ele gera, é o endereço da rede local
-/// do anfitrião, quando ele tem uma: a rede de casa vem primeiro no link
-/// (`seele_proto::uri`). Para quem visita pela internet, ele é um
-/// `192.168.x.y:8383` que se repete de uma casa para outra. Na rede em que a
-/// pessoa está, outro servidor pode atender
-/// nele, já fixado nesta máquina (por uma visita pelo link dele, ou por ser o
-/// servidor da própria casa). O pin confere, o endereço é o alvo, e o veredito
-/// é `InviteDisagrees` com a chave do outro. Ali vale a regra do ADR 0003, e o
-/// `Hello` vai para quem atendeu: o adendo de 2026-09-29 só vale fora do alvo,
-/// e não cobre essa colisão. Gravar a ofertada entregaria a entrada ao outro
-/// servidor, calada e para sempre: a volta seguinte conferiria por ela de
-/// qualquer rede, a pergunta ao quarto sairia pela marca dele, e o endereço
-/// público do servidor da entrada, fixado com a chave certa, passaria a ser
-/// recusado fora do alvo.
-///
-/// Então, sem link e com um alvo de escopo local (privado, link-local, CGNAT
-/// ou ULA: `seele_core::enlace::e_privado`), a lista fica como estava. O preço
-/// é que uma lista gravada pela 0.15.0 com um alvo desses não se cura sozinha,
-/// e o remédio é colar o link de novo. Um alvo público, ou um nome, é o mesmo
-/// endereço em qualquer rede, e ali a ofertada vai para a lista. A decisão é
-/// sobre o texto, sem resolver nome nenhum, como a de [`chave_do_servidor`].
-///
-/// **Com link nesta sessão, a ofertada vai para a lista em qualquer alvo.** É
-/// a decisão do ADR 0003 (quem discorda do pin é o link), e a faixa de
-/// `InviteDisagrees` avisa quem acabou de colar o link. Num alvo de LAN que
-/// colide, ela erra sobre quem é quem, e a entrada fica com a chave do
-/// servidor que atendeu: é um resíduo que nem o adendo nem esta regra fecham.
+/// **`InviteDisagrees` só vem do alvo, e só num alvo de escopo público — ver
+/// `TofuVerifier`** (`seele_core::tofu::TofuVerifier::decide`). O pin é por
+/// endereço de candidato e prova só aquele endereço. Num alvo de escopo
+/// público, o endereço que a pessoa escolheu e que é o mesmo em qualquer rede,
+/// ele prova a continuidade do servidor da entrada, e a ofertada é a chave
+/// dele. Num candidato que ninguém escolheu (a resposta do quarto, um caminho
+/// da lista) e num alvo de escopo local (um endereço de LAN, que é o mesmo de
+/// uma casa para outra), o pin pode ser de outro servidor, e ali o verificador
+/// recusa dentro do TLS a esperada que não confere: o caso chega como
+/// [`ConnectionError::InviteMismatch`], e nunca aqui. Quem decide onde o pin
+/// prova o servidor é `build_destino`, e só ele
+/// (`seele_core::enlace::Destino::o_pino_prova_o_servidor`). Se
+/// `InviteDisagrees` voltasse a nascer onde o pin não prova o servidor, gravar
+/// a ofertada poria na entrada a chave de outro servidor, e a volta seguinte
+/// conferiria por ela, calada.
 #[must_use]
 pub fn impressao_a_guardar(
     veredito: &Trust,
     do_link: Option<&str>,
     guardada: Option<&str>,
-    alvo: &str,
 ) -> Option<String> {
     match veredito {
         Trust::FirstContactVerified { fingerprint } => Some(fingerprint.clone()),
-        // **A ofertada, e não a esperada.** A conexão ficou de pé com ela, e
-        // ela é a fixada no alvo: ver «A invariante de que isso depende». Sem
-        // link, só num alvo que é o mesmo endereço em qualquer rede: ver «Sem
-        // link, o alvo de LAN não grava».
-        Trust::InviteDisagrees { offered, .. } => {
-            if do_link.is_none() && alvo_de_escopo_local(alvo) {
-                None
-            } else {
-                Some(offered.clone())
-            }
-        }
+        // **A ofertada, e não a esperada, com ou sem link.** A conexão ficou de
+        // pé com ela, e ela é a fixada num alvo de escopo público: ver «A
+        // invariante de que isso depende».
+        Trust::InviteDisagrees { offered, .. } => Some(offered.clone()),
         Trust::Known => impressao_a_conferir(do_link, guardada),
         // Fixada às cegas: guardá-la faria a volta por outro endereço conferir
         // contra uma chave que ninguém prometeu. Fica como na 0.15.0, em que
@@ -8098,31 +8263,12 @@ pub fn impressao_a_guardar(
     }
 }
 
-/// Se o alvo é um endereço de escopo local, cujo texto aponta para outra
-/// máquina em outra rede: privado, link-local, CGNAT ou ULA
-/// (`seele_core::enlace::e_privado`).
-///
-/// Decide sobre o texto, como [`chave_do_servidor`]: um nome, ou um texto que
-/// nem é endereço, não é local.
-fn alvo_de_escopo_local(alvo: &str) -> bool {
-    seele_core::uri::separar(alvo)
-        .ok()
-        .and_then(|separado| separado.maquina.parse::<std::net::IpAddr>().ok())
-        .is_some_and(seele_core::enlace::e_privado)
-}
-
 #[cfg(test)]
 mod a_lista_guarda_a_impressao_aceita {
     use super::{impressao_a_guardar, Trust};
 
     const DO_SERVIDOR: &str = "aaaa1111";
     const DE_OUTRO: &str = "bbbb2222";
-    /// Um alvo que é o mesmo endereço em qualquer rede: o de quem alcança o
-    /// servidor de fora.
-    const ALVO_PUBLICO: &str = "203.0.113.7:8383";
-    /// O alvo de um link de quem hospeda em casa: o endereço da rede local do
-    /// anfitrião (`seele_proto::uri`), que se repete de uma casa para outra.
-    const ALVO_DE_LAN: &str = "192.168.0.20:8383";
 
     #[test]
     fn um_link_que_discorda_do_pin_nao_vai_para_a_lista() {
@@ -8133,7 +8279,7 @@ mod a_lista_guarda_a_impressao_aceita {
             offered: DO_SERVIDOR.into(),
         };
         assert_eq!(
-            impressao_a_guardar(&veredito, Some(DE_OUTRO), None, ALVO_PUBLICO),
+            impressao_a_guardar(&veredito, Some(DE_OUTRO), None),
             Some(DO_SERVIDOR.to_owned()),
             "a lista guardou a impressão do link que discordava do pin: a volta pela \
              lista passa a esperar a chave de outro servidor e recusa o verdadeiro em \
@@ -8142,88 +8288,52 @@ mod a_lista_guarda_a_impressao_aceita {
     }
 
     #[test]
-    fn a_volta_por_um_alvo_fora_da_lan_que_discorda_do_pin_grava_a_ofertada() {
+    fn a_volta_pelo_alvo_que_discorda_do_pin_grava_a_ofertada() {
         // Sem link, quem discorda do pin é a guardada. `InviteDisagrees` só nasce
-        // no alvo (`seele_core::tofu::TofuVerifier::decide`), e num alvo que é o
-        // mesmo endereço em qualquer rede o pin prova a continuidade do servidor
-        // da entrada (ADR 0003): a ofertada é a chave dele. É assim que uma
-        // lista gravada pela 0.15.0, com a impressão de um link que discordava
-        // do pin, se cura na primeira volta pelo alvo. Um nome conta aqui: a
-        // regra decide sobre o texto, sem resolver nome nenhum.
+        // num alvo de escopo público (`seele_core::tofu::TofuVerifier::decide`,
+        // com o pino que `build_destino` diz provar o servidor): ali o pin prova
+        // a continuidade do servidor da entrada (ADR 0003), e a ofertada é a
+        // chave dele. É assim que uma lista gravada pela 0.15.0, com a impressão
+        // de um link que discordava do pin, se cura na primeira volta pelo alvo.
+        // Num alvo de LAN, a mesma volta é recusada dentro do TLS
+        // (`num_alvo_de_lan_o_pino_que_confere_nao_passa_por_cima_da_esperada`).
         let veredito = Trust::InviteDisagrees {
             expected: DE_OUTRO.into(),
             offered: DO_SERVIDOR.into(),
         };
-        for alvo in [ALVO_PUBLICO, "seele.exemplo.org", "[2001:db8::7]:8383"] {
-            assert_eq!(
-                impressao_a_guardar(&veredito, None, Some(DE_OUTRO), alvo),
-                Some(DO_SERVIDOR.to_owned()),
-                "a volta pelo alvo {alvo}, onde o pin prova a chave, deixou na lista a \
-                 impressão que o pin desmente: uma lista envenenada pela 0.15.0 continua \
-                 recusando o servidor verdadeiro em todo endereço sem pin"
-            );
-        }
-    }
-
-    #[test]
-    fn a_volta_por_um_alvo_de_lan_que_discorda_do_pin_deixa_a_lista_como_estava() {
-        // O alvo de um link, e da entrada que ele gera, é o endereço da rede
-        // local do anfitrião. Para quem o visita pela internet, ele é o mesmo
-        // de uma casa para outra: na rede em que a pessoa está, outro servidor
-        // pode atender ali, já fixado nesta máquina. O pin confere, o endereço é
-        // o alvo, e o veredito é `InviteDisagrees` com a chave do outro. Gravar
-        // a ofertada entregava a entrada a ele, calada e para sempre.
-        let veredito = Trust::InviteDisagrees {
-            expected: DO_SERVIDOR.into(),
-            offered: DE_OUTRO.into(),
-        };
-        for alvo in [
-            ALVO_DE_LAN,
-            "10.0.0.5",
-            "172.16.3.4:9000",
-            "169.254.1.1:8383",
-            "100.64.1.2:8383",
-            "[fd00::5]:8383",
-            "[fe80::1]:8383",
-            "[::ffff:192.168.0.20]:8383",
-        ] {
-            assert_eq!(
-                impressao_a_guardar(&veredito, None, Some(DO_SERVIDOR), alvo),
-                None,
-                "sem link, a volta pelo alvo de LAN {alvo} gravou na entrada a chave que o \
-                 pino dali prova: esse endereço é o mesmo de uma casa para outra, e o \
-                 servidor que atende nele na rede desta pessoa toma a entrada, calado e \
-                 para sempre"
-            );
-        }
+        assert_eq!(
+            impressao_a_guardar(&veredito, None, Some(DE_OUTRO)),
+            Some(DO_SERVIDOR.to_owned()),
+            "a volta pelo alvo, onde o pin prova o servidor, deixou na lista a impressão que \
+             o pin desmente: uma lista envenenada pela 0.15.0 continua recusando o servidor \
+             verdadeiro em todo endereço sem pin"
+        );
     }
 
     #[test]
     fn o_que_foi_conferido_vai_para_a_lista() {
-        // Num alvo de LAN, que é o de quase toda entrada: só o `InviteDisagrees`
-        // sem link deixa de gravar ali.
         let conferido = Trust::FirstContactVerified {
             fingerprint: DO_SERVIDOR.into(),
         };
         assert_eq!(
-            impressao_a_guardar(&conferido, Some(DO_SERVIDOR), None, ALVO_DE_LAN),
+            impressao_a_guardar(&conferido, Some(DO_SERVIDOR), None),
             Some(DO_SERVIDOR.to_owned()),
             "o primeiro contato conferido pelo link não foi para a lista"
         );
         // O que o app passa numa volta pela lista: sem link, com a guardada.
         assert_eq!(
-            impressao_a_guardar(&conferido, None, Some(DO_SERVIDOR), ALVO_DE_LAN),
+            impressao_a_guardar(&conferido, None, Some(DO_SERVIDOR)),
             Some(DO_SERVIDOR.to_owned()),
             "o primeiro contato conferido pela guardada, num endereço novo, não foi \
              para a lista"
         );
         assert_eq!(
-            impressao_a_guardar(&Trust::Known, Some(DO_SERVIDOR), None, ALVO_DE_LAN),
+            impressao_a_guardar(&Trust::Known, Some(DO_SERVIDOR), None),
             Some(DO_SERVIDOR.to_owned()),
             "a impressão do link que concorda com o pin não foi para a lista"
         );
         assert_eq!(
-            impressao_a_guardar(&Trust::Known, None, Some(DO_SERVIDOR), ALVO_DE_LAN),
+            impressao_a_guardar(&Trust::Known, None, Some(DO_SERVIDOR)),
             Some(DO_SERVIDOR.to_owned()),
             "a guardada que concorda com o pin, numa volta pela lista, deixou de ser \
              regravada, e a lista fica com uma impressão que ninguém confirmou hoje"
@@ -8233,7 +8343,7 @@ mod a_lista_guarda_a_impressao_aceita {
     #[test]
     fn o_que_ninguem_conferiu_deixa_a_lista_como_estava() {
         assert_eq!(
-            impressao_a_guardar(&Trust::Known, None, None, ALVO_PUBLICO),
+            impressao_a_guardar(&Trust::Known, None, None),
             None,
             "a volta sem impressão conferida inventou uma impressão para a lista"
         );
@@ -8243,8 +8353,7 @@ mod a_lista_guarda_a_impressao_aceita {
                     fingerprint: DO_SERVIDOR.into()
                 },
                 None,
-                None,
-                ALVO_PUBLICO
+                None
             ),
             None,
             "um primeiro contato cego foi para a lista como se tivesse sido \
@@ -8258,8 +8367,7 @@ mod a_lista_guarda_a_impressao_aceita {
                     offered: DO_SERVIDOR.into()
                 },
                 Some(DE_OUTRO),
-                None,
-                ALVO_PUBLICO
+                None
             ),
             None,
             "uma recusa deixou impressão na lista"

@@ -25,11 +25,12 @@
 //! `seele_ffi::impressao_a_guardar`, exercitada aqui com servidores de verdade:
 //! um que fecha e volta noutra porta, e um alvo já fixado cuja primeira volta
 //! pela lista cura a impressão que a 0.15.0 gravou errada. Esse alvo é
-//! `127.0.0.1`, que para a regra não é de escopo local e faz o papel de um
-//! alvo público; num alvo de LAN, sem link, a regra deixa a lista como estava,
-//! e isso se prova nela mesma, sem servidor (nenhum teste tem um endereço
-//! privado garantido). O uso pelo comando, com o link desta sessão, a guardada
-//! e o alvo como entradas, é guardado em
+//! `127.0.0.1`: o loopback é esta máquina em qualquer rede, e ali o pino prova
+//! o servidor como num alvo público (`seele_ffi` monta o destino assim). Num
+//! alvo de LAN o pino não prova o servidor, e a mesma volta é recusada dentro
+//! do TLS; isso se prova no destino que a FFI monta e no verificador, sem
+//! servidor (nenhum teste tem um endereço privado garantido). O uso pelo
+//! comando, com o link desta sessão e a guardada como entradas, é guardado em
 //! `a_lista_guarda_a_impressao_que_a_conexao_aceitou`.
 //!
 //! Os dois últimos testes põem na corrida um candidato de **outro** servidor,
@@ -330,7 +331,7 @@ fn anotar_como_o_app(
     let Ok(mut lista) = Conhecidos::abrir(casa.join("conhecidos")) else {
         panic!("a lista de conhecidos não abriu");
     };
-    let aceita = seele_ffi::impressao_a_guardar(veredito, do_link, guardada, alvo);
+    let aceita = seele_ffi::impressao_a_guardar(veredito, do_link, guardada);
     if lista.registrar(alvo, "pessoa", None).is_err() {
         panic!("a lista de conhecidos não registrou a visita");
     }
@@ -488,10 +489,10 @@ async fn a_primeira_volta_pelo_alvo_cura_a_lista_envenenada() {
     //
     // No alvo o pino prova a chave (ADR 0003): a volta por ele entra com
     // `InviteDisagrees`, e a lista passa a guardar a ofertada. Isso só vale
-    // porque `InviteDisagrees` só nasce no alvo: fora dele o pino não passa
-    // por cima da impressão guardada (os dois últimos testes deste arquivo).
-    // E porque o alvo daqui, `127.0.0.1`, é o mesmo endereço em qualquer rede
-    // para a regra: num alvo de LAN, sem link, ela não grava.
+    // porque `InviteDisagrees` só nasce onde o pino prova o servidor: fora do
+    // alvo ele não passa por cima da impressão guardada (os dois últimos
+    // testes deste arquivo), e num alvo de LAN também não. O alvo daqui,
+    // `127.0.0.1`, é esta máquina em qualquer rede, e conta como público.
     let Some((de_x, x)) = server_de_teste().await else {
         panic!("o servidor X não subiu");
     };

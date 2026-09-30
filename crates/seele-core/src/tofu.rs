@@ -32,9 +32,10 @@
 //! chave de identidade ficam nesta máquina. O que sai é o `ClientHello` do
 //! próprio TLS, que não leva nada disso. Até a 0.15.0 essa conferência
 //! acontecia depois do `Hello` (o S2b da análise de 22/09). Com pin
-//! estabelecido no endereço que a pessoa escolheu, a regra é a de sempre; num
-//! candidato que ninguém escolheu, o pin não passa por cima da impressão
-//! esperada — ver [`TofuVerifier::decide`].
+//! estabelecido onde ele prova o servidor (o endereço que a pessoa escolheu,
+//! quando é de escopo público), a regra é a de sempre; num candidato que
+//! ninguém escolheu, ou num alvo de escopo local, o pin não passa por cima da
+//! impressão esperada — ver [`TofuVerifier::decide`].
 //!
 //! A frase que o TLS leva a quem atendeu quando recusa é uma só para os dois
 //! motivos, a impressão que não confere e a chave fixada que mudou, e não conta
@@ -78,7 +79,8 @@ pub enum PinDecision {
         offered: String,
     },
     /// A chave não é a que a impressão esperada promete, e nenhum pin a
-    /// sustenta: nada estava fixado, ou o candidato não é o alvo.
+    /// sustenta: nada estava fixado, ou o pin daquele endereço não prova o
+    /// servidor.
     ///
     /// **Recusada dentro do TLS, e nada foi fixado nem desfeito.** O aperto de
     /// mão falha aqui, antes de qualquer `Hello`: o convite, a senha e o
@@ -88,9 +90,10 @@ pub enum PinDecision {
     /// recusado — o S2b da análise de 22/09, que a corrida de candidatos do
     /// ADR 0037 repetia em todo candidato que fechasse o TLS.
     ///
-    /// Existe no primeiro contato, e num candidato que a pessoa não escolheu
-    /// mesmo com um pin que confere: ali o pin pode ser de outro servidor. No
-    /// alvo, com pin estabelecido, quem decide é o pin; ver
+    /// Existe no primeiro contato, e mesmo com um pin que confere onde o pin
+    /// não prova o servidor (um candidato que a pessoa não escolheu, ou um
+    /// alvo de escopo local): ali o pin pode ser de outro servidor. Onde ele
+    /// prova o servidor, com pin estabelecido, quem decide é o pin; ver
     /// [`TofuVerifier::decide`].
     InviteRefused {
         /// O que a impressão esperada prometia.
@@ -267,15 +270,16 @@ pub struct TofuVerifier {
     pin_key: String,
     /// A impressão que quem conecta espera, quando espera alguma.
     ///
-    /// Decide o primeiro contato e, fora do alvo, também o candidato já
-    /// fixado — ver [`TofuVerifier::decide`].
+    /// Decide o primeiro contato e, onde o pin não prova o servidor, também o
+    /// candidato já fixado — ver [`TofuVerifier::decide`].
     esperada: Option<String>,
-    /// Se `pin_key` é o **alvo**: o endereço que a pessoa escolheu — o do
-    /// link, o digitado, ou o da entrada da lista.
+    /// Se o pino de `pin_key` prova o servidor: `pin_key` é o alvo (o endereço
+    /// que a pessoa escolheu) e o endereço dele é de escopo público.
     ///
-    /// Só pesa com pin e com esperada. O pin prova *este endereço*, e só no
-    /// alvo este endereço é o que a pessoa pediu — ver [`TofuVerifier::decide`].
-    e_o_alvo: bool,
+    /// Só pesa com pin e com esperada. O pin prova *este endereço*, e só ali
+    /// este endereço é o servidor que a pessoa pediu — ver
+    /// [`TofuVerifier::decide`] e `crate::enlace::Destino::o_pino_prova_o_servidor`.
+    o_pino_prova_o_servidor: bool,
     /// The last decision, so the shell can report what happened.
     ///
     /// É também por onde o motivo de uma recusa chega a quem conectou: o
@@ -309,23 +313,25 @@ impl TofuVerifier {
     /// `Client::connect_por` a repassa do `Destino`; só `Client::connect`, o
     /// caminho público que nunca confere impressão, passa `None`.
     ///
-    /// `e_o_alvo` diz se `pin_key` é o endereço que a pessoa escolheu, e não
-    /// um candidato que entrou na corrida por outro caminho: um alternativo do
-    /// convite ou da lista, ou o endereço que o quarto devolveu. Vem do
-    /// `Destino`, como a esperada; `Client::connect`, que só tem o endereço de
-    /// quem o chamou, passa `true`.
+    /// `o_pino_prova_o_servidor` diz se o pin de `pin_key` prova o servidor:
+    /// `false` num candidato que entrou na corrida por outro caminho que não a
+    /// escolha da pessoa (um alternativo do convite ou da lista, ou o endereço
+    /// que o quarto devolveu) e num alvo de escopo local (um endereço de LAN,
+    /// que é o mesmo de uma casa para outra). Vem do `Destino`, como a
+    /// esperada, e quem o calcula é a FFI; `Client::connect`, que não confere
+    /// impressão nenhuma, passa `true`, e sem esperada ele não pesa.
     #[must_use]
     pub fn new(
         store: Arc<dyn PinStore>,
         pin_key: String,
         esperada: Option<String>,
-        e_o_alvo: bool,
+        o_pino_prova_o_servidor: bool,
     ) -> Self {
         Self {
             store,
             pin_key,
             esperada,
-            e_o_alvo,
+            o_pino_prova_o_servidor,
             last: Mutex::new(None),
             provider: Arc::new(rustls::crypto::ring::default_provider()),
         }
@@ -348,37 +354,42 @@ impl TofuVerifier {
     /// [`PinDecision::InviteRefused`] e não é fixada. É isso que permite ao TLS
     /// recusar antes do `Hello`.
     ///
-    /// Com pin **no alvo**, ela não muda nada aqui. Um servidor já fixado cuja
-    /// chave o link desmente continua `Matches`, e o veredito vira
-    /// [`Verdict::InviteDisagrees`]: a conexão segue e avisa. É a decisão do
-    /// ADR 0003 — o pin é a prova de continuidade, e quem discorda dele é o
-    /// link —, e a tabela de [`verdict`] já a escrevia antes de a impressão
-    /// chegar ao TLS. Recusar ali trancaria alguém para fora de um servidor que
-    /// ele usa porque um amigo mandou um link velho.
+    /// Com pin **onde ele prova o servidor**, ela não muda nada aqui. Um
+    /// servidor já fixado cuja chave o link desmente continua `Matches`, e o
+    /// veredito vira [`Verdict::InviteDisagrees`]: a conexão segue e avisa. É a
+    /// decisão do ADR 0003 — o pin é a prova de continuidade, e quem discorda
+    /// dele é o link —, e a tabela de [`verdict`] já a escrevia antes de a
+    /// impressão chegar ao TLS. Recusar ali trancaria alguém para fora de um
+    /// servidor que ele usa porque um amigo mandou um link velho.
     ///
-    /// # Fora do alvo, o pin não passa por cima dela
+    /// # Onde o pin não prova o servidor, ele não passa por cima dela
     ///
     /// O pin prova *este endereço*: este `IP:porta` já apresentou esta chave.
-    /// No alvo, este endereço é o que a pessoa escolheu. Num candidato que
-    /// ninguém escolheu — um alternativo do convite ou da lista, ou o endereço
-    /// que o quarto devolveu —, o pin só diz que algum servidor já atendeu
-    /// ali, e pode ser outro: o quarto pode apontar para um endereço que esta
-    /// máquina fixou com a chave de quem ocupou a marca, e um alternativo de
-    /// LAN é o mesmo de uma casa para outra. Ali a impressão prometida vale
-    /// mais que o pin: a que não confere vira [`PinDecision::InviteRefused`],
-    /// dentro do TLS e antes do `Hello`, e nada é fixado nem desfeito. Sem
-    /// esperada, o pin decide como sempre. É o adendo de 2026-09-29 ao ADR 0003.
+    /// Ele só prova **o servidor** no alvo (o endereço que a pessoa escolheu)
+    /// cujo endereço é de escopo público, o mesmo em qualquer rede. Nos outros
+    /// dois casos ele só diz que algum servidor já atendeu ali, e pode ser
+    /// outro:
     ///
-    /// **O endereço de LAN de um link é o alvo**, e a colisão nele não é
-    /// coberta aqui. Ele é o primeiro endereço do link quando o anfitrião tem
-    /// rede de casa, e para quem visita pela internet ele se repete de uma casa
-    /// para outra: um servidor da rede em que a pessoa está, já fixado naquele
-    /// `IP:porta`, passa como `Matches`, e o `Hello` vai para ele. Numa volta
-    /// sem link, quem impede que a lista passe a guardar a chave dele é a FFI
-    /// (`seele_ffi::impressao_a_guardar`), e não este verificador.
+    /// - num candidato que ninguém escolheu — um alternativo do convite ou da
+    ///   lista, ou o endereço que o quarto devolveu —, o quarto pode apontar
+    ///   para um endereço que esta máquina fixou com a chave de quem ocupou a
+    ///   marca, e um alternativo de LAN é o mesmo de uma casa para outra;
+    /// - num alvo de escopo local — o endereço da rede de casa do anfitrião,
+    ///   que é o primeiro de um link quando ele tem uma —, um servidor da rede
+    ///   em que a pessoa está pode atender no mesmo `IP:porta`, já fixado. Ali
+    ///   um pin que confere com a esperada discordando é colisão, e não link
+    ///   velho: um servidor que trocou de chave dá `Changed`.
     ///
-    /// Uma chave **trocada** continua `Changed`, recusada com ou sem link, no
-    /// alvo e fora dele.
+    /// Nos dois, a impressão prometida vale mais que o pin: a que não confere
+    /// vira [`PinDecision::InviteRefused`], dentro do TLS e antes do `Hello`, e
+    /// nada é fixado nem desfeito. Sem esperada, o pin decide como sempre. É o
+    /// adendo de 2026-09-29 ao ADR 0003. Este verificador não decide onde o pin
+    /// prova o servidor: recebe a resposta pronta
+    /// (`crate::enlace::Destino::o_pino_prova_o_servidor`), calculada num lugar
+    /// só.
+    ///
+    /// Uma chave **trocada** continua `Changed`, recusada com ou sem link, onde
+    /// o pin prova o servidor e onde não prova.
     ///
     /// A comparação não diferencia maiúsculas de minúsculas, como a de
     /// [`verdict`]: é a mesma função, `confere`, nos dois lugares.
@@ -398,7 +409,7 @@ impl TofuVerifier {
                 }
             }
             Some(pinned) if pinned == offered => {
-                if !self.e_o_alvo {
+                if !self.o_pino_prova_o_servidor {
                     if let Some(expected) = self.desmente(&offered) {
                         return PinDecision::InviteRefused {
                             expected: expected.to_owned(),
@@ -843,10 +854,10 @@ mod tests {
         );
     }
 
-    /// Um verificador com a loja já fixada em `fixada`, no alvo ou fora dele,
-    /// e com a esperada que o teste quiser.
+    /// Um verificador com a loja já fixada em `fixada`, com um pino que prova o
+    /// servidor ou não, e com a esperada que o teste quiser.
     fn candidato_fixado(
-        e_o_alvo: bool,
+        o_pino_prova_o_servidor: bool,
         fixada: &str,
         esperada: Option<&str>,
     ) -> (Arc<MemoryPinStore>, TofuVerifier) {
@@ -856,19 +867,20 @@ mod tests {
             Arc::clone(&loja) as Arc<dyn PinStore>,
             "seele.exemplo".to_owned(),
             esperada.map(str::to_owned),
-            e_o_alvo,
+            o_pino_prova_o_servidor,
         );
         (loja, verificador)
     }
 
     #[test]
-    fn fora_do_alvo_o_pino_que_confere_nao_passa_por_cima_da_esperada() {
-        // O pino é por endereço de candidato, e o candidato nem sempre é o
-        // endereço que a pessoa escolheu: entram na corrida a resposta do quarto
-        // e os alternativos do convite e da lista. Se esta máquina já fixou ali
-        // um servidor Y, o pino confere com a chave de Y, e deixá-lo passar
-        // mandaria o `Hello` (o convite, o apelido e a assinatura) a um servidor
-        // que a impressão prometida desmente.
+    fn onde_o_pino_nao_prova_o_servidor_ele_nao_passa_por_cima_da_esperada() {
+        // O pino é por endereço de candidato, e nem todo endereço é o servidor
+        // que a pessoa pediu: entram na corrida a resposta do quarto e os
+        // alternativos do convite e da lista, e o alvo de LAN é o mesmo de uma
+        // casa para outra. Se esta máquina já fixou ali um servidor Y, o pino
+        // confere com a chave de Y, e deixá-lo passar mandaria o `Hello` (o
+        // convite, o apelido e a assinatura) a um servidor que a impressão
+        // prometida desmente.
         let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
         let (loja, verificador) = candidato_fixado(false, &um, Some(B));
 
@@ -878,37 +890,38 @@ mod tests {
                 expected: B.into(),
                 offered: um.clone()
             },
-            "um candidato que a pessoa não escolheu passou pelo pino de outro servidor, e \
-             o `Hello` sairia para ele com o convite, o apelido e a assinatura"
+            "um endereço cujo pino não prova o servidor passou pelo pino de outro servidor, \
+             e o `Hello` sairia para ele com o convite, o apelido e a assinatura"
         );
         assert_eq!(
             loja.pinned("server.example"),
             Some(um),
-            "a recusa fora do alvo mexeu no pino daquele endereço: ele continua sendo a \
-             prova de quem atendeu ali, e a recusa não fixa nem desfaz nada"
+            "a recusa onde o pino não prova o servidor mexeu no pino daquele endereço: ele \
+             continua sendo a prova de quem atendeu ali, e a recusa não fixa nem desfaz nada"
         );
     }
 
     #[test]
-    fn no_alvo_o_pino_que_confere_continua_passando_e_so_avisa() {
+    fn onde_o_pino_prova_o_servidor_o_que_confere_continua_passando_e_so_avisa() {
         // A metade que a recusa de cima não pode levar junto (ADR 0003). No
-        // endereço que a pessoa escolheu, o pino é a prova de continuidade, e
-        // quem discorda dele é o link.
+        // alvo de escopo público, o pino é a prova de continuidade, e quem
+        // discorda dele é o link.
         let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
         let (_, verificador) = candidato_fixado(true, &um, Some(B));
 
         assert_eq!(
             verificador.decide("server.example", b"certificate-one"),
             PinDecision::Matches { fingerprint: um },
-            "o alvo já fixado passou a ser recusado pela esperada: um link velho trancaria \
-             a pessoa para fora do servidor que ela usa, contra o ADR 0003"
+            "o alvo já fixado, onde o pino prova o servidor, passou a ser recusado pela \
+             esperada: um link velho trancaria a pessoa para fora do servidor que ela usa, \
+             contra o ADR 0003"
         );
     }
 
     #[test]
-    fn fora_do_alvo_o_pino_passa_quando_nada_o_desmente() {
-        // Fora do alvo, quem recusa é a esperada que não confere, e não a falta
-        // dela nem o fato de o candidato não ser o alvo.
+    fn onde_o_pino_nao_prova_o_servidor_ele_passa_quando_nada_o_desmente() {
+        // Onde o pino não prova o servidor, quem recusa é a esperada que não
+        // confere, e não a falta dela nem o próprio fato de o pino não provar.
         let um = seele_proto::transport::certificate_fingerprint(b"certificate-one");
 
         let (_, sem_esperada) = candidato_fixado(false, &um, None);
@@ -917,16 +930,16 @@ mod tests {
             PinDecision::Matches {
                 fingerprint: um.clone()
             },
-            "um candidato fixado, sem impressão a conferir, deixou de ser reconhecido só \
-             por não ser o alvo"
+            "um endereço fixado, sem impressão a conferir, deixou de ser reconhecido só \
+             porque o pino dele não prova o servidor"
         );
 
         let (_, que_confere) = candidato_fixado(false, &um, Some(&um.to_uppercase()));
         assert_eq!(
             que_confere.decide("server.example", b"certificate-one"),
             PinDecision::Matches { fingerprint: um },
-            "um candidato fixado com a chave que a impressão promete foi recusado fora do \
-             alvo: a conferência deixou de ser a mesma `confere` do veredito"
+            "um endereço fixado com a chave que a impressão promete foi recusado onde o pino \
+             não prova o servidor: a conferência deixou de ser a mesma `confere` do veredito"
         );
     }
 

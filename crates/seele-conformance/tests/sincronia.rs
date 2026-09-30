@@ -89,7 +89,7 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
         apelido: apelido.to_owned(),
         segredo: None,
         impressao_esperada: None,
-        e_o_alvo: true,
+        o_pino_prova_o_servidor: true,
         aceito: None,
     }
 }

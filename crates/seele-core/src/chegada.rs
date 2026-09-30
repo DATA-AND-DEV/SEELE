@@ -797,7 +797,7 @@ mod tests {
             apelido: "pessoa".into(),
             segredo: None,
             impressao_esperada: Some("0123456789abcdef0123".into()),
-            e_o_alvo: true,
+            o_pino_prova_o_servidor: true,
             aceito: None,
         }
     }

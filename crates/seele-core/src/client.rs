@@ -112,8 +112,9 @@ pub enum ConnectError {
     ///
     /// Deliberately distinct from [`ConnectError::PinChanged`]: there a known
     /// server's key changed, which is the ADR 0003 alarm. Here no pin vouches
-    /// for this address — nothing was pinned, or it is a candidate nobody
-    /// chose, where a matching pin may be another server's
+    /// for the server — nothing was pinned, or it is a candidate nobody chose
+    /// or a target of local scope (a LAN address, the same from one home to
+    /// the next), where a matching pin may be another server's
     /// ([`crate::tofu::TofuVerifier::decide`]) —, and the party that disagrees
     /// is the link.
     ///
@@ -491,7 +492,8 @@ impl Client {
             // Este caminho não confere impressão nenhuma: quem tem uma entra
             // por `crate::enlace::Enlace`, que a leva até o TLS.
             None,
-            // O único endereço que este caminho conhece é o de quem o chamou.
+            // Sem esperada, se o pino prova o servidor não pesa: o pin decide
+            // como sempre decidiu.
             true,
             nickname,
             signing_key,
@@ -521,9 +523,10 @@ impl Client {
     /// e trocá-la com `join_secret` ou `aceito`, que também são `Option<&str>`,
     /// compilaria calado.
     ///
-    /// `e_o_alvo` diz se `pin_key` é o endereço que a pessoa escolheu, e vai ao
-    /// verificador junto com a esperada: fora do alvo, um pin que confere não
-    /// passa por cima de uma esperada que não confere
+    /// `o_pino_prova_o_servidor` diz se o pin de `pin_key` prova o servidor
+    /// (`crate::enlace::Destino::o_pino_prova_o_servidor`), e vai ao
+    /// verificador junto com a esperada: onde não prova, um pin que confere
+    /// não passa por cima de uma esperada que não confere
     /// ([`crate::tofu::TofuVerifier::new`]). É o único `bool` da lista, e
     /// trocá-lo de lugar com qualquer vizinho não compila.
     ///
@@ -533,8 +536,8 @@ impl Client {
     #[expect(
         clippy::too_many_arguments,
         reason = "três argumentos a mais que o `connect` público — o socket, a \
-                  impressão esperada e se o endereço é o alvo —, que já passava do \
-                  limite"
+                  impressão esperada e se o pino prova o servidor —, que já passava \
+                  do limite"
     )]
     pub(crate) async fn connect_por(
         endpoint: &quinn::Endpoint,
@@ -542,7 +545,7 @@ impl Client {
         server_name: &str,
         pin_key: &str,
         impressao_esperada: Option<&str>,
-        e_o_alvo: bool,
+        o_pino_prova_o_servidor: bool,
         nickname: &str,
         signing_key: &SigningKey,
         pins: Arc<dyn PinStore>,
@@ -555,7 +558,7 @@ impl Client {
             pins,
             pin_key.to_owned(),
             impressao_esperada.map(str::to_owned),
-            e_o_alvo,
+            o_pino_prova_o_servidor,
         ));
         let mut tls = rustls::ClientConfig::builder()
             .dangerous()

@@ -1899,10 +1899,12 @@ pub enum ConnectionError {
     /// The invite named one key and the server offered another.
     ///
     /// ADR 0006, and deliberately not [`ConnectionError::PinChanged`]: nothing was
-    /// ever pinned here, or what was pinned belongs to an address the person did
-    /// not choose (a candidate from the invite, the list or the rendezvous
-    /// room), so the shell's key-change alarm would name the wrong culprit.
-    /// What failed is the link, not the server's continuity.
+    /// ever pinned here, or what was pinned does not vouch for the server — it
+    /// belongs to an address the person did not choose (a candidate from the
+    /// invite, the list or the rendezvous room), or to a target of local scope
+    /// (a LAN address, the same from one home to the next) —, so the shell's
+    /// key-change alarm would name the wrong culprit. What failed is the link,
+    /// not the server's continuity.
     ///
     /// **Recusada dentro do TLS, antes do `Hello`**: o convite, a senha e o
     /// apelido (e, com eles, a chave e a assinatura da identidade) não chegaram

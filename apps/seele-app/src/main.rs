@@ -1292,17 +1292,15 @@ async fn connect(
             //
             // Com o link desta sessão **e** a guardada, na ordem de
             // `impressao_a_conferir`: num `Known`, o que se guarda é a que se
-            // conferiu. E com o alvo, a chave da entrada. Um `InviteDisagrees`
-            // só nasce no alvo, e grava a ofertada com link, ou sem link num
-            // alvo público ou por nome: é assim que uma lista gravada pela
-            // 0.15.0 se cura na primeira volta por ele. Sem link num alvo de
-            // LAN, não grava: esse endereço é o mesmo de uma casa para outra, e
-            // o pino dali pode ser do servidor que atende na rede desta pessoa.
+            // conferiu. Um `InviteDisagrees`, com ou sem link, grava a
+            // ofertada: ele só nasce num alvo de escopo público, onde o pin
+            // prova o servidor, e é assim que uma lista gravada pela 0.15.0 se
+            // cura na primeira volta por ele. Num alvo de LAN, a esperada que
+            // não confere já foi recusada dentro do TLS.
             let impressao_aceita = seele_ffi::impressao_a_guardar(
                 &veredito,
                 esperada.as_deref(),
                 impressao_guardada.as_deref(),
-                &alvo,
             );
             if let Err(erro) = lista.anotar_caminhos(
                 &alvo,

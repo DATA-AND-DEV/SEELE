@@ -105,7 +105,7 @@ fn primeira_chegada(caderno: &Arc<Mutex<Vec<(Instant, SocketAddr)>>>) -> Option<
 }
 
 /// Um candidato do convite, com a impressão digital que o degrau 4 exige.
-fn destino_com_nome(alvo: &str, nome_tls: &str, e_o_alvo: bool) -> Destino {
+fn destino_com_nome(alvo: &str, nome_tls: &str, o_pino_prova_o_servidor: bool) -> Destino {
     let Ok(servidor) = alvo.parse::<SocketAddr>() else {
         panic!("o alvo de teste `{alvo}` não é um endereço");
     };
@@ -118,7 +118,7 @@ fn destino_com_nome(alvo: &str, nome_tls: &str, e_o_alvo: bool) -> Destino {
         apelido: "pessoa".to_owned(),
         segredo: None,
         impressao_esperada: Some(IMPRESSAO.to_owned()),
-        e_o_alvo,
+        o_pino_prova_o_servidor,
         aceito: None,
     }
 }

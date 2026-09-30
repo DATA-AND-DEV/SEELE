@@ -73,7 +73,7 @@ fn destinos_mortos_de_teste() -> Vec<Destino> {
                 apelido: "pessoa".into(),
                 segredo: None,
                 impressao_esperada: None,
-                e_o_alvo: posicao == 0,
+                o_pino_prova_o_servidor: posicao == 0,
                 aceito: None,
             }
         })
