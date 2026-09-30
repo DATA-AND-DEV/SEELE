@@ -1287,11 +1287,12 @@ async fn connect(
             // com ela o servidor verdadeiro seria recusado em todo endereço sem
             // pin. `None` deixa a guardada como estava.
             //
-            // Com o link desta sessão **e** a guardada, e não com a `conferida`
-            // já escolhida: a regra precisa saber de onde ela veio. Numa volta
-            // pela lista, um `InviteDisagrees` pode ser de um candidato que a
-            // pessoa não escolheu (o quarto, um caminho da lista), e a ofertada
-            // não é da entrada: a lista fica como estava.
+            // Com o link desta sessão **e** a guardada, na ordem de
+            // `impressao_a_conferir`: num `Known`, o que se guarda é a que se
+            // conferiu. Um `InviteDisagrees`, com ou sem link, grava a
+            // ofertada: ele só nasce no alvo, onde o pin prova a chave, e é
+            // assim que uma lista gravada pela 0.15.0 se cura na primeira volta
+            // por ele.
             let impressao_aceita = seele_ffi::impressao_a_guardar(
                 &veredito,
                 esperada.as_deref(),

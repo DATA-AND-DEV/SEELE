@@ -22,9 +22,10 @@
 //! (`a_volta_pela_lista_confere_pela_impressao_guardada`).
 //!
 //! O que a lista **guarda** depois de entrar segue a mesma divisão. A regra é
-//! `seele_ffi::impressao_a_guardar`, exercitada aqui com um servidor de verdade
-//! que fecha e volta noutra porta. O uso pelo comando, com o link desta sessão
-//! e a guardada como entradas, é guardado em
+//! `seele_ffi::impressao_a_guardar`, exercitada aqui com servidores de verdade:
+//! um que fecha e volta noutra porta, e um alvo já fixado cuja primeira volta
+//! pela lista cura a impressão que a 0.15.0 gravou errada. O uso pelo comando,
+//! com o link desta sessão e a guardada como entradas, é guardado em
 //! `a_lista_guarda_a_impressao_que_a_conexao_aceitou`.
 //!
 //! Os dois últimos testes põem na corrida um candidato de **outro** servidor,
@@ -470,6 +471,86 @@ async fn um_link_de_outro_servidor_nao_envenena_a_volta_pela_lista() {
 
     connection.disconnect();
     de_novo.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_primeira_volta_pelo_alvo_cura_a_lista_envenenada() {
+    let _vaga = vaga::minha();
+    // A lista que a 0.15.0 deixou: ela gravava a impressão do link qualquer
+    // que fosse o veredito, e um link de outro servidor colado para um
+    // endereço já fixado deixava na entrada a chave do outro. A volta pela
+    // lista confere por ela, e o servidor verdadeiro era recusado em todo
+    // endereço sem pin.
+    //
+    // No alvo o pino prova a chave (ADR 0003): a volta por ele entra com
+    // `InviteDisagrees`, e a lista passa a guardar a ofertada. Isso só vale
+    // porque `InviteDisagrees` só nasce no alvo: fora dele o pino não passa
+    // por cima da impressão guardada (os dois últimos testes deste arquivo).
+    let Some((de_x, x)) = server_de_teste().await else {
+        panic!("o servidor X não subiu");
+    };
+    let Ok(casa) = tempfile::tempdir() else {
+        panic!("sem diretório temporário não há lista nem identidade");
+    };
+    let real = x.fingerprint().to_owned();
+    let alvo = de_x.to_string();
+
+    // O alvo fica fixado com a chave verdadeira de X por uma visita de antes.
+    let (visita, veredito) = match conectar(config_do_link(casa.path(), alvo.clone(), &real)).await
+    {
+        Ok(entrada) => entrada,
+        Err(erro) => panic!("a visita que fixa X não entrou: {erro:?}"),
+    };
+    assert_eq!(
+        veredito,
+        Trust::FirstContactVerified {
+            fingerprint: real.clone()
+        },
+        "a visita que fixa X não conferiu, e o resto do teste perde o assunto"
+    );
+    visita.disconnect();
+
+    // E a lista com a impressão de outro servidor na entrada de X.
+    let Some(guardada) = lembrar_de_ontem(casa.path(), &alvo, &[], None, DE_OUTRO_SERVIDOR) else {
+        panic!("a lista de conhecidos não devolveu a impressão envenenada");
+    };
+
+    // A volta pela lista, sem link: só a guardada, contra o pino do alvo.
+    let configuracao = config(
+        casa.path(),
+        alvo.clone(),
+        Vec::new(),
+        seele_ffi::impressao_a_conferir(None, Some(&guardada)),
+        None,
+    );
+    let (connection, veredito) = match conectar(configuracao).await {
+        Ok(entrada) => entrada,
+        Err(erro) => panic!(
+            "a volta pelo alvo já fixado foi recusada pela impressão envenenada ({erro:?}): \
+             no alvo, o pino decide (ADR 0003)"
+        ),
+    };
+    assert_eq!(
+        veredito,
+        Trust::InviteDisagrees {
+            expected: DE_OUTRO_SERVIDOR.to_owned(),
+            offered: real.clone(),
+        },
+        "a volta pelo alvo não deu `InviteDisagrees` contra a impressão envenenada, e o teste \
+         não mede o que diz medir"
+    );
+    anotar_como_o_app(casa.path(), &alvo, &veredito, None, Some(&guardada));
+    connection.disconnect();
+
+    assert_eq!(
+        impressao_na_lista(casa.path(), &alvo),
+        Some(real),
+        "a primeira volta pelo alvo, onde o pino prova a chave de X, deixou a lista com a \
+         impressão de outro servidor: a lista envenenada pela 0.15.0 não se cura, e o \
+         servidor verdadeiro segue recusado em todo endereço sem pin"
+    );
+
+    x.shutdown();
 }
 
 /// A impressão que a lista de conhecidos guarda para `alvo`, relida do disco.

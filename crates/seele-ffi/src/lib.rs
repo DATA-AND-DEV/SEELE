@@ -7925,7 +7925,8 @@ mod a_consulta_ao_quarto {
 /// anterior **aceitou** ([`impressao_a_guardar`]). Não é assim numa lista gravada
 /// pela 0.15.0: ela guardava a impressão do link daquela vez qualquer que
 /// tivesse sido o veredito, inclusive quando o link discordava do pino e a
-/// conexão ficou com a chave fixada. Um link colado de novo corrige essa entrada.
+/// conexão ficou com a chave fixada. Um link colado de novo corrige essa entrada,
+/// e a primeira volta pelo alvo já fixado também ([`impressao_a_guardar`]).
 /// Se o link e a guardada discordam, conferir pela velha recusaria o servidor
 /// que a pessoa acabou de pedir. A mesma impressão forma a marca da pergunta ao
 /// quarto (o `connect` do app a usa nas duas coisas), pela mesma razão:
@@ -7984,8 +7985,9 @@ mod a_volta_pela_trilha_confere {
 /// A impressão que a lista de servidores guarda depois de uma conexão.
 ///
 /// Recebe as mesmas duas entradas de [`impressao_a_conferir`], o link desta
-/// sessão e a guardada, e não a impressão já escolhida: para decidir o que
-/// guardar é preciso saber **de onde** veio a que se conferiu.
+/// sessão e a guardada: num [`Trust::Known`], o que vai para a lista é a
+/// impressão que se conferiu, e ela sai de [`impressao_a_conferir`] com as
+/// mesmas duas, na mesma ordem.
 ///
 /// # Por que não é a do link
 ///
@@ -8004,8 +8006,10 @@ mod a_volta_pela_trilha_confere {
 ///
 /// - [`Trust::FirstContactVerified`]: a conferida no aperto de mão, pelo link
 ///   desta sessão ou pela guardada;
-/// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada, **quando há link
-///   nesta sessão**. Sem link, nada (ver abaixo);
+/// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada no alvo, com ou
+///   sem link nesta sessão. Sem link, quem discorda do pin é a guardada, e é
+///   assim que uma lista gravada pela 0.15.0 (com a impressão de um link que
+///   discordava do pin) se cura na primeira volta pelo alvo;
 /// - [`Trust::Known`]: a impressão que se conferiu, venha do link desta sessão
 ///   ou da lista ([`impressao_a_conferir`]), quando há uma, porque é ela
 ///   concordar com o pin que faz o veredito ser `Known`.
@@ -8013,30 +8017,22 @@ mod a_volta_pela_trilha_confere {
 /// `None` quando não há nada conferido a guardar, e `None` deixa a lista como
 /// estava (`Conhecidos::anotar_caminhos` não apaga a impressão). É o caso de
 /// [`Trust::Known`] sem impressão conferida; de [`Trust::FirstContact`], em que
-/// a chave foi fixada às cegas e ninguém a prometeu; de
-/// [`Trust::InviteRefused`], que não atravessa; e de [`Trust::InviteDisagrees`]
-/// numa volta pela lista.
+/// a chave foi fixada às cegas e ninguém a prometeu; e de
+/// [`Trust::InviteRefused`], que não atravessa.
 ///
-/// # Por que `InviteDisagrees` sem link não grava
+/// # A invariante de que isso depende
 ///
-/// O pin é por endereço **de candidato**, e o candidato que vence a corrida nem
-/// sempre é o que a pessoa clicou: entram a resposta do quarto e os caminhos
-/// da lista, e um endereço de LAN é o mesmo de uma casa para outra. Com um
-/// servidor Y já fixado num desses endereços, o pin confere, o TLS passa
-/// qualquer que seja a esperada, e o veredito é `InviteDisagrees` com a chave
-/// de Y. Numa volta pela lista quem discorda é a guardada, e a ofertada é a de
-/// um servidor que pode não ser o da entrada: gravá-la faria a próxima volta
-/// conferir por Y, e a tomada seria permanente e sem aviso. A lista fica como
-/// estava.
-///
-/// # O que ainda fica em aberto
-///
-/// Com link, a pessoa acabou de pedir este servidor, e é o caso do ADR 0003 que
-/// o parágrafo «Por que não é a do link» descreve. Mesmo ali o candidato que
-/// venceu pode não ser o endereço da entrada, e a ofertada seria a de outro
-/// servidor. Fechar isso pede saber qual endereço venceu a corrida, e a FFI não
-/// o expõe: a `Connection` não guarda a posição do vencedor, e a trilha da
-/// chegada não a diz (os candidatos começam em paralelo).
+/// **`InviteDisagrees` só vem do alvo — ver `TofuVerifier`**
+/// (`seele_core::tofu::TofuVerifier::decide`). O pin é por endereço de
+/// candidato e prova só aquele endereço. No alvo, o endereço que a pessoa
+/// escolheu, ele prova a continuidade do servidor da entrada, e a ofertada é a
+/// chave dele. Num candidato que ninguém escolheu (a resposta do quarto, um
+/// caminho da lista, um endereço de LAN que é o mesmo de uma casa para outra),
+/// o pin pode ser de outro servidor, e ali o verificador recusa dentro do TLS a
+/// esperada que não confere: o caso chega como
+/// [`ConnectionError::InviteMismatch`], e nunca aqui. Se `InviteDisagrees`
+/// voltasse a nascer fora do alvo, gravar a ofertada poria na entrada a chave
+/// de outro servidor, e a volta seguinte conferiria por ela, calada.
 #[must_use]
 pub fn impressao_a_guardar(
     veredito: &Trust,
@@ -8045,11 +8041,10 @@ pub fn impressao_a_guardar(
 ) -> Option<String> {
     match veredito {
         Trust::FirstContactVerified { fingerprint } => Some(fingerprint.clone()),
-        // **A ofertada, e não a esperada, e só com link.** A conexão ficou de
-        // pé com ela. Sem link a esperada é a guardada, e o candidato pode não
-        // ser o endereço da entrada: ver «Por que `InviteDisagrees` sem link
-        // não grava».
-        Trust::InviteDisagrees { offered, .. } => do_link.map(|_| offered.clone()),
+        // **A ofertada, e não a esperada, com ou sem link.** A conexão ficou de
+        // pé com ela, e ela é a fixada no alvo: ver «A invariante de que isso
+        // depende».
+        Trust::InviteDisagrees { offered, .. } => Some(offered.clone()),
         Trust::Known => impressao_a_conferir(do_link, guardada),
         // Fixada às cegas: guardá-la faria a volta por outro endereço conferir
         // contra uma chave que ninguém prometeu. Fica como na 0.15.0, em que
@@ -8086,21 +8081,23 @@ mod a_lista_guarda_a_impressao_aceita {
     }
 
     #[test]
-    fn a_volta_pela_lista_que_discorda_do_pin_deixa_a_lista_como_estava() {
-        // Sem link, quem discorda do pin é a guardada, e o endereço que venceu
-        // pode ser um candidato que a pessoa não escolheu (a resposta do quarto,
-        // um caminho da lista). A ofertada é a chave de quem estiver fixado ali,
-        // e pode não ser a do servidor da entrada.
+    fn a_volta_pelo_alvo_que_discorda_do_pin_grava_a_ofertada() {
+        // Sem link, quem discorda do pin é a guardada. `InviteDisagrees` só nasce
+        // no alvo (`seele_core::tofu::TofuVerifier::decide`): ali o pin prova a
+        // continuidade do endereço que a pessoa escolheu (ADR 0003), e a
+        // ofertada é a chave dele. É assim que uma lista gravada pela 0.15.0,
+        // com a impressão de um link que discordava do pin, se cura na primeira
+        // volta pelo alvo.
         let veredito = Trust::InviteDisagrees {
-            expected: DO_SERVIDOR.into(),
-            offered: DE_OUTRO.into(),
+            expected: DE_OUTRO.into(),
+            offered: DO_SERVIDOR.into(),
         };
         assert_eq!(
-            impressao_a_guardar(&veredito, None, Some(DO_SERVIDOR)),
-            None,
-            "a volta pela lista que entrou num candidato fixado com outra chave gravou a \
-             chave dele na entrada: a próxima volta confere por ela, e a tomada da entrada \
-             é permanente e calada"
+            impressao_a_guardar(&veredito, None, Some(DE_OUTRO)),
+            Some(DO_SERVIDOR.to_owned()),
+            "a volta pelo alvo, onde o pin prova a chave, deixou na lista a impressão que o \
+             pin desmente: uma lista envenenada pela 0.15.0 continua recusando o servidor \
+             verdadeiro em todo endereço sem pin"
         );
     }
 

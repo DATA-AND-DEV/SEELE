@@ -1554,11 +1554,11 @@ fn a_lista_guarda_a_impressao_que_a_conexao_aceitou() {
     // A regra é `seele_ffi::impressao_a_guardar`, provada lá e, com servidor
     // de verdade, em `crates/seele-conformance/tests/volta_pela_trilha.rs`. O
     // que só se vê aqui é o comando usá-la, e dando-lhe o link desta sessão e a
-    // guardada **separados**, nesta ordem: a regra precisa saber se houve link,
-    // porque só com ele um `InviteDisagrees` grava a ofertada (numa volta pela
-    // lista o candidato vencedor pode não ser o da entrada). Passar a
-    // `conferida` já escolhida apagaria essa diferença. Os espaços saem da
-    // comparação para o guarda não depender de onde o `rustfmt` quebra a linha.
+    // guardada **nesta ordem**, a de `impressao_a_conferir`: num `Known` a
+    // lista guarda a impressão que se conferiu, e com as duas trocadas ela
+    // guardaria a velha quando o link desta sessão e a lista discordam. Os
+    // espaços saem da comparação para o guarda não depender de onde o
+    // `rustfmt` quebra a linha.
     let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
         .chars()
         .filter(|c| !c.is_whitespace())
@@ -1569,9 +1569,8 @@ fn a_lista_guarda_a_impressao_que_a_conexao_aceitou() {
             "letimpressao_aceita=seele_ffi::impressao_a_guardar(&veredito,esperada.as_deref(),impressao_guardada.as_deref()"
         ),
         "`connect` não decide pela regra da FFI o que vai para a lista, ou não lhe dá o \
-         link desta sessão e a guardada separados: sem saber se houve link, a regra grava \
-         a chave de outro servidor na entrada quando uma volta pela lista entra num \
-         candidato fixado com outra chave"
+         link desta sessão e a guardada nesta ordem: num `Known`, a lista guardaria uma \
+         impressão que não é a que se conferiu"
     );
     assert!(
         connect.contains("bilhete_texto.as_deref(),impressao_aceita.as_deref()"),
