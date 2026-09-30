@@ -1556,21 +1556,29 @@ fn a_lista_guarda_a_impressao_que_a_conexao_aceitou() {
     // que só se vê aqui é o comando usá-la, e dando-lhe o link desta sessão e a
     // guardada **nesta ordem**, a de `impressao_a_conferir`: num `Known` a
     // lista guarda a impressão que se conferiu, e com as duas trocadas ela
-    // guardaria a velha quando o link desta sessão e a lista discordam. Os
-    // espaços saem da comparação para o guarda não depender de onde o
-    // `rustfmt` quebra a linha.
+    // guardaria a velha quando o link desta sessão e a lista discordam.
+    //
+    // E o `alvo`, o mesmo com que a entrada é anotada logo abaixo: sem link,
+    // um `InviteDisagrees` num alvo de LAN não grava, porque esse endereço é o
+    // mesmo de uma casa para outra e o pino dali pode ser de outro servidor.
+    // Com outro texto no lugar dele, a regra decidiria sobre o endereço
+    // errado. Os espaços saem da comparação para o guarda não depender de onde
+    // o `rustfmt` quebra a linha, e por isso a chamada pode fechar com ou sem
+    // a vírgula final.
     let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect();
+    let chamada = "letimpressao_aceita=seele_ffi::impressao_a_guardar(&veredito,\
+                   esperada.as_deref(),impressao_guardada.as_deref(),&alvo";
 
     assert!(
-        connect.contains(
-            "letimpressao_aceita=seele_ffi::impressao_a_guardar(&veredito,esperada.as_deref(),impressao_guardada.as_deref()"
-        ),
+        connect.contains(&format!("{chamada})")) || connect.contains(&format!("{chamada},)")),
         "`connect` não decide pela regra da FFI o que vai para a lista, ou não lhe dá o \
-         link desta sessão e a guardada nesta ordem: num `Known`, a lista guardaria uma \
-         impressão que não é a que se conferiu"
+         link desta sessão e a guardada nesta ordem, ou não lhe dá o alvo da entrada: num \
+         `Known`, a lista guardaria uma impressão que não é a que se conferiu, e sem link \
+         o servidor que atende no endereço de LAN da entrada, na rede desta pessoa, a \
+         tomaria"
     );
     assert!(
         connect.contains("bilhete_texto.as_deref(),impressao_aceita.as_deref()"),

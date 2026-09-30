@@ -7926,7 +7926,8 @@ mod a_consulta_ao_quarto {
 /// pela 0.15.0: ela guardava a impressão do link daquela vez qualquer que
 /// tivesse sido o veredito, inclusive quando o link discordava do pino e a
 /// conexão ficou com a chave fixada. Um link colado de novo corrige essa entrada,
-/// e a primeira volta pelo alvo já fixado também ([`impressao_a_guardar`]).
+/// e a primeira volta pelo alvo já fixado também, quando ele não é um endereço
+/// de LAN ([`impressao_a_guardar`]).
 /// Se o link e a guardada discordam, conferir pela velha recusaria o servidor
 /// que a pessoa acabou de pedir. A mesma impressão forma a marca da pergunta ao
 /// quarto (o `connect` do app a usa nas duas coisas), pela mesma razão:
@@ -7987,7 +7988,8 @@ mod a_volta_pela_trilha_confere {
 /// Recebe as mesmas duas entradas de [`impressao_a_conferir`], o link desta
 /// sessão e a guardada: num [`Trust::Known`], o que vai para a lista é a
 /// impressão que se conferiu, e ela sai de [`impressao_a_conferir`] com as
-/// mesmas duas, na mesma ordem.
+/// mesmas duas, na mesma ordem. E recebe o alvo, que é a chave da entrada: ver
+/// «Sem link, o alvo de LAN não grava».
 ///
 /// # Por que não é a do link
 ///
@@ -8006,45 +8008,85 @@ mod a_volta_pela_trilha_confere {
 ///
 /// - [`Trust::FirstContactVerified`]: a conferida no aperto de mão, pelo link
 ///   desta sessão ou pela guardada;
-/// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada no alvo, com ou
-///   sem link nesta sessão. Sem link, quem discorda do pin é a guardada, e é
-///   assim que uma lista gravada pela 0.15.0 (com a impressão de um link que
-///   discordava do pin) se cura na primeira volta pelo alvo;
+/// - [`Trust::InviteDisagrees`]: a ofertada, que é a fixada no alvo, com link
+///   nesta sessão ou, sem link, quando o alvo não é um endereço de escopo
+///   local. Sem link, quem discorda do pin é a guardada, e é assim que uma
+///   lista gravada pela 0.15.0 (com a impressão de um link que discordava do
+///   pin) se cura na primeira volta por um alvo público ou por um nome;
 /// - [`Trust::Known`]: a impressão que se conferiu, venha do link desta sessão
 ///   ou da lista ([`impressao_a_conferir`]), quando há uma, porque é ela
 ///   concordar com o pin que faz o veredito ser `Known`.
 ///
-/// `None` quando não há nada conferido a guardar, e `None` deixa a lista como
-/// estava (`Conhecidos::anotar_caminhos` não apaga a impressão). É o caso de
+/// `None` quando não há nada conferido a guardar, ou quando o que se conferiu
+/// não prova o servidor da entrada, e `None` deixa a lista como estava
+/// (`Conhecidos::anotar_caminhos` não apaga a impressão). É o caso de
 /// [`Trust::Known`] sem impressão conferida; de [`Trust::FirstContact`], em que
-/// a chave foi fixada às cegas e ninguém a prometeu; e de
-/// [`Trust::InviteRefused`], que não atravessa.
+/// a chave foi fixada às cegas e ninguém a prometeu; de
+/// [`Trust::InviteRefused`], que não atravessa; e de
+/// [`Trust::InviteDisagrees`] sem link num alvo de escopo local.
 ///
 /// # A invariante de que isso depende
 ///
 /// **`InviteDisagrees` só vem do alvo — ver `TofuVerifier`**
 /// (`seele_core::tofu::TofuVerifier::decide`). O pin é por endereço de
-/// candidato e prova só aquele endereço. No alvo, o endereço que a pessoa
-/// escolheu, ele prova a continuidade do servidor da entrada, e a ofertada é a
-/// chave dele. Num candidato que ninguém escolheu (a resposta do quarto, um
-/// caminho da lista, um endereço de LAN que é o mesmo de uma casa para outra),
-/// o pin pode ser de outro servidor, e ali o verificador recusa dentro do TLS a
-/// esperada que não confere: o caso chega como
-/// [`ConnectionError::InviteMismatch`], e nunca aqui. Se `InviteDisagrees`
-/// voltasse a nascer fora do alvo, gravar a ofertada poria na entrada a chave
-/// de outro servidor, e a volta seguinte conferiria por ela, calada.
+/// candidato e prova só aquele endereço. Num candidato que ninguém escolheu (a
+/// resposta do quarto, um caminho da lista), o pin pode ser de outro servidor,
+/// e ali o verificador recusa dentro do TLS a esperada que não confere: o caso
+/// chega como [`ConnectionError::InviteMismatch`], e nunca aqui. Se
+/// `InviteDisagrees` voltasse a nascer fora do alvo, gravar a ofertada poria na
+/// entrada a chave de outro servidor, e a volta seguinte conferiria por ela,
+/// calada.
+///
+/// # Sem link, o alvo de LAN não grava
+///
+/// A invariante não basta, porque o alvo nem sempre é o mesmo endereço em toda
+/// rede. O de um link, e o da entrada que ele gera, é o endereço da rede local
+/// do anfitrião, quando ele tem uma: a rede de casa vem primeiro no link
+/// (`seele_proto::uri`). Para quem visita pela internet, ele é um
+/// `192.168.x.y:8383` que se repete de uma casa para outra. Na rede em que a
+/// pessoa está, outro servidor pode atender
+/// nele, já fixado nesta máquina (por uma visita pelo link dele, ou por ser o
+/// servidor da própria casa). O pin confere, o endereço é o alvo, e o veredito
+/// é `InviteDisagrees` com a chave do outro. Ali vale a regra do ADR 0003, e o
+/// `Hello` vai para quem atendeu: o adendo de 2026-09-29 só vale fora do alvo,
+/// e não cobre essa colisão. Gravar a ofertada entregaria a entrada ao outro
+/// servidor, calada e para sempre: a volta seguinte conferiria por ela de
+/// qualquer rede, a pergunta ao quarto sairia pela marca dele, e o endereço
+/// público do servidor da entrada, fixado com a chave certa, passaria a ser
+/// recusado fora do alvo.
+///
+/// Então, sem link e com um alvo de escopo local (privado, link-local, CGNAT
+/// ou ULA: `seele_core::enlace::e_privado`), a lista fica como estava. O preço
+/// é que uma lista gravada pela 0.15.0 com um alvo desses não se cura sozinha,
+/// e o remédio é colar o link de novo. Um alvo público, ou um nome, é o mesmo
+/// endereço em qualquer rede, e ali a ofertada vai para a lista. A decisão é
+/// sobre o texto, sem resolver nome nenhum, como a de [`chave_do_servidor`].
+///
+/// **Com link nesta sessão, a ofertada vai para a lista em qualquer alvo.** É
+/// a decisão do ADR 0003 (quem discorda do pin é o link), e a faixa de
+/// `InviteDisagrees` avisa quem acabou de colar o link. Num alvo de LAN que
+/// colide, ela erra sobre quem é quem, e a entrada fica com a chave do
+/// servidor que atendeu: é um resíduo que nem o adendo nem esta regra fecham.
 #[must_use]
 pub fn impressao_a_guardar(
     veredito: &Trust,
     do_link: Option<&str>,
     guardada: Option<&str>,
+    alvo: &str,
 ) -> Option<String> {
     match veredito {
         Trust::FirstContactVerified { fingerprint } => Some(fingerprint.clone()),
-        // **A ofertada, e não a esperada, com ou sem link.** A conexão ficou de
-        // pé com ela, e ela é a fixada no alvo: ver «A invariante de que isso
-        // depende».
-        Trust::InviteDisagrees { offered, .. } => Some(offered.clone()),
+        // **A ofertada, e não a esperada.** A conexão ficou de pé com ela, e
+        // ela é a fixada no alvo: ver «A invariante de que isso depende». Sem
+        // link, só num alvo que é o mesmo endereço em qualquer rede: ver «Sem
+        // link, o alvo de LAN não grava».
+        Trust::InviteDisagrees { offered, .. } => {
+            if do_link.is_none() && alvo_de_escopo_local(alvo) {
+                None
+            } else {
+                Some(offered.clone())
+            }
+        }
         Trust::Known => impressao_a_conferir(do_link, guardada),
         // Fixada às cegas: guardá-la faria a volta por outro endereço conferir
         // contra uma chave que ninguém prometeu. Fica como na 0.15.0, em que
@@ -8056,12 +8098,31 @@ pub fn impressao_a_guardar(
     }
 }
 
+/// Se o alvo é um endereço de escopo local, cujo texto aponta para outra
+/// máquina em outra rede: privado, link-local, CGNAT ou ULA
+/// (`seele_core::enlace::e_privado`).
+///
+/// Decide sobre o texto, como [`chave_do_servidor`]: um nome, ou um texto que
+/// nem é endereço, não é local.
+fn alvo_de_escopo_local(alvo: &str) -> bool {
+    seele_core::uri::separar(alvo)
+        .ok()
+        .and_then(|separado| separado.maquina.parse::<std::net::IpAddr>().ok())
+        .is_some_and(seele_core::enlace::e_privado)
+}
+
 #[cfg(test)]
 mod a_lista_guarda_a_impressao_aceita {
     use super::{impressao_a_guardar, Trust};
 
     const DO_SERVIDOR: &str = "aaaa1111";
     const DE_OUTRO: &str = "bbbb2222";
+    /// Um alvo que é o mesmo endereço em qualquer rede: o de quem alcança o
+    /// servidor de fora.
+    const ALVO_PUBLICO: &str = "203.0.113.7:8383";
+    /// O alvo de um link de quem hospeda em casa: o endereço da rede local do
+    /// anfitrião (`seele_proto::uri`), que se repete de uma casa para outra.
+    const ALVO_DE_LAN: &str = "192.168.0.20:8383";
 
     #[test]
     fn um_link_que_discorda_do_pin_nao_vai_para_a_lista() {
@@ -8072,7 +8133,7 @@ mod a_lista_guarda_a_impressao_aceita {
             offered: DO_SERVIDOR.into(),
         };
         assert_eq!(
-            impressao_a_guardar(&veredito, Some(DE_OUTRO), None),
+            impressao_a_guardar(&veredito, Some(DE_OUTRO), None, ALVO_PUBLICO),
             Some(DO_SERVIDOR.to_owned()),
             "a lista guardou a impressão do link que discordava do pin: a volta pela \
              lista passa a esperar a chave de outro servidor e recusa o verdadeiro em \
@@ -8081,50 +8142,88 @@ mod a_lista_guarda_a_impressao_aceita {
     }
 
     #[test]
-    fn a_volta_pelo_alvo_que_discorda_do_pin_grava_a_ofertada() {
+    fn a_volta_por_um_alvo_fora_da_lan_que_discorda_do_pin_grava_a_ofertada() {
         // Sem link, quem discorda do pin é a guardada. `InviteDisagrees` só nasce
-        // no alvo (`seele_core::tofu::TofuVerifier::decide`): ali o pin prova a
-        // continuidade do endereço que a pessoa escolheu (ADR 0003), e a
-        // ofertada é a chave dele. É assim que uma lista gravada pela 0.15.0,
-        // com a impressão de um link que discordava do pin, se cura na primeira
-        // volta pelo alvo.
+        // no alvo (`seele_core::tofu::TofuVerifier::decide`), e num alvo que é o
+        // mesmo endereço em qualquer rede o pin prova a continuidade do servidor
+        // da entrada (ADR 0003): a ofertada é a chave dele. É assim que uma
+        // lista gravada pela 0.15.0, com a impressão de um link que discordava
+        // do pin, se cura na primeira volta pelo alvo. Um nome conta aqui: a
+        // regra decide sobre o texto, sem resolver nome nenhum.
         let veredito = Trust::InviteDisagrees {
             expected: DE_OUTRO.into(),
             offered: DO_SERVIDOR.into(),
         };
-        assert_eq!(
-            impressao_a_guardar(&veredito, None, Some(DE_OUTRO)),
-            Some(DO_SERVIDOR.to_owned()),
-            "a volta pelo alvo, onde o pin prova a chave, deixou na lista a impressão que o \
-             pin desmente: uma lista envenenada pela 0.15.0 continua recusando o servidor \
-             verdadeiro em todo endereço sem pin"
-        );
+        for alvo in [ALVO_PUBLICO, "seele.exemplo.org", "[2001:db8::7]:8383"] {
+            assert_eq!(
+                impressao_a_guardar(&veredito, None, Some(DE_OUTRO), alvo),
+                Some(DO_SERVIDOR.to_owned()),
+                "a volta pelo alvo {alvo}, onde o pin prova a chave, deixou na lista a \
+                 impressão que o pin desmente: uma lista envenenada pela 0.15.0 continua \
+                 recusando o servidor verdadeiro em todo endereço sem pin"
+            );
+        }
+    }
+
+    #[test]
+    fn a_volta_por_um_alvo_de_lan_que_discorda_do_pin_deixa_a_lista_como_estava() {
+        // O alvo de um link, e da entrada que ele gera, é o endereço da rede
+        // local do anfitrião. Para quem o visita pela internet, ele é o mesmo
+        // de uma casa para outra: na rede em que a pessoa está, outro servidor
+        // pode atender ali, já fixado nesta máquina. O pin confere, o endereço é
+        // o alvo, e o veredito é `InviteDisagrees` com a chave do outro. Gravar
+        // a ofertada entregava a entrada a ele, calada e para sempre.
+        let veredito = Trust::InviteDisagrees {
+            expected: DO_SERVIDOR.into(),
+            offered: DE_OUTRO.into(),
+        };
+        for alvo in [
+            ALVO_DE_LAN,
+            "10.0.0.5",
+            "172.16.3.4:9000",
+            "169.254.1.1:8383",
+            "100.64.1.2:8383",
+            "[fd00::5]:8383",
+            "[fe80::1]:8383",
+            "[::ffff:192.168.0.20]:8383",
+        ] {
+            assert_eq!(
+                impressao_a_guardar(&veredito, None, Some(DO_SERVIDOR), alvo),
+                None,
+                "sem link, a volta pelo alvo de LAN {alvo} gravou na entrada a chave que o \
+                 pino dali prova: esse endereço é o mesmo de uma casa para outra, e o \
+                 servidor que atende nele na rede desta pessoa toma a entrada, calado e \
+                 para sempre"
+            );
+        }
     }
 
     #[test]
     fn o_que_foi_conferido_vai_para_a_lista() {
+        // Num alvo de LAN, que é o de quase toda entrada: só o `InviteDisagrees`
+        // sem link deixa de gravar ali.
         let conferido = Trust::FirstContactVerified {
             fingerprint: DO_SERVIDOR.into(),
         };
         assert_eq!(
-            impressao_a_guardar(&conferido, Some(DO_SERVIDOR), None),
+            impressao_a_guardar(&conferido, Some(DO_SERVIDOR), None, ALVO_DE_LAN),
             Some(DO_SERVIDOR.to_owned()),
             "o primeiro contato conferido pelo link não foi para a lista"
         );
         // O que o app passa numa volta pela lista: sem link, com a guardada.
         assert_eq!(
-            impressao_a_guardar(&conferido, None, Some(DO_SERVIDOR)),
+            impressao_a_guardar(&conferido, None, Some(DO_SERVIDOR), ALVO_DE_LAN),
             Some(DO_SERVIDOR.to_owned()),
             "o primeiro contato conferido pela guardada, num endereço novo, não foi \
              para a lista"
         );
         assert_eq!(
-            impressao_a_guardar(&Trust::Known, Some(DO_SERVIDOR), None),
+            impressao_a_guardar(&Trust::Known, Some(DO_SERVIDOR), None, ALVO_DE_LAN),
             Some(DO_SERVIDOR.to_owned()),
             "a impressão do link que concorda com o pin não foi para a lista"
         );
         assert_eq!(
-            impressao_a_guardar(&Trust::Known, None, Some(DO_SERVIDOR)),
+            impressao_a_guardar(&Trust::Known, None, Some(DO_SERVIDOR), ALVO_DE_LAN),
             Some(DO_SERVIDOR.to_owned()),
             "a guardada que concorda com o pin, numa volta pela lista, deixou de ser \
              regravada, e a lista fica com uma impressão que ninguém confirmou hoje"
@@ -8134,7 +8233,7 @@ mod a_lista_guarda_a_impressao_aceita {
     #[test]
     fn o_que_ninguem_conferiu_deixa_a_lista_como_estava() {
         assert_eq!(
-            impressao_a_guardar(&Trust::Known, None, None),
+            impressao_a_guardar(&Trust::Known, None, None, ALVO_PUBLICO),
             None,
             "a volta sem impressão conferida inventou uma impressão para a lista"
         );
@@ -8144,7 +8243,8 @@ mod a_lista_guarda_a_impressao_aceita {
                     fingerprint: DO_SERVIDOR.into()
                 },
                 None,
-                None
+                None,
+                ALVO_PUBLICO
             ),
             None,
             "um primeiro contato cego foi para a lista como se tivesse sido \
@@ -8158,7 +8258,8 @@ mod a_lista_guarda_a_impressao_aceita {
                     offered: DO_SERVIDOR.into()
                 },
                 Some(DE_OUTRO),
-                None
+                None,
+                ALVO_PUBLICO
             ),
             None,
             "uma recusa deixou impressão na lista"

@@ -94,11 +94,20 @@ pub struct Destino {
     /// endereço*. No alvo, a continuidade dele é o que o ADR 0003 protege, e um
     /// pin que confere passa mesmo com a impressão esperada discordando. Num
     /// candidato que ninguém escolheu, o pin pode ser de outro servidor que
-    /// esta máquina já fixou ali (o quarto apontou para ele, ou um endereço de
-    /// LAN que é o mesmo de uma casa para outra), e a impressão esperada vale
-    /// mais que ele: a que não confere recusa dentro do TLS, antes do `Hello`.
-    /// Chega ao verificador na entrada e na volta da bateria interna, como a
-    /// impressão esperada.
+    /// esta máquina já fixou ali (o quarto apontou para ele, ou um alternativo
+    /// de LAN que é o mesmo de uma casa para outra), e a impressão esperada
+    /// vale mais que ele: a que não confere recusa dentro do TLS, antes do
+    /// `Hello`. Chega ao verificador na entrada e na volta da bateria interna,
+    /// como a impressão esperada.
+    ///
+    /// **O endereço de LAN de um link é o alvo**, e não um alternativo: é o
+    /// primeiro endereço do link quando o anfitrião tem rede de casa
+    /// (`seele_proto::uri`), e é a chave da entrada que o link gera na lista.
+    /// Para quem visita pela internet, ele se repete de uma casa para outra, e
+    /// a colisão nele não é coberta aqui: um pin que confere passa, e o `Hello`
+    /// vai para quem atende ali. O que a FFI faz nesse caso, numa volta sem
+    /// link, é não deixar a lista tomar a chave de quem atendeu
+    /// (`seele_ffi::impressao_a_guardar`).
     pub e_o_alvo: bool,
     /// A identidade do conjunto de MODs que esta máquina já aceitou para este
     /// servidor. ADR 0045.
@@ -4975,8 +4984,15 @@ async fn restabelecer(
 /// Se este endereço é de uma rede privada — a de casa **ou** a de outra casa.
 ///
 /// Sem loopback de propósito: `127.0.0.1` não é uma rede de ninguém, e as duas
-/// perguntas que se fazem com isto (precisa de furo? merece prazo curto?) têm
-/// resposta própria para ele.
+/// perguntas que se fazem com isto aqui (precisa de furo? merece prazo curto?)
+/// têm resposta própria para ele.
+///
+/// Pública por causa de uma terceira pergunta, que a FFI faz sobre o alvo de
+/// uma entrada da lista de servidores: o pino dele prova o servidor da entrada
+/// (`seele_ffi::impressao_a_guardar`)? Num endereço privado, não: ele é o mesmo
+/// de uma casa para outra, e quem atende nele depende da rede em que a pessoa
+/// está. O loopback fica de fora ali também, e não pesa: o `connect` do app não
+/// põe na lista o endereço que o botão HOSPEDAR escreve.
 ///
 /// # Por que `to_canonical` na entrada
 ///
@@ -4991,7 +5007,8 @@ async fn restabelecer(
 /// O endereço da rede de casa de alguém passava por público, queimava três
 /// furos da janela do anfitrião, vazava metadado que ninguém pediu e ainda
 /// levava o prazo cheio de quatro segundos em vez de um.
-fn e_privado(ip: IpAddr) -> bool {
+#[must_use]
+pub fn e_privado(ip: IpAddr) -> bool {
     match ip.to_canonical() {
         IpAddr::V4(quatro) => quatro.is_private() || quatro.is_link_local() || e_cgnat(quatro),
         IpAddr::V6(seis) => {

@@ -363,11 +363,19 @@ impl TofuVerifier {
     /// ninguém escolheu — um alternativo do convite ou da lista, ou o endereço
     /// que o quarto devolveu —, o pin só diz que algum servidor já atendeu
     /// ali, e pode ser outro: o quarto pode apontar para um endereço que esta
-    /// máquina fixou com a chave de quem ocupou a marca, e um endereço de LAN é
-    /// o mesmo de uma casa para outra. Ali a impressão prometida vale mais que
-    /// o pin: a que não confere vira [`PinDecision::InviteRefused`], dentro do
-    /// TLS e antes do `Hello`, e nada é fixado nem desfeito. Sem esperada, o
-    /// pin decide como sempre. É o adendo de 2026-09-29 ao ADR 0003.
+    /// máquina fixou com a chave de quem ocupou a marca, e um alternativo de
+    /// LAN é o mesmo de uma casa para outra. Ali a impressão prometida vale
+    /// mais que o pin: a que não confere vira [`PinDecision::InviteRefused`],
+    /// dentro do TLS e antes do `Hello`, e nada é fixado nem desfeito. Sem
+    /// esperada, o pin decide como sempre. É o adendo de 2026-09-29 ao ADR 0003.
+    ///
+    /// **O endereço de LAN de um link é o alvo**, e a colisão nele não é
+    /// coberta aqui. Ele é o primeiro endereço do link quando o anfitrião tem
+    /// rede de casa, e para quem visita pela internet ele se repete de uma casa
+    /// para outra: um servidor da rede em que a pessoa está, já fixado naquele
+    /// `IP:porta`, passa como `Matches`, e o `Hello` vai para ele. Numa volta
+    /// sem link, quem impede que a lista passe a guardar a chave dele é a FFI
+    /// (`seele_ffi::impressao_a_guardar`), e não este verificador.
     ///
     /// Uma chave **trocada** continua `Changed`, recusada com ou sem link, no
     /// alvo e fora dele.

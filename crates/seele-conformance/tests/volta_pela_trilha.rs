@@ -24,8 +24,12 @@
 //! O que a lista **guarda** depois de entrar segue a mesma divisão. A regra é
 //! `seele_ffi::impressao_a_guardar`, exercitada aqui com servidores de verdade:
 //! um que fecha e volta noutra porta, e um alvo já fixado cuja primeira volta
-//! pela lista cura a impressão que a 0.15.0 gravou errada. O uso pelo comando,
-//! com o link desta sessão e a guardada como entradas, é guardado em
+//! pela lista cura a impressão que a 0.15.0 gravou errada. Esse alvo é
+//! `127.0.0.1`, que para a regra não é de escopo local e faz o papel de um
+//! alvo público; num alvo de LAN, sem link, a regra deixa a lista como estava,
+//! e isso se prova nela mesma, sem servidor (nenhum teste tem um endereço
+//! privado garantido). O uso pelo comando, com o link desta sessão, a guardada
+//! e o alvo como entradas, é guardado em
 //! `a_lista_guarda_a_impressao_que_a_conexao_aceitou`.
 //!
 //! Os dois últimos testes põem na corrida um candidato de **outro** servidor,
@@ -326,7 +330,7 @@ fn anotar_como_o_app(
     let Ok(mut lista) = Conhecidos::abrir(casa.join("conhecidos")) else {
         panic!("a lista de conhecidos não abriu");
     };
-    let aceita = seele_ffi::impressao_a_guardar(veredito, do_link, guardada);
+    let aceita = seele_ffi::impressao_a_guardar(veredito, do_link, guardada, alvo);
     if lista.registrar(alvo, "pessoa", None).is_err() {
         panic!("a lista de conhecidos não registrou a visita");
     }
@@ -486,6 +490,8 @@ async fn a_primeira_volta_pelo_alvo_cura_a_lista_envenenada() {
     // `InviteDisagrees`, e a lista passa a guardar a ofertada. Isso só vale
     // porque `InviteDisagrees` só nasce no alvo: fora dele o pino não passa
     // por cima da impressão guardada (os dois últimos testes deste arquivo).
+    // E porque o alvo daqui, `127.0.0.1`, é o mesmo endereço em qualquer rede
+    // para a regra: num alvo de LAN, sem link, ela não grava.
     let Some((de_x, x)) = server_de_teste().await else {
         panic!("o servidor X não subiu");
     };
@@ -662,11 +668,11 @@ async fn um_candidato_que_a_pessoa_nao_escolheu_nao_toma_a_entrada_da_lista() {
     let _vaga = vaga::minha();
     // O pino é por endereço de candidato, e o candidato nem sempre é o
     // endereço que a pessoa escolheu: entram na corrida a resposta do quarto e
-    // os caminhos da lista, e um endereço de LAN (`192.168.x.y:8383`) é o mesmo
-    // de uma casa para outra. Se ali houver um servidor Y **já fixado** nesta
-    // máquina, o pino confere com a chave de Y. Deixá-lo passar mandava a Y o
-    // `Hello` (o convite, o apelido e a assinatura) e dava `InviteDisagrees`,
-    // com a chave de Y a um passo da entrada de X na lista.
+    // os caminhos da lista, e um alternativo de LAN (`192.168.x.y:8383`) é o
+    // mesmo de uma casa para outra. Se ali houver um servidor Y **já fixado**
+    // nesta máquina, o pino confere com a chave de Y. Deixá-lo passar mandava a
+    // Y o `Hello` (o convite, o apelido e a assinatura) e dava
+    // `InviteDisagrees`, com a chave de Y a um passo da entrada de X na lista.
     //
     // Fora do alvo, a impressão prometida vale mais que o pino: Y é recusado
     // dentro do TLS, antes do `Hello`. Isso se vê do lado de Y, como em
