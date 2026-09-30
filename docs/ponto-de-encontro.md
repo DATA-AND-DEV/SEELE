@@ -12,8 +12,11 @@ Se você só quer entender por que "não conecta", o documento é o outro:
 Ele diz a quem manda um pacote qual é o endereço de onde aquele pacote veio — ou
 conta isso a um terceiro endereço, quando quem manda pede.
 
-E guarda, em memória e por um minuto, o endereço em que cada anfitrião disse
-morar, para dizê-lo a quem perguntar por ele: é **o quarto**, descrito abaixo.
+E guarda em memória o endereço em que cada anfitrião disse morar, para dizê-lo a
+quem perguntar por ele: é **o quarto**, descrito abaixo. Esse endereço vale 60
+segundos desde o último aviso do anfitrião; vencido, deixa de ser dito a quem
+pergunta, mas não sai da memória na hora: fica lá até o quarto encher, até um
+aviso novo em nome do mesmo anfitrião o substituir, ou até o ponto reiniciar.
 Não há mais nada.
 
 Nenhuma máquina atrás de NAT sabe o próprio endereço público: o roteador
