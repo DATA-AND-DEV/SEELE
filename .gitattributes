@@ -60,6 +60,14 @@ crates/seele-lancador/testes/lista-de-revogacao-de-teste.json  -text
 
 # As versões da API de MODs. `api/congeladas.sha256` guarda o SHA-256 de cada
 # uma, e `a_api_publicada_nao_se_edita` confere contra os bytes da cópia de
-# trabalho: um `\r` a mais seria uma versão publicada «editada» por ninguém. A
-# regra `eol=lf` do topo já bastaria hoje; esta sobrevive a alguém afrouxá-la.
+# trabalho: um `\r` a mais seria uma versão publicada «editada» por ninguém.
+#
+# Esta linha guarda os bytes como foram escritos, inclusive um CRLF vindo do
+# Windows, e é isso que faz o hash que a reprovação dá a quem escreve uma
+# `vN.json` ser o mesmo que o CI vê. Sem ela, a regra do topo normaliza o CRLF
+# para LF no commit, mas a cópia de trabalho de quem escreveu continua com
+# CRLF: a linha da lista sairia do hash do CRLF, e o checkout do CI, com LF,
+# reprovaria nos três sistemas o que passou na máquina dele. O guarda
+# `todo_vetor_cujos_bytes_sao_o_contrato…`, no `apps/seele-app`, exige esta
+# linha.
 api/*.json                                           -text

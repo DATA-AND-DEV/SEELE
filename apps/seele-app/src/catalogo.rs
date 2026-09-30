@@ -873,6 +873,18 @@ mod o_catalogo {
              os scripts, e o orquestrador de release para de ser shell válido"
         );
 
+        // As versões da API de MODs. A regra de cima já as tira do CRLF no
+        // checkout; o que esta linha guarda é o commit de quem as escreve no
+        // Windows (ver o comentário dela no `.gitattributes`).
+        assert!(
+            sem_conversao.contains(&"api/*.json"),
+            "sumiu a linha `api/*.json -text` do `.gitattributes`. Sem ela, uma `api/vN.json` \
+             escrita com CRLF é normalizada para LF no commit, mas a cópia de trabalho de quem \
+             a escreveu continua com CRLF: o hash que `a_api_publicada_nao_se_edita` lhe dá, e \
+             que vai para `api/congeladas.sha256`, não é o que o CI vê — verde na máquina \
+             dele, vermelho nos três sistemas"
+        );
+
         let pastas = [
             "apps/seele-app/testes",
             "apps/seele-app/chaves",
