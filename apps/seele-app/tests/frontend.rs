@@ -496,7 +496,7 @@ fn every_command_the_frontend_calls_is_registered() {
 /// The seven of ADR 0030 were here for exactly one commit, and this is the note
 /// they left: `camada-portaria.js` draws all of them, so the check below said so
 /// by name and they came out. That is the list working the way it is meant to.
-// **A lista está vazia, que é o estado de repouso dela.**
+// **O estado de repouso da lista é estar vazia.**
 //
 // `renomear_voice_room` saiu na 0.9.0: a comp faz do **nome da sala** o botão que
 // renomeia, e o diálogo de nomear existe desde `bbe45b3`. A pilha inteira já
@@ -537,18 +537,29 @@ fn every_command_the_frontend_calls_is_registered() {
 // pergunta que a janela já mostra não tem resposta possível. A pessoa lê o que o
 // servidor exige e não tem o que fazer com a leitura — que é meia funcionalidade
 // entregue como se fosse uma.
-// **A lista voltou a ser vazia em 2026-09-17**, e o estado de repouso dela é
-// este. As cinco entradas que estavam aqui saíram juntas, com as duas telas que
-// faltavam: a camada de aceite (`camada-mods.js`), que é de quem entra, e a
-// seção MODS de CONFIGURAÇÕES, que é de quem hospeda mais a metade que vale
-// para todo mundo — desfazer um sim já dado.
+// **A lista voltou a ser vazia em 2026-09-17.** As cinco entradas que estavam
+// aqui saíram juntas, com as duas telas que faltavam: a camada de aceite
+// (`camada-mods.js`), que é de quem entra, e a seção MODS de CONFIGURAÇÕES, que
+// é de quem hospeda mais a metade que vale para todo mundo — desfazer um sim já
+// dado.
 //
 // `aceite_de_mods` foi a última a sair, e por pouco ela teria ficado com um
 // comentário dizendo que o guarda de baixo a cobrava — o que é falso: estar
 // nesta lista é justamente o que impede aquele guarda de vê-la. Ela ganhou o
 // chamador que faltava, e ele é o aviso que o protótipo desenha: quando esta
 // máquina já disse sim a **outra** lista deste mesmo servidor, a tela diz isso.
-const AGUARDANDO_TELA: &[&str] = &[];
+// **`som_do_mod` entrou em 2026-09-30, com a metade Rust do som de MOD** (fase
+// M1 da especificação da sala pessoal, Parte II, item 5). O comando entrega os
+// bytes crus de um som declarado para a casca tocar por WebAudio, sem abrir
+// `media-src`. Quem o chama é a casca, quando trocar o `<audio src="data:…">`
+// de `montarMidia` por `decodeAudioData` — e ele sai daqui nesse commit, que o
+// guarda de baixo cobra pelo nome.
+//
+// Ele entra antes da medida que a especificação pede primeiro, a do WKWebView,
+// porque o WebView2 já o exige: no Chromium, o motor dele, o `<audio>` de
+// `data:` não toca sob esta CSP. Fica aqui até o Plano 1D, que mede no
+// WKWebView (Task 1) e passa a chamá-lo (Task 8).
+const AGUARDANDO_TELA: &[&str] = &["som_do_mod"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -8067,6 +8078,47 @@ fn the_content_security_policy_did_not_move_to_make_room_for_a_picture() {
             "`blob:` entrou em `{diretiva}`, e fora de `worker-src` ele é um \
              caminho para conteúdo que ninguém conferiu: {csp}"
         );
+    }
+}
+
+/// **O som de MOD não abre a CSP para mídia de `data:` nem de `blob:`.**
+///
+/// A CSP desta janela não tem `media-src`: ela cai em `default-src 'self'`, e
+/// um `<audio src="data:…">` cai junto — medido no Chromium, o motor do
+/// WebView2; a medida no WKWebView é a Task 1 do Plano 1D. O conserto é tocar
+/// os bytes por WebAudio, sobre o que `som_do_mod` entrega, e isso não passa
+/// por `media-src`.
+///
+/// A saída fácil seria escrever `media-src 'self' data:`, e é ela que este
+/// guarda recusa: um `data:` em mídia é um caminho para bytes que o `sniff` do
+/// Rust não viu virarem som na máquina de quem conversa.
+#[test]
+fn o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob() {
+    let config = read("tauri.conf.json");
+    let Some(at) = config.find("\"csp\"") else {
+        panic!("a janela saiu sem política de conteúdo");
+    };
+    let resto = &config[at..];
+    let Some(abre) = resto.find(": \"") else {
+        panic!("a entrada csp não tem valor");
+    };
+    let valor = &resto[abre + 3..];
+    let Some(fim) = valor.find('"') else {
+        panic!("o valor da csp não termina");
+    };
+    let csp = &valor[..fim];
+    for diretiva in csp.split(';').map(str::trim) {
+        if !(diretiva.starts_with("media-src") || diretiva.starts_with("default-src")) {
+            continue;
+        }
+        for aberto in ["data:", "blob:", "*"] {
+            assert!(
+                !diretiva.contains(aberto),
+                "`{diretiva}` deixa um `<audio>` tocar bytes que o `sniff` do Rust não viu. \
+                 O som de MOD toca por WebAudio, sobre os bytes de `som_do_mod` — afrouxar a \
+                 CSP é a saída que este guarda recusa: {csp}"
+            );
+        }
     }
 }
 

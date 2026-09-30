@@ -2270,6 +2270,33 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
 /// teto de uma não pode divergir do da outra por esquecimento.
 const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
 
+/// **O maior id de MOD que uma linha do `seele.log` leva**, em caracteres.
+///
+/// Um id de verdade (`autor/nome`) é bem menor; o teto é para o que chega pela
+/// ponte sem ter passado por um manifesto. Nomeado porque duas portas escrevem
+/// `mod_id=`, e o número estava escrito à mão nas duas: ver
+/// [`id_no_registro`].
+const TETO_DO_ID_NO_REGISTRO: usize = 128;
+
+/// **O id de um MOD como uma linha do `seele.log` o leva**: cortado em
+/// [`TETO_DO_ID_NO_REGISTRO`] e sem caractere de controle.
+///
+/// Uma função só para as duas portas que escrevem `mod_id=` — a janela
+/// ([`registrar_da_janela`]) e a recusa de mídia do Rust
+/// ([`recusa_de_midia_dita`]). É por esse campo que uma busca só junta o que as
+/// duas disseram do mesmo MOD, e um tratamento repetido à mão em cada uma podia
+/// divergir sem que nada reclamasse.
+///
+/// Sem aspas, porque `mod_id=autor/nome` é a grafia que se procura: é o filtro
+/// que impede uma quebra de linha no id de escrever uma segunda linha com a
+/// cara do produto.
+fn id_no_registro(id: &str) -> String {
+    id.chars()
+        .take(TETO_DO_ID_NO_REGISTRO)
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
 /// **A janela também escreve no registro.**
 ///
 /// Ela não tinha como. Todo o caminho de um pedido de MOD é observável no Rust
@@ -2309,12 +2336,7 @@ fn registrar_da_janela(nivel: String, onde: String, o_que: String, mod_id: Optio
     // (`carregarMods`), e um `mod_id=` sem nome seria achado por uma busca e não
     // seria de MOD nenhum.
     let mod_id: Option<String> = mod_id
-        .map(|id| {
-            id.chars()
-                .take(128)
-                .filter(|c| !c.is_control())
-                .collect::<String>()
-        })
+        .map(|id| id_no_registro(&id))
         .filter(|id| !id.is_empty());
     // Em `display`, e não como texto cru: `mod_id=autor/nome`, sem aspas, é a
     // mesma grafia que as linhas do Rust escrevem com `%`. Ausente, o campo
@@ -5044,26 +5066,26 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
 /// certo, e avisá-la ensinaria a ignorar os avisos.
 ///
 /// **A geração morta que os comandos conferem na entrada não passa por aqui.**
-/// [`midia_do_mod`] e [`midia_em_bytes`] devolvem `sessao-encerrada` antes de
-/// chegar a esta função, e o que fica dela é o contador
-/// `comandos_de_geracao_morta`. O `sessao-encerrada` que chega aqui é o que a
-/// conexão devolve quando cai no meio de uma leitura por volume
+/// [`midia_do_mod`], [`midia_em_bytes`] e [`som_do_mod`] devolvem
+/// `sessao-encerrada` antes de chegar a esta função, e o que fica dela é o
+/// contador `comandos_de_geracao_morta`. O `sessao-encerrada` que chega aqui é
+/// o que a conexão devolve quando cai no meio de uma leitura por volume
 /// ([`ler_imagem_mod`]).
 ///
 /// **Texto de terceiro não entra solto numa linha do registro**, e são três
-/// campos com ele. `origem` vai em `?`: é o caminho que o MOD declarou. O
-/// `mod_id` chega da janela (`midia_em_bytes`, `ler_imagem_mod`) e sai sem
-/// caractere de controle e cortado, como em [`registrar_da_janela`]. O
-/// `motivo` passa por [`motivo_no_registro`]: em `ler_imagem_mod` ele é o
-/// texto que o servidor mandou. A recusa que volta à janela sai intacta —
-/// quem se protege é a linha, e não a resposta.
+/// campos com ele. `origem` vai em `?`, cortada em
+/// [`TETO_DA_FRASE_NO_REGISTRO`] caracteres antes do escape: é o caminho que a
+/// janela pede em `midia_do_mod` e em `som_do_mod`, e as aspas impedem a linha
+/// forjada, mas não a linha sem fim. O `mod_id` chega da janela
+/// (`midia_em_bytes`, `ler_imagem_mod`) e passa por [`id_no_registro`], a
+/// mesma função de [`registrar_da_janela`]. O `motivo` passa por
+/// [`motivo_no_registro`]: em `ler_imagem_mod` ele é o texto que o servidor
+/// mandou. A recusa que volta à janela sai intacta — quem se protege é a
+/// linha, e não a resposta.
 fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaNoMod {
     let motivo = motivo_de(&falha);
-    let mod_id: String = mod_id
-        .chars()
-        .take(128)
-        .filter(|c| !c.is_control())
-        .collect();
+    let mod_id = id_no_registro(mod_id);
+    let origem: String = origem.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
     let no_registro = motivo_no_registro(motivo);
     if motivo == "sessao-encerrada" {
         tracing::debug!(
@@ -5090,7 +5112,13 @@ fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaN
 /// palavra que a janela recebe. Qualquer outra coisa é texto de terceiro — o
 /// `erro` que o servidor põe na resposta de imagem, a razão com que a conexão
 /// fechou, que `ler_imagem_mod` repassa como veio — e sai entre aspas, com
-/// escape, cortada no mesmo teto das outras portas de texto de terceiro.
+/// escape.
+///
+/// **Cortado em [`TETO_DA_FRASE_NO_REGISTRO`] caracteres antes do escape**, e
+/// não depois: o `{:?}` pode fazer o texto crescer até dez vezes, porque um
+/// caractere que não se imprime sai como `\u{100000}`. Medido: quinhentos e
+/// doze deles viram 5122 caracteres na linha. O teto limita a linha, mas não a
+/// iguala à do `console`, que corta pelo tamanho escapado.
 ///
 /// O escape é o que importa: o formatador do registro escapa ANSI em `%`, mas
 /// não quebra de linha, e um `\n` no meio do motivo escreveria no `seele.log`
@@ -5217,6 +5245,87 @@ fn midia_do_mod(
         "mídia de MOD servida"
     );
     Ok(midia)
+}
+
+/// **Os bytes de um som que o MOD declarou**, crus, para a janela tocar por
+/// WebAudio.
+///
+/// # Por que um comando além de [`midia_do_mod`]
+///
+/// A CSP desta janela não tem `media-src` e cai em `default-src 'self'`: um
+/// `<audio src="data:…">` cai junto — medido no Chromium, o motor do WebView2;
+/// a medida no WKWebView é a Task 1 do Plano 1D —, e o `uri` que
+/// [`midia_do_mod`] devolve é um `data:`. A saída que não afrouxa nada é a
+/// casca decodificar os bytes com `decodeAudioData` — um `ArrayBuffer` não é
+/// uma busca, e não passa por `media-src`.
+///
+/// Os bytes já chegavam dentro do `data:`, em base64: um terço maior, em JSON,
+/// e decodificado à mão na thread da janela. Aqui eles vão crus, por
+/// `tauri::ipc::Response`, e chegam como `ArrayBuffer` pelo protocolo `ipc:`.
+/// Quando o Tauri cai no `postMessage`, chegam como lista de números — a casca
+/// aceita os dois.
+///
+/// A conferência é a mesma da imagem, e é a mesma **função**
+/// ([`bytes_declarados_do_mod`]): o pacote pelo hash, o hash deste MOD, o
+/// arquivo declarado, o teto. E o tipo sai dos bytes: o que não é som é
+/// recusado pelo nome, `nao-e-som`, em vez de virar um `decodeAudioData` que
+/// falha sem dizer por quê.
+///
+/// Toda recusa, exceto a de geração morta (contada em
+/// `comandos_de_geracao_morta`), vai ao `seele.log` por
+/// [`recusa_de_midia_dita`].
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`] quando a geração já acabou, quando o pacote é de
+/// outro MOD, quando o arquivo não está declarado, quando passa do teto, quando
+/// os bytes não são de um formato conhecido, ou quando são de imagem.
+#[tauri::command]
+fn som_do_mod(
+    app: AppHandle,
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    hash: String,
+    caminho: String,
+) -> Result<tauri::ipc::Response, FalhaNoMod> {
+    if !session.geracao_vale(geracao) {
+        session
+            .comandos_de_geracao_morta
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        });
+    }
+    let bytes = som_declarado_do_mod(&config_dir(&app), &id, &hash, &caminho)?;
+    tracing::info!(
+        mod_id = %id,
+        geracao,
+        caminho = %caminho,
+        bytes = bytes.len(),
+        "som de MOD servido em bytes"
+    );
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Os bytes de um som declarado, **ou a recusa dita no registro**.
+fn som_declarado_do_mod(
+    pasta: &str,
+    id: &str,
+    hash: &str,
+    caminho: &str,
+) -> Result<Vec<u8>, FalhaNoMod> {
+    bytes_declarados_do_mod(pasta, id, hash, caminho)
+        .and_then(|bytes| match seele_ffi::mods::ler_tipo(&bytes) {
+            Some(tipo) if tipo.papel == "som" => Ok(bytes),
+            Some(_) => Err(FalhaNoMod::Recusado {
+                motivo: "nao-e-som".to_owned(),
+            }),
+            None => Err(FalhaNoMod::Recusado {
+                motivo: "formato-desconhecido".to_owned(),
+            }),
+        })
+        .map_err(|falha| recusa_de_midia_dita(id, caminho, falha))
 }
 
 /// **Mídia que veio da metade de servidor de um MOD.**
@@ -8352,6 +8461,7 @@ fn main() {
             codigo_do_mod,
             midia_do_mod,
             midia_em_bytes,
+            som_do_mod,
             enviar_imagem_mod,
             ler_imagem_mod,
             escolher_para_o_mod,
@@ -10415,6 +10525,8 @@ mod o_registro_da_janela {
 /// procuram. Os bytes de cada formato são os menores que o `sniff` reconhece.
 #[cfg(test)]
 mod pacote_de_teste {
+    /// O menor WAV que o `sniff` aceita (`seele-proto/src/midia_de_mod.rs:73`).
+    pub(crate) const WAV: &[u8] = b"RIFF\0\0\0\0WAVEfmt ";
     /// A assinatura de um PNG.
     pub(crate) const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
     /// Texto, que nenhum decodificador deste produto aceita.
@@ -10474,7 +10586,7 @@ mod pacote_de_teste {
 mod a_midia_recusada_e_dita_no_registro {
     use super::{
         midia_declarada_do_mod, midia_do_servidor_dita, motivo_de, recusa_de_midia_dita,
-        FalhaNoMod, TETO_DA_FRASE_NO_REGISTRO,
+        registrar_da_janela, FalhaNoMod, TETO_DA_FRASE_NO_REGISTRO, TETO_DO_ID_NO_REGISTRO,
     };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO};
     use crate::rastro_de_teste::capturar;
@@ -10689,6 +10801,78 @@ mod a_midia_recusada_e_dita_no_registro {
         );
     }
 
+    /// **A origem também tem teto.** É o caminho que a janela pede em
+    /// `midia_do_mod` e em `som_do_mod`: texto que chega pela ponte, e que ia
+    /// inteiro para a linha. As aspas do `?` impedem a linha forjada, e não a
+    /// linha sem fim.
+    #[test]
+    fn uma_origem_enorme_sai_cortada_no_teto_de_frase() {
+        let (_, rastro) = capturar(|| {
+            recusa_de_midia_dita(
+                ID,
+                &"c".repeat(TETO_DA_FRASE_NO_REGISTRO * 4),
+                FalhaNoMod::Recusado {
+                    motivo: "arquivo-nao-declarado".to_owned(),
+                },
+            )
+        });
+        let linha =
+            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
+        assert!(
+            linha.contains(&format!(
+                "origem=\"{}\"",
+                "c".repeat(TETO_DA_FRASE_NO_REGISTRO)
+            )),
+            "o caminho que a janela pede entrou no registro sem o teto das outras portas de \
+             texto de terceiro: {} caracteres numa linha",
+            linha.chars().count()
+        );
+    }
+
+    /// **O id do MOD sai igual pelas duas portas do registro.** A janela
+    /// (`registrar_da_janela`) e a recusa de mídia do Rust escrevem o mesmo
+    /// `mod_id=`, e é por ele que uma busca só junta o que as duas disseram do
+    /// mesmo MOD. Com o tratamento escrito à mão em cada porta, um teto que
+    /// mudasse numa e não na outra separaria as duas linhas sem que nada
+    /// reclamasse.
+    #[test]
+    fn o_id_do_mod_sai_igual_pelas_duas_portas_do_registro() {
+        let enorme = format!("prova/{}", "m".repeat(TETO_DO_ID_NO_REGISTRO * 4));
+        let esperado: String = enorme.chars().take(TETO_DO_ID_NO_REGISTRO).collect();
+        let ((), da_janela) = capturar(|| {
+            registrar_da_janela(
+                "aviso".to_owned(),
+                "recusa-de-mod".to_owned(),
+                "uma frase da janela".to_owned(),
+                Some(enorme.clone()),
+            );
+        });
+        let (_, do_rust) = capturar(|| {
+            recusa_de_midia_dita(
+                &enorme,
+                "volume",
+                FalhaNoMod::Recusado {
+                    motivo: "nao-e-base64".to_owned(),
+                },
+            )
+        });
+        for (porta, rastro) in [
+            ("registrar_da_janela", &da_janela),
+            ("recusa_de_midia_dita", &do_rust),
+        ] {
+            let id = rastro
+                .split("mod_id=")
+                .nth(1)
+                .and_then(|resto| resto.split_whitespace().next())
+                .unwrap_or_else(|| panic!("`{porta}` não escreveu `mod_id=`: {rastro}"));
+            assert_eq!(
+                id, esperado,
+                "`{porta}` escreveu o id do MOD com outro teto, e uma busca por `mod_id=` já \
+                 não junta o que a janela e o Rust disseram do mesmo MOD"
+            );
+        }
+    }
+
     /// **Os três comandos de mídia passam pela recusa dita.**
     ///
     /// Os testes acima medem as funções; este prende que os comandos as
@@ -10726,5 +10910,55 @@ mod a_midia_recusada_e_dita_no_registro {
                  chega ao registro"
             );
         }
+    }
+}
+
+/// **O som de um MOD sai em bytes, conferido como a imagem é conferida.**
+#[cfg(test)]
+mod o_som_do_mod_sai_em_bytes {
+    use super::{motivo_de, som_declarado_do_mod};
+    use crate::pacote_de_teste::{pasta, publicar, ID, PNG, WAV};
+    use crate::rastro_de_teste::capturar;
+
+    #[test]
+    fn um_som_declarado_sai_com_os_bytes_exatos() {
+        let (raiz, hash) = publicar(&[("som/toque.wav", WAV)]);
+        let bytes = som_declarado_do_mod(&pasta(&raiz), ID, &hash, "som/toque.wav")
+            .expect("um som declarado foi recusado");
+        assert_eq!(
+            bytes, WAV,
+            "os bytes do som mudaram no caminho, e a casca decodificaria outra coisa"
+        );
+    }
+
+    #[test]
+    fn uma_imagem_pedida_como_som_e_recusada_pelo_nome_e_dita() {
+        let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
+        let (resultado, rastro) =
+            capturar(|| som_declarado_do_mod(&pasta(&raiz), ID, &hash, "img/rosto.png"));
+        let falha = resultado.expect_err("uma imagem saiu pelo caminho do som");
+        assert_eq!(
+            motivo_de(&falha),
+            "nao-e-som",
+            "a recusa não diz que o arquivo não é som, e o autor procuraria no lugar errado"
+        );
+        assert!(
+            rastro.lines().any(|linha| linha.contains("WARN")
+                && linha.contains("mod_id=prova/midia")
+                && linha.contains("motivo=nao-e-som")),
+            "a recusa do som não chegou ao registro: {rastro}"
+        );
+    }
+
+    #[test]
+    fn um_som_que_o_manifesto_nao_declara_nao_sai() {
+        let (raiz, hash) = publicar(&[("som/toque.wav", WAV)]);
+        let falha = som_declarado_do_mod(&pasta(&raiz), ID, &hash, "som/escondido.wav")
+            .expect_err("um som que o manifesto não declara saiu");
+        assert_eq!(
+            motivo_de(&falha),
+            "arquivo-nao-declarado",
+            "o som fora do manifesto foi recusado por outro motivo"
+        );
     }
 }
