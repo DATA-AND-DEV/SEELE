@@ -287,8 +287,11 @@ e um serviço no meio aprende alguma coisa. O que ele aprende é isto:
 
 O conteúdo continua ponta a ponta: o TLS 1.3 e a impressão digital do ADR 0003
 são conferidos entre as duas máquinas, e o ponto de encontro não tem por onde ler
-nem por onde se passar por ninguém — quem entra nem lê resposta dele, porque os
-endereços que tenta vieram todos do link.
+nem por onde se passar por ninguém. Quem chega lê uma resposta dele, o endereço
+de hoje guardado no quarto, mas a impressão esperada, a do link ou a da lista de
+conhecidos, é conferida dentro do TLS antes de qualquer `Hello`: uma resposta
+falsa custa não entrar, e o convite, a senha e o apelido não chegam a quem
+atendeu com a chave errada.
 
 Três coisas fazem parte da decisão, e não são promessas soltas:
 

@@ -2230,13 +2230,17 @@ o que o ADR 0006 desenhou.
 nomeados (`tofu::Verdict`). A impressão do link atravessa a ponte
 (`ConnectConfig::expected_fingerprint` → `Destino::impressao_esperada`) e a
 comparação acontece antes de haver sessão. No primeiro contato, um convite que
-não confere **recusa**: derruba a conexão e desfaz o pin que o TLS já tinha
-escrito — sem essa segunda metade a recusa seria decorativa, porque a visita
-seguinte, sem link para conferir, entraria calada no servidor recusado. Contra
-um servidor já fixado, um convite que discorda **avisa** e não derruba: o TOFU já
-provou que é o servidor de ontem, e trancar alguém para fora por causa de um
-link velho seria o erro oposto. As duas cascas leem o mesmo veredito; o `connection`
-não compara mais nada por conta própria.
+não confere **recusa**. Ao fechar esta entrada a recusa vinha depois do aperto de
+mão e desfazia o pin que o TLS já tinha escrito; desde o Plano 1B ela acontece
+**dentro do TLS, antes do `Hello`**: o verificador não fixa a chave que a
+impressão esperada desmente, e o convite, a senha e o apelido não chegam a quem
+atendeu com a chave errada. O aperto não grava pino, então a visita seguinte, sem
+link para conferir, não entra calada no servidor recusado; a limpeza que sobrou
+só desfaz o pino que o próprio aperto escreveu. Contra um servidor já fixado, um
+convite que discorda **avisa** e não derruba: o TOFU já provou que é o servidor
+de ontem, e trancar alguém para fora por causa de um link velho seria o erro
+oposto. As duas cascas leem o mesmo veredito; o `connection` não compara mais
+nada por conta própria.
 
 **A segunda ponta, do mesmo fio, também fechou.** O `Session::convite` morre
 com a sessão que ele abriu e é descartado quando o endereço no campo não é o do
@@ -2245,9 +2249,9 @@ dia em que a conferência passou a existir.
 
 **Como se sabe que não é enfeite.** `crates/seele-conformance/tests/convite.rs`
 prova os três desfechos contra um servidor de verdade — a impressão certa
-verificando, a errada recusando e desfixando, e o link velho avisando sobre uma
-sessão que continua falando. Cada um foi visto ficar vermelho com a política
-desligada antes de ser dado por bom.
+verificando, a errada recusando antes do `Hello` e sem fixar nada, e o link
+velho avisando sobre uma sessão que continua falando. Cada um foi visto ficar
+vermelho com a política desligada antes de ser dado por bom.
 
 **O que sobrou, e é de outra entrada.** A faixa de veredito da janela nunca foi
 desenhada para um humano — é a mesma ausência da pendência 13, e é lá que ela

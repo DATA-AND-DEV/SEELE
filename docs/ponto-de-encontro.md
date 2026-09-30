@@ -46,10 +46,18 @@ não passa por ali, porque a conversa nunca passou. Por padrão o serviço nem
 e avisa na saída o que passou a registrar, e mesmo com ele ligado o quarto não é
 impresso.
 
-**Ele não decide para onde ninguém conecta.** Quem recebe um convite nunca lê
-resposta nenhuma do ponto de encontro: os endereços que tenta vieram do
-`seele://`, e a impressão digital que confere também. Um ponto de encontro
-hostil consegue não avisar o anfitrião. É o teto do que ele consegue.
+**Ele não decide em quem se confia.** Quem chega a um servidor com o bilhete do
+ponto de encontro na mão, o do link ou o que a lista de conhecidos guardou,
+pergunta ao quarto onde o servidor mora hoje, e lê a resposta: o endereço que
+ela traz entra na frente dos guardados. Um ponto de encontro hostil, ou quem
+ocupou a marca, consegue mandar essa conexão para o endereço errado, ou não
+avisar o anfitrião. O que ele não escolhe é a impressão digital: a esperada, a
+do link ou a da lista, é conferida dentro do aperto de mão TLS, antes de
+qualquer `Hello`. Se a chave não confere, o aperto falha ali, e o convite, a
+senha e o apelido não chegam a quem atendeu com a chave errada. O prejuízo é
+não entrar. Isso vale onde o endereço ainda não tem chave fixada; onde tem,
+vale a regra do ADR 0003, e a conexão fica com a chave fixada, com aviso na
+tela. É o teto do que ele consegue.
 
 **O link fica com o seu endereço público dentro.** O bilhete (`enc=`) carrega o
 endereço do ponto de encontro e o endereço público da sua escuta de avisos —
