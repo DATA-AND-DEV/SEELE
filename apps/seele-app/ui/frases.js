@@ -422,20 +422,29 @@ function fraseDeErro(erro, apelido) {
     //
     // **A recusa é dentro do TLS, antes do `Hello`** (S2b da análise de 22/09):
     // o verificador do núcleo confere a impressão no aperto de mão, e o convite,
-    // a senha e o apelido não chegam a quem atendeu. A frase diz isso porque
-    // muda o que a pessoa faz: esta tentativa não gastou o convite de uso
-    // único, e não há por que pedir outro por causa dela. Diz só isso, e não
-    // «nada saiu desta máquina»: o `ClientHello` do TLS (nome, ALPN, chave
-    // efêmera) sai antes de haver o que conferir. Vale também para quem volta
-    // pela lista de servidores, que confere pela impressão que a lista guardou
-    // (S3). É `#boot-erro`, e não o veredito laranja da sessão, porque não há
-    // sessão nenhuma.
+    // a senha e o apelido não chegam a quem atendeu com a chave errada. A frase
+    // diz isso porque muda o que a pessoa faz: esse servidor não ficou com o
+    // convite, e não há por que pedir outro por causa dele.
+    //
+    // **Diz só isso: nada de «nada», de «nenhum» nem de «esta máquina».**
+    // - O `ClientHello` do TLS (nome, ALPN, chave efêmera) sai antes de haver o
+    //   que conferir.
+    // - Os candidatos de um convite correm em paralelo, cada um com o próprio
+    //   `Hello` depois do próprio TLS, e quando todos falham o núcleo mostra a
+    //   primeira falha de quem respondeu, na ordem de conclusão. Um candidato
+    //   que recusou no TLS pode terminar antes de outro que já entregou o
+    //   convite, a senha e o apelido ao servidor verdadeiro. O escopo que
+    //   sempre vale é «a ele»: a quem atendeu com a chave errada.
+    //
+    // Vale também para quem volta pela lista de servidores, que confere pela
+    // impressão que a lista guardou (S3). É `#boot-erro`, e não o veredito
+    // laranja da sessão, porque não há sessão nenhuma.
     if (erro.InviteMismatch) {
       return (
         "ESTE NÃO É O SERVIDOR DO CONVITE.\n" +
         `esperada: ${erro.InviteMismatch.expected}\n` +
         `ofertada: ${erro.InviteMismatch.offered}\n` +
-        "O convite, a senha e o apelido não saíram desta máquina.\n" +
+        "O convite, a senha e o apelido não chegaram a ele.\n" +
         "Confirme o link com quem o mandou."
       );
     }

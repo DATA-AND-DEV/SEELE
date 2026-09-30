@@ -1904,10 +1904,16 @@ pub enum ConnectionError {
     ///
     /// **Recusada dentro do TLS, antes do `Hello`**: o convite, a senha e o
     /// apelido (e, com eles, a chave e a assinatura da identidade) não chegaram
-    /// a quem atendeu. O que sai é o `ClientHello` do TLS, com o nome, o ALPN e
-    /// a chave efêmera. É por isso que a frase da casca pode
-    /// dizer que o convite, a senha e o apelido não saíram, e diz — e é por isso
-    /// que ela não pode dizer que nada saiu.
+    /// a quem atendeu com a chave errada. O que sai para ele é o `ClientHello`
+    /// do TLS, com o nome, o ALPN e a chave efêmera.
+    ///
+    /// **O escopo é por candidato, e a frase da casca respeita isso.** Os
+    /// candidatos de um convite correm em paralelo, cada um com o próprio
+    /// `Hello` depois do próprio TLS, e quando todos falham o núcleo guarda a
+    /// primeira falha de quem respondeu, na ordem de conclusão: um candidato que
+    /// recusou no TLS pode terminar antes de outro que já entregou o convite, a
+    /// senha e o apelido ao servidor verdadeiro. Por isso a frase diz que eles
+    /// não chegaram «a ele», e não diz «nada», «nenhum» nem «desta máquina».
     InviteMismatch {
         /// What the link promised.
         expected: String,

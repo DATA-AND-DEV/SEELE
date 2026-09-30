@@ -1390,21 +1390,29 @@ fn the_refused_invite_reaches_the_screen_with_both_fingerprints() {
 }
 
 #[test]
-fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_sairam() {
+fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_chegaram_a_ele() {
     // Desde que a impressão é conferida dentro do TLS (S2b da análise de
     // 22/09), a recusa acontece antes do `Hello`. O convite, a senha e o
-    // apelido não saem mais para quem atendeu no lugar do servidor, e
+    // apelido não chegam mais a quem atendeu no lugar do servidor, e
     // `crates/seele-conformance/tests/convite.rs` prova isso do lado do
     // servidor: o convite continua entrando e a portaria continua sem pedido.
     // O produto sabia e não contava, e quem lia a recusa ia achar que tinha
     // queimado o convite de uso único e pedir outro.
     //
-    // **A frase diz só o que é verdade.** Do aperto de mão TLS sai o
-    // `ClientHello` (o nome do servidor, o ALPN e a chave efêmera), então
-    // «nada saiu desta máquina» seria falso. O que não saiu é o que o `Hello`
-    // carrega: o convite, a senha e o apelido (e, com eles, a chave e a
-    // assinatura da identidade). Por isso a frase enumera os três e não
-    // promete o todo, e o guarda abaixo recusa a promessa maior.
+    // **A frase diz só o que vale sempre, e o escopo é «a ele».** Duas coisas a
+    // impedem de prometer mais:
+    // - Do aperto de mão TLS sai o `ClientHello` (o nome do servidor, o ALPN e
+    //   a chave efêmera), então «nada saiu» seria falso.
+    // - Os candidatos de um convite correm em paralelo (`enlace.rs`), cada um
+    //   com o próprio `Hello` depois do próprio TLS, e quando todos falham a
+    //   escolhida é a primeira falha de quem respondeu, por ordem de conclusão
+    //   (`FalhaAMostrar::anotar`). Um candidato que recusou no TLS pode
+    //   terminar antes de outro que já entregou o convite, a senha e o apelido
+    //   ao servidor verdadeiro. «Desta máquina» seria falso nesse caso.
+    //
+    // Por isso o guarda negativo é uma regra e não uma lista de frases falsas:
+    // o ramo não usa «nada» nem «nenhum», que são as palavras de quem promete
+    // o todo, e não fala de «desta máquina».
     //
     // E a frase é **desta** recusa. Se ela chegasse como `TlsRefused`, a FFI a
     // traduziria por `Refused { Incompatible }`, e a tela mandaria atualizar o
@@ -1429,15 +1437,28 @@ fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_sairam() {
         "a recusa pela impressão perdeu a frase própria:\n{ramo}"
     );
     assert!(
-        ramo.contains("O convite, a senha e o apelido não saíram desta máquina"),
-        "a frase não diz que o convite, a senha e o apelido não saíram, e quem \
-         lê vai pedir outro convite sem precisar:\n{ramo}"
+        ramo.contains("O convite, a senha e o apelido não chegaram a ele"),
+        "a frase não diz que o convite, a senha e o apelido não chegaram a ele, e \
+         quem lê vai pedir outro convite sem precisar:\n{ramo}"
     );
-    let minusculas = ramo.to_lowercase();
+
+    // O `\n` do fonte é uma barra e um `n`: sem trocá-lo, um «Nada» no começo de
+    // uma linha da frase ficaria colado num `n` e não contaria como palavra.
+    let minusculas = ramo.to_lowercase().replace("\\n", " ");
+    for absoluta in ["nada", "nenhum"] {
+        assert!(
+            !names(&minusculas, absoluta),
+            "a frase usa «{absoluta}», que promete o todo: o `ClientHello` do TLS \
+             sai, e outro candidato do convite pode ter entregado o `Hello` ao \
+             servidor verdadeiro. Ela só pode dizer o que vale para quem atendeu \
+             com a chave errada:\n{ramo}"
+        );
+    }
     assert!(
-        !minusculas.contains("nada saiu") && !minusculas.contains("nada seu chegou"),
-        "a frase promete que nada saiu desta máquina, e o `ClientHello` do TLS \
-         sai: ela só pode dizer o que o `Hello` deixou de levar:\n{ramo}"
+        !minusculas.contains("desta máquina"),
+        "a frase fala de «desta máquina», e o que vale é «a ele»: outro \
+         candidato do convite pode ter entregado o convite, a senha e o apelido \
+         ao servidor verdadeiro:\n{ramo}"
     );
     assert!(
         !ramo.contains("MOTIVOS") && !ramo.contains("INCOMPAT"),
