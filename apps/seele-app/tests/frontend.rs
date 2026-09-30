@@ -1625,6 +1625,72 @@ fn a_volta_pela_lista_confere_pela_impressao_guardada() {
 }
 
 #[test]
+fn a_lista_que_nao_abre_ou_nao_grava_diz_isso_no_log() {
+    // «O produto sabe e não conta.» A lista de conhecidos carrega a impressão
+    // que a volta confere, e três falhas dela passavam caladas no `connect`:
+    // - a leitura da volta (`Conhecidos::abrir(..).ok()`): a volta seguia sem
+    //   os caminhos, o bilhete e a impressão guardada, e ninguém sabia por quê;
+    // - a abertura para anotar a visita (`if let Ok(..)` sem `else`);
+    // - a gravação dos caminhos e da impressão (`anotar_caminhos`, em `debug`,
+    //   que o `seele.log` não grava).
+    // A cura de uma lista gravada pela 0.15.0 (a primeira volta por um alvo de
+    // escopo público) e o remédio da nota de release («cole o link de novo»)
+    // dependem de a lista gravar. As três sobem para `warn`, com o erro. O
+    // `connect` é um comando Tauri e não roda sem casca, então o guarda é o
+    // texto dele, sem comentários e sem espaços.
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    let Some(leitura) = connect
+        .split("ifveio_de_link{")
+        .nth(1)
+        .and_then(|resto| resto.split("letconferida=").next())
+    else {
+        panic!("`connect` não decide mais entre o link e a lista antes da impressão a conferir");
+    };
+    // O `.ok()` procurado é o da abertura, logo depois do caminho do arquivo,
+    // com ou sem a vírgula final do `rustfmt`: o do bilhete (`Bilhete::ler`) é
+    // outra coisa, e um bilhete ilegível fica sem bilhete de propósito.
+    let engole = ["join(\"conhecidos\"),).ok()", "join(\"conhecidos\")).ok()"];
+    assert!(
+        leitura.contains("Conhecidos::abrir(")
+            && !engole.iter().any(|agulha| leitura.contains(agulha))
+            && leitura.contains("tracing::warn!("),
+        "a leitura da lista na volta engole a falha de abrir: a volta segue sem a impressão \
+         guardada, sem os caminhos e sem o bilhete, e o `seele.log` não diz por quê:\n{leitura}"
+    );
+
+    let Some(visita) = connect
+        .split("if!hospedado_aqui(&alvo){")
+        .nth(1)
+        .and_then(|resto| resto.split("lista.registrar(").next())
+    else {
+        panic!("`connect` não anota mais a visita na lista, ou não pula o servidor desta máquina");
+    };
+    assert!(
+        visita.contains("Conhecidos::abrir(") && visita.contains("tracing::warn!("),
+        "a lista que não abre para anotar a visita passa calada: nem a visita, nem os \
+         caminhos, nem a impressão aceita vão para a lista, e ninguém fica sabendo:\n{visita}"
+    );
+
+    let Some(gravacao) = connect
+        .split("lista.anotar_caminhos(")
+        .nth(1)
+        .and_then(|resto| resto.get(..resto.find("Ok(Entrada").unwrap_or(resto.len())))
+    else {
+        panic!("`connect` não anota mais os caminhos e a impressão na lista");
+    };
+    assert!(
+        gravacao.contains("tracing::warn!(") && !gravacao.contains("tracing::debug!("),
+        "a falha de gravar os caminhos e a impressão aceita na lista vai para `debug`, que o \
+         `seele.log` não grava: a cura da lista e o remédio da nota de release falham \
+         calados:\n{gravacao}"
+    );
+}
+
+#[test]
 fn leaving_forgets_the_invite_that_let_us_in() {
     // Inert while nothing was checked, and not inert any more: the fingerprint
     // that `connect` checks against comes from this slot. Left behind, the next

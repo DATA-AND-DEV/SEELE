@@ -966,23 +966,35 @@ async fn connect(
     let (mut alternativos, bilhete, impressao_guardada) = if veio_de_link {
         (alternativos, bilhete, None)
     } else {
-        seele_ffi::conhecidos::Conhecidos::abrir(
+        match seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(config_dir(&app)).join("conhecidos"),
-        )
-        .ok()
-        .and_then(|lista| {
-            lista.buscar(&server).map(|conhecido| {
-                (
-                    conhecido.caminhos.clone(),
-                    conhecido
-                        .bilhete
-                        .as_deref()
-                        .and_then(|texto| seele_ffi::uri::Bilhete::ler(texto).ok()),
-                    conhecido.impressao.clone(),
-                )
-            })
-        })
-        .unwrap_or_default()
+        ) {
+            Ok(lista) => lista
+                .buscar(&server)
+                .map(|conhecido| {
+                    (
+                        conhecido.caminhos.clone(),
+                        conhecido
+                            .bilhete
+                            .as_deref()
+                            .and_then(|texto| seele_ffi::uri::Bilhete::ler(texto).ok()),
+                        conhecido.impressao.clone(),
+                    )
+                })
+                .unwrap_or_default(),
+            // **Dito, e não engolido.** Sem a lista, a volta segue como quem
+            // digitou o endereço: sem os outros caminhos, sem o bilhete e sem a
+            // impressão guardada, que é a que ela conferiria. Era um `.ok()`, e
+            // ninguém ficava sabendo por que a volta entrou às cegas.
+            Err(erro) => {
+                tracing::warn!(
+                    %erro,
+                    "não abri a lista de servidores conhecidos: esta volta segue sem os \
+                     caminhos, o bilhete e a impressão que ela guardava deste servidor"
+                );
+                Default::default()
+            }
+        }
     };
 
     // **A impressão que esta conexão confere, e a que o quarto pergunta.**
@@ -1237,9 +1249,19 @@ async fn connect(
         if let Ok(mut guardado) = session.alvo.lock() {
             *guardado = Some(alvo.clone());
         }
-        if let Ok(mut lista) = seele_ffi::conhecidos::Conhecidos::abrir(
+        let aberta = seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(&casa).join("conhecidos"),
-        ) {
+        );
+        // A lista que não abre não anota a visita, os caminhos nem a impressão
+        // aceita, e a cura de uma lista velha depende de ela gravar. Dito.
+        if let Err(erro) = &aberta {
+            tracing::warn!(
+                %erro,
+                "não abri a lista de servidores conhecidos: esta visita, os caminhos e a \
+                 impressão aceita não foram guardados"
+            );
+        }
+        if let Ok(mut lista) = aberta {
             // A sala de voz que já estava anotado, preservado. `registrar` reescreve a
             // entrada inteira, e este arquivo é compartilhado com o `connection`, que
             // grava em qual sala de voz a pessoa entrou e o lê de volta como padrão na
@@ -1308,7 +1330,14 @@ async fn connect(
                 bilhete_texto.as_deref(),
                 impressao_aceita.as_deref(),
             ) {
-                tracing::debug!(%erro, "não guardei os outros caminhos deste servidor");
+                // `warn`, e não `debug`, que o `seele.log` não grava: a volta
+                // pela lista confere pela impressão que ficou lá, e a cura de
+                // uma lista gravada pela 0.15.0 depende desta gravação.
+                tracing::warn!(
+                    %erro,
+                    "não guardei na lista os caminhos, o bilhete e a impressão aceita deste \
+                     servidor: a volta pela lista confere pela impressão que ficou lá"
+                );
             }
         }
     }
