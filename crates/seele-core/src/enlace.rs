@@ -4821,9 +4821,14 @@ impl PinStore for PinsDesteAperto {
 
 /// Desfaz o pin que **este** aperto de mão escreveu e que sobrou dele.
 ///
-/// O `TofuVerifier` fixa a chave dentro do TLS, e o aperto de mão continua
-/// depois disso — abrir o fluxo de controle, o prazo, a credencial, a resposta.
-/// Qualquer uma dessas saídas devolve erro com o pin já escrito.
+/// O `TofuVerifier` fixa a chave dentro do TLS, quando aceita o certificado, e
+/// o aperto de mão continua depois disso: o resto do próprio TLS (a assinatura
+/// do servidor sobre o aperto, que prova que quem atendeu tem a chave privada
+/// do certificado, e o `Finished`) e, com o TLS terminado, abrir o fluxo de
+/// controle, o prazo, a credencial, a resposta. Qualquer uma dessas saídas
+/// devolve erro com o pin já escrito. Inclusive a de um impostor que repete o
+/// certificado de um servidor (o certificado é público) sem ter a chave dele: o
+/// verificador aceita o certificado e fixa, e o TLS cai na assinatura.
 ///
 /// O que isso estragava: o link promete `B`, o servidor daquele endereço
 /// oferece `A` e falha o aperto de mão. `A` fica fixado. Na tentativa seguinte,
@@ -4854,6 +4859,12 @@ impl PinStore for PinsDesteAperto {
 /// Uma linha `info!` com a chave do pino, a impressão apagada e a falha do
 /// aperto (`falha`). «Por que meu pino sumiu» não tinha resposta no
 /// `seele.log`. Quando não apaga nada, não escreve nada.
+///
+/// A frase diz só o que vale em toda saída: o aperto falhou depois de o
+/// verificador aceitar a chave, no resto do TLS ou depois dele. Em qual dos
+/// dois, quem diz é `falha`. Com `TlsRefused`, foi o próprio TLS que caiu, como
+/// no impostor de cima, e ali dizer que o TLS terminou faria quem investiga
+/// achar que quem atendeu provou ter a chave.
 fn desfazer_o_pin_deste_aperto(
     pins: &dyn PinStore,
     chave_do_pin: &str,
@@ -4869,8 +4880,9 @@ fn desfazer_o_pin_deste_aperto(
             chave = %chave_do_pin,
             impressao = %escrito,
             erro = %falha,
-            "desfiz o pin que este aperto de mão fixou: o aperto falhou depois do TLS, e \
-             o pin deixado faria a visita seguinte entrar sem conferir"
+            "desfiz o pin que este aperto de mão fixou: o aperto falhou depois de o \
+             verificador aceitar a chave (no resto do TLS ou depois dele), e o pin deixado \
+             faria a visita seguinte tratar esta chave como já conhecida"
         );
     }
 }
@@ -5799,10 +5811,11 @@ mod tests {
     #[test]
     fn um_aperto_de_mao_que_falhou_nao_deixa_o_pin_que_o_tls_escreveu() {
         // O verificador fixa dentro do retorno de chamada do TLS, e o aperto de
-        // mão ainda tem quatro saídas de erro depois disso. O pin que sobrasse
-        // de uma delas faria a visita seguinte ver `Matches`, e aí um convite
-        // que **não** confere viraria `InviteDisagrees` — de recusar para
-        // avisar, sem ninguém decidir isso.
+        // mão ainda tem saídas de erro depois disso: o resto do próprio TLS e as
+        // do aperto do protocolo (ver `desfazer_o_pin_deste_aperto`). O pin que
+        // sobrasse de uma delas faria a visita seguinte ver `Matches`, e aí um
+        // convite que **não** confere viraria `InviteDisagrees` — de recusar
+        // para avisar, sem ninguém decidir isso.
         let loja = crate::tofu::MemoryPinStore::new();
         loja.pin("casa", "aaaa1111".into());
 
@@ -5939,6 +5952,158 @@ mod tests {
         assert!(
             linhas.is_empty(),
             "uma limpeza que não apagou pino nenhum escreveu no log: {linhas:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn o_pin_que_um_impostor_fez_fixar_e_desfeito_e_o_log_nao_diz_que_o_tls_terminou() {
+        // O caso de segurança da limpeza de `conectar_por`, e o que os testes
+        // de cima não alcançam, porque chamam a limpeza com um erro escolhido à
+        // mão. Um impostor repete o certificado do servidor verdadeiro (que é
+        // público) sem ter a chave dele. O verificador aceita o certificado e
+        // fixa a chave; o TLS cai logo depois, na assinatura de quem atendeu.
+        //
+        // Quem investiga precisa ler duas coisas nesta linha: o erro que o
+        // aperto deu de verdade (e não um escolhido pelo caminho), e nenhuma
+        // afirmação de que o TLS terminou, porque aqui quem atendeu não provou
+        // ter a chave.
+        //
+        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
+        // thread, e o aperto de mão inteiro roda nela.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let (onde_do_impostor, impressao_do_verdadeiro) = impostor_que_repete_o_certificado();
+        let chave = "chave-do-impostor";
+        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
+        let endpoint = crate::client::local_endpoint(None).expect("ponta local");
+
+        let resultado = tokio::time::timeout(
+            Duration::from_secs(20),
+            Enlace::conectar_por(
+                &endpoint,
+                None,
+                destino_na_chave(onde_do_impostor, chave, Some(&impressao_do_verdadeiro)),
+                SigningKey::from_bytes(&[7; 32]),
+                Arc::clone(&loja) as Arc<dyn PinStore>,
+            ),
+        )
+        .await
+        .expect("o aperto de mão com o impostor não terminou");
+
+        assert_eq!(
+            resultado.err(),
+            Some(ConnectError::TlsRefused),
+            "o impostor sem a chave não caiu no TLS como `TlsRefused`, e o teste mediu \
+             outra coisa"
+        );
+        assert_eq!(
+            loja.pinned(chave),
+            None,
+            "o pin que o verificador fixou para o impostor ficou na loja depois de o TLS cair"
+        );
+        let linhas = rastro.linhas();
+        let Some(desfeito) = linhas.iter().find(|linha| {
+            linha.starts_with("INFO")
+                && linha.contains(chave)
+                && linha.contains(&impressao_do_verdadeiro)
+        }) else {
+            panic!(
+                "o pin que o impostor fez o verificador fixar foi apagado sem dizer no log qual \
+                 chave e qual impressão. Rastro: {linhas:?}"
+            );
+        };
+        assert!(
+            desfeito.contains("TlsRefused"),
+            "a linha do pin desfeito não traz o erro que o aperto deu (`TlsRefused`), e sim \
+             outro: a falha que `conectar_por` passa à limpeza não é a do aperto. Linha: \
+             {desfeito}"
+        );
+        assert!(
+            ![
+                "depois do TLS",
+                "TLS terminou",
+                "TLS terminado",
+                "após o TLS"
+            ]
+            .iter()
+            .any(|afirmacao| desfeito.contains(afirmacao)),
+            "a linha do pin desfeito diz que o TLS terminou, e ele caiu no meio, na assinatura \
+             de quem atendeu: quem investiga fica achando que o servidor provou ter a chave. \
+             Linha: {desfeito}"
+        );
+    }
+
+    #[tokio::test]
+    async fn o_pin_orfao_de_um_candidato_que_estourou_o_prazo_vai_ao_log_com_a_falha_dele() {
+        // A limpeza de depois da corrida, pelo caminho de verdade. Um candidato
+        // termina o TLS (o verificador fixa a chave), manda o `Hello` e não
+        // ouve nada: o prazo do candidato estoura, a tentativa é derrubada no
+        // meio, e o pin fica órfão. A linha que o apaga tem de dizer a falha
+        // que este candidato deu (`SemResposta`, o prazo), e não uma escolhida
+        // pelo caminho.
+        //
+        // Custa o prazo de um candidato (`PRAZO_POR_CANDIDATO`, 4 s), porque é
+        // ele que deixa o pin órfão.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let (escuta, onde_de_quem_segura, impressao_de_quem_segura) =
+            ponta_com_certificado_proprio();
+        let segura = tokio::spawn(async move {
+            let Some(entrada) = escuta.accept().await else {
+                return;
+            };
+            let Ok(conexao) = entrada.await else {
+                return;
+            };
+            std::future::pending::<()>().await;
+            drop(conexao);
+        });
+        let chave = "chave-de-quem-segura";
+        let mut quem_nao_sai = destino_na_chave(
+            "127.0.0.1:9".parse().expect("endereço"),
+            "chave-de-quem-nao-sai",
+            None,
+        );
+        quem_nao_sai.nome_tls = "nome inválido com espaço".into();
+        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
+
+        let resultado = tokio::time::timeout(
+            Duration::from_secs(20),
+            Enlace::conectar_entre_com_bilhete(
+                vec![
+                    destino_na_chave(onde_de_quem_segura, chave, None),
+                    quem_nao_sai,
+                ],
+                None,
+                SigningKey::from_bytes(&[9; 32]),
+                Arc::clone(&loja) as Arc<dyn PinStore>,
+            ),
+        )
+        .await
+        .expect("a corrida não terminou");
+        segura.abort();
+
+        assert!(
+            resultado.is_err(),
+            "um candidato entrou numa corrida sem servidor que respondesse, e o teste mediu \
+             outra coisa"
+        );
+        assert_eq!(
+            loja.pinned(chave),
+            None,
+            "o pin órfão do candidato que estourou o prazo ficou na loja depois da corrida"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains(chave)
+                && linha.contains(&impressao_de_quem_segura)
+                && linha.contains("SemResposta")),
+            "o pin órfão foi apagado sem dizer no log a falha do candidato que o deixou \
+             (`SemResposta`, o prazo): a falha que a corrida passa à limpeza não é a dele. \
+             Rastro: {linhas:?}"
         );
     }
 
@@ -6739,6 +6904,57 @@ mod tests {
     /// a chave dela e decidir.
     fn ponta_que_so_mostra_a_chave() -> (SocketAddr, String) {
         let (escuta, endereco, impressao) = ponta_com_certificado_proprio();
+        tokio::spawn(async move {
+            while let Some(entrada) = escuta.accept().await {
+                let _ = entrada.await;
+            }
+        });
+        (endereco, impressao)
+    }
+
+    /// Uma ponta que repete o certificado de outro servidor sem ter a chave dele.
+    ///
+    /// O certificado é público: quem atende pode mandá-lo inteiro. O que não se
+    /// copia é a chave privada, e o TLS a cobra **depois** de o verificador
+    /// aceitar o certificado, na assinatura do servidor sobre o aperto de mão
+    /// (`CertificateVerify`). Aqui a assinatura sai com outra chave, e o TLS cai
+    /// ali, com o pin já fixado.
+    ///
+    /// Devolve o endereço e a impressão do certificado repetido, que é a do
+    /// servidor verdadeiro.
+    fn impostor_que_repete_o_certificado() -> (SocketAddr, String) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let verdadeiro =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificado");
+        let impressao = seele_proto::transport::certificate_fingerprint(verdadeiro.cert.der());
+        let outra = rcgen::KeyPair::generate().expect("outra chave");
+        let chave_do_impostor = rustls::crypto::ring::sign::any_supported_type(
+            &rustls::pki_types::PrivatePkcs8KeyDer::from(outra.serialize_der()).into(),
+        )
+        .expect("chave de assinatura");
+        // `CertifiedKey::new`, e não `with_single_cert`: este confere se a chave
+        // é a do certificado, e recusaria montar o impostor.
+        let certificado_e_chave = rustls::sign::CertifiedKey::new(
+            vec![rustls::pki_types::CertificateDer::from(
+                verdadeiro.cert.der().to_vec(),
+            )],
+            chave_do_impostor,
+        );
+
+        let mut tls_servidor = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(rustls::sign::SingleCertAndKey::from(
+                certificado_e_chave,
+            )));
+        tls_servidor.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+        let servidor_config = quinn::ServerConfig::with_crypto(Arc::new(
+            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
+        ));
+        let escuta =
+            quinn::Endpoint::server(servidor_config, SocketAddr::from(([127, 0, 0, 1], 0)))
+                .expect("escutar");
+        let endereco = escuta.local_addr().expect("endereço");
         tokio::spawn(async move {
             while let Some(entrada) = escuta.accept().await {
                 let _ = entrada.await;
