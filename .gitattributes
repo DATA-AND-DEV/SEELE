@@ -57,3 +57,9 @@ crates/seele-lancador/testes/lista-de-revogacao-de-teste.json  -text
 *.minisig                                            -text
 *.pub                                                -text
 *.base64                                             -text
+
+# As versões da API de MODs. `api/congeladas.sha256` guarda o SHA-256 de cada
+# uma, e `a_api_publicada_nao_se_edita` confere contra os bytes da cópia de
+# trabalho: um `\r` a mais seria uma versão publicada «editada» por ninguém. A
+# regra `eol=lf` do topo já bastaria hoje; esta sobrevive a alguém afrouxá-la.
+api/*.json                                           -text

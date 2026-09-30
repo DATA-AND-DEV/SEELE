@@ -2,6 +2,14 @@
 
 Um arquivo por versão, e **nenhum deles é editado depois de publicado**.
 
+`api/congeladas.sha256` guarda o SHA-256 de cada um, e o teste
+`a_api_publicada_nao_se_edita` (em `crates/seele-conformance`) reprova o
+`cargo test` — e com ele o portão da publicação — quando os bytes de uma versão
+listada mudam ou quando aparece uma `vN.json` fora da lista. Mudar o que uma
+versão promete é publicar a seguinte, e nunca editar esta — a v3 e a v4,
+editadas antes de o guarda existir, ficaram congeladas como estão, com a
+história no comentário da lista.
+
 ## Por que congelado
 
 O [ADR 0045](../docs/adr/0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md)

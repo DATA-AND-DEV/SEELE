@@ -1,0 +1,47 @@
+# O SHA-256 de cada `api/vN.json`, no formato do `shasum -a 256` rodado dentro
+# de `api/`: `<hash>  vN.json`, com dois espaços.
+#
+# Uma versão publicada não se edita. Um MOD escrito contra ela quebraria sem
+# que nada no dele mudasse, e a mudança vai numa versão nova, somada às
+# aceitas. O teste `a_api_publicada_nao_se_edita`, em `crates/seele-conformance`,
+# confere esta lista contra os bytes de `api/` e reprova uma versão listada que
+# mudou, uma `vN.json` que não está aqui, uma listada que sumiu, e esta lista
+# sem a linha de alguma versão que o build oferece. Para conferir à mão, dentro
+# de `api/`: `shasum -a 256 -c congeladas.sha256`.
+#
+# Uma versão nova entra aqui no commit que a cria. Enquanto este build não a
+# oferece (`MOD_API_VERSION` abaixo dela), a linha dela acompanha as edições;
+# quando `MOD_API_VERSION` chega a ela, a linha congela.
+#
+# ## v3 e v4 ficam congeladas COMO ESTÃO HOJE, e a história fica aqui
+#
+# As duas foram editadas depois de publicadas, antes de este guarda existir,
+# num commit só: `970cb67` («Os ajustes pós-v0.13.0…», 21/09/2026).
+#
+# - v3 saiu na v0.12.0 (commit fc9146ef3) com SHA-256
+#   fa8672fe51578c15f5840f26f83665e88007d901eabc5c126e88892c5788f1de,
+#   e foi assim também na v0.12.1 e na v0.13.0. O `970cb67` subiu
+#   `cartoes.limites.bytesDeMidia` de 8388608 para 20971520.
+# - v4 saiu na v0.13.0 (commit a6d5882f5) com SHA-256
+#   6369610eec749782c857a2f9b4b2afd33591dc65ba966d920fa6a55fdaec8be4.
+#   O `970cb67` acrescentou `pagina-imersiva` e `avisos-duracao-ms` a
+#   `superficies` e a `contribuicoes`, `listarNaBarra` a `contribuicoes`, e
+#   subiu `cartoes.limites.bytesDeMidia` de 8388608 para 20971520.
+#
+# Os bytes de hoje são os que saíram da v0.14.0 (5fe17686d) em diante — v0.14.1,
+# v0.14.2 e v0.15.0 —, e são os que descrevem o que o produto faz desde então.
+# Voltar aos bytes de antes faria o documento discordar do build que está no
+# mundo. Quem ainda roda um build de protocolo 7, dentro da janela de
+# compatibilidade da v0.15.0, segue com os bytes de antes: a v0.12.x lê a v3
+# com teto de mídia de cartão de 8 MiB, e a v0.13.0 lê a v3 e a v4 assim, e a
+# v4 sem `pagina-imersiva`, `avisos-duracao-ms` nem `listarNaBarra`. Um MOD de
+# API 3 ou 4 que conte com o teto novo ou com esses campos se comporta
+# diferente lá. As edições acrescentaram campos e subiram tetos, e nenhuma tirou
+# um nome que um MOD escreve; por isso o `check-api` não tinha o que ver. O que
+# este guarda muda é que a próxima edição assim não passa em silêncio: ela vira
+# a versão seguinte.
+298fcbc3f386bf62c5aa4484bbc32f4ebb7a9d5523891eceec4bc1cc7738d3d6  v1.json
+f28d33eef08841daee7da58075d3513c0a7f3719bcf51fec784bc16b70e3505b  v2.json
+519b5e0d1c47138e009d63fffe1c7cfa0a528808293d0b34c71a08c7140a71e2  v3.json
+e31dda28805d2c4213889ea9437bfb7d7f49b14b041b127f47bb97676c50b973  v4.json
+7ff2570751fa4acbe52cf2d3cf7cec015453c12fae62ab5a469b74959aec046b  v5.json
