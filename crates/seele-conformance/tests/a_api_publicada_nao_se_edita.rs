@@ -226,6 +226,35 @@ fn conferir(
     violacoes
 }
 
+/// Uma reprovação por versão que este build oferece (`oferecida`) e que não tem
+/// linha na lista.
+///
+/// Sem isto, apagar `api/v2.json` e a linha dela juntos deixaria a lista e a
+/// pasta de acordo, e o [`conferir`] passaria sem ter visto a v2.
+///
+/// Há dois jeitos de chegar aqui, e a mensagem cobre os dois: a linha de uma
+/// versão que já saiu foi apagada, ou `MOD_API_VERSION` subiu antes de a linha
+/// de uma versão nova entrar. Ela não dá o hash dos bytes de hoje, de
+/// propósito: no primeiro caso, esses bytes podem ser os de uma edição, e
+/// copiar o hash deles para a lista faria a edição passar calada. Por isso o
+/// teste de árvore reprova aqui antes de o [`conferir`], que daria esse hash.
+fn linhas_que_faltam(lista: &BTreeMap<String, String>, oferecida: u32) -> Vec<String> {
+    (1..=oferecida)
+        .map(|n| (n, format!("v{n}.json")))
+        .filter(|(_, nome)| !lista.contains_key(nome))
+        .map(|(n, nome)| {
+            format!(
+                "`{LISTA}` não tem a linha de `{nome}`, que este build oferece \
+                 (`MOD_API_VERSION` = {oferecida}), e sem ela a versão fica sem guarda \
+                 nenhum. Se `{nome}` já saiu numa release, restaure a linha \
+                 (`git checkout -- {LISTA}`). Se ela é nova neste commit, ponha a linha dela \
+                 na lista (`shasum -a 256 {nome}`, dentro de `api/`), e `MOD_API_VERSION` só \
+                 chega a {n} quando ela estiver pronta para sair: a partir daí ela congela."
+            )
+        })
+        .collect()
+}
+
 /// **A árvore de verdade.** Nenhuma versão publicada mudou, toda versão está
 /// na lista, e toda linha da lista tem o seu arquivo.
 #[test]
@@ -237,18 +266,9 @@ fn nenhuma_versao_publicada_da_api_mudou() {
     );
     let lista = ler_lista(&texto).unwrap_or_else(|erro| panic!("`{LISTA}`, {erro}"));
 
-    // A lista precisa ter a linha de toda versão que este build oferece. Sem
-    // isto, apagar `api/v2.json` e a linha dela juntos deixaria a lista e a
-    // pasta de acordo, e o guarda passaria sem ter conferido a v2.
-    for n in 1..=MOD_API_VERSION {
-        let publicada = format!("v{n}.json");
-        assert!(
-            lista.contains_key(&publicada),
-            "`{LISTA}` não tem a linha de `{publicada}`, que este build oferece \
-             (`MOD_API_VERSION` = {MOD_API_VERSION}). Sem ela a versão fica sem guarda \
-             nenhum. Restaure a linha (`git checkout -- {LISTA}`)."
-        );
-    }
+    // Antes do `conferir`, e de propósito: ver `linhas_que_faltam`.
+    let faltam = linhas_que_faltam(&lista, MOD_API_VERSION);
+    assert!(faltam.is_empty(), "{}", faltam.join("\n"));
 
     let presentes = ler_api(&raiz.join("api"));
     let violacoes = conferir(&lista, &presentes, MOD_API_VERSION);
@@ -286,6 +306,47 @@ fn lista_de_fixture() -> BTreeMap<String, String> {
         "b".repeat(64)
     );
     ler_lista(&texto).expect("a lista de fixture está no formato")
+}
+
+#[test]
+fn a_lista_sem_a_linha_da_versao_oferecida_reprova() {
+    // A lista tem a v1 e a v2, e o build oferece a 3. É o dia em que
+    // `MOD_API_VERSION` sobe antes de a linha da v3 entrar, ou o dia em que
+    // alguém apagou `api/v3.json` e a linha dela juntos: nos dois, a pasta e a
+    // lista concordam, e só esta conta vê a v3 sem guarda.
+    let lista = lista_de_fixture();
+    let faltam = linhas_que_faltam(&lista, 3);
+    assert_eq!(
+        faltam.len(),
+        1,
+        "esperava só a linha da v3, a versão oferecida que a lista não tem; vieram {faltam:?}"
+    );
+    let primeira = faltam.first().map_or("", String::as_str);
+    assert!(
+        primeira.contains("`v3.json`")
+            && primeira.contains("git checkout -- api/congeladas.sha256")
+            && primeira.contains("shasum -a 256 v3.json"),
+        "a reprovação não diz o que fazer nos dois casos — restaurar a linha de uma versão \
+         que já saiu, ou pôr a de uma versão nova antes de ela congelar: {primeira}"
+    );
+
+    // A primeira versão conta como as outras: sem a linha da v1, a v1 some do
+    // guarda do mesmo jeito.
+    let mut sem_a_v1 = lista.clone();
+    sem_a_v1.remove("v1.json");
+    let faltam = linhas_que_faltam(&sem_a_v1, 2);
+    assert!(
+        faltam.len() == 1 && faltam.first().is_some_and(|v| v.contains("`v1.json`")),
+        "a lista sem a linha da v1 não reprovou na v1: apagar `api/v1.json` e a linha dela \
+         juntos passaria calado. Vieram {faltam:?}"
+    );
+
+    let em_dia = linhas_que_faltam(&lista, 2);
+    assert!(
+        em_dia.is_empty(),
+        "a lista tem a linha de toda versão que o build oferece e reprovou mesmo assim: \
+         {em_dia:?}"
+    );
 }
 
 #[test]
