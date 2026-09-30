@@ -310,8 +310,8 @@ fn promessas_cobradas<'a>(
 /// processamento morava no `run`, cada conferência marcava a reprovação por
 /// conta própria, e apagar a marca da cobrança deixava o `check-api` imprimir
 /// a violação e sair com 0, com os testes, o clippy e o próprio `check-api`
-/// verdes. Aqui as duas voltam na mesma lista, e o `run` decide a saída por
-/// ela, num lugar só.
+/// verdes. Aqui as duas voltam na mesma lista, e [`conferir_api`] decide a
+/// saída por ela, num lugar só.
 fn conferir_arquivo(
     caminho: &std::path::Path,
     json: &serde_json::Value,
@@ -333,6 +333,76 @@ fn conferir_arquivo(
     let cobrada = cobranca.is_some();
     violacoes.extend(cobranca.unwrap_or_default());
     (violacoes, cobrada)
+}
+
+/// O que o `check-api` conta quando aprova `api/`.
+#[derive(Debug, PartialEq, Eq)]
+struct Resumo {
+    /// Os `.json` de `api/`.
+    versoes: usize,
+    /// Os que [`cobrar`] deu por cobrados.
+    cobradas: usize,
+}
+
+/// A decisão do `check-api` sobre `api/` inteira: `Ok` com o [`Resumo`] quando
+/// nada reprova, e `Err` com uma linha para cada coisa que reprova — cada
+/// violação de [`conferir_arquivo`], com o arquivo dela, e cada entrada,
+/// arquivo ou json que não se lê. Não para na primeira: diz todas.
+///
+/// Fora do [`run`], e com a saída decidida aqui, para que a decisão tenha
+/// teste. Quando o `run` a decidia numa marca que cada arquivo acendia, apagar
+/// a marca fazia o `check-api` imprimir a violação, a linha de sucesso logo
+/// depois e sair com 0, e só o clippy percebia, por um `mut` sobrando. O `run`
+/// só imprime o que volta daqui.
+///
+/// As `entradas` são os caminhos de `api/` como o `read_dir` os dá. Uma entrada
+/// que não se lê reprova dizendo o erro, em vez de sumir e levar junto a
+/// cobrança da versão que ela fosse: é o que `hashes_dos_json`, no guarda de
+/// congelamento, faz com o mesmo erro.
+fn conferir_api(
+    entradas: impl IntoIterator<Item = std::io::Result<std::path::PathBuf>>,
+    fonte: &str,
+    promessas: &[Promessa<'_>; 2],
+) -> Result<Resumo, Vec<String>> {
+    let mut resumo = Resumo {
+        versoes: 0,
+        cobradas: 0,
+    };
+    let mut falhas = Vec::new();
+    for entrada in entradas {
+        let caminho = match entrada {
+            Ok(caminho) => caminho,
+            Err(erro) => {
+                falhas.push(format!(
+                    "uma entrada de `api/` não se lê ({erro}), e uma versão nela ficaria sem \
+                     cobrança"
+                ));
+                continue;
+            }
+        };
+        if caminho.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        resumo.versoes += 1;
+        let Ok(texto) = std::fs::read_to_string(&caminho) else {
+            falhas.push(format!("não deu para ler {}", caminho.display()));
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&texto) else {
+            falhas.push(format!("{} não é json", caminho.display()));
+            continue;
+        };
+        let (violacoes, cobrada) = conferir_arquivo(&caminho, &json, fonte, promessas);
+        resumo.cobradas += usize::from(cobrada);
+        for violacao in violacoes {
+            falhas.push(format!("{} — {violacao}", caminho.display()));
+        }
+    }
+    if falhas.is_empty() {
+        Ok(resumo)
+    } else {
+        Err(falhas)
+    }
 }
 
 /// Reads `api/*.json` and every crate source, and reports orphans.
@@ -388,59 +458,29 @@ pub(crate) fn run() -> ExitCode {
     }
     let promessas = promessas_cobradas(&momentos, &eventos);
 
-    let mut houve = false;
     let Ok(entradas) = std::fs::read_dir(raiz.join("api")) else {
         eprintln!("check-api: não achei `api/`");
         return ExitCode::FAILURE;
     };
-    let mut versoes = 0_usize;
-    let mut cobradas = 0_usize;
-    for entrada in entradas {
-        // Pulada, a entrada levaria junto a cobrança da versão que ela fosse, e
-        // o resumo contaria uma versão a menos sem dizer por quê.
-        let entrada = match entrada {
-            Ok(entrada) => entrada,
-            Err(erro) => {
-                eprintln!(
-                    "check-api: uma entrada de `api/` não se lê ({erro}), e uma versão nela \
-                     ficaria sem cobrança"
-                );
-                return ExitCode::FAILURE;
+    let entradas = entradas.map(|entrada| entrada.map(|entrada| entrada.path()));
+
+    match conferir_api(entradas, &fonte, &promessas) {
+        Ok(Resumo { versoes, cobradas }) => {
+            println!(
+                "check-api: toda a superfície de MOD ainda aponta para algo ({versoes} \
+                 versão(ões)); `momento_de` despacha {} momento(s) e a janela, {} evento(s), \
+                 cobrados em {cobradas} versão(ões) a partir da {PRIMEIRA_API_COBRADA}.",
+                momentos.len(),
+                eventos.len()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(falhas) => {
+            for falha in &falhas {
+                eprintln!("check-api: {falha}");
             }
-        };
-        let caminho = entrada.path();
-        if caminho.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
+            ExitCode::FAILURE
         }
-        versoes += 1;
-        let Ok(texto) = std::fs::read_to_string(&caminho) else {
-            eprintln!("check-api: não deu para ler {}", caminho.display());
-            return ExitCode::FAILURE;
-        };
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&texto) else {
-            eprintln!("check-api: {} não é json", caminho.display());
-            return ExitCode::FAILURE;
-        };
-
-        let (violacoes, cobrada) = conferir_arquivo(&caminho, &json, &fonte, &promessas);
-        cobradas += usize::from(cobrada);
-        for violacao in &violacoes {
-            eprintln!("check-api: {} — {violacao}", caminho.display());
-        }
-        houve |= !violacoes.is_empty();
-    }
-
-    if houve {
-        ExitCode::FAILURE
-    } else {
-        println!(
-            "check-api: toda a superfície de MOD ainda aponta para algo ({versoes} \
-             versão(ões)); `momento_de` despacha {} momento(s) e a janela, {} evento(s), \
-             cobrados em {cobradas} versão(ões) a partir da {PRIMEIRA_API_COBRADA}.",
-            momentos.len(),
-            eventos.len()
-        );
-        ExitCode::SUCCESS
     }
 }
 
@@ -797,8 +837,9 @@ fn vizinha(x: u8) -> (&'static str, u8) {
 
     /// O arquivo inteiro, como o `run` o confere: uma v6 que promete um evento
     /// sem despachante volta com a violação e dada por cobrada. É da lista
-    /// devolvida aqui que o `run` tira a reprovação; uma violação que ficasse
-    /// fora dela seria impressa, ou nem isso, e o `check-api` sairia com 0.
+    /// devolvida aqui que [`conferir_api`] tira a reprovação; uma violação que
+    /// ficasse fora dela seria impressa, ou nem isso, e o `check-api` sairia
+    /// com 0.
     #[test]
     fn uma_api_6_que_falha_volta_com_a_violacao_e_cobrada() {
         let momentos = momentos_de_fixture();
@@ -854,6 +895,135 @@ fn vizinha(x: u8) -> (&'static str, u8) {
                     .is_some_and(|v| v.contains("pessoa.apelido") && v.contains("Person::nick")),
             "`pessoa.apelido` aponta para `Person::nick`, que sumiu, e a violação não voltou ao \
              `run`: o `check-api` sairia com 0. Vieram {violacoes:?}"
+        );
+    }
+
+    /// Uma pasta só deste teste, com os `arquivos` dados, para [`conferir_api`]
+    /// ler do disco como o `run` lê `api/`. O nome leva o do teste e o do
+    /// processo: dois testes em paralelo não leem a pasta um do outro.
+    fn pasta_com(nome: &str, arquivos: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("seele-check-api-{nome}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        if let Err(erro) = std::fs::create_dir_all(&dir) {
+            panic!(
+                "não deu para criar a pasta do teste, {}: {erro}",
+                dir.display()
+            );
+        }
+        for (arquivo, conteudo) in arquivos {
+            if let Err(erro) = std::fs::write(dir.join(arquivo), conteudo) {
+                panic!(
+                    "não deu para escrever `{arquivo}` em {}: {erro}",
+                    dir.display()
+                );
+            }
+        }
+        dir
+    }
+
+    /// A decisão do `check-api`, e não só a lista de um arquivo: uma v6 no
+    /// disco que promete um evento sem despachante dá `Err`, com a violação e
+    /// o arquivo dela. Quando a decisão morava no `run`, numa marca que cada
+    /// arquivo acendia, apagar a marca fazia o `check-api` imprimir a violação,
+    /// a linha de sucesso logo depois e sair com 0, e os testes continuavam
+    /// verdes: só o clippy percebia, por um `mut` sobrando.
+    #[test]
+    fn uma_api_6_no_disco_que_falha_reprova_o_check_api() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let dir = pasta_com(
+            "v6-que-falha",
+            &[(
+                "v6.json",
+                r#"{ "version": 6, "moments": ["PersonJoined"], "eventos": ["botao", "arrastar"] }"#,
+            )],
+        );
+        let resultado = conferir_api(
+            [Ok(dir.join("v6.json"))],
+            "",
+            &promessas_cobradas(&momentos, &eventos),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let Err(linhas) = resultado else {
+            panic!(
+                "uma v6 que promete `arrastar`, que ninguém despacha, foi aprovada: o \
+                 `check-api` imprimiria a linha de sucesso e sairia com 0. Veio {resultado:?}"
+            );
+        };
+        assert!(
+            linhas.len() == 1
+                && linhas
+                    .first()
+                    .is_some_and(|l| l.contains("v6.json") && l.contains("arrastar")),
+            "o `check-api` reprovou a v6 sem dizer em que arquivo está a promessa de `arrastar` \
+             que ninguém despacha: quem lê não saberia o que consertar. Vieram {linhas:?}"
+        );
+    }
+
+    /// Uma entrada de `api/` que não se lê reprova, dizendo o erro, em vez de
+    /// sumir e levar junto a cobrança da versão que ela fosse. É o que
+    /// `hashes_dos_json`, no guarda de congelamento, faz com o mesmo erro.
+    #[test]
+    fn uma_entrada_de_api_que_nao_se_le_reprova_o_check_api() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let resultado = conferir_api(
+            [Err(std::io::Error::other("erro provocado pelo teste"))],
+            "",
+            &promessas_cobradas(&momentos, &eventos),
+        );
+        let Err(linhas) = resultado else {
+            panic!(
+                "uma entrada de `api/` que não se lê foi pulada calada: a versão nela ficaria \
+                 sem cobrança, o resumo contaria uma a menos e o `check-api` sairia com 0. \
+                 Veio {resultado:?}"
+            );
+        };
+        assert!(
+            linhas
+                .iter()
+                .any(|l| l.contains("erro provocado pelo teste")),
+            "o `check-api` reprovou a entrada de `api/` que não se lê sem dizer o erro que ela \
+             teve: quem lê não saberia por onde começar. Vieram {linhas:?}"
+        );
+    }
+
+    /// O outro lado da decisão: uma v5 congelada e uma v6 que cumpre passam, e o
+    /// resumo conta duas versões e uma cobrada. O `README.md` da pasta não é
+    /// versão nenhuma e não entra na conta.
+    #[test]
+    fn a_api_que_cumpre_passa_e_o_resumo_conta_as_versoes_e_as_cobradas() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let dir = pasta_com(
+            "que-cumpre",
+            &[
+                (
+                    "v5.json",
+                    r#"{ "version": 5, "reads": { "pessoa.apelido": "Person::nick" } }"#,
+                ),
+                (
+                    "v6.json",
+                    r#"{ "version": 6, "moments": ["PersonJoined"], "eventos": ["botao"] }"#,
+                ),
+                ("README.md", "não é versão"),
+            ],
+        );
+        let resultado = conferir_api(
+            ["v5.json", "v6.json", "README.md"].map(|nome| Ok(dir.join(nome))),
+            "pub struct Person { pub nick: String }",
+            &promessas_cobradas(&momentos, &eventos),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            resultado,
+            Ok(Resumo {
+                versoes: 2,
+                cobradas: 1
+            }),
+            "uma `api/` que cumpre tudo não passou, ou o resumo contou errado: o `check-api` \
+             reprovaria a árvore sem nada a consertar, ou diria que cobrou versões que não cobrou"
         );
     }
 
@@ -1020,8 +1190,8 @@ const PERFIS = { regiao: { nome: "regiao" } };
     /// que ninguém entrega; com os conjuntos trocados, reprovaria um que é
     /// entregue.
     ///
-    /// O teste não vê o `run`. Que é este par que ele passa ao
-    /// [`conferir_arquivo`], e não outro, está no código dele: o tipo
+    /// O teste não vê o `run`. Que é este par que ele passa a
+    /// [`conferir_api`], e não outro, está no código dele: o tipo
     /// `[Promessa; 2]` só garante que são duas.
     #[test]
     fn as_promessas_cobradas_conferem_os_momentos_e_os_eventos() {
