@@ -23,8 +23,10 @@
 //!   arquivo **e** a linha passaria pelos três primeiros itens sem deixar
 //!   rastro.
 //!
-//! Cada reprovação diz o que fazer: desfazer a edição e publicar a versão
-//! seguinte, ou acrescentar a linha que falta.
+//! Cada reprovação diz o que fazer no caso dela. Por exemplo: desfazer a
+//! edição e pôr a mudança na versão seguinte à que o build oferece,
+//! acrescentar ou trocar a linha, restaurar o arquivo que sumiu, ou tirar a
+//! linha de uma versão que nunca saiu.
 //!
 //! # Por que aqui, e não no `check-api`
 //!
@@ -121,10 +123,21 @@ fn ler_lista(texto: &str) -> Result<BTreeMap<String, String>, String> {
 
 /// O que `api/` tem hoje: nome de cada `.json` → SHA-256 dos bytes.
 fn ler_api(api: &Path) -> BTreeMap<String, String> {
-    let mut presentes = BTreeMap::new();
     let entradas = std::fs::read_dir(api).expect("`api/` existe na raiz do repositório");
-    for entrada in entradas.flatten() {
-        let caminho = entrada.path();
+    hashes_dos_json(entradas.map(|entrada| entrada.map(|e| e.path())))
+}
+
+/// O SHA-256 de cada `.json` entre `caminhos`, pelo nome do arquivo.
+///
+/// Uma entrada que não se lê falha alto, e não é pulada. Pulada, uma versão
+/// listada reprovaria como «sumiu», com a causa errada, e uma `vN.json` nova,
+/// fora da lista, passaria sem guarda nenhum.
+fn hashes_dos_json(
+    caminhos: impl IntoIterator<Item = std::io::Result<PathBuf>>,
+) -> BTreeMap<String, String> {
+    let mut presentes = BTreeMap::new();
+    for caminho in caminhos {
+        let caminho = caminho.expect("uma entrada de `api/` se lê");
         if !caminho.extension().is_some_and(|e| e == "json") {
             continue;
         }
@@ -242,6 +255,29 @@ fn nenhuma_versao_publicada_da_api_mudou() {
     assert!(violacoes.is_empty(), "{}", violacoes.join("\n"));
 }
 
+#[test]
+fn uma_entrada_de_api_que_nao_se_le_falha_alto_em_vez_de_sumir() {
+    // Com `RUST_TEST_NOCAPTURE` (`.cargo/config.toml`), o pânico provocado
+    // aparece na saída mesmo com o teste verde, e o texto do erro diz que foi
+    // de propósito. Trocar o panic hook para calá-lo calaria também o pânico de
+    // um teste paralelo que reprovasse de verdade.
+    let panico = std::panic::catch_unwind(|| {
+        hashes_dos_json([Err(std::io::Error::other(
+            "erro provocado de propósito pelo teste",
+        ))])
+    });
+    let mensagem = panico
+        .err()
+        .and_then(|carga| carga.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    assert!(
+        mensagem.contains("erro provocado de propósito pelo teste"),
+        "uma entrada de `api/` que não se lê sumiu sem aviso: uma `vN.json` nova, fora da \
+         lista, passaria sem guarda, e uma listada reprovaria como «sumiu», com a causa \
+         errada. Pânico: {mensagem:?}"
+    );
+}
+
 /// Uma lista de duas versões, escrita como a de verdade.
 fn lista_de_fixture() -> BTreeMap<String, String> {
     let texto = format!(
@@ -278,7 +314,34 @@ fn uma_versao_publicada_editada_reprova_e_manda_publicar_a_seguinte() {
             && primeira.contains("api/v3.json")
             && primeira.contains("git checkout"),
         "a violação não diz o que fazer — desfazer a v1 e pôr a mudança na v3, a seguinte à \
-         mais nova: {primeira}"
+         que o build oferece: {primeira}"
+    );
+}
+
+#[test]
+fn a_versao_que_o_build_oferece_editada_reprova_como_publicada() {
+    // A fronteira: a v2 é a que o build oferece, e já saiu. É o caso do
+    // `970cb67`, que editou a v4 quando ela era a `MOD_API_VERSION`. Tratada
+    // como em construção, a mensagem mandaria trocar a linha, e quem seguisse
+    // o conselho faria a edição passar calada.
+    let lista = lista_de_fixture();
+    let mut presentes = lista.clone();
+    presentes.insert("v2.json".to_owned(), "c".repeat(64));
+    let violacoes = conferir(&lista, &presentes, 2);
+    assert_eq!(
+        violacoes.len(),
+        1,
+        "esperava uma violação, vieram {violacoes:?}"
+    );
+    let primeira = violacoes.first().map_or("", String::as_str);
+    assert!(
+        primeira.contains("api/v2.json")
+            && primeira.contains("foi publicada")
+            && primeira.contains("git checkout -- api/v2.json")
+            && primeira.contains("api/v3.json")
+            && !primeira.contains("troque a linha"),
+        "a versão que o build oferece foi editada e o guarda a tratou como em construção: \
+         trocar a linha, como a mensagem manda, deixaria a edição passar calada: {primeira}"
     );
 }
 
@@ -358,6 +421,31 @@ fn uma_versao_listada_que_sumiu_reprova() {
 }
 
 #[test]
+fn a_versao_que_o_build_oferece_sem_arquivo_manda_restaurar() {
+    // A fronteira do segundo laço: a v2 é a que o build oferece, então já saiu
+    // e pode ter MOD escrito contra ela. Tirar a linha, o conselho de uma
+    // versão que nunca saiu, apagaria a última prova de que ela existiu.
+    let lista = lista_de_fixture();
+    let mut presentes = lista.clone();
+    presentes.remove("v2.json");
+    let violacoes = conferir(&lista, &presentes, 2);
+    assert_eq!(
+        violacoes.len(),
+        1,
+        "esperava uma violação, vieram {violacoes:?}"
+    );
+    let primeira = violacoes.first().map_or("", String::as_str);
+    assert!(
+        primeira.contains("api/v2.json")
+            && primeira.contains("sumiu")
+            && primeira.contains("git checkout -- api/v2.json")
+            && !primeira.contains("tire a linha"),
+        "a versão que o build oferece sumiu e o guarda mandou tirar a linha dela, como se ela \
+         nunca tivesse saído: {primeira}"
+    );
+}
+
+#[test]
 fn uma_linha_sem_arquivo_de_versao_nao_oferecida_pede_tirar_a_linha_ou_criar_o_arquivo() {
     // A v3 está na lista e não em `api/`, e o build oferece a 2: ela nunca
     // saiu, então não há o que restaurar.
@@ -384,14 +472,28 @@ fn uma_linha_sem_arquivo_de_versao_nao_oferecida_pede_tirar_a_linha_ou_criar_o_a
 fn um_json_que_nao_se_chama_vn_reprova() {
     let lista = lista_de_fixture();
     let mut presentes = lista.clone();
-    presentes.insert("rascunho.json".to_owned(), "e".repeat(64));
-    presentes.insert("v06.json".to_owned(), "e".repeat(64));
+    // `v06.json` e `v+5.json` têm número, mas não a grafia de uma versão. Lidos
+    // como 6 e 5, cairiam em «não está na lista», e a linha pedida faria deles
+    // uma segunda grafia de uma versão.
+    let fora_do_padrao = ["rascunho.json", "v06.json", "v+5.json"];
+    for nome in fora_do_padrao {
+        presentes.insert(nome.to_owned(), "e".repeat(64));
+    }
     let violacoes = conferir(&lista, &presentes, 2);
     assert_eq!(
         violacoes.len(),
-        2,
+        fora_do_padrao.len(),
         "um `.json` com nome que não é `vN.json` escaparia do congelamento: {violacoes:?}"
     );
+    for nome in fora_do_padrao {
+        assert!(
+            violacoes
+                .iter()
+                .any(|v| v.contains(&format!("`api/{nome}` não é uma versão"))),
+            "`{nome}` não foi reprovado como nome fora do padrão: lido como número, ele vira \
+             uma segunda grafia de uma versão: {violacoes:?}"
+        );
+    }
 }
 
 #[test]
@@ -408,6 +510,11 @@ fn uma_lista_fora_do_formato_reprova_em_vez_de_pular_a_linha() {
             format!("{}  um.json\n", "a".repeat(64)),
             "nome que não é versão",
         ),
+        (
+            format!("{}  v06.json\n", "a".repeat(64)),
+            "zero à esquerda no número",
+        ),
+        (format!("{}  v+5.json\n", "a".repeat(64)), "sinal no número"),
         (repetida, "versão repetida"),
     ] {
         assert!(
