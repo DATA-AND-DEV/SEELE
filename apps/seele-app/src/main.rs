@@ -2262,12 +2262,23 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     }
 }
 
-/// **O maior pedaço de texto de terceiro que uma linha do `seele.log` leva.**
+/// **O teto de um pedaço de texto de terceiro numa linha do `seele.log`**,
+/// contado em caracteres **antes do escape**.
 ///
 /// Quinhentos e doze caracteres, o número que `registrar_da_janela` já usava
 /// escrito à mão. Nomeado quando o `console` dos MODs passou a escrever no
 /// mesmo arquivo: as duas portas põem lá texto que um terceiro escolheu, e o
 /// teto de uma não pode divergir do da outra por esquecimento.
+///
+/// **Onde há escape depois do corte, não é o tamanho escrito.** A janela
+/// ([`registrar_da_janela`]) escreve a frase sem escape, com o caractere de
+/// controle trocado por espaço, e o `console` do executor
+/// (`cortar_linha_do_console`) corta pelo tamanho já escapado: nas duas, o
+/// teto é o que a linha leva. Mas [`motivo_no_registro`] e
+/// [`caminho_no_registro`] cortam aqui e só depois escapam com `{:?}`, e o
+/// escape pode multiplicar o pedaço por até dez: um caractere que não se
+/// imprime sai como `\u{100000}`, e quinhentos e doze deles viram 5122
+/// caracteres na linha, com as aspas.
 const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
 
 /// **O maior id de MOD que uma linha do `seele.log` leva**, em caracteres.
@@ -5141,15 +5152,15 @@ fn motivo_no_registro(motivo: &str) -> String {
 /// aspas, com escape.
 ///
 /// O caminho é texto de terceiro nas duas pontas. Na recusa, é o que a janela
-/// pede ([`recusa_de_midia_dita`], campo `origem`). No som servido, é o nome que
-/// o MOD escolheu no manifesto ([`som_servido_dito`], campo `caminho`), e o
-/// manifesto só confere que cada pedaço é um nome (`inner_path`): uma quebra de
-/// linha passa. O formatador do registro não escapa quebra de linha em `%`, e
-/// um `\n` no caminho escreveria no `seele.log` uma segunda linha com a cara do
-/// produto.
+/// pede ([`recusa_de_midia_dita`], campo `origem`). Na mídia e no som servidos,
+/// é o nome que o MOD escolheu no manifesto ([`midia_servida_dita`] e
+/// [`som_servido_dito`], campo `caminho`), e o manifesto só confere que cada
+/// pedaço é um nome (`inner_path`): uma quebra de linha passa. O formatador do
+/// registro não escapa quebra de linha em `%`, e um `\n` no caminho escreveria
+/// no `seele.log` uma segunda linha com a cara do produto.
 ///
-/// Uma função só para as duas, para que o teto e o escape não divirjam: as
-/// aspas impedem a linha forjada, e o teto, a linha sem fim. O escape pode
+/// Uma função só para as três linhas, para que o teto e o escape não divirjam:
+/// as aspas impedem a linha forjada, e o teto, a linha sem fim. O escape pode
 /// fazer o texto crescer até dez vezes, como em [`motivo_no_registro`].
 fn caminho_no_registro(caminho: &str) -> String {
     let cortado: String = caminho.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
@@ -5255,15 +5266,26 @@ fn midia_do_mod(
     // terceiro e vira som na máquina de quem está numa conversa é um evento que
     // quem hospeda tem direito de ler no registro — e é o que permite medir o
     // caminho da mídia sem a janela contar nada.
+    midia_servida_dita(&id, geracao, &caminho, midia.papel, midia.bytes);
+    Ok(midia)
+}
+
+/// **Diz no registro que a mídia de um MOD saiu**, e qual.
+///
+/// Fora do comando pelo mesmo motivo de [`som_servido_dito`]: um teste lê a
+/// linha sem `AppHandle`. O caminho é o nome que o MOD escolheu no manifesto,
+/// e passa por [`caminho_no_registro`]: escrito cru, um nome com quebra de
+/// linha escreveria, a cada mídia servida, uma linha com a cara do produto. O
+/// `mod_id` vai em `%` como está, pela razão dita em [`som_servido_dito`].
+fn midia_servida_dita(mod_id: &str, geracao: u64, caminho: &str, papel: &str, bytes: usize) {
     tracing::info!(
-        mod_id = %id,
+        mod_id = %mod_id,
         geracao,
-        caminho = %caminho,
-        papel = midia.papel,
-        bytes = midia.bytes,
+        caminho = %caminho_no_registro(caminho),
+        papel,
+        bytes,
         "mídia de MOD servida"
     );
-    Ok(midia)
 }
 
 /// **Os bytes de um som que o MOD declarou**, crus, para a janela tocar por
@@ -10263,11 +10285,39 @@ mod rastro_de_teste {
         }
     }
 
+    /// **Um segundo despachante, vivo o processo inteiro, que não escreve
+    /// nada.** É ele que tira da captura a dependência da ordem das threads.
+    ///
+    /// O `tracing` decide uma vez só, na primeira passagem de qualquer thread,
+    /// se uma linha que escreve (o *callsite*) tem quem a ouça, e guarda a
+    /// resposta. Se, no último registro de despachante, só havia um vivo, a
+    /// pergunta vai só ao despachante da **thread que passou**
+    /// (`tracing-core` 0.1.36, `callsite.rs`: `Dispatchers::rebuilder` devolve
+    /// `Rebuilder::JustOne`, e ele consulta `dispatcher::get_default`). Um
+    /// teste sem captura que passasse primeiro por uma linha, com a captura de
+    /// outro teste como único despachante de pé, a deixava marcada como «nunca»
+    /// — e a mesma linha, no teste que a captura, não escrevia nada.
+    ///
+    /// Com dois vivos, a pergunta vai a todos, e uma linha que a captura ouve
+    /// fica em «às vezes»: cada evento pergunta de novo, à thread em que
+    /// acontece. O que uma captura vê não muda — só o que a thread dela
+    /// escreveu. Chamar `rebuild_interest_cache` ao abrir a captura não basta:
+    /// a outra thread pode passar pela linha depois, com a captura já aberta,
+    /// e foi medido (7 falhas em 20 rodadas do módulo do som).
+    fn segundo_despachante() {
+        static SEMPRE: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
+        SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
+    }
+
     /// Roda `o_que` com um rastro só dele, e devolve o resultado e o texto.
     ///
     /// Todos os níveis, do TRACE para cima: um guarda que confere que algo
     /// **não** saiu como WARN precisa ver que saiu como DEBUG.
+    ///
+    /// O resultado não depende de outro teste ter passado antes pela mesma
+    /// linha sem captura: ver [`segundo_despachante`].
     pub(crate) fn capturar<T>(o_que: impl FnOnce() -> T) -> (T, String) {
+        segundo_despachante();
         let captura = Captura::default();
         let escreve = captura.clone();
         let assinante = tracing_subscriber::fmt()
@@ -10282,6 +10332,39 @@ mod rastro_de_teste {
             resultado,
             String::from_utf8(bytes).expect("o rastro é UTF-8"),
         )
+    }
+
+    /// **Uma linha que outra thread tocou primeiro, fora de qualquer captura,
+    /// ainda é capturada.**
+    ///
+    /// É a ordem que fazia um teste do som falhar por sorte: um teste sem
+    /// captura passava pela linha de recusa antes do teste que a captura, e a
+    /// linha sumia do rastro deste. Aqui a ordem é forçada — a outra thread
+    /// toca a linha primeiro, com a captura já de pé —, e o resultado deixa de
+    /// depender de quem chega antes. E a linha da outra thread continua fora:
+    /// a captura segue sendo só da thread corrente.
+    #[test]
+    fn uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada() {
+        fn diz() {
+            tracing::warn!("linha tocada primeiro fora da captura");
+        }
+        let ((), rastro) = capturar(|| {
+            std::thread::spawn(diz)
+                .join()
+                .expect("a outra thread terminou");
+            diz();
+        });
+        assert!(
+            rastro.contains("linha tocada primeiro fora da captura"),
+            "uma linha que outra thread tocou primeiro sumiu do rastro, e um guarda que a \
+             capture passa ou falha conforme a ordem das threads: {rastro}"
+        );
+        assert_eq!(
+            rastro.lines().count(),
+            1,
+            "a linha da outra thread entrou no rastro desta captura, e um teste passaria a \
+             ler o que outro teste escreveu: {rastro}"
+        );
     }
 }
 
@@ -10616,8 +10699,9 @@ mod pacote_de_teste {
 #[cfg(test)]
 mod a_midia_recusada_e_dita_no_registro {
     use super::{
-        midia_declarada_do_mod, midia_do_servidor_dita, motivo_de, recusa_de_midia_dita,
-        registrar_da_janela, FalhaNoMod, TETO_DA_FRASE_NO_REGISTRO, TETO_DO_ID_NO_REGISTRO,
+        midia_declarada_do_mod, midia_do_servidor_dita, midia_servida_dita, motivo_de,
+        recusa_de_midia_dita, registrar_da_janela, FalhaNoMod, TETO_DA_FRASE_NO_REGISTRO,
+        TETO_DO_ID_NO_REGISTRO,
     };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO};
     use crate::rastro_de_teste::capturar;
@@ -10699,6 +10783,62 @@ mod a_midia_recusada_e_dita_no_registro {
         assert!(
             recusa(&rastro).is_none(),
             "uma mídia aceita escreveu uma recusa, e o registro ensinaria a ignorá-las: {rastro}"
+        );
+    }
+
+    /// **O nome da mídia servida não escreve uma segunda linha no registro.**
+    ///
+    /// O mesmo vetor da linha do som servido: o manifesto só confere que cada
+    /// pedaço do caminho é um nome (`inner_path`), e uma quebra de linha passa.
+    /// O caminho vem em texto, e não num pacote no disco, porque um nome de
+    /// arquivo com `\n` não existe no Windows.
+    #[test]
+    fn um_caminho_com_quebra_de_linha_nao_forja_linha_na_midia_servida() {
+        let ((), rastro) = capturar(|| {
+            midia_servida_dita(ID, 7, "img/a\nWARN seele_app: forjada.png", "imagem", 8);
+        });
+        assert_eq!(
+            rastro.lines().count(),
+            1,
+            "o nome que o MOD declarou escreveu uma segunda linha no seele.log, com a cara do \
+             produto: {rastro}"
+        );
+        for pedaco in [
+            "INFO",
+            "mídia de MOD servida",
+            "mod_id=prova/midia",
+            r#"caminho="img/a\nWARN seele_app: forjada.png""#,
+            "papel=\"imagem\"",
+        ] {
+            assert!(
+                rastro.contains(pedaco),
+                "a linha da mídia servida não traz `{pedaco}`, e quem lê o registro já não acha \
+                 o que o Rust serviu: {rastro}"
+            );
+        }
+    }
+
+    /// **O nome da mídia servida tem o teto das outras portas de texto de
+    /// terceiro.** As aspas impedem a linha forjada, e não a linha sem fim.
+    #[test]
+    fn um_caminho_enorme_sai_cortado_no_teto_de_frase_na_midia_servida() {
+        let ((), rastro) = capturar(|| {
+            midia_servida_dita(
+                ID,
+                7,
+                &"i".repeat(TETO_DA_FRASE_NO_REGISTRO * 4),
+                "imagem",
+                8,
+            );
+        });
+        assert!(
+            rastro.contains(&format!(
+                "caminho=\"{}\"",
+                "i".repeat(TETO_DA_FRASE_NO_REGISTRO)
+            )),
+            "o nome que o MOD declarou entrou no registro sem o teto das outras portas de \
+             texto de terceiro: {} caracteres numa linha",
+            rastro.chars().count()
         );
     }
 
@@ -10904,18 +11044,18 @@ mod a_midia_recusada_e_dita_no_registro {
         }
     }
 
-    /// **Os três comandos de mídia passam pela recusa dita.**
+    /// **Os quatro comandos de mídia passam pela recusa dita.**
     ///
-    /// Os testes acima medem as funções; este prende que os comandos as
-    /// chamam. `ler_imagem_mod` fala com a rede e não sobe num teste sem
-    /// servidor — e um comando que devolvesse a recusa por fora seria a mídia
-    /// recusada em silêncio de novo, com os testes verdes.
+    /// Os testes acima (e os do som) medem as funções; este prende que os
+    /// comandos as chamam. `ler_imagem_mod` fala com a rede e não sobe num
+    /// teste sem servidor — e um comando que devolvesse a recusa por fora seria
+    /// a mídia recusada em silêncio de novo, com os testes verdes.
     ///
     /// O fonte é normalizado para `\n`: num checkout com CRLF o corte em
     /// `"\n}\n"` não acharia o fim da função, e o guarda passaria a ler o
-    /// arquivo inteiro — inclusive este teste, que cita as três chamadas.
+    /// arquivo inteiro — inclusive este teste, que cita as quatro chamadas.
     #[test]
-    fn os_tres_comandos_de_midia_passam_pela_recusa_dita() {
+    fn os_quatro_comandos_de_midia_passam_pela_recusa_dita() {
         let fonte = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
         )
@@ -10925,6 +11065,7 @@ mod a_midia_recusada_e_dita_no_registro {
             ("fn midia_do_mod(", "midia_declarada_do_mod("),
             ("fn midia_em_bytes(", "midia_do_servidor_dita("),
             ("async fn ler_imagem_mod(", "recusa_de_midia_dita("),
+            ("fn som_do_mod(", "som_declarado_do_mod("),
         ] {
             let corpo = fonte
                 .split(comando)
@@ -10948,7 +11089,7 @@ mod a_midia_recusada_e_dita_no_registro {
 #[cfg(test)]
 mod o_som_do_mod_sai_em_bytes {
     use super::{motivo_de, som_declarado_do_mod, som_servido_dito, TETO_DA_FRASE_NO_REGISTRO};
-    use crate::pacote_de_teste::{pasta, publicar, ID, PNG, WAV};
+    use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO, WAV};
     use crate::rastro_de_teste::capturar;
 
     /// **O nome do som servido não escreve uma segunda linha no registro.**
@@ -10998,31 +11139,38 @@ mod o_som_do_mod_sai_em_bytes {
         );
     }
 
-    /// **O comando diz o som que serviu pela função que os testes acima
-    /// medem.** Uma linha escrita à mão dentro de `som_do_mod` deixaria esses
-    /// testes verdes e o caminho cru no registro de novo.
+    /// **Os dois comandos que servem o pacote dizem o que serviram pela função
+    /// que os testes medem**: `som_do_mod` por `som_servido_dito` (acima), e
+    /// `midia_do_mod` por `midia_servida_dita` (no módulo da mídia recusada).
+    /// Uma linha escrita à mão dentro de um deles deixaria esses testes verdes
+    /// e o caminho cru no registro de novo.
     #[test]
-    fn o_comando_do_som_diz_o_que_serviu_pela_funcao_medida() {
+    fn os_comandos_de_midia_dizem_o_que_serviram_pela_funcao_medida() {
         let fonte = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
         )
         .expect("main.rs legível")
         .replace("\r\n", "\n");
-        let corpo = fonte
-            .split("fn som_do_mod(")
-            .nth(1)
-            .and_then(|resto| resto.split("\n}\n").next())
-            .unwrap_or_else(|| panic!("`som_do_mod` sumiu de main.rs"));
-        let codigo: Vec<&str> = corpo
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .collect();
-        let codigo = codigo.join("\n");
-        assert!(
-            codigo.contains("som_servido_dito(") && !codigo.contains("tracing::"),
-            "`som_do_mod` escreve o som servido por fora de `som_servido_dito`, e o caminho que \
-             o MOD declarou pode voltar cru ao registro"
-        );
+        for (comando, funcao) in [
+            ("fn som_do_mod(", "som_servido_dito("),
+            ("fn midia_do_mod(", "midia_servida_dita("),
+        ] {
+            let corpo = fonte
+                .split(comando)
+                .nth(1)
+                .and_then(|resto| resto.split("\n}\n").next())
+                .unwrap_or_else(|| panic!("`{comando}` sumiu de main.rs"));
+            let codigo: Vec<&str> = corpo
+                .lines()
+                .filter(|linha| !linha.trim_start().starts_with("//"))
+                .collect();
+            let codigo = codigo.join("\n");
+            assert!(
+                codigo.contains(funcao) && !codigo.contains("tracing::"),
+                "`{comando}` escreve o que serviu por fora de `{funcao}`, e o caminho que o MOD \
+                 declarou pode voltar cru ao registro"
+            );
+        }
     }
 
     #[test]
@@ -11055,15 +11203,48 @@ mod o_som_do_mod_sai_em_bytes {
         );
     }
 
+    /// Dentro de `capturar`, como toda chamada de teste que passa por uma
+    /// linha que outro teste captura.
     #[test]
     fn um_som_que_o_manifesto_nao_declara_nao_sai() {
         let (raiz, hash) = publicar(&[("som/toque.wav", WAV)]);
-        let falha = som_declarado_do_mod(&pasta(&raiz), ID, &hash, "som/escondido.wav")
-            .expect_err("um som que o manifesto não declara saiu");
+        let (resultado, rastro) =
+            capturar(|| som_declarado_do_mod(&pasta(&raiz), ID, &hash, "som/escondido.wav"));
+        let falha = resultado.expect_err("um som que o manifesto não declara saiu");
         assert_eq!(
             motivo_de(&falha),
             "arquivo-nao-declarado",
             "o som fora do manifesto foi recusado por outro motivo"
+        );
+        assert!(
+            rastro.lines().any(|linha| linha.contains("WARN")
+                && linha.contains("mod_id=prova/midia")
+                && linha.contains("motivo=arquivo-nao-declarado")),
+            "a recusa do som fora do manifesto não chegou ao registro: {rastro}"
+        );
+    }
+
+    /// **Bytes que não são de formato nenhum, pedidos como som, são recusados
+    /// pelo nome e ditos.** É o braço `None` de `som_declarado_do_mod`: sem
+    /// ele, o texto sairia como som e viraria um `decodeAudioData` que falha
+    /// sem dizer por quê.
+    #[test]
+    fn um_texto_pedido_como_som_e_recusado_como_formato_desconhecido_e_dito() {
+        let (raiz, hash) = publicar(&[("som/x.wav", TEXTO)]);
+        let (resultado, rastro) =
+            capturar(|| som_declarado_do_mod(&pasta(&raiz), ID, &hash, "som/x.wav"));
+        let falha = resultado.expect_err("texto saiu pelo caminho do som");
+        assert_eq!(
+            motivo_de(&falha),
+            "formato-desconhecido",
+            "texto pedido como som foi recusado por outro motivo, e o autor procuraria no \
+             lugar errado"
+        );
+        assert!(
+            rastro.lines().any(|linha| linha.contains("WARN")
+                && linha.contains("mod_id=prova/midia")
+                && linha.contains("motivo=formato-desconhecido")),
+            "a recusa do som de formato desconhecido não chegou ao registro: {rastro}"
         );
     }
 }
