@@ -759,6 +759,20 @@ function donoDaRegiao(mod, instancia) {
       });
     },
     /**
+     * Uma recusa que o MOD não vê inteira, dita a quem hospeda.
+     *
+     * **Além do evento, e não no lugar dele.** O evento diz ao MOD «recusada»
+     * ou «falhou»; esta linha diz no `seele.log` **por quê**, com o id do MOD
+     * num campo próprio — o mesmo `mod_id=` das linhas do Rust.
+     *
+     * Só enquanto a instância é a deste MOD e a sessão é a de pé: depois da
+     * saída, uma mídia que não montou é o desfecho certo, e não um defeito.
+     */
+    anotarRecusa: (oQue) => {
+      if (!meu()) return;
+      registrarNoAnfitriao("recusa-de-mod", `${mod.id}: ${oQue}`, "aviso", mod.id);
+    },
+    /**
      * Mídia que a **metade de servidor deste MOD** guarda.
      *
      * A da região com `fonte` vem do pacote; esta vem do servidor — a cena de

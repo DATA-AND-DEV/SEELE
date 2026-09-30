@@ -361,6 +361,20 @@ function pedidoDeArquivo(no) {
 }
 
 /**
+ * O motivo de uma falha de mídia, em texto.
+ *
+ * A recusa do Rust chega como `{ Recusado: { motivo } }`, e não como `Error`:
+ * `String(falha?.message ?? falha)` a escrevia «[object Object]», no evento do
+ * MOD e agora também no registro. Um `Error` da própria janela continua saindo
+ * pela mensagem.
+ */
+function motivoDaFalha(falha) {
+  if (typeof falha?.Recusado?.motivo === "string") return falha.Recusado.motivo;
+  if (typeof falha?.message === "string") return falha.message;
+  return String(falha);
+}
+
+/**
  * Uma região montada, com os recursos dela.
  *
  * O dono é o par `(instancia, geracao)`, e não o `id` do MOD: um MOD pode ser
@@ -373,7 +387,7 @@ class RegiaoDeMod {
 
   /**
    * @param {string} id `autor/nome`.
-   * @param {object} dono `{ instancia, geracao, podeFalar, falar, carregarMidia }`.
+   * @param {object} dono `{ instancia, geracao, podeFalar, falar, anotarRecusa, carregarMidia }`.
    * @param {Element} raiz O elemento onde esta região desenha.
    */
   constructor(id, dono, raiz, perfil = PERFIS_DE_RENDER.regiao) {
@@ -1286,6 +1300,22 @@ class RegiaoDeMod {
   }
 
   /**
+   * Diz a quem hospeda que uma mídia deste MOD não montou, e por quê.
+   *
+   * **Além do evento, e não no lugar dele.** O evento `midia` é do MOD e diz
+   * «recusada» ou «falhou»; esta linha vai ao `seele.log` pelo dono, com o id
+   * do MOD em campo próprio. Em 23/09, descobrir que o avatar do PERFIS
+   * carregava levou uma hora de medição e um reinício com `RUST_LOG=debug`: a
+   * janela sabia o motivo e não o contava a ninguém.
+   *
+   * @param {string} chave A chave do nó, como o MOD a declarou.
+   * @param {string} oQue O que aconteceu, com o número ou o motivo dentro.
+   */
+  dizerRecusaDeMidia(chave, oQue) {
+    this.dono.anotarRecusa(`mídia «${chave}» ${oQue}`);
+  }
+
+  /**
    * O retrato de uma pessoa: imagem quando há, inicial quando não há.
    *
    * Forma própria e não `midia` porque a composição é diferente: um avatar tem
@@ -1310,13 +1340,23 @@ class RegiaoDeMod {
       : this.dono.carregarMidia(fonte.fonte);
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
-      if (midia.papel !== "imagem" || this[bolso.conta] + midia.bytes > bolso.teto) return;
+      if (midia.papel !== "imagem") {
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
+        return;
+      }
+      if (this[bolso.conta] + midia.bytes > bolso.teto) {
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
+        return;
+      }
       bytes = midia.bytes; this[bolso.conta] += bytes;
       elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
       elem.style.backgroundSize = "cover";
       elem.style.backgroundPosition = "center";
     }).catch(falha => {
-      if (!cancelado && !this.solta) this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque: String(falha?.message ?? falha) });
+      if (cancelado || this.solta) return;
+      const porque = motivoDaFalha(falha);
+      this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo: ${porque}`);
     });
   }
 
@@ -1347,12 +1387,16 @@ class RegiaoDeMod {
     if (!vindo) return;
     vindo.then((midia) => {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
-      if (midia.papel !== "imagem") return;
+      if (midia.papel !== "imagem") {
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: o arquivo é ${midia.papel}, e retrato só mostra imagem`);
+        return;
+      }
       const bolso = plano.cartao
         ? { conta: "bytesDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia }
         : { conta: "bytesDeMidia", teto: this.perfil.bytesDeMidia };
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
         elem.dataset.estadoDoRetrato = "cheia";
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
         return;
       }
       const img = elemento("img", "regiao-de-mod-retrato-imagem");
@@ -1363,11 +1407,13 @@ class RegiaoDeMod {
       this[bolso.conta] += midia.bytes;
       elem.append(img);
       elem.dataset.estadoDoRetrato = "imagem";
-    }).catch(() => {
+    }).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       // Falhar num retrato **não** é um erro que a pessoa precise ler: a
-      // inicial continua lá e responde a mesma pergunta.
+      // inicial continua lá e responde a mesma pergunta. Quem escreveu o MOD
+      // precisa — e é para ele que a linha vai ao registro.
       elem.dataset.estadoDoRetrato = "inicial";
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${motivoDaFalha(falha)}`);
     });
   }
 
@@ -1755,7 +1801,10 @@ class RegiaoDeMod {
       // a região pode estar solta, e a sessão pode ter acabado.
       if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (fundo.pedido !== chave) return;
-      if (midia.papel !== "imagem") return;
+      if (midia.papel !== "imagem") {
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo da tela: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
+        return;
+      }
       const img = new Image();
       img.onload = () => {
         if (fundo.cancelado || fundo.pedido !== chave) return;
@@ -1767,12 +1816,14 @@ class RegiaoDeMod {
       img.src = midia.uri;
     }).catch((falha) => {
       if (fundo.cancelado || this.solta) return;
+      const porque = motivoDaFalha(falha);
       this.dono.falar({
         nome: "tela",
         chave: plano.no.chave ?? "",
         estado: "fundo-falhou",
-        porque: String(falha?.message ?? falha),
+        porque,
       });
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo da tela: ${porque}`);
     });
   }
 
@@ -1985,7 +2036,11 @@ class RegiaoDeMod {
       : caminho
         ? this.dono.carregarMidia(caminho)
         : null;
-    if (!vindo) { elem.dataset.estado = "sem-fonte"; return; }
+    if (!vindo) {
+      elem.dataset.estado = "sem-fonte";
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", "a declaração não traz «fonte» nem «doServidor»");
+      return;
+    }
 
     vindo.then((midia) => {
       // **As três perguntas, depois do `await`.** A região pode ter sido
@@ -1996,6 +2051,7 @@ class RegiaoDeMod {
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
         elem.dataset.estado = "cheia";
         this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada" });
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
         return;
       }
       // A etiqueta sai do papel que o Rust devolveu, e o papel saiu dos bytes:
@@ -2012,6 +2068,9 @@ class RegiaoDeMod {
       for (const [nome, aviso] of [["play", "tocando"], ["pause", "pausada"], ["ended", "terminou"], ["error", "falhou"]]) {
         const ouvinte = () => {
           this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: aviso });
+          // O `error` do elemento é a recusa que nem o Rust nem a conta viram:
+          // os bytes chegaram e couberam, e o `<img>`/`<audio>` não os abriu.
+          if (aviso === "falhou") this.dizerRecusaDeMidia(plano.no.chave ?? "", "o elemento de mídia não abriu (evento error)");
         };
         tocador.addEventListener(nome, ouvinte);
         estado.ouvintes.push([nome, ouvinte]);
@@ -2020,12 +2079,14 @@ class RegiaoDeMod {
     }).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       elem.dataset.estado = "falhou";
+      const porque = motivoDaFalha(falha);
       this.dono.falar({
         nome: "midia",
         chave: plano.no.chave ?? "",
         estado: "falhou",
-        porque: String(falha?.message ?? falha),
+        porque,
       });
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou ao carregar: ${porque}`);
     });
   }
 
@@ -2037,8 +2098,9 @@ class RegiaoDeMod {
       // `play()` devolve promessa e ela **rejeita** quando o navegador não
       // deixa tocar sem gesto. Ignorá-la faria o MOD achar que está tocando;
       // o evento de erro é o que diz a verdade.
-      tocador.play().catch(() => {
+      tocador.play().catch((falha) => {
         this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada" });
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `não tocou: ${motivoDaFalha(falha)}`);
       });
     } else if (!tocador.paused) {
       tocador.pause();

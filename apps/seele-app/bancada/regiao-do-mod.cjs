@@ -266,13 +266,15 @@ function bancada() {
   };
 }
 
-/** Um dono que anota o que a região fala e o que ela pede. */
+/** Um dono que anota o que a região fala, o que ela pede e o que ela diz ao registro. */
 function dono(b, midia) {
   const ditos = [];
   const registrados = [];
+  const anotadas = [];
   return {
     ditos,
     registrados,
+    anotadas,
     api: {
       instancia: {
         registrar: (porque, descartar) => registrados.push({ porque, descartar }),
@@ -280,6 +282,7 @@ function dono(b, midia) {
       geracao: 1,
       podeFalar: () => true,
       falar: (dados) => ditos.push(dados),
+      anotarRecusa: (texto) => anotadas.push(String(texto)),
       carregarMidia: (caminho) =>
         midia ? midia(caminho) : Promise.reject(new Error("sem mídia")),
       carregarMidiaDoServidor: (canal, pedido, campo) =>
@@ -1114,6 +1117,199 @@ async function fundoTrocaSoltaECancela() {
   confere("fundo descartado", r.bytesDeMidia === 0 && r.recursos.size === 0, "sair reteve bytes ou recurso");
 }
 
+// ---------------------------------------------------------------------------
+// 9. Cada mídia recusada é dita a quem hospeda, com o motivo.
+// ---------------------------------------------------------------------------
+
+/**
+ * **O evento é do MOD; o registro é de quem investiga.** Em 23/09 o avatar do
+ * PERFIS não aparecia, a janela sabia por quê, e o `seele.log` não tinha uma
+ * palavra — levou uma hora de medição e um reinício com `RUST_LOG=debug`.
+ *
+ * Um caso por caminho de recusa, treze ao todo: os onze em que a janela recusa
+ * ou vê a carga falhar, o evento `error` do próprio elemento e a mídia
+ * declarada sem origem. Cada um mede o texto que chega a `anotarRecusa`, que o
+ * `base.js` leva ao `registrar_da_janela` como WARN e com o id do MOD em campo
+ * próprio (guarda irmão em `tests/frontend.rs`). A recusa do Rust entra aqui
+ * como ela chega de verdade: `{ Recusado: { motivo } }`.
+ */
+async function cadaMidiaRecusadaEDitaAoAnfitriao() {
+  const recusaDoRust = (motivo) => () => () => Promise.reject({ Recusado: { motivo } });
+  const casos = [
+    {
+      nome: "mídia acima do teto da região",
+      midia: (b) => () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: b.LIMITES.bytesDeMidia + 1 }),
+      declarar: [{ forma: "midia", chave: "grande", fonte: "img/g.png" }],
+      espera: ["«grande»", "teto"],
+    },
+    {
+      nome: "mídia que o Rust recusou",
+      midia: recusaDoRust("arquivo-nao-declarado"),
+      declarar: [{ forma: "midia", chave: "sumida", fonte: "img/s.png" }],
+      espera: ["«sumida»", "arquivo-nao-declarado"],
+    },
+    {
+      nome: "retrato que não é imagem",
+      midia: () => () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }),
+      declarar: [{ forma: "retrato", chave: "rosto", fonte: "som/a.wav", inicial: "A" }],
+      espera: ["«rosto»", "som"],
+    },
+    {
+      nome: "retrato acima do teto",
+      midia: (b) => () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: b.LIMITES.bytesDeMidia + 1 }),
+      declarar: [{ forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" }],
+      espera: ["«rosto»", "teto"],
+    },
+    {
+      nome: "retrato que o Rust recusou",
+      midia: recusaDoRust("formato-desconhecido"),
+      declarar: [{ forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" }],
+      espera: ["«rosto»", "formato-desconhecido"],
+    },
+    {
+      nome: "fundo que não é imagem",
+      midia: () => () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }),
+      declarar: [{ forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "som/a.wav" }, dentro: "Lia" }],
+      espera: ["«cx»", "som"],
+    },
+    {
+      nome: "fundo acima do teto",
+      midia: (b) => () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: b.LIMITES.bytesDeMidia + 1 }),
+      declarar: [{ forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" }],
+      espera: ["«cx»", "teto"],
+    },
+    {
+      nome: "fundo que falhou na janela",
+      midia: () => () => Promise.reject(new Error("a resposta do servidor não traz «image»")),
+      declarar: [{ forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" }],
+      espera: ["«cx»", "não traz"],
+    },
+  ];
+  for (const caso of casos) {
+    const b = bancada();
+    const d = dono(b, caso.midia(b));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar(caso.declarar);
+    await volta();
+    await volta();
+    confere(
+      `recusa dita · ${caso.nome}`,
+      d.anotadas.some((texto) => caso.espera.every((pedaco) => texto.includes(pedaco))),
+      `nada chegou ao registro com ${caso.espera.join(" e ")}: ${JSON.stringify(d.anotadas)}`,
+    );
+    confere(
+      `recusa dita · ${caso.nome}`,
+      !d.anotadas.some((texto) => texto.includes("[object Object]")),
+      `a recusa do Rust virou «[object Object]»: ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+  }
+
+  // O fundo de uma tela: ele só é buscado quando a tela tem onde pintar, e a
+  // primeira montagem ainda não tem pincel (`pintarTela` sai antes de
+  // `buscarFundoDaTela` quando `getContext` não devolve nada).
+  for (const [nome, midia, pedaco] of [
+    [
+      "fundo de tela que não é imagem",
+      () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }),
+      "som",
+    ],
+    [
+      "fundo de tela que o Rust recusou",
+      () => Promise.reject({ Recusado: { motivo: "arquivo-nao-declarado" } }),
+      "arquivo-nao-declarado",
+    ],
+  ]) {
+    const b = bancada();
+    const d = dono(b, midia);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    const declarar = () => regiao.aplicar([
+      { forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { fonte: "img/mapa.png" } },
+    ]);
+    declarar();
+    regiao.raiz.children[0].darPincel();
+    declarar();
+    await volta();
+    await volta();
+    confere(
+      `recusa dita · ${nome}`,
+      d.anotadas.some((texto) => texto.includes("«mapa»") && texto.includes(pedaco)),
+      `o fundo recusado da tela não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    confere(
+      `recusa dita · ${nome}`,
+      !d.anotadas.some((texto) => texto.includes("[object Object]")),
+      `a recusa do Rust virou «[object Object]»: ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+  }
+
+  // O som que o motor não deixou tocar: `play()` rejeita sem gesto de quem usa.
+  {
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    const tocar = Elemento.prototype.play;
+    Elemento.prototype.play = function play() {
+      return Promise.reject(new Error("NotAllowedError: sem gesto de quem usa"));
+    };
+    try {
+      regiao.aplicar([{ forma: "midia", chave: "toque", fonte: "som/a.wav", tocando: true }]);
+      await volta();
+      await volta();
+      await volta();
+    } finally {
+      Elemento.prototype.play = tocar;
+    }
+    confere(
+      "recusa dita · som que não tocou",
+      d.anotadas.some((texto) => texto.includes("«toque»") && texto.includes("NotAllowedError")),
+      `o play() recusado não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+  }
+
+  // A recusa que o próprio elemento faz: os bytes chegaram, o Rust os aceitou,
+  // a conta coube, e o `<img>`/`<audio>` não os abriu. O Rust não vê este caso,
+  // e o MOD só recebe «falhou», sem motivo.
+  {
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: 2 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "midia", chave: "quebrada", fonte: "img/q.png" }]);
+    await volta();
+    await volta();
+    const tocador = regiao.raiz.querySelector(".regiao-de-mod-tocador");
+    confere(
+      "recusa dita · elemento que não abriu",
+      tocador !== null && d.anotadas.length === 0,
+      `a imagem aceita não montou, ou já foi dita como recusa antes do evento: ${JSON.stringify(d.anotadas)}`,
+    );
+    tocador?.disparar("error");
+    confere(
+      "recusa dita · elemento que não abriu",
+      d.anotadas.some((texto) => texto.includes("«quebrada»") && texto.includes("error")),
+      `o evento error do elemento não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+  }
+
+  // A mídia declarada sem nenhuma das duas origens: a janela marca «sem-fonte»
+  // no elemento, e o MOD não recebe evento nenhum.
+  {
+    const b = bancada();
+    const d = dono(b);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "midia", chave: "vazia" }]);
+    confere(
+      "recusa dita · mídia sem origem",
+      d.anotadas.some((texto) => texto.includes("«vazia»") && texto.includes("«fonte»")),
+      `a mídia sem origem não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+  }
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -1135,6 +1331,7 @@ async function fundoTrocaSoltaECancela() {
     oRetratoDoCartaoEOMesmoNoEntreDoisRetratos,
     osTetosDoCartaoSaoDoCartaoENaoDaRegiao,
     aImagemAcompanhaAMudancaDaFonte,
+    cadaMidiaRecusadaEDitaAoAnfitriao,
   ];
   for (const prova of provas) {
     try {

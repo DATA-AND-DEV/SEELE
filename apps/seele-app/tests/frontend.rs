@@ -8122,6 +8122,39 @@ fn o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob() {
     }
 }
 
+/// **A mídia que a janela recusa chega ao `seele.log`, pelo dono de verdade.**
+///
+/// `mods-regiao.js` chama `dono.anotarRecusa` em cada mídia recusada, e a
+/// bancada `regiao-do-mod.cjs` prova isso com um dono de mentira. A outra
+/// metade ela não alcança: que o dono **de `base.js`** leve a frase ao
+/// `registrar_da_janela` como aviso, com o id do MOD em campo próprio, e só
+/// enquanto a instância é a de pé. Sem ela, as recusas chamariam um método que
+/// não existe, e cada uma lançaria dentro de um `then` que ninguém pega — o
+/// mesmo silêncio de antes, com um erro a mais no console.
+#[test]
+fn o_dono_da_regiao_leva_cada_recusa_de_midia_ao_registro() {
+    let dono = js_function(&read("ui/base.js"), "function donoDaRegiao(");
+    let Some(depois) = dono.split("anotarRecusa:").nth(1) else {
+        panic!(
+            "o dono da região não tem `anotarRecusa`, e `mods-regiao.js` a chama em cada \
+             mídia recusada: {dono}"
+        );
+    };
+    let propriedade = depois.split("\n    },").next().unwrap_or(depois);
+    assert!(
+        propriedade.contains("meu()"),
+        "`anotarRecusa` escreve mesmo depois de a sessão acabar, e uma mídia que não montou \
+         porque a pessoa saiu viraria aviso: {propriedade}"
+    );
+    for pedaco in ["registrarNoAnfitriao(", "\"aviso\"", "mod.id)"] {
+        assert!(
+            propriedade.contains(pedaco),
+            "`anotarRecusa` não leva a frase ao registro como aviso e com o id do MOD em \
+             campo próprio — falta `{pedaco}`: {propriedade}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Quem bate à porta, dos dois lados — ADR 0030, pendência 23.
 //
