@@ -801,7 +801,7 @@ function donoDaRegiao(mod, instancia) {
         if (voltas === PEDACOS_DE_MIDIA - 1) throw new Error("Envio de imagem incompleto.");
         pedidoAtual = { ...pedido, ...resposta.proximo };
       }
-      const midia = await invoke("midia_em_bytes", { geracao, base64 });
+      const midia = await invoke("midia_em_bytes", { geracao, id: mod.id, base64 });
       if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
       return midia;
     },

@@ -5019,6 +5019,119 @@ struct MidiaDoMod {
     bytes: usize,
 }
 
+/// O nome de uma recusa de MOD, como o registro o escreve.
+///
+/// A mesma palavra que a janela recebe em `Recusado { motivo }`: quem lê o
+/// `seele.log` e quem lê a frase na tela procuram pela mesma coisa.
+fn motivo_de(falha: &FalhaNoMod) -> &str {
+    match falha {
+        FalhaNoMod::Recusado { motivo } => motivo.as_str(),
+        FalhaNoMod::NaoEstaHospedando => "nao-esta-hospedando",
+        FalhaNoMod::BancoNaoRespondeu => "banco-nao-respondeu",
+        FalhaNoMod::ConjuntoMudou { .. } => "conjunto-mudou",
+    }
+}
+
+/// **Diz no registro por que a mídia de um MOD foi recusada**, e devolve a
+/// recusa intacta.
+///
+/// Em 23/09, descobrir que o avatar do PERFIS carregava levou uma hora de
+/// medição e um reinício com `RUST_LOG=debug`: o Rust recusava, devolvia à
+/// janela, e o registro não tinha uma palavra.
+///
+/// WARN com o id do MOD, a origem e o motivo — menos `sessao-encerrada`, que
+/// vai em DEBUG: uma mídia que não montou porque a pessoa saiu é o desfecho
+/// certo, e avisá-la ensinaria a ignorar os avisos.
+///
+/// **A geração morta que os comandos conferem na entrada não passa por aqui.**
+/// [`midia_do_mod`] e [`midia_em_bytes`] devolvem `sessao-encerrada` antes de
+/// chegar a esta função, e o que fica dela é o contador
+/// `comandos_de_geracao_morta`. O `sessao-encerrada` que chega aqui é o que a
+/// conexão devolve quando cai no meio de uma leitura por volume
+/// ([`ler_imagem_mod`]).
+///
+/// `origem` vai em `?`: é o caminho que o MOD declarou, e texto de terceiro
+/// não entra solto numa linha do registro.
+fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaNoMod {
+    let motivo = motivo_de(&falha);
+    if motivo == "sessao-encerrada" {
+        tracing::debug!(
+            mod_id = %mod_id,
+            origem = ?origem,
+            motivo = %motivo,
+            "mídia de MOD não servida: a sessão acabou"
+        );
+    } else {
+        tracing::warn!(
+            mod_id = %mod_id,
+            origem = ?origem,
+            motivo = %motivo,
+            "mídia de MOD recusada"
+        );
+    }
+    falha
+}
+
+/// **Os bytes de um arquivo que o manifesto deste MOD declara**, conferidos.
+///
+/// A conferência inteira de [`midia_do_mod`], num lugar só para que o som
+/// (`som_do_mod`) passe pela mesma: o pacote achado pelo hash, o hash sendo
+/// deste MOD, o arquivo declarado e dentro da pasta, e o teto por arquivo.
+fn bytes_declarados_do_mod(
+    pasta: &str,
+    id: &str,
+    hash: &str,
+    caminho: &str,
+) -> Result<Vec<u8>, FalhaNoMod> {
+    let pacote = seele_ffi::mods::ler_por_hash(pasta, hash)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    // **O hash tem de ser deste MOD.** Sem isto, uma janela que pedisse a
+    // mídia de um MOD sob o nome de outro receberia a do primeiro.
+    if pacote.id != id {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "conteudo-de-outro-mod".to_owned(),
+        });
+    }
+    let bytes = mods::serve(
+        std::path::Path::new(pasta),
+        &format!("/{id}/{caminho}"),
+        hash,
+    )
+    .ok_or(FalhaNoMod::Recusado {
+        motivo: "arquivo-nao-declarado".to_owned(),
+    })?;
+    // **O tamanho é separado do formato**: são recusas diferentes para quem
+    // está escrevendo o MOD, e «não toca» sem dizer qual das duas é a falha
+    // que este repositório mais paga.
+    if bytes.len() > seele_ffi::mods::TETO_DE_MIDIA {
+        return Err(FalhaNoMod::Recusado {
+            motivo: "arquivo-grande-demais".to_owned(),
+        });
+    }
+    Ok(bytes)
+}
+
+/// A mídia de um MOD pronta para a janela, **ou a recusa dita no registro**.
+fn midia_declarada_do_mod(
+    pasta: &str,
+    id: &str,
+    hash: &str,
+    caminho: &str,
+) -> Result<MidiaDoMod, FalhaNoMod> {
+    let lida = bytes_declarados_do_mod(pasta, id, hash, caminho)
+        .and_then(|bytes| {
+            seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
+                motivo: "formato-desconhecido".to_owned(),
+            })
+        })
+        .map_err(|falha| recusa_de_midia_dita(id, caminho, falha))?;
+    Ok(MidiaDoMod {
+        uri: lida.uri,
+        papel: lida.papel,
+        bytes: lida.bytes,
+    })
+}
+
 /// **Um arquivo que o MOD declarou, para a janela tocar ou mostrar.**
 ///
 /// Quatro recusas, todas pelo nome:
@@ -5032,6 +5145,10 @@ struct MidiaDoMod {
 ///
 /// O teto é por arquivo. O total por instância é da janela, que é quem sabe
 /// quantos já montou — ver `recursosDoMod` em `base.js`.
+///
+/// Toda recusa, exceto a de geração morta (contada em
+/// `comandos_de_geracao_morta`), vai ao `seele.log` por
+/// [`recusa_de_midia_dita`], com o id do MOD e o motivo.
 #[tauri::command]
 fn midia_do_mod(
     app: AppHandle,
@@ -5049,32 +5166,7 @@ fn midia_do_mod(
             motivo: "sessao-encerrada".to_owned(),
         });
     }
-    let pacote = seele_ffi::mods::ler_por_hash(&config_dir(&app), &hash)
-        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
-    if pacote.id != id {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "conteudo-de-outro-mod".to_owned(),
-        });
-    }
-    let bytes = mods::serve(
-        std::path::Path::new(&config_dir(&app)),
-        &format!("/{id}/{caminho}"),
-        &hash,
-    )
-    .ok_or(FalhaNoMod::Recusado {
-        motivo: "arquivo-nao-declarado".to_owned(),
-    })?;
-    // **O tamanho é separado do formato**, e não porque `ler_midia` precise:
-    // são recusas diferentes para quem está escrevendo o MOD, e «não toca»
-    // sem dizer qual das duas é a falha que este repositório mais paga.
-    if bytes.len() > seele_ffi::mods::TETO_DE_MIDIA {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "arquivo-grande-demais".to_owned(),
-        });
-    }
-    let lida = seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
-        motivo: "formato-desconhecido".to_owned(),
-    })?;
+    let midia = midia_declarada_do_mod(&config_dir(&app), &id, &hash, &caminho)?;
     // **Dito, como o código do MOD é dito.** Um arquivo que sai do pacote de um
     // terceiro e vira som na máquina de quem está numa conversa é um evento que
     // quem hospeda tem direito de ler no registro — e é o que permite medir o
@@ -5083,15 +5175,11 @@ fn midia_do_mod(
         mod_id = %id,
         geracao,
         caminho = %caminho,
-        papel = lida.papel,
-        bytes = lida.bytes,
+        papel = midia.papel,
+        bytes = midia.bytes,
         "mídia de MOD servida"
     );
-    Ok(MidiaDoMod {
-        uri: lida.uri,
-        papel: lida.papel,
-        bytes: lida.bytes,
-    })
+    Ok(midia)
 }
 
 /// **Mídia que veio da metade de servidor de um MOD.**
@@ -5107,6 +5195,10 @@ fn midia_do_mod(
 /// numa declaração de região, e fazê-la caber seria alargar o teto de mensagem
 /// para todo mundo por causa de um caso.
 ///
+/// Toda recusa, exceto a de geração morta (contada em
+/// `comandos_de_geracao_morta`), vai ao `seele.log` por
+/// [`recusa_de_midia_dita`], com o id do MOD que a janela manda.
+///
 /// # Errors
 ///
 /// [`FalhaNoMod`] quando a geração já acabou, quando o texto não é base64,
@@ -5115,6 +5207,7 @@ fn midia_do_mod(
 fn midia_em_bytes(
     session: State<'_, Session>,
     geracao: u64,
+    id: String,
     base64: String,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
     if !session.geracao_vale(geracao) {
@@ -5125,17 +5218,25 @@ fn midia_em_bytes(
             motivo: "sessao-encerrada".to_owned(),
         });
     }
-    let midia = ler_midia_do_servidor(&base64).map_err(|falha| {
-        tracing::warn!(geracao, erro = ?falha, "mídia de MOD recusada ao exibir");
-        falha
-    })?;
+    let midia = midia_do_servidor_dita(&id, &base64)?;
     tracing::debug!(
+        mod_id = %id,
         geracao,
         papel = midia.papel,
         bytes = midia.bytes,
         "mídia de MOD vinda do servidor"
     );
     Ok(midia)
+}
+
+/// A mídia vinda do servidor de um MOD, **ou a recusa dita no registro** com o
+/// id dele.
+///
+/// O `warn` que estava no comando não dizia de quem era a mídia: a janela não
+/// mandava o id, e «mídia de MOD recusada» com três MODs ligados não aponta
+/// para nenhum.
+fn midia_do_servidor_dita(id: &str, base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
+    ler_midia_do_servidor(base64).map_err(|falha| recusa_de_midia_dita(id, "servidor", falha))
 }
 
 fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
@@ -5243,13 +5344,14 @@ async fn ler_imagem_mod(
         .connection()
         .map_err(|_| recusa("sessao-encerrada"))?;
     let bytes = conexao
-        .ler_imagem_mod(id, channel, payload)
+        .ler_imagem_mod(id.clone(), channel, payload)
         .await
-        .map_err(|m| recusa(&m))?;
+        .map_err(|m| recusa_de_midia_dita(&id, "volume", recusa(&m)))?;
     if !session.geracao_vale(geracao) {
         return Err(recusa("sessao-encerrada"));
     }
-    let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| recusa("formato-desconhecido"))?;
+    let lida = seele_ffi::mods::ler_midia(&bytes)
+        .ok_or_else(|| recusa_de_midia_dita(&id, "volume", recusa("formato-desconhecido")))?;
     Ok(MidiaDoMod {
         uri: lida.uri,
         papel: lida.papel,
@@ -10263,6 +10365,243 @@ mod o_registro_da_janela {
                 1,
                 "uma quebra de linha em `{campo}` escreveu uma segunda linha no seele.log, \
                  com a cara de uma linha do produto: {rastro}"
+            );
+        }
+    }
+}
+
+/// **Um pacote de MOD publicado numa pasta de teste**, como o instalador o
+/// deixa.
+///
+/// Escrito numa pasta de obras, lido para saber o hash do conteúdo, e movido
+/// para `PACOTES/<hash>` — que é onde `ler_por_hash` e `mods::serve` o
+/// procuram. Os bytes de cada formato são os menores que o `sniff` reconhece.
+#[cfg(test)]
+mod pacote_de_teste {
+    /// A assinatura de um PNG.
+    pub(crate) const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    /// Texto, que nenhum decodificador deste produto aceita.
+    pub(crate) const TEXTO: &[u8] = b"so texto";
+    /// O id do MOD de todo pacote daqui.
+    pub(crate) const ID: &str = "prova/midia";
+
+    /// Publica um pacote que declara `arquivos`, e devolve a pasta e o hash.
+    ///
+    /// A pasta é um `TempDir`: some quando o teste termina.
+    pub(crate) fn publicar(arquivos: &[(&str, &[u8])]) -> (tempfile::TempDir, String) {
+        let raiz = tempfile::tempdir().expect("a pasta de teste");
+        let obras = raiz.path().join("em-obras");
+        std::fs::create_dir_all(obras.join("cliente")).expect("a pasta de obras");
+        let declarados: Vec<String> = arquivos
+            .iter()
+            .map(|(caminho, _)| format!("\"{caminho}\""))
+            .collect();
+        let api = seele_ffi::mods::MOD_API_VERSION;
+        std::fs::write(
+            obras.join("mod.json"),
+            format!(
+                r#"{{"schema":1,"id":"{ID}","version":"1.0.0","api":{api},"repo":"https://example.invalid/x","reach":["dom"],"client":"cliente/main.js","arquivos":[{}]}}"#,
+                declarados.join(",")
+            ),
+        )
+        .expect("o manifesto");
+        std::fs::write(obras.join("cliente/main.js"), "/* nada */").expect("o cliente");
+        for (caminho, bytes) in arquivos {
+            let destino = obras.join(caminho);
+            std::fs::create_dir_all(destino.parent().expect("a pasta do arquivo"))
+                .expect("a pasta do arquivo");
+            std::fs::write(&destino, bytes).expect("o arquivo");
+        }
+        let hash = seele_ffi::mods::ler_pasta(&obras.to_string_lossy())
+            .expect("o pacote de teste é válido")
+            .hash;
+        let publicado = raiz.path().join(seele_ffi::mods::PACOTES).join(&hash);
+        std::fs::create_dir_all(publicado.parent().expect("a pasta dos pacotes"))
+            .expect("a pasta dos pacotes");
+        std::fs::rename(&obras, &publicado).expect("publicar o pacote");
+        (raiz, hash)
+    }
+
+    /// A pasta de configuração, como `config_dir` a devolveria.
+    pub(crate) fn pasta(raiz: &tempfile::TempDir) -> String {
+        raiz.path().to_string_lossy().into_owned()
+    }
+}
+
+/// **A mídia de MOD recusada pelo Rust é dita no `seele.log`.**
+///
+/// Em 23/09, descobrir que o avatar do PERFIS carregava levou uma hora de
+/// medição e um reinício com `RUST_LOG=debug`: o Rust recusava e devolvia a
+/// recusa à janela, e o registro não tinha uma palavra.
+#[cfg(test)]
+mod a_midia_recusada_e_dita_no_registro {
+    use super::{
+        midia_declarada_do_mod, midia_do_servidor_dita, motivo_de, recusa_de_midia_dita, FalhaNoMod,
+    };
+    use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO};
+    use crate::rastro_de_teste::capturar;
+
+    /// A linha de recusa de mídia no rastro, se houver.
+    fn recusa(rastro: &str) -> Option<&str> {
+        rastro
+            .lines()
+            .find(|linha| linha.contains("mídia de MOD recusada"))
+    }
+
+    /// Confere os pedaços que fazem uma linha de recusa servir a quem lê.
+    fn traz(linha: &str, pedacos: &[&str]) {
+        for pedaco in pedacos {
+            assert!(
+                linha.contains(pedaco),
+                "a linha de recusa não traz `{pedaco}`, e é por ela que quem lê o registro \
+                 acha o MOD e o motivo: {linha}"
+            );
+        }
+    }
+
+    #[test]
+    fn um_arquivo_que_o_manifesto_nao_declara_sai_como_warn_com_o_id_e_o_motivo() {
+        let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
+        let (resultado, rastro) =
+            capturar(|| midia_declarada_do_mod(&pasta(&raiz), ID, &hash, "img/escondido.png"));
+        let falha = resultado
+            .err()
+            .expect("um arquivo que o manifesto não declara foi servido");
+        assert_eq!(
+            motivo_de(&falha),
+            "arquivo-nao-declarado",
+            "a recusa mudou de nome, e a frase da janela deixa de achá-la"
+        );
+        let linha = recusa(&rastro).unwrap_or_else(|| {
+            panic!(
+                "a recusa não chegou ao registro: o MOD fica sem imagem e o seele.log sem \
+                 uma palavra — {rastro}"
+            )
+        });
+        traz(
+            linha,
+            &[
+                "WARN",
+                "mod_id=prova/midia",
+                "motivo=arquivo-nao-declarado",
+                "origem=\"img/escondido.png\"",
+            ],
+        );
+    }
+
+    #[test]
+    fn um_arquivo_que_nao_e_midia_sai_como_warn_com_o_motivo() {
+        let (raiz, hash) = publicar(&[("doc/leia.txt", TEXTO)]);
+        let (resultado, rastro) =
+            capturar(|| midia_declarada_do_mod(&pasta(&raiz), ID, &hash, "doc/leia.txt"));
+        let falha = resultado.err().expect("texto foi servido como mídia");
+        assert_eq!(
+            motivo_de(&falha),
+            "formato-desconhecido",
+            "texto foi recusado por outro motivo, e o autor procuraria no lugar errado"
+        );
+        let linha =
+            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
+        traz(
+            linha,
+            &["WARN", "mod_id=prova/midia", "motivo=formato-desconhecido"],
+        );
+    }
+
+    #[test]
+    fn uma_imagem_aceita_nao_escreve_recusa() {
+        let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
+        let (resultado, rastro) =
+            capturar(|| midia_declarada_do_mod(&pasta(&raiz), ID, &hash, "img/rosto.png"));
+        let midia = resultado.expect("uma imagem declarada foi recusada");
+        assert_eq!(midia.papel, "imagem", "um PNG saiu com outro papel");
+        assert!(
+            recusa(&rastro).is_none(),
+            "uma mídia aceita escreveu uma recusa, e o registro ensinaria a ignorá-las: {rastro}"
+        );
+    }
+
+    #[test]
+    fn a_sessao_que_acabou_nao_vira_aviso() {
+        let (falha, rastro) = capturar(|| {
+            recusa_de_midia_dita(
+                ID,
+                "img/rosto.png",
+                FalhaNoMod::Recusado {
+                    motivo: "sessao-encerrada".to_owned(),
+                },
+            )
+        });
+        assert_eq!(
+            motivo_de(&falha),
+            "sessao-encerrada",
+            "a recusa mudou no caminho"
+        );
+        assert!(
+            !rastro.contains("WARN") && rastro.contains("DEBUG"),
+            "uma mídia que não montou porque a pessoa saiu virou aviso — é o desfecho \
+             certo, e não um defeito: {rastro}"
+        );
+    }
+
+    #[test]
+    fn a_midia_do_servidor_recusada_leva_o_id_do_mod() {
+        let (resultado, rastro) =
+            capturar(|| midia_do_servidor_dita("seele/perfis", "data:image/png;base64,%%%"));
+        let falha = resultado.err().expect("base64 inválido virou mídia");
+        assert_eq!(
+            motivo_de(&falha),
+            "nao-e-base64",
+            "o base64 inválido foi recusado por outro motivo"
+        );
+        let linha =
+            recusa(&rastro).unwrap_or_else(|| panic!("a recusa não chegou ao registro: {rastro}"));
+        traz(
+            linha,
+            &[
+                "WARN",
+                "mod_id=seele/perfis",
+                "motivo=nao-e-base64",
+                "origem=\"servidor\"",
+            ],
+        );
+    }
+
+    /// **Os três comandos de mídia passam pela recusa dita.**
+    ///
+    /// Os testes acima medem as funções; este prende que os comandos as
+    /// chamam. `ler_imagem_mod` fala com a rede e não sobe num teste sem
+    /// servidor — e um comando que devolvesse a recusa por fora seria a mídia
+    /// recusada em silêncio de novo, com os testes verdes.
+    ///
+    /// O fonte é normalizado para `\n`: num checkout com CRLF o corte em
+    /// `"\n}\n"` não acharia o fim da função, e o guarda passaria a ler o
+    /// arquivo inteiro — inclusive este teste, que cita as três chamadas.
+    #[test]
+    fn os_tres_comandos_de_midia_passam_pela_recusa_dita() {
+        let fonte = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
+        )
+        .expect("main.rs legível")
+        .replace("\r\n", "\n");
+        for (comando, chamada) in [
+            ("fn midia_do_mod(", "midia_declarada_do_mod("),
+            ("fn midia_em_bytes(", "midia_do_servidor_dita("),
+            ("async fn ler_imagem_mod(", "recusa_de_midia_dita("),
+        ] {
+            let corpo = fonte
+                .split(comando)
+                .nth(1)
+                .and_then(|resto| resto.split("\n}\n").next())
+                .unwrap_or_else(|| panic!("`{comando}` sumiu de main.rs"));
+            let codigo: Vec<&str> = corpo
+                .lines()
+                .filter(|linha| !linha.trim_start().starts_with("//"))
+                .collect();
+            assert!(
+                codigo.join("\n").contains(chamada),
+                "`{comando}` não passa por `{chamada}`: a recusa dele volta à janela e não \
+                 chega ao registro"
             );
         }
     }

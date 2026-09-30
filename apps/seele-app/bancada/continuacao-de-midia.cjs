@@ -21,6 +21,12 @@ const confere = (caso, cond, detalhe) => { if (!cond) falhas.push(`${caso}: ${de
 
 function rodar({ respostas, campo = "bytes" }) {
   const pedidos = [];
+  // **O que a janela pede ao Rust, gravado.** `midia_em_bytes` exige o `id`
+  // do MOD desde que a recusa passou a ser dita no `seele.log` com ele: um
+  // `invoke` que esquecesse o `id` faria o Tauri recusar toda imagem vinda do
+  // servidor, e o guarda de argumentos de `frontend.rs` só confere que cada
+  // chave enviada existe no comando — não que nenhuma falte.
+  const invocacoes = [];
   const contexto = vm.createContext({
     geracaoDaSessao: 1,
     daGeracaoDePe: () => true,
@@ -32,17 +38,20 @@ function rodar({ respostas, campo = "bytes" }) {
       pedidos.push(JSON.parse(JSON.stringify(pedido)));
       return respostas(pedidos.length - 1);
     },
-    invoke: async (_cmd, args) => ({ uri: "data:", papel: "imagem", bytes: args.base64.length, base64: args.base64 }),
+    invoke: async (cmd, args) => {
+      invocacoes.push({ cmd, args: JSON.parse(JSON.stringify(args)) });
+      return { uri: "data:", papel: "imagem", bytes: args.base64.length, base64: args.base64 };
+    },
   });
   const fn = vm.runInContext(`(async (canal, pedido, campo) => {${corpo}})`, contexto);
-  return { pedidos, resultado: fn(1, { op: "asset", slot: "avatar" }, campo) };
+  return { pedidos, invocacoes, resultado: fn(1, { op: "asset", slot: "avatar" }, campo) };
 }
 
 (async () => {
   // Três pedaços, com a continuação que o servidor manda.
   {
     const caso = "a continuação junta os pedaços na ordem";
-    const { pedidos, resultado } = rodar({
+    const { pedidos, invocacoes, resultado } = rodar({
       campo: "image",
       respostas: (i) => [
         { image: "AAA", proximo: { offset: 3, path: "p1" } },
@@ -62,6 +71,14 @@ function rodar({ respostas, campo = "bytes" }) {
       caso,
       pedidos[2].offset === 6,
       `o segundo proximo não substituiu o primeiro: ${JSON.stringify(pedidos[2])}`,
+    );
+    confere(
+      caso,
+      invocacoes.length === 1 &&
+        invocacoes[0].cmd === "midia_em_bytes" &&
+        invocacoes[0].args.id === "a/b" &&
+        invocacoes[0].args.geracao === 1,
+      `o invoke de midia_em_bytes não leva geracao e id do MOD: ${JSON.stringify(invocacoes)}`,
     );
   }
 
