@@ -773,6 +773,28 @@ fn vizinha(x: u8) -> (&'static str, u8) {
         );
     }
 
+    /// A violação de uma v6 sem o bloco manda escrever a lista, «ainda que
+    /// vazia». Então a lista vazia passa, nos dois blocos: se reprovasse, quem
+    /// seguisse a mensagem levaria vermelho de novo.
+    #[test]
+    fn uma_api_6_com_as_duas_listas_vazias_e_cobrada_e_passa() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let v6 = serde_json::json!({ "version": 6, "moments": [], "eventos": [] });
+        let cobranca = cobrar(
+            std::path::Path::new("api/v6.json"),
+            &v6,
+            &promessas_cobradas(&momentos, &eventos),
+        );
+        assert_eq!(
+            cobranca,
+            Some(vec![]),
+            "uma v6 que não promete nada, com as duas listas escritas e vazias, não passou: a \
+             mensagem manda escrever a lista «ainda que vazia», e quem a seguisse levaria \
+             vermelho de novo"
+        );
+    }
+
     /// O arquivo inteiro, como o `run` o confere: uma v6 que promete um evento
     /// sem despachante volta com a violação e dada por cobrada. É da lista
     /// devolvida aqui que o `run` tira a reprovação; uma violação que ficasse
