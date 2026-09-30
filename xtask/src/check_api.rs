@@ -395,7 +395,19 @@ pub(crate) fn run() -> ExitCode {
     };
     let mut versoes = 0_usize;
     let mut cobradas = 0_usize;
-    for entrada in entradas.flatten() {
+    for entrada in entradas {
+        // Pulada, a entrada levaria junto a cobrança da versão que ela fosse, e
+        // o resumo contaria uma versão a menos sem dizer por quê.
+        let entrada = match entrada {
+            Ok(entrada) => entrada,
+            Err(erro) => {
+                eprintln!(
+                    "check-api: uma entrada de `api/` não se lê ({erro}), e uma versão nela \
+                     ficaria sem cobrança"
+                );
+                return ExitCode::FAILURE;
+            }
+        };
         let caminho = entrada.path();
         if caminho.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
