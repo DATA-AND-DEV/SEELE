@@ -1430,6 +1430,13 @@ fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_chegaram_a_
     // da regra do alvo de LAN: uma lista gravada pela 0.15.0 num alvo de LAN
     // passa a ser recusada, e colar o link de novo a corrige. «O convite, a
     // senha e o apelido não chegaram a ele» fica nas duas.
+    //
+    // **E o remédio não afirma que a lista está errada.** Numa colisão de LAN
+    // (outro servidor, já fixado, atendendo no endereço de casa do anfitrião)
+    // ou num quarto hostil (que manda quem chega para o endereço de outro), a
+    // lista está certa, e quem atendeu é que não é o servidor dela. O remédio
+    // diz quando colar o link de novo: se a chave do servidor mudou, ou se a
+    // lista guardou a errada.
     let corpo = body_of(&scripts(), "function fraseDeErro(");
     let Some(ramo) = corpo
         .split("if (erro.InviteMismatch)")
@@ -1473,6 +1480,13 @@ fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_chegaram_a_
         "com a impressão vinda da lista, a recusa não diz o remédio (colar o link do \
          servidor de novo, ou removê-lo da lista), ou manda confirmar um link que não \
          existe:\n{da_lista}"
+    );
+    assert!(
+        da_lista.contains("Se a chave do servidor mudou, ou a lista guardou a errada")
+            && !da_lista.to_lowercase().contains("corrigir"),
+        "com a impressão vinda da lista, o remédio afirma que a lista está errada, ou não \
+         diz quando colar o link de novo: numa colisão de LAN ou num quarto hostil a lista \
+         está certa, e quem atendeu é que não é o servidor dela:\n{da_lista}"
     );
     for (origem, frase) in [("da lista", da_lista), ("do link", do_link)] {
         assert!(
@@ -1518,6 +1532,10 @@ fn a_faixa_de_um_pino_que_a_impressao_desmente_diz_de_onde_ela_veio() {
     //   a ofertada, e é assim que uma lista da 0.15.0 se cura). Isso só é
     //   verdade **se a gravação deu certo**: o `connect` diz se deu
     //   (`a_lista_guardou`), e a faixa não promete o que não aconteceu.
+    // - Da lista, sem gravar: dois motivos dão aqui, a gravação que falhou e o
+    //   servidor desta máquina, que o `connect` não anota de propósito
+    //   (`hospedado_aqui`). «Não conseguiu» só vale para o primeiro; o que vale
+    //   para os dois é que a lista continua com a impressão antiga.
     let corpo = body_of(&scripts(), "function fraseDoVeredito(");
     let Some(ramo) = corpo
         .split("if (veredito.InviteDisagrees)")
@@ -1564,9 +1582,13 @@ fn a_faixa_de_um_pino_que_a_impressao_desmente_diz_de_onde_ela_veio() {
         "quando a lista gravou a chave de quem atendeu, a faixa não diz isso:\n{guardou}"
     );
     assert!(
-        !nao_guardou.contains("passou a guardar") && nao_guardou.contains("não conseguiu"),
-        "quando a lista não gravou, a faixa promete que gravou, ou não diz que não \
-         conseguiu:\n{nao_guardou}"
+        !nao_guardou.contains("passou a guardar")
+            && nao_guardou.contains("continua com a impressão antiga")
+            && !nao_guardou.contains("não conseguiu"),
+        "quando a lista não gravou, a faixa promete que gravou, ou não diz que a lista \
+         continua com a impressão antiga, ou diz que a gravação «não conseguiu», que é \
+         falso quando o servidor é desta máquina e o `connect` não o anota de \
+         propósito:\n{nao_guardou}"
     );
 }
 
@@ -1602,6 +1624,17 @@ fn o_primeiro_contato_verificado_diz_quem_confirmou_a_chave() {
                 && corpo.contains("O CONVITE"),
             "{onde} diz que o convite confirmou a chave mesmo quando quem a confirmou foi \
              a lista:\n{corpo}"
+        );
+        // O ternário sozinho não basta: a frase tem de **usar** o que ele
+        // escolheu. Um texto com «O CONVITE» fixo ao lado de um ternário que
+        // ninguém lê passaria pelas três procuras de cima, e diria de novo que o
+        // convite confirmou uma chave que a lista confirmou.
+        assert!(
+            (corpo.contains("${quem} CONFIRMOU") || corpo.contains("${quem} JÁ CONFIRMOU"))
+                && corpo.matches("O CONVITE").count() == 1,
+            "{onde} tem o ternário de quem confirmou, mas a frase não o usa, ou diz «O \
+             CONVITE» fora dele: com a impressão vinda da lista, ela continua dizendo que o \
+             convite confirmou a chave:\n{corpo}"
         );
     }
 }
@@ -1688,6 +1721,55 @@ fn a_origem_da_impressao_vai_do_connect_ate_as_frases() {
         mostrar.contains("fraseDoVeredito(veredito, deOnde)"),
         "a faixa da sessão não passa a origem à frase:\n{mostrar}"
     );
+
+    // **E as chaves que `deOndeVeio` devolve são as que as frases leem.** O
+    // objeto viaja inteiro até elas, e um nome trocado de um lado só não quebra
+    // nada: a leitura dá `undefined`, a origem nunca é `"Lista"`, a gravação
+    // nunca aconteceu, e a frase do link volta a valer para tudo, calada. Os
+    // nomes saem de `deOndeVeio`, e não daqui: renomear dos dois lados continua
+    // passando, e só um lado, não.
+    let de_onde_veio = js_function(&read("ui/tela-boot.js"), "function deOndeVeio(");
+    let chave_que_devolve = |campo: &str| -> String {
+        let leitura = format!("resposta?.{campo}");
+        let Some(linha) = de_onde_veio.lines().find(|linha| linha.contains(&leitura)) else {
+            panic!("`deOndeVeio` não lê `{campo}` da resposta do `connect`:\n{de_onde_veio}");
+        };
+        let Some((chave, _)) = linha.split_once(':') else {
+            panic!("`deOndeVeio` não devolve `{campo}` numa chave do objeto: «{linha}»");
+        };
+        chave.trim().to_owned()
+    };
+    let origem = chave_que_devolve("origem_da_impressao");
+    let guardou = chave_que_devolve("a_lista_guardou");
+    let pela_origem = format!("deOnde?.{origem} === \"Lista\"");
+    let pela_gravacao = format!("deOnde.{guardou}");
+    for (arquivo, assinatura, leituras) in [
+        (
+            "ui/frases.js",
+            "function fraseDeErro(",
+            vec![pela_origem.as_str()],
+        ),
+        (
+            "ui/tela-sessao.js",
+            "function fraseDoVeredito(",
+            vec![pela_origem.as_str(), pela_gravacao.as_str()],
+        ),
+        (
+            "ui/tela-auth.js",
+            "function dizerSeOConviteJaConferiu(",
+            vec![pela_origem.as_str()],
+        ),
+    ] {
+        let corpo = js_function(&read(arquivo), assinatura);
+        for leitura in leituras {
+            assert!(
+                corpo.contains(leitura),
+                "`{assinatura}` ({arquivo}) não lê `{leitura}`, que é o nome que \
+                 `deOndeVeio` devolve: a leitura dá `undefined`, e a frase da lista nunca \
+                 aparece ali:\n{corpo}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -270,6 +270,11 @@ function fraseDoVeredito(veredito, deOnde = null) {
     // do link qualquer que fosse o veredito), e o `connect` grava a ofertada
     // no lugar dela (`impressao_a_guardar`). A faixa só diz que a lista passou
     // a guardar a dele quando a gravação deu certo: o `connect` diz se deu.
+    // Quando não gravou, são dois motivos, e a frase serve aos dois: a gravação
+    // que falhou (o `seele.log` diz qual erro) e o servidor desta máquina, que
+    // o `connect` não anota na lista de propósito (`hospedado_aqui`). Nos dois,
+    // a lista continua com a impressão antiga; «não conseguiu» seria falso no
+    // segundo.
     if (deOnde?.origem === "Lista") {
       if (deOnde.aListaGuardou) {
         return (
@@ -281,7 +286,7 @@ function fraseDoVeredito(veredito, deOnde = null) {
       return (
         "A LISTA GUARDA OUTRA IMPRESSÃO PARA ESTE SERVIDOR.\n" +
         comparacao +
-        "Você entrou no servidor de sempre, mas a lista não conseguiu guardar a impressão dele."
+        "Você entrou no servidor de sempre, mas a lista continua com a impressão antiga."
       );
     }
     return (

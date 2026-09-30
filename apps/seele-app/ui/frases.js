@@ -443,11 +443,17 @@ function fraseDeErro(erro, apelido, deOnde) {
     // **E quem prometeu muda a frase.** `deOnde` (`deOndeVeio`, em
     // `tela-boot.js`) diz se a impressão veio do link colado ou da lista. Da
     // lista, não há link nenhum a confirmar com ninguém: o título fala da
-    // lista, e o remédio é colar de novo o link do servidor (que corrige a
-    // impressão guardada) ou removê-lo da lista. É o caso de uma lista gravada
-    // pela 0.15.0 com a impressão de outro servidor, que passa a ser recusada
-    // em todo endereço onde nenhum pino prova o servidor (um alvo de LAN, um
-    // endereço sem pino). Sem `deOnde`, a frase é a do link.
+    // lista, e o remédio é colar de novo o link do servidor (a volta confere
+    // pela impressão do link, e a lista passa a guardar a que ele confirmou) ou
+    // removê-lo da lista. Serve a uma lista gravada pela 0.15.0 com a impressão
+    // de outro servidor, que passa a ser recusada em todo endereço onde nenhum
+    // pino prova o servidor (um alvo de LAN, um endereço sem pino), e a um
+    // servidor que trocou de chave. **O remédio não diz que a lista está
+    // errada**, porque nem sempre está: numa colisão de LAN (outro servidor,
+    // já fixado, atendendo no endereço de casa do anfitrião) ou num quarto
+    // hostil, a lista guardou a impressão certa, e quem atendeu é que não é o
+    // servidor dela. Por isso ele diz quando colar o link. Sem `deOnde`, a
+    // frase é a do link.
     if (erro.InviteMismatch) {
       const comparacao =
         `esperada: ${erro.InviteMismatch.expected}\n` +
@@ -457,7 +463,7 @@ function fraseDeErro(erro, apelido, deOnde) {
           "ESTE NÃO É O SERVIDOR QUE A LISTA GUARDOU.\n" +
           comparacao +
           "O convite, a senha e o apelido não chegaram a ele.\n" +
-          "Cole de novo o link do servidor para corrigir a lista, ou remova-o dela."
+          "Se a chave do servidor mudou, ou a lista guardou a errada, cole de novo o link dele; ou remova-o da lista."
         );
       }
       return (
