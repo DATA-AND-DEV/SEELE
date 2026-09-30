@@ -1420,7 +1420,17 @@ fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_chegaram_a_
     // do link. Que ela chegue com nome é guardado no núcleo
     // (`client::a_recusa_do_tls_chega_com_nome`); aqui se guarda o que a tela
     // faz com o nome.
-    let corpo = body_of(&scripts(), "function fraseDeErro(erro, apelido)");
+    //
+    // **E a frase diz de onde veio a impressão.** Quem volta pela lista de
+    // servidores também confere, pela impressão que a lista guardou, e não
+    // colou link nenhum: o título «SERVIDOR DO CONVITE» e «Confirme o link com
+    // quem o mandou» acusavam um link que não existe e não diziam o remédio.
+    // Com origem na lista, o título fala da lista, e o remédio é colar o link
+    // do servidor de novo ou removê-lo da lista. É também o que cobre o preço
+    // da regra do alvo de LAN: uma lista gravada pela 0.15.0 num alvo de LAN
+    // passa a ser recusada, e colar o link de novo a corrige. «O convite, a
+    // senha e o apelido não chegaram a ele» fica nas duas.
+    let corpo = body_of(&scripts(), "function fraseDeErro(");
     let Some(ramo) = corpo
         .split("if (erro.InviteMismatch)")
         .nth(1)
@@ -1431,16 +1441,46 @@ fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_chegaram_a_
              frase genérica do fim"
         );
     };
+    let Some((da_lista, do_link)) = ramo
+        .split_once("if (deOnde?.origem === \"Lista\")")
+        .and_then(|(_, depois)| depois.split_once("\n      }\n"))
+    else {
+        panic!(
+            "a recusa pela impressão não distingue a impressão que veio da lista da \
+             que veio do link, e acusa um link que quem voltou pela lista nunca \
+             colou:\n{ramo}"
+        );
+    };
 
     assert!(
-        ramo.contains("ESTE NÃO É O SERVIDOR DO CONVITE"),
-        "a recusa pela impressão perdeu a frase própria:\n{ramo}"
+        do_link.contains("ESTE NÃO É O SERVIDOR DO CONVITE")
+            && do_link.contains("Confirme o link com quem o mandou"),
+        "a recusa de uma impressão que veio do link perdeu a frase própria:\n{do_link}"
+    );
+    let titulo_da_lista = da_lista.split('"').nth(1).unwrap_or_default();
+    assert!(
+        titulo_da_lista.contains("LISTA")
+            && !titulo_da_lista.contains("CONVITE")
+            && !titulo_da_lista.contains("LINK"),
+        "com a impressão vinda da lista, o título da recusa não fala da lista, ou \
+         acusa um convite que ninguém colou: «{titulo_da_lista}»"
     );
     assert!(
-        ramo.contains("O convite, a senha e o apelido não chegaram a ele"),
-        "a frase não diz que o convite, a senha e o apelido não chegaram a ele, e \
-         quem lê vai pedir outro convite sem precisar:\n{ramo}"
+        da_lista.contains("link")
+            && da_lista.contains("de novo")
+            && da_lista.contains("remova")
+            && !da_lista.contains("Confirme o link com quem o mandou"),
+        "com a impressão vinda da lista, a recusa não diz o remédio (colar o link do \
+         servidor de novo, ou removê-lo da lista), ou manda confirmar um link que não \
+         existe:\n{da_lista}"
     );
+    for (origem, frase) in [("da lista", da_lista), ("do link", do_link)] {
+        assert!(
+            frase.contains("O convite, a senha e o apelido não chegaram a ele"),
+            "a recusa da impressão {origem} não diz que o convite, a senha e o apelido \
+             não chegaram a ele, e quem lê vai pedir outro convite sem precisar:\n{frase}"
+        );
+    }
 
     // O `\n` do fonte é uma barra e um `n`: sem trocá-lo, um «Nada» no começo de
     // uma linha da frase ficaria colado num `n` e não contaria como palavra.
@@ -1463,6 +1503,190 @@ fn a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_chegaram_a_
     assert!(
         !ramo.contains("MOTIVOS") && !ramo.contains("INCOMPAT"),
         "a recusa pela impressão foi dobrada na frase de versão incompatível:\n{ramo}"
+    );
+}
+
+#[test]
+fn a_faixa_de_um_pino_que_a_impressao_desmente_diz_de_onde_ela_veio() {
+    // `InviteDisagrees` só nasce num alvo de escopo público, onde o endereço é
+    // o mesmo em qualquer rede e o pino prova o servidor: «você entrou no
+    // servidor de sempre» é verdade ali, venha de onde vier a impressão que
+    // discorda. O que muda é quem discorda.
+    // - Do link: a faixa de sempre, que acusa o link.
+    // - Da lista: não há link nenhum. A lista guardava outra impressão para
+    //   este servidor, e passou a guardar a dele (`impressao_a_guardar` grava
+    //   a ofertada, e é assim que uma lista da 0.15.0 se cura). Isso só é
+    //   verdade **se a gravação deu certo**: o `connect` diz se deu
+    //   (`a_lista_guardou`), e a faixa não promete o que não aconteceu.
+    let corpo = body_of(&scripts(), "function fraseDoVeredito(");
+    let Some(ramo) = corpo
+        .split("if (veredito.InviteDisagrees)")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+    else {
+        panic!("`fraseDoVeredito` não trata mais `InviteDisagrees`, e a faixa fica muda");
+    };
+    let Some((da_lista, do_link)) = ramo
+        .split_once("if (deOnde?.origem === \"Lista\")")
+        .and_then(|(_, depois)| depois.split_once("\n    }\n"))
+    else {
+        panic!(
+            "a faixa de um pino que a impressão desmente não distingue a impressão que \
+             veio da lista da que veio do link, e fala de um link que quem voltou pela \
+             lista nunca colou:\n{ramo}"
+        );
+    };
+
+    assert!(
+        do_link.contains("O CONVITE NÃO CORRESPONDE A ESTE SERVIDOR")
+            && do_link.contains("Você entrou no servidor de sempre. O link é que não leva a ele."),
+        "a faixa de uma impressão que veio do link perdeu a frase de sempre:\n{do_link}"
+    );
+    let minusculas = da_lista.to_lowercase();
+    assert!(
+        minusculas.contains("lista")
+            && !minusculas.contains("link")
+            && !minusculas.contains("convite"),
+        "com a impressão vinda da lista, a faixa fala de link ou de convite, ou não fala \
+         da lista:\n{da_lista}"
+    );
+    let Some((guardou, nao_guardou)) = da_lista
+        .split_once("if (deOnde.aListaGuardou)")
+        .and_then(|(_, depois)| depois.split_once("\n      }\n"))
+    else {
+        panic!(
+            "a faixa da lista não pergunta se a gravação deu certo, e promete que a lista \
+             passou a guardar a chave mesmo quando ela não gravou:\n{da_lista}"
+        );
+    };
+    assert!(
+        guardou.contains("passou a guardar"),
+        "quando a lista gravou a chave de quem atendeu, a faixa não diz isso:\n{guardou}"
+    );
+    assert!(
+        !nao_guardou.contains("passou a guardar") && nao_guardou.contains("não conseguiu"),
+        "quando a lista não gravou, a faixa promete que gravou, ou não diz que não \
+         conseguiu:\n{nao_guardou}"
+    );
+}
+
+#[test]
+fn o_primeiro_contato_verificado_diz_quem_confirmou_a_chave() {
+    // Quem volta pela lista a um endereço sem pino (o que o quarto devolveu, por
+    // exemplo) tem a chave confirmada pela impressão que a lista guardou, e não
+    // por um convite. «O CONVITE CONFIRMOU A CHAVE» é falso ali: é a mesma
+    // classe da faixa acima, e as duas telas que dizem isso (a faixa e a tela de
+    // autenticação) dizem quem confirmou.
+    //
+    // Na faixa, só o ramo do `FirstContactVerified`: os outros ramos também
+    // falam da lista, e um guarda que casasse com eles não diria nada deste.
+    let faixa = js_function(&read("ui/tela-sessao.js"), "function fraseDoVeredito(");
+    let Some(ramo) = faixa
+        .split("if (veredito.FirstContactVerified)")
+        .nth(1)
+        .and_then(|resto| resto.split("\n  }\n").next())
+    else {
+        panic!("`fraseDoVeredito` não trata mais `FirstContactVerified`:\n{faixa}");
+    };
+    let autenticacao = js_function(
+        &read("ui/tela-auth.js"),
+        "function dizerSeOConviteJaConferiu(",
+    );
+    for (onde, corpo) in [
+        ("a faixa da sessão", ramo),
+        ("a tela de autenticação", autenticacao.as_str()),
+    ] {
+        assert!(
+            corpo.contains("deOnde?.origem === \"Lista\"")
+                && corpo.contains("A LISTA")
+                && corpo.contains("O CONVITE"),
+            "{onde} diz que o convite confirmou a chave mesmo quando quem a confirmou foi \
+             a lista:\n{corpo}"
+        );
+    }
+}
+
+#[test]
+fn a_origem_da_impressao_vai_do_connect_ate_as_frases() {
+    // As frases acima só servem se a origem chegar até elas. O caminho é o
+    // resultado que o `connect` já monta (`Entrada` e `FalhaDaEntrada`, em
+    // `main.rs`), sem campo novo na FFI, e cada elo pode cair sem que nada
+    // quebre: a frase do link volta a valer para tudo, calada.
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    for (elo, o_que_quebra) in [
+        (
+            "letorigem_da_impressao=OrigemDaImpressao::da_conferida(esperada.as_deref(),\
+             impressao_guardada.as_deref()",
+            "a origem não sai da mesma regra da impressão conferida, com o link desta \
+             sessão e a guardada nesta ordem",
+        ),
+        (
+            "FalhaDaEntrada{falha,de_onde:DeOndeVeio{origem_da_impressao,",
+            "a falha da entrada não leva a origem, e a recusa acusa o link de uma \
+             impressão que veio da lista",
+        ),
+        (
+            "letmuta_lista_guardou=false;",
+            "`a_lista_guardou` não começa falso, e a faixa promete a gravação quando a \
+             lista nem abriu, ou quando o servidor é desta máquina e não vai para ela",
+        ),
+        (
+            "Ok(())=>a_lista_guardou=impressao_aceita.is_some()",
+            "`a_lista_guardou` não sai da gravação da impressão aceita, e a faixa promete \
+             uma gravação que não aconteceu",
+        ),
+        (
+            "de_onde:DeOndeVeio{origem_da_impressao,a_lista_guardou,}",
+            "a entrada não leva a origem e a gravação à janela",
+        ),
+    ] {
+        assert!(connect.contains(elo), "{o_que_quebra}: `{elo}`");
+    }
+
+    let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
+    for (elo, o_que_quebra) in [
+        (
+            "entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor, deOndeVeio(resposta))",
+            "a entrada não leva a origem à tela de autenticação e à faixa",
+        ),
+        (
+            "fraseDeErro(motivo, apelido, deOndeVeio(falha))",
+            "a recusa não recebe a origem, e acusa o link de uma impressão da lista",
+        ),
+    ] {
+        assert!(conectar.contains(elo), "{o_que_quebra}:\n{conectar}");
+    }
+
+    let auth = read("ui/tela-auth.js");
+    let entrar = js_function(&auth, "function entrarNaAutenticacao(");
+    assert!(
+        entrar.contains("aperto = { snapshot, veredito, deOnde }")
+            && entrar.contains("dizerSeOConviteJaConferiu(veredito, deOnde)"),
+        "a tela de autenticação não guarda a origem, ou não a passa adiante:\n{entrar}"
+    );
+    for (assinatura, elo) in [
+        (
+            "async function verificarIdentidade(",
+            "fraseDoVeredito(aperto?.veredito, aperto?.deOnde)",
+        ),
+        (
+            "async function inserirPlug(",
+            "mostrarVeredito(aperto?.veredito ?? null, aperto?.deOnde ?? null)",
+        ),
+    ] {
+        let corpo = js_function(&auth, assinatura);
+        assert!(
+            corpo.contains(elo),
+            "`{assinatura}` não passa a origem à frase do veredito:\n{corpo}"
+        );
+    }
+    let mostrar = js_function(&read("ui/tela-sessao.js"), "function mostrarVeredito(");
+    assert!(
+        mostrar.contains("fraseDoVeredito(veredito, deOnde)"),
+        "a faixa da sessão não passa a origem à frase:\n{mostrar}"
     );
 }
 
@@ -2207,11 +2431,23 @@ fn the_failed_connection_hands_the_shell_the_trail_it_kept() {
     // quatro candidatos, o primeiro deu prazo esgotado em 4 s, o quarto
     // recusou» is the data that was missing when the two-house field test
     // failed, and a door nobody opens carries nothing.
+    //
+    // O `connect` responde por `FalhaDaEntrada` desde que a recusa pela
+    // impressão diz de onde ela veio: o `ConnectFailure` inteiro, achatado no
+    // topo, e mais a origem. Que o erro e a trilha continuam no topo depois do
+    // `flatten` é provado pela serialização de verdade, em `main.rs`
+    // (`a_falha_leva_o_erro_a_trilha_e_a_origem_no_topo`).
     let source = read("src/main.rs");
     assert!(
-        source.contains("Result<Entrada, ConnectFailure>"),
+        source.contains("Result<Entrada, FalhaDaEntrada>"),
         "`connect` answers with the bare error again, and the trail dies at the \
          bridge"
+    );
+    let falha = body_of(&source, "struct FalhaDaEntrada {");
+    assert!(
+        falha.contains("#[serde(flatten)]\n    falha: ConnectFailure,"),
+        "`FalhaDaEntrada` no longer carries the whole `ConnectFailure` flattened at the \
+         top, and the trail dies at the bridge:\n{falha}"
     );
 
     // And the shell has to know the shape changed, or every failure sentence

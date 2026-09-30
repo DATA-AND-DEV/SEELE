@@ -438,12 +438,21 @@ pub enum Trust {
         /// What the server offered.
         offered: String,
     },
-    /// The pin is the usual one, but the invite names a different key.
+    /// O pino confere, e a impressão esperada (a do link colado nesta sessão,
+    /// ou a que a lista de servidores guardou) nomeia outra chave.
     ///
-    /// The connection stands: trust on first use already established that this
-    /// is the same server as before, so the link is what is wrong.
+    /// A conexão segue e avisa. Só nasce onde o pino prova o servidor: o alvo
+    /// (o endereço que a pessoa escolheu) quando ele é de escopo público
+    /// (`seele_core::tofu::TofuVerifier::decide`). Ali o pino é a prova de
+    /// continuidade do ADR 0003: é o mesmo servidor de antes, e quem está
+    /// errado é quem prometeu a outra chave. Num candidato que ninguém
+    /// escolheu, ou num alvo de escopo local, o mesmo caso chega como
+    /// [`ConnectionError::InviteMismatch`].
+    ///
+    /// A casca diz quem prometeu: o `connect` do app sabe se a impressão veio
+    /// do link ou da lista, e a frase de um não serve para o outro.
     InviteDisagrees {
-        /// What the link promised.
+        /// O que a impressão esperada prometia: a do link, ou a da lista.
         expected: String,
         /// What the server offered, and what stays pinned.
         offered: String,

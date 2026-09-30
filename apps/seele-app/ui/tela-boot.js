@@ -100,6 +100,25 @@ let ultimoApelido = null;
 // a dispensa.
 let nossoServidorEm = null;
 
+/**
+ * De onde veio a impressão que o `connect` conferiu, e se a lista a guardou.
+ *
+ * O `connect` diz as duas coisas no topo da resposta, dê a entrada certo ou
+ * não (`DeOndeVeio`, em `main.rs`). A conferência é a mesma para as duas
+ * origens, e a frase não pode ser: uma impressão que veio do link colado
+ * acusa o link quando não confere, e uma que veio da lista de servidores não
+ * tem link nenhum a acusar. Quem decide a origem é o Rust, pela mesma regra da
+ * impressão conferida; aqui ela só é lida.
+ *
+ * `aListaGuardou` é falso numa falha, em que nada é gravado.
+ */
+function deOndeVeio(resposta) {
+  return {
+    origem: resposta?.origem_da_impressao ?? null,
+    aListaGuardou: resposta?.a_lista_guardou === true,
+  };
+}
+
 async function conectar(alvo, apelido, token) {
   ultimoAlvo = alvo ?? ultimoAlvo;
   ultimoApelido = apelido ?? ultimoApelido;
@@ -188,7 +207,7 @@ async function conectar(alvo, apelido, token) {
     // A entrada traz duas coisas: a tela, e o que a chave deste servidor acabou
     // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
     // um ouvinte inscrito depois chegaria sempre tarde.
-    const { snapshot, veredito, geracao } = await invoke("connect", {
+    const resposta = await invoke("connect", {
       server: alvo,
       nickname: apelido,
       // Sempre com áudio. A caixa de «entrar com áudio» saiu com a tela antiga,
@@ -202,6 +221,7 @@ async function conectar(alvo, apelido, token) {
       // quem confere.
       joinSecret: token ?? null,
     });
+    const { snapshot, veredito, geracao } = resposta;
 
 
     // Daqui em diante quem manda é `#tela-auth`: o veredito da chave é lido
@@ -215,13 +235,16 @@ async function conectar(alvo, apelido, token) {
     // sessão nova e a geração ainda é a de ninguém.
     entrarNaGeracao(geracao);
     desenhar(snapshot);
-    entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor);
+    // E de onde veio a impressão conferida, para a faixa do veredito dizer a
+    // frase da origem certa. Ver `deOndeVeio`.
+    entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor, deOndeVeio(resposta));
   } catch (falha) {
-    // `connect` responde por `ConnectFailure` desde esta tarefa: o erro de
-    // sempre **mais a trilha**. Quem escreve a frase quer o erro; a trilha vai
-    // para o console, que é onde alguém que está investigando a procura — «o
-    // primeiro deu prazo esgotado em 4 s, o quarto recusou» é o dado que faltou
-    // quando o teste de campo das duas casas falhou.
+    // `connect` responde por `FalhaDaEntrada` (em `main.rs`): o erro de sempre
+    // **mais a trilha**, e mais de onde veio a impressão conferida. Quem escreve
+    // a frase quer o erro e a origem; a trilha vai para o console, que é onde
+    // alguém que está investigando a procura — «o primeiro deu prazo esgotado
+    // em 4 s, o quarto recusou» é o dado que faltou quando o teste de campo das
+    // duas casas falhou.
     //
     // O `?? falha` não é zelo: `analisar_convite` e o `AlreadyConnected` deste
     // mesmo comando respondem com o enum cru, e a mesma função lê os dois.
@@ -243,8 +266,9 @@ async function conectar(alvo, apelido, token) {
     } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
       erro.hidden = false;
       // O apelido que esta tentativa mandou, para a recusa por nome tomado
-      // poder dizer **qual** nome foi recusado. Ver `fraseDeErro`.
-      erro.textContent = fraseDeErro(motivo, apelido);
+      // poder dizer **qual** nome foi recusado, e de onde veio a impressão,
+      // para a recusa por ela acusar o link ou a lista. Ver `fraseDeErro`.
+      erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
     }
   } finally {
     botao.disabled = false;

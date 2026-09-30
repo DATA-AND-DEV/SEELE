@@ -226,8 +226,15 @@ function blocos(pct, total) {
  *
  * A recusa de um convite que aponta para outra chave não chega como veredito —
  * ela derruba a conexão, e a frase dela vive em `fraseDeErro`.
+ *
+ * `deOnde` diz de onde veio a impressão que o `connect` conferiu (`"Link"` ou
+ * `"Lista"`) e se a lista guardou a aceita (`deOndeVeio`, em `tela-boot.js`).
+ * A comparação é a mesma para as duas origens; a frase não pode ser, porque
+ * uma impressão que veio da lista de servidores não tem link nenhum a acusar.
+ * Sem `deOnde`, a frase é a do link, que era a única antes de a volta pela
+ * lista conferir.
  */
-function fraseDoVeredito(veredito) {
+function fraseDoVeredito(veredito, deOnde = null) {
   if (!veredito || veredito === "Known") return null;
 
   // `tofu.rs`: a casca tem que dizer o que acabou de confiar. Fixar em
@@ -240,29 +247,59 @@ function fraseDoVeredito(veredito) {
     );
   }
   // É para produzir exatamente isto que o link do ADR 0006 existe. Não há nada
-  // a fazer, e por isso a frase não pede nada.
+  // a fazer, e por isso a frase não pede nada. Quem volta pela lista a um
+  // endereço sem pino tem a chave confirmada pela impressão que a lista
+  // guardou, e não por um convite: a frase diz quem confirmou.
   if (veredito.FirstContactVerified) {
+    const quem = deOnde?.origem === "Lista" ? "A LISTA" : "O CONVITE";
     return (
-      "PRIMEIRO CONTATO VERIFICADO — O CONVITE CONFIRMOU A CHAVE\n" +
+      `PRIMEIRO CONTATO VERIFICADO — ${quem} CONFIRMOU A CHAVE\n` +
       veredito.FirstContactVerified.fingerprint
     );
   }
-  // O servidor é o mesmo de sempre; o link é que não é dele. Ressalva, não
-  // queda.
+  // O servidor é o mesmo de sempre, e quem discorda do pino é a impressão.
+  // Ressalva, não queda. `InviteDisagrees` só nasce num alvo de escopo
+  // público, onde o endereço é o mesmo em qualquer rede e o pino prova o
+  // servidor (`TofuVerifier::decide`): «servidor de sempre» é verdade ali.
   if (veredito.InviteDisagrees) {
+    const comparacao =
+      `esperada: ${veredito.InviteDisagrees.expected}\n` +
+      `ofertada: ${veredito.InviteDisagrees.offered}\n`;
+    // **Da lista, não há link a acusar.** A lista guardava outra impressão
+    // para este servidor (a de uma lista gravada pela 0.15.0, que guardava a
+    // do link qualquer que fosse o veredito), e o `connect` grava a ofertada
+    // no lugar dela (`impressao_a_guardar`). A faixa só diz que a lista passou
+    // a guardar a dele quando a gravação deu certo: o `connect` diz se deu.
+    if (deOnde?.origem === "Lista") {
+      if (deOnde.aListaGuardou) {
+        return (
+          "A LISTA GUARDAVA OUTRA IMPRESSÃO PARA ESTE SERVIDOR.\n" +
+          comparacao +
+          "Você entrou no servidor de sempre, e a lista passou a guardar a impressão dele."
+        );
+      }
+      return (
+        "A LISTA GUARDA OUTRA IMPRESSÃO PARA ESTE SERVIDOR.\n" +
+        comparacao +
+        "Você entrou no servidor de sempre, mas a lista não conseguiu guardar a impressão dele."
+      );
+    }
     return (
       "O CONVITE NÃO CORRESPONDE A ESTE SERVIDOR.\n" +
-      `esperada: ${veredito.InviteDisagrees.expected}\n` +
-      `ofertada: ${veredito.InviteDisagrees.offered}\n` +
+      comparacao +
       "Você entrou no servidor de sempre. O link é que não leva a ele."
     );
   }
   return null;
 }
 
-/** Acende — ou apaga — a faixa de veredito da sessão. */
-function mostrarVeredito(veredito) {
-  const frase = fraseDoVeredito(veredito);
+/**
+ * Acende — ou apaga — a faixa de veredito da sessão.
+ *
+ * `deOnde` segue para a frase: ver `fraseDoVeredito`.
+ */
+function mostrarVeredito(veredito, deOnde = null) {
+  const frase = fraseDoVeredito(veredito, deOnde);
   // Mostrar a faixa **antes** de escrever nela. Um `role="status"` só é lido
   // quando o texto muda com a região já visível: escrever primeiro e revelar
   // depois faz vários leitores de tela tratarem a mudança como conteúdo que

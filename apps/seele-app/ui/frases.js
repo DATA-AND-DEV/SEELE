@@ -395,7 +395,7 @@ const NOMES_RECUSADOS = {
     "ESTE NOME TEM CARACTERE QUE ENDEREÇO NÃO TEM.\nValem letras, números, hífen e ponto — e os dois-pontos da porta.",
 };
 
-function fraseDeErro(erro, apelido) {
+function fraseDeErro(erro, apelido, deOnde) {
   if (typeof erro === "string") return FRASES[erro] ?? erro;
   if (erro && typeof erro === "object") {
     if (erro.Recusado?.motivo) {
@@ -416,9 +416,9 @@ function fraseDeErro(erro, apelido) {
         "Confirme por outro canal antes de continuar."
       );
     }
-    // O convite prometeu uma chave e o servidor ofertou outra. Não é troca de
-    // chave — nada estava fixado aqui — então a frase acusa o link, e não a
-    // continuidade do servidor.
+    // A impressão prometia uma chave e quem atendeu ofertou outra. Não é
+    // troca de chave — nenhum pino prova o servidor ali — então a frase acusa
+    // quem prometeu, e não a continuidade do servidor.
     //
     // **A recusa é dentro do TLS, antes do `Hello`** (S2b da análise de 22/09):
     // o verificador do núcleo confere a impressão no aperto de mão, e o convite,
@@ -439,11 +439,30 @@ function fraseDeErro(erro, apelido) {
     // Vale também para quem volta pela lista de servidores, que confere pela
     // impressão que a lista guardou (S3). É `#boot-erro`, e não o veredito
     // laranja da sessão, porque não há sessão nenhuma.
+    //
+    // **E quem prometeu muda a frase.** `deOnde` (`deOndeVeio`, em
+    // `tela-boot.js`) diz se a impressão veio do link colado ou da lista. Da
+    // lista, não há link nenhum a confirmar com ninguém: o título fala da
+    // lista, e o remédio é colar de novo o link do servidor (que corrige a
+    // impressão guardada) ou removê-lo da lista. É o caso de uma lista gravada
+    // pela 0.15.0 com a impressão de outro servidor, que passa a ser recusada
+    // em todo endereço onde nenhum pino prova o servidor (um alvo de LAN, um
+    // endereço sem pino). Sem `deOnde`, a frase é a do link.
     if (erro.InviteMismatch) {
+      const comparacao =
+        `esperada: ${erro.InviteMismatch.expected}\n` +
+        `ofertada: ${erro.InviteMismatch.offered}\n`;
+      if (deOnde?.origem === "Lista") {
+        return (
+          "ESTE NÃO É O SERVIDOR QUE A LISTA GUARDOU.\n" +
+          comparacao +
+          "O convite, a senha e o apelido não chegaram a ele.\n" +
+          "Cole de novo o link do servidor para corrigir a lista, ou remova-o dela."
+        );
+      }
       return (
         "ESTE NÃO É O SERVIDOR DO CONVITE.\n" +
-        `esperada: ${erro.InviteMismatch.expected}\n` +
-        `ofertada: ${erro.InviteMismatch.offered}\n` +
+        comparacao +
         "O convite, a senha e o apelido não chegaram a ele.\n" +
         "Confirme o link com quem o mandou."
       );

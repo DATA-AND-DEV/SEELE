@@ -884,6 +884,81 @@ struct Entrada {
     /// faz um trabalho que termina depois da saída ser recusado aqui, em vez de
     /// ser atendido contra a sessão seguinte.
     geracao: u64,
+    /// De onde veio a impressão que esta conexão conferiu, e se a lista a
+    /// guardou. Achatado: os dois campos chegam à janela no topo da entrada.
+    #[serde(flatten)]
+    de_onde: DeOndeVeio,
+}
+
+/// De onde veio a impressão que uma conexão conferiu.
+///
+/// A conferência é a mesma, e a frase não pode ser: uma impressão que veio do
+/// link colado nesta sessão acusa o link quando não confere, e uma que veio da
+/// lista de servidores conhecidos não tem link nenhum a acusar. O app sabia de
+/// onde ela vinha e não dizia, e a tela falava de um link que a pessoa não
+/// colou.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+enum OrigemDaImpressao {
+    /// Do link colado nesta sessão.
+    Link,
+    /// Da lista de servidores conhecidos: a impressão que uma conexão anterior
+    /// aceitou, ou a que a 0.15.0 gravou do link daquela vez.
+    Lista,
+}
+
+impl OrigemDaImpressao {
+    /// De onde veio a impressão que `seele_ffi::impressao_a_conferir` escolhe
+    /// com as mesmas duas entradas, e `None` quando ela não escolhe nenhuma.
+    ///
+    /// O link desta sessão vence a guardada, pela razão escrita lá.
+    fn da_conferida(do_link: Option<&str>, guardada: Option<&str>) -> Option<Self> {
+        match (do_link, guardada) {
+            (Some(_), _) => Some(Self::Link),
+            (None, Some(_)) => Some(Self::Lista),
+            (None, None) => None,
+        }
+    }
+}
+
+/// O que a janela precisa saber, além do veredito, para dizer a frase certa.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+struct DeOndeVeio {
+    /// De onde veio a impressão conferida; `None` quando não houve nenhuma.
+    origem_da_impressao: Option<OrigemDaImpressao>,
+    /// Se a lista de servidores conhecidos gravou, nesta entrada, a impressão
+    /// que a conexão aceitou.
+    ///
+    /// A faixa de uma lista que discordava do pino diz que a lista passou a
+    /// guardar a chave dele, e isso só é verdade se a gravação deu certo: a
+    /// lista pode não abrir, e a gravação pode falhar. Falso numa falha, em que
+    /// nada é gravado.
+    a_lista_guardou: bool,
+}
+
+/// Uma entrada que não aconteceu, como chega à janela.
+///
+/// O erro e a trilha da FFI (`ConnectFailure`), achatados no topo como sempre
+/// chegaram, e mais de onde veio a impressão: a recusa pela impressão diz uma
+/// frase para o link e outra para a lista. É daqui, e não de um campo novo na
+/// FFI, porque quem sabe de onde a impressão veio é este `connect`.
+#[derive(Debug, serde::Serialize)]
+struct FalhaDaEntrada {
+    /// O erro de sempre e por onde a chegada passou.
+    #[serde(flatten)]
+    falha: ConnectFailure,
+    /// De onde veio a impressão que esta tentativa conferia.
+    #[serde(flatten)]
+    de_onde: DeOndeVeio,
+}
+
+impl From<ConnectionError> for FalhaDaEntrada {
+    /// Uma falha de antes de haver impressão a conferir.
+    fn from(error: ConnectionError) -> Self {
+        Self {
+            falha: ConnectFailure::from(error),
+            de_onde: DeOndeVeio::default(),
+        }
+    }
 }
 
 #[tauri::command]
@@ -894,7 +969,7 @@ async fn connect(
     nickname: String,
     audio: bool,
     join_secret: Option<String>,
-) -> Result<Entrada, ConnectFailure> {
+) -> Result<Entrada, FalhaDaEntrada> {
     if session.connection().is_ok() {
         return Err(ConnectionError::AlreadyConnected.into());
     }
@@ -1014,6 +1089,10 @@ async fn connect(
     // em `impressao_a_conferir`.
     let conferida =
         seele_ffi::impressao_a_conferir(esperada.as_deref(), impressao_guardada.as_deref());
+    // E de onde ela veio, pela mesma ordem: a frase de uma impressão que não
+    // confere é outra quando quem a prometeu foi a lista, e não um link.
+    let origem_da_impressao =
+        OrigemDaImpressao::da_conferida(esperada.as_deref(), impressao_guardada.as_deref());
 
     // **O quarto: onde este servidor mora hoje.**
     //
@@ -1145,10 +1224,17 @@ async fn connect(
         descartados: Arc::clone(&session.eventos_de_geracao_morta),
     }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
-    let (connection, veredito) =
+    let resultado =
         tauri::async_runtime::spawn_blocking(move || Connection::connect_watching(config, atento))
             .await
-            .map_err(|_| ConnectFailure::from(ConnectionError::Unreachable))??;
+            .unwrap_or_else(|_| Err(ConnectFailure::from(ConnectionError::Unreachable)));
+    let (connection, veredito) = resultado.map_err(|falha| FalhaDaEntrada {
+        falha,
+        de_onde: DeOndeVeio {
+            origem_da_impressao,
+            a_lista_guardou: false,
+        },
+    })?;
 
     connection.subscribe(ponte);
 
@@ -1245,6 +1331,8 @@ async fn connect(
     if let Ok(mut onde) = session.endereco_da_sessao.lock() {
         *onde = Some(alvo.clone());
     }
+    // Falso até a lista gravar, lá embaixo, a impressão que a conexão aceitou.
+    let mut a_lista_guardou = false;
     if !hospedado_aqui(&alvo) {
         if let Ok(mut guardado) = session.alvo.lock() {
             *guardado = Some(alvo.clone());
@@ -1324,20 +1412,25 @@ async fn connect(
                 esperada.as_deref(),
                 impressao_guardada.as_deref(),
             );
-            if let Err(erro) = lista.anotar_caminhos(
+            match lista.anotar_caminhos(
                 &alvo,
                 &caminhos,
                 bilhete_texto.as_deref(),
                 impressao_aceita.as_deref(),
             ) {
+                // **Só aqui a lista guardou a impressão aceita**, e só quando
+                // havia uma a guardar. A faixa de uma lista que discordava do
+                // pino diz que ela passou a guardar a chave dele: sai deste
+                // valor, e não de supor que a gravação deu certo.
+                Ok(()) => a_lista_guardou = impressao_aceita.is_some(),
                 // `warn`, e não `debug`, que o `seele.log` não grava: a volta
                 // pela lista confere pela impressão que ficou lá, e a cura de
                 // uma lista gravada pela 0.15.0 depende desta gravação.
-                tracing::warn!(
+                Err(erro) => tracing::warn!(
                     %erro,
                     "não guardei na lista os caminhos, o bilhete e a impressão aceita deste \
                      servidor: a volta pela lista confere pela impressão que ficou lá"
-                );
+                ),
             }
         }
     }
@@ -1346,6 +1439,10 @@ async fn connect(
         snapshot,
         veredito,
         geracao,
+        de_onde: DeOndeVeio {
+            origem_da_impressao,
+            a_lista_guardou,
+        },
     })
 }
 
@@ -9651,5 +9748,115 @@ mod a_supervisao_dos_mods_nativos {
         );
         let (mensagens, _) = sobrevivente.executor.fila().ocupacao();
         assert_eq!(mensagens, 5, "os créditos de outra geração foram soltos");
+    }
+}
+
+#[cfg(test)]
+mod a_janela_sabe_de_onde_veio_a_impressao {
+    use super::{DeOndeVeio, FalhaDaEntrada, OrigemDaImpressao};
+    use seele_ffi::{ConnectFailure, ConnectionError};
+
+    #[test]
+    fn a_origem_e_a_da_impressao_que_se_confere() {
+        // As duas regras leem as mesmas entradas, e esta prende uma à outra: a
+        // origem dita à janela tem de ser a da impressão que o TLS conferiu. Se
+        // a ordem de `impressao_a_conferir` mudasse e esta não, a tela acusaria
+        // o link de uma impressão que veio da lista, ou o contrário.
+        let do_link = Some("bbbb2222");
+        let guardada = Some("aaaa1111");
+        for (link, lista) in [
+            (do_link, guardada),
+            (do_link, None),
+            (None, guardada),
+            (None, None),
+        ] {
+            let conferida = seele_ffi::impressao_a_conferir(link, lista);
+            let origem = OrigemDaImpressao::da_conferida(link, lista);
+            let de_onde_veio = match origem {
+                Some(OrigemDaImpressao::Link) => link,
+                Some(OrigemDaImpressao::Lista) => lista,
+                None => None,
+            };
+            assert_eq!(
+                de_onde_veio.map(str::to_owned),
+                conferida,
+                "com o link {link:?} e a guardada {lista:?}, a origem dita à janela \
+                 ({origem:?}) não é a da impressão conferida ({conferida:?}): a frase acusaria \
+                 quem não prometeu nada"
+            );
+        }
+    }
+
+    #[test]
+    fn a_falha_leva_o_erro_a_trilha_e_a_origem_no_topo() {
+        // `tela-boot.js` lê `falha.error` e `falha.trail` desde que a trilha
+        // existe, e agora também de onde veio a impressão. O `flatten` põe os
+        // quatro no topo; sem ele, o erro ficaria dentro de um invólucro que a
+        // janela não atravessa, e toda falha viraria «falha sem nome».
+        let falha = FalhaDaEntrada {
+            falha: ConnectFailure {
+                error: ConnectionError::InviteMismatch {
+                    expected: "bbbb2222".into(),
+                    offered: "aaaa1111".into(),
+                },
+                trail: Vec::new(),
+            },
+            de_onde: DeOndeVeio {
+                origem_da_impressao: Some(OrigemDaImpressao::Lista),
+                a_lista_guardou: false,
+            },
+        };
+        let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(&falha) else {
+            panic!("a falha da entrada tem de serializar para objeto");
+        };
+        for chave in ["error", "trail", "origem_da_impressao", "a_lista_guardou"] {
+            assert!(
+                mapa.contains_key(chave),
+                "a falha da entrada não traz `{chave}` no topo, e a janela o lê de lá: {mapa:?}"
+            );
+        }
+        assert_eq!(
+            mapa.get("origem_da_impressao"),
+            Some(&serde_json::Value::String("Lista".into())),
+            "a origem chegou à janela com outra forma que não o nome da variante"
+        );
+    }
+
+    #[test]
+    fn a_janela_le_o_que_o_rust_manda() {
+        // Os nomes saem da serialização de verdade: renomear um campo ou uma
+        // variante de um lado só faria a janela ler `undefined`, sem erro nenhum,
+        // e dizer a frase do link para uma impressão que veio da lista.
+        let ler = |nome: &str| {
+            std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("ui")
+                    .join(nome),
+            )
+            .unwrap_or_else(|erro| panic!("ui/{nome} tem de ser legível: {erro}"))
+        };
+        let entrada = ler("tela-boot.js");
+        let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(DeOndeVeio::default())
+        else {
+            panic!("`DeOndeVeio` tem de serializar para objeto");
+        };
+        for chave in mapa.keys() {
+            assert!(
+                entrada.contains(chave.as_str()),
+                "`tela-boot.js` não lê `{chave}`, que o `connect` manda"
+            );
+        }
+        let Ok(serde_json::Value::String(lista)) = serde_json::to_value(OrigemDaImpressao::Lista)
+        else {
+            panic!("a origem tem de serializar como texto");
+        };
+        let comparacao = format!("=== \"{lista}\"");
+        for nome in ["frases.js", "tela-sessao.js", "tela-auth.js"] {
+            assert!(
+                ler(nome).contains(&comparacao),
+                "`{nome}` não compara a origem com `\"{lista}\"`, que é como o Rust a manda: \
+                 a frase da lista nunca aparece ali"
+            );
+        }
     }
 }

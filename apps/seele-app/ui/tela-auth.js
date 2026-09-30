@@ -166,8 +166,13 @@ const LINHAS_DO_REGISTRO = 200;
  * quem esperava já apertou o botão que valia, lá atrás, e foi cuidar da vida
  * enquanto o dono decidia. Pedir a ele mais um aperto seria devolver o pedágio
  * na única entrada em que, por construção, ninguém está olhando para a tela.
+ *
+ * `deOnde` diz de onde veio a impressão que o `connect` conferiu, e se a lista
+ * a guardou (`deOndeVeio`, em `tela-boot.js`). Ele fica no `aperto` junto do
+ * veredito, porque as frases do veredito dependem dele: uma impressão que veio
+ * da lista não tem link nenhum a acusar.
  */
-function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = false) {
+function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = false, deOnde = null) {
   const tela = $("tela-auth");
   // Dois casos entram direto, e por razões diferentes.
   //
@@ -182,7 +187,7 @@ function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = fals
   esperando = false;
   pararDeBater();
 
-  aperto = { snapshot, veredito };
+  aperto = { snapshot, veredito, deOnde };
 
   // Só faz sentido vindo da entrada. Numa liberação o foco já está nesta tela,
   // e não há foco da tela de entrada para guardar.
@@ -203,7 +208,7 @@ function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = fals
   guardarAlvoDoServer(endereco);
   desenharPadrao(snapshot);
   desenharServerDaEntrada(snapshot);
-  dizerSeOConviteJaConferiu(veredito);
+  dizerSeOConviteJaConferiu(veredito, deOnde);
 
   // Um botão, um movimento. Conferir e entrar eram dois passos deste mesmo
   // botão, e a pessoa pagava os dois para fazer uma coisa só.
@@ -279,13 +284,18 @@ function desenharPadrao(snapshot) {
  *
  * `null` esconde a linha em vez de deixá-la vazia: fora do convite verificado
  * não há nada a afirmar aqui, e uma moldura vazia afirmaria que há.
+ *
+ * **E diz quem confirmou.** Quem volta pela lista de servidores a um endereço
+ * sem pino tem a chave confirmada pela impressão que a lista guardou, e não
+ * por um convite; dizer «o convite» ali é falar de um link que ninguém colou.
  */
-function dizerSeOConviteJaConferiu(veredito) {
+function dizerSeOConviteJaConferiu(veredito, deOnde = null) {
   const conferido = veredito?.FirstContactVerified ?? null;
   const linha = $("auth-conferido");
   linha.hidden = conferido === null;
+  const quem = deOnde?.origem === "Lista" ? "A LISTA" : "O CONVITE";
   linha.textContent = conferido
-    ? `O CONVITE JÁ CONFIRMOU A CHAVE DESTE SERVIDOR\n${conferido.fingerprint}`
+    ? `${quem} JÁ CONFIRMOU A CHAVE DESTE SERVIDOR\n${conferido.fingerprint}`
     : "";
 }
 
@@ -377,7 +387,7 @@ async function verificarIdentidade() {
   const botao = $("auth-botao");
   botao.textContent = "CONFERINDO IDENTIDADE…";
 
-  const frase = fraseDoVeredito(aperto?.veredito);
+  const frase = fraseDoVeredito(aperto?.veredito, aperto?.deOnde);
   if (frase) {
     registrar(frase, "atencao");
   } else {
@@ -458,7 +468,7 @@ async function inserirPlug() {
     // O veredito continua indo para a faixa da sessão. Ele foi lido aqui por
     // quem estava olhando esta tela; a faixa é onde ele fica disponível para
     // quem chegou depois, e é `role="status"`, que esta lista não é.
-    mostrarVeredito(aperto?.veredito ?? null);
+    mostrarVeredito(aperto?.veredito ?? null, aperto?.deOnde ?? null);
     // A imagem do servidor, uma vez, aqui.
     //
     // Ela **não** vem por evento nesta hora, e essa é a razão de esta linha
