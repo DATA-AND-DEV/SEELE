@@ -7636,7 +7636,9 @@ no HEAD: o Lote B do 1B reescreveu aqueles docs.
 Nenhum item daqui segura a release. Cada um tem o comando que o mostra, e o
 conserto que a revisão propôs. Estão na ordem em que atrapalham: primeiro o
 que o produto sabe e não conta, depois os testes que não provam o que dizem,
-e por fim o texto.
+e por fim o texto. Os itens 26 e 27 vieram depois, da revisão do Lote
+F-Fecho: estão na seção do seu tipo, com o número depois do último, para que
+nenhum número já citado mude.
 
 ### O produto sabe e não conta, ou conta errado
 
@@ -7806,6 +7808,50 @@ e por fim o texto.
     grep -n "recusas_de_carga" apps/seele-app/src/main.rs | head
     ```
 
+26. **FF-m1 da revisão do Lote F-Fecho · A recusa do pedido de catálogo sai
+    com `mod_id=` em branco.** O catálogo do servidor é pedido com o id vazio
+    (`carregarMods`, em `base.js`), e quando ele é recusado, a linha de
+    `executar` (`crates/seele-server/src/mods/pedidos.rs`) sai com `mod_id=`
+    sem nome nenhum, desde o `6800d18`, que passou o campo a `%id`; antes
+    saía `mod_id=""`. Uma busca por `mod_id=` a acha, e ela não é de MOD
+    nenhum. A janela já omite o campo quando o id é vazio
+    (`registrar_da_janela`, em `apps/seele-app/src/main.rs`). O conserto é o
+    mesmo tratamento no `warn!` de `pedidos.rs`, ou um `catalogo=true`
+    explícito no lugar do id.
+
+    ```sh
+    grep -n 'tracing::warn!(mod_id = %id, %error, "MOD request refused")' crates/seele-server/src/mods/pedidos.rs
+    grep -n 'pedirAoServidor("", 0, {})' apps/seele-app/ui/base.js   # o catálogo vai com o id vazio
+    grep -n ".filter(|id| !id.is_empty())" apps/seele-app/src/main.rs   # a janela omite o id vazio
+    ```
+
+27. **FF-m2 da revisão do Lote F-Fecho · Quando a metade de servidor de um
+    MOD lança, o `seele.log` diz só `mod threw`.** `Falha::Lancou`
+    (`crates/seele-server/src/mods/mod.rs`) não leva nada: `chamar` e
+    `pedir` trocam a exceção do QuickJS por ela
+    (`map_err(|_| Falha::Lancou)`). A linha diz o `mod_id` e, do erro, só
+    isso: `falha=mod threw` quando o `aoAcontecer` lança («MOD desabilitado:
+    a sala continua sem ele», em `despacho.rs`, com o momento), e
+    `error=mod threw` quando o `aoPedir` lança («MOD request refused», em
+    `pedidos.rs`). Sem o texto do que o MOD lançou, nem onde. Um `throw` no
+    topo do `servidor/main.js` sai pior: `carregar` o troca por
+    `Falha::NaoCarregou`, e a linha diz `mod source did not compile`. É o
+    mesmo «o produto sabe e não conta» que o I2 da revisão final consertou
+    na metade de janela, e é anterior à 0.15.0 (`b0d1fab`, de 05/09/2026,
+    dentro do commit da v0.15.0 publicada). O guia novo diz que os erros da
+    metade de servidor aparecem no `seele.log` de quem hospeda, e que lá um
+    `console.log(…)` lança `ReferenceError`, e um `aoAcontecer` que lança
+    desliga o MOD: quem cai nisso lê `mod threw`, e não o `ReferenceError`.
+    O conserto: `Falha::Lancou` passa a levar o texto e a primeira linha da
+    pilha, como `Lancado::da_excecao` faz na janela
+    (`apps/seele-app/src/executor.rs`).
+
+    ```sh
+    grep -n '#\[error("mod threw")\]' crates/seele-server/src/mods/mod.rs
+    grep -n "map_err(|_| Falha::Lancou)\|map_err(|_| Falha::NaoCarregou)" crates/seele-server/src/mods/mod.rs   # a exceção some aqui
+    grep -n '"MOD desabilitado: a sala continua sem ele"' -B 5 crates/seele-server/src/mods/despacho.rs
+    ```
+
 ### Testes que não provam o que dizem
 
 13. **m4 do 1C · Nada roda o elo da janela até o Rust.** Tirar o `modId` do
@@ -7823,7 +7869,15 @@ e por fim o texto.
 
 14. **Provas do console do 1C (m8, m9, T3 M2, T1, T2 N1 e m1).**
     - m8: a pilha de um `Error` passado ao `console` pode sumir: tirar o
-      `+ (valor.stack ? …)` de `emTexto` fica verde.
+      `+ (valor.stack ? …)` de `emTexto` fica verde. E esse trecho, que
+      nenhum teste prende, sustenta hoje uma frase pública: o `api/README.md`
+      e o guia (`docs/como-se-faz-um-mod.md`) dizem que o erro de um
+      temporizador e o de um ouvinte levam «a pilha inteira», e os dois vão
+      ao registro por `dizerOErro`, que passa por `emTexto`. Quando o item
+      for feito, o teste do temporizador
+      (`um_temporizador_que_lanca_deixa_linhas_limitadas_pelo_balde`, em
+      `apps/seele-app/src/main.rs`) exige um `at ` além da primeira linha,
+      como os da exceção no topo e da promessa já exigem.
     - m9: nenhum teste prende o teto de 512 da frase que a janela escreve:
       tirar o `.take(TETO_DA_FRASE_NO_REGISTRO)` de `registrar_da_janela`
       fica verde.
@@ -7839,6 +7893,8 @@ e por fim o texto.
 
     ```sh
     grep -n "valor.stack ? " apps/seele-app/src/executor.rs
+    grep -n "dizerOErro('erro num" apps/seele-app/src/executor.rs   # o temporizador e o ouvinte passam por emTexto
+    grep -n "pilha inteira" api/README.md docs/como-se-faz-um-mod.md
     grep -n ".take(TETO_DA_FRASE_NO_REGISTRO)" apps/seele-app/src/main.rs
     cargo test -p seele-app --bin seele-app    # verde com qualquer uma das mutações de m8, m9 e T3 M2
     ```
