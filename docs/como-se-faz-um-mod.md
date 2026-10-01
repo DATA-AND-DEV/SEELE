@@ -194,7 +194,10 @@ escreve MOD nesta versão».
 ### O `console`, e onde ele escreve
 
 A metade de janela tem `console`, e cada chamada vira **uma linha no
-`seele.log` da máquina que roda o MOD**, no nível que você escolheu:
+`seele.log` da máquina que roda o MOD**, no nível que você escolheu. A metade
+de servidor não tem: lá, `console.log(…)` lança `ReferenceError`, e um
+`aoAcontecer` que lança desliga o MOD. O registro dela é o `mundo.registrar`,
+que vai ao log de quem hospeda com o mesmo `mod_id=`.
 
 | você escreve | a linha sai em |
 |---|---|
@@ -204,9 +207,11 @@ A metade de janela tem `console`, e cada chamada vira **uma linha no
 | `console.error`, e o `console.assert` cuja condição é falsa | ERROR |
 
 `group`, `time`, `count` e `clear` existem e não fazem nada. O erro que o seu
-código não pegou também chega, em ERROR, com o texto e a primeira linha da
-pilha: a exceção no topo, num temporizador ou num ouvinte, e a promessa
-rejeitada que ninguém pegou até o fim da volta.
+código não pegou também chega, em ERROR. A exceção no topo e a promessa
+rejeitada que ninguém pegou até o fim da volta levam o texto e a primeira linha
+da pilha, que diz onde; a de um temporizador e a de um ouvinte levam o texto e
+a pilha inteira, até o teto da linha. A pilha só vem quando o lançado é um
+`Error`.
 
 **Tem teto.** Trinta e duas linhas de uma vez, e depois quatro por segundo;
 cada linha é cortada em 512 caracteres. O que o teto segurou não some calado:

@@ -18,27 +18,41 @@ das APIs 3, 4 e 5 carrega como carregava (`APIS_ACEITAS = [5, 4, 3]`, em
 depois da 0.15.0, é o executor da metade de janela e o som, e quem escreve MOD
 precisa saber disso para o MOD rodar igual nas duas.
 
-- **`console` existe, em qualquer API.** `console.log`, `info`, `warn`,
-  `error` e `debug` — e `dir`, `table`, `trace` e o `assert` que falha —
-  viram uma linha no `seele.log` da máquina que roda o MOD, com o id dele num
-  campo próprio (`mod_id=`); `group`, `time`, `count` e `clear` não fazem
-  nada. O `debug` não é gravado pelo filtro padrão do `seele.log`. Como ler
-  essas linhas está em
+- **Na metade de janela, `console` existe, em qualquer API.** `console.log`,
+  `info`, `warn`, `error` e `debug` — e `dir`, `table`, `trace` e o `assert`
+  que falha — viram uma linha no `seele.log` da máquina que roda o MOD, com o
+  id dele num campo próprio (`mod_id=`); `group`, `time`, `count` e `clear`
+  não fazem nada. O `debug` não é gravado pelo filtro padrão do `seele.log`.
+  Como ler essas linhas está em
   [`docs/como-se-faz-um-mod.md`](../docs/como-se-faz-um-mod.md), «Quando o MOD
   não faz o que devia».
-- **Na 0.15.0 o `console` não existe.** Lá, `console.warn(…)` é um
-  `ReferenceError`, e um MOD que o chame fora de um `try` quebra, na mesma
-  sala, para quem não atualizou. Quem precisa rodar nas duas versões escreve:
+- **A metade de servidor não tem `console`**, nesta versão nem na 0.15.0. Lá,
+  `console.log(…)` lança `ReferenceError`, e um `aoAcontecer` que lança
+  desliga o MOD. O registro dela é `mundo.registrar(texto)`: uma linha INFO
+  no registro de quem hospeda, com o mesmo `mod_id=`, cortada em 500
+  caracteres ([`docs/como-se-faz-um-mod.md`](../docs/como-se-faz-um-mod.md),
+  «`mundo` — rede, relógio, registro»).
+- **Na 0.15.0, a metade de janela também não tem `console`.** Lá,
+  `console.warn(…)` é um `ReferenceError`, e um MOD que o chame fora de um
+  `try` quebra, na mesma sala, para quem não atualizou. Quem precisa rodar nas
+  duas versões escreve:
 
   ```js
   if (typeof console !== "undefined") console.warn("o retrato não veio");
   ```
 
-- **O erro que o MOD não pegou vai ao `seele.log`, em ERROR**, com o texto e a
-  primeira linha da pilha: a exceção no topo do código, num temporizador e num
-  ouvinte de evento, e a promessa rejeitada sem tratamento («promessa
-  rejeitada sem tratamento: …»), dita no fim da volta e só se ninguém a pegou.
-  A gestão de MODs continua dizendo «falhou» como antes.
+- **O erro que a metade de janela não pegou vai ao `seele.log`, em ERROR**, e
+  cada caminho leva o que sabe:
+  - a exceção no topo do código («o MOD lançou: …») e a promessa rejeitada sem
+    tratamento («promessa rejeitada sem tratamento: …», dita no fim da volta e
+    só se ninguém a pegou) levam o texto e a primeira linha da pilha, que diz
+    onde;
+  - a de um temporizador («erro num temporizador: …») e a de um ouvinte de
+    evento («erro num ouvinte de evento: …») levam o texto e a pilha inteira,
+    até o teto de 512 caracteres da linha.
+
+  A pilha só vem quando o lançado é um `Error`. A gestão de MODs continua
+  dizendo «falhou» como antes, na exceção do topo e na promessa.
 - **O som do pacote toca por WebAudio**, sem `<audio>` e sem afrouxar a
   política da janela, e o contrato de `tocando` ficou escrito:
   - **`tocando` vale quando muda.** Um som que a pessoa pausou não volta
