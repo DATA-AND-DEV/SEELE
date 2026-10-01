@@ -1067,6 +1067,15 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
     desenhar(testTable.snapshot);
   });
   await esperarOSom("vinheta", "tocando", "a vinheta da substituição de `pessoa.cartao` não tocou");
+  // **Sem o retrato periódico, daqui até o fim do caso 4b** (S-m2 da revisão
+  // do Lote Som). A página roda `atualizar()` a cada meio segundo, e cada volta
+  // é um `desenhar` que também varre: com ele de pé, tirar a varredura de
+  // `escolherApresentacao` ou a do `aoMudar` deixava esta prova verde. Parado,
+  // o que cala o som é o desenho que a escolha ou o registro fazem na hora.
+  await pagina.evaluate(() => {
+    window.retratoDaSessao = testTable.snapshot;
+    testTable.snapshot = () => Promise.reject("NotConnected");
+  });
   const antesDoNativo = await contagem();
   await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA));
   await esperarOSom(
@@ -1102,6 +1111,40 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
     "o cartão da API 3 saiu da lista e a fonte dele não foi parada",
   );
   await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
+
+  // 4b. A substituição que perde para outra, registrada depois: quem tira o
+  // nó da lista é o `aoMudar` do registro, e não uma escolha nem um retrato.
+  await pagina.evaluate(() => contribuicoesDosMods.registrar({ id: "mod/a" }, somA, {
+    ponto: "pessoa.cartao",
+    modo: "substituir",
+    alvo: "2",
+    prioridade: 0,
+    conteudo: [{ forma: "texto", dentro: "Lia (mod/a)" }, { forma: "midia", chave: "abertura", fonte: "som/ab.wav", tocando: true }],
+  }));
+  await esperarOSom("abertura", "tocando", "a abertura da substituição de `pessoa.cartao` não tocou");
+  const antesDaOutra = await contagem();
+  await pagina.evaluate(() => contribuicoesDosMods.registrar({ id: "mod/b" }, somB, {
+    ponto: "pessoa.cartao",
+    modo: "substituir",
+    alvo: "2",
+    prioridade: 10,
+    conteudo: [{ forma: "texto", dentro: "Lia (mod/b)" }],
+  }));
+  await esperarOSom(
+    "abertura",
+    "pausada",
+    "outra substituição tomou o cartão da Lia, a de mod/a saiu da lista, e o MOD não ouviu «pausada»",
+  );
+  assert.equal(
+    (await contagem()).paradas,
+    antesDaOutra.paradas + 1,
+    "outra substituição tomou o cartão da Lia e a fonte da abertura de mod/a não foi parada",
+  );
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.revogarDoMod("mod/a");
+    contribuicoesDosMods.revogarDoMod("mod/b");
+    testTable.snapshot = window.retratoDaSessao;
+  });
 
   // 5. Quem sai: a contribuição continua montada para o destino de quem saiu
   // do servidor (`montadas` não encolhe), e o nó sai do documento no retrato
