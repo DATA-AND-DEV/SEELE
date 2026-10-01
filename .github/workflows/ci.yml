@@ -257,3 +257,10 @@ jobs:
       - run: node apps/seele-app/bancada/conversa-com-estado.cjs
       - run: node apps/seele-app/bancada/qualidade-da-voz.cjs
       - run: node apps/seele-app/bancada/avatares-do-mod.cjs
+      # As bancadas de MOD que não precisam de navegador: rodam no `node` puro,
+      # com um DOM de mentira, e guardam as recusas que o seele.log passou a
+      # contar (plano de 2026-09-29, fase M1). Fora daqui elas existiam e não
+      # rodavam — o «existir não é funcionar» do CLAUDE.md.
+      - run: node apps/seele-app/bancada/regiao-do-mod.cjs
+      - run: node apps/seele-app/bancada/contribuicoes-e-camadas.cjs
+      - run: node apps/seele-app/bancada/continuacao-de-midia.cjs
