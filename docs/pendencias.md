@@ -7331,13 +7331,14 @@ verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
    - o caso B (o `TOCAR` do MOD, sem gesto) pode não dar «recusada»: o wry
      0.55.1 nasce com `autoplay: true`, e nem o Tauri nem o app o mudam. Quem
      medir anota o que vir, sem forçar a expectativa;
-   - **o macOS 11, ou «não medido».** O pacote declara `minimumSystemVersion`
-     11.0 (`apps/seele-app/tauri.conf.json`), e o WebKit dele só tem os
-     construtores com prefixo. O recuo `webkitAudioContext` /
-     `webkitOfflineAudioContext` (`mods-regiao.js`) nunca rodou em lugar
-     nenhum: as bancadas usam o Chromium, e a Task 9 roda num macOS novo.
-     Quem não tiver um macOS 11 escreve «macOS 11: não medido» no
-     `registro.md`.
+   - **o macOS 11.0 a 11.2, ou «não medido».** O pacote declara
+     `minimumSystemVersion` 11.0 (`apps/seele-app/tauri.conf.json`), e o
+     WebKit do macOS 11.0 a 11.2 só tem os construtores com prefixo: os sem
+     prefixo chegaram com o Safari 14.1 (`mods-regiao.js`), que veio no macOS
+     11.3. O recuo `webkitAudioContext` / `webkitOfflineAudioContext` nunca
+     rodou em lugar nenhum: as bancadas usam o Chromium, e a Task 9 roda num
+     macOS novo. Quem não tiver um macOS 11.0 a 11.2 escreve «macOS 11.0 a
+     11.2: não medido» no `registro.md`.
 
      ```sh
      grep -n "minimumSystemVersion" apps/seele-app/tauri.conf.json
@@ -8034,8 +8035,9 @@ e por fim o texto.
     ```
 
 25. **m2 da revisão final · Os laboratórios dos MODs publicados não conhecem
-    o dono de hoje.** O `ferramentas/preview.cjs` da MESA, do PERFIS e do
-    ESTILO monta a região com o `mods-regiao.js` deste repositório e um dono
+    o dono de hoje.** O `ferramentas/preview.cjs` de `SEELE-MOD-MESA`,
+    `SEELE-MOD-PERFIS` e `SEELE-MOD-ESTILO`, os repositórios irmãos deste (ao
+    lado da raiz dele), monta a região com o `mods-regiao.js` daqui e um dono
     sem `bytesDoSom` nem `anotarRecusa`. Desde o `45cc55e`, a falta de
     `anotarRecusa` não lança mais; a de `bytesDoSom` faz todo som do pacote
     chegar ao MOD como `falhou` no laboratório. E a CSP de lá tem
@@ -8045,7 +8047,9 @@ e por fim o texto.
     recusa.
 
     ```sh
-    for r in MESA PERFIS ESTILO; do grep -c "bytesDoSom\|anotarRecusa" ../SEELE-MOD-$r/ferramentas/preview.cjs; done   # 0 nos três
+    # a pasta ao lado da raiz do repositório, também de dentro de uma árvore de trabalho
+    irmaos="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.."
+    for r in MESA PERFIS ESTILO; do grep -c "bytesDoSom\|anotarRecusa" "$irmaos/SEELE-MOD-$r/ferramentas/preview.cjs"; done   # 0 nos três
     ```
 
 **Quando fecha.** Item por item, quando um plano os tomar. Esta entrada

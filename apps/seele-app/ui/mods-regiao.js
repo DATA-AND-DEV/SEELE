@@ -2550,11 +2550,11 @@ class RegiaoDeMod {
    * Pelos «removing steps» do HTML, um `<audio>` pausava sozinho quando saía do
    * documento; uma fonte de WebAudio não, porque está ligada à saída de som e
    * não ao documento. O descarte já cala o som (`montarMidia`), mas o produto
-   * também tira nós da tela **sem** descartá-los: a página fechada pelo SAIR ou
-   * pelo Escape, a contribuição que perde a disputa, o cartão da API 3 sob «o
-   * SEELE desenha», o destino de quem saiu da sala. Nos cinco caminhos que a
-   * revisão ampla do Plano 1D mediu (I-1), o som seguia até o fim, sem controle
-   * à vista e sem `pausada` ao MOD.
+   * também tira nós da tela **sem** descartá-los: a página fechada pelo VOLTAR
+   * ou, quando é imersiva, pelo Escape, a contribuição que perde a disputa, o
+   * cartão da API 3 sob «o SEELE desenha», o destino de quem saiu da sala. Nos
+   * cinco caminhos que a revisão ampla do Plano 1D mediu (I-1), o som seguia
+   * até o fim, sem controle à vista e sem `pausada` ao MOD.
    *
    * Um som está fora da tela quando o nó dele saiu do documento, ou quando ele
    * mora num cartão — um da API 3, ou um destino de contribuição — e
