@@ -721,11 +721,11 @@ async function oArrastePegaAFiguraDeCima() {
     `o alvo se perdeu no meio do arraste: ${JSON.stringify(moveu)}`,
   );
   tela.disparar("pointerup", { clientX: 150, clientY: 150, pointerId: 1 });
-  const terminou = d.ditos.at(-1);
+  const fimDoArraste = d.ditos.at(-1);
   confere(
     caso,
-    terminou?.fase === "terminou" && terminou?.alvo === "peca-de-cima" && terminou?.x === 150,
-    `o fim do arraste não levou peça e destino: ${JSON.stringify(terminou)}`,
+    fimDoArraste?.fase === "terminou" && fimDoArraste?.alvo === "peca-de-cima" && fimDoArraste?.x === 150,
+    `o fim do arraste não levou peça e destino: ${JSON.stringify(fimDoArraste)}`,
   );
 
   // O MOD move a peça redeclarando-a, e o acerto acompanha.
