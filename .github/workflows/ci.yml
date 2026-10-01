@@ -277,20 +277,49 @@ jobs:
       # num `run:` deste job, na lista das de Node puro, ou na lista de
       # exceções dele, que é vazia. É ele que conta quantas são, e não um
       # comentário.
+      #
+      # **Cada passo roda mesmo depois de uma vermelha, e tem prazo.** No
+      # Actions um passo que falha pula os seguintes, e um passo pulado não fica
+      # nem verde nem vermelho: até 01/10/2026 a `ajustes-v013.cjs` ficava
+      # vermelha e pulava as duas que vinham depois dela em todo disparo. Com
+      # `!cancelled()`, uma bancada vermelha é só ela vermelha; com o prazo, uma
+      # que pendura não segura o job até o teto de 360 minutos. Cada uma leva
+      # segundos (de 0 a 5 s, medido no macOS em 01/10/2026). O teste
+      # `todo_passo_de_bancada_do_job_de_navegador_roda_depois_de_uma_vermelha_e_tem_prazo`,
+      # no mesmo `check_runtime.rs`, exige os dois em todo passo de bancada.
       - run: node apps/seele-app/bancada/compartilhar-por-identidade.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/conversa-com-estado.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/qualidade-da-voz.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/avatares-do-mod.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/diagnostico-de-mods.cjs
-      # **Estas três nunca rodaram em lugar nenhum.** Entraram em 21/09/2026
-      # (`ajustes-v013.cjs` e `gif-na-conversa.cjs` em `970cb67`,
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # **Estas três não rodaram em lugar nenhum até 01/10/2026.** Entraram em
+      # 21/09/2026 (`ajustes-v013.cjs` e `gif-na-conversa.cjs` em `970cb67`,
       # `escolha-de-versao-de-mod.cjs` em `0018e71`), e nenhum workflow nem a
-      # bateria do `empacotar/publicar.sh` as nomeou até 01/10/2026
-      # (`git log -S` com o nome de cada uma). Entram sem terem sido rodadas
-      # nesta mudança: o primeiro disparo manual deste workflow dirá se passam.
+      # bateria do `empacotar/publicar.sh` as nomeava (`git log -S` com o nome
+      # de cada uma). Rodadas, a `ajustes-v013.cjs` saía vermelha pela bancada,
+      # e não pelo produto: ela escrevia o retrato de antes de `14d9c30`
+      # (`snapshot.tela = { e_minha: true }`), e o produto pergunta por
+      # `snapshot.minha_transmissao` (ADR 0054). Com o retrato que o produto lê,
+      # as três saem com 0 (medido com o Playwright local em 01/10/2026).
       - run: node apps/seele-app/bancada/ajustes-v013.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/escolha-de-versao-de-mod.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/gif-na-conversa.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as

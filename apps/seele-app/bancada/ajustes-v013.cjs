@@ -49,7 +49,15 @@ const chromium = abrirChromium();
     await page.selectOption('#compartilhar-resolucao', '720');
     assert.equal(await page.evaluate(() => limitesEscolhidos().altura_maxima), 720);
     await page.screenshot({ path: '/tmp/seele-compartilhar-v013.png' });
-    await page.evaluate(() => { window.testTable.snapshot.tela = { e_minha: true }; });
+    // A transmissão desta pessoa no ar, no retrato que o produto lê: a troca
+    // durante a transmissão pergunta por `minha_transmissao` (ADR 0054), e não
+    // mais por `tela.e_minha`. Com o retrato velho, a bancada esperava 30 s
+    // por uma chamada que o produto, com razão, não fazia. Os campos são os de
+    // `TelaEmCurso` (`crates/seele-ffi/src/types.rs`); sem `pedido`, para a
+    // caixa não restaurar limites de outro pedido.
+    await page.evaluate(() => {
+      window.testTable.snapshot.minha_transmissao = { tela: 1, de: 1, e_minha: true, espectadores: 0, parada: null, pedido: null };
+    });
     await page.selectOption('#compartilhar-resolucao', '1080');
     await page.waitForFunction(() => testCalls.some(c => c.cmd === 'ajustar_limites_da_tela' && c.args.limites.altura_maxima === 1080));
     // O mesmo para os quadros: a troca atravessa com a transmissão no ar.

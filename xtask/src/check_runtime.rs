@@ -266,27 +266,59 @@ mod tests {
     /// esquecimento.
     const SEM_LUGAR: [&str; 0] = [];
 
-    /// As bancadas que o job `bancadas` do `ci.yml` roda, pelo `run:` de cada
-    /// uma: o job vai da linha `  bancadas:` até o próximo job, que é a próxima
-    /// linha com o recuo de um job.
-    fn bancadas_do_job_de_navegador() -> Vec<String> {
+    /// Os passos do job `bancadas` do `ci.yml`, cada um inteiro e sem
+    /// comentário: o job vai da linha `  bancadas:` até o próximo job, que é a
+    /// próxima linha com o recuo de um job, e cada passo vai da linha `- ` que o
+    /// abre até a próxima `- ` com o mesmo recuo.
+    fn passos_do_job_de_navegador() -> Vec<String> {
         let texto = ler(".github/workflows/ci.yml");
         let linhas = sem_comentario(&texto);
         let inicio = linhas
             .iter()
             .position(|linha| linha.trim_end() == "  bancadas:")
             .expect("o `ci.yml` tem o job `bancadas`, o das bancadas de navegador");
-        linhas
+        let mut passos: Vec<Vec<&str>> = Vec::new();
+        let mut recuo_dos_passos = None;
+        for linha in linhas
             .iter()
             .skip(inicio + 1)
             .take_while(|linha| linha.trim().is_empty() || recuo(linha) > 2)
-            .filter_map(|linha| {
-                let linha = linha.trim();
-                let linha = linha.strip_prefix("- ").unwrap_or(linha).trim_start();
-                let linha = linha.strip_prefix("run:")?.trim();
-                linha.strip_prefix("node apps/seele-app/bancada/")
-            })
+        {
+            let abre = linha.trim_start().starts_with("- ")
+                && recuo_dos_passos.is_none_or(|recuo_deles| recuo(linha) <= recuo_deles);
+            if abre {
+                recuo_dos_passos.get_or_insert(recuo(linha));
+                passos.push(vec![linha]);
+            } else if let Some(passo) = passos.last_mut() {
+                passo.push(linha);
+            }
+        }
+        passos.into_iter().map(|passo| passo.join("\n")).collect()
+    }
+
+    /// O valor da chave `chave:` do passo, de qualquer linha dele (a primeira
+    /// vem depois do `- `).
+    fn chave_do_passo<'a>(passo: &'a str, chave: &str) -> Option<&'a str> {
+        passo.lines().find_map(|linha| {
+            let linha = linha.trim();
+            let linha = linha.strip_prefix("- ").unwrap_or(linha).trim_start();
+            linha.strip_prefix(chave)?.strip_prefix(':').map(str::trim)
+        })
+    }
+
+    /// A bancada que o passo roda, pelo `run: node apps/seele-app/bancada/<nome>`.
+    fn bancada_do_passo(passo: &str) -> Option<String> {
+        chave_do_passo(passo, "run")?
+            .strip_prefix("node apps/seele-app/bancada/")
             .map(|nome| nome.trim().to_owned())
+    }
+
+    /// As bancadas que o job `bancadas` do `ci.yml` roda, pelo `run:` de cada
+    /// uma.
+    fn bancadas_do_job_de_navegador() -> Vec<String> {
+        passos_do_job_de_navegador()
+            .iter()
+            .filter_map(|passo| bancada_do_passo(passo))
             .collect()
     }
 
@@ -333,6 +365,46 @@ mod tests {
              job `bancadas` do `ci.yml`, e a que não deve rodar entra, por nome e com o porquê, \
              em `SEM_LUGAR` deste teste. O job hoje roda: {do_job:?}"
         );
+    }
+
+    /// **Estar no job não é rodar: um passo de bancada roda depois de uma
+    /// vermelha, e tem prazo.**
+    ///
+    /// No Actions, um passo que falha pula os seguintes, e um passo pulado não
+    /// fica nem verde nem vermelho. Até 01/10/2026 a `ajustes-v013.cjs` ficava
+    /// vermelha por um retrato de mentira velho, e por causa dela a
+    /// `escolha-de-versao-de-mod.cjs` e a `gif-na-conversa.cjs`, que vinham
+    /// depois, eram puladas em todo disparo, enquanto o teste acima dizia que
+    /// rodavam. Com `if: ${{ !cancelled() }}` cada passo roda mesmo depois de
+    /// uma vermelha, e com `timeout-minutes` uma bancada que pendura não segura
+    /// o job até o teto de 360 minutos, que pularia as seguintes do mesmo jeito.
+    #[test]
+    fn todo_passo_de_bancada_do_job_de_navegador_roda_depois_de_uma_vermelha_e_tem_prazo() {
+        let passos: Vec<(String, String)> = passos_do_job_de_navegador()
+            .into_iter()
+            .filter_map(|passo| Some((bancada_do_passo(&passo)?, passo)))
+            .collect();
+        assert!(
+            !passos.is_empty(),
+            "o job `bancadas` do `ci.yml` não tem passo de bancada nenhum que este guarda \
+             reconheça, e ele passaria sem medir nada"
+        );
+        for (nome, passo) in &passos {
+            assert_eq!(
+                chave_do_passo(passo, "if"),
+                Some("${{ !cancelled() }}"),
+                "ci.yml: o passo de {nome}, no job `bancadas`, não tem `if: ${{{{ !cancelled() \
+                 }}}}`: quando uma bancada antes dele reprova, o Actions o pula, ele não fica nem \
+                 verde nem vermelho, e `toda_bancada_da_pasta_roda_em_algum_lugar` continua \
+                 dizendo que ele roda:\n{passo}"
+            );
+            assert!(
+                chave_do_passo(passo, "timeout-minutes").is_some_and(|prazo| !prazo.is_empty()),
+                "ci.yml: o passo de {nome}, no job `bancadas`, não tem prazo \
+                 (`timeout-minutes`): uma bancada que pendura segura o job por seis horas, e \
+                 as seguintes não rodam:\n{passo}"
+            );
+        }
     }
 
     /// O que a lista escreve, num diário que o `node` de mentira também usa:
