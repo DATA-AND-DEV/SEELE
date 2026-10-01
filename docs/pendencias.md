@@ -7256,3 +7256,188 @@ pilha gtk-rs inteira, que é decisão dele.
 `glib >= 0.20`, e a conferência é a mesma tabela acima. Fica registrada para
 não voltar a ser um alerta vermelho sem contexto a cada push — que é o modo
 mais rápido de ensinar uma equipe a ignorar alerta.
+
+## 49 · Consertada em 2026-10-01, sem confirmação de campo · O som de MOD por WebAudio nunca foi medido no app de verdade
+
+**Aberta em 2026-10-01**, no fim do Plano 1D da 1.0
+(`docs/superpowers/plans/2026-09-29-1.0-plano-1d-mods-na-casca.md`), pela
+revisão ampla dele (m-1). O registro de decisões do plano mora num diretório
+que o git ignora e some junto com a árvore de trabalho; o que fica com quem
+opera mora aqui, com o comando de cada item.
+
+**O que foi consertado.** O som de MOD era montado num `<audio src="data:…">`,
+e a política da janela (`default-src 'self'`, sem `media-src`) recusa `data:`.
+Hoje ele toca por WebAudio, sobre os bytes do som — os do pacote, crus, pelo
+comando `som_do_mod` —, sem elemento de áudio e sem afrouxar a política. A gestão de MODs ganhou a aba DIAGNÓSTICO,
+que diz quem pinta cada lugar, e o modo de desenvolvedor, que contorna cada
+ponto.
+
+**Onde foi provado, e onde não.** No Chromium com a política do produto
+(`apps/seele-app/bancada/diagnostico-de-mods.cjs`) e nas bancadas de `node` do
+portão (`regiao-do-mod.cjs`, `contribuicoes-e-camadas.cjs`). **Nenhum dos dois
+é o WKWebView nem o WebView2**, os motores em que o produto roda. A
+especificação de 23/09 («Testes», item 14) pede o som tocando no app de
+verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
+
+### O que falta medir, com o comando de cada um
+
+1. **Task 1, o «antes»: o WKWebView com o `<audio>`.** Mede o build de
+   `3d50b21` — o fim do Plano 1C, a última árvore com o `<audio>` —, e não o
+   desta branch, que já tem o WebAudio. Numa árvore à parte, com `SEELE_HOME`
+   próprio:
+
+   ```sh
+   git worktree add --detach /tmp/seele-antes-do-webaudio 3d50b21
+   cd /tmp/seele-antes-do-webaudio
+   git log --oneline -1    # 3d50b21 Os docs da reserva de geração morta …
+   cargo build -p seele-app
+   rm -rf /tmp/seele-som-antes
+   SEELE_HOME=/tmp/seele-som-antes ./target/debug/seele-app
+   ```
+
+   O resto é o Step 2 da Task 1 do plano: os comandos que leem a máquina (o
+   do topo do `CLAUDE.md`, `sw_vers`, o do WebKit) rodam como estão, e estes
+   ficam no lugar dos de build e de abrir o app. O MOD de referência dessa
+   árvore é o mesmo de hoje (`git diff 3d50b21 HEAD --
+   apps/seele-app/testes/mod-de-referencia` não devolve nada). O `registro.md`
+   é escrito na branch, e não na árvore de `3d50b21`; depois,
+   `git worktree remove /tmp/seele-antes-do-webaudio`.
+
+2. **Task 9, o «depois»: o WKWebView com o WebAudio.** O build da branch, ou
+   do commit que for publicado, pelo roteiro da Task 9 do plano, que ganhou os
+   casos da revisão ampla:
+
+   ```sh
+   git rev-parse --short HEAD
+   cargo build -p seele-app
+   rm -rf /tmp/seele-som-depois
+   SEELE_HOME=/tmp/seele-som-depois ./target/debug/seele-app
+   pmset -g assertions | grep -i coreaudiod    # noutro terminal, nos momentos do roteiro
+   ```
+
+   Os casos novos, cada um descrito no Step 2 da Task 9:
+   - fechar a página da MESA com a trilha tocando: o som tem de parar, e não
+     voltar com a página fechada;
+   - um som de contribuição, que não tem botão. O MOD de referência não
+     declara nenhum, e o caso pede um MOD que declare;
+   - `pmset -g assertions` com um som de MOD montado e parado, uns 12 s
+     depois de um som terminar e uns 3 s depois de sair da sessão: o áudio do
+     SEELE não pode segurar o Mac acordado;
+   - a trilha passa de 30 s? Ela termina e volta do começo no próximo
+     redesenho da MESA que a declare tocando, como o `<audio>` fazia até a
+     0.15.0 — o silêncio até lá não é defeito do WebAudio;
+   - o caso B (o `TOCAR` do MOD, sem gesto) pode não dar «recusada»: o wry
+     0.55.1 nasce com `autoplay: true`, e nem o Tauri nem o app o mudam. Quem
+     medir anota o que vir, sem forçar a expectativa.
+
+3. **A metade WebView2, numa máquina Windows.** A mesma medição da Task 9 — o
+   mesmo MOD e os mesmos casos —, com `powercfg /requests`, num terminal de
+   administrador, no lugar de `pmset -g assertions`. O resultado responde a
+   linha «WebView2: pendente» da «Conclusão» do `registro.md`.
+
+   ```powershell
+   cargo build -p seele-app
+   $env:SEELE_HOME = "$env:TEMP\seele-som-depois"
+   .\target\debug\seele-app.exe
+   powercfg /requests    # num terminal de administrador, nos momentos do roteiro
+   ```
+
+4. **O disparo manual do `ci.yml`, job `bancadas`, antes de publicar.** O
+   workflow só roda por `workflow_dispatch`: pela aba Actions (CI › Run
+   workflow, no ramo que vai ser publicado), ou
+
+   ```sh
+   gh workflow run ci.yml --ref <ramo>
+   gh run list --workflow ci.yml --limit 1
+   gh run view <id> --log | grep -E "diagnóstico de MODs:|avatares:"
+   ```
+
+   Leia os passos `node apps/seele-app/bancada/diagnostico-de-mods.cjs` e
+   `node apps/seele-app/bancada/avatares-do-mod.cjs` do job «bancadas de
+   navegador», e **não a cor do job**: a `ajustes-v013.cjs` está vermelha desde
+   a v0.15.0 (medida fora do CI), e com ela vermelha o job sai vermelho. Ela
+   roda depois das duas, então as duas rodam; as que vêm depois dela no job
+   (`escolha-de-versao-de-mod.cjs` e `gif-na-conversa.cjs`) são puladas quando
+   ela falha. Cada uma das duas, quando passa, termina com a linha
+   «diagnóstico de MODs: …» ou «avatares: …».
+
+   **Por que o disparo é obrigatório.** As partes puras da aba DIAGNÓSTICO e
+   da gestão morrem no portão (`cargo xtask check-runtime`), mas o que precisa
+   de página só morre ali: os avisos e o redesenho da aba (os mutantes J10,
+   J11, J16–J18 e J20 da revisão ampla), o comportamento do modo de
+   desenvolvedor na página — nada focável, o clique, o recorte, o observador e
+   os contornos sob uma página aberta —, e as portas de página da varredura do
+   som que sai da tela (`desenhar` e `redesenharAsPessoas`).
+
+### O que fica aberto de propósito, para uma decisão ou um plano
+
+5. **m-2 · A aba DIAGNÓSTICO não lê a mídia da região nem das páginas.** Ela
+   conta só a mídia dos onze pontos de contribuição (`midiasDoPonto`, em
+   `base.js`): as anotações da faixa de cada MOD e as das superfícies
+   (páginas, painéis e diálogos) são feitas e ninguém as lê. É ali que o som
+   costuma morar — o do MOD de referência está na faixa, e a trilha da MESA
+   numa página —, e uma trilha recusada aparece no `seele.log` e no evento do
+   MOD, mas não na aba. O doc de `anotarMidia` (`mods-regiao.js`) diz isso. O
+   conserto proposto é um bloco «a região e as páginas de cada MOD» na aba,
+   somando `regioesDosMods` e `superficiesDosMods` sem o filtro de cartão.
+
+   ```sh
+   grep -n "midiasAnotadas()" apps/seele-app/ui/*.js    # os dois leitores, em base.js, e a definição
+   ```
+
+6. **m-4, para a API 6 · `repetir`, ou o contrato de `tocando`.** Hoje um
+   `tocando: true` declarado sobre um som que terminou o toca de novo, do
+   começo, no próximo `aplicar` — como o `<audio>` fazia até a 0.15.0, e a
+   MESA publicada conta com isso (trilhas de 30 s, sem ouvinte de
+   `terminou`). Pausado pela pessoa ou pelo produto, ou recusado, ele não
+   volta. Repetição explícita não existe. Antes de congelar a API 6, uma de
+   duas: um campo `repetir: true` (`AudioBufferSourceNode.loop`), ou o
+   contrato de `tocando` escrito — o que vale na mudança, e o que volta depois
+   do fim.
+
+   ```sh
+   grep -n "A repetição explícita" apps/seele-app/ui/mods-regiao.js
+   ```
+
+7. **O pico da decodificação e a leitura dobrada, para um plano Rust.**
+   - **O pico.** O som decodificado tem teto (64 MiB por bolso), e a
+     decodificação em si não: um som acima do teto é decodificado inteiro uma
+     vez antes de ser recusado. Um WAV de 8 bits, mono, a 8 kHz, do tamanho
+     do teto de arquivo (10 MiB), passa de 250 MB decodificado a 48 kHz em
+     `float32`. Fechar pede estimar a duração pelo cabeçalho, no Rust
+     (`som_do_mod`), e recusar antes de decodificar.
+   - **A leitura dobrada (P28 da varredura do plano).** O som do pacote
+     atravessa a ponte duas vezes: em base64 por `midia_do_mod`, que a região
+     chama para saber o papel e os bytes a contar, e cru por `som_do_mod`.
+     Numa contribuição sem alvo, o primeiro é pedido uma vez por destino — 64
+     vezes numa sala de 64 pessoas. Fechar pede que `midia_do_mod` não monte o
+     `uri` quando o papel é `som`.
+
+   ```sh
+   grep -n "^fn midia_do_mod\|^fn som_do_mod" apps/seele-app/src/main.rs
+   grep -n "atravessa duas vezes" apps/seele-app/ui/base.js apps/seele-app/ui/mods-regiao.js
+   ```
+
+8. **S-m7 · O som de uma contribuição sem alvo pertence ao destino que o
+   tomou, e não à contribuição.** Uma contribuição sem alvo é montada uma vez
+   por destino, e o primeiro destino que chega a um som toma todos os sons
+   dela: só ele pede os bytes, decodifica e toca. Quando a pessoa desse
+   destino sai da sala, o nó dela sai da tela e o som para — o MOD ouve
+   `pausada` —, e um `tocando` religado depois é recusado com a frase de
+   `SOM_FORA_DA_TELA` («… um cartão que o SEELE não desenha agora …»),
+   enquanto a mesma contribuição continua desenhada nos outros destinos, que
+   não têm tocador, num cartão sem botão. Nada fica calado — o MOD é avisado
+   —, mas a frase engana quem vê a contribuição na tela. É pendência de
+   desenho: o som de uma contribuição sem alvo devia ser da contribuição. O
+   conserto menor é deixar o som ser tomado de novo quando quem o tomou sai e
+   outro destino ainda desenha.
+
+   ```sh
+   grep -n "Numa contribuição, os sons moram num destino só" apps/seele-app/ui/mods-regiao.js
+   ```
+
+**Quando fecha.** A medição fecha quando
+`docs/evidencias/som-de-mod-wkwebview/registro.md` tiver o «Antes», o
+«Depois» com os casos novos e a linha do WebView2 respondida. Os itens 5 a 8
+ficam aqui até um plano os tomar, e o disparo do item 4 vale para toda
+publicação enquanto as bancadas de navegador só rodarem por ele.
