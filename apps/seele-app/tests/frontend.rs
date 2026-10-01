@@ -8138,11 +8138,17 @@ fn o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob() {
 /// `registrar_da_janela` como aviso, com o id do MOD em campo próprio, e só
 /// enquanto a instância é a de pé.
 ///
-/// **E só este guarda segura a metade do produto.** `anotarRecusa` é opcional
-/// no contrato do dono (os laboratórios dos MODs publicados não a têm), e a
-/// região a chama com `?.` dentro de um `try`: um dono de `base.js` sem ela
-/// deixaria a recusa chegar ao MOD e nenhuma linha chegar ao `seele.log`, sem
-/// erro nenhum que avisasse.
+/// **E este é o único guarda da metade do produto que roda em todo `cargo
+/// test`.** `anotarRecusa` é opcional no contrato do dono (os laboratórios dos
+/// MODs publicados não a têm), e a região a chama com `?.` dentro de um `try`:
+/// um dono de `base.js` sem ela deixaria a recusa de mídia da região e das
+/// páginas chegar ao MOD e nenhuma linha chegar ao `seele.log`, sem erro
+/// nenhum que avisasse. Fora daqui, só a bancada de navegador
+/// `diagnostico-de-mods.cjs` segura o caso, pela recusa do som de uma página
+/// fechada («a recusa do som da página fechada não chegou ao registro»), e ela
+/// só roda no job `bancadas` do `ci.yml`, que sai por disparo manual. As seis
+/// bancadas de node do `cargo xtask check-runtime` e a `avatares-do-mod.cjs`
+/// ficam verdes com o dono sem `anotarRecusa` (medido em 01/10/2026).
 #[test]
 fn o_dono_da_regiao_leva_cada_recusa_de_midia_ao_registro() {
     let dono = js_function(&read("ui/base.js"), "function donoDaRegiao(");

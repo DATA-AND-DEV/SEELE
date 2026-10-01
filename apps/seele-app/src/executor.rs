@@ -1983,6 +1983,16 @@ const REJEITADA_SEM_TRATAMENTO: &str = "promessa rejeitada sem tratamento";
 /// enquanto a linha é montada e cortada, uma rejeição de cada vez. Guardada sem
 /// corte, como antes, a espera segurava até uma rajada inteira de mensagens do
 /// tamanho que o MOD quisesse até o fim da volta (F-Mods-m2).
+///
+/// **O `Falhou` que vai à janela não passa por esta espera, nem por este
+/// corte.** O rastreador o manda na hora, para cada rejeição sem tratamento,
+/// com o texto inteiro do que o MOD lançou («promessa rejeitada sem
+/// tratamento: …»). O que o limita é a cota dos avisos ([`AVISOS_NA_FILA`]
+/// à espera, por instância), em número, e não em tamanho: um MOD que
+/// rejeita com uma mensagem enorme a põe inteira em cada `Falhou` que coube.
+/// Já era assim antes desta espera (a v0.15.0 manda o mesmo `Falhou`), e o
+/// conserto está na pendência 51 de `docs/pendencias.md`, junto com o
+/// `Falhou` que sai também para a rejeição que o MOD pega logo depois.
 pub(crate) const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize - 1;
 
 /// **As rejeições sem tratamento de uma volta, à espera do fim dela.**
