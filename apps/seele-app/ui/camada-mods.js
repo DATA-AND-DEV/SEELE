@@ -715,9 +715,16 @@ function desenharApresentacoes() {
     // apertou «usar apresentação padrão» não tinha como saber se tinha
     // funcionado.
     //
-    // E o escolhido que substitui só por pessoa desenha quem declarou: a
-    // gestão diz o caso parcial com as palavras da aba DIAGNÓSTICO, que mora
-    // logo abaixo e lê o mesmo registro.
+    // E o caso parcial de `resumo` — alguém substitui o lugar de todos (o
+    // alvo vazio), e o escolhido, fora dessas candidatas, substitui o de quem
+    // declarou — é dito com as palavras da aba DIAGNÓSTICO, que mora logo
+    // abaixo e lê o mesmo registro. **Só esse.** Quando ninguém substitui o
+    // lugar de todos — só há substituições por pessoa, como sempre no avatar
+    // —, `resumo` não diz a escolha, e a linha continua «N contribuição(ões)»
+    // seja qual for a escolha desta máquina, oferecendo de novo o que já
+    // vale: «USAR X» ao escolhido que substitui por pessoa, «USAR
+    // APRESENTAÇÃO DO SEELE» com o SEELE escolhido. Nesses casos, quem diz a
+    // escolha é a aba.
     const comoApresenta = linha.oSeeleDesenhaOutros
       ? ", para quem declarou; o SEELE desenha os outros"
       : linha.automatica ? " (escolha automática)" : "";

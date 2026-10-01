@@ -1417,8 +1417,10 @@ function anotando(...anotadas) {
     "mod/b, escolhido, desenha a pessoa 2 e o SEELE desenha as outras, e a gestão não disse isso — ou não disse que "
       + `mod/a perdeu: ${JSON.stringify(parcial)}`,
   );
-  // E a gestão diz o que a aba diz: as duas leem o mesmo registro e a mesma
-  // escolha, e uma não pode desmentir a outra.
+  // E, neste caso, a gestão diz o que a aba diz: as duas leem o mesmo
+  // registro e a mesma escolha, e uma não pode desmentir a outra. Só neste
+  // sentido: sem ninguém no cartão de todos, a aba diz o caso parcial e a
+  // gestão não diz a escolha (o doc de `resumo`).
   const naAba = registro.quemPinta("pessoa.cartao", "mod/b", deDe);
   confere(
     caso,

@@ -477,9 +477,20 @@ class RegistroDeContribuicoes {
    * pessoa não tem como ver. O §6 pede os dois juntos.
    *
    * A linha é a da disputa do **alvo vazio** — a do cartão de todo mundo —,
-   * salvo num caso: o escolhido que não tem candidata ali e substitui algum
-   * outro alvo. Ele desenha quem declarou, e o SEELE desenha os outros
-   * (`oSeeleDesenhaOutros`), como `quemPinta` diz na aba DIAGNÓSTICO.
+   * salvo num caso, o **caso parcial**: alguém substitui o alvo vazio, o
+   * escolhido não está entre essas candidatas, e ele pediu para substituir
+   * algum outro alvo. Ele desenha quem declarou, e o SEELE desenha os outros
+   * (`oSeeleDesenhaOutros`). Quando esta linha diz o caso parcial, `quemPinta`
+   * — a aba DIAGNÓSTICO — o diz também; o contrário não vale.
+   *
+   * **Sem ninguém substituindo o alvo vazio, a linha não diz a escolha.** A
+   * disputa dali não tem candidata, e `escolherSubstituicao` sai antes de
+   * olhar a escolha: `escolhido`, `nativa`, `ausente`, `escolhidoNaoSubstitui`
+   * e `oSeeleDesenhaOutros` ficam vazios seja qual for a escolha desta máquina
+   * — um escolhido que substitui só por pessoa, um que só acrescenta, um que
+   * não está de pé, ou o SEELE. É sempre o caso do avatar, que só aceita
+   * contribuição com alvo. Nesses casos, quem diz a escolha é `quemPinta`, que
+   * soma os alvos.
    *
    * @param {Map<string, string>} [preferidos] A escolha desta máquina **por
    *   ponto**, neste servidor: `""`, `NATIVO` ou um `id`.
@@ -500,11 +511,14 @@ class RegistroDeContribuicoes {
         ? this.escolherSubstituicao(ponto, "", escolha)
         : { escolhida: null, preteridas: [], nativa: false };
       const semCandidata = disputa.ausente ?? "";
-      // **O caso parcial.** O escolhido sem candidata no alvo vazio que pediu
-      // para substituir algum outro alvo vence lá — a escolha ganha de
-      // qualquer prioridade —, e o alvo vazio fica com o SEELE. Ele desenha
-      // quem declarou: nem «não substitui», nem «não está de pé», nem o SEELE
-      // no lugar inteiro.
+      // **O caso parcial.** Alguém substitui o alvo vazio, e o escolhido não
+      // está entre essas candidatas (`disputa.ausente`, que só existe com
+      // candidata ali), mas pediu para substituir algum outro alvo: ele vence
+      // lá — a escolha ganha de qualquer prioridade —, e o alvo vazio fica com
+      // o SEELE. Ele desenha quem declarou: nem «não substitui», nem «não está
+      // de pé», nem o SEELE no lugar inteiro. O escolhido que substitui só por
+      // pessoa **sem** ninguém no alvo vazio não chega aqui: a disputa não tem
+      // `ausente`, e a linha não diz a escolha (o doc acima).
       const desenhaQuemDeclarou = Boolean(semCandidata) && substituem.includes(semCandidata);
       const escolhidoDePe = Boolean(semCandidata)
         && !desenhaQuemDeclarou
@@ -530,14 +544,19 @@ class RegistroDeContribuicoes {
         // registrada — desligar um MOD não é desescolhê-lo —, e a tela precisa
         // poder dizer isso em vez de mostrar «automático».
         ausente: escolhidoDePe || desenhaQuemDeclarou ? "" : semCandidata,
-        // E o escolhido que **está** de pé e não pediu para substituir este
-        // ponto em alvo nenhum: revogou a substituição que tinha, só
-        // acrescenta, ou não contribui aqui. Dizer que ele não está de pé
-        // mandaria quem escreve o MOD depurar uma carga que não falhou. O que
-        // substitui só por pessoa não está aqui: é o caso parcial.
+        // E o escolhido que **está** de pé, fora das candidatas do alvo vazio
+        // que alguém substitui, e que não pediu para substituir este ponto em
+        // alvo nenhum: revogou a substituição que tinha, só acrescenta, ou não
+        // contribui aqui. Dizer que ele não está de pé mandaria quem escreve o
+        // MOD depurar uma carga que não falhou. O que substitui algum outro
+        // alvo não está aqui: é o caso parcial. E, sem ninguém no alvo vazio,
+        // nem este campo nem `ausente` são ditos (o doc acima).
         escolhidoNaoSubstitui: escolhidoDePe ? semCandidata : "",
         // O caso parcial: o escolhido desenha quem declarou, e o SEELE desenha
-        // os outros — o mesmo campo de `quemPinta`.
+        // os outros. Verdadeiro aqui, verdadeiro no `oSeeleDesenhaOutros` de
+        // `quemPinta` com a mesma escolha; o contrário não vale: sem ninguém
+        // no alvo vazio, `quemPinta` diz o caso parcial e este campo fica
+        // `false`.
         oSeeleDesenhaOutros: desenhaQuemDeclarou,
       });
     }
