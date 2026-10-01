@@ -468,8 +468,13 @@ function bancada(opcoes = {}) {
     /** O que a saída da sessão chama para calar e soltar o som dos MODs. */
     encerrarOSomDosMods: contexto.api.encerrarOSomDosMods,
     raiz: () => doc.createElement("section"),
+    /** O `Uint8Array` da janela: o que ele cria passa no `instanceof` dela. */
+    Uint8Array: vm.runInContext("Uint8Array", contexto),
   };
 }
+
+/** Os doze bytes que o dono de mentira entrega como som: o começo de um WAV. */
+const BYTES_DE_SOM = Object.freeze([82, 73, 70, 70, 0, 0, 0, 0, 87, 65, 86, 69]);
 
 /** Um dono que anota o que a região fala, o que ela pede, o que ela diz ao registro e quando uma mídia muda de estado. */
 function dono(b, midia) {
@@ -497,15 +502,17 @@ function dono(b, midia) {
         midia ? midia(caminho) : Promise.reject(new Error("sem mídia")),
       carregarMidiaDoServidor: (canal, pedido, campo) =>
         midia ? midia({ canal, pedido, campo }) : Promise.reject(new Error("sem mídia")),
-      // Os bytes de um som do pacote, como `som_do_mod` os devolve quando o
-      // Tauri cai no `postMessage`: uma lista de números (pelo protocolo `ipc:`
-      // seria um `ArrayBuffer`, e `bufferDoSom` aceita os dois; a bancada em
-      // Chromium da Task 8 mede esse outro). O conteúdo não importa — quem
-      // decodifica é o WebAudio de mentira —, e o pedido anotado diz qual
-      // caminho foi pedido.
+      // Os bytes de um som do pacote, como `som_do_mod` os devolve pelo
+      // protocolo `ipc:`, que é o caminho normal: um `ArrayBuffer` (a lista de
+      // números do recuo por `postMessage` tem prova própria, em
+      // `osBytesDoSomChegamPelosDoisCaminhosDoIpc`). **Do reino da janela**:
+      // um criado aqui fora, no do node, não passa no `instanceof ArrayBuffer`
+      // de `bufferDoSom`, e a prova mediria outro ramo (I-4 da revisão ampla do
+      // Plano 1D). O conteúdo não importa — quem decodifica é o WebAudio de
+      // mentira —, e o pedido anotado diz qual caminho foi pedido.
       bytesDoSom: (caminho) => {
         pedidosDeSom.push(caminho);
-        return Promise.resolve([82, 73, 70, 70, 0, 0, 0, 0, 87, 65, 86, 69]);
+        return Promise.resolve(new b.Uint8Array(BYTES_DE_SOM).buffer);
       },
       midiaMudou: () => {
         mudancas += 1;
@@ -2078,6 +2085,12 @@ async function oSomTocaPorWebAudioENuncaPorUmElementoDeMidia() {
   confere(caso, acharTag(figura, "audio") === null, "um `<audio>` voltou a ser montado, e a CSP recusa o `data:` dele");
   confere(caso, d.pedidosDeSom.join() === "som/a.wav", `os bytes do som não foram pedidos pelo caminho declarado: ${d.pedidosDeSom}`);
   confere(caso, figura.dataset.estado === "pronta", `o som decodificado não ficou pronto: ${figura.dataset.estado}`);
+  // **De pé e sem ter tocado, ele está pronto.** É o caso comum — um botão à
+  // espera, um som que o MOD dispara depois —, e quem diz «pronta» aqui é a
+  // anotação do fim de `montarSom`: os avisos do tocador só chegam quando ele
+  // toca. Sem ela, a aba DIAGNÓSTICO diria «carregando» até alguém apertar.
+  const anotada = regiao.midiasAnotadas()[0]?.situacao;
+  confere(caso, anotada === "pronta", `o som de pé que ainda não tocou ficou anotado como «${anotada}», e não «pronta»`);
   const botao = acharTag(figura, "button");
   confere(
     caso,
@@ -2268,6 +2281,32 @@ async function oSomNumCartaoNaoTemBotao() {
     for (const r of destinos) r.soltar();
     const sobrou = AudioC.ultimo?.fontes.filter((f) => f.tocando).length ?? 0;
     confere(naContribuicao, sobrou === 0, `${sobrou} som(ns) da contribuição continuaram depois de os destinos saírem`);
+  }
+
+  // **E o som parado de uma contribuição está pronto**, no destino que o
+  // tomou, uma vez. Um som de cartão não tem botão: ele só toca quando o MOD
+  // declara `tocando`, e até lá quem o diz «pronta» é a anotação do fim de
+  // `montarSom` — a aba diria «carregando» para um som que só espera a vez.
+  {
+    const parado = `${caso} · numa contribuição, um som parado`;
+    const AudioP = audioDeMentira();
+    const bp = bancada({ audio: AudioP });
+    const dp = dono(bp, () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }));
+    const sonsDaContribuicao = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new bp.RegiaoDeMod("a/b", dp.api, bp.raiz(), bp.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar([{ forma: "midia", chave: "sino", fonte: "som/a.wav", tocando: false }]);
+      return r;
+    });
+    await assentar();
+    const anotadas = destinos.flatMap((r) => r.midiasAnotadas().map((m) => m.situacao));
+    confere(
+      parado,
+      JSON.stringify(anotadas) === JSON.stringify(["pronta"]),
+      `o som parado de uma contribuição não ficou anotado «pronta», uma vez, no destino que o tomou: ${JSON.stringify(anotadas)}`,
+    );
+    for (const r of destinos) r.soltar();
   }
 }
 
@@ -2461,6 +2500,193 @@ async function oAudioDaJanelaNaoSeguraASaidaAToa() {
   confere(caso, segundo?.fechamentos === 1, `o áudio da janela foi fechado ${segundo?.fechamentos} vezes`);
 }
 
+// ---------------------------------------------------------------------------
+// 13. Os bytes do som chegam pelos dois caminhos do `ipc`.
+// ---------------------------------------------------------------------------
+
+/**
+ * `som_do_mod` responde com bytes crus, e eles chegam de dois jeitos: pelo
+ * protocolo `ipc:` — o caminho normal, que a CSP abre —, como `ArrayBuffer`; e
+ * pelo recuo do `postMessage`, como lista de números. `bufferDoSom` aceita os
+ * dois, e uma vista tipada.
+ *
+ * O `ArrayBuffer` é criado **no reino da janela** (`b.Uint8Array`): um de fora
+ * da vm não passa no `instanceof ArrayBuffer`, e a prova mediria o ramo errado.
+ * Sem esta prova, o ramo do `ArrayBuffer` só era medido na bancada Playwright,
+ * que roda num job manual — e, se ele regredisse, todo som do pacote se calava
+ * com «o som não chegou em bytes» e todos os portões ficavam verdes (I-4 da
+ * revisão ampla do Plano 1D).
+ */
+async function osBytesDoSomChegamPelosDoisCaminhosDoIpc() {
+  const caso = "os bytes do som pelo ipc";
+  const formas = {
+    "um ArrayBuffer, pelo protocolo ipc:": (b) => new b.Uint8Array(BYTES_DE_SOM).buffer,
+    "uma lista de números, pelo recuo do postMessage": () => [...BYTES_DE_SOM],
+    "uma vista tipada": (b) => new b.Uint8Array(BYTES_DE_SOM),
+  };
+  for (const [forma, entregar] of Object.entries(formas)) {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }));
+    d.api.bytesDoSom = () => Promise.resolve(entregar(b));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav" }]);
+    await assentar();
+    const figura = regiao.raiz.children[0];
+    const falhou = d.ditos.find((e) => e.nome === "midia" && e.estado === "falhou");
+    confere(
+      `${caso} · ${forma}`,
+      figura?.dataset.estado === "pronta" && Audio.decodificados.join() === String(BYTES_DE_SOM.length),
+      `o som do pacote entregue como ${forma} não chegou ao WebAudio: ${figura?.dataset.estado}, `
+        + `${falhou?.porque ?? "sem motivo dito"}, decodificados ${JSON.stringify(Audio.decodificados)}`,
+    );
+    regiao.soltar();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 14. As proteções do tocador e da montagem do som.
+// ---------------------------------------------------------------------------
+
+/**
+ * Promessas do doc que podiam regredir caladas (m-5 da revisão ampla do Plano
+ * 1D): cada uma é uma linha que nenhuma prova via.
+ *
+ * - **continuar de onde parou**: pausar lembra o ponto, e tocar de novo
+ *   começa dali — ou do começo, se o ponto passou do fim;
+ * - **o pedido superado não toca**: um `tocando` desligado enquanto o áudio
+ *   da janela ainda não ligou não começa quando ele liga;
+ * - **sair no meio do caminho**: o MOD tira o som da tela enquanto os bytes
+ *   vêm, ou enquanto eles decodificam, e nada segue — nem decodificação à
+ *   toa, nem bytes fantasmas no bolso, nem anotação sem nó;
+ * - **tirar a mídia avisa**: a gestão de MODs é avisada de que a soma mudou.
+ */
+async function asProtecoesDoTocadorEDaMontagemDoSom() {
+  const caso = "as proteções do som";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+
+  // Continuar de onde parou — e do começo, quando o ponto passou do fim.
+  {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav" }]);
+    await assentar();
+    const botao = acharTag(regiao.raiz.children[0], "button");
+    botao?.disparar("click");
+    await assentar();
+    const contexto = Audio.ultimo;
+    if (contexto) contexto.currentTime = 0.4;
+    botao?.disparar("click");
+    botao?.disparar("click");
+    await assentar();
+    const de = contexto?.fontes[1]?.de;
+    confere(
+      caso,
+      typeof de === "number" && Math.abs(de - 0.4) < 1e-9,
+      `pausar e continuar recomeçou o som de ${de}, e não de 0.4, onde ele parou`,
+    );
+    // O som de mentira dura um segundo: parado em 5,4 s, ele passou do fim.
+    if (contexto) contexto.currentTime = 5.4;
+    botao?.disparar("click");
+    botao?.disparar("click");
+    await assentar();
+    const doComeco = contexto?.fontes[2]?.de;
+    confere(caso, doComeco === 0, `parado depois do fim do som, tocar de novo começou de ${doComeco}, e não do começo`);
+    regiao.soltar();
+  }
+
+  // O pedido superado não toca.
+  {
+    let ligar = null;
+    class Contexto extends audioDeMentira({ semGesto: true }) {
+      resume() {
+        this.acordar += 1;
+        return new Promise((pronto) => {
+          ligar = () => {
+            this.state = "running";
+            pronto();
+          };
+        });
+      }
+    }
+    const b = bancada({ audio: Contexto });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
+    await assentar();
+    confere(caso, typeof ligar === "function", "o `tocando` declarado não pediu ao áudio da janela que ligasse");
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: false }]);
+    ligar?.();
+    await assentar();
+    const tocando = Contexto.ultimo?.fontes.filter((f) => f.tocando).length ?? 0;
+    const ouviu = d.ditos.filter((e) => e.nome === "midia" && e.estado === "tocando").length;
+    confere(
+      caso,
+      tocando === 0 && ouviu === 0,
+      "o MOD desligou o `tocando` antes de o áudio da janela ligar, e o som começou mesmo assim: "
+        + `${tocando} fonte(s), «tocando» dito ${ouviu} vez(es)`,
+    );
+    regiao.soltar();
+  }
+
+  // Sair durante os bytes, ou durante a decodificação.
+  for (const quando of ["os bytes", "a decodificação"]) {
+    const Audio = audioDeMentira({ segurarADecodificacao: quando === "a decodificação" });
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    let soltarOsBytes = null;
+    if (quando === "os bytes") {
+      d.api.bytesDoSom = () => new Promise((pronto) => {
+        soltarOsBytes = () => pronto(new b.Uint8Array(BYTES_DE_SOM).buffer);
+      });
+    }
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
+    await assentar();
+    // O MOD tira o som da tela no meio do caminho, e o caminho termina depois.
+    regiao.aplicar([]);
+    soltarOsBytes?.();
+    for (const presa of Audio.decodificacoesPresas) {
+      presa.pronto({ duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
+    }
+    await assentar();
+    const sobrou = {
+      decodificados: Audio.decodificados.length,
+      contaDoSom: regiao.bytesDeSomDecodificado,
+      anotadas: regiao.midiasAnotadas().map((m) => m.situacao),
+      fontes: Audio.ultimo?.fontes.length ?? 0,
+    };
+    const esperado = { decodificados: quando === "os bytes" ? 0 : 1, contaDoSom: 0, anotadas: [], fontes: 0 };
+    confere(
+      `${caso} · sair durante ${quando}`,
+      JSON.stringify(sobrou) === JSON.stringify(esperado),
+      `o MOD tirou o som da tela durante ${quando}, e a montagem seguiu: ${JSON.stringify(sobrou)}, e não `
+        + `${JSON.stringify(esperado)} — uma decodificação à toa, bytes fantasmas no bolso, ou uma anotação sem nó`,
+    );
+    regiao.soltar();
+  }
+
+  // Tirar a mídia avisa a gestão.
+  {
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: "data:image/png;base64,AA", papel: "imagem", bytes: 12 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.declararCartoes({ 7: [{ forma: "midia", chave: "m", fonte: "img/a.png" }] });
+    await assentar();
+    const antes = d.mudancas();
+    regiao.declararCartoes({});
+    confere(
+      caso,
+      d.mudancas() > antes && regiao.midiasAnotadas().length === 0,
+      "a mídia do cartão saiu e a gestão de MODs não foi avisada: a aba DIAGNÓSTICO seguiria contando uma "
+        + `mídia que não existe mais (${d.mudancas() - antes} aviso(s))`,
+    );
+    regiao.soltar();
+  }
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -2491,6 +2717,8 @@ async function oAudioDaJanelaNaoSeguraASaidaAToa() {
     oSomNumCartaoNaoTemBotao,
     oSomPedidoSemGestoEDitoRecusado,
     oAudioDaJanelaNaoSeguraASaidaAToa,
+    osBytesDoSomChegamPelosDoisCaminhosDoIpc,
+    asProtecoesDoTocadorEDaMontagemDoSom,
   ];
   for (const prova of provas) {
     try {
