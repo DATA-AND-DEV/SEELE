@@ -550,6 +550,76 @@ function acordarTudo(no) {
   );
 }
 
+// ------------------------------------------- M1 · quem pinta cada lugar
+
+{
+  // **Só leitura, e por alvo.** `resumo` responde pelo alvo vazio, e por isso
+  // não via uma substituição registrada para uma pessoa só — que é como todo
+  // avatar do PERFIS é registrado. `quemPinta` pergunta a mesma
+  // `escolherSubstituicao` para cada alvo que tem contribuição.
+  const registro = new R();
+  const a = new I("mod/a", "a", 7, {});
+  const b = new I("mod/b", "b", 7, {});
+  const c = new I("mod/c", "c", 7, {});
+  registro.registrar({ id: "mod/a" }, a, { ponto: "pessoa.cartao", modo: "substituir", prioridade: 10 });
+  registro.registrar({ id: "mod/b" }, b, { ponto: "pessoa.cartao", modo: "substituir", prioridade: 5 });
+  registro.registrar({ id: "mod/c" }, c, { ponto: "pessoa.cartao", modo: "adicionar" });
+
+  const auto = registro.quemPinta("pessoa.cartao", "");
+  confere("M1 · quem pinta", auto.substituivel === true, "`pessoa.cartao` aceita substituir e não foi lido como disputável");
+  confere("M1 · quem pinta", auto.substitui.join() === "mod/a", `sem preferência, quem vale deixou de ser o de maior prioridade: ${auto.substitui}`);
+  confere("M1 · quem pinta", auto.perderam.join() === "mod/b", `quem perdeu a disputa não foi dito: ${auto.perderam}`);
+  confere("M1 · quem pinta", auto.acrescentam.join() === "mod/c", `quem só acrescenta sumiu da resposta: ${auto.acrescentam}`);
+  confere("M1 · quem pinta", auto.contribuicoes === 3, `contou ${auto.contribuicoes} contribuições, e são três`);
+
+  const escolhido = registro.quemPinta("pessoa.cartao", "mod/b");
+  confere(
+    "M1 · preferência",
+    escolhido.substitui.join() === "mod/b" && escolhido.perderam.join() === "mod/a",
+    `a escolha desta máquina não decidiu: vale ${escolhido.substitui}, perdeu ${escolhido.perderam}`,
+  );
+
+  const nativo = registro.quemPinta("pessoa.cartao", NATIVO);
+  confere("M1 · nativo", nativo.nativa === true && nativo.substitui.length === 0, "com o SEELE escolhido, algum MOD continuou valendo");
+  confere("M1 · nativo", [...nativo.perderam].sort().join() === "mod/a,mod/b", `com o SEELE escolhido, os dois perdem: ${nativo.perderam}`);
+  confere("M1 · nativo", nativo.ausente === "", `o valor reservado foi lido como um MOD que sumiu: «${nativo.ausente}»`);
+
+  const sumiu = registro.quemPinta("pessoa.cartao", "mod/z");
+  confere("M1 · ausente", sumiu.ausente === "mod/z" && sumiu.nativa === true, "o provedor escolhido que não está de pé não foi nomeado");
+
+  // **Por alvo.** Uma substituição registrada só para a pessoa 12 vale para ela.
+  registro.registrar({ id: "mod/b" }, b, { ponto: "pessoa.cartao", modo: "substituir", alvo: "12", prioridade: 50 });
+  const porAlvo = registro.quemPinta("pessoa.cartao", "");
+  confere("M1 · por alvo", [...porAlvo.substitui].sort().join() === "mod/a,mod/b", `a substituição de uma pessoa só não apareceu: ${porAlvo.substitui}`);
+  confere("M1 · por alvo", porAlvo.perderam.length === 0, `quem vale para uma pessoa foi contado também como quem perdeu: ${porAlvo.perderam}`);
+
+  // Um ponto sem ninguém responde vazio, e não some; um que não existe, nada.
+  const vazio = registro.quemPinta("compositor.ferramentas", "");
+  confere(
+    "M1 · vazio",
+    vazio.contribuicoes === 0 && vazio.substituivel === false && vazio.acrescentam.length === 0,
+    `um ponto sem contribuição respondeu ${JSON.stringify(vazio)}`,
+  );
+  confere("M1 · vazio", registro.quemPinta("nao.existe", "") === null, "um ponto que a API não conhece ganhou resposta");
+
+  // **E nada mudou.** Ler a disputa não a decide de novo, nem mexe no registro.
+  confere("M1 · só leitura", registro.porHandle.size === 4, `o registro tem ${registro.porHandle.size} contribuições depois das leituras, e eram quatro`);
+  // Ler um ponto vazio não o cria: `tirar` não deixa entrada vazia em
+  // `porPonto`, e uma que a leitura deixasse viraria, no `resumo`, uma linha
+  // com zero contribuições.
+  confere(
+    "M1 · só leitura",
+    registro.porPonto.size === 1,
+    `o registro tem ${registro.porPonto.size} pontos depois das leituras, e só «pessoa.cartao» tem contribuição: `
+    + `ler um ponto vazio o criou (${[...registro.porPonto.keys()].join(", ")})`,
+  );
+  confere(
+    "M1 · só leitura",
+    registro.escolherSubstituicao("pessoa.cartao", "", "").escolhida?.mod === "mod/a",
+    "ler quem pinta mudou quem a disputa escolhe",
+  );
+}
+
 // ------------------------------------------ R4 · registrar e revogar estabiliza
 
 {

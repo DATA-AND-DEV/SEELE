@@ -509,4 +509,55 @@ class RegistroDeContribuicoes {
     }
     return linhas.sort((a, b) => a.ponto.localeCompare(b.ponto));
   }
+
+  /**
+   * Quem pinta um ponto **agora**, somando todos os alvos — só leitura.
+   *
+   * Para «quem pinta cada lugar», na gestão de MODs (fase M1 da
+   * especificação de 23/09). `resumo` responde pelo alvo vazio, e por isso não
+   * via a substituição que um MOD registra por pessoa: o avatar do PERFIS é
+   * sempre por pessoa, e a gestão dizia que ninguém o desenhava.
+   *
+   * A decisão é a de `escolherSubstituicao`, chamada para cada alvo que tem
+   * contribuição: nenhuma regra nova, e nada muda no registro.
+   *
+   * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
+   * @param {string} preferido A escolha desta máquina: `""`, `NATIVO` ou um `id`.
+   * @returns {object|null} `null` para um ponto que a API não conhece.
+   */
+  quemPinta(ponto, preferido = "") {
+    const regra = Object.hasOwn(PONTOS_DE_CONTRIBUICAO, ponto)
+      ? PONTOS_DE_CONTRIBUICAO[ponto]
+      : null;
+    if (!regra) return null;
+    const porAlvo = this.porPonto.get(ponto) ?? new Map();
+    const todas = [...porAlvo.values()].flat();
+    const substituivel = regra.modos.includes("substituir");
+    const venceram = new Set();
+    const pediram = new Set();
+    let nativa = false;
+    let ausente = "";
+    if (substituivel) {
+      for (const alvo of porAlvo.keys()) {
+        const disputa = this.escolherSubstituicao(ponto, alvo, preferido);
+        if (disputa.escolhida) {
+          venceram.add(disputa.escolhida.mod);
+          pediram.add(disputa.escolhida.mod);
+        }
+        for (const preterida of disputa.preteridas) pediram.add(preterida.mod);
+        if (disputa.nativa) nativa = true;
+        if (disputa.ausente) ausente = disputa.ausente;
+      }
+    }
+    return {
+      ponto,
+      substituivel,
+      substitui: [...venceram],
+      perderam: [...pediram].filter((mod) => !venceram.has(mod)),
+      acrescentam: [...new Set(todas.filter((c) => c.modo === "adicionar").map((c) => c.mod))],
+      nativa,
+      ausente,
+      contribuicoes: todas.length,
+    };
+  }
 }
