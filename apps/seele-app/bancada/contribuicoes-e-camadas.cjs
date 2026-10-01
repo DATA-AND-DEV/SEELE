@@ -593,6 +593,40 @@ function acordarTudo(no) {
   confere("M1 · por alvo", [...porAlvo.substitui].sort().join() === "mod/a,mod/b", `a substituição de uma pessoa só não apareceu: ${porAlvo.substitui}`);
   confere("M1 · por alvo", porAlvo.perderam.length === 0, `quem vale para uma pessoa foi contado também como quem perdeu: ${porAlvo.perderam}`);
 
+  // **Uma escolha que vale numa pessoa e não noutra.** O avatar é sempre por
+  // pessoa: `mod/a` desenha a 12, `mod/b` desenha a 7, e esta máquina escolheu
+  // `mod/b`. Na 7 vale `mod/b`; na 12 o escolhido não tem candidata e o SEELE
+  // desenha. `nativa` e `ausente` falam do ponto inteiro, e o ponto tem quem o
+  // desenhe: dizer que `mod/b` «não está de pé» seria falso e esconderia que
+  // ele desenha a pessoa 7. O caso parcial é dito por `substitui` e `perderam`.
+  const avatares = new R();
+  const avatar = { ponto: "pessoa.avatar", modo: "substituir", conteudo: { doServidor: { canal: 1, pedido: {} } } };
+  avatares.registrar({ id: "mod/a" }, a, { ...avatar, alvo: "12" });
+  avatares.registrar({ id: "mod/b" }, b, { ...avatar, alvo: "7" });
+  const parcial = avatares.quemPinta("pessoa.avatar", "mod/b");
+  confere(
+    "M1 · por alvo",
+    parcial.substitui.join() === "mod/b" && parcial.perderam.join() === "mod/a",
+    `com mod/b escolhido e um avatar por pessoa, vale «${parcial.substitui}» e perdeu «${parcial.perderam}»`,
+  );
+  confere(
+    "M1 · por alvo",
+    parcial.ausente === "",
+    `o MOD escolhido desenha a pessoa 7 e foi dito como quem não está de pé: «${parcial.ausente}»`,
+  );
+  confere(
+    "M1 · por alvo",
+    parcial.nativa === false,
+    "o MOD escolhido desenha a pessoa 7, e o ponto foi dito como desenhado pelo SEELE por escolha desta máquina",
+  );
+  // E o escolhido que não está de pé em pessoa nenhuma continua dito, por alvo.
+  const emNenhuma = avatares.quemPinta("pessoa.avatar", "mod/z");
+  confere(
+    "M1 · por alvo",
+    emNenhuma.ausente === "mod/z" && emNenhuma.nativa === true && emNenhuma.substitui.length === 0,
+    `o provedor escolhido não está de pé em pessoa nenhuma e não foi nomeado: ${JSON.stringify(emNenhuma)}`,
+  );
+
   // Um ponto sem ninguém responde vazio, e não some; um que não existe, nada.
   const vazio = registro.quemPinta("compositor.ferramentas", "");
   confere(

@@ -521,6 +521,19 @@ class RegistroDeContribuicoes {
    * A decisão é a de `escolherSubstituicao`, chamada para cada alvo que tem
    * contribuição: nenhuma regra nova, e nada muda no registro.
    *
+   * **O que cada campo soma.** A resposta é do ponto, e não de um alvo:
+   *
+   * - `substitui` — quem vence a disputa em **algum** alvo;
+   * - `perderam` — quem pediu para substituir e não vence em **nenhum**;
+   * - `nativa` e `ausente` — o ponto **inteiro**, e só quando nenhum alvo tem
+   *   MOD que o substitua: `nativa` diz que foi a escolha desta máquina (o
+   *   `NATIVO`, ou um escolhido que não está de pé) que deixou o SEELE
+   *   desenhar, e `ausente` nomeia o escolhido que não está de pé em alvo
+   *   nenhum. Quando algum alvo tem quem o desenhe, os dois ficam `false` e
+   *   `""`: um avatar escolhido que desenha a pessoa 7 e não tem candidata na
+   *   12 está de pé, e dizer que ele sumiu esconderia a pessoa 7. Esse caso
+   *   parcial é dito por `substitui` e `perderam`.
+   *
    * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
    * @param {string} preferido A escolha desta máquina: `""`, `NATIVO` ou um `id`.
    * @returns {object|null} `null` para um ponto que a API não conhece.
@@ -555,8 +568,9 @@ class RegistroDeContribuicoes {
       substitui: [...venceram],
       perderam: [...pediram].filter((mod) => !venceram.has(mod)),
       acrescentam: [...new Set(todas.filter((c) => c.modo === "adicionar").map((c) => c.mod))],
-      nativa,
-      ausente,
+      // Do ponto inteiro: um alvo que tem quem o desenhe desmente os dois.
+      nativa: nativa && venceram.size === 0,
+      ausente: venceram.size === 0 ? ausente : "",
       contribuicoes: todas.length,
     };
   }
