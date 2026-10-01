@@ -14942,3 +14942,214 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
          fica sem um caminho que a política deixe tocar"
     );
 }
+
+/// **Todo ponto de contribuição tem onde ser contornado.**
+///
+/// O modo de desenvolvedor (especificação de 23/09, Parte II, «Diagnóstico para
+/// quem escreve MOD», item 4) desenha um contorno com o nome de cada ponto
+/// sobre o contêiner onde a tela o monta. O mapa de contêineres é uma segunda
+/// lista dos pontos, e uma segunda lista é a que fica para trás: um ponto novo
+/// na tabela sem contêiner aqui é um lugar que o modo não mostra, e quem
+/// escreve o MOD conclui que ele não existe.
+///
+/// E cada seletor tem de casar com algo que a página ou os scripts criam: uma
+/// classe renomeada na lista de pessoas apagaria o contorno de três pontos sem
+/// nada reclamar. É o seletor como contrato que ninguém escreveu — o que o ADR
+/// 0052 recusa para MOD —, voltado para o próprio produto.
+#[test]
+fn todo_ponto_de_contribuicao_tem_onde_ser_contornado() {
+    let registro = read("ui/mods-contribuicoes.js");
+    let tabela = registro
+        .split_once("const PONTOS_DE_CONTRIBUICAO = Object.freeze({")
+        .expect("a tabela de pontos de contribuição")
+        .1
+        .split_once("});")
+        .expect("a tabela fecha")
+        .0;
+    let pontos: BTreeSet<String> = tabela
+        .lines()
+        .filter_map(|linha| {
+            let nome = linha.trim().strip_prefix('"')?;
+            Some(nome.split_once('"')?.0.to_owned())
+        })
+        .collect();
+    assert!(
+        pontos.len() >= 10,
+        "a tabela de pontos encolheu para {}: a leitura quebrou antes de o guarda dizer alguma coisa",
+        pontos.len()
+    );
+
+    let gestao = read("ui/camada-mods.js");
+    let mapa = gestao
+        .split_once("const CONTEINERES_DOS_PONTOS = Object.freeze({")
+        .expect("o mapa de contêineres do modo de desenvolvedor, em camada-mods.js")
+        .1
+        .split_once("});")
+        .expect("o mapa fecha")
+        .0;
+    let conteineres: Vec<(String, String)> = mapa
+        .lines()
+        .filter_map(|linha| {
+            let resto = linha.trim().strip_prefix('"')?;
+            let (ponto, resto) = resto.split_once('"')?;
+            let seletor = resto.split('"').nth(1)?;
+            Some((ponto.to_owned(), seletor.to_owned()))
+        })
+        .collect();
+    let contornados: BTreeSet<String> =
+        conteineres.iter().map(|(ponto, _)| ponto.clone()).collect();
+    assert_eq!(
+        contornados, pontos,
+        "o modo de desenvolvedor não contorna os mesmos pontos que a API anuncia: um \
+         ponto sem contêiner é um lugar que o modo não mostra, e um contêiner sem \
+         ponto é um nome que a API não aceita"
+    );
+
+    let pagina = without_comments(&read("ui/index.html"));
+    let script = without_comments(&scripts());
+    for (ponto, seletor) in &conteineres {
+        for atomo in seletor.split_whitespace() {
+            let etiqueta = atomo.chars().take_while(char::is_ascii_alphabetic).count();
+            let resto = &atomo[etiqueta..];
+            if let Some(id) = resto.strip_prefix('#') {
+                assert!(
+                    pagina.contains(&format!("id=\"{id}\"")),
+                    "o contêiner de «{ponto}» é `#{id}`, e a página não tem esse id"
+                );
+            } else if let Some(classe) = resto.strip_prefix('.') {
+                let criada = [
+                    format!("\"{classe}\""),
+                    format!("\"{classe} "),
+                    format!(" {classe}\""),
+                ]
+                .iter()
+                .any(|forma| script.contains(forma.as_str()));
+                assert!(
+                    criada,
+                    "o contêiner de «{ponto}» é `.{classe}`, e nenhum script cria essa \
+                     classe: o contorno do ponto some sem ninguém saber"
+                );
+            } else if let Some(atributo) = resto
+                .strip_prefix("[data-")
+                .and_then(|atributo| atributo.strip_suffix(']'))
+            {
+                let no_dataset = como_o_tauri_procura(&atributo.replace('-', "_"));
+                assert!(
+                    script.contains(&format!("dataset.{no_dataset}")),
+                    "o contêiner de «{ponto}» é `[data-{atributo}]`, e nenhum script \
+                     escreve `dataset.{no_dataset}`"
+                );
+            } else {
+                assert!(
+                    resto.is_empty(),
+                    "o seletor de «{ponto}» (`{seletor}`) tem uma parte que este guarda \
+                     não sabe ler: `{atomo}`"
+                );
+            }
+        }
+    }
+}
+
+/// **O modo de desenvolvedor contorna, e não toma nada.**
+///
+/// Os contornos ficam sobre a conversa inteira, e quem está nela está muitas
+/// vezes **falando**: a barra de espaço é o microfone, e o que ela faz depende
+/// de onde está o foco (`digitando()`, em `base.js`). Uma camada que mexesse no
+/// foco a cada redesenho — e ela redesenha a cada mudança da página — mudaria o
+/// que a tecla faz no meio da fala; uma que pegasse o clique tiraria da pessoa
+/// o canal, o nome e o botão que estão embaixo dela.
+///
+/// **As cinco funções do modo**, e não só as três que desenham: ligar pela
+/// configuração e ler o que esta máquina guardou também correm com a conversa
+/// aberta, e um `focus()` nelas tira a barra de espaço de quem fala do mesmo
+/// jeito.
+///
+/// É a regra da faixa de quem bate à porta
+/// (`the_knock_notice_never_takes_the_keyboard_from_somebody_mid_sentence`),
+/// aplicada a uma camada que cobre a janela toda.
+#[test]
+fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
+    let gestao = read("ui/camada-mods.js");
+    for assinatura in [
+        "function modoDeDesenvolvedorLigado(",
+        "function ligarModoDeDesenvolvedor(",
+        "function aplicarModoDeDesenvolvedor(",
+        "function agendarContornos(",
+        "function desenharContornos(",
+    ] {
+        let corpo = body_of(&gestao, assinatura);
+        // O nome, e não a chamada: `.focus?.()` e `["focus"]()` não contêm
+        // `focus(`, e `autofocus` contém `focus`. E `blur` também: tirar o
+        // foco do campo de escrever o devolve à página, e ali a barra de
+        // espaço é o microfone.
+        for roubo in [
+            "focus",
+            "blur",
+            "tabIndex",
+            "tabindex",
+            "addEventListener(\"click\"",
+            "addEventListener(\"keydown\"",
+            "addEventListener(\"pointerdown\"",
+        ] {
+            assert!(
+                !corpo.contains(roubo),
+                "`{assinatura}` usa `{roubo}`, e o contorno passa a tomar o teclado ou \
+                 o clique de quem está na conversa:\n{corpo}"
+            );
+        }
+    }
+
+    let tag = tag_with_id(&read("ui/index.html"), "contornos-dos-pontos");
+    assert!(
+        tag.contains("aria-hidden=\"true\""),
+        "a camada dos contornos perdeu o `aria-hidden`, e um leitor de tela lê o nome \
+         de cada ponto por cima da conversa: <{tag}>"
+    );
+    assert!(
+        !tag.contains("tabindex"),
+        "a camada dos contornos entrou na ordem de tabulação: <{tag}>"
+    );
+
+    let folha = read("ui/camada-mods.css");
+    for seletor in [
+        ".contornos-dos-pontos {",
+        ".contorno-de-ponto {",
+        ".contorno-de-ponto-nome {",
+        ".contornos-dos-pontos-aviso {",
+    ] {
+        let regra = folha
+            .split_once(seletor)
+            .unwrap_or_else(|| panic!("camada-mods.css não tem a regra `{seletor}`"))
+            .1
+            .split_once('}')
+            .expect("a regra fecha")
+            .0;
+        assert!(
+            regra.contains("pointer-events: none"),
+            "`{seletor}` não declara `pointer-events: none`, e o contorno pega o \
+             clique que era do canal ou do botão embaixo dele: {regra}"
+        );
+    }
+
+    // E abaixo de toda camada do produto: o alerta começa em 19, as
+    // configurações em 24. Acima delas, um diálogo aberto ficaria riscado pelos
+    // contornos da tela de baixo.
+    let camada = folha
+        .split_once(".contornos-dos-pontos {")
+        .expect("a regra da camada")
+        .1
+        .split_once('}')
+        .expect("a regra fecha")
+        .0;
+    let z: u32 = camada
+        .split_once("z-index:")
+        .and_then(|(_, resto)| resto.split(';').next())
+        .and_then(|valor| valor.trim().parse().ok())
+        .expect("a camada dos contornos não declara um `z-index` numérico");
+    assert!(
+        z < 19,
+        "a camada dos contornos está em `z-index: {z}`, acima das camadas do produto \
+         (alerta 19–21, configurações 24, aceite 27): ela passa a riscar os diálogos \
+         abertos"
+    );
+}

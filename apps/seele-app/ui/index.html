@@ -124,6 +124,15 @@
 <div class="varredura" aria-hidden="true"></div>
 
 <!--
+  Os contornos do modo de desenvolvedor — ver `desenharContornos` em
+  `camada-mods.js`. Fora das telas, como a varredura, porque cobrem a janela
+  inteira; `aria-hidden` e sem nada focável, porque são desenho sobre a
+  conversa e não parte dela. Ninguém clica neles: `pointer-events: none` em
+  `camada-mods.css`.
+-->
+<div id="contornos-dos-pontos" class="contornos-dos-pontos" aria-hidden="true" hidden></div>
+
+<!--
   O que a troca de tela diz a quem não a vê.
 
   Fora das telas de propósito, e pela mesma razão que a varredura: ela pertence
@@ -3316,6 +3325,30 @@
             <div class="server-bloco-corpo">
               <div class="server-campo">
                 <ul id="lista-quem-pinta" class="server-dispositivos mods-rolagem"></ul>
+              </div>
+            </div>
+          </div>
+          <!--
+            O modo de desenvolvedor: um contorno com o nome de cada lugar, sobre
+            a tela. Mora nesta máquina, como a escolha de apresentação, porque é
+            uma escolha de quem usa e não do servidor. A classe do rótulo é a da
+            REDUÇÃO DE RUÍDO, pelo motivo escrito lá.
+          -->
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">MODO DE DESENVOLVEDOR</h3>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <label class="server-marcar" for="mods-modo-desenvolvedor">
+                  <input id="mods-modo-desenvolvedor" type="checkbox">
+                  <span>contornar na tela cada lugar onde um MOD pode entrar</span>
+                </label>
+                <p class="server-frase">Cada contorno leva o nome do lugar como a
+                  API o chama — é o que um MOD escreve em «ponto». Os contornos não
+                  recebem clique nem teclado: a conversa continua funcionando por
+                  baixo, e a barra de espaço continua falando. Vale só nesta
+                  máquina.</p>
               </div>
             </div>
           </div>

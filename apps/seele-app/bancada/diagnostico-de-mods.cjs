@@ -11,7 +11,8 @@
 // - **a gestão**: «quem pinta cada lugar» desenhada a partir do registro e da
 //   mídia de verdade, e redesenhada quando os bytes chegam;
 // - **o modo de desenvolvedor**: que os contornos deixam o clique chegar ao
-//   canal de baixo e não tiram o foco de quem escreve;
+//   canal de baixo, não tiram o foco de quem escreve, e contornam só o que a
+//   rolagem deixa à vista;
 // - **o som**: `decodeAudioData` de verdade, sob a política que o produto
 //   declara (`default-src 'self'`, sem `media-src`) — medido no Chromium, o
 //   motor do WebView2; a medida no WKWebView é a Task 1 (antes) e a Task 9
@@ -550,9 +551,212 @@ async function quemPintaCadaLugar(navegador, servidor) {
   await pagina.close();
 }
 
+// ---------------------------------------------------------------------------
+// O modo de desenvolvedor contorna sem tomar nada.
+// ---------------------------------------------------------------------------
+
+async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
+  const { pagina, erros } = await abrirASessao(navegador, servidor);
+  await pagina.evaluate(() => {
+    // Um MOD que acrescenta ao item de canal: o contorno cerca o contêiner com
+    // o conteúdo do MOD dentro, e o clique tem de atravessar os dois.
+    contribuicoesDosMods.registrar({ id: "mod/a" }, instancia("mod/a"), {
+      ponto: "canal.item",
+      modo: "adicionar",
+      conteudo: [{ forma: "texto", dentro: "A" }],
+    });
+    desenhar(testTable.snapshot);
+  });
+  assert.equal(
+    await pagina.evaluate(() => $("contornos-dos-pontos").hidden),
+    true,
+    "os contornos apareceram sem ninguém ligar o modo",
+  );
+
+  // Liga pela configuração, como quem usa liga.
+  await pagina.evaluate(() => {
+    $("tela-server").hidden = false;
+    $("painel-mods").hidden = false;
+  });
+  await pagina.click("#mods-aba-diagnostico");
+  await pagina.click("#mods-modo-desenvolvedor");
+  await pagina.evaluate(() => {
+    $("tela-server").hidden = true;
+  });
+  await esperarQue(
+    pagina,
+    () => document.querySelectorAll('.contorno-de-ponto[data-ponto="canal.item"]').length === 2,
+    "ligar o modo pela configuração não contornou os dois canais",
+    () => [...document.querySelectorAll(".contorno-de-ponto")].map((c) => c.dataset.ponto),
+  );
+  const vistos = await pagina.evaluate(() => [
+    ...new Set([...document.querySelectorAll(".contorno-de-ponto")].map((c) => c.dataset.ponto)),
+  ]);
+  for (const ponto of [
+    "canal.cabecalho", "canal.item", "compositor.ferramentas", "pessoa.acoes", "pessoa.avatar",
+    "pessoa.cartao", "pessoa.identidade", "sala.acoes", "servidor.aparencia",
+  ]) {
+    assert.ok(vistos.includes(ponto), `o contorno de «${ponto}» não apareceu; apareceram: ${vistos.join(", ")}`);
+  }
+  assert.equal(
+    await pagina.evaluate(() => localStorage.getItem("seele.mods.desenvolvedor")),
+    "sim",
+    "ligar o modo não ficou guardado nesta máquina",
+  );
+
+  // **Nada na camada é focável.** O `aria-hidden` tira os contornos do leitor
+  // de tela, e não da tabulação: um botão ali dentro seria uma parada de Tab
+  // invisível, e com o foco nele a barra de espaço deixa de falar.
+  const focaveis = await pagina.evaluate(() => {
+    const camada = $("contornos-dos-pontos");
+    return [camada, ...camada.querySelectorAll("*")]
+      .filter((no) => no.tabIndex >= 0)
+      .map((no) => `${no.tagName.toLowerCase()}.${no.className}`);
+  });
+  assert.deepEqual(
+    focaveis,
+    [],
+    `a camada dos contornos ganhou algo focável: ${focaveis.join(", ")}`,
+  );
+
+  // **O foco fica com quem escreve**, mesmo com a página mudando embaixo.
+  await pagina.focus("#campo-mensagem");
+  await pagina.evaluate(() => desenhar(testTable.snapshot));
+  await pagina.evaluate(() => new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto))));
+  assert.equal(
+    await pagina.evaluate(() => document.activeElement?.id),
+    "campo-mensagem",
+    "redesenhar os contornos tirou o foco do campo de escrever — e com ele a barra de espaço, que fala",
+  );
+
+  // **O clique atravessa.** O meio do canal 2 é do canal, e apertar ali o abre.
+  const alvo = await pagina.evaluate(() => {
+    const botao = document.querySelector('#lista-linhas button[data-linha="2"]');
+    const caixa = botao.getBoundingClientRect();
+    const x = caixa.left + caixa.width / 2;
+    const y = caixa.top + caixa.height / 2;
+    const achado = document.elementFromPoint(x, y);
+    return {
+      x,
+      y,
+      de: achado?.closest?.('button[data-linha="2"]') ? "canal" : String(achado?.className ?? achado),
+    };
+  });
+  assert.equal(alvo.de, "canal", `o meio do canal é de «${alvo.de}»: o contorno está pegando o clique`);
+  await pagina.mouse.click(alvo.x, alvo.y);
+  await esperarQue(
+    pagina,
+    () => testCalls.some((c) => c.cmd === "open_channel" && c.args?.channel === 2),
+    "o clique no meio do canal 2, com o contorno por cima, não abriu o canal",
+  );
+
+  // **Guardado nesta máquina**: a janela reaberta volta com o modo ligado.
+  await pagina.reload();
+  await prepararASessao(pagina);
+  assert.equal(
+    await pagina.evaluate(() => $("mods-modo-desenvolvedor").checked),
+    true,
+    "a marca da configuração voltou desmarcada com o modo guardado como ligado",
+  );
+  await esperarQue(
+    pagina,
+    () => document.querySelectorAll(".contorno-de-ponto").length > 0,
+    "a janela reaberta, com o modo guardado como ligado, não desenhou contorno nenhum",
+  );
+
+  // **O contorno é do que se vê.** Uma conversa longa, rolada até o fim: os
+  // retratos que a rolagem levou para cima da lista continuam com caixa na
+  // janela — sobre o cabeçalho do canal —, e só o recorte da lista os
+  // esconde. Sem o recorte, o contorno de um retrato que ninguém vê fica
+  // desenhado por cima do nome do canal.
+  const rolada = await pagina.evaluate(async () => {
+    const agora = Math.floor(Date.now() / 1000);
+    const longa = Array.from({ length: 80 }, (_, i) => ({
+      id: 100 + i,
+      channel: 1,
+      author: i % 2 ? 2 : 1,
+      author_nickname: i % 2 ? "Lia" : "Alex",
+      at_seconds: agora - (80 - i) * 900,
+      body: `mensagem ${i}, com texto bastante para ocupar a linha`,
+      own: i % 2 === 0,
+      edited: false,
+      attachment: null,
+    }));
+    // A mesma conversa para quem a buscar de novo: uma busca em voo não a
+    // troca pela curta no meio da medida.
+    testTable.messages = longa;
+    mensagens = longa;
+    desenharMensagens();
+    const lista = $("lista-mensagens");
+    lista.scrollTop = lista.scrollHeight;
+    for (let volta = 0; volta < 2; volta += 1) {
+      await new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto)));
+    }
+    const area = lista.getBoundingClientRect();
+    const naJanela = (r) => r.width + r.height > 0 && r.bottom > 0 && r.top < innerHeight;
+    const cortados = [...lista.querySelectorAll("[data-pessoa-do-avatar]")]
+      .map((no) => no.getBoundingClientRect())
+      .filter((r) => naJanela(r) && (r.top < area.top || r.bottom > area.bottom));
+    // Os contornos de retrato na faixa da lista: os da conversa, e não os da
+    // lista de pessoas, que mora em outra coluna.
+    const daLista = [...document.querySelectorAll('.contorno-de-ponto[data-ponto="pessoa.avatar"]')]
+      .map((c) => {
+        const left = parseFloat(c.style.left);
+        const top = parseFloat(c.style.top);
+        return { left, top, right: left + parseFloat(c.style.width), bottom: top + parseFloat(c.style.height) };
+      })
+      .filter((c) => c.left >= area.left - 1 && c.right <= area.right + 1);
+    const fora = daLista.filter((c) => c.top < area.top - 1 || c.bottom > area.bottom + 1);
+    return {
+      rolou: lista.scrollTop,
+      area: `${Math.round(area.top)}–${Math.round(area.bottom)}px`,
+      cortados: cortados.length,
+      vistos: daLista.length - fora.length,
+      fora: fora.map((c) => `${Math.round(c.top)}–${Math.round(c.bottom)}px`),
+    };
+  });
+  assert.ok(rolada.rolou > 0, "a conversa longa não rolou: a prova do recorte não tem o que recortar");
+  assert.ok(
+    rolada.cortados > 0,
+    `a lista rolada não deixou nenhum retrato cortado com caixa na janela (lista em ${rolada.area}): a prova do recorte não prova nada`,
+  );
+  assert.ok(
+    rolada.vistos > 0,
+    `nenhum retrato à vista na lista rolada ganhou contorno (lista em ${rolada.area}): o recorte apagou o que se vê`,
+  );
+  assert.deepEqual(
+    rolada.fora,
+    [],
+    `com a lista rolada, contornos de retrato saíram dela (a lista vai de ${rolada.area}; fora dela: `
+    + `${rolada.fora.join(", ")}): o contorno de um lugar que a rolagem escondeu fica desenhado por cima do `
+    + "cabeçalho do canal",
+  );
+
+  // E desligar tira tudo, e esquece.
+  await pagina.evaluate(() => {
+    $("tela-server").hidden = false;
+    $("painel-mods").hidden = false;
+  });
+  await pagina.click("#mods-aba-diagnostico");
+  await pagina.click("#mods-modo-desenvolvedor");
+  const desligado = await pagina.evaluate(() => ({
+    oculta: $("contornos-dos-pontos").hidden,
+    filhos: $("contornos-dos-pontos").childElementCount,
+    guardado: localStorage.getItem("seele.mods.desenvolvedor"),
+  }));
+  assert.deepEqual(
+    desligado,
+    { oculta: true, filhos: 0, guardado: null },
+    "desligar o modo deixou contorno na tela ou a escolha guardada",
+  );
+  assert.deepEqual(erros, [], `a página lançou erro durante o modo de desenvolvedor: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
+  oModoDeDesenvolvedorContornaSemTomarNada,
 ];
 
 (async () => {

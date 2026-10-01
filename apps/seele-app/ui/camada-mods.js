@@ -939,6 +939,208 @@ function quemPintaEstaAVista() {
     && !$("mods-painel-diagnostico").hidden;
 }
 
+// ------------------------------------------------- o modo de desenvolvedor
+//
+// Especificação de 23/09, Parte II, «Diagnóstico para quem escreve MOD», item
+// 4: «um contorno com o nome de cada região sobre a tela, ligado nas
+// configurações». Na 0.15.x as regiões são os onze pontos de contribuição.
+
+/**
+ * Onde cada ponto de contribuição é montado na tela.
+ *
+ * **Um seletor do produto sobre a própria marcação**, e não um contrato com
+ * MOD: o ADR 0052 recusa seletor como API porque ninguém o escreveu, e este é
+ * só o produto apontando para onde ele mesmo monta cada ponto — onde
+ * `tela-sessao.js` põe o que `conteudoDasContribuicoes` e
+ * `acoesDasContribuicoes` devolvem, `vestirAvatar` para os retratos e
+ * `escreverOTemaDaSessao` para a aparência.
+ * `todo_ponto_de_contribuicao_tem_onde_ser_contornado`, em `tests/frontend.rs`,
+ * confere que cada ponto da tabela está aqui e que cada seletor ainda casa com
+ * algo que a página ou os scripts criam.
+ */
+const CONTEINERES_DOS_PONTOS = Object.freeze({
+  "pessoa.identidade": ".pessoa-identidade",
+  "pessoa.avatar": "[data-pessoa-do-avatar]",
+  "pessoa.cartao": "li.pessoa",
+  "pessoa.detalhes": ".pessoa-nativo",
+  "pessoa.acoes": ".pessoa-rodape",
+  "canal.item": "#lista-linhas button[data-linha]",
+  "canal.cabecalho": "#canal-cabecalho-mods",
+  "compositor.ferramentas": "#compositor-ferramentas",
+  "sala.acoes": ".roster-sala",
+  "servidor.navegacao": "#lista-mods-navegacao",
+  "servidor.aparencia": "#tela-sessao",
+});
+
+/** A chave desta preferência no armazenamento desta máquina. */
+const PREFERENCIA_DE_DESENVOLVEDOR = "seele.mods.desenvolvedor";
+
+/**
+ * Quantos contornos cabem num desenho.
+ *
+ * Uma conversa longa tem um retrato por mensagem, e cada retrato é um lugar de
+ * `pessoa.avatar`. Sem teto, rolar a conversa com o modo ligado desenharia
+ * centenas de caixas por quadro.
+ */
+const TETO_DE_CONTORNOS = 300;
+
+/** O observador, e o quadro pendente, enquanto o modo está ligado. */
+const estadoDosContornos = { observador: null, quadro: 0 };
+
+/** O modo está ligado nesta máquina? Sem armazenamento, não está. */
+function modoDeDesenvolvedorLigado() {
+  try {
+    return localStorage.getItem(PREFERENCIA_DE_DESENVOLVEDOR) === "sim";
+  } catch {
+    // Armazenamento bloqueado: o modo começa desligado, que é o estado de
+    // quem nunca o ligou.
+    return false;
+  }
+}
+
+/**
+ * Liga ou desliga, pela marca da configuração, e guarda nesta máquina.
+ *
+ * `localStorage`, como a preferência de apresentação: é uma escolha desta
+ * máquina, e não do servidor. Não conseguir guardar é dito no console, e não
+ * impede o modo de valer nesta sessão.
+ */
+function ligarModoDeDesenvolvedor(ligado) {
+  try {
+    if (ligado) localStorage.setItem(PREFERENCIA_DE_DESENVOLVEDOR, "sim");
+    else localStorage.removeItem(PREFERENCIA_DE_DESENVOLVEDOR);
+  } catch (falha) {
+    console.warn("o modo de desenvolvedor não foi guardado:", falha);
+  }
+  aplicarModoDeDesenvolvedor(ligado);
+}
+
+/**
+ * Põe os contornos na tela, ou tira todos.
+ *
+ * **Nada aqui toma o teclado nem o clique.** A camada é `aria-hidden`, não tem
+ * nada focável, e a folha a declara `pointer-events: none`: a barra de espaço
+ * continua falando, e o canal embaixo de um contorno continua abrindo.
+ * `o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique` prende as três
+ * coisas.
+ */
+function aplicarModoDeDesenvolvedor(ligado) {
+  const camada = $("contornos-dos-pontos");
+  const marca = $("mods-modo-desenvolvedor");
+  if (marca) marca.checked = ligado;
+  if (!camada) return;
+  if (!ligado) {
+    estadoDosContornos.observador?.disconnect();
+    estadoDosContornos.observador = null;
+    if (estadoDosContornos.quadro) cancelAnimationFrame(estadoDosContornos.quadro);
+    estadoDosContornos.quadro = 0;
+    window.removeEventListener("resize", agendarContornos);
+    window.removeEventListener("scroll", agendarContornos, true);
+    camada.replaceChildren();
+    camada.hidden = true;
+    return;
+  }
+  if (!estadoDosContornos.observador) {
+    estadoDosContornos.observador = new MutationObserver((registros) => {
+      // A camada mudando não conta: sem isto, desenhar os contornos pediria
+      // outro desenho, e o laço não pararia nunca.
+      if (registros.every((registro) => camada.contains(registro.target))) return;
+      agendarContornos();
+    });
+    estadoDosContornos.observador.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    });
+    window.addEventListener("resize", agendarContornos);
+    // Na captura, porque a rolagem que importa é a dos painéis, e ela não sobe.
+    window.addEventListener("scroll", agendarContornos, true);
+  }
+  agendarContornos();
+}
+
+/** Um desenho por quadro, por mais que a página mude nele. */
+function agendarContornos() {
+  if (estadoDosContornos.quadro) return;
+  estadoDosContornos.quadro = requestAnimationFrame(() => {
+    estadoDosContornos.quadro = 0;
+    desenharContornos();
+  });
+}
+
+/**
+ * Um contorno por lugar à vista, com o nome do ponto como a API o chama.
+ *
+ * **À vista é dentro do recorte, e não só dentro da janela.** Uma lista rolada
+ * deixa os itens que saíram por cima com caixa na janela — sobre o cabeçalho
+ * do canal —, e quem os esconde é o `overflow` da lista. Cada ancestral que
+ * corta o que transborda corta o contorno também: o nó que ficou todo fora não
+ * é contornado, e o que ficou em parte é contornado só na parte que se vê.
+ *
+ * As comparações são estritas de propósito: um contêiner vazio (0×0) dentro do
+ * recorte **está** à vista, e o contorno dele é o que mostra onde um MOD
+ * entraria. Pela mesma razão a pergunta não é `elementFromPoint`: no meio de
+ * um contêiner vazio está quem o cerca, e não ele.
+ */
+function desenharContornos() {
+  const camada = $("contornos-dos-pontos");
+  if (!camada) return;
+  const sessao = $("tela-sessao");
+  // Só com a sessão na frente: fora dela nenhum ponto está montado, e a
+  // camada ficaria desenhando o nada por cima da tela de entrada.
+  if (!estadoDosContornos.observador || !sessao || sessao.hidden) {
+    camada.replaceChildren();
+    camada.hidden = true;
+    return;
+  }
+  const largura = window.innerWidth;
+  const altura = window.innerHeight;
+  const caixas = [];
+  for (const [ponto, seletor] of Object.entries(CONTEINERES_DOS_PONTOS)) {
+    for (const no of document.querySelectorAll(seletor)) {
+      if (caixas.length >= TETO_DE_CONTORNOS) break;
+      // Sem retângulo nenhum é um nó fora da tela — escondido, ou dentro de
+      // algo escondido. Um contêiner vazio **está** na tela, só sem área, e o
+      // contorno dele é o que mostra onde um MOD entraria.
+      if (no.getClientRects().length === 0) continue;
+      const r = no.getBoundingClientRect();
+      // O recorte: a janela, e cada ancestral que corta o que transborda.
+      let cima = 0;
+      let esquerda = 0;
+      let baixo = altura;
+      let direita = largura;
+      for (let pai = no.parentElement; pai && pai !== document.body; pai = pai.parentElement) {
+        const estilo = getComputedStyle(pai);
+        if (estilo.overflowX === "visible" && estilo.overflowY === "visible") continue;
+        const corte = pai.getBoundingClientRect();
+        cima = Math.max(cima, corte.top);
+        esquerda = Math.max(esquerda, corte.left);
+        baixo = Math.min(baixo, corte.bottom);
+        direita = Math.min(direita, corte.right);
+      }
+      if (r.bottom < cima || r.right < esquerda || r.top > baixo || r.left > direita) continue;
+      const topo = Math.max(r.top, cima);
+      const lado = Math.max(r.left, esquerda);
+      const caixa = elemento("div", "contorno-de-ponto");
+      caixa.dataset.ponto = ponto;
+      caixa.style.setProperty("left", `${Math.round(lado)}px`);
+      caixa.style.setProperty("top", `${Math.round(topo)}px`);
+      caixa.style.setProperty("width", `${Math.round(Math.max(0, Math.min(r.right, direita) - lado))}px`);
+      caixa.style.setProperty("height", `${Math.round(Math.max(0, Math.min(r.bottom, baixo) - topo))}px`);
+      caixa.append(elemento("span", "contorno-de-ponto-nome", ponto));
+      caixas.push(caixa);
+    }
+  }
+  caixas.push(elemento(
+    "p",
+    "contornos-dos-pontos-aviso",
+    "MODO DE DESENVOLVEDOR · desligue em CONFIGURAÇÕES › MODS › DIAGNÓSTICO",
+  ));
+  camada.replaceChildren(...caixas);
+  camada.hidden = false;
+}
+
 /**
  * O que estaria ligado se esta tela fosse salva agora, por `id\u0000hash`.
  *
@@ -1855,3 +2057,10 @@ contribuicoesDosMods.aoMudar(() => {
 globalThis.addEventListener("seele-mods-midia", () => {
   if (quemPintaEstaAVista()) desenharQuemPinta();
 });
+
+// O modo de desenvolvedor: a marca da configuração liga e desliga, e o que
+// esta máquina guardou vale desde a abertura da janela.
+$("mods-modo-desenvolvedor").addEventListener("change", (evento) => {
+  ligarModoDeDesenvolvedor(evento.target.checked);
+});
+aplicarModoDeDesenvolvedor(modoDeDesenvolvedorLigado());

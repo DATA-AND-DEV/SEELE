@@ -407,3 +407,63 @@
 .mods-revisoes { list-style: none; margin-bottom: 16px; }
 .mods-revisoes summary { padding: 12px 16px; color: var(--seele-osso-apagado); cursor: pointer; font-size: 12px; }
 .mods-revisoes-lista { list-style: none; margin: 0; padding: 0 0 0 16px; border-left: 1px solid var(--seele-linha); }
+
+/* ------------------------------------------------ o modo de desenvolvedor */
+
+/* **Os contornos ficam sobre a tela, e nunca no caminho dela.**
+ *
+ * `pointer-events: none` porque um contorno que pegasse o clique tiraria o
+ * canal, o nome e o botão de quem conversa; sem nada focável e com
+ * `aria-hidden` na página porque o teclado e o leitor de tela são da conversa —
+ * a barra de espaço fala, e a regra do push-to-talk é não mexer no foco dela.
+ *
+ * `z-index: 10`: acima da varredura (9) e da sessão, abaixo de toda camada do
+ * produto — o alerta (19–21), as configurações (24), o aceite de MODs (27) e
+ * as superfícies de MOD (30 em diante). Um diálogo aberto cobre os contornos,
+ * e é assim que tem de ser: o contorno é da tela de baixo. */
+.contornos-dos-pontos {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.contorno-de-ponto {
+  position: absolute;
+  box-sizing: border-box;
+  min-width: 2px;
+  min-height: 2px;
+  border: var(--seele-b) dashed var(--seele-laranja-nerv);
+  pointer-events: none;
+}
+
+/* O nome como a API o escreve, em negro sobre o acento: 5,71:1. */
+.contorno-de-ponto-nome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0 2px;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  pointer-events: none;
+}
+
+/* Dito na tela, e não só na configuração: um modo ligado sem nada que o nomeie
+   é o modo que alguém esquece ligado. */
+.contornos-dos-pontos-aviso {
+  position: absolute;
+  right: var(--seele-e1);
+  bottom: var(--seele-e1);
+  margin: 0;
+  padding: 2px var(--seele-e1);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-micro);
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  pointer-events: none;
+}
