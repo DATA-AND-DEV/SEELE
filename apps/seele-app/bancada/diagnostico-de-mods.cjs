@@ -983,6 +983,53 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
     { oculta: true, filhos: 0, guardado: null },
     "desligar o modo deixou contorno na tela ou a escolha guardada",
   );
+
+  // **E não redesenha à toa** (m-7 da revisão ampla do Plano 1D). Desenhar
+  // mexe na camada, e a camada mora no `<body>` que o observador olha: sem o
+  // filtro que ignora a própria camada, cada desenho pedia o seguinte, e o
+  // laço não parava (medido: 120 desenhos num segundo, com a página parada). E
+  // desligar desliga o observador: sem o `disconnect`, cada mudança da página
+  // seguia pedindo um desenho (medido: 15). O modo fica guardado entre
+  // aberturas, e os dois valeriam para toda sessão.
+  const desenhos = await pagina.evaluate(async () => {
+    const esperar = (ms) => new Promise((pronto) => setTimeout(pronto, ms));
+    // A página parada: as configurações fechadas e sem o retrato periódico,
+    // sobra o relógio da barra, uma mudança por segundo.
+    $("tela-server").hidden = true;
+    testTable.snapshot = () => Promise.reject("NotConnected");
+    window.desenhosDosContornos = 0;
+    const desenharDeVerdade = desenharContornos;
+    window.desenharContornos = function contarODesenho(...args) {
+      window.desenhosDosContornos += 1;
+      return desenharDeVerdade.apply(this, args);
+    };
+    ligarModoDeDesenvolvedor(true);
+    await esperar(300);
+    window.desenhosDosContornos = 0;
+    await esperar(1000);
+    const parada = window.desenhosDosContornos;
+    const contornos = document.querySelectorAll(".contorno-de-ponto").length;
+    // Desligado, a página muda trinta vezes, e nada é desenhado.
+    ligarModoDeDesenvolvedor(false);
+    window.desenhosDosContornos = 0;
+    for (let i = 0; i < 30; i += 1) {
+      document.body.dataset.mudanca = String(i);
+      await new Promise((pronto) => requestAnimationFrame(pronto));
+    }
+    return { parada, contornos, desligado: window.desenhosDosContornos };
+  });
+  assert.ok(desenhos.contornos > 0, "o modo ligado não desenhou contorno nenhum: a contagem dos desenhos não mede nada");
+  assert.ok(
+    desenhos.parada <= 2,
+    `com a página parada, o modo de desenvolvedor desenhou ${desenhos.parada} vezes num segundo: desenhar a camada `
+      + "pede outro desenho, e o laço não para",
+  );
+  assert.equal(
+    desenhos.desligado,
+    0,
+    `com o modo desligado, a página mudou trinta vezes e os contornos foram desenhados ${desenhos.desligado} vezes: `
+      + "o observador seguiu de pé",
+  );
   assert.deepEqual(erros, [], `a página lançou erro durante o modo de desenvolvedor: ${erros.join(" | ")}`);
   await pagina.close();
 }
