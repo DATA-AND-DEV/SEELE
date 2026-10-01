@@ -700,11 +700,6 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
 /// - na hora, quando nenhuma pergunta da volta saiu ou a leitura falhou;
 /// - no prazo, quando nada respondeu.
 async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Instant) -> OndeMora {
-    let Some(sonda) = Marca::nova(MARCA_DA_CONSULTA) else {
-        // Inalcançável: a constante é uma marca válida, e
-        // `a_marca_da_consulta_e_valida_e_nao_colide_com_marca_de_morador` o prova.
-        return OndeMora::PontoMudo;
-    };
     let local = if destino.is_ipv4() {
         SocketAddr::from(([0, 0, 0, 0], 0))
     } else {
@@ -716,6 +711,27 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
             tracing::info!(%erro, %destino, "quarto: não abriu socket para perguntar");
             return OndeMora::PontoMudo;
         }
+    };
+    consultar_por(&socket, destino, marcas, ate).await
+}
+
+/// O laço de [`consultar`], num socket já aberto.
+///
+/// Separado só para o teste poder dar o socket. É assim que ele manda a esta
+/// consulta um `AQUI` de outro IP, e prova a chamada de [`aceita_origem`] aqui
+/// dentro: o predicado sozinho tem teste, e a chamada trocada por um no-op
+/// passava em todos (o m1 da revisão final do Plano 1). Ver
+/// `um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta`.
+async fn consultar_por(
+    socket: &tokio::net::UdpSocket,
+    destino: SocketAddr,
+    marcas: &Marcas,
+    ate: tokio::time::Instant,
+) -> OndeMora {
+    let Some(sonda) = Marca::nova(MARCA_DA_CONSULTA) else {
+        // Inalcançável: a constante é uma marca válida, e
+        // `a_marca_da_consulta_e_valida_e_nao_colide_com_marca_de_morador` o prova.
+        return OndeMora::PontoMudo;
     };
     let pedidos = [
         encontro::quem(&marcas.servidor),
@@ -854,10 +870,17 @@ async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Insta
 
 /// Se uma resposta à consulta veio do ponto a que se perguntou.
 ///
-/// É a única barreira entre um `AQUI` de terceiro e a lista de candidatos: o
-/// que o quarto responde entra na frente da escada, e um `AQUI` forjado que
-/// passasse daqui escolheria para onde esta máquina conecta. Quem protege a
-/// conexão depois disso é a impressão digital conferida no aperto de mão.
+/// É a única barreira entre um `AQUI` de terceiro e a resposta da consulta. O
+/// servidor que o quarto responde entra na frente da escada, e a escuta vira o
+/// aviso do `LEVE` ([`bilhete_desta_volta`]). Um `AQUI` forjado que passasse
+/// daqui escolheria para onde esta máquina conecta, e, com as duas marcas
+/// forjadas no mesmo IP, para onde vai o `LEVE`, que sai antes do TLS com o
+/// endereço de quem chega. Quem protege a conexão depois disso é a impressão
+/// digital conferida no aperto de mão; o `LEVE` não tem outra barreira.
+///
+/// A chamada dentro de [`consultar_por`] tem prova própria, com um `AQUI` de
+/// outro IP mandado ao socket da consulta
+/// (`um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta`).
 ///
 /// **Compara o IP, não a porta**, pelo motivo de `aviso_e_do_ponto`, no
 /// anfitrião: quem consegue forjar um endereço de origem forja a porta junto, e
@@ -996,6 +1019,94 @@ mod testes {
             aceita_origem(outra_porta, ponto),
             "a resposta do IP do ponto por outra porta foi recusada: um ponto atrás de um \
              balanceador deixaria de ser ouvido"
+        );
+    }
+
+    #[tokio::test]
+    async fn um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta() {
+        // O m1 da revisão final do Plano 1. O predicado tem teste (logo acima),
+        // e a **chamada** dele dentro da consulta não tinha nenhum: trocada por
+        // um no-op, os testes de `encontro` e do quarto passavam todos, e o
+        // único sinal era um aviso de função sem uso.
+        //
+        // Aqui um terceiro, noutro IP, manda à consulta um `AQUI` com a marca
+        // do servidor antes de o ponto responder. O ponto está em `::1`, e o
+        // terceiro em `127.0.0.1`: é o outro IP desta máquina (o macOS recusa o
+        // `127.0.0.2`). A consulta corre num socket de pilha dupla, o mesmo que
+        // `abrir_socket_local` abre para a batida, e é por ele que o pacote do
+        // IPv4 chega.
+        let Some(dupla) = abrir_socket_local() else {
+            panic!("não abriu o socket local da consulta");
+        };
+        let consulta = tokio::net::UdpSocket::from_std(dupla).unwrap();
+        assert!(
+            consulta.local_addr().unwrap().is_ipv6(),
+            "o socket local caiu para IPv4: sem pilha dupla, o `AQUI` do terceiro não chega à \
+             consulta e este teste não mede nada"
+        );
+        let porta_da_consulta = consulta.local_addr().unwrap().port();
+        let ponto = tokio::net::UdpSocket::bind("[::1]:0").await.unwrap();
+        let onde_ponto = ponto.local_addr().unwrap();
+        let terceiro = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let para_a_consulta = SocketAddr::from(([127, 0, 0, 1], porta_da_consulta));
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+        let forjado = SocketAddr::from(([203, 0, 113, 66], 4_444));
+
+        // O ponto: na primeira pergunta, o terceiro manda o `AQUI` forjado, e
+        // só depois o ponto responde ao `ONDE`. O `QUEM` ele cala: ninguém mora
+        // no quarto.
+        let atender = async {
+            let mut balde = [0_u8; encontro::TAMANHO];
+            let mut forjou = false;
+            loop {
+                let (lidos, de) = ponto.recv_from(&mut balde).await.unwrap();
+                if !forjou {
+                    forjou = true;
+                    terceiro
+                        .send_to(&encontro::aqui(&marcas.servidor, forjado), para_a_consulta)
+                        .await
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                if let Some(encontro::Pedido::Onde { marca }) =
+                    balde.get(..lidos).and_then(encontro::analisar)
+                {
+                    ponto
+                        .send_to(&encontro::aqui(&marca, de), de)
+                        .await
+                        .unwrap();
+                }
+            }
+        };
+        let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
+        let achado = tokio::select! {
+            achado = consultar_por(&consulta, onde_ponto, &marcas, ate) => achado,
+            () = atender => unreachable!("o ponto deste teste não para"),
+        };
+
+        assert_eq!(
+            achado,
+            OndeMora::NinguemMora,
+            "a consulta aceitou um `AQUI` que veio de outro IP que o do ponto ({achado:?}): \
+             qualquer um que acerte a porta efêmera escolhe para onde esta máquina conecta e, \
+             com a marca da escuta, para onde vai o `LEVE`, antes do TLS"
+        );
+
+        // E o caminho do terceiro existe: sem isto, um `NinguemMora` também
+        // sairia de um pacote que nunca chegou, e o teste passaria sem medir.
+        terceiro
+            .send_to(&encontro::aqui(&marcas.servidor, forjado), para_a_consulta)
+            .await
+            .unwrap();
+        let mut balde = [0_u8; encontro::TAMANHO];
+        let chegou =
+            tokio::time::timeout(Duration::from_secs(1), consulta.recv_from(&mut balde)).await;
+        assert!(
+            matches!(chegou, Ok(Ok((_, de))) if de.ip() != onde_ponto.ip()),
+            "o `AQUI` do terceiro não chega ao socket da consulta ({chegou:?}): este teste não \
+             mede a barreira, e o `NinguemMora` de cima não prova nada"
         );
     }
 
