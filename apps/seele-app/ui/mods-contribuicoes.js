@@ -475,8 +475,14 @@ class RegistroDeContribuicoes {
    *
    * Sem isto, «Usar apresentação padrão» seria um botão para um problema que a
    * pessoa não tem como ver. O §6 pede os dois juntos.
+   *
+   * @param {Map<string, string>} [preferidos] A escolha desta máquina **por
+   *   ponto**, neste servidor: `""`, `NATIVO` ou um `id`.
+   * @param {(id: string) => boolean} [estaDePe] Se o MOD de um `id` está
+   *   carregado — o que separa `ausente` de `escolhidoNaoSubstitui`, como em
+   *   `quemPinta`. Sem ela, nenhum está.
    */
-  resumo(preferidos = new Map()) {
+  resumo(preferidos = new Map(), estaDePe = null) {
     const linhas = [];
     for (const [ponto, porAlvo] of this.porPonto) {
       const regra = PONTOS_DE_CONTRIBUICAO[ponto];
@@ -487,9 +493,14 @@ class RegistroDeContribuicoes {
       const disputa = regra.modos.includes("substituir")
         ? this.escolherSubstituicao(ponto, "", escolha)
         : { escolhida: null, preteridas: [], nativa: false };
+      const semCandidata = disputa.ausente ?? "";
+      const escolhidoDePe = Boolean(semCandidata) && estaDePe?.(semCandidata) === true;
       linhas.push({
         ponto,
         mods,
+        // Quem pede para substituir este lugar — e só a estes a gestão oferece
+        // «usar»: escolher quem só acrescenta faz o SEELE desenhar.
+        substituem: [...new Set(todas.filter((c) => c.modo === "substituir").map((c) => c.mod))],
         quantas: todas.length,
         escolhido: disputa.escolhida?.mod ?? "",
         preteridos: [...new Set(disputa.preteridas.map((c) => c.mod))],
@@ -504,7 +515,11 @@ class RegistroDeContribuicoes {
         // O provedor escolhido que não está mais de pé. A escolha continua
         // registrada — desligar um MOD não é desescolhê-lo —, e a tela precisa
         // poder dizer isso em vez de mostrar «automático».
-        ausente: disputa.ausente ?? "",
+        ausente: escolhidoDePe ? "" : semCandidata,
+        // E o escolhido que **está** de pé e não tem candidata aqui: revogou o
+        // que tinha, ou só acrescenta. Dizer que ele não está de pé mandaria
+        // quem escreve o MOD depurar uma carga que não falhou.
+        escolhidoNaoSubstitui: escolhidoDePe ? semCandidata : "",
       });
     }
     return linhas.sort((a, b) => a.ponto.localeCompare(b.ponto));
@@ -527,12 +542,18 @@ class RegistroDeContribuicoes {
    * - `perderam` — quem pediu para substituir e não vence em **nenhum**;
    * - `nativa` e `ausente` — o ponto **inteiro**, e só quando nenhum alvo tem
    *   MOD que o substitua: `nativa` diz que foi a escolha desta máquina (o
-   *   `NATIVO`, ou um escolhido que não está de pé) que deixou o SEELE
-   *   desenhar, e `ausente` nomeia o escolhido que não está de pé em alvo
-   *   nenhum. Quando algum alvo tem quem o desenhe, os dois ficam `false` e
-   *   `""`: um avatar escolhido que desenha a pessoa 7 e não tem candidata na
-   *   12 está de pé, e dizer que ele sumiu esconderia a pessoa 7. Esse caso
-   *   parcial é dito por `substitui`, `perderam` e o campo seguinte;
+   *   `NATIVO`, ou um escolhido sem candidata) que deixou o SEELE desenhar, e
+   *   `ausente` nomeia o escolhido sem candidata em alvo nenhum **que não está
+   *   de pé** (`estaDePe`). Quando algum alvo tem quem o desenhe, os dois
+   *   ficam `false` e `""`: um avatar escolhido que desenha a pessoa 7 e não
+   *   tem candidata na 12 está de pé, e dizer que ele sumiu esconderia a
+   *   pessoa 7. Esse caso parcial é dito por `substitui`, `perderam` e
+   *   `oSeeleDesenhaOutros`;
+   * - `escolhidoNaoSubstitui` — o escolhido sem candidata em alvo nenhum que
+   *   **está** de pé: ele revogou o que tinha aqui, só acrescenta aqui, ou —
+   *   no avatar, que herda a escolha do cartão — desenha cartões e não
+   *   avatares. É o `ausente` da disputa, que só quer dizer «sem candidata»,
+   *   separado do que não está de pé (I-3 da revisão ampla do Plano 1D);
    * - `oSeeleDesenhaOutros` — o caso **parcial**: algum alvo vence, e algum
    *   alvo em que alguém pediu para substituir ficou sem vencedora, porque a
    *   escolha desta máquina não tem candidata ali. No exemplo acima, a pessoa
@@ -543,9 +564,11 @@ class RegistroDeContribuicoes {
    *
    * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
    * @param {string} preferido A escolha desta máquina: `""`, `NATIVO` ou um `id`.
+   * @param {(id: string) => boolean} [estaDePe] Se o MOD de um `id` está
+   *   carregado. Sem ela, nenhum está, como o registro sozinho sabe.
    * @returns {object|null} `null` para um ponto que a API não conhece.
    */
-  quemPinta(ponto, preferido = "") {
+  quemPinta(ponto, preferido = "", estaDePe = null) {
     const regra = Object.hasOwn(PONTOS_DE_CONTRIBUICAO, ponto)
       ? PONTOS_DE_CONTRIBUICAO[ponto]
       : null;
@@ -569,15 +592,18 @@ class RegistroDeContribuicoes {
         if (disputa.ausente) ausente = disputa.ausente;
       }
     }
+    // Do ponto inteiro: um alvo que tem quem o desenhe desmente os dois.
+    const semCandidata = venceram.size === 0 ? ausente : "";
+    const escolhidoDePe = Boolean(semCandidata) && estaDePe?.(semCandidata) === true;
     return {
       ponto,
       substituivel,
       substitui: [...venceram],
       perderam: [...pediram].filter((mod) => !venceram.has(mod)),
       acrescentam: [...new Set(todas.filter((c) => c.modo === "adicionar").map((c) => c.mod))],
-      // Do ponto inteiro: um alvo que tem quem o desenhe desmente os dois.
       nativa: nativa && venceram.size === 0,
-      ausente: venceram.size === 0 ? ausente : "",
+      ausente: escolhidoDePe ? "" : semCandidata,
+      escolhidoNaoSubstitui: escolhidoDePe ? semCandidata : "",
       // E o que eles calam quando algum alvo vence: um alvo disputado só fica
       // sem vencedora pela escolha desta máquina (`disputa.nativa`).
       oSeeleDesenhaOutros: nativa && venceram.size > 0,

@@ -552,6 +552,90 @@ async function quemPintaCadaLugar(navegador, servidor) {
   await pagina.close();
 }
 
+/**
+ * **«Não está de pé» só de quem não está carregado** (I-3 da revisão ampla do
+ * Plano 1D). A disputa diz `ausente` quando o escolhido não tem candidata no
+ * lugar, e a aba traduzia isso sempre por «não está de pé» — de um MOD de pé,
+ * desenhando outro lugar na mesma tela. Os três casos medidos na revisão, na
+ * página: o avatar que herda a escolha do cartão (o comum), o escolhido que
+ * revogou o cartão e segue rodando, e o escolhido que só acrescenta.
+ */
+async function oEscolhidoDePeNaoEDitoComoQuemNaoEstaDePe(navegador, servidor) {
+  const { pagina, erros } = await abrirASessao(navegador, servidor);
+  await pagina.evaluate(() => {
+    const foto = () => {
+      const tela = document.createElement("canvas");
+      tela.width = tela.height = 8;
+      return tela.toDataURL();
+    };
+    testTable.ler_imagem_mod = () => Promise.resolve({ papel: "imagem", uri: foto(), bytes: 64 });
+    const a = instancia("mod/a");
+    const b = instancia("mod/b");
+    instancia("mod/c");
+    const avatar = (alvo) => ({
+      ponto: "pessoa.avatar", modo: "substituir", alvo,
+      conteudo: { doServidor: { canal: 1, campo: "image", pedido: { transporte: "volume", path: `volume:${alvo}` } } },
+    });
+    window.cartaoDeA = contribuicoesDosMods.registrar({ id: "mod/a" }, a, {
+      ponto: "pessoa.cartao", modo: "substituir", prioridade: 10, conteudo: [{ forma: "texto", dentro: "A" }],
+    });
+    contribuicoesDosMods.registrar({ id: "mod/b" }, b, {
+      ponto: "pessoa.cartao", modo: "substituir", prioridade: 5, conteudo: [{ forma: "texto", dentro: "B" }],
+    });
+    contribuicoesDosMods.registrar({ id: "mod/b" }, b, avatar("1"));
+    contribuicoesDosMods.registrar({ id: "mod/b" }, b, avatar("2"));
+    desenhar(testTable.snapshot);
+    $("tela-server").hidden = false;
+    $("painel-mods").hidden = false;
+  });
+  await pagina.click("#mods-aba-diagnostico");
+
+  // A herança: o cartão é de mod/a por escolha, e o avatar segue essa escolha.
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", "mod/a"));
+  await esperarALinha(
+    pagina,
+    "pessoa.avatar",
+    /a escolha de «O cartão de cada pessoa» é mod\/a, que não desenha avatares: o SEELE desenha/,
+    "o avatar herdou a escolha do cartão, mod/a, que está de pé e não desenha avatares, e a aba não disse isso",
+  );
+  await esperarALinha(pagina, "pessoa.cartao", /desenhado por mod\/a/, "o cartão de mod/a, escolhido, não foi dito como quem desenha");
+
+  // O revogado: mod/a tira o cartão e continua rodando.
+  await pagina.evaluate(() => contribuicoesDosMods.revogar(cartaoDeA.handle));
+  await esperarALinha(
+    pagina,
+    "pessoa.cartao",
+    /você escolheu mod\/a, que está de pé e não substitui este lugar: o SEELE desenha/,
+    "mod/a, escolhido, revogou o cartão e continua de pé, e a aba não disse isso",
+  );
+
+  // Quem só acrescenta: mod/c põe um selo no cartão da Lia, e é o escolhido.
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.registrar({ id: "mod/c" }, modsCarregados.get("mod/c"), {
+      ponto: "pessoa.cartao", modo: "adicionar", alvo: "2", conteudo: [{ forma: "texto", dentro: "selo de C" }],
+    });
+    escolherApresentacao("pessoa.cartao", "mod/c");
+  });
+  await esperarALinha(
+    pagina,
+    "pessoa.cartao",
+    /você escolheu mod\/c, que está de pé e não substitui este lugar: o SEELE desenha.*acrescentam: mod\/c/,
+    "mod/c, escolhido, só acrescenta ao cartão e está de pé, e a aba não disse isso",
+  );
+  const naoEstaDePe = await pagina.evaluate(() => [...document.querySelectorAll("#lista-quem-pinta li")]
+    .map((li) => li.textContent)
+    .filter((texto) => texto.includes("não está de pé")));
+  assert.deepEqual(
+    naoEstaDePe,
+    [],
+    `com mod/a, mod/b e mod/c de pé, a aba disse de algum deles que não está de pé: ${naoEstaDePe.join(" || ")}`,
+  );
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
+
+  assert.deepEqual(erros, [], `a página lançou erro com o escolhido de pé: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
 // ---------------------------------------------------------------------------
 // «Quem desenha o que», na gestão de MODs.
 // ---------------------------------------------------------------------------
@@ -620,6 +704,45 @@ async function quemDesenhaOQueDizAEscolhaDestaMaquina(navegador, servidor) {
   assert.ok(
     linha.botoes.includes("DECIDIR AUTOMATICAMENTE") && !linha.botoes.includes("USAR APRESENTAÇÃO DO SEELE"),
     `com o SEELE escolhido, a gestão não ofereceu voltar ao automático, ou ofereceu o que já vale: ${linha.botoes.join(", ")}`,
+  );
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
+
+  // **«Usar» só quem pode desenhar o lugar** (I-3 da revisão ampla do Plano
+  // 1D). mod/c só acrescenta ao cartão: escolhê-lo não o faz desenhar nada, e
+  // o SEELE passa a desenhar. mod/d também só acrescenta, mas dá cartões pela
+  // API 3 — e escolhê-lo é o que faz os cartões dele valerem sozinhos.
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.registrar({ id: "mod/c" }, instancia("mod/c"), {
+      ponto: "pessoa.cartao", modo: "adicionar", alvo: "2", conteudo: [{ forma: "texto", dentro: "selo de C" }],
+    });
+    const d = instancia("mod/d");
+    contribuicoesDosMods.registrar({ id: "mod/d" }, d, {
+      ponto: "pessoa.cartao", modo: "adicionar", alvo: "2", conteudo: [{ forma: "texto", dentro: "selo de D" }],
+    });
+    darCartoesDoMod({ id: "mod/d", hash: "mod-d" }, d, { 2: [{ forma: "texto", dentro: "cartão de D" }] });
+  });
+  linha = await linhaDaGestao(pagina, cartao);
+  assert.ok(
+    !linha.botoes.includes("USAR mod/c") && linha.botoes.includes("USAR mod/d") && linha.botoes.includes("USAR mod/b"),
+    "a gestão ofereceu «usar» a um MOD que só acrescenta ao cartão, ou deixou de oferecer a quem o substitui ou "
+      + `dá cartões pela API 3: ${linha.botoes.join(", ")}`,
+  );
+
+  // E quem foi escolhido, está de pé e não substitui o lugar não é dito como
+  // quem não está de pé — esse é só o escolhido que não está carregado.
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", "mod/c"));
+  linha = await linhaDaGestao(pagina, cartao);
+  assert.equal(
+    linha.estado,
+    "você escolheu mod/c, que está de pé e não substitui este lugar — o SEELE desenha",
+    `mod/c, escolhido, está de pé e só acrescenta, e a gestão disse outra coisa: ${linha.estado}`,
+  );
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", "mod/z"));
+  linha = await linhaDaGestao(pagina, cartao);
+  assert.equal(
+    linha.estado,
+    "você escolheu mod/z, e ele não está de pé agora — o SEELE desenha",
+    `mod/z, escolhido, não está carregado, e a gestão não disse que ele não está de pé: ${linha.estado}`,
   );
   await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
 
@@ -1264,6 +1387,7 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
+  oEscolhidoDePeNaoEDitoComoQuemNaoEstaDePe,
   quemDesenhaOQueDizAEscolhaDestaMaquina,
   oModoDeDesenvolvedorContornaSemTomarNada,
   oSomDeModTocaPorWebAudioSobACspDoProduto,

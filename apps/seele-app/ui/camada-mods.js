@@ -698,7 +698,7 @@ function desenharApresentacoes() {
   const preferidos = new Map(
     Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => [ponto, modPreferidoPara(ponto)]),
   );
-  const linhas = contribuicoesDosMods.resumo(preferidos);
+  const linhas = contribuicoesDosMods.resumo(preferidos, (id) => modsCarregados.has(id));
   secao.hidden = linhas.length === 0;
   if (!linhas.length) {
     lista.replaceChildren();
@@ -716,11 +716,13 @@ function desenharApresentacoes() {
     // funcionado.
     const estado = linha.ausente
       ? `você escolheu ${linha.ausente}, e ele não está de pé agora — o SEELE desenha`
-      : linha.nativa
-        ? "o SEELE desenha; nenhum MOD substitui este lugar"
-        : linha.escolhido
-          ? `apresentado por ${linha.escolhido}${linha.automatica ? " (escolha automática)" : ""}`
-          : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`;
+      : linha.escolhidoNaoSubstitui
+        ? `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar — o SEELE desenha`
+        : linha.nativa
+          ? "o SEELE desenha; nenhum MOD substitui este lugar"
+          : linha.escolhido
+            ? `apresentado por ${linha.escolhido}${linha.automatica ? " (escolha automática)" : ""}`
+            : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`;
     texto.append(
       elemento("span", "mods-id", NOMES_DOS_PONTOS[linha.ponto] ?? linha.ponto),
       elemento("span", "mods-versao", estado),
@@ -738,8 +740,17 @@ function desenharApresentacoes() {
     item.append(texto);
 
     const botoes = elemento("div", "mods-linha-botoes");
+    // **«Usar» só quem pode desenhar este lugar.** Escolher um MOD que só
+    // acrescenta não o faz desenhar nada: o SEELE desenha, e o botão mentiria.
+    // A exceção é o cartão, em que um MOD da API 3 desenha pelos cartões dele
+    // (`SeeleUI.cartoes`) — e escolhê-lo é o que os faz valer sozinhos
+    // (`modsDeCartaoQueValem`).
+    const podemDesenhar = new Set(linha.substituem);
+    if (linha.ponto === "pessoa.cartao") {
+      for (const id of cartoesDosMods.keys()) podemDesenhar.add(id);
+    }
     for (const candidato of linha.mods) {
-      if (candidato === linha.escolhido) continue;
+      if (candidato === linha.escolhido || !podemDesenhar.has(candidato)) continue;
       const usar = elemento("button", "botao-fantasma", `USAR ${candidato}`);
       usar.type = "button";
       usar.addEventListener("click", () => escolherApresentacao(linha.ponto, candidato));
@@ -830,7 +841,7 @@ function quemPintaCadaPonto() {
   return Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => {
     const preferencia = preferenciaConsultadaPara(ponto);
     return {
-      ...contribuicoesDosMods.quemPinta(ponto, preferencia),
+      ...contribuicoesDosMods.quemPinta(ponto, preferencia, (id) => modsCarregados.has(id)),
       preferencia,
       herdada: ponto === "pessoa.avatar" && !modPreferidoPara(ponto) && preferencia !== "",
       antigos: modsDoCaminhoAntigo(ponto),
@@ -900,6 +911,13 @@ function frasesDeQuemPinta(linha) {
     const osOutros = linha.oSeeleDesenhaOutros ? "; o SEELE desenha os outros" : "";
     if (linha.ausente) {
       frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha`);
+    } else if (linha.escolhidoNaoSubstitui) {
+      // De pé, e sem candidata aqui: o avatar que herda a escolha do cartão,
+      // o escolhido que revogou o que tinha, o que só acrescenta.
+      frases.push(linha.herdada
+        ? `a escolha de «${NOMES_DOS_PONTOS["pessoa.cartao"]}» é ${linha.escolhidoNaoSubstitui}, que não desenha `
+          + "avatares: o SEELE desenha"
+        : `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar: o SEELE desenha`);
     } else if (linha.nativa) {
       frases.push("o SEELE desenha, por escolha desta máquina");
     } else if (linha.substitui.length > 1) {

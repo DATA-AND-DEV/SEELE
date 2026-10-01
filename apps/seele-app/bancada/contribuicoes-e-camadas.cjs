@@ -1312,6 +1312,77 @@ function anotando(...anotadas) {
   aba.preferencias.clear();
 }
 
+// **«Não está de pé» só de quem não está de pé** (I-3 da revisão ampla do
+// Plano 1D). `ausente`, na disputa, quer dizer só que o escolhido não tem
+// candidata neste lugar; a aba o traduzia sempre por «não está de pé», e quem
+// escreve o MOD ia depurar uma carga que não falhou. Os três casos em que o
+// escolhido está carregado, cada um num registro novo:
+{
+  const caso = "M1 · a aba · o escolhido";
+  const cenario = (montar) => {
+    const aba = abaDoDiagnostico();
+    for (const id of ["mod/a", "mod/b"]) aba.modsCarregados.set(id, {});
+    montar(aba.contribuicoesDosMods, aba.preferencias);
+    return (ponto) => aba.frasesDeQuemPinta(aba.quemPintaCadaPonto().find((l) => l.ponto === ponto)).join(" | ");
+  };
+  const avatar = (alvo) => ({ ponto: "pessoa.avatar", modo: "substituir", alvo, conteudo: { doServidor: { canal: 1 } } });
+
+  // A herança: o avatar segue a escolha do cartão, e o escolhido do cartão
+  // desenha cartões e não avatares.
+  const heranca = cenario((registro, preferencias) => {
+    registro.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+    registro.registrar({ id: "mod/b" }, null, avatar("1"));
+    registro.registrar({ id: "mod/b" }, null, avatar("2"));
+    preferencias.set("pessoa.cartao", "mod/a");
+  });
+  confere(
+    caso,
+    heranca("pessoa.avatar").startsWith(
+      "a escolha de «O cartão de cada pessoa» é mod/a, que não desenha avatares: o SEELE desenha |",
+    ) && heranca("pessoa.cartao").startsWith("desenhado por mod/a |"),
+    "o avatar herdou a escolha do cartão, mod/a, que está de pé e não desenha avatares, e a aba não disse isso — "
+      + `ou disse que mod/a não está de pé: avatar «${heranca("pessoa.avatar")}», cartão «${heranca("pessoa.cartao")}»`,
+  );
+
+  // O escolhido revogou a contribuição e continua rodando.
+  const revogado = cenario((registro, preferencias) => {
+    const { handle } = registro.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+    registro.registrar({ id: "mod/b" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+    preferencias.set("pessoa.cartao", "mod/a");
+    registro.revogar(handle, null);
+  });
+  confere(
+    caso,
+    revogado("pessoa.cartao").startsWith("você escolheu mod/a, que está de pé e não substitui este lugar: o SEELE desenha |"),
+    `mod/a, escolhido, revogou o cartão e continua de pé, e a aba disse outra coisa: ${revogado("pessoa.cartao")}`,
+  );
+
+  // O escolhido só acrescenta naquele lugar.
+  const acrescenta = cenario((registro, preferencias) => {
+    registro.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2" });
+    registro.registrar({ id: "mod/b" }, null, { ponto: "pessoa.cartao", modo: "adicionar", alvo: "2" });
+    preferencias.set("pessoa.cartao", "mod/b");
+  });
+  confere(
+    caso,
+    acrescenta("pessoa.cartao").startsWith(
+      "você escolheu mod/b, que está de pé e não substitui este lugar: o SEELE desenha | acrescentam: mod/b |",
+    ),
+    `mod/b, escolhido, só acrescenta ao cartão e está de pé, e a aba disse outra coisa: ${acrescenta("pessoa.cartao")}`,
+  );
+
+  // E quem não está carregado continua dito como quem não está de pé.
+  const desligado = cenario((registro, preferencias) => {
+    registro.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+    preferencias.set("pessoa.cartao", "mod/z");
+  });
+  confere(
+    caso,
+    desligado("pessoa.cartao").startsWith("você escolheu mod/z, e ele não está de pé agora: o SEELE desenha |"),
+    `mod/z, escolhido, não está carregado, e a aba não disse que ele não está de pé: ${desligado("pessoa.cartao")}`,
+  );
+}
+
 // ------------------------------------- R3 · os pontos aceitam o que aplicam
 
 {
