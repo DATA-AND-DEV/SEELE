@@ -924,9 +924,18 @@ contexto.cartoesDosMods = new Map();
   // escolher «usar apresentação do SEELE» devolvia o nome nativo **e deixava o
   // cartão do MOD logo abaixo**. A validação nativa de 20/09/2026 observou.
   const base = ler("base.js");
-  const inicio = base.indexOf("function cartoesDaPessoa(");
-  const fim = base.indexOf("\n}", inicio) + 2;
-  confere("N4 · o recorte", inicio >= 0, "`cartoesDaPessoa` mudou de forma e o recorte não a achou");
+  // **As duas funções, e não uma.** Desde a fase M1 a regra mora em
+  // `modsDeCartaoQueValem`, que «quem pinta cada lugar» também lê, e
+  // `cartoesDaPessoa` só desenha por ela. Recortar só a segunda mediria uma
+  // função que chama o que não está no recorte.
+  const inicio = base.indexOf("function modsDeCartaoQueValem(");
+  const desenha = base.indexOf("function cartoesDaPessoa(", inicio);
+  const fim = base.indexOf("\n}", desenha) + 2;
+  confere(
+    "N4 · o recorte",
+    inicio >= 0 && desenha > inicio,
+    "`modsDeCartaoQueValem` e `cartoesDaPessoa` deixaram de ser vizinhas, e o recorte não as achou",
+  );
   vm.runInContext(base.slice(inicio, fim), contexto);
 
   const doA = new No("div", "");
@@ -1207,6 +1216,14 @@ contexto.cartoesDosMods = new Map();
           anotarRecusa: (texto) => ditas.push(String(texto)),
           carregarMidiaDoServidor: carregar,
         });
+        // **O aviso à gestão mora em `base.js`, e não no recorte.** Desde a fase
+        // M1 da casca, o retrato diz em que pé a carga está e avisa quem desenha
+        // «quem pinta cada lugar»; aqui o aviso só é contado.
+        let avisosDeMidia = 0;
+        const avisarDeAntes = contexto.avisarQueAMidiaMudou;
+        contexto.avisarQueAMidiaMudou = () => {
+          avisosDeMidia += 1;
+        };
         try {
           confere("R4e · avatar", contexto.avatarContribuido(pessoa) === null,
             "o avatar devolveu uma imagem antes de ela chegar");
@@ -1214,7 +1231,18 @@ contexto.cartoesDosMods = new Map();
         } finally {
           contexto.contribuicoesDosMods = registroDeAntes;
           contexto.donoDaRegiao = donoDeAntes;
+          contexto.avisarQueAMidiaMudou = avisarDeAntes;
         }
+        // Com o motivo **do caso**, e não com um só: a recusa da janela diz «não
+        // é imagem», e a do Rust diz o motivo que ele deu.
+        confere(
+          "R4e · a gestão",
+          contribuicao.retrato?.situacao === "recusada"
+            && String(contribuicao.retrato?.motivo).includes(motivo)
+            && avisosDeMidia >= 2,
+          `o retrato recusado (${motivo}) não disse em que pé ficou, ou não avisou a gestão: `
+          + `${JSON.stringify(contribuicao.retrato)} (${avisosDeMidia} aviso(s))`,
+        );
         confere(
           "R4e · avatar",
           ditas.some((texto) => texto.includes(`avatar da pessoa ${pessoa}`) && texto.includes(motivo)),

@@ -281,6 +281,7 @@ jobs:
       - run: node apps/seele-app/bancada/conversa-com-estado.cjs
       - run: node apps/seele-app/bancada/qualidade-da-voz.cjs
       - run: node apps/seele-app/bancada/avatares-do-mod.cjs
+      - run: node apps/seele-app/bancada/diagnostico-de-mods.cjs
       # **Estas três nunca rodaram em lugar nenhum.** Entraram em 21/09/2026
       # (`ajustes-v013.cjs` e `gif-na-conversa.cjs` em `970cb67`,
       # `escolha-de-versao-de-mod.cjs` em `0018e71`), e nenhum workflow nem a

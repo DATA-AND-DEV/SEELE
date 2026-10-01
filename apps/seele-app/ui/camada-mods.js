@@ -627,6 +627,24 @@ function esquecerPreferenciasLidas() {
 }
 
 /**
+ * A preferência que a tela **de fato** consulta para um ponto.
+ *
+ * `pessoa.avatar` não tem linha própria em QUEM DESENHA O QUE, e herda a de
+ * `pessoa.cartao` quando não há escolha dele. `avatarContribuido`, em
+ * `base.js`, decide por esta função, e «quem pinta cada lugar» a lê: uma
+ * regra, e não duas cópias dela.
+ *
+ * @returns {string} `""` (automático), `":nativo"` (o SEELE desenha) ou o `id`
+ *   de um MOD.
+ */
+function preferenciaConsultadaPara(ponto) {
+  if (ponto === "pessoa.avatar") {
+    return modPreferidoPara("pessoa.avatar") || modPreferidoPara("pessoa.cartao");
+  }
+  return modPreferidoPara(ponto);
+}
+
+/**
  * Escolhe quem apresenta um ponto: um MOD, o nativo, ou o automático.
  *
  * **Três valores, e não dois** — R5 da revisão de 20/09/2026. «"Usar

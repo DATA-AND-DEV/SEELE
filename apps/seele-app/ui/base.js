@@ -729,6 +729,24 @@ function desenharARegiaoDoMod(mod, instancia, conteudo) {
 }
 
 /**
+ * A mídia de alguma montagem de MOD mudou de estado.
+ *
+ * Um evento na janela, e não uma chamada: quem escuta é a gestão de MODs
+ * («quem pinta cada lugar»), que carrega depois deste arquivo e só redesenha
+ * quando está à vista. **Um aviso por volta**, por mais mídias que mudem nela:
+ * vinte retratos chegando juntos são um redesenho, e não vinte.
+ */
+let midiaMudouAgendada = false;
+function avisarQueAMidiaMudou() {
+  if (midiaMudouAgendada) return;
+  midiaMudouAgendada = true;
+  queueMicrotask(() => {
+    midiaMudouAgendada = false;
+    globalThis.dispatchEvent(new CustomEvent("seele-mods-midia"));
+  });
+}
+
+/**
  * Quem a região chama, e o que ela tem direito de fazer.
  *
  * As três perguntas do §5 do contrato numa função só: esta instância ainda é a
@@ -916,6 +934,13 @@ function donoDaRegiao(mod, instancia) {
       if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
       return midia;
     },
+    /**
+     * A mídia de alguma montagem deste MOD mudou de estado.
+     *
+     * Só para o diagnóstico: sem este aviso, «quem pinta cada lugar» diria
+     * «carregando» para sempre sobre uma imagem que já chegou.
+     */
+    midiaMudou: avisarQueAMidiaMudou,
   };
 }
 
@@ -984,35 +1009,42 @@ function darCartoesDoMod(mod, instancia, cartoes) {
 }
 
 /**
- * Os cartões desta pessoa, na ordem em que os MODs os declararam.
+ * Os MODs cujos cartões da API 3 (`SeeleUI.cartoes`) entram na lista, pela
+ * escolha de apresentação de `pessoa.cartao`.
  *
- * Devolve os **nós de verdade**, e não cópias: mover um nó já montado preserva
- * o que ele segura — um `<audio>` recriado a cada retrato recomeçaria o som, e
- * um `<img>` recriado piscaria a cada quatro segundos.
+ * **A regra, num lugar só.** A validação nativa de 20/09/2026: «usar
+ * apresentação do SEELE» devolvia o nome e o diagnóstico nativos **e mantinha
+ * o cartão do MOD logo abaixo**. A preferência alcançava a substituição —
+ * `escolherSubstituicao` — e não alcançava `SeeleUI.cartoes`, que é o outro
+ * caminho do mesmo provedor para o mesmo ponto. Preservar a compatibilidade da
+ * API 3 é executar o caminho antigo, não ignorar o que a pessoa escolheu:
+ *
+ * - nativo explícito: nenhum cartão de MOD entra;
+ * - um provedor escolhido: só os dele;
+ * - automático: todos, na ordem em que declararam.
+ *
+ * `cartoesDaPessoa` desenha por ela, e «quem pinta cada lugar» a lê: duas
+ * cópias de uma regra de disputa são duas respostas no dia em que uma mudar.
  */
-function cartoesDaPessoa(id) {
-  // **A escolha de apresentação vale aqui também.**
-  //
-  // A validação nativa de 20/09/2026: «usar apresentação do SEELE» devolvia o
-  // nome e o diagnóstico nativos **e mantinha o cartão do MOD logo abaixo**. A
-  // preferência alcançava a substituição — `escolherSubstituicao` — e não
-  // alcançava `SeeleUI.cartoes`, que é o outro caminho do mesmo provedor para
-  // o mesmo ponto.
-  //
-  // Preservar a compatibilidade da API 3 é executar o caminho antigo, não
-  // ignorar o que a pessoa escolheu. A regra é uma só, e ela é do ponto:
-  //
-  // - nativo explícito: nenhum cartão de MOD entra;
-  // - um provedor escolhido: só os dele;
-  // - automático: todos, como sempre.
+function modsDeCartaoQueValem() {
   const escolha = typeof modPreferidoPara === "function"
     ? modPreferidoPara("pessoa.cartao")
     : "";
   if (escolha === NATIVO) return [];
+  return [...cartoesDosMods.keys()].filter((quem) => !escolha || quem === escolha);
+}
+
+/**
+ * Os cartões desta pessoa, na ordem em que os MODs os declararam.
+ *
+ * Devolve os **nós de verdade**, e não cópias: mover um nó já montado preserva
+ * o que ele segura — um som recriado a cada retrato recomeçaria, e um `<img>`
+ * recriado piscaria a cada quatro segundos.
+ */
+function cartoesDaPessoa(id) {
   const achados = [];
-  for (const [quem, regiao] of cartoesDosMods) {
-    if (escolha && quem !== escolha) continue;
-    const cartao = regiao.cartaoDe(id);
+  for (const quem of modsDeCartaoQueValem()) {
+    const cartao = cartoesDosMods.get(quem)?.cartaoDe(id);
     if (cartao) achados.push(cartao);
   }
   return achados;
@@ -1088,10 +1120,15 @@ contribuicoesDosMods.aoMudar(() => {
  * Avatar de servidor compartilhado por todas as aparições da mesma pessoa.
  * A origem vem do MOD; os bytes passam pela ponte de mídia do produto.
  * Uma contribuição carrega uma vez e perde o cache junto com a instância.
+ *
+ * O retrato guarda também **em que pé a carga está** — `situacao` e `motivo`
+ * —, para «quem pinta cada lugar» dizer que o avatar de um MOD está
+ * carregando, chegou ou foi recusado. A preferência que decide quem desenha é
+ * `preferenciaConsultadaPara`, a mesma que a gestão de MODs lê.
  */
 function avatarContribuido(pessoaId) {
-  const preferido = typeof modPreferidoPara === "function"
-    ? modPreferidoPara("pessoa.avatar") || modPreferidoPara("pessoa.cartao")
+  const preferido = typeof preferenciaConsultadaPara === "function"
+    ? preferenciaConsultadaPara("pessoa.avatar")
     : "";
   const contribuicao = contribuicoesDosMods.escolherSubstituicao(
     "pessoa.avatar", String(pessoaId), preferido,
@@ -1100,14 +1137,16 @@ function avatarContribuido(pessoaId) {
   const dono = donoDaRegiao({ id: contribuicao.mod }, contribuicao.instancia);
   if (!dono.podeFalar()) return null;
   if (contribuicao.retrato) return contribuicao.retrato.uri;
-  const estado = { uri: null, bytes: 0, cancelado: false };
+  const estado = { uri: null, bytes: 0, cancelado: false, situacao: "carregando", motivo: "" };
   contribuicao.retrato = estado;
   contribuicao.soltarMontagem = () => {
     estado.cancelado = true;
     estado.uri = null;
     estado.bytes = 0;
     contribuicao.retrato = null;
+    avisarQueAMidiaMudou();
   };
+  avisarQueAMidiaMudou();
   const fonte = contribuicao.conteudo.doServidor;
   dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes")
     .then((midia) => {
@@ -1122,11 +1161,16 @@ function avatarContribuido(pessoaId) {
       }
       estado.uri = midia.uri;
       estado.bytes = midia.bytes;
+      estado.situacao = "pronta";
+      avisarQueAMidiaMudou();
       redesenharAvatares();
     })
     .catch((falha) => {
       if (estado.cancelado || !dono.podeFalar()) return;
       const porque = motivoDaFalha(falha);
+      estado.situacao = "recusada";
+      estado.motivo = porque;
+      avisarQueAMidiaMudou();
       dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
       // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
       // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
@@ -1268,6 +1312,48 @@ function conteudoDasContribuicoes(ponto, alvo = "") {
     if (no) nos.push(no);
   }
   return nos;
+}
+
+/**
+ * Em que pé está a mídia de tudo o que foi montado para um ponto — só leitura.
+ *
+ * Para «quem pinta cada lugar», na gestão de MODs: soma o que cada renderer de
+ * contribuição anotou (`midiasAnotadas`, em `mods-regiao.js`), o retrato de
+ * avatar, que carrega por conta própria (`avatarContribuido`), e — em
+ * `pessoa.cartao` — os cartões da API 3, que moram na região do MOD.
+ *
+ * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
+ * @returns {{ carregando: number, pronta: number, recusada: number, motivos: string[] }}
+ *   `motivos` traz até três, sem repetir, cada um com o MOD na frente.
+ */
+function midiasDoPonto(ponto) {
+  const soma = { carregando: 0, pronta: 0, recusada: 0, motivos: [] };
+  const contar = (mod, anotada) => {
+    if (anotada.situacao === "carregando") {
+      soma.carregando += 1;
+    } else if (anotada.situacao === "pronta") {
+      soma.pronta += 1;
+    } else if (anotada.situacao === "recusada") {
+      soma.recusada += 1;
+      const texto = `${mod}: ${anotada.motivo || "sem motivo dito"}`;
+      if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
+    }
+  };
+  for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
+    if (contribuicao.ponto !== ponto) continue;
+    if (contribuicao.retrato) contar(contribuicao.mod, contribuicao.retrato);
+    for (const montagem of contribuicao.montadas?.values() ?? []) {
+      for (const anotada of montagem.renderer.midiasAnotadas()) contar(contribuicao.mod, anotada);
+    }
+  }
+  if (ponto === "pessoa.cartao") {
+    for (const [mod, regiao] of cartoesDosMods) {
+      for (const anotada of regiao.midiasAnotadas()) {
+        if (anotada.cartao) contar(mod, anotada);
+      }
+    }
+  }
+  return soma;
 }
 
 /**
