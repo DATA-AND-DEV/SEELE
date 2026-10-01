@@ -2390,12 +2390,13 @@ class RegiaoDeMod {
         // Com o clique de quem usa, a frase não diz «sem um gesto»: houve um,
         // e o áudio da janela não ligou mesmo assim. Nem quando quem parou o
         // áudio foi o próprio produto, pelo silêncio: ali não falta gesto
-        // nenhum, falta a saída acordar. E o que o navegador respondeu vai
-        // junto, quando ele respondeu.
+        // nenhum, falta a saída acordar — e «a tempo» só quando o prazo
+        // venceu, e não quando o navegador recusou antes dele. E o que o
+        // navegador respondeu vai junto, quando ele respondeu.
         const frase = comGesto
           ? "o áudio da janela não ligou, nem com o clique de quem usa"
           : suspensoPeloProduto
-            ? "a saída de som, que o produto suspendeu no silêncio, não acordou a tempo"
+            ? `a saída de som, que o produto suspendeu no silêncio, não acordou${naoLigou === undefined ? " a tempo" : ""}`
             : "o som não pôde começar sem um gesto de quem usa";
         recusou(naoLigou === undefined ? frase : `${frase} — ${motivoDaFalha(naoLigou)}`);
         return;
@@ -2879,9 +2880,12 @@ function contextoDeSomDeMod() {
  * começa quando o áudio volta a ligar — num fone Bluetooth, mais de um segundo
  * e meio depois —, e começa atrasado, e não cortado: a fonte só nasce com o
  * áudio ligado (`TocadorDeSomDeMod#tocar`). A espera é a de um clique
- * (`ESPERA_COM_GESTO_MS`), porque a suspensão foi do produto e não falta gesto
- * nenhum; se a saída não acordar nesse prazo, o som é recusado dizendo que ela
- * não acordou a tempo.
+ * (`ESPERA_COM_GESTO_MS`), com clique ou sem, porque a suspensão foi do
+ * produto e não falta gesto nenhum. Se a saída não acordar nesse prazo, o som
+ * é recusado dizendo que ela não acordou a tempo — ou, quando o pedido veio
+ * de um clique, com a frase do clique: o áudio da janela não ligou, nem com
+ * ele. Se o navegador recusar o `resume()` antes do prazo, a recusa vem quando
+ * ele responde, sem «a tempo», e leva o que ele respondeu.
  *
  * O Chromium, o motor do WebView2, solta a saída sozinho depois de uns 30 s
  * de silêncio; o WKWebView não a soltou em 302 s (os dois medidos na revisão

@@ -1154,6 +1154,10 @@ contexto.cartoesDosMods = new Map();
  *   `quemPintaCadaPonto` monta — com `fraseDaMidia`, `fraseDaPreferencia`,
  *   `modsDoCaminhoAntigo` e `preferenciaConsultadaPara`, os vizinhos que ela lê.
  *
+ * E a vizinha da gestão, logo acima da aba na mesma tela: `oQueAGestaoDiz`
+ * (`camada-mods.js`), o estado e os botões de cada linha de QUEM DESENHA O QUE,
+ * sobre as linhas que `resumo` monta.
+ *
  * Um contexto próprio, e não o da bancada: as funções de cima viram globais
  * dele, e as seções seguintes não podem herdá-las.
  *
@@ -1174,6 +1178,7 @@ function abaDoDiagnostico() {
     [base, "function midiasDoPonto(", "/**\n * Cala o som de MOD que um desenho tirou da tela."],
     [base, "function modsDeCartaoQueValem(", "/**\n * Os cartões desta pessoa"],
     [camada, "function preferenciaConsultadaPara(", "/**\n * Escolhe quem apresenta um ponto"],
+    [camada, "function oQueAGestaoDiz(", "/**\n * O valor que quer dizer «o SEELE desenha, e nenhum MOD»."],
     [camada, "const APRESENTACAO_NATIVA = ", "/** Uma linha: o nome em palavra"],
   ];
   for (const [fonte, de, ate] of recortes) {
@@ -1417,10 +1422,10 @@ function anotando(...anotadas) {
     "mod/b, escolhido, desenha a pessoa 2 e o SEELE desenha as outras, e a gestão não disse isso — ou não disse que "
       + `mod/a perdeu: ${JSON.stringify(parcial)}`,
   );
-  // E, neste caso, a gestão diz o que a aba diz: as duas leem o mesmo
-  // registro e a mesma escolha, e uma não pode desmentir a outra. Só neste
-  // sentido: sem ninguém no cartão de todos, a aba diz o caso parcial e a
-  // gestão não diz a escolha (o doc de `resumo`).
+  // E a gestão diz o que a aba diz: as duas leem o mesmo registro e a mesma
+  // escolha, e uma não pode desmentir a outra. Sem ninguém no cartão de
+  // todos, a gestão diz a escolha gravada, e o caso parcial dela continua
+  // sendo o da aba — o bloco «a escolha desta máquina», abaixo.
   const naAba = registro.quemPinta("pessoa.cartao", "mod/b", deDe);
   confere(
     caso,
@@ -1451,6 +1456,147 @@ function anotando(...anotadas) {
     Object.values(semSobra).every((linha) => linha.oSeeleDesenhaOutros === false),
     "a gestão disse que o SEELE desenha os outros sem caso parcial: "
       + Object.entries(semSobra).map(([nome, linha]) => `${nome} ${JSON.stringify(linha)}`).join(", "),
+  );
+}
+
+// **A gestão diz a escolha desta máquina, e não oferece o que já vale** (N-m1 e
+// D-m1 da revisão do Lote Diagnóstico da correção ampla do Plano 1D). Só
+// substituições por pessoa, como sempre no avatar: ninguém substitui o cartão
+// de todos, e a disputa do alvo vazio sai antes de olhar a escolha. A linha da
+// gestão era só a dessa disputa: dizia «4 contribuição(ões)» com qualquer
+// escolha, e oferecia de novo o que já vale — «USAR mod/b» com mod/b escolhido,
+// «USAR APRESENTAÇÃO DO SEELE» com o SEELE escolhido, «USAR mod/d» com o mod/d
+// da API 3 escolhido. A escolha dita e os botões que somem vêm da escolha
+// gravada do ponto; a disputa e quem pinta não mudam.
+{
+  const caso = "M1 · a gestão · a escolha desta máquina";
+  /** Um registro novo; devolve, para cada escolha, a linha de `resumo`, o que a gestão diz e a linha da aba. */
+  const montar = (registrar) => {
+    const aba = abaDoDiagnostico();
+    for (const id of ["mod/b", "mod/c", "mod/d", "mod/e"]) aba.modsCarregados.set(id, {});
+    registrar(aba.contribuicoesDosMods, aba.cartoesDosMods);
+    return (escolha) => {
+      const linha = aba.contribuicoesDosMods
+        .resumo(new Map([["pessoa.cartao", escolha]]), (id) => aba.modsCarregados.has(id))
+        .find((l) => l.ponto === "pessoa.cartao");
+      const { estado, botoes } = aba.oQueAGestaoDiz(linha, escolha);
+      aba.preferencias.set("pessoa.cartao", escolha);
+      const naAba = aba.quemPintaCadaPonto().find((l) => l.ponto === "pessoa.cartao");
+      aba.preferencias.clear();
+      return { linha, estado, botoes: botoes.map((b) => b.rotulo), naAba };
+    };
+  };
+  const cartao = (alvo, modo) => ({ ponto: "pessoa.cartao", modo, alvo });
+  // mod/b substitui o cartão da pessoa 2 e mod/e o da 3; mod/c acrescenta ao
+  // da 2; mod/d acrescenta ao da 3 e dá cartões pela API 3.
+  const naGestao = montar((registro, cartoesDosMods) => {
+    registro.registrar({ id: "mod/b" }, null, cartao("2", "substituir"));
+    registro.registrar({ id: "mod/c" }, null, cartao("2", "adicionar"));
+    registro.registrar({ id: "mod/e" }, null, cartao("3", "substituir"));
+    registro.registrar({ id: "mod/d" }, null, cartao("3", "adicionar"));
+    cartoesDosMods.set("mod/d", anotando());
+  });
+
+  // Sem escolha gravada, nada muda: a contagem, «usar» para quem desenha o
+  // cartão, e o SEELE; voltar ao automático não, porque já se está nele.
+  const automatico = naGestao("");
+  confere(
+    caso,
+    automatico.estado === "4 contribuição(ões) de mod/b, mod/c, mod/e, mod/d"
+      && automatico.botoes.join() === "USAR mod/b,USAR mod/e,USAR mod/d,USAR APRESENTAÇÃO DO SEELE",
+    `sem escolha nesta máquina, a linha da gestão mudou: «${automatico.estado}», ${automatico.botoes.join(", ")}`,
+  );
+
+  // mod/b escolhido desenha a pessoa 2; a 3, que só mod/e declarou, fica com o
+  // SEELE — e a gestão diz o que a aba, logo abaixo, diz.
+  const doB = naGestao("mod/b");
+  confere(
+    caso,
+    doB.estado === "apresentado por mod/b, para quem declarou; o SEELE desenha os outros",
+    `com mod/b escolhido, a gestão não disse a escolha desta máquina: «${doB.estado}»`,
+  );
+  confere(
+    caso,
+    !doB.botoes.includes("USAR mod/b")
+      && doB.botoes.includes("USAR mod/e")
+      && doB.botoes.includes("USAR APRESENTAÇÃO DO SEELE")
+      && doB.botoes.includes("DECIDIR AUTOMATICAMENTE"),
+    "com mod/b escolhido, a gestão ofereceu de novo «USAR mod/b», que já vale, ou deixou de oferecer as outras "
+      + `escolhas: ${doB.botoes.join(", ")}`,
+  );
+  confere(
+    caso,
+    doB.linha.oSeeleDesenhaOutros === doB.naAba.oSeeleDesenhaOutros && doB.naAba.substitui.join() === doB.linha.escolhido,
+    `com mod/b escolhido, a gestão e a aba DIAGNÓSTICO disseram coisas diferentes do mesmo cartão: gestão `
+      + `${JSON.stringify(doB.linha)}, aba ${JSON.stringify(doB.naAba)}`,
+  );
+
+  // O SEELE escolhido: nenhum MOD substitui, e o botão do SEELE some.
+  const doSeele = naGestao(NATIVO);
+  confere(
+    caso,
+    doSeele.estado === "o SEELE desenha; nenhum MOD substitui este lugar",
+    `com o SEELE escolhido, a gestão não disse a escolha desta máquina: «${doSeele.estado}»`,
+  );
+  confere(
+    caso,
+    !doSeele.botoes.includes("USAR APRESENTAÇÃO DO SEELE")
+      && doSeele.botoes.includes("DECIDIR AUTOMATICAMENTE")
+      && doSeele.botoes.includes("USAR mod/b"),
+    "com o SEELE escolhido, a gestão ofereceu de novo «USAR APRESENTAÇÃO DO SEELE», que já vale, ou deixou de "
+      + `oferecer as outras escolhas: ${doSeele.botoes.join(", ")}`,
+  );
+
+  // O mod/d da API 3 escolhido: os cartões dele valem sozinhos, e o «usar»
+  // dele some.
+  const doD = naGestao("mod/d");
+  confere(
+    caso,
+    doD.estado === "você escolheu mod/d, que está de pé e não substitui este lugar — o SEELE desenha",
+    `com mod/d escolhido, a gestão não disse a escolha desta máquina: «${doD.estado}»`,
+  );
+  confere(
+    caso,
+    !doD.botoes.includes("USAR mod/d")
+      && doD.botoes.includes("USAR APRESENTAÇÃO DO SEELE")
+      && doD.botoes.includes("DECIDIR AUTOMATICAMENTE"),
+    "com o mod/d da API 3 escolhido, a gestão ofereceu de novo «USAR mod/d», que já vale, ou deixou de oferecer "
+      + `as outras escolhas: ${doD.botoes.join(", ")}`,
+  );
+
+  // Quem não está carregado continua dito como quem não está de pé.
+  const doZ = naGestao("mod/z");
+  confere(
+    caso,
+    doZ.estado === "você escolheu mod/z, e ele não está de pé agora — o SEELE desenha",
+    `com mod/z escolhido, que não está carregado, a gestão não disse a escolha desta máquina: «${doZ.estado}»`,
+  );
+
+  // Sozinho, mod/b desenha a pessoa 2, e ninguém mais pediu o cartão: a aba
+  // diz «desenhado por mod/b», e a gestão não acrescenta que o SEELE desenha
+  // os outros — as duas, na mesma tela, não se desmentem.
+  const sozinho = montar((registro) => registro.registrar({ id: "mod/b" }, null, cartao("2", "substituir")))("mod/b");
+  confere(
+    caso,
+    sozinho.estado === "apresentado por mod/b"
+      && sozinho.linha.oSeeleDesenhaOutros === sozinho.naAba.oSeeleDesenhaOutros,
+    `com mod/b escolhido e sozinho no cartão, a gestão disse outra coisa que a aba: «${sozinho.estado}», `
+      + `aba ${JSON.stringify(sozinho.naAba)}`,
+  );
+
+  // E o SEELE só some dos botões quando é ele o escolhido. Com alguém no
+  // cartão de todos e mod/z escolhido, o SEELE desenha porque mod/z não está
+  // de pé — e escolher o SEELE muda a escolha: quando mod/z voltar, quem
+  // desenha continua sendo o SEELE.
+  const comTodos = montar((registro) => registro.registrar({ id: "mod/b" }, null, {
+    ponto: "pessoa.cartao", modo: "substituir",
+  }))("mod/z");
+  confere(
+    caso,
+    comTodos.estado === "você escolheu mod/z, e ele não está de pé agora — o SEELE desenha"
+      && comTodos.botoes.includes("USAR APRESENTAÇÃO DO SEELE"),
+    "com mod/z escolhido e fora de pé, a gestão escondeu «USAR APRESENTAÇÃO DO SEELE», que mudaria a escolha: "
+      + `«${comTodos.estado}», ${comTodos.botoes.join(", ")}`,
   );
 }
 

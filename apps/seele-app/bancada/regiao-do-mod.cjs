@@ -2667,6 +2667,36 @@ async function aSuspensaoDoProdutoEsperaASaidaAcordar() {
     regiao.soltar();
   }
 
+  // O navegador recusa acordá-la, na hora: não houve prazo vencido, e a frase
+  // não diz «a tempo» — diz que ela não acordou, com o que o navegador
+  // respondeu (D-m2 da revisão do Lote Diagnóstico da correção ampla do Plano
+  // 1D).
+  {
+    class Recusa extends audioDeMentira() {
+      resume() {
+        this.acordar += 1;
+        return Promise.reject(new Error("NotAllowedError: a saída de som não abriu"));
+      }
+    }
+    const { d, regiao, contexto } = await suspensaPeloProduto(Recusa);
+    regiao.aplicar(trilha);
+    await assentar();
+    const dita = d.ditos.find((e) => e.nome === "midia" && e.estado === "recusada");
+    const anotada = regiao.midiasAnotadas()[0];
+    const registrada = d.anotadas.find((t) => t.includes("«trilha»")) ?? "";
+    confere(
+      caso,
+      (contexto?.fontes.length ?? 0) === 1
+        && [dita?.porque, anotada?.motivo, registrada].every((t) => /a saída de som, que o produto suspendeu no silêncio, não acordou/.test(t ?? "")
+          && /NotAllowedError: a saída de som não abriu/.test(t ?? "")
+          && !/a tempo|gesto/.test(t ?? "")),
+      "o navegador recusou acordar a saída que o produto suspendeu, e a recusa disse que ela não acordou «a tempo» — "
+        + "um prazo que não venceu —, culpou o gesto, ou calou o que o navegador respondeu: ao MOD "
+        + `${JSON.stringify(dita?.porque)}, ao diagnóstico ${JSON.stringify(anotada?.motivo)}, ao registro ${JSON.stringify(registrada)}`,
+    );
+    regiao.soltar();
+  }
+
   // A marca vale até o áudio voltar a ligar. Acordado, e parado depois por
   // outro motivo — o navegador, e não o silêncio do produto —, ele volta a
   // esperar só o prazo da política: a frase de quem suspendeu seria falsa.

@@ -694,7 +694,11 @@ function desenharApresentacoes() {
   // destino na chave (`chaveDaPreferencia`), e `resumo` a pergunta pelo ponto:
   // passado o mapa gravado, a pergunta nunca achava a chave, e a gestão dizia
   // «(escolha automática)» de qualquer escolha — sem o botão de voltar ao
-  // automático. `modPreferidoPara` é a leitura que a tela usa para desenhar.
+  // automático. `modPreferidoPara` é a leitura que a tela usa para desenhar,
+  // exceto o avatar, que herda: sem escolha própria, a tela consulta a do
+  // cartão (`preferenciaConsultadaPara`). A gestão lê a escolha própria de
+  // cada ponto, de propósito: é a que esta linha grava, e a que «decidir
+  // automaticamente» desfaz — a herdada aparece na aba DIAGNÓSTICO.
   const preferidos = new Map(
     Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => [ponto, modPreferidoPara(ponto)]),
   );
@@ -706,90 +710,113 @@ function desenharApresentacoes() {
   }
 
   repovoar(lista, linhas.map((linha) => {
+    const { estado, nota, botoes } = oQueAGestaoDiz(linha, preferidos.get(linha.ponto) ?? "");
     const item = elemento("li", "server-dispositivo mods-linha-gestao");
     const texto = elemento("div", "mods-linha-texto");
-    // **O estado, em palavra, e os três são diferentes** — R5.
-    //
-    // «Apresentado por ninguém» dizia duas coisas ao mesmo tempo: «ninguém
-    // substitui este ponto» e «você desligou a substituição». A pessoa que
-    // apertou «usar apresentação padrão» não tinha como saber se tinha
-    // funcionado.
-    //
-    // E o caso parcial de `resumo` — alguém substitui o lugar de todos (o
-    // alvo vazio), e o escolhido, fora dessas candidatas, substitui o de quem
-    // declarou — é dito com as palavras da aba DIAGNÓSTICO, que mora logo
-    // abaixo e lê o mesmo registro. **Só esse.** Quando ninguém substitui o
-    // lugar de todos — só há substituições por pessoa, como sempre no avatar
-    // —, `resumo` não diz a escolha, e a linha continua «N contribuição(ões)»
-    // seja qual for a escolha desta máquina, oferecendo de novo o que já
-    // vale: «USAR X» ao escolhido que substitui por pessoa, «USAR
-    // APRESENTAÇÃO DO SEELE» com o SEELE escolhido. Nesses casos, quem diz a
-    // escolha é a aba.
-    const comoApresenta = linha.oSeeleDesenhaOutros
-      ? ", para quem declarou; o SEELE desenha os outros"
-      : linha.automatica ? " (escolha automática)" : "";
-    const estado = linha.ausente
-      ? `você escolheu ${linha.ausente}, e ele não está de pé agora — o SEELE desenha`
-      : linha.escolhidoNaoSubstitui
-        ? `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar — o SEELE desenha`
-        : linha.nativa
-          ? "o SEELE desenha; nenhum MOD substitui este lugar"
-          : linha.escolhido
-            ? `apresentado por ${linha.escolhido}${comoApresenta}`
-            : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`;
     texto.append(
       elemento("span", "mods-id", NOMES_DOS_PONTOS[linha.ponto] ?? linha.ponto),
       elemento("span", "mods-versao", estado),
     );
-    // **A disputa é dita, e não resolvida em silêncio.** Um MOD preterido que
-    // some sem explicação é a pessoa achando que o MOD não funciona.
-    if (linha.preteridos.length && !linha.nativa) {
-      texto.append(elemento(
-        "p",
-        "nota",
-        `Também pediram este lugar e não o receberam: ${linha.preteridos.join(", ")}. `
-        + "Escolha abaixo qual deve desenhar.",
-      ));
-    }
+    if (nota) texto.append(elemento("p", "nota", nota));
     item.append(texto);
 
-    const botoes = elemento("div", "mods-linha-botoes");
-    // **«Usar» só quem pode desenhar este lugar.** Escolher um MOD que só
-    // acrescenta não o faz desenhar nada: o SEELE desenha, e o botão mentiria.
-    // A exceção é o cartão, em que um MOD da API 3 desenha pelos cartões dele
-    // (`SeeleUI.cartoes`) — e escolhê-lo é o que os faz valer sozinhos
-    // (`modsDeCartaoQueValem`).
-    const podemDesenhar = new Set(linha.substituem);
-    if (linha.ponto === "pessoa.cartao") {
-      for (const id of cartoesDosMods.keys()) podemDesenhar.add(id);
+    const caixa = elemento("div", "mods-linha-botoes");
+    for (const { rotulo, escolha } of botoes) {
+      const botao = elemento("button", "botao-fantasma", rotulo);
+      botao.type = "button";
+      botao.addEventListener("click", () => escolherApresentacao(linha.ponto, escolha));
+      caixa.append(botao);
     }
-    for (const candidato of linha.mods) {
-      if (candidato === linha.escolhido || !podemDesenhar.has(candidato)) continue;
-      const usar = elemento("button", "botao-fantasma", `USAR ${candidato}`);
-      usar.type = "button";
-      usar.addEventListener("click", () => escolherApresentacao(linha.ponto, candidato));
-      botoes.append(usar);
-    }
-    // **Voltar ao nativo é uma escolha, e não a ausência de uma.** Ela some
-    // quando já se está nele — um botão que não muda nada é uma pergunta sem
-    // resposta.
-    if (!linha.nativa) {
-      const padrao = elemento("button", "botao-fantasma", "USAR APRESENTAÇÃO DO SEELE");
-      padrao.type = "button";
-      padrao.addEventListener("click", () => escolherApresentacao(linha.ponto, APRESENTACAO_NATIVA));
-      botoes.append(padrao);
-    }
-    // E desfazer a escolha, voltando ao automático. Só aparece quando há uma:
-    // «voltar ao automático» estando no automático não faz nada.
-    if (!linha.automatica) {
-      const auto = elemento("button", "botao-fantasma", "DECIDIR AUTOMATICAMENTE");
-      auto.type = "button";
-      auto.addEventListener("click", () => escolherApresentacao(linha.ponto, ""));
-      botoes.append(auto);
-    }
-    item.append(botoes);
+    item.append(caixa);
     return item;
   }));
+}
+
+/**
+ * O que a linha de um ponto diz em QUEM DESENHA O QUE, e o que ela oferece —
+ * sem desenhar nada.
+ *
+ * Separada de `desenharApresentacoes` para morrer no portão: a bancada de
+ * node `contribuicoes-e-camadas.cjs` a roda sobre o registro de verdade, e o
+ * desenho na página continua medido no Chromium.
+ *
+ * @param {object} linha Uma linha de `contribuicoesDosMods.resumo`.
+ * @param {string} escolha A escolha desta máquina para o ponto, neste
+ *   servidor: `""`, `APRESENTACAO_NATIVA` ou um `id`.
+ * @returns {{ estado: string, nota: string, botoes: { rotulo: string, escolha: string }[] }}
+ *   O estado em palavra, a nota de quem perdeu (vazia quando não há), e os
+ *   botões, cada um com a escolha que ele grava.
+ */
+function oQueAGestaoDiz(linha, escolha) {
+  // **O estado, em palavra, e os três são diferentes** — R5.
+  //
+  // «Apresentado por ninguém» dizia duas coisas ao mesmo tempo: «ninguém
+  // substitui este ponto» e «você desligou a substituição». A pessoa que
+  // apertou «usar apresentação padrão» não tinha como saber se tinha
+  // funcionado.
+  //
+  // E o caso parcial de `resumo` — o escolhido, sem candidata no lugar de
+  // todos (o alvo vazio), substitui o de quem declarou — é dito com as
+  // palavras da aba DIAGNÓSTICO, que mora logo abaixo e lê o mesmo registro.
+  //
+  // Quando ninguém substitui o lugar de todos — só há substituições por
+  // pessoa, como sempre no avatar —, a linha diz a escolha gravada desta
+  // máquina (`resumo`). Sem escolha, ela continua «N contribuição(ões)», e
+  // quem diz quem desenha cada pessoa é a aba.
+  const comoApresenta = linha.oSeeleDesenhaOutros
+    ? ", para quem declarou; o SEELE desenha os outros"
+    : linha.automatica ? " (escolha automática)" : "";
+  const estado = linha.ausente
+    ? `você escolheu ${linha.ausente}, e ele não está de pé agora — o SEELE desenha`
+    : linha.escolhidoNaoSubstitui
+      ? `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar — o SEELE desenha`
+      : linha.nativa
+        ? "o SEELE desenha; nenhum MOD substitui este lugar"
+        : linha.escolhido
+          ? `apresentado por ${linha.escolhido}${comoApresenta}`
+          : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`;
+  // **A disputa é dita, e não resolvida em silêncio.** Um MOD preterido que
+  // some sem explicação é a pessoa achando que o MOD não funciona.
+  const nota = linha.preteridos.length && !linha.nativa
+    ? `Também pediram este lugar e não o receberam: ${linha.preteridos.join(", ")}. `
+      + "Escolha abaixo qual deve desenhar."
+    : "";
+
+  const botoes = [];
+  // **«Usar» só quem pode desenhar este lugar.** Escolher um MOD que só
+  // acrescenta não o faz desenhar nada: o SEELE desenha, e o botão mentiria.
+  // A exceção é o cartão, em que um MOD da API 3 desenha pelos cartões dele
+  // (`SeeleUI.cartoes`) — e escolhê-lo é o que os faz valer sozinhos
+  // (`modsDeCartaoQueValem`).
+  const podemDesenhar = new Set(linha.substituem);
+  if (linha.ponto === "pessoa.cartao") {
+    for (const id of cartoesDosMods.keys()) podemDesenhar.add(id);
+  }
+  // **E nenhum «usar» para o que já vale.** O escolhido desta máquina não
+  // ganha botão — um botão que não muda nada é uma pergunta sem resposta —, e
+  // a escolha é a gravada, e não a disputa do alvo vazio: o MOD da API 3
+  // escolhido não tem candidata ali, e só acrescenta pelo registro (D-m1 da
+  // revisão do Lote Diagnóstico da correção ampla do Plano 1D). Sem escolha,
+  // quem não ganha botão é quem vence no automático o lugar de todos, quando
+  // alguém o pede.
+  for (const candidato of linha.mods) {
+    if (candidato === linha.escolhido || candidato === escolha || !podemDesenhar.has(candidato)) continue;
+    botoes.push({ rotulo: `USAR ${candidato}`, escolha: candidato });
+  }
+  // **Voltar ao nativo é uma escolha, e não a ausência de uma.** Ela some
+  // quando o SEELE já é a escolha desta máquina. E só então: com um escolhido
+  // que não está de pé, ou que não substitui o lugar, o SEELE desenha, mas a
+  // escolha é outra, e escolher o SEELE a muda — quando aquele MOD voltar, ou
+  // passar a substituir o lugar, quem desenha continua sendo o SEELE.
+  if (escolha !== APRESENTACAO_NATIVA) {
+    botoes.push({ rotulo: "USAR APRESENTAÇÃO DO SEELE", escolha: APRESENTACAO_NATIVA });
+  }
+  // E desfazer a escolha, voltando ao automático. Só aparece quando há uma:
+  // «voltar ao automático» estando no automático não faz nada.
+  if (!linha.automatica) {
+    botoes.push({ rotulo: "DECIDIR AUTOMATICAMENTE", escolha: "" });
+  }
+  return { estado, nota, botoes };
 }
 
 /**
