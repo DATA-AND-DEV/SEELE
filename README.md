@@ -102,13 +102,28 @@ que encontrar no convite — nunca só o melhor:
 | 4 | **furo de NAT**, com um ponto de encontro apresentando as duas pontas |
 
 O ponto de encontro não vê nada do que é dito: ele apresenta dois endereços um
-ao outro, e guarda em memória onde cada anfitrião disse morar — um endereço que
-vale 60 segundos desde o último aviso dele, e que quem volta pela lista pergunta
-antes de tentar. O TLS é ponta a ponta, e ele não está nele: o endereço que o
-ponto devolve é conferido pela impressão digital, dentro do TLS, antes de
-qualquer convite ou senha sair. `seele-encontro` é o programa, e o
-[`docs/ponto-de-encontro.md`](docs/ponto-de-encontro.md) diz o que ele guarda e
-o que um ponto hostil consegue.
+ao outro, e guarda em memória, no **quarto**, onde cada anfitrião disse morar —
+o servidor e a escuta de avisos, cada endereço valendo 60 segundos desde o
+último registro dele —, e quem volta pela lista pergunta ao quarto antes de
+tentar. O TLS é ponta a ponta, e o ponto não está nele. Cada endereço da
+resposta tem a sua barreira:
+
+- o do **servidor** é conferido pela impressão digital, dentro do TLS, antes de
+  qualquer convite ou senha sair;
+- o da **escuta de avisos** vira o destino do `LEVE`, que sai **antes** do TLS:
+  o ponto repassa a esse destino o IP, a porta e o instante de quem tenta
+  chegar. Por isso quem chega só o usa quando ele mora no mesmo IP que o
+  servidor da mesma resposta, e a lista de conhecidos nunca guarda o que o
+  quarto deu.
+
+**O que sobra, até o `SEELE-ENC/2`** (o registro assinado, no Plano 4): quem
+toma as duas marcas do anfitrião no quarto — os nomes, tirados da impressão
+digital, sob os quais o servidor e a escuta se registram —, ou só a da escuta
+saindo pelo mesmo IP público que ele, recebe pelo `LEVE` o IP, a porta e o
+instante de quem tenta chegar. O conteúdo, o convite, a senha e o apelido não
+saem: o TLS recusa o servidor errado. `seele-encontro` é o programa, e o
+[`docs/ponto-de-encontro.md`](docs/ponto-de-encontro.md) diz o que ele guarda, o
+que um ponto hostil consegue e quando as marcas ficam livres.
 
 O degrau 4 foi exercitado entre duas máquinas em redes diferentes — uma em casa
 atrás de CGNAT, outra numa rede móvel — e o convite passa a carregar o bilhete
