@@ -490,6 +490,10 @@ function bancada(opcoes = {}) {
     },
     /** O `Uint8Array` da janela: o que ele cria passa no `instanceof` dela. */
     Uint8Array: vm.runInContext("Uint8Array", contexto),
+    /** Tira o áudio de tempo real da janela, depois de montar: o tocar sem WebAudio. */
+    semAudioDeTempoReal: () => {
+      contexto.AudioContext = undefined;
+    },
   };
 }
 
@@ -2687,6 +2691,26 @@ async function asProtecoesDoTocadorEDaMontagemDoSom() {
       JSON.stringify(sobrou) === JSON.stringify(esperado),
       `o MOD tirou o som da tela durante ${quando}, e a montagem seguiu: ${JSON.stringify(sobrou)}, e não `
         + `${JSON.stringify(esperado)} — uma decodificação à toa, bytes fantasmas no bolso, ou uma anotação sem nó`,
+    );
+    regiao.soltar();
+  }
+
+  // Sem o áudio de tempo real na hora de tocar, a recusa diz isso — e não
+  // que faltou um gesto de quem usa.
+  {
+    const b = bancada();
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav" }]);
+    await assentar();
+    b.semAudioDeTempoReal();
+    acharTag(regiao.raiz.children[0], "button")?.disparar("click");
+    await assentar();
+    const anotada = regiao.midiasAnotadas()[0];
+    confere(
+      caso,
+      anotada?.situacao === "recusada" && /WebAudio/.test(anotada.motivo) && !/gesto/.test(anotada.motivo),
+      `tocar sem o áudio de tempo real da janela não foi recusado com o motivo certo: ${JSON.stringify(anotada)}`,
     );
     regiao.soltar();
   }

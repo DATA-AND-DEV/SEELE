@@ -3088,11 +3088,11 @@ class TocadorDeSomDeMod {
   async tocar(comGesto = false) {
     if (this.solto || this.fonte) return this.fonte !== null;
     const pedido = (this.pedido += 1);
+    // Sem WebAudio, `montarSom` já recusou o som antes de existir tocador; o
+    // `throw` é a mesma recusa, pelo `catch` de quem pediu, e não a frase do
+    // gesto que faltou.
     const contexto = contextoDeSomDeMod();
-    if (!contexto) {
-      this.avisar("recusada", comGesto, new Error("esta janela não oferece WebAudio"));
-      return false;
-    }
+    if (!contexto) throw new Error("esta janela não oferece WebAudio");
     // O que o navegador respondeu ao pedido de ligar o áudio, quando recusou.
     // **Guardado, e não engolido**: é o motivo que a recusa leva ao registro.
     let naoLigou;
