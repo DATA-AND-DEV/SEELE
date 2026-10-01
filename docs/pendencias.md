@@ -7808,28 +7808,35 @@ nenhum número já citado mude.
     grep -n "recusas_de_carga" apps/seele-app/src/main.rs | head
     ```
 
+Vieram depois, da revisão do Lote F-Fecho:
+
 26. **FF-m1 da revisão do Lote F-Fecho · A recusa do pedido de catálogo sai
     com `mod_id=` em branco.** O catálogo do servidor é pedido com o id vazio
     (`carregarMods`, em `base.js`), e quando ele é recusado, a linha de
     `executar` (`crates/seele-server/src/mods/pedidos.rs`) sai com `mod_id=`
     sem nome nenhum, desde o `6800d18`, que passou o campo a `%id`; antes
     saía `mod_id=""`. Uma busca por `mod_id=` a acha, e ela não é de MOD
-    nenhum. A janela já omite o campo quando o id é vazio
-    (`registrar_da_janela`, em `apps/seele-app/src/main.rs`). O conserto é o
-    mesmo tratamento no `warn!` de `pedidos.rs`, ou um `catalogo=true`
-    explícito no lugar do id.
+    nenhum. Na janela, a porta `registrar_da_janela` omite o campo quando o
+    id é vazio, mas o comando `mod_request` (em `apps/seele-app/src/main.rs`)
+    não: quando o envio do pedido de catálogo falha, a linha WARN «pedido de
+    MOD recusado na saída», que o `seele.log` grava, sai com o mesmo
+    `mod_id=` em branco. O conserto é o mesmo tratamento nos dois `warn!`, o
+    de `pedidos.rs` e o de `mod_request`, ou um `catalogo=true` explícito no
+    lugar do id.
 
     ```sh
     grep -n 'tracing::warn!(mod_id = %id, %error, "MOD request refused")' crates/seele-server/src/mods/pedidos.rs
+    grep -n 'tracing::warn!(mod_id = %id, request, %erro, "pedido de MOD recusado na saída")' apps/seele-app/src/main.rs
     grep -n 'pedirAoServidor("", 0, {})' apps/seele-app/ui/base.js   # o catálogo vai com o id vazio
-    grep -n ".filter(|id| !id.is_empty())" apps/seele-app/src/main.rs   # a janela omite o id vazio
+    grep -n ".filter(|id| !id.is_empty())" apps/seele-app/src/main.rs   # registrar_da_janela omite o id vazio
     ```
 
 27. **FF-m2 da revisão do Lote F-Fecho · Quando a metade de servidor de um
     MOD lança, o `seele.log` diz só `mod threw`.** `Falha::Lancou`
-    (`crates/seele-server/src/mods/mod.rs`) não leva nada: `chamar` e
-    `pedir` trocam a exceção do QuickJS por ela
-    (`map_err(|_| Falha::Lancou)`). A linha diz o `mod_id` e, do erro, só
+    (`crates/seele-server/src/mods/mod.rs`) não leva nada: `pedir` troca a
+    exceção do QuickJS por ela (`map_err(|_| Falha::Lancou)`), e `chamar`,
+    na chamada ao `aoAcontecer`, num `map_err` com fechamento, que dá
+    `Lancou` ou, se o MOD passou do teto de passos, `PassouDoTempo`. A linha diz o `mod_id` e, do erro, só
     isso: `falha=mod threw` quando o `aoAcontecer` lança («MOD desabilitado:
     a sala continua sem ele», em `despacho.rs`, com o momento), e
     `error=mod threw` quando o `aoPedir` lança («MOD request refused», em
@@ -7848,7 +7855,8 @@ nenhum número já citado mude.
 
     ```sh
     grep -n '#\[error("mod threw")\]' crates/seele-server/src/mods/mod.rs
-    grep -n "map_err(|_| Falha::Lancou)\|map_err(|_| Falha::NaoCarregou)" crates/seele-server/src/mods/mod.rs   # a exceção some aqui
+    grep -n "map_err(|_| Falha::Lancou)\|map_err(|_| Falha::NaoCarregou)" crates/seele-server/src/mods/mod.rs   # pedir e carregar: a exceção some aqui
+    grep -n 'f.call::<_, ()>((momento, carga)).map_err' -A6 crates/seele-server/src/mods/mod.rs   # chamar: e aqui
     grep -n '"MOD desabilitado: a sala continua sem ele"' -B 5 crates/seele-server/src/mods/despacho.rs
     ```
 
