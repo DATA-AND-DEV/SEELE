@@ -3105,6 +3105,10 @@
             montado: é o mesmo padrão APG que o renderer dos MODs usa, e pela
             mesma razão — o catálogo vai à rede, e percorrer as abas com a seta
             não pode disparar uma busca por tecla.
+
+            A quinta, DIAGNÓSTICO, veio depois, com a fase M1 da especificação
+            de 23/09: é para quem escreve MOD, e o comentário do painel dela diz
+            por que ela não é um bloco de INSTALADOS.
           -->
           <div class="mods-tiras" role="tablist" aria-label="atividades da gestão de MODs">
             <button id="mods-aba-instalados" class="mods-aba" type="button" role="tab"
@@ -3123,6 +3127,10 @@
                     data-aba="permissoes" aria-controls="mods-painel-permissoes"
                     aria-selected="false"
                     tabindex="-1">PERMISSÕES</button>
+            <button id="mods-aba-diagnostico" class="mods-aba" type="button" role="tab"
+                    data-aba="diagnostico" aria-controls="mods-painel-diagnostico"
+                    aria-selected="false"
+                    tabindex="-1">DIAGNÓSTICO</button>
           </div>
 
           <div id="mods-painel-instalados" class="mods-painel" role="tabpanel"
@@ -3281,6 +3289,33 @@
                 <p class="nota">Desfazer um sim faz a lista de MODs daquele
                   servidor ser perguntada de novo na próxima entrada. Um
                   consentimento que não se retira não é consentimento.</p>
+              </div>
+            </div>
+          </div>
+          </div>
+          <!--
+            **Diagnóstico para quem escreve MOD** — especificação de 23/09,
+            Parte II, fase M1.
+
+            Uma aba própria, e não mais um bloco em INSTALADOS: a auditoria de
+            U12 já achou aquela página longa, e quem abre isto está depurando
+            um MOD, não ligando um. Os onze lugares aparecem sempre, e não só
+            quando há disputa: «nenhum MOD usa este lugar agora» é a resposta
+            que quem escreve um MOD mais precisa ler quando o dele não aparece.
+
+            Só leitura: escolher quem desenha continua em QUEM DESENHA O QUE.
+          -->
+          <div id="mods-painel-diagnostico" class="mods-painel" role="tabpanel"
+               aria-labelledby="mods-aba-diagnostico" tabindex="0" hidden>
+            <p class="nota">Para quem escreve MOD: quem desenha cada lugar agora, e onde ele fica na tela.</p>
+          <div class="server-bloco">
+            <div class="server-bloco-topo">
+              <h3 class="server-bloco-nome">QUEM PINTA CADA LUGAR</h3>
+              <p class="nota">Os onze lugares onde um MOD pode entrar nesta versão</p>
+            </div>
+            <div class="server-bloco-corpo">
+              <div class="server-campo">
+                <ul id="lista-quem-pinta" class="server-dispositivos mods-rolagem"></ul>
               </div>
             </div>
           </div>

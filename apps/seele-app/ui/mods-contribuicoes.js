@@ -532,7 +532,14 @@ class RegistroDeContribuicoes {
    *   nenhum. Quando algum alvo tem quem o desenhe, os dois ficam `false` e
    *   `""`: um avatar escolhido que desenha a pessoa 7 e não tem candidata na
    *   12 está de pé, e dizer que ele sumiu esconderia a pessoa 7. Esse caso
-   *   parcial é dito por `substitui` e `perderam`.
+   *   parcial é dito por `substitui`, `perderam` e o campo seguinte;
+   * - `oSeeleDesenhaOutros` — o caso **parcial**: algum alvo vence, e algum
+   *   alvo em que alguém pediu para substituir ficou sem vencedora, porque a
+   *   escolha desta máquina não tem candidata ali. No exemplo acima, a pessoa
+   *   12. Ele e `nativa` não valem juntos: com nenhum alvo vencendo, quem diz
+   *   que o SEELE desenha é `nativa`. Um alvo que nenhum MOD declarou não
+   *   conta: o registro só conhece os alvos que alguém declarou, e não quem
+   *   está na tela.
    *
    * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
    * @param {string} preferido A escolha desta máquina: `""`, `NATIVO` ou um `id`.
@@ -571,6 +578,9 @@ class RegistroDeContribuicoes {
       // Do ponto inteiro: um alvo que tem quem o desenhe desmente os dois.
       nativa: nativa && venceram.size === 0,
       ausente: venceram.size === 0 ? ausente : "",
+      // E o que eles calam quando algum alvo vence: um alvo disputado só fica
+      // sem vencedora pela escolha desta máquina (`disputa.nativa`).
+      oSeeleDesenhaOutros: nativa && venceram.size > 0,
       contribuicoes: todas.length,
     };
   }

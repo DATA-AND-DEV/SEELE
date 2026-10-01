@@ -14468,6 +14468,57 @@ fn a_gestao_de_mods_nomeia_o_servidor_em_que_esta_mexendo() {
     );
 }
 
+/// O valor que quer dizer «o SEELE desenha» é um só, nas duas cópias.
+///
+/// `NATIVO`, em `mods-contribuicoes.js`, é o que `escolherSubstituicao`
+/// compara. `APRESENTACAO_NATIVA`, em `camada-mods.js`, é o que a gestão grava
+/// quando alguém aperta «USAR APRESENTAÇÃO DO SEELE», e o que «quem pinta cada
+/// lugar» compara para dizer a preferência em palavra. A casca não importa
+/// módulos, e por isso são duas constantes; o comentário de
+/// `APRESENTACAO_NATIVA` prometia este guarda desde `26ad0c2`, e ele não
+/// existia.
+///
+/// Divergentes, a mesma linha da gestão diria duas coisas: a preferência,
+/// «o SEELE desenha», e a disputa, que leria o valor gravado como o `id` de um
+/// MOD que não está de pé — «você escolheu :nativo, e ele não está de pé». E o
+/// botão gravaria um valor que a disputa não reconhece. Nenhuma bancada de node
+/// puro pega isso: o filtro dos cartões da API 3 devolve `[]` para qualquer
+/// valor que não seja um `id` de pé, e o nativo se parece com isso.
+#[test]
+fn a_apresentacao_nativa_tem_um_valor_so() {
+    let literal = |arquivo: &str, declaracao: &str| -> String {
+        let fonte = read(arquivo);
+        let achadas: Vec<&str> = fonte
+            .lines()
+            .filter_map(|linha| linha.strip_prefix(declaracao))
+            .collect();
+        assert_eq!(
+            achadas.len(),
+            1,
+            "`{declaracao}` aparece {} vez(es) no começo de uma linha de {arquivo}, e não uma: \
+             o guarda não sabe qual das cópias do valor nativo ler",
+            achadas.len()
+        );
+        let valor = achadas[0].trim().trim_end_matches(';').trim();
+        assert!(
+            valor.len() >= 2 && valor.starts_with('"') && valor.ends_with('"'),
+            "`{declaracao}` em {arquivo} deixou de ser um texto literal ({valor}): se uma cópia \
+             passou a ler a outra, o espelho acabou e este guarda sai junto com o comentário que \
+             o promete"
+        );
+        valor.to_owned()
+    };
+
+    let do_registro = literal("ui/mods-contribuicoes.js", "const NATIVO = ");
+    let da_gestao = literal("ui/camada-mods.js", "const APRESENTACAO_NATIVA = ");
+    assert_eq!(
+        do_registro, da_gestao,
+        "o valor que quer dizer «o SEELE desenha» divergiu: a disputa compara {do_registro} e a \
+         gestão grava {da_gestao} — escolher o SEELE passaria a ser lido como escolher um MOD que \
+         não está de pé"
+    );
+}
+
 /// Todo ponto de contribuição anunciado tem quem o aplique na interface.
 ///
 /// # O defeito que este guarda fecha

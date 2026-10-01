@@ -1315,18 +1315,36 @@ function conteudoDasContribuicoes(ponto, alvo = "") {
 }
 
 /**
- * Em que pé está a mídia de tudo o que foi montado para um ponto — só leitura.
+ * Em que pé está a mídia de quem pinta um ponto agora — só leitura.
  *
  * Para «quem pinta cada lugar», na gestão de MODs: soma o que cada renderer de
  * contribuição anotou (`midiasAnotadas`, em `mods-regiao.js`), o retrato de
  * avatar, que carrega por conta própria (`avatarContribuido`), e — em
  * `pessoa.cartao` — os cartões da API 3, que moram na região do MOD.
  *
+ * **Só de quem pinta.** Perder a disputa não desmonta nada: o retrato que
+ * chegou antes de a preferência mudar fica no cache da contribuição, o cartão
+ * de um MOD que já valeu fica montado para voltar sem piscar, e os cartões da
+ * API 3 montam na declaração. Contada, essa mídia sairia na gestão ao lado de
+ * «o SEELE desenha». Por isso cada uma conta pela regra que a tela usa para
+ * desenhá-la:
+ *
+ * - uma substituição conta no destino em que `escolherSubstituicao` a escolhe,
+ *   com a preferência que a tela consulta (`preferenciaConsultadaPara`) — a
+ *   mesma pergunta que `avatarContribuido` e a lista de pessoas fazem;
+ * - um acréscimo conta sempre: ele não disputa;
+ * - um cartão da API 3 conta quando o MOD está em `modsDeCartaoQueValem`.
+ *
  * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
  * @returns {{ carregando: number, pronta: number, recusada: number, motivos: string[] }}
  *   `motivos` traz até três, sem repetir, cada um com o MOD na frente.
  */
 function midiasDoPonto(ponto) {
+  const preferido = typeof preferenciaConsultadaPara === "function"
+    ? preferenciaConsultadaPara(ponto)
+    : "";
+  const pinta = (contribuicao, destino) => contribuicao.modo !== "substituir"
+    || contribuicoesDosMods.escolherSubstituicao(ponto, destino, preferido).escolhida === contribuicao;
   const soma = { carregando: 0, pronta: 0, recusada: 0, motivos: [] };
   const contar = (mod, anotada) => {
     if (anotada.situacao === "carregando") {
@@ -1335,20 +1353,28 @@ function midiasDoPonto(ponto) {
       soma.pronta += 1;
     } else if (anotada.situacao === "recusada") {
       soma.recusada += 1;
-      const texto = `${mod}: ${anotada.motivo || "sem motivo dito"}`;
+      // **Cortado aqui, num lugar só**, e por ponto de código, como
+      // `anotarMidia` corta as da região: o motivo do retrato vem do Rust ou
+      // de uma exceção, sem teto, e um corte por índice partiria um par
+      // substituto.
+      const motivo = [...String(anotada.motivo ?? "")].slice(0, 200).join("");
+      const texto = `${mod}: ${motivo || "sem motivo dito"}`;
       if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
     }
   };
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
     if (contribuicao.ponto !== ponto) continue;
-    if (contribuicao.retrato) contar(contribuicao.mod, contribuicao.retrato);
-    for (const montagem of contribuicao.montadas?.values() ?? []) {
+    if (contribuicao.retrato && pinta(contribuicao, contribuicao.alvo)) {
+      contar(contribuicao.mod, contribuicao.retrato);
+    }
+    for (const [destino, montagem] of contribuicao.montadas ?? []) {
+      if (!pinta(contribuicao, destino)) continue;
       for (const anotada of montagem.renderer.midiasAnotadas()) contar(contribuicao.mod, anotada);
     }
   }
   if (ponto === "pessoa.cartao") {
-    for (const [mod, regiao] of cartoesDosMods) {
-      for (const anotada of regiao.midiasAnotadas()) {
+    for (const mod of modsDeCartaoQueValem()) {
+      for (const anotada of cartoesDosMods.get(mod)?.midiasAnotadas() ?? []) {
         if (anotada.cartao) contar(mod, anotada);
       }
     }

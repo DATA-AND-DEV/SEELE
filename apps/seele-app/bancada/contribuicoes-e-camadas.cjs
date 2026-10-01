@@ -607,7 +607,16 @@ function acordarTudo(no) {
   confere(
     "M1 · por alvo",
     parcial.substitui.join() === "mod/b" && parcial.perderam.join() === "mod/a",
-    `com mod/b escolhido e um avatar por pessoa, vale «${parcial.substitui}» e perdeu «${parcial.perderam}»`,
+    `num avatar por pessoa, a escolha desta máquina não decidiu: vale «${parcial.substitui}», perdeu «${parcial.perderam}»`,
+  );
+  // **E a pessoa 12 é dita.** O escolhido não tem candidata nela, e o SEELE a
+  // desenha: sem este campo, a gestão diria «desenhado por mod/b» de um ponto
+  // que o SEELE desenha em parte.
+  confere(
+    "M1 · por alvo",
+    parcial.oSeeleDesenhaOutros === true,
+    "num avatar por pessoa, a pessoa 12 (que só mod/a declarou) fica com o SEELE pela escolha desta máquina, "
+    + `e quem pinta não disse: ${JSON.stringify(parcial)}`,
   );
   confere(
     "M1 · por alvo",
@@ -625,6 +634,26 @@ function acordarTudo(no) {
     "M1 · por alvo",
     emNenhuma.ausente === "mod/z" && emNenhuma.nativa === true && emNenhuma.substitui.length === 0,
     `o provedor escolhido não está de pé em pessoa nenhuma e não foi nomeado: ${JSON.stringify(emNenhuma)}`,
+  );
+  // O campo é do caso **parcial**: quando o SEELE desenha o ponto inteiro, quem
+  // diz é `nativa`; quando todo alvo disputado tem vencedora, ninguém sobra.
+  const semSobra = {
+    "o automático": auto,
+    "a escolha de mod/b no cartão": escolhido,
+    "o SEELE escolhido": nativo,
+    "um escolhido que não está de pé": sumiu,
+    "o automático por alvo": porAlvo,
+    "um avatar escolhido que não está de pé em pessoa nenhuma": emNenhuma,
+  };
+  confere(
+    "M1 · por alvo",
+    Object.values(semSobra).every((resposta) => resposta.oSeeleDesenhaOutros === false),
+    "«o SEELE desenha os outros» foi dito sem caso parcial — o SEELE desenha o ponto inteiro, ou todo alvo "
+    + "disputado tem vencedora: "
+    + Object.entries(semSobra)
+      .filter(([, resposta]) => resposta.oSeeleDesenhaOutros !== false)
+      .map(([caso, resposta]) => `${caso} (${resposta.oSeeleDesenhaOutros})`)
+      .join(", "),
   );
 
   // Um ponto sem ninguém responde vazio, e não some; um que não existe, nada.

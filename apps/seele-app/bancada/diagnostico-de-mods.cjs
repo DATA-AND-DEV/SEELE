@@ -129,14 +129,17 @@ async function aMidiaDeCadaPontoEContadaEDita(navegador, servidor) {
     testTable.midia_do_mod = (args) => (args.caminho === "img/falta.png"
       ? Promise.reject({ Recusado: { motivo: "arquivo-nao-declarado" } })
       : new Promise((resolve) => pendentes.push(resolve)));
-    testTable.ler_imagem_mod = () => new Promise((resolve) => pendentes.push(resolve));
+    // **O retrato tem pendências próprias.** Soltá-lo sozinho é o que separa o
+    // aviso do avatar do aviso dos selos, que chega pelo `dono.midiaMudou`.
+    window.pendentesDoAvatar = [];
+    testTable.ler_imagem_mod = () => new Promise((resolve) => pendentesDoAvatar.push(resolve));
     const a = instancia("mod/a");
     contribuicoesDosMods.registrar({ id: "mod/a" }, a, {
       ponto: "canal.item",
       modo: "adicionar",
       conteudo: [{ forma: "midia", chave: "selo", fonte: "img/selo.png" }],
     });
-    contribuicoesDosMods.registrar({ id: "mod/a" }, a, {
+    window.avatarDeA = contribuicoesDosMods.registrar({ id: "mod/a" }, a, {
       ponto: "pessoa.avatar",
       modo: "substituir",
       alvo: "1",
@@ -153,6 +156,34 @@ async function aMidiaDeCadaPontoEContadaEDita(navegador, servidor) {
     "os dois selos e o retrato que estão a caminho não foram contados como «carregando»",
     contagens,
   );
+  // **O retrato avisa a gestão quando chega.** Ele chega sozinho, com os selos
+  // ainda a caminho: soltos juntos, o aviso dos selos bastaria para a
+  // conferência passar sem o do `.then` do avatar — e a recusa (R4e, em
+  // `contribuicoes-e-camadas.cjs`) só exercita o `.catch`.
+  await pagina.evaluate(() => {
+    window.avisosDeMidia = 0;
+    for (const pronto of pendentesDoAvatar.splice(0)) pronto({ papel: "imagem", uri: foto(), bytes: 64 });
+  });
+  await esperarQue(
+    pagina,
+    () => midiasDoPonto("pessoa.avatar").pronta === 1,
+    "os bytes do retrato chegaram e ele não foi contado como «pronta»",
+    contagens,
+  );
+  const quandoORetratoChegou = await pagina.evaluate(async () => {
+    await new Promise((pronto) => setTimeout(pronto, 0));
+    return { avisos: window.avisosDeMidia, selos: midiasDoPonto("canal.item").carregando };
+  });
+  assert.equal(
+    quandoORetratoChegou.selos,
+    2,
+    "os selos chegaram junto com o retrato, e o aviso do retrato deixou de ser medido sozinho",
+  );
+  assert.ok(
+    quandoORetratoChegou.avisos > 0,
+    `o retrato chegou e a gestão não foi avisada (${quandoORetratoChegou.avisos} aviso(s))`,
+  );
+
   await pagina.evaluate(() => {
     for (const pronto of pendentes.splice(0)) pronto({ papel: "imagem", uri: foto(), bytes: 64 });
   });
@@ -161,6 +192,55 @@ async function aMidiaDeCadaPontoEContadaEDita(navegador, servidor) {
     () => midiasDoPonto("canal.item").pronta === 2 && midiasDoPonto("pessoa.avatar").pronta === 1,
     "os bytes chegaram e os selos ou o retrato não foram contados como «pronta»",
     contagens,
+  );
+
+  // **E avisa quando sai.** Revogar o avatar solta o retrato
+  // (`soltarMontagem`): a contagem do ponto zera, e quem a mostra precisa
+  // saber, ou a gestão continua dizendo «1 pronta» de um avatar que não existe.
+  const quandoOAvatarSaiu = await pagina.evaluate(async () => {
+    window.avisosDeMidia = 0;
+    contribuicoesDosMods.revogar(avatarDeA.handle);
+    await new Promise((pronto) => setTimeout(pronto, 0));
+    return { avisos: window.avisosDeMidia, avatar: midiasDoPonto("pessoa.avatar") };
+  });
+  assert.deepEqual(
+    quandoOAvatarSaiu.avatar,
+    { carregando: 0, pronta: 0, recusada: 0, motivos: [] },
+    "o avatar foi revogado e o retrato dele continuou contado em «pessoa.avatar»",
+  );
+  assert.ok(
+    quandoOAvatarSaiu.avisos > 0,
+    `o avatar foi revogado, o retrato saiu, e a gestão não foi avisada (${quandoOAvatarSaiu.avisos} aviso(s))`,
+  );
+
+  // **O motivo de um retrato recusado é cortado num lugar só**, em
+  // `midiasDoPonto`, e por ponto de código, como as anotações da região: o
+  // motivo do retrato vem do Rust ou de uma exceção, sem teto, e um par
+  // substituto partido na posição 200 deixaria meio caractere na tela.
+  const longo = `${"m".repeat(199)}😀${"n".repeat(100)}`;
+  await pagina.evaluate((motivo) => {
+    testTable.ler_imagem_mod = () => Promise.reject({ Recusado: { motivo } });
+    contribuicoesDosMods.registrar({ id: "mod/a" }, modsCarregados.get("mod/a"), {
+      ponto: "pessoa.avatar",
+      modo: "substituir",
+      alvo: "2",
+      conteudo: { doServidor: { canal: 1, campo: "image", pedido: { transporte: "volume", path: "volume:outra" } } },
+    });
+  }, longo);
+  await esperarQue(
+    pagina,
+    () => midiasDoPonto("pessoa.avatar").recusada === 1,
+    "o retrato que o Rust recusou não foi contado como «recusada»",
+    contagens,
+  );
+  const motivoDoRetrato = await pagina.evaluate(() => midiasDoPonto("pessoa.avatar").motivos.join(" | "));
+  const pontosDoMotivo = [...motivoDoRetrato.replace(/^mod\/a: /, "")];
+  assert.equal(
+    motivoDoRetrato,
+    `mod/a: ${"m".repeat(199)}😀`,
+    "o motivo de um retrato recusado não saiu cortado em 200 pontos de código inteiros: "
+    + `${pontosDoMotivo.length} pontos depois do MOD, o último U+${pontosDoMotivo.at(-1)?.codePointAt(0).toString(16).toUpperCase()}`
+    + " (o certo: 200, o último U+1F600 — um corte por índice deixa meio par substituto)",
   );
 
   // Uma recusa conta, e diz o motivo que o Rust deu, com o MOD na frente.
@@ -263,8 +343,216 @@ async function aMidiaDeCadaPontoEContadaEDita(navegador, servidor) {
   await pagina.close();
 }
 
+// ---------------------------------------------------------------------------
+// «Quem pinta cada lugar», na gestão de MODs.
+// ---------------------------------------------------------------------------
+
+/** Espera a linha de um ponto em «quem pinta» dizer isto, e diz o que ela dizia se não disser. */
+async function esperarALinha(pagina, ponto, padrao, oQueQuebra) {
+  try {
+    await pagina.waitForFunction(
+      ([qual, fonte]) => new RegExp(fonte).test(
+        document.querySelector(`#lista-quem-pinta li[data-ponto="${qual}"]`)?.textContent ?? "",
+      ),
+      [ponto, padrao.source],
+      { timeout: 8000 },
+    );
+  } catch {
+    const dizia = await pagina.evaluate(
+      (qual) => document.querySelector(`#lista-quem-pinta li[data-ponto="${qual}"]`)?.textContent ?? "(sem linha)",
+      ponto,
+    );
+    throw new Error(`${oQueQuebra} — a linha de «${ponto}» dizia: ${dizia}`);
+  }
+}
+
+async function quemPintaCadaLugar(navegador, servidor) {
+  const { pagina, erros } = await abrirASessao(navegador, servidor);
+  await pagina.evaluate(() => {
+    window.foto = () => {
+      const tela = document.createElement("canvas");
+      tela.width = tela.height = 8;
+      return tela.toDataURL();
+    };
+    window.pendentes = [];
+    testTable.midia_do_mod = (args) => (args.caminho === "img/falta.png"
+      ? Promise.reject({ Recusado: { motivo: "arquivo-nao-declarado" } })
+      : new Promise((resolve) => pendentes.push(resolve)));
+    const a = instancia("mod/a");
+    const b = instancia("mod/b");
+    contribuicoesDosMods.registrar({ id: "mod/a" }, a, {
+      ponto: "pessoa.cartao", modo: "substituir", prioridade: 10,
+      conteudo: [{ forma: "texto", dentro: "cartão de A" }],
+    });
+    // O cartão de B tem mídia: quando B perde, ela continua montada — e não
+    // pode ser dita como mídia de quem pinta.
+    contribuicoesDosMods.registrar({ id: "mod/b" }, b, {
+      ponto: "pessoa.cartao", modo: "substituir", prioridade: 5,
+      conteudo: [{ forma: "texto", dentro: "cartão de B" }, { forma: "midia", chave: "rosto", fonte: "img/rosto.png" }],
+    });
+    contribuicoesDosMods.registrar({ id: "mod/a" }, a, {
+      ponto: "canal.item", modo: "adicionar",
+      conteudo: [{ forma: "midia", chave: "selo", fonte: "img/selo.png" }],
+    });
+    desenhar(testTable.snapshot);
+    $("tela-server").hidden = false;
+    $("painel-mods").hidden = false;
+  });
+  await pagina.click("#mods-aba-diagnostico");
+  const linha = (ponto) => pagina.textContent(`#lista-quem-pinta li[data-ponto="${ponto}"]`);
+
+  assert.equal(await pagina.locator("#lista-quem-pinta > li").count(), 11, "a aba não mostra os onze lugares");
+
+  let cartao = await linha("pessoa.cartao");
+  assert.match(cartao, /desenhado por mod\/a/, `sem preferência, quem vale é o de maior prioridade: ${cartao}`);
+  assert.match(cartao, /pediram e não receberam: mod\/b/, `quem perdeu a disputa não foi dito: ${cartao}`);
+  assert.match(cartao, /preferência desta máquina: automática/, `a preferência automática não foi dita: ${cartao}`);
+
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", "mod/b"));
+  cartao = await linha("pessoa.cartao");
+  assert.match(cartao, /desenhado por mod\/b/, `com mod/b escolhido, ele não foi dito como quem desenha: ${cartao}`);
+  assert.match(cartao, /pediram e não receberam: mod\/a/, `com mod/b escolhido, mod/a não foi dito como quem perdeu: ${cartao}`);
+  assert.match(cartao, /preferência desta máquina: mod\/b/, `a escolha desta máquina não foi dita: ${cartao}`);
+  await esperarALinha(pagina, "pessoa.cartao", /mídia: \d+ carregando$/, "o cartão de mod/b, escolhido, não montou a mídia dele");
+
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA));
+  cartao = await linha("pessoa.cartao");
+  assert.match(cartao, /o SEELE desenha, por escolha desta máquina/, `o SEELE escolhido não foi dito como quem desenha: ${cartao}`);
+  assert.match(cartao, /preferência desta máquina: o SEELE desenha/, `o valor reservado «o SEELE desenha» não foi dito: ${cartao}`);
+  // **A mídia é de quem pinta.** O cartão de mod/b continua montado, com a
+  // mídia a caminho, e quem pinta é o SEELE.
+  assert.match(
+    cartao,
+    /mídia: nenhuma em uso agora$/,
+    `a mídia do cartão de mod/b, que perdeu, foi dita ao lado de «o SEELE desenha»: ${cartao}`,
+  );
+  assert.match(await linha("pessoa.avatar"), /O cartão de cada pessoa/, "a preferência que o avatar herda do cartão não foi dita");
+
+  // **A mídia acompanha a tela.** Dois canais, dois selos carregando; os bytes
+  // chegam e a aba muda sozinha.
+  await esperarALinha(pagina, "canal.item", /mídia: 2 carregando/, "os dois selos em voo não foram contados");
+  await pagina.evaluate(() => {
+    for (const pronto of pendentes.splice(0)) pronto({ papel: "imagem", uri: foto(), bytes: 64 });
+  });
+  await esperarALinha(pagina, "canal.item", /mídia: 2 prontas/, "os bytes chegaram e a aba não se redesenhou");
+
+  // Uma recusa diz o motivo que o Rust deu, com o MOD na frente.
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.registrar({ id: "mod/b" }, modsCarregados.get("mod/b"), {
+      ponto: "canal.item", modo: "adicionar",
+      conteudo: [{ forma: "midia", chave: "falta", fonte: "img/falta.png" }],
+    });
+    desenhar(testTable.snapshot);
+  });
+  await esperarALinha(
+    pagina,
+    "canal.item",
+    /2 recusadas — mod\/b: arquivo-nao-declarado/,
+    "a recusa não disse o motivo que o Rust deu, com o MOD na frente",
+  );
+  assert.match(await linha("canal.item"), /acrescentam: mod\/a, mod\/b/, "quem acrescenta a um lugar não foi dito");
+
+  // Um lugar sem MOD fica na lista, e diz que está vazio.
+  assert.match(await linha("compositor.ferramentas"), /nenhum MOD usa este lugar agora/, "um lugar sem MOD não disse que está vazio");
+
+  // **O registro também redesenha a aba.** Um MOD que passa a usar um lugar
+  // sem mídia nenhuma não dispara o aviso da mídia: só o `aoMudar` do registro
+  // leva a mudança à tela.
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.registrar({ id: "mod/a" }, modsCarregados.get("mod/a"), {
+      ponto: "compositor.ferramentas", modo: "adicionar",
+      conteudo: [{ forma: "texto", dentro: "ferramenta de A" }],
+    });
+  });
+  await esperarALinha(
+    pagina,
+    "compositor.ferramentas",
+    /acrescentam: mod\/a/,
+    "um MOD passou a usar um lugar, sem mídia, e a aba não se redesenhou",
+  );
+
+  // **O caminho da API 3 também pinta.**
+  await pagina.evaluate(() => {
+    darCartoesDoMod({ id: "mod/b", hash: "mod-b" }, modsCarregados.get("mod/b"), { 2: [{ forma: "texto", dentro: "B" }] });
+    escolherApresentacao("pessoa.cartao", "");
+  });
+  assert.match(await linha("pessoa.cartao"), /cartões pela API 3: mod\/b/, "um MOD que desenha cartões pela API 3 não apareceu em «quem pinta»");
+
+  // E a mídia dele é de quem pinta enquanto ele vale: no automático, a foto do
+  // cartão da API 3 conta (o cartão genérico de mod/b, que perdeu para mod/a,
+  // não); com o SEELE escolhido, nenhuma das duas.
+  await pagina.evaluate(() => {
+    darCartoesDoMod({ id: "mod/b", hash: "mod-b" }, modsCarregados.get("mod/b"), {
+      2: [{ forma: "texto", dentro: "B" }, { forma: "midia", chave: "foto", fonte: "img/b.png" }],
+    });
+  });
+  await esperarALinha(
+    pagina,
+    "pessoa.cartao",
+    /mídia: 1 carregando$/,
+    "no automático, a foto do cartão da API 3 não foi contada, ou a mídia do cartão de mod/b, que perdeu, foi contada junto",
+  );
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA));
+  cartao = await linha("pessoa.cartao");
+  assert.match(
+    cartao,
+    /mídia: nenhuma em uso agora$/,
+    `com o SEELE escolhido, a foto do cartão da API 3 de mod/b foi dita como mídia de quem pinta: ${cartao}`,
+  );
+
+  // **O caso parcial.** O avatar é por pessoa: mod/b desenha a Lia (2) e mod/a
+  // o Alex (1) — os dois que o retrato da bancada mostra com quadrado de
+  // avatar. No automático cada um desenha quem declarou, e os dois retratos
+  // chegam.
+  await pagina.evaluate(() => {
+    escolherApresentacao("pessoa.cartao", "");
+    testTable.ler_imagem_mod = () => Promise.resolve({ papel: "imagem", uri: foto(), bytes: 64 });
+    const avatar = (alvo) => ({
+      ponto: "pessoa.avatar", modo: "substituir", alvo,
+      conteudo: { doServidor: { canal: 1, campo: "image", pedido: { transporte: "volume", path: `volume:${alvo}` } } },
+    });
+    contribuicoesDosMods.registrar({ id: "mod/b" }, modsCarregados.get("mod/b"), avatar("2"));
+    contribuicoesDosMods.registrar({ id: "mod/a" }, modsCarregados.get("mod/a"), avatar("1"));
+  });
+  await esperarALinha(pagina, "pessoa.avatar", /mídia: 2 prontas$/, "os retratos de mod/b e de mod/a, cada um de quem o declarou, não chegaram");
+  let avatar = await linha("pessoa.avatar");
+  assert.match(
+    avatar,
+    /desenhado por mod\/b e mod\/a, cada um para quem declarou/,
+    `no automático, cada MOD de avatar desenha quem declarou, e a linha não disse: ${avatar}`,
+  );
+  assert.doesNotMatch(
+    avatar,
+    /o SEELE desenha os outros/,
+    `toda pessoa declarada tem quem a desenhe, e a linha disse que o SEELE desenha alguma: ${avatar}`,
+  );
+
+  // Com mod/b escolhido, o Alex — que só mod/a declarou — fica com o SEELE.
+  // mod/b está de pé e desenha a Lia: nem «o SEELE desenha» do ponto inteiro,
+  // nem «ele não está de pé». E o retrato de mod/a, que já tinha chegado,
+  // continua montado sem pintar ninguém.
+  await pagina.evaluate(() => escolherApresentacao("pessoa.avatar", "mod/b"));
+  avatar = await linha("pessoa.avatar");
+  assert.match(
+    avatar,
+    /desenhado por mod\/b, para quem declarou; o SEELE desenha os outros/,
+    `com mod/b escolhido, o Alex (que só mod/a declarou) é desenhado pelo SEELE, e a linha não disse: ${avatar}`,
+  );
+  assert.match(avatar, /pediram e não receberam: mod\/a/, `com mod/b escolhido, mod/a não foi dito como quem perdeu: ${avatar}`);
+  assert.doesNotMatch(avatar, /não está de pé/, `mod/b desenha a Lia e foi dito como quem não está de pé: ${avatar}`);
+  assert.match(
+    avatar,
+    /mídia: 1 pronta$/,
+    `o retrato de mod/a, que perdeu, foi contado como mídia de quem pinta: ${avatar}`,
+  );
+
+  assert.deepEqual(erros, [], `a página lançou erro durante «quem pinta cada lugar»: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
+  quemPintaCadaLugar,
 ];
 
 (async () => {

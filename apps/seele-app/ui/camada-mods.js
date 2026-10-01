@@ -672,6 +672,7 @@ function escolherApresentacao(ponto, id) {
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   if (typeof redesenharAvatares === "function") redesenharAvatares();
   desenharApresentacoes();
+  desenharQuemPinta();
 }
 
 /**
@@ -778,6 +779,165 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "servidor.navegacao": "Entradas na navegação",
   "servidor.aparencia": "A aparência da sessão",
 });
+
+// ------------------------------------------------ quem pinta cada lugar
+//
+// Especificação de 23/09, Parte II, «Diagnóstico para quem escreve MOD», item
+// 3: para cada lugar, o MOD que vale, os que perderam a disputa, a preferência
+// e o estado da mídia. Tudo aqui é leitura: nada escolhe, revoga ou grava.
+
+/**
+ * Quem desenha um ponto pelo caminho da API 3, fora do registro de
+ * contribuições.
+ *
+ * Dois pontos têm esse segundo caminho, e os dois são usados pelos MODs
+ * oficiais: `SeeleUI.cartoes` desenha em `pessoa.cartao` (o PERFIS), e
+ * `SeeleUI.tema` pinta `servidor.aparencia` (o ESTILO) sem registrar ponto
+ * nenhum. Sem esta leitura a aba diria «nenhum MOD usa este lugar» sobre a
+ * sessão inteira pintada por um.
+ *
+ * A regra dos cartões é `modsDeCartaoQueValem`, em `base.js` — a mesma que
+ * `cartoesDaPessoa` usa para desenhar.
+ */
+function modsDoCaminhoAntigo(ponto) {
+  if (ponto === "pessoa.cartao") {
+    const valem = modsDeCartaoQueValem();
+    return {
+      rotulo: "cartões pela API 3",
+      valem,
+      perdem: [...cartoesDosMods.keys()].filter((id) => !valem.includes(id)),
+    };
+  }
+  if (ponto === "servidor.aparencia") {
+    return { rotulo: "tema pedido por", valem: [...temaDosMods.keys()], perdem: [] };
+  }
+  return { rotulo: "", valem: [], perdem: [] };
+}
+
+/** Os onze pontos, na ordem da tabela da API, com tudo o que a aba diz de cada um. */
+function quemPintaCadaPonto() {
+  return Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => {
+    const preferencia = preferenciaConsultadaPara(ponto);
+    return {
+      ...contribuicoesDosMods.quemPinta(ponto, preferencia),
+      preferencia,
+      herdada: ponto === "pessoa.avatar" && !modPreferidoPara(ponto) && preferencia !== "",
+      antigos: modsDoCaminhoAntigo(ponto),
+      midias: midiasDoPonto(ponto),
+    };
+  });
+}
+
+/** «1 pronta», «2 prontas». */
+function emQuantidade(n, um, varios) {
+  return `${n} ${n === 1 ? um : varios}`;
+}
+
+/** A preferência desta máquina, em palavra — inclusive o valor reservado. */
+function fraseDaPreferencia(linha) {
+  const dita = linha.preferencia === APRESENTACAO_NATIVA
+    ? "o SEELE desenha"
+    : linha.preferencia || "automática — a prioridade decide";
+  return linha.herdada
+    ? `preferência desta máquina: a de «${NOMES_DOS_PONTOS["pessoa.cartao"]}» — ${dita}`
+    : `preferência desta máquina: ${dita}`;
+}
+
+/**
+ * O estado da mídia de quem pinta o ponto, ou nada quando não há o que contar.
+ *
+ * `midiasDoPonto` conta só a mídia de quem pinta: a de um MOD que perdeu
+ * continua montada, e não está em uso. Por isso o vazio diz «em uso», e não
+ * «montada» — com o SEELE escolhido, a mídia de quem perdeu existe.
+ */
+function fraseDaMidia(midias) {
+  if (!midias) return "";
+  const partes = [];
+  if (midias.carregando) partes.push(`${midias.carregando} carregando`);
+  if (midias.pronta) partes.push(emQuantidade(midias.pronta, "pronta", "prontas"));
+  if (midias.recusada) partes.push(emQuantidade(midias.recusada, "recusada", "recusadas"));
+  if (partes.length === 0) return "mídia: nenhuma em uso agora";
+  const porque = midias.motivos.length ? ` — ${midias.motivos.join("; ")}` : "";
+  return `mídia: ${partes.join(" · ")}${porque}`;
+}
+
+/**
+ * O que a linha de um ponto diz, uma frase por fato.
+ *
+ * **Os quatro fatos que a especificação pede**, nesta ordem: quem vale, quem
+ * perdeu, a preferência desta máquina e o estado da mídia. Um fato por linha,
+ * e não um parágrafo: quem abre esta aba está procurando **um** deles.
+ *
+ * **O caso parcial é dito.** Num ponto por alvo — o avatar é sempre por
+ * pessoa —, o MOD escolhido pode valer para quem ele declarou e não ter
+ * candidata para outra pessoa, que fica com o SEELE. `nativa` e `ausente`
+ * falam só do ponto inteiro (`quemPinta`), e é `oSeeleDesenhaOutros` que diz
+ * que o SEELE desenha os outros.
+ */
+function frasesDeQuemPinta(linha) {
+  const frases = [];
+  const antigos = linha.antigos;
+  const ninguem = linha.contribuicoes === 0
+    && antigos.valem.length === 0
+    && antigos.perdem.length === 0;
+  if (ninguem) {
+    frases.push("nenhum MOD usa este lugar agora");
+    if (linha.substituivel && linha.preferencia) frases.push(fraseDaPreferencia(linha));
+    return frases;
+  }
+  if (linha.substituivel) {
+    const osOutros = linha.oSeeleDesenhaOutros ? "; o SEELE desenha os outros" : "";
+    if (linha.ausente) {
+      frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha`);
+    } else if (linha.nativa) {
+      frases.push("o SEELE desenha, por escolha desta máquina");
+    } else if (linha.substitui.length > 1) {
+      frases.push(`desenhado por ${linha.substitui.join(" e ")}, cada um para quem declarou${osOutros}`);
+    } else if (linha.substitui.length === 1) {
+      frases.push(osOutros
+        ? `desenhado por ${linha.substitui[0]}, para quem declarou${osOutros}`
+        : `desenhado por ${linha.substitui[0]}`);
+    } else {
+      frases.push("o SEELE desenha; nenhum MOD substitui este lugar");
+    }
+  }
+  if (linha.acrescentam.length) frases.push(`acrescentam: ${linha.acrescentam.join(", ")}`);
+  if (antigos.valem.length) frases.push(`${antigos.rotulo}: ${antigos.valem.join(", ")}`);
+  const perderam = [...new Set([...linha.perderam, ...antigos.perdem])];
+  if (perderam.length) frases.push(`pediram e não receberam: ${perderam.join(", ")}`);
+  if (linha.substituivel) frases.push(fraseDaPreferencia(linha));
+  const midia = fraseDaMidia(linha.midias);
+  if (midia) frases.push(midia);
+  return frases;
+}
+
+/** Uma linha: o nome em palavra, o nome na API, e um fato por linha. */
+function linhaDeQuemPinta(linha) {
+  const item = elemento("li", "server-dispositivo mods-linha-gestao");
+  item.dataset.ponto = linha.ponto;
+  const texto = elemento("div", "mods-linha-texto");
+  texto.append(
+    elemento("span", "mods-id", NOMES_DOS_PONTOS[linha.ponto] ?? linha.ponto),
+    elemento("span", "mods-versao", `na API: ${linha.ponto}`),
+  );
+  for (const frase of frasesDeQuemPinta(linha)) texto.append(elemento("span", "mods-versao", frase));
+  item.append(texto);
+  return item;
+}
+
+/** Desenha «quem pinta cada lugar»: os onze, sempre. */
+function desenharQuemPinta() {
+  const lista = $("lista-quem-pinta");
+  if (!lista) return;
+  repovoar(lista, quemPintaCadaPonto().map(linhaDeQuemPinta));
+}
+
+/** A aba está na frente? Só então vale redesenhar a cada mudança. */
+function quemPintaEstaAVista() {
+  return !$("tela-server").hidden
+    && !$("painel-mods").hidden
+    && !$("mods-painel-diagnostico").hidden;
+}
 
 /**
  * O que estaria ligado se esta tela fosse salva agora, por `id\u0000hash`.
@@ -1065,6 +1225,7 @@ async function desenharMods() {
 
   desenharRascunho(hospedando);
   desenharApresentacoes();
+  desenharQuemPinta();
   // **A frase da última instalação não sobrevive ao redesenho** — U11.
   //
   // Ela dizia «instalado, e desligado» e ficava na tela enquanto a pessoa
@@ -1627,6 +1788,10 @@ globalThis.addEventListener("seele-mods-estado", () => {
  * **Ativação manual**, como o renderer dos MODs faz e pela mesma razão: o
  * catálogo vai à rede, e percorrer as abas com a seta não pode disparar uma
  * busca por tecla. Seguindo o padrão de abas da WAI-ARIA APG.
+ *
+ * A quinta aba, DIAGNÓSTICO, veio com a fase M1 (especificação de 23/09): ela
+ * é desenhada ao abrir, e a cada mudança só enquanto está à vista — ver
+ * `quemPintaEstaAVista`.
  */
 function ligarAsAbasDeMods() {
   const tiras = document.querySelector(".mods-tiras");
@@ -1645,6 +1810,9 @@ function ligarAsAbasDeMods() {
       const painel = $(`mods-painel-${botao.dataset.aba}`);
       if (painel) painel.hidden = !ativa;
     }
+    // A aba de diagnóstico é desenhada ao abrir: ela lê o registro e a mídia
+    // de agora, e ninguém a olha sem abri-la.
+    if (chave === "diagnostico") desenharQuemPinta();
   };
 
   tiras.addEventListener("click", (evento) => {
@@ -1676,3 +1844,14 @@ invoke("apis_de_mod_aceitas")
     apisDeModAceitas = apis;
   })
   .catch((falha) => console.warn("apis_de_mod_aceitas:", falha));
+
+// **Quem pinta cada lugar acompanha a tela.** O registro muda quando um MOD
+// contribui ou sai, e a mídia muda quando os bytes chegam — às vezes minutos
+// depois de a aba ter sido aberta. Redesenhar só com a aba à vista: fora dela,
+// abrir a aba já desenha.
+contribuicoesDosMods.aoMudar(() => {
+  if (quemPintaEstaAVista()) desenharQuemPinta();
+});
+globalThis.addEventListener("seele-mods-midia", () => {
+  if (quemPintaEstaAVista()) desenharQuemPinta();
+});
