@@ -577,25 +577,43 @@ impl NivelDoConsole {
 /// ([`LINHAS_DE_CONSOLE_POR_SEGUNDO`]) é contado sobre este. Para ASCII e para
 /// `é`, que não se escapam, o corte continua nos 512 caracteres.
 ///
-/// Caractere a caractere, e não por bytes: parar antes do caractere que não
-/// cabe respeita a fronteira dele por construção, e cortar por bytes pediria
-/// achá-la à mão. O aviso do corte conta os caracteres que o MOD escreveu.
+/// O corte é o de [`ate_o_teto_do_registro`], a regra que as outras portas que
+/// escapam texto de terceiro também usam. O aviso do corte conta os caracteres
+/// que o MOD escreveu.
 fn cortar_linha_do_console(texto: String) -> String {
-    let no_registro: usize = texto.chars().map(tamanho_no_registro).sum();
-    if no_registro <= crate::TETO_DA_FRASE_NO_REGISTRO {
+    let cabe = ate_o_teto_do_registro(&texto);
+    if cabe.len() == texto.len() {
         return texto;
     }
-    let mut ocupado = 0_usize;
-    let mut cortado: String = texto
-        .chars()
-        .take_while(|&c| {
-            ocupado = ocupado.saturating_add(tamanho_no_registro(c));
-            ocupado <= crate::TETO_DA_FRASE_NO_REGISTRO
-        })
-        .collect();
+    let mut cortado = cabe.to_owned();
     let total = texto.chars().count();
     let _ = write!(cortado, " […cortado: {total} caracteres]");
     cortado
+}
+
+/// **O começo de `texto` que cabe no teto de uma frase do registro**, contado
+/// pelo tamanho que ele tem lá, já escapado ([`tamanho_no_registro`]).
+///
+/// Uma regra só para as três portas que escrevem texto de terceiro escapado
+/// pelo `Debug` de um `str`: o `console` do MOD ([`cortar_linha_do_console`]),
+/// e o motivo e o caminho de uma mídia de MOD (`motivo_no_registro` e
+/// `caminho_no_registro`, em `main.rs`). Cortado **antes** do escape, um
+/// pedaço de 512 caracteres que não se imprimem chegava a 5120 no registro;
+/// cortado por aqui, nenhuma das três passa do teto, e o mesmo texto sai do
+/// mesmo tamanho por qualquer uma delas.
+///
+/// Caractere a caractere, e não por bytes: parar antes do caractere que não
+/// cabe respeita a fronteira dele por construção, e cortar por bytes pediria
+/// achá-la à mão. E para no primeiro que não cabe, sem medir o resto.
+pub(crate) fn ate_o_teto_do_registro(texto: &str) -> &str {
+    let mut ocupado = 0_usize;
+    for (onde, c) in texto.char_indices() {
+        ocupado = ocupado.saturating_add(tamanho_no_registro(c));
+        if ocupado > crate::TETO_DA_FRASE_NO_REGISTRO {
+            return texto.get(..onde).unwrap_or_default();
+        }
+    }
+    texto
 }
 
 /// Quantos caracteres `c` ocupa no `Debug` de um `str`, que é como a linha de

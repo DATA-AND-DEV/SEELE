@@ -2263,22 +2263,22 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
 }
 
 /// **O teto de um pedaço de texto de terceiro numa linha do `seele.log`**,
-/// contado em caracteres **antes do escape**.
+/// contado em caracteres **como a linha os leva**.
 ///
 /// Quinhentos e doze caracteres, o número que `registrar_da_janela` já usava
 /// escrito à mão. Nomeado quando o `console` dos MODs passou a escrever no
-/// mesmo arquivo: as duas portas põem lá texto que um terceiro escolheu, e o
-/// teto de uma não pode divergir do da outra por esquecimento.
+/// mesmo arquivo: as portas põem lá texto que um terceiro escolheu, e o teto
+/// de uma não pode divergir do da outra por esquecimento.
 ///
-/// **Onde há escape depois do corte, não é o tamanho escrito.** A janela
+/// **O mesmo em todas as portas, e é o tamanho escrito.** A janela
 /// ([`registrar_da_janela`]) escreve a frase sem escape, com o caractere de
-/// controle trocado por espaço, e o `console` do executor
-/// (`cortar_linha_do_console`) corta pelo tamanho já escapado: nas duas, o
-/// teto é o que a linha leva. Mas [`motivo_no_registro`] e
-/// [`caminho_no_registro`] cortam aqui e só depois escapam com `{:?}`, e o
-/// escape pode multiplicar o pedaço por até dez: um caractere que não se
-/// imprime sai como `\u{100000}`, e quinhentos e doze deles viram 5122
-/// caracteres na linha, com as aspas.
+/// controle trocado por espaço: um caractere da frase é um na linha. As três
+/// que escrevem o texto escapado pelo `Debug` de um `str` — o `console` do
+/// executor, o motivo ([`motivo_no_registro`]) e o caminho
+/// ([`caminho_no_registro`]) — cortam pelo tamanho já escapado, numa regra só
+/// ([`executor::ate_o_teto_do_registro`]): o escape pode fazer um caractere
+/// ocupar até dez (`\u{100000}`), e um corte contado antes dele deixava
+/// quinhentos e doze desses virarem 5122 caracteres na linha, com as aspas.
 const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
 
 /// **O maior id de MOD que uma linha do `seele.log` leva**, em caracteres.
@@ -5124,31 +5124,31 @@ fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaN
 /// fechou, que `ler_imagem_mod` repassa como veio — e sai entre aspas, com
 /// escape.
 ///
-/// **Cortado em [`TETO_DA_FRASE_NO_REGISTRO`] caracteres antes do escape**, e
-/// não depois: o `{:?}` pode fazer o texto crescer até dez vezes, porque um
-/// caractere que não se imprime sai como `\u{100000}`. Medido: quinhentos e
-/// doze deles viram 5122 caracteres na linha. O teto limita a linha, mas não a
-/// iguala à do `console`, que corta pelo tamanho escapado.
+/// **Cortado em [`TETO_DA_FRASE_NO_REGISTRO`] pelo tamanho já escapado**, com
+/// a mesma regra do `console` ([`executor::ate_o_teto_do_registro`]): o `{:?}`
+/// faz um caractere que não se imprime ocupar até dez (`\u{100000}`), e um
+/// corte contado antes do escape deixava quinhentos e doze deles virarem 5122
+/// caracteres na linha, com as aspas.
 ///
 /// O escape é o que importa: o formatador do registro escapa ANSI em `%`, mas
 /// não quebra de linha, e um `\n` no meio do motivo escreveria no `seele.log`
 /// uma segunda linha com a cara do produto. As aspas fazem o resto:
 /// `motivo=Prazo da transferência esgotado.` não se lê como chave=valor.
 fn motivo_no_registro(motivo: &str) -> String {
-    let cortado: String = motivo.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
+    let cortado = executor::ate_o_teto_do_registro(motivo);
     let nome = !cortado.is_empty()
         && cortado
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if nome {
-        cortado
+        cortado.to_owned()
     } else {
         format!("{cortado:?}")
     }
 }
 
 /// **O caminho de uma mídia de MOD como uma linha do `seele.log` o leva**:
-/// cortado em [`TETO_DA_FRASE_NO_REGISTRO`] caracteres antes do escape, e entre
+/// cortado em [`TETO_DA_FRASE_NO_REGISTRO`] pelo tamanho já escapado, e entre
 /// aspas, com escape.
 ///
 /// O caminho é texto de terceiro nas duas pontas. Na recusa, é o que a janela
@@ -5160,11 +5160,12 @@ fn motivo_no_registro(motivo: &str) -> String {
 /// no `seele.log` uma segunda linha com a cara do produto.
 ///
 /// Uma função só para as três linhas, para que o teto e o escape não divirjam:
-/// as aspas impedem a linha forjada, e o teto, a linha sem fim. O escape pode
-/// fazer o texto crescer até dez vezes, como em [`motivo_no_registro`].
+/// as aspas impedem a linha forjada, e o teto, a linha sem fim. O corte é o
+/// mesmo de [`motivo_no_registro`] e do `console`
+/// ([`executor::ate_o_teto_do_registro`]): contado depois do escape, que pode
+/// fazer um caractere ocupar até dez.
 fn caminho_no_registro(caminho: &str) -> String {
-    let cortado: String = caminho.chars().take(TETO_DA_FRASE_NO_REGISTRO).collect();
-    format!("{cortado:?}")
+    format!("{:?}", executor::ate_o_teto_do_registro(caminho))
 }
 
 /// **Os bytes de um arquivo que o manifesto deste MOD declara**, conferidos.
@@ -11058,6 +11059,90 @@ mod a_midia_recusada_e_dita_no_registro {
                 id, esperado,
                 "`{porta}` escreveu o id do MOD com outro teto, e uma busca por `mod_id=` já \
                  não junta o que a janela e o Rust disseram do mesmo MOD"
+            );
+        }
+    }
+
+    /// **O pior caso sai com o mesmo teto pelas três portas que escapam.**
+    ///
+    /// `\u{100000}` é o caractere que mais cresce no escape: um escrito, dez
+    /// no registro. O `console` do executor corta pelo tamanho escapado; o
+    /// motivo e o caminho de uma mídia de MOD cortavam em 512 caracteres
+    /// **antes** do escape, e quinhentos e doze deles viravam 5120 na linha —
+    /// dez vezes o teto, nas portas que não têm teto de vazão. Com uma regra só,
+    /// os campos saem do mesmo tamanho, e nenhum passa do teto.
+    ///
+    /// O `console` vai pelo caminho real: o executor corta, e a mesma
+    /// `assentar_fala` da bomba escreve.
+    #[test]
+    fn o_pior_caso_sai_com_o_mesmo_teto_pelas_tres_portas() {
+        use crate::executor::{ExecutorQuickJs, Fila, Limites, ParaOFora};
+        let pior = "\u{100000}".repeat(TETO_DA_FRASE_NO_REGISTRO * 4);
+        // O que vai entre as aspas de `nome="…"`, como a linha o leva.
+        let campo = |rastro: &str, nome: &str| -> String {
+            rastro
+                .split(&format!("{nome}=\""))
+                .nth(1)
+                .and_then(|resto| resto.split('"').next())
+                .unwrap_or_else(|| panic!("a linha não traz `{nome}=\"…\"`: {rastro}"))
+                .to_owned()
+        };
+
+        let executor = ExecutorQuickJs::novo(Limites::default()).expect("o motor");
+        executor
+            .iniciar(r"console.log('\u{100000}'.repeat(2048));")
+            .expect("o código");
+        let fala = loop {
+            match executor.receber(std::time::Duration::from_secs(5)) {
+                Some(fala @ ParaOFora::Console { .. }) => break fala,
+                Some(_) => {}
+                None => panic!("a linha de console não saiu do motor"),
+            }
+        };
+        let mods = std::sync::Mutex::new(super::ModsNativos::default());
+        let fila = std::sync::Arc::new(Fila::default());
+        let (_, do_console) =
+            capturar(|| super::assentar_fala(&mods, &|| true, &fila, 1, fala, ID));
+        let do_console = campo(&do_console, "texto");
+        let do_console = do_console
+            .strip_suffix(" […cortado: 2048 caracteres]")
+            .unwrap_or_else(|| panic!("a linha de console não diz que foi cortada: {do_console}"));
+
+        let (_, do_motivo) = recusa_do_servidor(&pior);
+        let (_, da_origem) = capturar(|| {
+            recusa_de_midia_dita(
+                ID,
+                &pior,
+                FalhaNoMod::Recusado {
+                    motivo: "arquivo-nao-declarado".to_owned(),
+                },
+            )
+        });
+        let ((), do_caminho) = capturar(|| midia_servida_dita(ID, 7, &pior, "imagem", 8));
+
+        let um_a_mais = r"\u{100000}".chars().count();
+        for (porta, escrito) in [
+            ("console", do_console.to_owned()),
+            ("motivo", campo(&do_motivo, "motivo")),
+            ("origem", campo(&da_origem, "origem")),
+            ("caminho", campo(&do_caminho, "caminho")),
+        ] {
+            let tamanho = escrito.chars().count();
+            assert!(
+                tamanho <= TETO_DA_FRASE_NO_REGISTRO,
+                "`{porta}` levou {tamanho} caracteres ao registro, e o teto de uma frase de \
+                 terceiro é {TETO_DA_FRASE_NO_REGISTRO}: o corte foi contado antes do escape"
+            );
+            assert!(
+                tamanho + um_a_mais > TETO_DA_FRASE_NO_REGISTRO,
+                "`{porta}` cortou mais do que precisava ({tamanho} de \
+                 {TETO_DA_FRASE_NO_REGISTRO}): cabia mais um, e o registro perde o que o \
+                 terceiro escreveu sem razão"
+            );
+            assert_eq!(
+                escrito, do_console,
+                "`{porta}` cortou o pior caso noutro tamanho que o `console`, e as portas do \
+                 mesmo `seele.log` voltam a ter tetos diferentes"
             );
         }
     }
