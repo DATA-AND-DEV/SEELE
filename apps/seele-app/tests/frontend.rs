@@ -14206,6 +14206,18 @@ fn sair_do_servidor_encerra_o_ambiente_dos_mods_antes_de_trocar_de_tela() {
             "o encerramento deixou de fazer `{exigido}`: {encerrar}"
         );
     }
+    // **O som para na hora, e a saída de som fecha.** O áudio é da janela, e
+    // não de uma instância: esperar cada executor confirmar deixava o som da
+    // sessão que acabou tocando, e o áudio da janela segurando a saída do
+    // sistema aberta — no macOS, o Mac sem repouso (I-2 da revisão ampla do
+    // Plano 1D). O que `encerrarOSomDosMods` faz é provado em
+    // `bancada/regiao-do-mod.cjs`; aqui, que a saída da sessão o chama.
+    assert!(
+        encerrar.contains("encerrarOSomDosMods()"),
+        "o encerramento deixou de calar o som dos MODs e de fechar o áudio da janela: o som \
+         da sessão que acabou segue até o executor confirmar, e a saída de som do sistema \
+         fica aberta: {encerrar}"
+    );
     // **Pelo ciclo, e não à mão.** O encerramento não pode voltar a mandar no
     // executor nem a limpar recurso por conta própria: quem sabe o que uma
     // instância criou é ela, e uma limpeza escrita aqui é uma lista que

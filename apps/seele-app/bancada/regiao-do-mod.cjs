@@ -234,12 +234,24 @@ class Elemento {
 // ---------------------------------------------------- o WebAudio de mentira
 
 /**
- * Um `AudioContext` de mentira, com as peças que `TocadorDeSomDeMod` usa.
+ * Um `AudioContext` de mentira, com as peças que `TocadorDeSomDeMod` usa — e o
+ * `OfflineAudioContext` que decodifica, em `Contexto.ForaDoTempo`.
  *
  * Ele anota o que o `<audio>` de mentira anotava — tocou, parou, soltou —,
- * agora nas peças do WebAudio: a fonte que começa e para, e o ganho que se
- * liga e se desliga da saída. `Contexto.ultimo` é a instância que a região
- * criou, para a prova olhar dentro dela.
+ * agora nas peças do WebAudio: a fonte que começa (e de onde) e para, e o
+ * ganho que se liga e se desliga da saída. `Contexto.ultimo` é a instância que
+ * a região criou, para a prova olhar dentro dela, e `Contexto.criados` conta
+ * quantas nasceram: um contexto de tempo real segura a saída do sistema
+ * aberta mesmo calado, e quando ele nasce é o que a prova do repouso confere.
+ * `suspensoes` e `fechamentos` contam as duas maneiras de soltá-la; a
+ * suspensão só muda `state` quando a promessa dela resolve, como no navegador.
+ *
+ * **Quem decodifica é o contexto fora do tempo**, que não abre a saída: o de
+ * tempo real também sabe decodificar, como o de verdade, mas anota cada vez
+ * em `Contexto.decodificadosNoTempoReal` — um som montado e parado não tem
+ * por que acordar o áudio do sistema. `Contexto.decodificados` junta o que os
+ * dois decodificaram, e `Contexto.ForaDoTempo.ultimo.argumentos` é com que o
+ * produto o construiu.
  *
  * As opções são os jeitos de o navegador dizer não:
  * - `semGesto`: o áudio da janela nasce parado e `resume()` fica pendurado,
@@ -250,25 +262,40 @@ class Elemento {
  *   avisar — o caminho defensivo do `catch` (P13 da varredura do Plano 1D);
  * - `naoDecodifica`: `decodeAudioData` recusa os bytes.
  *
- * E uma que não é recusa: `decodificado` é o som que `decodeAudioData`
- * devolve — por padrão um segundo estéreo a 48 kHz. Com `length` e
- * `numberOfChannels`, ele diz quanto o som ocupa decodificado, que é o que o
- * teto do som decodificado confere.
+ * E duas que não são recusa:
+ * - `decodificado` é o som que `decodeAudioData` devolve — por padrão um
+ *   segundo estéreo a 48 kHz. Com `length` e `numberOfChannels`, ele diz
+ *   quanto o som ocupa decodificado, que é o que o teto do som decodificado
+ *   confere;
+ * - `segurarADecodificacao`: a decodificação não responde sozinha, e fica em
+ *   `Contexto.decodificacoesPresas` (`{ pronto, falhou }`) para a prova soltar
+ *   quando quiser — é como se sai **no meio** dela.
  *
- * @param {object} opcoes `{ semGesto, recusaNaHora, fonteLanca, naoDecodifica, decodificado }`.
+ * @param {object} opcoes `{ semGesto, recusaNaHora, fonteLanca, naoDecodifica, decodificado, segurarADecodificacao }`.
  */
 function audioDeMentira(opcoes = {}) {
+  function decodificar(bytes, pronto, falhou) {
+    Contexto.decodificados.push(bytes.byteLength);
+    if (opcoes.segurarADecodificacao) Contexto.decodificacoesPresas.push({ pronto, falhou });
+    else if (opcoes.naoDecodifica) falhou(new Error("EncodingError: formato que este motor não conhece"));
+    else pronto(opcoes.decodificado ?? { duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
+    return undefined;
+  }
   class Contexto {
     constructor() {
       Contexto.ultimo = this;
+      Contexto.criados += 1;
       this.state = opcoes.semGesto || opcoes.recusaNaHora ? "suspended" : "running";
       this.currentTime = 0;
       this.destination = { saida: true };
       this.fontes = [];
       this.ganhos = [];
-      this.decodificados = [];
       /** Quantas vezes alguém pediu para o áudio da janela ligar. */
       this.acordar = 0;
+      /** Quantas vezes o produto soltou a saída sem fechar o contexto. */
+      this.suspensoes = 0;
+      /** Quantas vezes o produto fechou o contexto. */
+      this.fechamentos = 0;
     }
     resume() {
       this.acordar += 1;
@@ -277,6 +304,19 @@ function audioDeMentira(opcoes = {}) {
       if (opcoes.semGesto) return new Promise(() => {});
       if (opcoes.recusaNaHora) return Promise.reject(new Error("NotAllowedError: o áudio da janela não liga"));
       this.state = "running";
+      return Promise.resolve();
+    }
+    suspend() {
+      this.suspensoes += 1;
+      // Como o de verdade: `state` só muda quando a promessa resolve, e até
+      // lá o contexto diz «running» a quem perguntar.
+      return Promise.resolve().then(() => {
+        if (this.state !== "closed") this.state = "suspended";
+      });
+    }
+    close() {
+      this.fechamentos += 1;
+      this.state = "closed";
       return Promise.resolve();
     }
     createGain() {
@@ -295,43 +335,99 @@ function audioDeMentira(opcoes = {}) {
         ligado: null,
         tocando: false,
         parou: false,
+        /** De que ponto do som ela começou, em segundos. */
+        de: null,
         onended: null,
         connect(alvo) { this.ligado = alvo; },
         disconnect() { this.ligado = null; },
-        start() { this.tocando = true; },
+        start(_quando = 0, de = 0) { this.tocando = true; this.de = de; },
         stop() { this.tocando = false; this.parou = true; },
       };
       this.fontes.push(fonte);
       return fonte;
     }
     decodeAudioData(bytes, pronto, falhou) {
-      this.decodificados.push(bytes.byteLength);
-      if (opcoes.naoDecodifica) falhou(new Error("EncodingError: formato que este motor não conhece"));
-      else pronto(opcoes.decodificado ?? { duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
-      return undefined;
+      Contexto.decodificadosNoTempoReal.push(bytes.byteLength);
+      return decodificar(bytes, pronto, falhou);
     }
   }
+  Contexto.criados = 0;
+  Contexto.decodificados = [];
+  Contexto.decodificadosNoTempoReal = [];
+  Contexto.decodificacoesPresas = [];
+  /** O `OfflineAudioContext`: decodifica e não abre saída nenhuma. */
+  class ContextoForaDoTempo {
+    constructor(...argumentos) {
+      ContextoForaDoTempo.ultimo = this;
+      ContextoForaDoTempo.criados += 1;
+      this.argumentos = argumentos;
+    }
+    decodeAudioData(bytes, pronto, falhou) {
+      return decodificar(bytes, pronto, falhou);
+    }
+  }
+  ContextoForaDoTempo.criados = 0;
+  Contexto.ForaDoTempo = ContextoForaDoTempo;
   return Contexto;
 }
 
-/** Um contexto com o DOM mínimo e `mods-regiao.js` dentro. */
+/**
+ * Um relógio que só anda quando a prova manda.
+ *
+ * O prazo de silêncio que suspende o áudio da janela é de segundos, e esperar
+ * por ele de verdade faria a bancada levar esse tempo a cada volta. Aqui o
+ * prazo é anotado, e `passar(ms)` roda o que foi marcado para até `ms` — contado
+ * de quando foi marcado, que nesta bancada é sempre logo antes.
+ */
+function relogioDeMentira() {
+  const marcados = new Map();
+  let serie = 0;
+  return {
+    setTimeout: (fn, ms = 0) => {
+      serie += 1;
+      marcados.set(serie, { fn, ms });
+      return serie;
+    },
+    clearTimeout: (id) => {
+      marcados.delete(id);
+    },
+    passar(ms) {
+      for (const [id, marcado] of Array.from(marcados)) {
+        if (marcado.ms > ms) continue;
+        marcados.delete(id);
+        marcado.fn();
+      }
+    },
+  };
+}
+
+/**
+ * Um contexto com o DOM mínimo e `mods-regiao.js` dentro.
+ *
+ * @param {object} opcoes `{ audio, relogio }`: o WebAudio de mentira desta
+ *   prova (`audioDeMentira`), e um relógio que só anda quando ela manda
+ *   (`relogioDeMentira`) — sem ele, o de verdade.
+ */
 function bancada(opcoes = {}) {
   const quadros = [];
   const doc = { activeElement: null };
   doc.createElement = (tag) => new Elemento(tag, doc);
   doc.createTextNode = (data) => new NoDeTexto(data);
+  // O WebAudio desta prova, ou o padrão — um que decodifica e toca.
+  const Audio = opcoes.audio ?? audioDeMentira();
 
   const contexto = vm.createContext({
     console,
     document: doc,
     Node: { TEXT_NODE: TEXTO, ELEMENT_NODE: ELEMENTO },
-    // O relógio e o `atob` de verdade: o tocador espera a política de áudio
-    // com prazo, e o som que vem do servidor do MOD chega em base64.
-    setTimeout,
-    clearTimeout,
+    // O relógio e o `atob` de verdade, salvo quando a prova traz o dela: o
+    // tocador espera a política de áudio com prazo, o áudio calado é suspenso
+    // depois de outro, e o som que vem do servidor do MOD chega em base64.
+    setTimeout: opcoes.relogio?.setTimeout ?? setTimeout,
+    clearTimeout: opcoes.relogio?.clearTimeout ?? clearTimeout,
     atob,
-    // O WebAudio desta prova, ou o padrão — um que decodifica e toca.
-    AudioContext: opcoes.audio ?? audioDeMentira(),
+    AudioContext: Audio,
+    OfflineAudioContext: Audio.ForaDoTempo,
     requestAnimationFrame: (fn) => {
       quadros.push(fn);
       return quadros.length;
@@ -353,7 +449,9 @@ function bancada(opcoes = {}) {
   // propriedades do contexto, e por isso saem por esta linha em vez de por uma
   // leitura de `contexto.RegiaoDeMod`, que devolveria `undefined`.
   vm.runInContext(
-    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, PERFIS_DE_RENDER };`,
+    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, PERFIS_DE_RENDER,
+      SILENCIO: typeof SILENCIO_ANTES_DE_SUSPENDER_MS === "number" ? SILENCIO_ANTES_DE_SUSPENDER_MS : undefined,
+      encerrarOSomDosMods: typeof encerrarOSomDosMods === "function" ? encerrarOSomDosMods : undefined };`,
     contexto,
     { filename: "mods-regiao.js" },
   );
@@ -365,6 +463,10 @@ function bancada(opcoes = {}) {
     CARTAO: contexto.api.LIMITES_DO_CARTAO,
     FORMAS_DO_CARTAO: contexto.api.FORMAS_DO_CARTAO,
     PERFIS: contexto.api.PERFIS_DE_RENDER,
+    /** Quanto o áudio calado espera antes de ser suspenso — ver `SILENCIO_ANTES_DE_SUSPENDER_MS`. */
+    SILENCIO: contexto.api.SILENCIO,
+    /** O que a saída da sessão chama para calar e soltar o som dos MODs. */
+    encerrarOSomDosMods: contexto.api.encerrarOSomDosMods,
     raiz: () => doc.createElement("section"),
   };
 }
@@ -1129,7 +1231,7 @@ async function osTetosContemEARecusaEDita() {
 
   // **O som decodificado tem teto próprio, somado por bolso.** O teto de bytes
   // conta o arquivo como chegou, comprimido; `decodeAudioData` guarda o som
-  // inteiro em float32, na taxa do contexto, já na montagem — dez MiB de MP3 a
+  // inteiro em float32, na taxa da decodificação, já na montagem — dez MiB de MP3 a
   // 128 kbps viram uns 250 MB, e a 32 kbps passam de 1 GB. Aqui cada som ocupa
   // seis décimos do teto: o primeiro cabe, o segundo é recusado e dito, e não
   // vira tocador nem toca, mesmo declarado `tocando`. É a soma que conta: um
@@ -2030,7 +2132,7 @@ async function oSomDoServidorVemDosBytesDoDataENaoDeUmElemento() {
   regiao.aplicar([{ forma: "midia", chave: "m", doServidor: { canal: 1, pedido: { op: "som" } } }]);
   await assentar();
   confere(caso, d.pedidosDeSom.length === 0, "o som do servidor foi pedido ao pacote");
-  confere(caso, Audio.ultimo?.decodificados[0] === 4, `os bytes do data: não chegaram ao WebAudio: ${Audio.ultimo?.decodificados}`);
+  confere(caso, Audio.decodificados[0] === 4, `os bytes do data: não chegaram ao WebAudio: ${Audio.decodificados}`);
   confere(caso, regiao.raiz.children[0].dataset.estado === "pronta", "o som do servidor não ficou pronto");
   regiao.soltar();
 }
@@ -2132,7 +2234,7 @@ async function oSomNumCartaoNaoTemBotao() {
       "os bytes não foram pedidos uma vez por som — a mais é uma cópia por destino, a menos é um som que "
         + `nunca toca: ${JSON.stringify(pedidos)}`,
     );
-    const decodificados = AudioC.ultimo?.decodificados.length ?? 0;
+    const decodificados = AudioC.decodificados.length;
     confere(
       naContribuicao,
       decodificados === 2,
@@ -2200,6 +2302,165 @@ async function oSomPedidoSemGestoEDitoRecusado() {
   regiao.soltar();
 }
 
+// ---------------------------------------------------------------------------
+// 12. O áudio da janela não segura a saída à toa.
+// ---------------------------------------------------------------------------
+
+/**
+ * Um contexto de tempo real de pé segura a saída de som do sistema aberta,
+ * mesmo calado — e no macOS isso impede o repouso por ociosidade (I-2 da
+ * revisão ampla do Plano 1D: medido no WKWebView, a asserção do coreaudiod
+ * ficou de pé de 5 s a 302 s com o contexto calado, e só `suspend()` a soltou).
+ * Um `<audio>` parado não segurava nada.
+ *
+ * As quatro metades do conserto, cada uma medida aqui:
+ * - montar e decodificar não abre a saída: quem decodifica é um contexto fora
+ *   do tempo, construído com a assinatura que o `webkitOfflineAudioContext` do
+ *   macOS 11 conhece;
+ * - o de tempo real nasce no primeiro tocar;
+ * - calado pelo prazo, ele é suspenso — e nunca com um som tocando;
+ * - ele fecha quando o último tocador sai, e na saída da sessão.
+ */
+async function oAudioDaJanelaNaoSeguraASaidaAToa() {
+  const caso = "o áudio da janela não segura a saída à toa";
+  const relogio = relogioDeMentira();
+  const Audio = audioDeMentira();
+  const b = bancada({ audio: Audio, relogio });
+  confere(
+    caso,
+    Number.isFinite(b.SILENCIO) && b.SILENCIO > 0 && typeof b.encerrarOSomDosMods === "function",
+    `a região não tem prazo de silêncio (${b.SILENCIO}) ou não sabe encerrar o som dos MODs na saída da sessão`,
+  );
+  if (!Number.isFinite(b.SILENCIO) || typeof b.encerrarOSomDosMods !== "function") return;
+  const d = dono(b, () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }));
+  const som = (chave) => [{ forma: "midia", chave, fonte: `som/${chave}.wav` }];
+
+  // Montado e parado: decodificado, com botão, e sem saída aberta.
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar(som("a"));
+  await assentar();
+  const botao = acharTag(regiao.raiz.children[0], "button");
+  confere(caso, regiao.raiz.children[0]?.dataset.estado === "pronta" && Boolean(botao), "o som não ficou de pé, com botão");
+  if (!botao) return;
+  confere(
+    caso,
+    Audio.criados === 0,
+    `nasceu ${Audio.criados} contexto(s) de tempo real com um som só montado e parado: ele segura a saída `
+      + "do sistema, e no macOS o Mac deixa de dormir por ociosidade",
+  );
+  confere(
+    caso,
+    Audio.decodificadosNoTempoReal.length === 0 && Audio.ForaDoTempo.criados >= 1 && Audio.decodificados.length === 1,
+    "o som não foi decodificado num contexto fora do tempo — o de tempo real abre a saída para decodificar: "
+      + `${Audio.decodificadosNoTempoReal.length} no tempo real, ${Audio.ForaDoTempo.criados} fora do tempo`,
+  );
+  const argumentos = Audio.ForaDoTempo.ultimo?.argumentos ?? [];
+  confere(
+    caso,
+    argumentos.length === 3 && argumentos.every((n) => Number.isInteger(n) && n > 0)
+      && argumentos[2] >= 44100 && argumentos[2] <= 96000,
+    "o contexto fora do tempo não foi construído com (canais, quadros, taxa) e a taxa entre 44,1 e 96 kHz, a "
+      + `única forma que o webkitOfflineAudioContext do macOS 11 aceita: ${JSON.stringify(argumentos)}`,
+  );
+
+  // O primeiro tocar cria o contexto, e o fim do som começa o prazo.
+  botao.disparar("click");
+  await assentar();
+  const contexto = Audio.ultimo;
+  confere(caso, Audio.criados === 1 && contexto?.fontes[0]?.tocando === true, "o primeiro tocar não criou o contexto e tocou");
+  if (!contexto?.fontes[0]) return;
+  contexto.fontes[0].onended?.();
+  relogio.passar(b.SILENCIO - 1);
+  confere(caso, contexto.suspensoes === 0, "o áudio da janela foi suspenso antes do prazo de silêncio");
+  relogio.passar(b.SILENCIO);
+  await volta();
+  confere(
+    caso,
+    contexto.suspensoes === 1 && contexto.state === "suspended",
+    `o som terminou, o prazo de ${b.SILENCIO} ms passou calado, e o áudio da janela continuou de pé `
+      + `(${contexto.state}, ${contexto.suspensoes} suspensão(ões)): a saída do sistema fica aberta à toa`,
+  );
+
+  // Tocar de novo acorda o mesmo contexto, e não cria outro.
+  botao.disparar("click");
+  await assentar();
+  confere(
+    caso,
+    Audio.criados === 1 && contexto.state === "running" && contexto.fontes[1]?.tocando === true,
+    `tocar depois da suspensão não acordou o mesmo contexto: ${Audio.criados} criado(s), ${contexto.state}`,
+  );
+
+  // Com um som tocando, o prazo não suspende nada — nem quando outro para.
+  const outra = new b.RegiaoDeMod("a/c", d.api, b.raiz());
+  outra.aplicar(som("b"));
+  await assentar();
+  const outroBotao = acharTag(outra.raiz.children[0], "button");
+  outroBotao?.disparar("click");
+  await assentar();
+  confere(caso, contexto.fontes[2]?.tocando === true, "o segundo som não tocou no mesmo áudio da janela");
+  outroBotao?.disparar("click");
+  const suspensoesAntes = contexto.suspensoes;
+  relogio.passar(b.SILENCIO);
+  confere(
+    caso,
+    contexto.suspensoes === suspensoesAntes && contexto.state === "running",
+    "o áudio da janela foi suspenso com um som tocando, porque outro som parou: "
+      + `${contexto.suspensoes - suspensoesAntes} suspensão(ões), ${contexto.state}`,
+  );
+
+  // Pausado o último som, o prazo suspende de novo — e quem aperta TOCAR no
+  // meio da suspensão espera ela terminar e acorda o áudio. Sem a espera, a
+  // fonte começava num contexto que ainda dizia «running» e se suspendia logo
+  // depois: o MOD ouvia «tocando», e ninguém ouvia nada.
+  botao.disparar("click");
+  relogio.passar(b.SILENCIO);
+  confere(
+    caso,
+    contexto.suspensoes === suspensoesAntes + 1,
+    `o último som foi pausado, o prazo passou, e o áudio da janela não foi suspenso: ${contexto.suspensoes - suspensoesAntes}`,
+  );
+  const acordadoAntes = contexto.acordar;
+  botao.disparar("click");
+  await assentar();
+  confere(
+    caso,
+    contexto.state === "running" && contexto.acordar > acordadoAntes && contexto.fontes.at(-1)?.tocando === true,
+    "tocar no meio de uma suspensão começou o som sem acordar o áudio da janela, que se suspendeu por baixo "
+      + `dele: ${contexto.state}, ${contexto.acordar - acordadoAntes} pedido(s) de acordar`,
+  );
+  botao.disparar("click");
+  relogio.passar(b.SILENCIO);
+  await volta();
+  confere(caso, contexto.state === "suspended", `pausado de novo, o áudio da janela não voltou a ser suspenso: ${contexto.state}`);
+
+  // Sai o último tocador: o contexto fecha — e não antes.
+  regiao.soltar();
+  confere(caso, contexto.fechamentos === 0, "o áudio da janela fechou com um tocador ainda de pé");
+  outra.soltar();
+  confere(
+    caso,
+    contexto.fechamentos === 1,
+    `o último tocador saiu e o áudio da janela não fechou: ${contexto.fechamentos} fechamento(s)`,
+  );
+
+  // A saída da sessão cala o som que toca e fecha o contexto na hora, sem
+  // esperar cada instância confirmar que parou.
+  const depois = new b.RegiaoDeMod("a/d", d.api, b.raiz());
+  depois.aplicar([{ ...som("c")[0], tocando: true }]);
+  await assentar();
+  const segundo = Audio.ultimo;
+  confere(caso, Audio.criados === 2 && segundo?.fontes[0]?.tocando === true, "depois do fechamento, tocar não criou um contexto novo");
+  b.encerrarOSomDosMods();
+  confere(
+    caso,
+    segundo?.fontes[0]?.parou === true && segundo?.fechamentos === 1,
+    "a saída da sessão não calou o som que tocava ou não fechou o áudio da janela: "
+      + `parou=${segundo?.fontes[0]?.parou}, ${segundo?.fechamentos} fechamento(s)`,
+  );
+  depois.soltar();
+  confere(caso, segundo?.fechamentos === 1, `o áudio da janela foi fechado ${segundo?.fechamentos} vezes`);
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -2229,6 +2490,7 @@ async function oSomPedidoSemGestoEDitoRecusado() {
     oSomQueNaoDecodificaEDito,
     oSomNumCartaoNaoTemBotao,
     oSomPedidoSemGestoEDitoRecusado,
+    oAudioDaJanelaNaoSeguraASaidaAToa,
   ];
   for (const prova of provas) {
     try {

@@ -2361,6 +2361,14 @@ function encerrarOAmbienteDosMods() {
   // quem sai não precisa saber se o outro lado também vai avisar.
   geracaoDaSessao = 0;
 
+  // **O som para agora, e a saída de som do sistema fecha.** Cada instância
+  // solta os tocadores dela só quando o executor confirma que parou — e a
+  // confirmação tem prazo. Até lá, o som da sessão que acabou seguia tocando, e
+  // o áudio da janela seguia segurando a saída do sistema aberta, que no macOS
+  // impede o repouso (I-2 da revisão ampla do Plano 1D). O áudio é da janela,
+  // e não de uma instância: ver `encerrarOSomDosMods`, em `mods-regiao.js`.
+  encerrarOSomDosMods();
+
   for (const [, instancia] of modsCarregados) {
     // **Parar é do produto, e não um pedido ao MOD** — ADR 0049.
     //
