@@ -714,6 +714,13 @@ function desenharApresentacoes() {
     // substitui este ponto» e «você desligou a substituição». A pessoa que
     // apertou «usar apresentação padrão» não tinha como saber se tinha
     // funcionado.
+    //
+    // E o escolhido que substitui só por pessoa desenha quem declarou: a
+    // gestão diz o caso parcial com as palavras da aba DIAGNÓSTICO, que mora
+    // logo abaixo e lê o mesmo registro.
+    const comoApresenta = linha.oSeeleDesenhaOutros
+      ? ", para quem declarou; o SEELE desenha os outros"
+      : linha.automatica ? " (escolha automática)" : "";
     const estado = linha.ausente
       ? `você escolheu ${linha.ausente}, e ele não está de pé agora — o SEELE desenha`
       : linha.escolhidoNaoSubstitui
@@ -721,7 +728,7 @@ function desenharApresentacoes() {
         : linha.nativa
           ? "o SEELE desenha; nenhum MOD substitui este lugar"
           : linha.escolhido
-            ? `apresentado por ${linha.escolhido}${linha.automatica ? " (escolha automática)" : ""}`
+            ? `apresentado por ${linha.escolhido}${comoApresenta}`
             : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`;
     texto.append(
       elemento("span", "mods-id", NOMES_DOS_PONTOS[linha.ponto] ?? linha.ponto),

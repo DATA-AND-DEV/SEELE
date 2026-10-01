@@ -675,7 +675,7 @@ async function oEscolhidoDePeNaoEDitoComoQuemNaoEstaDePe(navegador, servidor) {
 // «Quem desenha o que», na gestão de MODs.
 // ---------------------------------------------------------------------------
 
-/** O texto e os botões da linha de um ponto em «quem desenha o que». */
+/** O texto, a nota de quem perdeu e os botões da linha de um ponto em «quem desenha o que». */
 function linhaDaGestao(pagina, ponto) {
   return pagina.evaluate((nome) => {
     desenharApresentacoes();
@@ -683,6 +683,7 @@ function linhaDaGestao(pagina, ponto) {
       .find((li) => li.querySelector(".mods-id")?.textContent === nome);
     return {
       estado: item?.querySelector(".mods-versao")?.textContent ?? "(sem linha)",
+      nota: item?.querySelector(".nota")?.textContent ?? "",
       botoes: [...(item?.querySelectorAll("button") ?? [])].map((b) => b.textContent),
     };
   }, ponto);
@@ -778,6 +779,53 @@ async function quemDesenhaOQueDizAEscolhaDestaMaquina(navegador, servidor) {
     linha.estado,
     "você escolheu mod/z, e ele não está de pé agora — o SEELE desenha",
     `mod/z, escolhido, não está carregado, e a gestão não disse que ele não está de pé: ${linha.estado}`,
+  );
+
+  // **O escolhido que desenha só quem declarou** (D-I1 da revisão do Lote
+  // Diagnóstico). mod/e substitui só o cartão da Lia (2), e mod/a e mod/b o de
+  // todos. A gestão oferece «USAR mod/e»; apertado, mod/e desenha a Lia e o
+  // SEELE desenha os outros — e a gestão dizia que mod/e «não substitui este
+  // lugar», escondendo «USAR APRESENTAÇÃO DO SEELE» e a nota de quem perdeu,
+  // com a aba DIAGNÓSTICO logo abaixo dizendo que mod/e desenha a Lia.
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.registrar({ id: "mod/e" }, instancia("mod/e"), {
+      ponto: "pessoa.cartao", modo: "substituir", alvo: "2", conteudo: [{ forma: "texto", dentro: "E" }],
+    });
+    escolherApresentacao("pessoa.cartao", "");
+  });
+  linha = await linhaDaGestao(pagina, cartao);
+  assert.ok(
+    linha.botoes.includes("USAR mod/e"),
+    `mod/e substitui o cartão da Lia, e a gestão não ofereceu escolhê-lo: ${linha.botoes.join(", ")}`,
+  );
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", "mod/e"));
+  linha = await linhaDaGestao(pagina, cartao);
+  assert.equal(
+    linha.estado,
+    "apresentado por mod/e, para quem declarou; o SEELE desenha os outros",
+    `mod/e, escolhido, desenha a Lia e o SEELE desenha os outros, e a gestão disse outra coisa: ${linha.estado}`,
+  );
+  assert.ok(
+    linha.botoes.includes("USAR APRESENTAÇÃO DO SEELE")
+      && linha.botoes.includes("DECIDIR AUTOMATICAMENTE")
+      && !linha.botoes.includes("USAR mod/e"),
+    "com mod/e escolhido e desenhando a Lia, a gestão escondeu «usar apresentação do SEELE» ou «decidir "
+      + `automaticamente», ou ofereceu de novo o que já vale: ${linha.botoes.join(", ")}`,
+  );
+  assert.match(
+    linha.nota,
+    /não o receberam: mod\/a, mod\/b\./,
+    `com mod/e escolhido, mod/a e mod/b pediram o cartão e não o receberam, e a gestão não disse: «${linha.nota}»`,
+  );
+  // E a aba DIAGNÓSTICO, que lê o mesmo registro e a mesma escolha, diz o
+  // mesmo: uma não desmente a outra.
+  const naAba = await pagina.evaluate(() => frasesDeQuemPinta(
+    quemPintaCadaPonto().find((l) => l.ponto === "pessoa.cartao"),
+  )[0]);
+  assert.equal(
+    naAba,
+    "desenhado por mod/e, para quem declarou; o SEELE desenha os outros",
+    `com mod/e escolhido, a aba DIAGNÓSTICO não disse que ele desenha a Lia — a gestão e a aba se desmentem: ${naAba}`,
   );
   await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
 

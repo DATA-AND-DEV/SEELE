@@ -476,6 +476,11 @@ class RegistroDeContribuicoes {
    * Sem isto, «Usar apresentação padrão» seria um botão para um problema que a
    * pessoa não tem como ver. O §6 pede os dois juntos.
    *
+   * A linha é a da disputa do **alvo vazio** — a do cartão de todo mundo —,
+   * salvo num caso: o escolhido que não tem candidata ali e substitui algum
+   * outro alvo. Ele desenha quem declarou, e o SEELE desenha os outros
+   * (`oSeeleDesenhaOutros`), como `quemPinta` diz na aba DIAGNÓSTICO.
+   *
    * @param {Map<string, string>} [preferidos] A escolha desta máquina **por
    *   ponto**, neste servidor: `""`, `NATIVO` ou um `id`.
    * @param {(id: string) => boolean} [estaDePe] Se o MOD de um `id` está
@@ -489,20 +494,29 @@ class RegistroDeContribuicoes {
       if (!regra) continue;
       const todas = [...porAlvo.values()].flat();
       const mods = [...new Set(todas.map((c) => c.mod))];
+      const substituem = [...new Set(todas.filter((c) => c.modo === "substituir").map((c) => c.mod))];
       const escolha = preferidos.get(ponto) ?? "";
       const disputa = regra.modos.includes("substituir")
         ? this.escolherSubstituicao(ponto, "", escolha)
         : { escolhida: null, preteridas: [], nativa: false };
       const semCandidata = disputa.ausente ?? "";
-      const escolhidoDePe = Boolean(semCandidata) && estaDePe?.(semCandidata) === true;
+      // **O caso parcial.** O escolhido sem candidata no alvo vazio que pediu
+      // para substituir algum outro alvo vence lá — a escolha ganha de
+      // qualquer prioridade —, e o alvo vazio fica com o SEELE. Ele desenha
+      // quem declarou: nem «não substitui», nem «não está de pé», nem o SEELE
+      // no lugar inteiro.
+      const desenhaQuemDeclarou = Boolean(semCandidata) && substituem.includes(semCandidata);
+      const escolhidoDePe = Boolean(semCandidata)
+        && !desenhaQuemDeclarou
+        && estaDePe?.(semCandidata) === true;
       linhas.push({
         ponto,
         mods,
         // Quem pede para substituir este lugar — e só a estes a gestão oferece
         // «usar»: escolher quem só acrescenta faz o SEELE desenhar.
-        substituem: [...new Set(todas.filter((c) => c.modo === "substituir").map((c) => c.mod))],
+        substituem,
         quantas: todas.length,
-        escolhido: disputa.escolhida?.mod ?? "",
+        escolhido: disputa.escolhida?.mod ?? (desenhaQuemDeclarou ? semCandidata : ""),
         preteridos: [...new Set(disputa.preteridas.map((c) => c.mod))],
         // **Os três estados, para a gestão poder desenhá-los** — R5.
         //
@@ -510,16 +524,21 @@ class RegistroDeContribuicoes {
         // «a substituição está desligada». A tela dizia a mesma frase para as
         // duas, e o botão de voltar ao padrão não tinha como dizer se já
         // estava no padrão.
-        nativa: disputa.nativa === true,
+        nativa: disputa.nativa === true && !desenhaQuemDeclarou,
         automatica: escolha === "",
         // O provedor escolhido que não está mais de pé. A escolha continua
         // registrada — desligar um MOD não é desescolhê-lo —, e a tela precisa
         // poder dizer isso em vez de mostrar «automático».
-        ausente: escolhidoDePe ? "" : semCandidata,
-        // E o escolhido que **está** de pé e não tem candidata aqui: revogou o
-        // que tinha, ou só acrescenta. Dizer que ele não está de pé mandaria
-        // quem escreve o MOD depurar uma carga que não falhou.
+        ausente: escolhidoDePe || desenhaQuemDeclarou ? "" : semCandidata,
+        // E o escolhido que **está** de pé e não pediu para substituir este
+        // ponto em alvo nenhum: revogou a substituição que tinha, só
+        // acrescenta, ou não contribui aqui. Dizer que ele não está de pé
+        // mandaria quem escreve o MOD depurar uma carga que não falhou. O que
+        // substitui só por pessoa não está aqui: é o caso parcial.
         escolhidoNaoSubstitui: escolhidoDePe ? semCandidata : "",
+        // O caso parcial: o escolhido desenha quem declarou, e o SEELE desenha
+        // os outros — o mesmo campo de `quemPinta`.
+        oSeeleDesenhaOutros: desenhaQuemDeclarou,
       });
     }
     return linhas.sort((a, b) => a.ponto.localeCompare(b.ponto));

@@ -1383,6 +1383,75 @@ function anotando(...anotadas) {
   );
 }
 
+// **O escolhido que desenha só quem declarou, na gestão** (D-I1 da revisão do
+// Lote Diagnóstico da correção ampla do Plano 1D). `resumo` decide pela
+// disputa do alvo vazio, e `quemPinta` soma os alvos. mod/a substitui o cartão
+// de todos, mod/b só o da pessoa 2, e esta máquina escolheu mod/b: no alvo
+// vazio ele não tem candidata, e a disputa diz `ausente` — mas ele desenha a
+// pessoa 2. A gestão dizia «você escolheu mod/b, que está de pé e não substitui
+// este lugar — o SEELE desenha», com a aba logo abaixo dizendo «desenhado por
+// mod/b, para quem declarou», e `nativa` escondia «USAR APRESENTAÇÃO DO SEELE»
+// e a nota de quem perdeu enquanto mod/b desenhava a pessoa 2.
+{
+  const caso = "M1 · a gestão · o caso parcial";
+  const registro = new R();
+  registro.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+  registro.registrar({ id: "mod/b" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2" });
+  registro.registrar({ id: "mod/c" }, null, { ponto: "pessoa.cartao", modo: "adicionar", alvo: "2" });
+  const deDe = (id) => ["mod/a", "mod/b", "mod/c"].includes(id);
+  const naGestao = (escolha) => registro.resumo(new Map([["pessoa.cartao", escolha]]), deDe)
+    .find((linha) => linha.ponto === "pessoa.cartao");
+
+  const parcial = naGestao("mod/b");
+  confere(
+    caso,
+    parcial.escolhidoNaoSubstitui === "" && parcial.nativa === false && parcial.ausente === "",
+    "mod/b, escolhido, desenha a pessoa 2, e a gestão o disse como quem não substitui o lugar, ou deu o lugar ao "
+      + `SEELE — e escondeu «USAR APRESENTAÇÃO DO SEELE» e a nota de quem perdeu: ${JSON.stringify(parcial)}`,
+  );
+  confere(
+    caso,
+    parcial.escolhido === "mod/b"
+      && parcial.oSeeleDesenhaOutros === true
+      && parcial.preteridos.join() === "mod/a",
+    "mod/b, escolhido, desenha a pessoa 2 e o SEELE desenha as outras, e a gestão não disse isso — ou não disse que "
+      + `mod/a perdeu: ${JSON.stringify(parcial)}`,
+  );
+  // E a gestão diz o que a aba diz: as duas leem o mesmo registro e a mesma
+  // escolha, e uma não pode desmentir a outra.
+  const naAba = registro.quemPinta("pessoa.cartao", "mod/b", deDe);
+  confere(
+    caso,
+    naAba.substitui.join() === parcial.escolhido && naAba.oSeeleDesenhaOutros === parcial.oSeeleDesenhaOutros,
+    `a gestão e a aba DIAGNÓSTICO disseram coisas diferentes do mesmo cartão: gestão ${JSON.stringify(parcial)}, `
+      + `aba ${JSON.stringify(naAba)}`,
+  );
+
+  // Os controles: o caso parcial é só de quem substitui algum alvo. Quem só
+  // acrescenta continua «não substitui este lugar», quem não está carregado
+  // continua «não está de pé», e o automático e o SEELE escolhido não sobram.
+  const acrescenta = naGestao("mod/c");
+  confere(
+    caso,
+    acrescenta.escolhidoNaoSubstitui === "mod/c" && acrescenta.nativa === true
+      && acrescenta.escolhido === "" && acrescenta.oSeeleDesenhaOutros === false,
+    `mod/c, escolhido, só acrescenta ao cartão, e a gestão o disse como quem desenha alguém: ${JSON.stringify(acrescenta)}`,
+  );
+  const desligado = naGestao("mod/z");
+  confere(
+    caso,
+    desligado.ausente === "mod/z" && desligado.nativa === true && desligado.oSeeleDesenhaOutros === false,
+    `mod/z, escolhido, não está carregado nem registrou nada, e a gestão disse outra coisa: ${JSON.stringify(desligado)}`,
+  );
+  const semSobra = { "o automático": naGestao(""), "o SEELE escolhido": naGestao(NATIVO) };
+  confere(
+    caso,
+    Object.values(semSobra).every((linha) => linha.oSeeleDesenhaOutros === false),
+    "a gestão disse que o SEELE desenha os outros sem caso parcial: "
+      + Object.entries(semSobra).map(([nome, linha]) => `${nome} ${JSON.stringify(linha)}`).join(", "),
+  );
+}
+
 // **O tema da API 3 pinta a sessão, e a aba diz** (I-7 e m-3 da revisão ampla
 // do Plano 1D). O ESTILO, oficial, pinta pela `SeeleUI.tema` sem registrar
 // ponto nenhum. Sem a leitura de `temaDosMods`, a aba dizia «nenhum MOD usa
