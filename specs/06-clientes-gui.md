@@ -46,15 +46,30 @@ conferências para discordar uma da outra.
 
 O que volta da conferência é um veredito, não um booleano: primeiro contato
 cego, primeiro contato verificado, Server já conhecido, convite que discorda de
-um servidor conhecido, e convite que não confere no primeiro contato. Os dois
-últimos são coisas diferentes e a tela os trata como tais. Um convite que não
-confere no primeiro contato **recusa**: a conexão cai, a chave que o TLS tinha
-acabado de fixar é desfeita, e a tela de entrada mostra a esperada e a ofertada
-lado a lado. Um convite que discorda de um servidor já fixado **avisa**: o TOFU já
-provou que é o servidor de sempre, então quem está errado é o link, a sessão
-entra, e a ressalva fica visível dentro dela. Primeiro contato — verificado ou
-cego — também aparece: o app diz o que acabou de fixar, porque fixar em
-silêncio é fixar sem ninguém saber que havia o que conferir. Só o servidor já
+um servidor conhecido, e convite recusado. Os dois últimos são coisas diferentes
+e a tela os trata como tais.
+
+Um convite que não confere no primeiro contato **recusa**, dentro do aperto de
+mão TLS e antes do `Hello`: nada é fixado (a recusa sai antes de a chave ser
+gravada, desde a Tarefa 2 do Plano 1B da 1.0), o convite, a senha e o apelido
+não chegam a quem atendeu, e a tela de entrada mostra a esperada e a ofertada
+lado a lado.
+
+Um convite que discorda de um servidor já fixado **avisa** no endereço que a
+pessoa escolheu, quando ele é de escopo público (o mesmo em qualquer rede): ali
+o TOFU já provou que é o servidor de sempre, então quem está errado é o link, a
+sessão entra, e a ressalva fica visível dentro dela. Num endereço de rede local
+(o `192.168.x.y` de uma casa é o de outra), ou num que ninguém escolheu (a
+resposta do quarto do ponto de encontro, um alternativo do convite), o pino só
+diz que algum servidor já atendeu ali, e o convite que discorda é **recusado**
+como no primeiro contato: dentro do TLS, antes do `Hello`, sem fixar nem
+desfazer nada. A frase da recusa diz o remédio: confirmar o link com quem o
+mandou, ou, para um servidor da lista, colar de novo o link dele ou removê-lo
+da lista. É o adendo de 2026-09-29 ao ADR 0003.
+
+Primeiro contato — verificado ou cego — também aparece: o app diz o que acabou
+de fixar, porque fixar em silêncio é fixar sem ninguém saber que havia o que
+conferir. Só o servidor já
 conhecido, sem nada que o contradiga, não vira frase; repetir "a chave é a
 mesma de sempre" a cada entrada ensina a não ler a linha no dia em que ela não
 for.

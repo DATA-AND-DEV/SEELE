@@ -102,8 +102,13 @@ que encontrar no convite — nunca só o melhor:
 | 4 | **furo de NAT**, com um ponto de encontro apresentando as duas pontas |
 
 O ponto de encontro não vê nada do que é dito: ele apresenta dois endereços um
-ao outro e esquece. O TLS é ponta a ponta, e ele não está nele. `seele-encontro`
-é o programa, e são cinquenta linhas de trabalho útil.
+ao outro, e guarda em memória onde cada anfitrião disse morar — um endereço que
+vale 60 segundos desde o último aviso dele, e que quem volta pela lista pergunta
+antes de tentar. O TLS é ponta a ponta, e ele não está nele: o endereço que o
+ponto devolve é conferido pela impressão digital, dentro do TLS, antes de
+qualquer convite ou senha sair. `seele-encontro` é o programa, e o
+[`docs/ponto-de-encontro.md`](docs/ponto-de-encontro.md) diz o que ele guarda e
+o que um ponto hostil consegue.
 
 O degrau 4 foi exercitado entre duas máquinas em redes diferentes — uma em casa
 atrás de CGNAT, outra numa rede móvel — e o convite passa a carregar o bilhete
@@ -214,10 +219,25 @@ seele://192.168.0.7:8383?fp=782cc791…&convite=2QKPAXPP97W5459H3TPA
 ```
 
 Ele carrega a impressão digital do certificado, então quem recebe **não precisa
-conferi-la por outro canal** — o cliente compara sozinho: num servidor que ele
-ainda não conhece, **recusa** se não bater; num servidor que ele já conhece, avisa
-que o link não é daquele servidor e entra assim mesmo, porque a chave de ontem
-já provou quem é. Do outro lado, `connection --url "seele://…"`.
+conferi-la por outro canal** — o cliente compara sozinho, dentro do aperto de mão
+TLS, antes de o convite, a senha ou o apelido saírem:
+
+- num endereço em que esta máquina ainda não fixou chave nenhuma, **recusa** se
+  não bater, e nada é fixado;
+- no endereço que a pessoa escolheu (o do link), quando ele é **público** (o
+  mesmo em qualquer rede) e esta máquina já fixou uma chave ali, um link que
+  discorda avisa que não é daquele servidor e **entra**: a chave fixada ali já
+  provou quem é (ADR 0003);
+- num endereço de **rede local**, como o `192.168.0.7` do exemplo, ou num
+  endereço que a pessoa não escolheu (o que o ponto de encontro devolveu, um
+  alternativo do convite), o link que discorda da chave fixada ali é
+  **recusado**, dentro do TLS e antes do `Hello`. O `192.168.0.7` de uma casa é
+  o de outra, e quem atende ali pode ser outro servidor (o adendo de 2026-09-29
+  ao ADR 0003). A frase da recusa diz o remédio: confirmar o link com quem o
+  mandou; para um servidor da lista, colar de novo o link dele, ou removê-lo da
+  lista.
+
+Do outro lado, `connection --url "seele://…"`.
 
 A senha do servidor nunca viaja no link, e isso é decisão registrada: senha vale
 para sempre, convite gasto não vale nada.
