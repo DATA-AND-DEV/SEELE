@@ -26,7 +26,10 @@
 //! vez. O ponto sobe uma vez por processo e fica.
 //!
 //! `127.0.0.1` faz o papel do nome: é um endereço escrito sem porta, com a
-//! forma de `encontro.seele.app.br`, e não depende de DNS.
+//! forma de `encontro.seele.app.br`, e não depende de DNS. O ponto também
+//! atende em `[::1]:8384`, com o mesmo quarto, como o de produção atende nas
+//! duas famílias (ver [`ponto_na_porta_padrao`]): a porta tem de estar livre
+//! nas duas, e a máquina precisa do loopback IPv6.
 //!
 //! # A exceção declarada: quando um teste daqui pula
 //!
@@ -68,7 +71,7 @@ use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use seele_core::encontro::{onde_mora_hoje, Marcas, OndeMora, PRAZO_DO_QUARTO};
+use seele_core::encontro::{onde_mora_hoje, EscutaDoQuarto, Marcas, OndeMora, PRAZO_DO_QUARTO};
 use seele_proto::encontro::{moro, Vizinhanca, PORTA_PADRAO, TAMANHO};
 use seele_server::alcance::encontro::Convocacao;
 use seele_server::hospedagem::Hospedagem;
@@ -80,27 +83,42 @@ mod vaga;
 ///
 /// O quarto volta junto para quem precisa saber quando um registro chegou:
 /// [`seele_encontro::Quarto::quantos`] existe para isso.
+///
+/// **As duas famílias e um quarto só, como o `seele-encontro` de produção**
+/// (`crates/seele-encontro/src/main.rs`, «um quarto para as duas»): a escuta
+/// IPv4 em `127.0.0.1:8384`, que é a que o link procura, e uma IPv6 em
+/// `[::1]:8384`. Um anfitrião que registrasse o servidor por uma família e a
+/// escuta pela outra seria visto pelo quarto em dois IPs, e é assim que a
+/// regra da escuta o deixaria de lado; com uma família só, o registro pela
+/// outra se perderia, e o quarto mostraria outro defeito.
 fn ponto_na_porta_padrao() -> (SocketAddr, Arc<seele_encontro::Quarto>) {
     static PONTO: OnceLock<(SocketAddr, Arc<seele_encontro::Quarto>)> = OnceLock::new();
     PONTO
         .get_or_init(|| {
             let escuta = SocketAddr::from(([127, 0, 0, 1], PORTA_PADRAO));
             let quarto = Arc::new(seele_encontro::Quarto::novo());
-            let ponto = seele_encontro::Ponto::abrir_com_quarto(
+            for onde in [
                 escuta,
-                Vizinhanca::TambemAqui,
-                Arc::clone(&quarto),
-            )
-            .unwrap_or_else(|erro| {
-                panic!(
-                    "este teste precisa da porta {escuta} livre, porque é nela que um ponto \
-                     escrito sem porta é procurado. Algo nesta máquina já a ocupa \
-                     (`lsof -nP -iUDP:{PORTA_PADRAO}`): {erro}"
+                SocketAddr::from((Ipv6Addr::LOCALHOST, PORTA_PADRAO)),
+            ] {
+                let ponto = seele_encontro::Ponto::abrir_com_quarto(
+                    onde,
+                    Vizinhanca::TambemAqui,
+                    Arc::clone(&quarto),
                 )
-            });
-            std::thread::spawn(move || {
-                let _ = ponto.servir();
-            });
+                .unwrap_or_else(|erro| {
+                    panic!(
+                        "este teste precisa da porta {onde} livre, porque é na 8384 que um \
+                         ponto escrito sem porta é procurado, e o ponto atende nas duas \
+                         famílias, como o de produção. Algo nesta máquina já a ocupa \
+                         (`lsof -nP -iUDP:{PORTA_PADRAO}`), ou ela não tem o loopback IPv6: \
+                         {erro}"
+                    )
+                });
+                std::thread::spawn(move || {
+                    let _ = ponto.servir();
+                });
+            }
             (escuta, quarto)
         })
         .clone()
@@ -376,6 +394,31 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
     }
     for ponto_do_link in formas {
         let achado = seele_ffi::onde_mora_hoje(&ponto_do_link, IMPRESSAO_DO_ANFITRIAO).await;
+        // **A regra da escuta não cala o anfitrião de verdade.** O `connect`
+        // só usa a escuta que o quarto deu quando o servidor da mesma resposta
+        // mora no mesmo IP (`OndeMora::escuta_do_anfitriao`, o I1 da revisão
+        // final do Plano 1). Os outros testes dela registram no quarto à mão:
+        // os de unidade escrevem os endereços, e `ocupante_da_escuta.rs`
+        // imita o datagrama do servidor. Este é o único em que quem registra
+        // os dois sockets é o anfitrião de verdade (`abrir`, e o `registrar`
+        // de `atender`). Uma mudança no anfitrião que registre o servidor e a
+        // escuta por caminhos diferentes (outra família, outro socket), ou
+        // uma regra que compare mais que o IP, faria o anfitrião de hoje ser
+        // deixado de lado em silêncio: quem chega pelo quarto tentaria só o
+        // aviso do link.
+        //
+        // Antes da asserção dos endereços, que também ficaria vermelha com o
+        // servidor registrado noutra família: esta diz a consequência.
+        assert_eq!(
+            achado.escuta_do_anfitriao(),
+            EscutaDoQuarto::DoAnfitriao(aviso),
+            "o anfitrião de hoje deixou de ser avisado pela escuta do quarto: com o link \
+             «{ponto_do_link}», a escuta que ele registrou não passou pela regra que a confere \
+             com o servidor da mesma resposta, e quem chega pelo quarto manda o `LEVE` só ao \
+             aviso do link, que pode ser de outra abertura. O quarto respondeu {achado:?}. `NaoConfirmada` com o servidor noutro IP é o \
+             anfitrião registrando o servidor e a escuta por caminhos diferentes, ou a regra \
+             comparando mais que o IP"
+        );
         assert_eq!(
             achado,
             OndeMora::Achado {
