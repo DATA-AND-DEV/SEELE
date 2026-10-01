@@ -490,10 +490,11 @@ class RegiaoDeMod {
     /**
      * O som de cada mídia, e o `tocando` que o MOD declarou por último.
      *
-     * `Map<Element, { tocador, tocar, declarado, quer }>`. À parte do nó porque o
-     * som chega depois dele — bytes e decodificação são duas voltas —, e o MOD
-     * pode ter mudado de ideia nesse meio tempo. `tocar` é o do tocador com a
-     * recusa já amarrada (ver `montarSom`). Ver `aplicarTocando`.
+     * `Map<Element, { tocador, tocar, declarado, quer, terminou }>`. À parte do
+     * nó porque o som chega depois dele — bytes e decodificação são duas
+     * voltas —, e o MOD pode ter mudado de ideia nesse meio tempo. `tocar` é o
+     * do tocador com a recusa já amarrada (ver `montarSom`); `terminou` diz se
+     * o último aviso dele foi o fim natural do som. Ver `aplicarTocando`.
      */
     this.somDaMidia = new Map();
     /**
@@ -2115,7 +2116,7 @@ class RegiaoDeMod {
     const estado = {
       elemento: null, som: null, cancelado: false, bytes: 0, bytesDoSom: 0, bolso, ouvintes: [], recusaDita: null,
     };
-    this.somDaMidia.set(elem, { tocador: null, tocar: null, declarado: undefined, quer: false });
+    this.somDaMidia.set(elem, { tocador: null, tocar: null, declarado: undefined, quer: false, terminou: false });
     this.guardar(elem, `midia ${plano.chave}`, () => {
       estado.cancelado = true;
       const tocador = estado.elemento;
@@ -2371,9 +2372,14 @@ class RegiaoDeMod {
       this.dizerRecusaDeMidia(chave, `não tocou: ${motivo}`);
     };
     let pintar = () => {};
+    const entrada = this.somDaMidia.get(elem) ?? {};
     const tocador = new TocadorDeSomDeMod(som, (aviso, comGesto, naoLigou) => {
       if (estado.cancelado || this.solta) return;
       pintar();
+      // Só o fim natural deixa o som pronto para a declaração religar: um
+      // pausado — pela pessoa ou pelo produto — e um recusado, não. Ver
+      // `aplicarTocando`.
+      entrada.terminou = aviso === "terminou";
       if (aviso === "recusada") {
         // Com o clique de quem usa, a frase não diz «sem um gesto»: houve um,
         // e o áudio da janela não ligou mesmo assim. E o que o navegador
@@ -2392,7 +2398,6 @@ class RegiaoDeMod {
     // (`aplicarTocando`) chamam este, e nunca `tocador.tocar` direto. O
     // `catch` é o pedido que rejeita em vez de avisar — a fonte que o WebAudio
     // não abre —, e ele não podia ficar só na anotação.
-    const entrada = this.somDaMidia.get(elem) ?? {};
     entrada.tocador = tocador;
     entrada.tocar = (comGesto) => tocador.tocar(comGesto).catch((falha) => {
       if (estado.cancelado || this.solta) return;
@@ -2428,13 +2433,24 @@ class RegiaoDeMod {
   }
 
   /**
-   * Aplica o `tocando` que o MOD declarou, **se ele mudou** desde a última vez.
+   * Aplica o `tocando` que o MOD declarou, **se ele mudou** desde a última vez
+   * — ou se o som terminou e o MOD continua o declarando.
    *
    * Um `<audio>` recebia `play()` a cada redesenho em que o MOD declarasse
-   * `tocando: true`: um som que tinha terminado recomeçava a cada atualização,
-   * e um que a pessoa pausou voltava sozinho. Com o botão do produto ao lado,
-   * isso seria o MOD desfazendo o que a pessoa acabou de apertar. A
-   * declaração vale quando muda; o botão vale entre uma mudança e outra.
+   * `tocando: true`: um que a pessoa pausou voltava sozinho. Com o botão do
+   * produto ao lado, isso seria o MOD desfazendo o que a pessoa acabou de
+   * apertar. A declaração vale quando muda; o botão vale entre uma mudança e
+   * outra.
+   *
+   * **A exceção é o som que terminou.** O mesmo `play()` recomeçava do começo
+   * um som que tinha chegado ao fim, e a MESA publicada conta com isso: as
+   * trilhas dela têm 30 s, ela não escuta «terminou», e redesenha declarando a
+   * trilha `tocando` — com o `<audio>`, até a 0.15.0, a trilha voltava a cada
+   * redesenho, e só valendo na mudança ela se calava em 30 s (m-4 da revisão
+   * ampla do Plano 1D). Por isso um `tocando: true` sobre um som cujo último
+   * aviso foi «terminou» toca de novo, do começo. Pausado — pela pessoa ou pelo
+   * produto — ou recusado, ele não volta: o último aviso desses não é o fim.
+   * A repetição explícita (`repetir`) é decisão da API 6.
    *
    * **Numa contribuição, uma vez, e não uma por destino**, sem nada aqui:
    * só o destino que tomou os sons dela tem tocador (ver `montarSom`), e nos
@@ -2442,8 +2458,11 @@ class RegiaoDeMod {
    */
   aplicarTocando(elem) {
     const som = this.somDaMidia.get(elem);
-    if (!som?.tocador || som.declarado === som.quer) return;
+    if (!som?.tocador) return;
+    const deNovo = som.quer && som.terminou;
+    if (som.declarado === som.quer && !deNovo) return;
     som.declarado = som.quer;
+    som.terminou = false;
     if (som.quer) som.tocar(false);
     else som.tocador.pausar();
   }

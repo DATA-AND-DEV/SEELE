@@ -2687,6 +2687,132 @@ async function asProtecoesDoTocadorEDaMontagemDoSom() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 15. O som que terminou volta a tocar com o `tocando` declarado.
+// ---------------------------------------------------------------------------
+
+/**
+ * Com o `<audio>`, até a 0.15.0, um `tocando: true` sobre um som que já tinha
+ * **terminado** o tocava de novo no próximo `aplicar` — o `play()` de um
+ * elemento no fim recomeça do começo. A MESA publicada conta com isso: as
+ * trilhas dela têm 30 s, ela não escuta «terminou», e redesenha declarando a
+ * trilha `tocando` enquanto o mestre a quer tocando; a trilha volta a cada
+ * redesenho. Com o WebAudio, a declaração passou a valer só na mudança, e a
+ * trilha se calava em 30 s (m-4 da revisão ampla do Plano 1D). O comportamento
+ * de antes volta para os MODs de hoje; a repetição explícita é da API 6.
+ *
+ * O que **não** volta: um som que a pessoa pausou, e um que o navegador
+ * recusou, não são religados pelo redesenho — a declaração continua valendo
+ * na mudança para eles, e o botão do produto vale entre uma mudança e outra.
+ */
+async function oSomQueTerminouVoltaComOTocandoDeclarado() {
+  const caso = "o som que terminou volta com o tocando declarado";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const trilha = [{ forma: "midia", chave: "trilha", fonte: "som/trilha.wav", tocando: true }];
+  const tocou = (d) => d.ditos.filter((e) => e.nome === "midia" && e.estado === "tocando").length;
+
+  const Audio = audioDeMentira();
+  const b = bancada({ audio: Audio });
+  const d = dono(b, midiaDeSom);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar(trilha);
+  await assentar();
+  const contexto = Audio.ultimo;
+  confere(caso, contexto?.fontes[0]?.tocando === true, "a trilha declarada `tocando` não tocou");
+  if (!contexto?.fontes[0]) return;
+
+  // Ela termina, e o MOD redesenha declarando-a `tocando`, como antes.
+  contexto.fontes[0].onended?.();
+  regiao.aplicar(trilha);
+  await assentar();
+  confere(
+    caso,
+    contexto.fontes[1]?.tocando === true && contexto.fontes[1].de === 0 && tocou(d) === 2,
+    "a trilha terminou, o MOD redesenhou com `tocando: true`, e ela não voltou a tocar do começo — a da MESA "
+      + `se cala em 30 s: ${contexto.fontes.length} fonte(s), «tocando» dito ${tocou(d)} vez(es)`,
+  );
+
+  // Tocando, um redesenho não a recomeça.
+  regiao.aplicar(trilha);
+  await assentar();
+  confere(
+    caso,
+    contexto.fontes.length === 2 && contexto.fontes[1].tocando === true,
+    `um redesenho com a trilha tocando a recomeçou: ${contexto.fontes.length} fonte(s)`,
+  );
+
+  // A pessoa pausa: o redesenho não a religa.
+  const botao = acharTag(regiao.raiz.children[0], "button");
+  botao?.disparar("click");
+  regiao.aplicar(trilha);
+  await assentar();
+  confere(
+    caso,
+    contexto.fontes.length === 2 && contexto.fontes[1].parou === true,
+    `a pessoa pausou a trilha, e o redesenho do MOD a religou: ${contexto.fontes.length} fonte(s)`,
+  );
+  regiao.soltar();
+
+  // Um som que o navegador recusou também não é tentado de novo a cada
+  // redesenho: a recusa é dita uma vez, e quem a desfaz é a mudança.
+  const AudioR = audioDeMentira({ recusaNaHora: true });
+  const br = bancada({ audio: AudioR });
+  const dr = dono(br, midiaDeSom);
+  const recusado = new br.RegiaoDeMod("a/b", dr.api, br.raiz());
+  recusado.aplicar(trilha);
+  await assentar();
+  const pedidos = AudioR.ultimo?.acordar ?? 0;
+  confere(caso, dr.ditos.some((e) => e.nome === "midia" && e.estado === "recusada"), "o som que o navegador recusou não foi dito recusado");
+  recusado.aplicar(trilha);
+  await assentar();
+  confere(
+    caso,
+    (AudioR.ultimo?.acordar ?? 0) === pedidos,
+    `o som que o navegador recusou foi pedido de novo pelo redesenho: ${(AudioR.ultimo?.acordar ?? 0) - pedidos} pedido(s) a mais`,
+  );
+  recusado.soltar();
+
+  // E o fim vale uma volta só: com o áudio da janela suspenso pelo silêncio,
+  // o som que volta espera ele acordar, e um redesenho nesse meio tempo não
+  // pede de novo — senão cada redesenho da espera seria um pedido de acordar.
+  const relogio = relogioDeMentira();
+  let acordar = null;
+  class Lento extends audioDeMentira() {
+    resume() {
+      this.acordar += 1;
+      return new Promise((pronto) => {
+        acordar = () => {
+          this.state = "running";
+          pronto();
+        };
+      });
+    }
+  }
+  const bl = bancada({ audio: Lento, relogio });
+  const dl = dono(bl, midiaDeSom);
+  const lenta = new bl.RegiaoDeMod("a/b", dl.api, bl.raiz());
+  lenta.aplicar(trilha);
+  await assentar();
+  const contextoLento = Lento.ultimo;
+  contextoLento?.fontes[0]?.onended?.();
+  relogio.passar(bl.SILENCIO);
+  await volta();
+  lenta.aplicar(trilha);
+  await assentar();
+  lenta.aplicar(trilha);
+  await assentar();
+  const pedidosDeAcordar = contextoLento?.acordar ?? 0;
+  acordar?.();
+  await assentar();
+  confere(
+    caso,
+    contextoLento?.state === "running" && pedidosDeAcordar === 1 && contextoLento?.fontes[1]?.tocando === true,
+    "o som que terminou foi pedido de novo a cada redesenho enquanto esperava o áudio da janela acordar: "
+      + `${pedidosDeAcordar} pedido(s) de acordar, ${contextoLento?.state}`,
+  );
+  lenta.soltar();
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -2719,6 +2845,7 @@ async function asProtecoesDoTocadorEDaMontagemDoSom() {
     oAudioDaJanelaNaoSeguraASaidaAToa,
     osBytesDoSomChegamPelosDoisCaminhosDoIpc,
     asProtecoesDoTocadorEDaMontagemDoSom,
+    oSomQueTerminouVoltaComOTocandoDeclarado,
   ];
   for (const prova of provas) {
     try {
