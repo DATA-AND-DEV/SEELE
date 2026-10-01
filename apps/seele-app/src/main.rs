@@ -4096,8 +4096,8 @@ fn assentar_fala(
 /// executor o põe no canal como uma linha de `console` (`o MOD lançou: …`,
 /// `erro num temporizador: …`, `erro num ouvinte de evento: …`), pelo mesmo
 /// balde. E a volta que o produto parou por um teto, com a frase do teto
-/// (`a volta passou do prazo de 500 ms e o produto parou o MOD: …`), e não
-/// como «o MOD lançou».
+/// (`esta volta do MOD passou do prazo de 500 ms, e o produto a interrompeu (o
+/// MOD continua de pé): …`), e não como «o MOD lançou».
 ///
 /// **O texto vai em `?`, e não solto na frase.** Ele é de um terceiro, e uma
 /// quebra de linha nele escreveria no registro uma segunda linha com a cara de
@@ -10997,9 +10997,13 @@ mod a_falha_do_mod_chega_ao_registro {
             Duration::from_secs(5),
         );
         assert!(
-            linha_de_erro(&deixou.rastro, &["e o produto parou o MOD"]).is_some(),
-            "a volta que o produto parou não chegou ao seele.log com o id e o teto que ela \
-             passou: {}",
+            linha_de_erro(
+                &deixou.rastro,
+                &["o produto a interrompeu (o MOD continua de pé)"]
+            )
+            .is_some(),
+            "a volta que o produto parou não chegou ao seele.log com o id e dizendo que só ela \
+             foi interrompida — sem isso, quem lê entende que o MOD acabou: {}",
             deixou.rastro
         );
         assert!(

@@ -380,6 +380,11 @@ impl Interrupcao {
     /// de trabalho sem número, porque uma contagem de consultas do motor não
     /// diz nada a quem escreve JavaScript — e o que costuma levar até ele. Sem
     /// «lançou»: quem parou foi o produto.
+    ///
+    /// **E o que parou foi a volta, e não o MOD.** A janela recebe `Falhou` ou
+    /// `Interrompido`, que não encerram a instância: o MOD segue de pé,
+    /// recebendo eventos e temporizadores. Uma frase que dissesse «parou o
+    /// MOD» mandaria quem lê procurar por que ele morreu.
     fn frase_do_teto(&self, teto: Teto) -> String {
         let qual = match teto {
             Teto::Prazo => format!(
@@ -389,8 +394,8 @@ impl Interrupcao {
             Teto::Trabalho => "do teto de trabalho".to_owned(),
         };
         format!(
-            "a volta passou {qual} e o produto parou o MOD: um laço que não sai, ou trabalho \
-             demais para uma volta só"
+            "esta volta do MOD passou {qual}, e o produto a interrompeu (o MOD continua de pé): \
+             um laço que não sai, ou trabalho demais para uma volta só"
         )
     }
 }
@@ -2989,8 +2994,14 @@ mod testes {
              o MOD procura um `throw` que não existe: {texto}"
         );
         assert!(
-            texto.contains(teto) && texto.contains("o produto parou o MOD"),
+            texto.contains(teto),
             "a linha da volta parada não diz que teto ela passou («{teto}»): {texto}"
+        );
+        assert!(
+            texto.contains("o produto a interrompeu (o MOD continua de pé)"),
+            "a linha da volta parada não diz que o produto interrompeu só aquela volta e que o \
+             MOD continua de pé, e quem lê o seele.log entende que o MOD acabou — ele segue \
+             recebendo eventos e temporizadores: {texto}"
         );
         if com_onde {
             assert!(
