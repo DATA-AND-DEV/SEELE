@@ -2379,7 +2379,7 @@ class RegiaoDeMod {
     };
     let pintar = () => {};
     const entrada = this.somDaMidia.get(elem) ?? {};
-    const tocador = new TocadorDeSomDeMod(som, (aviso, comGesto, naoLigou) => {
+    const tocador = new TocadorDeSomDeMod(som, (aviso, comGesto, naoLigou, suspensoPeloProduto) => {
       if (estado.cancelado || this.solta) return;
       pintar();
       // Só o fim natural deixa o som pronto para a declaração religar: um
@@ -2388,11 +2388,15 @@ class RegiaoDeMod {
       entrada.terminou = aviso === "terminou";
       if (aviso === "recusada") {
         // Com o clique de quem usa, a frase não diz «sem um gesto»: houve um,
-        // e o áudio da janela não ligou mesmo assim. E o que o navegador
-        // respondeu vai junto, quando ele respondeu.
+        // e o áudio da janela não ligou mesmo assim. Nem quando quem parou o
+        // áudio foi o próprio produto, pelo silêncio: ali não falta gesto
+        // nenhum, falta a saída acordar. E o que o navegador respondeu vai
+        // junto, quando ele respondeu.
         const frase = comGesto
           ? "o áudio da janela não ligou, nem com o clique de quem usa"
-          : "o som não pôde começar sem um gesto de quem usa";
+          : suspensoPeloProduto
+            ? "a saída de som, que o produto suspendeu no silêncio, não acordou a tempo"
+            : "o som não pôde começar sem um gesto de quem usa";
         recusou(naoLigou === undefined ? frase : `${frase} — ${motivoDaFalha(naoLigou)}`);
         return;
       }
@@ -2515,8 +2519,10 @@ class RegiaoDeMod {
    * `cartoesPintam` diz que aquela montagem não desenha agora.
    *
    * O som fora da tela é pausado: o MOD recebe `pausada`, e a anotação
-   * acompanha. Um `tocar` que ainda esperava o áudio da janela é cancelado. E
-   * a declaração dele é dada por aplicada, para um redesenho com
+   * acompanha. Um `tocar` que ainda esperava o áudio da janela é cancelado, e
+   * o cancelamento é dito: sem fonte, não há «pausada», e o pedido vira a
+   * recusa `SOM_FORA_DA_TELA`, ao MOD, ao registro e ao diagnóstico. E a
+   * declaração dele é dada por aplicada, para um redesenho com
    * `tocando: true` não o religar — nem o religar por ter terminado
    * (`aplicarTocando`).
    *
@@ -2533,9 +2539,14 @@ class RegiaoDeMod {
     for (const [elem, som] of this.somDaMidia) {
       if (!som.tocador) continue;
       if (elem.isConnected && (cartoesPintam || !som.cartao)) continue;
+      const esperava = som.tocador.esperando;
       som.declarado = som.quer;
       som.terminou = false;
       som.tocador.pausar();
+      // O pedido que ainda esperava o áudio da janela foi cancelado pelo
+      // `pausar`, sem fonte para dizer «pausada»: é dito como recusa, e não
+      // desfeito em silêncio.
+      if (esperava) som.recusar(SOM_FORA_DA_TELA);
     }
   }
 
@@ -2753,27 +2764,38 @@ class RegiaoDeMod {
  * não resolve nem recusa: fica esperando um clique que talvez nunca venha. Um
  * segundo e meio transforma a espera em resposta — `recusada`, a palavra que o
  * `<audio>` já usava —, e o MOD pode dizer à pessoa que aperte alguma coisa.
+ *
+ * Só para o áudio que o navegador parou. O que o próprio produto suspendeu
+ * pelo silêncio (`suspenderOSomCalado`) não espera gesto nenhum, e sim a saída
+ * acordar: espera `ESPERA_COM_GESTO_MS`.
  */
 const ESPERA_SEM_GESTO_MS = 1500;
 
 /**
- * Quanto um clique no botão do produto espera o áudio ligar.
+ * Quanto um clique no botão do produto espera o áudio ligar — e quanto
+ * qualquer pedido espera o áudio que o próprio produto suspendeu.
  *
  * Com gesto o navegador deixa, e a espera é só a do sistema abrir a saída — um
  * fone Bluetooth acordando leva mais que o prazo de cima, e recusar um clique
- * de verdade seria o botão mentindo.
+ * de verdade seria o botão mentindo. Depois de uma suspensão do produto a
+ * espera é a mesma, e pela mesma razão: o áudio já tocou nesta janela, e quem
+ * falta acordar é a saída.
  */
 const ESPERA_COM_GESTO_MS = 5000;
 
 /**
- * Por que a declaração de um MOD não liga um som cujo nó não está na tela.
+ * Por que a declaração de um MOD não liga um som cujo lugar saiu da tela.
  *
  * O motivo vai ao MOD, em `porque`, ao registro e ao diagnóstico — ver
- * `aplicarTocando`. Ele nomeia o caso comum, a página fechada, porque é o que
- * quem escreve o MOD precisa reconhecer.
+ * `aplicarTocando` e `calarSonsForaDaTela`. Ele nomeia o caso comum, a página
+ * fechada, porque é o que quem escreve o MOD precisa reconhecer.
+ *
+ * Diz só o que o código faz: um som cujo lugar saiu da tela não é ligado. Não
+ * promete que o produto não toca o que ninguém vê — uma página oculta continua
+ * no documento, e o som dela toca, como o de um `<audio>` escondido tocava.
  */
-const SOM_FORA_DA_TELA = "o lugar deste som não está na tela — uma página fechada, ou um cartão que o SEELE "
-  + "não desenha agora —, e o produto não toca o que ninguém vê";
+const SOM_FORA_DA_TELA = "o lugar deste som saiu da tela — uma página fechada, ou um cartão que o SEELE "
+  + "não desenha agora —, e o produto não liga um som cujo lugar saiu da tela";
 
 /**
  * O contexto de áudio que **toca** os sons de MOD: um por janela, criado no
@@ -2839,8 +2861,15 @@ function contextoDeSomDeMod() {
  * Dez segundos. Curto diante de qualquer prazo de repouso do sistema, que se
  * conta em minutos: o Mac volta a dormir na hora dele. E longo o bastante para
  * os sons curtos de uma mesma jogada, um atrás do outro, acharem a saída ainda
- * aberta — acordá-la custa, e num fone Bluetooth custa mais que um segundo e
- * meio (ver `ESPERA_COM_GESTO_MS`), que seriam o começo de cada som cortado.
+ * aberta.
+ *
+ * **O custo de suspender é o som seguinte esperar a saída acordar.** Ele só
+ * começa quando o áudio volta a ligar — num fone Bluetooth, mais de um segundo
+ * e meio depois —, e começa atrasado, e não cortado: a fonte só nasce com o
+ * áudio ligado (`TocadorDeSomDeMod#tocar`). A espera é a de um clique
+ * (`ESPERA_COM_GESTO_MS`), porque a suspensão foi do produto e não falta gesto
+ * nenhum; se a saída não acordar nesse prazo, o som é recusado dizendo que ela
+ * não acordou a tempo.
  *
  * O Chromium, o motor do WebView2, solta a saída sozinho depois de uns 30 s
  * de silêncio; o WKWebView não a soltou em 302 s (os dois medidos na revisão
@@ -2854,6 +2883,12 @@ const tocadoresDeSomDeMod = new Set();
 let silencioDosSonsDeMod = null;
 /** A suspensão em curso: quem pede para tocar espera ela terminar antes de acordar o áudio. */
 let suspensaoDosSonsDeMod = null;
+/**
+ * O áudio da janela que o próprio produto suspendeu pelo silêncio, até ele
+ * voltar a ligar. Quem pede para tocar sobre ele espera a saída acordar, e não
+ * um gesto — ver `ESPERA_COM_GESTO_MS`.
+ */
+let contextoSuspensoPeloProduto = null;
 
 /** Algum som de MOD está tocando agora? */
 function algumSomDeModTocando() {
@@ -2898,6 +2933,7 @@ function suspenderOSomCalado() {
   const contexto = contextoDosSonsDeMod;
   if (!contexto || contexto.state !== "running") return;
   if (algumSomDeModTocando()) return;
+  contextoSuspensoPeloProduto = contexto;
   const suspensao = Promise.resolve(contexto.suspend?.()).catch(() => {});
   suspensaoDosSonsDeMod = suspensao;
   suspensao.then(() => {
@@ -2910,6 +2946,7 @@ function fecharOSomDosMods() {
   adiarASuspensaoDoSom();
   const contexto = contextoDosSonsDeMod;
   contextoDosSonsDeMod = null;
+  contextoSuspensoPeloProduto = null;
   if (contexto) Promise.resolve(contexto.close?.()).catch(() => {});
 }
 
@@ -3042,13 +3079,15 @@ function bufferDaUri(uri) {
  * `avisar` recebe `"tocando"`, `"pausada"`, `"terminou"` ou `"recusada"` — as
  * palavras que o MOD já recebia do `<audio>`, para nenhum MOD publicado
  * precisar mudar. Na recusa vem junto se o pedido foi um clique de quem usa —
- * quem avisa o registro não pode dizer «sem um gesto» quando houve um —, e o
- * que o navegador respondeu, quando `resume()` recusou em vez de esperar.
+ * quem avisa o registro não pode dizer «sem um gesto» quando houve um —, o
+ * que o navegador respondeu, quando `resume()` recusou em vez de esperar, e se
+ * quem tinha parado o áudio era o próprio produto, pelo silêncio — aí também
+ * não faltou gesto.
  */
 class TocadorDeSomDeMod {
   /**
    * @param {AudioBuffer} som O que `decodificarSomDeMod` devolveu.
-   * @param {(aviso: string, comGesto?: boolean, naoLigou?: *) => void} avisar
+   * @param {(aviso: string, comGesto?: boolean, naoLigou?: *, suspensoPeloProduto?: boolean) => void} avisar
    */
   constructor(som, avisar) {
     this.som = som;
@@ -3061,6 +3100,8 @@ class TocadorDeSomDeMod {
     this.deslocamento = 0;
     /** Conta os pedidos: um `tocar` que ainda espera a política e foi superado não toca. */
     this.pedido = 0;
+    /** O pedido que espera o áudio da janela ligar, enquanto espera; 0 quando nenhum. */
+    this.pedidoEsperando = 0;
     this.solto = false;
     tocadoresDeSomDeMod.add(this);
   }
@@ -3068,6 +3109,15 @@ class TocadorDeSomDeMod {
   /** Está tocando agora? */
   get tocando() {
     return this.fonte !== null;
+  }
+
+  /**
+   * Um pedido de tocar ainda espera o áudio da janela ligar, e não foi
+   * superado? É o que `RegiaoDeMod#calarSonsForaDaTela` pergunta antes de
+   * cancelá-lo: um cancelamento sem fonte não tem «pausada» para dizer.
+   */
+  get esperando() {
+    return this.pedidoEsperando !== 0 && this.pedidoEsperando === this.pedido;
   }
 
   /**
@@ -3096,16 +3146,25 @@ class TocadorDeSomDeMod {
     // O que o navegador respondeu ao pedido de ligar o áudio, quando recusou.
     // **Guardado, e não engolido**: é o motivo que a recusa leva ao registro.
     let naoLigou;
+    this.pedidoEsperando = pedido;
     // Uma suspensão em curso termina antes: o contexto diz «running» até ela
     // resolver, e a fonte que começasse ali seria suspensa logo em seguida —
     // o MOD ouviria «tocando», e ninguém ouviria nada.
     if (suspensaoDosSonsDeMod) await suspensaoDosSonsDeMod;
+    // Quem parou o áudio foi o produto, pelo silêncio? Então não falta gesto:
+    // falta a saída acordar, e a espera é a de um clique.
+    const suspensoPeloProduto = contextoSuspensoPeloProduto === contexto;
     if (contexto.state !== "running") {
       const acordou = Promise.resolve(contexto.resume?.()).catch((falha) => {
         naoLigou = falha;
       });
-      const prazo = comGesto ? ESPERA_COM_GESTO_MS : ESPERA_SEM_GESTO_MS;
+      const prazo = comGesto || suspensoPeloProduto ? ESPERA_COM_GESTO_MS : ESPERA_SEM_GESTO_MS;
       await Promise.race([acordou, new Promise((pronto) => setTimeout(pronto, prazo))]);
+    }
+    if (this.pedidoEsperando === pedido) this.pedidoEsperando = 0;
+    // Ligado de novo, ele deixa de ser o que o produto suspendeu.
+    if (contexto.state === "running" && contextoSuspensoPeloProduto === contexto) {
+      contextoSuspensoPeloProduto = null;
     }
     if (this.solto || pedido !== this.pedido || this.fonte) {
       agendarASuspensaoDoSom();
@@ -3113,15 +3172,16 @@ class TocadorDeSomDeMod {
     }
     if (contexto.state !== "running") {
       agendarASuspensaoDoSom();
-      this.avisar("recusada", comGesto, naoLigou);
+      this.avisar("recusada", comGesto, naoLigou, suspensoPeloProduto);
       return false;
     }
     const de = this.deslocamento < this.som.duration ? this.deslocamento : 0;
     let fonte = null;
     try {
-      // O ganho é do contexto em que o som toca: um fechamento entre dois
-      // `tocar` — o último tocador saiu, a sessão acabou — deixa o de antes
-      // ligado a um contexto que não existe mais.
+      // O ganho é do contexto em que o som toca: a sessão pode ter acabado
+      // entre dois `tocar` (`encerrarOSomDosMods`), e ela fecha o contexto com
+      // este tocador de pé — o ganho de antes ficaria ligado a um contexto que
+      // não existe mais.
       if (this.contexto !== contexto) {
         if (this.ganho) this.ganho.disconnect();
         this.ganho = contexto.createGain();

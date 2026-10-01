@@ -2559,8 +2559,148 @@ async function oAudioDaJanelaNaoSeguraASaidaAToa() {
     "a saída da sessão não calou o som que tocava ou não fechou o áudio da janela: "
       + `parou=${segundo?.fontes[0]?.parou}, ${segundo?.fechamentos} fechamento(s)`,
   );
+
+  // Tocado de novo depois da saída da sessão, o som toca no contexto novo — e
+  // pelo ganho dele: o ganho de antes está ligado a um contexto fechado, e uma
+  // fonte ligada a ele ninguém ouve (S-m6 da revisão do Lote Som).
+  acharTag(depois.raiz.children[0], "button")?.disparar("click");
+  await assentar();
+  const terceiro = Audio.ultimo;
+  const fonteNova = terceiro?.fontes[0];
+  confere(
+    caso,
+    Audio.criados === 3 && fonteNova?.tocando === true && terceiro.ganhos.includes(fonteNova.ligado)
+      && fonteNova.ligado?.ligado === terceiro.destination,
+    "tocado de novo depois da saída da sessão, o som não tocou pelo ganho do contexto novo — o de antes está ligado "
+      + `a um contexto fechado, e ninguém ouviria nada: ${Audio.criados} contexto(s), fonte ligada a um ganho `
+      + `${terceiro?.ganhos.includes(fonteNova?.ligado) ? "do contexto novo" : "de outro contexto"}`,
+  );
   depois.soltar();
   confere(caso, segundo?.fechamentos === 1, `o áudio da janela foi fechado ${segundo?.fechamentos} vezes`);
+}
+
+/**
+ * **A suspensão é do produto, e a recusa não culpa o gesto** (S-m4 da revisão
+ * do Lote Som). Depois de o produto suspender o áudio calado, o som que o MOD
+ * declara de novo — a trilha da MESA, pelo m-4 — espera a saída acordar. Ela
+ * não depende de gesto nenhum: o áudio já tocou nesta janela. Esperando só o
+ * prazo da política, um fone Bluetooth que leva dois segundos para acordar
+ * fazia a trilha ser recusada com «sem um gesto de quem usa», um motivo falso
+ * — e, recusada, ela não voltava mais pelo redesenho.
+ */
+async function aSuspensaoDoProdutoEsperaASaidaAcordar() {
+  const caso = "a suspensão do produto";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const trilha = [{ forma: "midia", chave: "trilha", fonte: "som/trilha.wav", tocando: true }];
+  /** Toca, termina e deixa o prazo de silêncio suspender o áudio: o que o produto faz entre duas trilhas. */
+  const suspensaPeloProduto = async (Audio) => {
+    const relogio = relogioDeMentira();
+    const b = bancada({ audio: Audio, relogio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar(trilha);
+    await assentar();
+    const contexto = Audio.ultimo;
+    contexto?.fontes[0]?.onended?.();
+    relogio.passar(b.SILENCIO);
+    await volta();
+    return { relogio, d, regiao, contexto };
+  };
+
+  // A saída leva dois segundos para acordar: mais que o prazo da política, e a
+  // trilha toca mesmo assim.
+  {
+    let acordar = null;
+    class Lento extends audioDeMentira() {
+      resume() {
+        this.acordar += 1;
+        return new Promise((pronto) => {
+          acordar = () => {
+            this.state = "running";
+            pronto();
+          };
+        });
+      }
+    }
+    const { relogio, d, regiao, contexto } = await suspensaPeloProduto(Lento);
+    confere(caso, contexto?.state === "suspended", `o produto não suspendeu o áudio calado: ${contexto?.state}`);
+    regiao.aplicar(trilha);
+    await assentar();
+    relogio.passar(2000);
+    await assentar();
+    acordar?.();
+    await assentar();
+    const recusas = d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada").map((e) => e.porque);
+    confere(
+      caso,
+      contexto?.fontes[1]?.tocando === true && recusas.length === 0,
+      "o produto suspendeu o áudio calado, a saída levou 2 s para acordar — um fone Bluetooth —, e a trilha "
+        + `declarada foi recusada em vez de esperar: ${contexto?.fontes.length} fonte(s), recusas ${JSON.stringify(recusas)}`,
+    );
+    regiao.soltar();
+  }
+
+  // A saída não acorda nunca: a recusa diz isso, e não que faltou um gesto.
+  {
+    class Mudo extends audioDeMentira() {
+      resume() {
+        this.acordar += 1;
+        return new Promise(() => {});
+      }
+    }
+    const { relogio, d, regiao, contexto } = await suspensaPeloProduto(Mudo);
+    regiao.aplicar(trilha);
+    await assentar();
+    relogio.passar(60_000);
+    await assentar();
+    const dita = d.ditos.find((e) => e.nome === "midia" && e.estado === "recusada");
+    const anotada = regiao.midiasAnotadas()[0];
+    const registrada = d.anotadas.find((t) => t.includes("«trilha»")) ?? "";
+    confere(
+      caso,
+      (contexto?.fontes.length ?? 0) === 1
+        && [dita?.porque, anotada?.motivo, registrada].every((t) => /não acordou a tempo/.test(t ?? "") && !/gesto/.test(t ?? "")),
+      "a saída que o produto suspendeu não acordou, e a recusa culpou o gesto de quem usa ou não disse que a saída "
+        + `não acordou a tempo: ao MOD ${JSON.stringify(dita?.porque)}, ao diagnóstico ${JSON.stringify(anotada?.motivo)}, `
+        + `ao registro ${JSON.stringify(registrada)}`,
+    );
+    regiao.soltar();
+  }
+
+  // A marca vale até o áudio voltar a ligar. Acordado, e parado depois por
+  // outro motivo — o navegador, e não o silêncio do produto —, ele volta a
+  // esperar só o prazo da política: a frase de quem suspendeu seria falsa.
+  {
+    class Alternado extends audioDeMentira() {
+      resume() {
+        this.acordar += 1;
+        if (this.mudo) return new Promise(() => {});
+        this.state = "running";
+        return Promise.resolve();
+      }
+    }
+    const { relogio, d, regiao, contexto } = await suspensaPeloProduto(Alternado);
+    regiao.aplicar(trilha);
+    await assentar();
+    confere(caso, contexto?.fontes[1]?.tocando === true, "o áudio que o produto suspendeu não acordou para a trilha declarada");
+    contexto?.fontes[1]?.onended?.();
+    if (contexto) {
+      contexto.state = "suspended";
+      contexto.mudo = true;
+    }
+    regiao.aplicar(trilha);
+    await assentar();
+    relogio.passar(2000);
+    await assentar();
+    const dita = d.ditos.find((e) => e.nome === "midia" && e.estado === "recusada");
+    confere(
+      caso,
+      /gesto/.test(dita?.porque ?? ""),
+      "o áudio acordou depois da suspensão do produto, o navegador o parou de novo, e o pedido seguinte continuou "
+        + `tratado como se o produto o tivesse suspendido: ${JSON.stringify(dita?.porque)}`,
+    );
+    regiao.soltar();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2836,6 +2976,34 @@ async function oSomQueTerminouVoltaComOTocandoDeclarado() {
   );
   regiao.soltar();
 
+  // O fim que a pessoa já desfez não é mais fim: a trilha termina, a pessoa a
+  // toca pelo botão e a pausa, e o redesenho do MOD não a religa — o último
+  // aviso dela é «pausada», e não «terminou» (S-m1 da revisão do Lote Som).
+  {
+    const AudioP = audioDeMentira();
+    const bp = bancada({ audio: AudioP });
+    const dp = dono(bp, midiaDeSom);
+    const pausada = new bp.RegiaoDeMod("a/b", dp.api, bp.raiz());
+    pausada.aplicar(trilha);
+    await assentar();
+    const contextoP = AudioP.ultimo;
+    contextoP?.fontes[0]?.onended?.();
+    const botaoP = acharTag(pausada.raiz.children[0], "button");
+    botaoP?.disparar("click");
+    await assentar();
+    botaoP?.disparar("click");
+    const antes = contextoP?.fontes.length ?? 0;
+    pausada.aplicar(trilha);
+    await assentar();
+    confere(
+      caso,
+      antes === 2 && (contextoP?.fontes.length ?? 0) === 2,
+      "a trilha terminou, a pessoa a tocou pelo botão e a pausou, e o redesenho do MOD com `tocando: true` a "
+        + `religou como se ela tivesse terminado: ${(contextoP?.fontes.length ?? 0) - antes} fonte(s) nova(s)`,
+    );
+    pausada.soltar();
+  }
+
   // Um som que o navegador recusou também não é tentado de novo a cada
   // redesenho: a recusa é dita uma vez, e quem a desfaz é a mudança.
   const AudioR = audioDeMentira({ recusaNaHora: true });
@@ -2994,6 +3162,67 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     regiao.soltar();
   }
 
+  // O pedido que ainda esperava o áudio da janela ligar quando a página fechou:
+  // calar o cancela, e o cancelamento é dito — recusado, com o motivo, ao MOD,
+  // ao registro e ao diagnóstico —, e não desfeito em silêncio (S-m5 da
+  // revisão do Lote Som). Sem isto, o MOD declarou `tocando` e não ouviu
+  // «tocando», nem «pausada», nem «recusada».
+  {
+    const relogio = relogioDeMentira();
+    let acordar = null;
+    class Lento extends audioDeMentira({ semGesto: true }) {
+      resume() {
+        this.acordar += 1;
+        return new Promise((pronto) => {
+          acordar = () => {
+            this.state = "running";
+            pronto();
+          };
+        });
+      }
+    }
+    const b = bancada({ audio: Lento, relogio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([trilha]);
+    await assentar();
+    confere(caso, typeof acordar === "function", "a trilha declarada `tocando` não pediu ao áudio da janela que ligasse");
+    regiao.raiz.remove();
+    regiao.calarSonsForaDaTela();
+    acordar?.();
+    await assentar();
+    const recusa = ditos(d, "trilha", "recusada")[0];
+    confere(
+      caso,
+      (Lento.ultimo?.fontes.length ?? 0) === 0 && /tela/.test(recusa?.porque ?? "")
+        && regiao.midiasAnotadas().some((m) => m.situacao === "recusada" && /tela/.test(m.motivo))
+        && d.anotadas.some((t) => t.includes("«trilha»") && /tela/.test(t)),
+      "a página fechou com a trilha esperando o áudio da janela ligar, e o pedido foi desfeito em silêncio, ou tocou: "
+        + `${Lento.ultimo?.fontes.length} fonte(s), ao MOD ${JSON.stringify(recusa)}, ao diagnóstico `
+        + `${JSON.stringify(regiao.midiasAnotadas())}, ao registro ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+
+    // Um pedido que o próprio MOD já tinha desligado não é de ninguém: a
+    // página que fecha depois não o recusa.
+    const b2 = bancada({ audio: Lento, relogio });
+    const d2 = dono(b2, midiaDeSom);
+    const desligado = new b2.RegiaoDeMod("a/b", d2.api, b2.raiz());
+    desligado.aplicar([trilha]);
+    await assentar();
+    desligado.aplicar([{ ...trilha, tocando: false }]);
+    desligado.raiz.remove();
+    desligado.calarSonsForaDaTela();
+    await assentar();
+    confere(
+      caso,
+      ditos(d2, "trilha", "recusada").length === 0,
+      "o MOD desligou o `tocando` antes de o áudio ligar, a página fechou depois, e o pedido que já não era de "
+        + `ninguém foi recusado: ${JSON.stringify(ditos(d2, "trilha", "recusada"))}`,
+    );
+    desligado.soltar();
+  }
+
   // O som que terminou na tela não volta pelo redesenho com a página fechada
   // — nem recusado: o fim que a declaração religaria (m-4) é o da tela.
   {
@@ -3118,6 +3347,7 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     oSomNumCartaoNaoTemBotao,
     oSomPedidoSemGestoEDitoRecusado,
     oAudioDaJanelaNaoSeguraASaidaAToa,
+    aSuspensaoDoProdutoEsperaASaidaAcordar,
     osBytesDoSomChegamPelosDoisCaminhosDoIpc,
     asProtecoesDoTocadorEDaMontagemDoSom,
     oSomQueTerminouVoltaComOTocandoDeclarado,
