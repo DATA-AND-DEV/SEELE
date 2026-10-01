@@ -7328,7 +7328,19 @@ verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
      0.15.0 — o silêncio até lá não é defeito do WebAudio;
    - o caso B (o `TOCAR` do MOD, sem gesto) pode não dar «recusada»: o wry
      0.55.1 nasce com `autoplay: true`, e nem o Tauri nem o app o mudam. Quem
-     medir anota o que vir, sem forçar a expectativa.
+     medir anota o que vir, sem forçar a expectativa;
+   - **o macOS 11, ou «não medido».** O pacote declara `minimumSystemVersion`
+     11.0 (`apps/seele-app/tauri.conf.json`), e o WebKit dele só tem os
+     construtores com prefixo. O recuo `webkitAudioContext` /
+     `webkitOfflineAudioContext` (`mods-regiao.js`) nunca rodou em lugar
+     nenhum: as bancadas usam o Chromium, e a Task 9 roda num macOS novo.
+     Quem não tiver um macOS 11 escreve «macOS 11: não medido» no
+     `registro.md`.
+
+     ```sh
+     grep -n "minimumSystemVersion" apps/seele-app/tauri.conf.json
+     grep -n "webkitOfflineAudioContext\|webkitAudioContext" apps/seele-app/ui/mods-regiao.js
+     ```
 
 3. **A metade WebView2, numa máquina Windows.** A mesma medição da Task 9 — o
    mesmo MOD e os mesmos casos —, com `powercfg /requests`, num terminal de
@@ -7385,8 +7397,14 @@ verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
    conserto proposto é um bloco «a região e as páginas de cada MOD» na aba,
    somando `regioesDosMods` e `superficiesDosMods` sem o filtro de cartão.
 
+   **E o fundo de uma tela também não entra (T2 m4 do 1D).**
+   `buscarFundoDaTela` carrega a imagem e não chama `anotarMidia`, então um
+   fundo de tela recusado não é contado por ponto nenhum da aba. É lacuna do
+   plano 1D, e cabe no mesmo bloco.
+
    ```sh
    grep -n "midiasAnotadas()" apps/seele-app/ui/*.js    # os dois leitores, em base.js, e a definição
+   grep -n "buscarFundoDaTela(elem, plano) {" -A 52 apps/seele-app/ui/mods-regiao.js | grep -c anotarMidia   # 0: a função inteira
    ```
 
 6. **m-4, para a API 6 · `repetir`, ou o contrato de `tocando`.** Hoje um
@@ -7417,9 +7435,23 @@ verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
      vezes numa sala de 64 pessoas. Fechar pede que `midia_do_mod` não monte o
      `uri` quando o papel é `som`.
 
+   - **O teto do som decodificado é por bolso, e um MOD tem muitos bolsos
+     (T8 do 1D).** Os 64 MiB valem para a região de um MOD, para cada
+     superfície dele (cada página, painel ou diálogo monta a sua região) e
+     para cada contribuição. Um MOD mantém até 12 superfícies
+     (`TETO_DE_SUPERFICIES`) e 128 contribuições (`TETO_DE_CONTRIBUICOES`) de
+     pé: em tese, 128 × 64 MiB só nas contribuições, e mais 12 × 64 MiB nas
+     superfícies. O doc de `LIMITES_DO_CARTAO.bytesDeSomDecodificado` diz o
+     das contribuições; o de `LIMITES_DA_REGIAO.bytesDeSomDecodificado` diz
+     «somados nesta região» e não diz o das superfícies. O conserto barato é
+     não decodificar o som de uma contribuição declarado com `tocando:
+     false` até alguém pedir para tocar.
+
    ```sh
    grep -n "^fn midia_do_mod\|^fn som_do_mod" apps/seele-app/src/main.rs
    grep -n "atravessa duas vezes" apps/seele-app/ui/base.js apps/seele-app/ui/mods-regiao.js
+   grep -n "^const TETO_DE_SUPERFICIES\|^const TETO_DE_CONTRIBUICOES" apps/seele-app/ui/mods-*.js
+   grep -n "Bytes de som \*\*decodificado\*\* somados nesta região" apps/seele-app/ui/mods-regiao.js
    ```
 
 8. **S-m7 · O som de uma contribuição sem alvo pertence ao destino que o
@@ -7440,8 +7472,565 @@ verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
    grep -n "Numa contribuição, os sons moram num destino só" apps/seele-app/ui/mods-regiao.js
    ```
 
+9. **Docs-m2 do 1D · No automático misto, QUEM DESENHA O QUE nomeia um MOD
+   só.** Dois MODs substituem `pessoa.cartao`: mod/a no cartão de todos (sem
+   alvo) e mod/b, com prioridade maior, no da pessoa 2. Sem escolha desta
+   máquina, a gestão diz «apresentado por mod/a (escolha automática)», sem
+   nota, enquanto mod/b desenha a pessoa 2. Um terceiro, mod/e, que pede a
+   pessoa 3 com prioridade menor e perde para mod/a, também não aparece na
+   nota. A frase vem do alvo vazio (`resumo` pergunta a disputa de `""`), e
+   a aba DIAGNÓSTICO, na mesma tela, diz a verdade («desenhado por mod/a e
+   mod/b, cada um para quem declarou»); os botões «USAR mod/b» e «USAR
+   mod/e» sinalizam as outras. O defeito é anterior ao 1D, e nenhum par de
+   MODs publicados o provoca hoje. O conserto é a gestão dizer «automática:
+   mod/a para todos, mod/b para quem declarou», com prova no portão de node
+   (a `contribuicoes-e-camadas.cjs` já roda `oQueAGestaoDiz` sobre o
+   registro de verdade). O comando de baixo roda os dois casos, este e o do
+   item 10, sobre o registro e a função da gestão de verdade; medido em
+   01/10/2026, ele imprime:
+
+   ```
+   9 · a gestão: apresentado por mod/a (escolha automática)
+   9 · a pessoa 2: mod/b
+   10 · a gestão: você escolheu mod/d, que está de pé e não substitui este lugar — o SEELE desenha
+   ```
+
+   ```sh
+   node - <<'EOF'
+   const fs = require("node:fs"), vm = require("node:vm");
+   const ui = (nome) => fs.readFileSync(`apps/seele-app/ui/${nome}`, "utf8");
+   const ctx = vm.createContext({ console, queueMicrotask: () => {} });
+   vm.runInContext(ui("mods-runtime.js") + "\n" + ui("mods-contribuicoes.js"), ctx);
+   const camada = ui("camada-mods.js");
+   const de = (a, b) => camada.slice(camada.indexOf(a), camada.indexOf(b, camada.indexOf(a)));
+   vm.runInContext(de("function oQueAGestaoDiz(", "/**\n * O valor que quer dizer"), ctx);
+   vm.runInContext(de("const APRESENTACAO_NATIVA = ", "/** Uma linha: o nome em palavra"), ctx);
+   ctx.cartoesDosMods = new Map();
+   const cartao = (registro, escolha) => {
+     const linha = registro.resumo(new Map([["pessoa.cartao", escolha]]), () => true)
+       .find((l) => l.ponto === "pessoa.cartao");
+     return ctx.oQueAGestaoDiz(linha, escolha).estado;
+   };
+   // Item 9: mod/a no cartão de todos; mod/b, com mais prioridade, no da pessoa 2.
+   const misto = vm.runInContext("new RegistroDeContribuicoes()", ctx);
+   misto.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+   misto.registrar({ id: "mod/b" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 10 });
+   console.log("9 · a gestão:", cartao(misto, ""));
+   console.log("9 · a pessoa 2:", misto.escolherSubstituicao("pessoa.cartao", "2", "").escolhida.mod);
+   // Item 10: mod/d, da API 3, só acrescenta no cartão e tem cartões; esta máquina o escolheu.
+   const api3 = vm.runInContext("new RegistroDeContribuicoes()", ctx);
+   api3.registrar({ id: "mod/d" }, null, { ponto: "pessoa.cartao", modo: "adicionar" });
+   ctx.cartoesDosMods.set("mod/d", new Map());
+   console.log("10 · a gestão:", cartao(api3, "mod/d"));
+   EOF
+   ```
+
+10. **Docs-m3 do 1D · Com um MOD da API 3 escolhido, a gestão diz que o
+    SEELE desenha e cala os cartões dele.** mod/d, da API 3, desenha pelos
+    cartões dele (`SeeleUI.cartoes`) e só acrescenta em `pessoa.cartao`.
+    Escolhê-lo na gestão é o que faz os cartões dele valerem sozinhos
+    (`modsDeCartaoQueValem`, em `base.js`), e a gestão diz «você escolheu
+    mod/d, que está de pé e não substitui este lugar — o SEELE desenha»: o
+    cartão é do SEELE, e os cartões que a escolha fez valer não são ditos. O
+    cético da revisão final não o reproduziu pela tela; o comando do item 9
+    o reproduz pela função da gestão (a linha «10 ·»). O conserto é a frase
+    do caso «escolhido de pé sem substituição» dizer os cartões da API 3
+    quando o escolhido os tem, com a mesma prova no portão de node.
+
 **Quando fecha.** A medição fecha quando
 `docs/evidencias/som-de-mod-wkwebview/registro.md` tiver o «Antes», o
-«Depois» com os casos novos e a linha do WebView2 respondida. Os itens 5 a 8
+«Depois» com os casos novos e a linha do WebView2 respondida. Os itens 5 a 10
 ficam aqui até um plano os tomar, e o disparo do item 4 vale para toda
 publicação enquanto as bancadas de navegador só rodarem por ele.
+
+## 50 · Quem sai pelo app continua no roster dos outros por cerca de 20 segundos
+
+**Aberta em 2026-10-01**, na revisão final do Plano 1 da 1.0 (o I6). **Não é
+regressão:** a v0.15.0 publicada sai pelo mesmo caminho (`git show
+e2fac4dab:crates/seele-ffi/src/lib.rs`, o `client.sair().await` no fim de
+`drive`).
+
+**Sintoma.** Quem aperta SAIR, ou fecha a janela, só some do roster dos
+outros depois de perto de 20 segundos, o prazo de ociosidade do servidor. Até
+lá, para todo mundo na sala, a pessoa continua lá.
+
+**A causa, lida no código e medida.**
+
+- `Connection::disconnect` (`crates/seele-ffi/src/lib.rs`) manda o
+  `Command::Shutdown`, e `drive` sai do laço e termina com
+  `client.sair().await`.
+- `Enlace::sair` (`crates/seele-core/src/enlace.rs`) só põe o
+  `Comando::Sair` na fila do motor e volta.
+- `drive` devolve, e o runtime de thread única que a conexão montou
+  (`new_current_thread`) cai em seguida, sem rodar a tarefa do motor nem o
+  driver do quinn. O `CONNECTION_CLOSE` não sai, e o servidor só fica sabendo
+  pelo prazo de ociosidade.
+- O SAIR da tela (`invoke("disconnect")`, em `tela-sessao.js`) e o
+  `despedir_se` do fechamento do app (`apps/seele-app/src/main.rs`, no
+  `ExitRequested`) caem nesse caminho. **O doc de `despedir_se` promete o
+  `CONNECTION_CLOSE`**, e a medida diz que ele não sai.
+
+**A medida.** A revisão final escreveu, numa cópia, um teste de conformidade
+em que um cliente entra e sai por `disconnect` (`saida_sem_despedida.rs`, que
+não entrou no repositório): quem ficou viu a pessoa sumir do roster em
+**19,98 s**, e o cético, rodando de novo, mediu **20,98 s**. O relatório da
+Task 4 do Plano 1B já tinha medido o `wait_idle` do servidor em 20,001 s e
+20,002 s depois de `disconnect`, contra 4 µs depois de `shutdown`; o doc de
+`esperar_o_servidor_fechar` (`crates/seele-conformance/tests/volta_pela_trilha.rs`)
+guarda os 20,0 s.
+
+**O vizinho, do Plano 1C.** O `ExitRequested` só desconecta: ele não para os
+MODs, e a linha da parada de um MOD pode não chegar ao `seele.log` quando o
+app fecha. Isto não foi medido.
+
+**Uma sessão separada está medindo a causa** (aberta pelo dono em
+01/10/2026, durante a revisão final, a partir do chip `task_9b4579dc`). O que
+ela medir fecha ou estreita esta entrada.
+
+**O conserto proposto.** `Enlace::sair` esperar a tarefa do motor terminar
+(um `oneshot` disparado no `encerrar`), e `drive` esperar `endpoint.wait_idle()`
+com um teto curto, perto de 300 ms, antes de devolver. A prova é um teste de
+conformidade em que quem ficou vê a pessoa sair do roster em menos de 2 s,
+provado por reversão: sem a espera, ele volta aos 20 s. O doc de
+`despedir_se` passa a dizer o que acontece de verdade.
+
+```sh
+grep -n "client.sair().await" crates/seele-ffi/src/lib.rs           # o último passo de `drive`
+grep -n "pub async fn sair(&self)" -A 3 crates/seele-core/src/enlace.rs   # só enfileira
+grep -n "^fn despedir_se" -B 12 apps/seele-app/src/main.rs           # o doc que promete o CONNECTION_CLOSE
+```
+
+No app, com duas máquinas no mesmo servidor: numa, SAIR; na outra, contar
+até a pessoa sumir da lista. Perto de 20 s.
+
+**Quando fecha.** Com o conserto e o teste de 2 s, ou com a medida da sessão
+separada achando outra causa, escrita aqui.
+
+## 51 · O que o Plano 1 da 1.0 deixou para depois, fora das pendências 49 e 50
+
+**Aberta em 2026-10-01**, na revisão final do Plano 1 (o m6). O registro de
+decisões de cada parte do plano (1A, 1B, 1C, 1D e 1E) mora em
+`.superpowers/sdd/`, que o git ignora, e some junto com a árvore de trabalho.
+O que a triagem da revisão final marcou como ainda não versionado, e que
+continua aberto no código, mora aqui, com o comando que o mostra. O que o 1D
+deixou está na pendência 49; a saída sem despedida, na 50; a consulta ao
+quarto em paralelo com os candidatos da LAN, na linha do Plano 5 do índice
+(`docs/superpowers/plans/2026-09-29-1.0-indice.md`).
+
+**Fechados pela própria revisão final, e por isso fora daqui:** o guarda do
+ternário de quem confirmou a chave (C-M2 do 1B, `3ab858a`), o braço `None` de
+`conferir` (R-3 do 1E, `9740efe`), a promessa rejeitada sem tratamento no
+`seele.log` (I2 do 1C, `dc20419`), a fiação de `aceita_origem` (`4fdaec2`), a
+`ajustes-v013` e os passos sem `!cancelled()` (`fa82486`), o item 4 da
+pendência 49 que dizia «as duas rodam» (Docs-m6 do 1D, `4d910e3`), o `LEVE`
+que sai antes do TLS nas frases públicas (T6 do 1B, `82654a2`), e, no mesmo
+lote desta entrada, o roteiro da Task 9 do 1D (Docs-m1 e Docs-m4: o VOLTAR, o
+primeiro momento do repouso do Mac e o toque longo) e a faixa git do porquê
+da cadeia da Tarefa 7 no portão G1 (C-M1 do 1B). A quebra de linha no doc
+de `InviteMismatch` (T6 do 1B, `types.rs:183-188` na época) não se reproduz
+no HEAD: o Lote B do 1B reescreveu aqueles docs.
+
+Nenhum item daqui segura a release. Cada um tem o comando que o mostra, e o
+conserto que a revisão propôs. Estão na ordem em que atrapalham: primeiro o
+que o produto sabe e não conta, depois os testes que não provam o que dizem,
+e por fim o texto.
+
+### O produto sabe e não conta, ou conta errado
+
+1. **F-Mods-m4 e FP-3 da revisão final · O `Falhou` da promessa rejeitada.**
+   - **Uma rejeição que o MOD pega ainda deixa a gestão em «falhou».** O
+     QuickJS chama o rastreador na hora da rejeição, e uma função `async` que
+     lança antes do primeiro `await` rejeita antes de o `await` de quem chamou
+     prender o tratamento. O rastreador manda o `ParaOFora::Falhou` na hora,
+     antes da segunda chamada (`ja_tratada`), e a gestão marca o MOD como
+     «falhou-rodando» (`aoFalhar`, em `base.js`). A linha do `seele.log` já
+     espera o fim da volta e não sai (`RejeicoesDaVolta`, em `executor.rs`);
+     o `Falhou`, não. O cenário é o `await SeeleMods.request(…)` dentro de
+     um `try`, com uma recusa síncrona do prelúdio — `fila-cheia`,
+     `mensagem-grande`, `too-many-requests` —, como a `fila-cheia` de
+     `docs/validacao-nativa-api4-d96d71a.md`. O conserto natural é o `Falhou`
+     sair pela mesma espera, no fim da volta, só se ninguém pegou.
+   - **E ele leva o texto inteiro.** O `Falhou` vai à janela com o texto do
+     que o MOD lançou, sem o corte do registro: a cota dos avisos
+     (`AVISOS_NA_FILA`) o limita em número, e não em tamanho. Já era assim
+     na v0.15.0. O conserto é cortar o texto no mesmo teto do registro, junto
+     com o de cima.
+
+   ```sh
+   grep -n 'ParaOFora::Falhou(format!("{REJEITADA_SEM_TRATAMENTO}' -B 3 -A 12 apps/seele-app/src/executor.rs   # o Falhou sai antes de `guardar`
+   grep -n "falhou-rodando" apps/seele-app/ui/base.js
+   ```
+
+2. **1B, revisão final · O impostor que falha a assinatura sai como «versão
+   incompatível».** Quem manda o certificado certo e falha a assinatura do
+   TLS chega como `ConnectError::TlsRefused`, que a FFI traduz por
+   `Refused { reason: Incompatible }`: a tela manda atualizar o SEELE nas duas
+   máquinas. O núcleo sabe (o `warn!` e a linha do pin desfeito no
+   `seele.log`), e o `Hello` não sai. É raro, e separar pede classificar o
+   erro do rustls (assinatura × ALPN e versão), que cabe na «recusa legível»
+   do Plano 3.
+
+   ```sh
+   grep -n "ConnectError::TlsRefused | seele_core::ConnectError::ProtocolViolation" -A 4 crates/seele-ffi/src/lib.rs
+   grep -n "^  Incompatible:" -A 2 apps/seele-app/ui/frases.js
+   ```
+
+3. **P9 do 1B · A recusa pela impressão numa reconexão sai como «credencial
+   recusada».** Na volta da bateria, a recusa pela impressão vira
+   `Motivo::Recusado("InviteMismatch …")`, que a FFI traduz por
+   `EndReason::CredentialRejected`: a pessoa vai conferir uma senha que está
+   certa. A sessão acaba, que é o certo; a frase não. É raro (um servidor que
+   troca de identidade no meio de uma sessão), o plano 1B o registra em
+   «Compatibilidade» (a reconexão da bateria), e o conserto muda o tipo da
+   FFI.
+
+   ```sh
+   grep -n "Motivo::Recusado(_) => EndReason::CredentialRejected" crates/seele-ffi/src/lib.rs
+   grep -n "recusada |= texto.contains(\"InviteMismatch\")" crates/seele-core/src/enlace.rs
+   ```
+
+4. **m10 e m11 do 1C · Três recusas do roteador de MODs não chegam direito ao
+   registro.** A recusa de capacidade (`podePedir`: «`contribuir` não existe
+   na API 3») e a do tipo desconhecido respondem ao MOD e não ao registro. E
+   o `catch` de `atenderOMod` registra a frase de tela (`fraseDeErro`): uma
+   recusa de região, superfície, contribuição ou cartão sai como «ALGO FALHOU
+   E ESTE APP NÃO SABE EXPLICAR O QUÊ», com o motivo de verdade depois dela. O
+   conserto: `registrarNoAnfitriao("atender-mod", …, "aviso", mod.id)` nos
+   dois ramos, e `motivoDaFalha(falha)` no registro, deixando `fraseDeErro`
+   só para a resposta ao MOD.
+
+   ```sh
+   grep -n "if (!podePedir(mod, m.tipo))" -A 6 apps/seele-app/ui/base.js
+   grep -n "a API de MODs não conhece" apps/seele-app/ui/base.js
+   grep -n "fraseDeErro(falha) : String" apps/seele-app/ui/base.js
+   ```
+
+5. **m15 do 1C · A frase da janela vai sem aspas, e um MOD forja `mod_id=` na
+   linha.** `registrar_da_janela` escreve o texto do MOD como a mensagem da
+   linha, antes de `onde=` e `mod_id=`: medido pela revisão ampla do 1C, um
+   texto com `onde=… mod_id=vitima/mod` deixou dois `mod_id=` na mesma linha.
+   O conserto (a frase num campo próprio, `frase = ?o_que`) muda a forma da
+   linha, e o roteiro da Task 9 do 1D procura a forma de hoje: os dois mudam
+   juntos.
+
+   ```sh
+   grep -n '"aviso" => tracing::warn!(onde = %onde, mod_id, "{o_que}")' apps/seele-app/src/main.rs
+   ```
+
+6. **m6 do 1C e T6 · Um substituto UTF-16 solto faz a recusa sumir.** O texto
+   que vai a `registrar_da_janela` não passa por `toWellFormed()`: um MOD com
+   uma chave como `"avatar\uD800"` faz o `serde_json` do Tauri recusar o
+   corpo do invoke, e o `.catch(() => {})` engole a linha. E
+   `dataset.chaveDoMod` ainda corta a chave por índice, o que pode partir um
+   par. O gatilho exige UTF-16 malformado vindo do MOD; os MODs publicados
+   usam chaves literais.
+
+   ```sh
+   grep -n 'oQue: String(o_que), modId' apps/seele-app/ui/base.js
+   grep -n "elem.dataset.chaveDoMod = plano.no.chave.slice(0, 120)" apps/seele-app/ui/mods-regiao.js
+   ```
+
+7. **m2 do 1C · Uma imagem com cabeçalho válido e corpo corrompido fica
+   calada** no retrato (o `<img>` sem ouvinte de `error`), no fundo de mídia e
+   no avatar contribuído (os dois por CSS), e no fundo de tela (só
+   `onload`). O sniff do Rust só olha o cabeçalho. O conserto é
+   `img.decode()` com a recusa dita, e um ouvinte de `error` no retrato.
+
+   ```sh
+   grep -n "montarRetrato(elem, plano) {" -A 50 apps/seele-app/ui/mods-regiao.js | grep -c "addEventListener"   # 0
+   ```
+
+8. **m1 do 1C e T7 M1 · As portas da janela e da mídia não têm teto de
+   vazão.** O `console` tem balde (32 linhas, depois 4 por segundo); a porta
+   da janela, as recusas de mídia e a mídia servida não. Um MOD feito para
+   isso escreve, pela conta da revisão ampla do 1C, de 12 a 390 MB por hora
+   num `seele.log` que só gira na abertura. E a montagem de contribuição que
+   lança repete o WARN a cada redesenho. O conserto é um balde por MOD na
+   porta, o `BaldeDoConsole` num mapa pela chave de `id_no_registro`.
+
+   ```sh
+   grep -n "^fn registrar_da_janela\|^fn recusa_de_midia_dita\|^fn midia_servida_dita" apps/seele-app/src/main.rs
+   ```
+
+9. **Fecho do 1C (F2-F5, R1 e A3) · «N comandos recusados» conta menos do que
+   recusa.** A tela diz «N comandos recusados por serem de uma sessão
+   encerrada» (`camada-mods.js`), e o contador `comandos_de_geracao_morta`
+   não conta `liberar_reserva`, `mod_nativo_colher` e `mod_nativo_entregar`,
+   `enviar_imagem_mod` e `ler_imagem_mod`, nem a segunda conferência de
+   `escolher_para_o_mod`. O conserto é contar em todos, ou a frase dizer
+   «pelo menos».
+
+   ```sh
+   grep -n "comandos recusados por serem de uma sessão encerrada" apps/seele-app/ui/camada-mods.js
+   grep -n "^fn liberar_reserva" -A 12 apps/seele-app/src/main.rs   # recusa a geração morta sem contar
+   ```
+
+10. **m14 do 1C e Fecho F2 · O doc do escape ANSI, e o `mod_id` cru.** O doc
+    de `motivo_no_registro` diz que o formatador escapa ANSI em `%`; no
+    tracing-subscriber 0.3.23 só a mensagem é escapada, e um campo em `%` sai
+    cru. E o doc de `id_no_registro` fala em «três portas», enquanto
+    `mod_request`, `midia_em_bytes` e `escolher_para_o_mod` escrevem
+    `mod_id = %id` sem passar por ele. O conserto: a frase do doc, e o id
+    dessas portas por `id_no_registro`.
+
+    ```sh
+    grep -n "o formatador do registro escapa ANSI" apps/seele-app/src/main.rs
+    grep -n "mod_id = %id" apps/seele-app/src/main.rs
+    ```
+
+11. **m5 e m12 do 1C · `ler_imagem_mod`.** O guarda de fonte
+    (`os_quatro_comandos_de_midia_passam_pela_recusa_dita`) só pergunta se
+    `recusa_de_midia_dita(` aparece no corpo, e aceita que um dos dois
+    caminhos de recusa fique calado; e a geração morta ali não entra em
+    `comandos_de_geracao_morta`, e uma `connection()` que falha vira
+    «sessao-encerrada» sem contador nem linha. O conserto: extrair a parte
+    de depois do `await` numa função com teste de rastro, e contar a
+    geração morta como nos outros comandos.
+
+    ```sh
+    grep -n "^async fn ler_imagem_mod" -A 30 apps/seele-app/src/main.rs | grep -n "sessao-encerrada\|recusa_de_midia_dita"
+    ```
+
+12. **A4 do 1C · A memória das recusas de carga atravessa sessões numa
+    janela estreita.** `recusas_de_carga` é o que faz uma recusa de carga
+    repetida a cada quatro segundos sair uma vez, e ela é esvaziada quando a
+    sessão fecha (`Session::revogar`). Uma recusa que passou da conferência
+    de geração antes da saída, e é anotada depois do esvaziamento, fica
+    lembrada na sessão seguinte, e a mesma recusa não é dita de novo nela.
+    Fechar exige guardar a geração junto do motivo.
+
+    ```sh
+    grep -n "recusas_de_carga" apps/seele-app/src/main.rs | head
+    ```
+
+### Testes que não provam o que dizem
+
+13. **m4 do 1C · Nada roda o elo da janela até o Rust.** Tirar o `modId` do
+    invoke de `registrarNoAnfitriao` deixa verdes as seis bancadas do
+    `cargo xtask check-runtime` e o `frontend.rs` (medido em 01/10/2026), e a
+    revisão ampla do 1C mediu o mesmo para o `meu()` de `anotarRecusa`
+    invertido: as bancadas usam um anotador de mentira, e o guarda de texto
+    só procura `meu()` no corpo. O conserto é um bloco numa bancada
+    que o portão roda, que confere o `invoke('registrar_da_janela', …)` com
+    o `modId`, e que nada é invocado com `modsCarregados` vazio.
+
+    ```sh
+    grep -n 'invoke("registrar_da_janela"' apps/seele-app/ui/base.js
+    ```
+
+14. **Provas do console do 1C (m8, m9, T3 M2, T1, T2 N1 e m1).**
+    - m8: a pilha de um `Error` passado ao `console` pode sumir: tirar o
+      `+ (valor.stack ? …)` de `emTexto` fica verde.
+    - m9: nenhum teste prende o teto de 512 da frase que a janela escreve:
+      tirar o `.take(TETO_DA_FRASE_NO_REGISTRO)` de `registrar_da_janela`
+      fica verde.
+    - T3 M2: o `mod_id` dos braços «erro» e DEBUG de `registrar_da_janela`
+      não tem teste: o braço «erro» sem ele fica verde.
+    - As três mutações de cima foram medidas em 01/10/2026: os 188 testes do
+      binário passam com cada uma.
+    - T1: um `Error` aninhado sai `{}`, um objeto cíclico «[object Object]»,
+      e função e símbolo aninhados somem.
+    - T2 N1: um MOD sem volta nenhuma depois da rajada só tem a conta do
+      balde dita ao parar. T2 m1: `cortar_linha_do_console` soma o escape do
+      texto inteiro antes de decidir, O(n) na thread do motor.
+
+    ```sh
+    grep -n "valor.stack ? " apps/seele-app/src/executor.rs
+    grep -n ".take(TETO_DA_FRASE_NO_REGISTRO)" apps/seele-app/src/main.rs
+    cargo test -p seele-app --bin seele-app    # verde com qualquer uma das mutações de m8, m9 e T3 M2
+    ```
+
+15. **N-1 e T1 M5 do 1E · Duas reprovações do `check-api` sem teste, e um
+    «panicked» no verde.** Os `push` de «não deu para ler» e de «não é json»
+    em `conferir_api` podem ser apagados sem teste nem clippy perceberem
+    (medido em 01/10/2026: sem o de «não é json», os 29 testes de
+    `check_api` passam), e o braço `Err` do `match` do `run` não tem teste.
+    O teste da entrada que não se lê imprime uma linha «panicked» no stderr
+    mesmo verde (`RUST_TEST_NOCAPTURE` do `.cargo/config.toml`). O conserto:
+    dois fixtures (um json quebrado, um arquivo que some), entrando junto
+    com a etapa do `check-api` no `publicar.sh`.
+
+    ```sh
+    grep -n 'falhas.push(format!("não deu para ler\|falhas.push(format!("{} não é json' xtask/src/check_api.rs
+    cargo test -p xtask check_api   # verde com qualquer um dos dois `push` apagado
+    ```
+
+16. **Higiene dos testes do quarto, do 1A (T4d, M4 e M5).**
+    `um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada`
+    (`crates/seele-server/src/hospedagem.rs`) troca `$SEELE_ENCONTRO` e a
+    devolve à mão, depois dos `expect`: um pânico no meio deixa a variável
+    trocada para os outros testes do binário, e dois testes do
+    `seele-server` que a trocam podem correr juntos. E `quarto_pelo_link.rs`
+    supõe um binário de teste por vez na 8384. O conserto é o mesmo
+    `AmbienteDoEncontro`, com `Drop`, que o `quarto_pelo_link.rs` já usa.
+
+    ```sh
+    grep -n "let restaurar = |valor: Option<String>|" crates/seele-server/src/hospedagem.rs
+    ```
+
+17. **Os testes do quarto que provam menos do que parecem, do 1A.**
+    - C1: a segunda marca dentro do teto, e os ramos do teto pelo dobro da
+      ida e volta e pelo `ONDE` perdido, não têm teste.
+    - T5a: a ordem IPv4 primeiro em `resolver_ponto` não tem guarda: apagar o
+      `sort_by_key` fica verde.
+    - T5c e T5d: o ramo «resolveu para nenhum endereço» não tem teste, e um
+      ponto vazio passa em `separar_com` e resolveria para o loopback
+      (inalcançável pelo link).
+    - T6f: uma volta 2 ou 3 em que nenhuma pergunta sai, depois de uma volta 1
+      que saiu, perde uma resposta tardia à volta anterior.
+    - T7a: `um_ponto_que_nao_conhece_a_pergunta_apenas_cala` (`quarto.rs`)
+      testa um ponto totalmente mudo, e não o que o nome diz.
+    - T1a, T1b e T1c: `Marcas::do_servidor` valida só os 16 primeiros
+      caracteres, o `..16` só é provado por reversão, e o laço de
+      `a_escuta_nunca_tem_a_marca_do_aviso` não falha diferente por entrada;
+      os campos de `Marcas` são `pub` e deixam montar `escuta == aviso` por
+      fora do construtor.
+    - T2c, T3c e M3: o `MORO` do socket do servidor na subida não tem
+      reversão própria, o `ONDE` e o `LEVE` da subida com `marcas.escuta` em
+      `abrir` não têm guarda, e o `LEVE` da subida sai com a marca do `ONDE`.
+    - T4a: o laço de reabertura de `quarto_pelo_link.rs` descarta o último
+      erro, e o pânico afirma «endereço em uso» sem prová-lo.
+    - T8b e T8d: em `quarto_pelo_link.rs`, `escuta: None` também vem da FFI
+      formando a marca errada, e não só do anfitrião; e o teste usa
+      `bilhete.ponto`, e não o texto `ponto/aviso` do `enc=` lido de volta.
+    - T2 e T3 do 1B: `ponta_com_certificado_proprio` repete a montagem de
+      `servidor_que_aperta_a_mao_e_cai` (`enlace.rs`); a asserção do `LEVE`
+      na volta pela trilha não é provada sozinha; o contador do ponto não
+      olha a marca do `LEVE`; e `lembrar_de_ontem` e `server_de_teste`
+      descartam o erro com `.ok()?`.
+
+    ```sh
+    grep -n "achados.sort_by_key" crates/seele-core/src/encontro.rs
+    cargo test -p seele-core --lib encontro::   # verde sem o sort_by_key
+    grep -n "pub aviso: Marca\|pub escuta: Marca\|pub servidor: Marca" crates/seele-proto/src/encontro.rs
+    ```
+
+### O que o código faz e o texto diz de outro jeito
+
+18. **1A, revisão ampla · O `levou=` e o doc de `onde_mora_hoje`.** A linha
+    «quarto: onde o anfitrião mora hoje» não diz quanto a consulta levou, e
+    a medida de campo do G1 tem de ler o tempo numa captura; um campo
+    `levou=` a tiraria do log. E o doc de `onde_mora_hoje` diz que a leitura
+    que falha volta como `PontoMudo`: depois de o ponto responder, ela volta
+    como `NinguemMora` ou `Achado`.
+
+    ```sh
+    grep -n 'tracing::info!(%ponto, ?resposta, "quarto: onde o anfitrião mora hoje")' crates/seele-core/src/encontro.rs
+    grep -n "leitura falha\*\*: volta na hora" crates/seele-core/src/encontro.rs
+    ```
+
+19. **1A, revisão ampla e T5e · O que o 1A deixou de texto e de duplicação.**
+    - C4: um `WouldBlock` num tique do anfitrião vira um par de linhas
+      `info`.
+    - T5e: o resolver do servidor (`alcance/encontro.rs`) ainda separa o
+      ponto por `Bilhete::novo(texto, "0.0.0.0:0")`, e não por
+      `separar_ponto`. É o mais barato da lista, com o T5a.
+    - M2: `resolver_ponto` fica com um endereço só.
+    - T3d, T3e e T5f: um literal de impressão repetido, um bloco de alvo
+      repetido, e o `CapturaDeInfo` que duplica o assinante de teste de
+      `par.rs` e do `seele-ffi`.
+    - T7b: o ADR 0047 (`:83`) cita `onde_mora`, que foi apagada.
+    - O plano 1A ainda diz que o G1 é só o S2b e o S3; o índice e o plano 1B
+      são a referência. E o plano 1A cita `fn restaurar` (T4e), trocada por
+      `AmbienteDoEncontro`; o plano 1E descreve `PUBLICADAS_ANTES_DO_GUARDA`
+      e `$tmp`, que a execução trocou (Ruling da Task 1 do 1E).
+
+    ```sh
+    grep -n 'Bilhete::novo(texto, "0.0.0.0:0")' crates/seele-server/src/alcance/encontro.rs
+    grep -n "(\`onde_mora\`)" docs/adr/0047*.md
+    grep -n "fn restaurar" docs/superpowers/plans/2026-09-29-1.0-plano-1a-o-quarto.md
+    grep -n "PUBLICADAS_ANTES_DO_GUARDA" docs/superpowers/plans/2026-09-29-1.0-plano-1e-a-api-congelada.md
+    ```
+
+20. **Os docs do 1B (C-M3, C-M4, C-M5, C-R1-m1, T4 e o pino).**
+    - C-M3: o doc de `ConnectionError::InviteMismatch` (`types.rs`) diz que
+      «o que falhou é a promessa», e num alvo de LAN a promessa pode estar
+      certa e quem atendeu ser outro servidor com o mesmo endereço.
+    - C-M4: o doc de `Marca` (`seele_proto::encontro`) diz que a lista
+      «guardou a impressão de um link»; desde a Tarefa 4 do 1B ela guarda a
+      que a conexão aceitou.
+    - C-M5: o plano 1B atribui a `convite.rs` a prova de que o loopback conta
+      como público, e o fixture passa `true` à mão; quem prova é o teste da
+      FFI.
+    - C-R1-m1: os textos dizem que a entrada vencida fica na memória «até o
+      quarto encher»; a varredura só roda com o quarto cheio **e** uma marca
+      nova chegando (`Quarto::morar`).
+    - T4: `esperar_o_servidor_fechar` diz «dezenas de milissegundos», e a
+      medida foi 4 µs.
+    - O resíduo do pino (T2 e a revisão final do 1B): o mesmo servidor por
+      dois endereços do convite pode perder o pino do vencedor, e com dois
+      candidatos na mesma chave a linha do pin órfão pode levar a falha do
+      vizinho. Os dois falham para o lado seguro, e o doc de
+      `desfazer_o_pin_deste_aperto` diz o primeiro.
+
+    ```sh
+    grep -n "O que falhou é a promessa" crates/seele-ffi/src/types.rs
+    grep -n "guardou a impressão de um link" crates/seele-proto/src/encontro.rs
+    grep -n "o loopback conta como público" docs/superpowers/plans/2026-09-29-1.0-plano-1b-a-impressao-no-tls.md
+    git grep -n "quarto encher\|quarto enche" -- docs crates
+    grep -n "volta em dezenas de" crates/seele-conformance/tests/volta_pela_trilha.rs
+    grep -n "O que ela não distingue" crates/seele-core/src/enlace.rs
+    ```
+
+21. **R-4 do 1E · O cabeçalho do `.gitattributes` se contradiz.** O
+    cabeçalho do grupo `-text` diz que «a regra de cima já bastaria hoje»,
+    e o comentário da linha `api/*.json` explica por que, para ela, não
+    basta.
+
+    ```sh
+    grep -n "já bastaria hoje\|a regra do topo normaliza" .gitattributes
+    ```
+
+22. **Polimento do 1C e do 1D que não alcança quem usa.** Do 1C: o formato
+    `<id>: … / aviso / id` escrito à mão em quatro lugares ao lado de
+    `anotarRecusa`, e a frase do P12 com o ponto sem «» (T7 M2 e M3); o plano
+    1C (`:1458`) com o nome antigo do guarda de fonte; e o comentário de
+    `ci.yml` sobre «as quatro bancadas de navegador», que era o número da
+    época. Do 1D: o teto de 300 contornos do modo de desenvolvedor, que corta
+    calado os pontos do fim do mapa (T7 M2; o conserto é uma nota «N pontos
+    não contornados»); o recorte vazio que desenha um traço de 2 px (T7 M3);
+    as duas definições de «classe que o script aplica» em `frontend.rs` e a
+    frase do vermelho que diz «nenhum script cria» (T7 m1 e m2); a anotação
+    do teto de bytes sem os números (T8 m1); os docs de `LIMITES_DO_CARTAO`
+    que dizem «todos os cartões deste MOD» para os bytes, que numa
+    contribuição valem por destino; os comentários velhos da bancada e da
+    aba (T6 m1 a m4); e os docs do resumo e do «a tempo» (Docs-m5 e m7).
+
+    ```sh
+    grep -n "^const TETO_DE_CONTORNOS" apps/seele-app/ui/camada-mods.js
+    grep -n "quatro bancadas de navegador" .github/workflows/ci.yml
+    ```
+
+### Fora deste repositório
+
+23. **M-5 do 1E e m8 da revisão final · O guia externo não conhece a API 5.**
+    O guia de `mods.seele.app.br/guia` (repositório `SEELE-MODS-INDEXER`) diz
+    `APIS_ACEITAS = [4, 3]` e `MOD_API_VERSION = 4`, e não menciona a API 5;
+    a v0.15.0 publicada e este branch aceitam `[5, 4, 3]`
+    (`crates/seele-proto/src/mods.rs`). Medido em 01/10/2026. O conserto é
+    no outro repositório, e o que muda para quem escreve MOD nesta versão
+    está em `api/README.md`.
+
+    ```sh
+    curl -sS https://mods.seele.app.br/guia/ | grep -o "APIS_ACEITAS = \[[0-9, ]*\]"
+    grep -n "pub const APIS_ACEITAS" crates/seele-proto/src/mods.rs
+    ```
+
+24. **m2 da revisão final · Os laboratórios dos MODs publicados não conhecem
+    o dono de hoje.** O `ferramentas/preview.cjs` da MESA, do PERFIS e do
+    ESTILO monta a região com o `mods-regiao.js` deste repositório e um dono
+    sem `bytesDoSom` nem `anotarRecusa`. Desde o `45cc55e`, a falta de
+    `anotarRecusa` não lança mais; a de `bytesDoSom` faz todo som do pacote
+    chegar ao MOD como `falhou` no laboratório. E a CSP de lá tem
+    `media-src 'self' data:`, que a do produto não tem. O conserto é nos três
+    repositórios: `anotarRecusa` como `console.warn`, uma rota `bytesDoSom`,
+    tirar o `media-src data:`, e um `test-ui` que toca um som e provoca uma
+    recusa.
+
+    ```sh
+    for r in MESA PERFIS ESTILO; do grep -c "bytesDoSom\|anotarRecusa" ../SEELE-MOD-$r/ferramentas/preview.cjs; done   # 0 nos três
+    ```
+
+**Quando fecha.** Item por item, quando um plano os tomar. Esta entrada
+existe para que a lista não suma com a árvore de trabalho, e não para segurar
+release nenhuma.
