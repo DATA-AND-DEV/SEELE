@@ -1275,14 +1275,14 @@ function montarContribuicao(contribuicao, destino = "") {
     raiz,
     PERFIS_DE_RENDER.cartao,
   );
-  // **Um som por contribuição, e não um por destino.** Cada destino tem o seu
-  // renderer, e cada renderer o seu tocador: o som que o MOD declarou
-  // `tocando` numa contribuição sem alvo tocava uma vez por canal, todos
-  // juntos. O conjunto é um só para todos os destinos, e o primeiro tocador
-  // pronto é o que toca — ver `aplicarTocando`, em `mods-regiao.js`.
-  const sonsJaTocados = contribuicao.sonsJaTocados ?? new Set();
-  contribuicao.sonsJaTocados = sonsJaTocados;
-  renderer.sonsJaTocados = sonsJaTocados;
+  // **Os sons da contribuição moram num destino só.** Cada destino tem o seu
+  // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
+  // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
+  // é uma só para todos os destinos, e o primeiro que chega a um som é o que
+  // os segura — ver `montarSom`, em `mods-regiao.js`.
+  const sons = contribuicao.sons ?? { tomados: false };
+  contribuicao.sons = sons;
+  renderer.sonsDaContribuicao = sons;
   // **Registrada como recurso, e esquecida ao revogar.** O descartador volta
   // para a contribuição: sem isso, revogar deixaria o renderer retido na
   // instância — o mesmo vazamento que R4 fechou do outro lado, e que a revisão

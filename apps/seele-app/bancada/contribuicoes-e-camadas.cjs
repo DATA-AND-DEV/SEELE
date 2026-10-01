@@ -783,11 +783,11 @@ contexto.cartoesDosMods = new Map();
     `a montagem pede a mídia sem o hash do pacote da instância («${dono.hash}»): ${JSON.stringify(doCartao)}`,
   );
 
-  // **Um som por contribuição, e não um por destino.** Sem alvo, ela monta um
-  // renderer por destino, e cada um teria o seu tocador: o som declarado
-  // `tocando` tocava uma vez por canal, todos juntos. O conjunto dos sons já
-  // tocados é um só para todos os destinos — é ele que `aplicarTocando`, em
-  // `mods-regiao.js`, consulta.
+  // **Os sons de uma contribuição moram num destino só.** Sem alvo, ela monta
+  // um renderer por destino, e cada um pedia os bytes, decodificava e segurava
+  // a sua cópia do som — e tocava, todos juntos. O lugar de quem segura os sons
+  // é um só para todos os destinos, e começa vago: é ele que `montarSom`, em
+  // `mods-regiao.js`, toma no primeiro som que chega.
   {
     const { handle: semAlvo } = registro.registrar({ id: "mod/a" }, dono, {
       ponto: "canal.item", modo: "adicionar",
@@ -800,9 +800,11 @@ contexto.cartoesDosMods = new Map();
     const [um, dois] = renderersMontados.slice(antesDosDestinos);
     confere(
       "R4b · um som por contribuição",
-      Boolean(um && dois) && typeof um.sonsJaTocados?.has === "function" && um.sonsJaTocados === dois.sonsJaTocados,
-      "os destinos de uma contribuição sem alvo não dividem o conjunto dos sons já tocados, e o som "
-        + "declarado `tocando` toca uma vez por destino",
+      Boolean(um && dois) && um.sonsDaContribuicao?.tomados === false
+        && um.sonsDaContribuicao === dois.sonsDaContribuicao,
+      "os destinos de uma contribuição sem alvo não dividem o lugar de quem segura os sons, e cada um "
+        + "pede, decodifica e toca a sua cópia: "
+        + `${JSON.stringify([um?.sonsDaContribuicao, dois?.sonsDaContribuicao])}`,
     );
     registro.revogar(semAlvo, { id: "mod/a", instancia: dono });
   }

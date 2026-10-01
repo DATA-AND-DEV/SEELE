@@ -883,9 +883,12 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
   // WebAudio. Conferido em **todo** pedido de mídia da página, e não no
   // primeiro: o primeiro é o da região, que já tinha o hash.
   //
-  // E o som declarado `tocando` toca **uma vez** por contribuição, e não uma
-  // por destino — dois canais seriam dois sinos ao mesmo tempo, e o MOD
-  // ouviria «tocando» duas vezes de um som que declarou uma.
+  // E o som mora **num destino só**: um pede os bytes, decodifica e toca, e
+  // o outro mostra a figura sem tocador (`montarSom`). Por destino, dois
+  // canais eram dois sinos ao mesmo tempo, o MOD ouvia «tocando» duas vezes de
+  // um som que declarou uma, e cada canal segurava a sua cópia decodificada —
+  // numa sala de 64 pessoas, 64.
+  const pedidosAntes = await pagina.evaluate(() => testCalls.length);
   await pagina.evaluate(() => {
     contribuicoesDosMods.registrar({ id: "mod/a" }, somA, {
       ponto: "canal.item",
@@ -900,12 +903,12 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
       const figuras = [...document.querySelectorAll('.contribuicao-de-mod figure[data-chave-do-mod="sino-do-canal"]')];
       return figuras.length === 2 && figuras.every((f) => f.dataset.estado && f.dataset.estado !== "carregando");
     },
-    "o som da contribuição sem alvo não montou nos dois canais",
+    "o som da contribuição sem alvo não assentou nos dois canais",
     () => [...document.querySelectorAll('.contribuicao-de-mod figure[data-chave-do-mod="sino-do-canal"]')]
       .map((f) => f.dataset.estado),
   );
   await pagina.evaluate(() => new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto))));
-  const daContribuicao = await pagina.evaluate(() => ({
+  const daContribuicao = await pagina.evaluate((desde) => ({
     figuras: [...document.querySelectorAll('.contribuicao-de-mod figure[data-chave-do-mod="sino-do-canal"]')]
       .map((f) => f.dataset.estado),
     eventos: eventosDoMod
@@ -915,11 +918,18 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
       .filter((c) => c.cmd === "midia_do_mod" || c.cmd === "som_do_mod")
       .filter((c) => c.args?.hash !== "mod-a")
       .map((c) => `${c.cmd} ${JSON.stringify(c.args)}`),
-  }));
+    bytesPedidos: testCalls.slice(desde).filter((c) => c.cmd === "som_do_mod").length,
+  }), pedidosAntes);
   assert.deepEqual(
     daContribuicao.figuras,
     ["pronta", "pronta"],
-    `o som da contribuição sem alvo não ficou pronto nos dois canais: ${daContribuicao.figuras.join(", ")}`,
+    `o som da contribuição sem alvo não assentou nos dois canais: ${daContribuicao.figuras.join(", ")}`,
+  );
+  assert.equal(
+    daContribuicao.bytesPedidos,
+    1,
+    `os bytes do som da contribuição sem alvo foram pedidos ${daContribuicao.bytesPedidos} vez(es), e não `
+    + "uma — a mais é um canal a mais decodificando e segurando a sua cópia; nenhuma, um som que nunca toca",
   );
   assert.deepEqual(
     daContribuicao.semHash,

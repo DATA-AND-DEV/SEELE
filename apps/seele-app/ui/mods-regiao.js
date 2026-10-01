@@ -129,11 +129,20 @@ const LIMITES_DO_CARTAO = Object.freeze({
   /** Bytes de mídia somados em todos os cartões deste MOD. */
   bytesDeMidia: 20 * 1024 * 1024,
   /**
-   * Bytes de som decodificado somados em todos os cartões deste MOD — ver
+   * Bytes de som decodificado somados no bolso de cartão de um renderer — ver
    * `LIMITES_DA_REGIAO.bytesDeSomDecodificado`.
    *
    * O mesmo da região, e não o dobro como nos bytes: o bolso dos cartões é
    * maior pelos retratos de muitas pessoas, e retrato não é som.
+   *
+   * **De quem é o bolso.** Nos cartões da API 3, de todos os cartões deste
+   * MOD: eles moram no renderer da região. Numa contribuição, **de cada
+   * contribuição**: ela monta um renderer por destino, e os sons dela moram
+   * num destino só (ver `montarSom`) — sem isso, o teto valia por destino, e
+   * um `pessoa.cartao` sem alvo numa sala de 64 pessoas segurava até 64 vezes
+   * este número. O teto **não** soma as contribuições de um MOD entre si: cada
+   * uma tem o seu, e um MOD mantém até `TETO_DE_CONTRIBUICOES` (128, em
+   * `mods-contribuicoes.js`) de pé — em tese, 128 vezes este número por MOD.
    */
   bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
@@ -487,12 +496,14 @@ class RegiaoDeMod {
      */
     this.somDaMidia = new Map();
     /**
-     * As chaves dos sons cujo `tocando` já tocou, quando este renderer é **um
-     * dos destinos de uma contribuição** — o mesmo conjunto para todos eles
+     * Quando este renderer é **um dos destinos de uma contribuição**: se algum
+     * deles já tomou os sons dela — `{ tomados }`, o mesmo objeto para todos
      * (`montarContribuicao`, em `base.js`); `null` fora de uma. Ver
-     * `aplicarTocando`.
+     * `montarSom`.
      */
-    this.sonsJaTocados = null;
+    this.sonsDaContribuicao = null;
+    /** Se foi este destino que tomou os sons da contribuição. */
+    this.tomouOsSons = false;
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
     this.solta = false;
   }
@@ -2245,6 +2256,24 @@ class RegiaoDeMod {
    * (`plano.cartao`), que não recebe foco (ver `FORMAS_DO_CARTAO`), e o som dali
    * toca só quando o MOD declara `tocando`.
    *
+   * **Numa contribuição, os sons moram num destino só.** Uma contribuição sem
+   * alvo é montada uma vez por destino — um renderer por canal, ou por pessoa
+   * na lista —, e todos recebem o mesmo `sonsDaContribuicao`. O primeiro
+   * destino que chega aqui toma os sons dela, e é o único que pede os bytes,
+   * decodifica, conta no teto e toca — **todos** os sons da contribuição. Nos
+   * outros, a figura assenta sem tocador: num cartão um som não tem o que
+   * mostrar, e ela sai das anotações, porque o som não está ali — o
+   * diagnóstico o conta uma vez, onde ele está de pé. Por destino, um
+   * `pessoa.cartao` sem alvo numa sala de 64 pessoas pedia, decodificava e
+   * segurava 64 cópias do mesmo som, e todas tocavam juntas.
+   *
+   * A marca é por contribuição, e não por som: uma por som precisaria dizer
+   * qual nó é qual em todos os destinos, e a chave do plano não diz — a
+   * posição recomeça dentro de cada contêiner, e dois sons diferentes saíam
+   * com a mesma, o segundo calado sem aviso. Ela não é devolvida: os destinos
+   * saem juntos (`soltarMontagem`, ou a saída da instância), e um destino que
+   * não montou é solto antes de um som chegar aqui.
+   *
    * **Toda recusa é dita a quem hospeda**, como o `.catch` de `montarMidia` e o
    * `play()` recusado do `<audio>` já eram (`dizerRecusaDeMidia`): o som que
    * não chegou, o que não decodificou e o que não começou — por um caminho só,
@@ -2255,6 +2284,18 @@ class RegiaoDeMod {
    * @param {{ uri: string } | { caminho: string }} origem
    */
   async montarSom(elem, plano, estado, origem) {
+    // Numa contribuição, só o destino que tomou os sons dela segue daqui.
+    // Antes de qualquer `await`: dois destinos que chegam juntos não podem os
+    // dois achar a marca vaga.
+    if (this.sonsDaContribuicao && !this.tomouOsSons) {
+      if (this.sonsDaContribuicao.tomados) {
+        elem.dataset.estado = "pronta";
+        this.esquecerMidia(elem);
+        return;
+      }
+      this.sonsDaContribuicao.tomados = true;
+      this.tomouOsSons = true;
+    }
     const chave = plano.no.chave ?? "";
     const falhou = (motivo) => {
       if (estado.cancelado || this.solta) return;
@@ -2391,26 +2432,16 @@ class RegiaoDeMod {
    * isso seria o MOD desfazendo o que a pessoa acabou de apertar. A
    * declaração vale quando muda; o botão vale entre uma mudança e outra.
    *
-   * **Numa contribuição, uma vez, e não uma por destino.** Uma contribuição
-   * sem alvo é montada por destino — um renderer, e um tocador, por canal —,
-   * e todos dividem `sonsJaTocados`: o primeiro tocador pronto toca, e os
-   * outros mostram a figura, calados. Uma contribuição não muda depois de
-   * registrada (o MOD tira e registra outra), então o `tocando` dela vale uma
-   * vez, e o conjunto não precisa esquecer.
+   * **Numa contribuição, uma vez, e não uma por destino**, sem nada aqui:
+   * só o destino que tomou os sons dela tem tocador (ver `montarSom`), e nos
+   * outros a conferência do tocador, logo abaixo, já sai.
    */
   aplicarTocando(elem) {
     const som = this.somDaMidia.get(elem);
     if (!som?.tocador || som.declarado === som.quer) return;
     som.declarado = som.quer;
-    if (!som.quer) {
-      som.tocador.pausar();
-      return;
-    }
-    if (this.sonsJaTocados) {
-      if (this.sonsJaTocados.has(elem.dataset.chave)) return;
-      this.sonsJaTocados.add(elem.dataset.chave);
-    }
-    som.tocar(false);
+    if (som.quer) som.tocar(false);
+    else som.tocador.pausar();
   }
 
   /** O MOD declara «tocando»; o produto guarda, e aplica quando o som existir. */

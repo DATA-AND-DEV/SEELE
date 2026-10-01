@@ -428,6 +428,17 @@ function acharTag(no, tag) {
   return null;
 }
 
+/** Todos os descendentes com uma etiqueta, na ordem do documento. */
+function todasAsTags(no, tag) {
+  const alvo = String(tag).toUpperCase();
+  const achadas = [];
+  for (const filho of no?.filhos ?? []) {
+    if (filho.tagName === alvo) achadas.push(filho);
+    achadas.push(...todasAsTags(filho, tag));
+  }
+  return achadas;
+}
+
 /** O texto que um nó carrega, juntando os nós de texto de dentro dele. */
 function textoDe(no) {
   if (!no) return "";
@@ -2068,34 +2079,93 @@ async function oSomNumCartaoNaoTemBotao() {
   regiao.soltar();
   confere(caso, Audio.ultimo?.fontes[0]?.parou === true, "o som do cartão continuou depois de a região sair");
 
-  // **Numa contribuição, uma vez, e não uma por destino.** `montarContribuicao`
-  // (`base.js`) monta um renderer por destino, com o perfil do cartão — um
-  // `canal.item` sem alvo, dois canais, dois renderers —, e dá a todos o mesmo
-  // conjunto, `sonsJaTocados`. O som declarado `tocando` toca no primeiro que
-  // fica pronto; os outros mostram a figura, calados. Sem o conjunto, dois
-  // canais eram dois sinos ao mesmo tempo, e o MOD ouvia «tocando» duas vezes.
-  {
+  // **Numa contribuição, os sons moram num destino só, e cada som toca uma
+  // vez.** `montarContribuicao` (`base.js`) monta um renderer por destino, com
+  // o perfil do cartão — um `canal.item` sem alvo, dois canais, dois renderers
+  // —, e dá a todos o mesmo `sonsDaContribuicao`. O primeiro destino que chega
+  // a um som é o que pede os bytes, decodifica e toca **todos** os sons da
+  // contribuição; os outros mostram a figura, sem tocador (ver `montarSom`).
+  //
+  // As duas metades já falharam:
+  // - **um som por destino**: cada destino pedia os bytes e decodificava a
+  //   sua cópia, todas de pé ao mesmo tempo — num `pessoa.cartao` sem alvo
+  //   numa sala de 64 pessoas, 64 cópias de um som que pode chegar a 64 MiB
+  //   decodificado —, e todos tocavam juntos;
+  // - **cada som é o seu**: um conjunto pela chave do plano confundia dois
+  //   sons de contêineres diferentes — a posição recomeça dentro de cada um, e
+  //   os dois eram `p:midia:0.0` —, e calava o segundo sem evento, sem linha no
+  //   registro e com a anotação «pronta». Uma chave do MOD repetida em dois
+  //   contêineres caía no mesmo lugar.
+  const conteudos = {
+    "dois sons sem chave, um em cada linha": [
+      { forma: "linha", dentro: [{ forma: "midia", fonte: "som/a.wav", tocando: true }] },
+      { forma: "linha", dentro: [{ forma: "midia", fonte: "som/b.wav", tocando: true }] },
+    ],
+    "a mesma chave em duas linhas": [
+      { forma: "linha", dentro: [{ forma: "midia", chave: "sino", fonte: "som/a.wav", tocando: true }] },
+      { forma: "linha", dentro: [{ forma: "midia", chave: "sino", fonte: "som/b.wav", tocando: true }] },
+    ],
+  };
+  for (const [nome, conteudo] of Object.entries(conteudos)) {
+    const naContribuicao = `${caso} · numa contribuição, ${nome}`;
     const AudioC = audioDeMentira();
     const bc = bancada({ audio: AudioC });
     const dc = dono(bc, () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }));
-    const sonsJaTocados = new Set();
+    const sonsDaContribuicao = { tomados: false };
     const destinos = ["1", "2"].map(() => {
       const r = new bc.RegiaoDeMod("a/b", dc.api, bc.raiz(), bc.PERFIS.cartao);
-      r.sonsJaTocados = sonsJaTocados;
-      r.aplicar([{ forma: "midia", chave: "sino", fonte: "som/a.wav", tocando: true }]);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar(conteudo);
       return r;
     });
     await assentar();
+    const figuras = destinos.map((r) => todasAsTags(r.raiz, "figure").map((f) => f.dataset.estado));
     confere(
-      caso,
-      destinos.every((r) => r.raiz.children[0]?.dataset.estado === "pronta"),
-      "o som da contribuição não ficou pronto nos dois destinos, e a conferência abaixo passaria por um só ter montado",
+      naContribuicao,
+      JSON.stringify(figuras) === JSON.stringify([["pronta", "pronta"], ["pronta", "pronta"]]),
+      `as figuras dos dois destinos não assentaram — um cartão ficaria dizendo «carregando» para sempre: ${JSON.stringify(figuras)}`,
+    );
+    const pedidos = [...dc.pedidosDeSom].sort();
+    confere(
+      naContribuicao,
+      JSON.stringify(pedidos) === JSON.stringify(["som/a.wav", "som/b.wav"]),
+      "os bytes não foram pedidos uma vez por som — a mais é uma cópia por destino, a menos é um som que "
+        + `nunca toca: ${JSON.stringify(pedidos)}`,
+    );
+    const decodificados = AudioC.ultimo?.decodificados.length ?? 0;
+    confere(
+      naContribuicao,
+      decodificados === 2,
+      `${decodificados} decodificação(ões) para dois sons — a mais é uma cópia decodificada por destino, `
+        + "todas de pé ao mesmo tempo; a menos, um som que nunca toca",
+    );
+    const contados = destinos.map((r) => r.bytesDeSomDeCartao).sort((x, y) => x - y);
+    confere(
+      naContribuicao,
+      contados[0] === 0 && contados[1] > 0,
+      `o som decodificado ficou contado em mais de um destino, ou em nenhum: ${JSON.stringify(contados)}`,
+    );
+    const anotadas = destinos.map((r) => r.midiasAnotadas().length).sort((x, y) => x - y);
+    confere(
+      naContribuicao,
+      JSON.stringify(anotadas) === JSON.stringify([0, 2]),
+      `o diagnóstico não conta cada som uma vez, no destino que o segura: ${JSON.stringify(anotadas)}`,
     );
     const tocando = AudioC.ultimo?.fontes.filter((f) => f.tocando).length ?? 0;
-    confere(caso, tocando === 1, `o som de uma contribuição tocou ${tocando} vez(es) — uma por destino, e não uma`);
+    confere(
+      naContribuicao,
+      tocando === 2,
+      `${tocando} fonte(s) tocando para dois sons declarados \`tocando\` — uma por destino, ou um som calado pelo outro`,
+    );
     const ouviu = dc.ditos.filter((e) => e.nome === "midia" && e.estado === "tocando").length;
-    confere(caso, ouviu === 1, `o MOD ouviu «tocando» ${ouviu} vez(es) de um som que declarou uma`);
+    confere(
+      naContribuicao,
+      ouviu === 2,
+      `o MOD ouviu «tocando» ${ouviu} vez(es) de dois sons que declarou uma vez cada`,
+    );
     for (const r of destinos) r.soltar();
+    const sobrou = AudioC.ultimo?.fontes.filter((f) => f.tocando).length ?? 0;
+    confere(naContribuicao, sobrou === 0, `${sobrou} som(ns) da contribuição continuaram depois de os destinos saírem`);
   }
 }
 
