@@ -47,7 +47,10 @@ pub async fn executar(
     match executar_inner(server, person, channel, id, payload).await {
         Ok(text) => text,
         Err(error) => {
-            tracing::warn!(mod_id = id, %error, "MOD request refused");
+            // `%`, e não o `str` cru: cru, o `fmt` o escreve pelo `Debug`, entre
+            // aspas, e o `grep "mod_id=autor/nome"` do guia não acha a linha.
+            // É a grafia das outras linhas do MOD, nas duas metades.
+            tracing::warn!(mod_id = %id, %error, "MOD request refused");
             r#"{"ok":false,"error":"bridge-refused"}"#.into()
         }
     }
@@ -298,5 +301,111 @@ mod tests {
         assert!(chunks.iter().all(|part| part.len() <= 10 * 1024));
         assert_eq!(chunks.concat(), original);
         assert_eq!(super::partes(""), vec![String::new()]);
+    }
+
+    /// O que o `fmt` do `tracing` escreveu, guardado para o teste ler.
+    #[derive(Clone, Default)]
+    struct Registro(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Registro {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("o registro trancou")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Um servidor em memória, sem pasta de MODs e sem ninguém com permissão:
+    /// todo pedido de MOD é recusado antes de chegar ao QuickJS, e a recusa é
+    /// a linha que o teste lê.
+    fn servidor_que_recusa() -> std::sync::Arc<crate::server::Server> {
+        use crate::persistence::{Location, Persistence};
+        use crate::server::{spawn_writer, Server, Telas};
+        use std::sync::Arc;
+        use tokio::sync::{broadcast, Mutex};
+
+        let persistence = Arc::new(Mutex::new(
+            Persistence::open(&Location::Memory).expect("banco em memória"),
+        ));
+        let (events, _) = broadcast::channel(64);
+        let writes = spawn_writer(Arc::clone(&persistence), events.clone());
+        Arc::new(Server {
+            esperas: Arc::new(std::sync::Mutex::new(Default::default())),
+            mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            persistence,
+            events,
+            writes,
+            slots: Arc::new(Mutex::new(crate::server::Slots::default())),
+            occupancy: Arc::new(Mutex::new(crate::server::Occupancy::default())),
+            presentes: Arc::new(Mutex::new(crate::server::Presentes::default())),
+            subida: Arc::new(Mutex::new(crate::tela::Subida::nova())),
+            portaria: Arc::new(Mutex::new(crate::taxa::Portaria::nova())),
+            atrasos: Arc::new(crate::server::Atrasos::default()),
+            desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
+            pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
+            versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
+            telas: Arc::new(Mutex::new(Telas::default())),
+            anexos: None,
+            caminho_bps: None,
+            mods_dir: None,
+        })
+    }
+
+    /// **A recusa de um pedido de MOD escreve `mod_id=` como as outras linhas
+    /// do MOD**, e o `grep` do guia a acha.
+    ///
+    /// `docs/como-se-faz-um-mod.md` («Ler a linha») manda procurar um MOD com
+    /// `grep "mod_id=fulano/meu-mod"`, e diz que o que o servidor disse dele
+    /// usa o mesmo campo. Esta linha — a que diz que um pedido do MOD foi
+    /// recusado, inclusive quando o `aoPedir` dele lança — escrevia o id pelo
+    /// `Debug` de um `str`, entre aspas (`mod_id="fulano/meu-mod"`), e o grep
+    /// não a achava. As outras portas que escrevem `mod_id=` usam `%`, e a
+    /// janela, `display` (FD-m3 da revisão do Lote F-Docs).
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_recusa_do_pedido_escreve_o_mod_id_que_o_grep_do_guia_acha() {
+        let registro = Registro::default();
+        let escritor = registro.clone();
+        let assinante = tracing_subscriber::fmt()
+            .with_writer(move || escritor.clone())
+            .with_ansi(false)
+            .without_time()
+            .finish();
+        let _guarda = tracing::subscriber::set_default(assinante);
+
+        let resposta = super::executar(
+            &servidor_que_recusa(),
+            seele_proto::ids::PersonId(7),
+            seele_proto::ids::ChannelId(0),
+            "fulano/meu-mod",
+            "{}",
+        )
+        .await;
+        assert!(
+            resposta.contains("bridge-refused"),
+            "o pedido de quem não pode ler não foi recusado, e o teste não chegou à linha da \
+             recusa: {resposta}"
+        );
+
+        let texto =
+            String::from_utf8_lossy(&registro.0.lock().expect("o registro trancou")).into_owned();
+        let Some(linha) = texto
+            .lines()
+            .find(|linha| linha.contains("MOD request refused"))
+        else {
+            panic!("a recusa do pedido de MOD não chegou ao registro: {texto:?}");
+        };
+        assert!(
+            linha.contains("mod_id=fulano/meu-mod"),
+            "a recusa do pedido de MOD não traz `mod_id=fulano/meu-mod`, e o `grep` do guia \
+             (`docs/como-se-faz-um-mod.md`, «Ler a linha») não a acha. As outras linhas do MOD \
+             escrevem o id por `%`; o `str` cru sai pelo `Debug`, entre aspas: {linha}"
+        );
     }
 }
