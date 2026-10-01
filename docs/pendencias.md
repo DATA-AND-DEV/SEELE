@@ -7320,9 +7320,11 @@ verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
      voltar com a página fechada;
    - um som de contribuição, que não tem botão. O MOD de referência não
      declara nenhum, e o caso pede um MOD que declare;
-   - `pmset -g assertions` com um som de MOD montado e parado, uns 12 s
-     depois de um som terminar e uns 3 s depois de sair da sessão: o áudio do
-     SEELE não pode segurar o Mac acordado;
+   - `pmset -g assertions` com um som de MOD montado e parado, medido logo
+     ao abrir a janela, antes de qualquer toque; com a trilha da MESA (30 s)
+     tocando; uns 12 s depois de pausá-la; e uns 3 s depois de sair da
+     sessão: o áudio do SEELE não pode segurar o Mac acordado. O
+     `toque.wav` do MOD de referência dura 0,2 s, e não serve para isso;
    - a trilha passa de 30 s? Ela termina e volta do começo no próximo
      redesenho da MESA que a declare tocando, como o `<audio>` fazia até a
      0.15.0 — o silêncio até lá não é defeito do WebAudio;
