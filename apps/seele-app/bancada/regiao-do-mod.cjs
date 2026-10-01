@@ -2087,6 +2087,42 @@ async function oFundoEORetratoTambemDizemOEstado() {
   );
   regiao.soltar();
   confere(caso, regiao.midiasAnotadas().length === 0, "a região solta continuou anotando o fundo ou o retrato");
+
+  // **Cada recusa do fundo e do retrato é anotada, com o motivo** (I-5 da
+  // revisão ampla do Plano 1D). Sem a anotação, a do começo fica valendo: a
+  // aba DIAGNÓSTICO diria «1 carregando», sem motivo, de algo que o Rust ou o
+  // teto já recusou — e só o `seele.log` saberia. Uma região por caso: a
+  // anotação não diz de que nó é, e com uma só ela é a do caso.
+  const imagem = (bytes) => ({ uri: "data:image/png;base64,AA", papel: "imagem", bytes });
+  const recusaDoRust = () => Promise.reject({ Recusado: { motivo: "arquivo-nao-declarado" } });
+  const fundo = { forma: "caixa", chave: "c", fundoDeMidia: { fonte: "img/fundo.png" }, dentro: [{ forma: "texto", dentro: "x" }] };
+  const retrato = { forma: "retrato", chave: "r", fonte: "img/rosto.png" };
+  const recusas = {
+    "o fundo que não é imagem": {
+      no: fundo,
+      midia: () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 8 }),
+      motivo: /imagem/,
+    },
+    "o fundo acima do teto": { no: fundo, midia: (bb) => Promise.resolve(imagem(bb.PERFIS.regiao.bytesDeMidia + 1)), motivo: /teto/ },
+    "o fundo que o Rust recusou": { no: fundo, midia: recusaDoRust, motivo: /arquivo-nao-declarado/ },
+    "o retrato acima do teto": { no: retrato, midia: (bb) => Promise.resolve(imagem(bb.PERFIS.regiao.bytesDeMidia + 1)), motivo: /teto/ },
+    "o retrato que o Rust recusou": { no: retrato, midia: recusaDoRust, motivo: /arquivo-nao-declarado/ },
+  };
+  for (const [nome, recusa] of Object.entries(recusas)) {
+    const br = bancada();
+    const dr = dono(br, () => recusa.midia(br));
+    const umaRegiao = new br.RegiaoDeMod("a/b", dr.api, br.raiz());
+    umaRegiao.aplicar([recusa.no]);
+    await assentar();
+    const anotadas = umaRegiao.midiasAnotadas();
+    confere(
+      `${caso} · ${nome}`,
+      anotadas.length === 1 && anotadas[0].situacao === "recusada" && recusa.motivo.test(anotadas[0].motivo),
+      `${nome} não ficou anotado «recusada» com o motivo (${recusa.motivo}): ${JSON.stringify(anotadas)} — a aba `
+        + "DIAGNÓSTICO diria «carregando» de algo que já foi recusado",
+    );
+    umaRegiao.soltar();
+  }
 }
 
 // ---------------------------------------------------------------------------
