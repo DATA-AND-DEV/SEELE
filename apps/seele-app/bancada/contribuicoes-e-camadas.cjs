@@ -41,6 +41,22 @@ function confere(caso, condicao, detalhe) {
   if (!condicao) falhas.push(`${caso}: ${detalhe}`);
 }
 
+// **O fim é dito, e não suposto.** Uma promessa que nunca se resolve esvazia o
+// laço de eventos sem erro nenhum: o node sai com 0, sem uma linha, e o passo
+// do CI fica verde sem ter provado nada — medido com `await new Promise(() => {})`
+// em `atenderOMod`. O `terminou` só vira verdade em `terminar()`.
+//
+// Só quando o código seria 0: uma exceção solta também passa por aqui, mas já
+// sai com 1 e com a pilha dela, e dizer «promessa pendurada» por cima seria
+// apontar a causa errada.
+let terminou = false;
+process.on("exit", (codigo) => {
+  if (!terminou && codigo === 0) {
+    console.error("contribuicoes-e-camadas: não chegou ao fim — uma promessa ficou pendurada");
+    process.exitCode = 1;
+  }
+});
+
 // ------------------------------------------------- a árvore que a página tem
 
 /** Etiquetas que não fecham, e por isso não empilham. */
@@ -1101,6 +1117,7 @@ contexto.cartoesDosMods = new Map();
 }
 
 function terminar() {
+  terminou = true;
   if (falhas.length) {
     console.error("contribuicoes-e-camadas: reprovou");
     for (const f of falhas) console.error(`  ${f}`);

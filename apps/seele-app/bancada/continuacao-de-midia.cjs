@@ -19,6 +19,22 @@ const corpo = fonte
 const falhas = [];
 const confere = (caso, cond, detalhe) => { if (!cond) falhas.push(`${caso}: ${detalhe}`); };
 
+// **O fim é dito, e não suposto.** Uma promessa que nunca se resolve esvazia o
+// laço de eventos sem erro nenhum: o node sai com 0, sem uma linha, e o passo
+// do CI fica verde sem ter provado nada — medido com `await new Promise(() => {})`
+// no laço de `base.js` que esta bancada roda. Ela sai por `process.exit` quando
+// chega ao fim, e o `beforeExit` só acontece quando o laço de eventos esvazia
+// sozinho: é exatamente o caso em que ela não chegou lá. O `terminou` vale
+// mesmo assim: se o `process.exit(0)` der lugar a um fim natural, é ele que
+// separa o fim de verdade da promessa pendurada.
+let terminou = false;
+process.on("beforeExit", () => {
+  if (!terminou) {
+    console.error("continuacao-de-midia: não chegou ao fim — uma promessa ficou pendurada");
+    process.exitCode = 1;
+  }
+});
+
 function rodar({ respostas, campo = "bytes" }) {
   const pedidos = [];
   // **O que a janela pede ao Rust, gravado.** `midia_em_bytes` exige o `id`
@@ -103,6 +119,7 @@ function rodar({ respostas, campo = "bytes" }) {
     confere(caso, dito.includes("image"), `a falha não nomeia o campo: «${dito}»`);
   }
 
+  terminou = true;
   if (falhas.length === 0) {
     console.log("continuação de mídia: as 3 provas passam");
     process.exit(0);

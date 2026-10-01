@@ -7,6 +7,16 @@ const base = fs.readFileSync(path.join(__dirname, '../ui/base.js'), 'utf8');
 const ponte = base.slice(base.indexOf('const CAPACIDADES_POR_API'), base.indexOf('const modsCarregados ='));
 const rust = fs.readFileSync(path.join(__dirname, '../src/executor.rs'), 'utf8');
 const preludio = rust.split('const PRELUDIO: &str = r#"')[1].split('"#;')[0];
+// O fim é dito, e não suposto: uma promessa pendurada esvazia o laço de eventos e o node sai com 0,
+// sem uma linha (medido com `await new Promise(() => {})` em `atenderOMod`). Só quando o código
+// seria 0: uma exceção solta já sai com 1 e com a pilha dela, e «promessa pendurada» seria a causa errada.
+let terminou = false;
+process.on('exit', codigo => {
+  if (!terminou && codigo === 0) {
+    console.error('imagens-por-volume: não chegou ao fim — uma promessa ficou pendurada');
+    process.exitCode = 1;
+  }
+});
 (async () => {
   const chamadas = [], respostas = [];
   let concluir, ativa = true;
@@ -50,4 +60,4 @@ const preludio = rust.split('const PRELUDIO: &str = r#"')[1].split('"#;')[0];
     }
   }
   console.log('volume: SDK e ponte reais conferem capacidade, dono, gravação e geração.');
-})().catch(erro => { console.error(erro); process.exitCode = 1; });
+})().catch(erro => { console.error(erro); process.exitCode = 1; }).finally(() => { terminou = true; });

@@ -3,6 +3,16 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const fonte = fs.readFileSync(require('node:path').join(__dirname, '../ui/base.js'), 'utf8');
+// O fim é dito, e não suposto: uma promessa pendurada esvazia o laço de eventos e o node sai com 0,
+// sem uma linha (medido com `await new Promise(() => {})` em `pedirAoServidor`). Só quando o código
+// seria 0: uma exceção solta já sai com 1 e com a pilha dela, e «promessa pendurada» seria a causa errada.
+let terminou = false;
+process.on('exit', codigo => {
+  if (!terminou && codigo === 0) {
+    console.error('envio-de-imagens: não chegou ao fim — uma promessa ficou pendurada');
+    process.exitCode = 1;
+  }
+});
 const trecho = fonte.slice(fonte.indexOf('let filaDePedidosDeMod ='), fonte.indexOf('/**\n * Põe um MOD de pé'));
 let now = 0, last = 0, tokens = 60, other = 0, generation = 1, enviados = 0;
 function frame(t) {
@@ -39,4 +49,4 @@ vm.runInContext(trecho, contexto);
   await assert.rejects(antigo, /disconnected/);
   assert.equal(enviados, antes, 'pedido da sessão anterior atravessou');
   console.log('imagens: dois uploads de 10 MiB e tráfego concorrente cabem no balde; saída cancela pedidos antigos');
-})().catch(e => { console.error(e); process.exitCode = 1; });
+})().catch(e => { console.error(e); process.exitCode = 1; }).finally(() => { terminou = true; });
