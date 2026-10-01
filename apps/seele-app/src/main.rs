@@ -3776,8 +3776,9 @@ fn reservar_no_executor(
     id: &str,
     hash: String,
 ) -> Result<u64, FalhaNoMod> {
-    // Recusada **e contada** em `comandos_de_geracao_morta`, como todo comando
-    // de uma sessão que acabou.
+    // Recusada **e contada** em `comandos_de_geracao_morta`, como a de
+    // `codigo_do_mod`: as duas são a carga atrasada, e o doc de
+    // `recusa_de_carga_dita` diz que é esse contador que a conta.
     if session.confere_geracao(geracao).is_err() {
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
@@ -3925,8 +3926,10 @@ fn revogar_em(geracao: &std::sync::atomic::AtomicU64, mods: &std::sync::Mutex<Mo
 /// revogação não ter onde cair no meio: não há um segundo `insert`.
 ///
 /// A recusa por geração morta é contada em `mortos` — o
-/// `comandos_de_geracao_morta` da sessão —, como a de todo comando que chega
-/// depois de a sessão dele acabar.
+/// `comandos_de_geracao_morta` da sessão —, como a do começo de
+/// [`reservar_no_executor`]. A de [`liberar_reserva`], logo abaixo, não é
+/// contada: nem todo comando de geração morta passa por esse contador, e um
+/// zero nele não quer dizer que nada da sessão anterior falou.
 fn registrar_reserva(
     mods: &std::sync::Mutex<ModsNativos>,
     geracao_vale: &dyn Fn() -> bool,
@@ -9649,8 +9652,9 @@ mod a_supervisao_dos_mods_nativos {
         assert!(mods.encerrando.is_empty() && mods.vivos.is_empty());
     }
 
-    /// **A reserva que chega numa geração morta é contada**, como todo comando
-    /// de geração morta.
+    /// **A reserva que chega numa geração morta é contada** em
+    /// `comandos_de_geracao_morta`, como a leitura de `codigo_do_mod` que
+    /// chega atrasada.
     ///
     /// Ela era recusada sem conta: `comandos_de_geracao_morta`, o contador que
     /// diz «alguma coisa da sessão anterior ainda estava falando», não subia
