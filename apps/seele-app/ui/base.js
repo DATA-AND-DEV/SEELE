@@ -967,6 +967,17 @@ function darCartoesDoMod(mod, instancia, cartoes) {
   const regiao = regiaoDoMod(mod, instancia);
   if (!regiao) throw new Error("a tela da sessão não está montada");
   const recusados = regiao.declararCartoes(cartoes);
+  // **Dito a quem hospeda, além de devolvido ao MOD.** O número volta como o
+  // valor do pedido, e um MOD que não o confere não fica sabendo; o
+  // `seele.log` fica, com o id em campo próprio.
+  if (recusados > 0) {
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${mod.id}: ${recusados} nó(s) dos cartões não couberam nos limites do cartão`,
+      "aviso",
+      mod.id,
+    );
+  }
   cartoesDosMods.set(mod.id, regiao);
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   return recusados;
@@ -1115,7 +1126,11 @@ function avatarContribuido(pessoaId) {
     })
     .catch((falha) => {
       if (estado.cancelado || !dono.podeFalar()) return;
-      dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque: String(falha?.message ?? falha) });
+      const porque = motivoDaFalha(falha);
+      dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
+      // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
+      // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
+      dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
     });
   return null;
 }
@@ -1206,16 +1221,30 @@ function montarContribuicao(contribuicao, destino = "") {
     const recusados = renderer.aplicar(contribuicao.conteudo);
     if (recusados > 0) {
       // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
-      // não coube onde ele a pôs.
+      // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
       donoDaRegiao(mod, instancia).falar({
         nome: "contribuicao",
         ponto: contribuicao.ponto,
         destino: chave,
         recusados,
       });
+      registrarNoAnfitriao(
+        "recusa-de-mod",
+        `${contribuicao.mod}: ${recusados} nó(s) de «${contribuicao.ponto}»`
+          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`,
+        "aviso",
+        contribuicao.mod,
+      );
     }
   } catch (falha) {
-    console.warn(`MOD ${contribuicao.mod}: ${contribuicao.ponto} não montou`, falha);
+    // **No registro, e não no console da janela**: num app empacotado o
+    // console não é lugar nenhum, e foi lá que esta falha morava.
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${contribuicao.ponto}» não montou — ${String(falha?.message ?? falha)}`,
+      "aviso",
+      contribuicao.mod,
+    );
     soltar();
     return null;
   }

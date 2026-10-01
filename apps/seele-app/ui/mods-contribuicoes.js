@@ -314,7 +314,16 @@ class RegistroDeContribuicoes {
     try {
       soltarMontagem?.();
     } catch (falha) {
-      console.warn(`MOD ${contribuicao.mod}: o conteúdo de ${contribuicao.ponto} não saiu`, falha);
+      // **No registro de quem hospeda, e não no console da janela**: num app
+      // empacotado o console não é lugar nenhum. `registrarNoAnfitriao` é de
+      // `base.js`, que carrega depois deste arquivo; esta chamada só acontece
+      // ao revogar, quando tudo já está de pé, e ela nunca lança.
+      registrarNoAnfitriao(
+        "recusa-de-mod",
+        `${contribuicao.mod}: o conteúdo de ${contribuicao.ponto} não saiu — ${String(falha?.message ?? falha)}`,
+        "aviso",
+        contribuicao.mod,
+      );
     }
     // **O conteúdo sai junto.** Ele é o que a closure do descartador segurava,
     // e zerá-lo aqui é o que faz uma referência esquecida no meio do caminho

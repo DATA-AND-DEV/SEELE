@@ -664,6 +664,73 @@ contexto.cartoesDosMods = new Map();
   S.prototype.montarCasca = cascaReal;
 }
 
+// ----------- R4d · o que não coube numa contribuição ou num cartão é dito
+
+{
+  // **O MOD sabia; o `seele.log`, não.** A contribuição que não coube virava um
+  // evento para o MOD, a que lançou virava um `console.warn` da janela — que
+  // num app empacotado não é lugar nenhum —, e os cartões recusados voltavam só
+  // como o valor do pedido. Cada um tem de chegar a `registrarNoAnfitriao` como
+  // aviso e com o id do MOD em campo próprio.
+  const anotadas = [];
+  const registrarDeAntes = contexto.registrarNoAnfitriao;
+  const rendererDeAntes = contexto.RegiaoDeMod;
+  const regiaoDeAntes = contexto.regiaoDoMod;
+  contexto.registrarNoAnfitriao = (...argumentos) => anotadas.push(argumentos);
+  const dita = (idDoMod, ...pedacos) => anotadas.some(([onde, texto, nivel, modId]) =>
+    onde === "recusa-de-mod" && nivel === "aviso" && modId === idDoMod
+    && pedacos.every((pedaco) => String(texto).includes(pedaco)));
+
+  const registro = new R();
+  const dono = new I("mod/a", "a", 7, {});
+  dono.estado = contexto.ESTADOS_DE_MOD.ativa;
+  const contribuir = (alvo) => registro.porHandle.get(registro.registrar({ id: "mod/a" }, dono, {
+    ponto: "canal.item", modo: "adicionar", alvo,
+    conteudo: [{ forma: "texto", chave: "c", dentro: "x" }],
+  }).handle);
+
+  // Não coube: o renderer devolve três recusas.
+  contexto.RegiaoDeMod = class { aplicar() { return 3; } soltar() {} };
+  contexto.montarContribuicao(contribuir("1"), "1");
+  confere("R4d · não coube", dita("mod/a", "3 nó(s)", "canal.item"),
+    `a contribuição que não coube não chegou ao registro: ${JSON.stringify(anotadas)}`);
+
+  // Lançou ao montar.
+  contexto.RegiaoDeMod = class { aplicar() { throw new Error("forma quebrada"); } soltar() {} };
+  const no = contexto.montarContribuicao(contribuir("2"), "2");
+  confere("R4d · lançou", no === null, "a montagem que lançou devolveu um nó");
+  confere("R4d · lançou", dita("mod/a", "canal.item", "forma quebrada"),
+    `a montagem que lançou não chegou ao registro: ${JSON.stringify(anotadas)}`);
+
+  // **Um descarte de montagem que lança**, pelo `tirar` de verdade. Era o
+  // outro `console.warn` da janela no mesmo caminho: revogar seguia, e o
+  // conteúdo que não saiu da tela só era dito a um console que ninguém lê.
+  const presa = contribuir("3");
+  presa.soltarMontagem = () => { throw new Error("descarte quebrado"); };
+  registro.revogar(presa.handle, { id: "mod/a", instancia: dono });
+  confere("R4d · não saiu", !registro.porHandle.has(presa.handle),
+    "o descarte que lançou impediu a revogação de tirar a contribuição");
+  confere("R4d · não saiu", dita("mod/a", "canal.item", "não saiu", "descarte quebrado"),
+    `o descarte que lançou não chegou ao registro: ${JSON.stringify(anotadas)}`);
+
+  // Cartões recusados, pelo `darCartoesDoMod` de verdade.
+  const base = ler("base.js");
+  const inicio = base.indexOf("function darCartoesDoMod(");
+  const fim = base.indexOf("\n}\n", inicio) + 3;
+  confere("R4d · o recorte", inicio >= 0, "`darCartoesDoMod` mudou de forma e o recorte não a achou");
+  vm.runInContext(base.slice(inicio, fim), contexto);
+  contexto.regiaoDoMod = () => ({ declararCartoes: () => 2 });
+  const devolvidos = contexto.darCartoesDoMod({ id: "mod/c" }, {}, { 7: [] });
+  confere("R4d · cartões", devolvidos === 2, `o MOD deixou de receber o número de recusas: ${devolvidos}`);
+  confere("R4d · cartões", dita("mod/c", "2 nó(s)", "cartões"),
+    `os cartões que não couberam não chegaram ao registro: ${JSON.stringify(anotadas)}`);
+
+  contexto.regiaoDoMod = regiaoDeAntes;
+  contexto.RegiaoDeMod = rendererDeAntes;
+  contexto.registrarNoAnfitriao = registrarDeAntes;
+  contexto.cartoesDosMods.clear();
+}
+
 // ------------- R3b · a substituição desenha o conteúdo da própria contribuição
 
 {
@@ -978,6 +1045,51 @@ contexto.cartoesDosMods = new Map();
         "R2 · a região no registro",
         dita("«regiao»", "3 nó(s)"),
         `a região com nós demais não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
+      );
+    }
+
+    // **R4e · o avatar que não montou é dito.** Aqui, dentro do roteador, e não
+    // em R4d: a recusa chega numa promessa, e este é o trecho da bancada que
+    // espera antes de `terminar`. É o caso de 23/09 — o avatar do PERFIS.
+    {
+      const regiaoFonte = ler("mods-regiao.js");
+      const inicioDoMotivo = regiaoFonte.indexOf("function motivoDaFalha(");
+      const fimDoMotivo = regiaoFonte.indexOf("\n}\n", inicioDoMotivo) + 3;
+      const inicioDoAvatar = base.indexOf("function avatarContribuido(");
+      const fimDoAvatar = base.indexOf("\n}\n", inicioDoAvatar) + 3;
+      confere("R4e · o recorte", inicioDoMotivo >= 0 && inicioDoAvatar >= 0,
+        "`motivoDaFalha` ou `avatarContribuido` mudou de forma e o recorte não a achou");
+      vm.runInContext(regiaoFonte.slice(inicioDoMotivo, fimDoMotivo), contexto);
+      vm.runInContext(base.slice(inicioDoAvatar, fimDoAvatar), contexto);
+      const ditas = [];
+      const contribuicao = {
+        mod: "seele/perfis", instancia: {},
+        conteudo: { doServidor: { canal: 1, pedido: {}, campo: "image" } },
+      };
+      const registroDeAntes = contexto.contribuicoesDosMods;
+      const donoDeAntes = contexto.donoDaRegiao;
+      contexto.contribuicoesDosMods = {
+        escolherSubstituicao: () => ({ escolhida: contribuicao }),
+        porHandle: new Map(),
+      };
+      contexto.donoDaRegiao = () => ({
+        podeFalar: () => true,
+        falar() {},
+        anotarRecusa: (texto) => ditas.push(String(texto)),
+        carregarMidiaDoServidor: () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }),
+      });
+      try {
+        confere("R4e · avatar", contexto.avatarContribuido(12) === null,
+          "o avatar devolveu uma imagem antes de ela chegar");
+        await new Promise((resolve) => setImmediate(resolve));
+      } finally {
+        contexto.contribuicoesDosMods = registroDeAntes;
+        contexto.donoDaRegiao = donoDeAntes;
+      }
+      confere(
+        "R4e · avatar",
+        ditas.some((texto) => texto.includes("avatar da pessoa 12") && texto.includes("não é imagem")),
+        `o avatar que não montou não chegou ao registro: ${JSON.stringify(ditas)}`,
       );
     }
 
