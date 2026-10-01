@@ -89,11 +89,15 @@ conhecidos guarda o bilhete do link ou da lista, e nunca o que o quarto deu.
 **O que sobra, até o `SEELE-ENC/2`** (o registro assinado, no Plano 4): quem
 toma as **duas** marcas do anfitrião no quarto, a do servidor e a da escuta, ou
 só a da escuta saindo pelo mesmo IP público que ele, recebe pelo `LEVE` o IP, a
-porta e o instante de quem tenta chegar. A marca do servidor só fica livre com o
-anfitrião fora do ar por mais de 60 segundos, ou com o ponto recém-reiniciado,
-antes de o anfitrião se registrar de novo (ele se registra a cada 15 segundos).
-O conteúdo, o convite, a senha e o apelido não saem: o TLS recusa o servidor
-errado.
+porta e o instante de quem tenta chegar. A marca do servidor só fica livre em
+três janelas: com o anfitrião fora do ar por mais de 60 segundos; quando ele
+não se registra naquele ponto (com IPv4 global ele não abre o degrau 4, e
+`SEELE_ENCONTRO` desliga o degrau ou troca o ponto, enquanto o bilhete que a
+lista de conhecidos guardou continua apontando o de antes); e com o ponto
+recém-reiniciado, antes de o anfitrião se registrar de novo (ele se registra a
+cada 15 segundos). A da escuta tem as mesmas janelas, e num anfitrião 0.15.0
+está sempre livre. O conteúdo, o convite, a senha e o apelido não saem: o TLS
+recusa o servidor errado.
 
 **O link fica com o seu endereço público dentro.** O bilhete (`enc=`) carrega o
 endereço do ponto de encontro e o endereço público da sua escuta de avisos —

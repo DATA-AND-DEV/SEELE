@@ -120,7 +120,11 @@ impl Quarto {
     /// contra tomar o lugar de alguém, e ela não é autenticação — este serviço
     /// não tem chave nenhuma para conferir. Ver o cabeçalho de
     /// `seele_proto::encontro`: o anfitrião reavive o dele a cada quinze
-    /// segundos, então o lugar só está livre quando ele está fora do ar.
+    /// segundos, então o lugar dele só está livre quando ele está fora do ar
+    /// há mais que o prazo, quando ele não se registra neste ponto, e logo
+    /// depois de este processo reiniciar, até o próximo registro dele. **A
+    /// exceção é a marca da escuta de um anfitrião 0.15.0**: ele nunca a
+    /// registra, e ela está sempre livre para quem chegar primeiro.
     ///
     /// O próprio morador **pode** se mudar: é do mesmo endereço que ele reavive,
     /// e é para o endereço novo que ele escreve quando o NAT lhe deu outro.

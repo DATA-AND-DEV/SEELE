@@ -434,7 +434,10 @@ pub enum OndeMora {
     Achado {
         /// Onde o socket do servidor mora: para onde se conecta.
         servidor: Option<SocketAddr>,
-        /// Onde a escuta de avisos mora: para onde vai o `LEVE`.
+        /// Onde o quarto diz que a escuta de avisos mora, **crua**: quem
+        /// ocupou a marca da escuta também aparece aqui. Ela só vira o aviso do
+        /// `LEVE` pela regra ([`OndeMora::escuta_do_anfitriao`], e o bilhete
+        /// que a usa, [`bilhete_desta_volta`]).
         escuta: Option<SocketAddr>,
     },
     /// O ponto respondeu e calou para as duas marcas.
@@ -494,16 +497,26 @@ impl OndeMora {
     /// de mão: o ponto repassa a esse aviso o endereço público de quem chega, e
     /// o instante. A marca dela (os 16 primeiros caracteres da impressão
     /// digital, e um `e`) está em todo link, e no quarto fica quem escreveu
-    /// primeiro. Um anfitrião 0.15.0 nunca a registra, e a de um anfitrião de
-    /// hoje fica livre quando ele passa mais de 60 s fora do ar. Quem a tomou
-    /// não fica sabendo de conteúdo nenhum, mas ficava sabendo de onde e quando
+    /// primeiro. Um anfitrião 0.15.0 nunca a registra. A de um anfitrião de
+    /// hoje fica livre quando ele passa mais de 60 s fora do ar; quando ele não
+    /// se registra naquele ponto (com IPv4 global ele não abre o degrau 4, e
+    /// `$SEELE_ENCONTRO` pode desligá-lo ou trocar o ponto, e o bilhete que a
+    /// lista guardou continua apontando o ponto de antes); e logo depois de o
+    /// ponto reiniciar, até o próximo registro dele, que sai a cada 15 s. As
+    /// mesmas três janelas valem para a marca do servidor. Quem a tomou não
+    /// fica sabendo de conteúdo nenhum, mas ficava sabendo de onde e quando
     /// cada um tentava chegar (o I1 da revisão final do Plano 1).
     ///
     /// A escuta e o servidor de um anfitrião moram na mesma máquina, e saem
     /// pelo mesmo IP público para o mesmo ponto: os dois sockets se registram
     /// juntos, no mesmo tique de `atender` (`registrar`, no `seele-server`).
-    /// Uma escuta noutro IP que o servidor da mesma resposta é de outra pessoa,
-    /// e uma sem servidor não tem quem a confirme.
+    /// Com a escuta noutro IP que o servidor da mesma resposta, uma das duas
+    /// marcas foi ocupada por outra pessoa (a da escuta ou a do servidor), ou o
+    /// anfitrião sai por dois IPs públicos. A regra não sabe qual das três, e
+    /// não usa a escuta: com a marca do servidor tomada, a escuta deixada de
+    /// lado é a do anfitrião de verdade. Uma escuta sem servidor não tem quem
+    /// a confirme: ou a marca do servidor está vazia, ou a resposta sobre ele
+    /// não voltou a tempo.
     ///
     /// # O que sobra
     ///
@@ -592,7 +605,8 @@ pub fn bilhete_desta_volta(guardado: &Bilhete, no_quarto: &OndeMora) -> Bilhete 
                 "quarto: deu a escuta e não deu o servidor, que é quem a confirma; ela não vira o \
                  aviso do LEVE, que vai ao aviso guardado (do link ou da lista). Ou o anfitrião \
                  está fora do ar e outra pessoa ocupou a marca da escuta, ou o registro do \
-                 servidor dele não chegou ao ponto"
+                 servidor dele não chegou ao ponto, ou a resposta sobre o servidor não voltou a \
+                 tempo"
             );
             guardado.clone()
         }
@@ -606,8 +620,9 @@ pub fn bilhete_desta_volta(guardado: &Bilhete, no_quarto: &OndeMora) -> Bilhete 
                 ponto = %guardado.ponto,
                 "quarto: a escuta que ele deu mora noutro IP que o servidor da mesma resposta; \
                  ela não vira o aviso do LEVE, que vai ao aviso guardado (do link ou da lista). \
-                 A escuta e o servidor de um anfitrião saem pelo mesmo IP público: esta é de \
-                 outra pessoa, que ocupou a marca da escuta"
+                 A escuta e o servidor de um anfitrião saem pelo mesmo IP público: uma das duas \
+                 marcas foi ocupada por outra pessoa (a da escuta ou a do servidor), ou o \
+                 anfitrião sai por dois IPs públicos"
             );
             guardado.clone()
         }
@@ -1129,7 +1144,10 @@ mod testes {
         // escreveu primeiro: um anfitrião 0.15.0 nunca a registra, e qualquer um
         // com o link a toma. A escuta e o servidor de um anfitrião moram na
         // mesma máquina e saem pelo mesmo IP público, e o servidor é conferido
-        // no TLS logo depois. Uma escuta noutro IP é de outra pessoa.
+        // no TLS logo depois. Com a escuta noutro IP, uma das duas marcas é de
+        // outra pessoa (a da escuta ou a do servidor), ou o anfitrião sai por
+        // dois IPs: a regra não usa a escuta em nenhum dos três casos. O
+        // `OCUPANTE` daqui é o caso barato, quem tomou só a da escuta.
         let servidor = SocketAddr::from(SERVIDOR);
         let escuta = SocketAddr::from(ESCUTA);
         let ocupante = SocketAddr::from(OCUPANTE);
@@ -1269,20 +1287,48 @@ mod testes {
         );
 
         let linhas = captura.linhas();
-        for (caso, dito) in [
-            ("noutro IP que o servidor", servidor.to_string()),
-            ("sem servidor", "não deu o servidor".to_owned()),
+        // Cada linha diz também as causas possíveis, e não só a escuta: com o
+        // servidor noutro IP, quem ocupou uma marca pode ter ocupado a do
+        // servidor, e aí a escuta deixada de lado é a do anfitrião de verdade
+        // (F-Seg-m1 da revisão final do Plano 1). Sem servidor, a resposta
+        // dele pode só não ter voltado a tempo.
+        for (caso, dito, causas) in [
+            (
+                "noutro IP que o servidor",
+                servidor.to_string(),
+                &[
+                    "uma das duas marcas foi ocupada por outra pessoa (a da escuta ou a do \
+                     servidor)",
+                    "ou o anfitrião sai por dois IPs públicos",
+                ][..],
+            ),
+            (
+                "sem servidor",
+                "não deu o servidor".to_owned(),
+                &["ou a resposta sobre o servidor não voltou a tempo"][..],
+            ),
         ] {
-            assert!(
-                linhas.iter().any(|linha| linha.starts_with("INFO")
+            let Some(linha) = linhas.iter().find(|linha| {
+                linha.starts_with("INFO")
                     && linha.contains("não vira o aviso")
                     && linha.contains(&ocupante.to_string())
-                    && linha.contains(&dito)),
-                "a escuta deixada de lado {caso} não foi dita no rastro (`info`, o único nível \
-                 que o seele.log grava) com a escuta e «{dito}»: quem investiga um anfitrião que \
-                 não foi avisado não sabe que o quarto deu outra escuta, nem por que ela ficou \
-                 de lado. Rastro: {linhas:?}"
-            );
+                    && linha.contains(&dito)
+            }) else {
+                panic!(
+                    "a escuta deixada de lado {caso} não foi dita no rastro (`info`, o único \
+                     nível que o seele.log grava) com a escuta e «{dito}»: quem investiga um \
+                     anfitrião que não foi avisado não sabe que o quarto deu outra escuta, nem \
+                     por que ela ficou de lado. Rastro: {linhas:?}"
+                );
+            };
+            for causa in causas {
+                assert!(
+                    linha.contains(causa),
+                    "a linha da escuta deixada de lado {caso} não diz «{causa}»: quem lê o \
+                     seele.log culpa quem ocupou a escuta, e pode ser o anfitrião de verdade com \
+                     a marca do servidor tomada, ou a resposta que se perdeu. Linha: {linha}"
+                );
+            }
         }
         assert!(
             !linhas

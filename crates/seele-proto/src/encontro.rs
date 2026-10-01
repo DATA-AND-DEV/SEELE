@@ -76,10 +76,15 @@
 //!    2026-09-29 ao ADR 0003). Se a chave fixada ali mudou, a conexão é
 //!    recusada do mesmo jeito.
 //! 2. **Quem escreveu primeiro fica**, enquanto o prazo não vencer. O anfitrião
-//!    reavive as duas marcas dele a cada quinze segundos, então o lugar só está
-//!    livre quando ele está fora do ar — e aí o que se toma é o lugar de quem
-//!    não está lá. A marca da escuta de um anfitrião 0.15.0 é a exceção: ele
-//!    nunca a registra, e ela está sempre livre.
+//!    reavive as duas marcas dele a cada quinze segundos, então o lugar dele
+//!    só está livre em três janelas: com ele fora do ar há mais que o prazo;
+//!    quando ele não se registra naquele ponto (com IPv4 global ele não abre o
+//!    degrau 4, e `$SEELE_ENCONTRO` desliga o degrau ou troca o ponto, enquanto
+//!    o bilhete que a lista de conhecidos guardou continua apontando o de
+//!    antes); e logo depois de o ponto reiniciar, até o próximo registro dele.
+//!    Nas três, o que se toma é o lugar de quem não está lá, ou ainda não
+//!    voltou a se registrar. A marca da escuta de um anfitrião 0.15.0 é a
+//!    exceção: ele nunca a registra, e ela está sempre livre.
 //! 3. **A escuta só vale no IP do servidor.** O endereço da escuta vira o
 //!    destino do `LEVE` de quem chega, e o `LEVE` sai antes do TLS: o ponto
 //!    repassa a esse destino o IP, a porta e o instante de quem tenta chegar.
