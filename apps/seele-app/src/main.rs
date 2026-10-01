@@ -122,6 +122,10 @@ struct Session {
     /// **Aqui e não na janela** porque o runtime é nativo: quem o desmonta tem
     /// de ser quem o criou, e a janela pode desaparecer antes de pedir.
     mods_nativos: Mutex<ModsNativos>,
+    /// O último motivo por que cada MOD não carregou, como o `seele.log` o
+    /// disse. É o que faz uma recusa repetida a cada quatro segundos sair uma
+    /// vez: ver [`recusa_de_carga_dita`].
+    recusas_de_carga: RecusasDeCarga,
 
     /// Os arquivos que **uma pessoa escolheu** para um MOD, por identificador.
     ///
@@ -3639,6 +3643,55 @@ struct AvisoDoMod {
     parou: bool,
 }
 
+/// O último motivo de carga recusada dito por MOD, como o registro o leva: a
+/// chave por [`id_no_registro`] e o motivo por [`motivo_no_registro`], os dois
+/// com teto — ver [`recusa_de_carga_dita`].
+type RecusasDeCarga = Mutex<std::collections::HashMap<String, String>>;
+
+/// **Diz no registro por que um MOD não carregou** — quando o motivo muda —, e
+/// devolve a recusa intacta.
+///
+/// `codigo_do_mod` e `mod_nativo_reservar` recusavam sem uma linha. A janela
+/// anotava «não carregou» sem o motivo num mapa em memória, e o `seele.log` não
+/// tinha nada: o pacote de outro MOD, o cliente que não está no pacote, o
+/// executor que não subiu.
+///
+/// **Uma vez por motivo, e não uma por tentativa.** A janela tenta de novo a
+/// cada quatro segundos um MOD que não subiu (`carregarMods`), e a recusa é
+/// quase sempre a mesma: dita a cada vez, seriam novecentas linhas iguais por
+/// hora. Guardado o último motivo por id, sai a primeira recusa e cada
+/// mudança; a carga que dá certo o esquece ([`carga_aceita`]), e a recusa que
+/// vier depois dela é dita de novo. Sem a memória — um cadeado envenenado —, a
+/// recusa é dita: repetir é melhor que calar.
+///
+/// WARN com o id e o motivo, menos `sessao-encerrada`, que vai em DEBUG e não
+/// mexe na memória: uma carga que não subiu porque a pessoa saiu é o desfecho
+/// certo, e quem a conta é `comandos_de_geracao_morta`.
+fn recusa_de_carga_dita(ditas: &RecusasDeCarga, mod_id: &str, falha: FalhaNoMod) -> FalhaNoMod {
+    let motivo = motivo_de(&falha);
+    let id = id_no_registro(mod_id);
+    let no_registro = motivo_no_registro(motivo);
+    if motivo == "sessao-encerrada" {
+        tracing::debug!(mod_id = %id, motivo = %no_registro, "MOD não carregou: a sessão acabou");
+        return falha;
+    }
+    let mudou = ditas.lock().map_or(true, |mut ditas| {
+        ditas.insert(id.clone(), no_registro.clone()).as_ref() != Some(&no_registro)
+    });
+    if mudou {
+        tracing::warn!(mod_id = %id, motivo = %no_registro, "MOD não carregou");
+    }
+    falha
+}
+
+/// **Uma carga deu certo**: o motivo guardado deste MOD é esquecido, e a
+/// próxima recusa dele é dita mesmo que seja a de antes.
+fn carga_aceita(ditas: &RecusasDeCarga, mod_id: &str) {
+    if let Ok(mut ditas) = ditas.lock() {
+        ditas.remove(&id_no_registro(mod_id));
+    }
+}
+
 /// **Reserva a identidade de um MOD nativo, sem rodar nada** — etapa 1 de 2.
 ///
 /// # Por que duas etapas
@@ -3665,6 +3718,27 @@ fn mod_nativo_reservar(
     id: String,
     hash: String,
 ) -> Result<u64, FalhaNoMod> {
+    // **Dita no registro quando não reserva, e esquecida quando reserva**: a
+    // janela tenta de novo a cada quatro segundos, e a recusa sai uma vez por
+    // motivo — ver [`recusa_de_carga_dita`].
+    match reservar_no_executor(&app, &session, geracao, &id, hash) {
+        Ok(numero) => {
+            carga_aceita(&session.recusas_de_carga, &id);
+            Ok(numero)
+        }
+        Err(falha) => Err(recusa_de_carga_dita(&session.recusas_de_carga, &id, falha)),
+    }
+}
+
+/// O corpo de [`mod_nativo_reservar`], com a recusa devolvida sem ser dita:
+/// quem a diz, uma vez por motivo, é o comando.
+fn reservar_no_executor(
+    app: &AppHandle,
+    session: &Session,
+    geracao: u64,
+    id: &str,
+    hash: String,
+) -> Result<u64, FalhaNoMod> {
     if !session.geracao_vale(geracao) {
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
@@ -3673,13 +3747,7 @@ fn mod_nativo_reservar(
     // O mesmo caminho de sempre para chegar ao código: a conferência de hash e
     // de identidade mora lá, e um segundo caminho seria uma segunda regra. Lido
     // agora para que a ativação não possa falhar por causa do disco.
-    let (codigo, api_declarada) = codigo_do_mod(
-        app.clone(),
-        session.clone(),
-        geracao,
-        id.clone(),
-        hash.clone(),
-    )?;
+    let (codigo, api_declarada) = ler_codigo_do_mod(app, session, geracao, id, &hash)?;
 
     let mut executor =
         executor::ExecutorQuickJs::novo(executor::Limites::default()).map_err(|_| {
@@ -3705,7 +3773,7 @@ fn mod_nativo_reservar(
         &session.mods_nativos,
         &|| session.geracao_vale(geracao),
         InstanciaNativa {
-            id: id.clone(),
+            id: id.to_owned(),
             geracao,
             hash,
             estado: EstadoNativo::Reservada,
@@ -3724,7 +3792,7 @@ fn mod_nativo_reservar(
     // A bomba **não emite carga**: ela guarda a fala na instância e avisa que
     // há o que colher. Ver `FalaPendente` para o porquê.
     let janela = app.clone();
-    let quem = id.clone();
+    let quem = id.to_owned();
     if std::thread::Builder::new()
         .name("mod-nativo-bomba".into())
         .spawn(move || bombear(&janela, &recebedor, &fila, numero, geracao, &quem))
@@ -5028,6 +5096,23 @@ fn codigo_do_mod(
     id: String,
     hash: String,
 ) -> Result<(String, u32), FalhaNoMod> {
+    // **Dita no registro, uma vez por motivo** ([`recusa_de_carga_dita`]). A
+    // carga só é dada por aceita quando a reserva sobe, em
+    // [`mod_nativo_reservar`]: o código lido aqui ainda não é um MOD de pé.
+    ler_codigo_do_mod(&app, &session, geracao, &id, &hash)
+        .map_err(|falha| recusa_de_carga_dita(&session.recusas_de_carga, &id, falha))
+}
+
+/// O corpo de [`codigo_do_mod`], com a recusa devolvida sem ser dita — é o
+/// caminho que [`mod_nativo_reservar`] também usa, e quem diz é o comando que
+/// a janela chamou.
+fn ler_codigo_do_mod(
+    app: &AppHandle,
+    session: &Session,
+    geracao: u64,
+    id: &str,
+    hash: &str,
+) -> Result<(String, u32), FalhaNoMod> {
     // O código de um MOD é o começo de uma montagem, e uma montagem pertence a
     // uma sessão. Entregá-lo para uma geração morta seria pôr um worker de pé
     // depois de a sessão dele ter acabado — a corrida que o roteiro da E2 chama
@@ -5040,7 +5125,7 @@ fn codigo_do_mod(
             motivo: "sessao-encerrada".to_owned(),
         });
     }
-    let pacote = seele_ffi::mods::ler_por_hash(&config_dir(&app), &hash)
+    let pacote = seele_ffi::mods::ler_por_hash(&config_dir(app), hash)
         .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
     // **O hash tem de ser deste MOD.** Sem isto, uma janela que pedisse o
     // código de um MOD sob o nome de outro receberia o primeiro — e o nome é o
@@ -5056,7 +5141,7 @@ fn codigo_do_mod(
         });
     };
     let caminho = format!("/{id}/{cliente}");
-    let bytes = mods::serve(std::path::Path::new(&config_dir(&app)), &caminho, &hash).ok_or(
+    let bytes = mods::serve(std::path::Path::new(&config_dir(app)), &caminho, hash).ok_or(
         FalhaNoMod::Recusado {
             motivo: "cliente-nao-servido".to_owned(),
         },
@@ -10794,6 +10879,141 @@ mod a_falha_do_mod_chega_ao_registro {
             "a mensagem `erro-no-evento` deixou de ir à janela, e ela é do outro lado: {:?}",
             deixou.falas
         );
+    }
+}
+
+/// **Um MOD que não carregou é dito no `seele.log`, uma vez por motivo.**
+///
+/// `codigo_do_mod` e `mod_nativo_reservar` recusavam sem uma linha: a janela
+/// anotava «não carregou» sem o motivo, num mapa em memória, e tentava de novo
+/// a cada quatro segundos. Dita a cada tentativa, a recusa seria novecentas
+/// linhas iguais por hora; dita quando muda, é uma.
+#[cfg(test)]
+mod a_carga_recusada_e_dita_uma_vez_por_motivo {
+    use super::{carga_aceita, motivo_de, recusa_de_carga_dita, FalhaNoMod};
+    use crate::rastro_de_teste::capturar;
+
+    /// Uma recusa de carga pelo `motivo`, dita com a memória `ditas`.
+    fn recusar(
+        ditas: &std::sync::Mutex<std::collections::HashMap<String, String>>,
+        id: &str,
+        motivo: &str,
+    ) -> FalhaNoMod {
+        recusa_de_carga_dita(
+            ditas,
+            id,
+            FalhaNoMod::Recusado {
+                motivo: motivo.to_owned(),
+            },
+        )
+    }
+
+    /// As linhas de carga recusada no rastro.
+    fn ditas_no(rastro: &str) -> Vec<&str> {
+        rastro
+            .lines()
+            .filter(|linha| linha.contains("MOD não carregou"))
+            .collect()
+    }
+
+    #[test]
+    fn uma_carga_recusada_duas_vezes_pelo_mesmo_motivo_deixa_uma_linha_so() {
+        let ditas = std::sync::Mutex::default();
+        let (falha, rastro) = capturar(|| {
+            recusar(&ditas, "prova/carga", "conteudo-de-outro-mod");
+            recusar(&ditas, "prova/carga", "conteudo-de-outro-mod")
+        });
+        assert_eq!(
+            motivo_de(&falha),
+            "conteudo-de-outro-mod",
+            "a recusa que volta à janela foi mexida, e a gestão já não diz o motivo"
+        );
+        let linhas = ditas_no(&rastro);
+        assert_eq!(
+            linhas.len(),
+            1,
+            "a mesma recusa de carga, de novo a cada quatro segundos, saiu a cada tentativa — \
+             novecentas linhas iguais por hora: {rastro}"
+        );
+        for pedaco in ["WARN", "mod_id=prova/carga", "motivo=conteudo-de-outro-mod"] {
+            assert!(
+                linhas.iter().all(|linha| linha.contains(pedaco)),
+                "a linha da carga recusada não traz `{pedaco}`, e é por ela que quem lê o \
+                 registro acha o MOD e o motivo: {rastro}"
+            );
+        }
+    }
+
+    /// **O que muda é dito**: outro motivo, outro MOD, e o mesmo motivo de
+    /// novo depois de uma carga que deu certo.
+    #[test]
+    fn um_motivo_novo_outro_mod_ou_a_volta_depois_de_carregar_sao_ditos() {
+        let ditas = std::sync::Mutex::default();
+        let ((), rastro) = capturar(|| {
+            recusar(&ditas, "prova/carga", "cliente-nao-servido");
+            recusar(&ditas, "prova/carga", "executor-nao-subiu");
+            recusar(&ditas, "prova/outro", "executor-nao-subiu");
+            carga_aceita(&ditas, "prova/carga");
+            recusar(&ditas, "prova/carga", "executor-nao-subiu");
+        });
+        assert_eq!(
+            ditas_no(&rastro).len(),
+            4,
+            "uma recusa que mudou — de motivo, de MOD, ou depois de uma carga que deu certo — \
+             não foi dita: {rastro}"
+        );
+    }
+
+    /// **A sessão que acabou não é recusa a dizer**: é o desfecho certo de
+    /// uma carga atrasada, contada em `comandos_de_geracao_morta`.
+    #[test]
+    fn a_sessao_que_acabou_nao_vira_aviso_de_carga() {
+        let ditas = std::sync::Mutex::default();
+        let (_, rastro) = capturar(|| recusar(&ditas, "prova/carga", "sessao-encerrada"));
+        assert!(
+            !rastro.contains("WARN") && rastro.contains("DEBUG"),
+            "uma carga que não subiu porque a pessoa saiu virou aviso — é o desfecho certo, e \
+             não um defeito: {rastro}"
+        );
+    }
+
+    /// **Os dois comandos de carga passam pela recusa dita**, e a reserva que
+    /// deu certo esquece o motivo. Os comandos precisam de um `AppHandle` e
+    /// não sobem num teste; um que devolvesse a recusa por fora seria o MOD
+    /// sem carregar e o registro calado de novo, com os testes acima verdes.
+    #[test]
+    fn os_dois_comandos_de_carga_passam_pela_recusa_dita() {
+        let fonte = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
+        )
+        .expect("main.rs legível")
+        .replace("\r\n", "\n");
+        for (comando, chamadas) in [
+            ("fn codigo_do_mod(", &["recusa_de_carga_dita("][..]),
+            (
+                "fn mod_nativo_reservar(",
+                &["recusa_de_carga_dita(", "carga_aceita("][..],
+            ),
+        ] {
+            let corpo = fonte
+                .split(comando)
+                .nth(1)
+                .and_then(|resto| resto.split("\n}\n").next())
+                .unwrap_or_else(|| panic!("`{comando}` sumiu de main.rs"));
+            let codigo: Vec<&str> = corpo
+                .lines()
+                .filter(|linha| !linha.trim_start().starts_with("//"))
+                .collect();
+            let codigo = codigo.join("\n");
+            for chamada in chamadas {
+                assert!(
+                    codigo.contains(chamada),
+                    "`{comando}` não passa por `{chamada}`: a carga recusada volta à janela e \
+                     não chega ao registro, ou a que deu certo não esquece o motivo e a recusa \
+                     seguinte fica calada"
+                );
+            }
+        }
     }
 }
 

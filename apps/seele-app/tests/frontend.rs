@@ -12907,9 +12907,22 @@ fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
     // **Duas etapas**: reservar dá o número sem rodar nada, ativar libera a
     // execução. É o que fecha a corrida de identidade sem perder as primeiras
     // mensagens legítimas — entre as duas, não existe fala para ouvir.
-    let reservar = rust
+    //
+    // O corpo da reserva mora em `reservar_no_executor`, e o comando só diz a
+    // recusa no registro (`recusa_de_carga_dita`): é lá que se confere.
+    let comando = rust
         .split_once("fn mod_nativo_reservar(")
         .expect("`mod_nativo_reservar`")
+        .1;
+    let comando = comando.split_once("\n/// ").map_or(comando, |(a, _)| a);
+    assert!(
+        comando.contains("reservar_no_executor("),
+        "`mod_nativo_reservar` deixou de passar por `reservar_no_executor`, e o que este guarda \
+         confere já não é a reserva: {comando}"
+    );
+    let reservar = rust
+        .split_once("fn reservar_no_executor(")
+        .expect("`reservar_no_executor`")
         .1;
     let reservar = reservar.split_once("\n/// ").map_or(reservar, |(a, _)| a);
     assert!(
@@ -13047,10 +13060,22 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
          as duas coisas há efeito sendo admitido: {desmontar}"
     );
 
-    // Os dois comandos que um MOD alcança conferem a geração.
+    // Os dois comandos que um MOD alcança conferem a geração. O corpo de
+    // `codigo_do_mod` mora em `ler_codigo_do_mod`, que a reserva também usa, e
+    // o comando só diz a recusa no registro (`recusa_de_carga_dita`).
+    let codigo = rust
+        .split_once("fn codigo_do_mod(")
+        .expect("`codigo_do_mod`")
+        .1;
+    let codigo = codigo.split_once("\n}\n").map_or(codigo, |(a, _)| a);
+    assert!(
+        codigo.contains("ler_codigo_do_mod("),
+        "`codigo_do_mod` deixou de passar por `ler_codigo_do_mod`, e o que este guarda confere \
+         já não é o comando: {codigo}"
+    );
     for (comando, marca) in [
         ("fn mod_request(", "session.confere_geracao(geracao)?"),
-        ("fn codigo_do_mod(", "session.geracao_vale(geracao)"),
+        ("fn ler_codigo_do_mod(", "session.geracao_vale(geracao)"),
     ] {
         let corpo = rust.split_once(comando).expect(comando).1;
         let corpo = corpo.split_once("\n}\n").map_or(corpo, |(a, _)| a);
