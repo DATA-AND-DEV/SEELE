@@ -34,8 +34,14 @@
 //!   depois de gravar, responde `sessao-encerrada` quando o MOD deixa de valer
 //!   no meio da gravação, e só existe no SDK com a capacidade `volume`.
 //!
-//! As de navegador (Playwright) não estão aqui: elas precisam de um Chromium, e
-//! só o job `bancadas` do `ci.yml` as roda.
+//! As de navegador (Playwright) não estão aqui: elas precisam de um Chromium.
+//! Em 30/09/2026 a pasta tem sete, e o job `bancadas` do `ci.yml`, que só roda
+//! quando alguém o dispara, roda quatro delas, por nome. As outras três —
+//! `ajustes-v013.cjs`, `escolha-de-versao-de-mod.cjs` e `gif-na-conversa.cjs`
+//! — não rodam em lugar nenhum: nem lá, nem no `validar` do `release.yml`, nem
+//! na bateria do `publicar.sh`. O `telas.cjs` não é uma oitava: é o servidor
+//! que as sete usam e, rodado sozinho, uma ferramenta de retrato: tira a foto
+//! de uma cena e não julga o que vê.
 //!
 //! # Quem a chama
 //!

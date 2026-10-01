@@ -205,7 +205,9 @@ jobs:
       #
       # Cada uma reprova também quando não chega ao fim: uma promessa pendurada
       # sairia com 0 sem ter provado nada. As bancadas de navegador
-      # (Playwright) não estão aqui, e só rodam no `ci.yml`.
+      # (Playwright) não estão aqui: quatro delas rodam no job `bancadas` do
+      # `ci.yml`, e três não rodam em lugar nenhum (ver
+      # `xtask/src/check_runtime.rs`).
       #
       # **Depois dos testes, e com `!cancelled()`.** No Actions um passo que
       # reprova pula os seguintes que não dizem o contrário. Antes dos testes,

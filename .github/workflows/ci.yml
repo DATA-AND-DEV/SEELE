@@ -28,9 +28,11 @@ name: CI
 # bancadas de MOD de `node` puro, e o `--sem-bateria` pula tudo isso, dizendo
 # que pulou.
 #
-# **As bancadas de navegador são a exceção nos dois caminhos.** Elas só rodam
-# aqui, e uma release pode sair com uma delas vermelha se ninguém disparar este
-# workflow antes.
+# **As bancadas de navegador são a exceção nos dois caminhos.** As quatro que
+# o job `bancadas` nomeia só rodam aqui, e uma release pode sair com uma delas
+# vermelha se ninguém disparar este workflow antes. As outras três da pasta —
+# `ajustes-v013.cjs`, `escolha-de-versao-de-mod.cjs` e `gif-na-conversa.cjs` —
+# não rodam nem aqui (ver `xtask/src/check_runtime.rs`).
 #
 # Voltar ao automático é devolver as duas linhas:
 #
