@@ -1631,6 +1631,19 @@ fn o_primeiro_contato_verificado_diz_quem_confirmou_a_chave() {
             "{onde} diz que o convite confirmou a chave mesmo quando quem a confirmou foi \
              a lista:\n{corpo}"
         );
+        // As três procuras de cima não olham a ordem dos ramos: com o ternário
+        // invertido, as três palavras continuam lá, e a chave que a lista
+        // confirmou volta a sair como «O CONVITE CONFIRMOU A CHAVE» (C-M2 do 1B).
+        // Por isso o ternário inteiro, na ordem certa. Os espaços são
+        // normalizados, para um ternário quebrado em linhas valer o mesmo.
+        let normalizado = corpo.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            normalizado.contains("origem === \"Lista\" ? \"A LISTA\" : \"O CONVITE\""),
+            "{onde} não escolhe quem confirmou com `origem === \"Lista\" ? \"A LISTA\" : \
+             \"O CONVITE\"`, nessa ordem: com os ramos trocados (ou a condição negada), a \
+             chave que a lista confirmou sai como «O CONVITE CONFIRMOU A CHAVE», e a do \
+             convite sai como confirmada pela lista:\n{corpo}"
+        );
         // O ternário sozinho não basta: a frase tem de **usar** o que ele
         // escolheu. Um texto com «O CONVITE» fixo ao lado de um ternário que
         // ninguém lê passaria pelas três procuras de cima, e diria de novo que o
