@@ -1143,11 +1143,12 @@ function superficieDoMod(mod, instancia, chave) {
  * Coalescido em `avisar`, uma vez por quadro.
  */
 contribuicoesDosMods.aoMudar(() => {
+  // Com os nós já recolocados, `redesenharAsPessoas` cala o som de quem saiu
+  // da tela: ver `calarOsSonsQueSairamDaTela`. As entradas e os avatares, que
+  // vêm depois, não tiram nó de MOD da tela.
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   if (typeof redesenharAsEntradasDeMod === "function") redesenharAsEntradasDeMod();
   if (typeof redesenharAvatares === "function") redesenharAvatares();
-  // Com os nós já recolocados: o som de quem saiu da tela para.
-  calarOsSonsQueSairamDaTela();
 });
 
 /**
@@ -1454,8 +1455,14 @@ function aContribuicaoPinta(contribuicao, destino) {
  * (ver `RegiaoDeMod#calarSonsForaDaTela`, em `mods-regiao.js`). Quem tira um nó
  * de MOD da tela sem descartá-lo é quem desenha — a lista de pessoas, os
  * canais, a escolha de quem apresenta um lugar —, e por isso esta função roda
- * no fim de cada um deles, com os nós já recolocados: `desenhar`,
- * `redesenharAsPessoas`, o `aoMudar` do registro e `escolherApresentacao`. A
+ * no fim de dois desenhos, com os nós já recolocados: `desenhar`, o retrato
+ * inteiro, e `redesenharAsPessoas`, a lista de pessoas. A escolha de quem
+ * apresenta (`escolherApresentacao`) e o `aoMudar` do registro chegam aqui por
+ * `redesenharAsPessoas`, que os dois chamam com a escolha e o registro já
+ * mudados; o que eles desenham depois dela — os avatares, as entradas de MOD,
+ * a gestão e a aba DIAGNÓSTICO — não tira nó de MOD da tela. Uma varredura por
+ * caminho: as do fim desses dois repetiam a de `redesenharAsPessoas`, e
+ * nenhuma prova via a falta de uma delas (S-m2 da revisão do Lote Som). A
  * página fechada cala o som dela em `SuperficieDeMod#fechar`.
  *
  * Ela alcança o que a revisão ampla do Plano 1D mediu tocando fora da tela

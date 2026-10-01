@@ -1755,7 +1755,9 @@ $("lista-mensagens").addEventListener("keydown", (evento) => {
  */
 function redesenharAsPessoas() {
   if (desenhado) desenharPessoas(desenhado);
-  // O cartão que deixou a lista não segue tocando: ver `calarOsSonsQueSairamDaTela`.
+  // O cartão que deixou a lista não segue tocando. É também por aqui que
+  // `escolherApresentacao` e o `aoMudar` do registro calam o som de quem saiu
+  // da tela: ver `calarOsSonsQueSairamDaTela`.
   calarOsSonsQueSairamDaTela();
 }
 

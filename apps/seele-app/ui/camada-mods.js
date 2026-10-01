@@ -669,14 +669,14 @@ function escolherApresentacao(ponto, id) {
     console.warn("preferência de apresentação não foi guardada:", falha);
   }
   // O registro redesenha o que depende dela; ver `contribuicoesDosMods.avisar`.
+  // `redesenharAsPessoas` também cala o som de quem deixou de desenhar — o de
+  // uma substituição que perdeu, o de um cartão da API 3 sob «o SEELE desenha»
+  // —, com a escolha nova já gravada acima; o que vem depois dela não tira nó
+  // de MOD da tela. Ver `calarOsSonsQueSairamDaTela`, em `base.js`.
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   if (typeof redesenharAvatares === "function") redesenharAvatares();
   desenharApresentacoes();
   desenharQuemPinta();
-  // E o som de quem deixou de desenhar para — o de uma substituição que
-  // perdeu, o de um cartão da API 3 sob «o SEELE desenha». Ver
-  // `calarOsSonsQueSairamDaTela`, em `base.js`.
-  calarOsSonsQueSairamDaTela();
 }
 
 /**

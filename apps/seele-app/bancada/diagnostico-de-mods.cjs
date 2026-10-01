@@ -1392,11 +1392,13 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
     desenhar(testTable.snapshot);
   });
   await esperarOSom("vinheta", "tocando", "a vinheta da substituição de `pessoa.cartao` não tocou");
-  // **Sem o retrato periódico, daqui até o fim do caso 4b** (S-m2 da revisão
+  // **Sem o retrato periódico, daqui até o fim do caso 5** (S-m2 da revisão
   // do Lote Som). A página roda `atualizar()` a cada meio segundo, e cada volta
   // é um `desenhar` que também varre: com ele de pé, tirar a varredura de
-  // `escolherApresentacao` ou a do `aoMudar` deixava esta prova verde. Parado,
-  // o que cala o som é o desenho que a escolha ou o registro fazem na hora.
+  // `redesenharAsPessoas` deixava esta prova verde. Parado, cada caso tem uma
+  // porta só: a escolha (3 e 4) e o registro (4b) calam o som pela varredura do
+  // fim de `redesenharAsPessoas`, que `escolherApresentacao` e o `aoMudar`
+  // chamam; quem saiu do servidor (5), pela do fim de `desenhar`.
   await pagina.evaluate(() => {
     window.retratoDaSessao = testTable.snapshot;
     testTable.snapshot = () => Promise.reject("NotConnected");
@@ -1438,7 +1440,8 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
   await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
 
   // 4b. A substituição que perde para outra, registrada depois: quem tira o
-  // nó da lista é o `aoMudar` do registro, e não uma escolha nem um retrato.
+  // nó da lista é o `aoMudar` do registro, pelo `redesenharAsPessoas` que ele
+  // chama, e não uma escolha nem um retrato.
   await pagina.evaluate(() => contribuicoesDosMods.registrar({ id: "mod/a" }, somA, {
     ponto: "pessoa.cartao",
     modo: "substituir",
@@ -1468,12 +1471,12 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
   await pagina.evaluate(() => {
     contribuicoesDosMods.revogarDoMod("mod/a");
     contribuicoesDosMods.revogarDoMod("mod/b");
-    testTable.snapshot = window.retratoDaSessao;
   });
 
   // 5. Quem sai: a contribuição continua montada para o destino de quem saiu
   // do servidor (`montadas` não encolhe), e o nó sai do documento no retrato
-  // seguinte — que é só um `desenhar`, sem escolha nem registro mudando.
+  // seguinte — que é só um `desenhar`, sem escolha nem registro mudando. Com o
+  // periódico ainda parado, o retrato sem Lia é desenhado à mão, uma vez.
   await pagina.evaluate(() => {
     contribuicoesDosMods.registrar({ id: "mod/a" }, somA, {
       ponto: "pessoa.cartao",
@@ -1481,12 +1484,12 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
       alvo: "2",
       conteudo: [{ forma: "midia", chave: "chegada", fonte: "som/chegada.wav", tocando: true }],
     });
-    desenhar(testTable.snapshot);
+    desenhar(window.retratoDaSessao);
   });
   await esperarOSom("chegada", "tocando", "o som que a contribuição dá a Lia não tocou");
   const antesDeSair = await contagem();
   await pagina.evaluate(() => {
-    const semLia = structuredClone(testTable.snapshot);
+    const semLia = structuredClone(window.retratoDaSessao);
     for (const sala of semLia.voice_rooms) sala.people = sala.people.filter((pessoa) => pessoa.id !== 2);
     semLia.presentes = semLia.presentes.filter((pessoa) => pessoa.id !== 2);
     desenhar(semLia);
@@ -1503,6 +1506,7 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
   );
   await pagina.evaluate(() => {
     contribuicoesDosMods.revogarDoMod("mod/a");
+    testTable.snapshot = window.retratoDaSessao;
     desenhar(testTable.snapshot);
   });
 
