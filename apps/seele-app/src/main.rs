@@ -3980,6 +3980,11 @@ fn assentar_fala(
 /// Em 23/09, descobrir que o avatar do PERFIS carregava levou uma hora de
 /// medição e um reinício com `RUST_LOG=debug`.
 ///
+/// É também por aqui, em ERROR, que chega o erro que o MOD não pegou: o
+/// executor o põe no canal como uma linha de `console` (`o MOD lançou: …`,
+/// `erro num temporizador: …`, `erro num ouvinte de evento: …`), pelo mesmo
+/// balde.
+///
 /// **O texto vai em `?`, e não solto na frase.** Ele é de um terceiro, e uma
 /// quebra de linha nele escreveria no registro uma segunda linha com a cara de
 /// uma linha do produto. Em `?` ela sai escapada, entre aspas.
@@ -10559,6 +10564,236 @@ mod o_console_do_mod_chega_ao_registro {
                  não a acha: {rastro}"
             );
         }
+    }
+}
+
+/// **A falha do próprio MOD chega ao `seele.log`, com o id dele.**
+///
+/// O erro mais comum de quem escreve MOD — ler de `null`, chamar o que a API
+/// não tem — não deixava linha nenhuma em INFO. A exceção no topo virava
+/// `Falhou("o MOD lançou")`, sem o texto; a de um temporizador ou de um ouvinte
+/// ia à janela sem número de pedido, e a janela a descartava na primeira linha
+/// de `atenderOMod`. O produto sabia, e não contava.
+///
+/// Pelo caminho real: um executor de verdade, e a mesma `assentar_fala` da
+/// bomba, chamada na thread do teste para o rastro ser capturável.
+#[cfg(test)]
+mod a_falha_do_mod_chega_ao_registro {
+    use super::{assentar_fala, ModsNativos};
+    use crate::executor::{
+        ExecutorQuickJs, Fila, Limites, ParaOFora, LINHAS_DE_CONSOLE_POR_SEGUNDO, RAJADA_DO_CONSOLE,
+    };
+    use crate::rastro_de_teste::capturar;
+    use std::time::{Duration, Instant};
+
+    /// O id do MOD destes testes.
+    const ID: &str = "prova/falha";
+
+    /// O que um MOD de verdade deixou.
+    struct Deixou {
+        /// As falas que não são de console, em ordem.
+        falas: Vec<ParaOFora>,
+        /// O que a bomba escreveu no registro.
+        rastro: String,
+        /// Quantas linhas de console saíram do motor.
+        linhas: u32,
+        /// Quanto tempo passou desde antes de o motor subir.
+        levou: Duration,
+    }
+
+    /// Sobe `codigo` num executor de verdade, chama `depois` com ele de pé, e
+    /// assenta cada linha de console como a bomba assentaria — numa captura,
+    /// na thread do teste — até `basta` dizer que chega ou o `prazo` passar.
+    fn deixou(
+        codigo: &str,
+        depois: impl FnOnce(&ExecutorQuickJs),
+        basta: impl Fn(&[ParaOFora], u32) -> bool,
+        prazo: Duration,
+    ) -> Deixou {
+        let inicio = Instant::now();
+        let ((falas, linhas), rastro) = capturar(|| {
+            let executor = ExecutorQuickJs::novo(Limites::default()).expect("o motor");
+            executor.iniciar(codigo).expect("o código");
+            depois(&executor);
+            let mods = std::sync::Mutex::new(ModsNativos::default());
+            let fila = std::sync::Arc::new(Fila::default());
+            let mut falas = Vec::new();
+            let mut linhas = 0_u32;
+            while inicio.elapsed() < prazo && !basta(&falas, linhas) {
+                match executor.receber(Duration::from_millis(20)) {
+                    Some(fala @ ParaOFora::Console { .. }) => {
+                        linhas += 1;
+                        assentar_fala(&mods, &|| true, &fila, 1, fala, ID);
+                    }
+                    Some(fala) => falas.push(fala),
+                    None => {}
+                }
+            }
+            (falas, linhas)
+        });
+        Deixou {
+            falas,
+            rastro,
+            linhas,
+            levou: inicio.elapsed(),
+        }
+    }
+
+    /// O máximo de linhas que o balde do console deixa sair em `levou`: a
+    /// rajada, a recarga do tempo que passou e uma de folga pelo
+    /// arredondamento.
+    fn teto_do_balde(levou: Duration) -> u32 {
+        let recarga = (levou.as_secs_f64() * f64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO)).ceil();
+        RAJADA_DO_CONSOLE + recarga as u32 + 1
+    }
+
+    /// A linha de erro do console deste MOD que traz todos os `pedacos`.
+    fn linha_de_erro<'a>(rastro: &'a str, pedacos: &[&str]) -> Option<&'a str> {
+        rastro.lines().find(|linha| {
+            linha.contains("ERROR")
+                && linha.contains("console do MOD")
+                && linha.contains(&format!("mod_id={ID}"))
+                && pedacos.iter().all(|pedaco| linha.contains(pedaco))
+        })
+    }
+
+    /// Uma das falas é uma mensagem para a janela que contém `trecho`?
+    fn tem_mensagem(falas: &[ParaOFora], trecho: &str) -> bool {
+        falas
+            .iter()
+            .any(|fala| matches!(fala, ParaOFora::Mensagem(json) if json.contains(trecho)))
+    }
+
+    #[test]
+    fn uma_excecao_no_topo_do_mod_chega_ao_registro_com_o_texto() {
+        let lancou = |falas: &[ParaOFora]| {
+            falas
+                .iter()
+                .any(|fala| matches!(fala, ParaOFora::Falhou(texto) if texto == "o MOD lançou"))
+        };
+        let deixou = deixou(
+            "const avatar = null; avatar.largura;",
+            |_| {},
+            |falas, linhas| lancou(falas) && linhas > 0,
+            Duration::from_secs(5),
+        );
+        assert!(
+            lancou(&deixou.falas),
+            "a janela deixou de receber o `Falhou` da volta que lançou, e a gestão já não diz que \
+             o MOD falhou: {:?}",
+            deixou.falas
+        );
+        let linha =
+            linha_de_erro(&deixou.rastro, &["o MOD lançou", "TypeError"]).unwrap_or_else(|| {
+                panic!(
+                    "a exceção no topo do MOD não chegou ao seele.log com o id e o texto — quem \
+                     escreveu o MOD fica com «o MOD lançou» e nada mais: {}",
+                    deixou.rastro
+                )
+            });
+        assert!(
+            linha.contains(r"\n    at "),
+            "a linha da exceção perdeu a primeira linha da pilha, que diz onde o MOD lançou: \
+             {linha}"
+        );
+    }
+
+    /// **Pelo mesmo balde do `console`.** Um MOD que lança em toda resposta
+    /// lança tanto quanto a janela responde; sem o balde, cada volta seria uma
+    /// linha no `seele.log`, num arquivo que só gira na abertura do app.
+    #[test]
+    fn uma_excecao_em_cada_resposta_nao_passa_do_balde_do_console() {
+        let deixou = deixou(
+            "globalThis.aoResponder = () => { const a = null; a.x; };",
+            |executor| {
+                let fim = Instant::now() + Duration::from_millis(600);
+                while Instant::now() < fim {
+                    let _ = executor.entregar("{}");
+                    std::thread::yield_now();
+                }
+            },
+            |_, _| false,
+            Duration::from_millis(900),
+        );
+        assert!(
+            linha_de_erro(&deixou.rastro, &["o MOD lançou", "TypeError"]).is_some(),
+            "a exceção de uma resposta não chegou ao seele.log com o id e o texto: {}",
+            deixou.rastro
+        );
+        let teto = teto_do_balde(deixou.levou);
+        assert!(
+            deixou.linhas <= teto,
+            "{} linhas de console em {:?}, e o balde deixa {teto}: as exceções passaram por fora \
+             dele",
+            deixou.linhas,
+            deixou.levou
+        );
+        assert!(
+            deixou.rastro.contains("suprimidas="),
+            "o balde não segurou nada, e o teste não mediu o teto: {}",
+            deixou.rastro
+        );
+    }
+
+    /// **Um temporizador que lança deixa linhas com o texto, no teto do
+    /// balde.** O mesmo laço de 4 ms mandava 174 mensagens por segundo à
+    /// janela, que as descartava.
+    #[test]
+    fn um_temporizador_que_lanca_deixa_linhas_limitadas_pelo_balde() {
+        let deixou = deixou(
+            "setInterval(() => { const a = null; a.b; }, 4);",
+            |_| {},
+            |_, _| false,
+            Duration::from_secs(1),
+        );
+        assert!(
+            linha_de_erro(&deixou.rastro, &["erro num temporizador", "TypeError"]).is_some(),
+            "a exceção de um temporizador não chegou ao seele.log com o id e o texto: {}",
+            deixou.rastro
+        );
+        assert!(
+            tem_mensagem(&deixou.falas, "erro-no-relogio"),
+            "a mensagem `erro-no-relogio` deixou de ir à janela, e ela é do outro lado: {:?}",
+            deixou.falas.first()
+        );
+        let teto = teto_do_balde(deixou.levou);
+        assert!(
+            deixou.linhas <= teto,
+            "{} linhas de console em {:?}, e o balde deixa {teto}: o laço do temporizador passou \
+             por fora dele",
+            deixou.linhas,
+            deixou.levou
+        );
+        assert!(
+            deixou.rastro.contains("suprimidas="),
+            "o balde não segurou nada, e o teste não mediu o teto: {}",
+            deixou.rastro
+        );
+    }
+
+    #[test]
+    fn um_ouvinte_de_evento_que_lanca_deixa_a_linha() {
+        let deixou = deixou(
+            "SeeleUI.aoEvento(() => { const a = null; a.b; });",
+            |executor| {
+                executor
+                    .entregar(r#"{"tipo":"evento","nome":"tecla"}"#)
+                    .expect("o evento");
+            },
+            |falas, linhas| tem_mensagem(falas, "erro-no-evento") && linhas > 0,
+            Duration::from_secs(5),
+        );
+        assert!(
+            linha_de_erro(&deixou.rastro, &["erro num ouvinte de evento", "TypeError"]).is_some(),
+            "a exceção de um ouvinte de `SeeleUI.aoEvento` não chegou ao seele.log com o id e o \
+             texto: {}",
+            deixou.rastro
+        );
+        assert!(
+            tem_mensagem(&deixou.falas, "erro-no-evento"),
+            "a mensagem `erro-no-evento` deixou de ir à janela, e ela é do outro lado: {:?}",
+            deixou.falas
+        );
     }
 }
 

@@ -518,6 +518,34 @@ fn dizer_as_seguradas(
     });
 }
 
+/// **Uma linha de `console` sai do motor**: pelo balde, cortada, e para o
+/// canal que a bomba escreve no `seele.log` com o id do MOD.
+///
+/// O caminho de toda linha de console, e é por ser um só que o teto vale para
+/// todas: o que o MOD escreve com `seele.console`, e o que o produto diz por
+/// ele quando uma volta lança ([`relatar`]).
+fn linha_de_console(
+    balde: &std::cell::RefCell<BaldeDoConsole>,
+    manda: &Sender<ParaOFora>,
+    nivel: NivelDoConsole,
+    texto: String,
+) {
+    // Um `RefCell` e não um cadeado: o balde só é usado na thread do motor, e
+    // um `try_borrow` que falhasse seria uma reentrada que não existe — calar
+    // é a resposta segura se um dia existir.
+    let Ok(mut balde) = balde.try_borrow_mut() else {
+        return;
+    };
+    let Some(suprimidas) = balde.admitir(Instant::now()) else {
+        return;
+    };
+    let _ = manda.send(ParaOFora::Console {
+        nivel,
+        texto: cortar_linha_do_console(texto),
+        suprimidas,
+    });
+}
+
 /// O nível de uma linha que o MOD escreveu com `console`.
 ///
 /// Cinco métodos, quatro níveis: `log` e `info` são a mesma coisa para quem lê
@@ -533,7 +561,8 @@ pub(crate) enum NivelDoConsole {
     Informacao,
     /// `console.warn`.
     Aviso,
-    /// `console.error` (e o `assert` cuja condição é falsa).
+    /// `console.error` (e o `assert` cuja condição é falsa) — e o erro que o
+    /// MOD não pegou, que o produto diz por ele.
     Erro,
 }
 
@@ -673,15 +702,18 @@ pub(crate) enum ParaOFora {
         /// Quantos temporizadores estão na tabela.
         relogios: usize,
     },
-    /// Uma linha que o MOD escreveu com `console` — ou a linha em que o
-    /// produto diz, por ele, a conta que o balde guardou e nenhuma linha levou
-    /// ([`CONTA_DO_BALDE`], em aviso).
+    /// Uma linha que o MOD escreveu com `console` — ou uma que o produto diz
+    /// por ele: a conta que o balde guardou e nenhuma linha levou
+    /// ([`CONTA_DO_BALDE`], em aviso), e o erro que o MOD não pegou (em erro):
+    /// o de um temporizador ou de um ouvinte, dito pelo prelúdio, e o que
+    /// encerrou uma volta, dito por [`relatar`].
     ///
     /// **Não é fala para a janela**: é registro. Quem a escreve no `seele.log`
     /// é a bomba, que sabe de quem é o MOD; o executor não sabe, e não precisa
     /// saber para pôr a linha no canal.
     Console {
-        /// O nível, do método que o MOD chamou.
+        /// O nível, do método que o MOD chamou, ou o que o produto escolheu
+        /// para a linha que ele diz.
         nivel: NivelDoConsole,
         /// O texto, já cortado por [`cortar_linha_do_console`], ou
         /// [`CONTA_DO_BALDE`].
@@ -1062,20 +1094,12 @@ fn rodar(
         seele.set(
             "console",
             Function::new(ctx.clone(), move |metodo: String, texto: String| {
-                // Um `RefCell` e não um cadeado: a função só roda na thread do
-                // motor, e um `try_borrow` que falhasse seria uma reentrada que
-                // não existe — calar é a resposta segura se um dia existir.
-                let Ok(mut balde) = balde_da_ponte.try_borrow_mut() else {
-                    return;
-                };
-                let Some(suprimidas) = balde.admitir(Instant::now()) else {
-                    return;
-                };
-                let _ = linhas.send(ParaOFora::Console {
-                    nivel: NivelDoConsole::do_metodo(&metodo),
-                    texto: cortar_linha_do_console(texto),
-                    suprimidas,
-                });
+                linha_de_console(
+                    &balde_da_ponte,
+                    &linhas,
+                    NivelDoConsole::do_metodo(&metodo),
+                    texto,
+                );
             })?,
         )?;
         ctx.globals().set("seele", seele)?;
@@ -1115,13 +1139,14 @@ fn rodar(
             interrupcao.comecar();
             let vencidos = recolher_vencidos(&mut relogios);
             for id in vencidos {
-                let resultado = contexto.with(|ctx| -> rquickjs::Result<()> {
-                    let Ok(bate) = ctx.globals().get::<_, Function<'_>>("__seeleRelogio") else {
-                        return Ok(());
+                let volta = contexto.with(|ctx| {
+                    let resultado = match ctx.globals().get::<_, Function<'_>>("__seeleRelogio") {
+                        Ok(bate) => bate.call::<_, ()>((id,)),
+                        Err(_) => Ok(()),
                     };
-                    bate.call::<_, ()>((id,))
+                    com_o_que_lancou(&ctx, resultado)
                 });
-                relatar(manda, fila, interrupcao, resultado);
+                relatar(manda, fila, interrupcao, &balde_do_console, volta);
             }
             escoar_jobs(&runtime, interrupcao, manda, fila);
             // **Também aqui.** Sem esta linha, um callback que agenda outro
@@ -1155,36 +1180,39 @@ fn rodar(
                 // o prelúdio deixar de ser uma constante — e uma constante é
                 // exatamente o que dá para revisar uma vez e confiar sempre.
                 let capacidades = seele_ffi::mods::capacidades_da_api(api);
-                let resultado = contexto.with(|ctx| {
-                    let lista = rquickjs::Array::new(ctx.clone())?;
-                    for (onde, nome) in capacidades.iter().enumerate() {
-                        lista.set(onde, *nome)?;
-                    }
-                    ctx.globals().set("__seeleCapacidades", lista)?;
-                    // O teto por mensagem, pelo mesmo caminho e pela mesma
-                    // razão: o prelúdio precisa dele para separar «não coube»
-                    // de «a fila encheu», e interpolá-lo no texto faria o
-                    // prelúdio deixar de ser uma constante.
-                    ctx.globals()
-                        .set("__seeleTetoDaMensagem", TETO_DA_MENSAGEM as u32)?;
-                    ctx.eval::<(), _>(PRELUDIO.as_bytes())?;
-                    ctx.eval::<(), _>(fonte.as_bytes())
+                let volta = contexto.with(|ctx| {
+                    let resultado = (|| -> rquickjs::Result<()> {
+                        let lista = rquickjs::Array::new(ctx.clone())?;
+                        for (onde, nome) in capacidades.iter().enumerate() {
+                            lista.set(onde, *nome)?;
+                        }
+                        ctx.globals().set("__seeleCapacidades", lista)?;
+                        // O teto por mensagem, pelo mesmo caminho e pela mesma
+                        // razão: o prelúdio precisa dele para separar «não
+                        // coube» de «a fila encheu», e interpolá-lo no texto
+                        // faria o prelúdio deixar de ser uma constante.
+                        ctx.globals()
+                            .set("__seeleTetoDaMensagem", TETO_DA_MENSAGEM as u32)?;
+                        ctx.eval::<(), _>(PRELUDIO.as_bytes())?;
+                        ctx.eval::<(), _>(fonte.as_bytes())
+                    })();
+                    com_o_que_lancou(&ctx, resultado)
                 });
-                relatar(manda, fila, interrupcao, resultado);
+                relatar(manda, fila, interrupcao, &balde_do_console, volta);
             }
             ParaODentro::Resposta(json) => {
                 // O lugar volta **ao tirar da fila**, que é quando ela deixa de
                 // ocupar memória — e é o que a faz voltar a aceitar.
                 fila_de_entrada.tirar(json.len());
                 interrupcao.comecar();
-                let resultado = contexto.with(|ctx| -> rquickjs::Result<()> {
-                    let Ok(ao_responder) = ctx.globals().get::<_, Function<'_>>("aoResponder")
-                    else {
-                        return Ok(());
+                let volta = contexto.with(|ctx| {
+                    let resultado = match ctx.globals().get::<_, Function<'_>>("aoResponder") {
+                        Ok(ao_responder) => ao_responder.call::<_, ()>((json,)),
+                        Err(_) => Ok(()),
                     };
-                    ao_responder.call::<_, ()>((json,))
+                    com_o_que_lancou(&ctx, resultado)
                 });
-                relatar(manda, fila, interrupcao, resultado);
+                relatar(manda, fila, interrupcao, &balde_do_console, volta);
             }
         }
         escoar_jobs(&runtime, interrupcao, manda, fila);
@@ -1237,7 +1265,14 @@ const PRELUDIO: &str = r#"
       // O erro do MOD fica com o MOD: um ouvinte que lança não pode impedir o
       // próximo evento de chegar. A volta inteira falharia, e o anfitrião a
       // relataria como `Falhou` — que é o MOD com defeito, não este.
-      try { ouvinte(m); } catch (erro) { seele.postar(JSON.stringify({ tipo: 'erro-no-evento', erro: String(erro) })); }
+      //
+      // **E é dito no registro**, primeiro: a mensagem vai à janela sem número
+      // de pedido, e a janela a descarta. Antes da mensagem porque `String`
+      // de um valor lançado pode lançar, e a linha não pode depender dela.
+      try { ouvinte(m); } catch (erro) {
+        dizerOErro('erro num ouvinte de evento:', erro);
+        seele.postar(JSON.stringify({ tipo: 'erro-no-evento', erro: String(erro) }));
+      }
       return;
     }
     const espera = pendentes.get(m.n);
@@ -1361,6 +1396,12 @@ const PRELUDIO: &str = r#"
     try { seele.console(metodo, partes.map(emTexto).join(' ')); } catch { /* o registro é de quem hospeda */ }
   };
   const assertFalhou = escrever('error');
+  // **O erro que o MOD não pegou num temporizador ou num ouvinte**, dito por
+  // este `console`, e não pelo global: o MOD pode trocar ou calar o
+  // `console.error` dele, e não o que o produto diz dele. Sai como qualquer
+  // linha de console — com o id do MOD, o escape, o corte e o balde, que é o
+  // que segura um `setInterval` de 4 ms que lança a cada batida.
+  const dizerOErro = escrever('error');
   globalThis.console = {
     log: escrever('log'),
     info: escrever('info'),
@@ -1532,8 +1573,12 @@ const PRELUDIO: &str = r#"
     if (!marca.repete) relogios.delete(id);
     // **O erro do MOD fica com o MOD.** Um `setInterval` que lança não pode
     // parar o anfitrião, e a repetição continua: quem decide parar é quem
-    // cancela, e não um erro de uma volta.
-    try { marca.fn(); } catch (erro) { seele.postar(JSON.stringify({ tipo: 'erro-no-relogio', erro: String(erro) })); }
+    // cancela, e não um erro de uma volta. E é dito no registro, antes da
+    // mensagem à janela, pela mesma razão do ouvinte de eventos.
+    try { marca.fn(); } catch (erro) {
+      dizerOErro('erro num temporizador:', erro);
+      seele.postar(JSON.stringify({ tipo: 'erro-no-relogio', erro: String(erro) }));
+    }
   };
 
   // E o anfitrião recolhe o que se acumulou, esvaziando.
@@ -1710,12 +1755,68 @@ fn avisar(manda: &Sender<ParaOFora>, fila: &Arc<Fila>, aviso: ParaOFora) {
     }
 }
 
+/// O resultado de uma volta do motor e, quando o MOD lançou, o que ele lançou
+/// ([`o_que_o_mod_lancou`]).
+type Volta = (rquickjs::Result<()>, Option<String>);
+
+/// Junta ao resultado de uma volta o que o MOD lançou, **lido ainda dentro do
+/// contexto**: a exceção pendente é dele, e fora de `contexto.with` ela já não
+/// tem de onde ser lida.
+fn com_o_que_lancou(ctx: &rquickjs::Ctx<'_>, resultado: rquickjs::Result<()>) -> Volta {
+    let lancado =
+        matches!(resultado, Err(rquickjs::Error::Exception)).then(|| o_que_o_mod_lancou(ctx));
+    (resultado, lancado)
+}
+
+/// **O que o MOD lançou, em texto**: `nome: mensagem` e a primeira linha da
+/// pilha, quando é um `Error`; o valor como o JavaScript o diria, quando não é.
+///
+/// A pilha inteira não cabe no teto de uma linha, e a primeira linha é a que
+/// diz onde: `at <eval> (eval_script:1:20)`. O que não vira texto não derruba
+/// o resto: um nome que não vira texto sai como `Error`, uma mensagem ou uma
+/// pilha sai vazia, e um valor lançado que não vira texto (um `Symbol`) sai
+/// como um recuo que diz isso. A exceção que essa leitura deixar pendente é
+/// tirada — a próxima volta não pode herdar uma exceção que não é dela.
+fn o_que_o_mod_lancou(ctx: &rquickjs::Ctx<'_>) -> String {
+    use rquickjs::convert::Coerced;
+    let lancado = ctx.catch();
+    let texto = match lancado.as_exception() {
+        Some(excecao) => {
+            let nome = excecao
+                .get::<_, Coerced<String>>("name")
+                .map_or_else(|_| "Error".to_owned(), |nome| nome.0);
+            let mensagem = excecao.message().unwrap_or_default();
+            let pilha = excecao.stack().unwrap_or_default();
+            match pilha.lines().find(|linha| !linha.trim().is_empty()) {
+                Some(onde) => format!("{nome}: {mensagem}\n{onde}"),
+                None => format!("{nome}: {mensagem}"),
+            }
+        }
+        None => lancado.get::<Coerced<String>>().map_or_else(
+            |_| "[valor que não virou texto]".to_owned(),
+            |texto| texto.0,
+        ),
+    };
+    if ctx.has_exception() {
+        let _ = ctx.catch();
+    }
+    texto
+}
+
 /// Traduz o resultado de uma volta para o canal de saída.
+///
+/// **Quando o MOD lançou, a janela recebe o `Falhou` e o registro recebe o
+/// texto.** O `Falhou` era tudo, e dizia «o MOD lançou» sem dizer o quê: o erro
+/// mais comum de quem escreve MOD, ler de `null`, não deixava uma linha no
+/// `seele.log`. O texto vai como uma linha de `console` em erro, pelo mesmo
+/// balde ([`linha_de_console`]): com o id do MOD, o escape e o corte de
+/// qualquer outra, e um MOD que lança em toda volta não passa do teto de vazão.
 fn relatar(
     manda: &Sender<ParaOFora>,
     fila: &Arc<Fila>,
     interrupcao: &Arc<Interrupcao>,
-    resultado: rquickjs::Result<()>,
+    balde: &std::cell::RefCell<BaldeDoConsole>,
+    (resultado, lancado): Volta,
 ) {
     match resultado {
         Ok(()) => {}
@@ -1727,6 +1828,14 @@ fn relatar(
         // outra é o produto parando o MOD, e elas pedem frases diferentes.
         Err(rquickjs::Error::Exception) => {
             avisar(manda, fila, ParaOFora::Falhou("o MOD lançou".into()));
+            if let Some(lancado) = lancado {
+                linha_de_console(
+                    balde,
+                    manda,
+                    NivelDoConsole::Erro,
+                    format!("o MOD lançou: {lancado}"),
+                );
+            }
         }
         Err(erro) => {
             avisar(manda, fila, ParaOFora::Interrompido);
