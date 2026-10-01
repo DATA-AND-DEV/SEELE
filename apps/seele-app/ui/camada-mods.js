@@ -1138,6 +1138,15 @@ function desenharContornos() {
   }
   const largura = window.innerWidth;
   const altura = window.innerHeight;
+  // **Uma página de MOD aberta cobre a célula da conversa**, por cima dela
+  // (`.palco-de-paginas`, em `mods-superficies.css`), e o que ela cobre
+  // continua no documento, com caixa. Contornado, o modo riscaria a página do
+  // próprio MOD com os retratos, o cabeçalho do canal e as ferramentas de
+  // escrever que estão embaixo dela (T7 M1 da revisão ampla do Plano 1D). Ela
+  // é tratada como quem tapa: um nó inteiro dentro da área dela não está à
+  // vista. Nenhum lugar do produto mora dentro de uma página — o que ela
+  // mostra é do MOD —, então o que cai dentro da área dela é o que ela cobre.
+  const tapada = document.querySelector(".palco-de-paginas:not([hidden])")?.getBoundingClientRect() ?? null;
   const caixas = [];
   for (const [ponto, seletor] of Object.entries(CONTEINERES_DOS_PONTOS)) {
     for (const no of document.querySelectorAll(seletor)) {
@@ -1147,6 +1156,13 @@ function desenharContornos() {
       // contorno dele é o que mostra onde um MOD entraria.
       if (no.getClientRects().length === 0) continue;
       const r = no.getBoundingClientRect();
+      if (
+        tapada
+        && r.left >= tapada.left && r.right <= tapada.right
+        && r.top >= tapada.top && r.bottom <= tapada.bottom
+      ) {
+        continue;
+      }
       // O recorte: a janela, e cada ancestral que corta o que transborda.
       let cima = 0;
       let esquerda = 0;

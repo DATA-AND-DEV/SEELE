@@ -966,6 +966,51 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
     + "cabeçalho do canal",
   );
 
+  // **Uma página de MOD aberta cobre a conversa**, e o que ela cobre não ganha
+  // contorno (T7 M1 da revisão ampla do Plano 1D). A página mora na mesma
+  // célula da conversa, por cima dela: os retratos, o cabeçalho do canal e as
+  // ferramentas de escrever continuam no documento, com caixa, e eram
+  // contornados por cima da página — o modo dizendo algo falso sobre a página
+  // do próprio MOD. A lista de pessoas, ao lado, continua à vista e contornada.
+  const comAPagina = await pagina.evaluate(async () => {
+    const dono = instancia("mod/p");
+    const conjunto = superficiesDoMod({ id: "mod/p", hash: "mod-p" }, dono);
+    conjunto.criar({ id: "pagina", tipo: "pagina", titulo: "Página de P" });
+    const superficie = conjunto.de("pagina");
+    superficie.montar([{ forma: "texto", dentro: "conteúdo da página de P" }]);
+    superficie.mostrar();
+    conjunto.arrumarPalcos();
+    for (let volta = 0; volta < 2; volta += 1) {
+      await new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto)));
+    }
+    const palco = $("palco-de-paginas").getBoundingClientRect();
+    const contornos = [...document.querySelectorAll(".contorno-de-ponto")].map((c) => ({
+      ponto: c.dataset.ponto,
+      left: parseFloat(c.style.left),
+      top: parseFloat(c.style.top),
+    }));
+    const sobreAPagina = contornos
+      .filter((c) => c.left >= palco.left && c.top >= palco.top && c.left < palco.right && c.top < palco.bottom)
+      .map((c) => c.ponto);
+    const resultado = {
+      palcoVisivel: !$("palco-de-paginas").hidden && palco.width > 0 && palco.height > 0,
+      sobreAPagina,
+      cartoes: contornos.filter((c) => c.ponto === "pessoa.cartao").length,
+    };
+    superficie.pedirFechamento("saida-do-produto");
+    return resultado;
+  });
+  assert.ok(comAPagina.palcoVisivel, "a página do MOD não abriu: a prova do que ela cobre não tem o que cobrir");
+  assert.deepEqual(
+    comAPagina.sobreAPagina,
+    [],
+    `com a página de um MOD aberta, os lugares da conversa que ela cobre ganharam contorno por cima dela: ${comAPagina.sobreAPagina.join(", ")}`,
+  );
+  assert.ok(
+    comAPagina.cartoes > 0,
+    "com a página de um MOD aberta, a lista de pessoas, que ela não cobre, perdeu os contornos",
+  );
+
   // E desligar tira tudo, e esquece.
   await pagina.evaluate(() => {
     $("tela-server").hidden = false;
