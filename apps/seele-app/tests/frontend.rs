@@ -14943,6 +14943,50 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
     );
 }
 
+/// As classes que os scripts **criam**, cada criação com as etiquetas da mesma
+/// chamada.
+///
+/// Três formas contam, e as três põem a classe num elemento: o segundo
+/// argumento de `elemento(` (com as etiquetas do primeiro), os argumentos de
+/// `classList.add(` e o lado direito de `.className =`. Nas duas últimas a
+/// etiqueta não está na chamada, e o conjunto dela fica vazio. Um literal em
+/// qualquer outro lugar — uma frase, uma descrição, uma comparação
+/// `.className ===` — não cria classe nenhuma.
+///
+/// Uma forma que este leitor não conhece deixa a classe sem criação, e o guarda
+/// que o usa fica vermelho: o erro vai para o lado que avisa.
+fn classes_que_os_scripts_criam(script: &str) -> Vec<(BTreeSet<String>, BTreeSet<String>)> {
+    let tokens = |trecho: &str| -> BTreeSet<String> {
+        trecho
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .flat_map(str::split_whitespace)
+            .map(str::to_owned)
+            .collect()
+    };
+    let mut criacoes = Vec::new();
+    for (posicao, _) in script.match_indices("elemento(") {
+        let args = argumentos_da_chamada(&script[posicao + "elemento".len()..]);
+        if let [etiqueta, classe, ..] = args.as_slice() {
+            criacoes.push((tokens(etiqueta), tokens(classe)));
+        }
+    }
+    for (posicao, _) in script.match_indices("classList.add(") {
+        let args = argumentos_da_chamada(&script[posicao + "classList.add".len()..]);
+        criacoes.push((BTreeSet::new(), tokens(&args.concat())));
+    }
+    for (posicao, _) in script.match_indices(".className =") {
+        let resto = &script[posicao + ".className =".len()..];
+        if resto.starts_with('=') {
+            continue;
+        }
+        let fim = resto.find([';', '\n']).unwrap_or(resto.len());
+        criacoes.push((BTreeSet::new(), tokens(&resto[..fim])));
+    }
+    criacoes
+}
+
 /// **Todo ponto de contribuição tem onde ser contornado.**
 ///
 /// O modo de desenvolvedor (especificação de 23/09, Parte II, «Diagnóstico para
@@ -14956,6 +15000,14 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
 /// classe renomeada na lista de pessoas apagaria o contorno de três pontos sem
 /// nada reclamar. É o seletor como contrato que ninguém escreveu — o que o ADR
 /// 0052 recusa para MOD —, voltado para o próprio produto.
+///
+/// **«Criam» quer dizer criar.** A classe conta só onde um script a aplica
+/// (`classes_que_os_scripts_criam`), e um seletor com etiqueta (`li.pessoa`)
+/// exige a etiqueta na mesma chamada a `elemento(`. A primeira versão procurava
+/// o literal `"pessoa"` em qualquer texto, e ele está na concordância de número
+/// de `camada-moderar.js` (`"pessoa" : "pessoas"`) e na descrição do próprio
+/// ponto: com a classe renomeada nos dois lugares que criam o cartão, o guarda
+/// ficava verde.
 #[test]
 fn todo_ponto_de_contribuicao_tem_onde_ser_contornado() {
     let registro = read("ui/mods-contribuicoes.js");
@@ -15007,6 +15059,7 @@ fn todo_ponto_de_contribuicao_tem_onde_ser_contornado() {
 
     let pagina = without_comments(&read("ui/index.html"));
     let script = without_comments(&scripts());
+    let criacoes = classes_que_os_scripts_criam(&script);
     for (ponto, seletor) in &conteineres {
         for atomo in seletor.split_whitespace() {
             let etiqueta = atomo.chars().take_while(char::is_ascii_alphabetic).count();
@@ -15017,17 +15070,22 @@ fn todo_ponto_de_contribuicao_tem_onde_ser_contornado() {
                     "o contêiner de «{ponto}» é `#{id}`, e a página não tem esse id"
                 );
             } else if let Some(classe) = resto.strip_prefix('.') {
-                let criada = [
-                    format!("\"{classe}\""),
-                    format!("\"{classe} "),
-                    format!(" {classe}\""),
-                ]
-                .iter()
-                .any(|forma| script.contains(forma.as_str()));
+                let com_a_classe: Vec<&BTreeSet<String>> = criacoes
+                    .iter()
+                    .filter(|(_, classes)| classes.contains(classe))
+                    .map(|(etiquetas, _)| etiquetas)
+                    .collect();
                 assert!(
-                    criada,
+                    !com_a_classe.is_empty(),
                     "o contêiner de «{ponto}» é `.{classe}`, e nenhum script cria essa \
                      classe: o contorno do ponto some sem ninguém saber"
+                );
+                let etiqueta = &atomo[..etiqueta];
+                assert!(
+                    etiqueta.is_empty() || com_a_classe.iter().any(|tags| tags.contains(etiqueta)),
+                    "o contêiner de «{ponto}» é `{atomo}`, e nenhum script cria um \
+                     `<{etiqueta}>` com essa classe na mesma chamada a `elemento(`: o \
+                     seletor não casa com nada, e o contorno do ponto some sem ninguém saber"
                 );
             } else if let Some(atributo) = resto
                 .strip_prefix("[data-")
