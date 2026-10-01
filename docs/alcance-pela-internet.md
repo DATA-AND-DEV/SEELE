@@ -301,6 +301,19 @@ corrida, é um candidato que a pessoa não escolheu, e ali um pino que confere n
 passa por cima da impressão esperada (o adendo de 2026-09-29 ao ADR 0003). Se a
 chave fixada ali mudou, a conexão é recusada do mesmo jeito.
 
+A resposta do quarto traz também a escuta de avisos do anfitrião, e ela tem
+outra barreira, porque o que vai para ela sai **antes** do TLS. Ela vira, só
+nesta volta, o destino do `LEVE`, e o ponto repassa a esse destino o IP, a porta
+e o instante de quem tenta chegar. Quem chega só usa a escuta do quarto quando
+ela mora no mesmo IP que o servidor da mesma resposta (os dois saem da mesma
+máquina do anfitrião, pelo mesmo IP público); fora disso, o `LEVE` vai ao aviso
+do link ou da lista, e o `seele.log` diz por quê. A lista de conhecidos nunca
+guarda o que o quarto deu. **O que sobra, até o `SEELE-ENC/2`** (o registro
+assinado, no Plano 4): quem toma as duas marcas do anfitrião no quarto, ou só a
+da escuta saindo pelo mesmo IP público que ele, recebe o IP, a porta e o instante
+de quem tenta chegar. O conteúdo, o convite, a senha e o apelido não saem: o TLS
+recusa o servidor errado.
+
 Três coisas fazem parte da decisão, e não são promessas soltas:
 
 - **Ele guarda pouco, e só em memória.** Não há banco nem arquivo. A resposta a

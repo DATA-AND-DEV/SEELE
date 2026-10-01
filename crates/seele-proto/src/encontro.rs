@@ -61,7 +61,7 @@
 //! ## Por que ninguém rouba o lugar de ninguém
 //!
 //! Qualquer um pode mandar `MORO` com a marca de outro, e mandar quem pergunta
-//! para o endereço errado. Duas coisas contêm isso, e nenhuma delas é
+//! para o endereço errado. Três coisas contêm isso, e nenhuma delas é
 //! autenticação — este serviço não tem chave nenhuma para conferir:
 //!
 //! 1. **Quem chega confere a impressão digital dentro do TLS** (ADR 0003). A
@@ -76,8 +76,23 @@
 //!    2026-09-29 ao ADR 0003). Se a chave fixada ali mudou, a conexão é
 //!    recusada do mesmo jeito.
 //! 2. **Quem escreveu primeiro fica**, enquanto o prazo não vencer. O anfitrião
-//!    reavive o dele a cada quinze segundos, então o lugar só está livre quando
-//!    ele está fora do ar — e aí o que se toma é o lugar de quem não está lá.
+//!    reavive as duas marcas dele a cada quinze segundos, então o lugar só está
+//!    livre quando ele está fora do ar — e aí o que se toma é o lugar de quem
+//!    não está lá. A marca da escuta de um anfitrião 0.15.0 é a exceção: ele
+//!    nunca a registra, e ela está sempre livre.
+//! 3. **A escuta só vale no IP do servidor.** O endereço da escuta vira o
+//!    destino do `LEVE` de quem chega, e o `LEVE` sai antes do TLS: o ponto
+//!    repassa a esse destino o IP, a porta e o instante de quem tenta chegar.
+//!    Quem chega só usa a escuta que o quarto devolve quando ela mora no mesmo
+//!    IP que o servidor da mesma resposta, porque a escuta e o servidor de um
+//!    anfitrião saem da mesma máquina, pelo mesmo IP público. A lista de
+//!    conhecidos não a guarda (`seele_core::encontro::bilhete_desta_volta`).
+//!
+//! O que sobra, até o `SEELE-ENC/2` (o registro assinado, no Plano 4): quem
+//! toma as duas marcas, ou só a da escuta saindo pelo mesmo IP público que o
+//! anfitrião, recebe pelo `LEVE` o IP, a porta e o instante de quem tenta
+//! chegar. O conteúdo, o convite, a senha e o apelido não saem: o TLS recusa o
+//! servidor errado (o item 1).
 //!
 //! # O que ele não faz, e por construção
 //!
@@ -103,7 +118,8 @@
 //! 0003): um servidor com a chave errada falha ali e não vira conexão com o
 //! impostor, também num endereço que esta máquina já fixou com a chave de
 //! outro, como o item 1 acima escreve. E a conferência protege apenas quando
-//! há impressão digital contra a qual conferir.
+//! há impressão digital contra a qual conferir. A escuta que a resposta traz
+//! não passa por TLS nenhum, e a barreira dela é o item 3 acima.
 //!
 //! # Amplificação, e por que os pedidos são gordos
 //!

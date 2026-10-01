@@ -33,6 +33,11 @@
 //! servidor: o endereço do quarto, quando entra na corrida, é um candidato que
 //! a pessoa não escolheu, e ali o pino que confere não passa por cima da
 //! esperada (o adendo de 2026-09-29 ao ADR 0003, `crate::tofu::TofuVerifier`).
+//!
+//! A mesma resposta traz a escuta de avisos, que vira o destino do `LEVE`, e
+//! essa não tem TLS atrás: o `LEVE` sai antes do aperto de mão, com o endereço
+//! de quem chega. Ela só vale no IP do servidor que a mesma resposta deu
+//! ([`OndeMora::escuta_do_anfitriao`], [`bilhete_desta_volta`]).
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;

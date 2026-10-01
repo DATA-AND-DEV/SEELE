@@ -61,19 +61,39 @@ quarto não é impresso.
 **Ele não decide em quem se confia.** Quem chega com o bilhete do ponto de
 encontro (o do link, ou o que a lista de conhecidos guardou) **e** com uma
 impressão digital a conferir (a do link, ou a da lista) pergunta ao quarto onde
-o servidor mora hoje, e lê a resposta: o endereço que ela traz entra na frente
-dos guardados. Faltando uma das duas, não há pergunta. Um ponto de encontro
-hostil, ou quem ocupou a marca, consegue mandar essa conexão para o endereço
-errado, ou não avisar o anfitrião. O que ele não escolhe é a impressão digital:
-a esperada, a do link ou a da lista, é conferida dentro do aperto de mão TLS,
+o anfitrião mora hoje, e lê a resposta. Faltando uma das duas, não há pergunta.
+A resposta traz dois endereços, e cada um tem a sua barreira.
+
+O do **servidor** entra na frente dos guardados. Um ponto de encontro hostil,
+ou quem ocupou a marca, consegue mandar essa conexão para o endereço errado, ou
+não avisar o anfitrião. O que ele não escolhe é a impressão digital: a
+esperada, a do link ou a da lista, é conferida dentro do aperto de mão TLS,
 antes de qualquer `Hello`. Se a chave não confere, o aperto falha ali, e o
 convite, a senha e o apelido não chegam a quem atendeu com a chave errada. O
 prejuízo é não entrar. Isso vale também onde esta máquina já fixou uma chave
 naquele endereço: o endereço que o quarto devolve, quando entra na corrida, é
 um candidato que a pessoa não escolheu, e ali um pino que confere não passa por
 cima da impressão esperada (o adendo de 2026-09-29 ao ADR 0003). Se a chave
-fixada ali mudou, a conexão é recusada do mesmo jeito. É o teto do que ele
-consegue.
+fixada ali mudou, a conexão é recusada do mesmo jeito.
+
+O da **escuta de avisos** vira, só nesta volta, o destino do `LEVE`, e o `LEVE`
+sai **antes** de qualquer aperto de mão: o ponto repassa a esse destino o
+endereço público de quem chega (IP e porta), no instante em que ele tenta
+chegar. A marca da escuta está em todo link, e um anfitrião 0.15.0 nunca a
+registra. Por isso quem chega só usa a escuta do quarto quando ela mora no
+mesmo IP que o servidor da mesma resposta: a escuta e o servidor de um
+anfitrião saem da mesma máquina, pelo mesmo IP público. Fora disso, o `LEVE` vai
+ao aviso do link ou da lista, e o `seele.log` diz por quê. E a lista de
+conhecidos guarda o bilhete do link ou da lista, e nunca o que o quarto deu.
+
+**O que sobra, até o `SEELE-ENC/2`** (o registro assinado, no Plano 4): quem
+toma as **duas** marcas do anfitrião no quarto, a do servidor e a da escuta, ou
+só a da escuta saindo pelo mesmo IP público que ele, recebe pelo `LEVE` o IP, a
+porta e o instante de quem tenta chegar. A marca do servidor só fica livre com o
+anfitrião fora do ar por mais de 60 segundos, ou com o ponto recém-reiniciado,
+antes de o anfitrião se registrar de novo (ele se registra a cada 15 segundos).
+O conteúdo, o convite, a senha e o apelido não saem: o TLS recusa o servidor
+errado.
 
 **O link fica com o seu endereço público dentro.** O bilhete (`enc=`) carrega o
 endereço do ponto de encontro e o endereço público da sua escuta de avisos —
