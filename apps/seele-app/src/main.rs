@@ -3707,6 +3707,28 @@ fn carga_aceita(ditas: &RecusasDeCarga, mod_id: &str) {
     }
 }
 
+/// **O desfecho de uma carga, dito**: aceita, esquece o motivo guardado
+/// ([`carga_aceita`]); recusada, passa por [`recusa_de_carga_dita`]. Devolve o
+/// desfecho intacto.
+///
+/// Uma função, e não um `match` em cada comando, para que os dois braços não
+/// possam ser trocados num lugar só: o `carga_aceita` no braço da recusa
+/// esqueceria o motivo a cada tentativa, e a mesma recusa voltaria a sair a
+/// cada quatro segundos.
+fn carga_dita<T>(
+    ditas: &RecusasDeCarga,
+    mod_id: &str,
+    carga: Result<T, FalhaNoMod>,
+) -> Result<T, FalhaNoMod> {
+    match carga {
+        Ok(valor) => {
+            carga_aceita(ditas, mod_id);
+            Ok(valor)
+        }
+        Err(falha) => Err(recusa_de_carga_dita(ditas, mod_id, falha)),
+    }
+}
+
 /// **Reserva a identidade de um MOD nativo, sem rodar nada** — etapa 1 de 2.
 ///
 /// # Por que duas etapas
@@ -3735,14 +3757,12 @@ fn mod_nativo_reservar(
 ) -> Result<u64, FalhaNoMod> {
     // **Dita no registro quando não reserva, e esquecida quando reserva**: a
     // janela tenta de novo a cada quatro segundos, e a recusa sai uma vez por
-    // motivo — ver [`recusa_de_carga_dita`].
-    match reservar_no_executor(&app, &session, geracao, &id, hash) {
-        Ok(numero) => {
-            carga_aceita(&session.recusas_de_carga, &id);
-            Ok(numero)
-        }
-        Err(falha) => Err(recusa_de_carga_dita(&session.recusas_de_carga, &id, falha)),
-    }
+    // motivo — ver [`carga_dita`].
+    carga_dita(
+        &session.recusas_de_carga,
+        &id,
+        reservar_no_executor(&app, &session, geracao, &id, hash),
+    )
 }
 
 /// O corpo de [`mod_nativo_reservar`], com a recusa devolvida sem ser dita:
@@ -10935,7 +10955,7 @@ mod a_falha_do_mod_chega_ao_registro {
 /// linhas iguais por hora; dita quando muda, é uma.
 #[cfg(test)]
 mod a_carga_recusada_e_dita_uma_vez_por_motivo {
-    use super::{carga_aceita, motivo_de, recusa_de_carga_dita, FalhaNoMod};
+    use super::{carga_aceita, carga_dita, motivo_de, recusa_de_carga_dita, FalhaNoMod};
     use crate::rastro_de_teste::capturar;
 
     /// Uma recusa de carga pelo `motivo`, dita com a memória `ditas`.
@@ -11053,10 +11073,101 @@ mod a_carga_recusada_e_dita_uma_vez_por_motivo {
         );
     }
 
+    /// **`carga_dita`, no braço que aceita**: o valor volta intacto, e o motivo
+    /// guardado é esquecido — a mesma recusa depois dela é dita de novo.
+    #[test]
+    fn a_carga_dita_que_deu_certo_esquece_o_motivo_e_devolve_o_valor() {
+        let ditas = std::sync::Mutex::default();
+        let (valor, rastro) = capturar(|| {
+            recusar(&ditas, "prova/carga", "executor-nao-subiu");
+            let valor = carga_dita(&ditas, "prova/carga", Ok::<u64, FalhaNoMod>(7));
+            recusar(&ditas, "prova/carga", "executor-nao-subiu");
+            valor
+        });
+        assert!(
+            matches!(valor, Ok(7)),
+            "a carga que deu certo não voltou intacta, e a janela perde o número da instância: \
+             {valor:?}"
+        );
+        assert_eq!(
+            ditas_no(&rastro).len(),
+            2,
+            "a carga que deu certo não esqueceu o motivo, e a mesma recusa depois dela ficou \
+             calada — um MOD que subiu e caiu de novo pelo mesmo motivo some do registro: \
+             {rastro}"
+        );
+    }
+
+    /// **`carga_dita`, no braço que recusa**: passa pela recusa dita — uma
+    /// linha por motivo, e não uma por tentativa — e a recusa volta intacta.
+    #[test]
+    fn a_carga_dita_recusada_e_dita_uma_vez_e_volta_intacta() {
+        let ditas = std::sync::Mutex::default();
+        let (cargas, rastro) = capturar(|| {
+            (0..3)
+                .map(|_| {
+                    carga_dita(
+                        &ditas,
+                        "prova/carga",
+                        Err::<u64, _>(FalhaNoMod::Recusado {
+                            motivo: "conteudo-de-outro-mod".to_owned(),
+                        }),
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        for carga in &cargas {
+            let falha = carga
+                .as_ref()
+                .expect_err("uma carga recusada voltou como aceita");
+            assert_eq!(
+                motivo_de(falha),
+                "conteudo-de-outro-mod",
+                "a recusa que volta à janela foi mexida, e a gestão já não diz o motivo"
+            );
+        }
+        assert_eq!(
+            ditas_no(&rastro).len(),
+            1,
+            "a recusa de carga não passou pela recusa dita uma vez por motivo: três tentativas \
+             deixaram outra conta de linhas: {rastro}"
+        );
+    }
+
+    /// O corpo de `comando` em `main.rs` — do `{` da assinatura ao `}` que a
+    /// fecha —, sem as linhas de comentário, sem espaço nenhum e sem a vírgula
+    /// que o `rustfmt` põe antes de um `)` quando quebra a chamada em linhas: o
+    /// que sobra é o código, e a formatação não muda a conta.
+    fn corpo_sem_espaco(fonte: &str, comando: &str) -> String {
+        let funcao = fonte
+            .split(comando)
+            .nth(1)
+            .and_then(|resto| resto.split("\n}\n").next())
+            .unwrap_or_else(|| panic!("`{comando}` sumiu de main.rs"));
+        let corpo = funcao
+            .split_once("> {\n")
+            .map(|(_, corpo)| corpo)
+            .unwrap_or_else(|| panic!("o recorte não achou o corpo de `{comando}`: {funcao}"));
+        corpo
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .flat_map(str::chars)
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+            .replace(",)", ")")
+    }
+
     /// **Os dois comandos de carga passam pela recusa dita**, e a reserva que
     /// deu certo esquece o motivo. Os comandos precisam de um `AppHandle` e
     /// não sobem num teste; um que devolvesse a recusa por fora seria o MOD
     /// sem carregar e o registro calado de novo, com os testes acima verdes.
+    ///
+    /// **A reserva é a chamada única de [`carga_dita`]**, e não um `match` que
+    /// a imite. Conferir só que `carga_aceita(` e `recusa_de_carga_dita(`
+    /// aparecem no corpo deixava passar o `carga_aceita` no braço errado — a
+    /// recusa esquecida a cada tentativa, e de novo as novecentas linhas por
+    /// hora — sem nada reprovar. Os dois braços são provados nos testes de
+    /// `carga_dita`, acima; aqui se prova que a reserva é ela.
     #[test]
     fn os_dois_comandos_de_carga_passam_pela_recusa_dita() {
         let fonte = std::fs::read_to_string(
@@ -11064,32 +11175,22 @@ mod a_carga_recusada_e_dita_uma_vez_por_motivo {
         )
         .expect("main.rs legível")
         .replace("\r\n", "\n");
-        for (comando, chamadas) in [
-            ("fn codigo_do_mod(", &["recusa_de_carga_dita("][..]),
-            (
-                "fn mod_nativo_reservar(",
-                &["recusa_de_carga_dita(", "carga_aceita("][..],
-            ),
-        ] {
-            let corpo = fonte
-                .split(comando)
-                .nth(1)
-                .and_then(|resto| resto.split("\n}\n").next())
-                .unwrap_or_else(|| panic!("`{comando}` sumiu de main.rs"));
-            let codigo: Vec<&str> = corpo
-                .lines()
-                .filter(|linha| !linha.trim_start().starts_with("//"))
-                .collect();
-            let codigo = codigo.join("\n");
-            for chamada in chamadas {
-                assert!(
-                    codigo.contains(chamada),
-                    "`{comando}` não passa por `{chamada}`: a carga recusada volta à janela e \
-                     não chega ao registro, ou a que deu certo não esquece o motivo e a recusa \
-                     seguinte fica calada"
-                );
-            }
-        }
+        let codigo = corpo_sem_espaco(&fonte, "fn codigo_do_mod(");
+        assert!(
+            codigo.contains("recusa_de_carga_dita("),
+            "`fn codigo_do_mod(` não passa por `recusa_de_carga_dita(`: a carga recusada volta \
+             à janela e não chega ao registro: {codigo}"
+        );
+        let reserva = corpo_sem_espaco(&fonte, "fn mod_nativo_reservar(");
+        assert_eq!(
+            reserva,
+            "carga_dita(&session.recusas_de_carga,&id,reservar_no_executor(&app,&session,geracao,\
+             &id,hash))",
+            "`fn mod_nativo_reservar(` deixou de ser a chamada única de `carga_dita` sobre \
+             `reservar_no_executor`: um `match` escrito à mão pode pôr o `carga_aceita` no braço \
+             errado, e a mesma recusa volta a sair a cada quatro segundos, ou a seguinte fica \
+             calada"
+        );
     }
 }
 
