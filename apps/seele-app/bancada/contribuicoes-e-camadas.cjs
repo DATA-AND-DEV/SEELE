@@ -1138,6 +1138,180 @@ contexto.cartoesDosMods = new Map();
   contexto.cartoesDosMods.clear();
 }
 
+// ----------------------------- M1 · a aba DIAGNÓSTICO, no portão (m-6)
+
+/**
+ * As partes puras da aba DIAGNÓSTICO, com os arquivos de verdade.
+ *
+ * Elas só morriam na bancada Playwright (`diagnostico-de-mods.cjs`), que roda
+ * num job manual do `ci.yml`: dos 115 mutantes da revisão ampla do Plano 1D,
+ * quinze da aba passavam por todos os portões (m-6). Aqui moram as duas peças
+ * que não precisam de navegador:
+ *
+ * - `midiasDoPonto` e a regra dela, `aContribuicaoPinta` (`base.js`), sobre um
+ *   registro de verdade e renderers de mentira que só anotam;
+ * - `frasesDeQuemPinta` (`camada-mods.js`), sobre as linhas que
+ *   `quemPintaCadaPonto` monta — com `fraseDaMidia`, `fraseDaPreferencia`,
+ *   `modsDoCaminhoAntigo` e `preferenciaConsultadaPara`, os vizinhos que ela lê.
+ *
+ * Um contexto próprio, e não o da bancada: as funções de cima viram globais
+ * dele, e as seções seguintes não podem herdá-las.
+ *
+ * O desenho na página, o aviso que redesenha a aba e o modo de desenvolvedor
+ * continuam medidos no Chromium.
+ */
+function abaDoDiagnostico() {
+  const aba = vm.createContext({
+    console,
+    queueMicrotask: () => {},
+    geracaoDaSessao: 7,
+    modsCarregados: new Map(),
+  });
+  vm.runInContext(`${ler("mods-runtime.js")}\n${ler("mods-contribuicoes.js")}\n`, aba);
+  const base = ler("base.js");
+  const camada = ler("camada-mods.js");
+  const recortes = [
+    [base, "function midiasDoPonto(", "/**\n * Cala o som de MOD que um desenho tirou da tela."],
+    [base, "function modsDeCartaoQueValem(", "/**\n * Os cartões desta pessoa"],
+    [camada, "function preferenciaConsultadaPara(", "/**\n * Escolhe quem apresenta um ponto"],
+    [camada, "const APRESENTACAO_NATIVA = ", "/** Uma linha: o nome em palavra"],
+  ];
+  for (const [fonte, de, ate] of recortes) {
+    const inicio = fonte.indexOf(de);
+    const fim = fonte.indexOf(ate, inicio);
+    confere(
+      "M1 · a aba · o recorte",
+      inicio >= 0 && fim > inicio,
+      `«${de}» deixou de vir antes de «${ate.replace(/\n/g, " ")}», e o recorte não a achou`,
+    );
+    if (inicio >= 0 && fim > inicio) vm.runInContext(fonte.slice(inicio, fim), aba);
+  }
+  // O que a aba lê da página e dos MODs de pé: a preferência desta máquina,
+  // os cartões da API 3 e o tema da API 3. O registro é de verdade.
+  aba.preferencias = new Map();
+  aba.modPreferidoPara = (ponto) => aba.preferencias.get(ponto) ?? "";
+  aba.cartoesDosMods = new Map();
+  aba.temaDosMods = new Map();
+  aba.contribuicoesDosMods = vm.runInContext("new RegistroDeContribuicoes()", aba);
+  return aba;
+}
+
+/** Um renderer de mentira: só as anotações que `midiasDoPonto` lê. */
+function anotando(...anotadas) {
+  return { midiasAnotadas: () => anotadas.map((anotada) => ({ motivo: "", cartao: false, ...anotada })) };
+}
+
+{
+  const aba = abaDoDiagnostico();
+  const registro = aba.contribuicoesDosMods;
+  const linha = (ponto) => aba.quemPintaCadaPonto().find((l) => l.ponto === ponto);
+  const frases = (ponto) => aba.frasesDeQuemPinta(linha(ponto)).join(" | ");
+
+  // **A mídia é de quem pinta.** Duas substituições da pessoa 2, cada uma com
+  // a sua montagem anotada: conta só a da que vence.
+  const venceu = registro.porHandle.get(registro.registrar({ id: "mod/a" }, null, {
+    ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 10,
+  }).handle);
+  const perdeu = registro.porHandle.get(registro.registrar({ id: "mod/b" }, null, {
+    ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 5,
+  }).handle);
+  venceu.montadas = new Map([["2", { renderer: anotando({ situacao: "pronta" }) }]]);
+  perdeu.montadas = new Map([["2", { renderer: anotando({ situacao: "carregando" }, { situacao: "carregando" }) }]]);
+  confere(
+    "M1 · a aba · a mídia de quem pinta",
+    JSON.stringify(aba.midiasDoPonto("pessoa.cartao")) === JSON.stringify({ carregando: 0, pronta: 1, recusada: 0, motivos: [] }),
+    "a mídia de quem perdeu a disputa foi contada ao lado da de quem pinta, ou a de quem pinta sumiu: "
+      + `${JSON.stringify(aba.midiasDoPonto("pessoa.cartao"))}`,
+  );
+  // Com mod/b escolhido, a conta troca de lado — a regra é a da tela.
+  aba.preferencias.set("pessoa.cartao", "mod/b");
+  confere(
+    "M1 · a aba · a mídia de quem pinta",
+    aba.midiasDoPonto("pessoa.cartao").carregando === 2 && aba.midiasDoPonto("pessoa.cartao").pronta === 0,
+    `com mod/b escolhido, a mídia contada não passou a ser a dele: ${JSON.stringify(aba.midiasDoPonto("pessoa.cartao"))}`,
+  );
+  aba.preferencias.clear();
+
+  // **O retrato de avatar conta**, quando a contribuição dele pinta.
+  const avatar = registro.porHandle.get(registro.registrar({ id: "mod/a" }, null, {
+    ponto: "pessoa.avatar", modo: "substituir", alvo: "1", conteudo: { doServidor: { canal: 1 } },
+  }).handle);
+  avatar.retrato = { situacao: "recusada", motivo: `${"m".repeat(199)}😀${"n".repeat(20)}` };
+  const doAvatar = aba.midiasDoPonto("pessoa.avatar");
+  confere(
+    "M1 · a aba · o retrato",
+    doAvatar.recusada === 1,
+    `o retrato recusado de um avatar não foi contado em «pessoa.avatar»: ${JSON.stringify(doAvatar)}`,
+  );
+  // E o motivo é cortado em 200 pontos de código, e não por índice: um corte
+  // por índice parte o par substituto da posição 200 ao meio.
+  confere(
+    "M1 · a aba · o retrato",
+    doAvatar.motivos[0] === `mod/a: ${"m".repeat(199)}😀`,
+    `o motivo do retrato não saiu cortado em 200 pontos de código inteiros: ${JSON.stringify(doAvatar.motivos[0]?.slice(-4))}`,
+  );
+
+  // **Os cartões da API 3**: só os de quem vale, e só as anotações de cartão —
+  // a região do mesmo MOD mora no mesmo renderer, e não é de `pessoa.cartao`.
+  aba.cartoesDosMods.set("mod/c", anotando({ situacao: "pronta", cartao: true }, { situacao: "carregando", cartao: false }));
+  aba.cartoesDosMods.set("mod/d", anotando({ situacao: "carregando", cartao: true }));
+  aba.preferencias.set("pessoa.cartao", "mod/c");
+  const dosCartoes = aba.midiasDoPonto("pessoa.cartao");
+  confere(
+    "M1 · a aba · os cartões da API 3",
+    dosCartoes.pronta === 1 && dosCartoes.carregando === 0,
+    "com mod/c escolhido, a mídia do cartão da API 3 dele não foi contada, ou a da região dele e a dos cartões de "
+      + `mod/d, que não valem, foram contadas junto: ${JSON.stringify(dosCartoes)}`,
+  );
+  aba.preferencias.clear();
+  aba.cartoesDosMods.clear();
+
+  // **A preferência que o avatar consulta**: a dele, e na falta dela a do cartão.
+  aba.preferencias.set("pessoa.cartao", "mod/a");
+  confere(
+    "M1 · a aba · a herança",
+    aba.preferenciaConsultadaPara("pessoa.avatar") === "mod/a",
+    `sem escolha própria, o avatar não herdou a escolha do cartão: «${aba.preferenciaConsultadaPara("pessoa.avatar")}»`,
+  );
+  aba.preferencias.set("pessoa.avatar", vm.runInContext("NATIVO", aba));
+  confere(
+    "M1 · a aba · a herança",
+    aba.preferenciaConsultadaPara("pessoa.avatar") === ":nativo",
+    `com escolha própria, o avatar seguiu a do cartão: «${aba.preferenciaConsultadaPara("pessoa.avatar")}»`,
+  );
+  aba.preferencias.clear();
+
+  // **As frases.** Um lugar vazio, e a mídia de um lugar que tem quem pinte e
+  // não tem mídia nenhuma.
+  confere(
+    "M1 · a aba · as frases",
+    frases("compositor.ferramentas") === "nenhum MOD usa este lugar agora",
+    `um lugar sem MOD não disse que está vazio: ${frases("compositor.ferramentas")}`,
+  );
+  registro.registrar({ id: "mod/a" }, null, { ponto: "canal.item", modo: "adicionar" });
+  confere(
+    "M1 · a aba · as frases",
+    frases("canal.item") === "acrescentam: mod/a | mídia: nenhuma em uso agora",
+    `um lugar com quem acrescenta e sem mídia não disse que nenhuma está em uso: ${frases("canal.item")}`,
+  );
+
+  // **O caso parcial**: mod/b escolhido desenha a pessoa 2, e a pessoa 3, que
+  // só mod/a declarou, fica com o SEELE.
+  registro.registrar({ id: "mod/a" }, null, {
+    ponto: "pessoa.avatar", modo: "substituir", alvo: "3", conteudo: { doServidor: { canal: 1 } },
+  });
+  registro.registrar({ id: "mod/b" }, null, {
+    ponto: "pessoa.avatar", modo: "substituir", alvo: "2", conteudo: { doServidor: { canal: 1 } },
+  });
+  aba.preferencias.set("pessoa.avatar", "mod/b");
+  confere(
+    "M1 · a aba · as frases",
+    frases("pessoa.avatar").startsWith("desenhado por mod/b, para quem declarou; o SEELE desenha os outros |"),
+    `com mod/b escolhido, a pessoa que só mod/a declarou é desenhada pelo SEELE, e a linha não disse: ${frases("pessoa.avatar")}`,
+  );
+  aba.preferencias.clear();
+}
+
 // ------------------------------------- R3 · os pontos aceitam o que aplicam
 
 {
