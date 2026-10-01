@@ -1138,7 +1138,7 @@ async fn connect(
     let bilhete = match (conferida.as_deref(), &bilhete) {
         (Some(impressao), Some(bilhete_guardado)) => {
             let no_quarto = seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
-            let (fresco_do_server, fresco_do_aviso) = (no_quarto.servidor(), no_quarto.escuta());
+            let fresco_do_server = no_quarto.servidor();
             // Uma resposta que já é candidata, o alvo ou um alternativo, não
             // entra de novo: seriam dois apertos de mão e dois `Hello` para o
             // mesmo servidor. A regra compara pela chave de pino.
@@ -1148,15 +1148,13 @@ async fn connect(
             if let Some(texto) = &do_quarto {
                 alternativos.insert(0, texto.clone());
             }
-            match fresco_do_aviso {
-                Some(endereco) => seele_ffi::uri::Bilhete::novo(
-                    bilhete_guardado.ponto.clone(),
-                    endereco.to_string(),
-                )
-                .ok()
-                .or_else(|| Some(bilhete_guardado.clone())),
-                None => Some(bilhete_guardado.clone()),
-            }
+            // **A escuta do quarto só vira o aviso do `LEVE` quando o servidor
+            // da mesma resposta mora no mesmo IP.** O servidor é conferido no
+            // TLS; o `LEVE` sai antes dele, e leva a quem estiver no aviso o
+            // endereço de quem chega. A marca da escuta está em todo link, e
+            // um anfitrião 0.15.0 nunca a registra. A regra é da FFI, e diz no
+            // `seele.log` a escuta que deixou de lado.
+            Some(seele_ffi::bilhete_desta_volta(bilhete_guardado, &no_quarto))
         }
         _ => bilhete,
     };

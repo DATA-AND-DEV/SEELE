@@ -14936,6 +14936,36 @@ fn a_resposta_do_quarto_nao_repete_um_candidato() {
     );
 }
 
+#[test]
+fn a_escuta_do_quarto_so_vira_aviso_pela_regra_da_ffi() {
+    // A escuta que o quarto dá vira o aviso do `LEVE`, que sai antes do TLS e
+    // leva o endereço de quem chega. A marca dela (fp16 + `e`) está em todo
+    // link, e um anfitrião 0.15.0 nunca a registra: qualquer um com o link a
+    // toma (o I1 da revisão final do Plano 1). A regra que só a aceita no IP do
+    // servidor da mesma resposta é `seele_ffi::bilhete_desta_volta`, provada no
+    // `seele-core` e, de ponta a ponta, em
+    // `crates/seele-conformance/tests/ocupante_da_escuta.rs`. O que só se vê
+    // aqui é o `connect` usá-la com o bilhete guardado e a resposta inteira, e
+    // não ler a escuta crua. Os espaços saem da comparação para o guarda não
+    // depender de onde o `rustfmt` quebra a linha.
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    assert!(
+        connect.contains("Some(seele_ffi::bilhete_desta_volta(bilhete_guardado,&no_quarto))"),
+        "`connect` deixou de montar o bilhete desta volta pela regra da FFI, com o bilhete \
+         guardado e a resposta inteira do quarto: a escuta que quem ocupou a marca registrou de \
+         outro IP volta a receber o `LEVE`, com o endereço de quem chega"
+    );
+    assert!(
+        !connect.contains(".escuta()"),
+        "`connect` lê a escuta crua do quarto (`.escuta()`): quem ocupou a marca da escuta \
+         também aparece nela, e só `bilhete_desta_volta` sabe quando ela é do anfitrião"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Diagnóstico de MOD — fase M1 da especificação de 23/09, Parte II.
 // ---------------------------------------------------------------------------

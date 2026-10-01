@@ -466,12 +466,145 @@ impl OndeMora {
         }
     }
 
-    /// O endereço da escuta de avisos, se o quarto o deu.
+    /// O endereço da escuta de avisos, se o quarto o deu, **cru**.
+    ///
+    /// É o que o quarto disse, e não serve de aviso do `LEVE`: quem ocupou a
+    /// marca da escuta também é dito aqui. Para o aviso, a regra é
+    /// [`OndeMora::escuta_do_anfitriao`], e o bilhete que a usa é
+    /// [`bilhete_desta_volta`].
     #[must_use]
     pub fn escuta(&self) -> Option<SocketAddr> {
         match self {
             Self::Achado { escuta, .. } => *escuta,
             Self::NinguemMora | Self::PontoMudo | Self::PontoNaoResolve | Self::SemMarca => None,
+        }
+    }
+
+    /// A escuta que o quarto deu, julgada pelo servidor que ele deu **na mesma
+    /// resposta**.
+    ///
+    /// # Por que o servidor decide
+    ///
+    /// A escuta vira o aviso do `LEVE`, e o `LEVE` sai antes de qualquer aperto
+    /// de mão: o ponto repassa a esse aviso o endereço público de quem chega, e
+    /// o instante. A marca dela (os 16 primeiros caracteres da impressão
+    /// digital, e um `e`) está em todo link, e no quarto fica quem escreveu
+    /// primeiro. Um anfitrião 0.15.0 nunca a registra, e a de um anfitrião de
+    /// hoje fica livre quando ele passa mais de 60 s fora do ar. Quem a tomou
+    /// não fica sabendo de conteúdo nenhum, mas ficava sabendo de onde e quando
+    /// cada um tentava chegar (o I1 da revisão final do Plano 1).
+    ///
+    /// A escuta e o servidor de um anfitrião moram na mesma máquina, e saem
+    /// pelo mesmo IP público para o mesmo ponto: os dois sockets se registram
+    /// juntos, no mesmo tique de `atender` (`registrar`, no `seele-server`).
+    /// Uma escuta noutro IP que o servidor da mesma resposta é de outra pessoa,
+    /// e uma sem servidor não tem quem a confirme.
+    ///
+    /// # O que sobra
+    ///
+    /// Quem toma **as duas** marcas passa por aqui: o servidor dele mora no IP
+    /// dele. O TLS recusa o servidor errado logo depois, e o convite, a senha e
+    /// o apelido não saem. O que sai antes é o `LEVE`, com o IP e a porta
+    /// públicos de quem chega, até o SEELE-ENC/2 (Plano 4).
+    ///
+    /// **Compara o IP, e não a porta**: os dois sockets têm portas diferentes,
+    /// e é a porta que o NAT troca. O IPv4 escrito como IPv6 mapeado
+    /// (`::ffff:a.b.c.d`) é o mesmo IP.
+    #[must_use]
+    pub fn escuta_do_anfitriao(&self) -> EscutaDoQuarto {
+        let Some(escuta) = self.escuta() else {
+            return EscutaDoQuarto::Nenhuma;
+        };
+        match self.servidor() {
+            Some(servidor) if servidor.ip().to_canonical() == escuta.ip().to_canonical() => {
+                EscutaDoQuarto::DoAnfitriao(escuta)
+            }
+            servidor => EscutaDoQuarto::NaoConfirmada { escuta, servidor },
+        }
+    }
+}
+
+/// O que fazer com a escuta que o quarto deu: o veredito de
+/// [`OndeMora::escuta_do_anfitriao`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EscutaDoQuarto {
+    /// O quarto não deu escuta. O aviso do bilhete guardado fica como estava.
+    Nenhuma,
+    /// A escuta mora no IP do servidor que a mesma resposta deu. Vira o aviso
+    /// do `LEVE` desta volta.
+    DoAnfitriao(SocketAddr),
+    /// O quarto deu uma escuta que o servidor da mesma resposta não confirma:
+    /// ou não veio servidor, ou ele mora noutro IP. Ela não vira aviso de nada.
+    NaoConfirmada {
+        /// A escuta que o quarto deu.
+        escuta: SocketAddr,
+        /// O servidor da mesma resposta, se veio.
+        servidor: Option<SocketAddr>,
+    },
+}
+
+/// O bilhete desta volta: o guardado, com o aviso trocado pela escuta que o
+/// quarto deu **só** quando o servidor da mesma resposta a confirma.
+///
+/// O guardado é o do link desta sessão, ou o da lista de conhecidos. A troca
+/// vale só para esta volta: quem chama não grava o bilhete devolvido na lista
+/// (o `connect` do app grava o guardado). A regra é a de
+/// [`OndeMora::escuta_do_anfitriao`].
+///
+/// Uma escuta deixada de lado vai para o log em `info`, o nível que o
+/// `seele.log` grava, com ela, o servidor e o ponto: quem investiga um
+/// anfitrião que não foi avisado precisa saber que o quarto deu outra escuta, e
+/// por que ela não foi usada.
+#[must_use]
+pub fn bilhete_desta_volta(guardado: &Bilhete, no_quarto: &OndeMora) -> Bilhete {
+    match no_quarto.escuta_do_anfitriao() {
+        EscutaDoQuarto::Nenhuma => guardado.clone(),
+        EscutaDoQuarto::DoAnfitriao(escuta) => {
+            match Bilhete::novo(guardado.ponto.clone(), escuta.to_string()) {
+                Ok(desta_volta) => desta_volta,
+                // Um `SocketAddr` escrito é sempre um endereço que o bilhete
+                // aceita. Se um dia não for, a volta segue com o guardado, e
+                // diz por quê.
+                Err(erro) => {
+                    tracing::info!(
+                        ?erro,
+                        %escuta,
+                        ponto = %guardado.ponto,
+                        "quarto: a escuta que ele deu não coube no bilhete; o LEVE vai ao aviso \
+                         guardado (do link ou da lista)"
+                    );
+                    guardado.clone()
+                }
+            }
+        }
+        EscutaDoQuarto::NaoConfirmada {
+            escuta,
+            servidor: None,
+        } => {
+            tracing::info!(
+                %escuta,
+                ponto = %guardado.ponto,
+                "quarto: deu a escuta e não deu o servidor, que é quem a confirma; ela não vira o \
+                 aviso do LEVE, que vai ao aviso guardado (do link ou da lista). Ou o anfitrião \
+                 está fora do ar e outra pessoa ocupou a marca da escuta, ou o registro do \
+                 servidor dele não chegou ao ponto"
+            );
+            guardado.clone()
+        }
+        EscutaDoQuarto::NaoConfirmada {
+            escuta,
+            servidor: Some(servidor),
+        } => {
+            tracing::info!(
+                %escuta,
+                %servidor,
+                ponto = %guardado.ponto,
+                "quarto: a escuta que ele deu mora noutro IP que o servidor da mesma resposta; \
+                 ela não vira o aviso do LEVE, que vai ao aviso guardado (do link ou da lista). \
+                 A escuta e o servidor de um anfitrião saem pelo mesmo IP público: esta é de \
+                 outra pessoa, que ocupou a marca da escuta"
+            );
+            guardado.clone()
         }
     }
 }
@@ -863,6 +996,185 @@ mod testes {
             aceita_origem(outra_porta, ponto),
             "a resposta do IP do ponto por outra porta foi recusada: um ponto atrás de um \
              balanceador deixaria de ser ouvido"
+        );
+    }
+
+    /// O servidor de um anfitrião, a escuta dele, e quem ocupou a marca da
+    /// escuta de outro lugar. Endereços de documentação (RFC 5737).
+    const SERVIDOR: ([u8; 4], u16) = ([203, 0, 113, 7], 9_621);
+    const ESCUTA: ([u8; 4], u16) = ([203, 0, 113, 7], 51_000);
+    const OCUPANTE: ([u8; 4], u16) = ([198, 51, 100, 9], 51_000);
+
+    #[test]
+    fn a_escuta_do_quarto_so_vale_no_ip_do_servidor_da_mesma_resposta() {
+        // O I1 da revisão final do Plano 1. A escuta que o quarto dá vira o
+        // aviso do `LEVE`, que sai antes do TLS e leva o endereço de quem chega.
+        // A marca dela (fp16 + `e`) está em todo link, e no quarto fica quem
+        // escreveu primeiro: um anfitrião 0.15.0 nunca a registra, e qualquer um
+        // com o link a toma. A escuta e o servidor de um anfitrião moram na
+        // mesma máquina e saem pelo mesmo IP público, e o servidor é conferido
+        // no TLS logo depois. Uma escuta noutro IP é de outra pessoa.
+        let servidor = SocketAddr::from(SERVIDOR);
+        let escuta = SocketAddr::from(ESCUTA);
+        let ocupante = SocketAddr::from(OCUPANTE);
+
+        assert_eq!(
+            OndeMora::Achado {
+                servidor: Some(servidor),
+                escuta: Some(escuta),
+            }
+            .escuta_do_anfitriao(),
+            EscutaDoQuarto::DoAnfitriao(escuta),
+            "a escuta no IP do servidor da mesma resposta foi recusada: o anfitrião que mudou de \
+             porta deixa de ser avisado pela escuta de hoje"
+        );
+        assert_eq!(
+            OndeMora::Achado {
+                servidor: Some(servidor),
+                escuta: Some(ocupante),
+            }
+            .escuta_do_anfitriao(),
+            EscutaDoQuarto::NaoConfirmada {
+                escuta: ocupante,
+                servidor: Some(servidor),
+            },
+            "uma escuta noutro IP que o do servidor da mesma resposta virou aviso: quem ocupou a \
+             marca da escuta recebe, antes do TLS, o endereço de quem chega"
+        );
+        assert_eq!(
+            OndeMora::Achado {
+                servidor: None,
+                escuta: Some(ocupante),
+            }
+            .escuta_do_anfitriao(),
+            EscutaDoQuarto::NaoConfirmada {
+                escuta: ocupante,
+                servidor: None,
+            },
+            "uma escuta sem servidor na mesma resposta virou aviso: com o anfitrião fora do ar, \
+             quem ocupou a marca da escuta recebe o endereço de quem chega"
+        );
+        assert_eq!(
+            OndeMora::Achado {
+                servidor: Some(servidor),
+                escuta: None,
+            }
+            .escuta_do_anfitriao(),
+            EscutaDoQuarto::Nenhuma,
+            "o quarto não deu escuta (o anfitrião 0.15.0) e a regra inventou uma"
+        );
+        for sem_resposta in [
+            OndeMora::NinguemMora,
+            OndeMora::PontoMudo,
+            OndeMora::PontoNaoResolve,
+            OndeMora::SemMarca,
+        ] {
+            assert_eq!(
+                sem_resposta.escuta_do_anfitriao(),
+                EscutaDoQuarto::Nenhuma,
+                "{sem_resposta:?} não traz escuta, e a regra inventou uma"
+            );
+        }
+
+        // O mesmo IP escrito nas duas formas: um ponto de pilha dupla escreve o
+        // IPv4 como `::ffff:a.b.c.d`. A forma não muda de quem é o endereço.
+        let mapeado = SocketAddr::new(
+            std::net::Ipv4Addr::from(SERVIDOR.0).to_ipv6_mapped().into(),
+            SERVIDOR.1,
+        );
+        assert_eq!(
+            OndeMora::Achado {
+                servidor: Some(mapeado),
+                escuta: Some(escuta),
+            }
+            .escuta_do_anfitriao(),
+            EscutaDoQuarto::DoAnfitriao(escuta),
+            "o mesmo IP, escrito como IPv4 mapeado num lado e cru no outro, foi tratado como \
+             dois: um ponto de pilha dupla deixaria de avisar o anfitrião pela escuta de hoje"
+        );
+    }
+
+    #[test]
+    fn o_bilhete_desta_volta_so_troca_o_aviso_pela_escuta_que_o_servidor_confirma() {
+        // `bilhete_desta_volta` é o que a casca usa (pela FFI) para montar o
+        // `LEVE` da volta. O guardado é o do link desta sessão ou o da lista.
+        // E o que ele deixa de lado vai para o `seele.log` (`info`), com a
+        // escuta e o servidor: «o produto sabe e não conta» é o defeito que
+        // mais custou neste repositório.
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+        let guardado =
+            Bilhete::novo("192.0.2.1:8384", "203.0.113.7:40000").expect("bilhete de teste");
+        let servidor = SocketAddr::from(SERVIDOR);
+        let escuta = SocketAddr::from(ESCUTA);
+        let ocupante = SocketAddr::from(OCUPANTE);
+
+        let confirmada = bilhete_desta_volta(
+            &guardado,
+            &OndeMora::Achado {
+                servidor: Some(servidor),
+                escuta: Some(escuta),
+            },
+        );
+        assert_eq!(
+            confirmada,
+            Bilhete::novo("192.0.2.1:8384", escuta.to_string()).expect("bilhete de teste"),
+            "a escuta confirmada pelo servidor não trocou o aviso: o anfitrião que mudou de porta \
+             é avisado no endereço velho"
+        );
+
+        for (no_quarto, o_que_quebra) in [
+            (
+                OndeMora::Achado {
+                    servidor: Some(servidor),
+                    escuta: Some(ocupante),
+                },
+                "uma escuta noutro IP que o do servidor",
+            ),
+            (
+                OndeMora::Achado {
+                    servidor: None,
+                    escuta: Some(ocupante),
+                },
+                "uma escuta sem servidor na mesma resposta",
+            ),
+        ] {
+            assert_eq!(
+                bilhete_desta_volta(&guardado, &no_quarto),
+                guardado,
+                "{o_que_quebra} trocou o aviso do bilhete: o `LEVE` vai a quem ocupou a marca \
+                 da escuta, com o endereço de quem chega"
+            );
+        }
+        assert_eq!(
+            bilhete_desta_volta(&guardado, &OndeMora::PontoMudo),
+            guardado,
+            "sem resposta do quarto, o bilhete guardado mudou"
+        );
+
+        let linhas = captura.linhas();
+        for (caso, dito) in [
+            ("noutro IP que o servidor", servidor.to_string()),
+            ("sem servidor", "não deu o servidor".to_owned()),
+        ] {
+            assert!(
+                linhas.iter().any(|linha| linha.starts_with("INFO")
+                    && linha.contains("não vira o aviso")
+                    && linha.contains(&ocupante.to_string())
+                    && linha.contains(&dito)),
+                "a escuta deixada de lado {caso} não foi dita no rastro (`info`, o único nível \
+                 que o seele.log grava) com a escuta e «{dito}»: quem investiga um anfitrião que \
+                 não foi avisado não sabe que o quarto deu outra escuta, nem por que ela ficou \
+                 de lado. Rastro: {linhas:?}"
+            );
+        }
+        assert!(
+            !linhas
+                .iter()
+                .any(|linha| linha.contains("não vira o aviso")
+                    && linha.contains(&escuta.to_string())),
+            "a escuta confirmada foi dita como deixada de lado: o log acusa o anfitrião de \
+             verdade. Rastro: {linhas:?}"
         );
     }
 

@@ -8024,8 +8024,11 @@ mod conferir_a_troca {
 
 // O que o quarto disse sobre onde um servidor mora hoje, reexportado para a
 // casca ler a resposta sem nomear o `seele-core`, que o ADR 0002 não a deixa
-// alcançar.
-pub use seele_core::encontro::OndeMora;
+// alcançar. E a regra que monta com ela o bilhete do `LEVE` desta volta: a
+// escuta do quarto só troca o aviso quando mora no IP do servidor que a mesma
+// resposta deu (o I1 da revisão final do Plano 1). A casca usa a regra, e não
+// `OndeMora::escuta`, que é a resposta crua.
+pub use seele_core::encontro::{bilhete_desta_volta, OndeMora};
 
 /// Onde este servidor mora hoje: o socket dele, e a escuta de avisos dele.
 ///
@@ -8042,8 +8045,11 @@ pub use seele_core::encontro::OndeMora;
 ///
 /// Um [`OndeMora`], e não um par de `Option`: «o ponto não respondeu» e «o
 /// ponto respondeu e ninguém mora lá» apontam para lugares diferentes, e a
-/// consulta registra no log qual foi. A casca lê [`OndeMora::servidor`] e
-/// [`OndeMora::escuta`], e cada um é `None` quando o quarto não o deu.
+/// consulta registra no log qual foi. A casca lê [`OndeMora::servidor`], que é
+/// `None` quando o quarto não o deu, e monta o bilhete desta volta com
+/// [`bilhete_desta_volta`], que só usa a escuta que o servidor da mesma
+/// resposta confirma. [`OndeMora::escuta`] é a resposta crua, e quem ocupou a
+/// marca da escuta também aparece nela.
 pub async fn onde_mora_hoje(ponto: &str, impressao: &str) -> OndeMora {
     let Some(marcas) = seele_core::encontro::Marcas::do_servidor(impressao) else {
         tracing::info!(
