@@ -14897,22 +14897,31 @@ fn a_resposta_do_quarto_nao_repete_um_candidato() {
 /// O conserto não afrouxa a política (ver
 /// `o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob`, neste
 /// arquivo): os bytes vão para `decodeAudioData`, que não passa por
-/// `media-src`. Este guarda prende as duas metades — nenhum arquivo de MOD da
-/// casca volta a criar um elemento de áudio, e o caminho que o substitui
-/// continua lá —, e o pedido dos bytes, que segue o contrato de `som_do_mod`.
+/// `media-src`. Este guarda prende as duas metades — nenhum script da janela
+/// volta a criar um elemento de áudio, e o caminho que o substitui continua
+/// lá —, e o pedido dos bytes, que segue o contrato de `som_do_mod`.
+///
+/// **Todo script, e não só os de MOD.** A montagem de MOD não mora só em
+/// `mods-*.js`: `montarContribuicao`, `donoDaRegiao` e `avatarContribuido`
+/// estão em `base.js`. O guarda olhava os `mods-*.js` e `camada-mods.js`, e um
+/// `createElement("audio")` em `montarContribuicao` passava por ele (o G06 da
+/// revisão ampla do Plano 1D).
 #[test]
 fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
-    let de_mod: Vec<String> = ui_files(".js")
-        .into_iter()
-        .filter(|nome| nome.starts_with("mods-") || nome == "camada-mods.js")
-        .collect();
-    assert!(
-        de_mod.len() >= 6,
-        "só {} arquivos de MOD foram lidos ({de_mod:?}): se a leitura parou de \
-         achá-los, este guarda passa por não olhar nada",
-        de_mod.len()
-    );
-    for nome in &de_mod {
+    let da_janela = ui_files(".js");
+    for exigido in [
+        "base.js",
+        "mods-regiao.js",
+        "camada-mods.js",
+        "tela-sessao.js",
+    ] {
+        assert!(
+            da_janela.iter().any(|nome| nome == exigido),
+            "`{exigido}` não está entre os scripts lidos ({da_janela:?}): se a leitura \
+             parou de achá-lo, este guarda passa por não olhar onde a montagem de MOD mora"
+        );
+    }
+    for nome in &da_janela {
         let fonte = without_comments(&read(&format!("ui/{nome}")));
         for agulha in ["\"audio\"", "'audio'", "`audio`", "new Audio(", "<audio"] {
             assert!(
@@ -14922,9 +14931,6 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
                  em `media-src`, e o som de MOD volta a não tocar, em silêncio"
             );
         }
-    }
-    for nome in ui_files(".js") {
-        let fonte = without_comments(&read(&format!("ui/{nome}")));
         assert!(
             !fonte.contains("data:audio"),
             "`{nome}` escreve um `data:audio`, e nenhum som desta janela passa por `data:`"
