@@ -1008,8 +1008,9 @@ bateria() {
     # ninguém despacha passa no `cargo test` inteiro e só ele reprova (medido).
     # O `check-versao` prova que a versão chega a toda entrega, e o
     # `check-vetores` que todo vetor viaja num clone limpo, o que nenhum teste
-    # alcança. O `ci.yml` (manual) e o `validar` as rodam, mas as versões saem
-    # por aqui, por fora dos dois.
+    # alcança. O `validar` do `release.yml` roda as três; o job `regras` do
+    # `ci.yml` (manual) roda o `check-api` e o `check-versao`, e não o
+    # `check-vetores`. As versões saem por aqui, por fora dos dois.
     #
     # Logo depois das bancadas, pela mesma razão: compilam só o `xtask` e levam
     # segundos, e aqui a primeira reprovação para tudo.
