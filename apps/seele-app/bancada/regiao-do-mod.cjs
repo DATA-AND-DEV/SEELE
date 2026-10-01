@@ -353,7 +353,7 @@ function bancada(opcoes = {}) {
   // propriedades do contexto, e por isso saem por esta linha em vez de por uma
   // leitura de `contexto.RegiaoDeMod`, que devolveria `undefined`.
   vm.runInContext(
-    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO };`,
+    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, PERFIS_DE_RENDER };`,
     contexto,
     { filename: "mods-regiao.js" },
   );
@@ -364,6 +364,7 @@ function bancada(opcoes = {}) {
     LIMITES: contexto.api.LIMITES_DA_REGIAO,
     CARTAO: contexto.api.LIMITES_DO_CARTAO,
     FORMAS_DO_CARTAO: contexto.api.FORMAS_DO_CARTAO,
+    PERFIS: contexto.api.PERFIS_DE_RENDER,
     raiz: () => doc.createElement("section"),
   };
 }
@@ -1080,6 +1081,41 @@ async function osTetosContemEARecusaEDita() {
     "uma forma desconhecida virou elemento",
   );
 
+  // **As duas recusas por teto dizem a mesma palavra.** A figura, o evento do
+  // MOD e o começo da linha do registro, sem a chave: o teto de bytes e o do
+  // som decodificado são o mesmo tipo de não, e um MOD que trata «recusada»
+  // não pode ter de tratar o segundo como uma falha de carga.
+  const comoORecusa = (figura, dito, linha) => ({
+    figura: figura?.dataset.estado,
+    evento: dito?.estado,
+    registro: String(linha ?? "").replace(/«[^»]*»/, "«»").split(":")[0],
+  });
+  const aRecusaPorTeto = { figura: "cheia", evento: "recusada", registro: "mídia «» recusada" };
+
+  // O teto de bytes: o arquivo como chegou. O MOD recebe `recusada` **com o
+  // porquê e os números**, como no teto do som: sem eles, «recusada» por teto
+  // e «recusada» por falta de um gesto chegavam iguais.
+  {
+    const bt = bancada();
+    const dt = dono(bt, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: bt.LIMITES.bytesDeMidia + 1 }));
+    const r = new bt.RegiaoDeMod("a/b", dt.api, bt.raiz());
+    r.aplicar([{ forma: "midia", chave: "grande", fonte: "img/g.png" }]);
+    await assentar();
+    const dito = dt.ditos.find((e) => e.nome === "midia" && e.chave === "grande");
+    const linha = dt.anotadas.find((t) => t.includes("«grande»"));
+    confere(
+      caso,
+      String(dito?.porque ?? "").includes(String(bt.LIMITES.bytesDeMidia)),
+      `o MOD não soube por que a mídia acima do teto de bytes foi recusada, nem com que números: ${JSON.stringify(dt.ditos)}`,
+    );
+    confere(
+      caso,
+      JSON.stringify(comoORecusa(r.raiz.children[0], dito, linha)) === JSON.stringify(aRecusaPorTeto),
+      `a recusa pelo teto de bytes mudou de palavra: ${JSON.stringify(comoORecusa(r.raiz.children[0], dito, linha))}`,
+    );
+    r.soltar();
+  }
+
   // **O som decodificado tem teto próprio, somado por bolso.** O teto de bytes
   // conta o arquivo como chegou, comprimido; `decodeAudioData` guarda o som
   // inteiro em float32, na taxa do contexto, já na montagem — dez MiB de MP3 a
@@ -1101,23 +1137,30 @@ async function osTetosContemEARecusaEDita() {
     await assentar();
     const [um, dois] = r.raiz.children;
     confere(caso, um?.dataset.estado === "pronta", `o primeiro som, que cabe no teto decodificado, não ficou pronto: ${um?.dataset.estado}`);
-    confere(caso, dois?.dataset.estado === "falhou", `o som que passa do teto decodificado não foi recusado: ${dois?.dataset.estado}`);
+    confere(caso, dois?.dataset.estado === "cheia", `o som que passa do teto decodificado não foi recusado: ${dois?.dataset.estado}`);
     confere(
       caso,
       (Audio.ultimo?.ganhos.length ?? 0) === 1 && (Audio.ultimo?.fontes.length ?? 0) === 1,
       `o som acima do teto virou tocador e segura o som decodificado inteiro: ${Audio.ultimo?.ganhos.length} ganho(s), ${Audio.ultimo?.fontes.length} fonte(s)`,
     );
     confere(caso, acharTag(dois, "button") === null, "o som acima do teto decodificado ganhou um botão de tocar");
-    const dito = ds.ditos.find((e) => e.nome === "midia" && e.chave === "s2" && e.estado === "falhou");
+    const dito = ds.ditos.find((e) => e.nome === "midia" && e.chave === "s2");
     confere(
       caso,
-      /decodificado/.test(dito?.porque ?? "") && /teto/.test(dito?.porque ?? ""),
-      `o MOD não soube que o som passou do teto decodificado: ${JSON.stringify(ds.ditos)}`,
+      /decodificado/.test(dito?.porque ?? "") && String(dito?.porque ?? "").includes(String(tetoDoSom)),
+      `o MOD não soube que o som passou do teto decodificado, nem com que números: ${JSON.stringify(ds.ditos)}`,
+    );
+    const linha = ds.anotadas.find((t) => t.includes("«s2»"));
+    confere(
+      caso,
+      /decodificado/.test(linha ?? "") && /teto/.test(linha ?? ""),
+      `o som acima do teto decodificado não chegou ao registro: ${JSON.stringify(ds.anotadas)}`,
     );
     confere(
       caso,
-      ds.anotadas.some((t) => t.includes("«s2»") && t.includes("decodificado") && t.includes("teto")),
-      `o som acima do teto decodificado não chegou ao registro: ${JSON.stringify(ds.anotadas)}`,
+      JSON.stringify(comoORecusa(dois, dito, linha)) === JSON.stringify(aRecusaPorTeto),
+      "o teto do som decodificado não recusa com a palavra do teto de bytes — "
+        + `${JSON.stringify(comoORecusa(dois, dito, linha))}, e o de bytes diz ${JSON.stringify(aRecusaPorTeto)}`,
     );
     confere(
       caso,
@@ -1163,13 +1206,13 @@ async function osTetosContemEARecusaEDita() {
     );
     confere(
       caso,
-      ds.ditos.some((e) => e.nome === "midia" && e.chave === "c" && e.estado === "falhou" && /teto/.test(e.porque ?? "")),
+      ds.ditos.some((e) => e.nome === "midia" && e.chave === "c" && e.estado === "recusada" && /teto/.test(e.porque ?? "")),
       `o MOD não soube que o som do cartão passou do teto decodificado: ${JSON.stringify(ds.ditos)}`,
     );
     confere(
       caso,
-      ds.anotadas.some((t) => t.includes("«c»") && t.includes("decodificado")),
-      `o som de cartão acima do teto decodificado não chegou ao registro: ${JSON.stringify(ds.anotadas)}`,
+      ds.anotadas.some((t) => t.includes("«c» recusada:") && t.includes("decodificado")),
+      `o som de cartão acima do teto decodificado não chegou ao registro como recusa: ${JSON.stringify(ds.anotadas)}`,
     );
     confere(caso, r.bytesDeSomDeCartao === 0, `o som recusado entrou na conta dos cartões: ${r.bytesDeSomDeCartao}`);
     r.soltar();
@@ -1344,7 +1387,7 @@ async function fundoTrocaSoltaECancela() {
  * palavra — levou uma hora de medição e um reinício com `RUST_LOG=debug`.
  *
  * Ao menos um caso por caminho de recusa, que são quinze: os dez em que a
- * janela recusa ou vê a carga falhar uma imagem (a mídia, o retrato, o fundo e
+ * janela recusa ou vê a carga falhar uma mídia (a mídia, o retrato, o fundo e
  * o fundo de tela), o evento `error` do próprio elemento, a mídia declarada
  * sem origem, e os três do som desde que ele toca por WebAudio — os bytes que
  * o Rust recusou, o áudio da janela que não liga e a fonte que não abre. O som
@@ -1706,6 +1749,14 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
       doClique.length === 1 && !doClique[0].includes("sem um gesto"),
       `o clique de quem usa foi dito ao registro como «sem um gesto», ou não foi dito: ${JSON.stringify(doClique)}`,
     );
+    // **E o motivo do navegador vai junto.** `resume()` recusou com um motivo
+    // próprio, e ele é o que quem investiga veio buscar: engolido, a linha
+    // diria que o áudio não ligou sem dizer o que o navegador respondeu.
+    confere(
+      "recusa dita · som que o clique não ligou",
+      doClique.length === 1 && doClique[0].includes("NotAllowedError: o áudio da janela não liga"),
+      `o motivo com que o áudio da janela recusou ligar não chegou ao registro: ${JSON.stringify(doClique)}`,
+    );
     if (Audio.ultimo) Audio.ultimo.state = "running";
     botao?.disparar("click");
     await assentar();
@@ -2016,6 +2067,36 @@ async function oSomNumCartaoNaoTemBotao() {
   confere(caso, regiao.midiasAnotadas()[0]?.cartao === true, "a mídia do cartão não foi anotada como de cartão");
   regiao.soltar();
   confere(caso, Audio.ultimo?.fontes[0]?.parou === true, "o som do cartão continuou depois de a região sair");
+
+  // **Numa contribuição, uma vez, e não uma por destino.** `montarContribuicao`
+  // (`base.js`) monta um renderer por destino, com o perfil do cartão — um
+  // `canal.item` sem alvo, dois canais, dois renderers —, e dá a todos o mesmo
+  // conjunto, `sonsJaTocados`. O som declarado `tocando` toca no primeiro que
+  // fica pronto; os outros mostram a figura, calados. Sem o conjunto, dois
+  // canais eram dois sinos ao mesmo tempo, e o MOD ouvia «tocando» duas vezes.
+  {
+    const AudioC = audioDeMentira();
+    const bc = bancada({ audio: AudioC });
+    const dc = dono(bc, () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }));
+    const sonsJaTocados = new Set();
+    const destinos = ["1", "2"].map(() => {
+      const r = new bc.RegiaoDeMod("a/b", dc.api, bc.raiz(), bc.PERFIS.cartao);
+      r.sonsJaTocados = sonsJaTocados;
+      r.aplicar([{ forma: "midia", chave: "sino", fonte: "som/a.wav", tocando: true }]);
+      return r;
+    });
+    await assentar();
+    confere(
+      caso,
+      destinos.every((r) => r.raiz.children[0]?.dataset.estado === "pronta"),
+      "o som da contribuição não ficou pronto nos dois destinos, e a conferência abaixo passaria por um só ter montado",
+    );
+    const tocando = AudioC.ultimo?.fontes.filter((f) => f.tocando).length ?? 0;
+    confere(caso, tocando === 1, `o som de uma contribuição tocou ${tocando} vez(es) — uma por destino, e não uma`);
+    const ouviu = dc.ditos.filter((e) => e.nome === "midia" && e.estado === "tocando").length;
+    confere(caso, ouviu === 1, `o MOD ouviu «tocando» ${ouviu} vez(es) de um som que declarou uma`);
+    for (const r of destinos) r.soltar();
+  }
 }
 
 async function oSomPedidoSemGestoEDitoRecusado() {

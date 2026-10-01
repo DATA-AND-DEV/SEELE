@@ -486,6 +486,13 @@ class RegiaoDeMod {
      * recusa já amarrada (ver `montarSom`). Ver `aplicarTocando`.
      */
     this.somDaMidia = new Map();
+    /**
+     * As chaves dos sons cujo `tocando` já tocou, quando este renderer é **um
+     * dos destinos de uma contribuição** — o mesmo conjunto para todos eles
+     * (`montarContribuicao`, em `base.js`); `null` fora de uma. Ver
+     * `aplicarTocando`.
+     */
+    this.sonsJaTocados = null;
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
     this.solta = false;
   }
@@ -2154,10 +2161,14 @@ class RegiaoDeMod {
       // sessão que já não existe.
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
+        // O porquê vai ao MOD com os números, como no teto do som
+        // decodificado (`montarSom`): sem ele, «recusada» por teto e
+        // «recusada» por falta de um gesto chegavam iguais.
+        const porque = `${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`;
         elem.dataset.estado = "cheia";
         this.anotarMidia(elem, "recusada", `passou do teto de ${bolso.teto} bytes de mídia deste lugar`);
-        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada" });
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada: ${porque}`);
         return;
       }
       // Contados **agora**, e não quando o som terminar de decodificar: os
@@ -2224,8 +2235,9 @@ class RegiaoDeMod {
    * **O som decodificado tem teto**, somado por bolso
    * (`LIMITES_DA_REGIAO.bytesDeSomDecodificado`, e o do cartão): o WebAudio
    * guarda o som inteiro em float32 desde a montagem, e o teto de bytes de
-   * `montarMidia` conta o arquivo comprimido. Acima dele, o som falha com os
-   * números, e não vira tocador.
+   * `montarMidia` conta o arquivo comprimido. Acima dele, o som é recusado
+   * com as palavras daquele teto — figura «cheia», `recusada` ao MOD com os
+   * números —, e não vira tocador.
    *
    * **O botão substitui o `<audio controls>`**, que era o único jeito de uma
    * pessoa tocar um som que o MOD não mandou tocar. Ele não existe num cartão
@@ -2236,8 +2248,9 @@ class RegiaoDeMod {
    * **Toda recusa é dita a quem hospeda**, como o `.catch` de `montarMidia` e o
    * `play()` recusado do `<audio>` já eram (`dizerRecusaDeMidia`): o som que
    * não chegou, o que não decodificou e o que não começou — por um caminho só,
-   * `recusou`, seja o áudio da janela que não liga no prazo, seja o pedido de
-   * tocar que rejeita.
+   * `recusou`, seja o áudio da janela que não liga no prazo (com o que o
+   * navegador respondeu, quando respondeu), seja o pedido de tocar que
+   * rejeita.
    *
    * @param {{ uri: string } | { caminho: string }} origem
    */
@@ -2277,10 +2290,19 @@ class RegiaoDeMod {
     // bolso. Float32, quatro bytes por amostra, por canal, na taxa do
     // contexto — é o que o `AudioBuffer` segura enquanto o tocador existir.
     // Acima do teto, o som é largado aqui mesmo: sem tocador, ninguém o segura.
+    //
+    // A recusa é a do teto de bytes de `montarMidia`, com as mesmas palavras —
+    // figura «cheia», `recusada` ao MOD com o porquê e os números, e
+    // «recusada» no registro —: os dois são o mesmo tipo de não, e um MOD não
+    // tem de tratar um deles como falha de carga.
     const { contaDoSom, tetoDoSom } = estado.bolso;
     const ocupa = som.length * som.numberOfChannels * 4;
     if (this[contaDoSom] + ocupa > tetoDoSom) {
-      falhou(`o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`);
+      const porque = `o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`;
+      elem.dataset.estado = "cheia";
+      this.anotarMidia(elem, "recusada", porque);
+      this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
+      this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
       return;
     }
     estado.bytesDoSom = ocupa;
@@ -2304,15 +2326,17 @@ class RegiaoDeMod {
       this.dizerRecusaDeMidia(chave, `não tocou: ${motivo}`);
     };
     let pintar = () => {};
-    const tocador = new TocadorDeSomDeMod(contexto, som, (aviso, comGesto) => {
+    const tocador = new TocadorDeSomDeMod(contexto, som, (aviso, comGesto, naoLigou) => {
       if (estado.cancelado || this.solta) return;
       pintar();
       if (aviso === "recusada") {
         // Com o clique de quem usa, a frase não diz «sem um gesto»: houve um,
-        // e o áudio da janela não ligou mesmo assim.
-        recusou(comGesto
+        // e o áudio da janela não ligou mesmo assim. E o que o navegador
+        // respondeu vai junto, quando ele respondeu.
+        const frase = comGesto
           ? "o áudio da janela não ligou, nem com o clique de quem usa"
-          : "o som não pôde começar sem um gesto de quem usa");
+          : "o som não pôde começar sem um gesto de quem usa";
+        recusou(naoLigou === undefined ? frase : `${frase} — ${motivoDaFalha(naoLigou)}`);
         return;
       }
       this.anotarMidia(elem, "pronta");
@@ -2366,13 +2390,27 @@ class RegiaoDeMod {
    * e um que a pessoa pausou voltava sozinho. Com o botão do produto ao lado,
    * isso seria o MOD desfazendo o que a pessoa acabou de apertar. A
    * declaração vale quando muda; o botão vale entre uma mudança e outra.
+   *
+   * **Numa contribuição, uma vez, e não uma por destino.** Uma contribuição
+   * sem alvo é montada por destino — um renderer, e um tocador, por canal —,
+   * e todos dividem `sonsJaTocados`: o primeiro tocador pronto toca, e os
+   * outros mostram a figura, calados. Uma contribuição não muda depois de
+   * registrada (o MOD tira e registra outra), então o `tocando` dela vale uma
+   * vez, e o conjunto não precisa esquecer.
    */
   aplicarTocando(elem) {
     const som = this.somDaMidia.get(elem);
     if (!som?.tocador || som.declarado === som.quer) return;
     som.declarado = som.quer;
-    if (som.quer) som.tocar(false);
-    else som.tocador.pausar();
+    if (!som.quer) {
+      som.tocador.pausar();
+      return;
+    }
+    if (this.sonsJaTocados) {
+      if (this.sonsJaTocados.has(elem.dataset.chave)) return;
+      this.sonsJaTocados.add(elem.dataset.chave);
+    }
+    som.tocar(false);
   }
 
   /** O MOD declara «tocando»; o produto guarda, e aplica quando o som existir. */
@@ -2708,14 +2746,15 @@ function bufferDaUri(uri) {
  *
  * `avisar` recebe `"tocando"`, `"pausada"`, `"terminou"` ou `"recusada"` — as
  * palavras que o MOD já recebia do `<audio>`, para nenhum MOD publicado
- * precisar mudar. Na recusa vem junto se o pedido foi um clique de quem usa:
- * quem avisa o registro não pode dizer «sem um gesto» quando houve um.
+ * precisar mudar. Na recusa vem junto se o pedido foi um clique de quem usa —
+ * quem avisa o registro não pode dizer «sem um gesto» quando houve um —, e o
+ * que o navegador respondeu, quando `resume()` recusou em vez de esperar.
  */
 class TocadorDeSomDeMod {
   /**
    * @param {AudioContext} contexto O da janela — ver `contextoDeSomDeMod`.
    * @param {AudioBuffer} som O que `decodificarSomDeMod` devolveu.
-   * @param {(aviso: string, comGesto?: boolean) => void} avisar
+   * @param {(aviso: string, comGesto?: boolean, naoLigou?: *) => void} avisar
    */
   constructor(contexto, som, avisar) {
     this.contexto = contexto;
@@ -2750,14 +2789,19 @@ class TocadorDeSomDeMod {
   async tocar(comGesto = false) {
     if (this.solto || this.fonte) return this.fonte !== null;
     const pedido = (this.pedido += 1);
+    // O que o navegador respondeu ao pedido de ligar o áudio, quando recusou.
+    // **Guardado, e não engolido**: é o motivo que a recusa leva ao registro.
+    let naoLigou;
     if (this.contexto.state !== "running") {
-      const acordou = Promise.resolve(this.contexto.resume?.()).catch(() => {});
+      const acordou = Promise.resolve(this.contexto.resume?.()).catch((falha) => {
+        naoLigou = falha;
+      });
       const prazo = comGesto ? ESPERA_COM_GESTO_MS : ESPERA_SEM_GESTO_MS;
       await Promise.race([acordou, new Promise((pronto) => setTimeout(pronto, prazo))]);
     }
     if (this.solto || pedido !== this.pedido || this.fonte) return this.fonte !== null;
     if (this.contexto.state !== "running") {
-      this.avisar("recusada", comGesto);
+      this.avisar("recusada", comGesto, naoLigou);
       return false;
     }
     const fonte = this.contexto.createBufferSource();

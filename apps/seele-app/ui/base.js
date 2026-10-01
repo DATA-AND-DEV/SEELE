@@ -935,6 +935,38 @@ function donoDaRegiao(mod, instancia) {
       return midia;
     },
     /**
+     * Os bytes crus de um som que o manifesto deste MOD declarou.
+     *
+     * **Bytes, e não `data:`.** O `uri` de `carregarMidia` só serve para
+     * imagem: a política desta janela não deixa um elemento de mídia tocar
+     * `data:`, e ela não afrouxa. Estes bytes vão para `decodeAudioData`, que
+     * não passa por `media-src` — ver `TocadorDeSomDeMod` em `mods-regiao.js`.
+     *
+     * `som_do_mod` confere o mesmo que `midia_do_mod` — o pacote pelo hash, o
+     * hash deste MOD, o arquivo declarado, o teto — e recusa pelo nome o que
+     * não é som. Os quatro argumentos são os de `carregarMidia`, pelo mesmo
+     * motivo: a geração lida **antes** do `await` e conferida depois, porque
+     * um som que chega depois de a sessão acabar não é entregue a ninguém. O
+     * hash é o do pacote: na região, o do MOD carregado; numa contribuição,
+     * o da instância que a registrou (`montarContribuicao`).
+     *
+     * **O som do pacote atravessa duas vezes**, até um plano Rust mudar o
+     * `midia_do_mod` para o papel `som`: em base64 por `carregarMidia`, que a
+     * região chama para saber o papel e os bytes a contar, e cru por aqui.
+     */
+    bytesDoSom: async (caminho) => {
+      const geracao = geracaoDaSessao;
+      if (!meu()) throw new Error("disconnected");
+      const bytes = await invoke("som_do_mod", {
+        geracao,
+        id: mod.id,
+        hash: mod.hash,
+        caminho,
+      });
+      if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
+      return bytes;
+    },
+    /**
      * A mídia de alguma montagem deste MOD mudou de estado.
      *
      * Só para o diagnóstico: sem este aviso, «quem pinta cada lugar» diria
@@ -1227,7 +1259,11 @@ function montarContribuicao(contribuicao, destino = "") {
 
   const instancia = contribuicao.instancia;
   if (!instancia || !instancia.admite(geracaoDaSessao)) return null;
-  const mod = { id: contribuicao.mod };
+  // **O hash é o da instância.** O registro guarda só o id do MOD, e o dono
+  // pede a mídia com os dois: sem o hash, `midia_do_mod` e `som_do_mod`
+  // recusam o pedido antes de ler um byte, e nenhuma mídia de contribuição
+  // chega. É o hash com que a instância nasceu — o do pacote que está rodando.
+  const mod = { id: contribuicao.mod, hash: instancia.hash };
   const raiz = elemento("div", "contribuicao-de-mod");
   raiz.dataset.mod = contribuicao.mod;
   raiz.dataset.ponto = contribuicao.ponto;
@@ -1239,6 +1275,14 @@ function montarContribuicao(contribuicao, destino = "") {
     raiz,
     PERFIS_DE_RENDER.cartao,
   );
+  // **Um som por contribuição, e não um por destino.** Cada destino tem o seu
+  // renderer, e cada renderer o seu tocador: o som que o MOD declarou
+  // `tocando` numa contribuição sem alvo tocava uma vez por canal, todos
+  // juntos. O conjunto é um só para todos os destinos, e o primeiro tocador
+  // pronto é o que toca — ver `aplicarTocando`, em `mods-regiao.js`.
+  const sonsJaTocados = contribuicao.sonsJaTocados ?? new Set();
+  contribuicao.sonsJaTocados = sonsJaTocados;
+  renderer.sonsJaTocados = sonsJaTocados;
   // **Registrada como recurso, e esquecida ao revogar.** O descartador volta
   // para a contribuição: sem isso, revogar deixaria o renderer retido na
   // instância — o mesmo vazamento que R4 fechou do outro lado, e que a revisão

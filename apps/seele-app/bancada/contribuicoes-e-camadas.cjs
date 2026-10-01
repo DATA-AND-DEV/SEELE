@@ -721,14 +721,22 @@ function acordarTudo(no) {
  * ciclos de uma contribuição **sem conteúdo** nunca passam por aqui.
  */
 let soltouRenderer = 0;
+/** Os renderers que a montagem criou, na ordem: o que cada um recebeu é o que se confere. */
+const renderersMontados = [];
 contexto.RegiaoDeMod = class {
-  constructor(id, dono, raiz) { this.id = id; this.dono = dono; this.raiz = raiz; }
+  constructor(id, dono, raiz) {
+    this.id = id;
+    this.dono = dono;
+    this.raiz = raiz;
+    renderersMontados.push(this);
+  }
   aplicar() { return 0; }
   soltar() { soltouRenderer += 1; }
 };
 contexto.PERFIS_DE_RENDER = { cartao: {}, superficie: {} };
 contexto.elemento = (tag) => new No(tag, "");
-contexto.donoDaRegiao = (mod, instancia) => ({ instancia, falar() {} });
+// O `mod` vai junto: é com o hash dele que o dono de verdade pede a mídia.
+contexto.donoDaRegiao = (mod, instancia) => ({ instancia, mod, falar() {} });
 contexto.cartoesDosMods = new Map();
 
 {
@@ -763,6 +771,41 @@ contexto.cartoesDosMods = new Map();
   registro.revogar(handle, { id: "mod/a", instancia: dono });
   confere("R4b · revogar", soltouRenderer === antes + 1, "revogar não soltou o renderer da montagem");
   confere("R4b · revogar", dono.recursos.length === 0, `revogar deixou ${dono.recursos.length} recurso(s) retido(s)`);
+
+  // **O hash do pacote, e da instância.** A contribuição guarda só o id do MOD
+  // (`mod: mod.id`, no registro), e a montagem pedia a mídia com `{ id }`: sem
+  // o `hash`, que `midia_do_mod` e `som_do_mod` exigem, o Tauri recusa o pedido
+  // («missing required key hash») e nenhuma mídia de contribuição chega.
+  const doCartao = renderersMontados.at(-1)?.dono?.mod;
+  confere(
+    "R4b · montar",
+    doCartao?.id === "mod/a" && doCartao?.hash === dono.hash,
+    `a montagem pede a mídia sem o hash do pacote da instância («${dono.hash}»): ${JSON.stringify(doCartao)}`,
+  );
+
+  // **Um som por contribuição, e não um por destino.** Sem alvo, ela monta um
+  // renderer por destino, e cada um teria o seu tocador: o som declarado
+  // `tocando` tocava uma vez por canal, todos juntos. O conjunto dos sons já
+  // tocados é um só para todos os destinos — é ele que `aplicarTocando`, em
+  // `mods-regiao.js`, consulta.
+  {
+    const { handle: semAlvo } = registro.registrar({ id: "mod/a" }, dono, {
+      ponto: "canal.item", modo: "adicionar",
+      conteudo: [{ forma: "midia", chave: "sino", fonte: "som/a.wav", tocando: true }],
+    });
+    const geral = registro.porHandle.get(semAlvo);
+    const antesDosDestinos = renderersMontados.length;
+    contexto.montarContribuicao(geral, "1");
+    contexto.montarContribuicao(geral, "2");
+    const [um, dois] = renderersMontados.slice(antesDosDestinos);
+    confere(
+      "R4b · um som por contribuição",
+      Boolean(um && dois) && typeof um.sonsJaTocados?.has === "function" && um.sonsJaTocados === dois.sonsJaTocados,
+      "os destinos de uma contribuição sem alvo não dividem o conjunto dos sons já tocados, e o som "
+        + "declarado `tocando` toca uma vez por destino",
+    );
+    registro.revogar(semAlvo, { id: "mod/a", instancia: dono });
+  }
 
   // E mil ciclos **com conteúdo montado** estabilizam.
   const antesDoLaco = dono.recursos.length;

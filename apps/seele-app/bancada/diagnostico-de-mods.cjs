@@ -753,10 +753,198 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
   await pagina.close();
 }
 
+// ---------------------------------------------------------------------------
+// O som de MOD toca por WebAudio, sob a CSP do produto.
+// ---------------------------------------------------------------------------
+
+/** Um WAV de um segundo e meio, 440 Hz, feito aqui: nenhum binário no repositório. */
+function wavDeTeste() {
+  const taxa = 8000;
+  const amostras = taxa * 1.5;
+  const bytes = Buffer.alloc(44 + amostras * 2);
+  bytes.write("RIFF", 0, "ascii");
+  bytes.writeUInt32LE(36 + amostras * 2, 4);
+  bytes.write("WAVE", 8, "ascii");
+  bytes.write("fmt ", 12, "ascii");
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20); // PCM
+  bytes.writeUInt16LE(1, 22); // mono
+  bytes.writeUInt32LE(taxa, 24);
+  bytes.writeUInt32LE(taxa * 2, 28);
+  bytes.writeUInt16LE(2, 32);
+  bytes.writeUInt16LE(16, 34);
+  bytes.write("data", 36, "ascii");
+  bytes.writeUInt32LE(amostras * 2, 40);
+  for (let i = 0; i < amostras; i += 1) {
+    bytes.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / taxa) * 8000), 44 + i * 2);
+  }
+  return [...bytes];
+}
+
+/** Espera o MOD receber este estado da mídia `sino`, e diz o que veio se não vier. */
+async function esperarOSino(pagina, estado, vezes = 1) {
+  try {
+    await pagina.waitForFunction(
+      ([quer, quantas]) => eventosDoMod
+        .filter((e) => e.nome === "midia" && e.chave === "sino" && e.estado === quer)
+        .length >= quantas,
+      [estado, vezes],
+      { timeout: 8000 },
+    );
+  } catch {
+    const vieram = await pagina.evaluate(() => eventosDoMod
+      .filter((e) => e.nome === "midia")
+      .map((e) => `${e.estado}${e.porque ? ` (${e.porque})` : ""}`));
+    throw new Error(`o MOD esperava «${estado}» do som e recebeu: ${vieram.join(", ") || "nada"}`);
+  }
+}
+
+async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
+  const { pagina, erros, recusasDaCsp } = await abrirASessao(navegador, servidor);
+  const declarar = (tocando) => pagina.evaluate((quer) => {
+    desenharARegiaoDoMod({ id: "mod/a", hash: "mod-a" }, somA, [
+      { forma: "midia", chave: "sino", fonte: "som/sino.wav", descricao: "Sino de teste", tocando: quer },
+    ]);
+  }, tocando);
+  await pagina.evaluate((bytes) => {
+    // Quantas fontes de som foram paradas: é o que prova que sair no meio do
+    // som para o som, e não só o esconde.
+    window.paradas = 0;
+    const parar = AudioBufferSourceNode.prototype.stop;
+    AudioBufferSourceNode.prototype.stop = function (...args) {
+      window.paradas += 1;
+      return parar.apply(this, args);
+    };
+    testTable.midia_do_mod = { papel: "som", uri: "data:audio/wav;base64,UklGRg==", bytes: bytes.length };
+    // `som_do_mod` como ele chega pelo protocolo `ipc:`: um `ArrayBuffer` novo
+    // a cada pedido. O `number[]` do `postMessage` é o que a bancada em `vm`
+    // (`regiao-do-mod.cjs`) entrega; as duas formas ficam medidas.
+    testTable.som_do_mod = () => new Uint8Array(bytes).buffer;
+    window.somA = instancia("mod/a");
+  }, wavDeTeste());
+  await declarar(false);
+
+  // Os bytes e a decodificação são duas voltas: espera-se a figura sair de
+  // «carregando», e o que ela disse é o que se confere.
+  await pagina.waitForFunction(() => {
+    const estado = document.querySelector('#regioes-dos-mods figure[data-chave-do-mod="sino"]')?.dataset.estado;
+    return Boolean(estado) && estado !== "carregando";
+  }, null, { timeout: 8000 });
+  const montado = await pagina.evaluate(() => ({
+    porque: eventosDoMod.find((e) => e.nome === "midia" && e.estado === "falhou")?.porque ?? "",
+    audios: document.querySelectorAll("audio").length,
+    botao: document.querySelector("#regioes-dos-mods .regiao-de-mod-som")?.textContent ?? null,
+    figura: document.querySelector('#regioes-dos-mods figure[data-chave-do-mod="sino"]')?.dataset.estado ?? null,
+    pedido: testCalls.find((c) => c.cmd === "som_do_mod")?.args ?? null,
+    eventos: eventosDoMod.filter((e) => e.nome === "midia").length,
+  }));
+  assert.equal(montado.audios, 0, "um elemento <audio> voltou à página, e a CSP desta janela recusa o data: dele");
+  assert.equal(montado.figura, "pronta", `o som não chegou a ficar pronto: ${montado.figura} (${montado.porque})`);
+  assert.equal(montado.botao, "TOCAR", `o botão do produto não começou em TOCAR: ${montado.botao}`);
+  assert.equal(montado.eventos, 0, "o som tocou sem que o MOD declarasse e sem que alguém apertasse");
+  assert.deepEqual(
+    montado.pedido,
+    { geracao: 1, id: "mod/a", hash: "mod-a", caminho: "som/sino.wav" },
+    "os bytes do som não foram pedidos ao Rust pelo contrato de `som_do_mod`: a geração de pé, "
+    + "o id e o hash do MOD e o caminho declarado",
+  );
+
+  // Quem aperta o botão do produto ouve, e o fim é dito ao MOD.
+  await pagina.click("#regioes-dos-mods .regiao-de-mod-som");
+  await esperarOSino(pagina, "tocando");
+  assert.equal(
+    await pagina.textContent("#regioes-dos-mods .regiao-de-mod-som"),
+    "PAUSAR",
+    "o som começou e o botão do produto não passou a PAUSAR",
+  );
+  await esperarOSino(pagina, "terminou");
+  assert.equal(
+    await pagina.textContent("#regioes-dos-mods .regiao-de-mod-som"),
+    "TOCAR",
+    "o som terminou e o botão do produto ficou em PAUSAR",
+  );
+
+  // A declaração do MOD toca **na mudança**; e sair no meio do som para o som.
+  await declarar(true);
+  await esperarOSino(pagina, "tocando", 2);
+  const antes = await pagina.evaluate(() => window.paradas);
+  await pagina.evaluate(() => limparARegiaoDoMod("mod/a", somA));
+  assert.equal(
+    await pagina.evaluate(() => window.paradas),
+    antes + 1,
+    "sair no meio do som não parou a fonte, e o som continua tocando sem dono",
+  );
+  assert.equal(await pagina.locator(".regiao-de-mod-som").count(), 0, "o botão do som ficou na tela depois de a região sair");
+
+  // **E numa contribuição.** Ela é montada uma vez por destino — um
+  // `canal.item` sem alvo, num retrato de dois canais, monta duas vezes —, e
+  // cada montagem pede os bytes com o mesmo contrato: sem o `hash`, o Tauri
+  // recusa o pedido («missing required key hash») e o som nunca chega ao
+  // WebAudio. Conferido em **todo** pedido de mídia da página, e não no
+  // primeiro: o primeiro é o da região, que já tinha o hash.
+  //
+  // E o som declarado `tocando` toca **uma vez** por contribuição, e não uma
+  // por destino — dois canais seriam dois sinos ao mesmo tempo, e o MOD
+  // ouviria «tocando» duas vezes de um som que declarou uma.
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.registrar({ id: "mod/a" }, somA, {
+      ponto: "canal.item",
+      modo: "adicionar",
+      conteudo: [{ forma: "midia", chave: "sino-do-canal", fonte: "som/sino.wav", tocando: true }],
+    });
+    desenhar(testTable.snapshot);
+  });
+  await esperarQue(
+    pagina,
+    () => {
+      const figuras = [...document.querySelectorAll('.contribuicao-de-mod figure[data-chave-do-mod="sino-do-canal"]')];
+      return figuras.length === 2 && figuras.every((f) => f.dataset.estado && f.dataset.estado !== "carregando");
+    },
+    "o som da contribuição sem alvo não montou nos dois canais",
+    () => [...document.querySelectorAll('.contribuicao-de-mod figure[data-chave-do-mod="sino-do-canal"]')]
+      .map((f) => f.dataset.estado),
+  );
+  await pagina.evaluate(() => new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto))));
+  const daContribuicao = await pagina.evaluate(() => ({
+    figuras: [...document.querySelectorAll('.contribuicao-de-mod figure[data-chave-do-mod="sino-do-canal"]')]
+      .map((f) => f.dataset.estado),
+    eventos: eventosDoMod
+      .filter((e) => e.nome === "midia" && e.chave === "sino-do-canal")
+      .map((e) => `${e.estado}${e.porque ? ` (${e.porque})` : ""}`),
+    semHash: testCalls
+      .filter((c) => c.cmd === "midia_do_mod" || c.cmd === "som_do_mod")
+      .filter((c) => c.args?.hash !== "mod-a")
+      .map((c) => `${c.cmd} ${JSON.stringify(c.args)}`),
+  }));
+  assert.deepEqual(
+    daContribuicao.figuras,
+    ["pronta", "pronta"],
+    `o som da contribuição sem alvo não ficou pronto nos dois canais: ${daContribuicao.figuras.join(", ")}`,
+  );
+  assert.deepEqual(
+    daContribuicao.semHash,
+    [],
+    "a mídia de uma contribuição foi pedida sem o hash do MOD, e o Tauri recusa o pedido — "
+    + `o som de contribuição nunca chega ao WebAudio: ${daContribuicao.semHash.join(" | ")}`,
+  );
+  assert.deepEqual(
+    daContribuicao.eventos.filter((e) => e === "tocando"),
+    ["tocando"],
+    "o som da contribuição sem alvo tocou uma vez por canal, todos juntos, e não uma vez: "
+    + `${daContribuicao.eventos.join(", ") || "nada"}`,
+  );
+
+  // Nenhuma mídia passou pela CSP: os bytes foram para o WebAudio.
+  assert.deepEqual(recusasDaCsp, [], `a CSP recusou mídia: ${recusasDaCsp.join(" | ")}`);
+  assert.deepEqual(erros, [], `a página lançou erro durante o som de MOD: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
   oModoDeDesenvolvedorContornaSemTomarNada,
+  oSomDeModTocaPorWebAudioSobACspDoProduto,
 ];
 
 (async () => {

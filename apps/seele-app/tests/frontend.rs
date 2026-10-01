@@ -548,18 +548,13 @@ fn every_command_the_frontend_calls_is_registered() {
 // nesta lista é justamente o que impede aquele guarda de vê-la. Ela ganhou o
 // chamador que faltava, e ele é o aviso que o protótipo desenha: quando esta
 // máquina já disse sim a **outra** lista deste mesmo servidor, a tela diz isso.
-// **`som_do_mod` entrou em 2026-09-30, com a metade Rust do som de MOD** (fase
-// M1 da especificação da sala pessoal, Parte II, item 5). O comando entrega os
-// bytes crus de um som declarado para a casca tocar por WebAudio, sem abrir
-// `media-src`. Quem o chama é a casca, quando trocar o `<audio src="data:…">`
-// de `montarMidia` por `decodeAudioData` — e ele sai daqui nesse commit, que o
-// guarda de baixo cobra pelo nome.
-//
-// Ele entra antes da medida que a especificação pede primeiro, a do WKWebView,
-// porque o WebView2 já o exige: no Chromium, o motor dele, o `<audio>` de
-// `data:` não toca sob esta CSP. Fica aqui até o Plano 1D, que mede no
-// WKWebView (Task 1) e passa a chamá-lo (Task 8).
-const AGUARDANDO_TELA: &[&str] = &["som_do_mod"];
+// `som_do_mod` esteve aqui entre as duas metades do som de MOD (fase M1 da
+// especificação da sala pessoal, Parte II, item 5): o comando existia, e a
+// região ainda não pedia os bytes — o `<audio src="data:…">` saiu num commit,
+// e o pedido entrou noutro. Saiu quando o dono da região passou a pedi-los,
+// `bytesDoSom` em `base.js`, e a lista voltou ao estado de repouso, que é
+// vazia.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -14904,7 +14899,7 @@ fn a_resposta_do_quarto_nao_repete_um_candidato() {
 /// arquivo): os bytes vão para `decodeAudioData`, que não passa por
 /// `media-src`. Este guarda prende as duas metades — nenhum arquivo de MOD da
 /// casca volta a criar um elemento de áudio, e o caminho que o substitui
-/// continua lá.
+/// continua lá —, e o pedido dos bytes, que segue o contrato de `som_do_mod`.
 #[test]
 fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
     let de_mod: Vec<String> = ui_files(".js")
@@ -14941,6 +14936,38 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
         "`mods-regiao.js` deixou de decodificar o som por WebAudio, e o som de MOD \
          fica sem um caminho que a política deixe tocar"
     );
+
+    // E o caminho dos bytes: o dono pede ao Rust o som que o manifesto
+    // declara, pelo contrato de `som_do_mod` — a geração lida antes do `await`
+    // e conferida depois, o id e o hash deste MOD, e o caminho declarado. O
+    // guarda de argumentos confere que cada chave existe no comando; este
+    // confere que nenhuma das quatro falta, que é o que aquele não vê.
+    //
+    // `geracao` e `caminho` são procurados com a linha inteira, nos oito
+    // espaços do objeto: `arquivo: caminho,` contém `caminho,`, e um guarda que
+    // casasse o pedaço ficaria verde com a chave renomeada.
+    let dono = body_of(&read("ui/base.js"), "function donoDaRegiao(");
+    let Some(depois) = dono.split("bytesDoSom:").nth(1) else {
+        panic!(
+            "o dono da região não tem `bytesDoSom`, e `montarSom` o chama para todo \
+             som do pacote:\n{dono}"
+        );
+    };
+    let pedido = depois.split("\n    },").next().unwrap_or(depois);
+    for pedaco in [
+        "invoke(\"som_do_mod\", {",
+        "\n        geracao,\n",
+        "id: mod.id,",
+        "hash: mod.hash,",
+        "\n        caminho,\n",
+        "daGeracaoDePe(geracao)",
+    ] {
+        assert!(
+            pedido.contains(pedaco),
+            "o dono da região deixou de pedir ao Rust os bytes do som pelo contrato de \
+             `som_do_mod` — falta `{pedaco}`, e o WebAudio fica sem o que decodificar:\n{pedido}"
+        );
+    }
 }
 
 /// As classes que os scripts **criam**, cada criação com as etiquetas da mesma
