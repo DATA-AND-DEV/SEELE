@@ -124,7 +124,8 @@ struct Session {
     mods_nativos: Mutex<ModsNativos>,
     /// O último motivo por que cada MOD não carregou, como o `seele.log` o
     /// disse. É o que faz uma recusa repetida a cada quatro segundos sair uma
-    /// vez: ver [`recusa_de_carga_dita`].
+    /// vez: ver [`recusa_de_carga_dita`]. Esvaziada a cada sessão que fecha
+    /// ([`Session::revogar`]).
     recusas_de_carga: RecusasDeCarga,
 
     /// Os arquivos que **uma pessoa escolheu** para um MOD, por identificador.
@@ -332,6 +333,13 @@ impl Session {
             if soltos > 0 {
                 tracing::info!(soltos, "arquivos escolhidos soltos com a sessão");
             }
+        }
+        // **E a memória das recusas de carga também.** Ela segura a mesma
+        // recusa repetida a cada quatro segundos dentro de uma sessão; levada
+        // para a seguinte, calava a mesma falha numa entrada nova, e o
+        // `seele.log` dela não dizia por que o MOD não carregou.
+        if let Ok(mut ditas) = self.recusas_de_carga.lock() {
+            ditas.clear();
         }
         nova
     }
@@ -3663,6 +3671,13 @@ type RecusasDeCarga = Mutex<std::collections::HashMap<String, String>>;
 /// mudança; a carga que dá certo o esquece ([`carga_aceita`]), e a recusa que
 /// vier depois dela é dita de novo. Sem a memória — um cadeado envenenado —, a
 /// recusa é dita: repetir é melhor que calar.
+///
+/// **E a memória é de uma sessão.** [`Session::revogar`] a esvazia, e a mesma
+/// falha numa entrada nova é dita na primeira tentativa dela. O que sobra é uma
+/// corrida estreita: uma recusa que passou da conferência de geração antes da
+/// saída e falhou depois dela é dita — e guardada — depois da limpeza, e a
+/// mesma recusa, na sessão seguinte, fica calada, com a linha dita segundos
+/// antes no arquivo.
 ///
 /// WARN com o id e o motivo, menos `sessao-encerrada`, que vai em DEBUG e não
 /// mexe na memória: uma carga que não subiu porque a pessoa saiu é o desfecho
@@ -10991,6 +11006,37 @@ mod a_carga_recusada_e_dita_uma_vez_por_motivo {
             4,
             "uma recusa que mudou — de motivo, de MOD, ou depois de uma carga que deu certo — \
              não foi dita: {rastro}"
+        );
+    }
+
+    /// **Uma sessão nova diz de novo a recusa que a anterior já tinha dito.**
+    ///
+    /// A memória segura a recusa repetida dentro de uma sessão. Atravessando a
+    /// saída, ela calava a mesma falha na sessão seguinte: a pessoa sai, entra
+    /// de novo, o MOD não carrega pelo mesmo motivo, e o `seele.log` desta
+    /// entrada não diz nada — a linha que existe é a de uma sessão que já
+    /// acabou.
+    #[test]
+    fn a_mesma_recusa_numa_sessao_nova_e_dita_de_novo() {
+        let sessao = super::Session::default();
+        let ((), rastro) = capturar(|| {
+            recusar(
+                &sessao.recusas_de_carga,
+                "prova/carga",
+                "conteudo-de-outro-mod",
+            );
+            sessao.revogar();
+            recusar(
+                &sessao.recusas_de_carga,
+                "prova/carga",
+                "conteudo-de-outro-mod",
+            );
+        });
+        assert_eq!(
+            ditas_no(&rastro).len(),
+            2,
+            "a recusa de carga dita numa sessão calou a mesma recusa na sessão seguinte, e o \
+             seele.log da entrada nova não diz por que o MOD não carregou: {rastro}"
         );
     }
 
