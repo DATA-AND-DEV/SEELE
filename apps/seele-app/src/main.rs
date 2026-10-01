@@ -2271,8 +2271,9 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
 /// de uma não pode divergir do da outra por esquecimento.
 ///
 /// **O mesmo em todas as portas, e é o tamanho escrito.** A janela
-/// ([`registrar_da_janela`]) escreve a frase sem escape, com o caractere de
-/// controle trocado por espaço: um caractere da frase é um na linha. As três
+/// ([`registrar_da_janela`]) escreve a frase sem escape, com o caractere que
+/// quebra ou inverte a linha ([`quebra_ou_inverte_a_linha`]) trocado por
+/// espaço: um caractere da frase é um na linha. As três
 /// que escrevem o texto escapado pelo `Debug` de um `str` — o `console` do
 /// executor, o motivo ([`motivo_no_registro`]) e o caminho
 /// ([`caminho_no_registro`]) — cortam pelo tamanho já escapado, numa regra só
@@ -2290,7 +2291,8 @@ const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
 const TETO_DO_ID_NO_REGISTRO: usize = 128;
 
 /// **O id de um MOD como uma linha do `seele.log` o leva**: cortado em
-/// [`TETO_DO_ID_NO_REGISTRO`] e sem caractere de controle.
+/// [`TETO_DO_ID_NO_REGISTRO`] e sem caractere que quebre ou inverta a linha
+/// ([`quebra_ou_inverte_a_linha`]).
 ///
 /// Uma função só para as duas portas que escrevem `mod_id=` — a janela
 /// ([`registrar_da_janela`]) e a recusa de mídia do Rust
@@ -2304,8 +2306,36 @@ const TETO_DO_ID_NO_REGISTRO: usize = 128;
 fn id_no_registro(id: &str) -> String {
     id.chars()
         .take(TETO_DO_ID_NO_REGISTRO)
-        .filter(|c| !c.is_control())
+        .filter(|&c| !quebra_ou_inverte_a_linha(c))
         .collect()
+}
+
+/// **Um caractere que, escrito cru numa linha do `seele.log`, a quebra ou
+/// reordena o que vem depois dele.**
+///
+/// Os de controle (`char::is_control`: C0, DEL e C1, com o U+0085 que outros
+/// sistemas usam como quebra de linha); os separadores de linha e de parágrafo
+/// (U+2028 e U+2029), que um editor quebra como um `\n`; e os de controle
+/// bidirecional — a propriedade `Bidi_Control` do Unicode: U+061C, U+200E,
+/// U+200F, U+202A a U+202E e U+2066 a U+2069. Um U+202E na frase de um MOD
+/// inverte, num editor que segue o bidi, o `onde=` e o `mod_id=` que vêm depois
+/// dela na mesma linha.
+///
+/// As portas que escrevem pelo `Debug` de um `str` escapam todos eles
+/// (`\u{2028}`, `\u{202e}`); os campos que vão crus à linha — a frase, o
+/// `onde` e o id da janela, e o `mod_id=` do Rust — passam por aqui.
+fn quebra_ou_inverte_a_linha(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{2028}'
+                | '\u{2029}'
+                | '\u{061C}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2066}'..='\u{2069}'
+        )
 }
 
 /// **A janela também escreve no registro.**
@@ -2332,16 +2362,21 @@ fn registrar_da_janela(nivel: String, onde: String, o_que: String, mod_id: Optio
     // Cortado aqui, e não confiando em quem chama: uma frase sem teto vinda da
     // janela é uma linha de registro sem teto no disco de quem hospeda.
     //
-    // **Sem caractere de controle**, nem aqui nem nos outros dois campos: os
+    // **Sem caractere que quebre ou inverta a linha**
+    // ([`quebra_ou_inverte_a_linha`]), nem aqui nem nos outros dois campos: os
     // três chegam pela mesma ponte, e uma quebra de linha em qualquer um
     // escreveria no `seele.log` uma segunda linha com a cara do produto.
-    let onde: String = onde.chars().take(64).filter(|c| !c.is_control()).collect();
+    let onde: String = onde
+        .chars()
+        .take(64)
+        .filter(|&c| !quebra_ou_inverte_a_linha(c))
+        .collect();
     // A frase carrega texto que um MOD escolheu — o nome de um ponto, a
     // mensagem de um erro —, e por isso é a que mais precisa do filtro.
     let o_que: String = o_que
         .chars()
         .take(TETO_DA_FRASE_NO_REGISTRO)
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| if quebra_ou_inverte_a_linha(c) { ' ' } else { c })
         .collect();
     // Vazio é ninguém: o id vazio é o do catálogo do próprio servidor
     // (`carregarMods`), e um `mod_id=` sem nome seria achado por uma busca e não
@@ -10646,6 +10681,57 @@ mod o_registro_da_janela {
                 "uma quebra de linha em `{campo}` escreveu uma segunda linha no seele.log, \
                  com a cara de uma linha do produto: {rastro}"
             );
+        }
+    }
+
+    /// **O que quebra ou inverte a linha num editor também não passa**, e não
+    /// só o caractere de controle.
+    ///
+    /// As portas do Rust escrevem pelo `Debug` de um `str` e saem com
+    /// `\u{2028}` e `\u{202e}`; a da janela escreve a frase sem escape, e
+    /// deixava passar crus os separadores de linha e de parágrafo — que um
+    /// editor quebra como um `\n` — e os controles bidirecionais: um U+202E na
+    /// frase de um MOD inverte, num editor que segue o bidi, o `onde=` e o
+    /// `mod_id=` que vêm depois dela. Um caso por campo, para que tirar o
+    /// filtro de um deles reprove sozinho.
+    #[test]
+    fn a_janela_nao_deixa_passar_o_que_quebra_ou_inverte_a_linha() {
+        for c in [
+            '\u{0085}', '\u{2028}', '\u{2029}', '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}',
+            '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}',
+            '\u{2069}',
+        ] {
+            let com = |texto: &str| format!("{texto}{c}forjado");
+            for (campo, onde, o_que, mod_id) in [
+                (
+                    "frase",
+                    "recusa-de-mod".to_owned(),
+                    com("a/b: x"),
+                    "a/b".to_owned(),
+                ),
+                (
+                    "id",
+                    "recusa-de-mod".to_owned(),
+                    "a/b: x".to_owned(),
+                    com("a/b"),
+                ),
+                (
+                    "onde",
+                    com("recusa-de-mod"),
+                    "a/b: x".to_owned(),
+                    "a/b".to_owned(),
+                ),
+            ] {
+                let ((), rastro) = capturar(|| {
+                    super::registrar_da_janela("aviso".to_owned(), onde, o_que, Some(mod_id));
+                });
+                assert!(
+                    rastro.contains("a/b: x") && !rastro.contains(c),
+                    "U+{:04X} no campo `{campo}` saiu cru no seele.log, e num editor ele quebra \
+                     a linha ou inverte o `onde=` e o `mod_id=` que vêm depois: {rastro:?}",
+                    u32::from(c)
+                );
+            }
         }
     }
 }
