@@ -673,6 +673,30 @@ case "$*" in
         fi
         exit 0
         ;;
+    # As três conferências de regra que o `validar` do `release.yml` roda. Ao
+    # reprovar, cada uma diz o que quebrou, e é essa linha que quem publica
+    # tem de ler.
+    *'xtask check-api'*)
+        if [ "${FALSO_CHECK_API:-ok}" != ok ]; then
+            echo 'check-api: api/v6.json — `moments` promete `ChannelCreated`, e `momento_de` não o despacha' >&2
+            exit 1
+        fi
+        exit 0
+        ;;
+    *'xtask check-versao'*)
+        if [ "${FALSO_CHECK_VERSAO:-ok}" != ok ]; then
+            echo 'check-versao: empacotar/macos.sh não passa SEELE_VERSAO ao build do app' >&2
+            exit 1
+        fi
+        exit 0
+        ;;
+    *'xtask check-vetores'*)
+        if [ "${FALSO_CHECK_VETORES:-ok}" != ok ]; then
+            echo 'check-vetores: apps/seele-app/testes/som.wav não está versionado' >&2
+            exit 1
+        fi
+        exit 0
+        ;;
     *'tauri signer sign'*)
         if [ "${FALSO_ASSINATURA:-ok}" != ok ]; then
             echo 'Error failed to decode base64 secret key' >&2
@@ -2651,6 +2675,96 @@ fn o_sem_bateria_pula_tambem_as_bancadas_de_mod_e_grita() {
         saida.texto.contains("bateria pulada por --sem-bateria"),
         "a bateria foi pulada calada:\n{}",
         saida.texto
+    );
+}
+
+/// **Uma conferência de regra vermelha para a publicação antes de empacotar.**
+///
+/// O `check-api` não rodava no caminho que publica (m3 da revisão final do
+/// Plano 1). Ele roda no job `regras` do `ci.yml`, que é manual, e no `validar`
+/// do `release.yml`, e nenhum dos dois publica no SEELE-RELEASES: as versões
+/// saem por este script. Uma `api/v6.json` que promete um momento que ninguém
+/// despacha, com a linha dela na lista das congeladas, faz o `check-api` sair
+/// com 1, e o `cargo test` inteiro sai com 0 (medido): só ele pega. O
+/// `check-versao` e o `check-vetores`, que o `validar` também roda, faltavam
+/// aqui pelo mesmo caminho.
+///
+/// Cada uma num teste e numa bancada só dela: a primeira reprovação para a
+/// bateria, e com as três reprovando juntas só a primeira seria medida. Em
+/// testes separados elas também correm juntas, e cada rodada do script espera
+/// a bateria pelo relógio dela, de cinco em cinco segundos.
+fn uma_conferencia_de_regra_vermelha_para_a_publicacao(
+    conferencia: &str,
+    falso: &str,
+    o_que_ela_diz: &str,
+) {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    // Sem o Windows, pela mesma razão do teste das bancadas de MOD: a bateria
+    // de lá, contra o dublê do `ssh`, reprova sozinha, e a asserção sobre o
+    // código de saída passaria por sorte.
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[("SEELE_OPENH264", codec.as_str()), (falso, "reprova")],
+    );
+    assert!(
+        saida.diario.contains(&format!("cargo xtask {conferencia}")),
+        "a bateria de quem publica não chamou `cargo xtask {conferencia}`, e o que só ela \
+         pega volta a sair publicado:\n{}",
+        saida.diario
+    );
+    assert_ne!(
+        saida.estado, 0,
+        "`cargo xtask {conferencia}` reprovou e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .texto
+            .contains(&format!("Rode «cargo xtask {conferencia}»")),
+        "a queixa de `{conferencia}` não diz como rodá-la à mão, e quem publica fica sem o \
+         comando seguinte:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains(o_que_ela_diz),
+        "o que `{conferencia}` disse ao reprovar não chegou a quem publica — ela sabe e o \
+         script não conta:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.nada_foi_empacotado(),
+        "`{conferencia}` reprovou e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn um_check_api_vermelho_para_a_publicacao_antes_de_empacotar() {
+    uma_conferencia_de_regra_vermelha_para_a_publicacao(
+        "check-api",
+        "FALSO_CHECK_API",
+        "`moments` promete `ChannelCreated`",
+    );
+}
+
+#[test]
+fn um_check_versao_vermelho_para_a_publicacao_antes_de_empacotar() {
+    uma_conferencia_de_regra_vermelha_para_a_publicacao(
+        "check-versao",
+        "FALSO_CHECK_VERSAO",
+        "não passa SEELE_VERSAO ao build do app",
+    );
+}
+
+#[test]
+fn um_check_vetores_vermelho_para_a_publicacao_antes_de_empacotar() {
+    uma_conferencia_de_regra_vermelha_para_a_publicacao(
+        "check-vetores",
+        "FALSO_CHECK_VETORES",
+        "som.wav não está versionado",
     );
 }
 

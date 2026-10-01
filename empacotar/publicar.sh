@@ -1001,6 +1001,27 @@ bateria() {
     etapa_da_bateria "uma bancada de MOD reprovou, ou não há Node nesta máquina." \
         "Rode «cargo xtask check-runtime» e leia: ele diz qual bancada caiu." \
         cargo xtask check-runtime
+    # **As conferências de regra que o `validar` do `release.yml` roda, e esta
+    # bateria não rodava** (m3 da revisão final do Plano 1). O `check-api` é o
+    # único guarda de que todo nome, momento e evento que uma `api/vN.json`
+    # promete ainda tem quem o entregue: uma v6 que promete um momento que
+    # ninguém despacha passa no `cargo test` inteiro e só ele reprova (medido).
+    # O `check-versao` prova que a versão chega a toda entrega, e o
+    # `check-vetores` que todo vetor viaja num clone limpo, o que nenhum teste
+    # alcança. O `ci.yml` (manual) e o `validar` as rodam, mas as versões saem
+    # por aqui, por fora dos dois.
+    #
+    # Logo depois das bancadas, pela mesma razão: compilam só o `xtask` e levam
+    # segundos, e aqui a primeira reprovação para tudo.
+    etapa_da_bateria "a API de MODs promete algo que o código não entrega mais." \
+        "Rode «cargo xtask check-api» e leia: ele diz qual nome, momento ou evento quebrou." \
+        cargo xtask check-api
+    etapa_da_bateria "a versão do produto deixou de chegar a uma entrega." \
+        "Rode «cargo xtask check-versao» e leia: ele diz qual entrega ficou para trás." \
+        cargo xtask check-versao
+    etapa_da_bateria "um vetor de teste não está versionado, e um clone limpo não o terá." \
+        "Rode «cargo xtask check-vetores» e leia: ele diz qual arquivo falta." \
+        cargo xtask check-vetores
     etapa_da_bateria "o clippy reprovou." \
         "Rode «cargo clippy --workspace --all-targets»." \
         env RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets
