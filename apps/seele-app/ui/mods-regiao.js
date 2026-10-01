@@ -55,8 +55,36 @@ const LIMITES_DA_REGIAO = Object.freeze({
   valorDoCampo: 1024,
   /** Opções numa escolha. */
   opcoes: 64,
-  /** Bytes de mídia somados nesta região. */
+  /**
+   * Bytes de mídia somados nesta região — os do arquivo, como chegaram.
+   *
+   * Para imagem, é a conta que vale. Para som, não basta: o arquivo chega
+   * comprimido, e o WebAudio o guarda decodificado. Ver
+   * `bytesDeSomDecodificado`.
+   */
   bytesDeMidia: 10 * 1024 * 1024,
+  /**
+   * Bytes de som **decodificado** somados nesta região: o que o WebAudio
+   * segura enquanto o som está de pé, toque ele ou não.
+   *
+   * `decodeAudioData` devolve o som inteiro em float32, por canal, já na taxa
+   * do contexto — e isso na montagem, e não na hora de tocar. O teto de
+   * `bytesDeMidia` conta os bytes comprimidos, e não segurava isto: dez MiB de
+   * MP3 a 128 kbps viram uns 250 MB decodificados a 48 kHz, e a 32 kbps passam
+   * de 1 GB. O `<audio>` decodificava aos poucos; o WebAudio não.
+   *
+   * 64 MiB são pouco menos de três minutos de som estéreo a 48 kHz, ou o dobro
+   * em mono. A taxa é a do contexto, que segue a saída de som da máquina: numa
+   * saída de 96 kHz o mesmo arquivo ocupa o dobro — e a recusa, quando vem,
+   * diz os números ao MOD, à anotação que o diagnóstico lê (`anotarMidia`) e
+   * ao registro.
+   *
+   * **O teto vale para o que fica de pé.** A decodificação em si já aloca o som
+   * inteiro uma vez, antes de a conta poder ser feita — não há como saber a
+   * duração sem decodificar —, e o som acima do teto é largado logo em seguida,
+   * para o coletor levar. Ver `montarSom`.
+   */
+  bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
 
 /**
@@ -100,6 +128,14 @@ const LIMITES_DO_CARTAO = Object.freeze({
   midias: 64,
   /** Bytes de mídia somados em todos os cartões deste MOD. */
   bytesDeMidia: 20 * 1024 * 1024,
+  /**
+   * Bytes de som decodificado somados em todos os cartões deste MOD — ver
+   * `LIMITES_DA_REGIAO.bytesDeSomDecodificado`.
+   *
+   * O mesmo da região, e não o dobro como nos bytes: o bolso dos cartões é
+   * maior pelos retratos de muitas pessoas, e retrato não é som.
+   */
+  bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
 
 /**
@@ -419,6 +455,13 @@ class RegiaoDeMod {
     this.bytesDeMidia = 0;
     /** Bytes de mídia montados nos cartões, contados à parte. */
     this.bytesDeCartao = 0;
+    /**
+     * Bytes de som decodificado de pé nesta região, e nos cartões. O som conta
+     * duas vezes: o arquivo, em `bytesDeMidia`, e o que o WebAudio segura,
+     * aqui. Ver `LIMITES_DA_REGIAO.bytesDeSomDecodificado`.
+     */
+    this.bytesDeSomDecodificado = 0;
+    this.bytesDeSomDeCartao = 0;
     /** A raiz do cartão de cada pessoa, por `id` em texto. */
     this.raizesDeCartao = new Map();
     /** Quantos nós a última montagem recusou, por teto. */
@@ -2029,7 +2072,10 @@ class RegiaoDeMod {
    * - **o tipo vem dos bytes**, e o elemento sai do tipo — um MOD não escolhe
    *   o decodificador em que seus bytes caem;
    * - **a conta é por região**, em número e em bytes, e é ela que impede um MOD
-   *   de montar mídia até a memória acabar;
+   *   de montar mídia até a memória acabar. O som conta duas vezes: o arquivo,
+   *   aqui, e o som decodificado, que o WebAudio segura inteiro, em
+   *   `montarSom` — os bytes comprimidos sozinhos deixariam dez MiB de MP3
+   *   virarem centenas de MB;
    * - **o carregamento tem dono**. Sair durante o carregamento é o caso que a
    *   diretriz manda exercitar, e a resposta que chega depois da saída não
    *   monta nada: ela encontra a região já solta.
@@ -2039,9 +2085,17 @@ class RegiaoDeMod {
     // decidi-lo depois do `await` exigiria um campo de instância, e um campo
     // de instância estaria valendo a mídia errada quando duas carregam juntas.
     const bolso = plano.cartao
-      ? { conta: "bytesDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia, quantas: "midiasDeCartao" }
-      : { conta: "bytesDeMidia", teto: LIMITES_DA_REGIAO.bytesDeMidia, quantas: "midias" };
-    const estado = { elemento: null, som: null, cancelado: false, bytes: 0, ouvintes: [], recusaDita: null };
+      ? {
+          conta: "bytesDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia, quantas: "midiasDeCartao",
+          contaDoSom: "bytesDeSomDeCartao", tetoDoSom: LIMITES_DO_CARTAO.bytesDeSomDecodificado,
+        }
+      : {
+          conta: "bytesDeMidia", teto: LIMITES_DA_REGIAO.bytesDeMidia, quantas: "midias",
+          contaDoSom: "bytesDeSomDecodificado", tetoDoSom: LIMITES_DA_REGIAO.bytesDeSomDecodificado,
+        };
+    const estado = {
+      elemento: null, som: null, cancelado: false, bytes: 0, bytesDoSom: 0, bolso, ouvintes: [], recusaDita: null,
+    };
     this.somDaMidia.set(elem, { tocador: null, tocar: null, declarado: undefined, quer: false });
     this.guardar(elem, `midia ${plano.chave}`, () => {
       estado.cancelado = true;
@@ -2061,6 +2115,7 @@ class RegiaoDeMod {
       // bytes decodificados até o coletor passar.
       tocador?.removeAttribute("src");
       this[bolso.conta] -= estado.bytes;
+      this[bolso.contaDoSom] -= estado.bytesDoSom;
       this.contagem[bolso.quantas] -= 1;
       this.esquecerMidia(elem);
     });
@@ -2107,7 +2162,9 @@ class RegiaoDeMod {
       }
       // Contados **agora**, e não quando o som terminar de decodificar: os
       // bytes do som ainda levam mais duas voltas, e outra mídia que chegasse
-      // nesse meio tempo caberia num teto que esta já está ocupando.
+      // nesse meio tempo caberia num teto que esta já está ocupando. O que o
+      // som ocupa decodificado é contado à parte, em `montarSom`, quando se
+      // sabe.
       estado.bytes = midia.bytes;
       this[bolso.conta] += midia.bytes;
       // O papel veio do Rust, e ele saiu dos bytes: um MOD não escolhe o
@@ -2164,6 +2221,12 @@ class RegiaoDeMod {
    * `montarMidia` chama para saber o papel e os bytes a contar) e cru pelo
    * `som_do_mod`. Nada se perde; só se lê o arquivo duas vezes.
    *
+   * **O som decodificado tem teto**, somado por bolso
+   * (`LIMITES_DA_REGIAO.bytesDeSomDecodificado`, e o do cartão): o WebAudio
+   * guarda o som inteiro em float32 desde a montagem, e o teto de bytes de
+   * `montarMidia` conta o arquivo comprimido. Acima dele, o som falha com os
+   * números, e não vira tocador.
+   *
    * **O botão substitui o `<audio controls>`**, que era o único jeito de uma
    * pessoa tocar um som que o MOD não mandou tocar. Ele não existe num cartão
    * nem numa contribuição: os dois são montados com o perfil do cartão
@@ -2210,6 +2273,18 @@ class RegiaoDeMod {
       return;
     }
     if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
+    // **O que o som ocupa decodificado**, somado ao que já está de pé neste
+    // bolso. Float32, quatro bytes por amostra, por canal, na taxa do
+    // contexto — é o que o `AudioBuffer` segura enquanto o tocador existir.
+    // Acima do teto, o som é largado aqui mesmo: sem tocador, ninguém o segura.
+    const { contaDoSom, tetoDoSom } = estado.bolso;
+    const ocupa = som.length * som.numberOfChannels * 4;
+    if (this[contaDoSom] + ocupa > tetoDoSom) {
+      falhou(`o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`);
+      return;
+    }
+    estado.bytesDoSom = ocupa;
+    this[contaDoSom] += ocupa;
 
     // **O som que não começou, por um caminho só.** O evento ao MOD e a
     // anotação saem a cada vez: são deles, e o MOD pode dizer à pessoa que

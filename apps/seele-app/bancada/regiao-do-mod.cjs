@@ -250,7 +250,12 @@ class Elemento {
  *   avisar — o caminho defensivo do `catch` (P13 da varredura do Plano 1D);
  * - `naoDecodifica`: `decodeAudioData` recusa os bytes.
  *
- * @param {object} opcoes `{ semGesto, recusaNaHora, fonteLanca, naoDecodifica }`.
+ * E uma que não é recusa: `decodificado` é o som que `decodeAudioData`
+ * devolve — por padrão um segundo estéreo a 48 kHz. Com `length` e
+ * `numberOfChannels`, ele diz quanto o som ocupa decodificado, que é o que o
+ * teto do som decodificado confere.
+ *
+ * @param {object} opcoes `{ semGesto, recusaNaHora, fonteLanca, naoDecodifica, decodificado }`.
  */
 function audioDeMentira(opcoes = {}) {
   class Contexto {
@@ -302,7 +307,7 @@ function audioDeMentira(opcoes = {}) {
     decodeAudioData(bytes, pronto, falhou) {
       this.decodificados.push(bytes.byteLength);
       if (opcoes.naoDecodifica) falhou(new Error("EncodingError: formato que este motor não conhece"));
-      else pronto({ duration: 1 });
+      else pronto(opcoes.decodificado ?? { duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
       return undefined;
     }
   }
@@ -1074,6 +1079,101 @@ async function osTetosContemEARecusaEDita() {
     regiao3.raiz.children.length === 1 && regiao3.raiz.children[0].tagName === "P",
     "uma forma desconhecida virou elemento",
   );
+
+  // **O som decodificado tem teto próprio, somado por bolso.** O teto de bytes
+  // conta o arquivo como chegou, comprimido; `decodeAudioData` guarda o som
+  // inteiro em float32, na taxa do contexto, já na montagem — dez MiB de MP3 a
+  // 128 kbps viram uns 250 MB, e a 32 kbps passam de 1 GB. Aqui cada som ocupa
+  // seis décimos do teto: o primeiro cabe, o segundo é recusado e dito, e não
+  // vira tocador nem toca, mesmo declarado `tocando`. É a soma que conta: um
+  // teto por som deixaria quatro sons logo abaixo dele valerem quatro tetos.
+  const tetoDoSom = b.LIMITES.bytesDeSomDecodificado;
+  confere(caso, Number.isFinite(tetoDoSom) && tetoDoSom > 0, `a região não tem teto para o som decodificado: ${tetoDoSom}`);
+  if (Number.isFinite(tetoDoSom) && tetoDoSom > 0) {
+    // Estéreo, quatro bytes por amostra: o que o WebAudio guarda.
+    const quadros = Math.floor((tetoDoSom * 0.6) / 8);
+    const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
+    const bs = bancada({ audio: Audio });
+    const ds = dono(bs, () => Promise.resolve({ uri: "data:audio/ogg;base64,AA", papel: "som", bytes: 12 }));
+    const r = new bs.RegiaoDeMod("a/b", ds.api, bs.raiz());
+    const som = (chave) => ({ forma: "midia", chave, fonte: `som/${chave}.ogg`, tocando: true });
+    r.aplicar([som("s1"), som("s2")]);
+    await assentar();
+    const [um, dois] = r.raiz.children;
+    confere(caso, um?.dataset.estado === "pronta", `o primeiro som, que cabe no teto decodificado, não ficou pronto: ${um?.dataset.estado}`);
+    confere(caso, dois?.dataset.estado === "falhou", `o som que passa do teto decodificado não foi recusado: ${dois?.dataset.estado}`);
+    confere(
+      caso,
+      (Audio.ultimo?.ganhos.length ?? 0) === 1 && (Audio.ultimo?.fontes.length ?? 0) === 1,
+      `o som acima do teto virou tocador e segura o som decodificado inteiro: ${Audio.ultimo?.ganhos.length} ganho(s), ${Audio.ultimo?.fontes.length} fonte(s)`,
+    );
+    confere(caso, acharTag(dois, "button") === null, "o som acima do teto decodificado ganhou um botão de tocar");
+    const dito = ds.ditos.find((e) => e.nome === "midia" && e.chave === "s2" && e.estado === "falhou");
+    confere(
+      caso,
+      /decodificado/.test(dito?.porque ?? "") && /teto/.test(dito?.porque ?? ""),
+      `o MOD não soube que o som passou do teto decodificado: ${JSON.stringify(ds.ditos)}`,
+    );
+    confere(
+      caso,
+      ds.anotadas.some((t) => t.includes("«s2»") && t.includes("decodificado") && t.includes("teto")),
+      `o som acima do teto decodificado não chegou ao registro: ${JSON.stringify(ds.anotadas)}`,
+    );
+    confere(
+      caso,
+      r.midiasAnotadas().filter((a) => a.situacao === "recusada" && /decodificado/.test(a.motivo)).length === 1,
+      `o diagnóstico não anotou o som acima do teto decodificado: ${JSON.stringify(r.midiasAnotadas())}`,
+    );
+    confere(
+      caso,
+      r.bytesDeSomDecodificado === quadros * 2 * 4,
+      `a conta do som decodificado não é a do som que ficou de pé: ${r.bytesDeSomDecodificado}`,
+    );
+    // Tirar o som devolve o que ele ocupava, e o espaço serve ao próximo.
+    r.aplicar([som("s2")]);
+    confere(caso, r.bytesDeSomDecodificado === 0, `tirar o som não devolveu o que ele ocupava decodificado: ${r.bytesDeSomDecodificado}`);
+    r.aplicar([som("s2"), som("s3")]);
+    await assentar();
+    confere(
+      caso,
+      r.raiz.children[1]?.dataset.estado === "pronta",
+      `o espaço que o som tirado deixou não voltou para o próximo: ${r.raiz.children[1]?.dataset.estado}`,
+    );
+    r.soltar();
+    confere(caso, r.bytesDeSomDecodificado === 0, `sobraram ${r.bytesDeSomDecodificado} bytes de som decodificado contados depois da saída`);
+  }
+
+  // E o bolso dos cartões tem o teto dele: um som de cartão acima do teto não
+  // vira tocador nem toca, mesmo declarado `tocando` — e o cartão não tem botão
+  // que o tocasse depois.
+  const tetoDoCartao = b.CARTAO.bytesDeSomDecodificado;
+  confere(caso, Number.isFinite(tetoDoCartao) && tetoDoCartao > 0, `o cartão não tem teto para o som decodificado: ${tetoDoCartao}`);
+  if (Number.isFinite(tetoDoCartao) && tetoDoCartao > 0) {
+    const quadros = Math.floor(tetoDoCartao / 8) + 1;
+    const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
+    const bs = bancada({ audio: Audio });
+    const ds = dono(bs, () => Promise.resolve({ uri: "data:audio/ogg;base64,AA", papel: "som", bytes: 12 }));
+    const r = new bs.RegiaoDeMod("a/b", ds.api, bs.raiz());
+    r.declararCartoes({ 7: [{ forma: "midia", chave: "c", fonte: "som/c.ogg", tocando: true }] });
+    await assentar();
+    confere(
+      caso,
+      (Audio.ultimo?.ganhos.length ?? 0) === 0 && (Audio.ultimo?.fontes.length ?? 0) === 0,
+      `o som de cartão acima do teto decodificado virou tocador: ${Audio.ultimo?.ganhos.length} ganho(s), ${Audio.ultimo?.fontes.length} fonte(s)`,
+    );
+    confere(
+      caso,
+      ds.ditos.some((e) => e.nome === "midia" && e.chave === "c" && e.estado === "falhou" && /teto/.test(e.porque ?? "")),
+      `o MOD não soube que o som do cartão passou do teto decodificado: ${JSON.stringify(ds.ditos)}`,
+    );
+    confere(
+      caso,
+      ds.anotadas.some((t) => t.includes("«c»") && t.includes("decodificado")),
+      `o som de cartão acima do teto decodificado não chegou ao registro: ${JSON.stringify(ds.anotadas)}`,
+    );
+    confere(caso, r.bytesDeSomDeCartao === 0, `o som recusado entrou na conta dos cartões: ${r.bytesDeSomDeCartao}`);
+    r.soltar();
+  }
 }
 
 // ---------------------------------------------------------------------------
