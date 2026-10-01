@@ -4107,10 +4107,11 @@ fn assentar_fala(
 ///
 /// É também por aqui, em ERROR, que chega o erro que o MOD não pegou: o
 /// executor o põe no canal como uma linha de `console` (`o MOD lançou: …`,
-/// `erro num temporizador: …`, `erro num ouvinte de evento: …`), pelo mesmo
-/// balde. E a volta que o produto parou por um teto, com a frase do teto
-/// (`esta volta do MOD passou do prazo de 500 ms, e o produto a interrompeu (o
-/// MOD continua de pé): …`), e não como «o MOD lançou».
+/// `erro num temporizador: …`, `erro num ouvinte de evento: …`, `promessa
+/// rejeitada sem tratamento: …`), pelo mesmo balde. E a volta que o produto
+/// parou por um teto, com a frase do teto (`esta volta do MOD passou do prazo
+/// de 500 ms, e o produto a interrompeu (o MOD continua de pé): …`), e não
+/// como «o MOD lançou».
 ///
 /// **O texto vai em `?`, e não solto na frase.** Ele é de um terceiro, e uma
 /// quebra de linha nele escreveria no registro uma segunda linha com a cara de
@@ -10772,7 +10773,8 @@ mod o_console_do_mod_chega_ao_registro {
 /// não tem — não deixava linha nenhuma em INFO. A exceção no topo virava
 /// `Falhou("o MOD lançou")`, sem o texto; a de um temporizador ou de um ouvinte
 /// ia à janela sem número de pedido, e a janela a descartava na primeira linha
-/// de `atenderOMod`. O produto sabia, e não contava.
+/// de `atenderOMod`; e a de dentro de uma promessa só chegava à gestão. O
+/// produto sabia, e não contava.
 ///
 /// Pelo caminho real: um executor de verdade, e a mesma `assentar_fala` da
 /// bomba, chamada na thread do teste para o rastro ser capturável.
@@ -10894,6 +10896,233 @@ mod a_falha_do_mod_chega_ao_registro {
             linha.contains(r"\n    at "),
             "a linha da exceção perdeu a primeira linha da pilha, que diz onde o MOD lançou: \
              {linha}"
+        );
+    }
+
+    /// **A falha dentro de uma promessa também chega ao registro.**
+    ///
+    /// Todo pedido de MOD é uma promessa, e o erro mais comum de quem escreve
+    /// MOD — ler de `null` — dentro de uma função `async` sem `catch` só
+    /// chegava à gestão: o `Falhou` saía, e o `seele.log` ficava com uma linha
+    /// DEBUG que o filtro de produção nem grava (I2 da revisão final do Plano 1).
+    #[test]
+    fn uma_promessa_rejeitada_sem_tratamento_chega_ao_registro_com_o_texto() {
+        let rejeitou = |falas: &[ParaOFora]| {
+            falas.iter().any(|fala| {
+                matches!(fala, ParaOFora::Falhou(texto)
+                    if texto.starts_with("promessa rejeitada sem tratamento:"))
+            })
+        };
+        let deixou = deixou(
+            "(async () => { await 0; null.x; })();",
+            |_| {},
+            |falas, linhas| rejeitou(falas) && linhas > 0,
+            Duration::from_secs(5),
+        );
+        assert!(
+            rejeitou(&deixou.falas),
+            "a janela deixou de receber o `Falhou` da promessa rejeitada, e a gestão já não diz \
+             que o MOD falhou: {:?}",
+            deixou.falas
+        );
+        let linha = linha_de_erro(
+            &deixou.rastro,
+            &["promessa rejeitada sem tratamento", "TypeError", "of null"],
+        )
+        .unwrap_or_else(|| {
+            panic!(
+                "a promessa rejeitada sem tratamento não chegou ao seele.log em ERROR, com o id e \
+                 o texto — quem escreveu o MOD só a vê na gestão: {}",
+                deixou.rastro
+            )
+        });
+        assert!(
+            linha.contains(r"\n    at "),
+            "a linha da promessa rejeitada perdeu a primeira linha da pilha, que diz onde o MOD \
+             lançou: {linha}"
+        );
+    }
+
+    /// **A rejeição que o MOD pega logo depois não vira linha de erro.**
+    ///
+    /// `try { await f(); } catch {}`, com `f` uma função `async` que lança
+    /// antes do primeiro `await`: a promessa rejeita antes de o `await` prender
+    /// o tratamento, e o motor avisa a rejeição nessa hora — o `Falhou` da
+    /// janela sai (medido; é anterior a este teste). A linha do registro espera
+    /// o fim da volta e sai só se ninguém a pegou: dizer «sem tratamento» em
+    /// ERROR sobre uma rejeição tratada mandaria quem escreveu o MOD procurar
+    /// um defeito que não existe.
+    ///
+    /// O `fim` vem de um temporizador, numa volta seguinte: quando ele chega,
+    /// as linhas da primeira volta já passaram pelo canal.
+    #[test]
+    fn uma_rejeicao_pega_logo_depois_nao_vira_linha_de_erro() {
+        let deixou = deixou(
+            "(async () => { try { await (async () => { throw new Error('pega logo depois'); })(); } \
+               catch (e) {} })();\
+             (async () => { await 0; null.x; })();\
+             setTimeout(() => seele.postar('fim'), 0);",
+            |_| {},
+            |falas, _| tem_mensagem(falas, "fim"),
+            Duration::from_secs(5),
+        );
+        assert!(
+            tem_mensagem(&deixou.falas, "fim"),
+            "o MOD não chegou ao fim, e o teste não mediu nada: {:?}",
+            deixou.falas
+        );
+        assert!(
+            linha_de_erro(
+                &deixou.rastro,
+                &["promessa rejeitada sem tratamento", "of null"]
+            )
+            .is_some(),
+            "a rejeição que ninguém pegou, na mesma volta, não chegou ao seele.log: {}",
+            deixou.rastro
+        );
+        assert!(
+            !deixou.rastro.contains("pega logo depois"),
+            "uma rejeição que o MOD pegou com `try`/`await` saiu no seele.log como «sem \
+             tratamento»: quem escreveu o MOD vai procurar um defeito que não existe: {}",
+            deixou.rastro
+        );
+    }
+
+    /// **A volta que um teto parou, sem microtarefa na fila, também termina
+    /// para as rejeições.**
+    ///
+    /// Nada mais vai rodar nela que possa pegá-las, e a linha sai logo depois
+    /// da do teto. Esperar a próxima volta deixaria a rejeição de um MOD sem
+    /// temporizador nem resposta calada até a instância parar.
+    #[test]
+    fn a_rejeicao_de_uma_volta_parada_sem_microtarefa_na_fila_e_dita_sem_esperar_a_parada() {
+        let deixou = deixou(
+            "Promise.reject(new Error('antes do laço'));\
+             (async () => { await 0; while (true) {} })();",
+            |_| {},
+            |_, linhas| linhas >= 2,
+            Duration::from_secs(5),
+        );
+        assert!(
+            linha_de_erro(&deixou.rastro, &["passou do"]).is_some(),
+            "a volta do laço não foi parada por um teto, e o teste não mediu nada: {}",
+            deixou.rastro
+        );
+        assert!(
+            linha_de_erro(
+                &deixou.rastro,
+                &["promessa rejeitada sem tratamento", "antes do laço"]
+            )
+            .is_some(),
+            "a volta parou por um teto sem microtarefa na fila, e a rejeição dela ficou \
+             esperando uma volta seguinte que um MOD sem temporizador nem resposta não tem: {}",
+            deixou.rastro
+        );
+    }
+
+    /// **A rejeição que ainda esperava quando a instância parou é dita.**
+    ///
+    /// Uma volta que um teto parou com microtarefas na fila deixa as rejeições
+    /// dela esperando a próxima volta, porque essas microtarefas ainda podiam
+    /// pegá-las. Se a instância para antes, ninguém mais as pega: a linha sai
+    /// na parada, antes do `Parou`. E a espera fica vazia antes de o runtime
+    /// ser desfeito, porque cada rejeição segura a promessa dela.
+    #[test]
+    fn a_rejeicao_que_esperava_quando_a_instancia_parou_e_dita() {
+        let (falas, rastro) = capturar(|| {
+            let executor = ExecutorQuickJs::novo(Limites::default()).expect("o motor");
+            executor
+                .iniciar(
+                    "Promise.reject(new Error('esperava quando parou'));\
+                     (async () => { await 0; while (true) {} })();\
+                     (async () => { await 0; })();",
+                )
+                .expect("o código");
+            let mods = std::sync::Mutex::new(ModsNativos::default());
+            let fila = std::sync::Arc::new(Fila::default());
+            let mut falas = Vec::new();
+            let mut pediu = false;
+            let inicio = Instant::now();
+            while inicio.elapsed() < Duration::from_secs(10) {
+                match executor.receber(Duration::from_millis(20)) {
+                    Some(fala @ ParaOFora::Console { .. }) => {
+                        assentar_fala(&mods, &|| true, &fila, 1, fala, ID);
+                    }
+                    Some(ParaOFora::Parou) => {
+                        falas.push(ParaOFora::Parou);
+                        break;
+                    }
+                    Some(fala) => falas.push(fala),
+                    None => {}
+                }
+                if !pediu
+                    && falas
+                        .iter()
+                        .any(|fala| matches!(fala, ParaOFora::Interrompido))
+                {
+                    executor.pedir_encerramento();
+                    pediu = true;
+                }
+            }
+            falas
+        });
+        assert!(
+            falas
+                .iter()
+                .any(|fala| matches!(fala, ParaOFora::Interrompido)),
+            "a volta do laço não foi parada por um teto, e o teste não mediu a espera: {falas:?}"
+        );
+        assert!(
+            falas.iter().any(|fala| matches!(fala, ParaOFora::Parou)),
+            "a instância não confirmou a parada: {falas:?}"
+        );
+        assert!(
+            linha_de_erro(
+                &rastro,
+                &["promessa rejeitada sem tratamento", "esperava quando parou"]
+            )
+            .is_some(),
+            "a rejeição que esperava o fim de uma volta parada por um teto sumiu quando a \
+             instância parou, sem chegar ao seele.log: {rastro}"
+        );
+    }
+
+    /// **A rejeição além do teto da espera não se perde.**
+    ///
+    /// Até `REJEICOES_GUARDADAS` (a rajada do balde) rejeições esperam o fim
+    /// da volta; as de depois são ditas na hora, pelo balde. Quarenta numa
+    /// volta só: as oito últimas passam pela rajada antes de as guardadas
+    /// chegarem ao fim da volta. Calar a que não coube, ou guardar todas, faz a
+    /// última sumir do `seele.log`.
+    #[test]
+    fn a_rejeicao_alem_do_teto_da_espera_nao_se_perde() {
+        let deixou = deixou(
+            "for (let i = 0; i < 40; i++) Promise.reject(new Error('r' + i));\
+             setTimeout(() => seele.postar('fim'), 0);",
+            |_| {},
+            |falas, _| tem_mensagem(falas, "fim"),
+            Duration::from_secs(5),
+        );
+        assert!(
+            tem_mensagem(&deixou.falas, "fim"),
+            "o MOD não chegou ao fim, e o teste não mediu nada: {:?}",
+            deixou.falas
+        );
+        assert!(
+            linha_de_erro(
+                &deixou.rastro,
+                &["promessa rejeitada sem tratamento", "Error: r39"]
+            )
+            .is_some(),
+            "a quadragésima rejeição sem tratamento, além do teto da espera, não chegou ao \
+             seele.log — calada, ou segurada pelo balde atrás das outras: {}",
+            deixou.rastro
+        );
+        assert!(
+            deixou.linhas <= teto_do_balde(deixou.levou),
+            "{} linhas de console em {:?}: as rejeições passaram por fora do balde",
+            deixou.linhas,
+            deixou.levou
         );
     }
 

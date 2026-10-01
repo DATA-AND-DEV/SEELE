@@ -477,11 +477,11 @@ const FICHA: u64 = 1_000_000;
 /// primeira volta do motor que tiver ficha, ou quando a instância para (ver
 /// [`dizer_as_seguradas`]).
 ///
-/// Mora na thread do motor, dividido entre a função nativa e o laço de
-/// [`rodar`], e o relógio é passado por quem chama — é o que deixa o teste
-/// medi-lo sem dormir. Ele também é o que limita o canal entre o motor e a
-/// bomba para esta variante: a linha de console não reserva cota de fila, e a
-/// vazão dela é o teto.
+/// Mora na thread do motor, dividido entre a função nativa, o rastreador de
+/// rejeições e o laço de [`rodar`], e o relógio é passado por quem chama — é
+/// o que deixa o teste medi-lo sem dormir. Ele também é o que limita o canal
+/// entre o motor e a bomba para esta variante: a linha de console não reserva
+/// cota de fila, e a vazão dela é o teto.
 #[derive(Debug)]
 pub(crate) struct BaldeDoConsole {
     /// As fichas, em milionésimos de ficha.
@@ -606,8 +606,10 @@ fn dizer_as_seguradas(
 ///
 /// O caminho de toda linha que o MOD escreve com `seele.console` e da que o
 /// produto diz por ele quando uma volta lança ou passa de um teto
-/// ([`relatar`] e [`escoar_jobs`]), e é por ser um só que o teto vale para
-/// todas elas. Menos a conta do balde, que [`dizer_as_seguradas`] põe no canal
+/// ([`relatar`] e [`escoar_jobs`]), ou quando uma promessa rejeita sem que
+/// ninguém a pegue ([`dizer_as_rejeitadas`], e o rastreador de [`rodar`] para
+/// a que não coube na espera), e é por ser um só que o teto vale para todas
+/// elas. Menos a conta do balde, que [`dizer_as_seguradas`] põe no canal
 /// por fora daqui: ao fim de uma volta ela gasta a ficha dela no próprio
 /// balde, e na parada é a última linha da instância.
 fn linha_de_console(
@@ -1079,16 +1081,40 @@ fn rodar(
     //
     // `is_handled` é a segunda chamada, quando alguém prende um `catch`
     // depois: essa não é falha, e avisar nela seria ensinar a ignorar o aviso.
+    // A janela já recebeu o `Falhou` da primeira; a linha do registro, não —
+    // ela espera o fim da volta, e é esta segunda chamada que a tira da espera
+    // (ver [`RejeicoesDaVolta`]).
     //
     // Passa pela mesma cota dos outros avisos, e por isso um MOD que rejeita
     // num laço não enche o canal — a cota é o que separa «dito» de «gritado».
+    // A linha do registro passa pelo balde do `console`, pela mesma razão.
+    //
+    // **Três donos do balde, uma thread.** A ponte gasta ficha a cada linha; o
+    // rastreador, a cada rejeição que não coube na espera; e o laço abaixo
+    // tira dele, ao fim de cada volta e na parada, a conta que nenhuma linha
+    // levou (ver [`dizer_as_seguradas`]). Um `Rc` e não um `Arc`: os três
+    // moram na thread do motor, e este `rquickjs` (sem `parallel`) não pede
+    // `Send` ao rastreador.
+    let balde_do_console = std::rc::Rc::new(std::cell::RefCell::new(BaldeDoConsole::novo(
+        Instant::now(),
+    )));
+    let rejeicoes = std::rc::Rc::new(std::cell::RefCell::new(RejeicoesDaVolta::default()));
     let manda_rejeicao = manda.clone();
     let fila_de_rejeicao = Arc::clone(fila);
+    let balde_da_rejeicao = std::rc::Rc::clone(&balde_do_console);
+    let rejeicoes_do_rastreador = std::rc::Rc::clone(&rejeicoes);
     runtime.set_host_promise_rejection_tracker(Some(Box::new(
-        move |ctx, _promessa, motivo, ja_tratada| {
+        move |ctx, promessa, motivo, ja_tratada| {
             if ja_tratada {
+                if let Ok(mut rejeicoes) = rejeicoes_do_rastreador.try_borrow_mut() {
+                    rejeicoes.tratada(&ctx, &promessa);
+                }
                 return;
             }
+            // A leitura do motivo pode rodar código do MOD (um `name` com
+            // getter, um `toJSON`) e deixar uma exceção pendente. Ela é nossa,
+            // e é tirada; a de antes, se houvesse, não é.
+            let havia_excecao = ctx.has_exception();
             let texto = motivo
                 .as_exception()
                 .and_then(rquickjs::Exception::message)
@@ -1099,11 +1125,34 @@ fn rodar(
                         .and_then(|s| s.to_string().ok())
                 })
                 .unwrap_or_else(|| "sem motivo".to_owned());
+            let linha = match motivo.as_exception() {
+                Some(excecao) => Lancado::da_excecao(excecao),
+                None => Lancado {
+                    texto: texto.clone(),
+                    onde: None,
+                },
+            }
+            .dito_como_rejeicao();
+            if !havia_excecao && ctx.has_exception() {
+                let _ = ctx.catch();
+            }
             avisar(
                 &manda_rejeicao,
                 &fila_de_rejeicao,
-                ParaOFora::Falhou(format!("promessa rejeitada sem tratamento: {texto}")),
+                ParaOFora::Falhou(format!("{REJEITADA_SEM_TRATAMENTO}: {texto}")),
             );
+            let fora_da_espera = match rejeicoes_do_rastreador.try_borrow_mut() {
+                Ok(mut rejeicoes) => rejeicoes.guardar(&ctx, promessa, linha).err(),
+                Err(_) => Some(linha),
+            };
+            if let Some(linha) = fora_da_espera {
+                linha_de_console(
+                    &balde_da_rejeicao,
+                    &manda_rejeicao,
+                    NivelDoConsole::Erro,
+                    linha,
+                );
+            }
         },
     )));
 
@@ -1126,13 +1175,7 @@ fn rodar(
     let saida = manda.clone();
     let contagem = Arc::clone(fila);
     let linhas = manda.clone();
-    // **Dois donos, uma thread.** A ponte gasta ficha a cada linha; o laço
-    // abaixo tira do balde, ao fim de cada volta e na parada, a conta que
-    // nenhuma linha levou (ver [`dizer_as_seguradas`]). Um `Rc` e não um `Arc`:
-    // os dois moram na thread do motor.
-    let balde_do_console = std::rc::Rc::new(std::cell::RefCell::new(BaldeDoConsole::novo(
-        Instant::now(),
-    )));
+    // O balde é o de cima, dividido com o rastreador de rejeições.
     let balde_da_ponte = std::rc::Rc::clone(&balde_do_console);
     let montou = contexto.with(|ctx| -> rquickjs::Result<()> {
         let seele = rquickjs::Object::new(ctx.clone())?;
@@ -1236,7 +1279,14 @@ fn rodar(
                 });
                 relatar(manda, fila, interrupcao, &balde_do_console, volta);
             }
-            escoar_jobs(&runtime, interrupcao, manda, fila, &balde_do_console);
+            escoar_jobs(
+                &runtime,
+                interrupcao,
+                manda,
+                fila,
+                &balde_do_console,
+                &rejeicoes,
+            );
             // **Também aqui.** Sem esta linha, um callback que agenda outro
             // temporizador — ou que cancela o próprio intervalo — deixava o
             // pedido parado até chegar uma mensagem de fora. Num MOD que só
@@ -1303,7 +1353,14 @@ fn rodar(
                 relatar(manda, fila, interrupcao, &balde_do_console, volta);
             }
         }
-        escoar_jobs(&runtime, interrupcao, manda, fila, &balde_do_console);
+        escoar_jobs(
+            &runtime,
+            interrupcao,
+            manda,
+            fila,
+            &balde_do_console,
+            &rejeicoes,
+        );
         // Os pedidos de temporizador que o MOD fez nesta volta.
         recolher_pedidos_de_relogio(&contexto, &mut relogios);
         // A conta do console que nenhuma linha levou, se houver ficha.
@@ -1311,6 +1368,12 @@ fn rodar(
             balde.pendentes_se_couber(Instant::now())
         });
     }
+
+    // **As rejeições que ainda esperavam o fim de uma volta**, antes da conta:
+    // a instância parou, e ninguém mais vai pegá-las. E antes do descarte, de
+    // qualquer jeito — cada uma segura a promessa dela, e um runtime não se
+    // desfaz com valor dele vivo do lado de fora.
+    dizer_as_rejeitadas(&rejeicoes, &balde_do_console, manda);
 
     // **A conta do console antes da confirmação de parada**, com ficha ou sem:
     // depois do `Parou` a bomba não lê mais nada, e a conta cairia com o
@@ -1827,12 +1890,20 @@ fn recolher_pedidos_de_relogio(
 /// mesma linha que [`relatar`] escreve para a volta parada, pelo mesmo balde.
 /// Sem ela, o laço que o MOD pôs numa promessa parava sem uma palavra no
 /// `seele.log`, e o mesmo laço no topo deixava uma.
+///
+/// **E é aqui que a volta termina para as rejeições.** Sem microtarefa
+/// pendente, a promessa rejeitada que ainda espera em `rejeicoes` não foi pega
+/// por ninguém, e vira a linha do registro ([`dizer_as_rejeitadas`]). Numa
+/// volta que parou com microtarefas na fila — por um teto ou pela revogação —,
+/// elas ainda podem pegá-las: as rejeições esperam a próxima volta que
+/// termine, ou a parada da instância.
 fn escoar_jobs(
     runtime: &Runtime,
     interrupcao: &Arc<Interrupcao>,
     manda: &Sender<ParaOFora>,
     fila: &Arc<Fila>,
     balde: &std::cell::RefCell<BaldeDoConsole>,
+    rejeicoes: &std::cell::RefCell<RejeicoesDaVolta>,
 ) {
     while runtime.is_job_pending() && !interrupcao.revogada() {
         if let Err(excecao) = runtime.execute_pending_job() {
@@ -1849,8 +1920,102 @@ fn escoar_jobs(
                     lancado.dito_como_parada(&interrupcao.frase_do_teto(teto)),
                 );
             }
-            return;
+            break;
         }
+    }
+    if !runtime.is_job_pending() {
+        dizer_as_rejeitadas(rejeicoes, balde, manda);
+    }
+}
+
+/// O começo da frase de uma promessa rejeitada sem tratamento — no `Falhou`
+/// que vai à janela e na linha que vai ao registro, que dizem a mesma coisa.
+const REJEITADA_SEM_TRATAMENTO: &str = "promessa rejeitada sem tratamento";
+
+/// Quantas rejeições sem tratamento esperam, no máximo, o fim de uma volta.
+///
+/// O mesmo número da rajada do balde: mais do que isso, o balde não deixaria
+/// sair de uma vez, e o resto viraria a conta das seguradas de qualquer jeito.
+/// Acima dele, a linha sai na hora da rejeição, pelo balde, como sairia sem a
+/// espera — e o teto é o que impede um MOD que rejeita num laço de encher a
+/// memória do lado de fora do motor, onde o teto de memória dele não alcança.
+const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize;
+
+/// **As rejeições sem tratamento de uma volta, à espera do fim dela.**
+///
+/// O QuickJS chama o rastreador na hora da rejeição, e nessa hora quem a vai
+/// pegar pode ainda não ter tido a vez: `try { await f(); } catch {}`, com `f`
+/// uma função `async` que lança antes do primeiro `await`, rejeita a promessa
+/// antes de o `await` prender o tratamento — medido: o `Falhou` sai, e o MOD
+/// pegou. Dita na hora, a linha do registro diria «sem tratamento» em ERROR
+/// sobre uma rejeição que o MOD tratou. O rastreador é chamado de novo quando
+/// o tratamento chega (`ja_tratada`), e é essa segunda chamada que a tira
+/// daqui ([`Self::tratada`]); o que sobra quando as microtarefas da volta
+/// acabam ([`escoar_jobs`]) é o que ninguém pegou. É a regra do
+/// `unhandledrejection` do navegador.
+///
+/// Guarda a promessa, e não um número: segurá-la viva até o fim da volta é o
+/// que garante que a segunda chamada ache a mesma, e não outra que nasceu no
+/// endereço de uma que já foi coletada. Por isso a lista é esvaziada antes de
+/// o runtime ser desfeito (o fim de [`rodar`]).
+#[derive(Default)]
+struct RejeicoesDaVolta {
+    /// Cada promessa rejeitada sem tratamento, com a linha que ela vira.
+    guardadas: Vec<(rquickjs::Persistent<rquickjs::Value<'static>>, String)>,
+}
+
+impl RejeicoesDaVolta {
+    /// Guarda uma rejeição até o fim da volta; devolve a `linha` quando o teto
+    /// ([`REJEICOES_GUARDADAS`]) não deixa, para quem chamou dizê-la na hora.
+    fn guardar<'js>(
+        &mut self,
+        ctx: &rquickjs::Ctx<'js>,
+        promessa: rquickjs::Value<'js>,
+        linha: String,
+    ) -> Result<(), String> {
+        if self.guardadas.len() >= REJEICOES_GUARDADAS {
+            return Err(linha);
+        }
+        self.guardadas
+            .push((rquickjs::Persistent::save(ctx, promessa), linha));
+        Ok(())
+    }
+
+    /// A rejeição de `promessa` ganhou tratamento: ela sai da espera, sem linha.
+    fn tratada<'js>(&mut self, ctx: &rquickjs::Ctx<'js>, promessa: &rquickjs::Value<'js>) {
+        self.guardadas.retain(|(guardada, _)| {
+            guardada
+                .clone()
+                .restore(ctx)
+                .map_or(true, |ela| ela != *promessa)
+        });
+    }
+
+    /// As linhas das que ninguém pegou, na ordem em que rejeitaram; a espera
+    /// fica vazia, e as promessas, soltas.
+    fn sem_tratamento(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.guardadas)
+            .into_iter()
+            .map(|(_, linha)| linha)
+            .collect()
+    }
+}
+
+/// **Diz as rejeições que ninguém pegou**, cada uma como uma linha de
+/// `console` em erro, pelo balde ([`linha_de_console`]).
+fn dizer_as_rejeitadas(
+    rejeicoes: &std::cell::RefCell<RejeicoesDaVolta>,
+    balde: &std::cell::RefCell<BaldeDoConsole>,
+    manda: &Sender<ParaOFora>,
+) {
+    // Entre duas voltas nenhum JavaScript roda, e o rastreador não tem a
+    // espera emprestada.
+    let linhas = match rejeicoes.try_borrow_mut() {
+        Ok(mut rejeicoes) => rejeicoes.sem_tratamento(),
+        Err(_) => return,
+    };
+    for linha in linhas {
+        linha_de_console(balde, manda, NivelDoConsole::Erro, linha);
     }
 }
 
@@ -1887,10 +2052,37 @@ struct Lancado {
 }
 
 impl Lancado {
+    /// `nome: mensagem` e a primeira linha da pilha de um `Error`.
+    ///
+    /// O que não vira texto não derruba o resto: um nome que não vira texto
+    /// sai como `Error`, e uma mensagem ou uma pilha, vazia. A exceção que a
+    /// leitura deixar pendente fica para quem chamou tirar.
+    fn da_excecao(excecao: &rquickjs::Exception<'_>) -> Self {
+        use rquickjs::convert::Coerced;
+        let nome = excecao
+            .get::<_, Coerced<String>>("name")
+            .map_or_else(|_| "Error".to_owned(), |nome| nome.0);
+        let mensagem = excecao.message().unwrap_or_default();
+        let pilha = excecao.stack().unwrap_or_default();
+        Self {
+            texto: format!("{nome}: {mensagem}"),
+            onde: pilha
+                .lines()
+                .find(|linha| !linha.trim().is_empty())
+                .map(str::to_owned),
+        }
+    }
+
     /// A linha do registro quando o MOD lançou: `o MOD lançou: <texto>` e o
     /// onde.
     fn dito_como_excecao(&self) -> String {
         self.com_o_onde(&format!("o MOD lançou: {}", self.texto))
+    }
+
+    /// A linha do registro de uma promessa rejeitada que ninguém pegou:
+    /// `promessa rejeitada sem tratamento: <texto>` e o onde.
+    fn dito_como_rejeicao(&self) -> String {
+        self.com_o_onde(&format!("{REJEITADA_SEM_TRATAMENTO}: {}", self.texto))
     }
 
     /// A linha do registro quando quem parou foi o produto: a `frase` do teto,
@@ -1930,20 +2122,7 @@ fn o_que_o_mod_lancou(ctx: &rquickjs::Ctx<'_>) -> Lancado {
     use rquickjs::convert::Coerced;
     let lancado = ctx.catch();
     let lido = match lancado.as_exception() {
-        Some(excecao) => {
-            let nome = excecao
-                .get::<_, Coerced<String>>("name")
-                .map_or_else(|_| "Error".to_owned(), |nome| nome.0);
-            let mensagem = excecao.message().unwrap_or_default();
-            let pilha = excecao.stack().unwrap_or_default();
-            Lancado {
-                texto: format!("{nome}: {mensagem}"),
-                onde: pilha
-                    .lines()
-                    .find(|linha| !linha.trim().is_empty())
-                    .map(str::to_owned),
-            }
-        }
+        Some(excecao) => Lancado::da_excecao(excecao),
         None => Lancado {
             texto: lancado.get::<Coerced<String>>().map_or_else(
                 |_| "[valor que não virou texto]".to_owned(),
@@ -3669,6 +3848,45 @@ mod testes {
             motivo.contains("ninguém me pega"),
             "o aviso não leva o que o MOD disse: {motivo}"
         );
+    }
+
+    /// **A espera das rejeições tem teto, e devolve a linha que não coube.**
+    ///
+    /// Ela guarda cada promessa e a linha dela do lado de fora do motor, onde
+    /// o teto de memória do MOD não alcança: sem teto, um MOD que rejeita num
+    /// laço enche a memória do processo dentro de uma volta só. A linha que
+    /// não coube volta a quem chamou, para ser dita na hora, e não some.
+    #[test]
+    fn a_espera_das_rejeicoes_tem_teto_e_devolve_a_linha_que_nao_coube() {
+        let runtime = Runtime::new().expect("o motor");
+        let contexto = Context::full(&runtime).expect("o contexto");
+        contexto.with(|ctx| {
+            let promessa = || {
+                rquickjs::Object::new(ctx.clone())
+                    .expect("um objeto")
+                    .into_value()
+            };
+            let mut rejeicoes = RejeicoesDaVolta::default();
+            for n in 0..REJEICOES_GUARDADAS {
+                assert!(
+                    rejeicoes
+                        .guardar(&ctx, promessa(), format!("linha {n}"))
+                        .is_ok(),
+                    "a espera recusou a rejeição {n}, abaixo do teto de {REJEICOES_GUARDADAS}"
+                );
+            }
+            assert_eq!(
+                rejeicoes.guardar(&ctx, promessa(), "a de fora".to_owned()),
+                Err("a de fora".to_owned()),
+                "a espera guardou além do teto de {REJEICOES_GUARDADAS}, ou perdeu a linha que \
+                 não coube em vez de devolvê-la para ser dita na hora"
+            );
+            assert_eq!(
+                rejeicoes.sem_tratamento().len(),
+                REJEICOES_GUARDADAS,
+                "a espera não devolveu, no fim da volta, todas as que guardou"
+            );
+        });
     }
 
     /// E o descarte acontece na dona do runtime, sem matar thread à força.
