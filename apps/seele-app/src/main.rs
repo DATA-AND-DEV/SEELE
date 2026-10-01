@@ -11226,10 +11226,11 @@ mod a_carga_recusada_e_dita_uma_vez_por_motivo {
             .replace(",)", ")")
     }
 
-    /// **Os dois comandos de carga passam pela recusa dita**, e a reserva que
-    /// deu certo esquece o motivo. Os comandos precisam de um `AppHandle` e
-    /// não sobem num teste; um que devolvesse a recusa por fora seria o MOD
-    /// sem carregar e o registro calado de novo, com os testes acima verdes.
+    /// **Os dois comandos de carga passam pela recusa dita**, cada um na forma
+    /// exata que lhe cabe, e só a reserva que deu certo esquece o motivo. Os
+    /// comandos precisam de um `AppHandle` e não sobem num teste; um que
+    /// devolvesse a recusa por fora seria o MOD sem carregar e o registro
+    /// calado de novo, com os testes acima verdes.
     ///
     /// **A reserva é a chamada única de [`carga_dita`]**, e não um `match` que
     /// a imite. Conferir só que `carga_aceita(` e `recusa_de_carga_dita(`
@@ -11237,6 +11238,16 @@ mod a_carga_recusada_e_dita_uma_vez_por_motivo {
     /// recusa esquecida a cada tentativa, e de novo as novecentas linhas por
     /// hora — sem nada reprovar. Os dois braços são provados nos testes de
     /// `carga_dita`, acima; aqui se prova que a reserva é ela.
+    ///
+    /// **E o código é só a recusa dita**: `ler_codigo_do_mod(..)` com o
+    /// `map_err` de [`recusa_de_carga_dita`], e nada mais. Não é `carga_dita`:
+    /// a janela pede o código e depois a reserva, de novo a cada quatro
+    /// segundos enquanto o MOD não sobe, e o código lido esqueceria o motivo
+    /// antes de a reserva falhar — a mesma recusa dita a cada tentativa
+    /// (medido: dez linhas em dez tentativas, contra uma). Conferir só que
+    /// `recusa_de_carga_dita(` aparece no corpo deixava passar esse
+    /// esquecimento, num `match` com `carga_aceita` no `Ok` ou num `.inspect`
+    /// depois do `map_err`, sem nada reprovar.
     #[test]
     fn os_dois_comandos_de_carga_passam_pela_recusa_dita() {
         let fonte = std::fs::read_to_string(
@@ -11245,10 +11256,15 @@ mod a_carga_recusada_e_dita_uma_vez_por_motivo {
         .expect("main.rs legível")
         .replace("\r\n", "\n");
         let codigo = corpo_sem_espaco(&fonte, "fn codigo_do_mod(");
-        assert!(
-            codigo.contains("recusa_de_carga_dita("),
-            "`fn codigo_do_mod(` não passa por `recusa_de_carga_dita(`: a carga recusada volta \
-             à janela e não chega ao registro: {codigo}"
+        assert_eq!(
+            codigo,
+            "ler_codigo_do_mod(&app,&session,geracao,&id,&hash).map_err(|falha|\
+             recusa_de_carga_dita(&session.recusas_de_carga,&id,falha))",
+            "`fn codigo_do_mod(` deixou de ser `ler_codigo_do_mod(..)` com o `map_err` de \
+             `recusa_de_carga_dita`, e nada mais: sem a recusa dita, a carga recusada volta à \
+             janela e não chega ao registro; com um `carga_aceita` (ou `carga_dita`), o código \
+             lido esquece o motivo antes de a reserva falhar, e a mesma recusa volta a sair a \
+             cada quatro segundos"
         );
         let reserva = corpo_sem_espaco(&fonte, "fn mod_nativo_reservar(");
         assert_eq!(
