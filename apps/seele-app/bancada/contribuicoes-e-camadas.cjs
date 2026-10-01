@@ -1067,6 +1067,11 @@ contexto.cartoesDosMods = new Map();
     // **R4e · o avatar que não montou é dito.** Aqui, dentro do roteador, e não
     // em R4d: a recusa chega numa promessa, e este é o trecho da bancada que
     // espera antes de `terminar`. É o caso de 23/09 — o avatar do PERFIS.
+    //
+    // Duas chamadas: a que a janela recusa (lança um `Error`) e a que o Rust
+    // recusa, que chega como `{ Recusado: { motivo } }` e não como `Error`. Só
+    // a segunda separa `motivoDaFalha` de `String(falha?.message ?? falha)` —
+    // com esta, o registro voltaria a dizer «[object Object]».
     {
       const regiaoFonte = ler("mods-regiao.js");
       const inicioDoMotivo = regiaoFonte.indexOf("function motivoDaFalha(");
@@ -1077,36 +1082,46 @@ contexto.cartoesDosMods = new Map();
         "`motivoDaFalha` ou `avatarContribuido` mudou de forma e o recorte não a achou");
       vm.runInContext(regiaoFonte.slice(inicioDoMotivo, fimDoMotivo), contexto);
       vm.runInContext(base.slice(inicioDoAvatar, fimDoAvatar), contexto);
-      const ditas = [];
-      const contribuicao = {
-        mod: "seele/perfis", instancia: {},
-        conteudo: { doServidor: { canal: 1, pedido: {}, campo: "image" } },
-      };
-      const registroDeAntes = contexto.contribuicoesDosMods;
-      const donoDeAntes = contexto.donoDaRegiao;
-      contexto.contribuicoesDosMods = {
-        escolherSubstituicao: () => ({ escolhida: contribuicao }),
-        porHandle: new Map(),
-      };
-      contexto.donoDaRegiao = () => ({
-        podeFalar: () => true,
-        falar() {},
-        anotarRecusa: (texto) => ditas.push(String(texto)),
-        carregarMidiaDoServidor: () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }),
-      });
-      try {
-        confere("R4e · avatar", contexto.avatarContribuido(12) === null,
-          "o avatar devolveu uma imagem antes de ela chegar");
-        await new Promise((resolve) => setImmediate(resolve));
-      } finally {
-        contexto.contribuicoesDosMods = registroDeAntes;
-        contexto.donoDaRegiao = donoDeAntes;
+      for (const [pessoa, carregar, motivo] of [
+        [12, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }), "não é imagem"],
+        [13, () => Promise.reject({ Recusado: { motivo: "fora do teto" } }), "fora do teto"],
+      ]) {
+        const ditas = [];
+        const contribuicao = {
+          mod: "seele/perfis", instancia: {},
+          conteudo: { doServidor: { canal: 1, pedido: {}, campo: "image" } },
+        };
+        const registroDeAntes = contexto.contribuicoesDosMods;
+        const donoDeAntes = contexto.donoDaRegiao;
+        contexto.contribuicoesDosMods = {
+          escolherSubstituicao: () => ({ escolhida: contribuicao }),
+          porHandle: new Map(),
+        };
+        contexto.donoDaRegiao = () => ({
+          podeFalar: () => true,
+          falar() {},
+          anotarRecusa: (texto) => ditas.push(String(texto)),
+          carregarMidiaDoServidor: carregar,
+        });
+        try {
+          confere("R4e · avatar", contexto.avatarContribuido(pessoa) === null,
+            "o avatar devolveu uma imagem antes de ela chegar");
+          await new Promise((resolve) => setImmediate(resolve));
+        } finally {
+          contexto.contribuicoesDosMods = registroDeAntes;
+          contexto.donoDaRegiao = donoDeAntes;
+        }
+        confere(
+          "R4e · avatar",
+          ditas.some((texto) => texto.includes(`avatar da pessoa ${pessoa}`) && texto.includes(motivo)),
+          `o avatar que não montou (${motivo}) não chegou ao registro com o motivo: ${JSON.stringify(ditas)}`,
+        );
+        confere(
+          "R4e · avatar",
+          !ditas.some((texto) => texto.includes("[object Object]")),
+          `a recusa do Rust no avatar virou «[object Object]» no registro: ${JSON.stringify(ditas)}`,
+        );
       }
-      confere(
-        "R4e · avatar",
-        ditas.some((texto) => texto.includes("avatar da pessoa 12") && texto.includes("não é imagem")),
-        `o avatar que não montou não chegou ao registro: ${JSON.stringify(ditas)}`,
-      );
     }
 
     terminar();

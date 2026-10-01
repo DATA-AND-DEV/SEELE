@@ -1142,12 +1142,15 @@ async function fundoTrocaSoltaECancela() {
  * PERFIS não aparecia, a janela sabia por quê, e o `seele.log` não tinha uma
  * palavra — levou uma hora de medição e um reinício com `RUST_LOG=debug`.
  *
- * Um caso por caminho de recusa, treze ao todo: os onze em que a janela recusa
- * ou vê a carga falhar, o evento `error` do próprio elemento e a mídia
- * declarada sem origem. Cada um mede o texto que chega a `anotarRecusa`, que o
- * `base.js` leva ao `registrar_da_janela` como WARN e com o id do MOD em campo
- * próprio (guarda irmão em `tests/frontend.rs`). A recusa do Rust entra aqui
- * como ela chega de verdade: `{ Recusado: { motivo } }`.
+ * Ao menos um caso por caminho de recusa, que são treze: os onze em que a
+ * janela recusa ou vê a carga falhar, o evento `error` do próprio elemento e a
+ * mídia declarada sem origem. Cada um mede o texto que chega a `anotarRecusa`,
+ * que o `base.js` leva ao `registrar_da_janela` como WARN e com o id do MOD em
+ * campo próprio (guarda irmão em `tests/frontend.rs`). A recusa do Rust entra
+ * aqui como ela chega de verdade, `{ Recusado: { motivo } }`, nos quatro
+ * lugares que pedem mídia à ponte (a mídia, o retrato, o fundo e o fundo de
+ * tela): cada um tem o seu `catch`, e um que voltasse a escrever
+ * «[object Object]» passaria com os outros três verdes.
  *
  * E o avesso, no `play()`: dizer não é repetir. O mesmo motivo sai uma vez por
  * tocador, e não uma por redesenho; o `AbortError` do próprio descarte e a
@@ -1198,6 +1201,15 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
       midia: (b) => () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: b.LIMITES.bytesDeMidia + 1 }),
       declarar: [{ forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" }],
       espera: ["«cx»", "teto"],
+    },
+    // O mesmo `catch` do caso de baixo, com a recusa como o Rust a manda: sem
+    // este, o fundo podia voltar a escrever «[object Object]» com todo o resto
+    // verde, porque o caso de baixo rejeita com um `Error`.
+    {
+      nome: "fundo que o Rust recusou",
+      midia: recusaDoRust("arquivo-nao-declarado"),
+      declarar: [{ forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" }],
+      espera: ["«cx»", "arquivo-nao-declarado"],
     },
     {
       nome: "fundo que falhou na janela",
