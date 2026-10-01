@@ -425,6 +425,15 @@ class RegiaoDeMod {
     this.recusados = 0;
     /** Onde cada figura ficou em cada tela, para o toque saber o que pegou. */
     this.acertoDaTela = new Map();
+    /**
+     * Em que pé está cada mídia de pé nesta região, para o diagnóstico ler.
+     *
+     * `Map<Element, { situacao, motivo, cartao }>`. A região já sabia tudo
+     * isto — `data-estado` na figura, o evento para o MOD, a linha de recusa
+     * no registro — e não contava a ninguém de fora: «quem pinta cada lugar»,
+     * na gestão de MODs, pergunta aqui. Ver `anotarMidia`.
+     */
+    this.estadosDeMidia = new Map();
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
     this.solta = false;
   }
@@ -1341,18 +1350,26 @@ class RegiaoDeMod {
     this.guardar(elem, `fundo ${plano.chave}`, () => {
       cancelado = true; this[bolso.conta] -= bytes; this.contagem[bolso.quantas] -= 1;
       elem.style.backgroundImage = "";
+      this.esquecerMidia(elem);
     });
+    this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     const fonte = plano.no.fundoDeMidia;
     const vindo = fonte.doServidor
       ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
       : this.dono.carregarMidia(fonte.fonte);
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
+      // **As duas recusas são anotadas, além de ditas ao registro.** A linha
+      // do `seele.log` é de quem investiga; a anotação é o que «quem pinta
+      // cada lugar» soma — sem ela, o fundo que não veio seria só uma caixa
+      // lisa na gestão também.
       if (midia.papel !== "imagem") {
+        this.anotarMidia(elem, "recusada", `o fundo precisa ser imagem, e os bytes são ${midia.papel}`);
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
         return;
       }
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
+        this.anotarMidia(elem, "recusada", `passou do teto de ${bolso.teto} bytes de mídia deste lugar`);
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
         return;
       }
@@ -1360,9 +1377,11 @@ class RegiaoDeMod {
       elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
       elem.style.backgroundSize = "cover";
       elem.style.backgroundPosition = "center";
+      this.anotarMidia(elem, "pronta");
     }).catch(falha => {
       if (cancelado || this.solta) return;
       const porque = motivoDaFalha(falha);
+      this.anotarMidia(elem, "recusada", porque);
       this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
       this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo: ${porque}`);
     });
@@ -1379,6 +1398,7 @@ class RegiaoDeMod {
       const bolso = plano.cartao ? "bytesDeCartao" : "bytesDeMidia";
       this[bolso] -= estado.bytes;
       this.contagem[plano.cartao ? "midiasDeCartao" : "midias"] -= 1;
+      this.esquecerMidia(elem);
     });
     elem.dataset.estadoDoRetrato = "inicial";
     const doServidor = plano.no.doServidor;
@@ -1392,10 +1412,13 @@ class RegiaoDeMod {
       : caminho
         ? this.dono.carregarMidia(caminho)
         : null;
+    // Sem origem não há mídia: a inicial é o estado natural, e não uma recusa.
     if (!vindo) return;
+    this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     vindo.then((midia) => {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (midia.papel !== "imagem") {
+        this.anotarMidia(elem, "recusada", `o retrato precisa ser imagem, e os bytes são ${midia.papel}`);
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: o arquivo é ${midia.papel}, e retrato só mostra imagem`);
         return;
       }
@@ -1404,6 +1427,7 @@ class RegiaoDeMod {
         : { conta: "bytesDeMidia", teto: this.perfil.bytesDeMidia };
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
         elem.dataset.estadoDoRetrato = "cheia";
+        this.anotarMidia(elem, "recusada", `passou do teto de ${bolso.teto} bytes de mídia deste lugar`);
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
         return;
       }
@@ -1415,13 +1439,17 @@ class RegiaoDeMod {
       this[bolso.conta] += midia.bytes;
       elem.append(img);
       elem.dataset.estadoDoRetrato = "imagem";
+      this.anotarMidia(elem, "pronta");
     }).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       // Falhar num retrato **não** é um erro que a pessoa precise ler: a
       // inicial continua lá e responde a mesma pergunta. Quem escreveu o MOD
-      // precisa — e é para ele que a linha vai ao registro.
+      // precisa — e é para ele que a linha vai ao registro e o diagnóstico
+      // anota.
       elem.dataset.estadoDoRetrato = "inicial";
-      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${motivoDaFalha(falha)}`);
+      const porque = motivoDaFalha(falha);
+      this.anotarMidia(elem, "recusada", porque);
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${porque}`);
     });
   }
 
@@ -2023,8 +2051,10 @@ class RegiaoDeMod {
       }
       this[bolso.conta] -= estado.bytes;
       this.contagem[bolso.quantas] -= 1;
+      this.esquecerMidia(elem);
     });
     elem.dataset.estado = "carregando";
+    this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     // **Duas origens, e só duas.** Do pacote, por um arquivo que o manifesto
     // declara; ou do servidor deste MOD, por uma operação dele. Não há uma
     // terceira, e a que faltaria — um endereço qualquer — é justamente a que
@@ -2046,6 +2076,7 @@ class RegiaoDeMod {
         : null;
     if (!vindo) {
       elem.dataset.estado = "sem-fonte";
+      this.anotarMidia(elem, "recusada", "a declaração não traz «fonte» nem «doServidor»");
       this.dizerRecusaDeMidia(plano.no.chave ?? "", "a declaração não traz «fonte» nem «doServidor»");
       return;
     }
@@ -2058,6 +2089,7 @@ class RegiaoDeMod {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
         elem.dataset.estado = "cheia";
+        this.anotarMidia(elem, "recusada", `passou do teto de ${bolso.teto} bytes de mídia deste lugar`);
         this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada" });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
         return;
@@ -2072,6 +2104,7 @@ class RegiaoDeMod {
       estado.bytes = midia.bytes;
       this[bolso.conta] += midia.bytes;
       elem.dataset.estado = "pronta";
+      this.anotarMidia(elem, "pronta");
       elem.append(tocador);
       for (const [nome, aviso] of [["play", "tocando"], ["pause", "pausada"], ["ended", "terminou"], ["error", "falhou"]]) {
         const ouvinte = () => {
@@ -2088,6 +2121,7 @@ class RegiaoDeMod {
       if (estado.cancelado || this.solta) return;
       elem.dataset.estado = "falhou";
       const porque = motivoDaFalha(falha);
+      this.anotarMidia(elem, "recusada", porque);
       this.dono.falar({
         nome: "midia",
         chave: plano.no.chave ?? "",
@@ -2118,6 +2152,7 @@ class RegiaoDeMod {
         // ele é do MOD.
         if (this.solta || falha?.name === "AbortError") return;
         const porque = motivoDaFalha(falha);
+        this.anotarMidia(elem, "recusada", `o som não tocou: ${porque}`);
         if (tocador.__recusaDita === porque) return;
         tocador.__recusaDita = porque;
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `não tocou: ${porque}`);
@@ -2125,6 +2160,45 @@ class RegiaoDeMod {
     } else if (!tocador.paused) {
       tocador.pause();
     }
+  }
+
+  // ------------------------------------------------ o estado das mídias
+
+  /**
+   * Anota em que pé uma mídia desta região está: `carregando`, `pronta` ou
+   * `recusada`, com o motivo quando recusada.
+   *
+   * **Para quem escreve o MOD**, e não para quem conversa: a figura já diz o
+   * estado na tela, o MOD já recebe o evento, e a recusa já vai ao registro
+   * (`dizerRecusaDeMidia`). O que faltava era alguém de fora poder perguntar
+   * — «quem pinta cada lugar», na gestão de MODs, soma estas anotações por
+   * ponto de contribuição, e `dono.midiaMudou` é o aviso de que a soma mudou.
+   *
+   * @param {Element} elem O nó da mídia.
+   * @param {"carregando"|"pronta"|"recusada"} situacao
+   * @param {string} [motivo] Por que foi recusada, em texto.
+   * @param {boolean} [cartao] Se ela mora num cartão. Dito na primeira
+   *   anotação e mantido nas seguintes.
+   */
+  anotarMidia(elem, situacao, motivo = "", cartao) {
+    if (this.solta) return;
+    const antes = this.estadosDeMidia.get(elem);
+    this.estadosDeMidia.set(elem, {
+      situacao,
+      motivo: String(motivo ?? "").slice(0, 200),
+      cartao: cartao ?? antes?.cartao ?? false,
+    });
+    this.dono.midiaMudou?.();
+  }
+
+  /** Esquece a anotação de uma mídia que saiu da tela. */
+  esquecerMidia(elem) {
+    if (this.estadosDeMidia.delete(elem)) this.dono.midiaMudou?.();
+  }
+
+  /** O estado de cada mídia de pé, em cópia: quem lê não escreve aqui. */
+  midiasAnotadas() {
+    return [...this.estadosDeMidia.values()].map((anotada) => ({ ...anotada }));
   }
 
   // -------------------------------------------------------- os cartões
@@ -2278,6 +2352,7 @@ class RegiaoDeMod {
     // **E a folha adotada.** Ela não está sob a raiz desde que deixou de ser
     // um `<style>` — tirar o nó já não a tira do documento.
     this.soltarAFolha();
+    this.estadosDeMidia.clear();
     this.raiz.remove();
   }
 }

@@ -40,6 +40,11 @@ function confere(caso, condicao, detalhe) {
 }
 const volta = () => new Promise((r) => setImmediate(r));
 
+/** Deixa assentar as voltas encadeadas de uma mídia: bytes, decodificação, montagem. */
+async function assentar() {
+  for (let i = 0; i < 12; i += 1) await volta();
+}
+
 // **O fim é dito, e não suposto.** Uma promessa que nunca se resolve esvazia o
 // laço de eventos sem erro nenhum: o node sai com 0, sem uma linha, e o passo
 // do CI fica verde sem ter provado nada — medido com `await new Promise(() => {})`
@@ -282,15 +287,18 @@ function bancada() {
   };
 }
 
-/** Um dono que anota o que a região fala, o que ela pede e o que ela diz ao registro. */
+/** Um dono que anota o que a região fala, o que ela pede, o que ela diz ao registro e quando uma mídia muda de estado. */
 function dono(b, midia) {
   const ditos = [];
   const registrados = [];
   const anotadas = [];
+  let mudancas = 0;
   return {
     ditos,
     registrados,
     anotadas,
+    /** Quantas vezes a região avisou que o estado de uma mídia mudou. */
+    mudancas: () => mudancas,
     api: {
       instancia: {
         registrar: (porque, descartar) => registrados.push({ porque, descartar }),
@@ -303,6 +311,9 @@ function dono(b, midia) {
         midia ? midia(caminho) : Promise.reject(new Error("sem mídia")),
       carregarMidiaDoServidor: (canal, pedido, campo) =>
         midia ? midia({ canal, pedido, campo }) : Promise.reject(new Error("sem mídia")),
+      midiaMudou: () => {
+        mudancas += 1;
+      },
     },
   };
 }
@@ -1156,6 +1167,8 @@ async function fundoTrocaSoltaECancela() {
  * tocador, e não uma por redesenho; o `AbortError` do próprio descarte e a
  * recusa que chega a uma região já solta não saem. E a chave do MOD entra
  * cortada, para que o motivo caiba nos 512 caracteres que o registro guarda.
+ * A anotação que o diagnóstico lê (`midiasAnotadas`) passa pelo mesmo filtro:
+ * o `play()` recusado fica anotado como recusado, e o `AbortError`, não.
  */
 async function cadaMidiaRecusadaEDitaAoAnfitriao() {
   const recusaDoRust = (motivo) => () => () => Promise.reject({ Recusado: { motivo } });
@@ -1368,6 +1381,16 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
       "um motivo novo de recusa tinha de dar a segunda linha, e só ela — calado pelo anterior, "
         + `o registro esconde que a causa mudou: ${JSON.stringify(todas)}`,
     );
+    // E a anotação, que o diagnóstico lê, diz a recusa com o motivo de agora.
+    const doToque = regiao.midiasAnotadas();
+    confere(
+      "recusa dita · som que não tocou",
+      doToque.length === 1
+        && doToque[0].situacao === "recusada"
+        && doToque[0].motivo.includes("NotSupportedError"),
+      "o play() recusado não ficou anotado como recusado, e o diagnóstico conta como pronta "
+        + `uma mídia que não tocou: ${JSON.stringify(doToque)}`,
+    );
     regiao.soltar();
   }
 
@@ -1407,6 +1430,15 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
       "recusa dita · som interrompido pelo descarte",
       !d.anotadas.some((texto) => texto.includes("«cortada»")),
       `o AbortError do próprio descarte virou aviso no seele.log: ${JSON.stringify(d.anotadas)}`,
+    );
+    // O AbortError é o desfecho que o MOD pediu, e não uma recusa: ele não
+    // anota nada, nem recria a anotação de um nó que já saiu da tela.
+    const recusadas = regiao.midiasAnotadas().filter((m) => m.situacao === "recusada");
+    confere(
+      "recusa dita · som interrompido pelo descarte",
+      recusadas.length === 0,
+      "o AbortError do próprio descarte virou mídia recusada na anotação, e o diagnóstico conta "
+        + `uma recusa que não existe: ${JSON.stringify(recusadas)}`,
     );
     regiao.soltar();
   }
@@ -1489,6 +1521,111 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 10. A região diz em que pé cada mídia está — para o diagnóstico ler.
+// ---------------------------------------------------------------------------
+
+async function aMidiaAnotadaDizOsTresEstados() {
+  const caso = "a mídia anotada";
+  const b = bancada();
+  let chegar;
+  const pendente = new Promise((r) => {
+    chegar = r;
+  });
+  const d = dono(b, (caminho) => {
+    if (caminho === "img/falta.png") {
+      // A forma em que o Rust recusa: o enum serializado, e não um `Error`.
+      return Promise.reject({ Recusado: { motivo: "arquivo-nao-declarado" } });
+    }
+    if (caminho === "img/grande.png") {
+      return Promise.resolve({
+        uri: "data:image/png;base64,AA",
+        papel: "imagem",
+        bytes: b.LIMITES.bytesDeMidia + 1,
+      });
+    }
+    return pendente;
+  });
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([
+    { forma: "midia", chave: "a", fonte: "img/a.png" },
+    { forma: "midia", chave: "falta", fonte: "img/falta.png" },
+    { forma: "midia", chave: "nada" },
+    { forma: "midia", chave: "grande", fonte: "img/grande.png" },
+  ]);
+  await assentar();
+  const situacoes = () => regiao.midiasAnotadas().map((m) => m.situacao).sort().join(",");
+  confere(
+    caso,
+    situacoes() === "carregando,recusada,recusada,recusada",
+    `as quatro mídias não disseram em que pé estão: ${situacoes()}`,
+  );
+  const motivos = regiao.midiasAnotadas().map((m) => m.motivo).join(" | ");
+  confere(caso, motivos.includes("arquivo-nao-declarado"), `a recusa do Rust virou outra coisa: ${motivos}`);
+  confere(caso, !motivos.includes("[object Object]"), `a recusa do Rust virou «[object Object]»: ${motivos}`);
+  confere(caso, motivos.includes("fonte"), `a mídia sem origem foi recusada sem dizer por quê: ${motivos}`);
+  confere(caso, motivos.includes("teto"), `a mídia acima do teto foi recusada sem dizer por quê: ${motivos}`);
+
+  chegar({ uri: "data:image/png;base64,AA", papel: "imagem", bytes: 10 });
+  await assentar();
+  confere(
+    caso,
+    situacoes() === "pronta,recusada,recusada,recusada",
+    `a mídia que chegou não virou «pronta»: ${situacoes()}`,
+  );
+  confere(caso, d.mudancas() >= 5, `a região mudou o estado das mídias e avisou ${d.mudancas()} vez(es)`);
+
+  // O que sai da declaração sai do diagnóstico: contar mídia que não existe
+  // mais é o diagnóstico mentindo.
+  regiao.aplicar([{ forma: "midia", chave: "falta", fonte: "img/falta.png" }]);
+  confere(
+    caso,
+    regiao.midiasAnotadas().length === 1,
+    `sobraram ${regiao.midiasAnotadas().length} anotações para uma mídia de pé`,
+  );
+  regiao.soltar();
+  confere(caso, regiao.midiasAnotadas().length === 0, "a região solta continuou anotando mídia");
+}
+
+async function oFundoEORetratoTambemDizemOEstado() {
+  const caso = "fundo e retrato anotados";
+  const b = bancada();
+  const d = dono(b, (caminho) => Promise.resolve(caminho === "som/a.wav"
+    ? { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 8 }
+    : { uri: "data:image/png;base64,AA", papel: "imagem", bytes: 8 }));
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([
+    {
+      forma: "caixa",
+      chave: "c",
+      fundoDeMidia: { fonte: "img/fundo.png" },
+      dentro: [{ forma: "texto", dentro: "x" }],
+    },
+    { forma: "retrato", chave: "r", fonte: "img/rosto.png" },
+    { forma: "retrato", chave: "s", fonte: "som/a.wav" },
+  ]);
+  await assentar();
+  const situacoes = regiao.midiasAnotadas().map((m) => m.situacao).sort().join(",");
+  confere(
+    caso,
+    situacoes === "pronta,pronta,recusada",
+    `o fundo e os retratos não disseram em que pé estão: ${situacoes}`,
+  );
+  const recusa = regiao.midiasAnotadas().find((m) => m.situacao === "recusada");
+  confere(caso, /imagem/.test(recusa?.motivo ?? ""), `o retrato de som foi recusado sem dizer por quê: ${recusa?.motivo}`);
+  // O fundo e o retrato que saem da declaração saem do diagnóstico antes de a
+  // região sair: o `soltar()` abaixo limpa tudo, e por isso não vê o descarte
+  // de cada um esquecendo a sua anotação.
+  regiao.aplicar([{ forma: "retrato", chave: "r", fonte: "img/rosto.png" }]);
+  confere(
+    caso,
+    regiao.midiasAnotadas().length === 1,
+    `o fundo ou o retrato que saiu da declaração continuou anotado: ${JSON.stringify(regiao.midiasAnotadas())}`,
+  );
+  regiao.soltar();
+  confere(caso, regiao.midiasAnotadas().length === 0, "a região solta continuou anotando o fundo ou o retrato");
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -1511,6 +1648,8 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
     osTetosDoCartaoSaoDoCartaoENaoDaRegiao,
     aImagemAcompanhaAMudancaDaFonte,
     cadaMidiaRecusadaEDitaAoAnfitriao,
+    aMidiaAnotadaDizOsTresEstados,
+    oFundoEORetratoTambemDizemOEstado,
   ];
   for (const prova of provas) {
     try {
