@@ -490,11 +490,13 @@ class RegiaoDeMod {
     /**
      * O som de cada mídia, e o `tocando` que o MOD declarou por último.
      *
-     * `Map<Element, { tocador, tocar, declarado, quer, terminou }>`. À parte do
-     * nó porque o som chega depois dele — bytes e decodificação são duas
-     * voltas —, e o MOD pode ter mudado de ideia nesse meio tempo. `tocar` é o
-     * do tocador com a recusa já amarrada (ver `montarSom`); `terminou` diz se
-     * o último aviso dele foi o fim natural do som. Ver `aplicarTocando`.
+     * `Map<Element, { tocador, tocar, recusar, declarado, quer, terminou, cartao }>`.
+     * À parte do nó porque o som chega depois dele — bytes e decodificação são
+     * duas voltas —, e o MOD pode ter mudado de ideia nesse meio tempo.
+     * `tocar` é o do tocador com a recusa já amarrada, e `recusar` é essa
+     * recusa (ver `montarSom`); `terminou` diz se o último aviso dele foi o fim
+     * natural do som; `cartao`, se ele mora num cartão ou num destino de
+     * contribuição. Ver `aplicarTocando` e `calarSonsForaDaTela`.
      */
     this.somDaMidia = new Map();
     /**
@@ -2116,7 +2118,10 @@ class RegiaoDeMod {
     const estado = {
       elemento: null, som: null, cancelado: false, bytes: 0, bytesDoSom: 0, bolso, ouvintes: [], recusaDita: null,
     };
-    this.somDaMidia.set(elem, { tocador: null, tocar: null, declarado: undefined, quer: false, terminou: false });
+    this.somDaMidia.set(elem, {
+      tocador: null, tocar: null, recusar: null, declarado: undefined, quer: false, terminou: false,
+      cartao: Boolean(plano.cartao),
+    });
     this.guardar(elem, `midia ${plano.chave}`, () => {
       estado.cancelado = true;
       const tocador = estado.elemento;
@@ -2354,9 +2359,10 @@ class RegiaoDeMod {
     estado.bytesDoSom = ocupa;
     this[contaDoSom] += ocupa;
 
-    // **O som que não começou, por um caminho só.** O evento ao MOD e a
-    // anotação saem a cada vez: são deles, e o MOD pode dizer à pessoa que
-    // aperte alguma coisa. O registro sai **uma vez por motivo**, por tocador
+    // **O som que não começou, por um caminho só.** O evento ao MOD — com o
+    // motivo, em `porque` — e a anotação saem a cada vez: são deles, e o MOD
+    // pode dizer à pessoa que aperte alguma coisa, ou que abra a página. O
+    // registro sai **uma vez por motivo**, por tocador
     // (`estado.recusaDita`): um MOD que liga e desliga o `tocando` sem um gesto
     // de quem usa teria uma recusa por alternância, num `seele.log` que só gira
     // na abertura e numa porta da janela sem balde.
@@ -2366,7 +2372,7 @@ class RegiaoDeMod {
     // tirar o nó, não vai ao registro, nem ao MOD, nem recria a anotação.
     const recusou = (motivo) => {
       this.anotarMidia(elem, "recusada", motivo);
-      this.dono.falar({ nome: "midia", chave, estado: "recusada" });
+      this.dono.falar({ nome: "midia", chave, estado: "recusada", porque: motivo });
       if (estado.recusaDita === motivo) return;
       estado.recusaDita = motivo;
       this.dizerRecusaDeMidia(chave, `não tocou: ${motivo}`);
@@ -2399,6 +2405,7 @@ class RegiaoDeMod {
     // `catch` é o pedido que rejeita em vez de avisar — a fonte que o WebAudio
     // não abre —, e ele não podia ficar só na anotação.
     entrada.tocador = tocador;
+    entrada.recusar = recusou;
     entrada.tocar = (comGesto) => tocador.tocar(comGesto).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       recusou(motivoDaFalha(falha));
@@ -2452,6 +2459,15 @@ class RegiaoDeMod {
    * produto — ou recusado, ele não volta: o último aviso desses não é o fim.
    * A repetição explícita (`repetir`) é decisão da API 6.
    *
+   * **Fora da tela, a declaração não liga o som.** Um som cujo nó não está no
+   * documento — o de uma página fechada, o de um cartão fora da lista — não
+   * toca pelo `tocando` do MOD: ele é recusado, e o motivo
+   * (`SOM_FORA_DA_TELA`) vai ao MOD, ao registro e ao diagnóstico, pelo mesmo
+   * caminho das outras recusas. É a decisão do I-1 da revisão ampla do Plano
+   * 1D: a MESA continua montando a página dela fechada, e uma troca de trilha
+   * do mestre começava a tocar numa página que ninguém via. Reaberta, quem
+   * liga é o botão do produto, ou o MOD mudando o `tocando`.
+   *
    * **Numa contribuição, uma vez, e não uma por destino**, sem nada aqui:
    * só o destino que tomou os sons dela tem tocador (ver `montarSom`), e nos
    * outros a conferência do tocador, logo abaixo, já sai.
@@ -2463,8 +2479,15 @@ class RegiaoDeMod {
     if (som.declarado === som.quer && !deNovo) return;
     som.declarado = som.quer;
     som.terminou = false;
-    if (som.quer) som.tocar(false);
-    else som.tocador.pausar();
+    if (!som.quer) {
+      som.tocador.pausar();
+      return;
+    }
+    if (!elem.isConnected) {
+      som.recusar(SOM_FORA_DA_TELA);
+      return;
+    }
+    som.tocar(false);
   }
 
   /** O MOD declara «tocando»; o produto guarda, e aplica quando o som existir. */
@@ -2473,6 +2496,47 @@ class RegiaoDeMod {
     if (!som) return;
     som.quer = plano.no.tocando === true;
     this.aplicarTocando(elem);
+  }
+
+  /**
+   * Pausa o som de MOD que saiu da tela sem sair da declaração.
+   *
+   * Pelos «removing steps» do HTML, um `<audio>` pausava sozinho quando saía do
+   * documento; uma fonte de WebAudio não, porque está ligada à saída de som e
+   * não ao documento. O descarte já cala o som (`montarMidia`), mas o produto
+   * também tira nós da tela **sem** descartá-los: a página fechada pelo SAIR ou
+   * pelo Escape, a contribuição que perde a disputa, o cartão da API 3 sob «o
+   * SEELE desenha», o destino de quem saiu da sala. Nos cinco caminhos que a
+   * revisão ampla do Plano 1D mediu (I-1), o som seguia até o fim, sem controle
+   * à vista e sem `pausada` ao MOD.
+   *
+   * Um som está fora da tela quando o nó dele saiu do documento, ou quando ele
+   * mora num cartão — um da API 3, ou um destino de contribuição — e
+   * `cartoesPintam` diz que aquela montagem não desenha agora.
+   *
+   * O som fora da tela é pausado: o MOD recebe `pausada`, e a anotação
+   * acompanha. Um `tocar` que ainda esperava o áudio da janela é cancelado. E
+   * a declaração dele é dada por aplicada, para um redesenho com
+   * `tocando: true` não o religar — nem o religar por ter terminado
+   * (`aplicarTocando`).
+   *
+   * Quem chama: `SuperficieDeMod#fechar`, e `calarOsSonsQueSairamDaTela`, em
+   * `base.js`, no fim de cada desenho que pode tirar um nó de MOD da tela.
+   *
+   * @param {boolean} [cartoesPintam] Se as mídias de cartão deste renderer
+   *   desenham agora — falso para o destino de uma contribuição que não
+   *   desenha (`aContribuicaoPinta`, em `base.js`) e para os cartões da API 3
+   *   de um MOD fora de `modsDeCartaoQueValem`.
+   */
+  calarSonsForaDaTela(cartoesPintam = true) {
+    if (this.solta) return;
+    for (const [elem, som] of this.somDaMidia) {
+      if (!som.tocador) continue;
+      if (elem.isConnected && (cartoesPintam || !som.cartao)) continue;
+      som.declarado = som.quer;
+      som.terminou = false;
+      som.tocador.pausar();
+    }
   }
 
   // ------------------------------------------------ o estado das mídias
@@ -2700,6 +2764,16 @@ const ESPERA_SEM_GESTO_MS = 1500;
  * de verdade seria o botão mentindo.
  */
 const ESPERA_COM_GESTO_MS = 5000;
+
+/**
+ * Por que a declaração de um MOD não liga um som cujo nó não está na tela.
+ *
+ * O motivo vai ao MOD, em `porque`, ao registro e ao diagnóstico — ver
+ * `aplicarTocando`. Ele nomeia o caso comum, a página fechada, porque é o que
+ * quem escreve o MOD precisa reconhecer.
+ */
+const SOM_FORA_DA_TELA = "o lugar deste som não está na tela — uma página fechada, ou um cartão que o SEELE "
+  + "não desenha agora —, e o produto não toca o que ninguém vê";
 
 /**
  * O contexto de áudio que **toca** os sons de MOD: um por janela, criado no

@@ -12231,7 +12231,11 @@ fn todo_recurso_da_regiao_nasce_registrado_e_com_teto() {
 
     // O descarte da mídia solta o som **e** tira a fonte da imagem. Só remover
     // o nó deixa os bytes decodificados presos — e, no WebAudio, deixa a fonte
-    // tocando: ela está ligada à saída de som, e não ao documento.
+    // tocando: ela está ligada à saída de som, e não ao documento. O nó que sai
+    // da tela **sem** ser descartado — a página fechada, o cartão fora da
+    // lista — tem o som calado por `calarSonsForaDaTela`, que se prova pelo
+    // comportamento em `bancada/regiao-do-mod.cjs`, `contribuicoes-e-camadas.cjs`
+    // e `diagnostico-de-mods.cjs`, e não aqui.
     let midia = js_function(&regiao, "\n  montarMidia(elem, plano)");
     assert!(
         midia.contains("estado.som?.soltar()")

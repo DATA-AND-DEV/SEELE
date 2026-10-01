@@ -124,6 +124,17 @@ class Elemento {
   get children() {
     return this.filhos.filter((f) => f.nodeType === ELEMENTO);
   }
+  /**
+   * Está no documento? Sobe pelos pais até o `<body>` desta bancada.
+   *
+   * É a pergunta que separa um som na tela de um que saiu dela sem ser
+   * descartado — a página fechada, o cartão que o SEELE deixou de desenhar.
+   */
+  get isConnected() {
+    let no = this;
+    while (no.pai) no = no.pai;
+    return no === this.doc?.body;
+  }
   get firstChild() {
     return this.filhos[0] ?? null;
   }
@@ -413,6 +424,10 @@ function bancada(opcoes = {}) {
   const doc = { activeElement: null };
   doc.createElement = (tag) => new Elemento(tag, doc);
   doc.createTextNode = (data) => new NoDeTexto(data);
+  // O documento: as raízes nascem nele, como a da faixa e a de uma página
+  // aberta. Uma prova tira uma do documento — `raiz.remove()` — para medir o
+  // que sai da tela sem ser descartado.
+  doc.body = doc.createElement("body");
   // O WebAudio desta prova, ou o padrão — um que decodifica e toca.
   const Audio = opcoes.audio ?? audioDeMentira();
 
@@ -467,7 +482,12 @@ function bancada(opcoes = {}) {
     SILENCIO: contexto.api.SILENCIO,
     /** O que a saída da sessão chama para calar e soltar o som dos MODs. */
     encerrarOSomDosMods: contexto.api.encerrarOSomDosMods,
-    raiz: () => doc.createElement("section"),
+    /** Uma raiz no documento, como a da faixa ou a de uma página aberta. */
+    raiz: () => {
+      const raiz = doc.createElement("section");
+      doc.body.append(raiz);
+      return raiz;
+    },
     /** O `Uint8Array` da janela: o que ele cria passa no `instanceof` dela. */
     Uint8Array: vm.runInContext("Uint8Array", contexto),
   };
@@ -2186,6 +2206,9 @@ async function oSomNumCartaoNaoTemBotao() {
   );
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.declararCartoes({ 7: [{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }] });
+  // A lista de pessoas pendura o cartão na linha da pessoa no mesmo desenho
+  // (`darCartoesDoMod` → `redesenharAsPessoas`), antes de os bytes chegarem.
+  b.doc.body.append(regiao.cartaoDe(7));
   await assentar();
   const cartao = regiao.cartaoDe(7);
   confere(caso, acharTag(cartao, "button") === null, "um cartão ganhou um botão, e cartão não recebe foco (ver FORMAS_DO_CARTAO)");
@@ -2813,6 +2836,198 @@ async function oSomQueTerminouVoltaComOTocandoDeclarado() {
   lenta.soltar();
 }
 
+// ---------------------------------------------------------------------------
+// 16. O som que sai da tela para, como o `<audio>` parava.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pelos «removing steps» do HTML, um `<audio>` pausa sozinho quando sai do
+ * documento; uma fonte de WebAudio não, porque está ligada à saída de som. O
+ * descarte cala o som (`sairDuranteAReproducaoPara`), mas o produto também tira
+ * nós da tela **sem** descartá-los, e nos cinco caminhos que a revisão ampla do
+ * Plano 1D mediu (I-1) o som seguia até o fim, sem controle à vista e sem
+ * `pausada` ao MOD: a página fechada, a contribuição que perde a disputa, o
+ * cartão da API 3 sob «o SEELE desenha», o destino de quem saiu da sala, e a
+ * página fechada que recebe um som novo `tocando`.
+ *
+ * Esta prova mede `RegiaoDeMod#calarSonsForaDaTela` — quem a chama nos
+ * desenhos do produto é medido em `contribuicoes-e-camadas.cjs` (a página
+ * fechada e a varredura de `base.js`) e, no Chromium, em
+ * `diagnostico-de-mods.cjs`.
+ */
+async function oSomQueSaiDaTelaParaComoOAudioParava() {
+  const caso = "o som que sai da tela para";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const ditos = (d, chave, estado) => d.ditos.filter((e) => e.nome === "midia" && e.chave === chave && e.estado === estado);
+  const trilha = { forma: "midia", chave: "trilha", fonte: "som/trilha.wav", tocando: true };
+  const nova = { forma: "midia", chave: "nova", fonte: "som/nova.wav", tocando: true };
+
+  // A página fechada: o nó sai do documento, e o renderer fica para reabrir.
+  {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([trilha]);
+    await assentar();
+    const contexto = Audio.ultimo;
+    confere(caso, contexto?.fontes[0]?.tocando === true, "a trilha declarada `tocando` não tocou");
+    if (!contexto?.fontes[0]) return;
+    // Na tela, calar não cala nada.
+    regiao.calarSonsForaDaTela();
+    confere(caso, contexto.fontes[0].tocando === true, "a trilha foi calada com a página aberta, na tela");
+
+    regiao.raiz.remove();
+    regiao.calarSonsForaDaTela();
+    confere(
+      caso,
+      contexto.fontes[0].parou === true && ditos(d, "trilha", "pausada").length === 1,
+      "a página fechou e a trilha seguiu tocando fora da tela, sem controle à vista: "
+        + `parou=${contexto.fontes[0].parou}, «pausada» dita ${ditos(d, "trilha", "pausada").length} vez(es) ao MOD`,
+    );
+    confere(
+      caso,
+      regiao.midiasAnotadas()[0]?.situacao === "pronta",
+      `a trilha calada pela página fechada não ficou anotada «pronta»: ${JSON.stringify(regiao.midiasAnotadas())}`,
+    );
+
+    // Fechada, o redesenho do MOD com `tocando: true` não a religa.
+    regiao.aplicar([trilha]);
+    await assentar();
+    confere(
+      caso,
+      contexto.fontes.length === 1,
+      `com a página fechada, um redesenho do MOD com \`tocando: true\` religou a trilha: ${contexto.fontes.length} fonte(s)`,
+    );
+
+    // Fechada, um som novo declarado `tocando` não toca: é recusado, e o
+    // motivo vai ao MOD, ao registro e ao diagnóstico.
+    regiao.aplicar([trilha, nova]);
+    await assentar();
+    const recusa = ditos(d, "nova", "recusada")[0];
+    confere(
+      caso,
+      contexto.fontes.length === 1 && /tela/.test(recusa?.porque ?? ""),
+      "um som novo declarado `tocando` numa página fechada tocou, ou foi recusado sem dizer por quê ao MOD: "
+        + `${contexto.fontes.length} fonte(s), ${JSON.stringify(recusa)}`,
+    );
+    confere(
+      caso,
+      d.anotadas.some((t) => t.includes("«nova»") && /tela/.test(t)),
+      `a recusa do som da página fechada não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    confere(
+      caso,
+      regiao.midiasAnotadas().some((m) => m.situacao === "recusada" && /tela/.test(m.motivo)),
+      `a recusa do som da página fechada não chegou ao diagnóstico: ${JSON.stringify(regiao.midiasAnotadas())}`,
+    );
+
+    // Reaberta, o redesenho também não religa nada sozinho: quem religa é o
+    // botão do produto, ou o MOD mudando o `tocando`.
+    b.doc.body.append(regiao.raiz);
+    regiao.aplicar([trilha, nova]);
+    await assentar();
+    confere(caso, contexto.fontes.length === 1, `a página reabriu e um redesenho religou um som sozinho: ${contexto.fontes.length} fonte(s)`);
+    acharTag(regiao.raiz.children[0], "button")?.disparar("click");
+    await assentar();
+    confere(caso, contexto.fontes[1]?.tocando === true, "reaberta a página, o botão do produto não tocou a trilha");
+    regiao.soltar();
+  }
+
+  // O som que terminou na tela não volta pelo redesenho com a página fechada
+  // — nem recusado: o fim que a declaração religaria (m-4) é o da tela.
+  {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([trilha]);
+    await assentar();
+    Audio.ultimo?.fontes[0]?.onended?.();
+    regiao.raiz.remove();
+    regiao.calarSonsForaDaTela();
+    regiao.aplicar([trilha]);
+    await assentar();
+    confere(
+      caso,
+      (Audio.ultimo?.fontes.length ?? 0) === 1 && ditos(d, "trilha", "recusada").length === 0,
+      "a trilha terminou, a página fechou, e o redesenho a religou ou a recusou: "
+        + `${Audio.ultimo?.fontes.length} fonte(s), ${ditos(d, "trilha", "recusada").length} recusa(s)`,
+    );
+    regiao.soltar();
+  }
+
+  // O cartão da API 3: quando o SEELE desenha o cartão, o som do cartão para
+  // — e o da região, não. E o cartão que sai da lista, também.
+  {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    const cartoes = {
+      7: [{ forma: "midia", chave: "cartao-7", fonte: "som/c7.wav", tocando: true }],
+      8: [{ forma: "midia", chave: "cartao-8", fonte: "som/c8.wav", tocando: true }],
+    };
+    regiao.aplicar([{ forma: "midia", chave: "faixa", fonte: "som/f.wav", tocando: true }]);
+    regiao.declararCartoes(cartoes);
+    b.doc.body.append(regiao.cartaoDe(7), regiao.cartaoDe(8));
+    await assentar();
+    const tocando = () => (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    confere(caso, tocando() === 3, `a faixa e os dois cartões não tocaram: ${tocando()} fonte(s)`);
+
+    // A pessoa 8 sai da sala: o cartão dela sai da lista, e o MOD vale.
+    regiao.cartaoDe(8).remove();
+    regiao.calarSonsForaDaTela(true);
+    confere(
+      caso,
+      ditos(d, "cartao-8", "pausada").length === 1 && tocando() === 2,
+      `o cartão de quem saiu da lista seguiu tocando: ${tocando()} fonte(s), «pausada» dita `
+        + `${ditos(d, "cartao-8", "pausada").length} vez(es)`,
+    );
+    // «O SEELE desenha» o cartão: os cartões deste MOD deixam de valer.
+    regiao.calarSonsForaDaTela(false);
+    confere(
+      caso,
+      ditos(d, "cartao-7", "pausada").length === 1 && ditos(d, "faixa", "pausada").length === 0 && tocando() === 1,
+      "com «o SEELE desenha» o cartão, o som do cartão do MOD seguiu, ou o da faixa parou junto: "
+        + `${tocando()} fonte(s), cartão ${ditos(d, "cartao-7", "pausada").length}, faixa ${ditos(d, "faixa", "pausada").length}`,
+    );
+    // O MOD redeclara os cartões com `tocando: true`, e eles não voltam.
+    regiao.declararCartoes(cartoes);
+    await assentar();
+    confere(caso, tocando() === 1, `o MOD redeclarou os cartões e um som calado voltou a tocar: ${tocando()} fonte(s)`);
+    regiao.soltar();
+  }
+
+  // O destino que tomou os sons de uma contribuição e perde a disputa: o som
+  // dela para lá, que é onde ele mora (T8 N1).
+  {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sonsDaContribuicao = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar([{ forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando: true }]);
+      return r;
+    });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    confere(caso, Boolean(tomou) && Audio.ultimo?.fontes[0]?.tocando === true, "a vinheta da contribuição não tocou");
+    outro?.calarSonsForaDaTela(true);
+    tomou?.calarSonsForaDaTela(false);
+    confere(
+      caso,
+      Audio.ultimo?.fontes[0]?.parou === true && ditos(d, "vinheta", "pausada").length === 1,
+      "o destino que segura o som da contribuição perdeu a disputa, e o som seguiu tocando: "
+        + `parou=${Audio.ultimo?.fontes[0]?.parou}, «pausada» dita ${ditos(d, "vinheta", "pausada").length} vez(es)`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -2846,6 +3061,7 @@ async function oSomQueTerminouVoltaComOTocandoDeclarado() {
     osBytesDoSomChegamPelosDoisCaminhosDoIpc,
     asProtecoesDoTocadorEDaMontagemDoSom,
     oSomQueTerminouVoltaComOTocandoDeclarado,
+    oSomQueSaiDaTelaParaComoOAudioParava,
   ];
   for (const prova of provas) {
     try {

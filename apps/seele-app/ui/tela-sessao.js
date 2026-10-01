@@ -363,6 +363,10 @@ function desenhar(snapshot) {
   desenharAviso(snapshot);
 
   desenhado = snapshot;
+  // Com os nós de MOD já recolocados: o som do que saiu da tela — a pessoa que
+  // saiu da sala, o canal que sumiu — para, como o `<audio>` parava. Ver
+  // `calarOsSonsQueSairamDaTela`, em `base.js`.
+  calarOsSonsQueSairamDaTela();
 }
 
 /**
@@ -1751,6 +1755,8 @@ $("lista-mensagens").addEventListener("keydown", (evento) => {
  */
 function redesenharAsPessoas() {
   if (desenhado) desenharPessoas(desenhado);
+  // O cartão que deixou a lista não segue tocando: ver `calarOsSonsQueSairamDaTela`.
+  calarOsSonsQueSairamDaTela();
 }
 
 function desenharPessoas(snapshot) {

@@ -451,8 +451,14 @@ function acordarTudo(no) {
     palcos: { camadas: palco },
     camada: camadaDoTeste,
     raiz: new No("div", ""),
-    renderer: { soltar() { superficie.soltou = true; } },
+    renderer: {
+      soltar() { superficie.soltou = true; },
+      // Anota se a página ainda estava no documento quando pediu: o som que se
+      // cala é o que saiu dele, e pedir antes de tirar o nó não cala nada.
+      calarSonsForaDaTela() { superficie.calouNoDocumento.push(superficie.montada); },
+    },
     soltou: false,
+    calouNoDocumento: [],
   });
 
   superficie.abrir();
@@ -469,6 +475,16 @@ function acordarTudo(no) {
 
   superficie.fechar();
   confere("R6 · fechar", superficie.montada === false, "fechar deixou o nó no palco");
+  // **E o som dela para.** Fechar tira o nó do documento e mantém o renderer
+  // para reabrir; uma fonte de WebAudio não para por sair do documento, como o
+  // `<audio>` parava — quem fecha a MESA continuava ouvindo a trilha (I-1 da
+  // revisão ampla do Plano 1D). O som da região é medido em `regiao-do-mod.cjs`.
+  confere(
+    "R6 · fechar",
+    JSON.stringify(superficie.calouNoDocumento) === JSON.stringify([false]),
+    "fechar não pediu ao renderer que calasse o som da página depois de tirá-la do documento "
+      + `(${JSON.stringify(superficie.calouNoDocumento)}): um som de MOD continua tocando com a página fechada`,
+  );
 
   // **A correção de R6.** Antes, isto devolvia sucesso e a janela não voltava.
   superficie.mostrar();
@@ -732,6 +748,7 @@ contexto.RegiaoDeMod = class {
   }
   aplicar() { return 0; }
   soltar() { soltouRenderer += 1; }
+  calarSonsForaDaTela() {}
 };
 contexto.PERFIS_DE_RENDER = { cartao: {}, superficie: {} };
 contexto.elemento = (tag) => new No(tag, "");
@@ -825,6 +842,85 @@ contexto.cartoesDosMods = new Map();
     `mil ciclos com conteúdo montado deixaram ${dono.recursos.length} recurso(s) retido(s)`,
   );
   confere("R4b · mil com desenho", registro.porHandle.size === 0, "sobraram contribuições vivas");
+}
+
+// --------------- I-1 · o som de quem saiu da tela, pela varredura de base.js
+
+{
+  // `calarOsSonsQueSairamDaTela` mora em `base.js`, no recorte que R4b já
+  // roda, e é chamada no fim de cada desenho que pode tirar um nó de MOD da
+  // tela. Ela pergunta a cada renderer se as mídias de cartão dele desenham
+  // agora; os renderers aqui são de mentira e anotam a resposta — o som de
+  // cada um é medido em `regiao-do-mod.cjs`.
+  //
+  // A regra é a de `midiasDoPonto`: uma substituição desenha onde
+  // `escolherSubstituicao` a escolhe, um acréscimo desenha sempre, e um
+  // cartão da API 3 desenha quando o MOD está em `modsDeCartaoQueValem`.
+  const ouvidos = new Map();
+  const renderer = (nome) => ({
+    calarSonsForaDaTela(cartoesPintam = true) { ouvidos.set(nome, cartoesPintam); },
+  });
+  const registro = new R();
+  const instancia = (id) => {
+    const nova = new I(id, id.replace("/", "-"), 7, {});
+    nova.estado = contexto.ESTADOS_DE_MOD.ativa;
+    return nova;
+  };
+  const [a, b, c] = ["mod/a", "mod/b", "mod/c"].map(instancia);
+  contexto.contribuicoesDosMods = registro;
+  contexto.regioesDosMods = new Map([
+    [a, { id: "mod/a", ...renderer("a região de mod/a, cujos cartões valem") }],
+    [b, { id: "mod/b", ...renderer("a região de mod/b, cujos cartões não valem") }],
+  ]);
+  contexto.modsDeCartaoQueValem = () => ["mod/a"];
+  contexto.preferenciaConsultadaPara = () => "";
+  const montada = (mod, dono, pedido, nome) => {
+    const { handle } = registro.registrar({ id: mod }, dono, pedido);
+    registro.porHandle.get(handle).montadas = new Map([[pedido.alvo ?? "", { renderer: renderer(nome) }]]);
+  };
+  montada("mod/a", a, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 0 }, "a substituição que perdeu");
+  montada("mod/b", b, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 10 }, "a substituição que venceu");
+  montada("mod/c", c, { ponto: "canal.item", modo: "adicionar", alvo: "1" }, "o acréscimo");
+
+  const varrer = typeof contexto.calarOsSonsQueSairamDaTela === "function"
+    ? contexto.calarOsSonsQueSairamDaTela
+    : () => {};
+  confere(
+    "I-1 · a varredura",
+    typeof contexto.calarOsSonsQueSairamDaTela === "function",
+    "`calarOsSonsQueSairamDaTela` não existe no recorte de `base.js` que R4b roda: nada cala o som de quem saiu da tela",
+  );
+  varrer();
+  const esperado = {
+    "a região de mod/a, cujos cartões valem": true,
+    "a região de mod/b, cujos cartões não valem": false,
+    "a substituição que perdeu": false,
+    "a substituição que venceu": true,
+    "o acréscimo": true,
+  };
+  for (const [nome, desenha] of Object.entries(esperado)) {
+    confere(
+      "I-1 · a varredura",
+      ouvidos.get(nome) === desenha,
+      ouvidos.has(nome)
+        ? `a varredura disse que as mídias de cartão de «${nome}» ${ouvidos.get(nome) ? "desenham" : "não desenham"}, e o `
+          + `certo é o contrário: ${desenha ? "um som na tela seria calado" : "um som que saiu da tela seguiria tocando"}`
+        : `a varredura não visitou «${nome}»: um som que saia da tela ali seguiria tocando sem controle à vista`,
+    );
+  }
+
+  // Com «o SEELE desenha» o cartão, as duas substituições deixam de desenhar.
+  contexto.preferenciaConsultadaPara = () => contexto.NATIVO;
+  ouvidos.clear();
+  varrer();
+  confere(
+    "I-1 · a varredura",
+    ouvidos.get("a substituição que venceu") === false && ouvidos.get("o acréscimo") === true,
+    "com «o SEELE desenha» o cartão, a substituição escolhida antes seguiu desenhando para a varredura, ou o "
+      + `acréscimo deixou de desenhar: ${JSON.stringify(Object.fromEntries(ouvidos))}`,
+  );
+  for (const handle of Array.from(registro.porHandle.keys())) registro.revogar(handle);
+  delete contexto.preferenciaConsultadaPara;
 }
 
 // --------------------- R4c · mil superfícies criadas e descartadas

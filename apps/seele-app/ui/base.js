@@ -1146,6 +1146,8 @@ contribuicoesDosMods.aoMudar(() => {
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   if (typeof redesenharAsEntradasDeMod === "function") redesenharAsEntradasDeMod();
   if (typeof redesenharAvatares === "function") redesenharAvatares();
+  // Com os nós já recolocados: o som de quem saiu da tela para.
+  calarOsSonsQueSairamDaTela();
 });
 
 /**
@@ -1370,13 +1372,12 @@ function conteudoDasContribuicoes(ponto, alvo = "") {
  * chegou antes de a preferência mudar fica no cache da contribuição, o cartão
  * de um MOD que já valeu fica montado para voltar sem piscar, e os cartões da
  * API 3 montam na declaração. Contada, essa mídia sairia na gestão ao lado de
- * «o SEELE desenha». Por isso cada uma conta pela regra que a tela usa para
- * desenhá-la:
+ * «o SEELE desenha». (O som de quem perdeu não segue tocando: ele é pausado
+ * por `calarOsSonsQueSairamDaTela`, pela mesma regra.) Por isso cada uma conta
+ * pela regra que a tela usa para desenhá-la:
  *
- * - uma substituição conta no destino em que `escolherSubstituicao` a escolhe,
- *   com a preferência que a tela consulta (`preferenciaConsultadaPara`) — a
- *   mesma pergunta que `avatarContribuido` e a lista de pessoas fazem;
- * - um acréscimo conta sempre: ele não disputa;
+ * - uma contribuição conta onde `aContribuicaoPinta` diz que ela desenha: uma
+ *   substituição, no destino em que é escolhida; um acréscimo, sempre;
  * - um cartão da API 3 conta quando o MOD está em `modsDeCartaoQueValem`.
  *
  * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
@@ -1384,11 +1385,6 @@ function conteudoDasContribuicoes(ponto, alvo = "") {
  *   `motivos` traz até três, sem repetir, cada um com o MOD na frente.
  */
 function midiasDoPonto(ponto) {
-  const preferido = typeof preferenciaConsultadaPara === "function"
-    ? preferenciaConsultadaPara(ponto)
-    : "";
-  const pinta = (contribuicao, destino) => contribuicao.modo !== "substituir"
-    || contribuicoesDosMods.escolherSubstituicao(ponto, destino, preferido).escolhida === contribuicao;
   const soma = { carregando: 0, pronta: 0, recusada: 0, motivos: [] };
   const contar = (mod, anotada) => {
     if (anotada.situacao === "carregando") {
@@ -1408,11 +1404,11 @@ function midiasDoPonto(ponto) {
   };
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
     if (contribuicao.ponto !== ponto) continue;
-    if (contribuicao.retrato && pinta(contribuicao, contribuicao.alvo)) {
+    if (contribuicao.retrato && aContribuicaoPinta(contribuicao, contribuicao.alvo)) {
       contar(contribuicao.mod, contribuicao.retrato);
     }
     for (const [destino, montagem] of contribuicao.montadas ?? []) {
-      if (!pinta(contribuicao, destino)) continue;
+      if (!aContribuicaoPinta(contribuicao, destino)) continue;
       for (const anotada of montagem.renderer.midiasAnotadas()) contar(contribuicao.mod, anotada);
     }
   }
@@ -1424,6 +1420,65 @@ function midiasDoPonto(ponto) {
     }
   }
   return soma;
+}
+
+/**
+ * Se esta contribuição desenha neste destino agora — a regra que a tela usa.
+ *
+ * Uma substituição desenha no destino em que `escolherSubstituicao` a escolhe,
+ * com a preferência que a tela consulta (`preferenciaConsultadaPara`) — a
+ * mesma pergunta que `avatarContribuido` e a lista de pessoas fazem. Um
+ * acréscimo desenha sempre: ele não disputa.
+ *
+ * **Uma regra para quem pergunta**: `midiasDoPonto` conta a mídia de quem
+ * desenha, e `calarOsSonsQueSairamDaTela` cala o som de quem não desenha. Duas
+ * cópias seriam duas respostas no dia em que uma mudasse.
+ *
+ * @param {object} contribuicao Do registro.
+ * @param {string} destino Para quem ela foi montada, ou `""` num ponto sem alvo.
+ */
+function aContribuicaoPinta(contribuicao, destino) {
+  if (contribuicao.modo !== "substituir") return true;
+  const preferido = typeof preferenciaConsultadaPara === "function"
+    ? preferenciaConsultadaPara(contribuicao.ponto)
+    : "";
+  return contribuicoesDosMods
+    .escolherSubstituicao(contribuicao.ponto, destino, preferido)
+    .escolhida === contribuicao;
+}
+
+/**
+ * Cala o som de MOD que um desenho tirou da tela.
+ *
+ * Um `<audio>` pausava sozinho ao sair do documento; uma fonte de WebAudio não
+ * (ver `RegiaoDeMod#calarSonsForaDaTela`, em `mods-regiao.js`). Quem tira um nó
+ * de MOD da tela sem descartá-lo é quem desenha — a lista de pessoas, os
+ * canais, a escolha de quem apresenta um lugar —, e por isso esta função roda
+ * no fim de cada um deles, com os nós já recolocados: `desenhar`,
+ * `redesenharAsPessoas`, o `aoMudar` do registro e `escolherApresentacao`. A
+ * página fechada cala o som dela em `SuperficieDeMod#fechar`.
+ *
+ * Ela alcança o que a revisão ampla do Plano 1D mediu tocando fora da tela
+ * (I-1):
+ * - a região de cada MOD, com os cartões da API 3 de quem está fora de
+ *   `modsDeCartaoQueValem`: com «o SEELE desenha» o cartão, o som do cartão
+ *   para, e o da região não;
+ * - cada destino de cada contribuição, pela regra de `aContribuicaoPinta`: o
+ *   de quem perdeu a disputa para, e o de quem saiu da sala — que continua em
+ *   `montadas`, fora do documento — também. Assim o som de uma contribuição
+ *   sem alvo, que mora só no destino que o tomou (`montarSom`), não fica
+ *   soando quando esse destino deixa de desenhar (o N1 da Task 8).
+ */
+function calarOsSonsQueSairamDaTela() {
+  const valem = new Set(modsDeCartaoQueValem());
+  for (const regiao of regioesDosMods.values()) {
+    regiao.calarSonsForaDaTela(valem.has(regiao.id));
+  }
+  for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
+    for (const [destino, montagem] of contribuicao.montadas ?? []) {
+      montagem.renderer.calarSonsForaDaTela(aContribuicaoPinta(contribuicao, destino));
+    }
+  }
 }
 
 /**

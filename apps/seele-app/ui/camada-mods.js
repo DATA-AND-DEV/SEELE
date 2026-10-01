@@ -673,6 +673,10 @@ function escolherApresentacao(ponto, id) {
   if (typeof redesenharAvatares === "function") redesenharAvatares();
   desenharApresentacoes();
   desenharQuemPinta();
+  // E o som de quem deixou de desenhar para — o de uma substituição que
+  // perdeu, o de um cartão da API 3 sob «o SEELE desenha». Ver
+  // `calarOsSonsQueSairamDaTela`, em `base.js`.
+  calarOsSonsQueSairamDaTela();
 }
 
 /**

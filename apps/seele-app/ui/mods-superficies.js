@@ -606,6 +606,12 @@ class SuperficieDeMod {
    * montado, as classes e o que estava escrito nos campos permanecem, e
    * `mostrar` os traz de volta. `descartar` é o outro verbo — esse acaba com
    * ela.
+   *
+   * **O som dela para**, depois de o nó sair: um `<audio>` pausava sozinho ao
+   * sair do documento, e uma fonte de WebAudio não — quem fechava a MESA
+   * continuava ouvindo a trilha (I-1 da revisão ampla do Plano 1D). Ver
+   * `RegiaoDeMod#calarSonsForaDaTela`. Ocultar não cala: o nó continua no
+   * documento, como um `<audio>` escondido continuava tocando.
    */
   fechar() {
     if (this.solta) return;
@@ -614,6 +620,7 @@ class SuperficieDeMod {
     this.soltarFoco();
     const no = this.tipo === "dialogo" ? this.camada : this.raiz;
     no.remove();
+    this.renderer.calarSonsForaDaTela();
     this.aoPalcoMudar?.();
   }
 

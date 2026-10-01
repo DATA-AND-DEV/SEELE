@@ -93,10 +93,11 @@ async function abrirASessao(navegador, servidor) {
  * @param {string} oQueQuebra A frase da falha.
  * @param {Function} [comoFicou] Rodada na página quando o prazo vence; o que
  *   ela devolve entra na frase.
+ * @param {*} [argumento] O que `condicao` recebe na página.
  */
-async function esperarQue(pagina, condicao, oQueQuebra, comoFicou) {
+async function esperarQue(pagina, condicao, oQueQuebra, comoFicou, argumento = null) {
   try {
-    await pagina.waitForFunction(condicao, null, { timeout: 10_000 });
+    await pagina.waitForFunction(condicao, argumento, { timeout: 10_000 });
   } catch (falha) {
     const ficou = comoFicou
       ? await pagina.evaluate(comoFicou).catch((erro) => `não deu para ler: ${erro.message.split("\n")[0]}`)
@@ -757,10 +758,10 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
 // O som de MOD toca por WebAudio, sob a CSP do produto.
 // ---------------------------------------------------------------------------
 
-/** Um WAV de um segundo e meio, 440 Hz, feito aqui: nenhum binário no repositório. */
-function wavDeTeste() {
+/** Um WAV de 440 Hz — por padrão de um segundo e meio —, feito aqui: nenhum binário no repositório. */
+function wavDeTeste(segundos = 1.5) {
   const taxa = 8000;
-  const amostras = taxa * 1.5;
+  const amostras = Math.round(taxa * segundos);
   const bytes = Buffer.alloc(44 + amostras * 2);
   bytes.write("RIFF", 0, "ascii");
   bytes.writeUInt32LE(36 + amostras * 2, 4);
@@ -950,11 +951,204 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
   await pagina.close();
 }
 
+// ---------------------------------------------------------------------------
+// O som que sai da tela para, como o `<audio>` parava.
+// ---------------------------------------------------------------------------
+
+/**
+ * Os caminhos em que o produto tira um nó de MOD da tela **sem** descartá-lo,
+ * no Chromium, com o WebAudio de verdade (I-1 da revisão ampla do Plano 1D,
+ * medido na sonda «som solto»): a página fechada pela saída do produto, o som
+ * novo que uma página fechada declara `tocando`, a contribuição que perde a
+ * disputa para «o SEELE desenha», o cartão da API 3 que deixa a lista, e o
+ * destino de quem saiu do servidor.
+ *
+ * Antes, nos cinco, a fonte seguia até o fim fora da tela, e o MOD não ouvia
+ * `pausada`. Um `<audio>` tirado do documento pausava sozinho.
+ */
+async function oSomQueSaiDaTelaPara(navegador, servidor) {
+  const { pagina, erros, recusasDaCsp } = await abrirASessao(navegador, servidor);
+  await pagina.evaluate((bytes) => {
+    // Quantas fontes pararam, e quantas estão tocando agora.
+    window.paradas = 0;
+    window.ativas = 0;
+    const parar = AudioBufferSourceNode.prototype.stop;
+    AudioBufferSourceNode.prototype.stop = function (...args) {
+      window.paradas += 1;
+      return parar.apply(this, args);
+    };
+    const comecar = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args) {
+      window.ativas += 1;
+      this.addEventListener("ended", () => {
+        window.ativas -= 1;
+      });
+      return comecar.apply(this, args);
+    };
+    testTable.midia_do_mod = { papel: "som", uri: "data:audio/wav;base64,UklGRg==", bytes: bytes.length };
+    testTable.som_do_mod = () => new Uint8Array(bytes).buffer;
+    window.somA = instancia("mod/a");
+    window.somB = instancia("mod/b");
+  }, wavDeTeste(6));
+  const doSom = (chave) => pagina.evaluate((c) => eventosDoMod
+    .filter((e) => e.nome === "midia" && e.chave === c)
+    .map((e) => `${e.estado}${e.porque ? ` (${e.porque})` : ""}`), chave);
+  const esperarOSom = (chave, estado, oQueQuebra) => esperarQue(
+    pagina,
+    ([c, quer]) => eventosDoMod.some((e) => e.nome === "midia" && e.chave === c && e.estado === quer),
+    oQueQuebra,
+    // O `comoFicou` roda na página, sem os argumentos: lê o que o MOD ouviu.
+    () => eventosDoMod.filter((e) => e.nome === "midia").map((e) => `${e.chave}: ${e.estado}`),
+    [chave, estado],
+  );
+  const contagem = () => pagina.evaluate(() => ({ paradas: window.paradas, ativas: window.ativas }));
+
+  // 1. A página fechada pela saída do produto, com a trilha tocando.
+  await pagina.evaluate(() => {
+    const conjunto = superficiesDoMod({ id: "mod/a", hash: "mod-a" }, somA);
+    conjunto.criar({ id: "mesa", tipo: "pagina", titulo: "Mesa" });
+    conjunto.de("mesa").montar([{ forma: "midia", chave: "trilha", fonte: "som/trilha.wav", descricao: "Trilha" }]);
+  });
+  await esperarQue(
+    pagina,
+    () => document.querySelector('figure[data-chave-do-mod="trilha"] .regiao-de-mod-som'),
+    "a trilha da página não ficou de pé, com o botão do produto",
+  );
+  await pagina.click('figure[data-chave-do-mod="trilha"] .regiao-de-mod-som');
+  await esperarOSom("trilha", "tocando", "o botão do produto não tocou a trilha da página");
+  const antesDeFechar = await contagem();
+  await pagina.evaluate(() => superficiesDoMod({ id: "mod/a", hash: "mod-a" }, somA).de("mesa").pedirFechamento("saida-do-produto"));
+  await esperarOSom(
+    "trilha",
+    "pausada",
+    "a página fechou pela saída do produto e o MOD não ouviu «pausada»: a trilha segue tocando fora da tela",
+  );
+  await esperarQue(pagina, () => window.ativas === 0, "a página fechou e a fonte da trilha continuou tocando", () => window.ativas);
+  const depoisDeFechar = await contagem();
+  assert.equal(
+    depoisDeFechar.paradas,
+    antesDeFechar.paradas + 1,
+    "a página fechou e a fonte da trilha não foi parada: o som segue até o fim, sem controle à vista",
+  );
+
+  // 2. A página fechada recebe um som novo declarado `tocando`: ele não toca,
+  // e a recusa, com o motivo, vai ao MOD e ao registro.
+  await pagina.evaluate(() => superficiesDoMod({ id: "mod/a", hash: "mod-a" }, somA).de("mesa").montar([
+    { forma: "midia", chave: "trilha", fonte: "som/trilha.wav", descricao: "Trilha" },
+    { forma: "midia", chave: "combate", fonte: "som/combate.wav", tocando: true },
+  ]));
+  await esperarOSom(
+    "combate",
+    "recusada",
+    "a página fechada recebeu um som novo declarado `tocando`, e ele não foi recusado",
+  );
+  const recusa = await doSom("combate");
+  assert.ok(
+    recusa.some((e) => /tela/.test(e)) && !recusa.some((e) => e.startsWith("tocando")),
+    `o som novo da página fechada tocou, ou foi recusado sem dizer por quê ao MOD: ${recusa.join(", ")}`,
+  );
+  const linha = await pagina.evaluate(() => testCalls
+    .filter((c) => c.cmd === "registrar_da_janela" && String(c.args?.oQue ?? "").includes("«combate»"))
+    .map((c) => c.args.oQue));
+  assert.ok(
+    linha.some((texto) => /tela/.test(texto)),
+    `a recusa do som da página fechada não chegou ao registro: ${JSON.stringify(linha)}`,
+  );
+  assert.equal((await contagem()).ativas, 0, "um som começou a tocar dentro da página fechada");
+
+  // 3. A contribuição que perde a disputa para «o SEELE desenha».
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.registrar({ id: "mod/a" }, somA, {
+      ponto: "pessoa.cartao",
+      modo: "substituir",
+      alvo: "2",
+      conteudo: [{ forma: "texto", dentro: "Lia (mod/a)" }, { forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando: true }],
+    });
+    desenhar(testTable.snapshot);
+  });
+  await esperarOSom("vinheta", "tocando", "a vinheta da substituição de `pessoa.cartao` não tocou");
+  const antesDoNativo = await contagem();
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA));
+  await esperarOSom(
+    "vinheta",
+    "pausada",
+    "«o SEELE desenha» o cartão, a substituição saiu da tela, e o MOD não ouviu «pausada»: a vinheta segue tocando",
+  );
+  assert.equal(
+    (await contagem()).paradas,
+    antesDoNativo.paradas + 1,
+    "«o SEELE desenha» o cartão e a fonte da vinheta não foi parada: o som de quem perdeu a disputa segue até o fim",
+  );
+  await pagina.evaluate(() => {
+    escolherApresentacao("pessoa.cartao", "");
+    contribuicoesDosMods.revogarDoMod("mod/a");
+  });
+
+  // 4. O cartão da API 3 sob «o SEELE desenha».
+  await pagina.evaluate(() => darCartoesDoMod({ id: "mod/b", hash: "mod-b" }, somB, {
+    2: [{ forma: "midia", chave: "cartao-de-b", fonte: "som/b.wav", tocando: true }],
+  }));
+  await esperarOSom("cartao-de-b", "tocando", "o som do cartão da API 3 não tocou");
+  const antesDoCartao = await contagem();
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA));
+  await esperarOSom(
+    "cartao-de-b",
+    "pausada",
+    "«o SEELE desenha» o cartão, o cartão da API 3 saiu da lista, e o MOD não ouviu «pausada»",
+  );
+  assert.equal(
+    (await contagem()).paradas,
+    antesDoCartao.paradas + 1,
+    "o cartão da API 3 saiu da lista e a fonte dele não foi parada",
+  );
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
+
+  // 5. Quem sai: a contribuição continua montada para o destino de quem saiu
+  // do servidor (`montadas` não encolhe), e o nó sai do documento no retrato
+  // seguinte — que é só um `desenhar`, sem escolha nem registro mudando.
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.registrar({ id: "mod/a" }, somA, {
+      ponto: "pessoa.cartao",
+      modo: "adicionar",
+      alvo: "2",
+      conteudo: [{ forma: "midia", chave: "chegada", fonte: "som/chegada.wav", tocando: true }],
+    });
+    desenhar(testTable.snapshot);
+  });
+  await esperarOSom("chegada", "tocando", "o som que a contribuição dá a Lia não tocou");
+  const antesDeSair = await contagem();
+  await pagina.evaluate(() => {
+    const semLia = structuredClone(testTable.snapshot);
+    for (const sala of semLia.voice_rooms) sala.people = sala.people.filter((pessoa) => pessoa.id !== 2);
+    semLia.presentes = semLia.presentes.filter((pessoa) => pessoa.id !== 2);
+    desenhar(semLia);
+  });
+  await esperarOSom(
+    "chegada",
+    "pausada",
+    "Lia saiu do servidor, o nó dela saiu da lista, e o MOD não ouviu «pausada»: o som segue tocando para ninguém",
+  );
+  assert.equal(
+    (await contagem()).paradas,
+    antesDeSair.paradas + 1,
+    "Lia saiu do servidor e a fonte do som dela não foi parada",
+  );
+  await pagina.evaluate(() => {
+    contribuicoesDosMods.revogarDoMod("mod/a");
+    desenhar(testTable.snapshot);
+  });
+
+  assert.deepEqual(recusasDaCsp, [], `a CSP recusou mídia: ${recusasDaCsp.join(" | ")}`);
+  assert.deepEqual(erros, [], `a página lançou erro durante o som que sai da tela: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
   oModoDeDesenvolvedorContornaSemTomarNada,
   oSomDeModTocaPorWebAudioSobACspDoProduto,
+  oSomQueSaiDaTelaPara,
 ];
 
 (async () => {
