@@ -28,11 +28,12 @@ name: CI
 # bancadas de MOD de `node` puro, e o `--sem-bateria` pula tudo isso, dizendo
 # que pulou.
 #
-# **As bancadas de navegador são a exceção nos dois caminhos.** As quatro que
-# o job `bancadas` nomeia só rodam aqui, e uma release pode sair com uma delas
-# vermelha se ninguém disparar este workflow antes. As outras três da pasta —
-# `ajustes-v013.cjs`, `escolha-de-versao-de-mod.cjs` e `gif-na-conversa.cjs` —
-# não rodam nem aqui (ver `xtask/src/check_runtime.rs`).
+# **As bancadas de navegador são a exceção nos dois caminhos.** Elas só rodam
+# aqui, no job `bancadas`, e uma release pode sair com uma delas vermelha se
+# ninguém disparar este workflow antes. Quem diz quais são é o teste
+# `toda_bancada_da_pasta_roda_em_algum_lugar` (`xtask/src/check_runtime.rs`):
+# toda bancada da pasta está num `run:` daquele job ou na lista das de Node
+# puro, e a que não está reprova o teste.
 #
 # Voltar ao automático é devolver as duas linhas:
 #
@@ -268,10 +269,27 @@ jobs:
       # de ser acrescentada aqui de propósito: um laço que rodasse tudo passaria
       # a reprovar a CI no dia em que alguém guardasse um rascunho ali, e a
       # resposta a isso seria tirar o laço.
+      #
+      # **E esquecê-la é vermelho.** O teste
+      # `toda_bancada_da_pasta_roda_em_algum_lugar`, em
+      # `xtask/src/check_runtime.rs`, exige que todo `.cjs` de `bancada/` —
+      # fora o `playwright.cjs` e o `telas.cjs`, que não são bancada — esteja
+      # num `run:` deste job, na lista das de Node puro, ou na lista de
+      # exceções dele, que é vazia. É ele que conta quantas são, e não um
+      # comentário.
       - run: node apps/seele-app/bancada/compartilhar-por-identidade.cjs
       - run: node apps/seele-app/bancada/conversa-com-estado.cjs
       - run: node apps/seele-app/bancada/qualidade-da-voz.cjs
       - run: node apps/seele-app/bancada/avatares-do-mod.cjs
+      # **Estas três nunca rodaram em lugar nenhum.** Entraram em 21/09/2026
+      # (`ajustes-v013.cjs` e `gif-na-conversa.cjs` em `970cb67`,
+      # `escolha-de-versao-de-mod.cjs` em `0018e71`), e nenhum workflow nem a
+      # bateria do `empacotar/publicar.sh` as nomeou até 01/10/2026
+      # (`git log -S` com o nome de cada uma). Entram sem terem sido rodadas
+      # nesta mudança: o primeiro disparo manual deste workflow dirá se passam.
+      - run: node apps/seele-app/bancada/ajustes-v013.cjs
+      - run: node apps/seele-app/bancada/escolha-de-versao-de-mod.cjs
+      - run: node apps/seele-app/bancada/gif-na-conversa.cjs
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as
@@ -294,8 +312,9 @@ jobs:
   # do `empacotar/publicar.sh`. Eram três listas escritas à mão — a deste job,
   # a do `validar` e a do `check_runtime.rs`, que ninguém chamava e tinha
   # quatro das seis —, e uma bancada nova entraria numa e não nas outras. Por
-  # isso o job precisa de Rust, como o das regras, e do cache que o clippy e os
-  # testes usam.
+  # isso o job precisa de Rust, como o das regras, e de um cache de compilação,
+  # como o clippy e os testes: a mesma ação, com uma chave só dele
+  # (`ci-bancadas-de-mod`), porque ele compila o `xtask` e nada mais.
   bancadas-de-mod:
     name: bancadas de MOD (node puro)
     runs-on: ubuntu-24.04

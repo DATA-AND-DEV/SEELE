@@ -2571,8 +2571,10 @@ fn uma_bancada_de_mod_vermelha_para_a_publicacao_antes_de_empacotar() {
     // **As versões saem por este script, e a bateria dele não rodava bancada
     // nenhuma.**
     //
-    // As bancadas de MOD de Node puro são o único guarda de que as recusas da
-    // janela chegam ao seele.log. O lote CI do plano 1C as pôs no `validar` do
+    // Entre outras coisas, as bancadas de MOD de Node puro guardam que as
+    // recusas de mídia, de cartões, de contribuição e do avatar chegam ao
+    // seele.log: o `cargo test` confere a porta do registro, mas não enxerga
+    // quem a chama. O lote CI do plano 1C as pôs no `validar` do
     // `release.yml`, e a revisão dele mediu que as versões publicadas tinham
     // saído por aqui, por fora daquele portão. Uma bancada vermelha passava
     // calada até a máquina de quem instalou.

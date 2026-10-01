@@ -201,13 +201,13 @@ jobs:
       # ao seele.log: o `cargo test` confere a porta do registro, mas não
       # enxerga quem a chama (revisão ampla do plano 1C, I1). A bateria do
       # `empacotar/publicar.sh` e o `ci.yml` rodam a mesma lista, e uma bancada
-      # nova entra lá, e não aqui.
+      # nova entra em `xtask/src/check_runtime.rs`, e não aqui.
       #
       # Cada uma reprova também quando não chega ao fim: uma promessa pendurada
       # sairia com 0 sem ter provado nada. As bancadas de navegador
-      # (Playwright) não estão aqui: quatro delas rodam no job `bancadas` do
-      # `ci.yml`, e três não rodam em lugar nenhum (ver
-      # `xtask/src/check_runtime.rs`).
+      # (Playwright) não estão aqui: elas rodam só no job `bancadas` do
+      # `ci.yml`, e um teste em `xtask/src/check_runtime.rs` reprova se uma
+      # bancada da pasta não estiver naquele job nem na lista de Node puro.
       #
       # **Depois dos testes, e com `!cancelled()`.** No Actions um passo que
       # reprova pula os seguintes que não dizem o contrário. Antes dos testes,
