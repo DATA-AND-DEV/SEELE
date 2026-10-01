@@ -415,9 +415,10 @@ function relogioDeMentira() {
 /**
  * Um contexto com o DOM mínimo e `mods-regiao.js` dentro.
  *
- * @param {object} opcoes `{ audio, relogio }`: o WebAudio de mentira desta
- *   prova (`audioDeMentira`), e um relógio que só anda quando ela manda
- *   (`relogioDeMentira`) — sem ele, o de verdade.
+ * @param {object} opcoes `{ audio, relogio, console }`: o WebAudio de mentira
+ *   desta prova (`audioDeMentira`), um relógio que só anda quando ela manda
+ *   (`relogioDeMentira`) — sem ele, o de verdade —, e o `console` da janela,
+ *   para a prova ler o que a região diz nele — sem ele, o do node.
  */
 function bancada(opcoes = {}) {
   const quadros = [];
@@ -432,7 +433,7 @@ function bancada(opcoes = {}) {
   const Audio = opcoes.audio ?? audioDeMentira();
 
   const contexto = vm.createContext({
-    console,
+    console: opcoes.console ?? console,
     document: doc,
     Node: { TEXT_NODE: TEXTO, ELEMENT_NODE: ELEMENTO },
     // O relógio e o `atob` de verdade, salvo quando a prova traz o dela: o
@@ -1955,6 +1956,111 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
   }
 }
 
+/**
+ * **Um dono sem `anotarRecusa`, ou com uma que lança, não troca nem cala a
+ * recusa que o MOD recebe.**
+ *
+ * Os laboratórios dos MODs publicados carregam este arquivo com um dono deles,
+ * escrito antes de `anotarRecusa` existir. A chamada sem guarda lançava dentro
+ * do `then` da mídia: o `catch` dizia ao MOD «falhou», com o motivo trocado por
+ * `this.dono.anotarRecusa is not a function`, e lançava de novo numa promessa
+ * que ninguém pegava — o `pageerror` do laboratório (m2 da revisão final do
+ * Plano 1). A linha do `seele.log` é de quem hospeda, e o evento é do MOD: um
+ * não pode levar o outro junto.
+ *
+ * O `pageerror` do navegador é, no node, a promessa rejeitada que ninguém
+ * pegou: esta prova a escuta enquanto roda. E o dono cuja `anotarRecusa` lança
+ * tem o tropeço dito no `console` da janela, em vez de engolido.
+ */
+async function umDonoSemAnotarRecusaNaoTrocaARecusaDoMod() {
+  const soltas = [];
+  const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
+  process.on("unhandledRejection", pegar);
+  try {
+    const casos = [
+      {
+        nome: "mídia acima do teto",
+        midia: (b) => () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: b.LIMITES.bytesDeMidia + 1 }),
+        declarar: { forma: "midia", chave: "m", fonte: "img/m.png" },
+        estado: "recusada",
+        pedaco: "teto",
+      },
+      {
+        nome: "mídia que o Rust recusou",
+        midia: () => () => Promise.reject({ Recusado: { motivo: "arquivo-nao-declarado" } }),
+        declarar: { forma: "midia", chave: "m", fonte: "img/m.png" },
+        estado: "falhou",
+        pedaco: "arquivo-nao-declarado",
+      },
+      {
+        nome: "fundo que o Rust recusou",
+        midia: () => () => Promise.reject({ Recusado: { motivo: "arquivo-nao-declarado" } }),
+        declarar: { forma: "caixa", chave: "m", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" },
+        estado: "falhou",
+        pedaco: "arquivo-nao-declarado",
+      },
+    ];
+    const donos = [
+      { qual: "sem anotarRecusa", mexer: (api) => { delete api.anotarRecusa; }, tropeco: null },
+      {
+        qual: "com uma anotarRecusa que lança",
+        mexer: (api) => {
+          api.anotarRecusa = () => {
+            throw new Error("o registro caiu");
+          };
+        },
+        tropeco: "o registro caiu",
+      },
+    ];
+    for (const { qual, mexer, tropeco } of donos) {
+      for (const caso of casos) {
+        const avisos = [];
+        const b = bancada({
+          console: { ...console, warn: (...partes) => avisos.push(partes.map((p) => String(p?.message ?? p)).join(" ")) },
+        });
+        const d = dono(b, caso.midia(b));
+        mexer(d.api);
+        const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+        regiao.aplicar([caso.declarar]);
+        await assentar();
+        const daMidia = d.ditos.filter((dito) => dito.nome === "midia" && dito.chave === "m");
+        confere(
+          `dono ${qual} · ${caso.nome}`,
+          daMidia.length === 1
+            && daMidia[0].estado === caso.estado
+            && String(daMidia[0].porque ?? "").includes(caso.pedaco),
+          `a recusa que o MOD recebe mudou com o dono ${qual}: esperava um «${caso.estado}» com `
+            + `«${caso.pedaco}», e vieram ${JSON.stringify(daMidia)}`,
+        );
+        if (tropeco) {
+          confere(
+            `dono ${qual} · ${caso.nome}`,
+            avisos.some((aviso) => aviso.includes(tropeco)),
+            `a anotarRecusa do dono lançou e a região engoliu o tropeço calada: ${JSON.stringify(avisos)}`,
+          );
+        } else {
+          // `anotarRecusa` é opcional: um dono sem ela é um dono válido, e a
+          // região não o acusa de tropeço a cada recusa.
+          confere(
+            `dono ${qual} · ${caso.nome}`,
+            avisos.length === 0,
+            `a região tratou a anotarRecusa que falta como um tropeço, e ela é opcional: ${JSON.stringify(avisos)}`,
+          );
+        }
+        regiao.soltar();
+      }
+    }
+  } finally {
+    process.off("unhandledRejection", pegar);
+  }
+  confere(
+    "dono sem anotarRecusa",
+    soltas.length === 0,
+    "a recusa de mídia lançou numa promessa que ninguém pegou — no laboratório de um MOD, é o "
+      + `pageerror de cada recusa: ${soltas.join(" | ")}`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // 10. A região diz em que pé cada mídia está — para o diagnóstico ler.
 // ---------------------------------------------------------------------------
@@ -3369,6 +3475,7 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     osTetosDoCartaoSaoDoCartaoENaoDaRegiao,
     aImagemAcompanhaAMudancaDaFonte,
     cadaMidiaRecusadaEDitaAoAnfitriao,
+    umDonoSemAnotarRecusaNaoTrocaARecusaDoMod,
     aMidiaAnotadaDizOsTresEstados,
     oFundoEORetratoTambemDizemOEstado,
     oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,

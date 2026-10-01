@@ -432,8 +432,36 @@ class RegiaoDeMod {
   static serieDeEscopo = 0;
 
   /**
+   * **O contrato do dono, inteiro.** O do produto é `donoDaRegiao`, em
+   * `base.js`; os laboratórios dos MODs publicados carregam este arquivo com um
+   * dono deles, e é por eles que a lista diz o que pode faltar.
+   *
+   * Obrigatórios — sem um deles, o caminho que o chama lança:
+   * - `podeFalar()`: esta instância ainda é a deste MOD, e a sessão é a de pé.
+   *   Perguntado depois de cada espera, antes de montar o que chegou.
+   * - `falar(dados)`: um evento para o MOD.
+   * - `carregarMidia(caminho)` e `carregarMidiaDoServidor(canal, pedido,
+   *   campo)`: a mídia do pacote e a do servidor do MOD, com o papel e os bytes.
+   * - `bytesDoSom(caminho)`: os bytes crus de um som do pacote, para o WebAudio.
+   *   Sem ele, todo som do pacote chega ao MOD como `falhou`.
+   * - `escolherArquivo(pedido)`: o seletor da forma `arquivo`.
+   * - `abrirEndereco(url, chave)`: o endereço de um `link`, fora da janela.
+   *
+   * Opcionais — sem um deles, a região segue:
+   * - `instancia`, com `registrar(porque, descartar)`: cada recurso que a região
+   *   monta também fica na instância, para sair quando ela sai. Sem ela, só a
+   *   região solta o que montou.
+   * - `anotarRecusa(texto)`: a linha do `seele.log` de cada mídia recusada. Sem
+   *   ela, ou com uma que lança, a recusa continua dita ao MOD pelo evento (ver
+   *   `dizerRecusaDeMidia`).
+   * - `midiaMudou()`: o aviso, para o diagnóstico, de que o estado de alguma
+   *   mídia mudou.
+   *
+   * O do produto também leva `geracao`, que a região não lê: quem confere a
+   * geração é `podeFalar`.
+   *
    * @param {string} id `autor/nome`.
-   * @param {object} dono `{ instancia, geracao, podeFalar, falar, anotarRecusa, carregarMidia }`.
+   * @param {object} dono O dono, como descrito acima.
    * @param {Element} raiz O elemento onde esta região desenha.
    */
   constructor(id, dono, raiz, perfil = PERFIS_DE_RENDER.regiao) {
@@ -1398,12 +1426,25 @@ class RegiaoDeMod {
    * um par substituto não passa pela ponte (o `serde_json` recusa a cadeia), e
    * a linha inteira se perderia calada no `catch` de `registrarNoAnfitriao`.
    *
+   * **A linha do registro não leva a recusa do MOD junto.** `anotarRecusa` é
+   * opcional no dono (ver o construtor), e um dono que a não tem, ou cuja
+   * `anotarRecusa` lança, não pode fazer esta função lançar: ela é chamada
+   * dentro do `then` e do `catch` da mídia, e um lançamento ali trocava o
+   * evento do MOD por um «falhou» com o motivo errado e terminava numa
+   * promessa que ninguém pegava. É o que os laboratórios dos MODs publicados,
+   * com um dono escrito antes dela, mostravam em cada recusa. O tropeço de um
+   * dono que lança é dito no `console` da janela.
+   *
    * @param {string} chave A chave do nó, como o MOD a declarou.
    * @param {string} oQue O que aconteceu, com o número ou o motivo dentro.
    */
   dizerRecusaDeMidia(chave, oQue) {
     const nome = [...String(chave ?? "")].slice(0, 120).join("");
-    this.dono.anotarRecusa(`mídia «${nome}» ${oQue}`);
+    try {
+      this.dono.anotarRecusa?.(`mídia «${nome}» ${oQue}`);
+    } catch (falha) {
+      console.warn(`MOD ${this.id}: a recusa de mídia não chegou ao registro`, falha);
+    }
   }
 
   /**

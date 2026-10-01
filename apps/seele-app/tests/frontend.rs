@@ -8123,9 +8123,13 @@ fn o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob() {
 /// bancada `regiao-do-mod.cjs` prova isso com um dono de mentira. A outra
 /// metade ela não alcança: que o dono **de `base.js`** leve a frase ao
 /// `registrar_da_janela` como aviso, com o id do MOD em campo próprio, e só
-/// enquanto a instância é a de pé. Sem ela, as recusas chamariam um método que
-/// não existe, e cada uma lançaria dentro de um `then` que ninguém pega — o
-/// mesmo silêncio de antes, com um erro a mais no console.
+/// enquanto a instância é a de pé.
+///
+/// **E só este guarda segura a metade do produto.** `anotarRecusa` é opcional
+/// no contrato do dono (os laboratórios dos MODs publicados não a têm), e a
+/// região a chama com `?.` dentro de um `try`: um dono de `base.js` sem ela
+/// deixaria a recusa chegar ao MOD e nenhuma linha chegar ao `seele.log`, sem
+/// erro nenhum que avisasse.
 #[test]
 fn o_dono_da_regiao_leva_cada_recusa_de_midia_ao_registro() {
     let dono = js_function(&read("ui/base.js"), "function donoDaRegiao(");
