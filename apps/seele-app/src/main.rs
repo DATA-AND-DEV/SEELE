@@ -4051,7 +4051,9 @@ fn assentar_fala(
 /// É também por aqui, em ERROR, que chega o erro que o MOD não pegou: o
 /// executor o põe no canal como uma linha de `console` (`o MOD lançou: …`,
 /// `erro num temporizador: …`, `erro num ouvinte de evento: …`), pelo mesmo
-/// balde.
+/// balde. E a volta que o produto parou por um teto, com a frase do teto
+/// (`a volta passou do prazo de 500 ms e o produto parou o MOD: …`), e não
+/// como «o MOD lançou».
 ///
 /// **O texto vai em `?`, e não solto na frase.** Ele é de um terceiro, e uma
 /// quebra de linha nele escreveria no registro uma segunda linha com a cara de
@@ -10878,6 +10880,34 @@ mod a_falha_do_mod_chega_ao_registro {
             tem_mensagem(&deixou.falas, "erro-no-evento"),
             "a mensagem `erro-no-evento` deixou de ir à janela, e ela é do outro lado: {:?}",
             deixou.falas
+        );
+    }
+
+    /// **A volta que o produto parou não vira «o MOD lançou» no registro.**
+    ///
+    /// O laço infinito é dos erros mais comuns de quem escreve MOD, e o
+    /// `seele.log` dizia `o MOD lançou: InternalError: interrupted` — quem
+    /// parou foi o produto, pelo prazo ou pelo teto de trabalho. Com os tetos
+    /// do produto, o que para primeiro depende da máquina, e por isso a frase
+    /// exigida é a que as duas paradas dizem.
+    #[test]
+    fn uma_volta_que_o_produto_parou_nao_vira_o_mod_lancou_no_registro() {
+        let deixou = deixou(
+            "while (true) {}",
+            |_| {},
+            |falas, linhas| !falas.is_empty() && linhas > 0,
+            Duration::from_secs(5),
+        );
+        assert!(
+            linha_de_erro(&deixou.rastro, &["e o produto parou o MOD"]).is_some(),
+            "a volta que o produto parou não chegou ao seele.log com o id e o teto que ela \
+             passou: {}",
+            deixou.rastro
+        );
+        assert!(
+            !deixou.rastro.contains("lançou"),
+            "a volta que o produto parou foi dita no seele.log como se o MOD tivesse lançado: {}",
+            deixou.rastro
         );
     }
 }

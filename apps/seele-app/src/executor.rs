@@ -37,7 +37,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -261,6 +261,12 @@ impl Default for Limites {
 ///
 /// Um laço infinito escapa das duas primeiras se o motor nunca chamar o
 /// tratador; é por isso que as três existem juntas.
+///
+/// **E ela guarda qual teto disse sim** ([`Teto`]). O QuickJS faz da
+/// interrupção uma exceção como outra qualquer, `InternalError: interrupted`,
+/// e sem isto a volta que o produto parou chegava ao `seele.log` como «o MOD
+/// lançou» — o produto sabia que tinha sido ele, e por qual teto, e não
+/// contava.
 #[derive(Debug)]
 pub(crate) struct Interrupcao {
     revogado: AtomicBool,
@@ -268,7 +274,28 @@ pub(crate) struct Interrupcao {
     /// Quando esta volta começou. Guardado em milissegundos desde o início do
     /// executor porque `Instant` não cabe num atômico.
     comeco: std::sync::Mutex<Option<Instant>>,
+    /// Qual teto parou a volta: [`SEM_TETO`], [`PARADA_PELO_PRAZO`] ou
+    /// [`PARADA_PELO_TRABALHO`]. A revogação não entra aqui: ela tem o seu
+    /// próprio sinal, e não é teto.
+    parou_por: AtomicU8,
     limites: Limites,
+}
+
+/// Nenhum teto parou a volta.
+const SEM_TETO: u8 = 0;
+/// O prazo parou a volta.
+const PARADA_PELO_PRAZO: u8 = 1;
+/// O teto de trabalho parou a volta.
+const PARADA_PELO_TRABALHO: u8 = 2;
+
+/// **O teto que parou uma volta** — e não a revogação, que é a sessão
+/// acabando, e não o MOD passando de nada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Teto {
+    /// A volta passou do prazo ([`Limites::prazo_por_volta`]).
+    Prazo,
+    /// A volta passou do trabalho ([`Limites::consultas_por_volta`]).
+    Trabalho,
 }
 
 impl Interrupcao {
@@ -279,6 +306,7 @@ impl Interrupcao {
             revogado: AtomicBool::new(false),
             consultas: AtomicUsize::new(0),
             comeco: std::sync::Mutex::new(None),
+            parou_por: AtomicU8::new(SEM_TETO),
             limites,
         }
     }
@@ -294,20 +322,25 @@ impl Interrupcao {
         self.revogado.load(Ordering::Acquire)
     }
 
-    /// Começa uma volta: zera o trabalho e marca a hora.
+    /// Começa uma volta: zera o trabalho, esquece o teto da volta anterior e
+    /// marca a hora.
     fn comecar(&self) {
         self.consultas.store(0, Ordering::Relaxed);
+        self.parou_por.store(SEM_TETO, Ordering::Relaxed);
         if let Ok(mut comeco) = self.comeco.lock() {
             *comeco = Some(Instant::now());
         }
     }
 
-    /// O que o motor pergunta a cada tanto.
+    /// O que o motor pergunta a cada tanto. Quando um teto diz sim, ele fica
+    /// guardado para [`Self::tirar_teto`].
     fn deve_parar(&self) -> bool {
         if self.revogada() {
             return true;
         }
         if self.consultas.fetch_add(1, Ordering::Relaxed) > self.limites.consultas_por_volta {
+            self.parou_por
+                .store(PARADA_PELO_TRABALHO, Ordering::Relaxed);
             return true;
         }
         // O relógio não é lido a cada consulta: `Instant::now` num laço apertado
@@ -315,11 +348,50 @@ impl Interrupcao {
         if !self.consultas.load(Ordering::Relaxed).is_multiple_of(1024) {
             return false;
         }
-        self.comeco
+        let passou = self
+            .comeco
             .lock()
             .ok()
             .and_then(|c| *c)
-            .is_some_and(|inicio| inicio.elapsed() > self.limites.prazo_por_volta)
+            .is_some_and(|inicio| inicio.elapsed() > self.limites.prazo_por_volta);
+        if passou {
+            self.parou_por.store(PARADA_PELO_PRAZO, Ordering::Relaxed);
+        }
+        passou
+    }
+
+    /// **O teto que parou a volta, tirado**: quem o lê o consome.
+    ///
+    /// Tirado, e não só lido, porque [`rodar`] dispara os temporizadores
+    /// vencidos numa volta só: o primeiro pode ser parado pelo prazo e o
+    /// segundo lançar um `TypeError` de verdade antes de o motor consultar o
+    /// tratador de novo. Lido sem tirar, o teto do primeiro diria a parada do
+    /// segundo, e o `TypeError` sumiria.
+    fn tirar_teto(&self) -> Option<Teto> {
+        match self.parou_por.swap(SEM_TETO, Ordering::Relaxed) {
+            PARADA_PELO_PRAZO => Some(Teto::Prazo),
+            PARADA_PELO_TRABALHO => Some(Teto::Trabalho),
+            _ => None,
+        }
+    }
+
+    /// **A frase que diz a parada no `seele.log`**, para quem escreveu o MOD:
+    /// qual teto — o prazo com os milissegundos que ele tem nesta instância; o
+    /// de trabalho sem número, porque uma contagem de consultas do motor não
+    /// diz nada a quem escreve JavaScript — e o que costuma levar até ele. Sem
+    /// «lançou»: quem parou foi o produto.
+    fn frase_do_teto(&self, teto: Teto) -> String {
+        let qual = match teto {
+            Teto::Prazo => format!(
+                "do prazo de {} ms",
+                self.limites.prazo_por_volta.as_millis()
+            ),
+            Teto::Trabalho => "do teto de trabalho".to_owned(),
+        };
+        format!(
+            "a volta passou {qual} e o produto parou o MOD: um laço que não sai, ou trabalho \
+             demais para uma volta só"
+        )
     }
 }
 
@@ -523,7 +595,8 @@ fn dizer_as_seguradas(
 ///
 /// O caminho de toda linha de console, e é por ser um só que o teto vale para
 /// todas: o que o MOD escreve com `seele.console`, e o que o produto diz por
-/// ele quando uma volta lança ([`relatar`]).
+/// ele quando uma volta lança ou passa de um teto ([`relatar`] e
+/// [`escoar_jobs`]).
 fn linha_de_console(
     balde: &std::cell::RefCell<BaldeDoConsole>,
     manda: &Sender<ParaOFora>,
@@ -562,7 +635,8 @@ pub(crate) enum NivelDoConsole {
     /// `console.warn`.
     Aviso,
     /// `console.error` (e o `assert` cuja condição é falsa) — e o erro que o
-    /// MOD não pegou, que o produto diz por ele.
+    /// MOD não pegou, ou a volta que passou de um teto, que o produto diz por
+    /// ele.
     Erro,
 }
 
@@ -706,7 +780,8 @@ pub(crate) enum ParaOFora {
     /// por ele: a conta que o balde guardou e nenhuma linha levou
     /// ([`CONTA_DO_BALDE`], em aviso), e o erro que o MOD não pegou (em erro):
     /// o de um temporizador ou de um ouvinte, dito pelo prelúdio, e o que
-    /// encerrou uma volta, dito por [`relatar`].
+    /// encerrou uma volta, dito por [`relatar`] — ou, quando quem a encerrou
+    /// foi um teto, a frase do teto ([`relatar`] e [`escoar_jobs`]).
     ///
     /// **Não é fala para a janela**: é registro. Quem a escreve no `seele.log`
     /// é a bomba, que sabe de quem é o MOD; o executor não sabe, e não precisa
@@ -1148,7 +1223,7 @@ fn rodar(
                 });
                 relatar(manda, fila, interrupcao, &balde_do_console, volta);
             }
-            escoar_jobs(&runtime, interrupcao, manda, fila);
+            escoar_jobs(&runtime, interrupcao, manda, fila, &balde_do_console);
             // **Também aqui.** Sem esta linha, um callback que agenda outro
             // temporizador — ou que cancela o próprio intervalo — deixava o
             // pedido parado até chegar uma mensagem de fora. Num MOD que só
@@ -1215,7 +1290,7 @@ fn rodar(
                 relatar(manda, fila, interrupcao, &balde_do_console, volta);
             }
         }
-        escoar_jobs(&runtime, interrupcao, manda, fila);
+        escoar_jobs(&runtime, interrupcao, manda, fila, &balde_do_console);
         // Os pedidos de temporizador que o MOD fez nesta volta.
         recolher_pedidos_de_relogio(&contexto, &mut relogios);
         // A conta do console que nenhuma linha levou, se houver ficha.
@@ -1727,15 +1802,33 @@ fn recolher_pedidos_de_relogio(
 /// microtarefa e ninguém ficava sabendo — nem a janela, nem quem hospeda, nem
 /// quem escreveu o MOD. É o defeito que o `CLAUDE.md` deste repositório nomeia
 /// como o mais caro daqui, cometido pelo próprio mecanismo de contenção.
+///
+/// **E o registro também fica sabendo**, quando quem parou foi um teto: a
+/// mesma linha que [`relatar`] escreve para a volta parada, pelo mesmo balde.
+/// Sem ela, o laço que o MOD pôs numa promessa parava sem uma palavra no
+/// `seele.log`, e o mesmo laço no topo deixava uma.
 fn escoar_jobs(
     runtime: &Runtime,
     interrupcao: &Arc<Interrupcao>,
     manda: &Sender<ParaOFora>,
     fila: &Arc<Fila>,
+    balde: &std::cell::RefCell<BaldeDoConsole>,
 ) {
     while runtime.is_job_pending() && !interrupcao.revogada() {
-        if runtime.execute_pending_job().is_err() {
+        if let Err(excecao) = runtime.execute_pending_job() {
             avisar(manda, fila, ParaOFora::Interrompido);
+            if let Some(teto) = interrupcao.tirar_teto() {
+                // A exceção da parada é lida do contexto da microtarefa, pelo
+                // onde: a primeira linha da pilha diz em que ponto do MOD o
+                // laço estava.
+                let lancado = excecao.0.with(|ctx| o_que_o_mod_lancou(&ctx));
+                linha_de_console(
+                    balde,
+                    manda,
+                    NivelDoConsole::Erro,
+                    lancado.dito_como_parada(&interrupcao.frase_do_teto(teto)),
+                );
+            }
             return;
         }
     }
@@ -1757,7 +1850,43 @@ fn avisar(manda: &Sender<ParaOFora>, fila: &Arc<Fila>, aviso: ParaOFora) {
 
 /// O resultado de uma volta do motor e, quando o MOD lançou, o que ele lançou
 /// ([`o_que_o_mod_lancou`]).
-type Volta = (rquickjs::Result<()>, Option<String>);
+type Volta = (rquickjs::Result<()>, Option<Lancado>);
+
+/// **O que saiu de uma volta como exceção**, em duas partes: o que é e onde.
+///
+/// Separadas porque a volta que o produto parou por um teto também chega como
+/// exceção (`InternalError: interrupted`), e nela o «o quê» é a frase do teto,
+/// e não o que o QuickJS diz — mas o onde continua sendo o do MOD.
+#[derive(Debug)]
+struct Lancado {
+    /// `nome: mensagem` quando é um `Error`; o valor como o JavaScript o diria,
+    /// quando não é.
+    texto: String,
+    /// A primeira linha da pilha, quando há: `at <eval> (eval_script:1:20)`.
+    onde: Option<String>,
+}
+
+impl Lancado {
+    /// A linha do registro quando o MOD lançou: `o MOD lançou: <texto>` e o
+    /// onde.
+    fn dito_como_excecao(&self) -> String {
+        self.com_o_onde(&format!("o MOD lançou: {}", self.texto))
+    }
+
+    /// A linha do registro quando quem parou foi o produto: a `frase` do teto,
+    /// sem o que o QuickJS diz da interrupção, e o onde do MOD.
+    fn dito_como_parada(&self, frase: &str) -> String {
+        self.com_o_onde(frase)
+    }
+
+    /// `cabeca` e, numa linha abaixo, o onde, quando há.
+    fn com_o_onde(&self, cabeca: &str) -> String {
+        match &self.onde {
+            Some(onde) => format!("{cabeca}\n{onde}"),
+            None => cabeca.to_owned(),
+        }
+    }
+}
 
 /// Junta ao resultado de uma volta o que o MOD lançou, **lido ainda dentro do
 /// contexto**: a exceção pendente é dele, e fora de `contexto.with` ela já não
@@ -1777,30 +1906,36 @@ fn com_o_que_lancou(ctx: &rquickjs::Ctx<'_>, resultado: rquickjs::Result<()>) ->
 /// pilha sai vazia, e um valor lançado que não vira texto (um `Symbol`) sai
 /// como um recuo que diz isso. A exceção que essa leitura deixar pendente é
 /// tirada — a próxima volta não pode herdar uma exceção que não é dela.
-fn o_que_o_mod_lancou(ctx: &rquickjs::Ctx<'_>) -> String {
+fn o_que_o_mod_lancou(ctx: &rquickjs::Ctx<'_>) -> Lancado {
     use rquickjs::convert::Coerced;
     let lancado = ctx.catch();
-    let texto = match lancado.as_exception() {
+    let lido = match lancado.as_exception() {
         Some(excecao) => {
             let nome = excecao
                 .get::<_, Coerced<String>>("name")
                 .map_or_else(|_| "Error".to_owned(), |nome| nome.0);
             let mensagem = excecao.message().unwrap_or_default();
             let pilha = excecao.stack().unwrap_or_default();
-            match pilha.lines().find(|linha| !linha.trim().is_empty()) {
-                Some(onde) => format!("{nome}: {mensagem}\n{onde}"),
-                None => format!("{nome}: {mensagem}"),
+            Lancado {
+                texto: format!("{nome}: {mensagem}"),
+                onde: pilha
+                    .lines()
+                    .find(|linha| !linha.trim().is_empty())
+                    .map(str::to_owned),
             }
         }
-        None => lancado.get::<Coerced<String>>().map_or_else(
-            |_| "[valor que não virou texto]".to_owned(),
-            |texto| texto.0,
-        ),
+        None => Lancado {
+            texto: lancado.get::<Coerced<String>>().map_or_else(
+                |_| "[valor que não virou texto]".to_owned(),
+                |texto| texto.0,
+            ),
+            onde: None,
+        },
     };
     if ctx.has_exception() {
         let _ = ctx.catch();
     }
-    texto
+    lido
 }
 
 /// Traduz o resultado de uma volta para o canal de saída.
@@ -1811,6 +1946,11 @@ fn o_que_o_mod_lancou(ctx: &rquickjs::Ctx<'_>) -> String {
 /// `seele.log`. O texto vai como uma linha de `console` em erro, pelo mesmo
 /// balde ([`linha_de_console`]): com o id do MOD, o escape e o corte de
 /// qualquer outra, e um MOD que lança em toda volta não passa do teto de vazão.
+///
+/// **Quando quem parou a volta foi um teto, a linha diz o teto**, e não «o MOD
+/// lançou»: o QuickJS faz da interrupção uma exceção, e o texto dela seria
+/// `InternalError: interrupted` — que manda procurar um `throw` que não
+/// existe. O `Falhou` da janela fica como era.
 fn relatar(
     manda: &Sender<ParaOFora>,
     fila: &Arc<Fila>,
@@ -1818,6 +1958,9 @@ fn relatar(
     balde: &std::cell::RefCell<BaldeDoConsole>,
     (resultado, lancado): Volta,
 ) {
+    // Tirado em toda volta, e não só na que lançou: um teto que disse sim
+    // numa volta que terminou bem não pode sobrar para a seguinte.
+    let teto = interrupcao.tirar_teto();
     match resultado {
         Ok(()) => {}
         Err(_) if interrupcao.revogada() => {
@@ -1825,17 +1968,20 @@ fn relatar(
         }
         // Uma interrupção chega como erro do motor, como qualquer outra
         // exceção. Distinguir as duas importa: uma é o MOD com defeito, a
-        // outra é o produto parando o MOD, e elas pedem frases diferentes.
+        // outra é o produto parando o MOD, e elas pedem frases diferentes —
+        // a revogação acima, e os tetos aqui, pelo que a `Interrupcao`
+        // guardou.
         Err(rquickjs::Error::Exception) => {
             avisar(manda, fila, ParaOFora::Falhou("o MOD lançou".into()));
-            if let Some(lancado) = lancado {
-                linha_de_console(
-                    balde,
-                    manda,
-                    NivelDoConsole::Erro,
-                    format!("o MOD lançou: {lancado}"),
-                );
-            }
+            let linha = match (teto, lancado) {
+                (Some(teto), Some(lancado)) => {
+                    lancado.dito_como_parada(&interrupcao.frase_do_teto(teto))
+                }
+                (Some(teto), None) => interrupcao.frase_do_teto(teto),
+                (None, Some(lancado)) => lancado.dito_como_excecao(),
+                (None, None) => return,
+            };
+            linha_de_console(balde, manda, NivelDoConsole::Erro, linha);
         }
         Err(erro) => {
             avisar(manda, fila, ParaOFora::Interrompido);
@@ -2677,6 +2823,181 @@ mod testes {
             Some(ParaOFora::Interrompido | ParaOFora::Falhou(_)) => {}
             outro => panic!("o laço dentro da promessa não foi interrompido: {outro:?}"),
         }
+    }
+
+    /// **O teto que parou a volta é dito uma vez, e não sobra para a
+    /// seguinte.**
+    ///
+    /// Os temporizadores vencidos rodam numa volta só: se o teto do primeiro,
+    /// parado pelo prazo, ficasse guardado depois de lido, o `TypeError` de
+    /// verdade do segundo sairia como «o produto parou o MOD». E a revogação
+    /// não é teto: ela tem a frase dela, e não a de um teto.
+    #[test]
+    fn o_teto_que_parou_a_volta_e_tirado_uma_vez_e_nao_sobra() {
+        /// Chama o tratador até ele dizer sim, com um limite para o teste não
+        /// rodar para sempre se ele nunca disser.
+        fn ate_parar(interrupcao: &Interrupcao) -> bool {
+            (0..1_000_000).any(|_| interrupcao.deve_parar())
+        }
+        let trabalho = Interrupcao::nova(Limites {
+            memoria: TETO_DE_MEMORIA,
+            consultas_por_volta: 3,
+            prazo_por_volta: SEM_PRAZO,
+        });
+        trabalho.comecar();
+        assert!(ate_parar(&trabalho), "o teto de trabalho de 3 nunca parou");
+        assert_eq!(
+            trabalho.tirar_teto(),
+            Some(Teto::Trabalho),
+            "o teto de trabalho parou a volta, e a interrupção não guardou que foi ele"
+        );
+        assert_eq!(
+            trabalho.tirar_teto(),
+            None,
+            "o teto lido continuou guardado, e a próxima exceção de verdade da mesma volta \
+             sairia como parada do produto"
+        );
+
+        let prazo = Interrupcao::nova(Limites {
+            memoria: TETO_DE_MEMORIA,
+            consultas_por_volta: SEM_TETO_DE_TRABALHO,
+            prazo_por_volta: Duration::ZERO,
+        });
+        prazo.comecar();
+        assert!(ate_parar(&prazo), "o prazo de zero nunca parou");
+        assert_eq!(
+            prazo.tirar_teto(),
+            Some(Teto::Prazo),
+            "o prazo parou a volta, e a interrupção não guardou que foi ele"
+        );
+        assert!(ate_parar(&prazo), "o prazo vencido deixou de parar");
+        prazo.comecar();
+        assert_eq!(
+            prazo.tirar_teto(),
+            None,
+            "uma volta nova começou com o teto da anterior, e uma exceção de verdade nela sairia \
+             como parada do produto"
+        );
+
+        let revogada = Interrupcao::nova(Limites {
+            memoria: TETO_DE_MEMORIA,
+            consultas_por_volta: SEM_TETO_DE_TRABALHO,
+            prazo_por_volta: SEM_PRAZO,
+        });
+        revogada.comecar();
+        revogada.revogar();
+        assert!(revogada.deve_parar(), "a revogação não parou a volta");
+        assert_eq!(
+            revogada.tirar_teto(),
+            None,
+            "a revogação foi guardada como teto, e a sessão que acabou seria dita como um MOD \
+             que passou do prazo ou do trabalho"
+        );
+    }
+
+    /// O que uma volta parada deixou: as falas para a janela e as linhas de
+    /// `console`. Espera a primeira linha por até cinco segundos e, depois
+    /// dela, mais um pouco — uma segunda linha da mesma parada também conta.
+    fn o_que_a_parada_deixou(
+        executor: &ExecutorQuickJs,
+    ) -> (Vec<ParaOFora>, Vec<(NivelDoConsole, String)>) {
+        let mut fim = Instant::now() + Duration::from_secs(5);
+        let mut falas = Vec::new();
+        let mut linhas = Vec::new();
+        while Instant::now() < fim {
+            match executor.receber(Duration::from_millis(20)) {
+                Some(ParaOFora::Console { nivel, texto, .. }) => {
+                    if linhas.is_empty() {
+                        fim = Instant::now() + Duration::from_millis(200);
+                    }
+                    linhas.push((nivel, texto));
+                }
+                Some(fala) => falas.push(fala),
+                None => {}
+            }
+        }
+        (falas, linhas)
+    }
+
+    /// A linha que uma volta parada por um teto deixa: uma só, em erro, com a
+    /// frase de `teto`, sem «lançou» e, quando `com_onde`, com a primeira linha
+    /// da pilha — onde o MOD estava quando o produto o parou.
+    fn exigir_a_frase_do_teto(linhas: &[(NivelDoConsole, String)], teto: &str, com_onde: bool) {
+        let [(nivel, texto)] = linhas else {
+            panic!(
+                "a volta que o produto parou deixou {} linha(s) de console, e deve deixar uma — \
+                 sem ela o seele.log não diz por que o MOD parou: {linhas:?}",
+                linhas.len()
+            );
+        };
+        assert_eq!(
+            *nivel,
+            NivelDoConsole::Erro,
+            "a linha da volta parada saiu num nível que não é erro, e o filtro do seele.log a \
+             trataria como recado: {texto}"
+        );
+        assert!(
+            !texto.contains("lançou"),
+            "a volta que o produto parou foi dita como se o MOD tivesse lançado, e quem escreveu \
+             o MOD procura um `throw` que não existe: {texto}"
+        );
+        assert!(
+            texto.contains(teto) && texto.contains("o produto parou o MOD"),
+            "a linha da volta parada não diz que teto ela passou («{teto}»): {texto}"
+        );
+        if com_onde {
+            assert!(
+                texto.contains("\n    at "),
+                "a linha da volta parada perdeu a primeira linha da pilha, que diz onde o MOD \
+                 estava quando o produto o parou: {texto}"
+            );
+        }
+    }
+
+    /// **Uma volta que o produto parou pelo prazo é dita como tal, e não como
+    /// «o MOD lançou».**
+    ///
+    /// O QuickJS faz da interrupção uma exceção, `InternalError: interrupted`,
+    /// e a volta chegava a [`relatar`] como qualquer outra: o `seele.log` dizia
+    /// «o MOD lançou: InternalError: interrupted», e quem escreveu o MOD
+    /// procurava um `throw` que não existe. Quem parou foi o produto, e a
+    /// [`Interrupcao`] sabe por qual teto.
+    #[test]
+    fn uma_volta_parada_pelo_prazo_diz_o_prazo_e_nao_que_o_mod_lancou() {
+        let executor = so_com(SEM_TETO_DE_TRABALHO, Duration::from_millis(50));
+        executor.iniciar("while (true) {}").expect("código");
+        let (falas, linhas) = o_que_a_parada_deixou(&executor);
+        exigir_a_frase_do_teto(&linhas, "passou do prazo de 50 ms", true);
+        assert!(
+            falas
+                .iter()
+                .any(|fala| matches!(fala, ParaOFora::Falhou(_) | ParaOFora::Interrompido)),
+            "a janela deixou de saber que a volta parou: {falas:?}"
+        );
+    }
+
+    /// **E pelo teto de trabalho, com a frase dele.** O mesmo laço, com o
+    /// prazo fora de alcance: só o trabalho explica a parada, e a frase tem de
+    /// dizer isso, e não o prazo.
+    #[test]
+    fn uma_volta_parada_pelo_teto_de_trabalho_diz_o_teto_de_trabalho() {
+        let executor = so_com(1_000, SEM_PRAZO);
+        executor.iniciar("while (true) {}").expect("código");
+        let (_, linhas) = o_que_a_parada_deixou(&executor);
+        exigir_a_frase_do_teto(&linhas, "passou do teto de trabalho", true);
+    }
+
+    /// **O mesmo laço dentro de uma promessa também é dito.** A volta do
+    /// código termina bem, e quem para é a microtarefa, em [`escoar_jobs`]: a
+    /// janela recebia o `Interrompido`, e o `seele.log` não recebia nada.
+    #[test]
+    fn um_laco_numa_promessa_parado_pelo_prazo_tambem_e_dito() {
+        let executor = so_com(SEM_TETO_DE_TRABALHO, Duration::from_millis(50));
+        executor
+            .iniciar("Promise.resolve().then(() => { while (true) {} });")
+            .expect("código");
+        let (_, linhas) = o_que_a_parada_deixou(&executor);
+        exigir_a_frase_do_teto(&linhas, "passou do prazo de 50 ms", true);
     }
 
     /// **A mensagem que não caberia no fio não entra na fila.**
