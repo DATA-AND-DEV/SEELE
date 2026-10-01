@@ -127,9 +127,10 @@ jobs:
   #
   # Não é homologação nativa. Ele prova o que uma máquina sem som, sem câmera e
   # sem segunda máquina consegue provar: formatação, regras do repositório,
-  # clippy e os testes nos três sistemas suportados. A chamada entre duas
-  # máquinas, a instalação e a atualização continuam sendo evidência de gente, e
-  # o corpo do release é onde elas são registradas.
+  # clippy e os testes nos três sistemas suportados, e as bancadas de MOD de
+  # `node` puro no Linux. A chamada entre duas máquinas, a instalação e a
+  # atualização continuam sendo evidência de gente, e o corpo do release é onde
+  # elas são registradas.
   validar:
     name: validar (${{ matrix.nome }})
     if: ${{ !inputs.sem_validar }}
@@ -172,6 +173,42 @@ jobs:
           cargo xtask check-deps
           cargo xtask check-versao
           cargo xtask check-vetores
+
+      # As bancadas de MOD de `node` puro, também uma vez só e no Linux: elas
+      # rodam o código de verdade num contexto de VM, com o resto de mentira, e
+      # não dependem de sistema.
+      #
+      # **São o único guarda de que as recusas da janela chegam ao seele.log**
+      # — as de mídia, as de cartões, as de contribuição e a do avatar. O
+      # `cargo test` não enxerga quem as chama. Antes daqui elas só rodavam no
+      # `ci.yml`, que é manual, e uma publicação por este workflow podia sair
+      # com uma delas vermelha sem ninguém ver (revisão ampla do plano 1C, I1).
+      # As outras três guardam o ciclo de vida do executor, a fila de pedidos de
+      # MOD e a ponte das imagens por volume.
+      #
+      # Cada uma reprova também quando não chega ao fim: uma promessa pendurada
+      # sairia com 0 sem ter provado nada. As bancadas de navegador
+      # (Playwright) não estão aqui, e só rodam no `ci.yml`.
+      #
+      # **Este portão é o deste workflow.** O `empacotar/publicar.sh` publica
+      # por fora dele, com a bateria própria, e ela não roda bancada nenhuma.
+      - name: Node (Linux)
+        if: matrix.nome == 'linux'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - if: matrix.nome == 'linux'
+        run: node apps/seele-app/bancada/regiao-do-mod.cjs
+      - if: matrix.nome == 'linux'
+        run: node apps/seele-app/bancada/contribuicoes-e-camadas.cjs
+      - if: matrix.nome == 'linux'
+        run: node apps/seele-app/bancada/continuacao-de-midia.cjs
+      - if: matrix.nome == 'linux'
+        run: node apps/seele-app/bancada/ciclo-do-executor.cjs
+      - if: matrix.nome == 'linux'
+        run: node apps/seele-app/bancada/envio-de-imagens.cjs
+      - if: matrix.nome == 'linux'
+        run: node apps/seele-app/bancada/imagens-por-volume.cjs
 
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 

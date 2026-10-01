@@ -14,10 +14,18 @@ name: CI
 # # O que custa ser manual
 #
 # Um push não é conferido por ninguém até alguém pedir. O portão que **não** se
-# mexeu é o do `release.yml`: publicar continua exigindo `validar` verde nos três
-# sistemas sobre o mesmo SHA, que é o R07 da revisão da v15. Quer dizer que o
-# esquecimento aqui não chega ao que é publicado — ele chega ao tempo que se leva
-# para descobrir, e isso está dito porque é o preço real.
+# mexeu é o do `release.yml`: publicar por ele continua exigindo `validar` verde
+# nos três sistemas sobre o mesmo SHA, que é o R07 da revisão da v15. O
+# `validar` roda o que este arquivo roda — formatação, regras, clippy, testes e
+# as bancadas de MOD de `node` puro —, menos as bancadas de navegador. Quer
+# dizer que, nisso, o esquecimento aqui não chega ao que sai pelo `release.yml`:
+# ele chega ao tempo que se leva para descobrir, e isso está dito porque é o
+# preço real.
+#
+# **As bancadas de navegador são a exceção.** Elas só rodam aqui, e uma release
+# pode sair com uma delas vermelha se ninguém disparar este workflow antes. E o
+# `empacotar/publicar.sh` publica por fora do `validar`, com a bateria dele, que
+# não roda bancada nenhuma.
 #
 # Voltar ao automático é devolver as duas linhas:
 #
@@ -257,10 +265,35 @@ jobs:
       - run: node apps/seele-app/bancada/conversa-com-estado.cjs
       - run: node apps/seele-app/bancada/qualidade-da-voz.cjs
       - run: node apps/seele-app/bancada/avatares-do-mod.cjs
-      # As bancadas de MOD que não precisam de navegador: rodam no `node` puro,
-      # com um DOM de mentira, e guardam as recusas que o seele.log passou a
-      # contar (plano de 2026-09-29, fase M1). Fora daqui elas existiam e não
-      # rodavam — o «existir não é funcionar» do CLAUDE.md.
+
+  # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
+  # o código de verdade num contexto de VM e o resto de mentira, e guardam as
+  # recusas que o seele.log passou a contar (plano de 2026-09-29, fase M1), o
+  # ciclo de vida do executor, a fila de pedidos de MOD e a ponte das imagens
+  # por volume. Fora daqui elas existiam e não rodavam — o «existir não é
+  # funcionar» do CLAUDE.md.
+  #
+  # # Por que um job próprio
+  #
+  # Elas moravam no fim do job acima, depois da instalação do Chromium e das
+  # quatro bancadas de navegador. No Actions um passo que falha pula os
+  # seguintes, e uma instalação do Playwright que quebrasse as deixava como
+  # «skipped» — nem verdes nem vermelhas. Aqui elas não dependem de nada disso.
+  #
+  # As mesmas seis rodam no `validar` do `release.yml`, que é o portão de quem
+  # publica por lá; este job é para vê-las antes.
+  bancadas-de-mod:
+    name: bancadas de MOD (node puro)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Cada bancada por nome, pelo mesmo motivo do job acima.
       - run: node apps/seele-app/bancada/regiao-do-mod.cjs
       - run: node apps/seele-app/bancada/contribuicoes-e-camadas.cjs
       - run: node apps/seele-app/bancada/continuacao-de-midia.cjs
+      - run: node apps/seele-app/bancada/ciclo-do-executor.cjs
+      - run: node apps/seele-app/bancada/envio-de-imagens.cjs
+      - run: node apps/seele-app/bancada/imagens-por-volume.cjs
