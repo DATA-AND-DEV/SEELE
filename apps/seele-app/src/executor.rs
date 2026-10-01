@@ -607,16 +607,29 @@ fn dizer_as_seguradas(
 /// O caminho de toda linha que o MOD escreve com `seele.console` e da que o
 /// produto diz por ele quando uma volta lança ou passa de um teto
 /// ([`relatar`] e [`escoar_jobs`]), ou quando uma promessa rejeita sem que
-/// ninguém a pegue ([`dizer_as_rejeitadas`], e o rastreador de [`rodar`] para
-/// a que não coube na espera), e é por ser um só que o teto vale para todas
-/// elas. Menos a conta do balde, que [`dizer_as_seguradas`] põe no canal
-/// por fora daqui: ao fim de uma volta ela gasta a ficha dela no próprio
-/// balde, e na parada é a última linha da instância.
+/// ninguém a pegue ([`dizer_as_rejeitadas`], e o rastreador de [`rodar`] na
+/// reentrada em que a espera não pode ser emprestada), e é por ser um só que o
+/// teto vale para todas elas. Menos a conta do balde, que
+/// [`dizer_as_seguradas`] põe no canal por fora daqui: ao fim de uma volta ela
+/// gasta a ficha dela no próprio balde, e na parada é a última linha da
+/// instância.
 fn linha_de_console(
     balde: &std::cell::RefCell<BaldeDoConsole>,
     manda: &Sender<ParaOFora>,
     nivel: NivelDoConsole,
     texto: String,
+) {
+    linha_ja_cortada(balde, manda, nivel, cortar_linha_do_console(texto));
+}
+
+/// [`linha_de_console`] para a linha que já foi cortada: a que esperou o fim
+/// da volta em [`RejeicoesDaVolta`], cortada quando entrou na espera. Pelo
+/// mesmo balde, sem cortar de novo.
+fn linha_ja_cortada(
+    balde: &std::cell::RefCell<BaldeDoConsole>,
+    manda: &Sender<ParaOFora>,
+    nivel: NivelDoConsole,
+    linha: LinhaCortada,
 ) {
     // Um `RefCell` e não um cadeado: o balde só é usado na thread do motor, e
     // um `try_borrow` que falhasse seria uma reentrada que não existe — calar
@@ -629,10 +642,20 @@ fn linha_de_console(
     };
     let _ = manda.send(ParaOFora::Console {
         nivel,
-        texto: cortar_linha_do_console(texto),
+        texto: linha.0,
         suprimidas,
     });
 }
+
+/// **Uma linha de `console` já no teto do registro**, como ela vai ao canal.
+///
+/// Só [`cortar_linha_do_console`] a faz. Um tipo, e não uma `String`, para a
+/// linha que espera o fim da volta ([`RejeicoesDaVolta`]) ser cortada uma vez
+/// só, quando entra na espera: cortada de novo na saída, ela perderia o aviso
+/// do primeiro corte, que diz o tamanho do que o MOD lançou, e ganharia outro
+/// com o tamanho já cortado.
+#[derive(Debug)]
+struct LinhaCortada(String);
 
 /// O nível de uma linha que o MOD escreveu com `console`.
 ///
@@ -698,15 +721,15 @@ impl NivelDoConsole {
 /// O corte é o de [`ate_o_teto_do_registro`], a regra que as outras portas que
 /// escapam texto de terceiro também usam. O aviso do corte conta os caracteres
 /// que o MOD escreveu.
-fn cortar_linha_do_console(texto: String) -> String {
+fn cortar_linha_do_console(texto: String) -> LinhaCortada {
     let cabe = ate_o_teto_do_registro(&texto);
     if cabe.len() == texto.len() {
-        return texto;
+        return LinhaCortada(texto);
     }
     let mut cortado = cabe.to_owned();
     let total = texto.chars().count();
     let _ = write!(cortado, " […cortado: {total} caracteres]");
-    cortado
+    LinhaCortada(cortado)
 }
 
 /// **O começo de `texto` que cabe no teto de uma frase do registro**, contado
@@ -1090,11 +1113,12 @@ fn rodar(
     // A linha do registro passa pelo balde do `console`, pela mesma razão.
     //
     // **Três donos do balde, uma thread.** A ponte gasta ficha a cada linha; o
-    // rastreador, a cada rejeição que não coube na espera; e o laço abaixo
-    // tira dele, ao fim de cada volta e na parada, a conta que nenhuma linha
-    // levou (ver [`dizer_as_seguradas`]). Um `Rc` e não um `Arc`: os três
-    // moram na thread do motor, e este `rquickjs` (sem `parallel`) não pede
-    // `Send` ao rastreador.
+    // rastreador, só na reentrada em que a espera das rejeições não pode ser
+    // emprestada; e o laço abaixo, ao fim de cada volta e na parada, gasta com
+    // as rejeições que ninguém pegou e tira dele a conta que nenhuma linha
+    // levou (ver [`dizer_as_rejeitadas`] e [`dizer_as_seguradas`]). Um `Rc` e
+    // não um `Arc`: os três moram na thread do motor, e este `rquickjs` (sem
+    // `parallel`) não pede `Send` ao rastreador.
     let balde_do_console = std::rc::Rc::new(std::cell::RefCell::new(BaldeDoConsole::novo(
         Instant::now(),
     )));
@@ -1141,17 +1165,18 @@ fn rodar(
                 &fila_de_rejeicao,
                 ParaOFora::Falhou(format!("{REJEITADA_SEM_TRATAMENTO}: {texto}")),
             );
-            let fora_da_espera = match rejeicoes_do_rastreador.try_borrow_mut() {
-                Ok(mut rejeicoes) => rejeicoes.guardar(&ctx, promessa, linha).err(),
-                Err(_) => Some(linha),
-            };
-            if let Some(linha) = fora_da_espera {
-                linha_de_console(
+            // A espera guarda a linha, ou só a conta quando está cheia. Só uma
+            // reentrada, que não existe (a espera fica emprestada em código
+            // nativo que não roda JavaScript), deixaria de achá-la: aí a linha
+            // sai na hora, pelo balde, em vez de sumir.
+            match rejeicoes_do_rastreador.try_borrow_mut() {
+                Ok(mut rejeicoes) => rejeicoes.guardar(&ctx, promessa, linha),
+                Err(_) => linha_de_console(
                     &balde_da_rejeicao,
                     &manda_rejeicao,
                     NivelDoConsole::Erro,
                     linha,
-                );
+                ),
             }
         },
     )));
@@ -1893,7 +1918,8 @@ fn recolher_pedidos_de_relogio(
 ///
 /// **E é aqui que a volta termina para as rejeições.** Sem microtarefa
 /// pendente, a promessa rejeitada que ainda espera em `rejeicoes` não foi pega
-/// por ninguém, e vira a linha do registro ([`dizer_as_rejeitadas`]). Numa
+/// por ninguém, e vira a linha do registro, e as contadas além do teto da
+/// espera viram a conta ([`dizer_as_rejeitadas`]). Numa
 /// volta que parou com microtarefas na fila — por um teto ou pela revogação —,
 /// elas ainda podem pegá-las: as rejeições esperam a próxima volta que
 /// termine, ou a parada da instância.
@@ -1934,12 +1960,30 @@ const REJEITADA_SEM_TRATAMENTO: &str = "promessa rejeitada sem tratamento";
 
 /// Quantas rejeições sem tratamento esperam, no máximo, o fim de uma volta.
 ///
-/// O mesmo número da rajada do balde: mais do que isso, o balde não deixaria
-/// sair de uma vez, e o resto viraria a conta das seguradas de qualquer jeito.
-/// Acima dele, a linha sai na hora da rejeição, pelo balde, como sairia sem a
-/// espera — e o teto é o que impede um MOD que rejeita num laço de encher a
-/// memória do lado de fora do motor, onde o teto de memória dele não alcança.
-const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize;
+/// **A rajada do balde menos uma**, a da conta: acima do teto a rejeição só é
+/// contada, e no fim da volta saem as guardadas e depois uma linha «e mais N
+/// rejeições sem tratamento além da espera» ([`dizer_as_rejeitadas`]). Com o
+/// balde cheio, as guardadas e a conta saem de uma vez; com a rajada inteira de
+/// guardadas, a conta seria a primeira segurada, e o `seele.log` diria só que
+/// uma linha foi segurada, e não quantas rejeições ficaram de fora. A
+/// primeira linha, que costuma ser a causa, continua saindo.
+///
+/// Só contada, e não dita na hora, porque nessa hora quem a vai pegar pode
+/// ainda não ter tido a vez: um `Promise.allSettled` de mais promessas que o
+/// teto, de funções `async` que lançam antes do primeiro `await`, deixava em
+/// ERROR, como «sem tratamento», as que passavam do teto (F-Mods-m1 da revisão
+/// final do Plano 1).
+///
+/// **A memória do lado de fora do motor**, onde o teto de memória do MOD não
+/// alcança: no máximo este tanto de linhas, cada uma já cortada no teto do
+/// registro quando entra na espera (até 512 caracteres no registro, mais o
+/// aviso do corte; [`cortar_linha_do_console`]), um número para as de fora, e
+/// uma referência a cada promessa guardada, que continua morando no motor. Na
+/// espera, o texto inteiro do que o MOD lançou não fica: ele existe só
+/// enquanto a linha é montada e cortada, uma rejeição de cada vez. Guardada sem
+/// corte, como antes, a espera segurava até uma rajada inteira de mensagens do
+/// tamanho que o MOD quisesse até o fim da volta (F-Mods-m2).
+pub(crate) const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize - 1;
 
 /// **As rejeições sem tratamento de uma volta, à espera do fim dela.**
 ///
@@ -1960,49 +2004,78 @@ const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize;
 /// o runtime ser desfeito (o fim de [`rodar`]).
 #[derive(Default)]
 struct RejeicoesDaVolta {
-    /// Cada promessa rejeitada sem tratamento, com a linha que ela vira.
-    guardadas: Vec<(rquickjs::Persistent<rquickjs::Value<'static>>, String)>,
+    /// Cada promessa rejeitada sem tratamento, com a linha que ela vira, já
+    /// cortada no teto do registro.
+    guardadas: Vec<(rquickjs::Persistent<rquickjs::Value<'static>>, LinhaCortada)>,
+    /// Quantas rejeitaram sem tratamento com a espera cheia, e ainda não o
+    /// ganharam: só contadas ([`REJEICOES_GUARDADAS`]).
+    alem: u32,
 }
 
 impl RejeicoesDaVolta {
-    /// Guarda uma rejeição até o fim da volta; devolve a `linha` quando o teto
-    /// ([`REJEICOES_GUARDADAS`]) não deixa, para quem chamou dizê-la na hora.
+    /// Guarda uma rejeição até o fim da volta, com a `linha` cortada no teto do
+    /// registro; com a espera cheia ([`REJEICOES_GUARDADAS`]), só a conta.
     fn guardar<'js>(
         &mut self,
         ctx: &rquickjs::Ctx<'js>,
         promessa: rquickjs::Value<'js>,
         linha: String,
-    ) -> Result<(), String> {
+    ) {
         if self.guardadas.len() >= REJEICOES_GUARDADAS {
-            return Err(linha);
+            self.alem = self.alem.saturating_add(1);
+            return;
         }
-        self.guardadas
-            .push((rquickjs::Persistent::save(ctx, promessa), linha));
-        Ok(())
+        self.guardadas.push((
+            rquickjs::Persistent::save(ctx, promessa),
+            cortar_linha_do_console(linha),
+        ));
     }
 
     /// A rejeição de `promessa` ganhou tratamento: ela sai da espera, sem linha.
+    ///
+    /// **Ou sai da conta.** A segunda chamada do rastreador só vem para uma
+    /// promessa que a primeira deu como sem tratamento, e uma que não está na
+    /// espera é, nesta volta, uma das contadas com ela cheia. O que isso não
+    /// separa: a promessa de uma volta que já terminou, pega agora, também tira
+    /// uma da conta desta volta, e a conta pode sair menor do que foi — nunca
+    /// maior, que é o erro que esta espera existe para não cometer.
     fn tratada<'js>(&mut self, ctx: &rquickjs::Ctx<'js>, promessa: &rquickjs::Value<'js>) {
+        let antes = self.guardadas.len();
         self.guardadas.retain(|(guardada, _)| {
             guardada
                 .clone()
                 .restore(ctx)
                 .map_or(true, |ela| ela != *promessa)
         });
+        if self.guardadas.len() == antes {
+            self.alem = self.alem.saturating_sub(1);
+        }
     }
 
-    /// As linhas das que ninguém pegou, na ordem em que rejeitaram; a espera
-    /// fica vazia, e as promessas, soltas.
-    fn sem_tratamento(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.guardadas)
+    /// As linhas das que ninguém pegou, na ordem em que rejeitaram, e a conta
+    /// das de fora; a espera fica vazia, e as promessas, soltas.
+    fn sem_tratamento(&mut self) -> (Vec<LinhaCortada>, u32) {
+        let linhas = std::mem::take(&mut self.guardadas)
             .into_iter()
             .map(|(_, linha)| linha)
-            .collect()
+            .collect();
+        (linhas, std::mem::take(&mut self.alem))
+    }
+}
+
+/// A linha que diz quantas rejeições sem tratamento passaram do teto da
+/// espera, depois das linhas das guardadas.
+fn alem_da_espera(quantas: u32) -> String {
+    if quantas == 1 {
+        "e mais 1 rejeição sem tratamento além da espera".to_owned()
+    } else {
+        format!("e mais {quantas} rejeições sem tratamento além da espera")
     }
 }
 
 /// **Diz as rejeições que ninguém pegou**, cada uma como uma linha de
-/// `console` em erro, pelo balde ([`linha_de_console`]).
+/// `console` em erro, pelo balde, sem cortar de novo ([`linha_ja_cortada`]);
+/// e depois, se alguma passou do teto da espera, quantas.
 fn dizer_as_rejeitadas(
     rejeicoes: &std::cell::RefCell<RejeicoesDaVolta>,
     balde: &std::cell::RefCell<BaldeDoConsole>,
@@ -2010,12 +2083,15 @@ fn dizer_as_rejeitadas(
 ) {
     // Entre duas voltas nenhum JavaScript roda, e o rastreador não tem a
     // espera emprestada.
-    let linhas = match rejeicoes.try_borrow_mut() {
+    let (linhas, alem) = match rejeicoes.try_borrow_mut() {
         Ok(mut rejeicoes) => rejeicoes.sem_tratamento(),
         Err(_) => return,
     };
     for linha in linhas {
-        linha_de_console(balde, manda, NivelDoConsole::Erro, linha);
+        linha_ja_cortada(balde, manda, NivelDoConsole::Erro, linha);
+    }
+    if alem > 0 {
+        linha_de_console(balde, manda, NivelDoConsole::Erro, alem_da_espera(alem));
     }
 }
 
@@ -3850,14 +3926,16 @@ mod testes {
         );
     }
 
-    /// **A espera das rejeições tem teto, e devolve a linha que não coube.**
+    /// **A espera das rejeições tem teto, e a que não coube é contada.**
     ///
     /// Ela guarda cada promessa e a linha dela do lado de fora do motor, onde
     /// o teto de memória do MOD não alcança: sem teto, um MOD que rejeita num
-    /// laço enche a memória do processo dentro de uma volta só. A linha que
-    /// não coube volta a quem chamou, para ser dita na hora, e não some.
+    /// laço enche a memória do processo dentro de uma volta só. A que chega com
+    /// a espera cheia não é guardada nem dita na hora: entra na conta, que sai
+    /// no fim da volta. E sai da conta quando o tratamento dela chega, como as
+    /// guardadas saem da espera.
     #[test]
-    fn a_espera_das_rejeicoes_tem_teto_e_devolve_a_linha_que_nao_coube() {
+    fn a_espera_das_rejeicoes_tem_teto_e_conta_a_que_nao_coube() {
         let runtime = Runtime::new().expect("o motor");
         let contexto = Context::full(&runtime).expect("o contexto");
         contexto.with(|ctx| {
@@ -3868,23 +3946,81 @@ mod testes {
             };
             let mut rejeicoes = RejeicoesDaVolta::default();
             for n in 0..REJEICOES_GUARDADAS {
-                assert!(
-                    rejeicoes
-                        .guardar(&ctx, promessa(), format!("linha {n}"))
-                        .is_ok(),
-                    "a espera recusou a rejeição {n}, abaixo do teto de {REJEICOES_GUARDADAS}"
-                );
+                rejeicoes.guardar(&ctx, promessa(), format!("linha {n}"));
+            }
+            let de_fora = [promessa(), promessa()];
+            for ela in &de_fora {
+                rejeicoes.guardar(&ctx, ela.clone(), "a de fora".to_owned());
             }
             assert_eq!(
-                rejeicoes.guardar(&ctx, promessa(), "a de fora".to_owned()),
-                Err("a de fora".to_owned()),
-                "a espera guardou além do teto de {REJEICOES_GUARDADAS}, ou perdeu a linha que \
-                 não coube em vez de devolvê-la para ser dita na hora"
+                rejeicoes.guardadas.len(),
+                REJEICOES_GUARDADAS,
+                "a espera guardou além do teto de {REJEICOES_GUARDADAS}, ou recusou uma abaixo dele"
             );
             assert_eq!(
-                rejeicoes.sem_tratamento().len(),
-                REJEICOES_GUARDADAS,
-                "a espera não devolveu, no fim da volta, todas as que guardou"
+                rejeicoes.alem, 2,
+                "as rejeições que chegaram com a espera cheia não foram contadas"
+            );
+            rejeicoes.tratada(&ctx, &de_fora[0]);
+            assert_eq!(
+                rejeicoes.alem, 1,
+                "a rejeição contada além da espera ganhou tratamento e continuou na conta: o fim \
+                 da volta diria «sem tratamento» sobre uma que o MOD pegou"
+            );
+            let (linhas, alem) = rejeicoes.sem_tratamento();
+            assert_eq!(
+                (linhas.len(), alem),
+                (REJEICOES_GUARDADAS, 1),
+                "a espera não devolveu, no fim da volta, todas as que guardou e a conta das de fora"
+            );
+            assert!(
+                rejeicoes.guardadas.is_empty() && rejeicoes.alem == 0,
+                "a espera não ficou vazia depois do fim da volta, e a próxima repetiria as linhas \
+                 ou a conta"
+            );
+        });
+    }
+
+    /// **A linha que espera o fim da volta já cabe no teto do registro, e não
+    /// é cortada de novo quando sai.**
+    ///
+    /// A linha leva a mensagem e a pilha da exceção, do tamanho que o MOD
+    /// quiser: guardada inteira, a espera segurava até `REJEICOES_GUARDADAS`
+    /// delas do lado de fora do motor, e o corte só vinha na saída (F-Mods-m2
+    /// da revisão final do Plano 1). Cortada de novo na saída, ela perderia o
+    /// aviso do primeiro corte e ganharia outro, com o tamanho já cortado.
+    #[test]
+    fn a_linha_que_espera_o_fim_da_volta_ja_cabe_no_teto_e_sai_sem_novo_corte() {
+        let runtime = Runtime::new().expect("o motor");
+        let contexto = Context::full(&runtime).expect("o contexto");
+        contexto.with(|ctx| {
+            let promessa = rquickjs::Object::new(ctx.clone())
+                .expect("um objeto")
+                .into_value();
+            let mut rejeicoes = RejeicoesDaVolta::default();
+            rejeicoes.guardar(&ctx, promessa, "x".repeat(1_000_000));
+            let aviso = " […cortado: 1000000 caracteres]";
+            let guardada = match rejeicoes.guardadas.as_slice() {
+                [(_, linha)] => linha.0.clone(),
+                outras => panic!("esperava uma linha na espera, há {}", outras.len()),
+            };
+            assert_eq!(
+                guardada,
+                format!("{}{aviso}", "x".repeat(crate::TETO_DA_FRASE_NO_REGISTRO)),
+                "a linha entrou na espera sem o corte do registro: a espera segura o texto \
+                 inteiro que o MOD lançou, do lado de fora do motor, até o fim da volta"
+            );
+
+            let (manda, recebe) = std::sync::mpsc::channel();
+            let balde = std::cell::RefCell::new(BaldeDoConsole::novo(Instant::now()));
+            dizer_as_rejeitadas(&std::cell::RefCell::new(rejeicoes), &balde, &manda);
+            let Ok(ParaOFora::Console { texto, .. }) = recebe.try_recv() else {
+                panic!("a linha guardada não saiu no fim da volta");
+            };
+            assert_eq!(
+                texto, guardada,
+                "a linha guardada foi cortada de novo ao sair: o aviso do primeiro corte, que \
+                 diz o tamanho do que o MOD lançou, foi trocado por outro"
             );
         });
     }

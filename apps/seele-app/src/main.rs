@@ -4108,7 +4108,9 @@ fn assentar_fala(
 /// É também por aqui, em ERROR, que chega o erro que o MOD não pegou: o
 /// executor o põe no canal como uma linha de `console` (`o MOD lançou: …`,
 /// `erro num temporizador: …`, `erro num ouvinte de evento: …`, `promessa
-/// rejeitada sem tratamento: …`), pelo mesmo balde. E a volta que o produto
+/// rejeitada sem tratamento: …`, e, depois das rejeições de uma volta que
+/// passaram do teto da espera, `e mais N rejeições sem tratamento além da
+/// espera`), pelo mesmo balde. E a volta que o produto
 /// parou por um teto, com a frase do teto (`esta volta do MOD passou do prazo
 /// de 500 ms, e o produto a interrompeu (o MOD continua de pé): …`), e não
 /// como «o MOD lançou».
@@ -10782,7 +10784,8 @@ mod o_console_do_mod_chega_ao_registro {
 mod a_falha_do_mod_chega_ao_registro {
     use super::{assentar_fala, ModsNativos};
     use crate::executor::{
-        ExecutorQuickJs, Fila, Limites, ParaOFora, LINHAS_DE_CONSOLE_POR_SEGUNDO, RAJADA_DO_CONSOLE,
+        ExecutorQuickJs, Fila, Limites, ParaOFora, LINHAS_DE_CONSOLE_POR_SEGUNDO,
+        RAJADA_DO_CONSOLE, REJEICOES_GUARDADAS,
     };
     use crate::rastro_de_teste::capturar;
     use std::time::{Duration, Instant};
@@ -11087,13 +11090,15 @@ mod a_falha_do_mod_chega_ao_registro {
         );
     }
 
-    /// **A rejeição além do teto da espera não se perde.**
+    /// **A rejeição além do teto da espera não se perde: ela é contada, e a
+    /// conta sai no fim da volta.**
     ///
-    /// Até `REJEICOES_GUARDADAS` (a rajada do balde) rejeições esperam o fim
-    /// da volta; as de depois são ditas na hora, pelo balde. Quarenta numa
-    /// volta só: as oito últimas passam pela rajada antes de as guardadas
-    /// chegarem ao fim da volta. Calar a que não coube, ou guardar todas, faz a
-    /// última sumir do `seele.log`.
+    /// Até `REJEICOES_GUARDADAS` rejeições esperam o fim da volta, cada uma com
+    /// a linha dela; as de depois só são contadas, e a conta sai numa linha
+    /// depois das guardadas: «e mais N rejeições sem tratamento além da
+    /// espera». A primeira linha, que costuma ser a causa, continua saindo.
+    /// Quarenta numa volta só: as guardadas e a conta cabem juntas na rajada
+    /// do balde, e a conta não é segurada atrás delas.
     #[test]
     fn a_rejeicao_alem_do_teto_da_espera_nao_se_perde() {
         let deixou = deixou(
@@ -11108,14 +11113,37 @@ mod a_falha_do_mod_chega_ao_registro {
             "o MOD não chegou ao fim, e o teste não mediu nada: {:?}",
             deixou.falas
         );
+        let ultima_guardada = format!("Error: r{}", REJEICOES_GUARDADAS - 1);
+        for primeira_e_ultima in ["Error: r0", ultima_guardada.as_str()] {
+            assert!(
+                linha_de_erro(
+                    &deixou.rastro,
+                    &["promessa rejeitada sem tratamento", primeira_e_ultima]
+                )
+                .is_some(),
+                "a rejeição «{primeira_e_ultima}», dentro do teto da espera, não chegou ao \
+                 seele.log com a linha dela: {}",
+                deixou.rastro
+            );
+        }
+        let alem = 40 - REJEICOES_GUARDADAS;
         assert!(
             linha_de_erro(
                 &deixou.rastro,
-                &["promessa rejeitada sem tratamento", "Error: r39"]
+                &[&format!(
+                    "e mais {alem} rejeições sem tratamento além da espera"
+                )]
             )
             .is_some(),
-            "a quadragésima rejeição sem tratamento, além do teto da espera, não chegou ao \
-             seele.log — calada, ou segurada pelo balde atrás das outras: {}",
+            "as {alem} rejeições além do teto da espera não foram contadas no fim da volta — \
+             caladas, ou a conta segurada pelo balde atrás das guardadas: {}",
+            deixou.rastro
+        );
+        assert!(
+            !deixou.rastro.contains("Error: r39"),
+            "a quadragésima rejeição, além do teto da espera, saiu com a linha dela na hora, e \
+             não só na conta: uma que o MOD pegasse logo depois sairia em ERROR como «sem \
+             tratamento»: {}",
             deixou.rastro
         );
         assert!(
@@ -11123,6 +11151,47 @@ mod a_falha_do_mod_chega_ao_registro {
             "{} linhas de console em {:?}: as rejeições passaram por fora do balde",
             deixou.linhas,
             deixou.levou
+        );
+    }
+
+    /// **Um `Promise.allSettled` de mais promessas que o teto da espera, que
+    /// lançam antes do primeiro `await`, não deixa linha de erro.**
+    ///
+    /// Cada função `async` rejeita a promessa dela antes de o `allSettled`
+    /// prender o tratamento, e o motor avisa cada rejeição nessa hora. As que
+    /// cabem na espera saem dela quando o tratamento chega; as de depois, que
+    /// só foram contadas, saem da conta. Ditas na hora, como antes, elas
+    /// saíam em ERROR como «sem tratamento» — oito linhas sobre rejeições que o
+    /// MOD tratou (F-Mods-m1 da revisão final do Plano 1).
+    #[test]
+    fn um_allsettled_alem_do_teto_da_espera_nao_vira_linha_de_erro() {
+        let deixou = deixou(
+            "const lanca = async (i) => { throw new Error('tratada ' + i); };\
+             Promise.allSettled(Array.from({ length: 40 }, (_, i) => lanca(i)))\
+               .then((r) => seele.postar('assentou ' + \
+                 r.filter((x) => x.status === 'rejected').length));\
+             setTimeout(() => seele.postar('fim'), 0);",
+            |_| {},
+            |falas, _| tem_mensagem(falas, "fim"),
+            Duration::from_secs(5),
+        );
+        assert!(
+            tem_mensagem(&deixou.falas, "assentou 40") && tem_mensagem(&deixou.falas, "fim"),
+            "o `allSettled` não assentou as quarenta rejeições, ou o MOD não chegou ao fim, e o \
+             teste não mediu nada: {:?}",
+            deixou.falas
+        );
+        assert!(
+            !deixou.rastro.contains("tratada "),
+            "uma rejeição que o `allSettled` tratou saiu no seele.log como «sem tratamento»: \
+             quem escreveu o MOD vai procurar um defeito que não existe: {}",
+            deixou.rastro
+        );
+        assert!(
+            !deixou.rastro.contains("além da espera"),
+            "as rejeições além do teto da espera foram tratadas pelo `allSettled`, e a conta \
+             delas saiu mesmo assim: {}",
+            deixou.rastro
         );
     }
 
