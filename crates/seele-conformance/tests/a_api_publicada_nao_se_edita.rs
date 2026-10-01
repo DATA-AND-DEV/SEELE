@@ -184,6 +184,10 @@ fn conferir(
             continue;
         };
         match lista.get(nome) {
+            // Uma versão que o build oferece já saiu: sem a linha, os bytes de
+            // hoje podem ser os de uma edição, e dar o hash deles mandaria
+            // copiá-lo para a lista (ver [`linha_que_falta`]).
+            None if n <= oferecida => violacoes.push(linha_que_falta(nome, n, oferecida)),
             None => violacoes.push(format!(
                 "`api/{nome}` não está em `{LISTA}`. Toda versão entra na lista no commit \
                  que a cria: acrescente a linha `{achado}  {nome}`."
@@ -232,27 +236,37 @@ fn conferir(
 /// Sem isto, apagar `api/v2.json` e a linha dela juntos deixaria a lista e a
 /// pasta de acordo, e o [`conferir`] passaria sem ter visto a v2.
 ///
-/// Há dois jeitos de chegar aqui, e a mensagem cobre os dois: a linha de uma
-/// versão que já saiu foi apagada, ou `MOD_API_VERSION` subiu antes de a linha
-/// de uma versão nova entrar. Ela não dá o hash dos bytes de hoje, de
-/// propósito: no primeiro caso, esses bytes podem ser os de uma edição, e
-/// copiar o hash deles para a lista faria a edição passar calada. Por isso o
-/// teste de árvore reprova aqui antes de o [`conferir`], que daria esse hash.
+/// A mensagem está em [`linha_que_falta`], que o [`conferir`] também usa.
 fn linhas_que_faltam(lista: &BTreeMap<String, String>, oferecida: u32) -> Vec<String> {
     (1..=oferecida)
         .map(|n| (n, format!("v{n}.json")))
         .filter(|(_, nome)| !lista.contains_key(nome))
-        .map(|(n, nome)| {
-            format!(
-                "`{LISTA}` não tem a linha de `{nome}`, que este build oferece \
-                 (`MOD_API_VERSION` = {oferecida}), e sem ela a versão fica sem guarda \
-                 nenhum. Se `{nome}` já saiu numa release, restaure a linha \
-                 (`git checkout -- {LISTA}`). Se ela é nova neste commit, ponha a linha dela \
-                 na lista (`shasum -a 256 {nome}`, dentro de `api/`), e `MOD_API_VERSION` só \
-                 chega a {n} quando ela estiver pronta para sair: a partir daí ela congela."
-            )
-        })
+        .map(|(n, nome)| linha_que_falta(&nome, n, oferecida))
         .collect()
+}
+
+/// A reprovação de uma versão que este build oferece (`n <= oferecida`) e que
+/// não tem linha na lista, com ou sem o arquivo dela em `api/`.
+///
+/// Há dois jeitos de chegar aqui, e a mensagem cobre os dois: a linha de uma
+/// versão que já saiu foi apagada, ou `MOD_API_VERSION` subiu antes de a linha
+/// de uma versão nova entrar. Ela não dá o hash dos bytes de hoje, de
+/// propósito: no primeiro caso, esses bytes podem ser os de uma edição, e
+/// copiar o hash deles para a lista faria a edição passar calada.
+///
+/// **Uma frase só, para os dois guardas.** O [`conferir`] dava, no mesmo caso,
+/// a linha pronta com o hash dos bytes de hoje, e só a ordem dos dois asserts
+/// do teste de árvore o escondia: apagar a chamada de [`linhas_que_faltam`]
+/// não deixava teste nenhum vermelho (R-3 da revisão do Plano 1E).
+fn linha_que_falta(nome: &str, n: u32, oferecida: u32) -> String {
+    format!(
+        "`{LISTA}` não tem a linha de `{nome}`, que este build oferece \
+         (`MOD_API_VERSION` = {oferecida}), e sem ela a versão fica sem guarda \
+         nenhum. Se `{nome}` já saiu numa release, restaure a linha \
+         (`git checkout -- {LISTA}`). Se ela é nova neste commit, ponha a linha dela \
+         na lista (`shasum -a 256 {nome}`, dentro de `api/`), e `MOD_API_VERSION` só \
+         chega a {n} quando ela estiver pronta para sair: a partir daí ela congela."
+    )
 }
 
 /// **A árvore de verdade.** Nenhuma versão publicada mudou, toda versão está
@@ -266,7 +280,9 @@ fn nenhuma_versao_publicada_da_api_mudou() {
     );
     let lista = ler_lista(&texto).unwrap_or_else(|erro| panic!("`{LISTA}`, {erro}"));
 
-    // Antes do `conferir`, e de propósito: ver `linhas_que_faltam`.
+    // O `conferir` não vê a versão oferecida que sumiu junto com a linha dela,
+    // e esta conta vê. A ordem dos dois não esconde mais nada: para a versão
+    // oferecida sem linha, os dois dão a mesma frase (`linha_que_falta`).
     let faltam = linhas_que_faltam(&lista, MOD_API_VERSION);
     assert!(faltam.is_empty(), "{}", faltam.join("\n"));
 
@@ -464,6 +480,40 @@ fn uma_versao_fora_da_lista_reprova_e_da_a_linha() {
             .first()
             .is_some_and(|v| v.contains(&format!("{hash_da_nova}  v3.json"))),
         "a violação não dá a linha que falta na lista: {violacoes:?}"
+    );
+}
+
+/// **A versão publicada sem a linha dela não recebe o hash dos bytes de hoje.**
+///
+/// A v2 já saiu (o build oferece a 2), e alguém apagou a linha dela da lista e
+/// editou os bytes. A mensagem de uma versão fora da lista dava a linha pronta,
+/// com o hash dos bytes de hoje, e quem a seguisse copiaria para a lista o hash
+/// da edição: a edição passaria calada. Só a ordem dos dois asserts do teste de
+/// árvore escondia isso (R-3 da revisão do Plano 1E).
+#[test]
+fn uma_versao_publicada_sem_linha_e_com_bytes_editados_nao_recebe_o_hash_da_edicao() {
+    let mut lista = lista_de_fixture();
+    lista.remove("v2.json");
+    let mut presentes = lista_de_fixture();
+    let hash_da_edicao = "c".repeat(64);
+    presentes.insert("v2.json".to_owned(), hash_da_edicao.clone());
+    let violacoes = conferir(&lista, &presentes, 2);
+    assert_eq!(
+        violacoes.len(),
+        1,
+        "esperava uma violação, vieram {violacoes:?}"
+    );
+    let primeira = violacoes.first().map_or("", String::as_str);
+    assert!(
+        !primeira.contains(&hash_da_edicao),
+        "a v2 já saiu, a linha dela sumiu da lista, e a mensagem dá o hash dos bytes de hoje: \
+         copiado para a lista, ele faz uma edição da versão publicada passar calada: {primeira}"
+    );
+    assert!(
+        primeira.contains("`v2.json`")
+            && primeira.contains("git checkout -- api/congeladas.sha256"),
+        "a versão publicada sem linha não diz o que fazer — restaurar a linha da lista, que é o \
+         que faz a edição dos bytes aparecer na volta seguinte: {primeira}"
     );
 }
 
