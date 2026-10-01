@@ -394,6 +394,25 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
     }
     for ponto_do_link in formas {
         let achado = seele_ffi::onde_mora_hoje(&ponto_do_link, IMPRESSAO_DO_ANFITRIAO).await;
+        // **Primeiro, que o quarto deu os dois endereços.** Sem um deles a
+        // regra de baixo não tem o que julgar, e a frase dela apontaria o
+        // culpado errado: uma escuta que nunca chegou ao quarto não é uma
+        // escuta que a regra deixou de lado. Cada forma da falta tem a sua
+        // causa, e é esta asserção que a diz.
+        assert!(
+            matches!(
+                achado,
+                OndeMora::Achado {
+                    servidor: Some(_),
+                    escuta: Some(_),
+                }
+            ),
+            "o link com o ponto «{ponto_do_link}» não levou aos dois endereços de hoje: o \
+             quarto respondeu {achado:?}. Um `PontoNaoResolve` é o ponto sem porta indo cru ao \
+             DNS; `escuta: None` é a escuta registrada com outra marca; `servidor: None` é o \
+             registro do servidor que não chegou ao quarto; `NinguemMora` é o registro que não \
+             saiu na subida"
+        );
         // **A regra da escuta não cala o anfitrião de verdade.** O `connect`
         // só usa a escuta que o quarto deu quando o servidor da mesma resposta
         // mora no mesmo IP (`OndeMora::escuta_do_anfitriao`, o I1 da revisão
@@ -408,16 +427,45 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
         // aviso do link.
         //
         // Antes da asserção dos endereços, que também ficaria vermelha com o
-        // servidor registrado noutra família: esta diz a consequência.
+        // servidor registrado noutra família: esta diz a consequência. A
+        // frase separa os dois casos, porque o conserto de cada um mora num
+        // crate diferente: o servidor e a escuta vistos em dois IPs são o
+        // anfitrião (`registrar`, no `seele-server`); no mesmo IP, é a regra
+        // (`escuta_do_anfitriao`, no `seele-core`) comparando mais que o IP.
+        let veredito = achado.escuta_do_anfitriao();
+        let porque = match veredito {
+            EscutaDoQuarto::NaoConfirmada {
+                escuta,
+                servidor: Some(servidor),
+            } if servidor.ip().to_canonical() != escuta.ip().to_canonical() => format!(
+                "O quarto viu o servidor em {servidor} e a escuta em {escuta}, em IPs \
+                 diferentes: o anfitrião passou a registrar os dois por caminhos diferentes \
+                 (outra família, outro socket), e o conserto é no `registrar` do `seele-server`"
+            ),
+            EscutaDoQuarto::NaoConfirmada {
+                escuta,
+                servidor: Some(servidor),
+            } => format!(
+                "O quarto viu o servidor em {servidor} e a escuta em {escuta}, no mesmo IP, e a \
+                 regra os deixou de lado: ela passou a comparar mais que o IP (a porta, que é o \
+                 que o NAT troca), e o conserto é em `escuta_do_anfitriao`, no `seele-core`"
+            ),
+            EscutaDoQuarto::NaoConfirmada { servidor: None, .. } | EscutaDoQuarto::Nenhuma => {
+                "Faltou um dos dois endereços, e a asserção de cima devia ter dito qual".to_owned()
+            }
+            EscutaDoQuarto::DoAnfitriao(outra) => format!(
+                "A regra aceitou a escuta {outra}, e o aviso que este anfitrião abriu é {aviso}: \
+                 o quarto guardou a escuta de outro socket"
+            ),
+        };
         assert_eq!(
-            achado.escuta_do_anfitriao(),
+            veredito,
             EscutaDoQuarto::DoAnfitriao(aviso),
             "o anfitrião de hoje deixou de ser avisado pela escuta do quarto: com o link \
              «{ponto_do_link}», a escuta que ele registrou não passou pela regra que a confere \
              com o servidor da mesma resposta, e quem chega pelo quarto manda o `LEVE` só ao \
-             aviso do link, que pode ser de outra abertura. O quarto respondeu {achado:?}. `NaoConfirmada` com o servidor noutro IP é o \
-             anfitrião registrando o servidor e a escuta por caminhos diferentes, ou a regra \
-             comparando mais que o IP"
+             aviso do link, que pode ser de outra abertura. {porque}. O quarto respondeu \
+             {achado:?}"
         );
         assert_eq!(
             achado,
