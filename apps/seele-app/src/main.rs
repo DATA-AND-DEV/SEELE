@@ -2297,8 +2297,8 @@ const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
 /// **O maior id de MOD que uma linha do `seele.log` leva**, em caracteres.
 ///
 /// Um id de verdade (`autor/nome`) é bem menor; o teto é para o que chega pela
-/// ponte sem ter passado por um manifesto. Nomeado porque duas portas escrevem
-/// `mod_id=`, e o número estava escrito à mão nas duas: ver
+/// ponte sem ter passado por um manifesto. Nomeado porque mais de uma porta
+/// escreve `mod_id=`, e o número estava escrito à mão em duas: ver
 /// [`id_no_registro`].
 const TETO_DO_ID_NO_REGISTRO: usize = 128;
 
@@ -2306,11 +2306,12 @@ const TETO_DO_ID_NO_REGISTRO: usize = 128;
 /// [`TETO_DO_ID_NO_REGISTRO`] e sem caractere que quebre ou inverta a linha
 /// ([`quebra_ou_inverte_a_linha`]).
 ///
-/// Uma função só para as duas portas que escrevem `mod_id=` — a janela
-/// ([`registrar_da_janela`]) e a recusa de mídia do Rust
-/// ([`recusa_de_midia_dita`]). É por esse campo que uma busca só junta o que as
-/// duas disseram do mesmo MOD, e um tratamento repetido à mão em cada uma podia
-/// divergir sem que nada reclamasse.
+/// Uma função só para as três portas que escrevem `mod_id=` com um id que
+/// chega da janela — a própria janela ([`registrar_da_janela`]) e as recusas
+/// de mídia ([`recusa_de_midia_dita`]) e de carga ([`recusa_de_carga_dita`])
+/// do Rust. É por esse campo que uma busca só junta o que elas disseram do
+/// mesmo MOD, e um tratamento repetido à mão em cada uma podia divergir sem
+/// que nada reclamasse.
 ///
 /// Sem aspas, porque `mod_id=autor/nome` é a grafia que se procura: é o filtro
 /// que impede uma quebra de linha no id de escrever uma segunda linha com a
@@ -2335,7 +2336,8 @@ fn id_no_registro(id: &str) -> String {
 ///
 /// As portas que escrevem pelo `Debug` de um `str` escapam todos eles
 /// (`\u{2028}`, `\u{202e}`); os campos que vão crus à linha — a frase, o
-/// `onde` e o id da janela, e o `mod_id=` do Rust — passam por aqui.
+/// `onde` e o id da janela, e o `mod_id=` das recusas de mídia e de carga —
+/// passam por aqui.
 fn quebra_ou_inverte_a_linha(c: char) -> bool {
     c.is_control()
         || matches!(

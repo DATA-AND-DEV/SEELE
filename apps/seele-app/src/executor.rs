@@ -263,10 +263,11 @@ impl Default for Limites {
 /// tratador; é por isso que as três existem juntas.
 ///
 /// **E ela guarda qual teto disse sim** ([`Teto`]). O QuickJS faz da
-/// interrupção uma exceção como outra qualquer, `InternalError: interrupted`,
-/// e sem isto a volta que o produto parou chegava ao `seele.log` como «o MOD
-/// lançou» — o produto sabia que tinha sido ele, e por qual teto, e não
-/// contava.
+/// interrupção uma exceção que o MOD não consegue pegar — `InternalError:
+/// interrupted`, marcada como não capturável, que atravessa todo `catch` dele
+/// — e que chega ao anfitrião como qualquer outra. Sem isto, a volta que o
+/// produto parou chegava ao `seele.log` como «o MOD lançou» — o produto sabia
+/// que tinha sido ele, e por qual teto, e não contava.
 #[derive(Debug)]
 pub(crate) struct Interrupcao {
     revogado: AtomicBool,
@@ -362,11 +363,16 @@ impl Interrupcao {
 
     /// **O teto que parou a volta, tirado**: quem o lê o consome.
     ///
-    /// Tirado, e não só lido, porque [`rodar`] dispara os temporizadores
-    /// vencidos numa volta só: o primeiro pode ser parado pelo prazo e o
-    /// segundo lançar um `TypeError` de verdade antes de o motor consultar o
-    /// tratador de novo. Lido sem tirar, o teto do primeiro diria a parada do
-    /// segundo, e o `TypeError` sumiria.
+    /// Tirado, e não só lido, porque um teto lido não pode atribuir a parada a
+    /// uma exceção seguinte da mesma volta. [`rodar`] dispara os
+    /// temporizadores vencidos numa volta só, com um [`Self::comecar`] para
+    /// todos, e [`relatar`] lê o teto depois de cada um. O `TypeError` comum de
+    /// um temporizador não chega lá — o `catch` do prelúdio o pega e o diz como
+    /// «erro num temporizador» —, mas uma exceção de verdade ainda chega: a de
+    /// um valor lançado cujo `toString` lança dentro daquele `catch`, ou a de
+    /// um `__seeleRelogio` que o MOD trocou pelo dele. Lido sem tirar, o teto
+    /// de um temporizador anterior, parado pelo prazo, diria a parada dessa
+    /// exceção, e o texto dela sumiria.
     fn tirar_teto(&self) -> Option<Teto> {
         match self.parou_por.swap(SEM_TETO, Ordering::Relaxed) {
             PARADA_PELO_PRAZO => Some(Teto::Prazo),
@@ -598,10 +604,12 @@ fn dizer_as_seguradas(
 /// **Uma linha de `console` sai do motor**: pelo balde, cortada, e para o
 /// canal que a bomba escreve no `seele.log` com o id do MOD.
 ///
-/// O caminho de toda linha de console, e é por ser um só que o teto vale para
-/// todas: o que o MOD escreve com `seele.console`, e o que o produto diz por
-/// ele quando uma volta lança ou passa de um teto ([`relatar`] e
-/// [`escoar_jobs`]).
+/// O caminho de toda linha que o MOD escreve com `seele.console` e da que o
+/// produto diz por ele quando uma volta lança ou passa de um teto
+/// ([`relatar`] e [`escoar_jobs`]), e é por ser um só que o teto vale para
+/// todas elas. Menos a conta do balde, que [`dizer_as_seguradas`] põe no canal
+/// por fora daqui: ao fim de uma volta ela gasta a ficha dela no próprio
+/// balde, e na parada é a última linha da instância.
 fn linha_de_console(
     balde: &std::cell::RefCell<BaldeDoConsole>,
     manda: &Sender<ParaOFora>,
@@ -2880,10 +2888,14 @@ mod testes {
     /// **O teto que parou a volta é dito uma vez, e não sobra para a
     /// seguinte.**
     ///
-    /// Os temporizadores vencidos rodam numa volta só: se o teto do primeiro,
-    /// parado pelo prazo, ficasse guardado depois de lido, o `TypeError` de
-    /// verdade do segundo sairia como «o produto parou o MOD». E a revogação
-    /// não é teto: ela tem a frase dela, e não a de um teto.
+    /// Um teto lido não pode atribuir a parada a uma exceção seguinte da mesma
+    /// volta. Os temporizadores vencidos rodam numa volta só, e depois de um
+    /// parado pelo prazo ainda pode chegar a [`relatar`] uma exceção de
+    /// verdade — um valor lançado cujo `toString` lança dentro do `catch` do
+    /// prelúdio, ou um `__seeleRelogio` que o MOD trocou; o `TypeError` comum
+    /// não chega, porque aquele `catch` o pega. Se o teto ficasse guardado
+    /// depois de lido, essa exceção sairia como «o produto a interrompeu». E a
+    /// revogação não é teto: ela tem a frase dela, e não a de um teto.
     #[test]
     fn o_teto_que_parou_a_volta_e_tirado_uma_vez_e_nao_sobra() {
         /// Chama o tratador até ele dizer sim, com um limite para o teste não
