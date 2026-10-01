@@ -690,7 +690,14 @@ function desenharApresentacoes() {
   const lista = $("lista-apresentacoes");
   const secao = $("mods-apresentacao");
   if (!lista || !secao) return;
-  const preferidos = new Map(Object.entries(preferenciasDeApresentacao()));
+  // **A escolha deste servidor, por ponto.** A preferência é gravada com o
+  // destino na chave (`chaveDaPreferencia`), e `resumo` a pergunta pelo ponto:
+  // passado o mapa gravado, a pergunta nunca achava a chave, e a gestão dizia
+  // «(escolha automática)» de qualquer escolha — sem o botão de voltar ao
+  // automático. `modPreferidoPara` é a leitura que a tela usa para desenhar.
+  const preferidos = new Map(
+    Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => [ponto, modPreferidoPara(ponto)]),
+  );
   const linhas = contribuicoesDosMods.resumo(preferidos);
   secao.hidden = linhas.length === 0;
   if (!linhas.length) {

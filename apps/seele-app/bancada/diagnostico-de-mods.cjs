@@ -553,6 +553,81 @@ async function quemPintaCadaLugar(navegador, servidor) {
 }
 
 // ---------------------------------------------------------------------------
+// «Quem desenha o que», na gestão de MODs.
+// ---------------------------------------------------------------------------
+
+/** O texto e os botões da linha de um ponto em «quem desenha o que». */
+function linhaDaGestao(pagina, ponto) {
+  return pagina.evaluate((nome) => {
+    desenharApresentacoes();
+    const item = [...document.querySelectorAll("#lista-apresentacoes > li")]
+      .find((li) => li.querySelector(".mods-id")?.textContent === nome);
+    return {
+      estado: item?.querySelector(".mods-versao")?.textContent ?? "(sem linha)",
+      botoes: [...(item?.querySelectorAll("button") ?? [])].map((b) => b.textContent),
+    };
+  }, ponto);
+}
+
+async function quemDesenhaOQueDizAEscolhaDestaMaquina(navegador, servidor) {
+  const { pagina, erros } = await abrirASessao(navegador, servidor);
+  await pagina.evaluate(() => {
+    const a = instancia("mod/a");
+    const b = instancia("mod/b");
+    contribuicoesDosMods.registrar({ id: "mod/a" }, a, {
+      ponto: "pessoa.cartao", modo: "substituir", prioridade: 10, conteudo: [{ forma: "texto", dentro: "A" }],
+    });
+    contribuicoesDosMods.registrar({ id: "mod/b" }, b, {
+      ponto: "pessoa.cartao", modo: "substituir", prioridade: 5, conteudo: [{ forma: "texto", dentro: "B" }],
+    });
+  });
+  const cartao = "O cartão de cada pessoa";
+
+  // **A escolha desta máquina é a deste servidor.** A preferência é gravada
+  // com o destino na chave (`chaveDaPreferencia`), e a gestão a lia pelo ponto
+  // só: dizia «(escolha automática)» de qualquer escolha, e o botão de voltar
+  // ao automático nunca aparecia.
+  let linha = await linhaDaGestao(pagina, cartao);
+  assert.equal(
+    linha.estado,
+    "apresentado por mod/a (escolha automática)",
+    `sem escolha, quem vale é o de maior prioridade, e a gestão disse outra coisa: ${linha.estado}`,
+  );
+  assert.ok(
+    !linha.botoes.includes("DECIDIR AUTOMATICAMENTE"),
+    `no automático, a gestão ofereceu voltar ao automático: ${linha.botoes.join(", ")}`,
+  );
+
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", "mod/b"));
+  linha = await linhaDaGestao(pagina, cartao);
+  assert.equal(
+    linha.estado,
+    "apresentado por mod/b",
+    `com mod/b escolhido nesta máquina, a gestão não disse que ele apresenta por escolha: ${linha.estado}`,
+  );
+  assert.ok(
+    linha.botoes.includes("DECIDIR AUTOMATICAMENTE") && linha.botoes.includes("USAR mod/a"),
+    `com mod/b escolhido, a gestão não ofereceu voltar ao automático nem trocar para mod/a: ${linha.botoes.join(", ")}`,
+  );
+
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA));
+  linha = await linhaDaGestao(pagina, cartao);
+  assert.equal(
+    linha.estado,
+    "o SEELE desenha; nenhum MOD substitui este lugar",
+    `com o SEELE escolhido nesta máquina, a gestão não disse que o SEELE desenha: ${linha.estado}`,
+  );
+  assert.ok(
+    linha.botoes.includes("DECIDIR AUTOMATICAMENTE") && !linha.botoes.includes("USAR APRESENTAÇÃO DO SEELE"),
+    `com o SEELE escolhido, a gestão não ofereceu voltar ao automático, ou ofereceu o que já vale: ${linha.botoes.join(", ")}`,
+  );
+  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
+
+  assert.deepEqual(erros, [], `a página lançou erro em «quem desenha o que»: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
+// ---------------------------------------------------------------------------
 // O modo de desenvolvedor contorna sem tomar nada.
 // ---------------------------------------------------------------------------
 
@@ -1189,6 +1264,7 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
+  quemDesenhaOQueDizAEscolhaDestaMaquina,
   oModoDeDesenvolvedorContornaSemTomarNada,
   oSomDeModTocaPorWebAudioSobACspDoProduto,
   oSomQueSaiDaTelaPara,
