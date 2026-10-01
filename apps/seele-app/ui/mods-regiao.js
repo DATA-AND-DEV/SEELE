@@ -434,6 +434,15 @@ class RegiaoDeMod {
      * na gestão de MODs, pergunta aqui. Ver `anotarMidia`.
      */
     this.estadosDeMidia = new Map();
+    /**
+     * O som de cada mídia, e o `tocando` que o MOD declarou por último.
+     *
+     * `Map<Element, { tocador, tocar, declarado, quer }>`. À parte do nó porque o
+     * som chega depois dele — bytes e decodificação são duas voltas —, e o MOD
+     * pode ter mudado de ideia nesse meio tempo. `tocar` é o do tocador com a
+     * recusa já amarrada (ver `montarSom`). Ver `aplicarTocando`.
+     */
+    this.somDaMidia = new Map();
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
     this.solta = false;
   }
@@ -2032,7 +2041,8 @@ class RegiaoDeMod {
     const bolso = plano.cartao
       ? { conta: "bytesDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia, quantas: "midiasDeCartao" }
       : { conta: "bytesDeMidia", teto: LIMITES_DA_REGIAO.bytesDeMidia, quantas: "midias" };
-    const estado = { elemento: null, cancelado: false, bytes: 0, ouvintes: [] };
+    const estado = { elemento: null, som: null, cancelado: false, bytes: 0, ouvintes: [], recusaDita: null };
+    this.somDaMidia.set(elem, { tocador: null, tocar: null, declarado: undefined, quer: false });
     this.guardar(elem, `midia ${plano.chave}`, () => {
       estado.cancelado = true;
       const tocador = estado.elemento;
@@ -2041,14 +2051,15 @@ class RegiaoDeMod {
       // até lá cada um deles segura esta região, que segura a instância.
       for (const [nome, fn] of estado.ouvintes) tocador?.removeEventListener(nome, fn);
       estado.ouvintes.length = 0;
-      if (tocador) {
-        // Pausar **e** tirar a fonte: um `<audio>` removido do documento com
-        // `src` continua com os bytes decodificados presos até o coletor
-        // passar, e um que ainda não começou pode começar depois.
-        tocador.pause?.();
-        tocador.removeAttribute("src");
-        tocador.load?.();
-      }
+      // **O som para e solta o que decodificou.** Uma fonte de WebAudio está
+      // ligada à saída de som, e não ao documento: tirar o nó da página não a
+      // cala. É o «som sem dono» do topo deste arquivo, por outra porta.
+      estado.som?.soltar();
+      estado.som = null;
+      this.somDaMidia.delete(elem);
+      // Uma imagem solta a fonte: fora do documento com `src`, ela segura os
+      // bytes decodificados até o coletor passar.
+      tocador?.removeAttribute("src");
       this[bolso.conta] -= estado.bytes;
       this.contagem[bolso.quantas] -= 1;
       this.esquecerMidia(elem);
@@ -2081,7 +2092,7 @@ class RegiaoDeMod {
       return;
     }
 
-    vindo.then((midia) => {
+    vindo.then(async (midia) => {
       // **As três perguntas, depois do `await`.** A região pode ter sido
       // solta, o nó pode ter saído da árvore, e a sessão pode ter acabado —
       // e montar mídia em qualquer um dos três casos é tocar som de uma
@@ -2094,29 +2105,35 @@ class RegiaoDeMod {
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
         return;
       }
-      // A etiqueta sai do papel que o Rust devolveu, e o papel saiu dos bytes:
-      // um MOD não escolhe o decodificador em que os bytes dele caem.
-      const tocador = elemento(midia.papel === "som" ? "audio" : "img", "regiao-de-mod-tocador");
-      if (midia.papel === "som") tocador.controls = true;
-      else tocador.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
-      tocador.src = midia.uri;
-      estado.elemento = tocador;
+      // Contados **agora**, e não quando o som terminar de decodificar: os
+      // bytes do som ainda levam mais duas voltas, e outra mídia que chegasse
+      // nesse meio tempo caberia num teto que esta já está ocupando.
       estado.bytes = midia.bytes;
       this[bolso.conta] += midia.bytes;
+      // O papel veio do Rust, e ele saiu dos bytes: um MOD não escolhe o
+      // decodificador em que os bytes dele caem.
+      if (midia.papel === "som") {
+        await this.montarSom(elem, plano, estado, doServidor ? { uri: midia.uri } : { caminho });
+        return;
+      }
+      const tocador = elemento("img", "regiao-de-mod-tocador");
+      tocador.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
+      tocador.src = midia.uri;
+      estado.elemento = tocador;
       elem.dataset.estado = "pronta";
       this.anotarMidia(elem, "pronta");
       elem.append(tocador);
-      for (const [nome, aviso] of [["play", "tocando"], ["pause", "pausada"], ["ended", "terminou"], ["error", "falhou"]]) {
-        const ouvinte = () => {
-          this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: aviso });
-          // O `error` do elemento é a recusa que nem o Rust nem a conta viram:
-          // os bytes chegaram e couberam, e o `<img>`/`<audio>` não os abriu.
-          if (aviso === "falhou") this.dizerRecusaDeMidia(plano.no.chave ?? "", "o elemento de mídia não abriu (evento error)");
-        };
-        tocador.addEventListener(nome, ouvinte);
-        estado.ouvintes.push([nome, ouvinte]);
-      }
-      this.atualizarMidia(elem, plano);
+      // Uma imagem que o navegador não decodifica é dita ao MOD, ao
+      // diagnóstico e a quem hospeda, e não fica como um quadrado quebrado sem
+      // explicação. É a recusa que nem o Rust nem a conta viram: os bytes
+      // chegaram e couberam, e o `<img>` não os abriu.
+      const naoAbriu = () => {
+        this.anotarMidia(elem, "recusada", "o navegador não decodificou a imagem");
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou" });
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", "o elemento de mídia não abriu (evento error)");
+      };
+      tocador.addEventListener("error", naoAbriu);
+      estado.ouvintes.push(["error", naoAbriu]);
     }).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       elem.dataset.estado = "falhou";
@@ -2132,34 +2149,163 @@ class RegiaoDeMod {
     });
   }
 
-  /** O MOD pede «tocando» e o produto obedece, **se** puder. */
-  atualizarMidia(elem, plano) {
-    const tocador = elem.querySelector(".regiao-de-mod-tocador");
-    if (!tocador || typeof tocador.play !== "function") return;
-    if (plano.no.tocando === true) {
-      // `play()` devolve promessa e ela **rejeita** quando o navegador não
-      // deixa tocar sem gesto. Ignorá-la faria o MOD achar que está tocando;
-      // o evento de erro é o que diz a verdade.
-      tocador.play().catch((falha) => {
-        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada" });
-        // **Ao registro, uma vez por motivo, e só o que o produto não causou.**
-        // Esta função roda a cada `aplicar`, e um MOD com a trilha tocando
-        // redesenha a cada casa de um arraste: sem a memória do último motivo,
-        // o mesmo `play()` recusado viraria um aviso por redesenho, num
-        // `seele.log` que só gira na abertura. `AbortError` é o `pause()` ou o
-        // `load()` do próprio produto — o MOD pediu «parar» ou tirou o nó com o
-        // som pendente —, e não uma recusa. O evento acima continua a cada vez:
-        // ele é do MOD.
-        if (this.solta || falha?.name === "AbortError") return;
-        const porque = motivoDaFalha(falha);
-        this.anotarMidia(elem, "recusada", `o som não tocou: ${porque}`);
-        if (tocador.__recusaDita === porque) return;
-        tocador.__recusaDita = porque;
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `não tocou: ${porque}`);
-      });
-    } else if (!tocador.paused) {
-      tocador.pause();
+  /**
+   * O som de um MOD: bytes por `invoke`, decodificados por WebAudio, e um
+   * botão do produto para tocar e pausar.
+   *
+   * Os bytes vêm de dois lugares, como a mídia: do pacote, por
+   * `dono.bytesDoSom` (o comando `som_do_mod`, que entrega os bytes crus de um
+   * arquivo que o manifesto declara); ou do servidor do MOD, pelo `data:` que
+   * `midia_em_bytes` já devolveu — lido como texto, nunca entregue a um
+   * elemento de mídia.
+   *
+   * **O som do pacote atravessa duas vezes**, até um plano Rust mudar o
+   * `midia_do_mod` para o papel `som`: em base64 pelo `midia_do_mod` (que
+   * `montarMidia` chama para saber o papel e os bytes a contar) e cru pelo
+   * `som_do_mod`. Nada se perde; só se lê o arquivo duas vezes.
+   *
+   * **O botão substitui o `<audio controls>`**, que era o único jeito de uma
+   * pessoa tocar um som que o MOD não mandou tocar. Ele não existe num cartão
+   * nem numa contribuição: os dois são montados com o perfil do cartão
+   * (`plano.cartao`), que não recebe foco (ver `FORMAS_DO_CARTAO`), e o som dali
+   * toca só quando o MOD declara `tocando`.
+   *
+   * **Toda recusa é dita a quem hospeda**, como o `.catch` de `montarMidia` e o
+   * `play()` recusado do `<audio>` já eram (`dizerRecusaDeMidia`): o som que
+   * não chegou, o que não decodificou e o que não começou — por um caminho só,
+   * `recusou`, seja o áudio da janela que não liga no prazo, seja o pedido de
+   * tocar que rejeita.
+   *
+   * @param {{ uri: string } | { caminho: string }} origem
+   */
+  async montarSom(elem, plano, estado, origem) {
+    const chave = plano.no.chave ?? "";
+    const falhou = (motivo) => {
+      if (estado.cancelado || this.solta) return;
+      elem.dataset.estado = "falhou";
+      this.anotarMidia(elem, "recusada", motivo);
+      this.dono.falar({ nome: "midia", chave, estado: "falhou", porque: motivo });
+      this.dizerRecusaDeMidia(chave, `falhou ao carregar: ${motivo}`);
+    };
+    const contexto = contextoDeSomDeMod();
+    if (!contexto) {
+      falhou("esta janela não oferece WebAudio");
+      return;
     }
+    let bytes;
+    try {
+      bytes = origem.uri
+        ? bufferDaUri(origem.uri)
+        : bufferDoSom(await this.dono.bytesDoSom(origem.caminho));
+    } catch (falha) {
+      falhou(motivoDaFalha(falha));
+      return;
+    }
+    if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
+    let som;
+    try {
+      som = await decodificarSomDeMod(contexto, bytes);
+    } catch (falha) {
+      falhou(`o som não decodificou: ${motivoDaFalha(falha)}`);
+      return;
+    }
+    if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
+
+    // **O som que não começou, por um caminho só.** O evento ao MOD e a
+    // anotação saem a cada vez: são deles, e o MOD pode dizer à pessoa que
+    // aperte alguma coisa. O registro sai **uma vez por motivo**, por tocador
+    // (`estado.recusaDita`): um MOD que liga e desliga o `tocando` sem um gesto
+    // de quem usa teria uma recusa por alternância, num `seele.log` que só gira
+    // na abertura e numa porta da janela sem balde.
+    //
+    // Quem chama confere antes se o som ainda é de alguém (`estado.cancelado`,
+    // `this.solta`): uma recusa que chega depois de a região sair, ou de o MOD
+    // tirar o nó, não vai ao registro, nem ao MOD, nem recria a anotação.
+    const recusou = (motivo) => {
+      this.anotarMidia(elem, "recusada", motivo);
+      this.dono.falar({ nome: "midia", chave, estado: "recusada" });
+      if (estado.recusaDita === motivo) return;
+      estado.recusaDita = motivo;
+      this.dizerRecusaDeMidia(chave, `não tocou: ${motivo}`);
+    };
+    let pintar = () => {};
+    const tocador = new TocadorDeSomDeMod(contexto, som, (aviso, comGesto) => {
+      if (estado.cancelado || this.solta) return;
+      pintar();
+      if (aviso === "recusada") {
+        // Com o clique de quem usa, a frase não diz «sem um gesto»: houve um,
+        // e o áudio da janela não ligou mesmo assim.
+        recusou(comGesto
+          ? "o áudio da janela não ligou, nem com o clique de quem usa"
+          : "o som não pôde começar sem um gesto de quem usa");
+        return;
+      }
+      this.anotarMidia(elem, "pronta");
+      this.dono.falar({ nome: "midia", chave, estado: aviso });
+    });
+    estado.som = tocador;
+    // O `tocar` com a recusa já amarrada: o clique e a declaração do MOD
+    // (`aplicarTocando`) chamam este, e nunca `tocador.tocar` direto. O
+    // `catch` é o pedido que rejeita em vez de avisar — a fonte que o WebAudio
+    // não abre —, e ele não podia ficar só na anotação.
+    const entrada = this.somDaMidia.get(elem) ?? {};
+    entrada.tocador = tocador;
+    entrada.tocar = (comGesto) => tocador.tocar(comGesto).catch((falha) => {
+      if (estado.cancelado || this.solta) return;
+      recusou(motivoDaFalha(falha));
+    });
+    elem.dataset.estado = "pronta";
+    this.anotarMidia(elem, "pronta");
+
+    if (!plano.cartao) {
+      const botao = elemento("button", "botao-fantasma regiao-de-mod-som", "TOCAR");
+      botao.type = "button";
+      const nome = typeof plano.no.descricao === "string" && plano.no.descricao
+        ? plano.no.descricao.slice(0, 120)
+        : "som";
+      pintar = () => {
+        botao.textContent = tocador.tocando ? "PAUSAR" : "TOCAR";
+        botao.setAttribute("aria-label", `${tocador.tocando ? "Pausar" : "Tocar"}: ${nome}`);
+      };
+      pintar();
+      const aoApertar = () => {
+        if (tocador.tocando) {
+          tocador.pausar();
+          return;
+        }
+        entrada.tocar(true);
+      };
+      botao.addEventListener("click", aoApertar);
+      estado.ouvintes.push(["click", aoApertar]);
+      estado.elemento = botao;
+      elem.append(botao);
+    }
+    this.aplicarTocando(elem);
+  }
+
+  /**
+   * Aplica o `tocando` que o MOD declarou, **se ele mudou** desde a última vez.
+   *
+   * Um `<audio>` recebia `play()` a cada redesenho em que o MOD declarasse
+   * `tocando: true`: um som que tinha terminado recomeçava a cada atualização,
+   * e um que a pessoa pausou voltava sozinho. Com o botão do produto ao lado,
+   * isso seria o MOD desfazendo o que a pessoa acabou de apertar. A
+   * declaração vale quando muda; o botão vale entre uma mudança e outra.
+   */
+  aplicarTocando(elem) {
+    const som = this.somDaMidia.get(elem);
+    if (!som?.tocador || som.declarado === som.quer) return;
+    som.declarado = som.quer;
+    if (som.quer) som.tocar(false);
+    else som.tocador.pausar();
+  }
+
+  /** O MOD declara «tocando»; o produto guarda, e aplica quando o som existir. */
+  atualizarMidia(elem, plano) {
+    const som = this.somDaMidia.get(elem);
+    if (!som) return;
+    som.quer = plano.no.tocando === true;
+    this.aplicarTocando(elem);
   }
 
   // ------------------------------------------------ o estado das mídias
@@ -2176,7 +2322,9 @@ class RegiaoDeMod {
    *
    * @param {Element} elem O nó da mídia.
    * @param {"carregando"|"pronta"|"recusada"} situacao
-   * @param {string} [motivo] Por que foi recusada, em texto.
+   * @param {string} [motivo] Por que foi recusada, em texto. Cortado em 200
+   *   pontos de código, e não por índice, como a chave em `dizerRecusaDeMidia`:
+   *   um corte que parta um par substituto deixa meio caractere no motivo.
    * @param {boolean} [cartao] Se ela mora num cartão. Dito na primeira
    *   anotação e mantido nas seguintes.
    */
@@ -2185,7 +2333,7 @@ class RegiaoDeMod {
     const antes = this.estadosDeMidia.get(elem);
     this.estadosDeMidia.set(elem, {
       situacao,
-      motivo: String(motivo ?? "").slice(0, 200),
+      motivo: [...String(motivo ?? "")].slice(0, 200).join(""),
       cartao: cartao ?? antes?.cartao ?? false,
     });
     this.dono.midiaMudou?.();
@@ -2353,6 +2501,236 @@ class RegiaoDeMod {
     // um `<style>` — tirar o nó já não a tira do documento.
     this.soltarAFolha();
     this.estadosDeMidia.clear();
+    this.somDaMidia.clear();
     this.raiz.remove();
+  }
+}
+
+// ------------------------------------------------------------ o som de um MOD
+//
+// **Depois de `RegiaoDeMod`, e não antes.** `TocadorDeSomDeMod` tem um
+// `soltar()`, e `o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto`,
+// em `tests/frontend.rs`, acha o `soltar()` da região pelo primeiro que
+// aparece neste arquivo. Nada daqui roda na carga: a região chama estas peças
+// quando um som chega, e aí o arquivo inteiro já foi lido.
+
+/**
+ * Quanto a declaração de um MOD espera o áudio da janela ligar.
+ *
+ * Sem um gesto de quem usa, o navegador cria o WebAudio parado, e `resume()`
+ * não resolve nem recusa: fica esperando um clique que talvez nunca venha. Um
+ * segundo e meio transforma a espera em resposta — `recusada`, a palavra que o
+ * `<audio>` já usava —, e o MOD pode dizer à pessoa que aperte alguma coisa.
+ */
+const ESPERA_SEM_GESTO_MS = 1500;
+
+/**
+ * Quanto um clique no botão do produto espera o áudio ligar.
+ *
+ * Com gesto o navegador deixa, e a espera é só a do sistema abrir a saída — um
+ * fone Bluetooth acordando leva mais que o prazo de cima, e recusar um clique
+ * de verdade seria o botão mentindo.
+ */
+const ESPERA_COM_GESTO_MS = 5000;
+
+/**
+ * O contexto de áudio dos sons de MOD: **um por janela**, criado no primeiro som.
+ *
+ * # Por que WebAudio, e não `<audio>`
+ *
+ * A política desta janela é `default-src 'self'` e não declara `media-src`,
+ * então um `<audio>` só toca o que vem do pacote. O som de um MOD chegava como
+ * `data:` — o `uri` de `midia_do_mod` —, e a política o recusava: medido no
+ * Chromium com a política exata, o motor do WebView2; a medida no WKWebView é
+ * a Task 1 (antes) e a Task 9 (depois) do Plano 1D. Afrouxar `media-src` para
+ * `data:` abriria a política para todo `data:` de som que um terceiro mande, e
+ * a especificação de 23/09 diz que ela não afrouxa
+ * (`o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob`, em
+ * `tests/frontend.rs`).
+ *
+ * `decodeAudioData` recebe **bytes**, e bytes não passam por `media-src`: a
+ * política governa de onde um elemento de mídia busca, e aqui nada é buscado.
+ *
+ * # Por que um contexto só
+ *
+ * Cada contexto segura uma linha de áudio do sistema, e os navegadores
+ * limitam quantos uma página abre. Um por som faria o quinto MOD com trilha
+ * ficar mudo sem aviso. Um por janela, com um ganho por som, é o desenho que a
+ * própria API sugere.
+ *
+ * `webkitAudioContext` porque o pacote aceita o macOS 11.0, e o WebKit das
+ * primeiras versões dele só conhecia o nome com prefixo — o sem prefixo chegou
+ * com o Safari 14.1.
+ */
+let contextoDosSonsDeMod = null;
+function contextoDeSomDeMod() {
+  if (contextoDosSonsDeMod) return contextoDosSonsDeMod;
+  const Construtor = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+  if (typeof Construtor !== "function") return null;
+  contextoDosSonsDeMod = new Construtor();
+  return contextoDosSonsDeMod;
+}
+
+/**
+ * Decodifica bytes de som, pelos dois jeitos que um WebKit responde.
+ *
+ * O `decodeAudioData` antigo só chama de volta; o novo também devolve
+ * promessa. Chamar com os dois retornos e silenciar a promessa cobre os dois
+ * sem deixar uma rejeição solta, que a página contaria como erro dela.
+ *
+ * **Uma cópia dos bytes**, porque `decodeAudioData` desliga o `ArrayBuffer`
+ * que recebe: quem o guardasse para tentar de novo guardaria um buffer vazio.
+ */
+function decodificarSomDeMod(contexto, bytes) {
+  return new Promise((resolve, reject) => {
+    const talvez = contexto.decodeAudioData(bytes.slice(0), resolve, reject);
+    if (talvez && typeof talvez.catch === "function") talvez.catch(() => {});
+  });
+}
+
+/**
+ * Os bytes que `som_do_mod` devolveu, como um `ArrayBuffer` próprio.
+ *
+ * O comando responde com `tauri::ipc::Response`, bytes crus: pelo protocolo
+ * `ipc:` eles chegam como `ArrayBuffer`; quando o Tauri cai no `postMessage`
+ * (no macOS o corpo cru vai por `format_result`), chegam como lista de
+ * números. São o mesmo som, e a janela aceita os dois — e também uma vista
+ * tipada, que não custa nada aceitar.
+ */
+function bufferDoSom(resposta) {
+  if (resposta instanceof ArrayBuffer) return resposta.slice(0);
+  if (ArrayBuffer.isView(resposta)) {
+    return resposta.buffer.slice(resposta.byteOffset, resposta.byteOffset + resposta.byteLength);
+  }
+  if (Array.isArray(resposta)) return Uint8Array.from(resposta).buffer;
+  throw new Error("o som não chegou em bytes");
+}
+
+/**
+ * Os bytes de um `data:…;base64,`, para o som que veio do servidor do MOD.
+ *
+ * O texto é lido aqui, como texto, e nunca entregue a um elemento de mídia:
+ * `midia_em_bytes` já provou pelos bytes que é som, e o que a política recusa
+ * é carregar um `data:`, e não ler uma string.
+ */
+function bufferDaUri(uri) {
+  const texto = String(uri);
+  const virgula = texto.indexOf(",");
+  if (virgula < 0) throw new Error("o som do servidor não veio em base64");
+  const binario = atob(texto.slice(virgula + 1));
+  const bytes = new Uint8Array(binario.length);
+  for (let i = 0; i < binario.length; i += 1) bytes[i] = binario.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/**
+ * Um som de MOD tocando por WebAudio.
+ *
+ * As quatro coisas que o `<audio>` dava — tocar, pausar, saber que terminou e
+ * soltar —, feitas com as peças que o WebAudio tem. Uma fonte de buffer toca
+ * uma vez e não volta: pausar é pará-la e lembrar onde, e continuar é uma
+ * fonte nova a partir dali.
+ *
+ * `avisar` recebe `"tocando"`, `"pausada"`, `"terminou"` ou `"recusada"` — as
+ * palavras que o MOD já recebia do `<audio>`, para nenhum MOD publicado
+ * precisar mudar. Na recusa vem junto se o pedido foi um clique de quem usa:
+ * quem avisa o registro não pode dizer «sem um gesto» quando houve um.
+ */
+class TocadorDeSomDeMod {
+  /**
+   * @param {AudioContext} contexto O da janela — ver `contextoDeSomDeMod`.
+   * @param {AudioBuffer} som O que `decodificarSomDeMod` devolveu.
+   * @param {(aviso: string, comGesto?: boolean) => void} avisar
+   */
+  constructor(contexto, som, avisar) {
+    this.contexto = contexto;
+    this.som = som;
+    this.avisar = avisar;
+    this.ganho = contexto.createGain();
+    this.ganho.connect(contexto.destination);
+    this.fonte = null;
+    this.comecou = 0;
+    this.deslocamento = 0;
+    /** Conta os pedidos: um `tocar` que ainda espera a política e foi superado não toca. */
+    this.pedido = 0;
+    this.solto = false;
+  }
+
+  /** Está tocando agora? */
+  get tocando() {
+    return this.fonte !== null;
+  }
+
+  /**
+   * Toca de onde parou.
+   *
+   * **O navegador pode dizer não.** Com o áudio da janela parado, criar a
+   * fonte faria o MOD receber `tocando` sobre um silêncio; o prazo transforma
+   * a espera em `recusada`.
+   *
+   * @param {boolean} comGesto Veio de um clique de quem usa, e não da
+   *   declaração do MOD — ver `ESPERA_COM_GESTO_MS`.
+   * @returns {Promise<boolean>} Se começou.
+   */
+  async tocar(comGesto = false) {
+    if (this.solto || this.fonte) return this.fonte !== null;
+    const pedido = (this.pedido += 1);
+    if (this.contexto.state !== "running") {
+      const acordou = Promise.resolve(this.contexto.resume?.()).catch(() => {});
+      const prazo = comGesto ? ESPERA_COM_GESTO_MS : ESPERA_SEM_GESTO_MS;
+      await Promise.race([acordou, new Promise((pronto) => setTimeout(pronto, prazo))]);
+    }
+    if (this.solto || pedido !== this.pedido || this.fonte) return this.fonte !== null;
+    if (this.contexto.state !== "running") {
+      this.avisar("recusada", comGesto);
+      return false;
+    }
+    const fonte = this.contexto.createBufferSource();
+    fonte.buffer = this.som;
+    fonte.connect(this.ganho);
+    fonte.onended = () => {
+      if (this.fonte !== fonte) return;
+      this.fonte = null;
+      this.deslocamento = 0;
+      fonte.disconnect();
+      this.avisar("terminou");
+    };
+    const de = this.deslocamento < this.som.duration ? this.deslocamento : 0;
+    fonte.start(0, de);
+    this.comecou = this.contexto.currentTime - de;
+    this.fonte = fonte;
+    this.avisar("tocando");
+    return true;
+  }
+
+  /** Para, e lembra onde parou. Também cancela um `tocar` que ainda espera. */
+  pausar() {
+    this.pedido += 1;
+    const fonte = this.fonte;
+    if (!fonte) return;
+    this.fonte = null;
+    this.deslocamento = Math.max(0, this.contexto.currentTime - this.comecou);
+    fonte.onended = null;
+    fonte.stop();
+    fonte.disconnect();
+    this.avisar("pausada");
+  }
+
+  /**
+   * Solta tudo, sem avisar ninguém: quem solta é a saída, e o MOD que
+   * receberia o aviso é o que está saindo.
+   */
+  soltar() {
+    this.solto = true;
+    this.pedido += 1;
+    const fonte = this.fonte;
+    this.fonte = null;
+    if (fonte) {
+      fonte.onended = null;
+      fonte.stop();
+      fonte.disconnect();
+    }
+    this.ganho.disconnect();
+    this.som = null;
   }
 }

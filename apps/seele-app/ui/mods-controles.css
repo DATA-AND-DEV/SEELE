@@ -189,6 +189,14 @@ figure.regiao-de-mod-parte[data-estado="pronta"]::before { content: none; }
   height: auto;
 }
 
+/* O botão que toca o som de um MOD. É do produto, como o `<audio controls>`
+   que ele substitui (ver `TocadorDeSomDeMod` em mods-regiao.js): o controle
+   nativo era o único jeito de uma pessoa tocar um som que o MOD não mandou
+   tocar. `botao-fantasma` dá o desenho; esta regra só o afasta da legenda. */
+.regiao-de-mod-som {
+  margin-top: var(--seele-e1);
+}
+
 
 /* --------------------------------------------------- composição */
 

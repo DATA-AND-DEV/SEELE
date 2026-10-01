@@ -12234,12 +12234,21 @@ fn todo_recurso_da_regiao_nasce_registrado_e_com_teto() {
          para sair com o nó, e a instância, para sair com a sessão: {guardar}"
     );
 
-    // O descarte da mídia para o som **e** tira a fonte. Só remover o nó deixa
-    // os bytes decodificados presos, e um que ainda não começou pode começar.
+    // O descarte da mídia solta o som **e** tira a fonte da imagem. Só remover
+    // o nó deixa os bytes decodificados presos — e, no WebAudio, deixa a fonte
+    // tocando: ela está ligada à saída de som, e não ao documento.
     let midia = js_function(&regiao, "\n  montarMidia(elem, plano)");
     assert!(
-        midia.contains("tocador.pause?.()") && midia.contains(r#"tocador.removeAttribute("src")"#),
-        "o descarte da mídia deixou de parar e de tirar a fonte: {midia}"
+        midia.contains("estado.som?.soltar()")
+            && midia.contains(r#"tocador?.removeAttribute("src")"#),
+        "o descarte da mídia deixou de soltar o som ou de tirar a fonte da imagem: {midia}"
+    );
+    let tocador = js_function(&regiao, "class TocadorDeSomDeMod");
+    let soltar = js_function(&tocador, "\n  soltar()");
+    assert!(
+        soltar.contains("fonte.stop()") && soltar.contains("this.ganho.disconnect()"),
+        "o tocador de som deixou de parar a fonte e de desligar o ganho ao soltar: \
+         um som de MOD continua tocando depois de a pessoa sair: {soltar}"
     );
     // E o quadro pendente do arraste também é recurso.
     let tela = js_function(&regiao, "\n  montarTela(elem, plano)");
@@ -14823,5 +14832,62 @@ fn a_resposta_do_quarto_nao_repete_um_candidato() {
         "`connect` deixou de perguntar à regra da FFI se a resposta do quarto já está na \
          corrida, ou não lhe dá o alvo: quando o quarto devolve o próprio endereço da entrada, \
          o mesmo servidor recebe dois apertos de mão e dois `Hello`"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Diagnóstico de MOD — fase M1 da especificação de 23/09, Parte II.
+// ---------------------------------------------------------------------------
+
+/// **O som de MOD toca por WebAudio, e nunca por um elemento de áudio.**
+///
+/// O som de MOD (papel `som`, API 5) era montado como `<audio src="data:…">`,
+/// e a política desta janela não declara `media-src`: a mídia cai em
+/// `default-src 'self'`, que recusa `data:`. O MOD declarava o som, o produto
+/// montava o tocador, e nada tocava — medido no Chromium com a política exata,
+/// o motor do WebView2; a medida no WKWebView é a Task 1 (antes) e a Task 9
+/// (depois) do Plano 1D.
+///
+/// O conserto não afrouxa a política (ver
+/// `o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob`, neste
+/// arquivo): os bytes vão para `decodeAudioData`, que não passa por
+/// `media-src`. Este guarda prende as duas metades — nenhum arquivo de MOD da
+/// casca volta a criar um elemento de áudio, e o caminho que o substitui
+/// continua lá.
+#[test]
+fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
+    let de_mod: Vec<String> = ui_files(".js")
+        .into_iter()
+        .filter(|nome| nome.starts_with("mods-") || nome == "camada-mods.js")
+        .collect();
+    assert!(
+        de_mod.len() >= 6,
+        "só {} arquivos de MOD foram lidos ({de_mod:?}): se a leitura parou de \
+         achá-los, este guarda passa por não olhar nada",
+        de_mod.len()
+    );
+    for nome in &de_mod {
+        let fonte = without_comments(&read(&format!("ui/{nome}")));
+        for agulha in ["\"audio\"", "'audio'", "`audio`", "new Audio(", "<audio"] {
+            assert!(
+                !fonte.contains(agulha),
+                "`{nome}` voltou a criar um elemento de áudio (`{agulha}`): ele toca o \
+                 `data:` que o Rust devolve, a política desta janela recusa `data:` \
+                 em `media-src`, e o som de MOD volta a não tocar, em silêncio"
+            );
+        }
+    }
+    for nome in ui_files(".js") {
+        let fonte = without_comments(&read(&format!("ui/{nome}")));
+        assert!(
+            !fonte.contains("data:audio"),
+            "`{nome}` escreve um `data:audio`, e nenhum som desta janela passa por `data:`"
+        );
+    }
+    let regiao = without_comments(&read("ui/mods-regiao.js"));
+    assert!(
+        regiao.contains(".decodeAudioData("),
+        "`mods-regiao.js` deixou de decodificar o som por WebAudio, e o som de MOD \
+         fica sem um caminho que a política deixe tocar"
     );
 }

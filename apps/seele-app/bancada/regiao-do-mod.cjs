@@ -116,7 +116,6 @@ class Elemento {
     this.style = {};
     this.ouvintes = new Map();
     this.value = "";
-    this.paused = true;
     this.width = 0;
     this.height = 0;
     /** Foi tirado do documento alguma vez? É o que o foco mede. */
@@ -197,17 +196,9 @@ class Elemento {
     for (const filho of this.children) total += filho.ouvintesDePe();
     return total;
   }
-  // ---- o que um `<audio>` de mentira precisa ter ----
-  pause() {
-    this.paused = true;
-  }
-  play() {
-    this.paused = false;
-    return Promise.resolve();
-  }
-  load() {
-    this.carregou = (this.carregou ?? 0) + 1;
-  }
+  // O `<audio>` de mentira saiu com o `<audio>` da região, na fase M1 da
+  // casca: o som toca por WebAudio, e quem o imita é `audioDeMentira`. Um
+  // `play()` que voltasse a ser chamado aqui lança, que é a resposta certa.
   setAttribute(nome, valor) { this.atributos.set(nome, String(valor)); }
   getAttribute(nome) { return this.atributos.get(nome) ?? null; }
   removeAttribute(nome) {
@@ -240,8 +231,86 @@ class Elemento {
   setPointerCapture() {}
 }
 
+// ---------------------------------------------------- o WebAudio de mentira
+
+/**
+ * Um `AudioContext` de mentira, com as peças que `TocadorDeSomDeMod` usa.
+ *
+ * Ele anota o que o `<audio>` de mentira anotava — tocou, parou, soltou —,
+ * agora nas peças do WebAudio: a fonte que começa e para, e o ganho que se
+ * liga e se desliga da saída. `Contexto.ultimo` é a instância que a região
+ * criou, para a prova olhar dentro dela.
+ *
+ * As opções são os jeitos de o navegador dizer não:
+ * - `semGesto`: o áudio da janela nasce parado e `resume()` fica pendurado,
+ *   que é o que o Chromium faz com quem pede para tocar antes de um clique;
+ * - `recusaNaHora`: o áudio nasce parado e `resume()` recusa na hora, sem
+ *   ligá-lo — o desfecho que não depende do prazo;
+ * - `fonteLanca`: `createBufferSource` lança, e `tocar()` rejeita em vez de
+ *   avisar — o caminho defensivo do `catch` (P13 da varredura do Plano 1D);
+ * - `naoDecodifica`: `decodeAudioData` recusa os bytes.
+ *
+ * @param {object} opcoes `{ semGesto, recusaNaHora, fonteLanca, naoDecodifica }`.
+ */
+function audioDeMentira(opcoes = {}) {
+  class Contexto {
+    constructor() {
+      Contexto.ultimo = this;
+      this.state = opcoes.semGesto || opcoes.recusaNaHora ? "suspended" : "running";
+      this.currentTime = 0;
+      this.destination = { saida: true };
+      this.fontes = [];
+      this.ganhos = [];
+      this.decodificados = [];
+      /** Quantas vezes alguém pediu para o áudio da janela ligar. */
+      this.acordar = 0;
+    }
+    resume() {
+      this.acordar += 1;
+      // Sem gesto, a promessa fica pendurada: é o que o navegador faz com quem
+      // pede para tocar antes de alguém apertar alguma coisa.
+      if (opcoes.semGesto) return new Promise(() => {});
+      if (opcoes.recusaNaHora) return Promise.reject(new Error("NotAllowedError: o áudio da janela não liga"));
+      this.state = "running";
+      return Promise.resolve();
+    }
+    createGain() {
+      const ganho = {
+        ligado: null,
+        connect(alvo) { this.ligado = alvo; },
+        disconnect() { this.ligado = null; },
+      };
+      this.ganhos.push(ganho);
+      return ganho;
+    }
+    createBufferSource() {
+      if (opcoes.fonteLanca) throw new Error("InvalidStateError: a fonte não abriu");
+      const fonte = {
+        buffer: null,
+        ligado: null,
+        tocando: false,
+        parou: false,
+        onended: null,
+        connect(alvo) { this.ligado = alvo; },
+        disconnect() { this.ligado = null; },
+        start() { this.tocando = true; },
+        stop() { this.tocando = false; this.parou = true; },
+      };
+      this.fontes.push(fonte);
+      return fonte;
+    }
+    decodeAudioData(bytes, pronto, falhou) {
+      this.decodificados.push(bytes.byteLength);
+      if (opcoes.naoDecodifica) falhou(new Error("EncodingError: formato que este motor não conhece"));
+      else pronto({ duration: 1 });
+      return undefined;
+    }
+  }
+  return Contexto;
+}
+
 /** Um contexto com o DOM mínimo e `mods-regiao.js` dentro. */
-function bancada() {
+function bancada(opcoes = {}) {
   const quadros = [];
   const doc = { activeElement: null };
   doc.createElement = (tag) => new Elemento(tag, doc);
@@ -251,6 +320,13 @@ function bancada() {
     console,
     document: doc,
     Node: { TEXT_NODE: TEXTO, ELEMENT_NODE: ELEMENTO },
+    // O relógio e o `atob` de verdade: o tocador espera a política de áudio
+    // com prazo, e o som que vem do servidor do MOD chega em base64.
+    setTimeout,
+    clearTimeout,
+    atob,
+    // O WebAudio desta prova, ou o padrão — um que decodifica e toca.
+    AudioContext: opcoes.audio ?? audioDeMentira(),
     requestAnimationFrame: (fn) => {
       quadros.push(fn);
       return quadros.length;
@@ -293,10 +369,12 @@ function dono(b, midia) {
   const registrados = [];
   const anotadas = [];
   let mudancas = 0;
+  const pedidosDeSom = [];
   return {
     ditos,
     registrados,
     anotadas,
+    pedidosDeSom,
     /** Quantas vezes a região avisou que o estado de uma mídia mudou. */
     mudancas: () => mudancas,
     api: {
@@ -311,6 +389,16 @@ function dono(b, midia) {
         midia ? midia(caminho) : Promise.reject(new Error("sem mídia")),
       carregarMidiaDoServidor: (canal, pedido, campo) =>
         midia ? midia({ canal, pedido, campo }) : Promise.reject(new Error("sem mídia")),
+      // Os bytes de um som do pacote, como `som_do_mod` os devolve quando o
+      // Tauri cai no `postMessage`: uma lista de números (pelo protocolo `ipc:`
+      // seria um `ArrayBuffer`, e `bufferDoSom` aceita os dois; a bancada em
+      // Chromium da Task 8 mede esse outro). O conteúdo não importa — quem
+      // decodifica é o WebAudio de mentira —, e o pedido anotado diz qual
+      // caminho foi pedido.
+      bytesDoSom: (caminho) => {
+        pedidosDeSom.push(caminho);
+        return Promise.resolve([82, 73, 70, 70, 0, 0, 0, 0, 87, 65, 86, 69]);
+      },
       midiaMudou: () => {
         mudancas += 1;
       },
@@ -878,28 +966,29 @@ async function aMidiaDoServidorTemOMesmoDono() {
 
 async function sairDuranteAReproducaoPara() {
   const caso = "sair durante a reprodução";
-  const b = bancada();
+  const Audio = audioDeMentira();
+  const b = bancada({ audio: Audio });
   const d = dono(b, () =>
     Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 1024 }),
   );
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
-  await volta();
-  await volta();
+  await assentar();
 
-  const tocador = regiao.raiz.children[0].querySelector(".regiao-de-mod-tocador");
-  confere(caso, !!tocador, "a mídia não foi montada");
-  if (!tocador) return;
-  confere(caso, tocador.paused === false, "o `tocando` declarado não tocou");
+  const contexto = Audio.ultimo;
+  const fonte = contexto?.fontes[0];
+  confere(caso, !!fonte, "o som declarado não chegou a ter fonte de áudio");
+  if (!fonte) return;
+  confere(caso, fonte.tocando === true, "o `tocando` declarado não tocou");
   confere(caso, regiao.bytesDeMidia === 1024, `os bytes não foram contados: ${regiao.bytesDeMidia}`);
 
   // A pessoa sai no meio do som.
   regiao.soltar();
-  confere(caso, tocador.paused === true, "o som continuou tocando depois da saída");
+  confere(caso, fonte.parou === true, "o som continuou tocando depois da saída");
   confere(
     caso,
-    tocador.src === undefined,
-    "a fonte não foi tirada, e os bytes decodificados ficam presos",
+    contexto.ganhos.every((ganho) => ganho.ligado === null),
+    "o ganho continuou ligado à saída, e o som decodificado fica preso a ela",
   );
   confere(caso, regiao.bytesDeMidia === 0, `sobraram ${regiao.bytesDeMidia} bytes contados`);
   confere(
@@ -915,7 +1004,8 @@ async function sairDuranteAReproducaoPara() {
 
 async function tirarUmNoSoltaOQueEleSegurava() {
   const caso = "tirar um nó solta o recurso dele";
-  const b = bancada();
+  const Audio = audioDeMentira();
+  const b = bancada({ audio: Audio });
   const d = dono(b, () =>
     Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 512 }),
   );
@@ -924,14 +1014,14 @@ async function tirarUmNoSoltaOQueEleSegurava() {
     { forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true },
     { forma: "campo", chave: "c", rotulo: "X", valor: "" },
   ]);
-  await volta();
-  await volta();
-  const tocador = regiao.raiz.children[0].querySelector(".regiao-de-mod-tocador");
+  await assentar();
+  const fonte = Audio.ultimo?.fontes[0];
+  confere(caso, fonte?.tocando === true, "o som declarado não começou");
   confere(caso, regiao.contagem.midias === 1 && regiao.contagem.campos === 1, "a conta inicial está errada");
 
   // O MOD redesenha **sem** a mídia: ela sai da tela, e o som tem de parar.
   regiao.aplicar([{ forma: "campo", chave: "c", rotulo: "X", valor: "" }]);
-  confere(caso, tocador.paused === true, "o som continuou depois de o MOD tirar a mídia da tela");
+  confere(caso, fonte?.parou === true, "o som continuou depois de o MOD tirar a mídia da tela");
   confere(caso, regiao.contagem.midias === 0, `a conta de mídias ficou em ${regiao.contagem.midias}`);
   confere(caso, regiao.bytesDeMidia === 0, `sobraram ${regiao.bytesDeMidia} bytes contados`);
   // E o campo, que continua declarado, não foi mexido.
@@ -1153,22 +1243,25 @@ async function fundoTrocaSoltaECancela() {
  * PERFIS não aparecia, a janela sabia por quê, e o `seele.log` não tinha uma
  * palavra — levou uma hora de medição e um reinício com `RUST_LOG=debug`.
  *
- * Ao menos um caso por caminho de recusa, que são treze: os onze em que a
- * janela recusa ou vê a carga falhar, o evento `error` do próprio elemento e a
- * mídia declarada sem origem. Cada um mede o texto que chega a `anotarRecusa`,
- * que o `base.js` leva ao `registrar_da_janela` como WARN e com o id do MOD em
- * campo próprio (guarda irmão em `tests/frontend.rs`). A recusa do Rust entra
- * aqui como ela chega de verdade, `{ Recusado: { motivo } }`, nos quatro
- * lugares que pedem mídia à ponte (a mídia, o retrato, o fundo e o fundo de
- * tela): cada um tem o seu `catch`, e um que voltasse a escrever
- * «[object Object]» passaria com os outros três verdes.
+ * Ao menos um caso por caminho de recusa, que são quinze: os dez em que a
+ * janela recusa ou vê a carga falhar uma imagem (a mídia, o retrato, o fundo e
+ * o fundo de tela), o evento `error` do próprio elemento, a mídia declarada
+ * sem origem, e os três do som desde que ele toca por WebAudio — os bytes que
+ * o Rust recusou, o áudio da janela que não liga e a fonte que não abre. O som
+ * que não decodifica tem prova própria (`oSomQueNaoDecodificaEDito`). Cada um
+ * mede o texto que chega a `anotarRecusa`, que o `base.js` leva ao
+ * `registrar_da_janela` como WARN e com o id do MOD em campo próprio (guarda
+ * irmão em `tests/frontend.rs`). A recusa do Rust entra aqui como ela chega de
+ * verdade, `{ Recusado: { motivo } }`, nos cinco lugares que pedem mídia à
+ * ponte (a mídia, o retrato, o fundo, o fundo de tela e os bytes do som): cada
+ * um tem o seu `catch`, e um que voltasse a escrever «[object Object]» passaria
+ * com os outros quatro verdes.
  *
- * E o avesso, no `play()`: dizer não é repetir. O mesmo motivo sai uma vez por
- * tocador, e não uma por redesenho; o `AbortError` do próprio descarte e a
- * recusa que chega a uma região já solta não saem. E a chave do MOD entra
- * cortada, para que o motivo caiba nos 512 caracteres que o registro guarda.
- * A anotação que o diagnóstico lê (`midiasAnotadas`) passa pelo mesmo filtro:
- * o `play()` recusado fica anotado como recusado, e o `AbortError`, não.
+ * E o avesso, no som: dizer não é repetir. O mesmo motivo sai uma vez por
+ * tocador, e não uma por alternância do `tocando`; a recusa que chega depois de
+ * a região sair, ou de o MOD tirar o nó, não sai — nem ao registro, nem ao
+ * MOD, nem à anotação que o diagnóstico lê. E a chave do MOD entra cortada,
+ * para que o motivo caiba nos 512 caracteres que o registro guarda.
  */
 async function cadaMidiaRecusadaEDitaAoAnfitriao() {
   const recusaDoRust = (motivo) => () => () => Promise.reject({ Recusado: { motivo } });
@@ -1327,157 +1420,203 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
     regiao.soltar();
   }
 
-  // O som que o motor não deixou tocar: `play()` rejeita sem gesto de quem usa.
+  // Os bytes de um som do pacote, pedidos a `som_do_mod` por `dono.bytesDoSom`:
+  // o quinto lugar que pede mídia à ponte, com o `catch` dele. A recusa do Rust
+  // entra como ela chega, `{ Recusado: { motivo } }`.
+  {
+    const b = bancada({ audio: audioDeMentira() });
+    const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
+    d.api.bytesDoSom = () => Promise.reject({ Recusado: { motivo: "formato-desconhecido" } });
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav" }]);
+    await assentar();
+    confere(
+      "recusa dita · som que o Rust recusou",
+      d.anotadas.some((texto) => texto.includes("«m»") && texto.includes("formato-desconhecido")),
+      `os bytes do som que o Rust recusou não chegaram ao registro com o motivo: ${JSON.stringify(d.anotadas)}`,
+    );
+    confere(
+      "recusa dita · som que o Rust recusou",
+      !d.anotadas.some((texto) => texto.includes("[object Object]")),
+      `a recusa do Rust virou «[object Object]»: ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+  }
+
+  // O som que o navegador não deixou tocar. Sem `<audio>` desde a fase M1 da
+  // casca, não há `play()` que rejeite: o equivalente é o áudio da janela que
+  // não liga sem um gesto de quem usa, e o tocador diz «recusada» depois do
+  // prazo (`ESPERA_SEM_GESTO_MS`, em `mods-regiao.js`).
   //
-  // **Uma linha por motivo, e não uma por redesenho.** `atualizarMidia` roda a
-  // cada `aplicar`, e a MESA redesenha a cada casa de um arraste com a trilha
-  // tocando: três declarações iguais dão uma linha só, e um motivo novo dá a
-  // segunda.
+  // Na mesma espera, dois sons que saem antes do prazo, com o pedido de tocar
+  // ainda pendente: um numa região que sai inteira, e outro cujo MOD tirou o
+  // nó. A recusa que chega depois não é mais de ninguém — nem do registro, nem
+  // do MOD, nem da anotação que o diagnóstico lê.
   {
-    const b = bancada();
+    const b = bancada({ audio: audioDeMentira({ semGesto: true }) });
     const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
     const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-    const declarar = () => regiao.aplicar([
-      { forma: "midia", chave: "toque", fonte: "som/a.wav", tocando: true },
-    ]);
-    const tocar = Elemento.prototype.play;
-    let motivo = "NotAllowedError: sem gesto de quem usa";
-    Elemento.prototype.play = function play() {
-      return Promise.reject(new Error(motivo));
-    };
-    let depoisDeTres = [];
-    try {
-      declarar();
-      await volta();
-      await volta();
-      await volta();
-      declarar();
-      declarar();
-      await volta();
-      await volta();
-      depoisDeTres = d.anotadas.filter((texto) => texto.includes("«toque»"));
-      motivo = "NotSupportedError: o motor não abre esta fonte";
-      declarar();
-      await volta();
-      await volta();
-    } finally {
-      Elemento.prototype.play = tocar;
+    const declarar = (tocando) =>
+      regiao.aplicar([{ forma: "midia", chave: "toque", fonte: "som/a.wav", tocando }]);
+    declarar(true);
+
+    const orfas = [];
+    for (const [como, sair] of [
+      ["a região saiu", (r) => r.soltar()],
+      ["o MOD tirou o nó", (r) => r.aplicar([])],
+    ]) {
+      const Audio = audioDeMentira({ semGesto: true });
+      const bo = bancada({ audio: Audio });
+      const doOrfa = dono(bo, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
+      const ro = new bo.RegiaoDeMod("a/b", doOrfa.api, bo.raiz());
+      ro.aplicar([{ forma: "midia", chave: "orfa", fonte: "som/a.wav", tocando: true }]);
+      orfas.push({ como, sair, Audio, d: doOrfa, regiao: ro });
     }
+    await assentar();
+    for (const orfa of orfas) {
+      confere(
+        `recusa dita · som recusado depois que ${orfa.como}`,
+        (orfa.Audio.ultimo?.acordar ?? 0) > 0,
+        "o som nem pediu para tocar, e as conferências abaixo passariam por não medir nada",
+      );
+      orfa.sair(orfa.regiao);
+    }
+    // O prazo é de um segundo e meio; espera-se um pouco mais.
+    await new Promise((r) => setTimeout(r, 1700));
     confere(
       "recusa dita · som que não tocou",
-      d.anotadas.some((texto) => texto.includes("«toque»") && texto.includes("NotAllowedError")),
-      `o play() recusado não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+      d.anotadas.some((texto) => texto.includes("«toque»") && texto.includes("gesto")),
+      `o som que o navegador não deixou tocar não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
     );
+    for (const orfa of orfas) {
+      const caso = `recusa dita · som recusado depois que ${orfa.como}`;
+      confere(
+        caso,
+        !orfa.d.anotadas.some((texto) => texto.includes("«orfa»")),
+        `a recusa que chegou depois ainda escreveu no seele.log: ${JSON.stringify(orfa.d.anotadas)}`,
+      );
+      confere(
+        caso,
+        !orfa.d.ditos.some((e) => e.nome === "midia" && e.estado === "recusada"),
+        `o MOD ouviu «recusada» de um som que já tinha saído da tela: ${JSON.stringify(orfa.d.ditos)}`,
+      );
+      confere(
+        caso,
+        orfa.regiao.midiasAnotadas().length === 0,
+        "a recusa que chegou depois recriou a anotação de um nó que já saiu, e o diagnóstico "
+          + `conta uma mídia que não existe: ${JSON.stringify(orfa.regiao.midiasAnotadas())}`,
+      );
+    }
+
+    // **Uma linha por motivo, e não uma por alternância.** O MOD que liga e
+    // desliga o som sem um gesto de quem usa: cada `tocando` que volta a ser
+    // verdadeiro pede de novo, e cada pedido recusado é dito ao MOD e anotado —
+    // mas o registro já tem o motivo, e o `seele.log`, que só gira na abertura,
+    // não ganha uma linha por alternância. Os redesenhos que não mudam o
+    // `tocando` nem pedem.
+    declarar(false);
+    declarar(true);
+    declarar(true);
+    await new Promise((r) => setTimeout(r, 1700));
+    const doToque = d.anotadas.filter((texto) => texto.includes("«toque»"));
     confere(
       "recusa dita · som que não tocou",
-      depoisDeTres.length === 1,
-      "o mesmo play() recusado virou uma linha por redesenho, e um MOD que redesenha a cada "
-        + `casa de um arraste soterra o seele.log: ${JSON.stringify(depoisDeTres)}`,
+      doToque.length === 1,
+      "o mesmo motivo de recusa virou uma linha por alternância do `tocando`, e um MOD que "
+        + `liga e desliga o som soterra o seele.log: ${JSON.stringify(doToque)}`,
     );
-    const todas = d.anotadas.filter((texto) => texto.includes("«toque»"));
+    const recusadas = d.ditos.filter((e) => e.nome === "midia" && e.chave === "toque" && e.estado === "recusada");
     confere(
       "recusa dita · som que não tocou",
-      todas.length === 2 && todas[1].includes("NotSupportedError"),
-      "um motivo novo de recusa tinha de dar a segunda linha, e só ela — calado pelo anterior, "
-        + `o registro esconde que a causa mudou: ${JSON.stringify(todas)}`,
+      recusadas.length === 2,
+      "o MOD tinha de ouvir «recusada» a cada pedido recusado, e a conferência acima passaria "
+        + `por não ter pedido de novo: ${JSON.stringify(d.ditos)}`,
     );
-    // E a anotação, que o diagnóstico lê, diz a recusa com o motivo de agora.
-    const doToque = regiao.midiasAnotadas();
+    const anotada = regiao.midiasAnotadas();
     confere(
       "recusa dita · som que não tocou",
-      doToque.length === 1
-        && doToque[0].situacao === "recusada"
-        && doToque[0].motivo.includes("NotSupportedError"),
-      "o play() recusado não ficou anotado como recusado, e o diagnóstico conta como pronta "
-        + `uma mídia que não tocou: ${JSON.stringify(doToque)}`,
+      anotada.length === 1 && anotada[0].situacao === "recusada" && /gesto/.test(anotada[0].motivo),
+      "o som que não tocou não ficou anotado como recusado, e o diagnóstico conta como pronta "
+        + `uma mídia muda: ${JSON.stringify(anotada)}`,
     );
     regiao.soltar();
   }
 
-  // `AbortError` é o próprio produto interrompendo o `play()`: o MOD tirou o
-  // nó com o som ainda pendente, e o descarte chamou `pause()` e `load()`, que
-  // o motor responde rejeitando a promessa. É o desfecho que o MOD pediu, e não
-  // uma recusa.
+  // O pedido de tocar que **rejeita** em vez de avisar: a fonte que o WebAudio
+  // não abre. Um WebAudio conforme não chega aqui, e é por isso mesmo que o
+  // caminho tem prova: um `catch` que nada exercita é o que volta a ficar mudo.
+  // A recusa vai ao MOD e ao registro pelo mesmo caminho da do prazo.
   {
-    const b = bancada();
+    const b = bancada({ audio: audioDeMentira({ fonteLanca: true }) });
     const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
     const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-    const tocar = Elemento.prototype.play;
-    const pendentes = [];
-    Elemento.prototype.play = function play() {
-      return new Promise((_, rejeitar) => pendentes.push(rejeitar));
-    };
-    try {
-      regiao.aplicar([{ forma: "midia", chave: "cortada", fonte: "som/a.wav", tocando: true }]);
-      await volta();
-      await volta();
-      regiao.aplicar([]);
-      // O que o motor faz com o `play()` pendente quando o descarte pausa.
-      for (const rejeitar of pendentes) {
-        rejeitar(new DOMException("The play() request was interrupted by a call to pause().", "AbortError"));
-      }
-      await volta();
-      await volta();
-    } finally {
-      Elemento.prototype.play = tocar;
-    }
+    regiao.aplicar([{ forma: "midia", chave: "muda", fonte: "som/a.wav", tocando: true }]);
+    await assentar();
     confere(
-      "recusa dita · som interrompido pelo descarte",
-      pendentes.length > 0,
-      "o play() nem foi pedido, e a conferência abaixo passaria por não medir nada",
+      "recusa dita · som cuja fonte não abriu",
+      d.ditos.some((e) => e.nome === "midia" && e.chave === "muda" && e.estado === "recusada"),
+      `o MOD não soube que o som não começou: ${JSON.stringify(d.ditos)}`,
     );
     confere(
-      "recusa dita · som interrompido pelo descarte",
-      !d.anotadas.some((texto) => texto.includes("«cortada»")),
-      `o AbortError do próprio descarte virou aviso no seele.log: ${JSON.stringify(d.anotadas)}`,
+      "recusa dita · som cuja fonte não abriu",
+      d.anotadas.some((texto) => texto.includes("«muda»") && texto.includes("a fonte não abriu")),
+      `a fonte que não abriu não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
     );
-    // O AbortError é o desfecho que o MOD pediu, e não uma recusa: ele não
-    // anota nada, nem recria a anotação de um nó que já saiu da tela.
-    const recusadas = regiao.midiasAnotadas().filter((m) => m.situacao === "recusada");
+    // E pelo clique, o mesmo caminho: o MOD ouve de novo, e o registro, que já
+    // tem o motivo, não ganha outra linha.
+    acharTag(regiao.raiz, "button")?.disparar("click");
+    await assentar();
+    const recusadas = d.ditos.filter((e) => e.nome === "midia" && e.chave === "muda" && e.estado === "recusada");
     confere(
-      "recusa dita · som interrompido pelo descarte",
-      recusadas.length === 0,
-      "o AbortError do próprio descarte virou mídia recusada na anotação, e o diagnóstico conta "
-        + `uma recusa que não existe: ${JSON.stringify(recusadas)}`,
+      "recusa dita · som cuja fonte não abriu",
+      recusadas.length === 2,
+      `o clique que não tocou não foi dito ao MOD como «recusada»: ${JSON.stringify(d.ditos)}`,
+    );
+    const daMuda = d.anotadas.filter((texto) => texto.includes("«muda»"));
+    confere(
+      "recusa dita · som cuja fonte não abriu",
+      daMuda.length === 1,
+      `a mesma fonte que não abriu virou uma linha por pedido: ${JSON.stringify(daMuda)}`,
     );
     regiao.soltar();
   }
 
-  // A região saiu com o `play()` pendente, e a recusa chegou depois: a linha
-  // não é mais desta região, mesmo com a sessão de pé. O dono de mentira não
-  // confere nada, e o de verdade deixaria passar: o `meu()` dele pergunta pela
-  // instância e pela sessão, e não pela região, e as duas continuam as de pé
-  // quando só a superfície do MOD fecha.
+  // O clique de quem usa, e o áudio da janela que mesmo assim não liga. A linha
+  // não diz «sem um gesto»: houve um, e dizer o contrário manda quem investiga
+  // procurar no lugar errado. E o áudio que liga depois devolve a mídia a
+  // «pronta»: a recusa de antes não fica anotada para sempre.
   {
-    const b = bancada();
+    const Audio = audioDeMentira({ recusaNaHora: true });
+    const b = bancada({ audio: Audio });
     const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
     const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-    const tocar = Elemento.prototype.play;
-    const pendentes = [];
-    Elemento.prototype.play = function play() {
-      return new Promise((_, rejeitar) => pendentes.push(rejeitar));
-    };
-    try {
-      regiao.aplicar([{ forma: "midia", chave: "orfa", fonte: "som/a.wav", tocando: true }]);
-      await volta();
-      await volta();
-      regiao.soltar();
-      for (const rejeitar of pendentes) rejeitar(new Error("NotAllowedError: sem gesto de quem usa"));
-      await volta();
-      await volta();
-    } finally {
-      Elemento.prototype.play = tocar;
-    }
+    regiao.aplicar([{ forma: "midia", chave: "clique", fonte: "som/a.wav", descricao: "Sino" }]);
+    await assentar();
+    const botao = acharTag(regiao.raiz, "button");
     confere(
-      "recusa dita · som recusado depois da saída",
-      pendentes.length > 0,
-      "o play() nem foi pedido, e a conferência abaixo passaria por não medir nada",
+      "recusa dita · som que o clique não ligou",
+      Boolean(botao),
+      "o botão do produto não foi montado, e as conferências abaixo passariam por não clicar",
     );
+    botao?.disparar("click");
+    await assentar();
+    const doClique = d.anotadas.filter((texto) => texto.includes("«clique»"));
     confere(
-      "recusa dita · som recusado depois da saída",
-      !d.anotadas.some((texto) => texto.includes("«orfa»")),
-      `uma região já solta ainda escreveu no seele.log: ${JSON.stringify(d.anotadas)}`,
+      "recusa dita · som que o clique não ligou",
+      doClique.length === 1 && !doClique[0].includes("sem um gesto"),
+      `o clique de quem usa foi dito ao registro como «sem um gesto», ou não foi dito: ${JSON.stringify(doClique)}`,
     );
+    if (Audio.ultimo) Audio.ultimo.state = "running";
+    botao?.disparar("click");
+    await assentar();
+    const anotada = regiao.midiasAnotadas();
+    confere(
+      "recusa dita · som que o clique não ligou",
+      Audio.ultimo?.fontes[0]?.tocando === true && anotada.length === 1 && anotada[0].situacao === "pronta",
+      "o som que passou a tocar continuou anotado como recusado, e o diagnóstico conta como "
+        + `muda uma mídia que toca: ${JSON.stringify(anotada)}`,
+    );
+    regiao.soltar();
   }
 
   // A recusa que o próprio elemento faz: os bytes chegaram, o Rust os aceitou,
@@ -1575,6 +1714,17 @@ async function aMidiaAnotadaDizOsTresEstados() {
   );
   confere(caso, d.mudancas() >= 5, `a região mudou o estado das mídias e avisou ${d.mudancas()} vez(es)`);
 
+  // A imagem que chegou, coube e o navegador não abriu: «pronta» vira
+  // «recusada». Sem isto, o diagnóstico contaria de pé um quadrado quebrado.
+  acharTag(regiao.raiz, "img")?.disparar("error");
+  const quebrada = regiao.midiasAnotadas().find((m) => /não decodificou/.test(m.motivo));
+  confere(
+    caso,
+    situacoes() === "recusada,recusada,recusada,recusada" && quebrada?.situacao === "recusada",
+    "a imagem que o navegador não abriu continuou anotada como «pronta», e o diagnóstico conta "
+      + `de pé uma mídia quebrada: ${JSON.stringify(regiao.midiasAnotadas())}`,
+  );
+
   // O que sai da declaração sai do diagnóstico: contar mídia que não existe
   // mais é o diagnóstico mentindo.
   regiao.aplicar([{ forma: "midia", chave: "falta", fonte: "img/falta.png" }]);
@@ -1585,6 +1735,24 @@ async function aMidiaAnotadaDizOsTresEstados() {
   );
   regiao.soltar();
   confere(caso, regiao.midiasAnotadas().length === 0, "a região solta continuou anotando mídia");
+
+  // O motivo anotado é cortado em 200 **pontos de código**, como a chave em
+  // `dizerRecusaDeMidia`: um corte por índice que caia no meio de um par
+  // substituto deixa metade de um caractere no motivo, e a aba do diagnóstico
+  // mostra lixo no lugar do fim da frase.
+  const b2 = bancada();
+  const longo = `${"x".repeat(199)}😀${"x".repeat(20)}`;
+  const d2 = dono(b2, () => Promise.reject({ Recusado: { motivo: longo } }));
+  const regiao2 = new b2.RegiaoDeMod("a/b", d2.api, b2.raiz());
+  regiao2.aplicar([{ forma: "midia", chave: "longa", fonte: "img/l.png" }]);
+  await assentar();
+  const cortado = regiao2.midiasAnotadas()[0]?.motivo ?? "";
+  confere(
+    caso,
+    cortado.isWellFormed() && cortado.endsWith("😀") && Array.from(cortado).length === 200,
+    `o corte do motivo anotado partiu um par substituto ao meio, ou não cortou em 200: ${JSON.stringify(cortado.slice(-4))}`,
+  );
+  regiao2.soltar();
 }
 
 async function oFundoEORetratoTambemDizemOEstado() {
@@ -1626,6 +1794,161 @@ async function oFundoEORetratoTambemDizemOEstado() {
   confere(caso, regiao.midiasAnotadas().length === 0, "a região solta continuou anotando o fundo ou o retrato");
 }
 
+// ---------------------------------------------------------------------------
+// 11. O som toca por WebAudio, com botão do produto, e a declaração vale na mudança.
+// ---------------------------------------------------------------------------
+
+async function oSomTocaPorWebAudioENuncaPorUmElementoDeMidia() {
+  const caso = "o som toca por WebAudio";
+  const Audio = audioDeMentira();
+  const b = bancada({ audio: Audio });
+  const d = dono(b, () =>
+    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }),
+  );
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const declaracao = [{ forma: "midia", chave: "m", fonte: "som/a.wav", descricao: "Sino" }];
+  regiao.aplicar(declaracao);
+  await assentar();
+
+  const figura = regiao.raiz.children[0];
+  confere(caso, acharTag(figura, "audio") === null, "um `<audio>` voltou a ser montado, e a CSP recusa o `data:` dele");
+  confere(caso, d.pedidosDeSom.join() === "som/a.wav", `os bytes do som não foram pedidos pelo caminho declarado: ${d.pedidosDeSom}`);
+  confere(caso, figura.dataset.estado === "pronta", `o som decodificado não ficou pronto: ${figura.dataset.estado}`);
+  const botao = acharTag(figura, "button");
+  confere(
+    caso,
+    Boolean(botao) && botao.className.split(/\s+/).includes("regiao-de-mod-som"),
+    "o botão do produto que toca o som não foi montado",
+  );
+  if (!botao) return;
+  confere(caso, botao.textContent === "TOCAR", `o botão começou dizendo «${botao.textContent}»`);
+  confere(caso, (Audio.ultimo?.fontes.length ?? 0) === 0, "o som tocou sem ninguém pedir");
+
+  botao.disparar("click");
+  await assentar();
+  const fonte = Audio.ultimo?.fontes[0];
+  confere(caso, fonte?.tocando === true, "o botão do produto não tocou o som");
+  confere(caso, botao.textContent === "PAUSAR", `tocando, o botão diz «${botao.textContent}»`);
+  confere(caso, d.ditos.some((e) => e.nome === "midia" && e.estado === "tocando"), "o MOD não soube que o som começou");
+
+  // O MOD redesenha **sem** mudar `tocando`: quem apertou continua ouvindo.
+  regiao.aplicar(declaracao);
+  confere(caso, fonte?.tocando === true, "um redesenho do MOD que não mudou `tocando` parou o som que a pessoa pediu");
+
+  botao.disparar("click");
+  confere(caso, fonte?.parou === true && botao.textContent === "TOCAR", "pausar não parou o som, ou o botão não voltou a TOCAR");
+  confere(caso, d.ditos.some((e) => e.nome === "midia" && e.estado === "pausada"), "o MOD não soube que o som parou");
+
+  // O fim natural é dito, e o botão volta ao começo.
+  botao.disparar("click");
+  await assentar();
+  Audio.ultimo?.fontes[1]?.onended?.();
+  confere(
+    caso,
+    d.ditos.some((e) => e.nome === "midia" && e.estado === "terminou") && botao.textContent === "TOCAR",
+    "o fim do som não foi dito ao MOD, ou o botão ficou em PAUSAR",
+  );
+
+  // A declaração vale **na mudança**: `tocando` passando a verdadeiro toca.
+  regiao.aplicar([{ ...declaracao[0], tocando: true }]);
+  await assentar();
+  confere(caso, Audio.ultimo?.fontes[2]?.tocando === true, "o MOD passou a declarar `tocando` e o som não começou");
+  regiao.soltar();
+}
+
+async function oSomDoServidorVemDosBytesDoDataENaoDeUmElemento() {
+  const caso = "o som do servidor";
+  const Audio = audioDeMentira();
+  const b = bancada({ audio: Audio });
+  // «UklGRg==» são os quatro bytes de «RIFF».
+  const d = dono(b, () =>
+    Promise.resolve({ uri: "data:audio/wav;base64,UklGRg==", papel: "som", bytes: 4 }),
+  );
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([{ forma: "midia", chave: "m", doServidor: { canal: 1, pedido: { op: "som" } } }]);
+  await assentar();
+  confere(caso, d.pedidosDeSom.length === 0, "o som do servidor foi pedido ao pacote");
+  confere(caso, Audio.ultimo?.decodificados[0] === 4, `os bytes do data: não chegaram ao WebAudio: ${Audio.ultimo?.decodificados}`);
+  confere(caso, regiao.raiz.children[0].dataset.estado === "pronta", "o som do servidor não ficou pronto");
+  regiao.soltar();
+}
+
+async function oSomQueNaoDecodificaEDito() {
+  const caso = "o som que não decodifica";
+  const Audio = audioDeMentira({ naoDecodifica: true });
+  const b = bancada({ audio: Audio });
+  const d = dono(b, () =>
+    Promise.resolve({ uri: "data:audio/ogg;base64,AA", papel: "som", bytes: 12 }),
+  );
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.ogg" }]);
+  await assentar();
+  const figura = regiao.raiz.children[0];
+  confere(caso, figura.dataset.estado === "falhou", `a figura não disse que falhou: ${figura.dataset.estado}`);
+  const dito = d.ditos.find((e) => e.nome === "midia" && e.estado === "falhou");
+  confere(caso, /não decodificou/.test(dito?.porque ?? ""), `o MOD não soube por quê: ${JSON.stringify(dito)}`);
+  confere(caso, regiao.midiasAnotadas()[0]?.situacao === "recusada", "o diagnóstico não anotou a recusa");
+  // E quem investiga também sabe: a mesma linha que o `.catch` de
+  // `montarMidia` escreve para uma mídia que o Rust recusou.
+  confere(
+    caso,
+    d.anotadas.some((texto) => texto.includes("«m»") && texto.includes("não decodificou")),
+    `o som que não decodificou não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+  );
+  confere(caso, acharTag(figura, "button") === null, "um botão de tocar apareceu para um som que não decodificou");
+  regiao.soltar();
+  confere(caso, regiao.bytesDeMidia === 0, `sobraram ${regiao.bytesDeMidia} bytes contados`);
+}
+
+async function oSomNumCartaoNaoTemBotao() {
+  const caso = "o som num cartão";
+  const Audio = audioDeMentira();
+  const b = bancada({ audio: Audio });
+  const d = dono(b, () =>
+    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }),
+  );
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.declararCartoes({ 7: [{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }] });
+  await assentar();
+  const cartao = regiao.cartaoDe(7);
+  confere(caso, acharTag(cartao, "button") === null, "um cartão ganhou um botão, e cartão não recebe foco (ver FORMAS_DO_CARTAO)");
+  confere(caso, Audio.ultimo?.fontes[0]?.tocando === true, "o som que o MOD declarou no cartão não tocou");
+  confere(caso, regiao.midiasAnotadas()[0]?.cartao === true, "a mídia do cartão não foi anotada como de cartão");
+  regiao.soltar();
+  confere(caso, Audio.ultimo?.fontes[0]?.parou === true, "o som do cartão continuou depois de a região sair");
+}
+
+async function oSomPedidoSemGestoEDitoRecusado() {
+  const caso = "o som pedido sem gesto";
+  const Audio = audioDeMentira({ semGesto: true });
+  const b = bancada({ audio: Audio });
+  const d = dono(b, () =>
+    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }),
+  );
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
+  await assentar();
+  // O prazo da política é de um segundo e meio; espera-se um pouco mais.
+  await new Promise((r) => setTimeout(r, 1700));
+  confere(
+    caso,
+    d.ditos.some((e) => e.nome === "midia" && e.estado === "recusada"),
+    `a recusa do navegador não chegou ao MOD: ${JSON.stringify(d.ditos)}`,
+  );
+  confere(
+    caso,
+    (Audio.ultimo?.fontes.length ?? 0) === 0,
+    "uma fonte foi criada com o áudio da janela parado, e o MOD ouviria «tocando» sobre silêncio",
+  );
+  const anotada = regiao.midiasAnotadas()[0];
+  confere(
+    caso,
+    anotada?.situacao === "recusada" && /gesto/.test(anotada.motivo),
+    `o diagnóstico não disse por que o som não começou: ${JSON.stringify(anotada)}`,
+  );
+  regiao.soltar();
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -1650,6 +1973,11 @@ async function oFundoEORetratoTambemDizemOEstado() {
     cadaMidiaRecusadaEDitaAoAnfitriao,
     aMidiaAnotadaDizOsTresEstados,
     oFundoEORetratoTambemDizemOEstado,
+    oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,
+    oSomDoServidorVemDosBytesDoDataENaoDeUmElemento,
+    oSomQueNaoDecodificaEDito,
+    oSomNumCartaoNaoTemBotao,
+    oSomPedidoSemGestoEDitoRecusado,
   ];
   for (const prova of provas) {
     try {
