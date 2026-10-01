@@ -1812,7 +1812,15 @@ function aplicarOTemaDoMod(id, valores) {
   escreverOTemaDaSessao();
 }
 
-/** Escreve no contêiner da sessão o que os MODs de pé pediram, e só isso. */
+/**
+ * Escreve no contêiner da sessão o que os MODs de pé pediram, e só isso — e
+ * avisa a aba DIAGNÓSTICO, que diz quem pediu o tema.
+ *
+ * O aviso é daqui porque o tema não passa pelo registro de contribuições nem
+ * pela mídia, os dois avisos que redesenham «quem pinta cada lugar»: com a
+ * aba aberta, o ESTILO pintava a sessão e a aba seguia dizendo «nenhum MOD usa
+ * este lugar agora» (I-7 da revisão ampla do Plano 1D).
+ */
 function escreverOTemaDaSessao() {
   const sessao = $("tela-sessao");
   if (!sessao) return;
@@ -1854,6 +1862,7 @@ function escreverOTemaDaSessao() {
       }
     }
   }
+  if (typeof quemPintaEstaAVista === "function" && quemPintaEstaAVista()) desenharQuemPinta();
 }
 
 /**

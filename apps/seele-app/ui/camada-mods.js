@@ -909,17 +909,25 @@ function frasesDeQuemPinta(linha) {
   }
   if (linha.substituivel) {
     const osOutros = linha.oSeeleDesenhaOutros ? "; o SEELE desenha os outros" : "";
+    // **O tema da API 3 em vigor é dito junto de «o SEELE desenha».** O
+    // ESTILO pinta a sessão pela `SeeleUI.tema`, sem registrar ponto nenhum, e
+    // «o SEELE desenha» sozinho faria quem lê concluir que a sessão está com a
+    // cara do SEELE (m-3 da revisão ampla do Plano 1D).
+    const comOTema = linha.ponto === "servidor.aparencia" && antigos.valem.length
+      ? `, com o tema de ${antigos.valem.join(" e ")} em vigor (API 3)`
+      : "";
     if (linha.ausente) {
-      frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha`);
+      frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha${comOTema}`);
     } else if (linha.escolhidoNaoSubstitui) {
       // De pé, e sem candidata aqui: o avatar que herda a escolha do cartão,
       // o escolhido que revogou o que tinha, o que só acrescenta.
       frases.push(linha.herdada
         ? `a escolha de «${NOMES_DOS_PONTOS["pessoa.cartao"]}» é ${linha.escolhidoNaoSubstitui}, que não desenha `
           + "avatares: o SEELE desenha"
-        : `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar: o SEELE desenha`);
+        : `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar: `
+          + `o SEELE desenha${comOTema}`);
     } else if (linha.nativa) {
-      frases.push("o SEELE desenha, por escolha desta máquina");
+      frases.push(`o SEELE desenha, por escolha desta máquina${comOTema}`);
     } else if (linha.substitui.length > 1) {
       frases.push(`desenhado por ${linha.substitui.join(" e ")}, cada um para quem declarou${osOutros}`);
     } else if (linha.substitui.length === 1) {
@@ -927,7 +935,12 @@ function frasesDeQuemPinta(linha) {
         ? `desenhado por ${linha.substitui[0]}, para quem declarou${osOutros}`
         : `desenhado por ${linha.substitui[0]}`);
     } else {
-      frases.push("o SEELE desenha; nenhum MOD substitui este lugar");
+      frases.push(comOTema ? `o SEELE desenha${comOTema}` : "o SEELE desenha; nenhum MOD substitui este lugar");
+    }
+    // E o SEELE escolhido não apaga a cor: `escreverOTemaDaSessao`, em
+    // `base.js`, escreve o tema de quem pediu sem consultar a escolha.
+    if (comOTema && linha.preferencia === APRESENTACAO_NATIVA) {
+      frases.push("a escolha desta máquina não desliga o tema da API 3");
     }
   }
   if (linha.acrescentam.length) frases.push(`acrescentam: ${linha.acrescentam.join(", ")}`);

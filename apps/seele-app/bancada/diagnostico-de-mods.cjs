@@ -548,6 +548,41 @@ async function quemPintaCadaLugar(navegador, servidor) {
     `o retrato de mod/a, que perdeu, foi contado como mídia de quem pinta: ${avatar}`,
   );
 
+  // **O tema da API 3**, pelo caminho que o ESTILO usa: a `SeeleUI.tema` vira
+  // a mensagem «tema» que `atenderOMod` atende para um MOD da API 3. Ele pinta
+  // a sessão sem registrar ponto nenhum, e a aba diz quem pediu e que o SEELE
+  // desenha com o tema dele (I-7 e m-3 da revisão ampla do Plano 1D).
+  const tema = await pagina.evaluate(async () => {
+    await atenderOMod({ id: "mod/estilo", hash: "mod-estilo", api: 3 }, instancia("mod/estilo"), {
+      n: 1, tipo: "tema", valores: { acento: "#ff8800" },
+    });
+    return {
+      cor: $("tela-sessao").style.getPropertyValue("--seele-laranja-nerv"),
+      resposta: eventosDoMod.find((e) => e.mod === "mod/estilo" && e.tipo === "resposta"),
+    };
+  });
+  assert.equal(tema.cor, "#ff8800", `o tema da API 3 não pintou a sessão: ${JSON.stringify(tema)}`);
+  await esperarALinha(
+    pagina,
+    "servidor.aparencia",
+    /o SEELE desenha, com o tema de mod\/estilo em vigor \(API 3\).*tema pedido por: mod\/estilo/,
+    "o tema da API 3 pinta a sessão, e a aparência não disse que o SEELE desenha com ele, nem quem o pediu",
+  );
+  // Com o SEELE escolhido, a cor continua: a escolha não desliga o tema.
+  await pagina.evaluate(() => escolherApresentacao("servidor.aparencia", APRESENTACAO_NATIVA));
+  await esperarALinha(
+    pagina,
+    "servidor.aparencia",
+    /o SEELE desenha, com o tema de mod\/estilo em vigor \(API 3\)a escolha desta máquina não desliga o tema da API 3/,
+    "com o SEELE escolhido e a sessão ainda pintada pelo tema da API 3, a aparência não disse que a escolha não o desliga",
+  );
+  assert.equal(
+    await pagina.evaluate(() => $("tela-sessao").style.getPropertyValue("--seele-laranja-nerv")),
+    "#ff8800",
+    "com o SEELE escolhido, o tema da API 3 saiu da sessão — e a aba diria que a escolha não o desliga",
+  );
+  await pagina.evaluate(() => escolherApresentacao("servidor.aparencia", ""));
+
   assert.deepEqual(erros, [], `a página lançou erro durante «quem pinta cada lugar»: ${erros.join(" | ")}`);
   await pagina.close();
 }

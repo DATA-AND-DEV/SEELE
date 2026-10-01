@@ -1383,6 +1383,45 @@ function anotando(...anotadas) {
   );
 }
 
+// **O tema da API 3 pinta a sessão, e a aba diz** (I-7 e m-3 da revisão ampla
+// do Plano 1D). O ESTILO, oficial, pinta pela `SeeleUI.tema` sem registrar
+// ponto nenhum. Sem a leitura de `temaDosMods`, a aba dizia «nenhum MOD usa
+// este lugar» da sessão inteira pintada; com ela, mas sem dizer o tema junto,
+// «o SEELE desenha» — e com o SEELE escolhido nesta máquina, a cor do ESTILO
+// continua: a escolha não desliga o tema da API 3 (`escreverOTemaDaSessao`
+// não a consulta).
+{
+  const caso = "M1 · a aba · o tema da API 3";
+  const aba = abaDoDiagnostico();
+  aba.temaDosMods.set("mod/estilo", { acento: "#ff8800" });
+  const aparencia = () => aba.frasesDeQuemPinta(aba.quemPintaCadaPonto().find((l) => l.ponto === "servidor.aparencia"));
+  const automatico = aparencia();
+  confere(
+    caso,
+    automatico[0] === "o SEELE desenha, com o tema de mod/estilo em vigor (API 3)"
+      && automatico.includes("tema pedido por: mod/estilo")
+      && !automatico.includes("a escolha desta máquina não desliga o tema da API 3"),
+    "com o tema de mod/estilo em vigor, a aparência não disse que o SEELE desenha com ele, ou quem o pediu — ou, "
+      + `sem escolha nenhuma, falou da escolha desta máquina: ${automatico.join(" | ")}`,
+  );
+  aba.preferencias.set("servidor.aparencia", vm.runInContext("NATIVO", aba));
+  const nativo = aparencia();
+  confere(
+    caso,
+    nativo[0] === "o SEELE desenha, com o tema de mod/estilo em vigor (API 3)"
+      && nativo[1] === "a escolha desta máquina não desliga o tema da API 3",
+    "com o SEELE escolhido e o tema de mod/estilo em vigor, a aparência não disse que a escolha desta máquina não "
+      + `desliga o tema da API 3: ${nativo.join(" | ")}`,
+  );
+  // Sem tema, nada disso: um lugar vazio continua dito como vazio.
+  aba.temaDosMods.clear();
+  confere(
+    caso,
+    aparencia()[0] === "nenhum MOD usa este lugar agora",
+    `sem tema nenhum, a aparência falou de um tema: ${aparencia().join(" | ")}`,
+  );
+}
+
 // ------------------------------------- R3 · os pontos aceitam o que aplicam
 
 {
