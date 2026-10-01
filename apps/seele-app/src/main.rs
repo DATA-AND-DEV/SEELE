@@ -10494,17 +10494,35 @@ mod o_console_do_mod_chega_ao_registro {
         }
     }
 
+    /// Nos quatro braços de `registrar_console_do_mod`, que são escritos à mão
+    /// um a um: só o do aviso tinha guarda, e o mais usado, `console.log`, cai
+    /// no da informação. Um braço que escrevesse o texto cru forjaria linha só
+    /// no nível dele, e um que esquecesse o id deixaria a linha sem dono — o
+    /// texto não o traz.
     #[test]
     fn uma_quebra_de_linha_do_mod_nao_forja_outra_linha_no_registro() {
-        let (_, rastro, _) = assentar(
+        for nivel in [
+            NivelDoConsole::Depuracao,
+            NivelDoConsole::Informacao,
             NivelDoConsole::Aviso,
-            "primeira\n WARN seele_app: linha que o produto não escreveu",
-        );
-        assert_eq!(
-            rastro.lines().count(),
-            1,
-            "um MOD escreveu uma segunda linha no seele.log, com a cara de uma linha do produto: {rastro}"
-        );
+            NivelDoConsole::Erro,
+        ] {
+            let (_, rastro, _) = assentar(
+                nivel,
+                "primeira\n WARN seele_app: linha que o produto não escreveu",
+            );
+            assert_eq!(
+                rastro.lines().count(),
+                1,
+                "um MOD escreveu uma segunda linha no seele.log ({nivel:?}), com a cara de uma \
+                 linha do produto: {rastro}"
+            );
+            assert!(
+                rastro.contains("mod_id=seele/perfis"),
+                "a linha {nivel:?} do console saiu sem o id do MOD, e uma busca por `mod_id=` \
+                 não a acha: {rastro}"
+            );
+        }
     }
 }
 
