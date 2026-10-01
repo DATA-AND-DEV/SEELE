@@ -1123,6 +1123,17 @@ async fn connect(
     // As respostas entram **na frente** dos endereços guardados, e não no lugar
     // deles: um ponto que não responda (ou um antigo, sem o verbo) deixa tudo
     // como estava, e o guardado ainda serve a quem está na mesma casa.
+    //
+    // **E valem só para esta volta.** O bilhete que vai para a lista de
+    // conhecidos é tomado aqui, antes da pergunta: o do link desta sessão, ou o
+    // que a própria lista já guardava. A escuta que o quarto devolve troca o
+    // aviso do `LEVE` desta volta e não vai para a lista. Ia, e quem ocupasse a
+    // marca da escuta ficava gravado: as voltas seguintes sem escuta fresca (o
+    // anfitrião fora do ar, o ponto reiniciado, um anfitrião 0.15.0, que não
+    // registra essa marca) mandavam a ele o `LEVE`, que sai antes do TLS e leva
+    // o endereço de quem chega. O endereço do servidor que o quarto dá também
+    // fica de fora da lista, por outra razão (`caminhos_a_guardar`, abaixo).
+    let bilhete_texto = bilhete.as_ref().map(ToString::to_string);
     let mut do_quarto: Option<String> = None;
     let bilhete = match (conferida.as_deref(), &bilhete) {
         (Some(impressao), Some(bilhete_guardado)) => {
@@ -1186,7 +1197,6 @@ async fn connect(
     // A escada, para a mesma lista, sem o endereço que o quarto pôs na frente:
     // ele é perguntado de novo a cada conexão (ver `caminhos_a_guardar`).
     let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, do_quarto.as_deref());
-    let bilhete_texto = bilhete.as_ref().map(ToString::to_string);
     let config = ConnectConfig {
         server,
         alternate_servers: alternativos,

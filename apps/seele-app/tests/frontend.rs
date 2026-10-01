@@ -14845,14 +14845,25 @@ fn nenhum_script_cria_um_style_que_a_csp_desta_janela_descarta() {
 
 #[test]
 fn o_endereco_que_o_quarto_deu_nao_vai_para_a_lista_de_conhecidos() {
-    // O quarto põe o endereço de hoje na frente da escada, e a escada inteira
-    // ia para a lista. Com um NAT que troca de porta a cada abertura do
-    // anfitrião, a lista ganhava um endereço morto por reabertura, e todos
-    // entravam na corrida. A regra do que se grava é
-    // `seele_ffi::conhecidos::caminhos_a_guardar`, provada lá. O que só se vê
-    // aqui é o `connect` usá-la, porque `connect` é um comando Tauri e não roda
-    // sem casca. Os espaços saem da comparação para o guarda não depender de
-    // onde o `rustfmt` quebra a linha.
+    // As duas colunas que o quarto alcança: a dos caminhos e a do bilhete.
+    //
+    // **Os caminhos.** O quarto põe o endereço de hoje na frente da escada, e a
+    // escada inteira ia para a lista. Com um NAT que troca de porta a cada
+    // abertura do anfitrião, a lista ganhava um endereço morto por reabertura,
+    // e todos entravam na corrida. A regra do que se grava é
+    // `seele_ffi::conhecidos::caminhos_a_guardar`, provada lá.
+    //
+    // **O bilhete.** A escuta que o quarto dá troca o aviso do bilhete desta
+    // volta, e o bilhete trocado ia para a lista. Quem ocupasse a marca da
+    // escuta (fp16 + `e`) ficava gravado, e as voltas seguintes sem escuta
+    // fresca (o anfitrião fora do ar, o ponto reiniciado, um anfitrião 0.15.0)
+    // mandavam a ele o `LEVE`, que sai antes do TLS e leva o endereço de quem
+    // chega (o I1 da revisão final do Plano 1). O que se guarda é o bilhete do
+    // link ou o da lista, tomado antes da pergunta ao quarto.
+    //
+    // O que só se vê aqui é o `connect` fazer as duas coisas, porque `connect`
+    // é um comando Tauri e não roda sem casca. Os espaços saem da comparação
+    // para o guarda não depender de onde o `rustfmt` quebra a linha.
     let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
         .chars()
         .filter(|c| !c.is_whitespace())
@@ -14869,6 +14880,34 @@ fn o_endereco_que_o_quarto_deu_nao_vai_para_a_lista_de_conhecidos() {
         ),
         "`connect` grava a escada crua na lista de conhecidos: o endereço que o quarto deu vai \
          junto, e a lista ganha um endereço morto a cada reabertura do anfitrião"
+    );
+
+    let pergunta = connect.find("seele_ffi::onde_mora_hoje(");
+    assert!(
+        pergunta.is_some(),
+        "`connect` deixou de perguntar ao quarto por `seele_ffi::onde_mora_hoje`, e a ordem \
+         que este guarda confere abaixo não mede mais nada: ache a pergunta nova e acerte o guarda"
+    );
+    assert_eq!(
+        connect.matches("letbilhete_texto=").count(),
+        1,
+        "`connect` dá valor a `bilhete_texto` mais de uma vez (ou nenhuma): um segundo `let` \
+         depois da pergunta ao quarto troca, em silêncio, o bilhete que vai para a lista pelo \
+         que o quarto montou"
+    );
+    let tomado = connect.find("letbilhete_texto=bilhete.as_ref().map(ToString::to_string);");
+    assert!(
+        tomado
+            .zip(pergunta)
+            .is_some_and(|(tomado, pergunta)| tomado < pergunta),
+        "`connect` toma o bilhete que vai para a lista depois de perguntar ao quarto: a escuta \
+         que o quarto deu vai para a lista de conhecidos, e quem ocupou a marca da escuta recebe \
+         o `LEVE`, com o endereço de quem chega, em toda volta seguinte sem escuta fresca"
+    );
+    assert!(
+        connect.contains("lista.anotar_caminhos(&alvo,&caminhos,bilhete_texto.as_deref(),"),
+        "a lista de conhecidos deixou de receber `bilhete_texto`, o bilhete do link ou da lista \
+         tomado antes do quarto: o que ela grava agora pode ser o bilhete que o quarto montou"
     );
 }
 
