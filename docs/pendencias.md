@@ -7637,8 +7637,8 @@ Nenhum item daqui segura a release. Cada um tem o comando que o mostra, e o
 conserto que a revisão propôs. Estão na ordem em que atrapalham: primeiro o
 que o produto sabe e não conta, depois os testes que não provam o que dizem,
 e por fim o texto. Os itens 26 e 27 vieram depois, da revisão do Lote
-F-Fecho: estão na seção do seu tipo, com o número depois do último, para que
-nenhum número já citado mude.
+F-Fecho, e o 28, da do Lote F-Bateria: estão na seção do seu tipo, com o
+número depois do último, para que nenhum número já citado mude.
 
 ### O produto sabe e não conta, ou conta errado
 
@@ -7970,6 +7970,30 @@ Vieram depois, da revisão do Lote F-Fecho:
     grep -n "achados.sort_by_key" crates/seele-core/src/encontro.rs
     cargo test -p seele-core --lib encontro::   # verde sem o sort_by_key
     grep -n "pub aviso: Marca\|pub escuta: Marca\|pub servidor: Marca" crates/seele-proto/src/encontro.rs
+    ```
+
+Veio depois, da revisão do Lote F-Bateria:
+
+28. **FB-m2 da revisão do Lote F-Bateria · O vetor de referência não exercita
+    o `SeeleUI.enviar` da API 5, e o guarda não percebe.** O vetor declara
+    `"api": 5` (`apps/seele-app/testes/mod-de-referencia/mod.json`), e o
+    `api/v5.json` congela `SeeleUI.enviar(arquivo, token)`. O vetor não chama
+    `.enviar(` em lugar nenhum. O guarda
+    `a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe`
+    (`crates/seele-conformance/tests/mod_de_referencia.rs`) monta a lista do
+    que a API oferece pelas linhas `nome: (` do `PRELUDIO`, e a linha do
+    `enviar` começa com `...(capacidades.has('volume') ? { enviar: (`, e não
+    casa. A do `criar` (`criar: async (`) também não casa, mas o vetor o chama.
+    Vem de antes da 0.15.0: a lista de `74fa771^` também não tem o `enviar`.
+    O conserto tem duas partes: a leitura passa a achar os membros
+    condicionais e os `async`, e o vetor exercita o `enviar` ou diz no
+    cabeçalho por que não o faz. O vetor é publicado e conferido, e mudá-lo
+    é decisão de quem opera.
+
+    ```sh
+    grep -n "enviar: (" apps/seele-app/src/executor.rs          # a linha condicional que a leitura não acha
+    grep -c "\.enviar(" apps/seele-app/testes/mod-de-referencia/cliente/main.js   # 0
+    grep -n '"api"' apps/seele-app/testes/mod-de-referencia/mod.json
     ```
 
 ### O que o código faz e o texto diz de outro jeito

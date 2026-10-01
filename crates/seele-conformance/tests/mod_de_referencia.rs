@@ -19,7 +19,8 @@
 //!   produto usa: `aoPedir` responde, o quintal persiste entre pedidos, e um
 //!   canal desconhecido é recusado pelo nome;
 //! - **a metade de janela só chama o que existe**: cada `SeeleMods.x` e
-//!   `SeeleUI.x` que ela usa é exposto pelo prelúdio em `ui/base.js`, cada
+//!   `SeeleUI.x` que ela usa é exposto pelo `PRELUDIO` de
+//!   `apps/seele-app/src/executor.rs`, fora o `console`, cada
 //!   `forma` que ela declara está na gramática de `montarODeclarado`, e cada
 //!   chave de tema está em `TEMA_DA_API`;
 //! - **o pacote atravessa a ponte inteiro**: instalado pelo caminho do produto,
@@ -203,14 +204,25 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     // arquivo que não chama nada — que é a forma exata de «existir não é
     // funcionar» que o `CLAUDE.md` deste repositório nomeia.
     let executado = sem_comentarios(&cliente);
+    // **Sem o `console`, nas duas metades.** Ele mora no mesmo prelúdio, mas
+    // não é API de MOD: é da metade de janela, não está em nenhum `vN.json`, e
+    // o `api/README.md` o diz fora da superfície congelada («Nada disto está
+    // num `vN.json`»). Aqui, um `SeeleUI.log(…)` no vetor acharia o `log:` do
+    // console e passaria como «exposto», e no produto seria um `TypeError`.
+    // Embaixo, os membros dele que casam com `nome: (` — `assert` e os nove
+    // que não fazem nada, de `group` a `clear` — entravam na lista do que a
+    // API oferece, e o guarda cobrava do vetor um `.assert(` que a API não
+    // oferece. Quem prova o console são os testes do executor, e não este
+    // vetor.
+    let api_do_preludio = sem_o_console(preludio);
     for (objeto, metodo) in chamadas_de(&executado) {
         // **Um membro, ou um espaço de nomes.** A API 4 agrupou o que ela
         // acrescentou — `SeeleUI.superficies.criar`, `SeeleUI.contribuicoes.
         // registrar` —, e os grupos entram no objeto por abreviação
         // (`{ superficies }`), sem `superficies:` em lugar nenhum. Procurar só
         // por `nome:` reprovava o vetor por chamar uma coisa que existe.
-        let existe = preludio.contains(&format!("{metodo}:"))
-            || preludio.contains(&format!("const {metodo} = comCapacidade("));
+        let existe = api_do_preludio.contains(&format!("{metodo}:"))
+            || api_do_preludio.contains(&format!("const {metodo} = comCapacidade("));
         assert!(
             existe,
             "o vetor chama `{objeto}.{metodo}`, e o prelúdio do executor não o expõe"
@@ -223,17 +235,7 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     // A lista sai do **prelúdio**, e não é escrita aqui: escrita, ela ficaria
     // para trás no dia em que a API crescesse — e o guarda passaria a dizer
     // «tudo exercitado» sobre uma lista velha. Foi o que ia acontecer quando
-    // `aoEvento` entrou.
-    //
-    // **Sem o `console`.** Ele mora no mesmo prelúdio, mas não é API de MOD: é
-    // da metade de janela, não está em nenhum `vN.json`, e o `api/README.md` o
-    // diz fora da superfície congelada («Nada disto está num `vN.json`»). Desde
-    // que ele entrou no executor, os membros dele que casam com `nome: (` —
-    // `assert` e os nove que não fazem nada, de `group` a `clear` — entravam
-    // nesta lista, e o guarda cobrava do vetor um `.assert(` que a API não
-    // oferece. Quem prova o console são os testes do executor, e não este
-    // vetor.
-    let api_do_preludio = sem_o_console(preludio);
+    // `aoEvento` entrou. Ela também sai de `api_do_preludio`, sem o console.
     let oferecidos: Vec<String> = api_do_preludio
         .lines()
         .filter_map(|linha| {
@@ -324,7 +326,7 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
 ///
 /// **Cortado pelo recuo, e não pelo primeiro `};`.** O bloco é a linha que o
 /// abre e as linhas recuadas além dela; a primeira linha no recuo de quem o
-/// abre tem de ser o `};` que o fecha. Cortar no primeiro `};` do texto erraria
+/// abre tem de ser o `};` que o fecha. Cortar no primeiro `};` depois da abertura erraria
 /// sem dizer onde: um console que fechasse sem o `;`, que o JavaScript aceita,
 /// faria o corte seguir até o `};` de `marcar`, lá embaixo, e levar junto
 /// `SeeleMods` e `SeeleUI` — a API que este guarda existe para cobrar.
