@@ -224,7 +224,17 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     // para trás no dia em que a API crescesse — e o guarda passaria a dizer
     // «tudo exercitado» sobre uma lista velha. Foi o que ia acontecer quando
     // `aoEvento` entrou.
-    let oferecidos: Vec<String> = preludio
+    //
+    // **Sem o `console`.** Ele mora no mesmo prelúdio, mas não é API de MOD: é
+    // da metade de janela, não está em nenhum `vN.json`, e o `api/README.md` o
+    // diz fora da superfície congelada («Nada disto está num `vN.json`»). Desde
+    // que ele entrou no executor, os membros dele que casam com `nome: (` —
+    // `assert` e os nove que não fazem nada, de `group` a `clear` — entravam
+    // nesta lista, e o guarda cobrava do vetor um `.assert(` que a API não
+    // oferece. Quem prova o console são os testes do executor, e não este
+    // vetor.
+    let api_do_preludio = sem_o_console(preludio);
+    let oferecidos: Vec<String> = api_do_preludio
         .lines()
         .filter_map(|linha| {
             let corte = linha.trim().split_once(": (")?;
@@ -308,6 +318,74 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
             "o vetor pede o token de tema «{nome}», que a API não conhece"
         );
     }
+}
+
+/// O prelúdio sem o bloco `globalThis.console = { … };`.
+///
+/// **Cortado pelo recuo, e não pelo primeiro `};`.** O bloco é a linha que o
+/// abre e as linhas recuadas além dela; a primeira linha no recuo de quem o
+/// abre tem de ser o `};` que o fecha. Cortar no primeiro `};` do texto erraria
+/// sem dizer onde: um console que fechasse sem o `;`, que o JavaScript aceita,
+/// faria o corte seguir até o `};` de `marcar`, lá embaixo, e levar junto
+/// `SeeleMods` e `SeeleUI` — a API que este guarda existe para cobrar.
+///
+/// **Não achar é falhar.** Um prelúdio sem a linha que abre o console, ou com
+/// um console que não fecha onde devia, reprova aqui pelo nome: calado, o
+/// guarda voltaria a cobrar o console do vetor, ou deixaria de cobrar a API.
+fn sem_o_console(preludio: &str) -> String {
+    const ABRE: &str = "globalThis.console = {";
+    let linhas: Vec<&str> = preludio.lines().collect();
+    let abre = linhas
+        .iter()
+        .position(|linha| linha.trim() == ABRE)
+        .unwrap_or_else(|| {
+            panic!(
+                "o prelúdio do executor não tem mais a linha `{ABRE}`, e o guarda do vetor \
+                 não sabe onde o console começa: sem cortá-lo, ele cobraria do vetor o \
+                 console, que não é API de MOD; ache o console no PRELUDIO de \
+                 apps/seele-app/src/executor.rs e conserte `sem_o_console`"
+            )
+        });
+    let (antes, desde_a_abertura) = linhas.split_at(abre);
+    let (linha_que_abre, depois_da_abertura) = desde_a_abertura
+        .split_first()
+        .expect("`position` achou a linha que abre o console");
+    let recuo = linha_que_abre
+        .trim_end()
+        .strip_suffix(ABRE)
+        .expect("a linha que abre o console é recuo e marca");
+    let dentro_do_bloco = |linha: &str| {
+        linha.trim().is_empty()
+            || linha
+                .strip_prefix(recuo)
+                .is_some_and(|resto| resto.starts_with(char::is_whitespace))
+    };
+    let fecha = depois_da_abertura
+        .iter()
+        .position(|linha| !dentro_do_bloco(linha))
+        .unwrap_or_else(|| {
+            panic!(
+                "o console do prelúdio abre em `{ABRE}` e nenhuma linha depois volta ao \
+                 recuo dele: o guarda do vetor não sabe onde o console termina"
+            )
+        });
+    let (_console, desde_o_fechamento) = depois_da_abertura.split_at(fecha);
+    let (linha_que_fecha, depois) = desde_o_fechamento
+        .split_first()
+        .expect("`position` achou a linha que fecha o console");
+    assert_eq!(
+        *linha_que_fecha,
+        format!("{recuo}}};"),
+        "o console do prelúdio não fecha com `}};` no recuo de quem o abre, e o guarda \
+         do vetor não sabe onde ele termina: cortar no próximo `}};` levaria junto a \
+         API que vem depois dele"
+    );
+    antes
+        .iter()
+        .chain(depois)
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// O que sobra de um arquivo JS quando os comentários saem.
