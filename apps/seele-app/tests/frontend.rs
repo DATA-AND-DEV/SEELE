@@ -11815,9 +11815,14 @@ fn um_pedido_de_mod_nunca_fica_sem_resposta() {
 /// A bancada `contribuicoes-e-camadas.cjs` exercita o `catch` de `atenderOMod`
 /// de verdade; as quatro recusas de `pedirAoServidor` e a da instância que já
 /// não é a carregada não passam por ela, e voltar a tirar o id de uma delas não
-/// reprovaria nada. É o que este guarda prende. O nível fica livre: o que se
-/// exige é o id **na quarta posição** — um id que escorregasse para a terceira
-/// viraria o nível, e a linha sairia como DEBUG e sem `mod_id`.
+/// reprovaria nada. É o que este guarda prende: o id **na quarta posição** — um
+/// id que escorregasse para a terceira viraria o nível, e a linha sairia como
+/// DEBUG e sem `mod_id` — e `"aviso"` **na terceira**. O nível não é detalhe:
+/// `registrar_da_janela` escreve WARN só para `"aviso"`, e qualquer outro texto
+/// cai em DEBUG, que o filtro de produção (`seele_app=info`) não escreve; um
+/// `null` nem chega a ser texto, e o `nivel: String` do comando não o aceita.
+/// Nos dois casos a recusa some do `seele.log` com o id certo na quarta
+/// posição.
 #[test]
 fn toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio() {
     let base = without_comments(&read("ui/base.js"));
@@ -11842,13 +11847,18 @@ fn toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio() {
         );
         let sem_id: Vec<&Vec<String>> = chamadas
             .iter()
-            .filter(|argumentos| argumentos.get(3).map(String::as_str) != Some(id))
+            .filter(|argumentos| {
+                argumentos.get(3).map(String::as_str) != Some(id)
+                    || argumentos.get(2).map(String::as_str) != Some("\"aviso\"")
+            })
             .collect();
         assert!(
             sem_id.is_empty(),
-            "`{assinatura}` registra recusa de MOD sem `{id}` como quarto argumento: a \
-             linha sai sem `mod_id=`, e uma busca por ele no seele.log não acha o que a \
-             janela disse deste MOD. {} de {} chamada(s): {sem_id:?}",
+            "`{assinatura}` registra recusa de MOD sem `\"aviso\"` como terceiro argumento ou \
+             sem `{id}` como quarto: a linha cai em DEBUG (ou a ponte a recusa), que o \
+             filtro de produção não escreve, ou sai sem `mod_id=`, e uma busca por ele no \
+             seele.log não acha o que a janela disse deste MOD. {} de {} chamada(s): \
+             {sem_id:?}",
             sem_id.len(),
             chamadas.len()
         );
