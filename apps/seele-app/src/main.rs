@@ -3774,7 +3774,9 @@ fn reservar_no_executor(
     id: &str,
     hash: String,
 ) -> Result<u64, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
+    // Recusada **e contada** em `comandos_de_geracao_morta`, como todo comando
+    // de uma sessão que acabou.
+    if session.confere_geracao(geracao).is_err() {
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
         });
@@ -3807,6 +3809,7 @@ fn reservar_no_executor(
     let numero = registrar_reserva(
         &session.mods_nativos,
         &|| session.geracao_vale(geracao),
+        &session.comandos_de_geracao_morta,
         InstanciaNativa {
             id: id.to_owned(),
             geracao,
@@ -3918,13 +3921,19 @@ fn revogar_em(geracao: &std::sync::atomic::AtomicU64, mods: &std::sync::Mutex<Mo
 ///
 /// A instância chega inteira — **com o fonte dentro** —, e é isso que faz a
 /// revogação não ter onde cair no meio: não há um segundo `insert`.
+///
+/// A recusa por geração morta é contada em `mortos` — o
+/// `comandos_de_geracao_morta` da sessão —, como a de todo comando que chega
+/// depois de a sessão dele acabar.
 fn registrar_reserva(
     mods: &std::sync::Mutex<ModsNativos>,
     geracao_vale: &dyn Fn() -> bool,
+    mortos: &std::sync::atomic::AtomicU64,
     instancia: InstanciaNativa,
 ) -> Result<u64, FalhaNoMod> {
     let mut vivos = mods.lock().map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
     if !geracao_vale() {
+        mortos.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         instancia.executor.pedir_encerramento();
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
@@ -9638,6 +9647,45 @@ mod a_supervisao_dos_mods_nativos {
         assert!(mods.encerrando.is_empty() && mods.vivos.is_empty());
     }
 
+    /// **A reserva que chega numa geração morta é contada**, como todo comando
+    /// de geração morta.
+    ///
+    /// Ela era recusada sem conta: `comandos_de_geracao_morta`, o contador que
+    /// diz «alguma coisa da sessão anterior ainda estava falando», não subia
+    /// para a reserva atrasada — e o doc da recusa de carga dizia que subia.
+    /// A que vale não é contada.
+    #[test]
+    fn a_reserva_recusada_por_geracao_morta_e_contada() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let mods = std::sync::Mutex::new(ModsNativos::default());
+        let mortos = AtomicU64::new(0);
+        let mut atrasada = instancia(7);
+        atrasada.estado = EstadoNativo::Reservada;
+        let recusa = registrar_reserva(&mods, &|| false, &mortos, atrasada)
+            .expect_err("a reserva de uma geração morta foi aceita");
+        assert_eq!(
+            super::motivo_de(&recusa),
+            "sessao-encerrada",
+            "a reserva de uma geração morta foi recusada por outro motivo"
+        );
+        assert_eq!(
+            mortos.load(Ordering::Relaxed),
+            1,
+            "a reserva recusada por geração morta não foi contada em \
+             `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou"
+        );
+
+        let mut viva = instancia(7);
+        viva.estado = EstadoNativo::Reservada;
+        registrar_reserva(&mods, &|| true, &mortos, viva).expect("a reserva viva foi recusada");
+        assert_eq!(
+            mortos.load(Ordering::Relaxed),
+            1,
+            "a reserva de uma geração viva foi contada como de geração morta"
+        );
+    }
+
     /// **A corrida entre registrar uma reserva e revogar a geração.**
     ///
     /// A revisão pedia «uma prova com barreira entre registrar a instância e
@@ -9669,6 +9717,7 @@ mod a_supervisao_dos_mods_nativos {
         for rodada in 0..30u64 {
             let mods = std::sync::Arc::new(std::sync::Mutex::new(ModsNativos::default()));
             let geracao = std::sync::Arc::new(AtomicU64::new(7));
+            let mortos = std::sync::Arc::new(AtomicU64::new(0));
             {
                 let mut vivos = mods.lock().expect("cadeado");
                 for _ in 0..POVOAR {
@@ -9693,6 +9742,7 @@ mod a_supervisao_dos_mods_nativos {
                 .map(|nova| {
                     let mods = std::sync::Arc::clone(&mods);
                     let geracao = std::sync::Arc::clone(&geracao);
+                    let mortos = std::sync::Arc::clone(&mortos);
                     let largada = std::sync::Arc::clone(&largada);
                     std::thread::spawn(move || {
                         largada.wait();
@@ -9701,7 +9751,12 @@ mod a_supervisao_dos_mods_nativos {
                         for _ in 0..64 {
                             std::hint::spin_loop();
                         }
-                        registrar_reserva(&mods, &|| geracao.load(Ordering::Acquire) == 7, nova)
+                        registrar_reserva(
+                            &mods,
+                            &|| geracao.load(Ordering::Acquire) == 7,
+                            &mortos,
+                            nova,
+                        )
                     })
                 })
                 .collect();
@@ -9721,6 +9776,14 @@ mod a_supervisao_dos_mods_nativos {
                 .map(|t| t.join().expect("registrador"))
                 .collect();
             revogador.join().expect("revogador");
+            // Cada reserva que a revogação recusou é contada, uma vez.
+            let recusadas = registradas.iter().filter(|r| r.is_err()).count() as u64;
+            assert_eq!(
+                mortos.load(Ordering::Relaxed),
+                recusadas,
+                "rodada {rodada}: as reservas recusadas pela revogação e as contadas em \
+                 `comandos_de_geracao_morta` não batem"
+            );
 
             let vivos = mods.lock().expect("cadeado");
             let orfao = vivos

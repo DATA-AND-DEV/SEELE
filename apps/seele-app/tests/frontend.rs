@@ -13085,6 +13085,34 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
         );
     }
 
+    // **E a reserva conta as duas recusas dela**: a do começo, por
+    // `confere_geracao`, que conta, e a de `registrar_reserva`, sob o cadeado,
+    // pelo contador da sessão. `registrar_reserva` não tem sessão para contar
+    // sozinha — é o contador que a reserva lhe passa que sobe — e o teste dela
+    // (`a_reserva_recusada_por_geracao_morta_e_contada`) prova a conta, não
+    // quem é o contador.
+    let reservar = rust
+        .split_once("fn reservar_no_executor(")
+        .expect("`reservar_no_executor`")
+        .1;
+    let reservar = reservar.split_once("\n}\n").map_or(reservar, |(a, _)| a);
+    let reservar: String = reservar
+        .lines()
+        .filter(|linha| !linha.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        reservar.contains("session.confere_geracao(geracao)"),
+        "a reserva voltou a recusar a geração morta do começo sem contá-la em \
+         `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou: \
+         {reservar}"
+    );
+    assert!(
+        reservar.contains("&session.comandos_de_geracao_morta"),
+        "a reserva deixou de passar o contador da sessão a `registrar_reserva`, e a recusa sob \
+         o cadeado sobe outro contador, que ninguém lê: {reservar}"
+    );
+
     // E a ponte de eventos não fala em nome de uma sessão morta.
     let ponte = rust
         .split_once("impl EventListener for Bridge")
