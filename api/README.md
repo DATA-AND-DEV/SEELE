@@ -10,6 +10,57 @@ versão promete é publicar a seguinte, e nunca editar esta — a v3 e a v4,
 editadas antes de o guarda existir, ficaram congeladas como estão, com a
 história no comentário da lista.
 
+## O que muda para quem escreve MOD nesta versão
+
+**Nada disto está num `vN.json`.** A superfície congelada é a mesma, e um MOD
+das APIs 3, 4 e 5 carrega como carregava (`APIS_ACEITAS = [5, 4, 3]`, em
+`crates/seele-proto/src/mods.rs`, na v0.15.0 e aqui). O que muda, na versão
+depois da 0.15.0, é o executor da metade de janela e o som, e quem escreve MOD
+precisa saber disso para o MOD rodar igual nas duas.
+
+- **`console` existe, em qualquer API.** `console.log`, `info`, `warn`,
+  `error` e `debug` — e `dir`, `table`, `trace` e o `assert` que falha —
+  viram uma linha no `seele.log` da máquina que roda o MOD, com o id dele num
+  campo próprio (`mod_id=`); `group`, `time`, `count` e `clear` não fazem
+  nada. O `debug` não é gravado pelo filtro padrão do `seele.log`. Como ler
+  essas linhas está em
+  [`docs/como-se-faz-um-mod.md`](../docs/como-se-faz-um-mod.md), «Quando o MOD
+  não faz o que devia».
+- **Na 0.15.0 o `console` não existe.** Lá, `console.warn(…)` é um
+  `ReferenceError`, e um MOD que o chame fora de um `try` quebra, na mesma
+  sala, para quem não atualizou. Quem precisa rodar nas duas versões escreve:
+
+  ```js
+  if (typeof console !== "undefined") console.warn("o retrato não veio");
+  ```
+
+- **O erro que o MOD não pegou vai ao `seele.log`, em ERROR**, com o texto e a
+  primeira linha da pilha: a exceção no topo do código, num temporizador e num
+  ouvinte de evento, e a promessa rejeitada sem tratamento («promessa
+  rejeitada sem tratamento: …»), dita no fim da volta e só se ninguém a pegou.
+  A gestão de MODs continua dizendo «falhou» como antes.
+- **O som do pacote toca por WebAudio**, sem `<audio>` e sem afrouxar a
+  política da janela, e o contrato de `tocando` ficou escrito:
+  - **`tocando` vale quando muda.** Um som que a pessoa pausou não volta
+    sozinho no redesenho seguinte que o declare `tocando: true`.
+  - **A exceção é o som que terminou:** `tocando: true` sobre um som cujo
+    último aviso foi `terminou` toca de novo, do começo, como o `<audio>`
+    fazia até a 0.15.0. Repetição explícita (`repetir`) é decisão da API 6.
+  - **No fim, o MOD recebe só `terminou`.** O `<audio>` dizia `pausada`
+    antes dele.
+  - **O botão é do produto.** No lugar dos controles do `<audio>`, o produto
+    desenha um TOCAR/PAUSAR ao lado do som (num cartão, nenhum).
+  - **Fora da tela, a declaração não liga o som.** Um `tocando: true` num som
+    cujo lugar saiu da tela — uma página fechada, um cartão que o SEELE não
+    desenha agora — é recusado (`recusada`, com o motivo «o lugar deste som
+    saiu da tela…»), e um som que tocava ali é pausado (`pausada`).
+- **O som decodificado tem teto.** O WebAudio guarda o som inteiro em
+  `float32`, e por isso há um teto além do de bytes: 64 MiB de som de pé por
+  região, por superfície, por contribuição e nos cartões de um MOD — pouco
+  menos de três minutos de som estéreo a 48 kHz, ou o dobro em mono. Acima
+  dele, o som chega ao MOD como `recusada`, com os números no `porque`, como a
+  mídia acima do teto de bytes.
+
 ## Publicar a versão seguinte
 
 O guarda trata como publicada toda versão até `MOD_API_VERSION`

@@ -7981,7 +7981,22 @@ e por fim o texto.
     grep -n "já bastaria hoje\|a regra do topo normaliza" .gitattributes
     ```
 
-22. **Polimento do 1C e do 1D que não alcança quem usa.** Do 1C: o formato
+22. **Achado ao escrever o m8 · O guia do repositório descreve a metade de
+    janela de antes do ADR 0049.** `docs/como-se-faz-um-mod.md`, «A metade de
+    cliente», diz que ela é carregada «com acesso à janela inteira», com DOM
+    e CSSOM, e dá de exemplo um `document.documentElement.style…`. Desde o
+    ADR 0049 (18/09/2026, API 3), a lógica do MOD roda num executor fora da
+    janela (`apps/seele-app/src/executor.rs`), e o desenho é declarado à
+    região. O `mod.json` de exemplo ainda diz `"api": 1`. A seção nova
+    «Quando o MOD não faz o que devia», do mesmo arquivo, já fala do executor
+    de hoje. O conserto é reescrever «A metade de cliente» pela API 5, ou
+    apontar para o guia que a descreve.
+
+    ```sh
+    grep -n "acesso à janela inteira\|document.documentElement.style\|\"api\": 1" docs/como-se-faz-um-mod.md
+    ```
+
+23. **Polimento do 1C e do 1D que não alcança quem usa.** Do 1C: o formato
     `<id>: … / aviso / id` escrito à mão em quatro lugares ao lado de
     `anotarRecusa`, e a frase do P12 com o ponto sem «» (T7 M2 e M3); o plano
     1C (`:1458`) com o nome antigo do guarda de fonte; e o comentário de
@@ -8003,7 +8018,7 @@ e por fim o texto.
 
 ### Fora deste repositório
 
-23. **M-5 do 1E e m8 da revisão final · O guia externo não conhece a API 5.**
+24. **M-5 do 1E e m8 da revisão final · O guia externo não conhece a API 5.**
     O guia de `mods.seele.app.br/guia` (repositório `SEELE-MODS-INDEXER`) diz
     `APIS_ACEITAS = [4, 3]` e `MOD_API_VERSION = 4`, e não menciona a API 5;
     a v0.15.0 publicada e este branch aceitam `[5, 4, 3]`
@@ -8016,7 +8031,7 @@ e por fim o texto.
     grep -n "pub const APIS_ACEITAS" crates/seele-proto/src/mods.rs
     ```
 
-24. **m2 da revisão final · Os laboratórios dos MODs publicados não conhecem
+25. **m2 da revisão final · Os laboratórios dos MODs publicados não conhecem
     o dono de hoje.** O `ferramentas/preview.cjs` da MESA, do PERFIS e do
     ESTILO monta a região com o `mods-regiao.js` deste repositório e um dono
     sem `bytesDoSom` nem `anotarRecusa`. Desde o `45cc55e`, a falta de

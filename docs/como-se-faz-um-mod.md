@@ -174,13 +174,89 @@ mkdir -p ~/.config/seele/mods/fulano/meu-mod
 # copie mod.json, cliente/ e servidor/ para lá
 ```
 
-Abra o app, hospede, e habilite. **Erros do seu MOD aparecem no log de quem
-hospeda** — `~/.config/seele/seele.log` — com o seu `id` no prefixo.
+Abra o app, hospede, e habilite. **Erros do seu MOD aparecem no `seele.log`**
+(`~/.config/seele/seele.log`), com o seu `id` num campo próprio, `mod_id=`: os
+da metade de servidor no de quem hospeda, e os da metade de janela no de cada
+máquina que roda o MOD. A seção seguinte diz como lê-los.
 
 > **O que falta, e é honesto dizer:** não há `seele mod new`, não há definições
 > de tipo para o seu editor, e não há como rodar um MOD sem hospedar um servidor.
 > O ADR 0045 promete as definições de tipo e elas ainda não existem. Enquanto
-> não existirem, o retorno que você tem é o log.
+> não existirem, o retorno que você tem é o log e a aba DIAGNÓSTICO.
+
+## Quando o MOD não faz o que devia
+
+Esta seção vale a partir da versão seguinte à 0.15.0, a que trouxe o `console`
+da metade de janela. O que mudou nela para quem escreve MOD — o `console`, o som
+e os tetos — está em [`api/README.md`](../api/README.md), «O que muda para quem
+escreve MOD nesta versão».
+
+### O `console`, e onde ele escreve
+
+A metade de janela tem `console`, e cada chamada vira **uma linha no
+`seele.log` da máquina que roda o MOD**, no nível que você escolheu:
+
+| você escreve | a linha sai em |
+|---|---|
+| `console.debug`, `console.trace` | DEBUG — que o `seele.log` **não grava** por padrão |
+| `console.log`, `console.info`, `console.dir`, `console.table` | INFO |
+| `console.warn` | WARN |
+| `console.error`, e o `console.assert` cuja condição é falsa | ERROR |
+
+`group`, `time`, `count` e `clear` existem e não fazem nada. O erro que o seu
+código não pegou também chega, em ERROR, com o texto e a primeira linha da
+pilha: a exceção no topo, num temporizador ou num ouvinte, e a promessa
+rejeitada que ninguém pegou até o fim da volta.
+
+**Tem teto.** Trinta e duas linhas de uma vez, e depois quatro por segundo;
+cada linha é cortada em 512 caracteres. O que o teto segurou não some calado:
+a linha seguinte diz quantas foram seguradas (`suprimidas=`).
+
+**Na 0.15.0 o `console` não existe**, e `console.warn(…)` lá é um
+`ReferenceError`. Um MOD que precisa rodar nas duas versões pergunta antes:
+`if (typeof console !== "undefined") console.warn("…")`.
+
+### Ler a linha
+
+Cada linha do `console` sai assim:
+
+```text
+… WARN seele_app: console do MOD mod_id=fulano/meu-mod texto="o retrato não veio"
+```
+
+O texto vem entre aspas e escapado: uma quebra de linha nele não vira outra
+linha do registro. Para ver só o seu MOD — o `console`, as mídias que a janela
+recusou e o que o servidor disse dele, que usam o mesmo campo:
+
+```sh
+grep "mod_id=fulano/meu-mod" ~/.config/seele/seele.log
+```
+
+O arquivo fica em `~/.config/seele/` no macOS e no Linux (ou em `$SEELE_HOME`,
+quando definido) e em `%APPDATA%\tech.datadev.seele\` no Windows. Para gravar
+também o `console.debug`, abra o app com `RUST_LOG=info,seele_app=debug` no
+ambiente.
+
+### A aba DIAGNÓSTICO
+
+Em CONFIGURAÇÕES › MODS › DIAGNÓSTICO, QUEM PINTA CADA LUGAR: os onze pontos
+onde um MOD pode entrar nesta versão, sempre os onze, e não só os que alguém
+disputa. Para cada um, quem desenha agora (o SEELE, um MOD, ou um para cada
+pessoa que declarou), quem pediu e perdeu, a escolha desta máquina, e a mídia
+em uso — quantas carregando, prontas e recusadas, com o motivo da recusa. A
+mídia da região do MOD e a das páginas dele ainda não entram nessa conta
+(`docs/pendencias.md`, pendência 49, item 5): uma recusa ali está no
+`seele.log` e no evento que o seu MOD recebe. «Nenhum MOD usa este lugar agora»
+é a resposta que você mais precisa ler quando o seu não aparece. É só leitura:
+escolher quem desenha continua em INSTALADOS, «QUEM DESENHA O QUE».
+
+### O modo de desenvolvedor
+
+Na mesma aba, MODO DE DESENVOLVEDOR contorna na tela cada lugar onde um MOD pode
+entrar, com o nome do ponto como a API o chama — é o que você escreve em
+`ponto`. Os contornos não recebem clique nem teclado: a conversa continua
+funcionando por baixo, e a barra de espaço continua falando. Vale só na
+máquina em que você ligou.
 
 ## Publicar
 
