@@ -37,7 +37,7 @@ fn usage() {
     eprintln!("commands:");
     eprintln!("  check-api    enforce the MOD API façade from `api/` (ADR 0045)");
     eprintln!("  check-deps   enforce the dependency rule from specs/01-arquitetura.md");
-    eprintln!("  check-runtime prova as corridas do ciclo de vida de um MOD (precisa de Node)");
+    eprintln!("  check-runtime roda as bancadas de MOD de Node puro (precisa de Node)");
     eprintln!("  check-vetores confere que todo vetor está versionado (precisa de Git)");
     eprintln!("  check-versao prova que a versão do produto alcança tudo o que a carrega");
 }

@@ -664,6 +664,15 @@ pathlib.Path(entrega, "latest.json").write_text(
             r#"#!/bin/sh
 printf 'cargo %s\n' "$*" >> "$SEELE_TESTE_DIARIO"
 case "$*" in
+    *'xtask check-runtime'*)
+        # A lista das bancadas de MOD. Ao reprovar, a de verdade diz qual
+        # bancada caiu, e é essa linha que quem publica tem de ler.
+        if [ "${FALSO_CHECK_RUNTIME:-ok}" != ok ]; then
+            echo 'check-runtime: envio-de-imagens.cjs reprovou (exit status: 1)' >&2
+            exit 1
+        fi
+        exit 0
+        ;;
     *'tauri signer sign'*)
         if [ "${FALSO_ASSINATURA:-ok}" != ok ]; then
             echo 'Error failed to decode base64 secret key' >&2
@@ -2544,6 +2553,102 @@ fn a_bateria_tem_prazo_e_nao_espera_para_sempre() {
     assert!(
         etapa.contains("kill -9"),
         "o prazo vence e nada interrompe o que travou:\n{etapa}"
+    );
+}
+
+/// O módulo de vídeo de mentira que a bateria exige achar antes de começar.
+///
+/// A bateria de verdade morre sem ele (`SEELE_EXIGE_CODEC`), e aqui o que se
+/// quer medir vem depois disso.
+fn codec_de_mentira(bancada: &Bancada) -> String {
+    let codec = bancada.base.join("libopenh264.dylib");
+    escrever(&codec, "módulo de mentira\n", false);
+    codec.display().to_string()
+}
+
+#[test]
+fn uma_bancada_de_mod_vermelha_para_a_publicacao_antes_de_empacotar() {
+    // **As versões saem por este script, e a bateria dele não rodava bancada
+    // nenhuma.**
+    //
+    // As bancadas de MOD de Node puro são o único guarda de que as recusas da
+    // janela chegam ao seele.log. O lote CI do plano 1C as pôs no `validar` do
+    // `release.yml`, e a revisão dele mediu que as versões publicadas tinham
+    // saído por aqui, por fora daquele portão. Uma bancada vermelha passava
+    // calada até a máquina de quem instalou.
+    //
+    // A lista é uma só, a de `cargo xtask check-runtime`: este teste não repete
+    // os nomes, ele exige a chamada.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+
+    // Sem o Windows, de propósito: a bateria de lá, contra o dublê do `ssh`,
+    // não devolve veredito e reprova sozinha. Com ele, o código de saída
+    // diferente de zero viria de lá, e a asserção sobre ele passaria por sorte
+    // com a reprovação da bancada engolida.
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[
+            ("SEELE_OPENH264", codec.as_str()),
+            ("FALSO_CHECK_RUNTIME", "reprova"),
+        ],
+    );
+
+    assert!(
+        saida.diario.contains("cargo xtask check-runtime"),
+        "a bateria de quem publica não chamou a lista das bancadas de MOD, e uma \
+         bancada vermelha volta a sair publicada:\n{}",
+        saida.diario
+    );
+    assert_ne!(
+        saida.estado, 0,
+        "uma bancada de MOD reprovou e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("Rode «cargo xtask check-runtime»"),
+        "a queixa não diz como rodar a lista à mão, e quem publica fica sem o \
+         comando seguinte:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("envio-de-imagens.cjs reprovou"),
+        "o nome da bancada que caiu não chegou a quem publica — a lista sabe e \
+         o script não conta:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.nada_foi_empacotado(),
+        "a bancada reprovou e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn o_sem_bateria_pula_tambem_as_bancadas_de_mod_e_grita() {
+    // `--sem-bateria` é a saída de emergência, e ela pula **tudo** — inclusive
+    // a lista das bancadas, que não pode virar uma etapa à parte que roda
+    // mesmo assim. E pular tem de ser dito: um atalho calado vira o caminho
+    // normal em duas semanas.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("FALSO_CHECK_RUNTIME", "reprova")],
+    );
+
+    assert!(
+        !saida.diario.contains("xtask check-runtime"),
+        "o --sem-bateria deixou de pular as bancadas de MOD:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.texto.contains("bateria pulada por --sem-bateria"),
+        "a bateria foi pulada calada:\n{}",
+        saida.texto
     );
 }
 

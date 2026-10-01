@@ -978,6 +978,29 @@ bateria() {
     # descobrir que a queixa não tinha relação com o motivo.
     etapa_da_bateria "o código não está formatado." "Rode «cargo fmt»." \
         cargo fmt --manifest-path "$RAIZ/Cargo.toml" --all --check
+    # **As bancadas de MOD de Node puro, que esta bateria não rodava.**
+    #
+    # Entre outras coisas, elas guardam que as recusas de mídia, de cartões, de
+    # contribuição e do avatar chegam ao seele.log: o `cargo test` confere a
+    # porta do registro, mas não enxerga quem a chama. O `release.yml` as roda no
+    # `validar`, mas as versões vão para o SEELE-RELEASES por este script, por
+    # fora daquele portão, e uma bancada vermelha podia sair publicada sem
+    # ninguém ver (revisão do lote CI do plano 1C).
+    #
+    # A lista é uma só, a de `cargo xtask check-runtime`, e é a mesma que o
+    # `validar` e o `ci.yml` rodam: uma bancada nova entra em
+    # `xtask/src/check_runtime.rs`, e não aqui. Ela nomeia a bancada que caiu,
+    # e reprova sem Node, de propósito.
+    #
+    # Logo depois da formatação, porque é barata: compila só o `xtask`, e as
+    # bancadas, juntas, levaram menos de um segundo neste Mac quando esta etapa
+    # entrou (30/09/2026). Aqui a primeira reprovação para
+    # tudo, então a ordem decide quanto se espera para descobrir — inclusive a
+    # falta do Node. No `validar` ela vem depois dos testes, e roda mesmo que eles
+    # reprovem, porque lá uma bancada vermelha não pode pular o clippy e os testes.
+    etapa_da_bateria "uma bancada de MOD reprovou, ou não há Node nesta máquina." \
+        "Rode «cargo xtask check-runtime» e leia: ele diz qual bancada caiu." \
+        cargo xtask check-runtime
     etapa_da_bateria "o clippy reprovou." \
         "Rode «cargo clippy --workspace --all-targets»." \
         env RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets

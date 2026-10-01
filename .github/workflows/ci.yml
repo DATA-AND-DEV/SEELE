@@ -15,17 +15,22 @@ name: CI
 #
 # Um push não é conferido por ninguém até alguém pedir. O portão que **não** se
 # mexeu é o do `release.yml`: publicar por ele continua exigindo `validar` verde
-# nos três sistemas sobre o mesmo SHA, que é o R07 da revisão da v15. O
-# `validar` roda o que este arquivo roda — formatação, regras, clippy, testes e
-# as bancadas de MOD de `node` puro —, menos as bancadas de navegador. Quer
-# dizer que, nisso, o esquecimento aqui não chega ao que sai pelo `release.yml`:
-# ele chega ao tempo que se leva para descobrir, e isso está dito porque é o
-# preço real.
+# nos três sistemas sobre o mesmo SHA, que é o R07 da revisão da v15. A exceção
+# é a saída `sem_validar` do `release.yml`, que pula o `validar` inteiro e fica
+# no registro do run. O `validar` roda o que este arquivo roda — formatação,
+# regras, clippy, testes e as bancadas de MOD de `node` puro —, menos as
+# bancadas de navegador. Quer dizer que, nisso, o esquecimento aqui não chega
+# ao que sai pelo `release.yml`: ele chega ao tempo que se leva para descobrir,
+# e isso está dito porque é o preço real.
 #
-# **As bancadas de navegador são a exceção.** Elas só rodam aqui, e uma release
-# pode sair com uma delas vermelha se ninguém disparar este workflow antes. E o
-# `empacotar/publicar.sh` publica por fora do `validar`, com a bateria dele, que
-# não roda bancada nenhuma.
+# O `empacotar/publicar.sh` publica por fora do `validar`, com a bateria dele.
+# Ela roda, entre outras coisas, formatação, clippy, testes e as mesmas
+# bancadas de MOD de `node` puro, e o `--sem-bateria` pula tudo isso, dizendo
+# que pulou.
+#
+# **As bancadas de navegador são a exceção nos dois caminhos.** Elas só rodam
+# aqui, e uma release pode sair com uma delas vermelha se ninguém disparar este
+# workflow antes.
 #
 # Voltar ao automático é devolver as duas linhas:
 #
@@ -280,20 +285,32 @@ jobs:
   # seguintes, e uma instalação do Playwright que quebrasse as deixava como
   # «skipped» — nem verdes nem vermelhas. Aqui elas não dependem de nada disso.
   #
-  # As mesmas seis rodam no `validar` do `release.yml`, que é o portão de quem
-  # publica por lá; este job é para vê-las antes.
+  # # Uma lista só
+  #
+  # Os nomes moram em `xtask/src/check_runtime.rs`, e este job chama
+  # `cargo xtask check-runtime`, como o `validar` do `release.yml` e a bateria
+  # do `empacotar/publicar.sh`. Eram três listas escritas à mão — a deste job,
+  # a do `validar` e a do `check_runtime.rs`, que ninguém chamava e tinha
+  # quatro das seis —, e uma bancada nova entraria numa e não nas outras. Por
+  # isso o job precisa de Rust, como o das regras, e do cache que o clippy e os
+  # testes usam.
   bancadas-de-mod:
     name: bancadas de MOD (node puro)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-bancadas-de-mod
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      # Cada bancada por nome, pelo mesmo motivo do job acima.
-      - run: node apps/seele-app/bancada/regiao-do-mod.cjs
-      - run: node apps/seele-app/bancada/contribuicoes-e-camadas.cjs
-      - run: node apps/seele-app/bancada/continuacao-de-midia.cjs
-      - run: node apps/seele-app/bancada/ciclo-do-executor.cjs
-      - run: node apps/seele-app/bancada/envio-de-imagens.cjs
-      - run: node apps/seele-app/bancada/imagens-por-volume.cjs
+      # O `xtask` compila num passo à parte para o prazo de baixo medir as
+      # bancadas, e não a instalação do toolchain fixado nem a compilação.
+      - run: cargo build --quiet --package xtask
+      # **Com prazo.** Uma bancada que pendura de verdade — um temporizador
+      # vivo, um laço — não chega nem ao `exit` nem ao `beforeExit`, e o passo
+      # seguraria o job até o teto, 360 minutos. A lista leva segundos.
+      - name: as bancadas
+        timeout-minutes: 5
+        run: cargo xtask check-runtime
