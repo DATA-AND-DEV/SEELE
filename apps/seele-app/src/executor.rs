@@ -1327,6 +1327,11 @@ fn rodar(
 const PRELUDIO: &str = r#"
 'use strict';
 (() => {
+  // **A porta do registro, guardada antes de o MOD rodar.** O `seele` é um
+  // objeto que o MOD alcança, e o `console` abaixo, lendo `seele.console` na
+  // hora de escrever, deixava um `seele.console = () => {}` no topo do MOD
+  // calar até o que o produto diz dele.
+  const consoleDoAnfitriao = seele.console;
   const pendentes = new Map();
   let proximo = 0;
 
@@ -1468,12 +1473,14 @@ const PRELUDIO: &str = r#"
     }
   };
   const escrever = (metodo) => (...partes) => {
-    try { seele.console(metodo, partes.map(emTexto).join(' ')); } catch { /* o registro é de quem hospeda */ }
+    try { consoleDoAnfitriao(metodo, partes.map(emTexto).join(' ')); } catch { /* o registro é de quem hospeda */ }
   };
   const assertFalhou = escrever('error');
   // **O erro que o MOD não pegou num temporizador ou num ouvinte**, dito por
-  // este `console`, e não pelo global: o MOD pode trocar ou calar o
-  // `console.error` dele, e não o que o produto diz dele. Sai como qualquer
+  // este `console`, que escreve pela porta guardada no começo do prelúdio: o
+  // MOD que troca o `console.error` ou o `seele.console` depois não cala esta
+  // linha. Não é imunidade: o texto passa por `map`, `join`, `String` e
+  // `JSON.stringify`, que o MOD alcança pelos protótipos. Sai como qualquer
   // linha de console — com o id do MOD, o escape, o corte e o balde, que é o
   // que segura um `setInterval` de 4 ms que lança a cada batida.
   const dizerOErro = escrever('error');
@@ -2131,6 +2138,46 @@ mod testes {
                 "avatar recusado: {\"bytes\":12} 3 undefined null".to_owned()
             )],
             "a linha do console não chegou como o MOD a escreveu"
+        );
+    }
+
+    /// **Trocar o `seele.console` ou o `console.error` não cala o erro que o
+    /// produto diz do MOD.**
+    ///
+    /// O prelúdio lia `seele.console` na hora de escrever, e o `seele` é um
+    /// objeto que o MOD alcança: um `seele.console = () => {}` no topo calava a
+    /// linha de um temporizador que lança, e o comentário do prelúdio dizia
+    /// que o MOD não calava o que o produto diz dele.
+    #[test]
+    fn trocar_o_console_do_anfitriao_nao_cala_o_erro_de_um_temporizador() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "seele.console = () => {};\
+                 console.error = () => {};\
+                 setTimeout(() => { const a = null; a.x; }, 0);",
+            )
+            .expect("código");
+        let mut linhas = Vec::new();
+        let ate = Instant::now() + Duration::from_secs(5);
+        loop {
+            match executor.receber(Duration::from_millis(50)) {
+                Some(ParaOFora::Console { nivel, texto, .. }) => linhas.push((nivel, texto)),
+                Some(ParaOFora::Mensagem(json)) if json.contains("erro-no-relogio") => break,
+                Some(_) | None => assert!(
+                    Instant::now() < ate,
+                    "o temporizador que lança não chegou à janela em cinco segundos: {linhas:?}"
+                ),
+            }
+        }
+        assert!(
+            linhas.iter().any(|(nivel, texto)| {
+                *nivel == NivelDoConsole::Erro
+                    && texto.contains("erro num temporizador")
+                    && texto.contains("TypeError")
+            }),
+            "um MOD que troca o `seele.console` calou a linha do erro que ele não pegou, e o \
+             seele.log fica sem o porquê: {linhas:?}"
         );
     }
 
