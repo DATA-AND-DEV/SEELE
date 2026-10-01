@@ -7354,12 +7354,16 @@ verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
 
    Leia os passos `node apps/seele-app/bancada/diagnostico-de-mods.cjs` e
    `node apps/seele-app/bancada/avatares-do-mod.cjs` do job «bancadas de
-   navegador», e **não a cor do job**: a `ajustes-v013.cjs` está vermelha desde
-   a v0.15.0 (medida fora do CI), e com ela vermelha o job sai vermelho. Ela
-   roda depois das duas, então as duas rodam; as que vêm depois dela no job
-   (`escolha-de-versao-de-mod.cjs` e `gif-na-conversa.cjs`) são puladas quando
-   ela falha. Cada uma das duas, quando passa, termina com a linha
-   «diagnóstico de MODs: …» ou «avatares: …».
+   navegador»: cada um, quando passa, termina com a linha «diagnóstico de
+   MODs: …» ou «avatares: …». Desde 01/10/2026 cada passo de bancada do job
+   roda mesmo depois de uma vermelha (`if: ${{ !cancelled() }}`) e tem prazo,
+   e um job vermelho é uma bancada vermelha: leia qual. Até então a
+   `ajustes-v013.cjs` ficava vermelha e pulava as duas que vêm depois dela
+   (`escolha-de-versao-de-mod.cjs` e `gif-na-conversa.cjs`), e a causa era a
+   bancada, e não o produto: ela escrevia o retrato de antes de `14d9c30`
+   (`snapshot.tela = { e_minha: true }`), e o produto pergunta por
+   `snapshot.minha_transmissao`. Com o retrato que o produto lê, as oito
+   bancadas do job saem com 0 (Playwright local, 01/10/2026).
 
    **Por que o disparo é obrigatório.** As partes puras da aba DIAGNÓSTICO e
    da gestão morrem no portão (`cargo xtask check-runtime`), mas o que precisa
