@@ -1132,6 +1132,11 @@ async function fundoTrocaSoltaECancela() {
  * `base.js` leva ao `registrar_da_janela` como WARN e com o id do MOD em campo
  * próprio (guarda irmão em `tests/frontend.rs`). A recusa do Rust entra aqui
  * como ela chega de verdade: `{ Recusado: { motivo } }`.
+ *
+ * E o avesso, no `play()`: dizer não é repetir. O mesmo motivo sai uma vez por
+ * tocador, e não uma por redesenho; o `AbortError` do próprio descarte e a
+ * recusa que chega a uma região já solta não saem. E a chave do MOD entra
+ * cortada, para que o motivo caiba nos 512 caracteres que o registro guarda.
  */
 async function cadaMidiaRecusadaEDitaAoAnfitriao() {
   const recusaDoRust = (motivo) => () => () => Promise.reject({ Recusado: { motivo } });
@@ -1205,6 +1210,43 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
     regiao.soltar();
   }
 
+  // A chave é do MOD, e a região não lhe põe teto. O registro corta a frase
+  // inteira em 512 caracteres (`TETO_DA_FRASE_NO_REGISTRO`, `main.rs`), já com
+  // o `autor/nome: ` que o `base.js` põe na frente — aqui o id é o da região,
+  // `a/b`. Uma chave de quinhentos empurrava o motivo para fora da linha; e um
+  // corte por índice que parta um par substituto deixa a frase malformada, que
+  // a ponte recusa inteira.
+  {
+    const TETO_DA_FRASE_NO_REGISTRO = 512;
+    const b = bancada();
+    const d = dono(b, recusaDoRust("arquivo-nao-declarado")(b));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([
+      { forma: "midia", chave: "x".repeat(500), fonte: "img/x.png" },
+      { forma: "midia", chave: `${"y".repeat(119)}😀${"y".repeat(10)}`, fonte: "img/y.png" },
+    ]);
+    await volta();
+    await volta();
+    const longa = d.anotadas.find((texto) => texto.includes("«xxxx"));
+    const comoORegistroGuarda = longa === undefined
+      ? ""
+      : Array.from(`a/b: ${longa}`).slice(0, TETO_DA_FRASE_NO_REGISTRO).join("");
+    confere(
+      "recusa dita · chave longa",
+      comoORegistroGuarda.includes("arquivo-nao-declarado"),
+      "a chave do MOD, sem corte, empurrou o motivo para fora dos 512 caracteres que o registro "
+        + `guarda da frase, e a linha diz de quem é sem dizer por quê: ${JSON.stringify(comoORegistroGuarda)}`,
+    );
+    const partida = d.anotadas.find((texto) => texto.includes("«yyyy"));
+    confere(
+      "recusa dita · chave longa",
+      partida !== undefined && partida.isWellFormed(),
+      "o corte da chave partiu um par substituto ao meio, e a ponte recusa a frase malformada "
+        + `inteira — a recusa não chega ao seele.log: ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+  }
+
   // O fundo de uma tela: ele só é buscado quando a tela tem onde pintar, e a
   // primeira montagem ainda não tem pincel (`pintarTela` sai antes de
   // `buscarFundoDaTela` quando `getContext` não devolve nada).
@@ -1245,17 +1287,36 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
   }
 
   // O som que o motor não deixou tocar: `play()` rejeita sem gesto de quem usa.
+  //
+  // **Uma linha por motivo, e não uma por redesenho.** `atualizarMidia` roda a
+  // cada `aplicar`, e a MESA redesenha a cada casa de um arraste com a trilha
+  // tocando: três declarações iguais dão uma linha só, e um motivo novo dá a
+  // segunda.
   {
     const b = bancada();
     const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
     const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    const declarar = () => regiao.aplicar([
+      { forma: "midia", chave: "toque", fonte: "som/a.wav", tocando: true },
+    ]);
     const tocar = Elemento.prototype.play;
+    let motivo = "NotAllowedError: sem gesto de quem usa";
     Elemento.prototype.play = function play() {
-      return Promise.reject(new Error("NotAllowedError: sem gesto de quem usa"));
+      return Promise.reject(new Error(motivo));
     };
+    let depoisDeTres = [];
     try {
-      regiao.aplicar([{ forma: "midia", chave: "toque", fonte: "som/a.wav", tocando: true }]);
+      declarar();
       await volta();
+      await volta();
+      await volta();
+      declarar();
+      declarar();
+      await volta();
+      await volta();
+      depoisDeTres = d.anotadas.filter((texto) => texto.includes("«toque»"));
+      motivo = "NotSupportedError: o motor não abre esta fonte";
+      declarar();
       await volta();
       await volta();
     } finally {
@@ -1266,7 +1327,97 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
       d.anotadas.some((texto) => texto.includes("«toque»") && texto.includes("NotAllowedError")),
       `o play() recusado não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
     );
+    confere(
+      "recusa dita · som que não tocou",
+      depoisDeTres.length === 1,
+      "o mesmo play() recusado virou uma linha por redesenho, e um MOD que redesenha a cada "
+        + `casa de um arraste soterra o seele.log: ${JSON.stringify(depoisDeTres)}`,
+    );
+    const todas = d.anotadas.filter((texto) => texto.includes("«toque»"));
+    confere(
+      "recusa dita · som que não tocou",
+      todas.length === 2 && todas[1].includes("NotSupportedError"),
+      "um motivo novo de recusa tinha de dar a segunda linha, e só ela — calado pelo anterior, "
+        + `o registro esconde que a causa mudou: ${JSON.stringify(todas)}`,
+    );
     regiao.soltar();
+  }
+
+  // `AbortError` é o próprio produto interrompendo o `play()`: o MOD tirou o
+  // nó com o som ainda pendente, e o descarte chamou `pause()` e `load()`, que
+  // o motor responde rejeitando a promessa. É o desfecho que o MOD pediu, e não
+  // uma recusa.
+  {
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    const tocar = Elemento.prototype.play;
+    const pendentes = [];
+    Elemento.prototype.play = function play() {
+      return new Promise((_, rejeitar) => pendentes.push(rejeitar));
+    };
+    try {
+      regiao.aplicar([{ forma: "midia", chave: "cortada", fonte: "som/a.wav", tocando: true }]);
+      await volta();
+      await volta();
+      regiao.aplicar([]);
+      // O que o motor faz com o `play()` pendente quando o descarte pausa.
+      for (const rejeitar of pendentes) {
+        rejeitar(new DOMException("The play() request was interrupted by a call to pause().", "AbortError"));
+      }
+      await volta();
+      await volta();
+    } finally {
+      Elemento.prototype.play = tocar;
+    }
+    confere(
+      "recusa dita · som interrompido pelo descarte",
+      pendentes.length > 0,
+      "o play() nem foi pedido, e a conferência abaixo passaria por não medir nada",
+    );
+    confere(
+      "recusa dita · som interrompido pelo descarte",
+      !d.anotadas.some((texto) => texto.includes("«cortada»")),
+      `o AbortError do próprio descarte virou aviso no seele.log: ${JSON.stringify(d.anotadas)}`,
+    );
+    regiao.soltar();
+  }
+
+  // A região saiu com o `play()` pendente, e a recusa chegou depois: a linha
+  // não é mais desta região, mesmo com a sessão de pé. O dono de mentira não
+  // confere nada, e o de verdade deixaria passar: o `meu()` dele pergunta pela
+  // instância e pela sessão, e não pela região, e as duas continuam as de pé
+  // quando só a superfície do MOD fecha.
+  {
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    const tocar = Elemento.prototype.play;
+    const pendentes = [];
+    Elemento.prototype.play = function play() {
+      return new Promise((_, rejeitar) => pendentes.push(rejeitar));
+    };
+    try {
+      regiao.aplicar([{ forma: "midia", chave: "orfa", fonte: "som/a.wav", tocando: true }]);
+      await volta();
+      await volta();
+      regiao.soltar();
+      for (const rejeitar of pendentes) rejeitar(new Error("NotAllowedError: sem gesto de quem usa"));
+      await volta();
+      await volta();
+    } finally {
+      Elemento.prototype.play = tocar;
+    }
+    confere(
+      "recusa dita · som recusado depois da saída",
+      pendentes.length > 0,
+      "o play() nem foi pedido, e a conferência abaixo passaria por não medir nada",
+    );
+    confere(
+      "recusa dita · som recusado depois da saída",
+      !d.anotadas.some((texto) => texto.includes("«orfa»")),
+      `uma região já solta ainda escreveu no seele.log: ${JSON.stringify(d.anotadas)}`,
+    );
   }
 
   // A recusa que o próprio elemento faz: os bytes chegaram, o Rust os aceitou,

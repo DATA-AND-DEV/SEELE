@@ -1308,11 +1308,19 @@ class RegiaoDeMod {
    * carregava levou uma hora de medição e um reinício com `RUST_LOG=debug`: a
    * janela sabia o motivo e não o contava a ninguém.
    *
+   * **A chave vai cortada em 120**, como `dataset.chaveDoMod`. A região não
+   * põe teto nela, e o registro corta a frase inteira em 512 caracteres: uma
+   * chave de quinhentos empurrava o motivo, que é o que se veio buscar, para
+   * fora da linha. O corte é por ponto de código, e não por índice: metade de
+   * um par substituto não passa pela ponte (o `serde_json` recusa a cadeia), e
+   * a linha inteira se perderia calada no `catch` de `registrarNoAnfitriao`.
+   *
    * @param {string} chave A chave do nó, como o MOD a declarou.
    * @param {string} oQue O que aconteceu, com o número ou o motivo dentro.
    */
   dizerRecusaDeMidia(chave, oQue) {
-    this.dono.anotarRecusa(`mídia «${chave}» ${oQue}`);
+    const nome = [...String(chave ?? "")].slice(0, 120).join("");
+    this.dono.anotarRecusa(`mídia «${nome}» ${oQue}`);
   }
 
   /**
@@ -2100,7 +2108,19 @@ class RegiaoDeMod {
       // o evento de erro é o que diz a verdade.
       tocador.play().catch((falha) => {
         this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada" });
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `não tocou: ${motivoDaFalha(falha)}`);
+        // **Ao registro, uma vez por motivo, e só o que o produto não causou.**
+        // Esta função roda a cada `aplicar`, e um MOD com a trilha tocando
+        // redesenha a cada casa de um arraste: sem a memória do último motivo,
+        // o mesmo `play()` recusado viraria um aviso por redesenho, num
+        // `seele.log` que só gira na abertura. `AbortError` é o `pause()` ou o
+        // `load()` do próprio produto — o MOD pediu «parar» ou tirou o nó com o
+        // som pendente —, e não uma recusa. O evento acima continua a cada vez:
+        // ele é do MOD.
+        if (this.solta || falha?.name === "AbortError") return;
+        const porque = motivoDaFalha(falha);
+        if (tocador.__recusaDita === porque) return;
+        tocador.__recusaDita = porque;
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `não tocou: ${porque}`);
       });
     } else if (!tocador.paused) {
       tocador.pause();
