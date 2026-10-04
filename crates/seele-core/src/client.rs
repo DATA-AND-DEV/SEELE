@@ -2444,9 +2444,10 @@ impl Transfers {
     ///
     /// **Nothing is written to disk, at any point.** That is the channel between a
     /// preview and a save, and it is drawn here rather than left to a caller:
-    /// saving is an act of the person who received the file, in a place they
-    /// picked, and a thumbnail that quietly left a copy in a cache directory
-    /// would have made that act happen without anybody asking for it. No
+    /// saving is an act of the person who received the file, confirmed with the
+    /// place written out in front of them, and a thumbnail that quietly left a
+    /// copy in a cache directory would have made that act happen without
+    /// anybody asking for it. No
     /// quarantine mark either, for the same reason — there is no file to mark.
     ///
     /// `limit` is checked against the **declared** size in the header, before a

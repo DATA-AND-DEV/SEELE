@@ -125,10 +125,14 @@ pub const MAX_SERVER_ICON_SIDE: u32 = 256;
 
 /// Longest sender-chosen file name, in bytes.
 ///
-/// The name never reaches the filesystem — ADR 0027 stores a blob under the
-/// SHA-256 of its own content — so this bounds what a shell has to draw rather
-/// than what a path may hold. Long enough for anything a camera or a phone
-/// produces, short enough that no shell has to decide where to cut one off.
+/// No servidor o nome nunca chega ao sistema de arquivos — ADR 0027 guarda o
+/// blob sob o SHA-256 do próprio conteúdo —, e ali isto limita o que uma casca
+/// tem de desenhar. Do lado de quem recebe, o nome vira nome de arquivo ao
+/// salvar, e este é também o teto de lá: 255 bytes cabem no limite de nome dos
+/// sistemas de arquivos dos três sistemas, e `seele_core::anexo_no_disco` corta
+/// o radical para que «foto (2).png» ainda caiba. Long enough for anything a
+/// camera or a phone produces, short enough that no shell has to decide where
+/// to cut one off.
 pub const MAX_FILE_NAME_LEN: usize = 255;
 
 /// Longest declared content type, in bytes.
