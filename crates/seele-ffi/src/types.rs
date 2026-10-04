@@ -1714,8 +1714,14 @@ pub enum NotSavedReason {
     /// Não há pasta onde gravar: a casca não achou a de downloads nem a pessoal,
     /// ou passou uma que não é um caminho absoluto.
     SemPasta,
-    /// A gravação começou e não terminou: o disco recusou, os bytes não
-    /// fecharam com o hash, ou nada chegou a tempo. O que foi criado saiu.
+    /// Não deu para gravar: a pasta não deixou criar o arquivo (sem permissão,
+    /// pasta que não existe, ou os noventa e nove nomes possíveis tomados), o
+    /// disco recusou no meio, os bytes não fecharam com o hash, ou nada chegou
+    /// a tempo. O que foi criado saiu, e qual foi a causa vai para o
+    /// `seele.log`. Em várias delas — as da pasta, ou um arquivo estragado no
+    /// disco do servidor — tentar de novo dá no mesmo, e a frase da tela ainda
+    /// manda tentar: separá-las pede um motivo no `NaoSalvou` do core, que hoje
+    /// não tem.
     Falhou,
 }
 
@@ -1743,7 +1749,9 @@ pub struct SaveRefused {
     /// controle escrito por extenso — um U+202E citado como está inverteria a
     /// frase que o recusa. Vazio quando o anexo não está no histórico.
     pub claimed: String,
-    /// A pasta onde ele seria gravado. Vazia quando não há pasta.
+    /// A pasta que a casca passou, como veio: vazia quando ela não achou
+    /// nenhuma, e relativa quando a recusa é `SemPasta` por ela não ser um
+    /// caminho absoluto.
     pub folder: String,
 }
 

@@ -2369,9 +2369,16 @@ impl Transfers {
                 Ok(got)
             }
             Err(erro) => {
-                // O arquivo já foi fechado: `receber_no_arquivo` o recebeu por
-                // valor e o soltou ao voltar. No Windows, apagar um arquivo
-                // aberto falha.
+                // `receber_no_arquivo` recebeu o arquivo por valor e o soltou
+                // ao voltar, e aqui ele é apagado pelo caminho. Soltar um
+                // `tokio::fs::File` não espera uma escrita que ainda esteja
+                // terminando no pool de bloqueio — numa falha de leitura no
+                // meio do download pode haver uma —, e isso não impede o
+                // apagar. No Mac e no Linux, apagar um arquivo aberto tira o
+                // nome dele da pasta na hora. No Windows o std abre com
+                // `FILE_SHARE_DELETE`, então o apagar é aceito com ele aberto,
+                // e o arquivo sai no máximo quando a escrita termina e solta o
+                // último handle.
                 let _ = tokio::fs::remove_file(caminho).await;
                 Err(erro)
             }

@@ -2,8 +2,9 @@
 //!
 //! # O nome é de quem mandou, e quem decide é quem recebe
 //!
-//! O fio leva qualquer nome — `seele_proto::attachment` só recusa o vazio e o
-//! NUL, de propósito: do lado do servidor o nome é uma coluna, e o blob se
+//! O fio leva quase qualquer nome — `seele_proto::attachment` só recusa o que é
+//! vazio ou só espaço, o que tem NUL e o que passa de [`MAX_FILE_NAME_LEN`]
+//! bytes, de propósito: do lado do servidor o nome é uma coluna, e o blob se
 //! chama pelo hash do próprio conteúdo. **Do lado de quem recebe, o nome vira
 //! caminho**, e é aqui que ele é conferido antes disso. Um nome com `../`
 //! gravaria fora da pasta; `CON` abriria um dispositivo no Windows; um U+202E
@@ -206,12 +207,11 @@ pub fn nome_ao_lado(nome: &str, vez: u32) -> String {
         Some(ponto) if ponto > 0 => nome.split_at(ponto),
         _ => (nome, ""),
     };
-    let (radical, extensao) =
-        if extensao.len() + sufixo.len() < MAX_FILE_NAME_LEN && !radical.is_empty() {
-            (radical, extensao)
-        } else {
-            (nome, "")
-        };
+    let (radical, extensao) = if extensao.len() + sufixo.len() < MAX_FILE_NAME_LEN {
+        (radical, extensao)
+    } else {
+        (nome, "")
+    };
     let cabe = MAX_FILE_NAME_LEN.saturating_sub(sufixo.len() + extensao.len());
     let corte = radical
         .char_indices()
