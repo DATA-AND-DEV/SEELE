@@ -47,13 +47,70 @@ pub async fn executar(
     match executar_inner(server, person, channel, id, payload).await {
         Ok(text) => text,
         Err(error) => {
-            // `%`, e não o `str` cru: cru, o `fmt` o escreve pelo `Debug`, entre
-            // aspas, e o `grep "mod_id=autor/nome"` do guia não acha a linha.
-            // É a grafia das outras linhas do MOD, nas duas metades.
-            tracing::warn!(mod_id = %id, %error, "MOD request refused");
+            // O pedido do catálogo (id vazio) não é de MOD nenhum, e um
+            // `mod_id=` em branco casaria com qualquer `grep "mod_id="`.
+            if id.is_empty() {
+                tracing::warn!(catalogo = true, %error, "MOD request refused");
+            } else {
+                // `%`, e não o `str` cru: cru, o `fmt` o escreve pelo `Debug`,
+                // entre aspas, e o `grep "mod_id=autor/nome"` do guia não acha
+                // a linha. É a grafia das outras linhas do MOD, nas duas
+                // metades. Mas o `%` escreve cru, e este id vem do fio: é o
+                // `id_seguro` que impede quem pediu de escrever uma linha.
+                tracing::warn!(mod_id = %id_seguro(id), %error, "MOD request refused");
+            }
             r#"{"ok":false,"error":"bridge-refused"}"#.into()
         }
     }
+}
+
+/// **O maior id de MOD que a linha da recusa leva**, em caracteres.
+///
+/// Um id de verdade (`autor/nome`) é bem menor; o teto é para o que chega pelo
+/// fio, onde a única conferência do id é o tamanho. É o número do app
+/// (`TETO_DO_ID_NO_REGISTRO`, em `apps/seele-app/src/main.rs`).
+const TETO_DO_ID_NO_REGISTRO: usize = 128;
+
+/// **O id de um pedido como a linha da recusa o leva**: cortado em
+/// [`TETO_DO_ID_NO_REGISTRO`] e sem caractere que quebre ou inverta a linha
+/// ([`quebra_ou_inverte_a_linha`]).
+///
+/// O id vem do fio, por dois caminhos que chegam a [`executar`]: o
+/// `ClientMessage::ModRequest` e o pedido de imagem do fluxo de volume. Sem
+/// aspas, porque `mod_id=autor/nome` é a grafia que o guia manda procurar: é
+/// o filtro, e não o escape, que impede um `\n` no id de escrever uma segunda
+/// linha com a cara do produto.
+///
+/// A regra é a de `id_no_registro` do app, reescrita aqui porque o servidor
+/// não depende do app.
+fn id_seguro(id: &str) -> String {
+    id.chars()
+        .take(TETO_DO_ID_NO_REGISTRO)
+        .filter(|&c| !quebra_ou_inverte_a_linha(c))
+        .collect()
+}
+
+/// **Um caractere que, escrito cru numa linha do `seele.log`, a quebra ou
+/// reordena o que vem depois dele.**
+///
+/// Os de controle (`char::is_control`: C0, DEL e C1, com o U+0085 que outros
+/// sistemas usam como quebra de linha); os separadores de linha e de parágrafo
+/// (U+2028 e U+2029), que um editor quebra como um `\n`; e os de controle
+/// bidirecional — a propriedade `Bidi_Control` do Unicode: U+061C, U+200E,
+/// U+200F, U+202A a U+202E e U+2066 a U+2069. Um U+202E no id inverte, num
+/// editor que segue o bidi, o `error=` que vem depois dele na mesma linha.
+fn quebra_ou_inverte_a_linha(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{2028}'
+                | '\u{2029}'
+                | '\u{061C}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2066}'..='\u{2069}'
+        )
 }
 
 async fn executar_inner(
@@ -358,6 +415,42 @@ mod tests {
         })
     }
 
+    /// Pede `id` a [`servidor_que_recusa`] e devolve **tudo** o que o
+    /// registro recebeu enquanto isso, como o `fmt` de `seele.log` o escreve.
+    ///
+    /// O servidor é montado **antes** de o registro começar a ouvir: as linhas
+    /// das migrações do banco não são da recusa, e um teste que conta linhas as
+    /// contaria.
+    async fn o_registro_da_recusa(id: &str) -> String {
+        let servidor = servidor_que_recusa();
+        let registro = Registro::default();
+        let escritor = registro.clone();
+        let assinante = tracing_subscriber::fmt()
+            .with_writer(move || escritor.clone())
+            .with_ansi(false)
+            .without_time()
+            .finish();
+        let _guarda = tracing::subscriber::set_default(assinante);
+
+        let resposta = super::executar(
+            &servidor,
+            seele_proto::ids::PersonId(7),
+            seele_proto::ids::ChannelId(0),
+            id,
+            "{}",
+        )
+        .await;
+        assert!(
+            resposta.contains("bridge-refused"),
+            "o pedido de quem não pode ler não foi recusado, e o teste não chegou à linha da \
+             recusa: {resposta}"
+        );
+
+        let texto =
+            String::from_utf8_lossy(&registro.0.lock().expect("o registro trancou")).into_owned();
+        texto
+    }
+
     /// **A recusa de um pedido de MOD escreve `mod_id=` como as outras linhas
     /// do MOD**, e o `grep` do guia a acha.
     ///
@@ -370,31 +463,7 @@ mod tests {
     /// janela, `display` (FD-m3 da revisão do Lote F-Docs).
     #[tokio::test(flavor = "current_thread")]
     async fn a_recusa_do_pedido_escreve_o_mod_id_que_o_grep_do_guia_acha() {
-        let registro = Registro::default();
-        let escritor = registro.clone();
-        let assinante = tracing_subscriber::fmt()
-            .with_writer(move || escritor.clone())
-            .with_ansi(false)
-            .without_time()
-            .finish();
-        let _guarda = tracing::subscriber::set_default(assinante);
-
-        let resposta = super::executar(
-            &servidor_que_recusa(),
-            seele_proto::ids::PersonId(7),
-            seele_proto::ids::ChannelId(0),
-            "fulano/meu-mod",
-            "{}",
-        )
-        .await;
-        assert!(
-            resposta.contains("bridge-refused"),
-            "o pedido de quem não pode ler não foi recusado, e o teste não chegou à linha da \
-             recusa: {resposta}"
-        );
-
-        let texto =
-            String::from_utf8_lossy(&registro.0.lock().expect("o registro trancou")).into_owned();
+        let texto = o_registro_da_recusa("fulano/meu-mod").await;
         let Some(linha) = texto
             .lines()
             .find(|linha| linha.contains("MOD request refused"))
@@ -406,6 +475,75 @@ mod tests {
             "a recusa do pedido de MOD não traz `mod_id=fulano/meu-mod`, e o `grep` do guia \
              (`docs/como-se-faz-um-mod.md`, «Ler a linha») não a acha. As outras linhas do MOD \
              escrevem o id por `%`; o `str` cru sai pelo `Debug`, entre aspas: {linha}"
+        );
+    }
+
+    /// O id que vai à linha da recusa perde o que inverte a linha, e não só
+    /// o que a quebra, e é cortado no teto.
+    ///
+    /// Um U+202E no id inverte, num editor que segue o bidi, o `error=` que
+    /// vem depois dele; e o fio confere o id só pelo tamanho.
+    #[test]
+    fn o_id_da_recusa_perde_o_que_inverte_a_linha_e_cabe_no_teto() {
+        assert_eq!(
+            super::id_seguro("a/\u{202E}b\u{2028}c\u{2066}d\u{85}e"),
+            "a/bcde",
+            "o id de um pedido de MOD vai à linha da recusa com um caractere que quebra ou \
+             inverte a linha"
+        );
+        assert_eq!(
+            super::id_seguro(&"x".repeat(300)).chars().count(),
+            super::TETO_DO_ID_NO_REGISTRO,
+            "o id de um pedido de MOD vai à linha da recusa sem o teto, e quem pede escolhe o \
+             tamanho da linha"
+        );
+        assert_eq!(
+            super::id_seguro("fulano/meu-mod"),
+            "fulano/meu-mod",
+            "um id de verdade mudou ao ir à linha da recusa, e o grep do guia não o acha"
+        );
+    }
+
+    /// **O pedido do catálogo não escreve um `mod_id=` em branco** (P51-26).
+    ///
+    /// A janela pede a lista de MODs com o id vazio (`pedirAoServidor("", …)`,
+    /// em `base.js`). A recusa dele saía como `mod_id= error=…`, um campo que
+    /// casa com qualquer `grep "mod_id="` e não é de MOD nenhum.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_recusa_do_catalogo_diz_catalogo_e_nao_um_mod_id_em_branco() {
+        let texto = o_registro_da_recusa("").await;
+        let Some(linha) = texto
+            .lines()
+            .find(|linha| linha.contains("MOD request refused"))
+        else {
+            panic!("a recusa do pedido do catálogo não chegou ao registro: {texto:?}");
+        };
+        assert!(
+            linha.contains("catalogo=true") && !linha.contains("mod_id="),
+            "a recusa do pedido do catálogo não diz que era o catálogo, ou escreve um \
+             `mod_id=` em branco que o `grep` de qualquer MOD acha: {linha}"
+        );
+    }
+
+    /// **O id que chega pelo fio não escreve uma segunda linha no `seele.log`
+    /// de quem hospeda** (P51-26).
+    ///
+    /// O id de um `ModRequest` vem de um cliente autenticado, e a única
+    /// conferência dele no fio é o tamanho. Com o `%`, o `fmt` o escreve cru:
+    /// um `\n` nele fechava a linha da recusa e abria outra, com a cara do
+    /// produto, escrita por quem pediu.
+    #[tokio::test(flavor = "current_thread")]
+    async fn um_id_com_quebra_de_linha_nao_forja_uma_linha_no_registro() {
+        let texto = o_registro_da_recusa("a/b\nWARN seele_server: forjada").await;
+        assert_eq!(
+            texto.lines().count(),
+            1,
+            "o id de um pedido de MOD, que chega pelo fio, escreveu mais de uma linha no \
+             seele.log de quem hospeda: {texto:?}"
+        );
+        assert!(
+            texto.contains("MOD request refused") && texto.contains("mod_id=a/b"),
+            "a linha da recusa sumiu, ou perdeu o começo do id: {texto:?}"
         );
     }
 }
