@@ -188,6 +188,43 @@ async fn um_arquivo_sobe_inteiro_e_a_mensagem_so_aparece_depois() -> Result<()> 
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn baixar_num_caminho_que_ja_existe_nao_toca_no_que_estava_la() -> Result<()> {
+    let _vaga = vaga::minha();
+    // A porta da conformidade, `download_attachment`, recebe um caminho inteiro
+    // e grava nele. Com `File::create`, um arquivo que já estava lá era truncado
+    // e reescrito com os bytes de outra pessoa, sem pergunta nenhuma. Com
+    // `create_new`, a gravação recusa e o que estava lá fica como estava.
+    let (endereco, _servidor, casa) = server(64 * 1024).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let mut quem_espera = entrar(endereco, 9).await?;
+
+    let caminho = arquivo(casa.path(), "foto.png", 1_000, 0x11);
+    let anexo = mandar_e_receber(
+        &quem_manda,
+        &mut quem_espera,
+        &pedido(&caminho, "foto.png", 1),
+    )
+    .await?;
+
+    let ja_estava = casa.path().join("ja-estava.png");
+    std::fs::write(&ja_estava, "original")?;
+    let resultado = quem_espera
+        .download_attachment(anexo.id, &ja_estava, ESPERA, |_, _| {})
+        .await;
+    assert!(
+        resultado.is_err(),
+        "baixar por cima de um arquivo que já existe deu certo, e só dá certo \
+         substituindo o que estava lá"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ja_estava)?,
+        "original",
+        "o arquivo que já estava no caminho foi substituído pelos bytes do anexo"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio() -> Result<()> {
     let _vaga = vaga::minha();
     // O teto por arquivo é derivado do total, e um arquivo acima dele é
@@ -307,6 +344,12 @@ async fn o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expiro
     let _ = cliente
         .download_attachment(anexo.id, &destino, Duration::from_millis(300), |_, _| {})
         .await;
+    // O arquivo é criado antes de o pedido sair, e um pedido que não vem tem de
+    // levá-lo embora: senão cada anexo expirado deixa um arquivo vazio na pasta.
+    assert!(
+        !destino.exists(),
+        "um anexo que não veio deixou um arquivo vazio onde ia ser gravado"
+    );
     let razao = ate(&mut cliente, |evento| match evento {
         ServerMessage::AttachmentUnavailable { reason, .. } => Some(*reason),
         _ => None,
@@ -660,8 +703,9 @@ async fn um_arquivo_maior_que_o_limite_da_previa_nao_e_baixado() -> Result<()> {
 
     // E a conexão sobrevive a ter cortado aquele fluxo: salvar o mesmo arquivo
     // continua funcionando, que é a diferença entre recusar uma prévia e perder
-    // o anexo.
-    let destino = casa.path().join("panorama.png");
+    // o anexo. Num caminho novo: `panorama.png` é o arquivo que subiu, e o
+    // download não grava por cima do que já existe.
+    let destino = casa.path().join("panorama-salvo.png");
     let baixados = quem_espera
         .download_attachment(anexo.id, &destino, ESPERA, |_, _| {})
         .await?;

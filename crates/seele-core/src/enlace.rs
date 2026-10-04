@@ -3067,6 +3067,36 @@ impl Motor {
             }
 
             Comando::SalvarAnexo { anexo, destino } => {
+                // O arquivo é criado **antes** de o pedido sair, e com
+                // `create_new`: um nome tomado volta como falha aqui, sem byte
+                // nenhum pedido ao servidor e sem que o que já estava na pasta
+                // seja tocado. Num `spawn_blocking` porque abrir é uma chamada
+                // ao disco, e esta fila carrega toda tecla da sessão.
+                let criado = tokio::task::spawn_blocking(move || {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&destino)
+                        .map(|arquivo| (arquivo, destino))
+                })
+                .await;
+                let (arquivo, caminho) = match criado {
+                    Ok(Ok(criado)) => criado,
+                    Ok(Err(erro)) => {
+                        tracing::warn!(%erro, "não consegui criar o arquivo do anexo; nada foi gravado");
+                        let _ = self
+                            .avisos
+                            .send(Aviso::Transferencia(Transferencia::NaoSalvou { anexo }));
+                        return;
+                    }
+                    Err(erro) => {
+                        tracing::warn!(%erro, "a tarefa que cria o arquivo do anexo caiu; nada foi gravado");
+                        let _ = self
+                            .avisos
+                            .send(Aviso::Transferencia(Transferencia::NaoSalvou { anexo }));
+                        return;
+                    }
+                };
                 let transferencias = cliente.transfers();
                 let avisos = self.avisos.clone();
                 let pedido = cliente.fetch_attachment(anexo).await;
@@ -3079,13 +3109,10 @@ impl Motor {
                         }));
                     };
                     let fim = match transferencias
-                        .receive_attachment(anexo, &destino, ESPERA_DE_ANEXO, andamento)
+                        .receive_attachment(anexo, arquivo, &caminho, ESPERA_DE_ANEXO, andamento)
                         .await
                     {
-                        Ok(_) => Transferencia::Salvo {
-                            anexo,
-                            caminho: destino,
-                        },
+                        Ok(_) => Transferencia::Salvo { anexo, caminho },
                         Err(_) => Transferencia::NaoSalvou { anexo },
                     };
                     let _ = avisos.send(Aviso::Transferencia(fim));
