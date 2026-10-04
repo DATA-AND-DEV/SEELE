@@ -52,10 +52,10 @@ pub use types::{
     Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight, ConnectionError,
     ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio, EstadoDoTesteDeMicrofone, Event,
     ExclusaoDoSom, FonteDeTela, LimitesDeTela, LinkState, LinkTrust, Message, MotivoDaRecusa,
-    Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
-    PreviewRefusal, PreviewRules, Severity, SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso,
-    Telemetry, Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync,
-    VolumeRefusal,
+    NotSavedReason, Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person,
+    PlaybackDevice, Preview, PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity,
+    SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry, Transfer, TransmissaoNaSala,
+    Trust, VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -711,9 +711,11 @@ enum Command {
     /// enum is as big as its largest arm — a path, three strings and two ids on
     /// every queued keystroke would be paid by all of them.
     Attach(Box<seele_core::enlace::Anexo>),
+    /// Salvar um anexo nesta pasta. O nome não viaja aqui: é lido do histórico
+    /// por quem executa, como o tipo alegado da prévia.
     SaveAttachment {
         attachment: seele_core::AttachmentId,
-        destination: std::path::PathBuf,
+        folder: String,
     },
     /// A picture to look at, and where to put the verdict. ADR 0027.
     ///
@@ -1455,25 +1457,54 @@ impl Connection {
         Ok(id)
     }
 
-    /// Saves an attachment where the person receiving it chose.
+    /// Salva um anexo em `folder`, com o nome que veio com ele — ou ao lado.
     ///
-    /// **Where they chose, and nowhere else.** ADR 0027 gives no client of the
-    /// SEELE a button that opens a file: saving is an act of the person who
-    /// received it, in a place they picked. The file is marked with the
-    /// operating system's own quarantine on the way down — which is not
-    /// antivirus, and this product does not have one.
+    /// **O nome não é argumento.** Ele é lido do histórico local desta sessão,
+    /// como o tipo alegado da prévia, e nunca vem da janela: uma página que o
+    /// devolvesse poderia devolver outro. Conferido em
+    /// `seele_core::anexo_no_disco::nome_seguro`, um nome que não é só um nome
+    /// é recusado; e a gravação nunca substitui o que já está na pasta — se o
+    /// nome estiver tomado, o arquivo vai para «foto (2).png». A regra inteira
+    /// mora em `seele_core::anexo_no_disco`.
+    ///
+    /// Pede, e não espera: o resultado volta como [`Event::TransferChanged`],
+    /// com [`Transfer::Saved`] e o caminho real, ou [`Transfer::NotSaved`] e o
+    /// motivo. O arquivo é marcado com a quarentena do próprio sistema ao ser
+    /// gravado — o que não é antivírus, e este produto não tem um.
+    ///
+    /// `folder` é escolhida por quem chama, e tem de ser um caminho absoluto: a
+    /// casca do desktop passa a pasta de downloads, que ela mesma calcula.
     ///
     /// # Errors
     ///
     /// [`ConnectionError::NotConnected`] once the session is over.
-    pub fn save_attachment(
-        &self,
-        attachment: u64,
-        destination: String,
-    ) -> Result<(), ConnectionError> {
+    pub fn save_attachment(&self, attachment: u64, folder: String) -> Result<(), ConnectionError> {
         self.command(Command::SaveAttachment {
             attachment: seele_core::AttachmentId(attachment),
-            destination: std::path::PathBuf::from(destination),
+            folder,
+        })
+    }
+
+    /// Onde [`Self::save_attachment`] gravaria este anexo, ou por que não
+    /// gravaria.
+    ///
+    /// Só para a frase de confirmação: a mesma regra, lida agora, para que a
+    /// pessoa veja o nome e a pasta antes de apertar. Na hora de gravar, tudo é
+    /// derivado de novo.
+    ///
+    /// # Errors
+    ///
+    /// [`SaveRefused`], com o motivo, o nome que veio e a pasta.
+    pub fn save_destination(
+        &self,
+        attachment: u64,
+        folder: String,
+    ) -> Result<SaveDestination, SaveRefused> {
+        let (_, nome) = destino_de(&self.shared, seele_core::AttachmentId(attachment), &folder)?;
+        Ok(SaveDestination {
+            beside: seele_core::anexo_no_disco::nome_ao_lado(&nome, 2),
+            file_name: nome,
+            folder,
         })
     }
 
@@ -3681,8 +3712,11 @@ fn transfer_of(estado: &seele_core::enlace::Transferencia) -> Transfer {
             attachment: anexo.get(),
             path: caminho.display().to_string(),
         },
+        // O nome e a pasta já passaram por `destino_de` antes de o pedido sair,
+        // então o que sobra para o motor recusar é a gravação.
         Transferencia::NaoSalvou { anexo } => Transfer::NotSaved {
             attachment: anexo.get(),
+            reason: NotSavedReason::Falhou,
         },
     }
 }
@@ -4680,12 +4714,22 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                 return false;
             }
         }
-        Command::SaveAttachment {
-            attachment,
-            destination,
-        } => {
-            if client.salvar_anexo(attachment, destination).await.is_err() {
-                return false;
+        // O nome é lido do histórico aqui, e não da janela, pela mesma razão do
+        // tipo alegado da prévia logo abaixo. Uma recusa não derruba nada: ela
+        // vira o motivo do `NotSaved`, e nada é pedido ao servidor.
+        Command::SaveAttachment { attachment, folder } => {
+            match destino_de(shared, attachment, &folder) {
+                Ok((pasta, nome)) => {
+                    if client.salvar_anexo(attachment, pasta, nome).await.is_err() {
+                        return false;
+                    }
+                }
+                Err(recusa) => shared.notify(&Event::TransferChanged {
+                    transfer: Transfer::NotSaved {
+                        attachment: attachment.get(),
+                        reason: recusa.reason,
+                    },
+                }),
             }
         }
         Command::SetMuted(on) => {
@@ -4882,6 +4926,65 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         Command::Shutdown => return false,
     }
     true
+}
+
+/// O nome que o remetente deu a um anexo, tirado do histórico local.
+///
+/// Em todos os canais, pela razão de [`declared_type_of`].
+fn file_name_of(shared: &Shared, attachment: seele_core::AttachmentId) -> Option<String> {
+    let room = shared.room.lock().ok()?;
+    room.mensagens.values().flatten().find_map(|message| {
+        message
+            .attachment
+            .as_ref()
+            .filter(|anexo| anexo.id == attachment)
+            .map(|anexo| anexo.file_name.clone())
+    })
+}
+
+/// A pasta e o nome com que um anexo seria gravado, ou por que não seria.
+///
+/// Um lugar só para as duas perguntas — a da frase de confirmação e a da
+/// gravação —, para que elas não possam discordar. O nome sai do histórico e
+/// passa por [`seele_core::anexo_no_disco::nome_seguro`]; a regra que o pegou,
+/// quando pega, vai para o log, e a tela recebe só o motivo.
+fn destino_de(
+    shared: &Shared,
+    attachment: seele_core::AttachmentId,
+    folder: &str,
+) -> Result<(PathBuf, String), SaveRefused> {
+    let Some(alegado) = file_name_of(shared, attachment) else {
+        return Err(SaveRefused {
+            reason: NotSavedReason::AnexoDesconhecido,
+            claimed: String::new(),
+            folder: folder.to_owned(),
+        });
+    };
+    let claimed = seele_core::anexo_no_disco::para_mostrar(&alegado);
+    // Absoluta, e não só presente: uma pasta relativa grava onde quer que o
+    // processo tenha sido iniciado, num lugar que a frase não consegue nomear.
+    let pasta = PathBuf::from(folder);
+    if folder.is_empty() || !pasta.is_absolute() {
+        return Err(SaveRefused {
+            reason: NotSavedReason::SemPasta,
+            claimed,
+            folder: folder.to_owned(),
+        });
+    }
+    if let Err(regra) = seele_core::anexo_no_disco::nome_seguro(&alegado) {
+        tracing::warn!(
+            %attachment,
+            nome = %claimed,
+            %regra,
+            "o nome que veio com o anexo não é só um nome; nada foi gravado"
+        );
+        return Err(SaveRefused {
+            reason: NotSavedReason::NomeRecusado,
+            claimed,
+            folder: folder.to_owned(),
+        });
+    }
+    Ok((pasta, alegado))
 }
 
 /// The type the sender claimed for one attachment, out of the local history.

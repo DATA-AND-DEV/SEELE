@@ -441,9 +441,15 @@ enum Comando {
         linha: ChannelId,
     },
     Anexar(Box<Anexo>),
+    /// Baixar um anexo para `pasta`, com o nome que veio com ele.
+    ///
+    /// A pasta e o nome, e não um caminho: quem junta os dois é
+    /// [`crate::anexo_no_disco::abrir_sem_sobrescrever`], que confere o nome e
+    /// grava ao lado em vez de por cima.
     SalvarAnexo {
         anexo: AttachmentId,
-        destino: std::path::PathBuf,
+        pasta: std::path::PathBuf,
+        nome: String,
     },
     /// Baixar um anexo pequeno **para a memória**, para olhar os bytes dele.
     ///
@@ -652,11 +658,12 @@ pub enum Transferencia {
         /// Bytes ao todo.
         total: u64,
     },
-    /// O arquivo está no disco de quem recebeu, onde a pessoa escolheu.
+    /// O arquivo está no disco de quem recebeu.
     Salvo {
         /// Qual anexo.
         anexo: AttachmentId,
-        /// Onde ficou.
+        /// Onde ficou de verdade: «foto (2).png», se o nome estava tomado e foi
+        /// ao lado que ele ficou.
         caminho: std::path::PathBuf,
     },
     /// Não deu para salvar. Se o motivo for do servidor, ele vem pelo controle
@@ -1940,11 +1947,15 @@ impl Enlace {
         self.mandar(Comando::Anexar(Box::new(anexo))).await
     }
 
-    /// Pede um anexo e grava onde quem recebeu escolheu.
+    /// Pede um anexo e grava em `pasta`, com o nome que veio com ele.
     ///
-    /// **Onde a pessoa escolheu, e em lugar nenhum mais.** O ADR 0027 não dá a
-    /// cliente nenhum do SEELE um botão que abre arquivo; salvar é um ato de
-    /// quem recebeu.
+    /// **A regra de onde e com que nome mora em [`crate::anexo_no_disco`]**, e
+    /// não em quem chama: o motor abre o arquivo com
+    /// [`crate::anexo_no_disco::abrir_sem_sobrescrever`], que confere o nome de
+    /// novo e, se ele estiver tomado, grava ao lado — «foto (2).png» — em vez de
+    /// por cima. O caminho real volta em [`Transferencia::Salvo`]. O ADR 0027
+    /// não dá a cliente nenhum do SEELE um botão que abre arquivo; salvar é um
+    /// ato de quem recebeu.
     ///
     /// # Errors
     ///
@@ -1952,9 +1963,11 @@ impl Enlace {
     pub async fn salvar_anexo(
         &self,
         anexo: AttachmentId,
-        destino: std::path::PathBuf,
+        pasta: std::path::PathBuf,
+        nome: String,
     ) -> Result<(), Fechado> {
-        self.mandar(Comando::SalvarAnexo { anexo, destino }).await
+        self.mandar(Comando::SalvarAnexo { anexo, pasta, nome })
+            .await
     }
 
     /// Pede os bytes de um anexo **para a memória**, para olhar o começo deles.
@@ -3066,18 +3079,15 @@ impl Motor {
                 Ok(())
             }
 
-            Comando::SalvarAnexo { anexo, destino } => {
-                // O arquivo é criado **antes** de o pedido sair, e com
-                // `create_new`: um nome tomado volta como falha aqui, sem byte
-                // nenhum pedido ao servidor e sem que o que já estava na pasta
-                // seja tocado. Num `spawn_blocking` porque abrir é uma chamada
-                // ao disco, e esta fila carrega toda tecla da sessão.
+            Comando::SalvarAnexo { anexo, pasta, nome } => {
+                // O arquivo é criado **antes** de o pedido sair, por
+                // `abrir_sem_sobrescrever`: o nome é conferido de novo, um nome
+                // tomado vira «foto (2).png», e um que não é só um nome volta
+                // como falha aqui, sem byte nenhum pedido ao servidor. Num
+                // `spawn_blocking` porque abrir é uma chamada ao disco, e esta
+                // fila carrega toda tecla da sessão.
                 let criado = tokio::task::spawn_blocking(move || {
-                    std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(&destino)
-                        .map(|arquivo| (arquivo, destino))
+                    crate::anexo_no_disco::abrir_sem_sobrescrever(&pasta, &nome)
                 })
                 .await;
                 let (arquivo, caminho) = match criado {

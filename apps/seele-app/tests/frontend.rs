@@ -6865,27 +6865,43 @@ fn saving_says_out_loud_what_this_product_does_not_promise() {
         "saving arms an act without opening the box that would show it, so the \
          button is silent and the confirmation is never read: {salvar}"
     );
+    // A frase mora em `ui/frases.js`, com as outras, e é lá que ela é lida. O que
+    // se cobra de `salvarAnexo` é que a confirmação que ele abre seja ela.
     assert!(
-        salvar.contains("não varre vírus"),
+        salvar.contains("fraseDeSalvar("),
+        "a confirmação de salvar não é a frase de `ui/frases.js`, e o que se cobra \
+         dela abaixo deixa de ser o que a pessoa lê:\n{salvar}"
+    );
+    let frase = js_function(&read("ui/frases.js"), "function fraseDeSalvar(");
+    assert!(
+        frase.contains("não varre vírus"),
         "the confirmation does not say that this product does not scan for \
-         viruses, which is the thing it must not let anybody assume: {salvar}"
+         viruses, which is the thing it must not let anybody assume: {frase}"
     );
     assert!(
-        salvar.contains("quarentena"),
+        frase.contains("quarentena"),
         "the confirmation does not mention the quarantine mark, which is the \
          one concrete guard this product can point at"
     );
     assert!(
-        salvar.contains("chegou inteiro"),
+        frase.contains("chegou inteiro"),
         "the confirmation does not separate the question that has an answer \
          from the one that does not"
     );
     // And it says where the file lands. Choosing a file to send now opens a
     // system dialog; saving one that arrived still does not, so this side has
-    // no dialog to read the destination off and has to write it out.
+    // no dialog to read the destination off and has to write it out — a pasta
+    // e o nome que o Rust devolveu, e o nome ao lado, se o primeiro estiver
+    // tomado.
     assert!(
-        salvar.contains("destino"),
-        "the confirmation does not say where the file will be written"
+        frase.contains(".folder") && frase.contains(".file_name") && frase.contains(".beside"),
+        "a confirmação não diz onde o arquivo vai ser gravado, com que nome, ou \
+         com que nome ao lado se o primeiro estiver tomado: {frase}"
+    );
+    assert!(
+        frase.contains("não substitui nada"),
+        "a confirmação não diz que um arquivo que já está lá não é substituído, \
+         que é a pergunta de quem tem um «foto.png» na pasta: {frase}"
     );
 }
 
@@ -8793,47 +8809,126 @@ fn nothing_arms_an_act_in_a_box_it_never_opened() {
 
 #[test]
 fn saving_never_writes_to_a_path_this_window_cannot_name() {
-    // The destination comes from `pasta_de_downloads`, read once at load. On the
-    // Rust side that is `download_dir()`, falling back to `home_dir()`, falling
-    // back to `unwrap_or_default()` — an empty string. The shell held it in
-    // `pastaDeDestino` and built `${pastaDeDestino}/${nome}`, so an empty folder
-    // produced a bare file name: a **relative** path, written wherever the
-    // process happened to be started from.
+    // O destino era montado aqui: `${pastaDeDestino}/${nome}`, com o nome que o
+    // remetente escolheu, e o Rust gravava onde a janela mandasse. Um anexo
+    // chamado `../.zshrc` virava `~/.zshrc`; e como `salvar_anexo` aceitava
+    // qualquer caminho absoluto, qualquer script que rodasse na janela gravava
+    // onde quisesse.
     //
-    // That is the worst of the outcomes available here. The file is written for
-    // real, so nothing fails; the sentence the person confirmed named a place
-    // that is not where it went; and nobody finds it afterwards. A refusal that
-    // says so is the only honest branch, and it has to come before the path is
-    // ever assembled.
+    // Agora a janela só pede. O Rust lê o nome do histórico local, confere em
+    // `seele_core::anexo_no_disco`, escolhe a pasta, e devolve as duas coisas
+    // por `destino_do_anexo` só para a frase de confirmação. Na hora de gravar,
+    // ele deriva tudo de novo, e da janela recebe só o número do anexo.
     let salvar = js_function(&read("ui/tela-sessao.js"), "function salvarAnexo(");
 
-    let Some(guard) = salvar.find("pastaDeDestino === \"\"") else {
-        panic!(
-            "`salvarAnexo` never asks whether it knows the destination folder, so \
-             an empty one becomes a relative path and the file lands somewhere \
-             this window cannot name:\n{salvar}"
-        );
-    };
-    let Some(path) = salvar.find("${pastaDeDestino}") else {
-        panic!("`salvarAnexo` no longer builds the destination from the folder:\n{salvar}");
-    };
+    // A pergunta tem «destino» no nome; tirada ela, a palavra não pode sobrar.
+    let sem_a_pergunta = salvar.replace("destino_do_anexo", "");
     assert!(
-        guard < path,
-        "`salvarAnexo` builds the path before checking that it has a folder to \
-         build it from, so the check cannot stop anything:\n{salvar}"
+        !salvar.contains("${pastaDeDestino}") && !sem_a_pergunta.contains("destino"),
+        "`salvarAnexo` voltou a montar um destino na janela, e o nome que o \
+         remetente escolheu volta a decidir onde o arquivo grava:\n{salvar}"
     );
 
-    // And the empty case has to *say* so rather than return in silence, which is
-    // the failure this area keeps producing.
+    let Some(pergunta) = salvar.find("invoke(\"destino_do_anexo\", { anexo })") else {
+        panic!(
+            "`salvarAnexo` não pergunta ao Rust onde o arquivo vai, então a frase \
+             de confirmação não tem de onde tirar a pasta nem o nome:\n{salvar}"
+        );
+    };
+    let Some(confirmacao) = salvar.find("abrirConfirmacao(") else {
+        panic!("`salvarAnexo` não abre a confirmação:\n{salvar}");
+    };
     assert!(
-        salvar.contains("abrirRecusa("),
-        "with no destination folder, saving gives up without a word — the same \
-         silence the broken button had:\n{salvar}"
+        pergunta < confirmacao,
+        "`salvarAnexo` abre a confirmação antes de o Rust dizer onde grava, e a \
+         frase promete um lugar que ninguém conferiu:\n{salvar}"
     );
     assert!(
-        salvar.contains("Nada foi gravado"),
-        "the refusal does not say that nothing was written, which is the one \
-         thing somebody who just pressed SALVAR needs to know:\n{salvar}"
+        salvar.contains("invoke(\"salvar_anexo\", { anexo })"),
+        "`salvar_anexo` não vai só com o número do anexo, e o que mais a janela \
+         mandar é o que ela volta a poder escolher:\n{salvar}"
+    );
+
+    // A recusa do Rust — nome que não é só um nome, pasta que não existe — é
+    // dita em voz alta, e não engolida por um `catch` mudo.
+    assert!(
+        salvar.contains("abrirRecusa("),
+        "quando o Rust recusa o destino, `salvarAnexo` desiste sem uma palavra:\n{salvar}"
+    );
+
+    // E o outro lado da fronteira, que é onde o agravante morava: nenhum dos
+    // dois comandos aceita da janela mais que o número do anexo.
+    let comandos = command_parameters(&read("src/main.rs"));
+    for comando in ["salvar_anexo", "destino_do_anexo"] {
+        let Some(parametros) = comandos.get(comando) else {
+            panic!("`{comando}` sumiu de main.rs, e a janela chama um comando que não existe");
+        };
+        assert_eq!(
+            parametros.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["anexo"],
+            "`{comando}` aceita da janela mais que o anexo: um caminho ou um nome \
+             vindo dela é exatamente o que este comando deixou de aceitar"
+        );
+    }
+}
+
+#[test]
+fn um_anexo_que_nao_foi_salvo_diz_por_que() {
+    // `Transfer::NotSaved` carrega o motivo, e um motivo que a ponte manda e a
+    // tela não lê é o produto sabendo e não contando. «Tente de novo» para um
+    // nome que vai ser recusado de novo é a frase errada, e é a que sobraria.
+    let ponte = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
+    let Some(enumeracao) = ponte
+        .split("pub enum NotSavedReason {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!("a ponte não diz mais por que um anexo não foi salvo");
+    };
+    let frases = without_comments(&read("ui/frases.js"));
+    let ditas = sentences_of(&frases, "NAO_SALVOS");
+
+    let mut motivos = 0_usize;
+    for linha in enumeracao.lines() {
+        let nome = linha.trim().trim_end_matches(',');
+        if nome.is_empty() || !nome.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+            continue;
+        }
+        motivos += 1;
+        assert!(
+            ditas.iter().any(|(variante, _)| variante == nome),
+            "a ponte pode dizer `{nome}` e `NAO_SALVOS` não tem frase para ele, \
+             então ele chega à pessoa como nada"
+        );
+    }
+    assert!(
+        motivos >= 4,
+        "só {motivos} motivos foram lidos de `NotSavedReason`, e a leitura deste \
+         guarda parou de achar a enumeração"
+    );
+
+    let Some((_, recusado)) = ditas
+        .iter()
+        .find(|(variante, _)| variante == "NomeRecusado")
+    else {
+        panic!("um nome recusado não tem frase própria");
+    };
+    assert!(
+        !recusado.contains("tente de novo") && recusado.contains("outro nome"),
+        "a frase de um nome recusado não diz que só um nome novo resolve: {recusado}"
+    );
+
+    let andou = js_function(&read("ui/tela-sessao.js"), "function transferenciaAndou(");
+    // Do `"NotSaved"` em diante, e não a função inteira: os ramos da recusa do
+    // servidor também leem `transfer.reason`, e um guarda que olhasse a função
+    // toda ficaria verde com o `NotSaved` ignorando o motivo.
+    let Some(ramo) = andou.split("\"NotSaved\"").nth(1) else {
+        panic!("a tela não trata mais `NotSaved`, e um anexo não salvo não diz nada:\n{andou}");
+    };
+    assert!(
+        ramo.contains("fraseDeNaoSalvo(transfer.reason)"),
+        "a tela não lê o motivo de um anexo não salvo, e todo motivo vira a \
+         mesma frase:\n{ramo}"
     );
 }
 
@@ -8869,7 +8964,7 @@ const LIMITE_DE_FRASE: usize = 180;
 /// server down with the window. Nor the two `fraseDeErro` composes for a changed
 /// key: those are two fingerprints with a channel either side, and a fingerprint is
 /// as long as it is. What this guards is the prose.
-const DICIONARIOS: [&str; 9] = [
+const DICIONARIOS: [&str; 10] = [
     "MOTIVOS",
     "AVISOS",
     "ETAPAS",
@@ -8878,6 +8973,7 @@ const DICIONARIOS: [&str; 9] = [
     "FRASES",
     "ANEXOS",
     "TRANSFERENCIAS",
+    "NAO_SALVOS",
     "PREVIAS",
 ];
 

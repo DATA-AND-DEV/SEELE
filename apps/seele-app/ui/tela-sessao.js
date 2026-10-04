@@ -3123,10 +3123,13 @@ function transferenciaAndou(transfer) {
     const alvo = document.querySelector(
       `[data-anexo-estado="${transfer.attachment}"]`,
     );
+    // O caminho do salvo é o real, que o Rust devolveu: «foto (2).png», se foi
+    // ao lado que o arquivo ficou. O não salvo vem com o motivo, e cada motivo
+    // manda a pessoa fazer uma coisa diferente.
     const frase =
       tipo === "Saved"
         ? `${TRANSFERENCIAS.Saved} — ${transfer.path}`
-        : TRANSFERENCIAS.NotSaved;
+        : fraseDeNaoSalvo(transfer.reason);
     if (alvo) alvo.textContent = frase;
     anunciar(frase);
   }
@@ -3174,7 +3177,6 @@ function blocoDeAnexo(anexo) {
     const salvar = elemento("button", "anexo-salvar", "SALVAR");
     salvar.type = "button";
     salvar.dataset.anexoSalvar = String(anexo.id);
-    salvar.dataset.anexoNome = anexo.file_name;
     salvar.title = pastaDeDestino
       ? `salvar em ${pastaDeDestino}`
       : "salvar em disco";
@@ -3326,41 +3328,32 @@ async function verPrevia(anexo) {
  * é o que faz CANCELAR fechar a caixa em vez de voltar para uma lista de
  * pessoas que este caminho nunca mostrou.
  *
- * ---- sem pasta de destino não há pergunta a fazer ----
+ * ---- quem decide onde grava é o Rust ----
  *
- * `pastaDeDestino` vem de `pasta_de_downloads`, lido uma vez no carregamento, e
- * o Rust devolve `""` quando a máquina não sabe dizer nem downloads nem home.
- * Com a cadeia vazia o destino virava o nome do arquivo sozinho — um caminho
- * relativo, que grava onde quer que o processo tenha sido iniciado. É o pior
- * desfecho possível: o arquivo é gravado de verdade, a frase promete um lugar
- * que não é aquele, e ninguém acha o arquivo depois. Então esta é a única
- * recusa deste caminho, e ela é dita em voz alta.
+ * Esta janela não monta caminho nenhum, e não manda nome nenhum. Ela montava:
+ * `${pasta}/${nome}`, com o nome que o remetente escolheu, e um anexo chamado
+ * `../.zshrc` gravava em `~/.zshrc`. Agora ela pergunta a `destino_do_anexo`,
+ * e o Rust lê o nome do histórico local, confere em
+ * `seele_core::anexo_no_disco`, escolhe a pasta de downloads e responde — só
+ * para a frase. Na hora de gravar, `salvar_anexo` recebe o número do anexo e
+ * mais nada, e o Rust deriva tudo de novo.
+ *
+ * Uma recusa — o nome que veio não é só um nome, ou não há pasta onde gravar —
+ * é dita em voz alta antes de qualquer botão de gravar, e nada é gravado.
  */
-function salvarAnexo(anexo, nome) {
-  if (pastaDeDestino === "") {
-    abrirRecusa(
-      "SALVAR EM DISCO",
-      "Esta máquina não disse onde ficam os arquivos baixados, e sem isso o " +
-        "SEELE só saberia gravar «" +
-        nome +
-        "» num lugar que ele não consegue nomear para você — e um arquivo que " +
-        "ninguém sabe onde foi parar é um arquivo perdido.\n" +
-        "Nada foi gravado.",
-    );
+async function salvarAnexo(anexo) {
+  let onde;
+  try {
+    onde = await invoke("destino_do_anexo", { anexo });
+  } catch (recusa) {
+    abrirRecusa("SALVAR EM DISCO", fraseDeNaoSalvo(recusa));
     return;
   }
-
-  const destino = `${pastaDeDestino}/${nome}`;
   abrirConfirmacao(
     "SALVAR EM DISCO",
-    `Grava «${nome}» em ${destino}.\n` +
-      "O SEELE não confere se este arquivo é seguro: ele não varre vírus e não " +
-      "vai varrer. Ele confere só que o arquivo chegou inteiro. O arquivo é " +
-      "marcado com a quarentena do sistema ao ser gravado, e é o seu sistema " +
-      "operacional que vai parar você na frente dele se for o caso.\n" +
-      "Nenhuma tela do SEELE abre este arquivo. Abrir é um ato seu, fora daqui.",
+    fraseDeSalvar(onde),
     "SALVAR EM DISCO",
-    () => invoke("salvar_anexo", { anexo, destino }),
+    () => invoke("salvar_anexo", { anexo }),
   );
 }
 
@@ -4106,7 +4099,7 @@ $("botao-anexar").addEventListener("click", abrirSeletorDeArquivo);
 $("lista-mensagens").addEventListener("click", (evento) => {
   const salvar = evento.target.closest("button[data-anexo-salvar]");
   if (salvar) {
-    salvarAnexo(Number(salvar.dataset.anexoSalvar), salvar.dataset.anexoNome);
+    salvarAnexo(Number(salvar.dataset.anexoSalvar));
     return;
   }
   // A prévia é buscada aqui e em nenhum outro lugar: no clique, e nunca na

@@ -1675,18 +1675,72 @@ pub enum Transfer {
         /// Bytes in total.
         total: u64,
     },
-    /// On the receiver's disk, where they chose.
+    /// On the receiver's disk.
     Saved {
         /// Which attachment.
         attachment: u64,
-        /// Where it went.
+        /// Onde ficou de verdade: «foto (2).png», se o nome estava tomado e foi
+        /// ao lado que ele ficou. É este, e não o nome que veio, que a tela
+        /// mostra depois de salvar.
         path: String,
     },
-    /// It did not save.
+    /// It did not save, and why.
     NotSaved {
         /// Which attachment.
         attachment: u64,
+        /// Por quê. Cada motivo manda a pessoa fazer uma coisa diferente.
+        reason: NotSavedReason,
     },
+}
+
+/// Por que um anexo não foi, ou não seria, gravado.
+///
+/// Enumerado pelo motivo de sempre nesta fronteira: quem escreve a frase é a
+/// casca. E são quatro porque mandam coisas diferentes — um nome recusado não
+/// adianta tentar de novo, e uma gravação que falhou no meio adianta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum NotSavedReason {
+    /// O nome que veio com o arquivo não é só um nome de arquivo: tem caminho,
+    /// é um nome que o Windows reserva, ou disfarça a extensão. A regra mora em
+    /// `seele_core::anexo_no_disco`, e qual dela pegou vai para o `seele.log`.
+    NomeRecusado,
+    /// O anexo não está no histórico que esta sessão carregou. O nome sai dele,
+    /// e um anexo fora dele é recusado em vez de ganhar um nome vindo de fora.
+    AnexoDesconhecido,
+    /// Não há pasta onde gravar: a casca não achou a de downloads nem a pessoal,
+    /// ou passou uma que não é um caminho absoluto.
+    SemPasta,
+    /// A gravação começou e não terminou: o disco recusou, os bytes não
+    /// fecharam com o hash, ou nada chegou a tempo. O que foi criado saiu.
+    Falhou,
+}
+
+/// Onde um anexo vai ser gravado — para a frase de confirmação, e só para ela.
+///
+/// Na hora de gravar, [`crate::Connection::save_attachment`] deriva tudo de novo
+/// do histórico e da pasta, e não lê nada disto de volta: uma janela que
+/// devolvesse um destino poderia devolver outro.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SaveDestination {
+    /// A pasta, por extenso.
+    pub folder: String,
+    /// O nome com que o arquivo é gravado, se ele estiver livre.
+    pub file_name: String,
+    /// O nome que ele ganha ao lado, se o primeiro estiver tomado.
+    pub beside: String,
+}
+
+/// Por que um anexo não seria gravado, com o que a frase de recusa cita.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SaveRefused {
+    /// O motivo.
+    pub reason: NotSavedReason,
+    /// O nome que veio com o arquivo, com todo caractere invisível ou de
+    /// controle escrito por extenso — um U+202E citado como está inverteria a
+    /// frase que o recusa. Vazio quando o anexo não está no histórico.
+    pub claimed: String,
+    /// A pasta onde ele seria gravado. Vazia quando não há pasta.
+    pub folder: String,
 }
 
 /// Why a server would not take, or would not hand back, a file.
