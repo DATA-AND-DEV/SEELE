@@ -79,11 +79,13 @@ pub struct AttachmentHeader {
     /// nenhuma colisão de maiúsculas do macOS toca um caminho de quem hospeda.
     ///
     /// **Do lado de quem recebe, ele vira nome de arquivo ao salvar**, e é lá
-    /// que ele é conferido: sem caminho, sem nome que o Windows reserva, sem
-    /// caractere que disfarce a extensão, e sem substituir nada que já esteja
-    /// na pasta. A regra mora em `seele_core::anexo_no_disco`. Este crate não a
-    /// aplica, de propósito: o fio continua levando o nome como veio, para que
-    /// uma 0.15.0 e esta continuem conversando, e quem decide é quem recebe.
+    /// que ele é conferido: só grava um nome que sirva no Windows, no Mac e no
+    /// Linux — sem caminho, sem caractere nem nome que o Windows não aceite, sem
+    /// caractere invisível que disfarce a extensão, sem passar do tamanho — e
+    /// sem substituir nada que já esteja na pasta. A regra mora em
+    /// `seele_core::anexo_no_disco`. Este crate não a aplica, de propósito: o fio
+    /// continua levando o nome como veio, para que uma 0.15.0 e esta continuem
+    /// conversando, e quem decide é quem recebe.
     pub file_name: String,
     /// The type the sender claims the bytes are.
     ///

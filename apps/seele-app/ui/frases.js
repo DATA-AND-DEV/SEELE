@@ -1002,15 +1002,23 @@ function fraseDeSalvar(onde) {
  * os dois, um nome recusado é citado: a pessoa vê o que veio — com o caractere
  * invisível escrito por extenso, que o Rust já fez — e onde ele teria gravado.
  * Em duas linhas, como as outras compostas deste arquivo.
+ *
+ * A tela não sabe qual regra pegou o nome (isso vai para o `seele.log`), então
+ * a frase cobre todas sem afirmar o que só uma delas faz. Nomes comuns caem
+ * aqui também — «Notas 04:10.txt», que é como o Finder grava uma barra digitada
+ * no nome, ou «Por quê?.pdf», que o Mac e o Linux aceitam —, e a frase não pode
+ * descrevê-los como ataque.
  */
 function fraseDeNaoSalvo(recusa) {
   const motivo = typeof recusa === "string" ? recusa : recusa?.reason;
   if (motivo === "NomeRecusado" && recusa?.claimed && recusa?.folder) {
     return (
       "O NOME QUE VEIO COM ESTE ARQUIVO NÃO É SÓ UM NOME, E NADA FOI GRAVADO.\n" +
-      `«${recusa.claimed}» gravaria fora de ${recusa.folder}, num nome que o ` +
-      "Windows reserva ou com caracteres que disfarçam o nome, e o SEELE só grava " +
-      "dentro dessa pasta. Peça a quem mandou que mande de novo com outro nome."
+      `«${recusa.claimed}» tem um caminho, um caractere ou um nome que o ` +
+      "Windows não aceita, um caractere invisível que disfarça o nome, ou é " +
+      `comprido demais, e o SEELE só grava em ${recusa.folder} um nome que ` +
+      "sirva no Windows, no Mac e no Linux. Peça a quem mandou que mande de " +
+      "novo com outro nome."
     );
   }
   return NAO_SALVOS[motivo] ?? `FALHA NÃO IDENTIFICADA (${motivo})`;

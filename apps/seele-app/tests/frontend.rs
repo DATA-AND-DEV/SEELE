@@ -8932,6 +8932,120 @@ fn um_anexo_que_nao_foi_salvo_diz_por_que() {
     );
 }
 
+/// O texto que um pedaço de JavaScript escreve: as literais de aspas e as de
+/// crase, emendadas na ordem, com `\n` virando quebra de verdade.
+///
+/// A [`literals_in`] lê só as de aspas, que são as dos dicionários. Uma frase
+/// composta cita o nome e a pasta numa literal de crase, e o `${…}` fica no
+/// texto como está escrito.
+fn texto_das_literais(js: &str) -> String {
+    let mut texto = String::new();
+    let mut letras = js.chars();
+    while let Some(aspa) = letras.next() {
+        if aspa != '"' && aspa != '`' {
+            continue;
+        }
+        loop {
+            match letras.next() {
+                None => break,
+                Some(fim) if fim == aspa => break,
+                Some('\\') => match letras.next() {
+                    Some('n') => texto.push('\n'),
+                    Some(outra) => texto.push(outra),
+                    None => break,
+                },
+                Some(letra) => texto.push(letra),
+            }
+        }
+    }
+    texto
+}
+
+#[test]
+fn a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado() {
+    // `nome_seguro` recusa um nome por dez regras, e a tela fica sabendo só que
+    // ele foi recusado: qual regra pegou vai para o `seele.log`. Então a frase
+    // que cita o nome tem de ser verdadeira para todas elas, e não dizer de uma
+    // o que só vale para outra. A que estava aqui dizia que o nome «gravaria
+    // fora» da pasta, num nome que o Windows reserva ou com caracteres que
+    // disfarçam: nada disso vale para «Notas 04:10.txt», que é como o Finder
+    // grava uma barra digitada no nome, nem para «Por quê?.pdf», que o Mac e o
+    // Linux aceitam. Quem recebia lia um nome comum descrito como ataque.
+    //
+    // A tabela diz, regra a regra, que pedaço da frase a cobre. Uma regra nova
+    // em `NomeRecusado` não passa daqui até alguém dizer qual.
+    let regra = without_comments(&read("../../crates/seele-core/src/anexo_no_disco.rs"));
+    let Some(enumeracao) = regra
+        .split("pub enum NomeRecusado {")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!(
+            "`NomeRecusado` sumiu de `anexo_no_disco.rs`, e este guarda não sabe \
+             mais que regras a frase de recusa tem de cobrir"
+        );
+    };
+    let composta = js_function(&read("ui/frases.js"), "function fraseDeNaoSalvo(");
+    let Some(ramo) = composta
+        .split("\"NomeRecusado\"")
+        .nth(1)
+        .and_then(|resto| resto.split("NAO_SALVOS").next())
+    else {
+        panic!("`fraseDeNaoSalvo` não cita mais o nome recusado:\n{composta}");
+    };
+    let frase = texto_das_literais(ramo);
+
+    assert_eq!(
+        frase.lines().count(),
+        2,
+        "a frase que cita o nome recusado não tem mais duas linhas, e nenhuma \
+         régua mede as frases compostas:\n{frase}"
+    );
+    assert!(
+        !frase.contains("gravaria"),
+        "a frase que cita o nome recusado diz que ele gravaria fora da pasta, e \
+         isso só vale para um nome com caminho — não para «Notas 04:10.txt» nem \
+         para «Por quê?.pdf»:\n{frase}"
+    );
+
+    let mut regras = 0_usize;
+    for linha in enumeracao.lines() {
+        let nome = linha.trim().trim_end_matches(',');
+        if !nome.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+            continue;
+        }
+        regras += 1;
+        let pedacos: &[&str] = match nome {
+            "Separador" => &["um caminho"],
+            "DoisPontos" | "ProibidoNoWindows" | "Controle" => {
+                &["caractere", "que o Windows não aceita"]
+            }
+            "Vazio" | "SoPontos" | "ReservadoNoWindows" | "PontoOuEspacoNoFim" => {
+                &["nome que o Windows não aceita"]
+            }
+            "Formatacao" => &["caractere invisível que disfarça"],
+            "LongoDemais" => &["comprido demais"],
+            outra => panic!(
+                "`nome_seguro` ganhou a regra `{outra}`, e ninguém disse que pedaço \
+                 da frase de recusa a cobre: sem isso, a frase pode estar dando a \
+                 quem recebe o motivo de outra regra"
+            ),
+        };
+        for pedaco in pedacos {
+            assert!(
+                frase.contains(pedaco),
+                "um nome recusado por `{nome}` lê uma frase que não diz «{pedaco}», \
+                 e o motivo que ela dá é o de outra regra:\n{frase}"
+            );
+        }
+    }
+    assert!(
+        regras >= 10,
+        "só {regras} regras foram lidas de `NomeRecusado`, e a leitura deste \
+         guarda parou de achar a enumeração"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The ruler: one sentence, and a second one only when it changes what somebody
 // does. A third does not exist.
@@ -8964,6 +9078,15 @@ const LIMITE_DE_FRASE: usize = 180;
 /// server down with the window. Nor the two `fraseDeErro` composes for a changed
 /// key: those are two fingerprints with a channel either side, and a fingerprint is
 /// as long as it is. What this guards is the prose.
+///
+/// A exceção à regra do ato irreversível ao lado do ato é `fraseDeSalvar`, a
+/// confirmação de salvar um anexo: ela mora em `ui/frases.js` por decisão do
+/// lote A-S1, porque a janela não monta caminho nenhum e só escreve o que
+/// `destino_do_anexo` devolveu. São quatro linhas — onde grava, o nome ao lado,
+/// e as duas que o ADR 0027 manda dizer antes do ato —, e nenhuma régua daqui a
+/// mede, porque ela não está em dicionário. O que ela tem de dizer é cobrado
+/// por `saving_says_out_loud_what_this_product_does_not_promise`; o tamanho, por
+/// ninguém.
 const DICIONARIOS: [&str; 10] = [
     "MOTIVOS",
     "AVISOS",
@@ -9122,6 +9245,13 @@ fn no_sentence_the_screen_writes_reaches_a_third_line() {
     // and `fraseDePrevia` fold the byte limit into the headline instead of
     // adding a channel, because the number is what qualifies the «too big»: it
     // belongs to the sentence that says it, not under it.
+    //
+    // Eram duas; desde o lote A-S1 são três: `fraseDeNaoSalvo` cita o nome
+    // recusado e a pasta na segunda linha, a que já diz o que fazer. Este laço
+    // não as lê, porque não estão em dicionário; a de `fraseDeNaoSalvo` é
+    // contada por `a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado`.
+    // `fraseDeSalvar` tem quatro linhas e fica de fora por decisão — o doc de
+    // `DICIONARIOS` diz por quê.
     let file = without_comments(&read("ui/frases.js"));
 
     for dictionary in DICIONARIOS {

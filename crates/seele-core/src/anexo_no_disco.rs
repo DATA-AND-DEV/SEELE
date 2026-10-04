@@ -317,8 +317,8 @@ mod testes {
         ] {
             assert!(
                 nome_seguro(hostil).is_err(),
-                "{hostil:?} passou como nome de arquivo, e gravaria fora da pasta, \
-                 num dispositivo do Windows ou com a extensão disfarçada"
+                "{hostil:?} passou como nome de arquivo, e não é um nome que sirva \
+                 no Windows, no Mac e no Linux ao mesmo tempo"
             );
         }
         // E a regra dos reservados olha o radical inteiro, não o começo dele.
