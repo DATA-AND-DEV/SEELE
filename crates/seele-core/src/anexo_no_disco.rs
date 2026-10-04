@@ -194,8 +194,8 @@ pub fn para_mostrar(alegado: &str) -> String {
 ///
 /// O radical é cortado numa fronteira de caractere para o nome inteiro caber em
 /// [`MAX_FILE_NAME_LEN`] bytes: sem o corte, um nome de 255 bytes que colide vira
-/// ENAMETOOLONG em vez de um arquivo. Se nem um caractere do radical couber ao
-/// lado da extensão, o nome inteiro é tratado como radical.
+/// ENAMETOOLONG em vez de um arquivo. Se a extensão e o sufixo sozinhos já
+/// ocupam o limite inteiro, o nome todo é tratado como radical e cortado.
 #[must_use]
 pub fn nome_ao_lado(nome: &str, vez: u32) -> String {
     if vez <= 1 {
@@ -434,5 +434,17 @@ mod testes {
             "o nome ao lado perdeu o sufixo ou a extensão: {ao_lado}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+
+        // E quando a «extensão» sozinha já ocupa quase tudo, o nome inteiro vira
+        // radical: o sufixo não cabe ao lado dela, e o nome ao lado tem de caber
+        // assim mesmo.
+        let extensao_enorme = format!("a.{}", "x".repeat(253));
+        let ao_lado = nome_ao_lado(&extensao_enorme, 2);
+        assert!(
+            ao_lado.len() <= MAX_FILE_NAME_LEN && nome_seguro(&ao_lado).is_ok(),
+            "o nome ao lado de um nome com extensão enorme não cabe em \
+             {MAX_FILE_NAME_LEN} bytes ou não é mais só um nome: {} bytes",
+            ao_lado.len()
+        );
     }
 }
