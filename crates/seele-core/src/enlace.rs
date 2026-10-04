@@ -3093,14 +3093,14 @@ impl Motor {
                 let (arquivo, caminho) = match criado {
                     Ok(Ok(criado)) => criado,
                     Ok(Err(erro)) => {
-                        tracing::warn!(%erro, "não consegui criar o arquivo do anexo; nada foi gravado");
+                        tracing::warn!(%anexo, %erro, "não consegui criar o arquivo do anexo; nada foi gravado");
                         let _ = self
                             .avisos
                             .send(Aviso::Transferencia(Transferencia::NaoSalvou { anexo }));
                         return;
                     }
                     Err(erro) => {
-                        tracing::warn!(%erro, "a tarefa que cria o arquivo do anexo caiu; nada foi gravado");
+                        tracing::warn!(%anexo, %erro, "a tarefa que cria o arquivo do anexo caiu; nada foi gravado");
                         let _ = self
                             .avisos
                             .send(Aviso::Transferencia(Transferencia::NaoSalvou { anexo }));
@@ -3118,14 +3118,12 @@ impl Motor {
                             total,
                         }));
                     };
-                    let fim = match transferencias
+                    let recebido = transferencias
                         .receive_attachment(anexo, arquivo, &caminho, ESPERA_DE_ANEXO, andamento)
-                        .await
-                    {
-                        Ok(_) => Transferencia::Salvo { anexo, caminho },
-                        Err(_) => Transferencia::NaoSalvou { anexo },
-                    };
-                    let _ = avisos.send(Aviso::Transferencia(fim));
+                        .await;
+                    let _ = avisos.send(Aviso::Transferencia(fim_do_salvar(
+                        anexo, caminho, recebido,
+                    )));
                 });
                 pedido
             }
@@ -3683,6 +3681,31 @@ impl Motor {
         // alça nenhuma em lugar nenhum, e sobrevivia à sessão inteira
         // repassando a tela a um par por uma conexão que já tinha morrido.
         self.tarefas_de_par.servir(tarefa);
+    }
+}
+
+/// Como terminou o salvar de um anexo, e o que o `seele.log` fica sabendo dele.
+///
+/// A tela recebe `NaoSalvou` sem motivo — para ela, é `Falhou` —, e o motor é
+/// o único que sabe se foram os bytes que não fecharam com o hash, o prazo que
+/// acabou ou o disco que recusou. Fora do `tokio::spawn` que a chama para que
+/// um teste a exercite sem servidor.
+fn fim_do_salvar(
+    anexo: AttachmentId,
+    caminho: std::path::PathBuf,
+    recebido: anyhow::Result<u64>,
+) -> Transferencia {
+    match recebido {
+        Ok(_) => Transferencia::Salvo { anexo, caminho },
+        Err(erro) => {
+            tracing::warn!(
+                %anexo,
+                caminho = %caminho.display(),
+                %erro,
+                "o anexo não foi salvo"
+            );
+            Transferencia::NaoSalvou { anexo }
+        }
     }
 }
 
@@ -7170,6 +7193,53 @@ mod tests {
                 && linha.contains(&impressao_do_impostor)),
             "sem vencedor, a recusa pela impressão de um candidato não foi ao log em `warn` com \
              o endereço e as duas impressões. Rastro: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn um_anexo_que_nao_foi_salvo_deixa_o_porque_no_log() {
+        // A tela recebe `Falhou` e mais nada: o `NaoSalvou` do core não leva
+        // motivo. Mas quem investiga depois precisa saber se foi o hash, o
+        // prazo ou o disco, e só o motor sabe — se ele não escreve, a pergunta
+        // volta dias depois sem dado nenhum junto.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let fim = fim_do_salvar(
+            AttachmentId(41),
+            std::path::PathBuf::from("/tmp/pasta/foto.png"),
+            Err(anyhow::anyhow!(
+                "o arquivo não chegou inteiro e foi descartado"
+            )),
+        );
+        assert_eq!(
+            fim,
+            Transferencia::NaoSalvou {
+                anexo: AttachmentId(41)
+            },
+            "um anexo que não fechou com o hash não chegou à tela como não salvo"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("anexo=41")
+                && linha.contains("o arquivo não chegou inteiro")),
+            "um anexo que não foi salvo não deixou no `seele.log` qual anexo foi \
+             nem por quê, e o motor era o único que sabia. Rastro: {linhas:?}"
+        );
+
+        let salvo = fim_do_salvar(
+            AttachmentId(42),
+            std::path::PathBuf::from("/tmp/pasta/foto (2).png"),
+            Ok(3_000),
+        );
+        assert_eq!(
+            salvo,
+            Transferencia::Salvo {
+                anexo: AttachmentId(42),
+                caminho: std::path::PathBuf::from("/tmp/pasta/foto (2).png"),
+            },
+            "um anexo salvo não levou à tela o caminho real em que ficou"
         );
     }
 
