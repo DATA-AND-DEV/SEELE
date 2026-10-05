@@ -36,3 +36,21 @@ path = "fuzz_targets/control_frame.rs"
 test = false
 doc = false
 bench = false
+
+# O convite `seele://`, que chega colado de uma conversa e termina num
+# `connect`.
+[[bin]]
+name = "uri"
+path = "fuzz_targets/uri.rs"
+test = false
+doc = false
+bench = false
+
+# O datagrama do ponto de encontro, lido pelo ponto e pelo anfitrião antes de
+# qualquer conferência.
+[[bin]]
+name = "datagrama_do_encontro"
+path = "fuzz_targets/datagrama_do_encontro.rs"
+test = false
+doc = false
+bench = false
