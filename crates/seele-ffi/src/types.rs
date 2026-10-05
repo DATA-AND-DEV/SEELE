@@ -1718,11 +1718,17 @@ pub enum NotSavedReason {
     /// pasta que não existe), o disco recusou no meio, os bytes não fecharam com
     /// o hash, nada chegou a tempo, ou os noventa e nove nomes possíveis
     /// estavam tomados na hora de dar o nome final — que é depois de o hash
-    /// conferir. O que foi criado saiu, e qual foi a causa vai para o
-    /// `seele.log`. Em várias delas — as da pasta, ou um arquivo estragado no
-    /// disco do servidor — tentar de novo dá no mesmo, e a frase da tela ainda
-    /// manda tentar: separá-las pede um motivo no `NaoSalvou` do core, que hoje
-    /// não tem.
+    /// conferir. Qual foi a causa vai para o `seele.log`.
+    ///
+    /// Os bytes chegavam num parcial e nunca tiveram o nome final. O parcial é
+    /// apagado, e também a reserva vazia com o nome final que o recuo de um
+    /// volume sem link físico cria; um apagar que falha vai para o `seele.log`
+    /// com o caminho e o erro, e o que ele não apagou fica na pasta.
+    ///
+    /// Em várias das causas — as da pasta, ou um arquivo estragado no disco do
+    /// servidor — tentar de novo dá no mesmo, e a frase da tela ainda manda
+    /// tentar: separá-las pede um motivo no `NaoSalvou` do core, que hoje não
+    /// tem.
     Falhou,
 }
 

@@ -406,19 +406,27 @@ impl Parcial {
     /// do sistema, como veio, em qualquer outro caso. Em todos, o parcial é
     /// apagado ao soltar.
     pub fn nomear(self) -> io::Result<PathBuf> {
-        self.nomear_com(|de, para| std::fs::hard_link(de, para))
+        self.nomear_com(
+            |de, para| std::fs::hard_link(de, para),
+            |de, para| std::fs::rename(de, para),
+        )
     }
 
-    /// [`Self::nomear`], com o link físico trocável: o teste recusa o link de
-    /// propósito para provar o recuo num volume que o aceitaria.
-    fn nomear_com(mut self, ligar: impl Fn(&Path, &Path) -> io::Result<()>) -> io::Result<PathBuf> {
+    /// [`Self::nomear`], com o link físico e a troca de nome trocáveis: o teste
+    /// recusa o link de propósito para provar o recuo num volume que o
+    /// aceitaria, e faz a troca falhar para provar o que sobra dela.
+    fn nomear_com(
+        mut self,
+        ligar: impl Fn(&Path, &Path) -> io::Result<()>,
+        trocar: impl Fn(&Path, &Path) -> io::Result<()>,
+    ) -> io::Result<PathBuf> {
         let mut sem_link: Option<io::Error> = None;
         for vez in 1..=self.tentativas {
             let candidato = nome_ao_lado(&self.nome, vez);
             nome_seguro(&candidato).map_err(recusado)?;
             let destino = self.pasta.join(&candidato);
             let feito = if sem_link.is_some() {
-                reservar_e_trocar(&self.caminho, &destino)
+                reservar_e_trocar(&self.caminho, &destino, &trocar)
             } else {
                 match ligar(&self.caminho, &destino) {
                     // O nome final e o de parcial são agora o mesmo arquivo, e
@@ -432,7 +440,7 @@ impl Parcial {
                     // recuo do mesmo jeito.
                     Err(erro) => {
                         sem_link = Some(erro);
-                        reservar_e_trocar(&self.caminho, &destino)
+                        reservar_e_trocar(&self.caminho, &destino, &trocar)
                     }
                 }
             };
@@ -469,23 +477,48 @@ impl Parcial {
 ///
 /// Reserva `destino` com `create_new` — que falha se o nome existir, como o
 /// link — e troca a reserva pelo parcial. Se a troca falhar, a reserva, que é
-/// desta chamada e está vazia, sai.
-fn reservar_e_trocar(parcial: &Path, destino: &Path) -> io::Result<()> {
+/// desta chamada e está vazia, é apagada, e um apagar que falhe vai para o
+/// `seele.log`: é o único jeito de uma falha deixar o nome final na pasta.
+fn reservar_e_trocar(
+    parcial: &Path,
+    destino: &Path,
+    trocar: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     drop(
         OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(destino)?,
     );
-    std::fs::rename(parcial, destino).inspect_err(|_| {
-        let _ = std::fs::remove_file(destino);
-    })
+    trocar(parcial, destino)
+        .inspect_err(|_| apagar_dizendo(destino, "a reserva vazia com o nome final de um anexo"))
+}
+
+/// Apaga `caminho`, e diz no `seele.log` quando não consegue.
+///
+/// O que não sai fica na pasta da pessoa — o parcial, oculto; a reserva do
+/// recuo, vazia e com o nome final —, e só quem tentou apagar sabe disso. Um
+/// `let _` aqui era o produto sabendo e não contando: a tela dizia que nada
+/// tinha ficado, e a pergunta voltava sem dado nenhum.
+///
+/// `NotFound` não é falha: o que se queria era que o arquivo não estivesse lá,
+/// e ele não está.
+fn apagar_dizendo(caminho: &Path, o_que: &str) {
+    match std::fs::remove_file(caminho) {
+        Ok(()) => {}
+        Err(erro) if erro.kind() == io::ErrorKind::NotFound => {}
+        Err(erro) => tracing::warn!(
+            caminho = %caminho.display(),
+            %erro,
+            "não consegui apagar {o_que}, e ele ficou na pasta"
+        ),
+    }
 }
 
 impl Drop for Parcial {
     fn drop(&mut self) {
         if self.ainda_na_pasta {
-            let _ = std::fs::remove_file(&self.caminho);
+            apagar_dizendo(&self.caminho, "o parcial de um anexo");
         }
     }
 }
@@ -809,7 +842,10 @@ mod testes {
         drop(arquivo);
 
         let final_ = parcial
-            .nomear_com(|_, _| Err(io::Error::from_raw_os_error(45)))
+            .nomear_com(
+                |_, _| Err(io::Error::from_raw_os_error(45)),
+                |de, para| std::fs::rename(de, para),
+            )
             .expect(
                 "sem link físico, o anexo não ganhou nome nenhum: o recuo não rodou, \
                  ou falhou",
@@ -912,6 +948,87 @@ mod testes {
             parcial.nomear().expect("dar o nome final"),
             dir.join(&nome),
             "o anexo de nome comprido não ganhou o nome que veio com ele"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn um_parcial_que_nao_sai_da_pasta_fica_dito_no_log() {
+        // Apagar pode falhar, e o que não sai fica na pasta da pessoa. Antes,
+        // o `let _` engolia a falha: a tela dizia «nada foi gravado pela
+        // metade», e ninguém sabia do parcial. Para o apagar falhar em qualquer
+        // sistema, e também para quem roda como root, o parcial vira uma pasta:
+        // `remove_file` não apaga pasta.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let dir = pasta("parcial-preso");
+        let (arquivo, parcial) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("abrir o parcial");
+        drop(arquivo);
+        let preso = parcial.caminho().to_path_buf();
+        std::fs::remove_file(&preso).expect("tirar o parcial do lugar");
+        std::fs::create_dir(&preso).expect("pôr uma pasta no lugar do parcial");
+
+        drop(parcial);
+        assert!(
+            preso.exists(),
+            "o parcial preso saiu, e este teste não fez o apagar falhar"
+        );
+        let linhas = rastro.linhas();
+        let caminho = preso.display().to_string();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains(&caminho)
+                && linha.contains("erro=")),
+            "o parcial de um anexo não saiu da pasta e o `seele.log` não diz qual \
+             nem por quê: a pessoa fica com um arquivo que ninguém explica. \
+             Rastro: {linhas:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn uma_reserva_que_nao_sai_da_pasta_fica_dita_no_log() {
+        // A reserva do recuo tem o nome final. Se a troca falha e a reserva não
+        // sai, fica na pasta um arquivo vazio com o nome do anexo — o único jeito
+        // de o nome final sobrar de uma falha —, e o `seele.log` tem de dizer.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let dir = pasta("reserva-presa");
+        let (arquivo, parcial) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("abrir o parcial");
+        drop(arquivo);
+
+        let erro = parcial
+            .nomear_com(
+                |_, _| Err(io::Error::from_raw_os_error(45)),
+                |_, reserva| {
+                    // A troca falha, e a reserva vira uma pasta para que o
+                    // apagar dela falhe também.
+                    std::fs::remove_file(reserva)?;
+                    std::fs::create_dir(reserva)?;
+                    Err(io::Error::other("a troca foi recusada pelo teste"))
+                },
+            )
+            .expect_err("a troca recusada deu nome ao anexo assim mesmo");
+        assert_eq!(
+            erro.to_string(),
+            "a troca foi recusada pelo teste",
+            "o erro da troca não voltou a quem chamou"
+        );
+        let reserva = dir.join("foto.png");
+        assert!(
+            reserva.exists(),
+            "a reserva presa saiu, e este teste não fez o apagar falhar"
+        );
+        let linhas = rastro.linhas();
+        let caminho = reserva.display().to_string();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains(&format!("caminho={caminho} "))
+                && linha.contains("erro=")),
+            "a reserva com o nome final não saiu da pasta e o `seele.log` não diz \
+             qual nem por quê: a pessoa acha um «foto.png» vazio que ninguém \
+             explica. Rastro: {linhas:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

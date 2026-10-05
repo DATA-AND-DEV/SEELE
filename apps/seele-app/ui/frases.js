@@ -966,7 +966,9 @@ const NAO_SALVOS = {
   SemPasta:
     "O SEELE NÃO ACHOU ONDE GRAVAR — NEM A PASTA DE DOWNLOADS, NEM A SUA PASTA PESSOAL —, " +
     "E NADA FOI GRAVADO.",
-  Falhou: "NÃO DEU PARA SALVAR O ARQUIVO.\nNada foi gravado pela metade; tente de novo.",
+  Falhou:
+    "NÃO DEU PARA SALVAR O ARQUIVO.\n" +
+    "O SEELE apaga o que começou a gravar e, se não conseguir, diz no seele.log; tente de novo.",
 };
 
 /**
