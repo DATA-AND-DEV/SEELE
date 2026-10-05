@@ -9053,6 +9053,29 @@ fn a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado() {
          diferentes, e a mesma recusa é dita de dois jeitos"
     );
 
+    // E o título diz o que o SEELE faz, sem acusar o nome. O de antes, «O NOME
+    // QUE VEIO COM ESTE ARQUIVO NÃO É SÓ UM NOME», lia «Por quê?.pdf» como
+    // truque; a igualdade de cima não o pega se ele voltar nos dois lugares ao
+    // mesmo tempo, e esta lista pega ele e os jeitos óbvios de dizer o mesmo.
+    let titulo = sem_o_nome.lines().next().unwrap_or_default().to_uppercase();
+    for acusacao in [
+        "NÃO É SÓ UM NOME",
+        "TRUQUE",
+        "DISFARÇ",
+        "SUSPEIT",
+        "PERIGOS",
+        "MALICIOS",
+        "ATAQUE",
+        "HOSTIL",
+    ] {
+        assert!(
+            !titulo.contains(acusacao),
+            "o título da recusa do nome diz «{acusacao}» e acusa o nome que veio: \
+             a mesma recusa pega «Por quê?.pdf» e «Notas 04:10.txt», nomes comuns \
+             que o Mac e o Linux aceitam:\n{titulo}"
+        );
+    }
+
     let mut regras = 0_usize;
     for linha in enumeracao.lines() {
         let nome = linha.trim().trim_end_matches(',');
