@@ -1798,6 +1798,166 @@ fn sem_feat_nem_fix_na_faixa_nao_se_inventa_secao() {
     );
 }
 
+/// O texto das mudanças e o que o script disse a quem publica, separados.
+///
+/// [`notas`] devolve só a saída padrão, que é o que vai para a página. Os
+/// avisos vão para a de erro, e é nela que quem publica lê o que o resumo não
+/// soube classificar.
+fn notas_e_avisos(assuntos: &str) -> (String, String) {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut filho = Command::new(interpretador())
+        .arg(publicar())
+        .arg("--notas")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("o orquestrador tem que executar");
+    if let Some(entrada) = filho.stdin.as_mut() {
+        entrada
+            .write_all(assuntos.as_bytes())
+            .expect("a entrada padrão aceita bytes");
+    }
+    let saida = filho.wait_with_output().expect("o filho termina");
+    (
+        String::from_utf8_lossy(&saida.stdout).into_owned(),
+        String::from_utf8_lossy(&saida.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn um_assunto_sem_prefixo_nao_vira_nenhuma_mudanca_de_produto() {
+    // **A frase falsa da v0.15.0.** A faixa dela tinha 169 assuntos: 23 `docs:`
+    // e 146 sem prefixo nenhum, que é como este repositório escreve a maior
+    // parte dos commits — uma frase em português que diz o que mudou. O resumo
+    // só entendia `feat`, `fix` e `perf`, descartava o resto calado, e com as
+    // duas seções vazias afirmava «nenhuma mudança de produto» numa faixa cheia
+    // de código.
+    //
+    // Um assunto sem prefixo não diz se muda o produto, e o resumo não tem
+    // como saber. O que ele pode é parar de afirmar o que não sabe.
+    let texto = notas(
+        "O guarda do vetor deixa o console de fora\n\
+         docs: papel\n",
+    );
+
+    assert!(
+        !texto.contains("nenhuma mudança de produto"),
+        "um assunto sem prefixo pode ser mudança de produto, e a página afirmou \
+         que não há nenhuma:\n{texto}"
+    );
+    assert!(
+        texto.contains("não dizem pelo prefixo"),
+        "a página tem que dizer que os commits não se classificam pelo prefixo, \
+         em vez de calar:\n{texto}"
+    );
+}
+
+#[test]
+fn um_prefixo_desconhecido_tambem_nao_vira_nenhuma_mudanca_de_produto() {
+    // `wip:` não é `feat` nem `fix`, e também não é papel: o resumo não sabe o
+    // que ele é. Antes caía no mesmo descarte calado do assunto sem prefixo, e
+    // a página afirmava o mesmo «nenhuma mudança de produto» (medido).
+    let texto = notas("wip: algo\n");
+
+    assert!(
+        !texto.contains("nenhuma mudança de produto"),
+        "um prefixo que o resumo não conhece virou «nenhuma mudança de produto»:\n{texto}"
+    );
+    assert!(
+        texto.contains("não dizem pelo prefixo"),
+        "um prefixo desconhecido tem que ser dito como desconhecido:\n{texto}"
+    );
+}
+
+#[test]
+fn os_prefixos_de_papel_sao_todos_reconhecidos_com_e_sem_escopo() {
+    // «Nenhuma mudança de produto» continua existindo, e só para quando **todo**
+    // assunto da faixa tem um prefixo de papel. A lista é escrita à mão no
+    // `case` do publicar.sh; um prefixo que saísse dela passaria a ser contado
+    // como desconhecido, e uma versão só de papel deixaria de dizer isso.
+    let mut assuntos = String::new();
+    for prefixo in ["docs", "test", "chore", "refactor", "ci", "build", "style"] {
+        assuntos.push_str(&format!("{prefixo}: sem escopo\n"));
+        assuntos.push_str(&format!("{prefixo}(algo): com escopo\n"));
+    }
+    let (texto, avisos) = notas_e_avisos(&assuntos);
+
+    assert!(
+        texto.contains("nenhuma mudança de produto"),
+        "com todo assunto de papel, a versão é só de papel e a página tem que \
+         dizer isso:\n{texto}"
+    );
+    assert!(
+        !texto.contains("não dizem pelo prefixo"),
+        "um prefixo de papel foi contado como desconhecido:\n{texto}"
+    );
+    assert!(
+        !avisos.contains("não diz") && !avisos.contains("não dizem"),
+        "quem publica foi avisado de assunto sem classificação numa faixa só de \
+         papel:\n{avisos}"
+    );
+}
+
+#[test]
+fn quem_publica_fica_sabendo_quantos_assuntos_o_resumo_nao_classificou() {
+    // A página diz que não adivinha; quem publica precisa de mais: quantos são,
+    // e onde contar o que o resumo não contou. O arquivo de notas da versão é o
+    // lugar, porque ele sai no topo da página.
+    let (_, avisos) = notas_e_avisos(
+        "O guarda do vetor deixa o console de fora\n\
+         wip: algo\n\
+         docs: papel\n\
+         fix(ui): a tela para de falar com quem construiu\n",
+    );
+
+    assert!(
+        avisos.contains("2 assuntos"),
+        "o aviso não diz quantos assuntos ficaram sem classificar:\n{avisos}"
+    );
+    assert!(
+        avisos.contains("empacotar/notas/"),
+        "o aviso não diz onde contar o que o resumo não contou:\n{avisos}"
+    );
+}
+
+#[test]
+fn com_secoes_cheias_o_que_ficou_sem_classificar_tambem_e_dito() {
+    // Um `fix` de produto e cem assuntos sem prefixo dão uma seção «O que
+    // mudou» de uma linha só. Ela não mente sobre a linha que tem, e cala sobre
+    // as outras cem — e quem lê toma o resumo pela versão inteira.
+    let texto = notas(
+        "O guarda do vetor deixa o console de fora\n\
+         fix(ui): a tela para de falar com quem construiu\n",
+    );
+
+    assert!(
+        texto.contains("## O que mudou") && texto.contains("A tela para de falar"),
+        "o `fix` de produto continua na seção dele:\n{texto}"
+    );
+    assert!(
+        texto.contains("1 commit desta faixa não diz pelo prefixo"),
+        "a página resumiu a versão pelo único assunto que se classificou, e calou \
+         sobre o que não se classificou:\n{texto}"
+    );
+}
+
+#[test]
+fn um_aviso_de_varias_linhas_chega_inteiro_a_quem_publica() {
+    // `aviso` imprimia só o primeiro argumento. As chamadas que mandavam o
+    // conserto na segunda linha — «Classifique-o em ESCOPOS_DE_PRODUTO…», «git
+    // push origin v…» — chegavam a quem publica sem ele: o script sabia o
+    // comando seguinte e não contava.
+    let (_, avisos) = notas_e_avisos("feat(telepatia): o servidor adivinha\n");
+
+    assert!(
+        avisos.contains("Classifique-o em ESCOPOS_DE_PRODUTO ou ESCOPOS_DE_FERRAMENTA"),
+        "a segunda linha do aviso do escopo desconhecido não chegou:\n{avisos}"
+    );
+}
+
 #[test]
 fn o_assunto_atravessa_byte_a_byte() {
     // O caminho é shell, e shell come `$`, barra invertida e crase quando quem
