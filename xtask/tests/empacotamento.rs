@@ -2691,6 +2691,129 @@ fn a_bateria_confere_aviso_de_seguranca_e_nao_so_licenca() {
     );
 }
 
+/// Os comandos de `run:` de uma linha do `ci.yml`, sem comentário.
+///
+/// Um passo de várias linhas (`run: |`) não entra, e os que este arquivo
+/// guarda são todos de uma linha só: é o que deixa o guarda ler o comando, e
+/// não a prosa que o explica.
+fn comandos_do_ci() -> Vec<String> {
+    let ci = std::fs::read_to_string(raiz().join(".github/workflows/ci.yml"))
+        .expect("o ci.yml é legível");
+    sem_comentario(&ci)
+        .lines()
+        .filter_map(|linha| {
+            let linha = linha.trim();
+            let linha = linha.strip_prefix("- ").unwrap_or(linha).trim_start();
+            linha
+                .strip_prefix("run:")
+                .map(|comando| comando.trim().to_owned())
+        })
+        .filter(|comando| !comando.is_empty() && comando != "|")
+        .collect()
+}
+
+/// Os nomes dos `[[bin]]` de `fuzz/Cargo.toml`: os alvos de fuzz.
+fn alvos_do_fuzz() -> Vec<String> {
+    let manifesto = std::fs::read_to_string(raiz().join("fuzz/Cargo.toml"))
+        .expect("o fuzz/Cargo.toml é legível");
+    let mut alvos = Vec::new();
+    let mut num_bin = false;
+    for linha in manifesto.lines().map(str::trim) {
+        if linha.starts_with('[') {
+            num_bin = linha == "[[bin]]";
+            continue;
+        }
+        if !num_bin {
+            continue;
+        }
+        if let Some(valor) = linha
+            .strip_prefix("name")
+            .map(str::trim_start)
+            .and_then(|resto| resto.strip_prefix('='))
+        {
+            alvos.push(valor.trim().trim_matches('"').to_owned());
+        }
+    }
+    alvos
+}
+
+#[test]
+fn o_ci_roda_deny_e_fuzz() {
+    // **O deny e o fuzz tinham saído do `ci.yml`, e o fuzz nunca tinha
+    // entrado.** O `ci.yml` inteiro saiu em `1974d07`, com o `cargo deny`
+    // dentro, e voltou sem ele. O deny passou a rodar só na bateria do
+    // `publicar.sh`, que o `--sem-bateria` pula. Os alvos de `fuzz/` existem
+    // desde o primeiro commit (`f174394`), e nenhum workflow os rodou nunca
+    // (`git log -S 'cargo fuzz'` em `.github/` volta vazio): a
+    // `specs/08-seguranca.md` pede fuzz dos analisadores que recebem bytes da
+    // rede, e quem o fazia era quem lembrasse.
+    let comandos = comandos_do_ci();
+
+    let deny = comandos.iter().find(|comando| {
+        let partes: Vec<&str> = comando.split_whitespace().collect();
+        partes.starts_with(&["cargo", "deny"]) && partes.contains(&"check")
+    });
+    let Some(deny) = deny else {
+        panic!(
+            "o ci.yml não roda `cargo deny check`, e um aviso de segurança novo numa \
+             dependência só aparece na bateria de quem publica — que o --sem-bateria pula"
+        );
+    };
+    // As quatro conferências do `deny.toml`, ou o `check` sem nome, que é as
+    // quatro.
+    let partes: Vec<&str> = deny.split_whitespace().collect();
+    let depois_do_check: Vec<&str> = partes
+        .iter()
+        .skip_while(|parte| **parte != "check")
+        .skip(1)
+        .copied()
+        .collect();
+    for conferencia in ["advisories", "licenses", "bans", "sources"] {
+        assert!(
+            depois_do_check.is_empty() || depois_do_check.contains(&conferencia),
+            "o `cargo deny` do ci.yml deixou de conferir `{conferencia}`: {deny}"
+        );
+    }
+
+    let alvos = alvos_do_fuzz();
+    assert!(
+        !alvos.is_empty(),
+        "não achei nenhum `[[bin]]` em fuzz/Cargo.toml, e isso não é aprovação"
+    );
+    for alvo in &alvos {
+        let sementes = format!("fuzz/sementes/{alvo}");
+        let roda = comandos.iter().any(|comando| {
+            let partes: Vec<&str> = comando.split_whitespace().collect();
+            partes.first() == Some(&"cargo")
+                && partes
+                    .windows(3)
+                    .any(|tres| tres == ["fuzz", "run", alvo.as_str()])
+                && partes.contains(&sementes.as_str())
+        });
+        assert!(
+            roda,
+            "o ci.yml não roda o alvo de fuzz «{alvo}» a partir de {sementes}: o \
+             `[[bin]]` existe em fuzz/Cargo.toml e nada o executa"
+        );
+        // A primeira pasta é onde o libFuzzer grava o que acha, e a das
+        // sementes é versionada e conferida byte a byte: ela não pode ser a
+        // primeira.
+        let primeira_pasta = comandos.iter().find_map(|comando| {
+            let partes: Vec<&str> = comando.split_whitespace().collect();
+            let posicao = partes
+                .windows(3)
+                .position(|tres| tres == ["fuzz", "run", alvo.as_str()])?;
+            partes.get(posicao + 3).copied().map(str::to_owned)
+        });
+        assert_ne!(
+            primeira_pasta.as_deref(),
+            Some(sementes.as_str()),
+            "o fuzz de «{alvo}» grava o que acha em {sementes}, que é versionada e \
+             conferida byte a byte pelo seele-proto: a pasta de corpus vem antes"
+        );
+    }
+}
+
 #[test]
 fn a_bateria_tem_prazo_e_nao_espera_para_sempre() {
     // **Uma bateria travada não termina nunca, e quem publica desiste.**
