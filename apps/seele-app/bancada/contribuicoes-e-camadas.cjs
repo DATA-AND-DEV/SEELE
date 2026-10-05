@@ -214,6 +214,16 @@ vm.runInContext(
   contexto,
 );
 const { R, S, I, PONTOS, NATIVO } = contexto;
+// **As frases de tela, inteiras, como a página as carrega.** O `catch` de
+// `atenderOMod` responde ao MOD por `fraseDeErro`, e sem este arquivo ele
+// tomava o outro ramo do `typeof`: a bancada media um caminho que o app não
+// roda, e foi assim que o registro escreveu «ALGO FALHOU E ESTE APP NÃO SABE
+// EXPLICAR O QUÊ» no lugar do motivo sem que nada aqui reprovasse. Num
+// `runInContext` só dele porque o arquivo abre com `"use strict"`, que só vale
+// no começo de um script. Medido em 05/10/2026: nenhum outro recorte desta
+// bancada chega a `fraseDeErro` — as três chamadas que ela recebia vinham todas
+// de `atenderOMod`, no R2.
+vm.runInContext(ler("frases.js"), contexto);
 
 // ------------------------------------------------------- R1 · o ramo do modal
 
@@ -1732,6 +1742,15 @@ function anotando(...anotadas) {
   const registro = new R();
   contexto.contribuicoesDosMods = registro;
   vm.runInContext(base.slice(inicio, fim), contexto);
+  // **`motivoDaFalha` mora em `mods-regiao.js`**, que a página carrega antes de
+  // `base.js`: o `catch` de `atenderOMod` escreve com ela o motivo no
+  // registro, e o R4e, mais abaixo, a recusa do avatar.
+  const regiaoFonte = ler("mods-regiao.js");
+  const inicioDoMotivo = regiaoFonte.indexOf("function motivoDaFalha(");
+  const fimDoMotivo = regiaoFonte.indexOf("\n}\n", inicioDoMotivo) + 3;
+  confere("R2 · o recorte do motivo", inicioDoMotivo >= 0,
+    "`motivoDaFalha` mudou de forma e o recorte não a achou");
+  vm.runInContext(regiaoFonte.slice(inicioDoMotivo, fimDoMotivo), contexto);
 
   const respostas = [];
   const escuta = { entregar: (m) => respostas.push(JSON.parse(JSON.stringify(m))) };
@@ -1760,6 +1779,24 @@ function anotando(...anotadas) {
     confere("R2 · o dono", registro.porHandle.has(handle), "mod/b removeu a contribuição de mod/a");
     confere("R2 · o dono", respostas.at(-1)?.ok === false, "o roteador respondeu sucesso a uma revogação de outro MOD");
 
+    // **As recusas do roteador chegam ao registro com o id do MOD em campo
+    // próprio.** Elas sempre foram ditas ao MOD; o registro é de quem hospeda,
+    // e o `modId` vai como `mod_id=`, o mesmo campo das linhas do Rust. Quatro
+    // portas: a recusa por versão e a mensagem que a API não conhece, que
+    // saem antes do `switch` ou no `default` dele, e o `catch`, pela
+    // contribuição recusada e pela região com nós demais.
+    //
+    // A troca começa **antes** da chamada de API 3: começando depois, como
+    // começava, a recusa por versão podia sumir do `seele.log` sem que nada
+    // aqui reprovasse. Se o roteador lançar, o `catch` do fim encerra a
+    // bancada, e a troca não precisa voltar.
+    const anotadasDoRoteador = [];
+    const registrarDeAntes = contexto.registrarNoAnfitriao;
+    contexto.registrarNoAnfitriao = (...argumentos) => anotadasDoRoteador.push(argumentos);
+    const dita = (...pedacos) => anotadasDoRoteador.some(([onde, texto, nivel, modId]) =>
+      onde === "atender-mod" && nivel === "aviso" && modId === "mod/b"
+      && pedacos.every((pedaco) => String(texto).includes(pedaco)));
+
     // **E um pacote de API 3 não alcança uma mensagem da API 4.** O prelúdio
     // omite o método; `seele.postar` emite a mensagem do mesmo jeito, e é por
     // isso que a conferência é do anfitrião.
@@ -1772,6 +1809,12 @@ function anotando(...anotadas) {
       "R2 · a versão",
       String(respostas.at(-1)?.erro ?? "").includes("API 3"),
       `a recusa não disse que a API do pacote é a razão: ${respostas.at(-1)?.erro}`,
+    );
+    confere(
+      "R2 · a versão no registro",
+      dita("«contribuir»", "não existe na API 3"),
+      "a recusa por versão foi dita só ao MOD, e quem hospeda não acha no seele.log por que o "
+        + `pedido dele voltou recusado: ${JSON.stringify(anotadasDoRoteador)}`,
     );
 
     // E o mesmo pacote declarando API 4 é aceito: a conferência é por versão,
@@ -1793,15 +1836,9 @@ function anotando(...anotadas) {
     confere("R2 · o dono", registro.porHandle.has(handle) === false, "a revogação do dono não tirou a contribuição");
     confere("R2 · o dono", a.recursos.length === 0, "a revogação do dono deixou o descartador retido na instância");
 
-    // **As recusas do roteador chegam ao registro com o id do MOD em campo
-    // próprio.** Elas sempre foram ditas ao MOD e já saíam como aviso; o que
-    // faltava era o `modId`, que o `registrar_da_janela` escreve como
-    // `mod_id=` — o mesmo campo das linhas do Rust. Duas portas, o mesmo
-    // `catch` de `atenderOMod`: a contribuição recusada e a região com nós
-    // demais, esta pelo `desenharARegiaoDoMod` de verdade.
+    // **O `catch` de `atenderOMod`**, por duas portas: a contribuição recusada
+    // e a região com nós demais, esta pelo `desenharARegiaoDoMod` de verdade.
     {
-      const anotadasDoRoteador = [];
-      const registrarDeAntes = contexto.registrarNoAnfitriao;
       const regiaoDeAntes = contexto.regiaoDoMod;
       const inicioDaRegiao = base.indexOf("function desenharARegiaoDoMod(");
       const fimDaRegiao = base.indexOf("\n}\n", inicioDaRegiao) + 3;
@@ -1811,7 +1848,6 @@ function anotando(...anotadas) {
       // Uma região que recusa três nós: é o que o renderer devolve quando a
       // árvore passa do teto, e é o número que `desenharARegiaoDoMod` lança.
       contexto.regiaoDoMod = () => ({ aplicar: () => 3 });
-      contexto.registrarNoAnfitriao = (...argumentos) => anotadasDoRoteador.push(argumentos);
       let contribuicaoRespondida;
       let regiaoRespondida;
       try {
@@ -1826,18 +1862,25 @@ function anotando(...anotadas) {
         });
         regiaoRespondida = respostas.at(-1);
       } finally {
-        contexto.registrarNoAnfitriao = registrarDeAntes;
         contexto.regiaoDoMod = regiaoDeAntes;
       }
-      const dita = (...pedacos) => anotadasDoRoteador.some(([onde, texto, nivel, modId]) =>
-        onde === "atender-mod" && nivel === "aviso" && modId === "mod/b"
-        && pedacos.every((pedaco) => String(texto).includes(pedaco)));
       confere("R2 · a recusa no registro", contribuicaoRespondida?.ok === false,
         "um ponto que não existe foi aceito");
       confere(
         "R2 · a recusa no registro",
         dita("nao.existe"),
         `a contribuição recusada não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
+      );
+      // **O motivo, e não a frase de tela.** `fraseDeErro` é a fronteira com
+      // quem usa, e para um `Error` da janela ela começa por «ALGO FALHOU E
+      // ESTE APP NÃO SABE EXPLICAR O QUÊ»: na linha de quem hospeda, isso punha
+      // um pedido de desculpas na frente do motivo.
+      const linhaDaRecusada = anotadasDoRoteador.find(([, texto]) => String(texto).includes("nao.existe"));
+      confere(
+        "R2 · a recusa no registro",
+        linhaDaRecusada !== undefined && !String(linhaDaRecusada[1]).includes("ALGO FALHOU"),
+        "a linha da contribuição recusada levou ao seele.log a frase de tela de `fraseDeErro`, "
+          + `e não o motivo: ${JSON.stringify(linhaDaRecusada)}`,
       );
       confere("R2 · a região no registro", regiaoRespondida?.ok === false,
         "uma região com nós demais foi respondida como aceita");
@@ -1848,6 +1891,42 @@ function anotando(...anotadas) {
       );
     }
 
+    // **A mensagem que a API não conhece**, no `default` do `switch`: a
+    // conferência de versão deixa passar o tipo que não está em
+    // `CAPACIDADE_DA_MENSAGEM`, e é aqui que ele é recusado. Pelo tipo, e não
+    // só por «não conhece»: a recusa do ponto «nao.existe», acima, também diz
+    // isso.
+    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, { tipo: "inexistente", n: 7 });
+    confere("R2 · o tipo desconhecido", respostas.at(-1)?.ok === false,
+      "uma mensagem que a API não conhece foi respondida como aceita");
+    confere(
+      "R2 · o tipo desconhecido no registro",
+      dita("não conhece «inexistente»"),
+      "a mensagem que a API não conhece foi recusada só para o MOD, e o seele.log não diz que "
+        + `ela chegou: ${JSON.stringify(anotadasDoRoteador)}`,
+    );
+
+    // **Uma variante de struct da FFI**, que `motivoDaFalha` não sabe ler: ela
+    // a escreveria «[object Object]», e o registro a leva inteira em JSON. O
+    // `snapshot` é o caso por onde ela entraria — o `invoke` que rejeita —, e
+    // `Refused` é uma variante assim do `ConnectionError`.
+    contexto.invoke = () => Promise.reject({ Refused: { reason: "Teste" } });
+    try {
+      await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, { tipo: "snapshot", n: 8 });
+    } finally {
+      delete contexto.invoke;
+    }
+    confere("R2 · a variante da FFI", respostas.at(-1)?.ok === false,
+      "um retrato cujo `invoke` rejeitou foi respondido como aceito");
+    confere(
+      "R2 · a variante da FFI",
+      dita("«snapshot»", '{"Refused":{"reason":"Teste"}}')
+        && !anotadasDoRoteador.some(([, texto]) => String(texto).includes("[object Object]")),
+      "a falha que chega como variante de struct da FFI não foi ao registro inteira: "
+        + `${JSON.stringify(anotadasDoRoteador)}`,
+    );
+    contexto.registrarNoAnfitriao = registrarDeAntes;
+
     // **R4e · o avatar que não montou é dito.** Aqui, dentro do roteador, e não
     // em R4d: a recusa chega numa promessa, e este é o trecho da bancada que
     // espera antes de `terminar`. É o caso de 23/09 — o avatar do PERFIS.
@@ -1857,14 +1936,12 @@ function anotando(...anotadas) {
     // a segunda separa `motivoDaFalha` de `String(falha?.message ?? falha)` —
     // com esta, o registro voltaria a dizer «[object Object]».
     {
-      const regiaoFonte = ler("mods-regiao.js");
-      const inicioDoMotivo = regiaoFonte.indexOf("function motivoDaFalha(");
-      const fimDoMotivo = regiaoFonte.indexOf("\n}\n", inicioDoMotivo) + 3;
+      // `motivoDaFalha` já está no contexto: ela entra com o roteador, no
+      // começo do R2.
       const inicioDoAvatar = base.indexOf("function avatarContribuido(");
       const fimDoAvatar = base.indexOf("\n}\n", inicioDoAvatar) + 3;
-      confere("R4e · o recorte", inicioDoMotivo >= 0 && inicioDoAvatar >= 0,
-        "`motivoDaFalha` ou `avatarContribuido` mudou de forma e o recorte não a achou");
-      vm.runInContext(regiaoFonte.slice(inicioDoMotivo, fimDoMotivo), contexto);
+      confere("R4e · o recorte", inicioDoAvatar >= 0,
+        "`avatarContribuido` mudou de forma e o recorte não a achou");
       vm.runInContext(base.slice(inicioDoAvatar, fimDoAvatar), contexto);
       for (const [pessoa, carregar, motivo] of [
         [12, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }), "não é imagem"],
