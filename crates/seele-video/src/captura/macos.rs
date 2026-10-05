@@ -937,6 +937,7 @@ fn montar_i420(
 #[cfg(test)]
 mod testes {
     use super::*;
+    use std::time::Duration;
 
     /// Uma linha de luma com preenchimento: `largura` bytes úteis e mais lixo
     /// depois, que é exatamente o que o sistema entrega.
@@ -1171,6 +1172,387 @@ mod testes {
         captura.parar().expect("a captura para");
     }
 
+    /// Quantos segundos a medida ao longo do tempo dura.
+    const SEGUNDOS_DA_MEDIDA: u64 = 3;
+
+    /// O mínimo de amostras de imagem em **cada** segundo da medida, com
+    /// pixels ou sem.
+    ///
+    /// A 30 quadros por segundo a ScreenCaptureKit entrega trinta amostras por
+    /// segundo com a tela mudando ou não: numa tela parada elas chegam sem
+    /// imagem e contam em [`Vaga::sem_conteudo`]. Medido em 05/10/2026 nos três
+    /// monitores desta máquina, dois deles quase parados, e nas rodadas do
+    /// teste de campo: de 28 a 30 em cada segundo.
+    /// Dez é um terço disso — folga para uma máquina ocupada —, e uma captura
+    /// que trava depois das primeiras amostras não chega lá.
+    const MINIMO_DE_AMOSTRAS_POR_SEGUNDO: u64 = 10;
+
+    /// Quantos quadros com imagem uma tela que muda dá em três segundos, no
+    /// mínimo.
+    ///
+    /// É o que este teste cobrava de qualquer tela antes de separar a tela
+    /// parada da captura travada. Continua cobrado de uma tela que muda.
+    const QUADROS_DE_UMA_TELA_QUE_MUDA: u64 = 20;
+
+    /// A partir de quantos quadros escritos num segundo quem lê tem de ter
+    /// pegado pelo menos um naquele segundo.
+    ///
+    /// Quem lê olha a vaga a cada 5 ms, e a 30 por segundo o primeiro de três
+    /// quadros escritos num segundo chegou pelo menos 66 ms antes do fim dele:
+    /// quem lê o pega ainda ali, a não ser que tenha parado. Um ou dois quadros
+    /// podem cair na virada e ser pegos no segundo seguinte, e por isso a regra
+    /// começa em três.
+    const ESCRITOS_QUE_QUEM_LE_NAO_PERDE: u64 = 3;
+
+    /// O que chegou num segundo da medida.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Segundo {
+        /// Quadros com imagem que a captura pôs na vaga.
+        escritos: u64,
+        /// Amostras que chegaram sem nada a converter.
+        sem_conteudo: u64,
+        /// Quadros que quem lê tirou da vaga.
+        pegos: u64,
+    }
+
+    impl Segundo {
+        /// Toda amostra de imagem que chegou, com pixels ou sem.
+        fn amostras(self) -> u64 {
+            self.escritos + self.sem_conteudo
+        }
+    }
+
+    /// O que a medida ao longo do tempo viu.
+    #[derive(Debug)]
+    struct Medida {
+        /// Um por segundo, na ordem.
+        segundos: Vec<Segundo>,
+        /// Quadros substituídos na vaga antes de alguém pegá-los.
+        descartados: u64,
+        /// Amostras com pixels que não deu para converter.
+        ilegiveis: u64,
+    }
+
+    impl Medida {
+        fn soma(&self, campo: impl Fn(&Segundo) -> u64) -> u64 {
+            self.segundos.iter().map(campo).sum()
+        }
+
+        fn por_segundo(&self, campo: impl Fn(&Segundo) -> u64) -> Vec<u64> {
+            self.segundos.iter().map(campo).collect()
+        }
+    }
+
+    impl std::fmt::Display for Medida {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "amostras por segundo {:?} (escritos {:?}, sem conteúdo {:?}); pegos por quem \
+                 lê {:?}; descartados {}; ilegíveis {}",
+                self.por_segundo(|s| s.amostras()),
+                self.por_segundo(|s| s.escritos),
+                self.por_segundo(|s| s.sem_conteudo),
+                self.por_segundo(|s| s.pegos),
+                self.descartados,
+                self.ilegiveis,
+            )
+        }
+    }
+
+    /// O que a medida concluiu, quando passa.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Veredito {
+        /// A tela mudou, e os quadros com imagem chegaram a quem lê.
+        TelaQueMuda,
+        /// Poucos quadros com imagem, e as amostras sem conteúdo continuaram
+        /// chegando: a tela não mudou, e a captura não travou.
+        TelaParada,
+    }
+
+    /// Lê a vaga por [`SEGUNDOS_DA_MEDIDA`] segundos, a cada 5 ms, como o
+    /// codificador leria, e anota o que chegou em cada segundo.
+    ///
+    /// `tomar` é quem lê. No teste de campo é [`CapturaDaTela::tomar`]; nos
+    /// simulacros é a vaga direto, ou um que para de entregar.
+    fn medir(vaga: &Vaga, mut tomar: impl FnMut() -> Option<QuadroDaTela>) -> Medida {
+        let comeco = Instant::now();
+        let descartados_antes = vaga.descartados();
+        let ilegiveis_antes = vaga.ilegiveis();
+        let mut escritos_antes = vaga.escritos();
+        let mut sem_conteudo_antes = vaga.sem_conteudo();
+        let mut segundos = Vec::new();
+        for n in 1..=SEGUNDOS_DA_MEDIDA {
+            let fim = comeco + Duration::from_secs(n);
+            let mut pegos = 0;
+            while Instant::now() < fim {
+                if tomar().is_some() {
+                    pegos += 1;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let escritos = vaga.escritos();
+            let sem_conteudo = vaga.sem_conteudo();
+            segundos.push(Segundo {
+                escritos: escritos.saturating_sub(escritos_antes),
+                sem_conteudo: sem_conteudo.saturating_sub(sem_conteudo_antes),
+                pegos,
+            });
+            escritos_antes = escritos;
+            sem_conteudo_antes = sem_conteudo;
+        }
+        Medida {
+            segundos,
+            descartados: vaga.descartados().saturating_sub(descartados_antes),
+            ilegiveis: vaga.ilegiveis().saturating_sub(ilegiveis_antes),
+        }
+    }
+
+    /// Separa «a tela não mudou» de «a captura travou» e de «um quadro foi
+    /// jogado fora».
+    ///
+    /// `Err` traz o motivo da reprovação, com o que foi medido. As regras vão
+    /// na ordem em que uma explica as outras: uma captura travada também deixa
+    /// quem lê sem quadro, e é ela que a falha tem de nomear.
+    fn julgar(medida: &Medida) -> Result<Veredito, String> {
+        if medida.ilegiveis > 0 {
+            return Err(format!(
+                "a captura entregou {} amostra(s) ilegíveis: pixels que não deu para converter, \
+                 um formato inesperado ou uma linha curta. Isso é defeito, e não tela parada. \
+                 Medido: {medida}",
+                medida.ilegiveis
+            ));
+        }
+        for (n, segundo) in (1..).zip(&medida.segundos) {
+            if segundo.amostras() < MINIMO_DE_AMOSTRAS_POR_SEGUNDO {
+                return Err(format!(
+                    "a captura parou de entregar amostras: no {n}º segundo chegaram {}, contando \
+                     os quadros com imagem e as amostras sem conteúdo, e o mínimo é \
+                     {MINIMO_DE_AMOSTRAS_POR_SEGUNDO} em cada um dos {SEGUNDOS_DA_MEDIDA} \
+                     segundos (a 30 por segundo seriam trinta). Uma tela parada continua \
+                     mandando amostras sem conteúdo, e por isso isto não é tela parada: a \
+                     captura travou, ou entrega a menos de um terço da cadência pedida. \
+                     Medido: {medida}",
+                    segundo.amostras()
+                ));
+            }
+        }
+        let escritos = medida.soma(|s| s.escritos);
+        let sem_conteudo = medida.soma(|s| s.sem_conteudo);
+        let pegos = medida.soma(|s| s.pegos);
+        if pegos == 0 {
+            return Err(format!(
+                "as amostras chegaram, e nenhum quadro com imagem chegou a quem lê em \
+                 {SEGUNDOS_DA_MEDIDA} segundos. Uma tela parada ainda manda os quadros do \
+                 começo (uns 17 no primeiro segundo, medido num monitor parado em 05/10/2026); \
+                 tudo sem conteúdo é como a captura já descartou 145 quadros seguidos, sem uma \
+                 linha de erro. Medido: {medida}"
+            ));
+        }
+        for (n, segundo) in (1..).zip(&medida.segundos) {
+            if segundo.escritos >= ESCRITOS_QUE_QUEM_LE_NAO_PERDE && segundo.pegos == 0 {
+                return Err(format!(
+                    "no {n}º segundo a captura escreveu {} quadros com imagem na vaga, e quem lê \
+                     não pegou nenhum, olhando a cada 5 ms: quem lê parou de receber o que a \
+                     captura entrega. Medido: {medida}",
+                    segundo.escritos
+                ));
+            }
+        }
+        if pegos >= QUADROS_DE_UMA_TELA_QUE_MUDA {
+            return Ok(Veredito::TelaQueMuda);
+        }
+        if sem_conteudo > escritos {
+            return Ok(Veredito::TelaParada);
+        }
+        Err(format!(
+            "a tela mudou — {escritos} quadros com imagem escritos contra {sem_conteudo} amostras \
+             sem conteúdo — e quem lê pegou só {pegos} em {SEGUNDOS_DA_MEDIDA} segundos, menos \
+             que {QUADROS_DE_UMA_TELA_QUE_MUDA}. A tela parada não explica isso. Medido: {medida}"
+        ))
+    }
+
+    /// Uma medida montada à mão, segundo a segundo: `(escritos, sem_conteudo,
+    /// pegos)`.
+    fn medida_de(segundos: &[(u64, u64, u64)]) -> Medida {
+        Medida {
+            segundos: segundos
+                .iter()
+                .map(|&(escritos, sem_conteudo, pegos)| Segundo {
+                    escritos,
+                    sem_conteudo,
+                    pegos,
+                })
+                .collect(),
+            descartados: 0,
+            ilegiveis: 0,
+        }
+    }
+
+    /// A tela parada como ela chegou ao monitor externo desta máquina. A
+    /// bateria do lote K1 mediu 17 quadros com imagem, todos no primeiro
+    /// segundo, e 73 amostras sem conteúdo; a repartição das 73 por segundo é a
+    /// que a medida de 05/10/2026 viu no mesmo monitor, trinta por segundo.
+    #[test]
+    fn a_tela_parada_passa_e_e_dita() {
+        let medida = medida_de(&[(17, 13, 17), (0, 30, 0), (0, 30, 0)]);
+        assert_eq!(
+            julgar(&medida),
+            Ok(Veredito::TelaParada),
+            "uma tela parada, com as amostras chegando sem conteúdo a cada segundo, não foi \
+             reconhecida como tela parada: o teste de campo reprova numa máquina cujo \
+             primeiro monitor não mudou, ou passa sem dizer por quê ({medida})"
+        );
+    }
+
+    #[test]
+    fn a_tela_que_muda_passa() {
+        let medida = medida_de(&[(30, 0, 30), (29, 0, 29), (30, 0, 30)]);
+        assert_eq!(
+            julgar(&medida),
+            Ok(Veredito::TelaQueMuda),
+            "uma captura que entregou trinta quadros com imagem em cada segundo não passou \
+             como tela que muda ({medida})"
+        );
+    }
+
+    #[test]
+    fn um_segundo_sem_amostras_reprova() {
+        let medida = medida_de(&[(30, 0, 30), (30, 0, 30), (1, 1, 1)]);
+        let motivo = julgar(&medida).expect_err(
+            "uma captura que deixou de mandar amostras no terceiro segundo passou: a captura \
+             travada voltaria a passar como tela parada",
+        );
+        assert!(
+            motivo.contains("parou de entregar amostras") && motivo.contains("3º segundo"),
+            "a falha não diz que a captura parou de entregar amostras, nem em que segundo: \
+             {motivo}"
+        );
+    }
+
+    #[test]
+    fn nenhum_quadro_com_imagem_reprova() {
+        let medida = medida_de(&[(0, 30, 0), (0, 30, 0), (0, 30, 0)]);
+        let motivo = julgar(&medida).expect_err(
+            "noventa amostras, todas sem conteúdo, passaram: é o defeito que já descartou 145 \
+             quadros seguidos, contado como tela parada",
+        );
+        assert!(
+            motivo.contains("nenhum quadro com imagem"),
+            "a falha não diz que nenhum quadro com imagem chegou: {motivo}"
+        );
+    }
+
+    #[test]
+    fn quem_le_e_para_de_receber_reprova() {
+        let medida = medida_de(&[(30, 0, 30), (30, 0, 0), (30, 0, 0)]);
+        let motivo = julgar(&medida).expect_err(
+            "a captura escreveu trinta quadros por segundo e quem lê só os recebeu no primeiro \
+             segundo, e a medida passou",
+        );
+        assert!(
+            motivo.contains("quem lê não pegou nenhum") && motivo.contains("2º segundo"),
+            "a falha não diz que quem lê parou de receber, nem em que segundo: {motivo}"
+        );
+    }
+
+    #[test]
+    fn poucos_quadros_com_a_tela_mudando_reprova() {
+        let medida = medida_de(&[(30, 0, 5), (30, 0, 5), (30, 0, 5)]);
+        let motivo = julgar(&medida).expect_err(
+            "quinze quadros pegos com noventa escritos e nenhuma amostra sem conteúdo passaram: \
+             a tela parada não explica isso, e a medida passaria dizendo que explica",
+        );
+        assert!(
+            motivo.contains("a tela mudou"),
+            "a falha não diz que a tela mudou e os quadros não chegaram: {motivo}"
+        );
+    }
+
+    #[test]
+    fn uma_amostra_ilegivel_reprova() {
+        let mut medida = medida_de(&[(30, 0, 30), (30, 0, 30), (30, 0, 30)]);
+        medida.ilegiveis = 1;
+        let motivo = julgar(&medida).expect_err(
+            "uma amostra com pixels que não deu para converter passou: um formato de pixel \
+             inesperado ficaria escondido atrás de uma medida verde",
+        );
+        assert!(
+            motivo.contains("ilegíve"),
+            "a falha não diz que houve amostra ilegível: {motivo}"
+        );
+    }
+
+    /// Um simulacro da captura: escreve na vaga, alternando um quadro com
+    /// imagem e uma amostra sem conteúdo, até o prazo, e para.
+    ///
+    /// Escreve a cada 10 ms, mais depressa que a captura de verdade, para que
+    /// uma máquina ocupada pela bateria inteira não o derrube abaixo de
+    /// [`MINIMO_DE_AMOSTRAS_POR_SEGUNDO`] e troque o motivo da falha que os
+    /// testes conferem.
+    fn simular_captura(vaga: Arc<Vaga>, prazo: Duration) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let comeco = Instant::now();
+            let mut com_imagem = true;
+            while comeco.elapsed() < prazo {
+                if com_imagem {
+                    vaga.por(QuadroDaTela {
+                        quadro: QuadroI420::preto(2, 2),
+                        capturado_em: Instant::now(),
+                    });
+                } else {
+                    vaga.sem_conteudo.fetch_add(1, Ordering::Relaxed);
+                }
+                com_imagem = !com_imagem;
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })
+    }
+
+    /// A prova de que a medida de campo pega a captura que trava: o simulacro
+    /// entrega amostras por um segundo e para, e [`medir`] mais [`julgar`] — os
+    /// mesmos que o teste de campo usa — reprovam.
+    #[test]
+    fn uma_captura_que_para_depois_do_primeiro_segundo_reprova() {
+        let vaga = Arc::new(Vaga::default());
+        let simulacro = simular_captura(Arc::clone(&vaga), Duration::from_secs(1));
+        let medida = medir(&vaga, || vaga.tomar());
+        simulacro.join().expect("o simulacro termina");
+        let motivo = julgar(&medida).expect_err(
+            "uma captura que parou de entregar depois do primeiro segundo passou pela medida \
+             de campo",
+        );
+        assert!(
+            motivo.contains("parou de entregar amostras"),
+            "a captura parou depois do primeiro segundo, e a falha não diz isso: {motivo}"
+        );
+    }
+
+    /// O outro lado da mesma prova: o simulacro continua escrevendo, e o
+    /// `tomar()` de quem lê para de entregar depois do primeiro segundo.
+    #[test]
+    fn um_tomar_que_para_depois_do_primeiro_segundo_reprova() {
+        let vaga = Arc::new(Vaga::default());
+        let simulacro = simular_captura(Arc::clone(&vaga), Duration::from_millis(3200));
+        let comeco = Instant::now();
+        let medida = medir(&vaga, || {
+            if comeco.elapsed() < Duration::from_secs(1) {
+                vaga.tomar()
+            } else {
+                None
+            }
+        });
+        simulacro.join().expect("o simulacro termina");
+        let motivo = julgar(&medida).expect_err(
+            "um tomar() que parou de entregar depois do primeiro segundo passou pela medida de \
+             campo, com a captura escrevendo quadros o tempo todo",
+        );
+        assert!(
+            motivo.contains("quem lê não pegou nenhum"),
+            "quem lê parou de receber depois do primeiro segundo, e a falha não diz isso: \
+             {motivo}"
+        );
+    }
+
     /// A captura entrega quadros **ao longo do tempo**, e não um só.
     ///
     /// **O teste que faltava, e o defeito que ele encontra.** O outro teste de
@@ -1179,9 +1561,21 @@ mod testes {
     /// passa por ele inteira, e foi assim que o relato chegou: «compartilhamento
     /// de tela no Mac exibe apenas 1 frame».
     ///
-    /// Três segundos a 30 quadros são noventa; exigir vinte é folga de sobra
-    /// para uma máquina ocupada e ainda assim uma ordem de grandeza acima de
-    /// «um».
+    /// **A tela parada não é a captura travada, e o teste separa as duas.** Ele
+    /// exigia vinte quadros com imagem de qualquer tela, com a frase «a tela
+    /// parada não explica: o ScreenCaptureKit reentrega o mesmo quadro». Medido
+    /// em 05/10/2026, num monitor externo parado: uns 17 quadros com imagem no
+    /// primeiro segundo e, depois, só amostras **sem imagem**, perto de trinta
+    /// por segundo — o sistema não reentrega o quadro, ele diz que o anterior
+    /// continua valendo. O teste reprovava uma captura que funcionava.
+    ///
+    /// O que ele cobra agora é o que pode provar, e [`julgar`] diz as regras:
+    /// as amostras continuam chegando em cada segundo, com imagem ou sem;
+    /// pelo menos um quadro com imagem chega a quem lê; e uma tela que muda dá
+    /// os vinte de antes. A tela parada passa **dizendo** que passou por isso,
+    /// com os números. O que ele não separa sozinho de uma tela parada — uma
+    /// amostra com imagem contada como «sem conteúdo» depois dos primeiros
+    /// quadros — é de [`classificar`] e dos testes dela.
     #[test]
     fn a_captura_entrega_quadros_ao_longo_do_tempo() {
         if !permissao().concedida() {
@@ -1203,26 +1597,22 @@ mod testes {
 
         let captura = CapturaDaTela::iniciar(monitor, Resolucao::P720, Cadencia::Q30)
             .expect("a captura começa");
-        let comeco = Instant::now();
-        let mut pegos = 0_usize;
-        while comeco.elapsed().as_secs_f64() < 3.0 {
-            if captura.tomar().is_some() {
-                pegos += 1;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
         let vaga = captura.vaga();
-        let escritos = vaga.escritos();
+        let medida = medir(&vaga, || captura.tomar());
         captura.parar().expect("a captura para");
 
-        assert!(
-            pegos >= 20,
-            "a captura entregou {pegos} quadros em três segundos, e a 30 por \
-             segundo deveria haver noventa. A tela parada não explica: o \
-             ScreenCaptureKit reentrega o mesmo quadro. O que explica é a \
-             captura ter travado depois dos primeiros — escritos pelo sistema: \
-             {escritos}"
-        );
+        match julgar(&medida) {
+            Ok(Veredito::TelaQueMuda) => eprintln!("MEDIDO em {monitor:?}: {medida}"),
+            Ok(Veredito::TelaParada) => eprintln!(
+                "TELA PARADA em {monitor:?}: quem lê pegou {} quadros com imagem em \
+                 {SEGUNDOS_DA_MEDIDA} segundos, menos que os {QUADROS_DE_UMA_TELA_QUE_MUDA} de \
+                 uma tela que muda, e as amostras continuaram chegando sem conteúdo — o sistema \
+                 dizendo que o quadro anterior continua valendo. A captura não travou, e o teste \
+                 passa por isso. Medido: {medida}",
+                medida.soma(|s| s.pegos)
+            ),
+            Err(motivo) => panic!("{monitor:?}: {motivo}"),
+        }
     }
 
     /// O som do sistema chega pelo mesmo fluxo da imagem.
