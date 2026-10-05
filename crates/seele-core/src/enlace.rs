@@ -444,8 +444,10 @@ enum Comando {
     /// Baixar um anexo para `pasta`, com o nome que veio com ele.
     ///
     /// A pasta e o nome, e não um caminho: quem junta os dois é
-    /// [`crate::anexo_no_disco::abrir_sem_sobrescrever`], que confere o nome e
-    /// grava ao lado em vez de por cima.
+    /// [`crate::anexo_no_disco`] — [`crate::anexo_no_disco::abrir_parcial`]
+    /// confere o nome e cria o parcial, e
+    /// [`crate::anexo_no_disco::Parcial::nomear`] grava ao lado em vez de por
+    /// cima.
     SalvarAnexo {
         anexo: AttachmentId,
         pasta: std::path::PathBuf,
@@ -1950,12 +1952,13 @@ impl Enlace {
     /// Pede um anexo e grava em `pasta`, com o nome que veio com ele.
     ///
     /// **A regra de onde e com que nome mora em [`crate::anexo_no_disco`]**, e
-    /// não em quem chama: o motor abre o arquivo com
-    /// [`crate::anexo_no_disco::abrir_sem_sobrescrever`], que confere o nome de
-    /// novo e, se ele estiver tomado, grava ao lado — «foto (2).png» — em vez de
-    /// por cima. O caminho real volta em [`Transferencia::Salvo`]. O ADR 0027
-    /// não dá a cliente nenhum do SEELE um botão que abre arquivo; salvar é um
-    /// ato de quem recebeu.
+    /// não em quem chama: o motor abre o parcial com
+    /// [`crate::anexo_no_disco::abrir_parcial`], que confere o nome de novo, e o
+    /// arquivo só ganha o nome final depois de o hash conferir — e, se ele
+    /// estiver tomado, ganha o de ao lado, «foto (2).png», em vez de passar por
+    /// cima. O caminho real volta em [`Transferencia::Salvo`]. O ADR 0027 não dá
+    /// a cliente nenhum do SEELE um botão que abre arquivo; salvar é um ato de
+    /// quem recebeu.
     ///
     /// # Errors
     ///
@@ -3080,17 +3083,22 @@ impl Motor {
             }
 
             Comando::SalvarAnexo { anexo, pasta, nome } => {
-                // O arquivo é criado **antes** de o pedido sair, por
-                // `abrir_sem_sobrescrever`: o nome é conferido de novo, um nome
-                // tomado vira «foto (2).png», e um que não é só um nome volta
-                // como falha aqui, sem byte nenhum pedido ao servidor. Num
+                // O parcial é criado **antes** de o pedido sair, por
+                // `abrir_parcial`: o nome é conferido de novo, e um que não é
+                // só um nome volta como falha aqui, sem byte nenhum pedido ao
+                // servidor. O nome final — ou «foto (2).png», se ele estiver
+                // tomado — só é dado depois de o hash conferir. Num
                 // `spawn_blocking` porque abrir é uma chamada ao disco, e esta
                 // fila carrega toda tecla da sessão.
                 let criado = tokio::task::spawn_blocking(move || {
-                    crate::anexo_no_disco::abrir_sem_sobrescrever(&pasta, &nome)
+                    crate::anexo_no_disco::abrir_parcial(
+                        &pasta,
+                        &nome,
+                        crate::anexo_no_disco::TENTATIVAS,
+                    )
                 })
                 .await;
-                let (arquivo, caminho) = match criado {
+                let (arquivo, parcial) = match criado {
                     Ok(Ok(criado)) => criado,
                     Ok(Err(erro)) => {
                         tracing::warn!(%anexo, %erro, "não consegui criar o arquivo do anexo; nada foi gravado");
@@ -3118,11 +3126,14 @@ impl Motor {
                             total,
                         }));
                     };
+                    let parcial_em = parcial.caminho().to_path_buf();
                     let recebido = transferencias
-                        .receive_attachment(anexo, arquivo, &caminho, ESPERA_DE_ANEXO, andamento)
+                        .receive_attachment(anexo, arquivo, parcial, ESPERA_DE_ANEXO, andamento)
                         .await;
                     let _ = avisos.send(Aviso::Transferencia(fim_do_salvar(
-                        anexo, caminho, recebido,
+                        anexo,
+                        &parcial_em,
+                        recebido,
                     )));
                 });
                 pedido
@@ -3690,17 +3701,22 @@ impl Motor {
 /// o único que sabe se foram os bytes que não fecharam com o hash, o prazo que
 /// acabou ou o disco que recusou. Fora do `tokio::spawn` que a chama para que
 /// um teste a exercite sem servidor.
+///
+/// `parcial` é onde os bytes estavam chegando — `.foto.png.seele-parcial` —, e
+/// vai para a linha da falha porque diz a pasta e o nome que o anexo teria; o
+/// caminho do salvo é o que [`crate::client::Transfers::receive_attachment`]
+/// devolve, com o nome final que ele ganhou.
 fn fim_do_salvar(
     anexo: AttachmentId,
-    caminho: std::path::PathBuf,
-    recebido: anyhow::Result<u64>,
+    parcial: &std::path::Path,
+    recebido: anyhow::Result<(u64, std::path::PathBuf)>,
 ) -> Transferencia {
     match recebido {
-        Ok(_) => Transferencia::Salvo { anexo, caminho },
+        Ok((_, caminho)) => Transferencia::Salvo { anexo, caminho },
         Err(erro) => {
             tracing::warn!(
                 %anexo,
-                caminho = %caminho.display(),
+                caminho = %parcial.display(),
                 %erro,
                 "o anexo não foi salvo"
             );
@@ -7207,7 +7223,7 @@ mod tests {
 
         let fim = fim_do_salvar(
             AttachmentId(41),
-            std::path::PathBuf::from("/tmp/pasta/foto.png"),
+            std::path::Path::new("/tmp/pasta/.foto.png.seele-parcial"),
             Err(anyhow::anyhow!(
                 "o arquivo não chegou inteiro e foi descartado"
             )),
@@ -7230,8 +7246,8 @@ mod tests {
 
         let salvo = fim_do_salvar(
             AttachmentId(42),
-            std::path::PathBuf::from("/tmp/pasta/foto (2).png"),
-            Ok(3_000),
+            std::path::Path::new("/tmp/pasta/.foto.png.seele-parcial"),
+            Ok((3_000, std::path::PathBuf::from("/tmp/pasta/foto (2).png"))),
         );
         assert_eq!(
             salvo,

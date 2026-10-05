@@ -931,15 +931,23 @@ impl Client {
     ///
     /// `destination` é um caminho inteiro, e quem o escolhe é quem chama — a
     /// conformidade, que grava numa pasta temporária dela. O app não passa por
-    /// aqui: ele grava pela regra de [`crate::anexo_no_disco`]. Mesmo assim o
-    /// arquivo é criado com `create_new`, **antes** de o pedido sair, e um
-    /// caminho que já existe é recusado em vez de substituído.
+    /// aqui: ele grava ao lado, pela regra de [`crate::anexo_no_disco`]. Mesmo
+    /// assim a regra de não substituir vale aqui também, e pelo mesmo caminho:
+    /// os bytes chegam num parcial ao lado de `destination`, criado **antes** de
+    /// o pedido sair por [`crate::anexo_no_disco::abrir_parcial`], e só
+    /// ganham o nome `destination` depois de o hash conferir, por um link que
+    /// falha se ele já existir. O nome de `destination` passa por
+    /// [`crate::anexo_no_disco::nome_seguro`] como qualquer outro.
+    ///
+    /// Um `destination` que já existe é recusado também antes do pedido, para
+    /// não baixar à toa. Essa conferência é só um atalho, vencível por uma
+    /// corrida: quem garante que nada é substituído é o link.
     ///
     /// # Errors
     ///
-    /// Fails if `destination` already exists, if the file cannot be written, if
-    /// the bytes do not hash to what the server said, or if nothing arrives
-    /// inside `wait`.
+    /// Fails if `destination` already exists, if its name is not just a file
+    /// name, if the file cannot be written, if the bytes do not hash to what the
+    /// server said, or if nothing arrives inside `wait`.
     pub async fn download_attachment(
         &mut self,
         attachment: seele_proto::ids::AttachmentId,
@@ -947,22 +955,30 @@ impl Client {
         wait: std::time::Duration,
         progress: impl FnMut(u64, u64),
     ) -> Result<u64> {
-        let arquivo = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(destination)
-            .await?
-            .into_std()
-            .await;
-        let transfers = self.transfers();
-        if let Err(erro) = self.fetch_attachment(attachment).await {
-            drop(arquivo);
-            let _ = tokio::fs::remove_file(destination).await;
-            return Err(erro);
+        if tokio::fs::symlink_metadata(destination).await.is_ok() {
+            anyhow::bail!(
+                "{} já existe, e baixar não substitui nada",
+                destination.display()
+            );
         }
-        transfers
-            .receive_attachment(attachment, arquivo, destination, wait, progress)
-            .await
+        let (Some(pasta), Some(nome)) = (
+            destination.parent(),
+            destination.file_name().and_then(|nome| nome.to_str()),
+        ) else {
+            anyhow::bail!("{} não termina num nome de arquivo", destination.display());
+        };
+        let (pasta, nome) = (pasta.to_owned(), nome.to_owned());
+        let (arquivo, parcial) = tokio::task::spawn_blocking(move || {
+            crate::anexo_no_disco::abrir_parcial(&pasta, &nome, 1)
+        })
+        .await??;
+        let transfers = self.transfers();
+        // Um pedido que não sai leva o parcial embora ao soltá-lo, na volta.
+        self.fetch_attachment(attachment).await?;
+        let (bytes, _) = transfers
+            .receive_attachment(attachment, arquivo, parcial, wait, progress)
+            .await?;
+        Ok(bytes)
     }
 
     /// Takes the connection out of whatever voice room it is in.
@@ -2319,77 +2335,81 @@ impl Transfers {
         }
     }
 
-    /// Recebe os bytes de um anexo no arquivo que quem chama acabou de criar.
+    /// Recebe os bytes de um anexo no parcial que quem chama acabou de criar, e
+    /// dá a ele o nome final quando o hash confere.
     ///
-    /// **Esta função não escolhe caminho nenhum.** `arquivo` chega já aberto em
-    /// `caminho`, criado com `create_new` — no app, por
-    /// [`crate::anexo_no_disco::abrir_sem_sobrescrever`], que é onde mora a regra
-    /// de que nome um anexo pode ganhar no disco e de que nada que já existe é
-    /// substituído. O ADR 0027 não dá a cliente nenhum do SEELE um botão que abre
-    /// arquivo: salvar é um ato de quem recebeu.
+    /// **Esta função não escolhe caminho nenhum.** `arquivo` chega já aberto no
+    /// parcial, `.foto.png.seele-parcial`, criado por
+    /// [`crate::anexo_no_disco::abrir_parcial`] — que é onde mora a regra de que
+    /// nome um anexo pode ganhar no disco, de que ele só o ganha depois de
+    /// chegar inteiro e de que nada que já existe é substituído. O ADR 0027 não dá a cliente
+    /// nenhum do SEELE um botão que abre arquivo: salvar é um ato de quem
+    /// recebeu.
     ///
-    /// E é por ter sido criado para esta chamada que ele pode ser apagado aqui:
-    /// quando os bytes não fecham com o hash, quando nada chega dentro de
-    /// `wait`, ou quando o disco recusa, o arquivo criado sai, e o que já estava
-    /// na pasta continua onde estava.
+    /// Os bytes chegam no parcial, e só com o hash conferido o arquivo ganha o
+    /// nome final, por [`crate::anexo_no_disco::Parcial::nomear`]: um processo
+    /// que morre no meio deixa o parcial, e nunca um arquivo truncado com o
+    /// nome de um completo. Volta o caminho real, que é o que a tela mostra:
+    /// «foto (2).png», se foi lá que ele ficou.
     ///
     /// The file is marked with the operating system's own quarantine on the way
     /// down — `com.apple.quarantine`, or the `Zone.Identifier` stream — so that
     /// Gatekeeper and SmartScreen stop it in front of whoever opens it later.
     /// That is not antivirus, and this product does not have one; it is the
     /// guard the system already has, and it only works if whoever writes the
-    /// file turns it on.
+    /// file turns it on. A marca entra no parcial, **antes** de ele ganhar o nome
+    /// final: o link e a troca de nome levam junto o que é do arquivo, e assim o
+    /// nome final nunca existe sem ela.
     ///
     /// # Errors
     ///
     /// Fails if the file cannot be written, if the bytes do not hash to what the
-    /// server said, or if nothing arrives inside `wait` — and in all three the
-    /// file this call was handed is removed. A refusal arrives separately, as
-    /// [`ServerMessage::AttachmentUnavailable`] on the control stream — that is
-    /// where the enumerated reason lives, and the expected one is `Expired`.
+    /// server said, if nothing arrives inside `wait`, or if every name it may
+    /// take is taken — and in all of them the partial file is removed, by
+    /// dropping the [`crate::anexo_no_disco::Parcial`]. A refusal arrives
+    /// separately, as [`ServerMessage::AttachmentUnavailable`] on the control
+    /// stream — that is where the enumerated reason lives, and the expected one
+    /// is `Expired`.
     pub async fn receive_attachment(
         &self,
         attachment: seele_proto::ids::AttachmentId,
         arquivo: std::fs::File,
-        caminho: &std::path::Path,
+        parcial: crate::anexo_no_disco::Parcial,
         wait: std::time::Duration,
         progress: impl FnMut(u64, u64),
-    ) -> Result<u64> {
-        let recebido = self
+    ) -> Result<(u64, std::path::PathBuf)> {
+        // Numa falha, o `?` solta o `parcial`, e é soltá-lo que apaga o arquivo.
+        // `receber_no_arquivo` recebeu o arquivo por valor e já o soltou ao
+        // voltar. Soltar um `tokio::fs::File` não espera uma escrita que ainda
+        // esteja terminando no pool de bloqueio — numa falha de leitura no
+        // meio do download pode haver uma —, e isso não impede o apagar. No Mac
+        // e no Linux, apagar um arquivo aberto tira o nome dele da pasta na
+        // hora. No Windows o std abre com `FILE_SHARE_DELETE`, então o apagar é
+        // aceito com ele aberto, e o arquivo sai no máximo quando a escrita
+        // termina e solta o último handle.
+        let got = self
             .receber_no_arquivo(
                 attachment,
                 tokio::fs::File::from_std(arquivo),
                 wait,
                 progress,
             )
-            .await;
-        match recebido {
-            Ok(got) => {
-                quarantine(caminho);
-                Ok(got)
-            }
-            Err(erro) => {
-                // `receber_no_arquivo` recebeu o arquivo por valor e o soltou
-                // ao voltar, e aqui ele é apagado pelo caminho. Soltar um
-                // `tokio::fs::File` não espera uma escrita que ainda esteja
-                // terminando no pool de bloqueio — numa falha de leitura no
-                // meio do download pode haver uma —, e isso não impede o
-                // apagar. No Mac e no Linux, apagar um arquivo aberto tira o
-                // nome dele da pasta na hora. No Windows o std abre com
-                // `FILE_SHARE_DELETE`, então o apagar é aceito com ele aberto,
-                // e o arquivo sai no máximo quando a escrita termina e solta o
-                // último handle.
-                let _ = tokio::fs::remove_file(caminho).await;
-                Err(erro)
-            }
-        }
+            .await?;
+        // A marca e o nome final são chamadas ao disco, e o `xattr` é um
+        // processo: fora da tarefa assíncrona, como a abertura do parcial.
+        let caminho = tokio::task::spawn_blocking(move || {
+            quarantine(parcial.caminho());
+            parcial.nomear()
+        })
+        .await??;
+        Ok((got, caminho))
     }
 
     /// O miolo de [`Self::receive_attachment`]: espera o fluxo e grava em `file`.
     ///
-    /// Separado para que **toda** falha passe por um lugar só na volta, e é lá
-    /// que o arquivo criado é apagado. Escrito no corpo de cima, cada `?` daqui
-    /// seria uma saída que deixa um arquivo pela metade na pasta da pessoa.
+    /// Ele não vê o parcial, só o arquivo aberto: toda falha daqui volta pelo
+    /// `?` de cima, que solta o [`crate::anexo_no_disco::Parcial`], e é soltá-lo
+    /// que apaga o arquivo.
     async fn receber_no_arquivo(
         &self,
         attachment: seele_proto::ids::AttachmentId,
@@ -2436,7 +2456,7 @@ impl Transfers {
 
         // The same question the server asked on the way in: did it arrive whole.
         // It says nothing about the file being good, and nothing here pretends
-        // it does. Quem apaga o arquivo é `receive_attachment`, na volta.
+        // it does. Quem apaga o parcial é `receive_attachment`, na volta.
         anyhow::ensure!(
             digest.finish() == delivery.content_hash && got == delivery.byte_size,
             "o arquivo não chegou inteiro e foi descartado"

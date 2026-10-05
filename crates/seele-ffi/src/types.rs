@@ -1714,10 +1714,11 @@ pub enum NotSavedReason {
     /// Não há pasta onde gravar: a casca não achou a de downloads nem a pessoal,
     /// ou passou uma que não é um caminho absoluto.
     SemPasta,
-    /// Não deu para gravar: a pasta não deixou criar o arquivo (sem permissão,
-    /// pasta que não existe, ou os noventa e nove nomes possíveis tomados), o
-    /// disco recusou no meio, os bytes não fecharam com o hash, ou nada chegou
-    /// a tempo. O que foi criado saiu, e qual foi a causa vai para o
+    /// Não deu para gravar: a pasta não deixou criar o parcial (sem permissão,
+    /// pasta que não existe), o disco recusou no meio, os bytes não fecharam com
+    /// o hash, nada chegou a tempo, ou os noventa e nove nomes possíveis
+    /// estavam tomados na hora de dar o nome final — que é depois de o hash
+    /// conferir. O que foi criado saiu, e qual foi a causa vai para o
     /// `seele.log`. Em várias delas — as da pasta, ou um arquivo estragado no
     /// disco do servidor — tentar de novo dá no mesmo, e a frase da tela ainda
     /// manda tentar: separá-las pede um motivo no `NaoSalvou` do core, que hoje

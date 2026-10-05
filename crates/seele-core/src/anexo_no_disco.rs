@@ -18,12 +18,16 @@
 //! no Windows por outra pessoa com o mesmo binário. Lendo o texto, a regra é uma
 //! só, e um teste que roda no Mac prova o caso do Windows.
 //!
-//! # Nada que já existe é substituído
+//! # O parcial nunca tem o nome final, e nada que já existe é substituído
 //!
-//! [`abrir_sem_sobrescrever`] cria com `create_new`, que falha em vez de truncar
-//! — e falha também diante de um link simbólico que já estava lá, em vez de
-//! segui-lo. Um arquivo da pessoa com o mesmo nome fica onde estava, e o novo
-//! grava ao lado, como «foto (2).png».
+//! [`abrir_parcial`] cria o arquivo em que os bytes chegam com um nome de
+//! parcial — `.foto.png.seele-parcial` — e com `create_new`, que falha em vez
+//! de truncar e falha também diante de um link simbólico que já estava lá, em
+//! vez de segui-lo. Só depois de o hash conferir, [`Parcial::nomear`] dá o nome
+//! final, com um link físico que também falha se o nome existir: um arquivo da
+//! pessoa com o mesmo nome fica onde estava, e o novo ganha o nome ao lado, como
+//! «foto (2).png». Um processo que morre no meio do download deixa um parcial
+//! oculto, e não um «foto.png» truncado com cara de completo.
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -31,7 +35,8 @@ use std::path::{Path, PathBuf};
 
 use seele_proto::control::MAX_FILE_NAME_LEN;
 
-/// Quantos nomes [`abrir_sem_sobrescrever`] tenta antes de desistir.
+/// Quantos nomes [`Parcial::nomear`] tenta antes de desistir — e quantos nomes
+/// de parcial [`abrir_parcial`] tenta.
 ///
 /// «foto.png», «foto (2).png»… até «foto (99).png». Uma pasta com noventa e nove
 /// arquivos do mesmo nome é uma pasta em que mais um não ajuda ninguém a achar
@@ -224,63 +229,265 @@ pub fn nome_ao_lado(nome: &str, vez: u32) -> String {
         (nome, "")
     };
     let cabe = MAX_FILE_NAME_LEN.saturating_sub(sufixo.len() + extensao.len());
-    let corte = radical
+    format!("{}{sufixo}{extensao}", ate_caber(radical, cabe))
+}
+
+/// O fim do nome com que um anexo é gravado enquanto chega.
+///
+/// O nome inteiro do parcial de «foto.png» é `.foto.png.seele-parcial`, e cada
+/// pedaço tem um motivo:
+///
+/// - o ponto na frente esconde o parcial no Finder e no `ls`, onde ninguém o
+///   confunde com o arquivo (no Explorer do Windows quem esconde é um atributo,
+///   e não o nome);
+/// - o nome que veio, no meio, diz a quem achar o parcial de que anexo ele é;
+/// - o sufixo troca a extensão: o parcial de um `x.exe` não é um `.exe`, e um
+///   duplo clique nele não executa nada nem abre metade de uma imagem;
+/// - «parcial» é a palavra que o servidor já usa para o mesmo papel — ele grava
+///   o blob que está chegando com o sufixo `.parcial` —, e «seele» diz qual
+///   programa o deixou na pasta da pessoa.
+pub const SUFIXO_DO_PARCIAL: &str = ".seele-parcial";
+
+/// O pedaço do começo de `texto` que cabe em `cabe` bytes, cortado numa
+/// fronteira de caractere.
+fn ate_caber(texto: &str, cabe: usize) -> &str {
+    let corte = texto
         .char_indices()
         .map(|(inicio, letra)| inicio + letra.len_utf8())
         .take_while(|&fim| fim <= cabe)
         .last()
         .unwrap_or(0);
-    format!(
-        "{}{sufixo}{extensao}",
-        radical.get(..corte).unwrap_or_default()
-    )
+    texto.get(..corte).unwrap_or_default()
 }
 
-/// Cria um arquivo novo em `pasta`, com o nome alegado ou ao lado dele.
+/// O nome do parcial de `nome` na `vez`-ésima tentativa:
+/// `.foto.png.seele-parcial`, `.foto.png (2).seele-parcial`…
 ///
-/// **Nunca substitui nada.** Cada tentativa usa `create_new`, que falha se o
-/// nome já existir — arquivo, pasta ou link simbólico, que ele não segue — e é o
-/// sistema de arquivos que responde, não uma conferência feita antes e vencida
-/// por uma corrida. `AlreadyExists` passa ao nome seguinte, de «foto.png» a
-/// «foto (99).png»; qualquer outro erro volta como veio.
+/// O nome que veio é cortado numa fronteira de caractere para o parcial caber
+/// em [`MAX_FILE_NAME_LEN`] bytes: o ponto e o sufixo somam quinze, e sem o
+/// corte um nome de 255 bytes não conseguiria nem começar a chegar.
+fn nome_do_parcial(nome: &str, vez: u32) -> String {
+    let vez = if vez <= 1 {
+        String::new()
+    } else {
+        format!(" ({vez})")
+    };
+    let cabe = MAX_FILE_NAME_LEN.saturating_sub(1 + vez.len() + SUFIXO_DO_PARCIAL.len());
+    format!(".{}{vez}{SUFIXO_DO_PARCIAL}", ate_caber(nome, cabe))
+}
+
+/// Um nome recusado por [`nome_seguro`], como erro de disco.
+fn recusado(recusa: NomeRecusado) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, recusa)
+}
+
+/// Um anexo a caminho do disco: gravado com um nome de parcial, e ainda sem o
+/// nome que vai ter.
 ///
-/// O nome é conferido aqui de novo, com [`nome_seguro`], e não só por quem
-/// chama: esta é a última porta antes do disco, e uma regra que dependesse de
-/// cada chamador lembrar dela é uma regra que um chamador novo esquece.
+/// Sai de [`abrir_parcial`], junto com o arquivo aberto em que os bytes
+/// chegam. Quem recebe confere o hash e chama [`Parcial::nomear`], que dá o nome
+/// final. **Solto sem nome, ele apaga o parcial**: é o que faz toda falha — o
+/// prazo, o disco, o hash, um `?` qualquer no meio, uma tarefa largada antes do
+/// fim — levar o parcial embora, sem depender de quem chama lembrar.
+/// Só um processo morto não passa por aqui, e o que ele deixa é um arquivo
+/// oculto com [`SUFIXO_DO_PARCIAL`], e não um arquivo com o nome final.
+#[derive(Debug)]
+#[must_use = "solto sem nome, o parcial é apagado"]
+pub struct Parcial {
+    /// Onde os bytes estão chegando: `.foto.png.seele-parcial`.
+    caminho: PathBuf,
+    /// A pasta do nome final, que é a mesma do parcial.
+    pasta: PathBuf,
+    /// O nome que veio, já conferido por [`nome_seguro`].
+    nome: String,
+    /// Quantos nomes o final pode tentar: «foto.png», «foto (2).png»…
+    tentativas: u32,
+    /// Se o nome de parcial ainda está na pasta e tem de sair ao soltar.
+    ainda_na_pasta: bool,
+}
+
+/// Cria em `pasta` o arquivo em que um anexo vai chegar, com um nome de parcial.
 ///
-/// Devolve o arquivo aberto **e o caminho real**, que é o que a tela tem de
-/// mostrar depois: «foto (2).png», se foi lá que ele ficou.
+/// **O arquivo nunca começa com o nome final.** Ele é criado como
+/// `.foto.png.seele-parcial` (ver [`SUFIXO_DO_PARCIAL`]), na mesma pasta, e só
+/// ganha o nome que veio — ou um ao lado dele — em [`Parcial::nomear`], depois de
+/// o hash conferir. Um processo que morre no meio do download deixa o parcial, e
+/// não um «foto.png» truncado com cara de completo.
+///
+/// O parcial é criado com `create_new`, que falha se o nome já existir —
+/// arquivo, pasta ou link simbólico, que ele não segue — e é o sistema de
+/// arquivos que responde, não uma conferência feita antes e vencida por uma
+/// corrida. Um parcial que já está lá — de outro anexo do mesmo nome chegando
+/// agora, ou de um processo que morreu — passa ao nome seguinte, e não é
+/// tocado: daqui não se sabe se ele ainda está sendo escrito.
+///
+/// O nome é conferido aqui com [`nome_seguro`], e não só por quem chama: esta é
+/// a última porta antes do disco, e uma regra que dependesse de cada chamador
+/// lembrar dela é uma regra que um chamador novo esquece. `tentativas` é quantos
+/// nomes finais [`Parcial::nomear`] pode tentar: [`TENTATIVAS`] para o app, que
+/// grava ao lado; um para quem escolheu o caminho inteiro e não quer outro.
 ///
 /// # Errors
 ///
 /// `InvalidInput` quando o nome não passa em [`nome_seguro`]; `AlreadyExists`
-/// quando os [`TENTATIVAS`] nomes estão tomados; e o erro do sistema, como veio,
-/// em qualquer outro caso.
-pub fn abrir_sem_sobrescrever(pasta: &Path, nome: &str) -> io::Result<(File, PathBuf)> {
-    let nome =
-        nome_seguro(nome).map_err(|recusa| io::Error::new(io::ErrorKind::InvalidInput, recusa))?;
+/// quando os [`TENTATIVAS`] nomes de parcial estão tomados; e o erro do
+/// sistema, como veio, em qualquer outro caso.
+pub fn abrir_parcial(pasta: &Path, nome: &str, tentativas: u32) -> io::Result<(File, Parcial)> {
+    let nome = nome_seguro(nome).map_err(recusado)?;
     for vez in 1..=TENTATIVAS {
-        let candidato = nome_ao_lado(nome, vez);
-        // O sufixo só acrescenta espaço, parênteses e algarismos a pedaços de um
-        // nome que já passou, então isto não recusa nada que se saiba. Fica
-        // porque «não se sabe de nada» não é prova, e o custo é uma passada.
-        nome_seguro(&candidato)
-            .map_err(|recusa| io::Error::new(io::ErrorKind::InvalidInput, recusa))?;
+        let candidato = nome_do_parcial(nome, vez);
+        // O parcial só acrescenta ponto, espaço, parênteses, algarismos e o
+        // sufixo a um pedaço de um nome que já passou, então isto não recusa
+        // nada que se saiba. Fica porque «não se sabe de nada» não é prova, e o
+        // custo é uma passada.
+        nome_seguro(&candidato).map_err(recusado)?;
         let caminho = pasta.join(&candidato);
         match OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&caminho)
         {
-            Ok(arquivo) => return Ok((arquivo, caminho)),
+            Ok(arquivo) => {
+                let parcial = Parcial {
+                    caminho,
+                    pasta: pasta.to_owned(),
+                    nome: nome.to_owned(),
+                    tentativas,
+                    ainda_na_pasta: true,
+                };
+                return Ok((arquivo, parcial));
+            }
             Err(erro) if erro.kind() == io::ErrorKind::AlreadyExists => {}
             Err(erro) => return Err(erro),
         }
     }
     Err(io::Error::new(
         io::ErrorKind::AlreadyExists,
-        format!("os {TENTATIVAS} nomes ao lado de «{nome}» já existem nesta pasta"),
+        format!("os {TENTATIVAS} nomes de parcial de «{nome}» já existem nesta pasta"),
     ))
+}
+
+impl Parcial {
+    /// Onde os bytes estão chegando.
+    #[must_use]
+    pub fn caminho(&self) -> &Path {
+        &self.caminho
+    }
+
+    /// Dá ao parcial o nome final, **sem substituir nada**, e devolve o caminho
+    /// real: «foto (2).png», se foi lá que ele ficou.
+    ///
+    /// Chame só depois de o hash conferir: é este o instante em que o arquivo
+    /// passa a ter cara de completo.
+    ///
+    /// Cada nome, de «foto.png» a «foto (N).png» (N é o `tentativas` de
+    /// [`abrir_parcial`]), é tentado com `std::fs::hard_link`, que falha se o
+    /// nome já existir — e é o sistema de arquivos que responde, sem corrida
+    /// entre olhar e gravar. Depois o nome de parcial sai, e o arquivo fica só
+    /// com o final. A quarentena que quem recebe pôs no parcial vai junto: o
+    /// link é outro nome para o mesmo arquivo.
+    ///
+    /// **Num volume sem link físico** — FAT e exFAT, onde o `link` volta ENOTSUP
+    /// no macOS (medido) e, pelo `vfs_link` do kernel, EPERM no Linux —, o
+    /// recuo reserva o nome final com
+    /// `create_new` e troca a reserva pelo parcial com `rename`. Ele também
+    /// nunca passa por cima de um arquivo da pessoa: o `rename` só substitui a
+    /// reserva vazia que esta mesma chamada acabou de criar. O que ele não tem é
+    /// o link num passo só: se outro programa trocasse a reserva por um arquivo
+    /// dele no instante entre os dois passos, o `rename` passaria por cima; e um
+    /// processo que morra entre os dois deixa uma reserva vazia com o nome
+    /// final — vazia, e não truncada. Medido num volume FAT32 e num exFAT
+    /// montados no macOS: o `link` recusa, a troca funciona, e a quarentena vai
+    /// junto com o arquivo.
+    ///
+    /// # Errors
+    ///
+    /// `AlreadyExists` quando os nomes permitidos estão todos tomados, e o erro
+    /// do sistema, como veio, em qualquer outro caso. Em todos, o parcial é
+    /// apagado ao soltar.
+    pub fn nomear(self) -> io::Result<PathBuf> {
+        self.nomear_com(|de, para| std::fs::hard_link(de, para))
+    }
+
+    /// [`Self::nomear`], com o link físico trocável: o teste recusa o link de
+    /// propósito para provar o recuo num volume que o aceitaria.
+    fn nomear_com(mut self, ligar: impl Fn(&Path, &Path) -> io::Result<()>) -> io::Result<PathBuf> {
+        let mut sem_link: Option<io::Error> = None;
+        for vez in 1..=self.tentativas {
+            let candidato = nome_ao_lado(&self.nome, vez);
+            nome_seguro(&candidato).map_err(recusado)?;
+            let destino = self.pasta.join(&candidato);
+            let feito = if sem_link.is_some() {
+                reservar_e_trocar(&self.caminho, &destino)
+            } else {
+                match ligar(&self.caminho, &destino) {
+                    // O nome final e o de parcial são agora o mesmo arquivo, e
+                    // o de parcial sai quando este valor é solto, na volta.
+                    Ok(()) => Ok(()),
+                    Err(erro) if erro.kind() == io::ErrorKind::AlreadyExists => Err(erro),
+                    // Qualquer outro erro é lido como «este volume não faz
+                    // link»: o macOS diz ENOTSUP, que o std não classifica, o
+                    // Linux diria EPERM, e o recuo também não substitui nada. Um
+                    // erro de verdade — sem permissão, disco cheio — volta do
+                    // recuo do mesmo jeito.
+                    Err(erro) => {
+                        sem_link = Some(erro);
+                        reservar_e_trocar(&self.caminho, &destino)
+                    }
+                }
+            };
+            if feito.is_ok() && sem_link.is_some() {
+                // A troca levou o nome de parcial junto: não há o que apagar.
+                self.ainda_na_pasta = false;
+            }
+            match feito {
+                Ok(()) => {
+                    if let Some(erro) = &sem_link {
+                        tracing::info!(
+                            caminho = %destino.display(),
+                            %erro,
+                            "o volume não aceitou link físico, e o anexo ganhou o nome final pela reserva e troca"
+                        );
+                    }
+                    return Ok(destino);
+                }
+                Err(erro) if erro.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(erro) => return Err(erro),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "os {} nomes permitidos para «{}» já existem nesta pasta",
+                self.tentativas, self.nome
+            ),
+        ))
+    }
+}
+
+/// O recuo de [`Parcial::nomear`] num volume sem link físico.
+///
+/// Reserva `destino` com `create_new` — que falha se o nome existir, como o
+/// link — e troca a reserva pelo parcial. Se a troca falhar, a reserva, que é
+/// desta chamada e está vazia, sai.
+fn reservar_e_trocar(parcial: &Path, destino: &Path) -> io::Result<()> {
+    drop(
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destino)?,
+    );
+    std::fs::rename(parcial, destino).inspect_err(|_| {
+        let _ = std::fs::remove_file(destino);
+    })
+}
+
+impl Drop for Parcial {
+    fn drop(&mut self) {
+        if self.ainda_na_pasta {
+            let _ = std::fs::remove_file(&self.caminho);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -367,9 +574,11 @@ mod testes {
         let dir = pasta("ao-lado");
         let mut nomes = Vec::new();
         for vez in 0..4_u8 {
-            let (mut arquivo, caminho) =
-                abrir_sem_sobrescrever(&dir, "foto.png").expect("abrir um nome livre");
+            let (mut arquivo, parcial) =
+                abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("abrir um parcial");
             arquivo.write_all(&[vez]).expect("gravar um byte");
+            drop(arquivo);
+            let caminho = parcial.nomear().expect("dar um nome livre");
             nomes.push(
                 caminho
                     .strip_prefix(&dir)
@@ -435,8 +644,12 @@ mod testes {
         );
 
         let dir = pasta("longo");
-        let (_, primeiro) = abrir_sem_sobrescrever(&dir, &nome).expect("o nome livre");
-        let (_, segundo) = abrir_sem_sobrescrever(&dir, &nome).expect(
+        let salvar = || {
+            let (_, parcial) = abrir_parcial(&dir, &nome, TENTATIVAS)?;
+            parcial.nomear()
+        };
+        let primeiro = salvar().expect("o nome livre");
+        let segundo = salvar().expect(
             "o nome ao lado de um nome de 255 bytes não abriu: sem o corte do radical, \
              ele passa do limite e quem recebe não consegue salvar",
         );
@@ -470,5 +683,236 @@ mod testes {
              {MAX_FILE_NAME_LEN} bytes ou não é mais só um nome: {} bytes",
             ao_lado.len()
         );
+    }
+
+    /// Os nomes que estão em `dir` agora, em ordem.
+    fn nomes(dir: &Path) -> Vec<String> {
+        let mut nomes: Vec<String> = std::fs::read_dir(dir)
+            .expect("ler a pasta do teste")
+            .flatten()
+            .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+            .collect();
+        nomes.sort();
+        nomes
+    }
+
+    #[test]
+    fn o_parcial_nunca_tem_o_nome_final_e_so_ganha_o_nome_no_fim() {
+        let dir = pasta("parcial");
+        let (mut arquivo, parcial) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("abrir o parcial numa pasta vazia");
+        arquivo.write_all(b"metade").expect("gravar no parcial");
+
+        // Enquanto chega, o arquivo não tem o nome final: um processo que morre
+        // aqui deixa um parcial, e não um «foto.png» truncado.
+        assert!(
+            !nomes(&dir).iter().any(|nome| nome == "foto.png"),
+            "o arquivo que ainda está chegando já tem o nome final, e um processo \
+             que morra agora deixa um «foto.png» truncado com cara de completo: {:?}",
+            nomes(&dir)
+        );
+        let parcial_nome = parcial
+            .caminho()
+            .file_name()
+            .and_then(|nome| nome.to_str())
+            .expect("o parcial tem um nome de texto")
+            .to_owned();
+        assert!(
+            parcial_nome.starts_with('.')
+                && parcial_nome.ends_with(SUFIXO_DO_PARCIAL)
+                && parcial_nome.contains("foto.png"),
+            "o parcial não é um arquivo oculto com o nome que veio e o sufixo de \
+             parcial: «{parcial_nome}»"
+        );
+        assert_eq!(
+            parcial.caminho().parent(),
+            Some(dir.as_path()),
+            "o parcial não está na mesma pasta do nome final, e o link para o nome \
+             final atravessaria volumes"
+        );
+
+        arquivo.write_all(b" e o resto").expect("gravar o resto");
+        drop(arquivo);
+        let final_ = parcial.nomear().expect("dar o nome final ao parcial");
+        assert_eq!(
+            final_,
+            dir.join("foto.png"),
+            "o arquivo não ganhou o nome que veio com ele"
+        );
+        assert_eq!(
+            nomes(&dir),
+            ["foto.png"],
+            "depois de ganhar o nome final, o parcial continua na pasta"
+        );
+        assert_eq!(
+            std::fs::read(&final_).expect("ler o arquivo com o nome final"),
+            b"metade e o resto",
+            "o arquivo com o nome final não tem os bytes que foram gravados no parcial"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dar_o_nome_final_nunca_substitui_o_que_ja_estava_la() {
+        let dir = pasta("nome-final");
+        std::fs::write(dir.join("foto.png"), "original").expect("o arquivo da pessoa");
+
+        // Dois parciais do mesmo nome ao mesmo tempo, como dois anexos «foto.png»
+        // salvos um logo depois do outro.
+        let (mut primeiro, parcial_1) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("o primeiro parcial");
+        let (mut segundo, parcial_2) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("o segundo parcial");
+        assert_ne!(
+            parcial_1.caminho(),
+            parcial_2.caminho(),
+            "dois anexos do mesmo nome chegando ao mesmo tempo gravam no mesmo parcial"
+        );
+        primeiro.write_all(b"1").expect("gravar o primeiro");
+        segundo.write_all(b"2").expect("gravar o segundo");
+        drop((primeiro, segundo));
+
+        let ao_lado = parcial_1.nomear().expect("o primeiro ganha nome");
+        let mais_ao_lado = parcial_2.nomear().expect("o segundo ganha nome");
+        assert_eq!(
+            (ao_lado, mais_ao_lado),
+            (dir.join("foto (2).png"), dir.join("foto (3).png")),
+            "os anexos não foram gravados ao lado do «foto.png» que já estava na pasta"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("foto.png")).expect("o da pessoa continua lá"),
+            "original",
+            "dar o nome final a um anexo substituiu o «foto.png» que já estava na pasta"
+        );
+        assert_eq!(
+            nomes(&dir),
+            ["foto (2).png", "foto (3).png", "foto.png"],
+            "sobrou um parcial na pasta, ou faltou um dos arquivos"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sem_link_fisico_o_recuo_tambem_nao_substitui_nada() {
+        // FAT e exFAT não têm link físico: no macOS o `link` deles volta ENOTSUP,
+        // o erro 45, que o std não classifica (medido num volume de cada,
+        // montado de uma imagem de disco). O recuo tem de dar o nome final sem
+        // passar por cima do que já está lá — aqui com o link recusado de
+        // propósito, com o mesmo erro, num volume que o aceitaria.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let dir = pasta("sem-link");
+        std::fs::write(dir.join("foto.png"), "original").expect("o arquivo da pessoa");
+        let (mut arquivo, parcial) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("abrir o parcial");
+        arquivo.write_all(b"chegou").expect("gravar no parcial");
+        drop(arquivo);
+
+        let final_ = parcial
+            .nomear_com(|_, _| Err(io::Error::from_raw_os_error(45)))
+            .expect(
+                "sem link físico, o anexo não ganhou nome nenhum: o recuo não rodou, \
+                 ou falhou",
+            );
+        assert_eq!(
+            final_,
+            dir.join("foto (2).png"),
+            "sem link físico, o anexo não foi gravado ao lado do que já estava na pasta"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("foto.png")).expect("o da pessoa continua lá"),
+            "original",
+            "sem link físico, dar o nome final substituiu o arquivo que já estava na pasta"
+        );
+        assert_eq!(
+            std::fs::read(&final_).expect("ler o arquivo salvo"),
+            b"chegou",
+            "sem link físico, o arquivo com o nome final não tem os bytes do parcial"
+        );
+        assert_eq!(
+            nomes(&dir),
+            ["foto (2).png", "foto.png"],
+            "sem link físico, sobrou um parcial ou uma reserva vazia na pasta"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas
+                .iter()
+                .any(|linha| linha.contains("link físico") && linha.contains("foto (2).png")),
+            "o anexo ganhou o nome pelo recuo e o `seele.log` não diz que o volume \
+             recusou o link: quem investigar um salvo num pendrive não sabe que \
+             caminho ele fez. Rastro: {linhas:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn um_parcial_que_nao_ganhou_nome_sai_da_pasta() {
+        let dir = pasta("descartado");
+
+        // Uma falha no meio do download: o parcial é solto sem nome.
+        let (mut arquivo, parcial) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("abrir o parcial");
+        arquivo.write_all(b"metade").expect("gravar no parcial");
+        drop(arquivo);
+        drop(parcial);
+        assert_eq!(
+            nomes(&dir),
+            Vec::<String>::new(),
+            "um anexo que não chegou deixou alguma coisa na pasta"
+        );
+
+        // E um nome que não dá para dar: o único permitido já está tomado.
+        std::fs::write(dir.join("foto.png"), "original").expect("o arquivo da pessoa");
+        let (arquivo, parcial) =
+            abrir_parcial(&dir, "foto.png", 1).expect("o parcial abre com o nome final tomado");
+        drop(arquivo);
+        let erro = parcial
+            .nomear()
+            .expect_err("o único nome permitido estava tomado e o anexo ganhou nome assim mesmo");
+        assert_eq!(
+            erro.kind(),
+            io::ErrorKind::AlreadyExists,
+            "o nome tomado não voltou como já existente: {erro}"
+        );
+        assert_eq!(
+            nomes(&dir),
+            ["foto.png"],
+            "o anexo que não ganhou nome deixou o parcial na pasta"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("foto.png")).expect("o da pessoa continua lá"),
+            "original",
+            "o anexo que não ganhou nome mexeu no arquivo que já estava na pasta"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn o_parcial_de_um_nome_de_255_bytes_cabe_em_255() {
+        let nome = format!("a{}.png", "é".repeat(125));
+        let dir = pasta("parcial-longo");
+        let (arquivo, parcial) = abrir_parcial(&dir, &nome, TENTATIVAS).expect(
+            "o parcial de um nome de 255 bytes não abriu: sem o corte, o sufixo de \
+             parcial passa do limite e quem recebe não consegue salvar",
+        );
+        drop(arquivo);
+        let parcial_nome = parcial
+            .caminho()
+            .file_name()
+            .and_then(|nome| nome.to_str())
+            .expect("o parcial tem um nome de texto")
+            .to_owned();
+        assert!(
+            parcial_nome.len() <= MAX_FILE_NAME_LEN && parcial_nome != nome,
+            "o parcial de um nome de 255 bytes tem {} bytes, ou tem o nome final",
+            parcial_nome.len()
+        );
+        assert_eq!(
+            parcial.nomear().expect("dar o nome final"),
+            dir.join(&nome),
+            "o anexo de nome comprido não ganhou o nome que veio com ele"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -351,11 +351,19 @@ async fn o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expiro
     let _ = cliente
         .download_attachment(anexo.id, &destino, Duration::from_millis(300), |_, _| {})
         .await;
-    // O arquivo é criado antes de o pedido sair, e um pedido que não vem tem de
+    // O parcial é criado antes de o pedido sair, e um pedido que não vem tem de
     // levá-lo embora: senão cada anexo expirado deixa um arquivo vazio na pasta.
     assert!(
         !destino.exists(),
         "um anexo que não veio deixou um arquivo vazio onde ia ser gravado"
+    );
+    let sobras: Vec<String> = nomes_em(casa.path())
+        .into_iter()
+        .filter(|nome| nome.contains("nao-vem.bin"))
+        .collect();
+    assert!(
+        sobras.is_empty(),
+        "um anexo que não veio deixou o parcial na pasta: {sobras:?}"
     );
     let razao = ate(&mut cliente, |evento| match evento {
         ServerMessage::AttachmentUnavailable { reason, .. } => Some(*reason),
@@ -921,6 +929,12 @@ async fn um_nome_repetido_nao_substitui_o_que_ja_estava_la() -> Result<()> {
         vec![0xAB; 3_000],
         "o que foi gravado ao lado não são os bytes que subiram"
     );
+    assert_eq!(
+        nomes_em(&pasta),
+        ["foto (2).png", "foto.png"],
+        "depois de salvar, a pasta tem mais que o arquivo da pessoa e o salvo ao \
+         lado: o parcial ficou para trás"
+    );
     ponte.disconnect();
     Ok(())
 }
@@ -977,6 +991,109 @@ async fn um_anexo_que_nao_fecha_com_o_hash_nao_apaga_o_que_ja_estava_la() -> Res
         !pasta.join("foto (2).png").exists(),
         "o arquivo criado para o anexo estragado ficou na pasta pela metade"
     );
+    assert_eq!(
+        nomes_em(&pasta),
+        ["foto.png"],
+        "o anexo que não fechou com o hash deixou o parcial na pasta"
+    );
     ponte.disconnect();
+    Ok(())
+}
+
+/// Os nomes que estão na pasta agora, em ordem.
+fn nomes_em(pasta: &Path) -> Vec<String> {
+    let mut nomes: Vec<String> = std::fs::read_dir(pasta)
+        .expect("ler a pasta do teste")
+        .flatten()
+        .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+        .collect();
+    nomes.sort();
+    nomes
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_download_pela_metade_nunca_tem_o_nome_final() -> Result<()> {
+    let _vaga = vaga::minha();
+    // Um processo que morre no meio do download não apaga nada: o que fica na
+    // pasta é o que estava nela naquele instante. Com o arquivo criado já com
+    // o nome final, era um «foto.png» truncado com cara de completo, que a
+    // pessoa abre sem saber que faltam bytes.
+    //
+    // O andamento roda no meio da gravação, entre um bloco e o seguinte, e o
+    // que a pasta tem ali é o que um processo morto ali deixaria. Pelo
+    // `download_attachment`, e não pela ponte, porque é ele que chama o
+    // andamento na mesma volta da gravação: um evento da ponte chega depois, e
+    // olhar a pasta nele seria olhar outro instante.
+    let teto = 8 * 1024 * 1024_u64;
+    let (endereco, _servidor, casa) = server(teto).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let mut quem_espera = entrar(endereco, 9).await?;
+
+    // Maior que um bloco de leitura, para haver um meio de verdade.
+    let tamanho = 300_000_usize;
+    let origem = arquivo(casa.path(), "origem.png", tamanho, 0x3C);
+    let anexo = mandar_e_receber(
+        &quem_manda,
+        &mut quem_espera,
+        &pedido(&origem, "foto.png", 1),
+    )
+    .await?;
+
+    let pasta = casa.path().join("pasta");
+    std::fs::create_dir(&pasta)?;
+    let destino = pasta.join("foto.png");
+    let mut no_meio: Vec<(u64, Vec<String>)> = Vec::new();
+    let baixados = quem_espera
+        .download_attachment(anexo.id, &destino, ESPERA, |feito, total| {
+            if feito < total {
+                no_meio.push((feito, nomes_em(&pasta)));
+            }
+        })
+        .await?;
+    assert_eq!(
+        baixados,
+        u64::try_from(tamanho).unwrap(),
+        "o anexo não chegou inteiro, e o teste não mede o meio de um download que terminou"
+    );
+    assert!(
+        no_meio.iter().any(|(feito, _)| *feito > 0),
+        "o andamento não foi chamado com nenhum byte gravado e o download por \
+         terminar, então este teste não olhou a pasta no meio de nada: {no_meio:?}"
+    );
+    for (feito, nomes) in &no_meio {
+        assert!(
+            !nomes.iter().any(|nome| nome == "foto.png"),
+            "com {feito} de {tamanho} bytes gravados, a pasta já tinha um \
+             «foto.png»: se o processo morresse ali, ficaria um arquivo truncado \
+             com o nome de um completo. Pasta: {nomes:?}"
+        );
+    }
+
+    // E no fim fica só o nome final, com os bytes que subiram: o parcial saiu.
+    assert_eq!(
+        nomes_em(&pasta),
+        ["foto.png"],
+        "depois do download a pasta não tem só o arquivo salvo, e o parcial ficou \
+         para trás"
+    );
+    assert_eq!(
+        std::fs::read(&destino)?,
+        vec![0x3C; tamanho],
+        "o arquivo com o nome final não tem os bytes que subiram"
+    );
+
+    // A quarentena fica no arquivo com o nome final, que é o que alguém abre.
+    #[cfg(target_os = "macos")]
+    {
+        let marca = std::process::Command::new("xattr")
+            .args(["-p", "com.apple.quarantine"])
+            .arg(&destino)
+            .output()?;
+        assert!(
+            marca.status.success() && String::from_utf8_lossy(&marca.stdout).contains("SEELE"),
+            "o arquivo salvo não tem a quarentena do SEELE, e o Gatekeeper não para \
+             quem for abri-lo: {marca:?}"
+        );
+    }
     Ok(())
 }
