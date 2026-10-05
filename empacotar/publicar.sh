@@ -487,9 +487,11 @@ secao_do_escopo() {
 # **E todo o resto é contado, e não descartado.** Um assunto sem prefixo, ou com
 # um que esta casa não conhece (`wip:`), não diz se muda o produto, e o resumo
 # não tem como saber. Ele descartava esses assuntos calado e, com as duas
-# seções vazias, afirmava «nenhuma mudança de produto»: foi a frase da v0.15.0,
-# numa faixa de 169 assuntos, 146 deles sem prefixo e cheios de código. Agora a
-# página diz que não adivinha, e quem publica é avisado de quantos são.
+# seções vazias, afirmava «nenhuma mudança de produto». Foi a frase da página
+# da v0.15.0, cuja faixa tinha quatro assuntos sem prefixo, um deles com 85
+# arquivos (`14d9c30`); e era a da faixa seguinte, que em 04/10/2026 tinha 169
+# assuntos, 146 sem prefixo. Agora a página diz que não adivinha, e quem
+# publica é avisado de quantos são.
 # A primeira letra em maiúscula, e um ponto no fim.
 #
 # Os assuntos deste repositório já são frases inteiras em português — «o canal
@@ -682,8 +684,9 @@ $ndm_escopo
 # A linha do corpo do release que diz o que a bateria fez antes desta versão.
 #
 # **Quem baixa não vê o terminal de quem publica.** O `--sem-bateria` grita
-# aqui, e a página da versão não dizia nada: «bateria» não aparecia no corpo da
-# v0.15.0, e uma versão testada e uma pulada saíam com o mesmo texto.
+# aqui, e a página da versão não dizia nada: «bateria» não aparece no corpo da
+# v0.15.0 (medido em 04/10/2026), e uma versão testada e uma pulada saíam com o
+# mesmo texto.
 #
 # Dois argumentos, sem tocar em disco nem em rede, para se provar alimentando
 # texto, como o `--notas`: `sim` ou `nao` para o `--sem-bateria`, e os sistemas

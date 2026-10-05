@@ -1829,12 +1829,13 @@ fn notas_e_avisos(assuntos: &str) -> (String, String) {
 
 #[test]
 fn um_assunto_sem_prefixo_nao_vira_nenhuma_mudanca_de_produto() {
-    // **A frase falsa da v0.15.0.** A faixa dela tinha 169 assuntos: 23 `docs:`
-    // e 146 sem prefixo nenhum, que é como este repositório escreve a maior
-    // parte dos commits — uma frase em português que diz o que mudou. O resumo
-    // só entendia `feat`, `fix` e `perf`, descartava o resto calado, e com as
-    // duas seções vazias afirmava «nenhuma mudança de produto» numa faixa cheia
-    // de código.
+    // **A frase falsa da página da v0.15.0.** A faixa dela tinha quatro
+    // assuntos, nenhum com prefixo — é como este repositório escreve a maior
+    // parte dos commits, uma frase em português que diz o que mudou —, e um
+    // deles mexia em 85 arquivos (`14d9c30`). O resumo só entendia `feat`,
+    // `fix` e `perf`, descartava o resto calado, e com as duas seções vazias
+    // afirmava «nenhuma mudança de produto». A faixa seguinte, medida em
+    // 04/10/2026, dava o mesmo: 169 assuntos, 23 `docs:` e 146 sem prefixo.
     //
     // Um assunto sem prefixo não diz se muda o produto, e o resumo não tem
     // como saber. O que ele pode é parar de afirmar o que não sabe.
@@ -2448,9 +2449,9 @@ impl Drop for Instalador {
 #[cfg(unix)]
 #[test]
 fn o_instalador_de_uma_linha_confere_a_lista_de_somas_antes_de_baixar_o_pacote() {
-    // **Nenhuma das últimas versões publica pacote do Linux**, e o `install.sh`
-    // descobria isso baixando o pacote primeiro: a falha dizia «não consegui
-    // baixar», que não diz se foi a rede, o nome ou a versão. A lista de somas
+    // **A v0.15.0 não publica pacote do Linux** (medido em 04/10/2026), e o
+    // `install.sh` descobria isso baixando o pacote primeiro: a falha dizia «não
+    // consegui baixar», que não diz se foi a rede, o nome ou a versão. A lista de somas
     // sai em todo release e diz o que ele publica — lida antes, ela responde a
     // pergunta certa, com a saída certa: compilar do código.
     let instalador = Instalador::novo();
@@ -3289,9 +3290,9 @@ fn linha_da_bateria(pedidos: &str, sem_bateria: bool) -> (i32, String) {
 fn a_linha_da_bateria_diz_o_que_rodou_e_onde() {
     // **O corpo do release não dizia se a bateria tinha rodado.** O
     // `--sem-bateria` grita no terminal de quem publica, e quem baixa não vê
-    // esse terminal: a v0.15.0 saiu sem a palavra «bateria» na página. A linha
-    // diz o que rodou, e o Windows só quando ele foi pedido — a bateria de lá
-    // só roda quando há pacote de lá.
+    // esse terminal: a página da v0.15.0 não tem a palavra «bateria» (medido
+    // em 04/10/2026). A linha diz o que rodou, e o Windows só quando ele foi
+    // pedido — a bateria de lá só roda quando há pacote de lá.
     let (estado, aqui) = linha_da_bateria("macos linux", false);
     assert_eq!(estado, 0, "a linha da bateria não saiu:\n{aqui}");
     assert!(
