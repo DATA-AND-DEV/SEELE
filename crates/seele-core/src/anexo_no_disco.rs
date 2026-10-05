@@ -97,12 +97,23 @@ const FORMATACAO: [(char, char); 6] = [
 
 /// Os nomes que o Windows reserva para dispositivo, em maiúsculas.
 ///
-/// Valem com qualquer extensão — `nul.txt` é o NUL — e sem caixa. Os três
-/// sobrescritos de COM e LPT também: o Windows os lê como `COM1`, `COM2`…
-const RESERVADOS: [&str; 28] = [
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "COM¹", "COM²",
-    "COM³", "LPT¹", "LPT²", "LPT³",
+/// De onde vem a lista: a página «Naming Files, Paths, and Namespaces» da
+/// documentação do Win32, que manda não usar `CON`, `PRN`, `AUX`, `NUL`, `COM0`
+/// a `COM9`, `COM¹`, `COM²`, `COM³`, `LPT0` a `LPT9`, `LPT¹`, `LPT²` e `LPT³` —
+/// os três sobrescritos porque o Windows os lê como `COM1`, `COM2`… —, nem
+/// esses nomes seguidos de extensão. E mais `CONIN$` e `CONOUT$`, a entrada e a
+/// saída do console, que o `CreateFile` abre como dispositivo.
+///
+/// O `ntpath.isreserved` do Python, que cita a mesma página, recusa `CONIN$` e
+/// `CONOUT$` e não recusa `COM0` nem `LPT0` (conferido no 3.14). Os dois zeros
+/// ficam aqui assim mesmo: recusar um nome a mais custa a quem mandou escolher
+/// outro, e gravar num dispositivo custa o arquivo.
+///
+/// Valem com qualquer extensão — `nul.txt` é o NUL — e sem caixa.
+const RESERVADOS: [&str; 32] = [
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM0", "COM1", "COM2", "COM3", "COM4",
+    "COM5", "COM6", "COM7", "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
+    "LPT7", "LPT8", "LPT9", "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³",
 ];
 
 fn e_formatacao(letra: char) -> bool {
@@ -314,6 +325,17 @@ mod testes {
             "COM¹.txt",
             "CON .txt",
             "a\u{200B}.png",
+            // O zero de COM e LPT, que a lista da Microsoft acrescentou, e os dois
+            // nomes do console: sozinhos, com extensão e em minúsculas, porque
+            // a regra compara o radical sem caixa.
+            "COM0",
+            "lpt0",
+            "com0.txt",
+            "LPT0.tar.gz",
+            "CONIN$",
+            "CONOUT$",
+            "conin$.txt",
+            "Conout$.log",
         ] {
             assert!(
                 nome_seguro(hostil).is_err(),
@@ -328,6 +350,8 @@ mod testes {
             ".bashrc",
             "console.log",
             "com10.txt",
+            "conin.txt",
+            "lpt00.txt",
         ] {
             assert_eq!(
                 nome_seguro(nome),
