@@ -936,12 +936,15 @@ impl Client {
     /// os bytes chegam num parcial ao lado de `destination`, criado **antes** de
     /// o pedido sair por [`crate::anexo_no_disco::abrir_parcial`], e só
     /// ganham o nome `destination` depois de o hash conferir, por um link que
-    /// falha se ele já existir. O nome de `destination` passa por
-    /// [`crate::anexo_no_disco::nome_seguro`] como qualquer outro.
+    /// falha se ele já existir — ou, num volume sem link físico, por uma
+    /// reserva do nome que falha do mesmo jeito. O nome de `destination` passa
+    /// por [`crate::anexo_no_disco::nome_seguro`] como qualquer outro.
     ///
     /// Um `destination` que já existe é recusado também antes do pedido, para
     /// não baixar à toa. Essa conferência é só um atalho, vencível por uma
-    /// corrida: quem garante que nada é substituído é o link.
+    /// corrida: quem garante que nada é substituído é o link, ou, num volume
+    /// sem link físico, a reserva do recuo de
+    /// [`crate::anexo_no_disco::Parcial::nomear`].
     ///
     /// # Errors
     ///
@@ -2359,7 +2362,11 @@ impl Transfers {
     /// guard the system already has, and it only works if whoever writes the
     /// file turns it on. A marca entra no parcial, **antes** de ele ganhar o nome
     /// final: o link e a troca de nome levam junto o que é do arquivo, e assim o
-    /// nome final nunca existe sem ela.
+    /// arquivo com os bytes nunca tem o nome final sem ela — quando o sistema de
+    /// arquivos guarda a marca. Um FAT ou exFAT no Windows não tem onde guardar
+    /// o fluxo `Zone.Identifier`, e lá o arquivo fica sem marca nenhuma; e no
+    /// recuo de um volume sem link físico a reserva tem o nome final sem a marca
+    /// por um instante, vazia, até a troca pôr o parcial no lugar dela.
     ///
     /// # Errors
     ///

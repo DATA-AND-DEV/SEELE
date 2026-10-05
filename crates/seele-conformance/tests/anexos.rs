@@ -199,8 +199,12 @@ async fn baixar_num_caminho_que_ja_existe_nao_toca_no_que_estava_la() -> Result<
     let _vaga = vaga::minha();
     // A porta da conformidade, `download_attachment`, recebe um caminho inteiro
     // e grava nele. Com `File::create`, um arquivo que já estava lá era truncado
-    // e reescrito com os bytes de outra pessoa, sem pergunta nenhuma. Com
-    // `create_new`, a gravação recusa e o que estava lá fica como estava.
+    // e reescrito com os bytes de outra pessoa, sem pergunta nenhuma. Agora os
+    // bytes chegam num parcial ao lado, e quem recusa este caminho é o atalho
+    // de `download_attachment`, que vê que ele já existe antes de pedir byte
+    // nenhum. O atalho perde uma corrida; quem garante, numa pasta com link
+    // físico como esta, é o link que dá o nome final, que falha se o nome
+    // existir, e o que estava lá fica como estava.
     let (endereco, _servidor, casa) = server(64 * 1024).await?;
     let quem_manda = entrar(endereco, 7).await?;
     let mut quem_espera = entrar(endereco, 9).await?;

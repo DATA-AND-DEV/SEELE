@@ -24,10 +24,12 @@
 //! parcial — `.foto.png.seele-parcial` — e com `create_new`, que falha em vez
 //! de truncar e falha também diante de um link simbólico que já estava lá, em
 //! vez de segui-lo. Só depois de o hash conferir, [`Parcial::nomear`] dá o nome
-//! final, com um link físico que também falha se o nome existir: um arquivo da
-//! pessoa com o mesmo nome fica onde estava, e o novo ganha o nome ao lado, como
-//! «foto (2).png». Um processo que morre no meio do download deixa um parcial
-//! oculto, e não um «foto.png» truncado com cara de completo.
+//! final, com um link físico que também falha se o nome existir — ou, num
+//! volume sem link físico, com uma reserva do nome que falha do mesmo jeito: um
+//! arquivo da pessoa com o mesmo nome fica onde estava, e o novo ganha o nome ao
+//! lado, como «foto (2).png». Um processo que morre no meio do download deixa
+//! um parcial — que o ponto na frente esconde no Mac e no Linux, mas não no
+//! Explorer do Windows —, e não um «foto.png» truncado com cara de completo.
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -35,8 +37,13 @@ use std::path::{Path, PathBuf};
 
 use seele_proto::control::MAX_FILE_NAME_LEN;
 
-/// Quantos nomes [`Parcial::nomear`] tenta antes de desistir — e quantos nomes
-/// de parcial [`abrir_parcial`] tenta.
+/// Quantos nomes finais o app deixa [`Parcial::nomear`] tentar antes de
+/// desistir — é o `tentativas` que ele passa a [`abrir_parcial`] —, e quantos
+/// nomes de parcial [`abrir_parcial`] tenta sempre.
+///
+/// [`Parcial::nomear`] tenta o `tentativas` que [`abrir_parcial`] recebeu, e não
+/// esta constante: quem escolhe o caminho inteiro, como a porta da
+/// conformidade, passa um, e só o nome exato serve.
 ///
 /// «foto.png», «foto (2).png»… até «foto (99).png». Uma pasta com noventa e nove
 /// arquivos do mesmo nome é uma pasta em que mais um não ajuda ninguém a achar
@@ -290,7 +297,8 @@ fn recusado(recusa: NomeRecusado) -> io::Error {
 /// prazo, o disco, o hash, um `?` qualquer no meio, uma tarefa largada antes do
 /// fim — levar o parcial embora, sem depender de quem chama lembrar.
 /// Só um processo morto não passa por aqui, e o que ele deixa é um arquivo
-/// oculto com [`SUFIXO_DO_PARCIAL`], e não um arquivo com o nome final.
+/// com [`SUFIXO_DO_PARCIAL`] — oculto no Mac e no Linux, à vista no Explorer do
+/// Windows —, e não um arquivo com o nome final.
 #[derive(Debug)]
 #[must_use = "solto sem nome, o parcial é apagado"]
 pub struct Parcial {
@@ -357,7 +365,15 @@ pub fn abrir_parcial(pasta: &Path, nome: &str, tentativas: u32) -> io::Result<(F
                 };
                 return Ok((arquivo, parcial));
             }
-            Err(erro) if erro.kind() == io::ErrorKind::AlreadyExists => {}
+            // Pular em silêncio seria o produto sabendo de um arquivo na pasta
+            // da pessoa e não contando: quem achar um parcial esquecido e abrir
+            // o `seele.log` tem de achar esta linha com o caminho dele.
+            Err(erro) if erro.kind() == io::ErrorKind::AlreadyExists => tracing::info!(
+                caminho = %caminho.display(),
+                "já havia na pasta um arquivo com o nome de parcial deste anexo, de outro \
+                 anexo do mesmo nome chegando agora ou de um processo que morreu; ele \
+                 ficou como estava, e o anexo vai para o nome de parcial seguinte"
+            ),
             Err(erro) => return Err(erro),
         }
     }
@@ -403,8 +419,9 @@ impl Parcial {
     /// # Errors
     ///
     /// `AlreadyExists` quando os nomes permitidos estão todos tomados, e o erro
-    /// do sistema, como veio, em qualquer outro caso. Em todos, o parcial é
-    /// apagado ao soltar.
+    /// do sistema em qualquer outro caso: como veio, ou, quando o recuo rodou e
+    /// falhou, com o tipo dele e um texto que diz também que o volume recusou o
+    /// link e com que erro. Em todos, o parcial é apagado ao soltar.
     pub fn nomear(self) -> io::Result<PathBuf> {
         self.nomear_com(
             |de, para| std::fs::hard_link(de, para),
@@ -460,7 +477,24 @@ impl Parcial {
                     return Ok(destino);
                 }
                 Err(erro) if erro.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(erro) => return Err(erro),
+                Err(erro) => {
+                    return Err(match &sem_link {
+                        // O erro que volta é o que a linha «o anexo não foi
+                        // salvo» leva ao `seele.log`. Só com o da troca, quem
+                        // investiga vê um nome que não pôde ser trocado e não
+                        // sabe por que houve troca: o link recusado vai junto.
+                        // O tipo é o do recuo, que é o erro que impediu o nome.
+                        Some(do_link) => io::Error::new(
+                            erro.kind(),
+                            format!(
+                                "o volume não aceitou link físico ({do_link}), e o recuo, \
+                                 que reserva o nome final e troca a reserva pelo parcial, \
+                                 falhou: {erro}"
+                            ),
+                        ),
+                        None => erro,
+                    });
+                }
             }
         }
         Err(io::Error::new(
@@ -496,10 +530,10 @@ fn reservar_e_trocar(
 
 /// Apaga `caminho`, e diz no `seele.log` quando não consegue.
 ///
-/// O que não sai fica na pasta da pessoa — o parcial, oculto; a reserva do
-/// recuo, vazia e com o nome final —, e só quem tentou apagar sabe disso. Um
-/// `let _` aqui era o produto sabendo e não contando: a tela dizia que nada
-/// tinha ficado, e a pergunta voltava sem dado nenhum.
+/// O que não sai fica na pasta da pessoa — o parcial, com o nome de parcial; a
+/// reserva do recuo, vazia e com o nome final —, e só quem tentou apagar sabe
+/// disso. Um `let _` aqui era o produto sabendo e não contando: a tela dizia
+/// que nada tinha ficado, e a pergunta voltava sem dado nenhum.
 ///
 /// `NotFound` não é falha: o que se queria era que o arquivo não estivesse lá,
 /// e ele não está.
@@ -510,7 +544,7 @@ fn apagar_dizendo(caminho: &Path, o_que: &str) {
         Err(erro) => tracing::warn!(
             caminho = %caminho.display(),
             %erro,
-            "não consegui apagar {o_que}, e ele ficou na pasta"
+            "não consegui apagar {o_que}, e o arquivo ficou na pasta"
         ),
     }
 }
@@ -754,8 +788,8 @@ mod testes {
             parcial_nome.starts_with('.')
                 && parcial_nome.ends_with(SUFIXO_DO_PARCIAL)
                 && parcial_nome.contains("foto.png"),
-            "o parcial não é um arquivo oculto com o nome que veio e o sufixo de \
-             parcial: «{parcial_nome}»"
+            "o parcial não começa pelo ponto que o esconde no Mac e no Linux, não \
+             tem o nome que veio ou não tem o sufixo de parcial: «{parcial_nome}»"
         );
         assert_eq!(
             parcial.caminho().parent(),
@@ -1010,10 +1044,9 @@ mod testes {
                 },
             )
             .expect_err("a troca recusada deu nome ao anexo assim mesmo");
-        assert_eq!(
-            erro.to_string(),
-            "a troca foi recusada pelo teste",
-            "o erro da troca não voltou a quem chamou"
+        assert!(
+            erro.to_string().contains("a troca foi recusada pelo teste"),
+            "o erro da troca não voltou a quem chamou: {erro}"
         );
         let reserva = dir.join("foto.png");
         assert!(
@@ -1030,6 +1063,98 @@ mod testes {
              qual nem por quê: a pessoa acha um «foto.png» vazio que ninguém \
              explica. Rastro: {linhas:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn um_recuo_que_falha_diz_que_o_volume_recusou_o_link() {
+        // Num FAT ou exFAT em que a troca falha, o erro que volta daqui é o que
+        // a linha «o anexo não foi salvo» do `seele.log` leva. Só com o erro da
+        // troca, quem investiga vê um nome que não pôde ser trocado e não sabe
+        // por que houve troca: o link recusado, que fez o recuo rodar, tem de
+        // ir junto.
+        let dir = pasta("recuo-que-falha");
+        let (arquivo, parcial) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("abrir o parcial");
+        drop(arquivo);
+        let do_link = io::Error::from_raw_os_error(45).to_string();
+
+        let erro = parcial
+            .nomear_com(
+                |_, _| Err(io::Error::from_raw_os_error(45)),
+                |_, _| {
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "a troca foi recusada pelo teste",
+                    ))
+                },
+            )
+            .expect_err("a troca recusada deu nome ao anexo assim mesmo");
+        let texto = erro.to_string();
+        assert!(
+            texto.contains("a troca foi recusada pelo teste"),
+            "o erro da troca, que é o que impediu o nome final, não voltou a quem \
+             chamou: {texto}"
+        );
+        assert!(
+            texto.contains("link físico") && texto.contains(&do_link),
+            "o recuo falhou e o erro que volta não diz que o volume recusou o link \
+             nem com que erro («{do_link}»): a linha «o anexo não foi salvo» do \
+             `seele.log` mostra uma troca de nome que falhou sem dizer por que \
+             houve troca. Erro: {texto}"
+        );
+        assert_eq!(
+            erro.kind(),
+            io::ErrorKind::PermissionDenied,
+            "o erro do recuo voltou com outro tipo, e quem lê o tipo deixa de ver \
+             o erro do sistema que impediu o nome final"
+        );
+        assert_eq!(
+            nomes(&dir),
+            Vec::<String>::new(),
+            "o recuo que falhou deixou o parcial ou a reserva na pasta"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn um_parcial_que_ja_estava_na_pasta_fica_como_estava_e_e_dito_no_log() {
+        // Um parcial com o nome que este anexo tomaria já está na pasta — de
+        // outro anexo do mesmo nome chegando agora, ou de um processo que
+        // morreu. Ele não é tocado, porque daqui não se sabe se ainda está sendo
+        // escrito, e o anexo vai para o nome seguinte. Mas o produto sabe que ele
+        // está lá, e quem achar o arquivo e abrir o `seele.log` tem de achar a
+        // linha com o caminho dele.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let dir = pasta("parcial-que-ja-estava");
+        let ja_estava = dir.join(format!(".foto.png{SUFIXO_DO_PARCIAL}"));
+        std::fs::write(&ja_estava, "de antes").expect("o parcial que já estava");
+
+        let (arquivo, parcial) =
+            abrir_parcial(&dir, "foto.png", TENTATIVAS).expect("abrir o parcial");
+        drop(arquivo);
+        assert_eq!(
+            parcial.caminho(),
+            dir.join(format!(".foto.png (2){SUFIXO_DO_PARCIAL}")),
+            "o anexo não foi para o nome de parcial seguinte ao que já estava na pasta"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ja_estava).expect("o parcial de antes continua lá"),
+            "de antes",
+            "abrir um parcial mexeu no parcial que já estava na pasta"
+        );
+        let linhas = rastro.linhas();
+        let caminho = ja_estava.display().to_string();
+        assert!(
+            linhas
+                .iter()
+                .any(|linha| linha.starts_with("INFO") && linha.contains(&caminho)),
+            "um parcial que já estava na pasta foi pulado e o `seele.log` não diz \
+             qual: quem achar um «.foto.png.seele-parcial» esquecido não acha \
+             nenhuma linha sobre ele. Rastro: {linhas:?}"
+        );
+        drop(parcial);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
