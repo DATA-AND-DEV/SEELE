@@ -8961,6 +8961,21 @@ fn texto_das_literais(js: &str) -> String {
     texto
 }
 
+/// O texto sem os `${…}` que a frase composta interpola: o que a régua mede é o
+/// que a frase diz, e não o nome nem a pasta que entram nela.
+fn sem_interpolacoes(texto: &str) -> String {
+    let mut saida = String::new();
+    let mut resto = texto;
+    while let Some(inicio) = resto.find("${") {
+        saida.push_str(&resto[..inicio]);
+        resto = resto[inicio..]
+            .find('}')
+            .map_or("", |fim| &resto[inicio + fim + 1..]);
+    }
+    saida.push_str(resto);
+    saida
+}
+
 #[test]
 fn a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado() {
     // `nome_seguro` recusa um nome por dez regras, e a tela fica sabendo só que
@@ -8998,14 +9013,44 @@ fn a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado() {
     assert_eq!(
         frase.lines().count(),
         2,
-        "a frase que cita o nome recusado não tem mais duas linhas, e nenhuma \
-         régua mede as frases compostas:\n{frase}"
+        "a frase que cita o nome recusado não tem mais duas linhas, e as réguas \
+         de `DICIONARIOS` não medem as frases compostas:\n{frase}"
     );
     assert!(
         !frase.contains("gravaria"),
         "a frase que cita o nome recusado diz que ele gravaria fora da pasta, e \
          isso só vale para um nome com caminho — não para «Notas 04:10.txt» nem \
          para «Por quê?.pdf»:\n{frase}"
+    );
+
+    // A segunda linha passa pela régua das frases, fora o nome e a pasta que
+    // entram nela: as réguas de `DICIONARIOS` não leem uma frase composta, e
+    // esta chegou a 259 caracteres, uma oração de cada vez, antes de ser
+    // cortada.
+    let segunda = sem_interpolacoes(frase.lines().nth(1).unwrap_or_default());
+    let tamanho = segunda.chars().count();
+    assert!(
+        tamanho <= LIMITE_DE_FRASE,
+        "a segunda linha da frase que cita o nome recusado tem {tamanho} \
+         caracteres fora o nome e a pasta, e a régua das frases é \
+         {LIMITE_DE_FRASE}:\n{segunda}"
+    );
+
+    // E o título é o mesmo da recusa sem o nome. São a mesma recusa, e um título
+    // trocado num lugar só voltaria a dizer no outro o que este já deixou de
+    // dizer.
+    let Some((_, sem_o_nome)) =
+        sentences_of(&without_comments(&read("ui/frases.js")), "NAO_SALVOS")
+            .into_iter()
+            .find(|(motivo, _)| motivo == "NomeRecusado")
+    else {
+        panic!("`NAO_SALVOS` não tem mais a recusa de um nome");
+    };
+    assert_eq!(
+        frase.lines().next(),
+        sem_o_nome.lines().next(),
+        "a recusa que cita o nome e a que não cita começam por títulos \
+         diferentes, e a mesma recusa é dita de dois jeitos"
     );
 
     let mut regras = 0_usize;
@@ -9249,7 +9294,8 @@ fn no_sentence_the_screen_writes_reaches_a_third_line() {
     // Eram duas; desde o lote A-S1 são três: `fraseDeNaoSalvo` cita o nome
     // recusado e a pasta na segunda linha, a que já diz o que fazer. Este laço
     // não as lê, porque não estão em dicionário; a de `fraseDeNaoSalvo` é
-    // contada por `a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado`.
+    // contada por `a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado`, que
+    // também mede a segunda linha dela pela régua de `LIMITE_DE_FRASE`.
     // `fraseDeSalvar` tem quatro linhas e fica de fora por decisão — o doc de
     // `DICIONARIOS` diz por quê.
     let file = without_comments(&read("ui/frases.js"));

@@ -959,7 +959,8 @@ const TRANSFERENCIAS = {
  */
 const NAO_SALVOS = {
   NomeRecusado:
-    "O NOME QUE VEIO COM ESTE ARQUIVO NÃO É SÓ UM NOME, E NADA FOI GRAVADO.\n" +
+    "ESTE ARQUIVO VEIO COM UM NOME QUE O SEELE NÃO GRAVA " +
+    "NO WINDOWS, NO MAC NEM NO LINUX, E NADA FOI SALVO.\n" +
     "Peça a quem mandou que mande de novo com outro nome.",
   AnexoDesconhecido:
     "ESTE ARQUIVO NÃO ESTÁ NA CONVERSA QUE ESTA JANELA CARREGOU, E NADA FOI GRAVADO.",
@@ -1015,12 +1016,11 @@ function fraseDeNaoSalvo(recusa) {
   const motivo = typeof recusa === "string" ? recusa : recusa?.reason;
   if (motivo === "NomeRecusado" && recusa?.claimed && recusa?.folder) {
     return (
-      "O NOME QUE VEIO COM ESTE ARQUIVO NÃO É SÓ UM NOME, E NADA FOI GRAVADO.\n" +
-      `«${recusa.claimed}» tem um caminho, um caractere ou um nome que o ` +
-      "Windows não aceita, um caractere invisível que disfarça o nome, ou é " +
-      `comprido demais, e o SEELE só grava em ${recusa.folder} um nome que ` +
-      "sirva no Windows, no Mac e no Linux. Peça a quem mandou que mande de " +
-      "novo com outro nome."
+      "ESTE ARQUIVO VEIO COM UM NOME QUE O SEELE NÃO GRAVA " +
+      "NO WINDOWS, NO MAC NEM NO LINUX, E NADA FOI SALVO.\n" +
+      `«${recusa.claimed}» tem um caminho, um caractere ou nome que o Windows ` +
+      "não aceita, um caractere invisível que disfarça o nome, ou é comprido " +
+      `demais. Para gravar em ${recusa.folder}, peça outro nome a quem mandou.`
     );
   }
   return NAO_SALVOS[motivo] ?? `FALHA NÃO IDENTIFICADA (${motivo})`;
