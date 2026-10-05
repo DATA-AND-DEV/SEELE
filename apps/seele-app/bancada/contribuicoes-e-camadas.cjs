@@ -1723,6 +1723,110 @@ function anotando(...anotadas) {
   S.prototype.focarPrimeiro = focar;
 }
 
+// ------------------------ o elo da janela até o Rust, pelo `invoke` de verdade
+
+/**
+ * **`registrarNoAnfitriao` e `anotarRecusa` de `base.js`, até o `invoke`.**
+ *
+ * Todo outro bloco desta bancada troca `registrarNoAnfitriao` por um anotador
+ * de mentira, e por isso nenhum lia o que ela repassa ao comando
+ * `registrar_da_janela`: tirar o `modId` do `invoke`, ou inverter o `meu()` de
+ * `anotarRecusa`, deixava verdes as seis bancadas do `check-runtime` e o
+ * `frontend.rs`, cujo guarda de `anotarRecusa` só procura o texto `meu()`
+ * (pendência 51, item 13; medido de novo em 05/10/2026, com as duas
+ * mutações). Aqui as duas declarações de verdade rodam com um `invoke` de
+ * mentira que anota o que recebe.
+ *
+ * **Num contexto próprio.** O compartilhado tem um `registrarNoAnfitriao`
+ * mudo e um `donoDaRegiao` de mentira, e os blocos dele contam com os dois:
+ * rodar ali as declarações de verdade as trocaria por baixo deles.
+ */
+{
+  const base = ler("base.js");
+  const invocados = [];
+  const elo = vm.createContext({
+    console,
+    geracaoDaSessao: 7,
+    modsCarregados: new Map(),
+    invoke: (cmd, args) => {
+      invocados.push({ cmd, args });
+      return Promise.resolve();
+    },
+    // `donoDaRegiao` a lê ao montar o dono (`midiaMudou`), e sem ela o recorte
+    // lançaria antes de medir qualquer coisa.
+    avisarQueAMidiaMudou: () => {},
+  });
+  for (const de of ["function registrarNoAnfitriao(", "function donoDaRegiao("]) {
+    const inicio = base.indexOf(de);
+    const fim = base.indexOf("\n}\n", inicio);
+    confere("o elo · o recorte", inicio >= 0 && fim > inicio,
+      `«${de}» mudou de forma, e o recorte até o primeiro «\\n}\\n» não a achou`);
+    if (inicio >= 0 && fim > inicio) vm.runInContext(base.slice(inicio, fim + 3), elo);
+  }
+  /** Os argumentos de cada `registrar_da_janela` que saiu desde `de`. */
+  const registrados = (de) => invocados.slice(de).filter((i) => i.cmd === "registrar_da_janela").map((i) => i.args);
+  /** O mesmo objeto, campo a campo e sem campo a mais, em qualquer ordem. */
+  const comoEsperado = (args, esperado) => args !== null && typeof args === "object"
+    && JSON.stringify(Object.keys(args).sort()) === JSON.stringify(Object.keys(esperado).sort())
+    && Object.entries(esperado).every(([chave, valor]) => args[chave] === valor);
+
+  if (typeof elo.registrarNoAnfitriao === "function" && typeof elo.donoDaRegiao === "function") {
+    const mod = { id: "mod/a", hash: "h" };
+    const instancia = { geracao: 7, admite: () => true };
+    const dono = elo.donoDaRegiao(mod, instancia);
+    // Chamada com `?.`, como a região a chama: sem ela, o caso reprova pela
+    // frase dele, e não por um `TypeError` que derrubaria a bancada inteira.
+    confere("o elo · anotarRecusa", typeof dono.anotarRecusa === "function",
+      "o dono de `base.js` não tem `anotarRecusa`, e `mods-regiao.js` a chama em cada mídia recusada");
+
+    // (1) A instância é a carregada e a sessão é a de pé: uma linha, inteira.
+    elo.modsCarregados.set("mod/a", instancia);
+    let de = invocados.length;
+    dono.anotarRecusa?.("x");
+    const esperado = { nivel: "aviso", onde: "recusa-de-mod", oQue: "mod/a: x", modId: "mod/a" };
+    confere(
+      "o elo · anotarRecusa",
+      invocados.length - de === 1 && registrados(de).length === 1 && comoEsperado(registrados(de)[0], esperado),
+      `a recusa de mídia não saiu como um \`registrar_da_janela\` só, com ${JSON.stringify(esperado)}: `
+        + `${JSON.stringify(invocados.slice(de))}`,
+    );
+
+    // (2) Fora da vez: ninguém no mapa, outra instância no lugar desta, ou a
+    // sessão que já não é a de pé. Uma mídia que não montou porque a pessoa
+    // saiu é o desfecho certo, e não aviso.
+    for (const [caso, preparar] of [
+      ["sem instância carregada", () => elo.modsCarregados.clear()],
+      ["com outra instância no lugar", () => elo.modsCarregados.set("mod/a", { geracao: 7, admite: () => true })],
+      ["com a sessão que já não é a de pé", () => {
+        elo.modsCarregados.set("mod/a", instancia);
+        instancia.admite = () => false;
+      }],
+    ]) {
+      preparar();
+      de = invocados.length;
+      dono.anotarRecusa?.("x");
+      confere(
+        "o elo · anotarRecusa fora da vez",
+        invocados.length === de,
+        `${caso}, a recusa ainda foi ao registro: ${JSON.stringify(invocados.slice(de))}`,
+      );
+    }
+    instancia.admite = () => true;
+
+    // (3) O que `registrarNoAnfitriao` recebe é o que vai ao comando: o nível
+    // e o id do MOD também, e não só a frase.
+    de = invocados.length;
+    elo.registrarNoAnfitriao("o", "t", "erro", "mod/a");
+    confere(
+      "o elo · registrarNoAnfitriao",
+      registrados(de).length === 1
+        && comoEsperado(registrados(de)[0], { nivel: "erro", onde: "o", oQue: "t", modId: "mod/a" }),
+      "`registrarNoAnfitriao` não repassou ao `registrar_da_janela` o nível e o id do MOD que recebeu: "
+        + `${JSON.stringify(invocados.slice(de))}`,
+    );
+  }
+}
+
 // ---------------------------------------------- R2 · o roteador, de verdade
 
 {
