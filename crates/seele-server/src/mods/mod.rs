@@ -1196,6 +1196,42 @@ mod tests {
         );
     }
 
+    /// **O texto lançado no topo também não quebra a linha.**
+    ///
+    /// [`Falha::NaoCarregou`] tem `Display` próprio, e o texto dele vai ao
+    /// `seele.log` de quem hospeda por três portas: o «MOD recusado ao subir»
+    /// do `lib.rs`, o «MOD recusado ao recarregar» do `despacho.rs` e o
+    /// `%error` do carregar de cada pedido, em `pedidos.rs`. O teste de cima
+    /// passa só por `chamar`, que dá [`Falha::Lancou`]: sem este, o escape de
+    /// `NaoCarregou` voltaria ao texto cru e nada reclamaria.
+    #[test]
+    fn o_texto_lancado_no_topo_com_quebra_de_linha_fica_numa_linha_so() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        let falha = anfitriao
+            .carregar(
+                "seele/topo-quebra",
+                "throw new Error('a\\nWARN seele_server: forjada');",
+                &pasta_de_teste("topo-quebra"),
+            )
+            .expect_err("um MOD que lança no topo foi carregado");
+        assert!(
+            matches!(falha, Falha::NaoCarregou { .. }),
+            "um MOD que lança no topo não foi dito como um MOD que não carregou, e este teste \
+             deixou de guardar o Display de NaoCarregou: {falha:?}"
+        );
+
+        let dito = falha.to_string();
+        assert!(
+            dito.contains("forjada"),
+            "a falha ao carregar não traz o texto que o MOD lançou no topo: {dito}"
+        );
+        assert!(
+            !dito.contains('\n') && !dito.contains('\r'),
+            "o texto que o MOD lançou no topo quebra a linha do seele.log de quem hospeda, e a \
+             segunda linha sai com a cara do produto: {dito:?}"
+        );
+    }
+
     /// **O texto do MOD cabe no teto pelo tamanho que ele tem escapado.**
     ///
     /// O escape faz um caractere que não se imprime ocupar até dez
@@ -1223,8 +1259,11 @@ mod tests {
             "a falha não traz o texto que o MOD lançou, escapado: {}",
             dito.chars().take(200).collect::<String>()
         );
-        // A moldura: o começo, `" at "` e as duas aspas de cada parte.
-        let moldura = "mod threw while loading: ".len() + " at ".len() + 4;
+        // A moldura deste caso, e só ela: o começo de `Lancou` e as duas aspas
+        // do texto. O onde não entra, porque um texto cortado o leva embora
+        // (a última asserção confere). Uma moldura mais larga deixaria passar
+        // um corte que passasse do teto.
+        let moldura = "mod threw: ".chars().count() + 2;
         assert!(
             dito.chars().count() <= TETO_DO_LANCADO_NO_REGISTRO + moldura,
             "a falha passou do teto da linha: {} caracteres, para um teto de {} mais a \
