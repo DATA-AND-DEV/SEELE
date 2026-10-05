@@ -204,8 +204,11 @@ lançou: o texto, entre aspas e escapado, e, quando o lançado é um `Error`, a
 primeira linha da pilha, que diz onde —
 `mod threw: "ReferenceError: console is not defined" at "<anonymous> (eval_script:1:29)"`.
 Um `throw` no topo do arquivo, ou um erro de sintaxe, sai como
-`mod threw while loading: …`. O texto e o onde, juntos, são cortados em 512
-caracteres contados já escapados.
+`mod threw while loading: …`. Quando nada foi lançado, mas o motor recusou o
+que o MOD lhe deu — um `aoPedir` que falta, um que devolve outra coisa que
+texto, um valor que não é texto em `dados` —, a linha diz `mod failed: …`, com
+o texto do motor: `mod failed: "Error converting from js 'int' into type 'string'"`.
+O texto e o onde, juntos, são cortados em 512 caracteres contados já escapados.
 
 | você escreve | a linha sai em |
 |---|---|

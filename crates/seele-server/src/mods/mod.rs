@@ -80,7 +80,8 @@ const TETO_DE_CONSULTAS: usize = 500;
 /// MOD e vão em `%falha` e `%error` ao `seele.log` de quem hospeda. O `Debug`
 /// os escapa, e o escape faz um caractere que não se imprime ocupar até dez
 /// (`\u{100000}`): cortado antes do escape, um texto de 512 desses chegaria a
-/// 5120 caracteres na linha.
+/// 5120 caracteres na linha. O erro do motor de [`Falha::FalhouSemLancar`] e
+/// de [`Falha::NaoCarregouSemLancar`] passa pelo mesmo corte.
 ///
 /// O número é o da janela (`TETO_DA_FRASE_NO_REGISTRO`, no app), e a regra do
 /// corte é a de `ate_o_teto_do_registro` do executor, reescrita aqui porque o
@@ -102,30 +103,59 @@ const TETO_DO_LANCADO_NO_REGISTRO: usize = 512;
 /// (`mod threw: "ReferenceError: console is not defined" at "…"`), porque ele
 /// é do MOD e vai cru ao `seele.log` de quem hospeda: sem as aspas e o
 /// escape, um `\n` nele escreveria uma linha forjada. E cortado em
-/// [`TETO_DO_LANCADO_NO_REGISTRO`] pelo tamanho escapado. Não atravessa o fio:
+/// [`TETO_DO_LANCADO_NO_REGISTRO`] pelo tamanho escapado. Quando nada foi
+/// lançado, o erro do motor vai do mesmo jeito, em [`Self::FalhouSemLancar`]
+/// e [`Self::NaoCarregouSemLancar`] (`mod failed: "…"`). Não atravessa o fio:
 /// quem pediu recebe `bridge-refused`, como antes.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Falha {
     /// O código não carregou: não compilou, ou o topo dele lançou.
     ///
-    /// O texto do próprio QuickJS separa os dois — `SyntaxError: …` é o que
-    /// não compilou.
+    /// O texto do QuickJS e o onde costumam separar os dois: o que não
+    /// compilou sai como `SyntaxError: …`, com o onde no arquivo
+    /// (`eval_script:1:1`), e um `throw` do topo sai com o onde dentro do
+    /// `<eval>` (`<eval> (eval_script:1:10)`). Mas não é regra: um topo que
+    /// compila e chama `JSON.parse('{')` lança um `SyntaxError` também, com o
+    /// onde no texto que o JSON leu (`<input>:1:1`).
     #[error("mod threw while loading: {texto:?}{}", onde_dito(.onde.as_deref()))]
     NaoCarregou {
-        /// `nome: mensagem` do que foi lançado, ou o erro do motor quando
-        /// nada foi.
+        /// `nome: mensagem` quando é um `Error`; o valor como o JavaScript o
+        /// diria, quando não é.
         texto: String,
         /// A primeira linha da pilha, sem o `at` do começo, quando há.
         onde: Option<String>,
     },
-    /// It threw.
+    /// **Não carregou, e nada foi lançado**: o motor falhou ao montar o
+    /// contexto ou ao rodar o topo, sem exceção do MOD por trás — um teto de
+    /// memória menor que o próprio contexto, por exemplo.
+    ///
+    /// Distinta de [`Self::NaoCarregou`] porque «threw» mandaria quem escreveu
+    /// o MOD procurar um `throw` que não existe.
+    #[error("mod failed while loading: {texto:?}")]
+    NaoCarregouSemLancar {
+        /// O erro do motor.
+        texto: String,
+    },
+    /// Lançou, numa chamada.
     #[error("mod threw: {texto:?}{}", onde_dito(.onde.as_deref()))]
     Lancou {
         /// `nome: mensagem` quando é um `Error`; o valor como o JavaScript o
-        /// diria, quando não é; o erro do motor quando nada foi lançado.
+        /// diria, quando não é.
         texto: String,
         /// A primeira linha da pilha, sem o `at` do começo, quando há.
         onde: Option<String>,
+    },
+    /// **Falhou numa chamada, e nada foi lançado**: o motor recusou uma
+    /// conversão, sem exceção do MOD por trás — um `aoPedir` que falta, um
+    /// que devolve outra coisa que texto, um valor que não é texto em `dados`.
+    ///
+    /// Distinta de [`Self::Lancou`] pela mesma razão de
+    /// [`Self::NaoCarregouSemLancar`]. O caminho de eventos a trata como trata
+    /// quem lançou: desliga o MOD.
+    #[error("mod failed: {texto:?}")]
+    FalhouSemLancar {
+        /// O erro do motor.
+        texto: String,
     },
     /// **Não está carregado aqui**, e isso não é defeito dele.
     ///
@@ -165,6 +195,9 @@ struct Lancado {
     texto: String,
     /// A primeira linha da pilha, sem o `at` do começo.
     onde: Option<String>,
+    /// Nada foi lançado: o texto é o erro do motor, e a falha não pode
+    /// dizer «threw».
+    do_motor: bool,
 }
 
 impl Lancado {
@@ -178,12 +211,12 @@ impl Lancado {
             return Self::do_motor(erro);
         }
         let (texto, onde) = o_que_o_mod_lancou(ctx);
-        Self::no_teto(&texto, onde.as_deref())
+        Self::no_teto(&texto, onde.as_deref(), false)
     }
 
     /// Um erro do motor, sem exceção do MOD por trás.
     fn do_motor(erro: &rquickjs::Error) -> Self {
-        Self::no_teto(&erro.to_string(), None)
+        Self::no_teto(&erro.to_string(), None, true)
     }
 
     /// O texto e o onde cortados para caberem **juntos** em
@@ -192,7 +225,7 @@ impl Lancado {
     /// O texto vem primeiro, e o onde fica com o que sobrar. Um texto que
     /// precisou ser cortado ocupou a linha inteira, e o onde sai: o pedaço
     /// que sobraria dele (`"<an…"`) não diria onde.
-    fn no_teto(texto: &str, onde: Option<&str>) -> Self {
+    fn no_teto(texto: &str, onde: Option<&str>, do_motor: bool) -> Self {
         let inteiro = tamanho_escapado(texto) <= TETO_DO_LANCADO_NO_REGISTRO;
         let texto = cortado_no_teto(texto, TETO_DO_LANCADO_NO_REGISTRO);
         let sobra = TETO_DO_LANCADO_NO_REGISTRO.saturating_sub(tamanho_escapado(&texto));
@@ -200,22 +233,36 @@ impl Lancado {
             .filter(|_| inteiro)
             .map(|onde| cortado_no_teto(onde, sobra))
             .filter(|onde| !onde.is_empty() && onde != MARCA_DO_CORTE);
-        Self { texto, onde }
-    }
-
-    /// Como [`Falha::Lancou`].
-    fn lancou(self) -> Falha {
-        Falha::Lancou {
-            texto: self.texto,
-            onde: self.onde,
+        Self {
+            texto,
+            onde,
+            do_motor,
         }
     }
 
-    /// Como [`Falha::NaoCarregou`].
-    fn nao_carregou(self) -> Falha {
-        Falha::NaoCarregou {
-            texto: self.texto,
-            onde: self.onde,
+    /// Como falha de uma chamada: [`Falha::Lancou`], ou
+    /// [`Falha::FalhouSemLancar`] quando nada foi lançado.
+    fn na_chamada(self) -> Falha {
+        if self.do_motor {
+            Falha::FalhouSemLancar { texto: self.texto }
+        } else {
+            Falha::Lancou {
+                texto: self.texto,
+                onde: self.onde,
+            }
+        }
+    }
+
+    /// Como falha ao carregar: [`Falha::NaoCarregou`], ou
+    /// [`Falha::NaoCarregouSemLancar`] quando nada foi lançado.
+    fn ao_carregar(self) -> Falha {
+        if self.do_motor {
+            Falha::NaoCarregouSemLancar { texto: self.texto }
+        } else {
+            Falha::NaoCarregou {
+                texto: self.texto,
+                onde: self.onde,
+            }
         }
     }
 }
@@ -413,14 +460,16 @@ impl Anfitriao {
     ///
     /// [`Falha::NaoCarregou`] when the source does not compile or its top
     /// level throws, with what it threw; [`Falha::PassouDoTempo`] when its top
-    /// level goes past the step ceiling.
+    /// level goes past the step ceiling. [`Falha::NaoCarregouSemLancar`]
+    /// quando o motor falha sem que nada tenha sido lançado (um contexto que
+    /// não cabe no teto de memória).
     pub fn carregar(
         &mut self,
         id: &str,
         fonte: &str,
         pasta_de_dados: &std::path::Path,
     ) -> Result<(), Falha> {
-        let runtime = Runtime::new().map_err(|erro| Lancado::do_motor(&erro).nao_carregou())?;
+        let runtime = Runtime::new().map_err(|erro| Lancado::do_motor(&erro).ao_carregar())?;
         runtime.set_memory_limit(self.teto_de_memoria);
 
         let passos = Arc::new(AtomicUsize::new(0));
@@ -431,13 +480,13 @@ impl Anfitriao {
         })));
 
         let contexto =
-            Context::full(&runtime).map_err(|erro| Lancado::do_motor(&erro).nao_carregou())?;
+            Context::full(&runtime).map_err(|erro| Lancado::do_motor(&erro).ao_carregar())?;
 
         // A falha é lida **dentro** do `with`: a exceção pendente é do MOD, e
         // fora dele ela já não tem de onde ser lida. Ver `falha_da_volta`.
         contexto.with(|ctx| {
             self.montar(&ctx, id, pasta_de_dados, fonte)
-                .map_err(|erro| falha_da_volta(&ctx, &passos, teto, &erro, Lancado::nao_carregou))
+                .map_err(|erro| falha_da_volta(&ctx, &passos, teto, &erro, Lancado::ao_carregar))
         })?;
 
         self.hospedes.insert(
@@ -608,6 +657,8 @@ impl Anfitriao {
     ///
     /// [`Falha`] for a MOD that threw or went past a ceiling, and
     /// [`Falha::NaoCarregadoAqui`] for one that is not loaded here.
+    /// [`Falha::FalhouSemLancar`] quando o motor recusou uma conversão sem que
+    /// o MOD lançasse nada (um valor que não é texto em `dados`).
     pub fn chamar(
         &mut self,
         id: &str,
@@ -638,7 +689,7 @@ impl Anfitriao {
                     &hospede.passos,
                     self.teto_de_consultas,
                     &erro,
-                    Lancado::lancou,
+                    Lancado::na_chamada,
                 )
             };
             let dados = rquickjs::Object::new(ctx.clone()).map_err(falhou)?;
@@ -689,7 +740,7 @@ impl Anfitriao {
                     &hospede.passos,
                     self.teto_de_consultas,
                     &erro,
-                    Lancado::lancou,
+                    Lancado::na_chamada,
                 )
             };
             let dados = rquickjs::Object::new(ctx.clone()).map_err(falhou)?;
@@ -770,7 +821,7 @@ impl Anfitriao {
                         &hospede.passos,
                         self.teto_de_consultas,
                         &erro,
-                        Lancado::lancou,
+                        Lancado::na_chamada,
                     )
                 })?;
                 bytes = bytes
@@ -1140,6 +1191,69 @@ mod tests {
             dito.contains("ReferenceError"),
             "a falha de um aoPedir que chama console.log não diz o ReferenceError que ele \
              lançou, e quem hospeda lê só que o MOD lançou: {dito}"
+        );
+    }
+
+    /// **Um `aoPedir` que falta, ou que devolve outra coisa que texto, não
+    /// lançou nada**, e a linha de quem hospeda não diz que lançou.
+    ///
+    /// O motor recusa a conversão (`Error converting from js 'undefined' into
+    /// type 'function'`) sem exceção nenhuma do MOD. Dito como «mod threw», o
+    /// erro mandava quem escreveu o MOD procurar um `throw` que não existe.
+    #[test]
+    fn um_aopedir_que_falta_ou_devolve_numero_diz_que_falhou_e_nao_que_lancou() {
+        for (caso, fonte) in [
+            ("sem aoPedir", "globalThis.nada = 1;"),
+            (
+                "aoPedir que devolve número",
+                "globalThis.aoPedir = () => 1;",
+            ),
+        ] {
+            let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+            anfitriao
+                .carregar("seele/sem-texto", fonte, &pasta_de_teste("sem-texto"))
+                .expect("carregar");
+
+            let dito = anfitriao
+                .pedir(
+                    "seele/sem-texto",
+                    seele_proto::ids::PersonId(7),
+                    "{}",
+                    "{}",
+                    &mut BTreeMap::new(),
+                )
+                .expect_err("um aoPedir que o motor não converte respondeu como se nada fosse")
+                .to_string();
+            assert!(
+                dito.starts_with("mod failed: \"Error converting from js")
+                    && !dito.contains("threw"),
+                "{caso}: a falha de um aoPedir que o motor não converteu diz que o MOD lançou, \
+                 e manda procurar um throw que não existe: {dito}"
+            );
+        }
+    }
+
+    /// **Um motor que não consegue montar o contexto também não é um MOD que
+    /// lançou.**
+    ///
+    /// Com um teto de memória menor que o próprio contexto, o QuickJS falha ao
+    /// criar os objetos dele (`Allocation failed while creating object`), antes
+    /// de uma linha do MOD rodar.
+    #[test]
+    fn um_contexto_que_nao_coube_na_memoria_diz_que_falhou_ao_carregar_e_nao_que_lancou() {
+        let mut anfitriao = Anfitriao::com_tetos(16 * 1024, 100).expect("anfitrião");
+        let dito = anfitriao
+            .carregar(
+                "seele/sem-memoria",
+                "globalThis.x = 1;",
+                &pasta_de_teste("sem-memoria"),
+            )
+            .expect_err("um contexto montado em 16 KiB foi carregado, e este teste não prova nada")
+            .to_string();
+        assert!(
+            dito.starts_with("mod failed while loading: ") && !dito.contains("threw"),
+            "a falha do motor ao montar o contexto de um MOD diz que o MOD lançou ao carregar, \
+             antes de uma linha dele rodar: {dito}"
         );
     }
 
