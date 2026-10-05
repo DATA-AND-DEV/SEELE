@@ -49,15 +49,21 @@ pub async fn executar(
         Err(error) => {
             // O pedido do catálogo (id vazio) não é de MOD nenhum, e um
             // `mod_id=` em branco casaria com qualquer `grep "mod_id="`.
+            let legivel = id_seguro(id);
             if id.is_empty() {
                 tracing::warn!(catalogo = true, %error, "MOD request refused");
+            } else if legivel.trim().is_empty() {
+                // Um id que não é vazio, mas é feito só do que o `id_seguro`
+                // tira (e de espaço): escrito, ele seria o mesmo `mod_id=` em
+                // branco. A linha diz que ele não se lia.
+                tracing::warn!(mod_id_ilegivel = true, %error, "MOD request refused");
             } else {
                 // `%`, e não o `str` cru: cru, o `fmt` o escreve pelo `Debug`,
                 // entre aspas, e o `grep "mod_id=autor/nome"` do guia não acha
                 // a linha. É a grafia das outras linhas do MOD, nas duas
                 // metades. Mas o `%` escreve cru, e este id vem do fio: é o
                 // `id_seguro` que impede quem pediu de escrever uma linha.
-                tracing::warn!(mod_id = %id_seguro(id), %error, "MOD request refused");
+                tracing::warn!(mod_id = %legivel, %error, "MOD request refused");
             }
             r#"{"ok":false,"error":"bridge-refused"}"#.into()
         }
@@ -522,6 +528,33 @@ mod tests {
             linha.contains("catalogo=true") && !linha.contains("mod_id="),
             "a recusa do pedido do catálogo não diz que era o catálogo, ou escreve um \
              `mod_id=` em branco que o `grep` de qualquer MOD acha: {linha}"
+        );
+    }
+
+    /// **Um id feito só do que o filtro tira também não escreve um `mod_id=`
+    /// em branco.**
+    ///
+    /// O id não é vazio, e por isso não é o catálogo; mas o [`super::id_seguro`]
+    /// o reduz a um espaço, e a linha sairia `mod_id=  error=…`, a mesma forma
+    /// que o ramo do catálogo evita. A linha diz que o id não se lia.
+    #[tokio::test(flavor = "current_thread")]
+    async fn um_id_so_do_que_o_filtro_tira_diz_que_nao_se_lia_e_nao_um_mod_id_em_branco() {
+        let texto = o_registro_da_recusa("\u{202E}\n \u{2028}").await;
+        let Some(linha) = texto
+            .lines()
+            .find(|linha| linha.contains("MOD request refused"))
+        else {
+            panic!("a recusa do pedido de id ilegível não chegou ao registro: {texto:?}");
+        };
+        assert!(
+            linha.contains("mod_id_ilegivel=true") && !linha.contains("mod_id="),
+            "a recusa de um pedido cujo id é feito só do que quebra ou inverte a linha não diz \
+             que o id não se lia, ou escreve um `mod_id=` em branco: {linha}"
+        );
+        assert_eq!(
+            texto.lines().count(),
+            1,
+            "o id ilegível escreveu mais de uma linha no seele.log de quem hospeda: {texto:?}"
         );
     }
 
