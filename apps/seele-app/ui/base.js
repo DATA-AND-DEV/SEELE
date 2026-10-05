@@ -2208,7 +2208,8 @@ async function atenderOMod(mod, instancia, m) {
       default:
         // **Recusado e nomeado.** Uma mensagem que a API não conhece não pode
         // ser ignorada: quem escreveu o MOD ficaria esperando para sempre uma
-        // resposta que nunca vem, sem saber por quê. E quem hospeda também.
+        // resposta que nunca vem, sem saber por quê. E a linha no registro diz
+        // a quem hospeda que ela chegou e foi recusada.
         registrarNoAnfitriao(
           "atender-mod",
           `${mod.id}: a API de MODs não conhece «${m.tipo}»`,

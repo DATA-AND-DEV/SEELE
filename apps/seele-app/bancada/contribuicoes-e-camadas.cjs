@@ -217,12 +217,12 @@ const { R, S, I, PONTOS, NATIVO } = contexto;
 // **As frases de tela, inteiras, como a página as carrega.** O `catch` de
 // `atenderOMod` responde ao MOD por `fraseDeErro`, e sem este arquivo ele
 // tomava o outro ramo do `typeof`: a bancada media um caminho que o app não
-// roda, e foi assim que o registro escreveu «ALGO FALHOU E ESTE APP NÃO SABE
-// EXPLICAR O QUÊ» no lugar do motivo sem que nada aqui reprovasse. Num
+// roda, e foi assim que o registro pôs «ALGO FALHOU E ESTE APP NÃO SABE
+// EXPLICAR O QUÊ» na frente do motivo sem que nada aqui reprovasse. Num
 // `runInContext` só dele porque o arquivo abre com `"use strict"`, que só vale
-// no começo de um script. Medido em 05/10/2026: nenhum outro recorte desta
-// bancada chega a `fraseDeErro` — as três chamadas que ela recebia vinham todas
-// de `atenderOMod`, no R2.
+// no começo de um script. Medido em 05/10/2026: toda chamada que `fraseDeErro`
+// recebe nesta bancada vem de `atenderOMod`, no R2, e nenhum outro bloco muda
+// de resultado com o arquivo no contexto.
 vm.runInContext(ler("frases.js"), contexto);
 
 // ------------------------------------------------------- R1 · o ramo do modal
@@ -2012,7 +2012,7 @@ function anotando(...anotadas) {
         "R2 · a recusa no registro",
         linhaDaRecusada !== undefined && !String(linhaDaRecusada[1]).includes("ALGO FALHOU"),
         "a linha da contribuição recusada levou ao seele.log a frase de tela de `fraseDeErro`, "
-          + `e não o motivo: ${JSON.stringify(linhaDaRecusada)}`,
+          + `e não só o motivo: ${JSON.stringify(linhaDaRecusada)}`,
       );
       confere("R2 · a região no registro", regiaoRespondida?.ok === false,
         "uma região com nós demais foi respondida como aceita");
