@@ -11,8 +11,9 @@
 #        notepad install.ps1
 #        .\install.ps1
 #
-#   2. Sem script: pegue o .zip na aba Releases, confira a soma contra o
-#      SHA256SUMS publicado ao lado, e descompacte onde quiser.
+#   2. Sem script: pegue o .zip na aba Releases de DATA-AND-DEV/SEELE-RELEASES,
+#      confira a soma contra o SHA256SUMS publicado ao lado, e descompacte onde
+#      quiser.
 #
 # O que este script faz: baixa o pacote da versão pedida, **confere a soma
 # SHA-256** contra o arquivo publicado no mesmo release, e copia o executável
@@ -25,7 +26,13 @@
 
 $ErrorActionPreference = 'Stop'
 
-$repo = 'DATA-AND-DEV/SEELE'
+# As versões moram em SEELE-RELEASES, e não no repositório do código: é lá que
+# o `empacotar/publicar.sh` publica. Este script baixava do repositório do
+# código, onde a última versão publicada é a v0.10.0 (medido em 04/10/2026), um
+# servidor que nenhum cliente 0.15 alcança. O teste
+# `os_instaladores_de_uma_linha_baixam_de_onde_o_publicar_publica`, do `xtask`,
+# exige que esta casa esteja entre as do `publicar.sh`.
+$repoDasVersoes = 'DATA-AND-DEV/SEELE-RELEASES'
 $destino = if ($env:SEELE_BIN) { $env:SEELE_BIN } else { "$env:LOCALAPPDATA\SEELE\bin" }
 
 function Falhar($mensagem) {
@@ -44,7 +51,7 @@ $versao = $env:SEELE_VERSION
 if (-not $versao) {
     Write-Host 'procurando a última versão... ' -NoNewline
     try {
-        $ultimo = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+        $ultimo = Invoke-RestMethod "https://api.github.com/repos/$repoDasVersoes/releases/latest"
         $versao = $ultimo.tag_name
     } catch {
         Falhar @"
@@ -60,7 +67,7 @@ não achei nenhuma versão publicada.
 
 $numero = $versao -replace '^v', ''
 $pacote = "seele-cli-$numero-windows-x86_64.zip"
-$base = "https://github.com/$repo/releases/download/$versao"
+$base = "https://github.com/$repoDasVersoes/releases/download/$versao"
 
 # --------------------------------------------------------------------- baixa
 

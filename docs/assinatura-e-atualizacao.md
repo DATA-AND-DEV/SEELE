@@ -124,7 +124,7 @@ Abra `~/.tauri/seele.key.pub`. É uma única linha em base64. Cole-a em
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/DATA-AND-DEV/SEELE/releases/latest/download/latest.json"
+        "https://github.com/DATA-AND-DEV/SEELE-RELEASES/releases/latest/download/latest.json"
       ],
       "pubkey": "COLE-A-LINHA-AQUI",
 ```

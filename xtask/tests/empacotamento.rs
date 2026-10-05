@@ -2245,6 +2245,308 @@ fn quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio() {
     }
 }
 
+// ------------------------------------------------ os instaladores de uma linha
+
+/// O valor de `NOME="…"` ou `$nome = '…'` numa linha de código, e não de
+/// comentário: o comentário que explica a troca de repositório cita o nome
+/// antigo, e um guarda que o lesse casaria com a própria explicação.
+fn valor_atribuido(texto: &str, nome: &str) -> Option<String> {
+    sem_comentario(texto).lines().find_map(|linha| {
+        let resto = linha
+            .trim()
+            .strip_prefix(nome)?
+            .trim_start()
+            .strip_prefix('=')?
+            .trim();
+        let aspas = resto.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+        resto.get(1..)?.split(aspas).next().map(str::to_owned)
+    })
+}
+
+#[test]
+fn os_instaladores_de_uma_linha_baixam_de_onde_o_publicar_publica() {
+    // **O `install.sh` e o `install.ps1` baixavam do repositório do código.**
+    // As versões saem do `publicar.sh` para `DATA-AND-DEV/SEELE-RELEASES` desde
+    // a 0.10.1, e no do código a última publicada é a v0.10.0 (medido em
+    // 04/10/2026): a linha do README instalava, sem avisar, um servidor que
+    // nenhum cliente 0.15 alcança. Nem `SEELE_VERSION=v0.15.0` salvava, porque
+    // o endereço do download era montado no repositório errado.
+    //
+    // O mesmo recorte de `quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio`,
+    // e comparação exata: `DATA-AND-DEV/SEELE` é prefixo de
+    // `DATA-AND-DEV/SEELE-RELEASES`, e um `contains` aprovaria a volta.
+    let publicar = std::fs::read_to_string(publicar()).expect("o orquestrador é legível");
+    let destinos: Vec<&str> = publicar
+        .split("REPOS=\"${SEELE_REPO:-")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("o publicar.sh deixou de declarar os repositórios das versões")
+        .split_whitespace()
+        .collect();
+
+    for (arquivo, nome) in [
+        ("install.sh", "REPO_DAS_VERSOES"),
+        ("install.ps1", "$repoDasVersoes"),
+    ] {
+        let texto = std::fs::read_to_string(raiz().join(arquivo))
+            .unwrap_or_else(|erro| panic!("{arquivo} tem que ser legível: {erro}"));
+        let valor = valor_atribuido(&texto, nome).unwrap_or_else(|| {
+            panic!("{arquivo} deixou de declarar {nome}, e este guarda não sabe de onde ele baixa")
+        });
+        assert!(
+            destinos.contains(&valor.as_str()),
+            "{arquivo} baixa de «{valor}», e o publicar.sh publica em {destinos:?}: a linha \
+             do README instalaria uma versão que ninguém mais publica"
+        );
+
+        // E é ela que monta o endereço da API e o do download: declarar a casa
+        // certa e montar a URL com outra seria o mesmo defeito, escondido.
+        let codigo = sem_comentario(&texto);
+        let enderecos: Vec<&str> = codigo
+            .lines()
+            .filter(|linha| {
+                linha.contains("api.github.com/repos/") || linha.contains("/releases/download/")
+            })
+            .collect();
+        assert!(
+            enderecos.len() >= 2,
+            "{arquivo} deixou de montar o endereço da API e o do download, e este guarda \
+             não tem o que conferir: {enderecos:?}"
+        );
+        for linha in enderecos {
+            assert!(
+                linha.contains(nome),
+                "{arquivo} monta um endereço de versão sem {nome}:\n  {}",
+                linha.trim()
+            );
+        }
+    }
+}
+
+/// Um `install.sh` de verdade rodando contra uma versão de mentira, servida
+/// por `file://` de um diretório temporário: sem rede, e sem tocar no `PATH`
+/// de quem roda o teste, a não ser pelos dublês que ele pedir.
+#[cfg(unix)]
+struct Instalador {
+    base: PathBuf,
+}
+
+#[cfg(unix)]
+impl Instalador {
+    fn novo() -> Instalador {
+        let base = std::env::temp_dir().join(format!(
+            "seele-install-{}-{}",
+            std::process::id(),
+            CONTADOR.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("versao")).expect("a bancada tem que ser criável");
+        Instalador { base }
+    }
+
+    fn versao(&self) -> PathBuf {
+        self.base.join("versao")
+    }
+
+    fn instalado(&self) -> PathBuf {
+        self.base.join("bin/seeled")
+    }
+
+    /// Publica na versão de mentira o pacote de um sistema, com um `seeled`
+    /// de mentira dentro, e devolve os bytes dele.
+    fn publicar_pacote(&self, sistema: &str) -> Vec<u8> {
+        let conteudo = self.base.join("conteudo");
+        let seeled = b"#!/bin/sh\necho 'seeled de mentira'\n".to_vec();
+        std::fs::create_dir_all(&conteudo).expect("a pasta do conteúdo é criável");
+        std::fs::write(conteudo.join("seeled"), &seeled).expect("o seeled é gravável");
+        let pacote = self
+            .versao()
+            .join(format!("seele-cli-9.9.9-{sistema}.tar.gz"));
+        let tar = Command::new("tar")
+            .arg("-czf")
+            .arg(&pacote)
+            .arg("-C")
+            .arg(&conteudo)
+            .arg("seeled")
+            .output()
+            .expect("o tar tem que executar");
+        assert!(
+            tar.status.success(),
+            "não consegui montar o pacote de mentira:\n{}",
+            String::from_utf8_lossy(&tar.stderr)
+        );
+        seeled
+    }
+
+    /// A soma SHA-256 de um arquivo da versão, por quem a máquina tiver.
+    fn soma(&self, nome: &str) -> String {
+        let arquivo = self.versao().join(nome);
+        let saida = Command::new("shasum")
+            .arg("-a")
+            .arg("256")
+            .arg(&arquivo)
+            .output()
+            .or_else(|_| Command::new("sha256sum").arg(&arquivo).output())
+            .expect("esta máquina tem que ter shasum ou sha256sum");
+        String::from_utf8_lossy(&saida.stdout)
+            .split_whitespace()
+            .next()
+            .expect("o somador devolve a soma")
+            .to_owned()
+    }
+
+    fn somas(&self, linhas: &str) {
+        std::fs::write(self.versao().join("SHA256SUMS"), linhas).expect("o SHA256SUMS é gravável");
+    }
+
+    /// Roda o `install.sh`. Com `maquina`, o `uname` e o `sysctl` viram dublês
+    /// que respondem o sistema, a arquitetura e o `hw.optional.arm64` pedidos.
+    fn rodar(&self, maquina: Option<(&str, &str, &str)>) -> (i32, String) {
+        let mut comando = Command::new("sh");
+        comando
+            .arg(raiz().join("install.sh"))
+            .env("SEELE_VERSION", "v9.9.9")
+            .env("SEELE_BASE", format!("file://{}", self.versao().display()))
+            .env("SEELE_BIN", self.base.join("bin"));
+        if let Some((sistema, arquitetura, arm64)) = maquina {
+            let ferramentas = self.base.join("ferramentas");
+            escrever(
+                &ferramentas.join("uname"),
+                &format!(
+                    "#!/bin/sh\ncase \"${{1:-}}\" in\n    -m) echo '{arquitetura}' ;;\n    \
+                     *) echo '{sistema}' ;;\nesac\n"
+                ),
+                true,
+            );
+            escrever(
+                &ferramentas.join("sysctl"),
+                &format!("#!/bin/sh\nprintf '%s\\n' '{arm64}'\n"),
+                true,
+            );
+            let caminho = std::env::var("PATH").unwrap_or_default();
+            comando.env("PATH", format!("{}:{caminho}", ferramentas.display()));
+        }
+        let saida = comando.output().expect("o sh tem que executar");
+        (
+            saida.status.code().unwrap_or(-1),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&saida.stdout),
+                String::from_utf8_lossy(&saida.stderr)
+            ),
+        )
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Instalador {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.base);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn o_instalador_de_uma_linha_confere_a_lista_de_somas_antes_de_baixar_o_pacote() {
+    // **Nenhuma das últimas versões publica pacote do Linux**, e o `install.sh`
+    // descobria isso baixando o pacote primeiro: a falha dizia «não consegui
+    // baixar», que não diz se foi a rede, o nome ou a versão. A lista de somas
+    // sai em todo release e diz o que ele publica — lida antes, ela responde a
+    // pergunta certa, com a saída certa: compilar do código.
+    let instalador = Instalador::novo();
+    instalador.somas(
+        "0000000000000000000000000000000000000000000000000000000000000000  \
+         seele-cli-9.9.9-windows-x86_64.zip\n",
+    );
+
+    let (estado, texto) = instalador.rodar(None);
+
+    assert_ne!(
+        estado, 0,
+        "o install.sh instalou de uma versão que não publica pacote para este sistema:\n{texto}"
+    );
+    assert!(
+        texto.contains("não publica o servidor para"),
+        "o install.sh não disse que a versão não publica o servidor para este sistema — a \
+         lista de somas não foi lida antes do pacote:\n{texto}"
+    );
+    assert!(
+        !instalador.instalado().exists(),
+        "a recusa deixou um seeled instalado:\n{texto}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn o_instalador_de_uma_linha_instala_quando_a_soma_confere() {
+    // A ordem nova — a lista de somas antes do pacote — não pode custar o
+    // caminho que funciona. Num Mac Apple Silicon de mentira, com o pacote
+    // publicado e a soma certa, ele instala.
+    //
+    // E também sob Rosetta: ali o `uname -m` diz x86_64 num Mac Apple Silicon,
+    // e quem decide é o `hw.optional.arm64`. Uma conferência pelo `uname -m`
+    // recusaria a máquina certa.
+    for (arquitetura, como) in [("arm64", "nativo"), ("x86_64", "sob Rosetta")] {
+        let instalador = Instalador::novo();
+        let seeled = instalador.publicar_pacote("macos");
+        let soma = instalador.soma("seele-cli-9.9.9-macos.tar.gz");
+        instalador.somas(&format!("{soma}  seele-cli-9.9.9-macos.tar.gz\n"));
+
+        let (estado, texto) = instalador.rodar(Some(("Darwin", arquitetura, "1")));
+
+        assert_eq!(
+            estado, 0,
+            "num Mac Apple Silicon {como}, com o pacote publicado e a soma certa, o \
+             install.sh não instalou:\n{texto}"
+        );
+        assert_eq!(
+            std::fs::read(instalador.instalado()).ok(),
+            Some(seeled),
+            "num Mac Apple Silicon {como}, o seeled instalado não é o que estava no \
+             pacote:\n{texto}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn uma_maquina_sem_pacote_da_arquitetura_dela_recebe_a_frase_de_compilar() {
+    // O tar do macOS sai da arquitetura de quem compila (`empacotar/macos.sh`
+    // empacota o `seeled` do alvo daquela máquina), e quem publica compila
+    // num Mac Apple Silicon. Num Mac Intel ele não roda, e o install.sh o
+    // instalava assim mesmo.
+    //
+    // A conferência é pelo `hw.optional.arm64`, e não pelo `uname -m`: num
+    // terminal sob Rosetta, o `uname -m` de um Mac Apple Silicon diz x86_64, e
+    // recusaria a máquina certa. Num Mac Intel, o `sysctl -in` devolve vazio.
+    for (sistema, arquitetura, arm64, pacote) in [
+        ("Darwin", "x86_64", "", "macos"),
+        ("Linux", "aarch64", "", "linux"),
+    ] {
+        let instalador = Instalador::novo();
+        instalador.publicar_pacote(pacote);
+        let nome = format!("seele-cli-9.9.9-{pacote}.tar.gz");
+        let soma = instalador.soma(&nome);
+        instalador.somas(&format!("{soma}  {nome}\n"));
+
+        let (estado, texto) = instalador.rodar(Some((sistema, arquitetura, arm64)));
+
+        assert_ne!(
+            estado, 0,
+            "{sistema} {arquitetura}: o install.sh instalou um pacote de outra arquitetura:\n{texto}"
+        );
+        assert!(
+            texto.contains("Compile do código-fonte")
+                && texto.contains("git clone https://github.com/DATA-AND-DEV/SEELE "),
+            "{sistema} {arquitetura}: a recusa não diz como compilar do código:\n{texto}"
+        );
+        assert!(
+            !instalador.instalado().exists(),
+            "{sistema} {arquitetura}: a recusa deixou um seeled instalado:\n{texto}"
+        );
+    }
+}
+
 #[test]
 fn a_versao_sai_em_todas_as_casas_listadas_numa_execucao_so() {
     // **Compilar uma vez, publicar quantas casas houver.**
