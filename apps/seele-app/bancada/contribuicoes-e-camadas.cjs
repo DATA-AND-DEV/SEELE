@@ -1824,6 +1824,34 @@ function anotando(...anotadas) {
       "`registrarNoAnfitriao` não repassou ao `registrar_da_janela` o nível e o id do MOD que recebeu: "
         + `${JSON.stringify(invocados.slice(de))}`,
     );
+
+    // (4) **Um substituto UTF-16 solto não atravessa a ponte.** O
+    // `JSON.stringify` do `invoke` o escreve `\ud800`, o `serde_json` recusa a
+    // cadeia ao ler uma `String`, e o `.catch` de `registrarNoAnfitriao` engole
+    // a recusa: a linha some do `seele.log` sem aviso nenhum (pendência 51,
+    // item 6). Ele chega como «�», em cada campo de texto; o par inteiro, que é
+    // um caractere de verdade, chega como estava.
+    de = invocados.length;
+    elo.registrarNoAnfitriao("onde\uDC00", "avatar\uD800 😀", "aviso", "mod/a\uD800");
+    const saneado = registrados(de)[0];
+    confere(
+      "o elo · o substituto solto",
+      registrados(de).length === 1
+        && ["onde", "oQue", "modId"].every((campo) => typeof saneado?.[campo] === "string"
+          && saneado[campo].isWellFormed())
+        && saneado.oQue === "avatar\uFFFD 😀",
+      "um substituto solto chegou ao `registrar_da_janela`, que a ponte recusa inteiro, ou o par de um "
+        + `caractere de verdade foi trocado junto: ${JSON.stringify(invocados.slice(de))}`,
+    );
+    // E sem `modId` o campo vai `null`, e não o texto «null»: o Rust
+    // escreveria `mod_id=null`, um MOD que não existe.
+    de = invocados.length;
+    elo.registrarNoAnfitriao("o", "t");
+    confere(
+      "o elo · sem MOD",
+      registrados(de).length === 1 && registrados(de)[0].modId === null,
+      `sem \`modId\`, o \`registrar_da_janela\` não recebeu \`null\`: ${JSON.stringify(invocados.slice(de))}`,
+    );
   }
 }
 

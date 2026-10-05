@@ -445,8 +445,23 @@ function registrarNoAnfitriao(onde, o_que, nivel = "aviso", modId = null) {
   // `modId` é o MOD de quem a frase fala, quando é de um: o Rust o escreve
   // como `mod_id=`, o mesmo campo das linhas dele, e uma busca só acha as duas
   // metades.
+  //
+  // **Sem substituto UTF-16 solto.** O `JSON.stringify` do `invoke` o escreve
+  // `\ud800`, o `serde_json` recusa a cadeia ao ler uma `String`, e o `.catch`
+  // abaixo engole a recusa: a linha inteira sumia do `seele.log` por meio
+  // caractere de um nome que um MOD escolheu. Com a flag `u`, a classe só casa
+  // o substituto solto, e um par — um caractere de verdade — fica como está.
+  // Não `toWellFormed()`: ele exige o Safari 16.4, e este app declara o macOS
+  // 11. `modId` só quando há um: `bem(null)` daria o texto «null», e o Rust
+  // escreveria `mod_id=null`.
+  const bem = (texto) => String(texto).replace(/[\uD800-\uDFFF]/gu, "\uFFFD");
   try {
-    invoke("registrar_da_janela", { nivel, onde, oQue: String(o_que), modId }).catch(() => {});
+    invoke("registrar_da_janela", {
+      nivel,
+      onde: bem(onde),
+      oQue: bem(o_que),
+      modId: modId == null ? null : bem(modId),
+    }).catch(() => {});
   } catch {
     /* sem ponte, sem registro — e o caminho segue */
   }
