@@ -68,7 +68,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use core_graphics::access::ScreenCaptureAccess;
-use screencapturekit::cm::{CMSampleBufferExt, CMSampleBufferSCExt, CMTime};
+use screencapturekit::cm::{CMSampleBufferExt, CMSampleBufferSCExt, CMTime, SCFrameStatus};
+use screencapturekit::cv::CVPixelBuffer;
 use screencapturekit::prelude::{
     PixelFormat, SCContentFilter, SCDisplay, SCShareableContent, SCStream, SCStreamConfiguration,
     SCStreamOutputTrait, SCStreamOutputType, SCWindow,
@@ -533,41 +534,68 @@ impl SCStreamOutputTrait for Entregador {
         if tipo != SCStreamOutputType::Screen {
             return;
         }
-        // `Idle`, `Blank` e `Suspended` são a tela dizendo que nada mudou, que
-        // está em branco, ou que o sistema suspendeu a captura.
-        //
-        // **O desconhecido não conta como «sem conteúdo», e isso é medido.** Em
-        // `screencapturekit` 8.0.1 sobre macOS 26.5 o acessor do anexo
-        // `SCStreamFrameInfo` devolve `None` em **toda** amostra — 87 de 87 numa
-        // corrida de três segundos, todas com uma imagem de 1280×720 dentro.
-        // A primeira versão deste arquivo tratava `None` como «sem pixels» e
-        // descartou 145 quadros seguidos sem uma linha de erro: a captura
-        // parecia funcionar e não entregava nada. Quem confere se há pixels é
-        // quem procura os pixels, logo abaixo.
-        if amostra
-            .frame_status()
-            .is_some_and(|estado| !estado.has_content())
-        {
-            self.vaga.sem_conteudo.fetch_add(1, Ordering::Relaxed);
-            return;
-        }
-        match converter(&amostra, self.largura, self.altura) {
-            Ok(Some(quadro)) => self.vaga.por(QuadroDaTela {
-                quadro,
-                capturado_em: Instant::now(),
-            }),
-            Ok(None) => {
+        // A decisão entre «sem conteúdo» e «converter» mora em [`classificar`]:
+        // o motivo de o estado desconhecido não contar como «sem conteúdo» está
+        // escrito lá, e os testes dela o guardam.
+        match classificar(amostra.frame_status(), amostra.image_buffer()) {
+            Destino::SemConteudo => {
                 self.vaga.sem_conteudo.fetch_add(1, Ordering::Relaxed);
             }
-            Err(_) => {
-                // O motivo não vai para lugar nenhum daqui: esta função roda na
-                // fila de despacho da ScreenCaptureKit, onde não há a quem
-                // contar. O contador é o que atravessa para a outra thread, e
-                // quem lê a captura é quem decide o que fazer com ele.
-                self.vaga.ilegiveis.fetch_add(1, Ordering::Relaxed);
-            }
+            Destino::Converter(imagem) => match converter(&imagem, self.largura, self.altura) {
+                Ok(quadro) => self.vaga.por(QuadroDaTela {
+                    quadro,
+                    capturado_em: Instant::now(),
+                }),
+                Err(_) => {
+                    // O motivo não vai para lugar nenhum daqui: esta função roda
+                    // na fila de despacho da ScreenCaptureKit, onde não há a quem
+                    // contar. O contador é o que atravessa para a outra thread, e
+                    // quem lê a captura é quem decide o que fazer com ele.
+                    self.vaga.ilegiveis.fetch_add(1, Ordering::Relaxed);
+                }
+            },
         }
     }
+}
+
+/// O que fazer com uma amostra de imagem que a ScreenCaptureKit entregou.
+#[derive(Debug, PartialEq, Eq)]
+enum Destino<I> {
+    /// Nada a converter: conta em [`Vaga::sem_conteudo`] e o quadro anterior
+    /// continua valendo.
+    SemConteudo,
+    /// Há pixels, e esta é a imagem que os tem.
+    Converter(I),
+}
+
+/// Decide se uma amostra de imagem tem pixels a converter.
+///
+/// Separada do `CMSampleBuffer`, cujo anexo de estado só a ScreenCaptureKit
+/// escreve, numa captura de pé, para que a decisão tenha teste sem tela e sem
+/// TCC, em qualquer Mac: quem chama passa o estado do anexo
+/// `SCStreamFrameInfo` e a imagem, se houver uma. A imagem é
+/// genérica e não um `bool` para que o «converter» já traga o que converter —
+/// sem um segundo lugar que confira de novo se ela existe.
+///
+/// `Idle`, `Blank`, `Suspended` e `Stopped` são a tela dizendo que nada mudou,
+/// que está em branco, que o sistema suspendeu a captura ou que ela acabou.
+/// Uma amostra sem imagem também não tem o que converter.
+///
+/// **O desconhecido não conta como «sem conteúdo», e isso é medido.** Em
+/// `screencapturekit` 8.0.1 sobre macOS 26.5 o acessor do anexo
+/// `SCStreamFrameInfo` devolve `None` em **toda** amostra — 87 de 87 numa
+/// corrida de três segundos, todas com uma imagem de 1280×720 dentro.
+/// A primeira versão deste arquivo tratava `None` como «sem pixels» e
+/// descartou 145 quadros seguidos sem uma linha de erro: a captura parecia
+/// funcionar e não entregava nada. Medido de novo em 05/10/2026, na mesma
+/// versão do crate sobre macOS 27.0.1: `None` em todas as 264 amostras de três
+/// monitores, e a tela parada chegando como amostra sem imagem. Quem confere se
+/// há pixels é a imagem, e não o estado.
+fn classificar<I>(estado: Option<SCFrameStatus>, imagem: Option<I>) -> Destino<I> {
+    if estado.is_some_and(|estado| !estado.has_content()) {
+        return Destino::SemConteudo;
+    }
+    imagem.map_or(Destino::SemConteudo, Destino::Converter)
 }
 
 /// Uma transmissão viva.
@@ -812,20 +840,18 @@ impl std::fmt::Debug for CapturaDaTela {
     }
 }
 
-/// Tira os pixels da amostra e monta o I420.
+/// Tira os pixels da imagem e monta o I420.
 ///
-/// `Ok(None)` é a amostra que chegou **sem imagem**, que é como a tela parada
-/// se apresenta quando o estado do quadro não vem junto. Não é erro, e por isso
-/// não é `Err`: distingui-los é o que mantém [`Vaga::ilegiveis`] significando
-/// defeito de verdade.
+/// A amostra que chega **sem imagem** não passa por aqui: [`classificar`] a
+/// conta como «sem conteúdo», que é como a tela parada se apresenta quando o
+/// estado do quadro não vem junto. Não é erro, e por isso não sai daqui como
+/// `Err`: distingui-los é o que mantém [`Vaga::ilegiveis`] significando defeito
+/// de verdade.
 fn converter(
-    amostra: &screencapturekit::cm::CMSampleBuffer,
+    buffer: &CVPixelBuffer,
     largura: usize,
     altura: usize,
-) -> Result<Option<QuadroI420>, ErroDeCaptura> {
-    let Some(buffer) = amostra.image_buffer() else {
-        return Ok(None);
-    };
+) -> Result<QuadroI420, ErroDeCaptura> {
     let travado = buffer
         .lock_read_only()
         .map_err(|_| ErroDeCaptura::QuadroIlegivel {
@@ -856,7 +882,7 @@ fn converter(
         .filter_map(|l| travado.plane_row(1, l))
         .collect();
 
-    montar_i420(largura, altura, &luma, &croma).map(Some)
+    montar_i420(largura, altura, &luma, &croma)
 }
 
 /// Copia as linhas úteis e desentrelaça o croma.
@@ -989,6 +1015,78 @@ mod testes {
             erro,
             ErroDeCaptura::PlanosRecusados(ErroDeVideo::PlanosInconsistentes { .. })
         ));
+    }
+
+    /// O defeito que esta função existe para guardar: um estado desconhecido
+    /// tratado como «sem pixels».
+    ///
+    /// Em `screencapturekit` 8.0.1 sobre macOS 26.5 o anexo de estado vinha
+    /// `None` em toda amostra, cada uma com imagem dentro, e a primeira versão
+    /// da captura descartou 145 quadros seguidos sem uma linha de erro. O
+    /// `from_raw(42)` é o estado que uma versão futura do sistema pode inventar:
+    /// o acessor o devolve como `None` também.
+    #[test]
+    fn o_estado_desconhecido_com_imagem_e_convertido() {
+        for estado in [
+            None,
+            SCFrameStatus::from_raw(42),
+            SCFrameStatus::from_raw(-1),
+        ] {
+            assert_eq!(
+                classificar(estado, Some("imagem")),
+                Destino::Converter("imagem"),
+                "uma amostra com imagem e estado desconhecido ({estado:?}) foi contada como \
+                 «sem conteúdo»: é o defeito que já descartou 145 quadros seguidos sem uma \
+                 linha de erro, com a captura parecendo funcionar e não entregando nada"
+            );
+        }
+    }
+
+    #[test]
+    fn os_estados_sem_conteudo_nao_sao_convertidos() {
+        for estado in [
+            SCFrameStatus::Idle,
+            SCFrameStatus::Blank,
+            SCFrameStatus::Suspended,
+            SCFrameStatus::Stopped,
+        ] {
+            assert_eq!(
+                classificar(Some(estado), Some("imagem")),
+                Destino::SemConteudo,
+                "o estado {estado} diz que a amostra não traz quadro novo da tela, e ela \
+                 foi mandada converter: a vaga receberia como quadro novo o que o sistema \
+                 disse que não é"
+            );
+        }
+    }
+
+    #[test]
+    fn os_estados_com_conteudo_sao_convertidos() {
+        for estado in [SCFrameStatus::Complete, SCFrameStatus::Started] {
+            assert_eq!(
+                classificar(Some(estado), Some("imagem")),
+                Destino::Converter("imagem"),
+                "o estado {estado} diz que há quadro novo, e a amostra foi contada como \
+                 «sem conteúdo»: a imagem dela nunca chegaria a quem transmite"
+            );
+        }
+    }
+
+    #[test]
+    fn sem_imagem_nao_ha_o_que_converter() {
+        for estado in [
+            None,
+            Some(SCFrameStatus::Complete),
+            Some(SCFrameStatus::Started),
+            Some(SCFrameStatus::Idle),
+        ] {
+            assert_eq!(
+                classificar::<&str>(estado, None),
+                Destino::SemConteudo,
+                "uma amostra sem imagem, com o estado {estado:?}, foi mandada converter: \
+                 não há pixels nela, e ela tem de ser contada como «sem conteúdo»"
+            );
+        }
     }
 
     #[test]
