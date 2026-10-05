@@ -2838,6 +2838,86 @@ fn o_sem_bateria_pula_tambem_as_bancadas_de_mod_e_grita() {
     );
 }
 
+/// A linha do corpo do release que diz o que a bateria fez, sozinha: sem
+/// repositório, sem rede e sem compilar, como o `--notas`.
+fn linha_da_bateria(pedidos: &str, sem_bateria: bool) -> (i32, String) {
+    let mut comando = Command::new(interpretador());
+    comando
+        .arg(publicar())
+        .arg("--linha-da-bateria")
+        .arg(pedidos);
+    if sem_bateria {
+        comando.arg("--sem-bateria");
+    }
+    let saida = comando.output().expect("o orquestrador tem que executar");
+    (
+        saida.status.code().unwrap_or(-1),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&saida.stdout),
+            String::from_utf8_lossy(&saida.stderr)
+        ),
+    )
+}
+
+#[test]
+fn a_linha_da_bateria_diz_o_que_rodou_e_onde() {
+    // **O corpo do release não dizia se a bateria tinha rodado.** O
+    // `--sem-bateria` grita no terminal de quem publica, e quem baixa não vê
+    // esse terminal: a v0.15.0 saiu sem a palavra «bateria» na página. A linha
+    // diz o que rodou, e o Windows só quando ele foi pedido — a bateria de lá
+    // só roda quando há pacote de lá.
+    let (estado, aqui) = linha_da_bateria("macos linux", false);
+    assert_eq!(estado, 0, "a linha da bateria não saiu:\n{aqui}");
+    assert!(
+        aqui.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny)"),
+        "a linha não diz que a bateria rodou, nem o que ela rodou:\n{aqui}"
+    );
+    assert!(
+        !aqui.contains("Windows"),
+        "sem o Windows pedido, a bateria de lá não roda, e a linha disse que \
+         rodou:\n{aqui}"
+    );
+
+    let (_, com_windows) = linha_da_bateria("macos windows linux", false);
+    assert!(
+        com_windows.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny)")
+            && com_windows.contains("e no Windows"),
+        "com o Windows pedido, a bateria roda lá também, e a linha não diz:\n{com_windows}"
+    );
+
+    let (_, sem) = linha_da_bateria("macos windows linux", true);
+    assert!(
+        sem.contains("**Esta versão saiu com --sem-bateria: não foi testada antes de publicar.**"),
+        "uma versão que saiu sem bateria não diz isso na página:\n{sem}"
+    );
+    assert!(
+        !sem.contains("Bateria: rodou"),
+        "uma versão que saiu sem bateria diz que a bateria rodou:\n{sem}"
+    );
+}
+
+#[test]
+fn o_corpo_de_uma_versao_sem_bateria_diz_que_ela_nao_foi_testada() {
+    // A função existir não basta: é o corpo do release que quem baixa lê.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.corpos.contains("saiu com --sem-bateria"),
+        "o corpo do release de uma versão sem bateria não diz que ela não foi \
+         testada:\n{}",
+        saida.corpos
+    );
+}
+
 /// **Uma conferência de regra vermelha para a publicação antes de empacotar.**
 ///
 /// O `check-api` não rodava no caminho que publica (m3 da revisão final do

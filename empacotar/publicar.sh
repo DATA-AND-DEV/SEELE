@@ -679,6 +679,33 @@ $ndm_escopo
     fi
 }
 
+# A linha do corpo do release que diz o que a bateria fez antes desta versão.
+#
+# **Quem baixa não vê o terminal de quem publica.** O `--sem-bateria` grita
+# aqui, e a página da versão não dizia nada: «bateria» não aparecia no corpo da
+# v0.15.0, e uma versão testada e uma pulada saíam com o mesmo texto.
+#
+# Dois argumentos, sem tocar em disco nem em rede, para se provar alimentando
+# texto, como o `--notas`: `sim` ou `nao` para o `--sem-bateria`, e os sistemas
+# pedidos. O Windows só entra quando foi pedido, porque é só aí que a bateria
+# roda lá — e lá ela roda os testes, e não o resto.
+#
+#   ./empacotar/publicar.sh --linha-da-bateria "macos windows linux" [--sem-bateria]
+linha_da_bateria() {
+    if [ "$1" = sim ]; then
+        printf '%s\n' "**Esta versão saiu com --sem-bateria: não foi testada antes de publicar.**"
+        return 0
+    fi
+    case " $2 " in
+        *" windows "*)
+            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny) e no Windows (testes)."
+            ;;
+        *)
+            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny)."
+            ;;
+    esac
+}
+
 # A tag da versão publicada antes desta.
 #
 # Lê a lista de tags da entrada padrão — de novo para ser testável sem
@@ -713,6 +740,18 @@ tag_anterior() {
 if [ "${1:-}" = "--notas" ]; then
     # O corpo do release a partir dos assuntos, sozinho: sem git e sem rede.
     notas_das_mudancas
+    exit 0
+fi
+
+if [ "${1:-}" = "--linha-da-bateria" ]; then
+    # A linha da bateria do corpo do release, sozinha: sem git e sem rede.
+    if [ "$#" -lt 2 ]; then
+        morrer "uso: $0 --linha-da-bateria \"<pedidos>\" [--sem-bateria]"
+    fi
+    if [ "${3:-}" = "--sem-bateria" ]; then
+        SEM_BATERIA=sim
+    fi
+    linha_da_bateria "$SEM_BATERIA" "$2"
     exit 0
 fi
 
@@ -1987,6 +2026,8 @@ fi
 "**Fora da integração contínua.** Os pacotes desta página foram construídos nas" \
 "máquinas de quem publica — macOS e Linux num Mac, Windows numa máquina Windows" \
 "alcançada por SSH — a partir do commit \`$COMMIT\`." \
+"" \
+"$(linha_da_bateria "$SEM_BATERIA" "$PEDIDOS")" \
 "" \
 "A consequência, e ela muda o que conferir: **não há atestado de procedência do" \
 "GitHub para esta versão.** \`gh attestation verify\` vai responder que não" \
