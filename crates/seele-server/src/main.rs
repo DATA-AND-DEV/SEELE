@@ -14,7 +14,7 @@
     )
 )]
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use anyhow::{Context, Result};
 
@@ -81,23 +81,16 @@ async fn main() -> Result<()> {
         // O IPv6 global vem junto e vem primeiro, porque é o único dos dois que
         // funciona **de fora** sem encaminhar porta nenhuma — degrau 2 do
         // ADR 0022. O da LAN continua ali para quem está na mesma rede.
-        let global = seele_server::alcance::endereco_de_saida_v6();
-        if lan.is_some() || global.is_some() {
+        let global = global_se_atende(bound, seele_server::alcance::endereco_de_saida_v6());
+        let linhas = para_a_outra_maquina(bound.port(), lan, global, server.fingerprint());
+        if !linhas.is_empty() {
             println!();
-            println!("na outra máquina:");
-        }
-        if let Some(seis) = global {
-            println!(
-                "  connection --server [{seis}]:{}   (pela internet, se o",
-                bound.port()
-            );
-            println!("                             firewall do roteador deixar entrar)");
-        }
-        if let Some(lan) = lan {
-            println!(
-                "  connection --server {lan}:{}   (na mesma rede)",
-                bound.port()
-            );
+            for linha in linhas {
+                println!("{linha}");
+            }
+            // Uma linha em branco depois, para o link que se copia não grudar
+            // na impressão digital de baixo.
+            println!();
         }
     }
     println!("certificate fingerprint: {}", server.fingerprint());
@@ -117,6 +110,66 @@ async fn main() -> Result<()> {
     }
 
     server.run().await
+}
+
+/// O IPv6 global, só quando o socket atende em IPv6.
+///
+/// `[::]` atende nas duas famílias (`seele_server::alcance` desliga o
+/// `IPV6_V6ONLY` à mão), e `0.0.0.0` só em IPv4. Com o segundo, o link do IPv6
+/// global mandaria colar um endereço em que ninguém atende, e a falha chegaria
+/// a quem colou como se o servidor estivesse fora do ar. O `seeled 0.0.0.0:8383`
+/// é o exemplo do README.
+fn global_se_atende(escuta: SocketAddr, global: Option<Ipv6Addr>) -> Option<Ipv6Addr> {
+    global.filter(|_| escuta.is_ipv6())
+}
+
+/// O que dizer a quem vai entrar de outra máquina, uma linha por item.
+///
+/// **Um link para colar no SEELE, e não um comando para rodar.** A saída de
+/// antes mandava rodar o cliente de terminal com o endereço, e ele saiu do
+/// repositório com o ADR 0039: quem seguia a primeira coisa que o `seeled`
+/// dizia ganhava «comando não encontrado». O cliente que sobrou é o app, e o
+/// que o app aceita colar é um `seele://`.
+///
+/// Os links saem do mesmo construtor que `criar_convite` usa, e pelo mesmo
+/// motivo: o `Display` do `SocketAddr` põe os colchetes num IPv6, e o do
+/// [`seele_proto::uri::Convite`] escreve o link na forma que
+/// [`seele_proto::uri::analisar`] lê. Levam a impressão do certificado e
+/// nenhum token: a impressão é o que o app confere no aperto de mão antes de o
+/// apelido sair, e o token é de convite, que é de uso único e sai de
+/// `seeled convite`.
+///
+/// Sem endereço nenhum, nada, nem o cabeçalho: uma linha que manda colar o que
+/// não está embaixo dela é pior que silêncio.
+///
+/// Pura de propósito, para o teste ler o que o `seeled` imprime sem subir um
+/// servidor: `o_que_o_seeled_manda_colar_e_um_link_com_a_impressao`.
+fn para_a_outra_maquina(
+    porta: u16,
+    lan: Option<IpAddr>,
+    global: Option<Ipv6Addr>,
+    impressao: &str,
+) -> Vec<String> {
+    let link = |ip: IpAddr| {
+        seele_proto::uri::Convite::novo(SocketAddr::new(ip, porta).to_string())
+            .com_impressao_digital(impressao)
+            .to_string()
+    };
+    let mut linhas = Vec::new();
+    if lan.is_none() && global.is_none() {
+        return linhas;
+    }
+    linhas.push("na outra máquina, cole no SEELE:".to_owned());
+    if let Some(seis) = global {
+        linhas.push(format!(
+            "  {}   (pela internet, se o firewall do roteador deixar entrar)",
+            link(IpAddr::V6(seis))
+        ));
+    }
+    if let Some(lan) = lan {
+        linhas.push(format!("  {}   (na mesma rede)", link(lan)));
+    }
+    linhas
 }
 
 /// Se o servidor está aceitando qualquer um.
@@ -362,6 +415,117 @@ mod testes {
         for torto in ["", "muito", "-1", "1TB", "3,5G", "999999999999999999999G"] {
             assert!(ler_tamanho(torto).is_err(), "aceitou «{torto}»");
         }
+    }
+
+    #[test]
+    fn o_que_o_seeled_manda_colar_e_um_link_com_a_impressao() {
+        // A saída de antes mandava rodar um cliente de terminal que saiu do
+        // repositório com o ADR 0039: quem seguia a linha ganhava «comando não
+        // encontrado» na primeira coisa que fazia com um servidor novo. O que
+        // se cola no SEELE é um link, e o link é o que leva a impressão.
+        const FP: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
+        let lan: std::net::IpAddr = "192.168.0.7".parse().expect("IPv4 de exemplo");
+        let global: std::net::Ipv6Addr = "2001:db8::7".parse().expect("IPv6 de exemplo");
+
+        let linhas = para_a_outra_maquina(8383, Some(lan), Some(global), FP);
+
+        assert_eq!(
+            linhas.first().map(String::as_str),
+            Some("na outra máquina, cole no SEELE:"),
+            "a primeira linha tem de dizer onde o link vai, e não o que rodar: {linhas:#?}"
+        );
+        for linha in &linhas {
+            assert!(
+                !linha.contains("connection"),
+                "o seeled manda rodar um programa que não existe mais: «{linha}»"
+            );
+        }
+
+        let links: Vec<seele_proto::uri::Convite> = linhas
+            .iter()
+            .skip(1)
+            .map(|linha| {
+                let link = linha.split_whitespace().next().unwrap_or_default();
+                seele_proto::uri::analisar(link).unwrap_or_else(|falha| {
+                    panic!(
+                        "«{linha}» não começa por um link que o SEELE aceita colar ({falha}): \
+                         quem copiar a linha ganha uma recusa em vez de um servidor"
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(
+            links.len(),
+            2,
+            "com endereço da rede e IPv6 global, saem os dois links: {linhas:#?}"
+        );
+        for link in &links {
+            assert_eq!(
+                link.impressao_digital.as_deref(),
+                Some(FP),
+                "o link de {} saiu sem a impressão do certificado, e quem o colar \
+                 fixa a chave sem nada que a confirme",
+                link.alvo
+            );
+            assert_eq!(
+                link.token, None,
+                "o link de {} leva um token de convite: o que o seeled imprime ao \
+                 subir é o endereço, e um convite é de uso único",
+                link.alvo
+            );
+        }
+
+        // O IPv6 primeiro, porque é o único dos dois que alcança de fora sem
+        // porta encaminhada (degrau 2 do ADR 0022); o da rede depois.
+        let alvos: Vec<&str> = links.iter().map(|link| link.alvo.as_str()).collect();
+        assert_eq!(
+            alvos,
+            ["[2001:db8::7]:8383", "192.168.0.7:8383"],
+            "os alvos saíram na ordem errada ou com a forma errada (o IPv6 vai \
+             entre colchetes): {linhas:#?}"
+        );
+        assert!(
+            linhas
+                .get(1)
+                .is_some_and(|linha| linha.contains("pela internet")),
+            "a linha do IPv6 tem de dizer que é o caminho de fora: {linhas:#?}"
+        );
+        assert!(
+            linhas
+                .get(2)
+                .is_some_and(|linha| linha.contains("na mesma rede")),
+            "a linha da LAN tem de dizer que só vale na mesma rede: {linhas:#?}"
+        );
+
+        // Sem endereço nenhum, nada: um cabeçalho sem link embaixo manda colar
+        // o que não está ali.
+        assert!(
+            para_a_outra_maquina(8383, None, None, FP).is_empty(),
+            "sem endereço para dar, o seeled não pode mandar colar nada"
+        );
+        // E com um só, um só.
+        assert_eq!(
+            para_a_outra_maquina(8383, Some(lan), None, FP).len(),
+            2,
+            "só com a LAN, saem o cabeçalho e o link da LAN"
+        );
+    }
+
+    #[test]
+    fn o_link_do_ipv6_so_sai_quando_o_socket_atende_em_ipv6() {
+        let global: std::net::Ipv6Addr = "2001:db8::7".parse().expect("IPv6 de exemplo");
+        assert_eq!(
+            global_se_atende("0.0.0.0:8383".parse().expect("IPv4"), Some(global)),
+            None,
+            "o `seeled 0.0.0.0:8383` atende só em IPv4, e o link do IPv6 global \
+             mandaria colar um endereço em que ninguém atende"
+        );
+        assert_eq!(
+            global_se_atende("[::]:8383".parse().expect("IPv6"), Some(global)),
+            Some(global),
+            "o `[::]` atende nas duas famílias, e o link do IPv6 global é o único \
+             que alcança de fora sem porta encaminhada: ele não pode sumir"
+        );
     }
 
     #[test]

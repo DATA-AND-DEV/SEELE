@@ -1,11 +1,12 @@
 # SEELE no Windows
 
-> **O caminho curto:** se houver um release publicado, baixe
-> `seele-cli-<versão>-windows-x86_64.zip` na aba **Releases**, descompacte e
-> pule direto para o passo 3. Ele traz `seeled.exe` e `connection.exe` prontos, e
-> nenhuma das etapas de instalação abaixo é necessária — nem Rust, nem Build
-> Tools. O Windows vai reclamar que o arquivo não é assinado; **Mais
-> informações** → **Executar assim mesmo**.
+> **O caminho curto:** se houver um release publicado, instale o SEELE pelo
+> `SEELE_<versão>_x64-instalador.exe` da aba **Releases** e pule direto para o
+> passo 3. Ele traz o app e o `seeled.exe` prontos, e nenhuma das etapas de
+> instalação abaixo é necessária — nem Rust, nem Build Tools. Quem quer só o
+> servidor baixa o `seele-cli-<versão>-windows-x86_64.zip`, que traz o
+> `seeled.exe` sozinho. O Windows vai reclamar que o arquivo não é assinado;
+> **Mais informações** → **Executar assim mesmo**.
 >
 > O resto desta página é para compilar do código-fonte, que é o que você quer
 > se for mexer no código ou se não confiar num binário baixado.
@@ -138,17 +139,15 @@ Nos dois PCs:
 ```powershell
 git clone <url-do-repo> C:\SEELE
 cd C:\SEELE
-cargo build --release --bin seeled --bin connection
+cargo build --release --bin seeled
+cargo build --release -p seele-app
 ```
 
 A primeira compilação demora — dez a vinte minutos é normal, e o Opus baixa uma
 biblioteca pré-compilada no meio do caminho.
 
-Para o cliente gráfico, no PC onde quiser testá-lo:
-
-```powershell
-cargo build --release -p seele-app
-```
+O cliente é o app (`seele-app`), e os dois PCs precisam dele: o PC A hospeda e
+também conversa.
 
 O Tauri usa o **WebView2**, que já vem no Windows 11 e na maioria dos Windows 10
 atualizados. Se reclamar, o runtime está em
@@ -184,14 +183,14 @@ No **PC A**:
 Ele imprime, entre outras coisas:
 
 ```
-na outra máquina:
-  connection --server 192.168.x.x:8383
+na outra máquina, cole no SEELE:
+  seele://192.168.x.x:8383?fp=50217d68c6…   (na mesma rede)
 
 certificate fingerprint: 50217d68c6...
 ```
 
-**Anote a impressão digital.** É o que o cliente vai fixar no primeiro contato
-(ADR 0003) e conferir depois.
+**Anote a impressão digital.** O link já a leva, e é o que o cliente vai fixar
+no primeiro contato (ADR 0003) e conferir depois.
 
 Se a linha "na outra máquina" não aparecer, o servidor não achou um endereço de
 rede. Confira com `ipconfig`.
@@ -203,44 +202,38 @@ pare o servidor e apague o arquivo.
 
 ## 5 · Conectar os dois
 
-No **PC A**, num segundo terminal:
+Nos dois PCs, abra o app (`.\target\release\seele-app.exe`, ou o SEELE
+instalado) e escolha o apelido no perfil, no rodapé da entrada — **apelidos
+diferentes** nos dois. Depois **CONECTAR**:
 
-```powershell
-.\target\release\connection.exe --server 127.0.0.1:8383 --nick alexandre
-```
+- no **PC A**, digite `127.0.0.1:8383` no campo de baixo e **ENTRAR**;
+- no **PC B**, cole o link que o `seeled` imprimiu e **ENTRAR**.
 
-No **PC B**:
+No PC B, que entrou pelo link, a sessão abre dizendo `PRIMEIRO CONTATO
+VERIFICADO — O CONVITE CONFIRMOU A CHAVE`: o app conferiu a impressão do link
+sozinho. No PC A, que entrou pelo endereço cru, a frase é `PRIMEIRO CONTATO —
+CHAVE FIXADA`, com uma impressão digital. Confira contra a do passo 4. Se
+conferir, é aquele servidor.
 
-```powershell
-.\target\release\connection.exe --server 192.168.x.x:8383 --nick outro
-```
-
-Use o endereço que o `seeled` imprimiu, e **apelidos diferentes**.
-
-Na primeira conexão o cliente mostra `PRIMEIRO CONTATO — CHAVE FIXADA` com uma
-impressão digital. Confira contra a do passo 4. Se conferir, é aquele servidor.
-
-> Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o servidor
+> Dois apps com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o servidor
 > vincula o apelido à identidade que o reivindicou primeiro. No mesmo PC, para
-> ser um segundo pessoa:
+> ser uma segunda pessoa:
 > ```powershell
 > $env:SEELE_HOME="$HOME\.seele-outro"
-> .\target\release\connection.exe --server 127.0.0.1:8383 --nick terceiro
+> .\target\release\seele-app.exe
 > ```
 
 ---
 
 ## 6 · Usar
 
-Aperte `?` — a ajuda cabe na tela e é critério de aceite que ela baste.
+Aperte `?` — a ajuda abre de qualquer tela, com as palavras e as teclas que
+existem.
 
-O resumo: `i` escreve, `Enter` envia, `Esc` cancela, `Tab` troca de painel,
-`j`/`k` navegam, `:q` sai. `m` é mudo, `d` é surdo.
-
-**Falar:** barra de espaço no modo Normal. No Terminal do Windows e no
-PowerShell, segurar **não** funciona — esses terminais não reportam soltura de
-tecla, então a barra vira trava: aperta para abrir, aperta de novo para fechar
-(ADR 0016). A barra de telemetria diz qual estado está valendo.
+**Falar:** entre na sala de voz e segure **ESPAÇO**. É o modo TECLA;
+CONFIGURAÇÕES, em «COMO O MICROFONE ABRE», troca por VOZ ou ABERTO. A janela
+relata a soltura da tecla, então segurar funciona também no Windows, sem a
+trava que os terminais pediam (ADR 0016).
 
 **Use fones nos dois lados.** Não há cancelamento de eco neste produto, e sem
 fones haverá realimentação.
@@ -365,13 +358,10 @@ assinar atualização para todo SEELE instalado.
 | SSH entra e o `cargo` "não existe" | o Rust foi instalado noutra conta: ele precisa estar no PATH de quem atende o SSH (passo 7.4) |
 | Erro no build do `shiguredo_opus` | `curl`/`tar` ausentes, ou sem saída para a internet |
 | `llvm-nm` não encontrado | `rustup component add llvm-tools` |
-| Cliente fica em PADRÃO: LARANJA e não passa | firewall — a regra é **UDP** |
+| O app não passa da conexão | firewall — a regra é **UDP** |
 | `nickname belongs to a different identity` | apelido já pertence a outra identidade; troque de apelido ou de `$SEELE_HOME` |
 | Voz com eco horrível | alguém está sem fones |
 | A chave mudou e você não mudou nada | apagou o `seele.db`? O servidor gera certificado novo. Apague `%USERPROFILE%\.config\seele\pins` |
-
-Terminal recomendado: **Windows Terminal** (na Microsoft Store). O `conhost`
-antigo desenha mal caracteres de caixa e kanji.
 
 ---
 

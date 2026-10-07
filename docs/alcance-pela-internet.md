@@ -9,9 +9,9 @@ seu computador nem do seu amigo. O ADR 0022 registra a decisão por trás disto.
 
 ## O que o SEELE tenta sozinho
 
-Quando você aperta **HOSPEDAR AQUI** (ou roda `connection --hospedar`), o SEELE sobe
-uma escada e para no degrau mais alto que funcionar. Você não configura nada;
-ele tenta e depois **conta o que conseguiu**, junto do link.
+Quando você aperta **HOSPEDAR AQUI**, o SEELE sobe uma escada e para no degrau
+mais alto que funcionar. Você não configura nada; ele tenta e depois **conta o
+que conseguiu**, junto do link.
 
 | Degrau | O que é | Quem alcança você |
 |---|---|---|
