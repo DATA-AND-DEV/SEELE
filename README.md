@@ -148,7 +148,7 @@ se o app contém malware*, e o botão que ele oferece é "Mover para o Lixo". N�
 é detecção de nada: é a ausência de notarização, que exige conta paga da Apple.
 A saída é uma linha, `xattr -dr com.apple.quarantine /Applications/SEELE.app`,
 ou, depois da primeira tentativa de abrir, **Ajustes do Sistema** →
-**Privacidade e Segurança** → **Abrir assim mesmo** (*Open Anyway*), o caminho
+**Privacidade e Segurança** → **Abrir Mesmo Assim** (*Open Anyway*), o caminho
 do macOS 15, que tirou o atalho do botão direito. No Windows o SmartScreen
 avisa e o caminho é **Mais informações** → **Executar assim mesmo**. As notas
 de release explicam cada caso.
