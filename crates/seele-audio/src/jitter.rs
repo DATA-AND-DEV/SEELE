@@ -71,6 +71,10 @@ const CAPACITY: usize = 256;
 /// hold it next to.
 const JITTER_SMOOTHING: f64 = 1.0 / 16.0;
 
+/// Acima disto, uma diferença de trânsito entre dois quadros seguidos é salto
+/// do relógio de quem manda, e não oscilação da rede. Ver `update_jitter`.
+const DESCONTINUIDADE_DE_RELOGIO_MS: f64 = 500.0;
+
 /// How many jitter estimates of headroom the target aims to hold.
 ///
 /// Three covers the great majority of a roughly normal arrival distribution.
@@ -522,6 +526,25 @@ impl<T> JitterBuffer<T> {
             return Some(Decision::Silence);
         }
 
+        // **Silêncio com a voz já esperando na fila é atraso puro.** O silêncio
+        // de conforto é a pausa de quem fala, e é tocado no lugar dela. Mas se,
+        // enquanto ele toca, a fila passa do alvo, a pessoa já voltou a falar e o
+        // que sobra da pausa só empurra quem ouve para trás — e esse atraso não
+        // volta mais. O caso que ensinou: até a 0.15.0, trocar de microfone
+        // mandava o carimbo um segundo à frente, e cada troca somava ~900 ms a
+        // quem ouvia (relato de 05/10/2026). O resto da pausa é pulado de uma vez,
+        // contado como ressincronia, e a frente da fila toca.
+        if self.gap_comfort_left > 0 && self.depth_ms() > self.target_ms + self.config.frame_ms {
+            let pulo = u32::try_from(self.gap_comfort_left)
+                .unwrap_or(0)
+                .wrapping_mul(self.frame_samples());
+            self.next_timestamp = self.next_timestamp.map(|ts| ts.wrapping_add(pulo));
+            self.gap_comfort_left = 0;
+            self.consecutive_missing = 0;
+            self.metrics.resyncs += 1;
+            return None;
+        }
+
         if self.gap_comfort_left > 0 {
             self.gap_comfort_left -= 1;
             self.next_timestamp = self
@@ -547,7 +570,17 @@ impl<T> JitterBuffer<T> {
 
         if let Some(previous) = self.last_transit_ms {
             let difference = (transit - previous).abs();
-            self.jitter_ms += (difference - self.jitter_ms) * JITTER_SMOOTHING;
+            // **Um salto do relógio de quem manda não é jitter da rede.** Numa
+            // pausa de fala o carimbo e a chegada andam juntos e a diferença de
+            // trânsito fica perto de zero; quando o carimbo pula sem o tempo ter
+            // passado — trocar de microfone até a 0.15.0 pulava um segundo —, a
+            // diferença inteira entrava aqui como oscilação da rede, e o alvo do
+            // buffer subia para o teto e levava ~20 s para descer. Nenhuma rede
+            // em que se conversa oscila meio segundo de um pacote para o outro:
+            // acima disso é descontinuidade, e a base do trânsito recomeça.
+            if difference <= DESCONTINUIDADE_DE_RELOGIO_MS {
+                self.jitter_ms += (difference - self.jitter_ms) * JITTER_SMOOTHING;
+            }
         }
         self.last_transit_ms = Some(transit);
     }
@@ -1074,6 +1107,70 @@ mod tests {
             plays_in_first_50, 10,
             "the first burst is ten frames; more means the silence was compressed"
         );
+    }
+
+    /// **Trocar de microfone não pode empurrar quem ouve para trás.**
+    ///
+    /// Até a 0.15.0, quem trocava de microfone mandava o caminho novo um segundo
+    /// à frente no carimbo e um só número à frente na sequência. Aqui isso lia
+    /// como um segundo de pausa de quem fala, e o buffer agendava ~900 ms de
+    /// silêncio de conforto enquanto a voz nova já chegava e se empilhava na
+    /// fila. Esse atraso não voltava nunca, e cada troca somava outro: relato de
+    /// 05/10/2026, medido 50 → 950 → 1850 → 2750 ms.
+    ///
+    /// Simulado em tempo real, um tique a cada 20 ms: o remetente da 0.15.0
+    /// troca de aparelho quatro vezes, cada troca com 100 ms reais sem quadro.
+    /// O atraso de cada trecho entre trocas não pode passar do primeiro mais
+    /// 100 ms. As máquinas da 0.15.0 continuam mandando o salto, e por isso a
+    /// defesa mora aqui, e não só no remetente.
+    #[test]
+    fn trocar_de_microfone_do_outro_lado_nao_acumula_atraso() {
+        let mut buffer = buffer();
+        let quadro = crate::FRAME_SAMPLES as u32;
+        let (mut seq, mut carimbo) = (0_u16, 0_u32);
+        // Quando cada quadro saiu, em tiques: o atraso é o tique de agora menos esse.
+        let mut atrasos_por_trecho: Vec<Vec<u64>> = vec![Vec::new()];
+        let mut proximo_envio = 0_u64;
+        let mut trocas = 0;
+        for tique in 0_u64..1_400 {
+            // A cada 250 tiques (5 s), uma troca: 5 tiques (100 ms) sem quadro, e o
+            // caminho novo com o salto da 0.15.0.
+            if tique > 0 && tique % 250 == 0 && trocas < 4 {
+                trocas += 1;
+                proximo_envio = tique + 5;
+                seq = seq.wrapping_add(1);
+                carimbo = carimbo.wrapping_add(48_000);
+                atrasos_por_trecho.push(Vec::new());
+            }
+            if tique >= proximo_envio {
+                // Rede de 30 ms, constante: chega no mesmo tique, com o relógio certo.
+                buffer.push(seq, carimbo, tique as f64 * 20.0 + 30.0, tique as u16);
+                seq = seq.wrapping_add(1);
+                carimbo = carimbo.wrapping_add(quadro);
+            }
+            if let Decision::Play(enviado) = buffer.tick() {
+                let enviado = (tique & !0xffff) | u64::from(enviado);
+                if let Some(trecho) = atrasos_por_trecho.last_mut() {
+                    trecho.push(tique.saturating_sub(enviado) * 20);
+                }
+            }
+        }
+        let medianas: Vec<u64> = atrasos_por_trecho
+            .iter()
+            .map(|trecho| {
+                let mut t = trecho.clone();
+                t.sort_unstable();
+                t.get(t.len() / 2).copied().unwrap_or(0)
+            })
+            .collect();
+        let primeiro = *medianas.first().expect("há sempre o primeiro trecho");
+        for (i, mediana) in medianas.iter().enumerate() {
+            assert!(
+                *mediana <= primeiro + 100,
+                "o atraso cresceu com as trocas de microfone do outro lado: {medianas:?} ms \
+                 (trecho {i})"
+            );
+        }
     }
 
     #[test]

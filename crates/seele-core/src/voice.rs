@@ -906,15 +906,9 @@ fn carregar_controles(de: &Controls, para: &Controls) {
         .store(de.mode.load(Ordering::Relaxed), Ordering::Relaxed);
     para.key_held
         .store(de.key_held.load(Ordering::Relaxed), Ordering::Relaxed);
-    // O relógio de mídia junto, e é o item cuja falta calava a pessoa. Ver
-    // `Controls::relogio_seq` para o porquê e `salto_do_relogio` para o
-    // tamanho do pulo.
-    let (seq, carimbo) = Voice::salto_do_relogio(
-        de.relogio_seq.load(Ordering::Relaxed) as u16,
-        de.relogio_carimbo.load(Ordering::Relaxed),
-    );
-    para.relogio_seq.store(u32::from(seq), Ordering::Relaxed);
-    para.relogio_carimbo.store(carimbo, Ordering::Relaxed);
+    // O relógio de mídia **não** vai daqui: ele é entregue ao caminho novo na
+    // criação (`Voice::around`), antes de a thread nascer. Gravado aqui, depois
+    // do `spawn`, ele chegava tarde quando a thread ganhava a corrida.
     if let (Ok(antigos), Ok(mut novos)) = (de.gains.lock(), para.gains.lock()) {
         for (talker, gain) in antigos.iter() {
             novos.insert(*talker, *gain);
@@ -961,7 +955,7 @@ impl Voice {
         // microphone" is a return value the interface can show, instead of a
         // thread that quietly dies.
         let io = device::open(chosen.wanted(), RING_MS)?;
-        Self::around(io, chosen.clone(), media, ssrc)
+        Self::around(io, chosen.clone(), media, ssrc, (0, 0))
     }
 
     /// Opens the chosen devices, giving up one preference at a time.
@@ -991,11 +985,23 @@ impl Voice {
         ssrc: Ssrc,
     ) -> Result<Self> {
         let io = open_preferring(chosen)?;
-        Self::around(io, chosen.clone(), media, ssrc)
+        Self::around(io, chosen.clone(), media, ssrc, (0, 0))
     }
 
     /// Wraps devices that are already open in a running pipeline.
-    fn around(io: AudioIo, chosen: DeviceChoice, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
+    ///
+    /// `relogio` é a sequência e o carimbo de onde o caminho começa: zero num
+    /// caminho novo, e a continuação do anterior numa troca de aparelho (ver
+    /// [`Voice::relogio_seguinte`]). Gravado **antes** de a thread nascer: ela o
+    /// lê na primeira volta, e gravá-lo depois, como era, era uma corrida que
+    /// a thread podia ganhar e começar do zero.
+    fn around(
+        io: AudioIo,
+        chosen: DeviceChoice,
+        media: MediaChannel,
+        ssrc: Ssrc,
+        relogio: (u16, u32),
+    ) -> Result<Self> {
         let aparelhos = Arc::new(Mutex::new(EstadoDoAudio {
             capture: io.microfone(),
             playback: io.saida(),
@@ -1005,6 +1011,8 @@ impl Voice {
         }));
 
         let controls = Arc::new(Controls::novos());
+        controls.relogio_seq.store(u32::from(relogio.0), Ordering::Relaxed);
+        controls.relogio_carimbo.store(relogio.1, Ordering::Relaxed);
         let telemetry = Arc::new(Mutex::new(AudioTelemetry::default()));
 
         let thread_controls = Arc::clone(&controls);
@@ -1224,7 +1232,8 @@ impl Voice {
     /// The same as [`Voice::start_preferring`]. On failure nothing has changed
     /// and `self` is still running, though on a connection that is now dead.
     pub fn reopen(&self, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
-        let fresh = Self::start_preferring(&self.chosen, media, ssrc)?;
+        let io = open_preferring(&self.chosen)?;
+        let fresh = Self::around(io, self.chosen.clone(), media, ssrc, self.relogio_seguinte())?;
         self.carry_over(&fresh);
         Ok(fresh)
     }
@@ -1234,9 +1243,22 @@ impl Voice {
     /// The one place that list is written. Both switches and the reopening go
     /// through here, so an item added to it is added for all three at once.
     fn switch_to(&self, chosen: &DeviceChoice, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
-        let fresh = Self::start_on(chosen, media, ssrc)?;
+        // O aparelho primeiro, porque é a parte que falha e a que demora: se ele
+        // não abre, a pessoa continua falando pelo antigo; enquanto ele abre, o
+        // antigo continua mandando voz. Só depois o relógio é lido — do ponto em
+        // que o antigo de fato está.
+        let io = device::open(chosen.wanted(), RING_MS)?;
+        let fresh = Self::around(io, chosen.clone(), media, ssrc, self.relogio_seguinte())?;
         self.carry_over(&fresh);
         Ok(fresh)
+    }
+
+    /// De onde o caminho que substitui este começa a contar.
+    fn relogio_seguinte(&self) -> (u16, u32) {
+        Self::salto_do_relogio(
+            self.controls.relogio_seq.load(Ordering::Relaxed) as u16,
+            self.controls.relogio_carimbo.load(Ordering::Relaxed),
+        )
     }
 
     /// Puts this path's controls onto a freshly opened one.
@@ -1246,29 +1268,30 @@ impl Voice {
 
     /// Onde o relógio de mídia recomeça depois de trocar de dispositivo.
     ///
-    /// # Por que pular, e não só continuar
+    /// # Dois quadros, e a sequência junto
     ///
-    /// Porque os dois caminhos existem ao mesmo tempo por um instante: o novo é
-    /// aberto **antes** de o velho ser largado, de propósito — um microfone que
-    /// sumiu deixa a pessoa falando pelo antigo em vez de muda. Enquanto os dois
-    /// vivem, o velho ainda manda quadros com carimbos que crescem, e um caminho
-    /// novo que continuasse do último número visto ficaria atrás deles. Quem recebe
-    /// descarta o que vem atrás do que já tocou, e a pessoa some de novo — pelo
-    /// mesmo defeito, uma volta depois.
+    /// Os dois caminhos existem ao mesmo tempo por um instante: o novo nasce
+    /// **antes** de o velho ser largado, de propósito — um microfone que sumiu
+    /// deixa a pessoa falando pelo antigo em vez de muda. Depois de o relógio ser
+    /// lido, o velho ainda pode mandar um quadro antes de parar. Começar dois
+    /// quadros à frente passa por cima dele sem repetir número.
     ///
-    /// Um segundo de folga passa na frente de qualquer coisa que ainda esteja no ar
-    /// e custa, a quem escuta, um silêncio de um segundo que **de fato aconteceu**:
-    /// abrir um dispositivo de áudio leva esse tempo. O buffer de jitter lê o pulo
-    /// como um vão, esconde o que dá e reacerta — que é exatamente o que ele existe
-    /// para fazer.
+    /// **Até a 0.15.0 o pulo era de um segundo, e foi o defeito.** A ideia era
+    /// que abrir um aparelho leva esse tempo e o buffer de jitter de quem ouve
+    /// leria o pulo como pausa e reacertaria. Não reacertava: com a sequência
+    /// andando um e o carimbo cinquenta quadros, quem ouve agendava ~900 ms de
+    /// silêncio enquanto a voz nova já chegava, e o atraso ficava — cada troca
+    /// de microfone somava outro (relato de 05/10/2026, medido 50 → 950 → 1850
+    /// ms). O relógio agora é lido **depois** de o aparelho novo abrir, então o
+    /// tempo de abrir já está nele, e o pulo só cobre o quadro em voo.
     ///
-    /// A sequência anda um, e não mil: ela conta o que sai, e quem recebe usa a
-    /// diferença entre ela e o carimbo para separar silêncio de perda (M1.9).
+    /// A sequência anda o mesmo que o carimbo, em quadros: quem recebe usa a
+    /// diferença entre os dois para separar silêncio de perda (M1.9), e o vão
+    /// de dois quadros chega como um quadro perdido — que o Opus esconde — e
+    /// não como pausa de quem fala.
     fn salto_do_relogio(seq: u16, carimbo: u32) -> (u16, u32) {
-        (
-            seq.wrapping_add(1),
-            carimbo.wrapping_add(seele_audio::SAMPLE_RATE_HZ),
-        )
+        let quadro = u32::try_from(FRAME_SAMPLES).unwrap_or(960);
+        (seq.wrapping_add(2), carimbo.wrapping_add(2 * quadro))
     }
 
     /// Mutes the microphone — mudo.
@@ -2336,30 +2359,37 @@ mod relogio_de_midia {
     }
 
     #[test]
-    fn o_salto_passa_na_frente_do_caminho_que_ainda_esta_no_ar() {
+    fn o_salto_passa_na_frente_do_quadro_que_o_caminho_velho_ainda_manda() {
         // O caminho velho não morre no instante em que o novo abre — ele é
-        // largado **depois**, de propósito, para que um microfone que sumiu
-        // deixe a pessoa falando pelo antigo em vez de muda. Enquanto os dois
-        // vivem, o velho continua carimbando para a frente.
-        let (_, carimbo) = Voice::salto_do_relogio(700, 48_000 * 300);
-        // Meio segundo de caminho velho ainda saindo: 25 quadros de 20 ms.
-        let ultimo_do_velho = 48_000 * 300 + 25 * 960;
+        // largado logo **depois**, de propósito, para que um microfone que sumiu
+        // deixe a pessoa falando pelo antigo em vez de muda. O relógio é lido
+        // depois de o aparelho novo abrir, e o velho é largado em seguida: entre
+        // uma coisa e outra ele ainda pode mandar o quadro que estava em voo.
+        //
+        // Até a 0.15.0 isto supunha meio segundo de caminho velho no ar e pulava
+        // um segundo, e o pulo virava atraso permanente para quem ouvia. O que
+        // fica cobrado é a garantia que sobra: o novo nunca começa atrás.
+        let inicio = 48_000 * 300;
+        let (_, carimbo) = Voice::salto_do_relogio(700, inicio);
+        let quadro_em_voo = inicio + 960;
         assert!(
-            seele_audio::jitter::ts_delta(carimbo, ultimo_do_velho) > 0,
-            "o caminho novo abriu atrás do velho, e quem escuta descartaria              o novo exatamente como descartava antes"
+            seele_audio::jitter::ts_delta(carimbo, quadro_em_voo) > 0,
+            "o caminho novo abriu em cima do quadro em voo do velho, e quem escuta \
+             descartaria um dos dois"
         );
     }
 
     #[test]
-    fn a_sequencia_anda_um_e_nao_mil() {
+    fn a_sequencia_anda_com_o_carimbo_e_nao_mil() {
         // Ela conta o que sai, e quem recebe usa a distância entre ela e o
-        // carimbo para separar silêncio de perda (M1.9). Um pulo grande aqui
-        // seria lido como meio segundo de pacotes perdidos que nunca existiram.
+        // carimbo para separar silêncio de perda (M1.9). Andando junto com o
+        // carimbo, o vão chega como um quadro perdido; um pulo grande seria lido
+        // como meio segundo de pacotes perdidos que nunca existiram.
         let (seq, _) = Voice::salto_do_relogio(700, 0);
-        assert_eq!(seq, 701);
+        assert_eq!(seq, 702);
         // E dá a volta sem estourar, que é o caso de uma conversa longa.
         let (volta, _) = Voice::salto_do_relogio(u16::MAX, 0);
-        assert_eq!(volta, 0);
+        assert_eq!(volta, 1);
     }
 }
 
@@ -2841,7 +2871,7 @@ mod controles_na_reabertura {
     //! O item que machuca é o mudo: uma reabertura que o desliga sozinha põe no
     //! ar uma sala que estava calada, sem ninguém ter pedido.
 
-    use super::{carregar_controles, Controls, VoiceMode};
+    use super::{carregar_controles, Controls, Voice, VoiceMode, FRAME_SAMPLES};
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -2880,22 +2910,25 @@ mod controles_na_reabertura {
     }
 
     #[test]
-    fn o_relogio_de_midia_pula_para_a_frente_em_vez_de_recomecar() {
+    fn o_relogio_de_midia_continua_dois_quadros_a_frente() {
         // O defeito que calava a pessoa do outro lado: um caminho novo sobre o
-        // mesmo `ssrc` contando do zero é descartado inteiro por quem recebe.
-        let velho = Controls::novos();
-        velho.relogio_seq.store(4_000, Ordering::Relaxed);
-        velho.relogio_carimbo.store(1_000_000, Ordering::Relaxed);
-
-        let novo = Controls::novos();
-        carregar_controles(&velho, &novo);
-
-        assert_eq!(novo.relogio_seq.load(Ordering::Relaxed), 4_001);
+        // mesmo `ssrc` contando do zero é descartado inteiro por quem recebe. E o
+        // que atrasava quem ouvia: um pulo de um segundo com a sequência andando
+        // um só, lido como pausa e tocado como silêncio com a voz esperando.
+        let (seq, carimbo) = Voice::salto_do_relogio(4_000, 1_000_000);
+        let quadro = FRAME_SAMPLES as u32;
+        assert!(carimbo > 1_000_000, "o caminho novo não pode contar de trás do velho");
         assert_eq!(
-            novo.relogio_carimbo.load(Ordering::Relaxed),
-            1_000_000 + seele_audio::SAMPLE_RATE_HZ,
-            "sem a folga de um segundo, os quadros do caminho novo chegam \
-             atrás dos do velho, que ainda está no ar"
+            carimbo - 1_000_000,
+            2 * quadro,
+            "o pulo é de dois quadros: cobre o quadro em voo do caminho velho, e não \
+             um segundo que quem ouve tocaria como silêncio"
+        );
+        assert_eq!(
+            u32::from(seq - 4_000) * quadro,
+            carimbo - 1_000_000,
+            "a sequência anda o mesmo que o carimbo, em quadros: senão quem ouve lê \
+             o vão como pausa de quem fala, e não como um quadro perdido"
         );
     }
 }

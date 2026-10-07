@@ -1602,6 +1602,36 @@ function limparARegiaoDoMod(id, instancia) {
  */
 const temaDosMods = new Map();
 
+/**
+ * Qual instância de MOD é dona do tema de cada id.
+ *
+ * **O tema não tinha dono, e sobrevivia à sessão.** A única limpeza dele morava
+ * em `limparARegiaoDoMod`, registrada só quando o MOD cria uma região. O ESTILO
+ * 3.1.0 é de API 4 e não cria região quando há superfícies: o tema dele ficava
+ * em `temaDosMods` e escrito em `#tela-sessao` — o mesmo elemento em toda
+ * sessão — depois de sair. Entrar no servidor seguinte, sem MOD nenhum, mostrava
+ * as cores do anterior. Relato de 05/10/2026: um Mac entrou no servidor de um
+ * iPhone com a personalização de outro servidor. A personalização é da sessão
+ * e sai com ela (`specs/07-estetica.md`); isto não pode acontecer.
+ */
+const donoDoTema = new Map();
+
+/**
+ * Registra, uma vez por instância, a limpeza do tema que ela pediu.
+ *
+ * Só apaga se o tema ainda for desta instância: uma sessão velha que termina de
+ * encerrar depois de a nova começar não pode apagar o tema de quem chegou.
+ */
+function darDonoAoTema(id, instancia) {
+  if (donoDoTema.get(id) === instancia) return;
+  donoDoTema.set(id, instancia);
+  instancia.registrar(`${id}: o tema`, () => {
+    if (donoDoTema.get(id) !== instancia) return;
+    donoDoTema.delete(id);
+    if (temaDosMods.delete(id)) escreverOTemaDaSessao();
+  });
+}
+
 /** Os quatro que a API conhece, e o nome do token que cada um redefine. */
 const TEMA_DA_API = Object.freeze({
   fundo: "--seele-negro-absoluto",
@@ -2108,6 +2138,7 @@ async function atenderOMod(mod, instancia, m) {
         break;
       case "tema":
         aplicarOTemaDoMod(mod.id, m.valores);
+        darDonoAoTema(mod.id, instancia);
         responder(true, { valor: null });
         break;
       case "cartoes":
@@ -2480,6 +2511,15 @@ function encerrarOAmbienteDosMods() {
   // Idempotente: chamar de novo com zero não faz nada, e é o desfecho certo —
   // quem sai não precisa saber se o outro lado também vai avisar.
   geracaoDaSessao = 0;
+
+  // **O tema sai com a sessão, agora.** Ele é desta sessão e de mais nenhuma:
+  // sai antes de qualquer espera, e não quando o executor de cada MOD confirmar
+  // que parou — até lá, a cor do servidor que acabou pintava o que viesse
+  // depois. A limpeza registrada por `darDonoAoTema` continua lá para o caso de
+  // um MOD sair sozinho no meio da sessão.
+  temaDosMods.clear();
+  donoDoTema.clear();
+  escreverOTemaDaSessao();
 
   // **O som para agora, e a saída de som do sistema fecha.** Cada instância
   // solta os tocadores dela só quando o executor confirma que parou — e a
