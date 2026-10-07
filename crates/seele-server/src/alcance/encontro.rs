@@ -399,16 +399,28 @@ impl Encontro {
         self.publico
     }
 
-    /// O bilhete que vai no `seele://`.
+    /// O bilhete que vai no `seele://`, **com a porta do ponto escrita**.
+    ///
+    /// O ponto padrão é um nome sem porta, e um cliente 0.15.0 passa o ponto
+    /// do link cru a `lookup_host`, que recusa nome sem porta: a pergunta dele
+    /// ao quarto nunca saía. Escrita a porta, ela sai. Quem lê o link pela
+    /// regra de [`Bilhete::ponto`] chega ao mesmo lugar dos dois jeitos.
+    ///
+    /// **O que isso liga num cliente 0.15.0**, decidido pelo dono em
+    /// 2026-10-07 (o portão G2 do plano 1A): ele passa a perguntar ao quarto, e
+    /// na volta pela lista conecta sem impressão esperada. Quem atualiza para a
+    /// 0.15.1 ganha a conferência dentro do TLS.
     #[must_use]
     pub fn bilhete(&self) -> Bilhete {
-        // As duas metades já passaram por `validar_alvo` ao serem lidas ou são
+        // As duas metades já passaram por `validar_alvo` ao serem lidas, ou são
         // `SocketAddr`, que sempre escrevem um endereço válido. O recuo é
         // inalcançável e existe para não haver `expect` aqui.
-        Bilhete::novo(&self.ponto, self.aviso.to_string()).unwrap_or(Bilhete {
-            ponto: self.ponto.clone(),
-            aviso: self.aviso.to_string(),
-        })
+        Bilhete::novo(&self.ponto, self.aviso.to_string())
+            .and_then(|bilhete| bilhete.com_porta_escrita())
+            .unwrap_or(Bilhete {
+                ponto: self.ponto.clone(),
+                aviso: self.aviso.to_string(),
+            })
     }
 
     /// Para de reavivar o caminho e de atender avisos.
@@ -2152,6 +2164,36 @@ mod testes {
             "o primeiro registro no quarto não saiu e `atender` não disse isso no log (`info`, o \
              nível que o seele.log grava): o anfitrião some do quarto calado. Rastro: {}",
             rastro.texto()
+        );
+    }
+
+    #[tokio::test]
+    async fn o_bilhete_do_link_escreve_a_porta_do_ponto() {
+        // O ponto padrão não tem porta, e um cliente 0.15.0 passa o ponto do
+        // link cru a `lookup_host`, que recusa nome sem porta.
+        let aviso = SocketAddr::from(([198, 51, 100, 7], 41234));
+        let com = |ponto: &str| Encontro {
+            ponto: ponto.to_owned(),
+            aviso,
+            publico: SocketAddr::from(([198, 51, 100, 7], 8383)),
+            tarefa: tokio::spawn(async {}),
+        };
+        assert_eq!(
+            com(PONTO_PADRAO).bilhete().ponto,
+            "encontro.seele.app.br:8384",
+            "o link saiu com o ponto padrão sem porta: o cliente 0.15.0 continua sem perguntar ao \
+             quarto"
+        );
+        assert_eq!(com("[2001:db8::1]").bilhete().ponto, "[2001:db8::1]:8384");
+        assert_eq!(
+            com("meu.ponto:9000").bilhete().ponto,
+            "meu.ponto:9000",
+            "a porta que a pessoa escreveu foi trocada"
+        );
+        assert_eq!(
+            com(PONTO_PADRAO).bilhete().aviso,
+            aviso.to_string(),
+            "o aviso mudou junto com o ponto"
         );
     }
 }
