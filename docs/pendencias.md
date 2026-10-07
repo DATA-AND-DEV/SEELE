@@ -7279,6 +7279,11 @@ portão (`regiao-do-mod.cjs`, `contribuicoes-e-camadas.cjs`). **Nenhum dos dois
 especificação de 23/09 («Testes», item 14) pede o som tocando no app de
 verdade, e escrever «fechada» antes disso seria afirmar o que não foi medido.
 
+**A medição segura a 0.15.1** (decidido pelo dono em 2026-10-07). A versão só
+sai com os itens 1 a 3 abaixo feitos, nas duas metades, o WKWebView no Mac e
+o WebView2 no Windows, e o resultado escrito aqui. Ver o item 4 de «Antes de
+cortar a release», no índice da 1.0.
+
 ### O que falta medir, com o comando de cada um
 
 1. **Task 1, o «antes»: o WKWebView com o `<audio>`.** Mede o build de
