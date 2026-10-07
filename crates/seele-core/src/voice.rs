@@ -1011,7 +1011,9 @@ impl Voice {
         }));
 
         let controls = Arc::new(Controls::novos());
-        controls.relogio_seq.store(u32::from(relogio.0), Ordering::Relaxed);
+        controls
+            .relogio_seq
+            .store(u32::from(relogio.0), Ordering::Relaxed);
         controls.relogio_carimbo.store(relogio.1, Ordering::Relaxed);
         let telemetry = Arc::new(Mutex::new(AudioTelemetry::default()));
 
@@ -1233,7 +1235,13 @@ impl Voice {
     /// and `self` is still running, though on a connection that is now dead.
     pub fn reopen(&self, media: MediaChannel, ssrc: Ssrc) -> Result<Self> {
         let io = open_preferring(&self.chosen)?;
-        let fresh = Self::around(io, self.chosen.clone(), media, ssrc, self.relogio_seguinte())?;
+        let fresh = Self::around(
+            io,
+            self.chosen.clone(),
+            media,
+            ssrc,
+            self.relogio_seguinte(),
+        )?;
         self.carry_over(&fresh);
         Ok(fresh)
     }
@@ -2917,7 +2925,10 @@ mod controles_na_reabertura {
         // um só, lido como pausa e tocado como silêncio com a voz esperando.
         let (seq, carimbo) = Voice::salto_do_relogio(4_000, 1_000_000);
         let quadro = FRAME_SAMPLES as u32;
-        assert!(carimbo > 1_000_000, "o caminho novo não pode contar de trás do velho");
+        assert!(
+            carimbo > 1_000_000,
+            "o caminho novo não pode contar de trás do velho"
+        );
         assert_eq!(
             carimbo - 1_000_000,
             2 * quadro,
