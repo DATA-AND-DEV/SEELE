@@ -17,10 +17,7 @@ function botao() {
   );
 }
 
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 
 // Sem transmissão nenhuma e sem fonte escolhida.
 desenharBotoesDeTela({ tela: null });

@@ -8,10 +8,7 @@
 // Aqui o evento é entregue à mão, porque produzi-lo de verdade pediria dois
 // builds de versões diferentes. O que se mede é o que a casca faz com ele.
 
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 
 function palco() {
   const onde = $("palco-falha");

@@ -5,6 +5,8 @@
 // catálogo cuja assinatura não confere vira uma frase que manda parar — e não
 // uma lista vazia, que é como uma recusa de segurança some de vista.
 
+// `api` é a que este build aceita, lida do Rust pelo aparelho: um número fixo
+// aqui envelheceu (era 1) e o build de verdade teria escondido as duas versões.
 const CATALOGO = {
   esquema: 1,
   gerado_em: 1757100000,
@@ -18,7 +20,7 @@ const CATALOGO = {
       versoes: [
         {
           versao: "1.0.0",
-          api: 1,
+          api: SEELE_APIS_ACEITAS[0],
           hash: "9f2c",
           nivel: "com-notas",
           notas: ["fala-com-terceiro"],
@@ -27,7 +29,7 @@ const CATALOGO = {
         },
         {
           versao: "1.1.0",
-          api: 1,
+          api: SEELE_APIS_ACEITAS[0],
           hash: "4b71",
           nivel: "verificado",
           notas: [],
@@ -43,13 +45,17 @@ SEELE_RESPOSTAS.catalogo_de_mods = CATALOGO;
 SEELE_RESPOSTAS.mods_instalados = [];
 SEELE_RESPOSTAS.estou_hospedando = false;
 
-// Abrir CONFIGURAÇÕES e a seção MODS.
-document.getElementById("botao-server").click();
+// Abrir CONFIGURAÇÕES e a seção MODS. **De dentro de uma sessão**: sem ela a
+// seção nem aparece (`atualizarServer` a esconde), e abrir pela entrada fazia
+// o clique cair numa seção escondida e o roteiro estourar três passos adiante.
+await entrarNaSessao();
+document.getElementById("botao-server-sessao").click();
 await espera(150);
 document.getElementById("secao-mods").click();
 await espera(200);
 
 relatar(`painel MODS: ${visivel("painel-mods")}`);
+exigir(visivel("painel-mods") === "VISIVEL", "a seção MODS não abriu");
 // Nada foi buscado ao abrir — ADR 0026.
 relatar(`buscou ao abrir: ${window.__SEELE_CHAMADAS.includes("catalogo_de_mods")}`);
 

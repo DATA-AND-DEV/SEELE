@@ -1,8 +1,5 @@
 // A caixa de compartilhar pergunta qual monitor, e mais nada.
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 await abrirChamada();
 await espera(300);
 // O botão mora no rodapé do operador desde que a navegação passou para as

@@ -2,10 +2,7 @@
 //  Precisa clicar no cantinho do botão.»
 //
 // A pergunta é literal: o que o navegador encontra no centro do botão?
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 await abrirChamada();
 await espera(600);
 

@@ -1,8 +1,5 @@
 // O retrato da pessoa aparece na grade da chamada, e não só nas mensagens.
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 await abrirChamada();
 await espera(800);
 const cartoes = [...document.querySelectorAll(".chamada-cartao")];

@@ -1,8 +1,5 @@
 // O mesmo botão, dentro de um servidor, tem de mandar o nome ao servidor.
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 document.getElementById("operador-quem").click();
 await espera(400);
 document.getElementById("perfil-apelido").value = "aleta";

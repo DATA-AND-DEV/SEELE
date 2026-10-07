@@ -6,10 +6,7 @@ const cx = (id) => {
   return `${id}=${Math.round(r.width)}x${Math.round(r.height)}@y${Math.round(r.top)}`;
 };
 relatar("entrada: " + ["boot-perfil", "botao-server"].map(cx).join(" "));
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 relatar("cabecalho: " + ["nova-voice_room", "ajuda-abrir"].map(cx).join(" "));
 // O alternador `CONVERSA`/`CHAMADA` saiu do rodapé; a navegação é clicar numa
 // sala ou num canal. Ver `rodape-do-operador.js`, que mede o rodapé novo.
