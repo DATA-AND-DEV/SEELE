@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voz no navegador</title>
+<style>
+  :root {
+    --fundo: #f6f5f2; --texto: #1d1c1a; --suave: #6b6862; --linha: #d9d6cf;
+    --ok: #1f6f3d; --nao: #a3271b; --botao: #1d1c1a; --botao-texto: #f6f5f2;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #141413; --texto: #ecebe6; --suave: #9b988f; --linha: #34332f;
+      --ok: #6cc28b; --nao: #ef7a6b; --botao: #ecebe6; --botao-texto: #141413;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--fundo); color: var(--texto);
+    font: 15px/1.45 system-ui, -apple-system, sans-serif; max-width: 640px; margin-inline: auto;
+  }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--suave); margin: 22px 0 8px; }
+  p { margin: 0 0 8px; color: var(--suave); }
+  ul { list-style: none; padding: 0; margin: 0; }
+  #capacidades li { padding: 3px 0; border-bottom: 1px solid var(--linha); }
+  #capacidades li[data-ok="sim"] { color: var(--ok); }
+  #capacidades li[data-ok="nao"] { color: var(--nao); font-weight: 600; }
+  #ua { font-size: 12px; color: var(--suave); word-break: break-all; margin-top: 6px; }
+  .acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    font: inherit; padding: 10px 16px; border-radius: 8px; border: 0;
+    background: var(--botao); color: var(--botao-texto); min-height: 44px;
+  }
+  button:disabled { opacity: .35; }
+  label { display: inline-flex; gap: 6px; align-items: center; min-height: 44px; }
+  #medidas { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; margin: 0; }
+  #registro { font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--suave); }
+  #registro li { padding: 2px 0; border-bottom: 1px solid var(--linha); word-break: break-word; }
+  #testes a {
+    display: flex; align-items: center; min-height: 44px; padding: 8px 12px; margin-bottom: 6px;
+    border: 1px solid var(--linha); border-radius: 8px; color: var(--texto); text-decoration: none;
+  }
+  #testes a[aria-current="page"] { border-color: var(--texto); font-weight: 600; }
+  #modo { font-weight: 600; color: var(--texto); }
+</style>
+<script>/*SPIKE*/</script>
+</head>
+<body>
+  <h1>Voz no navegador</h1>
+  <p>Spike descartável. Tudo o que esta página mede volta ao servidor.</p>
+  <p>Modo desta página: <span id="modo">—</span></p>
+
+  <h2>Testes da tela bloqueada</h2>
+  <p>Toque num teste, faça os passos, bloqueie a tela por um minuto, volte e envie o relatório.</p>
+  <ul id="testes">
+    <li><a href="/?hash=errado&amp;auto=1">1 · hash errado (tem de falhar)</a></li>
+    <li><a href="/?sessao=play-and-record">2 · sessão de ligação</a></li>
+    <li><a href="/?saida=elemento">3 · saída pela tag &lt;audio&gt;</a></li>
+    <li><a href="/?sessao=play-and-record&amp;saida=elemento">4 · as duas juntas</a></li>
+    <li><a href="/">padrão (a rodada 1)</a></li>
+  </ul>
+
+  <h2>O que este aparelho tem</h2>
+  <ul id="capacidades"><li>medindo…</li></ul>
+  <div id="ua"></div>
+
+  <h2>Passos</h2>
+  <div class="acoes">
+    <button id="conectar">1 · Conectar</button>
+    <button id="audio" disabled>2 · Ligar áudio</button>
+    <label><input type="checkbox" id="falar" disabled> 3 · Falar</label>
+    <label><input type="checkbox" id="eco" disabled> eco da própria voz</label>
+  </div>
+  <p style="margin-top:8px">Depois: bloqueie a tela por um minuto, volte, e aperte
+    <button id="enviar" style="padding:4px 10px;min-height:32px">enviar relatório</button></p>
+
+  <h2>Medidas</h2>
+  <pre id="medidas">—</pre>
+
+  <h2>Registro</h2>
+  <ul id="registro"></ul>
+
+  <script src="/pagina.js"></script>
+</body>
+</html>

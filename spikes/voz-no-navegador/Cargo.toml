@@ -1,0 +1,29 @@
+[package]
+name = "spike-voz-no-navegador"
+description = "Prova de desenho: um navegador de celular fala voz com um servidor por WebTransport. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Fora do workspace de propósito, como os spikes anteriores. Este existe para
+# responder **uma** pergunta antes de alguém escrever um ADR sobre um cliente
+# web: um navegador de celular aceita um certificado autoassinado pelo hash,
+# codifica Opus pelo WebCodecs e mantém voz por datagrama — e o que acontece
+# com tudo isso quando a tela apaga. Ele morre com a resposta. Nada pode
+# depender dele.
+#
+# Ele **não** fala o protocolo do `seeled`. A pergunta é se o navegador chega
+# até um QUIC com voz; o postcard por cima é trabalho conhecido, e misturar os
+# dois esconderia em qual metade estaria a falha.
+[workspace]
+
+[dependencies]
+# O `wtransport` traz o próprio `quinn` 0.11 e o próprio `rustls` 0.23 — as
+# mesmas famílias do produto, não as mesmas versões. A medida aqui é do
+# navegador, não do servidor, e por isso a versão exata não invalida nada.
+wtransport = "0.7.2"
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde_json = "1"
+anyhow = "1"

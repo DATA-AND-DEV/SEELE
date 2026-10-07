@@ -34,30 +34,30 @@ o ganho é de estética.
 |---|---|---|---|
 | [0001](0001-serializacao-postcard.md) | Serialização com `postcard` | aceito por default | `02` — serialização |
 | [0002](0002-regra-de-dependencia.md) | Regra de dependência mais estrita que a spec | aceito por default | — (divergência encontrada em M0) |
-| [0003](0003-certificados-tofu.md) | TOFU como padrão de certificado | aceito por default | `01`, `08` — certificados |
+| [0003](0003-certificados-tofu.md) | TOFU como padrão de certificado | aceito por default · emendado no navegador pelo `0057` | `01`, `08` — certificados |
 | [0004](0004-autenticacao-chave-publica.md) | Autenticação por chave pública Ed25519 | aceito por default | `08` — autenticação |
 | [0005](0005-porta-padrao.md) | Porta padrão 8383/UDP | **proposto** | `01` — porta |
-| [0006](0006-esquema-de-uri.md) | Esquema de URI `seele://` | aceito | — (lacuna encontrada no design) |
-| [0007](0007-sem-dsp-externo-em-v1.md) | Sem DSP externo em v1 | aceito por default | `03` — AEC, AGC, supressão |
+| [0006](0006-esquema-de-uri.md) | Esquema de URI `seele://` | aceito · emendado no navegador pelo `0057` | — (lacuna encontrada no design) |
+| [0007](0007-sem-dsp-externo-em-v1.md) | Sem DSP externo em v1 | aceito por default · emendado no navegador pelo `0057` | `03` — AEC, AGC, supressão |
 | [0008](0008-binding-opus.md) | `shiguredo_opus` como binding do codec | **aceito** | `03` — binding do codec |
 | [0009](0009-orcamento-de-latencia.md) | Orçamento de latência boca-a-ouvido | **aceito** | — (contradição `00` × `03`) |
-| [0010](0010-fec-do-opus.md) | FEC in-band do Opus desligado em v1 | aceito | `02` — FEC |
+| [0010](0010-fec-do-opus.md) | FEC in-band do Opus desligado em v1 | aceito · emendado no navegador pelo `0057` | `02` — FEC |
 | [0011](0011-toolchain-e-msrv.md) | Toolchain fixado, MSRV igual ao toolchain | aceito por default | `01` — MSRV |
 | [0012](0012-i18n.md) | i18n desde M0, sem milestone próprio | aceito por default | — (lacuna G4) |
 | [0013](0013-idioma-de-manifestos-e-ci.md) | Manifestos e CI em inglês | aceito por default | — (lacuna em `10`) |
 | [0014](0014-palheta-v2-canonica.md) | Palheta v2 como canônica | aceito por default | `07` — tokens de cor |
 | [0015](0015-vad-sem-webrtc.md) | VAD por energia, sem `webrtc-vad` | aceito por default | `03` — ativação por voz |
 | [0016](0016-ptt-trava-quando-o-terminal-nao-reporta-soltura.md) | Push-to-talk vira trava onde o terminal não reporta soltura | aceito | `03` — push-to-talk |
-| [0017](0017-identidade-e-pins-em-disco.md) | Identidade e pins gravados em disco, sem senha | aceito | `08` — guarda da identidade |
-| [0018](0018-seele-ffi-sem-uniffi-por-enquanto.md) | `seele-ffi` com a forma que o `uniffi` exige, sem a dependência | aceito | `01` — ponte para o app |
-| [0019](0019-frontend-sem-framework-e-sem-npm.md) | Frontend do desktop sem framework e sem npm | aceito | `05` — frontend desktop |
+| [0017](0017-identidade-e-pins-em-disco.md) | Identidade e pins gravados em disco, sem senha | aceito · emendado no navegador pelo `0057` | `08` — guarda da identidade |
+| [0018](0018-seele-ffi-sem-uniffi-por-enquanto.md) | `seele-ffi` com a forma que o `uniffi` exige, sem a dependência | aceito · emendado pelo `0057`: o `uniffi` não entra em M6 | `01` — ponte para o app |
+| [0019](0019-frontend-sem-framework-e-sem-npm.md) | Frontend do desktop sem framework e sem npm | aceito · emendado no navegador pelo `0057` | `05` — frontend desktop |
 | [0020](0020-o-que-o-tauri-traz-junto.md) | O que o Tauri traz junto, e por que aceitamos | aceito | `01` — dependências do app |
 | [0021](0021-admissao-em-um-dogma.md) | Quem entra num servidor: convite de uso único, senha como alternativa | aceito | `08` — admissão |
 | [0022](0022-alcancar-um-dogma-pela-internet.md) | Alcançar um servidor pela internet | **aceito** · degrau 5 emendado pelo `0045` | `01` — alcance fora da rede local |
 | [0023](0023-idioma-dentro-do-seele-core.md) | Idioma dentro do `seele-core` | aceito | `10` — idioma |
 | [0024](0024-faixas-de-sincronia-em-tres-e-a-media-no-core.md) | Faixas do sinal em três, e a média da sala no core | aceito | `03` — sincronia |
 | [0025](0025-limitacao-de-taxa-em-dois-baldes.md) | Limitação de taxa: dois baldes, e um aviso antes da porta | aceito | `08` — limitação de taxa |
-| [0026](0026-duas-assinaturas-e-um-botao-de-atualizar.md) | Duas assinaturas, e um botão de atualizar | aceito · o botão foi substituído pelo `0046` | `01` — distribuição |
+| [0026](0026-duas-assinaturas-e-um-botao-de-atualizar.md) | Duas assinaturas, e um botão de atualizar | aceito · o botão foi substituído pelo `0046` · exceção no navegador pelo `0057` | `01` — distribuição |
 | [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md) | Anexos com teto total, e o mais velho sai | aceito | `02` — política de anexos (D14) |
 | [0028](0028-a-reserva-do-anel-de-reproducao.md) | A reserva do anel de reprodução, e o que ela custa de latência | aceito | — (pendência 2, e revisão do `0009`) |
 | [0029](0029-mods-declaram-valores-e-o-produto-mede.md) | MODs: declaram valores, e o produto mede antes de aplicar | **substituído pelo `0045`** · nada construído | — (pedido do dono; desfaz metade do não-objetivo de `00`) |
@@ -70,14 +70,14 @@ o ganho é de estética.
 | [0036](0036-bitrate-adaptativo-em-faixas.md) | Bitrate adaptativo em faixas, sobre perda de subida medida no servidor | aceito | `03` — o bitrate adaptativo que a spec pede |
 | [0037](0037-candidatos-do-convite-em-paralelo.md) | Um `Endpoint`, muitas conexões: os candidatos do convite correm juntos | aceito | `02` — alcançar um servidor pela internet |
 | [0038](0038-o-teto-da-sala-e-contado-nao-declarado.md) | O teto da sala é contado, e quem hospeda é avisado | aceito | `04` — o dimensionamento da sala |
-| [0039](0039-o-produto-passa-a-ter-uma-casca-so.md) | O produto passa a ter uma casca só | aceito | `05` e `06` — as cascas |
+| [0039](0039-o-produto-passa-a-ter-uma-casca-so.md) | O produto passa a ter uma casca só | aceito · emendado no navegador pelo `0057` | `05` e `06` — as cascas |
 | [0040](0040-sessenta-quadros-entram-por-medida.md) | Sessenta quadros entram, por medida | aceito | design da tela, §6 item 10 |
 | [0041](0041-o-codec-por-hardware-e-a-excecao-ao-unsafe.md) | O codec por hardware, e a exceção nomeada ao `unsafe` | **aceito** | — (reverte a recusa registrada no `Cargo.toml` do `seele-video`) |
 | [0042](0042-nomes-repetidos-e-a-chave-que-distingue.md) | Nomes repetidos, e a chave que distingue | **proposto** | — (pedido do dono; revisa o `0017`) |
 | [0043](0043-o-instalador-do-windows-e-nosso.md) | O instalador do Windows é nosso | **aceito** | — (o NSIS não desenha a moldura, os botões nem a fonte) |
 | [0044](0044-o-portao-divide-a-subida-medida.md) | O portão divide a subida medida, e a medida sobrevive ao reinício | **aceito** | — (revisa a perna do hospedeiro do `0038`) |
 | [0045](0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md) | MODs: o produto base tem regras, e um MOD não | **proposto** | — (pedido do dono; substitui o `0029`) |
-| [0046](0046-toda-versao-continua-de-pe.md) | Toda versão continua de pé: o app vira launcher | **proposto** | — (pedido do dono; substitui o botão do `0026`) |
+| [0046](0046-toda-versao-continua-de-pe.md) | Toda versão continua de pé: o app vira launcher | **proposto** · exceção no navegador pelo `0057` | — (pedido do dono; substitui o botão do `0026`) |
 | [0047](0047-o-link-que-volta-a-funcionar-amanha.md) | O link que volta a funcionar amanhã: permanência, multiconexão e chamada privada | **rascunho** | — (pedido do dono; confere o `0022` e o `0031` contra o código) |
 | [0048](0048-mods-ganham-o-caminho-de-volume-que-os-anexos-ja-tem.md) | MODs ganham o caminho de volume que os anexos já têm | **aceito** | — (relato de campo: imagem de 1 MB levando 28 s; estende o `0027` aos MODs do `0045`) |
 | [0049](0049-um-mod-deixa-de-rodar-na-janela-do-produto.md) | Um MOD deixa de rodar na janela do produto | **aceito** | — (revisa o `0045`; etapa 5 do plano de isolamento, e depende de protótipo em macOS e Windows) |
@@ -85,6 +85,7 @@ o ganho é de estética.
 | [0053](0053-uma-previa-nao-e-um-clique.md) | Uma prévia não é um clique | **aceito** | — (revisão da v15, R06: separa a política de prévia automática da de abrir link, e põe o consentimento por domínio nas mãos de quem lê) |
 | [0054](0054-uma-transmissao-tem-identidade.md) | Uma transmissão tem identidade | **aceito** | — (revisão da v15, R16–R21: tudo de compartilhamento passa a ser por `ScreenId`) |
 | [0055](0055-o-filtro-e-o-que-torna-o-limiar-baixo-defensavel.md) | O filtro é o que torna o limiar baixo defensável | **aceito** | — (`features-v15.md` F01 e F02: supressão de ruído em Rust puro, e o limiar que passou a medir a sala em vez de supor o ruído dela — revisado pela auditoria de 22/09/2026) |
+| [0057](0057-o-celular-entra-pelo-navegador.md) | No celular, o SEELE é uma página: web app instalável, sem app nativo | **aceito** | `06` — plataforma mobile (M6) |
 
 ## O que ainda não tem ADR
 
@@ -92,8 +93,7 @@ Decisões em aberto que vencem depois de M1 e por isso não foram escritas ainda
 ver `docs/plano-m0-m1.md`, seção 4.2: política acima de
 20 falantes (M3), endpoint de saúde (M3),
 recarga a quente de config (M3), compressão de histórico (M3), PTT global (M4),
-tecla de PTT (M4), leitor de tela (M4), framework do frontend desktop (M5),
-plataforma mobile (M6).
+tecla de PTT (M4), leitor de tela (M4).
 
 **Anexos saíram desta lista**: viraram o [0027](0027-anexos-com-teto-e-o-mais-velho-sai.md),
 aceito e construído, e ele desfaz metade da D14 — o teto de corpo de 4 KiB
@@ -109,6 +109,17 @@ aceito, com os degraus 2 (IPv6) e 3 (UPnP) construídos. O degrau 4 — furo de 
 com ponto de encontro — continua sem decisão de propósito: ele custa uma
 conversa sobre o metadado que o ponto de encontro aprende, e o 0022 existe para
 que essa conversa aconteça antes do código.
+
+**Plataforma mobile saiu desta lista**: virou o [0057](0057-o-celular-entra-pelo-navegador.md),
+aceito em 2026-10-07 e não construído. O celular é um web app instalável que só
+entra em servidores, por WebTransport direto ao `seeled`; o app nativo em Tauri
+do `8632668` foi abandonado. A decisão está tomada, e o aceite do M6 continua
+sem medida: 30 minutos com a tela bloqueada **no web app instalado**, 4G e
+Android.
+
+**Framework do frontend desktop também saiu, e já devia ter saído**: o
+[0019](0019-frontend-sem-framework-e-sem-npm.md) o fechou em M5, e a lista só
+não tinha sido atualizada.
 
 **MODs nunca estiveram nesta lista, e o motivo importa**: `specs/00-visao-geral.md`
 os punha como **não-objetivo** de v1 ("marketplace de plugins"), e a tela de
