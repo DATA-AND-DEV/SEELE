@@ -321,6 +321,27 @@ impl Bilhete {
             .map_err(|_| ErroDeUri::BilheteInvalido)?;
         Ok(std::net::SocketAddr::new(ip, alvo.porta))
     }
+
+    /// O mesmo bilhete, com a porta do ponto de encontro escrita.
+    ///
+    /// Quem lê o bilhete por [`Bilhete::ponto`] não precisa disto, porque a
+    /// porta padrão é aplicada lá. Quem precisa é o cliente anterior a
+    /// [`separar_ponto`]: ele passava o texto cru a `lookup_host`, que recusa
+    /// nome sem porta. Escrita, a porta viaja no link e dispensa a regra.
+    ///
+    /// # Errors
+    ///
+    /// O de [`Bilhete::ponto`]: não falha para um bilhete vindo de
+    /// [`Bilhete::novo`] ou de [`Bilhete::ler`].
+    pub fn com_porta_escrita(&self) -> Result<Self, ErroDeUri> {
+        let alvo = self.ponto()?;
+        let ponto = if alvo.maquina.contains(':') {
+            format!("[{}]:{}", alvo.maquina, alvo.porta)
+        } else {
+            format!("{}:{}", alvo.maquina, alvo.porta)
+        };
+        Self::novo(ponto, self.aviso.clone())
+    }
 }
 
 impl fmt::Display for Bilhete {
@@ -1196,6 +1217,55 @@ mod tests {
                 "passou: {torto}"
             );
         }
+    }
+
+    #[test]
+    fn um_bilhete_com_a_porta_escrita_serve_ao_cliente_que_nao_sabe_a_porta_padrao() {
+        use std::net::ToSocketAddrs;
+
+        let bilhete = Bilhete::novo("198.51.100.1", "198.51.100.7:41234")
+            .expect("bom")
+            .com_porta_escrita()
+            .expect("um bilhete válido sempre ganha a porta");
+        assert_eq!(bilhete.ponto, "198.51.100.1:8384");
+
+        // `analisar` e `Bilhete::ler` são os da v0.15.0 (e2fac4d): é o link novo
+        // lido pelo cliente velho.
+        let link = Convite::novo("192.168.0.30:8383")
+            .com_bilhete(bilhete.clone())
+            .com_impressao_digital(FP)
+            .to_string();
+        let lido = analisar(&link)
+            .expect("o link com a porta escrita derrubou a leitura")
+            .bilhete
+            .expect("o bilhete sumiu do link");
+        assert_eq!(lido, bilhete, "o bilhete não voltou igual: {link}");
+
+        // O que a v0.15.0 faz com esse texto: `lookup_host(ponto)` cru, que é
+        // `ToSocketAddrs` de `str`. Com a porta, resolve.
+        assert!(
+            lido.ponto.as_str().to_socket_addrs().is_ok(),
+            "o ponto com a porta escrita não resolve como texto cru, e o cliente 0.15.0 continua \
+             sem perguntar ao quarto"
+        );
+        // E o link de antes, sem porta: a pergunta nem saía.
+        assert!("198.51.100.1".to_socket_addrs().is_err());
+
+        // Escrever de novo não muda nada, e a porta de quem escreveu fica.
+        assert_eq!(
+            Bilhete::novo("encontro.exemplo:9000", "198.51.100.7:41234")
+                .expect("bom")
+                .com_porta_escrita()
+                .map(|bilhete| bilhete.ponto),
+            Ok("encontro.exemplo:9000".to_owned())
+        );
+        assert_eq!(
+            Bilhete::novo("[2001:db8::1]", "198.51.100.7:41234")
+                .expect("bom")
+                .com_porta_escrita()
+                .map(|bilhete| bilhete.ponto),
+            Ok("[2001:db8::1]:8384".to_owned())
+        );
     }
 }
 
