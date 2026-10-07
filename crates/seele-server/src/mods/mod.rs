@@ -73,6 +73,21 @@ const TETO_DE_MEMORIA: usize = 8 * 1024 * 1024;
 /// host's MOD and spare the fast one's.
 const TETO_DE_CONSULTAS: usize = 500;
 
+/// **O mais que o texto de um MOD ocupa na linha de quem hospeda**, contado
+/// pelo tamanho que ele tem lá, já escapado.
+///
+/// O texto e o onde de [`Falha::Lancou`] e de [`Falha::NaoCarregou`] vêm do
+/// MOD e vão em `%falha` e `%error` ao `seele.log` de quem hospeda. O `Debug`
+/// os escapa, e o escape faz um caractere que não se imprime ocupar até dez
+/// (`\u{100000}`): cortado antes do escape, um texto de 512 desses chegaria a
+/// 5120 caracteres na linha. O erro do motor de [`Falha::FalhouSemLancar`] e
+/// de [`Falha::NaoCarregouSemLancar`] passa pelo mesmo corte.
+///
+/// O número é o da janela (`TETO_DA_FRASE_NO_REGISTRO`, no app), e a regra do
+/// corte é a de `ate_o_teto_do_registro` do executor, reescrita aqui porque o
+/// servidor não depende do app.
+const TETO_DO_LANCADO_NO_REGISTRO: usize = 512;
+
 /// Why a MOD did not run.
 ///
 /// **There is no `EstourouMemoria`, and the absence is deliberate.** The memory
@@ -82,14 +97,66 @@ const TETO_DE_CONSULTAS: usize = 500;
 /// is never emitted is the debt ADR 0021 already recorded once
 /// (`DisconnectReason::RateLimited`, "existe e nunca é enviado"), and one is
 /// enough.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+///
+/// **O que o MOD lançou vai junto, e escapado.** O `Display` de
+/// [`Self::Lancou`] e de [`Self::NaoCarregou`] escreve o texto pelo `Debug`
+/// (`mod threw: "ReferenceError: console is not defined" at "…"`), porque ele
+/// é do MOD e vai cru ao `seele.log` de quem hospeda: sem as aspas e o
+/// escape, um `\n` nele escreveria uma linha forjada. E cortado em
+/// [`TETO_DO_LANCADO_NO_REGISTRO`] pelo tamanho escapado. Quando nada foi
+/// lançado, o erro do motor vai do mesmo jeito, em [`Self::FalhouSemLancar`]
+/// e [`Self::NaoCarregouSemLancar`] (`mod failed: "…"`). Não atravessa o fio:
+/// quem pediu recebe `bridge-refused`, como antes.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Falha {
-    /// The source did not compile.
-    #[error("mod source did not compile")]
-    NaoCarregou,
-    /// It threw.
-    #[error("mod threw")]
-    Lancou,
+    /// O código não carregou: não compilou, ou o topo dele lançou.
+    ///
+    /// O texto do QuickJS e o onde costumam separar os dois: o que não
+    /// compilou sai como `SyntaxError: …`, com o onde no arquivo
+    /// (`eval_script:1:1`), e um `throw` do topo sai com o onde dentro do
+    /// `<eval>` (`<eval> (eval_script:1:10)`). Mas não é regra: um topo que
+    /// compila e chama `JSON.parse('{')` lança um `SyntaxError` também, com o
+    /// onde no texto que o JSON leu (`<input>:1:1`).
+    #[error("mod threw while loading: {texto:?}{}", onde_dito(.onde.as_deref()))]
+    NaoCarregou {
+        /// `nome: mensagem` quando é um `Error`; o valor como o JavaScript o
+        /// diria, quando não é.
+        texto: String,
+        /// A primeira linha da pilha, sem o `at` do começo, quando há.
+        onde: Option<String>,
+    },
+    /// **Não carregou, e nada foi lançado**: o motor falhou ao montar o
+    /// contexto ou ao rodar o topo, sem exceção do MOD por trás — um teto de
+    /// memória menor que o próprio contexto, por exemplo.
+    ///
+    /// Distinta de [`Self::NaoCarregou`] porque «threw» mandaria quem escreveu
+    /// o MOD procurar um `throw` que não existe.
+    #[error("mod failed while loading: {texto:?}")]
+    NaoCarregouSemLancar {
+        /// O erro do motor.
+        texto: String,
+    },
+    /// Lançou, numa chamada.
+    #[error("mod threw: {texto:?}{}", onde_dito(.onde.as_deref()))]
+    Lancou {
+        /// `nome: mensagem` quando é um `Error`; o valor como o JavaScript o
+        /// diria, quando não é.
+        texto: String,
+        /// A primeira linha da pilha, sem o `at` do começo, quando há.
+        onde: Option<String>,
+    },
+    /// **Falhou numa chamada, e nada foi lançado**: o motor recusou uma
+    /// conversão, sem exceção do MOD por trás — um `aoPedir` que falta, um
+    /// que devolve outra coisa que texto, um valor que não é texto em `dados`.
+    ///
+    /// Distinta de [`Self::Lancou`] pela mesma razão de
+    /// [`Self::NaoCarregouSemLancar`]. O caminho de eventos a trata como trata
+    /// quem lançou: desliga o MOD.
+    #[error("mod failed: {texto:?}")]
+    FalhouSemLancar {
+        /// O erro do motor.
+        texto: String,
+    },
     /// **Não está carregado aqui**, e isso não é defeito dele.
     ///
     /// O conjunto exigido vive no banco; o código carregado vive na thread dos
@@ -112,6 +179,210 @@ pub enum Falha {
     /// will actually ask.
     #[error("mod yard went past its size ceiling")]
     QuintalCheio,
+}
+
+/// O ` at "…"` de uma falha, quando há onde.
+fn onde_dito(onde: Option<&str>) -> String {
+    onde.map(|onde| format!(" at {onde:?}")).unwrap_or_default()
+}
+
+/// **O que saiu de uma volta do MOD**, já cortado no teto da linha.
+///
+/// O molde é o `Lancado` do executor da janela (`apps/seele-app/src/executor.rs`),
+/// copiado e não importado: o servidor não depende do app.
+struct Lancado {
+    /// `nome: mensagem`, o valor lançado como texto, ou o erro do motor.
+    texto: String,
+    /// A primeira linha da pilha, sem o `at` do começo.
+    onde: Option<String>,
+    /// Nada foi lançado: o texto é o erro do motor, e a falha não pode
+    /// dizer «threw».
+    do_motor: bool,
+}
+
+impl Lancado {
+    /// O que fez `erro` acontecer, **lido ainda dentro do contexto**: a
+    /// exceção pendente é dele, e é aqui que ela é tirada.
+    ///
+    /// Quando o erro não é uma exceção (uma conversão que o motor recusou),
+    /// o texto é o do motor.
+    fn da_volta(ctx: &rquickjs::Ctx<'_>, erro: &rquickjs::Error) -> Self {
+        if !matches!(erro, rquickjs::Error::Exception) {
+            return Self::do_motor(erro);
+        }
+        let (texto, onde) = o_que_o_mod_lancou(ctx);
+        Self::no_teto(&texto, onde.as_deref(), false)
+    }
+
+    /// Um erro do motor, sem exceção do MOD por trás.
+    fn do_motor(erro: &rquickjs::Error) -> Self {
+        Self::no_teto(&erro.to_string(), None, true)
+    }
+
+    /// O texto e o onde cortados para caberem **juntos** em
+    /// [`TETO_DO_LANCADO_NO_REGISTRO`], pelo tamanho escapado.
+    ///
+    /// O texto vem primeiro, e o onde fica com o que sobrar. Um texto que
+    /// precisou ser cortado ocupou a linha inteira, e o onde sai: o pedaço
+    /// que sobraria dele (`"<an…"`) não diria onde.
+    fn no_teto(texto: &str, onde: Option<&str>, do_motor: bool) -> Self {
+        let inteiro = tamanho_escapado(texto) <= TETO_DO_LANCADO_NO_REGISTRO;
+        let texto = cortado_no_teto(texto, TETO_DO_LANCADO_NO_REGISTRO);
+        let sobra = TETO_DO_LANCADO_NO_REGISTRO.saturating_sub(tamanho_escapado(&texto));
+        let onde = onde
+            .filter(|_| inteiro)
+            .map(|onde| cortado_no_teto(onde, sobra))
+            .filter(|onde| !onde.is_empty() && onde != MARCA_DO_CORTE);
+        Self {
+            texto,
+            onde,
+            do_motor,
+        }
+    }
+
+    /// Como falha de uma chamada: [`Falha::Lancou`], ou
+    /// [`Falha::FalhouSemLancar`] quando nada foi lançado.
+    fn na_chamada(self) -> Falha {
+        if self.do_motor {
+            Falha::FalhouSemLancar { texto: self.texto }
+        } else {
+            Falha::Lancou {
+                texto: self.texto,
+                onde: self.onde,
+            }
+        }
+    }
+
+    /// Como falha ao carregar: [`Falha::NaoCarregou`], ou
+    /// [`Falha::NaoCarregouSemLancar`] quando nada foi lançado.
+    fn ao_carregar(self) -> Falha {
+        if self.do_motor {
+            Falha::NaoCarregouSemLancar { texto: self.texto }
+        } else {
+            Falha::NaoCarregou {
+                texto: self.texto,
+                onde: self.onde,
+            }
+        }
+    }
+}
+
+/// **Por que uma volta do MOD falhou**, lido ainda dentro do contexto.
+///
+/// O teto é conferido **antes** da leitura: ler o `name` ou a `stack` do que
+/// foi lançado pode rodar um getter do MOD, que conta consultas também, e um
+/// MOD que lançou não pode virar um que passou do tempo por causa de quem o
+/// leu. A leitura roda sob o mesmo teto da chamada, sem zerá-lo: um getter que
+/// não termina é cortado por ele.
+///
+/// Quando quem parou a volta foi o teto, a exceção (`InternalError:
+/// interrupted`) é tirada e a falha diz o teto, e não «o MOD lançou» — que
+/// mandaria procurar um `throw` que não existe.
+fn falha_da_volta(
+    ctx: &rquickjs::Ctx<'_>,
+    passos: &AtomicUsize,
+    teto: usize,
+    erro: &rquickjs::Error,
+    como: fn(Lancado) -> Falha,
+) -> Falha {
+    if passos.load(Ordering::Relaxed) > teto {
+        let _ = ctx.catch();
+        return Falha::PassouDoTempo;
+    }
+    como(Lancado::da_volta(ctx, erro))
+}
+
+/// **O que o MOD lançou, em texto**: `nome: mensagem` e a primeira linha da
+/// pilha, quando é um `Error`; o valor como o JavaScript o diria, quando não é.
+///
+/// O que não vira texto não derruba o resto: um nome que não vira texto sai
+/// como `Error`, uma mensagem ou uma pilha sai vazia, e um valor lançado que
+/// não vira texto (um `Symbol`) sai como um recuo que diz isso. A exceção que
+/// essa leitura deixar pendente é tirada — a volta seguinte não pode herdar
+/// uma exceção que não é dela.
+fn o_que_o_mod_lancou(ctx: &rquickjs::Ctx<'_>) -> (String, Option<String>) {
+    use rquickjs::convert::Coerced;
+    let lancado = ctx.catch();
+    let lido = match lancado.as_exception() {
+        Some(excecao) => {
+            let nome = excecao
+                .get::<_, Coerced<String>>("name")
+                .map_or_else(|_| "Error".to_owned(), |nome| nome.0);
+            let mensagem = excecao.message().unwrap_or_default();
+            let pilha = excecao.stack().unwrap_or_default();
+            let onde = pilha
+                .lines()
+                .map(str::trim)
+                .find(|linha| !linha.is_empty())
+                .map(|linha| linha.strip_prefix("at ").unwrap_or(linha).to_owned());
+            (format!("{nome}: {mensagem}"), onde)
+        }
+        None => (
+            lancado.get::<Coerced<String>>().map_or_else(
+                |_| "[valor que não virou texto]".to_owned(),
+                |texto| texto.0,
+            ),
+            None,
+        ),
+    };
+    if ctx.has_exception() {
+        let _ = ctx.catch();
+    }
+    lido
+}
+
+/// O que fecha um texto cortado, para quem lê saber que ele continuava.
+const MARCA_DO_CORTE: &str = "…";
+
+/// `texto` inteiro, quando cabe em `teto` pelo tamanho escapado; o começo que
+/// cabe e a [`MARCA_DO_CORTE`], quando não cabe.
+fn cortado_no_teto(texto: &str, teto: usize) -> String {
+    if tamanho_escapado(texto) <= teto {
+        return texto.to_owned();
+    }
+    let Some(sem_a_marca) = teto.checked_sub(tamanho_escapado(MARCA_DO_CORTE)) else {
+        return String::new();
+    };
+    let mut cortado = ate_o_teto(texto, sem_a_marca).to_owned();
+    cortado.push_str(MARCA_DO_CORTE);
+    cortado
+}
+
+/// **O começo de `texto` que cabe em `teto`**, contado pelo tamanho que ele
+/// tem escapado ([`tamanho_no_registro`]).
+///
+/// A regra de `ate_o_teto_do_registro` do executor da janela, reescrita aqui.
+/// Caractere a caractere, e não por bytes: parar antes do caractere que não
+/// cabe respeita a fronteira dele por construção. E para no primeiro que não
+/// cabe, sem medir o resto.
+fn ate_o_teto(texto: &str, teto: usize) -> &str {
+    let mut ocupado = 0_usize;
+    for (onde, c) in texto.char_indices() {
+        ocupado = ocupado.saturating_add(tamanho_no_registro(c));
+        if ocupado > teto {
+            return texto.get(..onde).unwrap_or_default();
+        }
+    }
+    texto
+}
+
+/// Quantos caracteres `texto` ocupa no `Debug` de um `str`, sem as aspas.
+fn tamanho_escapado(texto: &str) -> usize {
+    texto.chars().fold(0_usize, |soma, c| {
+        soma.saturating_add(tamanho_no_registro(c))
+    })
+}
+
+/// Quantos caracteres `c` ocupa no `Debug` de um `str`.
+///
+/// É o `escape_debug` do caractere, com uma exceção, a mesma do executor da
+/// janela: o `Debug` de um `char` escapa o apóstrofo, e o de um `str` não.
+fn tamanho_no_registro(c: char) -> usize {
+    if c == '\'' {
+        1
+    } else {
+        c.escape_debug().count()
+    }
 }
 
 /// One MOD's runtime, and the step counter its interrupt handler reads.
@@ -187,14 +458,18 @@ impl Anfitriao {
     ///
     /// # Errors
     ///
-    /// [`Falha::NaoCarregou`] when the source does not compile.
+    /// [`Falha::NaoCarregou`] when the source does not compile or its top
+    /// level throws, with what it threw; [`Falha::PassouDoTempo`] when its top
+    /// level goes past the step ceiling. [`Falha::NaoCarregouSemLancar`]
+    /// quando o motor falha sem que nada tenha sido lançado (um contexto que
+    /// não cabe no teto de memória).
     pub fn carregar(
         &mut self,
         id: &str,
         fonte: &str,
         pasta_de_dados: &std::path::Path,
     ) -> Result<(), Falha> {
-        let runtime = Runtime::new().map_err(|_| Falha::NaoCarregou)?;
+        let runtime = Runtime::new().map_err(|erro| Lancado::do_motor(&erro).ao_carregar())?;
         runtime.set_memory_limit(self.teto_de_memoria);
 
         let passos = Arc::new(AtomicUsize::new(0));
@@ -204,138 +479,15 @@ impl Anfitriao {
             contador.fetch_add(1, Ordering::Relaxed) > teto
         })));
 
-        let contexto = Context::full(&runtime).map_err(|_| Falha::NaoCarregou)?;
+        let contexto =
+            Context::full(&runtime).map_err(|erro| Lancado::do_motor(&erro).ao_carregar())?;
 
-        // A pasta do MOD, e nada além dela. Ver `arquivos` para por que o disco
-        // é a única exceção à liberdade total do ADR 0045.
-        let pasta = pasta_de_dados.to_path_buf();
-        contexto
-            .with(|ctx| {
-                let arquivos_js = rquickjs::Object::new(ctx.clone())?;
-
-                let p = pasta.clone();
-                arquivos_js.set(
-                    "ler",
-                    Function::new(ctx.clone(), move |caminho: String| {
-                        arquivos::ler(&p, &caminho)
-                    })?,
-                )?;
-
-                let p = pasta.clone();
-                arquivos_js.set(
-                    "escrever",
-                    Function::new(ctx.clone(), move |caminho: String, conteudo: String| {
-                        arquivos::escrever(&p, &caminho, &conteudo)
-                    })?,
-                )?;
-
-                let p = pasta.clone();
-                arquivos_js.set(
-                    "listar",
-                    Function::new(ctx.clone(), move || arquivos::listar(&p))?,
-                )?;
-
-                let p = pasta.clone();
-                arquivos_js.set(
-                    "apagar",
-                    Function::new(ctx.clone(), move |caminho: String| {
-                        arquivos::apagar(&p, &caminho)
-                    })?,
-                )?;
-
-                ctx.globals().set("arquivos", arquivos_js)?;
-
-                // O bloco de volume — ADR 0048. Ele **não carrega bytes**: o
-                // MOD autoriza, e os bytes vão por um fluxo próprio direto ao
-                // disco, sem passar por aqui. É isso que torna 10 MiB possível.
-                let volume_js = rquickjs::Object::new(ctx.clone())?;
-                let esperas = Arc::clone(&self.esperas);
-                let atendendo = Arc::clone(&self.atendendo);
-                let quem_autoriza = id.to_owned();
-                volume_js.set(
-                    "esperar",
-                    Function::new(
-                        ctx.clone(),
-                        move |token: String, caminho: String, tipos: Vec<String>, prazo: f64| {
-                            // A pessoa vem daqui, e não do argumento. Ver o
-                            // campo `atendendo`.
-                            let Ok(quem) = atendendo.lock() else {
-                                return false;
-                            };
-                            let Some(pessoa) = *quem else {
-                                return false;
-                            };
-                            let Ok(mut esperas) = esperas.lock() else {
-                                return false;
-                            };
-                            let segundos = if prazo.is_finite() && prazo > 0.0 {
-                                prazo
-                            } else {
-                                0.0
-                            };
-                            esperas
-                                .registrar(
-                                    volume::PedidoDeEspera {
-                                        mod_id: quem_autoriza.clone(),
-                                        pessoa,
-                                        token,
-                                        caminho,
-                                        tipos,
-                                        prazo: std::time::Duration::from_secs_f64(segundos),
-                                    },
-                                    std::time::Instant::now(),
-                                )
-                                .is_ok()
-                        },
-                    )?,
-                )?;
-                let p = pasta.join(volume::PASTA);
-                volume_js.set(
-                    "tamanho",
-                    Function::new(ctx.clone(), move |nome: String| {
-                        arquivos::dentro(&p, &nome)
-                            .and_then(|p| std::fs::metadata(p).ok())
-                            .filter(|m| m.is_file())
-                            .map(|m| m.len() as f64)
-                    })?,
-                )?;
-                let p = pasta.join(volume::PASTA);
-                volume_js.set(
-                    "apagar",
-                    Function::new(ctx.clone(), move |nome: String| arquivos::apagar(&p, &nome))?,
-                )?;
-                let p = pasta.join(volume::PASTA);
-                volume_js.set(
-                    "servir",
-                    Function::new(ctx.clone(), move |nome: String| {
-                        arquivos::dentro(&p, &nome)
-                            .filter(|p| p.is_file())
-                            .map(|_| nome)
-                    })?,
-                )?;
-                ctx.globals().set("volume", volume_js)?;
-
-                // O bloco `world` do `api/v1.json`: rede, relógio e registro.
-                // É onde a liberdade total do ADR 0045 mora, e é o que a tela
-                // de aceite tem de dizer em voz alta.
-                let mundo_js = rquickjs::Object::new(ctx.clone())?;
-                mundo_js.set(
-                    "buscar",
-                    Function::new(ctx.clone(), |url: String| mundo::buscar(&url))?,
-                )?;
-                mundo_js.set("agora", Function::new(ctx.clone(), mundo::agora)?)?;
-                let quem = id.to_owned();
-                mundo_js.set(
-                    "registrar",
-                    Function::new(ctx.clone(), move |linha: String| {
-                        mundo::registrar(&quem, &linha);
-                    })?,
-                )?;
-                ctx.globals().set("mundo", mundo_js)?;
-
-                ctx.eval::<(), _>(fonte)
-            })
-            .map_err(|_| Falha::NaoCarregou)?;
+        // A falha é lida **dentro** do `with`: a exceção pendente é do MOD, e
+        // fora dele ela já não tem de onde ser lida. Ver `falha_da_volta`.
+        contexto.with(|ctx| {
+            self.montar(&ctx, id, pasta_de_dados, fonte)
+                .map_err(|erro| falha_da_volta(&ctx, &passos, teto, &erro, Lancado::ao_carregar))
+        })?;
 
         self.hospedes.insert(
             id.to_owned(),
@@ -346,6 +498,145 @@ impl Anfitriao {
             },
         );
         Ok(())
+    }
+
+    /// Monta o contexto de um MOD — `arquivos`, `volume` e `mundo` — e roda o
+    /// topo do código dele.
+    ///
+    /// Separado de [`Self::carregar`] para a falha ser lida ainda dentro do
+    /// `contexto.with`, onde a exceção pendente existe.
+    fn montar(
+        &self,
+        ctx: &rquickjs::Ctx<'_>,
+        id: &str,
+        pasta: &std::path::Path,
+        fonte: &str,
+    ) -> rquickjs::Result<()> {
+        // A pasta do MOD, e nada além dela. Ver `arquivos` para por que o disco
+        // é a única exceção à liberdade total do ADR 0045.
+        let arquivos_js = rquickjs::Object::new(ctx.clone())?;
+
+        let p = pasta.to_path_buf();
+        arquivos_js.set(
+            "ler",
+            Function::new(ctx.clone(), move |caminho: String| {
+                arquivos::ler(&p, &caminho)
+            })?,
+        )?;
+
+        let p = pasta.to_path_buf();
+        arquivos_js.set(
+            "escrever",
+            Function::new(ctx.clone(), move |caminho: String, conteudo: String| {
+                arquivos::escrever(&p, &caminho, &conteudo)
+            })?,
+        )?;
+
+        let p = pasta.to_path_buf();
+        arquivos_js.set(
+            "listar",
+            Function::new(ctx.clone(), move || arquivos::listar(&p))?,
+        )?;
+
+        let p = pasta.to_path_buf();
+        arquivos_js.set(
+            "apagar",
+            Function::new(ctx.clone(), move |caminho: String| {
+                arquivos::apagar(&p, &caminho)
+            })?,
+        )?;
+
+        ctx.globals().set("arquivos", arquivos_js)?;
+
+        // O bloco de volume — ADR 0048. Ele **não carrega bytes**: o
+        // MOD autoriza, e os bytes vão por um fluxo próprio direto ao
+        // disco, sem passar por aqui. É isso que torna 10 MiB possível.
+        let volume_js = rquickjs::Object::new(ctx.clone())?;
+        let esperas = Arc::clone(&self.esperas);
+        let atendendo = Arc::clone(&self.atendendo);
+        let quem_autoriza = id.to_owned();
+        volume_js.set(
+            "esperar",
+            Function::new(
+                ctx.clone(),
+                move |token: String, caminho: String, tipos: Vec<String>, prazo: f64| {
+                    // A pessoa vem daqui, e não do argumento. Ver o
+                    // campo `atendendo`.
+                    let Ok(quem) = atendendo.lock() else {
+                        return false;
+                    };
+                    let Some(pessoa) = *quem else {
+                        return false;
+                    };
+                    let Ok(mut esperas) = esperas.lock() else {
+                        return false;
+                    };
+                    let segundos = if prazo.is_finite() && prazo > 0.0 {
+                        prazo
+                    } else {
+                        0.0
+                    };
+                    esperas
+                        .registrar(
+                            volume::PedidoDeEspera {
+                                mod_id: quem_autoriza.clone(),
+                                pessoa,
+                                token,
+                                caminho,
+                                tipos,
+                                prazo: std::time::Duration::from_secs_f64(segundos),
+                            },
+                            std::time::Instant::now(),
+                        )
+                        .is_ok()
+                },
+            )?,
+        )?;
+        let p = pasta.join(volume::PASTA);
+        volume_js.set(
+            "tamanho",
+            Function::new(ctx.clone(), move |nome: String| {
+                arquivos::dentro(&p, &nome)
+                    .and_then(|p| std::fs::metadata(p).ok())
+                    .filter(|m| m.is_file())
+                    .map(|m| m.len() as f64)
+            })?,
+        )?;
+        let p = pasta.join(volume::PASTA);
+        volume_js.set(
+            "apagar",
+            Function::new(ctx.clone(), move |nome: String| arquivos::apagar(&p, &nome))?,
+        )?;
+        let p = pasta.join(volume::PASTA);
+        volume_js.set(
+            "servir",
+            Function::new(ctx.clone(), move |nome: String| {
+                arquivos::dentro(&p, &nome)
+                    .filter(|p| p.is_file())
+                    .map(|_| nome)
+            })?,
+        )?;
+        ctx.globals().set("volume", volume_js)?;
+
+        // O bloco `world` do `api/v1.json`: rede, relógio e registro.
+        // É onde a liberdade total do ADR 0045 mora, e é o que a tela
+        // de aceite tem de dizer em voz alta.
+        let mundo_js = rquickjs::Object::new(ctx.clone())?;
+        mundo_js.set(
+            "buscar",
+            Function::new(ctx.clone(), |url: String| mundo::buscar(&url))?,
+        )?;
+        mundo_js.set("agora", Function::new(ctx.clone(), mundo::agora)?)?;
+        let quem = id.to_owned();
+        mundo_js.set(
+            "registrar",
+            Function::new(ctx.clone(), move |linha: String| {
+                mundo::registrar(&quem, &linha);
+            })?,
+        )?;
+        ctx.globals().set("mundo", mundo_js)?;
+
+        ctx.eval::<(), _>(fonte)
     }
 
     /// The most a MOD's key→value yard may hold, in bytes.
@@ -364,10 +655,10 @@ impl Anfitriao {
     ///
     /// # Errors
     ///
-    /// [`Falha`] for a MOD that threw or went past a ceiling. A MOD that is not
-    /// loaded is also `Lancou` — deliberately the same answer, because a caller
-    /// that has to tell them apart is a caller inventing a recovery for a state
-    /// it cannot fix.
+    /// [`Falha`] for a MOD that threw or went past a ceiling, and
+    /// [`Falha::NaoCarregadoAqui`] for one that is not loaded here.
+    /// [`Falha::FalhouSemLancar`] quando o motor recusou uma conversão sem que
+    /// o MOD lançasse nada (um valor que não é texto em `dados`).
     pub fn chamar(
         &mut self,
         id: &str,
@@ -389,26 +680,28 @@ impl Anfitriao {
             // testability would not survive it. It also makes a call
             // transactional by construction: a MOD that throws half-way leaves
             // the yard as it was.
-            let dados = rquickjs::Object::new(ctx.clone()).map_err(|_| Falha::Lancou)?;
+            //
+            // Toda falha é lida aqui dentro, com o que o MOD lançou: ver
+            // `falha_da_volta`.
+            let falhou = |erro: rquickjs::Error| {
+                falha_da_volta(
+                    &ctx,
+                    &hospede.passos,
+                    self.teto_de_consultas,
+                    &erro,
+                    Lancado::na_chamada,
+                )
+            };
+            let dados = rquickjs::Object::new(ctx.clone()).map_err(falhou)?;
             for (chave, valor) in quintal.iter() {
-                dados
-                    .set(chave.as_str(), valor.as_str())
-                    .map_err(|_| Falha::Lancou)?;
+                dados.set(chave.as_str(), valor.as_str()).map_err(falhou)?;
             }
-            ctx.globals()
-                .set("dados", dados)
-                .map_err(|_| Falha::Lancou)?;
+            ctx.globals().set("dados", dados).map_err(falhou)?;
 
             let Ok(f) = ctx.globals().get::<_, Function<'_>>("aoAcontecer") else {
                 return Ok(());
             };
-            f.call::<_, ()>((momento, carga)).map_err(|_| {
-                if hospede.passos.load(Ordering::Relaxed) > self.teto_de_consultas {
-                    Falha::PassouDoTempo
-                } else {
-                    Falha::Lancou
-                }
-            })
+            f.call::<_, ()>((momento, carga)).map_err(falhou)
         });
 
         // Read the yard back **only if the call finished**. A MOD that threw or
@@ -439,21 +732,27 @@ impl Anfitriao {
             *atendendo = Some(quem);
         }
         let resposta = hospede.contexto.with(|ctx| {
-            let dados = rquickjs::Object::new(ctx.clone()).map_err(|_| Falha::Lancou)?;
+            // Como em `chamar`: a falha é lida aqui dentro, e um `aoPedir`
+            // cortado pelo teto diz o teto, e não que lançou.
+            let falhou = |erro: rquickjs::Error| {
+                falha_da_volta(
+                    &ctx,
+                    &hospede.passos,
+                    self.teto_de_consultas,
+                    &erro,
+                    Lancado::na_chamada,
+                )
+            };
+            let dados = rquickjs::Object::new(ctx.clone()).map_err(falhou)?;
             for (k, v) in quintal.iter() {
-                dados
-                    .set(k.as_str(), v.as_str())
-                    .map_err(|_| Falha::Lancou)?;
+                dados.set(k.as_str(), v.as_str()).map_err(falhou)?;
             }
-            ctx.globals()
-                .set("dados", dados)
-                .map_err(|_| Falha::Lancou)?;
+            ctx.globals().set("dados", dados).map_err(falhou)?;
             let f = ctx
                 .globals()
                 .get::<_, Function<'_>>("aoPedir")
-                .map_err(|_| Falha::Lancou)?;
-            f.call::<_, String>((contexto, pedido))
-                .map_err(|_| Falha::Lancou)
+                .map_err(falhou)?;
+            f.call::<_, String>((contexto, pedido)).map_err(falhou)
         });
         // Limpo **antes** de propagar a falha: um MOD que lança não pode deixar
         // a pessoa dele pendurada aqui, onde o pedido seguinte de outro MOD a
@@ -514,7 +813,17 @@ impl Anfitriao {
             let mut novo = BTreeMap::new();
             let mut bytes = 0_usize;
             for par in dados.props::<String, String>() {
-                let (chave, valor) = par.map_err(|_| Falha::Lancou)?;
+                // Ler o quintal pode rodar um getter do MOD: a falha é lida
+                // como a de uma chamada, sob o mesmo teto.
+                let (chave, valor) = par.map_err(|erro| {
+                    falha_da_volta(
+                        &ctx,
+                        &hospede.passos,
+                        self.teto_de_consultas,
+                        &erro,
+                        Lancado::na_chamada,
+                    )
+                })?;
                 bytes = bytes
                     .saturating_add(chave.len())
                     .saturating_add(valor.len());
@@ -773,7 +1082,7 @@ mod tests {
         // `o_teto_de_memoria_e_aplicado`.
         assert!(matches!(
             falha,
-            Err(Falha::Lancou) | Err(Falha::PassouDoTempo)
+            Err(Falha::Lancou { .. }) | Err(Falha::PassouDoTempo)
         ));
 
         // E o contexto ainda responde.
@@ -841,13 +1150,364 @@ mod tests {
             .expect("carregar");
 
         let mut quintal = BTreeMap::from([("antes".to_owned(), "ok".to_owned())]);
-        assert_eq!(
-            anfitriao.chamar("seele/meio", "PersonJoined", "{}", &mut quintal),
-            Err(Falha::Lancou)
+        let chamada = anfitriao.chamar("seele/meio", "PersonJoined", "{}", &mut quintal);
+        assert!(
+            matches!(chamada, Err(Falha::Lancou { .. })),
+            "um MOD que lança no meio não foi dito como um MOD que lançou: {chamada:?}"
         );
 
         assert_eq!(quintal.len(), 1, "a escrita de um MOD que lançou entrou");
         assert_eq!(quintal.get("antes").map(String::as_str), Some("ok"));
+    }
+
+    /// **A linha de quem hospeda diz o que o MOD lançou** (P51-27).
+    ///
+    /// A metade de servidor não tem `console`, e o guia diz que `console.log`
+    /// lá lança `ReferenceError`. A falha dizia só «mod threw»: o erro mais
+    /// comum de quem escreve a metade de servidor não deixava no `seele.log`
+    /// nem o nome dele.
+    #[test]
+    fn um_aopedir_que_chama_console_diz_reference_error() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/console",
+                "globalThis.aoPedir = () => { console.log(1); return '{}'; };",
+                &pasta_de_teste("console"),
+            )
+            .expect("carregar");
+
+        let dito = anfitriao
+            .pedir(
+                "seele/console",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new(),
+            )
+            .expect_err("um aoPedir que chama console.log respondeu como se nada fosse")
+            .to_string();
+        assert!(
+            dito.contains("ReferenceError"),
+            "a falha de um aoPedir que chama console.log não diz o ReferenceError que ele \
+             lançou, e quem hospeda lê só que o MOD lançou: {dito}"
+        );
+    }
+
+    /// **Um `aoPedir` que falta, ou que devolve outra coisa que texto, não
+    /// lançou nada**, e a linha de quem hospeda não diz que lançou.
+    ///
+    /// O motor recusa a conversão (`Error converting from js 'undefined' into
+    /// type 'function'`) sem exceção nenhuma do MOD. Dito como «mod threw», o
+    /// erro mandava quem escreveu o MOD procurar um `throw` que não existe.
+    #[test]
+    fn um_aopedir_que_falta_ou_devolve_numero_diz_que_falhou_e_nao_que_lancou() {
+        for (caso, fonte) in [
+            ("sem aoPedir", "globalThis.nada = 1;"),
+            (
+                "aoPedir que devolve número",
+                "globalThis.aoPedir = () => 1;",
+            ),
+        ] {
+            let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+            anfitriao
+                .carregar("seele/sem-texto", fonte, &pasta_de_teste("sem-texto"))
+                .expect("carregar");
+
+            let dito = anfitriao
+                .pedir(
+                    "seele/sem-texto",
+                    seele_proto::ids::PersonId(7),
+                    "{}",
+                    "{}",
+                    &mut BTreeMap::new(),
+                )
+                .expect_err("um aoPedir que o motor não converte respondeu como se nada fosse")
+                .to_string();
+            assert!(
+                dito.starts_with("mod failed: \"Error converting from js")
+                    && !dito.contains("threw"),
+                "{caso}: a falha de um aoPedir que o motor não converteu diz que o MOD lançou, \
+                 e manda procurar um throw que não existe: {dito}"
+            );
+        }
+    }
+
+    /// **Um motor que não consegue montar o contexto também não é um MOD que
+    /// lançou.**
+    ///
+    /// Com um teto de memória menor que o próprio contexto, o QuickJS falha ao
+    /// criar os objetos dele (`Allocation failed while creating object`), antes
+    /// de uma linha do MOD rodar.
+    #[test]
+    fn um_contexto_que_nao_coube_na_memoria_diz_que_falhou_ao_carregar_e_nao_que_lancou() {
+        let mut anfitriao = Anfitriao::com_tetos(16 * 1024, 100).expect("anfitrião");
+        let dito = anfitriao
+            .carregar(
+                "seele/sem-memoria",
+                "globalThis.x = 1;",
+                &pasta_de_teste("sem-memoria"),
+            )
+            .expect_err("um contexto montado em 16 KiB foi carregado, e este teste não prova nada")
+            .to_string();
+        assert!(
+            dito.starts_with("mod failed while loading: ") && !dito.contains("threw"),
+            "a falha do motor ao montar o contexto de um MOD diz que o MOD lançou ao carregar, \
+             antes de uma linha dele rodar: {dito}"
+        );
+    }
+
+    /// Um `throw` no topo do MOD diz o que foi lançado, e diz que foi ao
+    /// carregar.
+    #[test]
+    fn um_throw_no_topo_diz_o_que_foi_lancado_ao_carregar() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        let dito = anfitriao
+            .carregar(
+                "seele/topo",
+                "throw new Error('topo');",
+                &pasta_de_teste("topo"),
+            )
+            .expect_err("um MOD que lança no topo foi carregado")
+            .to_string();
+        assert!(
+            dito.starts_with("mod threw while loading: ") && dito.contains("topo"),
+            "a falha de um MOD que lança no topo não diz que foi ao carregar, ou não traz o \
+             texto que ele lançou: {dito}"
+        );
+    }
+
+    /// **O texto do MOD não quebra a linha de quem hospeda.**
+    ///
+    /// Ele vai em `%falha` e `%error` ao `seele.log`, e o `%` escreve cru. Sem o
+    /// escape, um MOD que lança `"a\nWARN …"` escreveria uma segunda linha com
+    /// a cara do produto — a injeção que o P51-26 fecha no id.
+    #[test]
+    fn o_texto_lancado_com_quebra_de_linha_fica_numa_linha_so() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/quebra",
+                "globalThis.aoAcontecer = () => { \
+                   throw new Error('a\\nWARN seele_server: forjada'); \
+                 };",
+                &pasta_de_teste("quebra"),
+            )
+            .expect("carregar");
+
+        let dito = anfitriao
+            .chamar("seele/quebra", "PersonJoined", "{}", &mut BTreeMap::new())
+            .expect_err("um MOD que lança foi chamado como se nada fosse")
+            .to_string();
+        assert!(
+            dito.contains("forjada"),
+            "a falha não traz o texto que o MOD lançou: {dito}"
+        );
+        assert!(
+            !dito.contains('\n') && !dito.contains('\r'),
+            "o texto que o MOD lançou quebra a linha do seele.log de quem hospeda, e a \
+             segunda linha sai com a cara do produto: {dito:?}"
+        );
+    }
+
+    /// **O texto lançado no topo também não quebra a linha.**
+    ///
+    /// [`Falha::NaoCarregou`] tem `Display` próprio, e o texto dele vai ao
+    /// `seele.log` de quem hospeda por três portas: o «MOD recusado ao subir»
+    /// do `lib.rs`, o «MOD recusado ao recarregar» do `despacho.rs` e o
+    /// `%error` do carregar de cada pedido, em `pedidos.rs`. O teste de cima
+    /// passa só por `chamar`, que dá [`Falha::Lancou`]: sem este, o escape de
+    /// `NaoCarregou` voltaria ao texto cru e nada reclamaria.
+    #[test]
+    fn o_texto_lancado_no_topo_com_quebra_de_linha_fica_numa_linha_so() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        let falha = anfitriao
+            .carregar(
+                "seele/topo-quebra",
+                "throw new Error('a\\nWARN seele_server: forjada');",
+                &pasta_de_teste("topo-quebra"),
+            )
+            .expect_err("um MOD que lança no topo foi carregado");
+        assert!(
+            matches!(falha, Falha::NaoCarregou { .. }),
+            "um MOD que lança no topo não foi dito como um MOD que não carregou, e este teste \
+             deixou de guardar o Display de NaoCarregou: {falha:?}"
+        );
+
+        let dito = falha.to_string();
+        assert!(
+            dito.contains("forjada"),
+            "a falha ao carregar não traz o texto que o MOD lançou no topo: {dito}"
+        );
+        assert!(
+            !dito.contains('\n') && !dito.contains('\r'),
+            "o texto que o MOD lançou no topo quebra a linha do seele.log de quem hospeda, e a \
+             segunda linha sai com a cara do produto: {dito:?}"
+        );
+    }
+
+    /// **O texto do MOD cabe no teto pelo tamanho que ele tem escapado.**
+    ///
+    /// O escape faz um caractere que não se imprime ocupar até dez
+    /// (`\u{100000}`). Cortado antes do escape, um texto de 512 desses
+    /// chegaria a 5120 caracteres na linha.
+    #[test]
+    fn o_texto_lancado_cabe_no_teto_depois_de_escapado() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/comprido",
+                "globalThis.aoAcontecer = () => { \
+                   throw new Error('\\u{100000}'.repeat(2048)); \
+                 };",
+                &pasta_de_teste("comprido"),
+            )
+            .expect("carregar");
+
+        let dito = anfitriao
+            .chamar("seele/comprido", "PersonJoined", "{}", &mut BTreeMap::new())
+            .expect_err("um MOD que lança foi chamado como se nada fosse")
+            .to_string();
+        assert!(
+            dito.contains("\\u{100000}"),
+            "a falha não traz o texto que o MOD lançou, escapado: {}",
+            dito.chars().take(200).collect::<String>()
+        );
+        // A moldura deste caso, e só ela: o começo de `Lancou` e as duas aspas
+        // do texto. O onde não entra, porque um texto cortado o leva embora
+        // (a última asserção confere). Uma moldura mais larga deixaria passar
+        // um corte que passasse do teto.
+        let moldura = "mod threw: ".chars().count() + 2;
+        assert!(
+            dito.chars().count() <= TETO_DO_LANCADO_NO_REGISTRO + moldura,
+            "a falha passou do teto da linha: {} caracteres, para um teto de {} mais a \
+             moldura de {moldura}",
+            dito.chars().count(),
+            TETO_DO_LANCADO_NO_REGISTRO
+        );
+        assert!(
+            dito.ends_with("…\"") && !dito.contains("\" at \""),
+            "um texto cortado no teto não termina na marca do corte, ou leva junto o pedaço do \
+             onde que sobrou, que não diz onde: {}",
+            dito.chars()
+                .skip(dito.chars().count().saturating_sub(40))
+                .collect::<String>()
+        );
+    }
+
+    /// Um `aoPedir` cortado pelo teto diz o teto, e não «o MOD lançou».
+    ///
+    /// O QuickJS faz da interrupção uma exceção (`InternalError:
+    /// interrupted`), e dizê-la como lançada mandaria quem lê procurar um
+    /// `throw` que não existe. `chamar` já separava os dois; `pedir`, não.
+    #[test]
+    fn um_aopedir_que_nao_termina_passa_do_tempo_e_nao_lanca() {
+        let mut anfitriao = Anfitriao::com_tetos(64 * 1024 * 1024, 100).expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/eterno",
+                "globalThis.aoPedir = () => { for (;;) {} };",
+                &pasta_de_teste("pedido-eterno"),
+            )
+            .expect("carregar");
+
+        assert_eq!(
+            anfitriao.pedir(
+                "seele/eterno",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new(),
+            ),
+            Err(Falha::PassouDoTempo),
+            "um aoPedir que não termina foi dito como um MOD que lançou"
+        );
+    }
+
+    /// Um topo que não termina diz o teto ao carregar, e não que lançou.
+    #[test]
+    fn um_topo_que_nao_termina_passa_do_tempo_ao_carregar() {
+        let mut anfitriao = Anfitriao::com_tetos(64 * 1024 * 1024, 100).expect("anfitrião");
+        assert_eq!(
+            anfitriao.carregar(
+                "seele/topo-eterno",
+                "for (;;) {}",
+                &pasta_de_teste("topo-eterno")
+            ),
+            Err(Falha::PassouDoTempo),
+            "um MOD cujo topo não termina foi dito como um MOD que lançou ao carregar"
+        );
+    }
+
+    /// **O onde também é do MOD**, e também não quebra a linha.
+    ///
+    /// A pilha é uma propriedade que o MOD pode reescrever. A primeira linha
+    /// dela não tem `\n` — é por ele que a pilha se divide —, mas pode ter um
+    /// `\r` ou um U+2028, que um editor quebra do mesmo jeito.
+    #[test]
+    fn o_onde_que_o_mod_escreve_tambem_fica_numa_linha_so() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/pilha",
+                "globalThis.aoAcontecer = () => { \
+                   const e = new Error('eu'); \
+                   Object.defineProperty(e, 'stack', \
+                     { value: 'at a\\rWARN seele_server: forjada\\u2028outra' }); \
+                   throw e; \
+                 };",
+                &pasta_de_teste("pilha"),
+            )
+            .expect("carregar");
+
+        let dito = anfitriao
+            .chamar("seele/pilha", "PersonJoined", "{}", &mut BTreeMap::new())
+            .expect_err("um MOD que lança foi chamado como se nada fosse")
+            .to_string();
+        assert!(
+            dito.contains("forjada"),
+            "a falha não traz o onde que o MOD escreveu: {dito}"
+        );
+        assert!(
+            !dito.contains('\r') && !dito.contains('\u{2028}'),
+            "o onde que o MOD escreveu quebra a linha do seele.log de quem hospeda: {dito:?}"
+        );
+    }
+
+    /// **Ler o que o MOD lançou roda sob o teto da chamada.**
+    ///
+    /// O `name` de um `Error` pode ser um getter do MOD, e lê-lo roda código
+    /// dele. Um getter que não termina é cortado pelo mesmo teto, e a falha
+    /// continua sendo a de quem lançou, com o texto que deu para ler.
+    #[test]
+    fn um_getter_que_nao_termina_nao_segura_a_leitura_do_que_foi_lancado() {
+        let mut anfitriao = Anfitriao::com_tetos(64 * 1024 * 1024, 100).expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/getter",
+                "globalThis.aoAcontecer = () => { \
+                   const e = new Error('lancei'); \
+                   Object.defineProperty(e, 'name', { get() { for (;;) {} } }); \
+                   throw e; \
+                 };",
+                &pasta_de_teste("getter"),
+            )
+            .expect("carregar");
+
+        let inicio = std::time::Instant::now();
+        let dito = anfitriao
+            .chamar("seele/getter", "PersonJoined", "{}", &mut BTreeMap::new())
+            .expect_err("um MOD que lança foi chamado como se nada fosse")
+            .to_string();
+        assert!(
+            inicio.elapsed() < std::time::Duration::from_secs(5),
+            "ler o que o MOD lançou segurou a sala por {:?}",
+            inicio.elapsed()
+        );
+        assert!(
+            dito.starts_with("mod threw: ") && dito.contains("lancei"),
+            "um getter que não termina tirou da falha o texto que o MOD lançou: {dito}"
+        );
     }
 
     /// O teto do quintal recusa em vez de aparar. Um quintal que descarta a
@@ -1080,7 +1740,7 @@ mod tests {
         let falha = anfitriao.chamar("seele/eterno", "PersonJoined", "{}", &mut BTreeMap::new());
         assert!(matches!(
             falha,
-            Err(Falha::PassouDoTempo) | Err(Falha::Lancou)
+            Err(Falha::PassouDoTempo) | Err(Falha::Lancou { .. })
         ));
         assert!(
             inicio.elapsed() < std::time::Duration::from_secs(5),
@@ -1124,7 +1784,7 @@ mod tests {
                 "isto ( não é javascript",
                 &pasta_de_teste("t")
             ),
-            Err(Falha::NaoCarregou)
+            Err(Falha::NaoCarregou { .. })
         ));
     }
 

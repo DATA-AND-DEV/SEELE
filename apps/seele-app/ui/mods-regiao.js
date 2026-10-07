@@ -804,9 +804,12 @@ class RegiaoDeMod {
     elem.dataset.forma = plano.forma;
     this.fontesDeMidia.set(elem, fonteDaMidia(plano));
     // A chave que o MOD deu, guardada à parte da chave de reconciliação: é ela
-    // que `valoresDoFormulario` lê para montar o envio.
+    // que `valoresDoFormulario` lê para montar o envio. Cortada em 120 pontos
+    // de código, e não por índice: um corte por índice parte ao meio o par
+    // substituto da posição 120, e a chave volta ao MOD terminando em meio
+    // caractere. Sem trocar substituto nenhum: ela volta como ele a escreveu.
     if (typeof plano.no.chave === "string" && plano.no.chave) {
-      elem.dataset.chaveDoMod = plano.no.chave.slice(0, 120);
+      elem.dataset.chaveDoMod = [...plano.no.chave].slice(0, 120).join("");
     }
     if (classe) this.contagem[classe] += 1;
 
@@ -1424,7 +1427,8 @@ class RegiaoDeMod {
    * chave de quinhentos empurrava o motivo, que é o que se veio buscar, para
    * fora da linha. O corte é por ponto de código, e não por índice: metade de
    * um par substituto não passa pela ponte (o `serde_json` recusa a cadeia), e
-   * a linha inteira se perderia calada no `catch` de `registrarNoAnfitriao`.
+   * `registrarNoAnfitriao` a troca por «�» antes de mandar — o nome chegaria
+   * ao `seele.log` com um caractere que o MOD não escreveu.
    *
    * **A linha do registro não leva a recusa do MOD junto.** `anotarRecusa` é
    * opcional no dono (ver o construtor), e um dono que a não tem, ou cuja

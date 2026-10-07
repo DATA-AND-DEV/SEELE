@@ -29,7 +29,7 @@
 use anyhow::{Context, Result};
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use seele_proto::ids::VoiceRoomId;
 
@@ -79,6 +79,15 @@ impl Politica {
 
     /// Lê a política que está no banco.
     ///
+    /// **Uma falha ao ler fecha a porta.** A leitura da senha terminava em
+    /// `.ok()` e a contagem dos convites em `.unwrap_or(0)`: um banco travado,
+    /// uma tabela ausente ou uma coluna de tipo errado viravam «sem senha e
+    /// sem convites» — um servidor aberto, e entrava qualquer um. Só a falta
+    /// da linha da senha quer dizer «sem senha»; o resto é erro, e quem chama
+    /// já falha fechado com ele: `CredentialRejected` no handshake, `false`
+    /// no aviso de porta aberta do `seeled`, e `BancoNaoRespondeu` na tela de
+    /// quem hospeda, em vez de «aberto».
+    ///
     /// # Errors
     ///
     /// Falha se o banco não responder.
@@ -90,10 +99,9 @@ impl Politica {
                 [],
                 |linha| linha.get(0),
             )
-            .ok();
-        let convites: i64 = conexao
-            .query_row("SELECT COUNT(*) FROM convites", [], |linha| linha.get(0))
-            .unwrap_or(0);
+            .optional()?;
+        let convites: i64 =
+            conexao.query_row("SELECT COUNT(*) FROM convites", [], |linha| linha.get(0))?;
 
         Ok(Self {
             senha_hash,
@@ -351,6 +359,11 @@ pub fn definir_senha_voice_room(
 }
 
 /// Confere um convite, sem gastá-lo.
+///
+/// Só a falta da linha é «segredo inválido». Um banco que não responde volta
+/// como erro: a porta fica fechada dos dois jeitos, mas a linha que quem
+/// opera lê passa a dizer o erro do banco (`could not evaluate admission: …`,
+/// em `session.rs`) em vez de `SegredoInvalido`.
 fn conferir_convite(conexao: &Connection, token: &str) -> Result<Result<(), Recusa>> {
     let encontrado: Option<(i64, Option<i64>)> = conexao
         .query_row(
@@ -358,7 +371,7 @@ fn conferir_convite(conexao: &Connection, token: &str) -> Result<Result<(), Recu
             params![token],
             |linha| Ok((linha.get(0)?, linha.get(1)?)),
         )
-        .ok();
+        .optional()?;
 
     let Some((expira_em, usado_em)) = encontrado else {
         return Ok(Err(Recusa::SegredoInvalido));
@@ -636,6 +649,69 @@ mod tests {
                 .admitir(&mut persistence, Some(&token))
                 .expect("admitir"),
             Ok(())
+        );
+    }
+
+    /// **Uma falha ao ler a política fecha a porta em vez de abri-la.**
+    ///
+    /// A leitura da senha terminava em `.ok()` e a contagem dos convites em
+    /// `.unwrap_or(0)`: um banco que não respondia virava «sem senha e sem
+    /// convites», isto é, um servidor aberto, e entrava qualquer um. As
+    /// tabelas nascem na migração 2, então um banco sem elas é falha de
+    /// verdade, e não versão velha.
+    #[test]
+    fn uma_falha_ao_ler_a_politica_fecha_a_porta_em_vez_de_abrir() {
+        // (1) Com senha, e a tabela da senha some debaixo da leitura.
+        let mut com_senha = persistence();
+        definir_senha(&mut com_senha, Some("x")).expect("definir");
+        com_senha
+            .connection()
+            .execute("DROP TABLE configuracao", [])
+            .expect("derrubar a tabela da senha para simular a falha");
+        let lida = Politica::carregar(&com_senha);
+        assert!(
+            lida.is_err(),
+            "o banco não respondeu ao ler a senha, e a política saiu como lida — aberta, se \
+             não houver convite: {lida:?}"
+        );
+
+        // (2) Só com convites, e a tabela dos convites some.
+        let mut com_convites = persistence();
+        criar_convite(&mut com_convites, "marcela").expect("criar");
+        com_convites
+            .connection()
+            .execute("DROP TABLE convites", [])
+            .expect("derrubar a tabela dos convites para simular a falha");
+        let lida = Politica::carregar(&com_convites);
+        assert!(
+            lida.is_err(),
+            "o banco não respondeu ao contar os convites, e a política saiu como lida — \
+             aberta, se não houver senha: {lida:?}"
+        );
+    }
+
+    /// Uma falha ao conferir um convite é erro de banco, e não «segredo
+    /// inválido».
+    ///
+    /// A porta já ficava fechada; o que se perdia era o motivo. Quem chega
+    /// recebe `CredentialRejected` dos dois jeitos, mas o log de quem opera
+    /// dizia «admissão recusada: SegredoInvalido» para um banco que não
+    /// respondeu — e as duas coisas pedem ações bem diferentes dele.
+    #[test]
+    fn uma_falha_ao_conferir_o_convite_e_erro_e_nao_segredo_invalido() {
+        let mut banco = persistence();
+        let token = criar_convite(&mut banco, "marcela").expect("criar");
+        let politica = Politica::carregar(&banco).expect("política");
+        banco
+            .connection()
+            .execute("DROP TABLE convites", [])
+            .expect("derrubar a tabela dos convites para simular a falha");
+
+        let avaliado = politica.avaliar(&banco, Some(&token));
+        assert!(
+            avaliado.is_err(),
+            "o banco não respondeu ao conferir o convite, e a resposta foi uma recusa comum, \
+             que vai ao log como segredo inválido: {avaliado:?}"
         );
     }
 

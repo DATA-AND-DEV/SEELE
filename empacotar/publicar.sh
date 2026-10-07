@@ -188,7 +188,20 @@ RELEASE_URL=""
 
 passo() { printf '→ %s\n' "$1"; }
 
-aviso() { printf '!  %s\n' "$1" >&2; }
+# Um aviso, com quantas linhas ele tiver.
+#
+# **Todas as linhas, e não só a primeira.** Este `aviso` imprimia só o `$1`, e
+# as chamadas que mandavam o conserto na segunda linha — «Classifique-o em
+# ESCOPOS_DE_PRODUTO…», «git push origin v…» — chegavam a quem publica sem ele:
+# o script sabia o comando seguinte e não contava.
+aviso() {
+    printf '!  %s\n' "${1:-}" >&2
+    [ "$#" -gt 0 ] && shift
+    while [ "$#" -gt 0 ]; do
+        printf '   %s\n' "$1" >&2
+        shift
+    done
+}
 
 # Morrer dizendo o que falhou **e** o que fazer.
 #
@@ -466,9 +479,19 @@ secao_do_escopo() {
 #
 #   git log --no-merges --format='%s' v0.6.1..HEAD | ./empacotar/publicar.sh --notas
 #
-# Só `feat` e `fix` entram. `docs`, `test`, `chore` e `refactor` são verdade
-# sobre o commit e não são mudança do produto; quem quiser a verdade completa
-# tem o histórico, que continua sendo ela.
+# Só `feat`, `fix` e `perf` entram. Os prefixos de papel — `docs`, `test`,
+# `chore`, `refactor`, `ci`, `build` e `style` — são verdade sobre o commit e
+# não são mudança do produto; quem quiser a verdade completa tem a lista
+# inteira, logo abaixo na página.
+#
+# **E todo o resto é contado, e não descartado.** Um assunto sem prefixo, ou com
+# um que esta casa não conhece (`wip:`), não diz se muda o produto, e o resumo
+# não tem como saber. Ele descartava esses assuntos calado e, com as duas
+# seções vazias, afirmava «nenhuma mudança de produto». Foi a frase da página
+# da v0.15.0, cuja faixa tinha quatro assuntos sem prefixo, um deles com 85
+# arquivos (`14d9c30`); e era a da faixa seguinte, que em 04/10/2026 tinha 169
+# assuntos, 146 sem prefixo. Agora a página diz que não adivinha, e quem
+# publica é avisado de quantos são.
 # A primeira letra em maiúscula, e um ponto no fim.
 #
 # Os assuntos deste repositório já são frases inteiras em português — «o canal
@@ -514,6 +537,7 @@ notas_das_mudancas() {
     ndm_produto=""
     ndm_ferramenta=""
     ndm_novos=""
+    ndm_sem_classe=0
 
     while IFS= read -r ndm_linha; do
         case "$ndm_linha" in
@@ -526,7 +550,22 @@ notas_das_mudancas() {
                 ndm_escopo=""
                 ndm_assunto="${ndm_linha#*: }"
                 ;;
+            # Os prefixos de papel, com e sem escopo, por extenso.
+            #
+            # `case` e não expressão regular: o padrão de um `case` POSIX não
+            # sabe dizer «letras, um escopo opcional entre parênteses, dois
+            # pontos», e cada prefixo escrito é um que alguém decidiu que é
+            # papel. Um que não está aqui é contado como desconhecido logo
+            # abaixo, que é o lado que não afirma nada.
+            docs:\ *|docs\(*\):\ *|test:\ *|test\(*\):\ *|chore:\ *|chore\(*\):\ *|\
+            refactor:\ *|refactor\(*\):\ *|ci:\ *|ci\(*\):\ *|build:\ *|build\(*\):\ *|\
+            style:\ *|style\(*\):\ *)
+                continue
+                ;;
             *)
+                # Nem produto nem papel: sem prefixo, ou com um que esta casa
+                # não conhece. O resumo não sabe se muda o produto, e conta.
+                ndm_sem_classe=$((ndm_sem_classe + 1))
                 continue
                 ;;
         esac
@@ -585,7 +624,31 @@ $ndm_escopo
             "Classifique-o em ESCOPOS_DE_PRODUTO ou ESCOPOS_DE_FERRAMENTA."
     done
 
+    # Quantos o resumo não classificou, dito a quem publica, e onde contar o
+    # que ele não contou. O arquivo de notas da versão é opcional, e por isso a
+    # página não o promete: quem publica é que decide se escreve um.
+    if [ "$ndm_sem_classe" -eq 1 ]; then
+        aviso "1 assunto desta faixa não diz pelo prefixo se muda o produto:" \
+            "não é feat, fix nem perf, e também não é um prefixo de papel." \
+            "A página diz que não adivinha. Se ele muda o produto, conte em" \
+            "empacotar/notas/${VERSAO:-<versão>}.md, que sai no topo da página."
+    elif [ "$ndm_sem_classe" -gt 1 ]; then
+        aviso "$ndm_sem_classe assuntos desta faixa não dizem pelo prefixo se mudam o produto:" \
+            "não são feat, fix nem perf, e também não são um prefixo de papel." \
+            "A página diz que não adivinha. Se algum deles muda o produto, conte em" \
+            "empacotar/notas/${VERSAO:-<versão>}.md, que sai no topo da página."
+    fi
+
     if [ -z "$ndm_produto" ] && [ -z "$ndm_ferramenta" ]; then
+        # **«Nenhuma mudança de produto» só quando todo assunto é de papel.**
+        # Com um assunto que não se classifica, ela seria a afirmação que o
+        # resumo não tem como fazer.
+        if [ "$ndm_sem_classe" -gt 0 ]; then
+            printf '%s\n' \
+"_Os commits desta faixa não dizem pelo prefixo se mudam o produto, e este" \
+"resumo não adivinha. A lista inteira está logo abaixo._"
+            return 0
+        fi
         # Uma versão só de papel e teste existe, e a página tem que dizer isso.
         # Uma seção vazia parece defeito de script para quem lê.
         printf '%s\n' \
@@ -604,6 +667,46 @@ $ndm_escopo
         printf '%s' "$ndm_ferramenta"
         printf '\n'
     fi
+    # E com as seções cheias, o que ficou de fora delas também é dito: uma
+    # seção de uma linha só, ao lado de cem assuntos que não se classificaram,
+    # passaria pela versão inteira.
+    if [ "$ndm_sem_classe" -eq 1 ]; then
+        printf '%s\n' \
+"_Além destes, 1 commit desta faixa não diz pelo prefixo se muda o produto, e" \
+"este resumo não adivinha. A lista inteira está logo abaixo._"
+    elif [ "$ndm_sem_classe" -gt 1 ]; then
+        printf '%s\n' \
+"_Além destes, $ndm_sem_classe commits desta faixa não dizem pelo prefixo se mudam o" \
+"produto, e este resumo não adivinha. A lista inteira está logo abaixo._"
+    fi
+}
+
+# A linha do corpo do release que diz o que a bateria fez antes desta versão.
+#
+# **Quem baixa não vê o terminal de quem publica.** O `--sem-bateria` grita
+# aqui, e a página da versão não dizia nada: «bateria» não aparece no corpo da
+# v0.15.0 (medido em 04/10/2026), e uma versão testada e uma pulada saíam com o
+# mesmo texto.
+#
+# Dois argumentos, sem tocar em disco nem em rede, para se provar alimentando
+# texto, como o `--notas`: `sim` ou `nao` para o `--sem-bateria`, e os sistemas
+# pedidos. O Windows só entra quando foi pedido, porque é só aí que a bateria
+# roda lá — e lá ela roda os testes, e não o resto.
+#
+#   ./empacotar/publicar.sh --linha-da-bateria "macos windows linux" [--sem-bateria]
+linha_da_bateria() {
+    if [ "$1" = sim ]; then
+        printf '%s\n' "**Esta versão saiu com --sem-bateria: não foi testada antes de publicar.**"
+        return 0
+    fi
+    case " $2 " in
+        *" windows "*)
+            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny) e no Windows (testes)."
+            ;;
+        *)
+            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny)."
+            ;;
+    esac
 }
 
 # A tag da versão publicada antes desta.
@@ -640,6 +743,18 @@ tag_anterior() {
 if [ "${1:-}" = "--notas" ]; then
     # O corpo do release a partir dos assuntos, sozinho: sem git e sem rede.
     notas_das_mudancas
+    exit 0
+fi
+
+if [ "${1:-}" = "--linha-da-bateria" ]; then
+    # A linha da bateria do corpo do release, sozinha: sem git e sem rede.
+    if [ "$#" -lt 2 ]; then
+        morrer "uso: $0 --linha-da-bateria \"<pedidos>\" [--sem-bateria]"
+    fi
+    if [ "${3:-}" = "--sem-bateria" ]; then
+        SEM_BATERIA=sim
+    fi
+    linha_da_bateria "$SEM_BATERIA" "$2"
     exit 0
 fi
 
@@ -1914,6 +2029,8 @@ fi
 "**Fora da integração contínua.** Os pacotes desta página foram construídos nas" \
 "máquinas de quem publica — macOS e Linux num Mac, Windows numa máquina Windows" \
 "alcançada por SSH — a partir do commit \`$COMMIT\`." \
+"" \
+"$(linha_da_bateria "$SEM_BATERIA" "$PEDIDOS")" \
 "" \
 "A consequência, e ela muda o que conferir: **não há atestado de procedência do" \
 "GitHub para esta versão.** \`gh attestation verify\` vai responder que não" \

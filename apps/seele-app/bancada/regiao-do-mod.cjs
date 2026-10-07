@@ -1469,6 +1469,28 @@ function oErroDoCampoAcompanhaAEdicaoSemRoubarFoco() {
   r.soltar();
 }
 
+/**
+ * **A chave de um campo é cortada por ponto de código.** `dataset.chaveDoMod`
+ * é o que `valoresDoFormulario` devolve ao MOD como a chave do valor, e ela é
+ * cortada em 120. Por índice, o corte parte ao meio um par substituto na
+ * posição 120: a chave volta ao MOD terminando em meio caractere, que não é a
+ * que ele escreveu (pendência 51, item 6).
+ */
+function aChaveDoCampoNaoPartePar() {
+  const caso = "a chave do campo";
+  const b = bancada();
+  const r = new b.RegiaoDeMod("a/b", dono(b).api, b.raiz());
+  r.aplicar([{ forma: "campo", chave: `${"a".repeat(119)}😀`, rotulo: "X", valor: "" }]);
+  const guardada = r.raiz.children[0]?.dataset.chaveDoMod;
+  confere(
+    caso,
+    typeof guardada === "string" && guardada.isWellFormed() && guardada.endsWith("😀"),
+    "a chave de 120 pontos de código, terminada num par substituto, foi cortada pelo meio do par, e "
+      + `o MOD recebe de volta outra chave: ${JSON.stringify(guardada?.slice(-3))}`,
+  );
+  r.soltar();
+}
+
 function oRodapeEReconciliadoSemMoverOBotao() {
   const b = bancada();
   const d = dono(b);
@@ -1637,7 +1659,8 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
   // o `autor/nome: ` que o `base.js` põe na frente — aqui o id é o da região,
   // `a/b`. Uma chave de quinhentos empurrava o motivo para fora da linha; e um
   // corte por índice que parta um par substituto deixa a frase malformada, que
-  // a ponte recusa inteira.
+  // a ponte recusaria inteira: `registrarNoAnfitriao` troca a metade por «�»,
+  // e a chave chega ao seele.log com um caractere que o MOD não escreveu.
   {
     const TETO_DA_FRASE_NO_REGISTRO = 512;
     const b = bancada();
@@ -1663,8 +1686,8 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
     confere(
       "recusa dita · chave longa",
       partida !== undefined && partida.isWellFormed(),
-      "o corte da chave partiu um par substituto ao meio, e a ponte recusa a frase malformada "
-        + `inteira — a recusa não chega ao seele.log: ${JSON.stringify(d.anotadas)}`,
+      "o corte da chave partiu um par substituto ao meio: a frase sai malformada, e a chave chega ao "
+        + `seele.log com «�» no lugar do caractere que o MOD escreveu: ${JSON.stringify(d.anotadas)}`,
     );
     regiao.soltar();
   }
@@ -3460,6 +3483,7 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     aPreviaNaoTrocaOsAncestraisDoCampo,
     oRodapeEReconciliadoSemMoverOBotao,
     oErroDoCampoAcompanhaAEdicaoSemRoubarFoco,
+    aChaveDoCampoNaoPartePar,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     sairDuranteOCarregamentoNaoMonta,

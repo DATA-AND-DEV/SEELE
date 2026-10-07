@@ -25,6 +25,7 @@
 )]
 
 pub mod aceites;
+pub mod anexo_no_disco;
 pub mod battery;
 pub mod bomba;
 pub mod caminho;

@@ -1,0 +1,680 @@
+{
+ "parou_em": "K1-registro-da-janela",
+ "feitos": [
+  {
+   "lote": "A-S1",
+   "base": "3685a64",
+   "res": {
+    "aprovado": true,
+    "base": "3685a64",
+    "head": "ec5134d",
+    "rodadas": 1,
+    "ultima_revisao": {
+     "aprovado": true,
+     "achados": [
+      {
+       "id": "A-S1-R7",
+       "gravidade": "Minor",
+       "titulo": "O título da recusa ainda diz que um nome comum «não é só um nome»",
+       "onde": "apps/seele-app/ui/frases.js:962 (NAO_SALVOS.NomeRecusado) e :1016 (título da composta de fraseDeNaoSalvo)",
+       "porque": "A segunda linha agora vale para as dez regras. Só que «Por quê?.pdf» e «Notas 04:10.txt» continuam abrindo com «O NOME QUE VEIO COM ESTE ARQUIVO NÃO É SÓ UM NOME». Esse título sugere que o nome traz algo a mais, como um caminho ou um truque, e o próprio doc de fraseDeNaoSalvo (frases.js:1006-1010) diz que a frase não pode descrever esses nomes como ataque. O título é o da lista do lote, e por isso fica como Minor. Na mesma linha: a segunda linha da composta tem cerca de 259 caracteres fora o nome e a pasta, bem acima dos 180 do LIMITE_DE_FRASE, e nenhuma régua a mede. O implementador já registrou isso como preocupação 3.",
+       "conserto": "Se o controlador aceitar sair da letra da lista, trocar o título nos dois lugares por algo que valha para todas as regras, por exemplo «ESTE ARQUIVO VEIO COM UM NOME QUE O SEELE NÃO GRAVA, E NADA FOI GRAVADO.». Se não aceitar, registrar a decisão."
+      },
+      {
+       "id": "A-S1-R8",
+       "gravidade": "Minor",
+       "titulo": "A promessa nova «um nome que sirva no Windows» é mais larga que a lista RESERVADOS",
+       "onde": "apps/seele-app/ui/frases.js:1019-1020; crates/seele-ffi/src/types.rs:1703-1704; crates/seele-proto/src/attachment.rs:82-83; crates/seele-core/src/anexo_no_disco.rs:102-106 (RESERVADOS)",
+       "porque": "A correção do R1 trocou «o SEELE só grava dentro dessa pasta» por «só grava em <pasta> um nome que sirva no Windows, no Mac e no Linux». Acontece que RESERVADOS deixa de fora COM0 e LPT0. Pelo que lembro, a página atual da Microsoft sobre nomes de arquivo lista os dois como reservados, mas não conferi na fonte. A lista do lote pede só 1–9, e o implementador já registrou isso (preocupação 6). Não dá para medir aqui como o Windows trata «COM0.txt». Se ele for dispositivo, a frase promete mais do que a regra faz.",
+       "conserto": "Acrescentar \"COM0\" e \"LPT0\" a RESERVADOS, com um caso em um_nome_alegado_so_vira_nome_de_arquivo_se_for_so_um_nome. Uma linha e um caso. Ou medir na bateria Windows e anotar o resultado."
+      },
+      {
+       "id": "A-S1-R9",
+       "gravidade": "Minor",
+       "titulo": "O apagar do arquivo parcial falha calado, e duas frases dizem que ele sempre sai",
+       "onde": "crates/seele-core/src/client.rs:2382 (let _ = tokio::fs::remove_file); crates/seele-ffi/src/types.rs:1719-1720 («O que foi criado saiu»); apps/seele-app/ui/frases.js:969 («Nada foi gravado pela metade»)",
+       "porque": "O doc de Falhou foi reescrito nesta rodada e diz «O que foi criado saiu, e qual foi a causa vai para o seele.log» sem condição nenhuma. O remove_file ignora o próprio erro, e o warn! de fim_do_salvar registra a causa da falha, mas não diz se o parcial ficou. É raro: a pasta teria de mudar de permissão no meio da gravação. Mesmo assim é um caso de «o produto sabe e não conta». O implementador registrou (preocupação 2), e o `let _` vem da base.",
+       "conserto": "Trocar o `let _ =` por `if let Err(erro) = … { tracing::warn!(caminho = %caminho.display(), %erro, \"o arquivo parcial do anexo não pôde ser apagado\") }`. Para a frase da tela, deixar o registro para o lote que der motivo ao NaoSalvou."
+      }
+     ],
+     "vereditos_anteriores": [
+      {
+       "id": "A-S1-R1",
+       "resolvido": true,
+       "onde": "apps/seele-app/ui/frases.js:1012-1024 (fraseDeNaoSalvo, ramo NomeRecusado); crates/seele-ffi/src/types.rs:1703-1710 (NotSavedReason::NomeRecusado); crates/seele-proto/src/attachment.rs:81-88 (doc de file_name); crates/seele-core/src/anexo_no_disco.rs:320-321 (mensagem da asserção); guarda novo em apps/seele-app/tests/frontend.rs:8965"
+      }
+     ],
+     "resumo": "O A-S1-R1 está resolvido, e não sobrou nenhum achado Critical nem Important.\n\n**A frase nova.** No HEAD ec5134d, a segunda linha da recusa diz: «X» tem um caminho, um caractere ou um nome que o Windows não aceita, um caractere invisível que disfarça o nome, ou é comprido demais, e o SEELE só grava em <pasta> um nome que sirva no Windows, no Mac e no Linux. Conferi essa linha contra as dez regras de nome_seguro (anexo_no_disco.rs:123-166):\n- Separador → «caminho».\n- DoisPontos, ProibidoNoWindows e Controle → «caractere que o Windows não aceita». Os de controle DEL e C1 caem também em «invisível».\n- Vazio, SoPontos, ReservadoNoWindows e PontoOuEspacoNoFim → «nome que o Windows não aceita».\n- Formatacao → «invisível que disfarça».\n- LongoDemais → «comprido demais».\n\nRenderizei a frase no node com «Notas 04:10.txt», «Por quê?.pdf», «../.zshrc», «x.bat.» e só espaço, e ela não diz mais «gravaria fora» de nome nenhum. Os docs de NotSavedReason::NomeRecusado e de AttachmentHeader::file_name foram ajustados no mesmo tom, e a mensagem da asserção do teste do módulo também.\n\n**O guarda novo.** `a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado` lê as variantes de NomeRecusado e reprova regra nova sem linha na tabela. Refiz duas reversões por amostragem numa cópia isolada no scratchpad, compilando só o guarda e os ajudantes dele:\n- frases.js de 90e9a27 → vermelho, com a frase do «gravaria»;\n- tirar «ou é comprido demais» → vermelho, com a frase do LongoDemais.\n\nRestaurei e conferi com cmp, byte a byte. O worktree não foi tocado: status vazio, HEAD ec5134d.\n\n**Testes rodados agora.**\n- seele-app --test frontend: 259 ok.\n- seele-core: os de anexo_no_disco e o novo um_anexo_que_nao_foi_salvo_deixa_o_porque_no_log, ok.\n- seele-ffi --lib: 120 ok, 1 ignorado.\n- seele-conformance --test anexos: 14 ok.\n- seele-proto attachment: 11 ok.\n- `cargo fmt --check` limpo e `clippy -D warnings` do workspace limpo, só com o aviso ambiental do linker.\n\n**Quebra nova na correção.** Não achei nenhuma.\n- A rodada 90e9a27..ec5134d mexe em sete arquivos e não toca no fio, em api/*.json, na CSP nem em pendencias.md.\n- Nenhum assunto de commit contém uma das cadeias do G1, conferido contra as linhas do plano 1B, e os três commits têm o Co-Authored-By.\n- O `nome_ao_lado` sem `!radical.is_empty()` dá o mesmo resultado de antes.\n- O `fim_do_salvar` registra o anexo, o caminho e o erro. A ressalva já anotada pelo implementador continua: o teste prova a função, não a chamada.\n- O comentário do FILE_SHARE_DELETE e o doc de SaveRefused.folder batem com o código.\n\n**Ficaram três Minor.**\n- R7: o título da lista, «NÃO É SÓ UM NOME», ainda abre a recusa de nomes comuns, e a composta passa do tamanho que as réguas pedem.\n- R8: a promessa nova «um nome que sirva no Windows» é mais larga que RESERVADOS, que deixa de fora COM0 e LPT0. Não medi isso no Windows.\n- R9: o `remove_file` ignora o próprio erro, e duas frases dizem sem condição que o parcial sai."
+    },
+    "bateria": {
+     "verde": true,
+     "passos": [
+      {
+       "nome": "1-fmt: cargo fmt --all -- --check (teto 300)",
+       "saida": 0,
+       "resumo": "Sem diferenças de formatação. Log: /Users/dev-alexandre/SEELE/.claude/worktrees/abertos-da-1.0/.superpowers/sdd/2026-10-04-abertos/lote-A-S1-bateria/1-fmt.log"
+      },
+      {
+       "nome": "2-check-api: cargo xtask check-api (teto 600)",
+       "saida": 0,
+       "resumo": "Toda a superfície de MOD ainda aponta para algo (5 versões); momento_de despacha 5 momentos e a janela 17 eventos. O único aviso é o do linker do macOS (duplicate -rpath /usr/lib/swift), que é ambiental. Log: .../lote-A-S1-bateria/2-check-api.log"
+      },
+      {
+       "nome": "3-check-versao: cargo xtask check-versao (teto 600)",
+       "saida": 0,
+       "resumo": "A versão alcança as 3 entregas, e nenhum dos 4 lugares que a anunciam lê o Cargo.toml. O único aviso é o do linker. Log: .../lote-A-S1-bateria/3-check-versao.log"
+      },
+      {
+       "nome": "4-clippy: cargo clippy --workspace --all-targets --all-features -- -D warnings (teto 2400)",
+       "saida": 0,
+       "resumo": "Nenhum erro, com -D warnings. O único aviso é o linker_messages do macOS, que ignora o -D warnings. A compilação veio do cache (Finished em 0.28s). Log: .../lote-A-S1-bateria/4-clippy.log"
+      },
+      {
+       "nome": "5-test: cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada (teto 5400)",
+       "saida": 0,
+       "resumo": "Soma dos 91 «test result» (binários e doc-tests): 2636 aprovados, 0 falhas, 5 ignorados, 0 medidos, 1 filtrado (o do --skip). Os 5 ignorados são de propósito: o_caminho_ate_a_outra_maquina_esta_aberto, mods::hash_de_pasta::imprime, o_filtro_por_janela_isola_o_som_do_aplicativo, quanto_custa_de_verdade, quanto_o_videotoolbox_gasta_do_teto. Os panics que aparecem no log (laco.rs:470, a_api_publicada_nao_se_edita.rs:140, quarto_pelo_link.rs:181) são de testes que provocam pânico de propósito, e todos saíram ok. A porta UDP 8384 não deu falha. Log: .../lote-A-S1-bateria/5-test.log"
+      },
+      {
+       "nome": "6-check-runtime: cargo xtask check-runtime (teto 900)",
+       "saida": 0,
+       "resumo": "As bancadas de node puro passam: ciclo-do-executor (5 corridas), regiao-do-mod (34 provas), continuacao-de-midia (3 provas), contribuicoes-e-camadas, envio-de-imagens, imagens-por-volume. Log: .../lote-A-S1-bateria/6-check-runtime.log"
+      },
+      {
+       "nome": "7-bancadas Playwright do job bancadas do ci.yml (PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright, teto 240 cada)",
+       "saida": 0,
+       "resumo": "As 8 saíram com 0: compartilhar-por-identidade, conversa-com-estado, qualidade-da-voz, avatares-do-mod, diagnostico-de-mods, ajustes-v013, escolha-de-versao-de-mod, gif-na-conversa. Logs: .../lote-A-S1-bateria/7-bancada-<nome>.log"
+      }
+     ],
+     "falhas": []
+    },
+    "minors": [
+     {
+      "id": "A-S1-R7",
+      "gravidade": "Minor",
+      "titulo": "O título da recusa ainda diz que um nome comum «não é só um nome»",
+      "onde": "apps/seele-app/ui/frases.js:962 (NAO_SALVOS.NomeRecusado) e :1016 (título da composta de fraseDeNaoSalvo)",
+      "porque": "A segunda linha agora vale para as dez regras. Só que «Por quê?.pdf» e «Notas 04:10.txt» continuam abrindo com «O NOME QUE VEIO COM ESTE ARQUIVO NÃO É SÓ UM NOME». Esse título sugere que o nome traz algo a mais, como um caminho ou um truque, e o próprio doc de fraseDeNaoSalvo (frases.js:1006-1010) diz que a frase não pode descrever esses nomes como ataque. O título é o da lista do lote, e por isso fica como Minor. Na mesma linha: a segunda linha da composta tem cerca de 259 caracteres fora o nome e a pasta, bem acima dos 180 do LIMITE_DE_FRASE, e nenhuma régua a mede. O implementador já registrou isso como preocupação 3.",
+      "conserto": "Se o controlador aceitar sair da letra da lista, trocar o título nos dois lugares por algo que valha para todas as regras, por exemplo «ESTE ARQUIVO VEIO COM UM NOME QUE O SEELE NÃO GRAVA, E NADA FOI GRAVADO.». Se não aceitar, registrar a decisão."
+     },
+     {
+      "id": "A-S1-R8",
+      "gravidade": "Minor",
+      "titulo": "A promessa nova «um nome que sirva no Windows» é mais larga que a lista RESERVADOS",
+      "onde": "apps/seele-app/ui/frases.js:1019-1020; crates/seele-ffi/src/types.rs:1703-1704; crates/seele-proto/src/attachment.rs:82-83; crates/seele-core/src/anexo_no_disco.rs:102-106 (RESERVADOS)",
+      "porque": "A correção do R1 trocou «o SEELE só grava dentro dessa pasta» por «só grava em <pasta> um nome que sirva no Windows, no Mac e no Linux». Acontece que RESERVADOS deixa de fora COM0 e LPT0. Pelo que lembro, a página atual da Microsoft sobre nomes de arquivo lista os dois como reservados, mas não conferi na fonte. A lista do lote pede só 1–9, e o implementador já registrou isso (preocupação 6). Não dá para medir aqui como o Windows trata «COM0.txt». Se ele for dispositivo, a frase promete mais do que a regra faz.",
+      "conserto": "Acrescentar \"COM0\" e \"LPT0\" a RESERVADOS, com um caso em um_nome_alegado_so_vira_nome_de_arquivo_se_for_so_um_nome. Uma linha e um caso. Ou medir na bateria Windows e anotar o resultado."
+     },
+     {
+      "id": "A-S1-R9",
+      "gravidade": "Minor",
+      "titulo": "O apagar do arquivo parcial falha calado, e duas frases dizem que ele sempre sai",
+      "onde": "crates/seele-core/src/client.rs:2382 (let _ = tokio::fs::remove_file); crates/seele-ffi/src/types.rs:1719-1720 («O que foi criado saiu»); apps/seele-app/ui/frases.js:969 («Nada foi gravado pela metade»)",
+      "porque": "O doc de Falhou foi reescrito nesta rodada e diz «O que foi criado saiu, e qual foi a causa vai para o seele.log» sem condição nenhuma. O remove_file ignora o próprio erro, e o warn! de fim_do_salvar registra a causa da falha, mas não diz se o parcial ficou. É raro: a pasta teria de mudar de permissão no meio da gravação. Mesmo assim é um caso de «o produto sabe e não conta». O implementador registrou (preocupação 2), e o `let _` vem da base.",
+      "conserto": "Trocar o `let _ =` por `if let Err(erro) = … { tracing::warn!(caminho = %caminho.display(), %erro, \"o arquivo parcial do anexo não pôde ser apagado\") }`. Para a frase da tela, deixar o registro para o lote que der motivo ao NaoSalvou."
+     }
+    ],
+    "preocupacoes": [
+     "Desvios de texto em relação à lista. A recusa com o nome ficou em 2 linhas (pela regra das frases compostas do frontend.rs) e diz «ou com caracteres que disfarçam o nome» (a frase da lista seria falsa para RLO e caracteres de controle) e «dentro dessa pasta» (por causa do recuo para home_dir). SaveDestination ganhou o campo `beside` («foto (2).png»), calculado em Rust. Entrou um dicionário novo, NAO_SALVOS, já medido pelas réguas.",
+     "O guarda da tela foi reescrito no commit 3, junto com a tela, e não no 4: o guarda antigo ficaria vermelho. saving_says_out_loud_what_this_product_does_not_promise foi adaptado para ler fraseDeSalvar em frases.js. O comentário de MAX_FILE_NAME_LEN em control.rs, que não estava na lista de arquivos, também foi corrigido (só o comentário).",
+     "O guarda do motivo do NotSaved nasceu verde contra a reversão, porque outros ramos também leem transfer.reason. Ele foi estreitado ao ramo NotSaved e refeito vermelho.",
+     "Conflito de merge com o branch mobile/ios, que move apps/seele-app/src/main.rs para lib.rs. Fica com quem integrar por último.",
+     "Não compilado nem rodado aqui: o ramo cfg(windows) de quarantine e a gravação real no NTFS (reservados, ponto no fim, ADS, create_new). Os comandos Tauri também não rodam de ponta a ponta em runtime. A bateria inteira do lote não foi rodada por mim, só testes pontuais, clippy do workspace, check-api e as bancadas anexos e de rascunho.",
+     "Durante o download o arquivo já existe com o nome final, porque é criado antes do pedido. Toda falha o apaga, mas um processo morto no meio deixa o arquivo parcial.",
+     "A frase de Falhou continua dizendo «tente de novo», o que não ajuda num blob estragado nem com 99 nomes tomados. Sem sessão, destino_do_anexo responde AnexoDesconhecido. COM0/LPT0 e CONIN$/CONOUT$ não estão na regra (a lista diz 1–9).",
+     "Comportamento novo também no Mac: nomes antes aceitos (CON.txt, a:b, a?b) passam a ser recusados na hora de salvar. O registro em docs/pendencias.md, no índice e no plano 1B fica com o lote Z.",
+     "Relatório completo em /Users/dev-alexandre/SEELE/.claude/worktrees/abertos-da-1.0/.superpowers/sdd/2026-10-04-abertos/lote-A-S1-report.md (ignorado pelo git).",
+     "Os achados R1 (Important), R2, R3, R4 e R6 foram consertados. O R5 ficou só registrado, como o achado pede: a frase 'tente de novo' do Falhou não mudou. O doc de NotSavedReason::Falhou passou a nomear a pasta que não deixa criar o arquivo e a dizer que, em várias causas, tentar de novo dá no mesmo.",
+     "Diferenças em relação ao texto sugerido no R1: a frase ganhou 'ou é comprido demais', porque a regra LongoDemais não é 'um nome que o Windows não aceita', e 'três sistemas' virou 'no Windows, no Mac e no Linux'. A segunda linha passou de 184 para 259 caracteres, sem contar o nome e a pasta. Nenhuma régua mede as frases compostas.",
+     "No R4, a mensagem do log não diz 'o arquivo criado foi apagado', porque receive_attachment ignora a falha do remove_file (let _ = ..., código que já existia). Se esse apagar falhar, o arquivo parcial fica na pasta sem linha no log, e duas frases ficam falsas: 'Nada foi gravado pela metade', na tela, e 'O que foi criado saiu', no doc de Falhou. Isso não foi consertado, porque nenhum teste daqui alcança esse caminho sem servidor.",
+     "O guarda do R4 prova fim_do_salvar, mas não a chamada única que está em Comando::SalvarAnexo. Para ler o log pelo caminho da ponte seria preciso um Subscriber global no binário anexos, e o seele-conformance não tem tracing entre as dependências. Não acrescentei.",
+     "O relatório está em /Users/dev-alexandre/SEELE/.claude/worktrees/abertos-da-1.0/.superpowers/sdd/2026-10-04-abertos/lote-A-S1-report.md, seção 'Rodada 1'. Esse arquivo está no .gitignore e não foi commitado."
+    ],
+    "historico": [
+     {
+      "rodada": 0,
+      "head": "90e9a27",
+      "rev": {
+       "aprovado": false,
+       "achados": [
+        {
+         "id": "A-S1-R1",
+         "gravidade": "Important",
+         "titulo": "A frase de recusa do nome é falsa para uma classe inteira de nomes recusados, inclusive nomes comuns vindos de Mac e Linux",
+         "onde": "apps/seele-app/ui/frases.js:1009-1015 (fraseDeNaoSalvo, ramo NomeRecusado com claimed e folder); crates/seele-ffi/src/types.rs:1703-1705 (doc de NotSavedReason::NomeRecusado); crates/seele-proto/src/attachment.rs, doc de file_name («sem caminho, sem nome que o Windows reserva, sem caractere que disfarce a extensão»)",
+         "porque": "`nome_seguro` recusa também `< > \" | ? *` (ProibidoNoWindows), `:` sem caminho (DoisPontos), ponto ou espaço no fim, nomes só de espaço e «...». Para todos esses a tela diz: «X» gravaria fora de <pasta>, num nome que o Windows reserva ou com caracteres que disfarçam o nome. Nenhuma das três coisas é verdade nesses casos. E os casos são prováveis: no Mac, uma barra digitada no Finder vira `:` no nome POSIX («Notas 04/10» chega como «Notas 04:10.txt»), e aspas e interrogação são legais no Mac e no Linux («Proposta \"final\".pdf», «Por quê?.pdf»). Quem recebe lê uma explicação falsa que faz um nome comum parecer ataque. O implementador reescreveu a frase da lista justamente para que ela fosse verdadeira (acrescentou «caracteres que disfarçam»), mas cobriu só o RLO e os de controle. O doc de `NotSavedReason::NomeRecusado` (tem caminho, é reservado, ou disfarça a extensão) e o de attachment.rs enumeram o mesmo conjunto incompleto. A frase da própria lista já tinha essa falha, e a versão do HEAD a herdou.",
+         "conserto": "Reescrever a segunda linha para cobrir todas as regras sem citar uma que não pegou. Por exemplo: «X» tem um caminho, um caractere ou um nome que o Windows não aceita, ou um caractere invisível que disfarça o nome, e o SEELE só grava em <pasta> um nome que sirva nos três sistemas. Peça a quem mandou que mande de novo com outro nome. Mantém as duas linhas. Ajustar no mesmo tom o doc de NotSavedReason::NomeRecusado e o de attachment.rs. Opcional: um caso no frontend.rs que cobre que o ramo NomeRecusado de fraseDeNaoSalvo menciona caractere que o Windows não aceita."
+        },
+        {
+         "id": "A-S1-R2",
+         "gravidade": "Minor",
+         "titulo": "Comentário do receive_attachment promete arquivo já fechado e afirma que o Windows não apaga arquivo aberto",
+         "onde": "crates/seele-core/src/client.rs:2371-2374",
+         "porque": "Numa falha de `stream.read` no meio do download, pode haver uma escrita do `tokio::fs::File` ainda em voo no pool de bloqueio. Soltar o File não espera essa escrita, então «o arquivo já foi fechado» não é garantido. E o std do Rust abre no Windows com FILE_SHARE_DELETE, então apagar um arquivo aberto funciona. O comportamento está certo (o arquivo sai do mesmo jeito), mas a justificativa escrita não é a real.",
+         "conserto": "Dizer só o que vale: o arquivo foi solto por `receber_no_arquivo` e é apagado pelo caminho, e uma escrita que ainda esteja terminando não impede isso, porque o std abre com FILE_SHARE_DELETE no Windows."
+        },
+        {
+         "id": "A-S1-R3",
+         "gravidade": "Minor",
+         "titulo": "O comentário da régua das três linhas ficou desatualizado com as duas frases compostas novas em frases.js",
+         "onde": "apps/seele-app/tests/frontend.rs:9120-9123 e o doc de DICIONARIOS (~8958-8964)",
+         "porque": "O comentário diz que as frases compostas são duas (`fraseDeAnexo` e `fraseDePrevia`) e que ficam em duas linhas por construção. Também diz que uma confirmação de ato irreversível mora ao lado do ato, e não em frases.js. Agora `fraseDeSalvar` (quatro linhas) e `fraseDeNaoSalvo` moram em frases.js, e a régua não as mede.",
+         "conserto": "Atualizar os dois comentários: nomear `fraseDeNaoSalvo` como composta de duas linhas, e `fraseDeSalvar` como a confirmação que mora em frases.js por decisão do lote, sem medida da régua."
+        },
+        {
+         "id": "A-S1-R4",
+         "gravidade": "Minor",
+         "titulo": "Uma falha ao receber o anexo é jogada fora sem linha no log",
+         "onde": "crates/seele-core/src/enlace.rs:3126 (`Err(_) => Transferencia::NaoSalvou { anexo }`)",
+         "porque": "O motor sabe se foi o hash, o prazo ou o disco, e descarta o erro. A tela recebe Falhou, e o seele.log não diz nada. O código já existia, mas é o caminho que o lote reescreveu: a variante do hash é o caso do S1, e `NotSavedReason::Falhou` documenta três causas que depois ninguém consegue separar. É o «o produto sabe e não conta».",
+         "conserto": "`Err(erro) => { tracing::warn!(%anexo, %erro, \"o anexo não foi salvo; o arquivo criado foi apagado\"); Transferencia::NaoSalvou { anexo } }`, como já faz o ramo de abrir logo acima."
+        },
+        {
+         "id": "A-S1-R5",
+         "gravidade": "Minor",
+         "titulo": "Falhou continua mandando «tente de novo» quando tentar de novo não resolve",
+         "onde": "apps/seele-app/ui/frases.js (NAO_SALVOS.Falhou); crates/seele-ffi/src/lib.rs:3715-3720 (transfer_of)",
+         "porque": "Agora Falhou cobre também `abrir_sem_sobrescrever` falhando: 99 nomes tomados, permissão negada na pasta ou pasta inexistente. Tentar de novo dá no mesmo. O implementador anotou isso como preocupação 3.",
+         "conserto": "Fica para um lote que dê motivo ao `NaoSalvou` do core. Por ora, basta registrar."
+        },
+        {
+         "id": "A-S1-R6",
+         "gravidade": "Minor",
+         "titulo": "Detalhes de doc e uma condição redundante",
+         "onde": "crates/seele-core/src/anexo_no_disco.rs:5-6 e :210; crates/seele-ffi/src/types.rs:1742",
+         "porque": "O doc do módulo diz que o fio «só recusa o vazio e o NUL», mas ele recusa também o que é só espaço e o que passa do tamanho. O doc de `SaveRefused.folder` diz «Vazia quando não há pasta», mas uma pasta relativa recusada como SemPasta volta com o texto relativo. Em `nome_ao_lado`, `!radical.is_empty()` é sempre verdadeiro naquele ponto, porque o ramo `ponto > 0` nunca dá radical vazio.",
+         "conserto": "Acertar as duas frases e tirar a condição redundante."
+        }
+       ],
+       "vereditos_anteriores": [],
+       "resumo": "Revisei 3685a64..90e9a27 (sete commits do lote A-S1) contra lotes.md, o inventário e o relatório. Os oito itens da lista foram feitos. (1) `anexo_no_disco` no nível do texto, com a lista de recusas da especificação, a lista explícita de formatação, os reservados com sobrescritos, os 255 bytes e o `abrir_sem_sobrescrever` com `create_new` e o corte do radical. (2) `receive_attachment` recebe o arquivo já criado e só apaga o que esta chamada criou; `download_attachment` usa `create_new` antes do pedido. (3) O enlace leva pasta e nome, e o motor abre antes de pedir. (4) A FFI lê o nome do histórico, o NotSaved ganhou `reason` com os quatro motivos, e `save_destination` usa a mesma `destino_de`. (5) A casca calcula a pasta, `salvar_anexo` e `destino_do_anexo` recebem só `anexo` e estão registrados. (6) A tela pergunta antes de confirmar e não monta caminho. (7) As provas de ponta a ponta passam pela ponte. (8) Os comentários foram corrigidos. O que a lista proíbe não foi feito: nada em `File::create`, `Path::components` ou `file_name` na regra, nenhum diálogo nativo, nenhum crate novo, nenhuma edição em docs. O fio, a `api/*.json`, a CSP e o tauri.conf ficaram intocados; o seele-proto mudou só em comentários. `check-api` está verde e nenhum assunto de commit contém cadeia do G1.\n\nRodei aqui, todos verdes:\n- `seele-core --lib`: 407\n- `seele-ffi --lib`: 120 (1 ignorado)\n- `seele-proto --lib`: 257\n- `seele-conformance --test anexos`: 14\n- `seele-app` inteiro: frontend 258 e bin 188\n- fmt e clippy `-D warnings` do workspace: limpos\n\nRefiz quatro reversões numa cópia em scratchpad, e todas ficaram vermelhas com a frase certa:\n- `nome_seguro` trocado por `Path::file_name`: o teste reprova a linha com `..\\`.\n- `create_new` trocado por `create`+`truncate`: as colisões dão `foto.png` quatro vezes.\n- A janela manda um caminho junto do anexo: o guarda de saving_never reprova.\n- A casca volta a aceitar `destino`: `[\"anexo\",\"destino\"]`.\n\nUm fuzz de 155 mil nomes válidos confirmou que `nome_ao_lado` sempre devolve um nome que passa em `nome_seguro` e cabe em 255 bytes. A recusa chega à janela por `textContent`, sem innerHTML, e o log cita o nome escapado.\n\nSobrou um Important. A frase de recusa composta, e os docs que enumeram as mesmas regras, dizem que o nome «gravaria fora da pasta, num nome que o Windows reserva ou com caracteres que disfarçam o nome». Isso é falso para os nomes recusados por `< > \" | ? *`, por `:` e por ponto ou espaço no fim. São casos comuns vindos de Mac e Linux («Proposta \"final\".pdf», e «Notas 04/10» do Finder, que chega como «Notas 04:10»), e a tela faz um nome comum parecer ataque. O conserto é reescrever a frase. O resto é polimento: o comentário do Windows em client.rs, o comentário desatualizado da régua no frontend.rs, a falha de recepção sem log, Falhou com «tente de novo» e detalhes de doc."
+      }
+     },
+     {
+      "rodada": 1,
+      "head": "ec5134d",
+      "rev": {
+       "aprovado": true,
+       "achados": [
+        {
+         "id": "A-S1-R7",
+         "gravidade": "Minor",
+         "titulo": "O título da recusa ainda diz que um nome comum «não é só um nome»",
+         "onde": "apps/seele-app/ui/frases.js:962 (NAO_SALVOS.NomeRecusado) e :1016 (título da composta de fraseDeNaoSalvo)",
+         "porque": "A segunda linha agora vale para as dez regras. Só que «Por quê?.pdf» e «Notas 04:10.txt» continuam abrindo com «O NOME QUE VEIO COM ESTE ARQUIVO NÃO É SÓ UM NOME». Esse título sugere que o nome traz algo a mais, como um caminho ou um truque, e o próprio doc de fraseDeNaoSalvo (frases.js:1006-1010) diz que a frase não pode descrever esses nomes como ataque. O título é o da lista do lote, e por isso fica como Minor. Na mesma linha: a segunda linha da composta tem cerca de 259 caracteres fora o nome e a pasta, bem acima dos 180 do LIMITE_DE_FRASE, e nenhuma régua a mede. O implementador já registrou isso como preocupação 3.",
+         "conserto": "Se o controlador aceitar sair da letra da lista, trocar o título nos dois lugares por algo que valha para todas as regras, por exemplo «ESTE ARQUIVO VEIO COM UM NOME QUE O SEELE NÃO GRAVA, E NADA FOI GRAVADO.». Se não aceitar, registrar a decisão."
+        },
+        {
+         "id": "A-S1-R8",
+         "gravidade": "Minor",
+         "titulo": "A promessa nova «um nome que sirva no Windows» é mais larga que a lista RESERVADOS",
+         "onde": "apps/seele-app/ui/frases.js:1019-1020; crates/seele-ffi/src/types.rs:1703-1704; crates/seele-proto/src/attachment.rs:82-83; crates/seele-core/src/anexo_no_disco.rs:102-106 (RESERVADOS)",
+         "porque": "A correção do R1 trocou «o SEELE só grava dentro dessa pasta» por «só grava em <pasta> um nome que sirva no Windows, no Mac e no Linux». Acontece que RESERVADOS deixa de fora COM0 e LPT0. Pelo que lembro, a página atual da Microsoft sobre nomes de arquivo lista os dois como reservados, mas não conferi na fonte. A lista do lote pede só 1–9, e o implementador já registrou isso (preocupação 6). Não dá para medir aqui como o Windows trata «COM0.txt». Se ele for dispositivo, a frase promete mais do que a regra faz.",
+         "conserto": "Acrescentar \"COM0\" e \"LPT0\" a RESERVADOS, com um caso em um_nome_alegado_so_vira_nome_de_arquivo_se_for_so_um_nome. Uma linha e um caso. Ou medir na bateria Windows e anotar o resultado."
+        },
+        {
+         "id": "A-S1-R9",
+         "gravidade": "Minor",
+         "titulo": "O apagar do arquivo parcial falha calado, e duas frases dizem que ele sempre sai",
+         "onde": "crates/seele-core/src/client.rs:2382 (let _ = tokio::fs::remove_file); crates/seele-ffi/src/types.rs:1719-1720 («O que foi criado saiu»); apps/seele-app/ui/frases.js:969 («Nada foi gravado pela metade»)",
+         "porque": "O doc de Falhou foi reescrito nesta rodada e diz «O que foi criado saiu, e qual foi a causa vai para o seele.log» sem condição nenhuma. O remove_file ignora o próprio erro, e o warn! de fim_do_salvar registra a causa da falha, mas não diz se o parcial ficou. É raro: a pasta teria de mudar de permissão no meio da gravação. Mesmo assim é um caso de «o produto sabe e não conta». O implementador registrou (preocupação 2), e o `let _` vem da base.",
+         "conserto": "Trocar o `let _ =` por `if let Err(erro) = … { tracing::warn!(caminho = %caminho.display(), %erro, \"o arquivo parcial do anexo não pôde ser apagado\") }`. Para a frase da tela, deixar o registro para o lote que der motivo ao NaoSalvou."
+        }
+       ],
+       "vereditos_anteriores": [
+        {
+         "id": "A-S1-R1",
+         "resolvido": true,
+         "onde": "apps/seele-app/ui/frases.js:1012-1024 (fraseDeNaoSalvo, ramo NomeRecusado); crates/seele-ffi/src/types.rs:1703-1710 (NotSavedReason::NomeRecusado); crates/seele-proto/src/attachment.rs:81-88 (doc de file_name); crates/seele-core/src/anexo_no_disco.rs:320-321 (mensagem da asserção); guarda novo em apps/seele-app/tests/frontend.rs:8965"
+        }
+       ],
+       "resumo": "O A-S1-R1 está resolvido, e não sobrou nenhum achado Critical nem Important.\n\n**A frase nova.** No HEAD ec5134d, a segunda linha da recusa diz: «X» tem um caminho, um caractere ou um nome que o Windows não aceita, um caractere invisível que disfarça o nome, ou é comprido demais, e o SEELE só grava em <pasta> um nome que sirva no Windows, no Mac e no Linux. Conferi essa linha contra as dez regras de nome_seguro (anexo_no_disco.rs:123-166):\n- Separador → «caminho».\n- DoisPontos, ProibidoNoWindows e Controle → «caractere que o Windows não aceita». Os de controle DEL e C1 caem também em «invisível».\n- Vazio, SoPontos, ReservadoNoWindows e PontoOuEspacoNoFim → «nome que o Windows não aceita».\n- Formatacao → «invisível que disfarça».\n- LongoDemais → «comprido demais».\n\nRenderizei a frase no node com «Notas 04:10.txt», «Por quê?.pdf», «../.zshrc», «x.bat.» e só espaço, e ela não diz mais «gravaria fora» de nome nenhum. Os docs de NotSavedReason::NomeRecusado e de AttachmentHeader::file_name foram ajustados no mesmo tom, e a mensagem da asserção do teste do módulo também.\n\n**O guarda novo.** `a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado` lê as variantes de NomeRecusado e reprova regra nova sem linha na tabela. Refiz duas reversões por amostragem numa cópia isolada no scratchpad, compilando só o guarda e os ajudantes dele:\n- frases.js de 90e9a27 → vermelho, com a frase do «gravaria»;\n- tirar «ou é comprido demais» → vermelho, com a frase do LongoDemais.\n\nRestaurei e conferi com cmp, byte a byte. O worktree não foi tocado: status vazio, HEAD ec5134d.\n\n**Testes rodados agora.**\n- seele-app --test frontend: 259 ok.\n- seele-core: os de anexo_no_disco e o novo um_anexo_que_nao_foi_salvo_deixa_o_porque_no_log, ok.\n- seele-ffi --lib: 120 ok, 1 ignorado.\n- seele-conformance --test anexos: 14 ok.\n- seele-proto attachment: 11 ok.\n- `cargo fmt --check` limpo e `clippy -D warnings` do workspace limpo, só com o aviso ambiental do linker.\n\n**Quebra nova na correção.** Não achei nenhuma.\n- A rodada 90e9a27..ec5134d mexe em sete arquivos e não toca no fio, em api/*.json, na CSP nem em pendencias.md.\n- Nenhum assunto de commit contém uma das cadeias do G1, conferido contra as linhas do plano 1B, e os três commits têm o Co-Authored-By.\n- O `nome_ao_lado` sem `!radical.is_empty()` dá o mesmo resultado de antes.\n- O `fim_do_salvar` registra o anexo, o caminho e o erro. A ressalva já anotada pelo implementador continua: o teste prova a função, não a chamada.\n- O comentário do FILE_SHARE_DELETE e o doc de SaveRefused.folder batem com o código.\n\n**Ficaram três Minor.**\n- R7: o título da lista, «NÃO É SÓ UM NOME», ainda abre a recusa de nomes comuns, e a composta passa do tamanho que as réguas pedem.\n- R8: a promessa nova «um nome que sirva no Windows» é mais larga que RESERVADOS, que deixa de fora COM0 e LPT0. Não medi isso no Windows.\n- R9: o `remove_file` ignora o próprio erro, e duas frases dizem sem condição que o parcial sai."
+      }
+     }
+    ]
+   }
+  },
+  {
+   "lote": "B-servidor",
+   "base": "ec5134d",
+   "res": {
+    "aprovado": true,
+    "base": "ec5134d",
+    "head": "34235fe",
+    "rodadas": 1,
+    "ultima_revisao": {
+     "aprovado": true,
+     "achados": [
+      {
+       "id": "B-6",
+       "gravidade": "Minor",
+       "titulo": "O escape do Display de NaoCarregouSemLancar, variante nova desta rodada, não tem guarda: trocar `{texto:?}` por `{texto}` deixa a bateria verde",
+       "onde": "crates/seele-server/src/mods/mod.rs:134 (o #[error] de NaoCarregouSemLancar). O único teste da variante, `um_contexto_que_nao_coube_na_memoria_diz_que_falhou_ao_carregar_e_nao_que_lancou` (mod.rs:1254), confere `starts_with(\"mod failed while loading: \")`, sem a aspa.",
+       "porque": "Fiz a reversão numa cópia de 34235fe (git archive no scratchpad) e recompilei: `mods::` deu 101 verdes e 0 vermelhos. A variante irmã FalhouSemLancar fica guardada, porque o teste dela exige `starts_with(\"mod failed: \\\"Error converting from js\")`, com a aspa. O risco hoje é baixo. O texto dessas variantes vem só do `Display` do rquickjs 0.12.2 para erros que não são exceção: `Allocation failed while creating object`, a mensagem do NulError de uma fonte com byte nulo (medido: `nul byte found in provided data at position: 17`), e os FromJs com mensagens fixas. Nenhum desses textos vem do MOD. É o mesmo «existir não é funcionar» do B-1, numa superfície que o MOD não escreve.",
+       "conserto": "Basta incluir a aspa no prefixo que o teste da memória exige: `dito.starts_with(\"mod failed while loading: \\\"\")`. Depois, ver esse teste vermelho com a reversão feita só no #[error] de NaoCarregouSemLancar."
+      }
+     ],
+     "vereditos_anteriores": [
+      {
+       "id": "B-1",
+       "resolvido": true,
+       "onde": "crates/seele-server/src/mods/mod.rs:1322 (teste novo `o_texto_lancado_no_topo_com_quebra_de_linha_fica_numa_linha_so`). Ele guarda o #[error] de NaoCarregou, em mod.rs:120. Refiz a reversão numa cópia de 34235fe: troquei `{texto:?}` por `{texto}` só no #[error] de NaoCarregou e recompilei (o log mostra «Compiling seele-server»). Resultado: 100 verdes e 1 vermelho, exatamente o teste novo, que reprova em mod.rs:1342 com \"mod threw while loading: Error: a\\nWARN seele_server: forjada at \\\"<eval> (eval_script:1:10)\\\"\". Restaurei a cópia e o `cmp` deu igual. O `matches!(falha, Falha::NaoCarregou { .. })` impede que o teste deixe de guardar a variante se a classificação mudar. O comentário dele nomeia as três portas, e conferi cada uma no código: lib.rs:667, despacho.rs:155 e o %error de pedidos.rs. Ela entra pelo carregar de despacho.rs:191/:211 e de pedidos.rs."
+      }
+     ],
+     "resumo": "O B-1 está resolvido: o guarda novo existe e eu o vi falhar quando desfiz o conserto. Não achei nenhum Critical nem Important novo no diff da correção (b2dd6d1..34235fe).\n\nO que medi numa cópia de 34235fe tirada com git archive (só leitura no worktree):\n\n1. **Guardas das outras correções, por amostragem.**\n   - B-3: com `Lancado::do_motor` devolvendo `do_motor: false`, os dois testes novos ficam vermelhos, com as frases do relatório.\n   - B-4: trocando o ramo do id ilegível por `else if false`, o teste novo fica vermelho, com `mod_id=  error=cannot read`.\n   - B-2: refiz a conta. Com o corte 10 acima do teto a linha dá 531 caracteres, contra 525 permitidos pela moldura nova (512 + 13). A moldura antiga (33) deixaria passar.\n\n2. **Frases novas conferidas contra o código e uma sonda temporária, já apagada.**\n   - Um `dados.a = 1` em `pedir` e um `dados.b = {}` em `chamar` dão `FalhouSemLancar` com «Error converting from js…».\n   - Um `async aoPedir` dá `mod failed: \"…'promise'…\"`.\n   - Um byte nulo na fonte dá `NaoCarregouSemLancar`.\n   - Um erro de sintaxe dá `NaoCarregou` com onde `eval_script:1:1`.\n   - O caminho de eventos desliga quem cai em `FalhouSemLancar`, porque despacho.rs:429 só poupa `NaoCarregadoAqui`.\n   - A doc de `NaoCarregou`, as de `carregar` e de `chamar`, a do teto e o parágrafo do guia batem com o que o código faz. Nenhum código fora do seele-server faz match nas mensagens nem nas variantes de `Falha`.\n\n3. **Bateria e restrições do lote.**\n   - `cargo test -p seele-server --no-fail-fast` está verde no HEAD: lib 549, seeled 3, os sete binários de tests/ e os doctests.\n   - `cargo fmt --all -- --check` passa, e `cargo clippy -p seele-server --all-targets --all-features -- -D warnings` sai limpo.\n   - Os commits intermediários 380a745 e deed8a0 compilam e passam `mods::`, com 98 e 99 testes.\n   - Nenhum assunto ou corpo de commit da faixa contém uma das catorze cadeias do G1, e todos levam o Co-Authored-By.\n   - O diff não toca api/, seele-proto, apps/, lib.rs nem as pendências. Nada muda no fio: a resposta continua `bridge-refused`. Não há código cfg de outra plataforma.\n\nSobra um Minor, o B-6: o `{texto:?}` de NaoCarregouSemLancar não tem guarda. O texto dessa variante vem do rquickjs, sem conteúdo do MOD.\n\nDois avisos do ambiente para quem roda a bateria:\n\n- **Xcode:** a licença não está aceita nesta máquina, e o link com `cc` falha com «You have not agreed to the Xcode license agreements». Contornei rodando com `DEVELOPER_DIR=/Library/Developer/CommandLineTools`, só no processo, sem mexer em configuração do sistema.\n- **Binário velho:** uma cópia feita com git archive guarda o mtime do commit. Com um target compartilhado, o cargo considera o código atualizado e roda um binário velho. Isso aconteceu na minha primeira rodada «HEAD» e na primeira rodada dos commits intermediários, e descartei as duas. Tudo o que cito acima foi refeito com «Compiling seele-server» no log, depois de um `touch` nos fontes."
+    },
+    "bateria": {
+     "verde": true,
+     "passos": [
+      {
+       "nome": "1-fmt: cargo fmt --all -- --check (teto 300)",
+       "saida": 0,
+       "resumo": "Sem diferença de formatação. Log em .superpowers/sdd/2026-10-04-abertos/lote-B-servidor-bateria/1-fmt.log (vazio)."
+      },
+      {
+       "nome": "2-check-api: cargo xtask check-api (teto 600)",
+       "saida": 0,
+       "resumo": "Toda a superfície de MOD ainda aponta para algo (5 versões); momento_de despacha 5 momentos e a janela 17 eventos. Só o aviso ambiental do linker (duplicate -rpath /usr/lib/swift)."
+      },
+      {
+       "nome": "3-check-versao: cargo xtask check-versao (teto 600)",
+       "saida": 0,
+       "resumo": "A versão alcança as 3 entregas, e nenhum dos 4 lugares que a anunciam lê o Cargo.toml. Só o aviso ambiental do linker."
+      },
+      {
+       "nome": "4-clippy: cargo clippy --workspace --all-targets --all-features -- -D warnings (teto 2400)",
+       "saida": 0,
+       "resumo": "Nenhum aviso de lint. As únicas linhas warning são o aviso ambiental do linker do macOS, que o próprio lint linker_messages diz ignorar -D warnings. Terminou em 0,68 s porque o cargo já tinha o resultado em cache para estas mesmas fontes (cache por fingerprint, então vale para o HEAD 34235fe)."
+      },
+      {
+       "nome": "5-test: cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada (teto 5400)",
+       "saida": 0,
+       "resumo": "91 binários (contando os doc-tests), 2653 aprovados, 0 falhas, 5 ignorados, 1 filtrado (o do --skip). Nenhum test result: FAILED. Os panicked do log são de testes que provocam pânico de propósito: laco.rs:470 diz 'envenenando de propósito, para o teste', e os de a_api_publicada_nao_se_edita.rs:140 e quarto_pelo_link.rs:181 são de testes que passaram. Nenhuma falha de porta UDP 8384."
+      },
+      {
+       "nome": "6-check-runtime: cargo xtask check-runtime (teto 900)",
+       "saida": 0,
+       "resumo": "As 6 bancadas de node puro passam: ciclo-do-executor (5 corridas), regiao-do-mod (34 provas e a validação de resumo por linhas), continuacao-de-midia (3 provas), contribuicoes-e-camadas (R1 a R6, revisão de 26ad0c2, V14), envio-de-imagens e imagens-por-volume."
+      },
+      {
+       "nome": "7-bancadas Playwright do job bancadas do ci.yml (PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright, teto 240 cada)",
+       "saida": 0,
+       "resumo": "As 8 saem com 0, nenhuma pulada nem sem Playwright: compartilhar-por-identidade (R18, R19, R16 OK, 0 s), conversa-com-estado (até R06 OK, 0 s), qualidade-da-voz (até F01 OK, 1 s), avatares-do-mod (0 s), diagnostico-de-mods (5 s), ajustes-v013 (verificados em Chromium, 4 s), escolha-de-versao-de-mod (2 s), gif-na-conversa (3 s). Um log por bancada em 7-bancada-<nome>.log."
+      }
+     ],
+     "falhas": []
+    },
+    "minors": [
+     {
+      "id": "B-6",
+      "gravidade": "Minor",
+      "titulo": "O escape do Display de NaoCarregouSemLancar, variante nova desta rodada, não tem guarda: trocar `{texto:?}` por `{texto}` deixa a bateria verde",
+      "onde": "crates/seele-server/src/mods/mod.rs:134 (o #[error] de NaoCarregouSemLancar). O único teste da variante, `um_contexto_que_nao_coube_na_memoria_diz_que_falhou_ao_carregar_e_nao_que_lancou` (mod.rs:1254), confere `starts_with(\"mod failed while loading: \")`, sem a aspa.",
+      "porque": "Fiz a reversão numa cópia de 34235fe (git archive no scratchpad) e recompilei: `mods::` deu 101 verdes e 0 vermelhos. A variante irmã FalhouSemLancar fica guardada, porque o teste dela exige `starts_with(\"mod failed: \\\"Error converting from js\")`, com a aspa. O risco hoje é baixo. O texto dessas variantes vem só do `Display` do rquickjs 0.12.2 para erros que não são exceção: `Allocation failed while creating object`, a mensagem do NulError de uma fonte com byte nulo (medido: `nul byte found in provided data at position: 17`), e os FromJs com mensagens fixas. Nenhum desses textos vem do MOD. É o mesmo «existir não é funcionar» do B-1, numa superfície que o MOD não escreve.",
+      "conserto": "Basta incluir a aspa no prefixo que o teste da memória exige: `dito.starts_with(\"mod failed while loading: \\\"\")`. Depois, ver esse teste vermelho com a reversão feita só no #[error] de NaoCarregouSemLancar."
+     }
+    ],
+    "preocupacoes": [
+     "Além da lista, de propósito: pedir e o topo de carregar passam a devolver PassouDoTempo quando o teto os cortou (antes, Lancou/NaoCarregou). Com o texto novo, eles diriam mod threw: \"InternalError: interrupted\", que manda procurar um throw que não existe. Há testes, e a reversão D prova os dois.",
+     "Também além da lista: o onde (a primeira linha da stack, que o MOD pode reescrever) também sai por Debug, com teste. O corte põe … e tira o onde quando o texto enche a linha. conferir_convite e id_seguro ganharam testes próprios.",
+     "Palavra larga: um Runtime::new ou Context::full que falha diz «mod threw while loading: <erro do motor>». Um erro de conversão do motor (aoPedir que falta ou que devolve número, dados não-texto) diz «mod threw: \"Error converting from js 'int' into type 'string'\"». O texto diz o que houve; antes era «mod threw» sem texto nenhum.",
+     "O erro de banco ao conferir um convite chega ao log como «session closed … could not evaluate admission: <erro>» em INFO (lib.rs:809), não em ERROR. A lista mandou deixar os chamadores como estão; mudou só o texto, que antes era SegredoInvalido.",
+     "Doc tocada fora do item: o # Errors de chamar dizia que um MOD não carregado também é Lancou, e isso já não vale desde NaoCarregadoAqui. Agora ele nomeia NaoCarregadoAqui.",
+     "Prova que falta: «sem zerar o teto entre a chamada e a leitura» não tem teste afiado. O teste do getter que não termina prova só que a leitura tem limite e que a classificação vem antes dela (reversão E).",
+     "docs/pendencias.md:7835-7857 (P51-27) ainda descreve «mod threw»; é do lote Z. O P51-26 só fecha depois da metade do app, no lote C.",
+     "O diff de mod.rs é grande porque o corpo de carregar foi para um método montar, com um nível de recuo a menos. Com git diff -w, só mudam os quatro to_path_buf().",
+     "B-3 foi feito por inteiro, e não só a doc. O achado deixava a forma ao controlador (prefixo ou variante). Escolhi duas variantes novas na enum pública Falha: FalhouSemLancar ('mod failed: …') e NaoCarregouSemLancar ('mod failed while loading: …'). O despacho continua desligando o MOD que falha assim, e nada atravessa o fio. Se o controlador preferir só o prefixo, a troca fica em na_chamada/ao_carregar e nos dois #[error].",
+     "O teste de carregar do B-3 depende de 16 KiB não caberem num contexto do QuickJS. Medi: até 64 KiB não cabe, 128 KiB cabe. Se um dia couber, o expect_err diz isso.",
+     "B-2: um corte que passe do teto por um só caractere não tem teste próprio. Com \\u{100000}, o corte anda de 10 em 10, então esse erro dá o mesmo 508 e não aparece neste caso. A moldura exata pedida está feita; o teste de um a mais ficou de fora, e o motivo está no relatório.",
+     "B-4 foi um pouco além do achado: usei trim(), e por isso um id só de espaço (que o fio aceita) também sai como mod_id_ilegivel=true, e não como mod_id= em branco.",
+     "Para o lote Z: B-5 não muda código. Ao registrar o P51-27: o topo cortado pelo teto dizia 'mod source did not compile' (e não 'lançou') e agora diz 'mod went past its step ceiling'. A pendência 51 também precisa das frases 'mod failed: …' e 'mod failed while loading: …' e da linha mod_id_ilegivel=true do P51-26.",
+     "O relatório /Users/dev-alexandre/SEELE/.claude/worktrees/abertos-da-1.0/.superpowers/sdd/2026-10-04-abertos/lote-B-servidor-report.md ganhou a seção 'Rodada 1'. O arquivo é ignorado pelo git, então não entrou em commit. A bateria inteira (workspace, conformidade, check-runtime, Playwright) não rodou aqui, porque é o passo próprio do fluxo."
+    ],
+    "historico": [
+     {
+      "rodada": 0,
+      "head": "b2dd6d1",
+      "rev": {
+       "aprovado": false,
+       "achados": [
+        {
+         "id": "B-1",
+         "gravidade": "Important",
+         "titulo": "O escape do Display de Falha::NaoCarregou não tem guarda: reverter `{texto:?}` para `{texto}` só nele deixa a bateria inteira verde",
+         "onde": "crates/seele-server/src/mods/mod.rs:113 (o #[error] de NaoCarregou); o único teste do `\\n`, `o_texto_lancado_com_quebra_de_linha_fica_numa_linha_so` (mod.rs ~1170), passa só por `chamar`, isto é, por Falha::Lancou",
+         "porque": "Os Riscos do lote dizem que o Display em Debug é obrigatório, porque sem ele o P51-27 reabre a injeção que o P51-26 fecha. O texto de NaoCarregou é do MOD e vai ao seele.log de quem hospeda por lib.rs:667 («MOD recusado ao subir»), despacho.rs:155 («ao recarregar») e pelo `%error` de pedidos.rs (o carregar de cada pedido). Fiz a reversão numa cópia de b2dd6d1 (git archive no scratchpad), trocando `{texto:?}` por `{texto}` só no #[error] de NaoCarregou. `cargo test -p seele-server --no-fail-fast` deu verde: lib 545, seeled 3 e os sete binários de tests/. Medi o que essa reversão expõe: um `throw new Error('a\\nWARN seele_server: forjada')` no topo sai hoje escapado (`mod threw while loading: \"Error: a\\nWARN seele_server: forjada\" at \"<eval> (eval_script:1:10)\"`). Com a reversão, ele escreveria uma segunda linha com a cara do produto, e nada reclamaria. A reversão B do relatório cobriu só Lancou. O código do HEAD está certo, mas o guarda de metade da superfície nova não existe.",
+         "conserto": "Acrescentar um caso de topo, ou parametrizar o teste do `\\n` sobre `carregar` e `chamar`: `carregar(\"seele/topo-quebra\", \"throw new Error('a\\\\nWARN seele_server: forjada');\", …)`, exigindo `expect_err` com `contains(\"forjada\")` e nenhum `\\n` nem `\\r`. Depois, ver o teste novo vermelho com a reversão só no #[error] de NaoCarregou."
+        },
+        {
+         "id": "B-2",
+         "gravidade": "Minor",
+         "titulo": "O teste do teto mede a moldura com o prefixo de NaoCarregou num caso de Lancou, e por isso tolera 20 caracteres a mais",
+         "onde": "crates/seele-server/src/mods/mod.rs ~1227, em `o_texto_lancado_cabe_no_teto_depois_de_escapado`: `let moldura = \"mod threw while loading: \".len() + \" at \".len() + 4;`",
+         "porque": "O caso chama `chamar`, que dá Lancou (`mod threw: `, 11 caracteres), e o texto cortado leva o onde embora. O máximo real é 11 + 2 + 512 = 525, e o teste aceita até 512 + 33 = 545. Um corte que passasse do teto em até 20 caracteres (a marca não contada, um erro de um a mais) passaria. O comentário («o começo, \" at \" e as duas aspas de cada parte») descreve uma moldura que este caso não tem.",
+         "conserto": "Usar a moldura exata do caso: `\"mod threw: \".len() + 2`, porque o onde sai quando o texto é cortado. Ou afirmar que o miolo entre as aspas tem `tamanho_escapado <= TETO_DO_LANCADO_NO_REGISTRO`."
+        },
+        {
+         "id": "B-3",
+         "gravidade": "Minor",
+         "titulo": "Palavras que dizem mais que o código: «SyntaxError é o que não compilou» e «threw» onde nada foi lançado",
+         "onde": "crates/seele-server/src/mods/mod.rs:108-112 (doc de NaoCarregou); os #[error] de :113 e :122 no caminho de `Lancado::do_motor`",
+         "porque": "O doc diz que `SyntaxError: …` separa o que não compilou do topo que lançou. Mas um topo que compila e roda `JSON.parse('{')` também lança SyntaxError. E medi as frases de dois casos em que nada foi lançado: um MOD sem aoPedir dá `mod threw: \"Error converting from js 'undefined' into type 'function'\"`, e um aoPedir que devolve número dá `… 'int' into type 'string'`. Uma falha de Runtime::new ou Context::full dá `mod threw while loading: …`. Antes era «mod threw» sem texto, e agora o texto ao menos diz o que houve, mas o verbo continua afirmando um throw. O relatório levanta isso como preocupação 3.",
+         "conserto": "No doc, dizer que o texto do QuickJS e o onde costumam separar os dois casos, sem prometer que SyntaxError é sempre de compilação. Para o caminho `do_motor`, um prefixo próprio (por exemplo `mod failed: \"…\"`) ou uma variante, sem mudar o fio. Fica a critério do controlador."
+        },
+        {
+         "id": "B-4",
+         "gravidade": "Minor",
+         "titulo": "Um id feito só de caracteres filtrados volta a escrever `mod_id=` em branco",
+         "onde": "crates/seele-server/src/mods/pedidos.rs:50-61 (`executar`) e `id_seguro`",
+         "porque": "O ramo do catálogo existe porque um `mod_id=` em branco casa com qualquer `grep \"mod_id=\"`. Um cliente autenticado que manda um id não vazio feito só de controle ou bidi (por exemplo \"\\u{202E}\" ou \"\\n\") passa pelo `else`, e `id_seguro` o reduz a \"\". A linha sai `mod_id= error=…`, a mesma forma que o comentário diz evitar. Não abre injeção nenhuma: é só ruído no grep.",
+         "conserto": "Quando `id_seguro(id)` sair vazio com `id` não vazio, escrever um campo que diga isso (por exemplo `mod_id_ilegivel=true`) em vez do `mod_id=` em branco. Ou aceitar e registrar a decisão."
+        },
+        {
+         "id": "B-5",
+         "gravidade": "Minor",
+         "titulo": "A mensagem do commit cd71f8e diz que o topo de `carregar` «antes dizia lançou»",
+         "onde": "commit cd71f8e, segundo parágrafo: «agora também em `pedir` e no topo de `carregar`, que antes diziam «lançou»»",
+         "porque": "Antes, um topo cortado pelo teto virava `Falha::NaoCarregou`, com o texto «mod source did not compile», e não «lançou». A frase vale para `pedir`, e não para `carregar`. O commit não muda mais, mas quem registrar o P51-27 no lote Z pode copiar a frase errada.",
+         "conserto": "Nada no código. Ao registrar no lote Z, escrever que o topo cortado pelo teto dizia «mod source did not compile» e passa a dizer `mod went past its step ceiling`."
+        }
+       ],
+       "vereditos_anteriores": [],
+       "resumo": "Não aprovo o lote B-servidor em b2dd6d1 por uma falha Important: o escape do Display de Falha::NaoCarregou, que a especificação torna obrigatório, não tem teste que o veja vermelho. Os três itens (P51-27, P51-26 da metade do servidor e F1-portaria) seguem a especificação, e o código do HEAD está certo; falta o guarda dessa metade.\n\nO que o lote fez:\n- **P51-27:** Lancou e NaoCarregou passaram a carregar o texto do que o MOD lançou e a primeira linha da pilha, lidos com ctx.catch() dentro do contexto.with. O teto de passos é conferido antes da leitura, e nada o zera entre a chamada e a leitura. Texto e onde saem pelo Debug e são cortados juntos em 512 pelo tamanho escapado. Falha deixou de ser Copy e passou a Clone + PartialEq.\n- **P51-26:** `id_seguro` corta em 128 e tira os caracteres de controle, os separadores de linha e os de bidi. O id vazio sai como `catalogo=true`, e o caminho do volume também é coberto.\n- **F1-portaria:** `.optional()?` na senha e em conferir_convite, e `?` na contagem dos convites. Os chamadores ficaram como estavam; conferi session.rs, o seeled (main.rs:123-128) e o app (main.rs:7899).\n\nO que medi:\n- `cargo test -p seele-server --lib -- mods:: admissao` deu 117 verdes; fmt e clippy -D warnings estão limpos.\n- Rodei numa cópia de b2dd6d1 no scratchpad os casos de throw (console, topo, sintaxe, string, Symbol, getter). As frases que saíram batem exatamente com o exemplo do guia e com as do relatório.\n- A regra de tamanho (`escape_debug`, com o apóstrofo valendo 1) bate com o Debug de str em todos os caracteres de 0 a 0x10FFFF.\n\nReversões que refiz por amostragem, na cópia:\n- `chamar` voltando a jogar fora o texto: 5 testes vermelhos, entre eles o do despacho.\n- `%id` no lugar de `id_seguro`: vermelho, com `left: 2`.\n- A contagem voltando a `.unwrap_or(0)`: vermelho.\n- `{texto}` no lugar de `{texto:?}` só em NaoCarregou: o seele-server inteiro ficou verde (lib 545, seeled 3, os sete binários de tests/). Este é o B-1, porque um throw no topo do MOD voltaria a forjar linha pelas linhas «MOD recusado ao subir» e «ao recarregar» e pelo %error dos pedidos, sem nada reclamar.\n\nO que não mudou: o fio, a API, a CSP, o `bridge-refused`, o apps/seele-app/src/main.rs, as pendências e o índice. Nenhum assunto de commit tem uma das catorze cadeias do G1, e não há código cfg de outra plataforma.\n\nOs Minor: o teste do teto é 20 caracteres mais frouxo que o máximo real; algumas palavras dizem mais que o código («SyntaxError é o que não compilou», «threw» onde nada foi lançado); um id feito só de caracteres filtrados volta a escrever `mod_id=` em branco; e a mensagem do commit cd71f8e erra o que o topo de `carregar` dizia antes.\n\nO worktree ficou intacto: HEAD continua b2dd6d1 e o status está limpo."
+      }
+     },
+     {
+      "rodada": 1,
+      "head": "34235fe",
+      "rev": {
+       "aprovado": true,
+       "achados": [
+        {
+         "id": "B-6",
+         "gravidade": "Minor",
+         "titulo": "O escape do Display de NaoCarregouSemLancar, variante nova desta rodada, não tem guarda: trocar `{texto:?}` por `{texto}` deixa a bateria verde",
+         "onde": "crates/seele-server/src/mods/mod.rs:134 (o #[error] de NaoCarregouSemLancar). O único teste da variante, `um_contexto_que_nao_coube_na_memoria_diz_que_falhou_ao_carregar_e_nao_que_lancou` (mod.rs:1254), confere `starts_with(\"mod failed while loading: \")`, sem a aspa.",
+         "porque": "Fiz a reversão numa cópia de 34235fe (git archive no scratchpad) e recompilei: `mods::` deu 101 verdes e 0 vermelhos. A variante irmã FalhouSemLancar fica guardada, porque o teste dela exige `starts_with(\"mod failed: \\\"Error converting from js\")`, com a aspa. O risco hoje é baixo. O texto dessas variantes vem só do `Display` do rquickjs 0.12.2 para erros que não são exceção: `Allocation failed while creating object`, a mensagem do NulError de uma fonte com byte nulo (medido: `nul byte found in provided data at position: 17`), e os FromJs com mensagens fixas. Nenhum desses textos vem do MOD. É o mesmo «existir não é funcionar» do B-1, numa superfície que o MOD não escreve.",
+         "conserto": "Basta incluir a aspa no prefixo que o teste da memória exige: `dito.starts_with(\"mod failed while loading: \\\"\")`. Depois, ver esse teste vermelho com a reversão feita só no #[error] de NaoCarregouSemLancar."
+        }
+       ],
+       "vereditos_anteriores": [
+        {
+         "id": "B-1",
+         "resolvido": true,
+         "onde": "crates/seele-server/src/mods/mod.rs:1322 (teste novo `o_texto_lancado_no_topo_com_quebra_de_linha_fica_numa_linha_so`). Ele guarda o #[error] de NaoCarregou, em mod.rs:120. Refiz a reversão numa cópia de 34235fe: troquei `{texto:?}` por `{texto}` só no #[error] de NaoCarregou e recompilei (o log mostra «Compiling seele-server»). Resultado: 100 verdes e 1 vermelho, exatamente o teste novo, que reprova em mod.rs:1342 com \"mod threw while loading: Error: a\\nWARN seele_server: forjada at \\\"<eval> (eval_script:1:10)\\\"\". Restaurei a cópia e o `cmp` deu igual. O `matches!(falha, Falha::NaoCarregou { .. })` impede que o teste deixe de guardar a variante se a classificação mudar. O comentário dele nomeia as três portas, e conferi cada uma no código: lib.rs:667, despacho.rs:155 e o %error de pedidos.rs. Ela entra pelo carregar de despacho.rs:191/:211 e de pedidos.rs."
+        }
+       ],
+       "resumo": "O B-1 está resolvido: o guarda novo existe e eu o vi falhar quando desfiz o conserto. Não achei nenhum Critical nem Important novo no diff da correção (b2dd6d1..34235fe).\n\nO que medi numa cópia de 34235fe tirada com git archive (só leitura no worktree):\n\n1. **Guardas das outras correções, por amostragem.**\n   - B-3: com `Lancado::do_motor` devolvendo `do_motor: false`, os dois testes novos ficam vermelhos, com as frases do relatório.\n   - B-4: trocando o ramo do id ilegível por `else if false`, o teste novo fica vermelho, com `mod_id=  error=cannot read`.\n   - B-2: refiz a conta. Com o corte 10 acima do teto a linha dá 531 caracteres, contra 525 permitidos pela moldura nova (512 + 13). A moldura antiga (33) deixaria passar.\n\n2. **Frases novas conferidas contra o código e uma sonda temporária, já apagada.**\n   - Um `dados.a = 1` em `pedir` e um `dados.b = {}` em `chamar` dão `FalhouSemLancar` com «Error converting from js…».\n   - Um `async aoPedir` dá `mod failed: \"…'promise'…\"`.\n   - Um byte nulo na fonte dá `NaoCarregouSemLancar`.\n   - Um erro de sintaxe dá `NaoCarregou` com onde `eval_script:1:1`.\n   - O caminho de eventos desliga quem cai em `FalhouSemLancar`, porque despacho.rs:429 só poupa `NaoCarregadoAqui`.\n   - A doc de `NaoCarregou`, as de `carregar` e de `chamar`, a do teto e o parágrafo do guia batem com o que o código faz. Nenhum código fora do seele-server faz match nas mensagens nem nas variantes de `Falha`.\n\n3. **Bateria e restrições do lote.**\n   - `cargo test -p seele-server --no-fail-fast` está verde no HEAD: lib 549, seeled 3, os sete binários de tests/ e os doctests.\n   - `cargo fmt --all -- --check` passa, e `cargo clippy -p seele-server --all-targets --all-features -- -D warnings` sai limpo.\n   - Os commits intermediários 380a745 e deed8a0 compilam e passam `mods::`, com 98 e 99 testes.\n   - Nenhum assunto ou corpo de commit da faixa contém uma das catorze cadeias do G1, e todos levam o Co-Authored-By.\n   - O diff não toca api/, seele-proto, apps/, lib.rs nem as pendências. Nada muda no fio: a resposta continua `bridge-refused`. Não há código cfg de outra plataforma.\n\nSobra um Minor, o B-6: o `{texto:?}` de NaoCarregouSemLancar não tem guarda. O texto dessa variante vem do rquickjs, sem conteúdo do MOD.\n\nDois avisos do ambiente para quem roda a bateria:\n\n- **Xcode:** a licença não está aceita nesta máquina, e o link com `cc` falha com «You have not agreed to the Xcode license agreements». Contornei rodando com `DEVELOPER_DIR=/Library/Developer/CommandLineTools`, só no processo, sem mexer em configuração do sistema.\n- **Binário velho:** uma cópia feita com git archive guarda o mtime do commit. Com um target compartilhado, o cargo considera o código atualizado e roda um binário velho. Isso aconteceu na minha primeira rodada «HEAD» e na primeira rodada dos commits intermediários, e descartei as duas. Tudo o que cito acima foi refeito com «Compiling seele-server» no log, depois de um `touch` nos fontes."
+      }
+     }
+    ]
+   }
+  },
+  {
+   "lote": "A2-S1-acabamento",
+   "base": "34235fe",
+   "res": {
+    "aprovado": true,
+    "base": "34235fe",
+    "head": "39b1e58",
+    "rodadas": 1,
+    "ultima_revisao": {
+     "aprovado": true,
+     "achados": [
+      {
+       "id": "M1",
+       "gravidade": "Minor",
+       "titulo": "O erro novo do recuo afirma que «o volume não aceitou link físico» para qualquer falha do link",
+       "onde": "crates/seele-core/src/anexo_no_disco.rs:488-493 (o erro embrulhado que chegou em e0c1259); a linha INFO de :471-475, da rodada 0, usa o mesmo texto",
+       "porque": "O código trata qualquer erro do link que não seja AlreadyExists como falta de link físico. Num volume FAT isso é verdade. Mas o erro embrulhado só aparece quando o recuo também falha, e nesse caso a causa costuma ser outra. Um exemplo: o parcial sumiu, porque um antivírus no Windows ou um limpador o apagou. Aí o link dá NotFound, o rename dá NotFound, e a linha «o anexo não foi salvo» no seele.log diz «o volume não aceitou link físico (os error 2)». O mesmo vale para uma permissão perdida (EACCES nos dois) ou um volume ejetado. Os dois erros do sistema vão no texto, então o dado está lá. Mesmo assim, a frase aponta quem investiga para «é um FAT», e a frase vem de uma suposição do código, não do que o sistema respondeu. É uma linha de log, sem promessa na tela, por isso o achado é Minor.",
+       "conserto": "Dizer o que se sabe, por exemplo: «o link físico falhou ({do_link}), e o recuo, que reserva o nome final e troca a reserva pelo parcial, falhou: {erro}». Na linha INFO: «o link físico falhou, e o anexo ganhou o nome final pela reserva e troca». O teste um_recuo_que_falha_diz_que_o_volume_recusou_o_link continua cobrando «link físico» e o texto do erro 45."
+      },
+      {
+       "id": "M2",
+       "gravidade": "Minor",
+       "titulo": "O doc novo da quarentena admite o FAT do Windows sem marca, e o código que falha ali continua calado",
+       "onde": "crates/seele-core/src/client.rs:2365-2369 (o doc, de e0c1259) e client.rs:400 (`let _ = std::fs::write(stream, …)`, de antes deste lote)",
+       "porque": "O doc de receive_attachment agora diz que num FAT ou exFAT do Windows «o arquivo fica sem marca nenhuma». O `let _` do ramo cfg(windows) de quarantine engole esse erro, e também o do `xattr` no Mac. O produto sabe que a marca não entrou e não conta. O código é de antes e está fora do que o lote pede (o R9 era o remove_file). Mas a frase nova põe o caso por escrito, e nada no seele.log o confirma quando ele acontece.",
+       "conserto": "Mandar ao lote Z ou à pendência: escrever um warn! com o caminho e o erro quando a escrita do Zone.Identifier ou o `xattr -w` falha, com o mesmo cuidado no ramo cfg(windows), que não roda aqui."
+      }
+     ],
+     "vereditos_anteriores": [
+      {
+       "id": "I1",
+       "resolvido": true,
+       "onde": "crates/seele-core/src/anexo_no_disco.rs:29-32 (doc do módulo: «que o ponto na frente esconde no Mac e no Linux, mas não no Explorer do Windows»), :299-301 (doc de Parcial: «oculto no Mac e no Linux, à vista no Explorer do Windows»), :533-534 (doc de apagar_dizendo: «o parcial, com o nome de parcial», sem «oculto»), :791-792 (a mensagem do teste diz «não começa pelo ponto que o esconde no Mac e no Linux»). git grep no HEAD 39b1e58: os únicos «oculto» que sobraram sem condição estão em :668 e :672. São de antes do lote, falam de um nome como `.bashrc` e não do parcial, e estão certos. O assunto do commit 9461983 ainda diz «parcial oculto». É histórico já feito, e o relatório o registra como preocupação de quem integra."
+      }
+     ],
+     "resumo": "Re-revisão do lote A2-S1-acabamento, faixa 34235fe..39b1e58. O worktree está limpo em 39b1e58 e eu não mudei nada nele.\n\nO I1 está resolvido. Os três docs e a mensagem do teste agora dizem que o parcial fica oculto no Mac e no Linux e à vista no Explorer do Windows, e não sobrou «oculto» sem condição falando do parcial.\n\nO diff da correção (e0c1259 e 39b1e58) não quebra nada:\n- Rodei os testes e eles passaram: seele-core anexo_no_disco 13/13, o teste do enlace, seele-conformance anexos 15/15, os três testes de frontend da recusa e das réguas, e seele-ffi 120 ok com 1 ignorado.\n- `cargo fmt --check` e o clippy -D warnings de seele-core, seele-ffi e seele-conformance passaram limpos.\n\nRefiz por amostragem quatro reversões numa cópia de `git archive`, no scratchpad, e as quatro ficaram vermelhas pelo motivo certo:\n- RB: o pular em silêncio de abrir_parcial derruba um_parcial_que_ja_estava_na_pasta…, com «Rastro: []».\n- RA: o erro do recuo sem o embrulho derruba um_recuo_que_falha_diz…\n- RC: o título antigo nos dois lugares de frases.js derruba a_recusa_do_nome…, que diz «NÃO É SÓ UM NOME».\n- R1, de ponta a ponta: o parcial nascendo com o nome final derruba um_download_pela_metade_nunca_tem_o_nome_final, com «com 0 de 300000 bytes gravados, a pasta já tinha um «foto.png»».\n\nConferi os quatro itens da lista no código do HEAD:\n- Item 1: o parcial é `.<nome>.seele-parcial`, criado com create_new, e ganha o nome final por hard_link com o sufixo seguinte. O recuo reserva e troca. A quarentena é posta no parcial antes do nome final. O Salvo leva o caminho real, e o Drop apaga o parcial.\n- Item 2: apagar_dizendo escreve warn! com o caminho e o erro, e as duas frases foram condicionadas.\n- Item 3: a lista ganhou COM0, LPT0, CONIN$ e CONOUT$, com casos com extensão e em minúsculas, e o doc diz de onde ela vem.\n- Item 4: o título não acusa o nome, a segunda linha tem 179 caracteres e o guarda está verde.\n\nO fio, api/, a CSP, tauri.conf.json, as pendências e o índice não foram tocados. Nenhum assunto de commit tem uma das catorze cadeias do G1, e todos têm o Co-Authored-By.\n\nSobram dois Minor:\n- M1: o erro novo do recuo atribui ao volume qualquer falha do link.\n- M2: o doc novo admite o FAT do Windows sem Zone.Identifier, e o `let _` de quarantine, que é de antes do lote, continua calado.\n\nSem Critical nem Important: aprovado."
+    },
+    "bateria": {
+     "verde": true,
+     "passos": [
+      {
+       "nome": "01-fmt (cargo fmt --all -- --check, teto 300)",
+       "saida": 0,
+       "resumo": "Sem diferença de formatação. Log em /Users/dev-alexandre/SEELE/.claude/worktrees/abertos-da-1.0/.superpowers/sdd/2026-10-04-abertos/lote-A2-S1-acabamento-bateria/01-fmt.log"
+      },
+      {
+       "nome": "02-check-api (cargo xtask check-api, teto 600)",
+       "saida": 0,
+       "resumo": "Toda a superfície de MOD ainda aponta para algo (5 versões); momento_de despacha 5 momentos e a janela 17 eventos. O único aviso é o do linker do macOS (duplicate -rpath /usr/lib/swift), que é ambiental. Log em 02-check-api.log"
+      },
+      {
+       "nome": "03-check-versao (cargo xtask check-versao, teto 600)",
+       "saida": 0,
+       "resumo": "A versão alcança as 3 entregas, e nenhum dos 4 lugares que a anunciam lê o Cargo.toml. Só o aviso ambiental do linker. Log em 03-check-versao.log"
+      },
+      {
+       "nome": "04-clippy (cargo clippy --workspace --all-targets --all-features -- -D warnings, teto 2400)",
+       "saida": 0,
+       "resumo": "Nenhum lint. Os únicos avisos são o do linker do macOS (duplicate -rpath), que o próprio clippy diz que o -D warnings não cobre, e repetidos nos build scripts de seele-app e seele-instalador. O resultado veio do cache do cargo (Finished em 0.48s): a árvore não mudou desde a última checagem que passou. Log em 04-clippy.log"
+      },
+      {
+       "nome": "05-test (cargo test --workspace --no-fail-fast -- --skip a_saida_desta_maquina_abre_como_entrada, teto 5400)",
+       "saida": 0,
+       "resumo": "91 binários (91 linhas de «test result», todas ok): 2663 aprovados, 0 falhas, 5 ignorados, 1 filtrado (o --skip). Os 5 ignorados são instrumentos ou medições marcados #[ignore]: o_caminho_ate_a_outra_maquina_esta_aberto, mods::hash_de_pasta::imprime, captura::macos::medicao_do_som_por_janela::o_filtro_por_janela_isola_o_som_do_aplicativo, captura::reamostragem::medicao::quanto_custa_de_verdade e codec::macos::testes::quanto_o_videotoolbox_gasta_do_teto. Três panics aparecem no log e são provocados de propósito por testes que passaram: seele-audio laco.rs:470 («envenenando de propósito, para o teste»), uma_entrada_de_api_que_nao_se_le_falha_alto_em_vez_de_sumir e o_ambiente_do_encontro_volta_mesmo_quando_o_teste_entra_em_panico. Os testes deste lote rodaram e passaram: a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado, no_sentence_the_screen_writes_reaches_a_third_line e os 13 de anexo_no_disco::testes (parcial, recuo sem link físico, reserva, 255 bytes). Nenhuma falha de porta UDP 8384. Log em 05-test.log"
+      },
+      {
+       "nome": "06-check-runtime (cargo xtask check-runtime, teto 900)",
+       "saida": 0,
+       "resumo": "Todas as bancadas de Node puro passam: ciclo-do-executor (5 corridas), regiao-do-mod (34 provas), continuacao-de-midia (3), contribuicoes-e-camadas, envio-de-imagens e imagens-por-volume. Log em 06-check-runtime.log"
+      },
+      {
+       "nome": "07-bancadas Playwright do job bancadas do ci.yml (PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright, teto 240 cada)",
+       "saida": 0,
+       "resumo": "As 8 saem com 0: compartilhar-por-identidade (1s), conversa-com-estado (0s), qualidade-da-voz (1s), avatares-do-mod (1s), diagnostico-de-mods (6s), ajustes-v013 (4s), escolha-de-versao-de-mod (2s) e gif-na-conversa (3s). Logs em 07-bancada-<nome>.log"
+      }
+     ],
+     "falhas": []
+    },
+    "minors": [
+     {
+      "id": "M1",
+      "gravidade": "Minor",
+      "titulo": "O erro novo do recuo afirma que «o volume não aceitou link físico» para qualquer falha do link",
+      "onde": "crates/seele-core/src/anexo_no_disco.rs:488-493 (o erro embrulhado que chegou em e0c1259); a linha INFO de :471-475, da rodada 0, usa o mesmo texto",
+      "porque": "O código trata qualquer erro do link que não seja AlreadyExists como falta de link físico. Num volume FAT isso é verdade. Mas o erro embrulhado só aparece quando o recuo também falha, e nesse caso a causa costuma ser outra. Um exemplo: o parcial sumiu, porque um antivírus no Windows ou um limpador o apagou. Aí o link dá NotFound, o rename dá NotFound, e a linha «o anexo não foi salvo» no seele.log diz «o volume não aceitou link físico (os error 2)». O mesmo vale para uma permissão perdida (EACCES nos dois) ou um volume ejetado. Os dois erros do sistema vão no texto, então o dado está lá. Mesmo assim, a frase aponta quem investiga para «é um FAT», e a frase vem de uma suposição do código, não do que o sistema respondeu. É uma linha de log, sem promessa na tela, por isso o achado é Minor.",
+      "conserto": "Dizer o que se sabe, por exemplo: «o link físico falhou ({do_link}), e o recuo, que reserva o nome final e troca a reserva pelo parcial, falhou: {erro}». Na linha INFO: «o link físico falhou, e o anexo ganhou o nome final pela reserva e troca». O teste um_recuo_que_falha_diz_que_o_volume_recusou_o_link continua cobrando «link físico» e o texto do erro 45."
+     },
+     {
+      "id": "M2",
+      "gravidade": "Minor",
+      "titulo": "O doc novo da quarentena admite o FAT do Windows sem marca, e o código que falha ali continua calado",
+      "onde": "crates/seele-core/src/client.rs:2365-2369 (o doc, de e0c1259) e client.rs:400 (`let _ = std::fs::write(stream, …)`, de antes deste lote)",
+      "porque": "O doc de receive_attachment agora diz que num FAT ou exFAT do Windows «o arquivo fica sem marca nenhuma». O `let _` do ramo cfg(windows) de quarantine engole esse erro, e também o do `xattr` no Mac. O produto sabe que a marca não entrou e não conta. O código é de antes e está fora do que o lote pede (o R9 era o remove_file). Mas a frase nova põe o caso por escrito, e nada no seele.log o confirma quando ele acontece.",
+      "conserto": "Mandar ao lote Z ou à pendência: escrever um warn! com o caminho e o erro quando a escrita do Zone.Identifier ou o `xattr -w` falha, com o mesmo cuidado no ramo cfg(windows), que não roda aqui."
+     }
+    ],
+    "preocupacoes": [
+     "O Explorer do Windows mostra o parcial «.foto.png.seele-parcial»: o ponto na frente só esconde no Mac e no Linux, e o assunto do commit 9461983 diz «parcial oculto».",
+     "Um parcial deixado por um processo que morreu fica na pasta para sempre: o cliente não pode varrê-lo, porque não sabe se outra janela do SEELE ainda está escrevendo nele.",
+     "Quando os 99 nomes estão tomados, a falha agora só aparece depois do download inteiro; antes vinha antes do pedido. Um nome recusado por nome_seguro continua sem pedir byte nenhum ao servidor.",
+     "Sem link físico (FAT/exFAT), o nome final é dado em dois passos: reservar o nome com create_new e trocar a reserva pelo parcial com rename. Outro programa que trocasse a reserva no instante entre os dois seria substituído, e um processo morto entre os dois deixa uma reserva vazia com o nome final. Está no doc de Parcial::nomear. Medido no macOS num exFAT e num FAT32 montados de imagem: o link volta ENOTSUP (erro 45), que o std classifica como Uncategorized, e não Unsupported.",
+     "Não há fsync antes do link: uma queda de energia, que a lista não cobre, pode deixar à mostra o nome final antes de os dados chegarem ao disco.",
+     "Não compilado nem rodado aqui: o ramo cfg(windows) da quarentena (Zone.Identifier, agora gravado no parcial) e o hard_link e o recuo no Windows. O EPERM que um vfat devolve no Linux vem do kernel e não foi medido.",
+     "Na tela, a frase que cita o nome recusado tem 179 caracteres fora o nome e a pasta (209 com eles) e um título de 102. O título diz «NADA FOI SALVO», e não «GRAVADO», para não repetir «NÃO GRAVA».",
+     "Fora da lista, não mexi: o doc de NotSavedReason::NomeRecusado diz que o nome «não serve no Windows, no Mac e no Linux ao mesmo tempo», o que é falso para um nome com U+202E.",
+     "Não conferi sem rede que a página da Microsoft lista COM0 e LPT0. O que conferi foi o ntpath do Python 3.14.5 desta máquina: recusa CONIN$ e CONOUT$, e não recusa COM0 nem LPT0.",
+     "Relatório completo em /Users/dev-alexandre/SEELE/.claude/worktrees/abertos-da-1.0/.superpowers/sdd/2026-10-04-abertos/lote-A2-S1-acabamento-report.md (o diretório é ignorado pelo git).",
+     "O assunto do commit 9461983 ainda diz «parcial oculto», e isso só vale no Mac e no Linux. Ele não foi reescrito porque está três commits atrás, e mudar o assunto pediria rebase.",
+     "Não medi aqui que um FAT ou exFAT do Windows não guarda o Zone.Identifier. A frase nova do doc de receive_attachment vem de o NTFS ser o único que tem fluxo alternativo. O ramo cfg(windows) de quarantine não compila neste Mac.",
+     "O erro do recuo que falha é embrulhado num io::Error com o tipo do erro do recuo e um texto que junta o erro do link e o do recuo. Ele perde o raw_os_error e o source. Hoje ninguém lê esses dois: fim_do_salvar só escreve %erro, e NaoSalvou não leva motivo.",
+     "O parcial pulado vai ao log em INFO, porque o filtro padrão do seele.log é seele_core=info. No pior caso são 99 linhas, uma por nome de parcial tomado.",
+     "O guarda novo do M5 é uma lista de palavras proibidas no título (NÃO É SÓ UM NOME, TRUQUE, DISFARÇ, SUSPEIT, PERIGOS, MALICIOS, ATAQUE, HOSTIL). Ele pega o título antigo e as formas óbvias de acusar o nome, mas não uma acusação dita com outras palavras.",
+     "O relatório da rodada 0 ainda diz «o nome final nunca existe sem a marca». A seção «Rodada 1» do lote-A2-S1-acabamento-report.md diz que vale a frase com condição do M2.",
+     "Não rodei a bateria inteira do lote (cargo test --workspace, check-versao, check-runtime e as bancadas). Rodei só os testes do que mudou."
+    ],
+    "historico": [
+     {
+      "rodada": 0,
+      "head": "56d3bdc",
+      "rev": {
+       "aprovado": false,
+       "achados": [
+        {
+         "id": "I1",
+         "gravidade": "Important",
+         "titulo": "Três docs novos dizem que o parcial que sobra é «oculto», o que é falso no Windows",
+         "onde": "crates/seele-core/src/anexo_no_disco.rs:29-30 (doc do módulo: «deixa um parcial oculto»), :292-293 (doc de Parcial: «o que ele deixa é um arquivo oculto com SUFIXO_DO_PARCIAL»), :499 (doc de apagar_dizendo: «o parcial, oculto»); e a mensagem do teste em :757",
+         "porque": "O código só põe um ponto na frente do nome e não marca FILE_ATTRIBUTE_HIDDEN. No Explorer do Windows, inclusive na pasta Downloads em NTFS, que é o caso comum de uma plataforma publicada, o `.foto.png.seele-parcial` aparece. O próprio doc de SUFIXO_DO_PARCIAL (:240-242) diz isso, e o implementador tirou «oculto» do doc de Falhou exatamente por esse motivo. Nos outros três lugares a palavra ficou, e são frases que prometem mais do que o código faz na plataforma que não se testa aqui. O assunto do commit 9461983 tem o mesmo problema, e o relatório admite isso na preocupação 1, mas o commit já está feito.",
+         "conserto": "Tirar «oculto» desses três docs, ou escrever «oculto no Mac e no Linux», como já faz o doc de SUFIXO_DO_PARCIAL. Ajustar também a mensagem do teste em :757, que só confere o ponto na frente."
+        },
+        {
+         "id": "M1",
+         "gravidade": "Minor",
+         "titulo": "Quando o recuo falha, o seele.log não diz que o link foi recusado, e um parcial que já estava na pasta é pulado sem nenhuma linha",
+         "onde": "crates/seele-core/src/anexo_no_disco.rs:447-464 (o INFO do recuo só sai no Ok) e :360 (abrir_parcial pula AlreadyExists em silêncio)",
+         "porque": "Num FAT/exFAT em que a troca falha, a linha «o anexo não foi salvo» leva só o erro do rename, e o erro do link que levou ao recuo se perde. Quem investiga vê um erro de rename sem saber por que houve rename. Do mesmo jeito, um parcial que ficou de um processo morto e é pulado não deixa rastro, embora o produto saiba que ele está lá.",
+         "conserto": "Pôr o erro do link e o fato de o recuo ter rodado no erro devolvido, ou numa linha própria, também na falha. Em abrir_parcial, escrever uma linha info/debug com o caminho do parcial que já existia e foi pulado."
+        },
+        {
+         "id": "M2",
+         "gravidade": "Minor",
+         "titulo": "Frases sem condição que o recuo e os volumes sem xattr/ADS desmentem, e o doc de TENTATIVAS impreciso",
+         "onde": "crates/seele-core/src/client.rs:2361-2363 («assim o nome final nunca existe sem ela»), client.rs:943-945 («quem garante que nada é substituído é o link»), anexo_no_disco.rs:38-39 (TENTATIVAS «quantos nomes Parcial::nomear tenta»)",
+         "porque": "No recuo, a reserva vazia tem o nome final sem a marca durante um instante. Num FAT/exFAT do Windows, o Zone.Identifier não grava, então o arquivo final fica sem marca. Num volume sem link quem garante a não-substituição é a reserva, e não o link. E nomear tenta o `tentativas` recebido, que é 1 na porta da conformidade, e não TENTATIVAS.",
+         "conserto": "Condicionar as frases: «quando o sistema de arquivos guarda a marca», e «o link, ou a reserva num volume sem link». No doc de TENTATIVAS, dizer que é o máximo que o app passa a abrir_parcial."
+        },
+        {
+         "id": "M3",
+         "gravidade": "Minor",
+         "titulo": "Concordância no warn da reserva: «a reserva vazia…, e ele ficou na pasta»",
+         "onde": "crates/seele-core/src/anexo_no_disco.rs:494 com o modelo de :513",
+         "porque": "O modelo fixo «não consegui apagar {o_que}, e ele ficou na pasta» sai errado para o segundo chamador, que passa um substantivo feminino.",
+         "conserto": "Trocar para «e o arquivo ficou na pasta», ou passar o pronome junto com o_que."
+        },
+        {
+         "id": "M4",
+         "gravidade": "Minor",
+         "titulo": "Comentário de teste desatualizado sobre quem recusa o caminho que já existe",
+         "onde": "crates/seele-conformance/tests/anexos.rs:202-203",
+         "porque": "Ele ainda diz «Com `create_new`, a gravação recusa». Agora quem recusa é o atalho de symlink_metadata em download_attachment, e quem garante é o link, como o próprio doc de download_attachment diz.",
+         "conserto": "Reescrever o comentário para o atalho e o link."
+        },
+        {
+         "id": "M5",
+         "gravidade": "Minor",
+         "titulo": "Nenhum guarda impede o título acusatório de voltar nos dois lugares ao mesmo tempo",
+         "onde": "apps/seele-app/tests/frontend.rs:9036-9054",
+         "porque": "O guarda novo só cobra que os dois títulos sejam iguais. Se os dois voltarem a «NÃO É SÓ UM NOME», o teste continua verde. A lista não pedia esse guarda, mas o R7 pode voltar sem ninguém ver.",
+         "conserto": "Opcional: cobrar que o título não contenha «NÃO É SÓ UM NOME», ou um equivalente que acuse o nome."
+        }
+       ],
+       "vereditos_anteriores": [],
+       "resumo": "O lote A2-S1-acabamento (34235fe..56d3bdc, 4 commits) fez os quatro itens da lista. Faltou só um acabamento de frase.\n\nItem 1:\n- abrir_parcial cria `.<nome>.seele-parcial` com create_new, e a escolha do nome está justificada.\n- Parcial::nomear usa hard_link sem substituir nada e passa ao sufixo seguinte. Num volume sem link, o recuo reserva o nome com create_new e troca com rename; a janela não atômica está documentada.\n- A quarentena é posta no parcial antes do nome final. O Salvo leva o caminho real, e o Drop apaga o parcial em toda falha.\n\nItem 2: apagar_dizendo escreve warn! com caminho= e erro=, e NotFound não conta como falha. O seele_core=info do app leva a linha ao seele.log. As duas frases (Falhou em frases.js e o doc de NotSavedReason::Falhou) agora conferem com o código.\n\nItem 3: RESERVADOS ganhou COM0, LPT0, CONIN$ e CONOUT$, com os casos pedidos. Medi aqui que o ntpath do Python 3.14.5 recusa CONIN$ e conout$.log e não recusa COM0 nem lpt0.txt.\n\nItem 4: o título novo está nos dois lugares, a segunda linha tem 179 caracteres (medi) e o guarda continua verde, agora com a régua.\n\nO que conferi:\n- Fio, api/*.json, CSP, tauri.conf.json, main.rs, Cargo e docs ficaram intactos. Os commits têm o Co-Authored-By.\n- Na HEAD, verdes: seele-core --lib 415, conformance anexos 15, frontend 259, seele-ffi --lib 120 (1 ignorado), check-api, check-runtime (que o relatório não rodou, embora a regra peça quando se mexe em ui/), fmt --check e clippy -D warnings em core, conformance e ffi.\n- Reversões refeitas numa cópia no scratchpad, todas vermelhas e restauradas:\n  - o anexos.rs novo contra o core de 34235fe: «com 0 de 300000 bytes gravados, a pasta já tinha um «foto.png»»;\n  - R10, o Drop com `let _`: Rastro [];\n  - R8, o recuo só para Unsupported;\n  - R2, rename no lugar de hard_link: unidade e ponte;\n  - R3, o recuo sem a reserva;\n  - R6, sem a quarentena no parcial: «No such xattr»;\n  - R13, a segunda linha de 259 caracteres;\n  - R14, o título trocado num lugar só.\n- Medi num FAT32 montado no Mac: o link devolve ENOTSUP 45, e o rename leva o com.apple.quarantine junto.\n\nBloqueia (Important): três docs novos de anexo_no_disco.rs chamam de «oculto» o parcial que sobra. No Windows isso é falso, porque lá o ponto não esconde. O próprio doc de SUFIXO_DO_PARCIAL diz isso, e o implementador tirou a palavra do doc de Falhou pelo mesmo motivo. O conserto é trocar uma palavra em três lugares.\n\nO resto é Minor:\n- quando o recuo falha, o seele.log perde que o link foi recusado, e um parcial que já estava na pasta é pulado sem nenhuma linha;\n- algumas frases sem condição sobre a quarentena e o link, e o doc de TENTATIVAS impreciso;\n- concordância no warn da reserva;\n- um comentário de teste desatualizado;\n- falta um guarda contra a volta do título antigo nos dois lugares ao mesmo tempo.\n\nO Windows inteiro ficou sem rodar (NTFS, FAT do Windows, Zone.Identifier pelo link), e o relatório diz isso."
+      }
+     },
+     {
+      "rodada": 1,
+      "head": "39b1e58",
+      "rev": {
+       "aprovado": true,
+       "achados": [
+        {
+         "id": "M1",
+         "gravidade": "Minor",
+         "titulo": "O erro novo do recuo afirma que «o volume não aceitou link físico» para qualquer falha do link",
+         "onde": "crates/seele-core/src/anexo_no_disco.rs:488-493 (o erro embrulhado que chegou em e0c1259); a linha INFO de :471-475, da rodada 0, usa o mesmo texto",
+         "porque": "O código trata qualquer erro do link que não seja AlreadyExists como falta de link físico. Num volume FAT isso é verdade. Mas o erro embrulhado só aparece quando o recuo também falha, e nesse caso a causa costuma ser outra. Um exemplo: o parcial sumiu, porque um antivírus no Windows ou um limpador o apagou. Aí o link dá NotFound, o rename dá NotFound, e a linha «o anexo não foi salvo» no seele.log diz «o volume não aceitou link físico (os error 2)». O mesmo vale para uma permissão perdida (EACCES nos dois) ou um volume ejetado. Os dois erros do sistema vão no texto, então o dado está lá. Mesmo assim, a frase aponta quem investiga para «é um FAT», e a frase vem de uma suposição do código, não do que o sistema respondeu. É uma linha de log, sem promessa na tela, por isso o achado é Minor.",
+         "conserto": "Dizer o que se sabe, por exemplo: «o link físico falhou ({do_link}), e o recuo, que reserva o nome final e troca a reserva pelo parcial, falhou: {erro}». Na linha INFO: «o link físico falhou, e o anexo ganhou o nome final pela reserva e troca». O teste um_recuo_que_falha_diz_que_o_volume_recusou_o_link continua cobrando «link físico» e o texto do erro 45."
+        },
+        {
+         "id": "M2",
+         "gravidade": "Minor",
+         "titulo": "O doc novo da quarentena admite o FAT do Windows sem marca, e o código que falha ali continua calado",
+         "onde": "crates/seele-core/src/client.rs:2365-2369 (o doc, de e0c1259) e client.rs:400 (`let _ = std::fs::write(stream, …)`, de antes deste lote)",
+         "porque": "O doc de receive_attachment agora diz que num FAT ou exFAT do Windows «o arquivo fica sem marca nenhuma». O `let _` do ramo cfg(windows) de quarantine engole esse erro, e também o do `xattr` no Mac. O produto sabe que a marca não entrou e não conta. O código é de antes e está fora do que o lote pede (o R9 era o remove_file). Mas a frase nova põe o caso por escrito, e nada no seele.log o confirma quando ele acontece.",
+         "conserto": "Mandar ao lote Z ou à pendência: escrever um warn! com o caminho e o erro quando a escrita do Zone.Identifier ou o `xattr -w` falha, com o mesmo cuidado no ramo cfg(windows), que não roda aqui."
+        }
+       ],
+       "vereditos_anteriores": [
+        {
+         "id": "I1",
+         "resolvido": true,
+         "onde": "crates/seele-core/src/anexo_no_disco.rs:29-32 (doc do módulo: «que o ponto na frente esconde no Mac e no Linux, mas não no Explorer do Windows»), :299-301 (doc de Parcial: «oculto no Mac e no Linux, à vista no Explorer do Windows»), :533-534 (doc de apagar_dizendo: «o parcial, com o nome de parcial», sem «oculto»), :791-792 (a mensagem do teste diz «não começa pelo ponto que o esconde no Mac e no Linux»). git grep no HEAD 39b1e58: os únicos «oculto» que sobraram sem condição estão em :668 e :672. São de antes do lote, falam de um nome como `.bashrc` e não do parcial, e estão certos. O assunto do commit 9461983 ainda diz «parcial oculto». É histórico já feito, e o relatório o registra como preocupação de quem integra."
+        }
+       ],
+       "resumo": "Re-revisão do lote A2-S1-acabamento, faixa 34235fe..39b1e58. O worktree está limpo em 39b1e58 e eu não mudei nada nele.\n\nO I1 está resolvido. Os três docs e a mensagem do teste agora dizem que o parcial fica oculto no Mac e no Linux e à vista no Explorer do Windows, e não sobrou «oculto» sem condição falando do parcial.\n\nO diff da correção (e0c1259 e 39b1e58) não quebra nada:\n- Rodei os testes e eles passaram: seele-core anexo_no_disco 13/13, o teste do enlace, seele-conformance anexos 15/15, os três testes de frontend da recusa e das réguas, e seele-ffi 120 ok com 1 ignorado.\n- `cargo fmt --check` e o clippy -D warnings de seele-core, seele-ffi e seele-conformance passaram limpos.\n\nRefiz por amostragem quatro reversões numa cópia de `git archive`, no scratchpad, e as quatro ficaram vermelhas pelo motivo certo:\n- RB: o pular em silêncio de abrir_parcial derruba um_parcial_que_ja_estava_na_pasta…, com «Rastro: []».\n- RA: o erro do recuo sem o embrulho derruba um_recuo_que_falha_diz…\n- RC: o título antigo nos dois lugares de frases.js derruba a_recusa_do_nome…, que diz «NÃO É SÓ UM NOME».\n- R1, de ponta a ponta: o parcial nascendo com o nome final derruba um_download_pela_metade_nunca_tem_o_nome_final, com «com 0 de 300000 bytes gravados, a pasta já tinha um «foto.png»».\n\nConferi os quatro itens da lista no código do HEAD:\n- Item 1: o parcial é `.<nome>.seele-parcial`, criado com create_new, e ganha o nome final por hard_link com o sufixo seguinte. O recuo reserva e troca. A quarentena é posta no parcial antes do nome final. O Salvo leva o caminho real, e o Drop apaga o parcial.\n- Item 2: apagar_dizendo escreve warn! com o caminho e o erro, e as duas frases foram condicionadas.\n- Item 3: a lista ganhou COM0, LPT0, CONIN$ e CONOUT$, com casos com extensão e em minúsculas, e o doc diz de onde ela vem.\n- Item 4: o título não acusa o nome, a segunda linha tem 179 caracteres e o guarda está verde.\n\nO fio, api/, a CSP, tauri.conf.json, as pendências e o índice não foram tocados. Nenhum assunto de commit tem uma das catorze cadeias do G1, e todos têm o Co-Authored-By.\n\nSobram dois Minor:\n- M1: o erro novo do recuo atribui ao volume qualquer falha do link.\n- M2: o doc novo admite o FAT do Windows sem Zone.Identifier, e o `let _` de quarantine, que é de antes do lote, continua calado.\n\nSem Critical nem Important: aprovado."
+      }
+     }
+    ]
+   }
+  },
+  {
+   "lote": "K1-registro-da-janela",
+   "base": "39b1e58",
+   "res": {
+    "parado": {
+     "status": "NEEDS_CONTEXT",
+     "head": "d744644",
+     "commits": [],
+     "testes": "O teste de captura do seele-video, rodado sozinho três vezes no HEAD, reprovou nas três (17/17/17 quadros). A medida temporária por monitor mostrou que o ScreenCaptureKit entregou as 90 amostras e que 73 vieram sem conteúdo. O macos.rs voltou byte a byte (shasum -c OK) e o git status ficou vazio. O serde_json 1.0.151 (offline, num crate do scratchpad) recusou o corpo com a finalidade partida. Não rodei fmt nem clippy: nenhum arquivo do repositório mudou.",
+     "preocupacoes": [
+      "BAT-0-1 (Important) foi medido e não é do lote. O crates/seele-video, o Cargo.lock, o Cargo.toml, o .cargo e o rust-toolchain.toml são iguais de 3685a64 até o HEAD, e o seele-video não depende de nenhum crate do workspace. O teste usa o primeiro monitor de fontes(). Nesta máquina ele é o id=2, um externo vertical de 1080×1920 parado: deu pegos=17, escritos=17 e sem_conteudo=73, com escritos por segundo [17, 0, 0]. Como 17 + 73 = 90, o ScreenCaptureKit entregou as 30 amostras por segundo durante os 3 s e a captura não travou. Do segundo 1 em diante elas vieram sem pixels, e o código as conta em sem_conteudo, como diz o doc de Vaga::sem_conteudo. No monitor principal (id=5, com atividade) a mesma captura dá 88 pegos. A mensagem do teste («A tela parada não explica: o ScreenCaptureKit reentrega o mesmo quadro») é falsa nesta máquina, e a hipótese da bateria («5–6 por segundo») também não confere. O conserto seria o teste do seele-video cobrar escritos + sem_conteudo (ou um mínimo por segundo), sem deixar de reprovar o relato «exibe apenas 1 frame». Ele fica fora dos arquivos do K1, e quem coordena decide o lote ou a pendência.",
+      "K1-m1 ficou sem conserto. O frontend.rs não está na lista do K1, e o próprio conserto do achado o passa a quem mexer depois no arquivo. Correção da rota: pela lotes.md, nem o C nem o Z têm o frontend.rs na lista de arquivos. Os lotes que têm são H, K3, J, G e I, e o primeiro deles é o H.",
+      "K1-m2 ficou sem conserto. O achado diz que está fora do escopo e manda o caso ao inventário de um lote futuro, e eu não editei o inventario.json. Agora ele está medido: com a finalidade \"a\"×199 + 😀 cortada em 200, o JSON.stringify do node deixa \\ud83d solto, e o serde_json 1.0.151 recusa o corpo inteiro (unexpected end of hex escape). Medi o serde_json direto, e não a ida e volta pelo Tauri. O lugar natural é o K2, que já tem mods-regiao.js e regiao-do-mod.cjs na lista.",
+      "K1-m3 ficou sem conserto. Mudar o erro que o MOD recebe exige conferir antes a API congelada (api/v3..v5.json), e essa decisão é do dono. É a mesma pergunta da preocupação 1 da rodada 0.",
+      "O relatório ganhou a seção «Rodada 1» em /Users/dev-alexandre/SEELE/.claude/worktrees/abertos-da-1.0/.superpowers/sdd/2026-10-04-abertos/lote-K1-registro-da-janela-report.md, um arquivo que o git ignora."
+     ]
+    },
+    "historico": [
+     {
+      "rodada": 0,
+      "head": "d744644",
+      "rev": {
+       "aprovado": true,
+       "achados": [
+        {
+         "id": "K1-m1",
+         "gravidade": "Minor",
+         "titulo": "O doc de um guarda do frontend.rs ficou desatualizado depois do 4599e14",
+         "onde": "apps/seele-app/tests/frontend.rs:8165-8167 (doc de o_dono_da_regiao_leva_cada_recusa_de_midia_ao_registro)",
+         "porque": "O doc diz que «as seis bancadas de node do cargo xtask check-runtime [...] ficam verdes com o dono sem anotarRecusa (medido em 01/10/2026)». Desde 4599e14, a contribuicoes-e-camadas reprova nesse caso. Medi numa cópia em scratchpad, trocando `anotarRecusa:` por `anotarRecusaX:` em base.js: a bancada saiu com 1 e com «o elo · anotarRecusa: o dono de `base.js` não tem `anotarRecusa`…». A frase tem data, então ainda é verdade como registro histórico, mas quem a ler hoje vai achar que esse caso só é guardado pelo frontend.rs e pela bancada de navegador. O frontend.rs não está na lista de arquivos do K1, e o relatório já aponta isso (preocupação 3).",
+         "conserto": "Quem mexer depois no frontend.rs (lote C ou Z) acrescenta que, desde 4599e14, o bloco «o elo» da contribuicoes-e-camadas também reprova com o dono sem `anotarRecusa`, e com o `meu()` invertido."
+        },
+        {
+         "id": "K1-m2",
+         "gravidade": "Minor",
+         "titulo": "Outro texto de MOD que vai a um invoke ainda é cortado por índice (fora do escopo)",
+         "onde": "apps/seele-app/ui/mods-regiao.js:402 (`pedidoDeArquivo`, `finalidade.slice(0, 200)`) → base.js:905 `invoke(\"escolher_para_o_mod\", …)` → main.rs:5834 `finalidade: Option<String>`",
+         "porque": "O defeito é o mesmo do P51-06. Se o caractere da posição 200 for um par substituto, o corte o parte ao meio, e o serde_json 1.0.151 (read.rs:913/959, conferido) recusa a cadeia: o pedido de arquivo inteiro volta recusado. Não é calado para o MOD, porque o `.catch` da região manda `resultado: \"falhou\"` com o motivo. O lote limitou o item à linha 809, e o implementador o listou como preocupação 6, sem medir.",
+         "conserto": "Entra no inventário como item de um lote futuro: cortar a `finalidade` por ponto de código, como a 809 e a 1442, com uma prova em regiao-do-mod.cjs pelo mesmo molde da `aChaveDoCampoNaoPartePar`."
+        },
+        {
+         "id": "K1-m3",
+         "gravidade": "Minor",
+         "titulo": "O MOD continua recebendo a frase de tela «ALGO FALHOU…» no `erro` do catch",
+         "onde": "apps/seele-app/ui/base.js:2240-2242 (`responder` do `catch` de `atenderOMod`)",
+         "porque": "A lista manda deixar `fraseDeErro` no `responder`, e o lote fez assim, com o mesmo comportamento de antes. Mesmo assim, quem escreve MOD recebe o pedido de desculpas da tela («ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ.\\nSe for relatar…») em toda recusa que passa pelo catch, como a contribuição para um ponto que não existe ou uma superfície com nós demais. Não é defeito do lote. Fica registrado como a pergunta que o relatório já faz (preocupação 1).",
+         "conserto": "Levar ao dono, ou a um lote futuro, a decisão de mandar ao MOD o `motivo` (o mesmo texto que agora vai ao registro) em vez da frase de tela, conferindo antes se isso toca a API congelada."
+        }
+       ],
+       "vereditos_anteriores": [],
+       "resumo": "Lote K1 (39b1e58..d744644, HEAD limpo em d744644): aprovado, sem Critical nem Important. Só mudaram os quatro arquivos da lista (base.js, mods-regiao.js, contribuicoes-e-camadas.cjs, regiao-do-mod.cjs). Nada no Rust, no fio, na API congelada, na CSP (o index.html não mudou), nas pendências ou no índice. Não há `toWellFormed`, não há evento novo, e o recorte de base.js do P51-13 roda num `vm.createContext` próprio.\n\nP51-04: as duas linhas novas (a recusa de `podePedir` e o `default`) estão como a lista manda. O catch registra `motivoDaFalha`, com JSON quando ela daria «[object Object]», dentro de um try contra ciclo, e `fraseDeErro` ficou só no `responder`, com o mesmo `typeof` de antes. A bancada carrega frases.js inteiro. Conferi que, dos arquivos do contexto compartilhado, só `atenderOMod` usa `fraseDeErro` (o uso em mods-regiao.js:1114 não entra lá) e que nenhum nome do frases.js colide com os do produto nem com as 19 propriedades que a bancada escreve. As asserções `dita` ficaram mais apertadas que a lista pedia, com justificativa: a forma literal da lista já seria verde no HEAD.\n\nP51-13: o bloco «o elo» cobre (1), (2) e (3), e acrescenta o caso `admite` falso.\n\nP51-06: o `bem` usa a flag `u`. Provei os casos de borda no node: o par fica intacto, e o substituto solto, de abertura ou de fechamento, vira U+FFFD. O `modId` nulo continua nulo. A `chaveDoMod` é cortada por ponto de código.\n\nVermelho: a bancada nova, rodada contra o produto de 39b1e58, deu as 6 falhas esperadas (o elo · o substituto solto, as duas linhas novas no registro, o «ALGO FALHOU», a variante da FFI e a chave do campo). Refiz 10 reversões em cópias no scratchpad, sem tocar no worktree, e todas ficam vermelhas pelo motivo certo: tirar o `modId` (reprova 1 e 3), inverter o `meu()` (reprova 1 e 2), devolver `fraseDeErro` ao registro, tirar cada uma das duas linhas, tirar o `replace`, tirar a flag `u`, voltar ao `slice` por índice, tirar o fallback de JSON, e `bem(modId)` sem o teste de nulo. Também confirmei a premissa do P51-13: com o `meu()` invertido, as seis bancadas de 39b1e58 saem com 0.\n\nVerde: `cargo xtask check-runtime` (as seis) e `cargo test -p seele-app --test frontend` (259) passam no HEAD.\n\nFrases: conferi os comentários, as mensagens e os commits contra o código, e todos estão certos. O serde recusar o substituto solto foi conferido no read.rs do 1.0.151, o «use strict» do frases.js está no prólogo, o minimumSystemVersion é 11.0 e o Refused é variante de struct do ConnectionError. Nenhum código `cfg` foi tocado. O relatório diz que o WKWebView, o WebView2 e o WebKitGTK não se medem aqui.\n\nFicam três Minor: o doc datado do frontend.rs, que o 4599e14 superou e que é de outro lote; a `finalidade` cortada por índice que vai a um invoke, fora do escopo; e a frase de tela que o MOD ainda recebe, que a lista mandou manter."
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

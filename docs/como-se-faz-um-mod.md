@@ -339,6 +339,17 @@ de servidor não tem: lá, `console.log(…)` lança `ReferenceError`, e um
 `aoAcontecer` que lança desliga o MOD. O registro dela é o `mundo.registrar`,
 que vai ao log de quem hospeda com o mesmo `mod_id=`.
 
+Quando a metade de servidor lança, a linha de quem hospeda traz o que ela
+lançou: o texto, entre aspas e escapado, e, quando o lançado é um `Error`, a
+primeira linha da pilha, que diz onde —
+`mod threw: "ReferenceError: console is not defined" at "<anonymous> (eval_script:1:29)"`.
+Um `throw` no topo do arquivo, ou um erro de sintaxe, sai como
+`mod threw while loading: …`. Quando nada foi lançado, mas o motor recusou o
+que o MOD lhe deu — um `aoPedir` que falta, um que devolve outra coisa que
+texto, um valor que não é texto em `dados` —, a linha diz `mod failed: …`, com
+o texto do motor: `mod failed: "Error converting from js 'int' into type 'string'"`.
+O texto e o onde, juntos, são cortados em 512 caracteres contados já escapados.
+
 | você escreve | a linha sai em |
 |---|---|
 | `console.debug`, `console.trace` | DEBUG — que o `seele.log` **não grava** por padrão |

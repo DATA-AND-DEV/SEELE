@@ -1798,6 +1798,167 @@ fn sem_feat_nem_fix_na_faixa_nao_se_inventa_secao() {
     );
 }
 
+/// O texto das mudanças e o que o script disse a quem publica, separados.
+///
+/// [`notas`] devolve só a saída padrão, que é o que vai para a página. Os
+/// avisos vão para a de erro, e é nela que quem publica lê o que o resumo não
+/// soube classificar.
+fn notas_e_avisos(assuntos: &str) -> (String, String) {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut filho = Command::new(interpretador())
+        .arg(publicar())
+        .arg("--notas")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("o orquestrador tem que executar");
+    if let Some(entrada) = filho.stdin.as_mut() {
+        entrada
+            .write_all(assuntos.as_bytes())
+            .expect("a entrada padrão aceita bytes");
+    }
+    let saida = filho.wait_with_output().expect("o filho termina");
+    (
+        String::from_utf8_lossy(&saida.stdout).into_owned(),
+        String::from_utf8_lossy(&saida.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn um_assunto_sem_prefixo_nao_vira_nenhuma_mudanca_de_produto() {
+    // **A frase falsa da página da v0.15.0.** A faixa dela tinha quatro
+    // assuntos, nenhum com prefixo — é como este repositório escreve a maior
+    // parte dos commits, uma frase em português que diz o que mudou —, e um
+    // deles mexia em 85 arquivos (`14d9c30`). O resumo só entendia `feat`,
+    // `fix` e `perf`, descartava o resto calado, e com as duas seções vazias
+    // afirmava «nenhuma mudança de produto». A faixa seguinte, medida em
+    // 04/10/2026, dava o mesmo: 169 assuntos, 23 `docs:` e 146 sem prefixo.
+    //
+    // Um assunto sem prefixo não diz se muda o produto, e o resumo não tem
+    // como saber. O que ele pode é parar de afirmar o que não sabe.
+    let texto = notas(
+        "O guarda do vetor deixa o console de fora\n\
+         docs: papel\n",
+    );
+
+    assert!(
+        !texto.contains("nenhuma mudança de produto"),
+        "um assunto sem prefixo pode ser mudança de produto, e a página afirmou \
+         que não há nenhuma:\n{texto}"
+    );
+    assert!(
+        texto.contains("não dizem pelo prefixo"),
+        "a página tem que dizer que os commits não se classificam pelo prefixo, \
+         em vez de calar:\n{texto}"
+    );
+}
+
+#[test]
+fn um_prefixo_desconhecido_tambem_nao_vira_nenhuma_mudanca_de_produto() {
+    // `wip:` não é `feat` nem `fix`, e também não é papel: o resumo não sabe o
+    // que ele é. Antes caía no mesmo descarte calado do assunto sem prefixo, e
+    // a página afirmava o mesmo «nenhuma mudança de produto» (medido).
+    let texto = notas("wip: algo\n");
+
+    assert!(
+        !texto.contains("nenhuma mudança de produto"),
+        "um prefixo que o resumo não conhece virou «nenhuma mudança de produto»:\n{texto}"
+    );
+    assert!(
+        texto.contains("não dizem pelo prefixo"),
+        "um prefixo desconhecido tem que ser dito como desconhecido:\n{texto}"
+    );
+}
+
+#[test]
+fn os_prefixos_de_papel_sao_todos_reconhecidos_com_e_sem_escopo() {
+    // «Nenhuma mudança de produto» continua existindo, e só para quando **todo**
+    // assunto da faixa tem um prefixo de papel. A lista é escrita à mão no
+    // `case` do publicar.sh; um prefixo que saísse dela passaria a ser contado
+    // como desconhecido, e uma versão só de papel deixaria de dizer isso.
+    let mut assuntos = String::new();
+    for prefixo in ["docs", "test", "chore", "refactor", "ci", "build", "style"] {
+        assuntos.push_str(&format!("{prefixo}: sem escopo\n"));
+        assuntos.push_str(&format!("{prefixo}(algo): com escopo\n"));
+    }
+    let (texto, avisos) = notas_e_avisos(&assuntos);
+
+    assert!(
+        texto.contains("nenhuma mudança de produto"),
+        "com todo assunto de papel, a versão é só de papel e a página tem que \
+         dizer isso:\n{texto}"
+    );
+    assert!(
+        !texto.contains("não dizem pelo prefixo"),
+        "um prefixo de papel foi contado como desconhecido:\n{texto}"
+    );
+    assert!(
+        !avisos.contains("não diz") && !avisos.contains("não dizem"),
+        "quem publica foi avisado de assunto sem classificação numa faixa só de \
+         papel:\n{avisos}"
+    );
+}
+
+#[test]
+fn quem_publica_fica_sabendo_quantos_assuntos_o_resumo_nao_classificou() {
+    // A página diz que não adivinha; quem publica precisa de mais: quantos são,
+    // e onde contar o que o resumo não contou. O arquivo de notas da versão é o
+    // lugar, porque ele sai no topo da página.
+    let (_, avisos) = notas_e_avisos(
+        "O guarda do vetor deixa o console de fora\n\
+         wip: algo\n\
+         docs: papel\n\
+         fix(ui): a tela para de falar com quem construiu\n",
+    );
+
+    assert!(
+        avisos.contains("2 assuntos"),
+        "o aviso não diz quantos assuntos ficaram sem classificar:\n{avisos}"
+    );
+    assert!(
+        avisos.contains("empacotar/notas/"),
+        "o aviso não diz onde contar o que o resumo não contou:\n{avisos}"
+    );
+}
+
+#[test]
+fn com_secoes_cheias_o_que_ficou_sem_classificar_tambem_e_dito() {
+    // Um `fix` de produto e cem assuntos sem prefixo dão uma seção «O que
+    // mudou» de uma linha só. Ela não mente sobre a linha que tem, e cala sobre
+    // as outras cem — e quem lê toma o resumo pela versão inteira.
+    let texto = notas(
+        "O guarda do vetor deixa o console de fora\n\
+         fix(ui): a tela para de falar com quem construiu\n",
+    );
+
+    assert!(
+        texto.contains("## O que mudou") && texto.contains("A tela para de falar"),
+        "o `fix` de produto continua na seção dele:\n{texto}"
+    );
+    assert!(
+        texto.contains("1 commit desta faixa não diz pelo prefixo"),
+        "a página resumiu a versão pelo único assunto que se classificou, e calou \
+         sobre o que não se classificou:\n{texto}"
+    );
+}
+
+#[test]
+fn um_aviso_de_varias_linhas_chega_inteiro_a_quem_publica() {
+    // `aviso` imprimia só o primeiro argumento. As chamadas que mandavam o
+    // conserto na segunda linha — «Classifique-o em ESCOPOS_DE_PRODUTO…», «git
+    // push origin v…» — chegavam a quem publica sem ele: o script sabia o
+    // comando seguinte e não contava.
+    let (_, avisos) = notas_e_avisos("feat(telepatia): o servidor adivinha\n");
+
+    assert!(
+        avisos.contains("Classifique-o em ESCOPOS_DE_PRODUTO ou ESCOPOS_DE_FERRAMENTA"),
+        "a segunda linha do aviso do escopo desconhecido não chegou:\n{avisos}"
+    );
+}
+
 #[test]
 fn o_assunto_atravessa_byte_a_byte() {
     // O caminho é shell, e shell come `$`, barra invertida e crase quando quem
@@ -2081,6 +2242,308 @@ fn quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio() {
             "o script publica em «{destino}» e o `endpoints` do tauri.conf.json \
              não aponta para lá.\n\
              A versão sairia inteira nesse repositório e nenhum app a receberia."
+        );
+    }
+}
+
+// ------------------------------------------------ os instaladores de uma linha
+
+/// O valor de `NOME="…"` ou `$nome = '…'` numa linha de código, e não de
+/// comentário: o comentário que explica a troca de repositório cita o nome
+/// antigo, e um guarda que o lesse casaria com a própria explicação.
+fn valor_atribuido(texto: &str, nome: &str) -> Option<String> {
+    sem_comentario(texto).lines().find_map(|linha| {
+        let resto = linha
+            .trim()
+            .strip_prefix(nome)?
+            .trim_start()
+            .strip_prefix('=')?
+            .trim();
+        let aspas = resto.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+        resto.get(1..)?.split(aspas).next().map(str::to_owned)
+    })
+}
+
+#[test]
+fn os_instaladores_de_uma_linha_baixam_de_onde_o_publicar_publica() {
+    // **O `install.sh` e o `install.ps1` baixavam do repositório do código.**
+    // As versões saem do `publicar.sh` para `DATA-AND-DEV/SEELE-RELEASES` desde
+    // a 0.10.1, e no do código a última publicada é a v0.10.0 (medido em
+    // 04/10/2026): a linha do README instalava, sem avisar, um servidor que
+    // nenhum cliente 0.15 alcança. Nem `SEELE_VERSION=v0.15.0` salvava, porque
+    // o endereço do download era montado no repositório errado.
+    //
+    // O mesmo recorte de `quem_publica_e_quem_atualiza_apontam_para_o_mesmo_repositorio`,
+    // e comparação exata: `DATA-AND-DEV/SEELE` é prefixo de
+    // `DATA-AND-DEV/SEELE-RELEASES`, e um `contains` aprovaria a volta.
+    let publicar = std::fs::read_to_string(publicar()).expect("o orquestrador é legível");
+    let destinos: Vec<&str> = publicar
+        .split("REPOS=\"${SEELE_REPO:-")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("o publicar.sh deixou de declarar os repositórios das versões")
+        .split_whitespace()
+        .collect();
+
+    for (arquivo, nome) in [
+        ("install.sh", "REPO_DAS_VERSOES"),
+        ("install.ps1", "$repoDasVersoes"),
+    ] {
+        let texto = std::fs::read_to_string(raiz().join(arquivo))
+            .unwrap_or_else(|erro| panic!("{arquivo} tem que ser legível: {erro}"));
+        let valor = valor_atribuido(&texto, nome).unwrap_or_else(|| {
+            panic!("{arquivo} deixou de declarar {nome}, e este guarda não sabe de onde ele baixa")
+        });
+        assert!(
+            destinos.contains(&valor.as_str()),
+            "{arquivo} baixa de «{valor}», e o publicar.sh publica em {destinos:?}: a linha \
+             do README instalaria uma versão que ninguém mais publica"
+        );
+
+        // E é ela que monta o endereço da API e o do download: declarar a casa
+        // certa e montar a URL com outra seria o mesmo defeito, escondido.
+        let codigo = sem_comentario(&texto);
+        let enderecos: Vec<&str> = codigo
+            .lines()
+            .filter(|linha| {
+                linha.contains("api.github.com/repos/") || linha.contains("/releases/download/")
+            })
+            .collect();
+        assert!(
+            enderecos.len() >= 2,
+            "{arquivo} deixou de montar o endereço da API e o do download, e este guarda \
+             não tem o que conferir: {enderecos:?}"
+        );
+        for linha in enderecos {
+            assert!(
+                linha.contains(nome),
+                "{arquivo} monta um endereço de versão sem {nome}:\n  {}",
+                linha.trim()
+            );
+        }
+    }
+}
+
+/// Um `install.sh` de verdade rodando contra uma versão de mentira, servida
+/// por `file://` de um diretório temporário: sem rede, e sem tocar no `PATH`
+/// de quem roda o teste, a não ser pelos dublês que ele pedir.
+#[cfg(unix)]
+struct Instalador {
+    base: PathBuf,
+}
+
+#[cfg(unix)]
+impl Instalador {
+    fn novo() -> Instalador {
+        let base = std::env::temp_dir().join(format!(
+            "seele-install-{}-{}",
+            std::process::id(),
+            CONTADOR.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("versao")).expect("a bancada tem que ser criável");
+        Instalador { base }
+    }
+
+    fn versao(&self) -> PathBuf {
+        self.base.join("versao")
+    }
+
+    fn instalado(&self) -> PathBuf {
+        self.base.join("bin/seeled")
+    }
+
+    /// Publica na versão de mentira o pacote de um sistema, com um `seeled`
+    /// de mentira dentro, e devolve os bytes dele.
+    fn publicar_pacote(&self, sistema: &str) -> Vec<u8> {
+        let conteudo = self.base.join("conteudo");
+        let seeled = b"#!/bin/sh\necho 'seeled de mentira'\n".to_vec();
+        std::fs::create_dir_all(&conteudo).expect("a pasta do conteúdo é criável");
+        std::fs::write(conteudo.join("seeled"), &seeled).expect("o seeled é gravável");
+        let pacote = self
+            .versao()
+            .join(format!("seele-cli-9.9.9-{sistema}.tar.gz"));
+        let tar = Command::new("tar")
+            .arg("-czf")
+            .arg(&pacote)
+            .arg("-C")
+            .arg(&conteudo)
+            .arg("seeled")
+            .output()
+            .expect("o tar tem que executar");
+        assert!(
+            tar.status.success(),
+            "não consegui montar o pacote de mentira:\n{}",
+            String::from_utf8_lossy(&tar.stderr)
+        );
+        seeled
+    }
+
+    /// A soma SHA-256 de um arquivo da versão, por quem a máquina tiver.
+    fn soma(&self, nome: &str) -> String {
+        let arquivo = self.versao().join(nome);
+        let saida = Command::new("shasum")
+            .arg("-a")
+            .arg("256")
+            .arg(&arquivo)
+            .output()
+            .or_else(|_| Command::new("sha256sum").arg(&arquivo).output())
+            .expect("esta máquina tem que ter shasum ou sha256sum");
+        String::from_utf8_lossy(&saida.stdout)
+            .split_whitespace()
+            .next()
+            .expect("o somador devolve a soma")
+            .to_owned()
+    }
+
+    fn somas(&self, linhas: &str) {
+        std::fs::write(self.versao().join("SHA256SUMS"), linhas).expect("o SHA256SUMS é gravável");
+    }
+
+    /// Roda o `install.sh`. Com `maquina`, o `uname` e o `sysctl` viram dublês
+    /// que respondem o sistema, a arquitetura e o `hw.optional.arm64` pedidos.
+    fn rodar(&self, maquina: Option<(&str, &str, &str)>) -> (i32, String) {
+        let mut comando = Command::new("sh");
+        comando
+            .arg(raiz().join("install.sh"))
+            .env("SEELE_VERSION", "v9.9.9")
+            .env("SEELE_BASE", format!("file://{}", self.versao().display()))
+            .env("SEELE_BIN", self.base.join("bin"));
+        if let Some((sistema, arquitetura, arm64)) = maquina {
+            let ferramentas = self.base.join("ferramentas");
+            escrever(
+                &ferramentas.join("uname"),
+                &format!(
+                    "#!/bin/sh\ncase \"${{1:-}}\" in\n    -m) echo '{arquitetura}' ;;\n    \
+                     *) echo '{sistema}' ;;\nesac\n"
+                ),
+                true,
+            );
+            escrever(
+                &ferramentas.join("sysctl"),
+                &format!("#!/bin/sh\nprintf '%s\\n' '{arm64}'\n"),
+                true,
+            );
+            let caminho = std::env::var("PATH").unwrap_or_default();
+            comando.env("PATH", format!("{}:{caminho}", ferramentas.display()));
+        }
+        let saida = comando.output().expect("o sh tem que executar");
+        (
+            saida.status.code().unwrap_or(-1),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&saida.stdout),
+                String::from_utf8_lossy(&saida.stderr)
+            ),
+        )
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Instalador {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.base);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn o_instalador_de_uma_linha_confere_a_lista_de_somas_antes_de_baixar_o_pacote() {
+    // **A v0.15.0 não publica pacote do Linux** (medido em 04/10/2026), e o
+    // `install.sh` descobria isso baixando o pacote primeiro: a falha dizia «não
+    // consegui baixar», que não diz se foi a rede, o nome ou a versão. A lista de somas
+    // sai em todo release e diz o que ele publica — lida antes, ela responde a
+    // pergunta certa, com a saída certa: compilar do código.
+    let instalador = Instalador::novo();
+    instalador.somas(
+        "0000000000000000000000000000000000000000000000000000000000000000  \
+         seele-cli-9.9.9-windows-x86_64.zip\n",
+    );
+
+    let (estado, texto) = instalador.rodar(None);
+
+    assert_ne!(
+        estado, 0,
+        "o install.sh instalou de uma versão que não publica pacote para este sistema:\n{texto}"
+    );
+    assert!(
+        texto.contains("não publica o servidor para"),
+        "o install.sh não disse que a versão não publica o servidor para este sistema — a \
+         lista de somas não foi lida antes do pacote:\n{texto}"
+    );
+    assert!(
+        !instalador.instalado().exists(),
+        "a recusa deixou um seeled instalado:\n{texto}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn o_instalador_de_uma_linha_instala_quando_a_soma_confere() {
+    // A ordem nova — a lista de somas antes do pacote — não pode custar o
+    // caminho que funciona. Num Mac Apple Silicon de mentira, com o pacote
+    // publicado e a soma certa, ele instala.
+    //
+    // E também sob Rosetta: ali o `uname -m` diz x86_64 num Mac Apple Silicon,
+    // e quem decide é o `hw.optional.arm64`. Uma conferência pelo `uname -m`
+    // recusaria a máquina certa.
+    for (arquitetura, como) in [("arm64", "nativo"), ("x86_64", "sob Rosetta")] {
+        let instalador = Instalador::novo();
+        let seeled = instalador.publicar_pacote("macos");
+        let soma = instalador.soma("seele-cli-9.9.9-macos.tar.gz");
+        instalador.somas(&format!("{soma}  seele-cli-9.9.9-macos.tar.gz\n"));
+
+        let (estado, texto) = instalador.rodar(Some(("Darwin", arquitetura, "1")));
+
+        assert_eq!(
+            estado, 0,
+            "num Mac Apple Silicon {como}, com o pacote publicado e a soma certa, o \
+             install.sh não instalou:\n{texto}"
+        );
+        assert_eq!(
+            std::fs::read(instalador.instalado()).ok(),
+            Some(seeled),
+            "num Mac Apple Silicon {como}, o seeled instalado não é o que estava no \
+             pacote:\n{texto}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn uma_maquina_sem_pacote_da_arquitetura_dela_recebe_a_frase_de_compilar() {
+    // O tar do macOS sai da arquitetura de quem compila (`empacotar/macos.sh`
+    // empacota o `seeled` do alvo daquela máquina), e quem publica compila
+    // num Mac Apple Silicon. Num Mac Intel ele não roda, e o install.sh o
+    // instalava assim mesmo.
+    //
+    // A conferência é pelo `hw.optional.arm64`, e não pelo `uname -m`: num
+    // terminal sob Rosetta, o `uname -m` de um Mac Apple Silicon diz x86_64, e
+    // recusaria a máquina certa. Num Mac Intel, o `sysctl -in` devolve vazio.
+    for (sistema, arquitetura, arm64, pacote) in [
+        ("Darwin", "x86_64", "", "macos"),
+        ("Linux", "aarch64", "", "linux"),
+    ] {
+        let instalador = Instalador::novo();
+        instalador.publicar_pacote(pacote);
+        let nome = format!("seele-cli-9.9.9-{pacote}.tar.gz");
+        let soma = instalador.soma(&nome);
+        instalador.somas(&format!("{soma}  {nome}\n"));
+
+        let (estado, texto) = instalador.rodar(Some((sistema, arquitetura, arm64)));
+
+        assert_ne!(
+            estado, 0,
+            "{sistema} {arquitetura}: o install.sh instalou um pacote de outra arquitetura:\n{texto}"
+        );
+        assert!(
+            texto.contains("Compile do código-fonte")
+                && texto.contains("git clone https://github.com/DATA-AND-DEV/SEELE "),
+            "{sistema} {arquitetura}: a recusa não diz como compilar do código:\n{texto}"
+        );
+        assert!(
+            !instalador.instalado().exists(),
+            "{sistema} {arquitetura}: a recusa deixou um seeled instalado:\n{texto}"
         );
     }
 }
@@ -2531,6 +2994,129 @@ fn a_bateria_confere_aviso_de_seguranca_e_nao_so_licenca() {
     );
 }
 
+/// Os comandos de `run:` de uma linha do `ci.yml`, sem comentário.
+///
+/// Um passo de várias linhas (`run: |`) não entra, e os que este arquivo
+/// guarda são todos de uma linha só: é o que deixa o guarda ler o comando, e
+/// não a prosa que o explica.
+fn comandos_do_ci() -> Vec<String> {
+    let ci = std::fs::read_to_string(raiz().join(".github/workflows/ci.yml"))
+        .expect("o ci.yml é legível");
+    sem_comentario(&ci)
+        .lines()
+        .filter_map(|linha| {
+            let linha = linha.trim();
+            let linha = linha.strip_prefix("- ").unwrap_or(linha).trim_start();
+            linha
+                .strip_prefix("run:")
+                .map(|comando| comando.trim().to_owned())
+        })
+        .filter(|comando| !comando.is_empty() && comando != "|")
+        .collect()
+}
+
+/// Os nomes dos `[[bin]]` de `fuzz/Cargo.toml`: os alvos de fuzz.
+fn alvos_do_fuzz() -> Vec<String> {
+    let manifesto = std::fs::read_to_string(raiz().join("fuzz/Cargo.toml"))
+        .expect("o fuzz/Cargo.toml é legível");
+    let mut alvos = Vec::new();
+    let mut num_bin = false;
+    for linha in manifesto.lines().map(str::trim) {
+        if linha.starts_with('[') {
+            num_bin = linha == "[[bin]]";
+            continue;
+        }
+        if !num_bin {
+            continue;
+        }
+        if let Some(valor) = linha
+            .strip_prefix("name")
+            .map(str::trim_start)
+            .and_then(|resto| resto.strip_prefix('='))
+        {
+            alvos.push(valor.trim().trim_matches('"').to_owned());
+        }
+    }
+    alvos
+}
+
+#[test]
+fn o_ci_roda_deny_e_fuzz() {
+    // **O deny e o fuzz tinham saído do `ci.yml`, e o fuzz nunca tinha
+    // entrado.** O `ci.yml` inteiro saiu em `1974d07`, com o `cargo deny`
+    // dentro, e voltou sem ele. O deny passou a rodar só na bateria do
+    // `publicar.sh`, que o `--sem-bateria` pula. Os alvos de `fuzz/` existem
+    // desde o primeiro commit (`f174394`), e nenhum workflow os rodou nunca
+    // (`git log -S 'cargo fuzz'` em `.github/` volta vazio): a
+    // `specs/08-seguranca.md` pede fuzz dos analisadores que recebem bytes da
+    // rede, e quem o fazia era quem lembrasse.
+    let comandos = comandos_do_ci();
+
+    let deny = comandos.iter().find(|comando| {
+        let partes: Vec<&str> = comando.split_whitespace().collect();
+        partes.starts_with(&["cargo", "deny"]) && partes.contains(&"check")
+    });
+    let Some(deny) = deny else {
+        panic!(
+            "o ci.yml não roda `cargo deny check`, e um aviso de segurança novo numa \
+             dependência só aparece na bateria de quem publica — que o --sem-bateria pula"
+        );
+    };
+    // As quatro conferências do `deny.toml`, ou o `check` sem nome, que é as
+    // quatro.
+    let partes: Vec<&str> = deny.split_whitespace().collect();
+    let depois_do_check: Vec<&str> = partes
+        .iter()
+        .skip_while(|parte| **parte != "check")
+        .skip(1)
+        .copied()
+        .collect();
+    for conferencia in ["advisories", "licenses", "bans", "sources"] {
+        assert!(
+            depois_do_check.is_empty() || depois_do_check.contains(&conferencia),
+            "o `cargo deny` do ci.yml deixou de conferir `{conferencia}`: {deny}"
+        );
+    }
+
+    let alvos = alvos_do_fuzz();
+    assert!(
+        !alvos.is_empty(),
+        "não achei nenhum `[[bin]]` em fuzz/Cargo.toml, e isso não é aprovação"
+    );
+    for alvo in &alvos {
+        let sementes = format!("fuzz/sementes/{alvo}");
+        let roda = comandos.iter().any(|comando| {
+            let partes: Vec<&str> = comando.split_whitespace().collect();
+            partes.first() == Some(&"cargo")
+                && partes
+                    .windows(3)
+                    .any(|tres| tres == ["fuzz", "run", alvo.as_str()])
+                && partes.contains(&sementes.as_str())
+        });
+        assert!(
+            roda,
+            "o ci.yml não roda o alvo de fuzz «{alvo}» a partir de {sementes}: o \
+             `[[bin]]` existe em fuzz/Cargo.toml e nada o executa"
+        );
+        // A primeira pasta é onde o libFuzzer grava o que acha, e a das
+        // sementes é versionada e conferida byte a byte: ela não pode ser a
+        // primeira.
+        let primeira_pasta = comandos.iter().find_map(|comando| {
+            let partes: Vec<&str> = comando.split_whitespace().collect();
+            let posicao = partes
+                .windows(3)
+                .position(|tres| tres == ["fuzz", "run", alvo.as_str()])?;
+            partes.get(posicao + 3).copied().map(str::to_owned)
+        });
+        assert_ne!(
+            primeira_pasta.as_deref(),
+            Some(sementes.as_str()),
+            "o fuzz de «{alvo}» grava o que acha em {sementes}, que é versionada e \
+             conferida byte a byte pelo seele-proto: a pasta de corpus vem antes"
+        );
+    }
+}
+
 #[test]
 fn a_bateria_tem_prazo_e_nao_espera_para_sempre() {
     // **Uma bateria travada não termina nunca, e quem publica desiste.**
@@ -2675,6 +3261,86 @@ fn o_sem_bateria_pula_tambem_as_bancadas_de_mod_e_grita() {
         saida.texto.contains("bateria pulada por --sem-bateria"),
         "a bateria foi pulada calada:\n{}",
         saida.texto
+    );
+}
+
+/// A linha do corpo do release que diz o que a bateria fez, sozinha: sem
+/// repositório, sem rede e sem compilar, como o `--notas`.
+fn linha_da_bateria(pedidos: &str, sem_bateria: bool) -> (i32, String) {
+    let mut comando = Command::new(interpretador());
+    comando
+        .arg(publicar())
+        .arg("--linha-da-bateria")
+        .arg(pedidos);
+    if sem_bateria {
+        comando.arg("--sem-bateria");
+    }
+    let saida = comando.output().expect("o orquestrador tem que executar");
+    (
+        saida.status.code().unwrap_or(-1),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&saida.stdout),
+            String::from_utf8_lossy(&saida.stderr)
+        ),
+    )
+}
+
+#[test]
+fn a_linha_da_bateria_diz_o_que_rodou_e_onde() {
+    // **O corpo do release não dizia se a bateria tinha rodado.** O
+    // `--sem-bateria` grita no terminal de quem publica, e quem baixa não vê
+    // esse terminal: a página da v0.15.0 não tem a palavra «bateria» (medido
+    // em 04/10/2026). A linha diz o que rodou, e o Windows só quando ele foi
+    // pedido — a bateria de lá só roda quando há pacote de lá.
+    let (estado, aqui) = linha_da_bateria("macos linux", false);
+    assert_eq!(estado, 0, "a linha da bateria não saiu:\n{aqui}");
+    assert!(
+        aqui.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny)"),
+        "a linha não diz que a bateria rodou, nem o que ela rodou:\n{aqui}"
+    );
+    assert!(
+        !aqui.contains("Windows"),
+        "sem o Windows pedido, a bateria de lá não roda, e a linha disse que \
+         rodou:\n{aqui}"
+    );
+
+    let (_, com_windows) = linha_da_bateria("macos windows linux", false);
+    assert!(
+        com_windows.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny)")
+            && com_windows.contains("e no Windows"),
+        "com o Windows pedido, a bateria roda lá também, e a linha não diz:\n{com_windows}"
+    );
+
+    let (_, sem) = linha_da_bateria("macos windows linux", true);
+    assert!(
+        sem.contains("**Esta versão saiu com --sem-bateria: não foi testada antes de publicar.**"),
+        "uma versão que saiu sem bateria não diz isso na página:\n{sem}"
+    );
+    assert!(
+        !sem.contains("Bateria: rodou"),
+        "uma versão que saiu sem bateria diz que a bateria rodou:\n{sem}"
+    );
+}
+
+#[test]
+fn o_corpo_de_uma_versao_sem_bateria_diz_que_ela_nao_foi_testada() {
+    // A função existir não basta: é o corpo do release que quem baixa lê.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.corpos.contains("saiu com --sem-bateria"),
+        "o corpo do release de uma versão sem bateria não diz que ela não foi \
+         testada:\n{}",
+        saida.corpos
     );
 }
 

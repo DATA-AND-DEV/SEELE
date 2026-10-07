@@ -26,7 +26,7 @@ name: CI
 # O `empacotar/publicar.sh` publica por fora do `validar`, com a bateria dele.
 # Ela roda, entre outras coisas, formatação, clippy, testes e as mesmas
 # bancadas de MOD de `node` puro, e o `--sem-bateria` pula tudo isso, dizendo
-# que pulou.
+# que pulou: no terminal de quem publica e no corpo do release.
 #
 # **As bancadas de navegador são a exceção nos dois caminhos.** Elas só rodam
 # aqui, no job `bancadas`, e uma release pode sair com uma delas vermelha se
@@ -365,3 +365,90 @@ jobs:
       - name: as bancadas
         timeout-minutes: 5
         run: cargo xtask check-runtime
+
+  # O `cargo deny` sobre o `deny.toml`, que nenhum job daqui rodava.
+  #
+  # # Por que aqui também
+  #
+  # Ele estava neste arquivo até `1974d07`, quando o `ci.yml` inteiro saiu, e
+  # o arquivo voltou sem ele. Desde então o único lugar que o roda é a bateria
+  # do `empacotar/publicar.sh` — licenças e avisos de segurança —, e o
+  # `--sem-bateria` pula a bateria inteira. Um aviso novo numa dependência
+  # chegava pela pergunta de alguém, e não por um job vermelho: foi o caso do
+  # `rtrb` 0.3.4 (RUSTSEC-2026-0274), achado em 03/09/2026.
+  #
+  # As quatro conferências, e não só as duas da bateria: `bans` e `sources`
+  # também estão escritas no `deny.toml`, e ninguém as rodava. Em 05/10/2026,
+  # com o banco de avisos local de 01/10, as quatro passavam
+  # (`cargo deny --offline check advisories licenses bans sources`).
+  #
+  # A ferramenta é instalada no runner, como o `playwright` do job de
+  # navegador: é ferramenta de CI, e nada dela entra num `Cargo.toml` nem no
+  # `Cargo.lock`. O teste `o_ci_roda_deny_e_fuzz`, em
+  # `xtask/tests/empacotamento.rs`, exige este passo.
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-deny
+      - run: cargo install cargo-deny --locked
+      - run: cargo deny check advisories licenses bans sources
+
+  # O fuzz dos analisadores de `seele-proto`, curto, a partir das sementes.
+  #
+  # # Por que ele existe
+  #
+  # A `specs/08-seguranca.md` pede fuzz dos analisadores que recebem bytes da
+  # rede. Os alvos de `fuzz/` existem desde o primeiro commit, e nenhum
+  # workflow os rodou nunca. Este job roda cada um por um minuto: não é a
+  # campanha longa que acha o defeito raro, é o que impede um analisador novo
+  # de entrar em pânico com a primeira entrada torta sem ninguém ver.
+  #
+  # # Como cada passo roda
+  #
+  # A pasta de corpus vem **antes** da das sementes. O libFuzzer grava o que
+  # acha na primeira pasta que recebe (medido: 2 sementes viraram 658 arquivos
+  # em seis segundos), e `fuzz/sementes/` é versionada e conferida byte a byte
+  # por `crates/seele-proto/tests/sementes_do_fuzz.rs`. O `-create_missing_dirs=1`
+  # cria a pasta de corpus, que o runner não tem; sem ele o libFuzzer recusa a
+  # pasta que não existe.
+  #
+  # No nightly, porque o `cargo fuzz` precisa dele para o sanitizador, e o
+  # nightly pode quebrar sem aviso: um vermelho aqui pode ser do compilador, e
+  # o log diz qual dos dois.
+  #
+  # Sem `--locked`, e de propósito: o `fuzz/Cargo.lock` está atrás do
+  # `seele-proto` (falta o `serde_json`), e qualquer build do fuzz o reescreve
+  # — no runner, onde ninguém o comita.
+  #
+  # Cada alvo por nome, e cada passo roda mesmo depois de um vermelho, como as
+  # bancadas: um alvo que entra em pânico não esconde os outros. O teste
+  # `o_ci_roda_deny_e_fuzz`, em `xtask/tests/empacotamento.rs`, exige um passo
+  # para cada `[[bin]]` de `fuzz/Cargo.toml`, e o
+  # `todo_alvo_do_fuzz_tem_sementes`, no `seele-proto`, que cada um tenha
+  # sementes.
+  fuzz-curto:
+    name: fuzz curto
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly --profile minimal
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo +nightly fuzz run control_frame fuzz/corpus/control_frame fuzz/sementes/control_frame -- -max_total_time=60 -create_missing_dirs=1
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+      - run: cargo +nightly fuzz run media_header fuzz/corpus/media_header fuzz/sementes/media_header -- -max_total_time=60 -create_missing_dirs=1
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+      - run: cargo +nightly fuzz run version_negotiation fuzz/corpus/version_negotiation fuzz/sementes/version_negotiation -- -max_total_time=60 -create_missing_dirs=1
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+      - run: cargo +nightly fuzz run uri fuzz/corpus/uri fuzz/sementes/uri -- -max_total_time=60 -create_missing_dirs=1
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+      - run: cargo +nightly fuzz run datagrama_do_encontro fuzz/corpus/datagrama_do_encontro fuzz/sementes/datagrama_do_encontro -- -max_total_time=60 -create_missing_dirs=1
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15

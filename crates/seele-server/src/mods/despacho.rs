@@ -833,6 +833,19 @@ mod tests {
             resposta.falharam.first().map(|(id, _)| id.as_str()),
             Some("seele/ruim")
         );
+        // **A linha que desliga o MOD diz o que ele lançou** (P51-27). Ela
+        // escreve esta falha em `%falha`, e «mod threw» sozinho deixava quem
+        // hospeda sem saber o que procurar no código do MOD.
+        let dito = resposta
+            .falharam
+            .first()
+            .map(|(_, falha)| falha.to_string())
+            .unwrap_or_default();
+        assert!(
+            dito.contains("Error: eu"),
+            "a falha do MOD que lançou não traz o que ele lançou, e a linha que o desliga \
+             no seele.log de quem hospeda diz só que ele lançou: {dito}"
+        );
         assert_eq!(
             resposta.quintais["seele/bom"]
                 .escritas

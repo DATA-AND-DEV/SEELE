@@ -947,8 +947,84 @@ const TRANSFERENCIAS = {
     "A TRANSFERÊNCIA CAIU, E NÃO HÁ DE ONDE CONTINUAR.\n" +
     "Mandar de novo manda o arquivo inteiro outra vez, do começo.",
   Saved: "ARQUIVO SALVO",
-  NotSaved: "NÃO DEU PARA SALVAR O ARQUIVO.\nNada foi gravado pela metade; tente de novo.",
 };
+
+/**
+ * Por que um arquivo que chegou não foi salvo. O `Transfer::NotSaved` diz qual.
+ *
+ * Quatro, porque mandam coisas diferentes. Um nome recusado não adianta tentar
+ * de novo: só quem mandou resolve, mandando com outro nome. Uma gravação que
+ * falhou no meio adianta. Uma frase só para as quatro mandaria tentar de novo o
+ * que vai ser recusado de novo.
+ */
+const NAO_SALVOS = {
+  NomeRecusado:
+    "ESTE ARQUIVO VEIO COM UM NOME QUE O SEELE NÃO GRAVA " +
+    "NO WINDOWS, NO MAC NEM NO LINUX, E NADA FOI SALVO.\n" +
+    "Peça a quem mandou que mande de novo com outro nome.",
+  AnexoDesconhecido:
+    "ESTE ARQUIVO NÃO ESTÁ NA CONVERSA QUE ESTA JANELA CARREGOU, E NADA FOI GRAVADO.",
+  SemPasta:
+    "O SEELE NÃO ACHOU ONDE GRAVAR — NEM A PASTA DE DOWNLOADS, NEM A SUA PASTA PESSOAL —, " +
+    "E NADA FOI GRAVADO.",
+  Falhou:
+    "NÃO DEU PARA SALVAR O ARQUIVO.\n" +
+    "O SEELE apaga o que começou a gravar e, se não conseguir, diz no seele.log; tente de novo.",
+};
+
+/**
+ * A confirmação de salvar, com o lugar que o Rust escolheu.
+ *
+ * `onde` é o que `destino_do_anexo` devolveu: a pasta, o nome, e o nome que o
+ * arquivo ganha ao lado se o primeiro estiver tomado. Esta janela não monta
+ * caminho nenhum; ela só escreve o que o Rust disse que vai fazer — e na hora de
+ * gravar o Rust deriva tudo de novo, sem ler nada daqui.
+ *
+ * As duas linhas do fim são as que o ADR 0027 manda dizer antes do ato, e não
+ * numa página de ajuda: o SEELE não varre vírus, e nenhuma tela dele abre o
+ * arquivo.
+ */
+function fraseDeSalvar(onde) {
+  return (
+    `Grava «${onde.file_name}» em ${onde.folder}.\n` +
+    "Se já houver um arquivo com esse nome lá, o SEELE grava ao lado, como " +
+    `«${onde.beside}», e não substitui nada.\n` +
+    "O SEELE não confere se este arquivo é seguro: ele não varre vírus e não " +
+    "vai varrer. Ele confere só que o arquivo chegou inteiro. O arquivo é " +
+    "marcado com a quarentena do sistema ao ser gravado, e é o seu sistema " +
+    "operacional que vai parar você na frente dele se for o caso.\n" +
+    "Nenhuma tela do SEELE abre este arquivo. Abrir é um ato seu, fora daqui."
+  );
+}
+
+/**
+ * A frase de um arquivo que não foi, ou não seria, salvo.
+ *
+ * Recebe o motivo sozinho, como ele chega no `Transfer::NotSaved`, ou a recusa
+ * inteira de `destino_do_anexo`, que traz também o nome que veio e a pasta. Com
+ * os dois, um nome recusado é citado: a pessoa vê o que veio — com o caractere
+ * invisível escrito por extenso, que o Rust já fez — e onde ele teria gravado.
+ * Em duas linhas, como as outras compostas deste arquivo.
+ *
+ * A tela não sabe qual regra pegou o nome (isso vai para o `seele.log`), então
+ * a frase cobre todas sem afirmar o que só uma delas faz. Nomes comuns caem
+ * aqui também — «Notas 04:10.txt», que é como o Finder grava uma barra digitada
+ * no nome, ou «Por quê?.pdf», que o Mac e o Linux aceitam —, e a frase não pode
+ * descrevê-los como ataque.
+ */
+function fraseDeNaoSalvo(recusa) {
+  const motivo = typeof recusa === "string" ? recusa : recusa?.reason;
+  if (motivo === "NomeRecusado" && recusa?.claimed && recusa?.folder) {
+    return (
+      "ESTE ARQUIVO VEIO COM UM NOME QUE O SEELE NÃO GRAVA " +
+      "NO WINDOWS, NO MAC NEM NO LINUX, E NADA FOI SALVO.\n" +
+      `«${recusa.claimed}» tem um caminho, um caractere ou nome que o Windows ` +
+      "não aceita, um caractere invisível que disfarça o nome, ou é comprido " +
+      `demais. Para gravar em ${recusa.folder}, peça outro nome a quem mandou.`
+    );
+  }
+  return NAO_SALVOS[motivo] ?? `FALHA NÃO IDENTIFICADA (${motivo})`;
+}
 
 /**
  * Por que um arquivo não foi desenhado. ADR 0027.

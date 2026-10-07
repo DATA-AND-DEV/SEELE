@@ -1675,18 +1675,91 @@ pub enum Transfer {
         /// Bytes in total.
         total: u64,
     },
-    /// On the receiver's disk, where they chose.
+    /// On the receiver's disk.
     Saved {
         /// Which attachment.
         attachment: u64,
-        /// Where it went.
+        /// Onde ficou de verdade: «foto (2).png», se o nome estava tomado e foi
+        /// ao lado que ele ficou. É este, e não o nome que veio, que a tela
+        /// mostra depois de salvar.
         path: String,
     },
-    /// It did not save.
+    /// It did not save, and why.
     NotSaved {
         /// Which attachment.
         attachment: u64,
+        /// Por quê. Cada motivo manda a pessoa fazer uma coisa diferente.
+        reason: NotSavedReason,
     },
+}
+
+/// Por que um anexo não foi, ou não seria, gravado.
+///
+/// Enumerado pelo motivo de sempre nesta fronteira: quem escreve a frase é a
+/// casca. E são quatro porque mandam coisas diferentes — um nome recusado não
+/// adianta tentar de novo, e uma gravação que falhou no meio adianta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum NotSavedReason {
+    /// O nome que veio com o arquivo não serve de nome de arquivo no Windows, no
+    /// Mac e no Linux ao mesmo tempo: tem um caminho, um caractere ou um nome
+    /// que o Windows não aceita, um caractere invisível que disfarça a extensão,
+    /// ou é comprido demais. Nomes comuns do Mac e do Linux caem aqui também —
+    /// «Notas 04:10.txt», «Por quê?.pdf» —, porque quem mandou não sabe onde o
+    /// arquivo vai ser salvo. A regra mora em `seele_core::anexo_no_disco`, e
+    /// qual dela pegou vai para o `seele.log`.
+    NomeRecusado,
+    /// O anexo não está no histórico que esta sessão carregou. O nome sai dele,
+    /// e um anexo fora dele é recusado em vez de ganhar um nome vindo de fora.
+    AnexoDesconhecido,
+    /// Não há pasta onde gravar: a casca não achou a de downloads nem a pessoal,
+    /// ou passou uma que não é um caminho absoluto.
+    SemPasta,
+    /// Não deu para gravar: a pasta não deixou criar o parcial (sem permissão,
+    /// pasta que não existe), o disco recusou no meio, os bytes não fecharam com
+    /// o hash, nada chegou a tempo, ou os noventa e nove nomes possíveis
+    /// estavam tomados na hora de dar o nome final — que é depois de o hash
+    /// conferir. Qual foi a causa vai para o `seele.log`.
+    ///
+    /// Os bytes chegavam num parcial e nunca tiveram o nome final. O parcial é
+    /// apagado, e também a reserva vazia com o nome final que o recuo de um
+    /// volume sem link físico cria; um apagar que falha vai para o `seele.log`
+    /// com o caminho e o erro, e o que ele não apagou fica na pasta.
+    ///
+    /// Em várias das causas — as da pasta, ou um arquivo estragado no disco do
+    /// servidor — tentar de novo dá no mesmo, e a frase da tela ainda manda
+    /// tentar: separá-las pede um motivo no `NaoSalvou` do core, que hoje não
+    /// tem.
+    Falhou,
+}
+
+/// Onde um anexo vai ser gravado — para a frase de confirmação, e só para ela.
+///
+/// Na hora de gravar, [`crate::Connection::save_attachment`] deriva tudo de novo
+/// do histórico e da pasta, e não lê nada disto de volta: uma janela que
+/// devolvesse um destino poderia devolver outro.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SaveDestination {
+    /// A pasta, por extenso.
+    pub folder: String,
+    /// O nome com que o arquivo é gravado, se ele estiver livre.
+    pub file_name: String,
+    /// O nome que ele ganha ao lado, se o primeiro estiver tomado.
+    pub beside: String,
+}
+
+/// Por que um anexo não seria gravado, com o que a frase de recusa cita.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SaveRefused {
+    /// O motivo.
+    pub reason: NotSavedReason,
+    /// O nome que veio com o arquivo, com todo caractere invisível ou de
+    /// controle escrito por extenso — um U+202E citado como está inverteria a
+    /// frase que o recusa. Vazio quando o anexo não está no histórico.
+    pub claimed: String,
+    /// A pasta que a casca passou, como veio: vazia quando ela não achou
+    /// nenhuma, e relativa quando a recusa é `SemPasta` por ela não ser um
+    /// caminho absoluto.
+    pub folder: String,
 }
 
 /// Why a server would not take, or would not hand back, a file.

@@ -441,9 +441,17 @@ enum Comando {
         linha: ChannelId,
     },
     Anexar(Box<Anexo>),
+    /// Baixar um anexo para `pasta`, com o nome que veio com ele.
+    ///
+    /// A pasta e o nome, e não um caminho: quem junta os dois é
+    /// [`crate::anexo_no_disco`] — [`crate::anexo_no_disco::abrir_parcial`]
+    /// confere o nome e cria o parcial, e
+    /// [`crate::anexo_no_disco::Parcial::nomear`] grava ao lado em vez de por
+    /// cima.
     SalvarAnexo {
         anexo: AttachmentId,
-        destino: std::path::PathBuf,
+        pasta: std::path::PathBuf,
+        nome: String,
     },
     /// Baixar um anexo pequeno **para a memória**, para olhar os bytes dele.
     ///
@@ -652,11 +660,12 @@ pub enum Transferencia {
         /// Bytes ao todo.
         total: u64,
     },
-    /// O arquivo está no disco de quem recebeu, onde a pessoa escolheu.
+    /// O arquivo está no disco de quem recebeu.
     Salvo {
         /// Qual anexo.
         anexo: AttachmentId,
-        /// Onde ficou.
+        /// Onde ficou de verdade: «foto (2).png», se o nome estava tomado e foi
+        /// ao lado que ele ficou.
         caminho: std::path::PathBuf,
     },
     /// Não deu para salvar. Se o motivo for do servidor, ele vem pelo controle
@@ -1940,10 +1949,15 @@ impl Enlace {
         self.mandar(Comando::Anexar(Box::new(anexo))).await
     }
 
-    /// Pede um anexo e grava onde quem recebeu escolheu.
+    /// Pede um anexo e grava em `pasta`, com o nome que veio com ele.
     ///
-    /// **Onde a pessoa escolheu, e em lugar nenhum mais.** O ADR 0027 não dá a
-    /// cliente nenhum do SEELE um botão que abre arquivo; salvar é um ato de
+    /// **A regra de onde e com que nome mora em [`crate::anexo_no_disco`]**, e
+    /// não em quem chama: o motor abre o parcial com
+    /// [`crate::anexo_no_disco::abrir_parcial`], que confere o nome de novo, e o
+    /// arquivo só ganha o nome final depois de o hash conferir — e, se ele
+    /// estiver tomado, ganha o de ao lado, «foto (2).png», em vez de passar por
+    /// cima. O caminho real volta em [`Transferencia::Salvo`]. O ADR 0027 não dá
+    /// a cliente nenhum do SEELE um botão que abre arquivo; salvar é um ato de
     /// quem recebeu.
     ///
     /// # Errors
@@ -1952,9 +1966,11 @@ impl Enlace {
     pub async fn salvar_anexo(
         &self,
         anexo: AttachmentId,
-        destino: std::path::PathBuf,
+        pasta: std::path::PathBuf,
+        nome: String,
     ) -> Result<(), Fechado> {
-        self.mandar(Comando::SalvarAnexo { anexo, destino }).await
+        self.mandar(Comando::SalvarAnexo { anexo, pasta, nome })
+            .await
     }
 
     /// Pede os bytes de um anexo **para a memória**, para olhar o começo deles.
@@ -3066,7 +3082,39 @@ impl Motor {
                 Ok(())
             }
 
-            Comando::SalvarAnexo { anexo, destino } => {
+            Comando::SalvarAnexo { anexo, pasta, nome } => {
+                // O parcial é criado **antes** de o pedido sair, por
+                // `abrir_parcial`: o nome é conferido de novo, e um que não é
+                // só um nome volta como falha aqui, sem byte nenhum pedido ao
+                // servidor. O nome final — ou «foto (2).png», se ele estiver
+                // tomado — só é dado depois de o hash conferir. Num
+                // `spawn_blocking` porque abrir é uma chamada ao disco, e esta
+                // fila carrega toda tecla da sessão.
+                let criado = tokio::task::spawn_blocking(move || {
+                    crate::anexo_no_disco::abrir_parcial(
+                        &pasta,
+                        &nome,
+                        crate::anexo_no_disco::TENTATIVAS,
+                    )
+                })
+                .await;
+                let (arquivo, parcial) = match criado {
+                    Ok(Ok(criado)) => criado,
+                    Ok(Err(erro)) => {
+                        tracing::warn!(%anexo, %erro, "não consegui criar o arquivo do anexo; nada foi gravado");
+                        let _ = self
+                            .avisos
+                            .send(Aviso::Transferencia(Transferencia::NaoSalvou { anexo }));
+                        return;
+                    }
+                    Err(erro) => {
+                        tracing::warn!(%anexo, %erro, "a tarefa que cria o arquivo do anexo caiu; nada foi gravado");
+                        let _ = self
+                            .avisos
+                            .send(Aviso::Transferencia(Transferencia::NaoSalvou { anexo }));
+                        return;
+                    }
+                };
                 let transferencias = cliente.transfers();
                 let avisos = self.avisos.clone();
                 let pedido = cliente.fetch_attachment(anexo).await;
@@ -3078,17 +3126,15 @@ impl Motor {
                             total,
                         }));
                     };
-                    let fim = match transferencias
-                        .receive_attachment(anexo, &destino, ESPERA_DE_ANEXO, andamento)
-                        .await
-                    {
-                        Ok(_) => Transferencia::Salvo {
-                            anexo,
-                            caminho: destino,
-                        },
-                        Err(_) => Transferencia::NaoSalvou { anexo },
-                    };
-                    let _ = avisos.send(Aviso::Transferencia(fim));
+                    let parcial_em = parcial.caminho().to_path_buf();
+                    let recebido = transferencias
+                        .receive_attachment(anexo, arquivo, parcial, ESPERA_DE_ANEXO, andamento)
+                        .await;
+                    let _ = avisos.send(Aviso::Transferencia(fim_do_salvar(
+                        anexo,
+                        &parcial_em,
+                        recebido,
+                    )));
                 });
                 pedido
             }
@@ -3646,6 +3692,36 @@ impl Motor {
         // alça nenhuma em lugar nenhum, e sobrevivia à sessão inteira
         // repassando a tela a um par por uma conexão que já tinha morrido.
         self.tarefas_de_par.servir(tarefa);
+    }
+}
+
+/// Como terminou o salvar de um anexo, e o que o `seele.log` fica sabendo dele.
+///
+/// A tela recebe `NaoSalvou` sem motivo — para ela, é `Falhou` —, e o motor é
+/// o único que sabe se foram os bytes que não fecharam com o hash, o prazo que
+/// acabou ou o disco que recusou. Fora do `tokio::spawn` que a chama para que
+/// um teste a exercite sem servidor.
+///
+/// `parcial` é onde os bytes estavam chegando — `.foto.png.seele-parcial` —, e
+/// vai para a linha da falha porque diz a pasta e o nome que o anexo teria; o
+/// caminho do salvo é o que [`crate::client::Transfers::receive_attachment`]
+/// devolve, com o nome final que ele ganhou.
+fn fim_do_salvar(
+    anexo: AttachmentId,
+    parcial: &std::path::Path,
+    recebido: anyhow::Result<(u64, std::path::PathBuf)>,
+) -> Transferencia {
+    match recebido {
+        Ok((_, caminho)) => Transferencia::Salvo { anexo, caminho },
+        Err(erro) => {
+            tracing::warn!(
+                %anexo,
+                caminho = %parcial.display(),
+                %erro,
+                "o anexo não foi salvo"
+            );
+            Transferencia::NaoSalvou { anexo }
+        }
     }
 }
 
@@ -7133,6 +7209,53 @@ mod tests {
                 && linha.contains(&impressao_do_impostor)),
             "sem vencedor, a recusa pela impressão de um candidato não foi ao log em `warn` com \
              o endereço e as duas impressões. Rastro: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn um_anexo_que_nao_foi_salvo_deixa_o_porque_no_log() {
+        // A tela recebe `Falhou` e mais nada: o `NaoSalvou` do core não leva
+        // motivo. Mas quem investiga depois precisa saber se foi o hash, o
+        // prazo ou o disco, e só o motor sabe — se ele não escreve, a pergunta
+        // volta dias depois sem dado nenhum junto.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let fim = fim_do_salvar(
+            AttachmentId(41),
+            std::path::Path::new("/tmp/pasta/.foto.png.seele-parcial"),
+            Err(anyhow::anyhow!(
+                "o arquivo não chegou inteiro e foi descartado"
+            )),
+        );
+        assert_eq!(
+            fim,
+            Transferencia::NaoSalvou {
+                anexo: AttachmentId(41)
+            },
+            "um anexo que não fechou com o hash não chegou à tela como não salvo"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("anexo=41")
+                && linha.contains("o arquivo não chegou inteiro")),
+            "um anexo que não foi salvo não deixou no `seele.log` qual anexo foi \
+             nem por quê, e o motor era o único que sabia. Rastro: {linhas:?}"
+        );
+
+        let salvo = fim_do_salvar(
+            AttachmentId(42),
+            std::path::Path::new("/tmp/pasta/.foto.png.seele-parcial"),
+            Ok((3_000, std::path::PathBuf::from("/tmp/pasta/foto (2).png"))),
+        );
+        assert_eq!(
+            salvo,
+            Transferencia::Salvo {
+                anexo: AttachmentId(42),
+                caminho: std::path::PathBuf::from("/tmp/pasta/foto (2).png"),
+            },
+            "um anexo salvo não levou à tela o caminho real em que ficou"
         );
     }
 

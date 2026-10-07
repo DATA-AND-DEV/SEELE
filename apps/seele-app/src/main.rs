@@ -52,7 +52,8 @@ use std::sync::{Arc, Mutex};
 
 use seele_ffi::{
     ChannelWeight, ConnectConfig, ConnectFailure, Connection, ConnectionError, Event,
-    EventListener, Preview, PreviewRules, Snapshot, VoiceMode,
+    EventListener, NotSavedReason, Preview, PreviewRules, SaveDestination, SaveRefused, Snapshot,
+    VoiceMode,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -2999,7 +3000,31 @@ fn enviar_anexo(
         .send_attachment(channel, body, caminho, nome, tipo)
 }
 
-/// Salva um anexo onde quem recebeu escolheu.
+/// A pasta onde os anexos salvos vão: a de downloads, ou a pessoal.
+///
+/// **Calculada aqui, em Rust, e em nenhum outro lugar.** A janela não manda
+/// caminho: ela mandava, e `salvar_anexo` aceitava qualquer caminho absoluto, de
+/// modo que qualquer script que rodasse nela gravava onde quisesse. Vazia
+/// quando a máquina não diz nenhuma das duas, ou diz num caminho que não é
+/// texto — e a ponte recusa uma pasta vazia como `SemPasta`, em vez de gravar
+/// num caminho relativo que ninguém consegue nomear.
+fn pasta_dos_anexos(app: &AppHandle) -> String {
+    app.path()
+        .download_dir()
+        .or_else(|_| app.path().home_dir())
+        .ok()
+        .and_then(|pasta| pasta.into_os_string().into_string().ok())
+        .unwrap_or_default()
+}
+
+/// Salva um anexo na pasta de downloads.
+///
+/// **Da janela vem só o número do anexo.** A pasta é [`pasta_dos_anexos`], e o
+/// nome a ponte lê do histórico local e confere em
+/// `seele_core::anexo_no_disco`, que é onde mora a regra: um nome que não é só
+/// um nome é recusado, e um nome tomado grava ao lado, como «foto (2).png», sem
+/// substituir nada. O resultado volta como evento, com o caminho real ou o
+/// motivo.
 ///
 /// O arquivo é marcado com a quarentena do próprio sistema ao ser gravado —
 /// `com.apple.quarantine` no macOS, o fluxo `Zone.Identifier` no Windows —, que
@@ -3009,11 +3034,36 @@ fn enviar_anexo(
 /// acionar.
 #[tauri::command]
 fn salvar_anexo(
+    app: AppHandle,
     session: State<'_, Session>,
     anexo: u64,
-    destino: String,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.save_attachment(anexo, destino)
+    session
+        .connection()?
+        .save_attachment(anexo, pasta_dos_anexos(&app))
+}
+
+/// Onde [`salvar_anexo`] gravaria este anexo, ou por que não gravaria.
+///
+/// **Só para a frase de confirmação.** A janela escreve a pasta e o nome que
+/// voltam daqui, e mais nada: na hora de gravar, `salvar_anexo` não recebe nada
+/// disto de volta e deriva tudo de novo.
+#[tauri::command]
+fn destino_do_anexo(
+    app: AppHandle,
+    session: State<'_, Session>,
+    anexo: u64,
+) -> Result<SaveDestination, SaveRefused> {
+    let pasta = pasta_dos_anexos(&app);
+    // Sem sessão não há histórico, e sem histórico não há de onde tirar o nome.
+    let Ok(connection) = session.connection() else {
+        return Err(SaveRefused {
+            reason: NotSavedReason::AnexoDesconhecido,
+            claimed: String::new(),
+            folder: pasta,
+        });
+    };
+    connection.save_destination(anexo, pasta)
 }
 
 /// Baixa um anexo pequeno e diz se esta janela pode desenhá-lo.
@@ -3057,20 +3107,18 @@ fn regras_de_previa() -> PreviewRules {
     Connection::preview_rules()
 }
 
-/// Onde os arquivos salvos vão parar, por padrão.
+/// Onde os arquivos salvos vão parar.
 ///
-/// A pasta de downloads do sistema. Escrita inteira na tela antes de qualquer
-/// botão de salvar, e essa é a parte que importa: sem um seletor de arquivos
-/// nativo — que custaria um crate novo numa árvore que o ADR 0026 acabou de
-/// contar — o lugar tem de estar **visível** em vez de suposto.
+/// A pasta de downloads do sistema, ou a pessoal — [`pasta_dos_anexos`], a
+/// mesma que [`salvar_anexo`] usa, escolhida em Rust. Escrita na dica do botão
+/// de salvar, e por extenso na confirmação, antes de qualquer arquivo ser
+/// gravado: o lugar tem de estar **visível** em vez de suposto. Não há diálogo
+/// de salvar, e não é por falta de crate — o `tauri-plugin-dialog` já está na
+/// árvore, e é ele que abre o seletor de [`escolher_arquivo`]. É que o destino
+/// é decisão do Rust, e um diálogo seria outra decisão de produto.
 #[tauri::command]
 fn pasta_de_downloads(app: AppHandle) -> String {
-    use tauri::Manager as _;
-    app.path()
-        .download_dir()
-        .or_else(|_| app.path().home_dir())
-        .map(|pasta| pasta.display().to_string())
-        .unwrap_or_default()
+    pasta_dos_anexos(&app)
 }
 
 /// Pede ao servidor que faça uma sala de voz.
@@ -8837,6 +8885,7 @@ fn main() {
             escolher_arquivo,
             enviar_anexo,
             salvar_anexo,
+            destino_do_anexo,
             prever_anexo,
             regras_de_previa,
             pasta_de_downloads,

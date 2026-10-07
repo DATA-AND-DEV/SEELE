@@ -445,8 +445,23 @@ function registrarNoAnfitriao(onde, o_que, nivel = "aviso", modId = null) {
   // `modId` é o MOD de quem a frase fala, quando é de um: o Rust o escreve
   // como `mod_id=`, o mesmo campo das linhas dele, e uma busca só acha as duas
   // metades.
+  //
+  // **Sem substituto UTF-16 solto.** O `JSON.stringify` do `invoke` o escreve
+  // `\ud800`, o `serde_json` recusa a cadeia ao ler uma `String`, e o `.catch`
+  // abaixo engole a recusa: a linha inteira sumia do `seele.log` por meio
+  // caractere de um nome que um MOD escolheu. Com a flag `u`, a classe só casa
+  // o substituto solto, e um par — um caractere de verdade — fica como está.
+  // Não `toWellFormed()`: ele exige o Safari 16.4, e este app declara o macOS
+  // 11. `modId` só quando há um: `bem(null)` daria o texto «null», e o Rust
+  // escreveria `mod_id=null`.
+  const bem = (texto) => String(texto).replace(/[\uD800-\uDFFF]/gu, "\uFFFD");
   try {
-    invoke("registrar_da_janela", { nivel, onde, oQue: String(o_que), modId }).catch(() => {});
+    invoke("registrar_da_janela", {
+      nivel,
+      onde: bem(onde),
+      oQue: bem(o_que),
+      modId: modId == null ? null : bem(modId),
+    }).catch(() => {});
   } catch {
     /* sem ponte, sem registro — e o caminho segue */
   }
@@ -2058,6 +2073,15 @@ async function atenderOMod(mod, instancia, m) {
   // Contra `mod.api`, que é o que o manifesto do pacote conferido declarou, e
   // nunca contra um campo da mensagem.
   if (!podePedir(mod, m.tipo)) {
+    // Dita também a quem hospeda: a resposta vai só ao MOD, e um pedido
+    // recusado sem rastro no `seele.log` é o vão calado que
+    // `registrarNoAnfitriao` existe para fechar.
+    registrarNoAnfitriao(
+      "atender-mod",
+      `${mod.id}: «${m.tipo}» não existe na API ${mod?.api ?? "?"}`,
+      "aviso",
+      mod.id,
+    );
     responder(false, {
       erro: `«${m.tipo}» não existe na API ${mod?.api ?? "?"}, que é a que este `
         + "pacote declara",
@@ -2184,13 +2208,38 @@ async function atenderOMod(mod, instancia, m) {
       default:
         // **Recusado e nomeado.** Uma mensagem que a API não conhece não pode
         // ser ignorada: quem escreveu o MOD ficaria esperando para sempre uma
-        // resposta que nunca vem, sem saber por quê.
+        // resposta que nunca vem, sem saber por quê. E a linha no registro diz
+        // a quem hospeda que ela chegou e foi recusada.
+        registrarNoAnfitriao(
+          "atender-mod",
+          `${mod.id}: a API de MODs não conhece «${m.tipo}»`,
+          "aviso",
+          mod.id,
+        );
         responder(false, { erro: `a API de MODs não conhece «${m.tipo}»` });
     }
   } catch (falha) {
-    const motivo = typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha);
+    // **O registro leva o motivo; a frase de tela fica com o MOD.**
+    // `fraseDeErro` é a fronteira do produto com quem usa, e para um `Error`
+    // da janela ela começa por «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O
+    // QUÊ»: no `seele.log`, isso punha um pedido de desculpas na frente do
+    // motivo, e para uma variante da FFI que ela conhece, como `Refused`, uma
+    // frase de tela no lugar do que o Rust disse. `motivoDaFalha` mora
+    // em `mods-regiao.js`, que a página carrega antes deste arquivo; o que
+    // ela ainda escreveria «[object Object]» — uma variante de struct que ela
+    // não sabe ler — vai inteiro, em JSON.
+    let motivo = motivoDaFalha(falha);
+    if (motivo === "[object Object]") {
+      try {
+        motivo = JSON.stringify(falha) ?? motivo;
+      } catch {
+        /* um objeto com ciclo: fica o que havia, e o caminho segue */
+      }
+    }
     registrarNoAnfitriao("atender-mod", `${mod.id}: «${m.tipo}» falhou — ${motivo}`, "aviso", mod.id);
-    responder(false, { erro: motivo });
+    responder(false, {
+      erro: typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha),
+    });
   }
 }
 

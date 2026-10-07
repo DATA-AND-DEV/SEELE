@@ -15,6 +15,12 @@
 //!   evicted still says what the file was;
 //! - a file can be fetched back, and one that expired says so instead.
 //!
+//! E uma quinta, que é de quem recebe: um arquivo salvo fica **dentro** da
+//! pasta, com um nome que é só um nome, e nunca no lugar de um que já estava
+//! lá. Essa passa pela ponte (`seele_ffi::Connection`), e não pelo cliente: em
+//! produção o nome sai do histórico da ponte, e um teste que o passasse como
+//! argumento provaria um caminho que o app não usa.
+//!
 //! `current_thread` for the reason `limite_de_taxa.rs` gives: a `select!` over
 //! several tasks on a multi-threaded executor hides defects, and this repository
 //! has watched a test pass ten times out of ten with the function under test
@@ -28,13 +34,14 @@
 
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
 use seele_core::client::{AttachmentRequest, Previewed, Sent};
 use seele_core::preview::{data_uri, judge, ImageFormat, Verdict, PREVIEW_LIMIT};
 use seele_core::{Client, MemoryPinStore};
+use seele_ffi::{ConnectConfig, Connection, Event, EventListener, NotSavedReason, Transfer};
 use seele_proto::control::{AttachmentRefusal, AttachmentState, ServerMessage};
 use seele_proto::ids::{AttachmentId, ChannelId, ClientMessageId};
 use seele_server::persistence::attachments::per_file_limit;
@@ -188,6 +195,47 @@ async fn um_arquivo_sobe_inteiro_e_a_mensagem_so_aparece_depois() -> Result<()> 
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn baixar_num_caminho_que_ja_existe_nao_toca_no_que_estava_la() -> Result<()> {
+    let _vaga = vaga::minha();
+    // A porta da conformidade, `download_attachment`, recebe um caminho inteiro
+    // e grava nele. Com `File::create`, um arquivo que já estava lá era truncado
+    // e reescrito com os bytes de outra pessoa, sem pergunta nenhuma. Agora os
+    // bytes chegam num parcial ao lado, e quem recusa este caminho é o atalho
+    // de `download_attachment`, que vê que ele já existe antes de pedir byte
+    // nenhum. O atalho perde uma corrida; quem garante, numa pasta com link
+    // físico como esta, é o link que dá o nome final, que falha se o nome
+    // existir, e o que estava lá fica como estava.
+    let (endereco, _servidor, casa) = server(64 * 1024).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let mut quem_espera = entrar(endereco, 9).await?;
+
+    let caminho = arquivo(casa.path(), "foto.png", 1_000, 0x11);
+    let anexo = mandar_e_receber(
+        &quem_manda,
+        &mut quem_espera,
+        &pedido(&caminho, "foto.png", 1),
+    )
+    .await?;
+
+    let ja_estava = casa.path().join("ja-estava.png");
+    std::fs::write(&ja_estava, "original")?;
+    let resultado = quem_espera
+        .download_attachment(anexo.id, &ja_estava, ESPERA, |_, _| {})
+        .await;
+    assert!(
+        resultado.is_err(),
+        "baixar por cima de um arquivo que já existe deu certo, e só dá certo \
+         substituindo o que estava lá"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ja_estava)?,
+        "original",
+        "o arquivo que já estava no caminho foi substituído pelos bytes do anexo"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn um_arquivo_grande_demais_e_recusado_com_razao_e_nao_em_silencio() -> Result<()> {
     let _vaga = vaga::minha();
     // O teto por arquivo é derivado do total, e um arquivo acima dele é
@@ -307,6 +355,20 @@ async fn o_server_enche_sem_passar_do_teto_e_a_mensagem_diz_que_o_arquivo_expiro
     let _ = cliente
         .download_attachment(anexo.id, &destino, Duration::from_millis(300), |_, _| {})
         .await;
+    // O parcial é criado antes de o pedido sair, e um pedido que não vem tem de
+    // levá-lo embora: senão cada anexo expirado deixa um arquivo vazio na pasta.
+    assert!(
+        !destino.exists(),
+        "um anexo que não veio deixou um arquivo vazio onde ia ser gravado"
+    );
+    let sobras: Vec<String> = nomes_em(casa.path())
+        .into_iter()
+        .filter(|nome| nome.contains("nao-vem.bin"))
+        .collect();
+    assert!(
+        sobras.is_empty(),
+        "um anexo que não veio deixou o parcial na pasta: {sobras:?}"
+    );
     let razao = ate(&mut cliente, |evento| match evento {
         ServerMessage::AttachmentUnavailable { reason, .. } => Some(*reason),
         _ => None,
@@ -660,11 +722,382 @@ async fn um_arquivo_maior_que_o_limite_da_previa_nao_e_baixado() -> Result<()> {
 
     // E a conexão sobrevive a ter cortado aquele fluxo: salvar o mesmo arquivo
     // continua funcionando, que é a diferença entre recusar uma prévia e perder
-    // o anexo.
-    let destino = casa.path().join("panorama.png");
+    // o anexo. Num caminho novo: `panorama.png` é o arquivo que subiu, e o
+    // download não grava por cima do que já existe.
+    let destino = casa.path().join("panorama-salvo.png");
     let baixados = quem_espera
         .download_attachment(anexo.id, &destino, ESPERA, |_, _| {})
         .await?;
     assert_eq!(baixados, u64::try_from(tamanho).unwrap());
+    Ok(())
+}
+
+// --------------------------------------------- salvar, do lado de quem recebe
+//
+// O nome que veio com o arquivo é de quem mandou, e o fio o leva como veio. Do
+// lado de quem recebe ele vira caminho, e é aí que a regra mora:
+// `seele_core::anexo_no_disco`. Estes três passam pela ponte, como o app.
+
+/// O que a ponte contou sobre transferências, na ordem.
+#[derive(Default)]
+struct Transferencias(Mutex<Vec<Transfer>>);
+
+impl EventListener for Transferencias {
+    fn on_event(&self, event: Event) {
+        if let Event::TransferChanged { transfer } = event {
+            if let Ok(mut vistas) = self.0.lock() {
+                vistas.push(transfer);
+            }
+        }
+    }
+}
+
+impl Transferencias {
+    /// Como terminou o salvar deste anexo, se já terminou.
+    fn fim_de(&self, anexo: u64) -> Option<Transfer> {
+        self.0.lock().ok()?.iter().find_map(|vista| match vista {
+            Transfer::Saved { attachment, .. } | Transfer::NotSaved { attachment, .. }
+                if *attachment == anexo =>
+            {
+                Some(vista.clone())
+            }
+            _ => None,
+        })
+    }
+}
+
+/// Espera, sem segurar o executor, até a condição valer ou o prazo acabar.
+///
+/// Sem `std::thread::sleep`: o servidor roda neste mesmo executor de uma
+/// thread, e dormir a thread seria parar o servidor que o teste espera.
+async fn ate_que(mut pronto: impl FnMut() -> bool) -> bool {
+    let prazo = tokio::time::Instant::now() + ESPERA;
+    while tokio::time::Instant::now() < prazo {
+        if pronto() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    pronto()
+}
+
+/// Quem recebe, pela ponte que o comando do Tauri segura, com a linha aberta.
+async fn recebedor(
+    endereco: SocketAddr,
+    casa: &Path,
+) -> Result<(Arc<Connection>, Arc<Transferencias>)> {
+    let home = casa.join("carla").to_string_lossy().into_owned();
+    let (ponte, _confianca) = tokio::task::spawn_blocking(move || {
+        Connection::connect(ConnectConfig {
+            server: endereco.to_string(),
+            alternate_servers: Vec::new(),
+            nickname: "carla".to_owned(),
+            home,
+            join_secret: None,
+            expected_fingerprint: None,
+            bilhete: None,
+            // Não há placa de som numa máquina de integração contínua.
+            audio: false,
+            capture_device: None,
+            playback_device: None,
+        })
+    })
+    .await??;
+    let vistas = Arc::new(Transferencias::default());
+    ponte.subscribe(Arc::clone(&vistas) as Arc<dyn EventListener>);
+    ponte.open_channel(LINHA.0)?;
+    Ok((ponte, vistas))
+}
+
+/// Manda um arquivo com este nome e espera ele entrar no histórico da ponte.
+async fn chegar_na_ponte(
+    quem_manda: &Client,
+    ponte: &Connection,
+    caminho: &Path,
+    nome: &str,
+) -> Result<u64> {
+    let fim = quem_manda
+        .transfers()
+        .send_attachment(&pedido(caminho, nome, 1), |_, _| {})
+        .await?;
+    assert!(
+        matches!(fim, Sent::Delivered { .. }),
+        "o arquivo de quem manda não subiu, e o teste não chega a salvar nada: {fim:?}"
+    );
+    let mut anexo = None;
+    let chegou = ate_que(|| {
+        anexo = ponte.messages().iter().find_map(|mensagem| {
+            mensagem
+                .attachment
+                .as_ref()
+                .filter(|anexo| anexo.file_name == nome)
+                .map(|anexo| anexo.id)
+        });
+        anexo.is_some()
+    })
+    .await;
+    assert!(
+        chegou,
+        "a mensagem com «{nome}» não chegou ao histórico da ponte, e é de lá que \
+         o nome sai"
+    );
+    Ok(anexo.expect("o anexo chegou"))
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_nome_com_caminho_nao_grava_fora_da_pasta() -> Result<()> {
+    let _vaga = vaga::minha();
+    // O remetente chama o arquivo de `../escapou.txt`. O fio leva o nome como
+    // veio, e quem recebe salva em `casa/pasta`: se o nome virasse caminho, o
+    // arquivo apareceria em `casa/escapou.txt`, fora da pasta que a pessoa vê
+    // na frase de confirmação.
+    let (endereco, _servidor, casa) = server(64 * 1024).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let (ponte, vistas) = recebedor(endereco, casa.path()).await?;
+
+    let origem = arquivo(casa.path(), "origem.txt", 500, 0x42);
+    let anexo = chegar_na_ponte(&quem_manda, &ponte, &origem, "../escapou.txt").await?;
+
+    let pasta = casa.path().join("pasta");
+    std::fs::create_dir(&pasta)?;
+    ponte.save_attachment(anexo, pasta.to_string_lossy().into_owned())?;
+
+    let terminou = ate_que(|| vistas.fim_de(anexo).is_some()).await;
+    assert!(
+        terminou,
+        "salvar um anexo com caminho no nome não terminou nem em salvo nem em não \
+         salvo, e a tela ficaria esperando para sempre"
+    );
+    assert!(
+        !casa.path().join("escapou.txt").exists(),
+        "o nome `../escapou.txt` virou caminho e o arquivo foi gravado fora da \
+         pasta escolhida"
+    );
+    assert_eq!(
+        vistas.fim_de(anexo),
+        Some(Transfer::NotSaved {
+            attachment: anexo,
+            reason: NotSavedReason::NomeRecusado,
+        }),
+        "um nome com caminho não chegou à tela como nome recusado, e ela mandaria \
+         tentar de novo o que vai ser recusado de novo"
+    );
+    assert_eq!(
+        std::fs::read_dir(&pasta)?.count(),
+        0,
+        "um nome recusado deixou alguma coisa dentro da pasta"
+    );
+    ponte.disconnect();
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_nome_repetido_nao_substitui_o_que_ja_estava_la() -> Result<()> {
+    let _vaga = vaga::minha();
+    // A pessoa já tem um `foto.png` na pasta de downloads, e chega outro com o
+    // mesmo nome. Com `File::create`, o dela era truncado e reescrito com os
+    // bytes de outra pessoa, sem pergunta. Agora o novo grava ao lado.
+    let (endereco, _servidor, casa) = server(64 * 1024).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let (ponte, vistas) = recebedor(endereco, casa.path()).await?;
+
+    let origem = arquivo(casa.path(), "origem.png", 3_000, 0xAB);
+    let anexo = chegar_na_ponte(&quem_manda, &ponte, &origem, "foto.png").await?;
+
+    let pasta = casa.path().join("pasta");
+    std::fs::create_dir(&pasta)?;
+    std::fs::write(pasta.join("foto.png"), "original")?;
+    ponte.save_attachment(anexo, pasta.to_string_lossy().into_owned())?;
+
+    assert!(
+        ate_que(|| vistas.fim_de(anexo).is_some()).await,
+        "salvar o anexo não terminou dentro do prazo"
+    );
+    let ao_lado = pasta.join("foto (2).png");
+    assert_eq!(
+        vistas.fim_de(anexo),
+        Some(Transfer::Saved {
+            attachment: anexo,
+            path: ao_lado.display().to_string(),
+        }),
+        "o anexo não foi salvo ao lado, ou a tela não recebeu o caminho real em \
+         que ele ficou"
+    );
+    assert_eq!(
+        std::fs::read_to_string(pasta.join("foto.png"))?,
+        "original",
+        "o `foto.png` que já estava na pasta foi substituído pelo anexo"
+    );
+    assert_eq!(
+        std::fs::read(&ao_lado)?,
+        vec![0xAB; 3_000],
+        "o que foi gravado ao lado não são os bytes que subiram"
+    );
+    assert_eq!(
+        nomes_em(&pasta),
+        ["foto (2).png", "foto.png"],
+        "depois de salvar, a pasta tem mais que o arquivo da pessoa e o salvo ao \
+         lado: o parcial ficou para trás"
+    );
+    ponte.disconnect();
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_anexo_que_nao_fecha_com_o_hash_nao_apaga_o_que_ja_estava_la() -> Result<()> {
+    let _vaga = vaga::minha();
+    // A variante do apagar. Quando os bytes não fecham com o hash, o arquivo é
+    // descartado — e com `File::create` o descartado era o `foto.png` da
+    // pessoa: truncado, reescrito, e depois apagado. Só pode sair o que esta
+    // gravação criou.
+    let (endereco, _servidor, casa) = server(64 * 1024).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let (ponte, vistas) = recebedor(endereco, casa.path()).await?;
+
+    let origem = arquivo(casa.path(), "origem.png", 3_000, 0xCD);
+    let anexo = chegar_na_ponte(&quem_manda, &ponte, &origem, "foto.png").await?;
+
+    // Os bytes do servidor estragam no disco dele, com o mesmo tamanho: o
+    // servidor manda o que tem, e o hash que ele anuncia é o de antes.
+    let guardado = std::fs::read_dir(casa.path().join("anexos"))?
+        .flatten()
+        .map(|entrada| entrada.path())
+        .find(|caminho| std::fs::read(caminho).is_ok_and(|bytes| bytes == vec![0xCD; 3_000]))
+        .expect("o servidor guardou os bytes do anexo");
+    std::fs::write(&guardado, vec![0xEE; 3_000])?;
+
+    let pasta = casa.path().join("pasta");
+    std::fs::create_dir(&pasta)?;
+    std::fs::write(pasta.join("foto.png"), "original")?;
+    ponte.save_attachment(anexo, pasta.to_string_lossy().into_owned())?;
+
+    assert!(
+        ate_que(|| vistas.fim_de(anexo).is_some()).await,
+        "salvar o anexo estragado não terminou dentro do prazo"
+    );
+    assert_eq!(
+        vistas.fim_de(anexo),
+        Some(Transfer::NotSaved {
+            attachment: anexo,
+            reason: NotSavedReason::Falhou,
+        }),
+        "um anexo que não fecha com o hash não chegou à tela como falha"
+    );
+    assert_eq!(
+        std::fs::read_to_string(pasta.join("foto.png"))
+            .ok()
+            .as_deref(),
+        Some("original"),
+        "o anexo que não fechou com o hash levou junto o `foto.png` que já estava \
+         na pasta"
+    );
+    assert!(
+        !pasta.join("foto (2).png").exists(),
+        "o arquivo criado para o anexo estragado ficou na pasta pela metade"
+    );
+    assert_eq!(
+        nomes_em(&pasta),
+        ["foto.png"],
+        "o anexo que não fechou com o hash deixou o parcial na pasta"
+    );
+    ponte.disconnect();
+    Ok(())
+}
+
+/// Os nomes que estão na pasta agora, em ordem.
+fn nomes_em(pasta: &Path) -> Vec<String> {
+    let mut nomes: Vec<String> = std::fs::read_dir(pasta)
+        .expect("ler a pasta do teste")
+        .flatten()
+        .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+        .collect();
+    nomes.sort();
+    nomes
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn um_download_pela_metade_nunca_tem_o_nome_final() -> Result<()> {
+    let _vaga = vaga::minha();
+    // Um processo que morre no meio do download não apaga nada: o que fica na
+    // pasta é o que estava nela naquele instante. Com o arquivo criado já com
+    // o nome final, era um «foto.png» truncado com cara de completo, que a
+    // pessoa abre sem saber que faltam bytes.
+    //
+    // O andamento roda no meio da gravação, entre um bloco e o seguinte, e o
+    // que a pasta tem ali é o que um processo morto ali deixaria. Pelo
+    // `download_attachment`, e não pela ponte, porque é ele que chama o
+    // andamento na mesma volta da gravação: um evento da ponte chega depois, e
+    // olhar a pasta nele seria olhar outro instante.
+    let teto = 8 * 1024 * 1024_u64;
+    let (endereco, _servidor, casa) = server(teto).await?;
+    let quem_manda = entrar(endereco, 7).await?;
+    let mut quem_espera = entrar(endereco, 9).await?;
+
+    // Maior que um bloco de leitura, para haver um meio de verdade.
+    let tamanho = 300_000_usize;
+    let origem = arquivo(casa.path(), "origem.png", tamanho, 0x3C);
+    let anexo = mandar_e_receber(
+        &quem_manda,
+        &mut quem_espera,
+        &pedido(&origem, "foto.png", 1),
+    )
+    .await?;
+
+    let pasta = casa.path().join("pasta");
+    std::fs::create_dir(&pasta)?;
+    let destino = pasta.join("foto.png");
+    let mut no_meio: Vec<(u64, Vec<String>)> = Vec::new();
+    let baixados = quem_espera
+        .download_attachment(anexo.id, &destino, ESPERA, |feito, total| {
+            if feito < total {
+                no_meio.push((feito, nomes_em(&pasta)));
+            }
+        })
+        .await?;
+    assert_eq!(
+        baixados,
+        u64::try_from(tamanho).unwrap(),
+        "o anexo não chegou inteiro, e o teste não mede o meio de um download que terminou"
+    );
+    assert!(
+        no_meio.iter().any(|(feito, _)| *feito > 0),
+        "o andamento não foi chamado com nenhum byte gravado e o download por \
+         terminar, então este teste não olhou a pasta no meio de nada: {no_meio:?}"
+    );
+    for (feito, nomes) in &no_meio {
+        assert!(
+            !nomes.iter().any(|nome| nome == "foto.png"),
+            "com {feito} de {tamanho} bytes gravados, a pasta já tinha um \
+             «foto.png»: se o processo morresse ali, ficaria um arquivo truncado \
+             com o nome de um completo. Pasta: {nomes:?}"
+        );
+    }
+
+    // E no fim fica só o nome final, com os bytes que subiram: o parcial saiu.
+    assert_eq!(
+        nomes_em(&pasta),
+        ["foto.png"],
+        "depois do download a pasta não tem só o arquivo salvo, e o parcial ficou \
+         para trás"
+    );
+    assert_eq!(
+        std::fs::read(&destino)?,
+        vec![0x3C; tamanho],
+        "o arquivo com o nome final não tem os bytes que subiram"
+    );
+
+    // A quarentena fica no arquivo com o nome final, que é o que alguém abre.
+    #[cfg(target_os = "macos")]
+    {
+        let marca = std::process::Command::new("xattr")
+            .args(["-p", "com.apple.quarantine"])
+            .arg(&destino)
+            .output()?;
+        assert!(
+            marca.status.success() && String::from_utf8_lossy(&marca.stdout).contains("SEELE"),
+            "o arquivo salvo não tem a quarentena do SEELE, e o Gatekeeper não para \
+             quem for abri-lo: {marca:?}"
+        );
+    }
     Ok(())
 }

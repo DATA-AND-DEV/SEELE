@@ -73,10 +73,19 @@ pub struct AttachmentHeader {
     pub replies_to: Option<MessageId>,
     /// The name the sender gave the file.
     ///
-    /// A **gift, not an address**. It is stored in a column and never reaches
-    /// the filesystem: the blob is named after the SHA-256 of its own content,
-    /// so no `../`, no `CON`, no null byte and no two capitals colliding on
-    /// macOS ever touch a path.
+    /// A **gift, not an address** — no servidor. Lá ele é guardado numa coluna
+    /// e nunca chega ao sistema de arquivos: o blob se chama pelo SHA-256 do
+    /// próprio conteúdo, então nenhum `../`, nenhum `CON`, nenhum byte nulo e
+    /// nenhuma colisão de maiúsculas do macOS toca um caminho de quem hospeda.
+    ///
+    /// **Do lado de quem recebe, ele vira nome de arquivo ao salvar**, e é lá
+    /// que ele é conferido: só grava um nome que sirva no Windows, no Mac e no
+    /// Linux — sem caminho, sem caractere nem nome que o Windows não aceite, sem
+    /// caractere invisível que disfarce a extensão, sem passar do tamanho — e
+    /// sem substituir nada que já esteja na pasta. A regra mora em
+    /// `seele_core::anexo_no_disco`. Este crate não a aplica, de propósito: o fio
+    /// continua levando o nome como veio, para que uma 0.15.0 e esta continuem
+    /// conversando, e quem decide é quem recebe.
     pub file_name: String,
     /// The type the sender claims the bytes are.
     ///
@@ -296,9 +305,12 @@ mod tests {
     #[test]
     fn a_path_in_the_name_is_carried_rather_than_refused() {
         // Deliberate, and it is the difference between this design and a
-        // sanitiser. The name never reaches the filesystem — the blob is named
-        // after its own hash — so `../../etc/passwd` is a strange label and
-        // nothing more. Refusing it would suggest the name were an address.
+        // sanitiser on the wire. No servidor o nome nunca chega ao sistema de
+        // arquivos — o blob se chama pelo próprio hash —, então ali
+        // `../../etc/passwd` é um rótulo estranho e nada mais. Quem recebe é que
+        // transforma o nome em arquivo ao salvar, e é lá que ele é recusado:
+        // `seele_core::anexo_no_disco`. Recusá-lo aqui mudaria o fio, e uma
+        // 0.15.0 continuaria mandando o que quisesse.
         let ask = AttachmentHeader {
             file_name: "../../etc/passwd".into(),
             ..header()

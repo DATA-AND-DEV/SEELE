@@ -58,6 +58,13 @@ crates/seele-lancador/testes/lista-de-revogacao-de-teste.json  -text
 *.pub                                                -text
 *.base64                                             -text
 
+# As sementes do fuzz. `crates/seele-proto/tests/sementes_do_fuzz.rs` as
+# confere byte a byte contra o que o código gera, e quatro dos nove quadros de
+# controle não têm byte nulo nenhum (medido quando elas entraram): o Git os
+# toma por texto, e um 0x0D 0x0A que aparecesse no meio de um deles sairia do
+# commit com um byte a menos. A conferência exige esta linha.
+fuzz/sementes/**                                     -text
+
 # As versões da API de MODs. `api/congeladas.sha256` guarda o SHA-256 de cada
 # uma, e `a_api_publicada_nao_se_edita` confere contra os bytes da cópia de
 # trabalho: um `\r` a mais seria uma versão publicada «editada» por ninguém.
