@@ -1,6 +1,6 @@
 //! O que o SEELE diz em público não pode contradizer o código.
 //!
-//! # O defeito que este arquivo existe para não deixar voltar
+//! # Os dois defeitos que este arquivo existe para não deixar voltar
 //!
 //! **Um programa que não existe.** O cliente de terminal saiu do repositório
 //! com o ADR 0039 (`aa77ad8`), e o produto passou a ser o app e o `seeled`. O
@@ -10,12 +10,19 @@
 //! encontrado», e o `cargo build` do README falhava antes de compilar qualquer
 //! coisa. Nada no repositório reprovava: um texto não compila.
 //!
+//! **Uma promessa de privacidade que o produto não cumpre.** A `specs/01`
+//! dizia que o servidor nunca vê áudio em claro, e o README, que o TLS é
+//! «ponta a ponta». O TLS vai de cada pessoa até o servidor de quem hospeda, e
+//! ali a voz e o texto chegam em claro: a `specs/08` diz isso e manda escrever
+//! (o operador do servidor lendo o áudio está fora de escopo na v1). Uma frase
+//! que promete mais do que o produto entrega é a frase em que alguém confia.
+//!
 //! # O que fica de fora, e por quê
 //!
-//! Análises, planos e ADRs citam o cliente de terminal, e ficam como estão: são
-//! o histórico do que se decidiu, e reescrevê-los apagaria o motivo das
-//! decisões. O que este arquivo varre é o que alguém lê para instalar, subir ou
-//! testar o SEELE.
+//! Análises, planos e ADRs citam o cliente de terminal e o «ponta a ponta» de
+//! antes, e ficam como estão: são o histórico do que se decidiu, e reescrevê-los
+//! apagaria o motivo das decisões. O que este arquivo varre é o que alguém lê
+//! para instalar, subir, testar ou confiar no SEELE.
 
 #![allow(
     clippy::expect_used,
@@ -151,5 +158,80 @@ fn nenhum_texto_publicado_manda_rodar_um_programa_que_nao_existe() {
          de compilar. O cliente é o app, e o que se cola nele é o link que o \
          `seeled` imprime:\n{}",
         achados.join("\n")
+    );
+}
+
+/// O texto em minúsculas e com todo espaço, quebra de linha inclusive, virado
+/// um espaço só.
+///
+/// Um parágrafo de Markdown é quebrado onde o editor quiser, e uma frase
+/// partida em duas linhas continua sendo a mesma frase para quem lê.
+fn normalizado(texto: &str) -> String {
+    texto
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[test]
+fn nenhum_texto_promete_que_quem_hospeda_nao_ouve() {
+    const PROMESSA: &str = "nunca vê áudio em claro";
+
+    let mut lidos = vec![("README.md".to_owned(), ler("README.md"))];
+    let pasta = raiz().join("specs");
+    let mut specs: Vec<_> = std::fs::read_dir(&pasta)
+        .expect("specs/ tem de ser legível")
+        .map(|entrada| entrada.expect("entrada de specs/").path())
+        .filter(|caminho| caminho.extension().is_some_and(|ext| ext == "md"))
+        .collect();
+    specs.sort();
+    assert!(
+        specs
+            .iter()
+            .any(|caminho| caminho.ends_with("01-arquitetura.md")),
+        "a `specs/01-arquitetura.md` sumiu da pasta, e era ela que fazia a promessa: \
+         este guarda passaria sem olhar para lugar nenhum"
+    );
+    for caminho in specs {
+        let nome = format!(
+            "specs/{}",
+            caminho.file_name().expect("arquivo").to_string_lossy()
+        );
+        let texto = std::fs::read_to_string(&caminho).expect("spec legível");
+        lidos.push((nome, texto));
+    }
+
+    for (nome, texto) in &lidos {
+        assert!(
+            !normalizado(texto).contains(PROMESSA),
+            "`{nome}` diz que o servidor «{PROMESSA}». Ele recebe a voz e o texto em \
+             claro, e a `specs/08` manda dizer isso: quem hospeda pode, em tese, \
+             gravar a voz. Uma promessa de privacidade que o produto não cumpre é a \
+             frase em que alguém confia"
+        );
+    }
+
+    // «Ponta a ponta», sozinho, é o nome do que a v1 **não** tem: cifrado de
+    // quem fala até quem ouve, com o servidor no meio sem ler. O TLS daqui vai
+    // de cada pessoa até o servidor de quem hospeda, e a expressão só pode
+    // ficar no README dizendo isso na mesma frase.
+    let readme = normalizado(&ler("README.md"));
+    let soltas: Vec<&str> = readme
+        .split(['.', '!', '?'])
+        .filter(|frase| frase.contains("ponta a ponta") && !frase.contains("até o servidor"))
+        .map(str::trim)
+        .collect();
+    assert!(
+        soltas.is_empty(),
+        "o README diz «ponta a ponta» sem dizer até onde. O TLS vai de cada pessoa \
+         até o servidor de quem hospeda, e quem hospeda recebe a voz e o texto em \
+         claro (specs/08): sem o «até o servidor» na mesma frase, a expressão \
+         promete a cifra de quem fala até quem ouve, que a v1 não tem.\n{}",
+        soltas
+            .iter()
+            .map(|frase| format!("  «{frase}»"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }

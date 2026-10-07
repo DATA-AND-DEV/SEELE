@@ -105,8 +105,9 @@ O ponto de encontro não vê nada do que é dito: ele apresenta dois endereços 
 ao outro, e guarda em memória, no **quarto**, onde cada anfitrião disse morar —
 o servidor e a escuta de avisos, cada endereço valendo 60 segundos desde o
 último registro dele —, e quem volta pela lista pergunta ao quarto antes de
-tentar. O TLS é ponta a ponta, e o ponto não está nele. Cada endereço da
-resposta tem a sua barreira:
+tentar. O TLS vai de cada pessoa até o servidor de quem hospeda, e o ponto de
+encontro não está nele. Quem hospeda recebe a voz e o texto em claro, como diz
+a specs/08. Cada endereço da resposta tem a sua barreira:
 
 - o do **servidor** é conferido pela impressão digital, dentro do TLS, antes de
   qualquer convite ou senha sair;
@@ -370,8 +371,8 @@ Verificado **entre duas máquinas de verdade**, em redes diferentes: o furo de
 NAT abrindo caminho de uma casa atrás de CGNAT para uma rede móvel, com o ponto
 de encontro apresentando as duas pontas.
 
-Ainda **não** verificado: voz por microfone real entre duas máquinas, de ponta a
-ponta, com as duas pessoas se ouvindo. É a última validação que falta, e
+Ainda **não** verificado: voz por microfone real entre duas máquinas, com as
+duas pessoas se ouvindo. É a última validação que falta, e
 `docs/teste-duas-maquinas.md` é o roteiro dela.
 
 O que está frouxo está em `docs/pendencias.md`, com nome e motivo.

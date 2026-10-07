@@ -52,7 +52,7 @@ Consequências positivas:
 - CPU do servidor fica quase constante independente do número de falantes.
 - Volume e mudo por usuário são possíveis (impossível com mixagem no servidor).
 - Áudio espacial fica viável depois.
-- O servidor nunca vê áudio em claro → E2EE é um incremento, não uma reescrita.
+- O servidor encaminha o Opus sem decodificar nem reescrever (specs/02), mas o recebe em claro: quem hospeda pode, em tese, gravar a voz. Por não tocar no payload, E2EE é um incremento, e não uma reescrita (specs/08).
 
 Consequência negativa: banda cresce com O(n²) no pior caso. Para o alvo (VoiceRooms de até ~15 pessoas), é irrelevante. Mitigação embutida: o VAD faz com que só quem está falando transmita, e na prática 2–3 pessoas falam por vez.
 
