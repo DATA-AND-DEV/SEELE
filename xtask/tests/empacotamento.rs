@@ -2403,11 +2403,17 @@ impl Instalador {
     /// Roda o `install.sh`. Com `maquina`, o `uname` e o `sysctl` viram dublês
     /// que respondem o sistema, a arquitetura e o `hw.optional.arm64` pedidos.
     fn rodar(&self, maquina: Option<(&str, &str, &str)>) -> (i32, String) {
+        self.rodar_contra(&format!("file://{}", self.versao().display()), maquina)
+    }
+
+    /// O mesmo, baixando de outra base: a de uma rede que não responde, por
+    /// exemplo.
+    fn rodar_contra(&self, base: &str, maquina: Option<(&str, &str, &str)>) -> (i32, String) {
         let mut comando = Command::new("sh");
         comando
             .arg(raiz().join("install.sh"))
             .env("SEELE_VERSION", "v9.9.9")
-            .env("SEELE_BASE", format!("file://{}", self.versao().display()))
+            .env("SEELE_BASE", base)
             .env("SEELE_BIN", self.base.join("bin"));
         if let Some((sistema, arquitetura, arm64)) = maquina {
             let ferramentas = self.base.join("ferramentas");
@@ -2474,6 +2480,45 @@ fn o_instalador_de_uma_linha_confere_a_lista_de_somas_antes_de_baixar_o_pacote()
     assert!(
         !instalador.instalado().exists(),
         "a recusa deixou um seeled instalado:\n{texto}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sem_rede_o_instalador_nao_diz_que_a_versao_nao_publica_somas_nem_manda_baixar_sem_conferir() {
+    // A lista de somas é o primeiro download, e por isso é ela que topa com a
+    // rede fora. Uma frase só para «não achei» e «não falei com ninguém» dizia
+    // «este release não publica SHA256SUMS» a quem estava sem rede, e mandava
+    // baixar manualmente sem conferir. A porta 9 de 127.0.0.1 recusa a conexão
+    // sem sair desta máquina.
+    let instalador = Instalador::novo();
+
+    let (estado, texto) = instalador.rodar_contra("http://127.0.0.1:9/v9.9.9", None);
+
+    assert_ne!(
+        estado, 0,
+        "sem rede, o install.sh não pode terminar bem:\n{texto}"
+    );
+    assert!(
+        texto.contains("não consegui falar com"),
+        "sem rede, o install.sh não disse que não conseguiu falar com quem publica:\n{texto}"
+    );
+    assert!(
+        !texto.contains("Baixe manualmente") && !texto.contains("não publica"),
+        "sem rede, o install.sh culpou a versão e mandou baixar sem conferir:\n{texto}"
+    );
+
+    // E a versão que não existe continua dita como tal, com o caminho de baixar
+    // à mão só para ela.
+    let (estado, texto) = instalador.rodar(None);
+
+    assert_ne!(
+        estado, 0,
+        "uma versão sem lista de somas não pode instalar:\n{texto}"
+    );
+    assert!(
+        texto.contains("não existe ali, ou não publica a lista de somas"),
+        "a versão sem SHA256SUMS não foi dita como uma versão que não existe ali:\n{texto}"
     );
 }
 

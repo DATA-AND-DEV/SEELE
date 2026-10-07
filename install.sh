@@ -103,14 +103,27 @@ trap 'rm -rf "$TRABALHO"' EXIT INT TERM
 # publica. Baixar o pacote primeiro respondia a falta dele com «não consegui
 # baixar», que não diz se foi a rede, o nome ou a versão — e é a falta que
 # acontece: a v0.15.0 não publica pacote do Linux (medido em 04/10/2026).
+#
+# **E a falta da lista não é uma coisa só.** O código de saída do curl separa a
+# versão que não existe (22, um HTTP de 400 para cima; 37, o arquivo que não
+# está lá quando a base é um `file://`) da rede que não respondeu (todo o
+# resto). Uma frase só para os dois dizia «este release não publica
+# SHA256SUMS» a quem estava sem rede, e mandava baixar sem conferir.
 printf 'conferindo o que a versão %s publica... ' "$VERSAO"
-if ! curl -fsSL -o "$TRABALHO/SHA256SUMS" "$BASE/SHA256SUMS"; then
-    erro "este release não publica SHA256SUMS.
+codigo=0
+curl -fsSL -o "$TRABALHO/SHA256SUMS" "$BASE/SHA256SUMS" || codigo=$?
+case "$codigo" in
+    0) : ;;
+    22|37) erro "não achei $BASE/SHA256SUMS: a versão $VERSAO não existe ali, ou não publica a lista de somas.
 
+       Confira o nome da versão em https://github.com/$REPO_DAS_VERSOES/releases.
        Sem soma não há o que conferir, e instalar um binário sem conferir é
-       exatamente o que este script deveria evitar. Baixe manualmente se
-       aceitar o risco conscientemente."
-fi
+       exatamente o que este script deveria evitar. Baixe manualmente só se
+       aceitar o risco conscientemente." ;;
+    *) erro "não consegui falar com $BASE (o curl saiu com $codigo).
+
+       Confira a rede e tente de novo. Nada foi instalado." ;;
+esac
 
 ESPERADA=$(grep " \*\{0,1\}$PACOTE\$" "$TRABALHO/SHA256SUMS" | awk '{print $1}' | head -n1)
 [ -n "$ESPERADA" ] || erro "a versão $VERSAO não publica o servidor para $SISTEMA.
