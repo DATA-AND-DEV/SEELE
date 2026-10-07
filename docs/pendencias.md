@@ -7710,6 +7710,11 @@ número depois do último, para que nenhum número já citado mude.
    grep -n "fraseDeErro(falha) : String" apps/seele-app/ui/base.js
    ```
 
+   **Fechado em 2026-10-04**, `b655edf` (lote K1 dos abertos da 1.0): as
+   recusas por versão e por tipo desconhecido vão ao registro, e o `catch`
+   registra `motivoDaFalha`. Plano e relatório em
+   `docs/superpowers/sdd/2026-10-04-abertos/`.
+
 5. **m15 do 1C · A frase da janela vai sem aspas, e um MOD forja `mod_id=` na
    linha.** `registrar_da_janela` escreve o texto do MOD como a mensagem da
    linha, antes de `onde=` e `mod_id=`: medido pela revisão ampla do 1C, um
@@ -7734,6 +7739,10 @@ número depois do último, para que nenhum número já citado mude.
    grep -n 'oQue: String(o_que), modId' apps/seele-app/ui/base.js
    grep -n "elem.dataset.chaveDoMod = plano.no.chave.slice(0, 120)" apps/seele-app/ui/mods-regiao.js
    ```
+
+   **Fechado em 2026-10-04**, `ef707c7` (lote K1 dos abertos da 1.0): o
+   substituto solto vira U+FFFD antes do invoke, e a chave é cortada por ponto
+   de código.
 
 7. **m2 do 1C · Uma imagem com cabeçalho válido e corpo corrompido fica
    calada** no retrato (o `<img>` sem ouvinte de `error`), no fundo de mídia e
@@ -7831,6 +7840,12 @@ Vieram depois, da revisão do Lote F-Fecho:
     grep -n ".filter(|id| !id.is_empty())" apps/seele-app/src/main.rs   # registrar_da_janela omite o id vazio
     ```
 
+    **Metade de servidor fechada em 2026-10-04**, `fbf2d0d` e `deed8a0` (lote
+    B dos abertos da 1.0): o id do fio vai à linha sem o que quebra ou inverte
+    a linha, o pedido do catálogo diz `catalogo=true`, e um id feito só do que
+    o filtro tira diz `mod_id_ilegivel=true`. **A metade do app
+    (`mod_request`) continua aberta**: é do lote C.
+
 27. **FF-m2 da revisão do Lote F-Fecho · Quando a metade de servidor de um
     MOD lança, o `seele.log` diz só `mod threw`.** `Falha::Lancou`
     (`crates/seele-server/src/mods/mod.rs`) não leva nada: `pedir` troca a
@@ -7860,6 +7875,12 @@ Vieram depois, da revisão do Lote F-Fecho:
     grep -n '"MOD desabilitado: a sala continua sem ele"' -B 5 crates/seele-server/src/mods/despacho.rs
     ```
 
+    **Fechado em 2026-10-04**, `cd71f8e`, `380a745` e `34235fe` (lote B dos
+    abertos da 1.0): a linha de quem hospeda diz o que a metade de servidor
+    lançou e onde, entre aspas e cortado no teto, e uma falha em que nada foi
+    lançado diz `mod failed`, e não `mod threw`; na carga, diz
+    `mod failed while loading`.
+
 ### Testes que não provam o que dizem
 
 13. **m4 do 1C · Nada roda o elo da janela até o Rust.** Tirar o `modId` do
@@ -7874,6 +7895,10 @@ Vieram depois, da revisão do Lote F-Fecho:
     ```sh
     grep -n 'invoke("registrar_da_janela"' apps/seele-app/ui/base.js
     ```
+
+    **Fechado em 2026-10-04**, `4599e14` (lote K1 dos abertos da 1.0): a
+    bancada `contribuicoes-e-camadas.cjs` roda `registrarNoAnfitriao` e o
+    `anotarRecusa` de verdade até o invoke de `registrar_da_janela`.
 
 14. **Provas do console do 1C (m8, m9, T3 M2, T1, T2 N1 e m1).**
     - m8: a pilha de um `Error` passado ao `console` pode sumir: tirar o
