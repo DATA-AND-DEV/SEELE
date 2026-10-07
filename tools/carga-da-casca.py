@@ -46,11 +46,27 @@ import tempfile
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 CASCA = RAIZ / "apps" / "seele-app" / "ui"
+PROTO_MODS = RAIZ / "crates" / "seele-proto" / "src" / "mods.rs"
+
+
+def apis_aceitas() -> str:
+    """`APIS_ACEITAS` lida do Rust, e não copiada para cá.
+
+    Um número escrito à mão no duble envelhece na primeira subida de API, e o
+    catálogo do roteiro passa a oferecer o que o build de verdade filtraria.
+    Falha alto se a constante mudar de forma: um duble que adivinha não prova.
+    """
+    achado = re.search(r"pub const APIS_ACEITAS: &\[u32\] = &\[([0-9, ]+)\];", PROTO_MODS.read_text())
+    if not achado:
+        raise SystemExit(f"não achei `APIS_ACEITAS` em {PROTO_MODS}; o duble precisa dela.")
+    return "[" + achado.group(1) + "]"
+
 
 DUBLE = """<script>
 // O duble do Tauri. Responde o bastante para a casca andar; ver o cabeçalho de
 // `tools/carga-da-casca.py` sobre o que ele deliberadamente não finge.
 const SEELE_RETRATO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGP4FCSPFTEMLQkA4oZYwU22lhgAAAAASUVORK5CYII=";
+const SEELE_APIS_ACEITAS = __APIS_ACEITAS__;
 const SEELE_RESPOSTAS = {
   hospedar: { aqui: "127.0.0.1:8383", convite: "seele://127.0.0.1:8383?fp=abc",
               alcance: "SoRedeLocal", porta_recusada: null, encontro_recusado: null },
@@ -108,6 +124,8 @@ window.__SEELE_CHAMADAS = [];
 window.__SEELE_ARGS = {};
 window.__SEELE_EM_SESSAO = false;
 window.__SEELE_APELIDO = "";
+window.__SEELE_SERVIDORES = [];
+window.__SEELE_SEM_RESPOSTA = new Set();
 window.__SEELE_OUVINTES = {};
 window.__SEELE_EMITIR = (carga) => {
   for (const ouvinte of window.__SEELE_OUVINTES["seele://event"] ?? []) {
@@ -142,7 +160,28 @@ window.__TAURI__ = {
         }
         return resposta;
       }
-      if (/conhecid|fontes|lista|dispositiv|visitad|salas|canais|pessoas/i.test(cmd)) return [];
+      if (/conhecid|fontes|lista|dispositiv|visitad|salas|canais|pessoas|^microfones$|^saidas$/i.test(cmd)) return [];
+      // **Os três comandos do caminho de HOSPEDAR AQUI**, com o formato de
+      // `servidores::Servidor` e `versoes::VersaoInstalada`. Sem eles o `null`
+      // de baixo estourava em `guardados.length` e `guardado.id`, dentro de
+      // `try`s que só fazem `console.warn` — e a casca ficava na entrada com a
+      // carga limpa. Um roteiro pode pôr servidores em `__SEELE_SERVIDORES`.
+      if (cmd === "servidores_guardados") return window.__SEELE_SERVIDORES;
+      if (cmd === "versoes_instaladas") return [];
+      // Com `null`, `ultimaQueEsteBuildEntende` estourava em `.length` e o
+      // catálogo inteiro virava «ALGO FALHOU».
+      if (cmd === "apis_de_mod_aceitas") return SEELE_APIS_ACEITAS;
+      if (cmd === "pacotes_no_cache") return [];
+      if (cmd === "criar_servidor") {
+        const nome = ((args && args.nome) || "").trim();
+        const raiz = nome.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+          .slice(0, 32) || "servidor";
+        let id = raiz;
+        for (let n = 2; window.__SEELE_SERVIDORES.some((s) => s.id === id); n++) id = `${raiz}-${n}`;
+        const novo = { id, nome, versao: "", caminho: `servidores/${id}/seele.db`, ultimo_uso: 0 };
+        window.__SEELE_SERVIDORES.push(novo);
+        return novo;
+      }
       // Um retrato para uma pessoa só: o que se quer ver é a diferença entre um
       // avatar com imagem e um com iniciais, lado a lado no mesmo quadro.
       if (cmd === "imagem_da_pessoa") return args && args.person === 2 ? SEELE_RETRATO : null;
@@ -160,6 +199,12 @@ window.__TAURI__ = {
         return null;
       }
       if (/apelido|nickname|preferenc|link|caminho/i.test(cmd)) return "";
+      // **O que caiu aqui fica anotado.** Metade dos comandos responde `null`
+      // de verdade; a outra metade devolve uma lista ou um objeto, e o `null`
+      // vira um TypeError dentro de um `try` que só faz `console.warn`. O
+      // aparelho imprime esta lista no fim para o próximo comando novo da
+      // casca aparecer dito, e não como uma tela que não trocou.
+      window.__SEELE_SEM_RESPOSTA.add(cmd);
       return null;
     },
     convertFileSrc: (p) => p,
@@ -197,15 +242,49 @@ const visivel = (id) => {
 };
 const telas = (quando) =>
   `${quando}: boot=${visivel("tela-boot")} auth=${visivel("tela-auth")} sessao=${visivel("tela-sessao")}`;
+// **Um roteiro pode reprovar.** Relatar só não basta: `sessao.js` relatou
+// `sessao=escondida` por semanas com a carga limpa no fim, e quem lê a última
+// linha lê «limpa». `exigir` escreve REPROVADO, para o roteiro ali e faz o
+// aparelho sair com 1.
+const exigir = (condicao, frase) => {
+  if (condicao) return;
+  relatar("REPROVADO: " + frase);
+  throw Object.assign(new Error(frase), { reprovado: true });
+};
+const ate = async (condicao, ms) => {
+  for (let t = 0; t < ms && !condicao(); t += 50) await espera(50);
+  return condicao();
+};
+// HOSPEDAR AQUI até a sessão, pelo caminho que a pessoa faz hoje: o botão abre
+// a tela de preparar (ou a lista, havendo servidor guardado), e é CONFIRMAR que
+// hospeda. O diálogo da porta fecha porque cobre a tela. Quem chama recebe a
+// sessão na frente **ou** a reprovação — nunca a entrada calada.
+const entrarNaSessao = async () => {
+  document.getElementById("botao-hospedar").click();
+  if (await ate(() => visivel("tela-preparar") === "VISIVEL", 900)) {
+    document.getElementById("preparar-confirmar").click();
+  }
+  await ate(() => visivel("tela-sessao") === "VISIVEL", 1200);
+  await espera(200);
+  const porta = document.getElementById("porta");
+  if (porta && !porta.hidden) {
+    document.getElementById("porta-entendi").click();
+    await espera(200);
+  }
+  exigir(visivel("tela-sessao") === "VISIVEL",
+    telas("a sessão não ficou visível depois de HOSPEDAR AQUI") +
+      ` preparar=${visivel("tela-preparar")} servidores=${visivel("tela-servidores")}`);
+};
 setTimeout(async () => {
   try {
 """
 
 PE_DO_ROTEIRO = """
   } catch (erro) {
-    relatar("ROTEIRO ESTOUROU: " + erro);
+    if (!(erro && erro.reprovado)) relatar("ROTEIRO ESTOUROU: " + erro);
   }
   console.log("SEELE-RELATO " + window.__SEELE_RELATO.join(" | "));
+  console.log("SEELE-SEM-RESPOSTA " + [...window.__SEELE_SEM_RESPOSTA].sort().join(" "));
 }, 800);
 </script>
 """
@@ -256,7 +335,8 @@ def main() -> int:
         if opcoes.roteiro:
             corpo = opcoes.roteiro.read_text()
             roteiro = CABECA_DO_ROTEIRO + corpo + PE_DO_ROTEIRO
-        pagina.write_text(texto[:corte] + DUBLE + texto[corte:] + roteiro)
+        duble = DUBLE.replace("__APIS_ACEITAS__", apis_aceitas())
+        pagina.write_text(texto[:corte] + duble + texto[corte:] + roteiro)
 
         saida = subprocess.run(
             [
@@ -276,20 +356,39 @@ def main() -> int:
             shutil.copy(pasta / "foto.png", opcoes.foto)
 
     tudo = saida.stdout + saida.stderr
-    estouros = sorted(set(re.findall(r"Uncaught [A-Za-z]*Error: [^\"]*", tudo)))
+    # `(in promise)` também: uma rejeição que ninguém pegou é um estouro, e
+    # `desenharVersoes` estourou assim sem que este aparelho dissesse nada.
+    estouros = sorted(set(re.findall(r"Uncaught (?:\(in promise\) )?[A-Za-z]*Error: [^\"]*", tudo)))
     relatos = re.findall(r"SEELE-RELATO ([^\"]*)", tudo)
+    partes = [parte for linha in relatos for parte in linha.split(" | ")]
+    sem_resposta = sorted({c for linha in re.findall(r"SEELE-SEM-RESPOSTA ([^\"]*)", tudo)
+                           for c in linha.split()})
+    # Um roteiro que reprovou, que estourou no meio, ou que nem chegou ao fim
+    # dentro do orçamento de tempo não é uma carga limpa — e as três coisas
+    # terminavam com «carga limpa» antes.
+    falhas = [p for p in partes if p.startswith(("REPROVADO", "ROTEIRO ESTOUROU"))]
+    if opcoes.roteiro and not relatos:
+        falhas.append("o roteiro não chegou ao fim: nenhum relato saiu da página")
 
     if opcoes.tudo:
         for linha in tudo.splitlines():
             if "CONSOLE" in linha:
                 print(linha.split("CONSOLE:", 1)[-1].strip())
-    for linha in relatos:
-        for parte in linha.split(" | "):
-            print(parte)
+    for parte in partes:
+        print(parte)
+    if sem_resposta:
+        # Informação, e não reprovação: muitos destes respondem `null` no
+        # produto também. Quando uma tela não troca, é aqui que se olha primeiro.
+        print("\no duble respondeu null a: " + " ".join(sem_resposta))
     if estouros:
         print("\nestouros na carga:")
         for e in estouros:
             print(f"  {e}")
+    if falhas:
+        print("\no roteiro reprovou:")
+        for f in falhas:
+            print(f"  {f}")
+    if estouros or falhas:
         return 1
     print("\ncarga limpa: nenhum script estourou.")
     return 0

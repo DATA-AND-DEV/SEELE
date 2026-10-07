@@ -3,10 +3,7 @@
 // O caminho é: o servidor difunde `ServerIconChanged`, o cliente sobe
 // `icon_revision`, avisa `ServerChanged`, e a casca rebusca os bytes.
 window.__SEELE_ICONE_DO_SERVER = [1, 2, 3, 4];
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 document.getElementById("botao-server-sessao").click();
 await espera(300);
 document.getElementById("secao-servidor").click();

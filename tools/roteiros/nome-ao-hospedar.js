@@ -11,7 +11,7 @@ document.getElementById("perfil-salvar").click();
 await espera(400);
 relatar("gravado nesta maquina: [" + (window.__SEELE_APELIDO ?? "(nada)") + "]");
 
-document.getElementById("botao-hospedar").click();
-await espera(900);
+await entrarNaSessao();
 const args = window.__SEELE_ARGS.connect;
 relatar("connect levou nickname=[" + ((args && args.nickname) ?? "(nunca chamou)") + "]");
+exigir(args && args.nickname === "aleta", "o apelido gravado não foi no connect de quem hospeda");

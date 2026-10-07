@@ -1,10 +1,7 @@
 // O mesmo, olhando o ladrilho da trilha — que é onde o servidor se mostra na
 // tela o tempo todo, e não só quando a configuração está aberta.
 window.__SEELE_ICONE_DO_SERVER = [1, 2, 3, 4];
-document.getElementById("botao-hospedar").click();
-await espera(900);
-const porta = document.getElementById("porta");
-if (porta && !porta.hidden) { document.getElementById("porta-entendi").click(); await espera(200); }
+await entrarNaSessao();
 const olhar = () => {
   const ladrilho = document.getElementById("trilha-server");
   const img = ladrilho.querySelector("img");

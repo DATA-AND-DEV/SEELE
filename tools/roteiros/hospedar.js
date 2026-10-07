@@ -8,8 +8,10 @@
 desenhar = () => {};
 atualizar = async () => {};
 relatar(telas("antes"));
-document.getElementById("botao-hospedar").click();
-await espera(700);
+// `entrarNaSessao` reprova se a sessão não abrir; o que este roteiro acrescenta
+// é que ela abre **sem** a conferência de chave no caminho.
+await entrarNaSessao();
 relatar(telas("depois de HOSPEDAR"));
+exigir(visivel("tela-auth") === "escondida", telas("HOSPEDAR passou pela conferência de chave"));
 const registro = document.getElementById("auth-registro");
 relatar("registro: " + registro.textContent.replace(/\s+/g, " ").slice(0, 160));
