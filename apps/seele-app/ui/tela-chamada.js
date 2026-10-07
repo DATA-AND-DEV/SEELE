@@ -769,6 +769,12 @@ $("operador-sair").addEventListener("click", async () => {
     } catch (falha) {
       console.warn("leave_voice_room:", falha);
     }
+    // **E a grade fecha.** Fora da sala esta vista não tem o que desenhar, e
+    // ficar nela mostraria «VOCÊ NÃO ESTÁ EM NENHUMA SALA» depois de a pessoa
+    // ter saído de propósito. A promessa estava escrita no comentário de um
+    // `SAIR DA SALA` próprio da grade; o botão foi fundido neste, e a volta
+    // não veio junto — o simulador do iOS a achou em 05/10/2026.
+    if (!$("vista-chamada").hidden) fecharChamada();
     await atualizar();
     return;
   }
@@ -789,15 +795,6 @@ $("operador-sair").addEventListener("click", async () => {
 
 
 
-
-/**
- * `SAIR DA SALA` — a outra metade da distinção do §7.1.
- *
- * Este é o `leave_voice_room`, e é o único dos dois botões do rodapé que sai da sala
- * de voz. Ele devolve para os canais depois, porque fora da sala esta tela não
- * tem grade nenhuma para desenhar e ficar nela mostraria o vazio de uma sala
- * que a pessoa acabou de deixar de propósito.
- */
 
 /**
  * O volume, por delegação.
