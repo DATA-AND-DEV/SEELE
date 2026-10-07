@@ -264,14 +264,57 @@ para sempre, convite gasto não vale nada.
 
 ## Compartilhar a tela
 
-**Desenhado e medido, ainda não construído.** A spec está em
-`docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md` e a prova
-em `spikes/tela-no-transporte/`.
+Numa sala de voz, **COMPARTILHAR** — no rodapé, ou ao lado do palco vazio — abre
+a caixa que escolhe o que sai desta máquina e até onde ele sobe:
 
-A pergunta que a prova respondeu é a que mais importa: **quando alguém
-compartilha a tela e a subida da casa não dá conta, o que sobra da voz?** Um par
-QUIC inteiro num processo, com um cano de 2000 kbps no meio, carga com forma de
-vídeo e sem codec:
+- **o que mostrar** — uma JANELA ou um MONITOR, cada um com o tamanho ao lado;
+- **RESOLUÇÃO**, 540p, 720p ou 1080p, e **QUADROS**, 30 ou 60 por segundo. A
+  caixa nasce em 720p a 60, e as duas trocas valem durante a transmissão, sem
+  parar e recomeçar;
+- **INCLUIR SOM**, marcado por padrão. A frase embaixo dele diz o que esta
+  máquina faz com a conversa: o macOS, do 13 em diante, a deixa fora do que é
+  capturado; o Windows captura a saída inteira, o SEELE junto, e quem fala se
+  ouve de volta — por isso a frase oferece compartilhar uma janela em vez do
+  monitor, ou desmarcar o som.
+
+A resolução e os quadros são **teto, e nunca piso**. Quando o caminho não compra
+o que foi pedido, a imagem desce sozinha — a resolução segura, o quadro cede —, e
+o palco mostra o que está saindo ao lado do que foi pedido.
+
+**O vídeo é H.264.** Quem transmite codifica pelo codificador do sistema —
+VideoToolbox no macOS, Media Foundation no Windows
+([ADR 0041](docs/adr/0041-o-codec-por-hardware-e-a-excecao-ao-unsafe.md)) — e
+cai para o OpenH264, em software, quando ele recusa. O OpenH264 é o **módulo do
+Cisco, baixado no primeiro uso**: sem ele a caixa não compartilha, e pede para
+baixá-lo antes de qualquer outra escolha, dizendo tamanho e origem. O arquivo é
+conferido por SHA-256 e fica nesta máquina nas atualizações seguintes. Ele não
+vem no instalador por licença, e não por tamanho: a cobertura de patente do
+H.264 acompanha o binário que o Cisco distribui, e pô-lo dentro do nosso `.dmg`
+nos faria distribuidor sem ela. Há módulo publicado para o macOS em Apple
+Silicon e para o Windows x86-64; o Linux não compartilha tela, por decisão — o
+portal do sistema pediria `pipewire`, e o binário deixaria de ser autocontido.
+Tudo isso mora em `crates/seele-video`.
+
+**Quem leva a imagem até quem assiste é o servidor**, como já faz com a voz. A
+**MALHA**, em CONFIGURAÇÕES, deixa a tela vir de outra pessoa: quem assiste
+recebe direto de um par, e o servidor reassume sozinho quando o par falha ou
+sai. São dois consentimentos, porque são duas perguntas — emprestar a sua subida
+é quanto da sua internet você gasta pelos outros; aceitar ser servido é aceitar
+que o seu endereço seja entregue a quem te serve. Sem escolher nada, você não
+participa, e a tela vem do servidor.
+
+**Entre duas máquinas Windows a tela não aparece.** É regressão, e está aberta
+como pendência 33 em `docs/pendencias.md`: os quatro suspeitos foram eliminados
+por medida, e o que sobra exige sessão gráfica para investigar.
+
+### A prova que veio antes do código
+
+O desenho está em
+`docs/superpowers/specs/2026-08-22-compartilhamento-de-tela-design.md`, e a
+prova em `spikes/tela-no-transporte/`. A pergunta que ela respondeu é a que mais
+importa: **quando alguém compartilha a tela e a subida da casa não dá conta, o
+que sobra da voz?** Um par QUIC inteiro num processo, com um cano de 2000 kbps
+no meio, carga com forma de vídeo e sem codec:
 
 ```text
 cenário                        perda   p50 ms   p95 ms   vídeo kbps
@@ -295,14 +338,17 @@ Três conclusões, e nenhuma delas era óbvia antes de medir:
 A regra de aceite da v1 é uma frase: **a voz nunca cede à tela.** Quem baixa
 resolução e quem para é o vídeo.
 
-O que fica de fora da primeira versão está enumerado com motivo — doze itens,
-entre eles áudio da tela, câmera, gravação e controle remoto.
+O que ficava de fora da primeira versão está enumerado com motivo na spec —
+doze itens, entre eles câmera, gravação e controle remoto. Três entraram
+depois: os 60 quadros, por medida
+([ADR 0040](docs/adr/0040-sessenta-quadros-entram-por-medida.md)), o codificador
+do sistema (ADR 0041) e o som da tela.
 
 ---
 
 ## Em que pé está
 
-**1.362 testes automáticos passando.** O que eles cobrem:
+**2.621 testes automáticos passando.** O que eles cobrem:
 
 - dois clientes conversando por texto e voz sintética através do servidor
 - pipeline de áudio sob 5% de perda induzida, e soak de dez minutos em tempo
