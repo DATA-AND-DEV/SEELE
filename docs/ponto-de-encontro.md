@@ -106,16 +106,23 @@ aprenderia de qualquer forma; um link é para dar a quem se convida.
 
 ## Como não usar o nosso
 
-Uma variável de ambiente, na máquina que **hospeda**:
+Uma variável de ambiente, na máquina que **hospeda**. O degrau 4 é do
+**HOSPEDAR AQUI** do app, e não do `seeled`: abra o SEELE com a variável no
+ambiente e aperte **HOSPEDAR AQUI**.
 
 ```sh
 # usar o seu
-SEELE_ENCONTRO=encontro.suacasa.exemplo:8384 connection --hospedar
+SEELE_ENCONTRO=encontro.suacasa.exemplo:8384 ./target/release/seele-app
 
 # não usar nenhum: o degrau 4 deixa de existir, e nenhum pacote sai daqui
 # para ponto de encontro nenhum
-SEELE_ENCONTRO=nao connection --hospedar
+SEELE_ENCONTRO=nao ./target/release/seele-app
 ```
+
+O app só vê a variável se nascer com ela: aberto pelo Finder, pelo Dock ou pelo
+menu Iniciar, ele herda o ambiente do sistema, e não o do seu terminal. Com o
+app instalado, rode do terminal o executável do app, de dentro da instalação
+(no macOS, em `SEELE.app/Contents/MacOS/`, ao lado do `seeled`).
 
 Quem entra não configura nada: o endereço do ponto de encontro viaja no próprio
 `seele://`, dentro do `enc=`. É isso que faz o serviço ser trocável de verdade —

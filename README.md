@@ -136,18 +136,21 @@ que abre o caminho. O ADR 0022 conta a escada inteira, e por que o degrau 5
 
 ### Um arquivo, tudo dentro
 
-Na aba **Releases**, um instalador por sistema: `.dmg` no macOS, `.exe` no
-Windows, `.deb` no Linux. Cada um traz as três coisas — o app gráfico, o `connection`
-e o `seeled` —, então quem instala não precisa decidir nada antes de entender a
-diferença.
+Na aba **Releases**, um instalador por sistema: `.dmg` no macOS (Apple
+Silicon) e `.exe` no Windows. Cada um traz as duas coisas — o app gráfico e o
+`seeled` —, então quem instala não precisa decidir nada antes de entender a
+diferença. Linux e Mac Intel ainda não têm pacote: neles se compila do código,
+como está mais abaixo.
 
 **Nada é assinado.** No macOS o sistema vai dizer que *não consegue verificar
 se o app contém malware*, e o botão que ele oferece é "Mover para o Lixo". Não
 é detecção de nada: é a ausência de notarização, que exige conta paga da Apple.
 A saída é uma linha, `xattr -dr com.apple.quarantine /Applications/SEELE.app`,
-ou abrir pelo botão direito → **Abrir**. No Windows o SmartScreen avisa e o
-caminho é **Mais informações** → **Executar assim mesmo**. As notas de release
-explicam cada caso.
+ou, depois da primeira tentativa de abrir, **Ajustes do Sistema** →
+**Privacidade e Segurança** → **Abrir assim mesmo** (*Open Anyway*), o caminho
+do macOS 15, que tirou o atalho do botão direito. No Windows o SmartScreen
+avisa e o caminho é **Mais informações** → **Executar assim mesmo**. As notas
+de release explicam cada caso.
 
 ### Só o servidor, numa linha
 
@@ -176,20 +179,20 @@ Compilando do código-fonte, que é a opção que não exige confiar em ninguém
 
 ```sh
 git clone https://github.com/DATA-AND-DEV/SEELE && cd SEELE
-cargo build --release --bin seeled --bin connection
+cargo build --release --bin seeled
 ```
 
 No Windows isso pede o Build Tools do Visual Studio — ver `docs/windows.md`.
 
-Depois de instalar pelo `.dmg`, o `connection` e o `seeled` moram dentro do app. Para
-tê-los no `PATH`:
+Depois de instalar pelo `.dmg`, o `seeled` mora dentro do app. Para tê-lo no
+`PATH`:
 
 ```sh
-sudo ln -sf /Applications/SEELE.app/Contents/MacOS/{connection,seeled} /usr/local/bin/
+sudo ln -sf /Applications/SEELE.app/Contents/MacOS/seeled /usr/local/bin/
 ```
 
-No Linux o `.deb` já os põe em `/usr/bin`. No Windows ficam na pasta do
-programa e ainda não entram no `PATH` — ver `docs/pendencias.md`.
+No Windows ele fica na pasta do programa e ainda não entra no `PATH` — ver
+`docs/pendencias.md`.
 
 ---
 
@@ -201,14 +204,16 @@ Numa máquina:
 seeled 0.0.0.0:8383
 ```
 
-Ele imprime o endereço para usar na outra máquina e a impressão digital do
-certificado. Na outra:
+Ele imprime o link para usar na outra máquina, com a impressão digital do
+certificado dentro:
 
-```sh
-connection --server 192.168.x.x:8383 --nick seunome
+```text
+na outra máquina, cole no SEELE:
+  seele://192.168.0.7:8383?fp=782cc791…   (na mesma rede)
 ```
 
-Aperte `?`.
+Na outra, abra o SEELE, aperte **CONECTAR** e cole o link que o `seeled`
+imprimiu. Lá dentro, aperte `?`.
 
 Duas coisas que economizam meia hora:
 
@@ -252,7 +257,7 @@ TLS, antes de o convite, a senha ou o apelido saírem:
   mandou; para um servidor da lista, colar de novo o link dele, ou removê-lo da
   lista.
 
-Do outro lado, `connection --url "seele://…"`.
+Do outro lado, a pessoa abre o SEELE, aperta **CONECTAR** e cola o link.
 
 A senha do servidor nunca viaja no link, e isso é decisão registrada: senha vale
 para sempre, convite gasto não vale nada.
@@ -357,7 +362,6 @@ do sistema (ADR 0041) e o som da tela.
 - senha e convite fechando a porta; convite servindo a uma pessoa só
 - limitação de taxa nas duas pontas: quem bate à porta em laço é recusado com
   motivo, e quem inunda de mensagens é avisado antes de ser derrubado
-- a mesma sessão retomada entre o `connection` e o app, com autor e horário
 - a interface: que a ajuda não prometa uma tecla que não existe, que o
   vocabulário aposentado não volte à tela, que a marca não use o vermelho de
   alerta, e que os retratos acima saiam do código que desenha

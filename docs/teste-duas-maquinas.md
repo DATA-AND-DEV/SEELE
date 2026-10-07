@@ -14,17 +14,19 @@ Uma máquina é o **Server** (servidor + cliente) e a outra é só cliente. Pode
 os dois sistemas operacionais que você tiver — quanto mais diferentes, melhor,
 porque a matriz de três SOs em CI nunca executou.
 
-Em cada máquina:
+O cliente é o app, então as duas máquinas precisam de interface gráfica. Em
+cada uma:
 
 ```sh
-cargo build --release --bin seeled --bin connection
-```
-
-Se a máquina tiver interface gráfica e você quiser testar o app junto:
-
-```sh
+cargo build --release --bin seeled
 cargo build --release -p seele-app
 ```
+
+O que o app mede sai em dois lugares: o **rodapé da sessão** (ATRASO, JITTER,
+DISTÚRBIO, CODEC, SINAL DA SALA e CAMINHO) e o **`seele.log`**, em
+`~/.config/seele/seele.log` no macOS e no Linux (`$SEELE_HOME/seele.log`, se
+ela estiver definida) e em `%APPDATA%\tech.datadev.seele\seele.log` no
+Windows. As medidas abaixo dizem de qual dos dois cada número sai.
 
 ---
 
@@ -41,13 +43,14 @@ Ele imprime três coisas que importam:
 ```
 seeled listening on 0.0.0.0:8383
 
-na outra máquina:
-  connection --server 192.168.x.x:8383
+na outra máquina, cole no SEELE:
+  seele://192.168.x.x:8383?fp=50217d68c6…   (na mesma rede)
 
 certificate fingerprint: 50217d68c6...
 ```
 
-**Anote a impressão digital.** É o que o ADR 0003 pede que você confira: o
+O link já leva a impressão digital, e o app a confere sozinho no primeiro
+contato. **Anote-a mesmo assim.** É o que o ADR 0003 pede que você confira: o
 cliente vai fixá-la no primeiro contato e recusar a conexão em silêncio se ela
 mudar depois.
 
@@ -73,11 +76,7 @@ seele://192.168.x.x:8383?fp=782cc791…&convite=2QKPAXPP97W5459H3TPA
 
 Ele carrega a impressão digital do certificado, então quem receber **não
 precisa conferi-la por outro canal** — o cliente compara sozinho e recusa se
-não bater. Do outro lado:
-
-```sh
-./target/release/connection --url "seele://…" --nick seunome
-```
+não bater. Do outro lado, no app, **CONECTAR** e cole o link.
 
 ### Firewall
 
@@ -96,23 +95,27 @@ conectar e o firewall estiver liberado, é a suspeita seguinte.
 ## 2 · Conectar da máquina B
 
 ```sh
-./target/release/connection --server 192.168.x.x:8383 --nick seunome
+./target/release/seele-app
 ```
 
-Na primeira vez o cliente mostra `PRIMEIRO CONTATO — CHAVE FIXADA` com uma
-impressão digital. **Confira contra a que o `seeled` imprimiu.** Se conferir, é
-esse servidor. Se não conferir, alguém está no meio — e é exatamente para esse
-momento que o ADR 0003 existe.
+Escolha o apelido no perfil, no rodapé da entrada. Depois **CONECTAR**, cole o
+link que o `seeled` imprimiu no campo de baixo e **ENTRAR**.
 
-Conecte também na máquina A, com **apelido diferente**:
+Na primeira vez a sessão abre dizendo `PRIMEIRO CONTATO VERIFICADO — O CONVITE
+CONFIRMOU A CHAVE`, com a impressão digital embaixo: o app comparou a do link
+com a que o servidor apresentou, e elas bateram. Se em vez do link você colar o
+endereço cru, a frase é `PRIMEIRO CONTATO — CHAVE FIXADA`, e aí **confira a
+impressão contra a que o `seeled` imprimiu.** Se conferir, é esse servidor. Se
+não conferir, alguém está no meio — e é exatamente para esse momento que o
+ADR 0003 existe.
 
-```sh
-./target/release/connection --server 127.0.0.1:8383 --nick outronome
-```
+Conecte também na máquina A, com **apelido diferente**: no app dela,
+**CONECTAR** e `127.0.0.1:8383`.
 
-> Dois clientes com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o PERSISTENCE
-> vincula o apelido à identidade que o reivindicou (ADR 0017). Para serem dois
-> pessoas na mesma máquina, `SEELE_HOME=~/.seele-outro`.
+> Dois apps com o mesmo `$SEELE_HOME` são **a mesma pessoa** — o PERSISTENCE
+> vincula o apelido à identidade que o reivindicou (ADR 0017). Para serem duas
+> pessoas na mesma máquina,
+> `SEELE_HOME=~/.seele-outro ./target/release/seele-app`.
 
 ---
 
@@ -123,9 +126,9 @@ Antes de qualquer coisa com áudio, prove que o enlace existe.
 | | esperado |
 |---|---|
 | Os dois se veem no roster | cada um vê o outro na lista sob a sala de voz |
-| `i`, digitar, `Enter` na máquina A | aparece na B em menos de um segundo |
+| Escrever no canal e `Enter` na máquina A | aparece na B em menos de um segundo |
 | O mesmo de B para A | idem |
-| `:sync` nas duas | RTT plausível para a rede (LAN cabeada: 1–5 ms; wifi: 5–30 ms) |
+| O ATRASO do rodapé, nas duas | plausível para a rede (LAN cabeada: 1–5 ms; wifi: 5–30 ms) |
 
 Se o texto não atravessar, o áudio também não vai. Pare aqui e resolva a rede.
 
@@ -136,13 +139,10 @@ Se o texto não atravessar, o áudio também não vai. Pare aqui e resolva a red
 Fones nos dois lados. **Sem fones haverá realimentação**, e o cancelamento de
 eco não existe neste produto (ADR 0007 adiou explicitamente).
 
-Segure a barra de espaço no modo Normal e fale.
-
-> Dependendo do terminal, segurar funciona de verdade ou vira trava — aperta
-> para abrir, aperta de novo para fechar. kitty, foot, WezTerm e Ghostty
-> relatam soltura de tecla; Terminal.app, iTerm2 e a maioria do que se alcança
-> por SSH não relatam (ADR 0016). A barra de telemetria diz qual estado está
-> valendo, e o `●` no roster também.
+Entre na sala de voz, segure **ESPAÇO** e fale. É o modo TECLA; CONFIGURAÇÕES,
+em «COMO O MICROFONE ABRE», troca por VOZ ou ABERTO. A janela relata a soltura
+da tecla, então segurar funciona de verdade, sem a trava que os terminais
+pediam (ADR 0016).
 
 Anote:
 
@@ -150,9 +150,9 @@ Anote:
 |---|---|
 | A voz chega? | inteligível, sem robotização |
 | Há eco ou realimentação? | só deve haver se alguém estiver sem fones |
-| O `●` acende no roster do outro? | o `speaking` vem de datagrama chegando, não de o cliente afirmar |
-| `A.T. OFF` → `m` → o outro vê `A.T.`? | o mudo é anunciado, não só local |
-| Qual a Taxa de Sincronização em repouso? | `:sync` nos dois lados |
+| Quem fala acende no roster do outro? | o `speaking` vem de datagrama chegando, não de o cliente afirmar |
+| O mudo de um aparece no roster do outro? | o mudo é anunciado, não só local |
+| Qual o SINAL DA SALA em repouso? | o rodapé, nos dois lados |
 
 ---
 
@@ -166,28 +166,35 @@ Fiquem os dois na sala de voz por dez minutos com conversa intermitente. O que s
 procura é o que só aparece com tempo: **estalos**, e a deriva de clock que a
 M1.8 corrige (`docs/m1-medicoes.md` tem a tabela de deriva medida).
 
-Ao fim, `:sync` nos dois. Anote:
+Ao fim, olhe o rodapé e o `seele.log` nas duas. Anote:
 
 - estalos ouvidos, e mais ou menos quando
-- Taxa de Sincronização no início e no fim
-- `OPUS` na barra mudou de valor?
-- a linha `LOCAL`: o `saída` **cresceu** ao longo dos dez minutos?
-- a linha `RITMO`: quantos ppm, o `anel` longe do alvo, e quanto de `grampo`
+- o SINAL DA SALA no início e no fim
+- o CODEC do rodapé mudou de valor?
+- o rodapé acendeu **ÁUDIO LOCAL FALHANDO** em algum momento dos dez minutos?
+- o `seele.log` tem a linha «o laço de voz demorou mais que um quadro entre
+  duas conferidas», e com que `volta_ms` e quantas `reposicoes`?
+- o `seele.log` tem a linha «o reamostrador recusou a razão de compasso»?
 
-As duas últimas são a pendência 2, e agora têm resposta com número. `saída`
-crescendo é amostra que o dispositivo pediu e não tinha; `RITMO` diz por quê, e
-cada resposta manda para um lugar diferente:
+As três últimas são a pendência 2. **ÁUDIO LOCAL FALHANDO** é esta máquina
+derrubando áudio agora — amostra que o dispositivo pediu e não tinha, ou
+captura que transbordou —, e não a rede. As duas linhas do `seele.log` saem uma
+vez por sessão cada, e cada uma manda para um lugar diferente:
 
-- **ppm de dezenas, anel perto do alvo, grampo zero**: a malha está segurando a
-  deriva. É o normal, mesmo com o `saída` tendo crescido no arranque.
-- **grampo crescendo**: a razão pedida saiu da faixa em que cristal vive, então
-  a causa não é deriva — taxa diferente da anunciada (`:audio` diz a taxa), ou
-  dispositivo trocado.
-- **reposição crescendo**: o anel raspou o fundo de novo. Aí é a volta do laço,
-  que é a pendência 15, e o número a pedir é o `LAÇO volta`.
+- **nenhuma das duas**: a malha está segurando a deriva. É o normal, mesmo com
+  o aviso tendo acendido no arranque.
+- **o laço demorou mais que um quadro**: a reprodução está sendo mantida em dia
+  por reposição. É a volta do laço, que é a pendência 15, e o número a pedir é
+  o `volta_ms`.
+- **o reamostrador recusou**: a deriva entre esta máquina e o dispositivo ficou
+  sem correção. Rode o `ritmo` abaixo nessa máquina: grampo crescendo quer
+  dizer que a razão pedida saiu da faixa em que cristal vive, então a causa não
+  é deriva — taxa diferente da anunciada (a linha «o aparelho … taxa» do
+  `seele.log` diz a taxa), ou dispositivo trocado.
 
-Antes do soak, cada máquina pode dar o próprio veredito sozinha, em um minuto e
-sem a outra:
+O app não mostra o ppm, o anel e o grampo em números. Quem dá os três é o
+exemplo `ritmo`, e antes do soak cada máquina pode dar o próprio veredito
+sozinha, em um minuto e sem a outra:
 
 ```
 cargo run --release -p seele-audio --example ritmo
@@ -223,8 +230,9 @@ Converse por dois minutos. A pergunta é uma só: **continua inteligível?** Nã
 compreensível. Se virar ininteligível, o jitter buffer ou o concealment não
 estão fazendo o trabalho.
 
-Anote também o que a barra mostra em `LOSS`. Ela deve refletir a perda induzida;
-se marcar zero com 5% de perda real, a medição está errada e isso é um defeito.
+Anote também o que o rodapé mostra em DISTÚRBIO. Ele deve refletir a perda
+induzida; se marcar zero com 5% de perda real, a medição está errada e isso é
+um defeito.
 
 ### 5.3 · Latência boca-a-ouvido
 
@@ -244,23 +252,17 @@ Rode duas vezes: uma com cabo da saída para a entrada (mede a máquina) e uma n
 ar (mede a experiência). A ferramenta recusa dar número quando não tem confiança
 — um valor plausível vindo de cabo solto seria pior que valor nenhum.
 
-Some: `latência local de A` + `RTT/2` + `profundidade do jitter buffer` +
-`latência local de B`. Compare com os ≈67/87 ms que o ADR 0009 orça a partir das
-medições de M1.
+Some: `latência local de A` + `ATRASO/2` (o ATRASO do rodapé é a ida e volta)
++ `profundidade do jitter buffer` + `latência local de B`. O app não mostra a
+profundidade do jitter buffer; o JITTER do rodapé é a variação medida, e não
+ela. Faça a conta com os dois extremos do ADR 0009, o piso de 20 ms e o alvo de
+40 ms, e compare com os ≈67/87 ms que ele orça a partir das medições de M1.
 
 ---
 
-## 6 · Se o app gráfico estiver na jogada
+## 6 · O que mais checar no app
 
-Rode o `seele-app` numa das máquinas em vez do `connection` e repita as seções 3 e 4. A
-composição é a mesma de propósito: mesmos três painéis, telemetria no rodapé.
-
-Aqui a barra de espaço segura de verdade — a janela relata soltura.
-
-O que checar a mais:
-
-- o app e o `connection` no mesmo `$SEELE_HOME` são o mesmo pessoa (retomada de sessão)
-- o histórico aparece ao abrir a Linha, com autor e horário corretos
+- o histórico aparece ao abrir o canal, com autor e horário corretos
 - o deslizante de volume, ao apontar uma linha do roster, muda o que se ouve
 
 ---
@@ -286,18 +288,19 @@ saída antes deste degrau.
 ```
 
 Na máquina A, em casa, com o UPnP do roteador **desligado** de propósito (é o que
-força a escada a chegar ao degrau 4):
+força a escada a chegar ao degrau 4), abra o app com o ponto de encontro no
+ambiente e aperte **HOSPEDAR AQUI**:
 
 ```sh
-SEELE_ENCONTRO=<endereço-da-vps>:8384 ./target/release/connection --hospedar
+SEELE_ENCONTRO=<endereço-da-vps>:8384 ./target/release/seele-app
 ```
 
 O que checar, em ordem:
 
-1. A frase embaixo do link diz **"um ponto de encontro apresentou esta
-   máquina"**. Se disser "só funciona na sua rede", o degrau 4 não subiu: o
-   terminal do `connection` diz por quê, e o `--barulhento` da VPS diz se o pedido
-   chegou lá.
+1. A frase embaixo do link diz **«UM PONTO DE ENCONTRO ABRIU O CAMINHO»**. Se
+   disser «ESTE LINK SÓ FUNCIONA NA SUA REDE», o degrau 4 não subiu: o
+   `seele.log` da máquina A diz por quê, na linha «o degrau 4 não deu», e o
+   `--barulhento` da VPS diz se o pedido chegou lá.
 2. O link tem um `enc=` com **duas metades** separadas por `/`, e um endereço
    público seu no `alt=`.
 3. Na máquina B, na outra rede, cole o link. Ela entra.
@@ -305,10 +308,10 @@ O que checar, em ordem:
    descobrindo, e a da máquina B chegando. Nunca mais que isso — se aparecer
    tráfego contínuo ali, alguma coisa está passando pelo ponto de encontro que
    não deveria.
-5. **Desligue o ponto de encontro** e hospede de novo. O `connection` tem de subir na
-   mesma velocidade de antes (mais no máximo um segundo), com o link levando os
-   endereços de sempre e **sem** `enc=`. Este é o teste de que o degrau 4 não
-   virou ponto único de falha.
+5. **Desligue o ponto de encontro** e hospede de novo. O **HOSPEDAR AQUI** tem
+   de abrir a sala na mesma velocidade de antes (mais no máximo um segundo), com
+   o link levando os endereços de sempre e **sem** `enc=`. Este é o teste de que
+   o degrau 4 não virou ponto único de falha.
 6. Com a conversa de pé, derrube a rede da máquina B por uns segundos e deixe
    voltar. A reconexão sai de uma porta nova, então ela bate no ponto de
    encontro de novo — a sessão tem de voltar dentro dos cinco minutos da
@@ -331,13 +334,13 @@ entregável de M1.15 — CoreAudio, WASAPI, ALSA e PipeWire.
 | SO e versão | | |
 | Backend de áudio | | |
 | Dispositivos (captura / reprodução) | | |
-| Taxa nativa relatada pelo `connection` | | |
+| Taxa nativa (a linha «o aparelho … taxa» do `seele.log`) | | |
 | Latência por cabo (M1.2) | | |
 | Latência no ar (M1.2) | | |
 | Estalos em 10 min | | |
 | Inteligível a 5% de perda | | |
 | Troca de dispositivo a quente funciona | | |
-| RSS do `connection` após 10 min | | |
+| RSS do app após 10 min | | |
 
 A troca a quente é M1.14: com a chamada rodando, tire o fone USB e coloque de
 volta. A chamada deve pausar e retomar, não morrer.
@@ -351,8 +354,9 @@ os números reais devem ficar ao lado delas. Onde a realidade divergir das specs
 `specs/10-convencoes.md` exige corrigir `00` e `03` — é a tarefa M1.17, e ela só
 pode ser feita depois disto.
 
-Se algo falhar, o mais útil é: qual seção, o que a barra de telemetria mostrava,
-e o que o `seeled` imprimiu no terminal dele naquele momento.
+Se algo falhar, o mais útil é: qual seção, o que o rodapé de telemetria
+mostrava, o `seele.log` das duas máquinas e o que o `seeled` imprimiu no
+terminal dele naquele momento.
 
 ---
 
@@ -393,7 +397,7 @@ sozinha (o servidor e quem compartilha) pode estar em qualquer rede; as outras
 duas é que têm de ser redes diferentes entre si, ou o furo nunca é exercitado —
 mesmo aviso que a seção 7 já faz para o degrau 4.
 
-1. Numa máquina, suba o servidor (seção 1) e abra o app (seção 6). Entre na
+1. Numa máquina, suba o servidor (seção 1) e entre pelo app (seção 2). Entre na
    sala de voz e compartilhe a tela: o botão **COMPARTILHAR** no rodapé,
    escolha a janela ou o monitor.
 2. **(bloqueado)** Numa segunda rede, entre com uma pessoa e ligue o
@@ -511,7 +515,7 @@ transmissões no ar. O que se anota lá é o que a suíte local não alcança:
 | o que | como se lê |
 |---|---|
 | subida de quem hospeda, com e sem malha | o contador do servidor, e a conta de quantas cópias ele subiu |
-| qualidade vista por cada pessoa | `:sync` em cada máquina, não numa só |
+| qualidade vista por cada pessoa | o rodapé de telemetria em cada máquina, não numa só |
 | fração de furo com N pares | a seção de duas máquinas acima, repetida por par |
 | o que acontece quando um par cai numa sala cheia | quem ficou órfão voltou ao servidor, e em quanto tempo |
 
