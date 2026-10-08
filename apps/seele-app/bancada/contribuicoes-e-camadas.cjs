@@ -2159,13 +2159,19 @@ function anotando(...anotadas) {
         if (inicio >= 0) vm.runInContext(regiaoFonte.slice(inicio, regiaoFonte.indexOf(ate, inicio) + ate.length), contexto);
       }
       // O `Image` da janela, de mentira: decodifica tudo, menos o corpo
-      // corrompido.
+      // corrompido — e segura em `presas` a decodificação de quem começa com
+      // `URI_QUE_DEMORA`, até a prova soltar.
       const URI_QUE_NAO_DECODIFICA = "data:image/png;base64,iVBORw0KGgoCORPOQUEBRADO";
+      const URI_QUE_DEMORA = "data:image/png;base64,iVBORw0KGgoDEMORA";
+      const presas = [];
       contexto.Image = class {
         constructor() {
           this.src = "";
         }
         decode() {
+          if (this.src.startsWith(URI_QUE_DEMORA)) {
+            return new Promise((pronto, falhou) => presas.push({ pronto, falhou }));
+          }
           return this.src === URI_QUE_NAO_DECODIFICA
             ? Promise.reject(new Error("EncodingError: The source image cannot be decoded."))
             : Promise.resolve();
@@ -2288,6 +2294,60 @@ function anotando(...anotadas) {
               && contexto.avatarContribuido(15) === uri,
             `a imagem que decodifica não virou o avatar: ${JSON.stringify(contribuicao.retrato)}, `
               + `${redesenhos} redesenho(s)`,
+          );
+        } finally {
+          contexto.contribuicoesDosMods = registroDeAntes;
+          contexto.donoDaRegiao = donoDeAntes;
+          contexto.avisarQueAMidiaMudou = avisarDeAntes;
+          delete contexto.redesenharAvatares;
+        }
+      }
+
+      // **A sessão acaba no meio do `decode()`.** O avatar reservou os bytes
+      // antes de decodificar; quando a decodificação termina, `podeFalar()` já
+      // diz que a instância não é a de agora. A imagem não vira o avatar, e a
+      // reserva volta.
+      {
+        const contribuicao = {
+          mod: "seele/perfis", instancia: {},
+          conteudo: { doServidor: { canal: 1, pedido: {}, campo: "image" } },
+        };
+        const registroDeAntes = contexto.contribuicoesDosMods;
+        const donoDeAntes = contexto.donoDaRegiao;
+        const avisarDeAntes = contexto.avisarQueAMidiaMudou;
+        let falando = true;
+        let redesenhos = 0;
+        contexto.contribuicoesDosMods = {
+          escolherSubstituicao: () => ({ escolhida: contribuicao }),
+          porHandle: new Map(),
+        };
+        contexto.donoDaRegiao = () => ({
+          podeFalar: () => falando,
+          falar() {},
+          anotarRecusa() {},
+          carregarMidiaDoServidor: () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-sessao`, papel: "imagem", bytes: 2 }),
+        });
+        contexto.avisarQueAMidiaMudou = () => {};
+        contexto.redesenharAvatares = () => {
+          redesenhos += 1;
+        };
+        try {
+          contexto.avatarContribuido(16);
+          await new Promise((resolve) => setImmediate(resolve));
+          confere(
+            "R4e · a sessão acaba no meio",
+            presas.length === 1 && contribuicao.retrato?.bytes === 2,
+            `o avatar não ficou reservado enquanto decodificava: ${JSON.stringify(contribuicao.retrato)}`,
+          );
+          falando = false;
+          presas.shift()?.pronto();
+          await new Promise((resolve) => setImmediate(resolve));
+          confere(
+            "R4e · a sessão acaba no meio",
+            contribuicao.retrato?.bytes === 0 && contribuicao.retrato?.uri === null
+              && contribuicao.retrato?.situacao !== "pronta" && redesenhos === 0,
+            "o avatar decodificado depois de a sessão acabar virou a imagem da pessoa, ou ficou ocupando o teto "
+              + `do cartão: ${JSON.stringify(contribuicao.retrato)}, ${redesenhos} redesenho(s)`,
           );
         } finally {
           contexto.contribuicoesDosMods = registroDeAntes;

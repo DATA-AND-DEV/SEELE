@@ -2591,6 +2591,26 @@ async function oFundoDeTelaDizOEstado() {
     `a tela saiu e o fundo dela continua anotado: ${JSON.stringify(regiao.midiasAnotadas())}`,
   );
   regiao.soltar();
+
+  // **A sessão acaba no meio do `decode()`**: o mapa que termina de
+  // decodificar não vira o fundo de uma tela que já não fala com ninguém.
+  const b2 = bancada();
+  const d2 = dono(b2, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-sessao`, papel: "imagem", bytes: 8 }));
+  const regiao2 = new b2.RegiaoDeMod("a/b", d2.api, b2.raiz());
+  regiao2.aplicar([tela("img/e.png")]);
+  const elem2 = regiao2.raiz.children[0];
+  const pincel2 = elem2.darPincel();
+  regiao2.aplicar([tela("img/e.png")]);
+  await assentar();
+  d2.api.podeFalar = () => false;
+  b2.Imagem.presas.shift()?.pronto();
+  await assentar();
+  confere(
+    `${caso} · a sessão acaba no meio`,
+    !elem2.__fundoDaTela?.imagem && !pincel2.pintado.some((p) => p[0] === "imagem"),
+    `o mapa decodificado depois de a sessão acabar virou o fundo da tela: ${JSON.stringify(pincel2.pintado)}`,
+  );
+  regiao2.soltar();
 }
 
 /**
@@ -2671,6 +2691,34 @@ async function osBytesSaoReservadosAntesDoDecode() {
         + `${JSON.stringify(regiao3.midiasAnotadas())}`,
     );
     regiao3.soltar();
+
+    // **A sessão acaba no meio do `decode()`.** A região continua de pé, mas
+    // `podeFalar()` já diz que esta instância não é a de agora: a imagem que
+    // termina de decodificar não monta, e a reserva volta — uma vez só, e o
+    // descarte que vem depois não a devolve de novo.
+    const b4 = bancada();
+    const d4 = dono(b4, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-sessao`, papel: "imagem", bytes: 40 }));
+    const regiao4 = new b4.RegiaoDeMod("a/b", d4.api, b4.raiz());
+    regiao4.aplicar([no("e", "img/e.png")]);
+    await assentar();
+    const elem4 = regiao4.raiz.children[0];
+    d4.api.podeFalar = () => false;
+    b4.Imagem.presas[0]?.pronto();
+    await assentar();
+    confere(
+      `${nome} · a sessão acaba no meio`,
+      b4.Imagem.presas.length === 1 && regiao4.bytesDeMidia === 0
+        && !acharTag(elem4, "img") && !elem4.style.backgroundImage,
+      "a imagem decodificada depois de a sessão acabar montou, ou ficou contada: "
+        + `${regiao4.bytesDeMidia} bytes, img=${Boolean(acharTag(elem4, "img"))}, `
+        + `fundo=${JSON.stringify(elem4.style.backgroundImage ?? "")}`,
+    );
+    regiao4.soltar();
+    confere(
+      `${nome} · a sessão acaba no meio`,
+      regiao4.bytesDeMidia === 0,
+      `o descarte devolveu de novo a reserva que já tinha voltado: ${regiao4.bytesDeMidia} bytes`,
+    );
   }
 }
 
