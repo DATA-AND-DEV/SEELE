@@ -1663,7 +1663,7 @@ const PRELUDIO: &str = r#"
   };
   // **O ciclo, dito onde ele está.** O JSON lança num ciclo, e o recuo era
   // `String(valor)`: um objeto com uma referência para o pai saía
-  // `[object Object]`, sem um campo. Quando a primeira passada lança, esta
+  // `[object Object]`, sem um campo. Quando a primeira passada lança, uma
   // segunda troca por «[cíclico]» **só o que é ancestral do valor de agora**.
   //
   // Os ancestrais saem do `this` do substituto, que é o objeto que contém o
@@ -1672,12 +1672,33 @@ const PRELUDIO: &str = r#"
   // cíclica a mesma referência em dois campos, que é repetição, e não ciclo.
   // Cada degrau guarda o valor como o MOD o tem e como `semMentir` o
   // devolveu: um `Map` vira uma lista nova, e é ela o `this` dos filhos dele.
-  const semCiclo = () => {
+  //
+  // **E cada passada tem um orçamento de objetos.** Marcar só os ancestrais
+  // faz o JSON percorrer todos os caminhos simples do grafo, e eles crescem
+  // como (k−1)!: dez nós ligados todos a todos estouravam o prazo da volta, e
+  // o `console.log` derrubava o MOD que ele observava (medido na revisão do
+  // lote D). Um DAG faz o mesmo com a primeira passada, sem ciclo nenhum. Do
+  // objeto de número `OBJETOS_POR_PASSADA` em diante, a passada diz `[…]`.
+  //
+  // **Mil e vinte e quatro, o dobro do que aparece.** Cada objeto que a
+  // passada vê escreve ao menos um caractere antes de ela ver o seguinte (o
+  // `{` dele, o `[` ou o texto que o troca), e o JSON sai na ordem em que os
+  // vê: o de depois do teto começa além do milésimo caractere, e a linha é
+  // cortada em 512 do outro lado — escapada, em menos ainda. O orçamento não
+  // muda o que chega ao `seele.log`, só o trabalho de montar o que não chega:
+  // cada passada vê no máximo este tanto de objetos, e procura cada um entre
+  // no máximo este tanto de ancestrais. As duas passadas, juntas, o dobro.
+  const OBJETOS_POR_PASSADA = 1024;
+  const passada = (marcaCiclos) => {
     const ancestrais = [];
     let fundo = 0;
+    let vistos = 0;
     return function (chave, v) {
       const dito = semMentir(chave, v);
       if (typeof dito !== 'object' || dito === null) return dito;
+      if (vistos >= OBJETOS_POR_PASSADA) return '[…]';
+      vistos += 1;
+      if (!marcaCiclos) return dito;
       while (fundo > 0 && ancestrais[fundo - 1][1] !== this) fundo -= 1;
       for (let i = 0; i < fundo; i += 1) {
         if (ancestrais[i][0] === v) return '[cíclico]';
@@ -1708,8 +1729,8 @@ const PRELUDIO: &str = r#"
       if (typeof valor === 'function') return funcaoEmTexto(valor);
       if (typeof valor === 'bigint' || typeof valor === 'symbol') return String(valor);
       if (typeof valor === 'number') return String(valor);
-      try { return comoJson(valor, semMentir); } catch { /* um ciclo, ou um getter que lança */ }
-      try { return comoJson(valor, semCiclo()); } catch { /* o getter lançou de novo */ }
+      try { return comoJson(valor, passada(false)); } catch { /* um ciclo, ou um getter que lança */ }
+      try { return comoJson(valor, passada(true)); } catch { /* o getter lançou de novo */ }
       return String(valor);
     } catch {
       return '[valor que não virou texto]';
@@ -2722,6 +2743,63 @@ mod testes {
             repetido, "{\"x\":{\"a\":1},\"y\":{\"a\":1},\"p\":\"[cíclico]\"}",
             "a segunda passada marcou como cíclica uma referência só repetida, ou não marcou o \
              ciclo: o registro diz que há ciclo onde há só repetição"
+        );
+    }
+
+    /// **Um grafo denso no `console` não estoura a volta.**
+    ///
+    /// Marcar só os ancestrais faz o `JSON.stringify` percorrer todos os
+    /// caminhos simples do grafo, e eles crescem como (k−1)!. Medido na
+    /// revisão do lote D: com dez nós ligados todos a todos, a segunda passada
+    /// estourava o prazo da volta — o produto mandava `Falhou("o MOD
+    /// lançou")`, e o código do MOD depois do `console.log` não rodava. Um DAG
+    /// de vinte nós, cada um ligado a todos os de depois, é o mesmo estouro na
+    /// primeira passada, sem ciclo nenhum: 2¹⁹ caminhos. Antes do lote, o
+    /// ciclo saía `[object Object]` na hora; o DAG já estourava.
+    ///
+    /// Cada passada tem um orçamento de objetos ([`PRELUDIO`],
+    /// `OBJETOS_POR_PASSADA`), e o que passa dele sai `[…]`.
+    #[test]
+    fn um_grafo_denso_no_console_nao_estoura_a_volta() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "const completo = Array.from({ length: 10 }, (_, i) => ({ i }));\
+                 for (const a of completo) for (const b of completo) if (a !== b) a['n' + b.i] = b;\
+                 console.log(completo[0]);\
+                 const dag = Array.from({ length: 20 }, (_, i) => ({ i }));\
+                 for (let a = 0; a < 20; a++) for (let b = a + 1; b < 20; b++) dag[a]['n' + b] = dag[b];\
+                 console.log(dag[0]);\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        let mut linhas = Vec::new();
+        let inicio = Instant::now();
+        loop {
+            match executor.receber(Duration::from_secs(5)) {
+                Some(ParaOFora::Console { texto, .. }) => linhas.push(texto),
+                Some(ParaOFora::Mensagem(fim)) if fim == "fim" => break,
+                outra => panic!(
+                    "um `console.log` de um grafo denso não deixou o MOD chegar ao fim da volta \
+                     ({:?} depois de subir, com {} linhas): veio {outra:?}",
+                    inicio.elapsed(),
+                    linhas.len()
+                ),
+            }
+        }
+        let [completo, dag] = linhas.as_slice() else {
+            panic!("esperava duas linhas de console, vieram {linhas:?}");
+        };
+        assert!(
+            completo.starts_with("{\"i\":0,\"n1\":{\"i\":1,\"n0\":\"[cíclico]\""),
+            "o grafo completo saiu sem dizer o que tem no começo, ou sem o ciclo onde ele está: \
+             {}",
+            completo.chars().take(120).collect::<String>()
+        );
+        assert!(
+            dag.starts_with("{\"i\":0,\"n1\":{\"i\":1,\"n2\":{\"i\":2,"),
+            "o DAG saiu sem dizer o que tem no começo: {}",
+            dag.chars().take(120).collect::<String>()
         );
     }
 
