@@ -11766,6 +11766,34 @@ fn sem_nome_o_primeiro_conectar_pergunta_antes() {
         pagina.contains("<h2 id=\"perfil-titulo\" class=\"nomear-titulo\">SEU PERFIL</h2>"),
         "o título do perfil no HTML deixou de ser SEU PERFIL"
     );
+
+    // **A entrada por link não pode correr na frente dos scripts.** O que o
+    // launcher pede à janela (`cumprirAAbertura`) era chamado no topo de
+    // `tela-boot.js`, e chega à pergunta depois de três idas à ponte. Com a
+    // ponte respondendo em microtarefa, isso acontece antes de
+    // `camada-nomear.js` carregar: `perguntarONome is not defined`, a pergunta
+    // não abre, e como a marca já foi posta ela não volta (revisão do lote J,
+    // medido na bancada). `DOMContentLoaded` só dispara depois de todos os
+    // scripts da página.
+    let boot = without_comments(&read("ui/tela-boot.js"));
+    let chamadas = boot.matches("cumprirAAbertura()").count()
+        - boot.matches("function cumprirAAbertura()").count();
+    assert_eq!(
+        chamadas, 1,
+        "`cumprirAAbertura` é chamada {chamadas} vezes em `tela-boot.js`; ela é \
+         chamada uma vez, e só depois de a página inteira carregar"
+    );
+    let ao_carregar = if boot.contains("addEventListener(\"DOMContentLoaded\"") {
+        js_function(&boot, "addEventListener(\"DOMContentLoaded\"")
+    } else {
+        String::new()
+    };
+    assert!(
+        ao_carregar.contains("cumprirAAbertura()"),
+        "o que o launcher pede à janela roda antes de os outros scripts \
+         carregarem: aberta por um link sem nome nesta máquina, a entrada chega à \
+         pergunta antes de `camada-nomear.js` existir, e a pergunta nunca abre"
+    );
 }
 
 #[test]

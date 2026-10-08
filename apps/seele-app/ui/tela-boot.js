@@ -770,8 +770,19 @@ $("servidores-novo").addEventListener("click", () => {
 // lista pronta caso o `hospedar` automático falhe e a pessoa queira escolher
 // outra. Nenhuma das duas pode derrubar a tela de entrada, e por isso as duas
 // engolem a própria falha — ver os `catch` de cada uma.
+//
+// **A abertura espera a página inteira.** Ela chega a `conectar`, e dali à
+// pergunta do nome, que mora em `camada-nomear.js` — carregado depois deste
+// arquivo. Chamada aqui no topo, com a ponte respondendo rápido (em
+// microtarefa), a entrada por link chegava à pergunta antes de ela existir:
+// `perguntarONome is not defined`, nenhuma pergunta, e a marca de já ter
+// perguntado posta (revisão do lote J). `DOMContentLoaded` só dispara depois de
+// todos os scripts da página; nada daqui depende de a abertura correr antes
+// dele, e as versões continuam saindo primeiro.
 desenharVersoes();
-cumprirAAbertura();
+document.addEventListener("DOMContentLoaded", () => {
+  cumprirAAbertura();
+});
 
 // **Aqui havia um `desenharVisitados()` de um `desenharVisitados` que não
 // existe mais**, e ele foi o defeito mais caro desta leva: uma chamada solta no
