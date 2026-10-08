@@ -184,3 +184,13 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
 - **O merge de volta.** O `git merge versao/0.16` no `0.16/lotes` deu `628c7fd`.
 - **O ajuste do plano.** O plano ganhou, no G-servidor, o que a F7 deixou (`3b0b6a7`): o `antes_de_aceitar` obrigatório e as 17 chamadas de `Hospedagem::iniciar`.
 - **A onda 3 foi despachada:** E · J · G-servidor, este com o passo 0 do ponto de produção.
+- **E → integrado** (`3b0b6a7..3fd6c94`), aprovado na primeira revisão, com um fecho curto. P51-09 em `bece2bd` e P51-11 em `9abe067`.
+  - **O fecho cuidou de três pontos:**
+    - os guardas passaram a medir o caminho real de `ler_imagem_mod`;
+    - a conta de `recusar_se_morta` fora dos testes tem de bater com a lista do guarda;
+    - a conexão ausente não pode contar.
+  - **Além disso,** a ativação recusada por geração morta passou a ser dita, além de contada.
+  - **Ficam como nota:**
+    - o guarda não vê `if … else` nem `match`;
+    - a linha DEBUG de `confere_geracao` não diz o comando;
+    - a segunda conferência de `enviar_imagem_mod` vem depois do upload.
