@@ -1120,13 +1120,16 @@ fn rodar(
     //
     // `is_handled` é a segunda chamada, quando alguém prende um `catch`
     // depois: essa não é falha, e avisar nela seria ensinar a ignorar o aviso.
-    // A janela já recebeu o `Falhou` da primeira; a linha do registro, não —
-    // ela espera o fim da volta, e é esta segunda chamada que a tira da espera
-    // (ver [`RejeicoesDaVolta`]).
+    // **Nem a janela nem o registro ficam sabendo na primeira**: o `Falhou` e a
+    // linha esperam juntos o fim da volta, e é esta segunda chamada que os
+    // tira da espera (ver [`RejeicoesDaVolta`]). O `Falhou` saía daqui, na
+    // hora, e a gestão dizia «falhou» sobre a rejeição que o MOD pegava logo
+    // depois (P51-01).
     //
-    // Passa pela mesma cota dos outros avisos, e por isso um MOD que rejeita
-    // num laço não enche o canal — a cota é o que separa «dito» de «gritado».
-    // A linha do registro passa pelo balde do `console`, pela mesma razão.
+    // O `Falhou` passa pela mesma cota dos outros avisos, e por isso um MOD
+    // que rejeita num laço não enche o canal — a cota é o que separa «dito» de
+    // «gritado». A linha do registro passa pelo balde do `console`, pela mesma
+    // razão; e os dois saem cortados no teto do registro.
     //
     // **Três donos do balde, uma thread.** A ponte gasta ficha a cada linha; o
     // rastreador, só na reentrada em que a espera das rejeições não pode ser
@@ -1176,23 +1179,27 @@ fn rodar(
             if !havia_excecao && ctx.has_exception() {
                 let _ = ctx.catch();
             }
-            avisar(
-                &manda_rejeicao,
-                &fila_de_rejeicao,
-                ParaOFora::Falhou(format!("{REJEITADA_SEM_TRATAMENTO}: {texto}")),
-            );
-            // A espera guarda a linha, ou só a conta quando está cheia. Só uma
-            // reentrada, que não existe (a espera fica emprestada em código
-            // nativo que não roda JavaScript), deixaria de achá-la: aí a linha
-            // sai na hora, pelo balde, em vez de sumir.
+            let falhou = format!("{REJEITADA_SEM_TRATAMENTO}: {texto}");
+            // A espera guarda a linha e o `Falhou`, ou só a conta quando está
+            // cheia. Só uma reentrada, que não existe (a espera fica emprestada
+            // em código nativo que não roda JavaScript), deixaria de achá-la:
+            // aí os dois saem na hora, a linha pelo balde e o `Falhou` pela
+            // cota, em vez de sumir — sem isso, a janela deixaria de saber.
             match rejeicoes_do_rastreador.try_borrow_mut() {
-                Ok(mut rejeicoes) => rejeicoes.guardar(&ctx, promessa, linha),
-                Err(_) => linha_de_console(
-                    &balde_da_rejeicao,
-                    &manda_rejeicao,
-                    NivelDoConsole::Erro,
-                    linha,
-                ),
+                Ok(mut rejeicoes) => rejeicoes.guardar(&ctx, promessa, linha, falhou),
+                Err(_) => {
+                    linha_de_console(
+                        &balde_da_rejeicao,
+                        &manda_rejeicao,
+                        NivelDoConsole::Erro,
+                        linha,
+                    );
+                    avisar(
+                        &manda_rejeicao,
+                        &fila_de_rejeicao,
+                        ParaOFora::Falhou(cortar_linha_do_console(falhou).0),
+                    );
+                }
             }
         },
     )));
@@ -1414,7 +1421,7 @@ fn rodar(
     // a instância parou, e ninguém mais vai pegá-las. E antes do descarte, de
     // qualquer jeito — cada uma segura a promessa dela, e um runtime não se
     // desfaz com valor dele vivo do lado de fora.
-    dizer_as_rejeitadas(&rejeicoes, &balde_do_console, manda);
+    dizer_as_rejeitadas(&rejeicoes, &balde_do_console, manda, fila);
 
     // **A conta do console antes da confirmação de parada**, com ficha ou sem:
     // depois do `Parou` a bomba não lê mais nada, e a conta cairia com o
@@ -1934,8 +1941,8 @@ fn recolher_pedidos_de_relogio(
 ///
 /// **E é aqui que a volta termina para as rejeições.** Sem microtarefa
 /// pendente, a promessa rejeitada que ainda espera em `rejeicoes` não foi pega
-/// por ninguém, e vira a linha do registro, e as contadas além do teto da
-/// espera viram a conta ([`dizer_as_rejeitadas`]). Numa
+/// por ninguém, e vira a linha do registro e o `Falhou` da janela, e as
+/// contadas além do teto da espera viram a conta ([`dizer_as_rejeitadas`]). Numa
 /// volta que parou com microtarefas na fila — por um teto ou pela revogação —,
 /// elas ainda podem pegá-las: as rejeições esperam a próxima volta que
 /// termine, ou a parada da instância.
@@ -1966,7 +1973,7 @@ fn escoar_jobs(
         }
     }
     if !runtime.is_job_pending() {
-        dizer_as_rejeitadas(rejeicoes, balde, manda);
+        dizer_as_rejeitadas(rejeicoes, balde, manda, fila);
     }
 }
 
@@ -1991,24 +1998,15 @@ const REJEITADA_SEM_TRATAMENTO: &str = "promessa rejeitada sem tratamento";
 /// final do Plano 1).
 ///
 /// **A memória do lado de fora do motor**, onde o teto de memória do MOD não
-/// alcança: no máximo este tanto de linhas, cada uma já cortada no teto do
-/// registro quando entra na espera (até 512 caracteres no registro, mais o
-/// aviso do corte; [`cortar_linha_do_console`]), um número para as de fora, e
-/// uma referência a cada promessa guardada, que continua morando no motor. Na
-/// espera, o texto inteiro do que o MOD lançou não fica: ele existe só
-/// enquanto a linha é montada e cortada, uma rejeição de cada vez. Guardada sem
+/// alcança: no máximo este tanto de rejeições, cada uma com a linha dela e o
+/// `Falhou` dela, os dois já cortados no teto do registro quando entram na
+/// espera (até 512 caracteres no registro, mais o aviso do corte;
+/// [`cortar_linha_do_console`]); um número para as de fora; e uma referência a
+/// cada promessa guardada, que continua morando no motor. Na espera, o texto
+/// inteiro do que o MOD lançou não fica: ele existe só enquanto a linha e o
+/// `Falhou` são montados e cortados, uma rejeição de cada vez. Guardada sem
 /// corte, como antes, a espera segurava até uma rajada inteira de mensagens do
 /// tamanho que o MOD quisesse até o fim da volta (F-Mods-m2).
-///
-/// **O `Falhou` que vai à janela não passa por esta espera, nem por este
-/// corte.** O rastreador o manda na hora, para cada rejeição sem tratamento,
-/// com o texto inteiro do que o MOD lançou («promessa rejeitada sem
-/// tratamento: …»). O que o limita é a cota dos avisos ([`AVISOS_NA_FILA`]
-/// à espera, por instância), em número, e não em tamanho: um MOD que
-/// rejeita com uma mensagem enorme a põe inteira em cada `Falhou` que coube.
-/// Já era assim antes desta espera (a v0.15.0 manda o mesmo `Falhou`), e o
-/// conserto está na pendência 51 de `docs/pendencias.md`, junto com o
-/// `Falhou` que sai também para a rejeição que o MOD pega logo depois.
 pub(crate) const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize - 1;
 
 /// **As rejeições sem tratamento de uma volta, à espera do fim dela.**
@@ -2016,12 +2014,13 @@ pub(crate) const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize - 1;
 /// O QuickJS chama o rastreador na hora da rejeição, e nessa hora quem a vai
 /// pegar pode ainda não ter tido a vez: `try { await f(); } catch {}`, com `f`
 /// uma função `async` que lança antes do primeiro `await`, rejeita a promessa
-/// antes de o `await` prender o tratamento — medido: o `Falhou` sai, e o MOD
-/// pegou. Dita na hora, a linha do registro diria «sem tratamento» em ERROR
-/// sobre uma rejeição que o MOD tratou. O rastreador é chamado de novo quando
-/// o tratamento chega (`ja_tratada`), e é essa segunda chamada que a tira
-/// daqui ([`Self::tratada`]); o que sobra quando as microtarefas da volta
-/// acabam ([`escoar_jobs`]) é o que ninguém pegou. É a regra do
+/// antes de o `await` prender o tratamento — medido: o rastreador é chamado, e
+/// o MOD pegou. Dita na hora, a linha do registro diria «sem tratamento» em
+/// ERROR, e o `Falhou` faria a gestão dizer «falhou», sobre uma rejeição que o
+/// MOD tratou — o `Falhou` saía assim até a P51-01. O rastreador é chamado de
+/// novo quando o tratamento chega (`ja_tratada`), e é essa segunda chamada que
+/// a tira daqui ([`Self::tratada`]); o que sobra quando as microtarefas da
+/// volta acabam ([`escoar_jobs`]) é o que ninguém pegou. É a regra do
 /// `unhandledrejection` do navegador.
 ///
 /// Guarda a promessa, e não um número: segurá-la viva até o fim da volta é o
@@ -2030,31 +2029,44 @@ pub(crate) const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize - 1;
 /// o runtime ser desfeito (o fim de [`rodar`]).
 #[derive(Default)]
 struct RejeicoesDaVolta {
-    /// Cada promessa rejeitada sem tratamento, com a linha que ela vira, já
-    /// cortada no teto do registro.
-    guardadas: Vec<(rquickjs::Persistent<rquickjs::Value<'static>>, LinhaCortada)>,
+    /// Cada promessa rejeitada sem tratamento, com o que ela vira.
+    guardadas: Vec<Rejeitada>,
     /// Quantas rejeitaram sem tratamento com a espera cheia, e ainda não o
     /// ganharam: só contadas ([`REJEICOES_GUARDADAS`]).
     alem: u32,
 }
 
+/// Uma rejeição sem tratamento à espera do fim da volta, em
+/// [`RejeicoesDaVolta`].
+struct Rejeitada {
+    /// A promessa, viva até o fim da volta.
+    promessa: rquickjs::Persistent<rquickjs::Value<'static>>,
+    /// A linha do registro, já cortada no teto dele.
+    linha: LinhaCortada,
+    /// O texto do `Falhou` que vai à janela, cortado pela mesma regra.
+    falhou: LinhaCortada,
+}
+
 impl RejeicoesDaVolta {
-    /// Guarda uma rejeição até o fim da volta, com a `linha` cortada no teto do
-    /// registro; com a espera cheia ([`REJEICOES_GUARDADAS`]), só a conta.
+    /// Guarda uma rejeição até o fim da volta, com a `linha` do registro e o
+    /// texto do `Falhou` da janela, os dois cortados no teto do registro; com a
+    /// espera cheia ([`REJEICOES_GUARDADAS`]), só a conta.
     fn guardar<'js>(
         &mut self,
         ctx: &rquickjs::Ctx<'js>,
         promessa: rquickjs::Value<'js>,
         linha: String,
+        falhou: String,
     ) {
         if self.guardadas.len() >= REJEICOES_GUARDADAS {
             self.alem = self.alem.saturating_add(1);
             return;
         }
-        self.guardadas.push((
-            rquickjs::Persistent::save(ctx, promessa),
-            cortar_linha_do_console(linha),
-        ));
+        self.guardadas.push(Rejeitada {
+            promessa: rquickjs::Persistent::save(ctx, promessa),
+            linha: cortar_linha_do_console(linha),
+            falhou: cortar_linha_do_console(falhou),
+        });
     }
 
     /// A rejeição de `promessa` ganhou tratamento: ela sai da espera, sem linha.
@@ -2067,8 +2079,9 @@ impl RejeicoesDaVolta {
     /// maior, que é o erro que esta espera existe para não cometer.
     fn tratada<'js>(&mut self, ctx: &rquickjs::Ctx<'js>, promessa: &rquickjs::Value<'js>) {
         let antes = self.guardadas.len();
-        self.guardadas.retain(|(guardada, _)| {
+        self.guardadas.retain(|guardada| {
             guardada
+                .promessa
                 .clone()
                 .restore(ctx)
                 .map_or(true, |ela| ela != *promessa)
@@ -2078,19 +2091,21 @@ impl RejeicoesDaVolta {
         }
     }
 
-    /// As linhas das que ninguém pegou, na ordem em que rejeitaram, e a conta
-    /// das de fora; a espera fica vazia, e as promessas, soltas.
-    fn sem_tratamento(&mut self) -> (Vec<LinhaCortada>, u32) {
-        let linhas = std::mem::take(&mut self.guardadas)
+    /// A linha e o `Falhou` de cada uma que ninguém pegou, nesta ordem e na
+    /// ordem em que rejeitaram, e a conta das de fora; a espera fica vazia, e
+    /// as promessas, soltas.
+    fn sem_tratamento(&mut self) -> (Vec<(LinhaCortada, LinhaCortada)>, u32) {
+        let ditas = std::mem::take(&mut self.guardadas)
             .into_iter()
-            .map(|(_, linha)| linha)
+            .map(|Rejeitada { linha, falhou, .. }| (linha, falhou))
             .collect();
-        (linhas, std::mem::take(&mut self.alem))
+        (ditas, std::mem::take(&mut self.alem))
     }
 }
 
 /// A linha que diz quantas rejeições sem tratamento passaram do teto da
-/// espera, depois das linhas das guardadas.
+/// espera, depois das linhas das guardadas — e o `Falhou` que diz o mesmo à
+/// janela.
 fn alem_da_espera(quantas: u32) -> String {
     if quantas == 1 {
         "e mais 1 rejeição sem tratamento além da espera".to_owned()
@@ -2100,24 +2115,35 @@ fn alem_da_espera(quantas: u32) -> String {
 }
 
 /// **Diz as rejeições que ninguém pegou**, cada uma como uma linha de
-/// `console` em erro, pelo balde, sem cortar de novo ([`linha_ja_cortada`]);
-/// e depois, se alguma passou do teto da espera, quantas.
+/// `console` em erro, pelo balde, sem cortar de novo ([`linha_ja_cortada`]),
+/// e depois como o `Falhou` dela, pela cota dos avisos ([`avisar`]); e por
+/// fim, se alguma passou do teto da espera, quantas — numa linha e num
+/// `Falhou` só.
+///
+/// **A linha antes do `Falhou`**: a bomba lê o canal em ordem, e quem vê a
+/// gestão dizer «falhou» e abre o `seele.log` já acha lá a linha, com a pilha.
+/// O `Falhou` vai mesmo quando o balde segura a linha: a cota dele é outra, e
+/// a janela não pode deixar de saber porque o registro estava cheio.
 fn dizer_as_rejeitadas(
     rejeicoes: &std::cell::RefCell<RejeicoesDaVolta>,
     balde: &std::cell::RefCell<BaldeDoConsole>,
     manda: &Sender<ParaOFora>,
+    fila: &Arc<Fila>,
 ) {
     // Entre duas voltas nenhum JavaScript roda, e o rastreador não tem a
     // espera emprestada.
-    let (linhas, alem) = match rejeicoes.try_borrow_mut() {
+    let (ditas, alem) = match rejeicoes.try_borrow_mut() {
         Ok(mut rejeicoes) => rejeicoes.sem_tratamento(),
         Err(_) => return,
     };
-    for linha in linhas {
+    for (linha, falhou) in ditas {
         linha_ja_cortada(balde, manda, NivelDoConsole::Erro, linha);
+        avisar(manda, fila, ParaOFora::Falhou(falhou.0));
     }
     if alem > 0 {
-        linha_de_console(balde, manda, NivelDoConsole::Erro, alem_da_espera(alem));
+        let conta = alem_da_espera(alem);
+        linha_de_console(balde, manda, NivelDoConsole::Erro, conta.clone());
+        avisar(manda, fila, ParaOFora::Falhou(conta));
     }
 }
 
@@ -3952,6 +3978,55 @@ mod testes {
         );
     }
 
+    /// **O `Falhou` de uma rejeição sem tratamento tem o teto do registro.**
+    ///
+    /// Ele saía do rastreador com o texto inteiro do que o MOD lançou, e só a
+    /// cota dos avisos ([`AVISOS_NA_FILA`]) o limitava — em número, e não em
+    /// tamanho: um MOD que rejeitasse com cem mil caracteres punha os cem mil
+    /// em cada `Falhou` que coubesse, no canal e na fila da janela. Agora ele
+    /// é cortado como a linha do registro ([`cortar_linha_do_console`]), e
+    /// diz que foi.
+    #[test]
+    fn o_falhou_da_rejeicao_tem_o_teto_do_registro() {
+        let executor = executor();
+        executor
+            .iniciar("Promise.reject(new Error('x'.repeat(100000)));")
+            .expect("código");
+        let prazo = Instant::now() + Duration::from_secs(5);
+        let motivo = loop {
+            assert!(
+                Instant::now() < prazo,
+                "a rejeição sem tratamento não chegou à janela como `Falhou` em cinco segundos"
+            );
+            if let Some(ParaOFora::Falhou(motivo)) = executor.receber(Duration::from_millis(100)) {
+                break motivo;
+            }
+        };
+        assert!(
+            motivo.starts_with(&format!("{REJEITADA_SEM_TRATAMENTO}: ")),
+            "o `Falhou` da rejeição perdeu a frase que diz o que houve: {}",
+            motivo.chars().take(80).collect::<String>()
+        );
+        let (corpo, aviso) = motivo.split_once(" […cortado: ").unwrap_or_else(|| {
+            panic!(
+                "o `Falhou` de uma rejeição de cem mil caracteres saiu com {} caracteres, sem o \
+                 corte do registro: o canal e a fila da janela levam o texto inteiro a cada aviso",
+                motivo.chars().count()
+            )
+        });
+        assert!(
+            corpo.chars().count() <= crate::TETO_DA_FRASE_NO_REGISTRO,
+            "o `Falhou` da rejeição foi cortado acima do teto do registro: {} caracteres antes \
+             do aviso, e o teto é {}",
+            corpo.chars().count(),
+            crate::TETO_DA_FRASE_NO_REGISTRO
+        );
+        assert!(
+            aviso.ends_with(" caracteres]"),
+            "o aviso do corte do `Falhou` não diz quanto a rejeição tinha: {aviso}"
+        );
+    }
+
     /// **A espera das rejeições tem teto, e a que não coube é contada.**
     ///
     /// Ela guarda cada promessa e a linha dela do lado de fora do motor, onde
@@ -3972,11 +4047,21 @@ mod testes {
             };
             let mut rejeicoes = RejeicoesDaVolta::default();
             for n in 0..REJEICOES_GUARDADAS {
-                rejeicoes.guardar(&ctx, promessa(), format!("linha {n}"));
+                rejeicoes.guardar(
+                    &ctx,
+                    promessa(),
+                    format!("linha {n}"),
+                    format!("falhou {n}"),
+                );
             }
             let de_fora = [promessa(), promessa()];
             for ela in &de_fora {
-                rejeicoes.guardar(&ctx, ela.clone(), "a de fora".to_owned());
+                rejeicoes.guardar(
+                    &ctx,
+                    ela.clone(),
+                    "a de fora".to_owned(),
+                    "falhou de fora".to_owned(),
+                );
             }
             assert_eq!(
                 rejeicoes.guardadas.len(),
@@ -4015,6 +4100,9 @@ mod testes {
     /// delas do lado de fora do motor, e o corte só vinha na saída (F-Mods-m2
     /// da revisão final do Plano 1). Cortada de novo na saída, ela perderia o
     /// aviso do primeiro corte e ganharia outro, com o tamanho já cortado.
+    ///
+    /// **E o `Falhou` da janela sai logo depois dela, cortado do mesmo jeito**
+    /// (P51-01): ele espera o fim da volta com a linha, e não sai antes dela.
     #[test]
     fn a_linha_que_espera_o_fim_da_volta_ja_cabe_no_teto_e_sai_sem_novo_corte() {
         let runtime = Runtime::new().expect("o motor");
@@ -4023,11 +4111,17 @@ mod testes {
             let promessa = rquickjs::Object::new(ctx.clone())
                 .expect("um objeto")
                 .into_value();
+            let prefixo = format!("{REJEITADA_SEM_TRATAMENTO}: ");
             let mut rejeicoes = RejeicoesDaVolta::default();
-            rejeicoes.guardar(&ctx, promessa, "x".repeat(1_000_000));
+            rejeicoes.guardar(
+                &ctx,
+                promessa,
+                "x".repeat(1_000_000),
+                format!("{prefixo}{}", "y".repeat(1_000_000)),
+            );
             let aviso = " […cortado: 1000000 caracteres]";
             let guardada = match rejeicoes.guardadas.as_slice() {
-                [(_, linha)] => linha.0.clone(),
+                [Rejeitada { linha, .. }] => linha.0.clone(),
                 outras => panic!("esperava uma linha na espera, há {}", outras.len()),
             };
             assert_eq!(
@@ -4039,14 +4133,32 @@ mod testes {
 
             let (manda, recebe) = std::sync::mpsc::channel();
             let balde = std::cell::RefCell::new(BaldeDoConsole::novo(Instant::now()));
-            dizer_as_rejeitadas(&std::cell::RefCell::new(rejeicoes), &balde, &manda);
+            let fila = Arc::new(Fila::default());
+            dizer_as_rejeitadas(&std::cell::RefCell::new(rejeicoes), &balde, &manda, &fila);
             let Ok(ParaOFora::Console { texto, .. }) = recebe.try_recv() else {
-                panic!("a linha guardada não saiu no fim da volta");
+                panic!("a linha guardada não saiu no fim da volta, ou saiu depois do `Falhou`");
             };
             assert_eq!(
                 texto, guardada,
                 "a linha guardada foi cortada de novo ao sair: o aviso do primeiro corte, que \
                  diz o tamanho do que o MOD lançou, foi trocado por outro"
+            );
+            let Ok(ParaOFora::Falhou(falhou)) = recebe.try_recv() else {
+                panic!(
+                    "o `Falhou` da rejeição não saiu depois da linha, no fim da volta: a janela \
+                     não fica sabendo da promessa que ninguém pegou"
+                );
+            };
+            let cabe = crate::TETO_DA_FRASE_NO_REGISTRO - prefixo.chars().count();
+            assert_eq!(
+                falhou,
+                format!(
+                    "{prefixo}{} […cortado: {} caracteres]",
+                    "y".repeat(cabe),
+                    prefixo.chars().count() + 1_000_000
+                ),
+                "o `Falhou` da rejeição não saiu no teto do registro, cortado uma vez só: ou o \
+                 canal leva o texto inteiro que o MOD lançou, ou o aviso do corte mente o tamanho"
             );
         });
     }

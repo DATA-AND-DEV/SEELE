@@ -11796,18 +11796,20 @@ mod a_falha_do_mod_chega_ao_registro {
         );
     }
 
-    /// **A rejeição que o MOD pega logo depois não vira linha de erro.**
+    /// **A rejeição que o MOD pega logo depois não vira linha de erro, nem
+    /// `Falhou` na janela.**
     ///
     /// `try { await f(); } catch {}`, com `f` uma função `async` que lança
     /// antes do primeiro `await`: a promessa rejeita antes de o `await` prender
-    /// o tratamento, e o motor avisa a rejeição nessa hora — o `Falhou` da
-    /// janela sai (medido; é anterior a este teste). A linha do registro espera
-    /// o fim da volta e sai só se ninguém a pegou: dizer «sem tratamento» em
-    /// ERROR sobre uma rejeição tratada mandaria quem escreveu o MOD procurar
-    /// um defeito que não existe.
+    /// o tratamento, e o motor avisa a rejeição nessa hora. A linha do registro
+    /// e o `Falhou` da janela esperam o fim da volta, e saem só se ninguém a
+    /// pegou: dizer «sem tratamento» sobre uma rejeição tratada mandaria quem
+    /// escreveu o MOD procurar um defeito que não existe — no `seele.log`, em
+    /// ERROR, e na gestão, como «falhou». O `Falhou` saía na hora, de dentro
+    /// do rastreador (P51-01).
     ///
     /// O `fim` vem de um temporizador, numa volta seguinte: quando ele chega,
-    /// as linhas da primeira volta já passaram pelo canal.
+    /// as linhas e os avisos da primeira volta já passaram pelo canal.
     #[test]
     fn uma_rejeicao_pega_logo_depois_nao_vira_linha_de_erro() {
         let deixou = deixou(
@@ -11838,6 +11840,14 @@ mod a_falha_do_mod_chega_ao_registro {
             "uma rejeição que o MOD pegou com `try`/`await` saiu no seele.log como «sem \
              tratamento»: quem escreveu o MOD vai procurar um defeito que não existe: {}",
             deixou.rastro
+        );
+        assert!(
+            !deixou.falas.iter().any(
+                |fala| matches!(fala, ParaOFora::Falhou(texto) if texto.contains("pega logo depois"))
+            ),
+            "uma rejeição que o MOD pegou com `try`/`await` chegou à janela como `Falhou`, e a \
+             gestão diz que o MOD falhou por uma promessa que ele tratou: {:?}",
+            deixou.falas
         );
     }
 
