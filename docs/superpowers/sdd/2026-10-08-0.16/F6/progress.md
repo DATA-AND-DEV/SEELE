@@ -135,5 +135,5 @@ nenhum. Foram refeitas com `perl -e 'alarm …'` e aí provaram.
 | 13 | entrar por linha | feito, com reversão. O caminho pela recusa espera o `OutraLinha { numero }` da F1, que vem pelo byte 0 do quadro (mudou de forma em 08/10: a linha não é razão no fio) | `4818927` |
 | 14 | hospedar por linha | feito, com reversão. A primeira forma do guarda de texto passava revertida (casava com a chamada de `baixar_versao`); ficou presa à de `abrir_versao` | `a2160d7` |
 | 15 | tela de disco mínima | feito, com reversão. Fecha também o conserto da `InstalacaoAlterada` (apagar, e o app é baixado de novo no próximo uso) | `0258aea` |
-| 16 | documentos; sai o segundo endereço | — | |
-| 17 | medida de ponta a ponta (o Windows via orquestradora) | — | |
+| 16 | documentos; sai o segundo endereço | feito, com reversão (o guarda do endereço). O exemplo de `docs/assinatura-e-atualizacao.md` já mostrava só o endereço novo, e não precisou mudar | `de11305` |
+| 17 | medida de ponta a ponta (o Windows via orquestradora) | roteiro escrito em `F6/medida-ponta-a-ponta.md`. A parte sem tela espera a permissão para baixar o pacote publicado da 0.15.1; a parte com tela espera o dono, no Mac e no Windows | |
