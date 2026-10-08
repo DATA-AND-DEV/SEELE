@@ -132,8 +132,8 @@ nenhum. Foram refeitas com `perl -e 'alarm …'` e aí provaram.
 | 10 | revogação nos atos do próprio processo | feito, com reversão. O hospedar confere em Rust; o entrar confere por um comando à parte antes do único `connect` (o erro dele é o da FFI), com um guarda que prende a ordem | `f88f2e0`, frases em `0c01558` |
 | 11 | a guarda da linha legada | feito, com reversão (três peças). O botão de baixar de novo para a `InstalacaoAlterada` vem com a tela de disco (15) | `8312d67`, frase em `0ba303f` |
 | 12 | a primeira abertura | feito, com reversão (três peças). A busca da linha legada foi para depois do `set_var` do módulo de vídeo, porque o `reqwest` lê o ambiente | `82fd3f5` |
-| 13 | entrar por linha | — | (a recusa espera a F1) |
-| 14 | hospedar por linha | — | |
-| 15 | tela de disco mínima | — | |
+| 13 | entrar por linha | feito, com reversão. O caminho pela recusa espera o `OutraLinha { numero }` da F1, que vem pelo byte 0 do quadro (mudou de forma em 08/10: a linha não é razão no fio) | `4818927` |
+| 14 | hospedar por linha | feito, com reversão. A primeira forma do guarda de texto passava revertida (casava com a chamada de `baixar_versao`); ficou presa à de `abrir_versao` | `a2160d7` |
+| 15 | tela de disco mínima | feito, com reversão. Fecha também o conserto da `InstalacaoAlterada` (apagar, e o app é baixado de novo no próximo uso) | `0258aea` |
 | 16 | documentos; sai o segundo endereço | — | |
 | 17 | medida de ponta a ponta (o Windows via orquestradora) | — | |
