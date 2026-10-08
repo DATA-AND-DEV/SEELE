@@ -108,6 +108,7 @@ fn um_mod(id: &str, hash_de: u8) -> EnabledMod {
         repo: "https://github.com/seele/exemplo".to_owned(),
         reach: vec!["ler".to_owned()],
         server_half: true,
+        api: 6,
     }
 }
 

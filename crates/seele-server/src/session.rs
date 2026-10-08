@@ -5486,6 +5486,7 @@ mod o_aceite_dos_mods {
             repo: "https://github.com/seele/exemplo".to_owned(),
             reach: vec!["ler".to_owned()],
             server_half: no_servidor,
+            api: 6,
         }
     }
 

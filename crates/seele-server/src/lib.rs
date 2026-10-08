@@ -646,6 +646,12 @@ impl Daemon {
         if let Some(pasta_dos_mods) = config.mods_dir.clone() {
             let ligados = {
                 let banco = server.persistence.lock().await;
+                // A API das linhas habilitadas antes da migração 14, lida dos
+                // bytes do hash. Antes de montar qualquer anúncio, e dita no
+                // registro quando não se preenche (D-fio-7).
+                for queixa in crate::mods::preencher_as_apis(&banco, &pasta_dos_mods) {
+                    tracing::warn!("MOD habilitado sem API conhecida — {queixa}");
+                }
                 crate::persistence::mods::enabled(&banco).unwrap_or_default()
             };
             // O par, e não só o identificador: é o hash que diz **quais bytes**
