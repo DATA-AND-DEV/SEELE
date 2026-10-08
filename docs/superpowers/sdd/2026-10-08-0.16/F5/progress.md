@@ -47,3 +47,21 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - a mensagem de um teste;
     - um guarda de fonte que prende `drive` a `fim_da_sessao`.
   - **A re-revisão** resolveu os seis achados, sem quebra nova. Nenhum assunto casa com as cadeias do G1.
+- **Ferramentas → integrado** (`fbeff8e..184697b`, merge `84c142e`), em 2 rodadas.
+  - **Commits que fecham cada item:**
+    - P51-15: `1345e0e`;
+    - P51-21: `d7ecb3e`;
+    - L1-m2: `19e04ce`;
+    - L1-m3: `f9c2a94` (o lock é o do `1277d85` da F1, e a diferença entre os dois sai vazia) e `92783b5`;
+    - L1-m4: `02c720d`.
+  - **A primeira revisão aprovou com seis menores, e todos foram consertados antes do merge.** Quatro são os padrões que o `CLAUDE.md` diz terem custado mais caro:
+    - o teste do L1-m2 casava com o próprio dado;
+    - o `publicar.sh` calava a falha do git;
+    - o `relatar` saía com falha calada;
+    - os guardas do `ci.yml` aceitavam a forma errada.
+  - **Os outros dois menores:** os comentários com história não medida, e o `warn` no upload.
+  - **A re-revisão deu os seis por resolvidos.** Ficam como menores adiados, da mesma família e fora do diff:
+    - o `changelog_dos_commits` ainda cala a falha do git;
+    - a conferência dos alvos do fuzz lê o `ci.yml` inteiro;
+    - o guarda não olha o `continue-on-error` do passo `--locked`.
+  - **Nota para o plano:** a forma opcional do fuzz que o brief sugeria (`fuzz run uri fuzz/sementes/uri`) grava nas sementes versionadas. A forma certa é a do CI, com `fuzz/corpus/<alvo>` na frente.
