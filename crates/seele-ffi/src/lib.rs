@@ -5273,13 +5273,62 @@ mod a_volta_recusada_diz_o_motivo {
             ConnectError::SemResposta,
             ConnectError::ProtocolViolation,
         ] {
+            let obtido = fim_da_sessao(&Motivo::Recusado(erro.clone()));
             assert_eq!(
-                fim_da_sessao(&Motivo::Recusado(erro.clone())),
+                obtido,
                 EndReason::LinkLost,
-                "a volta que acabou em {erro:?} chega à tela como recusa de credencial, \
-                 e manda conferir convite e senha por uma falha de rede"
+                "a volta que acabou em {erro:?} chega à tela como {obtido:?}, e não como \
+                 enlace perdido: a frase manda procurar outra causa para uma falha de rede"
             );
         }
+    }
+
+    /// A ligação de `drive` a [`fim_da_sessao`], que nenhum teste de
+    /// comportamento alcança.
+    ///
+    /// Os testes de cima provam `fim_da_sessao`. `drive` só a usa com uma
+    /// sessão viva cuja volta pela bateria o servidor recuse, e nenhum teste
+    /// deste crate abre uma. Sem este guarda, um `match` reescrito à mão dentro
+    /// de `drive` (o `Recusado(_) => CredentialRejected` de antes do lote H)
+    /// deixaria todos verdes, e a tela voltaria a dizer «credencial recusada»
+    /// para toda volta recusada.
+    ///
+    /// Comentários fora, para que um parágrafo que cite a chamada não conte
+    /// como a chamada. As agulhas são montadas, e não escritas: este é o
+    /// arquivo que o teste lê.
+    #[test]
+    fn drive_traduz_o_fim_que_o_enlace_avisa_por_fim_da_sessao() {
+        let fonte = include_str!("lib.rs");
+        let sem_comentario: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let inicio = sem_comentario
+            .find(&format!("{} fn drive(", "async"))
+            .expect("`drive` sumiu de `lib.rs`");
+        let depois = sem_comentario.get(inicio..).expect("o começo de `drive`");
+        let fim = depois.find("\n}\n").expect("`drive` nunca fecha");
+        let corpo = depois.get(..fim).expect("o corpo de `drive`");
+        let Some(braco) = corpo
+            .split(&format!("enlace::Aviso::{}(motivo) =>", "Encerrado"))
+            .nth(1)
+        else {
+            panic!(
+                "`drive` não trata mais o fim que o enlace avisa pelo nome de sempre, e este \
+                 guarda deixou de achar o braço que ele prende"
+            );
+        };
+        let braco = braco
+            .split(&format!("{};", "break"))
+            .next()
+            .unwrap_or(braco);
+        assert!(
+            braco.contains(&format!("{}(&motivo)", "fim_da_sessao")),
+            "`drive` traduz o fim da sessão sem passar por `fim_da_sessao`: os testes de \
+             `fim_da_recusa` ficam verdes e a tela pode voltar a dizer «credencial recusada» \
+             para toda volta recusada:\n{braco}"
+        );
     }
 }
 
