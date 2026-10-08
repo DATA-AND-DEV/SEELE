@@ -12,6 +12,12 @@ commits de código e este relatório, todos locais: sem push, tag nem release.
 | `6bf9ddd7` | P51-14 T3 M2 | dois testes por `registrar_da_janela_em`: «erro» sai em ERROR e «outro» em DEBUG, os dois com `mod_id=a/b` |
 | `bead90c2` | P51-14 T1 | `semMentir` diz o `Error`, a função e o símbolo aninhados; um ciclo vira «[cíclico]» só onde é ancestral, numa segunda passada |
 | `74a5c427` | P51-14 T2 N1 | `BaldeDoConsole::ate_a_proxima_ficha`; a espera do laço de `rodar` acorda no menor prazo entre o temporizador e a ficha |
+| `7817f871` | T2 N1, rodada 1 | a espera só acorda quando sobra uma ficha além da do MOD (`ate_sobrar_uma_ficha`, duas fichas); guardas da escrita contínua, da parada e do fim de volta de resposta; o teste do laço volta aos 400 ms; `assert` de compilação da vazão |
+| `8719c9ee` | T1, rodada 1 | orçamento de 1024 objetos por passada em `emTexto` |
+| `20404362` | P51-01, rodada 1 | o `Falhou` da conta além da espera ganha o sujeito |
+
+A rodada 1 de conserto está no fim deste relatório, e reescreve o que as
+seções 5 e 6 e as «Preocupações» 1, 2, 5, 6 e 7 dizem.
 
 Arquivos mudados (`0f94be66..74a5c427`), só os da lista do lote:
 - `apps/seele-app/src/executor.rs`;
@@ -366,6 +372,244 @@ a F3 pode querer levar ao `api/README.md` da API 6:
 - a promessa rejeitada sem tratamento faz a gestão dizer «falhou» **só se
   ninguém a pegou até o fim da volta**, e o motivo vem cortado em 512
   caracteres com o aviso do corte;
-- a conta das linhas de `console` seguradas sai sozinha, em WARN, em até um
-  quarto de segundo depois que o MOD se cala (hoje dita só em
-  `docs/como-se-faz-um-mod.md`, que não é API).
+- a conta das linhas de `console` seguradas sai sozinha, em WARN, em até meio
+  segundo depois que o MOD se cala, e não toma a vez de quem continua
+  escrevendo (hoje dita só em `docs/como-se-faz-um-mod.md`, que não é API; o
+  «um quarto de segundo» da primeira versão mudou na rodada 1).
+
+## Rodada 1 de conserto
+
+A revisão aprovou o P51-01, o m8, o m9 e o T3 M2, e pediu conserto por dois
+Importantes medidos e três menores. Mesmo worktree, mesmo branch, a partir de
+`6ab208e4`. Três commits de código e este relatório. As reversões seguem o
+método de antes (cópia no scratchpad, troca, teste, cópia de volta, `cmp`),
+e todas voltaram «RESTAURADO_IGUAL».
+
+### Importante 1: a linha da conta tomava a vez do MOD (`7817f871`)
+
+**O defeito.** A espera acordava no microssegundo em que a ficha se
+completava, e a linha `CONTA_DO_BALDE` a gastava. A linha seguinte do MOD
+achava menos de uma ficha e era segurada, o que fazia o produto acordar de
+novo na ficha seguinte, e o ciclo se repetia. A minha preocupação 1 era esse
+defeito, e ele é permanente. Ajustar `um_mod_em_laco…` para 1 s tirou a
+disputa do teste em vez de consertá-la: adaptei o teste ao código. Esse ajuste
+foi desfeito.
+
+**A escolha: duas fichas.** `ate_a_proxima_ficha` virou
+`ate_sobrar_uma_ficha`, que mira `2 * FICHA`. O produto só fala quando há uma
+ficha que o MOD não vai precisar:
+- quem escreve quatro linhas por segundo ou mais gasta a primeira ficha antes
+  de juntar a segunda, e leva a conta na própria linha;
+- quem se calou tem a conta em até meio segundo (medido: 504 ms), e ainda acha
+  uma ficha quando volta a escrever.
+
+A outra opção — guardar a última tentativa de `admitir` e mirar
+`max(ficha, última + 250 ms)` — pedia um campo a mais. E deixava a conta gastar
+a única ficha: um MOD que voltasse a escrever logo depois do prazo achava o
+balde seco, o mesmo defeito numa janela menor.
+
+O fim de uma volta continua pedindo uma ficha só (`pendentes_se_couber`): ali
+o MOD acabou de ter a vez, e a ficha que ficou é uma que ele não usou. Os
+temporizadores vencidos rodam antes da conta no ramo do timeout, e por isso,
+quando os dois vencem juntos, a linha do MOD leva a conta.
+
+**A medida** (3 rodadas de 4 s, depois de uma rajada de 100, linhas do MOD /
+linhas da conta; mesma sonda para as três linhas, removida depois):
+
+| | P = 100 ms | P = 16 ms |
+|---|---|---|
+| antes (`74a5c427`) | 1/14, 0/15, 0/15 | 7/8, 5/11, 2/13 |
+| sem a espera da ficha (prazo só do vencimento) | 15/0, 15/0, 15/0 | 15/0, 15/0, 15/0 |
+| depois (`7817f871`) | 15/0, 15/0, 15/0 | 15/0, 15/0, 15/0 |
+
+**Testes.**
+- Novo `um_mod_que_continua_escrevendo_nao_perde_a_vez_para_a_conta`: uma
+  rajada de 100 e depois `setInterval(() => console.log('do MOD'), 100)` por
+  2 s. Exige no máximo uma linha de conta, mais linhas do MOD que da conta, e
+  pelo menos quatro do MOD.
+- `um_mod_em_laco_no_console_nao_passa_da_rajada_e_conta_o_resto` voltou byte
+  a byte ao de `0f94be66` (`cmp` do trecho contra `git show 0f94be66:…`), com
+  os 400 ms originais. Passa sem mudança.
+- `o_balde_diz_quanto_falta_para_a_proxima_ficha` virou
+  `o_balde_diz_quanto_falta_para_sobrar_uma_ficha`. Exige 500 ms com uma
+  segurada e 400 ms depois de 100 ms. Exige também que, acordado no prazo, a
+  conta saia e a linha seguinte do MOD passe, e que um microssegundo antes a
+  conta tome a ficha do MOD.
+- Menor 3a: `uma_rajada_no_console_seguida_de_silencio_tem_a_conta_dita_ao_parar`
+  foi renomeado `…_tem_a_conta_dita_ate_parar`. O doc diz que o caminho
+  depende do relógio. O guarda que não depende é o novo
+  `a_conta_que_sobra_quando_a_instancia_para_sai_antes_do_parou`: o MOD
+  escreve duas linhas a cada 4 ms. A primeira leva cada ficha, e a segunda é
+  sempre segurada. O balde nunca junta a ficha que sobraria, o fim de cada
+  volta o acha seco, e o teste exige que a última linha antes do `Parou` seja a
+  conta, com `suprimidas >= 1`.
+- Menor 3b: o teste renomeado na primeira passada foi dividido em dois.
+  - `a_conta_das_seguradas_nao_espera_um_temporizador_mais_tarde` (o
+    temporizador de um minuto) é o guarda do `min`.
+  - `a_conta_das_seguradas_sai_no_fim_da_volta_de_uma_resposta_com_ficha`
+    entrega a resposta 350 ms depois da rajada, entre a primeira ficha e a
+    segunda, e exige a conta antes do diagnóstico que vem atrás. Um atraso da
+    máquina não o reprova; só o faz deixar de distinguir os caminhos.
+
+  **Conferido por reversão: o guarda de escrita contínua não exercita a conta
+  do fim da volta.** Sem ela, ele continua verde, e quem reprova é o teste da
+  resposta.
+- `a_conta_das_seguradas_sai_sem_esperar_o_mod_parar` não mudou. Ele dá 1 s
+  para os ~500 ms.
+- Menor 2: `const _: () = assert!(FICHA.is_multiple_of(LINHAS_DE_CONSOLE_POR_SEGUNDO as u64));`,
+  junto de `FICHA`. Usei `is_multiple_of` porque o clippy recusa o `%` com
+  `manual_is_multiple_of`. Prova: com a vazão em 3, a compilação falha com
+  `error[E0080]: evaluation panicked: assertion failed: FICHA.is_multiple_of(…)`.
+- Docs: o do balde, o de `pendentes_se_couber`, o de `dizer_as_seguradas`, os
+  comentários da espera e do ramo do timeout, e `docs/como-se-faz-um-mod.md`
+  («em até meio segundo… e deixa ao seu código a vez seguinte»).
+
+**RED** (o código de `74a5c427`, com o guarda novo e o teste do laço
+original):
+```
+um MOD que escreve a cada 100 ms deixou, em dois segundos depois de uma rajada, 1 linhas dele e 6 da conta: a linha da conta toma a ficha que era do MOD, e o seele.log diz «quantas» no lugar de «o quê»
+um_mod_em_laco_no_console_nao_passa_da_rajada_e_conta_o_resto: veio None no meio das linhas de console
+test result: FAILED. 0 passed; 2 failed
+```
+
+**GREEN.**
+- `-- executor`: `50 passed`.
+- O binário inteiro: `251 passed`.
+- `mod_de_referencia`: `4 passed`.
+- Os oito testes do balde e da conta, rodados dez vezes seguidas: `8 passed`
+  nas dez.
+
+**Reversões.**
+1. `FICHA` no lugar de `2 * FICHA` (a espera da primeira versão): reprova o
+   guarda novo («0 linhas dele e 7 da conta»), o teste do laço («veio None…») e
+   o do balde (`left: Some(250ms) right: Some(500ms)`). Resultado:
+   `47 passed; 3 failed`.
+2. Sem a conta da parada: `a última linha antes do Parou não foi a conta… ("a",
+   suprimidas=87)`. O de rajada e silêncio também reprova. A primeira versão
+   do teste da parada descartava as linhas de antes do `Encerrar` e, na
+   reversão, reprovava pelo motivo errado («nenhuma linha de console
+   chegou…»). Corrigi para guardar a última linha do começo ao fim, e o motivo
+   passou a ser o certo.
+3. Sem a conta do fim de volta (a chamada tirada do fim do laço): só
+   `a_conta_das_seguradas_sai_no_fim_da_volta_de_uma_resposta_com_ficha`
+   reprova («a conta… não saiu em aviso (no fim da volta de uma resposta…)»),
+   com `49 passed; 1 failed`.
+4. O prazo com `+ 1` µs: `left: Some(500.001ms) right: Some(500ms)`.
+
+### Importante 2: a segunda passada não tinha orçamento (`8719c9ee`)
+
+**O conserto.** `semCiclo` virou `passada(marcaCiclos)`, e as duas passadas
+de `emTexto` usam o mesmo substituto, com e sem a marca de ciclos. Cada
+passada conta os objetos que vê. Do de número `OBJETOS_POR_PASSADA = 1024` em
+diante, ela devolve `'[…]'`. A conta pega todo valor que vira objeto depois de
+`semMentir`, e não só os expandidos: o que vira «[cíclico]» também conta, e
+por isso a busca entre os ancestrais também tem teto (no máximo 1024 buscas
+de no máximo 1024 degraus).
+
+**Por que 1024, e nas duas passadas.**
+- Cada objeto que a passada vê escreve ao menos um caractere (`{`, `[` ou o
+  texto que o troca) antes de ela ver o seguinte, e o JSON sai nessa ordem.
+- O objeto de depois do teto começa além do caractere 1024, e o Rust corta a
+  linha em 512, contados já escapados — o que, num JSON cheio de aspas, é
+  menos ainda.
+- O orçamento não muda o que chega ao `seele.log`. 512 já bastaria, e 1024 é
+  a folga.
+- Na primeira passada, ele fecha o mesmo estouro num DAG, que não tem ciclo e
+  já estourava antes do lote.
+- As duas juntas veem no máximo 2048 objetos. É aqui que entra o custo da
+  passada dobrada (a minha preocupação 5 de antes).
+
+**Teste.** Novo `um_grafo_denso_no_console_nao_estoura_a_volta`:
+- um grafo de 10 nós ligados todos a todos (ciclos, segunda passada);
+- um DAG de 20 nós, cada um ligado a todos os de depois (2¹⁹ caminhos,
+  primeira passada);
+- depois, `seele.postar('fim')`.
+
+Exige que a mensagem `fim` chegue (o código depois do `console.log` rodou) e
+as duas linhas com o começo certo
+(`{"i":0,"n1":{"i":1,"n0":"[cíclico]"…` e `{"i":0,"n1":{"i":1,"n2":{"i":2,…`).
+
+**RED:**
+```
+um `console.log` de um grafo denso não deixou o MOD chegar ao fim da volta (758.965542ms depois de subir, com 0 linhas): veio Some(Falhou("o MOD lançou"))
+```
+
+**GREEN.**
+- `-- executor`: `51 passed`.
+- O binário inteiro: `252 passed`.
+- `mod_de_referencia`: `4 passed`.
+- Os quatro testes do T1, dez vezes seguidas: verdes nas dez.
+
+Uma sonda temporária (removida depois) mediu o tempo de um `console.log`,
+dentro do motor, no build de teste:
+
+| caso | tempo |
+|---|---|
+| completo, k = 8 | 5–6 ms |
+| completo, k = 10 | 4 ms |
+| completo, k = 14 | 4–5 ms |
+| DAG, k = 20 | 5 ms |
+| cadeia de 100 / 300 / 500 / 700 nós, com 2000 referências ao pai no fim (o pior caso da busca entre ancestrais) | 20 / 38 / 53 / 65 ms |
+
+Uma cadeia de 1000 estoura a pilha do QuickJS nas duas passadas, e sai
+`[object Object]` em 55 ms. Isso é anterior ao lote: a primeira passada já
+estourava ali.
+
+**Reversões.**
+1. Sem o orçamento (`if (false && …)`): `…(718.550167ms depois de subir, com 0
+   linhas): veio Some(Falhou("o MOD lançou"))`.
+2. O orçamento só na segunda passada (`if (marcaCiclos && …)`):
+   `…(928.880708ms depois de subir, com 1 linhas): veio Some(Falhou("o MOD
+   lançou"))`. A linha do grafo completo sai, e o DAG estoura a primeira
+   passada.
+
+### Menor 1: o `Falhou` da conta além da espera ganha o sujeito (`20404362`)
+
+`falhou_alem_da_espera(n)` dá
+`"promessa rejeitada sem tratamento: e mais N além da espera"`. A linha do
+registro continua `alem_da_espera(n)`. Teste novo:
+`o_falhou_da_conta_alem_da_espera_diz_de_que_e_a_conta`, com
+`RejeicoesDaVolta { guardadas: vec![], alem: 3 }`. Exige a linha e depois o
+`Falhou`, nesta ordem e com estes textos.
+
+**RED** (o código de antes, que é a reversão):
+```
+left: "e mais 3 rejeições sem tratamento além da espera"
+right: "promessa rejeitada sem tratamento: e mais 3 além da espera"
+```
+
+**GREEN:** `9 passed` com os testes de rejeição; binário inteiro `253 passed`;
+`mod_de_referencia` `4 passed`.
+
+### O que rodou nesta rodada, e o que não rodou
+
+Rodou, depois de cada conserto:
+- `cargo test -p seele-app --bin seele-app` inteiro;
+- `cargo test -p seele-conformance --test mod_de_referencia`;
+- `cargo fmt --all -- --check`;
+- `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`
+  (limpo; só o `ld: duplicate -rpath`).
+
+Não rodou o mesmo que antes: `--workspace`, `check-api`, `check-runtime`, as
+bancadas, o app nativo.
+
+### Preocupações desta rodada
+
+1. **O fim de volta continua pedindo uma ficha só.** Um MOD que escreve num
+   temporizador e também recebe respostas sem escrever nelas ainda pode
+   perder uma linha para a conta dita no fim de uma volta de resposta. É o
+   comportamento de antes do lote (`sem a espera da ficha` na tabela), e não
+   foi medido com respostas misturadas.
+2. **Quem se cala tem a conta em ~500 ms**, e não mais em ~250 ms.
+3. O teste da resposta só distingue os dois caminhos se o `sleep` de 350 ms
+   não passar de 500 ms. Ele nunca reprova à toa, mas, numa máquina muito
+   carregada, a reversão 3 pode ficar verde.
+4. **O orçamento conta objetos, e não primitivos.** Um objeto com um milhão
+   de campos primitivos continua custando um milhão de chamadas do
+   substituto na primeira passada. Isso é anterior ao lote.
+5. **O pior caso medido do orçamento é de 65 ms no build de teste**, para uma
+   cadeia de 700 nós. Ele cabe nos 500 ms da volta, mas não é de graça.
+6. Continuam valendo as preocupações 3 e 4 de antes (o corte do `Falhou`
+   conta a frase do produto; a gestão sabe da rejeição no fim da volta). A 5
+   (o getter chamado duas vezes) agora tem o teto do orçamento, mas o getter
+   continua sendo chamado duas vezes.
