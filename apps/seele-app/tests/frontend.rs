@@ -11732,6 +11732,11 @@ fn sem_nome_o_primeiro_conectar_pergunta_antes() {
     let Some(local) = conectar.find("invoke(\"apelido_local\")") else {
         panic!("a entrada não lê mais o apelido desta máquina:\n{conectar}");
     };
+    assert!(
+        local < pergunta,
+        "a entrada pergunta o nome antes de ler o desta máquina, e para na porta \
+         quem já tem um:\n{conectar}"
+    );
     let condicao = conectar[local..pergunta]
         .rfind("if (")
         .map(|se| &conectar[local + se..pergunta])
@@ -11746,6 +11751,25 @@ fn sem_nome_o_primeiro_conectar_pergunta_antes() {
         condicao.contains("!jaPergunteiONome"),
         "a pergunta do nome não é mais só da primeira entrada desta execução: ela \
          volta a cada reconexão e a cada batida automática da espera:\n{condicao}"
+    );
+    // **CONECTAR apagado enquanto a pergunta está aberta.** Com Tab e Enter, ele
+    // abria uma segunda entrada por baixo da caixa, e essa já não perguntava —
+    // a marca estava posta — e entrava com o nome vazio (revisão do lote J).
+    let Some(se) = conectar[local..pergunta].rfind("if (") else {
+        panic!("a pergunta do nome não tem mais condição:\n{conectar}");
+    };
+    let antes_da_pergunta = &conectar[local + se..pergunta];
+    let depois_da_pergunta = &conectar[pergunta..connect];
+    assert!(
+        antes_da_pergunta.contains("$(\"botao-conectar\").disabled = true"),
+        "CONECTAR fica ativo enquanto a pergunta do nome está aberta, e uma segunda \
+         entrada por baixo dela entra com o nome vazio:\n{antes_da_pergunta}"
+    );
+    assert!(
+        depois_da_pergunta.contains("finally")
+            && depois_da_pergunta.contains("$(\"botao-conectar\").disabled = false"),
+        "CONECTAR não volta a valer depois da pergunta, inclusive quando ela \
+         falha:\n{depois_da_pergunta}"
     );
 
     // A pergunta é o perfil com outro título, e a entrada espera ele fechar.
@@ -11785,6 +11809,48 @@ fn sem_nome_o_primeiro_conectar_pergunta_antes() {
         "quem fecha a pergunta do nome sem responder entra sem saber com que \
          nome:\n{perguntar}"
     );
+
+    // **A nota diz a verdade do campo, e chega junto dele ao leitor de tela.**
+    // A revisão do lote J achou três coisas: a nota dizia «você vai entrar com
+    // um nome tirado da sua chave» embaixo de um nome já digitado; quem não vê a
+    // tela só a ouvia ao fechar, quando não dava mais para responder; e a nota
+    // de sempre do campo («O que você já disse continua com o nome de então»)
+    // falava com quem nunca disse nada.
+    let campo = tag_with_id(&read("ui/index.html"), "perfil-apelido");
+    assert!(
+        attribute(&campo, "aria-describedby").as_deref() == Some("perfil-sem-nome"),
+        "o campo do apelido não é descrito pela nota de quem fecha sem nome, e o \
+         leitor de tela só a diz depois de a caixa fechar:\n{campo}"
+    );
+    assert!(
+        without_comments(&nomear)
+            .contains("$(\"perfil-apelido\").addEventListener(\"input\", desenharNotasDoApelido)"),
+        "a nota de quem fecha sem nome não acompanha o campo: ela continua \
+         dizendo «nome tirado da sua chave» embaixo de um nome já digitado"
+    );
+    let notas = js_function(&nomear, "function desenharNotasDoApelido(");
+    for (trecho, o_que) in [
+        (
+            "const mostrar = perguntandoONome && vazio;",
+            "a de quem fecha sem nome aparece fora da pergunta, ou embaixo de um \
+             nome já digitado",
+        ),
+        (
+            "nota.textContent = mostrar ? ENTRAR_SEM_NOME : \"\";",
+            "a de quem fecha sem nome guarda o texto quando escondida, e o \
+             `aria-describedby` do campo o lê mesmo assim",
+        ),
+        (
+            "$(\"perfil-nota-do-apelido\").hidden = perguntandoONome;",
+            "a de quem troca de nome aparece na pergunta, para quem nunca disse \
+             nada",
+        ),
+    ] {
+        assert!(
+            notas.contains(trecho),
+            "as notas do campo do apelido erram: {o_que}:\n{notas}"
+        );
+    }
 
     // E o perfil de sempre continua sendo o de sempre.
     let abrir = js_function(&nomear, "async function abrirPerfil(");

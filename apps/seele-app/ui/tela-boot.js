@@ -171,9 +171,20 @@ async function conectar(alvo, apelido, token) {
   // espera também passam por aqui, e não podem parar atrás de uma caixa. Quem
   // fecha sem responder entra com o nome tirado da chave, como antes — e a
   // caixa diz isso enquanto ainda está aberta (`perguntarONome`).
+  //
+  // **CONECTAR apagado enquanto ela está aberta.** Com Tab e Enter ele abria uma
+  // segunda entrada por baixo da caixa — que já não perguntava, porque a marca
+  // estava posta, e entrava com o nome vazio. Volta a valer no `finally`, e logo
+  // abaixo, sem `await` no meio, a entrada o apaga de novo até o `connect`
+  // responder.
   if (apelido === "" && !jaPergunteiONome) {
     jaPergunteiONome = true;
-    apelido = await perguntarONome();
+    $("botao-conectar").disabled = true;
+    try {
+      apelido = await perguntarONome();
+    } finally {
+      $("botao-conectar").disabled = false;
+    }
   }
   // **Lembrado só quando é escolha de alguém**, e esta ordem é o conserto de
   // um defeito de campo que não tinha saída.

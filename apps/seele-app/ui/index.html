@@ -3896,16 +3896,25 @@
       -->
       <label class="nomear-campo">
         <span class="rotulo">APELIDO</span>
-        <input id="perfil-apelido" name="apelido" maxlength="32"
+        <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
+               name="apelido" maxlength="32"
                spellcheck="false" autocomplete="off"
                placeholder="como as pessoas te veem">
-        <span class="nota">O que você já disse continua com o nome de então.</span>
+        <!--
+          Escondida na pergunta do nome: ela fala com quem troca de nome, e
+          quem é perguntado ainda não disse nada com nome nenhum.
+        -->
+        <span id="perfil-nota-do-apelido" class="nota">O que você já disse continua com o nome de então.</span>
       </label>
       <!--
         Só na pergunta do nome, antes da primeira entrada desta execução
-        (`perguntarONome`): diz o que acontece a quem fecha sem responder, antes
-        de fechar. A frase é `ENTRAR_SEM_NOME`, de `frases.js`, e é escrita aqui
-        pelo script. `fecharPerfil` a esconde de novo.
+        (`perguntarONome`), e só com o campo vazio: diz o que acontece a quem
+        fecha sem responder, antes de fechar. A frase é `ENTRAR_SEM_NOME`, de
+        `frases.js`, escrita aqui por `desenharNotasDoApelido`.
+
+        O campo a tem em `aria-describedby`, para o leitor de tela dizê-la quando
+        o foco chega ao campo, e não só ao fechar. Escondida, ela fica vazia: a
+        descrição lê até o texto de um nó escondido.
       -->
       <p id="perfil-sem-nome" class="nota" hidden></p>
       <!--

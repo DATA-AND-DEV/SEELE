@@ -183,7 +183,7 @@ async function abrirPerfil(titulo) {
     $("perfil-titulo").textContent = titulo;
   } else if ($("perfil").hidden) {
     $("perfil-titulo").textContent = "SEU PERFIL";
-    $("perfil-sem-nome").hidden = true;
+    perguntandoONome = false;
   }
   focoAntesDoPerfil = document.activeElement;
   $("perfil-erro").hidden = true;
@@ -215,6 +215,9 @@ async function abrirPerfil(titulo) {
     }
   }
   $("perfil-apelido").value = apelido;
+  // Antes de a caixa aparecer e de o foco chegar ao campo: o leitor de tela lê a
+  // descrição do campo nesse instante, e ela tem de estar escrita.
+  desenharNotasDoApelido();
 
   // **O bloco da imagem aparece sempre**, e é o que faz os dois diálogos serem
   // um só.
@@ -248,6 +251,35 @@ async function abrirPerfil(titulo) {
  */
 let aoFecharOPerfil = null;
 
+/** Se a caixa aberta é a pergunta do nome, e não o SEU PERFIL de sempre. */
+let perguntandoONome = false;
+
+/**
+ * As duas notas embaixo do campo do apelido, conforme a caixa e o campo.
+ *
+ * - **A de quem fecha sem nome** (`ENTRAR_SEM_NOME`) só aparece na pergunta, e
+ *   só com o campo vazio: embaixo de um nome já digitado, «você vai entrar com
+ *   um nome tirado da sua chave» contradiz o que está escrito logo acima. Quem
+ *   digita e fecha sem salvar ainda entra com o nome da chave — e ouve isso ao
+ *   fechar (`perguntarONome`).
+ * - **A de sempre** («O que você já disse continua com o nome de então») fala
+ *   com quem troca de nome. Na pergunta ninguém disse nada ainda, e ela sai.
+ *
+ * A de quem fecha sem nome fica vazia quando escondida, e não só escondida: o
+ * campo a tem em `aria-describedby`, e a descrição lê até o texto de um nó
+ * escondido.
+ */
+function desenharNotasDoApelido() {
+  const vazio = $("perfil-apelido").value.trim() === "";
+  const nota = $("perfil-sem-nome");
+  const mostrar = perguntandoONome && vazio;
+  nota.hidden = !mostrar;
+  nota.textContent = mostrar ? ENTRAR_SEM_NOME : "";
+  $("perfil-nota-do-apelido").hidden = perguntandoONome;
+}
+
+$("perfil-apelido").addEventListener("input", desenharNotasDoApelido);
+
 /**
  * Pergunta o nome antes da primeira entrada, e devolve o que ficou gravado.
  *
@@ -257,16 +289,16 @@ let aoFecharOPerfil = null;
  * fechar com o campo preenchido e sem salvar não grava nada.
  *
  * Fechar sem nome segue como antes, para o nome tirado da chave, e diz isso: a
- * nota aparece na caixa enquanto ela está aberta, que é quando ainda dá para
- * mudar de ideia, e é anunciada ao fechar.
+ * nota aparece na caixa enquanto o campo está vazio, que é quando ainda dá para
+ * mudar de ideia — e o leitor de tela a ouve ao chegar ao campo, pela
+ * descrição dele —, e é anunciada ao fechar. Ver `desenharNotasDoApelido`.
  */
 async function perguntarONome() {
   const fechou = new Promise((resolver) => {
     aoFecharOPerfil = resolver;
   });
-  const nota = $("perfil-sem-nome");
-  nota.textContent = ENTRAR_SEM_NOME;
-  nota.hidden = false;
+  // Antes de abrir: é `abrirPerfil` que desenha as notas, com o campo já cheio.
+  perguntandoONome = true;
   try {
     await abrirPerfil("COMO OS OUTROS VÃO TE CHAMAR?");
     // O teclado no nome, e não na imagem, onde o perfil de sempre o põe: a
@@ -291,8 +323,9 @@ async function perguntarONome() {
 /** Fecha, devolvendo o teclado. */
 function fecharPerfil() {
   $("perfil").hidden = true;
-  // A nota da pergunta do nome é da pergunta, e ela acabou.
-  $("perfil-sem-nome").hidden = true;
+  // As notas da pergunta do nome são da pergunta, e ela acabou.
+  perguntandoONome = false;
+  desenharNotasDoApelido();
   // Quem esperava a caixa fechar segue — ver `aoFecharOPerfil`.
   const seguir = aoFecharOPerfil;
   aoFecharOPerfil = null;
