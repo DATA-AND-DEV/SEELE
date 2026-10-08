@@ -408,6 +408,19 @@ function fraseDeErro(erro, apelido, deOnde) {
         "exigido-por-este-servidor": "Desligue o MOD e salve antes de apagar.",
       }[motivo] ?? motivo;
     }
+    // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,
+    // como a lista assinada os escreve — nunca uma recusa genérica. Serve a
+    // `FalhaAoHospedar` e a `conferir_esta_versao`, que usam o mesmo nome.
+    if (erro.EstaVersaoRevogada) {
+      const { defeito, corrigida_em: corrigida } = erro.EstaVersaoRevogada;
+      return (
+        "ESTA VERSÃO DO SEELE FOI REVOGADA.\n" +
+        `O defeito: ${defeito}\n` +
+        (corrigida
+          ? `A ${corrigida} corrige. Atualize antes de hospedar ou de entrar.`
+          : "Atualize antes de hospedar ou de entrar.")
+      );
+    }
     if (erro.PinChanged) {
       return (
         "A CHAVE DO SERVIDOR MUDOU.\n" +
@@ -734,6 +747,14 @@ const FRASES = {
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O SERVIDOR AQUI",
+    // ADR 0046: a lista de revogação que chegou não abriu, ou é mais velha que
+    // a guardada nesta máquina — a forma de alguém esconder uma revogação é
+    // servir uma lista antiga. O ato para em vez de seguir calado. A outra
+    // recusa, a da versão revogada, traz o defeito e o conserto e é montada em
+    // `fraseDeErro`, que é onde as recusas com campos são lidas.
+    ListaDeRevogacaoRecusada:
+      "A LISTA DE VERSÕES REVOGADAS QUE CHEGOU NÃO CONFERE.\n" +
+      "Ela não abriu, ou é mais antiga que a que esta máquina já viu. Tente de novo mais tarde.",
 
     // O catálogo de MODs — ADR 0045.
     //
