@@ -121,3 +121,56 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - o K3 prova o desenho do bloco «a região e as páginas de cada MOD» em `diagnostico-de-mods.cjs`;
     - o M2 reescreve o doc de `onde_mora_hoje`.
   - **Os menores adiados** estão no ledger da frente, para a revisão final e para o Z.
+- **A integração da onda 1.** A orquestradora juntou `0.16/lotes`, `0.16/protocolo`, `0.16/launcher` e `0.16/web` em `versao/0.16` (`2a37ffc5`). A bateria inteira passou com 2912 testes. O único conflito foi o `EndReason` (H contra F1), e as duas listas ficaram.
+- **O merge de volta.** O `git merge versao/0.16` no `0.16/lotes` deu `0f94be6`, sem conflito.
+- **Onda 2 despachada:** D · K5 · M2 (com a montagem de certificado do 1B) · P53, em paralelo e sem dividir arquivo.
+- **P53 → integrado** (`0f94be6..2d2a914`, merge `8476815`), em 2 rodadas. A pendência 53 fecha em `c6ca70e` e `6038abb`.
+  - **O Importante da revisão:** a linha WARN nova registrava a pasta em `%` cru, e uma quebra de linha no nome forjava uma linha no `seele.log`, como o revisor mediu. A pasta passou a sair por `caminho_no_registro`, com um teste. O teste do Windows compara a forma escapada.
+  - **O guarda `variants_of`:**
+    - passou a ler `Nome(…),` e `Nome { … },`;
+    - prende a profundidade;
+    - enxerga as variantes com campo de `FalhaAoHospedar` (as da F6 inclusive) e de `FalhaAoInstalarMod`.
+  - **A frase do atalho** diz o remédio para todo atalho, e não só para o `node_modules`.
+  - **Ficam para o Z:**
+    - a frase de `ManifestoRecusado` mostra o código cru;
+    - `FalhaAoApagarPacote` não tem frase;
+    - duas recusas vizinhas não deixam linha no registro;
+    - nenhum guarda mede o tamanho da frase do atalho.
+- **M2 → integrado** (`0f94be6..80755ef`), em 2 rodadas. P51-16 em `8669d99`, P51-18 em `aa106bc`, P51-20 em `70a0f12`, e a escuta de teste compartilhada em `092dbfc`.
+  - **O Importante da revisão:** um teste novo escrevia `$SEELE_ENCONTRO` fora da trava, e era o terceiro escritor fora dela. O defeito foi reproduzido antes do conserto (3 em 6000 rodadas) e sumiu depois (0 em 6000).
+  - **Achado anterior à F5, medido neste Mac:** os testes do `seele-server` (`hospedagem.rs`) e o `ejetar.rs` falam com o ponto de encontro de produção, `encontro.seele.app.br`, sempre que `$SEELE_ENCONTRO` não está posta. Cada rodada registra a marca de um servidor de teste no quarto e deixa lá o IP público da máquina.
+    - Nenhum teste afirma esse degrau.
+    - A orquestradora foi avisada.
+    - O conserto sugerido é uma costura que passe `convocacao = None` à `Hospedagem::iniciar` em teste.
+- **K5 → integrado** (`0f94be6..7a54ba8`), em 3 rodadas e um fecho. Os commits que fecham os itens: P49-7c em `6be3d24`, P49-8 em `d9f481e` e P51-25 em `8cadbc2`.
+  - **A primeira revisão achou dois Importantes:**
+    - o `data:` de todo som do servidor ficava retido em toda montagem. Medido: um som de 1 MiB em 64 destinos ocupava +90 MiB, e passou a +6 MiB depois do conserto;
+    - a soltura do tocador não tinha guarda.
+  - **A decisão do controlador** se apoia nos riscos do plano: o som que tocava quando o destino saiu recomeça do começo onde a marca vai, inclusive no mesmo destino que volta. Com isso, o P49-8 tem efeito audível hoje.
+  - **As rodadas seguintes:**
+    - a marca devolvida não é tomada fora da tela;
+    - o som pedido de novo ao servidor conta no teto o tamanho da resposta nova;
+    - os guardas novos ganharam prova por reversão;
+    - o `data:` de um som recusado sai.
+  - **Para a v6:** o religar de uma contribuição só existe lá; hoje o P49-8 vale para o som que tocava.
+- **D → integrado** (`0f94be6..a840ed0`, merge `59a4221`), em 4 rodadas. Os commits que fecham os itens:
+  - P51-01: `3f1d2e9`;
+  - P51-14: m8 `59d66aa`, T3 M2 `6bf9ddd`, T1 `bead90c`, T2 N1 `74a5c42`;
+  - o m9 já vinha do C.
+  - **A primeira revisão mediu dois Importantes:**
+    - A conta do console, dita sem esperar o MOD parar, tomava a ficha das linhas dele. Num MOD que escreve sem parar, 15 linhas dele e 0 de conta viravam 1 e 14, e o teste que pegava isso tinha sido ajustado ao código.
+    - A segunda passada do `emTexto` não tinha orçamento: um grafo de 10 nós derrubava a volta.
+  - **As rodadas seguintes:**
+    - A conta só sai com uma ficha de sobra. Primeiro só na espera; depois, no fim de toda volta.
+    - Cada passada do `emTexto` tem um orçamento de 1024 objetos.
+    - O teste que tinha sido ajustado voltou byte a byte ao original.
+  - **A conta de fim de volta com uma ficha só vinha de antes do lote** (`7953a3b`). Um MOD com ouvinte de eventos, ou com trabalho depois da linha, perdia quase tudo para ela. Medido: 0/15 com 120 ms de trabalho; agora dá 15/0 em todos os casos.
+- **Onda 2 fechada.** Os quatro lotes estão em `0.16/lotes`, no `59a4221`.
+  - **O que o branch combinado mostrou**, com o `target/` deste worktree:
+    - fmt e `clippy --workspace --all-targets --all-features -D warnings` limpos;
+    - `seele-app`: todos os binários verdes (259, 263 e os menores);
+    - `seele-core --lib` 432, `seele-ffi --lib` 124 (mais 1 ignorado), `seele-proto` 316 com os doctests, `seele-server --lib` 562, `xtask` 161;
+    - `check-runtime` verde;
+    - conformidade verde em `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados`, `anexos` e `mod_de_referencia`;
+    - o `quarto_pelo_link` ficou de fora, por causa da porta 8384.
+  - **Ficam para a orquestradora decidir:** onde mora o conserto dos testes que falam com o ponto de encontro de produção, no G-servidor da onda 3 ou numa pendência nova.

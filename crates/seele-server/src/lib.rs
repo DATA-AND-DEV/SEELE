@@ -909,6 +909,168 @@ impl Daemon {
     }
 }
 
+/// `$SEELE_ENCONTRO` nos testes deste crate: trocada com trava, e devolvida
+/// pelo `Drop`.
+///
+/// A variável é do processo, e o `libtest` roda os testes deste binário em
+/// paralelo, no mesmo processo. Dois testes a trocam:
+/// `um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada` (`hospedagem.rs`) e
+/// `desligar_o_degrau_4_e_uma_variavel_de_ambiente` (`alcance/encontro.rs`).
+/// Cada um a devolvia à mão, no fim: um pânico no meio deixava a troca para os
+/// testes seguintes, e nada impedia os dois de trocá-la ao mesmo tempo.
+///
+/// O molde é o `AmbienteDoEncontro` de `quarto_pelo_link.rs`, com uma
+/// diferença: lá a `vaga` já serializa o binário inteiro, e aqui quem
+/// serializa é a trava que o guarda segura.
+///
+/// **O que a trava não cobre:** os outros testes deste crate que chamam
+/// `Hospedagem::iniciar` só leem a variável (`Convocacao::do_ambiente`), e não
+/// tomam a trava. Um deles que suba enquanto um destes dois a tem trocada lê o
+/// valor trocado, e pode pagar o prazo do degrau 4.
+#[cfg(test)]
+pub(crate) mod ambiente_de_teste {
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    use crate::alcance::encontro::VARIAVEL;
+
+    /// A trava de quem troca `$SEELE_ENCONTRO` nos testes deste crate. Quem a
+    /// toma é [`AmbienteDoEncontro::guardar`].
+    static TRAVA: Mutex<()> = Mutex::new(());
+
+    /// Guarda `$SEELE_ENCONTRO` e a devolve ao que era quando o teste acaba,
+    /// **inclusive em pânico**, e segura a [`TRAVA`] enquanto vive.
+    ///
+    /// Quem devolve é o `Drop`, e nenhum caminho precisa lembrar de chamar nada
+    /// à mão. Crie-o **antes** de qualquer troca, e troque só por ele
+    /// ([`Self::pedir`], [`Self::tirar`]).
+    ///
+    /// # Por que a trava é um campo
+    ///
+    /// O teste de `hospedagem.rs` é `#[tokio::test] async`, e segura a troca
+    /// através de `.await`. Um `let _t = TRAVA.lock()` solto no corpo do teste
+    /// faz o clippy reprovar por `await_holding_lock`, e o CI roda o clippy com
+    /// `-D warnings`. O campo não dispara o lint, e segura a trava pelo mesmo
+    /// tempo que a troca. Ele torna o futuro do teste `!Send`, o que o
+    /// `#[tokio::test]` de uma thread aceita.
+    ///
+    /// A ordem da queda é a que importa: o corpo do `drop` devolve a variável,
+    /// e só depois os campos caem, a trava com eles. O próximo teste que a
+    /// tomar acha a variável como ela era.
+    #[must_use = "a variável só volta quando o guarda cai; soltá-lo na hora a devolve cedo demais"]
+    pub(crate) struct AmbienteDoEncontro {
+        /// O que `$SEELE_ENCONTRO` era antes: `None` é «não estava definida».
+        antes: Option<std::ffi::OsString>,
+        /// A trava, segura até o guarda cair.
+        _trava: MutexGuard<'static, ()>,
+    }
+
+    impl AmbienteDoEncontro {
+        /// Toma a [`TRAVA`] e guarda o valor de agora, sem trocar nada.
+        ///
+        /// Espera quem a tiver. Uma trava envenenada também serve: quem entrou
+        /// em pânico com ela já devolveu a variável, pelo `Drop`.
+        pub(crate) fn guardar() -> Self {
+            Self::guardar_sob(&TRAVA)
+        }
+
+        /// [`Self::guardar`], sob a trava que quem chama escolhe.
+        ///
+        /// Existe para os testes deste módulo: eles seguram a [`TRAVA`] por
+        /// fora, para nenhum outro teste trocar a variável no meio da medida, e
+        /// o guarda que eles provam toma outra.
+        fn guardar_sob(trava: &'static Mutex<()>) -> Self {
+            let trava = trava.lock().unwrap_or_else(PoisonError::into_inner);
+            Self {
+                antes: std::env::var_os(VARIAVEL),
+                _trava: trava,
+            }
+        }
+
+        /// Troca `$SEELE_ENCONTRO` por `valor`, até este guarda cair.
+        pub(crate) fn pedir(&self, valor: &str) {
+            std::env::set_var(VARIAVEL, valor);
+        }
+
+        /// Tira `$SEELE_ENCONTRO` do ambiente, até este guarda cair.
+        pub(crate) fn tirar(&self) {
+            std::env::remove_var(VARIAVEL);
+        }
+    }
+
+    impl Drop for AmbienteDoEncontro {
+        fn drop(&mut self) {
+            match self.antes.take() {
+                Some(valor) => std::env::set_var(VARIAVEL, valor),
+                None => std::env::remove_var(VARIAVEL),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod testes {
+        use super::*;
+
+        #[test]
+        fn o_ambiente_do_encontro_volta_mesmo_quando_o_teste_entra_em_panico() {
+            // A `TRAVA` por fora, segura do começo ao fim: nenhum outro teste
+            // troca a variável entre o pânico e a conferência. O guarda que se
+            // prova toma outra trava, só deste teste: tomar a `TRAVA` por
+            // dentro, com ela já tomada aqui, travaria o teste.
+            //
+            // Sem `AmbienteDoEncontro` por fora: um segundo teria o mesmo
+            // `Drop`, e quebraria junto com o guarda que este teste prova.
+            static SO_DESTE_TESTE: Mutex<()> = Mutex::new(());
+            let _ninguem_mais_troca = TRAVA.lock().unwrap_or_else(PoisonError::into_inner);
+            let antes = std::env::var_os(VARIAVEL);
+
+            let resultado = std::panic::catch_unwind(|| {
+                let ambiente = AmbienteDoEncontro::guardar_sob(&SO_DESTE_TESTE);
+                ambiente.pedir("valor-que-o-panico-nao-pode-deixar-para-tras");
+                panic!("pânico provocado de propósito, com a variável já trocada");
+            });
+
+            assert!(
+                resultado.is_err(),
+                "o pânico provocado não aconteceu: este teste não mede nada"
+            );
+            assert_eq!(
+                std::env::var_os(VARIAVEL),
+                antes,
+                "um teste que entrou em pânico com `$SEELE_ENCONTRO` trocada deixou a troca \
+                 para trás: todo teste seguinte deste binário fala com o ponto de encontro \
+                 errado"
+            );
+        }
+
+        #[test]
+        fn o_ambiente_do_encontro_segura_a_trava_enquanto_vive() {
+            // A trava tem de durar o guarda inteiro, e não só o `guardar`. Uma
+            // trava só deste teste, e não a `TRAVA`: a de outro teste em curso
+            // deixaria esta conferência passar sem o guarda segurar nada.
+            //
+            // E a `TRAVA` por fora, como no teste de pânico: o guarda lê a
+            // variável ao nascer e a escreve ao cair. Sem ela, este teste lia a
+            // variável trocada pelo de pânico e a escrevia de volta depois de
+            // o outro a devolver, e o de pânico reprovava com uma frase falsa.
+            static SO_DESTE_TESTE: Mutex<()> = Mutex::new(());
+            let _ninguem_mais_troca = TRAVA.lock().unwrap_or_else(PoisonError::into_inner);
+            let ambiente = AmbienteDoEncontro::guardar_sob(&SO_DESTE_TESTE);
+
+            let tomada = matches!(
+                SO_DESTE_TESTE.try_lock(),
+                Err(std::sync::TryLockError::WouldBlock)
+            );
+            drop(ambiente);
+
+            assert!(
+                tomada,
+                "a trava estava livre com um `AmbienteDoEncontro` vivo: dois testes trocam \
+                 `$SEELE_ENCONTRO` ao mesmo tempo, e um lê o valor que o outro pôs"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

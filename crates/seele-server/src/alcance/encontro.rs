@@ -1395,18 +1395,19 @@ mod testes {
         let socket = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").expect("socket"));
         let fp = IMPRESSAO;
 
-        // A variável é global ao processo, então este teste a devolve como
-        // estava — outros testes deste crate leem o mesmo ambiente.
-        let antes = std::env::var(VARIAVEL).ok();
-        // SAFETY-de-teste: os testes deste módulo que mexem no ambiente estão
-        // todos aqui e são serializados por rodarem em sequência neste teste.
-        std::env::set_var(VARIAVEL, "nao");
+        // A variável é global ao processo, e outros testes deste crate leem o
+        // mesmo ambiente. Quem a troca é o guarda: o `Drop` a devolve como
+        // estava, inclusive se uma asserção abaixo entrar em pânico, e a trava
+        // dele impede o outro teste que a troca (o de `hospedagem.rs`) de
+        // correr junto. Os que só a leem não tomam a trava.
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.pedir("nao");
         assert!(Convocacao::do_ambiente(Arc::clone(&socket), fp).is_none());
 
-        std::env::set_var(VARIAVEL, "");
+        ambiente.pedir("");
         assert!(Convocacao::do_ambiente(Arc::clone(&socket), fp).is_none());
 
-        std::env::set_var(VARIAVEL, "meu.ponto:9000");
+        ambiente.pedir("meu.ponto:9000");
         assert!(
             Convocacao::do_ambiente(Arc::clone(&socket), "curto").is_none(),
             "uma impressão digital que não forma marca deu convocação pelo ambiente: o degrau 4 \
@@ -1418,14 +1419,9 @@ mod testes {
             "o ponto de encontro não é trocável"
         );
 
-        std::env::remove_var(VARIAVEL);
+        ambiente.tirar();
         let padrao = Convocacao::do_ambiente(socket, fp).expect("padrão");
         assert_eq!(padrao.ponto, PONTO_PADRAO);
-
-        match antes {
-            Some(valor) => std::env::set_var(VARIAVEL, valor),
-            None => std::env::remove_var(VARIAVEL),
-        }
     }
 
     #[tokio::test]

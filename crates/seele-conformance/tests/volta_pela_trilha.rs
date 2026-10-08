@@ -379,8 +379,8 @@ fn anotar_como_o_app(
 /// **Só depois de `shutdown`.** `wait_idle` volta quando o endpoint não tem
 /// conexão nenhuma, e `Connection::disconnect` não a faz voltar logo: medido,
 /// 20,0 s (o `IDLE_TIMEOUT`) depois de cada visita, duas vezes seguidas. O
-/// `shutdown` fecha o que estiver de pé e o `wait_idle` volta em dezenas de
-/// milissegundos, como em `bateria_interna.rs`.
+/// `shutdown` fecha o que estiver de pé e o `wait_idle` volta em microssegundos
+/// (medido: 4 µs), como em `bateria_interna.rs`.
 async fn esperar_o_servidor_fechar(servidor: &Daemon) {
     if tokio::time::timeout(Duration::from_secs(10), servidor.wait_idle())
         .await

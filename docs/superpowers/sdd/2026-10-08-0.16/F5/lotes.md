@@ -738,6 +738,11 @@ Os dois também mexem no prelúdio (`emTexto`) e nos testes do registro em `main
 
 **Estado em `d4eb6f1`:** nada feito. O `executor.rs` não mudou desde `3685a64`.
 
+**Depois da onda 1 (o que o C deixou).**
+- `fn registrar_da_janela_em(baldes: &BaldesDoRegistro, agora: Instant, nivel: String, onde: String, o_que: String, mod_id: Option<String>)`, com o teto por MOD **e por classe** (`enum Classe { Aviso, Servida, Depuracao }`). O nível «aviso» e o «erro» gastam do balde `Aviso`; o resto gasta de `Depuracao`. Os testes do T3 M2 passam um `BaldesDoRegistro` novo e um instante fixo, no molde de `mod o_teto_de_vazao_do_registro`.
+- O m9 já está feito: o C pôs a porta da janela em `o_pior_caso_sai_com_o_mesmo_teto_pelas_tres_portas`. Confira e cite no relatório.
+- `cortar_linha_do_console` e `LinhaCortada` ficaram `pub(crate)`, com o leitor `LinhaCortada::texto()`. O P51-01 (b) usa a mesma função; não reescreva a regra.
+
 ### 1. P51-01 — a rejeição é dita depois da volta, e com teto
 - **(a)** Tirar o `avisar(&manda_rejeicao, &fila_de_rejeicao, ParaOFora::Falhou(format!("{REJEITADA_SEM_TRATAMENTO}: {texto}")))` do caminho normal do rastreador (:1163-1167).
   - Ele fica no braço `Err(_) => linha_de_console(` do `try_borrow_mut` (:1174-1179), onde a linha já sai na hora. Sem isso, a janela deixaria de saber.
@@ -824,6 +829,8 @@ Os dois também mexem no prelúdio (`emTexto`) e nos testes do registro em `main
 
 **Estado em `d4eb6f1`:** nada feito.
 
+**Depois da onda 1 (o que o K2 deixou).** A bancada `regiao-do-mod.cjs` ganhou um `Image` padrão no `bancada()`, e os URIs `URI_QUE_DEMORA` e `URI_QUE_NAO_DECODIFICA`. Os caminhos de imagem passaram a `.then(aplicar, recusar)`, com o tropeço de aplicar dito por `dizerTropecoDaMidia`. O som não muda com isso: não mexa nos caminhos de imagem nem nesses dublês.
+
 ### 1. P49-7c — o som da contribuição só decodifica ao tocar
 O teto por MOD fica com o dono.
 - Uma contribuição declarada com `tocando: false` não decodifica até o MOD declarar `tocando: true`. Numa contribuição não há botão.
@@ -899,6 +906,15 @@ No `try` de `bytesDoSom` (:2367-2375): quando `typeof this.dono.bytesDoSom !== '
 
 **Estado em `d4eb6f1`:** nada feito. `hospedagem.rs` e o `lib.rs` do `seele-server` não mudaram desde `3685a64`.
 
+**Depois da onda 1.**
+- **O que o M1 deixou** em `seele-core/src/encontro.rs`, e que o doc de `onde_mora_hoje` (P51-18) tem de descrever:
+  - o traço privado `Canal`, a costura de teste do T6f;
+  - `PorUmEndereco { SemSocket, NadaSaiu, Perguntou }`: a consulta passa ao endereço seguinte só quando nada saiu, e diz isso numa linha info;
+  - a volta recusada depois da volta 1 conta como volta;
+  - `saiu_em` só anda quando algo saiu.
+- **O que o M1 deixou no alcance:** `NaoSaiu { passageira }` e `a_falha_que_conta`.
+- **O que o H deixou no `enlace.rs`.** Testes novos usam `impostor_que_repete_o_certificado`: o do pin desfeito, e `o_candidato_perdedor_que_nao_prova_a_chave_vai_ao_log_como_aviso`. A montagem compartilhada (passo 4) tem de mantê-los verdes. O H também reescreveu o doc de `EndReason::ServidorTrocouNaVolta` em `types.rs`: releia o C-M3 contra ele.
+
 ### 1. P51-16 — o ambiente do encontro com trava
 - **Em `crates/seele-server/src/lib.rs`:** `#[cfg(test)] pub(crate) mod ambiente_de_teste`, com `AmbienteDoEncontro` (guardar, pedir, e um `Drop` que devolve). O molde é `quarto_pelo_link.rs` (`struct AmbienteDoEncontro`, `guardar`, `pedir`, `impl Drop`).
   - Ele segura, **como campo**, um `MutexGuard<'static, ()>` de um `static TRAVA: Mutex<()>`, tomado com `unwrap_or_else(PoisonError::into_inner)`.
@@ -962,6 +978,8 @@ No `try` de `bytesDoSom` (:2367-2375): quando `typeof this.dono.bytesDoSom !== '
 
 **Estado em `d4eb6f1`:** nada feito.
 
+**Depois da onda 1 (o que o H deixou).** O `frontend.rs` ganhou `a_volta_recusada_so_diz_o_que_vale_para_toda_origem_e_todo_motivo` e um guarda só da variante `ConnectionError::ChaveNaoProvada` contra `FRASES`, que lê o nome pelo serde. O doc dele diz que `ConnectionError` não tem guarda de todas as variantes. O conserto de `variants_of` não pode quebrar esses dois guardas.
+
 **O defeito.**
 - `pub(crate) enum FalhaAoInstalarMod {` (`mods.rs`, :216) tem `SemManifesto`, `ManifestoRecusado(String)` e `NaoCopiei(String)`.
 - A recusa do atalho nasce em `fn copiar_arvore(de, para)` (:459), em `if tipo.is_symlink() {`, como `std::io::Error` com «atalho dentro do pacote: …». Ela vira `NaoCopiei` em `pub(crate) fn instalar_de` (:401), na linha `return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()))`.
@@ -1022,6 +1040,11 @@ O guarda passa a ler também `src/mods.rs`, a incluir `FalhaAoInstalarMod` e a a
 - No celular, a capacidade pode ficar ausente por plataforma, se a ponte web não tiver `ler_imagem_mod`. No desktop nada muda.
 
 **Estado em `d4eb6f1`:** nada feito.
+
+**Depois da onda 1 (o que o C deixou).**
+- `fn recusa_de_midia_dita(baldes: &BaldesDoRegistro, agora: Instant, mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaNoMod`. O motivo `sessao-encerrada` gasta da classe `Depuracao`, e o resto da classe `Aviso`.
+- `ler_imagem_mod` já passa `&session.baldes_do_registro`. O guarda `os_comandos_passam_os_baldes_da_sessao` conta as chamadas por comando, e o mínimo dele para `ler_imagem_mod` muda se `imagem_lida_dita` concentrar as duas recusas. Atualize-o junto, com reversão.
+- `imagem_lida_dita` recebe `baldes` e `agora`, como as outras portas.
 
 ### 1. P51-09 — toda geração morta é contada
 - **Criar `Session::recusar_se_morta(&self, geracao) -> Result<(), FalhaNoMod>`**, ao lado de `fn geracao_vale` (:352) e de `fn confere_geracao` (:357). Ela:
@@ -1257,6 +1280,8 @@ Os três mudam `despedir_se` e o guarda de texto `apps/seele-app/tests/encerrame
 
 **Estado em `d4eb6f1`:** nada feito.
 
+**Depois da onda 1 (o que o C deixou).** `Session::revogar` passou a chamar `Session::dizer_as_contas_do_registro()`, que diz a conta pendente de cada balde do registro, fora do cadeado. O `despedir_da_sessao` deste lote chama `sessao.revogar()` primeiro, e com isso a saída do app passa a dizer as contas. Prove com um teste: um balde com conta pendente, depois `despedir_da_sessao`, e a captura tem a linha da conta. Hoje a saída do app perde essa conta.
+
 ### 1. P50-1 — o `Enlace::sair` espera a despedida
 - **A constante `ESPERA_DA_DESPEDIDA` (300 ms)**, com doc: o CONNECTION_CLOSE sai na primeira volta do driver, e a espera só limita o escoamento (3×PTO).
 - **Os dois braços** `Some(Comando::Sair) | None => return self.encerrar(Motivo::Pedido)` (no laço com cliente e no laço sem cliente) passam a `return self.despedir().await`.
@@ -1349,6 +1374,11 @@ Os três mudam `despedir_se` e o guarda de texto `apps/seele-app/tests/encerrame
 `ui/camada-mods.css` só entra se a nota dos contornos ganhar classe nova.
 
 **Estado em `d4eb6f1`:** nada feito. `mods-contribuicoes.js`, `camada-mods.js` e `diagnostico-de-mods.cjs` não mudaram desde `3685a64`.
+
+**Depois da onda 1 (o que o K2 deixou).**
+- A aba DIAGNÓSTICO ganhou o bloco «a região e as páginas de cada MOD» (`desenharAMidiaDosMods`, `camada-mods.js`), desenhado por `desenharQuemPinta`.
+- Nenhuma prova versionada prende esse desenho. Em `diagnostico-de-mods.cjs` (que é deste lote), um caso exige que o bloco apareça com a mídia recusada de uma região e de uma página. Reversão: tirar a chamada de `desenharQuemPinta` deixa o caso vermelho.
+- O K2 mexeu em `montarFundoDeMidia` e `montarRetrato`. As anotações do teto do P51-23 continuam lá, mas noutras linhas: procure pelo texto.
 
 ### 1. P49-9 — a gestão diz quem desenha
 - Com a escolha automática e alguém substituindo o alvo vazio, `resumo(preferidos, estaDePe)` (`mods-contribuicoes.js`, :504-583) passa a somar `quemPinta(ponto, '', estaDePe)` (`quemPinta`, :628).
@@ -1671,6 +1701,17 @@ Talvez também:
 - **:22, a linha do Plano 6:** troca «o m-4 da pendência 49 (`repetir`, ou o contrato de `tocando` escrito na API)» por «o contrato de `tocando` (`api/README.md`, `563bc37`) entra no texto da v6; `repetir` é opção, não condição».
 - **:118:** a frase «Elas terminam num bloco «[PREENCHER ANTES DE PUBLICAR …]»», que `54f542f` já trocou nas notas, passa a dizer o que as notas da 0.15.1 trazem.
 - **A seção «Fora desta especificação»:** G, J e I deixam de estar abertos, e o G-casca aponta o Plano 2.
+
+### 6. O que a onda 1 deixou para o Z
+- **Os hashes da onda 1**, por item, estão em `F5/progress.md` e nos relatórios `F5/lote-<id>-report.md`. Entre eles, a pendência 54 fecha em `0d68c95`.
+- **Quatro portas do registro da casca continuam sem balde**, porque ficam fora do P51-08: `pedido_a_caminho_dito` e `pedido_recusado_na_saida_dito` (de `mod_request`), `mod_nativo_colher` e `mod_nativo_entregar`. O Z decide se elas viram pendência ou ficam com um lote.
+- **A frase de `ServidorTrocouNaVolta`** mudou na revisão do H. A frase do plano era falsa para quem volta pela lista, e a nova não fala em link nem em convite. Registre isso na pendência 51, item 3.
+- **Os menores adiados das revisões**, para a revisão final decidir:
+  - o `changelog_dos_commits` do `publicar.sh` ainda cala falha do git;
+  - a conferência dos alvos do fuzz lê o `ci.yml` inteiro, e não olha `continue-on-error`;
+  - as linhas que a conta de id ilegível conta não levam o rótulo dela;
+  - o guarda de `drive → fim_da_sessao` é de texto;
+  - o tropeço de aplicar uma imagem divide o `onde` com as recusas.
 
 **NÃO fazer:**
 - não acrescentar cadeia ao G1;

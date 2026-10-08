@@ -2203,29 +2203,65 @@ fn the_screen_says_which_microphone_is_open_and_not_only_which_was_chosen() {
     );
 }
 
-/// The variants of one `enum` declared in `main.rs`.
+/// The variants of one `enum` declared in a source file of this shell.
 ///
 /// Serde writes a fieldless variant as its own name, so these are exactly the
 /// strings the frontend receives when the command rejects.
+///
+/// **E a variante com campo também**, nas duas formas: `Nome(…),` e
+/// `Nome { … },`, esta em uma linha ou em várias. O serde a escreve como um
+/// objeto cuja chave é o nome (`{"TemAtalho": "…"}`), e `fraseDeErro` a acha
+/// por esse nome. Este leitor aceitava só `Nome,` e descartava calado o resto:
+/// um guarda feito com ele não via a variante com campo, e uma variante assim
+/// sem frase passava como se não existisse (pendência 53).
+///
+/// Uma linha declara variante quando começa com um nome seguido de `,`, `(` ou
+/// `{`. Os campos de uma variante `struct` ficam de fora por isso: depois do
+/// nome deles vem `:`.
+///
+/// **A profundidade é para a tupla de várias linhas.** Em `Longa(\n String,\n),`
+/// o `String,` de dentro tem a cara de uma unitária, e é a contagem de
+/// parênteses, chaves e colchetes que o tira: só a linha que abre na
+/// profundidade zero declara variante. Vale também para o tipo de um campo que
+/// quebra de linha. No fim do bloco a contagem tem de ter voltado a zero: se
+/// não voltou, um parêntese sem par num texto ou num atributo desalinhou a
+/// leitura, e a lista não é de confiança.
 fn variants_of(source: &str, name: &str) -> Vec<String> {
     let Some(after) = source.split(&format!("enum {name} {{")).nth(1) else {
-        panic!("main.rs no longer declares `enum {name}`");
+        panic!("a fonte lida não declara mais `enum {name}`");
     };
     let Some(block) = after.split("\n}").next() else {
         panic!("unterminated `enum {name}`");
     };
-    let found: Vec<String> = without_comments(block)
-        .lines()
-        .map(str::trim)
-        .filter_map(|channel| channel.strip_suffix(','))
-        .filter(|channel| {
-            !channel.is_empty()
-                && channel
-                    .chars()
-                    .all(|character| character.is_alphanumeric() || character == '_')
-        })
-        .map(str::to_owned)
-        .collect();
+    let mut found: Vec<String> = Vec::new();
+    let mut profundidade = 0usize;
+    for channel in without_comments(block).lines().map(str::trim) {
+        if profundidade == 0 {
+            let variant: String = channel
+                .chars()
+                .take_while(|character| character.is_alphanumeric() || *character == '_')
+                .collect();
+            let rest = channel
+                .strip_prefix(variant.as_str())
+                .unwrap_or_default()
+                .trim_start();
+            if !variant.is_empty() && rest.starts_with([',', '(', '{']) {
+                found.push(variant);
+            }
+        }
+        for character in channel.chars() {
+            match character {
+                '(' | '{' | '[' => profundidade += 1,
+                ')' | '}' | ']' => profundidade = profundidade.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(
+        profundidade, 0,
+        "`enum {name}` terminou com a profundidade em {profundidade}: um parêntese ou uma \
+         chave sem par desalinhou a leitura, e as variantes lidas não são de confiança"
+    );
     assert!(!found.is_empty(), "`enum {name}` came out with no variants");
     found
 }
@@ -2246,21 +2282,108 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
     // explaining why a variant exists must not count as declaring it, and the
     // paragraph in `frases.js` explaining a sentence must not count as writing
     // it.
-    let source = read("src/main.rs");
     let script = without_comments(&scripts());
 
     // `FalhaNaPortaria` joined the two for the same reason: the doorkeeper's
     // commands talk to this machine's own server rather than across the bridge,
     // so the FFI has no name for either of their failures.
-    for enumeration in ["FalhaAoHospedar", "FalhaAoEscolher", "FalhaNaPortaria"] {
-        for variant in variants_of(&source, enumeration) {
-            assert!(
-                names(&script, &variant),
-                "`{enumeration}::{variant}` reaches the page with no sentence written \
-                 for it, so the screen either says nothing or says `{variant}`"
-            );
+    //
+    // **E `FalhaAoInstalarMod`, que mora em `mods.rs`** (pendência 53). Este
+    // guarda lia só o `main.rs`, e as quatro recusas de instalar um MOD
+    // chegavam à tela sem frase nenhuma — a do atalho como «ALGO FALHOU E ESTE
+    // APP NÃO SABE EXPLICAR O QUÊ», com o JSON cru, a quem só tinha apontado
+    // para a pasta com `node_modules`.
+    let mut sem_frase: Vec<String> = Vec::new();
+    for (file, enumeration) in [
+        ("src/main.rs", "FalhaAoHospedar"),
+        ("src/main.rs", "FalhaAoEscolher"),
+        ("src/main.rs", "FalhaNaPortaria"),
+        ("src/mods.rs", "FalhaAoInstalarMod"),
+    ] {
+        for variant in variants_of(&read(file), enumeration) {
+            if !names(&script, &variant) {
+                sem_frase.push(format!("{enumeration}::{variant}"));
+            }
         }
     }
+    assert!(
+        sem_frase.is_empty(),
+        "estas recusas chegam à página sem frase escrita para elas, e a tela ou não diz \
+         nada, ou diz o nome de uma variante do Rust a quem só queria saber o que fazer: \
+         {sem_frase:?}"
+    );
+}
+
+#[test]
+fn variants_of_le_toda_forma_de_variante_e_nao_cala_a_que_tem_campo() {
+    // **O guarda acima só vale o que este leitor enxerga.** Ele aceitava só
+    // `Nome,`, e descartava calado a variante com campo — `Nome(…),` e
+    // `Nome { … },`. Uma variante assim sem frase passava pelo guarda como se
+    // não existisse: era o caso de `FalhaAoHospedar::NomeRecusado` e de
+    // `EstaVersaoRevogada`, e seria o de `FalhaAoInstalarMod::TemAtalho`, a
+    // recusa que a pendência 53 abriu justamente por chegar à tela sem frase.
+    //
+    // O serde escreve a variante com campo como um objeto cuja chave é o nome
+    // dela (`{"TemAtalho": "…"}`), e é por esse nome que `fraseDeErro` a acha.
+    // O nome é o que conta, com campo ou sem.
+    //
+    // **`Longa` é o caso que prende a profundidade.** Os campos de uma `struct`
+    // caem pelo `:` mesmo sem ela, e sem `Longa` esta lista saía igual com a
+    // contagem apagada: o `String,` de dentro da tupla de várias linhas é o
+    // único que só a profundidade tira.
+    let fonte = "enum Exemplo {\n\
+                 \x20   /// Um comentário com `Falsa,` dentro não declara nada.\n\
+                 \x20   Unitaria,\n\
+                 \x20   ComCampo(String),\n\
+                 \x20   ComDois(String, Option<u8>),\n\
+                 \x20   Longa(\n\
+                 \x20       String,\n\
+                 \x20   ),\n\
+                 \x20   #[serde(rename = \"x\")]\n\
+                 \x20   Struct {\n\
+                 \x20       /// O defeito.\n\
+                 \x20       defeito: String,\n\
+                 \x20       corrigida_em: Option<String>,\n\
+                 \x20   },\n\
+                 \x20   NaMesmaLinha { a: u8 },\n\
+                 \x20   Ultima,\n\
+                 }\n";
+    assert_eq!(
+        variants_of(fonte, "Exemplo"),
+        [
+            "Unitaria",
+            "ComCampo",
+            "ComDois",
+            "Longa",
+            "Struct",
+            "NaMesmaLinha",
+            "Ultima"
+        ],
+        "`variants_of` não lê toda forma de variante, e o guarda das recusas passa calado \
+         pela que ele não enxerga"
+    );
+
+    // E nas fontes de verdade: as variantes com campo que o leitor antigo
+    // calava estão na lista que o guarda confere.
+    let hospedar = variants_of(&read("src/main.rs"), "FalhaAoHospedar");
+    for com_campo in ["NomeRecusado", "EstaVersaoRevogada"] {
+        assert!(
+            hospedar.iter().any(|variante| variante == com_campo),
+            "`FalhaAoHospedar::{com_campo}` sumiu da leitura, e uma frase apagada para ela \
+             não reprovaria guarda nenhum: {hospedar:?}"
+        );
+    }
+    let instalar = variants_of(&read("src/mods.rs"), "FalhaAoInstalarMod");
+    assert_eq!(
+        instalar,
+        [
+            "SemManifesto",
+            "ManifestoRecusado",
+            "TemAtalho",
+            "NaoCopiei"
+        ],
+        "as recusas de instalar um MOD não são as que o guarda das frases confere"
+    );
 }
 
 #[test]

@@ -1297,7 +1297,10 @@ function avatarContribuido(pessoaId) {
  *
  * O nó é guardado e reaproveitado entre desenhos: refazê-lo a cada retrato
  * recriaria a mídia e tiraria o foco, que é o defeito que a reconciliação do
- * renderer existe para não ter.
+ * renderer existe para não ter. Por isso redesenhar não muda o som de lugar: a
+ * figura de um som que assentou sem tocador, num destino que não segura os
+ * sons da contribuição, volta como estava. Quem o remonta, quando o destino
+ * que os segurava sai da tela, é a varredura (`calarOsSonsQueSairamDaTela`).
  *
  * @param {object} contribuicao Do registro.
  * @param {string|number} destino Para quem, ou `""` num ponto sem alvo.
@@ -1335,8 +1338,10 @@ function montarContribuicao(contribuicao, destino = "") {
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
   // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
   // é uma só para todos os destinos, e o primeiro que chega a um som é o que
-  // os segura — ver `montarSom`, em `mods-regiao.js`.
-  const sons = contribuicao.sons ?? { tomados: false };
+  // os segura — ver `montarSom`, em `mods-regiao.js` — até sair da tela: aí
+  // ele a devolve, e um destino que desenha a toma na varredura
+  // (`calarOsSonsQueSairamDaTela`).
+  const sons = contribuicao.sons ?? { tomados: false, devolvidos: false };
   contribuicao.sons = sons;
   renderer.sonsDaContribuicao = sons;
   // **Registrada como recurso, e esquecida ao revogar.** O descartador volta
@@ -1583,6 +1588,20 @@ function midiasDaRegiaoEDasPaginas(regioes, superficies) {
  *   `montadas`, fora do documento — também. Assim o som de uma contribuição
  *   sem alvo, que mora só no destino que o tomou (`montarSom`), não fica
  *   soando quando esse destino deixa de desenhar (o N1 da Task 8).
+ *
+ * **E o som de uma contribuição muda de destino, na mesma varredura** (P49-8).
+ * O destino que segurava os sons dela e saiu do documento os devolve, na
+ * primeira volta (`RegiaoDeMod#devolverOsSons`, pelo `calarSonsForaDaTela`
+ * dele). A segunda volta — só quando há marca devolvida (`sons.devolvidos`) —
+ * oferece a marca aos destinos em que a contribuição desenha, na ordem de
+ * `montadas`, e o primeiro que está no documento com um som esperando a toma
+ * (`RegiaoDeMod#tomarOsSonsDevolvidos`) — outro destino, ou o mesmo, de volta à
+ * tela; o som que tocava recomeça ali. Duas voltas, e
+ * não uma: numa só, um destino visitado antes do que saiu acharia a marca
+ * ainda tomada, e o som ficaria sem lugar até o desenho seguinte. Redesenhar
+ * não faria isso: a montagem de cada destino é reaproveitada
+ * (`montarContribuicao`), e a figura que assentou sem tocador volta como
+ * estava.
  */
 function calarOsSonsQueSairamDaTela() {
   const valem = new Set(modsDeCartaoQueValem());
@@ -1592,6 +1611,15 @@ function calarOsSonsQueSairamDaTela() {
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
     for (const [destino, montagem] of contribuicao.montadas ?? []) {
       montagem.renderer.calarSonsForaDaTela(aContribuicaoPinta(contribuicao, destino));
+    }
+    // **Só a marca devolvida abre a segunda volta** — nesta varredura, ou numa
+    // anterior, sem destino na tela para tomá-la. A marca vaga de uma
+    // contribuição cujo som ainda não chegou, ou que não tem som, não tem quem
+    // a tome aqui, e a pergunta se repetiria a cada desenho, em cada destino.
+    // `sons` só existe numa contribuição montada (`montarContribuicao`).
+    if (!contribuicao.sons?.devolvidos) continue;
+    for (const [destino, montagem] of contribuicao.montadas ?? []) {
+      if (aContribuicaoPinta(contribuicao, destino) && montagem.renderer.tomarOsSonsDevolvidos()) break;
     }
   }
 }

@@ -284,7 +284,7 @@ e um serviço no meio aprende alguma coisa. O que ele aprende é isto:
 | que o seu endereço falou com o endereço de outra pessoa, e quando | o que foi dito, em texto ou em voz |
 | o endereço público das duas máquinas | quem são vocês, que Server é, quais salas existem |
 | que houve uma tentativa de conexão | se ela deu certo |
-| que uma marca está no ar, ou esteve até a última varredura, e em que endereço: é o que o quarto guarda. A entrada vale 60 segundos desde o último aviso do anfitrião; vencida, deixa de responder, e só sai da memória quando o quarto enche, quando um aviso novo da mesma marca a substitui, ou quando o ponto reinicia | de quem é a marca: ela é feita dos 16 primeiros dos 64 caracteres da impressão digital do servidor, e não de um nome |
+| que uma marca está no ar, ou esteve até a última varredura, e em que endereço: é o que o quarto guarda. A entrada vale 60 segundos desde o último aviso do anfitrião; vencida, deixa de responder, e só sai da memória quando o quarto enche e chega uma marca nova (`Quarto::morar`), quando um aviso novo da mesma marca a substitui, ou quando o ponto reinicia | de quem é a marca: ela é feita dos 16 primeiros dos 64 caracteres da impressão digital do servidor, e não de um nome |
 
 O conteúdo continua ponta a ponta: o TLS 1.3 e a impressão digital do ADR 0003
 são conferidos entre as duas máquinas, e o ponto de encontro não tem por onde ler
@@ -322,8 +322,9 @@ Três coisas fazem parte da decisão, e não são promessas soltas:
   caracteres da impressão digital do servidor, e uma letra) para o endereço em
   que o anfitrião disse morar, com teto de 4096 marcas. Uma entrada vale 60
   segundos desde o último aviso; vencida, deixa de responder, e fica na memória
-  até o quarto encher (a varredura), um aviso novo da mesma marca a substituir,
-  ou o ponto reiniciar. Nada disso vai a disco, e reiniciar o ponto o esvazia.
+  até o quarto encher e chegar uma marca nova (`Quarto::morar`, que só então
+  varre o que venceu), um aviso novo da mesma marca a substituir, ou o ponto
+  reiniciar. Nada disso vai a disco, e reiniciar o ponto o esvazia.
   Por padrão ele nem imprime quem falou com quem.
 - **Ele é opcional.** `SEELE_ENCONTRO=nao` na máquina que hospeda desliga o
   degrau 4, e nenhum pacote sai dali para ponto de encontro nenhum. Tudo o que
