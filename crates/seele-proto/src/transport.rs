@@ -315,6 +315,17 @@ pub fn certificate_fingerprint(der: &[u8]) -> String {
     hex_sha256(der)
 }
 
+/// O mesmo SHA-256 de [`certificate_fingerprint`], em bytes, e não em hex.
+///
+/// É o que a prova de identidade assina (o S2,
+/// [`crate::assinatura::prova_de_cliente`]): a impressão do servidor que o
+/// cliente conferiu. Os dois lados a calculam pela mesma função, pela mesma
+/// razão de [`certificate_fingerprint`].
+#[must_use]
+pub fn certificate_digest(der: &[u8]) -> [u8; 32] {
+    sha256(der)
+}
+
 /// Fingerprint of a person's Ed25519 public key: SHA-256, lowercase hex.
 ///
 /// The mirror image of [`certificate_fingerprint`]. That one names the machine
@@ -337,13 +348,19 @@ pub fn key_fingerprint(public_key: &[u8]) -> String {
     hex_sha256(public_key)
 }
 
+/// SHA-256 cru: o corpo único sob o hex de [`hex_sha256`] e os bytes de
+/// [`certificate_digest`], para os dois nunca divergirem.
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).into()
+}
+
 /// SHA-256, lowercase hex, colon-free.
 ///
 /// One body under both names above: two hex loops would be two places for the
 /// formatting to drift, and drift here reads as a key that changed.
 fn hex_sha256(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(bytes);
+    let digest = sha256(bytes);
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {
         use std::fmt::Write;
@@ -415,5 +432,19 @@ mod fingerprint_tests {
         // `key_fingerprint` is called on whatever bytes arrived in the `Hello`,
         // and a peer that sends none must not make the doorkeeper panic.
         assert_eq!(key_fingerprint(&[]).len(), 64);
+    }
+}
+
+#[cfg(test)]
+mod a_impressao_em_bytes {
+    use super::*;
+
+    /// A impressão em hexadecimal e o digest em bytes são a mesma coisa, em
+    /// duas formas: o S2 assina os bytes, e o link e o pino guardam o hex.
+    #[test]
+    fn a_impressao_em_hex_e_o_digest_em_bytes() {
+        let digest = certificate_digest(b"um certificado");
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, certificate_fingerprint(b"um certificado"));
     }
 }

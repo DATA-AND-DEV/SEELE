@@ -276,6 +276,14 @@ pub const SIGNATURE_LEN: usize = 64;
 /// password fallback needs.
 pub const MAX_PROOF_LEN: usize = 256;
 
+/// O tamanho **exato** do nonce de um `Challenge`.
+///
+/// Até a 0.15 o nonce podia ter até [`MAX_PROOF_LEN`] bytes, e o cliente
+/// assinava o que viesse. O S2 fixa o tamanho e amarra a prova à impressão do
+/// servidor ([`crate::assinatura::prova_de_cliente`]): um tamanho exato é o que
+/// deixa o cliente recusar, antes de assinar, qualquer outra coisa.
+pub const NONCE_LEN: usize = 32;
+
 /// O teto do assento do E2EE, nos dois sentidos.
 ///
 /// **O assento vai sempre `None` no Servidor 1.0.** Ele existe porque um campo
@@ -2925,7 +2933,14 @@ impl Validate for ClientMessage {
 impl Validate for ServerMessage {
     fn validate(&self) -> Result<(), ControlError> {
         match self {
-            Self::Challenge { nonce } => check("nonce", nonce.len(), MAX_PROOF_LEN),
+            // Exato, e não teto: o S2 (adendo de 08/10/2026, §9).
+            Self::Challenge { nonce } => {
+                if nonce.len() == NONCE_LEN {
+                    Ok(())
+                } else {
+                    Err(ControlError::FieldOutOfRange { field: "nonce" })
+                }
+            }
             Self::Session {
                 server,
                 voice_rooms,
@@ -5018,6 +5033,32 @@ mod os_mods_no_fio {
     fn o_conjunto_vazio_tem_identidade_e_atravessa() {
         let quadro = encode(&anuncio(vec![])).expect("o conjunto vazio serializa");
         let _: ServerMessage = decode(&quadro).expect("volta");
+    }
+}
+
+#[cfg(test)]
+mod o_desafio {
+    use super::*;
+
+    /// O nonce do `Challenge` tem exatamente 32 bytes (S2, adendo de
+    /// 08/10/2026, §9). Até a 0.15 ele podia ter até 256, e o cliente assinava
+    /// o que viesse: um oráculo de assinatura.
+    #[test]
+    fn um_desafio_tem_exatamente_trinta_e_dois_bytes() {
+        for tamanho in [0, 1, 31, 33, 64, 256] {
+            assert_eq!(
+                encode(&ServerMessage::Challenge {
+                    nonce: vec![0; tamanho]
+                }),
+                Err(ControlError::FieldOutOfRange { field: "nonce" }),
+                "um desafio de {tamanho} bytes saiu"
+            );
+        }
+        assert!(encode(&ServerMessage::Challenge {
+            nonce: vec![0; NONCE_LEN]
+        })
+        .is_ok());
+        assert_eq!(NONCE_LEN, 32);
     }
 }
 
