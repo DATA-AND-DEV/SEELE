@@ -1297,7 +1297,10 @@ function avatarContribuido(pessoaId) {
  *
  * O nó é guardado e reaproveitado entre desenhos: refazê-lo a cada retrato
  * recriaria a mídia e tiraria o foco, que é o defeito que a reconciliação do
- * renderer existe para não ter.
+ * renderer existe para não ter. Por isso redesenhar não muda o som de lugar: a
+ * figura de um som que assentou sem tocador, num destino que não segura os
+ * sons da contribuição, volta como estava. Quem o remonta, quando o destino
+ * que os segurava sai da tela, é a varredura (`calarOsSonsQueSairamDaTela`).
  *
  * @param {object} contribuicao Do registro.
  * @param {string|number} destino Para quem, ou `""` num ponto sem alvo.
@@ -1335,7 +1338,9 @@ function montarContribuicao(contribuicao, destino = "") {
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
   // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
   // é uma só para todos os destinos, e o primeiro que chega a um som é o que
-  // os segura — ver `montarSom`, em `mods-regiao.js`.
+  // os segura — ver `montarSom`, em `mods-regiao.js` — até sair da tela: aí
+  // ele a devolve, e um destino que desenha a toma na varredura
+  // (`calarOsSonsQueSairamDaTela`).
   const sons = contribuicao.sons ?? { tomados: false };
   contribuicao.sons = sons;
   renderer.sonsDaContribuicao = sons;
@@ -1583,6 +1588,18 @@ function midiasDaRegiaoEDasPaginas(regioes, superficies) {
  *   `montadas`, fora do documento — também. Assim o som de uma contribuição
  *   sem alvo, que mora só no destino que o tomou (`montarSom`), não fica
  *   soando quando esse destino deixa de desenhar (o N1 da Task 8).
+ *
+ * **E o som de uma contribuição muda de destino, na mesma varredura** (P49-8).
+ * O destino que segurava os sons dela e saiu do documento os devolve, na
+ * primeira volta (`RegiaoDeMod#devolverOsSons`, pelo `calarSonsForaDaTela`
+ * dele). A segunda volta oferece a marca aos destinos em que a contribuição
+ * desenha, na ordem de `montadas`, e o primeiro que está no documento com um
+ * som esperando a toma (`RegiaoDeMod#tomarOsSonsDevolvidos`). Duas voltas, e
+ * não uma: numa só, um destino visitado antes do que saiu acharia a marca
+ * ainda tomada, e o som ficaria sem lugar até o desenho seguinte. Redesenhar
+ * não faria isso: a montagem de cada destino é reaproveitada
+ * (`montarContribuicao`), e a figura que assentou sem tocador volta como
+ * estava.
  */
 function calarOsSonsQueSairamDaTela() {
   const valem = new Set(modsDeCartaoQueValem());
@@ -1590,8 +1607,18 @@ function calarOsSonsQueSairamDaTela() {
     regiao.calarSonsForaDaTela(valem.has(regiao.id));
   }
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
-    for (const [destino, montagem] of contribuicao.montadas ?? []) {
-      montagem.renderer.calarSonsForaDaTela(aContribuicaoPinta(contribuicao, destino));
+    const destinos = Array.from(contribuicao.montadas ?? [], ([destino, montagem]) => ({
+      renderer: montagem.renderer,
+      pinta: aContribuicaoPinta(contribuicao, destino),
+    }));
+    for (const { renderer, pinta } of destinos) renderer.calarSonsForaDaTela(pinta);
+    // `sons` só existe numa contribuição montada (`montarContribuicao`). A
+    // marca vaga é a que um destino devolveu — nesta varredura, ou numa
+    // anterior, sem destino na tela para tomá-la —, ou a de uma contribuição
+    // cujo som ainda não chegou, e aí nenhum destino tem o que tomar.
+    if (!contribuicao.sons || contribuicao.sons.tomados) continue;
+    for (const { renderer, pinta } of destinos) {
+      if (pinta && renderer.tomarOsSonsDevolvidos()) break;
     }
   }
 }

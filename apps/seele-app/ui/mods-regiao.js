@@ -573,7 +573,7 @@ class RegiaoDeMod {
      * O som de cada mídia, e o `tocando` que o MOD declarou por último.
      *
      * `Map<Element, { tocador, tocar, recusar, declarado, quer, terminou, cartao,
-     * adiado }>`.
+     * montagem, adiado, carregando }>`.
      * À parte do nó porque o som chega depois dele — bytes e decodificação são
      * duas voltas —, e o MOD pode ter mudado de ideia nesse meio tempo.
      * `tocar` é o do tocador com a recusa já amarrada, e `recusar` é essa
@@ -581,16 +581,21 @@ class RegiaoDeMod {
      * natural do som; `cartao`, se ele mora num cartão ou num destino de
      * contribuição. Ver `aplicarTocando` e `calarSonsForaDaTela`.
      *
-     * `adiado` é o que `montarSom` recebeu (`{ plano, estado, origem }`)
+     * Os três do fim são do som que espera para carregar: `montagem` é o que
+     * `montarSom` recebeu (`{ plano, estado, origem }`, e a recusa amarrada,
+     * `recusou`), guardado para o som ser carregado depois, ou de novo;
+     * `adiado` é essa mesma montagem
      * enquanto o som de uma contribuição assentou sem tocador e espera o
-     * pedido de tocar (ver `pedirParaTocar`).
+     * pedido de tocar, ou a marca dos sons (ver `pedirParaTocar` e
+     * `tomarOsSonsDevolvidos`); `carregando` diz que os bytes ou a
+     * decodificação desse pedido estão a caminho (`pedirParaTocar`).
      */
     this.somDaMidia = new Map();
     /**
      * Quando este renderer é **um dos destinos de uma contribuição**: se algum
-     * deles já tomou os sons dela — `{ tomados }`, o mesmo objeto para todos
-     * (`montarContribuicao`, em `base.js`); `null` fora de uma. Ver
-     * `montarSom`.
+     * deles segura os sons dela agora — `{ tomados }`, o mesmo objeto para
+     * todos (`montarContribuicao`, em `base.js`); `null` fora de uma. Ver
+     * `montarSom`, `devolverOsSons` e `tomarOsSonsDevolvidos`.
      */
     this.sonsDaContribuicao = null;
     /** Se foi este destino que tomou os sons da contribuição. */
@@ -2339,12 +2344,15 @@ class RegiaoDeMod {
           conta: "bytesDeMidia", teto: LIMITES_DA_REGIAO.bytesDeMidia, quantas: "midias",
           contaDoSom: "bytesDeSomDecodificado", tetoDoSom: LIMITES_DA_REGIAO.bytesDeSomDecodificado,
         };
+    // `carga` conta as cargas do som (`carregarSom`): a que um destino
+    // devolveu no meio do caminho não vira tocador (`devolverOsSons`).
     const estado = {
       elemento: null, som: null, cancelado: false, bytes: 0, bytesDoSom: 0, bolso, ouvintes: [], recusaDita: null,
+      carga: 0,
     };
     this.somDaMidia.set(elem, {
       tocador: null, tocar: null, recusar: null, declarado: undefined, quer: false, terminou: false,
-      cartao: Boolean(plano.cartao), adiado: null,
+      cartao: Boolean(plano.cartao), montagem: null, adiado: null, carregando: false,
     });
     this.guardar(elem, `midia ${plano.chave}`, () => {
       estado.cancelado = true;
@@ -2511,9 +2519,14 @@ class RegiaoDeMod {
    * A marca é por contribuição, e não por som: uma por som precisaria dizer
    * qual nó é qual em todos os destinos, e a chave do plano não diz — a
    * posição recomeça dentro de cada contêiner, e dois sons diferentes saíam
-   * com a mesma, o segundo calado sem aviso. Ela não é devolvida: os destinos
-   * saem juntos (`soltarMontagem`, ou a saída da instância), e um destino que
-   * não montou é solto antes de um som chegar aqui.
+   * com a mesma, o segundo calado sem aviso. **Ela volta quando o destino que
+   * a tomou sai da tela** (P49-8): o nó dele saiu do documento, e a
+   * contribuição continua desenhada noutro. Ele solta os tocadores e devolve a
+   * marca (`devolverOsSons`), e um destino que desenha a toma na mesma
+   * varredura (`tomarOsSonsDevolvidos`) — sem isso, o som ficava preso no lugar
+   * que ninguém via, e o `tocando` religado era recusado como fora da tela. Na
+   * saída, os destinos saem juntos (`soltarMontagem`, ou a saída da instância),
+   * e um destino que não montou é solto antes de um som chegar aqui.
    *
    * **Toda recusa é dita a quem hospeda**, como o `.catch` de `montarMidia` e o
    * `play()` recusado do `<audio>` já eram (`dizerRecusaDeMidia`): o som que
@@ -2525,23 +2538,47 @@ class RegiaoDeMod {
    * @param {{ uri: string } | { caminho: string }} origem
    */
   async montarSom(elem, plano, estado, origem) {
+    const chave = plano.no.chave ?? "";
+    const entrada = this.somDaMidia.get(elem) ?? {};
+    // **O som que não começou, por um caminho só.** O evento ao MOD — com o
+    // motivo, em `porque` — e a anotação saem a cada vez: são deles, e o MOD
+    // pode dizer à pessoa que aperte alguma coisa, ou que abra a página. O
+    // registro sai **uma vez por motivo**, por tocador
+    // (`estado.recusaDita`): um MOD que liga e desliga o `tocando` sem um gesto
+    // de quem usa teria uma recusa por alternância, num `seele.log` que só gira
+    // na abertura e numa porta da janela sem balde.
+    //
+    // Quem chama confere antes se o som ainda é de alguém (`estado.cancelado`,
+    // `this.solta`): uma recusa que chega depois de a região sair, ou de o MOD
+    // tirar o nó, não vai ao registro, nem ao MOD, nem recria a anotação.
+    //
+    // Amarrada aqui, e não com o tocador: o pedido de tocar que um destino
+    // devolve no meio da carga também é dito por ela (`devolverOsSons`).
+    const recusou = (motivo) => {
+      this.anotarMidia(elem, "recusada", motivo);
+      this.dono.falar({ nome: "midia", chave, estado: "recusada", porque: motivo });
+      if (estado.recusaDita === motivo) return;
+      estado.recusaDita = motivo;
+      this.dizerRecusaDeMidia(chave, `não tocou: ${motivo}`);
+    };
+    const montagem = { plano, estado, origem, recusou };
+    entrada.montagem = montagem;
+    entrada.recusar = recusou;
     // Numa contribuição, só o destino que tomou os sons dela segue daqui.
     // Antes de qualquer `await`: dois destinos que chegam juntos não podem os
-    // dois achar a marca vaga.
-    if (this.sonsDaContribuicao && !this.tomouOsSons) {
-      if (this.sonsDaContribuicao.tomados) {
-        elem.dataset.estado = "pronta";
-        this.esquecerMidia(elem);
-        return;
-      }
-      this.sonsDaContribuicao.tomados = true;
-      this.tomouOsSons = true;
-    }
-    const montagem = { plano, estado, origem };
-    // E o som dela espera o pedido de tocar para pedir os bytes.
+    // dois achar a marca vaga. Os outros guardam o adiamento: a marca pode
+    // voltar, e um deles tomá-la (`tomarOsSonsDevolvidos`).
     if (this.sonsDaContribuicao) {
-      const entrada = this.somDaMidia.get(elem);
-      if (entrada) entrada.adiado = montagem;
+      entrada.adiado = montagem;
+      if (!this.tomouOsSons) {
+        if (this.sonsDaContribuicao.tomados) {
+          elem.dataset.estado = "pronta";
+          this.esquecerMidia(elem);
+          return;
+        }
+        this.sonsDaContribuicao.tomados = true;
+        this.tomouOsSons = true;
+      }
       this.esperarOPedidoDeTocar(elem);
       return;
     }
@@ -2587,13 +2624,22 @@ class RegiaoDeMod {
    * (`montarSom`); no pedido de tocar, para o de uma contribuição
    * (`pedirParaTocar`).
    *
-   * @param {{ plano: object, estado: object, origem: object }} montagem
+   * **Uma carga é desta montagem enquanto `estado.carga` for a dela.** O
+   * destino que devolve os sons de uma contribuição no meio do caminho conta
+   * mais uma (`devolverOsSons`): os bytes e a decodificação que chegam depois
+   * não viram tocador num destino que já não os segura, nem contam no bolso
+   * dele.
+   *
+   * @param {{ plano: object, estado: object, origem: object, recusou: (motivo: string) => void }} montagem
    */
   async carregarSom(elem, montagem) {
-    const { plano, estado, origem } = montagem;
+    const { plano, estado, origem, recusou } = montagem;
     const chave = plano.no.chave ?? "";
+    estado.carga += 1;
+    const carga = estado.carga;
+    const deAlguem = () => !estado.cancelado && !this.solta && estado.carga === carga;
     const falhou = (motivo) => {
-      if (estado.cancelado || this.solta) return;
+      if (!deAlguem()) return;
       this.falharOSom(elem, plano, motivo);
     };
     // **Nada de áudio da janela aqui.** O som é decodificado num contexto
@@ -2612,7 +2658,7 @@ class RegiaoDeMod {
       falhou(motivoDaFalha(falha));
       return;
     }
-    if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
+    if (!deAlguem() || !this.dono.podeFalar()) return;
     let som;
     try {
       som = await decodificarSomDeMod(bytes);
@@ -2620,7 +2666,7 @@ class RegiaoDeMod {
       falhou(`o som não decodificou: ${motivoDaFalha(falha)}`);
       return;
     }
-    if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
+    if (!deAlguem() || !this.dono.podeFalar()) return;
     // **O que o som ocupa decodificado**, somado ao que já está de pé neste
     // bolso. Float32, quatro bytes por amostra, por canal, na taxa da
     // decodificação (`TAXA_DA_DECODIFICACAO`) — é o que o `AudioBuffer` segura
@@ -2645,24 +2691,6 @@ class RegiaoDeMod {
     estado.bytesDoSom = ocupa;
     this[contaDoSom] += ocupa;
 
-    // **O som que não começou, por um caminho só.** O evento ao MOD — com o
-    // motivo, em `porque` — e a anotação saem a cada vez: são deles, e o MOD
-    // pode dizer à pessoa que aperte alguma coisa, ou que abra a página. O
-    // registro sai **uma vez por motivo**, por tocador
-    // (`estado.recusaDita`): um MOD que liga e desliga o `tocando` sem um gesto
-    // de quem usa teria uma recusa por alternância, num `seele.log` que só gira
-    // na abertura e numa porta da janela sem balde.
-    //
-    // Quem chama confere antes se o som ainda é de alguém (`estado.cancelado`,
-    // `this.solta`): uma recusa que chega depois de a região sair, ou de o MOD
-    // tirar o nó, não vai ao registro, nem ao MOD, nem recria a anotação.
-    const recusou = (motivo) => {
-      this.anotarMidia(elem, "recusada", motivo);
-      this.dono.falar({ nome: "midia", chave, estado: "recusada", porque: motivo });
-      if (estado.recusaDita === motivo) return;
-      estado.recusaDita = motivo;
-      this.dizerRecusaDeMidia(chave, `não tocou: ${motivo}`);
-    };
     let pintar = () => {};
     const entrada = this.somDaMidia.get(elem) ?? {};
     const tocador = new TocadorDeSomDeMod(som, (aviso, comGesto, naoLigou, suspensoPeloProduto) => {
@@ -2696,7 +2724,6 @@ class RegiaoDeMod {
     // `catch` é o pedido que rejeita em vez de avisar — a fonte que o WebAudio
     // não abre —, e ele não podia ficar só na anotação.
     entrada.tocador = tocador;
-    entrada.recusar = recusou;
     entrada.tocar = (comGesto) => tocador.tocar(comGesto).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       recusou(motivoDaFalha(falha));
@@ -2776,7 +2803,9 @@ class RegiaoDeMod {
    * **Numa contribuição, uma vez, e não uma por destino**: só o destino que
    * segura os sons dela tem tocador (ver `montarSom`). E o som dela só ganha
    * tocador no pedido de tocar: sem tocador, a declaração vai a
-   * `pedirParaTocar`, que carrega o som quando ela pede para tocar.
+   * `pedirParaTocar`, que carrega o som quando ela pede para tocar. O destino
+   * que saiu da tela devolve os sons (`devolverOsSons`), e o `tocando` religado
+   * toca no que os tomou — e não é recusado como fora da tela no que saiu.
    */
   aplicarTocando(elem) {
     const som = this.somDaMidia.get(elem);
@@ -2813,6 +2842,10 @@ class RegiaoDeMod {
    *
    * O que lança fora dos caminhos de recusa de `carregarSom` é dito como o
    * `.catch` de `montarMidia` diz: o som falhou ao carregar.
+   *
+   * `carregando` fica de pé enquanto a carga do pedido estiver a caminho: o
+   * destino que devolve os sons nesse meio tempo diz o pedido como recusado
+   * (`devolverOsSons`), em vez de desfazê-lo em silêncio.
    */
   pedirParaTocar(elem, som) {
     if (!som.adiado || !this.tomouOsSons) return;
@@ -2822,11 +2855,21 @@ class RegiaoDeMod {
       return;
     }
     const montagem = som.adiado;
+    const { estado } = montagem;
     som.adiado = null;
-    this.carregarSom(elem, montagem).catch((falha) => {
-      if (montagem.estado.cancelado || this.solta) return;
-      this.falharOSom(elem, montagem.plano, motivoDaFalha(falha));
-    });
+    som.carregando = true;
+    const vindo = this.carregarSom(elem, montagem);
+    // A carga que `carregarSom` acabou de tomar, antes do primeiro `await`
+    // dele: uma devolvida no meio do caminho já não é esta.
+    const carga = estado.carga;
+    vindo
+      .catch((falha) => {
+        if (estado.cancelado || this.solta || estado.carga !== carga) return;
+        this.falharOSom(elem, montagem.plano, motivoDaFalha(falha));
+      })
+      .finally(() => {
+        if (estado.carga === carga) som.carregando = false;
+      });
   }
 
   /** O MOD declara «tocando»; o produto guarda, e aplica quando o som existir. */
@@ -2861,6 +2904,11 @@ class RegiaoDeMod {
    * `tocando: true` não o religar — nem o religar por ter terminado
    * (`aplicarTocando`).
    *
+   * **E o destino de contribuição que segura os sons dela e saiu do documento
+   * os devolve** (`devolverOsSons`), depois de calá-los: a contribuição pode
+   * continuar desenhada noutro destino, e é a segunda volta da varredura de
+   * `base.js` que a oferece a ele (`tomarOsSonsDevolvidos`).
+   *
    * Quem chama: `SuperficieDeMod#fechar`, e `calarOsSonsQueSairamDaTela`, em
    * `base.js`, no fim de cada desenho que pode tirar um nó de MOD da tela.
    *
@@ -2883,6 +2931,90 @@ class RegiaoDeMod {
       // desfeito em silêncio.
       if (esperava) som.recusar(SOM_FORA_DA_TELA);
     }
+    if (this.tomouOsSons && !this.raiz?.isConnected) this.devolverOsSons();
+  }
+
+  /**
+   * **O destino que segurava os sons de uma contribuição e saiu da tela os
+   * devolve** (P49-8, o S-m7 da revisão do Lote Som).
+   *
+   * Uma contribuição sem alvo desenha em vários destinos, e os sons dela moram
+   * no que os tomou (`montarSom`). Quando a pessoa daquele destino sai da sala,
+   * o nó dele sai do documento — e a contribuição continua desenhada nos
+   * outros. O som ficava preso ali: um `tocando` religado era recusado com
+   * «o lugar deste som saiu da tela», ao lado da contribuição na tela.
+   *
+   * Calado o som por `calarSonsForaDaTela`, este destino:
+   * - solta os tocadores — e cancela a carga que estiver a caminho
+   *   (`estado.carga`): os bytes e a decodificação que chegarem depois não
+   *   viram tocador aqui. O pedido de tocar que a esperava é dito como a
+   *   recusa de quem saiu da tela, como o que esperava o áudio da janela;
+   * - devolve ao bolso o que o som decodificado ocupava;
+   * - esquece as anotações desses sons: o diagnóstico os conta onde estão;
+   * - guarda o adiamento de cada um, como um destino que nunca os tomou, e
+   *   devolve a marca.
+   *
+   * Quando a pessoa volta, o nó reaparece com a figura «pronta» e sem
+   * tocador: a marca está com o destino que a tomou, e este só a toma de novo
+   * se ela for devolvida outra vez com ele na tela (`tomarOsSonsDevolvidos`).
+   */
+  devolverOsSons() {
+    if (!this.sonsDaContribuicao || !this.tomouOsSons) return;
+    for (const [elem, som] of this.somDaMidia) {
+      const montagem = som.montagem;
+      if (!montagem) continue;
+      const { estado } = montagem;
+      if (som.carregando && som.quer) som.recusar(SOM_FORA_DA_TELA);
+      estado.carga += 1;
+      som.carregando = false;
+      estado.som?.soltar();
+      estado.som = null;
+      this[estado.bolso.contaDoSom] -= estado.bytesDoSom;
+      estado.bytesDoSom = 0;
+      estado.recusaDita = null;
+      som.tocador = null;
+      som.tocar = null;
+      som.terminou = false;
+      som.adiado = montagem;
+      elem.dataset.estado = "pronta";
+      this.esquecerMidia(elem);
+    }
+    this.sonsDaContribuicao.tomados = false;
+    this.tomouOsSons = false;
+  }
+
+  /**
+   * Toma os sons de uma contribuição que o destino que os segurava devolveu
+   * (`devolverOsSons`) — **na mesma varredura**.
+   *
+   * Redesenhar não basta: a montagem de cada destino é guardada e
+   * reaproveitada (`montarContribuicao`, em `base.js`), e a figura que assentou
+   * sem tocador volta como estava. Quem chama é a segunda volta de
+   * `calarOsSonsQueSairamDaTela`, em `base.js`, só nos destinos em que a
+   * contribuição desenha; este confere que o nó dele está no documento e que
+   * tem um som que assentou esperando.
+   *
+   * **Ele não pede os bytes por tomar a marca.** O som saiu da tela parado
+   * (`calarSonsForaDaTela`), e a declaração dele vale como aplicada aqui também:
+   * um `tocando: true` que já valia não o liga de novo. Ele assenta como no
+   * destino que o tomou primeiro (`esperarOPedidoDeTocar`), e o `tocando`
+   * religado é o pedido de tocar — que agora toca aqui, sem recusa. Do começo:
+   * o ponto em que o outro parou foi embora com o tocador dele.
+   *
+   * @returns {boolean} Se tomou a marca.
+   */
+  tomarOsSonsDevolvidos() {
+    if (this.solta || !this.sonsDaContribuicao || this.sonsDaContribuicao.tomados) return false;
+    if (!this.raiz?.isConnected) return false;
+    const adiados = [...this.somDaMidia].filter(([, som]) => som.adiado);
+    if (adiados.length === 0) return false;
+    this.sonsDaContribuicao.tomados = true;
+    this.tomouOsSons = true;
+    for (const [elem, som] of adiados) {
+      som.declarado = som.quer;
+      this.esperarOPedidoDeTocar(elem);
+    }
+    return true;
   }
 
   // ------------------------------------------------ o estado das mídias

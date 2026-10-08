@@ -556,7 +556,54 @@ function bancada(opcoes = {}) {
     semAudioDeTempoReal: () => {
       contexto.AudioContext = undefined;
     },
+    /** O global desta janela, para uma prova pôr nele o que um recorte de `base.js` lê. */
+    janela: contexto,
+    /** Roda um recorte de outro arquivo da janela neste mesmo contexto, depois da região. */
+    rodar: (codigo, arquivo) => vm.runInContext(codigo, contexto, { filename: arquivo }),
   };
+}
+
+/**
+ * A varredura de `base.js` que cala o som de quem saiu da tela —
+ * `calarOsSonsQueSairamDaTela`, com `aContribuicaoPinta`, a regra de quem
+ * desenha —, recortada do arquivo de verdade e rodada no contexto de `b`.
+ *
+ * **A de verdade, e não uma cópia nesta bancada.** É ela que muda o som de uma
+ * contribuição de destino (P49-8): uma volta que cala, e devolve a marca de
+ * quem saiu, e outra que a oferece a quem desenha. Uma cópia aqui ficaria
+ * verde com a segunda volta tirada de `base.js`.
+ *
+ * As tabelas que ela lê são desta prova: nenhuma região de MOD, nenhum MOD com
+ * cartão que valha, e as contribuições que a prova passa, cada uma com o seu
+ * `montadas` e o seu `sons`, como `montarContribuicao` os deixa.
+ *
+ * @param {object} b A bancada.
+ * @param {object[]} contribuicoes `{ modo, ponto, sons, montadas }`.
+ * @returns {() => void} A varredura, para a prova rodar quando um nó sai.
+ */
+function varreduraDeBase(b, contribuicoes) {
+  const base = fs.readFileSync(path.join(raiz, "ui/base.js"), "utf8");
+  const recorte = (assinatura) => {
+    const inicio = base.indexOf(assinatura);
+    const fim = base.indexOf("\n}\n", inicio);
+    return inicio >= 0 && fim > inicio ? base.slice(inicio, fim + 3) : "";
+  };
+  const pinta = recorte("function aContribuicaoPinta(");
+  const varre = recorte("function calarOsSonsQueSairamDaTela(");
+  confere(
+    "a varredura de base.js",
+    Boolean(pinta && varre),
+    "`aContribuicaoPinta` ou `calarOsSonsQueSairamDaTela` mudou de forma em `base.js`, e o recorte não a achou: "
+      + "as provas do som que muda de destino mediriam outra varredura",
+  );
+  if (!pinta || !varre) return () => {};
+  b.janela.modsDeCartaoQueValem = () => [];
+  b.janela.regioesDosMods = new Map();
+  b.janela.contribuicoesDosMods = {
+    porHandle: new Map(contribuicoes.map((contribuicao, i) => [`c${i + 1}`, contribuicao])),
+  };
+  b.rodar(`${pinta}\n${varre}`, "base.js");
+  return () => b.janela.calarOsSonsQueSairamDaTela();
 }
 
 /** Os doze bytes que o dono de mentira entrega como som: o começo de um WAV. */
@@ -4256,6 +4303,175 @@ async function oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 18. O som de uma contribuição muda de destino quando quem o tomou sai da tela.
+// ---------------------------------------------------------------------------
+
+/**
+ * P49-8 (S-m7). Os sons de uma contribuição sem alvo moram no destino que os
+ * tomou. Quando quem estava ali sai da sala, o nó desse destino sai da tela e o
+ * som para — e ele ficava preso ali: um `tocando` religado era recusado com
+ * «o lugar deste som saiu da tela», com a mesma contribuição desenhada nos
+ * outros destinos, sem tocador.
+ *
+ * O destino que saiu solta o tocador, devolve ao bolso o som decodificado,
+ * esquece a anotação e devolve a marca; um destino que desenha a toma na
+ * mesma varredura — a de `base.js`, recortada (`varreduraDeBase`). Ele não
+ * pede os bytes por tomá-la: o som saiu da tela parado, e a declaração dele
+ * conta como aplicada, como em `calarSonsForaDaTela`. O `tocando` religado
+ * toca ali, sem recusa, e só existe um tocador — e continua um só quando o nó
+ * do primeiro volta.
+ *
+ * E o pedido de tocar que ainda decodificava quando o lugar saiu: ele não
+ * vira tocador num destino que já não segura o som, e é dito ao MOD como a
+ * recusa de quem saiu da tela — como o pedido que esperava o áudio da janela.
+ */
+async function oSomDaContribuicaoMudaDeDestino() {
+  const caso = "o som da contribuição muda de destino";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const vinheta = (tocando) => [{ forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando }];
+  const ditos = (d, estado) => d.ditos.filter((e) => e.nome === "midia" && e.chave === "vinheta" && e.estado === estado);
+  // Quantos tocadores de pé, somando os destinos: o que «só existe um» conta.
+  const tocadores = (destinos) => destinos.flatMap((r) => [...r.somDaMidia.values()]).filter((s) => s.tocador).length;
+  const montar = (opcoes) => {
+    const Audio = audioDeMentira(opcoes);
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(vinheta(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    const tocando = () => (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    return { Audio, b, d, sons, destinos, varrer, tocando };
+  };
+
+  {
+    const { Audio, b, d, sons, destinos, varrer, tocando } = montar();
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    confere(caso, Boolean(tomou) && tocando() === 1, "a vinheta da contribuição não tocou no destino que a tomou");
+    if (!tomou) return;
+
+    // Quem estava no canal do destino que tomou os sons sai: o nó sai da tela,
+    // e a varredura do fim do desenho roda.
+    tomou.raiz.remove();
+    varrer();
+    await assentar();
+    confere(
+      caso,
+      ditos(d, "pausada").length === 1 && tocando() === 0,
+      `o lugar do som saiu da tela e o som não parou: ${tocando()} fonte(s), «pausada» dita ${ditos(d, "pausada").length} vez(es)`,
+    );
+    confere(
+      caso,
+      !tomou.tomouOsSons && outro.tomouOsSons === true && sons.tomados === true,
+      "a marca dos sons não mudou de destino na varredura: o som fica preso no destino que saiu da tela — "
+        + `${JSON.stringify({ saiu: tomou.tomouOsSons, outro: outro.tomouOsSons, tomados: sons.tomados })}`,
+    );
+    confere(
+      caso,
+      tocadores([tomou]) === 0 && tomou.bytesDeSomDeCartao === 0 && tomou.midiasAnotadas().length === 0,
+      "o destino que saiu da tela segurou o tocador, o som decodificado no bolso, ou a anotação: "
+        + `${tocadores([tomou])} tocador(es), ${tomou.bytesDeSomDeCartao} bytes, ${JSON.stringify(tomou.midiasAnotadas())}`,
+    );
+    confere(
+      caso,
+      Audio.decodificados.length === 1
+        && JSON.stringify(outro.midiasAnotadas().map((m) => m.situacao)) === JSON.stringify(["pronta"]),
+      "o destino que tomou a marca pediu o som sem um pedido de tocar, ou não o anotou «pronta»: "
+        + `${Audio.decodificados.length} decodificação(ões), ${JSON.stringify(outro.midiasAnotadas())}`,
+    );
+
+    // O MOD religa o `tocando`: o som toca no destino que desenha, sem recusa.
+    for (const r of destinos) r.aplicar(vinheta(false));
+    for (const r of destinos) r.aplicar(vinheta(true));
+    await assentar();
+    confere(
+      caso,
+      ditos(d, "recusada").length === 0,
+      "o `tocando` religado foi recusado como fora da tela, com a contribuição desenhada noutro destino: "
+        + `${JSON.stringify(ditos(d, "recusada"))}`,
+    );
+    confere(
+      caso,
+      tocando() === 1 && tocadores(destinos) === 1 && tocadores([outro]) === 1,
+      `o \`tocando\` religado não tocou no destino que desenha, ou tocou em dois: ${tocando()} fonte(s), `
+        + `${tocadores(destinos)} tocador(es), ${tocadores([outro])} no destino que desenha`,
+    );
+
+    // Num segundo passo, quem saiu volta: o nó reaparece sem tocador.
+    b.doc.body.append(tomou.raiz);
+    varrer();
+    for (const r of destinos) r.aplicar(vinheta(false));
+    for (const r of destinos) r.aplicar(vinheta(true));
+    await assentar();
+    confere(
+      caso,
+      tocadores(destinos) === 1 && tocadores([outro]) === 1 && tocando() === 1 && ditos(d, "recusada").length === 0
+        && todasAsTags(tomou.raiz, "figure")[0]?.dataset.estado === "pronta",
+      `o nó de quem saiu voltou, e o som não ficou com um tocador só, no destino que o tem: ${tocadores(destinos)} `
+        + `tocador(es), ${tocando()} fonte(s), recusas ${JSON.stringify(ditos(d, "recusada"))}`,
+    );
+    for (const r of destinos) r.soltar();
+    confere(caso, tocando() === 0, "o som da contribuição continuou depois de os destinos saírem");
+  }
+
+  // O pedido de tocar que ainda decodificava quando o lugar saiu da tela.
+  {
+    const noMeio = `${caso} · no meio da decodificação`;
+    const { Audio, d, destinos, varrer, tocando } = montar({ segurarADecodificacao: true });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    confere(noMeio, Boolean(tomou) && Audio.decodificacoesPresas.length === 1, "a vinheta não começou a decodificar");
+    if (!tomou) return;
+    tomou.raiz.remove();
+    varrer();
+    for (const presa of Audio.decodificacoesPresas.splice(0)) {
+      presa.pronto({ duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
+    }
+    await assentar();
+    confere(
+      noMeio,
+      tocadores(destinos) === 0 && tomou.bytesDeSomDeCartao === 0 && outro.tomouOsSons === true,
+      "a decodificação terminou depois de o lugar sair da tela e virou tocador no destino que já não segura o "
+        + `som: ${tocadores(destinos)} tocador(es), ${tomou.bytesDeSomDeCartao} bytes, a marca com o outro: ${outro.tomouOsSons}`,
+    );
+    const recusa = ditos(d, "recusada");
+    confere(
+      noMeio,
+      recusa.length === 1 && /tela/.test(recusa[0]?.porque ?? "")
+        && d.anotadas.some((t) => t.includes("«vinheta»") && /tela/.test(t)),
+      "o pedido de tocar que decodificava quando o lugar saiu da tela foi desfeito em silêncio: ao MOD "
+        + `${JSON.stringify(recusa)}, ao registro ${JSON.stringify(d.anotadas)}`,
+    );
+    for (const r of destinos) r.aplicar(vinheta(false));
+    for (const r of destinos) r.aplicar(vinheta(true));
+    // Os bytes chegam antes de a decodificação começar: ela só fica presa depois.
+    await assentar();
+    for (const presa of Audio.decodificacoesPresas.splice(0)) {
+      presa.pronto({ duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
+    }
+    await assentar();
+    confere(
+      noMeio,
+      tocando() === 1 && tocadores([outro]) === 1 && tocadores(destinos) === 1,
+      `o \`tocando\` religado não tocou no destino que tomou a marca: ${tocando()} fonte(s), ${tocadores(destinos)} tocador(es)`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -4299,6 +4515,7 @@ async function oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar() {
     oSomQueTerminouVoltaComOTocandoDeclarado,
     oSomQueSaiDaTelaParaComoOAudioParava,
     oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar,
+    oSomDaContribuicaoMudaDeDestino,
   ];
   for (const prova of provas) {
     try {
