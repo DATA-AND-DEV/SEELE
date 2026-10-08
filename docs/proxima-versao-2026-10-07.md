@@ -76,8 +76,12 @@ conferem, e a bateria inteira roda no commit que vai para a `main`.
      lado do cliente, do DNS num buraco negro e de uma captura.
    - As quatro linhas de resultado vão no bloco «[PREENCHER ANTES DE
      PUBLICAR…]» de `empacotar/notas/0.15.1.md`, num commit.
-2. **A medição do som de MOD**, no WKWebView e no WebView2, pelo roteiro da
-   pendência 49. O resultado é escrito lá.
+2. ~~A medição do som de MOD~~, no WKWebView e no WebView2: **feita em 07 e
+   08/10, e toca nas duas** (pendência 49 e
+   `docs/evidencias/som-de-mod-wkwebview/registro.md`). Ela achou três coisas
+   fora do som de MOD, que não seguram a versão: a voz segura o aparelho de
+   som a sessão inteira (pendência 52), a recusa de um MOD com atalho sem
+   frase (53) e a linha do padrão do aparelho de saída (54).
 3. **`git push origin main`.** O `curl` do `install.sh` serve a `main` remota, e
    o CI precisa do ramo no GitHub.
 4. **Disparar o `ci.yml`**, job `bancadas`, no ramo que vai sair. Ele roda só

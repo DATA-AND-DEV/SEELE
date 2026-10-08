@@ -7284,6 +7284,20 @@ sai com os itens 1 a 3 abaixo feitos, nas duas metades, o WKWebView no Mac e
 o WebView2 no Windows, e o resultado escrito aqui. Ver o item 4 de «Antes de
 cortar a release», no índice da 1.0.
 
+**Medida em 2026-10-07 e 2026-10-08, e toca nas duas.** Os itens 1, 2 e 3
+abaixo estão feitos, com o registro em
+`docs/evidencias/som-de-mod-wkwebview/registro.md`:
+- **antes** (`3d50b21`, WKWebView do macOS 27.0.1): não tocava; a CSP recusa o
+  `data:` do `<audio>`, e o MOD escreve `som: recusada`;
+- **depois** (`f1ec0b3`): toca no WKWebView e no WebView2 154 (Windows), nos
+  casos A e B, no som de contribuição (uma vez por contribuição, sem eco) e na
+  trilha da MESA; nenhum `<audio>`, nenhuma recusa de CSP; o áudio da janela
+  não fica preso depois de pausar, de fechar a página ou de sair da sessão.
+
+O macOS 11.0 a 11.2 continua **não medido**. Os itens 5 a 10 não mudam. O
+repouso achou outra coisa, que não é do som de MOD: a voz segura o aparelho de
+som a sessão inteira (pendência 52).
+
 ### O que falta medir, com o comando de cada um
 
 1. **Task 1, o «antes»: o WKWebView com o `<audio>`.** Mede o build de
@@ -8173,3 +8187,66 @@ Veio depois, da revisão do Lote F-Bateria:
 **Quando fecha.** Item por item, quando um plano os tomar. Esta entrada
 existe para que a lista não suma com a árvore de trabalho, e não para segurar
 release nenhuma.
+
+## 52 · A voz segura o aparelho de som, e a máquina acordada, a sessão inteira, também fora de sala
+
+**Aberta em 2026-10-08**, medindo o repouso da pendência 49. Enquanto se está
+num servidor, o motor de voz mantém a saída e o microfone abertos, **também
+fora de qualquer sala de voz** («FORA DE SALA · microfone abre na tecla»), e
+com eles o sistema não dorme por ociosidade:
+
+- **macOS 27.0.1:** a asserção `PreventUserIdleSystemSleep` do `coreaudiod`
+  nasce ao entrar no servidor, junto com a linha «a supressão de ruído do
+  microfone está tratando o sinal» do `seele.log`, e só cai ao sair da sessão
+  ou fechar o app (medido de 21:41:17 a 21:54:39, fora de sala o tempo todo);
+- **Windows 10.0.26300:** o `powercfg /requests` mostra o pedido de **driver**
+  da saída (NVIDIA High Definition Audio) e do microfone USB a sessão inteira.
+
+Ao sair da sessão, os dois soltam na hora. O som de MOD não tem nada com isso:
+separados por aparelho (macOS) e por processo (Windows), ele só segura enquanto
+toca. Ver o registro da pendência 49.
+
+**O que decidir.** Abrir o áudio só ao entrar numa sala de voz, e fechá-lo ao
+sair dela, devolve o repouso a quem fica no servidor só pela conversa de
+texto, e custa a latência de abrir o aparelho a cada entrada (e o primeiro
+quadro de quem fala logo ao entrar). É decisão de produto, e não conserto.
+
+```sh
+grep -n "a supressão de ruído do microfone está tratando o sinal" crates/seele-core/src/voice.rs
+```
+
+## 53 · Instalar um MOD de uma pasta com atalho: a recusa é certa, e a tela não sabe dizer qual é
+
+**Aberta em 2026-10-08.** Uma pasta de MOD de quem desenvolve tem
+`node_modules/.bin/`, cheia de atalhos (symlinks). O instalador recusa um
+atalho dentro do pacote, e isso está certo. Mas a tela mostra «ALGO FALHOU E
+ESTE APP NÃO SABE EXPLICAR O QUÊ» com o JSON cru —
+`{"NaoCopiei":"atalho dentro do pacote: /Users/…/SEELE-MOD-MESA/node_modules/.bin/playwright-core"}`
+— e o `seele.log` não ganha linha nenhuma. O produto sabe o motivo e o caminho
+exatos, e não conta.
+
+O conserto: uma frase em `ui/frases.js` para `FalhaAoInstalarMod::NaoCopiei`
+(«ESTA PASTA TEM UM ATALHO, E O SEELE NÃO INSTALA MOD COM ATALHO: <caminho>.
+Instale a pasta do pacote, sem `node_modules`.»), separando o atalho das
+outras falhas de cópia, e a linha da recusa no `seele.log`.
+
+```sh
+grep -n "NaoCopiei" apps/seele-app/src/mods.rs
+grep -n "NaoCopiei" apps/seele-app/ui/frases.js   # vazio: não há frase
+```
+
+## 54 · «PADRÃO DA MÁQUINA · <aparelho>» diz o aparelho em uso, e não o padrão, quando a escolha é outro aparelho
+
+**Aberta em 2026-10-08.** Em CONFIGURAÇÕES · MICROFONE E SOM, a linha
+`PADRÃO DA MÁQUINA` ganha o nome do aparelho que a voz abriu
+(`marcarUmaLista`, `ui/tela-server.js`), para dizer no que o padrão deu. Isso
+só vale quando o padrão é a escolha. Com um aparelho escolhido à mão, a linha
+continua dizendo o aparelho aberto: com o monitor 27QHD240 escolhido e os
+alto-falantes do MacBook como padrão do macOS, a tela mostrou
+«PADRÃO DA MÁQUINA · 27QHD240» e, logo abaixo, «Alto-falantes (MacBook Pro)
+PADRÃO». O conserto: só escrever o nome resolvido quando a linha do padrão for
+a escolhida, ou escrever nela o padrão do sistema.
+
+```sh
+grep -n "PADRÃO DA MÁQUINA · " apps/seele-app/ui/tela-server.js
+```
