@@ -17,8 +17,8 @@ publicado.
 |---|---|---|
 | 0.1 · medição 2: `seele-proto` em `wasm32` | **feita**: o `check` passa, e o codec roda no `.wasm` com os mesmos bytes do nativo | `spikes/proto-em-wasm/README.md` |
 | 0.2 · medição 1: o Ed25519 do Safari no `verify` | **feita** no Mac e no Simulador: passa. O iPhone fica com o dono (`prova.py iphone`) | `spikes/ed25519-do-navegador/README.md` |
-| 0.3 · preparar a medição 3 (ALPN no iPhone) | a fazer | `spikes/alpn-no-mesmo-socket/` |
-| 0.4 · spike do executor de MODs | a fazer | `spikes/mods-no-navegador/` |
+| 0.3 · preparar a medição 3 (ALPN no iPhone) | **feita**; a bancada (Chromium e Simulador) mediu, e o iPhone fica com o dono | `spikes/alpn-no-mesmo-socket/README.md` |
+| 0.4 · spike do executor de MODs | **feito**: recomenda **AB**. O custo no iPhone fica com o dono (`prova.py iphone`) | `spikes/mods-no-navegador/README.md` |
 | 0.5 · passos do dono, medições 3 a 6 | a fazer | `F4/medicoes-do-dono.md` |
 | 0.6 · pedidos ao contrato de fio | depois da 0.2 e da medição 3 | `F4/pedidos-ao-fio.md` |
 
@@ -46,3 +46,28 @@ publicado.
 
   À parte: o `crypto.subtle.verify` do WebKit recusa a própria assinatura
   sobre 0 bytes, e o `ed25519-dalek` a aceita. Não toca o produto.
+- **Medição 3 preparada** (`a3a79b1`). O spike do ALPN assina o longo e o
+  curto com uma chave só, ganha o controle A2, o MUDO e a porta FECHADA, e
+  registra cada conexão. A página do iPhone (`iphone.py`) foi percorrida no
+  Simulador pelo IP da LAN. Na bancada:
+  - a mesma chave abre nos dois navegadores, e 500 hashes também;
+  - no Safari, a recusa e a porta fechada chegam iguais (3–7 ms, erro sem
+    texto); o silêncio leva 30 s;
+  - o servidor desiste de um navegador morto em 24,6 s (os 20 s mais o
+    keepalive).
+- **O spike dos MODs** (candidatas A, B e AB, no Chromium 151 e no Safari do
+  Simulador, com o navegador fechado entre as duas fases):
+  - **A e AB passam nos cinco critérios.** Nenhuma canária tocou, nada
+    sobreviveu, a página não travou (13 ms no pior caso), e o laço sem fim e a
+    memória foram cortados;
+  - **B reprova em rede e em API**: 8 pacotes STUN saem pela CSP nos dois
+    navegadores, e o `webrtc 'block'` é ignorado pelos dois. A página trava
+    3 s, e a memória não tem teto;
+  - **recomendação: AB**;
+  - **três achados para o produto**:
+    - no `wasm32-wasip1`, o teto de memória do QuickJS não existe sem o
+      `RustAllocator`: o MOD alocou 128 MiB com o teto de 8 MiB;
+    - o prelúdio pressupõe as voltas do anfitrião;
+    - o `build.rs` do `rquickjs-sys` baixa o wasi-sdk sem checksum.
+- O plano ganhou a regra «na tela, nunca linha» (aviso da orquestradora, vindo
+  da F6) e a forma AB na Tarefa 3.2.
