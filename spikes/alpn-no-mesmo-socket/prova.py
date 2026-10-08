@@ -1,79 +1,164 @@
 #!/usr/bin/env python3
-"""Chromium contra um quinn::Endpoint com dois ALPNs. Descartável."""
-import http.server, json, subprocess, sys, threading, pathlib
-from playwright.sync_api import sync_playwright
+"""A bancada da medição 3, em localhost: Chromium e Safari do Simulador. Descartável.
+
+    cargo build --release
+    python3 prova.py chromium      # os casos 1 a 3, e o ocioso medido matando o navegador
+    python3 prova.py safari-sim    # os casos 1 a 3 no Safari do Simulador (um simulador ligado)
+
+O binário sobe os endpoints (A, A2, B, MUDO e a porta FECHADA) e registra cada
+conexão no stderr. A página `bancada.html` roda os casos de `casos.js` e manda o
+resultado por POST. «Ninguém» é o 192.0.2.1 (TEST-NET-1), que não responde.
+"""
+import http.server, json, os, pathlib, signal, subprocess, sys, tempfile, threading, time
 
 AQUI = pathlib.Path(__file__).resolve().parent
-bin_ = AQUI / "target" / "release" / "alpn-demux"
-srv = subprocess.Popen([str(bin_)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-linha = srv.stdout.readline()
-cfg = json.loads(linha)
-print("servidor:", cfg)
+BIN = AQUI / "target" / "release" / "alpn-demux"
+PORTA = 8091
 
-class H(http.server.SimpleHTTPRequestHandler):
+srv = subprocess.Popen([str(BIN)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+cfg = json.loads(srv.stdout.readline())
+cfg["host"] = "127.0.0.1"
+cfg["ninguem"] = "192.0.2.1"
+servidor = []  # (hora local, evento)
+
+
+def ler_stderr():
+    for linha in srv.stderr:
+        try:
+            servidor.append((time.monotonic(), json.loads(linha)))
+        except json.JSONDecodeError:
+            servidor.append((time.monotonic(), {"texto": linha.rstrip()}))
+
+
+threading.Thread(target=ler_stderr, daemon=True).start()
+
+recebido = {}
+eventos = []
+
+
+class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200); self.send_header("content-type", "text/html"); self.end_headers()
-        self.wfile.write(b"<!doctype html><title>t</title>")
-    def log_message(self, *a): pass
+        caminho = self.path.split("?")[0]
+        if caminho == "/cfg":
+            corpo, tipo = json.dumps(cfg).encode(), "application/json"
+        elif caminho == "/casos.js":
+            corpo, tipo = (AQUI / "casos.js").read_bytes(), "text/javascript; charset=utf-8"
+        else:
+            corpo, tipo = (AQUI / "bancada.html").read_bytes(), "text/html; charset=utf-8"
+        self.send_response(200)
+        self.send_header("content-type", tipo)
+        self.send_header("cache-control", "no-store")
+        self.end_headers()
+        self.wfile.write(corpo)
 
-httpd = http.server.HTTPServer(("127.0.0.1", 0), H)
+    def do_POST(self):
+        n = int(self.headers.get("content-length", 0))
+        corpo = json.loads(self.rfile.read(n))
+        if self.path.startswith("/evento"):
+            eventos.append((time.monotonic(), corpo))
+        else:
+            recebido[corpo["nav"]] = corpo
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+httpd = http.server.ThreadingHTTPServer(("127.0.0.1", PORTA), H)
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
-JS = """
-async ({porta, hash, rotulo}) => {
-  const r = {rotulo};
-  const hs = hash.split(',').map(h => ({algorithm: 'sha-256', value: new Uint8Array(h.match(/../g).map(x => parseInt(x, 16)))}));
-  r.quantos_hashes = hs.length;
-  const t0 = performance.now();
-  let wt;
-  try {
-    wt = new WebTransport(`https://127.0.0.1:${porta}/seele/1`, {
-      serverCertificateHashes: hs,
-    });
-    await wt.ready;
-    r.abriu_ms = Math.round(performance.now() - t0);
-  } catch (e) { r.erro = String(e); r.ms = Math.round(performance.now() - t0); return r; }
-  // datagrama de eco
-  const w = wt.datagrams.writable.getWriter();
-  const rd = wt.datagrams.readable.getReader();
-  await w.write(new Uint8Array([8, 1, 2, 3, 4]));
-  const d = await Promise.race([rd.read(), new Promise(res => setTimeout(() => res(null), 3000))]);
-  r.datagrama_eco = d && d.value ? Array.from(d.value) : null;
-  r.maxDatagramSize = wt.datagrams.maxDatagramSize;
-  // quadro de 4 bytes BE + corpo num fluxo bidirecional
-  const s = await wt.createBidirectionalStream();
-  const sw = s.writable.getWriter();
-  const corpo = new TextEncoder().encode('\\x08ola');
-  const q = new Uint8Array(4 + corpo.length);
-  new DataView(q.buffer).setUint32(0, corpo.length);
-  q.set(corpo, 4);
-  await sw.write(q); await sw.close();
-  const sr = s.readable.getReader(); let tudo = [];
-  while (true) { const {value, done} = await sr.read(); if (done) break; tudo.push(...value); }
-  r.quadro_eco_ok = JSON.stringify(tudo) === JSON.stringify(Array.from(q));
-  wt.close();
-  return r;
-}
-"""
 
-def adulterar(h):
-    b = bytearray.fromhex(h); b[0] ^= 1; return b.hex()
+def esperar(nav, prazo=400):
+    fim = time.time() + prazo
+    while time.time() < fim and nav not in recebido:
+        time.sleep(0.5)
+    return recebido.get(nav, {"erro": f"nada voltou em {prazo} s"})
 
-casos = [
-    ("A h3, hash do curto", cfg["porta_a"], cfg["curto"]),
-    ("A h3, hash do curto com um bit trocado", cfg["porta_a"], adulterar(cfg["curto"])),
-    ("A h3, hash do longo (o servidor apresenta o curto)", cfg["porta_a"], cfg["longo"]),
-    ("A h3, 60 hashes, o certo por último", cfg["porta_a"], ",".join([__import__('os').urandom(32).hex() for _ in range(59)] + [cfg["curto"]])),
-    ("B h3, só o longo (1975-4096), hash certo", cfg["porta_b"], cfg["longo"]),
-]
-with sync_playwright() as p:
-    nav = p.chromium.launch()
-    pag = nav.new_page()
-    pag.goto(f"http://localhost:{httpd.server_address[1]}/")
-    print("navegador:", nav.version)
-    for rotulo, porta, h in casos:
-        print(json.dumps(pag.evaluate(JS, {"porta": porta, "hash": h, "rotulo": rotulo}), ensure_ascii=False))
-    nav.close()
+
+def ocioso_do_chromium():
+    """Abre uma sessão no A, mata o navegador sem fechar nada e mede quando o
+    servidor desiste. Sem CONNECTION_CLOSE, só o ocioso de 20 s fecha."""
+    from playwright.sync_api import sync_playwright
+    perfil = tempfile.mkdtemp(prefix="medicao3-ocioso-")
+    antes = len(servidor)
+    p = sync_playwright().start()
+    ctx = p.chromium.launch_persistent_context(perfil)
+    ctx.pages[0].goto(f"http://localhost:{PORTA}/?modo=ficar&nav=chromium-ocioso")
+    fim = time.time() + 30
+    aberta = None
+    while time.time() < fim and aberta is None:
+        for t, e in servidor[antes:]:
+            if e.get("ev") == "aberta" and e.get("ponto") == "A":
+                aberta = (t, e)
+        time.sleep(0.2)
+    pids = [int(x) for x in subprocess.run(["pgrep", "-f", perfil], capture_output=True, text=True).stdout.split()]
+    if not aberta or not pids:
+        ctx.close(); p.stop()
+        return {"erro": f"a sessão não abriu em 30 s (pids {pids})"}
+    time.sleep(3)  # alguns pings vão e voltam
+    morto = time.monotonic()
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        p.stop()
+    except Exception:
+        pass
+    fim = time.time() + 60
+    while time.time() < fim:
+        for t, e in servidor:
+            if t > morto and e.get("ev") == "fechou" and e.get("de") == aberta[1]["de"]:
+                return {"processos_mortos": len(pids), "servidor_fechou_depois_de_s": round(t - morto, 2),
+                        "motivo": e.get("motivo"), "durou_ms": e.get("durou_ms")}
+        time.sleep(0.2)
+    return {"erro": "o servidor não fechou em 60 s depois de o navegador morrer"}
+
+
+def resumo(r):
+    print(f"\n== {r.get('nav')} · {r.get('ua', '')}")
+    if r.get("erro"):
+        print("ERRO:", r["erro"])
+        return
+    for grupo in ("basicos", "lista", "fora"):
+        print(f"-- {grupo}")
+        for c in r.get(grupo, []):
+            estado = "ABRIU" if c.get("abriu") else "recusado/sem resposta"
+            extra = f"datagrama={c.get('datagrama_eco')} quadro={c.get('quadro_eco')} max={c.get('maxDatagramSize')}" if c.get("abriu") else c.get("erro", "")
+            print(f"   {c['rotulo']:<52} {estado:<22} {c.get('ms')} ms  {extra}")
+
+
+navs = sys.argv[1:] or ["chromium"]
+(AQUI / "resultados").mkdir(exist_ok=True)
+for nav in navs:
+    url = f"http://localhost:{PORTA}/?modo=bancada&nav={nav}&t={int(time.time())}"
+    if nav == "chromium":
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page()
+            pg.goto(url)
+            r = esperar(nav)
+            r["navegador"] = b.version
+            b.close()
+        r["ocioso"] = ocioso_do_chromium()
+    elif nav == "safari-sim":
+        subprocess.run(["xcrun", "simctl", "openurl", "booted", url], check=True)
+        r = esperar(nav)
+    else:
+        raise SystemExit(f"navegador desconhecido: {nav}")
+    r["cfg"] = cfg
+    r["servidor"] = [e for _, e in servidor]
+    (AQUI / "resultados" / f"{nav}.json").write_text(json.dumps(r, ensure_ascii=False, indent=1))
+    resumo(r)
+    if "ocioso" in r:
+        print("-- ocioso (navegador morto sem fechar):", r["ocioso"])
+
 srv.terminate()
-print("--- stderr do servidor ---")
-print(srv.stderr.read())
+httpd.shutdown()
+print("\n-- o que o servidor viu fechar ou falhar")
+for _, e in servidor:
+    if e.get("ev") in ("falhou", "fechou", "mudo_primeiro_pacote", "cliente_seele1"):
+        print("  ", json.dumps(e, ensure_ascii=False))

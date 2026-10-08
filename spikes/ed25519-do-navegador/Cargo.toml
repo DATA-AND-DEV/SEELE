@@ -1,0 +1,14 @@
+[package]
+name = "spike-ed25519-do-navegador"
+description = "Medição 1 do ADR 0057: a assinatura Ed25519 do WebCrypto passa no verify do seeled? DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Fora do workspace, como os outros spikes. O `Cargo.lock` é cópia do da raiz:
+# o `ed25519-dalek` e o `curve25519-dalek` são os que o `seeled` usa (3.0.0 e
+# 5.0.0), e com outra versão a medida diria outra coisa.
+[workspace]
+
+[dependencies]
+ed25519-dalek = "=3.0.0"
