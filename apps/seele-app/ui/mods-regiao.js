@@ -2569,6 +2569,13 @@ class RegiaoDeMod {
     // Antes de qualquer `await`: dois destinos que chegam juntos não podem os
     // dois achar a marca vaga. Os outros guardam o adiamento: a marca pode
     // voltar, e um deles tomá-la (`tomarOsSonsDevolvidos`).
+    //
+    // **O que o adiamento segura.** Do pacote, só o caminho: os bytes vêm de
+    // `som_do_mod` no pedido de tocar. Do servidor do MOD, o `data:` que
+    // `midia_em_bytes` devolveu (`origem.uri`), em cada destino até ele sair:
+    // é o que um destino que tome a marca decodifica, sem pedir de novo ao
+    // servidor. É o mesmo que a imagem do servidor segura no `src` de cada
+    // destino, e o teto de bytes de cada um já o conta (`montarMidia`).
     if (this.sonsDaContribuicao) {
       entrada.adiado = montagem;
       if (!this.tomouOsSons) {
