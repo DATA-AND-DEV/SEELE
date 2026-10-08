@@ -9751,6 +9751,104 @@ fn a_ajuda_escreve_a_tecla_de_falar_que_esta_gravada() {
     );
 }
 
+#[test]
+fn ha_um_aviso_de_fone_em_algum_lugar_que_a_pessoa_le() {
+    // O SEELE não cancela eco: o ADR 0007 tirou DSP em C/C++ do v1 e fez do fone
+    // um requisito escrito. Escrito em `docs/`, que ninguém que entra numa sala
+    // de voz lê. Sem fone, o alto-falante volta para o microfone, e quem sofre
+    // é o outro lado — que ouve a própria voz de volta e não tem como saber de
+    // onde ela vem. «O produto sabe e não conta», na forma mais cara: o
+    // defeito aparece na máquina de quem não fez nada de errado.
+    //
+    // Três lugares, e cada um por uma razão: a faixa, no momento em que passa a
+    // valer; a ajuda, que é onde se procura depois; e CONFIGURAÇÕES · MICROFONE
+    // E SOM, que é onde se vai quando o som está estranho. A mesma frase nos
+    // três, lida de `frases.js`.
+    const FRASE: &str = "USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala \
+                         com você se ouve de volta.";
+
+    let frases = without_comments(&read("ui/frases.js"));
+    let escrita = frases
+        .split("const AVISO_DE_FONE =")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .map(literals_in)
+        .unwrap_or_default();
+    assert_eq!(
+        escrita, FRASE,
+        "`frases.js` não tem mais o aviso de fone, ou o diz com outras palavras; \
+         quem entra numa sala de voz sem fone faz o outro lado ouvir a própria \
+         voz de volta sem saber por quê"
+    );
+
+    // A faixa: desenhada a cada quadro, acesa ao entrar numa sala de voz.
+    let sessao = read("ui/tela-sessao.js");
+    let desenhar = js_function(&sessao, "function desenhar(");
+    assert!(
+        desenhar.contains("desenharAvisoDeFone(snapshot)"),
+        "o desenho da sessão não passa mais pelo aviso de fone, então a faixa \
+         nunca acende:\n{desenhar}"
+    );
+    let aviso = js_function(&sessao, "function desenharAvisoDeFone(");
+    assert!(
+        aviso.contains("occupied_by_us"),
+        "o aviso de fone não espera a entrada numa sala de voz: ele aparece \
+         para quem só lê um canal, e já se apagou quando a voz começa:\n{aviso}"
+    );
+    assert!(
+        aviso.contains("$(\"aviso-fone-texto\").textContent = AVISO_DE_FONE"),
+        "a faixa de fone não escreve a frase de `frases.js`, e ela e a ajuda \
+         passam a poder discordar:\n{aviso}"
+    );
+    // Por execução: zerada ao trocar de servidor, a faixa voltaria a cada
+    // sessão, e um aviso repetido é um aviso que se aprende a fechar sem ler.
+    let sem_comentario = without_comments(&sessao);
+    assert_eq!(
+        sem_comentario.matches("foneJaAvisado = false").count(),
+        1,
+        "a marca do aviso de fone é zerada em algum lugar além da declaração; ele \
+         é da primeira entrada numa sala de voz desta execução, e não de cada \
+         sessão"
+    );
+    assert!(
+        sem_comentario.contains("$(\"aviso-fone-fechar\").addEventListener(\"click\""),
+        "a faixa de fone não se fecha: ela fica sobre a sessão inteira de quem já \
+         leu e já está de fone"
+    );
+
+    // E os dois lugares onde ela continua escrita depois de fechada.
+    let pagina = without_comments(&read("ui/index.html"));
+    for (id, onde) in [
+        ("ajuda-aviso-fone", "a ajuda"),
+        ("server-aviso-fone", "CONFIGURAÇÕES · MICROFONE E SOM"),
+    ] {
+        let Some(texto) = pagina
+            .split(&format!("id=\"{id}\""))
+            .nth(1)
+            .and_then(|resto| resto.split_once('>'))
+            .and_then(|(_, resto)| resto.split('<').next())
+        else {
+            panic!("{onde} não tem mais o aviso de fone (`#{id}`)");
+        };
+        assert_eq!(
+            texto.split_whitespace().collect::<Vec<_>>().join(" "),
+            FRASE,
+            "{onde} diz o aviso de fone com outras palavras, ou não o diz; quem \
+             procura ali depois de fechar a faixa lê outra coisa"
+        );
+    }
+    let audio = pagina
+        .split("id=\"painel-audio\"")
+        .nth(1)
+        .and_then(|resto| resto.split("id=\"painel-atalhos\"").next())
+        .unwrap_or_default();
+    assert!(
+        audio.contains("id=\"server-aviso-fone\""),
+        "o aviso de fone da configuração saiu de MICROFONE E SOM, que é onde se vai \
+         quando o som está estranho"
+    );
+}
+
 /// A `<section id="tela-boot">` inteira, sem comentário.
 ///
 /// O corte é na tela seguinte e não no primeiro `</section>`, e a diferença não

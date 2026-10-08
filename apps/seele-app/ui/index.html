@@ -726,6 +726,25 @@
   </div>
 
   <!--
+    O aviso de fone, na primeira entrada numa sala de voz desta execução.
+
+    O SEELE não cancela eco, e quem paga a falta do fone é o outro lado: ouve a
+    própria voz de volta. A frase é `AVISO_DE_FONE`, de `frases.js`, e
+    `desenharAvisoDeFone` a escreve; a ajuda e MICROFONE E SOM a repetem.
+
+    As classes do veredito, e é a mesma coisa que ele: uma ressalva, e não uma
+    queda — laranja e `role="status"`, nunca o vermelho do banner. Uma folha
+    própria seria uma segunda faixa idêntica esperando para divergir desta.
+
+    Aqui, e não dentro de `<main>`: a faixa fica de pé na conversa e na
+    chamada, que é para onde a entrada na sala leva.
+  -->
+  <div id="aviso-fone" class="veredito" role="status" hidden>
+    <span id="aviso-fone-texto" class="veredito-texto"></span>
+    <button id="aviso-fone-fechar" class="botao-fantasma" type="button">dispensar</button>
+  </div>
+
+  <!--
     A queda, e o período de graça que ela abre. `specs/07-estetica.md` é
     explícito: o cliente não fecha nem mostra um spinner. A interface esmaece,
     conta cinco minutos, e o histórico continua ali para leitura. Por isso isto é
@@ -2767,6 +2786,17 @@
 
             </div>
             <div class="server-bloco-corpo">
+              <!--
+                O aviso de fone, com as palavras da faixa que acende ao entrar
+                numa sala de voz (`AVISO_DE_FONE`, em `frases.js`). Na saída
+                porque o eco nasce nela: é o alto-falante voltando para o
+                microfone. E primeiro no bloco, antes da lista de aparelhos,
+                porque nenhum aparelho daquela lista cancela eco.
+              -->
+              <div class="server-campo">
+                <h4 class="rotulo">FONE</h4>
+                <p id="server-aviso-fone" class="server-frase">USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.</p>
+              </div>
               <div class="server-campo">
                 <h4 class="rotulo">DISPOSITIVO DE SAÍDA</h4>
                 <!--
@@ -3947,6 +3977,13 @@
           <dd class="ajuda-diz">Quanto da sua voz está chegando inteira do outro lado.</dd>
           <dt class="ajuda-termo">CONEXÃO SEGURA</dt>
           <dd class="ajuda-diz">O aperto de mão foi até o fim: o caminho é cifrado e a chave do servidor confere.</dd>
+          <!--
+            A frase da faixa que acende ao entrar numa sala de voz, igual a
+            `AVISO_DE_FONE` de `frases.js`. A faixa se fecha e não volta nesta
+            execução; aqui ela continua escrita para quem a fechou.
+          -->
+          <dt class="ajuda-termo">FONE</dt>
+          <dd id="ajuda-aviso-fone" class="ajuda-diz">USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.</dd>
         </dl>
       </section>
 
