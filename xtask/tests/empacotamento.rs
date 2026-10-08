@@ -698,6 +698,18 @@ case "$*" in
         fi
         exit 0
         ;;
+    # O sondar do portão do ENC/2 (D-enc-2). O de verdade fala com o ponto de
+    # produção, e nenhum teste fala com ele: este diz o que o de verdade diz.
+    *'--example sondar'*)
+        if [ "${FALSO_SONDAR:-fala}" != fala ]; then
+            echo '  IPv4  203.0.113.7:8384  respondeu'
+            echo '          o ENC/2: mudo — é um ponto anterior ao ENC/2, e quem liga pelo código não acha ninguém nele'
+            exit 1
+        fi
+        echo '  IPv4  203.0.113.7:8384  respondeu'
+        echo '          o ENC/2: fala — MORO2, QUEM2 e NINGUEM responderam, e o relógio do ponto difere do daqui em 0 s'
+        exit 0
+        ;;
     *'tauri signer sign'*)
         if [ "${FALSO_ASSINATURA:-ok}" != ok ]; then
             echo 'Error failed to decode base64 secret key' >&2
@@ -4507,5 +4519,205 @@ fn uma_assinatura_que_nao_sai_para_a_publicacao_em_vez_de_seguir() {
         saida.corpos.is_empty(),
         "nada podia ter sido enviado ao GitHub depois de a assinatura falhar:\n{}",
         saida.corpos
+    );
+}
+
+// ---------------------------------------------------------------------------
+// O portão do ENC/2 (D-enc-2, decidido pelo dono em 08/10/2026; ADR 0062)
+// ---------------------------------------------------------------------------
+
+/// A chamada do sondar que o portão faz, como o dublê do `cargo` a anota.
+const SONDAR_DO_PORTAO: &str = "--example sondar -- --exige-enc2 encontro.seele.app.br";
+
+/// **Um ponto sem o ENC/2 para a publicação, antes de qualquer conferência com
+/// efeito.** O ADR 0047 foram dez dias de recurso morto por um binário velho na
+/// VPS: o app pergunta, e ninguém do outro lado entende. Na 0.16 isso deixa
+/// todo código do mundo sem achar ninguém, e o portão existe para essa
+/// publicação não sair.
+#[test]
+fn um_ponto_sem_o_enc2_para_a_publicacao_antes_de_qualquer_pergunta_com_efeito() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SONDAR", "mudo")]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "o ponto em produção não fala o ENC/2 e as conferências passaram:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("tudo conferido"),
+        "com o ponto sem o ENC/2, as conferências deram o veredito:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("não fala o ENC/2") && saida.texto.contains("o ENC/2: mudo"),
+        "a recusa não diz o que falta, nem o que o sondar viu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.diario.contains(SONDAR_DO_PORTAO),
+        "o portão não perguntou ao ponto padrão pelo sondar com --exige-enc2:\n{}",
+        saida.diario
+    );
+    for pergunta in ["ssh", "docker", "curl"] {
+        assert!(
+            !saida.diario.contains(pergunta),
+            "a recusa veio depois de perguntar ao «{pergunta}», que é uma conferência \
+             com efeito ou cara:\n{}",
+            saida.diario
+        );
+    }
+}
+
+#[test]
+fn o_ponto_que_fala_o_enc2_deixa_a_publicacao_seguir_e_diz_o_que_o_sondar_viu() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "com o ponto falando o ENC/2, as conferências reprovaram:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("tudo conferido"),
+        "faltou o veredito das conferências:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.diario.contains(SONDAR_DO_PORTAO),
+        "as conferências passaram sem perguntar ao ponto:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.texto.contains("relógio do ponto difere do daqui"),
+        "o portão passou e não mostrou o que o sondar viu, o relógio inclusive:\n{}",
+        saida.texto
+    );
+}
+
+/// O `--sem-ponto` existe para a emergência que não depende do ponto, e ele
+/// **diz**: no terminal e no corpo do release, como o `--sem-bateria`. Quem
+/// baixa não vê o terminal de quem publica.
+#[test]
+fn o_sem_ponto_nao_pergunta_e_o_corpo_do_release_diz() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria", "--sem-ponto"],
+        &[("FALSO_SONDAR", "mudo")],
+    );
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar com --sem-ponto:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.diario.contains("--example sondar"),
+        "o --sem-ponto perguntou ao ponto assim mesmo:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.texto.contains("NÃO conferido"),
+        "o --sem-ponto não gritou no terminal de quem publica:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.corpos.contains("saiu com --sem-ponto"),
+        "o corpo do release de uma versão que não conferiu o ponto não diz isso:\n{}",
+        saida.corpos
+    );
+}
+
+#[test]
+fn o_corpo_de_uma_versao_com_o_ponto_conferido_diz_isso() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .corpos
+            .contains("Ponto de encontro: conferido antes de publicar"),
+        "o corpo do release não diz que o ponto foi conferido:\n{}",
+        saida.corpos
+    );
+}
+
+/// A linha do corpo, sozinha, sem disco nem rede, como a da bateria.
+fn linha_do_ponto(argumentos: &[&str]) -> (i32, String) {
+    let saida = Command::new(interpretador())
+        .arg(publicar())
+        .arg("--linha-do-ponto")
+        .args(argumentos)
+        .output()
+        .expect("o orquestrador tem que executar");
+    (
+        saida.status.code().unwrap_or(-1),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&saida.stdout),
+            String::from_utf8_lossy(&saida.stderr)
+        ),
+    )
+}
+
+#[test]
+fn a_linha_do_ponto_diz_se_ele_foi_conferido() {
+    let (estado, conferido) = linha_do_ponto(&[]);
+    assert_eq!(estado, 0, "a linha do ponto não saiu:\n{conferido}");
+    assert!(
+        conferido.contains("Ponto de encontro: conferido antes de publicar"),
+        "a linha não diz que o ponto foi conferido:\n{conferido}"
+    );
+    let (_, pulado) = linha_do_ponto(&["--sem-ponto"]);
+    assert!(
+        pulado.contains("**Esta versão saiu com --sem-ponto:"),
+        "uma versão que não conferiu o ponto não diz isso na página:\n{pulado}"
+    );
+    assert!(
+        !pulado.contains("conferido antes de publicar"),
+        "uma versão que não conferiu o ponto diz que conferiu:\n{pulado}"
+    );
+    let (_, legada) = linha_do_ponto(&["--linha-legada"]);
+    assert!(
+        legada.trim().is_empty(),
+        "a linha legada não fala o ENC/2, e a página dela falou do ponto:\n{legada}"
+    );
+}
+
+/// A linha legada (um conserto do Servidor 0.15) não fala o ENC/2: o ponto sem
+/// ele não a impede de sair, e ela nem pergunta.
+#[test]
+fn a_linha_legada_nao_confere_o_enc2() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--conferir", "--linha-legada"],
+        &[("FALSO_SONDAR", "mudo")],
+    );
+
+    assert_eq!(
+        saida.estado, 0,
+        "a linha legada foi barrada pelo portão do ENC/2, que não é dela:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.diario.contains("--example sondar"),
+        "a linha legada perguntou ao ponto pelo ENC/2:\n{}",
+        saida.diario
     );
 }
