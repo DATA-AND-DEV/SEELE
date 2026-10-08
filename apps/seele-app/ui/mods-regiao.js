@@ -2742,6 +2742,26 @@ class RegiaoDeMod {
       } else {
         const midia = await this.dono.carregarMidiaDoServidor(...pedidoAoServidor(plano.no.doServidor ?? {}));
         if (midia?.papel !== "som") throw new Error("o servidor do MOD não devolveu um som no pedido de tocar");
+        if (!deAlguem() || !this.dono.podeFalar()) return;
+        // **A conta do teto de bytes é a da resposta nova**, e não a da
+        // montagem: o servidor do MOD pode ter mudado o arquivo nesse meio
+        // tempo. A recusa, quando não cabe, é a de `montarMidia`.
+        const { conta, teto } = estado.bolso;
+        const novos = Number.isFinite(midia.bytes) && midia.bytes >= 0 ? midia.bytes : estado.bytes;
+        const dosOutros = this[conta] - estado.bytes;
+        if (dosOutros + novos > teto) {
+          const porque = `${novos} bytes somados aos ${dosOutros} já montados passam do teto de ${teto}`;
+          const motivo = `passou do teto de ${teto} bytes de mídia deste lugar`;
+          const recusado = this.somDaMidia.get(elem);
+          if (recusado) recusado.recusa = { figura: "cheia", motivo };
+          elem.dataset.estado = "cheia";
+          this.anotarMidia(elem, "recusada", motivo);
+          this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
+          this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
+          return;
+        }
+        this[conta] = dosOutros + novos;
+        estado.bytes = novos;
         bytes = bufferDaUri(midia.uri);
       }
     } catch (falha) {

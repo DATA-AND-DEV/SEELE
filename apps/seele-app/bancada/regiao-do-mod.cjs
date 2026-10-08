@@ -5126,6 +5126,53 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
     for (const r of destinos) r.soltar();
   }
 
+  // **O pedido de novo ao servidor conta o tamanho da resposta nova** (rodada
+  // 2, o opcional): o teto de bytes do destino que toma a marca usa o que
+  // chegou agora, e não o que chegou na montagem — e recusa como a montagem
+  // recusa, quando a resposta nova não cabe.
+  for (const [nome, novos] of [["maior", 20], ["acima do teto", 21 * 1024 * 1024]]) {
+    const resposta = `${caso} · a resposta nova do servidor, ${nome}`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let pedidos = 0;
+    const d = dono(b, () => {
+      pedidos += 1;
+      return Promise.resolve({ uri: "data:audio/wav;base64,UklGRgAAAABXQVZF", papel: "som", bytes: pedidos > 2 ? novos : 12 });
+    });
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    tomou?.raiz.remove();
+    varrer();
+    await assentar();
+    const figura = todasAsTags(outro?.raiz, "figure")[0]?.dataset.estado;
+    const recusas = d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada");
+    const esperado = novos === 20
+      ? figura === "pronta" && outro?.bytesDeCartao === 20 && recusas.length === 0
+      : figura === "cheia" && outro?.bytesDeCartao === 12 && recusas.length === 1 && /teto/.test(recusas[0]?.porque ?? "");
+    confere(
+      resposta,
+      pedidos === 3 && esperado,
+      "o destino que tomou a marca pediu o som de novo ao servidor e não contou o tamanho da resposta nova no teto "
+        + `de bytes: ${pedidos} pedido(s), figura «${figura}», ${outro?.bytesDeCartao} bytes contados, recusas `
+        + `${JSON.stringify(recusas)}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
   // O destino que toma a marca pede o som de novo ao servidor.
   {
     const montado = contribuicao({}, true);
