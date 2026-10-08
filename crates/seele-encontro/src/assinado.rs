@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use seele_proto::codigo::Codigo;
@@ -29,6 +29,14 @@ pub const PRAZO_DO_REGISTRO: Duration = Duration::from_secs(60);
 /// Duas por app aberto da 0.16, que registra a sala sempre: cerca de 8 000 apps.
 /// Cada registro custa perto de 280 bytes com o mapa, então o quarto cheio
 /// custa uns 4,6 MB. Separado das 4096 marcas do quarto da versão 1.
+///
+/// **O teto conta os registros vivos.** Um registro vencido continua lembrado
+/// enquanto o carimbo dele passaria na tolerância, e o carimbo pode vir até
+/// 300 s no futuro: contado no teto, cada `MORO2` seguraria a vaga por ~600 s,
+/// e quatro IPv4 a 8 pedidos por segundo encheriam o quarto para sempre
+/// (medido na revisão de 08/10/2026). Com o quarto no teto, os só lembrados
+/// saem antes de um registro novo ouvir «cheio». O preço é perder, sob pressão,
+/// a lembrança que recusa a repetição de um `MORO2` copiado no caminho.
 pub const MARCAS_ASSINADAS: usize = 16_384;
 
 /// Se este `MORO2` é de quem tem a chave: a marca é a escuta ou o servidor da
@@ -141,12 +149,7 @@ impl QuartoAssinado {
         if pedido.carimbo.abs_diff(agora_unix) > TOLERANCIA_DO_CARIMBO {
             return Err(Motivo::Relogio);
         }
-        // Um `Mutex` envenenado é um pânico noutra linha de execução com o
-        // quarto na mão. Recusar como cheio é dizer a verdade a quem pediu: o
-        // quarto não tem onde guardar.
-        let Ok(mut registros) = self.registros.lock() else {
-            return Err(Motivo::Cheio);
-        };
+        let mut registros = self.trancar();
         let novo = || Registro {
             endereco: de,
             desde: agora,
@@ -173,7 +176,12 @@ impl QuartoAssinado {
             Some(_) => return Err(Motivo::Velho),
             None => {
                 if !registros.contains_key(marca) && registros.len() >= self.teto {
+                    // Primeiro o que nem é mais lembrado; depois, se ainda não
+                    // couber, o que só é lembrado. Os vivos ficam.
                     registros.retain(|_, registro| registro.lembrado(agora, agora_unix));
+                    if registros.len() >= self.teto {
+                        registros.retain(|_, registro| registro.vale(agora));
+                    }
                     if registros.len() >= self.teto {
                         return Err(Motivo::Cheio);
                     }
@@ -191,7 +199,7 @@ impl QuartoAssinado {
         marca: &Marca,
         agora: Instant,
     ) -> Option<(SocketAddr, Vec<SocketAddr>)> {
-        let registros = self.registros.lock().ok()?;
+        let registros = self.trancar();
         let registro = registros
             .get(marca.texto())
             .filter(|registro| registro.vale(agora))?;
@@ -202,7 +210,19 @@ impl QuartoAssinado {
     /// inclusive. Para o teste.
     #[must_use]
     pub fn quantos(&self) -> usize {
-        self.registros.lock().map_or(0, |registros| registros.len())
+        self.trancar().len()
+    }
+
+    /// O mapa, mesmo com o `Mutex` envenenado.
+    ///
+    /// Um pânico noutra linha com o quarto na mão envenena o `Mutex`, e o mapa
+    /// não fica inconsistente: cada operação aqui é inteira. Recusar daí em
+    /// diante como cheio, ou dizer `NINGUEM` para toda marca, seria mentir para
+    /// sempre a quem pergunta.
+    fn trancar(&self) -> MutexGuard<'_, HashMap<String, Registro>> {
+        self.registros
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -572,6 +592,98 @@ mod testes {
             quarto.quantos() <= 2,
             "o quarto passou do teto: {}",
             quarto.quantos()
+        );
+    }
+
+    #[test]
+    fn um_registro_so_lembrado_nao_segura_vaga_contra_um_novo() {
+        // O achado da revisão de 08/10: um registro conta enquanto o carimbo
+        // passaria na tolerância, e o carimbo pode vir 300 s no futuro. Contado
+        // assim, um MORO2 só segurava a vaga por ~600 s, e quatro IPv4 enchiam
+        // o quarto para sempre. O teto conta os registros **vivos**: um
+        // registro só lembrado (vencido, guardado contra a repetição) cede a
+        // vaga a um registro novo.
+        let quarto = QuartoAssinado::com_teto(2);
+        let agora = Instant::now();
+        quarto
+            .morar(
+                &do_servidor(&chave(1), AGORA + 300, Vec::new()),
+                em(A, 1),
+                agora,
+                AGORA,
+            )
+            .unwrap();
+        quarto
+            .morar(
+                &do_servidor(&chave(2), AGORA, Vec::new()),
+                em(A, 2),
+                agora,
+                AGORA,
+            )
+            .unwrap();
+
+        let depois = agora + PRAZO_DO_REGISTRO + Duration::from_secs(1);
+        assert_eq!(
+            quarto.morar(
+                &do_servidor(&chave(3), AGORA + 61, Vec::new()),
+                em(A, 3),
+                depois,
+                AGORA + 61
+            ),
+            Ok(()),
+            "dois registros vencidos, só lembrados, seguraram o quarto contra um registro vivo"
+        );
+        assert!(
+            quarto.quantos() <= 2,
+            "o quarto passou do teto: {}",
+            quarto.quantos()
+        );
+
+        // Com o quarto cheio de vivos, continua «cheio».
+        assert_eq!(
+            quarto.morar(
+                &do_servidor(&chave(4), AGORA + 61, Vec::new()),
+                em(A, 4),
+                depois,
+                AGORA + 61
+            ),
+            Ok(()),
+            "havia um só lembrado, e ele não cedeu a vaga"
+        );
+        assert_eq!(
+            quarto.morar(
+                &do_servidor(&chave(5), AGORA + 61, Vec::new()),
+                em(A, 5),
+                depois,
+                AGORA + 61
+            ),
+            Err(Motivo::Cheio),
+            "com o quarto cheio de registros vivos, um novo entrou"
+        );
+    }
+
+    #[test]
+    fn um_mutex_envenenado_nao_cala_o_quarto() {
+        // Um pânico noutra linha com o quarto na mão envenena o `Mutex`. O mapa
+        // não fica inconsistente (cada operação é inteira), e recusar para
+        // sempre seria mentir: o quarto continua guardando.
+        let quarto = std::sync::Arc::new(QuartoAssinado::novo());
+        let outro = std::sync::Arc::clone(&quarto);
+        let _ = std::thread::spawn(move || {
+            let _guarda = outro.registros.lock().unwrap();
+            panic!("pânico de propósito, com o quarto na mão");
+        })
+        .join();
+        assert!(
+            quarto.registros.is_poisoned(),
+            "o teste não envenenou o Mutex"
+        );
+        let pedido = do_servidor(&chave(1), AGORA, Vec::new());
+        let agora = Instant::now();
+        assert_eq!(quarto.morar(&pedido, em(A, 1), agora, AGORA), Ok(()));
+        assert_eq!(
+            quarto.onde_mora(&pedido.marca, agora).map(|(onde, _)| onde),
+            Some(em(A, 1))
         );
     }
 
