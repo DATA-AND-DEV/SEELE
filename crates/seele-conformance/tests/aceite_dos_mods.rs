@@ -24,11 +24,11 @@
 //! habilitar um MOD não tranca a porta nem derruba a sala: é a regressão que a
 //! entrega do anúncio chegou a introduzir, e eles são o guarda dela.
 //!
-//! **E a janela de compatibilidade**, no fim: um par falando a versão anterior
-//! continua entrando num servidor sem MOD, e é recusado por um que exige MOD.
-//! O que estes testes **não** provam, de propósito, é que a última release
-//! publicada continue entrando — não continua, e a medida disso está em
-//! `seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`.
+//! **E a faixa do `Hello`**, no fim: um par que só fala a linha de antes da 1.0
+//! é recusado com `Incompatible`, e um que fala a mínima desta build recebe o
+//! anúncio antes de entrar. O que estes testes **não** provam, de propósito, é
+//! o lado do codec da release publicada — essa medida está em
+//! `seele_proto::control::a_publicada_ou_e_da_mesma_linha_ou_le_a_recusa_desta_build`.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
 

@@ -172,7 +172,9 @@ pub const PRIMEIRO_DA_LINHA_UM: u8 = 9;
 /// de 3 morre ali, com `PeerTooNew`. Um par v3 de verdade recebe o primeiro
 /// quadro de um servidor v5 e fecha — num servidor sem MOD nenhum, e com esta
 /// janela em 2 do mesmo jeito. Preso em
-/// `control.rs::a_release_publicada_recusa_o_carimbo_desta_build`.
+/// `control.rs::a_release_publicada_recusa_o_carimbo_desta_build`, que desde
+/// 08/10/2026 é `a_publicada_ou_e_da_mesma_linha_ou_le_a_recusa_desta_build` e
+/// mede contra a v0.15.1, e não contra o 3.
 ///
 /// Então o 2 não comprava nada que o 1 não comprasse: só deixava o par v3 morrer
 /// mais tarde, no meio do aperto de mão, em vez de receber `Incompatible` na

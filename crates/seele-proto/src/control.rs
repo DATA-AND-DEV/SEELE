@@ -3257,35 +3257,79 @@ mod tests {
         assert_eq!(frame.first(), Some(&PROTOCOL_VERSION));
     }
 
-    /// O outro lado da janela de compatibilidade, que é onde ela não chega.
+    /// A última release publicada, como ela lê o byte 0: a tag, o número que
+    /// ela fala e a janela dela.
     ///
-    /// `encode` carimba `PROTOCOL_VERSION` — o número **global**, não o
-    /// negociado — no primeiro byte de todo quadro, e o teste acima prende isso.
-    /// A consequência é este teste: a última release publicada, `v0.10.5-1`
-    /// (commit `12a6401a6`), traz este mesmo `decode`, e o `version.rs` de lá
-    /// tem `PROTOCOL_VERSION = 3` com `COMPATIBILITY_WINDOW = 1`. Ela aceita o
-    /// primeiro byte 2 ou 3 e recusa qualquer outro com `PeerTooNew`, **antes**
-    /// de olhar para o corpo.
+    /// **v0.15.1**, publicada em 08/10/2026 do commit `54f542f`, conferida pela
+    /// API de releases como manda o `CLAUDE.md`. No `version.rs` daquele commit,
+    /// `PROTOCOL_VERSION = 8` (`:124`) e `COMPATIBILITY_WINDOW = 1` (`:164`):
+    /// ela lê 7 e 8 no byte 0, e recusa o resto antes de olhar o corpo.
     ///
-    /// Então um par v3 de verdade não completa o aperto de mão com esta build,
-    /// por mais larga que seja a janela **daqui** — e nenhum teste que simule o
-    /// par velho só pelo campo `Hello.version` mede isso, porque nele os dois
-    /// lados são o mesmo codec.
+    /// **Este número estava em 3 até 08/10/2026** — o da `v0.10.5-1` —, e com
+    /// ele o guarda passava sem medir nada: nenhuma subida de 4 a 8 o fazia
+    /// reprovar, porque o 3 já estava fora da janela de todas. Quem publicar uma
+    /// versão de servidor nova atualiza esta linha (ADR 0058).
+    const PUBLICADA: (&str, u8, u8) = ("v0.15.1", 8, 1);
+
+    /// Se a publicada lê um quadro carimbado com `carimbo`.
+    fn a_publicada_le(carimbo: u8) -> bool {
+        let (_, protocolo, janela) = PUBLICADA;
+        (protocolo.saturating_sub(janela)..=protocolo).contains(&carimbo)
+    }
+
+    /// **A publicada ou é da mesma linha desta build e a lê, ou é de outra
+    /// linha e lê a recusa dela.**
+    ///
+    /// Os dois lados que o carimbo decide, medidos contra a release de verdade:
+    ///
+    /// - **mesma linha** (quando a publicada for uma 1.x): o `Hello` desta build
+    ///   sai carimbado com a mínima, e a publicada tem de lê-lo — é o «1.x nunca
+    ///   quebra o fio» do ADR 0058 do lado de quem já está em campo;
+    /// - **outra linha** (hoje, com a v0.15.1): a publicada **não** lê o `Hello`
+    ///   desta build — é a quebra decidida em 08/10/2026 —, e **lê** a recusa
+    ///   que esta build manda a ela, `[8, 11, 0]`, como `Disconnecting {
+    ///   Incompatible }`. É a frase «VERSÃO INCOMPATÍVEL» chegando a quem ficou
+    ///   na 0.15, em vez de «não foi possível alcançar».
+    ///
+    /// Os testes de ida e volta não medem nada disso: neles as duas pontas são
+    /// o mesmo codec. Esta conta é sobre o codec da publicada, escrito como os
+    /// três números dele.
     #[test]
-    fn a_release_publicada_recusa_o_carimbo_desta_build() {
-        const PUBLICADA: u8 = 3;
-        const JANELA_DA_PUBLICADA: u8 = 1;
+    fn a_publicada_ou_e_da_mesma_linha_ou_le_a_recusa_desta_build() {
+        use crate::version::{linha_de, VERSAO_MINIMA};
 
-        let frame = encode(&hello()).unwrap();
-        let carimbo = *frame.first().expect("quadro sem carimbo");
-        let janela_de_la = (PUBLICADA - JANELA_DA_PUBLICADA)..=PUBLICADA;
-
-        assert!(
-            !janela_de_la.contains(&carimbo),
-            "um par da release publicada aceitaria este quadro: se isso passou a \
-             ser verdade, o carimbo deixou de ser a versão global e o texto de \
-             version.rs precisa mudar junto"
+        let (tag, protocolo, _) = PUBLICADA;
+        let carimbo_do_hello = encode_em(VERSAO_MINIMA, &hello()).unwrap()[0];
+        assert_eq!(
+            carimbo_do_hello, VERSAO_MINIMA,
+            "o Hello sai com a mínima desta build"
         );
+
+        if linha_de(protocolo) == linha_de(PROTOCOL_VERSION) {
+            assert!(
+                a_publicada_le(carimbo_do_hello),
+                "{tag} é da mesma linha e não lê o Hello desta build: o fio quebrou"
+            );
+        } else {
+            assert!(
+                !a_publicada_le(carimbo_do_hello),
+                "{tag} é de outra linha e leria o Hello desta build: a quebra \
+                 decidida não aconteceu, ou a linha de {protocolo} está errada"
+            );
+            let recusa = recusa_por_versao(protocolo);
+            assert!(
+                a_publicada_le(recusa[0]),
+                "{tag} não lê o carimbo da recusa que esta build manda a ela"
+            );
+            // Em `54f542f`, `Disconnecting` é o ordinal 11 de `ServerMessage` e
+            // `Incompatible` é o 0 de `DisconnectReason`: os dois existem
+            // desde a 0.11, e o ADR 0058 os congela.
+            assert_eq!(
+                recusa[1..],
+                [11, 0],
+                "{tag} leria outra coisa no lugar de Disconnecting{{Incompatible}}"
+            );
+        }
     }
 
     #[test]
