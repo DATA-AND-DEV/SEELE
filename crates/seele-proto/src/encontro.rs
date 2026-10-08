@@ -93,11 +93,23 @@
 //!    anfitrião saem da mesma máquina, pelo mesmo IP público. A lista de
 //!    conhecidos não a guarda (`seele_core::encontro::bilhete_desta_volta`).
 //!
-//! O que sobra, até o `SEELE-ENC/2` (o registro assinado, no Plano 4): quem
-//! toma as duas marcas, ou só a da escuta saindo pelo mesmo IP público que o
-//! anfitrião, recebe pelo `LEVE` o IP, a porta e o instante de quem tenta
-//! chegar. O conteúdo, o convite, a senha e o apelido não saem: o TLS recusa o
-//! servidor errado (o item 1).
+//! O que sobra num servidor guardado, que continua nesta versão: quem toma as
+//! duas marcas, ou só a da escuta saindo pelo mesmo IP público que o anfitrião,
+//! recebe pelo `LEVE` o IP, a porta e o instante de quem tenta chegar. O
+//! conteúdo, o convite, a senha e o apelido não saem: o TLS recusa o servidor
+//! errado (o item 1). A sala pessoal não tem essa sobra: ela se registra pela
+//! versão 2, abaixo.
+//!
+//! # A versão 2: o registro assinado (ADR 0062)
+//!
+//! A sala pessoal só é achável pelo quarto, porque um código não carrega
+//! endereço nenhum. Ela se registra com um `MORO2` assinado pela chave da pessoa
+//! ([`Moro2`], [`crate::assinatura::moro2`]), e quem liga pergunta com um `QUEM2`,
+//! que sempre responde: o endereço e as dicas de rede local
+//! ([`Resposta2::Aqui2`]), ou [`Resposta2::Ninguem`]. As duas versões convivem
+//! no mesmo ponto, separadas por [`MAGIA2`] e por [`TAMANHO2`], e um ponto de
+//! antes da versão 2 cala para ela. O ponto guarda o registro assinado num
+//! quarto separado (`seele_encontro::assinado`), e é lá que estão as regras.
 //!
 //! # O que ele não faz, e por construção
 //!
@@ -132,7 +144,7 @@
 //! refletor, e um refletor que responde mais do que recebe é uma arma. Por isso
 //! todo datagrama tem [`TAMANHO`] bytes — os pedidos vão com enchimento — e a
 //! resposta nunca é maior que o pedido que a causou. O ganho de banda de quem
-//! abusar é, no máximo, 1:1.
+//! abusar é, no máximo, 1:1. Na versão 2 a regra é a mesma, com [`TAMANHO2`].
 //!
 //! O resto das defesas está em [`responder`]: destino global, porta alta, e
 //! nada que não seja exatamente uma destas três linhas.

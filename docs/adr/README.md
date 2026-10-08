@@ -78,7 +78,7 @@ o ganho é de estética.
 | [0044](0044-o-portao-divide-a-subida-medida.md) | O portão divide a subida medida, e a medida sobrevive ao reinício | **aceito** | — (revisa a perna do hospedeiro do `0038`) |
 | [0045](0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md) | MODs: o produto base tem regras, e um MOD não | **proposto** | — (pedido do dono; substitui o `0029`) |
 | [0046](0046-toda-versao-continua-de-pe.md) | Toda versão continua de pé: o app vira launcher | aceito em 08/10/2026 · emenda das duas numerações: toda **linha** de servidor para sempre · exceção no navegador pelo `0057` · a identidade não é por linha, pelo `0061` | — (pedido do dono; substitui o botão do `0026`) |
-| [0047](0047-o-link-que-volta-a-funcionar-amanha.md) | O link que volta a funcionar amanhã: permanência, multiconexão e chamada privada | **rascunho** | — (pedido do dono; confere o `0022` e o `0031` contra o código) |
+| [0047](0047-o-link-que-volta-a-funcionar-amanha.md) | O link que volta a funcionar amanhã: permanência, multiconexão e chamada privada | **rascunho** · o §2.4 (o registro assinado) revisto pelo `0062` | — (pedido do dono; confere o `0022` e o `0031` contra o código) |
 | [0048](0048-mods-ganham-o-caminho-de-volume-que-os-anexos-ja-tem.md) | MODs ganham o caminho de volume que os anexos já têm | **aceito** | — (relato de campo: imagem de 1 MB levando 28 s; estende o `0027` aos MODs do `0045`) |
 | [0049](0049-um-mod-deixa-de-rodar-na-janela-do-produto.md) | Um MOD deixa de rodar na janela do produto | **aceito** | — (revisa o `0045`; etapa 5 do plano de isolamento, e depende de protótipo em macOS e Windows) |
 | [0052](0052-um-mod-ganha-superficies-proprias-e-pontos-de-integracao.md) | Um MOD ganha superfícies próprias e pontos de integração | **aceito** | — (auditoria de UX/UI de 20/09/2026, U01–U03 e U27; estende o `0049` sem mexer no executor) |
@@ -91,6 +91,7 @@ o ganho é de estética.
 | [0059](0059-a-sala-pessoal-segura-a-conexao-enquanto-toca.md) | A sala pessoal segura a conexão enquanto toca | **aceito** | — (decisão do dono de 23/09: o toque instantâneo; restringe o `0030` aos servidores guardados) |
 | [0060](0060-o-codigo-de-uma-pessoa.md) | O código de uma pessoa | **aceito** | — (decisão do dono de 23/09: o código de usuário; forma, marcas e o DER da sala congelados) |
 | [0061](0061-a-identidade-e-uma-por-maquina.md) | A identidade é uma por máquina, e não por linha nem por versão | **proposto** | — (decisão do dono de 08/10; emenda o `0017` e o `0046`; espera as opções da linha legada e a regra dos 32 bytes na 0.15.2) |
+| [0062](0062-o-registro-assinado-no-ponto-de-encontro.md) | SEELE-ENC/2: o registro assinado no ponto de encontro | **aceito** | — (spec de 23/09 e decisões do dono de 08/10: o limite e o teto, e o portão no `publicar.sh`; revê o §2.4 do `0047`) |
 
 ## O que ainda não tem ADR
 

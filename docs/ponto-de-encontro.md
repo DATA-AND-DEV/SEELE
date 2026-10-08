@@ -87,7 +87,7 @@ anfitrião saem da mesma máquina, pelo mesmo IP público. Fora disso, o `LEVE` 
 ao aviso do link ou da lista, e o `seele.log` diz por quê. E a lista de
 conhecidos guarda o bilhete do link ou da lista, e nunca o que o quarto deu.
 
-**O que sobra, até o `SEELE-ENC/2`** (o registro assinado, no Plano 4): quem
+**O que sobra num servidor guardado**, que continua no `SEELE-ENC/1`: quem
 toma as **duas** marcas do anfitrião no quarto, a do servidor e a da escuta, ou
 só a da escuta saindo pelo mesmo IP público que ele, recebe pelo `LEVE` o IP, a
 porta e o instante de quem tenta chegar. A marca do servidor só fica livre em
@@ -99,6 +99,23 @@ recém-reiniciado, antes de o anfitrião se registrar de novo (ele se registra a
 cada 15 segundos). A da escuta tem as mesmas janelas, e num anfitrião 0.15.0
 está sempre livre. O conteúdo, o convite, a senha e o apelido não saem: o TLS
 recusa o servidor errado.
+
+**A sala pessoal, no `SEELE-ENC/2`** (ADR 0062), não tem essa sobra. Ela se
+registra num segundo quarto, separado do primeiro, com um `MORO2` assinado pela
+chave da pessoa, e o ponto confere que a marca sai daquela chave, que a
+assinatura vale e que o carimbo de hora está a menos de cinco minutos do relógio
+dele. Ninguém sem a chave ocupa as marcas de uma sala; um `MORO2` copiado no
+caminho só é aceito de volta do mesmo IP e da mesma porta de quem o mandou, onde
+ele não muda nada; e uma troca de rede de quem recebe vale no reavivamento
+seguinte, sem esperar os 60 segundos. Quem pergunta pela sala com `QUEM2` sempre
+ouve uma resposta: o endereço e as dicas, ou `NINGUEM`.
+
+**O que a sala conta.** Quem tem o seu código consegue saber, sem ligar, se o seu
+SEELE está aberto, qual é o seu IP público, e as dicas de rede local da sua sala
+(até dois endereços da rede da sua casa, que é o que deixa duas pessoas na mesma
+casa se ligarem sem o roteador dar a volta). É a natureza de ser encontrável, e a
+alavanca é «não receber ligações». O operador do ponto aprende o mesmo, e quem
+procura quem, enquanto as perguntas passam por ele; nada disso vai a disco.
 
 **O link fica com o seu endereço público dentro.** O bilhete (`enc=`) carrega o
 endereço do ponto de encontro e o endereço público da sua escuta de avisos —

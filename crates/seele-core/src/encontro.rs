@@ -536,7 +536,8 @@ impl OndeMora {
     /// Quem toma **as duas** marcas passa por aqui: o servidor dele mora no IP
     /// dele. O TLS recusa o servidor errado logo depois, e o convite, a senha e
     /// o apelido não saem. O que sai antes é o `LEVE`, com o IP e a porta
-    /// públicos de quem chega, até o SEELE-ENC/2 (Plano 4).
+    /// públicos de quem chega. Isto é do servidor guardado, que continua no
+    /// ENC/1: a sala pessoal se registra assinada pelo ENC/2 ([`localizar`]).
     ///
     /// **Compara o IP, e não a porta**: os dois sockets têm portas diferentes,
     /// e é a porta que o NAT troca. O IPv4 escrito como IPv6 mapeado
