@@ -7,7 +7,11 @@
 //! operacional por FFI.
 //!
 //! - `seele-video`, pelo codificador por hardware (ADR 0041);
-//! - `seele-instalador`, pela janela em Win32 (ADR 0043).
+//! - `seele-instalador`, pela janela em Win32 (ADR 0043);
+//! - `seele-web` e `seele-motor-web`, pelas funções que um `.wasm` exporta e
+//!   importa para falar com o JavaScript do celular (emenda de 08/10/2026 ao
+//!   ADR 0057). Nesses dois, o `allow` mora só num `fronteira.rs`, e quem
+//!   confere é `fronteira_do_celular.rs`.
 //!
 //! O Cargo não tem como dizer «herde tudo menos uma linha», então cada um copia
 //! a folha inteira. É aí que mora o defeito que este arquivo existe para pegar:
@@ -144,9 +148,10 @@ fn toda_folha_propria_so_difere_do_workspace_no_unsafe() {
     }
 
     assert!(
-        proprias >= 2,
-        "achei {proprias} folha(s) própria(s), e são dois os crates que não \
-         herdam: `seele-video` e `seele-instalador`.\n\
+        proprias >= 4,
+        "achei {proprias} folha(s) própria(s), e são quatro os crates que não \
+         herdam: `seele-video`, `seele-instalador`, `seele-web` e \
+         `seele-motor-web`.\n\
          Se um deles voltou a herdar, ótimo — apague esta asserção junto. Se a \
          leitura dos `members` quebrou, este guarda está cego e passando."
     );

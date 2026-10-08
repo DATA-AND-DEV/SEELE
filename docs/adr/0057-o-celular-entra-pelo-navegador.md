@@ -16,6 +16,11 @@ citados aqui ainda não estão no `main` (ver «O destino do branch `mobile/ios`
 > por WebTransport direto ao `seeled`, com TLS do navegador até o servidor e
 > nenhum gateway no meio.
 
+> **Emendado em 08/10/2026** (ver «Emenda de 08/10/2026»): **os MODs rodam no
+> celular**, e a recusa de servidor com MOD sai; e os dois crates do celular,
+> `seele-web` e `seele-motor-web`, têm `unsafe` num arquivo nomeado cada, no
+> molde do 0041 e do 0043.
+
 > **Emenda os ADRs 0003, 0006, 0007, 0010, 0017, 0018, 0019 e 0039, e abre
 > exceção nomeada, só no navegador, ao 0026 e ao 0046.** No 0006, revoga para o
 > navegador a recusa de `0006:43`. A tabela está em «O que acontece com os ADRs
@@ -234,6 +239,8 @@ do `docs/adr/README.md` (linha 96 em `a058457`). **Não declara o M6 cumprido.**
   quando o servidor só é alcançável pelo degrau 4 (ver «O que isto custa»).
 - **Uma sessão vinda por `h3`, num servidor com MOD habilitado, é recusada já no
   `Hello`, antes de gastar o convite**, com um `DisconnectReason` próprio.
+  *(Revogado pela emenda de 08/10/2026: os MODs rodam no celular, e a recusa e
+  o item 16 do contrato de fio da 0.16 saem.)*
   - Hoje o `ModsExigidos` sai (`session.rs:1153-1158`) depois de o convite ser
     gasto (`:686-688`) e depois de `register_or_find` prender o apelido à chave
     (`:735-736`). A ordem está em `specs/02-protocolo.md:40-48`.
@@ -529,7 +536,9 @@ Decidido:
     `session.rs:751-758`) ganha tela própria: «este aparelho pode ter perdido a
     identidade; quem hospeda libera o nome». É o caso do `0017:37`.
 - **Nenhum MOD roda na origem do app.** Ali ele alcançaria a chave da pessoa e
-  poderia assinar o desafio de outro servidor. No v1, um servidor que exige MOD
+  poderia assinar o desafio de outro servidor. *(Continua valendo. O resto
+  deste item, a recusa de servidor com MOD, foi revogado pela emenda de
+  08/10/2026: os MODs rodam no celular, fora da origem.)* No v1, um servidor que exige MOD
   (`specs/02-protocolo.md:40-48`) é recusado com o motivo dito: «este servidor
   exige MODs que o celular não roda». A recusa vem do `seeled`, no `Hello`, antes
   de o convite ser gasto (ver «O que muda no `seeled`»).
@@ -607,6 +616,104 @@ EM ABERTO: **o aperto de mão assina o nonce cru.**
     tela (`tela.rs:960-962`) e as imagens de MOD (`session.rs:1548`). Um fluxo
     de tela assistida passa dos 16 MB.
   - O cliente conta os fluxos **e os bytes**, e reconecta antes do teto.
+
+## Emenda de 08/10/2026
+
+Duas decisões do mesmo dia, registradas pela sessão da F4 (spec-mestre da 0.16,
+§2 F4, `00935da`).
+
+### Os MODs rodam no celular (D-web-1)
+
+**O dono decidiu o contrário da recusa** de «O cliente web» e de «O que muda no
+`seeled`»: o celular roda os MODs de um servidor.
+- **Revogados:** a recusa no `Hello` de uma sessão `h3` num servidor com MOD, e
+  o item 16 do contrato de fio da 0.16 (a razão própria dessa recusa).
+- **Mantido:** nenhum MOD roda na origem do app. A `CryptoKey` da pessoa mora
+  no armazenamento dela.
+
+**A forma, medida e não escolhida:** AB, do spike `spikes/mods-no-navegador/`.
+- O motor do desktop (o `rquickjs` 0.12.2, o mesmo prelúdio, extraído do
+  `executor.rs` no build, e os mesmos limites) roda num Worker criado de dentro
+  de um `iframe` com `sandbox` e origem opaca.
+- Medido no Chromium 151 e no Safari do Simulador do iOS 27, com o navegador
+  fechado entre a fase que grava e a que procura:
+  - nenhuma canária HTTP ou UDP tocou;
+  - nada sobreviveu ao reinício;
+  - a chave da página ficou fora de alcance;
+  - a API do desktop bateu inteira;
+  - o laço sem fim foi cortado em 500 ms, com a página travando 13 ms no pior
+    caso;
+  - a memória parou no teto.
+- **O `iframe` sozinho, com o MOD no motor do navegador, reprovou:**
+  - 8 pacotes STUN saem pela CSP nos dois navegadores, e o `webrtc 'block'` da
+    CSP3 é ignorado pelos dois;
+  - um laço trava a página por 3 s;
+  - a memória não tem teto.
+
+**Duas condições, cada uma com guarda provado por reversão:**
+- **O `RustAllocator`.** No `wasm32-wasip1`, o `js__malloc_usable_size` do
+  quickjs-ng devolve 0 (`rquickjs-sys-0.12.2/quickjs/cutils.h:601-612`), e com
+  o alocador padrão o teto de 8 MiB não existe: um MOD alocou 128 MiB. O guarda
+  roda dentro do `.wasm` (`xtask/web/motor.mjs`, pelo `cargo xtask web`),
+  porque no nativo o alocador padrão já responde o tamanho dos blocos.
+- **O wasi-sdk conferido.**
+  - O `build.rs` do `rquickjs-sys` baixa o wasi-sdk com `curl` e o descompacta
+    sem conferir (medido: 464 MB).
+  - `cargo xtask wasi-sdk` baixa, confere o SHA-256 antes de descompactar e dá
+    o caminho para `WASI_SDK`.
+  - O `.cargo/config.toml` aponta `WASI_SDK` para uma pasta que não existe, e
+    sem a variável o build para em vez de baixar.
+  - O wasi-sdk não publica checksum, então os hashes foram fixados na primeira
+    descarga, e o comentário no código diz o que isso não prova.
+
+**O que falta:**
+- o custo num iPhone (medição do dono);
+- os três MODs oficiais no celular (a medição de custo da API 6);
+- o que cada região da API 6 faz na casca de uma mão (F3).
+
+### O `unsafe` da fronteira, nos dois crates do celular
+
+**Por quê.** A página fala com o `.wasm` por funções que ele exporta (o codec do
+`seele-web`) ou importa e exporta (o motor do `seele-motor-web`).
+- `#[no_mangle]`, ler um bloco por ponteiro e tamanho e chamar uma função
+  importada são `unsafe`, e o `wasm-bindgen` gera o mesmo `unsafe` por baixo.
+- O workspace tem `unsafe_code = "forbid"`, e um `allow` não afrouxa um
+  `forbid`, nem dentro de um módulo.
+
+**O precedente:** o ADR 0041 (`seele-video`) e o 0043 (`seele-instalador`).
+- `deny` numa folha de lints própria, copiada inteira do workspace.
+- O `allow` **só** num módulo nomeado.
+- A garantia deixa de ser «não existe `unsafe` neste crate» e passa a ser
+  «existe num arquivo nomeado, e o compilador recusa em qualquer outro». É uma
+  garantia mais fraca, e é a mais forte que este trabalho admite.
+
+**Aqui:** nos dois crates, o `allow` mora só em `src/fronteira.rs`. Lá dentro,
+`#![deny(clippy::undocumented_unsafe_blocks)]` exige um `// SAFETY:` em cada
+bloco. A fronteira do motor existe só no `wasm`, e o clippy dela roda pelo
+`cargo xtask web`.
+
+**Os guardas:**
+- `xtask/tests/folha_de_lints.rs`: a folha própria só difere do workspace no
+  `unsafe_code`, e agora são quatro os crates com folha própria;
+- `xtask/tests/fronteira_do_celular.rs`:
+  - nenhum `allow(unsafe_code)` fora da `fronteira.rs`;
+  - a fronteira existe e cobra o `SAFETY`;
+  - o CI roda o `cargo xtask web`;
+- o próprio `deny`: um `unsafe` noutro arquivo não compila.
+
+**Provados por reversão** em 08/10/2026:
+- um `unsafe` no `lib.rs` não compila;
+- o mesmo com `#[allow(unsafe_code)]` junto compila, e o guarda o nomeia;
+- um bloco sem `// SAFETY:` reprova no clippy;
+- o motor com `forbid` reprova no `folha_de_lints`.
+
+**Sem `wasm-bindgen`.** O «como» do `wasm-bindgen-cli` sob o `cargo deny`
+estava EM ABERTO em «O cliente web».
+- Com uma fronteira de 6 funções no `seele-web` e de 9 no motor, a cola em
+  JavaScript é de poucas linhas, e nenhuma ferramenta entra fora da árvore.
+- Os bytes-ouro da linha 1 cruzam essa fronteira dentro do `.wasm`, com o JSON
+  passando pelo JavaScript (`xtask/web/ouro.mjs`).
+- «Sem npm, sem bundler, sem `package.json`» continua valendo.
 
 ## O que acontece com os ADRs que já existem
 
@@ -877,7 +984,8 @@ branch `conserto/l2-textos-publicos`, reprova «nunca vê áudio em claro» em
 - quanto do núcleo vai para `wasm`;
 - o contexto da assinatura do aperto de mão;
 - notificações (Web Push);
-- MODs no celular além da recusa nomeada;
+- ~~MODs no celular além da recusa nomeada~~ (decidido pela emenda de
+  08/10/2026: eles rodam, na forma AB);
 - pagar o programa da Apple mais tarde;
 - o que fazer se o Android falhar com a tela bloqueada;
 - as operações de git sobre `mobile/ios`.

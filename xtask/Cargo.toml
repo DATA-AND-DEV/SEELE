@@ -11,6 +11,9 @@ publish.workspace = true
 # crates que já o declaram.
 serde_json = "1.0.151"
 cargo_metadata = "0.23.1"
+# O SHA-256 do wasi-sdk (`wasi_sdk.rs`). A mesma versão que o `seele-proto` já
+# usa, então nada novo na árvore.
+sha2 = "0.11.0"
 
 [lints]
 workspace = true
