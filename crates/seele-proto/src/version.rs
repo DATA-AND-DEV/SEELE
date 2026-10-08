@@ -169,6 +169,32 @@ pub const fn oldest_supported_version() -> u8 {
     PROTOCOL_VERSION.saturating_sub(COMPATIBILITY_WINDOW)
 }
 
+/// A versão de servidor que esta build fala, como as pessoas a leem.
+///
+/// Duas numerações desde a 0.16 (spec-mestre, §1): a do app, que o atualizador
+/// oferece, e a do servidor, que é o protocolo e a API de MODs. O app 0.16 sai
+/// falando o **Servidor 1.0**, e um conserto do `seeled` não muda este nome.
+///
+/// **A forma desta linha é contrato:** o `empacotar/manifesto.py` a lê por
+/// expressão regular. Preso em `a_versao_do_servidor_e_a_que_a_0_16_fala`.
+pub const VERSAO_DO_SERVIDOR: &str = "1.0";
+
+/// A linha de servidor de um número do fio, com o nome que o launcher usa:
+/// `"0.15"` para o 8 e `"1"` do 9 em diante.
+///
+/// **Congelada:** um número nunca troca de linha. As linhas de antes da 0.15
+/// (números 1 a 7) não são oferecidas pelo launcher, e por isso não têm nome.
+/// Uma linha 2, quando existir, entra aqui com o primeiro número dela; até lá,
+/// «9 em diante é a linha 1» é a regra decidida em 08/10/2026.
+#[must_use]
+pub const fn linha_do_protocolo(numero: u8) -> Option<&'static str> {
+    match numero {
+        8 => Some("0.15"),
+        9..=u8::MAX => Some("1"),
+        _ => None,
+    }
+}
+
 /// Why a peer's protocol version was refused.
 ///
 /// `specs/02-protocolo.md`: "Every error reason is enumerated. No free-form
@@ -313,6 +339,32 @@ mod tests {
              voltou a ficar dormente, ou passou a pedir mais do que a versão \
              global entrega"
         );
+    }
+
+    /// O nome do servidor que esta build fala, lido pelo `empacotar/manifesto.py`
+    /// por expressão regular: a forma da linha é contrato com ele.
+    #[test]
+    fn a_versao_do_servidor_e_a_que_a_0_16_fala() {
+        assert_eq!(VERSAO_DO_SERVIDOR, "1.0");
+        let fonte = include_str!("version.rs");
+        assert!(
+            fonte.contains("pub const VERSAO_DO_SERVIDOR: &str = \"1.0\";"),
+            "o manifesto.py lê esta linha por regex, e ela mudou de forma"
+        );
+    }
+
+    /// A linha de cada número, como o launcher a nomeia.
+    #[test]
+    fn a_linha_de_cada_protocolo_para_o_launcher() {
+        assert_eq!(linha_do_protocolo(0), None);
+        assert_eq!(
+            linha_do_protocolo(7),
+            None,
+            "as linhas 0.11 a 0.14 não são oferecidas"
+        );
+        assert_eq!(linha_do_protocolo(8), Some("0.15"));
+        assert_eq!(linha_do_protocolo(9), Some("1"));
+        assert_eq!(linha_do_protocolo(u8::MAX), Some("1"));
     }
 
     #[test]

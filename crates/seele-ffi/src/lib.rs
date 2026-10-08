@@ -81,6 +81,11 @@ pub use types::{
 /// em que uma mudasse.
 pub use seele_core::{conhecidos, preferences, preview, search, uri};
 
+/// O número do fio, a versão de servidor e a linha de cada número, para quem
+/// confere o manifesto do launcher contra esta build. Pelo `seele-core`, e não
+/// direto do `seele-proto`: o ADR 0002 deixa este crate ver só o núcleo.
+pub use seele_core::{linha_do_protocolo, PROTOCOL_VERSION, VERSAO_DO_SERVIDOR};
+
 /// Every microphone this machine is offering, right now.
 ///
 /// A free function and not a method on [`Connection`]: picking a microphone is a thing
