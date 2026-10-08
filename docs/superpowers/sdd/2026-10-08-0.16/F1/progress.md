@@ -39,6 +39,9 @@ Plano: `docs/superpowers/plans/2026-10-08-0.16-F1-protocolo.md`. Branch `0.16/pr
 | tarefa | estado | commit | nota |
 |---|---|---|---|
 | §14 da API 6 no fio | feito | `6d07ac9e` | `ModAviso` (46) e `TemaMudou` (47), com o JSON do tema opaco e o teto de 12 KiB (`MAX_CARGA_DE_MOD`, agora também do `ModRequest`). O item «pedidos ao servidor» saiu: o `ChannelId(0)` já é o escopo de servidor. Bytes conferidos por uma conta independente. Reversão: sem o teto da carga, reprova |
+| merge da `versao/0.16` (`4fc31e9c`) | feito | `26f5b395` | sem conflito; `seele-proto` verde depois |
+| P10 `Marcas::da_sala` | feito | `481849b4` | `p` + os 15 símbolos de dado, `e` e `s`, na caixa do código; nos `vetores-de-codigo.json`, conferidas pela referência. A propriedade sorteada da não-colisão **não reprovava** sem o `p`, e foi trocada por um teste determinístico da primeira letra, que reprova |
+| P9 as formas de link (no `uri.rs`) | feito | `8f38b2b5` | `seele://@` (`link_da_sala`, `codigo_do_link`); a forma `https` com `wh=` e `ate=` num analisador e num enum de erro próprios (`analisar_no_navegador`, `ErroDoNavegador`, `Convite::no_navegador`), sem mexer no `ErroDeUri` nem no `main.rs`; o `v=` estrito. Fragmento = o corpo do `seele://`. O alvo de fuzz `uri` ganhou as duas formas, com 8,3 milhões de execuções num minuto, sem pânico. Três reversões reprovam. **A escrita do `v=` em `hospedagem.rs` espera o M2 e o G** |
 | P7a a API guardada e anunciada | feito | `4112f96b` | **esquema 14** (a migração nova). O `EnabledMod.api` obrigou os dois construtores do `main.rs` a mudar para compilar, e eles passaram a gravar `instalado.api`: isso é a P7b, que ficou feita junto, sem o teste próprio da tela. Achado pelo teste: o `definir_conjunto`, o outro caminho de escrita, descartava a API. A subida lê a API com `como_ele_se_chama`, porque `read_manifest` recusaria um MOD da API 5 antes de dizer o número. Três reversões reprovam |
 
 ## Verificação final (08/10)
