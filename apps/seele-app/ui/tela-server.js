@@ -1349,6 +1349,19 @@ contarAAtualizacaoQueNaoPegou().catch((falha) =>
   console.warn("a atualização anterior:", falha),
 );
 
+// **Aberta pelo launcher de outra linha, esta janela não se atualiza** (spec
+// 0.16, D-linha-1). O atualizador trocaria o app guardado no depósito do
+// launcher por outra linha. O comando recusa de qualquer jeito; a seção some
+// para não oferecer um botão que só sabe recusar.
+invoke("abertura")
+  .then((aberta) => {
+    if (!aberta?.pelo_lancador) return;
+    const secao = $("secao-atualizacao");
+    const item = secao?.closest("li");
+    if (item) item.hidden = true;
+  })
+  .catch((falha) => console.warn("abertura:", falha));
+
 /** Pergunta se há versão nova. Não baixa nada. */
 async function procurarAtualizacao() {
   const botao = $("atualizacao-procurar");

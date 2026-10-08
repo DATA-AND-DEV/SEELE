@@ -891,6 +891,12 @@ const FRASES = {
       "Feche outras cópias do SEELE e tente de novo.",
     NadaEscolhido:
       "NÃO HÁ VERSÃO NOVA ESCOLHIDA PARA INSTALAR.\n" + "Procure de novo antes de instalar.",
+    // Spec 0.16, D-linha-1: esta versão foi aberta pelo launcher de outra
+    // versão do servidor, e o atualizador dela trocaria o app guardado lá. Sem
+    // «linha» na frase: o ADR 0033 tirou a palavra da tela.
+    AbertaPeloLancador:
+      "ESTA VERSÃO FOI ABERTA POR OUTRO SEELE, QUE CUIDA DELA.\n" +
+      "Quem a atualiza é ele: não há nada a fazer aqui.",
 };
 
 /**

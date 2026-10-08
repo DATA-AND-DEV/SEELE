@@ -271,6 +271,14 @@ struct Abertura {
     /// único — e um link remontado de pedaços é um segundo analisador para
     /// discordar do primeiro.
     entrar: Option<String>,
+    /// **Quem abriu esta janela foi o launcher de outra linha.**
+    ///
+    /// Lido de `SEELE_LANCADOR`, que o launcher da 0.16 põe com o valor `1`.
+    /// Aberta assim, esta versão mora no depósito do launcher, e o atualizador
+    /// dela trocaria o `.app` de lá pela versão do topo do manifesto — outra
+    /// linha, que este depósito não deveria guardar no lugar desta. Então o
+    /// botão some e o comando recusa (spec 0.16, D-linha-1).
+    pelo_lancador: bool,
 }
 
 impl Abertura {
@@ -282,8 +290,22 @@ impl Abertura {
     /// está no mundo. Aqui, a mesma tolerância vale para o caminho oposto — uma
     /// versão futura passando um argumento que esta não conhece.
     fn da_linha_de_comando() -> Self {
-        let mut aberta = Self::default();
-        let mut argumentos = std::env::args().skip(1);
+        Self::de(
+            std::env::args().skip(1),
+            std::env::var("SEELE_LANCADOR").ok().as_deref(),
+        )
+    }
+
+    /// O mesmo, a partir dos argumentos e do valor de `SEELE_LANCADOR`.
+    ///
+    /// Separado da leitura do processo para o teste poder dizer o que entra,
+    /// sem mexer no ambiente de quem roda a bateria.
+    fn de(argumentos: impl IntoIterator<Item = String>, lancador: Option<&str>) -> Self {
+        let mut aberta = Self {
+            pelo_lancador: lancador == Some("1"),
+            ..Self::default()
+        };
+        let mut argumentos = argumentos.into_iter();
         while let Some(argumento) = argumentos.next() {
             match argumento.as_str() {
                 "--hospedar" => aberta.hospedar = true,
@@ -8221,6 +8243,26 @@ enum FalhaAoAtualizar {
     NaoInstalei,
     /// Pediram para instalar sem ter procurado antes.
     NadaEscolhido,
+    /// Esta versão foi aberta pelo SEELE de outra linha, e quem a atualiza é
+    /// ele.
+    ///
+    /// Spec 0.16, D-linha-1. Aberta pelo launcher, esta versão mora no depósito
+    /// dele, e o atualizador do Tauri trocaria o `.app` de lá pela versão do
+    /// topo do manifesto — outra linha. A tela esconde o botão; esta recusa é
+    /// o que vale quando alguém chega ao comando por outro caminho.
+    AbertaPeloLancador,
+}
+
+/// Se esta janela pode procurar e instalar atualização.
+///
+/// Uma função e não um `if` em cada comando, para os dois comandos não
+/// poderem discordar: procurar sem poder instalar seria oferecer o que vai ser
+/// recusado.
+fn atualizacao_permitida(abertura: &Abertura) -> Result<(), FalhaAoAtualizar> {
+    if abertura.pelo_lancador {
+        return Err(FalhaAoAtualizar::AbertaPeloLancador);
+    }
+    Ok(())
 }
 
 /// Traduz a falha do plugin para o que a tela tem que dizer.
@@ -8289,6 +8331,7 @@ async fn procurar_atualizacao(
 ) -> Result<Option<VersaoNova>, FalhaAoAtualizar> {
     use tauri_plugin_updater::UpdaterExt;
 
+    atualizacao_permitida(&session.abertura)?;
     if !tem_chave_de_atualizacao(&app) {
         return Err(FalhaAoAtualizar::NaoConfigurado);
     }
@@ -8358,6 +8401,7 @@ async fn instalar_atualizacao(
     app: AppHandle,
     session: State<'_, Session>,
 ) -> Result<(), FalhaAoAtualizar> {
+    atualizacao_permitida(&session.abertura)?;
     // Tirado do lugar, e não emprestado: instalar é uma vez. Se falhar, quem
     // quiser tentar de novo procura de novo — e a consulta nova é justamente o
     // que confirma que a versão ainda é aquela.
@@ -12511,5 +12555,48 @@ mod o_som_do_mod_sai_em_bytes {
                 && linha.contains("motivo=formato-desconhecido")),
             "a recusa do som de formato desconhecido não chegou ao registro: {rastro}"
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod a_abertura_pelo_launcher {
+    use super::{atualizacao_permitida, Abertura, FalhaAoAtualizar};
+
+    #[test]
+    fn quem_foi_aberta_pelo_launcher_sabe_disso() {
+        assert!(Abertura::de(Vec::<String>::new(), Some("1")).pelo_lancador);
+        assert!(!Abertura::de(Vec::<String>::new(), None).pelo_lancador);
+        // Só o valor que o launcher põe. Uma variável esquecida no ambiente
+        // com outro valor não esconde o botão de ninguém.
+        assert!(!Abertura::de(Vec::<String>::new(), Some("0")).pelo_lancador);
+    }
+
+    /// Os argumentos continuam sendo lidos como antes, com a variável junto.
+    #[test]
+    fn os_argumentos_do_launcher_continuam_chegando() {
+        let aberta = Abertura::de(
+            ["--hospedar", "--nome-publico", "casa.exemplo.br"].map(str::to_owned),
+            Some("1"),
+        );
+        assert!(aberta.hospedar && aberta.pelo_lancador);
+        assert_eq!(aberta.nome_publico.as_deref(), Some("casa.exemplo.br"));
+    }
+
+    /// Spec 0.16, D-linha-1: o atualizador de uma versão aberta pelo launcher
+    /// trocaria o `.app` do depósito pela versão do topo do manifesto — outra
+    /// linha (`updater.rs:1217-1300` do plugin 2.10.1). Esconder o botão não
+    /// basta: o comando recusa.
+    #[test]
+    fn aberta_pelo_launcher_o_atualizador_recusa() {
+        assert!(matches!(
+            atualizacao_permitida(&Abertura::de(Vec::<String>::new(), Some("1"))),
+            Err(FalhaAoAtualizar::AbertaPeloLancador)
+        ));
+        assert!(atualizacao_permitida(&Abertura::de(Vec::<String>::new(), None)).is_ok());
     }
 }

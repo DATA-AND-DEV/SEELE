@@ -423,6 +423,19 @@ fn toda_classe_que_o_script_aplica_tem_regra_de_css() {
     );
 }
 
+/// A 0.15.2 aberta pelo launcher não mostra o atualizador (spec 0.16,
+/// D-linha-1). O comando recusa de qualquer jeito; esconder é para não oferecer
+/// um botão que só sabe recusar.
+#[test]
+fn aberta_pelo_launcher_a_tela_esconde_a_atualizacao() {
+    let script = read("ui/tela-server.js");
+    let script = without_comments(&script);
+    assert!(
+        script.contains("pelo_lancador") && script.contains("secao-atualizacao"),
+        "a tela de configurações não esconde a atualização quando quem abriu foi o launcher"
+    );
+}
+
 #[test]
 fn todo_argumento_que_o_frontend_manda_existe_no_comando() {
     // **O guarda irmão do de baixo, e ele nasceu de um defeito de campo.**
@@ -5274,11 +5287,18 @@ fn every_way_the_update_can_fail_asks_something_different_of_the_reader() {
     // The number is asserted rather than merely counted so that the next
     // variant also has to come with the sentence and the reason, instead of
     // arriving silently and sharing somebody else's wording.
+    //
+    // Eight since the 0.15.2: `AbertaPeloLancador`. A version opened by the
+    // launcher of another line lives in that launcher's store, and its updater
+    // would swap the store's `.app` for the version at the top of the manifest
+    // — another line (spec 0.16, D-linha-1). The button hides and the command
+    // refuses, and the refusal has its own sentence because it asks nothing of
+    // the reader: the other SEELE is the one that updates.
     let variants = variants_of(&source, "FalhaAoAtualizar");
     assert_eq!(
         variants.len(),
-        7,
-        "`FalhaAoAtualizar` has {} variants; ADR 0026 accounts for seven: {variants:?}",
+        8,
+        "`FalhaAoAtualizar` has {} variants; ADR 0026 and the 0.15.2 account for eight: {variants:?}",
         variants.len()
     );
 
