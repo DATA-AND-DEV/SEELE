@@ -246,18 +246,56 @@ impl std::fmt::Display for Marca {
 /// conta própria, os dois divergiram: o anfitrião registrava a escuta como
 /// `anfitriao`, o cliente perguntava pela impressão digital, e a resposta
 /// nunca veio (análise de 22/09/2026, §2.1).
+///
+/// # Por que os campos são privados
+///
+/// Com os campos públicos, quem estivesse fora deste módulo montava
+/// `Marcas { escuta: aviso.clone(), … }` sem passar por [`Marcas::do_servidor`],
+/// e a escuta com a marca do aviso é exatamente o eco que vira furo contra si
+/// mesmo. O único jeito de ter `Marcas` é [`Marcas::do_servidor`], e o que se
+/// lê delas sai por [`Marcas::aviso`], [`Marcas::escuta`] e
+/// [`Marcas::servidor`].
+///
+/// O exemplo abaixo é o guarda disto: ele **não pode compilar**, e o teste de
+/// documentação reprova no dia em que um campo voltar a ser público.
+///
+/// ```compile_fail,E0451
+/// use seele_proto::encontro::{Marca, Marcas};
+///
+/// let aviso = Marca::nova("3cbcfb0212da738f").expect("é uma marca");
+/// let _eco = Marcas {
+///     aviso: aviso.clone(),
+///     escuta: aviso.clone(),
+///     servidor: aviso,
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marcas {
-    /// A que o `LEVE` de quem chega traz, e a que o anfitrião confere antes de
-    /// furar.
-    pub aviso: Marca,
-    /// Sob a qual a escuta de avisos se registra no quarto.
-    pub escuta: Marca,
-    /// Sob a qual o socket do servidor se registra no quarto.
-    pub servidor: Marca,
+    aviso: Marca,
+    escuta: Marca,
+    servidor: Marca,
 }
 
 impl Marcas {
+    /// A que o `LEVE` de quem chega traz, e a que o anfitrião confere antes de
+    /// furar.
+    #[must_use]
+    pub fn aviso(&self) -> &Marca {
+        &self.aviso
+    }
+
+    /// Sob a qual a escuta de avisos se registra no quarto.
+    #[must_use]
+    pub fn escuta(&self) -> &Marca {
+        &self.escuta
+    }
+
+    /// Sob a qual o socket do servidor se registra no quarto.
+    #[must_use]
+    pub fn servidor(&self) -> &Marca {
+        &self.servidor
+    }
+
     /// As marcas de um servidor guardado, tiradas da impressão digital.
     ///
     /// Partem dos dezesseis primeiros caracteres, que o `seele://` carrega em
@@ -846,17 +884,17 @@ mod testes {
         let marcas =
             Marcas::do_servidor(IMPRESSAO).expect("uma impressão digital sempre dá marcas");
         assert_eq!(
-            marcas.aviso.texto(),
+            marcas.aviso().texto(),
             "3cbcfb0212da738f",
             "a marca do aviso mudou: todo cliente 0.15.0 passa a bater com uma marca que o anfitrião ignora"
         );
         assert_eq!(
-            marcas.servidor.texto(),
+            marcas.servidor().texto(),
             "3cbcfb0212da738fs",
             "a marca do servidor mudou: todo cliente 0.15.0 pergunta por uma marca que ninguém registra"
         );
         assert_eq!(
-            marcas.escuta.texto(),
+            marcas.escuta().texto(),
             "3cbcfb0212da738fe",
             "a marca da escuta mudou: quem procura o anfitrião pergunta por uma marca que a escuta não registra"
         );
@@ -875,18 +913,21 @@ mod testes {
             let marcas =
                 Marcas::do_servidor(impressao).expect("uma impressão digital sempre dá marcas");
             assert_ne!(
-                marcas.escuta, marcas.aviso,
-                "a escuta se registra com a marca do aviso: o AQUI que responde ao próprio MORO \
-                 passa no filtro e vira um furo contra si mesmo"
+                marcas.escuta(),
+                marcas.aviso(),
+                "com a impressão {impressao}, a escuta se registra com a marca do aviso: o AQUI \
+                 que responde ao próprio MORO passa no filtro e vira um furo contra si mesmo"
             );
             assert_ne!(
-                marcas.servidor, marcas.aviso,
-                "o servidor se registra com a marca do aviso"
+                marcas.servidor(),
+                marcas.aviso(),
+                "com a impressão {impressao}, o servidor se registra com a marca do aviso"
             );
             assert_ne!(
-                marcas.servidor, marcas.escuta,
-                "servidor e escuta com a mesma marca: o quarto guarda um endereço por marca, e um \
-                 apaga o outro"
+                marcas.servidor(),
+                marcas.escuta(),
+                "com a impressão {impressao}, servidor e escuta têm a mesma marca: o quarto guarda \
+                 um endereço por marca, e um apaga o outro"
             );
         }
     }

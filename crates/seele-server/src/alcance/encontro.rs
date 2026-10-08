@@ -509,8 +509,8 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
             perguntar(
                 &escuta,
                 alvo,
-                &encontro::onde(&marcas.escuta),
-                &marcas.escuta,
+                &encontro::onde(marcas.escuta()),
+                marcas.escuta(),
             ),
         )
         .await;
@@ -537,7 +537,7 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
     // deste socket não dá para ler — quem lê é o quinn.
     let publico = tokio::time::timeout_at(
         ate,
-        perguntar_pelo_server(&convocacao.socket, &avisos, ponto, aviso, &marcas.escuta),
+        perguntar_pelo_server(&convocacao.socket, &avisos, ponto, aviso, marcas.escuta()),
     )
     .await
     .map_err(|_| FalhaNoEncontro::SemRespostaAoLeve)?
@@ -867,7 +867,7 @@ async fn atender(
                 else {
                     continue;
                 };
-                if marca != marcas.aviso {
+                if marca != *marcas.aviso() {
                     // Ou é a resposta do nosso próprio registro, que vem com a
                     // marca da escuta ou do servidor e nunca com a do aviso, ou
                     // é ruído da internet. Nenhum dos dois vira furo.
@@ -878,7 +878,7 @@ async fn atender(
                     continue;
                 }
                 tracing::info!(%endereco, "degrau 4: alguém com o link está chegando; furando");
-                furar(&server, endereco, &marcas.aviso).await;
+                furar(&server, endereco, marcas.aviso()).await;
             }
         }
     }
@@ -898,12 +898,12 @@ async fn registrar(
     marcas: &Marcas,
 ) -> Result<(), String> {
     let escuta = avisos
-        .send_to(&encontro::moro(&marcas.escuta), ponto)
+        .send_to(&encontro::moro(marcas.escuta()), ponto)
         .await
         .map(|_| ())
         .map_err(|erro| format!("o MORO da escuta de avisos não saiu: {erro}"));
-    let leve = mandar_pelo_server(server, &encontro::leve(aviso, &marcas.escuta), ponto);
-    let servidor = mandar_pelo_server(server, &encontro::moro(&marcas.servidor), ponto);
+    let leve = mandar_pelo_server(server, &encontro::leve(aviso, marcas.escuta()), ponto);
+    let servidor = mandar_pelo_server(server, &encontro::moro(marcas.servidor()), ponto);
     escuta.and(leve).and(servidor)
 }
 
@@ -1282,7 +1282,7 @@ mod testes {
         let convocacao = Convocacao::para_servidor(Arc::clone(&socket), IMPRESSAO, PONTO_PADRAO)
             .expect("uma impressão digital sempre dá uma convocação");
         assert_eq!(
-            convocacao.marcas.aviso.texto(),
+            convocacao.marcas.aviso().texto(),
             "3cbcfb0212da738f",
             "a marca do aviso não é o começo da impressão digital: o LEVE de quem tem o link \
              deixa de passar no filtro do anfitrião, e ninguém fura para ninguém"
@@ -1561,26 +1561,21 @@ mod testes {
             panic!("o alvo do furo de teste não tem endereço local");
         };
 
-        // As marcas de um anfitrião qualquer: `visitante` é o que um `AQUI`
-        // legítimo traz, e as outras duas são as do registro no quarto. O
-        // registro da subida vai para `ponto`, que nestes testes não responde
-        // e não é o `alvo` que eles contam.
-        let (Some(aviso), Some(escuta), Some(servidor)) = (
-            Marca::nova("visitante"),
-            Marca::nova("visitantee"),
-            Marca::nova("visitantes"),
-        ) else {
-            panic!("marca de teste inválida");
-        };
-        let marcas = Marcas {
-            aviso,
-            escuta,
-            servidor,
-        };
+        // As marcas de um anfitrião, pelo caminho de produção: a do aviso é o
+        // que um `AQUI` legítimo traz, e as outras duas são as do registro no
+        // quarto. O registro da subida vai para `ponto`, que nestes testes não
+        // responde e não é o `alvo` que eles contam.
+        let marcas = marcas_da_impressao();
 
         let tarefa = anfitriao.subir(ponto, marcas.clone());
 
-        (tarefa, avisos_endereco, alvo, alvo_endereco, marcas.aviso)
+        (
+            tarefa,
+            avisos_endereco,
+            alvo,
+            alvo_endereco,
+            marcas.aviso().clone(),
+        )
     }
 
     #[tokio::test]
@@ -1873,12 +1868,12 @@ mod testes {
 
         let tarefa = anfitriao.subir(ponto, marcas.clone());
         let da_escuta = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
-            matches!(pedido, encontro::Pedido::Moro { marca } if *marca == marcas.escuta)
+            matches!(pedido, encontro::Pedido::Moro { marca } if marca == marcas.escuta())
                 && de == avisos_endereco
         })
         .await;
         let do_servidor = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
-            matches!(pedido, encontro::Pedido::Moro { marca } if *marca == marcas.servidor)
+            matches!(pedido, encontro::Pedido::Moro { marca } if marca == marcas.servidor())
                 && de == server_endereco
         })
         .await;
@@ -1888,13 +1883,13 @@ mod testes {
             da_escuta,
             "a escuta de avisos não se registrou no quarto com a marca dela ({}) no primeiro \
              segundo: quem perguntar pela escuta não a acha, e o LEVE cai num endereço de ontem",
-            marcas.escuta
+            marcas.escuta()
         );
         assert!(
             do_servidor,
             "o socket do servidor não se registrou no quarto com a marca dele ({}) no primeiro \
              segundo: quem voltar pela trilha não acha para onde conectar",
-            marcas.servidor
+            marcas.servidor()
         );
     }
 

@@ -306,12 +306,12 @@ async fn um_ponto_escrito_sem_porta_e_procurado_na_porta_padrao() {
     // então esperar por ela é esperar o registro.
     let servidor = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     servidor
-        .send_to(&moro(&marcas.servidor), ponto)
+        .send_to(&moro(marcas.servidor()), ponto)
         .await
         .unwrap();
     servidor.recv_from(&mut balde).await.unwrap();
     let escuta = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    escuta.send_to(&moro(&marcas.escuta), ponto).await.unwrap();
+    escuta.send_to(&moro(marcas.escuta()), ponto).await.unwrap();
     escuta.recv_from(&mut balde).await.unwrap();
 
     // O ponto como o link o carrega: sem porta.

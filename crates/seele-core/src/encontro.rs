@@ -112,7 +112,10 @@ impl Batida {
         // A marca do aviso sai da mesma função com que o anfitrião a confere
         // ([`Marcas::do_servidor`]): duas derivações da mesma regra são duas
         // regras para discordarem no dia em que uma mudar.
-        let marca = impressao_digital.and_then(Marcas::do_servidor)?.aviso;
+        let marca = impressao_digital
+            .and_then(Marcas::do_servidor)?
+            .aviso()
+            .clone();
         let aviso = bilhete.aviso().ok()?;
         let ponto = tokio::time::timeout(PRAZO, resolver(bilhete))
             .await
@@ -845,8 +848,8 @@ async fn consultar_por(
         return PorUmEndereco::NadaSaiu;
     };
     let pedidos = [
-        encontro::quem(&marcas.servidor),
-        encontro::quem(&marcas.escuta),
+        encontro::quem(marcas.servidor()),
+        encontro::quem(marcas.escuta()),
         encontro::onde(&sonda),
     ];
 
@@ -953,9 +956,9 @@ async fn consultar_por(
         primeira_resposta.get_or_insert(chegou);
         if marca == sonda {
             ida_e_volta.get_or_insert(chegou.saturating_duration_since(saiu_em));
-        } else if marca == marcas.servidor {
+        } else if marca == *marcas.servidor() {
             servidor = Some(endereco);
-        } else if marca == marcas.escuta {
+        } else if marca == *marcas.escuta() {
             escuta = Some(endereco);
         }
     }
@@ -1268,7 +1271,7 @@ mod testes {
                 if !forjou {
                     forjou = true;
                     terceiro
-                        .send_to(&encontro::aqui(&marcas.servidor, forjado), para_a_consulta)
+                        .send_to(&encontro::aqui(marcas.servidor(), forjado), para_a_consulta)
                         .await
                         .unwrap();
                     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1300,7 +1303,7 @@ mod testes {
         // E o caminho do terceiro existe: sem isto, um `NinguemMora` também
         // sairia de um pacote que nunca chegou, e o teste passaria sem medir.
         terceiro
-            .send_to(&encontro::aqui(&marcas.servidor, forjado), para_a_consulta)
+            .send_to(&encontro::aqui(marcas.servidor(), forjado), para_a_consulta)
             .await
             .unwrap();
         let mut balde = [0_u8; encontro::TAMANHO];
@@ -1765,10 +1768,10 @@ mod testes {
         let (servidor, escuta) = (SocketAddr::from(SERVIDOR), SocketAddr::from(ESCUTA));
         let quem = marcas.clone();
         let (ponto, _) = ponto_falso(move |pedido, de| match pedido {
-            encontro::Pedido::Quem { marca } if *marca == quem.servidor => {
+            encontro::Pedido::Quem { marca } if marca == quem.servidor() => {
                 vec![(Duration::ZERO, encontro::aqui(marca, servidor))]
             }
-            encontro::Pedido::Quem { marca } if *marca == quem.escuta => {
+            encontro::Pedido::Quem { marca } if marca == quem.escuta() => {
                 vec![(Duration::ZERO, encontro::aqui(marca, escuta))]
             }
             encontro::Pedido::Onde { marca } => vec![(Duration::ZERO, encontro::aqui(marca, de))],
@@ -1878,7 +1881,7 @@ mod testes {
         let servidor = SocketAddr::from(SERVIDOR);
         let quem = marcas.clone();
         let (ponto, anotados) = ponto_falso(move |pedido, _| match pedido {
-            encontro::Pedido::Quem { marca } if *marca == quem.servidor => {
+            encontro::Pedido::Quem { marca } if marca == quem.servidor() => {
                 vec![(Duration::from_millis(700), encontro::aqui(marca, servidor))]
             }
             _ => Vec::new(),
@@ -1925,10 +1928,10 @@ mod testes {
             encontro::Pedido::Onde { marca } => {
                 vec![(Duration::from_millis(600), encontro::aqui(marca, de))]
             }
-            encontro::Pedido::Quem { marca } if *marca == quem.servidor => {
+            encontro::Pedido::Quem { marca } if marca == quem.servidor() => {
                 vec![(Duration::from_millis(600), encontro::aqui(marca, servidor))]
             }
-            encontro::Pedido::Quem { marca } if *marca == quem.escuta => {
+            encontro::Pedido::Quem { marca } if marca == quem.escuta() => {
                 vec![(Duration::from_millis(900), encontro::aqui(marca, escuta))]
             }
             _ => Vec::new(),
@@ -1989,10 +1992,10 @@ mod testes {
             encontro::Pedido::Onde { marca } if onde_volta => {
                 vec![(Duration::ZERO, encontro::aqui(marca, de))]
             }
-            encontro::Pedido::Quem { marca } if *marca == quem.servidor => {
+            encontro::Pedido::Quem { marca } if marca == quem.servidor() => {
                 vec![(Duration::ZERO, encontro::aqui(marca, servidor))]
             }
-            encontro::Pedido::Quem { marca } if *marca == quem.escuta => escuta_em
+            encontro::Pedido::Quem { marca } if marca == quem.escuta() => escuta_em
                 .map(|demora| (demora, encontro::aqui(marca, escuta)))
                 .into_iter()
                 .collect(),

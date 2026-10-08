@@ -49,7 +49,7 @@ async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
     let ontem = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let porta_de_ontem = ontem.local_addr().unwrap();
     ontem
-        .send_to(&moro(&marcas.servidor), onde_fica)
+        .send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     ontem.recv_from(&mut balde).await.unwrap();
@@ -62,7 +62,7 @@ async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
         porta_de_ontem, porta_de_hoje,
         "o teste precisa de duas portas diferentes para dizer alguma coisa"
     );
-    hoje.send_to(&moro(&marcas.servidor), onde_fica)
+    hoje.send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     hoje.recv_from(&mut balde).await.unwrap();
@@ -151,7 +151,7 @@ async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele()
 
     let dono = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let do_dono = dono.local_addr().unwrap();
-    dono.send_to(&moro(&marcas.servidor), onde_fica)
+    dono.send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     dono.recv_from(&mut balde).await.unwrap();
@@ -163,7 +163,7 @@ async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele()
     let mudou = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let novo = mudou.local_addr().unwrap();
     mudou
-        .send_to(&moro(&marcas.servidor), onde_fica)
+        .send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     mudou.recv_from(&mut balde).await.unwrap();
@@ -280,13 +280,13 @@ async fn o_quarto_devolve_o_servidor_e_a_escuta_e_nao_espera_o_prazo() {
 
     let servidor = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     servidor
-        .send_to(&moro(&marcas.servidor), onde_fica)
+        .send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     servidor.recv_from(&mut balde).await.unwrap();
     let escuta = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     escuta
-        .send_to(&moro(&marcas.escuta), onde_fica)
+        .send_to(&moro(marcas.escuta()), onde_fica)
         .await
         .unwrap();
     escuta.recv_from(&mut balde).await.unwrap();
@@ -337,7 +337,7 @@ async fn sem_resposta_a_pergunta_sai_tres_vezes() {
     let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let onde_fica = mudo.local_addr().unwrap().to_string();
     let marcas = marcas_de_teste();
-    let do_servidor = marcas.servidor.clone();
+    let do_servidor = marcas.servidor().clone();
 
     let consulta =
         tokio::spawn(async move { onde_mora_hoje(&onde_fica, &marcas, PRAZO_DO_QUARTO).await });
@@ -381,7 +381,7 @@ async fn um_anfitriao_que_so_registrou_o_servidor_volta_sem_a_escuta_e_sem_esper
 
     let servidor = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     servidor
-        .send_to(&moro(&marcas.servidor), onde_fica)
+        .send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     servidor.recv_from(&mut balde).await.unwrap();
