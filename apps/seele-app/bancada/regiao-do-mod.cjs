@@ -4322,13 +4322,13 @@ async function oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar() {
  * «o lugar deste som saiu da tela», com a mesma contribuição desenhada nos
  * outros destinos, sem tocador.
  *
- * O destino que saiu solta o tocador, devolve ao bolso o som decodificado,
- * esquece a anotação e devolve a marca; um destino que desenha a toma na
- * mesma varredura — a de `base.js`, recortada (`varreduraDeBase`). Ele não
- * pede os bytes por tomá-la: o som saiu da tela parado, e a declaração dele
- * conta como aplicada, como em `calarSonsForaDaTela`. O `tocando` religado
- * toca ali, sem recusa, e só existe um tocador — e continua um só quando o nó
- * do primeiro volta.
+ * O destino que saiu solta o tocador — e a janela fica sem ele —, devolve ao
+ * bolso o som decodificado, esquece a anotação e devolve a marca; um destino
+ * que desenha a toma na mesma varredura — a de `base.js`, recortada
+ * (`varreduraDeBase`). **O som que tocava recomeça ali, do começo**, sem um
+ * `tocando` novo (a continuidade, decidida na rodada 1); um som que já tinha
+ * terminado não volta. O `tocando` religado toca ali, sem recusa, e só existe
+ * um tocador — e continua um só quando o nó do primeiro volta.
  *
  * E o pedido de tocar que ainda decodificava quando o lugar saiu: ele não
  * vira tocador num destino que já não segura o som, e é dito ao MOD como a
@@ -4373,21 +4373,25 @@ async function oSomDaContribuicaoMudaDeDestino() {
     // Quem estava no canal do destino que tomou os sons sai: o nó sai da tela,
     // e a varredura do fim do desenho roda.
     const audioDoPrimeiro = Audio.ultimo;
+    const fonteDoPrimeiro = audioDoPrimeiro?.fontes[0];
     tomou.raiz.remove();
     varrer();
     await assentar();
     confere(
       caso,
-      ditos(d, "pausada").length === 1 && tocando() === 0,
-      `o lugar do som saiu da tela e o som não parou: ${tocando()} fonte(s), «pausada» dita ${ditos(d, "pausada").length} vez(es)`,
+      ditos(d, "pausada").length === 1 && fonteDoPrimeiro?.parou === true,
+      `o lugar do som saiu da tela e o som não parou ali: parou=${fonteDoPrimeiro?.parou}, «pausada» dita `
+        + `${ditos(d, "pausada").length} vez(es)`,
     );
     // **Soltar, e não só esquecer o campo.** Zerar `som.tocador` sem soltar o
     // tocador o deixa em `tocadoresDeSomDeMod` para sempre, com o
     // `AudioBuffer` dentro — a memória que a devolução existe para liberar —,
     // e o áudio da janela, que fecha quando o último tocador sai, nunca fecha.
+    //
+    // Um de pé na janela, e não zero: o som recomeçou no outro destino.
     confere(
       caso,
-      b.tocadoresDePe() === 0 && audioDoPrimeiro?.state === "closed",
+      b.tocadoresDePe() === 1 && audioDoPrimeiro?.state === "closed",
       "o destino que saiu da tela esqueceu o tocador sem soltá-lo: o som decodificado segue de pé na janela e o "
         + `áudio dela não fechou — ${b.tocadoresDePe()} tocador(es) de pé, áudio «${audioDoPrimeiro?.state}»`,
     );
@@ -4403,12 +4407,19 @@ async function oSomDaContribuicaoMudaDeDestino() {
       "o destino que saiu da tela segurou o tocador, o som decodificado no bolso, ou a anotação: "
         + `${tocadores([tomou])} tocador(es), ${tomou.bytesDeSomDeCartao} bytes, ${JSON.stringify(tomou.midiasAnotadas())}`,
     );
+    // **A continuidade** (decisão da rodada 1): o som que tocava quando o
+    // lugar dele saiu recomeça, do começo, no destino que tomou a marca — sem
+    // um `tocando` novo do MOD, e sem recusa.
+    const fonteDoOutro = Audio.ultimo?.fontes.find((f) => f.tocando);
     confere(
       caso,
-      Audio.decodificados.length === 1
+      Audio.decodificados.length === 2 && fonteDoOutro?.de === 0 && tocadores([outro]) === 1
+        && ditos(d, "tocando").length === 2 && ditos(d, "recusada").length === 0
         && JSON.stringify(outro.midiasAnotadas().map((m) => m.situacao)) === JSON.stringify(["pronta"]),
-      "o destino que tomou a marca pediu o som sem um pedido de tocar, ou não o anotou «pronta»: "
-        + `${Audio.decodificados.length} decodificação(ões), ${JSON.stringify(outro.midiasAnotadas())}`,
+      "o som que tocava quando o lugar dele saiu da tela não recomeçou, do começo, no destino que tomou a marca: "
+        + `${Audio.decodificados.length} decodificação(ões), a fonte nova de ${fonteDoOutro?.de}, `
+        + `${tocadores([outro])} tocador(es) no outro, «tocando» dito ${ditos(d, "tocando").length} vez(es), `
+        + `recusas ${JSON.stringify(ditos(d, "recusada"))}, ${JSON.stringify(outro.midiasAnotadas())}`,
     );
 
     // O MOD religa o `tocando`: o som toca no destino que desenha, sem recusa.
@@ -4443,6 +4454,33 @@ async function oSomDaContribuicaoMudaDeDestino() {
     );
     for (const r of destinos) r.soltar();
     confere(caso, tocando() === 0, "o som da contribuição continuou depois de os destinos saírem");
+  }
+
+  // O som que já tinha terminado não volta: a troca de destino não é um
+  // `tocando` novo, e ele não tocava quando o lugar saiu.
+  {
+    const terminou = `${caso} · o som que já terminou`;
+    const { Audio, b, d, destinos, varrer } = montar();
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    Audio.ultimo?.fontes[0]?.onended?.();
+    if (tomou) {
+      tomou.raiz.remove();
+      varrer();
+    }
+    await assentar();
+    // Uma fonte só, a do começo, num áudio da janela só: a troca não criou outra.
+    const fontes = Audio.criados === 1 ? (Audio.ultimo?.fontes.length ?? 0) : -1;
+    confere(
+      terminou,
+      outro?.tomouOsSons === true && Audio.decodificados.length === 1 && fontes === 1
+        && ditos(d, "tocando").length === 1 && b.tocadoresDePe() === 0,
+      "a vinheta tinha terminado, o lugar dela saiu da tela, e a troca de destino a tocou de novo, ou a marca não "
+        + `mudou: ${Audio.decodificados.length} decodificação(ões), ${Audio.criados} áudio(s) da janela, `
+        + `${fontes} fonte(s), «tocando» dito ${ditos(d, "tocando").length} vez(es), ${b.tocadoresDePe()} tocador(es) de pé`,
+    );
+    for (const r of destinos) r.soltar();
   }
 
   // O pedido de tocar que ainda decodificava quando o lugar saiu da tela.

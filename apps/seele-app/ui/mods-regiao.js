@@ -623,6 +623,13 @@ class RegiaoDeMod {
     this.sonsDaContribuicao = null;
     /** Se foi este destino que tomou os sons da contribuição. */
     this.tomouOsSons = false;
+    /**
+     * O que este destino herdou do destino que devolveu a marca, até cada som
+     * chegar aqui: `{ tocavam }`, os lugares dos sons que tocavam quando o
+     * lugar deles saiu da tela (ver `devolverOsSons` e `herdarOSom`); `null`
+     * quando a marca não veio de uma devolução.
+     */
+    this.herdados = null;
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
     this.solta = false;
   }
@@ -2539,7 +2546,9 @@ class RegiaoDeMod {
    * contribuição continua desenhada noutro. Ele solta os tocadores e devolve a
    * marca (`devolverOsSons`), e um destino que desenha a toma na mesma
    * varredura (`tomarOsSonsDevolvidos`) — sem isso, o som ficava preso no lugar
-   * que ninguém via, e o `tocando` religado era recusado como fora da tela. Na
+   * que ninguém via, e o `tocando` religado era recusado como fora da tela. O
+   * som que tocava recomeça, do começo, no destino que tomou a marca, e os
+   * outros ficam calados (`herdarOSom`). Na
    * saída, os destinos saem juntos (`soltarMontagem`, ou a saída da instância),
    * e um destino que não montou é solto antes de um som chegar aqui.
    *
@@ -2971,9 +2980,15 @@ class RegiaoDeMod {
    */
   calarSonsForaDaTela(cartoesPintam = true) {
     if (this.solta) return;
+    // O destino de contribuição que segura os sons e saiu do documento os
+    // devolve, e diz quais **tocavam** antes de esta pausa os calar: é esse som
+    // que recomeça no destino que tomar a marca (`devolverOsSons`).
+    const devolve = this.tomouOsSons && !this.raiz?.isConnected;
+    const tocavam = new Set();
     for (const [elem, som] of this.somDaMidia) {
       if (!som.tocador) continue;
       if (elem.isConnected && (cartoesPintam || !som.cartao)) continue;
+      if (devolve && som.tocador.tocando) tocavam.add(elem);
       const esperava = som.tocador.esperando;
       som.declarado = som.quer;
       som.terminou = false;
@@ -2983,7 +2998,7 @@ class RegiaoDeMod {
       // desfeito em silêncio.
       if (esperava) som.recusar(SOM_FORA_DA_TELA);
     }
-    if (this.tomouOsSons && !this.raiz?.isConnected) this.devolverOsSons();
+    if (devolve) this.devolverOsSons(tocavam);
   }
 
   /**
@@ -3004,18 +3019,24 @@ class RegiaoDeMod {
    * - devolve ao bolso o que o som decodificado ocupava;
    * - esquece as anotações desses sons: o diagnóstico os conta onde estão;
    * - guarda o adiamento de cada um, como um destino que nunca os tomou, e
-   *   devolve a marca.
+   *   devolve a marca, com o lugar dos sons que **tocavam** antes de a pausa os
+   *   calar (`tocavam`, que `calarSonsForaDaTela` guarda): esses recomeçam no
+   *   destino que a tomar (`herdarOSom`), e os outros continuam calados.
    *
    * Quando a pessoa volta, o nó reaparece com a figura «pronta» e sem
    * tocador: a marca está com o destino que a tomou, e este só a toma de novo
    * se ela for devolvida outra vez com ele na tela (`tomarOsSonsDevolvidos`).
    */
-  devolverOsSons() {
+  devolverOsSons(tocavam = new Set()) {
     if (!this.sonsDaContribuicao || !this.tomouOsSons) return;
+    const lugares = this.lugaresDasMidias();
+    // O que este destino herdou e ainda não chegou a ele passa adiante.
+    const herdados = { tocavam: new Set(this.herdados?.tocavam ?? []) };
     for (const [elem, som] of this.somDaMidia) {
       const montagem = som.montagem;
       if (!montagem) continue;
       const { estado } = montagem;
+      if (tocavam.has(elem)) herdados.tocavam.add(lugares.get(elem));
       if (som.carregando && som.quer) som.recusar(SOM_FORA_DA_TELA);
       estado.carga += 1;
       som.carregando = false;
@@ -3031,6 +3052,8 @@ class RegiaoDeMod {
       elem.dataset.estado = "pronta";
       this.esquecerMidia(elem);
     }
+    this.herdados = null;
+    this.sonsDaContribuicao.herdados = herdados;
     this.sonsDaContribuicao.tomados = false;
     this.tomouOsSons = false;
   }
@@ -3046,12 +3069,12 @@ class RegiaoDeMod {
    * contribuição desenha; este confere que o nó dele está no documento e que
    * tem um som que assentou esperando.
    *
-   * **Ele não pede os bytes por tomar a marca.** O som saiu da tela parado
-   * (`calarSonsForaDaTela`), e a declaração dele vale como aplicada aqui também:
-   * um `tocando: true` que já valia não o liga de novo. Ele assenta como no
-   * destino que o tomou primeiro (`esperarOPedidoDeTocar`), e o `tocando`
-   * religado é o pedido de tocar — que agora toca aqui, sem recusa. Do começo:
-   * o ponto em que o outro parou foi embora com o tocador dele.
+   * **O som que tocava recomeça aqui, e os outros não.** Quem decide, por som,
+   * é `herdarOSom`: o que tocava quando o lugar dele saiu da tela recomeça, do
+   * começo — o ponto em que o outro parou foi embora com o tocador dele —, sem
+   * um `tocando` novo do MOD; o que não tocava (terminado, parado pelo MOD, ou
+   * recusado) fica calado, e o `tocando` religado é o pedido de tocar — que
+   * agora toca aqui, sem recusa.
    *
    * @returns {boolean} Se tomou a marca.
    */
@@ -3060,13 +3083,68 @@ class RegiaoDeMod {
     if (!this.raiz?.isConnected) return false;
     const adiados = [...this.somDaMidia].filter(([, som]) => som.adiado);
     if (adiados.length === 0) return false;
-    this.sonsDaContribuicao.tomados = true;
-    this.tomouOsSons = true;
-    for (const [elem, som] of adiados) {
-      som.declarado = som.quer;
-      this.esperarOPedidoDeTocar(elem);
-    }
+    const lugares = this.lugaresDasMidias();
+    this.tomarAMarca();
+    for (const [elem, som] of adiados) this.herdarOSom(elem, som, lugares);
     return true;
+  }
+
+  /**
+   * Toma a marca dos sons desta contribuição — e, quando ela foi devolvida,
+   * herda o que o destino que saiu disse deles (`devolverOsSons`): quais
+   * tocavam. A herança fica com este destino até cada som dela chegar aqui.
+   */
+  tomarAMarca() {
+    const sons = this.sonsDaContribuicao;
+    sons.tomados = true;
+    this.tomouOsSons = true;
+    this.herdados = sons.herdados ?? null;
+    sons.herdados = null;
+  }
+
+  /**
+   * Assenta um som que este destino tomou de um que saiu da tela, pela regra
+   * da troca de destino.
+   *
+   * **O som que tocava quando o lugar dele saiu recomeça aqui, do começo** —
+   * «uma troca de tocador no meio de um som o faz recomeçar», nos riscos do
+   * K5: a declaração dele fica por aplicar, e o `tocando: true` que valia é o
+   * pedido de tocar. **Os outros continuam calados**: a declaração deles vale
+   * como aplicada, como em `calarSonsForaDaTela`, e um som que já tinha
+   * terminado, ou que o MOD tinha parado, não volta pela troca.
+   *
+   * Qual som é qual nos dois destinos é o lugar dele na declaração
+   * (`lugaresDasMidias`): a chave do plano não diz, e os destinos desenham a
+   * mesma declaração.
+   */
+  herdarOSom(elem, som, lugares) {
+    if (this.herdados) {
+      som.declarado = this.herdados.tocavam.delete(lugares.get(elem)) ? undefined : som.quer;
+    }
+    this.esperarOPedidoDeTocar(elem);
+  }
+
+  /**
+   * O lugar de cada mídia deste renderer na declaração: a ordem dela entre as
+   * mídias, no documento.
+   *
+   * É o que diz qual som é qual entre os destinos de uma contribuição. A chave
+   * do plano não diz — a posição recomeça dentro de cada contêiner, e dois sons
+   * de contêineres diferentes saem com a mesma —, e a ordem diz: todo destino
+   * monta a mesma declaração, com o mesmo perfil e os mesmos tetos.
+   *
+   * @returns {Map<Element, number>}
+   */
+  lugaresDasMidias() {
+    const lugares = new Map();
+    const andar = (no) => {
+      for (const filho of Array.from(no?.children ?? [])) {
+        if (this.somDaMidia.has(filho)) lugares.set(filho, lugares.size);
+        andar(filho);
+      }
+    };
+    andar(this.raiz);
+    return lugares;
   }
 
   // ------------------------------------------------ o estado das mídias
