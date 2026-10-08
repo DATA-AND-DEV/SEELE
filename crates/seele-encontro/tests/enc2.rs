@@ -57,7 +57,30 @@ fn assinado(chave: &SigningKey, marca: Marca, carimbo: u64, dicas: Vec<SocketAdd
         carimbo,
         dicas,
         assinatura: chave.sign(&mensagem).to_bytes(),
+        cookie: None,
     }
+}
+
+/// O caminho de verdade de um registro: o `MORO2` sem cookie ouve o `DESAFIO`,
+/// e o mesmo `MORO2`, com o cookie dele, recebe a resposta que se devolve.
+fn morar(socket: &UdpSocket, ponto: SocketAddr, mut pedido: Moro2) -> Option<Resposta2> {
+    pedido.cookie = Some(cookie_de(socket, ponto, &pedido));
+    socket.send_to(&moro2(&pedido), ponto).unwrap();
+    ler_resposta2(&receber(socket)?)
+}
+
+/// O cookie deste socket, pelo `DESAFIO` de um `MORO2` sem ele.
+fn cookie_de(socket: &UdpSocket, ponto: SocketAddr, pedido: &Moro2) -> [u8; 16] {
+    let sem = Moro2 {
+        cookie: None,
+        ..pedido.clone()
+    };
+    socket.send_to(&moro2(&sem), ponto).unwrap();
+    let resposta = receber(socket).map(|d| ler_resposta2(&d));
+    let Some(Some(Resposta2::Desafio { cookie, .. })) = resposta else {
+        panic!("um MORO2 sem cookie não ouviu o DESAFIO: {resposta:?}");
+    };
+    cookie
 }
 
 fn receber(socket: &UdpSocket) -> Option<Vec<u8>> {
@@ -86,24 +109,22 @@ fn um_moro2_assinado_mora_e_o_quem2_devolve_o_endereco_e_as_dicas() {
     let anfitriao = socket();
     let quem_liga = socket();
 
-    anfitriao
-        .send_to(
-            &moro2(&assinado(&chave, marca.clone(), agora(), dicas.clone())),
-            ponto,
-        )
-        .unwrap();
-    let resposta = receber(&anfitriao).expect("o MORO2 não foi respondido");
-    assert_eq!(
-        resposta.len(),
-        TAMANHO2,
-        "a resposta não tem o tamanho do pedido"
+    let resposta = morar(
+        &anfitriao,
+        ponto,
+        assinado(&chave, marca.clone(), agora(), dicas.clone()),
     );
+    let Some(Resposta2::Morou {
+        marca: dela,
+        endereco,
+        ..
+    }) = resposta
+    else {
+        panic!("o MORO2 com o cookie não morou: {resposta:?}");
+    };
     assert_eq!(
-        ler_resposta2(&resposta),
-        Some(Resposta2::Morou {
-            marca: marca.clone(),
-            endereco: anfitriao.local_addr().unwrap(),
-        })
+        (dela, endereco),
+        (marca.clone(), anfitriao.local_addr().unwrap())
     );
 
     quem_liga.send_to(&quem2(&marca), ponto).unwrap();
@@ -141,6 +162,8 @@ fn um_moro2_com_assinatura_errada_e_calado_e_nao_mora() {
     let mut forjado = assinado(&chave, marca.clone(), agora(), Vec::new());
     forjado.assinatura[0] ^= 1;
     let impostor = socket();
+    // Com o cookie do próprio impostor: aqui a barreira é a assinatura.
+    forjado.cookie = Some(cookie_de(&impostor, ponto, &forjado));
     impostor.send_to(&moro2(&forjado), ponto).unwrap();
     assert!(
         nada_chega(&impostor),
@@ -160,19 +183,18 @@ fn um_moro2_com_relogio_torto_ouve_a_recusa_com_a_hora_do_ponto() {
     let chave = SigningKey::from_bytes(&[4; 32]);
     let marca = marcas_de(&chave).servidor().clone();
     let anfitriao = socket();
-    anfitriao
-        .send_to(
-            &moro2(&assinado(&chave, marca.clone(), agora() - 1000, Vec::new())),
-            ponto,
-        )
-        .unwrap();
+    let resposta = morar(
+        &anfitriao,
+        ponto,
+        assinado(&chave, marca.clone(), agora() - 1000, Vec::new()),
+    );
     let Some(Resposta2::Recusa {
         marca: dela,
         motivo,
         agora: do_ponto,
-    }) = ler_resposta2(&receber(&anfitriao).expect("o relógio torto foi calado"))
+    }) = resposta
     else {
-        panic!("o relógio torto não virou RECUSA");
+        panic!("o relógio torto não virou RECUSA: {resposta:?}");
     };
     assert_eq!((dela, motivo), (marca, Motivo::Relogio));
     assert!(
@@ -300,17 +322,14 @@ fn uma_enxurrada_de_quem2_nao_cala_o_registro_da_mesma_rede() {
     let alguem = socket();
     let chave = SigningKey::from_bytes(&[7; 32]);
     let marca = marcas_de(&chave).servidor().clone();
+    let mut pedido = assinado(&chave, marca.clone(), agora(), Vec::new());
+    pedido.cookie = Some(cookie_de(&alguem, ponto, &pedido));
     // Logo em seguida, com o balde das perguntas vazio: esperar o fim das
     // respostas daria tempo de ele encher de novo.
     for _ in 0..100 {
         alguem.send_to(&quem2(&marca), ponto).unwrap();
     }
-    alguem
-        .send_to(
-            &moro2(&assinado(&chave, marca.clone(), agora(), Vec::new())),
-            ponto,
-        )
-        .unwrap();
+    alguem.send_to(&moro2(&pedido), ponto).unwrap();
     let chegou = tudo_que_chega(&alguem);
     assert!(
         chegou
@@ -318,5 +337,104 @@ fn uma_enxurrada_de_quem2_nao_cala_o_registro_da_mesma_rede() {
             .any(|d| matches!(ler_resposta2(d), Some(Resposta2::Morou { .. }))),
         "a enxurrada de QUEM2 esvaziou o balde do registro da mesma rede, e o MORO2 \
          logo depois dela foi calado"
+    );
+}
+
+#[test]
+fn um_moro2_sem_cookie_ouve_o_desafio_e_nao_mora() {
+    let ponto = ponto_no_ar();
+    let chave = SigningKey::from_bytes(&[8; 32]);
+    let marca = marcas_de(&chave).servidor().clone();
+    let anfitriao = socket();
+    anfitriao
+        .send_to(
+            &moro2(&assinado(&chave, marca.clone(), agora(), Vec::new())),
+            ponto,
+        )
+        .unwrap();
+    let resposta = receber(&anfitriao).expect("um MORO2 sem cookie foi calado");
+    assert_eq!(
+        resposta.len(),
+        TAMANHO2,
+        "o DESAFIO não tem o tamanho do pedido"
+    );
+    assert!(
+        matches!(ler_resposta2(&resposta), Some(Resposta2::Desafio { .. })),
+        "um MORO2 sem cookie não ouviu o DESAFIO"
+    );
+    anfitriao.send_to(&quem2(&marca), ponto).unwrap();
+    assert_eq!(
+        ler_resposta2(&receber(&anfitriao).unwrap()),
+        Some(Resposta2::Ninguem { marca }),
+        "um MORO2 sem cookie morou"
+    );
+}
+
+#[test]
+fn cem_moro2_sem_cookie_nao_gastam_o_balde_do_registro() {
+    // Quem forja a origem não recebe o cookie do IP que forja: o que ele manda
+    // ouve DESAFIO, e não gasta o balde de quem mora naquele IP.
+    let ponto = ponto_no_ar();
+    let chave = SigningKey::from_bytes(&[9; 32]);
+    let marca = marcas_de(&chave).servidor().clone();
+    let alguem = socket();
+    let mut pedido = assinado(&chave, marca, agora(), Vec::new());
+    let cookie = cookie_de(&alguem, ponto, &pedido);
+    for _ in 0..100 {
+        alguem.send_to(&moro2(&pedido), ponto).unwrap();
+    }
+    pedido.cookie = Some(cookie);
+    alguem.send_to(&moro2(&pedido), ponto).unwrap();
+    let chegou = tudo_que_chega(&alguem);
+    assert!(
+        chegou
+            .iter()
+            .any(|d| matches!(ler_resposta2(d), Some(Resposta2::Morou { .. }))),
+        "cem MORO2 sem cookie gastaram o balde do registro, e o com cookie foi calado"
+    );
+}
+
+#[test]
+fn o_cookie_de_um_ip_nao_vale_noutro() {
+    // As duas famílias do loopback são dois IPs: o cookie do ::1 não vale no
+    // 127.0.0.1, como o de quem forja a origem não vale no IP que ele forja.
+    let quarto = std::sync::Arc::new(seele_encontro::Quarto::novo());
+    let quatro = Ponto::abrir_com_quarto(
+        "127.0.0.1:0".parse().unwrap(),
+        Vizinhanca::TambemAqui,
+        std::sync::Arc::clone(&quarto),
+    )
+    .unwrap();
+    let Ok(seis) = Ponto::abrir_com_quarto(
+        "[::1]:0".parse().unwrap(),
+        Vizinhanca::TambemAqui,
+        std::sync::Arc::clone(&quarto),
+    ) else {
+        eprintln!("PARCIAL: esta máquina não tem o ::1, e o teste dos dois IPs não roda");
+        return;
+    };
+    let (onde_quatro, onde_seis) = (quatro.endereco().unwrap(), seis.endereco().unwrap());
+    std::thread::spawn(move || {
+        let _ = quatro.servir();
+    });
+    std::thread::spawn(move || {
+        let _ = seis.servir();
+    });
+
+    let chave = SigningKey::from_bytes(&[10; 32]);
+    let marca = marcas_de(&chave).servidor().clone();
+    let mut pedido = assinado(&chave, marca, agora(), Vec::new());
+    let pelo_seis = UdpSocket::bind("[::1]:0").unwrap();
+    pelo_seis.set_read_timeout(Some(PRAZO)).unwrap();
+    pedido.cookie = Some(cookie_de(&pelo_seis, onde_seis, &pedido));
+
+    let pelo_quatro = socket();
+    pelo_quatro.send_to(&moro2(&pedido), onde_quatro).unwrap();
+    assert!(
+        matches!(
+            ler_resposta2(&receber(&pelo_quatro).unwrap()),
+            Some(Resposta2::Desafio { .. })
+        ),
+        "o cookie do ::1 valeu no 127.0.0.1"
     );
 }

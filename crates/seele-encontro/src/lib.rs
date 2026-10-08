@@ -66,6 +66,7 @@
 //! igual no Linux, no BSD e no Windows sem dependência nenhuma.
 
 pub mod assinado;
+pub mod cookie;
 pub mod taxa;
 
 use std::collections::HashMap;
@@ -75,8 +76,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use seele_proto::encontro::{
-    analisar, analisar2, aqui, responder_em, resposta2, Motivo, Pedido, Pedido2, Resposta,
-    Resposta2, Vizinhanca, TAMANHO2,
+    analisar, analisar2, aqui, responder_em, resposta2, Marca, Moro2, Motivo, Pedido, Pedido2,
+    Resposta, Resposta2, Vizinhanca, TAMANHO2,
 };
 
 /// O que aconteceu com um datagrama.
@@ -140,6 +141,9 @@ pub struct Quarto {
     assinados: assinado::QuartoAssinado,
     /// O limite por prefixo, só do ENC/2: ver [`taxa`].
     taxa: taxa::Taxa,
+    /// O segredo dos cookies do `MORO2`, sorteado na subida: ver [`cookie`].
+    /// Um só para as duas famílias, como o resto do quarto.
+    cookies: cookie::Cookies,
 }
 
 impl Quarto {
@@ -402,55 +406,94 @@ impl Ponto {
     /// **Nada disto é impresso, nem com `--barulhento`**, pelo motivo do quarto
     /// da versão 1: o registro é metadado guardado.
     fn atender2(&self, datagrama: &[u8], de: SocketAddr) -> Option<Resposta> {
-        let pedido = analisar2(datagrama)?;
-        let (marca, classe) = match &pedido {
-            Pedido2::Moro2(moro) => (moro.marca.clone(), taxa::Classe::Registro),
-            Pedido2::Quem2 { marca } => (marca.clone(), taxa::Classe::Pergunta),
-        };
-        let resposta = match self.quarto.taxa.pedir(de.ip(), classe, Instant::now()) {
-            taxa::Decisao::Recusa { dizer: false } => return None,
-            taxa::Decisao::Recusa { dizer: true } => Resposta2::Recusa {
-                marca,
-                motivo: Motivo::Taxa,
-                agora: agora_unix(),
-            },
-            taxa::Decisao::Passa => match pedido {
-                Pedido2::Moro2(moro) => {
-                    if !assinado::conferir(&moro) {
-                        return None;
-                    }
-                    match self
-                        .quarto
-                        .assinados
-                        .morar(&moro, de, Instant::now(), agora_unix())
-                    {
-                        Ok(()) => Resposta2::Morou {
-                            marca,
-                            endereco: de,
-                        },
-                        Err(motivo) => Resposta2::Recusa {
-                            marca,
-                            motivo,
-                            agora: agora_unix(),
-                        },
-                    }
-                }
-                Pedido2::Quem2 { .. } => {
-                    match self.quarto.assinados.onde_mora(&marca, Instant::now()) {
-                        Some((endereco, dicas)) => Resposta2::Aqui2 {
-                            marca,
-                            endereco,
-                            dicas,
-                        },
-                        None => Resposta2::Ninguem { marca },
-                    }
-                }
-            },
+        let resposta = match analisar2(datagrama)? {
+            Pedido2::Moro2(moro) => self.registrar(&moro, de)?,
+            Pedido2::Quem2 { marca } => self.responder_quem2(marca, de)?,
         };
         Some(Resposta {
             destino: de,
             datagrama: resposta2(&resposta),
         })
+    }
+
+    /// O `MORO2`, nesta ordem: o cookie, o limite, a assinatura, o quarto.
+    ///
+    /// **O cookie vem antes do limite** (D-enc-4): um `MORO2` sem ele, ou com
+    /// um que não confere para este IP, ouve o `DESAFIO` e não gasta o balde de
+    /// registro. Quem forja a origem não recebe o cookie do IP que forja, então
+    /// não esvazia o balde de ninguém nem registra em nome de ninguém. O
+    /// `DESAFIO` tem o tamanho do pedido e vai a quem pediu, como o `ONDE`.
+    fn registrar(&self, moro: &Moro2, de: SocketAddr) -> Option<Resposta2> {
+        let agora = agora_unix();
+        let marca = moro.marca.clone();
+        let cookie_valido = moro
+            .cookie
+            .is_some_and(|cookie| self.quarto.cookies.confere(de.ip(), &cookie, agora));
+        if !cookie_valido {
+            return Some(Resposta2::Desafio {
+                marca,
+                cookie: self.quarto.cookies.emitir(de.ip(), agora),
+            });
+        }
+        match self
+            .quarto
+            .taxa
+            .pedir(de.ip(), taxa::Classe::Registro, Instant::now())
+        {
+            taxa::Decisao::Recusa { dizer: false } => return None,
+            taxa::Decisao::Recusa { dizer: true } => {
+                return Some(Resposta2::Recusa {
+                    marca,
+                    motivo: Motivo::Taxa,
+                    agora,
+                })
+            }
+            taxa::Decisao::Passa => {}
+        }
+        if !assinado::conferir(moro) {
+            return None;
+        }
+        Some(
+            match self.quarto.assinados.morar(moro, de, Instant::now(), agora) {
+                Ok(()) => Resposta2::Morou {
+                    marca,
+                    endereco: de,
+                    cookie: self.quarto.cookies.emitir(de.ip(), agora),
+                },
+                Err(motivo) => Resposta2::Recusa {
+                    marca,
+                    motivo,
+                    agora,
+                },
+            },
+        )
+    }
+
+    /// O `QUEM2`: o limite de perguntas, e a resposta, que sempre vem dentro
+    /// dele. Sem cookie: a pergunta não guarda nada, e o balde dela é outro.
+    fn responder_quem2(&self, marca: Marca, de: SocketAddr) -> Option<Resposta2> {
+        match self
+            .quarto
+            .taxa
+            .pedir(de.ip(), taxa::Classe::Pergunta, Instant::now())
+        {
+            taxa::Decisao::Recusa { dizer: false } => None,
+            taxa::Decisao::Recusa { dizer: true } => Some(Resposta2::Recusa {
+                marca,
+                motivo: Motivo::Taxa,
+                agora: agora_unix(),
+            }),
+            taxa::Decisao::Passa => Some(
+                match self.quarto.assinados.onde_mora(&marca, Instant::now()) {
+                    Some((endereco, dicas)) => Resposta2::Aqui2 {
+                        marca,
+                        endereco,
+                        dicas,
+                    },
+                    None => Resposta2::Ninguem { marca },
+                },
+            ),
+        }
     }
 
     /// Atende para sempre.

@@ -274,6 +274,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             carimbo: 1_791_000_000,
             dicas: vec![dica],
             assinatura: [0xAB; 64],
+            cookie: Some([0xC0; encontro::BYTES_DO_COOKIE]),
         }),
     );
     do_encontro.insert("quem2".to_owned(), encontro::quem2(sala.servidor()));
@@ -283,6 +284,14 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             encontro::Resposta2::Morou {
                 marca: sala.servidor().clone(),
                 endereco: publico,
+                cookie: [0xC0; encontro::BYTES_DO_COOKIE],
+            },
+        ),
+        (
+            "desafio",
+            encontro::Resposta2::Desafio {
+                marca: sala.servidor().clone(),
+                cookie: [0xC0; encontro::BYTES_DO_COOKIE],
             },
         ),
         (

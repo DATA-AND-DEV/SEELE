@@ -259,6 +259,7 @@ mod testes {
             carimbo,
             dicas,
             assinatura: chave.sign(&mensagem).to_bytes(),
+            cookie: None,
         }
     }
 
@@ -349,6 +350,7 @@ mod testes {
             carimbo: AGORA,
             dicas: Vec::new(),
             assinatura,
+            cookie: None,
         };
         assert!(
             !conferir(&pedido),

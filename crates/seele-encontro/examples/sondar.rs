@@ -42,11 +42,13 @@
 //! # O ENC/2, e o portão da 0.16
 //!
 //! Depois do quarto, ele sonda o ENC/2 (ADR 0062) com uma chave de sondagem
-//! nova a cada rodada: um `MORO2` com o carimbo de uma hora atrás, que um
-//! ponto com o ENC/2 recusa dizendo a hora dele (é assim que o relógio do ponto
-//! é medido); um `MORO2` com o carimbo de agora e uma dica sintética de rede
-//! local, que ele guarda; um `QUEM2` da mesma marca, que devolve o endereço e a
-//! dica; e um `QUEM2` de uma marca que ninguém registrou, que diz `NINGUEM`.
+//! nova a cada rodada: um `MORO2` sem cookie, que um ponto com o ENC/2 responde
+//! com o `DESAFIO`; o mesmo `MORO2`, com o cookie e o carimbo de uma hora atrás,
+//! que ele recusa dizendo a hora dele (é assim que o relógio do ponto é
+//! medido); um `MORO2` com o cookie, o carimbo de agora e uma dica sintética de
+//! rede local, que ele guarda; um `QUEM2` da mesma marca, que devolve o
+//! endereço e a dica; e um `QUEM2` de uma marca que ninguém registrou, que diz
+//! `NINGUEM`. Cada pedido sai até três vezes.
 //!
 //! Um ponto anterior ao ENC/2 cala para os quatro, e é o caso que o portão
 //! existe para pegar: a sala de toda pessoa ficaria sem registro, e quem liga
@@ -356,6 +358,7 @@ fn moro2_de(chave: &SigningKey, carimbo: u64, dicas: Vec<SocketAddr>) -> Moro2 {
         carimbo,
         dicas,
         assinatura: chave.sign(&mensagem).to_bytes(),
+        cookie: None,
     }
 }
 
@@ -365,27 +368,53 @@ fn moro2_de(chave: &SigningKey, carimbo: u64, dicas: Vec<SocketAddr>) -> Moro2 {
 fn sondar_enc2(socket: &UdpSocket, destino: SocketAddr) -> EstadoDoEnc2 {
     let chave = chave_de_sondagem(0x5E);
     let uma_hora_atras = agora_unix().saturating_sub(3600);
-    let torto = moro2_de(&chave, uma_hora_atras, Vec::new());
-    let relogio_do_ponto =
-        match pedir2(socket, destino, &moro2(&torto), &torto.marca) {
-            None => return EstadoDoEnc2::Mudo,
-            Some(Resposta2::Recusa {
-                motivo: Motivo::Relogio,
-                agora,
-                ..
-            }) => i64::try_from(i128::from(agora) - i128::from(agora_unix())).unwrap_or(i64::MAX),
-            Some(Resposta2::Morou { .. }) => return EstadoDoEnc2::Torto(
-                "o ponto aceitou um carimbo de uma hora atrás: o relógio dele está atrasado em \
-                 cerca de uma hora, e o de toda sala que registrar vai ser recusado"
+    let mut torto = moro2_de(&chave, uma_hora_atras, Vec::new());
+
+    // Sem cookie, o DESAFIO (D-enc-4). Silêncio aqui é um ponto de antes do
+    // ENC/2.
+    let cookie = match pedir2(socket, destino, &moro2(&torto), &torto.marca) {
+        None => return EstadoDoEnc2::Mudo,
+        Some(Resposta2::Desafio { cookie, .. }) => cookie,
+        Some(outra) => {
+            return EstadoDoEnc2::Torto(format!(
+                "um MORO2 sem cookie não ouviu o DESAFIO, e sim {outra:?}: o ponto fala um \
+                 ENC/2 de antes do cookie"
+            ))
+        }
+    };
+    torto.cookie = Some(cookie);
+
+    let relogio_do_ponto = match pedir2(socket, destino, &moro2(&torto), &torto.marca) {
+        None => {
+            return EstadoDoEnc2::Torto(
+                "o MORO2 com o cookie do DESAFIO ficou sem resposta em três tentativas".to_owned(),
+            )
+        }
+        Some(Resposta2::Recusa {
+            motivo: Motivo::Relogio,
+            agora,
+            ..
+        }) => i64::try_from(i128::from(agora) - i128::from(agora_unix())).unwrap_or(i64::MAX),
+        Some(Resposta2::Desafio { .. }) => {
+            return EstadoDoEnc2::Torto(
+                "o cookie que o próprio ponto deu não valeu no MORO2 seguinte".to_owned(),
+            )
+        }
+        Some(Resposta2::Morou { .. }) => {
+            return EstadoDoEnc2::Torto(
+                "o ponto aceitou um carimbo de uma hora atrás: o relógio dele está atrasado \
+                     em cerca de uma hora, e o de toda sala que registrar vai ser recusado"
                     .to_owned(),
-            ),
-            Some(outra) => {
-                return EstadoDoEnc2::Torto(format!("ao carimbo torto, respondeu {outra:?}"))
-            }
-        };
+            )
+        }
+        Some(outra) => {
+            return EstadoDoEnc2::Torto(format!("ao carimbo torto, respondeu {outra:?}"))
+        }
+    };
 
     let dica: SocketAddr = SocketAddr::from(([10, 255, 255, 254], 8385));
-    let certo = moro2_de(&chave, agora_unix(), vec![dica]);
+    let mut certo = moro2_de(&chave, agora_unix(), vec![dica]);
+    certo.cookie = Some(cookie);
     let registrado = match pedir2(socket, destino, &moro2(&certo), &certo.marca) {
         Some(Resposta2::Morou { endereco, .. }) => endereco,
         Some(Resposta2::Recusa {

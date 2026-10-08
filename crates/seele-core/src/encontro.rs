@@ -1096,6 +1096,7 @@ impl std::fmt::Debug for PeloQuem2<'_> {
                     format!("RECUSA {} {agora}", motivo.texto())
                 }
                 Some(encontro::Resposta2::Morou { endereco, .. }) => format!("MOROU {endereco}"),
+                Some(encontro::Resposta2::Desafio { .. }) => "DESAFIO".to_owned(),
             }
         }
         f.debug_struct("PeloQuem2")

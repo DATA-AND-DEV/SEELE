@@ -702,8 +702,9 @@ pub const MAGIA2: &str = "SEELE-ENC/2";
 /// da versão 1.
 ///
 /// Fixo, pelo motivo de [`TAMANHO`]: toda resposta tem o tamanho do pedido que
-/// a causou, e o ponto nunca amplifica. O maior `MORO2` possível tem 299 bytes
-/// com a quebra de linha (o teste `o_maior_moro2_cabe_no_datagrama`).
+/// a causou, e o ponto nunca amplifica. O maior `MORO2` possível tem 322 bytes
+/// com a quebra de linha, o cookie incluído (o teste
+/// `o_maior_moro2_cabe_no_datagrama`).
 ///
 /// **A folga não compra campo novo sem versão nova.** Cada linha tem um número
 /// exato de campos, e cada motivo da recusa é um de quatro: um campo ou um
@@ -720,6 +721,14 @@ pub const LIMITE_DE_DICAS: usize = 2;
 /// copiado no caminho poderia ser repetido, e é por isso que o ponto lembra o
 /// carimbo de cada marca durante esse tempo (ADR 0062).
 pub const TOLERANCIA_DO_CARIMBO: u64 = 300;
+
+/// Quantos bytes tem o cookie do `MORO2` (D-enc-4, ADR 0062).
+///
+/// É a prova de ida e volta: o ponto o dá num [`Resposta2::Desafio`] ou num
+/// [`Resposta2::Morou`], preso ao IP de quem pediu, e só um `MORO2` que o traz
+/// de volta gasta o limite e chega ao quarto. Quem forja a origem não recebe o
+/// cookie do IP que forja.
+pub const BYTES_DO_COOKIE: usize = 16;
 
 /// O motor de base64 do fio: base64url, sem `=`, e sem bits sobrando no fim.
 /// Uma chave tem uma escrita só.
@@ -743,6 +752,11 @@ pub struct Moro2 {
     pub dicas: Vec<SocketAddr>,
     /// A assinatura Ed25519 de [`crate::assinatura::moro2`].
     pub assinatura: [u8; 64],
+    /// O cookie que o ponto deu a este IP, ou `None` na primeira vez.
+    ///
+    /// **Não vai assinado**: ele prova o caminho de volta, e não a chave. A
+    /// sala o junta ao `MORO2` sem assinar de novo.
+    pub cookie: Option<[u8; BYTES_DO_COOKIE]>,
 }
 
 /// O que se pede a um ponto de encontro na versão 2.
@@ -800,12 +814,24 @@ impl Motivo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resposta2 {
     /// O `MORO2` foi guardado. Leva o endereço que o ponto viu, como o `AQUI`
-    /// que responde a um `MORO`.
+    /// que responde a um `MORO`, e o cookie da janela corrente, para a sala
+    /// renová-lo antes de ele vencer.
     Morou {
         /// A marca registrada.
         marca: Marca,
         /// O endereço público de quem registrou, visto pelo ponto.
         endereco: SocketAddr,
+        /// O cookie deste IP, na janela corrente.
+        cookie: [u8; BYTES_DO_COOKIE],
+    },
+    /// O `MORO2` veio sem cookie, ou com um que não confere para o IP de onde
+    /// ele veio. O ponto não guardou nada, e diz o cookie: o mesmo `MORO2`,
+    /// com ele, mora.
+    Desafio {
+        /// A marca do pedido.
+        marca: Marca,
+        /// O cookie deste IP, na janela corrente.
+        cookie: [u8; BYTES_DO_COOKIE],
     },
     /// Onde a marca mora, e as dicas que ela deixou.
     Aqui2 {
@@ -839,6 +865,7 @@ impl Resposta2 {
     pub fn marca(&self) -> &Marca {
         match self {
             Self::Morou { marca, .. }
+            | Self::Desafio { marca, .. }
             | Self::Aqui2 { marca, .. }
             | Self::Ninguem { marca }
             | Self::Recusa { marca, .. } => marca,
@@ -876,12 +903,15 @@ pub fn serve_de_dica(endereco: SocketAddr) -> bool {
 pub fn moro2(pedido: &Moro2) -> Vec<u8> {
     use base64::Engine as _;
     encher2(format!(
-        "{MAGIA2} MORO2 {} {} {} {} {}",
+        "{MAGIA2} MORO2 {} {} {} {} {} {}",
         pedido.marca,
         BASE64.encode(pedido.chave),
         pedido.carimbo,
         escrever_dicas(&pedido.dicas),
         BASE64.encode(pedido.assinatura),
+        pedido
+            .cookie
+            .map_or_else(|| "-".to_owned(), |cookie| BASE64.encode(cookie)),
     ))
 }
 
@@ -894,8 +924,19 @@ pub fn quem2(marca: &Marca) -> Vec<u8> {
 /// Monta uma resposta da versão 2.
 #[must_use]
 pub fn resposta2(resposta: &Resposta2) -> Vec<u8> {
+    use base64::Engine as _;
     encher2(match resposta {
-        Resposta2::Morou { marca, endereco } => format!("{MAGIA2} MOROU {marca} {endereco}"),
+        Resposta2::Morou {
+            marca,
+            endereco,
+            cookie,
+        } => format!(
+            "{MAGIA2} MOROU {marca} {endereco} {}",
+            BASE64.encode(cookie)
+        ),
+        Resposta2::Desafio { marca, cookie } => {
+            format!("{MAGIA2} DESAFIO {marca} {}", BASE64.encode(cookie))
+        }
         Resposta2::Aqui2 {
             marca,
             endereco,
@@ -925,13 +966,17 @@ pub fn analisar2(datagrama: &[u8]) -> Option<Pedido2> {
     let (verbo, resto) = verbo2(datagrama)?;
     match verbo {
         "MORO2" => {
-            let [marca, chave, carimbo, dicas, assinatura] = campos(resto)?;
+            let [marca, chave, carimbo, dicas, assinatura, cookie] = campos(resto)?;
             Some(Pedido2::Moro2(Moro2 {
                 marca: Marca::nova(marca)?,
                 chave: ler_base64(chave)?,
                 carimbo: ler_numero(carimbo)?,
                 dicas: ler_dicas(dicas)?,
                 assinatura: ler_base64(assinatura)?,
+                cookie: match cookie {
+                    "-" => None,
+                    cookie => Some(ler_base64(cookie)?),
+                },
             }))
         }
         "QUEM2" => {
@@ -952,10 +997,18 @@ pub fn ler_resposta2(datagrama: &[u8]) -> Option<Resposta2> {
     let (verbo, resto) = verbo2(datagrama)?;
     match verbo {
         "MOROU" => {
-            let [marca, endereco] = campos(resto)?;
+            let [marca, endereco, cookie] = campos(resto)?;
             Some(Resposta2::Morou {
                 marca: Marca::nova(marca)?,
                 endereco: ler_endereco(endereco)?,
+                cookie: ler_base64(cookie)?,
+            })
+        }
+        "DESAFIO" => {
+            let [marca, cookie] = campos(resto)?;
+            Some(Resposta2::Desafio {
+                marca: Marca::nova(marca)?,
+                cookie: ler_base64(cookie)?,
             })
         }
         "AQUI2" => {
@@ -1504,6 +1557,7 @@ mod enc2 {
             carimbo: 1_791_000_000,
             dicas: vec![de("192.168.0.10:8385"), de("[fd12:3456::1]:8385")],
             assinatura: [9; 64],
+            cookie: Some([5; BYTES_DO_COOKIE]),
         }
     }
 
@@ -1524,6 +1578,7 @@ mod enc2 {
             carimbo: u64::MAX,
             dicas: vec![de("[fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535"); 2],
             assinatura: [0xFF; 64],
+            cookie: Some([0xFF; BYTES_DO_COOKIE]),
         };
         let datagrama = moro2(&pedido);
         assert_eq!(datagrama.len(), TAMANHO2);
@@ -1536,6 +1591,10 @@ mod enc2 {
             Pedido2::Moro2(um_moro2()),
             Pedido2::Moro2(Moro2 {
                 dicas: Vec::new(),
+                ..um_moro2()
+            }),
+            Pedido2::Moro2(Moro2 {
+                cookie: None,
                 ..um_moro2()
             }),
             Pedido2::Quem2 {
@@ -1554,6 +1613,11 @@ mod enc2 {
             Resposta2::Morou {
                 marca: marca("pAs"),
                 endereco: de("203.0.113.7:41234"),
+                cookie: [3; BYTES_DO_COOKIE],
+            },
+            Resposta2::Desafio {
+                marca: marca("pAs"),
+                cookie: [0xFE; BYTES_DO_COOKIE],
             },
             Resposta2::Aqui2 {
                 marca: marca("pAs"),
@@ -1650,6 +1714,7 @@ mod enc2 {
         let resposta = resposta2(&Resposta2::Morou {
             marca: marca("abc"),
             endereco: de("203.0.113.7:4000"),
+            cookie: [1; BYTES_DO_COOKIE],
         });
         assert_eq!(analisar2(&resposta), None);
         assert_eq!(ler_resposta2(&moro2(&um_moro2())), None);
@@ -1657,8 +1722,8 @@ mod enc2 {
     }
 
     /// O `MORO2` de `um_moro2`, com o campo `indice` trocado por `texto`:
-    /// 0 a magia, 1 o verbo, 2 a marca, 3 a chave, 4 o carimbo, 5 as dicas e
-    /// 6 a assinatura.
+    /// 0 a magia, 1 o verbo, 2 a marca, 3 a chave, 4 o carimbo, 5 as dicas,
+    /// 6 a assinatura e 7 o cookie.
     fn com_campo(indice: usize, texto: &str) -> Vec<u8> {
         let linha = linha(&moro2(&um_moro2()));
         let mut campos: Vec<&str> = linha.split(' ').collect();
@@ -1672,6 +1737,10 @@ mod enc2 {
         assert!(
             analisar2(&com_campo(3, &chave)).is_some(),
             "o caso de controle, com a chave canônica, tem de ser aceito"
+        );
+        assert!(
+            analisar2(&com_campo(7, "-")).is_some(),
+            "o caso de controle, sem cookie, tem de ser aceito"
         );
         let inteira = linha(&moro2(&um_moro2()));
         let faltando: Vec<&str> = inteira.split(' ').take(6).collect();
@@ -1688,6 +1757,11 @@ mod enc2 {
             com_campo(5, ""),
             com_campo(5, "192.168.0.10:8385,192.168.0.11:8385,192.168.0.12:8385"),
             com_campo(6, &"A".repeat(85)),
+            com_campo(7, &"A".repeat(21)),
+            com_campo(7, &"A".repeat(23)),
+            com_campo(7, &format!("{}=", "A".repeat(22))),
+            com_campo(7, ""),
+            com_campo(7, "--"),
             encher2(format!("{inteira} extra")),
             encher2(faltando.join(" ")),
         ];
@@ -1777,5 +1851,23 @@ mod enc2 {
         assert_eq!(TAMANHO2, 384);
         assert_eq!(TAMANHO2, 4 * TAMANHO);
         assert_eq!(MAGIA2, "SEELE-ENC/2");
+        assert_eq!(BYTES_DO_COOKIE, 16);
+    }
+
+    #[test]
+    fn o_cookie_nao_entra_na_mensagem_assinada() {
+        // Ele prova o caminho de volta, e não a chave: a sala o junta ao
+        // MORO2 sem assinar de novo. A mensagem assinada não o recebe, e o
+        // mesmo pedido com e sem cookie difere só no último campo.
+        let com = linha(&moro2(&um_moro2()));
+        let sem = linha(&moro2(&Moro2 {
+            cookie: None,
+            ..um_moro2()
+        }));
+        let (com_resto, com_cookie) = com.rsplit_once(' ').expect("tem campos");
+        let (sem_resto, sem_cookie) = sem.rsplit_once(' ').expect("tem campos");
+        assert_eq!(com_resto, sem_resto);
+        assert_eq!(sem_cookie, "-");
+        assert_eq!(com_cookie.len(), 22);
     }
 }

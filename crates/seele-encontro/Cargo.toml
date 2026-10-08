@@ -29,6 +29,12 @@ socket2 = { workspace = true }
 # mandar o pedido antes dela. Já está na árvore pelo `seele-server`, pelo
 # `seele-core` e pelo `seele-conformance`, na mesma versão.
 ed25519-dalek = "3.0.0"
+# O cookie do `MORO2` (D-enc-4, ADR 0062): um HMAC-SHA256 escrito sobre o
+# `sha2`, que o `seele-proto` já traz na mesma versão, e o segredo sorteado do
+# sistema pelo `getrandom`, que o `quinn` e o `rand` já trazem na mesma versão.
+# Nenhum dos dois cresce a árvore.
+sha2 = "0.11.0"
+getrandom = "0.4"
 
 [lints]
 workspace = true
