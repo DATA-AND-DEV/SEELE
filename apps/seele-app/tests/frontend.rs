@@ -9655,6 +9655,315 @@ fn a_ajuda_nao_rouba_a_interrogacao_de_quem_esta_escrevendo() {
     );
 }
 
+#[test]
+fn a_linha_de_estado_nomeia_a_tecla_de_falar() {
+    // «microfone abre na tecla» dizia que há uma tecla e não dizia qual. A
+    // tecla de falar é escolhida em CONFIGURAÇÕES · ATALHOS e fica gravada, então
+    // quem a trocou lia a mesma frase de quem nunca mexeu — e nenhum dos dois
+    // tinha, pela tela, como saber o que segurar.
+    //
+    // São duas linhas que dizem como o microfone abre: a do operador, na
+    // sessão, e a faixa de contexto da configuração. As duas nomeiam a tecla
+    // pelo mesmo `nomeDaTecla`, com a mesma `teclaDeFalar` que o `keydown`
+    // compara — a frase não pode dizer uma tecla e o ouvinte escutar outra.
+    for (arquivo, funcao, onde) in [
+        (
+            "ui/tela-sessao.js",
+            "function desenharOperador(",
+            "a linha do operador",
+        ),
+        (
+            "ui/tela-server.js",
+            "function desenharContextoDaSessao(",
+            "a faixa de contexto da configuração",
+        ),
+    ] {
+        let corpo = js_function(&read(arquivo), funcao);
+        let Some(tecla) = corpo.lines().find(|linha| linha.contains("PushToTalk:")) else {
+            panic!("{onde} não diz mais nada sobre o modo tecla:\n{corpo}");
+        };
+        assert!(
+            tecla.contains("nomeDaTecla(teclaDeFalar)"),
+            "{onde} diz que o microfone abre numa tecla sem dizer qual: quem \
+             trocou a tecla em ATALHOS segura a errada, e quem nunca trocou não \
+             sabe que é o ESPAÇO:\n{tecla}"
+        );
+        assert!(
+            !corpo.contains("abre na tecla"),
+            "{onde} voltou a dizer «abre na tecla» sem o nome dela:\n{corpo}"
+        );
+    }
+
+    // **E a faixa de contexto acompanha o que muda com ela aberta.** A linha do
+    // operador é redesenhada a cada quadro; a faixa da configuração era escrita
+    // ao abrir a tela, e mais nunca. Medido nas revisões do lote J: trocada a
+    // tecla para F, o botão e o operador diziam F e a faixa continuava em
+    // «segura ESPAÇO»; trocado o modo do microfone, a faixa dizia o modo de
+    // antes. A rodada 1 consertou a tecla com um redesenho no `.then` de cada
+    // releitura, e o modo ficou de fora — dois caminhos, e o terceiro esquecido.
+    //
+    // **Um caminho só**: `atualizarServer`, que roda ao abrir e a cada 500 ms
+    // com a tela na frente, redesenha a faixa do quadro da sessão e da tecla de
+    // agora. Tecla, modo, mudo e sala chegam todos por ele. Uma segunda chamada
+    // em outro lugar é o começo de um caminho que alguém esquece de estender.
+    let server = without_comments(&read("ui/tela-server.js"));
+    let atualizar = js_function(&server, "async function atualizarServer(");
+    assert!(
+        atualizar.contains("desenharContextoDaSessao()"),
+        "`atualizarServer` não redesenha a faixa de contexto: o que muda com a \
+         configuração aberta — a tecla de falar, o modo do microfone — fica dito \
+         como era ao abrir:\n{atualizar}"
+    );
+    // **Toda referência, em todo `.js` de `ui/`.** A contagem via só a forma com
+    // parênteses e só `tela-server.js`, e a re-revisão da rodada 2 achou as duas
+    // brechas: um `.then(desenharContextoDaSessao)` — o estilo que o arquivo usa
+    // para `desenharTeclaDeFalar` — e uma chamada noutra tela passavam sem ser
+    // vistos. Conta-se o nome como palavra inteira, fora da declaração.
+    let palavra = "desenharContextoDaSessao";
+    let borda = |letra: Option<char>| {
+        letra.is_none_or(|letra| !letra.is_alphanumeric() && letra != '_' && letra != '$')
+    };
+    let mut fora_da_declaracao: Vec<String> = Vec::new();
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        let referencias = texto
+            .match_indices(palavra)
+            .filter(|&(onde, _)| {
+                borda(texto[..onde].chars().next_back())
+                    && borda(texto[onde + palavra.len()..].chars().next())
+            })
+            .count();
+        let declaracoes = texto.matches("function desenharContextoDaSessao(").count();
+        for _ in declaracoes..referencias {
+            fora_da_declaracao.push(nome.clone());
+        }
+    }
+    assert_eq!(
+        fora_da_declaracao,
+        vec!["tela-server.js".to_owned()],
+        "a faixa de contexto é alcançada em {} lugares de `ui/` ({:?}); ela tem um \
+         caminho só, `atualizarServer`, e um segundo — chamado, ou passado a um \
+         `.then` — é o que fez a troca de modo ficar de fora na rodada 1",
+        fora_da_declaracao.len(),
+        fora_da_declaracao
+    );
+
+    // **E certa no primeiro quadro.** A configuração aparece no `hidden = false`
+    // de `abrirServer`, e a rodada 2 deixou a primeira escrita da faixa para
+    // depois da lista de aparelhos e de uma ida à ponte: com o microfone já mudo
+    // ao reabrir, ela disse «… segura ESPAÇO» nos primeiros quadros, e aberta da
+    // entrada depois de a sessão acabar, a sala que não existia mais. A faixa
+    // não depende do que `atualizarServer` vai buscar — ela lê o quadro da
+    // sessão e a tecla —, então ele a escreve antes do primeiro `await` dele, e
+    // `abrirServer` o chama antes do primeiro `await` seu. Tudo na mesma tarefa
+    // que mostra a tela, e nenhum quadro sai com a faixa da abertura anterior.
+    let antes_de_esperar =
+        |corpo: &str, procurado: &str| match (corpo.find(procurado), corpo.find("await ")) {
+            (Some(achado), Some(espera)) => achado < espera,
+            (Some(_), None) => true,
+            (None, _) => false,
+        };
+    assert!(
+        antes_de_esperar(&atualizar, "desenharContextoDaSessao()"),
+        "`atualizarServer` escreve a faixa de contexto depois de esperar a ponte, e \
+         a configuração aparece com a faixa da abertura anterior até a resposta \
+         chegar:\n{atualizar}"
+    );
+    let abrir = js_function(&server, "async function abrirServer(");
+    assert!(
+        antes_de_esperar(&abrir, "atualizarServer()"),
+        "`abrirServer` mostra a configuração e espera alguma coisa antes de \
+         `atualizarServer` escrever a faixa de contexto: os primeiros quadros \
+         saem com a faixa da abertura anterior:\n{abrir}"
+    );
+
+    // **Em `base.js`, porque as duas telas a usam.** Ela morava em
+    // `tela-server.js`, que carrega depois de `tela-sessao.js`: chamada de lá,
+    // a linha do operador só funcionaria porque o primeiro quadro chega depois
+    // de tudo carregar. `base.js` carrega antes das telas, e a ordem passa a ser
+    // a garantia em vez da sorte.
+    let base = without_comments(&read("ui/base.js"));
+    assert!(
+        base.contains("function nomeDaTecla("),
+        "`nomeDaTecla` saiu de `base.js`. As duas telas que dizem como o \
+         microfone abre a chamam, e só `base.js` carrega antes das duas"
+    );
+}
+
+#[test]
+fn a_ajuda_escreve_a_tecla_de_falar_que_esta_gravada() {
+    // A ajuda prometia ESPAÇO escrito à mão, e a tecla de falar se troca e fica
+    // gravada. Para quem a trocou, a ajuda ensinava a tecla de antes — o defeito
+    // que `a_ajuda_so_promete_teclas_que_a_janela_atende` existe para impedir,
+    // por um caminho que ele não via: a tecla existe, e não é a que vale.
+    //
+    // O HTML continua dizendo ESPAÇO, que é o padrão e é o que aquele guarda
+    // lê; quem abre a ajuda escreve por cima a tecla gravada.
+    let pagina = without_comments(&read("ui/index.html"));
+    assert!(
+        pagina.contains("<span id=\"ajuda-tecla-falar\" class=\"ajuda-tecla\">ESPAÇO</span>"),
+        "a tecla de falar da ajuda perdeu o `id` por onde a tecla gravada é \
+         escrita, ou deixou de partir do padrão ESPAÇO — sem um, a ajuda ensina \
+         a tecla errada a quem trocou; sem o outro, ela abre vazia"
+    );
+
+    let abrir = js_function(&read("ui/camada-ajuda.js"), "function abrirAjuda(");
+    assert!(
+        abrir.contains("$(\"ajuda-tecla-falar\").textContent = nomeDaTecla(teclaDeFalar)"),
+        "a ajuda abre sem escrever a tecla de falar que está gravada, e ensina \
+         ESPAÇO a quem falar noutra:\n{abrir}"
+    );
+
+    // E onde ela vale. Segurar a tecla com a janela atrás de outra, ou com o
+    // cursor na caixa de mensagem, não abre nada — e a pessoa conclui que o
+    // microfone quebrou.
+    let Some(diz) = pagina
+        .split("id=\"ajuda-tecla-falar\"")
+        .nth(1)
+        .and_then(|resto| resto.split("<dd class=\"ajuda-diz\">").nth(1))
+        .and_then(|resto| resto.split("</dd>").next())
+    else {
+        panic!("a tecla de falar da ajuda não tem mais a frase que a explica");
+    };
+    assert_eq!(
+        diz.split_whitespace().collect::<Vec<_>>().join(" "),
+        "Segure para falar, no modo tecla. Vale com a janela do SEELE na frente \
+         e fora da caixa de mensagem.",
+        "a ajuda não diz mais onde a tecla de falar vale; quem a segura na caixa \
+         de mensagem ou com outra janela na frente acha que o microfone quebrou"
+    );
+}
+
+#[test]
+fn ha_um_aviso_de_fone_em_algum_lugar_que_a_pessoa_le() {
+    // O SEELE não cancela eco: o ADR 0007 tirou DSP em C/C++ do v1 e fez do fone
+    // um requisito escrito. Escrito em `docs/`, que ninguém que entra numa sala
+    // de voz lê. Sem fone, o alto-falante volta para o microfone, e quem sofre
+    // é o outro lado — que ouve a própria voz de volta e não tem como saber de
+    // onde ela vem. «O produto sabe e não conta», na forma mais cara: o
+    // defeito aparece na máquina de quem não fez nada de errado.
+    //
+    // Três lugares, e cada um por uma razão: a faixa, no momento em que passa a
+    // valer; a ajuda, que é onde se procura depois; e CONFIGURAÇÕES · MICROFONE
+    // E SOM, que é onde se vai quando o som está estranho. A mesma frase nos
+    // três, lida de `frases.js`.
+    const FRASE: &str = "USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala \
+                         com você se ouve de volta.";
+
+    let frases = without_comments(&read("ui/frases.js"));
+    let escrita = frases
+        .split("const AVISO_DE_FONE =")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .map(literals_in)
+        .unwrap_or_default();
+    assert_eq!(
+        escrita, FRASE,
+        "`frases.js` não tem mais o aviso de fone, ou o diz com outras palavras; \
+         quem entra numa sala de voz sem fone faz o outro lado ouvir a própria \
+         voz de volta sem saber por quê"
+    );
+
+    // A faixa: desenhada a cada quadro, acesa ao entrar numa sala de voz.
+    let sessao = read("ui/tela-sessao.js");
+    let desenhar = js_function(&sessao, "function desenhar(");
+    assert!(
+        desenhar.contains("desenharAvisoDeFone(snapshot)"),
+        "o desenho da sessão não passa mais pelo aviso de fone, então a faixa \
+         nunca acende:\n{desenhar}"
+    );
+    let aviso = js_function(&sessao, "function desenharAvisoDeFone(");
+    assert!(
+        aviso.contains("occupied_by_us"),
+        "o aviso de fone não espera a entrada numa sala de voz: ele aparece \
+         para quem só lê um canal, e já se apagou quando a voz começa:\n{aviso}"
+    );
+    assert!(
+        aviso.contains("$(\"aviso-fone-texto\").textContent = AVISO_DE_FONE"),
+        "a faixa de fone não escreve a frase de `frases.js`, e ela e a ajuda \
+         passam a poder discordar:\n{aviso}"
+    );
+    // Por execução: zerada ao trocar de servidor, a faixa voltaria a cada
+    // sessão, e um aviso repetido é um aviso que se aprende a fechar sem ler.
+    let sem_comentario = without_comments(&sessao);
+    assert_eq!(
+        sem_comentario.matches("foneJaAvisado = false").count(),
+        1,
+        "a marca do aviso de fone é zerada em algum lugar além da declaração; ele \
+         é da primeira entrada numa sala de voz desta execução, e não de cada \
+         sessão"
+    );
+    // E as duas linhas que fazem a marca valer. Sem a que lê, a faixa acende a
+    // cada quadro dentro de uma sala — fechar não adianta, ela volta meio
+    // segundo depois; sem a que escreve, a mesma coisa por outro caminho.
+    // Apagar qualquer uma deixava o resto deste guarda verde (revisão do lote J).
+    for (linha, o_que) in [
+        ("if (foneJaAvisado) return;", "não confere se já avisou"),
+        ("foneJaAvisado = true;", "não marca que avisou"),
+    ] {
+        assert!(
+            aviso.contains(linha),
+            "o aviso de fone {o_que}: a faixa volta a acender a cada quadro dentro \
+             da sala, e «dispensar» não a fecha por mais de meio segundo:\n{aviso}"
+        );
+    }
+
+    // **E ela não atravessa sessões.** Não dispensada, a faixa ficava acesa
+    // dentro da tela de sessão escondida e reaparecia sobre o servidor seguinte
+    // — um aviso sobre a sala de outra conversa. Ao sair pelo SAIR DO SERVIDOR,
+    // `ejetar` a apaga junto do veredito. A outra saída, a do fim de sessão, mora
+    // em `tela-fim.js`; para ela, a faixa guarda a geração da sessão em que
+    // acendeu e se apaga no primeiro quadro de uma geração nova.
+    let ejetar = js_function(&sessao, "async function ejetar(");
+    assert!(
+        ejetar.contains("$(\"aviso-fone\").hidden = true"),
+        "sair do servidor não apaga a faixa de fone, e ela reaparece sobre a \
+         sessão seguinte:\n{ejetar}"
+    );
+    assert!(
+        aviso.contains("geracaoDoAvisoDeFone !== geracaoDaSessao"),
+        "a faixa de fone não sabe de que sessão é: uma sessão encerrada pelo \
+         servidor a deixa acesa para a próxima:\n{aviso}"
+    );
+    assert!(
+        sem_comentario.contains("$(\"aviso-fone-fechar\").addEventListener(\"click\""),
+        "a faixa de fone não se fecha: ela fica sobre a sessão inteira de quem já \
+         leu e já está de fone"
+    );
+
+    // E os dois lugares onde ela continua escrita depois de fechada.
+    let pagina = without_comments(&read("ui/index.html"));
+    for (id, onde) in [
+        ("ajuda-aviso-fone", "a ajuda"),
+        ("server-aviso-fone", "CONFIGURAÇÕES · MICROFONE E SOM"),
+    ] {
+        let Some(texto) = pagina
+            .split(&format!("id=\"{id}\""))
+            .nth(1)
+            .and_then(|resto| resto.split_once('>'))
+            .and_then(|(_, resto)| resto.split('<').next())
+        else {
+            panic!("{onde} não tem mais o aviso de fone (`#{id}`)");
+        };
+        assert_eq!(
+            texto.split_whitespace().collect::<Vec<_>>().join(" "),
+            FRASE,
+            "{onde} diz o aviso de fone com outras palavras, ou não o diz; quem \
+             procura ali depois de fechar a faixa lê outra coisa"
+        );
+    }
+    let audio = pagina
+        .split("id=\"painel-audio\"")
+        .nth(1)
+        .and_then(|resto| resto.split("id=\"painel-atalhos\"").next())
+        .unwrap_or_default();
+    assert!(
+        audio.contains("id=\"server-aviso-fone\""),
+        "o aviso de fone da configuração saiu de MICROFONE E SOM, que é onde se vai \
+         quando o som está estranho"
+    );
+}
+
 /// A `<section id="tela-boot">` inteira, sem comentário.
 ///
 /// O corte é na tela seguinte e não no primeiro `</section>`, e a diferença não
@@ -11434,6 +11743,223 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
          Lembrar o vazio, ou um recurso, faz o perfil parar de ser consultado \
          nas tentativas seguintes — e quem corrigir o nome no perfil vai vê-lo \
          gravado no disco sem nunca sair da máquina.\n{corpo}"
+    );
+}
+
+#[test]
+fn sem_nome_o_primeiro_conectar_pergunta_antes() {
+    // Quem nunca se nomeou entrava calado com um nome tirado da chave — e só
+    // descobria o `pessoa-3f2a` na lista dos outros, depois de já ter falado.
+    // A entrada por link é o caso mais comum: o app abre e conecta sem passar
+    // pela tela inicial, onde fica o perfil.
+    //
+    // Então a primeira entrada desta execução pergunta, antes do `connect`. Só
+    // a quem não tem nome nenhum — nem o desta visita, nem o desta máquina —, e
+    // só uma vez: uma pergunta que voltasse a cada reconexão, ou a cada batida
+    // automática da espera, pararia a reconexão atrás de uma caixa.
+    let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
+    let Some(pergunta) = conectar.find("await perguntarONome()") else {
+        panic!(
+            "a entrada não pergunta mais o nome a quem não tem nenhum, e a pessoa \
+             entra com um nome tirado da chave sem ter sido avisada:\n{conectar}"
+        );
+    };
+    let Some(connect) = conectar.find("invoke(\"connect\"") else {
+        panic!("a entrada não chama mais o `connect`:\n{conectar}");
+    };
+    assert!(
+        pergunta < connect,
+        "a entrada pergunta o nome depois de conectar, quando o servidor já \
+         recebeu o nome tirado da chave:\n{conectar}"
+    );
+    let Some(local) = conectar.find("invoke(\"apelido_local\")") else {
+        panic!("a entrada não lê mais o apelido desta máquina:\n{conectar}");
+    };
+    assert!(
+        local < pergunta,
+        "a entrada pergunta o nome antes de ler o desta máquina, e para na porta \
+         quem já tem um:\n{conectar}"
+    );
+    let condicao = conectar[local..pergunta]
+        .rfind("if (")
+        .map(|se| &conectar[local + se..pergunta])
+        .and_then(|resto| resto.lines().next())
+        .unwrap_or_default();
+    assert!(
+        condicao.contains("apelido === \"\""),
+        "a pergunta do nome não espera o apelido estar vazio, ou vem antes de ler \
+         o desta máquina — e quem já tem nome é parado na porta:\n{condicao}"
+    );
+    assert!(
+        condicao.contains("!jaPergunteiONome"),
+        "a pergunta do nome não é mais só da primeira entrada desta execução: ela \
+         volta a cada reconexão e a cada batida automática da espera:\n{condicao}"
+    );
+    // **CONECTAR apagado enquanto a pergunta está aberta.** Com Tab e Enter, ele
+    // abria uma segunda entrada por baixo da caixa, e essa já não perguntava —
+    // a marca estava posta — e entrava com o nome vazio (revisão do lote J).
+    let Some(se) = conectar[local..pergunta].rfind("if (") else {
+        panic!("a pergunta do nome não tem mais condição:\n{conectar}");
+    };
+    let antes_da_pergunta = &conectar[local + se..pergunta];
+    let depois_da_pergunta = &conectar[pergunta..connect];
+    assert!(
+        antes_da_pergunta.contains("$(\"botao-conectar\").disabled = true"),
+        "CONECTAR fica ativo enquanto a pergunta do nome está aberta, e uma segunda \
+         entrada por baixo dela entra com o nome vazio:\n{antes_da_pergunta}"
+    );
+    assert!(
+        depois_da_pergunta.contains("finally")
+            && depois_da_pergunta.contains("$(\"botao-conectar\").disabled = false"),
+        "CONECTAR não volta a valer depois da pergunta, inclusive quando ela \
+         falha:\n{depois_da_pergunta}"
+    );
+
+    // A pergunta é o perfil com outro título, e a entrada espera ele fechar.
+    let nomear = read("ui/camada-nomear.js");
+    let perguntar = js_function(&nomear, "async function perguntarONome(");
+    let abre = perguntar.find("abrirPerfil(\"COMO OS OUTROS VÃO TE CHAMAR?\")");
+    let espera = perguntar.find("await fechou");
+    let rele = perguntar.find("invoke(\"apelido_local\")");
+    assert!(
+        matches!((abre, espera, rele), (Some(a), Some(e), Some(r)) if a < e && e < r),
+        "a pergunta do nome não abre o perfil com «COMO OS OUTROS VÃO TE CHAMAR?», \
+         não espera ele fechar, ou não relê o nome gravado depois — e a entrada \
+         segue com o nome de antes da resposta:\n{perguntar}"
+    );
+    let fechar = js_function(&nomear, "function fecharPerfil(");
+    assert!(
+        fechar.contains("aoFecharOPerfil"),
+        "fechar o perfil não solta a entrada que espera por ele, e a conexão fica \
+         parada para sempre atrás de uma caixa que já fechou:\n{fechar}"
+    );
+
+    // Fechar sem nome segue, e diz com que nome se entra.
+    let frases = without_comments(&read("ui/frases.js"));
+    let escrita = frases
+        .split("const ENTRAR_SEM_NOME =")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .map(literals_in)
+        .unwrap_or_default();
+    assert_eq!(
+        escrita, "Você vai entrar com um nome tirado da sua chave. Dá para trocar no perfil.",
+        "`frases.js` não diz mais com que nome entra quem fecha a pergunta sem \
+         responder"
+    );
+    assert!(
+        perguntar.contains("ENTRAR_SEM_NOME"),
+        "quem fecha a pergunta do nome sem responder entra sem saber com que \
+         nome:\n{perguntar}"
+    );
+
+    // **A nota diz a verdade do campo, e chega junto dele ao leitor de tela.**
+    // A revisão do lote J achou três coisas: a nota dizia «você vai entrar com
+    // um nome tirado da sua chave» embaixo de um nome já digitado; quem não vê a
+    // tela só a ouvia ao fechar, quando não dava mais para responder; e a nota
+    // de sempre do campo («O que você já disse continua com o nome de então»)
+    // falava com quem nunca disse nada.
+    let campo = tag_with_id(&read("ui/index.html"), "perfil-apelido");
+    assert!(
+        attribute(&campo, "aria-describedby").as_deref() == Some("perfil-sem-nome"),
+        "o campo do apelido não é descrito pela nota de quem fecha sem nome, e o \
+         leitor de tela só a diz depois de a caixa fechar:\n{campo}"
+    );
+    assert!(
+        without_comments(&nomear)
+            .contains("$(\"perfil-apelido\").addEventListener(\"input\", desenharNotasDoApelido)"),
+        "a nota de quem fecha sem nome não acompanha o campo: ela continua \
+         dizendo «nome tirado da sua chave» embaixo de um nome já digitado"
+    );
+    let notas = js_function(&nomear, "function desenharNotasDoApelido(");
+    for (trecho, o_que) in [
+        (
+            "const mostrar = perguntandoONome && vazio;",
+            "a de quem fecha sem nome aparece fora da pergunta, ou embaixo de um \
+             nome já digitado",
+        ),
+        (
+            "nota.textContent = mostrar ? ENTRAR_SEM_NOME : \"\";",
+            "a de quem fecha sem nome guarda o texto quando escondida, e o \
+             `aria-describedby` do campo o lê mesmo assim",
+        ),
+        (
+            "$(\"perfil-nota-do-apelido\").hidden = perguntandoONome;",
+            "a de quem troca de nome aparece na pergunta, para quem nunca disse \
+             nada",
+        ),
+    ] {
+        assert!(
+            notas.contains(trecho),
+            "as notas do campo do apelido erram: {o_que}:\n{notas}"
+        );
+    }
+
+    // E o perfil de sempre continua sendo o de sempre.
+    let abrir = js_function(&nomear, "async function abrirPerfil(");
+    assert!(
+        abrir.contains("$(\"perfil-titulo\").textContent = \"SEU PERFIL\""),
+        "o perfil aberto sem título deixou de se chamar SEU PERFIL, e o diálogo \
+         de todo dia herda a pergunta da primeira entrada:\n{abrir}"
+    );
+    let pagina = without_comments(&read("ui/index.html"));
+    assert!(
+        pagina.contains("<h2 id=\"perfil-titulo\" class=\"nomear-titulo\">SEU PERFIL</h2>"),
+        "o título do perfil no HTML deixou de ser SEU PERFIL"
+    );
+
+    // **A entrada por link não pode correr na frente dos scripts.** O que o
+    // launcher pede à janela (`cumprirAAbertura`) era chamado no topo de
+    // `tela-boot.js`, e chega à pergunta depois de três idas à ponte. Com a
+    // ponte respondendo em microtarefa, isso acontece antes de
+    // `camada-nomear.js` carregar: `perguntarONome is not defined`, a pergunta
+    // não abre, e como a marca já foi posta ela não volta (revisão do lote J,
+    // medido na bancada). `DOMContentLoaded` só dispara depois de todos os
+    // scripts da página.
+    let boot = without_comments(&read("ui/tela-boot.js"));
+    let chamadas = boot.matches("cumprirAAbertura()").count()
+        - boot.matches("function cumprirAAbertura()").count();
+    assert_eq!(
+        chamadas, 1,
+        "`cumprirAAbertura` é chamada {chamadas} vezes em `tela-boot.js`; ela é \
+         chamada uma vez, e só depois de a página inteira carregar"
+    );
+    let ao_carregar = if boot.contains("addEventListener(\"DOMContentLoaded\"") {
+        js_function(&boot, "addEventListener(\"DOMContentLoaded\"")
+    } else {
+        String::new()
+    };
+    assert!(
+        ao_carregar.contains("cumprirAAbertura()"),
+        "o que o launcher pede à janela roda antes de os outros scripts \
+         carregarem: aberta por um link sem nome nesta máquina, a entrada chega à \
+         pergunta antes de `camada-nomear.js` existir, e a pergunta nunca abre"
+    );
+}
+
+#[test]
+fn o_titulo_do_perfil_tem_altura_de_linha_propria() {
+    // A pergunta do nome antes da primeira entrada («COMO OS OUTROS VÃO TE
+    // CHAMAR?») não cabe numa linha da caixa de 480px. O título herdava os 16px
+    // de altura de linha de `base.css`, com letra de 24px, e a tinta da segunda
+    // linha encostava na da primeira — medido no Chromium, folga de −0,9px.
+    //
+    // A medida de verdade é a de `bancada/ajustes-v013.cjs`, que abre a pergunta
+    // e mede a tinta das duas linhas. Este guarda é a metade que roda em toda
+    // máquina: sem `line-height` na regra do título do perfil, a herança volta.
+    let folha = without_comments(&read("ui/camada-nomear.css"));
+    let Some(regra) = folha
+        .split(".perfil-cabeca .nomear-titulo {")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+    else {
+        panic!("a regra `.perfil-cabeca .nomear-titulo` sumiu de `camada-nomear.css`");
+    };
+    assert!(
+        regra.contains("line-height"),
+        "o título do perfil voltou a herdar a altura de linha de `base.css` (16px \
+         para letra de 24px): a pergunta do nome quebra em duas linhas, e a segunda \
+         encosta na primeira:\n{regra}"
     );
 }
 

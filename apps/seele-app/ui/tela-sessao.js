@@ -299,6 +299,54 @@ function fraseDoVeredito(veredito, deOnde = null) {
 }
 
 /**
+ * Se o aviso de fone já apareceu **nesta execução**.
+ *
+ * Por execução, e não por sessão: nada o zera ao sair de um servidor nem ao
+ * entrar noutro. O SEELE continua sem cancelar eco de uma sessão para a
+ * seguinte, e um aviso que volta a cada servidor vira um aviso que se aprende a
+ * fechar sem ler. Uma vez por abertura do app é o bastante para quem esqueceu o
+ * fone hoje, e pouco o bastante para quem já está com ele.
+ *
+ * Um sim ou não, e não um `Set` de salas: a frase é sobre esta máquina, e não
+ * sobre a sala em que se entrou.
+ */
+let foneJaAvisado = false;
+
+/**
+ * A geração da sessão em que a faixa de fone acendeu.
+ *
+ * A marca é da execução, e a faixa é da sessão. Não dispensada, ela ficava
+ * acesa dentro da tela de sessão escondida e reaparecia sobre o servidor
+ * seguinte. `ejetar` a apaga ao sair pelo SAIR DO SERVIDOR; a saída pelo fim de
+ * sessão mora em `tela-fim.js`, e para ela é o primeiro quadro de uma geração
+ * nova (`geracaoDaSessao`, em `base.js`) que apaga.
+ */
+let geracaoDoAvisoDeFone = 0;
+
+/**
+ * A faixa de fone, na primeira entrada numa sala de voz desta execução.
+ *
+ * Do retrato, e não do clique que entra: o que importa é a voz ter começado, e
+ * quem diz isso é `occupied_by_us`, qualquer que tenha sido o caminho até a
+ * sala. Um aviso preso ao botão calaria no primeiro caminho que não passasse
+ * por ele.
+ *
+ * Revelada antes de escrita, como a do veredito: um `role="status"` escondido
+ * no instante em que o texto muda não é anunciado.
+ */
+function desenharAvisoDeFone(snapshot) {
+  if (!$("aviso-fone").hidden && geracaoDoAvisoDeFone !== geracaoDaSessao) {
+    $("aviso-fone").hidden = true;
+  }
+  if (foneJaAvisado) return;
+  if (!snapshot.voice_rooms.some((sala) => sala.occupied_by_us)) return;
+  foneJaAvisado = true;
+  geracaoDoAvisoDeFone = geracaoDaSessao;
+  $("aviso-fone").hidden = false;
+  $("aviso-fone-texto").textContent = AVISO_DE_FONE;
+}
+
+/**
  * Acende — ou apaga — a faixa de veredito da sessão.
  *
  * `deOnde` segue para a frase: ver `fraseDoVeredito`.
@@ -361,6 +409,7 @@ function desenhar(snapshot) {
   desenharPessoas(snapshot);
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
+  desenharAvisoDeFone(snapshot);
 
   desenhado = snapshot;
   // Com os nós de MOD já recolocados: o som do que saiu da tela — a pessoa que
@@ -891,8 +940,12 @@ function desenharOperador(snapshot) {
   // inteiro, não. E o `aria-label` diz a mesma coisa em palavra, para quem não
   // vê nenhum dos dois.
   const mudo = $("botao-mudo");
+  // **No modo tecla, a tecla pelo nome.** «abre na tecla» dizia que há uma e não
+  // qual — e ela se troca em CONFIGURAÇÕES · ATALHOS e fica gravada. A mesma
+  // `teclaDeFalar` que o `keydown` do fim deste arquivo compara, então a frase
+  // não diz uma tecla enquanto o ouvinte escuta outra.
   const comoAbre = {
-    PushToTalk: "microfone abre na tecla",
+    PushToTalk: `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}`,
     VoiceActivated: "microfone abre por voz",
     Open: "microfone aberto",
   }[snapshot.voice_mode] ?? "microfone disponível";
@@ -3715,6 +3768,10 @@ async function ejetar() {
   // O veredito era sobre a chave daquela sessão. Deixá-lo aceso sobre a
   // próxima seria dizer de um servidor o que se apurou de outro.
   mostrarVeredito(null);
+  // A faixa de fone pela mesma razão: não dispensada, ela reaparecia sobre o
+  // servidor seguinte. A marca fica — o aviso é desta execução —, então ela não
+  // volta a acender na próxima sala.
+  $("aviso-fone").hidden = true;
   document.body.classList.remove("na-bateria");
   // A gaveta pela mesma razão que a moderação: aberta, ela voltaria por cima
   // da próxima sessão com a lista de salas da anterior ainda desenhada.
@@ -4253,6 +4310,9 @@ window.addEventListener("keydown", (evento) => {
   }
 });
 $("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = true));
+// Fechada, ela não volta nesta execução — ver `foneJaAvisado`. A frase continua
+// na ajuda e em CONFIGURAÇÕES · MICROFONE E SOM para quem quiser relê-la.
+$("aviso-fone-fechar").addEventListener("click", () => ($("aviso-fone").hidden = true));
 
 $("botao-mudo").addEventListener("click", async () => {
   const snapshot = await invoke("snapshot");
