@@ -81,6 +81,11 @@ pub use types::{
 /// em que uma mudasse.
 pub use seele_core::{conhecidos, preferences, preview, search, uri};
 
+/// O número do fio, a versão de servidor e a linha de cada número, para quem
+/// confere o manifesto do launcher contra esta build. Pelo `seele-core`, e não
+/// direto do `seele-proto`: o ADR 0002 deixa este crate ver só o núcleo.
+pub use seele_core::{linha_do_protocolo, PROTOCOL_VERSION, VERSAO_DO_SERVIDOR};
+
 /// Every microphone this machine is offering, right now.
 ///
 /// A free function and not a method on [`Connection`]: picking a microphone is a thing
@@ -5886,6 +5891,7 @@ mod tests {
                 id: PersonId(3),
                 nickname: "marcela".into(),
                 roles: Vec::new(),
+                material_e2ee: None,
             },
             ssrc: Ssrc(30),
         });
@@ -5925,6 +5931,7 @@ mod tests {
                 id: PersonId(3),
                 nickname: "marcela".into(),
                 roles: Vec::new(),
+                material_e2ee: None,
             },
             ssrc: Ssrc(30),
         });
@@ -5971,6 +5978,7 @@ mod tests {
                     id: PersonId(id),
                     nickname: format!("pessoa {id}"),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: Ssrc(u32::try_from(id * 10).expect("ssrc")),
             });
@@ -7277,6 +7285,7 @@ mod tests {
                 id: PersonId(pessoa),
                 nickname: format!("pessoa-{pessoa}"),
                 roles: Vec::new(),
+                material_e2ee: None,
             },
             ssrc: Ssrc(pessoa.wrapping_mul(10).try_into().unwrap_or(1)),
         });
@@ -7502,6 +7511,7 @@ mod tests {
                     id: PersonId(4),
                     nickname: "pessoa-4".into(),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: Ssrc(40),
             },
@@ -7630,6 +7640,7 @@ mod tests {
                     id: PersonId(3),
                     nickname: "marcela".into(),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: Ssrc(30),
             },
@@ -7673,6 +7684,7 @@ mod tests {
                     id: PersonId(4),
                     nickname: "pires".into(),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: Ssrc(40),
             },

@@ -1,0 +1,23 @@
+[package]
+name = "spike-proto-em-wasm"
+description = "Medição 2 do ADR 0057, um passo além do check: o codec do seele-proto roda em wasm32 e escreve os mesmos bytes que o nativo. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Fora do workspace, como os outros spikes. O `seele-proto` entra pelo caminho e
+# só é lido: ele é da F1, e nada aqui o muda. O `Cargo.lock` é cópia do da raiz,
+# para o `postcard`, o `serde` e o `sha2` serem as versões do produto.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+seele-proto = { path = "../../crates/seele-proto" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

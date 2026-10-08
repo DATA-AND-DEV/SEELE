@@ -2109,7 +2109,7 @@ async fn pipeline(
                     .relogio_seq
                     .store(u32::from(seq), Ordering::Relaxed);
                 let header = MediaHeader {
-                    version: seele_proto::PROTOCOL_VERSION,
+                    version: seele_proto::MEDIA_HEADER_VERSION,
                     // The server refuses anything but the ssrc it assigned — G2.
                     ssrc: ssrc.get(),
                     seq,

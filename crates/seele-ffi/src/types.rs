@@ -346,6 +346,19 @@ pub enum EndReason {
     /// [`Self::CredentialRejected`]. As duas impressões ficam no `seele.log`,
     /// pelo mesmo motivo de [`Self::ServidorTrocouNaVolta`].
     ChaveMudouNaVolta,
+    /// Quem recebia encerrou a ligação da sala pessoal. Spec de 23/09/2026.
+    ChamadaEncerrada,
+    /// O toque da sala pessoal venceu sem ninguém atender.
+    NinguemAtendeu,
+    /// Quem recebia recusou a ligação.
+    ChamadaRecusada,
+    /// O servidor exige MODs de uma API que este app não roda (D-fio-7).
+    ///
+    /// As APIs exigidas chegam no fio como máscara, e não atravessam aqui: este
+    /// enum é unitário porque a casca o lê como texto. A frase diz «atualize o
+    /// app», que é o que a pessoa faz com qualquer API que falte; quem precisa
+    /// dos números é o launcher, na sessão do Plano 3.
+    ModsDeOutraApi,
     /// The link died without the server saying why.
     LinkLost,
 }
@@ -371,6 +384,10 @@ impl From<seele_core::DisconnectReason> for EndReason {
             seele_core::DisconnectReason::ModsRecusados => Self::ModsRecusados,
             seele_core::DisconnectReason::ModsMudaram => Self::ModsMudaram,
             seele_core::DisconnectReason::ModsIndisponiveis => Self::ModsIndisponiveis,
+            seele_core::DisconnectReason::ChamadaEncerrada => Self::ChamadaEncerrada,
+            seele_core::DisconnectReason::NinguemAtendeu => Self::NinguemAtendeu,
+            seele_core::DisconnectReason::ChamadaRecusada => Self::ChamadaRecusada,
+            seele_core::DisconnectReason::ModsDeOutraApi { .. } => Self::ModsDeOutraApi,
         }
     }
 }

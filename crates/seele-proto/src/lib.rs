@@ -22,7 +22,9 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod assinatura;
 pub mod attachment;
+pub mod codigo;
 pub mod control;
 pub mod encontro;
 pub mod ids;
@@ -30,17 +32,23 @@ pub mod imagem;
 pub mod media;
 pub mod midia_de_mod;
 pub mod mods;
+pub mod quadro;
 pub mod screen;
 pub mod signal;
 pub mod stream;
 pub mod transport;
 pub mod uri;
 pub mod version;
+pub mod vocabulario;
 pub mod volume;
 
 pub use control::{ClientMessage, ControlError, ServerMessage};
 pub use ids::{ChannelId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
-pub use media::{MediaError, MediaHeader, HEADER_LEN, MAX_DATAGRAM_LEN, MAX_PAYLOAD_LEN};
+pub use media::{
+    MediaError, MediaHeader, HEADER_LEN, MAX_DATAGRAM_LEN, MAX_PAYLOAD_LEN, MEDIA_HEADER_VERSION,
+};
 pub use signal::{Signal, SignalBand, SyncInputs};
 pub use stream::{StreamType, StreamTypeError, RESERVED_TYPE, STREAM_TYPE_LEN};
-pub use version::{oldest_supported_version, Incompatible, COMPATIBILITY_WINDOW, PROTOCOL_VERSION};
+pub use version::{
+    oldest_supported_version, Faixa, Incompatible, FAIXA, PROTOCOL_VERSION, VERSAO_MINIMA,
+};

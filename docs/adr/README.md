@@ -77,7 +77,7 @@ o ganho é de estética.
 | [0043](0043-o-instalador-do-windows-e-nosso.md) | O instalador do Windows é nosso | **aceito** | — (o NSIS não desenha a moldura, os botões nem a fonte) |
 | [0044](0044-o-portao-divide-a-subida-medida.md) | O portão divide a subida medida, e a medida sobrevive ao reinício | **aceito** | — (revisa a perna do hospedeiro do `0038`) |
 | [0045](0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md) | MODs: o produto base tem regras, e um MOD não | **proposto** | — (pedido do dono; substitui o `0029`) |
-| [0046](0046-toda-versao-continua-de-pe.md) | Toda versão continua de pé: o app vira launcher | **proposto** · exceção no navegador pelo `0057` | — (pedido do dono; substitui o botão do `0026`) |
+| [0046](0046-toda-versao-continua-de-pe.md) | Toda versão continua de pé: o app vira launcher | aceito em 08/10/2026 · emenda das duas numerações: toda **linha** de servidor para sempre · exceção no navegador pelo `0057` | — (pedido do dono; substitui o botão do `0026`) |
 | [0047](0047-o-link-que-volta-a-funcionar-amanha.md) | O link que volta a funcionar amanhã: permanência, multiconexão e chamada privada | **rascunho** | — (pedido do dono; confere o `0022` e o `0031` contra o código) |
 | [0048](0048-mods-ganham-o-caminho-de-volume-que-os-anexos-ja-tem.md) | MODs ganham o caminho de volume que os anexos já têm | **aceito** | — (relato de campo: imagem de 1 MB levando 28 s; estende o `0027` aos MODs do `0045`) |
 | [0049](0049-um-mod-deixa-de-rodar-na-janela-do-produto.md) | Um MOD deixa de rodar na janela do produto | **aceito** | — (revisa o `0045`; etapa 5 do plano de isolamento, e depende de protótipo em macOS e Windows) |
@@ -86,6 +86,7 @@ o ganho é de estética.
 | [0054](0054-uma-transmissao-tem-identidade.md) | Uma transmissão tem identidade | **aceito** | — (revisão da v15, R16–R21: tudo de compartilhamento passa a ser por `ScreenId`) |
 | [0055](0055-o-filtro-e-o-que-torna-o-limiar-baixo-defensavel.md) | O filtro é o que torna o limiar baixo defensável | **aceito** | — (`features-v15.md` F01 e F02: supressão de ruído em Rust puro, e o limiar que passou a medir a sala em vez de supor o ruído dela — revisado pela auditoria de 22/09/2026) |
 | [0057](0057-o-celular-entra-pelo-navegador.md) | No celular, o SEELE é uma página: web app instalável, sem app nativo | **aceito** | `06` — plataforma mobile (M6) |
+| [0058](0058-1x-nunca-quebra-o-fio.md) | 1.x nunca quebra o fio: a definição da versão de servidor | **aceito** | `02` e `10` — versionamento (substitui a janela N−1) |
 
 ## O que ainda não tem ADR
 

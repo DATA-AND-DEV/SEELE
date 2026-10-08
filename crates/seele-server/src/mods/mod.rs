@@ -889,6 +889,60 @@ pub fn carregar_do_disco(
     (prontos, queixas)
 }
 
+/// Preenche a API das linhas habilitadas que ainda não a têm (migração 14).
+///
+/// Lê o `mod.json` da pasta do **hash** que a linha exige — os bytes que a
+/// exigência cobre, e não «o que estiver na pasta do MOD» —, como
+/// [`carregar_do_disco`] faz. Uma linha que não se preenche (pacote fora do
+/// disco, manifesto que não abre) fica zero, que é «não preenchida», e é
+/// **nomeada** na lista devolvida: zero em silêncio seria o anúncio dizendo «não
+/// sei» sem ninguém saber por quê.
+#[must_use]
+pub fn preencher_as_apis(
+    persistence: &crate::persistence::Persistence,
+    raizes: &crate::RaizesDosMods,
+) -> Vec<String> {
+    let ligados = match crate::persistence::mods::enabled(persistence) {
+        Ok(ligados) => ligados,
+        Err(erro) => return vec![format!("não deu para ler a tabela de MODs: {erro}")],
+    };
+    let mut queixas = Vec::new();
+    for ligado in ligados.into_iter().filter(|ligado| ligado.api == 0) {
+        let dir = raizes.pacote_de(&ligado.hash);
+        // **O que o manifesto declara, e não se esta build o aceita.** Um MOD
+        // da API 5 numa build da 6 tem de ser anunciado como da 5 — é isso
+        // que deixa o servidor dizer a quem entra que versão do app o roda —,
+        // e `read_manifest` o recusaria antes de dizer o número.
+        let api = std::fs::read_to_string(dir.join("mod.json"))
+            .map_err(|erro| format!("sem mod.json em {}: {erro}", dir.display()))
+            .and_then(
+                |texto| match seele_proto::mods::como_ele_se_chama(&texto).api {
+                    0 => Err("o mod.json não declara a API".to_owned()),
+                    api => Ok(api),
+                },
+            );
+        match api {
+            Ok(api) => {
+                if let Err(erro) = crate::persistence::mods::preencher_api(
+                    persistence,
+                    &ligado.id,
+                    &ligado.hash,
+                    api,
+                ) {
+                    queixas.push(format!("{}: a API não foi gravada: {erro}", ligado.id));
+                }
+            }
+            Err(motivo) => {
+                queixas.push(format!(
+                    "{}: a API ficou não preenchida — {motivo}",
+                    ligado.id
+                ));
+            }
+        }
+    }
+    queixas
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -914,6 +968,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temporário");
         dir
+    }
+
+    /// Um pacote no disco, com o `mod.json` dizendo a API pedida, na pasta do
+    /// hash dele.
+    fn pacote_com_api(raizes: &crate::RaizesDosMods, hash: &str, api: u32) {
+        let dir = raizes.pacote_de(hash);
+        std::fs::create_dir_all(&dir).expect("pasta do pacote");
+        std::fs::write(
+            dir.join("mod.json"),
+            format!(
+                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[]}}"#
+            ),
+        )
+        .expect("manifesto");
+    }
+
+    /// **As linhas habilitadas antes da coluna ganham a API na subida**, lida
+    /// do manifesto dos bytes que o hash cobre (a P7a da F1b). Uma que não se
+    /// preenche é dita pelo nome, e não fica zero em silêncio.
+    #[test]
+    fn a_subida_preenche_a_api_das_linhas_antigas_e_nomeia_a_que_nao_consegue() {
+        use crate::persistence::mods::{enable, enabled, EnabledMod};
+        use crate::persistence::{Location, Persistence};
+
+        let raiz = pasta_de_teste("api-na-subida");
+        let raizes = crate::RaizesDosMods {
+            pacotes: raiz.clone(),
+            dados: raiz.join("mod-data"),
+        };
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        let linha = |id: &str, hash: &str| EnabledMod {
+            id: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            hash: hash.to_owned(),
+            repo: String::new(),
+            reach: Vec::new(),
+            server_half: false,
+            api: 0,
+        };
+        let com_pacote = "e5".repeat(32);
+        pacote_com_api(&raizes, &com_pacote, 6);
+        enable(&banco, &linha("seele/bot", &com_pacote)).expect("habilitar");
+        enable(&banco, &linha("seele/sumido", &"f6".repeat(32))).expect("habilitar");
+
+        let queixas = preencher_as_apis(&banco, &raizes);
+
+        let lista = enabled(&banco).expect("listar");
+        let api_de = |id: &str| lista.iter().find(|m| m.id == id).map(|m| m.api);
+        assert_eq!(api_de("seele/bot"), Some(6));
+        assert_eq!(api_de("seele/sumido"), Some(0));
+        assert_eq!(queixas.len(), 1, "{queixas:?}");
+        assert!(queixas[0].contains("seele/sumido"), "{queixas:?}");
     }
 
     /// **A pessoa de uma espera vem do servidor, e não do MOD** — ADR 0048.

@@ -122,6 +122,7 @@ async fn main() -> Result<()> {
                 repo: manifesto.repo.clone(),
                 reach: manifesto.reach.clone(),
                 server_half: manifesto.server.is_some(),
+                api: manifesto.api,
             },
         )?;
     }

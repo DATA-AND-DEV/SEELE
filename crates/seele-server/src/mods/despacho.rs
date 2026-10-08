@@ -568,6 +568,7 @@ mod tests {
                 repo: String::new(),
                 reach: Vec::new(),
                 server_half: true,
+                api: 6,
             },
         )
         .expect("ligar");
@@ -645,6 +646,7 @@ mod tests {
                 repo: String::new(),
                 reach: Vec::new(),
                 server_half: true,
+                api: 6,
             },
         )
         .expect("ligar");
@@ -1099,6 +1101,7 @@ mod tests {
                     repo: String::new(),
                     reach: Vec::new(),
                     server_half: true,
+                    api: 6,
                 },
             )
             .expect("ligar");
@@ -1176,6 +1179,7 @@ mod tests {
                 repo: String::new(),
                 reach: Vec::new(),
                 server_half: true,
+                api: 6,
             },
         )
         .expect("ligar");

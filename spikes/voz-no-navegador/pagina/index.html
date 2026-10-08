@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Voz no navegador</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icone-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <style>
   :root {
     --fundo: #f6f5f2; --texto: #1d1c1a; --suave: #6b6862; --linha: #d9d6cf;
@@ -52,15 +55,31 @@
   <h1>Voz no navegador</h1>
   <p>Spike descartável. Tudo o que esta página mede volta ao servidor.</p>
   <p>Modo desta página: <span id="modo">—</span></p>
+  <p>Servidor: <span id="servidor">—</span></p>
+  <p>Aberta em: <span id="abertura">—</span></p>
+
+  <h2>Identidade (medição 4)</h2>
+  <p id="identidade">—</p>
+  <div class="acoes">
+    <button id="criar-identidade">criar identidade</button>
+    <button id="persistir">pedir persistência</button>
+  </div>
+
+  <h2>Colar o link do servidor</h2>
+  <p>No web app da Tela de Início, que não divide o armazenamento com a aba.</p>
+  <div class="acoes">
+    <input id="link" placeholder="https://…/#a=…&amp;h=…" style="flex:1;min-height:44px;font:inherit">
+    <button id="usar-link">usar este link</button>
+  </div>
 
   <h2>Testes da tela bloqueada</h2>
   <p>Toque num teste, faça os passos, bloqueie a tela por um minuto, volte e envie o relatório.</p>
   <ul id="testes">
-    <li><a href="/?hash=errado&amp;auto=1">1 · hash errado (tem de falhar)</a></li>
-    <li><a href="/?sessao=play-and-record">2 · sessão de ligação</a></li>
-    <li><a href="/?saida=elemento">3 · saída pela tag &lt;audio&gt;</a></li>
-    <li><a href="/?sessao=play-and-record&amp;saida=elemento">4 · as duas juntas</a></li>
-    <li><a href="/">padrão (a rodada 1)</a></li>
+    <li><a href="?hash=errado&amp;auto=1">1 · hash errado (tem de falhar)</a></li>
+    <li><a href="?sessao=play-and-record">2 · sessão de ligação</a></li>
+    <li><a href="?saida=elemento">3 · saída pela tag &lt;audio&gt;</a></li>
+    <li><a href="?sessao=play-and-record&amp;saida=elemento">4 · as duas juntas</a></li>
+    <li><a href="./">padrão (a rodada 1)</a></li>
   </ul>
 
   <h2>O que este aparelho tem</h2>
@@ -83,6 +102,6 @@
   <h2>Registro</h2>
   <ul id="registro"></ul>
 
-  <script src="/pagina.js"></script>
+  <script src="pagina.js"></script>
 </body>
 </html>

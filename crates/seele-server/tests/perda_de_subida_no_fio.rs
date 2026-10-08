@@ -147,11 +147,13 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
     frame::write(
         &mut envio,
         &ClientMessage::Hello {
-            version: seele_proto::PROTOCOL_VERSION,
+            faixa: seele_proto::FAIXA,
             client: "par-cru".into(),
             nickname: format!("pessoa{semente:03}"),
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
+            material_e2ee: None,
+            apis_de_mod: Vec::new(),
         },
     )
     .await?;
@@ -163,7 +165,10 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
     frame::write(
         &mut envio,
         &ClientMessage::Response {
-            proof: chave.sign(&nonce).to_bytes().to_vec(),
+            proof: chave
+                .sign(&prova_amarrada(&conexao, &nonce))
+                .to_bytes()
+                .to_vec(),
         },
     )
     .await?;
@@ -190,7 +195,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
 /// Um quadro de voz pronto para o fio, com o ssrc que o servidor atribuiu.
 fn quadro(ssrc: Ssrc, seq: u16) -> Vec<u8> {
     let cabecalho = MediaHeader {
-        version: seele_proto::PROTOCOL_VERSION,
+        version: seele_proto::MEDIA_HEADER_VERSION,
         ssrc: ssrc.get(),
         seq,
         // 20 ms a 48 kHz são 960 amostras. O servidor não lê isto; quem lê é o
@@ -299,4 +304,26 @@ async fn quem_perde_pacote_e_avisado_e_o_vizinho_nao() -> Result<()> {
 
     servidor.shutdown();
     Ok(())
+}
+
+/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
+/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
+/// Desde o Servidor 1.0, o nonce cru não entra mais.
+fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
+    let cadeia = conexao
+        .peer_identity()
+        .and_then(|identidade| {
+            identidade
+                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
+                .ok()
+        })
+        .expect("o TLS sempre entrega a cadeia do servidor");
+    let impressao = seele_proto::transport::certificate_digest(
+        cadeia
+            .first()
+            .expect("a cadeia tem um certificado")
+            .as_ref(),
+    );
+    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
+    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

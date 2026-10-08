@@ -113,6 +113,18 @@ const MOTIVOS = {
   ModsIndisponiveis:
     "ESTE SERVIDOR EXIGE MODS QUE ELE NÃO CONSEGUE DESCREVER.\n" +
     "Não é a sua entrada: avise quem hospeda.",
+  // A sala pessoal (spec de 23/09, «Erros e frases»). Provisórias e sem nome:
+  // a spec as escreve com o nome de quem foi chamado («ALICE NÃO ATENDEU»), e
+  // quem as reescreve com ele é a casca da ligação. «RECUSOU» e «NÃO ATENDEU»
+  // continuam distintas, que é a decisão do dono de 23/09.
+  ChamadaEncerrada: "A LIGAÇÃO FOI ENCERRADA DO OUTRO LADO.",
+  NinguemAtendeu: "NINGUÉM ATENDEU.",
+  ChamadaRecusada: "A LIGAÇÃO FOI RECUSADA.",
+  // D-fio-7: o servidor roda MODs de uma API que esta versão não roda. Nada a
+  // mudar do lado de quem hospeda; quem resolve é atualizar.
+  ModsDeOutraApi:
+    "ESTE SERVIDOR RODA MODS QUE ESTA VERSÃO DO APP NÃO RODA.\n" +
+    "Atualize o app para entrar.",
 
   // ---- a volta da bateria, recusada dentro do TLS ----
   //
@@ -436,6 +448,19 @@ function fraseDeErro(erro, apelido, deOnde) {
         "formato-desconhecido": "Use uma imagem PNG, JPEG, WebP ou GIF.",
         "exigido-por-este-servidor": "Desligue o MOD e salve antes de apagar.",
       }[motivo] ?? motivo;
+    }
+    // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,
+    // como a lista assinada os escreve — nunca uma recusa genérica. Serve a
+    // `FalhaAoHospedar` e a `conferir_esta_versao`, que usam o mesmo nome.
+    if (erro.EstaVersaoRevogada) {
+      const { defeito, corrigida_em: corrigida } = erro.EstaVersaoRevogada;
+      return (
+        "ESTA VERSÃO DO SEELE FOI REVOGADA.\n" +
+        `O defeito: ${defeito}\n` +
+        (corrigida
+          ? `A ${corrigida} corrige. Atualize antes de hospedar ou de entrar.`
+          : "Atualize antes de hospedar ou de entrar.")
+      );
     }
     if (erro.PinChanged) {
       return (
@@ -773,6 +798,14 @@ const FRASES = {
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O SERVIDOR AQUI",
+    // ADR 0046: a lista de revogação que chegou não abriu, ou é mais velha que
+    // a guardada nesta máquina — a forma de alguém esconder uma revogação é
+    // servir uma lista antiga. O ato para em vez de seguir calado. A outra
+    // recusa, a da versão revogada, traz o defeito e o conserto e é montada em
+    // `fraseDeErro`, que é onde as recusas com campos são lidas.
+    ListaDeRevogacaoRecusada:
+      "A LISTA DE VERSÕES REVOGADAS QUE CHEGOU NÃO CONFERE.\n" +
+      "Ela não abriu, ou é mais antiga que a que esta máquina já viu. Tente de novo mais tarde.",
 
     // O catálogo de MODs — ADR 0045.
     //
@@ -930,6 +963,12 @@ const FRASES = {
       "Feche outras cópias do SEELE e tente de novo.",
     NadaEscolhido:
       "NÃO HÁ VERSÃO NOVA ESCOLHIDA PARA INSTALAR.\n" + "Procure de novo antes de instalar.",
+    // Spec 0.16, D-linha-1: esta versão foi aberta pelo launcher de outra
+    // versão do servidor, e o atualizador dela trocaria o app guardado lá. Sem
+    // «linha» na frase: o ADR 0033 tirou a palavra da tela.
+    AbertaPeloLancador:
+      "ESTA VERSÃO FOI ABERTA POR OUTRO SEELE, QUE CUIDA DELA.\n" +
+      "Quem a atualiza é ele: não há nada a fazer aqui.",
 };
 
 /**

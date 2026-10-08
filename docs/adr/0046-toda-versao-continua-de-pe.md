@@ -1,6 +1,6 @@
 # ADR 0046 — Toda versão continua de pé: o app vira launcher
 
-**Estado:** proposto
+**Estado:** aceito em 08/10/2026, com a emenda das duas numerações (abaixo)
 **Data:** 2026-09-05
 
 > **Esta página nasceu como 0045 e foi renumerada na integração**, junto com o
@@ -71,6 +71,10 @@ Foi escolhido com o custo na mesa duas vezes, e o custo está escrito abaixo.
 
 ### Uma versão do produto é uma unidade
 
+> **Emendado em 08/10/2026.** A versão do *servidor* sobe junto com o protocolo
+> e a API de MODs, e o app tem número próprio. Ver «Emenda, 08/10/2026 — duas
+> numerações, e toda linha para sempre», mais abaixo.
+
 Cliente, servidor, protocolo e API de MOD sobem juntos e são identificados pelo
 mesmo número. **Não há matriz de compatibilidade**, e essa é a propriedade que
 torna a decisão sustentável: a única pergunta que alguém precisa responder é
@@ -132,6 +136,44 @@ ser a mesma coisa — duas listas de revogação seriam duas chances de esquecer
 > formato e o procedimento estão em
 > [`docs/versoes-lado-a-lado.md`](../versoes-lado-a-lado.md), que é também
 > onde mora o contrato do manifesto e a lista do que falta publicar.
+
+### Emenda, 08/10/2026 — duas numerações, e toda linha para sempre
+
+Decisão do dono para a 0.16 (spec `docs/superpowers/specs/2026-10-08-0.16-design.md`,
+§1), e com ela este ADR passa de proposto a aceito.
+
+- **«Cliente, servidor, protocolo e API de MOD sobem juntos com o mesmo
+  número» passa a ser:** a versão do **servidor** sobe junto com o protocolo e
+  a API de MODs; o **app** tem número próprio. O app 0.16 fala o Servidor 1.0.
+  Um 1.x nunca quebra o fio ([ADR 0058](0058-1x-nunca-quebra-o-fio.md)), então
+  a família 1.x inteira é **uma linha**. O número que viaja no primeiro byte do
+  quadro continua um só e só cresce (o Servidor 1.0 é o protocolo 9), e a linha
+  é derivada por uma tabela congelada no `seele-proto`.
+- **«Toda versão para sempre» passa a ser «toda linha para sempre».** O
+  launcher guarda o app **mais novo de cada linha**: a 0.16.1 substitui a 0.16,
+  porque as duas falam o Servidor 1.0. O manifesto continua acumulado e lista
+  as publicações; quem escolhe é a linha.
+- **Um diretório de dados por linha**, e não por versão (`dados/servidor-0.15`):
+  um conserto da linha herda os dados dela. A tela diz, antes de abrir, que as
+  conversas de uma linha não aparecem na outra. A seção «Um diretório de dados
+  por versão» acima vale com «linha» no lugar de «versão».
+- **As versões 0.11 a 0.14 deixam de ser oferecidas.** A única linha além da 1
+  é a do Servidor 0.15, servida por uma 0.15.2 publicada só para o launcher,
+  com `--latest=false`, que não se atualiza quando é ele quem a abre. Mac Intel
+  e Linux ficam sem linha legada, porque a 0.15 nunca teve pacote para eles.
+- **A matriz continua não existindo.** A pergunta passa a ser «qual linha», e
+  não «qual versão» — e continua sem «qual combinação».
+- **A revogação continua igual**, e o lado que a **lê** passa a funcionar: até
+  a 0.15 o `Resolvedor` e a conciliação existiam, passavam nos testes e
+  ninguém os chamava. Na 0.16 hospedar e entrar conferem a lista, inclusive
+  para a versão do próprio processo; abrir continua não conferindo.
+
+O que não muda: as duas assinaturas, o manifesto no release (agora híbrido: o
+topo no formato que o atualizador da 0.15.1 lê, e `schema: 2` com `versions[]`
+ao lado), a conferência antes de tocar arquivo, nenhuma consulta ao abrir, e
+«descer não leva as conversas». O formato do manifesto, o procedimento da linha
+legada e a primeira abertura da 0.16 estão em
+[`docs/versoes-lado-a-lado.md`](../versoes-lado-a-lado.md).
 
 ### O que o ADR 0026 perde, e o que ele mantém
 
