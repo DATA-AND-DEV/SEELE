@@ -1202,8 +1202,8 @@ function abaDoDiagnostico() {
     if (inicio >= 0 && fim > inicio) vm.runInContext(fonte.slice(inicio, fim), aba);
   }
   // O que a aba lê da página e dos MODs de pé: a preferência desta máquina,
-  // os cartões da API 3, o tema da API 3, e a região e as superfícies de cada
-  // instância. O registro é de verdade.
+  // os cartões e o tema do caminho antigo (`modsDoCaminhoAntigo`), e a região
+  // e as superfícies de cada instância. O registro é de verdade.
   aba.preferencias = new Map();
   aba.modPreferidoPara = (ponto) => aba.preferencias.get(ponto) ?? "";
   aba.cartoesDosMods = new Map();
