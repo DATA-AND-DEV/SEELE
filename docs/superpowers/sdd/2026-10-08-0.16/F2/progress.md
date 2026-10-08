@@ -66,11 +66,24 @@ não toca no `seele-core/src/encontro.rs`, então a Task 9 não espera.
 | 6 | o ponto fala as duas versões | feita | `50488d25` |
 | 7 | o `sondar` aprende o `/2` | feita | `f3e1bff8` |
 | 8 | o anfitrião assina e diz | **espera o G-servidor** | |
-| 9 | quem liga pergunta pelo `QUEM2` | a fazer | |
+| 9 | quem liga pergunta pelo `QUEM2` | feita | `7871d563` |
 | 10 | de ponta a ponta | espera a 8 | |
-| 11 | o ENC/2 no fuzz | a fazer | |
-| 12 | o ADR 0062 e as frases públicas | a fazer | |
-| 13 | o portão da VPS | a fazer | |
+| 11 | o ENC/2 no fuzz | feita | `ff203557` |
+| 12 | o ADR 0062 e as frases públicas | feita | `3c12e223` |
+| 13 | o portão da VPS | feita | `e9b31450` (o `publicar.sh`, à parte; a F6 simulou o merge com o `36274663` e ele entra limpo), `8f006d8c` (a receita) |
+
+## A Task 3 depois do G-servidor
+
+O G-servidor (`8a4bd619`, no `0.16/lotes-g-servidor`) dá dois sentidos à
+ausência de `$SEELE_ENCONTRO`: no `do_ambiente`, nenhum ponto; no
+`com_o_ponto_padrao` (o HOSPEDAR do app), o `PONTO_PADRAO`. Então a função pura
+da Task 3 passa a ser `ponto_escolhido(variavel, sem_a_variavel)`, o
+`do_ambiente_ou` do G-servidor passa a chamá-la, e o `ponto_de_quem_liga` do
+cliente é o caminho de produção (sem a variável, o padrão). Proposta, a levar à
+orquestradora: o guarda que o G-servidor pôs no `resolver` do anfitrião
+(nenhum teste fala com a produção) ganha um gêmeo no `resolver_ponto` do
+cliente, quando o `PONTO_PADRAO` chegar ao `seele-proto`; hoje um teste que
+chamasse `localizar(ponto_de_quem_liga()…)` sem ambiente perguntaria à VPS.
 
 **Marco: o lado do ponto está pronto** (Tasks 1, 2, 4, 5, 6 e 7). Depois do merge,
 o binário do `seele-encontro` deste branch é o que vai para a VPS, e o
