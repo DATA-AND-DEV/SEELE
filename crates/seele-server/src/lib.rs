@@ -1047,7 +1047,13 @@ pub(crate) mod ambiente_de_teste {
             // A trava tem de durar o guarda inteiro, e não só o `guardar`. Uma
             // trava só deste teste, e não a `TRAVA`: a de outro teste em curso
             // deixaria esta conferência passar sem o guarda segurar nada.
+            //
+            // E a `TRAVA` por fora, como no teste de pânico: o guarda lê a
+            // variável ao nascer e a escreve ao cair. Sem ela, este teste lia a
+            // variável trocada pelo de pânico e a escrevia de volta depois de
+            // o outro a devolver, e o de pânico reprovava com uma frase falsa.
             static SO_DESTE_TESTE: Mutex<()> = Mutex::new(());
+            let _ninguem_mais_troca = TRAVA.lock().unwrap_or_else(PoisonError::into_inner);
             let ambiente = AmbienteDoEncontro::guardar_sob(&SO_DESTE_TESTE);
 
             let tomada = matches!(
