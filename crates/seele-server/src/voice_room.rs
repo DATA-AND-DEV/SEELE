@@ -1289,7 +1289,7 @@ mod tests {
 
     fn datagram(ssrc: u32, seq: u16) -> Vec<u8> {
         let header = MediaHeader {
-            version: seele_proto::PROTOCOL_VERSION,
+            version: seele_proto::MEDIA_HEADER_VERSION,
             ssrc,
             seq,
             timestamp: u32::from(seq) * 960,

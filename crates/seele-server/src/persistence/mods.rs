@@ -46,6 +46,12 @@ pub struct EnabledMod {
     /// `world` block of `api/v1.json` — outbound network, clock and log — from
     /// the host's machine.
     pub server_half: bool,
+    /// A API de MOD que o manifesto deste MOD pede (D-fio-7; migração 14).
+    ///
+    /// **Zero é «não preenchida»**: uma linha gravada antes da coluna, que a
+    /// subida do servidor preenche pelo `mod.json` dos bytes do hash
+    /// ([`preencher_api`]).
+    pub api: u32,
 }
 
 /// Turns a MOD on, or updates everything about one already known.
@@ -60,17 +66,19 @@ pub struct EnabledMod {
 pub fn enable(persistence: &Persistence, ligado: &EnabledMod) -> Result<()> {
     let reach = serde_json::to_string(&ligado.reach).unwrap_or_else(|_| "[]".to_owned());
     persistence.connection().execute(
-        "INSERT INTO mods (id, version, hash, repo, reach, server_half, enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)
+        "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
          ON CONFLICT(id) DO UPDATE SET
-            version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, enabled = 1",
+            version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, api = ?7,
+            enabled = 1",
         params![
             ligado.id,
             ligado.version,
             ligado.hash,
             ligado.repo,
             reach,
-            i64::from(ligado.server_half)
+            i64::from(ligado.server_half),
+            i64::from(ligado.api)
         ],
     )?;
     // Depois de gravado, e não antes: quem acorda vai ao banco, e acordar antes
@@ -112,17 +120,18 @@ pub fn definir_conjunto(persistence: &Persistence, ligados: &[EnabledMod]) -> Re
     for ligado in ligados {
         let reach = serde_json::to_string(&ligado.reach).unwrap_or_else(|_| "[]".to_owned());
         transaction.execute(
-            "INSERT INTO mods (id, version, hash, repo, reach, server_half, enabled)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)
+            "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
              ON CONFLICT(id) DO UPDATE SET
-                version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, enabled = 1",
+                version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, api = ?7, enabled = 1",
             params![
                 ligado.id,
                 ligado.version,
                 ligado.hash,
                 ligado.repo,
                 reach,
-                i64::from(ligado.server_half)
+                i64::from(ligado.server_half),
+                i64::from(ligado.api)
             ],
         )?;
     }
@@ -156,7 +165,7 @@ pub fn disable(persistence: &Persistence, id: &str) -> Result<()> {
 pub fn enabled(persistence: &Persistence) -> Result<Vec<EnabledMod>> {
     let connection = persistence.connection();
     let mut statement = connection.prepare(
-        "SELECT id, version, hash, repo, reach, server_half
+        "SELECT id, version, hash, repo, reach, server_half, api
          FROM mods WHERE enabled = 1 ORDER BY id",
     )?;
     let rows = statement.query_map([], |row| {
@@ -173,9 +182,30 @@ pub fn enabled(persistence: &Persistence) -> Result<Vec<EnabledMod>> {
             // «nada declarado», que é verdade sobre o que o produto sabe.
             reach: serde_json::from_str(&reach).unwrap_or_default(),
             server_half: row.get::<_, i64>(5)? != 0,
+            // Uma API que não cabe num `u32` é uma linha estragada, e vira
+            // «não preenchida» em vez de uma leitura que falha, pelo mesmo
+            // motivo do `reach` acima.
+            api: u32::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Preenche a API de uma linha que ainda não a tem, e só ela.
+///
+/// Só toca a linha de `id` **com o mesmo `hash`** e com a API zero: uma linha
+/// que outro caminho já preencheu, ou que passou a exigir outros bytes, não é
+/// sobrescrita. Devolve se alguma linha mudou.
+///
+/// # Errors
+///
+/// Falha se o banco não aceitar a escrita.
+pub fn preencher_api(persistence: &Persistence, id: &str, hash: &str, api: u32) -> Result<bool> {
+    let mudou = persistence.connection().execute(
+        "UPDATE mods SET api = ?3 WHERE id = ?1 AND hash = ?2 AND api = 0",
+        params![id, hash, i64::from(api)],
+    )?;
+    Ok(mudou > 0)
 }
 
 /// Everything one MOD has in its yard.
@@ -322,6 +352,7 @@ mod tests {
             repo: "https://github.com/seele/exemplo".to_owned(),
             reach: vec!["dom".to_owned()],
             server_half: false,
+            api: 6,
         }
     }
 
@@ -393,6 +424,82 @@ mod tests {
             .expect("contar");
         assert_eq!(linhas, 1);
     }
+    /// **A API de cada MOD vai e volta do banco** (a P7a da F1b; D-fio-7), e
+    /// re-habilitar a regrava, como regrava as outras colunas.
+    #[test]
+    fn a_api_do_mod_vai_e_volta_do_banco() {
+        let persistence = banco();
+        let mut ligado = ligado("seele/bot", "1.0.0", &"a1".repeat(32));
+        ligado.api = 6;
+        enable(&persistence, &ligado).expect("habilitar");
+        assert_eq!(enabled(&persistence).expect("listar")[0].api, 6);
+
+        ligado.api = 7;
+        enable(&persistence, &ligado).expect("re-habilitar");
+        assert_eq!(enabled(&persistence).expect("listar")[0].api, 7);
+    }
+
+    /// Uma linha gravada antes da coluna fica com a API 0, que é «não
+    /// preenchida»: a migração não inventa um número que o produto não sabe.
+    #[test]
+    fn uma_linha_de_antes_da_coluna_fica_com_a_api_zero() {
+        let conexao = rusqlite::Connection::open_in_memory().expect("memória");
+        for migracao in crate::persistence::schema::MIGRATIONS
+            .iter()
+            .filter(|migracao| migracao.version <= 13)
+        {
+            conexao
+                .execute_batch(migracao.sql)
+                .expect("migração antiga");
+        }
+        conexao
+            .execute(
+                "INSERT INTO mods (id, version, hash) VALUES ('seele/velho', '1.0.0', ?1)",
+                [&"b2".repeat(32)],
+            )
+            .expect("linha da 0.15");
+        let nova = crate::persistence::schema::MIGRATIONS
+            .iter()
+            .find(|migracao| migracao.version == 14)
+            .expect("a migração da API existe");
+        conexao.execute_batch(nova.sql).expect("migração da API");
+        let api: i64 = conexao
+            .query_row(
+                "SELECT api FROM mods WHERE id = 'seele/velho'",
+                [],
+                |linha| linha.get(0),
+            )
+            .expect("ler a coluna");
+        assert_eq!(api, 0);
+    }
+
+    /// Preencher só toca a linha que ainda não tem API, e só a dos mesmos
+    /// bytes: uma linha que outro caminho já preencheu, ou que passou a exigir
+    /// outro hash, não é sobrescrita.
+    #[test]
+    fn preencher_a_api_so_toca_a_linha_sem_api_e_com_o_mesmo_hash() {
+        let persistence = banco();
+        let hash = "c3".repeat(32);
+        let mut sem_api = ligado("seele/sem", "1.0.0", &hash);
+        sem_api.api = 0;
+        enable(&persistence, &sem_api).expect("habilitar");
+        let mut com_api = ligado("seele/com", "1.0.0", &hash);
+        com_api.api = 5;
+        enable(&persistence, &com_api).expect("habilitar");
+
+        assert!(preencher_api(&persistence, "seele/sem", &hash, 6).expect("preencher"));
+        assert!(!preencher_api(&persistence, "seele/com", &hash, 6).expect("preencher"));
+        assert!(
+            !preencher_api(&persistence, "seele/sem", &"d4".repeat(32), 9).expect("preencher"),
+            "outro hash não é a mesma linha"
+        );
+
+        let lista = enabled(&persistence).expect("listar");
+        let api_de = |id: &str| lista.iter().find(|m| m.id == id).map(|m| m.api);
+        assert_eq!(api_de("seele/sem"), Some(6));
+        assert_eq!(api_de("seele/com"), Some(5));
+    }
+
     /// O que a tela de aceite precisa dizer vai e volta do banco.
     ///
     /// Sem estas três colunas, o anúncio teria de ler o disco a cada entrada —
@@ -410,6 +517,7 @@ mod tests {
                 repo: "https://github.com/seele/bot".to_owned(),
                 reach: vec!["ler".to_owned(), "escrever".to_owned()],
                 server_half: true,
+                api: 6,
             },
         )
         .expect("habilitar");

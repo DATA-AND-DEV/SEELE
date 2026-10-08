@@ -31,7 +31,17 @@
 
 use thiserror::Error;
 
-use crate::version::PROTOCOL_VERSION;
+/// O número destes onze bytes: **o número da voz**.
+///
+/// **Sobe só quando o layout mudar**, e não quando o protocolo sobe. São duas
+/// perguntas, e a tela já tem o número dela (`screen::SCREEN_HEADER_VERSION`).
+///
+/// Até a 0.15 este byte carregava o `PROTOCOL_VERSION` de quem falava, e quem
+/// ouvia exigia igualdade estrita: cada subida de protocolo derrubava a voz
+/// entre versões, apesar de os onze bytes nunca terem mudado. O servidor repassa
+/// o datagrama intacto, então quem fala e quem ouve têm de concordar neste
+/// número, e não no do controle. Adendo de 08/10/2026, §7, decisão D-fio-5.
+pub const MEDIA_HEADER_VERSION: u8 = 1;
 
 /// Bytes of header before the Opus payload.
 pub const HEADER_LEN: usize = 11;
@@ -82,7 +92,7 @@ pub enum MediaError {
 /// The fixed part of a media datagram.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MediaHeader {
-    /// Protocol version. Always [`PROTOCOL_VERSION`] on the way out.
+    /// O número do layout. Sempre [`MEDIA_HEADER_VERSION`] na saída.
     pub version: u8,
     /// Source identifier, assigned by the server on voice room entry.
     ///
@@ -182,10 +192,10 @@ impl MediaHeader {
         // Read the version before anything else, so a future layout change is
         // rejected rather than misparsed.
         let version = header.first().copied().unwrap_or_default();
-        if version != PROTOCOL_VERSION {
+        if version != MEDIA_HEADER_VERSION {
             return Err(MediaError::UnsupportedVersion {
                 found: version,
-                expected: PROTOCOL_VERSION,
+                expected: MEDIA_HEADER_VERSION,
             });
         }
 
@@ -230,11 +240,45 @@ mod tests {
 
     fn header() -> MediaHeader {
         MediaHeader {
-            version: PROTOCOL_VERSION,
+            version: MEDIA_HEADER_VERSION,
             ssrc: 0xDEAD_BEEF,
             seq: 0x1234,
             timestamp: 0x0009_6000,
         }
+    }
+
+    /// **A voz carrega o número dos onze bytes, e não o do protocolo.**
+    ///
+    /// Até a 0.15, o primeiro byte do datagrama era o `PROTOCOL_VERSION` de
+    /// quem falava, conferido com igualdade estrita: cada subida de protocolo
+    /// derrubava a voz entre versões, apesar de estes onze bytes nunca terem
+    /// mudado. A tela já tinha passado por isso (`screen::SCREEN_HEADER_VERSION`).
+    /// Adendo de 08/10/2026, §7, decisão D-fio-5.
+    #[test]
+    fn a_voz_carrega_o_numero_dos_onze_bytes_e_nao_o_do_protocolo() {
+        let mut saida = [0_u8; HEADER_LEN + 1];
+        let cabecalho = MediaHeader {
+            version: MEDIA_HEADER_VERSION,
+            ssrc: 1,
+            seq: 2,
+            timestamp: 3,
+        };
+        cabecalho.encode_datagram(&[0xAB], &mut saida).unwrap();
+        assert_eq!(
+            saida[0], 1,
+            "o byte 0 da voz voltou a ser a versão do protocolo"
+        );
+        assert!(MediaHeader::decode(&saida).is_ok());
+
+        let mut do_protocolo = saida;
+        do_protocolo[0] = crate::PROTOCOL_VERSION;
+        assert!(
+            matches!(
+                MediaHeader::decode(&do_protocolo),
+                Err(MediaError::UnsupportedVersion { found, .. }) if found == crate::PROTOCOL_VERSION
+            ),
+            "a voz passou a aceitar o número do protocolo, e cada subida voltaria a derrubá-la"
+        );
     }
 
     #[test]
@@ -266,7 +310,7 @@ mod tests {
         let mut buffer = [0_u8; HEADER_LEN];
         header().encode(&mut buffer).unwrap();
 
-        assert_eq!(buffer[0], PROTOCOL_VERSION, "version first");
+        assert_eq!(buffer[0], MEDIA_HEADER_VERSION, "version first");
         assert_eq!(&buffer[1..5], &[0xDE, 0xAD, 0xBE, 0xEF], "ssrc, big-endian");
         assert_eq!(&buffer[5..7], &[0x12, 0x34], "seq");
         assert_eq!(&buffer[7..11], &[0x00, 0x09, 0x60, 0x00], "timestamp");
@@ -327,13 +371,13 @@ mod tests {
     fn a_foreign_version_is_refused_with_the_numbers() {
         let mut buffer = [0_u8; 32];
         let len = header().encode_datagram(&[9], &mut buffer).unwrap();
-        buffer[0] = PROTOCOL_VERSION.wrapping_add(7);
+        buffer[0] = MEDIA_HEADER_VERSION.wrapping_add(7);
 
         assert_eq!(
             MediaHeader::decode(&buffer[..len]),
             Err(MediaError::UnsupportedVersion {
-                found: PROTOCOL_VERSION.wrapping_add(7),
-                expected: PROTOCOL_VERSION,
+                found: MEDIA_HEADER_VERSION.wrapping_add(7),
+                expected: MEDIA_HEADER_VERSION,
             })
         );
     }
@@ -365,7 +409,7 @@ mod tests {
         // Sequence wraps every 21 minutes and the timestamp every 24.8 hours,
         // so the ends of both ranges are ordinary values, not edge cases.
         let extremes = MediaHeader {
-            version: PROTOCOL_VERSION,
+            version: MEDIA_HEADER_VERSION,
             ssrc: u32::MAX,
             seq: u16::MAX,
             timestamp: u32::MAX,

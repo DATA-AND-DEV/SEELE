@@ -24,11 +24,11 @@
 //! habilitar um MOD não tranca a porta nem derruba a sala: é a regressão que a
 //! entrega do anúncio chegou a introduzir, e eles são o guarda dela.
 //!
-//! **E a janela de compatibilidade**, no fim: um par falando a versão anterior
-//! continua entrando num servidor sem MOD, e é recusado por um que exige MOD.
-//! O que estes testes **não** provam, de propósito, é que a última release
-//! publicada continue entrando — não continua, e a medida disso está em
-//! `seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`.
+//! **E a faixa do `Hello`**, no fim: um par que só fala a linha de antes da 1.0
+//! é recusado com `Incompatible`, e um que fala a mínima desta build recebe o
+//! anúncio antes de entrar. O que estes testes **não** provam, de propósito, é
+//! o lado do codec da release publicada — essa medida está em
+//! `seele_proto::control::a_publicada_ou_e_da_mesma_linha_ou_le_a_recusa_desta_build`.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
 
@@ -41,6 +41,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use seele_core::frame;
 use seele_core::{Client, ConnectError, MemoryPinStore};
 use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
+use seele_proto::version::Faixa;
 use seele_server::persistence::mods::{enable, EnabledMod};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
@@ -107,6 +108,7 @@ fn um_mod(id: &str, hash_de: u8) -> EnabledMod {
         repo: "https://github.com/seele/exemplo".to_owned(),
         reach: vec!["ler".to_owned()],
         server_half: true,
+        api: 6,
     }
 }
 
@@ -565,7 +567,7 @@ async fn motivo_do_fechamento(par: &Par, prazo: Duration) -> Option<Vec<u8>> {
 
 /// Faz o aperto de mão à mão, para que a despedida possa ser lida no fio.
 async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
-    abrir_falando(endereco, semente, seele_proto::PROTOCOL_VERSION).await
+    abrir_falando(endereco, semente, seele_proto::FAIXA).await
 }
 
 /// O quadro que veio no lugar de `Session`, guardado em vez de resumido.
@@ -588,21 +590,19 @@ impl std::fmt::Display for NaoEntrou {
 
 impl std::error::Error for NaoEntrou {}
 
-/// O mesmo, declarando no `Hello` a versão que se quiser.
+/// O mesmo, declarando no `Hello` a faixa que se quiser.
 ///
-/// **É a única forma de um par mais velho aparecer neste crate**, e é uma
+/// **É a única forma de um par de outra linha aparecer neste crate**, e é uma
 /// simulação parcial — dizê-lo é metade do valor deste comentário. As duas
 /// pontas são a mesma build: o quadro sai carimbado com `PROTOCOL_VERSION` por
 /// `control::encode`, e volta a ser lido por este mesmo codec. Só o campo
-/// `Hello.version` fala a versão pedida.
+/// `Hello.faixa` fala a faixa pedida.
 ///
-/// Isto mede o lado do **servidor** — a janela de compatibilidade e o limiar do
-/// anúncio, que decidem sobre o número declarado. Não mede o lado do cliente
-/// velho, que recusaria o carimbo antes de ler o corpo: essa metade está em
-/// `seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`, e é
-/// por isso que nenhum teste deste arquivo promete que a release publicada
-/// conecta.
-async fn abrir_falando(endereco: SocketAddr, semente: u8, versao: u8) -> Result<Par> {
+/// Isto mede o lado do **servidor** — a negociação e o limiar do anúncio, que
+/// decidem sobre a faixa declarada. Não mede o lado do cliente velho, que
+/// recusaria o carimbo antes de ler o corpo: essa metade está em
+/// `seele_proto::control::a_publicada_ou_e_da_mesma_linha_ou_le_a_recusa_desta_build`.
+async fn abrir_falando(endereco: SocketAddr, semente: u8, faixa: Faixa) -> Result<Par> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let provider = Arc::new(rustls::crypto::ring::default_provider());
 
@@ -625,23 +625,30 @@ async fn abrir_falando(endereco: SocketAddr, semente: u8, versao: u8) -> Result<
     frame::write(
         &mut envio,
         &ClientMessage::Hello {
-            version: versao,
+            faixa,
             client: "par-cru".into(),
             nickname: format!("pessoa{semente:03}"),
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
+            material_e2ee: None,
+            apis_de_mod: Vec::new(),
         },
     )
     .await?;
 
-    let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
-    else {
-        anyhow::bail!("o servidor não mandou Challenge");
+    // Uma recusa que vem no lugar do `Challenge` — a da negociação, por
+    // exemplo — volta inteira, pela mesma razão do `NaoEntrou` do fim.
+    let primeiro = frame::read::<ServerMessage>(&mut recebe).await?;
+    let ServerMessage::Challenge { nonce } = primeiro else {
+        return Err(NaoEntrou(primeiro).into());
     };
     frame::write(
         &mut envio,
         &ClientMessage::Response {
-            proof: chave.sign(&nonce).to_bytes().to_vec(),
+            proof: chave
+                .sign(&prova_amarrada(&conexao, &nonce))
+                .to_bytes()
+                .to_vec(),
         },
     )
     .await?;
@@ -790,6 +797,7 @@ fn anunciado(id: &str, hash_de: u8) -> seele_proto::mods::ModAnunciado {
         repo: "https://github.com/seele/exemplo".to_owned(),
         reach: vec!["ler".to_owned()],
         no_servidor: true,
+        api: 0,
     }
 }
 
@@ -940,58 +948,76 @@ async fn o_anuncio_sai_do_servidor_padrao_sem_ninguem_baixar_limiar() -> Result<
     Ok(())
 }
 
-/// **Um par da versão anterior continua entrando, e é só isso que a janela
-/// promete.**
+/// **Um par da linha de antes da 1.0 é recusado com `Incompatible`, e a
+/// recusa diz por quê.**
 ///
-/// A janela de compatibilidade é N−1: a v5 desta build ouve a v4. Este teste
-/// prende esse lado — o `Hello` sai com o número anterior de verdade e o aperto
-/// de mão inteiro corre até `Session`, sem baixar constante nenhuma.
+/// Até a 0.15 este teste se chamava `um_par_da_versao_anterior_continua_entrando`
+/// e prendia a janela N−1. O Servidor 1.0 fala só o 9, e a 0.15 — que fala 8 —
+/// fica de fora por decisão de 08/10/2026 (ADR 0058). O que se prende agora é a
+/// metade que a janela nunca entregou: a razão certa, e não «não alcançou».
 ///
-/// **O que ele deliberadamente não promete:** que a release publicada
-/// `v0.10.5-1`, que fala protocolo 3, continue entrando. Ela não continua, e a
-/// janela não tem como fazê-la continuar — o quadro do servidor sai carimbado
-/// com a versão global e aquele build recusa o carimbo antes de ler o corpo.
-/// Medido em `seele_proto::control::a_release_publicada_recusa_o_carimbo_desta_build`
-/// e contado por inteiro na pendência #42.
+/// A faixa declarada é a da 0.15, `[8, 8]`. O carimbo do quadro continua o
+/// desta build — ver o doc de [`abrir_falando`] —, então isto mede a
+/// negociação do servidor, e não o byte 0 da 0.15 de verdade.
 #[tokio::test(flavor = "multi_thread")]
-async fn um_par_da_versao_anterior_continua_entrando() -> Result<()> {
+async fn um_par_da_linha_anterior_e_recusado_com_incompatible() -> Result<()> {
     let _vaga = vaga::minha();
-    let anterior = seele_proto::version::oldest_supported_version();
-    assert!(
-        anterior < seele_proto::PROTOCOL_VERSION,
-        "a janela fechou sobre a própria versão: não há vocabulário anterior vivo"
-    );
-
     let (endereco, daemon) = servidor().await?;
 
-    // `abrir` só devolve `Par` depois de ler o `Session`, então chegar aqui é a
-    // prova: o aperto de mão inteiro correu com o número anterior.
-    let _par = abrir_falando(endereco, 53, anterior)
-        .await
-        .map_err(|erro| anyhow::anyhow!("um par da versão anterior não entrou: {erro}"))?;
+    let erro = abrir_falando(
+        endereco,
+        53,
+        Faixa {
+            minima: 8,
+            maxima: 8,
+        },
+    )
+    .await
+    .err()
+    .expect("um par que só fala 8 entrou num Servidor 1.0");
+    let recusa = erro
+        .downcast_ref::<NaoEntrou>()
+        .unwrap_or_else(|| panic!("a conexão caiu sem o servidor dizer por quê: {erro:#}"));
+    assert!(
+        matches!(
+            recusa.0,
+            ServerMessage::Disconnecting {
+                reason: DisconnectReason::Incompatible
+            }
+        ),
+        "a faixa da 0.15 foi recusada com outra razão: {:?}",
+        recusa.0
+    );
 
     daemon.shutdown();
     Ok(())
 }
 
-/// Na v6, a janela N−1 já alcança o anúncio v5. O servidor deve anunciar
-/// antes de Session, sem dispensar o aceite do par anterior. A recusa por
-/// estar abaixo do limiar continua coberta na unidade do servidor com v4.
+/// Um par que fala a mínima desta build recebe o anúncio antes de entrar. O
+/// anúncio pede `VERSAO_DO_ANUNCIO` (5), e todo número da linha 1 o alcança.
+/// A recusa por estar abaixo do limiar continua coberta na unidade do servidor.
 #[tokio::test(flavor = "multi_thread")]
 async fn um_par_dentro_da_janela_recebe_o_anuncio_antes_de_entrar() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, daemon) = servidor().await?;
     habilitar(&daemon, &um_mod("seele/bot", 0xa1)).await;
 
-    let anterior = seele_proto::version::oldest_supported_version();
+    let minima = seele_proto::version::VERSAO_MINIMA;
     assert!(
-        anterior >= seele_proto::mods::VERSAO_DO_ANUNCIO,
-        "a janela atual deve alcançar o anúncio original"
+        minima >= seele_proto::mods::VERSAO_DO_ANUNCIO,
+        "a mínima desta build deve alcançar o anúncio original"
     );
-    let erro = abrir_falando(endereco, 54, anterior)
-        .await
-        .err()
-        .expect("o servidor entregou Session sem primeiro exigir o aceite dos MODs");
+    let erro = abrir_falando(
+        endereco,
+        54,
+        Faixa {
+            minima,
+            maxima: minima,
+        },
+    )
+    .await
+    .err()
+    .expect("o servidor entregou Session sem primeiro exigir o aceite dos MODs");
 
     // O helper esperava Session; o que veio precisa ser o anúncio, não uma
     // desconexão ou falha de transporte mascarada como sucesso do teste.
@@ -1000,9 +1026,31 @@ async fn um_par_dentro_da_janela_recebe_o_anuncio_antes_de_entrar() -> Result<()
         .unwrap_or_else(|| panic!("a conexão caiu sem o servidor dizer por quê: {erro:#}"));
     assert!(
         matches!(&recusa.0, ServerMessage::ModsExigidos { mods, .. } if mods.len() == 1 && mods[0].id == "seele/bot"),
-        "a v5 recebe o anúncio e precisa aceitá-lo antes de Session"
+        "a mínima desta build recebe o anúncio e precisa aceitá-lo antes de Session"
     );
 
     daemon.shutdown();
     Ok(())
+}
+
+/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
+/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
+/// Desde o Servidor 1.0, o nonce cru não entra mais.
+fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
+    let cadeia = conexao
+        .peer_identity()
+        .and_then(|identidade| {
+            identidade
+                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
+                .ok()
+        })
+        .expect("o TLS sempre entrega a cadeia do servidor");
+    let impressao = seele_proto::transport::certificate_digest(
+        cadeia
+            .first()
+            .expect("a cadeia tem um certificado")
+            .as_ref(),
+    );
+    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
+    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

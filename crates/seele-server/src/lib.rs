@@ -518,6 +518,7 @@ impl Daemon {
             vec!["localhost".into(), config.listen.ip().to_string()],
         )?;
         let fingerprint = identity.fingerprint();
+        let impressao = identity.digest();
         let server_config = tls::server_config(identity)?;
 
         // Não é `Endpoint::server`: aquele faz um `UdpSocket::bind` cru e herda
@@ -633,6 +634,7 @@ impl Daemon {
             esperas: Arc::new(std::sync::Mutex::new(mods::volume::Esperas::default())),
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            impressao,
         });
 
         // Os MODs deste servidor, se houver pasta. ADR 0045.
@@ -644,6 +646,12 @@ impl Daemon {
         if let Some(pasta_dos_mods) = config.mods_dir.clone() {
             let ligados = {
                 let banco = server.persistence.lock().await;
+                // A API das linhas habilitadas antes da migração 14, lida dos
+                // bytes do hash. Antes de montar qualquer anúncio, e dita no
+                // registro quando não se preenche (D-fio-7).
+                for queixa in crate::mods::preencher_as_apis(&banco, &pasta_dos_mods) {
+                    tracing::warn!("MOD habilitado sem API conhecida — {queixa}");
+                }
                 crate::persistence::mods::enabled(&banco).unwrap_or_default()
             };
             // O par, e não só o identificador: é o hash que diz **quais bytes**

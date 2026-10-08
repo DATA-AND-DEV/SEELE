@@ -607,6 +607,15 @@ pub struct ModAnunciado {
     /// a diferença entre repintar uma janela e abrir conexões da casa de
     /// alguém.
     pub no_servidor: bool,
+    /// A API de MOD que este MOD pede, como o manifesto dele declara (D-fio-7).
+    ///
+    /// Com ela, quem entra sabe antes de aceitar se este build roda o MOD, e
+    /// um servidor sabe quem recusar antes do convite. **Zero é «não
+    /// preenchida»**: no Servidor 1.0 a tabela de MODs habilitados ainda não
+    /// guarda a API, e quem a preenche é o lado do servidor, depois. Ela fica
+    /// fora de [`identidade_do_conjunto`] porque já está dentro do hash: o
+    /// `mod.json` faz parte do conteúdo.
+    pub api: u32,
 }
 
 /// Um hash de conteúdo em hexadecimal minúsculo, e nada mais.
@@ -941,6 +950,7 @@ mod tests {
             repo: "https://github.com/seele/exemplo".to_owned(),
             reach: vec!["dom".to_owned()],
             no_servidor: false,
+            api: 0,
         }
     }
 

@@ -113,6 +113,18 @@ const MOTIVOS = {
   ModsIndisponiveis:
     "ESTE SERVIDOR EXIGE MODS QUE ELE NÃO CONSEGUE DESCREVER.\n" +
     "Não é a sua entrada: avise quem hospeda.",
+  // A sala pessoal (spec de 23/09, «Erros e frases»). Provisórias e sem nome:
+  // a spec as escreve com o nome de quem foi chamado («ALICE NÃO ATENDEU»), e
+  // quem as reescreve com ele é a casca da ligação. «RECUSOU» e «NÃO ATENDEU»
+  // continuam distintas, que é a decisão do dono de 23/09.
+  ChamadaEncerrada: "A LIGAÇÃO FOI ENCERRADA DO OUTRO LADO.",
+  NinguemAtendeu: "NINGUÉM ATENDEU.",
+  ChamadaRecusada: "A LIGAÇÃO FOI RECUSADA.",
+  // D-fio-7: o servidor roda MODs de uma API que esta versão não roda. Nada a
+  // mudar do lado de quem hospeda; quem resolve é atualizar.
+  ModsDeOutraApi:
+    "ESTE SERVIDOR RODA MODS QUE ESTA VERSÃO DO APP NÃO RODA.\n" +
+    "Atualize o app para entrar.",
 
   // ---- a volta da bateria, recusada dentro do TLS ----
   //

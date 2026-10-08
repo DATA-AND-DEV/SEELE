@@ -4835,6 +4835,9 @@ async fn habilitar_mod(
             repo: instalado.repo,
             reach: instalado.reach,
             server_half: instalado.server,
+            // A API que o manifesto pede, gravada no mesmo ato que o hash
+            // (migração 14; D-fio-7). É ela que o anúncio diz.
+            api: instalado.api,
         },
     )
     .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
@@ -6734,6 +6737,7 @@ async fn aplicar_conjunto_de_mods(
             repo: instalado.repo,
             reach: instalado.reach,
             server_half: instalado.server,
+            api: instalado.api,
         });
     }
 

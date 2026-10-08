@@ -4,13 +4,17 @@
 //! lived". A QUIC stream is a byte stream, so message boundaries have to be
 //! written down: four bytes of big-endian length, then the frame.
 //!
+//! **A regra mora em [`seele_proto::quadro`]**, e aqui fica só a E/S do
+//! `quinn` e a distinção entre [`FimDoQuadro::Fechou`] e
+//! [`FimDoQuadro::NaoEntendi`], que é do servidor.
+//!
 //! The length is checked against [`seele_proto::control::MAX_FRAME_LEN`] **before**
 //! anything is allocated, per `specs/08-seguranca.md`. Reading a 4 GiB length
 //! from an unauthenticated peer and reserving for it is the oldest denial of
 //! service there is.
 
 use anyhow::Result;
-use seele_proto::control::{Validate, MAX_FRAME_LEN};
+use seele_proto::control::{ControlError, Validate, MAX_FRAME_LEN};
 use serde::{Deserialize, Serialize};
 
 /// Por que a leitura de um quadro parou.
@@ -103,24 +107,22 @@ pub async fn ler<T>(stream: &mut quinn::RecvStream) -> Result<T, FimDoQuadro>
 where
     T: for<'de> Deserialize<'de> + Validate,
 {
-    let mut length = [0_u8; 4];
+    let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
     stream
-        .read_exact(&mut length)
+        .read_exact(&mut prefixo)
         .await
         .map_err(|erro| FimDoQuadro::Fechou(erro.into()))?;
-    let length = u32::from_be_bytes(length) as usize;
 
     // Before allocating. specs/08-seguranca.md.
-    if length > MAX_FRAME_LEN {
-        return Err(FimDoQuadro::NaoEntendi(anyhow::anyhow!(
-            "peer announced a {length}-byte control frame, over the {MAX_FRAME_LEN}-byte limit"
-        )));
-    }
-    if length == 0 {
-        return Err(FimDoQuadro::NaoEntendi(anyhow::anyhow!(
-            "peer announced an empty control frame"
-        )));
-    }
+    let length = seele_proto::quadro::comprimento(prefixo).map_err(|erro| {
+        FimDoQuadro::NaoEntendi(match erro {
+            ControlError::Empty => anyhow::anyhow!("peer announced an empty control frame"),
+            _ => anyhow::anyhow!(
+                "peer announced a {}-byte control frame, over the {MAX_FRAME_LEN}-byte limit",
+                u32::from_be_bytes(prefixo)
+            ),
+        })
+    })?;
 
     let mut frame = vec![0_u8; length];
     // **Aqui ainda é `Fechou`.** O comprimento chegou e o corpo não: o par
@@ -145,8 +147,8 @@ where
     T: Serialize + Validate,
 {
     let frame = seele_proto::control::encode(message)?;
-    let length = u32::try_from(frame.len())?;
-    stream.write_all(&length.to_be_bytes()).await?;
-    stream.write_all(&frame).await?;
+    stream
+        .write_all(&seele_proto::quadro::enquadrar(&frame)?)
+        .await?;
     Ok(())
 }

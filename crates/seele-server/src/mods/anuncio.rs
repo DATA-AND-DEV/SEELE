@@ -126,6 +126,10 @@ pub fn conjunto_exigido(persistence: &Persistence) -> Result<Conjunto, NaoDaPara
             repo: ligado.repo,
             reach: ligado.reach,
             no_servidor: ligado.server_half,
+            // A API que o banco guardou (migração 14). Zero continua sendo
+            // «não preenchida»: uma linha antiga cujo pacote a subida não
+            // conseguiu ler, e que foi dita no registro.
+            api: ligado.api,
         });
     }
 
@@ -285,6 +289,7 @@ mod tests {
             repo: "https://github.com/seele/exemplo".to_owned(),
             reach: vec!["dom".to_owned()],
             server_half: false,
+            api: 6,
         }
     }
 
@@ -318,6 +323,18 @@ mod tests {
              roda na máquina de quem hospeda"
         );
         assert!(conjunto.anuncio().validate().is_ok());
+    }
+
+    /// O anúncio diz a API que o banco guardou, e não o zero de «não
+    /// preenchida» (a P7a da F1b; D-fio-7).
+    #[test]
+    fn o_anuncio_diz_a_api_que_o_banco_guardou() {
+        let persistence = banco();
+        let mut ligado = linha("seele/bot", 0xa1);
+        ligado.api = 6;
+        enable(&persistence, &ligado).expect("habilitar");
+        let conjunto = conjunto_exigido(&persistence).expect("montar");
+        assert_eq!(conjunto.mods[0].api, 6);
     }
 
     /// **Instalado, habilitado e exigido são três coisas.** Desabilitar tira do

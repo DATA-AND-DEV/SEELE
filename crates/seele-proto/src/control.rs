@@ -276,6 +276,32 @@ pub const SIGNATURE_LEN: usize = 64;
 /// password fallback needs.
 pub const MAX_PROOF_LEN: usize = 256;
 
+/// O tamanho **exato** do nonce de um `Challenge`.
+///
+/// Até a 0.15 o nonce podia ter até [`MAX_PROOF_LEN`] bytes, e o cliente
+/// assinava o que viesse. O S2 fixa o tamanho e amarra a prova à impressão do
+/// servidor ([`crate::assinatura::prova_de_cliente`]): um tamanho exato é o que
+/// deixa o cliente recusar, antes de assinar, qualquer outra coisa.
+pub const NONCE_LEN: usize = 32;
+
+/// O teto do assento do E2EE, nos dois sentidos.
+///
+/// **O assento vai sempre `None` no Servidor 1.0.** Ele existe porque um campo
+/// novo numa mensagem que já existe não pode chegar numa 1.x — o postcard lê
+/// campo por posição (ADR 0058) —, e o E2EE de mídia por sala
+/// (`specs/08-seguranca.md`) vai precisar que cada pessoa publique, uma vez
+/// por sessão, um material de acordo de chave assinado pela identidade. 256
+/// bytes cabem uma chave X25519, a assinatura dela e folga; é o mesmo teto da
+/// prova. Adendo de 08/10/2026, §10.
+pub const MAX_MATERIAL_E2EE_LEN: usize = 256;
+
+/// Quantas APIs de MOD um `Hello` pode dizer que roda.
+///
+/// Uma build roda poucas: a 0.15 roda três (3, 4 e 5), e a 0.16 roda uma. Oito
+/// é folga para uma linha inteira, e um teto pequeno é o que cabe a um campo
+/// que chega antes de qualquer autenticação.
+pub const MAX_APIS_DE_MOD: usize = 8;
+
 /// Tamanho de uma impressão digital em hex.
 ///
 /// Um SHA-256 em hexadecimal são exatamente 64 caracteres — nem mais, nem
@@ -332,7 +358,10 @@ pub enum ControlError {
         len: usize,
     },
 
-    /// A version outside the compatibility window.
+    /// A version outside this build's [`crate::version::FAIXA`].
+    ///
+    /// `found` é o número de quem mandou, e é por ele que se sabe a linha do
+    /// outro lado: ver [`crate::version::linha_de`].
     #[error("frame announces protocol {found}, this build implements {expected}")]
     UnsupportedVersion {
         /// Version in the frame.
@@ -461,7 +490,60 @@ pub struct PersonProfile {
     pub nickname: String,
     /// Roles held.
     pub roles: Vec<RoleId>,
+    /// O assento do E2EE: o material que esta pessoa publicou no `Hello`.
+    ///
+    /// **Sempre `None` no Servidor 1.0**, que não guarda nem repassa. É no
+    /// perfil porque é ele que apresenta uma pessoa aos outros — em
+    /// `PersonJoined` e em `PersonPresent` —, inclusive a quem é movido de sala
+    /// sem pedir. Ver [`MAX_MATERIAL_E2EE_LEN`].
+    pub material_e2ee: Option<Vec<u8>>,
 }
+
+/// Uma pessoa que é membro deste servidor, esteja ou não conectada.
+///
+/// É o grupo **FORA DO AR** da lista de pessoas (decisão D-fio-4 de
+/// 08/10/2026): quem tem conta aqui e não está na sala aparece apagado. **Sem
+/// papéis e sem horário**, de propósito: o grupo diz quem pertence ao
+/// servidor, e não quando cada um esteve nele — isso seria presença
+/// publicada, que `specs/00-visao-geral.md` nomeia como o que não se quer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Membro {
+    /// A conta.
+    pub id: PersonId,
+    /// O apelido.
+    pub nickname: String,
+}
+
+/// O teto de membros numa parte de [`ServerMessage::Membros`].
+///
+/// **É teto de quadro, e não de gosto:** com o maior identificador e o maior
+/// apelido, 256 membros ainda cabem em [`MAX_FRAME_LEN`] — preso em
+/// `uma_parte_cheia_cabe_num_quadro`. Um servidor com mais membros manda mais
+/// partes.
+pub const MAX_MEMBROS_POR_PARTE: usize = 256;
+
+/// Uma janela de certificado curto do `h3`: o hash dele e quando ele vale.
+///
+/// O navegador só aceita, em `serverCertificateHashes`, um certificado válido
+/// **agora** e de no máximo 14 dias; por isso o servidor pré-gera uma janela a
+/// cada [`crate::transport::PASSO_DA_JANELA`] e anuncia os hashes à frente
+/// (ADR 0057; pedido da F4, item 17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JanelaDoNavegador {
+    /// O SHA-256 do DER do certificado curto.
+    pub hash: [u8; 32],
+    /// Desde quando ele vale, em segundos Unix UTC.
+    pub nao_antes: u64,
+    /// Até quando ele vale, em segundos Unix UTC.
+    pub nao_depois: u64,
+}
+
+/// O teto de janelas em [`ServerMessage::HashesDoNavegador`]: as
+/// [`crate::transport::JANELAS_ANUNCIADAS`] e folga.
+pub const MAX_JANELAS_DO_NAVEGADOR: usize = 64;
+
+/// A validade máxima de uma janela que um navegador aceita: 14 dias.
+const VALIDADE_MAXIMA_NO_NAVEGADOR: u64 = 14 * 24 * 60 * 60;
 
 /// A voice channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -698,6 +780,61 @@ pub enum DisconnectReason {
     ///
     /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
     ModsIndisponiveis,
+
+    // ---- a linha 1, do ordinal 18 em diante, numa lista só ----
+    //
+    // Decidido em 08/10/2026 (`7abfb500`): as três da sala pessoal e a da API
+    // de MOD. A razão «servidor de outra linha» **não** está aqui: entre
+    // linhas o par não lê o corpo, e a linha viaja só pelo byte 0 (ADR 0058).
+    /// Quem recebia encerrou a ligação. Spec de 23/09/2026, «Protocolo».
+    ///
+    /// **Terminal no cliente:** reconectar abriria a sala de alguém que acabou
+    /// de desligar.
+    ChamadaEncerrada,
+
+    /// O toque venceu o prazo sem ninguém atender. Spec de 23/09/2026.
+    ///
+    /// Terminal, e diferente de [`Self::ChamadaRecusada`]: quem liga lê «NÃO
+    /// ATENDEU», e não «RECUSOU» (decisão do dono de 23/09).
+    NinguemAtendeu,
+
+    /// Quem recebia recusou a ligação, inclusive por ter bloqueado quem liga.
+    /// Spec de 23/09/2026.
+    ChamadaRecusada,
+
+    /// O servidor exige MODs de uma API que este cliente não roda (D-fio-7).
+    ///
+    /// Sai antes do convite ser gasto, pela lista de [`ClientMessage::Hello`]
+    /// `apis_de_mod`, e diz «atualize o app» em vez de anunciar MODs que nunca
+    /// vão carregar.
+    ///
+    /// As APIs vão como máscara de bits, e não como lista, para esta razão
+    /// continuar `Copy` como as outras: ver [`mascara_de_apis`].
+    ModsDeOutraApi {
+        /// As APIs que o servidor exige e o cliente não roda: o bit `k` ligado
+        /// é a API `k`.
+        apis: u64,
+    },
+}
+
+/// As APIs de MOD como máscara de bits: o bit `k` ligado é a API `k`.
+///
+/// APIs acima de 63 não cabem e ficam de fora: são 57 versões de servidor além
+/// da 1.0, e a razão que usa esta máscara diz «atualize o app» com qualquer
+/// bit ligado.
+#[must_use]
+pub fn mascara_de_apis(apis: &[u32]) -> u64 {
+    apis.iter()
+        .filter_map(|api| 1_u64.checked_shl(*api))
+        .fold(0, |mascara, bit| mascara | bit)
+}
+
+/// As APIs de uma máscara de [`mascara_de_apis`], da menor para a maior.
+#[must_use]
+pub fn apis_da_mascara(mascara: u64) -> Vec<u32> {
+    (0..64_u32)
+        .filter(|api| mascara & (1_u64 << api) != 0)
+        .collect()
 }
 
 /// How loud an alert is.
@@ -1037,8 +1174,14 @@ pub enum ClientMessage {
         ///
         /// `None` num servidor aberto é o caso normal.
         join_secret: Option<String>,
-        /// Protocol version the client speaks.
-        version: u8,
+        /// A faixa de números que este cliente fala (ADR 0058).
+        ///
+        /// Até a 0.15 era `version: u8`, um número só, e o servidor recusava
+        /// tudo que não fosse ele ou o anterior. Agora o servidor escolhe o
+        /// menor dos máximos ([`crate::version::negociar`]), e o quadro deste
+        /// `Hello` sai carimbado com a mínima, para que todo servidor da mesma
+        /// linha o leia.
+        faixa: crate::version::Faixa,
         /// Client software name, for logs.
         client: String,
         /// Nickname the client would like.
@@ -1051,6 +1194,20 @@ pub enum ClientMessage {
         /// up against known accounts; in M2 there is no persistence, so proving
         /// possession of the key is all the handshake can establish.
         public_key: Vec<u8>,
+        /// As APIs de MOD que este cliente roda (D-fio-7).
+        ///
+        /// É o que deixa um servidor com um MOD de API que este cliente não
+        /// roda recusá-lo **antes** do convite ser gasto, dizendo «atualize o
+        /// app», em vez de anunciar um MOD que nunca vai carregar. Até
+        /// [`MAX_APIS_DE_MOD`].
+        apis_de_mod: Vec<u32>,
+        /// O assento do E2EE: um material de acordo de chave que esta pessoa
+        /// publica uma vez por sessão.
+        ///
+        /// **Sempre `None` no Servidor 1.0.** Último campo de propósito: é o
+        /// lugar que uma 1.x vai ocupar sem quebrar o fio. Ver
+        /// [`MAX_MATERIAL_E2EE_LEN`].
+        material_e2ee: Option<Vec<u8>>,
     },
     /// Answers the server's challenge.
     Response {
@@ -2288,6 +2445,62 @@ pub enum ServerMessage {
         /// Por quê, de uma lista fechada.
         reason: MessageRefusal,
     },
+
+    // ---- a sala pessoal, desde o Servidor 1.0 ----
+    //
+    // No fim, como toda variante nova (ADR 0058). O 9 ainda não saiu para
+    // ninguém, então elas entram no mesmo número, sem portão.
+    /// A ligação está tocando do outro lado, e a conexão fica segurada até
+    /// quem recebe decidir ou o prazo vencer.
+    ///
+    /// Spec de 23/09/2026, «O aperto de mão em três fases»: depois do
+    /// `Challenge` e do `Response`, o servidor da sala manda isto e espera a
+    /// decisão da campainha sem segurar a trava do banco. Quem liga espera
+    /// `prazo_s` mais uma folga antes de desistir, e mostra CHAMANDO.
+    Tocando {
+        /// Quantos segundos o toque dura. 45 na 1.0.
+        prazo_s: u16,
+    },
+
+    // ---- o FORA DO AR, desde o Servidor 1.0 (D-fio-4) ----
+    /// Uma parte da lista de membros deste servidor, no começo da sessão.
+    ///
+    /// A lista vai em partes de até [`MAX_MEMBROS_POR_PARTE`], e `fim` diz que
+    /// esta é a última: só então quem recebe sabe que a lista está inteira, e
+    /// que um membro que não veio não é membro. Todo mundo recebe; a sala
+    /// pessoal não manda (ela não tem membros, só quem ligou).
+    Membros {
+        /// Os membros desta parte.
+        membros: Vec<Membro>,
+        /// Se esta é a última parte.
+        fim: bool,
+    },
+    /// Alguém passou a ser membro: a primeira vez que uma conta nova entrou.
+    MembroNovo {
+        /// Quem.
+        membro: Membro,
+    },
+    /// Alguém deixou de ser membro, por banimento.
+    ///
+    /// O renomear não tem mensagem própria: é o [`ServerMessage::PersonRenamed`]
+    /// de sempre, e quem recebe o aplica também à lista de membros.
+    MembroBanido {
+        /// Quem.
+        person: PersonId,
+    },
+
+    // ---- o celular, desde o Servidor 1.0 (ADR 0057) ----
+    /// Os certificados curtos do `h3`, para o navegador guardar por `fp`.
+    ///
+    /// Uma vez, logo depois do `Session`, **nos dois transportes**: um membro
+    /// do desktop que monta links para o celular também precisa dos hashes, e
+    /// o nativo que não os usa os ignora. Em ordem crescente de `nao_antes`.
+    /// Os DERs não viajam aqui: o navegador só precisa dos da janela vigente,
+    /// e eles chegam por outra mensagem (pedido da F4, item 17).
+    HashesDoNavegador {
+        /// As janelas, da mais antiga para a mais nova.
+        janelas: Vec<JanelaDoNavegador>,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2300,14 +2513,60 @@ pub enum ServerMessage {
 /// Returns [`ControlError::FieldTooLong`] if a field exceeds its limit, or
 /// [`ControlError::TooLong`] if the whole frame does.
 pub fn encode<T: Serialize + Validate>(message: &T) -> Result<Vec<u8>, ControlError> {
+    encode_em(PROTOCOL_VERSION, message)
+}
+
+/// Como [`encode`], com o carimbo escolhido por quem manda.
+///
+/// Depois do `Hello`, os dois lados carimbam com o número negociado (adendo de
+/// 08/10/2026, §4): é isso que deixa uma 1.x mais nova legível para uma 1.0,
+/// que só lê o 9. Na 1.0, a faixa é `[9, 9]` e esta função dá o mesmo quadro
+/// que [`encode`].
+///
+/// # Errors
+///
+/// Os mesmos de [`encode`].
+pub fn encode_em<T: Serialize + Validate>(
+    versao: u8,
+    message: &T,
+) -> Result<Vec<u8>, ControlError> {
     message.validate()?;
     let mut frame = Vec::with_capacity(64);
-    frame.push(PROTOCOL_VERSION);
+    frame.push(versao);
     frame = postcard::to_extend(message, frame).map_err(|_| ControlError::Malformed)?;
     if frame.len() > MAX_FRAME_LEN {
         return Err(ControlError::TooLong { len: frame.len() });
     }
     Ok(frame)
+}
+
+/// O ordinal de [`ServerMessage::Disconnecting`]. **Congelado** pelo ADR 0058:
+/// é por ele que toda build, desde a 0.11, lê uma recusa.
+pub const ORDINAL_DISCONNECTING: u8 = 11;
+
+/// O ordinal de [`DisconnectReason::Incompatible`]. **Congelado** pelo ADR 0058.
+pub const ORDINAL_INCOMPATIBLE: u8 = 0;
+
+/// O quadro que recusa um par por versão: `Disconnecting { Incompatible }`,
+/// carimbado para que ele o leia.
+///
+/// - **Um par de antes da 1.0** (carimbo abaixo de 9) só lê o próprio número e
+///   o anterior, então recebe o carimbo dele. A 0.15.1 lê `[8, 11, 0]` como
+///   «versão incompatível», e não como «não foi possível alcançar».
+/// - **Um par da linha 1 em diante** recebe o número de quem recusa. A linha
+///   de quem recusa viaja no byte 0: o par a lê em
+///   [`ControlError::UnsupportedVersion`] e em [`crate::version::linha_de`].
+///
+/// O carimbo do par é o byte 0 do primeiro quadro dele, lido antes do
+/// `decode` — que o recusaria justamente por estar fora da faixa.
+#[must_use]
+pub const fn recusa_por_versao(carimbo_do_par: u8) -> [u8; 3] {
+    let carimbo = if carimbo_do_par < crate::version::PRIMEIRO_DA_LINHA_UM {
+        carimbo_do_par
+    } else {
+        PROTOCOL_VERSION
+    };
+    [carimbo, ORDINAL_DISCONNECTING, ORDINAL_INCOMPATIBLE]
 }
 
 /// Parses a frame back into a message.
@@ -2327,7 +2586,7 @@ pub fn decode<T: for<'de> Deserialize<'de> + Validate>(frame: &[u8]) -> Result<T
     };
     // Version before anything else, so a future layout is refused rather than
     // misparsed into something plausible.
-    crate::version::negotiate(*version).map_err(|_| ControlError::UnsupportedVersion {
+    crate::version::confere_o_carimbo(*version).map_err(|_| ControlError::UnsupportedVersion {
         found: *version,
         expected: PROTOCOL_VERSION,
     })?;
@@ -2335,6 +2594,119 @@ pub fn decode<T: for<'de> Deserialize<'de> + Validate>(frame: &[u8]) -> Result<T
     let message: T = postcard::from_bytes(body).map_err(|_| ControlError::Malformed)?;
     message.validate()?;
     Ok(message)
+}
+
+/// Uma das duas listas de cima: as mensagens do fluxo de controle.
+///
+/// É nelas — e só nelas — que uma variante desconhecida é pulada em vez de
+/// encerrar a leitura (adendo de 08/10/2026, §6). Nos enums que viajam dentro
+/// de uma mensagem a regra continua a de sempre: quem manda não manda o que o
+/// par não entende, porque ignorar, por exemplo, um `Disconnecting` com razão
+/// desconhecida calaria o fim da sessão.
+pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
+    /// Quantas variantes esta build conhece. Um ordinal igual ou acima disto
+    /// é de um vocabulário mais novo.
+    ///
+    /// Escrito como número, e não perguntado ao `serde` a cada quadro, e preso
+    /// ao que o `serde` conta em `as_conhecidas_sao_as_que_o_serde_conta`.
+    const CONHECIDAS: u32;
+}
+
+impl ListaDeCima for ClientMessage {
+    const CONHECIDAS: u32 = 37;
+}
+
+impl ListaDeCima for ServerMessage {
+    const CONHECIDAS: u32 = 46;
+}
+
+/// O que um quadro da lista de cima trouxe.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Lido<T> {
+    /// Uma mensagem que esta build conhece.
+    Mensagem(T),
+    /// Uma variante de um vocabulário mais novo.
+    ///
+    /// Quem lê pula, conta ([`Desconhecidas`]) e segue: o quadro tem
+    /// comprimento próprio ([`crate::quadro`]), então pular não desalinha a
+    /// leitura do próximo.
+    Desconhecida {
+        /// O ordinal que veio.
+        ordinal: u32,
+    },
+}
+
+/// Como [`decode`], mas uma variante que esta build não conhece vira
+/// [`Lido::Desconhecida`] em vez de [`ControlError::Malformed`].
+///
+/// É rede de segurança, e não licença: a regra continua sendo quem manda não
+/// mandar o que o par não entende (ADR 0058). Ela existe para que um portão
+/// esquecido custe uma linha no registro, e não a sessão — que foi o que a
+/// subida de 7 para 8 custou.
+///
+/// # Errors
+///
+/// Os mesmos de [`decode`] para tudo que não é um ordinal desconhecido: o
+/// carimbo e o teto são conferidos antes, e um ordinal conhecido com corpo
+/// errado continua [`ControlError::Malformed`].
+pub fn decode_da_lista<T: ListaDeCima>(frame: &[u8]) -> Result<Lido<T>, ControlError> {
+    if frame.len() > MAX_FRAME_LEN {
+        return Err(ControlError::TooLong { len: frame.len() });
+    }
+    let Some((version, body)) = frame.split_first() else {
+        return Err(ControlError::Empty);
+    };
+    crate::version::confere_o_carimbo(*version).map_err(|_| ControlError::UnsupportedVersion {
+        found: *version,
+        expected: PROTOCOL_VERSION,
+    })?;
+    let ordinal = ler_ordinal(body).ok_or(ControlError::Malformed)?;
+    if ordinal >= T::CONHECIDAS {
+        return Ok(Lido::Desconhecida { ordinal });
+    }
+    decode::<T>(frame).map(Lido::Mensagem)
+}
+
+/// O ordinal de variante que o postcard escreve: um varint sem sinal, sete
+/// bits por byte, o menos significativo primeiro, no máximo cinco bytes.
+///
+/// `None` para um varint que não termina dentro do corpo. Um ordinal enorme
+/// não é erro aqui: ele é só uma variante que esta build não conhece.
+fn ler_ordinal(corpo: &[u8]) -> Option<u32> {
+    let mut valor: u32 = 0;
+    for (posicao, byte) in corpo.iter().take(5).enumerate() {
+        let deslocamento = u32::try_from(posicao).ok()?.checked_mul(7)?;
+        valor |= u32::from(byte & 0x7f).checked_shl(deslocamento)?;
+        if byte & 0x80 == 0 {
+            return Some(valor);
+        }
+    }
+    None
+}
+
+/// Quantas mensagens desconhecidas um fluxo pulou.
+///
+/// **Existe para ser lida.** Quem a guarda registra a primeira — e só a
+/// primeira, para um par defeituoso não encher o registro — e põe o total no
+/// diagnóstico. Uma contagem que ninguém lê é o «existir não é funcionar» do
+/// `CLAUDE.md`. A ligação nos laços de leitura é da sessão do Plano 3.
+#[derive(Debug, Default)]
+pub struct Desconhecidas {
+    total: u64,
+}
+
+impl Desconhecidas {
+    /// Conta uma. `true` só na primeira, que é a que vai para o registro.
+    pub fn contar(&mut self) -> bool {
+        self.total = self.total.saturating_add(1);
+        self.total == 1
+    }
+
+    /// Quantas até agora.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.total
+    }
 }
 
 /// Bounds checking that serialisation cannot express.
@@ -2600,19 +2972,33 @@ impl Validate for ClientMessage {
     fn validate(&self) -> Result<(), ControlError> {
         match self {
             Self::Hello {
+                faixa,
                 client,
                 nickname,
                 public_key,
+                apis_de_mod,
+                material_e2ee,
                 ..
             } => {
                 check("client", client.len(), MAX_CLIENT_NAME_LEN)?;
                 check("nickname", nickname.len(), MAX_NICKNAME_LEN)?;
+                check("apis_de_mod", apis_de_mod.len(), MAX_APIS_DE_MOD)?;
+                check(
+                    "material_e2ee",
+                    material_e2ee.as_ref().map_or(0, Vec::len),
+                    MAX_MATERIAL_E2EE_LEN,
+                )?;
                 // An Ed25519 public key is exactly 32 bytes. Anything else is
                 // not a key, and length is the cheapest place to say so.
                 if public_key.len() != PUBLIC_KEY_LEN {
                     return Err(ControlError::FieldOutOfRange {
                         field: "public_key",
                     });
+                }
+                // Uma faixa ao contrário, ou que começa no 0, não tem número
+                // nenhum que alguém fale: não é um `Hello` de SEELE.
+                if !faixa.valida() {
+                    return Err(ControlError::FieldOutOfRange { field: "faixa" });
                 }
                 Ok(())
             }
@@ -2720,7 +3106,14 @@ impl Validate for ClientMessage {
 impl Validate for ServerMessage {
     fn validate(&self) -> Result<(), ControlError> {
         match self {
-            Self::Challenge { nonce } => check("nonce", nonce.len(), MAX_PROOF_LEN),
+            // Exato, e não teto: o S2 (adendo de 08/10/2026, §9).
+            Self::Challenge { nonce } => {
+                if nonce.len() == NONCE_LEN {
+                    Ok(())
+                } else {
+                    Err(ControlError::FieldOutOfRange { field: "nonce" })
+                }
+            }
             Self::Session {
                 server,
                 voice_rooms,
@@ -2746,7 +3139,12 @@ impl Validate for ServerMessage {
                 check_name("name", name)
             }
             Self::PersonJoined { profile, .. } | Self::PersonPresent { profile, .. } => {
-                check("nickname", profile.nickname.len(), MAX_NICKNAME_LEN)
+                check("nickname", profile.nickname.len(), MAX_NICKNAME_LEN)?;
+                check(
+                    "material_e2ee",
+                    profile.material_e2ee.as_ref().map_or(0, Vec::len),
+                    MAX_MATERIAL_E2EE_LEN,
+                )
             }
             Self::MessageReceived {
                 body, attachment, ..
@@ -2855,6 +3253,35 @@ impl Validate for ServerMessage {
             // cair num `_ =>` é o que faz o compilador cobrar a próxima
             // variante.
             Self::MessageRejected { .. } => Ok(()),
+            // Um `u16` só. Um prazo de zero é um toque que já acabou, e quem
+            // liga desiste na folga; não é byte que derrube nada.
+            Self::Tocando { .. } => Ok(()),
+            Self::Membros { membros, .. } => {
+                check("membros", membros.len(), MAX_MEMBROS_POR_PARTE)?;
+                for membro in membros {
+                    check("nickname", membro.nickname.len(), MAX_NICKNAME_LEN)?;
+                }
+                Ok(())
+            }
+            Self::MembroNovo { membro } => {
+                check("nickname", membro.nickname.len(), MAX_NICKNAME_LEN)
+            }
+            Self::MembroBanido { .. } => Ok(()),
+            Self::HashesDoNavegador { janelas } => {
+                check("janelas", janelas.len(), MAX_JANELAS_DO_NAVEGADOR)?;
+                let cada_uma_vale = janelas.iter().all(|janela| {
+                    janela.nao_depois > janela.nao_antes
+                        && janela.nao_depois - janela.nao_antes <= VALIDADE_MAXIMA_NO_NAVEGADOR
+                });
+                let em_ordem = janelas.windows(2).all(
+                    |par| matches!(par, [antes, depois] if antes.nao_antes < depois.nao_antes),
+                );
+                if cada_uma_vale && em_ordem {
+                    Ok(())
+                } else {
+                    Err(ControlError::FieldOutOfRange { field: "janelas" })
+                }
+            }
         }
     }
 }
@@ -2867,10 +3294,12 @@ mod tests {
     fn hello() -> ClientMessage {
         ClientMessage::Hello {
             join_secret: None,
-            version: PROTOCOL_VERSION,
+            faixa: crate::version::FAIXA,
             client: "connection/0.0.0".into(),
             nickname: "marcela".into(),
             public_key: vec![7; PUBLIC_KEY_LEN],
+            material_e2ee: None,
+            apis_de_mod: Vec::new(),
         }
     }
 
@@ -3046,35 +3475,79 @@ mod tests {
         assert_eq!(frame.first(), Some(&PROTOCOL_VERSION));
     }
 
-    /// O outro lado da janela de compatibilidade, que é onde ela não chega.
+    /// A última release publicada, como ela lê o byte 0: a tag, o número que
+    /// ela fala e a janela dela.
     ///
-    /// `encode` carimba `PROTOCOL_VERSION` — o número **global**, não o
-    /// negociado — no primeiro byte de todo quadro, e o teste acima prende isso.
-    /// A consequência é este teste: a última release publicada, `v0.10.5-1`
-    /// (commit `12a6401a6`), traz este mesmo `decode`, e o `version.rs` de lá
-    /// tem `PROTOCOL_VERSION = 3` com `COMPATIBILITY_WINDOW = 1`. Ela aceita o
-    /// primeiro byte 2 ou 3 e recusa qualquer outro com `PeerTooNew`, **antes**
-    /// de olhar para o corpo.
+    /// **v0.15.1**, publicada em 08/10/2026 do commit `54f542f`, conferida pela
+    /// API de releases como manda o `CLAUDE.md`. No `version.rs` daquele commit,
+    /// `PROTOCOL_VERSION = 8` (`:124`) e `COMPATIBILITY_WINDOW = 1` (`:164`):
+    /// ela lê 7 e 8 no byte 0, e recusa o resto antes de olhar o corpo.
     ///
-    /// Então um par v3 de verdade não completa o aperto de mão com esta build,
-    /// por mais larga que seja a janela **daqui** — e nenhum teste que simule o
-    /// par velho só pelo campo `Hello.version` mede isso, porque nele os dois
-    /// lados são o mesmo codec.
+    /// **Este número estava em 3 até 08/10/2026** — o da `v0.10.5-1` —, e com
+    /// ele o guarda passava sem medir nada: nenhuma subida de 4 a 8 o fazia
+    /// reprovar, porque o 3 já estava fora da janela de todas. Quem publicar uma
+    /// versão de servidor nova atualiza esta linha (ADR 0058).
+    const PUBLICADA: (&str, u8, u8) = ("v0.15.1", 8, 1);
+
+    /// Se a publicada lê um quadro carimbado com `carimbo`.
+    fn a_publicada_le(carimbo: u8) -> bool {
+        let (_, protocolo, janela) = PUBLICADA;
+        (protocolo.saturating_sub(janela)..=protocolo).contains(&carimbo)
+    }
+
+    /// **A publicada ou é da mesma linha desta build e a lê, ou é de outra
+    /// linha e lê a recusa dela.**
+    ///
+    /// Os dois lados que o carimbo decide, medidos contra a release de verdade:
+    ///
+    /// - **mesma linha** (quando a publicada for uma 1.x): o `Hello` desta build
+    ///   sai carimbado com a mínima, e a publicada tem de lê-lo — é o «1.x nunca
+    ///   quebra o fio» do ADR 0058 do lado de quem já está em campo;
+    /// - **outra linha** (hoje, com a v0.15.1): a publicada **não** lê o `Hello`
+    ///   desta build — é a quebra decidida em 08/10/2026 —, e **lê** a recusa
+    ///   que esta build manda a ela, `[8, 11, 0]`, como `Disconnecting {
+    ///   Incompatible }`. É a frase «VERSÃO INCOMPATÍVEL» chegando a quem ficou
+    ///   na 0.15, em vez de «não foi possível alcançar».
+    ///
+    /// Os testes de ida e volta não medem nada disso: neles as duas pontas são
+    /// o mesmo codec. Esta conta é sobre o codec da publicada, escrito como os
+    /// três números dele.
     #[test]
-    fn a_release_publicada_recusa_o_carimbo_desta_build() {
-        const PUBLICADA: u8 = 3;
-        const JANELA_DA_PUBLICADA: u8 = 1;
+    fn a_publicada_ou_e_da_mesma_linha_ou_le_a_recusa_desta_build() {
+        use crate::version::{linha_de, VERSAO_MINIMA};
 
-        let frame = encode(&hello()).unwrap();
-        let carimbo = *frame.first().expect("quadro sem carimbo");
-        let janela_de_la = (PUBLICADA - JANELA_DA_PUBLICADA)..=PUBLICADA;
-
-        assert!(
-            !janela_de_la.contains(&carimbo),
-            "um par da release publicada aceitaria este quadro: se isso passou a \
-             ser verdade, o carimbo deixou de ser a versão global e o texto de \
-             version.rs precisa mudar junto"
+        let (tag, protocolo, _) = PUBLICADA;
+        let carimbo_do_hello = encode_em(VERSAO_MINIMA, &hello()).unwrap()[0];
+        assert_eq!(
+            carimbo_do_hello, VERSAO_MINIMA,
+            "o Hello sai com a mínima desta build"
         );
+
+        if linha_de(protocolo) == linha_de(PROTOCOL_VERSION) {
+            assert!(
+                a_publicada_le(carimbo_do_hello),
+                "{tag} é da mesma linha e não lê o Hello desta build: o fio quebrou"
+            );
+        } else {
+            assert!(
+                !a_publicada_le(carimbo_do_hello),
+                "{tag} é de outra linha e leria o Hello desta build: a quebra \
+                 decidida não aconteceu, ou a linha de {protocolo} está errada"
+            );
+            let recusa = recusa_por_versao(protocolo);
+            assert!(
+                a_publicada_le(recusa[0]),
+                "{tag} não lê o carimbo da recusa que esta build manda a ela"
+            );
+            // Em `54f542f`, `Disconnecting` é o ordinal 11 de `ServerMessage` e
+            // `Incompatible` é o 0 de `DisconnectReason`: os dois existem
+            // desde a 0.11, e o ADR 0058 os congela.
+            assert_eq!(
+                recusa[1..],
+                [11, 0],
+                "{tag} leria outra coisa no lugar de Disconnecting{{Incompatible}}"
+            );
+        }
     }
 
     #[test]
@@ -3130,10 +3603,12 @@ mod tests {
     fn an_oversized_nickname_is_refused() {
         let long = ClientMessage::Hello {
             join_secret: None,
-            version: PROTOCOL_VERSION,
+            faixa: crate::version::FAIXA,
             client: "connection".into(),
             nickname: "n".repeat(MAX_NICKNAME_LEN + 1),
             public_key: vec![7; PUBLIC_KEY_LEN],
+            material_e2ee: None,
+            apis_de_mod: Vec::new(),
         };
         assert!(matches!(
             encode(&long),
@@ -3165,6 +3640,7 @@ mod tests {
                 id: PersonId(2),
                 nickname: "rafael".into(),
                 roles: vec![RoleId(1)],
+                material_e2ee: None,
             },
             ssrc: Ssrc(99),
         };
@@ -3208,7 +3684,13 @@ mod tests {
     fn a_control_frame_stays_small() {
         // The control stream shares a connection with voice datagrams. A
         // handshake that needed several kilobytes would be a design smell.
-        assert!(encode(&hello()).unwrap().len() < 64);
+        //
+        // O teto era 64 e o `Hello` deste teste tinha 62 bytes. O Servidor 1.0
+        // somou dois: a faixa ocupa um byte a mais que o `version` de antes, e
+        // o assento do E2EE vazio é um `None`, outro byte. Medido em 64, e o
+        // teto foi para 128 — a pergunta deste teste é «quilobytes?», e não
+        // «um byte a mais?».
+        assert!(encode(&hello()).unwrap().len() < 128);
         assert!(encode(&session()).unwrap().len() < 256);
     }
 
@@ -3808,10 +4290,12 @@ mod key_tests {
         for len in [0, 16, 31, 33, 64] {
             let hello = ClientMessage::Hello {
                 join_secret: None,
-                version: PROTOCOL_VERSION,
+                faixa: crate::version::FAIXA,
                 client: "connection".into(),
                 nickname: "marcela".into(),
                 public_key: vec![0; len],
+                material_e2ee: None,
+                apis_de_mod: Vec::new(),
             };
             assert!(
                 matches!(
@@ -3829,10 +4313,12 @@ mod key_tests {
     fn a_thirty_two_byte_key_is_accepted() {
         let hello = ClientMessage::Hello {
             join_secret: None,
-            version: PROTOCOL_VERSION,
+            faixa: crate::version::FAIXA,
             client: "connection".into(),
             nickname: "marcela".into(),
             public_key: vec![9; PUBLIC_KEY_LEN],
+            material_e2ee: None,
+            apis_de_mod: Vec::new(),
         };
         let frame = encode(&hello).unwrap();
         assert_eq!(decode::<ClientMessage>(&frame).unwrap(), hello);
@@ -4336,76 +4822,15 @@ mod o_vocabulario_e_a_versao {
     }
 
     /// Quantas variantes tem o enum `T`, contadas pela lista que o `derive` do
-    /// `serde` entrega ao `Deserializer`.
-    ///
-    /// Não decodifica nada: o `Deserializer` abaixo atende só `deserialize_enum`
-    /// — onde a lista chega — e erra em todo o resto. O erro devolvido depois de
-    /// anotar é como ele desiste sem precisar construir um valor de `T`.
+    /// `serde` entrega ao `Deserializer`. O `Deserializer` mora em
+    /// [`crate::vocabulario`] desde 08/10/2026, porque a leitura de uma mensagem
+    /// desconhecida passou a precisar dele fora dos testes.
     fn quantas_variantes<T>() -> usize
     where
         T: for<'a> serde::Deserialize<'a>,
     {
-        use std::cell::Cell;
-        use std::fmt;
-
-        #[derive(Debug)]
-        struct Desistencia(String);
-
-        impl fmt::Display for Desistencia {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.0)
-            }
-        }
-
-        impl std::error::Error for Desistencia {}
-
-        impl serde::de::Error for Desistencia {
-            fn custom<M: fmt::Display>(msg: M) -> Self {
-                Desistencia(msg.to_string())
-            }
-        }
-
-        struct Perguntador<'a>(&'a Cell<Option<usize>>);
-
-        impl<'de> serde::Deserializer<'de> for Perguntador<'_> {
-            type Error = Desistencia;
-
-            fn deserialize_enum<V>(
-                self,
-                _nome: &'static str,
-                variantes: &'static [&'static str],
-                _visitor: V,
-            ) -> Result<V::Value, Self::Error>
-            where
-                V: serde::de::Visitor<'de>,
-            {
-                self.0.set(Some(variantes.len()));
-                Err(serde::de::Error::custom(
-                    "a pergunta era quantas variantes existem, e ela já foi \
-                     respondida",
-                ))
-            }
-
-            fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-            where
-                V: serde::de::Visitor<'de>,
-            {
-                Err(serde::de::Error::custom(
-                    "este Deserializer só sabe responder por um enum",
-                ))
-            }
-
-            serde::forward_to_deserialize_any! {
-                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str
-                string bytes byte_buf option unit unit_struct newtype_struct seq
-                tuple tuple_struct map struct identifier ignored_any
-            }
-        }
-
-        let contagem = Cell::new(None);
-        let _ = T::deserialize(Perguntador(&contagem));
-        contagem
-            .get()
+        crate::vocabulario::variantes::<T>()
+            .map(<[_]>::len)
             .expect("esta lista é um enum, e `deserialize_enum` é por onde ela entra")
     }
 
@@ -4529,7 +4954,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            40,
+            45,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4558,12 +4983,31 @@ mod o_vocabulario_e_a_versao {
         // desalinharia o quadro de um par v7 para sempre, e a janela N−1
         // deixaria de ser honesta. A lista do cliente não mudou — a recusa é
         // resposta, e quem responde é o servidor.
+        //
+        // **45 pela `HashesDoNavegador`**, os certificados curtos do celular
+        // (ADR 0057), no mesmo 9.
+        //
+        // **42 a 44 pelo FORA DO AR** — `Membros`, `MembroNovo` e
+        // `MembroBanido` (D-fio-4) —, no mesmo 9 e pelo mesmo motivo.
+        //
+        // **41 pela `Tocando`**, da sala pessoal, dentro do mesmo 9: o 9 ainda
+        // não saiu para ninguém, e é nele que entra o vocabulário inteiro da
+        // linha 1 (o lote do vocabulário, liberado em 08/10/2026). Daqui em
+        // diante, o fim desta lista também é o que `ListaDeCima::CONHECIDAS`
+        // diz, e `as_conhecidas_sao_as_que_o_serde_conta` prende os dois juntos.
+        //
+        // **9 em 08/10/2026, o Servidor 1.0, e as listas não mudaram.** A
+        // subida é pelo `Hello`, que trocou o número único pela faixa — um
+        // campo, e não uma variante, e por isso nenhum ordinal acima se mexeu.
+        // A 0.15 fica de fora por decisão, e daqui em diante a regra é a do
+        // ADR 0058: variante nova no fim, com o portão de quem manda, e nunca
+        // campo novo numa mensagem que já existe.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            8,
-            "a versão do protocolo mudou; confira se os ordinais acima, a janela \
-             de compatibilidade e `mods::VERSAO_DO_ANUNCIO` continuam contando a \
-             mesma história"
+            9,
+            "a versão do protocolo mudou; confira se os ordinais acima, a faixa \
+             de `version::FAIXA` e `mods::VERSAO_DO_ANUNCIO` continuam contando \
+             a mesma história"
         );
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
@@ -4665,6 +5109,7 @@ mod os_mods_no_fio {
             repo: "https://github.com/seele/exemplo".to_owned(),
             reach: vec!["dom".to_owned()],
             no_servidor: false,
+            api: 0,
         }
     }
 
@@ -4790,6 +5235,7 @@ mod os_mods_no_fio {
                 repo: "r".repeat(MAX_MOD_REPO_LEN),
                 reach: vec!["a".repeat(MAX_REACH_LEN); MAX_REACH_ITENS],
                 no_servidor: true,
+                api: 0,
             })
             .collect();
         let quadro = encode(&anuncio(cheio)).expect("um anúncio no teto serializa");
@@ -4807,5 +5253,643 @@ mod os_mods_no_fio {
     fn o_conjunto_vazio_tem_identidade_e_atravessa() {
         let quadro = encode(&anuncio(vec![])).expect("o conjunto vazio serializa");
         let _: ServerMessage = decode(&quadro).expect("volta");
+    }
+}
+
+#[cfg(test)]
+mod o_desafio {
+    use super::*;
+
+    /// O nonce do `Challenge` tem exatamente 32 bytes (S2, adendo de
+    /// 08/10/2026, §9). Até a 0.15 ele podia ter até 256, e o cliente assinava
+    /// o que viesse: um oráculo de assinatura.
+    #[test]
+    fn um_desafio_tem_exatamente_trinta_e_dois_bytes() {
+        for tamanho in [0, 1, 31, 33, 64, 256] {
+            assert_eq!(
+                encode(&ServerMessage::Challenge {
+                    nonce: vec![0; tamanho]
+                }),
+                Err(ControlError::FieldOutOfRange { field: "nonce" }),
+                "um desafio de {tamanho} bytes saiu"
+            );
+        }
+        assert!(encode(&ServerMessage::Challenge {
+            nonce: vec![0; NONCE_LEN]
+        })
+        .is_ok());
+        assert_eq!(NONCE_LEN, 32);
+    }
+}
+
+#[cfg(test)]
+mod o_toque {
+    use super::*;
+
+    /// O toque da sala pessoal (spec de 23/09, «O aperto de mão em três
+    /// fases»): o servidor segura a conexão e diz quanto tempo ela fica
+    /// tocando. Nasce no fim da lista do servidor.
+    #[test]
+    fn tocando_vai_e_volta_e_mora_no_fim_da_lista() {
+        let tocando = ServerMessage::Tocando { prazo_s: 45 };
+        let quadro = encode(&tocando).unwrap();
+        assert_eq!(quadro, vec![PROTOCOL_VERSION, 41, 45]);
+        assert_eq!(decode::<ServerMessage>(&quadro).unwrap(), tocando);
+    }
+}
+
+#[cfg(test)]
+mod fora_do_ar {
+    //! Os membros do servidor, conectados ou não: o grupo FORA DO AR da lista
+    //! de pessoas (decisão D-fio-4 de 08/10/2026). Sem papéis e sem horário.
+    use super::*;
+
+    fn membro(id: u64, nickname: &str) -> Membro {
+        Membro {
+            id: PersonId(id),
+            nickname: nickname.into(),
+        }
+    }
+
+    #[test]
+    fn as_tres_mensagens_vao_e_voltam() {
+        for mensagem in [
+            ServerMessage::Membros {
+                membros: vec![membro(1, "maya"), membro(2, "shinji")],
+                fim: false,
+            },
+            ServerMessage::Membros {
+                membros: vec![],
+                fim: true,
+            },
+            ServerMessage::MembroNovo {
+                membro: membro(3, "asuka"),
+            },
+            ServerMessage::MembroBanido {
+                person: PersonId(3),
+            },
+        ] {
+            assert_eq!(
+                decode::<ServerMessage>(&encode(&mensagem).unwrap()).unwrap(),
+                mensagem
+            );
+        }
+    }
+
+    /// Uma parte cheia, com o maior identificador e o maior apelido, cabe num
+    /// quadro: o teto de membros por parte é de quadro, e não de gosto.
+    #[test]
+    fn uma_parte_cheia_cabe_num_quadro() {
+        let cheia = ServerMessage::Membros {
+            membros: (0..MAX_MEMBROS_POR_PARTE)
+                .map(|_| Membro {
+                    id: PersonId(u64::MAX),
+                    nickname: "n".repeat(MAX_NICKNAME_LEN),
+                })
+                .collect(),
+            fim: false,
+        };
+        let quadro = encode(&cheia).unwrap();
+        assert!(quadro.len() <= MAX_FRAME_LEN, "{} bytes", quadro.len());
+    }
+
+    #[test]
+    fn os_tetos_valem_nos_dois_sentidos() {
+        let demais = ServerMessage::Membros {
+            membros: (0..=MAX_MEMBROS_POR_PARTE)
+                .map(|i| membro(u64::try_from(i).unwrap(), "m"))
+                .collect(),
+            fim: true,
+        };
+        assert!(matches!(
+            encode(&demais),
+            Err(ControlError::FieldTooLong {
+                field: "membros",
+                ..
+            })
+        ));
+        let longo = "n".repeat(MAX_NICKNAME_LEN + 1);
+        assert!(matches!(
+            encode(&ServerMessage::Membros {
+                membros: vec![membro(1, &longo)],
+                fim: true,
+            }),
+            Err(ControlError::FieldTooLong {
+                field: "nickname",
+                ..
+            })
+        ));
+        assert!(matches!(
+            encode(&ServerMessage::MembroNovo {
+                membro: membro(1, &longo),
+            }),
+            Err(ControlError::FieldTooLong {
+                field: "nickname",
+                ..
+            })
+        ));
+    }
+}
+
+#[cfg(test)]
+mod a_api_de_mod_no_fio {
+    //! D-fio-7: o anúncio diz a API de cada MOD, e o `Hello` diz as APIs que o
+    //! cliente roda. É o que deixa um servidor recusar, antes do convite, quem
+    //! não roda um MOD dele — e dizer «atualize o app».
+    use super::*;
+
+    fn hello(apis: Vec<u32>) -> ClientMessage {
+        ClientMessage::Hello {
+            join_secret: None,
+            faixa: crate::version::FAIXA,
+            client: "seele".into(),
+            nickname: "maya".into(),
+            public_key: vec![7; PUBLIC_KEY_LEN],
+            apis_de_mod: apis,
+            material_e2ee: None,
+        }
+    }
+
+    #[test]
+    fn o_hello_leva_as_apis_que_o_cliente_roda_e_tem_teto() {
+        let com = hello(vec![6, 5]);
+        assert_eq!(
+            decode::<ClientMessage>(&encode(&com).unwrap()).unwrap(),
+            com
+        );
+        assert!(encode(&hello(vec![6; MAX_APIS_DE_MOD])).is_ok());
+        assert!(matches!(
+            encode(&hello(vec![6; MAX_APIS_DE_MOD + 1])),
+            Err(ControlError::FieldTooLong {
+                field: "apis_de_mod",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn o_anuncio_diz_a_api_de_cada_mod() {
+        let mut mods = vec![crate::mods::ModAnunciado {
+            id: "autor/nome".into(),
+            version: "1.0.0".into(),
+            hash: "ab".repeat(32),
+            repo: "https://github.com/autor/nome".into(),
+            reach: vec![],
+            no_servidor: false,
+            api: 6,
+        }];
+        let conjunto = crate::mods::hex(&crate::mods::identidade_do_conjunto(&mut mods));
+        let anuncio = ServerMessage::ModsExigidos { mods, conjunto };
+        let de_volta = decode::<ServerMessage>(&encode(&anuncio).unwrap()).unwrap();
+        let ServerMessage::ModsExigidos { mods, .. } = de_volta else {
+            panic!("o anúncio voltou como outra coisa");
+        };
+        assert_eq!(mods[0].api, 6);
+    }
+}
+
+#[cfg(test)]
+mod as_razoes_da_linha_1 {
+    //! As razões de fim que a linha 1 acrescentou, do ordinal 18 em diante,
+    //! numa lista só: as três da sala pessoal e a da API de MOD (decisão de
+    //! 08/10/2026, `7abfb500`).
+    use super::*;
+
+    fn ordinal(razao: DisconnectReason) -> u8 {
+        let quadro = encode(&ServerMessage::Disconnecting { reason: razao }).unwrap();
+        quadro[2]
+    }
+
+    #[test]
+    fn as_razoes_novas_moram_do_18_em_diante_nesta_ordem() {
+        assert_eq!(ordinal(DisconnectReason::ChamadaEncerrada), 18);
+        assert_eq!(ordinal(DisconnectReason::NinguemAtendeu), 19);
+        assert_eq!(ordinal(DisconnectReason::ChamadaRecusada), 20);
+        assert_eq!(ordinal(DisconnectReason::ModsDeOutraApi { apis: 0 }), 21);
+    }
+
+    #[test]
+    fn a_razao_da_api_leva_as_apis_que_o_servidor_exige() {
+        let razao = DisconnectReason::ModsDeOutraApi {
+            apis: mascara_de_apis(&[7, 8]),
+        };
+        let quadro = encode(&ServerMessage::Disconnecting { reason: razao }).unwrap();
+        let ServerMessage::Disconnecting {
+            reason: DisconnectReason::ModsDeOutraApi { apis },
+        } = decode::<ServerMessage>(&quadro).unwrap()
+        else {
+            panic!("a razão voltou como outra");
+        };
+        assert_eq!(apis_da_mascara(apis), vec![7, 8]);
+    }
+
+    #[test]
+    fn a_mascara_vai_e_volta_e_ignora_o_que_nao_cabe() {
+        assert_eq!(mascara_de_apis(&[]), 0);
+        assert_eq!(mascara_de_apis(&[0]), 1);
+        assert_eq!(mascara_de_apis(&[6]), 1 << 6);
+        assert_eq!(mascara_de_apis(&[6, 6]), 1 << 6, "repetir não soma");
+        assert_eq!(mascara_de_apis(&[63]), 1 << 63);
+        assert_eq!(mascara_de_apis(&[64, 1_000]), 0, "acima de 63 não cabe");
+        assert_eq!(
+            apis_da_mascara(mascara_de_apis(&[3, 4, 5, 6])),
+            vec![3, 4, 5, 6]
+        );
+        assert_eq!(apis_da_mascara(u64::MAX).len(), 64);
+    }
+}
+
+#[cfg(test)]
+mod os_hashes_do_navegador {
+    //! Os certificados curtos do `h3`, anunciados depois do `Session` para o
+    //! navegador guardar por `fp` (pedido da F4, item 17; ADR 0057).
+    use super::*;
+    use crate::transport::{
+        ANTES_DA_JANELA, JANELAS_ANUNCIADAS, PASSO_DA_JANELA, VALIDADE_DO_CURTO,
+    };
+
+    const DIA: u64 = 24 * 60 * 60;
+
+    /// As janelas como o `seeled` as gera: uma a cada passo, cada uma valendo
+    /// a validade do curto a partir de um dia antes.
+    fn janelas(quantas: usize) -> Vec<JanelaDoNavegador> {
+        let inicio = 1_790_000_000_u64;
+        (0..quantas)
+            .map(|indice| {
+                let nao_antes = inicio + u64::try_from(indice).unwrap() * PASSO_DA_JANELA.as_secs()
+                    - ANTES_DA_JANELA.as_secs();
+                JanelaDoNavegador {
+                    hash: [u8::try_from(indice % 256).unwrap(); 32],
+                    nao_antes,
+                    nao_depois: nao_antes + VALIDADE_DO_CURTO.as_secs(),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn as_janelas_anunciadas_vao_e_voltam_e_cabem_folgadas() {
+        let mensagem = ServerMessage::HashesDoNavegador {
+            janelas: janelas(JANELAS_ANUNCIADAS),
+        };
+        let quadro = encode(&mensagem).unwrap();
+        assert!(
+            quadro.len() < 4 * 1024,
+            "{} bytes para 60 janelas",
+            quadro.len()
+        );
+        assert_eq!(decode::<ServerMessage>(&quadro).unwrap(), mensagem);
+    }
+
+    #[test]
+    fn as_janelas_tortas_sao_recusadas_nos_dois_sentidos() {
+        let recusa =
+            |janelas: Vec<JanelaDoNavegador>| encode(&ServerMessage::HashesDoNavegador { janelas });
+        assert!(matches!(
+            recusa(janelas(MAX_JANELAS_DO_NAVEGADOR + 1)),
+            Err(ControlError::FieldTooLong {
+                field: "janelas",
+                ..
+            })
+        ));
+        let mut ao_contrario = janelas(1);
+        ao_contrario[0].nao_depois = ao_contrario[0].nao_antes;
+        assert_eq!(
+            recusa(ao_contrario),
+            Err(ControlError::FieldOutOfRange { field: "janelas" })
+        );
+        let mut longa = janelas(1);
+        longa[0].nao_depois = longa[0].nao_antes + 14 * DIA + 1;
+        assert_eq!(
+            recusa(longa),
+            Err(ControlError::FieldOutOfRange { field: "janelas" })
+        );
+        let mut fora_de_ordem = janelas(2);
+        fora_de_ordem.swap(0, 1);
+        assert_eq!(
+            recusa(fora_de_ordem),
+            Err(ControlError::FieldOutOfRange { field: "janelas" })
+        );
+        assert!(
+            recusa(vec![]).is_ok(),
+            "sem janela nenhuma é um servidor sem h3"
+        );
+    }
+
+    /// As contas das janelas: duas valem ao mesmo tempo, com sobreposição, e
+    /// nenhuma passa do que os navegadores aceitam.
+    #[test]
+    fn as_contas_das_janelas_fecham() {
+        assert!(
+            VALIDADE_DO_CURTO.as_secs() <= 14 * DIA,
+            "os navegadores recusam acima de 14 dias"
+        );
+        assert!(
+            VALIDADE_DO_CURTO > PASSO_DA_JANELA,
+            "sem sobreposição, há um instante sem janela"
+        );
+        assert_eq!(
+            VALIDADE_DO_CURTO.as_secs() - PASSO_DA_JANELA.as_secs(),
+            7 * DIA
+        );
+        const { assert!(JANELAS_ANUNCIADAS <= MAX_JANELAS_DO_NAVEGADOR) };
+        assert_eq!(crate::transport::ALPN_DO_NAVEGADOR, b"h3");
+    }
+}
+
+#[cfg(test)]
+mod a_recusa_legivel {
+    //! A recusa por versão que toda build lê: `Disconnecting { Incompatible }`,
+    //! com os bytes-ouro `[carimbo, 11, 0]`. Adendo de 08/10/2026, §5, e
+    //! ADR 0058.
+    use super::*;
+
+    /// O 11 e o 0 são congelados, e o carimbo é o que quem recusa escolher:
+    /// para todo byte, a recusa é estes três bytes e mais nada.
+    #[test]
+    fn os_bytes_ouro_da_recusa_sao_o_carimbo_onze_e_zero() {
+        let incompativel = ServerMessage::Disconnecting {
+            reason: DisconnectReason::Incompatible,
+        };
+        for carimbo in 0..=u8::MAX {
+            assert_eq!(
+                encode_em(carimbo, &incompativel).unwrap(),
+                vec![carimbo, 11, 0],
+                "a recusa carimbada com {carimbo} saiu diferente"
+            );
+        }
+        assert_eq!(ORDINAL_DISCONNECTING, 11);
+        assert_eq!(ORDINAL_INCOMPATIBLE, 0);
+    }
+
+    /// A 0.15.1 (protocolo 8, janela 1) só lê 7 e 8 no byte 0. Recebendo o
+    /// próprio carimbo, ela lê `Incompatible` e diz «VERSÃO INCOMPATÍVEL», em
+    /// vez de «não foi possível alcançar».
+    #[test]
+    fn um_par_de_antes_da_1_0_recebe_o_proprio_carimbo() {
+        assert_eq!(recusa_por_versao(8), [8, 11, 0]);
+        assert_eq!(recusa_por_versao(3), [3, 11, 0]);
+    }
+
+    /// Da linha 1 em diante, quem é recusado lê no byte 0 o número de quem
+    /// recusou — e com ele a linha, por `version::linha_de`.
+    #[test]
+    fn um_par_da_linha_1_em_diante_le_o_numero_de_quem_recusa() {
+        assert_eq!(recusa_por_versao(30), [PROTOCOL_VERSION, 11, 0]);
+        assert_eq!(recusa_por_versao(9), [PROTOCOL_VERSION, 11, 0]);
+        assert_eq!(recusa_por_versao(u8::MAX), [PROTOCOL_VERSION, 11, 0]);
+    }
+
+    #[test]
+    fn a_recusa_e_um_quadro_que_esta_build_decodifica_pelo_mesmo_caminho() {
+        let quadro = recusa_por_versao(PROTOCOL_VERSION);
+        assert_eq!(
+            decode::<ServerMessage>(&quadro).unwrap(),
+            ServerMessage::Disconnecting {
+                reason: DisconnectReason::Incompatible
+            }
+        );
+    }
+
+    /// E quem recebe uma recusa carimbada fora da própria faixa sabe quem
+    /// recusou pelo número que o `decode` devolve.
+    #[test]
+    fn quem_recebe_a_recusa_de_outra_linha_le_o_numero_dela() {
+        let de_uma_linha_posterior = [PROTOCOL_VERSION + 20, 11, 0];
+        assert_eq!(
+            decode::<ServerMessage>(&de_uma_linha_posterior),
+            Err(ControlError::UnsupportedVersion {
+                found: PROTOCOL_VERSION + 20,
+                expected: PROTOCOL_VERSION,
+            })
+        );
+        assert_eq!(
+            crate::version::linha_de(PROTOCOL_VERSION + 20),
+            Some(crate::version::Linha::Posterior {
+                numero: PROTOCOL_VERSION + 20
+            })
+        );
+    }
+
+    /// `encode` é `encode_em` com o número desta build: na 1.0, os dois são o
+    /// mesmo quadro.
+    #[test]
+    fn encode_e_o_carimbo_desta_build() {
+        let pong = ServerMessage::Pong { timestamp: 7 };
+        assert_eq!(
+            encode(&pong).unwrap(),
+            encode_em(PROTOCOL_VERSION, &pong).unwrap()
+        );
+    }
+}
+
+#[cfg(test)]
+mod a_mensagem_desconhecida {
+    //! Uma variante de um vocabulário mais novo, na lista de cima, é pulada e
+    //! contada, e não derruba o fluxo. Adendo de 08/10/2026, §6.
+    use super::*;
+
+    #[test]
+    fn um_ordinal_alem_da_lista_e_pulado_e_nao_e_malformado() {
+        // O primeiro ordinal que esta build não conhece, lido da própria
+        // constante: um número escrito aqui viraria conhecido na próxima
+        // variante, e o teste passaria a perguntar outra coisa.
+        let alem = u8::try_from(ServerMessage::CONHECIDAS).unwrap();
+        let quadro = [PROTOCOL_VERSION, alem, 0xAA, 0xBB];
+        assert_eq!(
+            decode_da_lista::<ServerMessage>(&quadro).unwrap(),
+            Lido::Desconhecida {
+                ordinal: ServerMessage::CONHECIDAS
+            }
+        );
+        // O `decode` de sempre continua chamando isto de malformado: quem
+        // pula é só quem pede.
+        assert_eq!(
+            decode::<ServerMessage>(&quadro),
+            Err(ControlError::Malformed)
+        );
+        // E um ordinal conhecido com corpo errado continua malformado.
+        assert_eq!(
+            decode_da_lista::<ServerMessage>(&[PROTOCOL_VERSION, 1]),
+            Err(ControlError::Malformed)
+        );
+    }
+
+    #[test]
+    fn uma_mensagem_conhecida_sai_inteira() {
+        let pong = ServerMessage::Pong { timestamp: 7 };
+        assert_eq!(
+            decode_da_lista::<ServerMessage>(&encode(&pong).unwrap()).unwrap(),
+            Lido::Mensagem(pong)
+        );
+        let ping = ClientMessage::Ping { timestamp: 7 };
+        assert_eq!(
+            decode_da_lista::<ClientMessage>(&encode(&ping).unwrap()).unwrap(),
+            Lido::Mensagem(ping)
+        );
+    }
+
+    #[test]
+    fn um_ordinal_de_dois_bytes_tambem_e_desconhecido() {
+        // 200 em varint são dois bytes: 0xC8 com o bit de continuação, e 0x01.
+        let quadro = [PROTOCOL_VERSION, 0xC8, 0x01];
+        assert_eq!(
+            decode_da_lista::<ClientMessage>(&quadro).unwrap(),
+            Lido::Desconhecida { ordinal: 200 }
+        );
+    }
+
+    #[test]
+    fn um_varint_que_nao_termina_e_malformado() {
+        assert_eq!(
+            decode_da_lista::<ClientMessage>(&[PROTOCOL_VERSION, 0x80, 0x80]),
+            Err(ControlError::Malformed)
+        );
+        assert_eq!(
+            decode_da_lista::<ClientMessage>(&[PROTOCOL_VERSION]),
+            Err(ControlError::Malformed)
+        );
+    }
+
+    #[test]
+    fn o_carimbo_e_o_teto_continuam_sendo_conferidos_antes() {
+        assert!(matches!(
+            decode_da_lista::<ServerMessage>(&[8, 41]),
+            Err(ControlError::UnsupportedVersion { found: 8, .. })
+        ));
+        assert_eq!(
+            decode_da_lista::<ServerMessage>(&[]),
+            Err(ControlError::Empty)
+        );
+        assert!(matches!(
+            decode_da_lista::<ServerMessage>(&vec![PROTOCOL_VERSION; MAX_FRAME_LEN + 1]),
+            Err(ControlError::TooLong { .. })
+        ));
+    }
+
+    #[test]
+    fn so_a_primeira_desconhecida_vai_para_o_registro() {
+        let mut contagem = Desconhecidas::default();
+        assert_eq!(contagem.total(), 0);
+        assert!(contagem.contar(), "a primeira é a que se registra");
+        assert!(!contagem.contar(), "a segunda só conta");
+        assert_eq!(contagem.total(), 2);
+    }
+
+    /// As conhecidas de cada lista são as que o `serde` conta. Uma variante
+    /// nova sem a constante acompanhar faria a build pular a própria mensagem.
+    #[test]
+    fn as_conhecidas_sao_as_que_o_serde_conta() {
+        assert_eq!(
+            crate::vocabulario::variantes::<ClientMessage>().map(<[_]>::len),
+            Some(usize::try_from(ClientMessage::CONHECIDAS).unwrap())
+        );
+        assert_eq!(
+            crate::vocabulario::variantes::<ServerMessage>().map(<[_]>::len),
+            Some(usize::try_from(ServerMessage::CONHECIDAS).unwrap())
+        );
+    }
+
+    proptest::proptest! {
+        /// A superfície de bytes não confiáveis: nada aqui entra em pânico.
+        #[test]
+        fn nunca_entra_em_panico(bytes: Vec<u8>) {
+            let _ = decode_da_lista::<ClientMessage>(&bytes);
+            let _ = decode_da_lista::<ServerMessage>(&bytes);
+        }
+    }
+}
+
+#[cfg(test)]
+mod o_assento_do_e2ee {
+    //! Um campo novo numa mensagem que já existe não pode chegar numa 1.x,
+    //! porque o postcard lê por posição. O assento do E2EE entra no 9, e vai
+    //! sempre `None` no Servidor 1.0. Adendo de 08/10/2026, §10.
+    use super::*;
+
+    fn perfil(material: Option<Vec<u8>>) -> ServerMessage {
+        ServerMessage::PersonJoined {
+            voice_room: VoiceRoomId(1),
+            profile: PersonProfile {
+                id: PersonId(1),
+                nickname: "maya".into(),
+                roles: vec![],
+                material_e2ee: material,
+            },
+            ssrc: Ssrc(1),
+        }
+    }
+
+    fn hello(material: Option<Vec<u8>>) -> ClientMessage {
+        ClientMessage::Hello {
+            join_secret: None,
+            faixa: crate::version::FAIXA,
+            client: "seele".into(),
+            nickname: "maya".into(),
+            public_key: vec![7; PUBLIC_KEY_LEN],
+            material_e2ee: material,
+            apis_de_mod: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn o_material_vai_e_volta_e_tem_teto_nos_dois_sentidos() {
+        let cabe = perfil(Some(vec![7; MAX_MATERIAL_E2EE_LEN]));
+        assert_eq!(
+            decode::<ServerMessage>(&encode(&cabe).unwrap()).unwrap(),
+            cabe
+        );
+        assert!(matches!(
+            encode(&perfil(Some(vec![7; MAX_MATERIAL_E2EE_LEN + 1]))),
+            Err(ControlError::FieldTooLong {
+                field: "material_e2ee",
+                ..
+            })
+        ));
+
+        let cabe = hello(Some(vec![7; MAX_MATERIAL_E2EE_LEN]));
+        assert_eq!(
+            decode::<ClientMessage>(&encode(&cabe).unwrap()).unwrap(),
+            cabe
+        );
+        assert!(matches!(
+            encode(&hello(Some(vec![7; MAX_MATERIAL_E2EE_LEN + 1]))),
+            Err(ControlError::FieldTooLong {
+                field: "material_e2ee",
+                ..
+            })
+        ));
+    }
+
+    /// Quem monta um quadro à mão também não passa do teto: a conferência vale
+    /// na entrada, e não só na saída.
+    #[test]
+    fn um_material_grande_demais_feito_a_mao_e_recusado_na_entrada() {
+        let mut quadro = encode(&hello(None)).unwrap();
+        // O `None` do último campo é o último byte; troca-se por um `Some` de
+        // 257 bytes escrito à mão: 1, depois o varint de 257 (0x81 0x02).
+        assert_eq!(quadro.pop(), Some(0));
+        quadro.extend([1, 0x81, 0x02]);
+        quadro.extend(std::iter::repeat_n(7_u8, MAX_MATERIAL_E2EE_LEN + 1));
+        assert!(matches!(
+            decode::<ClientMessage>(&quadro),
+            Err(ControlError::FieldTooLong {
+                field: "material_e2ee",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn o_material_e_o_ultimo_campo_do_hello_e_none_e_um_byte() {
+        assert_eq!(
+            encode(&hello(None)).unwrap().last(),
+            Some(&0),
+            "None é o último byte do Hello"
+        );
+        assert_eq!(
+            decode::<ServerMessage>(&encode(&perfil(None)).unwrap()).unwrap(),
+            perfil(None)
+        );
     }
 }

@@ -1431,6 +1431,20 @@ pub struct Server {
     /// alcançada — a chave não pode ficar velha, porque ela é o conteúdo.
     pub pacotes_conferidos:
         Arc<std::sync::Mutex<std::collections::HashMap<String, PacoteConferido>>>,
+    /// A impressão do certificado **de longa duração** deste servidor — a
+    /// identidade —, em bytes: o SHA-256 do DER dele, o mesmo cujo hex vai no
+    /// `fp=` do link.
+    ///
+    /// No `seele/1` é o certificado que o TLS apresenta. No `h3` do celular o
+    /// TLS apresenta um certificado **curto**, e a prova continua conferida
+    /// contra esta, porque a página assina com o `fp=` do link e não sabe qual
+    /// curto foi apresentado. **Não troque por algo lido da conexão**: o valor
+    /// sai de `Identity::digest()` na subida, de propósito (pedido da F4).
+    ///
+    /// **É contra ela que a prova de identidade é conferida** (o S2,
+    /// `seele_proto::assinatura::prova_de_cliente`): uma prova feita para
+    /// outro servidor carrega a impressão dele, e não confere aqui.
+    pub impressao: [u8; 32],
 }
 
 /// Um pacote de MOD cujo hash já foi conferido.
