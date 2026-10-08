@@ -175,7 +175,8 @@ SEM_PONTO=nao
 # O ponto de encontro que o portão do ENC/2 confere. O padrão é o de produção,
 # o mesmo `PONTO_PADRAO` que o app usa; a variável existe para conferir uma VPS
 # nova antes de o nome apontar para ela.
-PONTO_DO_PORTAO="${SEELE_ENCONTRO_DO_PORTAO:-encontro.seele.app.br}"
+PONTO_PADRAO_DO_PORTAO="encontro.seele.app.br"
+PONTO_DO_PORTAO="${SEELE_ENCONTRO_DO_PORTAO:-$PONTO_PADRAO_DO_PORTAO}"
 PARCIAL=nao
 SEM_ASSINATURA=nao
 SO_CONFERIR=nao
@@ -725,11 +726,17 @@ linha_da_bateria() {
     esac
 }
 
-# A linha do corpo do release que diz se o ponto de encontro foi conferido.
+# A linha do corpo do release que diz se o ponto de encontro foi conferido, e
+# qual.
 #
 # Como a da bateria: quem baixa não vê o terminal de quem publica, e uma versão
 # que saiu com `--sem-ponto` não pode sair com o mesmo texto de uma conferida.
 # A linha legada não fala o ENC/2 e não ganha linha nenhuma.
+#
+# **E qual ponto.** O `SEELE_ENCONTRO_DO_PORTAO` confere uma VPS nova antes de o
+# nome apontar para ela, e nesse caso o portão passa com o nome ainda no
+# binário velho. A linha dizia «o de produção fala o ENC/2» assim mesmo: a
+# armadilha do ADR 0047, dita como conferida (a revisão de 08/10/2026).
 #
 #   ./empacotar/publicar.sh --linha-do-ponto [--sem-ponto] [--linha-legada]
 linha_do_ponto() {
@@ -740,7 +747,11 @@ linha_do_ponto() {
         printf '%s\n' "**Esta versão saiu com --sem-ponto: não foi conferido que o ponto de encontro em produção fala o ENC/2. Sem ele, ninguém acha ninguém pelo código.**"
         return 0
     fi
-    printf '%s\n' "Ponto de encontro: conferido antes de publicar — o de produção fala o ENC/2 em toda família que responde."
+    if [ "$PONTO_DO_PORTAO" != "$PONTO_PADRAO_DO_PORTAO" ]; then
+        printf '%s\n' "**Ponto de encontro: conferido em $PONTO_DO_PORTAO, que fala o ENC/2 — e não no padrão: $PONTO_PADRAO_DO_PORTAO, o que o app usa, não foi conferido.**"
+        return 0
+    fi
+    printf '%s\n' "Ponto de encontro: conferido antes de publicar — o de produção ($PONTO_DO_PORTAO) fala o ENC/2 em toda família que responde."
 }
 
 # A tag da versão publicada antes desta.
@@ -1307,6 +1318,10 @@ conferir_ponto_de_encontro() {
             "Numa emergência que não depende do ponto: --sem-ponto, e o corpo do release diz."
     fi
     printf '%s\n' "$cpe_saida" | LC_ALL=C sed 's/^/    /'
+    if [ "$PONTO_DO_PORTAO" != "$PONTO_PADRAO_DO_PORTAO" ]; then
+        aviso "o ponto conferido foi $PONTO_DO_PORTAO, e não o padrão ($PONTO_PADRAO_DO_PORTAO)." \
+            "O app pergunta ao padrão. O corpo do release vai dizer que ele não foi conferido."
+    fi
     passo "ponto de encontro ($PONTO_DO_PORTAO): fala o ENC/2 em toda família que responde"
 }
 

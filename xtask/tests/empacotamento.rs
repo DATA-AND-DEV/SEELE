@@ -4658,12 +4658,21 @@ fn o_corpo_de_uma_versao_com_o_ponto_conferido_diz_isso() {
 
 /// A linha do corpo, sozinha, sem disco nem rede, como a da bateria.
 fn linha_do_ponto(argumentos: &[&str]) -> (i32, String) {
-    let saida = Command::new(interpretador())
+    linha_do_ponto_com(argumentos, &[])
+}
+
+/// O mesmo, com variáveis de ambiente.
+fn linha_do_ponto_com(argumentos: &[&str], ambiente: &[(&str, &str)]) -> (i32, String) {
+    let mut comando = Command::new(interpretador());
+    comando
         .arg(publicar())
         .arg("--linha-do-ponto")
-        .args(argumentos)
-        .output()
-        .expect("o orquestrador tem que executar");
+        .args(argumentos);
+    comando.env_remove("SEELE_ENCONTRO_DO_PORTAO");
+    for (nome, valor) in ambiente {
+        comando.env(nome, valor);
+    }
+    let saida = comando.output().expect("o orquestrador tem que executar");
     (
         saida.status.code().unwrap_or(-1),
         format!(
@@ -4719,5 +4728,64 @@ fn a_linha_legada_nao_confere_o_enc2() {
         !saida.diario.contains("--example sondar"),
         "a linha legada perguntou ao ponto pelo ENC/2:\n{}",
         saida.diario
+    );
+}
+
+/// **A página diz qual ponto foi conferido.** O `SEELE_ENCONTRO_DO_PORTAO`
+/// existe para conferir uma VPS nova antes de o nome apontar para ela. Nesse
+/// caso o portão passa, e a página dizia «o de produção fala o ENC/2» com o
+/// nome ainda apontando o binário velho: a armadilha do ADR 0047, dita como
+/// conferida (a revisão de 08/10/2026).
+#[test]
+fn a_linha_do_ponto_diz_qual_ponto_foi_conferido() {
+    let (_, padrao) = linha_do_ponto(&[]);
+    assert!(
+        padrao.contains("encontro.seele.app.br"),
+        "a linha não diz qual ponto foi conferido:\n{padrao}"
+    );
+
+    let (estado, outro) =
+        linha_do_ponto_com(&[], &[("SEELE_ENCONTRO_DO_PORTAO", "203.0.113.7:8384")]);
+    assert_eq!(estado, 0, "a linha do ponto não saiu:\n{outro}");
+    assert!(
+        outro.contains("**") && outro.contains("203.0.113.7:8384"),
+        "um ponto conferido fora do padrão não é dito em negrito, com o nome:\n{outro}"
+    );
+    assert!(
+        outro.contains("encontro.seele.app.br") && outro.contains("não foi conferido"),
+        "a linha não diz que o ponto padrão, o que o app usa, não foi conferido:\n{outro}"
+    );
+    assert!(
+        !outro.contains("o de produção fala"),
+        "com outro ponto conferido, a linha diz que o de produção fala o ENC/2:\n{outro}"
+    );
+}
+
+#[test]
+fn o_corpo_de_uma_versao_conferida_em_outro_ponto_diz_qual() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("SEELE_ENCONTRO_DO_PORTAO", "203.0.113.7:8384")],
+    );
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.diario.contains("--exige-enc2 203.0.113.7:8384"),
+        "o portão não conferiu o ponto que a variável pediu:\n{}",
+        saida.diario
+    );
+    assert!(
+        // O corpo vai em JSON, com os acentos escapados: o trecho é o da mesma
+        // frase que só tem ASCII.
+        saida.corpos.contains("203.0.113.7:8384") && saida.corpos.contains("o que o app usa"),
+        "o corpo do release não diz que conferiu outro ponto, e não o padrão:\n{}",
+        saida.corpos
     );
 }
