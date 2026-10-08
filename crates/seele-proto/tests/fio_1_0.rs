@@ -638,6 +638,23 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 }],
             },
         ),
+        (
+            "ModAviso",
+            ServerMessage::ModAviso {
+                mod_id: "seele/mesa".into(),
+                canal: Some(ChannelId(1)),
+                carga: r#"{"rodada":2}"#.into(),
+            },
+        ),
+        (
+            "TemaMudou",
+            ServerMessage::TemaMudou {
+                tema: Some(seele_proto::control::TemaDoServidor {
+                    mod_id: "seele/estilo".into(),
+                    valores: r##"{"acento":"#c86b1f"}"##.into(),
+                }),
+            },
+        ),
     ]
 }
 

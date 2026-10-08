@@ -14,7 +14,14 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use seele_proto::uri::{analisar, LIMITE_DE_ALVOS};
+use seele_proto::uri::{
+    analisar, analisar_no_navegador, codigo_do_link, LIMITE_DE_ALVOS,
+    LIMITE_DE_HASHES_DO_NAVEGADOR,
+};
+
+/// A origem dos testes, até o D-web-2 escolher a de verdade. Precisa ser a
+/// mesma de `fuzz/sementes/uri/navegador`.
+const ORIGEM: &str = "origem.invalid";
 
 fuzz_target!(|dados: &[u8]| {
     // O convite é texto. Bytes que não são UTF-8 não chegam a `analisar`: quem
@@ -22,6 +29,23 @@ fuzz_target!(|dados: &[u8]| {
     let Ok(texto) = std::str::from_utf8(dados) else {
         return;
     };
+
+    // O link da sala: só não pode entrar em pânico.
+    let _ = codigo_do_link(texto);
+
+    // A forma do navegador (ADR 0057): o que ela aceita respeita os tetos, e o
+    // que o SEELE escreve dela é lido de volta igual.
+    if let Ok(lido) = analisar_no_navegador(texto, ORIGEM) {
+        assert!(lido.hashes.len() <= LIMITE_DE_HASHES_DO_NAVEGADOR);
+        assert!(lido.convite.bilhete.is_none());
+        let escrito = lido
+            .convite
+            .no_navegador(ORIGEM, "/e", &lido.hashes, lido.ate)
+            .expect("o link do navegador aceito tem fp e hashes");
+        let relido = analisar_no_navegador(&escrito, ORIGEM)
+            .expect("o link do navegador que o SEELE escreve tem de ser lido de volta");
+        assert_eq!(relido, lido);
+    }
 
     let Ok(convite) = analisar(texto) else {
         // Recusar é sempre aceitável. O que não é aceitável é entrar em pânico,
