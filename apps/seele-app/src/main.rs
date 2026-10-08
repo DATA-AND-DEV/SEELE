@@ -12607,6 +12607,75 @@ mod o_registro_da_janela {
         );
     }
 
+    /// A linha da janela no `nivel` dado, com o id `a/b`, e o rastro dela.
+    fn da_janela_no_nivel(nivel: &str) -> String {
+        let ((), rastro) = capturar(|| {
+            super::registrar_da_janela_em(
+                &super::BaldesDoRegistro::default(),
+                origem(),
+                nivel.to_owned(),
+                "atender-mod".to_owned(),
+                "uma frase da janela".to_owned(),
+                Some("a/b".to_owned()),
+            );
+        });
+        rastro
+    }
+
+    /// Os pedaços da linha, separados por espaço: um campo é um pedaço inteiro,
+    /// e `mod_id=a/b` não casa com `mod_id=a/bc`.
+    fn tem_o_campo(linha: &str, campo: &str) -> bool {
+        linha.split_whitespace().any(|pedaco| pedaco == campo)
+    }
+
+    /// **Os três braços levam o id, e não só o do aviso.** O teste de cima
+    /// prova o WARN; o ERROR e o DEBUG escrevem por chamadas próprias, e um
+    /// braço que esquecesse o `mod_id` deixava a linha fora da busca por
+    /// `mod_id=` sem que nenhum teste reclamasse (T3 M2). Pelos campos, e não
+    /// pela forma inteira da linha.
+    #[test]
+    fn o_erro_da_janela_sai_como_error_com_o_id_do_mod() {
+        let rastro = da_janela_no_nivel("erro");
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("uma frase da janela"))
+            .unwrap_or_else(|| panic!("o erro da janela não chegou ao registro: {rastro}"));
+        assert!(
+            tem_o_campo(linha, "ERROR"),
+            "o erro da janela não saiu em ERROR, e o filtro do seele.log o trata como outra \
+             coisa: {linha}"
+        );
+        assert!(
+            tem_o_campo(linha, "mod_id=a/b"),
+            "o erro da janela saiu sem `mod_id=`, e uma busca pelo MOD não junta o que a janela \
+             disse dele com o que o Rust disse: {linha}"
+        );
+    }
+
+    /// O mesmo para um nível que a janela não conhece, que sai em DEBUG.
+    #[test]
+    fn um_nivel_desconhecido_da_janela_sai_como_debug_com_o_id_do_mod() {
+        let rastro = da_janela_no_nivel("outro");
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("uma frase da janela"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "a linha da janela num nível desconhecido não chegou ao registro, que captura \
+                     do TRACE para cima: {rastro}"
+                )
+            });
+        assert!(
+            tem_o_campo(linha, "DEBUG"),
+            "a linha da janela num nível desconhecido não saiu em DEBUG: {linha}"
+        );
+        assert!(
+            tem_o_campo(linha, "mod_id=a/b"),
+            "a linha DEBUG da janela saiu sem `mod_id=`, e com `RUST_LOG=debug` uma busca pelo \
+             MOD não a acha: {linha}"
+        );
+    }
+
     #[test]
     fn sem_id_a_linha_da_janela_continua_saindo() {
         let ((), rastro) = capturar(|| {
