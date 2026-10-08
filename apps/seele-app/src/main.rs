@@ -128,6 +128,12 @@ struct Session {
     /// vez: ver [`recusa_de_carga_dita`]. Esvaziada a cada sessão que fecha
     /// ([`Session::revogar`]).
     recusas_de_carga: RecusasDeCarga,
+    /// **O teto de vazão de cada MOD no `seele.log`**: as linhas que o produto
+    /// escreve em nome de um MOD — a frase da janela, a mídia recusada, a
+    /// servida e o som servido — passam pelo balde dele. Ver
+    /// [`linha_admitida`]. Esvaziado, com a conta dita, a cada sessão que fecha
+    /// ([`Session::revogar`]).
+    baldes_do_registro: BaldesDoRegistro,
 
     /// Os arquivos que **uma pessoa escolheu** para um MOD, por identificador.
     ///
@@ -342,6 +348,20 @@ impl Session {
         if let Ok(mut ditas) = self.recusas_de_carga.lock() {
             ditas.clear();
         }
+        // **E os baldes do registro, com a conta dita antes.** Uma linha por
+        // MOD que tinha linhas seguradas sem outra depois que as contasse: sem
+        // ela, a conta caía com o balde, e o `seele.log` mostrava a rajada como
+        // se fosse tudo.
+        let mut baldes = self
+            .baldes_do_registro
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (chave, balde) in baldes.iter_mut() {
+            if let Some(suprimidas) = balde.pendentes() {
+                conta_do_balde_dita(chave, suprimidas);
+            }
+        }
+        baldes.clear();
         nova
     }
 
@@ -2362,6 +2382,115 @@ fn quebra_ou_inverte_a_linha(c: char) -> bool {
         )
 }
 
+/// **Os baldes de vazão do `seele.log`, um por MOD**, pela chave de
+/// [`chave_do_balde`]. Ver [`linha_admitida`].
+type BaldesDoRegistro = Mutex<std::collections::HashMap<String, executor::BaldeDoConsole>>;
+
+/// **Quantos baldes o mapa do registro guarda**, contando o de transbordo.
+///
+/// Sessenta e quatro: sessenta e três ids com balde próprio — o do catálogo
+/// entre eles — e um dividido ([`BALDE_DE_TRANSBORDO`]) por todo id que chegar
+/// depois. Os ids vêm da janela, e uma janela que mandasse um id novo a cada
+/// linha faria do mapa memória sem teto — e de cada id novo um balde cheio, a
+/// vazão também sem teto.
+const BALDES_NO_REGISTRO: usize = 64;
+
+/// A chave do balde da linha sem id, que é a do catálogo do servidor
+/// (`carregarMods` pede o catálogo com o id vazio). O caractere de controle na
+/// frente faz dela uma chave que [`id_no_registro`] nunca devolve: nenhum MOD
+/// cai neste balde.
+const BALDE_DO_CATALOGO: &str = "\u{0}catalogo";
+
+/// A chave do balde dividido pelos ids que chegam com o mapa cheio
+/// ([`BALDES_NO_REGISTRO`]). Pela razão de [`BALDE_DO_CATALOGO`], nenhum id a
+/// escreve.
+const BALDE_DE_TRANSBORDO: &str = "\u{0}transbordo";
+
+/// A chave do balde de `mod_id`: [`id_no_registro`] dele, ou
+/// [`BALDE_DO_CATALOGO`] quando não sobra nada.
+fn chave_do_balde(mod_id: &str) -> String {
+    let id = id_no_registro(mod_id);
+    if id.is_empty() {
+        BALDE_DO_CATALOGO.to_owned()
+    } else {
+        id
+    }
+}
+
+/// **Uma linha do registro em nome de `mod_id` quer passar.**
+///
+/// `Some(n)` é «passa», com quantas foram seguradas antes dela — o campo
+/// `suprimidas` da linha, no molde de [`registrar_console_do_mod`]; `None` é
+/// «segurada», e ela entra na conta da próxima.
+///
+/// # Por que um teto por MOD
+///
+/// O `console` de um MOD já tinha o dele, no executor. As outras portas por
+/// onde um MOD faz o produto escrever não tinham nenhum: a janela
+/// ([`registrar_da_janela`]) diz o que um MOD faz dar errado, a cada vez, e um
+/// MOD que pede num laço a mesma mídia recusada deixava uma linha por pedido
+/// ([`recusa_de_midia_dita`]), num arquivo que só gira na abertura do app. O
+/// balde é o do `console` ([`executor::BaldeDoConsole`]): a mesma rajada, o
+/// mesmo ritmo e a mesma conta.
+///
+/// **Um balde por MOD, dividido pelas portas**: a janela, a mídia recusada, a
+/// servida ([`midia_servida_dita`]) e o som servido ([`som_servido_dito`]) do
+/// mesmo MOD gastam do mesmo balde, e um MOD não segura as linhas de outro.
+/// Com o mapa cheio ([`BALDES_NO_REGISTRO`]), um id novo gasta do balde de
+/// transbordo — e a conta que uma linha de lá leva pode ser de mais de um id.
+///
+/// O relógio vem de quem chama, como no balde do `console`: é o que deixa o
+/// teste medir o teto sem dormir. Um cadeado envenenado não tira o teto: o
+/// balde é lido como está.
+fn linha_admitida(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    mod_id: &str,
+) -> Option<u32> {
+    let mut baldes = baldes
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let chave = chave_do_balde(mod_id);
+    let chave = if baldes.contains_key(&chave) || baldes.len() < BALDES_NO_REGISTRO - 1 {
+        chave
+    } else {
+        BALDE_DE_TRANSBORDO.to_owned()
+    };
+    baldes
+        .entry(chave)
+        .or_insert_with(|| executor::BaldeDoConsole::novo(agora))
+        .admitir(agora)
+}
+
+/// **Diz a conta que um balde do registro guardou e nenhuma linha levou**,
+/// quando a sessão fecha ([`Session::revogar`]).
+///
+/// Com ficha ou sem, como a última linha de uma instância do `console`
+/// ([`executor::BaldeDoConsole::pendentes`]): o balde vai embora com a sessão,
+/// e guardar a conta para uma ficha que não vai chegar era perdê-la. Os campos
+/// seguem os da linha que a conta contaria: `mod_id=`, ou `catalogo=true` para
+/// a linha sem id, ou `transbordo=true` para o balde dividido.
+fn conta_do_balde_dita(chave: &str, suprimidas: u32) {
+    match chave {
+        BALDE_DO_CATALOGO => tracing::warn!(
+            catalogo = true,
+            suprimidas,
+            "linhas do registro seguradas pelo teto de vazão, sem outra linha depois que as contasse"
+        ),
+        BALDE_DE_TRANSBORDO => tracing::warn!(
+            transbordo = true,
+            suprimidas,
+            "linhas do registro seguradas pelo teto de vazão, sem outra linha depois que as contasse"
+        ),
+        // A chave já é `id_no_registro` do id: em `%` ela não quebra a linha.
+        mod_id => tracing::warn!(
+            mod_id = %mod_id,
+            suprimidas,
+            "linhas do registro seguradas pelo teto de vazão, sem outra linha depois que as contasse"
+        ),
+    }
+}
+
 /// **A janela também escreve no registro.**
 ///
 /// Ela não tinha como. Todo o caminho de um pedido de MOD é observável no Rust
@@ -2383,9 +2512,51 @@ fn quebra_ou_inverte_a_linha(c: char) -> bool {
 /// MOD.
 ///
 /// A linha é `a janela disse onde=… mod_id=… frase="…"`: a frase num campo, em
-/// `?`, depois do id — ver o comentário do corte, abaixo.
+/// `?`, depois do id — ver o comentário do corte, em
+/// [`registrar_da_janela_em`].
+///
+/// **Com o teto de vazão do MOD** ([`linha_admitida`]): a janela diz o que um
+/// MOD faz dar errado a cada vez que dá, e um MOD num laço deixava uma linha
+/// por volta. A sessão dá os baldes; os argumentos do `invoke` não mudam.
 #[tauri::command]
-fn registrar_da_janela(nivel: String, onde: String, o_que: String, mod_id: Option<String>) {
+fn registrar_da_janela(
+    session: State<'_, Session>,
+    nivel: String,
+    onde: String,
+    o_que: String,
+    mod_id: Option<String>,
+) {
+    registrar_da_janela_em(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        nivel,
+        onde,
+        o_que,
+        mod_id,
+    );
+}
+
+/// O corpo de [`registrar_da_janela`], com os baldes e o relógio de quem
+/// chama: é o que deixa um teste medir o teto de vazão sem `AppHandle` e sem
+/// dormir.
+fn registrar_da_janela_em(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    nivel: String,
+    onde: String,
+    o_que: String,
+    mod_id: Option<String>,
+) {
+    // **O balde primeiro**: a linha segurada não custa o corte nem o escape.
+    // A chave é o id como a linha o levaria ([`chave_do_balde`]), e a linha sem
+    // id gasta do balde do catálogo.
+    let Some(suprimidas) = linha_admitida(baldes, agora, mod_id.as_deref().unwrap_or_default())
+    else {
+        return;
+    };
+    // Só aparece quando não é zero, como no `console` do MOD: é o registro
+    // dizendo que houve mais do que ele mostra.
+    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     // Cortado aqui, e não confiando em quem chama: uma frase sem teto vinda da
     // janela é uma linha de registro sem teto no disco de quem hospeda.
     //
@@ -2426,9 +2597,13 @@ fn registrar_da_janela(nivel: String, onde: String, o_que: String, mod_id: Optio
     // não sai.
     let mod_id = mod_id.as_deref().map(tracing::field::display);
     match nivel.as_str() {
-        "aviso" => tracing::warn!(onde = %onde, mod_id, frase = ?frase, "a janela disse"),
-        "erro" => tracing::error!(onde = %onde, mod_id, frase = ?frase, "a janela disse"),
-        _ => tracing::debug!(onde = %onde, mod_id, frase = ?frase, "a janela disse"),
+        "aviso" => {
+            tracing::warn!(onde = %onde, mod_id, frase = ?frase, suprimidas, "a janela disse");
+        }
+        "erro" => {
+            tracing::error!(onde = %onde, mod_id, frase = ?frase, suprimidas, "a janela disse");
+        }
+        _ => tracing::debug!(onde = %onde, mod_id, frase = ?frase, suprimidas, "a janela disse"),
     }
 }
 
@@ -5341,7 +5516,21 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
 /// [`motivo_no_registro`]: em `ler_imagem_mod` ele é o texto que o servidor
 /// mandou. A recusa que volta à janela sai intacta — quem se protege é a
 /// linha, e não a resposta.
-fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaNoMod {
+///
+/// **Com o teto de vazão do MOD** ([`linha_admitida`]): um MOD que pede num
+/// laço a mesma mídia recusada deixava uma linha por pedido. A recusa volta à
+/// janela do mesmo jeito; só a linha é segurada, e contada.
+fn recusa_de_midia_dita(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    mod_id: &str,
+    origem: &str,
+    falha: FalhaNoMod,
+) -> FalhaNoMod {
+    let Some(suprimidas) = linha_admitida(baldes, agora, mod_id) else {
+        return falha;
+    };
+    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     let motivo = motivo_de(&falha);
     let mod_id = id_no_registro(mod_id);
     let origem = caminho_no_registro(origem);
@@ -5351,6 +5540,7 @@ fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaN
             mod_id = %mod_id,
             origem = %origem,
             motivo = %no_registro,
+            suprimidas,
             "mídia de MOD não servida: a sessão acabou"
         );
     } else {
@@ -5358,6 +5548,7 @@ fn recusa_de_midia_dita(mod_id: &str, origem: &str, falha: FalhaNoMod) -> FalhaN
             mod_id = %mod_id,
             origem = %origem,
             motivo = %no_registro,
+            suprimidas,
             "mídia de MOD recusada"
         );
     }
@@ -5456,8 +5647,11 @@ fn bytes_declarados_do_mod(
     Ok(bytes)
 }
 
-/// A mídia de um MOD pronta para a janela, **ou a recusa dita no registro**.
+/// A mídia de um MOD pronta para a janela, **ou a recusa dita no registro**,
+/// com o teto de vazão de `baldes` ([`recusa_de_midia_dita`]).
 fn midia_declarada_do_mod(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
     pasta: &str,
     id: &str,
     hash: &str,
@@ -5469,7 +5663,7 @@ fn midia_declarada_do_mod(
                 motivo: "formato-desconhecido".to_owned(),
             })
         })
-        .map_err(|falha| recusa_de_midia_dita(id, caminho, falha))?;
+        .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))?;
     Ok(MidiaDoMod {
         uri: lida.uri,
         papel: lida.papel,
@@ -5511,12 +5705,27 @@ fn midia_do_mod(
             motivo: "sessao-encerrada".to_owned(),
         });
     }
-    let midia = midia_declarada_do_mod(&config_dir(&app), &id, &hash, &caminho)?;
+    let midia = midia_declarada_do_mod(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        &config_dir(&app),
+        &id,
+        &hash,
+        &caminho,
+    )?;
     // **Dito, como o código do MOD é dito.** Um arquivo que sai do pacote de um
     // terceiro e vira som na máquina de quem está numa conversa é um evento que
     // quem hospeda tem direito de ler no registro — e é o que permite medir o
     // caminho da mídia sem a janela contar nada.
-    midia_servida_dita(&id, geracao, &caminho, midia.papel, midia.bytes);
+    midia_servida_dita(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        &id,
+        geracao,
+        &caminho,
+        midia.papel,
+        midia.bytes,
+    );
     Ok(midia)
 }
 
@@ -5527,13 +5736,29 @@ fn midia_do_mod(
 /// e passa por [`caminho_no_registro`]: escrito cru, um nome com quebra de
 /// linha escreveria, a cada mídia servida, uma linha com a cara do produto. O
 /// `mod_id` vai em `%` como está, pela razão dita em [`som_servido_dito`].
-fn midia_servida_dita(mod_id: &str, geracao: u64, caminho: &str, papel: &str, bytes: usize) {
+///
+/// Com o teto de vazão do MOD ([`linha_admitida`]): a janela pede a mesma
+/// mídia a cada vez que a monta de novo.
+fn midia_servida_dita(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    mod_id: &str,
+    geracao: u64,
+    caminho: &str,
+    papel: &str,
+    bytes: usize,
+) {
+    let Some(suprimidas) = linha_admitida(baldes, agora, mod_id) else {
+        return;
+    };
+    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     tracing::info!(
         mod_id = %mod_id,
         geracao,
         caminho = %caminho_no_registro(caminho),
         papel,
         bytes,
+        suprimidas,
         "mídia de MOD servida"
     );
 }
@@ -5588,8 +5813,22 @@ fn som_do_mod(
             motivo: "sessao-encerrada".to_owned(),
         });
     }
-    let bytes = som_declarado_do_mod(&config_dir(&app), &id, &hash, &caminho)?;
-    som_servido_dito(&id, geracao, &caminho, bytes.len());
+    let bytes = som_declarado_do_mod(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        &config_dir(&app),
+        &id,
+        &hash,
+        &caminho,
+    )?;
+    som_servido_dito(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        &id,
+        geracao,
+        &caminho,
+        bytes.len(),
+    );
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -5601,18 +5840,36 @@ fn som_do_mod(
 /// linha com a cara do produto. O `mod_id` vai em `%` como está: aqui ele já é
 /// o do manifesto ([`bytes_declarados_do_mod`] recusa o hash de outro MOD), e o
 /// manifesto só passa com `autor/nome` em minúsculas, dígitos e hífen.
-fn som_servido_dito(mod_id: &str, geracao: u64, caminho: &str, bytes: usize) {
+///
+/// Com o teto de vazão do MOD ([`linha_admitida`]): o som que um MOD toca a
+/// cada evento é pedido a cada vez.
+fn som_servido_dito(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    mod_id: &str,
+    geracao: u64,
+    caminho: &str,
+    bytes: usize,
+) {
+    let Some(suprimidas) = linha_admitida(baldes, agora, mod_id) else {
+        return;
+    };
+    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     tracing::info!(
         mod_id = %mod_id,
         geracao,
         caminho = %caminho_no_registro(caminho),
         bytes,
+        suprimidas,
         "som de MOD servido em bytes"
     );
 }
 
-/// Os bytes de um som declarado, **ou a recusa dita no registro**.
+/// Os bytes de um som declarado, **ou a recusa dita no registro**, com o teto
+/// de vazão de `baldes` ([`recusa_de_midia_dita`]).
 fn som_declarado_do_mod(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
     pasta: &str,
     id: &str,
     hash: &str,
@@ -5628,7 +5885,7 @@ fn som_declarado_do_mod(
                 motivo: "formato-desconhecido".to_owned(),
             }),
         })
-        .map_err(|falha| recusa_de_midia_dita(id, caminho, falha))
+        .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))
 }
 
 /// **Mídia que veio da metade de servidor de um MOD.**
@@ -5667,7 +5924,12 @@ fn midia_em_bytes(
             motivo: "sessao-encerrada".to_owned(),
         });
     }
-    let midia = midia_do_servidor_dita(&id, &base64)?;
+    let midia = midia_do_servidor_dita(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        &id,
+        &base64,
+    )?;
     tracing::debug!(
         mod_id = %id,
         geracao,
@@ -5684,8 +5946,16 @@ fn midia_em_bytes(
 /// O `warn` que estava no comando não dizia de quem era a mídia: a janela não
 /// mandava o id, e «mídia de MOD recusada» com três MODs ligados não aponta
 /// para nenhum.
-fn midia_do_servidor_dita(id: &str, base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
-    ler_midia_do_servidor(base64).map_err(|falha| recusa_de_midia_dita(id, "servidor", falha))
+///
+/// Com o teto de vazão de `baldes` ([`recusa_de_midia_dita`]).
+fn midia_do_servidor_dita(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    id: &str,
+    base64: &str,
+) -> Result<MidiaDoMod, FalhaNoMod> {
+    ler_midia_do_servidor(base64)
+        .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, "servidor", falha))
 }
 
 fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
@@ -5792,15 +6062,33 @@ async fn ler_imagem_mod(
     let conexao = session
         .connection()
         .map_err(|_| recusa("sessao-encerrada"))?;
+    // O relógio é lido quando a linha é escrita, e não antes do `await`: a
+    // leitura por volume pode levar segundos, e o balde contaria a recarga
+    // desde um instante que já passou.
     let bytes = conexao
         .ler_imagem_mod(id.clone(), channel, payload)
         .await
-        .map_err(|m| recusa_de_midia_dita(&id, "volume", recusa(&m)))?;
+        .map_err(|m| {
+            recusa_de_midia_dita(
+                &session.baldes_do_registro,
+                std::time::Instant::now(),
+                &id,
+                "volume",
+                recusa(&m),
+            )
+        })?;
     if !session.geracao_vale(geracao) {
         return Err(recusa("sessao-encerrada"));
     }
-    let lida = seele_ffi::mods::ler_midia(&bytes)
-        .ok_or_else(|| recusa_de_midia_dita(&id, "volume", recusa("formato-desconhecido")))?;
+    let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| {
+        recusa_de_midia_dita(
+            &session.baldes_do_registro,
+            std::time::Instant::now(),
+            &id,
+            "volume",
+            recusa("formato-desconhecido"),
+        )
+    })?;
     Ok(MidiaDoMod {
         uri: lida.uri,
         papel: lida.papel,
@@ -10558,6 +10846,22 @@ mod a_janela_sabe_de_onde_veio_a_impressao {
     }
 }
 
+/// **O relógio fixo dos testes do registro.**
+///
+/// O teto de vazão ([`linha_admitida`]) recebe o instante de quem chama, e um
+/// teste que lesse o relógio da máquina a cada chamada mediria o balde com a
+/// recarga que o tempo da própria execução trouxe. Aqui o relógio é lido uma
+/// vez no processo: todo instante de um teste é esta origem mais uma duração
+/// escrita nele.
+#[cfg(test)]
+mod relogio_de_teste {
+    /// A origem do relógio fixo, a mesma para todo teste do processo.
+    pub(crate) fn origem() -> std::time::Instant {
+        static ORIGEM: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        *ORIGEM.get_or_init(std::time::Instant::now)
+    }
+}
+
 /// **O rastro de um teste, capturado.**
 ///
 /// Os guardas de diagnóstico desta casca perguntam «o `seele.log` diz isto?»,
@@ -11659,11 +11963,14 @@ mod a_carga_recusada_e_dita_uma_vez_por_motivo {
 #[cfg(test)]
 mod o_registro_da_janela {
     use crate::rastro_de_teste::capturar;
+    use crate::relogio_de_teste::origem;
 
     #[test]
     fn o_aviso_da_janela_sai_como_warn_com_o_id_do_mod_em_campo_proprio() {
         let ((), rastro) = capturar(|| {
-            super::registrar_da_janela(
+            super::registrar_da_janela_em(
+                &super::BaldesDoRegistro::default(),
+                origem(),
                 "aviso".to_owned(),
                 "atender-mod".to_owned(),
                 "seele/perfis: «contribuir» falhou — a API de MODs não conhece o ponto «x»"
@@ -11703,7 +12010,9 @@ mod o_registro_da_janela {
     #[test]
     fn um_mod_id_forjado_na_frase_nao_vem_antes_do_verdadeiro() {
         let ((), rastro) = capturar(|| {
-            super::registrar_da_janela(
+            super::registrar_da_janela_em(
+                &super::BaldesDoRegistro::default(),
+                origem(),
                 "aviso".to_owned(),
                 "atender-mod".to_owned(),
                 "x onde=forjado mod_id=vitima/mod".to_owned(),
@@ -11739,7 +12048,9 @@ mod o_registro_da_janela {
     #[test]
     fn sem_id_a_linha_da_janela_continua_saindo() {
         let ((), rastro) = capturar(|| {
-            super::registrar_da_janela(
+            super::registrar_da_janela_em(
+                &super::BaldesDoRegistro::default(),
+                origem(),
                 "aviso".to_owned(),
                 "geral".to_owned(),
                 "sem MOD".to_owned(),
@@ -11763,7 +12074,9 @@ mod o_registro_da_janela {
     #[test]
     fn o_id_vazio_do_catalogo_nao_vira_um_mod_id_sem_nome() {
         let ((), rastro) = capturar(|| {
-            super::registrar_da_janela(
+            super::registrar_da_janela_em(
+                &super::BaldesDoRegistro::default(),
+                origem(),
                 "aviso".to_owned(),
                 "pedido-de-mod".to_owned(),
                 ": oito pedidos em voo, este não cabe".to_owned(),
@@ -11784,7 +12097,9 @@ mod o_registro_da_janela {
     #[test]
     fn uma_quebra_de_linha_da_janela_nao_forja_outra_linha_no_registro() {
         let ((), rastro) = capturar(|| {
-            super::registrar_da_janela(
+            super::registrar_da_janela_em(
+                &super::BaldesDoRegistro::default(),
+                origem(),
                 "aviso".to_owned(),
                 "recusa-de-mod".to_owned(),
                 "a/b: ponto «x\nWARN seele_app: forjada»".to_owned(),
@@ -11810,7 +12125,9 @@ mod o_registro_da_janela {
             ("mod_id", "atender-mod", "a/b\nWARN seele_app: forjada"),
         ] {
             let ((), rastro) = capturar(|| {
-                super::registrar_da_janela(
+                super::registrar_da_janela_em(
+                    &super::BaldesDoRegistro::default(),
+                    origem(),
                     "aviso".to_owned(),
                     onde.to_owned(),
                     "a/b: uma frase de verdade".to_owned(),
@@ -11865,7 +12182,14 @@ mod o_registro_da_janela {
                 ),
             ] {
                 let ((), rastro) = capturar(|| {
-                    super::registrar_da_janela("aviso".to_owned(), onde, o_que, Some(mod_id));
+                    super::registrar_da_janela_em(
+                        &super::BaldesDoRegistro::default(),
+                        origem(),
+                        "aviso".to_owned(),
+                        onde,
+                        o_que,
+                        Some(mod_id),
+                    );
                 });
                 assert!(
                     rastro.contains("a/b: x") && !rastro.contains(c),
@@ -11875,6 +12199,283 @@ mod o_registro_da_janela {
                 );
             }
         }
+    }
+}
+
+/// **O teto de vazão de cada MOD no `seele.log`**, pelas portas que não são
+/// o `console`.
+///
+/// Com o relógio fixo ([`relogio_de_teste`]): cada instante é a origem mais
+/// uma duração, e o balde é medido sem dormir.
+#[cfg(test)]
+mod o_teto_de_vazao_do_registro {
+    use std::time::{Duration, Instant};
+
+    use super::{
+        midia_servida_dita, recusa_de_midia_dita, registrar_da_janela_em, som_servido_dito,
+        BaldesDoRegistro, FalhaNoMod, Session, BALDES_NO_REGISTRO,
+    };
+    use crate::executor::RAJADA_DO_CONSOLE;
+    use crate::rastro_de_teste::capturar;
+    use crate::relogio_de_teste::origem;
+
+    /// Uma linha da janela em nome de `id`, no instante `agora`.
+    fn da_janela(baldes: &BaldesDoRegistro, agora: Instant, id: &str) {
+        registrar_da_janela_em(
+            baldes,
+            agora,
+            "aviso".to_owned(),
+            "atender-mod".to_owned(),
+            "uma frase".to_owned(),
+            Some(id.to_owned()),
+        );
+    }
+
+    /// Uma recusa de mídia de `id`, no instante `agora`.
+    fn recusa(baldes: &BaldesDoRegistro, agora: Instant, id: &str) {
+        recusa_de_midia_dita(
+            baldes,
+            agora,
+            id,
+            "img/rosto.png",
+            FalhaNoMod::Recusado {
+                motivo: "arquivo-nao-declarado".to_owned(),
+            },
+        );
+    }
+
+    /// As linhas do rastro com `mod_id=<id>` num campo.
+    fn de<'a>(rastro: &'a str, id: &str) -> Vec<&'a str> {
+        let campo = format!("mod_id={id}");
+        rastro
+            .lines()
+            .filter(|linha| linha.split_whitespace().any(|pedaco| pedaco == campo))
+            .collect()
+    }
+
+    /// Um quarto de segundo: a recarga de uma ficha do balde.
+    const UMA_FICHA: Duration = Duration::from_millis(250);
+
+    #[test]
+    fn duzentas_linhas_de_um_mod_no_mesmo_instante_deixam_so_a_rajada() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for _ in 0..200 {
+                da_janela(&baldes, agora, "a/b");
+            }
+        });
+        assert_eq!(
+            de(&rastro, "a/b").len(),
+            RAJADA_DO_CONSOLE as usize,
+            "duzentas linhas da janela no mesmo instante passaram de outro jeito que a rajada: \
+             um MOD num laço escreve sem teto no seele.log de quem hospeda"
+        );
+    }
+
+    /// **O que o balde segura é contado**, e a primeira linha que passa depois
+    /// leva a conta: o registro diz que houve mais do que ele mostra.
+    #[test]
+    fn a_linha_depois_do_aperto_diz_quantas_ficaram_para_tras() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for _ in 0..200 {
+                da_janela(&baldes, agora, "a/b");
+            }
+            da_janela(&baldes, agora + UMA_FICHA, "a/b");
+        });
+        let linhas = de(&rastro, "a/b");
+        let seguradas = 200 - RAJADA_DO_CONSOLE as usize;
+        assert_eq!(
+            linhas.len(),
+            RAJADA_DO_CONSOLE as usize + 1,
+            "um quarto de segundo depois da rajada, a linha seguinte não passou (ou passou mais \
+             de uma): {rastro}"
+        );
+        let ultima = linhas.last().copied().unwrap_or_default();
+        assert!(
+            ultima.contains(&format!("suprimidas={seguradas}")),
+            "a linha que passou depois do aperto não diz as {seguradas} que o balde segurou, e o \
+             registro mostra a rajada como se fosse tudo: {ultima}"
+        );
+        assert!(
+            linhas
+                .iter()
+                .take(RAJADA_DO_CONSOLE as usize)
+                .all(|linha| !linha.contains("suprimidas")),
+            "uma linha da rajada trouxe `suprimidas` sem nada ter sido segurado: {rastro}"
+        );
+    }
+
+    #[test]
+    fn um_mod_nao_segura_as_linhas_de_outro() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for _ in 0..200 {
+                da_janela(&baldes, agora, "a/b");
+            }
+            da_janela(&baldes, agora, "c/d");
+        });
+        assert_eq!(
+            de(&rastro, "c/d").len(),
+            1,
+            "a linha de `c/d` foi segurada pelo balde de `a/b`: um MOD num laço cala o \
+             diagnóstico de todos os outros"
+        );
+    }
+
+    /// **Com o mapa cheio, um id novo gasta do balde de transbordo**, e nunca
+    /// passa sem teto: o mapa não cresce, e o balde é um só para todos os ids
+    /// que chegaram depois.
+    #[test]
+    fn com_o_mapa_cheio_um_id_novo_passa_pelo_transbordo() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let cheio = || baldes.lock().expect("os baldes").len() >= BALDES_NO_REGISTRO;
+        let ((), rastro) = capturar(|| {
+            // Um id novo por linha até o mapa encher — e não além: o que
+            // passasse disso gastaria do transbordo antes do id medido.
+            for n in 0..=BALDES_NO_REGISTRO {
+                if cheio() {
+                    break;
+                }
+                da_janela(&baldes, agora, &format!("cheio/{n}"));
+            }
+            assert!(
+                cheio(),
+                "{BALDES_NO_REGISTRO} ids diferentes não encheram o mapa dos baldes"
+            );
+            for _ in 0..200 {
+                da_janela(&baldes, agora, "novo/x");
+            }
+            da_janela(&baldes, agora, "novo/y");
+            for n in 0..BALDES_NO_REGISTRO {
+                da_janela(&baldes, agora, &format!("mais/{n}"));
+            }
+        });
+        let guardados = baldes.lock().expect("os baldes").len();
+        assert_eq!(
+            guardados, BALDES_NO_REGISTRO,
+            "o mapa dos baldes passou de {BALDES_NO_REGISTRO} entradas: uma janela que manda um \
+             id novo por linha faz dele memória sem teto"
+        );
+        let do_novo = de(&rastro, "novo/x").len();
+        assert!(
+            (1..=RAJADA_DO_CONSOLE as usize).contains(&do_novo),
+            "com o mapa cheio, um id novo deixou {do_novo} linhas em duzentas: zero cala um MOD \
+             que nunca escreveu, e mais que a rajada é um id novo passando sem teto"
+        );
+        let depois: usize = std::iter::once("novo/y".to_owned())
+            .chain((0..BALDES_NO_REGISTRO).map(|n| format!("mais/{n}")))
+            .map(|id| de(&rastro, &id).len())
+            .sum();
+        assert_eq!(
+            depois, 0,
+            "os ids novos seguintes ganharam balde cheio, e não o transbordo que o primeiro \
+             secou: uma janela que muda de id a cada linha escreve sem teto: {rastro}"
+        );
+    }
+
+    /// **A sessão que fecha diz a conta que nenhuma linha levou**, uma linha
+    /// por balde — o do catálogo também —, e esvazia o mapa.
+    #[test]
+    fn revogar_diz_a_conta_que_nenhuma_linha_levou() {
+        let sessao = Session::default();
+        let agora = origem();
+        let a_mais = 8;
+        let ((), rastro) = capturar(|| {
+            for _ in 0..RAJADA_DO_CONSOLE as usize + a_mais {
+                da_janela(&sessao.baldes_do_registro, agora, "a/b");
+                registrar_da_janela_em(
+                    &sessao.baldes_do_registro,
+                    agora,
+                    "aviso".to_owned(),
+                    "pedido-de-mod".to_owned(),
+                    "o catálogo".to_owned(),
+                    None,
+                );
+            }
+            sessao.revogar();
+        });
+        let contas: Vec<&str> = rastro
+            .lines()
+            .filter(|linha| linha.contains("seguradas pelo teto de vazão"))
+            .collect();
+        assert_eq!(
+            contas.len(),
+            2,
+            "a sessão fechou com linhas seguradas em dois baldes e não disse uma conta por \
+             balde: {rastro}"
+        );
+        for pedaco in ["mod_id=a/b", "catalogo=true"] {
+            assert!(
+                contas.iter().any(|conta| conta.contains(pedaco)
+                    && conta.contains(&format!("suprimidas={a_mais}"))),
+                "a sessão fechou sem dizer as {a_mais} linhas seguradas de `{pedaco}`: a conta \
+                 caiu com o balde, e o seele.log mostra a rajada como se fosse tudo: {rastro}"
+            );
+        }
+        assert!(
+            sessao
+                .baldes_do_registro
+                .lock()
+                .expect("os baldes")
+                .is_empty(),
+            "os baldes atravessaram a sessão: a seguinte começa com o teto gasto pela anterior"
+        );
+    }
+
+    /// **A recusa de mídia tem o mesmo teto**, e a mesma conta.
+    #[test]
+    fn a_recusa_de_midia_tem_o_mesmo_teto_e_a_mesma_conta() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for _ in 0..200 {
+                recusa(&baldes, agora, "a/b");
+            }
+            recusa(&baldes, agora + UMA_FICHA, "a/b");
+        });
+        let linhas = de(&rastro, "a/b");
+        assert_eq!(
+            linhas.len(),
+            RAJADA_DO_CONSOLE as usize + 1,
+            "duzentas recusas de mídia do mesmo MOD no mesmo instante passaram de outro jeito \
+             que a rajada, e a seguinte um quarto de segundo depois: {rastro}"
+        );
+        let seguradas = 200 - RAJADA_DO_CONSOLE as usize;
+        assert!(
+            linhas
+                .last()
+                .is_some_and(|linha| linha.contains(&format!("suprimidas={seguradas}"))),
+            "a recusa que passou depois do aperto não diz as {seguradas} que o balde segurou: \
+             {rastro}"
+        );
+    }
+
+    /// **As portas do mesmo MOD dividem o balde dele**: é um teto por MOD, e
+    /// não um por porta — senão um MOD teria quatro rajadas.
+    #[test]
+    fn as_portas_do_mesmo_mod_dividem_o_balde() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let por_porta = RAJADA_DO_CONSOLE as usize / 4;
+        let ((), rastro) = capturar(|| {
+            for _ in 0..=por_porta {
+                da_janela(&baldes, agora, "a/b");
+                recusa(&baldes, agora, "a/b");
+                midia_servida_dita(&baldes, agora, "a/b", 7, "img/rosto.png", "imagem", 8);
+                som_servido_dito(&baldes, agora, "a/b", 7, "som/toque.wav", 16);
+            }
+        });
+        assert_eq!(
+            de(&rastro, "a/b").len(),
+            RAJADA_DO_CONSOLE as usize,
+            "as quatro portas do mesmo MOD não dividem o balde dele: cada uma tem uma rajada, e \
+             o teto de um MOD é quatro vezes o escrito: {rastro}"
+        );
     }
 }
 
@@ -11947,11 +12548,12 @@ mod pacote_de_teste {
 mod a_midia_recusada_e_dita_no_registro {
     use super::{
         midia_declarada_do_mod, midia_do_servidor_dita, midia_servida_dita, motivo_de,
-        recusa_de_midia_dita, registrar_da_janela, FalhaNoMod, TETO_DA_FRASE_NO_REGISTRO,
-        TETO_DO_ID_NO_REGISTRO,
+        recusa_de_midia_dita, registrar_da_janela_em, BaldesDoRegistro, FalhaNoMod,
+        TETO_DA_FRASE_NO_REGISTRO, TETO_DO_ID_NO_REGISTRO,
     };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO};
     use crate::rastro_de_teste::capturar;
+    use crate::relogio_de_teste::origem;
 
     /// A linha de recusa de mídia no rastro, se houver.
     fn recusa(rastro: &str) -> Option<&str> {
@@ -11974,8 +12576,16 @@ mod a_midia_recusada_e_dita_no_registro {
     #[test]
     fn um_arquivo_que_o_manifesto_nao_declara_sai_como_warn_com_o_id_e_o_motivo() {
         let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
-        let (resultado, rastro) =
-            capturar(|| midia_declarada_do_mod(&pasta(&raiz), ID, &hash, "img/escondido.png"));
+        let (resultado, rastro) = capturar(|| {
+            midia_declarada_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                "img/escondido.png",
+            )
+        });
         let falha = resultado
             .err()
             .expect("um arquivo que o manifesto não declara foi servido");
@@ -12004,8 +12614,16 @@ mod a_midia_recusada_e_dita_no_registro {
     #[test]
     fn um_arquivo_que_nao_e_midia_sai_como_warn_com_o_motivo() {
         let (raiz, hash) = publicar(&[("doc/leia.txt", TEXTO)]);
-        let (resultado, rastro) =
-            capturar(|| midia_declarada_do_mod(&pasta(&raiz), ID, &hash, "doc/leia.txt"));
+        let (resultado, rastro) = capturar(|| {
+            midia_declarada_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                "doc/leia.txt",
+            )
+        });
         let falha = resultado.err().expect("texto foi servido como mídia");
         assert_eq!(
             motivo_de(&falha),
@@ -12023,8 +12641,16 @@ mod a_midia_recusada_e_dita_no_registro {
     #[test]
     fn uma_imagem_aceita_nao_escreve_recusa() {
         let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
-        let (resultado, rastro) =
-            capturar(|| midia_declarada_do_mod(&pasta(&raiz), ID, &hash, "img/rosto.png"));
+        let (resultado, rastro) = capturar(|| {
+            midia_declarada_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                "img/rosto.png",
+            )
+        });
         let midia = resultado.expect("uma imagem declarada foi recusada");
         assert_eq!(midia.papel, "imagem", "um PNG saiu com outro papel");
         assert!(
@@ -12042,7 +12668,15 @@ mod a_midia_recusada_e_dita_no_registro {
     #[test]
     fn um_caminho_com_quebra_de_linha_nao_forja_linha_na_midia_servida() {
         let ((), rastro) = capturar(|| {
-            midia_servida_dita(ID, 7, "img/a\nWARN seele_app: forjada.png", "imagem", 8);
+            midia_servida_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                7,
+                "img/a\nWARN seele_app: forjada.png",
+                "imagem",
+                8,
+            );
         });
         assert_eq!(
             rastro.lines().count(),
@@ -12071,6 +12705,8 @@ mod a_midia_recusada_e_dita_no_registro {
     fn um_caminho_enorme_sai_cortado_no_teto_de_frase_na_midia_servida() {
         let ((), rastro) = capturar(|| {
             midia_servida_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
                 ID,
                 7,
                 &"i".repeat(TETO_DA_FRASE_NO_REGISTRO * 4),
@@ -12093,6 +12729,8 @@ mod a_midia_recusada_e_dita_no_registro {
     fn a_sessao_que_acabou_nao_vira_aviso() {
         let (falha, rastro) = capturar(|| {
             recusa_de_midia_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
                 ID,
                 "img/rosto.png",
                 FalhaNoMod::Recusado {
@@ -12114,8 +12752,14 @@ mod a_midia_recusada_e_dita_no_registro {
 
     #[test]
     fn a_midia_do_servidor_recusada_leva_o_id_do_mod() {
-        let (resultado, rastro) =
-            capturar(|| midia_do_servidor_dita("seele/perfis", "data:image/png;base64,%%%"));
+        let (resultado, rastro) = capturar(|| {
+            midia_do_servidor_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
+                "seele/perfis",
+                "data:image/png;base64,%%%",
+            )
+        });
         let falha = resultado.err().expect("base64 inválido virou mídia");
         assert_eq!(
             motivo_de(&falha),
@@ -12143,6 +12787,8 @@ mod a_midia_recusada_e_dita_no_registro {
     fn recusa_do_servidor(motivo: &str) -> (FalhaNoMod, String) {
         capturar(|| {
             recusa_de_midia_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
                 ID,
                 "volume",
                 FalhaNoMod::Recusado {
@@ -12178,7 +12824,7 @@ mod a_midia_recusada_e_dita_no_registro {
     fn o_id_que_a_janela_manda_nao_forja_linha() {
         let (_, rastro) = capturar(|| {
             recusa_de_midia_dita(
-                "prova/midia\n2026-09-30T00:00:00.000000Z  WARN seele_app: linha forjada pela janela",
+&BaldesDoRegistro::default(), origem(),                 "prova/midia\n2026-09-30T00:00:00.000000Z  WARN seele_app: linha forjada pela janela",
                 "servidor",
                 FalhaNoMod::Recusado {
                     motivo: "nao-e-base64".to_owned(),
@@ -12227,6 +12873,8 @@ mod a_midia_recusada_e_dita_no_registro {
     fn uma_origem_enorme_sai_cortada_no_teto_de_frase() {
         let (_, rastro) = capturar(|| {
             recusa_de_midia_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
                 ID,
                 &"c".repeat(TETO_DA_FRASE_NO_REGISTRO * 4),
                 FalhaNoMod::Recusado {
@@ -12258,7 +12906,9 @@ mod a_midia_recusada_e_dita_no_registro {
         let enorme = format!("prova/{}", "m".repeat(TETO_DO_ID_NO_REGISTRO * 4));
         let esperado: String = enorme.chars().take(TETO_DO_ID_NO_REGISTRO).collect();
         let ((), da_janela) = capturar(|| {
-            registrar_da_janela(
+            registrar_da_janela_em(
+                &BaldesDoRegistro::default(),
+                origem(),
                 "aviso".to_owned(),
                 "recusa-de-mod".to_owned(),
                 "uma frase da janela".to_owned(),
@@ -12267,6 +12917,8 @@ mod a_midia_recusada_e_dita_no_registro {
         });
         let (_, do_rust) = capturar(|| {
             recusa_de_midia_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
                 &enorme,
                 "volume",
                 FalhaNoMod::Recusado {
@@ -12343,6 +12995,8 @@ mod a_midia_recusada_e_dita_no_registro {
         let (_, do_motivo) = recusa_do_servidor(&pior);
         let (_, da_origem) = capturar(|| {
             recusa_de_midia_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
                 ID,
                 &pior,
                 FalhaNoMod::Recusado {
@@ -12350,12 +13004,24 @@ mod a_midia_recusada_e_dita_no_registro {
                 },
             )
         });
-        let ((), do_caminho) = capturar(|| midia_servida_dita(ID, 7, &pior, "imagem", 8));
+        let ((), do_caminho) = capturar(|| {
+            midia_servida_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                7,
+                &pior,
+                "imagem",
+                8,
+            )
+        });
         // A frase da janela é cortada pela mesma regra do `console`, com o
         // mesmo aviso: os dois são texto de terceiro que chega inteiro, e o
         // aviso diz o tamanho do que foi escrito.
         let ((), da_janela) = capturar(|| {
-            registrar_da_janela(
+            registrar_da_janela_em(
+                &BaldesDoRegistro::default(),
+                origem(),
                 "aviso".to_owned(),
                 "recusa-de-mod".to_owned(),
                 pior.clone(),
@@ -12444,9 +13110,13 @@ mod a_midia_recusada_e_dita_no_registro {
 /// **O som de um MOD sai em bytes, conferido como a imagem é conferida.**
 #[cfg(test)]
 mod o_som_do_mod_sai_em_bytes {
-    use super::{motivo_de, som_declarado_do_mod, som_servido_dito, TETO_DA_FRASE_NO_REGISTRO};
+    use super::{
+        motivo_de, som_declarado_do_mod, som_servido_dito, BaldesDoRegistro,
+        TETO_DA_FRASE_NO_REGISTRO,
+    };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO, WAV};
     use crate::rastro_de_teste::capturar;
+    use crate::relogio_de_teste::origem;
 
     /// **O nome do som servido não escreve uma segunda linha no registro.**
     ///
@@ -12459,8 +13129,16 @@ mod o_som_do_mod_sai_em_bytes {
     /// Windows.
     #[test]
     fn um_caminho_com_quebra_de_linha_nao_forja_linha_no_som_servido() {
-        let ((), rastro) =
-            capturar(|| som_servido_dito(ID, 7, "som/a\nWARN seele_app: forjada.wav", 16));
+        let ((), rastro) = capturar(|| {
+            som_servido_dito(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                7,
+                "som/a\nWARN seele_app: forjada.wav",
+                16,
+            )
+        });
         assert_eq!(
             rastro.lines().count(),
             1,
@@ -12482,7 +13160,14 @@ mod o_som_do_mod_sai_em_bytes {
     #[test]
     fn um_caminho_enorme_sai_cortado_no_teto_de_frase_no_som_servido() {
         let ((), rastro) = capturar(|| {
-            som_servido_dito(ID, 7, &"s".repeat(TETO_DA_FRASE_NO_REGISTRO * 4), 16);
+            som_servido_dito(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                7,
+                &"s".repeat(TETO_DA_FRASE_NO_REGISTRO * 4),
+                16,
+            );
         });
         assert!(
             rastro.contains(&format!(
@@ -12532,8 +13217,15 @@ mod o_som_do_mod_sai_em_bytes {
     #[test]
     fn um_som_declarado_sai_com_os_bytes_exatos() {
         let (raiz, hash) = publicar(&[("som/toque.wav", WAV)]);
-        let bytes = som_declarado_do_mod(&pasta(&raiz), ID, &hash, "som/toque.wav")
-            .expect("um som declarado foi recusado");
+        let bytes = som_declarado_do_mod(
+            &BaldesDoRegistro::default(),
+            origem(),
+            &pasta(&raiz),
+            ID,
+            &hash,
+            "som/toque.wav",
+        )
+        .expect("um som declarado foi recusado");
         assert_eq!(
             bytes, WAV,
             "os bytes do som mudaram no caminho, e a casca decodificaria outra coisa"
@@ -12543,8 +13235,16 @@ mod o_som_do_mod_sai_em_bytes {
     #[test]
     fn uma_imagem_pedida_como_som_e_recusada_pelo_nome_e_dita() {
         let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
-        let (resultado, rastro) =
-            capturar(|| som_declarado_do_mod(&pasta(&raiz), ID, &hash, "img/rosto.png"));
+        let (resultado, rastro) = capturar(|| {
+            som_declarado_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                "img/rosto.png",
+            )
+        });
         let falha = resultado.expect_err("uma imagem saiu pelo caminho do som");
         assert_eq!(
             motivo_de(&falha),
@@ -12564,8 +13264,16 @@ mod o_som_do_mod_sai_em_bytes {
     #[test]
     fn um_som_que_o_manifesto_nao_declara_nao_sai() {
         let (raiz, hash) = publicar(&[("som/toque.wav", WAV)]);
-        let (resultado, rastro) =
-            capturar(|| som_declarado_do_mod(&pasta(&raiz), ID, &hash, "som/escondido.wav"));
+        let (resultado, rastro) = capturar(|| {
+            som_declarado_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                "som/escondido.wav",
+            )
+        });
         let falha = resultado.expect_err("um som que o manifesto não declara saiu");
         assert_eq!(
             motivo_de(&falha),
@@ -12587,8 +13295,16 @@ mod o_som_do_mod_sai_em_bytes {
     #[test]
     fn um_texto_pedido_como_som_e_recusado_como_formato_desconhecido_e_dito() {
         let (raiz, hash) = publicar(&[("som/x.wav", TEXTO)]);
-        let (resultado, rastro) =
-            capturar(|| som_declarado_do_mod(&pasta(&raiz), ID, &hash, "som/x.wav"));
+        let (resultado, rastro) = capturar(|| {
+            som_declarado_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                "som/x.wav",
+            )
+        });
         let falha = resultado.expect_err("texto saiu pelo caminho do som");
         assert_eq!(
             motivo_de(&falha),
