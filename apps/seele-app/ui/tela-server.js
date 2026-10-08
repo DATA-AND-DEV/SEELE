@@ -847,8 +847,13 @@ function desenharContextoDaSessao() {
   // ainda dizia «microfone aberto» com o modo em TECLA, porque esta linha só
   // olhava `muted`. São três coisas — o aparelho, como ele abre, e se está
   // indo ao ar —, e «aberto» sem ressalva só é verdade no terceiro modo.
+  //
+  // **E a tecla pelo nome.** «abre na tecla» dizia que há uma e não qual, e a
+  // tecla de falar se troca logo ao lado, em ATALHOS. `teclaDeFalar` é a que o
+  // `keydown` compara (`tela-sessao.js`), então a frase e o ouvinte não têm
+  // como discordar.
   const comoAbre = {
-    PushToTalk: "microfone abre na tecla",
+    PushToTalk: `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}`,
     VoiceActivated: "microfone abre por voz",
     Open: "microfone aberto",
   }[retrato.voice_mode] ?? "microfone aberto";
@@ -1542,39 +1547,11 @@ setInterval(() => {
   if (!$("tela-server").hidden) atualizarServer();
 }, 500);
 
-/**
- * O nome que uma pessoa lê para o código que o navegador dá.
+/* `nomeDaTecla` desceu para `base.js`.
  *
- * **Este é o único lugar do produto que nomeia teclas**, e é de propósito: o
- * `preferences.rs` diz, por escrito, que o valor atravessa opaco por lá porque
- * «quem lê teclado é a casca, e é o único lugar que pode nomeá-las».
- *
- * O que não estiver na tabela sai como o próprio código. Um nome feio é melhor
- * que um nome errado, e melhor ainda que uma tecla que a lista não sabe
- * mostrar.
- */
-function nomeDaTecla(codigo) {
-  const nomes = {
-    Space: "ESPAÇO",
-    Enter: "ENTER",
-    Tab: "TAB",
-    Backquote: "`",
-    ShiftLeft: "SHIFT ESQ",
-    ShiftRight: "SHIFT DIR",
-    ControlLeft: "CTRL ESQ",
-    ControlRight: "CTRL DIR",
-    AltLeft: "ALT ESQ",
-    AltRight: "ALT DIR",
-    CapsLock: "CAPS",
-  };
-  if (nomes[codigo]) return nomes[codigo];
-  // `KeyF` vira `F`, `Digit4` vira `4`, `F9` fica `F9`.
-  const letra = /^Key([A-Z])$/.exec(codigo);
-  if (letra) return letra[1];
-  const numero = /^Digit([0-9])$/.exec(codigo);
-  if (numero) return numero[1];
-  return codigo;
-}
+ * Esta lista era a única a nomear teclas, e deixou de ser: a linha de estado do
+ * operador e a ajuda dizem a tecla de falar pelo nome. `base.js` carrega antes
+ * das duas telas, e esta carrega depois de `tela-sessao.js`. */
 
 /** Se o botão está esperando a próxima tecla. */
 let ouvindoTecla = false;

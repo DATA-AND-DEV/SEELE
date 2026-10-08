@@ -3954,12 +3954,17 @@
         Só as teclas que existem de verdade. Uma ajuda que lista um atalho que
         o programa não tem é pior que ajuda nenhuma: ela ensina errado e não
         falha em lugar nenhum.
+
+        A de falar se troca em CONFIGURAÇÕES · ATALHOS, e `abrirAjuda` escreve
+        no `#ajuda-tecla-falar` a que está gravada. ESPAÇO fica escrito aqui
+        porque é o padrão, e é o que se lê se o script não chegar a escrever.
+        O `id` antes da classe: o guarda das teclas lê a partir da classe.
       -->
       <section>
         <h3 class="ajuda-secao-nome">AS TECLAS</h3>
         <dl class="ajuda-lista">
-          <dt class="ajuda-termo"><span class="ajuda-tecla">ESPAÇO</span></dt>
-          <dd class="ajuda-diz">Segure para falar, no modo tecla.</dd>
+          <dt class="ajuda-termo"><span id="ajuda-tecla-falar" class="ajuda-tecla">ESPAÇO</span></dt>
+          <dd class="ajuda-diz">Segure para falar, no modo tecla. Vale com a janela do SEELE na frente e fora da caixa de mensagem.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">/</span></dt>
           <dd class="ajuda-diz">Procurar no que já foi dito neste canal.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">ENTER</span></dt>

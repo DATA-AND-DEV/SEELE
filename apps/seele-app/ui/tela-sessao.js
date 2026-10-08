@@ -891,8 +891,12 @@ function desenharOperador(snapshot) {
   // inteiro, não. E o `aria-label` diz a mesma coisa em palavra, para quem não
   // vê nenhum dos dois.
   const mudo = $("botao-mudo");
+  // **No modo tecla, a tecla pelo nome.** «abre na tecla» dizia que há uma e não
+  // qual — e ela se troca em CONFIGURAÇÕES · ATALHOS e fica gravada. A mesma
+  // `teclaDeFalar` que o `keydown` do fim deste arquivo compara, então a frase
+  // não diz uma tecla enquanto o ouvinte escuta outra.
   const comoAbre = {
-    PushToTalk: "microfone abre na tecla",
+    PushToTalk: `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}`,
     VoiceActivated: "microfone abre por voz",
     Open: "microfone aberto",
   }[snapshot.voice_mode] ?? "microfone disponível";

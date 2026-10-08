@@ -9655,6 +9655,102 @@ fn a_ajuda_nao_rouba_a_interrogacao_de_quem_esta_escrevendo() {
     );
 }
 
+#[test]
+fn a_linha_de_estado_nomeia_a_tecla_de_falar() {
+    // «microfone abre na tecla» dizia que há uma tecla e não dizia qual. A
+    // tecla de falar é escolhida em CONFIGURAÇÕES · ATALHOS e fica gravada, então
+    // quem a trocou lia a mesma frase de quem nunca mexeu — e nenhum dos dois
+    // tinha, pela tela, como saber o que segurar.
+    //
+    // São duas linhas que dizem como o microfone abre: a do operador, na
+    // sessão, e a faixa de contexto da configuração. As duas nomeiam a tecla
+    // pelo mesmo `nomeDaTecla`, com a mesma `teclaDeFalar` que o `keydown`
+    // compara — a frase não pode dizer uma tecla e o ouvinte escutar outra.
+    for (arquivo, funcao, onde) in [
+        (
+            "ui/tela-sessao.js",
+            "function desenharOperador(",
+            "a linha do operador",
+        ),
+        (
+            "ui/tela-server.js",
+            "function desenharContextoDaSessao(",
+            "a faixa de contexto da configuração",
+        ),
+    ] {
+        let corpo = js_function(&read(arquivo), funcao);
+        let Some(tecla) = corpo.lines().find(|linha| linha.contains("PushToTalk:")) else {
+            panic!("{onde} não diz mais nada sobre o modo tecla:\n{corpo}");
+        };
+        assert!(
+            tecla.contains("nomeDaTecla(teclaDeFalar)"),
+            "{onde} diz que o microfone abre numa tecla sem dizer qual: quem \
+             trocou a tecla em ATALHOS segura a errada, e quem nunca trocou não \
+             sabe que é o ESPAÇO:\n{tecla}"
+        );
+        assert!(
+            !corpo.contains("abre na tecla"),
+            "{onde} voltou a dizer «abre na tecla» sem o nome dela:\n{corpo}"
+        );
+    }
+
+    // **Em `base.js`, porque as duas telas a usam.** Ela morava em
+    // `tela-server.js`, que carrega depois de `tela-sessao.js`: chamada de lá,
+    // a linha do operador só funcionaria porque o primeiro quadro chega depois
+    // de tudo carregar. `base.js` carrega antes das telas, e a ordem passa a ser
+    // a garantia em vez da sorte.
+    let base = without_comments(&read("ui/base.js"));
+    assert!(
+        base.contains("function nomeDaTecla("),
+        "`nomeDaTecla` saiu de `base.js`. As duas telas que dizem como o \
+         microfone abre a chamam, e só `base.js` carrega antes das duas"
+    );
+}
+
+#[test]
+fn a_ajuda_escreve_a_tecla_de_falar_que_esta_gravada() {
+    // A ajuda prometia ESPAÇO escrito à mão, e a tecla de falar se troca e fica
+    // gravada. Para quem a trocou, a ajuda ensinava a tecla de antes — o defeito
+    // que `a_ajuda_so_promete_teclas_que_a_janela_atende` existe para impedir,
+    // por um caminho que ele não via: a tecla existe, e não é a que vale.
+    //
+    // O HTML continua dizendo ESPAÇO, que é o padrão e é o que aquele guarda
+    // lê; quem abre a ajuda escreve por cima a tecla gravada.
+    let pagina = without_comments(&read("ui/index.html"));
+    assert!(
+        pagina.contains("<span id=\"ajuda-tecla-falar\" class=\"ajuda-tecla\">ESPAÇO</span>"),
+        "a tecla de falar da ajuda perdeu o `id` por onde a tecla gravada é \
+         escrita, ou deixou de partir do padrão ESPAÇO — sem um, a ajuda ensina \
+         a tecla errada a quem trocou; sem o outro, ela abre vazia"
+    );
+
+    let abrir = js_function(&read("ui/camada-ajuda.js"), "function abrirAjuda(");
+    assert!(
+        abrir.contains("$(\"ajuda-tecla-falar\").textContent = nomeDaTecla(teclaDeFalar)"),
+        "a ajuda abre sem escrever a tecla de falar que está gravada, e ensina \
+         ESPAÇO a quem falar noutra:\n{abrir}"
+    );
+
+    // E onde ela vale. Segurar a tecla com a janela atrás de outra, ou com o
+    // cursor na caixa de mensagem, não abre nada — e a pessoa conclui que o
+    // microfone quebrou.
+    let Some(diz) = pagina
+        .split("id=\"ajuda-tecla-falar\"")
+        .nth(1)
+        .and_then(|resto| resto.split("<dd class=\"ajuda-diz\">").nth(1))
+        .and_then(|resto| resto.split("</dd>").next())
+    else {
+        panic!("a tecla de falar da ajuda não tem mais a frase que a explica");
+    };
+    assert_eq!(
+        diz.split_whitespace().collect::<Vec<_>>().join(" "),
+        "Segure para falar, no modo tecla. Vale com a janela do SEELE na frente \
+         e fora da caixa de mensagem.",
+        "a ajuda não diz mais onde a tecla de falar vale; quem a segura na caixa \
+         de mensagem ou com outra janela na frente acha que o microfone quebrou"
+    );
+}
+
 /// A `<section id="tela-boot">` inteira, sem comentário.
 ///
 /// O corte é na tela seguinte e não no primeiro `</section>`, e a diferença não
