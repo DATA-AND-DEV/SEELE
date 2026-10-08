@@ -625,9 +625,10 @@ class RegiaoDeMod {
     this.tomouOsSons = false;
     /**
      * O que este destino herdou do destino que devolveu a marca, até cada som
-     * chegar aqui: `{ tocavam }`, os lugares dos sons que tocavam quando o
-     * lugar deles saiu da tela (ver `devolverOsSons` e `herdarOSom`); `null`
-     * quando a marca não veio de uma devolução.
+     * chegar aqui: `{ lugares, tocavam }`, os lugares dos sons que aquele
+     * destino segurava e, deles, os que tocavam quando o lugar saiu da tela
+     * (ver `devolverOsSons` e `herdarOSom`); `null` quando a marca não veio de
+     * uma devolução, ou quando todos os sons dela já chegaram.
      */
     this.herdados = null;
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
@@ -2611,13 +2612,12 @@ class RegiaoDeMod {
         this.esquecerMidia(elem);
         return;
       }
-      if (!this.tomouOsSons) {
-        this.sonsDaContribuicao.tomados = true;
-        this.tomouOsSons = true;
-      }
+      if (!this.tomouOsSons) this.tomarAMarca();
       entrada.montagem = montagem;
       entrada.adiado = montagem;
-      this.esperarOPedidoDeTocar(elem);
+      // Um som que chega depois de este destino tomar uma marca devolvida
+      // segue a mesma regra dos que já estavam aqui (`herdarOSom`).
+      this.herdarOSom(elem, entrada, this.herdados ? this.lugaresDasMidias() : new Map());
       return;
     }
     await this.carregarSom(elem, montagem);
@@ -3031,11 +3031,15 @@ class RegiaoDeMod {
     if (!this.sonsDaContribuicao || !this.tomouOsSons) return;
     const lugares = this.lugaresDasMidias();
     // O que este destino herdou e ainda não chegou a ele passa adiante.
-    const herdados = { tocavam: new Set(this.herdados?.tocavam ?? []) };
+    const herdados = {
+      lugares: new Set(this.herdados?.lugares ?? []),
+      tocavam: new Set(this.herdados?.tocavam ?? []),
+    };
     for (const [elem, som] of this.somDaMidia) {
       const montagem = som.montagem;
       if (!montagem) continue;
       const { estado } = montagem;
+      herdados.lugares.add(lugares.get(elem));
       if (tocavam.has(elem)) herdados.tocavam.add(lugares.get(elem));
       if (som.carregando && som.quer) som.recusar(SOM_FORA_DA_TELA);
       estado.carga += 1;
@@ -3116,10 +3120,20 @@ class RegiaoDeMod {
    * Qual som é qual nos dois destinos é o lugar dele na declaração
    * (`lugaresDasMidias`): a chave do plano não diz, e os destinos desenham a
    * mesma declaração.
+   *
+   * **Vale também para o som que chega depois** de este destino tomar a marca
+   * — a mídia dele ainda vinha quando a marca mudou (`montarSom`): a herança
+   * fica com o destino até o último som dela chegar. Um som num lugar que o
+   * destino que saiu não segurava é montado como qualquer outro.
    */
   herdarOSom(elem, som, lugares) {
-    if (this.herdados) {
-      som.declarado = this.herdados.tocavam.delete(lugares.get(elem)) ? undefined : som.quer;
+    const herdados = this.herdados;
+    const lugar = lugares.get(elem);
+    if (herdados?.lugares.delete(lugar)) {
+      som.declarado = herdados.tocavam.delete(lugar) ? undefined : som.quer;
+      // A herança acaba quando o último som dela chega: um som num lugar que o
+      // destino que saiu não segurava é montado como qualquer outro.
+      if (herdados.lugares.size === 0) this.herdados = null;
     }
     this.esperarOPedidoDeTocar(elem);
   }

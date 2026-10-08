@@ -4483,6 +4483,66 @@ async function oSomDaContribuicaoMudaDeDestino() {
     for (const r of destinos) r.soltar();
   }
 
+  // **O som que chega ao destino novo depois de ele tomar a marca** segue a
+  // mesma regra (rodada 1, menor 6): no destino que saiu, a vinheta tocava e
+  // o sino já tinha terminado; no outro, o sino ainda vinha quando a marca
+  // mudou. A vinheta recomeça; o sino, quando chega, não volta.
+  {
+    const tarde = `${caso} · o som que chega depois da troca`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let chamadas = 0;
+    let soltarOSino = null;
+    const d = dono(b, () => {
+      chamadas += 1;
+      const midia = { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 };
+      // A quarta é o sino do segundo destino: a mídia dele fica a caminho.
+      if (chamadas === 4) return new Promise((pronto) => { soltarOSino = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const dois = [
+      { forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando: true },
+      { forma: "midia", chave: "sino", fonte: "som/s.wav", tocando: true },
+    ];
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(dois);
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const [primeiro, segundo] = destinos;
+    const daChave = (chave, estado) => d.ditos.filter((e) => e.nome === "midia" && e.chave === chave && e.estado === estado);
+    // O sino é a segunda fonte do primeiro destino, e termina.
+    Audio.ultimo?.fontes[1]?.onended?.();
+    confere(
+      tarde,
+      primeiro.tomouOsSons === true && daChave("sino", "terminou").length === 1 && typeof soltarOSino === "function",
+      "o primeiro destino não tomou os dois sons, o sino não terminou, ou a mídia do sino do segundo não ficou a "
+        + `caminho: ${JSON.stringify({ tomou: primeiro.tomouOsSons, terminou: daChave("sino", "terminou").length })}`,
+    );
+    primeiro.raiz.remove();
+    varrer();
+    await assentar();
+    soltarOSino?.();
+    await assentar();
+    confere(
+      tarde,
+      segundo.tomouOsSons === true && daChave("vinheta", "tocando").length === 2 && daChave("sino", "tocando").length === 1,
+      "o som que chegou ao destino novo depois da troca não seguiu a regra dos outros — o sino, que tinha "
+        + "terminado, voltou a tocar, ou a vinheta, que tocava, não recomeçou: «tocando» da vinheta "
+        + `${daChave("vinheta", "tocando").length} vez(es), do sino ${daChave("sino", "tocando").length}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
   // O pedido de tocar que ainda decodificava quando o lugar saiu da tela.
   {
     const noMeio = `${caso} · no meio da decodificação`;
