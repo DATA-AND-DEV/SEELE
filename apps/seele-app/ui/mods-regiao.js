@@ -442,6 +442,27 @@ function motivoDaFalha(falha) {
 }
 
 /**
+ * Os argumentos de `dono.carregarMidiaDoServidor` para uma mídia declarada com
+ * `doServidor`: o canal, o pedido, e o campo da resposta que traz o base64.
+ *
+ * Um lugar só, porque são dois que pedem: a montagem de toda mídia
+ * (`montarMidia`), e o pedido de tocar do som de uma contribuição que um
+ * destino tomou sem ter guardado o `data:` (`RegiaoDeMod#carregarSom`).
+ *
+ * @param {{ canal?: *, pedido?: object, campo?: string }} doServidor
+ * @returns {[number, object, string]}
+ */
+function pedidoAoServidor(doServidor) {
+  return [
+    Number(doServidor.canal) || 0,
+    doServidor.pedido ?? {},
+    // Qual campo da resposta traz o base64. O nome é do MOD, não do
+    // produto: ditar um faria todo servidor existente renomear o dele.
+    typeof doServidor.campo === "string" && doServidor.campo ? doServidor.campo : "bytes",
+  ];
+}
+
+/**
  * Prova que uma imagem abre, antes de alguém a dar por pronta.
  *
  * **O sniff do Rust só lê o cabeçalho** (pendência 51, item 7). Bytes com o
@@ -582,10 +603,11 @@ class RegiaoDeMod {
      * natural do som; `cartao`, se ele mora num cartão ou num destino de
      * contribuição. Ver `aplicarTocando` e `calarSonsForaDaTela`.
      *
-     * Os três do fim são do som que espera para carregar: `montagem` é o que
-     * `montarSom` recebeu (`{ plano, estado, origem }`, e a recusa amarrada,
-     * `recusou`), guardado para o som ser carregado depois, ou de novo;
-     * `adiado` é essa mesma montagem
+     * Os três do fim são do som de uma contribuição, que espera para carregar:
+     * `montagem` é o que `montarSom` recebeu (`{ plano, estado, origem }`, e a
+     * recusa amarrada, `recusou`), guardado para o som ser carregado depois, ou
+     * de novo — sem o `data:` do servidor, salvo no destino que tomou o som e
+     * até a carga ter os bytes (ver `montarSom`); `adiado` é essa mesma montagem
      * enquanto o som de uma contribuição assentou sem tocador e espera o
      * pedido de tocar, ou a marca dos sons (ver `pedirParaTocar` e
      * `tomarOsSonsDevolvidos`); `carregando` diz que os bytes ou a
@@ -2386,15 +2408,7 @@ class RegiaoDeMod {
     const doServidor = plano.no.doServidor;
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
     const vindo = doServidor
-      ? this.dono.carregarMidiaDoServidor(
-          Number(doServidor.canal) || 0,
-          doServidor.pedido ?? {},
-          // Qual campo da resposta traz o base64. O nome é do MOD, não do
-          // produto: ditar um faria todo servidor existente renomear o dele.
-          typeof doServidor.campo === "string" && doServidor.campo
-            ? doServidor.campo
-            : "bytes",
-        )
+      ? this.dono.carregarMidiaDoServidor(...pedidoAoServidor(doServidor))
       : caminho
         ? this.dono.carregarMidia(caminho)
         : null;
@@ -2563,30 +2577,37 @@ class RegiaoDeMod {
       this.dizerRecusaDeMidia(chave, `não tocou: ${motivo}`);
     };
     const montagem = { plano, estado, origem, recusou };
-    entrada.montagem = montagem;
     entrada.recusar = recusou;
     // Numa contribuição, só o destino que tomou os sons dela segue daqui.
     // Antes de qualquer `await`: dois destinos que chegam juntos não podem os
     // dois achar a marca vaga. Os outros guardam o adiamento: a marca pode
     // voltar, e um deles tomá-la (`tomarOsSonsDevolvidos`).
     //
-    // **O que o adiamento segura.** Do pacote, só o caminho: os bytes vêm de
+    // **O que a montagem guardada segura** — e só numa contribuição, onde
+    // alguém a lê de novo (o pedido de tocar, e `devolverOsSons`); fora de
+    // uma, ela morre com a carga. Do pacote, o caminho: os bytes vêm de
     // `som_do_mod` no pedido de tocar. Do servidor do MOD, o `data:` que
-    // `midia_em_bytes` devolveu (`origem.uri`), em cada destino até ele sair:
-    // é o que um destino que tome a marca decodifica, sem pedir de novo ao
-    // servidor. É o mesmo que a imagem do servidor segura no `src` de cada
-    // destino, e o teto de bytes de cada um já o conta (`montarMidia`).
+    // `midia_em_bytes` devolveu (`origem.uri`) fica **só no destino que tomou
+    // o som, e só até a carga ter os bytes** (`carregarSom`): em cada destino,
+    // e pela vida do nó, ele era 1,33 vez o arquivo vezes os destinos — um som
+    // de 10 MiB num `pessoa.cartao` de 64 pessoas segurava uns 850 MB de texto.
+    // Os outros destinos guardam o plano, que traz o `doServidor`, e o que
+    // tomar a marca pede o som de novo ao servidor no pedido de tocar.
     if (this.sonsDaContribuicao) {
-      entrada.adiado = montagem;
+      if (!this.tomouOsSons && this.sonsDaContribuicao.tomados) {
+        const semOData = { ...montagem, origem: origem.caminho === undefined ? {} : origem };
+        entrada.montagem = semOData;
+        entrada.adiado = semOData;
+        elem.dataset.estado = "pronta";
+        this.esquecerMidia(elem);
+        return;
+      }
       if (!this.tomouOsSons) {
-        if (this.sonsDaContribuicao.tomados) {
-          elem.dataset.estado = "pronta";
-          this.esquecerMidia(elem);
-          return;
-        }
         this.sonsDaContribuicao.tomados = true;
         this.tomouOsSons = true;
       }
+      entrada.montagem = montagem;
+      entrada.adiado = montagem;
       this.esperarOPedidoDeTocar(elem);
       return;
     }
@@ -2661,19 +2682,34 @@ class RegiaoDeMod {
     // som de um laboratório com um dono escrito antes do som chegava ao MOD
     // com o `TypeError` do motor, que diz onde a janela tropeçou, e não o
     // que falta no dono.
-    if (!origem.uri && typeof this.dono.bytesDoSom !== "function") {
+    if (origem.caminho !== undefined && typeof this.dono.bytesDoSom !== "function") {
       falhou("o dono desta região não oferece bytesDoSom");
       return;
     }
+    // **Três origens dos bytes.** Do pacote, por `som_do_mod`; do servidor, o
+    // `data:` que a montagem trouxe; ou, num destino de contribuição que tomou
+    // o som sem ter guardado o `data:` (ver `montarSom`), o servidor de novo,
+    // pelo mesmo pedido da montagem.
     let bytes;
     try {
-      bytes = origem.uri
-        ? bufferDaUri(origem.uri)
-        : bufferDoSom(await this.dono.bytesDoSom(origem.caminho));
+      if (origem.caminho !== undefined) {
+        bytes = bufferDoSom(await this.dono.bytesDoSom(origem.caminho));
+      } else if (origem.uri !== undefined) {
+        bytes = bufferDaUri(origem.uri);
+      } else {
+        const midia = await this.dono.carregarMidiaDoServidor(...pedidoAoServidor(plano.no.doServidor ?? {}));
+        if (midia?.papel !== "som") throw new Error("o servidor do MOD não devolveu um som no pedido de tocar");
+        bytes = bufferDaUri(midia.uri);
+      }
     } catch (falha) {
       falhou(motivoDaFalha(falha));
       return;
     }
+    // **O `data:` não fica.** Os bytes já estão aqui, e o texto é 1,33 vez o
+    // arquivo: guardado na montagem, ele ficava de pé pela vida do nó. Uma
+    // carga seguinte do mesmo som — num destino que devolveu a marca e a toma
+    // de novo — o pede de novo ao servidor.
+    delete origem.uri;
     if (!deAlguem() || !this.dono.podeFalar()) return;
     let som;
     try {
