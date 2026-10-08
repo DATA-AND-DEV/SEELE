@@ -2036,10 +2036,10 @@ pub enum ConnectionError {
     /// acusaria o culpado errado. A continuidade do servidor não está em
     /// questão: o que não confere é a promessa, do link ou da lista, com quem
     /// atendeu. Ou a promessa está errada, ou ela está certa e quem atendeu é
-    /// outro servidor. Num alvo de LAN, a promessa pode estar certa e quem
-    /// atendeu ser outro servidor no mesmo endereço: o endereço da rede de casa
-    /// se repete de uma casa para outra. A casca diz de quem era a promessa: o
-    /// `connect` do app sabe se a impressão veio do link ou da lista.
+    /// outro servidor: num alvo de LAN, outro servidor no mesmo endereço,
+    /// porque o endereço da rede de casa se repete de uma casa para outra. A
+    /// casca diz de quem era a promessa: o `connect` do app sabe se a impressão
+    /// veio do link ou da lista.
     ///
     /// **Recusada dentro do TLS, antes do `Hello`**: o convite, a senha e o
     /// apelido (e, com eles, a chave e a assinatura da identidade) não chegaram

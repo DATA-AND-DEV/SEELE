@@ -853,7 +853,8 @@ async fn perguntar_a(
 ///   pela ida e volta do `ONDE`;
 /// - na hora da volta seguinte, com o ponto no ar e o teto ainda por vencer
 ///   (o `ONDE` se perdeu, ou a ida e volta é longa);
-/// - na hora, quando nenhuma pergunta da volta saiu ou a leitura falhou;
+/// - na hora, quando nenhuma pergunta da primeira volta saiu ou a leitura
+///   falhou;
 /// - no prazo, quando nada respondeu.
 ///
 /// Separado de [`perguntar_a`] só para o teste poder dar o socket. É assim que
