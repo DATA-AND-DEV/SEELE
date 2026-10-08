@@ -4648,6 +4648,69 @@ async function oSomDaContribuicaoMudaDeDestino() {
     for (const r of destinos) r.soltar();
   }
 
+  // **A segunda volta da varredura só abre com a marca devolvida** (rodada 1,
+  // menor 1). Ela roda no fim de todo desenho que pode tirar um nó de MOD da
+  // tela, para cada contribuição e cada destino: perguntar a cada destino se
+  // quer a marca quando ninguém a devolveu é trabalho à toa — numa
+  // contribuição sem som, a marca nunca é tomada, e a pergunta se repetia em
+  // todo desenho.
+  {
+    const segunda = `${caso} · a segunda volta`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    let perguntas = 0;
+    const contar = (r) => {
+      const tomar = r.tomarOsSonsDevolvidos.bind(r);
+      r.tomarOsSonsDevolvidos = () => {
+        perguntas += 1;
+        return tomar();
+      };
+      return r;
+    };
+    const montarContribuicao = (conteudo) => {
+      const sons = { tomados: false };
+      const destinos = ["1", "2"].map(() => {
+        const r = contar(new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao));
+        r.sonsDaContribuicao = sons;
+        r.aplicar(conteudo);
+        return r;
+      });
+      return {
+        destinos,
+        contribuicao: {
+          modo: "adicionar",
+          ponto: "canal.item",
+          sons,
+          montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+        },
+      };
+    };
+    const semSom = montarContribuicao([{ forma: "texto", chave: "t", dentro: "oi" }]);
+    const comSom = montarContribuicao(vinheta(true));
+    const varrer = varreduraDeBase(b, [semSom.contribuicao, comSom.contribuicao]);
+    await assentar();
+    varrer();
+    confere(
+      segunda,
+      perguntas === 0,
+      `a varredura perguntou ${perguntas} vez(es) a um destino se ele queria a marca, sem marca devolvida nenhuma`,
+    );
+    const tomou = comSom.destinos.find((r) => r.tomouOsSons);
+    tomou?.raiz.remove();
+    varrer();
+    const naDevolucao = perguntas;
+    varrer();
+    confere(
+      segunda,
+      naDevolucao >= 1 && perguntas === naDevolucao && comSom.contribuicao.sons.tomados === true,
+      "a segunda volta não abriu quando a marca foi devolvida, ou seguiu abrindo depois de alguém a tomar: "
+        + `${naDevolucao} pergunta(s) na devolução, ${perguntas - naDevolucao} na varredura seguinte`,
+    );
+    await assentar();
+    for (const r of [...semSom.destinos, ...comSom.destinos]) r.soltar();
+  }
+
   // O pedido de tocar que ainda decodificava quando o lugar saiu da tela.
   {
     const noMeio = `${caso} · no meio da decodificação`;

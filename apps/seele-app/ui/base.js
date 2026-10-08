@@ -1341,7 +1341,7 @@ function montarContribuicao(contribuicao, destino = "") {
   // os segura — ver `montarSom`, em `mods-regiao.js` — até sair da tela: aí
   // ele a devolve, e um destino que desenha a toma na varredura
   // (`calarOsSonsQueSairamDaTela`).
-  const sons = contribuicao.sons ?? { tomados: false };
+  const sons = contribuicao.sons ?? { tomados: false, devolvidos: false };
   contribuicao.sons = sons;
   renderer.sonsDaContribuicao = sons;
   // **Registrada como recurso, e esquecida ao revogar.** O descartador volta
@@ -1592,9 +1592,10 @@ function midiasDaRegiaoEDasPaginas(regioes, superficies) {
  * **E o som de uma contribuição muda de destino, na mesma varredura** (P49-8).
  * O destino que segurava os sons dela e saiu do documento os devolve, na
  * primeira volta (`RegiaoDeMod#devolverOsSons`, pelo `calarSonsForaDaTela`
- * dele). A segunda volta oferece a marca aos destinos em que a contribuição
- * desenha, na ordem de `montadas`, e o primeiro que está no documento com um
- * som esperando a toma (`RegiaoDeMod#tomarOsSonsDevolvidos`). Duas voltas, e
+ * dele). A segunda volta — só quando há marca devolvida (`sons.devolvidos`) —
+ * oferece a marca aos destinos em que a contribuição desenha, na ordem de
+ * `montadas`, e o primeiro que está no documento com um som esperando a toma
+ * (`RegiaoDeMod#tomarOsSonsDevolvidos`); o som que tocava recomeça ali. Duas voltas, e
  * não uma: numa só, um destino visitado antes do que saiu acharia a marca
  * ainda tomada, e o som ficaria sem lugar até o desenho seguinte. Redesenhar
  * não faria isso: a montagem de cada destino é reaproveitada
@@ -1607,18 +1608,17 @@ function calarOsSonsQueSairamDaTela() {
     regiao.calarSonsForaDaTela(valem.has(regiao.id));
   }
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
-    const destinos = Array.from(contribuicao.montadas ?? [], ([destino, montagem]) => ({
-      renderer: montagem.renderer,
-      pinta: aContribuicaoPinta(contribuicao, destino),
-    }));
-    for (const { renderer, pinta } of destinos) renderer.calarSonsForaDaTela(pinta);
-    // `sons` só existe numa contribuição montada (`montarContribuicao`). A
-    // marca vaga é a que um destino devolveu — nesta varredura, ou numa
-    // anterior, sem destino na tela para tomá-la —, ou a de uma contribuição
-    // cujo som ainda não chegou, e aí nenhum destino tem o que tomar.
-    if (!contribuicao.sons || contribuicao.sons.tomados) continue;
-    for (const { renderer, pinta } of destinos) {
-      if (pinta && renderer.tomarOsSonsDevolvidos()) break;
+    for (const [destino, montagem] of contribuicao.montadas ?? []) {
+      montagem.renderer.calarSonsForaDaTela(aContribuicaoPinta(contribuicao, destino));
+    }
+    // **Só a marca devolvida abre a segunda volta** — nesta varredura, ou numa
+    // anterior, sem destino na tela para tomá-la. A marca vaga de uma
+    // contribuição cujo som ainda não chegou, ou que não tem som, não tem quem
+    // a tome aqui, e a pergunta se repetiria a cada desenho, em cada destino.
+    // `sons` só existe numa contribuição montada (`montarContribuicao`).
+    if (!contribuicao.sons?.devolvidos) continue;
+    for (const [destino, montagem] of contribuicao.montadas ?? []) {
+      if (aContribuicaoPinta(contribuicao, destino) && montagem.renderer.tomarOsSonsDevolvidos()) break;
     }
   }
 }

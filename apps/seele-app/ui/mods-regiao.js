@@ -622,8 +622,11 @@ class RegiaoDeMod {
     /**
      * Quando este renderer é **um dos destinos de uma contribuição**: se algum
      * deles segura os sons dela agora — `{ tomados }`, o mesmo objeto para
-     * todos (`montarContribuicao`, em `base.js`); `null` fora de uma. Ver
-     * `montarSom`, `devolverOsSons` e `tomarOsSonsDevolvidos`.
+     * todos (`montarContribuicao`, em `base.js`); `null` fora de uma. Quando
+     * um destino a devolve, o objeto ganha `devolvidos` — a bandeira que abre a
+     * segunda volta da varredura de `base.js` — e `herdados`, o que o destino
+     * que saiu diz dos sons dela. Ver `montarSom`, `devolverOsSons` e
+     * `tomarOsSonsDevolvidos`.
      */
     this.sonsDaContribuicao = null;
     /** Se foi este destino que tomou os sons da contribuição. */
@@ -3085,6 +3088,9 @@ class RegiaoDeMod {
     this.herdados = null;
     this.sonsDaContribuicao.herdados = herdados;
     this.sonsDaContribuicao.tomados = false;
+    // A bandeira que abre a segunda volta da varredura (`base.js`): só uma
+    // marca devolvida tem quem a tome ali.
+    this.sonsDaContribuicao.devolvidos = true;
     this.tomouOsSons = false;
   }
 
@@ -3127,6 +3133,7 @@ class RegiaoDeMod {
   tomarAMarca() {
     const sons = this.sonsDaContribuicao;
     sons.tomados = true;
+    sons.devolvidos = false;
     this.tomouOsSons = true;
     this.herdados = sons.herdados ?? null;
     sons.herdados = null;
