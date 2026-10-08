@@ -2330,6 +2330,22 @@ pub enum ServerMessage {
         /// Por quê, de uma lista fechada.
         reason: MessageRefusal,
     },
+
+    // ---- a sala pessoal, desde o Servidor 1.0 ----
+    //
+    // No fim, como toda variante nova (ADR 0058). O 9 ainda não saiu para
+    // ninguém, então elas entram no mesmo número, sem portão.
+    /// A ligação está tocando do outro lado, e a conexão fica segurada até
+    /// quem recebe decidir ou o prazo vencer.
+    ///
+    /// Spec de 23/09/2026, «O aperto de mão em três fases»: depois do
+    /// `Challenge` e do `Response`, o servidor da sala manda isto e espera a
+    /// decisão da campainha sem segurar a trava do banco. Quem liga espera
+    /// `prazo_s` mais uma folga antes de desistir, e mostra CHAMANDO.
+    Tocando {
+        /// Quantos segundos o toque dura. 45 na 1.0.
+        prazo_s: u16,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2446,7 +2462,7 @@ impl ListaDeCima for ClientMessage {
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 41;
+    const CONHECIDAS: u32 = 42;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3080,6 +3096,9 @@ impl Validate for ServerMessage {
             // cair num `_ =>` é o que faz o compilador cobrar a próxima
             // variante.
             Self::MessageRejected { .. } => Ok(()),
+            // Um `u16` só. Um prazo de zero é um toque que já acabou, e quem
+            // liga desiste na folga; não é byte que derrube nada.
+            Self::Tocando { .. } => Ok(()),
         }
     }
 }
@@ -4748,7 +4767,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            40,
+            41,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4777,6 +4796,12 @@ mod o_vocabulario_e_a_versao {
         // desalinharia o quadro de um par v7 para sempre, e a janela N−1
         // deixaria de ser honesta. A lista do cliente não mudou — a recusa é
         // resposta, e quem responde é o servidor.
+        //
+        // **41 pela `Tocando`**, da sala pessoal, dentro do mesmo 9: o 9 ainda
+        // não saiu para ninguém, e é nele que entra o vocabulário inteiro da
+        // linha 1 (o lote do vocabulário, liberado em 08/10/2026). Daqui em
+        // diante, o fim desta lista também é o que `ListaDeCima::CONHECIDAS`
+        // diz, e `as_conhecidas_sao_as_que_o_serde_conta` prende os dois juntos.
         //
         // **9 em 08/10/2026, o Servidor 1.0, e as listas não mudaram.** A
         // subida é pelo `Hello`, que trocou o número único pela faixa — um
@@ -5063,6 +5088,22 @@ mod o_desafio {
 }
 
 #[cfg(test)]
+mod o_toque {
+    use super::*;
+
+    /// O toque da sala pessoal (spec de 23/09, «O aperto de mão em três
+    /// fases»): o servidor segura a conexão e diz quanto tempo ela fica
+    /// tocando. Nasce no fim da lista do servidor.
+    #[test]
+    fn tocando_vai_e_volta_e_mora_no_fim_da_lista() {
+        let tocando = ServerMessage::Tocando { prazo_s: 45 };
+        let quadro = encode(&tocando).unwrap();
+        assert_eq!(quadro, vec![PROTOCOL_VERSION, 41, 45]);
+        assert_eq!(decode::<ServerMessage>(&quadro).unwrap(), tocando);
+    }
+}
+
+#[cfg(test)]
 mod a_recusa_legivel {
     //! A recusa por versão que toda build lê: `Disconnecting { Incompatible }`,
     //! com os bytes-ouro `[carimbo, 11, 0]`. Adendo de 08/10/2026, §5, e
@@ -5156,10 +5197,16 @@ mod a_mensagem_desconhecida {
 
     #[test]
     fn um_ordinal_alem_da_lista_e_pulado_e_nao_e_malformado() {
-        let quadro = [PROTOCOL_VERSION, 41, 0xAA, 0xBB];
+        // O primeiro ordinal que esta build não conhece, lido da própria
+        // constante: um número escrito aqui viraria conhecido na próxima
+        // variante, e o teste passaria a perguntar outra coisa.
+        let alem = u8::try_from(ServerMessage::CONHECIDAS).unwrap();
+        let quadro = [PROTOCOL_VERSION, alem, 0xAA, 0xBB];
         assert_eq!(
             decode_da_lista::<ServerMessage>(&quadro).unwrap(),
-            Lido::Desconhecida { ordinal: 41 }
+            Lido::Desconhecida {
+                ordinal: ServerMessage::CONHECIDAS
+            }
         );
         // O `decode` de sempre continua chamando isto de malformado: quem
         // pula é só quem pede.

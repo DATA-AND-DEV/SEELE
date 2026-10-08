@@ -600,6 +600,7 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 reason: MessageRefusal::NoSuchChannel,
             },
         ),
+        ("Tocando", ServerMessage::Tocando { prazo_s: 45 }),
     ]
 }
 

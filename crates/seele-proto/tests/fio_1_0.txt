@@ -77,6 +77,7 @@ servidor:ModReply	0925010001027b7d
 servidor:Instancia	0926203031323334353637383961626364656630313233343536373839616263646566
 servidor:VolumeRecusado	092703746f6b00
 servidor:MessageRejected	0928010401
+servidor:Tocando	09292d
 quadro:enquadramento	00000003090b00
 recusa:8	080b00
 recusa:9	090b00

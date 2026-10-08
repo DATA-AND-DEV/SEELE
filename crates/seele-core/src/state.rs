@@ -1618,7 +1618,13 @@ impl Room {
 
             // Consumed by the handshake and by the round-trip measurement, both
             // of which are over before any shell is watching.
-            ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
+            //
+            // O `Tocando` também é do aperto de mão, o da sala pessoal: chega
+            // antes do `Session`, e quem o lê é quem liga, na fase de chamar
+            // (a F7 da 0.16). Uma sessão não tem o que fazer com ele.
+            ServerMessage::Challenge { .. }
+            | ServerMessage::Pong { .. }
+            | ServerMessage::Tocando { .. } => {}
 
             // Decisão da Task 8, e não mais andaime: nada, de propósito.
             //
