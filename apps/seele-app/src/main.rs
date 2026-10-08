@@ -356,9 +356,9 @@ impl Session {
             .baldes_do_registro
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for (chave, balde) in baldes.iter_mut() {
+        for ((classe, chave), balde) in baldes.iter_mut() {
             if let Some(suprimidas) = balde.pendentes() {
-                conta_do_balde_dita(chave, suprimidas);
+                conta_do_balde_dita(*classe, chave, suprimidas);
             }
         }
         baldes.clear();
@@ -2384,17 +2384,48 @@ fn quebra_ou_inverte_a_linha(c: char) -> bool {
         )
 }
 
-/// **Os baldes de vazão do `seele.log`, um por MOD**, pela chave de
-/// [`chave_do_balde`]. Ver [`linha_admitida`].
-type BaldesDoRegistro = Mutex<std::collections::HashMap<String, executor::BaldeDoConsole>>;
+/// **Os baldes de vazão do `seele.log`, um por MOD e por classe de linha**
+/// ([`Classe`]), pela chave de [`chave_do_balde`]. Ver [`linha_admitida`].
+type BaldesDoRegistro =
+    Mutex<std::collections::HashMap<(Classe, String), executor::BaldeDoConsole>>;
 
-/// **Quantos baldes o mapa do registro guarda**, contando o de transbordo.
+/// **A classe de uma linha que o produto escreve em nome de um MOD**, e de
+/// que balde ela gasta.
 ///
-/// Sessenta e quatro: sessenta e três ids com balde próprio — o do catálogo
-/// entre eles — e um dividido ([`BALDE_DE_TRANSBORDO`]) por todo id que chegar
-/// depois. Os ids vêm da janela, e uma janela que mandasse um id novo a cada
-/// linha faria do mapa memória sem teto — e de cada id novo um balde cheio, a
-/// vazão também sem teto.
+/// Um balde só por MOD deixava uma classe calar a outra. Segurada, uma linha
+/// não atrasa: ela some, e só a conta segue, na próxima linha do MOD — que
+/// pode ser de outra classe. Um MOD que monta mais de 32 mídias de uma vez
+/// gastava a rajada em «mídia de MOD servida», e a recusa da mídia seguinte
+/// sumia: o defeito de 23/09, de volta pelo teto. Com um balde por classe, a
+/// INFO e a depuração não gastam a ficha de um aviso, nem inflam a conta dele.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Classe {
+    /// O que deu errado: a janela em aviso e em erro
+    /// ([`registrar_da_janela`]), e a mídia recusada
+    /// ([`recusa_de_midia_dita`]).
+    Aviso,
+    /// O que saiu: a mídia ([`midia_servida_dita`]) e o som
+    /// ([`som_servido_dito`]) servidos.
+    Servida,
+    /// A depuração, que o filtro padrão do `seele.log` não escreve: a janela em
+    /// qualquer outro nível, e a mídia não servida porque a sessão acabou.
+    Depuracao,
+}
+
+impl Classe {
+    /// As três: cada uma tem o seu balde de transbordo.
+    const TODAS: [Self; 3] = [Self::Aviso, Self::Servida, Self::Depuracao];
+}
+
+/// **Quantos baldes o mapa do registro guarda**, contando os de transbordo.
+///
+/// Sessenta e quatro: sessenta e um baldes próprios — um por MOD e por classe,
+/// o do catálogo entre eles — e, para cada uma das três classes, um dividido
+/// ([`BALDE_DE_TRANSBORDO`]) por todo id que chegar depois. Os ids vêm da
+/// janela, e uma janela que mandasse um id novo a cada linha faria do mapa
+/// memória sem teto — e de cada id novo um balde cheio, a vazão também sem
+/// teto. O transbordo é por classe pela razão de [`Classe`]: dividido entre
+/// todas, as linhas servidas de um id gastariam a ficha do aviso de outro.
 const BALDES_NO_REGISTRO: usize = 64;
 
 /// A chave do balde da linha sem id, que é a do catálogo do servidor
@@ -2419,11 +2450,12 @@ fn chave_do_balde(mod_id: &str) -> String {
     }
 }
 
-/// **Uma linha do registro em nome de `mod_id` quer passar.**
+/// **Uma linha do registro em nome de `mod_id`, da `classe` dela, quer
+/// passar.**
 ///
 /// `Some(n)` é «passa», com quantas foram seguradas antes dela — o campo
 /// `suprimidas` da linha, no molde de [`registrar_console_do_mod`]; `None` é
-/// «segurada», e ela entra na conta da próxima.
+/// «segurada»: a linha não é escrita, e entra na conta da próxima.
 ///
 /// # Por que um teto por MOD
 ///
@@ -2435,11 +2467,13 @@ fn chave_do_balde(mod_id: &str) -> String {
 /// balde é o do `console` ([`executor::BaldeDoConsole`]): a mesma rajada, o
 /// mesmo ritmo e a mesma conta.
 ///
-/// **Um balde por MOD, dividido pelas portas**: a janela, a mídia recusada, a
-/// servida ([`midia_servida_dita`]) e o som servido ([`som_servido_dito`]) do
-/// mesmo MOD gastam do mesmo balde, e um MOD não segura as linhas de outro.
-/// Com o mapa cheio ([`BALDES_NO_REGISTRO`]), um id novo gasta do balde de
-/// transbordo — e a conta que uma linha de lá leva pode ser de mais de um id.
+/// **Um balde por MOD e por classe, dividido pelas portas da classe**: a
+/// janela em aviso e a mídia recusada gastam do balde de avisos do MOD; a
+/// mídia e o som servidos ([`midia_servida_dita`], [`som_servido_dito`]), do
+/// de servidas; a depuração, do dela. Um MOD não segura as linhas de outro, e
+/// uma classe não segura as de outra ([`Classe`]). Com o mapa cheio
+/// ([`BALDES_NO_REGISTRO`]), um id novo gasta do balde de transbordo da
+/// classe — e a conta que uma linha de lá leva pode ser de mais de um id.
 ///
 /// O relógio vem de quem chama, como no balde do `console`: é o que deixa o
 /// teste medir o teto sem dormir. Um cadeado envenenado não tira o teto: o
@@ -2447,16 +2481,20 @@ fn chave_do_balde(mod_id: &str) -> String {
 fn linha_admitida(
     baldes: &BaldesDoRegistro,
     agora: std::time::Instant,
+    classe: Classe,
     mod_id: &str,
 ) -> Option<u32> {
     let mut baldes = baldes
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let chave = chave_do_balde(mod_id);
-    let chave = if baldes.contains_key(&chave) || baldes.len() < BALDES_NO_REGISTRO - 1 {
+    let chave = (classe, chave_do_balde(mod_id));
+    // Um lugar fica guardado para o transbordo de cada classe: o mapa nunca
+    // passa de `BALDES_NO_REGISTRO`.
+    let proprios = BALDES_NO_REGISTRO - Classe::TODAS.len();
+    let chave = if baldes.contains_key(&chave) || baldes.len() < proprios {
         chave
     } else {
-        BALDE_DE_TRANSBORDO.to_owned()
+        (classe, BALDE_DE_TRANSBORDO.to_owned())
     };
     baldes
         .entry(chave)
@@ -2464,32 +2502,56 @@ fn linha_admitida(
         .admitir(agora)
 }
 
+/// A frase da linha em que o produto diz a conta de um balde do registro.
+const CONTA_DO_BALDE_DO_REGISTRO: &str =
+    "linhas do registro seguradas pelo teto de vazão, sem outra linha depois que as contasse";
+
 /// **Diz a conta que um balde do registro guardou e nenhuma linha levou**,
 /// quando a sessão fecha ([`Session::revogar`]).
 ///
 /// Com ficha ou sem, como a última linha de uma instância do `console`
 /// ([`executor::BaldeDoConsole::pendentes`]): o balde vai embora com a sessão,
-/// e guardar a conta para uma ficha que não vai chegar era perdê-la. Os campos
-/// seguem os da linha que a conta contaria: `mod_id=`, ou `catalogo=true` para
-/// a linha sem id, ou `transbordo=true` para o balde dividido.
-fn conta_do_balde_dita(chave: &str, suprimidas: u32) {
-    match chave {
-        BALDE_DO_CATALOGO => tracing::warn!(
-            catalogo = true,
-            suprimidas,
-            "linhas do registro seguradas pelo teto de vazão, sem outra linha depois que as contasse"
-        ),
-        BALDE_DE_TRANSBORDO => tracing::warn!(
-            transbordo = true,
-            suprimidas,
-            "linhas do registro seguradas pelo teto de vazão, sem outra linha depois que as contasse"
-        ),
-        // A chave já é `id_no_registro` do id: em `%` ela não quebra a linha.
-        mod_id => tracing::warn!(
-            mod_id = %mod_id,
-            suprimidas,
-            "linhas do registro seguradas pelo teto de vazão, sem outra linha depois que as contasse"
-        ),
+/// e guardar a conta para uma ficha que não vai chegar era perdê-la.
+///
+/// No nível da classe que ela conta — WARN para os avisos, INFO para as
+/// servidas, DEBUG para a depuração —, e com os campos da linha que ela
+/// contaria: `mod_id=`, ou `catalogo=true` para a linha sem id, ou
+/// `transbordo=true` para o balde dividido.
+fn conta_do_balde_dita(classe: Classe, chave: &str, suprimidas: u32) {
+    let catalogo = (chave == BALDE_DO_CATALOGO).then_some(true);
+    let transbordo = (chave == BALDE_DE_TRANSBORDO).then_some(true);
+    // A chave de um MOD já é `id_no_registro` do id: em `%` ela não quebra a
+    // linha.
+    let mod_id =
+        (catalogo.is_none() && transbordo.is_none()).then(|| tracing::field::display(chave));
+    match classe {
+        Classe::Aviso => {
+            tracing::warn!(
+                mod_id,
+                catalogo,
+                transbordo,
+                suprimidas,
+                "{CONTA_DO_BALDE_DO_REGISTRO}"
+            );
+        }
+        Classe::Servida => {
+            tracing::info!(
+                mod_id,
+                catalogo,
+                transbordo,
+                suprimidas,
+                "{CONTA_DO_BALDE_DO_REGISTRO}"
+            );
+        }
+        Classe::Depuracao => {
+            tracing::debug!(
+                mod_id,
+                catalogo,
+                transbordo,
+                suprimidas,
+                "{CONTA_DO_BALDE_DO_REGISTRO}"
+            );
+        }
     }
 }
 
@@ -2551,8 +2613,14 @@ fn registrar_da_janela_em(
 ) {
     // **O balde primeiro**: a linha segurada não custa o corte nem o escape.
     // A chave é o id como a linha o levaria ([`chave_do_balde`]), e a linha sem
-    // id gasta do balde do catálogo.
-    let Some(suprimidas) = linha_admitida(baldes, agora, mod_id.as_deref().unwrap_or_default())
+    // id gasta do balde do catálogo. Aviso e erro gastam do balde de avisos;
+    // o resto sai em DEBUG e gasta do de depuração ([`Classe`]).
+    let classe = match nivel.as_str() {
+        "aviso" | "erro" => Classe::Aviso,
+        _ => Classe::Depuracao,
+    };
+    let Some(suprimidas) =
+        linha_admitida(baldes, agora, classe, mod_id.as_deref().unwrap_or_default())
     else {
         return;
     };
@@ -5608,7 +5676,9 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
 ///
 /// **Com o teto de vazão do MOD** ([`linha_admitida`]): um MOD que pede num
 /// laço a mesma mídia recusada deixava uma linha por pedido. A recusa volta à
-/// janela do mesmo jeito; só a linha é segurada, e contada.
+/// janela do mesmo jeito; só a linha é segurada, e contada. A recusa gasta do
+/// balde de avisos do MOD, e a sessão que acabou, do de depuração
+/// ([`Classe`]): nenhuma mídia servida segura uma recusa.
 fn recusa_de_midia_dita(
     baldes: &BaldesDoRegistro,
     agora: std::time::Instant,
@@ -5616,11 +5686,16 @@ fn recusa_de_midia_dita(
     origem: &str,
     falha: FalhaNoMod,
 ) -> FalhaNoMod {
-    let Some(suprimidas) = linha_admitida(baldes, agora, mod_id) else {
+    let motivo = motivo_de(&falha);
+    let classe = if motivo == "sessao-encerrada" {
+        Classe::Depuracao
+    } else {
+        Classe::Aviso
+    };
+    let Some(suprimidas) = linha_admitida(baldes, agora, classe, mod_id) else {
         return falha;
     };
     let suprimidas = (suprimidas > 0).then_some(suprimidas);
-    let motivo = motivo_de(&falha);
     let mod_id = id_no_registro(mod_id);
     let origem = caminho_no_registro(origem);
     let no_registro = motivo_no_registro(motivo);
@@ -5828,7 +5903,9 @@ fn midia_do_mod(
 /// `mod_id` vai em `%` como está, pela razão dita em [`som_servido_dito`].
 ///
 /// Com o teto de vazão do MOD ([`linha_admitida`]): a janela pede a mesma
-/// mídia a cada vez que a monta de novo.
+/// mídia a cada vez que a monta de novo. No balde das servidas
+/// ([`Classe::Servida`]), e não no dos avisos: um MOD com muitas mídias não
+/// cala a recusa da seguinte.
 fn midia_servida_dita(
     baldes: &BaldesDoRegistro,
     agora: std::time::Instant,
@@ -5838,7 +5915,7 @@ fn midia_servida_dita(
     papel: &str,
     bytes: usize,
 ) {
-    let Some(suprimidas) = linha_admitida(baldes, agora, mod_id) else {
+    let Some(suprimidas) = linha_admitida(baldes, agora, Classe::Servida, mod_id) else {
         return;
     };
     let suprimidas = (suprimidas > 0).then_some(suprimidas);
@@ -5932,7 +6009,8 @@ fn som_do_mod(
 /// manifesto só passa com `autor/nome` em minúsculas, dígitos e hífen.
 ///
 /// Com o teto de vazão do MOD ([`linha_admitida`]): o som que um MOD toca a
-/// cada evento é pedido a cada vez.
+/// cada evento é pedido a cada vez. No balde das servidas
+/// ([`Classe::Servida`]), como a mídia servida.
 fn som_servido_dito(
     baldes: &BaldesDoRegistro,
     agora: std::time::Instant,
@@ -5941,7 +6019,7 @@ fn som_servido_dito(
     caminho: &str,
     bytes: usize,
 ) {
-    let Some(suprimidas) = linha_admitida(baldes, agora, mod_id) else {
+    let Some(suprimidas) = linha_admitida(baldes, agora, Classe::Servida, mod_id) else {
         return;
     };
     let suprimidas = (suprimidas > 0).then_some(suprimidas);
@@ -12352,21 +12430,40 @@ mod o_teto_de_vazao_do_registro {
 
     use super::{
         midia_servida_dita, recusa_de_midia_dita, registrar_da_janela_em, som_servido_dito,
-        BaldesDoRegistro, FalhaNoMod, Session, BALDES_NO_REGISTRO,
+        BaldesDoRegistro, Classe, FalhaNoMod, Session, BALDES_NO_REGISTRO,
     };
     use crate::executor::RAJADA_DO_CONSOLE;
     use crate::rastro_de_teste::capturar;
     use crate::relogio_de_teste::origem;
 
-    /// Uma linha da janela em nome de `id`, no instante `agora`.
+    /// Um aviso da janela em nome de `id`, no instante `agora`.
     fn da_janela(baldes: &BaldesDoRegistro, agora: Instant, id: &str) {
+        da_janela_no(baldes, agora, "aviso", id);
+    }
+
+    /// Uma linha da janela no `nivel` que a janela manda.
+    fn da_janela_no(baldes: &BaldesDoRegistro, agora: Instant, nivel: &str, id: &str) {
         registrar_da_janela_em(
             baldes,
             agora,
-            "aviso".to_owned(),
+            nivel.to_owned(),
             "atender-mod".to_owned(),
             "uma frase".to_owned(),
             Some(id.to_owned()),
+        );
+    }
+
+    /// Uma mídia de `id` não servida porque a sessão acabou: a linha DEBUG de
+    /// [`recusa_de_midia_dita`].
+    fn nao_servida(baldes: &BaldesDoRegistro, agora: Instant, id: &str) {
+        recusa_de_midia_dita(
+            baldes,
+            agora,
+            id,
+            "img/rosto.png",
+            FalhaNoMod::Recusado {
+                motivo: "sessao-encerrada".to_owned(),
+            },
         );
     }
 
@@ -12465,27 +12562,25 @@ mod o_teto_de_vazao_do_registro {
         );
     }
 
-    /// **Com o mapa cheio, um id novo gasta do balde de transbordo**, e nunca
-    /// passa sem teto: o mapa não cresce, e o balde é um só para todos os ids
-    /// que chegaram depois.
+    /// **Com o mapa cheio, um id novo gasta do balde de transbordo da classe
+    /// dele**, e nunca passa sem teto: o mapa não cresce, e o balde é um só
+    /// para todos os ids da classe que chegaram depois. E é um por classe: as
+    /// linhas servidas que transbordam não gastam a ficha de um aviso que
+    /// transborda.
     #[test]
     fn com_o_mapa_cheio_um_id_novo_passa_pelo_transbordo() {
         let baldes = BaldesDoRegistro::default();
         let agora = origem();
-        let cheio = || baldes.lock().expect("os baldes").len() >= BALDES_NO_REGISTRO;
         let ((), rastro) = capturar(|| {
-            // Um id novo por linha até o mapa encher — e não além: o que
-            // passasse disso gastaria do transbordo antes do id medido.
-            for n in 0..=BALDES_NO_REGISTRO {
-                if cheio() {
-                    break;
-                }
+            // Um aviso de um id novo por balde próprio que o mapa aceita — e
+            // não além: o que passasse disso gastaria do transbordo antes do
+            // id medido.
+            for n in 0..BALDES_NO_REGISTRO - Classe::TODAS.len() {
                 da_janela(&baldes, agora, &format!("cheio/{n}"));
             }
-            assert!(
-                cheio(),
-                "{BALDES_NO_REGISTRO} ids diferentes não encheram o mapa dos baldes"
-            );
+            for _ in 0..200 {
+                midia_servida_dita(&baldes, agora, "servida/x", 7, "img/a.png", "imagem", 8);
+            }
             for _ in 0..200 {
                 da_janela(&baldes, agora, "novo/x");
             }
@@ -12493,19 +12588,17 @@ mod o_teto_de_vazao_do_registro {
             for n in 0..BALDES_NO_REGISTRO {
                 da_janela(&baldes, agora, &format!("mais/{n}"));
             }
+            da_janela_no(&baldes, agora, "depuracao", "depuracao/x");
         });
-        let guardados = baldes.lock().expect("os baldes").len();
-        assert_eq!(
-            guardados, BALDES_NO_REGISTRO,
-            "o mapa dos baldes passou de {BALDES_NO_REGISTRO} entradas: uma janela que manda um \
-             id novo por linha faz dele memória sem teto"
-        );
-        let do_novo = de(&rastro, "novo/x").len();
-        assert!(
-            (1..=RAJADA_DO_CONSOLE as usize).contains(&do_novo),
-            "com o mapa cheio, um id novo deixou {do_novo} linhas em duzentas: zero cala um MOD \
-             que nunca escreveu, e mais que a rajada é um id novo passando sem teto"
-        );
+        for id in ["servida/x", "novo/x"] {
+            let do_novo = de(&rastro, id).len();
+            assert!(
+                (1..=RAJADA_DO_CONSOLE as usize).contains(&do_novo),
+                "com o mapa cheio, `{id}` deixou {do_novo} linhas em duzentas: zero cala um MOD \
+                 que nunca escreveu — ou outra classe secou o transbordo desta —, e mais que a \
+                 rajada é um id novo passando sem teto"
+            );
+        }
         let depois: usize = std::iter::once("novo/y".to_owned())
             .chain((0..BALDES_NO_REGISTRO).map(|n| format!("mais/{n}")))
             .map(|id| de(&rastro, &id).len())
@@ -12514,6 +12607,13 @@ mod o_teto_de_vazao_do_registro {
             depois, 0,
             "os ids novos seguintes ganharam balde cheio, e não o transbordo que o primeiro \
              secou: uma janela que muda de id a cada linha escreve sem teto: {rastro}"
+        );
+        let guardados = baldes.lock().expect("os baldes").len();
+        assert_eq!(
+            guardados, BALDES_NO_REGISTRO,
+            "o mapa dos baldes não ficou em {BALDES_NO_REGISTRO} entradas com as três classes \
+             transbordando: passar delas faz de uma janela que manda um id novo por linha \
+             memória sem teto"
         );
     }
 
@@ -12594,26 +12694,106 @@ mod o_teto_de_vazao_do_registro {
         );
     }
 
-    /// **As portas do mesmo MOD dividem o balde dele**: é um teto por MOD, e
-    /// não um por porta — senão um MOD teria quatro rajadas.
+    /// **Dentro de cada classe, as portas do mesmo MOD dividem o balde dele**:
+    /// é um teto por MOD e por classe, e não um por porta — senão um MOD teria
+    /// uma rajada por porta. Os avisos são a janela em aviso e a mídia
+    /// recusada; as servidas, a mídia e o som; a depuração, a janela em DEBUG e
+    /// a mídia não servida porque a sessão acabou.
     #[test]
     fn as_portas_do_mesmo_mod_dividem_o_balde() {
         let baldes = BaldesDoRegistro::default();
         let agora = origem();
-        let por_porta = RAJADA_DO_CONSOLE as usize / 4;
+        let por_porta = RAJADA_DO_CONSOLE as usize / 2;
         let ((), rastro) = capturar(|| {
             for _ in 0..=por_porta {
                 da_janela(&baldes, agora, "a/b");
                 recusa(&baldes, agora, "a/b");
                 midia_servida_dita(&baldes, agora, "a/b", 7, "img/rosto.png", "imagem", 8);
                 som_servido_dito(&baldes, agora, "a/b", 7, "som/toque.wav", 16);
+                da_janela_no(&baldes, agora, "depuracao", "a/b");
+                nao_servida(&baldes, agora, "a/b");
             }
         });
-        assert_eq!(
-            de(&rastro, "a/b").len(),
-            RAJADA_DO_CONSOLE as usize,
-            "as quatro portas do mesmo MOD não dividem o balde dele: cada uma tem uma rajada, e \
-             o teto de um MOD é quatro vezes o escrito: {rastro}"
+        let linhas = de(&rastro, "a/b");
+        for (classe, nivel) in [
+            ("aviso", "WARN"),
+            ("servida", "INFO"),
+            ("depuração", "DEBUG"),
+        ] {
+            let da_classe = linhas
+                .iter()
+                .filter(|linha| linha.split_whitespace().next() == Some(nivel))
+                .count();
+            assert_eq!(
+                da_classe, RAJADA_DO_CONSOLE as usize,
+                "as duas portas da classe {classe} do mesmo MOD não deixaram uma rajada só: ou \
+                 cada porta tem a dela, e o teto de um MOD é o dobro do escrito, ou outra classe \
+                 gastou as fichas desta: {rastro}"
+            );
+        }
+    }
+
+    /// **Um aviso não é segurado pelas linhas servidas do mesmo MOD.**
+    ///
+    /// Segurada, uma linha não atrasa: ela some, e só a conta segue, na
+    /// próxima linha do MOD — que pode ser outra «mídia de MOD servida». Um MOD
+    /// que monta mais de 32 mídias de uma vez gastava a rajada em INFO, e a
+    /// recusa da seguinte sumia: o defeito de 23/09, que o módulo da mídia
+    /// recusada conta, de volta pelo teto.
+    #[test]
+    fn uma_recusa_depois_de_quarenta_servidas_do_mesmo_mod_sai() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for n in 0..40 {
+                midia_servida_dita(
+                    &baldes,
+                    agora,
+                    "a/b",
+                    7,
+                    &format!("img/{n}.png"),
+                    "imagem",
+                    8,
+                );
+            }
+            recusa(&baldes, agora, "a/b");
+        });
+        let recusada = rastro
+            .lines()
+            .find(|linha| linha.contains("mídia de MOD recusada"));
+        assert!(
+            recusada.is_some_and(|linha| linha.contains("mod_id=a/b")),
+            "quarenta mídias servidas do mesmo MOD gastaram a ficha da recusa, e ela sumiu do \
+             seele.log — a mídia recusada em silêncio de novo: {rastro}"
+        );
+        assert!(
+            recusada.is_some_and(|linha| !linha.contains("suprimidas")),
+            "a recusa levou na conta as mídias servidas que o balde delas segurou, e quem lê \
+             acha que avisos sumiram: {rastro}"
+        );
+    }
+
+    /// **A depuração não gasta a ficha de um aviso, nem infla a conta dele.**
+    /// O DEBUG não está no `seele.log` com o filtro padrão: segurar um aviso
+    /// por causa dele era calar o que se lê pelo que não se lê.
+    #[test]
+    fn a_depuracao_nao_gasta_a_ficha_nem_infla_a_conta_de_um_aviso() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for _ in 0..40 {
+                da_janela_no(&baldes, agora, "depuracao", "a/b");
+            }
+            da_janela(&baldes, agora, "a/b");
+        });
+        let aviso = rastro
+            .lines()
+            .find(|linha| linha.split_whitespace().next() == Some("WARN"));
+        assert!(
+            aviso
+                .is_some_and(|linha| linha.contains("mod_id=a/b") && !linha.contains("suprimidas")),
+            "quarenta linhas DEBUG da janela seguraram o aviso do mesmo MOD, ou entraram na \
+             conta dele: {rastro}"
         );
     }
 }
