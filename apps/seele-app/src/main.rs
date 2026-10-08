@@ -4567,7 +4567,10 @@ fn registrar_reserva(
 /// corrida contra a saída da sessão, e uma prova dela não pode precisar de um
 /// `AppHandle`.
 ///
-/// A recusa por geração morta é contada em `mortos`, como a da reserva.
+/// A recusa por geração morta é contada em `mortos`, como a da reserva, e
+/// dita com a linha DEBUG de [`Session::confere_geracao`], como a dos outros
+/// comandos de MOD — com a instância no lugar da geração de pé, que esta
+/// função não conhece.
 fn liberar_reserva(
     mods: &std::sync::Mutex<ModsNativos>,
     geracao_vale: &dyn Fn() -> bool,
@@ -4579,6 +4582,14 @@ fn liberar_reserva(
     if !geracao_vale() {
         mortos.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         vivos.encerrar(instancia);
+        // A linha sai com o cadeado solto: com ele na mão, uma escrita lenta
+        // no disco seguraria toda a supervisão dos MODs.
+        drop(vivos);
+        tracing::debug!(
+            geracao,
+            instancia,
+            "comando recusado: a sessão dele já acabou"
+        );
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
         });
@@ -10531,15 +10542,18 @@ mod a_supervisao_dos_mods_nativos {
         );
     }
 
-    /// **A ativação que chega numa geração morta também é contada**, como a
-    /// reserva logo acima.
+    /// **A ativação que chega numa geração morta também é contada e dita**,
+    /// como a reserva logo acima e como os comandos que passam por
+    /// [`super::Session::recusar_se_morta`].
     ///
     /// Ela era a ressalva do doc de `registrar_reserva`: recusada sem conta, e
     /// um zero em `comandos_de_geracao_morta` não queria dizer que nada da
-    /// sessão anterior tinha falado. A que vale não é contada, nem quando é
+    /// sessão anterior tinha falado. Depois de contada, ainda não dizia: os
+    /// outros comandos de MOD escreviam a linha DEBUG de `confere_geracao`, e
+    /// a ativação, não. A que vale não é contada nem dita, nem quando é
     /// recusada por outro motivo.
     #[test]
-    fn a_ativacao_recusada_por_geracao_morta_e_contada() {
+    fn a_ativacao_recusada_por_geracao_morta_e_contada_e_dita() {
         use std::sync::atomic::{AtomicU64, Ordering};
 
         let mods = std::sync::Mutex::new(ModsNativos::default());
@@ -10550,8 +10564,27 @@ mod a_supervisao_dos_mods_nativos {
             .expect("a reserva viva foi recusada");
 
         let mortos = AtomicU64::new(0);
-        let recusa = liberar_reserva(&mods, &|| false, &mortos, 7, numero)
-            .expect_err("a ativação de uma geração morta foi aceita");
+        let (recusa, rastro) = crate::rastro_de_teste::capturar(|| {
+            liberar_reserva(&mods, &|| false, &mortos, 7, numero)
+        });
+        let recusa = recusa.expect_err("a ativação de uma geração morta foi aceita");
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("comando recusado: a sessão dele já acabou"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "a ativação recusada por geração morta foi contada e não foi dita: os \
+                     outros comandos de MOD deixam a linha DEBUG de `confere_geracao`, e esta \
+                     some do registro — {rastro}"
+                )
+            });
+        for pedaco in ["DEBUG", "geracao=7", &format!("instancia={numero}")] {
+            assert!(
+                linha.contains(pedaco),
+                "a linha da ativação recusada por geração morta não traz `{pedaco}`, e quem lê \
+                 o registro não acha de que sessão e de que instância ela era: {linha}"
+            );
+        }
         assert_eq!(
             super::motivo_de(&recusa),
             "sessao-encerrada",
@@ -10571,8 +10604,10 @@ mod a_supervisao_dos_mods_nativos {
             "a reserva de uma ativação recusada por geração morta não foi encerrada"
         );
 
-        let recusa = liberar_reserva(&mods, &|| true, &mortos, 7, numero)
-            .expect_err("a ativação de uma reserva já encerrada foi aceita");
+        let (recusa, rastro) = crate::rastro_de_teste::capturar(|| {
+            liberar_reserva(&mods, &|| true, &mortos, 7, numero)
+        });
+        let recusa = recusa.expect_err("a ativação de uma reserva já encerrada foi aceita");
         assert_eq!(
             super::motivo_de(&recusa),
             "instancia-nao-esta-reservada",
@@ -10582,6 +10617,10 @@ mod a_supervisao_dos_mods_nativos {
             mortos.load(Ordering::Relaxed),
             1,
             "a ativação de uma geração viva foi contada como de geração morta"
+        );
+        assert!(
+            !rastro.contains("comando recusado: a sessão dele já acabou"),
+            "a ativação de uma geração viva foi dita como de uma sessão que acabou: {rastro}"
         );
     }
 
