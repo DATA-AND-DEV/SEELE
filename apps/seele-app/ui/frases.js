@@ -114,6 +114,35 @@ const MOTIVOS = {
     "ESTE SERVIDOR EXIGE MODS QUE ELE NÃO CONSEGUE DESCREVER.\n" +
     "Não é a sua entrada: avise quem hospeda.",
 
+  // ---- a volta da bateria, recusada dentro do TLS ----
+  //
+  // As duas vestiam CREDENCIAL RECUSADA, e a frase mandava conferir convite e
+  // senha que não chegaram a quem atendeu: a recusa é antes do `Hello`. Do
+  // aperto de mão sai só o `ClientHello` do TLS, como na recusa pela impressão
+  // de `fraseDeErro`, e por isso nenhuma das duas diz que nada saiu.
+  //
+  // A primeira cobre duas recusas da volta: a impressão esperada que não
+  // confere (`InviteMismatch`) e quem mostrou o certificado do servidor sem
+  // provar a chave dele (`ChaveNaoProvada`). E a impressão esperada pode ter
+  // vindo do link colado ou da lista de servidores. Esta tela só recebe o
+  // `EndReason`, sem a origem, sem as impressões e sem saber qual das duas foi,
+  // então a frase diz o que vale nos quatro casos: quem atendeu não é o
+  // servidor desta sessão, o convite, a senha e o apelido não chegaram a ele,
+  // e o remédio é falar com quem hospeda por outro canal. Nada de «convite»
+  // como dono da impressão, nem de «link»: é o que `fraseDeErro` separa por
+  // `deOnde`, e aqui não dá.
+  //
+  // A segunda é o alarme de chave trocada do ADR 0003. As impressões não
+  // atravessam a ponte aqui (o motivo do fim é um nome só), e ficam no
+  // `seele.log`, na linha da volta recusada.
+  ServidorTrocouNaVolta:
+    "QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DESTA SESSÃO.\n" +
+    "O convite, a senha e o apelido não chegaram a ele. " +
+    "Confirme com quem hospeda, por outro canal, antes de entrar de novo.",
+  ChaveMudouNaVolta:
+    "A CHAVE DO SERVIDOR MUDOU DURANTE A SESSÃO.\n" +
+    "Confirme por outro canal antes de entrar de novo.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 
@@ -665,6 +694,16 @@ const FRASES = {
         "OS PACOTES SAÍRAM E NADA VOLTOU\n" +
         "Confira o endereço e a porta UDP de quem hospeda. No Mac, confira também " +
         "a permissão de rede local em Ajustes.",
+    // **O impostor que repete o certificado do servidor**, e que chegava aqui
+    // como versão incompatível: a frase mandava atualizar o SEELE nas duas
+    // máquinas. O certificado é público; a chave que o assina, não, e o TLS a
+    // cobrou antes do `Hello`. Por isso a segunda linha diz o que não saiu,
+    // com o escopo «a ele» da recusa pela impressão (ver `InviteMismatch`, em
+    // `fraseDeErro`).
+    ChaveNaoProvada:
+        "QUEM ATENDEU NÃO PROVOU SER ESTE SERVIDOR.\n" +
+        "Ele mostrou o certificado do servidor sem a chave que o assina. " +
+        "O convite, a senha e o apelido não chegaram a ele.",
     IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
     NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
     UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",

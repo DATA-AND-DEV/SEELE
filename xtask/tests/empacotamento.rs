@@ -863,6 +863,80 @@ esac
         }
     }
 
+    /// Um comando de `git` no repositório da bancada, com a identidade que o
+    /// `commit` pede e sem assinatura. Devolve a saída padrão sem a quebra do fim.
+    fn git(&self, argumentos: &[&str]) -> String {
+        let saida = Command::new("git")
+            .arg("-C")
+            .arg(&self.repo)
+            .args([
+                "-c",
+                "user.email=bancada@seele",
+                "-c",
+                "user.name=bancada",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+            ])
+            .args(argumentos)
+            .output()
+            .expect("o git tem que executar");
+        assert!(
+            saida.status.success(),
+            "git {argumentos:?} falhou:\n{}",
+            String::from_utf8_lossy(&saida.stderr)
+        );
+        String::from_utf8_lossy(&saida.stdout).trim().to_owned()
+    }
+
+    /// Põe na frente do `PATH` do script um `git` que repassa tudo ao de
+    /// verdade, menos as chamadas que levam o argumento `falha`: a partir da
+    /// `(deixa_passar + 1)`-ésima, elas saem com 128 e uma frase no erro, como
+    /// um repositório que o git não consegue ler.
+    ///
+    /// A configuração mora em arquivos ao lado do dublê, e não no ambiente, para
+    /// que `rodar` continue com a mesma assinatura. O argumento é casado inteiro:
+    /// `--list` só pega o `git tag --list`, e `--format=%s` só pega o `git log`
+    /// que classifica os assuntos, e não o que lista os commits.
+    fn git_que_falha(&self, falha: &str, deixa_passar: usize) {
+        let caminho = std::env::var_os("PATH").unwrap_or_default();
+        let de_verdade = std::env::split_paths(&caminho)
+            .map(|pasta| pasta.join("git"))
+            .find(|git| git.is_file())
+            .expect("o git de verdade tem que estar no PATH");
+        let ferramentas = self.base.join("ferramentas");
+        escrever(&ferramentas.join("git.falha"), falha, false);
+        escrever(
+            &ferramentas.join("git.deixa"),
+            &deixa_passar.to_string(),
+            false,
+        );
+        escrever(&ferramentas.join("git.contador"), "", false);
+        escrever(
+            &ferramentas.join("git"),
+            &format!(
+                r#"#!/bin/sh
+aqui=$(dirname "$0")
+falha=$(cat "$aqui/git.falha")
+case " $* " in
+    *" $falha "*)
+        echo x >> "$aqui/git.contador"
+        vezes=$(wc -l < "$aqui/git.contador" | tr -d ' ')
+        if [ "$vezes" -gt "$(cat "$aqui/git.deixa")" ]; then
+            echo "fatal: o git de mentira falhou em $falha" >&2
+            exit 128
+        fi
+        ;;
+esac
+exec "{}" "$@"
+"#,
+                de_verdade.display()
+            ),
+            true,
+        );
+    }
+
     fn rodar(&self, argumentos: &[&str], ambiente: &[(&str, &str)]) -> Saida {
         let caminho_antigo = std::env::var("PATH").unwrap_or_default();
         let mut comando = Command::new(interpretador());
@@ -941,6 +1015,227 @@ fn com_tudo_no_lugar_as_conferencias_passam_sem_compilar_nada() {
     assert!(saida.diario.contains("docker"), "não perguntou ao Docker");
     assert!(saida.diario.contains("ssh"), "não perguntou ao Windows");
     assert!(saida.diario.contains("curl"), "não perguntou ao GitHub");
+}
+
+/// O aviso dos assuntos que o resumo não classifica sai nas conferências.
+///
+/// Ele morava só dentro de `notas_das_mudancas`, chamada depois da bateria, dos
+/// três builds e do «--- publicando ---»: quem publica lia o aviso horas depois
+/// de começar, e o `--conferir`, que existe para dizer em segundos se vale a
+/// pena, saía sem nunca classificar. E o conselho do aviso («conte em
+/// `empacotar/notas/<versão>.md`») não se segue depois de começar sem abortar,
+/// porque `conferir_arvore` exige `empacotar/` limpo.
+///
+/// A ordem não se prova pela posição no texto, porque `Saida.texto` é a saída
+/// padrão seguida do erro. A prova é o aviso aparecer num `--conferir`, que
+/// nunca chega à bateria — e o diário sem nenhum `cargo test` diz que não chegou.
+#[test]
+fn o_conferir_avisa_dos_assuntos_sem_classe_sem_chegar_a_bateria() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    // A bancada faz um commit só, sem tag: a faixa seria vazia. Uma tag na
+    // versão de antes e dois commits depois dela fazem a faixa de `1.2.3`.
+    //
+    // O assunto do commit **não** repete a frase que a asserção procura: um
+    // assunto que dissesse «não diz pelo prefixo» a faria casar com o próprio
+    // dado de entrada, se o script o ecoasse, e o teste passaria sem o aviso.
+    bancada.git(&["tag", "v1.2.2"]);
+    bancada.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "arruma a fila do servidor",
+    ]);
+    bancada.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "feat(telepatia): o servidor adivinha",
+    ]);
+    // O Windows de mentira responde com a cabeça que lhe mandarem; ela mudou.
+    let cabeca = bancada.git(&["rev-parse", "HEAD"]);
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "com tudo no lugar as conferências têm que passar, avisos à parte:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("tudo conferido"),
+        "faltou o veredito das conferências:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.diario.contains("cargo test"),
+        "o --conferir chegou à bateria, e a prova abaixo não prova mais nada:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida
+            .texto
+            .contains("1 assunto desta faixa não diz pelo prefixo se muda o produto"),
+        "o --conferir não avisou do assunto sem prefixo da faixa: quem publica só ficaria \
+         sabendo depois da bateria e dos builds, quando o conselho do aviso (contar em \
+         `empacotar/notas/`) já não se segue sem abortar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("«telepatia» é um escopo que a tabela"),
+        "o --conferir não avisou do escopo que a tabela não conhece:\n{}",
+        saida.texto
+    );
+}
+
+/// O git que falha não vira «primeira versão publicada».
+///
+/// `faixa_da_versao` lia as tags numa substituição de comando dentro de um
+/// pipe, e o status do `git tag` se perdia: sem tags, o `--conferir` dizia que
+/// esta é a primeira versão e que não havia o que classificar. Uma falha que o
+/// script não conta volta como pergunta de quem publica, dias depois.
+#[test]
+fn o_conferir_para_dizendo_quando_o_git_nao_lista_as_tags() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    bancada.git(&["tag", "v1.2.2"]);
+    bancada.git_que_falha("--list", 0);
+
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "o git não listou as tags e o --conferir passou: quem publica ficaria sem saber que a \
+         faixa da versão não foi lida:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("não consegui listar as tags"),
+        "o --conferir parou sem dizer que o git não listou as tags:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("primeira versão publicada")
+            && !saida.texto.contains("tudo conferido"),
+        "o git não listou as tags e o --conferir disse que esta é a primeira versão, ou que \
+         está tudo conferido:\n{}",
+        saida.texto
+    );
+}
+
+/// O mesmo, para o `git log` da faixa: o status do `git` se perdia no pipe, o
+/// status do pipe era o do `notas_das_mudancas`, e o passo dizia
+/// «classificadas» sem ter lido um commit.
+#[test]
+fn o_conferir_para_dizendo_quando_o_git_nao_le_os_commits_da_faixa() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    bancada.git(&["tag", "v1.2.2"]);
+    bancada.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "arruma a fila do servidor",
+    ]);
+    let cabeca = bancada.git(&["rev-parse", "HEAD"]);
+    bancada.git_que_falha("--format=%s", 0);
+
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "o git não leu os commits da faixa e o --conferir passou:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .texto
+            .contains("não consegui ler os commits de v1.2.2..HEAD"),
+        "o --conferir parou sem dizer que o git não leu os commits da faixa:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("classificadas") && !saida.texto.contains("tudo conferido"),
+        "o git não leu os commits e o --conferir disse que os classificou, ou que está tudo \
+         conferido:\n{}",
+        saida.texto
+    );
+}
+
+/// No fim, onde o corpo do release é montado, a falha do git é dita, e a
+/// publicação segue: as conferências já leram as tags e os commits uma vez, e
+/// um segundo erro no mesmo script é raro demais para abortar horas de build.
+/// O que não pode é o corpo sair afirmando uma coisa que o script não leu.
+#[test]
+fn o_corpo_do_release_avisa_quando_o_git_nao_lista_as_tags_na_hora_de_montar() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    bancada.git(&["tag", "v1.2.2"]);
+    // A primeira chamada, a das conferências, passa; a do corpo falha.
+    bancada.git_que_falha("--list", 1);
+
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+
+    assert!(
+        saida
+            .texto
+            .contains("não consegui listar as tags de novo ao montar o corpo do release"),
+        "o git não listou as tags ao montar o corpo do release, e o script não disse: o corpo \
+         sairia afirmando que esta é a primeira versão sem que nada avisasse quem publica:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn o_corpo_do_release_avisa_quando_o_git_nao_le_os_commits_na_hora_de_montar() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    bancada.git(&["tag", "v1.2.2"]);
+    bancada.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "arruma a fila do servidor",
+    ]);
+    let cabeca = bancada.git(&["rev-parse", "HEAD"]);
+    // A primeira chamada, a das conferências, passa; a do corpo falha.
+    bancada.git_que_falha("--format=%s", 1);
+
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert!(
+        saida
+            .texto
+            .contains("não consegui ler os commits de v1.2.2..HEAD ao montar o corpo do release"),
+        "o git não leu os commits ao montar o corpo do release, e o script não disse: a seção \
+         de mudanças sairia dizendo que não há nenhuma:\n{}",
+        saida.texto
+    );
+    // O corpo vai ao GitHub em JSON, e `json.dump` escapa o que não é ASCII:
+    // por isso os pedaços abaixo são os ASCII das frases («As mudan…», «nenhuma
+    // mudan…»). O primeiro prova que o corpo chegou até aqui e está sendo lido;
+    // o segundo, que ele não afirma o que o script não leu.
+    assert!(
+        saida.corpos.contains("As mudan"),
+        "o corpo do release não chegou ao dublê do GitHub, e a asserção abaixo não prova \
+         nada:\n{}\n{}",
+        saida.corpos,
+        saida.texto
+    );
+    assert!(
+        !saida.corpos.contains("nenhuma mudan"),
+        "o git não leu os commits e o corpo do release afirmou que a versão não traz nenhuma \
+         mudança de produto:\n{}",
+        saida.corpos
+    );
 }
 
 #[test]
@@ -2433,6 +2728,12 @@ impl Instalador {
             let caminho = std::env::var("PATH").unwrap_or_default();
             comando.env("PATH", format!("{}:{caminho}", ferramentas.display()));
         }
+        Self::executar(comando)
+    }
+
+    /// Roda o comando e devolve o código de saída e as duas saídas, a padrão
+    /// seguida do erro.
+    fn executar(mut comando: Command) -> (i32, String) {
         let saida = comando.output().expect("o sh tem que executar");
         (
             saida.status.code().unwrap_or(-1),
@@ -2442,6 +2743,31 @@ impl Instalador {
                 String::from_utf8_lossy(&saida.stderr)
             ),
         )
+    }
+
+    /// Roda o `install.sh` como num Mac Apple Silicon cujo `PATH` não tem o
+    /// `sysctl`: só o dublê do `uname` (Darwin, arm64) e os dois diretórios
+    /// onde o macOS guarda o que o script usa. O `sysctl` de verdade mora em
+    /// `/usr/sbin`, que não está aqui, e é o script que tem de achá-lo.
+    ///
+    /// Sem dublê de `sysctl` de propósito: quem responde é o da máquina, e é
+    /// isso que o teste que usa isto quer provar.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn rodar_num_mac_sem_o_sysctl_no_caminho(&self) -> (i32, String) {
+        let ferramentas = self.base.join("ferramentas");
+        escrever(
+            &ferramentas.join("uname"),
+            "#!/bin/sh\ncase \"${1:-}\" in\n    -m) echo 'arm64' ;;\n    *) echo 'Darwin' ;;\nesac\n",
+            true,
+        );
+        let mut comando = Command::new("sh");
+        comando
+            .arg(raiz().join("install.sh"))
+            .env("SEELE_VERSION", "v9.9.9")
+            .env("SEELE_BASE", format!("file://{}", self.versao().display()))
+            .env("SEELE_BIN", self.base.join("bin"))
+            .env("PATH", format!("{}:/usr/bin:/bin", ferramentas.display()));
+        Self::executar(comando)
     }
 }
 
@@ -2589,6 +2915,103 @@ fn uma_maquina_sem_pacote_da_arquitetura_dela_recebe_a_frase_de_compilar() {
         assert!(
             !instalador.instalado().exists(),
             "{sistema} {arquitetura}: a recusa deixou um seeled instalado:\n{texto}"
+        );
+    }
+}
+
+/// **O `sysctl` mora em `/usr/sbin`, e um `curl | sh` nem sempre o tem no `PATH`.**
+///
+/// Com um `PATH` sem ele — o de um `sh -c` mínimo, o de um contêiner, o de um
+/// `env -i` —, o comando não era achado, o `2>/dev/null || true` engolia o erro
+/// e devolvia vazio, e o vazio é a resposta de um Mac Intel: um Mac Apple
+/// Silicon recebia «este Mac é Intel» e a frase de compilar, sem que nada dissesse
+/// que o `sysctl` nem tinha rodado.
+///
+/// Este roda o script de verdade: o `uname` é dublê (Darwin arm64) e o `PATH`
+/// não tem o `sysctl`, que é o da máquina. **Só roda num Mac Apple Silicon**,
+/// porque é lá que o `sysctl` de `/usr/sbin` responde `1`; nas outras máquinas
+/// quem guarda é o teste de texto logo abaixo.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn um_mac_apple_silicon_sem_o_sysctl_no_caminho_ainda_e_apple_silicon() {
+    for onde in ["/usr/bin/sysctl", "/bin/sysctl"] {
+        assert!(
+            !std::path::Path::new(onde).exists(),
+            "o `sysctl` apareceu em {onde}, dentro do `PATH` que este teste monta sem ele: \
+             o teste não prova mais nada"
+        );
+    }
+    assert!(
+        std::path::Path::new("/usr/sbin/sysctl").exists(),
+        "esta máquina não tem o `sysctl` em /usr/sbin, e o script não tem onde achá-lo"
+    );
+    let instalador = Instalador::novo();
+    let seeled = instalador.publicar_pacote("macos");
+    let soma = instalador.soma("seele-cli-9.9.9-macos.tar.gz");
+    instalador.somas(&format!("{soma}  seele-cli-9.9.9-macos.tar.gz\n"));
+
+    let (estado, texto) = instalador.rodar_num_mac_sem_o_sysctl_no_caminho();
+
+    assert!(
+        !texto.contains("este Mac é Intel"),
+        "o install.sh chamou de Intel um Mac Apple Silicon cujo PATH não tem o `sysctl`: o \
+         comando não foi achado, o erro foi engolido e o vazio virou a resposta de um Intel:\n{texto}"
+    );
+    assert_eq!(
+        estado, 0,
+        "num Mac Apple Silicon sem o `sysctl` no PATH, com o pacote publicado e a soma certa, o \
+         install.sh não instalou:\n{texto}"
+    );
+    assert_eq!(
+        std::fs::read(instalador.instalado()).ok(),
+        Some(seeled),
+        "o seeled instalado não é o que estava no pacote:\n{texto}"
+    );
+}
+
+/// O mesmo defeito, para toda máquina: a chamada do `sysctl` no `install.sh`
+/// acrescenta `/usr/sbin` ao `PATH` **depois** do que a pessoa já tem, e não
+/// chama `/usr/sbin/sysctl` por caminho absoluto.
+///
+/// O fim do `PATH`, e não o começo nem o caminho absoluto, porque o dublê que
+/// `Instalador::rodar_contra` põe na frente tem de continuar interceptando: um
+/// `sysctl` chamado por caminho absoluto responderia a máquina de quem roda o
+/// teste, e os testes de Rosetta e de Intel deixariam de provar o que dizem.
+#[test]
+fn a_chamada_do_sysctl_no_instalador_alcanca_o_usr_sbin_depois_do_path_da_pessoa() {
+    let texto = std::fs::read_to_string(raiz().join("install.sh"))
+        .expect("o install.sh tem que ser legível");
+    let codigo = sem_comentario(&texto);
+    let chamadas: Vec<&str> = codigo
+        .lines()
+        .filter(|linha| linha.contains("sysctl"))
+        .collect();
+    assert!(
+        !chamadas.is_empty(),
+        "o install.sh deixou de chamar o `sysctl`, e este guarda não tem o que conferir: a \
+         arquitetura do Mac passou a ser decidida de outro jeito"
+    );
+    for linha in chamadas {
+        let linha = linha.trim();
+        assert!(
+            linha.contains("/usr/sbin"),
+            "a chamada do `sysctl` não alcança /usr/sbin, onde ele mora no macOS: com um PATH \
+             que não o tem, o comando não é achado, o `|| true` engole o erro e um Mac Apple \
+             Silicon recebe «este Mac é Intel»:\n  {linha}"
+        );
+        assert!(
+            !linha.contains("/usr/sbin/sysctl"),
+            "a chamada do `sysctl` usa o caminho absoluto, e o dublê dos testes deixa de \
+             interceptá-la:\n  {linha}"
+        );
+        let path = linha.find("$PATH");
+        let usr_sbin = linha.find("/usr/sbin");
+        assert!(
+            path.zip(usr_sbin)
+                .is_some_and(|(path, usr_sbin)| path < usr_sbin),
+            "o /usr/sbin vem antes do `$PATH` da pessoa, e não depois dele: o `sysctl` de lá \
+             passaria na frente do dublê dos testes, e de qualquer outro que ela tenha posto \
+             de propósito:\n  {linha}"
         );
     }
 }
@@ -2846,13 +3269,26 @@ fn o_corpo_do_release_lista_os_commits_da_mesma_faixa_que_resume() {
         texto.contains("changelog_dos_commits \"$FAIXA\""),
         "o corpo do release tem que listar os commits da faixa que ele resume"
     );
-    assert!(
-        texto.contains(
-            "git -C \"$RAIZ\" log --no-merges --format='%s' \"$FAIXA\" \
-                        | notas_das_mudancas"
-        ),
-        "e o resumo tem que sair da mesma faixa"
+    // O resumo lê os assuntos da faixa em dois lugares — a conferência, que só
+    // avisa, e o corpo, que monta — e lê num `$(…)`, e não num pipe, para que o
+    // status do git possa ser testado. As duas leituras são da mesma faixa, e
+    // cada uma entrega o que leu ao `resumir_assuntos`.
+    let codigo = sem_comentario(&texto);
+    let leitura = "log --no-merges --format='%s' \"$FAIXA\")";
+    assert_eq!(
+        codigo.matches(leitura).count(),
+        2,
+        "o resumo tem que sair da mesma faixa nas duas leituras (conferência e corpo), cada uma \
+         lida num `$(…)` com o status testado"
     );
+    for variavel in ["cn_assuntos", "assuntos"] {
+        assert!(
+            codigo.contains(&format!("{variavel}=$(git -C \"$RAIZ\" {leitura}"))
+                && codigo.contains(&format!("resumir_assuntos \"${variavel}\"")),
+            "o resumo lê os assuntos da faixa em `{variavel}` e não os entrega ao \
+             `resumir_assuntos`: a página resumiria outra coisa que não a faixa que lista"
+        );
+    }
 }
 
 #[test]
@@ -3085,6 +3521,168 @@ fn alvos_do_fuzz() -> Vec<String> {
     alvos
 }
 
+/// Os passos de um job do `ci.yml`, cada um como as linhas dele — sem comentário
+/// e sem o recuo, com o `- ` do primeiro passo já tirado.
+///
+/// Existe ao lado de [`comandos_do_ci`] porque ela só lê o `run:` de uma linha, e
+/// um passo `uses:` com `if:` e `with:` — o do `upload-artifact` — não é um
+/// comando. O job vai da linha `  <job>:` até a próxima linha com o recuo de um
+/// job, e cada passo, da linha `      - ` que o abre até a próxima igual.
+fn passos_do_job_do_ci(job: &str) -> Vec<Vec<String>> {
+    let ci = std::fs::read_to_string(raiz().join(".github/workflows/ci.yml"))
+        .expect("o ci.yml é legível");
+    let ci = sem_comentario(&ci);
+    let cabecalho = format!("  {job}:");
+    let mut passos: Vec<Vec<String>> = Vec::new();
+    let mut dentro = false;
+    for linha in ci.lines().map(str::trim_end) {
+        if linha.trim().is_empty() {
+            continue;
+        }
+        if linha == cabecalho {
+            dentro = true;
+            continue;
+        }
+        if !dentro {
+            continue;
+        }
+        // Dois espaços ou menos: o próximo job, ou outra seção de topo.
+        if !linha.starts_with("   ") {
+            break;
+        }
+        if let Some(abre) = linha.strip_prefix("      - ") {
+            passos.push(vec![abre.trim().to_owned()]);
+        } else if let Some(passo) = passos.last_mut() {
+            passo.push(linha.trim().to_owned());
+        }
+    }
+    passos
+}
+
+/// O comando do `run:` de um passo de [`passos_do_job_do_ci`], se ele tem um.
+fn comando_do_passo(passo: &[String]) -> Option<&str> {
+    passo
+        .iter()
+        .find_map(|linha| linha.strip_prefix("run:").map(str::trim))
+}
+
+/// A condição do `if:` de um passo de [`passos_do_job_do_ci`], sem o `${{ }}`
+/// que pode envolvê-la — `if: failure()` e `if: ${{ failure() }}` são a mesma
+/// condição —, ou `None` se o passo não tem `if:`.
+fn condicao_do_passo(passo: &[String]) -> Option<String> {
+    let se = passo
+        .iter()
+        .find_map(|linha| linha.strip_prefix("if:"))?
+        .trim();
+    let se = se
+        .strip_prefix("${{")
+        .and_then(|resto| resto.strip_suffix("}}"))
+        .unwrap_or(se);
+    Some(se.trim().to_owned())
+}
+
+/// Os nomes que a seção `[dependencies]` de um `Cargo.toml` declara — não os de
+/// `[dev-dependencies]` nem os de `[build-dependencies]`, que o `Cargo.lock` de
+/// um pacote de fora do workspace não lista. Entende uma dependência por linha,
+/// como os manifestos deste repositório as escrevem: uma tabela de várias linhas
+/// faria `version` e `features` virarem nomes, e o guarda que usa isto diria
+/// que sobram no lock, o que denuncia o limite em vez de escondê-lo.
+fn dependencias_declaradas(manifesto: &str) -> std::collections::BTreeSet<String> {
+    let mut nomes = std::collections::BTreeSet::new();
+    let mut na_secao = false;
+    for linha in manifesto.lines().map(str::trim) {
+        if linha.starts_with('[') {
+            na_secao = linha == "[dependencies]";
+            continue;
+        }
+        if !na_secao || linha.starts_with('#') {
+            continue;
+        }
+        let nome: String = linha
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if !nome.is_empty() {
+            nomes.insert(nome);
+        }
+    }
+    nomes
+}
+
+/// Os nomes que o `Cargo.lock` lista como dependências de `pacote`, ou `None`
+/// quando o pacote nem está no lock. Um nome que o lock desambigua com a versão
+/// (`"sha2 0.11.0"`) entra só pelo nome.
+fn dependencias_no_lock(lock: &str, pacote: &str) -> Option<std::collections::BTreeSet<String>> {
+    let bloco = lock.split("[[package]]").find(|bloco| {
+        bloco
+            .lines()
+            .find_map(|linha| linha.trim().strip_prefix("name = "))
+            .is_some_and(|nome| nome.trim_matches('"') == pacote)
+    })?;
+    let mut nomes = std::collections::BTreeSet::new();
+    let mut dentro = false;
+    for linha in bloco.lines().map(str::trim) {
+        if linha.starts_with("dependencies = [") {
+            dentro = true;
+            continue;
+        }
+        if !dentro {
+            continue;
+        }
+        if linha == "]" {
+            break;
+        }
+        let item = linha.trim_matches(|c| c == '"' || c == ',');
+        if let Some(nome) = item.split_whitespace().next() {
+            nomes.insert(nome.to_owned());
+        }
+    }
+    Some(nomes)
+}
+
+#[test]
+fn o_lock_do_fuzz_lista_o_que_o_seele_proto_declara() {
+    // **O lock do fuzz ficou atrás do `seele-proto`, e o job não tinha como dizer.**
+    //
+    // O que o histórico mostra: o `serde_json` entrou no
+    // `crates/seele-proto/Cargo.toml` em `f4e3183` (05/09), e o
+    // `fuzz/Cargo.lock`, que não é do workspace, ficou como estava desde
+    // `8df5da6` (09/08) até o `1277d85` (08/10). O job `fuzz curto` nasceu em
+    // `62e3f7e` (05/10) sem `--locked` e já dizendo que o lock estava atrás: sem
+    // a flag, o cargo reescreve o lock no runner, onde ninguém o comita. Não se
+    // mediu se o job rodou, nem com que resultado, entre 05/10 e 08/10. Agora o
+    // job confere o lock com `--locked`, e este teste diz o mesmo sem rede e sem
+    // o nightly, na máquina de quem mexeu no manifesto.
+    let manifesto = std::fs::read_to_string(raiz().join("crates/seele-proto/Cargo.toml"))
+        .expect("o manifesto do seele-proto é legível");
+    let lock = std::fs::read_to_string(raiz().join("fuzz/Cargo.lock"))
+        .expect("o fuzz/Cargo.lock é legível");
+
+    let declaradas = dependencias_declaradas(&manifesto);
+    assert!(
+        declaradas.contains("serde"),
+        "o teste não leu as dependências do `seele-proto` — leu {declaradas:?} —, e sem elas a \
+         comparação abaixo passaria sem conferir nada"
+    );
+    let Some(no_lock) = dependencias_no_lock(&lock, "seele-proto") else {
+        panic!(
+            "o fuzz/Cargo.lock não tem o pacote `seele-proto`: o fuzz compila contra ele, e o \
+             lock não sabe disso"
+        );
+    };
+
+    let faltam: Vec<&String> = declaradas.difference(&no_lock).collect();
+    let sobram: Vec<&String> = no_lock.difference(&declaradas).collect();
+    assert!(
+        faltam.is_empty() && sobram.is_empty(),
+        "o fuzz/Cargo.lock está atrasado em relação ao `seele-proto`: faltam {faltam:?} e \
+         sobram {sobram:?}. O job `fuzz curto` roda `cargo metadata --locked` e reprovaria \
+         antes do primeiro alvo. Atualize sem rede, no próprio repositório: \
+         `cargo metadata --offline --manifest-path fuzz/Cargo.toml --format-version 1 > \
+         /dev/null`, e comite o lock"
+    );
+}
+
 #[test]
 fn o_ci_roda_deny_e_fuzz() {
     // **O deny e o fuzz tinham saído do `ci.yml`, e o fuzz nunca tinha
@@ -3160,6 +3758,94 @@ fn o_ci_roda_deny_e_fuzz() {
              conferida byte a byte pelo seele-proto: a pasta de corpus vem antes"
         );
     }
+
+    // **O lock do fuzz é conferido, e o `cargo fuzz run` não aceita `--locked`.**
+    // O passo é `cargo +nightly metadata --locked` sobre o manifesto do fuzz, **no
+    // job `fuzz-curto`** — um passo igual noutro job não confere o lock que o fuzz
+    // vai usar — e vem antes do primeiro alvo: sem ele, o cargo reescreve um lock
+    // atrasado no runner, onde ninguém o comita, e o job passa com o lock errado.
+    let passos = passos_do_job_do_ci("fuzz-curto");
+    let posicao_do_lock = passos.iter().position(|passo| {
+        comando_do_passo(passo).is_some_and(|comando| {
+            let partes: Vec<&str> = comando.split_whitespace().collect();
+            partes.starts_with(&["cargo", "+nightly", "metadata"])
+                && partes.contains(&"--locked")
+                && partes
+                    .windows(2)
+                    .any(|dois| dois == ["--manifest-path", "fuzz/Cargo.toml"])
+        })
+    });
+    let Some(posicao_do_lock) = posicao_do_lock else {
+        panic!(
+            "o job `fuzz-curto` do ci.yml não confere o `fuzz/Cargo.lock` com `cargo +nightly \
+             metadata --locked --manifest-path fuzz/Cargo.toml`: um lock atrasado em relação ao \
+             `seele-proto` seria reescrito no runner e o job passaria. Os passos: {passos:?}"
+        );
+    };
+    let primeiro_alvo = passos.iter().position(|passo| {
+        comando_do_passo(passo).is_some_and(|comando| comando.contains("fuzz run"))
+    });
+    assert!(
+        primeiro_alvo.is_some_and(|primeiro| posicao_do_lock < primeiro),
+        "o job `fuzz-curto` do ci.yml confere o lock do fuzz depois de rodar o primeiro alvo, e \
+         o `cargo fuzz run` já o teria reescrito: o passo do `--locked` vem antes"
+    );
+
+    // **O crash que o fuzz acha tem de sobreviver ao runner.** O libFuzzer grava
+    // o `crash-*` em `fuzz/artifacts/`, e o runner some no fim do job: sem o
+    // upload, quem vê o vermelho fica com o nome do alvo e sem a entrada que o
+    // derrubou. É `uses:` com `if:` e `with:`, e por isso não passa por
+    // `comandos_do_ci`.
+    let achado = passos.iter().enumerate().find(|(_, passo)| {
+        passo
+            .iter()
+            .any(|linha| linha == "uses: actions/upload-artifact@v4")
+    });
+    let Some((posicao_do_upload, upload)) = achado else {
+        panic!(
+            "o job `fuzz-curto` do ci.yml não guarda o que o fuzz acha com \
+             `actions/upload-artifact@v4`: o `crash-*` ficaria no runner, que some no fim do job"
+        );
+    };
+    // A condição inteira, e não um pedaço dela: `${{ !failure() }}` e
+    // `failure() && false` contêm «failure()» e dizem o contrário do que o passo
+    // precisa. `${{ failure() }}` é a mesma coisa que `failure()`, e passa.
+    assert_eq!(
+        condicao_do_passo(upload).as_deref(),
+        Some("failure()"),
+        "o upload do fuzz não tem exatamente `if: failure()`: ou roda sempre, subindo uma \
+         pasta vazia a cada job verde, ou não roda no vermelho, que é o único caso em que há \
+         um crash a guardar. O passo: {upload:?}"
+    );
+    assert!(
+        upload.iter().any(|linha| linha
+            .strip_prefix("path:")
+            .is_some_and(|caminho| caminho.trim().trim_end_matches('/') == "fuzz/artifacts")),
+        "o upload do fuzz não guarda `fuzz/artifacts/`, que é onde o libFuzzer grava o \
+         `crash-*`. O passo: {upload:?}"
+    );
+    // `warn`, e não `ignore`: um caminho errado no `path:` (ou um libFuzzer que
+    // passou a gravar noutra pasta) faria o upload não achar nada, e `ignore`
+    // calaria justamente esse sinal. Com `warn`, um vermelho que não é crash
+    // ganha uma anotação de «nenhum arquivo achado», que é verdade e não custa nada.
+    assert!(
+        upload
+            .iter()
+            .any(|linha| linha == "if-no-files-found: warn"),
+        "o upload do fuzz não tem `if-no-files-found: warn`: com `ignore` (ou `error`) um \
+         `path:` errado não deixaria sinal nenhum, ou reprovaria o job por causa do upload. \
+         O passo: {upload:?}"
+    );
+    let ultimo_alvo = passos.iter().rposition(|passo| {
+        passo
+            .iter()
+            .any(|linha| linha.starts_with("run:") && linha.contains("fuzz run"))
+    });
+    assert!(
+        ultimo_alvo.is_some_and(|ultimo| posicao_do_upload > ultimo),
+        "o upload do fuzz vem antes do último alvo: um crash dele não seria guardado, porque \
+         `failure()` só vale para o que já rodou"
+    );
 }
 
 #[test]

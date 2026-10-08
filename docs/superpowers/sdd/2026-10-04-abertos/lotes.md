@@ -1,5 +1,7 @@
 # Os lotes dos abertos da 1.0
 
+> **Substituído na 0.16** por `docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, reescrito em 08/10 contra `d4eb6f1`, com as âncoras por texto e as decisões de 08/10. Este arquivo fica como registro de 04/10: as linhas abaixo são de `3685a64` e andaram.
+
 Saíram do inventário verificado (`inventario.json`): 65 pontos, um cético por fonte, e uma síntese. A ordem abaixo é a de
 execução, um lote de cada vez neste worktree (a bateria inteira de um lote ocupa a porta UDP 8384).
 

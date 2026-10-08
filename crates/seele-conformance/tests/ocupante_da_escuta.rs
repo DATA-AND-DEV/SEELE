@@ -168,7 +168,7 @@ async fn voltar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Recebido {
     let ocupante = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let ocupante_em = ocupante.local_addr().unwrap();
     ocupante
-        .send_to(&moro(&marcas.escuta), ponto)
+        .send_to(&moro(marcas.escuta()), ponto)
         .await
         .unwrap();
     let mut balde = [0_u8; TAMANHO];
@@ -190,7 +190,7 @@ async fn voltar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Recebido {
         SocketAddr::from((quatro.ip().to_ipv6_mapped(), quatro.port()))
     };
     espelho
-        .send_to(&moro(&marcas.servidor), por_onde)
+        .send_to(&moro(marcas.servidor()), por_onde)
         .expect("o MORO do servidor de X sai pelo espelho");
     esperar_o_quarto(&quarto, 2, "do servidor de X").await;
 
@@ -236,8 +236,8 @@ async fn voltar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Recebido {
         .unwrap();
 
     let (escuta_de_x, ocupante) = tokio::join!(
-        aqui_do_aviso(&escuta_de_x, &marcas.aviso),
-        aqui_do_aviso(&ocupante, &marcas.aviso),
+        aqui_do_aviso(&escuta_de_x, marcas.aviso()),
+        aqui_do_aviso(&ocupante, marcas.aviso()),
     );
     let (conexao, confianca) = entrada.expect("a entrada em X deu certo");
     assert!(

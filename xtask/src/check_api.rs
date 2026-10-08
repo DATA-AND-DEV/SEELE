@@ -30,6 +30,7 @@
 //! cobrança começa na 6.
 
 use std::collections::BTreeSet;
+use std::io::Write;
 use std::process::ExitCode;
 
 /// One MOD-facing name that no longer resolves.
@@ -405,6 +406,56 @@ fn conferir_api(
     }
 }
 
+/// O que o `check-api` diz do que [`conferir_api`] decidiu, e com que código
+/// sai: `Err` escreve cada falha em `erros`, com o prefixo `check-api:`, e sai
+/// com falha; `Ok` escreve o resumo em `saida` e sai com sucesso. A linha de
+/// sucesso nunca sai junto com uma falha.
+///
+/// Fora do [`run`], e com a saída recebida, para que o código de saída e o que
+/// se escreve tenham teste. Quando o braço do `Err` morava dentro do `run`,
+/// trocar o `FAILURE` por `SUCCESS` nele não reprovava teste nenhum.
+///
+/// Um resumo que não consegue ser escrito sai com falha, como o `println!` de
+/// antes, que entrava em pânico: o CI não fica verde sem o log dizer o que foi
+/// conferido. E diz isso, e o porquê, em `erros`, para que o vermelho não
+/// chegue sem nenhuma linha que o explique. Se o próprio `erros` não se
+/// escreve, não há mais por onde dizer, e o código de falha é o que sobra; o
+/// mesmo vale para as falhas de `api/`, cujo código já é de falha.
+fn relatar(
+    resultado: Result<Resumo, Vec<String>>,
+    n_momentos: usize,
+    n_eventos: usize,
+    saida: &mut impl Write,
+    erros: &mut impl Write,
+) -> ExitCode {
+    match resultado {
+        Ok(Resumo { versoes, cobradas }) => {
+            let escrito = writeln!(
+                saida,
+                "check-api: toda a superfície de MOD ainda aponta para algo ({versoes} \
+                 versão(ões)); `momento_de` despacha {n_momentos} momento(s) e a janela, \
+                 {n_eventos} evento(s), cobrados em {cobradas} versão(ões) a partir da \
+                 {PRIMEIRA_API_COBRADA}."
+            );
+            match escrito {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(erro) => {
+                    // Se nem o erro se escreve, não há mais por onde dizer; o
+                    // código de falha é o que sobra.
+                    let _ = writeln!(erros, "check-api: não deu para escrever o resumo ({erro})");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Err(falhas) => {
+            for falha in &falhas {
+                let _ = writeln!(erros, "check-api: {falha}");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// Reads `api/*.json` and every crate source, and reports orphans.
 ///
 /// E, a partir da API 6, cobra de cada versão que o que ela promete em
@@ -464,24 +515,13 @@ pub(crate) fn run() -> ExitCode {
     };
     let entradas = entradas.map(|entrada| entrada.map(|entrada| entrada.path()));
 
-    match conferir_api(entradas, &fonte, &promessas) {
-        Ok(Resumo { versoes, cobradas }) => {
-            println!(
-                "check-api: toda a superfície de MOD ainda aponta para algo ({versoes} \
-                 versão(ões)); `momento_de` despacha {} momento(s) e a janela, {} evento(s), \
-                 cobrados em {cobradas} versão(ões) a partir da {PRIMEIRA_API_COBRADA}.",
-                momentos.len(),
-                eventos.len()
-            );
-            ExitCode::SUCCESS
-        }
-        Err(falhas) => {
-            for falha in &falhas {
-                eprintln!("check-api: {falha}");
-            }
-            ExitCode::FAILURE
-        }
-    }
+    relatar(
+        conferir_api(entradas, &fonte, &promessas),
+        momentos.len(),
+        eventos.len(),
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
 }
 
 /// Concatenates every source file under `dir` that the façade can point into.
@@ -961,6 +1001,71 @@ fn vizinha(x: u8) -> (&'static str, u8) {
         );
     }
 
+    /// Um `.json` de `api/` que não é json reprova, dizendo qual. Sem o `push`
+    /// dele, o `continue` seguinte descartava o arquivo calado: a versão ficava
+    /// sem cobrança, o resumo contava uma a menos e o `check-api` saía com 0.
+    #[test]
+    fn um_json_de_api_que_nao_e_json_reprova_o_check_api_dizendo_qual() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let dir = pasta_com("json-quebrado", &[("v7.json", "{")]);
+        let caminho = dir.join("v7.json");
+        let resultado = conferir_api(
+            [Ok(caminho.clone())],
+            "",
+            &promessas_cobradas(&momentos, &eventos),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let Err(linhas) = resultado else {
+            panic!(
+                "um `v7.json` que contém só `{{` foi aprovado: a versão ficaria sem cobrança \
+                 calada, o resumo contaria uma a menos e o `check-api` sairia com 0. Veio \
+                 {resultado:?}"
+            );
+        };
+        assert!(
+            linhas.len() == 1
+                && linhas.first().is_some_and(
+                    |l| l.contains("não é json") && l.contains(&caminho.display().to_string())
+                ),
+            "o `check-api` reprovou o `v7.json` que não é json sem dizer que não é json, ou sem \
+             dizer qual arquivo: quem lê não saberia o que abrir. Vieram {linhas:?}"
+        );
+    }
+
+    /// Um `.json` de `api/` que o `read_dir` listou e que já não se abre
+    /// reprova, dizendo qual. Sem o `push` dele, o arquivo sumia da conta do
+    /// mesmo jeito que o que não é json.
+    #[test]
+    fn um_json_de_api_que_nao_se_abre_reprova_o_check_api_dizendo_qual() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let dir = pasta_com("json-que-sumiu", &[]);
+        let caminho = dir.join("v8.json");
+        let resultado = conferir_api(
+            [Ok(caminho.clone())],
+            "",
+            &promessas_cobradas(&momentos, &eventos),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let Err(linhas) = resultado else {
+            panic!(
+                "um `v8.json` que o `read_dir` listou e que não existe foi aprovado: a versão \
+                 ficaria sem cobrança calada, o resumo contaria uma a menos e o `check-api` \
+                 sairia com 0. Veio {resultado:?}"
+            );
+        };
+        assert!(
+            linhas.len() == 1
+                && linhas
+                    .first()
+                    .is_some_and(|l| l.contains("não deu para ler")
+                        && l.contains(&caminho.display().to_string())),
+            "o `check-api` reprovou o `v8.json` que não se abre sem dizer que não deu para ler, \
+             ou sem dizer qual arquivo: quem lê não saberia o que abrir. Vieram {linhas:?}"
+        );
+    }
+
     /// Uma entrada de `api/` que não se lê reprova, dizendo o erro, em vez de
     /// sumir e levar junto a cobrança da versão que ela fosse. É o que
     /// `hashes_dos_json`, no guarda de congelamento, faz com o mesmo erro.
@@ -1024,6 +1129,137 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             }),
             "uma `api/` que cumpre tudo não passou, ou o resumo contou errado: o `check-api` \
              reprovaria a árvore sem nada a consertar, ou diria que cobrou versões que não cobrou"
+        );
+    }
+
+    /// A saída do `check-api` quando `api/` reprova: o código é de falha, cada
+    /// falha sai no erro com o prefixo `check-api:`, e a linha de sucesso **não
+    /// sai**. É o defeito que a decisão antes morava no `run` deixava passar
+    /// (imprimir a violação, a linha de sucesso logo depois e sair com 0), e
+    /// que nenhum teste via porque o braço do `Err` nunca tinha teste.
+    #[test]
+    fn o_check_api_que_reprova_sai_com_falha_e_diz_cada_falha_no_erro() {
+        let mut saida = Vec::new();
+        let mut erros = Vec::new();
+        let codigo = relatar(
+            Err(vec![
+                "api/v6.json — a promessa `arrastar` não tem quem despache".to_owned(),
+                "api/v7.json não é json".to_owned(),
+            ]),
+            5,
+            16,
+            &mut saida,
+            &mut erros,
+        );
+        let saida = String::from_utf8_lossy(&saida);
+        let erros = String::from_utf8_lossy(&erros);
+        assert_eq!(
+            codigo,
+            ExitCode::FAILURE,
+            "o `check-api` achou duas falhas em `api/` e saiu com 0: o CI ficaria verde com a \
+             API quebrada"
+        );
+        assert_eq!(
+            erros.lines().collect::<Vec<_>>(),
+            [
+                "check-api: api/v6.json — a promessa `arrastar` não tem quem despache",
+                "check-api: api/v7.json não é json",
+            ],
+            "o `check-api` não disse cada falha no erro, uma por linha e com o prefixo \
+             `check-api:`: quem lê o log do CI não saberia o que consertar"
+        );
+        assert!(
+            saida.is_empty(),
+            "o `check-api` reprovou e imprimiu a linha de sucesso logo depois: quem lê o log do \
+             CI leria que a superfície de MOD está em ordem. Saiu {saida:?}"
+        );
+    }
+
+    /// O outro lado: `api/` que cumpre sai com 0 e diz o resumo — as versões,
+    /// os momentos, os eventos e as cobradas — na saída, sem nada no erro.
+    #[test]
+    fn o_check_api_que_aprova_sai_com_sucesso_e_diz_o_resumo() {
+        let mut saida = Vec::new();
+        let mut erros = Vec::new();
+        let codigo = relatar(
+            Ok(Resumo {
+                versoes: 7,
+                cobradas: 2,
+            }),
+            5,
+            16,
+            &mut saida,
+            &mut erros,
+        );
+        let saida = String::from_utf8_lossy(&saida);
+        let erros = String::from_utf8_lossy(&erros);
+        assert_eq!(
+            codigo,
+            ExitCode::SUCCESS,
+            "o `check-api` aprovou `api/` e saiu com falha: o CI ficaria vermelho sem nada a \
+             consertar"
+        );
+        for pedaco in [
+            "check-api: toda a superfície de MOD ainda aponta para algo",
+            "(7 versão(ões))",
+            "despacha 5 momento(s)",
+            "a janela, 16 evento(s)",
+            "cobrados em 2 versão(ões) a partir da 6",
+        ] {
+            assert!(
+                saida.contains(pedaco),
+                "o resumo do `check-api` perdeu «{pedaco}»: quem lê o log do CI não saberia o \
+                 que foi conferido. Saiu {saida:?}"
+            );
+        }
+        assert!(
+            erros.is_empty(),
+            "o `check-api` aprovou e escreveu no erro: o log do CI mostraria um aviso onde não \
+             há nada a consertar. Saiu {erros:?}"
+        );
+    }
+
+    /// Um resumo que não consegue ser escrito não é um `check-api` que passou:
+    /// quem lê o log ficaria sem saber o que foi conferido. `println!` entrava
+    /// em pânico nesse caso, e o código de saída nunca era 0. E a falha não sai
+    /// calada: o erro diz que não deu para escrever o resumo e por quê, para que
+    /// o vermelho do CI não chegue sem nenhuma linha que o explique.
+    #[test]
+    fn o_check_api_que_nao_consegue_dizer_o_resumo_nao_sai_com_sucesso() {
+        /// Uma saída que recusa tudo, como um cano quebrado.
+        struct Quebrada;
+        impl std::io::Write for Quebrada {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("cano quebrado provocado pelo teste"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut erros = Vec::new();
+        let codigo = relatar(
+            Ok(Resumo {
+                versoes: 1,
+                cobradas: 0,
+            }),
+            5,
+            16,
+            &mut Quebrada,
+            &mut erros,
+        );
+        assert_eq!(
+            codigo,
+            ExitCode::FAILURE,
+            "o `check-api` não conseguiu escrever o resumo e saiu com 0: o CI ficaria verde sem \
+             o log dizer o que foi conferido"
+        );
+        let erros = String::from_utf8_lossy(&erros);
+        assert!(
+            erros.starts_with("check-api: não deu para escrever o resumo")
+                && erros.contains("cano quebrado provocado pelo teste"),
+            "o `check-api` saiu com falha por não conseguir escrever o resumo e não disse isso \
+             nem o porquê no erro: o vermelho do CI chegaria sem nenhuma linha que o explique. \
+             Saiu {erros:?}"
         );
     }
 

@@ -654,8 +654,19 @@ fn linha_ja_cortada(
 /// só, quando entra na espera: cortada de novo na saída, ela perderia o aviso
 /// do primeiro corte, que diz o tamanho do que o MOD lançou, e ganharia outro
 /// com o tamanho já cortado.
+///
+/// Visível no crate porque a frase da janela (`registrar_da_janela`, em
+/// `main.rs`) é cortada por aqui também; o campo continua privado, e quem está
+/// fora do executor só a lê ([`LinhaCortada::texto`]).
 #[derive(Debug)]
-struct LinhaCortada(String);
+pub(crate) struct LinhaCortada(String);
+
+impl LinhaCortada {
+    /// O texto já cortado, com o aviso do corte quando houve um.
+    pub(crate) fn texto(&self) -> &str {
+        &self.0
+    }
+}
 
 /// O nível de uma linha que o MOD escreveu com `console`.
 ///
@@ -702,7 +713,10 @@ impl NivelDoConsole {
 /// **O teto é o da janela**: [`crate::TETO_DA_FRASE_NO_REGISTRO`], os 512
 /// caracteres que `registrar_da_janela` já aplicava ao que a janela escreve.
 /// As duas portas põem no mesmo `seele.log` texto que um terceiro escolheu, e
-/// uma não pode ser mais larga que a outra.
+/// uma não pode ser mais larga que a outra. **E o corte é este mesmo nas
+/// duas**: a janela também escreve a frase em `?` (`frase = ?…`), e a corta
+/// aqui, com o aviso — e não com um `take` de 512 caracteres contado antes do
+/// escape, que deixava a frase ocupar até dez vezes o teto.
 ///
 /// **Não é o [`TETO_DA_MENSAGEM`]**, que foi o primeiro candidato: doze
 /// kibibytes por linha, num MOD que escreve em laço, são megabytes por minuto
@@ -721,7 +735,7 @@ impl NivelDoConsole {
 /// O corte é o de [`ate_o_teto_do_registro`], a regra que as outras portas que
 /// escapam texto de terceiro também usam. O aviso do corte conta os caracteres
 /// que o MOD escreveu.
-fn cortar_linha_do_console(texto: String) -> LinhaCortada {
+pub(crate) fn cortar_linha_do_console(texto: String) -> LinhaCortada {
     let cabe = ate_o_teto_do_registro(&texto);
     if cabe.len() == texto.len() {
         return LinhaCortada(texto);
@@ -735,13 +749,15 @@ fn cortar_linha_do_console(texto: String) -> LinhaCortada {
 /// **O começo de `texto` que cabe no teto de uma frase do registro**, contado
 /// pelo tamanho que ele tem lá, já escapado ([`tamanho_no_registro`]).
 ///
-/// Uma regra só para as três portas que escrevem texto de terceiro escapado
-/// pelo `Debug` de um `str`: o `console` do MOD ([`cortar_linha_do_console`]),
-/// e o motivo e o caminho de uma mídia de MOD (`motivo_no_registro` e
-/// `caminho_no_registro`, em `main.rs`). Cortado **antes** do escape, um
-/// pedaço de 512 caracteres que não se imprimem chegava a 5120 no registro;
-/// cortado por aqui, nenhuma das três passa do teto, e o mesmo texto sai do
-/// mesmo tamanho por qualquer uma delas.
+/// Uma regra só para as quatro portas que escrevem texto de terceiro escapado
+/// pelo `Debug` de um `str`: o `console` do MOD e a frase da janela
+/// (`registrar_da_janela`, em `main.rs`), as duas por
+/// [`cortar_linha_do_console`], com o aviso do corte; e o motivo e o caminho
+/// de uma mídia de MOD (`motivo_no_registro` e `caminho_no_registro`, em
+/// `main.rs`). Cortado **antes** do escape, um pedaço de 512 caracteres que
+/// não se imprimem chegava a 5120 no registro; cortado por aqui, nenhuma das
+/// quatro passa do teto, e o mesmo texto sai do mesmo tamanho por qualquer uma
+/// delas.
 ///
 /// Caractere a caractere, e não por bytes: parar antes do caractere que não
 /// cabe respeita a fronteira dele por construção, e cortar por bytes pediria

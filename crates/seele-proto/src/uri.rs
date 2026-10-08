@@ -268,10 +268,13 @@ impl Bilhete {
     /// # Errors
     ///
     /// O mesmo [`ErroDeUri`] de um alvo torto: este texto acaba num `send_to`
-    /// como qualquer outro endereço do convite.
+    /// como qualquer outro endereço do convite. O ponto passa pela regra de
+    /// [`separar_ponto`], a mesma de [`Bilhete::ponto`], e por isso o ponto
+    /// vazio é recusado aqui, como [`Bilhete::ler`] já o recusava: um bilhete
+    /// que este construtor aceita sempre separa o ponto.
     pub fn novo(ponto: impl Into<String>, aviso: impl Into<String>) -> Result<Self, ErroDeUri> {
         let (ponto, aviso) = (ponto.into(), aviso.into());
-        validar_alvo(&ponto)?;
+        separar_ponto(&ponto)?;
         validar_alvo(&aviso)?;
         Ok(Self { ponto, aviso })
     }
@@ -565,8 +568,14 @@ pub fn separar(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
 ///
 /// # Errors
 ///
-/// O mesmo [`ErroDeUri`] de um alvo torto: este texto acaba num `send_to`.
+/// O mesmo [`ErroDeUri`] de um alvo torto: este texto acaba num `send_to`. E
+/// [`ErroDeUri::EnderecoInvalido`] para o texto vazio, que `validar_alvo` deixa
+/// passar: sem isto ele ia ao DNS como um nome, e a consulta ao quarto dizia
+/// que o ponto «não resolveu», culpando o DNS por um link sem ponto.
 pub fn separar_ponto(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
+    if alvo.is_empty() {
+        return Err(ErroDeUri::EnderecoInvalido);
+    }
     validar_alvo(alvo)?;
     separar_com(alvo, crate::encontro::PORTA_PADRAO)
 }
@@ -952,6 +961,37 @@ mod tests {
             bilhete.ponto(),
             separar_ponto("encontro.seele.app.br"),
             "o bilhete e o texto solto separam o mesmo ponto de maneiras diferentes"
+        );
+    }
+
+    #[test]
+    fn um_ponto_vazio_nao_e_um_ponto_de_encontro() {
+        // O T5d da pendência 51, item 17. O texto vazio passava por
+        // `validar_alvo` e virava `Alvo { maquina: "", porta: 8384 }`, que ia
+        // ao DNS. Medido neste Mac em 08/10/2026, o `getaddrinfo` do Rust
+        // recusa o nome vazio («nodename nor servname provided»), e a consulta
+        // ao quarto dizia no log que o ponto «não resolveu»: um link sem ponto
+        // aparecia como DNS com defeito. Recusado aqui, ele é dito como o que
+        // é, um texto que não é endereço.
+        assert_eq!(
+            separar_ponto(""),
+            Err(ErroDeUri::EnderecoInvalido),
+            "um ponto vazio virou ponto de encontro: ele vai ao DNS, e o log culpa o DNS por um \
+             link sem ponto"
+        );
+        // E o bilhete recusa junto, como `Bilhete::ler` já recusava. Sem isto,
+        // `Bilhete::novo("", …)` dava `Ok`, e o doc de `Bilhete::ponto` («não
+        // falha para um bilhete que veio de `Bilhete::novo`») passava a mentir.
+        assert_eq!(
+            Bilhete::novo("", "198.51.100.7:41234"),
+            Err(ErroDeUri::EnderecoInvalido),
+            "um bilhete de ponto vazio foi montado: `Bilhete::ponto` falha para um bilhete que \
+             veio de `Bilhete::novo`, contra o doc dele"
+        );
+        assert_eq!(
+            Bilhete::ler("/198.51.100.7:41234"),
+            Err(ErroDeUri::BilheteInvalido),
+            "o bilhete do link de ponto vazio deixou de ser recusado"
         );
     }
 
