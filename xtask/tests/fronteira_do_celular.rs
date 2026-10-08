@@ -104,7 +104,7 @@ fn o_ci_roda_os_crates_do_celular_dentro_do_wasm() {
         .map(str::trim)
         .collect();
     assert!(
-        comandos.iter().any(|c| *c == "cargo xtask web"),
+        comandos.contains(&"cargo xtask web"),
         "o ci.yml não roda `cargo xtask web`: o teto de memória do motor do celular e os \
          bytes-ouro no .wasm viram guardas que ninguém roda"
     );

@@ -597,6 +597,12 @@ fn todo_crate_do_produto_pode_falar_no_log() {
         if nome == "seele_tui" || nome == "seele_conformance" {
             continue;
         }
+        // Estes dois entram no web app do celular, e nunca no app de desktop
+        // cujo filtro este teste confere: rodam em `wasm`, dentro do navegador,
+        // e o registro deles é o canal de diagnóstico da página (ADR 0057).
+        if nome == "seele_web" || nome == "seele_motor_web" {
+            continue;
+        }
         if !fonte.contains(&format!("{nome}=info")) {
             faltando.push(nome);
         }
