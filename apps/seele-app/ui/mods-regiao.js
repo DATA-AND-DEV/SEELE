@@ -497,7 +497,8 @@ class RegiaoDeMod {
    * - `carregarMidia(caminho)` e `carregarMidiaDoServidor(canal, pedido,
    *   campo)`: a mídia do pacote e a do servidor do MOD, com o papel e os bytes.
    * - `bytesDoSom(caminho)`: os bytes crus de um som do pacote, para o WebAudio.
-   *   Sem ele, todo som do pacote chega ao MOD como `falhou`.
+   *   Sem ele, todo som do pacote chega ao MOD como `falhou`, com o motivo
+   *   «o dono desta região não oferece bytesDoSom» (ver `carregarSom`).
    * - `escolherArquivo(pedido)`: o seletor da forma `arquivo`.
    * - `abrirEndereco(url, chave)`: o endereço de um `link`, fora da janela.
    *
@@ -2647,6 +2648,14 @@ class RegiaoDeMod {
     // nasce quando alguém toca: ver `contextoDeSomDeMod`.
     if (!janelaTocaSomDeMod()) {
       falhou("esta janela não oferece WebAudio");
+      return;
+    }
+    // **O dono que não oferece `bytesDoSom` é dito pelo nome** (P51-25): o
+    // som de um laboratório com um dono escrito antes do som chegava ao MOD
+    // com o `TypeError` do motor, que diz onde a janela tropeçou, e não o
+    // que falta no dono.
+    if (!origem.uri && typeof this.dono.bytesDoSom !== "function") {
+      falhou("o dono desta região não oferece bytesDoSom");
       return;
     }
     let bytes;

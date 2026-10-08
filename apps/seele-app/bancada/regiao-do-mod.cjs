@@ -4472,6 +4472,40 @@ async function oSomDaContribuicaoMudaDeDestino() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 19. O dono sem `bytesDoSom` diz por quê.
+// ---------------------------------------------------------------------------
+
+/**
+ * P51-25, a parte desta janela. `bytesDoSom` é obrigatório no contrato do dono
+ * (ver o construtor de `RegiaoDeMod`), e os laboratórios dos MODs publicados
+ * carregam a região com um dono deles. Um dono escrito antes do som chegava ao
+ * MOD como `falhou` com o `TypeError` do motor — «this.dono.bytesDoSom is not a
+ * function» —, que diz a quem escreve o laboratório onde a janela tropeçou, e
+ * não o que falta no dono dele.
+ */
+async function oDonoSemBytesDoSomDizPorQue() {
+  const caso = "o dono sem bytesDoSom";
+  const b = bancada();
+  const d = dono(b, () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }));
+  delete d.api.bytesDoSom;
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
+  await assentar();
+  const dito = d.ditos.find((e) => e.nome === "midia" && e.chave === "m" && e.estado === "falhou");
+  confere(
+    caso,
+    dito?.porque === "o dono desta região não oferece bytesDoSom",
+    `um dono sem \`bytesDoSom\` fez o som chegar ao MOD com o tropeço do motor, e não com o que falta: ${JSON.stringify(dito)}`,
+  );
+  confere(
+    caso,
+    d.anotadas.some((t) => t.includes("«m»") && t.includes("não oferece bytesDoSom")),
+    `o som sem \`bytesDoSom\` não chegou ao registro com o que falta: ${JSON.stringify(d.anotadas)}`,
+  );
+  regiao.soltar();
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -4516,6 +4550,7 @@ async function oSomDaContribuicaoMudaDeDestino() {
     oSomQueSaiDaTelaParaComoOAudioParava,
     oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar,
     oSomDaContribuicaoMudaDeDestino,
+    oDonoSemBytesDoSomDizPorQue,
   ];
   for (const prova of provas) {
     try {
