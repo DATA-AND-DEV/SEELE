@@ -333,6 +333,28 @@ async fn par_cru(endereco: SocketAddr, semente: u8) -> Result<ParCru> {
     })
 }
 
+/// O teto que este teste passa a [`Hospedagem::despedir`].
+const TETO_DA_DESPEDIDA: Duration = Duration::from_millis(800);
+
+/// Quanto a mais a linha de quem hospeda pode levar depois do teto: o runtime
+/// cair e a linha de execução terminar.
+const FOLGA_DA_DESPEDIDA: Duration = Duration::from_millis(200);
+
+/// A despedida da saída do app: o aviso e o fechamento chegam **antes** de o
+/// runtime de quem hospeda cair, e `despedir` volta dentro do teto.
+///
+/// # A prova do `wait_idle` depende da máquina
+///
+/// Tirar o `wait_idle` do `despedir` reprova este teste **nesta** máquina,
+/// medido no lote G-servidor: quem estava no meio do aperto de mão só vê a
+/// conexão fechar pelo tempo ocioso, em 20,004 s. A reprovação depende de nada
+/// mais deixar o runtime rodar entre o `shutdown` e a queda. O passo seguinte do
+/// `despedir`, `escada.descer()`, devolve a porta do roteador quando o degrau 3
+/// abriu uma: numa rede com UPnP que respondeu, ele faz E/S de rede, o runtime
+/// roda o driver do endpoint enquanto espera, e o fechamento pode sair sem o
+/// `wait_idle`. Ali a reversão pode passar verde sem que o `wait_idle` tenha
+/// deixado de importar — ele é o que segura a ordem quando o roteador não tem
+/// nada a devolver.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()> {
     let _vaga = vaga::minha();
@@ -356,10 +378,13 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
                 .send(hospedagem.endereco().port())
                 .expect("o teste espera a porta");
             let _ = fechar_rx.await;
-            hospedagem.despedir(Duration::from_millis(800)).await;
+            hospedagem.despedir(TETO_DA_DESPEDIDA).await;
         });
         // A linha seguinte: o runtime cai, e com ele toda tarefa do servidor.
         drop(runtime);
+        // Quando a linha de quem hospeda acabou, para o teste medir contra o
+        // começo da despedida.
+        Instant::now()
     });
     let porta = tokio::task::spawn_blocking(move || porta_rx.recv())
         .await?
@@ -412,13 +437,15 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
         .ok()
         .and_then(Result::ok)
         .flatten();
-    anfitriao
+    let acabou = anfitriao
         .join()
         .expect("a linha de quem hospeda terminou sem pânico");
+    let a_despedida_levou = acabou.saturating_duration_since(comeco);
     // A medida, no registro da rodada: quanto do teto o fechamento usou.
     eprintln!(
         "quem_hospeda_fecha: aviso {aviso:?}; a sessão fechou em {levou:?} ({fechou:?}); quem \
-         entrava fechou em {levou_entrando:?} ({fechou_entrando:?})"
+         entrava fechou em {levou_entrando:?} ({fechou_entrando:?}); a despedida voltou e o \
+         runtime caiu em {a_despedida_levou:?}"
     );
 
     assert_eq!(
@@ -443,6 +470,16 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
     assert!(
         matches!(erro, quinn::ConnectionError::ApplicationClosed(_)),
         "a conexão fechou por outra coisa que não o servidor se despedindo: {erro}"
+    );
+
+    // O teto é a promessa de `despedir` a quem fecha o app: a casca segura o
+    // `ExitRequested` por ele, e uma despedida que passasse dele seguraria a
+    // janela fechando.
+    assert!(
+        a_despedida_levou < TETO_DA_DESPEDIDA + FOLGA_DA_DESPEDIDA,
+        "`despedir({TETO_DA_DESPEDIDA:?})` levou {a_despedida_levou:?} até o runtime cair: \
+         passou do teto mais {FOLGA_DA_DESPEDIDA:?}, e a saída do app espera a despedida \
+         inteira"
     );
 
     let Ok(erro_de_quem_entrava) = fechou_entrando else {

@@ -146,7 +146,10 @@ impl Hospedagem {
         // tentado. Fora deles, nada. Ver
         // `crate::alcance::encontro::recusar_a_producao`.
         if let Some(convocacao) = &convocacao {
-            crate::alcance::encontro::recusar_a_producao(&convocacao.ponto);
+            crate::alcance::encontro::recusar_a_producao(
+                &convocacao.ponto,
+                "Hospedagem::iniciar, antes da escada",
+            );
         }
         let escada = crate::alcance::Escada::subir(
             crate::alcance::Escuta::nova(endereco.port(), server.pilha()),
@@ -425,7 +428,9 @@ impl Hospedagem {
     ///    terminar de mandar o fechamento das conexões que o prazo do aviso
     ///    deixou para trás. Sem ele, o runtime cai com esse fechamento na fila,
     ///    e quem estava conectado só descobre pelos 20 s do tempo ocioso do
-    ///    transporte;
+    ///    transporte. Ele pode voltar pelo próprio prazo, numa rede longe, com
+    ///    conexões ainda drenando: o fechamento delas já saiu, e o dreno só
+    ///    responde a pacotes atrasados;
     /// 3. **o roteador**, o último quarto: devolver a porta pedida pelo degrau
     ///    3. Uma regra que sobra só some quando o prazo dela vence.
     ///
@@ -461,13 +466,19 @@ impl Hospedagem {
 /// Quanto o SAIR de quem hospeda espera, no máximo, cada sessão ler que o
 /// servidor está encerrando.
 ///
-/// Meio segundo. Numa rede de casa a despedida leva uma ida e volta e a
-/// confirmação de entrega, dezenas de milissegundos, e o endpoint já fica
-/// ocioso antes disso. O teto existe para quem não se despede — alguém no meio
-/// do aperto de mão, um par que não confirma a entrega —, e é ele que quem
-/// aperta SAIR paga no pior caso. O `session::despedir` espera até 1 s pela
-/// entrega de cada sessão; com o prazo menor que isso, uma sessão lenta não
-/// segura o SAIR, e é fechada pelo `shutdown` do fim.
+/// Meio segundo. A despedida de uma sessão é o `Disconnecting` e a
+/// confirmação de entrega: uma ida e volta. O endpoint, porém, só fica ocioso
+/// depois que cada conexão fechada cumpre o dreno do QUIC, três PTO — no laço
+/// local, milissegundos; numa internet com RTT de umas poucas dezenas de
+/// milissegundos, mais que este prazo. Ver [`Daemon::encerrar_avisando`]. Então
+/// o teto é pago inteiro em dois casos: por quem não se despede (alguém no
+/// meio do aperto de mão, um par que não confirma a entrega), e pelo dreno de
+/// quem já se despediu numa rede longe. No segundo caso o aviso já chegou, e o
+/// `shutdown` do fim não muda nada para aquela sessão.
+///
+/// O `session::despedir` espera até 1 s pela entrega de cada sessão; com o
+/// prazo menor que isso, uma sessão lenta não segura o SAIR, e é fechada pelo
+/// `shutdown` do fim.
 const PRAZO_DO_AVISO: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Drop for Hospedagem {
@@ -757,5 +768,21 @@ mod tests {
             "a porta continuou presa: {:?}",
             segunda.err()
         );
+    }
+
+    /// O guarda de `iniciar` dispara, e é **ele** que dispara.
+    ///
+    /// `$SEELE_ENCONTRO` aponta um IP da VPS de produção, e não o nome: nem
+    /// com este guarda desfeito há consulta de DNS. Desfeito, o que pega é o
+    /// guarda de `resolver`, antes do primeiro pacote, e a frase dele diz
+    /// outro lugar — o `expected` não casa, e o teste reprova. Numa máquina
+    /// com IPv4 global o degrau 4 nem é tentado, e o teste reprova por não
+    /// haver pânico. Nos dois casos nenhum pacote sai para a VPS.
+    #[tokio::test]
+    #[should_panic(expected = "pego em Hospedagem::iniciar, antes da escada")]
+    async fn o_guarda_de_iniciar_pega_o_ponto_de_producao_antes_da_escada() {
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.pedir(crate::alcance::encontro::REDE_DO_PADRAO[1]);
+        let _ = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(())).await;
     }
 }

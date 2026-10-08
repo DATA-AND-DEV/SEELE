@@ -947,10 +947,20 @@ impl Daemon {
     /// conta), e o endpoint já é quem sabe quantas conexões há.
     ///
     /// O prazo é o teto, e não a espera de sempre: sem ninguém conectado o
-    /// endpoint já está ocioso, e isto volta na hora. Quem o gasta inteiro é
-    /// uma conexão que não se despede — uma ainda no aperto de mão, que não
-    /// assinou o barramento, ou um par que não confirma a entrega. Essa é
-    /// fechada sem aviso pelo [`Self::shutdown`] do fim.
+    /// endpoint já está ocioso, e isto volta na hora. Ele vence em dois casos,
+    /// e o endpoint não distingue um do outro:
+    ///
+    /// - **uma conexão que não se despede** — uma ainda no aperto de mão, que
+    ///   não assinou o barramento, ou um par que não confirma a entrega. Essa
+    ///   é fechada sem aviso pelo [`Self::shutdown`] do fim;
+    /// - **uma sessão que já se despediu e ainda conta.** Uma conexão fechada
+    ///   fica no endpoint pelo dreno do QUIC, três PTO, e um PTO é o RTT
+    ///   suavizado, mais quatro vezes a variação, mais os 25 ms de atraso de
+    ///   confirmação. No laço local isso são milissegundos; numa internet com
+    ///   RTT de umas poucas dezenas de milissegundos (perto de 50 a 70 ms,
+    ///   conforme a variação), passa de meio segundo. Essa sessão já leu o
+    ///   aviso, o fechamento dela já saiu, e o `shutdown` não muda nada para
+    ///   ela.
     ///
     /// # O que isto não faz
     ///
@@ -971,10 +981,13 @@ impl Daemon {
             .await
             .is_err()
         {
+            // O que se sabe, e só isso: o endpoint conta as conexões ainda
+            // drenando junto com as que não se despediram. Ver o doc acima.
             tracing::info!(
                 conexoes = self.endpoint.open_connections(),
                 ?prazo,
-                "o prazo da despedida acabou com conexões ainda abertas; elas fecham sem aviso"
+                "o prazo da despedida acabou com conexões ainda no endpoint: fechando depois do \
+                 aviso, ou sem ter se despedido (estas fecham agora, sem aviso)"
             );
         }
         self.shutdown();

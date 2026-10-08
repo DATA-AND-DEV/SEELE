@@ -102,7 +102,7 @@ pub const PONTO_PADRAO: &str = "encontro.seele.app.br";
 /// máquina de um desconhecido sempre que o DNS falhasse — e ela aprenderia que
 /// endereço falou com que endereço, que é exatamente o metadado que este ADR
 /// pesa em voz alta.
-const REDE_DO_PADRAO: [&str; 2] = [
+pub(crate) const REDE_DO_PADRAO: [&str; 2] = [
     "[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384",
     "216.128.168.216:8384",
 ];
@@ -577,7 +577,7 @@ async fn resolver(
     };
 
     // Nos testes, antes do DNS: ver [`recusar_a_producao`].
-    recusar_a_producao(texto);
+    recusar_a_producao(texto, "alcance::encontro::resolver, antes do DNS");
 
     // Com prazo: um DNS que não responde é a outra forma de o degrau 4 segurar
     // quem apertou HOSPEDAR, e ele não pode segurar ninguém.
@@ -654,6 +654,25 @@ fn rede_do_padrao() -> Option<SocketAddr> {
     candidatos.first().copied()
 }
 
+// A feature do guarda nunca entra num build otimizado.
+//
+// O resolvedor 2 já a deixa fora do binário do produto, e isto foi medido
+// (`cargo check --release`, `features=[]`). Medido não é impedido: um
+// `--features` a mais num script de empacotamento, ou uma dependência normal
+// que a peça por engano, poria no produto um servidor que entra em pânico ao
+// hospedar com o ponto padrão — que é o caso comum de quem hospeda. Este erro
+// faz esse build não compilar.
+//
+// O preço é que os testes do `seele-conformance` não rodam em `--release`.
+// Nenhum roda assim hoje.
+#[cfg(all(feature = "recusar-encontro-de-producao", not(debug_assertions)))]
+compile_error!(
+    "a feature `recusar-encontro-de-producao` é só de teste e não pode ir num build otimizado: \
+     com ela, hospedar com o ponto de encontro padrão entra em pânico. Ela vem da \
+     `[dev-dependencies]` do `seele-conformance`; quem a ligou num build de release está \
+     empacotando o guarda dos testes junto com o produto"
+);
+
 /// O guarda dos testes: nenhum deles fala com o ponto de encontro de produção.
 ///
 /// # O defeito que ele segura
@@ -691,23 +710,25 @@ fn rede_do_padrao() -> Option<SocketAddr> {
 /// Os testes de `tests/` deste crate só a têm quando rodam junto com o
 /// `seele-conformance` (`cargo test --workspace`): ver o `Cargo.toml`.
 ///
-/// `#[track_caller]`: o pânico aponta a linha de quem chamou, e é ela que diz
-/// qual dos dois lugares pegou o teste.
+/// `onde` vai na frase do pânico, e é ele que diz qual dos dois lugares pegou o
+/// teste: um teste que prova um dos guardas casa com ele, e o outro guarda
+/// pegando no lugar não passa por este. `#[track_caller]` aponta a linha de
+/// quem chamou, para quem lê o pânico.
 #[cfg(any(test, feature = "recusar-encontro-de-producao"))]
 #[track_caller]
-pub(crate) fn recusar_a_producao(ponto: &str) {
+pub(crate) fn recusar_a_producao(ponto: &str, onde: &str) {
     assert!(
         !aponta_para_a_producao(ponto),
-        "um teste ia falar com o ponto de encontro de produção («{ponto}»): cada rodada \
-         registraria um servidor de teste no quarto da VPS de produção e deixaria lá o IP desta \
-         máquina, e o teste passaria a depender da rede de fora. Aponte um ponto local, ou desligue \
-         o degrau 4 com `{VARIAVEL}=nao`, pelo `AmbienteDoEncontro` do teste"
+        "um teste ia falar com o ponto de encontro de produção («{ponto}», pego em {onde}): cada \
+         rodada registraria um servidor de teste no quarto da VPS de produção e deixaria lá o IP \
+         desta máquina, e o teste passaria a depender da rede de fora. Aponte um ponto local, ou \
+         desligue o degrau 4 com `{VARIAVEL}=nao`, pelo `AmbienteDoEncontro` do teste"
     );
 }
 
 /// Fora dos testes, nada: ver a versão ligada logo acima.
 #[cfg(not(any(test, feature = "recusar-encontro-de-producao")))]
-pub(crate) fn recusar_a_producao(_ponto: &str) {}
+pub(crate) fn recusar_a_producao(_ponto: &str, _onde: &str) {}
 
 /// Se este texto de ponto é o de produção: o [`PONTO_PADRAO`], escrito como
 /// for, ou um dos IPs de [`REDE_DO_PADRAO`], em qualquer porta.
@@ -2698,7 +2719,7 @@ mod testes {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "ponto de encontro de produção")]
+    #[should_panic(expected = "pego em alcance::encontro::resolver, antes do DNS")]
     async fn resolver_o_ip_da_vps_de_producao_reprova_antes_do_primeiro_pacote() {
         // Um IP escrito à mão, e não o nome: assim este teste não consulta DNS
         // nem com o guarda desfeito. `resolver` com um IP volta na hora, sem
