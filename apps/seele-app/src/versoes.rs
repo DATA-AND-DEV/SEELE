@@ -216,10 +216,17 @@ fn preparar(
         argumentos.push(link.to_owned());
     }
 
+    // Até esta montagem à mão ser trocada pelo `Resolvedor` (tarefa 9 do plano
+    // da F6), a linha vem da regra de antes das duas numerações, que é a única
+    // que existe sem manifesto. Sem ela, recusa: abrir com a pasta de dados de
+    // outra linha é o defeito sem sintoma do cabeçalho deste módulo.
+    let linha = seele_lancador::Linha::da_versao_legada_do_app(versao.como_texto())
+        .ok_or(FalhaAoAbrirVersao::SemProcedencia)?;
     let resolvida = seele_lancador::VersaoResolvida {
+        dados: deposito.pasta_de_dados_da_linha(&linha),
+        linha,
         versao: instalacao.versao,
         executavel: instalacao.executavel,
-        dados: deposito.pasta_de_dados(&versao),
         unidade: None,
     };
     // A pasta de dados precisa existir antes: o produto a cria sozinho, mas
@@ -449,16 +456,17 @@ mod o_launcher_ligado_ao_produto {
             deposito.pasta_da_versao(&v).join("bin/seele"),
             "o programa não é o executável que aquela instalação publicou"
         );
+        let dados = deposito.pasta_de_dados_da_linha(&seele_lancador::Linha::nova("0.10").unwrap());
         assert_eq!(
             lancamento.ambiente,
             vec![(
                 "SEELE_HOME".to_owned(),
-                deposito.pasta_de_dados(&v).to_string_lossy().into_owned()
+                dados.to_string_lossy().into_owned()
             )],
-            "a versão foi aberta sem o diretório de dados dela, ou com o de outra"
+            "a versão foi aberta sem o diretório de dados da linha dela, ou com o de outra"
         );
         assert!(
-            deposito.pasta_de_dados(&v).is_dir(),
+            dados.is_dir(),
             "a pasta de dados não foi criada antes de o processo subir"
         );
         assert_eq!(

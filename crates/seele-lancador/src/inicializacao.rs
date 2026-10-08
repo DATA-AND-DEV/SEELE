@@ -143,7 +143,7 @@ mod testes {
         // texto. O que este teste tem a dizer é que o lançamento aponta para a
         // pasta de dados **daquela versão**, e o depósito sabe qual é.
         //
-        // O formato `dados/<versão>` continua preso, em
+        // O formato `dados/servidor-<linha>` continua preso, em
         // `resolucao::testes::cada_versao_resolve_para_o_executavel_e_os_dados_dela`:
         // lá o campo é `PathBuf`, e `Path::ends_with` compara componente a
         // componente, que atravessa os três sistemas.
@@ -151,10 +151,12 @@ mod testes {
             (&dados_novos, "2.0.0-teste"),
             (&dados_velhos, "1.0.0-teste"),
         ] {
+            let linha =
+                crate::Linha::do_servidor(&crate::cenario::servidor_de_teste(versao)).unwrap();
             assert_eq!(
                 std::path::Path::new(valor),
-                deposito.pasta_de_dados(&Versao::nova(versao).unwrap()),
-                "o lançamento de {versao} não aponta para a pasta de dados dela"
+                deposito.pasta_de_dados_da_linha(&linha),
+                "o lançamento de {versao} não aponta para a pasta de dados da linha dela"
             );
         }
         assert_ne!(dados_novos, dados_velhos);

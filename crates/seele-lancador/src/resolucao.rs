@@ -44,6 +44,7 @@ use std::path::PathBuf;
 
 use crate::deposito::Deposito;
 use crate::executavel::ExecutavelInvalido;
+use crate::linha::Linha;
 use crate::manifesto::{Manifesto, Unidade};
 use crate::revogacao::Vigente;
 use crate::versao::Versao;
@@ -56,6 +57,12 @@ pub enum Pedido {
     MaisNova,
     /// Esta, e não outra.
     Exata(Versao),
+    /// A mais nova **desta linha** que o manifesto lista.
+    ///
+    /// É o pedido de quem entra num servidor de outra linha, ou de quem hospeda
+    /// numa linha escolhida (spec 0.16, §1). Ninguém escolhe «a 0.15.2»:
+    /// escolhe «o Servidor 0.15», e o launcher abre o app mais novo dele.
+    MaisNovaDaLinha(Linha),
 }
 
 /// Para que se está resolvendo uma versão.
@@ -92,6 +99,22 @@ pub enum Recusa {
     /// identificador digitado à mão.
     NaoPublicada {
         /// A que foi pedida.
+        versao: Versao,
+    },
+    /// O manifesto não lista app nenhum desta linha.
+    ///
+    /// Um link de um Servidor 0.14, que deixou de ser oferecido em 08/10/2026,
+    /// cai aqui, e a tela diz qual linha faltou.
+    LinhaNaoPublicada {
+        /// A linha pedida.
+        linha: Linha,
+    },
+    /// O manifesto não diz de que linha esta versão é.
+    ///
+    /// Sem linha não há pasta de dados certa, e chutar uma é escrever as
+    /// conversas no lugar de outra linha, sem sintoma nenhum.
+    LinhaNaoDeclarada {
+        /// A versão escolhida.
         versao: Versao,
     },
     /// Esta versão foi revogada, e a recusa diz o que houve.
@@ -177,9 +200,11 @@ pub enum Recusa {
 pub struct VersaoResolvida {
     /// Qual é.
     pub versao: Versao,
+    /// A linha de servidor dela, que é quem decide a pasta de dados.
+    pub linha: Linha,
     /// O executável a rodar.
     pub executavel: PathBuf,
-    /// O diretório de dados **daquela versão**.
+    /// O diretório de dados **daquela linha**: `dados/servidor-<linha>`.
     pub dados: PathBuf,
     /// O que ela fala, quando o manifesto declara.
     pub unidade: Option<Unidade>,
@@ -239,6 +264,13 @@ impl<'a> Resolvedor<'a> {
                         versao: versao.clone(),
                     })?
             }
+            Pedido::MaisNovaDaLinha(linha) => {
+                self.manifesto.mais_nova_da_linha(linha).ok_or_else(|| {
+                    Recusa::LinhaNaoPublicada {
+                        linha: linha.clone(),
+                    }
+                })?
+            }
         };
         let versao = publicacao.version.clone();
 
@@ -255,6 +287,12 @@ impl<'a> Resolvedor<'a> {
                 });
             }
         }
+
+        // A linha antes do disco: sem ela não há pasta de dados certa, e não
+        // há por que conferir a instalação de uma versão que não se pode abrir.
+        let Some(linha) = publicacao.linha() else {
+            return Err(Recusa::LinhaNaoDeclarada { versao });
+        };
 
         let pacote = publicacao.platforms.get(&self.alvo);
 
@@ -301,8 +339,9 @@ impl<'a> Resolvedor<'a> {
         }
 
         Ok(VersaoResolvida {
-            dados: self.deposito.pasta_de_dados(&versao),
+            dados: self.deposito.pasta_de_dados_da_linha(&linha),
             unidade: publicacao.unit.clone(),
+            linha,
             versao,
             executavel,
         })
@@ -348,6 +387,11 @@ mod testes {
         ALVO, EXECUTAVEL,
     };
     use crate::deposito::Deposito;
+    use crate::linha::Linha;
+
+    fn linha(texto: &str) -> Linha {
+        Linha::nova(texto).unwrap()
+    }
 
     fn instalar(deposito: &Deposito, manifesto: &Manifesto, versao: &str) {
         let v = Versao::nova(versao).unwrap();
@@ -382,8 +426,8 @@ mod testes {
         assert_ne!(nova.executavel, velha.executavel);
         assert_ne!(nova.dados, velha.dados);
         assert!(nova.executavel.ends_with(EXECUTAVEL));
-        assert!(nova.dados.ends_with("dados/2.0.0-teste"));
-        assert!(velha.dados.ends_with("dados/1.0.0-teste"));
+        assert!(nova.dados.ends_with("dados/servidor-2"));
+        assert!(velha.dados.ends_with("dados/servidor-1"));
         // E o executável de cada uma é o pacote daquela versão, não do outro.
         assert_eq!(
             std::fs::read(&velha.executavel).unwrap(),
@@ -767,6 +811,117 @@ mod testes {
             Err(Recusa::ExecutavelNaoDeclarado {
                 versao: Versao::nova("1.0.0-teste").unwrap(),
                 alvo: ALVO.to_owned(),
+            })
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **O critério de aceite da F6:** entrar num servidor de outra linha abre o
+    /// app mais novo **daquela** linha.
+    #[test]
+    fn a_mais_nova_da_linha_e_a_primeira_daquela_linha_no_manifesto() {
+        let raiz = pasta("mais-nova-da-linha");
+        let deposito = Deposito::em(&raiz);
+        let m = manifesto(&["1.1.0-teste", "1.0.0-teste", "0.15.2-teste"], &[]);
+        for v in ["1.1.0-teste", "1.0.0-teste", "0.15.2-teste"] {
+            instalar(&deposito, &m, v);
+        }
+        let sem_revogacao = vigente(&m, &deposito);
+        let r = Resolvedor::novo(&m, &deposito, ALVO, &sem_revogacao);
+
+        let um = r
+            .resolver(&Pedido::MaisNovaDaLinha(linha("1")), Ato::Entrar)
+            .unwrap();
+        let legada = r
+            .resolver(&Pedido::MaisNovaDaLinha(linha("0.15")), Ato::Entrar)
+            .unwrap();
+        assert_eq!(um.versao.como_texto(), "1.1.0-teste");
+        assert_eq!(um.linha, linha("1"));
+        assert_eq!(legada.versao.como_texto(), "0.15.2-teste");
+        assert_eq!(legada.linha, linha("0.15"));
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Os dados são da **linha**: a 1.1 herda os da 1.0 sem cópia, e a 0.15
+    /// fica com os dela.
+    #[test]
+    fn duas_versoes_da_mesma_linha_dividem_os_dados_e_outra_linha_nao() {
+        let raiz = pasta("dados-por-linha");
+        let deposito = Deposito::em(&raiz);
+        let m = manifesto(&["1.1.0-teste", "1.0.0-teste", "0.15.2-teste"], &[]);
+        for v in ["1.1.0-teste", "1.0.0-teste", "0.15.2-teste"] {
+            instalar(&deposito, &m, v);
+        }
+        let sem_revogacao = vigente(&m, &deposito);
+        let r = Resolvedor::novo(&m, &deposito, ALVO, &sem_revogacao);
+        let exata = |v: &str| {
+            r.resolver(&Pedido::Exata(Versao::nova(v).unwrap()), Ato::Abrir)
+                .unwrap()
+        };
+
+        assert_eq!(exata("1.1.0-teste").dados, exata("1.0.0-teste").dados);
+        assert_ne!(exata("1.1.0-teste").dados, exata("0.15.2-teste").dados);
+        assert!(exata("0.15.2-teste").dados.ends_with("dados/servidor-0.15"));
+        assert!(exata("1.0.0-teste").dados.ends_with("dados/servidor-1"));
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[test]
+    fn uma_linha_que_o_manifesto_nao_publica_e_recusada_por_isso() {
+        let raiz = pasta("linha-nao-publicada");
+        let deposito = Deposito::em(&raiz);
+        let m = manifesto(&["1.0.0-teste"], &[]);
+        let sem_revogacao = vigente(&m, &deposito);
+        assert_eq!(
+            Resolvedor::novo(&m, &deposito, ALVO, &sem_revogacao)
+                .resolver(&Pedido::MaisNovaDaLinha(linha("0.14")), Ato::Entrar),
+            Err(Recusa::LinhaNaoPublicada {
+                linha: linha("0.14")
+            })
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Sem linha não há pasta de dados certa, e chutar uma seria escrever as
+    /// conversas no lugar de outra linha.
+    #[test]
+    fn uma_publicacao_sem_linha_declarada_nao_inventa_os_dados() {
+        let raiz = pasta("sem-linha");
+        let deposito = Deposito::em(&raiz);
+        let json = r#"{"schema":2,"versions":[{"version":"1.0.0-teste",
+            "unit":{"protocol":3,"mod_api":1},"platforms":{}}]}"#;
+        let m = Manifesto::ler(json.as_bytes(), &chave()).unwrap();
+        let sem_revogacao = vigente(&m, &deposito);
+        assert_eq!(
+            Resolvedor::novo(&m, &deposito, ALVO, &sem_revogacao)
+                .resolver(&Pedido::MaisNova, Ato::Abrir),
+            Err(Recusa::LinhaNaoDeclarada {
+                versao: Versao::nova("1.0.0-teste").unwrap()
+            })
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// O pedido por linha não pula a revogação: a mais nova da linha, revogada,
+    /// é recusada com o conserto.
+    #[test]
+    fn a_mais_nova_da_linha_revogada_e_recusada_com_o_conserto() {
+        let raiz = pasta("linha-revogada");
+        let deposito = Deposito::em(&raiz);
+        let m = manifesto(
+            &["1.0.0-teste", "0.15.2-teste"],
+            &[("0.15.2-teste", "defeito de teste", Some("0.15.3-teste"))],
+        );
+        instalar(&deposito, &m, "0.15.2-teste");
+        let revogando = vigente(&m, &deposito);
+        assert_eq!(
+            Resolvedor::novo(&m, &deposito, ALVO, &revogando)
+                .resolver(&Pedido::MaisNovaDaLinha(linha("0.15")), Ato::Hospedar),
+            Err(Recusa::Revogada {
+                versao: Versao::nova("0.15.2-teste").unwrap(),
+                defeito: "defeito de teste".to_owned(),
+                corrigida_em: Some("0.15.3-teste".to_owned()),
+                ato: Ato::Hospedar,
             })
         );
         let _ = std::fs::remove_dir_all(&raiz);

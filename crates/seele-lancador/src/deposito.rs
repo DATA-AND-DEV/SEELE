@@ -171,6 +171,15 @@ impl Deposito {
         self.raiz.join("dados").join(versao.como_texto())
     }
 
+    /// Onde ficam os dados desta **linha**: `dados/servidor-<linha>`.
+    ///
+    /// Spec 0.16, §1: um conserto da linha herda os dados dela, e as conversas
+    /// de uma linha não aparecem na outra. A tela diz isso **antes** de abrir.
+    #[must_use]
+    pub fn pasta_de_dados_da_linha(&self, linha: &crate::linha::Linha) -> PathBuf {
+        self.raiz.join("dados").join(linha.pasta_de_dados())
+    }
+
     /// Esta versão está instalada e completa?
     ///
     /// Uma instalação sem o marcador é uma instalação que não terminou, e a
