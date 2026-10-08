@@ -4261,6 +4261,51 @@ async function oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar() {
     for (const r of destinos) r.soltar();
   }
 
+  // **Enquanto o pedido de tocar decodifica, o som está «carregando»**, como
+  // estava antes do adiamento (rodada 1, menor 2): «pronta» é do som que
+  // espera o pedido, e não do que já o recebeu. Nos dois jeitos de o pedido
+  // chegar — declarado `tocando: true` desde a montagem, e religado depois.
+  for (const desde of ["a montagem", "um tocando religado"]) {
+    const decodificando = `${caso} · decodificando, desde ${desde}`;
+    const Audio = audioDeMentira({ segurarADecodificacao: true });
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sonsDaContribuicao = { tomados: false };
+    const sino = (tocando) => [{ forma: "midia", chave: "sino", fonte: "som/sino.wav", tocando }];
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar(sino(desde === "a montagem"));
+      return r;
+    });
+    await assentar();
+    if (desde !== "a montagem") {
+      for (const r of destinos) r.aplicar(sino(true));
+      await assentar();
+    }
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const estado = () => ({
+      figura: todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado,
+      anotada: tomou?.midiasAnotadas().map((m) => m.situacao).join(),
+    });
+    confere(
+      decodificando,
+      Audio.decodificacoesPresas.length === 1 && JSON.stringify(estado()) === JSON.stringify({ figura: "carregando", anotada: "carregando" }),
+      "o som de uma contribuição que o MOD mandou tocar ficou «pronta» enquanto decodificava — o diagnóstico diria "
+        + `que ele está de pé antes de ele existir: ${JSON.stringify(estado())}`,
+    );
+    for (const presa of Audio.decodificacoesPresas.splice(0)) {
+      presa.pronto({ duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
+    }
+    await assentar();
+    confere(
+      decodificando,
+      JSON.stringify(estado()) === JSON.stringify({ figura: "pronta", anotada: "pronta" }),
+      `o som decodificado não ficou «pronta»: ${JSON.stringify(estado())}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
   // O teto do bolso vale no pedido de tocar, e não na montagem.
   {
     const naRecusa = `${caso} · o teto, no pedido de tocar`;

@@ -2635,7 +2635,8 @@ class RegiaoDeMod {
    * o tamanho do arquivo, que o Rust já conferiu — o papel e o teto de
    * arquivo — e que `montarMidia` já contou. Quem pede os bytes e decodifica
    * é o pedido de tocar (`pedirParaTocar`), que `aplicarTocando` faz daqui
-   * mesmo quando o MOD já declarou `tocando: true`.
+   * mesmo quando o MOD já declarou `tocando: true` — e aí o som segue
+   * «carregando» até decodificar.
    *
    * Uma janela sem WebAudio é dita aqui, e não no pedido de tocar: ela não
    * vai tocar o som nunca, e uma figura «pronta» até lá esconderia isso.
@@ -2657,6 +2658,8 @@ class RegiaoDeMod {
       `${estado.bytes} bytes de arquivo, já conferidos; o som decodifica quando o MOD mandar tocar`,
       Boolean(plano.cartao),
     );
+    // O som que o MOD já declarou `tocando` recebe o pedido agora, e volta a
+    // «carregando» até decodificar (`pedirParaTocar`).
     this.aplicarTocando(elem);
   }
 
@@ -2929,6 +2932,10 @@ class RegiaoDeMod {
     const { estado } = montagem;
     som.adiado = null;
     som.carregando = true;
+    // Até decodificar, o som que o MOD mandou tocar está «carregando», e não
+    // «pronta»: quem lê a aba não pode ver de pé um som que ainda não existe.
+    elem.dataset.estado = "carregando";
+    this.anotarMidia(elem, "carregando", "", Boolean(montagem.plano.cartao));
     const vindo = this.carregarSom(elem, montagem);
     // A carga que `carregarSom` acabou de tomar, antes do primeiro `await`
     // dele: uma devolvida no meio do caminho já não é esta.
