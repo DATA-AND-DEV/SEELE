@@ -290,7 +290,7 @@
     "fundoDeMidia": "propriedade de caixa: {doServidor:{canal,pedido,campo}}, {fonte} ou {daPessoa:'capa'}"
   },
   "limites": {
-    "estado": "EM ABERTO: congelam com o v6.json, depois da M3 com as regiões da 6 (desktop, WebView2 e iPhone)",
+    "estado": "EM ABERTO: congelam com o v6.json, depois da M3 com as regiões da 6 (desktop, WebView2 e iPhone); cada número vale igual no desktop e no navegador, porque o motor é o mesmo",
     "mensagem": "12 KiB hoje; em aberto montagem parcial ou teto por superfície maior (MESA item 1, PERFIS R8)",
     "aviso-do-servidor": "proposta de 1 KiB por aviso e 4 por segundo por MOD",
     "capas-animadas": "proposta de 6",
@@ -301,7 +301,7 @@
     "regra": "toda região e camada diz se existe na casca de uma mão (≤ 600 px), com que tamanho, e o que acontece com uma contribuição para onde ela não existe",
     "onde-o-mod-sabe": "retrato.onde, retrato.regioes e o evento lugar",
     "ausente": "contribuição recusada com motivo regiao-ausente; a aba DIAGNÓSTICO conta",
-    "executor": "o mesmo prelúdio do desktop, num executor isolado da origem da página (spike da F4); capacidades por plataforma",
+    "executor": "o mesmo rquickjs 0.12.2 do desktop em wasm32-wasip1, num Worker criado de dentro de um iframe de origem opaca, com o prelúdio extraído do executor.rs (spike da F4, spec-mestre 00935dac): um contrato e um motor só; nada depende de o MOD rodar fora de uma volta do anfitrião; os limites valem igual nos dois, e o teto de memória no web exige o RustAllocator; capacidades por plataforma",
     "toque-na-tela": "um dedo sobre figura com chave arrasta, um dedo no vazio rola, pinça amplia dentro da tela, área de acerto mínima, toque longo opcional por figura (MESA item 15); os números sobem da medida"
   }
 }

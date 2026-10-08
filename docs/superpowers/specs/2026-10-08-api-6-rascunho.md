@@ -106,7 +106,7 @@ o espelho `CAPACIDADES_POR_API` em `base.js:1982-1989` [c]):
 
 **Capacidade por plataforma, e não só por versão.** Hoje a ausência é por
 versão: um pacote de API 3 recebe um `SeeleUI` sem `superficies`
-(`comCapacidade`, `executor.rs:1641` [c]). Na 6, o executor do celular omite
+(`comCapacidade`, `executor.rs:1643` [c]). Na 6, o executor do celular omite
 também o que a ponte web não tem (PERFIS R13). Se ela não tiver
 `enviar_imagem_mod`, o `SeeleUI.enviar` não existe lá, e o MOD mostra o editor
 sem os controles de imagem, com uma frase. **Ausente, e não recusado depois de
@@ -187,7 +187,7 @@ SeeleUI.contribuicoes.registrar({
 
 | lugar | desktop | celular |
 |---|---|---|
-| o cartão da pessoa na chamada (`pintarCartao`, `tela-chamada.js:452` [c]) | sim, animada até o teto | **sim, animada até o mesmo teto** (D-capa-1) |
+| o cartão da pessoa na chamada (`pintarCartao`, `tela-chamada.js:453` [c]) | sim, animada até o teto | **sim, animada até o mesmo teto** (D-capa-1) |
 | o fundo da barra do operador (`.operador`, com `snapshot.me`) | sim | **não**: a barra sai da vista, e a faixa de voz é do núcleo |
 | o cabeçalho do perfil do PERFIS | sim, por citação (abaixo) | sim |
 | o «SEU PERFIL» nativo (`index.html:3816`) | sim, por um aplicador do produto | sim |
@@ -604,8 +604,10 @@ retrato, e pelo evento `lugar` quando o aparelho deita.
 - o custo de capas animadas e de fundo por mídia num iPhone (o teto de memória
   de uma aba é muito menor, e passar dele encerra a aba);
 - o som de MOD com a tela bloqueada: ele só sobrevive no caminho de saída da
-  voz, e só dentro de uma sala de voz (MESA, item 14; D-52). Até a medida, **a
-  API 6 promete som de MOD só com a tela acesa** no celular;
+  voz, e só dentro de uma sala de voz (MESA, item 14; D-52). E o MOD só roda
+  quando o anfitrião o chama (§16), o que, com a página oculta, pode não
+  acontecer. Até a medida, **a API 6 promete som de MOD só com a tela acesa**
+  no celular;
 - o arraste por toque na `tela`: um dedo sobre uma figura com `chave` arrasta,
   um dedo no vazio rola, pinça amplia dentro da tela, área de acerto mínima de
   22 px de raio, toque longo opcional por figura (MESA, item 15). **Entra no
@@ -616,8 +618,9 @@ retrato, e pelo evento `lugar` quando o aparelho deita.
 ## 12. Os limites
 
 **Os limites congelam com o `v6.json`, e por isso esperam a M3** (spec-mestre,
-F3). A medição de base da v0.15.1 está no ADR 0056 (§15). Os valores de hoje,
-lidos no código:
+F3). A medição de base da v0.15.1 está no ADR 0056 (§15). **Cada número vale
+igual no desktop e no navegador**, porque o motor é o mesmo (§16). Os valores
+de hoje, lidos no código:
 
 | limite | hoje | onde [c] | na 6 |
 |---|---|---|---|
@@ -685,11 +688,36 @@ no ADR 0056.** A M3 com as regiões da 6 repete o mesmo roteiro, e os limites
 do §12 saem dela, com o iPhone (F4, item 3) e o WebView2 pedidos à
 orquestradora.
 
-## 16. O que a F4 precisa que o executor do navegador exponha
+## 16. O executor do navegador: um contrato só, e um motor só
 
-O spike da F4 decide entre o QuickJS em `wasm` num Worker e um `iframe` com
-`sandbox` e origem opaca. **A superfície que ele expõe é a deste documento, e
-é a mesma do desktop**:
+**O spike da F4 escolheu** (spec-mestre `00935dac`, §2 F4;
+`spikes/mods-no-navegador/README.md` no branch `0.16/web`): **o mesmo
+`rquickjs` 0.12.2 do desktop, compilado para `wasm32-wasip1`, num Worker
+criado de dentro de um `iframe` de origem opaca**, com o prelúdio extraído do
+`executor.rs` no build. O `iframe` sozinho reprovou: 8 pacotes STUN saem por
+cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto.
+
+**O que isso fixa nesta API:**
+
+1. **Nada aqui depende de o código do MOD rodar fora de uma volta do
+   anfitrião.** O prelúdio pressupõe isso nos dois executores: um evento
+   (§7), um temporizador ou a resposta de um pedido só chegam ao MOD quando o
+   anfitrião o chama. No celular, com a página oculta, o anfitrião pode não
+   chamar: **a API 6 não promete que um MOD rode com a tela bloqueada** (§11,
+   o som de MOD).
+2. **Os limites valem igual nos dois executores**: memória, tempo de volta,
+   contribuições, superfícies, o teto de 12 KiB por mensagem. No web, o teto de
+   memória só existe com o `RustAllocator` (com o alocador padrão do QuickJS,
+   um MOD alocou 128 MiB com teto de 8 MiB), e a F4 põe guarda. O §12 lista os
+   números uma vez, para as duas plataformas.
+3. **O custo do motor no web entra na M3 do celular**: 942 KB (361 KB com
+   gzip), 14 a 59 ms para um MOD subir, de 5 a 7 vezes mais lento que o JIT,
+   e a ida e volta entre a página e o MOD abaixo de 1 ms. A medida no iPhone
+   é do dono.
+4. **As capacidades ausentes por plataforma continuam** (§2): o que a ponte
+   web não tiver some do `SeeleUI` lá.
+
+**A superfície que ele expõe é a deste documento, e é a mesma do desktop**:
 
 - o prelúdio inteiro de `executor.rs` (`SeeleMods.request`, `SeeleUI.*`, os
   quatro temporizadores, o `console` da 0.15.1), com `SeeleUI.retrato()` no
@@ -699,7 +727,8 @@ O spike da F4 decide entre o QuickJS em `wasm` num Worker e um `iframe` com
 - o teto de 12 KiB por mensagem, conferido antes de postar, igual
   (`executor.rs:1504-1516` [c]), enquanto o §12 não mudar;
 - nenhum armazenamento que sobreviva à sessão, nenhuma rede, nenhum acesso à
-  origem da página (os critérios do spike).
+  origem da página (os critérios do spike, que o AB passou no Chromium 151 e
+  no Safari do Simulador).
 
 **A MESA não usa armazenamento nem rede** e roda igual nas duas candidatas
 (MESA, item 18). O PERFIS e o ESTILO também não, pela leitura das revisões

@@ -123,8 +123,11 @@ tela embutida (Liquid Retina XDR). **App:** SEELE 0.15.1 publicado
   sessões de MOD, com a recomendação no rascunho, §18.
 - **Os três candidatos ao fio** (rascunho, §14): o aviso da metade de servidor,
   os pedidos endereçados ao servidor e o tema como dado do servidor. Com a F1.
-- **Como o MOD roda no navegador**: é do spike da F4. Este ADR diz só a
-  superfície que ele expõe (rascunho, §16).
+- **Como o MOD roda no navegador**: decidido pelo spike da F4 (o motor do
+  desktop num Worker dentro de um `iframe` opaco, spec-mestre `00935dac`).
+  Este ADR fixa só o que isso pede da API: um contrato e um motor, nada que
+  dependa de o MOD rodar fora de uma volta do anfitrião, e os mesmos limites
+  nos dois (rascunho, §16).
 
 ## Custo de reverter
 
