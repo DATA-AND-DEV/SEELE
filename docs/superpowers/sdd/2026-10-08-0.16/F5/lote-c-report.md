@@ -583,7 +583,10 @@ branch, a partir de `6c6f8a1a`. Dois commits de código e este relatório; só
 | `bc2043a1` | 1 | o teste do cadeado conta só a linha da conta, e chama `segundo_despachante` |
 | (este) | 4 | a contagem dos achados no relatório |
 
-### Item 2: a última porta sem teto (`6e71e894`)
+### Item 2: mais uma porta com teto (`6e71e894`)
+
+*(Rodada 3: o título dizia «a última porta sem teto», e não era a última. Ver
+«Portas sem balde, fora do lote», na rodada 3.)*
 
 O DEBUG «mídia de MOD vinda do servidor» de `midia_em_bytes` sai por
 `midia_vinda_do_servidor_dita(&baldes, agora, mod_id, geracao, papel, bytes)`,
@@ -629,7 +632,10 @@ arquivo voltou igual à cópia (`cmp`).
 
 O doc de `conta_do_balde_dita` deixa de dizer «quando a sessão fecha
 (`Session::revogar`)»: quem a chama é `Session::dizer_as_contas_do_registro`,
-ao fechar a sessão e na saída do app, que não passa por `revogar`.
+ao fechar a sessão; a saída do app, que não passa por `revogar`, é a outra
+porta que a deve chamar, e quem vai chamá-la é o lote F. Hoje ela não chama.
+*(Rodada 3: a primeira versão desta frase, no código e aqui, dava a saída do
+app como quem já chama.)*
 
 ### Item 1: a asserção que podia ficar vazia (`bc2043a1`)
 
@@ -659,3 +665,65 @@ do lote. As duas frases foram acertadas.
 - `cargo fmt --all -- --check` e
   `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`
   limpos antes de cada commit; só o aviso ambiental `ld: duplicate -rpath`.
+
+## Rodada 3
+
+Três menores da re-revisão da rodada 2. Mesmo branch, a partir de `9f343d2e`.
+Um commit de código (`255fc574`, só `apps/seele-app/src/main.rs`) e este
+relatório.
+
+### Item 1: o teste da mídia vinda do servidor não provava a classe (`255fc574`)
+
+**O buraco, medido antes do conserto.** Com `Classe::Aviso` no lugar de
+`Classe::Depuracao` em `midia_vinda_do_servidor_dita`, o teste antigo
+`a_midia_vinda_do_servidor_tem_teto_na_classe_da_depuracao` ficava verde
+(`test result: ok. 1 passed`). Com `Aviso`, um laço de mídias do servidor
+seguraria a WARN «mídia de MOD recusada» do mesmo MOD: o defeito de 23/09 na
+direção oposta. E o teste não conferia a conta.
+
+**O teste agora**, depois das 200 chamadas no mesmo instante:
+- uma `recusa` do mesmo MOD sai, sem `suprimidas`;
+- uma `midia_servida_dita` do mesmo MOD sai;
+- uma chamada em `agora + UMA_FICHA` passa (33 linhas no total, todas DEBUG)
+  e traz `suprimidas=168`.
+
+As asserções estão na ordem em que cada reversão cai na sua: a da recusa
+antes da da servida, e a conta por último.
+
+**Reversões** (`… --bin seele-app a_midia_vinda_do_servidor_tem_teto`):
+
+| mutação | vermelho |
+|---|---|
+| (a) `Classe::Aviso` em vez de `Depuracao` | `as mídias vindas do servidor gastaram a ficha dos avisos do mesmo MOD, e a recusa sumiu — o defeito de 23/09 na direção oposta` |
+| (b) `Classe::Servida` em vez de `Depuracao` | `as mídias vindas do servidor gastaram a ficha das servidas do mesmo MOD` |
+| (c) a linha sem o campo `suprimidas` | `a mídia vinda do servidor que passou depois do aperto não diz as 168 que o balde segurou` |
+
+As três voltaram «restaurado byte a byte», e o arquivo ficou igual à cópia
+pronta (`cmp`).
+
+### Item 2: o doc que afirmava o que não existe (`255fc574` e este relatório)
+
+O doc de `conta_do_balde_dita` dizia que `dizer_as_contas_do_registro` é
+chamada «ao fechar a sessão e na saída do app». A saída do app ainda não a
+chama: isso é do lote F. Ficou: «ao fechar a sessão (`Session::revogar`); a
+saída do app, que não passa por `revogar`, é a outra porta que a deve chamar
+(lote F)». A mesma frase da rodada 2, neste relatório (item 3), foi corrigida.
+
+### Item 3: portas sem balde, fora do lote
+
+O título «a última porta sem teto», na rodada 2, estava errado, e foi
+trocado. Escrevem no `seele.log` em nome de um MOD, sem balde, e ficam fora do
+P51-08 — o brief dele nomeia a janela, a mídia recusada, a servida e o som
+servido. **Para o Z decidir:**
+- `pedido_a_caminho_dito` (DEBUG «pedido de MOD a caminho do servidor») e
+  `pedido_recusado_na_saida_dito` (WARN «pedido de MOD recusado na saída»), as
+  duas linhas de `mod_request`;
+- `mod_nativo_colher` (DEBUG «falas colhidas pela janela») e
+  `mod_nativo_entregar` (WARN «entrega a um MOD nativo recusada»).
+
+### O que rodou
+
+- A suíte `--bin seele-app` inteira: **211 passaram, 0 falharam** (11,9 s).
+- `cargo fmt --all -- --check` e
+  `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`
+  limpos; só o aviso ambiental `ld: duplicate -rpath`.
