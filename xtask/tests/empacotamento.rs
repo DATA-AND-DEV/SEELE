@@ -3559,6 +3559,28 @@ fn passos_do_job_do_ci(job: &str) -> Vec<Vec<String>> {
     passos
 }
 
+/// O comando do `run:` de um passo de [`passos_do_job_do_ci`], se ele tem um.
+fn comando_do_passo(passo: &[String]) -> Option<&str> {
+    passo
+        .iter()
+        .find_map(|linha| linha.strip_prefix("run:").map(str::trim))
+}
+
+/// A condição do `if:` de um passo de [`passos_do_job_do_ci`], sem o `${{ }}`
+/// que pode envolvê-la — `if: failure()` e `if: ${{ failure() }}` são a mesma
+/// condição —, ou `None` se o passo não tem `if:`.
+fn condicao_do_passo(passo: &[String]) -> Option<String> {
+    let se = passo
+        .iter()
+        .find_map(|linha| linha.strip_prefix("if:"))?
+        .trim();
+    let se = se
+        .strip_prefix("${{")
+        .and_then(|resto| resto.strip_suffix("}}"))
+        .unwrap_or(se);
+    Some(se.trim().to_owned())
+}
+
 /// Os nomes que a seção `[dependencies]` de um `Cargo.toml` declara — não os de
 /// `[dev-dependencies]` nem os de `[build-dependencies]`, que o `Cargo.lock` de
 /// um pacote de fora do workspace não lista. Entende uma dependência por linha,
@@ -3736,31 +3758,35 @@ fn o_ci_roda_deny_e_fuzz() {
     }
 
     // **O lock do fuzz é conferido, e o `cargo fuzz run` não aceita `--locked`.**
-    // O passo é `cargo +nightly metadata --locked` sobre o manifesto do fuzz, e
-    // vem antes do primeiro alvo: sem ele, o cargo reescreve um lock atrasado no
-    // runner, onde ninguém o comita, e o job passa com o lock errado.
-    let posicao_do_lock = comandos.iter().position(|comando| {
-        let partes: Vec<&str> = comando.split_whitespace().collect();
-        partes.starts_with(&["cargo", "+nightly", "metadata"])
-            && partes.contains(&"--locked")
-            && partes
-                .windows(2)
-                .any(|dois| dois == ["--manifest-path", "fuzz/Cargo.toml"])
+    // O passo é `cargo +nightly metadata --locked` sobre o manifesto do fuzz, **no
+    // job `fuzz-curto`** — um passo igual noutro job não confere o lock que o fuzz
+    // vai usar — e vem antes do primeiro alvo: sem ele, o cargo reescreve um lock
+    // atrasado no runner, onde ninguém o comita, e o job passa com o lock errado.
+    let passos = passos_do_job_do_ci("fuzz-curto");
+    let posicao_do_lock = passos.iter().position(|passo| {
+        comando_do_passo(passo).is_some_and(|comando| {
+            let partes: Vec<&str> = comando.split_whitespace().collect();
+            partes.starts_with(&["cargo", "+nightly", "metadata"])
+                && partes.contains(&"--locked")
+                && partes
+                    .windows(2)
+                    .any(|dois| dois == ["--manifest-path", "fuzz/Cargo.toml"])
+        })
     });
     let Some(posicao_do_lock) = posicao_do_lock else {
         panic!(
-            "o ci.yml não confere o `fuzz/Cargo.lock` com `cargo +nightly metadata --locked \
-             --manifest-path fuzz/Cargo.toml`: um lock atrasado em relação ao `seele-proto` \
-             seria reescrito no runner e o job passaria"
+            "o job `fuzz-curto` do ci.yml não confere o `fuzz/Cargo.lock` com `cargo +nightly \
+             metadata --locked --manifest-path fuzz/Cargo.toml`: um lock atrasado em relação ao \
+             `seele-proto` seria reescrito no runner e o job passaria. Os passos: {passos:?}"
         );
     };
-    let primeiro_alvo = comandos
-        .iter()
-        .position(|comando| comando.contains("fuzz run"));
+    let primeiro_alvo = passos.iter().position(|passo| {
+        comando_do_passo(passo).is_some_and(|comando| comando.contains("fuzz run"))
+    });
     assert!(
         primeiro_alvo.is_some_and(|primeiro| posicao_do_lock < primeiro),
-        "o ci.yml confere o lock do fuzz depois de rodar o primeiro alvo, e o `cargo fuzz run` \
-         já o teria reescrito: o passo do `--locked` vem antes"
+        "o job `fuzz-curto` do ci.yml confere o lock do fuzz depois de rodar o primeiro alvo, e \
+         o `cargo fuzz run` já o teria reescrito: o passo do `--locked` vem antes"
     );
 
     // **O crash que o fuzz acha tem de sobreviver ao runner.** O libFuzzer grava
@@ -3768,7 +3794,6 @@ fn o_ci_roda_deny_e_fuzz() {
     // upload, quem vê o vermelho fica com o nome do alvo e sem a entrada que o
     // derrubou. É `uses:` com `if:` e `with:`, e por isso não passa por
     // `comandos_do_ci`.
-    let passos = passos_do_job_do_ci("fuzz-curto");
     let achado = passos.iter().enumerate().find(|(_, passo)| {
         passo
             .iter()
@@ -3780,13 +3805,15 @@ fn o_ci_roda_deny_e_fuzz() {
              `actions/upload-artifact@v4`: o `crash-*` ficaria no runner, que some no fim do job"
         );
     };
-    assert!(
-        upload.iter().any(|linha| linha
-            .strip_prefix("if:")
-            .is_some_and(|se| se.contains("failure()"))),
-        "o upload do fuzz não tem `if: failure()`: ou roda sempre, subindo uma pasta vazia a \
-         cada job verde, ou não roda no vermelho, que é o único caso em que há um crash a \
-         guardar. O passo: {upload:?}"
+    // A condição inteira, e não um pedaço dela: `${{ !failure() }}` e
+    // `failure() && false` contêm «failure()» e dizem o contrário do que o passo
+    // precisa. `${{ failure() }}` é a mesma coisa que `failure()`, e passa.
+    assert_eq!(
+        condicao_do_passo(upload).as_deref(),
+        Some("failure()"),
+        "o upload do fuzz não tem exatamente `if: failure()`: ou roda sempre, subindo uma \
+         pasta vazia a cada job verde, ou não roda no vermelho, que é o único caso em que há \
+         um crash a guardar. O passo: {upload:?}"
     );
     assert!(
         upload.iter().any(|linha| linha
