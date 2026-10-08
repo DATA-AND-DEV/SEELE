@@ -82,14 +82,27 @@ Para a orquestradora conferir:
 
 ## Tarefas
 
+**O `seele-lancador` depois das tarefas 1 a 5:** 113 testes de unidade e 2 de
+integração, verdes, e o clippy limpo.
+
+**Merge da F1:** o `aa8574e` (`0.16/protocolo`) entrou em `96abc57`, com
+`VERSAO_DO_SERVIDOR`, `linha_do_protocolo` e o reexport no `seele-ffi` — os
+pedidos (a), (b) e (e). Ali o `PROTOCOL_VERSION` ainda é 8; o 9 vem no commit
+seguinte da F1. Os pedidos (c) e (d) ficam para depois: o número de quem recusa
+já chega em `ControlError::UnsupportedVersion { found }`.
+
+**Um tropeço registrado.** O macOS não tem `timeout`, e as duas primeiras
+tentativas de reversão da tarefa 4 falharam no comando, sem rodar teste
+nenhum. Foram refeitas com `perl -e 'alarm …'` e aí provaram.
+
 | # | tarefa | estado | commits |
 |---|---|---|---|
 | — | plano | feito | |
-| 1 | a linha e a unidade no manifesto | — | |
-| 2 | `Pedido::MaisNovaDaLinha`; dados da linha | — | |
-| 3 | marcador com linha e soma; poda | — | |
-| 4 | dados por linha; `semear_linha` | — | |
-| 5 | tamanho e remoção | — | |
+| 1 | a linha e a unidade no manifesto | feito, com reversão (a regra legada e a ordem das linhas) | `e2ead14` |
+| 2 | `Pedido::MaisNovaDaLinha`; dados da linha | feito, com reversão; os 7 testes da casca (`o_launcher_ligado_ao_produto`), que o levantamento dava como nunca rodados, rodam e passam | `3a1b7f6` |
+| 3 | marcador com linha e soma; poda | feito, com reversão (`skip(1)` e a recusa sem linha) | `5e8933c` |
+| 4 | dados por linha; `semear_linha` | feito, com reversão (a recusa do destino dentro da origem e o «deixar de fora» da cópia) | `3ac83dc` |
+| 5 | tamanho e remoção | feito, com reversão (`symlink_metadata`) | `62b7c5b` |
 | 6 | `manifesto.py` híbrido e acumulado | — | |
 | 7 | pacote portátil do Windows | — | |
 | 8 | a 0.15.2 (`linha/0.15`) | — | |
