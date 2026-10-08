@@ -616,6 +616,7 @@ entrega, tag = sys.argv[1], sys.argv[2]
 repo = sys.argv[sys.argv.index("--repo") + 1]
 with open(os.environ["SEELE_TESTE_DIARIO"], "a", encoding="utf-8") as diario:
     diario.write("manifesto " + repo + "\n")
+    diario.write("manifesto-argumentos " + " ".join(sys.argv[3:]) + "\n")
 pathlib.Path(entrega, "latest.json").write_text(
     '{"url": "https://github.com/' + repo + '/releases/download/' + tag + '/SEELE.dmg"}',
     encoding="utf-8",
@@ -760,7 +761,9 @@ case "$comando" in
 memoria = io.BytesIO()
 with zipfile.ZipFile(memoria, "w") as pacote:
     pacote.writestr("SEELE_%s_x64-instalador.exe" % sys.argv[1], "instalador de mentira")
-sys.stdout.write(base64.b64encode(memoria.getvalue()).decode())' "${FALSO_VERSAO:-1.2.3}"
+    if sys.argv[2] != "1":
+        pacote.writestr("SEELE_%s_x64-portatil.tar.gz" % sys.argv[1], "portatil de mentira")
+sys.stdout.write(base64.b64encode(memoria.getvalue()).decode())' "${FALSO_VERSAO:-1.2.3}" "${FALSO_SEM_PORTATIL:-0}"
         exit 0
         ;;
 esac
@@ -2655,6 +2658,100 @@ fn cada_casa_recebe_o_manifesto_que_aponta_para_ela_mesma() {
 }
 
 #[test]
+fn o_manifesto_anterior_pedido_chega_ao_manifesto_py() {
+    // **Acumulado** (spec 0.16, §1). A 0.16.0 recebe o manifesto da 0.15.2,
+    // que nunca foi `latest`, por `SEELE_MANIFESTO_ANTERIOR`. Um script que
+    // baixasse e aceitasse a variável sem repassá-la ao `manifesto.py`
+    // publicaria um manifesto sem a linha legada, e nada avisaria.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let anterior = bancada.base.join("anterior-da-0.15.2.json");
+    escrever(&anterior, "{}", false);
+    let anterior_texto = anterior.display().to_string();
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("SEELE_MANIFESTO_ANTERIOR", anterior_texto.as_str())],
+    );
+    assert!(
+        saida
+            .diario
+            .contains(&format!("--anterior {anterior_texto}")),
+        "o manifesto anterior pedido não chegou ao manifesto.py:\n{}\n{}",
+        saida.diario,
+        saida.texto
+    );
+}
+
+#[test]
+fn um_manifesto_anterior_que_nao_existe_para_o_release() {
+    // Um nome errado em `SEELE_MANIFESTO_ANTERIOR` sairia como um manifesto
+    // sem a linha legada. Melhor parar dizendo qual arquivo faltou.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("SEELE_MANIFESTO_ANTERIOR", "/caminho/que/nao/existe.json")],
+    );
+    assert_ne!(saida.estado, 0, "seguiu com um anterior que não existe");
+    assert!(
+        saida.texto.contains("/caminho/que/nao/existe.json"),
+        "a recusa não diz qual arquivo faltou:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.diario.contains("manifesto-argumentos"),
+        "o manifesto.py rodou assim mesmo:\n{}",
+        saida.diario
+    );
+}
+
+/// **Um conserto da linha legada nunca vira o `latest` do GitHub** (spec 0.16,
+/// D-linha-1). Como `latest`, quem está na 0.15.1 o receberia pelo
+/// atualizador, e o launcher leria o manifesto do release errado. O rascunho
+/// sai com `make_latest: false`, e o fim do script lembra de desmarcar a caixa
+/// ao publicar, porque a tela do GitHub pode marcá-la de novo.
+#[test]
+fn a_linha_legada_sai_sem_virar_a_mais_nova() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria", "--linha-legada"], &[]);
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.corpos.contains("\"make_latest\": \"false\""),
+        "o rascunho da linha legada saiu podendo virar o latest:\n{}",
+        saida.corpos
+    );
+    assert!(
+        saida.texto.contains("Set as the latest release"),
+        "o fim não lembra de desmarcar a caixa ao publicar:\n{}",
+        saida.texto
+    );
+}
+
+/// E o contrário: sem a opção, o pedido não leva `make_latest`, e o GitHub faz
+/// o de sempre — a publicação mais nova vira a `latest`.
+#[test]
+fn sem_a_opcao_o_rascunho_e_o_de_sempre() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+    assert_eq!(saida.estado, 0, "{}", saida.texto);
+    assert!(
+        !saida.corpos.contains("make_latest"),
+        "o rascunho comum levou make_latest:\n{}",
+        saida.corpos
+    );
+}
+
+#[test]
 fn o_endereco_antigo_continua_na_lista_enquanto_a_migracao_dura() {
     // **Um guarda com prazo, e ele diz isso de si mesmo.**
     //
@@ -3604,6 +3701,99 @@ fn o_instalador_do_windows_sai_assinado() {
          arquivo assinado: sem ele a página sai sem Windows no `latest.json`, e \
          quem usa Windows deixa de receber atualização sem ser avisado.\n{}",
         saida.texto
+    );
+}
+
+/// O portátil sai assinado como o instalador. Sem o `.sig`, o `manifesto.py`
+/// o deixa fora do `versions[]`, e a linha deixa de existir no Windows para o
+/// launcher (spec 0.16, §1).
+#[test]
+fn o_portatil_do_windows_sai_assinado() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        bancada
+            .repo
+            .join("entrega/SEELE_1.2.3_x64-portatil.tar.gz.sig")
+            .is_file(),
+        "o portátil subiu sem `.sig`, e o launcher não o veria no Windows:\n{}",
+        saida.texto
+    );
+}
+
+/// Um Windows que devolve o instalador e não o portátil não entrou inteiro: a
+/// versão sairia sem linha no launcher do Windows, sem ninguém saber.
+#[test]
+fn sem_o_portatil_o_windows_nao_entrou() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_SEM_PORTATIL", "1")]);
+    assert_ne!(
+        saida.estado, 0,
+        "sem o portátil, a publicação seguiu como se o Windows estivesse inteiro:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("portátil"),
+        "a recusa tem de dizer o que faltou:\n{}",
+        saida.texto
+    );
+}
+
+/// **O nome do portátil está escrito em dois arquivos**, como o do instalador
+/// (ver `o_nome_que_o_windows_escreve_e_o_que_o_orquestrador_procura`), e o
+/// guarda é o mesmo: ler os dois e perguntar se casam.
+///
+/// É um guarda de texto, e por isso limitado: ele prende o nome, o formato e a
+/// assinatura, e não prova que o PowerShell monta o arquivo. Quem prova é a
+/// medida de ponta a ponta no Windows (tarefa 17 do plano da F6).
+#[test]
+fn o_portatil_que_o_windows_escreve_e_o_que_o_orquestrador_procura_e_assina() {
+    let ps = std::fs::read_to_string(raiz().join("empacotar/windows.ps1"))
+        .expect("o empacotador do Windows");
+    let sh = std::fs::read_to_string(raiz().join("empacotar/publicar.sh")).expect("o orquestrador");
+
+    let nome = ps
+        .lines()
+        .map(str::trim)
+        .find_map(|linha| linha.strip_prefix("$NomePortatil = \""))
+        .and_then(|resto| resto.split('"').next())
+        .expect("o `windows.ps1` tem de declarar `$NomePortatil`")
+        .replace("${Versao}", "9.9.9")
+        .replace("$Versao", "9.9.9");
+    assert!(
+        nome.ends_with("-portatil.tar.gz"),
+        "o portátil tem de ser um tar.gz, que o `DesempacotarTarGz` do launcher abre: `{nome}`"
+    );
+    assert!(
+        sem_comentario(&ps).contains("tar -czf"),
+        "o `windows.ps1` não comprime o portátil com `tar -czf`"
+    );
+
+    let padrao = sh
+        .lines()
+        .filter(|linha| linha.contains("/entrega\" -type f -name \""))
+        .filter_map(|linha| linha.split("-name \"").nth(1))
+        .filter_map(|resto| resto.split('"').next())
+        .find(|padrao| padrao.contains("portatil"))
+        .expect("o `publicar.sh` tem de conferir a chegada do portátil")
+        .replace("${VERSAO}", "9.9.9")
+        .replace("$VERSAO", "9.9.9");
+    assert!(
+        casa_com_glob(&padrao, &nome),
+        "o `publicar.sh` procura `{padrao}` e o `windows.ps1` escreve `{nome}`"
+    );
+    assert!(
+        sh.contains("\"$RAIZ\"/entrega/*-portatil.tar.gz"),
+        "o laço de assinatura do `publicar.sh` não cobre o portátil"
     );
 }
 

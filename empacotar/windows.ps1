@@ -356,6 +356,26 @@ try {
     tar -cf $CargaTar -C $Carga .
     if ($LASTEXITCODE -ne 0) { throw "não montei a carga do instalador" }
 
+    # ------------------------------------------------------------ o portátil
+    #
+    # **A mesma carga, num tar.gz que se abre ao lado de outra versão.** Spec
+    # da 0.16, §1: o instalador grava por cima de Program Files e não aceita
+    # outra pasta, e o launcher precisa guardar a linha legada no depósito dele.
+    # O launcher abre isto com o mesmo desempacotador do `.app.tar.gz` do Mac,
+    # e o manifesto declara `SEELE.exe` como o executável.
+    #
+    # Sai daqui sem assinatura: quem assina é o `publicar.sh`, no Mac, onde a
+    # chave mora — o mesmo caminho do `-instalador.exe`. E ele não entra no
+    # topo do `latest.json`: o atualizador continua trocando a instalação pelo
+    # instalador.
+    New-Item -ItemType Directory -Force -Path "entrega" | Out-Null
+    $NomePortatil = "SEELE_${Versao}_x64-portatil.tar.gz"
+    $Portatil = Join-Path "entrega" $NomePortatil
+    Remove-Item -Force $Portatil -ErrorAction SilentlyContinue
+    tar -czf $Portatil -C $Carga .
+    if ($LASTEXITCODE -ne 0) { throw "não montei o pacote portátil" }
+    Write-Host "→ portátil: $NomePortatil" -ForegroundColor Cyan
+
     Write-Host "→ compilando o instalador próprio" -ForegroundColor Cyan
     $env:SEELE_CARGA = $CargaTar
     # **E a versão, que o instalador não tinha como saber.**
