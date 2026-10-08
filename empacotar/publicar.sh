@@ -172,6 +172,7 @@ SEM_BATERIA=nao
 PARCIAL=nao
 SEM_ASSINATURA=nao
 SO_CONFERIR=nao
+LINHA_LEGADA=nao
 
 COMMIT=""
 TOCOU_WINDOWS=nao
@@ -233,6 +234,8 @@ uso() {
 "  --sem-assinatura             segue sem a chave do projeto (release que não" \
 "                               atualiza ninguém)" \
 "  --conferir                   só as conferências prévias; não compila nada" \
+"  --linha-legada               um conserto da linha do Servidor 0.15: o rascunho" \
+"                               sai sem poder virar o latest do GitHub" \
 "  --decidir <pedidos> <falhas> a regra de publicação, sozinha, sem compilar" \
 "" \
 "ambiente:" \
@@ -812,6 +815,7 @@ while [ "$#" -gt 0 ]; do
         --sem-bateria) SEM_BATERIA=sim; shift ;;
         --sem-assinatura) SEM_ASSINATURA=sim; shift ;;
         --conferir) SO_CONFERIR=sim; shift ;;
+        --linha-legada) LINHA_LEGADA=sim; shift ;;
         -h|--help|--ajuda) uso; exit 0 ;;
         -*) uso >&2; morrer "não conheço a opção «${1}»." ;;
         *)
@@ -2197,8 +2201,12 @@ for pub_repo in $REPOS; do
     else
         pub_alvo=""
     fi
+    # **A linha legada nunca vira o `latest`** (spec 0.16, D-linha-1). Como
+    # `latest`, quem está na 0.15.1 receberia a 0.15.2 pelo atualizador, e o
+    # launcher leria o manifesto do release errado. `make_latest` vai como
+    # texto porque é assim que a API do GitHub o define.
     if ! python3 -c 'import json, sys
-tag, commit, notas, destino = sys.argv[1:5]
+tag, commit, notas, destino, legada = sys.argv[1:6]
 corpo = {
     "tag_name": tag,
     "name": "SEELE " + tag,
@@ -2208,8 +2216,10 @@ corpo = {
 }
 if commit:
     corpo["target_commitish"] = commit
+if legada == "sim":
+    corpo["make_latest"] = "false"
 with open(destino, "w", encoding="utf-8") as saida:
-    json.dump(corpo, saida)' "v$VERSAO" "$pub_alvo" "$NOTAS" "$PEDIDO"; then
+    json.dump(corpo, saida)' "v$VERSAO" "$pub_alvo" "$NOTAS" "$PEDIDO" "$LINHA_LEGADA"; then
         morrer "não consegui montar o pedido de criação do release."
     fi
 
@@ -2338,6 +2348,19 @@ if [ "$(printf '%s' "$RASCUNHOS" | grep -c .)" -gt 1 ]; then
 "olha primeiro para o novo. Publicar só um deixa metade das pessoas numa versão" \
 "que ninguém mais toca — e um atualizador que não acha nada não sabe dizer se" \
 "não há versão nova ou se ele olhou no lugar errado." \
+""
+fi
+if [ "$LINHA_LEGADA" = sim ]; then
+    printf '%s\n' \
+"**Este é um conserto da linha do Servidor 0.15, e ele não pode virar o latest.**" \
+"Ao publicar o rascunho, DESMARQUE «Set as the latest release». O pedido já foi" \
+"com make_latest=false, mas a tela do GitHub pode marcar a caixa de novo. Como" \
+"latest, quem está na 0.15.1 receberia esta versão pelo atualizador, e o" \
+"launcher leria o manifesto do release errado." \
+"" \
+"Depois de publicar a 0.16, um conserto da linha legada só chega ao launcher se" \
+"o latest.json do release latest for refeito com ele: docs/versoes-lado-a-lado.md," \
+"seção 3." \
 ""
 fi
 printf '%s\n' \

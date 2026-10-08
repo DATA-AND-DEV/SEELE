@@ -2707,6 +2707,50 @@ fn um_manifesto_anterior_que_nao_existe_para_o_release() {
     );
 }
 
+/// **Um conserto da linha legada nunca vira o `latest` do GitHub** (spec 0.16,
+/// D-linha-1). Como `latest`, quem está na 0.15.1 o receberia pelo
+/// atualizador, e o launcher leria o manifesto do release errado. O rascunho
+/// sai com `make_latest: false`, e o fim do script lembra de desmarcar a caixa
+/// ao publicar, porque a tela do GitHub pode marcá-la de novo.
+#[test]
+fn a_linha_legada_sai_sem_virar_a_mais_nova() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria", "--linha-legada"], &[]);
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.corpos.contains("\"make_latest\": \"false\""),
+        "o rascunho da linha legada saiu podendo virar o latest:\n{}",
+        saida.corpos
+    );
+    assert!(
+        saida.texto.contains("Set as the latest release"),
+        "o fim não lembra de desmarcar a caixa ao publicar:\n{}",
+        saida.texto
+    );
+}
+
+/// E o contrário: sem a opção, o pedido não leva `make_latest`, e o GitHub faz
+/// o de sempre — a publicação mais nova vira a `latest`.
+#[test]
+fn sem_a_opcao_o_rascunho_e_o_de_sempre() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+    assert_eq!(saida.estado, 0, "{}", saida.texto);
+    assert!(
+        !saida.corpos.contains("make_latest"),
+        "o rascunho comum levou make_latest:\n{}",
+        saida.corpos
+    );
+}
+
 #[test]
 fn o_endereco_antigo_continua_na_lista_enquanto_a_migracao_dura() {
     // **Um guarda com prazo, e ele diz isso de si mesmo.**
