@@ -269,9 +269,16 @@ impl Marcas {
     /// `QUEM <fp16>s`, e trocar qualquer um dos dois o deixaria falando sozinho.
     ///
     /// Devolve `None` para um texto que não forma marca: curto demais, ou com
-    /// algo que não é letra nem número.
+    /// algo que não é letra nem número **em qualquer posição**, e não só nos
+    /// dezesseis primeiros.
     #[must_use]
     pub fn do_servidor(impressao_digital: &str) -> Option<Self> {
+        if !impressao_digital
+            .chars()
+            .all(|caractere| caractere.is_ascii_alphanumeric())
+        {
+            return None;
+        }
         let prefixo = impressao_digital.get(..16)?;
         Some(Self {
             aviso: Marca::nova(prefixo)?,
@@ -900,6 +907,15 @@ mod testes {
             Marcas::do_servidor("3cbcfb02 2da738f89c156de86eb280a"),
             None,
             "um espaço virou marca: a marca é o único campo que volta na resposta do ponto"
+        );
+        // O T1a da pendência 51, item 17: o texto inteiro, e não só os 16
+        // primeiros. O doc promete `None` para «algo que não é letra nem
+        // número», e o que vinha depois do 16º caractere não era olhado.
+        assert_eq!(
+            Marcas::do_servidor("0123456789abcdef!!!"),
+            None,
+            "um texto com algo que não é letra nem número depois do 16º caractere deu marcas: \
+             o doc de `do_servidor` promete recusá-lo, e uma impressão torta passa por boa"
         );
     }
 }
