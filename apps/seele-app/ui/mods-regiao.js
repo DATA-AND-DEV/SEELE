@@ -2559,8 +2559,9 @@ class RegiaoDeMod {
    * marca (`devolverOsSons`), e um destino que desenha a toma na mesma
    * varredura (`tomarOsSonsDevolvidos`) — sem isso, o som ficava preso no lugar
    * que ninguém via, e o `tocando` religado era recusado como fora da tela. O
-   * som que tocava recomeça, do começo, no destino que tomou a marca, e os
-   * outros ficam calados (`herdarOSom`). Na
+   * som que tocava recomeça, do começo, no destino que tomou a marca — outro,
+   * ou o mesmo que volta à tela sem ninguém a ter tomado —, e os outros ficam
+   * calados (`herdarOSom`). Na
    * saída, os destinos saem juntos (`soltarMontagem`, ou a saída da instância),
    * e um destino que não montou é solto antes de um som chegar aqui.
    *
@@ -2615,12 +2616,19 @@ class RegiaoDeMod {
     // Os outros destinos guardam o plano, que traz o `doServidor`, e o que
     // tomar a marca pede o som de novo ao servidor no pedido de tocar.
     if (this.sonsDaContribuicao) {
-      if (!this.tomouOsSons && this.sonsDaContribuicao.tomados) {
+      const sons = this.sonsDaContribuicao;
+      if (!this.tomouOsSons && (sons.tomados || sons.devolvidos)) {
         const semOData = { ...montagem, origem: origem.caminho === undefined ? {} : origem };
         entrada.montagem = semOData;
         entrada.adiado = semOData;
         elem.dataset.estado = "pronta";
         this.esquecerMidia(elem);
+        // **A marca devolvida é tomada por um caminho só**, com todos os sons
+        // deste destino e só com o nó dele no documento
+        // (`tomarOsSonsDevolvidos`). Tomada aqui, fora da tela, o som herdado
+        // que tocava decodificava para ser recusado como fora da tela, e os
+        // outros sons da herança ficavam presos nela.
+        if (!sons.tomados) this.tomarOsSonsDevolvidos();
         return;
       }
       if (!this.tomouOsSons) this.tomarAMarca();
@@ -3045,9 +3053,13 @@ class RegiaoDeMod {
    *   calar (`tocavam`, que `calarSonsForaDaTela` guarda): esses recomeçam no
    *   destino que a tomar (`herdarOSom`), e os outros continuam calados.
    *
-   * Quando a pessoa volta, o nó reaparece com a figura «pronta» e sem
-   * tocador: a marca está com o destino que a tomou, e este só a toma de novo
-   * se ela for devolvida outra vez com ele na tela (`tomarOsSonsDevolvidos`).
+   * Quando a pessoa volta, o nó reaparece com a figura «pronta». Se outro
+   * destino tomou a marca, ele fica sem tocador, e só a toma de novo se ela for
+   * devolvida outra vez com ele na tela. Se ninguém a tomou, ele a retoma na
+   * varredura (`tomarOsSonsDevolvidos`) pela mesma regra de um destino novo: o
+   * som que tocava quando ele saiu recomeça, do começo — com o conteúdo de uma
+   * contribuição fixo, é o único jeito de o som voltar —, e os outros ficam
+   * calados.
    */
   devolverOsSons(tocavam = new Set()) {
     if (!this.sonsDaContribuicao || !this.tomouOsSons) return;
@@ -3162,7 +3174,14 @@ class RegiaoDeMod {
    * **Vale também para o som que chega depois** de este destino tomar a marca
    * — a mídia dele ainda vinha quando a marca mudou (`montarSom`): a herança
    * fica com o destino até o último som dela chegar. Um som num lugar que o
-   * destino que saiu não segurava é montado como qualquer outro.
+   * destino que saiu não segurava é montado como qualquer outro. E o som que
+   * chega a um destino com a marca devolvida o faz tomá-la pelo caminho de
+   * toda devolução, `tomarOsSonsDevolvidos`: só com o nó na tela, e com todos
+   * os sons dele.
+   *
+   * **E vale para o mesmo destino que volta à tela** e retoma a marca que ele
+   * mesmo devolveu: o que é «o destino que saiu» e o que é «o que toma» são o
+   * mesmo renderer, e a regra não os distingue.
    */
   herdarOSom(elem, som, lugares) {
     const herdados = this.herdados;

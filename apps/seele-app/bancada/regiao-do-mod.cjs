@@ -4590,6 +4590,105 @@ async function oSomDaContribuicaoMudaDeDestino() {
     for (const r of destinos) r.soltar();
   }
 
+  // **A marca devolvida não é tomada fora da tela** (rodada 2, menor 1). Os
+  // dois destinos saem juntos, com a vinheta e o sino tocando no primeiro, e
+  // a varredura não acha quem tome a marca; a mídia do sino chega ao segundo
+  // ainda fora da tela. Tomá-la ali decodificava o sino herdado para recusá-lo
+  // como fora da tela, e deixava a vinheta presa na herança: quando o segundo
+  // voltava, nada tocava. A marca espera o destino voltar, e aí os dois sons
+  // que tocavam recomeçam.
+  {
+    const foraDaTela = `${caso} · a marca devolvida fora da tela`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let chamadas = 0;
+    let soltarOSino = null;
+    const d = dono(b, () => {
+      chamadas += 1;
+      const midia = { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 };
+      if (chamadas === 4) return new Promise((pronto) => { soltarOSino = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const dois = [
+      { forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando: true },
+      { forma: "midia", chave: "sino", fonte: "som/s.wav", tocando: true },
+    ];
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(dois);
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const [primeiro, segundo] = destinos;
+    const daChave = (chave, estado) => d.ditos.filter((e) => e.nome === "midia" && e.chave === chave && e.estado === estado);
+    primeiro.raiz.remove();
+    segundo.raiz.remove();
+    varrer();
+    soltarOSino?.();
+    await assentar();
+    const recusas = d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada");
+    confere(
+      foraDaTela,
+      recusas.length === 0 && segundo.tomouOsSons === false,
+      "a mídia do sino chegou ao destino fora da tela e ele tomou a marca devolvida ali — o sino herdado foi "
+        + `decodificado para ser recusado como fora da tela: ${JSON.stringify(recusas)}, tomou: ${segundo.tomouOsSons}`,
+    );
+    b.doc.body.append(segundo.raiz);
+    varrer();
+    await assentar();
+    const tocandoAgora = (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    confere(
+      foraDaTela,
+      segundo.tomouOsSons === true && daChave("vinheta", "tocando").length === 2 && daChave("sino", "tocando").length === 2
+        && tocandoAgora === 2 && d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada").length === 0,
+      "o destino voltou à tela e os sons que tocavam quando a marca foi devolvida não recomeçaram ali: «tocando» da "
+        + `vinheta ${daChave("vinheta", "tocando").length} vez(es), do sino ${daChave("sino", "tocando").length}, `
+        + `${tocandoAgora} fonte(s) tocando, tomou: ${segundo.tomouOsSons}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **O mesmo destino que volta à tela** (rodada 2, decisão do controlador):
+  // sem ninguém que tenha tomado a marca, ele a retoma, e o som que tocava
+  // quando ele saiu recomeça, do começo — com o conteúdo de uma contribuição
+  // fixo, é o único jeito de o som voltar, e é a regra do destino novo.
+  {
+    const deVolta = `${caso} · o mesmo destino que volta`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sons = { tomados: false };
+    const so = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+    so.sonsDaContribuicao = sons;
+    so.aplicar(vinheta(true));
+    const varrer = varreduraDeBase(b, [{ modo: "adicionar", ponto: "canal.item", sons, montadas: new Map([["1", { renderer: so }]]) }]);
+    await assentar();
+    so.raiz.remove();
+    varrer();
+    await assentar();
+    b.doc.body.append(so.raiz);
+    varrer();
+    await assentar();
+    const tocandoAgora = (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    confere(
+      deVolta,
+      ditos(d, "tocando").length === 2 && tocandoAgora === 1 && b.tocadoresDePe() === 1 && tocadores([so]) === 1
+        && ditos(d, "recusada").length === 0,
+      "o destino que tocava a vinheta saiu e voltou à tela sem ninguém ter tomado a marca, e ela não recomeçou ali, "
+        + `ou recomeçou em dobro: «tocando» dito ${ditos(d, "tocando").length} vez(es), ${tocandoAgora} fonte(s) `
+        + `tocando, ${b.tocadoresDePe()} tocador(es) na janela`,
+    );
+    so.soltar();
+  }
+
   // **O som recusado não volta a «pronta» no destino novo** (rodada 1,
   // menor 4). Um som que falhou ou passou do teto no destino que saiu fica
   // assim no que toma a marca — a figura, e a anotação com o motivo —, sem

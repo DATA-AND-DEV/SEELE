@@ -1595,7 +1595,8 @@ function midiasDaRegiaoEDasPaginas(regioes, superficies) {
  * dele). A segunda volta — só quando há marca devolvida (`sons.devolvidos`) —
  * oferece a marca aos destinos em que a contribuição desenha, na ordem de
  * `montadas`, e o primeiro que está no documento com um som esperando a toma
- * (`RegiaoDeMod#tomarOsSonsDevolvidos`); o som que tocava recomeça ali. Duas voltas, e
+ * (`RegiaoDeMod#tomarOsSonsDevolvidos`) — outro destino, ou o mesmo, de volta à
+ * tela; o som que tocava recomeça ali. Duas voltas, e
  * não uma: numa só, um destino visitado antes do que saiu acharia a marca
  * ainda tomada, e o som ficaria sem lugar até o desenho seguinte. Redesenhar
  * não faria isso: a montagem de cada destino é reaproveitada
