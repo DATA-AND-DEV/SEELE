@@ -420,8 +420,13 @@ pub(crate) fn instalar_de(
 ) -> Result<Publicado, FalhaAoInstalarMod> {
     let publicado = publicar_de(config_dir, origem);
     if let Err(recusa) = &publicado {
+        // **A pasta entre aspas e com escape**, por `caminho_no_registro`. O
+        // nome dela vem de quem empacotou o MOD, e o formatador não escapa
+        // quebra de linha num campo `%`: um `\n` no nome escreveria no
+        // `seele.log` uma segunda linha com a cara do produto. A recusa vai
+        // pelo `Debug`, que já escapa o caminho do atalho dentro dela.
         tracing::warn!(
-            origem = %origem.display(),
+            origem = %crate::caminho_no_registro(&origem.to_string_lossy()),
             ?recusa,
             "não instalei o MOD desta pasta"
         );
@@ -429,8 +434,9 @@ pub(crate) fn instalar_de(
     publicado
 }
 
-/// O trabalho de [`instalar_de`], sem o registro: cada `return` daqui é uma
-/// recusa, e é lá, num lugar só, que toda ela vira linha no `seele.log`.
+/// O trabalho de [`instalar_de`], sem o registro: toda saída `Err` daqui é uma
+/// recusa, e é lá, num lugar só, que ela vira linha no `seele.log`. A outra
+/// saída antecipada, a do pacote que já está no cache, é `Ok`.
 fn publicar_de(config_dir: &Path, origem: &Path) -> Result<Publicado, FalhaAoInstalarMod> {
     if !origem.join("mod.json").is_file() {
         return Err(FalhaAoInstalarMod::SemManifesto);
@@ -755,7 +761,10 @@ mod instalar {
             let (resultado, rastro) =
                 crate::rastro_de_teste::capturar(|| instalar_de(&config, &origem));
             assert!(resultado.is_err(), "{} instalou", origem.display());
-            let caminho = origem.display().to_string();
+            // **A forma que o registro escreve, e não `display()`.** A pasta
+            // vai escapada, e no Windows o escape dobra a barra invertida:
+            // comparar com `display()` reprovaria lá com o registro certo.
+            let caminho = crate::caminho_no_registro(&origem.to_string_lossy());
             assert!(
                 rastro
                     .lines()
@@ -764,6 +773,47 @@ mod instalar {
                  {resultado:?}\n{rastro}"
             );
         }
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **Uma pasta com quebra de linha no nome não forja linha no `seele.log`.**
+    ///
+    /// O nome da pasta vem de quem empacotou o MOD, e o formatador do registro
+    /// não escapa `\n` nem `\r` num campo `%`: a pasta abaixo escrevia uma
+    /// segunda linha com a cara do produto, e quem lê o registro não tinha como
+    /// saber que ela era forjada. A pasta vai ao registro por
+    /// `caminho_no_registro`, entre aspas e com escape, como o resto da casca.
+    // **Só onde um nome de pasta aceita `\n`.** O Windows não aceita.
+    #[cfg(unix)]
+    #[test]
+    fn uma_pasta_com_quebra_de_linha_no_nome_nao_forja_linha_no_registro() {
+        const FORJADA: &str = "2026-10-08T00:00:00.000000Z  INFO seele_app: tudo certo";
+        let raiz = pasta("forjada");
+        let origem = raiz.join(format!("mod\n{FORJADA}"));
+        std::fs::create_dir_all(&origem).unwrap();
+        let config = raiz.join("config");
+
+        let (resultado, rastro) =
+            crate::rastro_de_teste::capturar(|| instalar_de(&config, &origem));
+
+        assert!(
+            matches!(resultado, Err(FalhaAoInstalarMod::SemManifesto)),
+            "a pasta sem `mod.json` não foi recusada como tal: {resultado:?}"
+        );
+        assert!(
+            !rastro
+                .lines()
+                .any(|linha| linha.trim_start().starts_with(FORJADA)),
+            "o nome da pasta escreveu no `seele.log` uma linha com a cara do produto, e quem \
+             lê o registro não tem como saber que ela é forjada:\n{rastro}"
+        );
+        let escapada = crate::caminho_no_registro(&origem.to_string_lossy());
+        assert!(
+            rastro
+                .lines()
+                .any(|linha| linha.contains("WARN") && linha.contains(&escapada)),
+            "a recusa não ficou no `seele.log` com a pasta escapada, {escapada}:\n{rastro}"
+        );
         let _ = std::fs::remove_dir_all(&raiz);
     }
 
