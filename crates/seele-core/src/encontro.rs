@@ -830,9 +830,11 @@ async fn perguntar_a(
 /// ele manda a esta consulta um `AQUI` de outro IP, e prova a chamada de
 /// [`aceita_origem`] aqui dentro: o predicado sozinho tem teste, e a chamada
 /// trocada por um no-op passava em todos (o m1 da revisão final do Plano 1).
-/// Ver `um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta`.
+/// Ver `um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta`. E é por isso
+/// que ele recebe um [`Canal`], e não o socket: um teste precisa de um envio
+/// que o sistema recusa numa volta e não na outra.
 async fn consultar_por(
-    socket: &tokio::net::UdpSocket,
+    canal: &impl Canal,
     destino: SocketAddr,
     marcas: &Marcas,
     ate: tokio::time::Instant,
@@ -891,9 +893,8 @@ async fn consultar_por(
             // recusa costuma recusar as três, e a causa é a mesma.
             let mut saidas = 0_u32;
             let mut recusa = None;
-            saiu_em = agora;
             for pedido in &pedidos {
-                match socket.send_to(pedido, destino).await {
+                match canal.mandar(pedido, destino).await {
                     Ok(_) => saidas += 1,
                     Err(erro) => {
                         recusa.get_or_insert(erro);
@@ -909,18 +910,13 @@ async fn consultar_por(
                     "quarto: a pergunta não saiu"
                 );
             }
-            // **Nenhuma pergunta saiu: não há o que esperar.** Sem rota
-            // (`ENETUNREACH`, `EHOSTUNREACH`) o sistema recusa as três na hora, e
-            // repetir a volta e dormir até o prazo só faria a conexão pagar
-            // 1,5 s por uma resposta que não tem como vir. Na primeira volta,
-            // é `NadaSaiu`, e [`consultar`] tenta o endereço seguinte do ponto;
-            // o `info` acima diz a causa. A `perguntar` antiga também saía
-            // aqui, na hora.
-            if saidas == 0 {
-                if enviados == 0 {
-                    return PorUmEndereco::NadaSaiu;
-                }
-                break;
+            if depois_da_volta(saidas, enviados) == DepoisDaVolta::NadaSaiu {
+                return PorUmEndereco::NadaSaiu;
+            }
+            // A ida e volta do `ONDE` se mede da última volta que saiu: numa
+            // volta recusada, as perguntas no ar são as da anterior.
+            if saidas > 0 {
+                saiu_em = agora;
             }
             enviados += 1;
             proxima_volta += INTERVALO_DOS_ENVIOS;
@@ -932,7 +928,7 @@ async fn consultar_por(
         };
         let acordar = teto.map_or(acordar, |teto| teto.min(acordar));
         let (lidos, origem) =
-            match tokio::time::timeout_at(acordar, socket.recv_from(&mut balde)).await {
+            match tokio::time::timeout_at(acordar, canal.receber(&mut balde)).await {
                 Ok(Ok(recebido)) => recebido,
                 // Hora da próxima volta, ou do fim: o topo do laço decide.
                 Err(_) => continue,
@@ -979,6 +975,64 @@ async fn consultar_por(
         (None, None) => OndeMora::PontoMudo,
         (servidor, escuta) => OndeMora::Achado { servidor, escuta },
     })
+}
+
+/// Por onde [`consultar_por`] fala com o ponto: em produção, o socket UDP que
+/// [`perguntar_a`] abre.
+///
+/// Um traço, e não o `tokio::net::UdpSocket` direto, por um teste só:
+/// `uma_volta_recusada_depois_da_primeira_ainda_ouve_a_resposta_tardia`. Ele
+/// precisa de um envio que dá certo na volta 1 e é recusado na 2, e nenhum
+/// socket de verdade faz isso do mesmo jeito no macOS, no Windows e no Linux
+/// (as recusas que cada sistema faz estão medidas em `destino_recusado`, nos
+/// testes deste módulo).
+trait Canal {
+    /// Manda um datagrama a `destino`, como `send_to`.
+    async fn mandar(&self, datagrama: &[u8], destino: SocketAddr) -> std::io::Result<usize>;
+    /// Espera o próximo datagrama, como `recv_from`.
+    async fn receber(&self, balde: &mut [u8]) -> std::io::Result<(usize, SocketAddr)>;
+}
+
+impl Canal for tokio::net::UdpSocket {
+    async fn mandar(&self, datagrama: &[u8], destino: SocketAddr) -> std::io::Result<usize> {
+        self.send_to(datagrama, destino).await
+    }
+
+    async fn receber(&self, balde: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+        self.recv_from(balde).await
+    }
+}
+
+/// O que [`consultar_por`] faz depois de mandar uma volta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DepoisDaVolta {
+    /// Nenhuma pergunta saiu, e nenhuma volta antes desta: não há resposta que
+    /// possa vir, e a consulta por este endereço acaba na hora.
+    NadaSaiu,
+    /// A volta conta, tenha saído ou não, e a consulta espera a resposta até a
+    /// volta seguinte.
+    Contar,
+}
+
+/// A decisão de [`consultar_por`] depois de mandar a volta `enviados + 1`, da
+/// qual saíram `saidas` perguntas.
+///
+/// **Só a primeira volta recusada inteira acaba a consulta.** Sem rota
+/// (`ENETUNREACH`, `EHOSTUNREACH`) o sistema recusa as três na hora, e repetir a
+/// volta e dormir até o prazo só faria a conexão pagar 1,5 s por uma resposta
+/// que não tem como vir. A `perguntar` antiga também saía ali, na hora.
+///
+/// Numa volta 2 ou 3 não é assim: as perguntas da volta anterior saíram, e a
+/// resposta a elas ainda pode chegar. Parar ali perdia essa resposta, e a
+/// consulta voltava como `PontoMudo` com o anfitrião no quarto (o T6f da
+/// pendência 51, item 17). A volta recusada **conta como volta**: a seguinte sai
+/// meio segundo depois, e a recusa não vira laço quente.
+fn depois_da_volta(saidas: u32, enviados: u32) -> DepoisDaVolta {
+    if saidas == 0 && enviados == 0 {
+        DepoisDaVolta::NadaSaiu
+    } else {
+        DepoisDaVolta::Contar
+    }
 }
 
 /// Se uma resposta à consulta veio do ponto a que se perguntou.
@@ -1744,6 +1798,158 @@ mod testes {
             "a consulta passou ao endereço seguinte do ponto sem dizer no rastro (`info`, o \
              único nível que o seele.log grava) de qual para qual: quem lê o «não saiu» do \
              primeiro acha que a consulta parou ali. Rastro: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn uma_volta_recusada_depois_da_primeira_conta_como_volta() {
+        // O T6f da pendência 51, item 17. Nenhuma pergunta sair na primeira
+        // volta é não haver resposta que possa vir, e a consulta volta na hora
+        // (`uma_pergunta_que_nao_sai_volta_na_hora_e_diz_no_rastro_por_que_nao_saiu`).
+        // Numa volta 2 ou 3 não é: as perguntas da volta anterior saíram, e a
+        // resposta a elas ainda pode chegar.
+        assert_eq!(
+            depois_da_volta(0, 0),
+            DepoisDaVolta::NadaSaiu,
+            "nenhuma pergunta saiu na primeira volta e a consulta não desistiu dela: sem rota, \
+             a conexão paga o prazo inteiro por uma resposta que não tem como vir"
+        );
+        for enviados in 1..ENVIOS_AO_QUARTO {
+            assert_eq!(
+                depois_da_volta(0, enviados),
+                DepoisDaVolta::Contar,
+                "a volta {} não saiu, depois de {enviados} que saíram, e a consulta parou: a \
+                 resposta tardia às perguntas que já saíram se perde, e a consulta volta como \
+                 `PontoMudo`",
+                enviados + 1
+            );
+        }
+        for saidas in [1, 3] {
+            for enviados in 0..ENVIOS_AO_QUARTO {
+                assert_eq!(
+                    depois_da_volta(saidas, enviados),
+                    DepoisDaVolta::Contar,
+                    "a volta {} saiu ({saidas} perguntas) e a consulta não a contou",
+                    enviados + 1
+                );
+            }
+        }
+    }
+
+    /// Um canal que deixa sair as primeiras perguntas e recusa as seguintes,
+    /// como uma máquina que perde a rota no meio da consulta.
+    struct RecusaDepois {
+        socket: tokio::net::UdpSocket,
+        /// Quantas perguntas ainda saem.
+        deixa: std::sync::atomic::AtomicU32,
+    }
+
+    impl Canal for RecusaDepois {
+        async fn mandar(&self, datagrama: &[u8], destino: SocketAddr) -> std::io::Result<usize> {
+            let saiu = self.deixa.fetch_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |restam| restam.checked_sub(1),
+            );
+            if saiu.is_err() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NetworkUnreachable,
+                    "a rota caiu no meio da consulta",
+                ));
+            }
+            self.socket.send_to(datagrama, destino).await
+        }
+
+        async fn receber(&self, balde: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+            self.socket.recv_from(balde).await
+        }
+    }
+
+    #[tokio::test]
+    async fn uma_volta_recusada_depois_da_primeira_ainda_ouve_a_resposta_tardia() {
+        // O par de `uma_volta_recusada_depois_da_primeira_conta_como_volta`,
+        // com a consulta de verdade. A volta 1 sai; a 2, meio segundo depois,
+        // o sistema recusa inteira; e a resposta à volta 1 chega aos 700 ms.
+        // Parar na volta recusada perdia essa resposta, e a consulta voltava
+        // como `PontoMudo` com o servidor no quarto.
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+        let servidor = SocketAddr::from(SERVIDOR);
+        let quem = marcas.clone();
+        let (ponto, anotados) = ponto_falso(move |pedido, _| match pedido {
+            encontro::Pedido::Quem { marca } if *marca == quem.servidor => {
+                vec![(Duration::from_millis(700), encontro::aqui(marca, servidor))]
+            }
+            _ => Vec::new(),
+        })
+        .await;
+        let canal = RecusaDepois {
+            socket: tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+            deixa: std::sync::atomic::AtomicU32::new(3),
+        };
+
+        let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
+        let achado = consultar_por(&canal, ponto, &marcas, ate).await;
+
+        assert_eq!(
+            anotados.lock().unwrap().len(),
+            3,
+            "o ponto não recebeu exatamente as três perguntas da volta 1: o canal deste teste não \
+             recusou a volta 2, e o teste não mede o que diz medir"
+        );
+        assert_eq!(
+            achado,
+            PorUmEndereco::Perguntou(OndeMora::Achado {
+                servidor: Some(servidor),
+                escuta: None,
+            }),
+            "a volta 2 não saiu e a consulta perdeu a resposta tardia à volta 1: o servidor estava \
+             no quarto e quem chega fica sem o endereço de hoje"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_ida_e_volta_se_mede_da_ultima_volta_que_saiu() {
+        // O outro lado de contar a volta recusada: as perguntas no ar são as
+        // da volta 1, e a ida e volta do `ONDE` se mede dela. Medida da volta
+        // 2, que não saiu, a resposta aos 600 ms viraria uma ida e volta de
+        // 100 ms, o teto cairia aos 800 ms, e a escuta que chega aos 900 ms se
+        // perderia antes da hora da volta seguinte.
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+        let (servidor, escuta) = (SocketAddr::from(SERVIDOR), SocketAddr::from(ESCUTA));
+        let quem = marcas.clone();
+        let (ponto, _) = ponto_falso(move |pedido, de| match pedido {
+            encontro::Pedido::Onde { marca } => {
+                vec![(Duration::from_millis(600), encontro::aqui(marca, de))]
+            }
+            encontro::Pedido::Quem { marca } if *marca == quem.servidor => {
+                vec![(Duration::from_millis(600), encontro::aqui(marca, servidor))]
+            }
+            encontro::Pedido::Quem { marca } if *marca == quem.escuta => {
+                vec![(Duration::from_millis(900), encontro::aqui(marca, escuta))]
+            }
+            _ => Vec::new(),
+        })
+        .await;
+        let canal = RecusaDepois {
+            socket: tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap(),
+            deixa: std::sync::atomic::AtomicU32::new(3),
+        };
+
+        let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
+        let achado = consultar_por(&canal, ponto, &marcas, ate).await;
+
+        assert_eq!(
+            achado,
+            PorUmEndereco::Perguntou(OndeMora::Achado {
+                servidor: Some(servidor),
+                escuta: Some(escuta),
+            }),
+            "a escuta respondeu antes da hora da volta seguinte e se perdeu: a ida e volta foi \
+             medida da volta recusada, e não da que saiu, e o teto venceu cedo demais"
         );
     }
 
