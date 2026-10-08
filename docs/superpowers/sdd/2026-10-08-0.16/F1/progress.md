@@ -22,6 +22,18 @@ Plano: `docs/superpowers/plans/2026-10-08-0.16-F1-protocolo.md`. Branch `0.16/pr
 | 13 o S2 no fio | feito | `67619142` | RED antes: a prova amarrada era recusada e a do nonce cru entrava. Reversões: o servidor conferindo contra zeros reprova `prova_amarrada`; o cliente assinando o nonce cru reprova os dois de `recusa` |
 | 13b o lado do cliente | feito | `33d23400` | reversão: o cliente tirando a impressão de outra fonte (zeros) reprova |
 
+## O lote do vocabulário (liberado em 08/10)
+
+| parte | estado | commit | nota |
+|---|---|---|---|
+| plano do lote | feito | `99caa927` | a razão de outra linha **não** entra no fio (decisão `7abfb500`) |
+| V1 o `Codigo` | feito | `b10797ec` | quatro vetores calculados por uma referência independente em Python; `vetores-de-codigo.json` cruzado com ela. Reversões: fator do Luhn reprova 4; corte de bits, 3 |
+| V2 `Tocando` | feito | `567fa409` | ordinal 41. Reversão: sem o exemplar, a completude acusa `Tocando` |
+| V3 o FORA DO AR | feito | `2a70021b` | `Membros { membros, fim }` (42), `MembroNovo` (43) e `MembroBanido` (44); o renomear é o `PersonRenamed`. Reversão: sem o teto de membros, reprova |
+| V4 a API de MOD no fio | feito | `49de9d45` | `Hello.apis_de_mod` e `ModAnunciado.api`; o servidor manda 0 («não preenchida»). Reversão: sem o teto de APIs, reprova |
+| V5 razões 18–21 | feito | `206f269c` | `ChamadaEncerrada`, `NinguemAtendeu`, `ChamadaRecusada` (terminais no `enlace.rs`) e `ModsDeOutraApi { apis: u64 }`, em máscara para a razão continuar `Copy`. Tocou a FFI (`EndReason`) e o `frases.js` (frases provisórias), que o guarda da casca exige. Três reversões |
+| F4: hashes do navegador | feito | `64792dee` | `HashesDoNavegador` (45), as constantes das janelas, o `ALPN_DO_NAVEGADOR` e o doc do `Server::impressao`. Bytes conferidos por uma conta independente. Reversão: sem a ordem, reprova |
+
 ## Verificação final (08/10)
 
 - `cargo fmt --all -- --check` limpo; `cargo clippy --workspace --all-targets` sem aviso.
