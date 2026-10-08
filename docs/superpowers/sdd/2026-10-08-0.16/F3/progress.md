@@ -88,3 +88,25 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
 - **Incorporados ao rascunho:** o spike da F4 (um contrato e um motor só, nada
   fora de uma volta do anfitrião, os mesmos limites nos dois executores) e, no
   plano, o guarda do indexador pela união das linhas (spec-mestre `b9817abc`).
+- **Decisões do dono de 08/10 sobre o rascunho**, todas como recomendado: a
+  `folha` substitui o `painel`; `regiao` e `cartoes` saem e o `tema` fica,
+  ampliado, com `servidor.aparencia` como porta; `repetir: true` por contrato;
+  os membros fora do ar ficam fora do retrato. O aviso do servidor (`ModAviso`)
+  e o tema como dado (`TemaMudou`) foram para o contrato da 1.0, pela F1.
+- **O R5 do PERFIS, medido:** o escopo de servidor já existe no fio
+  (`ChannelId(0)`, correção da F1). Um cliente sem janela mandou ao PERFIS
+  3.3.0 `view` e `save` com canal 0 e com canal 1, e os quatro voltaram
+  `ok: true`. A causa é a casca comum dos MODs oficiais, que exige um canal de
+  texto e nunca manda o 0 — conserto do porte.
+  - Ruling: no escopo de servidor, o `write` do contexto é o `WriteChannel`
+    global (o de hoje, agora escrito), e não uma permissão nova — custo se
+    errado: uma permissão de servidor a criar numa API somada, com migração.
+  - Ruling: no escopo de canal, o `write` passa a `pode_no_canal(…, Escrita)`,
+    e o pedido num canal que a pessoa não lê é recusado — custo se errado:
+    nenhum hoje, porque nada grava papel mínimo em canal.
+- **Regras da v6 vindas dos achados**, com guarda no `check-api` (tarefa 2):
+  os nomes da metade de servidor conferidos contra o runtime, e os tetos
+  declarados contra as constantes do renderer.
+- **Tarefas novas no plano:** 15 (o `servidor-com-mod.rs` instala por hash,
+  fora da 8384, e o guia o documenta; defeito, pela orquestradora) e 16 (o
+  escopo de um pedido).
