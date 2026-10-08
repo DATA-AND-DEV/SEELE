@@ -38,6 +38,11 @@ nada dependa da memória de uma conversa.
   0.15.1 publicado contra o `seeled` novo, e o app novo contra o `seeled` 0.15.1
   (plano F1b, P1 e P8).
 - **A parte 2 da tarefa 17 da F6**, com tela, no Mac e no Windows, com o dono.
+- **O ponto em produção fala o ENC/2**: `sondar --exige-enc2 encontro.seele.app.br`, de
+  outra máquina, depois de o dono reimplantar a VPS (`docs/ponto-de-encontro.md`).
+  A VPS vai antes do app (spec-mestre, §4).
+- **As notas não têm condição pendente**: o `publicar.sh` recusa notas com o marcador
+  `<!-- CONDIÇÃO:` (F6, `36274663` e `7e444fe8`).
 
 ## As integrações feitas
 
