@@ -11197,7 +11197,7 @@ mod rastro_de_teste {
     /// escreveu. Chamar `rebuild_interest_cache` ao abrir a captura não basta:
     /// a outra thread pode passar pela linha depois, com a captura já aberta,
     /// e foi medido (7 falhas em 20 rodadas do módulo do som).
-    fn segundo_despachante() {
+    pub(crate) fn segundo_despachante() {
         static SEMPRE: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
         SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
     }
@@ -13003,12 +13003,32 @@ mod o_teto_de_vazao_do_registro {
             preso: Arc<AtomicUsize>,
         }
 
+        /// A mensagem do evento é a da conta dos baldes?
+        struct EAConta(bool);
+
+        impl tracing::field::Visit for EAConta {
+            fn record_debug(&mut self, campo: &tracing::field::Field, valor: &dyn std::fmt::Debug) {
+                if campo.name() == "message"
+                    && format!("{valor:?}") == super::CONTA_DO_BALDE_DO_REGISTRO
+                {
+                    self.0 = true;
+                }
+            }
+        }
+
         impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for TentaOCadeado {
             fn on_event(
                 &self,
-                _evento: &tracing::Event<'_>,
+                evento: &tracing::Event<'_>,
                 _contexto: tracing_subscriber::layer::Context<'_, S>,
             ) {
+                // Só a linha da conta: qualquer outra que o `revogar` passe a
+                // escrever não pode fazer as vezes dela.
+                let mut e_a_conta = EAConta(false);
+                evento.record(&mut e_a_conta);
+                if !e_a_conta.0 {
+                    return;
+                }
                 let contador = if self.baldes.try_lock().is_ok() {
                     &self.livre
                 } else {
@@ -13018,6 +13038,10 @@ mod o_teto_de_vazao_do_registro {
             }
         }
 
+        // Como em `capturar`: com um segundo despachante vivo, o interesse da
+        // linha da conta não fica preso ao de outra thread que passou por ela
+        // antes, sem assinante.
+        crate::rastro_de_teste::segundo_despachante();
         // `'static`, porque o assinante é: a sessão de um teste só.
         let sessao: &'static Session = Box::leak(Box::default());
         let agora = origem();
@@ -13040,9 +13064,10 @@ mod o_teto_de_vazao_do_registro {
             "a conta dos baldes foi escrita com o cadeado deles na mão: uma linha lenta no disco \
              segura o registro de todo MOD até terminar"
         );
-        assert!(
-            livre.load(Ordering::Relaxed) >= 1,
-            "a sessão fechou com uma linha segurada e não disse a conta dela"
+        assert_eq!(
+            livre.load(Ordering::Relaxed),
+            1,
+            "a sessão fechou com um balde de linhas seguradas e não disse a conta dele uma vez"
         );
     }
 
