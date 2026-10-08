@@ -107,5 +107,25 @@ path = "src/lib.rs"
 name = "seeled"
 path = "src/main.rs"
 
+[features]
+# Faz um teste que ia falar com o ponto de encontro de produção reprovar antes
+# do primeiro pacote, com a frase de `alcance::encontro::recusar_a_producao`.
+# Os testes deste crate o têm pelo `cfg(test)`; os do `seele-conformance` não
+# veem esse `cfg`, e é para eles que a feature existe.
+#
+# **Nunca ligada no binário do produto**: só a `[dev-dependencies]` do
+# `seele-conformance` a pede, e com o resolvedor 2 a feature de uma dependência
+# de teste não se une ao build normal. É o mesmo desenho da `fixtures` do
+# `seele-lancador`.
+#
+# **O que ela não alcança sozinha:** os testes de `tests/` deste crate. Eles
+# não veem o `cfg(test)`, e a única forma de ligá-la para eles pelo Cargo seria
+# o crate depender de si mesmo em `[dev-dependencies]`, aresta que o
+# `cargo xtask check-deps` recusa. Num `cargo test --workspace` (a CI, a
+# bateria da integração) a feature se une pela dependência do
+# `seele-conformance` e os alcança; num `cargo test -p seele-server` sozinho,
+# não.
+recusar-encontro-de-producao = []
+
 [dev-dependencies]
 tempfile = "3.27.0"

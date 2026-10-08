@@ -944,10 +944,22 @@ impl Daemon {
 /// diferença: lá a `vaga` já serializa o binário inteiro, e aqui quem
 /// serializa é a trava que o guarda segura.
 ///
-/// **O que a trava não cobre:** os outros testes deste crate que chamam
-/// `Hospedagem::iniciar` só leem a variável (`Convocacao::do_ambiente`), e não
-/// tomam a trava. Um deles que suba enquanto um destes dois a tem trocada lê o
-/// valor trocado, e pode pagar o prazo do degrau 4.
+/// # Quem sobe hospedagem também a toma
+///
+/// Todo teste deste crate que chama `Hospedagem::iniciar` toma o guarda com o
+/// degrau 4 desligado ([`AmbienteDoEncontro::sem_degrau_4`]). Antes eles só
+/// liam a variável, sem trava, e sem ela `Convocacao::do_ambiente` cai no ponto
+/// de encontro de produção: numa máquina sem IPv4 global, cada rodada
+/// registrava um servidor de teste no quarto da VPS. Medido no lote
+/// G-servidor da F5: rodados junto com
+/// `um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada`, os oito passavam, e
+/// passavam porque liam o `nao` ou o buraco negro que **aquele** teste tinha
+/// posto; rodados sem ele, os oito reprovavam no guarda
+/// (`alcance::encontro::recusar_a_producao`). Qual ponto cada um usava
+/// dependia de quem subia primeiro.
+///
+/// A trava serializa os que sobem hospedagem. Medido na mesma máquina: os oito
+/// em 1,08 s em fila, contra 0,52 s em paralelo.
 #[cfg(test)]
 pub(crate) mod ambiente_de_teste {
     use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -992,6 +1004,17 @@ pub(crate) mod ambiente_de_teste {
         /// em pânico com ela já devolveu a variável, pelo `Drop`.
         pub(crate) fn guardar() -> Self {
             Self::guardar_sob(&TRAVA)
+        }
+
+        /// [`Self::guardar`] com o degrau 4 desligado (`nao`) até o guarda
+        /// cair.
+        ///
+        /// É o de quem sobe hospedagem e não mede o degrau 4: nenhum pacote
+        /// sai para ponto de encontro nenhum, e o de produção nem é lido.
+        pub(crate) fn sem_degrau_4() -> Self {
+            let ambiente = Self::guardar();
+            ambiente.pedir("nao");
+            ambiente
         }
 
         /// [`Self::guardar`], sob a trava que quem chama escolhe.

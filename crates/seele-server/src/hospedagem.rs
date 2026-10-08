@@ -141,6 +141,13 @@ impl Hospedagem {
         let convocacao = server.espelho().and_then(|socket| {
             crate::alcance::encontro::Convocacao::do_ambiente(socket, server.fingerprint())
         });
+        // Nos testes, um teste que sobe a hospedagem sem ambiente reprova aqui,
+        // e não só numa máquina sem IPv4 global, que é onde o degrau 4 é
+        // tentado. Fora deles, nada. Ver
+        // `crate::alcance::encontro::recusar_a_producao`.
+        if let Some(convocacao) = &convocacao {
+            crate::alcance::encontro::recusar_a_producao(&convocacao.ponto);
+        }
         let escada = crate::alcance::Escada::subir(
             crate::alcance::Escuta::nova(endereco.port(), server.pilha()),
             convocacao,
@@ -411,6 +418,8 @@ mod tests {
 
     #[tokio::test]
     async fn um_server_hospedado_aceita_conexao() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
@@ -430,6 +439,8 @@ mod tests {
     /// palavra «nome» neste arquivo ficaria verde com o nome sendo ignorado.
     #[tokio::test]
     async fn o_nome_publico_vira_o_alvo_do_link_e_o_numero_desce_para_alternativo() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
@@ -467,6 +478,8 @@ mod tests {
     /// launcher de quem recebe procurar no catálogo algo que ninguém publicou.
     #[tokio::test]
     async fn o_link_so_anuncia_a_versao_quando_esta_build_tem_carimbo() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
@@ -489,6 +502,8 @@ mod tests {
 
     #[tokio::test]
     async fn escuta_em_todas_as_interfaces_e_nao_so_em_localhost() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // Um servidor hospedado que só aceitasse localhost serviria para falar
         // sozinho, que é o oposto do motivo de existir.
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
@@ -499,6 +514,8 @@ mod tests {
 
     #[tokio::test]
     async fn o_endereco_para_os_amigos_nao_e_o_de_escuta() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // `0.0.0.0` é onde se escuta, não um lugar aonde alguém possa ir.
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
@@ -515,6 +532,8 @@ mod tests {
 
     #[tokio::test]
     async fn o_convite_carrega_a_impressao_digital_desta_instancia() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // Sem ela o primeiro contato volta a ser cego, e o convite deixa de ser
         // a coisa que torna o TOFU verificável.
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
@@ -535,6 +554,8 @@ mod tests {
 
     #[tokio::test]
     async fn o_convite_leva_o_endereco_da_rede_local_quando_ele_existe() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // O defeito de campo, do lado de quem gera o link: em 0.5.0 o convite
         // levava só o endereço do degrau mais alto, e quem estava na mesma casa
         // deixou de conseguir entrar. Agora o endereço da rede local está
@@ -638,6 +659,8 @@ mod tests {
 
     #[tokio::test]
     async fn encerrar_libera_a_porta_para_hospedar_de_novo() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // Fechar uma conversa e abrir outra é o caso normal, e sem esperar o
         // endpoint terminar isso falha com "endereço já em uso".
         let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
