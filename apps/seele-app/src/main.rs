@@ -5864,13 +5864,6 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
 /// vai em DEBUG: uma mídia que não montou porque a pessoa saiu é o desfecho
 /// certo, e avisá-la ensinaria a ignorar os avisos.
 ///
-/// **A geração morta que os comandos conferem na entrada não passa por aqui.**
-/// [`midia_do_mod`], [`midia_em_bytes`] e [`som_do_mod`] devolvem
-/// `sessao-encerrada` antes de chegar a esta função, e o que fica dela é o
-/// contador `comandos_de_geracao_morta`. O `sessao-encerrada` que chega aqui é
-/// o que a conexão devolve quando cai no meio de uma leitura por volume
-/// ([`ler_imagem_mod`]).
-///
 /// **Texto de terceiro não entra solto numa linha do registro**, e são três
 /// campos com ele. `origem` é o caminho que a janela pede em `midia_do_mod` e
 /// em `som_do_mod`, e passa por [`caminho_no_registro`]: as aspas impedem a
@@ -6447,6 +6440,19 @@ async fn enviar_imagem_mod(
     Ok(())
 }
 
+/// **Lê por volume a imagem que um MOD guardou no servidor.**
+///
+/// Toda recusa é dita no `seele.log`: a geração morta, na entrada e — quando
+/// os bytes chegaram — depois do `await`, por [`Session::recusar_se_morta`],
+/// que a conta; a conexão que não está de pé, por [`recusa_de_midia_dita`], em
+/// DEBUG; e as duas de depois do `await` — a do servidor e
+/// `formato-desconhecido` — por [`imagem_lida_dita`], com o id do MOD.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`] quando a geração já acabou, quando não há conexão,
+/// com o texto que o servidor mandou, ou quando os bytes não são de um formato
+/// conhecido.
 #[tauri::command]
 async fn ler_imagem_mod(
     session: State<'_, Session>,
@@ -6455,42 +6461,81 @@ async fn ler_imagem_mod(
     channel: u32,
     payload: String,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    let recusa = |motivo: &str| FalhaNoMod::Recusado {
-        motivo: motivo.to_owned(),
-    };
     session.recusar_se_morta(geracao)?;
-    let conexao = session
-        .connection()
-        .map_err(|_| recusa("sessao-encerrada"))?;
-    // O relógio é lido quando a linha é escrita, e não antes do `await`: a
-    // leitura por volume pode levar segundos, e o balde contaria a recarga
-    // desde um instante que já passou.
-    let bytes = conexao
-        .ler_imagem_mod(id.clone(), channel, payload)
-        .await
-        .map_err(|m| {
-            recusa_de_midia_dita(
-                &session.baldes_do_registro,
-                std::time::Instant::now(),
-                &id,
-                "volume",
-                recusa(&m),
-            )
-        })?;
-    session.recusar_se_morta(geracao)?;
-    let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| {
+    // **Dita, e não contada.** A geração foi conferida logo acima: uma conexão
+    // ausente com a geração de pé não é comando de uma sessão encerrada, e
+    // contá-la faria o contador dizer que a sessão anterior falou sem ela ter
+    // falado.
+    let conexao = session.connection().map_err(|_| {
         recusa_de_midia_dita(
             &session.baldes_do_registro,
             std::time::Instant::now(),
             &id,
             "volume",
-            recusa("formato-desconhecido"),
+            FalhaNoMod::Recusado {
+                motivo: "sessao-encerrada".to_owned(),
+            },
+        )
+    })?;
+    let lida = conexao.ler_imagem_mod(id.clone(), channel, payload).await;
+    // **A ordem de sempre.** O `Err` do servidor é dito como veio, mesmo que a
+    // geração tenha morrido durante o `await`: ele é o dado da recusa, e a
+    // janela continua recebendo o que o servidor disse. Só os bytes que
+    // chegaram esperam a conferência, porque decodificá-los já seria trabalho
+    // para uma sessão que acabou.
+    if lida.is_ok() {
+        session.recusar_se_morta(geracao)?;
+    }
+    // O relógio é lido quando a linha é escrita, e não antes do `await`: a
+    // leitura por volume pode levar segundos, e o balde contaria a recarga
+    // desde um instante que já passou.
+    imagem_lida_dita(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        &id,
+        lida,
+    )
+}
+
+/// **A imagem lida por volume, ou a recusa dita no registro** com o id do MOD:
+/// a parte de [`ler_imagem_mod`] depois do `await`.
+///
+/// Duas recusas, as duas por [`recusa_de_midia_dita`] com a origem `volume`:
+///
+/// - a do servidor, com o texto que ele mandou — o `erro` da resposta, a razão
+///   com que a conexão fechou, o prazo esgotado;
+/// - a dos bytes que chegaram e não são de um formato que este produto
+///   decodifica, `formato-desconhecido`.
+///
+/// Extraída porque o comando fala com a rede e não sobe num teste: o guarda de
+/// texto que procurava `recusa_de_midia_dita` no comando passava com uma só das
+/// duas, e a outra saía calada. Aqui cada uma tem o seu caso.
+///
+/// Com o teto de vazão de `baldes`.
+fn imagem_lida_dita(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    id: &str,
+    lida: Result<Vec<u8>, String>,
+) -> Result<MidiaDoMod, FalhaNoMod> {
+    let bytes = lida.map_err(|motivo| {
+        recusa_de_midia_dita(baldes, agora, id, "volume", FalhaNoMod::Recusado { motivo })
+    })?;
+    let midia = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| {
+        recusa_de_midia_dita(
+            baldes,
+            agora,
+            id,
+            "volume",
+            FalhaNoMod::Recusado {
+                motivo: "formato-desconhecido".to_owned(),
+            },
         )
     })?;
     Ok(MidiaDoMod {
-        uri: lida.uri,
-        papel: lida.papel,
-        bytes: lida.bytes,
+        uri: midia.uri,
+        papel: midia.papel,
+        bytes: midia.bytes,
     })
 }
 
@@ -13282,9 +13327,13 @@ mod o_teto_de_vazao_do_registro {
     /// compila, deixa os testes acima verdes e tira o teto: cada chamada
     /// ganharia um balde cheio. Aqui, toda chamada de porta nos cinco comandos
     /// tem de levar `&session.baldes_do_registro` no primeiro argumento.
+    ///
+    /// Em `ler_imagem_mod` as duas são a conexão ausente
+    /// (`recusa_de_midia_dita`) e `imagem_lida_dita`, que leva as duas recusas
+    /// de depois do `await`.
     #[test]
     fn os_comandos_passam_os_baldes_da_sessao() {
-        const PORTAS: [&str; 8] = [
+        const PORTAS: [&str; 9] = [
             "registrar_da_janela_em(",
             "midia_declarada_do_mod(",
             "midia_servida_dita(",
@@ -13293,6 +13342,7 @@ mod o_teto_de_vazao_do_registro {
             "midia_do_servidor_dita(",
             "midia_vinda_do_servidor_dita(",
             "recusa_de_midia_dita(",
+            "imagem_lida_dita(",
         ];
         let fonte = super::fonte_sem_comentarios();
         for (comando, chamadas_minimas) in [
@@ -13880,8 +13930,8 @@ mod pacote_de_teste {
 #[cfg(test)]
 mod a_midia_recusada_e_dita_no_registro {
     use super::{
-        midia_declarada_do_mod, midia_do_servidor_dita, midia_servida_dita, motivo_de,
-        recusa_de_midia_dita, registrar_da_janela_em, BaldesDoRegistro, FalhaNoMod,
+        imagem_lida_dita, midia_declarada_do_mod, midia_do_servidor_dita, midia_servida_dita,
+        motivo_de, recusa_de_midia_dita, registrar_da_janela_em, BaldesDoRegistro, FalhaNoMod,
         TETO_DA_FRASE_NO_REGISTRO, TETO_DO_ID_NO_REGISTRO,
     };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO};
@@ -14186,6 +14236,102 @@ mod a_midia_recusada_e_dita_no_registro {
         );
     }
 
+    /// **A imagem que o servidor recusou é dita**, com o id e o texto dele.
+    ///
+    /// É a primeira das duas recusas de `ler_imagem_mod` depois do `await`, e
+    /// a que vem com o que o servidor mandou — o prazo esgotado, o `erro` da
+    /// resposta, a razão com que a conexão fechou.
+    #[test]
+    fn a_imagem_recusada_pelo_servidor_sai_como_warn_com_o_id_e_o_motivo() {
+        let (resultado, rastro) = capturar(|| {
+            imagem_lida_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                Err("Prazo esgotado".to_owned()),
+            )
+        });
+        let falha = resultado.err().expect("a recusa do servidor virou imagem");
+        assert_eq!(
+            motivo_de(&falha),
+            "Prazo esgotado",
+            "a recusa do servidor voltou à janela mexida, e a janela deixa de dizer o que ele \
+             disse"
+        );
+        let linha = recusa(&rastro).unwrap_or_else(|| {
+            panic!(
+                "a imagem que o servidor recusou não chegou ao registro: o MOD fica sem imagem \
+                 e o seele.log sem uma palavra — {rastro}"
+            )
+        });
+        traz(
+            linha,
+            &[
+                "WARN",
+                "mod_id=prova/midia",
+                "motivo=\"Prazo esgotado\"",
+                "origem=\"volume\"",
+            ],
+        );
+    }
+
+    /// **A imagem lida que não é mídia é dita**, pelo nome da recusa.
+    ///
+    /// A segunda recusa de `ler_imagem_mod` depois do `await`: o servidor
+    /// entregou, e os bytes não são de um formato que este produto decodifica.
+    #[test]
+    fn a_imagem_lida_que_nao_e_midia_sai_como_warn_com_o_motivo() {
+        let (resultado, rastro) = capturar(|| {
+            imagem_lida_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                Ok(TEXTO.to_vec()),
+            )
+        });
+        let falha = resultado.err().expect("texto lido por volume virou imagem");
+        assert_eq!(
+            motivo_de(&falha),
+            "formato-desconhecido",
+            "texto lido por volume foi recusado por outro motivo, e o autor procuraria no lugar \
+             errado"
+        );
+        let linha = recusa(&rastro).unwrap_or_else(|| {
+            panic!(
+                "a imagem lida que não é mídia não chegou ao registro: o MOD fica sem imagem e \
+                 o seele.log sem uma palavra — {rastro}"
+            )
+        });
+        traz(
+            linha,
+            &[
+                "WARN",
+                "mod_id=prova/midia",
+                "motivo=formato-desconhecido",
+                "origem=\"volume\"",
+            ],
+        );
+    }
+
+    /// **A imagem lida que é mídia passa sem linha**: uma recusa só é dita
+    /// quando há recusa.
+    #[test]
+    fn a_imagem_lida_aceita_nao_escreve_linha() {
+        let (resultado, rastro) = capturar(|| {
+            imagem_lida_dita(&BaldesDoRegistro::default(), origem(), ID, Ok(PNG.to_vec()))
+        });
+        let midia = resultado.expect("um PNG lido por volume foi recusado");
+        assert_eq!(
+            midia.papel, "imagem",
+            "um PNG lido por volume saiu com outro papel"
+        );
+        assert!(
+            rastro.is_empty(),
+            "uma imagem lida e aceita escreveu no registro, e ele ensinaria a ignorar as \
+             recusas: {rastro}"
+        );
+    }
+
     #[test]
     fn o_motivo_do_servidor_tem_teto() {
         let (_, rastro) = recusa_do_servidor(&"a".repeat(TETO_DA_FRASE_NO_REGISTRO * 4));
@@ -14408,6 +14554,10 @@ mod a_midia_recusada_e_dita_no_registro {
     /// teste sem servidor — e um comando que devolvesse a recusa por fora seria
     /// a mídia recusada em silêncio de novo, com os testes verdes.
     ///
+    /// Em `ler_imagem_mod` a chamada é `imagem_lida_dita`, que leva as duas
+    /// recusas de depois do `await`. Procurar `recusa_de_midia_dita` ali
+    /// passava com uma só delas: a outra saía calada, e o guarda verde.
+    ///
     /// O fonte é normalizado para `\n`: num checkout com CRLF o corte em
     /// `"\n}\n"` não acharia o fim da função, e o guarda passaria a ler o
     /// arquivo inteiro — inclusive este teste, que cita as quatro chamadas.
@@ -14421,7 +14571,7 @@ mod a_midia_recusada_e_dita_no_registro {
         for (comando, chamada) in [
             ("fn midia_do_mod(", "midia_declarada_do_mod("),
             ("fn midia_em_bytes(", "midia_do_servidor_dita("),
-            ("async fn ler_imagem_mod(", "recusa_de_midia_dita("),
+            ("async fn ler_imagem_mod(", "imagem_lida_dita("),
             ("fn som_do_mod(", "som_declarado_do_mod("),
         ] {
             let corpo = fonte
