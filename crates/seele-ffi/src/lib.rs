@@ -4179,19 +4179,9 @@ async fn drive(
                         shared.notify(&Event::TelemetryChanged);
                     }
                     seele_core::enlace::Aviso::Encerrado(motivo) => {
-                        let reason = match motivo {
-                            seele_core::enlace::Motivo::Descarregou => EndReason::LinkLost,
-                            seele_core::enlace::Motivo::Recusado(_) => EndReason::CredentialRejected,
-                            seele_core::enlace::Motivo::Pedido => EndReason::LinkLost,
-                            // O motivo enumerado que o servidor mandou, e não
-                            // uma tradução dele: quem foi expulso tem de ler
-                            // «expulso». Cair aqui em `CredentialRejected`
-                            // mandaria a pessoa conferir uma senha que está
-                            // certa — a mesma armadilha que o doc de
-                            // `DisconnectReason::NicknameTaken` registra.
-                            seele_core::enlace::Motivo::Moderado(porque) => porque.into(),
-                        };
-                        shared.notify(&Event::Ended { reason });
+                        shared.notify(&Event::Ended {
+                            reason: fim_da_sessao(&motivo),
+                        });
                         break;
                     }
                 }
@@ -5089,6 +5079,59 @@ fn next_client_message_id() -> u64 {
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Por que a sessão acabou, como a casca o lê, a partir do que o enlace disse.
+///
+/// Fora de `drive` para ter teste: é a única tradução entre o fim que o núcleo
+/// enumera e o `EndReason` que chega à tela e ao retrato.
+fn fim_da_sessao(motivo: &seele_core::enlace::Motivo) -> EndReason {
+    match motivo {
+        seele_core::enlace::Motivo::Descarregou | seele_core::enlace::Motivo::Pedido => {
+            EndReason::LinkLost
+        }
+        seele_core::enlace::Motivo::Recusado(erro) => fim_da_recusa(erro),
+        // O motivo enumerado que o servidor mandou, e não uma tradução dele:
+        // quem foi expulso tem de ler «expulso». Cair aqui em
+        // `CredentialRejected` mandaria a pessoa conferir uma senha que está
+        // certa — a mesma armadilha que o doc de
+        // `DisconnectReason::NicknameTaken` registra.
+        seele_core::enlace::Motivo::Moderado(porque) => (*porque).into(),
+    }
+}
+
+/// O fim de uma sessão cuja volta pela bateria foi recusada.
+///
+/// Era `CredentialRejected` para toda recusa, e a tela mandava conferir convite
+/// e senha a quem voltou para um servidor que não é o do convite, cuja chave
+/// mudou, que lotou ou cujos MODs mudaram. A recusa já vinha tipada do núcleo
+/// ([`seele_core::enlace::Motivo::Recusado`]); só esta tradução a jogava fora.
+///
+/// # `match` exaustivo, e sem braço `_`
+///
+/// Pela regra que `enlace::alguem_respondeu` escreve: uma variante nova de
+/// `ConnectError` não compila até alguém dizer o que ela vira na tela.
+///
+/// As de rede não chegam aqui hoje — `enlace::vale_insistir` as devolve à
+/// bateria —, e cada uma está nomeada para que uma mudança lá não as faça
+/// chegar como credencial.
+fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
+    match erro {
+        seele_core::ConnectError::Refused { reason } => (*reason).into(),
+        // Sem as impressões: `EndReason` é `Copy` e chega ao retrato. Elas
+        // ficam no `seele.log`, na linha da volta recusada.
+        seele_core::ConnectError::InviteMismatch { .. } => EndReason::ServidorTrocouNaVolta,
+        seele_core::ConnectError::PinChanged { .. } => EndReason::ChaveMudouNaVolta,
+        // Na volta, o anúncio que esta máquina não aceitou é o servidor que
+        // passou a exigir outro conjunto no meio da sessão.
+        seele_core::ConnectError::ModsNaoAceitos { .. } => EndReason::ModsMudaram,
+        seele_core::ConnectError::LocalEndpoint
+        | seele_core::ConnectError::Unreachable
+        | seele_core::ConnectError::TlsRefused
+        | seele_core::ConnectError::HandshakeTimeout
+        | seele_core::ConnectError::SemResposta
+        | seele_core::ConnectError::ProtocolViolation => EndReason::LinkLost,
+    }
+}
+
 /// Relabels a core connection failure for the shell.
 ///
 /// A relabel and nothing more: the core already decided *what* went wrong, and
@@ -5131,6 +5174,88 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
         seele_core::ConnectError::Refused { reason } => ConnectionError::Refused {
             reason: (*reason).into(),
         },
+    }
+}
+
+#[cfg(test)]
+mod a_volta_recusada_diz_o_motivo {
+    use super::{fim_da_sessao, EndReason};
+    use seele_core::enlace::Motivo;
+    use seele_core::{ConnectError, DisconnectReason};
+
+    #[test]
+    fn fim_da_recusa_diz_o_motivo_de_verdade_e_nao_credencial_recusada() {
+        // A volta da bateria recusada acabava em `CredentialRejected` qualquer
+        // que fosse o motivo, e a tela mandava conferir convite e senha: sobre
+        // um servidor que não é o do convite, sobre a chave que mudou, sobre o
+        // servidor lotado e sobre os MODs que mudaram. Passa pelo mesmo
+        // `fim_da_sessao` que `drive` chama, para que a fiação conte junto.
+        let casos = [
+            (
+                "InviteMismatch",
+                ConnectError::InviteMismatch {
+                    expected: "bbbb2222".into(),
+                    offered: "aaaa1111".into(),
+                },
+                EndReason::ServidorTrocouNaVolta,
+            ),
+            (
+                "Refused { ServerFull }",
+                ConnectError::Refused {
+                    reason: DisconnectReason::ServerFull,
+                },
+                EndReason::ServerFull,
+            ),
+            (
+                "PinChanged",
+                ConnectError::PinChanged {
+                    pinned: "aaaa1111".into(),
+                    offered: "cccc3333".into(),
+                },
+                EndReason::ChaveMudouNaVolta,
+            ),
+            (
+                "ModsNaoAceitos",
+                ConnectError::ModsNaoAceitos {
+                    mods: Vec::new(),
+                    conjunto: "conjunto".into(),
+                },
+                EndReason::ModsMudaram,
+            ),
+        ];
+        let erradas: Vec<String> = casos
+            .into_iter()
+            .filter_map(|(nome, erro, esperado)| {
+                let obtido = fim_da_sessao(&Motivo::Recusado(erro));
+                (obtido != esperado).then(|| format!("{nome} deu {obtido:?}, e não {esperado:?}"))
+            })
+            .collect();
+        assert!(
+            erradas.is_empty(),
+            "a volta recusada chega à tela com um motivo que não é o dela, e a frase manda \
+             a pessoa conferir o que não está errado: {erradas:#?}"
+        );
+    }
+
+    #[test]
+    fn fim_da_recusa_do_que_nao_e_recusa_e_enlace_perdido() {
+        // Estas não chegam a `Recusado` hoje (`vale_insistir` as manda de volta
+        // à bateria). Se uma chegar, ela é rede, e não credencial.
+        for erro in [
+            ConnectError::LocalEndpoint,
+            ConnectError::Unreachable,
+            ConnectError::TlsRefused,
+            ConnectError::HandshakeTimeout,
+            ConnectError::SemResposta,
+            ConnectError::ProtocolViolation,
+        ] {
+            assert_eq!(
+                fim_da_sessao(&Motivo::Recusado(erro.clone())),
+                EndReason::LinkLost,
+                "a volta que acabou em {erro:?} chega à tela como recusa de credencial, \
+                 e manda conferir convite e senha por uma falha de rede"
+            );
+        }
     }
 }
 

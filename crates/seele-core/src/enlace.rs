@@ -297,15 +297,23 @@ pub enum Motivo {
     /// A bateria interna descarregou: cinco minutos sem reconectar.
     Descarregou,
     /// O servidor recusou, e insistir não muda a resposta.
-    Recusado(String),
+    ///
+    /// Leva o [`ConnectError`] inteiro, e não um texto dele: a casca traduz a
+    /// recusa pelo tipo (`fim_da_recusa`, na FFI). Um texto só servia ao log,
+    /// e a tela recebia `CredentialRejected` para toda recusa — a chave que
+    /// mudou, o servidor que não é o do convite e os MODs que mudaram viravam a
+    /// mesma «credencial recusada».
+    Recusado(ConnectError),
     /// Alguém pediu para sair.
     Pedido,
     /// Um operador acabou com esta sessão, e o motivo veio no fio.
     ///
     /// Separado de [`Self::Recusado`] porque a casca precisa dizer **qual** foi:
-    /// «você foi expulso» e «você foi banido» são frases diferentes, e
-    /// `EndReason::CredentialRejected` — o que `Recusado` vira do outro lado do
-    /// FFI — mandaria a pessoa conferir a senha de uma conta que está certa.
+    /// «você foi expulso» e «você foi banido» são frases diferentes. `Recusado`
+    /// é a volta da bateria que o servidor (ou o TLS) não aceitou, e a FFI a
+    /// traduz pelo [`ConnectError`] que ela leva; nenhum desses motivos é
+    /// `Kicked` nem `Banned`, e cair numa frase de credencial mandaria a pessoa
+    /// conferir a senha de uma conta que está certa.
     Moderado(DisconnectReason),
 }
 
@@ -2928,8 +2936,13 @@ impl Motor {
             }
             // Uma recusa não melhora com insistência, e insistir contra uma
             // credencial rejeitada é a diferença entre reconectar e martelar.
+            //
+            // **E acaba dizendo qual foi.** A tentativa que falha e deixa a
+            // bateria correndo tem o `debug!` do braço de baixo; esta, que
+            // acaba com a sessão, saía sem linha nenhuma no `seele.log`.
             Err(erro) if !vale_insistir(&erro) => {
-                self.encerrar(Motivo::Recusado(format!("{erro:?}")));
+                tracing::warn!(?erro, "a volta da bateria foi recusada, e a sessão acaba");
+                self.encerrar(Motivo::Recusado(erro));
             }
             Err(erro) => {
                 tracing::debug!(?erro, "tentativa de reconexão falhou");
@@ -6949,9 +6962,10 @@ mod tests {
         );
         let mut recusada = false;
         while let Ok(aviso) = avisos_rx.try_recv() {
-            if let Aviso::Encerrado(Motivo::Recusado(texto)) = &aviso {
-                recusada |= texto.contains("InviteMismatch");
-            }
+            recusada |= matches!(
+                aviso,
+                Aviso::Encerrado(Motivo::Recusado(ConnectError::InviteMismatch { .. }))
+            );
         }
         assert!(
             recusada,
@@ -6963,6 +6977,44 @@ mod tests {
             Some(impressao),
             "a recusa da volta mexeu no pino daquele endereço, que continua sendo a prova de \
              quem atende ali"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_volta_recusada_diz_no_registro_por_que_a_sessao_acabou() {
+        // A volta recusada acabava com a sessão sem uma linha no `seele.log`:
+        // só a tentativa que falha e deixa a bateria correndo tinha o `debug!`
+        // dela. A que acaba com tudo saía calada, e quem relatava «caiu e não
+        // voltou» não tinha o que mostrar.
+        //
+        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
+        // thread, e `tentar` roda nela.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let (endereco, impressao, _) = servidor_que_conta_os_hellos();
+        let (mut motor, _) = motor_que_volta_a(endereco, &impressao, false);
+        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
+        motor.avisos = avisos;
+
+        motor.tentar().await;
+
+        let mut recusada = false;
+        while let Ok(aviso) = avisos_rx.try_recv() {
+            recusada |= matches!(aviso, Aviso::Encerrado(Motivo::Recusado(_)));
+        }
+        assert!(
+            recusada,
+            "a volta pela impressão que não confere não acabou recusada, e o teste mediu \
+             outra coisa"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("a volta da bateria foi recusada")
+                && linha.contains("InviteMismatch")),
+            "a volta recusada acabou com a sessão sem dizer no `seele.log` qual recusa foi: \
+             quem relata «caiu e não voltou» não tem o que mostrar. Linhas: {linhas:?}"
         );
     }
 

@@ -323,6 +323,23 @@ pub enum EndReason {
     /// Não é sobre a credencial de quem tentou entrar: é configuração do
     /// servidor, e quem hospeda tem o motivo no log dele.
     ModsIndisponiveis,
+    /// Quem atendeu na volta da bateria não é o servidor desta sessão.
+    ///
+    /// A volta foi recusada dentro do TLS, antes do `Hello`: a impressão
+    /// esperada nomeava outra chave (`InviteMismatch`). Era
+    /// [`Self::CredentialRejected`], e a frase mandava conferir uma credencial
+    /// que nem chegou a sair desta máquina.
+    ///
+    /// Sem as impressões de propósito: este enum é `Copy` e chega ao retrato
+    /// (`ended`). Elas ficam no `seele.log`, na linha da volta recusada.
+    ServidorTrocouNaVolta,
+    /// A chave fixada do servidor mudou entre a queda e a volta. ADR 0003.
+    ///
+    /// O alarme de chave trocada, no meio de uma sessão: a volta da bateria foi
+    /// recusada dentro do TLS (`PinChanged`). Era
+    /// [`Self::CredentialRejected`]. As duas impressões ficam no `seele.log`,
+    /// pelo mesmo motivo de [`Self::ServidorTrocouNaVolta`].
+    ChaveMudouNaVolta,
     /// The link died without the server saying why.
     LinkLost,
 }

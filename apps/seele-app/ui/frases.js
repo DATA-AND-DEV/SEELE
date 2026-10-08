@@ -114,6 +114,21 @@ const MOTIVOS = {
     "ESTE SERVIDOR EXIGE MODS QUE ELE NÃO CONSEGUE DESCREVER.\n" +
     "Não é a sua entrada: avise quem hospeda.",
 
+  // ---- a volta da bateria, recusada dentro do TLS ----
+  //
+  // As duas vestiam CREDENCIAL RECUSADA, e a frase mandava conferir convite e
+  // senha que nem chegaram a sair: a recusa é antes do `Hello`. A primeira é a
+  // recusa pela impressão do convite, como a de `fraseDeErro`, só que no meio
+  // de uma sessão; a segunda é o alarme de chave trocada do ADR 0003. As
+  // impressões não atravessam a ponte aqui (o motivo do fim é um nome só), e
+  // ficam no `seele.log`, na linha da volta recusada.
+  ServidorTrocouNaVolta:
+    "QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DO CONVITE.\n" +
+    "A sessão acabou sem mandar nada a ele. Confirme o link com quem o mandou.",
+  ChaveMudouNaVolta:
+    "A CHAVE DO SERVIDOR MUDOU DURANTE A SESSÃO.\n" +
+    "Confirme por outro canal antes de entrar de novo.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 
